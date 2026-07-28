@@ -140,14 +140,15 @@ test("composer sendability and selection replacements share one state path", asy
       selectionStart: textarea.selectionStart,
       selectionEnd: textarea.selectionEnd,
       height: textarea.style.height,
+      minHeight: getComputedStyle(textarea).minHeight,
       hasText: !!textarea.closest(".input-composer")?.classList.contains("has-text"),
     };
   });
-  expect(pasteState).toEqual({
+  expect(pasteState.height).toBe(pasteState.minHeight);
+  expect(pasteState).toMatchObject({
     value: "abXYef",
     selectionStart: 4,
     selectionEnd: 4,
-    height: "40px",
     hasText: true,
   });
   await expect(send).toBeEnabled();
@@ -204,7 +205,7 @@ test("composer more menu follows keyboard focus and returns it on close", async 
   await expect(trigger).toBeFocused();
 });
 
-test("prompt optimizer is an inline trailing action and replaces the draft atomically", async ({ page }) => {
+test("prompt optimizer stays in the action rail and replaces the draft atomically", async ({ page }) => {
   const session = composerSession("composer-prompt-optimizer", "2026-07-24T03:45:00.000Z");
   await routeComposerSessions(page, [session]);
 
@@ -237,7 +238,7 @@ test("prompt optimizer is an inline trailing action and replaces the draft atomi
   const send = page.locator("#send-input-button");
 
   await expect(optimize).toBeHidden();
-  expect(await optimize.evaluate((element) => element.parentElement?.classList.contains("composer-input-wrap"))).toBe(true);
+  expect(await optimize.evaluate((element) => element.parentElement?.classList.contains("composer-actions-right"))).toBe(true);
   expect(await page.locator("#composer-plus-popover #prompt-optimize-btn").count()).toBe(0);
 
   await input.fill("   ");
@@ -341,7 +342,7 @@ test("prompt optimizer preserves the draft and recovers after a non-JSON error",
   await expect(optimize).toBeEnabled();
   await expect(optimize).toHaveAttribute("aria-busy", "false");
   await expect(input).toBeFocused();
-  await expect(page.getByText("提示词优化失败（HTTP 502）。")).toBeVisible();
+  await expect(page.getByText("提示词优化失败（HTTP 502）。", { exact: true })).toBeVisible();
 });
 
 test("duplicate submission is guarded and a failed send restores draft and attachments", async ({ page }) => {

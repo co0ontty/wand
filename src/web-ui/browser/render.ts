@@ -794,9 +794,9 @@ export function renderAppShell() {
           // 垂直排列，一行一个液态玻璃气泡（编号 + 文本 + 立即/删除）。
           // updateQueueBar() 在 queuedMessages 非空时去掉 hidden。
           '<div id="queue-bar-host" class="queue-bar-host" hidden></div>' +
-          // 输入主行：桌面端在 + 与 textarea 之间显示模式 / 模型 / 思考三个低噪声控件；
-          // 窄屏隐藏这组三件套，统一从 + 弹层调整，保证输入区和发送键不被挤压。
-          //  · 附件留在 + 弹层；提示词优化作为正文区的低噪声尾部动作。
+          // 输入主行：正文独占书写区域，所有操作统一落在底部工具栏，避免动作按钮
+          // 压住首行文本。桌面端保留模型 / 思考摘要，窄屏可从 + 弹层调整完整配置。
+          //  · 附件留在 + 弹层；提示词优化与发送归入同一操作组。
           //  · 语音模式 UI 保留，等待接入 STT。
           //  · 自动批准 / 权限操作行统一搬到 textarea 上方的状态行，
           //    输入主行保持极简。
@@ -828,13 +828,13 @@ export function renderAppShell() {
               '</div>' +
               '<div class="composer-input-wrap">' +
                 '<textarea id="input-box" class="input-textarea" aria-label="消息输入" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml(currentDraft) + '</textarea>' +
+              '</div>' +
+              '<div class="composer-actions-right">' +
                 '<button class="prompt-optimize-btn" id="prompt-optimize-btn" type="button" title="优化提示词" aria-label="优化提示词">' +
-                  iconSvg("edit", { size: 13, strokeWidth: 1.9, cls: "prompt-optimize-icon" }) +
+                  iconSvg("edit", { size: 15, strokeWidth: 1.9, cls: "prompt-optimize-icon" }) +
                   '<span class="prompt-optimize-label">优化</span>' +
                   '<span class="prompt-optimize-spinner" aria-hidden="true"></span>' +
                 '</button>' +
-              '</div>' +
-              '<div class="composer-actions-right">' +
                 // 停止按钮默认隐藏；updateInteractiveControls() 根据 computeRunningSignal
                 // 判断「真有 reply 在跑」时再露出，平时让位给主操作减少视觉噪声。
                 '<button id="stop-button" class="btn-circle btn-circle-stop hidden" type="button" title="停止" aria-label="停止生成">' +

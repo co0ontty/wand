@@ -135,10 +135,16 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
 
       export function autoResizeInput(el) {
         if (!el) return;
-        var minHeight = 40;
-        // Respect the responsive CSS cap (mobile uses min(160px, 35dvh)) instead
-        // of forcing every viewport back to the desktop 120px limit.
-        var computedMaxHeight = parseFloat(window.getComputedStyle(el).maxHeight || "");
+        // Clear the previous responsive minimum before measuring. Otherwise a
+        // desktop inline value survives a later phone resize (and vice versa)
+        // and wins over the current media-query value.
+        el.style.minHeight = "";
+        var inputStyles = window.getComputedStyle(el);
+        var computedMinHeight = parseFloat(inputStyles.minHeight || "");
+        var minHeight = Number.isFinite(computedMinHeight) ? computedMinHeight : 40;
+        // Respect the responsive CSS cap instead of forcing every viewport
+        // back to a JavaScript-only desktop limit.
+        var computedMaxHeight = parseFloat(inputStyles.maxHeight || "");
         var maxHeight = Number.isFinite(computedMaxHeight)
           ? Math.max(minHeight, computedMaxHeight)
           : 120;
