@@ -12834,7 +12834,8 @@
     }
 
     .input-composer-row {
-      max-width: 820px;
+      width: 100%;
+      max-width: none;
       align-items: stretch;
     }
 

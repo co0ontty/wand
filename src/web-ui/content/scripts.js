@@ -36960,7 +36960,7 @@
   }
   function isJoystickAvailable() {
     var selectedSession = getSelectedSession();
-    return !!selectedSession && !isStructuredSession2(selectedSession) && (isMobileLayout() || document.documentElement.classList.contains("is-wand-embed-terminal"));
+    return !!selectedSession && !isStructuredSession2(selectedSession);
   }
   function clampJoystickPos(pos) {
     var maxRight = Math.max(JOYSTICK_EDGE_MARGIN, window.innerWidth - JOYSTICK_BALL_SIZE - JOYSTICK_EDGE_MARGIN);

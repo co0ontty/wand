@@ -370,13 +370,12 @@ import { renderChat } from "./websocket";
       }
 
       export function isJoystickAvailable() {
-        // This is a touch remote for compact/mobile layouts. Showing it on a
-        // desktop conversation competes with the composer and duplicates the
-        // keyboard controls already available there.
+        // The PTY remote is part of the session controls, not a mobile-only
+        // affordance. Keep it available at every web viewport size so desktop
+        // PTY sessions do not lose the floating entry point.
         var selectedSession = getSelectedSession();
         return !!selectedSession
-          && !isStructuredSession(selectedSession)
-          && (isMobileLayout() || document.documentElement.classList.contains("is-wand-embed-terminal"));
+          && !isStructuredSession(selectedSession);
       }
 
       export function clampJoystickPos(pos) {
