@@ -473,6 +473,15 @@ DEV_VERSION="${BASE_VERSION}-debug.t$(date +%m%d%H%M)"
 PACK_DIR=""
 
 restore_version() {
+  if [[ "$SERVICE_STOPPED_FOR_INSTALL" == "1" ]]; then
+    warn "Beta 安装未完成，尝试恢复启动原 $SCOPE 服务"
+    if [[ -f "$WAND_BIN" || -x "$WAND_BIN" ]]; then
+      run_privileged "$NODE_FOR_WAND" "$WAND_BIN" service:install "$SCOPE_FLAG" -c "$CONFIG_PATH" >/dev/null 2>&1 || warn "服务自动恢复失败，请运行 ./start.sh --restart"
+    else
+      warn "全局 wand 入口不存在，请重新运行 ./start.sh"
+    fi
+    SERVICE_STOPPED_FOR_INSTALL=0
+  fi
   "$NPM_FOR_WAND" version "$RESTORE_VERSION" --no-git-tag-version --allow-same-version --ignore-scripts >/dev/null 2>&1 || true
   [[ -n "$PACK_DIR" && -d "$PACK_DIR" ]] && rm -rf "$PACK_DIR"
   return 0
@@ -515,13 +524,6 @@ else
 fi
 
 if [[ "$DO_INSTALL" == "1" ]]; then
-  if service_installed && [[ -f "$WAND_BIN" || -x "$WAND_BIN" ]]; then
-    msg "安装前先停止 $SCOPE 服务"
-    run_privileged "$NODE_FOR_WAND" "$WAND_BIN" service:stop "$SCOPE_FLAG" -c "$CONFIG_PATH" >/dev/null 2>&1 || die "service:stop 失败，已取消覆盖全局包"
-    cleanup_stale_wand
-    SERVICE_STOPPED_FOR_INSTALL=1
-  fi
-
   PACK_DIR="$(mktemp -d)"
   msg "npm pack -> install -g --prefix $WAND_PREFIX"
   repair_global_package_permissions
@@ -532,6 +534,13 @@ if [[ "$DO_INSTALL" == "1" ]]; then
   # build before installation.
   PACK_FILE="$("$NPM_FOR_WAND" pack --ignore-scripts --pack-destination "$PACK_DIR" | tail -1)"
   [[ -n "$PACK_FILE" && -f "$PACK_DIR/$PACK_FILE" ]] || die "npm pack 未产出 tarball"
+
+  if service_installed && [[ -f "$WAND_BIN" || -x "$WAND_BIN" ]]; then
+    msg "安装前先停止 $SCOPE 服务"
+    run_privileged "$NODE_FOR_WAND" "$WAND_BIN" service:stop "$SCOPE_FLAG" -c "$CONFIG_PATH" >/dev/null 2>&1 || die "service:stop 失败，已取消覆盖全局包"
+    SERVICE_STOPPED_FOR_INSTALL=1
+    cleanup_stale_wand
+  fi
   "$NPM_FOR_WAND" install -g --prefix "$WAND_PREFIX" "$PACK_DIR/$PACK_FILE" --no-audit --no-fund
   ok "本地 npm 包已安装到 $WAND_PREFIX"
   refresh_wand_runtime
@@ -553,6 +562,7 @@ fi
 
 ensure_service_installed_and_running
 wait_for_service_ready
+SERVICE_STOPPED_FOR_INSTALL=0
 trap - INT
 print_panel
 exit 0
