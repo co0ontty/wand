@@ -794,42 +794,37 @@ export function renderAppShell() {
           // 垂直排列，一行一个液态玻璃气泡（编号 + 文本 + 立即/删除）。
           // updateQueueBar() 在 queuedMessages 非空时去掉 hidden。
           '<div id="queue-bar-host" class="queue-bar-host" hidden></div>' +
-          // 输入主行：正文独占书写区域，所有操作统一落在底部工具栏，避免动作按钮
-          // 压住首行文本。桌面端保留模型 / 思考摘要，窄屏可从 + 弹层调整完整配置。
-          //  · 附件留在 + 弹层；提示词优化与发送归入同一操作组。
-          //  · 语音模式 UI 保留，等待接入 STT。
-          //  · 自动批准 / 权限操作行统一搬到 textarea 上方的状态行，
-          //    输入主行保持极简。
+          // 输入主行：正文独占上层书写区域；下层按参考布局分为
+          // 「添加 / 权限」与「模型 / 思考 / 发送」两组，键盘顺序与视觉顺序一致。
           '<div class="input-composer-row">' +
-          '<div class="input-composer' + (String(currentDraft || "").trim() ? ' has-text' : '') + '">' +
-            // 顶部状态行：自动批准 / 权限审批 / 统计 —— 仅在有内容时占位，
-            // 否则折叠成 0 高度。避免与下方"主输入行"挤在一行。
-            '<div class="composer-status-row" id="composer-status-row">' +
-              renderAutoApproveChip(selectedSession) +
-              '<span class="permission-actions hidden" id="permission-actions">' +
-                '<span class="permission-actions-label" id="permission-actions-label">等待授权</span>' +
-                '<button id="approve-permission-btn" class="btn btn-permission btn-permission-approve" type="button">批准</button>' +
-                '<button id="deny-permission-btn" class="btn btn-permission btn-permission-deny" type="button">拒绝</button>' +
-              '</span>' +
-              renderApprovalStatsBadge() +
-            '</div>' +
-            // 主输入行（单行）：左动作 / 输入区 / 右动作
+          '<div class="input-composer' + (String(currentDraft || "").trim() ? ' has-text' : '') + '" role="group" aria-label="消息编辑器">' +
+            '<div id="attachment-preview" class="attachment-preview hidden" aria-label="待发送附件" aria-live="polite"></div>' +
             '<div class="composer-main-row">' +
-              '<div class="composer-actions-left">' +
+              '<div class="composer-input-wrap">' +
+                '<textarea id="input-box" class="input-textarea" aria-label="消息输入" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml(currentDraft) + '</textarea>' +
+              '</div>' +
+              '<div class="composer-actions-left" role="group" aria-label="添加内容与权限">' +
                 // 加号按钮 —— 点击向上展开 popover：附件 / 终端交互 / 三件套（模式·模型·思考）
                 '<button id="attach-btn" class="btn-circle btn-circle-action" type="button" title="更多" aria-label="更多操作" aria-haspopup="dialog" aria-controls="composer-plus-popover" aria-expanded="false">' +
                   iconSvg("plus", { size: 18, strokeWidth: 2.2 }) +
                 '</button>' +
                 // tabindex="-1": 把 file input 移出 iOS Safari 表单导航链，避免软键盘顶部工具条出现 ⌃ ⌄ ✓。
                 '<input type="file" id="file-upload-input" multiple tabindex="-1" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0);pointer-events:none">' +
+                '<div class="composer-status-row" id="composer-status-row">' +
+                  renderComposerConfigControlsHtml(selectedSession, "mode") +
+                  renderAutoApproveChip(selectedSession) +
+                  '<span class="permission-actions hidden" id="permission-actions">' +
+                    '<span class="permission-actions-label" id="permission-actions-label" role="status" aria-live="polite" aria-atomic="true">等待授权</span>' +
+                    '<button id="approve-permission-btn" class="btn btn-permission btn-permission-approve" type="button">批准</button>' +
+                    '<button id="deny-permission-btn" class="btn btn-permission btn-permission-deny" type="button">拒绝</button>' +
+                  '</span>' +
+                  renderApprovalStatsBadge() +
+                '</div>' +
               '</div>' +
-              '<div class="composer-inline-config">' +
-                renderComposerConfigControlsHtml(selectedSession) +
-              '</div>' +
-              '<div class="composer-input-wrap">' +
-                '<textarea id="input-box" class="input-textarea" aria-label="消息输入" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml(currentDraft) + '</textarea>' +
-              '</div>' +
-              '<div class="composer-actions-right">' +
+              '<div class="composer-actions-right" role="group" aria-label="模型与发送">' +
+                '<div class="composer-inline-config">' +
+                  renderComposerConfigControlsHtml(selectedSession, "runtime") +
+                '</div>' +
                 '<button class="prompt-optimize-btn" id="prompt-optimize-btn" type="button" title="优化提示词" aria-label="优化提示词">' +
                   iconSvg("edit", { size: 15, strokeWidth: 1.9, cls: "prompt-optimize-icon" }) +
                   '<span class="prompt-optimize-label">优化</span>' +
@@ -850,7 +845,6 @@ export function renderAppShell() {
                 '</button>' +
               '</div>' +
             '</div>' +
-            '<div id="attachment-preview" class="attachment-preview hidden"></div>' +
           '</div>' +
           '</div>' +
           // 加号气泡 —— 浮在 + 按钮上方（.input-composer 之外，绕开它的 overflow:hidden）。

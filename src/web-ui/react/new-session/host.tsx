@@ -59,7 +59,7 @@ const MODES: ReadonlyArray<{
   description: string;
 }> = [
   { value: "managed", label: "托管", description: "全自动完成任务" },
-  { value: "full-access", label: "全权限", description: "自动确认权限" },
+  { value: "full-access", label: "完全访问", description: "自动确认权限" },
   { value: "auto-edit", label: "自动编辑", description: "自动确认修改" },
   { value: "default", label: "标准", description: "逐步确认操作" },
   { value: "native", label: "原生", description: "原生结构化输出" },

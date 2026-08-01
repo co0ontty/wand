@@ -2472,3 +2472,168 @@ export const sessionPickerAndWorktreeStyles = String.raw`
 
 
 `;
+
+/** Componentized selects mounted into the legacy composer slots. */
+export const composerSelectStyles = String.raw`
+.composer-config-select-host {
+  display: inline-flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.wand-ui-select-trigger.wand-composer-select-trigger {
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  gap: 4px;
+  border: 0;
+  border-radius: 8px;
+  padding: 4px 3px;
+  color: inherit;
+  background: transparent;
+  box-shadow: none;
+  font-size: 0.8125rem;
+  font-weight: 450;
+  letter-spacing: -0.01em;
+  line-height: 1;
+  transition:
+    color 140ms cubic-bezier(0.23, 1, 0.32, 1),
+    background-color 140ms cubic-bezier(0.23, 1, 0.32, 1),
+    transform 120ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.wand-ui-select-trigger.wand-composer-select-trigger[data-placeholder] {
+  color: inherit;
+}
+
+.wand-composer-select-trigger > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wand-composer-select-trigger > [aria-hidden="true"] {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  line-height: 1;
+  opacity: 0.72;
+  transform: translateY(-1px);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .wand-ui-select-trigger.wand-composer-select-trigger:hover:not(:disabled) {
+    color: var(--text-primary);
+    background: color-mix(in srgb, var(--bg-tertiary) 72%, transparent);
+  }
+}
+
+.wand-ui-select-trigger.wand-composer-select-trigger[data-state="open"] {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--bg-tertiary) 82%, transparent);
+}
+
+.wand-ui-select-trigger.wand-composer-select-trigger:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.wand-ui-select-trigger.wand-composer-select-trigger:focus-visible {
+  outline: none;
+  background: color-mix(in srgb, var(--bg-tertiary) 74%, transparent);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 38%, transparent);
+}
+
+.wand-ui-select-content.wand-composer-select-content {
+  width: max-content;
+  max-width: min(360px, calc(100vw - var(--wand-safe-left) - var(--wand-safe-right) - 28px));
+  max-height: min(330px, var(--radix-select-content-available-height));
+  border-color: color-mix(in srgb, var(--border-default) 78%, #9b806c);
+  border-radius: 14px;
+  padding: 6px;
+  background: color-mix(in srgb, var(--bg-elevated) 96%, transparent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.8),
+    0 4px 10px rgba(60, 42, 28, 0.09),
+    0 22px 44px -22px rgba(60, 42, 28, 0.34);
+  backdrop-filter: blur(20px) saturate(122%);
+  -webkit-backdrop-filter: blur(20px) saturate(122%);
+  pointer-events: auto;
+  transform-origin: var(--radix-select-content-transform-origin);
+}
+
+.wand-ui-select-content.wand-composer-select-content[data-state="open"] {
+  animation: none;
+}
+
+.wand-composer-select-content-mode { min-width: min(210px, calc(100vw - 28px)); }
+.wand-composer-select-content-model { min-width: min(260px, calc(100vw - 28px)); }
+.wand-composer-select-content-thinking { min-width: min(170px, calc(100vw - 28px)); }
+
+.wand-ui-select-item.wand-composer-select-item {
+  min-height: 36px;
+  border-radius: 9px;
+  padding: 7px 32px 7px 10px;
+  line-height: 1.3;
+  cursor: pointer;
+}
+
+.wand-ui-select-item.wand-composer-select-item[data-highlighted] {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent-muted) 72%, transparent);
+}
+
+.wand-ui-select-item.wand-composer-select-item[data-state="checked"] {
+  color: var(--accent);
+  font-weight: 560;
+}
+
+.wand-composer-select-content .wand-ui-select-indicator {
+  right: 10px;
+  font-size: 0.78rem;
+}
+
+.input-composer .composer-config-chip:focus-within {
+  outline: none;
+}
+
+.input-composer .composer-config-chip:has(.composer-config-select-host):hover,
+.input-composer .composer-config-chip:has(.composer-config-select-host):focus-within {
+  background: transparent;
+}
+
+.input-composer .composer-config-model,
+.input-composer .composer-config-thinking {
+  padding-inline: 0;
+}
+
+.input-composer .composer-status-row .composer-config-chip-mode {
+  padding-right: 0;
+}
+
+.input-composer .wand-composer-select-trigger {
+  min-height: 34px;
+}
+
+@media (max-width: 640px) {
+  .input-composer .wand-composer-select-trigger {
+    min-height: 44px;
+    padding-inline: 4px;
+    font-size: 0.75rem;
+  }
+
+  .wand-ui-select-item.wand-composer-select-item {
+    min-height: 44px;
+    padding-block: 9px;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .wand-ui-select-content.wand-composer-select-content {
+    background: var(--bg-elevated);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+`;

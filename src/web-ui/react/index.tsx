@@ -103,6 +103,13 @@ export {
 } from "./feature-flags";
 export { settingsController, settingsStore } from "./settings/controller";
 export {
+  composerSelectController,
+  type ComposerSelectControl,
+  type ComposerSelectMount,
+  type ComposerSelectScope,
+  type ComposerSelectSnapshot,
+} from "./composer-select/controller";
+export {
   configureNewSessionRuntime,
   newSessionController,
   newSessionStore,

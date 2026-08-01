@@ -1,4 +1,5 @@
 import * as SelectPrimitive from "@radix-ui/react-select";
+import * as React from "react";
 import { classNames } from "./class-names";
 import { usePortalContainer } from "./portal-context";
 
@@ -13,10 +14,18 @@ export interface WandSelectProps {
   defaultValue?: string;
   options: ReadonlyArray<WandSelectOption>;
   placeholder?: string;
+  displayValue?: string;
   ariaLabel: string;
   disabled?: boolean;
   className?: string;
+  contentClassName?: string;
+  itemClassName?: string;
+  side?: "top" | "right" | "bottom" | "left";
+  align?: "start" | "center" | "end";
+  sideOffset?: number;
+  collisionPadding?: number;
   onValueChange?(value: string): void;
+  onOpenChange?(open: boolean): void;
 }
 
 export function WandSelect({
@@ -24,10 +33,18 @@ export function WandSelect({
   defaultValue,
   options,
   placeholder = "请选择",
+  displayValue,
   ariaLabel,
   disabled,
   className,
+  contentClassName,
+  itemClassName,
+  side,
+  align,
+  sideOffset = 6,
+  collisionPadding = 12,
   onValueChange,
+  onOpenChange,
 }: WandSelectProps) {
   const portalContainer = usePortalContainer();
   return (
@@ -36,20 +53,23 @@ export function WandSelect({
       defaultValue={defaultValue}
       disabled={disabled}
       onValueChange={onValueChange}
+      onOpenChange={onOpenChange}
     >
       <SelectPrimitive.Trigger
         className={classNames("wand-ui-select-trigger", className)}
         aria-label={ariaLabel}
       >
-        <SelectPrimitive.Value placeholder={placeholder} />
+        <SelectPrimitive.Value placeholder={placeholder}>{displayValue}</SelectPrimitive.Value>
         <SelectPrimitive.Icon aria-hidden="true">⌄</SelectPrimitive.Icon>
       </SelectPrimitive.Trigger>
       <SelectPrimitive.Portal container={portalContainer}>
         <SelectPrimitive.Content
-          className="wand-ui-select-content"
+          className={classNames("wand-ui-select-content", contentClassName)}
           position="popper"
-          sideOffset={6}
-          collisionPadding={12}
+          side={side}
+          align={align}
+          sideOffset={sideOffset}
+          collisionPadding={collisionPadding}
         >
           <SelectPrimitive.ScrollUpButton className="wand-ui-select-scroll-button">
             ⌃
@@ -58,7 +78,7 @@ export function WandSelect({
             {options.map((option) => (
               <SelectPrimitive.Item
                 key={option.value}
-                className="wand-ui-select-item"
+                className={classNames("wand-ui-select-item", itemClassName)}
                 value={option.value}
                 disabled={option.disabled}
               >

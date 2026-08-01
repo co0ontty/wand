@@ -2060,7 +2060,9 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         // React/Radix overlays own their keyboard contract. In terminal-interactive
         // mode the document capture listener otherwise consumes Escape before the
         // dialog can dismiss itself (and can forward radio arrow keys to the PTY).
-        return !!(target.closest && target.closest('[role="dialog"], [role="alertdialog"]'));
+        return !!(target.closest && target.closest(
+          '[role="dialog"], [role="alertdialog"], .wand-ui-select-trigger, .wand-ui-select-content, [role="listbox"], [role="option"]'
+        ));
       }
 
       export var modifierKeySet = new Set(["ctrl", "alt", "shift"]);
@@ -2260,6 +2262,9 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
             : (structured
               ? (structuredInFlight ? "排队发送（当前回复结束后处理）" : "发送")
               : (isCodex ? (isRunning ? "发送给 Codex" : "Codex 会话已结束") : (!selectedSession || isRunning || canResumeOnSend ? "发送" : "会话已结束"))));
+          sendBtn.setAttribute("aria-label", promptOptimizeBusyForCurrent
+            ? "正在优化提示词"
+            : (structuredInFlight ? "加入发送队列" : "发送消息"));
           sendBtn.classList.toggle("queue-mode", structuredInFlight);
         }
         // 停止按钮：仅当当前会话真"在跑"才露出（结构化 inFlight / PTY running / 等待权限阻塞）。

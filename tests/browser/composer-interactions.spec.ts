@@ -15,6 +15,8 @@ type ComposerSession = {
   exitCode: null;
   archived: false;
   startedAt: string;
+  selectedModel?: string;
+  thinkingEffort?: string;
   structuredState: { provider: string; runner: string; inFlight: false };
 };
 
@@ -161,13 +163,11 @@ test("composer sendability and selection replacements share one state path", asy
     return [textarea.selectionStart, textarea.selectionEnd];
   })).toEqual([2, 2]);
 
+  const attach = page.locator("#attach-btn");
   await input.evaluate((element) => (element as HTMLTextAreaElement).setSelectionRange(1, 2));
   await input.press("Tab");
-  await expect(input).toHaveValue("a\tef");
-  expect(await input.evaluate((element) => {
-    const textarea = element as HTMLTextAreaElement;
-    return [textarea.selectionStart, textarea.selectionEnd];
-  })).toEqual([2, 2]);
+  await expect(input).toHaveValue("a\nef");
+  await expect(attach).toBeFocused();
 
   await input.fill("");
   await expect(send).toBeDisabled();
@@ -187,7 +187,7 @@ test("composer more menu follows keyboard focus and returns it on close", async 
   const trigger = page.locator("#attach-btn");
   const popover = page.locator("#composer-plus-popover");
   const upload = page.locator("#plus-attach-item");
-  const mode = popover.locator('select[data-mode-control="mode"]');
+  const mode = popover.getByRole("combobox", { name: "模式" });
 
   await trigger.focus();
   await trigger.press("Enter");
@@ -196,13 +196,108 @@ test("composer more menu follows keyboard focus and returns it on close", async 
   await expect(popover).toHaveAttribute("aria-hidden", "false");
   await expect(upload).toBeFocused();
 
-  await page.keyboard.press("ArrowDown");
+  await mode.focus();
+  await expect(mode).toBeFocused();
+  await mode.press("ArrowDown");
+  await expect(page.getByRole("option", { name: "默认" })).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(popover).toHaveAttribute("aria-hidden", "false");
   await expect(mode).toBeFocused();
   await page.keyboard.press("Escape");
 
   await expect(popover).toHaveAttribute("aria-hidden", "true");
   await expect(trigger).toHaveAttribute("aria-expanded", "false");
   await expect(trigger).toBeFocused();
+});
+
+test("component selects normalize default model and unsupported thinking before syncing mutations", async ({ page }) => {
+  const session = {
+    ...composerSession("composer-select-normalization", "2026-07-24T03:40:00.000Z"),
+    selectedModel: "default",
+    thinkingEffort: "max",
+  };
+  await routeComposerSessions(page, [session]);
+  await page.route(/\/api\/models(?:\?.*)?$/, (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({
+      models: [],
+      codexModels: [
+        {
+          id: "default",
+          label: "Default Codex",
+          reasoningEfforts: [{ effort: "low", description: "Fast" }],
+          defaultReasoningEffort: "low",
+        },
+        {
+          id: "gpt-test",
+          label: "GPT Test",
+          reasoningEfforts: [{ effort: "low", description: "Fast" }],
+          defaultReasoningEffort: "low",
+        },
+      ],
+      opencodeModels: [],
+      grokModels: [],
+      qoderModels: [],
+      defaultModel: "default",
+    }),
+  }));
+
+  const modelBodies: Array<{ model?: string | null }> = [];
+  const thinkingBodies: Array<{ thinkingEffort?: string }> = [];
+  await page.route(new RegExp(`/api/sessions/${session.id}/model$`), async (route) => {
+    const body = route.request().postDataJSON() as { model?: string | null };
+    modelBodies.push(body);
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...session,
+        selectedModel: body.model || "default",
+        thinkingEffort: "standard",
+      }),
+    });
+  });
+  await page.route(new RegExp(`/api/sessions/${session.id}/thinking-effort$`), async (route) => {
+    const body = route.request().postDataJSON() as { thinkingEffort?: string };
+    thinkingBodies.push(body);
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...session,
+        selectedModel: "default",
+        thinkingEffort: body.thinkingEffort || "off",
+      }),
+    });
+  });
+  await login(page);
+
+  const runtime = page.locator(".composer-inline-config");
+  const model = runtime.getByRole("combobox", { name: "模型" });
+  const thinking = runtime.getByRole("combobox", { name: "思考深度" });
+
+  await model.click();
+  const defaultModel = page.getByRole("option", { name: /默认 · Default Codex/ });
+  await expect(defaultModel).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("Escape");
+
+  await thinking.click();
+  const automaticThinking = page.getByRole("option", { name: "自动（模型默认）" });
+  await expect(automaticThinking).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("Escape");
+
+  await thinking.click();
+  await page.getByRole("option", { name: "低" }).click();
+  await expect.poll(() => thinkingBodies).toEqual([{ thinkingEffort: "standard" }]);
+
+  await model.click();
+  await page.getByRole("option", { name: "GPT Test" }).click();
+  await expect.poll(() => modelBodies).toEqual([{ model: "gpt-test" }]);
+
+  await model.click();
+  await expect(page.getByRole("option", { name: "GPT Test" })).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("Escape");
+  await thinking.click();
+  await expect(page.getByRole("option", { name: "低" })).toHaveAttribute("aria-selected", "true");
 });
 
 test("prompt optimizer stays in the action rail and replaces the draft atomically", async ({ page }) => {

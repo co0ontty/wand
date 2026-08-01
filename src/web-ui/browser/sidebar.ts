@@ -1,6 +1,12 @@
 import { state, readStoredBoolean, writeStoredBoolean } from "./state";
 import { t, iconSvg } from "./i18n";
 import { escapeHtml } from "./utils";
+import {
+  inferProviderIdFromCommand,
+  normalizeProviderId,
+  providerDisplayName,
+  renderProviderLogoMarkup,
+} from "../provider-identity";
 import { persistSelectedId } from "./chat-scroll";
 import { closeSwipedItem } from "./input";
 import { showError, wandConfirm } from "./notifications";
@@ -129,7 +135,12 @@ document.addEventListener("click", function(event) {
           var s = e.ref;
           var activeCls = s.id === state.selectedId ? " active" : "";
           var title = s.title || s.description || s.summary || s.command || ("会话 " + idx);
-          return '<button class="sidebar-collapsed-tile' + activeCls + '" type="button" data-collapsed-session-id="' + escapeHtml(s.id) + '" title="' + escapeHtml(title) + '">' + idx + '</button>';
+          var provider = s.provider || inferProviderIdFromCommand(s.command) || "claude";
+          var normalizedProvider = normalizeProviderId(provider) || "generic";
+          var accessibleLabel = title + " · " + providerDisplayName(provider);
+          return '<button class="sidebar-collapsed-tile provider-' + normalizedProvider + activeCls + '" type="button" data-collapsed-session-id="' + escapeHtml(s.id) + '" title="' + escapeHtml(title) + '" aria-label="' + escapeHtml(accessibleLabel) + '">' +
+            '<span class="sidebar-collapsed-provider-mark" aria-hidden="true">' + renderProviderLogoMarkup(provider) + '</span>' +
+          '</button>';
         }).join("");
         var automationCount = entries.automation.length;
         var automationActive = entries.automation.some(function(entry: any) { return entry.ref.id === state.selectedId; });

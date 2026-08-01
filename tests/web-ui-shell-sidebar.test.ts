@@ -272,16 +272,38 @@ test("ShellSidebar SSR renders managed selection and capability-gated controls",
 
 test("ShellSidebar SSR keeps the collapsed legacy tile contract", () => {
   const base = fixture();
+  const groups = base.sidebar.groups.map((group) => group.kind === "wand"
+    ? {
+        ...group,
+        entries: group.entries.map((entry, index) => index === 1
+          ? { ...entry, provider: "codex" as const }
+          : entry),
+      }
+    : group);
   const html = renderSidebar(fixture({
     layout: {
       ...base.layout,
       sidebarCollapsed: true,
+    },
+    sidebar: {
+      ...base.sidebar,
+      groups,
     },
   }));
 
   assert.match(html, /id="sessions-drawer" class="sidebar open pinned collapsed"/);
   assert.match(html, /class="sidebar-collapsed-tiles"/);
   assert.match(html, /data-collapsed-session-id="session-1"/);
+  const collapsedSessionButtons = html.match(
+    /<button[^>]+data-collapsed-session-id="[^"]+"[^>]*>[\s\S]*?<\/button>/g,
+  ) ?? [];
+  assert.equal(collapsedSessionButtons.length, 2);
+  assert.match(collapsedSessionButtons[0] ?? "", /class="sidebar-collapsed-tile provider-claude active"/);
+  assert.match(collapsedSessionButtons[1] ?? "", /class="sidebar-collapsed-tile provider-codex"/);
+  assert.match(collapsedSessionButtons[0] ?? "", /data-provider-logo="claude"/);
+  assert.match(collapsedSessionButtons[1] ?? "", /data-provider-logo="codex"/);
+  assert.doesNotMatch(collapsedSessionButtons.join(""), />\s*[12]\s*<\/button>/);
+  assert.match(collapsedSessionButtons[0] ?? "", /aria-label="Main session · Claude"/);
   assert.match(html, /data-expand-session-group="automation"/);
   assert.match(html, /data-expand-session-group="non-wand"/);
   assert.match(html, /data-collapsed-new-session="1"/);

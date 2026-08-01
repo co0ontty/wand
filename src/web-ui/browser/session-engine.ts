@@ -23,6 +23,11 @@ import {
 } from "./worktree-merge-adapter";
 import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
 import { closeReactOverlays } from "./react-overlay-coordinator";
+import { syncBrowserComposerSelects } from "./composer-select-adapter";
+import {
+  normalizeAvailableComposerValue,
+  normalizeComposerModelValue,
+} from "./composer-select-values";
 
       // 证书不受信任时浏览器会丢弃 Secure Cookie —— 密码正确也存不住登录态。
       // 这里揭示专用提示，并把「改用 HTTP」按钮指向同 host 的 http:// 地址。
@@ -176,7 +181,7 @@ import { closeReactOverlays } from "./react-overlay-coordinator";
 
       export function getModeLabel(mode) {
         return mode === "full-access"
-          ? "全权限"
+          ? "完全访问"
           : mode === "default"
             ? "默认"
             : mode === "native"
@@ -409,9 +414,9 @@ import { closeReactOverlays } from "./react-overlay-coordinator";
             '</select>' +
           '</span>';
         }
-        var refreshButton = '<button class="model-refresh-button" type="button" data-models-refresh ' +
-          'aria-label="刷新模型列表" title="刷新模型列表"' +
-          (state.modelsRefreshing ? ' disabled aria-busy="true"' : '') + '>' +
+        var refreshButton = '<button class="model-refresh-button' + (state.modelsRefreshing ? ' is-refreshing' : '') + '" type="button" data-models-refresh ' +
+          'aria-label="刷新模型列表" title="刷新模型列表" aria-busy="' + (state.modelsRefreshing ? 'true' : 'false') + '"' +
+          (state.modelsRefreshing ? ' disabled' : '') + '>' +
           iconSvg("refresh", { size: 13, strokeWidth: 1.9, cls: "model-refresh-icon" }) +
           '<span class="model-refresh-label">刷新模型列表</span>' +
           '</button>';
@@ -476,13 +481,20 @@ import { closeReactOverlays } from "./react-overlay-coordinator";
         return label;
       }
 
-      export function renderThinkingOptions(selected, session?) {
+      function getThinkingSelectOptions(selected, session?) {
         var levels = getThinkingLevels(session);
-        var normalized = levels.some(function(level) { return level.id === selected; }) ? selected : "off";
         return levels.map(function(level) {
           var label = level.id === "off" ? "自动（模型默认）" : getThinkingCompactLabel(level.id, session);
-          return '<option value="' + escapeHtml(level.id) + '"' + (level.id === normalized ? " selected" : "") + '>' +
-            escapeHtml(label) +
+          return { value: level.id, label: label };
+        });
+      }
+
+      export function renderThinkingOptions(selected, session?) {
+        var options = getThinkingSelectOptions(selected, session);
+        var normalized = normalizeAvailableComposerValue(selected, options, "off");
+        return options.map(function(option) {
+          return '<option value="' + escapeHtml(option.value) + '"' + (option.value === normalized ? " selected" : "") + '>' +
+            escapeHtml(option.label) +
           '</option>';
         }).join("");
       }
@@ -490,8 +502,9 @@ import { closeReactOverlays } from "./react-overlay-coordinator";
       function syncThinkingSelect(container, selected, session?) {
         var select = container.querySelector('[data-mode-control="thinking"]') as HTMLSelectElement | null;
         if (!select) return;
+        var options = getThinkingSelectOptions(selected, session);
         select.innerHTML = renderThinkingOptions(selected, session);
-        select.value = getThinkingLevels(session).some(function(level) { return level.id === selected; }) ? selected : "off";
+        select.value = normalizeAvailableComposerValue(selected, options, "off");
       }
 
       export function supportsClaudeSkillSelection(session) {
@@ -631,43 +644,50 @@ import { closeReactOverlays } from "./react-overlay-coordinator";
         refreshClaudeSkillControls();
       }
 
-      export function renderComposerConfigControlsHtml(session) {
-        var preferredTool = getPreferredTool();
+      function renderComposerSelectHost(control, scope) {
+        var key = String(scope) + "-" + String(control);
+        return '<span class="composer-config-select-host" data-composer-select-host data-composer-select-key="' + escapeHtml(key) + '" data-composer-select-scope="' + escapeHtml(scope) + '" data-mode-control="' + escapeHtml(control) + '"></span>';
+      }
+
+      export function renderComposerConfigControlsHtml(session, scope = "all") {
         var mode = state.chatMode || "default";
-        var model = getEffectiveModel(session) || "";
-        var thinking = getEffectiveThinking(session);
+        var model = normalizeComposerModelValue(getEffectiveModel(session));
+        var thinkingOptions = getThinkingSelectOptions(getEffectiveThinking(session), session);
+        var thinking = normalizeAvailableComposerValue(getEffectiveThinking(session), thinkingOptions, "off");
         var modeLabel = getModeLabel(mode);
         var modelLabel = getShortModelLabel(model, session);
         var thinkingLabel = getThinkingCompactLabel(thinking, session);
         var title = "模式 " + modeLabel + " · 模型 " + modelLabel + " · 思考 " + thinkingLabel;
-        return '<div class="composer-config-controls" role="group" aria-label="会话设置" title="' + escapeHtml(title) + '">' +
-          '<span class="composer-config-chip composer-config-chip-mode" data-mode-control-pill="mode" title="模式：' + escapeHtml(modeLabel) + '">' +
-            iconSvg("shield", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) +
-            '<span class="composer-config-label">' + escapeHtml(modeLabel) + '</span>' +
-            '<select class="composer-text-hidden-select" data-mode-control="mode" aria-label="模式">' +
-              renderChatModeOptionsRaw(preferredTool, mode) +
-            '</select>' +
-          '</span>' +
-          '<span class="composer-config-chip composer-config-model" data-mode-control-pill="model" title="模型：' + escapeHtml(modelLabel) + '">' +
-            iconSvg("cpu", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) +
-            '<span class="composer-config-label">' + escapeHtml(modelLabel) + '</span>' +
-            '<select class="composer-text-hidden-select" data-mode-control="model" aria-label="模型">' +
-              renderChatModelOptions(model, session) +
-            '</select>' +
-          '</span>' +
-          '<button class="model-refresh-button composer-model-refresh-button" type="button" data-models-refresh aria-label="刷新模型列表" title="刷新模型列表"' +
-            (state.modelsRefreshing ? ' disabled aria-busy="true"' : '') + '>' +
-            iconSvg("refresh", { size: 13, strokeWidth: 1.9, cls: "model-refresh-icon" }) +
-            '<span class="model-refresh-label">刷新模型列表</span>' +
-          '</button>' +
-          '<span class="composer-config-chip composer-config-thinking" data-mode-control-pill="thinking" data-thinking="' + escapeHtml(thinking) + '" title="思考深度：' + escapeHtml(thinkingLabel) + '">' +
-            iconSvg("brain", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) +
-            '<span class="composer-config-label">' + escapeHtml(thinkingLabel) + '</span>' +
-            '<select class="composer-text-hidden-select" data-mode-control="thinking" aria-label="思考深度">' +
-              renderThinkingOptions(thinking, session) +
-            '</select>' +
-          '</span>' +
-          (supportsClaudeSkillSelection(session)
+        var showMode = scope !== "runtime";
+        var showRuntime = scope !== "mode";
+        var showExtended = scope === "all";
+        var showModelRefresh = scope === "runtime" || showExtended;
+        var ariaLabel = scope === "mode" ? "权限模式" : (scope === "runtime" ? "模型与思考设置" : "会话设置");
+        return '<div class="composer-config-controls composer-config-controls-' + escapeHtml(scope) + '" data-config-scope="' + escapeHtml(scope) + '" role="group" aria-label="' + ariaLabel + '" title="' + escapeHtml(title) + '">' +
+          (showMode
+            ? '<span class="composer-config-chip composer-config-chip-mode" data-mode-control-pill="mode" title="模式：' + escapeHtml(modeLabel) + '">' +
+                iconSvg("shield", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) +
+                renderComposerSelectHost("mode", scope) +
+              '</span>'
+            : "") +
+          (showRuntime
+            ? '<span class="composer-config-chip composer-config-model" data-mode-control-pill="model" title="模型：' + escapeHtml(modelLabel) + '">' +
+                iconSvg("cpu", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) +
+                renderComposerSelectHost("model", scope) +
+              '</span>' +
+              (showModelRefresh
+                ? '<button class="model-refresh-button composer-model-refresh-button' + (state.modelsRefreshing ? ' is-refreshing' : '') + '" type="button" data-models-refresh data-models-refresh-scope="' + escapeHtml(scope) + '" aria-label="刷新模型列表" title="刷新模型列表" aria-busy="' + (state.modelsRefreshing ? 'true' : 'false') + '"' +
+                    (state.modelsRefreshing ? ' disabled' : '') + '>' +
+                    iconSvg("refresh", { size: 13, strokeWidth: 1.9, cls: "model-refresh-icon" }) +
+                    '<span class="model-refresh-label">刷新模型列表</span>' +
+                  '</button>'
+                : "") +
+              '<span class="composer-config-chip composer-config-thinking" data-mode-control-pill="thinking" data-thinking="' + escapeHtml(thinking) + '" title="思考深度：' + escapeHtml(thinkingLabel) + '">' +
+                iconSvg("brain", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) +
+                renderComposerSelectHost("thinking", scope) +
+              '</span>'
+            : "") +
+          (showExtended && supportsClaudeSkillSelection(session)
             ? '<button class="composer-config-chip composer-config-skills" type="button" data-claude-skills-trigger aria-haspopup="dialog" aria-expanded="false" title="选择本条消息要应用的 skills">Skills</button>'
             : "") +
         '</div>';
@@ -707,43 +727,33 @@ import { closeReactOverlays } from "./react-overlay-coordinator";
 
       export function refreshComposerConfigControls(session, mode, model, thinking) {
         var preferredTool = getPreferredTool();
+        var modelOptions = getChatModelSelectOptions(model, session);
+        var normalizedModel = normalizeComposerModelValue(model);
+        var thinkingOptions = getThinkingSelectOptions(thinking, session);
+        var normalizedThinking = normalizeAvailableComposerValue(thinking, thinkingOptions, "off");
         var modeLabel = getModeLabel(mode);
-        var modelLabel = getShortModelLabel(model, session);
-        var thinkingLabel = getThinkingCompactLabel(thinking, session);
+        var modelLabel = getShortModelLabel(normalizedModel, session);
+        var thinkingLabel = getThinkingCompactLabel(normalizedThinking, session);
         var controls = document.querySelectorAll(".composer-config-controls");
         controls.forEach(function(control) {
           var title = "模式 " + modeLabel + " · 模型 " + modelLabel + " · 思考 " + thinkingLabel;
           control.setAttribute("title", title);
-          function updateSelect(part, value, optionsHtml) {
-            var sel = part.querySelector("[data-mode-control]") as HTMLSelectElement | null;
-            if (!sel) return;
-            sel.innerHTML = optionsHtml;
-            sel.value = value;
-          }
           var modePart = control.querySelector('[data-mode-control-pill="mode"]');
           if (modePart) {
-            var modeText = modePart.querySelector(".composer-config-label");
-            if (modeText) modeText.textContent = modeLabel;
             modePart.setAttribute("title", "模式：" + modeLabel);
-            updateSelect(modePart, mode, renderChatModeOptionsRaw(preferredTool, mode));
           }
           var modelPart = control.querySelector('[data-mode-control-pill="model"]');
           if (modelPart) {
-            var modelText = modelPart.querySelector(".composer-config-label");
-            if (modelText) modelText.textContent = modelLabel;
             modelPart.setAttribute("title", "模型：" + modelLabel);
-            updateSelect(modelPart, model, renderChatModelOptions(model, session));
           }
           var thinkingPart = control.querySelector('[data-mode-control-pill="thinking"]');
           if (thinkingPart) {
-            var thinkingText = thinkingPart.querySelector(".composer-config-label");
-            if (thinkingText) thinkingText.textContent = thinkingLabel;
-            thinkingPart.setAttribute("data-thinking", thinking);
+            thinkingPart.setAttribute("data-thinking", normalizedThinking);
             thinkingPart.setAttribute("title", "思考深度：" + thinkingLabel);
-            syncThinkingSelect(thinkingPart, thinking, session);
           }
           var skillsTrigger = control.querySelector("[data-claude-skills-trigger]");
-          if (supportsClaudeSkillSelection(session)) {
+          var supportsExtendedControls = control.getAttribute("data-config-scope") === "all";
+          if (supportsExtendedControls && supportsClaudeSkillSelection(session)) {
             if (!skillsTrigger) {
               control.insertAdjacentHTML(
                 "beforeend",
@@ -753,6 +763,45 @@ import { closeReactOverlays } from "./react-overlay-coordinator";
           } else {
             skillsTrigger?.remove();
           }
+        });
+        syncBrowserComposerSelects({
+          resolve: function(control) {
+            if (control === "mode") {
+              return {
+                value: mode,
+                options: getSupportedModes(preferredTool).map(function(item) {
+                  return { value: item, label: getModeLabel(item) };
+                }),
+                ariaLabel: "模式",
+                placeholder: modeLabel,
+                displayValue: modeLabel,
+              };
+            }
+            if (control === "model") {
+              return {
+                value: normalizedModel,
+                options: modelOptions,
+                ariaLabel: "模型",
+                placeholder: modelLabel,
+                displayValue: modelLabel,
+              };
+            }
+            return {
+              value: normalizedThinking,
+              options: thinkingOptions,
+              ariaLabel: "思考深度",
+              placeholder: thinkingLabel,
+              displayValue: thinkingLabel,
+            };
+          },
+          onValueChange: function(control, value, scope) {
+            if (control === "mode") onChatModeChange(value);
+            else if (control === "model") onChatModelChange(value);
+            else onChatThinkingChange(value);
+            if (scope === "all") {
+              requestAnimationFrame(function() { closePlusPopover(true); });
+            }
+          },
         });
         refreshClaudeSkillControls();
       }
@@ -833,10 +882,10 @@ import { closeReactOverlays } from "./react-overlay-coordinator";
         return state.availableModels || [];
       }
 
-      export function renderChatModelOptions(selected, session) {
+      function getChatModelSelectOptions(selected, session) {
         var models = getModelsForCurrentProvider(session);
-        var normalized = selected === "default" ? "" : (selected || "");
-        var html = '<option value=""' + (!normalized ? " selected" : "") + '>默认 · ' + escapeHtml(getModelDisplayLabel("", session)) + '</option>';
+        var normalized = normalizeComposerModelValue(selected);
+        var options = [{ value: "", label: "默认 · " + getModelDisplayLabel("", session) }];
         for (var i = 0; i < models.length; i++) {
           var m = models[i];
           if (m.id === "default") continue;
@@ -850,18 +899,27 @@ import { closeReactOverlays } from "./react-overlay-coordinator";
                   ? " · API 候选"
                   : " · 候选"
             : "";
-          html += '<option value="' + escapeHtml(m.id) + '"' + (m.id === normalized ? " selected" : "") + '>' + escapeHtml(label + suffix) + '</option>';
+          options.push({ value: m.id, label: label + suffix });
         }
         if (normalized && !models.some(function(m) { return m.id === normalized; })) {
-          html += '<option value="' + escapeHtml(normalized) + '" selected>' + escapeHtml(normalized) + '（自定义）</option>';
+          options.push({ value: normalized, label: normalized + "（自定义）" });
         }
-        return html;
+        return options;
+      }
+
+      export function renderChatModelOptions(selected, session) {
+        var normalized = normalizeComposerModelValue(selected);
+        return getChatModelSelectOptions(selected, session).map(function(option) {
+          return '<option value="' + escapeHtml(option.value) + '"' + (option.value === normalized ? " selected" : "") + '>' +
+            escapeHtml(option.label) +
+          '</option>';
+        }).join("");
       }
 
       // Raw 选项优先显示模型 ID，并以简短状态标识候选的验证状态。
       export function renderChatModelOptionsRaw(selected, session) {
         var models = getModelsForCurrentProvider(session);
-        var normalized = selected === "default" ? "" : (selected || "");
+        var normalized = normalizeComposerModelValue(selected);
         var html = '<option value=""' + (!normalized ? " selected" : "") + '>' + escapeHtml(getModelDisplayLabel("", session)) + '</option>';
         for (var i = 0; i < models.length; i++) {
           var m = models[i];
@@ -2448,15 +2506,6 @@ import { closeReactOverlays } from "./react-overlay-coordinator";
               setDraftValue(inputBox.value, true);
             }
           }, 0);
-          return;
-        }
-
-        if (event.key === "Tab") {
-          event.preventDefault();
-          var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
-          if (inputBox) {
-            replaceComposerSelection(inputBox, String.fromCharCode(9));
-          }
           return;
         }
 

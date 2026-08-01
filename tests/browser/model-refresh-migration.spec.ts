@@ -66,13 +66,25 @@ test("model refresh is a single in-flight POST and repopulates model controls", 
 
   await login(page);
 
-  const modelSelect = page.locator(".composer-inline-config [data-mode-control='model']").first();
+  const modelSelect = page.locator(".composer-inline-config").getByRole("combobox", { name: "模型" });
   await expect(modelSelect).toBeAttached();
-  await expect(modelSelect.locator("option[value='claude-after-refresh']")).toHaveCount(0);
+  await modelSelect.click();
+  await expect(page.getByRole("option", { name: /Claude before refresh/ })).toBeVisible();
+  await expect(page.getByRole("option", { name: /Claude after refresh/ })).toHaveCount(0);
+  await page.keyboard.press("Escape");
 
-  const refreshButtons = page.locator("[data-models-refresh]");
-  await expect(refreshButtons.first()).toBeVisible();
-  await refreshButtons.first().click();
+  const inlineRefresh = page.locator('.composer-inline-config [data-models-refresh-scope="runtime"]');
+  await expect(inlineRefresh).toHaveCount(1);
+  await expect(inlineRefresh).toBeVisible();
+  await expect(inlineRefresh).toHaveAttribute("aria-label", "刷新模型列表");
+
+  await page.locator("#attach-btn").click();
+  await expect(page.locator("#composer-plus-popover")).toBeVisible();
+  const plusRefresh = page.locator('#composer-plus-popover [data-models-refresh-scope="all"]');
+  await expect(plusRefresh).toHaveCount(1);
+  await expect(plusRefresh).toBeVisible();
+  const refreshButtons = page.locator('[data-models-refresh-scope="runtime"], [data-models-refresh-scope="all"]');
+  await inlineRefresh.click();
   await expect.poll(() => refreshRequestCount).toBe(1);
   await expect.poll(() => refreshButtons.evaluateAll((buttons) => (
     buttons.length > 0 && buttons.every((button) => (
@@ -95,8 +107,10 @@ test("model refresh is a single in-flight POST and repopulates model controls", 
   expect(refreshRequestCount).toBe(1);
 
   releaseRefresh?.();
-  await expect(modelSelect.locator("option[value='claude-after-refresh']")).toHaveCount(1);
-  await expect(refreshButtons.first()).not.toBeDisabled();
+  await modelSelect.click();
+  await expect(page.getByRole("option", { name: /Claude after refresh/ })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(inlineRefresh).not.toBeDisabled();
   await expect.poll(() => refreshButtons.evaluateAll((buttons) => (
     buttons.length > 0 && buttons.every((button) => (
       button.getAttribute("aria-busy") === "false" && !button.classList.contains("is-refreshing")

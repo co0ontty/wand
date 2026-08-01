@@ -343,12 +343,16 @@ import { isBrowserReactShellMounted } from "./shell-runtime";
           if (!state.plusPopoverOpen) return;
           var pop = document.getElementById("composer-plus-popover");
           var btn = document.getElementById("attach-btn");
+          var target = e.target as HTMLElement | null;
+          if (target && typeof target.closest === "function" && target.closest(".wand-composer-select-content")) return;
           if (pop && pop.contains(e.target as Node)) return;
           if (btn && btn.contains(e.target as Node)) return;
           closePlusPopover();
         });
         document.addEventListener("keydown", function(e) {
           if (e.key === "Escape" && state.plusPopoverOpen) {
+            var target = e.target as HTMLElement | null;
+            if (target && typeof target.closest === "function" && target.closest(".wand-composer-select-content")) return;
             e.preventDefault();
             closePlusPopover(true);
           }
@@ -654,7 +658,8 @@ import { isBrowserReactShellMounted } from "./shell-runtime";
             togglePlusPopover(e.detail === 0);
           });
           plusPopover.addEventListener("keydown", function(e) {
-            if (e.target instanceof HTMLSelectElement) return;
+            var target = e.target as HTMLElement;
+            if (e.target instanceof HTMLSelectElement || target.matches('[role="combobox"], .wand-ui-select-trigger')) return;
             if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
             var controls = Array.from(plusPopover!.querySelectorAll<HTMLElement>(
               'button:not([disabled]):not(.hidden), select:not([disabled]), [tabindex]:not([tabindex="-1"])'

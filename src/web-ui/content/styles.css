@@ -739,9 +739,9 @@
       width: 36px;
       height: 36px;
       border-radius: 11px;
-      border: 0.5px solid rgba(255, 255, 255, 0.32);
-      background: linear-gradient(145deg, #d4785a 0%, #b8573a 50%, #a04a2e 100%);
-      color: #fff;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--text-secondary);
       font-size: 14px;
       font-weight: 700;
       font-variant-numeric: tabular-nums;
@@ -751,20 +751,49 @@
       align-items: center;
       justify-content: center;
       padding: 0;
-      box-shadow:
-        0 1px 2px rgba(184, 92, 55, 0.22),
-        inset 0 1px 0 rgba(255, 255, 255, 0.28);
+      box-shadow: none;
       transition:
-        filter var(--transition-fast),
-        box-shadow 0.22s ease,
-        transform 0.22s var(--ease-out-expo);
+        border-color 0.16s ease,
+        box-shadow 0.16s ease,
+        transform 0.16s var(--ease-out-expo);
+    }
+    .sidebar-collapsed-tile.provider-claude {
+      --sidebar-provider-color: #d97757;
+    }
+    .sidebar-collapsed-tile.provider-codex,
+    .sidebar-collapsed-tile.provider-grok,
+    .sidebar-collapsed-tile.provider-opencode {
+      --sidebar-provider-color: #131010;
+    }
+    .sidebar-collapsed-tile.provider-qoder {
+      --sidebar-provider-color: #2adb5c;
+    }
+    .sidebar-collapsed-provider-mark {
+      display: inline-flex;
+      width: 20px;
+      height: 20px;
+      align-items: center;
+      justify-content: center;
+      color: var(--sidebar-provider-color, currentColor);
+    }
+    .sidebar-collapsed-provider-mark > .wand-provider-logo {
+      width: 18px;
+      height: 18px;
+    }
+    .sidebar-collapsed-provider-mark > .wand-provider-logo-opencode,
+    .sidebar-collapsed-provider-mark > .wand-provider-logo-qoder {
+      width: 20px;
+      height: 20px;
+      border-radius: 5px;
     }
     .sidebar-collapsed-tile:hover {
-      filter: brightness(1.06);
+      border-color: color-mix(
+        in srgb,
+        var(--sidebar-provider-color, var(--text-primary)) 22%,
+        transparent
+      );
       transform: translateY(-1px);
-      box-shadow:
-        0 4px 10px -3px rgba(184, 92, 55, 0.36),
-        inset 0 1px 0 rgba(255, 255, 255, 0.32);
+      box-shadow: 0 3px 8px -5px rgba(73, 51, 35, 0.2);
     }
     /* 快速新建会话 tile —— 虚线描边 + 加号，区别于实心会话方块 */
     .sidebar-collapsed-tile.add {
@@ -784,15 +813,22 @@
     .sidebar-collapsed-tile.add:active {
       transform: translateY(0) scale(0.94);
     }
-    /* Active — accent ring + 一层柔和暖投影 + 顶高光。原先 7 层叠加在 36px 小块上
-       糊成一团，精简到 3 层即可表达「升起 + 选中」。 */
+    /* Active — 保持原始侧栏底色，仅用 provider 原色轮廓表达选中。 */
     .sidebar-collapsed-tile.active {
-      background: linear-gradient(145deg, #d27358 0%, #b35434 50%, #934128 100%);
+      border-color: color-mix(
+        in srgb,
+        var(--sidebar-provider-color, var(--text-primary)) 48%,
+        transparent
+      );
+      background: transparent;
       transform: translateY(-1px);
       box-shadow:
-        0 0 0 2px rgba(197, 101, 61, 0.3),
-        0 5px 14px -4px rgba(160, 74, 46, 0.45),
-        inset 0 1px 0 rgba(255, 255, 255, 0.4);
+        0 0 0 2px color-mix(
+          in srgb,
+          var(--sidebar-provider-color, var(--text-primary)) 12%,
+          transparent
+        ),
+        0 3px 8px -5px rgba(73, 51, 35, 0.22);
     }
     .sidebar-collapsed-tile:active {
       transform: translateY(0) scale(0.94);
@@ -12818,19 +12854,29 @@
     }
 
     /* =====================================================================
-       Composer finish: floating writing surface
+       Composer finish: spacious writing surface with a quiet bottom rail
 
-       Keep the existing composer DOM and interaction hooks, but give it one
-       stable three-band layout: optional attachments, growing writing area,
-       and a quiet action rail. The surface never changes geometry on focus;
-       only color and depth respond, so typing remains visually anchored.
+       The reference separates drafting from controls: text owns the upper
+       band, while permission context and runtime choices sit on opposite
+       sides of one unboxed toolbar. Focus only changes color and depth, never
+       geometry, so the caret remains visually anchored while typing.
        ===================================================================== */
     .input-panel {
-      padding: 12px 20px 16px;
+      --composer-panel-inline: clamp(20px, 4vw, 30px);
+      --composer-panel-right: var(--composer-panel-inline);
+      padding: 12px var(--composer-panel-inline) 16px;
       padding-bottom: calc(16px + var(--input-safe-bottom, var(--safe-bottom, 0px)));
       background:
-        linear-gradient(180deg, transparent 0, color-mix(in srgb, var(--bg-primary) 92%, transparent) 32px),
+        linear-gradient(180deg, transparent 0, color-mix(in srgb, var(--bg-primary) 94%, transparent) 36px),
         var(--bg-primary);
+    }
+
+    .input-panel > .queue-bar-host {
+      right: var(--composer-panel-right, var(--composer-panel-inline));
+      max-width: min(
+        440px,
+        calc(100% - var(--composer-panel-inline) - var(--composer-panel-right, var(--composer-panel-inline)))
+      );
     }
 
     .input-composer-row {
@@ -12842,22 +12888,21 @@
     .input-composer {
       --composer-action-size: 36px;
       --composer-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
-      --composer-border: color-mix(in srgb, var(--border-default) 84%, #a99584);
-      --composer-hairline: color-mix(in srgb, var(--border-subtle) 84%, #aa907a);
-      display: grid;
-      grid-template-columns: 46px minmax(0, 1fr) auto auto;
-      grid-template-rows: auto minmax(56px, auto) 46px;
+      --composer-border: color-mix(in srgb, var(--border-default) 76%, #b7ada5);
+      --composer-hairline: color-mix(in srgb, var(--border-subtle) 78%, #b8aea6);
+      display: flex;
+      flex-direction: column;
       overflow: hidden;
       isolation: isolate;
       border: 1px solid var(--composer-border);
-      border-radius: 21px;
-      background: color-mix(in srgb, var(--bg-elevated) 97%, transparent);
+      border-radius: 22px;
+      background: color-mix(in srgb, var(--bg-elevated) 99%, transparent);
       box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.82),
-        0 1px 2px rgba(58, 42, 30, 0.05),
-        0 12px 32px -24px rgba(58, 42, 30, 0.28);
-      backdrop-filter: blur(20px) saturate(115%);
-      -webkit-backdrop-filter: blur(20px) saturate(115%);
+        inset 0 1px 0 rgba(255, 255, 255, 0.88),
+        0 1px 2px rgba(40, 32, 26, 0.045),
+        0 12px 34px -20px rgba(40, 32, 26, 0.22);
+      backdrop-filter: blur(18px) saturate(108%);
+      -webkit-backdrop-filter: blur(18px) saturate(108%);
       transition:
         border-color 160ms var(--composer-ease),
         background-color 160ms var(--composer-ease),
@@ -12866,14 +12911,36 @@
 
     .input-composer:focus-within,
     .input-composer.is-expanded {
-      border-color: color-mix(in srgb, var(--accent) 40%, var(--composer-border));
-      border-radius: 21px;
+      border-color: color-mix(in srgb, var(--accent) 30%, var(--composer-border));
+      border-radius: 22px;
       background: color-mix(in srgb, var(--bg-elevated) 99%, transparent);
       box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.88),
-        0 0 0 2px color-mix(in srgb, var(--accent-muted) 48%, transparent),
-        0 2px 5px rgba(58, 42, 30, 0.06),
-        0 16px 36px -26px rgba(58, 42, 30, 0.34);
+        inset 0 1px 0 rgba(255, 255, 255, 0.9),
+        0 0 0 2px color-mix(in srgb, var(--accent) 10%, transparent),
+        0 2px 5px rgba(40, 32, 26, 0.05),
+        0 16px 38px -24px rgba(40, 32, 26, 0.26);
+    }
+
+    .input-composer.in-flight {
+      border-color: var(--composer-border);
+      background: color-mix(in srgb, var(--bg-elevated) 99%, transparent);
+      box-shadow:
+        inset 0 2px 0 rgba(var(--accent-rgb, 197, 101, 61), 0.24),
+        0 1px 2px rgba(40, 32, 26, 0.045),
+        0 12px 34px -20px rgba(40, 32, 26, 0.22);
+    }
+
+    .input-composer.in-flight:focus-within {
+      border-color: color-mix(in srgb, var(--accent) 30%, var(--composer-border));
+      box-shadow:
+        inset 0 2px 0 rgba(var(--accent-rgb, 197, 101, 61), 0.24),
+        0 0 0 2px color-mix(in srgb, var(--accent) 10%, transparent),
+        0 16px 38px -24px rgba(40, 32, 26, 0.26);
+    }
+
+    .input-composer.in-flight::before,
+    .input-composer.in-flight::after {
+      content: none;
     }
 
     .input-composer::after {
@@ -12883,15 +12950,21 @@
     .composer-main-row,
     .input-composer:focus-within .composer-main-row,
     .input-composer.is-expanded .composer-main-row {
-      display: contents;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-rows: minmax(72px, auto) 40px;
+      min-height: 112px;
+      padding: 0;
+      column-gap: 0;
+      row-gap: 0;
     }
 
     .composer-input-wrap,
     .input-composer:focus-within .composer-input-wrap,
     .input-composer.is-expanded .composer-input-wrap {
       grid-column: 1 / -1;
-      grid-row: 2;
-      min-height: 56px;
+      grid-row: 1;
+      min-height: 72px;
       align-items: center;
     }
 
@@ -12903,12 +12976,14 @@
     .input-composer:focus-within .composer-actions-left,
     .input-composer.is-expanded .composer-actions-left {
       grid-column: 1;
-      grid-row: 3;
+      grid-row: 2;
       align-self: stretch;
-      justify-content: center;
-      gap: 0;
+      min-width: 0;
+      justify-content: flex-start;
+      align-items: center;
+      gap: 2px;
       z-index: 1;
-      padding-left: 6px;
+      padding: 3px 2px 3px 2px;
       flex-wrap: nowrap;
     }
 
@@ -12916,54 +12991,55 @@
     .input-composer:focus-within .composer-inline-config,
     .input-composer.is-expanded .composer-inline-config {
       display: flex;
-      grid-column: 2;
-      grid-row: 3;
       align-self: center;
-      justify-self: start;
       width: max-content;
       max-width: 100%;
       min-width: 0;
       height: 34px;
       z-index: 1;
       gap: 0;
-      padding: 2px;
-      margin-left: 2px;
+      padding: 0;
+      margin: 0;
       overflow: hidden;
       flex-wrap: nowrap;
-      border: 1px solid color-mix(in srgb, var(--border-subtle) 70%, transparent);
-      border-radius: 10px;
-      background: color-mix(in srgb, var(--bg-tertiary) 42%, transparent);
+      border: 0;
+      border-radius: 0;
+      background: transparent;
     }
 
-    .input-composer > .composer-status-row {
-      grid-column: 3;
-      grid-row: 3;
+    .input-composer .composer-status-row {
       align-self: center;
       min-width: 0;
+      max-width: 100%;
       z-index: 1;
-      padding: 0 3px;
+      padding: 0;
       gap: 2px;
+      overflow: hidden;
       flex-wrap: nowrap;
+    }
+
+    .input-composer .composer-status-row:has(> *:not(.hidden)) {
+      padding: 0;
     }
 
     .composer-actions-right,
     .input-composer:focus-within .composer-actions-right,
     .input-composer.is-expanded .composer-actions-right {
-      grid-column: 4;
-      grid-row: 3;
+      grid-column: 2;
+      grid-row: 2;
       align-self: stretch;
       justify-content: flex-end;
       align-items: center;
       z-index: 1;
-      gap: 5px;
-      padding: 4px 6px 4px 0;
+      gap: 3px;
+      padding: 3px 7px;
       flex-wrap: nowrap;
     }
 
     .input-textarea {
       --input-max-height: min(180px, 34dvh);
-      min-height: 44px;
-      padding: 12px 16px 9px;
+      min-height: 72px;
+      padding: 13px 12px 8px;
       font-size: 15px;
       line-height: 1.5;
       scrollbar-gutter: auto;
@@ -12971,11 +13047,11 @@
     }
 
     .input-composer.has-text .input-textarea {
-      padding-right: 16px;
+      padding-right: 12px;
     }
 
     .input-composer .input-textarea::placeholder {
-      color: color-mix(in srgb, var(--text-muted) 72%, transparent);
+      color: var(--text-tertiary);
       opacity: 1;
     }
 
@@ -13112,16 +13188,20 @@
       flex-wrap: nowrap;
     }
 
+    .input-composer .composer-config-controls-mode {
+      overflow: visible;
+    }
+
     .input-composer .composer-config-chip {
       flex: 0 1 auto;
       min-width: 0;
-      min-height: 28px;
+      min-height: 34px;
       max-width: 92px;
-      padding: 0 7px;
-      gap: 4px;
+      padding: 0 5px;
+      gap: 3px;
       justify-content: flex-start;
       border-color: transparent;
-      border-radius: 7px;
+      border-radius: 9px;
       color: var(--text-muted);
       background: transparent;
       transition:
@@ -13129,35 +13209,67 @@
         background-color 150ms var(--composer-ease);
     }
 
-    /* The dock only surfaces the two values needed while writing. Mode and
-       refresh remain available in the + menu, where they do not compete with
-       the draft for width. */
-    .input-composer .composer-config-chip-mode {
-      display: none;
+    /* The bottom rail mirrors the reference: access context on the left,
+       model and thinking depth on the right. Full settings stay in the + menu. */
+    .input-composer .composer-status-row .composer-config-chip-mode {
+      display: inline-flex;
+      max-width: 112px;
+      padding-inline: 6px;
+      color: var(--accent);
+      background: transparent;
     }
 
     .input-composer .composer-model-refresh-button {
-      display: none;
+      display: inline-flex;
+      width: 34px;
+      min-width: 34px;
+      height: 34px;
+      margin: 0;
+      border-radius: 9px;
+      transition:
+        color 140ms var(--composer-ease),
+        background-color 140ms var(--composer-ease),
+        transform 120ms var(--composer-ease);
+    }
+
+    .input-composer .composer-model-refresh-button:focus-visible {
+      box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 38%, transparent);
     }
 
     .input-composer .composer-config-icon {
       display: none;
     }
 
+    .input-composer .composer-status-row .composer-config-icon {
+      display: block;
+      flex: 0 0 auto;
+    }
+
     .input-composer .composer-config-model {
       max-width: 118px;
-      padding-right: 6px;
+      padding-right: 4px;
+      color: var(--text-secondary);
     }
 
     .input-composer .composer-config-thinking {
-      max-width: 78px;
-      padding-left: 4px;
+      max-width: 88px;
+      padding-left: 3px;
+      padding-right: 4px;
     }
 
     .input-composer .composer-config-thinking::before {
-      content: "·";
+      content: none;
+    }
+
+    .input-composer .composer-config-thinking:not([data-thinking="off"]) {
+      color: #8b5cf6;
+    }
+
+    .input-composer .composer-config-chevron {
+      display: block;
       flex: 0 0 auto;
-      color: var(--text-tertiary);
+      color: var(--text-muted);
+      pointer-events: none;
     }
 
     .input-composer .composer-config-chip:hover,
@@ -13175,8 +13287,9 @@
     .input-composer .composer-config-label {
       min-width: 0;
       overflow: hidden;
-      font-size: 0.75rem;
-      font-weight: 520;
+      font-size: 0.8125rem;
+      font-weight: 450;
+      letter-spacing: -0.01em;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
@@ -13212,9 +13325,9 @@
       display: none;
     }
 
-    .input-composer:has(.permission-actions:not(.hidden)) > .composer-status-row {
-      grid-column: 2 / 4;
-      overflow: hidden;
+    .input-composer:has(.permission-actions:not(.hidden))
+      .composer-status-row > :not(.permission-actions) {
+      display: none;
     }
 
     .input-composer .permission-actions {
@@ -13224,7 +13337,8 @@
 
     .input-composer .permission-actions-label {
       min-width: 0;
-      max-width: 100px;
+      max-width: min(42vw, 320px);
+      color: color-mix(in srgb, var(--accent) 88%, #7a4300);
     }
 
     .input-composer .btn-permission {
@@ -13248,14 +13362,15 @@
     }
 
     .input-composer .btn-circle-send {
-      width: 36px;
-      height: 36px;
-      min-width: 36px;
-      border: 1px solid color-mix(in srgb, var(--accent) 80%, #8b4b34);
-      background: var(--accent);
+      width: 32px;
+      height: 32px;
+      min-width: 32px;
+      color: var(--bg-primary);
+      border: 1px solid color-mix(in srgb, var(--text-primary) 88%, transparent);
+      background: var(--text-primary);
       box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.24),
-        0 4px 10px -6px rgba(132, 61, 35, 0.72);
+        inset 0 1px 0 rgba(255, 255, 255, 0.16),
+        0 5px 12px -7px color-mix(in srgb, var(--text-primary) 64%, transparent);
       transition:
         color 150ms var(--composer-ease),
         background-color 150ms var(--composer-ease),
@@ -13265,17 +13380,32 @@
     }
 
     .input-composer .btn-circle-send:hover:not(:disabled) {
-      background: var(--accent-hover);
-      border-color: var(--accent-hover);
+      color: var(--bg-primary);
+      background: color-mix(in srgb, var(--text-primary) 88%, var(--bg-primary));
+      border-color: color-mix(in srgb, var(--text-primary) 88%, var(--bg-primary));
       box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.28),
-        0 7px 16px -8px rgba(132, 61, 35, 0.86);
+        inset 0 1px 0 rgba(255, 255, 255, 0.18),
+        0 7px 16px -9px color-mix(in srgb, var(--text-primary) 72%, transparent);
       transform: translateY(-1px);
     }
 
     .input-composer .btn-circle-send:active:not(:disabled) {
-      box-shadow: inset 0 1px 1px rgba(88, 35, 19, 0.18);
+      box-shadow: inset 0 1px 2px color-mix(in srgb, var(--bg-primary) 22%, transparent);
       transform: scale(0.97);
+    }
+
+    .input-composer .btn-circle-send.queue-mode:not(:disabled) {
+      color: white;
+      border-color: color-mix(in srgb, var(--accent) 84%, #8b4b34);
+      background: var(--accent);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.24),
+        0 5px 12px -7px rgba(132, 61, 35, 0.72);
+    }
+
+    .input-composer .btn-circle-send.queue-mode:hover:not(:disabled) {
+      border-color: var(--accent-hover);
+      background: var(--accent-hover);
     }
 
     .input-composer .btn-circle-send:focus-visible,
@@ -13305,9 +13435,9 @@
     }
 
     .input-composer #attach-btn {
-      width: 36px;
-      height: 36px;
-      min-width: 36px;
+      width: 34px;
+      height: 34px;
+      min-width: 34px;
       border: 1px solid transparent;
       color: var(--text-muted);
       background: transparent;
@@ -13329,7 +13459,7 @@
     }
 
     .input-composer.in-flight::after {
-      content: "";
+      content: none;
     }
 
     .input-composer .permission-actions {
@@ -13350,8 +13480,7 @@
     }
 
     .attachment-preview {
-      grid-column: 1 / -1;
-      grid-row: 1;
+      flex: 0 0 auto;
       box-sizing: border-box;
       width: 100%;
       height: 36px;
@@ -13442,13 +13571,12 @@
       transform: scale(0.94);
     }
 
-    /* The menu is anchored to the centered composer, not the input panel's
-       left edge. Keeping the hidden state rendered lets opacity/transform
-       retarget cleanly when users click rapidly, including a quiet exit. */
+    /* The menu shares the + trigger's left edge. Keeping the hidden state
+       rendered lets opacity/transform retarget cleanly on rapid activation. */
     .composer-plus-popover {
-      left: max(18px, calc((100% - 920px) / 2));
+      left: calc(var(--composer-panel-inline, 20px) + 3px);
       bottom: calc(
-        68px
+        72px
         + var(--input-safe-bottom, var(--safe-bottom, 0px))
         + var(--keyboard-offset, 0px)
       );
@@ -13536,9 +13664,11 @@
 
     @media (max-width: 640px) {
       .input-panel {
+        --composer-panel-inline: max(6px, var(--wand-safe-left, 0px));
+        --composer-panel-right: max(6px, var(--wand-safe-right, 0px));
         padding-top: 8px;
         padding-right: max(6px, var(--wand-safe-right, 0px));
-        padding-left: max(6px, var(--wand-safe-left, 0px));
+        padding-left: var(--composer-panel-inline);
         padding-bottom: calc(10px + var(--input-safe-bottom, var(--safe-bottom, 0px)) + var(--keyboard-offset, 0px));
         backdrop-filter: none;
         -webkit-backdrop-filter: none;
@@ -13546,14 +13676,19 @@
 
       .input-composer {
         --composer-action-size: 44px;
-        grid-template-columns: 50px minmax(0, 1fr) auto auto;
-        grid-template-rows: auto minmax(58px, auto) 52px;
-        border-radius: 19px;
+        border-radius: 20px;
       }
 
       .input-composer:focus-within,
       .input-composer.is-expanded {
-        border-radius: 19px;
+        border-radius: 20px;
+      }
+
+      .composer-main-row,
+      .input-composer:focus-within .composer-main-row,
+      .input-composer.is-expanded .composer-main-row {
+        grid-template-rows: minmax(58px, auto) 52px;
+        min-height: 110px;
       }
 
       .composer-input-wrap,
@@ -13564,14 +13699,14 @@
 
       .input-textarea {
         --input-max-height: min(180px, 32dvh);
-        min-height: 46px;
-        padding: 11px 14px 9px;
+        min-height: 58px;
+        padding: 12px 12px 8px;
         font-size: 16px;
         line-height: 1.45;
       }
 
       .input-composer.has-text .input-textarea {
-        padding-right: 14px;
+        padding-right: 12px;
       }
 
       .input-composer .prompt-optimize-btn {
@@ -13583,12 +13718,12 @@
       }
 
       .composer-inline-config {
-        height: 40px;
+        height: 44px;
         margin-left: 0;
       }
 
       .input-composer .composer-config-chip {
-        min-height: 34px;
+        min-height: 44px;
         padding-inline: 6px;
       }
 
@@ -13608,12 +13743,20 @@
         max-width: 100px;
       }
 
+      .input-composer .composer-model-refresh-button {
+        width: 44px;
+        min-width: 44px;
+        height: 44px;
+        margin-inline: -3px 0;
+        border-radius: 12px;
+      }
+
       .input-composer .composer-config-thinking {
         max-width: 72px;
       }
 
       .input-composer .composer-config-label {
-        font-size: 0.7rem;
+        font-size: 0.75rem;
       }
 
       .input-composer .auto-approve-indicator,
@@ -13645,9 +13788,9 @@
       }
 
       .composer-plus-popover {
-        left: max(8px, var(--wand-safe-left, 0px));
+        left: calc(var(--composer-panel-inline) + 3px);
         bottom: calc(
-          64px
+          70px
           + var(--input-safe-bottom, var(--safe-bottom, 0px))
           + var(--keyboard-offset, 0px)
         );
@@ -13661,10 +13804,26 @@
       }
     }
 
+    @media (max-width: 420px) {
+      .input-composer .composer-config-thinking {
+        display: none;
+      }
+    }
+
     /* Coarse pointers can also occur above the phone breakpoint (landscape
        phones and tablets). Keep the visual control itself at touch-target
        size instead of relying on an invisible hit-area expansion. */
     @media (pointer: coarse) and (min-width: 641px) {
+      .composer-main-row,
+      .input-composer:focus-within .composer-main-row,
+      .input-composer.is-expanded .composer-main-row {
+        grid-template-rows: minmax(60px, auto) 52px;
+      }
+
+      .input-textarea {
+        min-height: 60px;
+      }
+
       .input-composer.has-text .input-textarea {
         padding-right: 16px;
       }
@@ -13674,6 +13833,17 @@
         min-width: 44px;
         height: 44px;
         padding: 0;
+        border-radius: 11px;
+      }
+
+      .composer-inline-config {
+        height: 44px;
+      }
+
+      .input-composer .composer-model-refresh-button {
+        width: 44px;
+        min-width: 44px;
+        height: 44px;
         border-radius: 11px;
       }
     }

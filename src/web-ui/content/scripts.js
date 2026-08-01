@@ -13964,7 +13964,7 @@
 
   // src/web-ui/browser/shell-runtime.ts
   var React45 = __toESM(require_react(), 1);
-  var import_react_dom3 = __toESM(require_react_dom(), 1);
+  var import_react_dom4 = __toESM(require_react_dom(), 1);
   var import_client2 = __toESM(require_client(), 1);
 
   // src/web-ui/react/index.tsx
@@ -14013,7 +14013,7 @@
   }
 
   // src/web-ui/react/overlay-host.tsx
-  var import_react16 = __toESM(require_react(), 1);
+  var import_react17 = __toESM(require_react(), 1);
 
   // src/web-ui/react/overlay-controller.tsx
   var nextId = 0;
@@ -20507,10 +20507,18 @@
     defaultValue,
     options,
     placeholder = "\u8BF7\u9009\u62E9",
+    displayValue,
     ariaLabel,
     disabled,
     className,
-    onValueChange
+    contentClassName,
+    itemClassName,
+    side,
+    align,
+    sideOffset = 6,
+    collisionPadding = 12,
+    onValueChange,
+    onOpenChange
   }) {
     const portalContainer = usePortalContainer();
     return /* @__PURE__ */ (0, import_jsx_runtime20.jsxs)(
@@ -20520,6 +20528,7 @@
         defaultValue,
         disabled,
         onValueChange,
+        onOpenChange,
         children: [
           /* @__PURE__ */ (0, import_jsx_runtime20.jsxs)(
             SelectTrigger,
@@ -20527,7 +20536,7 @@
               className: classNames("wand-ui-select-trigger", className),
               "aria-label": ariaLabel,
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime20.jsx)(SelectValue, { placeholder }),
+                /* @__PURE__ */ (0, import_jsx_runtime20.jsx)(SelectValue, { placeholder, children: displayValue }),
                 /* @__PURE__ */ (0, import_jsx_runtime20.jsx)(SelectIcon, { "aria-hidden": "true", children: "\u2304" })
               ]
             }
@@ -20535,16 +20544,18 @@
           /* @__PURE__ */ (0, import_jsx_runtime20.jsx)(SelectPortal, { container: portalContainer, children: /* @__PURE__ */ (0, import_jsx_runtime20.jsxs)(
             SelectContent,
             {
-              className: "wand-ui-select-content",
+              className: classNames("wand-ui-select-content", contentClassName),
               position: "popper",
-              sideOffset: 6,
-              collisionPadding: 12,
+              side,
+              align,
+              sideOffset,
+              collisionPadding,
               children: [
                 /* @__PURE__ */ (0, import_jsx_runtime20.jsx)(SelectScrollUpButton, { className: "wand-ui-select-scroll-button", children: "\u2303" }),
                 /* @__PURE__ */ (0, import_jsx_runtime20.jsx)(SelectViewport, { className: "wand-ui-select-viewport", children: options.map((option) => /* @__PURE__ */ (0, import_jsx_runtime20.jsxs)(
                   SelectItem,
                   {
-                    className: "wand-ui-select-item",
+                    className: classNames("wand-ui-select-item", itemClassName),
                     value: option.value,
                     disabled: option.disabled,
                     children: [
@@ -24909,7 +24920,7 @@
   ];
   var MODES2 = [
     { value: "managed", label: "\u6258\u7BA1", description: "\u5168\u81EA\u52A8\u5B8C\u6210\u4EFB\u52A1" },
-    { value: "full-access", label: "\u5168\u6743\u9650", description: "\u81EA\u52A8\u786E\u8BA4\u6743\u9650" },
+    { value: "full-access", label: "\u5B8C\u5168\u8BBF\u95EE", description: "\u81EA\u52A8\u786E\u8BA4\u6743\u9650" },
     { value: "auto-edit", label: "\u81EA\u52A8\u7F16\u8F91", description: "\u81EA\u52A8\u786E\u8BA4\u4FEE\u6539" },
     { value: "default", label: "\u6807\u51C6", description: "\u9010\u6B65\u786E\u8BA4\u64CD\u4F5C" },
     { value: "native", label: "\u539F\u751F", description: "\u539F\u751F\u7ED3\u6784\u5316\u8F93\u51FA" }
@@ -28986,24 +28997,91 @@
     ] });
   }
 
-  // src/web-ui/react/overlay-host.tsx
+  // src/web-ui/react/composer-select/host.tsx
+  var import_react16 = __toESM(require_react(), 1);
+  var import_react_dom3 = __toESM(require_react_dom(), 1);
+
+  // src/web-ui/react/composer-select/controller.ts
+  var EMPTY_SNAPSHOT = Object.freeze({
+    revision: 0,
+    mounts: Object.freeze([])
+  });
+  var ComposerSelectController = class {
+    constructor() {
+      __publicField(this, "snapshot", EMPTY_SNAPSHOT);
+      __publicField(this, "listeners", /* @__PURE__ */ new Set());
+      __publicField(this, "subscribe", (listener) => {
+        this.listeners.add(listener);
+        return () => this.listeners.delete(listener);
+      });
+      __publicField(this, "getSnapshot", () => this.snapshot);
+    }
+    sync(mounts) {
+      this.snapshot = Object.freeze({
+        revision: this.snapshot.revision + 1,
+        mounts: Object.freeze(mounts.slice())
+      });
+      for (const listener of this.listeners) listener();
+    }
+    clear() {
+      if (this.snapshot.mounts.length === 0) return;
+      this.sync([]);
+    }
+  };
+  var composerSelectController = new ComposerSelectController();
+
+  // src/web-ui/react/composer-select/host.tsx
   var import_jsx_runtime39 = __toESM(require_jsx_runtime(), 1);
+  function ComposerSelectHost() {
+    const snapshot7 = (0, import_react16.useSyncExternalStore)(
+      composerSelectController.subscribe,
+      composerSelectController.getSnapshot,
+      composerSelectController.getSnapshot
+    );
+    return snapshot7.mounts.map((mount) => (0, import_react_dom3.createPortal)(
+      /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(
+        WandSelect,
+        {
+          value: mount.value,
+          options: mount.options,
+          ariaLabel: mount.ariaLabel,
+          placeholder: mount.placeholder,
+          displayValue: mount.displayValue,
+          disabled: mount.disabled,
+          className: `wand-composer-select-trigger wand-composer-select-trigger-${mount.control}`,
+          contentClassName: `wand-composer-select-content wand-composer-select-content-${mount.control}`,
+          itemClassName: "wand-composer-select-item",
+          side: "top",
+          align: mount.align,
+          sideOffset: 8,
+          collisionPadding: 14,
+          onValueChange: mount.onValueChange
+        }
+      ),
+      mount.target,
+      mount.key
+    ));
+  }
+
+  // src/web-ui/react/overlay-host.tsx
+  var import_jsx_runtime40 = __toESM(require_jsx_runtime(), 1);
   function OverlayHost({ portalContainer }) {
-    const current = (0, import_react16.useSyncExternalStore)(
+    const current = (0, import_react17.useSyncExternalStore)(
       overlayStore.subscribe,
       overlayStore.getSnapshot,
       overlayStore.getSnapshot
     );
     const dialog = current.activeDialog;
-    return /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)(PortalContainerProvider, { container: portalContainer, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(SettingsHost, { showRestart: () => restartOverlayController.showRestart() }),
-      /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(NewSessionHost, {}),
-      /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(FolderPickerHost, {}),
-      /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(QuickCommitHost, {}),
-      /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(WorktreeMergeHost, {}),
-      /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(FilePreviewHost, {}),
-      /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(RestartOverlayHost, {}),
-      /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(WandToastRegion, { children: current.toasts.map((toast) => /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)(PortalContainerProvider, { container: portalContainer, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(ComposerSelectHost, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(SettingsHost, { showRestart: () => restartOverlayController.showRestart() }),
+      /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(NewSessionHost, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(FolderPickerHost, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(QuickCommitHost, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(WorktreeMergeHost, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(FilePreviewHost, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(RestartOverlayHost, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(WandToastRegion, { children: current.toasts.map((toast) => /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(
         WandToastItem,
         {
           open: toast.open,
@@ -29015,7 +29093,7 @@
         },
         toast.id
       )) }),
-      dialog ? /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(
+      dialog ? /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(
         WandDialog,
         {
           open: true,
@@ -32163,6 +32241,169 @@
 
 
 `;
+  var composerSelectStyles = String.raw`
+.composer-config-select-host {
+  display: inline-flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.wand-ui-select-trigger.wand-composer-select-trigger {
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  gap: 4px;
+  border: 0;
+  border-radius: 8px;
+  padding: 4px 3px;
+  color: inherit;
+  background: transparent;
+  box-shadow: none;
+  font-size: 0.8125rem;
+  font-weight: 450;
+  letter-spacing: -0.01em;
+  line-height: 1;
+  transition:
+    color 140ms cubic-bezier(0.23, 1, 0.32, 1),
+    background-color 140ms cubic-bezier(0.23, 1, 0.32, 1),
+    transform 120ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.wand-ui-select-trigger.wand-composer-select-trigger[data-placeholder] {
+  color: inherit;
+}
+
+.wand-composer-select-trigger > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wand-composer-select-trigger > [aria-hidden="true"] {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  line-height: 1;
+  opacity: 0.72;
+  transform: translateY(-1px);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .wand-ui-select-trigger.wand-composer-select-trigger:hover:not(:disabled) {
+    color: var(--text-primary);
+    background: color-mix(in srgb, var(--bg-tertiary) 72%, transparent);
+  }
+}
+
+.wand-ui-select-trigger.wand-composer-select-trigger[data-state="open"] {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--bg-tertiary) 82%, transparent);
+}
+
+.wand-ui-select-trigger.wand-composer-select-trigger:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.wand-ui-select-trigger.wand-composer-select-trigger:focus-visible {
+  outline: none;
+  background: color-mix(in srgb, var(--bg-tertiary) 74%, transparent);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 38%, transparent);
+}
+
+.wand-ui-select-content.wand-composer-select-content {
+  width: max-content;
+  max-width: min(360px, calc(100vw - var(--wand-safe-left) - var(--wand-safe-right) - 28px));
+  max-height: min(330px, var(--radix-select-content-available-height));
+  border-color: color-mix(in srgb, var(--border-default) 78%, #9b806c);
+  border-radius: 14px;
+  padding: 6px;
+  background: color-mix(in srgb, var(--bg-elevated) 96%, transparent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.8),
+    0 4px 10px rgba(60, 42, 28, 0.09),
+    0 22px 44px -22px rgba(60, 42, 28, 0.34);
+  backdrop-filter: blur(20px) saturate(122%);
+  -webkit-backdrop-filter: blur(20px) saturate(122%);
+  pointer-events: auto;
+  transform-origin: var(--radix-select-content-transform-origin);
+}
+
+.wand-ui-select-content.wand-composer-select-content[data-state="open"] {
+  animation: none;
+}
+
+.wand-composer-select-content-mode { min-width: min(210px, calc(100vw - 28px)); }
+.wand-composer-select-content-model { min-width: min(260px, calc(100vw - 28px)); }
+.wand-composer-select-content-thinking { min-width: min(170px, calc(100vw - 28px)); }
+
+.wand-ui-select-item.wand-composer-select-item {
+  min-height: 36px;
+  border-radius: 9px;
+  padding: 7px 32px 7px 10px;
+  line-height: 1.3;
+  cursor: pointer;
+}
+
+.wand-ui-select-item.wand-composer-select-item[data-highlighted] {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent-muted) 72%, transparent);
+}
+
+.wand-ui-select-item.wand-composer-select-item[data-state="checked"] {
+  color: var(--accent);
+  font-weight: 560;
+}
+
+.wand-composer-select-content .wand-ui-select-indicator {
+  right: 10px;
+  font-size: 0.78rem;
+}
+
+.input-composer .composer-config-chip:focus-within {
+  outline: none;
+}
+
+.input-composer .composer-config-chip:has(.composer-config-select-host):hover,
+.input-composer .composer-config-chip:has(.composer-config-select-host):focus-within {
+  background: transparent;
+}
+
+.input-composer .composer-config-model,
+.input-composer .composer-config-thinking {
+  padding-inline: 0;
+}
+
+.input-composer .composer-status-row .composer-config-chip-mode {
+  padding-right: 0;
+}
+
+.input-composer .wand-composer-select-trigger {
+  min-height: 34px;
+}
+
+@media (max-width: 640px) {
+  .input-composer .wand-composer-select-trigger {
+    min-height: 44px;
+    padding-inline: 4px;
+    font-size: 0.75rem;
+  }
+
+  .wand-ui-select-item.wand-composer-select-item {
+    min-height: 44px;
+    padding-block: 9px;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .wand-ui-select-content.wand-composer-select-content {
+    background: var(--bg-elevated);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+`;
 
   // src/web-ui/react/styles.ts
   var REACT_UI_STYLE_ID = "wand-react-ui-styles";
@@ -32171,6 +32412,7 @@
     settingsAndQuickCommitStyles,
     sharedMotionStyles,
     sessionPickerAndWorktreeStyles,
+    composerSelectStyles,
     reducedMotionStyles
   ].join("");
   function installReactUiStyles(target = document) {
@@ -32554,8 +32796,8 @@
   var React41 = __toESM(require_react(), 1);
 
   // src/web-ui/react/shell/ui-store-react.tsx
-  var import_react17 = __toESM(require_react(), 1);
-  var UiStoreContext = (0, import_react17.createContext)(null);
+  var import_react18 = __toESM(require_react(), 1);
+  var UiStoreContext = (0, import_react18.createContext)(null);
   function createUiStoreExternalSource(store) {
     return {
       subscribe: (listener) => store.subscribe(listener),
@@ -32563,10 +32805,10 @@
     };
   }
   function UiStoreProvider({ store, children }) {
-    return (0, import_react17.createElement)(UiStoreContext.Provider, { value: store }, children);
+    return (0, import_react18.createElement)(UiStoreContext.Provider, { value: store }, children);
   }
   function useUiStore() {
-    const store = (0, import_react17.useContext)(UiStoreContext);
+    const store = (0, import_react18.useContext)(UiStoreContext);
     if (!store) {
       throw new Error("useUiStore must be used inside UiStoreProvider");
     }
@@ -32574,16 +32816,16 @@
   }
   function useUiStoreSnapshot() {
     const store = useUiStore();
-    const source = (0, import_react17.useMemo)(() => createUiStoreExternalSource(store), [store]);
-    return (0, import_react17.useSyncExternalStore)(source.subscribe, source.getSnapshot, source.getSnapshot);
+    const source = (0, import_react18.useMemo)(() => createUiStoreExternalSource(store), [store]);
+    return (0, import_react18.useSyncExternalStore)(source.subscribe, source.getSnapshot, source.getSnapshot);
   }
   function useUiDispatch() {
     const store = useUiStore();
-    return (0, import_react17.useCallback)((action) => store.dispatch(action), [store]);
+    return (0, import_react18.useCallback)((action) => store.dispatch(action), [store]);
   }
 
   // src/web-ui/react/shell/shell-file-panel.tsx
-  var import_jsx_runtime40 = __toESM(require_jsx_runtime(), 1);
+  var import_jsx_runtime41 = __toESM(require_jsx_runtime(), 1);
   function normalizeFilePanelCwd(raw) {
     let cwd = raw.trim();
     if (!cwd) return "";
@@ -32612,18 +32854,18 @@
     };
     switch (name) {
       case "close":
-        return /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("path", { d: "M18 6L6 18M6 6l12 12" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("path", { d: "M18 6L6 18M6 6l12 12" }) });
       case "folder":
-        return /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("svg", { ...common, className: "wand-icon wand-icon-folder-open", children: /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("path", { d: "M6 14l1.5-3A2 2 0 019.2 10H20a2 2 0 011.9 2.5l-1.5 6A2 2 0 0118.4 20H4a2 2 0 01-2-2V5a2 2 0 012-2h4l3 3h7a2 2 0 012 2v2" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("svg", { ...common, className: "wand-icon wand-icon-folder-open", children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("path", { d: "M6 14l1.5-3A2 2 0 019.2 10H20a2 2 0 011.9 2.5l-1.5 6A2 2 0 0118.4 20H4a2 2 0 01-2-2V5a2 2 0 012-2h4l3 3h7a2 2 0 012 2v2" }) });
       case "refresh":
-        return /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("path", { d: "M21 12a9 9 0 11-3-6.7M21 4v5h-5" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("path", { d: "M21 12a9 9 0 11-3-6.7M21 4v5h-5" }) });
       case "search":
-        return /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("circle", { cx: "11", cy: "11", r: "7" }),
-          /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("path", { d: "M21 21l-4.3-4.3" })
+        return /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("circle", { cx: "11", cy: "11", r: "7" }),
+          /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("path", { d: "M21 21l-4.3-4.3" })
         ] });
       case "up":
-        return /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("path", { d: "M12 19V5M5 12l7-7 7 7" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("path", { d: "M12 19V5M5 12l7-7 7 7" }) });
     }
   }
   function ShellFilePanel({ explorerRef } = {}) {
@@ -32651,8 +32893,8 @@
       void dispatch({ type: "layout.files.navigate", cwd: normalized });
     }, [cwd, dispatch]);
     const parentCwd = getParentFilePanelCwd(committedCwd.current);
-    return /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)(import_jsx_runtime40.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)(import_jsx_runtime41.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
         "div",
         {
           id: "file-panel-backdrop",
@@ -32661,20 +32903,20 @@
           onClick: () => void dispatch({ type: "layout.files.close" })
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)(
+      /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)(
         "div",
         {
           id: "file-side-panel",
           className: classNames("file-side-panel", snapshot7.layout.filePanelOpen && "open"),
           "aria-hidden": !snapshot7.layout.filePanelOpen,
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("div", { className: "file-side-panel-header", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("div", { className: "file-side-panel-title-group", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("span", { className: "file-side-panel-icon", children: /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(FileIcon, { name: "folder" }) }),
-                /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("span", { className: "file-side-panel-title", children: "\u6587\u4EF6" })
+            /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("div", { className: "file-side-panel-header", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("div", { className: "file-side-panel-title-group", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { className: "file-side-panel-icon", children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(FileIcon, { name: "folder" }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { className: "file-side-panel-title", children: "\u6587\u4EF6" })
               ] }),
-              /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("div", { className: "file-side-panel-header-actions", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(
+              /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("div", { className: "file-side-panel-header-actions", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
                   "button",
                   {
                     className: "file-side-panel-iconbtn",
@@ -32683,10 +32925,10 @@
                     title: "\u5237\u65B0",
                     "aria-label": "\u5237\u65B0\u6587\u4EF6\u5217\u8868",
                     onClick: () => void dispatch({ type: "layout.files.refresh" }),
-                    children: /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(FileIcon, { name: "refresh", size: 15 })
+                    children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(FileIcon, { name: "refresh", size: 15 })
                   }
                 ),
-                /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(
+                /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
                   "button",
                   {
                     id: "file-side-panel-close",
@@ -32695,14 +32937,14 @@
                     "aria-label": "\u5173\u95ED\u6587\u4EF6\u9762\u677F",
                     title: "\u5173\u95ED",
                     onClick: () => void dispatch({ type: "layout.files.close" }),
-                    children: /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(FileIcon, { name: "close" })
+                    children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(FileIcon, { name: "close" })
                   }
                 )
               ] })
             ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("div", { className: "file-side-panel-body", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("div", { className: "file-explorer-header", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(
+            /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("div", { className: "file-side-panel-body", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("div", { className: "file-explorer-header", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
                   "button",
                   {
                     className: "file-explorer-up",
@@ -32717,10 +32959,10 @@
                       setCwd(parentCwd);
                       void dispatch({ type: "layout.files.up" });
                     },
-                    children: /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(FileIcon, { name: "up", size: 15 })
+                    children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(FileIcon, { name: "up", size: 15 })
                   }
                 ),
-                /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(
+                /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
                   "input",
                   {
                     type: "text",
@@ -32758,9 +33000,9 @@
                   }
                 )
               ] }),
-              /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("div", { className: "file-search-box", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("span", { className: "file-search-icon", children: /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(FileIcon, { name: "search", size: 14 }) }),
-                /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(
+              /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("div", { className: "file-search-box", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { className: "file-search-icon", children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(FileIcon, { name: "search", size: 14 }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
                   "input",
                   {
                     type: "text",
@@ -32780,7 +33022,7 @@
                     }
                   }
                 ),
-                /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(
+                /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
                   "button",
                   {
                     className: classNames("file-search-clear", search.trim() && "visible"),
@@ -32793,11 +33035,11 @@
                       setSearch("");
                       void dispatch({ type: "layout.files.search.clear" });
                     },
-                    children: /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(FileIcon, { name: "close", size: 13 })
+                    children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(FileIcon, { name: "close", size: 13 })
                   }
                 )
               ] }),
-              /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("div", { className: "file-explorer", id: "file-explorer", ref: explorerRef })
+              /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("div", { className: "file-explorer", id: "file-explorer", ref: explorerRef })
             ] })
           ]
         }
@@ -32810,7 +33052,7 @@
 
   // src/web-ui/react/shell/shell-sidebar.tsx
   var React42 = __toESM(require_react(), 1);
-  var import_jsx_runtime41 = __toESM(require_jsx_runtime(), 1);
+  var import_jsx_runtime42 = __toESM(require_jsx_runtime(), 1);
   function getSidebarEntryTarget(entry) {
     if (entry.source === "claude-history") return "claude-history";
     if (entry.source === "codex-history") return "codex-history";
@@ -32854,50 +33096,50 @@
     };
     switch (name) {
       case "back":
-        return /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("rect", { x: "10", y: "3", width: "11", height: "18", rx: "2" }),
-          /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("path", { d: "M7 8l-4 4 4 4M3 12h11" })
+        return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("rect", { x: "10", y: "3", width: "11", height: "18", rx: "2" }),
+          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M7 8l-4 4 4 4M3 12h11" })
         ] });
       case "chevron":
-        return /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("path", { d: "M6 9l6 6 6-6" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M6 9l6 6 6-6" }) });
       case "cleanup":
       case "trash":
-        return /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("path", { d: "M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" }) });
       case "close":
-        return /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("path", { d: "M6 6l12 12M18 6L6 18" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M6 6l12 12M18 6L6 18" }) });
       case "file":
-        return /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("path", { d: "M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" }) });
       case "gear":
-        return /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("circle", { cx: "12", cy: "12", r: "3" }),
-          /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("path", { d: "M12 2v3M12 19v3M4.9 4.9L7 7M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1L7 17M17 7l2.1-2.1" })
+        return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("circle", { cx: "12", cy: "12", r: "3" }),
+          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M12 2v3M12 19v3M4.9 4.9L7 7M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1L7 17M17 7l2.1-2.1" })
         ] });
       case "history":
-        return /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("path", { d: "M3 12a9 9 0 109-9 9.7 9.7 0 00-6.7 2.7L3 8M3 3v5h5M12 7v5l3 2" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M3 12a9 9 0 109-9 9.7 9.7 0 00-6.7 2.7L3 8M3 3v5h5M12 7v5l3 2" }) });
       case "logout":
-        return /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("path", { d: "M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" }) });
       case "merge":
-        return /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("path", { d: "M7 7h10M7 12h10M7 17h10M5 7L3 9l2 2M19 15l2 2-2 2" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M7 7h10M7 12h10M7 17h10M5 7L3 9l2 2M19 15l2 2-2 2" }) });
       case "more":
-        return /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("circle", { cx: "12", cy: "5", r: "1" }),
-          /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("circle", { cx: "12", cy: "12", r: "1" }),
-          /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("circle", { cx: "12", cy: "19", r: "1" })
+        return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("circle", { cx: "12", cy: "5", r: "1" }),
+          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("circle", { cx: "12", cy: "12", r: "1" }),
+          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("circle", { cx: "12", cy: "19", r: "1" })
         ] });
       case "pin":
-        return /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("path", { d: "M12 17v5M5 17h14M9 12V6H8a2 2 0 010-4h8a2 2 0 010 4h-1v6" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M12 17v5M5 17h14M9 12V6H8a2 2 0 010-4h8a2 2 0 010 4h-1v6" }) });
       case "resume":
-        return /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("path", { d: "M1 4v6h6M3.5 15A9 9 0 109 3.6L3 10" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M1 4v6h6M3.5 15A9 9 0 109 3.6L3 10" }) });
       case "server":
-        return /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("rect", { x: "2", y: "3", width: "20", height: "8", rx: "2" }),
-          /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("rect", { x: "2", y: "13", width: "20", height: "8", rx: "2" }),
-          /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("path", { d: "M6 7h.01M6 17h.01" })
+        return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("rect", { x: "2", y: "3", width: "20", height: "8", rx: "2" }),
+          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("rect", { x: "2", y: "13", width: "20", height: "8", rx: "2" }),
+          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M6 7h.01M6 17h.01" })
         ] });
       case "spark":
-        return /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("path", { d: "M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8" }),
-          /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("circle", { cx: "12", cy: "12", r: "3" })
+        return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8" }),
+          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("circle", { cx: "12", cy: "12", r: "3" })
         ] });
     }
   }
@@ -32911,7 +33153,7 @@
     disabled,
     data
   }) {
-    return /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
       "button",
       {
         type: "button",
@@ -32927,7 +33169,7 @@
           event.stopPropagation();
           void dispatch(action);
         },
-        children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(Icon, { name: icon })
+        children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(Icon, { name: icon })
       }
     );
   }
@@ -32937,8 +33179,8 @@
   }) {
     const target = getSidebarEntryTarget(entry);
     const legacyKind = target === "session" ? "sessions" : target === "codex-history" ? "codex" : "history";
-    return /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("label", { className: "session-manage-check", onClick: (event) => event.stopPropagation(), children: [
-      /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("label", { className: "session-manage-check", onClick: (event) => event.stopPropagation(), children: [
+      /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
         "input",
         {
           type: "checkbox",
@@ -32950,7 +33192,7 @@
           onChange: () => void dispatch({ type: "session.manage.select", target, id: entry.id })
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", {})
+      /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", {})
     ] });
   }
   function WorktreeBadges({ entry }) {
@@ -32966,9 +33208,9 @@
       entry.worktree.branch && `Worktree: ${entry.worktree.branch}`,
       entry.worktree.path && `Path: ${entry.worktree.path}`
     ].filter(Boolean).join("\n");
-    return /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)(import_jsx_runtime41.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { className: "session-kind-badge worktree", title: title || void 0, children: "Worktree" }),
-      entry.worktree.mergeStatus && /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { className: classNames("session-kind-badge worktree-merge", entry.worktree.mergeStatus), children: labels[entry.worktree.mergeStatus] ?? entry.worktree.mergeStatus })
+    return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(import_jsx_runtime42.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "session-kind-badge worktree", title: title || void 0, children: "Worktree" }),
+      entry.worktree.mergeStatus && /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: classNames("session-kind-badge worktree-merge", entry.worktree.mergeStatus), children: labels[entry.worktree.mergeStatus] ?? entry.worktree.mergeStatus })
     ] });
   }
   function formatEntryTime(entry) {
@@ -32993,13 +33235,13 @@
   function ProviderMark({ entry }) {
     const label = providerDisplayName(entry.provider);
     const provider = normalizeProviderId(entry.provider);
-    return /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
       "span",
       {
         className: classNames("session-provider-mark", `provider-${provider ?? "generic"}`),
         "aria-hidden": "true",
         title: label,
-        children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(ProviderLogo, { provider })
+        children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(ProviderLogo, { provider })
       }
     );
   }
@@ -33028,7 +33270,7 @@
     }, [normalized]);
     const travelSeconds = Math.max(4.8, overflow / 28);
     if (!path) return null;
-    return /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
       "span",
       {
         ref: containerRef,
@@ -33040,9 +33282,9 @@
           "--tail-marquee-duration": `${Math.min(8, travelSeconds)}s`,
           "--tail-marquee-delay": `${1.8 + staggerMs / 1e3}s`
         },
-        children: /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("span", { className: "tail-marquee-path-inner", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { className: "tail-marquee-prefix", children: prefix }),
-          /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { className: "tail-marquee-leaf", children: leaf })
+        children: /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("span", { className: "tail-marquee-path-inner", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "tail-marquee-prefix", children: prefix }),
+          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "tail-marquee-leaf", children: leaf })
         ] })
       }
     );
@@ -33060,7 +33302,7 @@
     const time = formatEntryTime(entry);
     const prominentStatus = !isHistory && (entry.permissionBlocked || entry.inFlight || ["running", "thinking", "waiting-input", "waiting_input", "reconnecting"].includes(entry.status));
     const prominentWarning = entry.permissionBlocked || ["waiting-input", "waiting_input", "reconnecting"].includes(entry.status);
-    return /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)(
+    return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
       "div",
       {
         className: classNames(
@@ -33087,7 +33329,7 @@
           activate();
         },
         children: [
-          !manageMode && !isHistory && actions.delete && /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("div", { className: "session-swipe-bg", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)(
+          !manageMode && !isHistory && actions.delete && /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("div", { className: "session-swipe-bg", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
             "button",
             {
               className: "session-swipe-delete",
@@ -33101,17 +33343,17 @@
                 void dispatch(actions.delete);
               },
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(Icon, { name: "trash", size: 18 }),
-                /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { children: "\u5220\u9664" })
+                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(Icon, { name: "trash", size: 18 }),
+                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { children: "\u5220\u9664" })
               ]
             }
           ) }),
-          /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("div", { className: "session-item-content", children: /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("div", { className: "session-item-row", children: [
-            manageMode && /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(ManageCheckbox, { entry, dispatch }),
-            /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("div", { className: "session-main", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("div", { className: "session-title-row", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { className: "session-leading-slot", children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(ProviderMark, { entry }) }),
-                /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("div", { className: "session-item-content", children: /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "session-item-row", children: [
+            manageMode && /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(ManageCheckbox, { entry, dispatch }),
+            /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "session-main", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "session-title-row", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "session-leading-slot", children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(ProviderMark, { entry }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
                   "div",
                   {
                     className: classNames(
@@ -33123,24 +33365,24 @@
                   }
                 )
               ] }),
-              entry.description && /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("div", { className: "session-description", children: entry.description }),
-              /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("div", { className: "session-meta", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { className: "session-leading-slot session-time", children: time }),
-                isHistory ? /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)(import_jsx_runtime41.Fragment, { children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("span", { className: "session-context session-context-recoverable", children: [
-                    /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(Icon, { name: "history", size: 11 }),
+              entry.description && /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("div", { className: "session-description", children: entry.description }),
+              /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "session-meta", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "session-leading-slot session-time", children: time }),
+                isHistory ? /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(import_jsx_runtime42.Fragment, { children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("span", { className: "session-context session-context-recoverable", children: [
+                    /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(Icon, { name: "history", size: 11 }),
                     "\u53EF\u6062\u590D"
                   ] }),
-                  /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(PathReveal, { path: entry.cwd })
-                ] }) : /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)(import_jsx_runtime41.Fragment, { children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { className: classNames("session-status", entry.permissionBlocked ? "permission-blocked" : entry.inFlight ? "running" : entry.status), children: entry.statusLabel }),
-                  /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(PathReveal, { path: entry.cwd }),
-                  /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(WorktreeBadges, { entry })
+                  /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(PathReveal, { path: entry.cwd })
+                ] }) : /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(import_jsx_runtime42.Fragment, { children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: classNames("session-status", entry.permissionBlocked ? "permission-blocked" : entry.inFlight ? "running" : entry.status), children: entry.statusLabel }),
+                  /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(PathReveal, { path: entry.cwd }),
+                  /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(WorktreeBadges, { entry })
                 ] })
               ] })
             ] }),
-            !manageMode && /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("span", { className: "session-actions", children: [
-              actions.resume && /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+            !manageMode && /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("span", { className: "session-actions", children: [
+              actions.resume && /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
                 ActionButton,
                 {
                   action: actions.resume,
@@ -33151,7 +33393,7 @@
                   data
                 }
               ),
-              actions.merge && /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+              actions.merge && /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
                 ActionButton,
                 {
                   action: actions.merge,
@@ -33164,7 +33406,7 @@
                   data
                 }
               ),
-              actions.cleanup && /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+              actions.cleanup && /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
                 ActionButton,
                 {
                   action: actions.cleanup,
@@ -33176,7 +33418,7 @@
                   data
                 }
               ),
-              actions.delete && /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+              actions.delete && /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
                 ActionButton,
                 {
                   action: actions.delete,
@@ -33200,14 +33442,14 @@
     dispatch
   }) {
     if (group.entries.length === 0) return null;
-    const entries = /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("section", { className: classNames(
+    const entries = /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("section", { className: classNames(
       "session-group",
       group.kind === "automation" && "automation-session-list",
       group.kind === "history" && "non-wand-session-list"
-    ), children: group.entries.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(SessionEntry, { entry, manageMode, dispatch }, `${entry.source}:${entry.id}`)) });
+    ), children: group.entries.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(SessionEntry, { entry, manageMode, dispatch }, `${entry.source}:${entry.id}`)) });
     if (group.kind === "wand") return entries;
     const automation = group.kind === "automation";
-    return /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)(
+    return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
       "details",
       {
         className: classNames(
@@ -33224,16 +33466,16 @@
           });
         },
         children: [
-          /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)(
+          /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
             "summary",
             {
               className: automation ? "automation-session-summary" : "non-wand-session-summary",
               title: automation ? "\u7531\u81EA\u52A8\u5316\u6216\u542F\u52A8\u4EFB\u52A1\u521B\u5EFA\uFF0C\u4E0D\u53C2\u4E0E\u666E\u901A Wand \u4F1A\u8BDD\u6392\u5E8F" : "Claude \u4E0E Codex \u7684\u672C\u673A\u539F\u751F\u4F1A\u8BDD\uFF0C\u4E0D\u53C2\u4E0E Wand \u4F1A\u8BDD\u6392\u5E8F",
               onClick: manageMode ? (event) => event.preventDefault() : void 0,
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { className: automation ? "automation-session-icon" : "non-wand-session-icon", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(Icon, { name: automation ? "spark" : "history" }) }),
-                /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { className: automation ? "automation-session-title" : "non-wand-session-title", children: group.label }),
-                /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: automation ? "automation-session-icon" : "non-wand-session-icon", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(Icon, { name: automation ? "spark" : "history" }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: automation ? "automation-session-title" : "non-wand-session-title", children: group.label }),
+                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
                   "span",
                   {
                     className: automation ? "automation-session-count" : "non-wand-session-count",
@@ -33241,7 +33483,7 @@
                     children: group.entries.length
                   }
                 ),
-                /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
                   Icon,
                   {
                     name: "chevron",
@@ -33263,23 +33505,23 @@
     dispatch
   }) {
     if (!manageMode) {
-      return /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("div", { className: "session-manage-bar", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { className: "sidebar-intro", children: "Wand \u4F1A\u8BDD" }),
-        /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+      return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "session-manage-bar", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "sidebar-intro", children: "Wand \u4F1A\u8BDD" }),
+        /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
           "button",
           {
             className: "btn btn-ghost btn-xs session-manage-toggle",
             "data-action": "toggle-manage-mode",
             type: "button",
             onClick: () => void dispatch({ type: "session.manage.toggle" }),
-            children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { children: "\u7BA1\u7406" })
+            children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { children: "\u7BA1\u7406" })
           }
         )
       ] });
     }
     const allSelected = totalCount > 0 && selectedCount >= totalCount;
-    return /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("div", { className: "session-manage-bar active", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "session-manage-bar active", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
         "button",
         {
           className: "session-manage-exit",
@@ -33288,15 +33530,15 @@
           "aria-label": "\u9000\u51FA\u7BA1\u7406\u6A21\u5F0F",
           title: "\u9000\u51FA\u7BA1\u7406\u6A21\u5F0F",
           onClick: () => void dispatch({ type: "session.manage.toggle" }),
-          children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(Icon, { name: "close" })
+          children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(Icon, { name: "close" })
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("div", { className: "session-manage-summary", children: selectedCount > 0 ? /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)(import_jsx_runtime41.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { className: "session-manage-count", children: selectedCount }),
-        /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { className: "session-manage-summary-label", children: "\u5DF2\u9009\u62E9" })
-      ] }) : /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { className: "session-manage-summary-label muted", children: "\u9009\u62E9\u8981\u7BA1\u7406\u7684\u9879\u76EE" }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("div", { className: "session-manage-actions", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("div", { className: "session-manage-summary", children: selectedCount > 0 ? /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(import_jsx_runtime42.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "session-manage-count", children: selectedCount }),
+        /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "session-manage-summary-label", children: "\u5DF2\u9009\u62E9" })
+      ] }) : /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "session-manage-summary-label muted", children: "\u9009\u62E9\u8981\u7BA1\u7406\u7684\u9879\u76EE" }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "session-manage-actions", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
           "button",
           {
             className: "btn btn-ghost btn-xs",
@@ -33309,7 +33551,7 @@
             children: allSelected ? "\u53D6\u6D88\u5168\u9009" : "\u5168\u9009"
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)(
+        /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
           "button",
           {
             className: "btn btn-danger btn-xs",
@@ -33333,20 +33575,25 @@
     const wand = groups.find((group) => group.kind === "wand")?.entries ?? [];
     const automation = groups.find((group) => group.kind === "automation")?.entries ?? [];
     const history2 = groups.find((group) => group.kind === "history")?.entries ?? [];
-    return /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("div", { className: "sidebar-collapsed-tiles", children: [
-      wand.map((entry, index2) => /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "sidebar-collapsed-tiles", children: [
+      wand.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
         "button",
         {
-          className: classNames("sidebar-collapsed-tile", entry.active && "active"),
+          className: classNames(
+            "sidebar-collapsed-tile",
+            `provider-${normalizeProviderId(entry.provider) ?? "generic"}`,
+            entry.active && "active"
+          ),
           type: "button",
           "data-collapsed-session-id": entry.id,
           title: entry.title,
+          "aria-label": `${entry.title} \xB7 ${providerDisplayName(entry.provider)}`,
           onClick: () => void dispatch({ type: "session.select", id: entry.id }),
-          children: index2 + 1
+          children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "sidebar-collapsed-provider-mark", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(ProviderLogo, { provider: entry.provider }) })
         },
         entry.id
       )),
-      automation.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)(
+      automation.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
         "button",
         {
           className: classNames(
@@ -33359,12 +33606,12 @@
           "aria-label": `\u5C55\u5F00\u67E5\u770B ${automation.length} \u4E2A\u81EA\u52A8\u5316\u4F1A\u8BDD`,
           onClick: () => void dispatch({ type: "layout.drawer.expandGroup", group: "automation" }),
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(Icon, { name: "spark", size: 16 }),
-            /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { className: "non-wand-count-badge", children: automation.length > 99 ? "99+" : automation.length })
+            /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(Icon, { name: "spark", size: 16 }),
+            /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "non-wand-count-badge", children: automation.length > 99 ? "99+" : automation.length })
           ]
         }
       ),
-      history2.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)(
+      history2.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
         "button",
         {
           className: "sidebar-collapsed-tile non-wand-count-tile",
@@ -33374,12 +33621,12 @@
           "aria-label": `\u5C55\u5F00\u67E5\u770B ${history2.length} \u4E2A\u975E Wand \u4F1A\u8BDD`,
           onClick: () => void dispatch({ type: "layout.drawer.expandGroup", group: "history" }),
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(Icon, { name: "history", size: 16 }),
-            /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { className: "non-wand-count-badge", children: history2.length > 99 ? "99+" : history2.length })
+            /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(Icon, { name: "history", size: 16 }),
+            /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "non-wand-count-badge", children: history2.length > 99 ? "99+" : history2.length })
           ]
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
         "button",
         {
           className: "sidebar-collapsed-tile add",
@@ -33388,7 +33635,7 @@
           title: "\u65B0\u5EFA\u4F1A\u8BDD",
           "aria-label": "\u65B0\u5EFA\u4F1A\u8BDD",
           onClick: () => void dispatch({ type: "session.new" }),
-          children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { "aria-hidden": "true", children: "\uFF0B" })
+          children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { "aria-hidden": "true", children: "\uFF0B" })
         }
       )
     ] });
@@ -33404,8 +33651,8 @@
       snapshot7.layout.sidebarAnchored && "pinned",
       narrow && "collapsed"
     );
-    return /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)(import_jsx_runtime41.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(import_jsx_runtime42.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
         "div",
         {
           id: "sessions-drawer-backdrop",
@@ -33414,15 +33661,15 @@
           onClick: () => void dispatch({ type: "layout.drawer.close" })
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("aside", { id: "sessions-drawer", className: sidebarClass, "aria-label": "\u4F1A\u8BDD\u4FA7\u680F", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("div", { className: "sidebar-header", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("div", { className: "sidebar-header-main", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("div", { className: "topbar-logo-icon", children: "W" }),
-            /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { className: "sidebar-title", children: "\u4F1A\u8BDD" }),
-            /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { className: "session-count", id: "session-count", children: snapshot7.sidebar.interactiveCount })
+      /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("aside", { id: "sessions-drawer", className: sidebarClass, "aria-label": "\u4F1A\u8BDD\u4FA7\u680F", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "sidebar-header", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "sidebar-header-main", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("div", { className: "topbar-logo-icon", children: "W" }),
+            /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "sidebar-title", children: "\u4F1A\u8BDD" }),
+            /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "session-count", id: "session-count", children: snapshot7.sidebar.interactiveCount })
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("div", { className: "sidebar-header-actions", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("div", { className: "sidebar-header-more", children: /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)(
+          /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "sidebar-header-actions", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("div", { className: "sidebar-header-more", children: /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
               WandPopover,
               {
                 open: moreOpen,
@@ -33436,7 +33683,7 @@
                 contentRole: "menu",
                 ariaLabel: "\u4FA7\u680F\u66F4\u591A\u64CD\u4F5C",
                 className: classNames("sidebar-header-overflow", "wand-shell-menu-popover", moreOpen && "open"),
-                trigger: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+                trigger: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
                   "button",
                   {
                     id: "sidebar-more-btn",
@@ -33446,11 +33693,11 @@
                     "aria-haspopup": "menu",
                     "aria-expanded": moreOpen,
                     "aria-controls": "sidebar-overflow-menu",
-                    children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(Icon, { name: "more" })
+                    children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(Icon, { name: "more" })
                   }
                 ),
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+                  /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
                     "button",
                     {
                       className: "overflow-item",
@@ -33461,10 +33708,10 @@
                         setMoreOpen(false);
                         void dispatch({ type: "nav.home" });
                       },
-                      children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { children: "\u56DE\u5230\u9996\u9875" })
+                      children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { children: "\u56DE\u5230\u9996\u9875" })
                     }
                   ),
-                  /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+                  /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
                     "button",
                     {
                       className: "overflow-item",
@@ -33475,13 +33722,13 @@
                         setMoreOpen(false);
                         void dispatch({ type: "nav.refresh" });
                       },
-                      children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { children: "\u5237\u65B0\u9875\u9762" })
+                      children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { children: "\u5237\u65B0\u9875\u9762" })
                     }
                   )
                 ]
               }
             ) }),
-            /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+            /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
               "button",
               {
                 id: "sidebar-pin-btn",
@@ -33491,10 +33738,10 @@
                 "aria-label": snapshot7.layout.sidebarPinned ? "\u89E3\u9664\u56FA\u5B9A\u5E38\u9A7B" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B",
                 "aria-pressed": snapshot7.layout.sidebarPinned,
                 onClick: () => void dispatch({ type: "layout.drawer.pin" }),
-                children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(Icon, { name: "pin" })
+                children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(Icon, { name: "pin" })
               }
             ),
-            /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+            /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
               "button",
               {
                 id: "sidebar-collapse-btn",
@@ -33503,10 +33750,10 @@
                 title: narrow ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761",
                 "aria-label": narrow ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761",
                 onClick: () => void dispatch({ type: "layout.drawer.collapse" }),
-                children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(Icon, { name: "chevron" })
+                children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(Icon, { name: "chevron" })
               }
             ),
-            /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+            /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
               "button",
               {
                 id: "close-drawer-button",
@@ -33514,13 +33761,13 @@
                 type: "button",
                 "aria-label": "\u5173\u95ED\u83DC\u5355",
                 onClick: () => void dispatch({ type: "layout.drawer.close" }),
-                children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(Icon, { name: "close" })
+                children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(Icon, { name: "close" })
               }
             )
           ] })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("div", { className: "sidebar-body", children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("div", { id: "sessions-panel", children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("div", { className: "sessions-list", id: "sessions-list", children: narrow ? /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(CollapsedSessions, { groups: snapshot7.sidebar.groups, dispatch }) : /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)(import_jsx_runtime41.Fragment, { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("div", { className: "sidebar-body", children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("div", { id: "sessions-panel", children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("div", { className: "sessions-list", id: "sessions-list", children: narrow ? /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(CollapsedSessions, { groups: snapshot7.sidebar.groups, dispatch }) : /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(import_jsx_runtime42.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
             ManageBar,
             {
               manageMode: snapshot7.sidebar.manageMode,
@@ -33529,14 +33776,14 @@
               dispatch
             }
           ),
-          snapshot7.sidebar.totalCount === 0 ? /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("div", { className: "empty-state", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("strong", { children: "\u8FD8\u6CA1\u6709\u4F1A\u8BDD\u8BB0\u5F55" }),
-            /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("br", {}),
+          snapshot7.sidebar.totalCount === 0 ? /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "empty-state", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("strong", { children: "\u8FD8\u6CA1\u6709\u4F1A\u8BDD\u8BB0\u5F55" }),
+            /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("br", {}),
             "\u70B9\u51FB\u4E0A\u65B9\u300C\u65B0\u5BF9\u8BDD\u300D\u5F00\u59CB\u4F60\u7684\u7B2C\u4E00\u6B21\u5BF9\u8BDD\u3002"
-          ] }) : snapshot7.sidebar.groups.map((group) => /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(SessionGroup, { group, manageMode: snapshot7.sidebar.manageMode, dispatch }, group.kind))
+          ] }) : snapshot7.sidebar.groups.map((group) => /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(SessionGroup, { group, manageMode: snapshot7.sidebar.manageMode, dispatch }, group.kind))
         ] }) }) }) }),
-        /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("div", { className: "sidebar-footer", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)(
+        /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "sidebar-footer", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
             "button",
             {
               id: "drawer-new-session-button",
@@ -33544,13 +33791,13 @@
               type: "button",
               onClick: () => void dispatch({ type: "session.new" }),
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { children: "+" }),
+                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { children: "+" }),
                 " \u65B0\u4F1A\u8BDD"
               ]
             }
           ),
-          /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("div", { className: "sidebar-footer-actions", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)(
+          /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "sidebar-footer-actions", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
               "button",
               {
                 id: "file-panel-toggle-btn",
@@ -33559,12 +33806,12 @@
                 title: "\u67E5\u770B\u6587\u4EF6",
                 onClick: () => void dispatch({ type: "layout.files.toggle" }),
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(Icon, { name: "file", size: 16 }),
-                  /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { children: "\u6587\u4EF6" })
+                  /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(Icon, { name: "file", size: 16 }),
+                  /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { children: "\u6587\u4EF6" })
                 ]
               }
             ),
-            /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)(
+            /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
               "button",
               {
                 id: "settings-button",
@@ -33573,12 +33820,12 @@
                 title: "\u8BBE\u7F6E",
                 onClick: () => void dispatch({ type: "settings.open" }),
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(Icon, { name: "gear", size: 16 }),
-                  /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { children: "\u8BBE\u7F6E" })
+                  /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(Icon, { name: "gear", size: 16 }),
+                  /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { children: "\u8BBE\u7F6E" })
                 ]
               }
             ),
-            snapshot7.capabilities.backToNative && /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)(
+            snapshot7.capabilities.backToNative && /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
               "button",
               {
                 id: "back-to-native-button",
@@ -33587,12 +33834,12 @@
                 title: "\u8FD4\u56DE App \u539F\u751F\u754C\u9762",
                 onClick: () => void dispatch({ type: "native.back" }),
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(Icon, { name: "back", size: 16 }),
-                  /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { children: "\u8FD4\u56DEApp" })
+                  /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(Icon, { name: "back", size: 16 }),
+                  /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { children: "\u8FD4\u56DEApp" })
                 ]
               }
             ),
-            snapshot7.capabilities.switchServer && /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)(
+            snapshot7.capabilities.switchServer && /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
               "button",
               {
                 id: "switch-server-button",
@@ -33601,12 +33848,12 @@
                 title: "\u5207\u6362\u670D\u52A1\u5668",
                 onClick: () => void dispatch({ type: "native.switchServer" }),
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(Icon, { name: "server", size: 16 }),
-                  /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { children: "\u5207\u6362" })
+                  /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(Icon, { name: "server", size: 16 }),
+                  /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { children: "\u5207\u6362" })
                 ]
               }
             ),
-            /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)(
+            /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
               "button",
               {
                 id: "logout-button",
@@ -33615,8 +33862,8 @@
                 title: "\u9000\u51FA\u767B\u5F55",
                 onClick: () => void dispatch({ type: "auth.logout" }),
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(Icon, { name: "logout", size: 16 }),
-                  /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { children: "\u9000\u51FA" })
+                  /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(Icon, { name: "logout", size: 16 }),
+                  /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { children: "\u9000\u51FA" })
                 ]
               }
             )
@@ -33627,7 +33874,7 @@
   }
 
   // src/web-ui/react/shell/shell-topbar.tsx
-  var import_jsx_runtime42 = __toESM(require_jsx_runtime(), 1);
+  var import_jsx_runtime43 = __toESM(require_jsx_runtime(), 1);
   function TopbarIcon({ name, size: size4 = 16 }) {
     const common = {
       width: size4,
@@ -33642,31 +33889,31 @@
     };
     switch (name) {
       case "copy":
-        return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("rect", { x: "9", y: "9", width: "13", height: "13", rx: "2" }),
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" })
+        return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("rect", { x: "9", y: "9", width: "13", height: "13", rx: "2" }),
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" })
         ] });
       case "file":
-        return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" }) });
       case "git":
-        return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("svg", { ...common, className: "topbar-git-icon", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("circle", { cx: "6", cy: "6", r: "2" }),
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("circle", { cx: "6", cy: "18", r: "2" }),
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("circle", { cx: "18", cy: "9", r: "2" }),
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M6 8v8M18 11v1a3 3 0 01-3 3H9" })
+        return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("svg", { ...common, className: "topbar-git-icon", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("circle", { cx: "6", cy: "6", r: "2" }),
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("circle", { cx: "6", cy: "18", r: "2" }),
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("circle", { cx: "18", cy: "9", r: "2" }),
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M6 8v8M18 11v1a3 3 0 01-3 3H9" })
         ] });
       case "hash":
-        return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M4 9h16M4 15h16M10 3L8 21M16 3l-2 18" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M4 9h16M4 15h16M10 3L8 21M16 3l-2 18" }) });
       case "merge":
-        return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M7 7h10M7 12h10M7 17h10M5 7L3 9l2 2M19 15l2 2-2 2" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M7 7h10M7 12h10M7 17h10M5 7L3 9l2 2M19 15l2 2-2 2" }) });
       case "more":
-        return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("circle", { cx: "12", cy: "5", r: "1" }),
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("circle", { cx: "12", cy: "12", r: "1" }),
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("circle", { cx: "12", cy: "19", r: "1" })
+        return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("circle", { cx: "12", cy: "5", r: "1" }),
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("circle", { cx: "12", cy: "12", r: "1" }),
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("circle", { cx: "12", cy: "19", r: "1" })
         ] });
       case "trash":
-        return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" }) });
     }
   }
   function MoreItem({
@@ -33678,7 +33925,7 @@
     disabled,
     onAction
   }) {
-    return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
+    return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
       "button",
       {
         className: classNames("topbar-more-item", danger && "topbar-more-item-danger"),
@@ -33688,8 +33935,8 @@
         disabled,
         onClick: () => onAction(action),
         children: [
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(TopbarIcon, { name: icon, size: 14 }),
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { children: label })
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(TopbarIcon, { name: icon, size: 14 }),
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { children: label })
         ]
       }
     );
@@ -33707,9 +33954,9 @@
       if (moreOpen) void dispatch({ type: "topbar.menu.toggle" });
       void dispatch(action);
     };
-    return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "main-header-row", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "topbar-left", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "main-header-row", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "topbar-left", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
           "button",
           {
             id: "sessions-toggle-button",
@@ -33717,17 +33964,17 @@
             "aria-label": "\u5207\u6362\u4F1A\u8BDD\u4FA7\u680F",
             type: "button",
             onClick: () => void dispatch({ type: "layout.drawer.toggle" }),
-            children: /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("span", { className: "hamburger-icon", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", {}),
-              /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", {}),
-              /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", {})
+            children: /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("span", { className: "hamburger-icon", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", {}),
+              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", {}),
+              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", {})
             ] })
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "topbar-brand", "aria-hidden": "true", children: "W" })
+        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "topbar-brand", "aria-hidden": "true", children: "W" })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("div", { className: "topbar-center", children: selected ? /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(import_jsx_runtime42.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "topbar-center", children: selected ? /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(import_jsx_runtime43.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
           "span",
           {
             className: classNames("topbar-session-title", snapshot7.topbar.titleGenerating && "title-generating"),
@@ -33736,18 +33983,18 @@
             children: snapshot7.topbar.title
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
+        /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
           "span",
           {
             className: classNames("session-status-pill", snapshot7.topbar.statusTone),
             title: snapshot7.topbar.statusLabel,
             children: [
-              /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "session-status-dot" }),
-              /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "session-status-text", children: snapshot7.topbar.statusLabel })
+              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "session-status-dot" }),
+              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "session-status-text", children: snapshot7.topbar.statusLabel })
             ]
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
           "span",
           {
             className: classNames("current-task", !snapshot7.topbar.currentTask && "hidden"),
@@ -33756,7 +34003,7 @@
             children: snapshot7.topbar.currentTask
           }
         ),
-        snapshot7.topbar.cwd && /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+        snapshot7.topbar.cwd && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
           "span",
           {
             className: "topbar-cwd tail-marquee-path",
@@ -33770,15 +34017,15 @@
               event.preventDefault();
               openFiles();
             },
-            children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "tail-marquee-path-inner", children: snapshot7.topbar.cwd })
+            children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "tail-marquee-path-inner", children: snapshot7.topbar.cwd })
           }
         )
-      ] }) : /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(import_jsx_runtime42.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "topbar-tagline", children: snapshot7.topbar.title || "Wand \u63A7\u5236\u53F0" }),
-        /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "current-task hidden", id: "current-task" })
+      ] }) : /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(import_jsx_runtime43.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "topbar-tagline", children: snapshot7.topbar.title || "Wand \u63A7\u5236\u53F0" }),
+        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "current-task hidden", id: "current-task" })
       ] }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "topbar-right", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "topbar-right", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
           "button",
           {
             id: "topbar-file-button",
@@ -33787,10 +34034,10 @@
             "aria-label": "\u6587\u4EF6",
             title: "\u67E5\u770B\u6587\u4EF6\uFF08\u53EF\u4FEE\u6539\u8DEF\u5F84\uFF09",
             onClick: () => void dispatch({ type: "layout.files.toggle" }),
-            children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(TopbarIcon, { name: "file" })
+            children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(TopbarIcon, { name: "file" })
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { id: "topbar-git-slot", className: "topbar-git-slot", children: snapshot7.topbar.git && /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
+        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { id: "topbar-git-slot", className: "topbar-git-slot", children: snapshot7.topbar.git && /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
           "button",
           {
             id: "topbar-git-badge",
@@ -33800,16 +34047,16 @@
             "aria-label": "\u5FEB\u6377\u63D0\u4EA4",
             onClick: () => void dispatch({ type: "topbar.gitCommit" }),
             children: [
-              /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(TopbarIcon, { name: "git", size: 14 }),
-              /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "topbar-git-branch", children: snapshot7.topbar.git.branch }),
-              snapshot7.topbar.git.clean ? /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "topbar-git-clean", "aria-hidden": "true", children: "\u2713" }) : /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("span", { className: "topbar-git-count", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(TopbarIcon, { name: "git", size: 14 }),
+              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "topbar-git-branch", children: snapshot7.topbar.git.branch }),
+              snapshot7.topbar.git.clean ? /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "topbar-git-clean", "aria-hidden": "true", children: "\u2713" }) : /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("span", { className: "topbar-git-count", children: [
                 "\xB7",
                 snapshot7.topbar.git.modifiedCount
               ] })
             ]
           }
         ) }),
-        selected && /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("div", { className: "topbar-more-wrap", children: /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
+        selected && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "topbar-more-wrap", children: /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
           WandPopover,
           {
             open: moreOpen,
@@ -33825,7 +34072,7 @@
             contentRole: "menu",
             ariaLabel: "\u5F53\u524D\u4F1A\u8BDD",
             className: classNames("topbar-more-menu", "wand-shell-menu-popover", !moreOpen && "hidden"),
-            trigger: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+            trigger: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
               "button",
               {
                 id: "topbar-more-button",
@@ -33836,11 +34083,11 @@
                 "aria-expanded": moreOpen,
                 "aria-controls": "topbar-more-menu",
                 title: "\u5F53\u524D\u4F1A\u8BDD\u64CD\u4F5C",
-                children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(TopbarIcon, { name: "more" })
+                children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(TopbarIcon, { name: "more" })
               }
             ),
             children: [
-              selected.claudeSessionId && /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+              selected.claudeSessionId && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
                 MoreItem,
                 {
                   action: { type: "topbar.copy", field: "providerSessionId" },
@@ -33850,7 +34097,7 @@
                   onAction: runMoreAction
                 }
               ),
-              selected.cwd && /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+              selected.cwd && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
                 MoreItem,
                 {
                   action: { type: "topbar.copy", field: "cwd" },
@@ -33860,7 +34107,7 @@
                   onAction: runMoreAction
                 }
               ),
-              /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
                 MoreItem,
                 {
                   action: { type: "topbar.copy", field: "sessionId" },
@@ -33870,8 +34117,8 @@
                   onAction: runMoreAction
                 }
               ),
-              /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("div", { className: "topbar-more-divider", role: "separator" }),
-              selectedActions?.merge && /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "topbar-more-divider", role: "separator" }),
+              selectedActions?.merge && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
                 MoreItem,
                 {
                   action: selectedActions.merge,
@@ -33882,7 +34129,7 @@
                   onAction: runMoreAction
                 }
               ),
-              selectedActions?.cleanup && /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+              selectedActions?.cleanup && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
                 MoreItem,
                 {
                   action: selectedActions.cleanup,
@@ -33892,7 +34139,7 @@
                   onAction: runMoreAction
                 }
               ),
-              selectedActions?.delete && /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+              selectedActions?.delete && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
                 MoreItem,
                 {
                   action: selectedActions.delete,
@@ -33911,7 +34158,7 @@
   }
 
   // src/web-ui/react/shell/shell-main-content.tsx
-  var import_jsx_runtime43 = __toESM(require_jsx_runtime(), 1);
+  var import_jsx_runtime44 = __toESM(require_jsx_runtime(), 1);
   function getShellLegacySlotClasses(visibility) {
     return {
       terminal: `terminal-container ${visibility.terminal ? "active" : "hidden"}`,
@@ -33946,13 +34193,13 @@
     };
     switch (name) {
       case "chat":
-        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M21 15a4 4 0 01-4 4H8l-5 3V7a4 4 0 014-4h10a4 4 0 014 4z" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("path", { d: "M21 15a4 4 0 01-4 4H8l-5 3V7a4 4 0 014-4h10a4 4 0 014 4z" }) });
       case "chevron-down":
-        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, strokeWidth: 2, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M6 9l6 6 6-6" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("svg", { ...common, strokeWidth: 2, children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("path", { d: "M6 9l6 6 6-6" }) });
       case "folder":
-        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("path", { d: "M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" }) });
       case "terminal":
-        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M4 17l6-5-6-5M12 19h8" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("path", { d: "M4 17l6-5-6-5M12 19h8" }) });
     }
   }
   function ShellBlankChat({ className, cwd, queueRef }) {
@@ -33963,13 +34210,13 @@
     const openFolderPicker2 = () => {
       void dispatch({ type: "folderPicker.open" });
     };
-    return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { id: "blank-chat", className, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "blank-chat-inner", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "blank-chat-logo", children: "W" }),
-        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("h2", { className: "blank-chat-title", children: "Wand" }),
-        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("p", { className: "blank-chat-subtitle", children: "\u652F\u6301\u7EC8\u7AEF PTY \u4F1A\u8BDD\u4E0E\u7ED3\u6784\u5316 chat \u4F1A\u8BDD\uFF0C\u4E24\u79CD\u6A21\u5F0F\u53EF\u5E76\u5B58\u3002" }),
-        /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "blank-chat-tools", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+    return /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("div", { id: "blank-chat", className, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("div", { className: "blank-chat-inner", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("div", { className: "blank-chat-logo", children: "W" }),
+        /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("h2", { className: "blank-chat-title", children: "Wand" }),
+        /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("p", { className: "blank-chat-subtitle", children: "\u652F\u6301\u7EC8\u7AEF PTY \u4F1A\u8BDD\u4E0E\u7ED3\u6784\u5316 chat \u4F1A\u8BDD\uFF0C\u4E24\u79CD\u6A21\u5F0F\u53EF\u5E76\u5B58\u3002" }),
+        /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("div", { className: "blank-chat-tools", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)(
             "button",
             {
               className: "blank-chat-tool-btn",
@@ -33977,12 +34224,12 @@
               type: "button",
               onClick: () => quickStart2("claude"),
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "tool-icon", children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(ProviderLogo, { provider: "claude" }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "tool-icon", children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(ProviderLogo, { provider: "claude" }) }),
                 "\u65B0\u5EFA\u7EC8\u7AEF\u4F1A\u8BDD"
               ]
             }
           ),
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+          /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)(
             "button",
             {
               className: "blank-chat-tool-btn",
@@ -33990,12 +34237,12 @@
               type: "button",
               onClick: () => quickStart2("codex"),
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "tool-icon", children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(ProviderLogo, { provider: "codex" }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "tool-icon", children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(ProviderLogo, { provider: "codex" }) }),
                 "\u65B0\u5EFA Codex \u4F1A\u8BDD"
               ]
             }
           ),
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+          /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)(
             "button",
             {
               className: "blank-chat-tool-btn",
@@ -34003,12 +34250,12 @@
               type: "button",
               onClick: () => quickStart2("opencode"),
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "tool-icon", children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(ProviderLogo, { provider: "opencode" }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "tool-icon", children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(ProviderLogo, { provider: "opencode" }) }),
                 "\u65B0\u5EFA OpenCode \u4F1A\u8BDD"
               ]
             }
           ),
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+          /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)(
             "button",
             {
               className: "blank-chat-tool-btn",
@@ -34016,13 +34263,13 @@
               type: "button",
               onClick: () => quickStart2("structured"),
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "tool-icon", children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(WelcomeIcon, { name: "chat", size: 16 }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "tool-icon", children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(WelcomeIcon, { name: "chat", size: 16 }) }),
                 "\u65B0\u5EFA\u7ED3\u6784\u5316\u4F1A\u8BDD"
               ]
             }
           )
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "blank-chat-cwd-wrap", children: /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+        /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("div", { className: "blank-chat-cwd-wrap", children: /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)(
           "div",
           {
             className: "blank-chat-cwd",
@@ -34038,26 +34285,26 @@
               openFolderPicker2();
             },
             children: [
-              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "blank-chat-cwd-icon", children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(WelcomeIcon, { name: "folder", size: 13 }) }),
-              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "blank-chat-cwd-path tail-marquee-path", id: "blank-chat-cwd-path", title: cwd, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "tail-marquee-path-inner", children: cwd }) }),
-              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "blank-chat-cwd-arrow", id: "blank-chat-cwd-arrow", children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(WelcomeIcon, { name: "chevron-down", size: 11 }) })
+              /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "blank-chat-cwd-icon", children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(WelcomeIcon, { name: "folder", size: 13 }) }),
+              /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "blank-chat-cwd-path tail-marquee-path", id: "blank-chat-cwd-path", title: cwd, children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "tail-marquee-path-inner", children: cwd }) }),
+              /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "blank-chat-cwd-arrow", id: "blank-chat-cwd-arrow", children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(WelcomeIcon, { name: "chevron-down", size: 11 }) })
             ]
           }
         ) })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { id: "cross-session-queue-host", ref: queueRef })
+      /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("div", { id: "cross-session-queue-host", ref: queueRef })
     ] });
   }
   function ShellMainContent({ legacyRefs } = {}) {
     const snapshot7 = useUiStoreSnapshot();
     const classes2 = getShellLegacySlotClasses(snapshot7.legacyVisibility);
     const cwd = snapshot7.topbar.cwd || "/";
-    return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("main", { className: `main-content${snapshot7.layout.filePanelOpen ? " file-panel-open" : ""}`, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(ShellTopbar, {}),
-      /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(ShellFilePanel, { explorerRef: legacyRefs?.fileExplorer }),
-      /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { id: "output", className: classes2.terminal, ref: legacyRefs?.terminal }),
-      /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { id: "chat-output", className: classes2.chat, ref: legacyRefs?.chat }),
-      /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("main", { className: `main-content${snapshot7.layout.filePanelOpen ? " file-panel-open" : ""}`, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(ShellTopbar, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(ShellFilePanel, { explorerRef: legacyRefs?.fileExplorer }),
+      /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("div", { id: "output", className: classes2.terminal, ref: legacyRefs?.terminal }),
+      /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("div", { id: "chat-output", className: classes2.chat, ref: legacyRefs?.chat }),
+      /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(
         ShellBlankChat,
         {
           className: classes2.blank,
@@ -34065,12 +34312,12 @@
           queueRef: legacyRefs?.crossSessionQueue
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: classes2.composer, ref: legacyRefs?.composer })
+      /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("div", { className: classes2.composer, ref: legacyRefs?.composer })
     ] });
   }
 
   // src/web-ui/react/shell/shell-app.tsx
-  var import_jsx_runtime44 = __toESM(require_jsx_runtime(), 1);
+  var import_jsx_runtime45 = __toESM(require_jsx_runtime(), 1);
   function getShellLayoutClassName(layout) {
     const classes2 = ["main-layout"];
     if (layout.sessionsDrawerOpen) classes2.push("sidebar-open");
@@ -34080,13 +34327,13 @@
   }
   function ShellAppFrame({ legacyRefs } = {}) {
     const snapshot7 = useUiStoreSnapshot();
-    return /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("div", { className: "app-container", children: /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("div", { className: getShellLayoutClassName(snapshot7.layout), children: [
-      /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(ShellSidebar, {}),
-      /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(ShellMainContent, { legacyRefs })
+    return /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("div", { className: "app-container", children: /* @__PURE__ */ (0, import_jsx_runtime45.jsxs)("div", { className: getShellLayoutClassName(snapshot7.layout), children: [
+      /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(ShellSidebar, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(ShellMainContent, { legacyRefs })
     ] }) });
   }
   function ShellApp({ store, legacyRefs }) {
-    return /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(UiStoreProvider, { store, children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(ShellAppFrame, { legacyRefs }) });
+    return /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(UiStoreProvider, { store, children: /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(ShellAppFrame, { legacyRefs }) });
   }
 
   // src/web-ui/react/shell/ui-store.ts
@@ -34280,7 +34527,7 @@
   };
 
   // src/web-ui/react/index.tsx
-  var import_jsx_runtime45 = __toESM(require_jsx_runtime(), 1);
+  var import_jsx_runtime46 = __toESM(require_jsx_runtime(), 1);
   var OVERLAY_ROOT_ID = "overlay-root";
   var REACT_MOUNT_ID = "wand-react-ui-mount";
   var PORTAL_CONTAINER_ID = "wand-react-ui-portals";
@@ -34320,7 +34567,7 @@
       const mount = getOrCreateChild(overlayRoot, REACT_MOUNT_ID, "wand-ui-mount");
       const portals = getOrCreateChild(overlayRoot, PORTAL_CONTAINER_ID, "wand-ui-portals");
       activeRoot = (0, import_client.createRoot)(mount);
-      activeRoot.render(/* @__PURE__ */ (0, import_jsx_runtime45.jsx)(OverlayHost, { portalContainer: portals }));
+      activeRoot.render(/* @__PURE__ */ (0, import_jsx_runtime46.jsx)(OverlayHost, { portalContainer: portals }));
     }
     exposeBusinessControllers();
     overlayRoot.dataset.reactUi = genericUiEnabled ? "enabled" : "fallback";
@@ -34428,7 +34675,7 @@
     if (!commands) throw new Error("Browser shell commands were not configured");
     if (runtime5) {
       if (runtime5.app !== app) throw new Error("React shell cannot move to a different #app root");
-      (0, import_react_dom3.flushSync)(() => runtime5?.store.publish({ sync: true, reason: "legacy:render" }));
+      (0, import_react_dom4.flushSync)(() => runtime5?.store.publish({ sync: true, reason: "legacy:render" }));
       return "updated";
     }
     const legacy = createLegacyRefs(createLegacyMarkup());
@@ -34438,7 +34685,7 @@
     const root = (0, import_client2.createRoot)(app);
     runtime5 = { app, root, store, hosts: legacy.hosts };
     try {
-      (0, import_react_dom3.flushSync)(() => root.render(React45.createElement(ShellApp, { store, legacyRefs: legacy.refs })));
+      (0, import_react_dom4.flushSync)(() => root.render(React45.createElement(ShellApp, { store, legacyRefs: legacy.refs })));
     } catch (error) {
       runtime5 = null;
       store.dispose();
@@ -34452,7 +34699,7 @@
     const active = runtime5;
     if (!active) return;
     runtime5 = null;
-    (0, import_react_dom3.flushSync)(() => active.root.unmount());
+    (0, import_react_dom4.flushSync)(() => active.root.unmount());
     active.store.dispose();
     for (const host of active.hosts) host.dispose();
     delete active.app.dataset.reactShell;
@@ -35572,7 +35819,10 @@
       var s = e.ref;
       var activeCls = s.id === state.selectedId ? " active" : "";
       var title = s.title || s.description || s.summary || s.command || "\u4F1A\u8BDD " + idx;
-      return '<button class="sidebar-collapsed-tile' + activeCls + '" type="button" data-collapsed-session-id="' + escapeHtml(s.id) + '" title="' + escapeHtml(title) + '">' + idx + "</button>";
+      var provider = s.provider || inferProviderIdFromCommand(s.command) || "claude";
+      var normalizedProvider = normalizeProviderId(provider) || "generic";
+      var accessibleLabel = title + " \xB7 " + providerDisplayName(provider);
+      return '<button class="sidebar-collapsed-tile provider-' + normalizedProvider + activeCls + '" type="button" data-collapsed-session-id="' + escapeHtml(s.id) + '" title="' + escapeHtml(title) + '" aria-label="' + escapeHtml(accessibleLabel) + '"><span class="sidebar-collapsed-provider-mark" aria-hidden="true">' + renderProviderLogoMarkup(provider) + "</span></button>";
     }).join("");
     var automationCount = entries.automation.length;
     var automationActive = entries.automation.some(function(entry) {
@@ -38857,12 +39107,16 @@
       if (!state.plusPopoverOpen) return;
       var pop = document.getElementById("composer-plus-popover");
       var btn = document.getElementById("attach-btn");
+      var target = e.target;
+      if (target && typeof target.closest === "function" && target.closest(".wand-composer-select-content")) return;
       if (pop && pop.contains(e.target)) return;
       if (btn && btn.contains(e.target)) return;
       closePlusPopover();
     });
     document.addEventListener("keydown", function(e) {
       if (e.key === "Escape" && state.plusPopoverOpen) {
+        var target = e.target;
+        if (target && typeof target.closest === "function" && target.closest(".wand-composer-select-content")) return;
         e.preventDefault();
         closePlusPopover(true);
       }
@@ -39134,7 +39388,8 @@
         togglePlusPopover(e.detail === 0);
       });
       plusPopover.addEventListener("keydown", function(e) {
-        if (e.target instanceof HTMLSelectElement) return;
+        var target = e.target;
+        if (e.target instanceof HTMLSelectElement || target.matches('[role="combobox"], .wand-ui-select-trigger')) return;
         if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
         var controls = Array.from(plusPopover.querySelectorAll(
           'button:not([disabled]):not(.hidden), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
@@ -39731,7 +39986,7 @@
     return '<div class="app-container"><div id="sessions-drawer-backdrop" class="drawer-backdrop' + backdropClass + '"></div><div class="main-layout' + (state.sessionsDrawerOpen ? " sidebar-open" : "") + (isAnchored ? " sidebar-pinned" : "") + collapsedCls + '"><aside id="sessions-drawer" class="sidebar' + drawerClass + (isAnchored ? " pinned" : "") + sidebarCollapsedCls + '"><div class="sidebar-header"><div class="sidebar-header-main"><div class="topbar-logo-icon">W</div><span class="sidebar-title">\u4F1A\u8BDD</span><span class="session-count" id="session-count">' + String(state.sessions.filter(function(session) {
       var source = String(session && session.sessionSource || "").toLowerCase();
       return source !== "automation" && source !== "startup";
-    }).length) + '</span></div><div class="sidebar-header-actions"><div class="sidebar-header-more"><button id="sidebar-more-btn" class="btn btn-ghost btn-sm" type="button" title="\u66F4\u591A\u64CD\u4F5C"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg></button><div class="sidebar-header-overflow" id="sidebar-overflow-menu"><button class="overflow-item" id="sidebar-home-btn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg><span>\u56DE\u5230\u9996\u9875</span></button><button class="overflow-item" id="sidebar-refresh-btn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg><span>\u5237\u65B0\u9875\u9762</span></button></div></div><button id="sidebar-pin-btn" class="btn btn-ghost btn-sm sidebar-pin-toggle' + (state.sidebarPinned ? " pinned" : "") + '" type="button" title="' + (state.sidebarPinned ? "\u5DF2\u56FA\u5B9A\u5E38\u9A7B\uFF08\u70B9\u51FB\u89E3\u9664\u9501\u5B9A\uFF09" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B") + '" aria-label="' + (state.sidebarPinned ? "\u89E3\u9664\u56FA\u5B9A\u5E38\u9A7B" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B") + '" aria-pressed="' + (state.sidebarPinned ? "true" : "false") + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24z"/></svg></button><button id="sidebar-collapse-btn" class="btn btn-ghost btn-sm sidebar-collapse-toggle' + (isCollapsed ? " collapsed" : "") + '" type="button" title="' + (isCollapsed ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761") + '" aria-label="' + (isCollapsed ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761") + '">' + (isCollapsed ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="10 6 16 12 10 18"/><line x1="20" y1="5" x2="20" y2="19"/></svg>' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="14 6 8 12 14 18"/><line x1="4" y1="5" x2="4" y2="19"/></svg>') + '</button><button id="close-drawer-button" class="btn btn-ghost btn-icon sidebar-close drawer-close-btn" type="button" aria-label="\u5173\u95ED\u83DC\u5355"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button></div></div><div class="sidebar-body"><div id="sessions-panel"><div class="sessions-list" id="sessions-list">' + renderSessionsListContent() + '</div></div></div><div class="sidebar-footer"><button id="drawer-new-session-button" class="btn btn-primary btn-block"><span>+</span> \u65B0\u4F1A\u8BDD</button><div class="sidebar-footer-actions"><button id="file-panel-toggle-btn" class="btn btn-ghost btn-sm' + (state.filePanelOpen ? " active" : "") + '" type="button" title="\u67E5\u770B\u6587\u4EF6"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg><span>\u6587\u4EF6</span></button><button id="settings-button" class="btn btn-ghost btn-sm" type="button" title="\u8BBE\u7F6E"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>\u8BBE\u7F6E</span></button>' + (hasNativeBackToApp() ? '<button id="back-to-native-button" class="btn btn-ghost btn-sm sidebar-back-to-native" type="button" title="\u8FD4\u56DE App \u539F\u751F\u754C\u9762"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="10" y="3" width="11" height="18" rx="2"/><line x1="14" y1="17" x2="17" y2="17"/><polyline points="7 8 3 12 7 16"/></svg><span>\u8FD4\u56DEApp</span></button>' : "") + (hasNativeSwitchServer() ? '<button id="switch-server-button" class="btn btn-ghost btn-sm sidebar-switch-server" type="button" title="\u5207\u6362\u670D\u52A1\u5668"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg><span>\u5207\u6362</span></button>' : "") + '<button id="logout-button" class="btn btn-ghost btn-sm sidebar-logout" type="button" title="\u9000\u51FA\u767B\u5F55"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg><span>\u9000\u51FA</span></button></div></div></aside><main class="main-content"><div class="main-header-row"><div class="topbar-left"><button id="sessions-toggle-button" class="floating-sidebar-toggle' + (state.sessionsDrawerOpen ? " active" : "") + '" aria-label="\u5207\u6362\u4F1A\u8BDD\u4FA7\u680F" type="button"><span class="hamburger-icon"><span></span><span></span><span></span></span></button><span class="topbar-brand" aria-hidden="true">W</span></div><div class="topbar-center">' + (selectedSession ? '<span class="topbar-session-title' + (selectedSession.titleGenerating ? " title-generating" : "") + '"' + (selectedSession.titleGenerating ? ' aria-busy="true"' : "") + ' title="' + escapeHtml(selectedSession.description || selectedSession.command || "") + '">' + escapeHtml(selectedSession.title || shortCommand(selectedSession.command)) + '</span><span class="session-status-pill ' + getSessionStatusClass(selectedSession) + '" title="' + escapeHtml(getSessionStatusLabel(selectedSession)) + '"><span class="session-status-dot"></span><span class="session-status-text">' + escapeHtml(getSessionStatusLabel(selectedSession)) + '</span></span><span class="current-task hidden" id="current-task"></span>' + (selectedSession.cwd ? renderTailMarqueePath(selectedSession.cwd, "topbar-cwd", ' id="topbar-cwd" role="button" tabindex="0"') : "") : '<span class="topbar-tagline">Wand \u63A7\u5236\u53F0</span><span class="current-task hidden" id="current-task"></span>') + '</div><div class="topbar-right"><button id="topbar-file-button" class="topbar-btn square' + (state.filePanelOpen ? " active" : "") + '" type="button" aria-label="\u6587\u4EF6" title="\u67E5\u770B\u6587\u4EF6\uFF08\u53EF\u4FEE\u6539\u8DEF\u5F84\uFF09"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button><span id="topbar-git-slot" class="topbar-git-slot">' + renderTopbarGitBadgeHtml() + "</span>" + (selectedSession ? renderTopbarMoreMenuHtml(selectedSession) : "") + '</div></div><div id="file-panel-backdrop" class="file-panel-backdrop' + (state.filePanelOpen ? " open" : "") + '"></div><div id="file-side-panel" class="file-side-panel' + (state.filePanelOpen ? " open" : "") + '"><div class="file-side-panel-header"><div class="file-side-panel-title-group"><span class="file-side-panel-icon">' + wandFileIcon("folder-open", { size: 16 }) + '</span><span class="file-side-panel-title">\u6587\u4EF6</span></div><div class="file-side-panel-header-actions"><button class="file-side-panel-iconbtn" id="file-explorer-refresh" type="button" title="\u5237\u65B0" aria-label="\u5237\u65B0\u6587\u4EF6\u5217\u8868">' + wandFileIcon("refresh", { size: 15 }) + '</button><button id="file-side-panel-close" class="file-side-panel-iconbtn close" type="button" aria-label="\u5173\u95ED\u6587\u4EF6\u9762\u677F" title="\u5173\u95ED">' + wandFileIcon("x", { size: 16 }) + '</button></div></div><div class="file-side-panel-body"><div class="file-explorer-header"><button class="file-explorer-up" id="file-explorer-up" type="button" title="\u8FD4\u56DE\u4E0A\u7EA7\u76EE\u5F55" aria-label="\u8FD4\u56DE\u4E0A\u7EA7\u76EE\u5F55">' + wandFileIcon("arrow-up", { size: 15 }) + '</button><input type="text" class="file-explorer-path" id="file-explorer-cwd" value="' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" title="' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" placeholder="\u8F93\u5165\u8DEF\u5F84\u5E76\u56DE\u8F66..." spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" aria-label="\u5F53\u524D\u8DEF\u5F84\uFF0C\u53EF\u76F4\u63A5\u4FEE\u6539\u540E\u56DE\u8F66" /></div><div class="file-search-box"><span class="file-search-icon">' + wandFileIcon("search", { size: 14 }) + '</span><input type="text" id="file-search-input" class="file-search-input" placeholder="\u641C\u7D22\u5F53\u524D\u76EE\u5F55\u2026" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" /><button class="file-search-clear" id="file-search-clear" type="button" aria-label="\u6E05\u9664\u641C\u7D22" title="\u6E05\u9664">' + wandFileIcon("x", { size: 13 }) + '</button></div><div class="file-explorer" id="file-explorer">' + renderFileExplorer(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '</div></div></div><div id="output" class="terminal-container' + (state.selectedId ? "" : " hidden") + ' active"><div class="terminal-scale-overlay" aria-label="\u7EC8\u7AEF\u7F29\u653E\u63A7\u4EF6"><button id="terminal-scale-down-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="\u7F29\u5C0F">\u2212</button><span class="terminal-scale-overlay-label terminal-scale-label" id="terminal-scale-label-top">' + Math.round(state.terminalScale * 100) + '%</span><button id="terminal-scale-up-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="\u653E\u5927">+</button><span class="terminal-scale-overlay-divider"></span><button id="page-refresh-btn" class="terminal-scale-overlay-btn" type="button" title="\u5237\u65B0\u9875\u9762">\u21BB</button></div><button id="terminal-jump-bottom" class="terminal-jump-bottom' + (state.showTerminalJumpToBottom ? " visible" : "") + '" type="button" title="\u56DE\u5230\u5E95\u90E8" aria-label="\u56DE\u5230\u5E95\u90E8"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></button></div><div id="chat-output" class="chat-container hidden"><div id="chat-fold-bar" class="chat-fold-bar hidden" aria-live="polite"></div><button id="chat-unread-bubble" class="chat-unread-bubble" type="button" title="\u56DE\u5230\u6700\u65B0\u6D88\u606F" aria-label="\u56DE\u5230\u6700\u65B0\u6D88\u606F"><span class="chat-unread-bubble-icon"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></span><span class="chat-unread-bubble-count" aria-hidden="true"></span></button></div><div id="blank-chat" class="blank-chat' + (state.selectedId ? " hidden" : "") + '"><div class="blank-chat-inner"><div class="blank-chat-logo">W</div><h2 class="blank-chat-title">Wand</h2><p class="blank-chat-subtitle">\u652F\u6301\u7EC8\u7AEF PTY \u4F1A\u8BDD\u4E0E\u7ED3\u6784\u5316 chat \u4F1A\u8BDD\uFF0C\u4E24\u79CD\u6A21\u5F0F\u53EF\u5E76\u5B58\u3002</p><div class="blank-chat-tools"><button class="blank-chat-tool-btn" id="welcome-tool-claude" type="button"><span class="tool-icon">' + renderProviderLogoMarkup("claude") + '</span>\u65B0\u5EFA\u7EC8\u7AEF\u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-codex" type="button"><span class="tool-icon">' + renderProviderLogoMarkup("codex") + '</span>\u65B0\u5EFA Codex \u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-opencode" type="button"><span class="tool-icon">' + renderProviderLogoMarkup("opencode") + '</span>\u65B0\u5EFA OpenCode \u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-structured" type="button"><span class="tool-icon">' + iconSvg("chat", { size: 16, strokeWidth: 1.8 }) + '</span>\u65B0\u5EFA\u7ED3\u6784\u5316\u4F1A\u8BDD</button></div><div class="blank-chat-cwd-wrap"><div class="blank-chat-cwd" id="blank-chat-cwd" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" title="\u70B9\u51FB\u5207\u6362\u5DE5\u4F5C\u76EE\u5F55"><span class="blank-chat-cwd-icon">' + iconSvg("folder", { size: 13, strokeWidth: 1.8 }) + "</span>" + renderTailMarqueePath(getEffectiveCwd(), "blank-chat-cwd-path", ' id="blank-chat-cwd-path"') + '<span class="blank-chat-cwd-arrow">' + iconSvg("chevronDown", { size: 11, strokeWidth: 2 }) + '</span></div></div></div><div id="cross-session-queue-host"></div></div><div class="input-panel' + (state.selectedId ? "" : " hidden") + '"><div class="composer-top-row"><div id="todo-progress" class="todo-progress hidden"><button class="todo-progress-header" id="todo-progress-toggle" type="button" aria-expanded="false" aria-controls="todo-progress-body" aria-label="\u5C55\u5F00\u5F85\u529E\u5217\u8868"><div class="todo-progress-fill" id="todo-progress-fill" aria-hidden="true" style="--progress:0"></div><div class="todo-progress-left"><span class="todo-progress-ring" id="todo-progress-ring" aria-hidden="true" style="--progress:0"><svg width="16" height="16" viewBox="0 0 36 36"><circle class="todo-ring-track" cx="18" cy="18" r="15.5" fill="none" stroke-width="4"/><circle class="todo-ring-fill" cx="18" cy="18" r="15.5" fill="none" stroke-width="4" stroke-linecap="round"/></svg></span><span class="todo-progress-counter" id="todo-progress-counter"></span></div><div class="todo-progress-task-wrap"><span class="todo-progress-task" id="todo-progress-task"></span></div>' + iconSvg("chevronDown", { size: 14, strokeWidth: 2 }) + '</button></div><div class="todo-progress-body hidden" id="todo-progress-body"><ul class="todo-progress-list" id="todo-progress-list"></ul></div></div><div id="queue-bar-host" class="queue-bar-host" hidden></div><div class="input-composer-row"><div class="input-composer' + (String(currentDraft || "").trim() ? " has-text" : "") + '"><div class="composer-status-row" id="composer-status-row">' + renderAutoApproveChip(selectedSession) + '<span class="permission-actions hidden" id="permission-actions"><span class="permission-actions-label" id="permission-actions-label">\u7B49\u5F85\u6388\u6743</span><button id="approve-permission-btn" class="btn btn-permission btn-permission-approve" type="button">\u6279\u51C6</button><button id="deny-permission-btn" class="btn btn-permission btn-permission-deny" type="button">\u62D2\u7EDD</button></span>' + renderApprovalStatsBadge() + '</div><div class="composer-main-row"><div class="composer-actions-left"><button id="attach-btn" class="btn-circle btn-circle-action" type="button" title="\u66F4\u591A" aria-label="\u66F4\u591A\u64CD\u4F5C" aria-haspopup="dialog" aria-controls="composer-plus-popover" aria-expanded="false">' + iconSvg("plus", { size: 18, strokeWidth: 2.2 }) + '</button><input type="file" id="file-upload-input" multiple tabindex="-1" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0);pointer-events:none"></div><div class="composer-inline-config">' + renderComposerConfigControlsHtml(selectedSession) + '</div><div class="composer-input-wrap"><textarea id="input-box" class="input-textarea" aria-label="\u6D88\u606F\u8F93\u5165" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml(currentDraft) + '</textarea></div><div class="composer-actions-right"><button class="prompt-optimize-btn" id="prompt-optimize-btn" type="button" title="\u4F18\u5316\u63D0\u793A\u8BCD" aria-label="\u4F18\u5316\u63D0\u793A\u8BCD">' + iconSvg("edit", { size: 15, strokeWidth: 1.9, cls: "prompt-optimize-icon" }) + '<span class="prompt-optimize-label">\u4F18\u5316</span><span class="prompt-optimize-spinner" aria-hidden="true"></span></button><button id="stop-button" class="btn-circle btn-circle-stop hidden" type="button" title="\u505C\u6B62" aria-label="\u505C\u6B62\u751F\u6210"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg></button><button id="voice-record-btn" class="btn-circle btn-circle-action btn-circle-voice" type="button" title="\u6309\u4F4F\u8BED\u97F3\u8F93\u5165" aria-label="\u6309\u4F4F\u8BED\u97F3\u8F93\u5165" aria-pressed="false"' + (state.terminalInteractive ? " disabled" : "") + ">" + iconSvg("mic", { size: 19, strokeWidth: 2 }) + '</button><button id="send-input-button" class="btn-circle btn-circle-send" type="button" title="\u53D1\u9001" aria-label="\u53D1\u9001\u6D88\u606F"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m6 11 6-6 6 6"/></svg></button></div></div><div id="attachment-preview" class="attachment-preview hidden"></div></div></div><div class="composer-plus-popover hidden" id="composer-plus-popover" role="dialog" aria-modal="false" aria-label="\u66F4\u591A\u64CD\u4F5C" aria-hidden="true"><button class="plus-popover-item" id="plus-attach-item" type="button">' + iconSvg("paperclip", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) + '<span class="plus-popover-label">\u4E0A\u4F20\u9644\u4EF6</span></button><button class="plus-popover-item' + (state.terminalInteractive ? " is-on" : "") + '" id="terminal-interactive-toggle-top" type="button" aria-pressed="' + (state.terminalInteractive ? "true" : "false") + '">' + iconSvg("keyboard", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) + '<span class="plus-popover-label">\u7EC8\u7AEF\u4EA4\u4E92</span><span class="plus-popover-toggle-state">' + (state.terminalInteractive ? "\u5F00" : "\u5173") + '</span></button><div class="plus-popover-sep" aria-hidden="true"></div><div class="plus-popover-trio-wrap">' + renderComposerConfigControlsHtml(selectedSession) + "</div></div>" + renderClaudeSkillsPickerHtml(selectedSession) + // 语音实时转写气泡 —— 浮在输入框上方（.input-composer 之外，绕开它的 overflow:hidden）。
+    }).length) + '</span></div><div class="sidebar-header-actions"><div class="sidebar-header-more"><button id="sidebar-more-btn" class="btn btn-ghost btn-sm" type="button" title="\u66F4\u591A\u64CD\u4F5C"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg></button><div class="sidebar-header-overflow" id="sidebar-overflow-menu"><button class="overflow-item" id="sidebar-home-btn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg><span>\u56DE\u5230\u9996\u9875</span></button><button class="overflow-item" id="sidebar-refresh-btn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg><span>\u5237\u65B0\u9875\u9762</span></button></div></div><button id="sidebar-pin-btn" class="btn btn-ghost btn-sm sidebar-pin-toggle' + (state.sidebarPinned ? " pinned" : "") + '" type="button" title="' + (state.sidebarPinned ? "\u5DF2\u56FA\u5B9A\u5E38\u9A7B\uFF08\u70B9\u51FB\u89E3\u9664\u9501\u5B9A\uFF09" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B") + '" aria-label="' + (state.sidebarPinned ? "\u89E3\u9664\u56FA\u5B9A\u5E38\u9A7B" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B") + '" aria-pressed="' + (state.sidebarPinned ? "true" : "false") + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24z"/></svg></button><button id="sidebar-collapse-btn" class="btn btn-ghost btn-sm sidebar-collapse-toggle' + (isCollapsed ? " collapsed" : "") + '" type="button" title="' + (isCollapsed ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761") + '" aria-label="' + (isCollapsed ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761") + '">' + (isCollapsed ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="10 6 16 12 10 18"/><line x1="20" y1="5" x2="20" y2="19"/></svg>' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="14 6 8 12 14 18"/><line x1="4" y1="5" x2="4" y2="19"/></svg>') + '</button><button id="close-drawer-button" class="btn btn-ghost btn-icon sidebar-close drawer-close-btn" type="button" aria-label="\u5173\u95ED\u83DC\u5355"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button></div></div><div class="sidebar-body"><div id="sessions-panel"><div class="sessions-list" id="sessions-list">' + renderSessionsListContent() + '</div></div></div><div class="sidebar-footer"><button id="drawer-new-session-button" class="btn btn-primary btn-block"><span>+</span> \u65B0\u4F1A\u8BDD</button><div class="sidebar-footer-actions"><button id="file-panel-toggle-btn" class="btn btn-ghost btn-sm' + (state.filePanelOpen ? " active" : "") + '" type="button" title="\u67E5\u770B\u6587\u4EF6"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg><span>\u6587\u4EF6</span></button><button id="settings-button" class="btn btn-ghost btn-sm" type="button" title="\u8BBE\u7F6E"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>\u8BBE\u7F6E</span></button>' + (hasNativeBackToApp() ? '<button id="back-to-native-button" class="btn btn-ghost btn-sm sidebar-back-to-native" type="button" title="\u8FD4\u56DE App \u539F\u751F\u754C\u9762"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="10" y="3" width="11" height="18" rx="2"/><line x1="14" y1="17" x2="17" y2="17"/><polyline points="7 8 3 12 7 16"/></svg><span>\u8FD4\u56DEApp</span></button>' : "") + (hasNativeSwitchServer() ? '<button id="switch-server-button" class="btn btn-ghost btn-sm sidebar-switch-server" type="button" title="\u5207\u6362\u670D\u52A1\u5668"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg><span>\u5207\u6362</span></button>' : "") + '<button id="logout-button" class="btn btn-ghost btn-sm sidebar-logout" type="button" title="\u9000\u51FA\u767B\u5F55"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg><span>\u9000\u51FA</span></button></div></div></aside><main class="main-content"><div class="main-header-row"><div class="topbar-left"><button id="sessions-toggle-button" class="floating-sidebar-toggle' + (state.sessionsDrawerOpen ? " active" : "") + '" aria-label="\u5207\u6362\u4F1A\u8BDD\u4FA7\u680F" type="button"><span class="hamburger-icon"><span></span><span></span><span></span></span></button><span class="topbar-brand" aria-hidden="true">W</span></div><div class="topbar-center">' + (selectedSession ? '<span class="topbar-session-title' + (selectedSession.titleGenerating ? " title-generating" : "") + '"' + (selectedSession.titleGenerating ? ' aria-busy="true"' : "") + ' title="' + escapeHtml(selectedSession.description || selectedSession.command || "") + '">' + escapeHtml(selectedSession.title || shortCommand(selectedSession.command)) + '</span><span class="session-status-pill ' + getSessionStatusClass(selectedSession) + '" title="' + escapeHtml(getSessionStatusLabel(selectedSession)) + '"><span class="session-status-dot"></span><span class="session-status-text">' + escapeHtml(getSessionStatusLabel(selectedSession)) + '</span></span><span class="current-task hidden" id="current-task"></span>' + (selectedSession.cwd ? renderTailMarqueePath(selectedSession.cwd, "topbar-cwd", ' id="topbar-cwd" role="button" tabindex="0"') : "") : '<span class="topbar-tagline">Wand \u63A7\u5236\u53F0</span><span class="current-task hidden" id="current-task"></span>') + '</div><div class="topbar-right"><button id="topbar-file-button" class="topbar-btn square' + (state.filePanelOpen ? " active" : "") + '" type="button" aria-label="\u6587\u4EF6" title="\u67E5\u770B\u6587\u4EF6\uFF08\u53EF\u4FEE\u6539\u8DEF\u5F84\uFF09"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button><span id="topbar-git-slot" class="topbar-git-slot">' + renderTopbarGitBadgeHtml() + "</span>" + (selectedSession ? renderTopbarMoreMenuHtml(selectedSession) : "") + '</div></div><div id="file-panel-backdrop" class="file-panel-backdrop' + (state.filePanelOpen ? " open" : "") + '"></div><div id="file-side-panel" class="file-side-panel' + (state.filePanelOpen ? " open" : "") + '"><div class="file-side-panel-header"><div class="file-side-panel-title-group"><span class="file-side-panel-icon">' + wandFileIcon("folder-open", { size: 16 }) + '</span><span class="file-side-panel-title">\u6587\u4EF6</span></div><div class="file-side-panel-header-actions"><button class="file-side-panel-iconbtn" id="file-explorer-refresh" type="button" title="\u5237\u65B0" aria-label="\u5237\u65B0\u6587\u4EF6\u5217\u8868">' + wandFileIcon("refresh", { size: 15 }) + '</button><button id="file-side-panel-close" class="file-side-panel-iconbtn close" type="button" aria-label="\u5173\u95ED\u6587\u4EF6\u9762\u677F" title="\u5173\u95ED">' + wandFileIcon("x", { size: 16 }) + '</button></div></div><div class="file-side-panel-body"><div class="file-explorer-header"><button class="file-explorer-up" id="file-explorer-up" type="button" title="\u8FD4\u56DE\u4E0A\u7EA7\u76EE\u5F55" aria-label="\u8FD4\u56DE\u4E0A\u7EA7\u76EE\u5F55">' + wandFileIcon("arrow-up", { size: 15 }) + '</button><input type="text" class="file-explorer-path" id="file-explorer-cwd" value="' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" title="' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" placeholder="\u8F93\u5165\u8DEF\u5F84\u5E76\u56DE\u8F66..." spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" aria-label="\u5F53\u524D\u8DEF\u5F84\uFF0C\u53EF\u76F4\u63A5\u4FEE\u6539\u540E\u56DE\u8F66" /></div><div class="file-search-box"><span class="file-search-icon">' + wandFileIcon("search", { size: 14 }) + '</span><input type="text" id="file-search-input" class="file-search-input" placeholder="\u641C\u7D22\u5F53\u524D\u76EE\u5F55\u2026" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" /><button class="file-search-clear" id="file-search-clear" type="button" aria-label="\u6E05\u9664\u641C\u7D22" title="\u6E05\u9664">' + wandFileIcon("x", { size: 13 }) + '</button></div><div class="file-explorer" id="file-explorer">' + renderFileExplorer(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '</div></div></div><div id="output" class="terminal-container' + (state.selectedId ? "" : " hidden") + ' active"><div class="terminal-scale-overlay" aria-label="\u7EC8\u7AEF\u7F29\u653E\u63A7\u4EF6"><button id="terminal-scale-down-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="\u7F29\u5C0F">\u2212</button><span class="terminal-scale-overlay-label terminal-scale-label" id="terminal-scale-label-top">' + Math.round(state.terminalScale * 100) + '%</span><button id="terminal-scale-up-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="\u653E\u5927">+</button><span class="terminal-scale-overlay-divider"></span><button id="page-refresh-btn" class="terminal-scale-overlay-btn" type="button" title="\u5237\u65B0\u9875\u9762">\u21BB</button></div><button id="terminal-jump-bottom" class="terminal-jump-bottom' + (state.showTerminalJumpToBottom ? " visible" : "") + '" type="button" title="\u56DE\u5230\u5E95\u90E8" aria-label="\u56DE\u5230\u5E95\u90E8"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></button></div><div id="chat-output" class="chat-container hidden"><div id="chat-fold-bar" class="chat-fold-bar hidden" aria-live="polite"></div><button id="chat-unread-bubble" class="chat-unread-bubble" type="button" title="\u56DE\u5230\u6700\u65B0\u6D88\u606F" aria-label="\u56DE\u5230\u6700\u65B0\u6D88\u606F"><span class="chat-unread-bubble-icon"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></span><span class="chat-unread-bubble-count" aria-hidden="true"></span></button></div><div id="blank-chat" class="blank-chat' + (state.selectedId ? " hidden" : "") + '"><div class="blank-chat-inner"><div class="blank-chat-logo">W</div><h2 class="blank-chat-title">Wand</h2><p class="blank-chat-subtitle">\u652F\u6301\u7EC8\u7AEF PTY \u4F1A\u8BDD\u4E0E\u7ED3\u6784\u5316 chat \u4F1A\u8BDD\uFF0C\u4E24\u79CD\u6A21\u5F0F\u53EF\u5E76\u5B58\u3002</p><div class="blank-chat-tools"><button class="blank-chat-tool-btn" id="welcome-tool-claude" type="button"><span class="tool-icon">' + renderProviderLogoMarkup("claude") + '</span>\u65B0\u5EFA\u7EC8\u7AEF\u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-codex" type="button"><span class="tool-icon">' + renderProviderLogoMarkup("codex") + '</span>\u65B0\u5EFA Codex \u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-opencode" type="button"><span class="tool-icon">' + renderProviderLogoMarkup("opencode") + '</span>\u65B0\u5EFA OpenCode \u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-structured" type="button"><span class="tool-icon">' + iconSvg("chat", { size: 16, strokeWidth: 1.8 }) + '</span>\u65B0\u5EFA\u7ED3\u6784\u5316\u4F1A\u8BDD</button></div><div class="blank-chat-cwd-wrap"><div class="blank-chat-cwd" id="blank-chat-cwd" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" title="\u70B9\u51FB\u5207\u6362\u5DE5\u4F5C\u76EE\u5F55"><span class="blank-chat-cwd-icon">' + iconSvg("folder", { size: 13, strokeWidth: 1.8 }) + "</span>" + renderTailMarqueePath(getEffectiveCwd(), "blank-chat-cwd-path", ' id="blank-chat-cwd-path"') + '<span class="blank-chat-cwd-arrow">' + iconSvg("chevronDown", { size: 11, strokeWidth: 2 }) + '</span></div></div></div><div id="cross-session-queue-host"></div></div><div class="input-panel' + (state.selectedId ? "" : " hidden") + '"><div class="composer-top-row"><div id="todo-progress" class="todo-progress hidden"><button class="todo-progress-header" id="todo-progress-toggle" type="button" aria-expanded="false" aria-controls="todo-progress-body" aria-label="\u5C55\u5F00\u5F85\u529E\u5217\u8868"><div class="todo-progress-fill" id="todo-progress-fill" aria-hidden="true" style="--progress:0"></div><div class="todo-progress-left"><span class="todo-progress-ring" id="todo-progress-ring" aria-hidden="true" style="--progress:0"><svg width="16" height="16" viewBox="0 0 36 36"><circle class="todo-ring-track" cx="18" cy="18" r="15.5" fill="none" stroke-width="4"/><circle class="todo-ring-fill" cx="18" cy="18" r="15.5" fill="none" stroke-width="4" stroke-linecap="round"/></svg></span><span class="todo-progress-counter" id="todo-progress-counter"></span></div><div class="todo-progress-task-wrap"><span class="todo-progress-task" id="todo-progress-task"></span></div>' + iconSvg("chevronDown", { size: 14, strokeWidth: 2 }) + '</button></div><div class="todo-progress-body hidden" id="todo-progress-body"><ul class="todo-progress-list" id="todo-progress-list"></ul></div></div><div id="queue-bar-host" class="queue-bar-host" hidden></div><div class="input-composer-row"><div class="input-composer' + (String(currentDraft || "").trim() ? " has-text" : "") + '" role="group" aria-label="\u6D88\u606F\u7F16\u8F91\u5668"><div id="attachment-preview" class="attachment-preview hidden" aria-label="\u5F85\u53D1\u9001\u9644\u4EF6" aria-live="polite"></div><div class="composer-main-row"><div class="composer-input-wrap"><textarea id="input-box" class="input-textarea" aria-label="\u6D88\u606F\u8F93\u5165" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml(currentDraft) + '</textarea></div><div class="composer-actions-left" role="group" aria-label="\u6DFB\u52A0\u5185\u5BB9\u4E0E\u6743\u9650"><button id="attach-btn" class="btn-circle btn-circle-action" type="button" title="\u66F4\u591A" aria-label="\u66F4\u591A\u64CD\u4F5C" aria-haspopup="dialog" aria-controls="composer-plus-popover" aria-expanded="false">' + iconSvg("plus", { size: 18, strokeWidth: 2.2 }) + '</button><input type="file" id="file-upload-input" multiple tabindex="-1" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0);pointer-events:none"><div class="composer-status-row" id="composer-status-row">' + renderComposerConfigControlsHtml(selectedSession, "mode") + renderAutoApproveChip(selectedSession) + '<span class="permission-actions hidden" id="permission-actions"><span class="permission-actions-label" id="permission-actions-label" role="status" aria-live="polite" aria-atomic="true">\u7B49\u5F85\u6388\u6743</span><button id="approve-permission-btn" class="btn btn-permission btn-permission-approve" type="button">\u6279\u51C6</button><button id="deny-permission-btn" class="btn btn-permission btn-permission-deny" type="button">\u62D2\u7EDD</button></span>' + renderApprovalStatsBadge() + '</div></div><div class="composer-actions-right" role="group" aria-label="\u6A21\u578B\u4E0E\u53D1\u9001"><div class="composer-inline-config">' + renderComposerConfigControlsHtml(selectedSession, "runtime") + '</div><button class="prompt-optimize-btn" id="prompt-optimize-btn" type="button" title="\u4F18\u5316\u63D0\u793A\u8BCD" aria-label="\u4F18\u5316\u63D0\u793A\u8BCD">' + iconSvg("edit", { size: 15, strokeWidth: 1.9, cls: "prompt-optimize-icon" }) + '<span class="prompt-optimize-label">\u4F18\u5316</span><span class="prompt-optimize-spinner" aria-hidden="true"></span></button><button id="stop-button" class="btn-circle btn-circle-stop hidden" type="button" title="\u505C\u6B62" aria-label="\u505C\u6B62\u751F\u6210"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg></button><button id="voice-record-btn" class="btn-circle btn-circle-action btn-circle-voice" type="button" title="\u6309\u4F4F\u8BED\u97F3\u8F93\u5165" aria-label="\u6309\u4F4F\u8BED\u97F3\u8F93\u5165" aria-pressed="false"' + (state.terminalInteractive ? " disabled" : "") + ">" + iconSvg("mic", { size: 19, strokeWidth: 2 }) + '</button><button id="send-input-button" class="btn-circle btn-circle-send" type="button" title="\u53D1\u9001" aria-label="\u53D1\u9001\u6D88\u606F"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m6 11 6-6 6 6"/></svg></button></div></div></div></div><div class="composer-plus-popover hidden" id="composer-plus-popover" role="dialog" aria-modal="false" aria-label="\u66F4\u591A\u64CD\u4F5C" aria-hidden="true"><button class="plus-popover-item" id="plus-attach-item" type="button">' + iconSvg("paperclip", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) + '<span class="plus-popover-label">\u4E0A\u4F20\u9644\u4EF6</span></button><button class="plus-popover-item' + (state.terminalInteractive ? " is-on" : "") + '" id="terminal-interactive-toggle-top" type="button" aria-pressed="' + (state.terminalInteractive ? "true" : "false") + '">' + iconSvg("keyboard", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) + '<span class="plus-popover-label">\u7EC8\u7AEF\u4EA4\u4E92</span><span class="plus-popover-toggle-state">' + (state.terminalInteractive ? "\u5F00" : "\u5173") + '</span></button><div class="plus-popover-sep" aria-hidden="true"></div><div class="plus-popover-trio-wrap">' + renderComposerConfigControlsHtml(selectedSession) + "</div></div>" + renderClaudeSkillsPickerHtml(selectedSession) + // 语音实时转写气泡 —— 浮在输入框上方（.input-composer 之外，绕开它的 overflow:hidden）。
     // 按住录音时显示，逐字展示识别文字；松手填回输入框。默认 hidden。
     '<div class="voice-transcript-bubble hidden" id="voice-transcript-bubble" aria-live="polite"><div class="voice-transcript-text" id="voice-transcript-text"></div><div class="voice-transcript-hint" id="voice-transcript-hint"><span class="voice-wave" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span class="voice-transcript-status" id="voice-transcript-status">\u6B63\u5728\u8046\u542C\u2026\u4E0A\u6ED1\u53D6\u6D88</span></div><span class="voice-bubble-arrow" aria-hidden="true"></span></div><p id="action-error" class="error-message hidden"></p></div></main></div></div>';
   }
@@ -42216,7 +42471,9 @@
   function shouldIgnoreInteractiveTarget(target) {
     if (!target) return false;
     if (ignoredInteractiveTargetIds.has(target.id)) return true;
-    return !!(target.closest && target.closest('[role="dialog"], [role="alertdialog"]'));
+    return !!(target.closest && target.closest(
+      '[role="dialog"], [role="alertdialog"], .wand-ui-select-trigger, .wand-ui-select-content, [role="listbox"], [role="option"]'
+    ));
   }
   var modifierKeySet = /* @__PURE__ */ new Set(["ctrl", "alt", "shift"]);
   function isModifierKey(key) {
@@ -42382,6 +42639,7 @@
       sendBtn.disabled = promptOptimizeBusyForCurrent || !composerCanSend || duplicateInFlight || sessionUnavailable;
       sendBtn.setAttribute("aria-disabled", sendBtn.disabled ? "true" : "false");
       sendBtn.setAttribute("title", promptOptimizeBusyForCurrent ? "\u6B63\u5728\u4F18\u5316\u63D0\u793A\u8BCD" : structured ? structuredInFlight ? "\u6392\u961F\u53D1\u9001\uFF08\u5F53\u524D\u56DE\u590D\u7ED3\u675F\u540E\u5904\u7406\uFF09" : "\u53D1\u9001" : isCodex ? isRunning ? "\u53D1\u9001\u7ED9 Codex" : "Codex \u4F1A\u8BDD\u5DF2\u7ED3\u675F" : !selectedSession || isRunning || canResumeOnSend ? "\u53D1\u9001" : "\u4F1A\u8BDD\u5DF2\u7ED3\u675F");
+      sendBtn.setAttribute("aria-label", promptOptimizeBusyForCurrent ? "\u6B63\u5728\u4F18\u5316\u63D0\u793A\u8BCD" : structuredInFlight ? "\u52A0\u5165\u53D1\u9001\u961F\u5217" : "\u53D1\u9001\u6D88\u606F");
       sendBtn.classList.toggle("queue-mode", structuredInFlight);
     }
     var stopBtn = document.getElementById("stop-button");
@@ -46037,6 +46295,49 @@
     return false;
   }
 
+  // src/web-ui/browser/composer-select-adapter.ts
+  function isControl(value) {
+    return value === "mode" || value === "model" || value === "thinking";
+  }
+  function isScope(value) {
+    return value === "mode" || value === "runtime" || value === "all" || value === "dropdown";
+  }
+  function syncBrowserComposerSelects(config) {
+    const mounts = [];
+    document.querySelectorAll("[data-composer-select-host]").forEach((target, index2) => {
+      const control = target.dataset.modeControl;
+      const scope = target.dataset.composerSelectScope;
+      if (!isControl(control) || !isScope(scope) || !target.isConnected) return;
+      const definition = config.resolve(control, scope);
+      mounts.push({
+        key: target.dataset.composerSelectKey || `${scope}-${control}-${index2}`,
+        target,
+        control,
+        scope,
+        value: definition.value,
+        options: definition.options,
+        ariaLabel: definition.ariaLabel,
+        placeholder: definition.placeholder,
+        displayValue: definition.displayValue,
+        disabled: definition.disabled,
+        align: control === "mode" ? "start" : "end",
+        onValueChange(value) {
+          config.onValueChange(control, value, scope);
+        }
+      });
+    });
+    composerSelectController.sync(mounts);
+  }
+
+  // src/web-ui/browser/composer-select-values.ts
+  function normalizeComposerModelValue(value) {
+    return value === "default" ? "" : value || "";
+  }
+  function normalizeAvailableComposerValue(value, options, fallback) {
+    const candidate = value || fallback;
+    return options.some((option) => option.value === candidate) ? candidate : fallback;
+  }
+
   // src/web-ui/browser/session-engine.ts
   function showLoginCertHint() {
     var hint = document.getElementById("login-cert-hint");
@@ -46163,7 +46464,7 @@
     return loadSessions();
   }
   function getModeLabel(mode) {
-    return mode === "full-access" ? "\u5168\u6743\u9650" : mode === "default" ? "\u9ED8\u8BA4" : mode === "native" ? "\u539F\u751F" : mode === "auto-edit" ? "\u81EA\u52A8\u7F16\u8F91" : mode === "managed" ? "\u6258\u7BA1" : mode;
+    return mode === "full-access" ? "\u5B8C\u5168\u8BBF\u95EE" : mode === "default" ? "\u9ED8\u8BA4" : mode === "native" ? "\u539F\u751F" : mode === "auto-edit" ? "\u81EA\u52A8\u7F16\u8F91" : mode === "managed" ? "\u6258\u7BA1" : mode;
   }
   function getPreferredTool() {
     return state.sessionTool || state.preferredCommand || "claude";
@@ -46306,7 +46607,7 @@
       var tagHtml = kind === "compact" ? "" : '<span class="chat-mode-trio-tag">' + escapeHtml(label) + "</span>";
       return '<span class="composer-text-pill chat-mode-trio-pill" data-mode-control-pill="' + ctrl + '" title="' + escapeHtml(label) + '">' + tagHtml + '<span class="composer-text-label">' + escapeHtml(value) + '</span><select class="composer-text-hidden-select" data-mode-control="' + ctrl + '" aria-label="' + escapeHtml(label) + '">' + optionsHtml + "</select></span>";
     }
-    var refreshButton = '<button class="model-refresh-button" type="button" data-models-refresh aria-label="\u5237\u65B0\u6A21\u578B\u5217\u8868" title="\u5237\u65B0\u6A21\u578B\u5217\u8868"' + (state.modelsRefreshing ? ' disabled aria-busy="true"' : "") + ">" + iconSvg("refresh", { size: 13, strokeWidth: 1.9, cls: "model-refresh-icon" }) + '<span class="model-refresh-label">\u5237\u65B0\u6A21\u578B\u5217\u8868</span></button>';
+    var refreshButton = '<button class="model-refresh-button' + (state.modelsRefreshing ? " is-refreshing" : "") + '" type="button" data-models-refresh aria-label="\u5237\u65B0\u6A21\u578B\u5217\u8868" title="\u5237\u65B0\u6A21\u578B\u5217\u8868" aria-busy="' + (state.modelsRefreshing ? "true" : "false") + '"' + (state.modelsRefreshing ? " disabled" : "") + ">" + iconSvg("refresh", { size: 13, strokeWidth: 1.9, cls: "model-refresh-icon" }) + '<span class="model-refresh-label">\u5237\u65B0\u6A21\u578B\u5217\u8868</span></button>';
     return '<div class="chat-mode-trio chat-mode-trio-' + kind + '" role="group" aria-label="\u4F1A\u8BDD\u8BBE\u7F6E">' + pill("mode", "\u6A21\u5F0F", composerMode, renderChatModeOptionsRaw(preferredTool, composerMode)) + '<span class="composer-text-sep" aria-hidden="true">\xB7</span>' + pill("model", "\u6A21\u578B", modelLabel, renderChatModelOptionsRaw(modelText, session)) + refreshButton + '<span class="composer-text-sep" aria-hidden="true">\xB7</span>' + pill("thinking", "\u601D\u8003", getThinkingCompactLabel(thinkingText, session), renderThinkingOptions(thinkingText, session)) + "</div>";
   }
   function getThinkingCompactLabel(id, session) {
@@ -46357,23 +46658,26 @@
     if (label.length > 12) return label.slice(0, 10) + "\u2026";
     return label;
   }
-  function renderThinkingOptions(selected, session) {
+  function getThinkingSelectOptions(selected, session) {
     var levels = getThinkingLevels(session);
-    var normalized = levels.some(function(level) {
-      return level.id === selected;
-    }) ? selected : "off";
     return levels.map(function(level) {
       var label = level.id === "off" ? "\u81EA\u52A8\uFF08\u6A21\u578B\u9ED8\u8BA4\uFF09" : getThinkingCompactLabel(level.id, session);
-      return '<option value="' + escapeHtml(level.id) + '"' + (level.id === normalized ? " selected" : "") + ">" + escapeHtml(label) + "</option>";
+      return { value: level.id, label };
+    });
+  }
+  function renderThinkingOptions(selected, session) {
+    var options = getThinkingSelectOptions(selected, session);
+    var normalized = normalizeAvailableComposerValue(selected, options, "off");
+    return options.map(function(option) {
+      return '<option value="' + escapeHtml(option.value) + '"' + (option.value === normalized ? " selected" : "") + ">" + escapeHtml(option.label) + "</option>";
     }).join("");
   }
   function syncThinkingSelect(container, selected, session) {
     var select = container.querySelector('[data-mode-control="thinking"]');
     if (!select) return;
+    var options = getThinkingSelectOptions(selected, session);
     select.innerHTML = renderThinkingOptions(selected, session);
-    select.value = getThinkingLevels(session).some(function(level) {
-      return level.id === selected;
-    }) ? selected : "off";
+    select.value = normalizeAvailableComposerValue(selected, options, "off");
   }
   function supportsClaudeSkillSelection(session) {
     return !!session && session.sessionKind === "structured" && session.provider === "claude" && session.runner === "claude-sdk";
@@ -46481,16 +46785,25 @@
     state.selectedClaudeSkillsBySession[session.id] = selected;
     refreshClaudeSkillControls();
   }
-  function renderComposerConfigControlsHtml(session) {
-    var preferredTool = getPreferredTool();
+  function renderComposerSelectHost(control, scope) {
+    var key = String(scope) + "-" + String(control);
+    return '<span class="composer-config-select-host" data-composer-select-host data-composer-select-key="' + escapeHtml(key) + '" data-composer-select-scope="' + escapeHtml(scope) + '" data-mode-control="' + escapeHtml(control) + '"></span>';
+  }
+  function renderComposerConfigControlsHtml(session, scope = "all") {
     var mode = state.chatMode || "default";
-    var model = getEffectiveModel(session) || "";
-    var thinking = getEffectiveThinking(session);
+    var model = normalizeComposerModelValue(getEffectiveModel(session));
+    var thinkingOptions = getThinkingSelectOptions(getEffectiveThinking(session), session);
+    var thinking = normalizeAvailableComposerValue(getEffectiveThinking(session), thinkingOptions, "off");
     var modeLabel = getModeLabel(mode);
     var modelLabel = getShortModelLabel(model, session);
     var thinkingLabel = getThinkingCompactLabel(thinking, session);
     var title = "\u6A21\u5F0F " + modeLabel + " \xB7 \u6A21\u578B " + modelLabel + " \xB7 \u601D\u8003 " + thinkingLabel;
-    return '<div class="composer-config-controls" role="group" aria-label="\u4F1A\u8BDD\u8BBE\u7F6E" title="' + escapeHtml(title) + '"><span class="composer-config-chip composer-config-chip-mode" data-mode-control-pill="mode" title="\u6A21\u5F0F\uFF1A' + escapeHtml(modeLabel) + '">' + iconSvg("shield", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) + '<span class="composer-config-label">' + escapeHtml(modeLabel) + '</span><select class="composer-text-hidden-select" data-mode-control="mode" aria-label="\u6A21\u5F0F">' + renderChatModeOptionsRaw(preferredTool, mode) + '</select></span><span class="composer-config-chip composer-config-model" data-mode-control-pill="model" title="\u6A21\u578B\uFF1A' + escapeHtml(modelLabel) + '">' + iconSvg("cpu", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) + '<span class="composer-config-label">' + escapeHtml(modelLabel) + '</span><select class="composer-text-hidden-select" data-mode-control="model" aria-label="\u6A21\u578B">' + renderChatModelOptions(model, session) + '</select></span><button class="model-refresh-button composer-model-refresh-button" type="button" data-models-refresh aria-label="\u5237\u65B0\u6A21\u578B\u5217\u8868" title="\u5237\u65B0\u6A21\u578B\u5217\u8868"' + (state.modelsRefreshing ? ' disabled aria-busy="true"' : "") + ">" + iconSvg("refresh", { size: 13, strokeWidth: 1.9, cls: "model-refresh-icon" }) + '<span class="model-refresh-label">\u5237\u65B0\u6A21\u578B\u5217\u8868</span></button><span class="composer-config-chip composer-config-thinking" data-mode-control-pill="thinking" data-thinking="' + escapeHtml(thinking) + '" title="\u601D\u8003\u6DF1\u5EA6\uFF1A' + escapeHtml(thinkingLabel) + '">' + iconSvg("brain", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) + '<span class="composer-config-label">' + escapeHtml(thinkingLabel) + '</span><select class="composer-text-hidden-select" data-mode-control="thinking" aria-label="\u601D\u8003\u6DF1\u5EA6">' + renderThinkingOptions(thinking, session) + "</select></span>" + (supportsClaudeSkillSelection(session) ? '<button class="composer-config-chip composer-config-skills" type="button" data-claude-skills-trigger aria-haspopup="dialog" aria-expanded="false" title="\u9009\u62E9\u672C\u6761\u6D88\u606F\u8981\u5E94\u7528\u7684 skills">Skills</button>' : "") + "</div>";
+    var showMode = scope !== "runtime";
+    var showRuntime = scope !== "mode";
+    var showExtended = scope === "all";
+    var showModelRefresh = scope === "runtime" || showExtended;
+    var ariaLabel = scope === "mode" ? "\u6743\u9650\u6A21\u5F0F" : scope === "runtime" ? "\u6A21\u578B\u4E0E\u601D\u8003\u8BBE\u7F6E" : "\u4F1A\u8BDD\u8BBE\u7F6E";
+    return '<div class="composer-config-controls composer-config-controls-' + escapeHtml(scope) + '" data-config-scope="' + escapeHtml(scope) + '" role="group" aria-label="' + ariaLabel + '" title="' + escapeHtml(title) + '">' + (showMode ? '<span class="composer-config-chip composer-config-chip-mode" data-mode-control-pill="mode" title="\u6A21\u5F0F\uFF1A' + escapeHtml(modeLabel) + '">' + iconSvg("shield", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) + renderComposerSelectHost("mode", scope) + "</span>" : "") + (showRuntime ? '<span class="composer-config-chip composer-config-model" data-mode-control-pill="model" title="\u6A21\u578B\uFF1A' + escapeHtml(modelLabel) + '">' + iconSvg("cpu", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) + renderComposerSelectHost("model", scope) + "</span>" + (showModelRefresh ? '<button class="model-refresh-button composer-model-refresh-button' + (state.modelsRefreshing ? " is-refreshing" : "") + '" type="button" data-models-refresh data-models-refresh-scope="' + escapeHtml(scope) + '" aria-label="\u5237\u65B0\u6A21\u578B\u5217\u8868" title="\u5237\u65B0\u6A21\u578B\u5217\u8868" aria-busy="' + (state.modelsRefreshing ? "true" : "false") + '"' + (state.modelsRefreshing ? " disabled" : "") + ">" + iconSvg("refresh", { size: 13, strokeWidth: 1.9, cls: "model-refresh-icon" }) + '<span class="model-refresh-label">\u5237\u65B0\u6A21\u578B\u5217\u8868</span></button>' : "") + '<span class="composer-config-chip composer-config-thinking" data-mode-control-pill="thinking" data-thinking="' + escapeHtml(thinking) + '" title="\u601D\u8003\u6DF1\u5EA6\uFF1A' + escapeHtml(thinkingLabel) + '">' + iconSvg("brain", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) + renderComposerSelectHost("thinking", scope) + "</span>" : "") + (showExtended && supportsClaudeSkillSelection(session) ? '<button class="composer-config-chip composer-config-skills" type="button" data-claude-skills-trigger aria-haspopup="dialog" aria-expanded="false" title="\u9009\u62E9\u672C\u6761\u6D88\u606F\u8981\u5E94\u7528\u7684 skills">Skills</button>' : "") + "</div>";
   }
   function refreshAllChatModeTrios2() {
     var session = getSelectedSession4();
@@ -46523,43 +46836,33 @@
   }
   function refreshComposerConfigControls(session, mode, model, thinking) {
     var preferredTool = getPreferredTool();
+    var modelOptions = getChatModelSelectOptions(model, session);
+    var normalizedModel = normalizeComposerModelValue(model);
+    var thinkingOptions = getThinkingSelectOptions(thinking, session);
+    var normalizedThinking = normalizeAvailableComposerValue(thinking, thinkingOptions, "off");
     var modeLabel = getModeLabel(mode);
-    var modelLabel = getShortModelLabel(model, session);
-    var thinkingLabel = getThinkingCompactLabel(thinking, session);
+    var modelLabel = getShortModelLabel(normalizedModel, session);
+    var thinkingLabel = getThinkingCompactLabel(normalizedThinking, session);
     var controls = document.querySelectorAll(".composer-config-controls");
     controls.forEach(function(control) {
       var title = "\u6A21\u5F0F " + modeLabel + " \xB7 \u6A21\u578B " + modelLabel + " \xB7 \u601D\u8003 " + thinkingLabel;
       control.setAttribute("title", title);
-      function updateSelect(part, value, optionsHtml) {
-        var sel = part.querySelector("[data-mode-control]");
-        if (!sel) return;
-        sel.innerHTML = optionsHtml;
-        sel.value = value;
-      }
       var modePart = control.querySelector('[data-mode-control-pill="mode"]');
       if (modePart) {
-        var modeText = modePart.querySelector(".composer-config-label");
-        if (modeText) modeText.textContent = modeLabel;
         modePart.setAttribute("title", "\u6A21\u5F0F\uFF1A" + modeLabel);
-        updateSelect(modePart, mode, renderChatModeOptionsRaw(preferredTool, mode));
       }
       var modelPart = control.querySelector('[data-mode-control-pill="model"]');
       if (modelPart) {
-        var modelText = modelPart.querySelector(".composer-config-label");
-        if (modelText) modelText.textContent = modelLabel;
         modelPart.setAttribute("title", "\u6A21\u578B\uFF1A" + modelLabel);
-        updateSelect(modelPart, model, renderChatModelOptions(model, session));
       }
       var thinkingPart = control.querySelector('[data-mode-control-pill="thinking"]');
       if (thinkingPart) {
-        var thinkingText = thinkingPart.querySelector(".composer-config-label");
-        if (thinkingText) thinkingText.textContent = thinkingLabel;
-        thinkingPart.setAttribute("data-thinking", thinking);
+        thinkingPart.setAttribute("data-thinking", normalizedThinking);
         thinkingPart.setAttribute("title", "\u601D\u8003\u6DF1\u5EA6\uFF1A" + thinkingLabel);
-        syncThinkingSelect(thinkingPart, thinking, session);
       }
       var skillsTrigger = control.querySelector("[data-claude-skills-trigger]");
-      if (supportsClaudeSkillSelection(session)) {
+      var supportsExtendedControls = control.getAttribute("data-config-scope") === "all";
+      if (supportsExtendedControls && supportsClaudeSkillSelection(session)) {
         if (!skillsTrigger) {
           control.insertAdjacentHTML(
             "beforeend",
@@ -46568,6 +46871,47 @@
         }
       } else {
         skillsTrigger?.remove();
+      }
+    });
+    syncBrowserComposerSelects({
+      resolve: function(control) {
+        if (control === "mode") {
+          return {
+            value: mode,
+            options: getSupportedModes(preferredTool).map(function(item) {
+              return { value: item, label: getModeLabel(item) };
+            }),
+            ariaLabel: "\u6A21\u5F0F",
+            placeholder: modeLabel,
+            displayValue: modeLabel
+          };
+        }
+        if (control === "model") {
+          return {
+            value: normalizedModel,
+            options: modelOptions,
+            ariaLabel: "\u6A21\u578B",
+            placeholder: modelLabel,
+            displayValue: modelLabel
+          };
+        }
+        return {
+          value: normalizedThinking,
+          options: thinkingOptions,
+          ariaLabel: "\u601D\u8003\u6DF1\u5EA6",
+          placeholder: thinkingLabel,
+          displayValue: thinkingLabel
+        };
+      },
+      onValueChange: function(control, value, scope) {
+        if (control === "mode") onChatModeChange(value);
+        else if (control === "model") onChatModelChange(value);
+        else onChatThinkingChange(value);
+        if (scope === "all") {
+          requestAnimationFrame(function() {
+            closePlusPopover(true);
+          });
+        }
       }
     });
     refreshClaudeSkillControls();
@@ -46636,27 +46980,27 @@
     if (provider === "qoder") return state.availableQoderModels || [];
     return state.availableModels || [];
   }
-  function renderChatModelOptions(selected, session) {
+  function getChatModelSelectOptions(selected, session) {
     var models = getModelsForCurrentProvider(session);
-    var normalized = selected === "default" ? "" : selected || "";
-    var html = '<option value=""' + (!normalized ? " selected" : "") + ">\u9ED8\u8BA4 \xB7 " + escapeHtml(getModelDisplayLabel("", session)) + "</option>";
+    var normalized = normalizeComposerModelValue(selected);
+    var options = [{ value: "", label: "\u9ED8\u8BA4 \xB7 " + getModelDisplayLabel("", session) }];
     for (var i = 0; i < models.length; i++) {
       var m = models[i];
       if (m.id === "default") continue;
       var label = m.label || m.id;
       var suffix = getProviderForSession(session) === "claude" ? m.availability === "verified" ? " \xB7 \u5DF2\u9A8C\u8BC1" : m.availability === "stale" ? " \xB7 \u5F85\u5237\u65B0" : m.source === "models-api" ? " \xB7 API \u5019\u9009" : " \xB7 \u5019\u9009" : "";
-      html += '<option value="' + escapeHtml(m.id) + '"' + (m.id === normalized ? " selected" : "") + ">" + escapeHtml(label + suffix) + "</option>";
+      options.push({ value: m.id, label: label + suffix });
     }
     if (normalized && !models.some(function(m2) {
       return m2.id === normalized;
     })) {
-      html += '<option value="' + escapeHtml(normalized) + '" selected>' + escapeHtml(normalized) + "\uFF08\u81EA\u5B9A\u4E49\uFF09</option>";
+      options.push({ value: normalized, label: normalized + "\uFF08\u81EA\u5B9A\u4E49\uFF09" });
     }
-    return html;
+    return options;
   }
   function renderChatModelOptionsRaw(selected, session) {
     var models = getModelsForCurrentProvider(session);
-    var normalized = selected === "default" ? "" : selected || "";
+    var normalized = normalizeComposerModelValue(selected);
     var html = '<option value=""' + (!normalized ? " selected" : "") + ">" + escapeHtml(getModelDisplayLabel("", session)) + "</option>";
     for (var i = 0; i < models.length; i++) {
       var m = models[i];
@@ -48034,14 +48378,6 @@
           setDraftValue(inputBox3.value, true);
         }
       }, 0);
-      return;
-    }
-    if (event.key === "Tab") {
-      event.preventDefault();
-      var inputBox = document.getElementById("input-box");
-      if (inputBox) {
-        replaceComposerSelection2(inputBox, String.fromCharCode(9));
-      }
       return;
     }
     if (event.key === "Escape") {

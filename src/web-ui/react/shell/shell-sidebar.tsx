@@ -610,16 +610,23 @@ function CollapsedSessions({
   const history = groups.find((group) => group.kind === "history")?.entries ?? [];
   return (
     <div className="sidebar-collapsed-tiles">
-      {wand.map((entry, index) => (
+      {wand.map((entry) => (
         <button
           key={entry.id}
-          className={classNames("sidebar-collapsed-tile", entry.active && "active")}
+          className={classNames(
+            "sidebar-collapsed-tile",
+            `provider-${normalizeProviderId(entry.provider) ?? "generic"}`,
+            entry.active && "active",
+          )}
           type="button"
           data-collapsed-session-id={entry.id}
           title={entry.title}
+          aria-label={`${entry.title} · ${providerDisplayName(entry.provider)}`}
           onClick={() => void dispatch({ type: "session.select", id: entry.id })}
         >
-          {index + 1}
+          <span className="sidebar-collapsed-provider-mark" aria-hidden="true">
+            <ProviderLogo provider={entry.provider}/>
+          </span>
         </button>
       ))}
       {automation.length > 0 && (

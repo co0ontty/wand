@@ -14,6 +14,7 @@ import { WorktreeMergeHost } from "./worktree-merge/host";
 import { RestartOverlayHost } from "./restart-overlay/host";
 import { restartOverlayController } from "./restart-overlay/controller";
 import { FilePreviewHost } from "./file-preview/host";
+import { ComposerSelectHost } from "./composer-select/host";
 
 export interface OverlayHostProps {
   portalContainer: HTMLElement;
@@ -29,6 +30,7 @@ export function OverlayHost({ portalContainer }: OverlayHostProps) {
 
   return (
     <PortalContainerProvider container={portalContainer}>
+      <ComposerSelectHost />
       <SettingsHost showRestart={() => restartOverlayController.showRestart()} />
       <NewSessionHost />
       <FolderPickerHost />
