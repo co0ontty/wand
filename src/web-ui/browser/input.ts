@@ -1745,7 +1745,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         // 就允许在用户发送时静默触发恢复。不再要求 messages 里同时
         // 有 user + assistant 文本（slim 列表/截断历史会让该判断失真）。
         return !!(session && !isStructuredSession(session)
-          && ["claude", "codex", "opencode", "grok", "qoder"].indexOf(session.provider) !== -1
+          && ["claude", "codex", "opencode", "grok", "qoder", "pi"].indexOf(session.provider) !== -1
           && session.status !== "running" && session.claudeSessionId);
       }
 

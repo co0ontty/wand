@@ -182,6 +182,7 @@ export var state: AppState = {
   availableOpenCodeModels: [],
   availableGrokModels: [],
   availableQoderModels: [],
+  availablePiModels: [],
   modelsRefreshing: false,
   sessionTool: "claude",
   preferredCommand: "claude",

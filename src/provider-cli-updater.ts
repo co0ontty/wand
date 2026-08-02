@@ -14,7 +14,7 @@ const REGISTRY_TIMEOUT_MS = 15_000;
 const UPDATE_TIMEOUT_MS = 5 * 60_000;
 const MAX_BUFFER = 4 * 1024 * 1024;
 
-export type ProviderCliId = "claude" | "codex" | "opencode" | "qoder";
+export type ProviderCliId = "claude" | "codex" | "opencode" | "qoder" | "pi";
 
 interface ProviderCliSpec {
   id: ProviderCliId;
@@ -57,6 +57,14 @@ const PROVIDER_CLI_SPECS: readonly ProviderCliSpec[] = [
     npmPackage: "@qoder-ai/qodercli",
     versionArgs: ["--version"],
     updateArgs: ["update"],
+  },
+  {
+    id: "pi",
+    label: "Pi CLI",
+    command: "pi",
+    npmPackage: "@mariozechner/pi-coding-agent",
+    versionArgs: ["--version"],
+    updateArgs: ["update", "self"],
   },
 ] as const;
 

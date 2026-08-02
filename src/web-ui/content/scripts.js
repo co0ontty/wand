@@ -13009,6 +13009,7 @@
     availableOpenCodeModels: [],
     availableGrokModels: [],
     availableQoderModels: [],
+    availablePiModels: [],
     modelsRefreshing: false,
     sessionTool: "claude",
     preferredCommand: "claude",
@@ -22176,6 +22177,7 @@
     const opencode = stringValue(defaults.opencode, stringValue(input.defaultOpenCodeModel));
     const grok = stringValue(defaults.grok, stringValue(input.defaultGrokModel));
     const qoder = stringValue(defaults.qoder, stringValue(input.defaultQoderModel));
+    const pi = stringValue(defaults.pi, stringValue(input.defaultPiModel));
     return {
       host: stringValue(input.host, "127.0.0.1"),
       port: numberValue(input.port, 3e3),
@@ -22191,7 +22193,8 @@
       defaultOpenCodeModel: opencode,
       defaultGrokModel: grok,
       defaultQoderModel: qoder,
-      defaultModels: { claude, codex, opencode, grok, qoder },
+      defaultPiModel: pi,
+      defaultModels: { claude, codex, opencode, grok, qoder, pi },
       commitCli,
       commitModel: stringValue(input.commitModel),
       commitAiSource: input.commitAiSource === "api" ? "api" : "cli",
@@ -22244,6 +22247,7 @@
       opencodeModels: models("opencodeModels"),
       grokModels: models("grokModels"),
       qoderModels: models("qoderModels"),
+      piModels: models("piModels"),
       claudeVersion: nullableString(input.claudeVersion),
       opencodeVersion: nullableString(input.opencodeVersion),
       refreshedAt: nullableString(input.refreshedAt),
@@ -22252,12 +22256,14 @@
       defaultOpenCodeModel: stringValue(input.defaultOpenCodeModel),
       defaultGrokModel: stringValue(input.defaultGrokModel),
       defaultQoderModel: stringValue(input.defaultQoderModel),
+      defaultPiModel: stringValue(input.defaultPiModel),
       defaultModels: {
         claude: stringValue(defaults.claude, stringValue(input.defaultModel)),
         codex: stringValue(defaults.codex, stringValue(input.defaultCodexModel)),
         opencode: stringValue(defaults.opencode, stringValue(input.defaultOpenCodeModel)),
         grok: stringValue(defaults.grok, stringValue(input.defaultGrokModel)),
-        qoder: stringValue(defaults.qoder, stringValue(input.defaultQoderModel))
+        qoder: stringValue(defaults.qoder, stringValue(input.defaultQoderModel)),
+        pi: stringValue(defaults.pi, stringValue(input.defaultPiModel))
       }
     };
   }
@@ -22561,7 +22567,8 @@
               codex: command.value.defaultCodexModel,
               opencode: command.value.defaultOpenCodeModel,
               grok: command.value.defaultGrokModel,
-              qoder: command.value.defaultQoderModel
+              qoder: command.value.defaultQoderModel,
+              pi: command.value.defaultPiModel
             }
           }, options.signal);
           this.runtime.configSaved(normalizeConfig(record(result).config));
@@ -23361,6 +23368,7 @@
       defaultOpenCodeModel: config.defaultOpenCodeModel,
       defaultGrokModel: config.defaultGrokModel,
       defaultQoderModel: config.defaultQoderModel,
+      defaultPiModel: config.defaultPiModel,
       commitAiSource: config.commitAiSource,
       systemAi: {
         ...primary,
@@ -23699,6 +23707,10 @@
             /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(SettingsField, { label: "Qoder \u9ED8\u8BA4\u6A21\u578B", htmlFor: "settings-model-qoder", hint: "\u53EF\u9009 lite / efficient / auto / performance / ultimate", children: [
               /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsTextInput, { id: "settings-model-qoder", list: "settings-models-qoder", value: form.defaultQoderModel, placeholder: "\u8DDF\u968F Qoder \u9ED8\u8BA4", onChange: (value) => update("defaultQoderModel", value) }),
               /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(ModelSuggestions, { id: "settings-models-qoder", models: models?.qoderModels || [] })
+            ] }),
+            /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(SettingsField, { label: "Pi \u9ED8\u8BA4\u6A21\u578B", htmlFor: "settings-model-pi", hint: "\u53EF\u7528 provider/model\uFF0C\u7559\u7A7A\u5219\u8DDF\u968F Pi \u9ED8\u8BA4", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsTextInput, { id: "settings-model-pi", list: "settings-models-pi", value: form.defaultPiModel, placeholder: "\u8DDF\u968F Pi \u9ED8\u8BA4", onChange: (value) => update("defaultPiModel", value) }),
+              /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(ModelSuggestions, { id: "settings-models-pi", models: models?.piModels || [] })
             ] })
           ] })
         }
@@ -23838,7 +23850,7 @@
             "\u76F4\u8FDE API"
           ] })
         ] }),
-        form.commitAiSource === "api" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsStatus, { tone: "success", children: "\u5148\u6309\u4E0A\u65B9\u9884\u8BBE\u987A\u5E8F\u4EE5\u6700\u4F4E\u63A8\u7406\u8C03\u7528\uFF0C\u518D\u8FFD\u52A0\u81EA\u52A8\u53D1\u73B0\u4F46\u5C1A\u672A\u5217\u51FA\u7684\u5DE5\u5177 API\uFF1B\u5168\u90E8\u4E0D\u53EF\u7528\u65F6\u4F7F\u7528\u5F53\u524D\u4F1A\u8BDD CLI\u3002" }) : /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsStatus, { tone: "success", children: "\u4F7F\u7528\u5F53\u524D\u4F1A\u8BDD\u7684 CLI \u548C\u6A21\u578B\uFF1B\u63A8\u7406\u56FA\u5B9A\u4E3A\u6700\u4F4E\u6863\u3002" })
+        form.commitAiSource === "api" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsStatus, { tone: "success", children: "\u5148\u6309\u4E0A\u65B9\u9884\u8BBE\u987A\u5E8F\u4EE5\u6700\u4F4E\u63A8\u7406\u8C03\u7528\uFF0C\u518D\u8FFD\u52A0\u81EA\u52A8\u53D1\u73B0\u4F46\u5C1A\u672A\u5217\u51FA\u7684\u5DE5\u5177 API\uFF1B\u5168\u90E8\u4E0D\u53EF\u7528\u65F6\u4F7F\u7528\u5F53\u524D\u4F1A\u8BDD\u7684 CLI\u3001\u6A21\u578B\u548C\u63A8\u7406\u914D\u7F6E\u3002" }) : /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsStatus, { tone: "success", children: "\u4F7F\u7528\u5F53\u524D\u4F1A\u8BDD\u7684 CLI\u3001\u6A21\u578B\u548C\u63A8\u7406\u914D\u7F6E\u3002" })
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsSaveBar, { label: "\u4FDD\u5B58 AI \u4E0E\u6A21\u578B\u914D\u7F6E", pending: pending === "save", disabled: !!pending && pending !== "save", onSave: () => void save(), status, tone })
     ] });
@@ -24469,7 +24481,8 @@
     codex: "Codex",
     opencode: "OpenCode",
     grok: "Grok",
-    qoder: "Qoder"
+    qoder: "Qoder",
+    pi: "Pi"
   };
   var PROVIDER_ALIASES = {
     anthropic: "claude",
@@ -24489,7 +24502,10 @@
     qoder: "qoder",
     "qoder-cli": "qoder",
     "qoder-cli-print": "qoder",
-    qodercli: "qoder"
+    qodercli: "qoder",
+    pi: "pi",
+    "pi-cli": "pi",
+    "pi-cli-json": "pi"
   };
   function normalizeProviderId(value) {
     if (typeof value !== "string") return null;
@@ -24512,6 +24528,7 @@
   }
   var CLAUDE_LOGO_PATH = "m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z";
   var CODEX_LOGO_PATH = "M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z";
+  var PI_LOGO_PATH = "M4 5h16v4h-3v11h-4V9h-2v11H7V9H4Z";
   var GROK_LOGO_PATHS = [
     "M13.2371 21.0407L24.3186 12.8506C24.8619 12.4491 25.6384 12.6057 25.8973 13.2294C27.2597 16.5185 26.651 20.4712 23.9403 23.1851C21.2297 25.8989 17.4581 26.4941 14.0108 25.1386L10.2449 26.8843C15.6463 30.5806 22.2053 29.6665 26.304 25.5601C29.5551 22.3051 30.562 17.8683 29.6205 13.8673L29.629 13.8758C28.2637 7.99809 29.9647 5.64871 33.449.844576C33.5314.730667 33.6139.616757 33.6964.5L29.1113 5.09055V5.07631L13.2343 21.0436Z",
     "M10.9503 23.0313C7.07343 19.3235 7.74185 13.5853 11.0498 10.2763C13.4959 7.82722 17.5036 6.82767 21.0021 8.2971L24.7595 6.55998C24.0826 6.07017 23.215 5.54334 22.2195 5.17313C17.7198 3.31926 12.3326 4.24192 8.67479 7.90126C5.15635 11.4239 4.0499 16.8403 5.94992 21.4622C7.36924 24.9165 5.04257 27.3598 2.69884 29.826C1.86829 30.7002 1.0349 31.5745.36364 32.5L10.9474 23.0341Z"
@@ -24528,6 +24545,9 @@
     }
     if (provider === "grok") {
       return `<svg ${common} viewBox="0 0 34 33" fill="currentColor">${GROK_LOGO_PATHS.map((path) => `<path d="${path}"/>`).join("")}</svg>`;
+    }
+    if (provider === "pi") {
+      return `<svg ${common} viewBox="0 0 24 24" fill="currentColor"><path d="${PI_LOGO_PATH}"/></svg>`;
     }
     if (provider === "claude" || provider === "codex") {
       return `<svg ${common} viewBox="0 0 24 24" fill="currentColor"><path d="${provider === "claude" ? CLAUDE_LOGO_PATH : CODEX_LOGO_PATH}"/></svg>`;
@@ -24606,6 +24626,9 @@
           children: GROK_LOGO_PATHS.map((path) => /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("path", { d: path }, path))
         }
       );
+    }
+    if (normalized === "pi") {
+      return /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("svg", { className: logoClass, viewBox: "0 0 24 24", fill: "currentColor", "aria-hidden": "true", focusable: "false", "data-provider-logo": "pi", children: /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("path", { d: PI_LOGO_PATH }) });
     }
     if (normalized === "claude" || normalized === "codex") {
       return /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(
@@ -24706,7 +24729,7 @@
   }
 
   // src/web-ui/react/new-session/repository.ts
-  var PROVIDERS = ["claude", "codex", "opencode", "grok", "qoder"];
+  var PROVIDERS = ["claude", "codex", "opencode", "grok", "qoder", "pi"];
   var KINDS = ["structured", "pty"];
   var MODES = [
     "default",
@@ -24760,7 +24783,7 @@
   }
   function supportedModes(provider) {
     if (provider === "codex") return ["full-access"];
-    if (provider === "opencode" || provider === "grok") return ["default", "full-access", "managed"];
+    if (provider === "opencode" || provider === "grok" || provider === "pi") return ["default", "full-access", "managed"];
     if (provider === "qoder") return ["default", "full-access", "auto-edit", "managed"];
     return ["default", "full-access", "auto-edit", "native", "managed"];
   }
@@ -24775,6 +24798,7 @@
     if (provider === "opencode") return "opencode-cli-run";
     if (provider === "grok") return "grok-cli-headless";
     if (provider === "qoder") return "qoder-cli-print";
+    if (provider === "pi") return "pi-cli-json";
     return configured === "sdk" || configured === "claude-sdk" ? "claude-sdk" : "claude-cli-print";
   }
   function ptyCommand(provider) {
@@ -24912,7 +24936,8 @@
     { value: "codex", label: "Codex", description: "\u7ED3\u6784\u5316 JSONL \u6216 PTY \u4F1A\u8BDD" },
     { value: "opencode", label: "OpenCode", description: "\u591A\u6A21\u578B\u7ED3\u6784\u5316\u6216 PTY \u4F1A\u8BDD" },
     { value: "grok", label: "Grok", description: "Grok Build \u7ED3\u6784\u5316\u6216 PTY \u4F1A\u8BDD" },
-    { value: "qoder", label: "Qoder", description: "Qoder CLI \u7ED3\u6784\u5316\u6216 PTY \u4F1A\u8BDD" }
+    { value: "qoder", label: "Qoder", description: "Qoder CLI \u7ED3\u6784\u5316\u6216 PTY \u4F1A\u8BDD" },
+    { value: "pi", label: "Pi", description: "Pi \u591A\u6A21\u578B\u7ED3\u6784\u5316\u6216 PTY \u4F1A\u8BDD" }
   ];
   var KINDS2 = [
     { value: "structured", label: "\u7ED3\u6784\u5316", description: "\u667A\u80FD\u5BF9\u8BDD\u6A21\u5F0F" },
@@ -24933,12 +24958,14 @@
       if (provider === "opencode") return "OpenCode JSON \u7ED3\u6784\u5316\u804A\u5929\u754C\u9762\uFF0C\u652F\u6301\u7EED\u804A\u3001\u601D\u8003\u8FC7\u7A0B\u548C\u5DE5\u5177\u8C03\u7528\u5C55\u793A\u3002";
       if (provider === "grok") return "Grok streaming-json \u7ED3\u6784\u5316\u804A\u5929\u754C\u9762\uFF0C\u652F\u6301\u591A\u8F6E\u7EED\u804A\u4E0E\u601D\u8003\u8FC7\u7A0B\u5C55\u793A\u3002";
       if (provider === "qoder") return "Qoder stream-json \u7ED3\u6784\u5316\u804A\u5929\u754C\u9762\uFF0C\u652F\u6301\u7EED\u804A\u3001\u601D\u8003\u8FC7\u7A0B\u548C\u5DE5\u5177\u8C03\u7528\u5C55\u793A\u3002";
+      if (provider === "pi") return "Pi JSON \u7ED3\u6784\u5316\u804A\u5929\u754C\u9762\uFF0C\u652F\u6301\u7EED\u804A\u3001\u601D\u8003\u8FC7\u7A0B\u548C\u5DE5\u5177\u8C03\u7528\u5C55\u793A\u3002";
       return "\u7ED3\u6784\u5316\u804A\u5929\u754C\u9762\uFF0C\u652F\u6301\u591A\u8F6E\u5BF9\u8BDD\u3001\u6D41\u5F0F\u8F93\u51FA\u548C\u5DE5\u5177\u8C03\u7528\u5C55\u793A\u3002";
     }
     if (provider === "codex") return "Codex PTY \u7EC8\u7AEF\u4F1A\u8BDD\uFF1Bterminal \u662F\u539F\u59CB\u8F93\u51FA\uFF0Cchat \u662F\u89E3\u6790\u540E\u7684\u9605\u8BFB\u89C6\u56FE\u3002";
     if (provider === "opencode") return "OpenCode TUI \u7684\u539F\u59CB PTY \u7EC8\u7AEF\u4F1A\u8BDD\u3002";
     if (provider === "grok") return "Grok Build TUI \u7684\u539F\u59CB PTY \u7EC8\u7AEF\u4F1A\u8BDD\u3002";
     if (provider === "qoder") return "Qoder CLI TUI \u7684\u539F\u59CB PTY \u7EC8\u7AEF\u4F1A\u8BDD\u3002";
+    if (provider === "pi") return "Pi TUI \u7684\u539F\u59CB PTY \u7EC8\u7AEF\u4F1A\u8BDD\u3002";
     return "\u539F\u59CB PTY \u7EC8\u7AEF\u4F1A\u8BDD\uFF0C\u652F\u6301\u6301\u7EED\u4EA4\u4E92\u3001\u7EC8\u7AEF\u89C6\u56FE\u548C\u6743\u9650\u6D41\u3002";
   }
   function modeHint(provider, mode) {
@@ -24954,6 +24981,7 @@
     if (provider === "qoder") {
       return mode === "full-access" || mode === "managed" ? "Qoder \u5C06\u4EE5 bypass_permissions \u8FD0\u884C\uFF1B\u652F\u6301 TUI \u4E0E stream-json \u7ED3\u6784\u5316\u4F1A\u8BDD\u3002" : mode === "auto-edit" ? "Qoder \u5C06\u81EA\u52A8\u6279\u51C6\u5DE5\u4F5C\u533A\u5185\u7684\u5B89\u5168\u7F16\u8F91\u3002" : "Qoder \u4F7F\u7528\u81EA\u8EAB\u6743\u9650\u786E\u8BA4\uFF1B\u7ED3\u6784\u5316\u6A21\u5F0F\u4E0B\u672A\u6279\u51C6\u7684\u64CD\u4F5C\u4F1A\u88AB\u62D2\u7EDD\u3002";
     }
+    if (provider === "pi") return "Pi \u652F\u6301\u6807\u51C6\u4E0E\u6258\u7BA1\u6A21\u5F0F\uFF1B\u6A21\u578B\u548C thinking \u4F1A\u4F20\u7ED9 Pi CLI\u3002";
     if (mode === "full-access") return "\u81EA\u52A8\u786E\u8BA4\u6743\u9650\u8BF7\u6C42\u4E0E\u9AD8\u6743\u9650\u64CD\u4F5C\uFF0C\u9002\u5408\u4F60\u786E\u8BA4\u73AF\u5883\u5B89\u5168\u540E\u7684\u8FDE\u7EED\u4FEE\u6539\u3002";
     if (mode === "auto-edit") return "\u4FDD\u7559\u4EA4\u4E92\u5F0F\u4F1A\u8BDD\uFF0C\u540C\u65F6\u66F4\u504F\u5411\u76F4\u63A5\u7F16\u8F91\u4EE3\u7801\u3002";
     if (mode === "native") return "\u8C03\u7528 Claude \u539F\u751F API \u8F93\u51FA\uFF0C\u9002\u5408\u5FEB\u901F\u95EE\u7B54\u6216\u4E00\u6B21\u6027\u751F\u6210\u3002";
@@ -24966,6 +24994,7 @@
     if (provider === "opencode") return "\u65E0\u6CD5\u542F\u52A8 OpenCode \u4F1A\u8BDD\uFF0C\u8BF7\u786E\u8BA4 opencode-ai \u5DF2\u6B63\u786E\u5B89\u88C5\u3002";
     if (provider === "grok") return "\u65E0\u6CD5\u542F\u52A8 Grok \u4F1A\u8BDD\uFF0C\u8BF7\u786E\u8BA4 Grok Build CLI \u5DF2\u6B63\u786E\u5B89\u88C5\u3002";
     if (provider === "qoder") return "\u65E0\u6CD5\u542F\u52A8 Qoder \u4F1A\u8BDD\uFF0C\u8BF7\u786E\u8BA4 @qoder-ai/qodercli \u5DF2\u6B63\u786E\u5B89\u88C5\u3002";
+    if (provider === "pi") return "\u65E0\u6CD5\u542F\u52A8 Pi \u4F1A\u8BDD\uFF0C\u8BF7\u786E\u8BA4 Pi CLI \u5DF2\u6B63\u786E\u5B89\u88C5\u3002";
     return "\u65E0\u6CD5\u542F\u52A8 Claude \u4F1A\u8BDD\uFF0C\u8BF7\u786E\u8BA4 Claude \u5DF2\u6B63\u786E\u5B89\u88C5\u3002";
   }
   function presentError(error, fallback) {
@@ -25118,7 +25147,7 @@
           if (!open) newSessionController.close();
         },
         title: "\u65B0\u5BF9\u8BDD",
-        description: "\u542F\u52A8 Claude\u3001Codex\u3001OpenCode\u3001Grok \u6216 Qoder \u4F1A\u8BDD\uFF0C\u9009\u62E9 provider\u3001\u4F1A\u8BDD\u7C7B\u578B\u3001\u6A21\u5F0F\u548C\u5DE5\u4F5C\u76EE\u5F55\u3002",
+        description: "\u542F\u52A8 Claude\u3001Codex\u3001OpenCode\u3001Grok\u3001Qoder \u6216 Pi \u4F1A\u8BDD\uFF0C\u9009\u62E9 provider\u3001\u4F1A\u8BDD\u7C7B\u578B\u3001\u6A21\u5F0F\u548C\u5DE5\u4F5C\u76EE\u5F55\u3002",
         className: "wand-new-session-dialog",
         overlayClassName: "wand-new-session-overlay",
         titleClassName: "wand-new-session-title",
@@ -42230,7 +42259,7 @@
     updateSessionSnapshot({ id: sessionId, status: status || "exited" });
   }
   function canAutoResumeSession(session) {
-    return !!(session && !isStructuredSession2(session) && ["claude", "codex", "opencode", "grok", "qoder"].indexOf(session.provider) !== -1 && session.status !== "running" && session.claudeSessionId);
+    return !!(session && !isStructuredSession2(session) && ["claude", "codex", "opencode", "grok", "qoder", "pi"].indexOf(session.provider) !== -1 && session.status !== "running" && session.claudeSessionId);
   }
   function ensureSessionReadyForInput(session, errorEl) {
     if (!session) {
@@ -46922,7 +46951,7 @@
     }).join("");
   }
   function getProviderKey(provider) {
-    return provider === "codex" || provider === "opencode" || provider === "grok" || provider === "qoder" ? provider : "claude";
+    return provider === "codex" || provider === "opencode" || provider === "grok" || provider === "qoder" || provider === "pi" ? provider : "claude";
   }
   function getProviderForSession(session) {
     return getProviderKey(session && session.provider || state.sessionTool || "claude");
@@ -46934,7 +46963,8 @@
       codex: typeof configured.codex === "string" ? configured.codex : state.config && state.config.defaultCodexModel || "",
       opencode: typeof configured.opencode === "string" ? configured.opencode : state.config && state.config.defaultOpenCodeModel || "",
       grok: typeof configured.grok === "string" ? configured.grok : state.config && state.config.defaultGrokModel || "",
-      qoder: typeof configured.qoder === "string" ? configured.qoder : state.config && state.config.defaultQoderModel || ""
+      qoder: typeof configured.qoder === "string" ? configured.qoder : state.config && state.config.defaultQoderModel || "",
+      pi: typeof configured.pi === "string" ? configured.pi : state.config && state.config.defaultPiModel || ""
     };
   }
   function getConfigDefaultModelForProvider(provider) {
@@ -46944,6 +46974,7 @@
     if (key === "opencode") return defaults.opencode || "";
     if (key === "grok") return defaults.grok || "";
     if (key === "qoder") return defaults.qoder || "";
+    if (key === "pi") return defaults.pi || "";
     return defaults.claude || "";
   }
   function getChatModelForProvider(provider) {
@@ -46978,6 +47009,7 @@
     if (provider === "opencode") return state.availableOpenCodeModels || [];
     if (provider === "grok") return state.availableGrokModels || [];
     if (provider === "qoder") return state.availableQoderModels || [];
+    if (provider === "pi") return state.availablePiModels || [];
     return state.availableModels || [];
   }
   function getChatModelSelectOptions(selected, session) {
@@ -47146,6 +47178,7 @@
     state.availableOpenCodeModels = Array.isArray(data.opencodeModels) ? data.opencodeModels : [];
     state.availableGrokModels = Array.isArray(data.grokModels) ? data.grokModels : [];
     state.availableQoderModels = Array.isArray(data.qoderModels) ? data.qoderModels : [];
+    state.availablePiModels = Array.isArray(data.piModels) ? data.piModels : [];
     syncComposerModelSelect(getSelectedSession4());
     return true;
   }
@@ -47278,7 +47311,7 @@
     var provider = getProviderKey(state.sessionTool);
     var modelPref = getChatModelForProvider(provider) || getConfigDefaultModelForProvider(provider);
     var thinkingPref = state.chatThinking || "off";
-    var structuredRunner2 = provider === "codex" ? "codex-cli-exec" : provider === "opencode" ? "opencode-cli-run" : provider === "grok" ? "grok-cli-headless" : provider === "qoder" ? "qoder-cli-print" : state.config && state.config.structuredRunner === "sdk" ? "claude-sdk" : state.structuredRunner || "claude-cli-print";
+    var structuredRunner2 = provider === "codex" ? "codex-cli-exec" : provider === "opencode" ? "opencode-cli-run" : provider === "grok" ? "grok-cli-headless" : provider === "qoder" ? "qoder-cli-print" : provider === "pi" ? "pi-cli-json" : state.config && state.config.structuredRunner === "sdk" ? "claude-sdk" : state.structuredRunner || "claude-cli-print";
     var payload = {
       cwd: cwdOverride || getEffectiveCwd(),
       mode: modeOverride || state.chatMode || state.config && state.config.defaultMode || "default",

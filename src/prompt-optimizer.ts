@@ -1,32 +1,11 @@
-import { ClaudeRunError, runClaudePrint } from "./claude-sdk-runner.js";
-import { callSystemAiTextWithFallback } from "./system-ai.js";
-import type { SystemAiConfig } from "./types.js";
+import { callConfiguredAiText, type QuickCommitAiOptions } from "./git-quick-commit.js";
 
-const CLAUDE_TIMEOUT_MS = 60_000;
 const MAX_INPUT_LENGTH = 8000;
 
 export class PromptOptimizeError extends Error {
   constructor(message: string, public readonly code: string) {
     super(message);
     this.name = "PromptOptimizeError";
-  }
-}
-
-async function callClaudeText(prompt: string, cwd?: string, language?: string): Promise<string> {
-  try {
-    return await runClaudePrint(prompt, { cwd, timeoutMs: CLAUDE_TIMEOUT_MS, language });
-  } catch (error) {
-    if (error instanceof ClaudeRunError) {
-      // 翻译成 prompt-optimizer 自己的话术 + 错误码（与原文案保持一致）。
-      if (error.code === "CLAUDE_TIMEOUT") {
-        throw new PromptOptimizeError("Claude 优化超时，请稍后重试。", "CLAUDE_TIMEOUT");
-      }
-      if (error.code === "CLAUDE_EMPTY_RESULT") {
-        throw new PromptOptimizeError("Claude 返回了空结果。", "EMPTY_RESULT");
-      }
-      throw new PromptOptimizeError(error.message, error.code);
-    }
-    throw error;
   }
 }
 
@@ -45,7 +24,12 @@ function buildOptimizePrompt(userInput: string, language: string): string {
   ].join("\n");
 }
 
-export async function optimizePrompt(rawText: string, language: string, cwd?: string, systemAi?: SystemAiConfig): Promise<string> {
+export async function optimizePrompt(
+  rawText: string,
+  language: string,
+  cwd?: string,
+  ai: QuickCommitAiOptions = {},
+): Promise<string> {
   const text = (rawText || "").trim();
   if (!text) {
     throw new PromptOptimizeError("请先输入要优化的内容。", "EMPTY_INPUT");
@@ -58,14 +42,14 @@ export async function optimizePrompt(rawText: string, language: string, cwd?: st
   }
   const prompt = buildOptimizePrompt(text, language);
   let raw: string;
-  if (systemAi?.enabled) {
-    try {
-      raw = await callSystemAiTextWithFallback(prompt, systemAi);
-    } catch {
-      raw = await callClaudeText(prompt, cwd, language);
-    }
-  } else {
-    raw = await callClaudeText(prompt, cwd, language);
+  try {
+    raw = await callConfiguredAiText(prompt, cwd ?? process.cwd(), language, ai);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const code = error && typeof error === "object" && "code" in error && typeof error.code === "string"
+      ? error.code
+      : "AI_OPTIMIZE_FAILED";
+    throw new PromptOptimizeError(message, code);
   }
   const cleaned = raw
     .replace(/^```[a-zA-Z]*\n?/, "")
@@ -73,7 +57,7 @@ export async function optimizePrompt(rawText: string, language: string, cwd?: st
     .replace(/^["'`]+|["'`]+$/g, "")
     .trim();
   if (!cleaned) {
-    throw new PromptOptimizeError("Claude 返回了空结果。", "EMPTY_RESULT");
+    throw new PromptOptimizeError("AI 返回了空结果。", "EMPTY_RESULT");
   }
   return cleaned;
 }

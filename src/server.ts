@@ -32,6 +32,7 @@ import { ModelCatalogService, type ModelRefreshOptions } from "./models.js";
 import { ProcessManager, ProcessEvent } from "./process-manager.js";
 import { SessionLogger } from "./session-logger.js";
 import { SessionRegistry } from "./session-registry.js";
+import { resolveSessionAiContext, resolveSystemAiContext } from "./session-ai-context.js";
 import { StructuredSessionManager } from "./structured-session-manager.js";
 import { recordRecentPath, registerFileRoutes } from "./server-file-routes.js";
 import { registerSettingsRoutes } from "./server-settings-routes.js";
@@ -1099,12 +1100,26 @@ export async function startServer(
     const body = (req.body ?? {}) as { text?: string; sessionId?: string };
     const text = typeof body.text === "string" ? body.text : "";
     let cwd: string | undefined;
+    let ai: ReturnType<typeof resolveSessionAiContext> | undefined;
     if (typeof body.sessionId === "string" && body.sessionId.length > 0) {
-      const snap = storage.getSession(body.sessionId);
-      if (snap?.cwd) cwd = snap.cwd;
+      const snapshot = sessionRegistry.getLatest(body.sessionId);
+      if (snapshot?.cwd) cwd = snapshot.cwd;
+      if (snapshot) ai = resolveSystemAiContext(snapshot, config);
+    }
+    if (!ai) {
+      const defaultSession = {
+        provider: config.defaultProvider,
+        structuredState: undefined,
+        runner: undefined,
+        command: config.defaultProvider === "qoder" ? "qodercli" : config.defaultProvider ?? "claude",
+        selectedModel: null,
+        thinkingEffort: config.defaultThinkingEffort,
+      };
+      const cli = resolveSessionAiContext(defaultSession, config);
+      ai = config.systemAi?.enabled ? { ...cli, systemAi: config.systemAi } : cli;
     }
     try {
-      const optimized = await optimizePrompt(text, config.language ?? "", cwd, config.systemAi);
+      const optimized = await optimizePrompt(text, config.language ?? "", cwd, ai);
       res.json({ optimized });
     } catch (error) {
       if (error instanceof PromptOptimizeError) {
@@ -1142,6 +1157,8 @@ export async function startServer(
           ? "grok"
         : body.provider === "qoder" || /^qodercli\b/.test(body.command.trim())
           ? "qoder"
+        : body.provider === "pi" || /^pi\b/.test(body.command.trim())
+          ? "pi"
           : "claude";
       // Older clients used the provider id as the PTY command. Qoder's executable
       // is named qodercli, so keep those clients working while preserving custom commands.

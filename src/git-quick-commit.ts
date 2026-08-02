@@ -15,6 +15,7 @@ import {
   thinkingEffortToGrokEffort,
   thinkingEffortToOpenCodeVariant,
   thinkingEffortToQoderEffort,
+  thinkingEffortToPiLevel,
 } from "./structured-provider-common.js";
 import {
   GitStatusFileEntry,
@@ -363,6 +364,7 @@ function normalizeProvider(provider: SessionProvider | undefined): SessionProvid
     || provider === "opencode"
     || provider === "grok"
     || provider === "qoder"
+    || provider === "pi"
     ? provider
     : "claude";
 }
@@ -464,6 +466,32 @@ function extractQoderText(stdout: string): string {
     }
   }
   return (resultText || assistantTexts.join("\n")).trim();
+}
+
+function extractPiText(stdout: string): string {
+  let text = "";
+  for (const line of stdout.split(/\r?\n/)) {
+    try {
+      const event = JSON.parse(line) as { type?: string; message?: { role?: string; content?: unknown } };
+      if (event.type !== "message_end" || event.message?.role !== "assistant" || !Array.isArray(event.message.content)) continue;
+      text = event.message.content
+        .filter((block): block is { type: "text"; text: string } => !!block && typeof block === "object" && (block as { type?: unknown }).type === "text" && typeof (block as { text?: unknown }).text === "string")
+        .map((block) => block.text)
+        .join("\n");
+    } catch { /* ignore non-protocol stdout */ }
+  }
+  return text.trim();
+}
+
+function buildPiTextArgs(prompt: string, opts: QuickCommitAiOptions, allowTools = false): string[] {
+  const args = ["--mode", "json", "--print", "--no-session"];
+  if (!allowTools) args.push("--no-tools");
+  const model = opts.model?.trim();
+  if (model && model !== "default") args.push("--model", model);
+  const level = thinkingEffortToPiLevel(opts.thinkingEffort ?? "off");
+  if (level) args.push("--thinking", level);
+  args.push(prompt);
+  return args;
 }
 
 function buildGrokTextArgs(prompt: string, opts: QuickCommitAiOptions, allowTools = false): string[] {
@@ -589,6 +617,13 @@ async function callQoderText(prompt: string, cwd: string, opts: QuickCommitAiOpt
   return text;
 }
 
+async function callPiText(prompt: string, cwd: string, opts: QuickCommitAiOptions): Promise<string> {
+  const stdout = await runCliText("pi", buildPiTextArgs(prompt, opts), "", { cwd, timeoutMs: CODEX_MESSAGE_TIMEOUT_MS, inheritEnv: opts.inheritEnv });
+  const text = extractPiText(stdout);
+  if (!text) throw new QuickCommitError("Pi 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
+  return text;
+}
+
 async function callCliAiText(prompt: string, cwd: string, language: string, opts: QuickCommitAiOptions): Promise<string> {
   const provider = normalizeProvider(opts.provider);
   if (provider === "codex") {
@@ -597,6 +632,7 @@ async function callCliAiText(prompt: string, cwd: string, language: string, opts
   if (provider === "opencode") return callOpenCodeText(prompt, cwd, opts);
   if (provider === "grok") return callGrokText(prompt, cwd, opts);
   if (provider === "qoder") return callQoderText(prompt, cwd, opts);
+  if (provider === "pi") return callPiText(prompt, cwd, opts);
   return callClaudeText(prompt, cwd, language, opts);
 }
 
@@ -1320,6 +1356,12 @@ async function runQuickCommitFallbackCli(opts: QuickCommitOptions, priorError: s
     });
   } else if (provider === "qoder") {
     await runCliText("qodercli", buildQoderTextArgs(prompt, opts, true), "", {
+      cwd: opts.cwd,
+      timeoutMs: QUICK_COMMIT_CLI_TIMEOUT_MS,
+      inheritEnv: opts.inheritEnv,
+    });
+  } else if (provider === "pi") {
+    await runCliText("pi", buildPiTextArgs(prompt, opts, true), "", {
       cwd: opts.cwd,
       timeoutMs: QUICK_COMMIT_CLI_TIMEOUT_MS,
       inheritEnv: opts.inheritEnv,

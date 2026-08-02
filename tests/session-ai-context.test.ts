@@ -10,6 +10,7 @@ const config = {
   defaultOpenCodeModel: "anthropic/claude-sonnet-4-6",
   defaultGrokModel: "grok-4.5",
   defaultQoderModel: "performance",
+  defaultPiModel: "anthropic/claude-sonnet-4-6",
   defaultThinkingEffort: "deep" as const,
   inheritEnv: true,
   commitCli: "claude" as const,
@@ -120,7 +121,7 @@ test("resolveSessionAiContext uses Codex default for legacy Codex sessions", () 
   assert.equal(context.model, "gpt-5.5-codex");
 });
 
-test("resolveCommitAiContext keeps the current session CLI and model but uses minimum effort", () => {
+test("resolveCommitAiContext keeps the complete current-session CLI context", () => {
   const context = resolveCommitAiContext(session({
     provider: "claude",
     selectedModel: "claude-opus-4-6",
@@ -134,7 +135,7 @@ test("resolveCommitAiContext keeps the current session CLI and model but uses mi
   assert.deepEqual(context, {
     provider: "claude",
     model: "claude-opus-4-6",
-    thinkingEffort: "standard",
+    thinkingEffort: "max",
     inheritEnv: true,
   });
 });
@@ -148,7 +149,7 @@ test("resolveCommitAiContext ignores legacy commit CLI preferences", () => {
 
   assert.equal(context.provider, "codex");
   assert.equal(context.model, "gpt-5.5-codex");
-  assert.equal(context.thinkingEffort, "standard");
+  assert.equal(context.thinkingEffort, "codex:ultra");
 });
 
 test("resolveCommitAiContext uses only the current session CLI in CLI mode", () => {
@@ -165,7 +166,7 @@ test("resolveCommitAiContext uses only the current session CLI in CLI mode", () 
   });
 
   assert.equal(context.systemAi, undefined);
-  assert.equal(context.thinkingEffort, "standard");
+  assert.equal(context.thinkingEffort, "deep");
 });
 
 test("resolveCommitAiContext prefers the preset route order and appends discovered APIs", () => {
@@ -218,7 +219,7 @@ test("resolveCommitAiContext prefers the preset route order and appends discover
   });
   assert.equal(context.provider, "codex");
   assert.equal(context.model, "gpt-5.6-sol");
-  assert.equal(context.thinkingEffort, "standard");
+  assert.equal(context.thinkingEffort, "deep");
 });
 
 test("resolveCommitAiContext falls straight through to the session CLI when no API is usable", () => {
@@ -236,11 +237,15 @@ test("resolveCommitAiContext falls straight through to the session CLI when no A
 
   assert.equal(context.systemAi, undefined);
   assert.equal(context.provider, "codex");
-  assert.equal(context.thinkingEffort, "standard");
+  assert.equal(context.thinkingEffort, "deep");
 });
 
-test("resolveSystemAiContext follows the system feature switch independently of Commit", () => {
-  const context = resolveSystemAiContext(session({ provider: "codex" }), {
+test("resolveSystemAiContext keeps the current session CLI context independently of Commit", () => {
+  const context = resolveSystemAiContext(session({
+    provider: "codex",
+    selectedModel: "gpt-5.6-sol",
+    thinkingEffort: "codex:xhigh",
+  }), {
     ...config,
     commitAiSource: "cli",
     systemAi: {
@@ -252,7 +257,9 @@ test("resolveSystemAiContext follows the system feature switch independently of 
     },
   });
 
-  assert.equal(context.provider, "claude");
-  assert.equal(context.model, "claude-haiku-4-5");
+  assert.equal(context.provider, "codex");
+  assert.equal(context.model, "gpt-5.6-sol");
+  assert.equal(context.thinkingEffort, "codex:xhigh");
+  assert.equal(context.inheritEnv, true);
   assert.equal(context.systemAi?.enabled, true);
 });

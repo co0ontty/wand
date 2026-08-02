@@ -11,7 +11,7 @@
 
 ### Overview
 
-Wand is a web console for remotely accessing and managing local CLI tools from a browser. It supports [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), [OpenCode](https://opencode.ai/), [Grok Build](https://grok.com/), and [Qoder CLI](https://docs.qoder.com/en/cli/quick-start), with terminal and structured conversation views, persistent resumable sessions, permission controls, file browsing, and native clients for multiple platforms.
+Wand is a web console for remotely accessing and managing local CLI tools from a browser. It supports [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), [OpenCode](https://opencode.ai/), [Grok Build](https://grok.com/), [Qoder CLI](https://docs.qoder.com/en/cli/quick-start), and [Pi](https://pi.dev/), with terminal and structured conversation views, persistent resumable sessions, permission controls, file browsing, and native clients for multiple platforms.
 
 The browser password manager extension source lives in `browser-extension/`; setup and supported baseline features are documented in [docs/browser-extension.md](docs/browser-extension.md).
 
@@ -56,7 +56,7 @@ wand config:password
 #### Core
 
 - **Dual view modes** — switch between raw terminal output and a structured conversation view for the same session
-- **Multiple providers** — create PTY or structured sessions for Claude Code, Codex, OpenCode, Grok, and Qoder CLI
+- **Multiple providers** — create PTY or structured sessions for Claude Code, Codex, OpenCode, Grok, Qoder CLI, and Pi
 - **Session management** — create, archive, and resume Claude, Codex, OpenCode, Grok, and Qoder sessions with their provider-native context; restore Claude/Codex native history; show summaries in the session list
 - **Permission control** — visual permission prompts with one-time approval, per-turn memory, and related policies
 
@@ -73,7 +73,7 @@ wand config:password
 - **Native clients** — Android, iOS, and macOS clients with encrypted connection codes and update checks
 - **HTTPS** — optional self-signed certificates for remote or mobile access
 - **Update channels** — built-in stable/beta update checks and upgrade prompts
-- **CLI updates** — check and quickly update Claude Code, Codex, and OpenCode from server settings, with optional automatic updates
+- **CLI updates** — check and quickly update Claude Code, Codex, OpenCode, Qoder CLI, and Pi from server settings, with optional automatic updates
 
 ### Configuration
 
@@ -155,7 +155,7 @@ npm install -g opencode-ai@latest
 
 ### 概览
 
-通过浏览器远程访问和管理本地 CLI 工具的 Web 控制台。支持 [Claude Code](https://docs.anthropic.com/en/docs/claude-code)、[Codex](https://github.com/openai/codex)、[OpenCode](https://opencode.ai/)、[Grok Build](https://grok.com/) 和 [Qoder CLI](https://docs.qoder.com/zh/cli/quick-start)，提供终端和结构化对话双视图、会话持久化与恢复、权限管控、文件浏览和多平台客户端。
+通过浏览器远程访问和管理本地 CLI 工具的 Web 控制台。支持 [Claude Code](https://docs.anthropic.com/en/docs/claude-code)、[Codex](https://github.com/openai/codex)、[OpenCode](https://opencode.ai/)、[Grok Build](https://grok.com/)、[Qoder CLI](https://docs.qoder.com/zh/cli/quick-start) 和 [Pi](https://pi.dev/)，提供终端和结构化对话双视图、会话持久化与恢复、权限管控、文件浏览和多平台客户端。
 
 <p align="center">
   <img src="docs/screenshots/clients-overview.png" width="100%" alt="Web 居中，iOS 和 Android 客户端在两侧的多端详情总览" />
@@ -205,7 +205,7 @@ npm install -g opencode-ai@latest
 #### 核心
 
 - **双视图模式** — 终端原始输出和结构化对话视图可随时切换，同一会话两种呈现
-- **多 Provider 支持** — Claude Code、Codex、OpenCode、Grok 和 Qoder CLI 均可创建 PTY 或结构化会话
+- **多 Provider 支持** — Claude Code、Codex、OpenCode、Grok、Qoder CLI 和 Pi 均可创建 PTY 或结构化会话
 - **会话管理** — 创建、归档并携带原生上下文恢复 Claude、Codex、OpenCode、Grok、Qoder 会话；支持恢复 Claude/Codex 原生历史记录；会话列表显示摘要
 - **权限控制** — 可视化权限提示，支持逐次确认、单次批准、本轮记忆等策略
 
@@ -222,7 +222,7 @@ npm install -g opencode-ai@latest
 - **多平台客户端** — Android / iOS / macOS 原生客户端，支持加密连接码分发、自动更新检查
 - **HTTPS** — 可选自签证书，适合远程或移动端访问
 - **版本管理** — 内置更新检查与升级提示，支持 stable/beta 双通道
-- **CLI 更新** — 在服务端设置中检查并快速更新 Claude Code、Codex、OpenCode，也可开启自动更新
+- **CLI 更新** — 在服务端设置中检查并快速更新 Claude Code、Codex、OpenCode、Qoder CLI 和 Pi，也可开启自动更新
 
 ### 截图
 

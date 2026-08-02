@@ -159,6 +159,7 @@ function normalizeConfig(value: unknown): SettingsConfig {
   const opencode = stringValue(defaults.opencode, stringValue(input.defaultOpenCodeModel));
   const grok = stringValue(defaults.grok, stringValue(input.defaultGrokModel));
   const qoder = stringValue(defaults.qoder, stringValue(input.defaultQoderModel));
+  const pi = stringValue(defaults.pi, stringValue(input.defaultPiModel));
   return {
     host: stringValue(input.host, "127.0.0.1"),
     port: numberValue(input.port, 3000),
@@ -174,7 +175,8 @@ function normalizeConfig(value: unknown): SettingsConfig {
     defaultOpenCodeModel: opencode,
     defaultGrokModel: grok,
     defaultQoderModel: qoder,
-    defaultModels: { claude, codex, opencode, grok, qoder },
+    defaultPiModel: pi,
+    defaultModels: { claude, codex, opencode, grok, qoder, pi },
     commitCli,
     commitModel: stringValue(input.commitModel),
     commitAiSource: input.commitAiSource === "api" ? "api" : "cli",
@@ -229,6 +231,7 @@ function normalizeModels(value: unknown): SettingsModelCatalog {
     opencodeModels: models("opencodeModels"),
     grokModels: models("grokModels"),
     qoderModels: models("qoderModels"),
+    piModels: models("piModels"),
     claudeVersion: nullableString(input.claudeVersion),
     opencodeVersion: nullableString(input.opencodeVersion),
     refreshedAt: nullableString(input.refreshedAt),
@@ -237,12 +240,14 @@ function normalizeModels(value: unknown): SettingsModelCatalog {
     defaultOpenCodeModel: stringValue(input.defaultOpenCodeModel),
     defaultGrokModel: stringValue(input.defaultGrokModel),
     defaultQoderModel: stringValue(input.defaultQoderModel),
+    defaultPiModel: stringValue(input.defaultPiModel),
     defaultModels: {
       claude: stringValue(defaults.claude, stringValue(input.defaultModel)),
       codex: stringValue(defaults.codex, stringValue(input.defaultCodexModel)),
       opencode: stringValue(defaults.opencode, stringValue(input.defaultOpenCodeModel)),
       grok: stringValue(defaults.grok, stringValue(input.defaultGrokModel)),
       qoder: stringValue(defaults.qoder, stringValue(input.defaultQoderModel)),
+      pi: stringValue(defaults.pi, stringValue(input.defaultPiModel)),
     },
   };
 }
@@ -538,6 +543,7 @@ export class HttpSettingsRepository implements SettingsRepository {
             opencode: command.value.defaultOpenCodeModel,
             grok: command.value.defaultGrokModel,
             qoder: command.value.defaultQoderModel,
+            pi: command.value.defaultPiModel,
           },
         }, options.signal);
         this.runtime.configSaved(normalizeConfig(record(result).config));

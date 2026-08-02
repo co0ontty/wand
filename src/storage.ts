@@ -279,7 +279,7 @@ function parseQueuedMessageSkills(raw: string | null, queueLength: number): stri
 }
 
 function inferSessionProvider(row: Pick<SessionRow, "provider" | "runner" | "command">): SessionProvider | undefined {
-  if (row.provider === "claude" || row.provider === "codex" || row.provider === "opencode" || row.provider === "grok" || row.provider === "qoder") {
+  if (row.provider === "claude" || row.provider === "codex" || row.provider === "opencode" || row.provider === "grok" || row.provider === "qoder" || row.provider === "pi") {
     return row.provider;
   }
   if (row.runner === "claude-cli" || row.runner === "claude-cli-print") {
@@ -293,10 +293,12 @@ function inferSessionProvider(row: Pick<SessionRow, "provider" | "runner" | "com
   }
   if (row.runner === "grok-cli-headless") return "grok";
   if (row.runner === "qoder-cli-print") return "qoder";
+  if (row.runner === "pi-cli-json") return "pi";
   if (/^codex\b/i.test(row.command.trim())) return "codex";
   if (/^opencode\b/i.test(row.command.trim())) return "opencode";
   if (/^grok\b/i.test(row.command.trim())) return "grok";
   if (/^qodercli\b/i.test(row.command.trim())) return "qoder";
+  if (/^pi\b/i.test(row.command.trim())) return "pi";
   return /^claude\b/i.test(row.command.trim()) ? "claude" : undefined;
 }
 

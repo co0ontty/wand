@@ -42,6 +42,7 @@ const PROVIDERS: ReadonlyArray<{
   { value: "opencode", label: "OpenCode", description: "多模型结构化或 PTY 会话" },
   { value: "grok", label: "Grok", description: "Grok Build 结构化或 PTY 会话" },
   { value: "qoder", label: "Qoder", description: "Qoder CLI 结构化或 PTY 会话" },
+  { value: "pi", label: "Pi", description: "Pi 多模型结构化或 PTY 会话" },
 ];
 
 const KINDS: ReadonlyArray<{
@@ -74,12 +75,14 @@ function kindHint(provider: NewSessionProvider, kind: NewSessionKind): string {
     if (provider === "opencode") return "OpenCode JSON 结构化聊天界面，支持续聊、思考过程和工具调用展示。";
     if (provider === "grok") return "Grok streaming-json 结构化聊天界面，支持多轮续聊与思考过程展示。";
     if (provider === "qoder") return "Qoder stream-json 结构化聊天界面，支持续聊、思考过程和工具调用展示。";
+    if (provider === "pi") return "Pi JSON 结构化聊天界面，支持续聊、思考过程和工具调用展示。";
     return "结构化聊天界面，支持多轮对话、流式输出和工具调用展示。";
   }
   if (provider === "codex") return "Codex PTY 终端会话；terminal 是原始输出，chat 是解析后的阅读视图。";
   if (provider === "opencode") return "OpenCode TUI 的原始 PTY 终端会话。";
   if (provider === "grok") return "Grok Build TUI 的原始 PTY 终端会话。";
   if (provider === "qoder") return "Qoder CLI TUI 的原始 PTY 终端会话。";
+  if (provider === "pi") return "Pi TUI 的原始 PTY 终端会话。";
   return "原始 PTY 终端会话，支持持续交互、终端视图和权限流。";
 }
 
@@ -104,6 +107,7 @@ function modeHint(provider: NewSessionProvider, mode: NewSessionMode): string {
         ? "Qoder 将自动批准工作区内的安全编辑。"
         : "Qoder 使用自身权限确认；结构化模式下未批准的操作会被拒绝。";
   }
+  if (provider === "pi") return "Pi 支持标准与托管模式；模型和 thinking 会传给 Pi CLI。";
   if (mode === "full-access") return "自动确认权限请求与高权限操作，适合你确认环境安全后的连续修改。";
   if (mode === "auto-edit") return "保留交互式会话，同时更偏向直接编辑代码。";
   if (mode === "native") return "调用 Claude 原生 API 输出，适合快速问答或一次性生成。";
@@ -117,6 +121,7 @@ function creationFallback(provider: NewSessionProvider, kind: NewSessionKind): s
   if (provider === "opencode") return "无法启动 OpenCode 会话，请确认 opencode-ai 已正确安装。";
   if (provider === "grok") return "无法启动 Grok 会话，请确认 Grok Build CLI 已正确安装。";
   if (provider === "qoder") return "无法启动 Qoder 会话，请确认 @qoder-ai/qodercli 已正确安装。";
+  if (provider === "pi") return "无法启动 Pi 会话，请确认 Pi CLI 已正确安装。";
   return "无法启动 Claude 会话，请确认 Claude 已正确安装。";
 }
 
@@ -293,7 +298,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
       open={controller.open}
       onOpenChange={(open) => { if (!open) newSessionController.close(); }}
       title="新对话"
-      description="启动 Claude、Codex、OpenCode、Grok 或 Qoder 会话，选择 provider、会话类型、模式和工作目录。"
+      description="启动 Claude、Codex、OpenCode、Grok、Qoder 或 Pi 会话，选择 provider、会话类型、模式和工作目录。"
       className="wand-new-session-dialog"
       overlayClassName="wand-new-session-overlay"
       titleClassName="wand-new-session-title"

@@ -29,6 +29,7 @@ export function resolveSessionProvider(snapshot: Pick<
     || snapshot.provider === "opencode"
     || snapshot.provider === "grok"
     || snapshot.provider === "qoder"
+    || snapshot.provider === "pi"
   ) {
     return snapshot.provider;
   }
@@ -38,6 +39,7 @@ export function resolveSessionProvider(snapshot: Pick<
     || snapshot.structuredState?.provider === "opencode"
     || snapshot.structuredState?.provider === "grok"
     || snapshot.structuredState?.provider === "qoder"
+    || snapshot.structuredState?.provider === "pi"
   ) {
     return snapshot.structuredState.provider;
   }
@@ -47,12 +49,14 @@ export function resolveSessionProvider(snapshot: Pick<
   if (runner === "opencode-cli-run") return "opencode";
   if (runner === "grok-cli-headless") return "grok";
   if (runner === "qoder-cli-print") return "qoder";
+  if (runner === "pi-cli-json") return "pi";
   if (runner === "claude-cli" || runner === "claude-cli-print" || runner === "claude-sdk") return "claude";
 
   if (/^codex\b/i.test(snapshot.command.trim())) return "codex";
   if (/^opencode\b/i.test(snapshot.command.trim())) return "opencode";
   if (/^grok\b/i.test(snapshot.command.trim())) return "grok";
   if (/^qodercli\b/i.test(snapshot.command.trim())) return "qoder";
+  if (/^pi\b/i.test(snapshot.command.trim())) return "pi";
   return "claude";
 }
 
@@ -72,7 +76,7 @@ export function resolveSessionAiContext(
     SessionSnapshot,
     "provider" | "structuredState" | "runner" | "command" | "selectedModel" | "thinkingEffort"
   >,
-  config: Pick<WandConfig, "defaultModel" | "defaultCodexModel" | "defaultOpenCodeModel" | "defaultGrokModel" | "defaultQoderModel" | "defaultThinkingEffort" | "inheritEnv">,
+  config: Pick<WandConfig, "defaultModel" | "defaultCodexModel" | "defaultOpenCodeModel" | "defaultGrokModel" | "defaultQoderModel" | "defaultPiModel" | "defaultThinkingEffort" | "inheritEnv">,
 ): SessionAiContext {
   const provider = resolveSessionProvider(snapshot);
   const sessionModel = normalizeModel(snapshot.selectedModel) ?? normalizeModel(snapshot.structuredState?.model);
@@ -89,16 +93,13 @@ export function resolveSessionAiContext(
 /** Build the source order for Wand-owned AI features such as titles. */
 export function resolveSystemAiContext(
   snapshot: Parameters<typeof resolveSessionAiContext>[0],
-  config: Parameters<typeof resolveSessionAiContext>[1] & Pick<WandConfig, "systemAi" | "commitCli" | "commitModel">,
+  config: Parameters<typeof resolveSessionAiContext>[1] & Pick<WandConfig, "systemAi">,
 ): SessionAiContext {
   const sessionContext = resolveSessionAiContext(snapshot, config);
   const directApi = config.systemAi ? usableSystemAi(config.systemAi) : undefined;
-  const cliContext: SessionAiContext = {
-    ...sessionContext,
-    provider: config.commitCli === "codex" || config.commitCli === "opencode" ? config.commitCli : "claude",
-    model: normalizeModel(config.commitModel),
-  };
-  return directApi && config.systemAi?.enabled ? { ...cliContext, systemAi: directApi } : cliContext;
+  return directApi && config.systemAi?.enabled
+    ? { ...sessionContext, systemAi: directApi }
+    : sessionContext;
 }
 
 /** Build the AI context for quick-commit actions from their global preferences. */
@@ -114,6 +115,7 @@ export function resolveCommitAiContext(
     | "defaultOpenCodeModel"
     | "defaultGrokModel"
     | "defaultQoderModel"
+    | "defaultPiModel"
     | "defaultThinkingEffort"
     | "inheritEnv"
     | "commitAiSource"
@@ -122,20 +124,13 @@ export function resolveCommitAiContext(
   discoverApis: typeof discoverCliSystemAiConfigs = discoverCliSystemAiConfigs,
 ): SessionAiContext {
   const sessionContext = resolveSessionAiContext(snapshot, config);
-  const commitContext: SessionAiContext = {
-    ...sessionContext,
-    // Commit messages and tags are short classification/summarization tasks.
-    // Keep them on the minimum explicit provider effort instead of inheriting
-    // an expensive deep/max setting from the conversation.
-    thinkingEffort: "standard",
-  };
-  if (config.commitAiSource !== "api") return commitContext;
+  if (config.commitAiSource !== "api") return sessionContext;
   const directApi = mergeSystemAiConfigs(
     config.systemAi,
-    discoverApis(commitContext.provider),
+    discoverApis(sessionContext.provider),
   );
   return {
-    ...commitContext,
+    ...sessionContext,
     ...(directApi ? { systemAi: directApi } : {}),
   };
 }

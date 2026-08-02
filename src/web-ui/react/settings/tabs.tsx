@@ -533,6 +533,7 @@ function aiFromSnapshot(snapshot: SettingsSnapshot): SettingsAiInput {
     defaultOpenCodeModel: config.defaultOpenCodeModel,
     defaultGrokModel: config.defaultGrokModel,
     defaultQoderModel: config.defaultQoderModel,
+    defaultPiModel: config.defaultPiModel,
     commitAiSource: config.commitAiSource,
     systemAi: {
       ...primary,
@@ -927,6 +928,10 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toas
             <SettingsTextInput id="settings-model-qoder" list="settings-models-qoder" value={form.defaultQoderModel} placeholder="跟随 Qoder 默认" onChange={(value) => update("defaultQoderModel", value)} />
             <ModelSuggestions id="settings-models-qoder" models={models?.qoderModels || []} />
           </SettingsField>
+          <SettingsField label="Pi 默认模型" htmlFor="settings-model-pi" hint="可用 provider/model，留空则跟随 Pi 默认">
+            <SettingsTextInput id="settings-model-pi" list="settings-models-pi" value={form.defaultPiModel} placeholder="跟随 Pi 默认" onChange={(value) => update("defaultPiModel", value)} />
+            <ModelSuggestions id="settings-models-pi" models={models?.piModels || []} />
+          </SettingsField>
         </SettingsGrid>
       </SettingsSection>
 
@@ -1057,11 +1062,11 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toas
         </fieldset>
         {form.commitAiSource === "api" ? (
           <SettingsStatus tone="success">
-            先按上方预设顺序以最低推理调用，再追加自动发现但尚未列出的工具 API；全部不可用时使用当前会话 CLI。
+            先按上方预设顺序以最低推理调用，再追加自动发现但尚未列出的工具 API；全部不可用时使用当前会话的 CLI、模型和推理配置。
           </SettingsStatus>
         ) : (
           <SettingsStatus tone="success">
-            使用当前会话的 CLI 和模型；推理固定为最低档。
+            使用当前会话的 CLI、模型和推理配置。
           </SettingsStatus>
         )}
       </SettingsSection>

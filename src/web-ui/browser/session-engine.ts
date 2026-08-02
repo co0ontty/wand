@@ -815,7 +815,7 @@ import {
       }
 
       export function getProviderKey(provider) {
-        return provider === "codex" || provider === "opencode" || provider === "grok" || provider === "qoder" ? provider : "claude";
+        return provider === "codex" || provider === "opencode" || provider === "grok" || provider === "qoder" || provider === "pi" ? provider : "claude";
       }
 
       export function getProviderForSession(session) {
@@ -832,6 +832,7 @@ import {
           opencode: typeof configured.opencode === "string" ? configured.opencode : ((state.config && state.config.defaultOpenCodeModel) || ""),
           grok: typeof configured.grok === "string" ? configured.grok : ((state.config && state.config.defaultGrokModel) || ""),
           qoder: typeof configured.qoder === "string" ? configured.qoder : ((state.config && state.config.defaultQoderModel) || "")
+          , pi: typeof configured.pi === "string" ? configured.pi : ((state.config && state.config.defaultPiModel) || "")
         };
       }
 
@@ -842,6 +843,7 @@ import {
         if (key === "opencode") return defaults.opencode || "";
         if (key === "grok") return defaults.grok || "";
         if (key === "qoder") return defaults.qoder || "";
+        if (key === "pi") return defaults.pi || "";
         return defaults.claude || "";
       }
 
@@ -879,6 +881,7 @@ import {
         if (provider === "opencode") return state.availableOpenCodeModels || [];
         if (provider === "grok") return state.availableGrokModels || [];
         if (provider === "qoder") return state.availableQoderModels || [];
+        if (provider === "pi") return state.availablePiModels || [];
         return state.availableModels || [];
       }
 
@@ -1084,6 +1087,7 @@ import {
         state.availableOpenCodeModels = Array.isArray(data.opencodeModels) ? data.opencodeModels : [];
         state.availableGrokModels = Array.isArray(data.grokModels) ? data.grokModels : [];
         state.availableQoderModels = Array.isArray(data.qoderModels) ? data.qoderModels : [];
+        state.availablePiModels = Array.isArray(data.piModels) ? data.piModels : [];
         syncComposerModelSelect(getSelectedSession());
         return true;
       }
@@ -1236,6 +1240,8 @@ import {
               ? "grok-cli-headless"
             : provider === "qoder"
               ? "qoder-cli-print"
+            : provider === "pi"
+              ? "pi-cli-json"
               : ((state.config && state.config.structuredRunner === "sdk") ? "claude-sdk" : (state.structuredRunner || "claude-cli-print"));
         var payload = {
           cwd: cwdOverride || getEffectiveCwd(),

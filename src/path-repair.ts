@@ -55,7 +55,7 @@ export interface PathRepairResult {
 }
 
 /** 关键的 CLI 工具，会被诊断输出。 */
-const PROBE_COMMANDS = ["claude", "codex", "opencode", "grok", "qodercli"] as const;
+const PROBE_COMMANDS = ["claude", "codex", "opencode", "grok", "qodercli", "pi"] as const;
 
 const DEEP_PROBE_TIMEOUT_MS = 4000;
 

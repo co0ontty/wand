@@ -23,7 +23,7 @@ function resumeArgumentPattern(provider: SessionProvider): RegExp {
   if (provider === "codex") {
     return new RegExp(`(?:^|\\s)resume\\s+${SAFE_PROVIDER_SESSION_ID_SOURCE}(?=\\s|$)`, "i");
   }
-  if (provider === "opencode") {
+  if (provider === "opencode" || provider === "pi") {
     return new RegExp(`(?:^|\\s)(?:--session|-s)\\s+${SAFE_PROVIDER_SESSION_ID_SOURCE}(?=\\s|$)`, "i");
   }
   return new RegExp(`(?:^|\\s)(?:--resume|-r)\\s+${SAFE_PROVIDER_SESSION_ID_SOURCE}(?=\\s|$)`, "i");
@@ -44,13 +44,13 @@ export function getProviderResumeCommandSessionId(
 export function getProviderCommandSessionId(provider: SessionProvider, command: string): string | null {
   const resumed = getProviderResumeCommandSessionId(provider, command);
   if (resumed) return resumed;
-  if (provider === "codex" || provider === "opencode") return null;
+  if (provider === "codex" || provider === "opencode" || provider === "pi") return null;
   return assignedSessionIdPattern().exec(command)?.[1] ?? null;
 }
 
 function stripProviderResumeArgument(provider: SessionProvider, command: string): string {
   const withoutResume = command.replace(resumeArgumentPattern(provider), " ");
-  const withoutAssignedId = provider === "codex" || provider === "opencode"
+  const withoutAssignedId = provider === "codex" || provider === "opencode" || provider === "pi"
     ? withoutResume
     : withoutResume.replace(assignedSessionIdPattern(), " ");
   return withoutAssignedId.replace(/\s+/g, " ").trim();
@@ -68,5 +68,6 @@ export function buildProviderResumeCommand(
   const base = stripProviderResumeArgument(provider, command) || (provider === "qoder" ? "qodercli" : provider);
   if (provider === "codex") return `${base} resume ${providerSessionId}`;
   if (provider === "opencode") return `${base} --session ${providerSessionId}`;
+  if (provider === "pi") return `${base} --session ${providerSessionId}`;
   return `${base} --resume ${providerSessionId}`;
 }

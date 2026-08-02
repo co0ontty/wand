@@ -19,7 +19,7 @@ import { ensureNodePtyHelperExecutable } from "./ensure-node-pty-helper.js";
 import { buildLanguageDirective, buildManagedAutonomyDirective } from "./language-prompt.js";
 import { prepareSessionWorktree } from "./git-worktree.js";
 import { getProviderCommandSessionId, getProviderResumeCommandSessionId } from "./resume-policy.js";
-import { normalizeThinkingEffort, thinkingEffortToClaudeCliEffort, thinkingEffortToClaudeSlashEffort, thinkingEffortToCodexReasoningEffort, thinkingEffortToOpenCodeVariant } from "./structured-provider-common.js";
+import { normalizeThinkingEffort, thinkingEffortToClaudeCliEffort, thinkingEffortToClaudeSlashEffort, thinkingEffortToCodexReasoningEffort, thinkingEffortToOpenCodeVariant, thinkingEffortToPiLevel } from "./structured-provider-common.js";
 import { SessionTopicCoordinator } from "./session-topic.js";
 import { getErrorMessage } from "./error-utils.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
@@ -43,6 +43,7 @@ function resolveProviderFromCommand(command: string): SessionProvider {
   if (/^codex\b/.test(command.trim())) return "codex";
   if (/^opencode\b/.test(command.trim())) return "opencode";
   if (/^grok\b/.test(command.trim())) return "grok";
+  if (/^pi\b/.test(command.trim())) return "pi";
   return /^qodercli\b/.test(command.trim()) ? "qoder" : "claude";
 }
 
@@ -2482,6 +2483,17 @@ export class ProcessManager extends EventEmitter {
       } else if (mode === "auto-edit" && !/--permission-mode(?:\s|=)/.test(result)) {
         result += " --permission-mode accept_edits";
       }
+      return result;
+    }
+
+    if (provider === "pi") {
+      let result = command;
+      const trimmedModel = model?.trim();
+      if (trimmedModel && trimmedModel !== "default" && !/--model(?:\s|=)/.test(result)) {
+        result += ` --model '${trimmedModel.replace(/'/g, "'\\''")}'`;
+      }
+      const level = thinkingEffortToPiLevel(thinkingEffort ?? null);
+      if (level && !/--thinking(?:\s|=)/.test(result)) result += ` --thinking '${level}'`;
       return result;
     }
 

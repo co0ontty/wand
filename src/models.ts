@@ -60,6 +60,9 @@ const QODER_FALLBACK_MODELS: ClaudeModelInfo[] = [
   { id: "performance", label: "Performance" },
   { id: "ultimate", label: "Ultimate" },
 ];
+const PI_FALLBACK_MODELS: ClaudeModelInfo[] = [
+  { id: "default", label: "跟随 Pi 默认", alias: true },
+];
 
 export interface ModelCacheStorage {
   getConfigValue(key: string): string | null;
@@ -109,6 +112,7 @@ export interface ModelCache {
   opencodeModels: ClaudeModelInfo[];
   grokModels: ClaudeModelInfo[];
   qoderModels: ClaudeModelInfo[];
+  piModels: ClaudeModelInfo[];
   claudeVersion: string | null;
   opencodeVersion: string | null;
   refreshedAt: string;
@@ -189,6 +193,7 @@ function cloneCache(cache: ModelCache): ModelCache {
     opencodeModels: cloneModels(cache.opencodeModels),
     grokModels: cloneModels(cache.grokModels),
     qoderModels: cloneModels(cache.qoderModels),
+    piModels: cloneModels(cache.piModels),
     claudeVersion: cache.claudeVersion,
     opencodeVersion: cache.opencodeVersion,
     refreshedAt: cache.refreshedAt,
@@ -372,6 +377,7 @@ function createInitialCache(options: ModelRefreshOptions): ModelCache {
     opencodeModels: cloneModels(OPENCODE_FALLBACK_MODELS),
     grokModels: cloneModels(GROK_FALLBACK_MODELS),
     qoderModels: cloneModels(QODER_FALLBACK_MODELS),
+    piModels: cloneModels(PI_FALLBACK_MODELS),
     claudeVersion: null,
     opencodeVersion: null,
     refreshedAt: now.toISOString(),
@@ -689,6 +695,7 @@ function catalogRevision(cache: ModelCache): string {
     opencodeModels: cache.opencodeModels,
     grokModels: cache.grokModels,
     qoderModels: cache.qoderModels,
+    piModels: cache.piModels,
     claudeVersion: cache.claudeVersion,
     opencodeVersion: cache.opencodeVersion,
   });
@@ -766,9 +773,10 @@ function parsePersistedModelCatalog(value: unknown): PersistedModelCatalog | nul
   const opencodeModels = parsePersistedModelList(catalog.opencodeModels);
   const grokModels = parsePersistedModelList(catalog.grokModels);
   const qoderModels = parsePersistedModelList(catalog.qoderModels);
+  const piModels = parsePersistedModelList(catalog.piModels);
   const refreshedAt = safePersistedString(catalog.refreshedAt, 64);
   if (
-    !models || !codexModels || !opencodeModels || !grokModels || !qoderModels
+    !models || !codexModels || !opencodeModels || !grokModels || !qoderModels || !piModels
     || !refreshedAt || Number.isNaN(Date.parse(refreshedAt))
   ) {
     return null;
@@ -784,6 +792,7 @@ function parsePersistedModelCatalog(value: unknown): PersistedModelCatalog | nul
     opencodeModels,
     grokModels,
     qoderModels,
+    piModels,
     claudeVersion,
     opencodeVersion,
     refreshedAt,
@@ -866,6 +875,7 @@ async function discoverModelCache(
     opencodeModels: opencodeProbe.models.ok ? opencodeProbe.models.value : cloneModels(previous.opencodeModels),
     grokModels: grokProbe.ok ? grokProbe.value : cloneModels(previous.grokModels),
     qoderModels: qoderProbe.ok ? qoderProbe.value : cloneModels(previous.qoderModels),
+    piModels: cloneModels(previous.piModels),
     claudeVersion,
     opencodeVersion: opencodeProbe.version.ok ? opencodeProbe.version.value : previous.opencodeVersion,
     refreshedAt: now.toISOString(),

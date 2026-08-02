@@ -4,6 +4,7 @@ import {
   CLAUDE_LOGO_PATH,
   CODEX_LOGO_PATH,
   GROK_LOGO_PATHS,
+  PI_LOGO_PATH,
   normalizeProviderId,
 } from "../provider-identity";
 
@@ -77,6 +78,9 @@ export function ProviderLogo({ provider, className }: ProviderLogoProps) {
         {GROK_LOGO_PATHS.map((path) => <path key={path} d={path}/>)}
       </svg>
     );
+  }
+  if (normalized === "pi") {
+    return <svg className={logoClass} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false" data-provider-logo="pi"><path d={PI_LOGO_PATH}/></svg>;
   }
 
   if (normalized === "claude" || normalized === "codex") {

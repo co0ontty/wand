@@ -17,7 +17,10 @@ test("Qoder structured runner consumes stream-json and resumes the session", asy
   const originalArgsFile = process.env.WAND_TEST_QODER_ARGS;
   mkdirSync(binDir);
   writeFileSync(qoder, `#!/bin/sh
-printf '%s\n' "$@" > "$WAND_TEST_QODER_ARGS"
+case "$2" in
+  请综合总结*) ;;
+  *) printf '%s\n' "$@" > "$WAND_TEST_QODER_ARGS" ;;
+esac
 printf '%s\n' \\
 '{"type":"system","subtype":"init","session_id":"qoder_test","model":"performance"}' \\
 '{"type":"assistant","uuid":"assistant-1","session_id":"qoder_test","parent_tool_use_id":null,"message":{"role":"assistant","content":[{"type":"thinking","thinking":"checking"},{"type":"tool_use","id":"tool-1","name":"Bash","input":{"command":"pwd"}},{"type":"text","text":"done"}]}}' \\

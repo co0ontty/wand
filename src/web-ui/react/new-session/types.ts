@@ -1,4 +1,4 @@
-export type NewSessionProvider = "claude" | "codex" | "opencode" | "grok" | "qoder";
+export type NewSessionProvider = "claude" | "codex" | "opencode" | "grok" | "qoder" | "pi";
 
 export type NewSessionKind = "structured" | "pty";
 

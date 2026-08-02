@@ -10,8 +10,8 @@ export type SettingsTab =
 export type SettingsAccess = "admin" | "read-only";
 export type SettingsProvider = "claude" | "codex" | "opencode";
 /** Providers that have per-session default model preferences. */
-export type SettingsModelProvider = SettingsProvider | "grok" | "qoder";
-export type SettingsCliProvider = SettingsProvider | "qoder";
+export type SettingsModelProvider = SettingsProvider | "grok" | "qoder" | "pi";
+export type SettingsCliProvider = SettingsProvider | "qoder" | "pi";
 export type SettingsUpdateChannel = "stable" | "beta";
 export type SettingsAutoUpdateTarget = "web" | "apk" | "dmg" | "cli";
 export type SettingsDistributionKind = "apk" | "dmg";
@@ -97,7 +97,7 @@ export interface SettingsSystemAi {
   hasApiKey: boolean;
   model: string;
   authHeader: "bearer" | "x-api-key";
-  source: Exclude<SettingsModelProvider, "qoder"> | "custom";
+  source: Exclude<SettingsModelProvider, "qoder" | "pi"> | "custom";
   fallbacks?: SettingsSystemAi[];
 }
 
@@ -124,6 +124,7 @@ export interface SettingsConfig {
   defaultOpenCodeModel: string;
   defaultGrokModel: string;
   defaultQoderModel: string;
+  defaultPiModel: string;
   defaultModels: Record<SettingsModelProvider, string>;
   commitCli: SettingsProvider;
   commitModel: string;
@@ -159,6 +160,7 @@ export interface SettingsModelCatalog {
   opencodeModels: SettingsModelOption[];
   grokModels: SettingsModelOption[];
   qoderModels: SettingsModelOption[];
+  piModels: SettingsModelOption[];
   claudeVersion: string | null;
   opencodeVersion: string | null;
   refreshedAt: string | null;
@@ -167,6 +169,7 @@ export interface SettingsModelCatalog {
   defaultOpenCodeModel: string;
   defaultGrokModel: string;
   defaultQoderModel: string;
+  defaultPiModel: string;
   defaultModels: Record<SettingsModelProvider, string>;
 }
 
@@ -287,6 +290,7 @@ export interface SettingsAiInput {
   defaultOpenCodeModel: string;
   defaultGrokModel: string;
   defaultQoderModel: string;
+  defaultPiModel: string;
   commitAiSource: "cli" | "api";
   systemAi: SettingsSystemAi;
 }

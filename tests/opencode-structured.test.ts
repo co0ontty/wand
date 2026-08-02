@@ -17,7 +17,9 @@ test("OpenCode structured runner maps JSON events and resumes the CLI session", 
   const originalArgsFile = process.env.WAND_TEST_OPENCODE_ARGS;
   mkdirSync(binDir);
   writeFileSync(opencode, `#!/bin/sh
-printf '%s\n' "$@" > "$WAND_TEST_OPENCODE_ARGS"
+case " $* " in
+  *" --thinking "*) printf '%s\n' "$@" > "$WAND_TEST_OPENCODE_ARGS" ;;
+esac
 cat >/dev/null
 printf '%s\n' \
 '{"type":"step_start","sessionID":"ses_test","part":{"type":"step-start","id":"step_1"}}' \

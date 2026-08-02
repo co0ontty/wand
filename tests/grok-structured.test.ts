@@ -17,7 +17,10 @@ test("Grok structured runner consumes streaming-json and resumes the session", a
   const originalArgsFile = process.env.WAND_TEST_GROK_ARGS;
   mkdirSync(binDir);
   writeFileSync(grok, `#!/bin/sh
-printf '%s\n' "$@" > "$WAND_TEST_GROK_ARGS"
+case "$3" in
+  请综合总结*) ;;
+  *) printf '%s\n' "$@" > "$WAND_TEST_GROK_ARGS" ;;
+esac
 printf '%s\n' \\
 '{"type":"thought","data":"checking"}' \\
 '{"type":"text","data":"WAND"}' \\

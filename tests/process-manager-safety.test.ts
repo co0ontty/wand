@@ -183,6 +183,19 @@ test("Qoder PTY launches the TUI with model and managed permission flags", (t) =
   assert.match(shellArgs.at(-1) ?? "", /^qodercli --model 'performance' --permission-mode bypass_permissions --session-id [0-9a-f-]{36}$/);
 });
 
+test("Pi PTY launches the TUI with model and thinking flags", (t) => {
+  const { manager, root, spawnCalls } = createHarness(t);
+  const session = manager.start("pi", root, "managed", undefined, {
+    provider: "pi",
+    model: "openai/gpt-5.4",
+    thinkingEffort: "deep",
+  });
+  assert.equal(session.provider, "pi");
+  assert.equal(session.runner, "pty");
+  const shellArgs = spawnCalls[0][1] as string[];
+  assert.equal(shellArgs.at(-1), "pi --model 'openai/gpt-5.4' --thinking 'high'");
+});
+
 test("command allowlist compares safe shell tokens instead of raw prefixes", () => {
   assert.equal(isCommandAllowedByPrefixes("claude --resume abc", ["claude"]), true);
   assert.equal(isCommandAllowedByPrefixes("MODEL=sonnet claude --help", ["claude"]), false);

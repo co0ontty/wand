@@ -5,7 +5,8 @@ export function isStructuredRunnerForProvider(provider: SessionProvider, runner:
   if (provider === "codex") return runner === "codex-cli-exec";
   if (provider === "opencode") return runner === "opencode-cli-run";
   if (provider === "grok") return runner === "grok-cli-headless";
-  return runner === "qoder-cli-print";
+  if (provider === "qoder") return runner === "qoder-cli-print";
+  return runner === "pi-cli-json";
 }
 
 export function defaultStructuredRunner(
@@ -16,6 +17,7 @@ export function defaultStructuredRunner(
   if (provider === "opencode") return "opencode-cli-run";
   if (provider === "grok") return "grok-cli-headless";
   if (provider === "qoder") return "qoder-cli-print";
+  if (provider === "pi") return "pi-cli-json";
   return configuredClaudeRunner === "sdk" ? "claude-sdk" : "claude-cli-print";
 }
 
@@ -95,5 +97,13 @@ export function thinkingEffortToQoderEffort(effort: SessionSnapshot["thinkingEff
   if (effort === "standard") return "low";
   if (effort === "deep") return "high";
   if (effort === "max") return "max";
+  return effort.startsWith("codex:") ? effort.slice("codex:".length) || null : null;
+}
+
+export function thinkingEffortToPiLevel(effort: SessionSnapshot["thinkingEffort"]): string | null {
+  if (!effort || effort === "off") return "off";
+  if (effort === "standard") return "low";
+  if (effort === "deep") return "high";
+  if (effort === "max") return "xhigh";
   return effort.startsWith("codex:") ? effort.slice("codex:".length) || null : null;
 }

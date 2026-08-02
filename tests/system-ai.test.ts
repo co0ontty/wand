@@ -7,6 +7,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { generateCommitMessageOnly, QuickCommitError, runQuickCommitWithFallback } from "../src/git-quick-commit.js";
+import { optimizePrompt } from "../src/prompt-optimizer.js";
 import {
   callSystemAiText,
   callSystemAiTextWithFallback,
@@ -573,6 +574,57 @@ test("direct API quick commit falls back to the selected CLI", async () => {
     const cliArgs = readFileSync(marker, "utf8");
     assert.match(cliArgs, /--model\ncurrent-session-model\n/);
     assert.match(cliArgs, /-c\nmodel_reasoning_effort=low\n/);
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+    if (previousMarker === undefined) delete process.env.WAND_FALLBACK_MARKER;
+    else process.env.WAND_FALLBACK_MARKER = previousMarker;
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("prompt optimization falls back to the current session CLI and model", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-prompt-cli-fallback-"));
+  const bin = path.join(root, "bin");
+  const marker = path.join(root, "codex-args");
+  mkdirSync(bin);
+  writeFileSync(path.join(bin, "codex"), [
+    "#!/bin/sh",
+    'printf "%s\\n" "$@" > "$WAND_FALLBACK_MARKER"',
+    "printf '%s\\n' '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"Use the current session context.\"}}'",
+  ].join("\n"), { mode: 0o755 });
+
+  const server = createServer((_req, res) => {
+    res.statusCode = 503;
+    res.end("unavailable");
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const previousPath = process.env.PATH;
+  const previousMarker = process.env.WAND_FALLBACK_MARKER;
+  process.env.PATH = `${bin}${path.delimiter}${previousPath ?? ""}`;
+  process.env.WAND_FALLBACK_MARKER = marker;
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const optimized = await optimizePrompt("rough prompt", "English", root, {
+      provider: "codex",
+      model: "current-session-model",
+      thinkingEffort: "codex:xhigh",
+      inheritEnv: true,
+      systemAi: {
+        enabled: true,
+        protocol: "openai",
+        baseUrl: `http://127.0.0.1:${address.port}/v1`,
+        apiKey: "direct-secret",
+        model: "api-model",
+      },
+    });
+
+    assert.equal(optimized, "Use the current session context.");
+    const args = readFileSync(marker, "utf8");
+    assert.match(args, /--model\ncurrent-session-model\n/);
+    assert.match(args, /-c\nmodel_reasoning_effort=xhigh\n/);
   } finally {
     if (previousPath === undefined) delete process.env.PATH;
     else process.env.PATH = previousPath;

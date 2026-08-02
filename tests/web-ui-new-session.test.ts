@@ -113,6 +113,22 @@ test("create-request builder preserves structured and PTY legacy contracts", () 
   }, config, context).runner, "qoder-cli-print");
 
   assert.equal(buildCreateRequest({
+    provider: "pi",
+    kind: "structured",
+    cwd: "/repo",
+    mode: "managed",
+    worktreeEnabled: false,
+  }, config, context).runner, "pi-cli-json");
+
+  assert.equal(buildCreateRequest({
+    provider: "pi",
+    kind: "pty",
+    cwd: "/repo",
+    mode: "default",
+    worktreeEnabled: false,
+  }, config, context).command, "pi");
+
+  assert.equal(buildCreateRequest({
     provider: "qoder",
     kind: "pty",
     cwd: "/repo",

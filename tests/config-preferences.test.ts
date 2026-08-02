@@ -132,6 +132,16 @@ test("Qoder provider and model preferences round-trip through storage", () => {
   assert.equal(restored.defaultQoderModel, "performance");
 });
 
+test("Pi provider and model preferences round-trip through storage", () => {
+  const storage = new FakePreferenceStorage() as unknown as WandStorage;
+  const config = defaultConfig();
+  writePreferenceToStorage(config, storage, "defaultProvider", "pi");
+  writePreferenceToStorage(config, storage, "defaultPiModel", " openai/gpt-5.4 ");
+  const restored = applyStoragePreferences(defaultConfig(), storage);
+  assert.equal(restored.defaultProvider, "pi");
+  assert.equal(restored.defaultPiModel, "openai/gpt-5.4");
+});
+
 test("new-session preferences reject unsupported values", () => {
   const storage = new FakePreferenceStorage() as unknown as WandStorage;
 

@@ -38,6 +38,7 @@ import {
 import { OpenCodeRunner } from "./structured-opencode-adapter.js";
 import { GrokRunner } from "./structured-grok-adapter.js";
 import { QoderRunner } from "./structured-qoder-adapter.js";
+import { PiRunner } from "./structured-pi-adapter.js";
 import type { StructuredRunnerAdapter, StructuredRunnerExecution, StructuredRunnerTurnState } from "./structured-runner.js";
 import {
   defaultStructuredRunner,
@@ -63,6 +64,7 @@ export interface StructuredSessionManagerRunners {
   opencode?: StructuredRunnerAdapter;
   grok?: StructuredRunnerAdapter;
   qoder?: StructuredRunnerAdapter;
+  pi?: StructuredRunnerAdapter;
 }
 
 interface CreateStructuredSessionOptions {
@@ -296,6 +298,7 @@ export class StructuredSessionManager {
   private readonly openCodeRunner: StructuredRunnerAdapter;
   private readonly grokRunner: StructuredRunnerAdapter;
   private readonly qoderRunner: StructuredRunnerAdapter;
+  private readonly piRunner: StructuredRunnerAdapter;
   private disposed = false;
 
   constructor(
@@ -310,11 +313,12 @@ export class StructuredSessionManager {
     this.openCodeRunner = runners.opencode ?? new OpenCodeRunner();
     this.grokRunner = runners.grok ?? new GrokRunner();
     this.qoderRunner = runners.qoder ?? new QoderRunner();
+    this.piRunner = runners.pi ?? new PiRunner();
     for (const snapshot of this.storage.loadSessions()) {
       if ((snapshot.sessionKind ?? "pty") !== "structured") continue;
       const restoredStatus = snapshot.status === "running" ? "idle" : snapshot.status;
       const storedProvider = snapshot.provider ?? snapshot.structuredState?.provider;
-      const provider: SessionProvider = storedProvider === "codex" || storedProvider === "opencode" || storedProvider === "grok" || storedProvider === "qoder"
+      const provider: SessionProvider = storedProvider === "codex" || storedProvider === "opencode" || storedProvider === "grok" || storedProvider === "qoder" || storedProvider === "pi"
         ? storedProvider
         : "claude";
       const storedRunner = snapshot.runner ?? snapshot.structuredState?.runner;
@@ -625,7 +629,7 @@ export class StructuredSessionManager {
     const id = randomUUID();
     const startedAt = new Date().toISOString();
     const requestedProvider: unknown = options.provider ?? "claude";
-    if (requestedProvider !== "claude" && requestedProvider !== "codex" && requestedProvider !== "opencode" && requestedProvider !== "grok" && requestedProvider !== "qoder") {
+    if (requestedProvider !== "claude" && requestedProvider !== "codex" && requestedProvider !== "opencode" && requestedProvider !== "grok" && requestedProvider !== "qoder" && requestedProvider !== "pi") {
       throw new Error(`不支持的结构化 provider: ${String(requestedProvider)}`);
     }
     const provider: SessionProvider = requestedProvider;
@@ -652,6 +656,8 @@ export class StructuredSessionManager {
             ? "grok -p --output-format streaming-json"
           : provider === "qoder"
             ? "qodercli -p --output-format stream-json"
+          : provider === "pi"
+            ? "pi --mode json --print"
           : runner === "claude-sdk"
             ? "claude-agent-sdk (stream-json)"
             : "claude -p --output-format stream-json",
@@ -872,6 +878,14 @@ export class StructuredSessionManager {
           commandLabel: "qodercli -p",
           logKind: "qoder-print",
           installHint: "请安装 @qoder-ai/qodercli，或重跑 `wand service:install` 刷新服务的 PATH",
+        });
+      } else if (provider === "pi") {
+        await this.runClaudeStreaming(id, updated, prompt, requestId, {
+          runner: this.piRunner,
+          provider: "pi",
+          commandLabel: "pi --mode json --print",
+          logKind: "pi-json",
+          installHint: "请安装 @mariozechner/pi-coding-agent（或兼容的 Pi CLI），或重跑 `wand service:install` 刷新服务的 PATH",
         });
       } else if (runner === "claude-sdk") {
         await this.runClaudeSdkStreaming(id, updated, prompt, requestId, skills);
@@ -1969,7 +1983,7 @@ export class StructuredSessionManager {
 
     if (result.spawnError) {
       const hint = result.spawnError.code === "ENOENT"
-        ? `（PATH 中找不到 ${provider === "qoder" ? "qodercli" : "claude"} 可执行文件；${options.installHint ?? "请确认 claude 已安装，或重跑 `wand service:install` 刷新服务的 PATH"}）`
+        ? `（PATH 中找不到 ${provider === "qoder" ? "qodercli" : provider === "pi" ? "pi" : "claude"} 可执行文件；${options.installHint ?? "请确认 claude 已安装，或重跑 `wand service:install` 刷新服务的 PATH"}）`
         : "";
       throw new Error(`${commandLabel} 启动失败：${result.spawnError.message}${hint}`);
     }
