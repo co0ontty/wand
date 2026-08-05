@@ -70,7 +70,7 @@ export function getShellSidebarEntryActions(
 
 function Icon({ name, size = 14, className }: {
   name: "back" | "chevron" | "cleanup" | "close" | "file" | "gear" | "history"
-    | "logout" | "merge" | "more" | "pin" | "resume" | "server" | "spark" | "trash";
+    | "inbox" | "logout" | "merge" | "more" | "pin" | "resume" | "server" | "spark" | "trash";
   size?: number;
   className?: string;
 }) {
@@ -102,6 +102,8 @@ function Icon({ name, size = 14, className }: {
       return <svg {...common}><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9L7 7M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>;
     case "history":
       return <svg {...common}><path d="M3 12a9 9 0 109-9 9.7 9.7 0 00-6.7 2.7L3 8M3 3v5h5M12 7v5l3 2"/></svg>;
+    case "inbox":
+      return <svg {...common}><path d="M4 4h16l2 10v6H2v-6L4 4zM2 14h6l2 3h4l2-3h6"/></svg>;
     case "logout":
       return <svg {...common}><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>;
     case "merge":
@@ -820,6 +822,15 @@ export function ShellSidebar() {
             <span>+</span> 新会话
           </button>
           <div className="sidebar-footer-actions">
+            <button
+              id="missions-button"
+              className="btn btn-ghost btn-sm"
+              type="button"
+              title="Agent Inbox"
+              onClick={() => void dispatch({ type: "missions.open" })}
+            >
+              <Icon name="inbox" size={16}/><span>任务</span>
+            </button>
             <button
               id="file-panel-toggle-btn"
               className={classNames("btn btn-ghost btn-sm", snapshot.layout.filePanelOpen && "active")}

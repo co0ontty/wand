@@ -1,12 +1,24 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, symlinkSync } from "node:fs";
 import path from "node:path";
 
 import { SessionSnapshot, WorktreeMergeCheckResult, WorktreeMergeResult } from "./types.js";
 import { runGit, runGitAsync, getGitErrorMessage } from "./git-utils.js";
 
+export interface WorktreeSetupSpec {
+  /** Branch, tag, or commit used as the task's immutable starting point. */
+  baseRef?: string;
+  /** Human-readable task name used in the generated branch. */
+  taskName?: string;
+  /** Gitignored repo-relative paths copied into the new worktree. */
+  copyPaths?: string[];
+  /** Gitignored repo-relative paths symlinked from the main checkout. */
+  sharedDirectories?: string[];
+}
+
 interface WorktreeSetupOptions {
   cwd: string;
   sessionId: string;
+  spec?: WorktreeSetupSpec;
 }
 
 interface WorktreeSetupResult {
@@ -82,6 +94,48 @@ function sanitizeBranchSegment(value: string): string {
 function getCurrentBranch(repoRoot: string, timeoutMs = DEFAULT_WORKTREE_GIT_TIMEOUT_MS): string {
   const branch = runWorktreeGit(["branch", "--show-current"], repoRoot, timeoutMs);
   return branch || "master";
+}
+
+function normalizePortableRelativePath(value: string): string {
+  const normalized = value.trim().replace(/\\/g, "/").replace(/^\.\//, "");
+  if (!normalized || path.isAbsolute(normalized) || normalized === ".git" || normalized.startsWith(".git/") || normalized.split("/").includes("..")) {
+    throw new Error(`无效的 worktree 共享路径：${value}`);
+  }
+  return normalized;
+}
+
+function ensureIgnoredPath(repoRoot: string, relativePath: string): void {
+  try {
+    runGit(["check-ignore", "--quiet", "--", relativePath], repoRoot);
+  } catch {
+    throw new Error(`仅允许复制或共享被 gitignore 忽略的路径：${relativePath}`);
+  }
+}
+
+function populateWorktreePaths(repoRoot: string, worktreePath: string, spec: WorktreeSetupSpec): void {
+  for (const rawPath of spec.copyPaths ?? []) {
+    const relativePath = normalizePortableRelativePath(rawPath);
+    ensureIgnoredPath(repoRoot, relativePath);
+    const source = path.join(repoRoot, relativePath);
+    if (!existsSync(source)) throw new Error(`要复制的路径不存在：${relativePath}`);
+    const destination = path.join(worktreePath, relativePath);
+    if (existsSync(destination)) throw new Error(`Worktree 中目标路径已存在：${relativePath}`);
+    mkdirSync(path.dirname(destination), { recursive: true });
+    cpSync(source, destination, { recursive: true, preserveTimestamps: true });
+  }
+
+  for (const rawPath of spec.sharedDirectories ?? []) {
+    const relativePath = normalizePortableRelativePath(rawPath);
+    ensureIgnoredPath(repoRoot, relativePath);
+    const source = path.join(repoRoot, relativePath);
+    if (!existsSync(source) || !lstatSync(source).isDirectory()) {
+      throw new Error(`要共享的目录不存在：${relativePath}`);
+    }
+    const destination = path.join(worktreePath, relativePath);
+    if (existsSync(destination)) throw new Error(`Worktree 中目标路径已存在：${relativePath}`);
+    mkdirSync(path.dirname(destination), { recursive: true });
+    symlinkSync(source, destination, "dir");
+  }
 }
 
 
@@ -383,13 +437,28 @@ export function prepareSessionWorktree(options: WorktreeSetupOptions): WorktreeS
   }
 
   const baseBranch = getCurrentBranch(repoRoot);
+  const requestedBaseRef = options.spec?.baseRef?.trim() || baseBranch;
+  let baseCommit: string;
+  try {
+    baseCommit = runGit(["rev-parse", "--verify", `${requestedBaseRef}^{commit}`], repoRoot);
+  } catch {
+    throw new Error(`Worktree 基线不存在：${requestedBaseRef}`);
+  }
   const branchSuffix = sanitizeBranchSegment(options.sessionId.split("-")[0] || options.sessionId);
-  const branchName = `wand/${sanitizeBranchSegment(baseBranch)}-${branchSuffix}`;
+  const branchPrefix = sanitizeBranchSegment(options.spec?.taskName || baseBranch);
+  const branchName = `wand/${branchPrefix}-${branchSuffix}`;
   const worktreesRoot = path.join(repoRoot, ".wand-worktrees");
   const worktreePath = path.join(worktreesRoot, branchName.replace(/\//g, "-"));
 
   mkdirSync(worktreesRoot, { recursive: true });
-  runGit(["worktree", "add", "-b", branchName, worktreePath, "HEAD"], repoRoot);
+  runGit(["worktree", "add", "-b", branchName, worktreePath, baseCommit], repoRoot);
+  try {
+    populateWorktreePaths(repoRoot, worktreePath, options.spec ?? {});
+  } catch (error) {
+    try { runGit(["worktree", "remove", "--force", worktreePath], repoRoot); } catch { /* preserve setup error */ }
+    try { runGit(["branch", "-D", branchName], repoRoot); } catch { /* preserve setup error */ }
+    throw error;
+  }
 
   return {
     cwd: worktreePath,
@@ -397,6 +466,10 @@ export function prepareSessionWorktree(options: WorktreeSetupOptions): WorktreeS
     worktree: {
       branch: branchName,
       path: worktreePath,
+      // Pin the resolved commit so later movement of the source branch cannot
+      // change the mission's review baseline.
+      baseRef: baseCommit,
+      repoRoot,
     },
   };
 }

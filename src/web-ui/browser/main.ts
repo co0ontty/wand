@@ -33,6 +33,7 @@ import { installWorktreeMergeLegacyAdapter } from "./worktree-merge-adapter";
 import { refreshAll } from "./session-engine";
 import { openWandDialog, showToast } from "./notifications";
 import { installFilePreviewLegacyAdapter } from "./file-preview-adapter";
+import { installMissionsLegacyAdapter } from "./missions-adapter";
 import {
   appendToComposer,
   copyTextSafely,
@@ -85,6 +86,7 @@ configureBrowserShellCommands(createBrowserShellCommands());
 // Chat, and Composer keep stable host nodes whose children remain legacy-owned.
 startReactUi();
 installNewSessionLegacyAdapter();
+installMissionsLegacyAdapter();
 installFolderPickerLegacyAdapter();
 installWorktreeMergeLegacyAdapter({
   getSession(sessionId) {

@@ -1200,6 +1200,85 @@ export const settingsAndQuickCommitStyles = String.raw`
 
 `;
 
+/** Agent Inbox and task-race workspace. */
+export const missionsStyles = String.raw`
+.wand-missions-overlay { position: fixed; inset: 0; z-index: 34; background: var(--bg-overlay); backdrop-filter: blur(6px); pointer-events: auto; }
+.wand-missions-dialog { position: fixed; inset: max(24px, var(--wand-safe-top)) max(24px, var(--wand-safe-right)) max(24px, var(--wand-safe-bottom)) max(24px, var(--wand-safe-left)); z-index: 35; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border-subtle); border-radius: 20px; color: var(--text-primary); background: color-mix(in srgb, var(--bg-elevated) 94%, transparent); box-shadow: 0 24px 70px rgb(0 0 0 / 24%); pointer-events: auto; }
+.wand-missions-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 18px 20px 12px; }
+.wand-missions-header > div { min-width: 0; }
+.wand-missions-title { margin: 0; font-size: 1.2rem; letter-spacing: -.02em; }
+.wand-missions-description { margin: 4px 0 0; color: var(--text-secondary); font-size: var(--font-size-sm); }
+.wand-missions-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border-subtle); padding: 0 20px 12px; }
+.wand-missions-tabs { display: flex; gap: 4px; padding: 3px; border-radius: 10px; background: var(--bg-secondary); }
+.wand-missions-tabs button { display: flex; align-items: center; gap: 7px; min-height: 34px; border: 0; border-radius: 8px; padding: 0 13px; color: var(--text-secondary); background: transparent; cursor: pointer; }
+.wand-missions-tabs button.active { color: var(--text-primary); background: var(--bg-elevated); box-shadow: 0 1px 3px rgb(0 0 0 / 10%); }
+.wand-missions-tabs b { display: grid; min-width: 18px; height: 18px; place-items: center; border-radius: 9px; color: white; background: var(--danger); font-size: 10px; }
+.wand-missions-error { margin: 10px 20px 0; border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent); border-radius: 10px; padding: 9px 12px; color: var(--danger); background: var(--danger-muted); font-size: var(--font-size-sm); }
+.wand-missions-body { flex: 1; min-height: 0; overflow: hidden; }
+.wand-missions-inbox { height: 100%; overflow: auto; padding: 18px 20px 28px; }
+.wand-missions-section + .wand-missions-section { margin-top: 24px; }
+.wand-missions-section h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 9px; font-size: var(--font-size-sm); }
+.wand-missions-section h3 span { color: var(--text-muted); font-size: var(--font-size-xs); }
+.wand-missions-card-list { display: grid; gap: 8px; }
+.wand-missions-activity { display: flex; align-items: center; width: 100%; gap: 12px; border: 1px solid var(--border-subtle); border-radius: 13px; padding: 12px 13px; color: inherit; background: var(--bg-secondary); text-align: left; cursor: pointer; }
+.wand-missions-activity:hover { border-color: color-mix(in srgb, var(--accent) 38%, var(--border-subtle)); background: color-mix(in srgb, var(--accent-muted) 36%, var(--bg-secondary)); }
+.wand-missions-state-dot { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 50%; background: var(--text-muted); }
+.wand-missions-state-dot.is-working { background: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent); }
+.wand-missions-state-dot.is-needs_input,.wand-missions-state-dot.is-needs_permission { background: var(--warning); }
+.wand-missions-state-dot.is-failed { background: var(--danger); }
+.wand-missions-activity-copy { display: grid; flex: 1; min-width: 0; gap: 3px; }
+.wand-missions-activity-copy strong,.wand-missions-activity-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wand-missions-activity-copy small { color: var(--text-secondary); }
+.wand-missions-state { flex: 0 0 auto; border-radius: 999px; padding: 4px 8px; color: var(--text-secondary); background: var(--bg-tertiary); font-size: 10px; font-weight: 650; }
+.wand-missions-state.is-working,.wand-missions-state.is-running { color: var(--accent); background: var(--accent-muted); }
+.wand-missions-state.is-needs_input,.wand-missions-state.is-needs_permission { color: var(--warning); background: var(--warning-muted); }
+.wand-missions-state.is-failed { color: var(--danger); background: var(--danger-muted); }
+.wand-missions-state.is-done,.wand-missions-state.is-completed { color: var(--success); background: var(--success-muted); }
+.wand-missions-workspace { display: grid; grid-template-columns: minmax(210px, 270px) minmax(0, 1fr); height: 100%; }
+.wand-missions-list { overflow: auto; border-right: 1px solid var(--border-subtle); padding: 12px; background: color-mix(in srgb, var(--bg-secondary) 72%, transparent); }
+.wand-missions-list > button { display: grid; width: 100%; gap: 5px; border: 0; border-radius: 11px; padding: 11px; color: inherit; background: transparent; text-align: left; cursor: pointer; }
+.wand-missions-list > button:hover,.wand-missions-list > button.active { background: var(--bg-elevated); }
+.wand-missions-list > button.active { box-shadow: inset 3px 0 var(--accent); }
+.wand-missions-list small { color: var(--text-secondary); }
+.wand-missions-detail { min-width: 0; overflow: auto; padding: 18px 20px 32px; }
+.wand-missions-detail-head,.wand-missions-review-head,.wand-missions-attempt-head,.wand-missions-create-head,.wand-missions-create-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.wand-missions-detail-head h2,.wand-missions-review h3,.wand-missions-create h2 { margin: 0; font-size: 1.05rem; }
+.wand-missions-detail-head p,.wand-missions-create-head p { margin: 4px 0 0; color: var(--text-secondary); font-size: var(--font-size-xs); }
+.wand-missions-prompt { max-width: 900px; margin: 14px 0; color: var(--text-secondary); white-space: pre-wrap; }
+.wand-missions-attempt-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
+.wand-missions-attempt { border: 1px solid var(--border-subtle); border-radius: 13px; padding: 12px; background: var(--bg-secondary); }
+.wand-missions-provider { display: flex; align-items: center; gap: 7px; text-transform: capitalize; }
+.wand-missions-provider svg { width: 18px; height: 18px; }
+.wand-missions-attempt p { min-height: 36px; margin: 10px 0; color: var(--text-secondary); font-size: var(--font-size-xs); }
+.wand-missions-attempt-actions { display: flex; gap: 6px; }
+.wand-missions-review { margin-top: 18px; border: 1px solid var(--border-subtle); border-radius: 14px; overflow: hidden; }
+.wand-missions-review-head { padding: 11px 13px; background: var(--bg-secondary); }
+.wand-missions-review-head span { color: var(--text-secondary); font-size: var(--font-size-xs); }
+.wand-missions-diff { max-height: 48vh; overflow: auto; background: #101214; }
+.wand-missions-diff button { display: grid; grid-template-columns: 54px minmax(max-content, 1fr); width: 100%; min-width: max-content; border: 0; padding: 0; color: #c9d1d9; background: transparent; text-align: left; }
+.wand-missions-diff button:not(:disabled):hover { outline: 1px solid var(--accent); outline-offset: -1px; cursor: crosshair; }
+.wand-missions-diff button > span { padding: 2px 8px; color: #6e7681; background: rgb(255 255 255 / 3%); text-align: right; user-select: none; }
+.wand-missions-diff code { padding: 2px 12px; white-space: pre; font: 12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace; }
+.wand-missions-diff button.is-add { background: rgb(46 160 67 / 14%); }.wand-missions-diff button.is-remove { background: rgb(248 81 73 / 13%); }.wand-missions-diff button.is-meta code { color: #8b949e; }
+.wand-missions-comment-form { display: grid; grid-template-columns: minmax(140px,auto) minmax(220px,1fr) auto; align-items: center; gap: 9px; border-top: 1px solid var(--border-subtle); padding: 10px 12px; }
+.wand-missions-comment-form label { overflow: hidden; color: var(--text-secondary); font: 11px ui-monospace,SFMono-Regular,Menlo,monospace; text-overflow: ellipsis; }
+.wand-missions-comment-form textarea { min-height: 38px; max-height: 100px; resize: vertical; }
+.wand-missions-pending-review { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; border-top: 1px solid var(--border-subtle); padding: 11px 12px; }
+.wand-missions-pending-review > div { display: grid; gap: 5px; }.wand-missions-pending-review p { margin: 0; color: var(--text-secondary); font-size: var(--font-size-xs); }.wand-missions-pending-review strong { margin-right: 8px; color: var(--text-primary); }
+.wand-missions-empty { padding: 28px 14px; color: var(--text-secondary); text-align: center; }
+.wand-missions-create-overlay { position: absolute; inset: 0; display: grid; z-index: 2; place-items: center; padding: 22px; background: var(--bg-overlay); backdrop-filter: blur(5px); }
+.wand-missions-create { display: grid; width: min(680px, 100%); max-height: 100%; gap: 13px; overflow: auto; border: 1px solid var(--border-subtle); border-radius: 17px; padding: 18px; background: var(--bg-elevated); box-shadow: 0 18px 55px rgb(0 0 0 / 25%); }
+.wand-missions-create-head > button { border: 0; color: var(--text-secondary); background: transparent; font-size: 24px; cursor: pointer; }
+.wand-missions-create > label,.wand-missions-create details label { display: grid; gap: 6px; color: var(--text-secondary); font-size: var(--font-size-xs); }
+.wand-missions-create input,.wand-missions-create textarea,.wand-missions-comment-form textarea { box-sizing: border-box; width: 100%; border: 1px solid var(--border-subtle); border-radius: 9px; padding: 9px 10px; color: var(--text-primary); background: var(--bg-primary); font: inherit; }
+.wand-missions-create textarea { min-height: 120px; resize: vertical; }
+.wand-missions-provider-picker { display: grid; grid-template-columns: repeat(3,1fr); gap: 7px; }
+.wand-missions-provider-picker label { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border-subtle); border-radius: 10px; padding: 9px; cursor: pointer; }.wand-missions-provider-picker label.active { border-color: var(--accent); background: var(--accent-muted); }.wand-missions-provider-picker svg { width: 19px; height: 19px; }.wand-missions-provider-picker input { width: auto; }
+.wand-missions-create details { display: grid; gap: 10px; border: 1px solid var(--border-subtle); border-radius: 10px; padding: 10px; }.wand-missions-create details[open] summary { margin-bottom: 10px; }.wand-missions-create details label + label { margin-top: 9px; }
+.wand-missions-create-actions { justify-content: flex-end; }
+@media (max-width: 760px) { .wand-missions-dialog { inset: var(--wand-safe-top) 0 var(--wand-safe-bottom); border-radius: 0; }.wand-missions-description { display: none; }.wand-missions-workspace { grid-template-columns: 1fr; }.wand-missions-list { max-height: 160px; border-right: 0; border-bottom: 1px solid var(--border-subtle); }.wand-missions-comment-form { grid-template-columns: 1fr; }.wand-missions-provider-picker { grid-template-columns: repeat(2,1fr); } }
+`;
+
 /** New Session, Folder Picker and Worktree business presentation. */
 export const sessionPickerAndWorktreeStyles = String.raw`
 .wand-new-session-overlay {

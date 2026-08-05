@@ -3242,15 +3242,15 @@
         return value;
       }
       var AbortControllerLocal = "undefined" !== typeof AbortController ? AbortController : function() {
-        var listeners7 = [], signal = this.signal = {
+        var listeners8 = [], signal = this.signal = {
           aborted: false,
           addEventListener: function(type, listener) {
-            listeners7.push(listener);
+            listeners8.push(listener);
           }
         };
         this.abort = function() {
           signal.aborted = true;
-          listeners7.forEach(function(listener) {
+          listeners8.forEach(function(listener) {
             return listener();
           });
         };
@@ -3302,33 +3302,33 @@
       function pingEngtangledActionScope() {
         if (0 === --currentEntangledPendingCount && null !== currentEntangledListeners) {
           null !== currentEntangledActionThenable && (currentEntangledActionThenable.status = "fulfilled");
-          var listeners7 = currentEntangledListeners;
+          var listeners8 = currentEntangledListeners;
           currentEntangledListeners = null;
           currentEntangledLane = 0;
           currentEntangledActionThenable = null;
-          for (var i = 0; i < listeners7.length; i++) (0, listeners7[i])();
+          for (var i = 0; i < listeners8.length; i++) (0, listeners8[i])();
         }
       }
       function chainThenableValue(thenable, result) {
-        var listeners7 = [], thenableWithOverride = {
+        var listeners8 = [], thenableWithOverride = {
           status: "pending",
           value: null,
           reason: null,
           then: function(resolve) {
-            listeners7.push(resolve);
+            listeners8.push(resolve);
           }
         };
         thenable.then(
           function() {
             thenableWithOverride.status = "fulfilled";
             thenableWithOverride.value = result;
-            for (var i = 0; i < listeners7.length; i++) (0, listeners7[i])(result);
+            for (var i = 0; i < listeners8.length; i++) (0, listeners8[i])(result);
           },
           function(error) {
             thenableWithOverride.status = "rejected";
             thenableWithOverride.reason = error;
-            for (error = 0; error < listeners7.length; error++)
-              (0, listeners7[error])(void 0);
+            for (error = 0; error < listeners8.length; error++)
+              (0, listeners8[error])(void 0);
           }
         );
         return thenableWithOverride;
@@ -10339,15 +10339,15 @@
         };
       }
       function accumulateTwoPhaseListeners(targetFiber, reactName) {
-        for (var captureName = reactName + "Capture", listeners7 = []; null !== targetFiber; ) {
+        for (var captureName = reactName + "Capture", listeners8 = []; null !== targetFiber; ) {
           var _instance2 = targetFiber, stateNode = _instance2.stateNode;
           _instance2 = _instance2.tag;
-          5 !== _instance2 && 26 !== _instance2 && 27 !== _instance2 || null === stateNode || (_instance2 = getListener(targetFiber, captureName), null != _instance2 && listeners7.unshift(
+          5 !== _instance2 && 26 !== _instance2 && 27 !== _instance2 || null === stateNode || (_instance2 = getListener(targetFiber, captureName), null != _instance2 && listeners8.unshift(
             createDispatchListener(targetFiber, _instance2, stateNode)
-          ), _instance2 = getListener(targetFiber, reactName), null != _instance2 && listeners7.push(
+          ), _instance2 = getListener(targetFiber, reactName), null != _instance2 && listeners8.push(
             createDispatchListener(targetFiber, _instance2, stateNode)
           ));
-          if (3 === targetFiber.tag) return listeners7;
+          if (3 === targetFiber.tag) return listeners8;
           targetFiber = targetFiber.return;
         }
         return [];
@@ -10360,18 +10360,18 @@
         return inst ? inst : null;
       }
       function accumulateEnterLeaveListenersForEvent(dispatchQueue, event, target, common, inCapturePhase) {
-        for (var registrationName = event._reactName, listeners7 = []; null !== target && target !== common; ) {
+        for (var registrationName = event._reactName, listeners8 = []; null !== target && target !== common; ) {
           var _instance3 = target, alternate = _instance3.alternate, stateNode = _instance3.stateNode;
           _instance3 = _instance3.tag;
           if (null !== alternate && alternate === common) break;
-          5 !== _instance3 && 26 !== _instance3 && 27 !== _instance3 || null === stateNode || (alternate = stateNode, inCapturePhase ? (stateNode = getListener(target, registrationName), null != stateNode && listeners7.unshift(
+          5 !== _instance3 && 26 !== _instance3 && 27 !== _instance3 || null === stateNode || (alternate = stateNode, inCapturePhase ? (stateNode = getListener(target, registrationName), null != stateNode && listeners8.unshift(
             createDispatchListener(target, stateNode, alternate)
-          )) : inCapturePhase || (stateNode = getListener(target, registrationName), null != stateNode && listeners7.push(
+          )) : inCapturePhase || (stateNode = getListener(target, registrationName), null != stateNode && listeners8.push(
             createDispatchListener(target, stateNode, alternate)
           )));
           target = target.return;
         }
-        0 !== listeners7.length && dispatchQueue.push({ event, listeners: listeners7 });
+        0 !== listeners8.length && dispatchQueue.push({ event, listeners: listeners8 });
       }
       var NORMALIZE_NEWLINES_REGEX = /\r\n?/g;
       var NORMALIZE_NULL_AND_REPLACEMENT_REGEX = /\u0000|\uFFFD/g;
@@ -13706,19 +13706,19 @@
     }
     return removed ? filtered : messages;
   }
-  function normalizeStructuredSnapshot(snapshot7, existingSession) {
-    if (!snapshot7 || !Array.isArray(snapshot7.messages)) {
-      return snapshot7;
+  function normalizeStructuredSnapshot(snapshot8, existingSession) {
+    if (!snapshot8 || !Array.isArray(snapshot8.messages)) {
+      return snapshot8;
     }
-    var sessionKind = snapshot7.sessionKind || existingSession && existingSession.sessionKind;
+    var sessionKind = snapshot8.sessionKind || existingSession && existingSession.sessionKind;
     if (sessionKind !== "structured") {
-      return snapshot7;
+      return snapshot8;
     }
-    var sanitizedMessages = stripRenderOnlyStructuredMessages(snapshot7.messages);
-    if (sanitizedMessages === snapshot7.messages) {
-      return snapshot7;
+    var sanitizedMessages = stripRenderOnlyStructuredMessages(snapshot8.messages);
+    if (sanitizedMessages === snapshot8.messages) {
+      return snapshot8;
     }
-    return Object.assign({}, snapshot7, { messages: sanitizedMessages });
+    return Object.assign({}, snapshot8, { messages: sanitizedMessages });
   }
   function saveStructuredQueue() {
     try {
@@ -14014,7 +14014,7 @@
   }
 
   // src/web-ui/react/overlay-host.tsx
-  var import_react17 = __toESM(require_react(), 1);
+  var import_react18 = __toESM(require_react(), 1);
 
   // src/web-ui/react/overlay-controller.tsx
   var nextId = 0;
@@ -22518,8 +22518,8 @@
     }
   }
   var HttpSettingsRepository = class {
-    constructor(runtime6 = new BrowserSettingsRuntimeAdapter()) {
-      __publicField(this, "runtime", runtime6);
+    constructor(runtime7 = new BrowserSettingsRuntimeAdapter()) {
+      __publicField(this, "runtime", runtime7);
     }
     async load(options = {}) {
       if (options.canManageSettings === false) {
@@ -22534,20 +22534,20 @@
         }
         throw error;
       }
-      const snapshot7 = aboutSnapshot(admin, "admin");
+      const snapshot8 = aboutSnapshot(admin, "admin");
       const origin = window.location?.origin ? `?origin=${encodeURIComponent(window.location.origin)}` : "";
       const [models, cliUpdates, connectCode] = await Promise.all([
         request("/api/models", { signal: options.signal }).catch(() => null),
         request("/api/provider-cli-updates", { signal: options.signal }).catch(() => null),
         request(`/api/app-connect-code${origin}`, { signal: options.signal }).catch(() => null)
       ]);
-      snapshot7.models = models ? normalizeModels(models) : null;
-      snapshot7.providerCliUpdates = cliUpdates;
-      snapshot7.connectCode = connectCode ? {
+      snapshot8.models = models ? normalizeModels(models) : null;
+      snapshot8.providerCliUpdates = cliUpdates;
+      snapshot8.connectCode = connectCode ? {
         code: stringValue(connectCode.code),
         url: stringValue(connectCode.url)
       } : null;
-      return snapshot7;
+      return snapshot8;
     }
     async execute(command, options = {}) {
       let result;
@@ -22988,12 +22988,12 @@
       ] }, source);
     }) : /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("div", { className: "wand-settings-empty", children: "\u6682\u65E0\u53EF\u7528\u5B89\u88C5\u5305" }) });
   }
-  function AboutSettingsTab({ snapshot: snapshot7, repository, refresh, toast, showRestart: showRestart2 }) {
+  function AboutSettingsTab({ snapshot: snapshot8, repository, refresh, toast, showRestart: showRestart2 }) {
     const [pending, setPending] = (0, import_react7.useState)("");
     const [status, setStatus] = (0, import_react7.useState)("");
     const [tone, setTone] = (0, import_react7.useState)("info");
     const [update, setUpdate] = (0, import_react7.useState)(null);
-    const about = snapshot7.about;
+    const about = snapshot8.about;
     async function action(name, task, success) {
       setPending(name);
       setStatus("");
@@ -23010,7 +23010,7 @@
         setPending("");
       }
     }
-    const cliItems = snapshot7.providerCliUpdates?.items || [];
+    const cliItems = snapshot8.providerCliUpdates?.items || [];
     const cliUpdates = cliItems.filter((item) => item.updateAvailable && item.updateSupported);
     return /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)("section", { className: "wand-settings-panel", "aria-label": "\u5173\u4E8E Wand", children: [
       /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)("header", { className: "wand-settings-panel-heading", children: [
@@ -23042,7 +23042,7 @@
           /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("dd", { children: /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("a", { href: about.repoUrl, target: "_blank", rel: "noopener noreferrer", children: about.repoUrl }) })
         ] }) : null
       ] }) }),
-      snapshot7.access === "admin" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(import_jsx_runtime30.Fragment, { children: [
+      snapshot8.access === "admin" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(import_jsx_runtime30.Fragment, { children: [
         /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(SettingsSection, { title: "\u4FDD\u6301\u5728\u6700\u65B0\u7248\u672C", description: `\u5F53\u524D ${about.version} \xB7 ${about.updateChannel === "beta" ? "Beta \u901A\u9053" : "Stable \u901A\u9053"}`, children: [
           /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)("div", { className: "wand-settings-update-deck", children: [
             /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("span", { className: "wand-settings-update-deck-icon", "aria-hidden": "true", children: "\u21BB" }),
@@ -23075,7 +23075,7 @@
             {
               label: "\u81EA\u52A8\u66F4\u65B0 Web \u670D\u52A1",
               description: "\u68C0\u6D4B\u5230\u65B0\u7248\u672C\u540E\u81EA\u52A8\u4E0B\u8F7D\u5B89\u88C5\u5E76\u91CD\u542F\u670D\u52A1\u3002",
-              checked: snapshot7.autoUpdate.web,
+              checked: snapshot8.autoUpdate.web,
               disabled: !!pending,
               onCheckedChange: (enabled) => void action("auto-web", async () => {
                 await repository.execute({ type: "autoUpdate.set", target: "web", enabled });
@@ -23089,7 +23089,7 @@
               const result = await repository.execute({ type: "webUpdate.install" });
               setStatus(result.message);
             }, void 0), children: "\u66F4\u65B0\u6216\u91CD\u65B0\u5B89\u88C5" }),
-            snapshot7.restartRequired ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsActionButton, { pending: pending === "restart", kind: "secondary", onClick: () => void action("restart", async () => {
+            snapshot8.restartRequired ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsActionButton, { pending: pending === "restart", kind: "secondary", onClick: () => void action("restart", async () => {
               try {
                 await repository.execute({ type: "server.restart" });
               } finally {
@@ -23114,7 +23114,7 @@
             {
               label: "\u81EA\u52A8\u66F4\u65B0\u5F00\u53D1 CLI",
               description: "\u670D\u52A1\u7AEF\u5B9A\u671F\u68C0\u67E5\u5E76\u8C03\u7528\u5404 CLI \u7684\u5B98\u65B9\u66F4\u65B0\u5668\u3002",
-              checked: snapshot7.autoUpdate.cli,
+              checked: snapshot8.autoUpdate.cli,
               disabled: !!pending,
               onCheckedChange: (enabled) => void action("auto-cli", async () => {
                 await repository.execute({ type: "autoUpdate.set", target: "cli", enabled });
@@ -23138,20 +23138,20 @@
           ] })
         ] })
       ] }) : null,
-      snapshot7.platform.kind === "browser" || snapshot7.platform.kind === "android" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(DistributionSection, { kind: "apk", title: "Android App", distribution: about.androidApk, currentVersion: snapshot7.platform.kind === "android" ? snapshot7.platform.appVersion : null, repository, toast }) : null,
-      snapshot7.platform.kind === "browser" || snapshot7.platform.kind === "macos" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(DistributionSection, { kind: "dmg", title: "macOS App", distribution: about.macosDmg, currentVersion: snapshot7.platform.kind === "macos" ? snapshot7.platform.appVersion : null, repository, toast }) : null,
-      snapshot7.access === "admin" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(import_jsx_runtime30.Fragment, { children: /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(SettingsSection, { title: "App \u8FDE\u63A5\u7801", description: "\u7C98\u8D34\u6216\u626B\u7801\u540E\u53EF\u8FDE\u63A5\u5F53\u524D\u670D\u52A1\uFF1B\u4FEE\u6539\u5BC6\u7801\u540E\u4F1A\u5931\u6548\u3002", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("code", { className: "wand-settings-connect-code", "aria-label": "App \u8FDE\u63A5\u7801", children: snapshot7.connectCode?.code || "\u6682\u4E0D\u53EF\u7528" }),
+      snapshot8.platform.kind === "browser" || snapshot8.platform.kind === "android" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(DistributionSection, { kind: "apk", title: "Android App", distribution: about.androidApk, currentVersion: snapshot8.platform.kind === "android" ? snapshot8.platform.appVersion : null, repository, toast }) : null,
+      snapshot8.platform.kind === "browser" || snapshot8.platform.kind === "macos" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(DistributionSection, { kind: "dmg", title: "macOS App", distribution: about.macosDmg, currentVersion: snapshot8.platform.kind === "macos" ? snapshot8.platform.appVersion : null, repository, toast }) : null,
+      snapshot8.access === "admin" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(import_jsx_runtime30.Fragment, { children: /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(SettingsSection, { title: "App \u8FDE\u63A5\u7801", description: "\u7C98\u8D34\u6216\u626B\u7801\u540E\u53EF\u8FDE\u63A5\u5F53\u524D\u670D\u52A1\uFF1B\u4FEE\u6539\u5BC6\u7801\u540E\u4F1A\u5931\u6548\u3002", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("code", { className: "wand-settings-connect-code", "aria-label": "App \u8FDE\u63A5\u7801", children: snapshot8.connectCode?.code || "\u6682\u4E0D\u53EF\u7528" }),
         /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)("div", { className: "wand-settings-button-row", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(WandButton, { disabled: !snapshot7.connectCode?.code, kind: "secondary", onClick: async () => {
-            await repository.execute({ type: "clipboard.copy", text: snapshot7.connectCode.code });
+          /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(WandButton, { disabled: !snapshot8.connectCode?.code, kind: "secondary", onClick: async () => {
+            await repository.execute({ type: "clipboard.copy", text: snapshot8.connectCode.code });
             toast("\u8FDE\u63A5\u7801\u5DF2\u590D\u5236", "success");
           }, children: "\u590D\u5236\u8FDE\u63A5\u7801" }),
-          /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(WandButton, { disabled: !snapshot7.connectCode?.code, kind: "secondary", onClick: () => settingsStore.setNested("qr"), children: "\u653E\u5927\u8FDE\u63A5\u4E8C\u7EF4\u7801" })
+          /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(WandButton, { disabled: !snapshot8.connectCode?.code, kind: "secondary", onClick: () => settingsStore.setNested("qr"), children: "\u653E\u5927\u8FDE\u63A5\u4E8C\u7EF4\u7801" })
         ] })
       ] }) }) : null,
       status ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsStatus, { tone, children: status }) : null,
-      /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(ConnectCodeDialog, { code: snapshot7.connectCode?.code || "" })
+      /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(ConnectCodeDialog, { code: snapshot8.connectCode?.code || "" })
     ] });
   }
   var MODE_OPTIONS = [
@@ -23164,8 +23164,8 @@
     { value: "native", label: "\u539F\u751F\u6A21\u5F0F" },
     { value: "managed", label: "\u6258\u7BA1\u6A21\u5F0F" }
   ];
-  function generalFromSnapshot(snapshot7) {
-    const config = snapshot7.config;
+  function generalFromSnapshot(snapshot8) {
+    const config = snapshot8.config;
     return {
       host: config.host,
       port: config.port,
@@ -23253,13 +23253,13 @@
       }
     );
   }
-  function GeneralSettingsTab({ snapshot: snapshot7, repository, refresh, toast }) {
-    const [form, setForm] = (0, import_react7.useState)(() => generalFromSnapshot(snapshot7));
+  function GeneralSettingsTab({ snapshot: snapshot8, repository, refresh, toast }) {
+    const [form, setForm] = (0, import_react7.useState)(() => generalFromSnapshot(snapshot8));
     const [pending, setPending] = (0, import_react7.useState)(false);
     const [status, setStatus] = (0, import_react7.useState)("");
     const [tone, setTone] = (0, import_react7.useState)("info");
     const [errors, setErrors] = (0, import_react7.useState)({});
-    (0, import_react7.useEffect)(() => setForm(generalFromSnapshot(snapshot7)), [snapshot7]);
+    (0, import_react7.useEffect)(() => setForm(generalFromSnapshot(snapshot8)), [snapshot8]);
     function update(key, value) {
       setForm((current) => ({ ...current, [key]: value }));
       setErrors((current) => ({ ...current, [key]: "" }));
@@ -23353,8 +23353,8 @@
       /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(EnvironmentDialog, { repository })
     ] });
   }
-  function aiFromSnapshot(snapshot7) {
-    const config = snapshot7.config;
+  function aiFromSnapshot(snapshot8) {
+    const config = snapshot8.config;
     const withClientId = (profile) => ({
       ...profile,
       id: profile.id || createSystemAiRouteId(),
@@ -23453,14 +23453,14 @@
       route.baseUrl.trim() && route.model.trim() && (route.apiKey.trim() || route.hasApiKey)
     );
   }
-  function AiSettingsTab({ snapshot: snapshot7, repository, refresh, setSnapshot, toast }) {
-    const [form, setForm] = (0, import_react7.useState)(() => aiFromSnapshot(snapshot7));
+  function AiSettingsTab({ snapshot: snapshot8, repository, refresh, setSnapshot, toast }) {
+    const [form, setForm] = (0, import_react7.useState)(() => aiFromSnapshot(snapshot8));
     const [pending, setPending] = (0, import_react7.useState)("");
     const [status, setStatus] = (0, import_react7.useState)("");
     const [tone, setTone] = (0, import_react7.useState)("info");
     const [errors, setErrors] = (0, import_react7.useState)({});
     const [routeTests, setRouteTests] = (0, import_react7.useState)({});
-    (0, import_react7.useEffect)(() => setForm(aiFromSnapshot(snapshot7)), [snapshot7.config]);
+    (0, import_react7.useEffect)(() => setForm(aiFromSnapshot(snapshot8)), [snapshot8.config]);
     function update(key, value) {
       setForm((current) => ({ ...current, [key]: value }));
     }
@@ -23672,7 +23672,7 @@
         setPending("");
       }
     }
-    const models = snapshot7.models;
+    const models = snapshot8.models;
     const systemAiProfiles = systemAiRoutes(form.systemAi);
     const configuredSystemAiProfiles = systemAiProfiles.filter(routeIsComplete);
     const systemAiOrder = configuredSystemAiProfiles.map((profile) => `${SYSTEM_AI_SOURCE_LABELS[profile.source]} \xB7 ${profile.model}`).join(" \u2192 ");
@@ -23856,12 +23856,12 @@
     ] });
   }
   function NotificationSettingsTab(_props) {
-    const { snapshot: snapshot7, repository, setSnapshot, toast } = _props;
-    const [preferences, setPreferences] = (0, import_react7.useState)(() => ({ ...snapshot7.notifications }));
+    const { snapshot: snapshot8, repository, setSnapshot, toast } = _props;
+    const [preferences, setPreferences] = (0, import_react7.useState)(() => ({ ...snapshot8.notifications }));
     const [pending, setPending] = (0, import_react7.useState)("");
     const [status, setStatus] = (0, import_react7.useState)("");
     const [tone, setTone] = (0, import_react7.useState)("info");
-    (0, import_react7.useEffect)(() => setPreferences({ ...snapshot7.notifications }), [snapshot7.notifications]);
+    (0, import_react7.useEffect)(() => setPreferences({ ...snapshot8.notifications }), [snapshot8.notifications]);
     async function savePreference(value, preview = false) {
       setPending("preference");
       setStatus("");
@@ -23972,11 +23972,11 @@
           })
         }
       ) }) : null,
-      snapshot7.platform.canSetAppIcon ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsSection, { title: "\u5E94\u7528\u56FE\u6807", description: "\u5207\u6362 Wand \u7684\u684C\u9762\u56FE\u6807\uFF0C\u8FD4\u56DE\u7CFB\u7EDF\u684C\u9762\u540E\u751F\u6548\u3002", children: /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("div", { className: "wand-settings-button-row", role: "group", "aria-label": "\u5E94\u7528\u56FE\u6807", children: ["shorthair", "garfield"].map((icon) => /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(
+      snapshot8.platform.canSetAppIcon ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsSection, { title: "\u5E94\u7528\u56FE\u6807", description: "\u5207\u6362 Wand \u7684\u684C\u9762\u56FE\u6807\uFF0C\u8FD4\u56DE\u7CFB\u7EDF\u684C\u9762\u540E\u751F\u6548\u3002", children: /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("div", { className: "wand-settings-button-row", role: "group", "aria-label": "\u5E94\u7528\u56FE\u6807", children: ["shorthair", "garfield"].map((icon) => /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(
         WandButton,
         {
-          kind: snapshot7.platform.appIcon === icon ? "primary" : "secondary",
-          "aria-pressed": snapshot7.platform.appIcon === icon,
+          kind: snapshot8.platform.appIcon === icon ? "primary" : "secondary",
+          "aria-pressed": snapshot8.platform.appIcon === icon,
           onClick: async () => {
             await repository.execute({ type: "appIcon.set", icon });
             setSnapshot((current) => current ? {
@@ -24004,7 +24004,7 @@
               const result = await repository.execute({ type: "notification.settings.open" });
               return result.native ? "\u5DF2\u6253\u5F00 Wand \u7684\u7CFB\u7EDF\u901A\u77E5\u8BBE\u7F6E\uFF1B\u4FEE\u6539\u540E\u8FD4\u56DE\u6B64\u9875\u5373\u53EF\u3002" : "\u8BF7\u5728\u6D4F\u89C8\u5668\u7684\u7F51\u7AD9\u6743\u9650\u8BBE\u7F6E\u4E2D\u5141\u8BB8\u901A\u77E5\uFF0C\u7136\u540E\u5237\u65B0\u9875\u9762\u3002";
             }),
-            children: snapshot7.platform.kind === "android" ? "\u6253\u5F00\u7CFB\u7EDF\u901A\u77E5\u8BBE\u7F6E" : "\u5982\u4F55\u91CD\u7F6E\u6743\u9650"
+            children: snapshot8.platform.kind === "android" ? "\u6253\u5F00\u7CFB\u7EDF\u901A\u77E5\u8BBE\u7F6E" : "\u5982\u4F55\u91CD\u7F6E\u6743\u9650"
           }
         ) : null,
         /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsActionButton, { pending: pending === "test", kind: "secondary", onClick: () => void run2("test", async () => {
@@ -24021,7 +24021,7 @@
     ] });
   }
   function SecuritySettingsTab(_props) {
-    const { snapshot: snapshot7, repository, refresh, toast } = _props;
+    const { snapshot: snapshot8, repository, refresh, toast } = _props;
     const [password, setPassword] = (0, import_react7.useState)("");
     const [confirmation, setConfirmation] = (0, import_react7.useState)("");
     const [keyFile, setKeyFile] = (0, import_react7.useState)(null);
@@ -24106,7 +24106,7 @@
         ] }),
         /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsActionButton, { type: "submit", pending: pending === "password", kind: "primary", children: "\u4FEE\u6539\u5BC6\u7801\u5E76\u91CD\u65B0\u767B\u5F55" })
       ] }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(SettingsSection, { title: "SSL \u8BC1\u4E66", description: `\u5F53\u524D\u72B6\u6001\uFF1A${snapshot7.hasCert ? "\u5DF2\u5B89\u88C5\u8BC1\u4E66" : "\u672A\u5B89\u88C5\u8BC1\u4E66\uFF08\u4F7F\u7528\u81EA\u7B7E\u540D\u6216 HTTP\uFF09"}`, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(SettingsSection, { title: "SSL \u8BC1\u4E66", description: `\u5F53\u524D\u72B6\u6001\uFF1A${snapshot8.hasCert ? "\u5DF2\u5B89\u88C5\u8BC1\u4E66" : "\u672A\u5B89\u88C5\u8BC1\u4E66\uFF08\u4F7F\u7528\u81EA\u7B7E\u540D\u6216 HTTP\uFF09"}`, children: [
         /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)("div", { className: "wand-settings-file-grid", children: [
           /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)("label", { children: [
             /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("span", { children: "\u79C1\u94A5\u6587\u4EF6\uFF08server.key\uFF09" }),
@@ -24124,8 +24124,8 @@
       status ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsStatus, { tone, children: status }) : null
     ] });
   }
-  function PresetSettingsTab({ snapshot: snapshot7 }) {
-    const presets = snapshot7.config?.commandPresets || [];
+  function PresetSettingsTab({ snapshot: snapshot8 }) {
+    const presets = snapshot8.config?.commandPresets || [];
     return /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)("section", { className: "wand-settings-panel", "aria-label": "\u547D\u4EE4\u9884\u8BBE", children: [
       /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)("header", { className: "wand-settings-panel-heading", children: [
         /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("h2", { children: "\u547D\u4EE4\u9884\u8BBE" }),
@@ -24151,12 +24151,12 @@
     { key: "thinking", title: "\u601D\u8003\u8FC7\u7A0B", description: "\u6A21\u578B\u7684 Thinking \u5185\u5BB9" },
     { key: "toolGroup", title: "\u5DE5\u5177\u7EC4", description: "\u8FDE\u7EED\u540C\u7C7B\u5DE5\u5177\u8C03\u7528\u7684\u6298\u53E0\u7EC4" }
   ];
-  function DisplaySettingsTab({ snapshot: snapshot7, repository, refresh, toast }) {
-    const [value, setValue] = (0, import_react7.useState)(() => ({ ...snapshot7.config.cardDefaults }));
+  function DisplaySettingsTab({ snapshot: snapshot8, repository, refresh, toast }) {
+    const [value, setValue] = (0, import_react7.useState)(() => ({ ...snapshot8.config.cardDefaults }));
     const [pending, setPending] = (0, import_react7.useState)(false);
     const [status, setStatus] = (0, import_react7.useState)("");
     const [tone, setTone] = (0, import_react7.useState)("info");
-    (0, import_react7.useEffect)(() => setValue({ ...snapshot7.config.cardDefaults }), [snapshot7]);
+    (0, import_react7.useEffect)(() => setValue({ ...snapshot8.config.cardDefaults }), [snapshot8]);
     async function save() {
       setPending(true);
       setStatus("");
@@ -24256,8 +24256,8 @@
     };
     return /* @__PURE__ */ (0, import_jsx_runtime31.jsx)("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.8", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true", children: paths[tab] });
   }
-  function SettingsOverview({ snapshot: snapshot7 }) {
-    const version = snapshot7.platform.appVersion || snapshot7.about.version || "\u672A\u77E5\u7248\u672C";
+  function SettingsOverview({ snapshot: snapshot8 }) {
+    const version = snapshot8.platform.appVersion || snapshot8.about.version || "\u672A\u77E5\u7248\u672C";
     return /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)("section", { className: "wand-settings-overview", "aria-label": "\u5F53\u524D\u8BBE\u7F6E\u6982\u89C8", children: [
       /* @__PURE__ */ (0, import_jsx_runtime31.jsx)("span", { className: "wand-settings-overview-mark", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(SettingsTabIcon, { tab: "general" }) }),
       /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)("div", { className: "wand-settings-overview-copy", children: [
@@ -24266,9 +24266,9 @@
           /* @__PURE__ */ (0, import_jsx_runtime31.jsx)("span", { children: "\u8FDE\u63A5\u3001\u8BBE\u5907\u548C\u5DE5\u4F5C\u6D41\u504F\u597D\u90FD\u5728\u8FD9\u91CC\u8C03\u6574\u3002" })
         ] }),
         /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)("div", { className: "wand-settings-overview-pills", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(WandBadge, { tone: "success", children: snapshot7.access === "admin" ? "\u7BA1\u7406\u5458\u8FDE\u63A5" : "App \u8FDE\u63A5" }),
-          /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(WandBadge, { tone: snapshot7.about.updateChannel === "beta" ? "warning" : "info", children: snapshot7.about.updateChannel === "beta" ? "Beta \u901A\u9053" : "Stable \u901A\u9053" }),
-          /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(WandBadge, { tone: "accent", children: PLATFORM_LABELS[snapshot7.platform.kind] })
+          /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(WandBadge, { tone: "success", children: snapshot8.access === "admin" ? "\u7BA1\u7406\u5458\u8FDE\u63A5" : "App \u8FDE\u63A5" }),
+          /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(WandBadge, { tone: snapshot8.about.updateChannel === "beta" ? "warning" : "info", children: snapshot8.about.updateChannel === "beta" ? "Beta \u901A\u9053" : "Stable \u901A\u9053" }),
+          /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(WandBadge, { tone: "accent", children: PLATFORM_LABELS[snapshot8.platform.kind] })
         ] })
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)("code", { children: [
@@ -24313,10 +24313,10 @@
       setError("");
       try {
         await repository.execute({ type: "admin.login", password });
-        const snapshot7 = await repository.load();
-        if (snapshot7.access !== "admin") throw new Error("\u767B\u5F55\u6210\u529F\uFF0C\u4F46\u5F53\u524D\u4F1A\u8BDD\u4ECD\u6CA1\u6709\u7BA1\u7406\u6743\u9650\u3002");
+        const snapshot8 = await repository.load();
+        if (snapshot8.access !== "admin") throw new Error("\u767B\u5F55\u6210\u529F\uFF0C\u4F46\u5F53\u524D\u4F1A\u8BDD\u4ECD\u6CA1\u6709\u7BA1\u7406\u6743\u9650\u3002");
         setPassword("");
-        onAuthenticated(snapshot7);
+        onAuthenticated(snapshot8);
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : "\u7BA1\u7406\u5458\u767B\u5F55\u5931\u8D25\u3002");
       } finally {
@@ -24371,7 +24371,7 @@
       settingsStore.getSnapshot,
       settingsStore.getSnapshot
     );
-    const [snapshot7, setSnapshot] = (0, import_react8.useState)(null);
+    const [snapshot8, setSnapshot] = (0, import_react8.useState)(null);
     const [loading, setLoading] = (0, import_react8.useState)(false);
     const [loadError, setLoadError] = (0, import_react8.useState)("");
     const load = (0, import_react8.useCallback)(async (signal, quiet = false) => {
@@ -24397,8 +24397,8 @@
       wandOverlay.toast(message, { tone });
     }, []);
     const tabs = (0, import_react8.useMemo)(() => {
-      if (!snapshot7) return [];
-      const props = { snapshot: snapshot7, repository, refresh, setSnapshot, toast, showRestart: showRestart2 };
+      if (!snapshot8) return [];
+      const props = { snapshot: snapshot8, repository, refresh, setSnapshot, toast, showRestart: showRestart2 };
       const contentByTab = {
         general: /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(GeneralSettingsTab, { ...props }),
         ai: /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(AiSettingsTab, { ...props }),
@@ -24408,7 +24408,7 @@
         presets: /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(PresetSettingsTab, { ...props }),
         about: /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(AboutSettingsTab, { ...props })
       };
-      const order = snapshot7.access === "admin" ? ADMIN_TAB_ORDER : CONNECTED_APP_TAB_ORDER;
+      const order = snapshot8.access === "admin" ? ADMIN_TAB_ORDER : CONNECTED_APP_TAB_ORDER;
       return order.map((value) => ({
         value,
         label: /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)("span", { className: "wand-settings-tab-label", children: [
@@ -24420,8 +24420,8 @@
         ] }),
         content: contentByTab[value]
       }));
-    }, [refresh, repository, showRestart2, snapshot7, toast]);
-    const selectedTab = snapshot7?.access === "admin" ? controller.tab : controller.tab === "about" ? "about" : "notifications";
+    }, [refresh, repository, showRestart2, snapshot8, toast]);
+    const selectedTab = snapshot8?.access === "admin" ? controller.tab : controller.tab === "about" ? "about" : "notifications";
     return /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(
       WandDialogSurface,
       {
@@ -24441,9 +24441,9 @@
         children: loading ? /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(SettingsLoading, {}) : loadError ? /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)("div", { className: "wand-settings-load-error", role: "alert", children: [
           /* @__PURE__ */ (0, import_jsx_runtime31.jsx)("p", { children: loadError }),
           /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(WandButton, { kind: "primary", onClick: () => void load(), children: "\u91CD\u8BD5\u52A0\u8F7D\u8BBE\u7F6E" })
-        ] }) : snapshot7 ? /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)(import_jsx_runtime31.Fragment, { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(SettingsOverview, { snapshot: snapshot7 }),
-          snapshot7.access === "read-only" ? /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(
+        ] }) : snapshot8 ? /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)(import_jsx_runtime31.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(SettingsOverview, { snapshot: snapshot8 }),
+          snapshot8.access === "read-only" ? /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(
             ConnectedAppAccess,
             {
               repository,
@@ -25029,7 +25029,7 @@
     (0, import_react10.useEffect)(() => {
       if (!controller.open) return;
       const abort = new AbortController();
-      const runtime6 = newSessionStore.getRuntime();
+      const runtime7 = newSessionStore.getRuntime();
       setLoading(true);
       setSubmitting(false);
       setError("");
@@ -25040,7 +25040,7 @@
       setAdvancedOpen(false);
       void repository.load({ signal: abort.signal }).then((loaded) => {
         if (abort.signal.aborted) return;
-        const context = runtime6?.getContext();
+        const context = runtime7?.getContext();
         setDefaults(loaded);
         setForm({
           provider: loaded.config.defaultProvider,
@@ -25113,8 +25113,8 @@
     async function submit(event) {
       event.preventDefault();
       if (!form || !defaults || submitting) return;
-      const runtime6 = newSessionStore.getRuntime();
-      if (!runtime6) {
+      const runtime7 = newSessionStore.getRuntime();
+      if (!runtime7) {
         setError("\u65B0\u5EFA\u4F1A\u8BDD\u8FD0\u884C\u73AF\u5883\u5C1A\u672A\u5C31\u7EEA\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u540E\u91CD\u8BD5\u3002");
         return;
       }
@@ -25122,15 +25122,15 @@
       setSubmitting(true);
       setError("");
       try {
-        const dimensions = await runtime6.prepareCreate(form.kind);
-        const request2 = buildCreateRequest(form, defaults.config, runtime6.getContext(), dimensions);
+        const dimensions = await runtime7.prepareCreate(form.kind);
+        const request2 = buildCreateRequest(form, defaults.config, runtime7.getContext(), dimensions);
         void repository.savePreferences({
           defaultProvider: request2.provider,
           defaultSessionKind: request2.kind,
           defaultMode: request2.mode
         }).catch((saveError) => console.warn("[wand] Failed to persist new-session defaults", saveError));
         const created = await repository.create(request2);
-        await runtime6.completeCreate(request2, created);
+        await runtime7.completeCreate(request2, created);
         newSessionController.close();
       } catch (createError) {
         setError(presentError(createError, creationFallback(form.provider, form.kind)));
@@ -26947,39 +26947,39 @@
       currentVersion
     };
   }
-  function waitingStatus(snapshot7) {
-    if (snapshot7.lastError) {
-      return `\u670D\u52A1\u6682\u4E0D\u53EF\u7528\uFF0C\u6B63\u5728\u7EE7\u7EED\u7B49\u5F85\uFF08${snapshot7.attempts}/${snapshot7.maxAttempts}\uFF09\u2026`;
+  function waitingStatus(snapshot8) {
+    if (snapshot8.lastError) {
+      return `\u670D\u52A1\u6682\u4E0D\u53EF\u7528\uFF0C\u6B63\u5728\u7EE7\u7EED\u7B49\u5F85\uFF08${snapshot8.attempts}/${snapshot8.maxAttempts}\uFF09\u2026`;
     }
-    if (snapshot7.attempts === 0) {
-      return snapshot7.mode === "auto-update" ? "\u6B63\u5728\u7B49\u5F85\u66F4\u65B0\u5B8C\u6210\u5E76\u91CD\u542F\u670D\u52A1\u2026" : "\u6B63\u5728\u7B49\u5F85\u670D\u52A1\u91CD\u65B0\u542F\u52A8\u2026";
+    if (snapshot8.attempts === 0) {
+      return snapshot8.mode === "auto-update" ? "\u6B63\u5728\u7B49\u5F85\u66F4\u65B0\u5B8C\u6210\u5E76\u91CD\u542F\u670D\u52A1\u2026" : "\u6B63\u5728\u7B49\u5F85\u670D\u52A1\u91CD\u65B0\u542F\u52A8\u2026";
     }
-    if (!snapshot7.readiness.instanceReady && !snapshot7.readiness.versionReady) {
-      return `\u6B63\u5728\u7B49\u5F85\u65B0\u670D\u52A1\u5B9E\u4F8B\u548C\u76EE\u6807\u7248\u672C\uFF08${snapshot7.attempts}/${snapshot7.maxAttempts}\uFF09\u2026`;
+    if (!snapshot8.readiness.instanceReady && !snapshot8.readiness.versionReady) {
+      return `\u6B63\u5728\u7B49\u5F85\u65B0\u670D\u52A1\u5B9E\u4F8B\u548C\u76EE\u6807\u7248\u672C\uFF08${snapshot8.attempts}/${snapshot8.maxAttempts}\uFF09\u2026`;
     }
-    if (!snapshot7.readiness.instanceReady) {
-      return `\u76EE\u6807\u7248\u672C\u5DF2\u5C31\u7EEA\uFF0C\u6B63\u5728\u7B49\u5F85\u65B0\u670D\u52A1\u5B9E\u4F8B\uFF08${snapshot7.attempts}/${snapshot7.maxAttempts}\uFF09\u2026`;
+    if (!snapshot8.readiness.instanceReady) {
+      return `\u76EE\u6807\u7248\u672C\u5DF2\u5C31\u7EEA\uFF0C\u6B63\u5728\u7B49\u5F85\u65B0\u670D\u52A1\u5B9E\u4F8B\uFF08${snapshot8.attempts}/${snapshot8.maxAttempts}\uFF09\u2026`;
     }
-    if (!snapshot7.readiness.versionReady) {
-      const expected = snapshot7.target.expectedVersion || snapshot7.latestVersion || "\u76EE\u6807\u7248\u672C";
-      return `\u65B0\u670D\u52A1\u5DF2\u542F\u52A8\uFF0C\u6B63\u5728\u7B49\u5F85\u7248\u672C ${expected}\uFF08${snapshot7.attempts}/${snapshot7.maxAttempts}\uFF09\u2026`;
+    if (!snapshot8.readiness.versionReady) {
+      const expected = snapshot8.target.expectedVersion || snapshot8.latestVersion || "\u76EE\u6807\u7248\u672C";
+      return `\u65B0\u670D\u52A1\u5DF2\u542F\u52A8\uFF0C\u6B63\u5728\u7B49\u5F85\u7248\u672C ${expected}\uFF08${snapshot8.attempts}/${snapshot8.maxAttempts}\uFF09\u2026`;
     }
-    return `\u6B63\u5728\u7B49\u5F85\u670D\u52A1\u5C31\u7EEA\uFF08${snapshot7.attempts}/${snapshot7.maxAttempts}\uFF09\u2026`;
+    return `\u6B63\u5728\u7B49\u5F85\u670D\u52A1\u5C31\u7EEA\uFF08${snapshot8.attempts}/${snapshot8.maxAttempts}\uFF09\u2026`;
   }
-  function restartOverlayPresentation(snapshot7) {
-    const isAutoUpdate = snapshot7.mode === "auto-update";
-    const title = isAutoUpdate ? "\u81EA\u52A8\u66F4\u65B0\u4E2D" : snapshot7.target.expectedVersion ? "\u6B63\u5728\u5B8C\u6210\u66F4\u65B0" : "\u670D\u52A1\u6B63\u5728\u91CD\u542F";
-    const description = isAutoUpdate ? `${snapshot7.currentVersion || "-"} \u2192 ${snapshot7.latestVersion || "-"}
-\u6B63\u5728\u4E0B\u8F7D\u5E76\u5B89\u88C5\u65B0\u7248\u672C\uFF0C\u5B8C\u6210\u540E\u5C06\u81EA\u52A8\u91CD\u542F\u3002` : snapshot7.target.expectedVersion ? "\u5B89\u88C5\u5B8C\u6210\u5E76\u542F\u52A8\u65B0\u7248\u672C\u540E\u5C06\u81EA\u52A8\u5237\u65B0\u9875\u9762\u3002" : "\u670D\u52A1\u6062\u590D\u540E\u5C06\u81EA\u52A8\u5237\u65B0\u9875\u9762\u3002";
+  function restartOverlayPresentation(snapshot8) {
+    const isAutoUpdate = snapshot8.mode === "auto-update";
+    const title = isAutoUpdate ? "\u81EA\u52A8\u66F4\u65B0\u4E2D" : snapshot8.target.expectedVersion ? "\u6B63\u5728\u5B8C\u6210\u66F4\u65B0" : "\u670D\u52A1\u6B63\u5728\u91CD\u542F";
+    const description = isAutoUpdate ? `${snapshot8.currentVersion || "-"} \u2192 ${snapshot8.latestVersion || "-"}
+\u6B63\u5728\u4E0B\u8F7D\u5E76\u5B89\u88C5\u65B0\u7248\u672C\uFF0C\u5B8C\u6210\u540E\u5C06\u81EA\u52A8\u91CD\u542F\u3002` : snapshot8.target.expectedVersion ? "\u5B89\u88C5\u5B8C\u6210\u5E76\u542F\u52A8\u65B0\u7248\u672C\u540E\u5C06\u81EA\u52A8\u5237\u65B0\u9875\u9762\u3002" : "\u670D\u52A1\u6062\u590D\u540E\u5C06\u81EA\u52A8\u5237\u65B0\u9875\u9762\u3002";
     let liveStatus = "";
-    if (snapshot7.phase === "checking") {
-      liveStatus = `\u6B63\u5728\u68C0\u67E5\u670D\u52A1\u72B6\u6001\uFF08${snapshot7.attempts}/${snapshot7.maxAttempts}\uFF09\u2026`;
-    } else if (snapshot7.phase === "ready") {
+    if (snapshot8.phase === "checking") {
+      liveStatus = `\u6B63\u5728\u68C0\u67E5\u670D\u52A1\u72B6\u6001\uFF08${snapshot8.attempts}/${snapshot8.maxAttempts}\uFF09\u2026`;
+    } else if (snapshot8.phase === "ready") {
       liveStatus = "\u65B0\u670D\u52A1\u548C\u76EE\u6807\u7248\u672C\u5747\u5DF2\u5C31\u7EEA\uFF0C\u6B63\u5728\u5237\u65B0\u9875\u9762\u2026";
-    } else if (snapshot7.phase === "timed-out") {
+    } else if (snapshot8.phase === "timed-out") {
       liveStatus = "\u7B49\u5F85\u670D\u52A1\u91CD\u542F\u8D85\u65F6\uFF0C\u8BF7\u624B\u52A8\u5237\u65B0\u9875\u9762\u3002";
-    } else if (snapshot7.phase === "waiting") {
-      liveStatus = waitingStatus(snapshot7);
+    } else if (snapshot8.phase === "waiting") {
+      liveStatus = waitingStatus(snapshot8);
     }
     return { title, description, liveStatus };
   }
@@ -27069,16 +27069,16 @@
     return typeof value === "string" ? value.trim() : "";
   }
   function createRestartOverlayController(dependencies) {
-    let snapshot7 = blankSnapshot();
+    let snapshot8 = blankSnapshot();
     let pollTimer = null;
     let deadlineTimer = null;
     let probeTimer = null;
     let request2 = null;
     let generation = 0;
-    const listeners7 = /* @__PURE__ */ new Set();
-    function publish7(patch) {
-      snapshot7 = { ...snapshot7, ...patch, revision: snapshot7.revision + 1 };
-      for (const listener of listeners7) listener();
+    const listeners8 = /* @__PURE__ */ new Set();
+    function publish8(patch) {
+      snapshot8 = { ...snapshot8, ...patch, revision: snapshot8.revision + 1 };
+      for (const listener of listeners8) listener();
     }
     function stopPollTimer() {
       if (pollTimer === null) return;
@@ -27110,13 +27110,13 @@
       abortProbe();
     }
     function timeOut(runGeneration) {
-      if (runGeneration !== generation || !snapshot7.open || snapshot7.phase === "ready" || snapshot7.phase === "timed-out") return;
+      if (runGeneration !== generation || !snapshot8.open || snapshot8.phase === "ready" || snapshot8.phase === "timed-out") return;
       stopSchedule();
       abortProbe();
-      publish7({ phase: "timed-out" });
+      publish8({ phase: "timed-out" });
     }
     function failReload(error) {
-      publish7({
+      publish8({
         phase: "timed-out",
         lastError: errorMessage(error)
       });
@@ -27129,14 +27129,14 @@
       }
     }
     async function poll(runGeneration) {
-      if (runGeneration !== generation || !snapshot7.open || snapshot7.phase === "timed-out" || snapshot7.phase === "ready") return;
+      if (runGeneration !== generation || !snapshot8.open || snapshot8.phase === "timed-out" || snapshot8.phase === "ready") return;
       if (request2 !== null) {
         abortProbe(new DOMException("Restart probe timed out.", "TimeoutError"));
       }
       const abort = new AbortController();
       request2 = abort;
-      const attempt = snapshot7.attempts + 1;
-      publish7({ phase: "checking", attempts: attempt, lastError: "" });
+      const attempt = snapshot8.attempts + 1;
+      publish8({ phase: "checking", attempts: attempt, lastError: "" });
       let removeAbortListener = () => {
       };
       const aborted = new Promise((_resolve, reject) => {
@@ -27157,10 +27157,10 @@
           dependencies.repository.loadConfig({ signal: abort.signal }),
           aborted
         ]);
-        if (abort.signal.aborted || runGeneration !== generation || request2 !== abort || !snapshot7.open) return;
-        const readiness = evaluateRestartReadiness(snapshot7.target, config);
+        if (abort.signal.aborted || runGeneration !== generation || request2 !== abort || !snapshot8.open) return;
+        const readiness = evaluateRestartReadiness(snapshot8.target, config);
         becameReady = readiness.ready;
-        publish7({
+        publish8({
           phase: readiness.ready ? "ready" : "waiting",
           readiness,
           lastError: ""
@@ -27170,12 +27170,12 @@
           reloadPage();
         }
       } catch (error) {
-        if (runGeneration !== generation || request2 !== abort || !snapshot7.open) return;
+        if (runGeneration !== generation || request2 !== abort || !snapshot8.open) return;
         if (abort.signal.aborted && abort.signal.reason instanceof DOMException) {
           if (abort.signal.reason.name !== "TimeoutError") return;
-          publish7({ phase: "waiting", lastError: "\u670D\u52A1\u72B6\u6001\u68C0\u67E5\u8D85\u65F6\uFF0C\u6B63\u5728\u91CD\u8BD5\u3002" });
+          publish8({ phase: "waiting", lastError: "\u670D\u52A1\u72B6\u6001\u68C0\u67E5\u8D85\u65F6\uFF0C\u6B63\u5728\u91CD\u8BD5\u3002" });
         } else {
-          publish7({ phase: "waiting", lastError: errorMessage(error) });
+          publish8({ phase: "waiting", lastError: errorMessage(error) });
         }
       } finally {
         removeAbortListener();
@@ -27184,7 +27184,7 @@
           request2 = null;
         }
       }
-      if (!becameReady && runGeneration === generation && snapshot7.open && attempt >= RESTART_MAX_ATTEMPTS) {
+      if (!becameReady && runGeneration === generation && snapshot8.open && attempt >= RESTART_MAX_ATTEMPTS) {
         timeOut(runGeneration);
       }
     }
@@ -27195,7 +27195,7 @@
         previousInstanceId: normalizedText(previousInstanceId),
         expectedVersion: normalizeRestartVersion(expectedVersion)
       };
-      snapshot7 = {
+      snapshot8 = {
         open: true,
         mode,
         phase: "waiting",
@@ -27212,9 +27212,9 @@
           currentVersion: ""
         },
         lastError: "",
-        revision: snapshot7.revision + 1
+        revision: snapshot8.revision + 1
       };
-      for (const listener of listeners7) listener();
+      for (const listener of listeners8) listener();
       const runGeneration = generation;
       pollTimer = dependencies.clock.setInterval(
         () => {
@@ -27247,25 +27247,25 @@
         );
       },
       manualRefresh() {
-        if (!snapshot7.open) return;
+        if (!snapshot8.open) return;
         reloadPage();
       },
       isOpen() {
-        return snapshot7.open;
+        return snapshot8.open;
       },
       subscribe(listener) {
-        listeners7.add(listener);
-        return () => listeners7.delete(listener);
+        listeners8.add(listener);
+        return () => listeners8.delete(listener);
       },
       getSnapshot() {
-        return snapshot7;
+        return snapshot8;
       },
       dispose() {
         generation += 1;
         stopPolling2();
-        if (!snapshot7.open && snapshot7.phase === "idle") return;
-        snapshot7 = blankSnapshot(snapshot7.revision + 1);
-        for (const listener of listeners7) listener();
+        if (!snapshot8.open && snapshot8.phase === "idle") return;
+        snapshot8 = blankSnapshot(snapshot8.revision + 1);
+        for (const listener of listeners8) listener();
       }
     };
   }
@@ -27472,25 +27472,25 @@
   function RestartOverlayHost({
     controller = restartOverlayController
   }) {
-    const snapshot7 = (0, import_react14.useSyncExternalStore)(
+    const snapshot8 = (0, import_react14.useSyncExternalStore)(
       controller.subscribe,
       controller.getSnapshot,
       controller.getSnapshot
     );
-    const presentation = restartOverlayPresentation(snapshot7);
+    const presentation = restartOverlayPresentation(snapshot8);
     const manualRefreshButton = (0, import_react14.useRef)(null);
     (0, import_react14.useEffect)(() => {
-      if (snapshot7.phase !== "timed-out") return;
+      if (snapshot8.phase !== "timed-out") return;
       manualRefreshButton.current?.focus();
-    }, [snapshot7.phase]);
-    const busy = snapshot7.phase === "waiting" || snapshot7.phase === "checking";
-    const progressValue = Math.min(snapshot7.attempts, snapshot7.maxAttempts);
+    }, [snapshot8.phase]);
+    const busy = snapshot8.phase === "waiting" || snapshot8.phase === "checking";
+    const progressValue = Math.min(snapshot8.attempts, snapshot8.maxAttempts);
     return /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)(import_jsx_runtime37.Fragment, { children: [
       /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("style", { "data-wand-restart-overlay-styles": true, children: restartOverlayStyles }),
       /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(
         WandDialogSurface,
         {
-          open: snapshot7.open,
+          open: snapshot8.open,
           onOpenChange: () => {
           },
           title: presentation.title,
@@ -27504,33 +27504,33 @@
           testId: "restart-overlay",
           dismissable: false,
           children: /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)("div", { className: "wand-restart-body", "aria-busy": busy, children: [
-            snapshot7.phase !== "timed-out" ? /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("div", { className: "wand-restart-spinner", "aria-hidden": "true" }) : null,
+            snapshot8.phase !== "timed-out" ? /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("div", { className: "wand-restart-spinner", "aria-hidden": "true" }) : null,
             /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(
               "p",
               {
                 className: "wand-restart-live",
-                role: snapshot7.phase === "timed-out" ? "alert" : "status",
-                "aria-live": snapshot7.phase === "timed-out" ? "assertive" : "polite",
+                role: snapshot8.phase === "timed-out" ? "alert" : "status",
+                "aria-live": snapshot8.phase === "timed-out" ? "assertive" : "polite",
                 "data-wand-autofocus": "true",
                 tabIndex: -1,
                 children: presentation.liveStatus
               }
             ),
-            snapshot7.phase !== "timed-out" ? /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)(import_jsx_runtime37.Fragment, { children: [
+            snapshot8.phase !== "timed-out" ? /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)(import_jsx_runtime37.Fragment, { children: [
               /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(
                 "progress",
                 {
                   className: "wand-restart-progress",
-                  max: snapshot7.maxAttempts,
+                  max: snapshot8.maxAttempts,
                   value: progressValue,
                   "aria-label": "\u7B49\u5F85\u670D\u52A1\u91CD\u542F\u8FDB\u5EA6"
                 }
               ),
               /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)("span", { className: "wand-restart-attempts", children: [
                 "\u5DF2\u68C0\u67E5 ",
-                snapshot7.attempts,
+                snapshot8.attempts,
                 " / ",
-                snapshot7.maxAttempts,
+                snapshot8.maxAttempts,
                 " \u6B21"
               ] })
             ] }) : /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(
@@ -28056,28 +28056,28 @@
     }
   };
   function createFilePreviewModule(options) {
-    const listeners7 = /* @__PURE__ */ new Set();
-    let snapshot7 = initialSnapshot();
-    let runtime6 = options.runtime ?? defaultRuntime;
+    const listeners8 = /* @__PURE__ */ new Set();
+    let snapshot8 = initialSnapshot();
+    let runtime7 = options.runtime ?? defaultRuntime;
     let loadSequence = 0;
     let activeAbort = null;
-    function publish7(patch) {
-      snapshot7 = { ...snapshot7, ...patch, revision: snapshot7.revision + 1 };
-      for (const listener of listeners7) listener();
+    function publish8(patch) {
+      snapshot8 = { ...snapshot8, ...patch, revision: snapshot8.revision + 1 };
+      for (const listener of listeners8) listener();
     }
     function closeNow() {
       activeAbort?.abort();
       activeAbort = null;
       loadSequence += 1;
-      snapshot7 = initialSnapshot(snapshot7.revision + 1);
-      for (const listener of listeners7) listener();
+      snapshot8 = initialSnapshot(snapshot8.revision + 1);
+      for (const listener of listeners8) listener();
     }
     async function confirmDiscard(reason) {
-      if (!snapshot7.dirty || !snapshot7.request) return true;
+      if (!snapshot8.dirty || !snapshot8.request) return true;
       try {
-        return await runtime6.confirmDiscard(reason, snapshot7.request.path);
+        return await runtime7.confirmDiscard(reason, snapshot8.request.path);
       } catch (error) {
-        runtime6.notify(unknownFailure(error, "\u65E0\u6CD5\u786E\u8BA4\u662F\u5426\u653E\u5F03\u4FEE\u6539\u3002").message, "error");
+        runtime7.notify(unknownFailure(error, "\u65E0\u6CD5\u786E\u8BA4\u662F\u5426\u653E\u5F03\u4FEE\u6539\u3002").message, "error");
         return false;
       }
     }
@@ -28086,7 +28086,7 @@
       const abort = new AbortController();
       activeAbort = abort;
       const sequence = ++loadSequence;
-      publish7({
+      publish8({
         open: true,
         request: request2,
         status: "loading",
@@ -28103,14 +28103,14 @@
       });
       try {
         const outcome = await options.repository.load(request2.path, { signal: abort.signal });
-        if (sequence !== loadSequence || abort.signal.aborted || !snapshot7.open) return false;
+        if (sequence !== loadSequence || abort.signal.aborted || !snapshot8.open) return false;
         activeAbort = null;
         if (outcome.ok === false) {
-          publish7({ status: "error", failure: outcome.failure });
+          publish8({ status: "error", failure: outcome.failure });
           return false;
         }
         const baseline = outcome.file.kind === "text" ? outcome.file.content ?? "" : "";
-        publish7({
+        publish8({
           status: "ready",
           file: outcome.file,
           failure: null,
@@ -28119,28 +28119,28 @@
         });
         return true;
       } catch (error) {
-        if (sequence !== loadSequence || abort.signal.aborted || isAbort(error) || !snapshot7.open) return false;
+        if (sequence !== loadSequence || abort.signal.aborted || isAbort(error) || !snapshot8.open) return false;
         activeAbort = null;
-        publish7({ status: "error", failure: unknownFailure(error, "\u52A0\u8F7D\u9884\u89C8\u5931\u8D25") });
+        publish8({ status: "error", failure: unknownFailure(error, "\u52A0\u8F7D\u9884\u89C8\u5931\u8D25") });
         return false;
       }
     }
     async function copy(text5, successMessage) {
       try {
-        await runtime6.copyText(text5);
-        runtime6.notify(successMessage, "success");
+        await runtime7.copyText(text5);
+        runtime7.notify(successMessage, "success");
         return true;
       } catch (error) {
-        runtime6.notify(unknownFailure(error, "\u590D\u5236\u5931\u8D25\u3002").message, "error");
+        runtime7.notify(unknownFailure(error, "\u590D\u5236\u5931\u8D25\u3002").message, "error");
         return false;
       }
     }
     async function execute(command) {
-      if (!snapshot7.open) return false;
+      if (!snapshot8.open) return false;
       switch (command.type) {
         case "close": {
-          if (snapshot7.saving) return false;
-          if (!snapshot7.dirty) {
+          if (snapshot8.saving) return false;
+          if (!snapshot8.dirty) {
             closeNow();
             return true;
           }
@@ -28149,52 +28149,52 @@
           return true;
         }
         case "navigate": {
-          if (snapshot7.editing || snapshot7.saving) return false;
-          const sibling = nextFilePreviewSibling(snapshot7.request, command.direction);
-          if (!sibling || !snapshot7.request) return false;
-          return load({ ...snapshot7.request, path: sibling.path });
+          if (snapshot8.editing || snapshot8.saving) return false;
+          const sibling = nextFilePreviewSibling(snapshot8.request, command.direction);
+          if (!sibling || !snapshot8.request) return false;
+          return load({ ...snapshot8.request, path: sibling.path });
         }
         case "edit.enter": {
-          if (snapshot7.status !== "ready" || snapshot7.file?.kind !== "text" || snapshot7.saving) return false;
-          const baseline = snapshot7.file.content ?? "";
-          publish7({ editing: true, draft: baseline, baseline, dirty: false, failure: null });
+          if (snapshot8.status !== "ready" || snapshot8.file?.kind !== "text" || snapshot8.saving) return false;
+          const baseline = snapshot8.file.content ?? "";
+          publish8({ editing: true, draft: baseline, baseline, dirty: false, failure: null });
           return true;
         }
         case "edit.change": {
-          if (!snapshot7.editing || snapshot7.saving) return false;
-          publish7({ draft: command.value, dirty: command.value !== snapshot7.baseline, failure: null });
+          if (!snapshot8.editing || snapshot8.saving) return false;
+          publish8({ draft: command.value, dirty: command.value !== snapshot8.baseline, failure: null });
           return true;
         }
         case "edit.revert": {
-          if (!snapshot7.editing || snapshot7.saving) return false;
-          publish7({ draft: snapshot7.baseline, dirty: false, failure: null });
+          if (!snapshot8.editing || snapshot8.saving) return false;
+          publish8({ draft: snapshot8.baseline, dirty: false, failure: null });
           return true;
         }
         case "edit.exit": {
-          if (!snapshot7.editing || snapshot7.saving) return false;
+          if (!snapshot8.editing || snapshot8.saving) return false;
           if (!await confirmDiscard("exit-edit")) return false;
-          publish7({ editing: false, draft: snapshot7.baseline, dirty: false, failure: null });
+          publish8({ editing: false, draft: snapshot8.baseline, dirty: false, failure: null });
           return true;
         }
         case "edit.save": {
-          if (!snapshot7.editing || snapshot7.saving || snapshot7.file?.kind !== "text" || !snapshot7.request) return false;
-          if (snapshot7.draft === snapshot7.baseline) {
-            runtime6.notify("\u6CA1\u6709\u6539\u52A8", "info");
+          if (!snapshot8.editing || snapshot8.saving || snapshot8.file?.kind !== "text" || !snapshot8.request) return false;
+          if (snapshot8.draft === snapshot8.baseline) {
+            runtime7.notify("\u6CA1\u6709\u6539\u52A8", "info");
             return true;
           }
-          const path = snapshot7.request.path;
-          const draft = snapshot7.draft;
-          publish7({ saving: true, failure: null });
+          const path = snapshot8.request.path;
+          const draft = snapshot8.draft;
+          publish8({ saving: true, failure: null });
           try {
             const outcome = await options.repository.save(path, draft);
-            if (!snapshot7.open || snapshot7.request?.path !== path) return false;
+            if (!snapshot8.open || snapshot8.request?.path !== path) return false;
             if (outcome.ok === false) {
-              publish7({ saving: false, failure: outcome.failure });
-              runtime6.notify(outcome.failure.message, "error");
+              publish8({ saving: false, failure: outcome.failure });
+              runtime7.notify(outcome.failure.message, "error");
               return false;
             }
-            const currentFile = snapshot7.file;
-            publish7({
+            const currentFile = snapshot8.file;
+            publish8({
               saving: false,
               file: currentFile ? { ...currentFile, content: draft, size: outcome.result.size } : currentFile,
               baseline: draft,
@@ -28202,47 +28202,47 @@
               dirty: false,
               failure: null
             });
-            runtime6.notify("\u5DF2\u4FDD\u5B58", "success");
+            runtime7.notify("\u5DF2\u4FDD\u5B58", "success");
             try {
-              await runtime6.onSaved(path);
+              await runtime7.onSaved(path);
             } catch {
             }
             return true;
           } catch (error) {
-            if (!snapshot7.open || snapshot7.request?.path !== path) return false;
+            if (!snapshot8.open || snapshot8.request?.path !== path) return false;
             const failure = unknownFailure(error, "\u4FDD\u5B58\u5931\u8D25\uFF1A\u7F51\u7EDC\u9519\u8BEF");
-            publish7({ saving: false, failure });
-            runtime6.notify(failure.message, "error");
+            publish8({ saving: false, failure });
+            runtime7.notify(failure.message, "error");
             return false;
           }
         }
         case "copy.path":
-          return snapshot7.file ? copy(snapshot7.file.path, "\u5DF2\u590D\u5236\u8DEF\u5F84") : false;
+          return snapshot8.file ? copy(snapshot8.file.path, "\u5DF2\u590D\u5236\u8DEF\u5F84") : false;
         case "copy.content":
-          return snapshot7.file?.kind === "text" ? copy(snapshot7.file.content ?? "", "\u5DF2\u590D\u5236\u5185\u5BB9") : false;
+          return snapshot8.file?.kind === "text" ? copy(snapshot8.file.content ?? "", "\u5DF2\u590D\u5236\u5185\u5BB9") : false;
         case "composer.path": {
-          if (!snapshot7.file) return false;
-          const appended = runtime6.appendToComposer(snapshot7.file.path);
-          runtime6.notify(appended ? "\u5DF2\u7C98\u8D34\u5230\u8F93\u5165\u6846" : "\u65E0\u6CD5\u7C98\u8D34\u5230\u8F93\u5165\u6846", appended ? "success" : "error");
+          if (!snapshot8.file) return false;
+          const appended = runtime7.appendToComposer(snapshot8.file.path);
+          runtime7.notify(appended ? "\u5DF2\u7C98\u8D34\u5230\u8F93\u5165\u6846" : "\u65E0\u6CD5\u7C98\u8D34\u5230\u8F93\u5165\u6846", appended ? "success" : "error");
           return appended;
         }
         case "composer.cat": {
-          if (!snapshot7.file) return false;
-          const appended = runtime6.appendToComposer(`cat -- ${shellQuoteFilePath(snapshot7.file.path)}`);
-          runtime6.notify(appended ? "\u547D\u4EE4\u5DF2\u7C98\u8D34\u5230\u8F93\u5165\u6846" : "\u65E0\u6CD5\u7C98\u8D34\u5230\u8F93\u5165\u6846", appended ? "success" : "error");
+          if (!snapshot8.file) return false;
+          const appended = runtime7.appendToComposer(`cat -- ${shellQuoteFilePath(snapshot8.file.path)}`);
+          runtime7.notify(appended ? "\u547D\u4EE4\u5DF2\u7C98\u8D34\u5230\u8F93\u5165\u6846" : "\u65E0\u6CD5\u7C98\u8D34\u5230\u8F93\u5165\u6846", appended ? "success" : "error");
           return appended;
         }
         case "view.wrap.toggle":
-          if (snapshot7.file?.kind !== "text" || snapshot7.editing) return false;
-          publish7({ wrap: !snapshot7.wrap });
+          if (snapshot8.file?.kind !== "text" || snapshot8.editing) return false;
+          publish8({ wrap: !snapshot8.wrap });
           return true;
         case "view.font.adjust":
-          if (snapshot7.file?.kind !== "text" || snapshot7.editing) return false;
-          publish7({ fontSize: clampFilePreviewFontSize(snapshot7.fontSize + command.delta) });
+          if (snapshot8.file?.kind !== "text" || snapshot8.editing) return false;
+          publish8({ fontSize: clampFilePreviewFontSize(snapshot8.fontSize + command.delta) });
           return true;
         case "view.image.zoom.toggle":
-          if (snapshot7.file?.kind !== "image" || snapshot7.editing) return false;
-          publish7({ imageZoomed: !snapshot7.imageZoomed });
+          if (snapshot8.file?.kind !== "image" || snapshot8.editing) return false;
+          publish8({ imageZoomed: !snapshot8.imageZoomed });
           return true;
       }
     }
@@ -28250,16 +28250,16 @@
       async open(input) {
         const request2 = normalizeFilePreviewRequest(input);
         if (!request2) return false;
-        if (snapshot7.open && snapshot7.request?.path === request2.path && !snapshot7.dirty) {
-          publish7({ request: request2 });
+        if (snapshot8.open && snapshot8.request?.path === request2.path && !snapshot8.dirty) {
+          publish8({ request: request2 });
           return true;
         }
-        if (snapshot7.open && snapshot7.dirty && !await confirmDiscard("replace")) return false;
+        if (snapshot8.open && snapshot8.dirty && !await confirmDiscard("replace")) return false;
         return load(request2);
       },
       execute,
       closeIfOpen() {
-        if (!snapshot7.open) return false;
+        if (!snapshot8.open) return false;
         void execute({ type: "close" });
         return true;
       },
@@ -28267,25 +28267,25 @@
         return this.closeIfOpen();
       },
       isOpen() {
-        return snapshot7.open;
+        return snapshot8.open;
       }
     };
     return {
       controller,
       store: {
         subscribe(listener) {
-          listeners7.add(listener);
-          return () => listeners7.delete(listener);
+          listeners8.add(listener);
+          return () => listeners8.delete(listener);
         },
         getSnapshot() {
-          return snapshot7;
+          return snapshot8;
         }
       },
       configureRuntime(adapter) {
-        const previous = runtime6;
-        runtime6 = adapter;
+        const previous = runtime7;
+        runtime7 = adapter;
         return () => {
-          if (runtime6 === adapter) runtime6 = previous;
+          if (runtime7 === adapter) runtime7 = previous;
         };
       }
     };
@@ -28745,26 +28745,26 @@
         return /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("hr", {});
     }
   }
-  function TextPreview({ snapshot: snapshot7, file }) {
+  function TextPreview({ snapshot: snapshot8, file }) {
     const content = file.content ?? "";
     if (isMarkdownPreview(file)) {
       return /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(
         "div",
         {
-          className: `wand-file-preview-markdown${snapshot7.wrap ? " wrap" : ""}`,
-          style: { fontSize: `${snapshot7.fontSize}px` },
+          className: `wand-file-preview-markdown${snapshot8.wrap ? " wrap" : ""}`,
+          style: { fontSize: `${snapshot8.fontSize}px` },
           children: parseFilePreviewMarkdown(content).map((block, index2) => /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(MarkdownBlock, { block }, index2))
         }
       );
     }
     const lineCount = Math.max(1, content.split("\n").length);
-    return /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: `wand-file-preview-code${snapshot7.wrap ? " wrap" : ""}`, children: [
+    return /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: `wand-file-preview-code${snapshot8.wrap ? " wrap" : ""}`, children: [
       /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(
         "pre",
         {
           "aria-hidden": "true",
           className: "wand-file-preview-lines",
-          style: { fontSize: `${snapshot7.fontSize}px` },
+          style: { fontSize: `${snapshot8.fontSize}px` },
           children: Array.from({ length: lineCount }, (_value, index2) => index2 + 1).join("\n")
         }
       ),
@@ -28772,7 +28772,7 @@
         "pre",
         {
           className: "wand-file-preview-code-content",
-          style: { fontSize: `${snapshot7.fontSize}px` },
+          style: { fontSize: `${snapshot8.fontSize}px` },
           children: /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("code", { children: /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(CodeTokens, { tokens: tokenizeFilePreviewCode(content) }) })
         }
       )
@@ -28794,24 +28794,24 @@
       ] })
     ] });
   }
-  function PreviewBody({ snapshot: snapshot7, editorRef }) {
-    if (snapshot7.status === "loading") {
+  function PreviewBody({ snapshot: snapshot8, editorRef }) {
+    if (snapshot8.status === "loading") {
       return /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("div", { className: "wand-file-preview-state", role: "status", children: "\u6B63\u5728\u52A0\u8F7D\u9884\u89C8\u2026" });
     }
-    if (snapshot7.status === "error") {
+    if (snapshot8.status === "error") {
       return /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: "wand-file-preview-state wand-file-preview-error", role: "alert", children: [
         /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { "aria-hidden": "true", children: "!" }),
-        /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("strong", { children: snapshot7.failure?.message || "\u52A0\u8F7D\u9884\u89C8\u5931\u8D25" }),
-        snapshot7.failure?.size != null ? /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("small", { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("strong", { children: snapshot8.failure?.message || "\u52A0\u8F7D\u9884\u89C8\u5931\u8D25" }),
+        snapshot8.failure?.size != null ? /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("small", { children: [
           "\u6587\u4EF6\u5927\u5C0F\uFF1A",
-          formatFilePreviewSize(snapshot7.failure.size)
+          formatFilePreviewSize(snapshot8.failure.size)
         ] }) : null,
-        snapshot7.failure?.download ? /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(DownloadLink, { file: snapshot7.failure.download, label: "\u4ECD\u7136\u4E0B\u8F7D\u6587\u4EF6" }) : null
+        snapshot8.failure?.download ? /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(DownloadLink, { file: snapshot8.failure.download, label: "\u4ECD\u7136\u4E0B\u8F7D\u6587\u4EF6" }) : null
       ] });
     }
-    const file = snapshot7.file;
+    const file = snapshot8.file;
     if (!file) return /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("div", { className: "wand-file-preview-state", children: "\u9009\u62E9\u6587\u4EF6\u540E\u5C06\u5728\u8FD9\u91CC\u663E\u793A\u9884\u89C8\u3002" });
-    if (snapshot7.editing) {
+    if (snapshot8.editing) {
       return /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("div", { className: "wand-file-preview-editor", children: /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(
         "textarea",
         {
@@ -28822,7 +28822,7 @@
           autoCapitalize: "off",
           spellCheck: false,
           wrap: "off",
-          value: snapshot7.draft,
+          value: snapshot8.draft,
           onChange: (event) => run({ type: "edit.change", value: event.currentTarget.value }),
           onKeyDown: (event) => {
             if (event.key !== "Tab") return;
@@ -28830,7 +28830,7 @@
             const input = event.currentTarget;
             const start = input.selectionStart;
             const end = input.selectionEnd;
-            const value = `${snapshot7.draft.slice(0, start)}  ${snapshot7.draft.slice(end)}`;
+            const value = `${snapshot8.draft.slice(0, start)}  ${snapshot8.draft.slice(end)}`;
             run({ type: "edit.change", value });
             requestAnimationFrame(() => {
               input.selectionStart = start + 2;
@@ -28846,8 +28846,8 @@
           "button",
           {
             type: "button",
-            className: `wand-file-preview-image${snapshot7.imageZoomed ? " zoomed" : ""}`,
-            "aria-label": snapshot7.imageZoomed ? "\u7F29\u5C0F\u56FE\u7247" : "\u653E\u5927\u56FE\u7247",
+            className: `wand-file-preview-image${snapshot8.imageZoomed ? " zoomed" : ""}`,
+            "aria-label": snapshot8.imageZoomed ? "\u7F29\u5C0F\u56FE\u7247" : "\u653E\u5927\u56FE\u7247",
             onClick: () => run({ type: "view.image.zoom.toggle" }),
             children: /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("img", { src: file.rawUrl, alt: file.name })
           }
@@ -28869,14 +28869,14 @@
       case "binary":
         return /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(BinaryPreview, { file });
       default:
-        return /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(TextPreview, { snapshot: snapshot7, file });
+        return /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(TextPreview, { snapshot: snapshot8, file });
     }
   }
-  function PreviewToolbar({ snapshot: snapshot7 }) {
-    const previous = nextFilePreviewSibling(snapshot7.request, -1);
-    const next = nextFilePreviewSibling(snapshot7.request, 1);
-    const file = snapshot7.file;
-    return /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: `wand-file-preview-toolbar${snapshot7.editing ? " editing" : ""}`, "aria-label": "\u6587\u4EF6\u9884\u89C8\u5DE5\u5177\u680F", children: [
+  function PreviewToolbar({ snapshot: snapshot8 }) {
+    const previous = nextFilePreviewSibling(snapshot8.request, -1);
+    const next = nextFilePreviewSibling(snapshot8.request, 1);
+    const file = snapshot8.file;
+    return /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: `wand-file-preview-toolbar${snapshot8.editing ? " editing" : ""}`, "aria-label": "\u6587\u4EF6\u9884\u89C8\u5DE5\u5177\u680F", children: [
       /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: "wand-file-preview-toolbar-group", children: [
         /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(
           WandButton,
@@ -28885,7 +28885,7 @@
             kind: "ghost",
             "aria-label": "\u4E0A\u4E00\u4E2A\u6587\u4EF6",
             title: previous ? `\u4E0A\u4E00\u4E2A\u6587\u4EF6\uFF1A${previous.name}` : "\u6CA1\u6709\u4E0A\u4E00\u4E2A\u6587\u4EF6",
-            disabled: !previous || snapshot7.editing || snapshot7.saving,
+            disabled: !previous || snapshot8.editing || snapshot8.saving,
             onClick: () => run({ type: "navigate", direction: -1 }),
             children: "\u2190"
           }
@@ -28897,16 +28897,16 @@
             kind: "ghost",
             "aria-label": "\u4E0B\u4E00\u4E2A\u6587\u4EF6",
             title: next ? `\u4E0B\u4E00\u4E2A\u6587\u4EF6\uFF1A${next.name}` : "\u6CA1\u6709\u4E0B\u4E00\u4E2A\u6587\u4EF6",
-            disabled: !next || snapshot7.editing || snapshot7.saving,
+            disabled: !next || snapshot8.editing || snapshot8.saving,
             onClick: () => run({ type: "navigate", direction: 1 }),
             children: "\u2192"
           }
         )
       ] }),
-      snapshot7.editing ? /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: "wand-file-preview-toolbar-group wand-file-preview-edit-actions", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(WandButton, { kind: "primary", size: "small", disabled: snapshot7.saving, onClick: () => run({ type: "edit.save" }), children: snapshot7.saving ? "\u4FDD\u5B58\u4E2D\u2026" : "\u4FDD\u5B58" }),
-        /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(WandButton, { size: "small", disabled: snapshot7.saving || !snapshot7.dirty, onClick: () => run({ type: "edit.revert" }), children: "\u64A4\u9500\u6539\u52A8" }),
-        /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(WandButton, { size: "small", disabled: snapshot7.saving, onClick: () => run({ type: "edit.exit" }), children: "\u9000\u51FA\u7F16\u8F91" })
+      snapshot8.editing ? /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: "wand-file-preview-toolbar-group wand-file-preview-edit-actions", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(WandButton, { kind: "primary", size: "small", disabled: snapshot8.saving, onClick: () => run({ type: "edit.save" }), children: snapshot8.saving ? "\u4FDD\u5B58\u4E2D\u2026" : "\u4FDD\u5B58" }),
+        /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(WandButton, { size: "small", disabled: snapshot8.saving || !snapshot8.dirty, onClick: () => run({ type: "edit.revert" }), children: "\u64A4\u9500\u6539\u52A8" }),
+        /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(WandButton, { size: "small", disabled: snapshot8.saving, onClick: () => run({ type: "edit.exit" }), children: "\u9000\u51FA\u7F16\u8F91" })
       ] }) : file ? /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)(import_jsx_runtime38.Fragment, { children: [
         /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: "wand-file-preview-toolbar-group", children: [
           file.kind === "text" ? /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(WandButton, { kind: "primary", size: "small", onClick: () => run({ type: "edit.enter" }), children: "\u7F16\u8F91" }) : null,
@@ -28920,39 +28920,39 @@
             WandButton,
             {
               size: "small",
-              kind: snapshot7.wrap ? "primary" : "secondary",
-              "aria-pressed": snapshot7.wrap,
+              kind: snapshot8.wrap ? "primary" : "secondary",
+              "aria-pressed": snapshot8.wrap,
               onClick: () => run({ type: "view.wrap.toggle" }),
               children: "\u81EA\u52A8\u6362\u884C"
             }
           ),
           /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(WandButton, { size: "small", "aria-label": "\u7F29\u5C0F\u5B57\u53F7", onClick: () => run({ type: "view.font.adjust", delta: -1 }), children: "A\u2212" }),
-          /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { className: "wand-file-preview-font-size", "aria-label": `\u5B57\u53F7 ${snapshot7.fontSize}`, children: snapshot7.fontSize }),
+          /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { className: "wand-file-preview-font-size", "aria-label": `\u5B57\u53F7 ${snapshot8.fontSize}`, children: snapshot8.fontSize }),
           /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(WandButton, { size: "small", "aria-label": "\u653E\u5927\u5B57\u53F7", onClick: () => run({ type: "view.font.adjust", delta: 1 }), children: "A+" })
         ] }) : null
-      ] }) : snapshot7.failure?.download ? /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(DownloadLink, { file: snapshot7.failure.download }) : null
+      ] }) : snapshot8.failure?.download ? /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(DownloadLink, { file: snapshot8.failure.download }) : null
     ] });
   }
   function FilePreviewHost() {
-    const snapshot7 = (0, import_react15.useSyncExternalStore)(
+    const snapshot8 = (0, import_react15.useSyncExternalStore)(
       filePreviewStore.subscribe,
       filePreviewStore.getSnapshot,
       filePreviewStore.getSnapshot
     );
     const editorRef = (0, import_react15.useRef)(null);
     (0, import_react15.useEffect)(() => {
-      if (!snapshot7.editing) return;
+      if (!snapshot8.editing) return;
       const editor = editorRef.current;
       if (!editor) return;
       editor.focus();
       editor.setSelectionRange(0, 0);
       editor.scrollTop = 0;
-    }, [snapshot7.editing]);
-    const path = snapshot7.request?.path ?? "";
-    const title = snapshot7.file?.name || (path ? fileNameFromPath(path) : "\u6587\u4EF6\u9884\u89C8");
-    const file = snapshot7.file;
+    }, [snapshot8.editing]);
+    const path = snapshot8.request?.path ?? "";
+    const title = snapshot8.file?.name || (path ? fileNameFromPath(path) : "\u6587\u4EF6\u9884\u89C8");
+    const file = snapshot8.file;
     function handleKeyboard(event) {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s" && snapshot7.editing) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s" && snapshot8.editing) {
         event.preventDefault();
         event.stopPropagation();
         run({ type: "edit.save" });
@@ -28961,12 +28961,12 @@
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
-        run({ type: snapshot7.editing ? "edit.exit" : "close" });
+        run({ type: snapshot8.editing ? "edit.exit" : "close" });
         return;
       }
       const target = event.target;
       if (target instanceof HTMLElement && (target.matches("input, textarea") || target.isContentEditable)) return;
-      if (snapshot7.editing) return;
+      if (snapshot8.editing) return;
       if (event.key === "ArrowLeft") {
         event.preventDefault();
         run({ type: "navigate", direction: -1 });
@@ -28983,7 +28983,7 @@
       /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(
         WandDialogSurface,
         {
-          open: snapshot7.open,
+          open: snapshot8.open,
           onOpenChange: (open) => {
             if (!open) run({ type: "close" });
           },
@@ -28996,7 +28996,7 @@
           headerClassName: "wand-ui-dialog-heading wand-file-preview-header",
           closeLabel: "\u5173\u95ED\u6587\u4EF6\u9884\u89C8",
           testId: "file-preview-dialog",
-          dismissable: !snapshot7.saving && !snapshot7.editing,
+          dismissable: !snapshot8.saving && !snapshot8.editing,
           children: /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)(
             "div",
             {
@@ -29008,11 +29008,11 @@
                 /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: "wand-file-preview-title-meta", "aria-live": "polite", children: [
                   /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { className: "wand-file-preview-kind-icon", "aria-hidden": "true", children: file ? filePreviewIcon(file.kind) : "\u2026" }),
                   file ? /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { className: "wand-file-preview-kind", children: filePreviewKindLabel(file) }) : null,
-                  snapshot7.dirty ? /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { className: "wand-file-preview-dirty", children: "\u25CF \u672A\u4FDD\u5B58" }) : null
+                  snapshot8.dirty ? /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { className: "wand-file-preview-dirty", children: "\u25CF \u672A\u4FDD\u5B58" }) : null
                 ] }),
-                /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(PreviewToolbar, { snapshot: snapshot7 }),
-                snapshot7.status === "ready" && snapshot7.failure ? /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("p", { className: "wand-file-preview-inline-error", role: "alert", children: snapshot7.failure.message }) : null,
-                /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("div", { className: `wand-file-preview-body kind-${file?.kind ?? snapshot7.status}`, children: /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(PreviewBody, { snapshot: snapshot7, editorRef }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(PreviewToolbar, { snapshot: snapshot8 }),
+                snapshot8.status === "ready" && snapshot8.failure ? /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("p", { className: "wand-file-preview-inline-error", role: "alert", children: snapshot8.failure.message }) : null,
+                /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("div", { className: `wand-file-preview-body kind-${file?.kind ?? snapshot8.status}`, children: /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(PreviewBody, { snapshot: snapshot8, editorRef }) }),
                 file ? /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("footer", { className: "wand-file-preview-metadata", "aria-label": "\u6587\u4EF6\u5143\u6570\u636E", children: [
                   /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { children: formatFilePreviewSize(file.size) }),
                   /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { children: file.mime || file.ext.replace(/^\./, "") || file.kind }),
@@ -29062,12 +29062,12 @@
   // src/web-ui/react/composer-select/host.tsx
   var import_jsx_runtime39 = __toESM(require_jsx_runtime(), 1);
   function ComposerSelectHost() {
-    const snapshot7 = (0, import_react16.useSyncExternalStore)(
+    const snapshot8 = (0, import_react16.useSyncExternalStore)(
       composerSelectController.subscribe,
       composerSelectController.getSnapshot,
       composerSelectController.getSnapshot
     );
-    return snapshot7.mounts.map((mount) => (0, import_react_dom3.createPortal)(
+    return snapshot8.mounts.map((mount) => (0, import_react_dom3.createPortal)(
       /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(
         WandSelect,
         {
@@ -29092,25 +29092,513 @@
     ));
   }
 
-  // src/web-ui/react/overlay-host.tsx
+  // src/web-ui/react/missions/host.tsx
+  var import_react17 = __toESM(require_react(), 1);
+
+  // src/web-ui/react/missions/controller.ts
+  var snapshot7 = { open: false, revision: 0 };
+  var runtime5 = null;
+  var listeners7 = /* @__PURE__ */ new Set();
+  function publish7(open) {
+    snapshot7 = { open, revision: snapshot7.revision + 1 };
+    for (const listener of listeners7) listener();
+  }
+  var missionsController = {
+    open() {
+      runtime5?.onOpen();
+      publish7(true);
+      return true;
+    },
+    close() {
+      if (!snapshot7.open) return;
+      publish7(false);
+      runtime5?.onClose();
+    },
+    closeIfOpen() {
+      if (!snapshot7.open) return true;
+      this.close();
+      return true;
+    },
+    isOpen() {
+      return snapshot7.open;
+    }
+  };
+  var missionsStore = {
+    subscribe(listener) {
+      listeners7.add(listener);
+      return () => listeners7.delete(listener);
+    },
+    getSnapshot() {
+      return snapshot7;
+    },
+    getRuntime() {
+      return runtime5;
+    }
+  };
+  function configureMissionsRuntime(adapter) {
+    runtime5 = adapter;
+    return () => {
+      if (runtime5 !== adapter) return;
+      runtime5 = null;
+    };
+  }
+
+  // src/web-ui/react/missions/repository.ts
+  async function json(response) {
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || body.error) throw new Error(body.error || `\u8BF7\u6C42\u5931\u8D25 (HTTP ${response.status})`);
+    return body;
+  }
+  var HttpMissionsRepository = class {
+    constructor(fetchImpl = (input, init) => globalThis.fetch(input, init)) {
+      __publicField(this, "fetchImpl", fetchImpl);
+    }
+    async list() {
+      const body = await json(await this.fetchImpl("/api/missions", { credentials: "same-origin" }));
+      return body.missions ?? [];
+    }
+    async inbox() {
+      const body = await json(await this.fetchImpl("/api/inbox", { credentials: "same-origin" }));
+      return body.items ?? [];
+    }
+    async create(request2) {
+      return json(await this.fetchImpl("/api/missions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify(request2)
+      }));
+    }
+    async diff(missionId, attemptId) {
+      return json(await this.fetchImpl(`/api/missions/${encodeURIComponent(missionId)}/attempts/${encodeURIComponent(attemptId)}/diff`, { credentials: "same-origin" }));
+    }
+    async addComment(missionId, attemptId, input) {
+      return json(await this.fetchImpl(`/api/missions/${encodeURIComponent(missionId)}/attempts/${encodeURIComponent(attemptId)}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify(input)
+      }));
+    }
+    async sendReview(missionId, attemptId) {
+      const body = await json(await this.fetchImpl(`/api/missions/${encodeURIComponent(missionId)}/attempts/${encodeURIComponent(attemptId)}/review/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: "{}"
+      }));
+      return body.comments ?? [];
+    }
+    async markRead(sessionId) {
+      await json(await this.fetchImpl("/api/inbox/read", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify(sessionId ? { sessionId } : {})
+      }));
+    }
+  };
+  var httpMissionsRepository = new HttpMissionsRepository();
+
+  // src/web-ui/react/missions/host.tsx
   var import_jsx_runtime40 = __toESM(require_jsx_runtime(), 1);
+  var PROVIDERS3 = [
+    { id: "claude", label: "Claude" },
+    { id: "codex", label: "Codex" },
+    { id: "opencode", label: "OpenCode" },
+    { id: "grok", label: "Grok" },
+    { id: "qoder", label: "Qoder" },
+    { id: "pi", label: "Pi" }
+  ];
+  var STATE_LABELS = {
+    dispatching: "\u5206\u6D3E\u4E2D",
+    queued: "\u7B49\u5F85\u4E2D",
+    running: "\u6267\u884C\u4E2D",
+    working: "\u6267\u884C\u4E2D",
+    needs_input: "\u7B49\u5F85\u7B54\u590D",
+    needs_permission: "\u7B49\u5F85\u6388\u6743",
+    completed: "\u5DF2\u5B8C\u6210",
+    done: "\u5DF2\u5B8C\u6210",
+    failed: "\u5931\u8D25"
+  };
+  function parseDiff(patch) {
+    let oldFile = null;
+    let newFile = null;
+    let oldLine = 0;
+    let newLine = 0;
+    return patch.split("\n").slice(0, 5e3).map((text5, index2) => {
+      if (text5.startsWith("--- ")) {
+        const path = text5.slice(4).replace(/^a\//, "");
+        oldFile = path === "/dev/null" ? null : path;
+      }
+      if (text5.startsWith("+++ ")) {
+        const path = text5.slice(4).replace(/^b\//, "");
+        newFile = path === "/dev/null" ? null : path;
+      }
+      const hunk = text5.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      if (hunk) {
+        oldLine = Number(hunk[1]);
+        newLine = Number(hunk[2]);
+        return { key: String(index2), text: text5, path: newFile ?? oldFile, line: null, side: "new", kind: "meta" };
+      }
+      if (text5.startsWith("+") && !text5.startsWith("+++")) {
+        const line = newLine++;
+        return { key: String(index2), text: text5, path: newFile ?? oldFile, line, side: "new", kind: "add" };
+      }
+      if (text5.startsWith("-") && !text5.startsWith("---")) {
+        const line = oldLine++;
+        return { key: String(index2), text: text5, path: oldFile ?? newFile, line, side: "old", kind: "remove" };
+      }
+      if (text5.startsWith(" ")) {
+        const line = newLine++;
+        oldLine++;
+        return { key: String(index2), text: text5, path: newFile ?? oldFile, line, side: "new", kind: "context" };
+      }
+      return { key: String(index2), text: text5, path: newFile ?? oldFile, line: null, side: "new", kind: "meta" };
+    });
+  }
+  function splitPaths(value) {
+    return value.split(/[\n,]/).map((item) => item.trim()).filter(Boolean);
+  }
+  function ActivitySection({ title, items, openSession }) {
+    if (!items.length) return null;
+    return /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("section", { className: "wand-missions-section", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("h3", { children: [
+        title,
+        /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("span", { children: items.length })
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("div", { className: "wand-missions-card-list", children: items.map((item) => /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("button", { className: "wand-missions-activity", onClick: () => openSession(item.sessionId), children: [
+        /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("span", { className: `wand-missions-state-dot is-${item.state}` }),
+        /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("span", { className: "wand-missions-activity-copy", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("strong", { children: item.title }),
+          /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("small", { children: item.summary || item.cwd || "\u6682\u65E0\u6458\u8981" })
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("span", { className: `wand-missions-state is-${item.state}`, children: STATE_LABELS[item.state] })
+      ] }, item.sessionId)) })
+    ] });
+  }
+  function AttemptCard({ attempt, onOpen, onDiff }) {
+    return /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("article", { className: "wand-missions-attempt", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("div", { className: "wand-missions-attempt-head", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("span", { className: "wand-missions-provider", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(ProviderLogo, { provider: attempt.provider }),
+          /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("strong", { children: attempt.provider })
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("span", { className: `wand-missions-state is-${attempt.state}`, children: STATE_LABELS[attempt.state] })
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("p", { children: attempt.summary || attempt.error || attempt.branch || "\u6B63\u5728\u51C6\u5907\u72EC\u7ACB worktree\u2026" }),
+      /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("div", { className: "wand-missions-attempt-actions", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(WandButton, { size: "small", kind: "ghost", disabled: !attempt.sessionId, onClick: onOpen, children: "\u6253\u5F00\u4F1A\u8BDD" }),
+        /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(WandButton, { size: "small", kind: "outline", disabled: !attempt.worktreePath, onClick: onDiff, children: "\u5BA1\u67E5 Diff" })
+      ] })
+    ] });
+  }
+  function MissionsHost({ repository = httpMissionsRepository }) {
+    const controller = (0, import_react17.useSyncExternalStore)(missionsStore.subscribe, missionsStore.getSnapshot, missionsStore.getSnapshot);
+    const [tab, setTab] = (0, import_react17.useState)("inbox");
+    const [missions, setMissions] = (0, import_react17.useState)([]);
+    const [inbox, setInbox] = (0, import_react17.useState)([]);
+    const [selectedId, setSelectedId] = (0, import_react17.useState)(null);
+    const [creating, setCreating] = (0, import_react17.useState)(false);
+    const [busy, setBusy] = (0, import_react17.useState)(false);
+    const [error, setError] = (0, import_react17.useState)("");
+    const [prompt, setPrompt] = (0, import_react17.useState)("");
+    const [title, setTitle] = (0, import_react17.useState)("");
+    const [cwd, setCwd] = (0, import_react17.useState)("");
+    const [baseRef, setBaseRef] = (0, import_react17.useState)("");
+    const [sharedPaths, setSharedPaths] = (0, import_react17.useState)("");
+    const [copyPaths, setCopyPaths] = (0, import_react17.useState)("");
+    const [providers, setProviders] = (0, import_react17.useState)(/* @__PURE__ */ new Set(["claude", "codex"]));
+    const [diff, setDiff] = (0, import_react17.useState)(null);
+    const [diffAttempt, setDiffAttempt] = (0, import_react17.useState)(null);
+    const [reviewTarget, setReviewTarget] = (0, import_react17.useState)(null);
+    const [reviewBody, setReviewBody] = (0, import_react17.useState)("");
+    const selected = missions.find((mission) => mission.id === selectedId) ?? missions[0] ?? null;
+    const diffLines = (0, import_react17.useMemo)(() => diff ? parseDiff(diff.patch) : [], [diff]);
+    const refresh = async () => {
+      const [nextMissions, nextInbox] = await Promise.all([repository.list(), repository.inbox()]);
+      setMissions(nextMissions);
+      setInbox(nextInbox);
+      setSelectedId((current) => current && nextMissions.some((mission) => mission.id === current) ? current : nextMissions[0]?.id ?? null);
+    };
+    (0, import_react17.useEffect)(() => {
+      if (!controller.open) return;
+      setCwd((value) => value || missionsStore.getRuntime()?.effectiveCwd() || "");
+      setError("");
+      void refresh().catch((cause) => setError(cause instanceof Error ? cause.message : "\u65E0\u6CD5\u52A0\u8F7D\u4EFB\u52A1\u3002"));
+      const timer = window.setInterval(() => void refresh().catch(() => void 0), 4e3);
+      return () => window.clearInterval(timer);
+    }, [controller.open, controller.revision]);
+    const openSession = (sessionId) => {
+      void repository.markRead(sessionId).catch(() => void 0);
+      void missionsStore.getRuntime()?.openSession(sessionId);
+      missionsController.close();
+    };
+    const submitMission = async (event) => {
+      event.preventDefault();
+      setBusy(true);
+      setError("");
+      try {
+        const created = await repository.create({
+          title: title.trim() || void 0,
+          prompt,
+          cwd,
+          providers: [...providers],
+          baseRef: baseRef.trim() || void 0,
+          sharedDirectories: splitPaths(sharedPaths),
+          copyPaths: splitPaths(copyPaths)
+        });
+        setCreating(false);
+        setPrompt("");
+        setTitle("");
+        setSelectedId(created.id);
+        setTab("missions");
+        await refresh();
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "\u521B\u5EFA\u4EFB\u52A1\u5931\u8D25\u3002");
+      } finally {
+        setBusy(false);
+      }
+    };
+    const openDiff = async (mission, attempt) => {
+      setBusy(true);
+      setError("");
+      try {
+        setDiff(await repository.diff(mission.id, attempt.id));
+        setDiffAttempt(attempt);
+        setReviewTarget(null);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "\u65E0\u6CD5\u8BFB\u53D6 Diff\u3002");
+      } finally {
+        setBusy(false);
+      }
+    };
+    const addComment = async () => {
+      if (!selected || !diffAttempt || !reviewTarget || !reviewBody.trim()) return;
+      setBusy(true);
+      setError("");
+      try {
+        await repository.addComment(selected.id, diffAttempt.id, { ...reviewTarget, body: reviewBody });
+        setReviewBody("");
+        await refresh();
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "\u65E0\u6CD5\u4FDD\u5B58 Review\u3002");
+      } finally {
+        setBusy(false);
+      }
+    };
+    const sendReview = async () => {
+      if (!selected || !diffAttempt) return;
+      setBusy(true);
+      setError("");
+      try {
+        await repository.sendReview(selected.id, diffAttempt.id);
+        await refresh();
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "\u65E0\u6CD5\u53D1\u9001 Review\u3002");
+      } finally {
+        setBusy(false);
+      }
+    };
+    const needsYou = inbox.filter((item) => item.state === "needs_input" || item.state === "needs_permission");
+    const working = inbox.filter((item) => item.state === "working");
+    const done = inbox.filter((item) => item.state === "done" || item.state === "failed");
+    const pendingComments = selected && diffAttempt ? selected.comments.filter((comment) => comment.attemptId === diffAttempt.id && comment.status === "pending") : [];
+    return /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)(
+      WandDialogSurface,
+      {
+        open: controller.open,
+        title: "Agent Inbox",
+        description: "\u5E76\u884C\u5206\u6D3E\u4EFB\u52A1\u3001\u67E5\u770B\u9700\u8981\u4F60\u4ECB\u5165\u7684\u4F1A\u8BDD\uFF0C\u5E76\u628A Diff \u610F\u89C1\u4E00\u6B21\u6027\u53D1\u56DE Agent\u3002",
+        className: "wand-missions-dialog",
+        overlayClassName: "wand-missions-overlay",
+        headerClassName: "wand-missions-header",
+        titleClassName: "wand-missions-title",
+        descriptionClassName: "wand-missions-description",
+        onOpenChange: (open) => {
+          if (!open) missionsController.close();
+        },
+        children: [
+          /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("div", { className: "wand-missions-toolbar", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("div", { className: "wand-missions-tabs", role: "tablist", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("button", { className: tab === "inbox" ? "active" : "", onClick: () => setTab("inbox"), children: [
+                "Inbox",
+                needsYou.length ? /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("b", { children: needsYou.length }) : null
+              ] }),
+              /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("button", { className: tab === "missions" ? "active" : "", onClick: () => setTab("missions"), children: [
+                "\u4EFB\u52A1 ",
+                /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("span", { children: missions.length })
+              ] })
+            ] }),
+            /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(WandButton, { kind: "primary", size: "small", onClick: () => {
+              setCreating(true);
+              setTab("missions");
+            }, children: "\uFF0B \u65B0\u4EFB\u52A1" })
+          ] }),
+          error ? /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("div", { className: "wand-missions-error", role: "alert", children: error }) : null,
+          /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("div", { className: "wand-missions-body", children: tab === "inbox" ? /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("div", { className: "wand-missions-inbox", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(ActivitySection, { title: "\u9700\u8981\u4F60", items: needsYou, openSession }),
+            /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(ActivitySection, { title: "\u6267\u884C\u4E2D", items: working, openSession }),
+            /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(ActivitySection, { title: "\u5DF2\u7ED3\u675F", items: done, openSession }),
+            !inbox.length ? /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("div", { className: "wand-missions-empty", children: "\u76EE\u524D\u6CA1\u6709 Agent \u6D3B\u52A8\u3002" }) : null
+          ] }) : /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("div", { className: "wand-missions-workspace", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("aside", { className: "wand-missions-list", children: [
+              missions.map((mission) => /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("button", { className: selected?.id === mission.id ? "active" : "", onClick: () => {
+                setSelectedId(mission.id);
+                setDiff(null);
+              }, children: [
+                /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("strong", { children: mission.title }),
+                /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("small", { children: [
+                  mission.attempts.length,
+                  " \u4E2A Agent \xB7 ",
+                  STATE_LABELS[mission.status]
+                ] })
+              ] }, mission.id)),
+              !missions.length ? /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("div", { className: "wand-missions-empty", children: "\u521B\u5EFA\u4E00\u4E2A\u4EFB\u52A1\uFF0C\u8BA9\u591A\u4E2A Agent \u5728\u72EC\u7ACB worktree \u4E2D\u5E76\u884C\u5C1D\u8BD5\u3002" }) : null
+            ] }),
+            /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("main", { className: "wand-missions-detail", children: selected ? /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)(import_jsx_runtime40.Fragment, { children: [
+              /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("div", { className: "wand-missions-detail-head", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("div", { children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("h2", { children: selected.title }),
+                  /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("p", { children: [
+                    selected.cwd,
+                    " \xB7 \u57FA\u7EBF ",
+                    selected.worktree.baseRef || "\u5F53\u524D\u5206\u652F"
+                  ] })
+                ] }),
+                /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("span", { className: `wand-missions-state is-${selected.status}`, children: STATE_LABELS[selected.status] })
+              ] }),
+              /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("p", { className: "wand-missions-prompt", children: selected.prompt }),
+              /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("div", { className: "wand-missions-attempt-grid", children: selected.attempts.map((attempt) => /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(AttemptCard, { attempt, onOpen: () => attempt.sessionId && openSession(attempt.sessionId), onDiff: () => void openDiff(selected, attempt) }, attempt.id)) }),
+              diff && diffAttempt ? /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("section", { className: "wand-missions-review", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("div", { className: "wand-missions-review-head", children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("div", { children: [
+                    /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("h3", { children: [
+                      diffAttempt.provider,
+                      " Diff"
+                    ] }),
+                    /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("span", { children: [
+                      diff.files.length,
+                      " \u4E2A\u6587\u4EF6",
+                      diff.truncated ? " \xB7 \u5185\u5BB9\u5DF2\u622A\u65AD" : ""
+                    ] })
+                  ] }),
+                  /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(WandButton, { size: "small", kind: "ghost", onClick: () => setDiff(null), children: "\u6536\u8D77" })
+                ] }),
+                /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("div", { className: "wand-missions-diff", role: "list", "aria-label": "\u4EFB\u52A1 Diff", children: diffLines.map((line) => /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)(
+                  "button",
+                  {
+                    className: `is-${line.kind}`,
+                    disabled: !line.path || line.line === null,
+                    title: line.path && line.line ? `\u5728 ${line.path}:${line.line} \u6DFB\u52A0\u610F\u89C1` : void 0,
+                    onClick: () => line.path && setReviewTarget({ filePath: line.path, line: line.line, side: line.side }),
+                    children: [
+                      /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("span", { children: line.line ?? "" }),
+                      /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("code", { children: line.text || " " })
+                    ]
+                  },
+                  line.key
+                )) }),
+                reviewTarget ? /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("div", { className: "wand-missions-comment-form", children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("label", { children: [
+                    reviewTarget.filePath,
+                    reviewTarget.line ? `:${reviewTarget.line}` : ""
+                  ] }),
+                  /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("textarea", { value: reviewBody, onChange: (event) => setReviewBody(event.target.value), placeholder: "\u5199\u4E0B\u5177\u4F53\u3001\u53EF\u6267\u884C\u7684\u4FEE\u6539\u610F\u89C1\u2026" }),
+                  /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(WandButton, { kind: "primary", size: "small", disabled: busy || !reviewBody.trim(), onClick: () => void addComment(), children: "\u52A0\u5165 Review" })
+                ] }) : null,
+                pendingComments.length ? /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("div", { className: "wand-missions-pending-review", children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("div", { children: pendingComments.map((comment) => /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("p", { children: [
+                    /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("strong", { children: [
+                      comment.filePath,
+                      comment.line ? `:${comment.line}` : ""
+                    ] }),
+                    comment.body
+                  ] }, comment.id)) }),
+                  /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)(WandButton, { kind: "primary", disabled: busy, onClick: () => void sendReview(), children: [
+                    "\u53D1\u9001 ",
+                    pendingComments.length,
+                    " \u6761\u610F\u89C1"
+                  ] })
+                ] }) : null
+              ] }) : null
+            ] }) : /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("div", { className: "wand-missions-empty", children: "\u9009\u62E9\u6216\u521B\u5EFA\u4E00\u4E2A\u4EFB\u52A1\u3002" }) })
+          ] }) }),
+          creating ? /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("div", { className: "wand-missions-create-overlay", children: /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("form", { className: "wand-missions-create", onSubmit: (event) => void submitMission(event), children: [
+            /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("div", { className: "wand-missions-create-head", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("div", { children: [
+                /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("h2", { children: "\u5E76\u884C\u4EFB\u52A1" }),
+                /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("p", { children: "\u6BCF\u4E2A Provider \u4F1A\u83B7\u5F97\u72EC\u7ACB branch \u4E0E worktree\u3002" })
+              ] }),
+              /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("button", { type: "button", onClick: () => setCreating(false), children: "\xD7" })
+            ] }),
+            /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("label", { children: [
+              "\u4EFB\u52A1\u6807\u9898\uFF08\u53EF\u9009\uFF09",
+              /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("input", { value: title, onChange: (event) => setTitle(event.target.value), placeholder: "\u4F8B\u5982\uFF1A\u91CD\u6784\u4F1A\u8BDD\u6062\u590D\u6D41\u7A0B" })
+            ] }),
+            /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("label", { children: [
+              "\u76EE\u6807",
+              /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("textarea", { autoFocus: true, required: true, value: prompt, onChange: (event) => setPrompt(event.target.value), placeholder: "\u63CF\u8FF0\u6E05\u695A\u5B8C\u6210\u6761\u4EF6\u3001\u9650\u5236\u548C\u9A8C\u8BC1\u8981\u6C42\u2026" })
+            ] }),
+            /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("label", { children: [
+              "\u9879\u76EE\u76EE\u5F55",
+              /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("input", { required: true, value: cwd, onChange: (event) => setCwd(event.target.value) })
+            ] }),
+            /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("div", { className: "wand-missions-provider-picker", children: PROVIDERS3.map((provider) => /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("label", { className: providers.has(provider.id) ? "active" : "", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("input", { type: "checkbox", checked: providers.has(provider.id), onChange: () => setProviders((current) => {
+                const next = new Set(current);
+                if (next.has(provider.id)) next.delete(provider.id);
+                else next.add(provider.id);
+                return next;
+              }) }),
+              /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(ProviderLogo, { provider: provider.id }),
+              /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("span", { children: provider.label })
+            ] }, provider.id)) }),
+            /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("details", { children: [
+              /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("summary", { children: "Worktree \u9AD8\u7EA7\u9009\u9879" }),
+              /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("label", { children: [
+                "\u57FA\u7EBF ref",
+                /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("input", { value: baseRef, onChange: (event) => setBaseRef(event.target.value), placeholder: "\u5F53\u524D\u5206\u652F" })
+              ] }),
+              /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("label", { children: [
+                "\u5171\u4EAB\u76EE\u5F55\uFF08\u4EC5 gitignored\uFF09",
+                /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("input", { value: sharedPaths, onChange: (event) => setSharedPaths(event.target.value), placeholder: "node_modules, .venv" })
+              ] }),
+              /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("label", { children: [
+                "\u590D\u5236\u8DEF\u5F84\uFF08\u4EC5 gitignored\uFF09",
+                /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("input", { value: copyPaths, onChange: (event) => setCopyPaths(event.target.value), placeholder: ".env.local" })
+              ] })
+            ] }),
+            /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("div", { className: "wand-missions-create-actions", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(WandButton, { kind: "ghost", onClick: () => setCreating(false), children: "\u53D6\u6D88" }),
+              /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(WandButton, { kind: "primary", type: "submit", disabled: busy || !prompt.trim() || !cwd.trim() || providers.size === 0, children: busy ? "\u6B63\u5728\u5206\u6D3E\u2026" : `\u5206\u6D3E\u7ED9 ${providers.size} \u4E2A Agent` })
+            ] })
+          ] }) }) : null
+        ]
+      }
+    );
+  }
+
+  // src/web-ui/react/overlay-host.tsx
+  var import_jsx_runtime41 = __toESM(require_jsx_runtime(), 1);
   function OverlayHost({ portalContainer }) {
-    const current = (0, import_react17.useSyncExternalStore)(
+    const current = (0, import_react18.useSyncExternalStore)(
       overlayStore.subscribe,
       overlayStore.getSnapshot,
       overlayStore.getSnapshot
     );
     const dialog = current.activeDialog;
-    return /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)(PortalContainerProvider, { container: portalContainer, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(ComposerSelectHost, {}),
-      /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(SettingsHost, { showRestart: () => restartOverlayController.showRestart() }),
-      /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(NewSessionHost, {}),
-      /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(FolderPickerHost, {}),
-      /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(QuickCommitHost, {}),
-      /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(WorktreeMergeHost, {}),
-      /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(FilePreviewHost, {}),
-      /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(RestartOverlayHost, {}),
-      /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(WandToastRegion, { children: current.toasts.map((toast) => /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)(PortalContainerProvider, { container: portalContainer, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(ComposerSelectHost, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(MissionsHost, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(SettingsHost, { showRestart: () => restartOverlayController.showRestart() }),
+      /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(NewSessionHost, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(FolderPickerHost, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(QuickCommitHost, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(WorktreeMergeHost, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(FilePreviewHost, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(RestartOverlayHost, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(WandToastRegion, { children: current.toasts.map((toast) => /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
         WandToastItem,
         {
           open: toast.open,
@@ -29122,7 +29610,7 @@
         },
         toast.id
       )) }),
-      dialog ? /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(
+      dialog ? /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
         WandDialog,
         {
           open: true,
@@ -30999,6 +31487,83 @@
 
 
 `;
+  var missionsStyles = String.raw`
+.wand-missions-overlay { position: fixed; inset: 0; z-index: 34; background: var(--bg-overlay); backdrop-filter: blur(6px); pointer-events: auto; }
+.wand-missions-dialog { position: fixed; inset: max(24px, var(--wand-safe-top)) max(24px, var(--wand-safe-right)) max(24px, var(--wand-safe-bottom)) max(24px, var(--wand-safe-left)); z-index: 35; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border-subtle); border-radius: 20px; color: var(--text-primary); background: color-mix(in srgb, var(--bg-elevated) 94%, transparent); box-shadow: 0 24px 70px rgb(0 0 0 / 24%); pointer-events: auto; }
+.wand-missions-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 18px 20px 12px; }
+.wand-missions-header > div { min-width: 0; }
+.wand-missions-title { margin: 0; font-size: 1.2rem; letter-spacing: -.02em; }
+.wand-missions-description { margin: 4px 0 0; color: var(--text-secondary); font-size: var(--font-size-sm); }
+.wand-missions-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border-subtle); padding: 0 20px 12px; }
+.wand-missions-tabs { display: flex; gap: 4px; padding: 3px; border-radius: 10px; background: var(--bg-secondary); }
+.wand-missions-tabs button { display: flex; align-items: center; gap: 7px; min-height: 34px; border: 0; border-radius: 8px; padding: 0 13px; color: var(--text-secondary); background: transparent; cursor: pointer; }
+.wand-missions-tabs button.active { color: var(--text-primary); background: var(--bg-elevated); box-shadow: 0 1px 3px rgb(0 0 0 / 10%); }
+.wand-missions-tabs b { display: grid; min-width: 18px; height: 18px; place-items: center; border-radius: 9px; color: white; background: var(--danger); font-size: 10px; }
+.wand-missions-error { margin: 10px 20px 0; border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent); border-radius: 10px; padding: 9px 12px; color: var(--danger); background: var(--danger-muted); font-size: var(--font-size-sm); }
+.wand-missions-body { flex: 1; min-height: 0; overflow: hidden; }
+.wand-missions-inbox { height: 100%; overflow: auto; padding: 18px 20px 28px; }
+.wand-missions-section + .wand-missions-section { margin-top: 24px; }
+.wand-missions-section h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 9px; font-size: var(--font-size-sm); }
+.wand-missions-section h3 span { color: var(--text-muted); font-size: var(--font-size-xs); }
+.wand-missions-card-list { display: grid; gap: 8px; }
+.wand-missions-activity { display: flex; align-items: center; width: 100%; gap: 12px; border: 1px solid var(--border-subtle); border-radius: 13px; padding: 12px 13px; color: inherit; background: var(--bg-secondary); text-align: left; cursor: pointer; }
+.wand-missions-activity:hover { border-color: color-mix(in srgb, var(--accent) 38%, var(--border-subtle)); background: color-mix(in srgb, var(--accent-muted) 36%, var(--bg-secondary)); }
+.wand-missions-state-dot { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 50%; background: var(--text-muted); }
+.wand-missions-state-dot.is-working { background: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent); }
+.wand-missions-state-dot.is-needs_input,.wand-missions-state-dot.is-needs_permission { background: var(--warning); }
+.wand-missions-state-dot.is-failed { background: var(--danger); }
+.wand-missions-activity-copy { display: grid; flex: 1; min-width: 0; gap: 3px; }
+.wand-missions-activity-copy strong,.wand-missions-activity-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wand-missions-activity-copy small { color: var(--text-secondary); }
+.wand-missions-state { flex: 0 0 auto; border-radius: 999px; padding: 4px 8px; color: var(--text-secondary); background: var(--bg-tertiary); font-size: 10px; font-weight: 650; }
+.wand-missions-state.is-working,.wand-missions-state.is-running { color: var(--accent); background: var(--accent-muted); }
+.wand-missions-state.is-needs_input,.wand-missions-state.is-needs_permission { color: var(--warning); background: var(--warning-muted); }
+.wand-missions-state.is-failed { color: var(--danger); background: var(--danger-muted); }
+.wand-missions-state.is-done,.wand-missions-state.is-completed { color: var(--success); background: var(--success-muted); }
+.wand-missions-workspace { display: grid; grid-template-columns: minmax(210px, 270px) minmax(0, 1fr); height: 100%; }
+.wand-missions-list { overflow: auto; border-right: 1px solid var(--border-subtle); padding: 12px; background: color-mix(in srgb, var(--bg-secondary) 72%, transparent); }
+.wand-missions-list > button { display: grid; width: 100%; gap: 5px; border: 0; border-radius: 11px; padding: 11px; color: inherit; background: transparent; text-align: left; cursor: pointer; }
+.wand-missions-list > button:hover,.wand-missions-list > button.active { background: var(--bg-elevated); }
+.wand-missions-list > button.active { box-shadow: inset 3px 0 var(--accent); }
+.wand-missions-list small { color: var(--text-secondary); }
+.wand-missions-detail { min-width: 0; overflow: auto; padding: 18px 20px 32px; }
+.wand-missions-detail-head,.wand-missions-review-head,.wand-missions-attempt-head,.wand-missions-create-head,.wand-missions-create-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.wand-missions-detail-head h2,.wand-missions-review h3,.wand-missions-create h2 { margin: 0; font-size: 1.05rem; }
+.wand-missions-detail-head p,.wand-missions-create-head p { margin: 4px 0 0; color: var(--text-secondary); font-size: var(--font-size-xs); }
+.wand-missions-prompt { max-width: 900px; margin: 14px 0; color: var(--text-secondary); white-space: pre-wrap; }
+.wand-missions-attempt-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
+.wand-missions-attempt { border: 1px solid var(--border-subtle); border-radius: 13px; padding: 12px; background: var(--bg-secondary); }
+.wand-missions-provider { display: flex; align-items: center; gap: 7px; text-transform: capitalize; }
+.wand-missions-provider svg { width: 18px; height: 18px; }
+.wand-missions-attempt p { min-height: 36px; margin: 10px 0; color: var(--text-secondary); font-size: var(--font-size-xs); }
+.wand-missions-attempt-actions { display: flex; gap: 6px; }
+.wand-missions-review { margin-top: 18px; border: 1px solid var(--border-subtle); border-radius: 14px; overflow: hidden; }
+.wand-missions-review-head { padding: 11px 13px; background: var(--bg-secondary); }
+.wand-missions-review-head span { color: var(--text-secondary); font-size: var(--font-size-xs); }
+.wand-missions-diff { max-height: 48vh; overflow: auto; background: #101214; }
+.wand-missions-diff button { display: grid; grid-template-columns: 54px minmax(max-content, 1fr); width: 100%; min-width: max-content; border: 0; padding: 0; color: #c9d1d9; background: transparent; text-align: left; }
+.wand-missions-diff button:not(:disabled):hover { outline: 1px solid var(--accent); outline-offset: -1px; cursor: crosshair; }
+.wand-missions-diff button > span { padding: 2px 8px; color: #6e7681; background: rgb(255 255 255 / 3%); text-align: right; user-select: none; }
+.wand-missions-diff code { padding: 2px 12px; white-space: pre; font: 12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace; }
+.wand-missions-diff button.is-add { background: rgb(46 160 67 / 14%); }.wand-missions-diff button.is-remove { background: rgb(248 81 73 / 13%); }.wand-missions-diff button.is-meta code { color: #8b949e; }
+.wand-missions-comment-form { display: grid; grid-template-columns: minmax(140px,auto) minmax(220px,1fr) auto; align-items: center; gap: 9px; border-top: 1px solid var(--border-subtle); padding: 10px 12px; }
+.wand-missions-comment-form label { overflow: hidden; color: var(--text-secondary); font: 11px ui-monospace,SFMono-Regular,Menlo,monospace; text-overflow: ellipsis; }
+.wand-missions-comment-form textarea { min-height: 38px; max-height: 100px; resize: vertical; }
+.wand-missions-pending-review { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; border-top: 1px solid var(--border-subtle); padding: 11px 12px; }
+.wand-missions-pending-review > div { display: grid; gap: 5px; }.wand-missions-pending-review p { margin: 0; color: var(--text-secondary); font-size: var(--font-size-xs); }.wand-missions-pending-review strong { margin-right: 8px; color: var(--text-primary); }
+.wand-missions-empty { padding: 28px 14px; color: var(--text-secondary); text-align: center; }
+.wand-missions-create-overlay { position: absolute; inset: 0; display: grid; z-index: 2; place-items: center; padding: 22px; background: var(--bg-overlay); backdrop-filter: blur(5px); }
+.wand-missions-create { display: grid; width: min(680px, 100%); max-height: 100%; gap: 13px; overflow: auto; border: 1px solid var(--border-subtle); border-radius: 17px; padding: 18px; background: var(--bg-elevated); box-shadow: 0 18px 55px rgb(0 0 0 / 25%); }
+.wand-missions-create-head > button { border: 0; color: var(--text-secondary); background: transparent; font-size: 24px; cursor: pointer; }
+.wand-missions-create > label,.wand-missions-create details label { display: grid; gap: 6px; color: var(--text-secondary); font-size: var(--font-size-xs); }
+.wand-missions-create input,.wand-missions-create textarea,.wand-missions-comment-form textarea { box-sizing: border-box; width: 100%; border: 1px solid var(--border-subtle); border-radius: 9px; padding: 9px 10px; color: var(--text-primary); background: var(--bg-primary); font: inherit; }
+.wand-missions-create textarea { min-height: 120px; resize: vertical; }
+.wand-missions-provider-picker { display: grid; grid-template-columns: repeat(3,1fr); gap: 7px; }
+.wand-missions-provider-picker label { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border-subtle); border-radius: 10px; padding: 9px; cursor: pointer; }.wand-missions-provider-picker label.active { border-color: var(--accent); background: var(--accent-muted); }.wand-missions-provider-picker svg { width: 19px; height: 19px; }.wand-missions-provider-picker input { width: auto; }
+.wand-missions-create details { display: grid; gap: 10px; border: 1px solid var(--border-subtle); border-radius: 10px; padding: 10px; }.wand-missions-create details[open] summary { margin-bottom: 10px; }.wand-missions-create details label + label { margin-top: 9px; }
+.wand-missions-create-actions { justify-content: flex-end; }
+@media (max-width: 760px) { .wand-missions-dialog { inset: var(--wand-safe-top) 0 var(--wand-safe-bottom); border-radius: 0; }.wand-missions-description { display: none; }.wand-missions-workspace { grid-template-columns: 1fr; }.wand-missions-list { max-height: 160px; border-right: 0; border-bottom: 1px solid var(--border-subtle); }.wand-missions-comment-form { grid-template-columns: 1fr; }.wand-missions-provider-picker { grid-template-columns: repeat(2,1fr); } }
+`;
   var sessionPickerAndWorktreeStyles = String.raw`
 .wand-new-session-overlay {
   position: fixed;
@@ -32442,6 +33007,7 @@
     sharedMotionStyles,
     sessionPickerAndWorktreeStyles,
     composerSelectStyles,
+    missionsStyles,
     reducedMotionStyles
   ].join("");
   function installReactUiStyles(target = document) {
@@ -32738,6 +33304,8 @@
         return commands2.refreshPage();
       case "session.new":
         return commands2.openNewSession();
+      case "missions.open":
+        return commands2.openMissions?.();
       case "session.quickStart.claude":
         return commands2.quickStartClaudeTerminal();
       case "session.quickStart.codex":
@@ -32825,8 +33393,8 @@
   var React41 = __toESM(require_react(), 1);
 
   // src/web-ui/react/shell/ui-store-react.tsx
-  var import_react18 = __toESM(require_react(), 1);
-  var UiStoreContext = (0, import_react18.createContext)(null);
+  var import_react19 = __toESM(require_react(), 1);
+  var UiStoreContext = (0, import_react19.createContext)(null);
   function createUiStoreExternalSource(store) {
     return {
       subscribe: (listener) => store.subscribe(listener),
@@ -32834,10 +33402,10 @@
     };
   }
   function UiStoreProvider({ store, children }) {
-    return (0, import_react18.createElement)(UiStoreContext.Provider, { value: store }, children);
+    return (0, import_react19.createElement)(UiStoreContext.Provider, { value: store }, children);
   }
   function useUiStore() {
-    const store = (0, import_react18.useContext)(UiStoreContext);
+    const store = (0, import_react19.useContext)(UiStoreContext);
     if (!store) {
       throw new Error("useUiStore must be used inside UiStoreProvider");
     }
@@ -32845,16 +33413,16 @@
   }
   function useUiStoreSnapshot() {
     const store = useUiStore();
-    const source = (0, import_react18.useMemo)(() => createUiStoreExternalSource(store), [store]);
-    return (0, import_react18.useSyncExternalStore)(source.subscribe, source.getSnapshot, source.getSnapshot);
+    const source = (0, import_react19.useMemo)(() => createUiStoreExternalSource(store), [store]);
+    return (0, import_react19.useSyncExternalStore)(source.subscribe, source.getSnapshot, source.getSnapshot);
   }
   function useUiDispatch() {
     const store = useUiStore();
-    return (0, import_react18.useCallback)((action) => store.dispatch(action), [store]);
+    return (0, import_react19.useCallback)((action) => store.dispatch(action), [store]);
   }
 
   // src/web-ui/react/shell/shell-file-panel.tsx
-  var import_jsx_runtime41 = __toESM(require_jsx_runtime(), 1);
+  var import_jsx_runtime42 = __toESM(require_jsx_runtime(), 1);
   function normalizeFilePanelCwd(raw) {
     let cwd = raw.trim();
     if (!cwd) return "";
@@ -32883,24 +33451,24 @@
     };
     switch (name) {
       case "close":
-        return /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("path", { d: "M18 6L6 18M6 6l12 12" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M18 6L6 18M6 6l12 12" }) });
       case "folder":
-        return /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("svg", { ...common, className: "wand-icon wand-icon-folder-open", children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("path", { d: "M6 14l1.5-3A2 2 0 019.2 10H20a2 2 0 011.9 2.5l-1.5 6A2 2 0 0118.4 20H4a2 2 0 01-2-2V5a2 2 0 012-2h4l3 3h7a2 2 0 012 2v2" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("svg", { ...common, className: "wand-icon wand-icon-folder-open", children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M6 14l1.5-3A2 2 0 019.2 10H20a2 2 0 011.9 2.5l-1.5 6A2 2 0 0118.4 20H4a2 2 0 01-2-2V5a2 2 0 012-2h4l3 3h7a2 2 0 012 2v2" }) });
       case "refresh":
-        return /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("path", { d: "M21 12a9 9 0 11-3-6.7M21 4v5h-5" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M21 12a9 9 0 11-3-6.7M21 4v5h-5" }) });
       case "search":
-        return /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("circle", { cx: "11", cy: "11", r: "7" }),
-          /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("path", { d: "M21 21l-4.3-4.3" })
+        return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("circle", { cx: "11", cy: "11", r: "7" }),
+          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M21 21l-4.3-4.3" })
         ] });
       case "up":
-        return /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("path", { d: "M12 19V5M5 12l7-7 7 7" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M12 19V5M5 12l7-7 7 7" }) });
     }
   }
   function ShellFilePanel({ explorerRef } = {}) {
-    const snapshot7 = useUiStoreSnapshot();
+    const snapshot8 = useUiStoreSnapshot();
     const dispatch = useUiDispatch();
-    const snapshotCwd = normalizeFilePanelCwd(snapshot7.topbar.cwd) || "/";
+    const snapshotCwd = normalizeFilePanelCwd(snapshot8.topbar.cwd) || "/";
     const [cwd, setCwd] = React41.useState(snapshotCwd);
     const [search, setSearch] = React41.useState("");
     const committedCwd = React41.useRef(snapshotCwd);
@@ -32909,7 +33477,7 @@
       if (editingCwd.current) return;
       committedCwd.current = snapshotCwd;
       setCwd(snapshotCwd);
-    }, [snapshot7.selected?.id, snapshotCwd]);
+    }, [snapshot8.selected?.id, snapshotCwd]);
     const commitCwd = React41.useCallback(() => {
       const normalized = normalizeFilePanelCwd(cwd);
       if (!normalized) {
@@ -32922,30 +33490,30 @@
       void dispatch({ type: "layout.files.navigate", cwd: normalized });
     }, [cwd, dispatch]);
     const parentCwd = getParentFilePanelCwd(committedCwd.current);
-    return /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)(import_jsx_runtime41.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(import_jsx_runtime42.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
         "div",
         {
           id: "file-panel-backdrop",
-          className: classNames("file-panel-backdrop", snapshot7.layout.filePanelBackdropVisible && "open"),
+          className: classNames("file-panel-backdrop", snapshot8.layout.filePanelBackdropVisible && "open"),
           "aria-hidden": "true",
           onClick: () => void dispatch({ type: "layout.files.close" })
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)(
+      /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
         "div",
         {
           id: "file-side-panel",
-          className: classNames("file-side-panel", snapshot7.layout.filePanelOpen && "open"),
-          "aria-hidden": !snapshot7.layout.filePanelOpen,
+          className: classNames("file-side-panel", snapshot8.layout.filePanelOpen && "open"),
+          "aria-hidden": !snapshot8.layout.filePanelOpen,
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("div", { className: "file-side-panel-header", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("div", { className: "file-side-panel-title-group", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { className: "file-side-panel-icon", children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(FileIcon, { name: "folder" }) }),
-                /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { className: "file-side-panel-title", children: "\u6587\u4EF6" })
+            /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "file-side-panel-header", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "file-side-panel-title-group", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "file-side-panel-icon", children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(FileIcon, { name: "folder" }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "file-side-panel-title", children: "\u6587\u4EF6" })
               ] }),
-              /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("div", { className: "file-side-panel-header-actions", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+              /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "file-side-panel-header-actions", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
                   "button",
                   {
                     className: "file-side-panel-iconbtn",
@@ -32954,10 +33522,10 @@
                     title: "\u5237\u65B0",
                     "aria-label": "\u5237\u65B0\u6587\u4EF6\u5217\u8868",
                     onClick: () => void dispatch({ type: "layout.files.refresh" }),
-                    children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(FileIcon, { name: "refresh", size: 15 })
+                    children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(FileIcon, { name: "refresh", size: 15 })
                   }
                 ),
-                /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
                   "button",
                   {
                     id: "file-side-panel-close",
@@ -32966,14 +33534,14 @@
                     "aria-label": "\u5173\u95ED\u6587\u4EF6\u9762\u677F",
                     title: "\u5173\u95ED",
                     onClick: () => void dispatch({ type: "layout.files.close" }),
-                    children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(FileIcon, { name: "close" })
+                    children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(FileIcon, { name: "close" })
                   }
                 )
               ] })
             ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("div", { className: "file-side-panel-body", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("div", { className: "file-explorer-header", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+            /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "file-side-panel-body", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "file-explorer-header", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
                   "button",
                   {
                     className: "file-explorer-up",
@@ -32988,10 +33556,10 @@
                       setCwd(parentCwd);
                       void dispatch({ type: "layout.files.up" });
                     },
-                    children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(FileIcon, { name: "up", size: 15 })
+                    children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(FileIcon, { name: "up", size: 15 })
                   }
                 ),
-                /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
                   "input",
                   {
                     type: "text",
@@ -33029,9 +33597,9 @@
                   }
                 )
               ] }),
-              /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("div", { className: "file-search-box", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { className: "file-search-icon", children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(FileIcon, { name: "search", size: 14 }) }),
-                /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+              /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "file-search-box", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "file-search-icon", children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(FileIcon, { name: "search", size: 14 }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
                   "input",
                   {
                     type: "text",
@@ -33051,7 +33619,7 @@
                     }
                   }
                 ),
-                /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
                   "button",
                   {
                     className: classNames("file-search-clear", search.trim() && "visible"),
@@ -33064,11 +33632,11 @@
                       setSearch("");
                       void dispatch({ type: "layout.files.search.clear" });
                     },
-                    children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(FileIcon, { name: "close", size: 13 })
+                    children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(FileIcon, { name: "close", size: 13 })
                   }
                 )
               ] }),
-              /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("div", { className: "file-explorer", id: "file-explorer", ref: explorerRef })
+              /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("div", { className: "file-explorer", id: "file-explorer", ref: explorerRef })
             ] })
           ]
         }
@@ -33081,7 +33649,7 @@
 
   // src/web-ui/react/shell/shell-sidebar.tsx
   var React42 = __toESM(require_react(), 1);
-  var import_jsx_runtime42 = __toESM(require_jsx_runtime(), 1);
+  var import_jsx_runtime43 = __toESM(require_jsx_runtime(), 1);
   function getSidebarEntryTarget(entry) {
     if (entry.source === "claude-history") return "claude-history";
     if (entry.source === "codex-history") return "codex-history";
@@ -33125,50 +33693,52 @@
     };
     switch (name) {
       case "back":
-        return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("rect", { x: "10", y: "3", width: "11", height: "18", rx: "2" }),
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M7 8l-4 4 4 4M3 12h11" })
+        return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("rect", { x: "10", y: "3", width: "11", height: "18", rx: "2" }),
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M7 8l-4 4 4 4M3 12h11" })
         ] });
       case "chevron":
-        return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M6 9l6 6 6-6" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M6 9l6 6 6-6" }) });
       case "cleanup":
       case "trash":
-        return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" }) });
       case "close":
-        return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M6 6l12 12M18 6L6 18" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M6 6l12 12M18 6L6 18" }) });
       case "file":
-        return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" }) });
       case "gear":
-        return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("circle", { cx: "12", cy: "12", r: "3" }),
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M12 2v3M12 19v3M4.9 4.9L7 7M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1L7 17M17 7l2.1-2.1" })
+        return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("circle", { cx: "12", cy: "12", r: "3" }),
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M12 2v3M12 19v3M4.9 4.9L7 7M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1L7 17M17 7l2.1-2.1" })
         ] });
       case "history":
-        return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M3 12a9 9 0 109-9 9.7 9.7 0 00-6.7 2.7L3 8M3 3v5h5M12 7v5l3 2" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M3 12a9 9 0 109-9 9.7 9.7 0 00-6.7 2.7L3 8M3 3v5h5M12 7v5l3 2" }) });
+      case "inbox":
+        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M4 4h16l2 10v6H2v-6L4 4zM2 14h6l2 3h4l2-3h6" }) });
       case "logout":
-        return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" }) });
       case "merge":
-        return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M7 7h10M7 12h10M7 17h10M5 7L3 9l2 2M19 15l2 2-2 2" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M7 7h10M7 12h10M7 17h10M5 7L3 9l2 2M19 15l2 2-2 2" }) });
       case "more":
-        return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("circle", { cx: "12", cy: "5", r: "1" }),
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("circle", { cx: "12", cy: "12", r: "1" }),
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("circle", { cx: "12", cy: "19", r: "1" })
+        return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("circle", { cx: "12", cy: "5", r: "1" }),
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("circle", { cx: "12", cy: "12", r: "1" }),
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("circle", { cx: "12", cy: "19", r: "1" })
         ] });
       case "pin":
-        return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M12 17v5M5 17h14M9 12V6H8a2 2 0 010-4h8a2 2 0 010 4h-1v6" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M12 17v5M5 17h14M9 12V6H8a2 2 0 010-4h8a2 2 0 010 4h-1v6" }) });
       case "resume":
-        return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M1 4v6h6M3.5 15A9 9 0 109 3.6L3 10" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M1 4v6h6M3.5 15A9 9 0 109 3.6L3 10" }) });
       case "server":
-        return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("rect", { x: "2", y: "3", width: "20", height: "8", rx: "2" }),
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("rect", { x: "2", y: "13", width: "20", height: "8", rx: "2" }),
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M6 7h.01M6 17h.01" })
+        return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("rect", { x: "2", y: "3", width: "20", height: "8", rx: "2" }),
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("rect", { x: "2", y: "13", width: "20", height: "8", rx: "2" }),
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M6 7h.01M6 17h.01" })
         ] });
       case "spark":
-        return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8" }),
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("circle", { cx: "12", cy: "12", r: "3" })
+        return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8" }),
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("circle", { cx: "12", cy: "12", r: "3" })
         ] });
     }
   }
@@ -33182,7 +33752,7 @@
     disabled,
     data
   }) {
-    return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
       "button",
       {
         type: "button",
@@ -33198,7 +33768,7 @@
           event.stopPropagation();
           void dispatch(action);
         },
-        children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(Icon, { name: icon })
+        children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: icon })
       }
     );
   }
@@ -33208,8 +33778,8 @@
   }) {
     const target = getSidebarEntryTarget(entry);
     const legacyKind = target === "session" ? "sessions" : target === "codex-history" ? "codex" : "history";
-    return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("label", { className: "session-manage-check", onClick: (event) => event.stopPropagation(), children: [
-      /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("label", { className: "session-manage-check", onClick: (event) => event.stopPropagation(), children: [
+      /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
         "input",
         {
           type: "checkbox",
@@ -33221,7 +33791,7 @@
           onChange: () => void dispatch({ type: "session.manage.select", target, id: entry.id })
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", {})
+      /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", {})
     ] });
   }
   function WorktreeBadges({ entry }) {
@@ -33237,9 +33807,9 @@
       entry.worktree.branch && `Worktree: ${entry.worktree.branch}`,
       entry.worktree.path && `Path: ${entry.worktree.path}`
     ].filter(Boolean).join("\n");
-    return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(import_jsx_runtime42.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "session-kind-badge worktree", title: title || void 0, children: "Worktree" }),
-      entry.worktree.mergeStatus && /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: classNames("session-kind-badge worktree-merge", entry.worktree.mergeStatus), children: labels[entry.worktree.mergeStatus] ?? entry.worktree.mergeStatus })
+    return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(import_jsx_runtime43.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "session-kind-badge worktree", title: title || void 0, children: "Worktree" }),
+      entry.worktree.mergeStatus && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: classNames("session-kind-badge worktree-merge", entry.worktree.mergeStatus), children: labels[entry.worktree.mergeStatus] ?? entry.worktree.mergeStatus })
     ] });
   }
   function formatEntryTime(entry) {
@@ -33264,13 +33834,13 @@
   function ProviderMark({ entry }) {
     const label = providerDisplayName(entry.provider);
     const provider = normalizeProviderId(entry.provider);
-    return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
       "span",
       {
         className: classNames("session-provider-mark", `provider-${provider ?? "generic"}`),
         "aria-hidden": "true",
         title: label,
-        children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(ProviderLogo, { provider })
+        children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(ProviderLogo, { provider })
       }
     );
   }
@@ -33299,7 +33869,7 @@
     }, [normalized]);
     const travelSeconds = Math.max(4.8, overflow / 28);
     if (!path) return null;
-    return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
       "span",
       {
         ref: containerRef,
@@ -33311,9 +33881,9 @@
           "--tail-marquee-duration": `${Math.min(8, travelSeconds)}s`,
           "--tail-marquee-delay": `${1.8 + staggerMs / 1e3}s`
         },
-        children: /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("span", { className: "tail-marquee-path-inner", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "tail-marquee-prefix", children: prefix }),
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "tail-marquee-leaf", children: leaf })
+        children: /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("span", { className: "tail-marquee-path-inner", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "tail-marquee-prefix", children: prefix }),
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "tail-marquee-leaf", children: leaf })
         ] })
       }
     );
@@ -33331,7 +33901,7 @@
     const time = formatEntryTime(entry);
     const prominentStatus = !isHistory && (entry.permissionBlocked || entry.inFlight || ["running", "thinking", "waiting-input", "waiting_input", "reconnecting"].includes(entry.status));
     const prominentWarning = entry.permissionBlocked || ["waiting-input", "waiting_input", "reconnecting"].includes(entry.status);
-    return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
+    return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
       "div",
       {
         className: classNames(
@@ -33358,7 +33928,7 @@
           activate();
         },
         children: [
-          !manageMode && !isHistory && actions.delete && /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("div", { className: "session-swipe-bg", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
+          !manageMode && !isHistory && actions.delete && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "session-swipe-bg", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
             "button",
             {
               className: "session-swipe-delete",
@@ -33372,17 +33942,17 @@
                 void dispatch(actions.delete);
               },
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(Icon, { name: "trash", size: 18 }),
-                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { children: "\u5220\u9664" })
+                /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "trash", size: 18 }),
+                /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { children: "\u5220\u9664" })
               ]
             }
           ) }),
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("div", { className: "session-item-content", children: /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "session-item-row", children: [
-            manageMode && /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(ManageCheckbox, { entry, dispatch }),
-            /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "session-main", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "session-title-row", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "session-leading-slot", children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(ProviderMark, { entry }) }),
-                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "session-item-content", children: /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "session-item-row", children: [
+            manageMode && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(ManageCheckbox, { entry, dispatch }),
+            /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "session-main", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "session-title-row", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "session-leading-slot", children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(ProviderMark, { entry }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
                   "div",
                   {
                     className: classNames(
@@ -33394,24 +33964,24 @@
                   }
                 )
               ] }),
-              entry.description && /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("div", { className: "session-description", children: entry.description }),
-              /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "session-meta", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "session-leading-slot session-time", children: time }),
-                isHistory ? /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(import_jsx_runtime42.Fragment, { children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("span", { className: "session-context session-context-recoverable", children: [
-                    /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(Icon, { name: "history", size: 11 }),
+              entry.description && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "session-description", children: entry.description }),
+              /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "session-meta", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "session-leading-slot session-time", children: time }),
+                isHistory ? /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(import_jsx_runtime43.Fragment, { children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("span", { className: "session-context session-context-recoverable", children: [
+                    /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "history", size: 11 }),
                     "\u53EF\u6062\u590D"
                   ] }),
-                  /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(PathReveal, { path: entry.cwd })
-                ] }) : /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(import_jsx_runtime42.Fragment, { children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: classNames("session-status", entry.permissionBlocked ? "permission-blocked" : entry.inFlight ? "running" : entry.status), children: entry.statusLabel }),
-                  /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(PathReveal, { path: entry.cwd }),
-                  /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(WorktreeBadges, { entry })
+                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(PathReveal, { path: entry.cwd })
+                ] }) : /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(import_jsx_runtime43.Fragment, { children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: classNames("session-status", entry.permissionBlocked ? "permission-blocked" : entry.inFlight ? "running" : entry.status), children: entry.statusLabel }),
+                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(PathReveal, { path: entry.cwd }),
+                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(WorktreeBadges, { entry })
                 ] })
               ] })
             ] }),
-            !manageMode && /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("span", { className: "session-actions", children: [
-              actions.resume && /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+            !manageMode && /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("span", { className: "session-actions", children: [
+              actions.resume && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
                 ActionButton,
                 {
                   action: actions.resume,
@@ -33422,7 +33992,7 @@
                   data
                 }
               ),
-              actions.merge && /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+              actions.merge && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
                 ActionButton,
                 {
                   action: actions.merge,
@@ -33435,7 +34005,7 @@
                   data
                 }
               ),
-              actions.cleanup && /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+              actions.cleanup && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
                 ActionButton,
                 {
                   action: actions.cleanup,
@@ -33447,7 +34017,7 @@
                   data
                 }
               ),
-              actions.delete && /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+              actions.delete && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
                 ActionButton,
                 {
                   action: actions.delete,
@@ -33471,14 +34041,14 @@
     dispatch
   }) {
     if (group.entries.length === 0) return null;
-    const entries = /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("section", { className: classNames(
+    const entries = /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("section", { className: classNames(
       "session-group",
       group.kind === "automation" && "automation-session-list",
       group.kind === "history" && "non-wand-session-list"
-    ), children: group.entries.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(SessionEntry, { entry, manageMode, dispatch }, `${entry.source}:${entry.id}`)) });
+    ), children: group.entries.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(SessionEntry, { entry, manageMode, dispatch }, `${entry.source}:${entry.id}`)) });
     if (group.kind === "wand") return entries;
     const automation = group.kind === "automation";
-    return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
+    return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
       "details",
       {
         className: classNames(
@@ -33495,16 +34065,16 @@
           });
         },
         children: [
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
             "summary",
             {
               className: automation ? "automation-session-summary" : "non-wand-session-summary",
               title: automation ? "\u7531\u81EA\u52A8\u5316\u6216\u542F\u52A8\u4EFB\u52A1\u521B\u5EFA\uFF0C\u4E0D\u53C2\u4E0E\u666E\u901A Wand \u4F1A\u8BDD\u6392\u5E8F" : "Claude \u4E0E Codex \u7684\u672C\u673A\u539F\u751F\u4F1A\u8BDD\uFF0C\u4E0D\u53C2\u4E0E Wand \u4F1A\u8BDD\u6392\u5E8F",
               onClick: manageMode ? (event) => event.preventDefault() : void 0,
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: automation ? "automation-session-icon" : "non-wand-session-icon", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(Icon, { name: automation ? "spark" : "history" }) }),
-                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: automation ? "automation-session-title" : "non-wand-session-title", children: group.label }),
-                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+                /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: automation ? "automation-session-icon" : "non-wand-session-icon", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: automation ? "spark" : "history" }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: automation ? "automation-session-title" : "non-wand-session-title", children: group.label }),
+                /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
                   "span",
                   {
                     className: automation ? "automation-session-count" : "non-wand-session-count",
@@ -33512,7 +34082,7 @@
                     children: group.entries.length
                   }
                 ),
-                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+                /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
                   Icon,
                   {
                     name: "chevron",
@@ -33534,23 +34104,23 @@
     dispatch
   }) {
     if (!manageMode) {
-      return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "session-manage-bar", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "sidebar-intro", children: "Wand \u4F1A\u8BDD" }),
-        /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+      return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "session-manage-bar", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "sidebar-intro", children: "Wand \u4F1A\u8BDD" }),
+        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
           "button",
           {
             className: "btn btn-ghost btn-xs session-manage-toggle",
             "data-action": "toggle-manage-mode",
             type: "button",
             onClick: () => void dispatch({ type: "session.manage.toggle" }),
-            children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { children: "\u7BA1\u7406" })
+            children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { children: "\u7BA1\u7406" })
           }
         )
       ] });
     }
     const allSelected = totalCount > 0 && selectedCount >= totalCount;
-    return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "session-manage-bar active", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "session-manage-bar active", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
         "button",
         {
           className: "session-manage-exit",
@@ -33559,15 +34129,15 @@
           "aria-label": "\u9000\u51FA\u7BA1\u7406\u6A21\u5F0F",
           title: "\u9000\u51FA\u7BA1\u7406\u6A21\u5F0F",
           onClick: () => void dispatch({ type: "session.manage.toggle" }),
-          children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(Icon, { name: "close" })
+          children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "close" })
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("div", { className: "session-manage-summary", children: selectedCount > 0 ? /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(import_jsx_runtime42.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "session-manage-count", children: selectedCount }),
-        /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "session-manage-summary-label", children: "\u5DF2\u9009\u62E9" })
-      ] }) : /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "session-manage-summary-label muted", children: "\u9009\u62E9\u8981\u7BA1\u7406\u7684\u9879\u76EE" }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "session-manage-actions", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "session-manage-summary", children: selectedCount > 0 ? /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(import_jsx_runtime43.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "session-manage-count", children: selectedCount }),
+        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "session-manage-summary-label", children: "\u5DF2\u9009\u62E9" })
+      ] }) : /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "session-manage-summary-label muted", children: "\u9009\u62E9\u8981\u7BA1\u7406\u7684\u9879\u76EE" }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "session-manage-actions", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
           "button",
           {
             className: "btn btn-ghost btn-xs",
@@ -33580,7 +34150,7 @@
             children: allSelected ? "\u53D6\u6D88\u5168\u9009" : "\u5168\u9009"
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
+        /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
           "button",
           {
             className: "btn btn-danger btn-xs",
@@ -33604,8 +34174,8 @@
     const wand = groups.find((group) => group.kind === "wand")?.entries ?? [];
     const automation = groups.find((group) => group.kind === "automation")?.entries ?? [];
     const history2 = groups.find((group) => group.kind === "history")?.entries ?? [];
-    return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "sidebar-collapsed-tiles", children: [
-      wand.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "sidebar-collapsed-tiles", children: [
+      wand.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
         "button",
         {
           className: classNames(
@@ -33618,11 +34188,11 @@
           title: entry.title,
           "aria-label": `${entry.title} \xB7 ${providerDisplayName(entry.provider)}`,
           onClick: () => void dispatch({ type: "session.select", id: entry.id }),
-          children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "sidebar-collapsed-provider-mark", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(ProviderLogo, { provider: entry.provider }) })
+          children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "sidebar-collapsed-provider-mark", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(ProviderLogo, { provider: entry.provider }) })
         },
         entry.id
       )),
-      automation.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
+      automation.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
         "button",
         {
           className: classNames(
@@ -33635,12 +34205,12 @@
           "aria-label": `\u5C55\u5F00\u67E5\u770B ${automation.length} \u4E2A\u81EA\u52A8\u5316\u4F1A\u8BDD`,
           onClick: () => void dispatch({ type: "layout.drawer.expandGroup", group: "automation" }),
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(Icon, { name: "spark", size: 16 }),
-            /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "non-wand-count-badge", children: automation.length > 99 ? "99+" : automation.length })
+            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "spark", size: 16 }),
+            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "non-wand-count-badge", children: automation.length > 99 ? "99+" : automation.length })
           ]
         }
       ),
-      history2.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
+      history2.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
         "button",
         {
           className: "sidebar-collapsed-tile non-wand-count-tile",
@@ -33650,12 +34220,12 @@
           "aria-label": `\u5C55\u5F00\u67E5\u770B ${history2.length} \u4E2A\u975E Wand \u4F1A\u8BDD`,
           onClick: () => void dispatch({ type: "layout.drawer.expandGroup", group: "history" }),
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(Icon, { name: "history", size: 16 }),
-            /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "non-wand-count-badge", children: history2.length > 99 ? "99+" : history2.length })
+            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "history", size: 16 }),
+            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "non-wand-count-badge", children: history2.length > 99 ? "99+" : history2.length })
           ]
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
         "button",
         {
           className: "sidebar-collapsed-tile add",
@@ -33664,41 +34234,41 @@
           title: "\u65B0\u5EFA\u4F1A\u8BDD",
           "aria-label": "\u65B0\u5EFA\u4F1A\u8BDD",
           onClick: () => void dispatch({ type: "session.new" }),
-          children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { "aria-hidden": "true", children: "\uFF0B" })
+          children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { "aria-hidden": "true", children: "\uFF0B" })
         }
       )
     ] });
   }
   function ShellSidebar() {
-    const snapshot7 = useUiStoreSnapshot();
+    const snapshot8 = useUiStoreSnapshot();
     const dispatch = useUiDispatch();
     const [moreOpen, setMoreOpen] = React42.useState(false);
-    const narrow = snapshot7.layout.sidebarPinned && snapshot7.layout.sidebarCollapsed;
+    const narrow = snapshot8.layout.sidebarPinned && snapshot8.layout.sidebarCollapsed;
     const sidebarClass = classNames(
       "sidebar",
-      snapshot7.layout.sessionsDrawerOpen && "open",
-      snapshot7.layout.sidebarAnchored && "pinned",
+      snapshot8.layout.sessionsDrawerOpen && "open",
+      snapshot8.layout.sidebarAnchored && "pinned",
       narrow && "collapsed"
     );
-    return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(import_jsx_runtime42.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(import_jsx_runtime43.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
         "div",
         {
           id: "sessions-drawer-backdrop",
-          className: classNames("drawer-backdrop", snapshot7.layout.sessionsBackdropVisible && "open"),
+          className: classNames("drawer-backdrop", snapshot8.layout.sessionsBackdropVisible && "open"),
           "aria-hidden": "true",
           onClick: () => void dispatch({ type: "layout.drawer.close" })
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("aside", { id: "sessions-drawer", className: sidebarClass, "aria-label": "\u4F1A\u8BDD\u4FA7\u680F", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "sidebar-header", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "sidebar-header-main", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("div", { className: "topbar-logo-icon", children: "W" }),
-            /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "sidebar-title", children: "\u4F1A\u8BDD" }),
-            /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "session-count", id: "session-count", children: snapshot7.sidebar.interactiveCount })
+      /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("aside", { id: "sessions-drawer", className: sidebarClass, "aria-label": "\u4F1A\u8BDD\u4FA7\u680F", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "sidebar-header", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "sidebar-header-main", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "topbar-logo-icon", children: "W" }),
+            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "sidebar-title", children: "\u4F1A\u8BDD" }),
+            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "session-count", id: "session-count", children: snapshot8.sidebar.interactiveCount })
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "sidebar-header-actions", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("div", { className: "sidebar-header-more", children: /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "sidebar-header-actions", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "sidebar-header-more", children: /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
               WandPopover,
               {
                 open: moreOpen,
@@ -33712,7 +34282,7 @@
                 contentRole: "menu",
                 ariaLabel: "\u4FA7\u680F\u66F4\u591A\u64CD\u4F5C",
                 className: classNames("sidebar-header-overflow", "wand-shell-menu-popover", moreOpen && "open"),
-                trigger: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+                trigger: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
                   "button",
                   {
                     id: "sidebar-more-btn",
@@ -33722,11 +34292,11 @@
                     "aria-haspopup": "menu",
                     "aria-expanded": moreOpen,
                     "aria-controls": "sidebar-overflow-menu",
-                    children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(Icon, { name: "more" })
+                    children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "more" })
                   }
                 ),
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
                     "button",
                     {
                       className: "overflow-item",
@@ -33737,10 +34307,10 @@
                         setMoreOpen(false);
                         void dispatch({ type: "nav.home" });
                       },
-                      children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { children: "\u56DE\u5230\u9996\u9875" })
+                      children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { children: "\u56DE\u5230\u9996\u9875" })
                     }
                   ),
-                  /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
                     "button",
                     {
                       className: "overflow-item",
@@ -33751,26 +34321,26 @@
                         setMoreOpen(false);
                         void dispatch({ type: "nav.refresh" });
                       },
-                      children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { children: "\u5237\u65B0\u9875\u9762" })
+                      children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { children: "\u5237\u65B0\u9875\u9762" })
                     }
                   )
                 ]
               }
             ) }),
-            /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
               "button",
               {
                 id: "sidebar-pin-btn",
-                className: classNames("btn btn-ghost btn-sm sidebar-pin-toggle", snapshot7.layout.sidebarPinned && "pinned"),
+                className: classNames("btn btn-ghost btn-sm sidebar-pin-toggle", snapshot8.layout.sidebarPinned && "pinned"),
                 type: "button",
-                title: snapshot7.layout.sidebarPinned ? "\u5DF2\u56FA\u5B9A\u5E38\u9A7B\uFF08\u70B9\u51FB\u89E3\u9664\u9501\u5B9A\uFF09" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B",
-                "aria-label": snapshot7.layout.sidebarPinned ? "\u89E3\u9664\u56FA\u5B9A\u5E38\u9A7B" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B",
-                "aria-pressed": snapshot7.layout.sidebarPinned,
+                title: snapshot8.layout.sidebarPinned ? "\u5DF2\u56FA\u5B9A\u5E38\u9A7B\uFF08\u70B9\u51FB\u89E3\u9664\u9501\u5B9A\uFF09" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B",
+                "aria-label": snapshot8.layout.sidebarPinned ? "\u89E3\u9664\u56FA\u5B9A\u5E38\u9A7B" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B",
+                "aria-pressed": snapshot8.layout.sidebarPinned,
                 onClick: () => void dispatch({ type: "layout.drawer.pin" }),
-                children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(Icon, { name: "pin" })
+                children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "pin" })
               }
             ),
-            /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
               "button",
               {
                 id: "sidebar-collapse-btn",
@@ -33779,10 +34349,10 @@
                 title: narrow ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761",
                 "aria-label": narrow ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761",
                 onClick: () => void dispatch({ type: "layout.drawer.collapse" }),
-                children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(Icon, { name: "chevron" })
+                children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "chevron" })
               }
             ),
-            /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
               "button",
               {
                 id: "close-drawer-button",
@@ -33790,29 +34360,29 @@
                 type: "button",
                 "aria-label": "\u5173\u95ED\u83DC\u5355",
                 onClick: () => void dispatch({ type: "layout.drawer.close" }),
-                children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(Icon, { name: "close" })
+                children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "close" })
               }
             )
           ] })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("div", { className: "sidebar-body", children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("div", { id: "sessions-panel", children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("div", { className: "sessions-list", id: "sessions-list", children: narrow ? /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(CollapsedSessions, { groups: snapshot7.sidebar.groups, dispatch }) : /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(import_jsx_runtime42.Fragment, { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "sidebar-body", children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { id: "sessions-panel", children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "sessions-list", id: "sessions-list", children: narrow ? /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(CollapsedSessions, { groups: snapshot8.sidebar.groups, dispatch }) : /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(import_jsx_runtime43.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
             ManageBar,
             {
-              manageMode: snapshot7.sidebar.manageMode,
-              selectedCount: snapshot7.sidebar.selectedCount,
-              totalCount: snapshot7.sidebar.totalCount,
+              manageMode: snapshot8.sidebar.manageMode,
+              selectedCount: snapshot8.sidebar.selectedCount,
+              totalCount: snapshot8.sidebar.totalCount,
               dispatch
             }
           ),
-          snapshot7.sidebar.totalCount === 0 ? /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "empty-state", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("strong", { children: "\u8FD8\u6CA1\u6709\u4F1A\u8BDD\u8BB0\u5F55" }),
-            /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("br", {}),
+          snapshot8.sidebar.totalCount === 0 ? /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "empty-state", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("strong", { children: "\u8FD8\u6CA1\u6709\u4F1A\u8BDD\u8BB0\u5F55" }),
+            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("br", {}),
             "\u70B9\u51FB\u4E0A\u65B9\u300C\u65B0\u5BF9\u8BDD\u300D\u5F00\u59CB\u4F60\u7684\u7B2C\u4E00\u6B21\u5BF9\u8BDD\u3002"
-          ] }) : snapshot7.sidebar.groups.map((group) => /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(SessionGroup, { group, manageMode: snapshot7.sidebar.manageMode, dispatch }, group.kind))
+          ] }) : snapshot8.sidebar.groups.map((group) => /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(SessionGroup, { group, manageMode: snapshot8.sidebar.manageMode, dispatch }, group.kind))
         ] }) }) }) }),
-        /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "sidebar-footer", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
+        /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "sidebar-footer", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
             "button",
             {
               id: "drawer-new-session-button",
@@ -33820,27 +34390,41 @@
               type: "button",
               onClick: () => void dispatch({ type: "session.new" }),
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { children: "+" }),
+                /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { children: "+" }),
                 " \u65B0\u4F1A\u8BDD"
               ]
             }
           ),
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "sidebar-footer-actions", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "sidebar-footer-actions", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+              "button",
+              {
+                id: "missions-button",
+                className: "btn btn-ghost btn-sm",
+                type: "button",
+                title: "Agent Inbox",
+                onClick: () => void dispatch({ type: "missions.open" }),
+                children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "inbox", size: 16 }),
+                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { children: "\u4EFB\u52A1" })
+                ]
+              }
+            ),
+            /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
               "button",
               {
                 id: "file-panel-toggle-btn",
-                className: classNames("btn btn-ghost btn-sm", snapshot7.layout.filePanelOpen && "active"),
+                className: classNames("btn btn-ghost btn-sm", snapshot8.layout.filePanelOpen && "active"),
                 type: "button",
                 title: "\u67E5\u770B\u6587\u4EF6",
                 onClick: () => void dispatch({ type: "layout.files.toggle" }),
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(Icon, { name: "file", size: 16 }),
-                  /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { children: "\u6587\u4EF6" })
+                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "file", size: 16 }),
+                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { children: "\u6587\u4EF6" })
                 ]
               }
             ),
-            /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
+            /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
               "button",
               {
                 id: "settings-button",
@@ -33849,12 +34433,12 @@
                 title: "\u8BBE\u7F6E",
                 onClick: () => void dispatch({ type: "settings.open" }),
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(Icon, { name: "gear", size: 16 }),
-                  /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { children: "\u8BBE\u7F6E" })
+                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "gear", size: 16 }),
+                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { children: "\u8BBE\u7F6E" })
                 ]
               }
             ),
-            snapshot7.capabilities.backToNative && /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
+            snapshot8.capabilities.backToNative && /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
               "button",
               {
                 id: "back-to-native-button",
@@ -33863,12 +34447,12 @@
                 title: "\u8FD4\u56DE App \u539F\u751F\u754C\u9762",
                 onClick: () => void dispatch({ type: "native.back" }),
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(Icon, { name: "back", size: 16 }),
-                  /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { children: "\u8FD4\u56DEApp" })
+                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "back", size: 16 }),
+                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { children: "\u8FD4\u56DEApp" })
                 ]
               }
             ),
-            snapshot7.capabilities.switchServer && /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
+            snapshot8.capabilities.switchServer && /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
               "button",
               {
                 id: "switch-server-button",
@@ -33877,12 +34461,12 @@
                 title: "\u5207\u6362\u670D\u52A1\u5668",
                 onClick: () => void dispatch({ type: "native.switchServer" }),
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(Icon, { name: "server", size: 16 }),
-                  /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { children: "\u5207\u6362" })
+                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "server", size: 16 }),
+                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { children: "\u5207\u6362" })
                 ]
               }
             ),
-            /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
+            /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
               "button",
               {
                 id: "logout-button",
@@ -33891,8 +34475,8 @@
                 title: "\u9000\u51FA\u767B\u5F55",
                 onClick: () => void dispatch({ type: "auth.logout" }),
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(Icon, { name: "logout", size: 16 }),
-                  /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { children: "\u9000\u51FA" })
+                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "logout", size: 16 }),
+                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { children: "\u9000\u51FA" })
                 ]
               }
             )
@@ -33903,7 +34487,7 @@
   }
 
   // src/web-ui/react/shell/shell-topbar.tsx
-  var import_jsx_runtime43 = __toESM(require_jsx_runtime(), 1);
+  var import_jsx_runtime44 = __toESM(require_jsx_runtime(), 1);
   function TopbarIcon({ name, size: size4 = 16 }) {
     const common = {
       width: size4,
@@ -33918,31 +34502,31 @@
     };
     switch (name) {
       case "copy":
-        return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("rect", { x: "9", y: "9", width: "13", height: "13", rx: "2" }),
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" })
+        return /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("rect", { x: "9", y: "9", width: "13", height: "13", rx: "2" }),
+          /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("path", { d: "M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" })
         ] });
       case "file":
-        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("path", { d: "M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" }) });
       case "git":
-        return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("svg", { ...common, className: "topbar-git-icon", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("circle", { cx: "6", cy: "6", r: "2" }),
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("circle", { cx: "6", cy: "18", r: "2" }),
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("circle", { cx: "18", cy: "9", r: "2" }),
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M6 8v8M18 11v1a3 3 0 01-3 3H9" })
+        return /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("svg", { ...common, className: "topbar-git-icon", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("circle", { cx: "6", cy: "6", r: "2" }),
+          /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("circle", { cx: "6", cy: "18", r: "2" }),
+          /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("circle", { cx: "18", cy: "9", r: "2" }),
+          /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("path", { d: "M6 8v8M18 11v1a3 3 0 01-3 3H9" })
         ] });
       case "hash":
-        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M4 9h16M4 15h16M10 3L8 21M16 3l-2 18" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("path", { d: "M4 9h16M4 15h16M10 3L8 21M16 3l-2 18" }) });
       case "merge":
-        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M7 7h10M7 12h10M7 17h10M5 7L3 9l2 2M19 15l2 2-2 2" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("path", { d: "M7 7h10M7 12h10M7 17h10M5 7L3 9l2 2M19 15l2 2-2 2" }) });
       case "more":
-        return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("circle", { cx: "12", cy: "5", r: "1" }),
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("circle", { cx: "12", cy: "12", r: "1" }),
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("circle", { cx: "12", cy: "19", r: "1" })
+        return /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("circle", { cx: "12", cy: "5", r: "1" }),
+          /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("circle", { cx: "12", cy: "12", r: "1" }),
+          /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("circle", { cx: "12", cy: "19", r: "1" })
         ] });
       case "trash":
-        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("path", { d: "M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" }) });
     }
   }
   function MoreItem({
@@ -33954,7 +34538,7 @@
     disabled,
     onAction
   }) {
-    return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+    return /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)(
       "button",
       {
         className: classNames("topbar-more-item", danger && "topbar-more-item-danger"),
@@ -33964,128 +34548,128 @@
         disabled,
         onClick: () => onAction(action),
         children: [
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(TopbarIcon, { name: icon, size: 14 }),
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { children: label })
+          /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(TopbarIcon, { name: icon, size: 14 }),
+          /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { children: label })
         ]
       }
     );
   }
   function ShellTopbar() {
-    const snapshot7 = useUiStoreSnapshot();
+    const snapshot8 = useUiStoreSnapshot();
     const dispatch = useUiDispatch();
-    const selected = snapshot7.selected;
-    const moreOpen = snapshot7.layout.topbarMoreOpen;
+    const selected = snapshot8.selected;
+    const moreOpen = snapshot8.layout.topbarMoreOpen;
     const selectedActions = selected ? getShellSidebarEntryActions(selected, false) : null;
     const openFiles = () => {
-      if (!snapshot7.layout.filePanelOpen) void dispatch({ type: "layout.files.toggle" });
+      if (!snapshot8.layout.filePanelOpen) void dispatch({ type: "layout.files.toggle" });
     };
     const runMoreAction = (action) => {
       if (moreOpen) void dispatch({ type: "topbar.menu.toggle" });
       void dispatch(action);
     };
-    return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "main-header-row", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "topbar-left", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("div", { className: "main-header-row", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("div", { className: "topbar-left", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(
           "button",
           {
             id: "sessions-toggle-button",
-            className: classNames("floating-sidebar-toggle", snapshot7.layout.sessionsDrawerOpen && "active"),
+            className: classNames("floating-sidebar-toggle", snapshot8.layout.sessionsDrawerOpen && "active"),
             "aria-label": "\u5207\u6362\u4F1A\u8BDD\u4FA7\u680F",
             type: "button",
             onClick: () => void dispatch({ type: "layout.drawer.toggle" }),
-            children: /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("span", { className: "hamburger-icon", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", {}),
-              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", {}),
-              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", {})
+            children: /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("span", { className: "hamburger-icon", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", {}),
+              /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", {}),
+              /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", {})
             ] })
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "topbar-brand", "aria-hidden": "true", children: "W" })
+        /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "topbar-brand", "aria-hidden": "true", children: "W" })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "topbar-center", children: selected ? /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(import_jsx_runtime43.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("div", { className: "topbar-center", children: selected ? /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)(import_jsx_runtime44.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(
           "span",
           {
-            className: classNames("topbar-session-title", snapshot7.topbar.titleGenerating && "title-generating"),
-            title: snapshot7.topbar.description || selected.title,
-            "aria-busy": snapshot7.topbar.titleGenerating || void 0,
-            children: snapshot7.topbar.title
+            className: classNames("topbar-session-title", snapshot8.topbar.titleGenerating && "title-generating"),
+            title: snapshot8.topbar.description || selected.title,
+            "aria-busy": snapshot8.topbar.titleGenerating || void 0,
+            children: snapshot8.topbar.title
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+        /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)(
           "span",
           {
-            className: classNames("session-status-pill", snapshot7.topbar.statusTone),
-            title: snapshot7.topbar.statusLabel,
+            className: classNames("session-status-pill", snapshot8.topbar.statusTone),
+            title: snapshot8.topbar.statusLabel,
             children: [
-              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "session-status-dot" }),
-              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "session-status-text", children: snapshot7.topbar.statusLabel })
+              /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "session-status-dot" }),
+              /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "session-status-text", children: snapshot8.topbar.statusLabel })
             ]
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(
           "span",
           {
-            className: classNames("current-task", !snapshot7.topbar.currentTask && "hidden"),
+            className: classNames("current-task", !snapshot8.topbar.currentTask && "hidden"),
             id: "current-task",
-            title: snapshot7.topbar.currentTask || void 0,
-            children: snapshot7.topbar.currentTask
+            title: snapshot8.topbar.currentTask || void 0,
+            children: snapshot8.topbar.currentTask
           }
         ),
-        snapshot7.topbar.cwd && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+        snapshot8.topbar.cwd && /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(
           "span",
           {
             className: "topbar-cwd tail-marquee-path",
             id: "topbar-cwd",
             role: "button",
             tabIndex: 0,
-            title: snapshot7.topbar.cwd,
+            title: snapshot8.topbar.cwd,
             onClick: openFiles,
             onKeyDown: (event) => {
               if (event.key !== "Enter" && event.key !== " ") return;
               event.preventDefault();
               openFiles();
             },
-            children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "tail-marquee-path-inner", children: snapshot7.topbar.cwd })
+            children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "tail-marquee-path-inner", children: snapshot8.topbar.cwd })
           }
         )
-      ] }) : /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(import_jsx_runtime43.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "topbar-tagline", children: snapshot7.topbar.title || "Wand \u63A7\u5236\u53F0" }),
-        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "current-task hidden", id: "current-task" })
+      ] }) : /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)(import_jsx_runtime44.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "topbar-tagline", children: snapshot8.topbar.title || "Wand \u63A7\u5236\u53F0" }),
+        /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "current-task hidden", id: "current-task" })
       ] }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "topbar-right", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("div", { className: "topbar-right", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(
           "button",
           {
             id: "topbar-file-button",
-            className: classNames("topbar-btn square", snapshot7.layout.filePanelOpen && "active"),
+            className: classNames("topbar-btn square", snapshot8.layout.filePanelOpen && "active"),
             type: "button",
             "aria-label": "\u6587\u4EF6",
             title: "\u67E5\u770B\u6587\u4EF6\uFF08\u53EF\u4FEE\u6539\u8DEF\u5F84\uFF09",
             onClick: () => void dispatch({ type: "layout.files.toggle" }),
-            children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(TopbarIcon, { name: "file" })
+            children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(TopbarIcon, { name: "file" })
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { id: "topbar-git-slot", className: "topbar-git-slot", children: snapshot7.topbar.git && /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+        /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { id: "topbar-git-slot", className: "topbar-git-slot", children: snapshot8.topbar.git && /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)(
           "button",
           {
             id: "topbar-git-badge",
             className: "topbar-git-badge",
             type: "button",
-            title: `${snapshot7.topbar.git.branch}  \xB7  ${snapshot7.topbar.git.clean ? "\u5DE5\u4F5C\u533A\u5E72\u51C0" : `${snapshot7.topbar.git.modifiedCount} \u4E2A\u6587\u4EF6\u5F85\u63D0\u4EA4`}`,
+            title: `${snapshot8.topbar.git.branch}  \xB7  ${snapshot8.topbar.git.clean ? "\u5DE5\u4F5C\u533A\u5E72\u51C0" : `${snapshot8.topbar.git.modifiedCount} \u4E2A\u6587\u4EF6\u5F85\u63D0\u4EA4`}`,
             "aria-label": "\u5FEB\u6377\u63D0\u4EA4",
             onClick: () => void dispatch({ type: "topbar.gitCommit" }),
             children: [
-              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(TopbarIcon, { name: "git", size: 14 }),
-              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "topbar-git-branch", children: snapshot7.topbar.git.branch }),
-              snapshot7.topbar.git.clean ? /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "topbar-git-clean", "aria-hidden": "true", children: "\u2713" }) : /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("span", { className: "topbar-git-count", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(TopbarIcon, { name: "git", size: 14 }),
+              /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "topbar-git-branch", children: snapshot8.topbar.git.branch }),
+              snapshot8.topbar.git.clean ? /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "topbar-git-clean", "aria-hidden": "true", children: "\u2713" }) : /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("span", { className: "topbar-git-count", children: [
                 "\xB7",
-                snapshot7.topbar.git.modifiedCount
+                snapshot8.topbar.git.modifiedCount
               ] })
             ]
           }
         ) }),
-        selected && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "topbar-more-wrap", children: /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+        selected && /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("div", { className: "topbar-more-wrap", children: /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)(
           WandPopover,
           {
             open: moreOpen,
@@ -34101,7 +34685,7 @@
             contentRole: "menu",
             ariaLabel: "\u5F53\u524D\u4F1A\u8BDD",
             className: classNames("topbar-more-menu", "wand-shell-menu-popover", !moreOpen && "hidden"),
-            trigger: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+            trigger: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(
               "button",
               {
                 id: "topbar-more-button",
@@ -34112,11 +34696,11 @@
                 "aria-expanded": moreOpen,
                 "aria-controls": "topbar-more-menu",
                 title: "\u5F53\u524D\u4F1A\u8BDD\u64CD\u4F5C",
-                children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(TopbarIcon, { name: "more" })
+                children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(TopbarIcon, { name: "more" })
               }
             ),
             children: [
-              selected.claudeSessionId && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+              selected.claudeSessionId && /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(
                 MoreItem,
                 {
                   action: { type: "topbar.copy", field: "providerSessionId" },
@@ -34126,7 +34710,7 @@
                   onAction: runMoreAction
                 }
               ),
-              selected.cwd && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+              selected.cwd && /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(
                 MoreItem,
                 {
                   action: { type: "topbar.copy", field: "cwd" },
@@ -34136,7 +34720,7 @@
                   onAction: runMoreAction
                 }
               ),
-              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+              /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(
                 MoreItem,
                 {
                   action: { type: "topbar.copy", field: "sessionId" },
@@ -34146,8 +34730,8 @@
                   onAction: runMoreAction
                 }
               ),
-              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "topbar-more-divider", role: "separator" }),
-              selectedActions?.merge && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+              /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("div", { className: "topbar-more-divider", role: "separator" }),
+              selectedActions?.merge && /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(
                 MoreItem,
                 {
                   action: selectedActions.merge,
@@ -34158,7 +34742,7 @@
                   onAction: runMoreAction
                 }
               ),
-              selectedActions?.cleanup && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+              selectedActions?.cleanup && /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(
                 MoreItem,
                 {
                   action: selectedActions.cleanup,
@@ -34168,7 +34752,7 @@
                   onAction: runMoreAction
                 }
               ),
-              selectedActions?.delete && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+              selectedActions?.delete && /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(
                 MoreItem,
                 {
                   action: selectedActions.delete,
@@ -34187,7 +34771,7 @@
   }
 
   // src/web-ui/react/shell/shell-main-content.tsx
-  var import_jsx_runtime44 = __toESM(require_jsx_runtime(), 1);
+  var import_jsx_runtime45 = __toESM(require_jsx_runtime(), 1);
   function getShellLegacySlotClasses(visibility) {
     return {
       terminal: `terminal-container ${visibility.terminal ? "active" : "hidden"}`,
@@ -34222,13 +34806,13 @@
     };
     switch (name) {
       case "chat":
-        return /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("path", { d: "M21 15a4 4 0 01-4 4H8l-5 3V7a4 4 0 014-4h10a4 4 0 014 4z" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("path", { d: "M21 15a4 4 0 01-4 4H8l-5 3V7a4 4 0 014-4h10a4 4 0 014 4z" }) });
       case "chevron-down":
-        return /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("svg", { ...common, strokeWidth: 2, children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("path", { d: "M6 9l6 6 6-6" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("svg", { ...common, strokeWidth: 2, children: /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("path", { d: "M6 9l6 6 6-6" }) });
       case "folder":
-        return /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("path", { d: "M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("path", { d: "M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" }) });
       case "terminal":
-        return /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("path", { d: "M4 17l6-5-6-5M12 19h8" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("path", { d: "M4 17l6-5-6-5M12 19h8" }) });
     }
   }
   function ShellBlankChat({ className, cwd, queueRef }) {
@@ -34239,13 +34823,13 @@
     const openFolderPicker2 = () => {
       void dispatch({ type: "folderPicker.open" });
     };
-    return /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("div", { id: "blank-chat", className, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("div", { className: "blank-chat-inner", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("div", { className: "blank-chat-logo", children: "W" }),
-        /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("h2", { className: "blank-chat-title", children: "Wand" }),
-        /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("p", { className: "blank-chat-subtitle", children: "\u652F\u6301\u7EC8\u7AEF PTY \u4F1A\u8BDD\u4E0E\u7ED3\u6784\u5316 chat \u4F1A\u8BDD\uFF0C\u4E24\u79CD\u6A21\u5F0F\u53EF\u5E76\u5B58\u3002" }),
-        /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("div", { className: "blank-chat-tools", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)(
+    return /* @__PURE__ */ (0, import_jsx_runtime45.jsxs)("div", { id: "blank-chat", className, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime45.jsxs)("div", { className: "blank-chat-inner", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("div", { className: "blank-chat-logo", children: "W" }),
+        /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("h2", { className: "blank-chat-title", children: "Wand" }),
+        /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("p", { className: "blank-chat-subtitle", children: "\u652F\u6301\u7EC8\u7AEF PTY \u4F1A\u8BDD\u4E0E\u7ED3\u6784\u5316 chat \u4F1A\u8BDD\uFF0C\u4E24\u79CD\u6A21\u5F0F\u53EF\u5E76\u5B58\u3002" }),
+        /* @__PURE__ */ (0, import_jsx_runtime45.jsxs)("div", { className: "blank-chat-tools", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime45.jsxs)(
             "button",
             {
               className: "blank-chat-tool-btn",
@@ -34253,12 +34837,12 @@
               type: "button",
               onClick: () => quickStart2("claude"),
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "tool-icon", children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(ProviderLogo, { provider: "claude" }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("span", { className: "tool-icon", children: /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(ProviderLogo, { provider: "claude" }) }),
                 "\u65B0\u5EFA\u7EC8\u7AEF\u4F1A\u8BDD"
               ]
             }
           ),
-          /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)(
+          /* @__PURE__ */ (0, import_jsx_runtime45.jsxs)(
             "button",
             {
               className: "blank-chat-tool-btn",
@@ -34266,12 +34850,12 @@
               type: "button",
               onClick: () => quickStart2("codex"),
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "tool-icon", children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(ProviderLogo, { provider: "codex" }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("span", { className: "tool-icon", children: /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(ProviderLogo, { provider: "codex" }) }),
                 "\u65B0\u5EFA Codex \u4F1A\u8BDD"
               ]
             }
           ),
-          /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)(
+          /* @__PURE__ */ (0, import_jsx_runtime45.jsxs)(
             "button",
             {
               className: "blank-chat-tool-btn",
@@ -34279,12 +34863,12 @@
               type: "button",
               onClick: () => quickStart2("opencode"),
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "tool-icon", children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(ProviderLogo, { provider: "opencode" }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("span", { className: "tool-icon", children: /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(ProviderLogo, { provider: "opencode" }) }),
                 "\u65B0\u5EFA OpenCode \u4F1A\u8BDD"
               ]
             }
           ),
-          /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)(
+          /* @__PURE__ */ (0, import_jsx_runtime45.jsxs)(
             "button",
             {
               className: "blank-chat-tool-btn",
@@ -34292,13 +34876,13 @@
               type: "button",
               onClick: () => quickStart2("structured"),
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "tool-icon", children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(WelcomeIcon, { name: "chat", size: 16 }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("span", { className: "tool-icon", children: /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(WelcomeIcon, { name: "chat", size: 16 }) }),
                 "\u65B0\u5EFA\u7ED3\u6784\u5316\u4F1A\u8BDD"
               ]
             }
           )
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("div", { className: "blank-chat-cwd-wrap", children: /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)(
+        /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("div", { className: "blank-chat-cwd-wrap", children: /* @__PURE__ */ (0, import_jsx_runtime45.jsxs)(
           "div",
           {
             className: "blank-chat-cwd",
@@ -34314,26 +34898,26 @@
               openFolderPicker2();
             },
             children: [
-              /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "blank-chat-cwd-icon", children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(WelcomeIcon, { name: "folder", size: 13 }) }),
-              /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "blank-chat-cwd-path tail-marquee-path", id: "blank-chat-cwd-path", title: cwd, children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "tail-marquee-path-inner", children: cwd }) }),
-              /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "blank-chat-cwd-arrow", id: "blank-chat-cwd-arrow", children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(WelcomeIcon, { name: "chevron-down", size: 11 }) })
+              /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("span", { className: "blank-chat-cwd-icon", children: /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(WelcomeIcon, { name: "folder", size: 13 }) }),
+              /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("span", { className: "blank-chat-cwd-path tail-marquee-path", id: "blank-chat-cwd-path", title: cwd, children: /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("span", { className: "tail-marquee-path-inner", children: cwd }) }),
+              /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("span", { className: "blank-chat-cwd-arrow", id: "blank-chat-cwd-arrow", children: /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(WelcomeIcon, { name: "chevron-down", size: 11 }) })
             ]
           }
         ) })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("div", { id: "cross-session-queue-host", ref: queueRef })
+      /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("div", { id: "cross-session-queue-host", ref: queueRef })
     ] });
   }
   function ShellMainContent({ legacyRefs } = {}) {
-    const snapshot7 = useUiStoreSnapshot();
-    const classes2 = getShellLegacySlotClasses(snapshot7.legacyVisibility);
-    const cwd = snapshot7.topbar.cwd || "/";
-    return /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("main", { className: `main-content${snapshot7.layout.filePanelOpen ? " file-panel-open" : ""}`, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(ShellTopbar, {}),
-      /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(ShellFilePanel, { explorerRef: legacyRefs?.fileExplorer }),
-      /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("div", { id: "output", className: classes2.terminal, ref: legacyRefs?.terminal }),
-      /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("div", { id: "chat-output", className: classes2.chat, ref: legacyRefs?.chat }),
-      /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(
+    const snapshot8 = useUiStoreSnapshot();
+    const classes2 = getShellLegacySlotClasses(snapshot8.legacyVisibility);
+    const cwd = snapshot8.topbar.cwd || "/";
+    return /* @__PURE__ */ (0, import_jsx_runtime45.jsxs)("main", { className: `main-content${snapshot8.layout.filePanelOpen ? " file-panel-open" : ""}`, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(ShellTopbar, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(ShellFilePanel, { explorerRef: legacyRefs?.fileExplorer }),
+      /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("div", { id: "output", className: classes2.terminal, ref: legacyRefs?.terminal }),
+      /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("div", { id: "chat-output", className: classes2.chat, ref: legacyRefs?.chat }),
+      /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(
         ShellBlankChat,
         {
           className: classes2.blank,
@@ -34341,12 +34925,12 @@
           queueRef: legacyRefs?.crossSessionQueue
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("div", { className: classes2.composer, ref: legacyRefs?.composer })
+      /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("div", { className: classes2.composer, ref: legacyRefs?.composer })
     ] });
   }
 
   // src/web-ui/react/shell/shell-app.tsx
-  var import_jsx_runtime45 = __toESM(require_jsx_runtime(), 1);
+  var import_jsx_runtime46 = __toESM(require_jsx_runtime(), 1);
   function getShellLayoutClassName(layout) {
     const classes2 = ["main-layout"];
     if (layout.sessionsDrawerOpen) classes2.push("sidebar-open");
@@ -34355,14 +34939,14 @@
     return classes2.join(" ");
   }
   function ShellAppFrame({ legacyRefs } = {}) {
-    const snapshot7 = useUiStoreSnapshot();
-    return /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("div", { className: "app-container", children: /* @__PURE__ */ (0, import_jsx_runtime45.jsxs)("div", { className: getShellLayoutClassName(snapshot7.layout), children: [
-      /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(ShellSidebar, {}),
-      /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(ShellMainContent, { legacyRefs })
+    const snapshot8 = useUiStoreSnapshot();
+    return /* @__PURE__ */ (0, import_jsx_runtime46.jsx)("div", { className: "app-container", children: /* @__PURE__ */ (0, import_jsx_runtime46.jsxs)("div", { className: getShellLayoutClassName(snapshot8.layout), children: [
+      /* @__PURE__ */ (0, import_jsx_runtime46.jsx)(ShellSidebar, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime46.jsx)(ShellMainContent, { legacyRefs })
     ] }) });
   }
   function ShellApp({ store, legacyRefs }) {
-    return /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(UiStoreProvider, { store, children: /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(ShellAppFrame, { legacyRefs }) });
+    return /* @__PURE__ */ (0, import_jsx_runtime46.jsx)(UiStoreProvider, { store, children: /* @__PURE__ */ (0, import_jsx_runtime46.jsx)(ShellAppFrame, { legacyRefs }) });
   }
 
   // src/web-ui/react/shell/ui-store.ts
@@ -34388,7 +34972,7 @@
     return Object.freeze(value);
   }
   function isolateSnapshot(data, revision, freeze) {
-    const snapshot7 = cloneValue({
+    const snapshot8 = cloneValue({
       auth: data.auth,
       viewport: data.viewport,
       capabilities: data.capabilities,
@@ -34399,7 +34983,7 @@
       legacyVisibility: data.legacyVisibility,
       revision
     });
-    return freeze ? freezeValue(snapshot7) : snapshot7;
+    return freeze ? freezeValue(snapshot8) : snapshot8;
   }
   function normalizeBatchMs(value) {
     const batchMs = value ?? 0;
@@ -34556,7 +35140,7 @@
   };
 
   // src/web-ui/react/index.tsx
-  var import_jsx_runtime46 = __toESM(require_jsx_runtime(), 1);
+  var import_jsx_runtime47 = __toESM(require_jsx_runtime(), 1);
   var OVERLAY_ROOT_ID = "overlay-root";
   var REACT_MOUNT_ID = "wand-react-ui-mount";
   var PORTAL_CONTAINER_ID = "wand-react-ui-portals";
@@ -34587,6 +35171,7 @@
     window.__wandReactWorktreeMerge = worktreeMergeController;
     window.__wandReactRestartOverlay = restartOverlayController;
     window.__wandReactFilePreview = filePreviewController;
+    window.__wandReactMissions = missionsController;
   }
   function startReactUi() {
     const overlayRoot = getOrCreateOverlayRoot();
@@ -34596,7 +35181,7 @@
       const mount = getOrCreateChild(overlayRoot, REACT_MOUNT_ID, "wand-ui-mount");
       const portals = getOrCreateChild(overlayRoot, PORTAL_CONTAINER_ID, "wand-ui-portals");
       activeRoot = (0, import_client.createRoot)(mount);
-      activeRoot.render(/* @__PURE__ */ (0, import_jsx_runtime46.jsx)(OverlayHost, { portalContainer: portals }));
+      activeRoot.render(/* @__PURE__ */ (0, import_jsx_runtime47.jsx)(OverlayHost, { portalContainer: portals }));
     }
     exposeBusinessControllers();
     overlayRoot.dataset.reactUi = genericUiEnabled ? "enabled" : "fallback";
@@ -34655,13 +35240,13 @@
 
   // src/web-ui/browser/shell-runtime.ts
   var commands = null;
-  var runtime5 = null;
+  var runtime6 = null;
   function configureBrowserShellCommands(nextCommands) {
-    if (runtime5) throw new Error("Cannot replace browser shell commands after mount");
+    if (runtime6) throw new Error("Cannot replace browser shell commands after mount");
     commands = nextCommands;
   }
   function isBrowserReactShellMounted() {
-    return runtime5 !== null;
+    return runtime6 !== null;
   }
   function moveChildren(source, target) {
     while (source.firstChild) target.appendChild(source.firstChild);
@@ -34702,9 +35287,9 @@
       return "disabled";
     }
     if (!commands) throw new Error("Browser shell commands were not configured");
-    if (runtime5) {
-      if (runtime5.app !== app) throw new Error("React shell cannot move to a different #app root");
-      (0, import_react_dom4.flushSync)(() => runtime5?.store.publish({ sync: true, reason: "legacy:render" }));
+    if (runtime6) {
+      if (runtime6.app !== app) throw new Error("React shell cannot move to a different #app root");
+      (0, import_react_dom4.flushSync)(() => runtime6?.store.publish({ sync: true, reason: "legacy:render" }));
       return "updated";
     }
     const legacy = createLegacyRefs(createLegacyMarkup());
@@ -34712,11 +35297,11 @@
     app.replaceChildren();
     app.dataset.reactShell = "enabled";
     const root = (0, import_client2.createRoot)(app);
-    runtime5 = { app, root, store, hosts: legacy.hosts };
+    runtime6 = { app, root, store, hosts: legacy.hosts };
     try {
       (0, import_react_dom4.flushSync)(() => root.render(React45.createElement(ShellApp, { store, legacyRefs: legacy.refs })));
     } catch (error) {
-      runtime5 = null;
+      runtime6 = null;
       store.dispose();
       for (const host of legacy.hosts) host.dispose();
       delete app.dataset.reactShell;
@@ -34725,9 +35310,9 @@
     return "mounted";
   }
   function unmountBrowserReactShell() {
-    const active = runtime5;
+    const active = runtime6;
     if (!active) return;
-    runtime5 = null;
+    runtime6 = null;
     (0, import_react_dom4.flushSync)(() => active.root.unmount());
     active.store.dispose();
     for (const host of active.hosts) host.dispose();
@@ -34737,6 +35322,7 @@
   // src/web-ui/browser/react-overlay-coordinator.ts
   var REACT_OVERLAY_CONTROLLERS = {
     folderPicker: folderPickerController,
+    missions: missionsController,
     newSession: newSessionController,
     quickCommit: quickCommitController,
     settings: settingsController,
@@ -34811,9 +35397,9 @@
   }
   function prepareFilePreviewForCompetingOverlay(openIntent) {
     if (!filePreviewController.isOpen()) return true;
-    const snapshot7 = filePreviewStore.getSnapshot();
-    if (snapshot7.saving) return false;
-    if (!snapshot7.dirty) {
+    const snapshot8 = filePreviewStore.getSnapshot();
+    if (snapshot8.saving) return false;
+    if (!snapshot8.dirty) {
       filePreviewController.closeIfOpen();
       return !filePreviewController.isOpen();
     }
@@ -36361,43 +36947,43 @@
         }
         if (msg.data && msg.sessionId) {
           var isIncremental = !!msg.data.incremental;
-          var snapshot7 = { id: msg.sessionId };
+          var snapshot8 = { id: msg.sessionId };
           var topicMetadataChanged = false;
           if (!isIncremental && msg.data.output !== void 0) {
-            snapshot7.output = msg.data.output;
+            snapshot8.output = msg.data.output;
           }
           if (Object.prototype.hasOwnProperty.call(msg.data, "permissionBlocked")) {
-            snapshot7.permissionBlocked = !!msg.data.permissionBlocked;
+            snapshot8.permissionBlocked = !!msg.data.permissionBlocked;
           }
           if (Object.prototype.hasOwnProperty.call(msg.data, "queuedMessages")) {
-            snapshot7.queuedMessages = msg.data.queuedMessages || [];
+            snapshot8.queuedMessages = msg.data.queuedMessages || [];
             state.queueEpoch++;
           }
           if (msg.data.structuredState) {
-            snapshot7.structuredState = msg.data.structuredState;
+            snapshot8.structuredState = msg.data.structuredState;
           }
           if (msg.data.sessionKind) {
-            snapshot7.sessionKind = msg.data.sessionKind;
+            snapshot8.sessionKind = msg.data.sessionKind;
           }
           if (Object.prototype.hasOwnProperty.call(msg.data, "title")) {
-            snapshot7.title = msg.data.title;
+            snapshot8.title = msg.data.title;
             topicMetadataChanged = true;
           }
           if (Object.prototype.hasOwnProperty.call(msg.data, "description")) {
-            snapshot7.description = msg.data.description;
+            snapshot8.description = msg.data.description;
             topicMetadataChanged = true;
           }
           if (Object.prototype.hasOwnProperty.call(msg.data, "titleGenerating")) {
-            snapshot7.titleGenerating = !!msg.data.titleGenerating;
+            snapshot8.titleGenerating = !!msg.data.titleGenerating;
             topicMetadataChanged = true;
           }
           if (Object.prototype.hasOwnProperty.call(msg.data, "summary")) {
-            snapshot7.summary = msg.data.summary;
+            snapshot8.summary = msg.data.summary;
           }
           if (msg.data.messages) {
-            snapshot7.messages = msg.data.messages;
-            if (typeof msg.data.messageOffset === "number") snapshot7.messageOffset = msg.data.messageOffset;
-            if (typeof msg.data.messageTotal === "number") snapshot7.messageTotal = msg.data.messageTotal;
+            snapshot8.messages = msg.data.messages;
+            if (typeof msg.data.messageOffset === "number") snapshot8.messageOffset = msg.data.messageOffset;
+            if (typeof msg.data.messageTotal === "number") snapshot8.messageTotal = msg.data.messageTotal;
           } else if (isIncremental && msg.data.lastMessage) {
             var existingSession = state.sessions.find(function(s) {
               return s.id === msg.sessionId;
@@ -36413,28 +36999,28 @@
               } else if (baseOffset + msgs.length < expectedCount) {
                 msgs.push(incoming);
               }
-              snapshot7.messages = msgs;
-              if (expectedCount > 0) snapshot7.messageTotal = expectedCount;
+              snapshot8.messages = msgs;
+              if (expectedCount > 0) snapshot8.messageTotal = expectedCount;
             }
           }
-          var isChunkOnly = isIncremental && msg.data.chunk && !msg.data.lastMessage && !snapshot7.messages && snapshot7.output === void 0 && !msg.data.structuredState && !msg.data.sessionKind;
+          var isChunkOnly = isIncremental && msg.data.chunk && !msg.data.lastMessage && !snapshot8.messages && snapshot8.output === void 0 && !msg.data.structuredState && !msg.data.sessionKind;
           if (isChunkOnly) {
             if (msg.data.permissionBlocked !== void 0) {
               var existingPB = state.sessions.find(function(s) {
                 return s.id === msg.sessionId;
               });
               if (existingPB && !!existingPB.permissionBlocked !== !!msg.data.permissionBlocked) {
-                updateSessionSnapshot(snapshot7);
+                updateSessionSnapshot(snapshot8);
                 if (msg.sessionId === state.selectedId) updateTaskDisplay();
               }
             }
-          } else if (snapshot7.output !== void 0 || snapshot7.messages || isIncremental || msg.data.permissionBlocked !== void 0 || snapshot7.title || snapshot7.description || snapshot7.titleGenerating !== void 0) {
-            updateSessionSnapshot(snapshot7);
+          } else if (snapshot8.output !== void 0 || snapshot8.messages || isIncremental || msg.data.permissionBlocked !== void 0 || snapshot8.title || snapshot8.description || snapshot8.titleGenerating !== void 0) {
+            updateSessionSnapshot(snapshot8);
             if (topicMetadataChanged) scheduleSessionListUpdate();
             if (msg.sessionId === state.selectedId) {
               var updatedSession = state.sessions.find(function(s) {
                 return s.id === msg.sessionId;
-              }) || snapshot7;
+              }) || snapshot8;
               state.currentMessages = buildMessagesForRender(updatedSession, getPreferredMessages(updatedSession, updatedSession.output, false));
               updateTaskDisplay();
               if (updatedSession.sessionKind === "structured" || msg.data.sessionKind === "structured") {
@@ -37492,14 +38078,14 @@
         throw new Error(p && p.error || "\u4E2D\u65AD\u5931\u8D25 (key=" + key + ")");
       });
       return res.json();
-    }).then(function(snapshot7) {
-      if (snapshot7 && snapshot7.id) {
-        updateSessionSnapshot(snapshot7);
-        if (snapshot7.id === state.selectedId) {
+    }).then(function(snapshot8) {
+      if (snapshot8 && snapshot8.id) {
+        updateSessionSnapshot(snapshot8);
+        if (snapshot8.id === state.selectedId) {
           var refreshed = state.sessions.find(function(s) {
-            return s.id === snapshot7.id;
-          }) || snapshot7;
-          state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, snapshot7.output, false));
+            return s.id === snapshot8.id;
+          }) || snapshot8;
+          state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, snapshot8.output, false));
           renderChat2(true);
           if (typeof updateQueueBar === "function") updateQueueBar();
         }
@@ -39346,6 +39932,10 @@
       if (backToNativeBtn) backToNativeBtn.addEventListener("click", backToNativeApp);
       var settingsBtn = document.getElementById("settings-button");
       if (settingsBtn) settingsBtn.addEventListener("click", openSettingsModal);
+      var missionsBtn = document.getElementById("missions-button");
+      if (missionsBtn) missionsBtn.addEventListener("click", function() {
+        missionsController.open();
+      });
       var newSessBtn = document.getElementById("topbar-new-session-button");
       if (newSessBtn) newSessBtn.addEventListener("click", openSessionModal);
       var drawerNewSessBtn = document.getElementById("drawer-new-session-button");
@@ -40015,7 +40605,7 @@
     return '<div class="app-container"><div id="sessions-drawer-backdrop" class="drawer-backdrop' + backdropClass + '"></div><div class="main-layout' + (state.sessionsDrawerOpen ? " sidebar-open" : "") + (isAnchored ? " sidebar-pinned" : "") + collapsedCls + '"><aside id="sessions-drawer" class="sidebar' + drawerClass + (isAnchored ? " pinned" : "") + sidebarCollapsedCls + '"><div class="sidebar-header"><div class="sidebar-header-main"><div class="topbar-logo-icon">W</div><span class="sidebar-title">\u4F1A\u8BDD</span><span class="session-count" id="session-count">' + String(state.sessions.filter(function(session) {
       var source = String(session && session.sessionSource || "").toLowerCase();
       return source !== "automation" && source !== "startup";
-    }).length) + '</span></div><div class="sidebar-header-actions"><div class="sidebar-header-more"><button id="sidebar-more-btn" class="btn btn-ghost btn-sm" type="button" title="\u66F4\u591A\u64CD\u4F5C"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg></button><div class="sidebar-header-overflow" id="sidebar-overflow-menu"><button class="overflow-item" id="sidebar-home-btn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg><span>\u56DE\u5230\u9996\u9875</span></button><button class="overflow-item" id="sidebar-refresh-btn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg><span>\u5237\u65B0\u9875\u9762</span></button></div></div><button id="sidebar-pin-btn" class="btn btn-ghost btn-sm sidebar-pin-toggle' + (state.sidebarPinned ? " pinned" : "") + '" type="button" title="' + (state.sidebarPinned ? "\u5DF2\u56FA\u5B9A\u5E38\u9A7B\uFF08\u70B9\u51FB\u89E3\u9664\u9501\u5B9A\uFF09" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B") + '" aria-label="' + (state.sidebarPinned ? "\u89E3\u9664\u56FA\u5B9A\u5E38\u9A7B" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B") + '" aria-pressed="' + (state.sidebarPinned ? "true" : "false") + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24z"/></svg></button><button id="sidebar-collapse-btn" class="btn btn-ghost btn-sm sidebar-collapse-toggle' + (isCollapsed ? " collapsed" : "") + '" type="button" title="' + (isCollapsed ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761") + '" aria-label="' + (isCollapsed ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761") + '">' + (isCollapsed ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="10 6 16 12 10 18"/><line x1="20" y1="5" x2="20" y2="19"/></svg>' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="14 6 8 12 14 18"/><line x1="4" y1="5" x2="4" y2="19"/></svg>') + '</button><button id="close-drawer-button" class="btn btn-ghost btn-icon sidebar-close drawer-close-btn" type="button" aria-label="\u5173\u95ED\u83DC\u5355"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button></div></div><div class="sidebar-body"><div id="sessions-panel"><div class="sessions-list" id="sessions-list">' + renderSessionsListContent() + '</div></div></div><div class="sidebar-footer"><button id="drawer-new-session-button" class="btn btn-primary btn-block"><span>+</span> \u65B0\u4F1A\u8BDD</button><div class="sidebar-footer-actions"><button id="file-panel-toggle-btn" class="btn btn-ghost btn-sm' + (state.filePanelOpen ? " active" : "") + '" type="button" title="\u67E5\u770B\u6587\u4EF6"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg><span>\u6587\u4EF6</span></button><button id="settings-button" class="btn btn-ghost btn-sm" type="button" title="\u8BBE\u7F6E"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>\u8BBE\u7F6E</span></button>' + (hasNativeBackToApp() ? '<button id="back-to-native-button" class="btn btn-ghost btn-sm sidebar-back-to-native" type="button" title="\u8FD4\u56DE App \u539F\u751F\u754C\u9762"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="10" y="3" width="11" height="18" rx="2"/><line x1="14" y1="17" x2="17" y2="17"/><polyline points="7 8 3 12 7 16"/></svg><span>\u8FD4\u56DEApp</span></button>' : "") + (hasNativeSwitchServer() ? '<button id="switch-server-button" class="btn btn-ghost btn-sm sidebar-switch-server" type="button" title="\u5207\u6362\u670D\u52A1\u5668"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg><span>\u5207\u6362</span></button>' : "") + '<button id="logout-button" class="btn btn-ghost btn-sm sidebar-logout" type="button" title="\u9000\u51FA\u767B\u5F55"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg><span>\u9000\u51FA</span></button></div></div></aside><main class="main-content"><div class="main-header-row"><div class="topbar-left"><button id="sessions-toggle-button" class="floating-sidebar-toggle' + (state.sessionsDrawerOpen ? " active" : "") + '" aria-label="\u5207\u6362\u4F1A\u8BDD\u4FA7\u680F" type="button"><span class="hamburger-icon"><span></span><span></span><span></span></span></button><span class="topbar-brand" aria-hidden="true">W</span></div><div class="topbar-center">' + (selectedSession ? '<span class="topbar-session-title' + (selectedSession.titleGenerating ? " title-generating" : "") + '"' + (selectedSession.titleGenerating ? ' aria-busy="true"' : "") + ' title="' + escapeHtml(selectedSession.description || selectedSession.command || "") + '">' + escapeHtml(selectedSession.title || shortCommand(selectedSession.command)) + '</span><span class="session-status-pill ' + getSessionStatusClass(selectedSession) + '" title="' + escapeHtml(getSessionStatusLabel(selectedSession)) + '"><span class="session-status-dot"></span><span class="session-status-text">' + escapeHtml(getSessionStatusLabel(selectedSession)) + '</span></span><span class="current-task hidden" id="current-task"></span>' + (selectedSession.cwd ? renderTailMarqueePath(selectedSession.cwd, "topbar-cwd", ' id="topbar-cwd" role="button" tabindex="0"') : "") : '<span class="topbar-tagline">Wand \u63A7\u5236\u53F0</span><span class="current-task hidden" id="current-task"></span>') + '</div><div class="topbar-right"><button id="topbar-file-button" class="topbar-btn square' + (state.filePanelOpen ? " active" : "") + '" type="button" aria-label="\u6587\u4EF6" title="\u67E5\u770B\u6587\u4EF6\uFF08\u53EF\u4FEE\u6539\u8DEF\u5F84\uFF09"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button><span id="topbar-git-slot" class="topbar-git-slot">' + renderTopbarGitBadgeHtml() + "</span>" + (selectedSession ? renderTopbarMoreMenuHtml(selectedSession) : "") + '</div></div><div id="file-panel-backdrop" class="file-panel-backdrop' + (state.filePanelOpen ? " open" : "") + '"></div><div id="file-side-panel" class="file-side-panel' + (state.filePanelOpen ? " open" : "") + '"><div class="file-side-panel-header"><div class="file-side-panel-title-group"><span class="file-side-panel-icon">' + wandFileIcon("folder-open", { size: 16 }) + '</span><span class="file-side-panel-title">\u6587\u4EF6</span></div><div class="file-side-panel-header-actions"><button class="file-side-panel-iconbtn" id="file-explorer-refresh" type="button" title="\u5237\u65B0" aria-label="\u5237\u65B0\u6587\u4EF6\u5217\u8868">' + wandFileIcon("refresh", { size: 15 }) + '</button><button id="file-side-panel-close" class="file-side-panel-iconbtn close" type="button" aria-label="\u5173\u95ED\u6587\u4EF6\u9762\u677F" title="\u5173\u95ED">' + wandFileIcon("x", { size: 16 }) + '</button></div></div><div class="file-side-panel-body"><div class="file-explorer-header"><button class="file-explorer-up" id="file-explorer-up" type="button" title="\u8FD4\u56DE\u4E0A\u7EA7\u76EE\u5F55" aria-label="\u8FD4\u56DE\u4E0A\u7EA7\u76EE\u5F55">' + wandFileIcon("arrow-up", { size: 15 }) + '</button><input type="text" class="file-explorer-path" id="file-explorer-cwd" value="' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" title="' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" placeholder="\u8F93\u5165\u8DEF\u5F84\u5E76\u56DE\u8F66..." spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" aria-label="\u5F53\u524D\u8DEF\u5F84\uFF0C\u53EF\u76F4\u63A5\u4FEE\u6539\u540E\u56DE\u8F66" /></div><div class="file-search-box"><span class="file-search-icon">' + wandFileIcon("search", { size: 14 }) + '</span><input type="text" id="file-search-input" class="file-search-input" placeholder="\u641C\u7D22\u5F53\u524D\u76EE\u5F55\u2026" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" /><button class="file-search-clear" id="file-search-clear" type="button" aria-label="\u6E05\u9664\u641C\u7D22" title="\u6E05\u9664">' + wandFileIcon("x", { size: 13 }) + '</button></div><div class="file-explorer" id="file-explorer">' + renderFileExplorer(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '</div></div></div><div id="output" class="terminal-container' + (state.selectedId ? "" : " hidden") + ' active"><div class="terminal-scale-overlay" aria-label="\u7EC8\u7AEF\u7F29\u653E\u63A7\u4EF6"><button id="terminal-scale-down-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="\u7F29\u5C0F">\u2212</button><span class="terminal-scale-overlay-label terminal-scale-label" id="terminal-scale-label-top">' + Math.round(state.terminalScale * 100) + '%</span><button id="terminal-scale-up-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="\u653E\u5927">+</button><span class="terminal-scale-overlay-divider"></span><button id="page-refresh-btn" class="terminal-scale-overlay-btn" type="button" title="\u5237\u65B0\u9875\u9762">\u21BB</button></div><button id="terminal-jump-bottom" class="terminal-jump-bottom' + (state.showTerminalJumpToBottom ? " visible" : "") + '" type="button" title="\u56DE\u5230\u5E95\u90E8" aria-label="\u56DE\u5230\u5E95\u90E8"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></button></div><div id="chat-output" class="chat-container hidden"><div id="chat-fold-bar" class="chat-fold-bar hidden" aria-live="polite"></div><button id="chat-unread-bubble" class="chat-unread-bubble" type="button" title="\u56DE\u5230\u6700\u65B0\u6D88\u606F" aria-label="\u56DE\u5230\u6700\u65B0\u6D88\u606F"><span class="chat-unread-bubble-icon"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></span><span class="chat-unread-bubble-count" aria-hidden="true"></span></button></div><div id="blank-chat" class="blank-chat' + (state.selectedId ? " hidden" : "") + '"><div class="blank-chat-inner"><div class="blank-chat-logo">W</div><h2 class="blank-chat-title">Wand</h2><p class="blank-chat-subtitle">\u652F\u6301\u7EC8\u7AEF PTY \u4F1A\u8BDD\u4E0E\u7ED3\u6784\u5316 chat \u4F1A\u8BDD\uFF0C\u4E24\u79CD\u6A21\u5F0F\u53EF\u5E76\u5B58\u3002</p><div class="blank-chat-tools"><button class="blank-chat-tool-btn" id="welcome-tool-claude" type="button"><span class="tool-icon">' + renderProviderLogoMarkup("claude") + '</span>\u65B0\u5EFA\u7EC8\u7AEF\u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-codex" type="button"><span class="tool-icon">' + renderProviderLogoMarkup("codex") + '</span>\u65B0\u5EFA Codex \u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-opencode" type="button"><span class="tool-icon">' + renderProviderLogoMarkup("opencode") + '</span>\u65B0\u5EFA OpenCode \u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-structured" type="button"><span class="tool-icon">' + iconSvg("chat", { size: 16, strokeWidth: 1.8 }) + '</span>\u65B0\u5EFA\u7ED3\u6784\u5316\u4F1A\u8BDD</button></div><div class="blank-chat-cwd-wrap"><div class="blank-chat-cwd" id="blank-chat-cwd" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" title="\u70B9\u51FB\u5207\u6362\u5DE5\u4F5C\u76EE\u5F55"><span class="blank-chat-cwd-icon">' + iconSvg("folder", { size: 13, strokeWidth: 1.8 }) + "</span>" + renderTailMarqueePath(getEffectiveCwd(), "blank-chat-cwd-path", ' id="blank-chat-cwd-path"') + '<span class="blank-chat-cwd-arrow">' + iconSvg("chevronDown", { size: 11, strokeWidth: 2 }) + '</span></div></div></div><div id="cross-session-queue-host"></div></div><div class="input-panel' + (state.selectedId ? "" : " hidden") + '"><div class="composer-top-row"><div id="todo-progress" class="todo-progress hidden"><button class="todo-progress-header" id="todo-progress-toggle" type="button" aria-expanded="false" aria-controls="todo-progress-body" aria-label="\u5C55\u5F00\u5F85\u529E\u5217\u8868"><div class="todo-progress-fill" id="todo-progress-fill" aria-hidden="true" style="--progress:0"></div><div class="todo-progress-left"><span class="todo-progress-ring" id="todo-progress-ring" aria-hidden="true" style="--progress:0"><svg width="16" height="16" viewBox="0 0 36 36"><circle class="todo-ring-track" cx="18" cy="18" r="15.5" fill="none" stroke-width="4"/><circle class="todo-ring-fill" cx="18" cy="18" r="15.5" fill="none" stroke-width="4" stroke-linecap="round"/></svg></span><span class="todo-progress-counter" id="todo-progress-counter"></span></div><div class="todo-progress-task-wrap"><span class="todo-progress-task" id="todo-progress-task"></span></div>' + iconSvg("chevronDown", { size: 14, strokeWidth: 2 }) + '</button></div><div class="todo-progress-body hidden" id="todo-progress-body"><ul class="todo-progress-list" id="todo-progress-list"></ul></div></div><div id="queue-bar-host" class="queue-bar-host" hidden></div><div class="input-composer-row"><div class="input-composer' + (String(currentDraft || "").trim() ? " has-text" : "") + '" role="group" aria-label="\u6D88\u606F\u7F16\u8F91\u5668"><div id="attachment-preview" class="attachment-preview hidden" aria-label="\u5F85\u53D1\u9001\u9644\u4EF6" aria-live="polite"></div><div class="composer-main-row"><div class="composer-input-wrap"><textarea id="input-box" class="input-textarea" aria-label="\u6D88\u606F\u8F93\u5165" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml(currentDraft) + '</textarea></div><div class="composer-actions-left" role="group" aria-label="\u6DFB\u52A0\u5185\u5BB9\u4E0E\u6743\u9650"><button id="attach-btn" class="btn-circle btn-circle-action" type="button" title="\u66F4\u591A" aria-label="\u66F4\u591A\u64CD\u4F5C" aria-haspopup="dialog" aria-controls="composer-plus-popover" aria-expanded="false">' + iconSvg("plus", { size: 18, strokeWidth: 2.2 }) + '</button><input type="file" id="file-upload-input" multiple tabindex="-1" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0);pointer-events:none"><div class="composer-status-row" id="composer-status-row">' + renderComposerConfigControlsHtml(selectedSession, "mode") + renderAutoApproveChip(selectedSession) + '<span class="permission-actions hidden" id="permission-actions"><span class="permission-actions-label" id="permission-actions-label" role="status" aria-live="polite" aria-atomic="true">\u7B49\u5F85\u6388\u6743</span><button id="approve-permission-btn" class="btn btn-permission btn-permission-approve" type="button">\u6279\u51C6</button><button id="deny-permission-btn" class="btn btn-permission btn-permission-deny" type="button">\u62D2\u7EDD</button></span>' + renderApprovalStatsBadge() + '</div></div><div class="composer-actions-right" role="group" aria-label="\u6A21\u578B\u4E0E\u53D1\u9001"><div class="composer-inline-config">' + renderComposerConfigControlsHtml(selectedSession, "runtime") + '</div><button class="prompt-optimize-btn" id="prompt-optimize-btn" type="button" title="\u4F18\u5316\u63D0\u793A\u8BCD" aria-label="\u4F18\u5316\u63D0\u793A\u8BCD">' + iconSvg("edit", { size: 15, strokeWidth: 1.9, cls: "prompt-optimize-icon" }) + '<span class="prompt-optimize-label">\u4F18\u5316</span><span class="prompt-optimize-spinner" aria-hidden="true"></span></button><button id="stop-button" class="btn-circle btn-circle-stop hidden" type="button" title="\u505C\u6B62" aria-label="\u505C\u6B62\u751F\u6210"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg></button><button id="voice-record-btn" class="btn-circle btn-circle-action btn-circle-voice" type="button" title="\u6309\u4F4F\u8BED\u97F3\u8F93\u5165" aria-label="\u6309\u4F4F\u8BED\u97F3\u8F93\u5165" aria-pressed="false"' + (state.terminalInteractive ? " disabled" : "") + ">" + iconSvg("mic", { size: 19, strokeWidth: 2 }) + '</button><button id="send-input-button" class="btn-circle btn-circle-send" type="button" title="\u53D1\u9001" aria-label="\u53D1\u9001\u6D88\u606F"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m6 11 6-6 6 6"/></svg></button></div></div></div></div><div class="composer-plus-popover hidden" id="composer-plus-popover" role="dialog" aria-modal="false" aria-label="\u66F4\u591A\u64CD\u4F5C" aria-hidden="true"><button class="plus-popover-item" id="plus-attach-item" type="button">' + iconSvg("paperclip", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) + '<span class="plus-popover-label">\u4E0A\u4F20\u9644\u4EF6</span></button><button class="plus-popover-item' + (state.terminalInteractive ? " is-on" : "") + '" id="terminal-interactive-toggle-top" type="button" aria-pressed="' + (state.terminalInteractive ? "true" : "false") + '">' + iconSvg("keyboard", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) + '<span class="plus-popover-label">\u7EC8\u7AEF\u4EA4\u4E92</span><span class="plus-popover-toggle-state">' + (state.terminalInteractive ? "\u5F00" : "\u5173") + '</span></button><div class="plus-popover-sep" aria-hidden="true"></div><div class="plus-popover-trio-wrap">' + renderComposerConfigControlsHtml(selectedSession) + "</div></div>" + renderClaudeSkillsPickerHtml(selectedSession) + // 语音实时转写气泡 —— 浮在输入框上方（.input-composer 之外，绕开它的 overflow:hidden）。
+    }).length) + '</span></div><div class="sidebar-header-actions"><div class="sidebar-header-more"><button id="sidebar-more-btn" class="btn btn-ghost btn-sm" type="button" title="\u66F4\u591A\u64CD\u4F5C"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg></button><div class="sidebar-header-overflow" id="sidebar-overflow-menu"><button class="overflow-item" id="sidebar-home-btn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg><span>\u56DE\u5230\u9996\u9875</span></button><button class="overflow-item" id="sidebar-refresh-btn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg><span>\u5237\u65B0\u9875\u9762</span></button></div></div><button id="sidebar-pin-btn" class="btn btn-ghost btn-sm sidebar-pin-toggle' + (state.sidebarPinned ? " pinned" : "") + '" type="button" title="' + (state.sidebarPinned ? "\u5DF2\u56FA\u5B9A\u5E38\u9A7B\uFF08\u70B9\u51FB\u89E3\u9664\u9501\u5B9A\uFF09" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B") + '" aria-label="' + (state.sidebarPinned ? "\u89E3\u9664\u56FA\u5B9A\u5E38\u9A7B" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B") + '" aria-pressed="' + (state.sidebarPinned ? "true" : "false") + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24z"/></svg></button><button id="sidebar-collapse-btn" class="btn btn-ghost btn-sm sidebar-collapse-toggle' + (isCollapsed ? " collapsed" : "") + '" type="button" title="' + (isCollapsed ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761") + '" aria-label="' + (isCollapsed ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761") + '">' + (isCollapsed ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="10 6 16 12 10 18"/><line x1="20" y1="5" x2="20" y2="19"/></svg>' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="14 6 8 12 14 18"/><line x1="4" y1="5" x2="4" y2="19"/></svg>') + '</button><button id="close-drawer-button" class="btn btn-ghost btn-icon sidebar-close drawer-close-btn" type="button" aria-label="\u5173\u95ED\u83DC\u5355"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button></div></div><div class="sidebar-body"><div id="sessions-panel"><div class="sessions-list" id="sessions-list">' + renderSessionsListContent() + '</div></div></div><div class="sidebar-footer"><button id="drawer-new-session-button" class="btn btn-primary btn-block"><span>+</span> \u65B0\u4F1A\u8BDD</button><div class="sidebar-footer-actions"><button id="missions-button" class="btn btn-ghost btn-sm" type="button" title="Agent Inbox"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16l2 10v6H2v-6L4 4zM2 14h6l2 3h4l2-3h6"/></svg><span>\u4EFB\u52A1</span></button><button id="file-panel-toggle-btn" class="btn btn-ghost btn-sm' + (state.filePanelOpen ? " active" : "") + '" type="button" title="\u67E5\u770B\u6587\u4EF6"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg><span>\u6587\u4EF6</span></button><button id="settings-button" class="btn btn-ghost btn-sm" type="button" title="\u8BBE\u7F6E"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>\u8BBE\u7F6E</span></button>' + (hasNativeBackToApp() ? '<button id="back-to-native-button" class="btn btn-ghost btn-sm sidebar-back-to-native" type="button" title="\u8FD4\u56DE App \u539F\u751F\u754C\u9762"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="10" y="3" width="11" height="18" rx="2"/><line x1="14" y1="17" x2="17" y2="17"/><polyline points="7 8 3 12 7 16"/></svg><span>\u8FD4\u56DEApp</span></button>' : "") + (hasNativeSwitchServer() ? '<button id="switch-server-button" class="btn btn-ghost btn-sm sidebar-switch-server" type="button" title="\u5207\u6362\u670D\u52A1\u5668"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg><span>\u5207\u6362</span></button>' : "") + '<button id="logout-button" class="btn btn-ghost btn-sm sidebar-logout" type="button" title="\u9000\u51FA\u767B\u5F55"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg><span>\u9000\u51FA</span></button></div></div></aside><main class="main-content"><div class="main-header-row"><div class="topbar-left"><button id="sessions-toggle-button" class="floating-sidebar-toggle' + (state.sessionsDrawerOpen ? " active" : "") + '" aria-label="\u5207\u6362\u4F1A\u8BDD\u4FA7\u680F" type="button"><span class="hamburger-icon"><span></span><span></span><span></span></span></button><span class="topbar-brand" aria-hidden="true">W</span></div><div class="topbar-center">' + (selectedSession ? '<span class="topbar-session-title' + (selectedSession.titleGenerating ? " title-generating" : "") + '"' + (selectedSession.titleGenerating ? ' aria-busy="true"' : "") + ' title="' + escapeHtml(selectedSession.description || selectedSession.command || "") + '">' + escapeHtml(selectedSession.title || shortCommand(selectedSession.command)) + '</span><span class="session-status-pill ' + getSessionStatusClass(selectedSession) + '" title="' + escapeHtml(getSessionStatusLabel(selectedSession)) + '"><span class="session-status-dot"></span><span class="session-status-text">' + escapeHtml(getSessionStatusLabel(selectedSession)) + '</span></span><span class="current-task hidden" id="current-task"></span>' + (selectedSession.cwd ? renderTailMarqueePath(selectedSession.cwd, "topbar-cwd", ' id="topbar-cwd" role="button" tabindex="0"') : "") : '<span class="topbar-tagline">Wand \u63A7\u5236\u53F0</span><span class="current-task hidden" id="current-task"></span>') + '</div><div class="topbar-right"><button id="topbar-file-button" class="topbar-btn square' + (state.filePanelOpen ? " active" : "") + '" type="button" aria-label="\u6587\u4EF6" title="\u67E5\u770B\u6587\u4EF6\uFF08\u53EF\u4FEE\u6539\u8DEF\u5F84\uFF09"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button><span id="topbar-git-slot" class="topbar-git-slot">' + renderTopbarGitBadgeHtml() + "</span>" + (selectedSession ? renderTopbarMoreMenuHtml(selectedSession) : "") + '</div></div><div id="file-panel-backdrop" class="file-panel-backdrop' + (state.filePanelOpen ? " open" : "") + '"></div><div id="file-side-panel" class="file-side-panel' + (state.filePanelOpen ? " open" : "") + '"><div class="file-side-panel-header"><div class="file-side-panel-title-group"><span class="file-side-panel-icon">' + wandFileIcon("folder-open", { size: 16 }) + '</span><span class="file-side-panel-title">\u6587\u4EF6</span></div><div class="file-side-panel-header-actions"><button class="file-side-panel-iconbtn" id="file-explorer-refresh" type="button" title="\u5237\u65B0" aria-label="\u5237\u65B0\u6587\u4EF6\u5217\u8868">' + wandFileIcon("refresh", { size: 15 }) + '</button><button id="file-side-panel-close" class="file-side-panel-iconbtn close" type="button" aria-label="\u5173\u95ED\u6587\u4EF6\u9762\u677F" title="\u5173\u95ED">' + wandFileIcon("x", { size: 16 }) + '</button></div></div><div class="file-side-panel-body"><div class="file-explorer-header"><button class="file-explorer-up" id="file-explorer-up" type="button" title="\u8FD4\u56DE\u4E0A\u7EA7\u76EE\u5F55" aria-label="\u8FD4\u56DE\u4E0A\u7EA7\u76EE\u5F55">' + wandFileIcon("arrow-up", { size: 15 }) + '</button><input type="text" class="file-explorer-path" id="file-explorer-cwd" value="' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" title="' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" placeholder="\u8F93\u5165\u8DEF\u5F84\u5E76\u56DE\u8F66..." spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" aria-label="\u5F53\u524D\u8DEF\u5F84\uFF0C\u53EF\u76F4\u63A5\u4FEE\u6539\u540E\u56DE\u8F66" /></div><div class="file-search-box"><span class="file-search-icon">' + wandFileIcon("search", { size: 14 }) + '</span><input type="text" id="file-search-input" class="file-search-input" placeholder="\u641C\u7D22\u5F53\u524D\u76EE\u5F55\u2026" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" /><button class="file-search-clear" id="file-search-clear" type="button" aria-label="\u6E05\u9664\u641C\u7D22" title="\u6E05\u9664">' + wandFileIcon("x", { size: 13 }) + '</button></div><div class="file-explorer" id="file-explorer">' + renderFileExplorer(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '</div></div></div><div id="output" class="terminal-container' + (state.selectedId ? "" : " hidden") + ' active"><div class="terminal-scale-overlay" aria-label="\u7EC8\u7AEF\u7F29\u653E\u63A7\u4EF6"><button id="terminal-scale-down-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="\u7F29\u5C0F">\u2212</button><span class="terminal-scale-overlay-label terminal-scale-label" id="terminal-scale-label-top">' + Math.round(state.terminalScale * 100) + '%</span><button id="terminal-scale-up-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="\u653E\u5927">+</button><span class="terminal-scale-overlay-divider"></span><button id="page-refresh-btn" class="terminal-scale-overlay-btn" type="button" title="\u5237\u65B0\u9875\u9762">\u21BB</button></div><button id="terminal-jump-bottom" class="terminal-jump-bottom' + (state.showTerminalJumpToBottom ? " visible" : "") + '" type="button" title="\u56DE\u5230\u5E95\u90E8" aria-label="\u56DE\u5230\u5E95\u90E8"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></button></div><div id="chat-output" class="chat-container hidden"><div id="chat-fold-bar" class="chat-fold-bar hidden" aria-live="polite"></div><button id="chat-unread-bubble" class="chat-unread-bubble" type="button" title="\u56DE\u5230\u6700\u65B0\u6D88\u606F" aria-label="\u56DE\u5230\u6700\u65B0\u6D88\u606F"><span class="chat-unread-bubble-icon"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></span><span class="chat-unread-bubble-count" aria-hidden="true"></span></button></div><div id="blank-chat" class="blank-chat' + (state.selectedId ? " hidden" : "") + '"><div class="blank-chat-inner"><div class="blank-chat-logo">W</div><h2 class="blank-chat-title">Wand</h2><p class="blank-chat-subtitle">\u652F\u6301\u7EC8\u7AEF PTY \u4F1A\u8BDD\u4E0E\u7ED3\u6784\u5316 chat \u4F1A\u8BDD\uFF0C\u4E24\u79CD\u6A21\u5F0F\u53EF\u5E76\u5B58\u3002</p><div class="blank-chat-tools"><button class="blank-chat-tool-btn" id="welcome-tool-claude" type="button"><span class="tool-icon">' + renderProviderLogoMarkup("claude") + '</span>\u65B0\u5EFA\u7EC8\u7AEF\u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-codex" type="button"><span class="tool-icon">' + renderProviderLogoMarkup("codex") + '</span>\u65B0\u5EFA Codex \u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-opencode" type="button"><span class="tool-icon">' + renderProviderLogoMarkup("opencode") + '</span>\u65B0\u5EFA OpenCode \u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-structured" type="button"><span class="tool-icon">' + iconSvg("chat", { size: 16, strokeWidth: 1.8 }) + '</span>\u65B0\u5EFA\u7ED3\u6784\u5316\u4F1A\u8BDD</button></div><div class="blank-chat-cwd-wrap"><div class="blank-chat-cwd" id="blank-chat-cwd" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" title="\u70B9\u51FB\u5207\u6362\u5DE5\u4F5C\u76EE\u5F55"><span class="blank-chat-cwd-icon">' + iconSvg("folder", { size: 13, strokeWidth: 1.8 }) + "</span>" + renderTailMarqueePath(getEffectiveCwd(), "blank-chat-cwd-path", ' id="blank-chat-cwd-path"') + '<span class="blank-chat-cwd-arrow">' + iconSvg("chevronDown", { size: 11, strokeWidth: 2 }) + '</span></div></div></div><div id="cross-session-queue-host"></div></div><div class="input-panel' + (state.selectedId ? "" : " hidden") + '"><div class="composer-top-row"><div id="todo-progress" class="todo-progress hidden"><button class="todo-progress-header" id="todo-progress-toggle" type="button" aria-expanded="false" aria-controls="todo-progress-body" aria-label="\u5C55\u5F00\u5F85\u529E\u5217\u8868"><div class="todo-progress-fill" id="todo-progress-fill" aria-hidden="true" style="--progress:0"></div><div class="todo-progress-left"><span class="todo-progress-ring" id="todo-progress-ring" aria-hidden="true" style="--progress:0"><svg width="16" height="16" viewBox="0 0 36 36"><circle class="todo-ring-track" cx="18" cy="18" r="15.5" fill="none" stroke-width="4"/><circle class="todo-ring-fill" cx="18" cy="18" r="15.5" fill="none" stroke-width="4" stroke-linecap="round"/></svg></span><span class="todo-progress-counter" id="todo-progress-counter"></span></div><div class="todo-progress-task-wrap"><span class="todo-progress-task" id="todo-progress-task"></span></div>' + iconSvg("chevronDown", { size: 14, strokeWidth: 2 }) + '</button></div><div class="todo-progress-body hidden" id="todo-progress-body"><ul class="todo-progress-list" id="todo-progress-list"></ul></div></div><div id="queue-bar-host" class="queue-bar-host" hidden></div><div class="input-composer-row"><div class="input-composer' + (String(currentDraft || "").trim() ? " has-text" : "") + '" role="group" aria-label="\u6D88\u606F\u7F16\u8F91\u5668"><div id="attachment-preview" class="attachment-preview hidden" aria-label="\u5F85\u53D1\u9001\u9644\u4EF6" aria-live="polite"></div><div class="composer-main-row"><div class="composer-input-wrap"><textarea id="input-box" class="input-textarea" aria-label="\u6D88\u606F\u8F93\u5165" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml(currentDraft) + '</textarea></div><div class="composer-actions-left" role="group" aria-label="\u6DFB\u52A0\u5185\u5BB9\u4E0E\u6743\u9650"><button id="attach-btn" class="btn-circle btn-circle-action" type="button" title="\u66F4\u591A" aria-label="\u66F4\u591A\u64CD\u4F5C" aria-haspopup="dialog" aria-controls="composer-plus-popover" aria-expanded="false">' + iconSvg("plus", { size: 18, strokeWidth: 2.2 }) + '</button><input type="file" id="file-upload-input" multiple tabindex="-1" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0);pointer-events:none"><div class="composer-status-row" id="composer-status-row">' + renderComposerConfigControlsHtml(selectedSession, "mode") + renderAutoApproveChip(selectedSession) + '<span class="permission-actions hidden" id="permission-actions"><span class="permission-actions-label" id="permission-actions-label" role="status" aria-live="polite" aria-atomic="true">\u7B49\u5F85\u6388\u6743</span><button id="approve-permission-btn" class="btn btn-permission btn-permission-approve" type="button">\u6279\u51C6</button><button id="deny-permission-btn" class="btn btn-permission btn-permission-deny" type="button">\u62D2\u7EDD</button></span>' + renderApprovalStatsBadge() + '</div></div><div class="composer-actions-right" role="group" aria-label="\u6A21\u578B\u4E0E\u53D1\u9001"><div class="composer-inline-config">' + renderComposerConfigControlsHtml(selectedSession, "runtime") + '</div><button class="prompt-optimize-btn" id="prompt-optimize-btn" type="button" title="\u4F18\u5316\u63D0\u793A\u8BCD" aria-label="\u4F18\u5316\u63D0\u793A\u8BCD">' + iconSvg("edit", { size: 15, strokeWidth: 1.9, cls: "prompt-optimize-icon" }) + '<span class="prompt-optimize-label">\u4F18\u5316</span><span class="prompt-optimize-spinner" aria-hidden="true"></span></button><button id="stop-button" class="btn-circle btn-circle-stop hidden" type="button" title="\u505C\u6B62" aria-label="\u505C\u6B62\u751F\u6210"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg></button><button id="voice-record-btn" class="btn-circle btn-circle-action btn-circle-voice" type="button" title="\u6309\u4F4F\u8BED\u97F3\u8F93\u5165" aria-label="\u6309\u4F4F\u8BED\u97F3\u8F93\u5165" aria-pressed="false"' + (state.terminalInteractive ? " disabled" : "") + ">" + iconSvg("mic", { size: 19, strokeWidth: 2 }) + '</button><button id="send-input-button" class="btn-circle btn-circle-send" type="button" title="\u53D1\u9001" aria-label="\u53D1\u9001\u6D88\u606F"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m6 11 6-6 6 6"/></svg></button></div></div></div></div><div class="composer-plus-popover hidden" id="composer-plus-popover" role="dialog" aria-modal="false" aria-label="\u66F4\u591A\u64CD\u4F5C" aria-hidden="true"><button class="plus-popover-item" id="plus-attach-item" type="button">' + iconSvg("paperclip", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) + '<span class="plus-popover-label">\u4E0A\u4F20\u9644\u4EF6</span></button><button class="plus-popover-item' + (state.terminalInteractive ? " is-on" : "") + '" id="terminal-interactive-toggle-top" type="button" aria-pressed="' + (state.terminalInteractive ? "true" : "false") + '">' + iconSvg("keyboard", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) + '<span class="plus-popover-label">\u7EC8\u7AEF\u4EA4\u4E92</span><span class="plus-popover-toggle-state">' + (state.terminalInteractive ? "\u5F00" : "\u5173") + '</span></button><div class="plus-popover-sep" aria-hidden="true"></div><div class="plus-popover-trio-wrap">' + renderComposerConfigControlsHtml(selectedSession) + "</div></div>" + renderClaudeSkillsPickerHtml(selectedSession) + // 语音实时转写气泡 —— 浮在输入框上方（.input-composer 之外，绕开它的 overflow:hidden）。
     // 按住录音时显示，逐字展示识别文字；松手填回输入框。默认 hidden。
     '<div class="voice-transcript-bubble hidden" id="voice-transcript-bubble" aria-live="polite"><div class="voice-transcript-text" id="voice-transcript-text"></div><div class="voice-transcript-hint" id="voice-transcript-hint"><span class="voice-wave" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span class="voice-transcript-status" id="voice-transcript-status">\u6B63\u5728\u8046\u542C\u2026\u4E0A\u6ED1\u53D6\u6D88</span></div><span class="voice-bubble-arrow" aria-hidden="true"></span></div><p id="action-error" class="error-message hidden"></p></div></main></div></div>';
   }
@@ -41085,12 +41675,12 @@
     if (index2 >= 0) latestQueue.splice(index2, 1);
     return latestQueue;
   }
-  function stripStaleStructuredQueueSnapshot(snapshot7, sessionId, requestRevision, requestQueueEpoch) {
-    if (!snapshot7 || !snapshot7.queuedMessages) return snapshot7;
+  function stripStaleStructuredQueueSnapshot(snapshot8, sessionId, requestRevision, requestQueueEpoch) {
+    if (!snapshot8 || !snapshot8.queuedMessages) return snapshot8;
     if (getStructuredQueueMutationRevision(sessionId) !== requestRevision || state.queueEpoch > requestQueueEpoch) {
-      delete snapshot7.queuedMessages;
+      delete snapshot8.queuedMessages;
     }
-    return snapshot7;
+    return snapshot8;
   }
   function continueStructuredSession(session, text5) {
     var normalizedText2 = typeof text5 === "string" ? text5.trim() : "";
@@ -41126,11 +41716,11 @@
         });
       }
       return res.json();
-    }).then(function(snapshot7) {
-      if (snapshot7 && snapshot7.id) {
-        stripStaleStructuredQueueSnapshot(snapshot7, session.id, queueRevision, queueEpoch);
-        updateSessionSnapshot(snapshot7);
-        if (snapshot7.id === state.selectedId) updateQueueBar();
+    }).then(function(snapshot8) {
+      if (snapshot8 && snapshot8.id) {
+        stripStaleStructuredQueueSnapshot(snapshot8, session.id, queueRevision, queueEpoch);
+        updateSessionSnapshot(snapshot8);
+        if (snapshot8.id === state.selectedId) updateQueueBar();
       }
     }).catch(function(err) {
       var rollbackQueue = removeOneQueuedMessage(session.id, text5, prevQueue.length);
@@ -41733,23 +42323,23 @@
         });
       }
       return res.json();
-    }).then(function(snapshot7) {
-      if (snapshot7 && snapshot7.error) {
-        throw new Error(snapshot7.error);
+    }).then(function(snapshot8) {
+      if (snapshot8 && snapshot8.error) {
+        throw new Error(snapshot8.error);
       }
-      if (snapshot7 && snapshot7.id) {
+      if (snapshot8 && snapshot8.id) {
         stripStaleStructuredQueueSnapshot(
-          snapshot7,
+          snapshot8,
           session.id,
           requestQueueRevision,
           epochBeforePost
         );
-        updateSessionSnapshot(snapshot7);
-        if (snapshot7.id === state.selectedId) {
+        updateSessionSnapshot(snapshot8);
+        if (snapshot8.id === state.selectedId) {
           var refreshedSession = state.sessions.find(function(s) {
-            return s.id === snapshot7.id;
-          }) || snapshot7;
-          state.currentMessages = buildMessagesForRender(refreshedSession, getPreferredMessages(refreshedSession, snapshot7.output, false));
+            return s.id === snapshot8.id;
+          }) || snapshot8;
+          state.currentMessages = buildMessagesForRender(refreshedSession, getPreferredMessages(refreshedSession, snapshot8.output, false));
           renderChat(true);
           updateStructuredQueueCounter();
         }
@@ -41984,20 +42574,20 @@
         });
       }
       return res.json();
-    }).then(function(snapshot7) {
-      if (snapshot7 && snapshot7.id) {
+    }).then(function(snapshot8) {
+      if (snapshot8 && snapshot8.id) {
         stripStaleStructuredQueueSnapshot(
-          snapshot7,
+          snapshot8,
           session.id,
           mutationRevision,
           mutationQueueEpoch
         );
-        updateSessionSnapshot(snapshot7);
-        if (snapshot7.id === state.selectedId) {
+        updateSessionSnapshot(snapshot8);
+        if (snapshot8.id === state.selectedId) {
           var refreshed = state.sessions.find(function(s) {
-            return s.id === snapshot7.id;
-          }) || snapshot7;
-          state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, snapshot7.output, false));
+            return s.id === snapshot8.id;
+          }) || snapshot8;
+          state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, snapshot8.output, false));
           renderChat(true);
           updateQueueBar();
         }
@@ -42405,17 +42995,17 @@
         });
       }
       return res.json();
-    }).then(function(snapshot7) {
-      if (snapshot7 && snapshot7.id) {
-        updateSessionSnapshot(snapshot7);
-        if (snapshot7.id === state.selectedId) {
-          if (snapshot7.messages && snapshot7.messages.length > 0) {
-            state.currentMessages = snapshot7.messages;
+    }).then(function(snapshot8) {
+      if (snapshot8 && snapshot8.id) {
+        updateSessionSnapshot(snapshot8);
+        if (snapshot8.id === state.selectedId) {
+          if (snapshot8.messages && snapshot8.messages.length > 0) {
+            state.currentMessages = snapshot8.messages;
           }
           renderChat(true);
         }
       }
-      return snapshot7;
+      return snapshot8;
     });
   }
   function getSelectedSession() {
@@ -42857,17 +43447,17 @@
         });
       }
       return res.json();
-    }).then(function(snapshot7) {
-      if (snapshot7 && snapshot7.id) {
-        updateSessionSnapshot(snapshot7);
-        if (snapshot7.id === state.selectedId) {
-          if (snapshot7.messages && snapshot7.messages.length > 0) {
-            state.currentMessages = snapshot7.messages;
+    }).then(function(snapshot8) {
+      if (snapshot8 && snapshot8.id) {
+        updateSessionSnapshot(snapshot8);
+        if (snapshot8.id === state.selectedId) {
+          if (snapshot8.messages && snapshot8.messages.length > 0) {
+            state.currentMessages = snapshot8.messages;
           }
           renderChat(true);
         }
       }
-      return snapshot7;
+      return snapshot8;
     });
   }
   function stopSession() {
@@ -47383,12 +47973,12 @@
     updateInteractiveControls3();
     notifyLegacyUiChange("shell:view");
   }
-  function updateSessionSnapshot(snapshot7) {
-    if (!snapshot7 || !snapshot7.id) return;
+  function updateSessionSnapshot(snapshot8) {
+    if (!snapshot8 || !snapshot8.id) return;
     var currentSession = state.sessions.find(function(session) {
-      return session.id === snapshot7.id;
+      return session.id === snapshot8.id;
     }) || null;
-    var normalizedSnapshot = normalizeStructuredSnapshot(snapshot7, currentSession);
+    var normalizedSnapshot = normalizeStructuredSnapshot(snapshot8, currentSession);
     if (Array.isArray(normalizedSnapshot.messages) && typeof normalizedSnapshot.messageOffset === "number") {
       var mw = mergeWindowedMessages(currentSession, normalizedSnapshot.messages, normalizedSnapshot.messageOffset, normalizedSnapshot.messageTotal);
       normalizedSnapshot.messages = mw.messages;
@@ -49238,6 +49828,9 @@
       goHome,
       refreshPage: () => window.location.reload(),
       openNewSession: openSessionModal,
+      openMissions: () => {
+        missionsController.open();
+      },
       quickStartClaudeTerminal: () => quickStart("claude"),
       quickStartCodexTerminal: () => quickStart("codex"),
       quickStartOpenCodeTerminal: () => quickStart("opencode"),
@@ -49304,6 +49897,30 @@
     };
   }
 
+  // src/web-ui/browser/missions-adapter.ts
+  var uninstall = null;
+  function installMissionsLegacyAdapter() {
+    if (uninstall) return;
+    uninstall = configureMissionsRuntime({
+      onOpen() {
+        closeReactOverlays(["missions"]);
+        dismissDrawerIfOverlay();
+      },
+      onClose() {
+      },
+      effectiveCwd: getEffectiveCwd,
+      async openSession(sessionId) {
+        await loadSessions();
+        if (!state.sessions.some((session) => session.id === sessionId)) return;
+        state.selectedId = sessionId;
+        persistSelectedId();
+        resetChatRenderCache();
+        selectSession(sessionId);
+        dismissDrawerIfOverlay();
+      }
+    });
+  }
+
   // src/web-ui/browser/main.ts
   installSettingsRuntimeBridge();
   configureBrowserShellCommands(createBrowserShellCommands());
@@ -49345,6 +49962,7 @@
   })();
   startReactUi();
   installNewSessionLegacyAdapter();
+  installMissionsLegacyAdapter();
   installFolderPickerLegacyAdapter();
   installWorktreeMergeLegacyAdapter({
     getSession(sessionId) {

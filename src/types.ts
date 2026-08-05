@@ -209,9 +209,13 @@ export interface ReasoningEffortInfo {
  */
 export type ThinkingEffort = "off" | "standard" | "deep" | "max" | `codex:${string}`;
 
-interface WorktreeInfo {
+export interface WorktreeInfo {
   branch: string;
   path: string;
+  /** Git ref each task worktree was created from. */
+  baseRef?: string;
+  /** Main checkout root, used by task review without rediscovering it. */
+  repoRoot?: string;
 }
 
 export interface WorktreeMergeInfo {

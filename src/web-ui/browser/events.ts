@@ -14,6 +14,7 @@ import { copySelectedSessionField, handleSessionItemClick, handleSessionItemKeyd
 import { ensureTerminalFit, setupVisualViewportHandlers, teardownTerminal } from "./viewport";
 import { approvePermission, denyPermission, toggleAutoApprove } from "./websocket";
 import { isBrowserReactShellMounted } from "./shell-runtime";
+import { missionsController } from "../react/missions/controller";
 
       // Global toggle function for tool card headers — called via onclick attribute
       // Lazy-load tool content for truncated results
@@ -568,6 +569,8 @@ import { isBrowserReactShellMounted } from "./shell-runtime";
         if (backToNativeBtn) backToNativeBtn.addEventListener("click", backToNativeApp);
         var settingsBtn = document.getElementById("settings-button");
         if (settingsBtn) settingsBtn.addEventListener("click", openSettingsModal);
+        var missionsBtn = document.getElementById("missions-button");
+        if (missionsBtn) missionsBtn.addEventListener("click", function() { missionsController.open(); });
         var newSessBtn = document.getElementById("topbar-new-session-button");
         if (newSessBtn) newSessBtn.addEventListener("click", openSessionModal);
         var drawerNewSessBtn = document.getElementById("drawer-new-session-button");

@@ -5,6 +5,7 @@ import {
 } from "./styles/base";
 import {
   composerSelectStyles,
+  missionsStyles,
   sessionPickerAndWorktreeStyles,
   settingsAndQuickCommitStyles,
 } from "./styles/features";
@@ -19,6 +20,7 @@ const reactUiStyles = [
   sharedMotionStyles,
   sessionPickerAndWorktreeStyles,
   composerSelectStyles,
+  missionsStyles,
   reducedMotionStyles,
 ].join("");
 

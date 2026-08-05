@@ -109,6 +109,7 @@ export type UiAction =
   | { type: "nav.home" }
   | { type: "nav.refresh" }
   | { type: "session.new" }
+  | { type: "missions.open" }
   | { type: "session.quickStart.claude" }
   | { type: "session.quickStart.codex" }
   | { type: "session.quickStart.opencode" }

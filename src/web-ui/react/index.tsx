@@ -10,6 +10,7 @@ import { quickCommitController } from "./quick-commit/controller";
 import { worktreeMergeController } from "./worktree-merge/controller";
 import { restartOverlayController } from "./restart-overlay/controller";
 import { filePreviewController } from "./file-preview/controller";
+import { missionsController } from "./missions/controller";
 
 const OVERLAY_ROOT_ID = "overlay-root";
 const REACT_MOUNT_ID = "wand-react-ui-mount";
@@ -51,6 +52,7 @@ function exposeBusinessControllers(): void {
   window.__wandReactWorktreeMerge = worktreeMergeController;
   window.__wandReactRestartOverlay = restartOverlayController;
   window.__wandReactFilePreview = filePreviewController;
+  window.__wandReactMissions = missionsController;
 }
 
 /**
@@ -140,6 +142,19 @@ export {
   filePreviewController,
   filePreviewStore,
 } from "./file-preview/controller";
+export {
+  configureMissionsRuntime,
+  missionsController,
+  missionsStore,
+} from "./missions/controller";
+export type {
+  ActivityItem,
+  CreateMissionRequest,
+  MissionDetails,
+  MissionDiff,
+  MissionsRepository,
+  MissionsRuntimeAdapter,
+} from "./missions/types";
 export type {
   NewSessionCreateRequest,
   NewSessionCreated,

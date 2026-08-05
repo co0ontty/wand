@@ -36,6 +36,8 @@ import { resolveSessionAiContext, resolveSystemAiContext } from "./session-ai-co
 import { StructuredSessionManager } from "./structured-session-manager.js";
 import { recordRecentPath, registerFileRoutes } from "./server-file-routes.js";
 import { registerSettingsRoutes } from "./server-settings-routes.js";
+import { registerMissionRoutes } from "./server-mission-routes.js";
+import { Missions } from "./missions.js";
 import {
   refreshProviderCliUpdateState,
   registerAdminUpdateRoutes,
@@ -625,6 +627,7 @@ export async function startServer(
   const structuredLogger = new SessionLogger(configDir, config.shortcutLogMaxBytes);
   const structuredSessions = new StructuredSessionManager(storage, config, structuredLogger);
   const sessionRegistry = new SessionRegistry(processes, structuredSessions, storage);
+  const missions = new Missions(storage, structuredSessions, sessionRegistry);
   const updateState = new ServerUpdateState();
   const getUpdateChannel = (): "stable" | "beta" =>
     normalizeUpdateChannel(storage.getConfigValue("updateChannel"));
@@ -844,6 +847,8 @@ export async function startServer(
     "/api/claude-sessions",
     "/api/codex-sessions",
     "/api/optimize-prompt",
+    "/api/inbox",
+    "/api/missions",
   ], requireSessions);
   app.use([
     "/api/directory",
@@ -1094,6 +1099,7 @@ export async function startServer(
     recordRecentPath(storage, cwd);
   });
   registerClaudeHistoryRoutes(app, processes, structuredSessions, storage, sessionRegistry);
+  registerMissionRoutes(app, missions);
   registerUploadRoutes(app, processes);
 
   app.post("/api/optimize-prompt", asyncRoute(async (req, res) => {
@@ -1250,9 +1256,11 @@ export async function startServer(
 
   // Wire process events to WebSocket broadcast
   processes.on("process", (event: ProcessEvent) => {
+    missions.ingest(event);
     wsManager.emitEvent(event);
   });
   structuredSessions.setEventEmitter((event) => {
+    missions.ingest(event);
     wsManager.emitEvent(event);
   });
 

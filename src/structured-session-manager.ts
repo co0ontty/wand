@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { query as sdkQuery, type Options as SdkOptions, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 
-import { prepareSessionWorktree } from "./git-worktree.js";
+import { prepareSessionWorktree, type WorktreeSetupSpec } from "./git-worktree.js";
 
 import { SessionLogger } from "./session-logger.js";
 import { WandStorage } from "./storage.js";
@@ -73,6 +73,7 @@ interface CreateStructuredSessionOptions {
   provider?: SessionProvider;
   runner?: SessionRunner;
   worktreeEnabled?: boolean;
+  worktreeSpec?: WorktreeSetupSpec;
   /** 用户指定的模型（别名或完整 ID）。留空则 spawn 时不加 --model。 */
   model?: string;
   /** 用户预设的思考深度。留空 / null 视为 off。 */
@@ -636,7 +637,7 @@ export class StructuredSessionManager {
     const runner = resolveStructuredRunner(provider, options.runner, this.config.structuredRunner);
     const baseCwd = resolveSessionCwd(options.cwd, this.config.defaultCwd);
     const worktreeSetup = options.worktreeEnabled
-      ? prepareSessionWorktree({ cwd: baseCwd, sessionId: id })
+      ? prepareSessionWorktree({ cwd: baseCwd, sessionId: id, spec: options.worktreeSpec })
       : null;
     const selectedModel = options.model?.trim() || null;
     const initialThinkingEffort = normalizeThinkingEffort(options.thinkingEffort);

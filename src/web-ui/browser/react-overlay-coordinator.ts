@@ -3,8 +3,9 @@ import { newSessionController } from "../react/new-session/controller";
 import { quickCommitController } from "../react/quick-commit/controller";
 import { settingsController } from "../react/settings/controller";
 import { worktreeMergeController } from "../react/worktree-merge/controller";
+import { missionsController } from "../react/missions/controller";
 
-export type ReactOverlayName = "folderPicker" | "newSession" | "quickCommit" | "settings" | "worktreeMerge";
+export type ReactOverlayName = "folderPicker" | "missions" | "newSession" | "quickCommit" | "settings" | "worktreeMerge";
 
 interface ClosableOverlayController {
   isOpen(): boolean;
@@ -13,6 +14,7 @@ interface ClosableOverlayController {
 
 const REACT_OVERLAY_CONTROLLERS: Record<ReactOverlayName, ClosableOverlayController> = {
   folderPicker: folderPickerController,
+  missions: missionsController,
   newSession: newSessionController,
   quickCommit: quickCommitController,
   settings: settingsController,

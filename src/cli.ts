@@ -27,6 +27,7 @@ import {
 import { WandConfig } from "./types.js";
 import { getErrorMessage } from "./error-utils.js";
 import type { IpcResponse, IpcSnapshotData } from "./tui/ipc-protocol.js";
+import { WandCliApi } from "./cli-api.js";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -181,6 +182,19 @@ async function main(): Promise<void> {
       }
       break;
     }
+    case "session:list":
+    case "session:read":
+    case "session:send":
+    case "session:wait":
+    case "inbox:list":
+    case "mission:list":
+    case "mission:create":
+    case "mission:diff":
+    case "mission:review":
+    case "mission:review:send": {
+      await runAgentCliCommand(command, args, configPath);
+      break;
+    }
     case "service:install":
     case "service:uninstall":
     case "service:start":
@@ -219,6 +233,18 @@ Commands:
   wand config:password      Print current login password
   wand config:set           Update a simple config value
 
+Agent runtime:
+  wand session:list         List sessions as JSON
+  wand session:read <id>    Read a complete session snapshot
+  wand session:send <id> <text>
+  wand session:wait <id> [--timeout 900]
+  wand inbox:list           List global Agent Inbox items
+  wand mission:list         List parallel tasks
+  wand mission:create --prompt <text> --cwd <path> --providers claude,codex
+  wand mission:diff <mission-id> <attempt-id>
+  wand mission:review <mission-id> <attempt-id> --file <path> --body <text> [--line N]
+  wand mission:review:send <mission-id> <attempt-id>
+
 System service (default = system-wide; pass --user for user-level):
   wand service:install      Register and start the background service (needs sudo for system)
   wand service:uninstall    Stop and remove the service
@@ -235,6 +261,76 @@ Options:
   --verbose                 (service:*) Print full detail output
   --lines <N>               (service:logs) Number of log lines (default 80)
 `);
+}
+
+async function runAgentCliCommand(command: string, args: string[], configPath: string): Promise<void> {
+  const { config } = await loadConfigForCli(configPath);
+  const api = new WandCliApi(config);
+  const output = (value: unknown): void => { process.stdout.write(`${JSON.stringify(value, null, 2)}\n`); };
+  const required = (value: string | undefined, usage: string): string => {
+    if (!value) throw new Error(`Usage: ${usage}`);
+    return value;
+  };
+
+  switch (command) {
+    case "session:list": return output(await api.get("/api/sessions"));
+    case "session:read": {
+      const id = required(args[1], "wand session:read <id>");
+      return output(await api.get(`/api/sessions/${encodeURIComponent(id)}`));
+    }
+    case "session:send": {
+      const id = required(args[1], "wand session:send <id> <text>");
+      const text = required(args[2], "wand session:send <id> <text>");
+      return output(await api.post(`/api/sessions/${encodeURIComponent(id)}/input`, { input: text, respondImmediately: true }));
+    }
+    case "session:wait": {
+      const id = required(args[1], "wand session:wait <id> [--timeout 900]");
+      const timeoutSeconds = Math.max(1, Number(readFlagValue(args, "--timeout") ?? 900));
+      const deadline = Date.now() + timeoutSeconds * 1000;
+      while (true) {
+        const session = await api.get<{ status?: string; structuredState?: { inFlight?: boolean } }>(`/api/sessions/${encodeURIComponent(id)}`);
+        const complete = session.status !== "running" && !session.structuredState?.inFlight;
+        if (complete) return output(session);
+        if (Date.now() >= deadline) throw new Error(`等待会话超时：${id}`);
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    }
+    case "inbox:list": return output(await api.get("/api/inbox"));
+    case "mission:list": return output(await api.get("/api/missions"));
+    case "mission:create": {
+      const prompt = required(readFlagValue(args, "--prompt"), "wand mission:create --prompt <text> --cwd <path> --providers claude,codex");
+      const cwd = required(readFlagValue(args, "--cwd"), "wand mission:create --prompt <text> --cwd <path> --providers claude,codex");
+      const providers = required(readFlagValue(args, "--providers"), "wand mission:create --prompt <text> --cwd <path> --providers claude,codex")
+        .split(",").map((value) => value.trim()).filter(Boolean);
+      return output(await api.post("/api/missions", {
+        prompt, cwd, providers,
+        title: readFlagValue(args, "--title"),
+        baseRef: readFlagValue(args, "--base"),
+        sharedDirectories: readFlagValue(args, "--shared")?.split(",").filter(Boolean),
+        copyPaths: readFlagValue(args, "--copy")?.split(",").filter(Boolean),
+      }));
+    }
+    case "mission:diff": {
+      const missionId = required(args[1], "wand mission:diff <mission-id> <attempt-id>");
+      const attemptId = required(args[2], "wand mission:diff <mission-id> <attempt-id>");
+      return output(await api.get(`/api/missions/${encodeURIComponent(missionId)}/attempts/${encodeURIComponent(attemptId)}/diff`));
+    }
+    case "mission:review": {
+      const missionId = required(args[1], "wand mission:review <mission-id> <attempt-id> --file <path> --body <text>");
+      const attemptId = required(args[2], "wand mission:review <mission-id> <attempt-id> --file <path> --body <text>");
+      const filePath = required(readFlagValue(args, "--file"), "wand mission:review <mission-id> <attempt-id> --file <path> --body <text>");
+      const body = required(readFlagValue(args, "--body"), "wand mission:review <mission-id> <attempt-id> --file <path> --body <text>");
+      const line = readFlagValue(args, "--line");
+      return output(await api.post(`/api/missions/${encodeURIComponent(missionId)}/attempts/${encodeURIComponent(attemptId)}/comments`, {
+        filePath, body, line: line ? Number(line) : null, side: readFlagValue(args, "--side") === "old" ? "old" : "new",
+      }));
+    }
+    case "mission:review:send": {
+      const missionId = required(args[1], "wand mission:review:send <mission-id> <attempt-id>");
+      const attemptId = required(args[2], "wand mission:review:send <mission-id> <attempt-id>");
+      return output(await api.post(`/api/missions/${encodeURIComponent(missionId)}/attempts/${encodeURIComponent(attemptId)}/review/send`, {}));
+    }
+  }
 }
 
 async function ensureRequiredFiles(
