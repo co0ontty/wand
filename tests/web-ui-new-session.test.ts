@@ -135,6 +135,23 @@ test("create-request builder preserves structured and PTY legacy contracts", () 
     mode: "default",
     worktreeEnabled: false,
   }, config, context).command, "qodercli");
+
+  assert.deepEqual(buildCreateRequest({
+    provider: "claude",
+    kind: "shell",
+    cwd: "/repo",
+    mode: "managed",
+    worktreeEnabled: true,
+  }, config, context, { cols: 101, rows: 32 }), {
+    kind: "shell",
+    shell: true,
+    cwd: "/repo",
+    mode: "default",
+    worktreeEnabled: true,
+    sessionSource: "interactive",
+    cols: 101,
+    rows: 32,
+  });
 });
 
 test("HTTP repository serializes preferences and loads the latest server defaults", async () => {
@@ -219,6 +236,34 @@ test("HTTP repository selects the endpoint and surfaces server creation errors",
     sessionSource: "interactive",
   }), /cwd 不存在/);
   assert.equal(calls[1].url, "/api/commands");
+});
+
+test("HTTP repository creates a bare shell without sending a provider command", async () => {
+  const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+  const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const body = JSON.parse(String(init?.body ?? "{}"));
+    calls.push({ url, body });
+    return json({ id: "shell-1", sessionKind: "pty", command: "/bin/zsh" }, 201);
+  }) as typeof fetch;
+  const repository = new HttpNewSessionRepository(fetchImpl);
+
+  const created = await repository.create({
+    kind: "shell",
+    shell: true,
+    cwd: "/repo",
+    mode: "default",
+    worktreeEnabled: false,
+    sessionSource: "interactive",
+    cols: 100,
+    rows: 30,
+  });
+
+  assert.equal(created.id, "shell-1");
+  assert.equal(calls[0].url, "/api/commands");
+  assert.equal(calls[0].body.shell, true);
+  assert.equal("command" in calls[0].body, false);
+  assert.equal("provider" in calls[0].body, false);
 });
 
 test("controller delegates lifecycle through one runtime adapter", () => {

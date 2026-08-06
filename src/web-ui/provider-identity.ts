@@ -57,6 +57,7 @@ export function inferProviderIdFromCommand(value: unknown): ProviderId | null {
 }
 
 export function providerDisplayName(value: unknown): string {
+  if (typeof value === "string" && value.trim().toLowerCase() === "terminal") return "终端";
   const provider = normalizeProviderId(value);
   if (provider) return PROVIDER_LABELS[provider];
   return typeof value === "string" && value.trim() ? value.trim() : "AI";

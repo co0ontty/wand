@@ -48,7 +48,7 @@ const legacyRuntime: NewSessionRuntimeAdapter = {
   },
 
   async prepareCreate(kind) {
-    if (kind !== "pty") return {};
+    if (kind === "structured") return {};
     await ensureTerminalReady();
     try {
       state.terminal?.remeasure?.();
@@ -64,8 +64,10 @@ const legacyRuntime: NewSessionRuntimeAdapter = {
   async completeCreate(request: NewSessionCreateRequest, created: NewSessionCreated): Promise<void> {
     state.modeValue = request.mode;
     state.chatMode = request.mode;
-    state.sessionTool = request.provider;
-    state.preferredCommand = request.provider;
+    if (request.kind !== "shell") {
+      state.sessionTool = request.provider;
+      state.preferredCommand = request.provider;
+    }
     state.selectedId = created.id;
     state.drafts[created.id] = "";
     persistSelectedId();

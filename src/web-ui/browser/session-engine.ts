@@ -28,6 +28,7 @@ import {
   normalizeAvailableComposerValue,
   normalizeComposerModelValue,
 } from "./composer-select-values";
+import { inferProviderIdFromCommand } from "../provider-identity";
 
       // 证书不受信任时浏览器会丢弃 Secure Cookie —— 密码正确也存不住登录态。
       // 这里揭示专用提示，并把「改用 HTTP」按钮指向同 host 的 http:// 地址。
@@ -288,7 +289,9 @@ import {
       }
 
       export function getSessionKindLabel(session) {
-        var provider = session && session.provider ? session.provider : "claude";
+        var provider = session && session.provider
+          ? session.provider
+          : inferProviderIdFromCommand(session && session.command) || "terminal";
         return (isStructuredSession(session) ? "结构化" : "终端") + " · " + provider;
       }
 

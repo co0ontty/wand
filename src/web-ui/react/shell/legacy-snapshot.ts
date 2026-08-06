@@ -168,7 +168,7 @@ function sessionToVm(
   const explicitProvider = asString(session.provider);
   const provider = (
     normalizeProviderId(explicitProvider)
-    ?? (explicitProvider || inferProviderIdFromCommand(session.command) || "claude")
+    ?? (explicitProvider || inferProviderIdFromCommand(session.command) || "terminal")
   ) as UiProvider;
   const status = asString(session.status, "idle") as UiSessionStatus;
   const kind = session.sessionKind === "structured" ? "structured" : "pty";

@@ -24522,6 +24522,7 @@
     return normalizeProviderId(executable);
   }
   function providerDisplayName(value) {
+    if (typeof value === "string" && value.trim().toLowerCase() === "terminal") return "\u7EC8\u7AEF";
     const provider = normalizeProviderId(value);
     if (provider) return PROVIDER_LABELS[provider];
     return typeof value === "string" && value.trim() ? value.trim() : "AI";
@@ -24806,23 +24807,32 @@
   }
   function buildCreateRequest(form, defaults, context, dimensions = {}) {
     const cwd = form.cwd.trim() || context.effectiveCwd.trim() || defaults.defaultCwd;
-    const mode = safeMode(form.provider, form.mode, defaults.defaultMode);
-    const base = {
-      provider: form.provider,
+    const terminalDimensions = {
+      cols: Number.isFinite(dimensions.cols) && (dimensions.cols ?? 0) > 0 ? dimensions.cols : void 0,
+      rows: Number.isFinite(dimensions.rows) && (dimensions.rows ?? 0) > 0 ? dimensions.rows : void 0
+    };
+    const common = {
       cwd,
-      mode,
       worktreeEnabled: form.worktreeEnabled === true,
       sessionSource: "interactive"
     };
+    if (form.kind === "shell") {
+      return {
+        ...common,
+        ...terminalDimensions,
+        kind: "shell",
+        shell: true,
+        mode: "default"
+      };
+    }
+    const mode = safeMode(form.provider, form.mode, defaults.defaultMode);
+    const base = { ...common, provider: form.provider, mode };
     if (form.kind === "pty") {
-      const cols = Number.isFinite(dimensions.cols) && (dimensions.cols ?? 0) > 0 ? dimensions.cols : void 0;
-      const rows = Number.isFinite(dimensions.rows) && (dimensions.rows ?? 0) > 0 ? dimensions.rows : void 0;
       return {
         ...base,
+        ...terminalDimensions,
         kind: "pty",
-        command: ptyCommand(form.provider),
-        cols,
-        rows
+        command: ptyCommand(form.provider)
       };
     }
     const model = context.selectedModels?.[form.provider]?.trim();
@@ -24894,8 +24904,9 @@
         thinkingEffort: request2.thinkingEffort,
         sessionSource: request2.sessionSource
       } : {
-        command: request2.command,
-        provider: request2.provider,
+        command: request2.kind === "pty" ? request2.command : void 0,
+        provider: request2.kind === "pty" ? request2.provider : void 0,
+        shell: request2.kind === "shell" || void 0,
         cwd: request2.cwd,
         mode: request2.mode,
         worktreeEnabled: request2.worktreeEnabled,
@@ -24941,7 +24952,8 @@
   ];
   var KINDS2 = [
     { value: "structured", label: "\u7ED3\u6784\u5316", description: "\u667A\u80FD\u5BF9\u8BDD\u6A21\u5F0F" },
-    { value: "pty", label: "PTY", description: "\u4EA4\u4E92\u5F0F\u7EC8\u7AEF\u4F1A\u8BDD" }
+    { value: "pty", label: "PTY", description: "\u4EA4\u4E92\u5F0F\u7EC8\u7AEF\u4F1A\u8BDD" },
+    { value: "shell", label: "\u7A7A\u767D\u7EC8\u7AEF", description: "\u4EC5\u542F\u52A8\u7CFB\u7EDF Shell" }
   ];
   var MODES2 = [
     { value: "managed", label: "\u6258\u7BA1", description: "\u5168\u81EA\u52A8\u5B8C\u6210\u4EFB\u52A1" },
@@ -24953,6 +24965,9 @@
   var PROVIDER_VALUES = PROVIDERS2.map((provider) => provider.value);
   var KIND_VALUES = KINDS2.map((kind) => kind.value);
   function kindHint(provider, kind) {
+    if (kind === "shell") {
+      return "\u542F\u52A8\u5F53\u524D\u5DE5\u4F5C\u76EE\u5F55\u4E0B\u7684\u4EA4\u4E92\u5F0F\u767B\u5F55 Shell\uFF0C\u4E0D\u81EA\u52A8\u8FD0\u884C\u4EFB\u4F55 CLI \u5DE5\u5177\u3002";
+    }
     if (kind === "structured") {
       if (provider === "codex") return "Codex JSONL \u7ED3\u6784\u5316\u804A\u5929\u754C\u9762\uFF0C\u652F\u6301\u591A\u8F6E\u5BF9\u8BDD\u548C\u5DE5\u5177\u8C03\u7528\u5C55\u793A\u3002";
       if (provider === "opencode") return "OpenCode JSON \u7ED3\u6784\u5316\u804A\u5929\u754C\u9762\uFF0C\u652F\u6301\u7EED\u804A\u3001\u601D\u8003\u8FC7\u7A0B\u548C\u5DE5\u5177\u8C03\u7528\u5C55\u793A\u3002";
@@ -24989,6 +25004,7 @@
     return "\u4FDD\u7559\u6807\u51C6\u4EA4\u4E92\u6D41\u7A0B\uFF0C\u9002\u5408\u624B\u52A8\u786E\u8BA4\u6BCF\u4E00\u6B65\u3002";
   }
   function creationFallback(provider, kind) {
+    if (kind === "shell") return "\u65E0\u6CD5\u542F\u52A8\u7A7A\u767D\u7EC8\u7AEF\uFF0C\u8BF7\u68C0\u67E5\u670D\u52A1\u7AEF Shell \u914D\u7F6E\u3002";
     if (kind === "structured") return "\u65E0\u6CD5\u542F\u52A8\u7ED3\u6784\u5316\u4F1A\u8BDD\uFF0C\u8BF7\u786E\u8BA4\u5BF9\u5E94 Provider \u5DF2\u6B63\u786E\u5B89\u88C5\u3002";
     if (provider === "codex") return "\u65E0\u6CD5\u542F\u52A8 Codex \u4F1A\u8BDD\uFF0C\u8BF7\u786E\u8BA4 codex \u5DF2\u6B63\u786E\u5B89\u88C5\u5E76\u53EF\u5728\u7EC8\u7AEF\u4E2D\u6267\u884C\u3002";
     if (provider === "opencode") return "\u65E0\u6CD5\u542F\u52A8 OpenCode \u4F1A\u8BDD\uFF0C\u8BF7\u786E\u8BA4 opencode-ai \u5DF2\u6B63\u786E\u5B89\u88C5\u3002";
@@ -25088,8 +25104,10 @@
     }, [defaults, form, repository]);
     const selectKind = (0, import_react10.useCallback)((kind) => {
       setForm((current) => current ? { ...current, kind } : current);
-      if (kind === "pty") setAdvancedOpen(true);
-      void repository.savePreferences({ defaultSessionKind: kind }).catch((saveError) => console.warn("[wand] Failed to persist new-session defaults", saveError));
+      if (kind !== "structured") setAdvancedOpen(true);
+      if (kind !== "shell") {
+        void repository.savePreferences({ defaultSessionKind: kind }).catch((saveError) => console.warn("[wand] Failed to persist new-session defaults", saveError));
+      }
     }, [repository]);
     const selectMode = (0, import_react10.useCallback)((mode) => {
       if (!form || !supportedModes(form.provider).includes(mode)) return;
@@ -25125,9 +25143,11 @@
         const dimensions = await runtime7.prepareCreate(form.kind);
         const request2 = buildCreateRequest(form, defaults.config, runtime7.getContext(), dimensions);
         void repository.savePreferences({
-          defaultProvider: request2.provider,
-          defaultSessionKind: request2.kind,
-          defaultMode: request2.mode
+          ...request2.kind === "shell" ? {} : {
+            defaultProvider: request2.provider,
+            defaultSessionKind: request2.kind,
+            defaultMode: request2.mode
+          }
         }).catch((saveError) => console.warn("[wand] Failed to persist new-session defaults", saveError));
         const created = await repository.create(request2);
         await runtime7.completeCreate(request2, created);
@@ -25147,7 +25167,7 @@
           if (!open) newSessionController.close();
         },
         title: "\u65B0\u5BF9\u8BDD",
-        description: "\u542F\u52A8 Claude\u3001Codex\u3001OpenCode\u3001Grok\u3001Qoder \u6216 Pi \u4F1A\u8BDD\uFF0C\u9009\u62E9 provider\u3001\u4F1A\u8BDD\u7C7B\u578B\u3001\u6A21\u5F0F\u548C\u5DE5\u4F5C\u76EE\u5F55\u3002",
+        description: "\u542F\u52A8 AI \u4F1A\u8BDD\u6216\u7A7A\u767D\u7EC8\u7AEF\uFF0C\u9009\u62E9 provider\u3001\u4F1A\u8BDD\u7C7B\u578B\u3001\u6A21\u5F0F\u548C\u5DE5\u4F5C\u76EE\u5F55\u3002",
         className: "wand-new-session-dialog",
         overlayClassName: "wand-new-session-overlay",
         titleClassName: "wand-new-session-title",
@@ -25296,7 +25316,7 @@
                   children: [
                     /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("span", { children: "\u9AD8\u7EA7\u9009\u9879" }),
                     /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)("span", { className: "wand-new-session-advanced-summary", children: [
-                      selectedMode?.label ?? "\u6807\u51C6",
+                      form.kind === "shell" ? "Shell \u73AF\u5883" : selectedMode?.label ?? "\u6807\u51C6",
                       " \xB7 ",
                       form.worktreeEnabled ? "Worktree \u5DF2\u5F00\u542F" : "\u4E0D\u4F7F\u7528 Worktree"
                     ] })
@@ -25304,7 +25324,7 @@
                 }
               ),
               advancedOpen ? /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)("div", { id: "wand-new-session-advanced-content", className: "wand-new-session-advanced-content", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)("fieldset", { className: "wand-new-session-field wand-new-session-fieldset", children: [
+                form.kind !== "shell" ? /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)("fieldset", { className: "wand-new-session-field wand-new-session-fieldset", children: [
                   /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("legend", { className: "wand-new-session-field-label", children: "\u6A21\u5F0F" }),
                   /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("div", { className: "wand-new-session-choices wand-new-session-mode-choices", role: "radiogroup", "aria-label": "\u6267\u884C\u6A21\u5F0F", children: MODES2.map((mode) => {
                     const disabled = !supported.has(mode.value);
@@ -25338,7 +25358,7 @@
                     );
                   }) }),
                   /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("p", { className: "wand-new-session-field-hint", children: modeHint(form.provider, form.mode) })
-                ] }),
+                ] }) : /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("p", { className: "wand-new-session-field-hint", children: "\u7A7A\u767D\u7EC8\u7AEF\u4F7F\u7528\u670D\u52A1\u7AEF\u914D\u7F6E\u7684\u767B\u5F55 Shell\uFF0C\u4E0D\u5E94\u7528 AI \u6743\u9650\u6A21\u5F0F\u3002" }),
                 /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)("div", { className: "wand-new-session-worktree", children: [
                   /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)("div", { children: [
                     /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("strong", { children: "Worktree \u6A21\u5F0F" }),
@@ -25362,14 +25382,10 @@
           ] }),
           /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)("div", { className: "wand-new-session-summary", "aria-live": "polite", children: [
             /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("span", { children: "\u5373\u5C06\u542F\u52A8" }),
-            /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)("strong", { children: [
-              PROVIDERS2.find((provider) => provider.value === form.provider)?.label,
-              " \xB7 ",
-              form.kind === "structured" ? "\u7ED3\u6784\u5316" : "PTY"
-            ] }),
+            /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("strong", { children: form.kind === "shell" ? "\u7A7A\u767D\u7EC8\u7AEF \xB7 Shell" : `${PROVIDERS2.find((provider) => provider.value === form.provider)?.label} \xB7 ${form.kind === "structured" ? "\u7ED3\u6784\u5316" : "PTY"}` }),
             /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("span", { title: effectiveCwd, children: effectiveCwd }),
             /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)("span", { children: [
-              selectedMode?.label ?? "\u6807\u51C6",
+              form.kind === "shell" ? "\u4E0D\u542F\u52A8 CLI" : selectedMode?.label ?? "\u6807\u51C6",
               form.worktreeEnabled ? " \xB7 Worktree" : ""
             ] })
           ] }),
@@ -25382,7 +25398,7 @@
                 type: "submit",
                 className: "wand-new-session-submit",
                 disabled: submitting,
-                children: submitting ? "\u6B63\u5728\u542F\u52A8\u2026" : "\u542F\u52A8\u4F1A\u8BDD"
+                children: submitting ? "\u6B63\u5728\u542F\u52A8\u2026" : form.kind === "shell" ? "\u542F\u52A8\u7A7A\u767D\u7EC8\u7AEF" : "\u542F\u52A8\u4F1A\u8BDD"
               }
             ),
             error ? /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("p", { className: "wand-new-session-error", role: "alert", children: error }) : null
@@ -33070,7 +33086,7 @@
   function sessionToVm(session, state2, manageSelection) {
     const id = asString(session.id);
     const explicitProvider = asString(session.provider);
-    const provider = normalizeProviderId(explicitProvider) ?? (explicitProvider || inferProviderIdFromCommand(session.command) || "claude");
+    const provider = normalizeProviderId(explicitProvider) ?? (explicitProvider || inferProviderIdFromCommand(session.command) || "terminal");
     const status = asString(session.status, "idle");
     const kind = session.sessionKind === "structured" ? "structured" : "pty";
     const worktreeEnabled = Boolean(session.worktree?.enabled ?? session.worktreeEnabled);
@@ -36434,7 +36450,7 @@
       var s = e.ref;
       var activeCls = s.id === state.selectedId ? " active" : "";
       var title = s.title || s.description || s.summary || s.command || "\u4F1A\u8BDD " + idx;
-      var provider = s.provider || inferProviderIdFromCommand(s.command) || "claude";
+      var provider = s.provider || inferProviderIdFromCommand(s.command) || "terminal";
       var normalizedProvider = normalizeProviderId(provider) || "generic";
       var accessibleLabel = title + " \xB7 " + providerDisplayName(provider);
       return '<button class="sidebar-collapsed-tile provider-' + normalizedProvider + activeCls + '" type="button" data-collapsed-session-id="' + escapeHtml(s.id) + '" title="' + escapeHtml(title) + '" aria-label="' + escapeHtml(accessibleLabel) + '"><span class="sidebar-collapsed-provider-mark" aria-hidden="true">' + renderProviderLogoMarkup(provider) + "</span></button>";
@@ -47131,7 +47147,7 @@
     return hints[mode] || "";
   }
   function getSessionKindLabel(session) {
-    var provider = session && session.provider ? session.provider : "claude";
+    var provider = session && session.provider ? session.provider : inferProviderIdFromCommand(session && session.command) || "terminal";
     return (isStructuredSession2(session) ? "\u7ED3\u6784\u5316" : "\u7EC8\u7AEF") + " \xB7 " + provider;
   }
   function getSessionKindDescription(session) {
@@ -49731,7 +49747,7 @@
       };
     },
     async prepareCreate(kind) {
-      if (kind !== "pty") return {};
+      if (kind === "structured") return {};
       await ensureTerminalReady();
       try {
         state.terminal?.remeasure?.();
@@ -49747,8 +49763,10 @@
     async completeCreate(request2, created) {
       state.modeValue = request2.mode;
       state.chatMode = request2.mode;
-      state.sessionTool = request2.provider;
-      state.preferredCommand = request2.provider;
+      if (request2.kind !== "shell") {
+        state.sessionTool = request2.provider;
+        state.preferredCommand = request2.provider;
+      }
       state.selectedId = created.id;
       state.drafts[created.id] = "";
       persistSelectedId();

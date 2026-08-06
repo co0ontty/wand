@@ -52,6 +52,7 @@ const KINDS: ReadonlyArray<{
 }> = [
   { value: "structured", label: "结构化", description: "智能对话模式" },
   { value: "pty", label: "PTY", description: "交互式终端会话" },
+  { value: "shell", label: "空白终端", description: "仅启动系统 Shell" },
 ];
 
 const MODES: ReadonlyArray<{
@@ -70,6 +71,9 @@ const PROVIDER_VALUES = PROVIDERS.map((provider) => provider.value);
 const KIND_VALUES = KINDS.map((kind) => kind.value);
 
 function kindHint(provider: NewSessionProvider, kind: NewSessionKind): string {
+  if (kind === "shell") {
+    return "启动当前工作目录下的交互式登录 Shell，不自动运行任何 CLI 工具。";
+  }
   if (kind === "structured") {
     if (provider === "codex") return "Codex JSONL 结构化聊天界面，支持多轮对话和工具调用展示。";
     if (provider === "opencode") return "OpenCode JSON 结构化聊天界面，支持续聊、思考过程和工具调用展示。";
@@ -116,6 +120,7 @@ function modeHint(provider: NewSessionProvider, mode: NewSessionMode): string {
 }
 
 function creationFallback(provider: NewSessionProvider, kind: NewSessionKind): string {
+  if (kind === "shell") return "无法启动空白终端，请检查服务端 Shell 配置。";
   if (kind === "structured") return "无法启动结构化会话，请确认对应 Provider 已正确安装。";
   if (provider === "codex") return "无法启动 Codex 会话，请确认 codex 已正确安装并可在终端中执行。";
   if (provider === "opencode") return "无法启动 OpenCode 会话，请确认 opencode-ai 已正确安装。";
@@ -226,9 +231,11 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
 
   const selectKind = useCallback((kind: NewSessionKind) => {
     setForm((current) => current ? { ...current, kind } : current);
-    if (kind === "pty") setAdvancedOpen(true);
-    void repository.savePreferences({ defaultSessionKind: kind })
-      .catch((saveError) => console.warn("[wand] Failed to persist new-session defaults", saveError));
+    if (kind !== "structured") setAdvancedOpen(true);
+    if (kind !== "shell") {
+      void repository.savePreferences({ defaultSessionKind: kind })
+        .catch((saveError) => console.warn("[wand] Failed to persist new-session defaults", saveError));
+    }
   }, [repository]);
 
   const selectMode = useCallback((mode: NewSessionMode) => {
@@ -278,9 +285,11 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
       const dimensions = await runtime.prepareCreate(form.kind);
       const request = buildCreateRequest(form, defaults.config, runtime.getContext(), dimensions);
       void repository.savePreferences({
-        defaultProvider: request.provider,
-        defaultSessionKind: request.kind,
-        defaultMode: request.mode,
+        ...(request.kind === "shell" ? {} : {
+          defaultProvider: request.provider,
+          defaultSessionKind: request.kind,
+          defaultMode: request.mode,
+        }),
       }).catch((saveError) => console.warn("[wand] Failed to persist new-session defaults", saveError));
       const created = await repository.create(request);
       await runtime.completeCreate(request, created);
@@ -298,7 +307,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
       open={controller.open}
       onOpenChange={(open) => { if (!open) newSessionController.close(); }}
       title="新对话"
-      description="启动 Claude、Codex、OpenCode、Grok、Qoder 或 Pi 会话，选择 provider、会话类型、模式和工作目录。"
+      description="启动 AI 会话或空白终端，选择 provider、会话类型、模式和工作目录。"
       className="wand-new-session-dialog"
       overlayClassName="wand-new-session-overlay"
       titleClassName="wand-new-session-title"
@@ -448,12 +457,12 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
               >
                 <span>高级选项</span>
                 <span className="wand-new-session-advanced-summary">
-                  {selectedMode?.label ?? "标准"} · {form.worktreeEnabled ? "Worktree 已开启" : "不使用 Worktree"}
+                  {form.kind === "shell" ? "Shell 环境" : selectedMode?.label ?? "标准"} · {form.worktreeEnabled ? "Worktree 已开启" : "不使用 Worktree"}
                 </span>
               </button>
               {advancedOpen ? (
                 <div id="wand-new-session-advanced-content" className="wand-new-session-advanced-content">
-                  <fieldset className="wand-new-session-field wand-new-session-fieldset">
+                  {form.kind !== "shell" ? <fieldset className="wand-new-session-field wand-new-session-fieldset">
                     <legend className="wand-new-session-field-label">模式</legend>
                     <div className="wand-new-session-choices wand-new-session-mode-choices" role="radiogroup" aria-label="执行模式">
                       {MODES.map((mode) => {
@@ -485,7 +494,9 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                       })}
                     </div>
                     <p className="wand-new-session-field-hint">{modeHint(form.provider, form.mode)}</p>
-                  </fieldset>
+                  </fieldset> : (
+                    <p className="wand-new-session-field-hint">空白终端使用服务端配置的登录 Shell，不应用 AI 权限模式。</p>
+                  )}
                   <div className="wand-new-session-worktree">
                     <div>
                       <strong>Worktree 模式</strong>
@@ -508,9 +519,11 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
 
           <div className="wand-new-session-summary" aria-live="polite">
             <span>即将启动</span>
-            <strong>{PROVIDERS.find((provider) => provider.value === form.provider)?.label} · {form.kind === "structured" ? "结构化" : "PTY"}</strong>
+            <strong>{form.kind === "shell"
+              ? "空白终端 · Shell"
+              : `${PROVIDERS.find((provider) => provider.value === form.provider)?.label} · ${form.kind === "structured" ? "结构化" : "PTY"}`}</strong>
             <span title={effectiveCwd}>{effectiveCwd}</span>
-            <span>{selectedMode?.label ?? "标准"}{form.worktreeEnabled ? " · Worktree" : ""}</span>
+            <span>{form.kind === "shell" ? "不启动 CLI" : selectedMode?.label ?? "标准"}{form.worktreeEnabled ? " · Worktree" : ""}</span>
           </div>
 
           <div className="wand-new-session-footer">
@@ -521,7 +534,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
               className="wand-new-session-submit"
               disabled={submitting}
             >
-              {submitting ? "正在启动…" : "启动会话"}
+              {submitting ? "正在启动…" : form.kind === "shell" ? "启动空白终端" : "启动会话"}
             </WandButton>
             {error ? <p className="wand-new-session-error" role="alert">{error}</p> : null}
           </div>

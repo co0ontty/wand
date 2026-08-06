@@ -1,6 +1,7 @@
 export type NewSessionProvider = "claude" | "codex" | "opencode" | "grok" | "qoder" | "pi";
 
-export type NewSessionKind = "structured" | "pty";
+export type NewSessionKind = "structured" | "pty" | "shell";
+export type NewSessionPreferenceKind = Exclude<NewSessionKind, "shell">;
 
 export type NewSessionMode =
   | "default"
@@ -11,7 +12,7 @@ export type NewSessionMode =
 
 export interface NewSessionConfig {
   defaultProvider: NewSessionProvider;
-  defaultSessionKind: NewSessionKind;
+  defaultSessionKind: NewSessionPreferenceKind;
   defaultMode: NewSessionMode;
   defaultCwd: string;
   structuredRunner: string;
@@ -37,7 +38,7 @@ export interface NewSessionForm {
 
 export interface NewSessionPreferencePatch {
   defaultProvider?: NewSessionProvider;
-  defaultSessionKind?: NewSessionKind;
+  defaultSessionKind?: NewSessionPreferenceKind;
   defaultMode?: NewSessionMode;
 }
 
@@ -53,7 +54,6 @@ export interface NewSessionTerminalDimensions {
 }
 
 interface NewSessionCreateRequestBase {
-  provider: NewSessionProvider;
   cwd: string;
   mode: NewSessionMode;
   worktreeEnabled: boolean;
@@ -62,6 +62,7 @@ interface NewSessionCreateRequestBase {
 
 export interface StructuredNewSessionCreateRequest extends NewSessionCreateRequestBase {
   kind: "structured";
+  provider: NewSessionProvider;
   runner: string;
   model?: string;
   thinkingEffort?: string;
@@ -69,14 +70,23 @@ export interface StructuredNewSessionCreateRequest extends NewSessionCreateReque
 
 export interface PtyNewSessionCreateRequest extends NewSessionCreateRequestBase {
   kind: "pty";
+  provider: NewSessionProvider;
   command: string;
+  cols?: number;
+  rows?: number;
+}
+
+export interface ShellNewSessionCreateRequest extends NewSessionCreateRequestBase {
+  kind: "shell";
+  shell: true;
   cols?: number;
   rows?: number;
 }
 
 export type NewSessionCreateRequest =
   | StructuredNewSessionCreateRequest
-  | PtyNewSessionCreateRequest;
+  | PtyNewSessionCreateRequest
+  | ShellNewSessionCreateRequest;
 
 export interface NewSessionCreated {
   id: string;

@@ -228,6 +228,20 @@ test("ProcessManager rejects unsafe allowlist lookalikes before spawning", (t) =
   assert.equal(spawned.length, 0);
 });
 
+test("bare shell sessions launch the configured login shell without provider metadata", (t) => {
+  const { manager, root, spawnCalls } = createHarness(t, ["claude"]);
+
+  const session = manager.startShell(root, "default", { cols: 96, rows: 28 });
+
+  assert.equal(session.sessionKind, "pty");
+  assert.equal(session.provider, undefined);
+  assert.equal(session.command, defaultConfig().shell);
+  assert.equal(spawnCalls[0][0], defaultConfig().shell);
+  assert.deepEqual(spawnCalls[0][1], process.platform === "win32" ? [] : ["-l"]);
+  assert.equal(session.claudeSessionId, null);
+  assert.equal(session.autoApprovePermissions, false);
+});
+
 test("disabling auto approval persists the false value", (t) => {
   const { manager, root, storage } = createHarness(t);
   const started = manager.start("claude", root, "full-access", undefined, {

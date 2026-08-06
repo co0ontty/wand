@@ -1143,7 +1143,8 @@ export async function startServer(
 
   app.post("/api/commands", (req, res) => {
     const body = req.body as CommandRequest & { sessionSource?: unknown; automationId?: unknown };
-    if (!body.command?.trim()) {
+    const interactiveShell = body.shell === true;
+    if (!interactiveShell && !body.command?.trim()) {
       res.status(400).json({ error: "请输入要执行的命令。" });
       return;
     }
@@ -1155,40 +1156,52 @@ export async function startServer(
     try {
       const origin = parseSessionCreationOrigin(body);
       const rawModel = typeof body.model === "string" ? body.model.trim() : "";
-      const provider: SessionProvider = body.provider === "codex" || /^codex\b/.test(body.command.trim())
+      const rawCommand = body.command?.trim() ?? "";
+      const provider: SessionProvider | undefined = interactiveShell
+        ? undefined
+        : body.provider === "codex" || /^codex\b/.test(rawCommand)
         ? "codex"
-        : body.provider === "opencode" || /^opencode\b/.test(body.command.trim())
+        : body.provider === "opencode" || /^opencode\b/.test(rawCommand)
           ? "opencode"
-        : body.provider === "grok" || /^grok\b/.test(body.command.trim())
+        : body.provider === "grok" || /^grok\b/.test(rawCommand)
           ? "grok"
-        : body.provider === "qoder" || /^qodercli\b/.test(body.command.trim())
+        : body.provider === "qoder" || /^qodercli\b/.test(rawCommand)
           ? "qoder"
-        : body.provider === "pi" || /^pi\b/.test(body.command.trim())
+        : body.provider === "pi" || /^pi\b/.test(rawCommand)
           ? "pi"
           : "claude";
       // Older clients used the provider id as the PTY command. Qoder's executable
       // is named qodercli, so keep those clients working while preserving custom commands.
-      const command = provider === "qoder" && body.command.trim() === "qoder"
+      const command = provider === "qoder" && rawCommand === "qoder"
         ? "qodercli"
-        : body.command;
-      const effectiveModel = rawModel || getDefaultModelForProvider(config, provider) || undefined;
+        : rawCommand;
+      const effectiveModel = provider
+        ? rawModel || getDefaultModelForProvider(config, provider) || undefined
+        : undefined;
       const reqCols = typeof body.cols === "number" && Number.isFinite(body.cols) ? body.cols : undefined;
       const reqRows = typeof body.rows === "number" && Number.isFinite(body.rows) ? body.rows : undefined;
-      const snapshot = processes.start(
-        command,
-        body.cwd,
-        body.mode ?? config.defaultMode,
-        initialInput || undefined,
-        {
-          worktreeEnabled: body.worktreeEnabled === true,
-          provider,
-          model: effectiveModel,
-          cols: reqCols,
-          rows: reqRows,
-          thinkingEffort: body.thinkingEffort ?? config.defaultThinkingEffort,
-          ...origin,
-        }
-      );
+      const snapshot = interactiveShell
+        ? processes.startShell(body.cwd, body.mode ?? "default", {
+            worktreeEnabled: body.worktreeEnabled === true,
+            cols: reqCols,
+            rows: reqRows,
+            ...origin,
+          })
+        : processes.start(
+            command,
+            body.cwd,
+            body.mode ?? config.defaultMode,
+            initialInput || undefined,
+            {
+              worktreeEnabled: body.worktreeEnabled === true,
+              provider,
+              model: effectiveModel,
+              cols: reqCols,
+              rows: reqRows,
+              thinkingEffort: body.thinkingEffort ?? config.defaultThinkingEffort,
+              ...origin,
+            }
+          );
       recordRecentPath(storage, snapshot.cwd);
       res.status(201).json(snapshot);
     } catch (error) {

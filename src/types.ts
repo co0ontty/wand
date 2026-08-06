@@ -322,7 +322,9 @@ export interface PushResult {
 }
 
 export interface CommandRequest {
-  command: string;
+  command?: string;
+  /** Start the configured login shell without launching a provider CLI. */
+  shell?: boolean;
   provider?: SessionProvider;
   cwd?: string;
   mode?: ExecutionMode;

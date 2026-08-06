@@ -4,10 +4,10 @@ import type {
   NewSessionCreated,
   NewSessionDefaults,
   NewSessionForm,
-  NewSessionKind,
   NewSessionLoadOptions,
   NewSessionMode,
   NewSessionPath,
+  NewSessionPreferenceKind,
   NewSessionPreferencePatch,
   NewSessionProvider,
   NewSessionRepository,
@@ -19,7 +19,7 @@ type FetchLike = typeof fetch;
 type JsonRecord = Record<string, unknown>;
 
 const PROVIDERS: readonly NewSessionProvider[] = ["claude", "codex", "opencode", "grok", "qoder", "pi"];
-const KINDS: readonly NewSessionKind[] = ["structured", "pty"];
+const KINDS: readonly NewSessionPreferenceKind[] = ["structured", "pty"];
 const MODES: readonly NewSessionMode[] = [
   "default",
   "full-access",
@@ -119,28 +119,39 @@ export function buildCreateRequest(
   dimensions: NewSessionTerminalDimensions = {},
 ): NewSessionCreateRequest {
   const cwd = form.cwd.trim() || context.effectiveCwd.trim() || defaults.defaultCwd;
-  const mode = safeMode(form.provider, form.mode, defaults.defaultMode);
-  const base = {
-    provider: form.provider,
+  const terminalDimensions = {
+    cols: Number.isFinite(dimensions.cols) && (dimensions.cols ?? 0) > 0
+      ? dimensions.cols
+      : undefined,
+    rows: Number.isFinite(dimensions.rows) && (dimensions.rows ?? 0) > 0
+      ? dimensions.rows
+      : undefined,
+  };
+  const common = {
     cwd,
-    mode,
     worktreeEnabled: form.worktreeEnabled === true,
     sessionSource: "interactive" as const,
   };
 
+  if (form.kind === "shell") {
+    return {
+      ...common,
+      ...terminalDimensions,
+      kind: "shell",
+      shell: true,
+      mode: "default",
+    };
+  }
+
+  const mode = safeMode(form.provider, form.mode, defaults.defaultMode);
+  const base = { ...common, provider: form.provider, mode };
+
   if (form.kind === "pty") {
-    const cols = Number.isFinite(dimensions.cols) && (dimensions.cols ?? 0) > 0
-      ? dimensions.cols
-      : undefined;
-    const rows = Number.isFinite(dimensions.rows) && (dimensions.rows ?? 0) > 0
-      ? dimensions.rows
-      : undefined;
     return {
       ...base,
+      ...terminalDimensions,
       kind: "pty",
       command: ptyCommand(form.provider),
-      cols,
-      rows,
     };
   }
 
@@ -228,8 +239,9 @@ export class HttpNewSessionRepository implements NewSessionRepository {
           sessionSource: request.sessionSource,
         }
       : {
-          command: request.command,
-          provider: request.provider,
+          command: request.kind === "pty" ? request.command : undefined,
+          provider: request.kind === "pty" ? request.provider : undefined,
+          shell: request.kind === "shell" || undefined,
           cwd: request.cwd,
           mode: request.mode,
           worktreeEnabled: request.worktreeEnabled,

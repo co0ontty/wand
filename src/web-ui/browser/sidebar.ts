@@ -135,7 +135,7 @@ document.addEventListener("click", function(event) {
           var s = e.ref;
           var activeCls = s.id === state.selectedId ? " active" : "";
           var title = s.title || s.description || s.summary || s.command || ("会话 " + idx);
-          var provider = s.provider || inferProviderIdFromCommand(s.command) || "claude";
+          var provider = s.provider || inferProviderIdFromCommand(s.command) || "terminal";
           var normalizedProvider = normalizeProviderId(provider) || "generic";
           var accessibleLabel = title + " · " + providerDisplayName(provider);
           return '<button class="sidebar-collapsed-tile provider-' + normalizedProvider + activeCls + '" type="button" data-collapsed-session-id="' + escapeHtml(s.id) + '" title="' + escapeHtml(title) + '" aria-label="' + escapeHtml(accessibleLabel) + '">' +

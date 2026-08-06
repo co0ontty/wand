@@ -39,12 +39,13 @@ export type {
   QoderHistorySession,
 } from "./provider-history-scanner.js";
 
-function resolveProviderFromCommand(command: string): SessionProvider {
+function resolveProviderFromCommand(command: string): SessionProvider | undefined {
+  if (/^(?:claude|npx\s+claude|[^\s]+\/claude)(?:\s|$)/.test(command.trim())) return "claude";
   if (/^codex\b/.test(command.trim())) return "codex";
   if (/^opencode\b/.test(command.trim())) return "opencode";
   if (/^grok\b/.test(command.trim())) return "grok";
   if (/^pi\b/.test(command.trim())) return "pi";
-  return /^qodercli\b/.test(command.trim()) ? "qoder" : "claude";
+  return /^qodercli\b/.test(command.trim()) ? "qoder" : undefined;
 }
 
 /**
@@ -179,7 +180,7 @@ export class SessionInputError extends Error {
 
 
 interface SessionRecord extends SessionSnapshot {
-  provider: SessionProvider;
+  provider?: SessionProvider;
   processId: number | null;
   ptyProcess: IPty | null;
   stopRequested: boolean;
@@ -705,7 +706,9 @@ export class ProcessManager extends EventEmitter {
       const isClaudeCmd = provider === "claude";
       const isCodexCmd = provider === "codex";
       const isOpenCodeCmd = provider === "opencode";
-      const resumeCommandSessionId = getProviderCommandSessionId(provider, snapshot.command);
+      const resumeCommandSessionId = provider
+        ? getProviderCommandSessionId(provider, snapshot.command)
+        : null;
       const orphanEndedAt = snapshot.status === "running" ? new Date().toISOString() : null;
       const sessionIdFromHistory = isClaudeCmd
         ? recoverClaudeSessionIdFromHistory({
@@ -936,9 +939,9 @@ export class ProcessManager extends EventEmitter {
     }
   }
 
-  start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: { resumedFromSessionId?: string; autoRecovered?: boolean; worktreeEnabled?: boolean; provider?: SessionProvider; model?: string; reuseId?: string; cols?: number; rows?: number; thinkingEffort?: SessionSnapshot["thinkingEffort"]; sessionSource?: SessionSource; automationId?: string }): SessionSnapshot {
+  start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: { resumedFromSessionId?: string; autoRecovered?: boolean; worktreeEnabled?: boolean; provider?: SessionProvider; model?: string; reuseId?: string; cols?: number; rows?: number; thinkingEffort?: SessionSnapshot["thinkingEffort"]; sessionSource?: SessionSource; automationId?: string; interactiveShell?: boolean }): SessionSnapshot {
     if (this.disposed) throw new Error("ProcessManager has been disposed.");
-    this.assertCommandAllowed(command);
+    if (!opts?.interactiveShell) this.assertCommandAllowed(command);
 
     const baseCwd = resolveSessionCwd(cwd, this.config.defaultCwd);
 
@@ -970,7 +973,9 @@ export class ProcessManager extends EventEmitter {
       ? prepareSessionWorktree({ cwd: baseCwd, sessionId: id })
       : null;
     const resolvedCwd = worktreeSetup?.cwd ?? baseCwd;
-    const provider = opts?.provider ?? resolveProviderFromCommand(command);
+    const provider = opts?.interactiveShell
+      ? undefined
+      : opts?.provider ?? resolveProviderFromCommand(command);
     const effectiveMode = provider === "codex" ? "full-access" : mode;
     const isClaudeProvider = provider === "claude";
     const selectedModel = opts?.model?.trim() || undefined;
@@ -978,8 +983,10 @@ export class ProcessManager extends EventEmitter {
     let processedCommand = this.processCommandForMode(command, effectiveMode, provider, selectedModel, initialThinkingEffort);
     const isCodexProvider = provider === "codex";
     const isOpenCodeProvider = provider === "opencode";
-    const existingProviderSessionId = getProviderCommandSessionId(provider, processedCommand)
-      ?? getProviderCommandSessionId(provider, command);
+    const existingProviderSessionId = provider
+      ? getProviderCommandSessionId(provider, processedCommand)
+        ?? getProviderCommandSessionId(provider, command)
+      : null;
     // Grok and Qoder accept caller-selected IDs for new conversations. Assigning
     // one up front avoids depending on provider-specific TUI rendering to learn
     // the durable ID later.
@@ -1077,7 +1084,7 @@ export class ProcessManager extends EventEmitter {
     this.cleanupOldSessions();
 
 
-    const shellArgs = this.buildShellArgs(processedCommand);
+    const shellArgs = this.buildShellArgs(processedCommand, opts?.interactiveShell === true);
     // Self-heal node-pty's spawn-helper +x bit before every spawn: a self-update
     // can re-drop it after this server already ran its startup chmod, which would
     // otherwise make every PTY launch throw "posix_spawnp failed." until restart.
@@ -2376,7 +2383,24 @@ export class ProcessManager extends EventEmitter {
     return record;
   }
 
-  private buildShellArgs(command: string): string[] {
+  /** Start a bare interactive login shell without a provider CLI. */
+  startShell(cwd: string | undefined, mode: ExecutionMode, opts?: {
+    worktreeEnabled?: boolean;
+    cols?: number;
+    rows?: number;
+    sessionSource?: SessionSource;
+    automationId?: string;
+  }): SessionSnapshot {
+    return this.start(this.config.shell, cwd, mode, undefined, {
+      ...opts,
+      interactiveShell: true,
+    });
+  }
+
+  private buildShellArgs(command: string, interactiveShell = false): string[] {
+    if (interactiveShell) {
+      return os.platform() === "win32" ? [] : ["-l"];
+    }
     if (os.platform() === "win32") {
       return ["/d", "/s", "/c", command];
     }
@@ -2389,7 +2413,7 @@ export class ProcessManager extends EventEmitter {
     return ["-lc", command];
   }
 
-  private shouldAutoApprovePermissions(command: string, mode: ExecutionMode, provider: SessionProvider): boolean {
+  private shouldAutoApprovePermissions(command: string, mode: ExecutionMode, provider?: SessionProvider): boolean {
     if (provider !== "claude") {
       return false;
     }
@@ -2416,10 +2440,11 @@ export class ProcessManager extends EventEmitter {
   private processCommandForMode(
     command: string,
     mode: ExecutionMode,
-    provider: SessionProvider,
+    provider?: SessionProvider,
     model?: string,
     thinkingEffort?: SessionSnapshot["thinkingEffort"],
   ): string {
+    if (!provider) return command;
     if (provider === "codex") {
       let result = command;
       const trimmedModel = model?.trim();
