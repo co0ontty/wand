@@ -281,8 +281,9 @@ test("controller delegates lifecycle through one runtime adapter", () => {
     revisions.push(newSessionStore.getSnapshot().revision);
   });
 
-  assert.equal(newSessionController.open(), true);
+  assert.equal(newSessionController.open({ initialCwd: " /workspace/project " }), true);
   assert.equal(newSessionController.isOpen(), true);
+  assert.equal(newSessionStore.getSnapshot().initialCwd, "/workspace/project");
   newSessionController.setDismissable(false);
   assert.equal(newSessionStore.getSnapshot().dismissable, false);
   assert.equal(newSessionController.closeIfOpen(), false);
@@ -292,6 +293,7 @@ test("controller delegates lifecycle through one runtime adapter", () => {
   newSessionController.setDismissable(true);
   assert.equal(newSessionController.closeTopmost(), true);
   assert.equal(newSessionController.closeIfOpen(), false);
+  assert.equal(newSessionStore.getSnapshot().initialCwd, "");
   assert.deepEqual(lifecycle, ["open", "close"]);
   assert.equal(revisions.length, 4);
   assert.equal(revisions[1], revisions[0], "busy state must not replay open initialization");

@@ -2259,12 +2259,12 @@ import { inferProviderIdFromCommand } from "../provider-identity";
       // moved to state.state.lastFocusedElement
       // moved to state.state.focusTrapHandler
 
-      function openSessionModalNow() {
+      function openSessionModalNow(initialCwd?: string) {
         if (!closeReactOverlays(["newSession"])) return;
         var reactNewSession = window.__wandReactNewSession;
         if (reactNewSession && typeof reactNewSession.open === "function") {
           try {
-            if (reactNewSession.open()) return;
+            if (reactNewSession.open(initialCwd ? { initialCwd: initialCwd } : undefined)) return;
           } catch (error) {
             console.warn("[wand] React new-session host unavailable", error);
           }
@@ -2285,9 +2285,10 @@ import { inferProviderIdFromCommand } from "../provider-identity";
         showToast("新建会话界面未能启动，请刷新页面后重试。", "error");
       }
 
-      export function openSessionModal() {
-        if (!prepareFilePreviewForCompetingOverlay(openSessionModalNow)) return;
-        openSessionModalNow();
+      export function openSessionModal(initialCwd?: string) {
+        var open = function() { openSessionModalNow(initialCwd); };
+        if (!prepareFilePreviewForCompetingOverlay(open)) return;
+        open();
       }
 
       export function openWorktreeMergeModal(sessionId: string) {

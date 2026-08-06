@@ -10,6 +10,7 @@ import { openQuickCommitModal } from "./git-commit";
 import {
   deleteClaudeHistorySession,
   deleteCodexHistorySession,
+  deleteExternalHistorySession,
   deleteSession,
   focusInputBox,
   resumeHistoryFromList,
@@ -49,16 +50,25 @@ import { missionsController } from "../react/missions/controller";
 function managedKind(target: UiManageTarget): "sessions" | "history" | "codex" {
   if (target === "claude-history") return "history";
   if (target === "codex-history") return "codex";
+  if (target === "opencode-history" || target === "qoder-history") return "history";
   return "sessions";
 }
 
 function confirmAndDelete(target: UiManageTarget, id: string): Promise<unknown> {
-  const provider = target === "codex-history" ? "Codex" : target === "claude-history" ? "Claude" : "Wand";
+  const provider = target === "codex-history"
+    ? "Codex"
+    : target === "opencode-history"
+      ? "OpenCode"
+      : target === "qoder-history"
+        ? "Qoder"
+        : target === "claude-history" ? "Claude" : "Wand";
   return confirmDelete(`确认删除这条 ${provider} 会话吗？`, { title: "删除会话" })
     .then((confirmed: boolean) => {
       if (!confirmed) return undefined;
       if (target === "codex-history") return deleteCodexHistorySession(id);
       if (target === "claude-history") return deleteClaudeHistorySession(id, null);
+      if (target === "opencode-history") return deleteExternalHistorySession("opencode", id);
+      if (target === "qoder-history") return deleteExternalHistorySession("qoder", id);
       return deleteSession(id);
     });
 }
@@ -105,7 +115,7 @@ export function createBrowserShellCommands(): LegacyUiCommands {
   return {
     goHome,
     refreshPage: () => window.location.reload(),
-    openNewSession: openSessionModal,
+    openNewSession: (cwd) => openSessionModal(cwd),
     openMissions: () => { missionsController.open(); },
     quickStartClaudeTerminal: () => quickStart("claude"),
     quickStartCodexTerminal: () => quickStart("codex"),

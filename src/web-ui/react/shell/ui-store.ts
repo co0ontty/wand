@@ -5,9 +5,10 @@ export type UiView = "terminal" | "chat";
 export type UiSessionKind = "pty" | "structured";
 export type UiProvider = ProviderId | (string & {});
 export type UiSessionStatus = "running" | "idle" | "stopped" | "exited" | "failed" | (string & {});
-export type UiSessionSource = "wand" | "automation" | "claude-history" | "codex-history";
+export type UiNativeHistoryProvider = "claude" | "codex" | "opencode" | "qoder";
+export type UiSessionSource = "wand" | "automation" | `${UiNativeHistoryProvider}-history`;
 export type UiSidebarGroupKind = "wand" | "automation" | "history";
-export type UiManageTarget = "session" | "claude-history" | "codex-history";
+export type UiManageTarget = "session" | `${UiNativeHistoryProvider}-history`;
 
 export interface UiSessionVm {
   id: string;
@@ -109,6 +110,7 @@ export type UiAction =
   | { type: "nav.home" }
   | { type: "nav.refresh" }
   | { type: "session.new" }
+  | { type: "session.newAt"; cwd: string }
   | { type: "missions.open" }
   | { type: "session.quickStart.claude" }
   | { type: "session.quickStart.codex" }
@@ -116,7 +118,7 @@ export type UiAction =
   | { type: "session.quickStart.structured" }
   | { type: "session.select"; id: string }
   | { type: "session.resume"; id: string }
-  | { type: "session.resumeHistory"; provider: "claude" | "codex"; id: string; cwd: string }
+  | { type: "session.resumeHistory"; provider: UiNativeHistoryProvider; id: string; cwd: string }
   | { type: "session.delete"; target: UiManageTarget; id: string }
   | { type: "session.merge"; id: string }
   | { type: "session.cleanup"; id: string }

@@ -2970,14 +2970,29 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
       export function resumeHistoryFromList(provider, providerSessionId, cwd) {
         var request = provider === "codex"
           ? resumeCodexHistorySession(providerSessionId, cwd)
-          : resumeClaudeHistorySession(providerSessionId, cwd);
+          : provider === "claude"
+            ? resumeClaudeHistorySession(providerSessionId, cwd)
+            : fetch("/api/" + encodeURIComponent(provider) + "-sessions/" + encodeURIComponent(providerSessionId) + "/resume", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "same-origin",
+                body: JSON.stringify({
+                  mode: state.chatMode || (state.config && state.config.defaultMode) || "default",
+                  cwd: cwd
+                })
+              })
+              .then(function(res) { return res.json(); })
+              .then(function(data) {
+                if (data && data.error) throw new Error(data.error);
+                return data;
+              });
         return request.then(function(data) {
           if (!data || !data.id) return null;
           if (provider === "codex") {
             state.codexHistory = state.codexHistory.filter(function(s) {
               return s.claudeSessionId !== providerSessionId;
             });
-          } else {
+          } else if (provider === "claude") {
             state.claudeHistory = state.claudeHistory.filter(function(s) {
               return s.claudeSessionId !== providerSessionId;
             });
@@ -2991,6 +3006,20 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
             return data;
           });
         });
+      }
+
+      /** Directory view exposes every provider supported by the unified history API. */
+      export function deleteExternalHistorySession(provider, providerSessionId) {
+        return fetch("/api/" + encodeURIComponent(provider) + "-history/" + encodeURIComponent(providerSessionId), {
+          method: "DELETE",
+          credentials: "same-origin"
+        })
+          .then(function(res) { return res.json(); })
+          .then(function(data) {
+            if (!data || data.ok !== true) throw new Error((data && data.error) || "无法删除会话。");
+            updateSessionsList();
+            return data;
+          });
       }
 
       /** DOM-free Codex history deletion port; confirmation stays with callers. */

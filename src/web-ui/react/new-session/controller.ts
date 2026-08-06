@@ -3,11 +3,16 @@ import type { NewSessionRuntimeAdapter } from "./types";
 export interface NewSessionControllerSnapshot {
   open: boolean;
   dismissable: boolean;
+  initialCwd: string;
   revision: number;
 }
 
+export interface NewSessionOpenOptions {
+  initialCwd?: string;
+}
+
 export interface WandNewSessionController {
-  open(): boolean;
+  open(options?: NewSessionOpenOptions): boolean;
   close(): void;
   closeIfOpen(): boolean;
   closeTopmost(): boolean;
@@ -18,11 +23,21 @@ export interface WandNewSessionController {
 type Listener = () => void;
 
 let runtime: NewSessionRuntimeAdapter | null = null;
-let snapshot: NewSessionControllerSnapshot = { open: false, dismissable: true, revision: 0 };
+let snapshot: NewSessionControllerSnapshot = {
+  open: false,
+  dismissable: true,
+  initialCwd: "",
+  revision: 0,
+};
 const listeners = new Set<Listener>();
 
-function publish(open: boolean): void {
-  snapshot = { open, dismissable: true, revision: snapshot.revision + 1 };
+function publish(open: boolean, initialCwd = ""): void {
+  snapshot = {
+    open,
+    dismissable: true,
+    initialCwd: open ? initialCwd.trim() : "",
+    revision: snapshot.revision + 1,
+  };
   for (const listener of listeners) listener();
 }
 
@@ -35,10 +50,10 @@ function publishDismissable(dismissable: boolean): void {
 }
 
 export const newSessionController: WandNewSessionController = {
-  open(): boolean {
+  open(options = {}): boolean {
     if (!runtime) return false;
     runtime.onOpen();
-    publish(true);
+    publish(true, options.initialCwd);
     return true;
   },
 

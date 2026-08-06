@@ -24668,10 +24668,20 @@
 
   // src/web-ui/react/new-session/controller.ts
   var runtime = null;
-  var snapshot3 = { open: false, dismissable: true, revision: 0 };
+  var snapshot3 = {
+    open: false,
+    dismissable: true,
+    initialCwd: "",
+    revision: 0
+  };
   var listeners3 = /* @__PURE__ */ new Set();
-  function publish3(open) {
-    snapshot3 = { open, dismissable: true, revision: snapshot3.revision + 1 };
+  function publish3(open, initialCwd = "") {
+    snapshot3 = {
+      open,
+      dismissable: true,
+      initialCwd: open ? initialCwd.trim() : "",
+      revision: snapshot3.revision + 1
+    };
     for (const listener of listeners3) listener();
   }
   function publishDismissable(dismissable) {
@@ -24680,10 +24690,10 @@
     for (const listener of listeners3) listener();
   }
   var newSessionController = {
-    open() {
+    open(options = {}) {
       if (!runtime) return false;
       runtime.onOpen();
-      publish3(true);
+      publish3(true, options.initialCwd);
       return true;
     },
     close() {
@@ -25066,7 +25076,7 @@
             loaded.config.defaultMode,
             loaded.config.defaultMode
           ),
-          cwd: "",
+          cwd: controller.initialCwd,
           worktreeEnabled: false
         });
         if (!context) setError("\u65B0\u5EFA\u4F1A\u8BDD\u8FD0\u884C\u73AF\u5883\u5C1A\u672A\u5C31\u7EEA\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u540E\u91CD\u8BD5\u3002");
@@ -25076,7 +25086,7 @@
         if (!abort.signal.aborted) setLoading(false);
       });
       return () => abort.abort();
-    }, [controller.open, controller.revision, repository]);
+    }, [controller.initialCwd, controller.open, controller.revision, repository]);
     (0, import_react10.useEffect)(() => {
       if (!controller.open || !form || !suggestionsActive) return;
       const abort = new AbortController();
@@ -33320,6 +33330,8 @@
         return commands2.refreshPage();
       case "session.new":
         return commands2.openNewSession();
+      case "session.newAt":
+        return commands2.openNewSession(action.cwd);
       case "missions.open":
         return commands2.openMissions?.();
       case "session.quickStart.claude":
@@ -33665,11 +33677,36 @@
 
   // src/web-ui/react/shell/shell-sidebar.tsx
   var React42 = __toESM(require_react(), 1);
+
+  // src/web-ui/react/shell/session-directory-repository.ts
+  var HttpSessionDirectoryRepository = class {
+    constructor(fetchImpl = (input, init) => globalThis.fetch(input, init)) {
+      __publicField(this, "fetchImpl", fetchImpl);
+    }
+    async load(signal) {
+      const response = await this.fetchImpl("/api/session-directories", {
+        credentials: "same-origin",
+        signal
+      });
+      if (!response.ok) throw new Error("\u65E0\u6CD5\u52A0\u8F7D\u4F1A\u8BDD\u76EE\u5F55");
+      return response.json();
+    }
+  };
+  var httpSessionDirectoryRepository = new HttpSessionDirectoryRepository();
+
+  // src/web-ui/react/shell/shell-sidebar.tsx
   var import_jsx_runtime43 = __toESM(require_jsx_runtime(), 1);
   function getSidebarEntryTarget(entry) {
-    if (entry.source === "claude-history") return "claude-history";
-    if (entry.source === "codex-history") return "codex-history";
+    if (entry.source.endsWith("-history")) return entry.source;
     return "session";
+  }
+  function isHistoryEntry(entry) {
+    return entry.source.endsWith("-history");
+  }
+  function historyProviderFor(entry) {
+    if (!isHistoryEntry(entry)) return null;
+    const provider = entry.source.slice(0, -"-history".length);
+    return provider === "codex" || provider === "opencode" || provider === "qoder" ? provider : "claude";
   }
   function getShellSidebarEntryActions(entry, manageMode) {
     const target = getSidebarEntryTarget(entry);
@@ -33682,7 +33719,7 @@
         cleanup: null
       };
     }
-    const historyProvider = entry.source === "codex-history" ? "codex" : entry.source === "claude-history" ? "claude" : null;
+    const historyProvider = historyProviderFor(entry);
     const historyResume = historyProvider ? { type: "session.resumeHistory", provider: historyProvider, id: entry.id, cwd: entry.cwd } : null;
     const cleanup = entry.worktree?.enabled && entry.worktree.mergeStatus === "merged" ? { type: "session.cleanup", id: entry.id } : null;
     const merge = entry.worktree?.enabled && entry.worktree.branch && entry.worktree.path && entry.worktree.mergeStatus !== "merged" ? { type: "session.merge", id: entry.id } : null;
@@ -33910,8 +33947,8 @@
     dispatch
   }) {
     const actions = getShellSidebarEntryActions(entry, manageMode);
-    const isHistory = entry.source === "claude-history" || entry.source === "codex-history";
-    const provider = entry.source === "codex-history" ? "codex" : "claude";
+    const isHistory = isHistoryEntry(entry);
+    const provider = historyProviderFor(entry) ?? "claude";
     const data = isHistory ? { historyId: entry.id, cwd: entry.cwd } : { sessionId: entry.id };
     const activate = () => void dispatch(actions.primary);
     const time = formatEntryTime(entry);
@@ -34002,8 +34039,8 @@
                 {
                   action: actions.resume,
                   dispatch,
-                  actionName: isHistory ? entry.source === "codex-history" ? "resume-codex-history" : "resume-history" : "resume",
-                  label: isHistory ? `\u6062\u590D\u6B64 ${provider === "codex" ? "Codex" : "Claude"} \u4F1A\u8BDD` : "\u6062\u590D\u4F1A\u8BDD",
+                  actionName: isHistory ? provider === "claude" ? "resume-history" : `resume-${provider}-history` : "resume",
+                  label: isHistory ? `\u6062\u590D\u6B64 ${providerDisplayName(provider)} \u4F1A\u8BDD` : "\u6062\u590D\u4F1A\u8BDD",
                   icon: "resume",
                   data
                 }
@@ -34038,7 +34075,7 @@
                 {
                   action: actions.delete,
                   dispatch,
-                  actionName: isHistory ? entry.source === "codex-history" ? "delete-codex-history" : "delete-history" : "delete-session",
+                  actionName: isHistory ? provider === "claude" ? "delete-history" : `delete-${provider}-history` : "delete-session",
                   label: "\u5220\u9664\u4F1A\u8BDD",
                   icon: "trash",
                   className: "delete-btn",
@@ -34050,6 +34087,234 @@
         ]
       }
     );
+  }
+  var SIDEBAR_VIEW_MODE_KEY = "wand-sidebar-view-mode";
+  function readSidebarViewMode() {
+    if (typeof window === "undefined") return "sessions";
+    try {
+      return window.localStorage.getItem(SIDEBAR_VIEW_MODE_KEY) === "directories" ? "directories" : "sessions";
+    } catch {
+      return "sessions";
+    }
+  }
+  function writeSidebarViewMode(mode) {
+    try {
+      window.localStorage.setItem(SIDEBAR_VIEW_MODE_KEY, mode);
+    } catch {
+    }
+  }
+  function statusLabel(status, permissionBlocked, inFlight) {
+    if (permissionBlocked) return "\u7B49\u5F85\u6388\u6743";
+    if (inFlight) return "\u601D\u8003\u4E2D";
+    const labels = {
+      idle: "\u7A7A\u95F2",
+      stopped: "\u5DF2\u505C\u6B62",
+      running: "\u8FD0\u884C\u4E2D",
+      thinking: "\u601D\u8003\u4E2D",
+      "waiting-input": "\u7B49\u5F85\u8F93\u5165",
+      waiting_input: "\u7B49\u5F85\u8F93\u5165",
+      reconnecting: "\u91CD\u8FDE\u4E2D",
+      exited: "\u5DF2\u9000\u51FA",
+      failed: "\u5DF2\u5931\u8D25"
+    };
+    return labels[status] ?? status;
+  }
+  function directoryEntryToVm(entry, selectedId) {
+    if (entry.type === "recoverable") {
+      const provider = entry.history.provider === "codex" || entry.history.provider === "opencode" || entry.history.provider === "qoder" ? entry.history.provider : "claude";
+      return {
+        id: entry.history.claudeSessionId,
+        source: `${provider}-history`,
+        provider,
+        kind: "pty",
+        title: entry.history.firstUserMessage || "\uFF08\u7A7A\u4F1A\u8BDD\uFF09",
+        description: "",
+        cwd: entry.history.cwd || "",
+        status: "stopped",
+        statusLabel: "\u5386\u53F2",
+        active: false,
+        selected: false,
+        resumable: true,
+        permissionBlocked: false,
+        inFlight: false,
+        titleGenerating: false,
+        startedAt: entry.history.timestamp || (entry.history.mtimeMs ? new Date(entry.history.mtimeMs).toISOString() : void 0),
+        claudeSessionId: entry.history.claudeSessionId
+      };
+    }
+    const session = entry.session;
+    const id = session.id;
+    const status = session.status || "idle";
+    const permissionBlocked = Boolean(session.permissionBlocked);
+    const inFlight = Boolean(session.structuredState?.inFlight);
+    const worktreeEnabled = Boolean(session.worktree?.enabled ?? session.worktreeEnabled);
+    return {
+      id,
+      source: session.sessionSource === "automation" || session.sessionSource === "startup" ? "automation" : "wand",
+      provider: session.provider || "terminal",
+      kind: session.sessionKind === "structured" ? "structured" : "pty",
+      title: session.title || "Wand \u4F1A\u8BDD",
+      description: session.description || "",
+      cwd: session.cwd || "",
+      status,
+      statusLabel: statusLabel(status, permissionBlocked, inFlight),
+      active: id === selectedId,
+      selected: false,
+      resumable: session.sessionKind !== "structured" && status !== "running" && Boolean(session.claudeSessionId),
+      permissionBlocked,
+      inFlight,
+      titleGenerating: Boolean(session.titleGenerating),
+      startedAt: session.startedAt,
+      endedAt: session.endedAt,
+      claudeSessionId: session.claudeSessionId,
+      ...worktreeEnabled ? {
+        worktree: {
+          enabled: true,
+          branch: session.worktree?.branch ?? session.worktreeBranch,
+          path: session.worktree?.path ?? session.worktreePath,
+          mergeStatus: session.worktree?.mergeStatus ?? session.worktreeMergeStatus
+        }
+      } : {}
+    };
+  }
+  function useSessionDirectories(enabled, refreshKey) {
+    const [data, setData] = React42.useState(null);
+    const [loading, setLoading] = React42.useState(false);
+    const [error, setError] = React42.useState("");
+    React42.useEffect(() => {
+      if (!enabled) return;
+      const abort = new AbortController();
+      setLoading(data === null);
+      setError("");
+      void httpSessionDirectoryRepository.load(abort.signal).then((value) => {
+        if (!abort.signal.aborted) setData(value);
+      }).catch((fetchError) => {
+        if (!abort.signal.aborted) {
+          setError(fetchError instanceof Error ? fetchError.message : "\u65E0\u6CD5\u52A0\u8F7D\u4F1A\u8BDD\u76EE\u5F55");
+        }
+      }).finally(() => {
+        if (!abort.signal.aborted) setLoading(false);
+      });
+      return () => abort.abort();
+    }, [enabled, refreshKey]);
+    return { data, loading, error };
+  }
+  function nodeContainsActive(node, selectedId) {
+    if (!selectedId) return false;
+    return node.entries.some((entry) => entry.type === "managed" && entry.session.id === selectedId) || node.children.some((child) => nodeContainsActive(child, selectedId));
+  }
+  function DirectoryNode({
+    node,
+    depth,
+    selectedId,
+    dispatch
+  }) {
+    const activeWithin = nodeContainsActive(node, selectedId);
+    const [open, setOpen] = React42.useState(depth === 0 || activeWithin);
+    React42.useEffect(() => {
+      if (activeWithin) setOpen(true);
+    }, [activeWithin]);
+    const hasContents = node.entries.length > 0 || node.children.length > 0;
+    return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+      "section",
+      {
+        className: classNames("session-directory-node", activeWithin && "active-path"),
+        style: { "--directory-depth": Math.min(depth, 6) },
+        children: [
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "session-directory-row", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+              "button",
+              {
+                type: "button",
+                className: "session-directory-main",
+                "aria-expanded": open,
+                title: node.path || node.name,
+                onClick: () => {
+                  if (hasContents) setOpen((current) => !current);
+                },
+                children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "chevron", size: 12, className: classNames("session-directory-chevron", open && "open") }),
+                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "file", size: 15 }),
+                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "session-directory-name", children: node.name }),
+                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "session-directory-count", "aria-label": `${node.totalCount} \u4E2A\u4F1A\u8BDD`, children: node.totalCount })
+                ]
+              }
+            ),
+            !node.synthetic && node.path && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+              "button",
+              {
+                type: "button",
+                className: "session-directory-add",
+                title: `\u5728 ${node.path} \u65B0\u5EFA\u4F1A\u8BDD`,
+                "aria-label": `\u5728 ${node.path} \u65B0\u5EFA\u4F1A\u8BDD`,
+                onClick: () => void dispatch({ type: "session.newAt", cwd: node.path }),
+                children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { "aria-hidden": "true", children: "\uFF0B" })
+              }
+            )
+          ] }),
+          open && /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "session-directory-contents", children: [
+            node.entries.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "session-directory-sessions", children: node.entries.map((entry) => {
+              const vm = directoryEntryToVm(entry, selectedId);
+              return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(SessionEntry, { entry: vm, manageMode: false, dispatch }, entry.key);
+            }) }),
+            node.children.map((child) => /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+              DirectoryNode,
+              {
+                node: child,
+                depth: depth + 1,
+                selectedId,
+                dispatch
+              },
+              child.path || child.name
+            ))
+          ] })
+        ]
+      }
+    );
+  }
+  function DirectoryTree({
+    response,
+    loading,
+    error,
+    selectedId,
+    dispatch
+  }) {
+    if (loading && !response) return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "session-directory-state", children: "\u6B63\u5728\u6574\u7406\u76EE\u5F55\u2026" });
+    if (error && !response) return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "session-directory-state error", children: error });
+    if (!response || response.roots.length === 0) {
+      return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "empty-state", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("strong", { children: "\u8FD8\u6CA1\u6709\u4F1A\u8BDD\u76EE\u5F55" }),
+        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("br", {}),
+        "\u521B\u5EFA\u4F1A\u8BDD\u540E\u4F1A\u6309\u5DE5\u4F5C\u76EE\u5F55\u663E\u793A\u5728\u8FD9\u91CC\u3002"
+      ] });
+    }
+    return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "session-directory-tree", "aria-label": "\u4F1A\u8BDD\u76EE\u5F55\u6811", children: response.roots.map((node) => /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+      DirectoryNode,
+      {
+        node,
+        depth: 0,
+        selectedId,
+        dispatch
+      },
+      node.path || node.name
+    )) });
+  }
+  function SidebarViewSwitch({
+    mode,
+    onChange
+  }) {
+    return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "sidebar-view-switch", role: "tablist", "aria-label": "\u4FA7\u680F\u5C55\u793A\u65B9\u5F0F", children: ["sessions", "directories"].map((value) => /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+      "button",
+      {
+        type: "button",
+        role: "tab",
+        "aria-selected": mode === value,
+        className: classNames(mode === value && "active"),
+        onClick: () => onChange(value),
+        children: value === "sessions" ? "\u4F1A\u8BDD" : "\u76EE\u5F55"
+      },
+      value
+    )) });
   }
   function SessionGroup({
     group,
@@ -34259,6 +34524,8 @@
     const snapshot8 = useUiStoreSnapshot();
     const dispatch = useUiDispatch();
     const [moreOpen, setMoreOpen] = React42.useState(false);
+    const [viewMode, setViewMode] = React42.useState(readSidebarViewMode);
+    const directories = useSessionDirectories(viewMode === "directories", snapshot8.revision);
     const narrow = snapshot8.layout.sidebarPinned && snapshot8.layout.sidebarCollapsed;
     const sidebarClass = classNames(
       "sidebar",
@@ -34266,6 +34533,13 @@
       snapshot8.layout.sidebarAnchored && "pinned",
       narrow && "collapsed"
     );
+    const changeViewMode = (next) => {
+      setViewMode(next);
+      writeSidebarViewMode(next);
+      if (next === "directories" && snapshot8.sidebar.manageMode) {
+        void dispatch({ type: "session.manage.toggle" });
+      }
+    };
     return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(import_jsx_runtime43.Fragment, { children: [
       /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
         "div",
@@ -34280,8 +34554,8 @@
         /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "sidebar-header", children: [
           /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "sidebar-header-main", children: [
             /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "topbar-logo-icon", children: "W" }),
-            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "sidebar-title", children: "\u4F1A\u8BDD" }),
-            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "session-count", id: "session-count", children: snapshot8.sidebar.interactiveCount })
+            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(SidebarViewSwitch, { mode: viewMode, onChange: changeViewMode }),
+            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "session-count", id: "session-count", children: viewMode === "directories" ? directories.data?.directoryCount ?? "\u2026" : snapshot8.sidebar.interactiveCount })
           ] }),
           /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "sidebar-header-actions", children: [
             /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "sidebar-header-more", children: /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
@@ -34381,7 +34655,16 @@
             )
           ] })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "sidebar-body", children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { id: "sessions-panel", children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "sessions-list", id: "sessions-list", children: narrow ? /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(CollapsedSessions, { groups: snapshot8.sidebar.groups, dispatch }) : /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(import_jsx_runtime43.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "sidebar-body", children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { id: "sessions-panel", children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "sessions-list", id: "sessions-list", children: narrow ? /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(CollapsedSessions, { groups: snapshot8.sidebar.groups, dispatch }) : viewMode === "directories" ? /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+          DirectoryTree,
+          {
+            response: directories.data,
+            loading: directories.loading,
+            error: directories.error,
+            selectedId: snapshot8.selected?.id ?? null,
+            dispatch
+          }
+        ) : /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(import_jsx_runtime43.Fragment, { children: [
           /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
             ManageBar,
             {
@@ -39953,9 +40236,13 @@
         missionsController.open();
       });
       var newSessBtn = document.getElementById("topbar-new-session-button");
-      if (newSessBtn) newSessBtn.addEventListener("click", openSessionModal);
+      if (newSessBtn) newSessBtn.addEventListener("click", function() {
+        openSessionModal();
+      });
       var drawerNewSessBtn = document.getElementById("drawer-new-session-button");
-      if (drawerNewSessBtn) drawerNewSessBtn.addEventListener("click", openSessionModal);
+      if (drawerNewSessBtn) drawerNewSessBtn.addEventListener("click", function() {
+        openSessionModal();
+      });
     }
     var approvePermissionBtn = document.getElementById("approve-permission-btn");
     if (approvePermissionBtn) approvePermissionBtn.addEventListener("click", approvePermission);
@@ -43743,14 +44030,27 @@
     });
   }
   function resumeHistoryFromList(provider, providerSessionId, cwd) {
-    var request2 = provider === "codex" ? resumeCodexHistorySession(providerSessionId, cwd) : resumeClaudeHistorySession(providerSessionId, cwd);
+    var request2 = provider === "codex" ? resumeCodexHistorySession(providerSessionId, cwd) : provider === "claude" ? resumeClaudeHistorySession(providerSessionId, cwd) : fetch("/api/" + encodeURIComponent(provider) + "-sessions/" + encodeURIComponent(providerSessionId) + "/resume", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({
+        mode: state.chatMode || state.config && state.config.defaultMode || "default",
+        cwd
+      })
+    }).then(function(res) {
+      return res.json();
+    }).then(function(data) {
+      if (data && data.error) throw new Error(data.error);
+      return data;
+    });
     return request2.then(function(data) {
       if (!data || !data.id) return null;
       if (provider === "codex") {
         state.codexHistory = state.codexHistory.filter(function(s) {
           return s.claudeSessionId !== providerSessionId;
         });
-      } else {
+      } else if (provider === "claude") {
         state.claudeHistory = state.claudeHistory.filter(function(s) {
           return s.claudeSessionId !== providerSessionId;
         });
@@ -43762,6 +44062,18 @@
         dismissDrawerIfOverlay();
         return data;
       });
+    });
+  }
+  function deleteExternalHistorySession(provider, providerSessionId) {
+    return fetch("/api/" + encodeURIComponent(provider) + "-history/" + encodeURIComponent(providerSessionId), {
+      method: "DELETE",
+      credentials: "same-origin"
+    }).then(function(res) {
+      return res.json();
+    }).then(function(data) {
+      if (!data || data.ok !== true) throw new Error(data && data.error || "\u65E0\u6CD5\u5220\u9664\u4F1A\u8BDD\u3002");
+      updateSessionsList();
+      return data;
     });
   }
   function deleteCodexHistorySession(threadId) {
@@ -48771,12 +49083,12 @@
       menu.style.right = parentRect.right - (vw - margin) + "px";
     }
   }
-  function openSessionModalNow() {
+  function openSessionModalNow(initialCwd) {
     if (!closeReactOverlays(["newSession"])) return;
     var reactNewSession = window.__wandReactNewSession;
     if (reactNewSession && typeof reactNewSession.open === "function") {
       try {
-        if (reactNewSession.open()) return;
+        if (reactNewSession.open(initialCwd ? { initialCwd } : void 0)) return;
       } catch (error) {
         console.warn("[wand] React new-session host unavailable", error);
       }
@@ -48799,9 +49111,12 @@
     }
     showToast("\u65B0\u5EFA\u4F1A\u8BDD\u754C\u9762\u672A\u80FD\u542F\u52A8\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u540E\u91CD\u8BD5\u3002", "error");
   }
-  function openSessionModal() {
-    if (!prepareFilePreviewForCompetingOverlay(openSessionModalNow)) return;
-    openSessionModalNow();
+  function openSessionModal(initialCwd) {
+    var open = function() {
+      openSessionModalNow(initialCwd);
+    };
+    if (!prepareFilePreviewForCompetingOverlay(open)) return;
+    open();
   }
   function openWorktreeMergeModal(sessionId) {
     openWorktreeMergeForSession(sessionId, "merge");
@@ -49805,14 +50120,17 @@
   function managedKind(target) {
     if (target === "claude-history") return "history";
     if (target === "codex-history") return "codex";
+    if (target === "opencode-history" || target === "qoder-history") return "history";
     return "sessions";
   }
   function confirmAndDelete(target, id) {
-    const provider = target === "codex-history" ? "Codex" : target === "claude-history" ? "Claude" : "Wand";
+    const provider = target === "codex-history" ? "Codex" : target === "opencode-history" ? "OpenCode" : target === "qoder-history" ? "Qoder" : target === "claude-history" ? "Claude" : "Wand";
     return confirmDelete(`\u786E\u8BA4\u5220\u9664\u8FD9\u6761 ${provider} \u4F1A\u8BDD\u5417\uFF1F`, { title: "\u5220\u9664\u4F1A\u8BDD" }).then((confirmed) => {
       if (!confirmed) return void 0;
       if (target === "codex-history") return deleteCodexHistorySession(id);
       if (target === "claude-history") return deleteClaudeHistorySession2(id, null);
+      if (target === "opencode-history") return deleteExternalHistorySession("opencode", id);
+      if (target === "qoder-history") return deleteExternalHistorySession("qoder", id);
       return deleteSession(id);
     });
   }
@@ -49845,7 +50163,7 @@
     return {
       goHome,
       refreshPage: () => window.location.reload(),
-      openNewSession: openSessionModal,
+      openNewSession: (cwd) => openSessionModal(cwd),
       openMissions: () => {
         missionsController.open();
       },

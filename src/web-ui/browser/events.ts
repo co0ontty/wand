@@ -572,9 +572,9 @@ import { missionsController } from "../react/missions/controller";
         var missionsBtn = document.getElementById("missions-button");
         if (missionsBtn) missionsBtn.addEventListener("click", function() { missionsController.open(); });
         var newSessBtn = document.getElementById("topbar-new-session-button");
-        if (newSessBtn) newSessBtn.addEventListener("click", openSessionModal);
+        if (newSessBtn) newSessBtn.addEventListener("click", function() { openSessionModal(); });
         var drawerNewSessBtn = document.getElementById("drawer-new-session-button");
-        if (drawerNewSessBtn) drawerNewSessBtn.addEventListener("click", openSessionModal);
+        if (drawerNewSessBtn) drawerNewSessBtn.addEventListener("click", function() { openSessionModal(); });
         }
         var approvePermissionBtn = document.getElementById("approve-permission-btn");
         if (approvePermissionBtn) approvePermissionBtn.addEventListener("click", approvePermission);

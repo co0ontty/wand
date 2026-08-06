@@ -63,6 +63,38 @@ test("session HTTP interface preserves create, list, update, detail, and delete 
     assert.deepEqual(firstPage.entries.map((entry) => entry.key), [`session-${created.id}`]);
     assert.equal(typeof firstPage.revision, "string");
 
+    const directoriesResponse = await fetch(`${baseUrl}/api/session-directories`);
+    assert.equal(directoriesResponse.status, 200);
+    type DirectoryNode = {
+      path: string;
+      directCount: number;
+      totalCount: number;
+      entries: Array<{ key: string }>;
+      children: DirectoryNode[];
+    };
+    const directories = await directoriesResponse.json() as {
+      roots: DirectoryNode[];
+      totalSessions: number;
+      directoryCount: number;
+      revision: string;
+    };
+    const findDirectory = (nodes: DirectoryNode[], target: string): DirectoryNode | undefined => {
+      for (const node of nodes) {
+        if (node.path === target) return node;
+        const nested = findDirectory(node.children, target);
+        if (nested) return nested;
+      }
+      return undefined;
+    };
+    const createdDirectory = findDirectory(directories.roots, root);
+    assert.ok(directories.totalSessions >= 1);
+    assert.ok(directories.directoryCount >= 1);
+    assert.ok(createdDirectory);
+    assert.ok(createdDirectory.directCount >= 1);
+    assert.ok(createdDirectory.totalCount >= 1);
+    assert.ok(createdDirectory.entries.some((entry) => entry.key === `session-${created.id}`));
+    assert.equal(directories.revision, firstPage.revision);
+
     const stalePageResponse = await fetch(
       `${baseUrl}/api/session-list?offset=1&limit=1&revision=${encodeURIComponent(firstPage.revision)}&cacheBust=1`,
     );

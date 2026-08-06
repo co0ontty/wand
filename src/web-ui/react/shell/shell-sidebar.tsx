@@ -4,10 +4,17 @@ import { ProviderLogo } from "../provider-logo";
 import { WandPopover } from "../ui";
 import { classNames } from "../ui/class-names";
 
+import {
+  httpSessionDirectoryRepository,
+  type DirectorySessionEntry,
+  type SessionDirectoryNode,
+  type SessionDirectoryResponse,
+} from "./session-directory-repository";
 import { useUiDispatch, useUiStoreSnapshot } from "./ui-store-react";
 import type {
   UiAction,
   UiManageTarget,
+  UiNativeHistoryProvider,
   UiSessionVm,
   UiSidebarGroupVm,
 } from "./ui-store";
@@ -21,9 +28,20 @@ export interface ShellSidebarEntryActions {
 }
 
 export function getSidebarEntryTarget(entry: Readonly<UiSessionVm>): UiManageTarget {
-  if (entry.source === "claude-history") return "claude-history";
-  if (entry.source === "codex-history") return "codex-history";
+  if (entry.source.endsWith("-history")) return entry.source as UiManageTarget;
   return "session";
+}
+
+function isHistoryEntry(entry: Readonly<UiSessionVm>): boolean {
+  return entry.source.endsWith("-history");
+}
+
+function historyProviderFor(entry: Readonly<UiSessionVm>): UiNativeHistoryProvider | null {
+  if (!isHistoryEntry(entry)) return null;
+  const provider = entry.source.slice(0, -"-history".length);
+  return provider === "codex" || provider === "opencode" || provider === "qoder"
+    ? provider
+    : "claude";
 }
 
 export function getShellSidebarEntryActions(
@@ -41,11 +59,7 @@ export function getShellSidebarEntryActions(
     };
   }
 
-  const historyProvider = entry.source === "codex-history"
-    ? "codex"
-    : entry.source === "claude-history"
-      ? "claude"
-      : null;
+  const historyProvider = historyProviderFor(entry);
   const historyResume: UiAction | null = historyProvider
     ? { type: "session.resumeHistory", provider: historyProvider, id: entry.id, cwd: entry.cwd }
     : null;
@@ -304,8 +318,8 @@ function SessionEntry({
   dispatch(action: UiAction): void | Promise<unknown>;
 }) {
   const actions = getShellSidebarEntryActions(entry, manageMode);
-  const isHistory = entry.source === "claude-history" || entry.source === "codex-history";
-  const provider = entry.source === "codex-history" ? "codex" : "claude";
+  const isHistory = isHistoryEntry(entry);
+  const provider = historyProviderFor(entry) ?? "claude";
   const data: Record<string, string> = isHistory
     ? { historyId: entry.id, cwd: entry.cwd }
     : { sessionId: entry.id };
@@ -409,9 +423,9 @@ function SessionEntry({
                   action={actions.resume}
                   dispatch={dispatch}
                   actionName={isHistory
-                    ? entry.source === "codex-history" ? "resume-codex-history" : "resume-history"
+                    ? provider === "claude" ? "resume-history" : `resume-${provider}-history`
                     : "resume"}
-                  label={isHistory ? `恢复此 ${provider === "codex" ? "Codex" : "Claude"} 会话` : "恢复会话"}
+                  label={isHistory ? `恢复此 ${providerDisplayName(provider)} 会话` : "恢复会话"}
                   icon="resume"
                   data={data}
                 />
@@ -444,7 +458,7 @@ function SessionEntry({
                   action={actions.delete}
                   dispatch={dispatch}
                   actionName={isHistory
-                    ? entry.source === "codex-history" ? "delete-codex-history" : "delete-history"
+                    ? provider === "claude" ? "delete-history" : `delete-${provider}-history`
                     : "delete-session"}
                   label="删除会话"
                   icon="trash"
@@ -456,6 +470,289 @@ function SessionEntry({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+type SidebarViewMode = "sessions" | "directories";
+
+const SIDEBAR_VIEW_MODE_KEY = "wand-sidebar-view-mode";
+
+function readSidebarViewMode(): SidebarViewMode {
+  if (typeof window === "undefined") return "sessions";
+  try {
+    return window.localStorage.getItem(SIDEBAR_VIEW_MODE_KEY) === "directories"
+      ? "directories"
+      : "sessions";
+  } catch {
+    return "sessions";
+  }
+}
+
+function writeSidebarViewMode(mode: SidebarViewMode): void {
+  try {
+    window.localStorage.setItem(SIDEBAR_VIEW_MODE_KEY, mode);
+  } catch {}
+}
+
+function statusLabel(status: string, permissionBlocked: boolean, inFlight: boolean): string {
+  if (permissionBlocked) return "等待授权";
+  if (inFlight) return "思考中";
+  const labels: Record<string, string> = {
+    idle: "空闲",
+    stopped: "已停止",
+    running: "运行中",
+    thinking: "思考中",
+    "waiting-input": "等待输入",
+    waiting_input: "等待输入",
+    reconnecting: "重连中",
+    exited: "已退出",
+    failed: "已失败",
+  };
+  return labels[status] ?? status;
+}
+
+function directoryEntryToVm(
+  entry: DirectorySessionEntry,
+  selectedId: string | null,
+): UiSessionVm {
+  if (entry.type === "recoverable") {
+    const provider = entry.history.provider === "codex"
+      || entry.history.provider === "opencode"
+      || entry.history.provider === "qoder"
+      ? entry.history.provider
+      : "claude";
+    return {
+      id: entry.history.claudeSessionId,
+      source: `${provider}-history`,
+      provider,
+      kind: "pty",
+      title: entry.history.firstUserMessage || "（空会话）",
+      description: "",
+      cwd: entry.history.cwd || "",
+      status: "stopped",
+      statusLabel: "历史",
+      active: false,
+      selected: false,
+      resumable: true,
+      permissionBlocked: false,
+      inFlight: false,
+      titleGenerating: false,
+      startedAt: entry.history.timestamp
+        || (entry.history.mtimeMs ? new Date(entry.history.mtimeMs).toISOString() : undefined),
+      claudeSessionId: entry.history.claudeSessionId,
+    };
+  }
+
+  const session = entry.session;
+  const id = session.id;
+  const status = session.status || "idle";
+  const permissionBlocked = Boolean(session.permissionBlocked);
+  const inFlight = Boolean(session.structuredState?.inFlight);
+  const worktreeEnabled = Boolean(session.worktree?.enabled ?? session.worktreeEnabled);
+  return {
+    id,
+    source: session.sessionSource === "automation" || session.sessionSource === "startup"
+      ? "automation"
+      : "wand",
+    provider: session.provider || "terminal",
+    kind: session.sessionKind === "structured" ? "structured" : "pty",
+    title: session.title || "Wand 会话",
+    description: session.description || "",
+    cwd: session.cwd || "",
+    status,
+    statusLabel: statusLabel(status, permissionBlocked, inFlight),
+    active: id === selectedId,
+    selected: false,
+    resumable: session.sessionKind !== "structured"
+      && status !== "running"
+      && Boolean(session.claudeSessionId),
+    permissionBlocked,
+    inFlight,
+    titleGenerating: Boolean(session.titleGenerating),
+    startedAt: session.startedAt,
+    endedAt: session.endedAt,
+    claudeSessionId: session.claudeSessionId,
+    ...(worktreeEnabled ? {
+      worktree: {
+        enabled: true,
+        branch: session.worktree?.branch ?? session.worktreeBranch,
+        path: session.worktree?.path ?? session.worktreePath,
+        mergeStatus: session.worktree?.mergeStatus ?? session.worktreeMergeStatus,
+      },
+    } : {}),
+  };
+}
+
+function useSessionDirectories(enabled: boolean, refreshKey: number): {
+  data: SessionDirectoryResponse | null;
+  loading: boolean;
+  error: string;
+} {
+  const [data, setData] = React.useState<SessionDirectoryResponse | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState("");
+
+  React.useEffect(() => {
+    if (!enabled) return;
+    const abort = new AbortController();
+    setLoading(data === null);
+    setError("");
+    void httpSessionDirectoryRepository.load(abort.signal)
+      .then((value) => {
+        if (!abort.signal.aborted) setData(value);
+      })
+      .catch((fetchError: unknown) => {
+        if (!abort.signal.aborted) {
+          setError(fetchError instanceof Error ? fetchError.message : "无法加载会话目录");
+        }
+      })
+      .finally(() => {
+        if (!abort.signal.aborted) setLoading(false);
+      });
+    return () => abort.abort();
+  // data is intentionally excluded: retaining stale content avoids a blank flash during refresh.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, refreshKey]);
+
+  return { data, loading, error };
+}
+
+function nodeContainsActive(node: SessionDirectoryNode, selectedId: string | null): boolean {
+  if (!selectedId) return false;
+  return node.entries.some((entry) => entry.type === "managed" && entry.session.id === selectedId)
+    || node.children.some((child) => nodeContainsActive(child, selectedId));
+}
+
+function DirectoryNode({
+  node,
+  depth,
+  selectedId,
+  dispatch,
+}: {
+  node: SessionDirectoryNode;
+  depth: number;
+  selectedId: string | null;
+  dispatch(action: UiAction): void | Promise<unknown>;
+}) {
+  const activeWithin = nodeContainsActive(node, selectedId);
+  const [open, setOpen] = React.useState(depth === 0 || activeWithin);
+  React.useEffect(() => {
+    if (activeWithin) setOpen(true);
+  }, [activeWithin]);
+  const hasContents = node.entries.length > 0 || node.children.length > 0;
+
+  return (
+    <section
+      className={classNames("session-directory-node", activeWithin && "active-path")}
+      style={{ "--directory-depth": Math.min(depth, 6) } as React.CSSProperties}
+    >
+      <div className="session-directory-row">
+        <button
+          type="button"
+          className="session-directory-main"
+          aria-expanded={open}
+          title={node.path || node.name}
+          onClick={() => { if (hasContents) setOpen((current) => !current); }}
+        >
+          <Icon name="chevron" size={12} className={classNames("session-directory-chevron", open && "open")}/>
+          <Icon name="file" size={15}/>
+          <span className="session-directory-name">{node.name}</span>
+          <span className="session-directory-count" aria-label={`${node.totalCount} 个会话`}>
+            {node.totalCount}
+          </span>
+        </button>
+        {!node.synthetic && node.path && (
+          <button
+            type="button"
+            className="session-directory-add"
+            title={`在 ${node.path} 新建会话`}
+            aria-label={`在 ${node.path} 新建会话`}
+            onClick={() => void dispatch({ type: "session.newAt", cwd: node.path })}
+          >
+            <span aria-hidden="true">＋</span>
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="session-directory-contents">
+          {node.entries.length > 0 && (
+            <div className="session-directory-sessions">
+              {node.entries.map((entry) => {
+                const vm = directoryEntryToVm(entry, selectedId);
+                return <SessionEntry key={entry.key} entry={vm} manageMode={false} dispatch={dispatch}/>;
+              })}
+            </div>
+          )}
+          {node.children.map((child) => (
+            <DirectoryNode
+              key={child.path || child.name}
+              node={child}
+              depth={depth + 1}
+              selectedId={selectedId}
+              dispatch={dispatch}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function DirectoryTree({
+  response,
+  loading,
+  error,
+  selectedId,
+  dispatch,
+}: {
+  response: SessionDirectoryResponse | null;
+  loading: boolean;
+  error: string;
+  selectedId: string | null;
+  dispatch(action: UiAction): void | Promise<unknown>;
+}) {
+  if (loading && !response) return <div className="session-directory-state">正在整理目录…</div>;
+  if (error && !response) return <div className="session-directory-state error">{error}</div>;
+  if (!response || response.roots.length === 0) {
+    return <div className="empty-state"><strong>还没有会话目录</strong><br/>创建会话后会按工作目录显示在这里。</div>;
+  }
+  return (
+    <div className="session-directory-tree" aria-label="会话目录树">
+      {response.roots.map((node) => (
+        <DirectoryNode
+          key={node.path || node.name}
+          node={node}
+          depth={0}
+          selectedId={selectedId}
+          dispatch={dispatch}
+        />
+      ))}
+    </div>
+  );
+}
+
+function SidebarViewSwitch({
+  mode,
+  onChange,
+}: {
+  mode: SidebarViewMode;
+  onChange(mode: SidebarViewMode): void;
+}) {
+  return (
+    <div className="sidebar-view-switch" role="tablist" aria-label="侧栏展示方式">
+      {(["sessions", "directories"] as const).map((value) => (
+        <button
+          key={value}
+          type="button"
+          role="tab"
+          aria-selected={mode === value}
+          className={classNames(mode === value && "active")}
+          onClick={() => onChange(value)}
+        >
+          {value === "sessions" ? "会话" : "目录"}
+        </button>
+      ))}
     </div>
   );
 }
@@ -678,6 +975,8 @@ export function ShellSidebar() {
   const snapshot = useUiStoreSnapshot();
   const dispatch = useUiDispatch();
   const [moreOpen, setMoreOpen] = React.useState(false);
+  const [viewMode, setViewMode] = React.useState<SidebarViewMode>(readSidebarViewMode);
+  const directories = useSessionDirectories(viewMode === "directories", snapshot.revision);
   const narrow = snapshot.layout.sidebarPinned && snapshot.layout.sidebarCollapsed;
   const sidebarClass = classNames(
     "sidebar",
@@ -685,6 +984,13 @@ export function ShellSidebar() {
     snapshot.layout.sidebarAnchored && "pinned",
     narrow && "collapsed",
   );
+  const changeViewMode = (next: SidebarViewMode) => {
+    setViewMode(next);
+    writeSidebarViewMode(next);
+    if (next === "directories" && snapshot.sidebar.manageMode) {
+      void dispatch({ type: "session.manage.toggle" });
+    }
+  };
 
   return (
     <>
@@ -698,8 +1004,12 @@ export function ShellSidebar() {
         <div className="sidebar-header">
           <div className="sidebar-header-main">
             <div className="topbar-logo-icon">W</div>
-            <span className="sidebar-title">会话</span>
-            <span className="session-count" id="session-count">{snapshot.sidebar.interactiveCount}</span>
+            <SidebarViewSwitch mode={viewMode} onChange={changeViewMode}/>
+            <span className="session-count" id="session-count">
+              {viewMode === "directories"
+                ? directories.data?.directoryCount ?? "…"
+                : snapshot.sidebar.interactiveCount}
+            </span>
           </div>
           <div className="sidebar-header-actions">
             <div className="sidebar-header-more">
@@ -792,6 +1102,14 @@ export function ShellSidebar() {
             <div className="sessions-list" id="sessions-list">
               {narrow ? (
                 <CollapsedSessions groups={snapshot.sidebar.groups} dispatch={dispatch}/>
+              ) : viewMode === "directories" ? (
+                <DirectoryTree
+                  response={directories.data}
+                  loading={directories.loading}
+                  error={directories.error}
+                  selectedId={snapshot.selected?.id ?? null}
+                  dispatch={dispatch}
+                />
               ) : (
                 <>
                   <ManageBar

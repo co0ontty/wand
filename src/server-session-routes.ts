@@ -32,6 +32,10 @@ import { parseBoundedInteger } from "./request-limits.js";
 import { asyncRoute } from "./express-async.js";
 import { SessionRegistry } from "./session-registry.js";
 import { enrichStructuredMessages, WAND_PROTOCOL_VERSION } from "./structured-client-protocol.js";
+import {
+  buildDirectoryTree,
+  type SessionDirectoryNode,
+} from "./session-directory-tree.js";
 
 export function parseExecutionMode(value: unknown, fallback: ExecutionMode): ExecutionMode {
   if (value === undefined) return fallback;
@@ -267,21 +271,26 @@ export interface SessionListPage {
   revision: string;
 }
 
+export interface SessionDirectoryTreeResponse {
+  roots: SessionDirectoryNode<SessionListPageEntry>[];
+  totalSessions: number;
+  directoryCount: number;
+  revision: string;
+}
+
 function sessionSortTimestamp(snapshot: SessionSnapshot): number {
   const timestamp = Date.parse(snapshot.startedAt);
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
-export function buildSessionListPage(
+export function buildSessionListEntries(
   sessions: SessionSnapshot[],
   claudeHistory: ProviderHistorySession[],
   codexHistory: ProviderHistorySession[],
   hiddenHistoryIds: Set<string>,
-  offset: number,
-  limit: number,
   openCodeHistory: ProviderHistorySession[] = [],
   qoderHistory: ProviderHistorySession[] = [],
-): SessionListPage {
+): SessionListPageEntry[] {
   const managed = sessions.map<SessionListPageEntry>((session) => ({
     type: "managed",
     key: `session-${session.id}`,
@@ -307,20 +316,68 @@ export function buildSessionListPage(
       history: { ...history, provider },
     }];
   });
-  const entries = [...managed, ...recoverable].sort((left, right) => {
+  return [...managed, ...recoverable].sort((left, right) => {
     const timestampOrder = right.sortTimestamp - left.sortTimestamp;
     return timestampOrder || left.key.localeCompare(right.key);
   });
-  const boundedOffset = Math.min(Math.max(offset, 0), entries.length);
-  const revision = createHash("sha256")
+}
+
+function sessionListRevision(entries: readonly SessionListPageEntry[]): string {
+  return createHash("sha256")
     .update(JSON.stringify(entries.map((entry) => [entry.key, entry.sortTimestamp])))
     .digest("base64url");
+}
+
+export function buildSessionListPage(
+  sessions: SessionSnapshot[],
+  claudeHistory: ProviderHistorySession[],
+  codexHistory: ProviderHistorySession[],
+  hiddenHistoryIds: Set<string>,
+  offset: number,
+  limit: number,
+  openCodeHistory: ProviderHistorySession[] = [],
+  qoderHistory: ProviderHistorySession[] = [],
+): SessionListPage {
+  const entries = buildSessionListEntries(
+    sessions,
+    claudeHistory,
+    codexHistory,
+    hiddenHistoryIds,
+    openCodeHistory,
+    qoderHistory,
+  );
+  const boundedOffset = Math.min(Math.max(offset, 0), entries.length);
+  const revision = sessionListRevision(entries);
   return {
     entries: entries.slice(boundedOffset, boundedOffset + limit),
     offset: boundedOffset,
     total: entries.length,
     revision,
   };
+}
+
+export function buildSessionDirectoryTree(
+  sessions: SessionSnapshot[],
+  claudeHistory: ProviderHistorySession[],
+  codexHistory: ProviderHistorySession[],
+  hiddenHistoryIds: Set<string>,
+  openCodeHistory: ProviderHistorySession[] = [],
+  qoderHistory: ProviderHistorySession[] = [],
+): SessionDirectoryTreeResponse {
+  const entries = buildSessionListEntries(
+    sessions,
+    claudeHistory,
+    codexHistory,
+    hiddenHistoryIds,
+    openCodeHistory,
+    qoderHistory,
+  );
+  const tree = buildDirectoryTree(entries.map((entry) => ({
+    entry,
+    cwd: entry.type === "managed" ? entry.session.cwd : entry.history.cwd,
+    sortTimestamp: entry.sortTimestamp,
+  })));
+  return { ...tree, revision: sessionListRevision(entries) };
 }
 
 /**
@@ -555,6 +612,21 @@ export function registerSessionRoutes(
       res.json(page);
     } catch (error) {
       res.status(500).json({ error: getErrorMessage(error, "无法加载会话列表。") });
+    }
+  });
+
+  app.get("/api/session-directories", (_req, res) => {
+    try {
+      res.json(buildSessionDirectoryTree(
+        sessions.listSlim(),
+        processes.listClaudeHistorySessions(),
+        processes.listCodexHistorySessions(),
+        getHiddenClaudeSessionIds(storage),
+        processes.listOpenCodeHistorySessions(),
+        processes.listQoderHistorySessions(),
+      ));
+    } catch (error) {
+      res.status(500).json({ error: getErrorMessage(error, "无法加载会话目录。") });
     }
   });
 

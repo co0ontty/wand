@@ -112,6 +112,223 @@
       --ease-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
     }
 
+    /* ── 会话侧栏：时间视图 / 目录树视图 ─────────────────────── */
+    .sidebar-view-switch {
+      display: inline-grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      width: 116px;
+      min-width: 0;
+      padding: 2px;
+      border: 1px solid color-mix(in srgb, var(--border-subtle) 82%, transparent);
+      border-radius: 9px;
+      background: color-mix(in srgb, var(--bg-secondary) 78%, transparent);
+      box-shadow: inset 0 1px 1px rgba(89, 58, 32, 0.04);
+    }
+
+    .sidebar-view-switch button {
+      min-width: 0;
+      min-height: 26px;
+      border: 0;
+      border-radius: 7px;
+      padding: 0 8px;
+      color: var(--text-muted);
+      background: transparent;
+      font: inherit;
+      font-size: 0.6875rem;
+      font-weight: 650;
+      cursor: pointer;
+      transition: color 140ms ease, background-color 140ms ease, box-shadow 140ms ease, transform 100ms ease;
+    }
+
+    .sidebar-view-switch button:hover {
+      color: var(--text-primary);
+    }
+
+    .sidebar-view-switch button:active {
+      transform: scale(0.97);
+    }
+
+    .sidebar-view-switch button.active {
+      color: var(--text-primary);
+      background: color-mix(in srgb, var(--bg-elevated) 94%, white);
+      box-shadow: 0 1px 4px rgba(89, 58, 32, 0.11), inset 0 1px 0 rgba(255, 255, 255, 0.72);
+    }
+
+    .session-directory-tree {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding: 4px 2px 12px;
+    }
+
+    .session-directory-node {
+      min-width: 0;
+    }
+
+    .session-directory-row {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 2px;
+      padding-left: calc(var(--directory-depth, 0) * 12px);
+      border-radius: 10px;
+    }
+
+    .session-directory-row:hover,
+    .session-directory-node.active-path > .session-directory-row {
+      background: color-mix(in srgb, var(--accent-muted) 42%, transparent);
+    }
+
+    .session-directory-main {
+      display: flex;
+      min-width: 0;
+      min-height: 38px;
+      flex: 1;
+      align-items: center;
+      gap: 7px;
+      border: 0;
+      border-radius: 9px;
+      padding: 5px 4px 5px 7px;
+      color: var(--text-secondary);
+      background: transparent;
+      font: inherit;
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .session-directory-main:active {
+      transform: scale(0.99);
+    }
+
+    .session-directory-chevron {
+      flex: 0 0 auto;
+      transform: rotate(-90deg);
+      transition: transform 160ms var(--ease-out-expo);
+    }
+
+    .session-directory-chevron.open {
+      transform: rotate(0deg);
+    }
+
+    .session-directory-name {
+      min-width: 0;
+      flex: 1;
+      overflow: hidden;
+      color: var(--text-primary);
+      font-size: 0.75rem;
+      font-weight: 620;
+      line-height: 1.25;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .session-directory-count {
+      display: inline-flex;
+      min-width: 21px;
+      height: 19px;
+      align-items: center;
+      justify-content: center;
+      border-radius: 6px;
+      padding-inline: 5px;
+      color: var(--text-muted);
+      background: color-mix(in srgb, var(--bg-elevated) 78%, transparent);
+      font-size: 0.625rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .session-directory-add {
+      display: inline-flex;
+      width: 32px;
+      min-width: 32px;
+      height: 32px;
+      align-items: center;
+      justify-content: center;
+      border: 0;
+      border-radius: 9px;
+      color: var(--text-muted);
+      background: transparent;
+      font-size: 1rem;
+      cursor: pointer;
+      opacity: 0.58;
+      transition: color 120ms ease, background-color 120ms ease, opacity 120ms ease, transform 100ms ease;
+    }
+
+    .session-directory-row:hover .session-directory-add,
+    .session-directory-add:focus-visible {
+      color: var(--accent);
+      background: var(--accent-muted);
+      opacity: 1;
+    }
+
+    .session-directory-add:active {
+      transform: scale(0.94);
+    }
+
+    .session-directory-contents {
+      min-width: 0;
+    }
+
+    .session-directory-sessions {
+      margin: 2px 0 5px calc(var(--directory-depth, 0) * 8px + 12px);
+      padding-left: 5px;
+      border-left: 1px solid color-mix(in srgb, var(--border-subtle) 80%, transparent);
+    }
+
+    .session-directory-sessions .session-item {
+      margin-block: 2px;
+    }
+
+    .session-directory-state {
+      padding: 34px 16px;
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      text-align: center;
+    }
+
+    .session-directory-state.error {
+      color: var(--danger);
+    }
+
+    @media (hover: none) {
+      .session-directory-add {
+        opacity: 0.9;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .sidebar-header-main {
+        min-width: 0;
+        flex: 1;
+      }
+
+      .sidebar-view-switch {
+        width: 108px;
+      }
+
+      .sidebar-header-main .session-count {
+        display: none;
+      }
+
+      .session-directory-main {
+        min-height: 44px;
+      }
+
+      .session-directory-add {
+        width: 40px;
+        min-width: 40px;
+        height: 40px;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .session-directory-chevron,
+      .sidebar-view-switch button,
+      .session-directory-add {
+        transition: none;
+      }
+    }
+
     /* 尊重用户的减少动画偏好。
        但 Android WebView 例外: Chromium 在 Android 上会把系统 Developer
        Options 里的 "Animator duration scale" / "Transition animation scale"

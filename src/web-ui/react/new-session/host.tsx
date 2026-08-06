@@ -187,7 +187,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
             loaded.config.defaultMode,
             loaded.config.defaultMode,
           ),
-          cwd: "",
+          cwd: controller.initialCwd,
           worktreeEnabled: false,
         });
         if (!context) setError("新建会话运行环境尚未就绪，请刷新页面后重试。");
@@ -199,7 +199,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
         if (!abort.signal.aborted) setLoading(false);
       });
     return () => abort.abort();
-  }, [controller.open, controller.revision, repository]);
+  }, [controller.initialCwd, controller.open, controller.revision, repository]);
 
   useEffect(() => {
     if (!controller.open || !form || !suggestionsActive) return;

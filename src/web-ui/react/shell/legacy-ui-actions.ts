@@ -1,4 +1,4 @@
-import type { UiAction, UiManageTarget } from "./ui-store";
+import type { UiAction, UiManageTarget, UiNativeHistoryProvider } from "./ui-store";
 
 /**
  * Narrow command port implemented by today's imperative browser modules.
@@ -7,7 +7,7 @@ import type { UiAction, UiManageTarget } from "./ui-store";
 export interface LegacyUiCommands {
   goHome(): void | Promise<unknown>;
   refreshPage(): void | Promise<unknown>;
-  openNewSession(): void | Promise<unknown>;
+  openNewSession(cwd?: string): void | Promise<unknown>;
   openMissions?(): void | Promise<unknown>;
   quickStartClaudeTerminal(): void | Promise<unknown>;
   quickStartCodexTerminal(): void | Promise<unknown>;
@@ -15,7 +15,7 @@ export interface LegacyUiCommands {
   quickStartStructuredSession(): void | Promise<unknown>;
   selectSession(id: string): void | Promise<unknown>;
   resumeSession(id: string): void | Promise<unknown>;
-  resumeHistory(provider: "claude" | "codex", id: string, cwd: string): void | Promise<unknown>;
+  resumeHistory(provider: UiNativeHistoryProvider, id: string, cwd: string): void | Promise<unknown>;
   deleteItem(target: UiManageTarget, id: string): void | Promise<unknown>;
   mergeSession(id: string): void | Promise<unknown>;
   cleanupSession(id: string): void | Promise<unknown>;
@@ -56,6 +56,7 @@ export function applyLegacyUiAction(
     case "nav.home": return commands.goHome();
     case "nav.refresh": return commands.refreshPage();
     case "session.new": return commands.openNewSession();
+    case "session.newAt": return commands.openNewSession(action.cwd);
     case "missions.open": return commands.openMissions?.();
     case "session.quickStart.claude": return commands.quickStartClaudeTerminal();
     case "session.quickStart.codex": return commands.quickStartCodexTerminal();
