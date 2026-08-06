@@ -11,11 +11,14 @@ import {
   MemoryUiAdapter,
   ShellSidebar,
   UiStoreProvider,
+  getSessionDirectoryLabels,
   getShellSidebarEntryActions,
   getSidebarEntryTarget,
+  normalizeSessionDirectoryCustomName,
   type UiSessionVm,
   type UiSnapshotData,
 } from "../src/web-ui/react/shell/index.js";
+import { HttpSessionDirectoryRepository } from "../src/web-ui/react/shell/session-directory-repository.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -195,6 +198,87 @@ test("sidebar entry helpers map primary and secondary actions without legacy sta
     merge: null,
     cleanup: null,
   });
+});
+
+test("directory labels prefer a custom workspace name without losing the real directory", () => {
+  assert.deepEqual(getSessionDirectoryLabels({
+    name: "wand",
+    customName: "  核心工作区  ",
+    path: "/workspace/wand",
+  }), {
+    displayName: "核心工作区",
+    directoryName: "wand",
+    path: "/workspace/wand",
+  });
+  assert.deepEqual(getSessionDirectoryLabels({
+    name: "wand",
+    customName: "   ",
+    path: "/workspace/wand",
+  }), {
+    displayName: "wand",
+    directoryName: "",
+    path: "/workspace/wand",
+  });
+  assert.deepEqual(getSessionDirectoryLabels({
+    name: "wand",
+    customName: "wand",
+    path: "/workspace/wand",
+  }), {
+    displayName: "wand",
+    directoryName: "",
+    path: "/workspace/wand",
+  });
+  assert.equal(normalizeSessionDirectoryCustomName("  wand  ", "wand"), "");
+  assert.equal(normalizeSessionDirectoryCustomName("  核心工作区  ", "wand"), "核心工作区");
+});
+
+test("session directory repository saves trimmed workspace names and surfaces server errors", async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const repository = new HttpSessionDirectoryRepository((async (input, init) => {
+    calls.push({ url: String(input), init });
+    if (calls.length === 1) {
+      return new Response(JSON.stringify({
+        roots: [{
+          path: "/workspace/wand",
+          name: "wand",
+          customName: "核心工作区",
+          synthetic: false,
+          directCount: 0,
+          totalCount: 0,
+          latestTimestamp: 0,
+          entries: [],
+          children: [],
+        }],
+        totalSessions: 0,
+        directoryCount: 1,
+        revision: "r1",
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    return new Response(JSON.stringify({
+      ok: true,
+      path: "/workspace/wand",
+      name: "新名称",
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch);
+
+  const tree = await repository.load();
+  assert.equal(tree.roots[0]?.customName, "核心工作区");
+  assert.deepEqual(await repository.rename("/workspace/wand", "  新名称  "), {
+    ok: true,
+    path: "/workspace/wand",
+    name: "新名称",
+  });
+  assert.equal(calls[1]?.url, "/api/session-directories/name");
+  assert.equal(calls[1]?.init?.method, "PUT");
+  assert.deepEqual(JSON.parse(String(calls[1]?.init?.body)), {
+    path: "/workspace/wand",
+    name: "新名称",
+  });
+
+  const denied = new HttpSessionDirectoryRepository((async () => new Response(JSON.stringify({
+    error: "该目录不存在",
+  }), { status: 404, headers: { "Content-Type": "application/json" } })) as typeof fetch);
+  await assert.rejects(denied.rename("/missing", "name"), /该目录不存在/);
 });
 
 test("ShellSidebar SSR preserves native ids, key classes, groups, and action contracts", () => {

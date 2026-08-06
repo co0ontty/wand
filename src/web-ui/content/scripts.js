@@ -33691,6 +33691,34 @@
       if (!response.ok) throw new Error("\u65E0\u6CD5\u52A0\u8F7D\u4F1A\u8BDD\u76EE\u5F55");
       return response.json();
     }
+    async rename(path, name, signal) {
+      const response = await this.fetchImpl("/api/session-directories/name", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        signal,
+        body: JSON.stringify({ path, name: name.trim() })
+      });
+      let value;
+      try {
+        value = await response.json();
+      } catch {
+        value = null;
+      }
+      if (!response.ok) {
+        const message = value && typeof value === "object" && "error" in value && typeof value.error === "string" ? value.error : `\u65E0\u6CD5\u66F4\u65B0\u5DE5\u4F5C\u533A\u540D\u79F0 (HTTP ${response.status})`;
+        throw new Error(message);
+      }
+      const result = value;
+      if (result?.ok !== true || typeof result.path !== "string") {
+        throw new Error("\u670D\u52A1\u7AEF\u672A\u8FD4\u56DE\u6709\u6548\u7684\u5DE5\u4F5C\u533A\u540D\u79F0\u3002");
+      }
+      return {
+        ok: true,
+        path: result.path,
+        name: typeof result.name === "string" ? result.name : null
+      };
+    }
   };
   var httpSessionDirectoryRepository = new HttpSessionDirectoryRepository();
 
@@ -33750,6 +33778,8 @@
           /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("rect", { x: "10", y: "3", width: "11", height: "18", rx: "2" }),
           /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M7 8l-4 4 4 4M3 12h11" })
         ] });
+      case "check":
+        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M20 6L9 17l-5-5" }) });
       case "chevron":
         return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M6 9l6 6 6-6" }) });
       case "cleanup":
@@ -33757,6 +33787,11 @@
         return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" }) });
       case "close":
         return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M6 6l12 12M18 6L6 18" }) });
+      case "edit":
+        return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M12 20h9" }),
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M16.5 3.5a2.1 2.1 0 013 3L8 18l-4 1 1-4z" })
+        ] });
       case "file":
         return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" }) });
       case "gear":
@@ -34181,77 +34216,267 @@
     const [data, setData] = React42.useState(null);
     const [loading, setLoading] = React42.useState(false);
     const [error, setError] = React42.useState("");
+    const loadGenerationRef = React42.useRef(0);
+    const activeLoadRef = React42.useRef(null);
+    const renameInFlightRef = React42.useRef(false);
+    const loadLatest = React42.useCallback(async (showLoading, propagateError = false) => {
+      const generation = ++loadGenerationRef.current;
+      activeLoadRef.current?.abort();
+      const abort = new AbortController();
+      activeLoadRef.current = abort;
+      if (showLoading) setLoading(true);
+      try {
+        const value = await httpSessionDirectoryRepository.load(abort.signal);
+        if (!abort.signal.aborted && generation === loadGenerationRef.current) {
+          setData(value);
+          setError("");
+        }
+      } catch (fetchError) {
+        if (!abort.signal.aborted && generation === loadGenerationRef.current) {
+          const loadError = fetchError instanceof Error ? fetchError : new Error("\u65E0\u6CD5\u52A0\u8F7D\u4F1A\u8BDD\u76EE\u5F55");
+          setError(loadError.message);
+          if (propagateError) throw loadError;
+        }
+      } finally {
+        if (generation === loadGenerationRef.current) {
+          activeLoadRef.current = null;
+          setLoading(false);
+        }
+      }
+    }, []);
     React42.useEffect(() => {
       if (!enabled) return;
-      const abort = new AbortController();
-      setLoading(data === null);
       setError("");
-      void httpSessionDirectoryRepository.load(abort.signal).then((value) => {
-        if (!abort.signal.aborted) setData(value);
-      }).catch((fetchError) => {
-        if (!abort.signal.aborted) {
-          setError(fetchError instanceof Error ? fetchError.message : "\u65E0\u6CD5\u52A0\u8F7D\u4F1A\u8BDD\u76EE\u5F55");
-        }
-      }).finally(() => {
-        if (!abort.signal.aborted) setLoading(false);
-      });
-      return () => abort.abort();
-    }, [enabled, refreshKey]);
-    return { data, loading, error };
+      void loadLatest(data === null);
+      const interval = window.setInterval(() => void loadLatest(false), 1e4);
+      return () => {
+        window.clearInterval(interval);
+        loadGenerationRef.current += 1;
+        activeLoadRef.current?.abort();
+        activeLoadRef.current = null;
+      };
+    }, [enabled, refreshKey, loadLatest]);
+    const rename = React42.useCallback(async (path, name) => {
+      if (renameInFlightRef.current) throw new Error("\u53E6\u4E00\u4E2A\u5DE5\u4F5C\u533A\u540D\u79F0\u6B63\u5728\u4FDD\u5B58\uFF0C\u8BF7\u7A0D\u5019\u3002");
+      renameInFlightRef.current = true;
+      setError("");
+      loadGenerationRef.current += 1;
+      activeLoadRef.current?.abort();
+      activeLoadRef.current = null;
+      try {
+        await httpSessionDirectoryRepository.rename(path, name);
+        await loadLatest(false, true);
+      } finally {
+        renameInFlightRef.current = false;
+      }
+    }, [loadLatest]);
+    return { data, loading, error, rename };
   }
   function nodeContainsActive(node, selectedId) {
     if (!selectedId) return false;
     return node.entries.some((entry) => entry.type === "managed" && entry.session.id === selectedId) || node.children.some((child) => nodeContainsActive(child, selectedId));
   }
+  function getSessionDirectoryLabels(node) {
+    const customName = node.customName?.trim() ?? "";
+    return {
+      displayName: customName || node.name,
+      directoryName: customName && customName !== node.name ? node.name : "",
+      path: node.path || node.name
+    };
+  }
+  function normalizeSessionDirectoryCustomName(input, defaultName) {
+    const trimmed = input.trim();
+    return trimmed === defaultName ? "" : trimmed;
+  }
   function DirectoryNode({
     node,
     depth,
     selectedId,
-    dispatch
+    dispatch,
+    renameDirectory
   }) {
     const activeWithin = nodeContainsActive(node, selectedId);
     const [open, setOpen] = React42.useState(depth === 0 || activeWithin);
+    const [renaming, setRenaming] = React42.useState(false);
+    const [renameDraft, setRenameDraft] = React42.useState("");
+    const [renameError, setRenameError] = React42.useState("");
+    const [renameSaving, setRenameSaving] = React42.useState(false);
+    const renameInputRef = React42.useRef(null);
+    const renameTriggerRef = React42.useRef(null);
+    const labels = getSessionDirectoryLabels(node);
+    const renameLength = Array.from(renameDraft.trim()).length;
+    const renameTooLong = renameLength > 80;
+    const renameHasInvalidCharacters = /[\u0000-\u001F\u007F-\u009F\u2028\u2029]/u.test(renameDraft.trim());
     React42.useEffect(() => {
       if (activeWithin) setOpen(true);
     }, [activeWithin]);
+    React42.useEffect(() => {
+      if (!renaming) return;
+      const frame = requestAnimationFrame(() => {
+        renameInputRef.current?.focus();
+        renameInputRef.current?.select();
+      });
+      return () => cancelAnimationFrame(frame);
+    }, [renaming]);
     const hasContents = node.entries.length > 0 || node.children.length > 0;
+    const restoreRenameTriggerFocus = () => {
+      requestAnimationFrame(() => {
+        renameTriggerRef.current?.focus();
+      });
+    };
+    const beginRename = () => {
+      setRenameDraft(node.customName?.trim() || node.name);
+      setRenameError("");
+      setRenaming(true);
+    };
+    const cancelRename = () => {
+      if (renameSaving) return;
+      setRenaming(false);
+      setRenameError("");
+      restoreRenameTriggerFocus();
+    };
+    const saveRename = async () => {
+      if (renameSaving) return;
+      const submittedName = normalizeSessionDirectoryCustomName(renameDraft, node.name);
+      const currentName = node.customName?.trim() ?? "";
+      if (submittedName === currentName) {
+        setRenaming(false);
+        setRenameError("");
+        restoreRenameTriggerFocus();
+        return;
+      }
+      if (renameTooLong || renameHasInvalidCharacters) {
+        setRenameError(renameHasInvalidCharacters ? "\u5DE5\u4F5C\u533A\u540D\u79F0\u4E0D\u80FD\u5305\u542B\u6362\u884C\u6216\u63A7\u5236\u5B57\u7B26" : "\u5DE5\u4F5C\u533A\u540D\u79F0\u6700\u591A 80 \u4E2A\u5B57\u7B26");
+        return;
+      }
+      setRenameSaving(true);
+      setRenameError("");
+      try {
+        await renameDirectory(node.path, submittedName);
+        setRenaming(false);
+        restoreRenameTriggerFocus();
+      } catch (error) {
+        setRenameError(error instanceof Error ? error.message : "\u65E0\u6CD5\u66F4\u65B0\u5DE5\u4F5C\u533A\u540D\u79F0");
+      } finally {
+        setRenameSaving(false);
+      }
+    };
     return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
       "section",
       {
         className: classNames("session-directory-node", activeWithin && "active-path"),
         style: { "--directory-depth": Math.min(depth, 6) },
         children: [
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "session-directory-row", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "session-directory-row", children: renaming ? /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+            "form",
+            {
+              className: "session-directory-rename-form",
+              "aria-busy": renameSaving || void 0,
+              onSubmit: (event) => {
+                event.preventDefault();
+                void saveRename();
+              },
+              onKeyDown: (event) => {
+                if (event.key !== "Escape") return;
+                event.preventDefault();
+                event.stopPropagation();
+                cancelRename();
+              },
+              children: [
+                /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "file", size: 15 }),
+                /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+                  "input",
+                  {
+                    ref: renameInputRef,
+                    className: "session-directory-rename-input",
+                    value: renameDraft,
+                    disabled: renameSaving,
+                    autoComplete: "off",
+                    spellCheck: false,
+                    "aria-invalid": renameTooLong || renameHasInvalidCharacters || void 0,
+                    "aria-label": `\u4E3A ${node.name} \u8BBE\u7F6E\u5DE5\u4F5C\u533A\u540D\u79F0`,
+                    placeholder: "\u5DE5\u4F5C\u533A\u540D\u79F0\uFF08\u7559\u7A7A\u6062\u590D\u76EE\u5F55\u540D\uFF09",
+                    onChange: (event) => {
+                      setRenameDraft(event.currentTarget.value);
+                      setRenameError("");
+                    }
+                  }
+                ),
+                /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+                  "button",
+                  {
+                    type: "submit",
+                    className: "session-directory-rename-action save",
+                    disabled: renameSaving || renameTooLong || renameHasInvalidCharacters,
+                    title: "\u4FDD\u5B58\u540D\u79F0",
+                    "aria-label": "\u4FDD\u5B58\u5DE5\u4F5C\u533A\u540D\u79F0",
+                    children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "check", size: 14 })
+                  }
+                ),
+                /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+                  "button",
+                  {
+                    type: "button",
+                    className: "session-directory-rename-action",
+                    disabled: renameSaving,
+                    title: "\u53D6\u6D88",
+                    "aria-label": "\u53D6\u6D88\u91CD\u547D\u540D",
+                    onClick: cancelRename,
+                    children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "close", size: 14 })
+                  }
+                )
+              ]
+            }
+          ) : /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(import_jsx_runtime43.Fragment, { children: [
             /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
               "button",
               {
                 type: "button",
                 className: "session-directory-main",
                 "aria-expanded": open,
-                title: node.path || node.name,
+                "aria-label": `${labels.displayName}\uFF0C${node.totalCount} \u4E2A\u4F1A\u8BDD\uFF0C\u76EE\u5F55 ${labels.path}`,
+                title: labels.path,
                 onClick: () => {
                   if (hasContents) setOpen((current) => !current);
                 },
                 children: [
                   /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "chevron", size: 12, className: classNames("session-directory-chevron", open && "open") }),
                   /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "file", size: 15 }),
-                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "session-directory-name", children: node.name }),
+                  /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("span", { className: "session-directory-label", children: [
+                    /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "session-directory-name", children: labels.displayName }),
+                    labels.directoryName && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "session-directory-default-name", children: labels.directoryName })
+                  ] }),
                   /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "session-directory-count", "aria-label": `${node.totalCount} \u4E2A\u4F1A\u8BDD`, children: node.totalCount })
                 ]
               }
             ),
-            !node.synthetic && node.path && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
-              "button",
-              {
-                type: "button",
-                className: "session-directory-add",
-                title: `\u5728 ${node.path} \u65B0\u5EFA\u4F1A\u8BDD`,
-                "aria-label": `\u5728 ${node.path} \u65B0\u5EFA\u4F1A\u8BDD`,
-                onClick: () => void dispatch({ type: "session.newAt", cwd: node.path }),
-                children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { "aria-hidden": "true", children: "\uFF0B" })
-              }
-            )
-          ] }),
+            !node.synthetic && node.path && /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("span", { className: "session-directory-actions", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+                "button",
+                {
+                  ref: renameTriggerRef,
+                  type: "button",
+                  className: "session-directory-rename",
+                  title: `\u8BBE\u7F6E ${labels.displayName} \u7684\u5DE5\u4F5C\u533A\u540D\u79F0`,
+                  "aria-label": `\u91CD\u547D\u540D\u5DE5\u4F5C\u533A ${labels.displayName}`,
+                  onClick: beginRename,
+                  children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "edit", size: 14 })
+                }
+              ),
+              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+                "button",
+                {
+                  type: "button",
+                  className: "session-directory-add",
+                  title: `\u5728 ${node.path} \u65B0\u5EFA\u4F1A\u8BDD`,
+                  "aria-label": `\u5728 ${node.path} \u65B0\u5EFA\u4F1A\u8BDD`,
+                  onClick: () => void dispatch({ type: "session.newAt", cwd: node.path }),
+                  children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { "aria-hidden": "true", children: "\uFF0B" })
+                }
+              )
+            ] })
+          ] }) }),
+          renaming && (renameTooLong || renameHasInvalidCharacters || renameError) && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "session-directory-rename-error", role: "alert", children: renameHasInvalidCharacters ? "\u5DE5\u4F5C\u533A\u540D\u79F0\u4E0D\u80FD\u5305\u542B\u6362\u884C\u6216\u63A7\u5236\u5B57\u7B26" : renameTooLong ? `\u5DE5\u4F5C\u533A\u540D\u79F0\u6700\u591A 80 \u4E2A\u5B57\u7B26\uFF08\u5F53\u524D ${renameLength} \u4E2A\uFF09` : renameError }),
           open && /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "session-directory-contents", children: [
             node.entries.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "session-directory-sessions", children: node.entries.map((entry) => {
               const vm = directoryEntryToVm(entry, selectedId);
@@ -34263,7 +34488,8 @@
                 node: child,
                 depth: depth + 1,
                 selectedId,
-                dispatch
+                dispatch,
+                renameDirectory
               },
               child.path || child.name
             ))
@@ -34277,7 +34503,8 @@
     loading,
     error,
     selectedId,
-    dispatch
+    dispatch,
+    renameDirectory
   }) {
     if (loading && !response) return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "session-directory-state", children: "\u6B63\u5728\u6574\u7406\u76EE\u5F55\u2026" });
     if (error && !response) return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "session-directory-state error", children: error });
@@ -34294,7 +34521,8 @@
         node,
         depth: 0,
         selectedId,
-        dispatch
+        dispatch,
+        renameDirectory
       },
       node.path || node.name
     )) });
@@ -34662,7 +34890,8 @@
             loading: directories.loading,
             error: directories.error,
             selectedId: snapshot8.selected?.id ?? null,
-            dispatch
+            dispatch,
+            renameDirectory: directories.rename
           }
         ) : /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(import_jsx_runtime43.Fragment, { children: [
           /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(

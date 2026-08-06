@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { SessionSnapshot, ConversationTurn, SessionKind, SessionProvider, SessionRunner, SessionSource, StructuredSessionState, WorktreeMergeInfo } from "./types.js";
+import { normalizeSessionDirectory } from "./session-directory-tree.js";
 import type {
   AgentActivityItem,
   AgentActivityState,
@@ -585,6 +586,12 @@ const INIT_SQL = `
     value TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS session_directory_names (
+    path TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS password_vaults (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -784,6 +791,36 @@ export class WandStorage {
   /** 判断偏好是否在 DB 中存在（区别于值为 null/false/""）。 */
   hasPreference(key: string): boolean {
     return this.getConfigValue(key) !== null;
+  }
+
+  // ============ Session Directory Names ============
+
+  /** Return user-defined workspace labels keyed by normalized session cwd. */
+  listSessionDirectoryNames(): Map<string, string> {
+    const rows = this.db
+      .prepare("SELECT path, name FROM session_directory_names ORDER BY path ASC")
+      .all() as unknown as Array<{ path: string; name: string }>;
+    return new Map(rows.map((row) => [row.path, row.name]));
+  }
+
+  /** Set a workspace label, or remove it when name is null/blank. */
+  setSessionDirectoryName(directoryPath: string, name: string | null): void {
+    const normalizedPath = normalizeSessionDirectory(directoryPath);
+    if (!normalizedPath) throw new Error("会话目录路径不能为空。");
+    const normalizedName = name?.trim() ?? "";
+    if (!normalizedName) {
+      this.db.prepare("DELETE FROM session_directory_names WHERE path = ?").run(normalizedPath);
+      return;
+    }
+    this.db
+      .prepare(
+        `INSERT INTO session_directory_names (path, name, updated_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT(path) DO UPDATE SET
+           name = excluded.name,
+           updated_at = excluded.updated_at`
+      )
+      .run(normalizedPath, normalizedName, nowIso());
   }
 
   /** Get password from database */

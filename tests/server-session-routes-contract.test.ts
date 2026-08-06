@@ -67,6 +67,8 @@ test("session HTTP interface preserves create, list, update, detail, and delete 
     assert.equal(directoriesResponse.status, 200);
     type DirectoryNode = {
       path: string;
+      name: string;
+      customName?: string;
       directCount: number;
       totalCount: number;
       entries: Array<{ key: string }>;
@@ -77,6 +79,7 @@ test("session HTTP interface preserves create, list, update, detail, and delete 
       totalSessions: number;
       directoryCount: number;
       revision: string;
+      treeRevision: string;
     };
     const findDirectory = (nodes: DirectoryNode[], target: string): DirectoryNode | undefined => {
       for (const node of nodes) {
@@ -94,6 +97,61 @@ test("session HTTP interface preserves create, list, update, detail, and delete 
     assert.ok(createdDirectory.totalCount >= 1);
     assert.ok(createdDirectory.entries.some((entry) => entry.key === `session-${created.id}`));
     assert.equal(directories.revision, firstPage.revision);
+    assert.equal(directories.treeRevision, directories.revision);
+
+    const renameResponse = await fetch(`${baseUrl}/api/session-directories/name`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: `${root}/`, name: "  演示工作区  " }),
+    });
+    assert.equal(renameResponse.status, 200);
+    assert.deepEqual(await renameResponse.json(), { ok: true, path: root, name: "演示工作区" });
+
+    const renamedDirectories = await (await fetch(`${baseUrl}/api/session-directories`)).json() as {
+      roots: DirectoryNode[];
+      revision: string;
+      treeRevision: string;
+    };
+    const renamedDirectory = findDirectory(renamedDirectories.roots, root);
+    assert.equal(renamedDirectory?.customName, "演示工作区");
+    assert.equal(renamedDirectory?.name, createdDirectory.name);
+    assert.equal(renamedDirectories.revision, directories.revision);
+    assert.notEqual(renamedDirectories.treeRevision, directories.treeRevision);
+
+    const tooLongName = await fetch(`${baseUrl}/api/session-directories/name`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: root, name: "x".repeat(81) }),
+    });
+    assert.equal(tooLongName.status, 400);
+    const multilineName = await fetch(`${baseUrl}/api/session-directories/name`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: root, name: "两行\n名称" }),
+    });
+    assert.equal(multilineName.status, 400);
+    const missingDirectory = await fetch(`${baseUrl}/api/session-directories/name`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: path.join(root, "missing"), name: "Missing" }),
+    });
+    assert.equal(missingDirectory.status, 404);
+
+    const resetNameResponse = await fetch(`${baseUrl}/api/session-directories/name`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: root, name: null }),
+    });
+    assert.equal(resetNameResponse.status, 200);
+    assert.deepEqual(await resetNameResponse.json(), { ok: true, path: root, name: null });
+    const resetDirectories = await (await fetch(`${baseUrl}/api/session-directories`)).json() as {
+      roots: DirectoryNode[];
+      revision: string;
+      treeRevision: string;
+    };
+    assert.equal(findDirectory(resetDirectories.roots, root)?.customName, undefined);
+    assert.equal(resetDirectories.revision, directories.revision);
+    assert.equal(resetDirectories.treeRevision, directories.treeRevision);
 
     const stalePageResponse = await fetch(
       `${baseUrl}/api/session-list?offset=1&limit=1&revision=${encodeURIComponent(firstPage.revision)}&cacheBust=1`,

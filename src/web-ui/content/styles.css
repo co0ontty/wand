@@ -200,6 +200,11 @@
       transform: scale(0.99);
     }
 
+    .session-directory-main > svg,
+    .session-directory-rename-form > svg {
+      flex: 0 0 auto;
+    }
+
     .session-directory-chevron {
       flex: 0 0 auto;
       transform: rotate(-90deg);
@@ -210,16 +215,32 @@
       transform: rotate(0deg);
     }
 
-    .session-directory-name {
+    .session-directory-label {
       min-width: 0;
       flex: 1;
+      display: grid;
+      gap: 1px;
+    }
+
+    .session-directory-name,
+    .session-directory-default-name {
       overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .session-directory-name {
       color: var(--text-primary);
       font-size: 0.75rem;
       font-weight: 620;
       line-height: 1.25;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+    }
+
+    .session-directory-default-name {
+      color: var(--text-muted);
+      font-size: 0.625rem;
+      font-weight: 500;
+      line-height: 1.15;
     }
 
     .session-directory-count {
@@ -237,10 +258,19 @@
       font-variant-numeric: tabular-nums;
     }
 
-    .session-directory-add {
+    .session-directory-actions {
       display: inline-flex;
-      width: 32px;
-      min-width: 32px;
+      flex: 0 0 auto;
+      align-items: center;
+      gap: 1px;
+    }
+
+    .session-directory-add,
+    .session-directory-rename,
+    .session-directory-rename-action {
+      display: inline-flex;
+      width: 30px;
+      min-width: 30px;
       height: 32px;
       align-items: center;
       justify-content: center;
@@ -254,15 +284,86 @@
       transition: color 120ms ease, background-color 120ms ease, opacity 120ms ease, transform 100ms ease;
     }
 
+    .session-directory-rename {
+      opacity: 0.36;
+    }
+
     .session-directory-row:hover .session-directory-add,
-    .session-directory-add:focus-visible {
+    .session-directory-row:hover .session-directory-rename,
+    .session-directory-add:focus-visible,
+    .session-directory-rename:focus-visible {
       color: var(--accent);
       background: var(--accent-muted);
       opacity: 1;
     }
 
-    .session-directory-add:active {
+    .session-directory-add:active,
+    .session-directory-rename:active,
+    .session-directory-rename-action:active {
       transform: scale(0.94);
+    }
+
+    .session-directory-rename-form {
+      display: flex;
+      min-width: 0;
+      min-height: 38px;
+      flex: 1;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 2px 3px 9px;
+    }
+
+    .session-directory-rename-input {
+      width: 0;
+      min-width: 0;
+      height: 30px;
+      flex: 1;
+      border: 1px solid var(--accent);
+      border-radius: 8px;
+      padding: 0 8px;
+      color: var(--text-primary);
+      background: var(--bg-elevated);
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 14%, transparent);
+      font: inherit;
+      font-size: 0.75rem;
+      outline: none;
+    }
+
+    .session-directory-rename-input::placeholder {
+      color: var(--text-muted);
+    }
+
+    .session-directory-rename-action {
+      height: 30px;
+      color: var(--text-muted);
+      opacity: 1;
+    }
+
+    .session-directory-rename-action:hover {
+      color: var(--text-primary);
+      background: color-mix(in srgb, var(--bg-tertiary) 72%, transparent);
+    }
+
+    .session-directory-rename-action.save {
+      color: var(--accent);
+      background: var(--accent-muted);
+    }
+
+    .session-directory-rename-action:disabled {
+      cursor: not-allowed;
+      opacity: 0.56;
+    }
+
+    .session-directory-rename-input:disabled {
+      cursor: wait;
+      opacity: 0.56;
+    }
+
+    .session-directory-rename-error {
+      margin: 0 8px 5px calc(var(--directory-depth, 0) * 12px + 9px);
+      color: var(--danger);
+      font-size: 0.625rem;
+      line-height: 1.35;
     }
 
     .session-directory-contents {
@@ -291,7 +392,8 @@
     }
 
     @media (hover: none) {
-      .session-directory-add {
+      .session-directory-add,
+      .session-directory-rename {
         opacity: 0.9;
       }
     }
@@ -314,17 +416,24 @@
         min-height: 44px;
       }
 
-      .session-directory-add {
-        width: 40px;
-        min-width: 40px;
+      .session-directory-add,
+      .session-directory-rename {
+        width: 36px;
+        min-width: 36px;
         height: 40px;
+      }
+
+      .session-directory-rename-form {
+        min-height: 44px;
       }
     }
 
     @media (prefers-reduced-motion: reduce) {
       .session-directory-chevron,
       .sidebar-view-switch button,
-      .session-directory-add {
+      .session-directory-add,
+      .session-directory-rename,
+      .session-directory-rename-action {
         transition: none;
       }
     }

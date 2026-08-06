@@ -839,6 +839,7 @@ export async function startServer(
     "/api/config",
     "/api/models",
     "/api/sessions",
+    "/api/session-directories",
     "/api/structured-sessions",
     "/api/commands",
     "/api/claude-skills",

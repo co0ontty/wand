@@ -83,8 +83,9 @@ export function getShellSidebarEntryActions(
 }
 
 function Icon({ name, size = 14, className }: {
-  name: "back" | "chevron" | "cleanup" | "close" | "file" | "gear" | "history"
-    | "inbox" | "logout" | "merge" | "more" | "pin" | "resume" | "server" | "spark" | "trash";
+  name: "back" | "check" | "chevron" | "cleanup" | "close" | "edit" | "file" | "gear"
+    | "history" | "inbox" | "logout" | "merge" | "more" | "pin" | "resume" | "server"
+    | "spark" | "trash";
   size?: number;
   className?: string;
 }) {
@@ -103,6 +104,8 @@ function Icon({ name, size = 14, className }: {
   switch (name) {
     case "back":
       return <svg {...common}><rect x="10" y="3" width="11" height="18" rx="2"/><path d="M7 8l-4 4 4 4M3 12h11"/></svg>;
+    case "check":
+      return <svg {...common}><path d="M20 6L9 17l-5-5"/></svg>;
     case "chevron":
       return <svg {...common}><path d="M6 9l6 6 6-6"/></svg>;
     case "cleanup":
@@ -110,6 +113,8 @@ function Icon({ name, size = 14, className }: {
       return <svg {...common}><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>;
     case "close":
       return <svg {...common}><path d="M6 6l12 12M18 6L6 18"/></svg>;
+    case "edit":
+      return <svg {...common}><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L8 18l-4 1 1-4z"/></svg>;
     case "file":
       return <svg {...common}><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>;
     case "gear":
@@ -588,34 +593,75 @@ function useSessionDirectories(enabled: boolean, refreshKey: number): {
   data: SessionDirectoryResponse | null;
   loading: boolean;
   error: string;
+  rename(path: string, name: string): Promise<void>;
 } {
   const [data, setData] = React.useState<SessionDirectoryResponse | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState("");
+  const loadGenerationRef = React.useRef(0);
+  const activeLoadRef = React.useRef<AbortController | null>(null);
+  const renameInFlightRef = React.useRef(false);
+
+  const loadLatest = React.useCallback(async (
+    showLoading: boolean,
+    propagateError = false,
+  ): Promise<void> => {
+    const generation = ++loadGenerationRef.current;
+    activeLoadRef.current?.abort();
+    const abort = new AbortController();
+    activeLoadRef.current = abort;
+    if (showLoading) setLoading(true);
+    try {
+      const value = await httpSessionDirectoryRepository.load(abort.signal);
+      if (!abort.signal.aborted && generation === loadGenerationRef.current) {
+        setData(value);
+        setError("");
+      }
+    } catch (fetchError: unknown) {
+      if (!abort.signal.aborted && generation === loadGenerationRef.current) {
+        const loadError = fetchError instanceof Error ? fetchError : new Error("无法加载会话目录");
+        setError(loadError.message);
+        if (propagateError) throw loadError;
+      }
+    } finally {
+      if (generation === loadGenerationRef.current) {
+        activeLoadRef.current = null;
+        setLoading(false);
+      }
+    }
+  }, []);
 
   React.useEffect(() => {
     if (!enabled) return;
-    const abort = new AbortController();
-    setLoading(data === null);
     setError("");
-    void httpSessionDirectoryRepository.load(abort.signal)
-      .then((value) => {
-        if (!abort.signal.aborted) setData(value);
-      })
-      .catch((fetchError: unknown) => {
-        if (!abort.signal.aborted) {
-          setError(fetchError instanceof Error ? fetchError.message : "无法加载会话目录");
-        }
-      })
-      .finally(() => {
-        if (!abort.signal.aborted) setLoading(false);
-      });
-    return () => abort.abort();
+    void loadLatest(data === null);
+    const interval = window.setInterval(() => void loadLatest(false), 10_000);
+    return () => {
+      window.clearInterval(interval);
+      loadGenerationRef.current += 1;
+      activeLoadRef.current?.abort();
+      activeLoadRef.current = null;
+    };
   // data is intentionally excluded: retaining stale content avoids a blank flash during refresh.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, refreshKey]);
+  }, [enabled, refreshKey, loadLatest]);
 
-  return { data, loading, error };
+  const rename = React.useCallback(async (path: string, name: string) => {
+    if (renameInFlightRef.current) throw new Error("另一个工作区名称正在保存，请稍候。");
+    renameInFlightRef.current = true;
+    setError("");
+    loadGenerationRef.current += 1;
+    activeLoadRef.current?.abort();
+    activeLoadRef.current = null;
+    try {
+      await httpSessionDirectoryRepository.rename(path, name);
+      await loadLatest(false, true);
+    } finally {
+      renameInFlightRef.current = false;
+    }
+  }, [loadLatest]);
+
+  return { data, loading, error, rename };
 }
 
 function nodeContainsActive(node: SessionDirectoryNode, selectedId: string | null): boolean {
@@ -624,23 +670,105 @@ function nodeContainsActive(node: SessionDirectoryNode, selectedId: string | nul
     || node.children.some((child) => nodeContainsActive(child, selectedId));
 }
 
+export function getSessionDirectoryLabels(node: Pick<SessionDirectoryNode, "customName" | "name" | "path">): {
+  displayName: string;
+  directoryName: string;
+  path: string;
+} {
+  const customName = node.customName?.trim() ?? "";
+  return {
+    displayName: customName || node.name,
+    directoryName: customName && customName !== node.name ? node.name : "",
+    path: node.path || node.name,
+  };
+}
+
+export function normalizeSessionDirectoryCustomName(input: string, defaultName: string): string {
+  const trimmed = input.trim();
+  return trimmed === defaultName ? "" : trimmed;
+}
+
 function DirectoryNode({
   node,
   depth,
   selectedId,
   dispatch,
+  renameDirectory,
 }: {
   node: SessionDirectoryNode;
   depth: number;
   selectedId: string | null;
   dispatch(action: UiAction): void | Promise<unknown>;
+  renameDirectory(path: string, name: string): Promise<void>;
 }) {
   const activeWithin = nodeContainsActive(node, selectedId);
   const [open, setOpen] = React.useState(depth === 0 || activeWithin);
+  const [renaming, setRenaming] = React.useState(false);
+  const [renameDraft, setRenameDraft] = React.useState("");
+  const [renameError, setRenameError] = React.useState("");
+  const [renameSaving, setRenameSaving] = React.useState(false);
+  const renameInputRef = React.useRef<HTMLInputElement>(null);
+  const renameTriggerRef = React.useRef<HTMLButtonElement>(null);
+  const labels = getSessionDirectoryLabels(node);
+  const renameLength = Array.from(renameDraft.trim()).length;
+  const renameTooLong = renameLength > 80;
+  const renameHasInvalidCharacters = /[\u0000-\u001F\u007F-\u009F\u2028\u2029]/u.test(renameDraft.trim());
   React.useEffect(() => {
     if (activeWithin) setOpen(true);
   }, [activeWithin]);
+  React.useEffect(() => {
+    if (!renaming) return;
+    const frame = requestAnimationFrame(() => {
+      renameInputRef.current?.focus();
+      renameInputRef.current?.select();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [renaming]);
   const hasContents = node.entries.length > 0 || node.children.length > 0;
+  const restoreRenameTriggerFocus = () => {
+    requestAnimationFrame(() => {
+      renameTriggerRef.current?.focus();
+    });
+  };
+  const beginRename = () => {
+    setRenameDraft(node.customName?.trim() || node.name);
+    setRenameError("");
+    setRenaming(true);
+  };
+  const cancelRename = () => {
+    if (renameSaving) return;
+    setRenaming(false);
+    setRenameError("");
+    restoreRenameTriggerFocus();
+  };
+  const saveRename = async () => {
+    if (renameSaving) return;
+    const submittedName = normalizeSessionDirectoryCustomName(renameDraft, node.name);
+    const currentName = node.customName?.trim() ?? "";
+    if (submittedName === currentName) {
+      setRenaming(false);
+      setRenameError("");
+      restoreRenameTriggerFocus();
+      return;
+    }
+    if (renameTooLong || renameHasInvalidCharacters) {
+      setRenameError(renameHasInvalidCharacters
+        ? "工作区名称不能包含换行或控制字符"
+        : "工作区名称最多 80 个字符");
+      return;
+    }
+    setRenameSaving(true);
+    setRenameError("");
+    try {
+      await renameDirectory(node.path, submittedName);
+      setRenaming(false);
+      restoreRenameTriggerFocus();
+    } catch (error) {
+      setRenameError(error instanceof Error ? error.message : "无法更新工作区名称");
+    } finally {
+      setRenameSaving(false);
+    }
+  };
 
   return (
     <section
@@ -648,32 +776,114 @@ function DirectoryNode({
       style={{ "--directory-depth": Math.min(depth, 6) } as React.CSSProperties}
     >
       <div className="session-directory-row">
-        <button
-          type="button"
-          className="session-directory-main"
-          aria-expanded={open}
-          title={node.path || node.name}
-          onClick={() => { if (hasContents) setOpen((current) => !current); }}
-        >
-          <Icon name="chevron" size={12} className={classNames("session-directory-chevron", open && "open")}/>
-          <Icon name="file" size={15}/>
-          <span className="session-directory-name">{node.name}</span>
-          <span className="session-directory-count" aria-label={`${node.totalCount} 个会话`}>
-            {node.totalCount}
-          </span>
-        </button>
-        {!node.synthetic && node.path && (
-          <button
-            type="button"
-            className="session-directory-add"
-            title={`在 ${node.path} 新建会话`}
-            aria-label={`在 ${node.path} 新建会话`}
-            onClick={() => void dispatch({ type: "session.newAt", cwd: node.path })}
+        {renaming ? (
+          <form
+            className="session-directory-rename-form"
+            aria-busy={renameSaving || undefined}
+            onSubmit={(event) => {
+              event.preventDefault();
+              void saveRename();
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== "Escape") return;
+              event.preventDefault();
+              event.stopPropagation();
+              cancelRename();
+            }}
           >
-            <span aria-hidden="true">＋</span>
-          </button>
+            <Icon name="file" size={15}/>
+            <input
+              ref={renameInputRef}
+              className="session-directory-rename-input"
+              value={renameDraft}
+              disabled={renameSaving}
+              autoComplete="off"
+              spellCheck={false}
+              aria-invalid={renameTooLong || renameHasInvalidCharacters || undefined}
+              aria-label={`为 ${node.name} 设置工作区名称`}
+              placeholder="工作区名称（留空恢复目录名）"
+              onChange={(event) => {
+                setRenameDraft(event.currentTarget.value);
+                setRenameError("");
+              }}
+            />
+            <button
+              type="submit"
+              className="session-directory-rename-action save"
+              disabled={renameSaving || renameTooLong || renameHasInvalidCharacters}
+              title="保存名称"
+              aria-label="保存工作区名称"
+            >
+              <Icon name="check" size={14}/>
+            </button>
+            <button
+              type="button"
+              className="session-directory-rename-action"
+              disabled={renameSaving}
+              title="取消"
+              aria-label="取消重命名"
+              onClick={cancelRename}
+            >
+              <Icon name="close" size={14}/>
+            </button>
+          </form>
+        ) : (
+          <>
+            <button
+              type="button"
+              className="session-directory-main"
+              aria-expanded={open}
+              aria-label={`${labels.displayName}，${node.totalCount} 个会话，目录 ${labels.path}`}
+              title={labels.path}
+              onClick={() => { if (hasContents) setOpen((current) => !current); }}
+            >
+              <Icon name="chevron" size={12} className={classNames("session-directory-chevron", open && "open")}/>
+              <Icon name="file" size={15}/>
+              <span className="session-directory-label">
+                <span className="session-directory-name">{labels.displayName}</span>
+                {labels.directoryName && (
+                  <span className="session-directory-default-name">{labels.directoryName}</span>
+                )}
+              </span>
+              <span className="session-directory-count" aria-label={`${node.totalCount} 个会话`}>
+                {node.totalCount}
+              </span>
+            </button>
+            {!node.synthetic && node.path && (
+              <span className="session-directory-actions">
+                <button
+                  ref={renameTriggerRef}
+                  type="button"
+                  className="session-directory-rename"
+                  title={`设置 ${labels.displayName} 的工作区名称`}
+                  aria-label={`重命名工作区 ${labels.displayName}`}
+                  onClick={beginRename}
+                >
+                  <Icon name="edit" size={14}/>
+                </button>
+                <button
+                  type="button"
+                  className="session-directory-add"
+                  title={`在 ${node.path} 新建会话`}
+                  aria-label={`在 ${node.path} 新建会话`}
+                  onClick={() => void dispatch({ type: "session.newAt", cwd: node.path })}
+                >
+                  <span aria-hidden="true">＋</span>
+                </button>
+              </span>
+            )}
+          </>
         )}
       </div>
+      {renaming && (renameTooLong || renameHasInvalidCharacters || renameError) && (
+        <div className="session-directory-rename-error" role="alert">
+          {renameHasInvalidCharacters
+            ? "工作区名称不能包含换行或控制字符"
+            : renameTooLong
+              ? `工作区名称最多 80 个字符（当前 ${renameLength} 个）`
+              : renameError}
+        </div>
+      )}
       {open && (
         <div className="session-directory-contents">
           {node.entries.length > 0 && (
@@ -691,6 +901,7 @@ function DirectoryNode({
               depth={depth + 1}
               selectedId={selectedId}
               dispatch={dispatch}
+              renameDirectory={renameDirectory}
             />
           ))}
         </div>
@@ -705,12 +916,14 @@ function DirectoryTree({
   error,
   selectedId,
   dispatch,
+  renameDirectory,
 }: {
   response: SessionDirectoryResponse | null;
   loading: boolean;
   error: string;
   selectedId: string | null;
   dispatch(action: UiAction): void | Promise<unknown>;
+  renameDirectory(path: string, name: string): Promise<void>;
 }) {
   if (loading && !response) return <div className="session-directory-state">正在整理目录…</div>;
   if (error && !response) return <div className="session-directory-state error">{error}</div>;
@@ -726,6 +939,7 @@ function DirectoryTree({
           depth={0}
           selectedId={selectedId}
           dispatch={dispatch}
+          renameDirectory={renameDirectory}
         />
       ))}
     </div>
@@ -1109,6 +1323,7 @@ export function ShellSidebar() {
                   error={directories.error}
                   selectedId={snapshot.selected?.id ?? null}
                   dispatch={dispatch}
+                  renameDirectory={directories.rename}
                 />
               ) : (
                 <>

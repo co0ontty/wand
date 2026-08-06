@@ -11,6 +11,8 @@ export interface SessionDirectoryNode<T> {
   path: string;
   /** Compact path segment label. Single-child ancestors are folded into this label. */
   name: string;
+  /** User-defined workspace label. Clients display this in preference to name. */
+  customName?: string;
   synthetic: boolean;
   /** Sessions whose cwd is exactly this node. */
   directCount: number;
@@ -107,14 +109,19 @@ function compactLabel(parent: string, child: string, childPath: string): string 
   return `${parent}${separator}${child}`;
 }
 
-function finalizeNode<T>(node: MutableDirectoryNode<T>): SessionDirectoryNode<T> {
-  let children = [...node.children.values()].map(finalizeNode);
+function finalizeNode<T>(
+  node: MutableDirectoryNode<T>,
+  customNames: ReadonlyMap<string, string>,
+): SessionDirectoryNode<T> {
+  let children = [...node.children.values()].map((child) => finalizeNode(child, customNames));
   const sortedEntries = node.entries
     .slice()
     .sort((left, right) => right.sortTimestamp - left.sortTimestamp);
+  const customName = customNames.get(node.path);
   let result: SessionDirectoryNode<T> = {
     path: node.path,
     name: node.name,
+    ...(customName ? { customName } : {}),
     synthetic: node.synthetic,
     directCount: sortedEntries.length,
     totalCount: sortedEntries.length + children.reduce((sum, child) => sum + child.totalCount, 0),
@@ -129,7 +136,7 @@ function finalizeNode<T>(node: MutableDirectoryNode<T>): SessionDirectoryNode<T>
 
   // A filesystem root followed by a single unambiguous chain is visual noise in
   // a 280-300px sidebar. Fold it while retaining the exact descendant path.
-  while (!result.synthetic && result.directCount === 0 && result.children.length === 1) {
+  while (!result.synthetic && !result.customName && result.directCount === 0 && result.children.length === 1) {
     const child = result.children[0];
     result = {
       ...child,
@@ -139,7 +146,7 @@ function finalizeNode<T>(node: MutableDirectoryNode<T>): SessionDirectoryNode<T>
 
   children = result.children.slice().sort((left, right) => {
     const latestOrder = right.latestTimestamp - left.latestTimestamp;
-    return latestOrder || left.name.localeCompare(right.name);
+    return latestOrder || (left.customName ?? left.name).localeCompare(right.customName ?? right.name);
   });
   return { ...result, children };
 }
@@ -147,6 +154,7 @@ function finalizeNode<T>(node: MutableDirectoryNode<T>): SessionDirectoryNode<T>
 export function buildDirectoryTree<T>(
   sources: readonly SessionDirectorySource<T>[],
   unknownLabel = "未知目录",
+  customNames: ReadonlyMap<string, string> = new Map(),
 ): SessionDirectoryTree<T> {
   const roots = new Map<string, MutableDirectoryNode<T>>();
   let unknown: MutableDirectoryNode<T> | null = null;
@@ -171,12 +179,12 @@ export function buildDirectoryTree<T>(
     node.entries.push({ entry: source.entry, sortTimestamp: source.sortTimestamp });
   }
 
-  const finalized = [...roots.values()].map(finalizeNode);
-  if (unknown) finalized.push(finalizeNode(unknown));
+  const finalized = [...roots.values()].map((node) => finalizeNode(node, customNames));
+  if (unknown) finalized.push(finalizeNode(unknown, customNames));
   finalized.sort((left, right) => {
     if (left.synthetic !== right.synthetic) return left.synthetic ? 1 : -1;
     const latestOrder = right.latestTimestamp - left.latestTimestamp;
-    return latestOrder || left.name.localeCompare(right.name);
+    return latestOrder || (left.customName ?? left.name).localeCompare(right.customName ?? right.name);
   });
 
   return {

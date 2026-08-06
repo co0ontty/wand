@@ -34,6 +34,7 @@ import { SessionRegistry } from "./session-registry.js";
 import { enrichStructuredMessages, WAND_PROTOCOL_VERSION } from "./structured-client-protocol.js";
 import {
   buildDirectoryTree,
+  normalizeSessionDirectory,
   type SessionDirectoryNode,
 } from "./session-directory-tree.js";
 
@@ -275,7 +276,10 @@ export interface SessionDirectoryTreeResponse {
   roots: SessionDirectoryNode<SessionListPageEntry>[];
   totalSessions: number;
   directoryCount: number;
+  /** Session-entry revision, kept identical to /api/session-list for pagination compatibility. */
   revision: string;
+  /** Full directory-tree revision, including custom workspace names. */
+  treeRevision: string;
 }
 
 function sessionSortTimestamp(snapshot: SessionSnapshot): number {
@@ -322,9 +326,19 @@ export function buildSessionListEntries(
   });
 }
 
-function sessionListRevision(entries: readonly SessionListPageEntry[]): string {
+function sessionListRevision(
+  entries: readonly SessionListPageEntry[],
+  directoryNames: ReadonlyArray<readonly [path: string, name: string]> = [],
+): string {
+  const entryState = entries.map((entry) => [entry.key, entry.sortTimestamp]);
+  const revisionState = directoryNames.length === 0
+    ? entryState
+    : {
+      entries: entryState,
+      directoryNames: directoryNames.slice().sort(([left], [right]) => left.localeCompare(right)),
+    };
   return createHash("sha256")
-    .update(JSON.stringify(entries.map((entry) => [entry.key, entry.sortTimestamp])))
+    .update(JSON.stringify(revisionState))
     .digest("base64url");
 }
 
@@ -363,6 +377,7 @@ export function buildSessionDirectoryTree(
   hiddenHistoryIds: Set<string>,
   openCodeHistory: ProviderHistorySession[] = [],
   qoderHistory: ProviderHistorySession[] = [],
+  customNames: ReadonlyMap<string, string> = new Map(),
 ): SessionDirectoryTreeResponse {
   const entries = buildSessionListEntries(
     sessions,
@@ -376,8 +391,30 @@ export function buildSessionDirectoryTree(
     entry,
     cwd: entry.type === "managed" ? entry.session.cwd : entry.history.cwd,
     sortTimestamp: entry.sortTimestamp,
-  })));
-  return { ...tree, revision: sessionListRevision(entries) };
+  })), "未知目录", customNames);
+  const appliedCustomNames: Array<readonly [string, string]> = [];
+  const collectCustomNames = (nodes: readonly SessionDirectoryNode<SessionListPageEntry>[]): void => {
+    for (const node of nodes) {
+      if (node.customName) appliedCustomNames.push([node.path, node.customName]);
+      collectCustomNames(node.children);
+    }
+  };
+  collectCustomNames(tree.roots);
+  return {
+    ...tree,
+    revision: sessionListRevision(entries),
+    treeRevision: sessionListRevision(entries, appliedCustomNames),
+  };
+}
+
+function directoryTreeContainsPath(
+  nodes: readonly SessionDirectoryNode<SessionListPageEntry>[],
+  directoryPath: string,
+): boolean {
+  return nodes.some((node) => (
+    (!node.synthetic && node.path === directoryPath)
+    || directoryTreeContainsPath(node.children, directoryPath)
+  ));
 }
 
 /**
@@ -589,6 +626,16 @@ export function registerSessionRoutes(
     });
   };
 
+  const currentDirectoryTree = (): SessionDirectoryTreeResponse => buildSessionDirectoryTree(
+    sessions.listSlim(),
+    processes.listClaudeHistorySessions(),
+    processes.listCodexHistorySessions(),
+    getHiddenClaudeSessionIds(storage),
+    processes.listOpenCodeHistorySessions(),
+    processes.listQoderHistorySessions(),
+    storage.listSessionDirectoryNames(),
+  );
+
   app.get("/api/session-list", (req, res) => {
     try {
       const offset = parseBoundedInteger(req.query.offset, 0, 0, Number.MAX_SAFE_INTEGER);
@@ -617,16 +664,47 @@ export function registerSessionRoutes(
 
   app.get("/api/session-directories", (_req, res) => {
     try {
-      res.json(buildSessionDirectoryTree(
-        sessions.listSlim(),
-        processes.listClaudeHistorySessions(),
-        processes.listCodexHistorySessions(),
-        getHiddenClaudeSessionIds(storage),
-        processes.listOpenCodeHistorySessions(),
-        processes.listQoderHistorySessions(),
-      ));
+      res.json(currentDirectoryTree());
     } catch (error) {
       res.status(500).json({ error: getErrorMessage(error, "无法加载会话目录。") });
+    }
+  });
+
+  app.put("/api/session-directories/name", (req, res) => {
+    const body = req.body as { path?: unknown; name?: unknown } | null | undefined;
+    if (typeof body?.path !== "string") {
+      res.status(400).json({ error: "path 必须是当前工作区的目录路径。" });
+      return;
+    }
+    const directoryPath = normalizeSessionDirectory(body.path);
+    if (!directoryPath) {
+      res.status(400).json({ error: "不能重命名未知目录。" });
+      return;
+    }
+    if (body.name !== null && typeof body.name !== "string") {
+      res.status(400).json({ error: "name 必须是字符串或 null。" });
+      return;
+    }
+    const customName = typeof body.name === "string" ? body.name.trim() : "";
+    if (Array.from(customName).length > 80) {
+      res.status(400).json({ error: "工作区名称不能超过 80 个字符。" });
+      return;
+    }
+    if (/[\u0000-\u001F\u007F-\u009F\u2028\u2029]/u.test(customName)) {
+      res.status(400).json({ error: "工作区名称不能包含换行或控制字符。" });
+      return;
+    }
+
+    try {
+      const tree = currentDirectoryTree();
+      if (!directoryTreeContainsPath(tree.roots, directoryPath)) {
+        res.status(404).json({ error: "未找到该会话目录。" });
+        return;
+      }
+      storage.setSessionDirectoryName(directoryPath, customName || null);
+      res.json({ ok: true, path: directoryPath, name: customName || null });
+    } catch (error) {
+      res.status(500).json({ error: getErrorMessage(error, "无法保存工作区名称。") });
     }
   });
 
