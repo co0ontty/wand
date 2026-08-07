@@ -590,6 +590,15 @@ import { missionsController } from "../react/missions/controller";
         if (stopBtn) stopBtn.addEventListener("click", stopSession);
         var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
         if (inputBox) {
+          // A render/login transition may replace a composing textarea without
+          // dispatching compositionend. A newly bound node starts a fresh IME
+          // generation so stale state cannot swallow its first Return/input.
+          if (state.composerCompositionTarget !== inputBox) {
+            state.composerCompositionGeneration += 1;
+            state.composerCompositionTarget = inputBox;
+            state.composerComposing = false;
+            state.terminalComposing = false;
+          }
           bindInputTouchScroll(inputBox);
           inputBox.addEventListener("keydown", handleInputBoxKeydown);
           inputBox.addEventListener("paste", handleInputPaste);
@@ -604,16 +613,45 @@ import { missionsController } from "../react/missions/controller";
             // v2: 触发 ghost meta / 优化按钮的显隐切换
             syncComposerHasText(inputBox!);
           });
-          // INPUT-3: 交互模式 IME 组字承接。compositionstart 起置位标志让 input
-          // handler 静默；compositionend 取最终组字结果发 PTY 并清空。非交互模式不
-          // 介入，正常的中文聊天输入不受影响。
+          // INPUT-3: 所有 composer 都跟踪 IME 组字，避免 Safari / WKWebView 在
+          // compositionend 同一轮事件里把“确认候选”的 Enter 当成发送。PTY 交互模式
+          // 另保留 terminalComposing，用于在组字结束后把最终文本一次性写进终端。
           inputBox.addEventListener("compositionstart", function() {
-            if (state.terminalInteractive) state.terminalComposing = true;
+            state.composerCompositionGeneration += 1;
+            state.composerCompositionTarget = inputBox;
+            state.composerComposing = true;
+            state.terminalComposing = !!state.terminalInteractive;
           });
           inputBox.addEventListener("compositionend", function() {
-            if (!state.terminalComposing) return;
-            state.terminalComposing = false;
-            if (state.terminalInteractive) handleInteractiveTextInput(inputBox!);
+            // WebKit 可能先发 compositionend，再发 isComposing=false 的 Enter keydown。
+            // 同时它也可能到下一轮才把最终文本写回 textarea。因此 PTY 的最终 flush
+            // 和 guard 清理一起延迟；generation 防止旧 timer 清掉紧接着开始的新组字。
+            var generation = state.composerCompositionGeneration;
+            var wasTerminalComposition = state.terminalComposing;
+            setTimeout(function() {
+              if (generation !== state.composerCompositionGeneration) return;
+              if (!inputBox!.isConnected) {
+                if (state.composerCompositionTarget === inputBox) {
+                  state.composerCompositionTarget = null;
+                }
+                state.terminalComposing = false;
+                state.composerComposing = false;
+                return;
+              }
+              if (wasTerminalComposition) {
+                state.terminalComposing = false;
+                if (state.terminalInteractive) {
+                  handleInteractiveTextInput(inputBox!);
+                } else {
+                  // Interactive mode can be switched off while compositionend
+                  // is settling. Preserve the committed text as a normal draft.
+                  refreshInputBoxState(inputBox!);
+                  setDraftValue(inputBox!.value, true);
+                  syncComposerHasText(inputBox!);
+                }
+              }
+              state.composerComposing = false;
+            }, 0);
           });
           inputBox.addEventListener("focus", function() {
             // 只在手机 drawer 真的盖在输入区上面时才收起，避免 backdrop 挡点击。

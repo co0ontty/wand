@@ -561,14 +561,15 @@
       padding-top: var(--wand-safe-top);
     }
 
-    /* ===== 嵌入终端模式（iOS 原生壳把 PTY 套在原生头部里） =====
+    /* ===== 嵌入终端模式（原生客户端把 PTY 套在平台头部里） =====
        由 ?embed=terminal 触发，main.ts 给 <html> 挂 .is-wand-embed-terminal。
-       只保留 #output 终端黑窗；nativeInput=1 时底部输入栏由原生壳渲染。
-       侧边栏 / 顶栏 / 空白欢迎页全部隐藏，顶部安全区交给原生导航条消费。 */
+       保留终端工作区；nativeInput=1 时底部输入栏也由原生壳渲染。
+       网页侧边栏 / 顶栏 / 文件栏 / 空白欢迎页全部隐藏，顶部安全区交给原生头部消费。 */
     .is-wand-embed-terminal .sidebar,
     .is-wand-embed-terminal .main-header-row,
     .is-wand-embed-terminal .blank-chat,
     .is-wand-embed-terminal .drawer-backdrop,
+    .is-wand-embed-terminal .file-side-panel,
     .is-wand-embed-terminal .file-panel-backdrop {
       display: none !important;
     }
@@ -590,6 +591,9 @@
     }
     .is-wand-embed-terminal .main-content {
       background: var(--embed-pty-bg);
+    }
+    .is-wand-embed-terminal .main-content.file-panel-open {
+      margin-right: 0;
     }
     .is-wand-embed-terminal .terminal-container {
       margin: 0;

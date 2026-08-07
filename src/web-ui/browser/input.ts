@@ -1978,9 +1978,21 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         return true;
       }
 
+      // Safari / WKWebView can expose the Enter that confirms an IME candidate
+      // with isComposing=false. This predicate is shared by the document-level
+      // terminal capture phase and the textarea handler so neither path can
+      // forward that key before the other one sees it.
+      export function isImeKeyboardEvent(event) {
+        return !!event && (
+          !!event.isComposing
+          || event.keyCode === 229
+          || !!state.composerComposing
+        );
+      }
+
       export function shouldCaptureTerminalEvent(event) {
         if (!state.terminalInteractive || !isTerminalInteractionAvailable()) return false;
-        if (event.defaultPrevented || event.isComposing) return false;
+        if (event.defaultPrevented || isImeKeyboardEvent(event)) return false;
         var target = event.target;
         if (!target) return true;
         if (

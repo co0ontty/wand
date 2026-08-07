@@ -68,6 +68,8 @@ test("web source preserves native events, safe-area variables, and selector hook
     "--wand-safe-left",
     "--wand-safe-right",
     ".is-wand-app-native-insets",
+    ".is-wand-embed-terminal .file-side-panel",
+    ".is-wand-embed-terminal .main-content.file-panel-open",
     ".is-wand-embed-terminal .terminal-scroll-wrap",
     ".is-wand-embed-terminal.is-wand-native-input .input-panel",
     ".is-wand-embed-terminal .terminal-container",
@@ -118,8 +120,28 @@ test("Apple WebViews preserve deep links, bridge globals, and terminal hooks", (
   includesAll("macos/Wand/WebContainerView.swift", [
     "window.__wandMacNative = true",
     "window.__wandBackToNative",
+    "var embedTerminal: Bool = false",
+    "embedTerminal: embedTerminal",
+    "var embedNativeInput: Bool = false",
+    "embedNativeInput: embedNativeInput",
     'URLQueryItem(name: "session", value: sessionId)',
+    'URLQueryItem(name: "embed", value: "terminal")',
+    'URLQueryItem(name: "nativeInput", value: "1")',
     "WandPlatform/macOS",
+  ]);
+  includesAll("macos/Wand/MainShellView.swift", [
+    "if session?.isStructured == false",
+    "SessionHeaderView(",
+    "PtySessionView(sessionId: sessionId, api: api)",
+  ]);
+  includesAll("macos/Wand/ChatView.swift", [
+    "embedTerminal: true",
+    "embedNativeInput: true",
+    "IMEAwareComposerTextView",
+    "doCommandBy commandSelector",
+    "textView.hasMarkedText()",
+    "textView.unmarkText()",
+    "composerIsComposing",
   ]);
 });
 

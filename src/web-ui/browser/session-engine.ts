@@ -7,7 +7,7 @@ import { bindChatScrollListener, clearStructuredQueuePersistence, normalizeStruc
 import { attachEventListeners } from "./events";
 import { applyTerminalScale, isMobileLayout, refreshFileExplorer, setFilePanelOpen, shouldShowSessionsBackdrop, updateFilePanelCwd, updateLayoutState } from "./file-browser";
 import { loadGitStatus, updateTopbarGitBadge } from "./git-commit";
-import { activateSession, autoResizeInput, buildMessagesForRender, canAutoResumeSession, captureTerminalInput, closeKeyboardPopup, closeSwipedItem, flushCrossSessionQueue, focusInputBox, getControlInput, hasActiveTerminalSelection, hideMiniKeyboard, queueDirectInput, reconcileInteractiveState, renderCrossSessionQueue, sendInputFromBox, setTerminalInteractive, shouldCaptureTerminalEvent, stopSession, switchToSessionView, updateInteractiveControls, updateStructuredQueueCounter, updateVoiceTranscript } from "./input";
+import { activateSession, autoResizeInput, buildMessagesForRender, canAutoResumeSession, captureTerminalInput, closeKeyboardPopup, closeSwipedItem, flushCrossSessionQueue, focusInputBox, getControlInput, hasActiveTerminalSelection, hideMiniKeyboard, isImeKeyboardEvent, queueDirectInput, reconcileInteractiveState, renderCrossSessionQueue, sendInputFromBox, setTerminalInteractive, shouldCaptureTerminalEvent, stopSession, switchToSessionView, updateInteractiveControls, updateStructuredQueueCounter, updateVoiceTranscript } from "./input";
 import { _apkVersion, _getNativePermission, _hasNativeBridge, _macAppVersion, _syncWakeLock, _vibrate, clearSessionProgressNative, hideError, notifyTaskEnded, openWandDialog, performRestart, sendBrowserNotification, showError, showNotificationBubble, showRestartOverlay, showToast, tryPlayNotificationSound, wandAlert, wandConfirm, wandPrompt } from "./notifications";
 import { bindForegroundSyncListeners, getEffectiveCwd, render, renderAppShell, resetChatRenderCache, updateOfflineBanner } from "./render";
 import { ensureClaudeHistoryLoaded, ensureCodexHistoryLoaded, loadClaudeHistory, loadCodexHistory, renderSessions, renderSessionsListContent } from "./sidebar";
@@ -2479,7 +2479,11 @@ import { inferProviderIdFromCommand } from "../provider-identity";
       }
 
       export function handleInputBoxKeydown(event) {
-        if (event.isComposing) return;
+        // `isComposing` alone is insufficient on Safari/WKWebView: the Enter used
+        // to accept an IME candidate can arrive with isComposing=false (often
+        // keyCode 229), or immediately after compositionend in the same event
+        // loop. None of those cases may submit the composer.
+        if (isImeKeyboardEvent(event)) return;
 
         if (shouldCaptureTerminalEvent(event)) {
           captureTerminalInput(event);

@@ -12920,6 +12920,13 @@
     terminalViewportTouchStartHandler: null,
     terminalTouchStartY: 0,
     terminalComposing: false,
+    // Safari / WKWebView may report the Enter key used to confirm an IME
+    // candidate after compositionend with isComposing=false. Keep a composer-
+    // level guard alive through the rest of that event loop so the confirmation
+    // keystroke can never fall through to message submission.
+    composerComposing: false,
+    composerCompositionGeneration: 0,
+    composerCompositionTarget: null,
     resizeObserver: null,
     resizeHandler: null,
     resizeTimer: null,
@@ -40486,6 +40493,12 @@
     if (stopBtn) stopBtn.addEventListener("click", stopSession);
     var inputBox = document.getElementById("input-box");
     if (inputBox) {
+      if (state.composerCompositionTarget !== inputBox) {
+        state.composerCompositionGeneration += 1;
+        state.composerCompositionTarget = inputBox;
+        state.composerComposing = false;
+        state.terminalComposing = false;
+      }
       bindInputTouchScroll(inputBox);
       inputBox.addEventListener("keydown", handleInputBoxKeydown);
       inputBox.addEventListener("paste", handleInputPaste);
@@ -40499,12 +40512,36 @@
         syncComposerHasText(inputBox);
       });
       inputBox.addEventListener("compositionstart", function() {
-        if (state.terminalInteractive) state.terminalComposing = true;
+        state.composerCompositionGeneration += 1;
+        state.composerCompositionTarget = inputBox;
+        state.composerComposing = true;
+        state.terminalComposing = !!state.terminalInteractive;
       });
       inputBox.addEventListener("compositionend", function() {
-        if (!state.terminalComposing) return;
-        state.terminalComposing = false;
-        if (state.terminalInteractive) handleInteractiveTextInput(inputBox);
+        var generation = state.composerCompositionGeneration;
+        var wasTerminalComposition = state.terminalComposing;
+        setTimeout(function() {
+          if (generation !== state.composerCompositionGeneration) return;
+          if (!inputBox.isConnected) {
+            if (state.composerCompositionTarget === inputBox) {
+              state.composerCompositionTarget = null;
+            }
+            state.terminalComposing = false;
+            state.composerComposing = false;
+            return;
+          }
+          if (wasTerminalComposition) {
+            state.terminalComposing = false;
+            if (state.terminalInteractive) {
+              handleInteractiveTextInput(inputBox);
+            } else {
+              refreshInputBoxState(inputBox);
+              setDraftValue(inputBox.value, true);
+              syncComposerHasText(inputBox);
+            }
+          }
+          state.composerComposing = false;
+        }, 0);
       });
       inputBox.addEventListener("focus", function() {
         dismissDrawerIfOverlay();
@@ -43554,9 +43591,12 @@
     if (state.terminalSessionId && state.terminalSessionId !== sessionId) return false;
     return true;
   }
+  function isImeKeyboardEvent(event) {
+    return !!event && (!!event.isComposing || event.keyCode === 229 || !!state.composerComposing);
+  }
   function shouldCaptureTerminalEvent(event) {
     if (!state.terminalInteractive || !isTerminalInteractionAvailable2()) return false;
-    if (event.defaultPrevented || event.isComposing) return false;
+    if (event.defaultPrevented || isImeKeyboardEvent(event)) return false;
     var target = event.target;
     if (!target) return true;
     if (document.documentElement.classList.contains("is-wand-embed-terminal") && target.closest && target.closest("#input-box")) {
@@ -49531,7 +49571,7 @@
     });
   }
   function handleInputBoxKeydown(event) {
-    if (event.isComposing) return;
+    if (isImeKeyboardEvent(event)) return;
     if (shouldCaptureTerminalEvent(event)) {
       captureTerminalInput2(event);
       return;

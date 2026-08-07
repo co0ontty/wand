@@ -179,6 +179,203 @@ test("composer sendability and selection replacements share one state path", asy
   await expect(send).toBeEnabled();
 });
 
+test("IME confirmation Enter never submits the composer in WebKit event orderings", async ({ page }) => {
+  const session = composerSession("composer-ime-enter", "2026-07-24T03:15:00.000Z");
+  await routeComposerSessions(page, [session]);
+
+  let messageCount = 0;
+  await page.route(`**/api/structured-sessions/${session.id}/messages`, async (route) => {
+    messageCount += 1;
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true }),
+    });
+  });
+  await login(page);
+
+  const input = page.locator("#input-box");
+  await input.fill("正在输入拼音");
+
+  // Chromium-style ordering: keydown still advertises active composition.
+  await input.evaluate((element) => {
+    element.dispatchEvent(new CompositionEvent("compositionstart", {
+      bubbles: true,
+      data: "pinyin",
+    }));
+    element.dispatchEvent(new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "Enter",
+      isComposing: true,
+    }));
+  });
+
+  // Safari/WKWebView can emit compositionend first, followed in the same task
+  // by an Enter whose isComposing is already false.
+  await input.evaluate((element) => {
+    element.dispatchEvent(new CompositionEvent("compositionend", {
+      bubbles: true,
+      data: "拼音",
+    }));
+    element.dispatchEvent(new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "Enter",
+      isComposing: false,
+    }));
+  });
+
+  await page.waitForTimeout(20);
+  expect(messageCount).toBe(0);
+  await expect(input).toHaveValue("正在输入拼音");
+
+  // Older WebKit exposes the IME sentinel keyCode even when isComposing=false.
+  await input.evaluate((element) => {
+    const event = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "Enter",
+      isComposing: false,
+    });
+    Object.defineProperty(event, "keyCode", { value: 229 });
+    element.dispatchEvent(event);
+  });
+  await page.waitForTimeout(20);
+  expect(messageCount).toBe(0);
+  await expect(input).toHaveValue("正在输入拼音");
+
+  // A new composition cycle can begin before the previous settle timer runs.
+  // The old timer must not clear the guard belonging to the new cycle.
+  await input.evaluate((element) => {
+    element.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: "n" }));
+    element.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: "你" }));
+    element.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: "h" }));
+  });
+  await page.waitForTimeout(20);
+  await input.evaluate((element) => {
+    element.dispatchEvent(new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "Enter",
+      isComposing: false,
+    }));
+    element.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: "好" }));
+  });
+  await page.waitForTimeout(20);
+  expect(messageCount).toBe(0);
+  await expect(input).toHaveValue("正在输入拼音");
+
+  // Once composition has settled, a normal Return retains the send shortcut.
+  await input.press("Enter");
+  await expect.poll(() => messageCount).toBe(1);
+  await expect(input).toHaveValue("");
+});
+
+test("IME confirmation is suppressed before terminal-interactive capture", async ({ page }) => {
+  const session = {
+    id: "composer-ime-pty-capture",
+    title: "PTY IME capture",
+    sessionKind: "pty",
+    sessionSource: "interactive",
+    runner: "pty",
+    provider: "codex",
+    command: "codex",
+    cwd: "/tmp/wand-composer",
+    mode: "full-access",
+    status: "running",
+    exitCode: null,
+    archived: false,
+    startedAt: "2026-07-24T03:20:00.000Z",
+    output: "",
+    messages: [],
+    messageOffset: 0,
+    messageTotal: 0,
+  };
+  await page.route("**/api/sessions", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify([session]),
+  }));
+
+  const sentInputs: string[] = [];
+  await page.route(new RegExp(`/api/sessions/${session.id}(?:\\?.*)?$`), async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(session),
+    });
+  });
+  await page.route(`**/api/sessions/${session.id}/input`, async (route) => {
+    sentInputs.push(route.request().postDataJSON().input);
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true }),
+    });
+  });
+  await login(page);
+  await switchSession(page, session.id);
+
+  await page.locator("#attach-btn").click();
+  const interactiveToggle = page.locator("#terminal-interactive-toggle-top");
+  await expect(interactiveToggle).toBeVisible();
+  await interactiveToggle.click();
+  await expect(interactiveToggle).toHaveAttribute("aria-pressed", "true");
+
+  const input = page.locator("#input-box");
+  await input.evaluate((element) => {
+    element.dispatchEvent(new CompositionEvent("compositionstart", {
+      bubbles: true,
+      data: "pinyin",
+    }));
+    element.dispatchEvent(new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "Enter",
+      isComposing: false,
+    }));
+    element.dispatchEvent(new CompositionEvent("compositionend", {
+      bubbles: true,
+      data: "拼音",
+    }));
+    // Safari/WebKit may commit the final value after compositionend.
+    (element as HTMLTextAreaElement).value = "拼音";
+    element.dispatchEvent(new InputEvent("input", {
+      bubbles: true,
+      data: "拼音",
+      inputType: "insertCompositionText",
+    }));
+    element.dispatchEvent(new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "Enter",
+      isComposing: false,
+    }));
+  });
+  await page.waitForTimeout(20);
+
+  await input.evaluate((element) => {
+    const event = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "Enter",
+      isComposing: false,
+    });
+    Object.defineProperty(event, "keyCode", { value: 229 });
+    element.dispatchEvent(event);
+  });
+  await page.waitForTimeout(20);
+  expect(sentInputs).toEqual(["拼音"]);
+
+  // Prove terminal capture is actually active rather than the test passing
+  // because the listener was never installed.
+  await input.evaluate((element) => {
+    element.dispatchEvent(new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "x",
+    }));
+  });
+  await expect.poll(() => sentInputs).toEqual(["拼音", "x"]);
+});
+
 test("composer more menu follows keyboard focus and returns it on close", async ({ page }) => {
   const session = composerSession("composer-more-menu", "2026-07-24T03:30:00.000Z");
   await routeComposerSessions(page, [session]);

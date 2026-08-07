@@ -103,6 +103,13 @@ export var state: AppState = {
   terminalViewportTouchStartHandler: null,
   terminalTouchStartY: 0,
   terminalComposing: false,
+  // Safari / WKWebView may report the Enter key used to confirm an IME
+  // candidate after compositionend with isComposing=false. Keep a composer-
+  // level guard alive through the rest of that event loop so the confirmation
+  // keystroke can never fall through to message submission.
+  composerComposing: false,
+  composerCompositionGeneration: 0,
+  composerCompositionTarget: null,
   resizeObserver: null,
   resizeHandler: null,
   resizeTimer: null,
