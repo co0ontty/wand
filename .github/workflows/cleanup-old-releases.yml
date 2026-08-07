@@ -1,12 +1,12 @@
 name: Cleanup Old Release Assets
 
-# 只保留最近 N 个 release 的 APK / DMG 产物，更老的 release 页面与 release notes 保留，
+# 只保留最近 N 个 release 的 APK / DMG / ZIP / IPA 产物，更老的 release 页面与 release notes 保留，
 # 仅删除二进制 assets。每次新 release 发布后自动跑；也可手动触发做一次性清理。
 #
 # - 排序：按 tag 的 semver 降序（sort -V），不依赖 created_at，避免回填型发布被误删。
 # - 保护刚发布的那个 tag：哪怕它的 semver 排不进前 N（例如对老分支的补丁版本），
 #   也会被排除在删除名单外。
-# - 仅删 .apk / .dmg / .ipa，其他 assets 不动。
+# - 仅删 .apk / .dmg / .zip / .ipa，其他 assets 不动。
 # - 每类产物全局至少保住一个：用于兼容旧 release 或某次平台构建失败后
 #   保留窗口内缺失某类产物的情况。
 
@@ -27,7 +27,7 @@ jobs:
   cleanup:
     runs-on: ubuntu-latest
     steps:
-      - name: Prune APK/DMG/IPA from older releases
+      - name: Prune APK/DMG/ZIP/IPA from older releases
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -65,6 +65,7 @@ jobs:
             case "${1,,}" in
               *.apk) echo apk ;;
               *.dmg) echo dmg ;;
+              *.zip) echo zip ;;
               *.ipa) echo ipa ;;
             esac
           }
@@ -86,14 +87,14 @@ jobs:
           for tag in "${PRUNE[@]}"; do
             PRUNE_ASSETS["$tag"]=$(
               gh release view "$tag" --repo "$REPO" --json assets \
-                --jq '.assets[] | select(.name | test("\\.(apk|dmg|ipa)$"; "i")) | .name' \
+                --jq '.assets[] | select(.name | test("\\.(apk|dmg|zip|ipa)$"; "i")) | .name' \
                 2>/dev/null || true
             )
           done
 
           # 保留窗口内缺失的产物类型：保住窗口外（semver 降序）最新的那一个
           declare -A PROTECT=()
-          for want in apk dmg ipa; do
+          for want in apk dmg zip ipa; do
             [ -n "${EXT_IN_KEEP[$want]:-}" ] && continue
             for tag in "${PRUNE[@]}"; do
               found=""
