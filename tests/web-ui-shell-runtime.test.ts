@@ -102,6 +102,14 @@ test("composer skill picker stays scoped to Claude SDK structured sessions", () 
   assert.match(events, /data-claude-skill-name/);
 });
 
+test("PTY running indicators stop when the provider exits into its retained shell", () => {
+  const utils = readFileSync(path.join(root, "src/web-ui/browser/utils.ts"), "utf8");
+  const sessions = readFileSync(path.join(root, "src/web-ui/browser/session-engine.ts"), "utf8");
+  assert.match(utils, /session\.providerCliActive !== false/);
+  assert.match(utils, /session\.status === "running"\s*&& providerCliRunning/);
+  assert.match(sessions, /capabilities: \{ ptyAck: true \}/);
+});
+
 test("terminal initialization cannot expose PTY chrome for a structured session", () => {
   const terminal = readFileSync(path.join(root, "src/web-ui/browser/terminal.ts"), "utf8");
   const sessions = readFileSync(path.join(root, "src/web-ui/browser/session-engine.ts"), "utf8");
@@ -110,4 +118,28 @@ test("terminal initialization cannot expose PTY chrome for a structured session"
   assert.match(terminal, /if \(shouldExposeTerminal\) \{\s*container\.classList\.remove\("hidden"\);\s*container\.classList\.add\("active"\);/s);
   assert.doesNotMatch(terminal, /if \(state\.selectedId\) \{\s*container\.classList\.remove\("hidden"\)/s);
   assert.match(sessions, /!state\.terminal && terminalContainer && selectedSession && !isStructuredSession\(selectedSession\)/);
+});
+
+test("terminal snapshots survive WebSocket init arriving before xterm mounts", () => {
+  const state = readFileSync(path.join(root, "src/web-ui/browser/state.ts"), "utf8");
+  const terminal = readFileSync(path.join(root, "src/web-ui/browser/terminal.ts"), "utf8");
+  const sessions = readFileSync(path.join(root, "src/web-ui/browser/session-engine.ts"), "utf8");
+
+  assert.match(state, /terminalStatesBySession: \{\}/);
+  assert.match(terminal, /if \(sessionId\) state\.terminalStatesBySession\[sessionId\] = snapshot;/);
+  assert.match(terminal, /if \(!state\.terminal\) return true;/);
+  assert.match(terminal, /session\.terminalState \|\| cachedState/);
+  assert.match(sessions, /if \(!sessionIds\.has\(id\)\) delete state\.terminalStatesBySession\[id\]/);
+});
+
+test("terminal interaction compacts the composer without shrinking touch controls", () => {
+  const input = readFileSync(path.join(root, "src/web-ui/browser/input.ts"), "utf8");
+  const render = readFileSync(path.join(root, "src/web-ui/browser/render.ts"), "utf8");
+  const styles = readFileSync(path.join(root, "src/web-ui/content/styles.css"), "utf8");
+
+  assert.match(input, /composerShell\.classList\.toggle\("is-terminal-interactive", !!state\.terminalInteractive\)/);
+  assert.match(input, /var terminalPassthrough = el\.classList\.contains\("is-terminal-passthrough"\)/);
+  assert.match(render, /state\.terminalInteractive \? ' is-terminal-interactive' : ''/);
+  assert.match(styles, /\.input-composer\.is-terminal-interactive \.composer-main-row[\s\S]*?grid-template-rows: 32px 36px;[\s\S]*?min-height: 68px;/);
+  assert.match(styles, /@media \(max-width: 640px\)[\s\S]*?\.input-composer\.is-terminal-interactive[\s\S]*?grid-template-rows: 40px 48px;/);
 });

@@ -10,7 +10,7 @@ import { showToast, wandConfirm, wandAlert, wandPrompt, openWandDialog, showErro
 import { render, resetChatRenderCache, getEffectiveCwd } from "./render";
 import { applyCurrentView, buildAttachmentPrefix, canSendComposer, discardPendingAttachments, dismissDrawerIfOverlay, getChatModelForProvider, getComposerPlaceholder, getComposerTool, getDraftValueForSession, getPendingAttachments, getPreferredMessages, getPreferredTool, getSafeModeForTool, getSelectedClaudeSkills, isStructuredSession, loadOutput, loadSessions, refreshAll, replaceComposerSelection, restoreComposerStateForSession, restorePendingAttachments, selectSession, setDraftValue, setDraftValueForSession, shouldRequestChatFormat, subscribeToSession, supportsClaudeSkillSelection, syncComposerHasText, takePendingAttachments, updateSessionSnapshot, updateSessionsList, uploadAttachments, withTerminalDimensions } from "./session-engine";
 import { renderSessions, loadClaudeHistory, loadCodexHistory, ensureClaudeHistoryLoaded, ensureCodexHistoryLoaded, confirmDelete } from "./sidebar";
-import { initTerminal, maybeScheduleResyncForChunk, maybeScrollTerminalToBottom, scheduleSoftResyncTerminal, softResyncTerminal, syncTerminalBuffer } from "./terminal";
+import { initTerminal, maybeScrollTerminalToBottom, scheduleSoftResyncTerminal } from "./terminal";
 import { ensureTerminalFit, scheduleClosedViewportBaselineWindow, sendTerminalResize, syncAppViewportHeight, teardownTerminal, updateJoystickPanelUI, updateJoystickVisibility } from "./viewport";
 import { setView, initWebSocket, forceReconnectWebSocket } from "./websocket";
 import { getSessionStatusLabel } from "./session-ui";
@@ -149,8 +149,12 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           ? Math.max(minHeight, computedMaxHeight)
           : 120;
         var touchDevice = isTouchDevice();
-        // For empty content, reset to minimum height immediately
-        if (!el.value || el.value.trim() === "") {
+        // PTY passthrough is a compact control surface, not a drafting area.
+        // Keep it at the CSS minimum even if a previous composer draft still
+        // exists for this session; the draft is restored when passthrough ends.
+        var terminalPassthrough = el.classList.contains("is-terminal-passthrough");
+        // For empty content, reset to minimum height immediately.
+        if (terminalPassthrough || !el.value || el.value.trim() === "") {
           el.style.height = minHeight + "px";
           el.style.minHeight = minHeight + "px";
           el.style.overflowY = touchDevice ? "auto" : "hidden";
@@ -1822,27 +1826,23 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         });
       }
 
-      // R8: 检测用户输入是否包含 /clear 命令，命中时把 marker 标到当前 buffer
-      // 长度，下次 softResync 时就不会重放 /clear 之前的历史。
-      // 检测点放在 queueDirectInput 是因为：所有用户 input（chat 框发送、终端
-      // interactive 直写、shortcut 按键、bracketed paste 等）最终都汇到这条
-      // 路径。先 strip bracketed-paste 包络（\x1b[200~ ... \x1b[201~）再做行首
-      // 匹配，覆盖多种粘贴形式。
-      export function _detectAndMarkClear(input) {
-        if (typeof input !== "string" || !input) return;
-        var stripped = input.replace(/\x1b\[200~/g, "").replace(/\x1b\[201~/g, "");
-        // 必须 /clear 在某一行起始位置，且后接 \r 或 \n 或行尾
-        if (/(?:^|\n)\s*\/clear\s*(?:\r|\n|$)/.test(stripped)) {
-          if (typeof state !== "undefined" && state) {
-            state.terminalOutputMarker = (state.terminalOutput && state.terminalOutput.length) | 0;
-          }
-        }
-      }
-
       export function queueDirectInput(input, shortcutKey?, viewOverride?, sessionId?) {
         var targetSessionId = sessionId || state.selectedId;
         if (!input || !targetSessionId) return Promise.resolve();
-        _detectAndMarkClear(input);
+        var effectiveView = viewOverride || state.currentView;
+        if (effectiveView === "terminal"
+            && targetSessionId === state.selectedId
+            && state.ws
+            && state.ws.readyState === WebSocket.OPEN) {
+          state.ws.send(JSON.stringify({
+            type: "pty_input",
+            sessionId: targetSessionId,
+            data: input,
+            shortcutKey: shortcutKey,
+            userInput: true
+          }));
+          return Promise.resolve();
+        }
         state.messageQueue.push(input);
         state.inputQueue = state.inputQueue.then(function() {
           return postInput(input, shortcutKey, viewOverride, targetSessionId, !!sessionId).finally(function() {
@@ -1966,7 +1966,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         return !!state.selectedId && state.currentView === "terminal";
       }
 
-      // 判断一条带 sessionId 的 ws 消息是否应该被当前 wterm 实例消费。
+      // 判断一条带 sessionId 的 WS 消息是否应该被当前 xterm 实例消费。
       // 收敛多处散落的"selectedId 一致 + terminalSessionId 兼容"判断，避免
       // 后续重构时漏改某一处导致旧会话的输出污染当前终端。
       // terminalSessionId 为空（尚未首次 init/切换刚发生）视为可接受任何
@@ -2140,6 +2140,10 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         var next = !!enabled && isTerminalInteractionAvailable();
         if (state.terminalInteractive === next) return;
         state.terminalInteractive = next;
+        if (state.terminal && state.terminal.element) {
+          var helperTextarea = state.terminal.element.querySelector(".xterm-helper-textarea");
+          if (helperTextarea) helperTextarea.readOnly = !next;
+        }
         if (next) {
           enableTerminalCapture();
           hideMiniKeyboard(false);
@@ -2150,6 +2154,10 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           clearModifiers();
         }
         updateInteractiveControls();
+        // Re-measure after the terminal modifier lands so an inline height
+        // left by the normal composer cannot override the compact CSS state.
+        var composer = document.getElementById("input-box");
+        if (composer) autoResizeInput(composer);
       }
 
       export function reconcileInteractiveState() {
@@ -2221,6 +2229,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         }
         if (composerShell) {
           composerShell.classList.toggle("is-optimizing", promptOptimizeBusyForCurrent);
+          composerShell.classList.toggle("is-terminal-interactive", !!state.terminalInteractive);
         }
         var promptOptimizeBtn = document.getElementById("prompt-optimize-btn") as HTMLButtonElement | null;
         if (promptOptimizeBtn) {
@@ -2336,9 +2345,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         sendTerminalSequence(sequence, key);
       }
 
-      // 快捷键点击后做一次延迟 resync 兜底：maybeScheduleResyncForChunk 偶尔会漏
-      // 抓 Codex 菜单切换之类的原地重绘，导致 DOM 行残留。500ms 是为了等服务端把
-      // 本次按键的回执完整推过来，避免 resync 只回放到 chunk 一半。
+      // 快捷键响应完成后只要求 xterm 刷新可见行，不重放 PTY 字节。
       export function scheduleShortcutResync() {
         if (!state.terminal) return;
         scheduleSoftResyncTerminal(500);
@@ -2362,11 +2369,18 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
       }
 
       export function enableTerminalCapture() {
-        document.addEventListener("keydown", captureTerminalInput, true);
+        if (state.terminal && state.terminal.element) {
+          var helperTextarea = state.terminal.element.querySelector(".xterm-helper-textarea");
+          if (helperTextarea) helperTextarea.readOnly = false;
+        }
       }
 
       export function disableTerminalCapture() {
         document.removeEventListener("keydown", captureTerminalInput, true);
+        if (state.terminal && state.terminal.element) {
+          var helperTextarea = state.terminal.element.querySelector(".xterm-helper-textarea");
+          if (helperTextarea) helperTextarea.readOnly = true;
+        }
       }
 
       export function buildPtySequence(key, modifiers) {
@@ -3281,7 +3295,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         }
 
         // 键盘已弹出时，点击输入区以外的区域自动收起（仅触摸设备）。
-        // 只处理聊天输入框 #input-box：终端透传 / wterm 自己的隐藏输入框有
+        // 只处理聊天输入框 #input-box：xterm 的 textarea 有
         // 独立的焦点管理，不能在这里误伤。用 click 而非 pointerdown——滚动
         // 手势不产生 click，上滑翻历史不会误收键盘；且收起引发的布局位移
         // 发生在本次点击完成之后，不会造成误点。capture 阶段监听，避免被

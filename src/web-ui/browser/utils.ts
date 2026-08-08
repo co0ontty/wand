@@ -18,7 +18,10 @@ export function computeRunningSignal(session: any) {
   var permBlocked = !!session.permissionBlocked;
   var inFlight = !!(isStructuredSession(session)
     && session.structuredState && session.structuredState.inFlight);
-  var ptyRunning = !isStructuredSession(session) && session.status === "running";
+  var providerCliRunning = session.providerCliActive !== false;
+  var ptyRunning = !isStructuredSession(session)
+    && session.status === "running"
+    && providerCliRunning;
   return {
     active: inFlight || ptyRunning || permBlocked,
     inFlight: inFlight,

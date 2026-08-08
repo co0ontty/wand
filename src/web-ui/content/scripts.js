@@ -12880,36 +12880,21 @@
     config: null,
     sessions: [],
     terminal: null,
+    terminalFitAddon: null,
+    terminalWriteQueue: Promise.resolve(),
+    terminalRestoreGeneration: 0,
+    // WS init can arrive before xterm finishes loading fonts/opening its DOM.
+    // Keep the authoritative emulator snapshot outside the replaceable session
+    // list so a concurrent /api/sessions refresh cannot lose it.
+    terminalStatesBySession: {},
     terminalFitInProgress: false,
     terminalSessionId: null,
     terminalOutput: "",
-    // R8: /clear marker。Claude 的 /clear 不发任何 ANSI 清屏序列，它只
-    // 就地把对话框重画成空、把旧对话推进 scrollback。但 wand 的
-    // state.terminalOutput 是 append-only buffer，softResync 一触发就
-    // 把 /clear 之前的历史全部重放回 wterm（用户看到"/clear 后短暂闪
-    // 回旧内容"）。marker 表示 buffer 里"用户上次 /clear 时刻的位置"，
-    // softResync 只重放 slice(marker)，从根上避免历史被重放。
-    terminalOutputMarker: 0,
     terminalLiveStreamSessions: {},
-    // CSI ?2026h..l 同步输出缓冲：begin 时拿到 "\x1b[?2026h" 后开始缓冲，
-    // end 时拿到 "\x1b[?2026l" 一次性 flush 给 wterm。null 表示当前不在
-    // sync 包帧内。@wterm/core 0.1.8 不实现 sync output，begin/end 之间
-    // 每个 write 立即落到 grid + mark dirty —— 跨 server-debounce 窗口
-    // 时浏览器看到中间帧 + 触发 softResync 时状态机被打断，正是
-    // askuserquestion 菜单多份叠加的最强候选根因。
-    syncOutputBuffer: null,
-    syncOutputDeadline: 0,
-    syncFramingResidue: false,
     lastChunkAt: 0,
     terminalHealthTimer: null,
-    lastTerminalResyncAt: 0,
     terminalAutoFollow: true,
-    // 程序触发的滚动（wand 主动 scrollTo / wterm 内部因 _shouldScrollToBottom=true
-    // 拽 scrollTop=scrollHeight）落到 scroll handler 时会被误判为"用户滚回严格
-    // 底部"，把 autoFollow 反转回 true，把用户刚 wheel 上滚的意图吞掉。
-    // 存"窗口截止时间戳"而非"开始时间戳"：不同调用方按各自动画长度延长窗口
-    // （瞬时 120ms 覆盖一次 rAF + 事件分发；smooth 500ms 覆盖 Chromium smooth
-    // scroll 动画），多次调用用 Math.max 合并、不会被短窗口缩短。
+    // Ignore scroll events caused by our own scroll-to-bottom operation.
     terminalProgrammaticScrollUntil: 0,
     terminalScrollIdleTimer: null,
     terminalScrollThreshold: 12,
@@ -24536,7 +24521,8 @@
   }
   var CLAUDE_LOGO_PATH = "m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z";
   var CODEX_LOGO_PATH = "M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z";
-  var PI_LOGO_PATH = "M4 5h16v4h-3v11h-4V9h-2v11H7V9H4Z";
+  var PI_LOGO_PATH = "M165.29 165.29H517.36V400H400V517.36H282.65V634.72H165.29ZM282.65 282.65V400H400V282.65Z";
+  var PI_LOGO_DOT_PATH = "M517.36 400H634.72V634.72H517.36Z";
   var GROK_LOGO_PATHS = [
     "M13.2371 21.0407L24.3186 12.8506C24.8619 12.4491 25.6384 12.6057 25.8973 13.2294C27.2597 16.5185 26.651 20.4712 23.9403 23.1851C21.2297 25.8989 17.4581 26.4941 14.0108 25.1386L10.2449 26.8843C15.6463 30.5806 22.2053 29.6665 26.304 25.5601C29.5551 22.3051 30.562 17.8683 29.6205 13.8673L29.629 13.8758C28.2637 7.99809 29.9647 5.64871 33.449.844576C33.5314.730667 33.6139.616757 33.6964.5L29.1113 5.09055V5.07631L13.2343 21.0436Z",
     "M10.9503 23.0313C7.07343 19.3235 7.74185 13.5853 11.0498 10.2763C13.4959 7.82722 17.5036 6.82767 21.0021 8.2971L24.7595 6.55998C24.0826 6.07017 23.215 5.54334 22.2195 5.17313C17.7198 3.31926 12.3326 4.24192 8.67479 7.90126C5.15635 11.4239 4.0499 16.8403 5.94992 21.4622C7.36924 24.9165 5.04257 27.3598 2.69884 29.826C1.86829 30.7002 1.0349 31.5745.36364 32.5L10.9474 23.0341Z"
@@ -24555,7 +24541,7 @@
       return `<svg ${common} viewBox="0 0 34 33" fill="currentColor">${GROK_LOGO_PATHS.map((path) => `<path d="${path}"/>`).join("")}</svg>`;
     }
     if (provider === "pi") {
-      return `<svg ${common} viewBox="0 0 24 24" fill="currentColor"><path d="${PI_LOGO_PATH}"/></svg>`;
+      return `<svg ${common} viewBox="0 0 800 800" fill="currentColor"><path d="${PI_LOGO_PATH}" fill-rule="evenodd"/><path d="${PI_LOGO_DOT_PATH}"/></svg>`;
     }
     if (provider === "claude" || provider === "codex") {
       return `<svg ${common} viewBox="0 0 24 24" fill="currentColor"><path d="${provider === "claude" ? CLAUDE_LOGO_PATH : CODEX_LOGO_PATH}"/></svg>`;
@@ -24636,7 +24622,21 @@
       );
     }
     if (normalized === "pi") {
-      return /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("svg", { className: logoClass, viewBox: "0 0 24 24", fill: "currentColor", "aria-hidden": "true", focusable: "false", "data-provider-logo": "pi", children: /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("path", { d: PI_LOGO_PATH }) });
+      return /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(
+        "svg",
+        {
+          className: logoClass,
+          viewBox: "0 0 800 800",
+          fill: "currentColor",
+          "aria-hidden": "true",
+          focusable: "false",
+          "data-provider-logo": "pi",
+          children: [
+            /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("path", { d: PI_LOGO_PATH, fillRule: "evenodd" }),
+            /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("path", { d: PI_LOGO_DOT_PATH })
+          ]
+        }
+      );
     }
     if (normalized === "claude" || normalized === "codex") {
       return /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(
@@ -33030,6 +33030,30 @@
     -webkit-backdrop-filter: none;
   }
 }
+
+html:not(.is-wand-app) .wand-ui-select-content.wand-composer-select-content {
+  border-color: var(--border-default);
+  border-radius: 10px;
+  padding: 5px;
+  background: var(--bg-elevated);
+  box-shadow: 0 14px 34px -20px rgba(40, 32, 26, 0.38);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+html:not(.is-wand-app) .wand-ui-select-item.wand-composer-select-item {
+  border-radius: 7px;
+}
+
+html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
+  min-height: 32px;
+}
+
+@media (max-width: 640px), (pointer: coarse) {
+  html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
+    min-height: 44px;
+  }
+}
 `;
 
   // src/web-ui/react/styles.ts
@@ -36050,14 +36074,11 @@
     if (!state.terminal || !state.terminal.element) return;
     var rawFontSize = state.terminalBaseFontSize * state.terminalScale;
     var fontPx = Math.max(1, Math.round(rawFontSize));
-    var rowPx = Math.max(1, Math.round(rawFontSize * 1.5));
-    state.terminal.element.style.setProperty("--term-font-size", fontPx + "px");
-    state.terminal.element.style.setProperty("--term-row-height", rowPx + "px");
-    if (typeof state.terminal.remeasure === "function") {
-      requestAnimationFrame(function() {
-        if (state.terminal) state.terminal.remeasure();
-      });
-    }
+    state.terminal.options.fontSize = fontPx;
+    requestAnimationFrame(function() {
+      if (!state.terminal || !state.terminalFitAddon) return;
+      state.terminalFitAddon.fit();
+    });
   }
   function updateScaleLabel() {
     var label = document.getElementById("terminal-scale-label-top");
@@ -37422,6 +37443,10 @@
             }
             return;
           }
+          if (msg && msg.type === "pty_error") {
+            showToast(msg.error || "\u7EC8\u7AEF\u8F93\u5165\u5931\u8D25", "error");
+            return;
+          }
           if (msg && msg.type === "resync_required" && msg.sessionId) {
             if (state.ws && state.ws.readyState === WebSocket.OPEN) {
               try {
@@ -37570,19 +37595,20 @@
           if (msg.data.chunk && isCurrentTerminalSession(msg.sessionId)) {
             state.lastChunkAt = Date.now();
             state.terminalLiveStreamSessions[msg.sessionId] = true;
-            wandTerminalWrite(state.terminal, msg.data.chunk);
+            wandTerminalWrite(state.terminal, msg.data.chunk, msg.ptyBytes, msg.sessionId);
             state.terminalSessionId = msg.sessionId;
             if (msg.data.output) {
-              state.terminalOutput = clampClientTerminalOutput(normalizeTerminalOutput(msg.data.output));
-              state.terminalOutputMarker = 0;
+              state.terminalOutput = clampClientTerminalOutput(String(msg.data.output));
             } else {
-              state.terminalOutput = clampClientTerminalOutput((state.terminalOutput || "") + normalizeTerminalOutput(msg.data.chunk));
+              state.terminalOutput = clampClientTerminalOutput((state.terminalOutput || "") + String(msg.data.chunk));
             }
             maybeScrollTerminalToBottom("output");
             updateTerminalJumpToBottomButton();
           } else if (!msg.data.incremental && Object.prototype.hasOwnProperty.call(msg.data, "output")) {
             syncTerminalBuffer(msg.sessionId, msg.data.output || "", { mode: "append" });
           }
+        } else if (msg.ptyBytes && state.ws && state.ws.readyState === WebSocket.OPEN) {
+          state.ws.send(JSON.stringify({ type: "pty_ack", sessionId: msg.sessionId, bytes: msg.ptyBytes }));
         }
         break;
       case "started":
@@ -37694,11 +37720,10 @@
           updateTaskDisplay();
           updateApprovalStats();
           var initOutput = msg.data.output || "";
-          var sameTerminalSession = state.terminalSessionId === msg.sessionId;
-          var currTerminalOutput = state.terminalOutput || "";
-          var canAppendDelta = sameTerminalSession && currTerminalOutput.length > 0 && initOutput.length >= currTerminalOutput.length && initOutput.startsWith(currTerminalOutput);
-          updateTerminalOutput(initOutput, msg.sessionId, canAppendDelta ? "append" : "replace");
-          ensureTerminalFitWithRetry("init");
+          if (!restoreTerminalState(msg.sessionId, msg.data.terminalState, initOutput)) {
+            updateTerminalOutput(initOutput, msg.sessionId, "replace");
+            ensureTerminalFitWithRetry("init");
+          }
         }
         break;
       case "usage":
@@ -38764,13 +38789,6 @@
       });
       if (!selectedSession || selectedSession.sessionKind === "structured") return;
       ensureTerminalFit("health");
-      var now = Date.now();
-      var chunkPause = state.lastChunkAt > 0 && now - state.lastChunkAt > 300;
-      var resyncDue = now - state.lastTerminalResyncAt > 3e4;
-      var dirtySinceResync = state.lastChunkAt > state.lastTerminalResyncAt;
-      if (resyncDue && dirtySinceResync && (chunkPause || selectedSession.status !== "running") && state.terminalOutput) {
-        softResyncTerminal2();
-      }
     }, 5e3);
   }
   function stopTerminalHealthCheck() {
@@ -38855,7 +38873,8 @@
     state.terminalScrollbarDragging = false;
     state.terminalScrollbarRafPending = false;
     if (state.terminal) {
-      state.terminal.destroy();
+      if (typeof state.terminal.dispose === "function") state.terminal.dispose();
+      else if (typeof state.terminal.destroy === "function") state.terminal.destroy();
       state.terminal = null;
     }
     if (output) {
@@ -38865,13 +38884,11 @@
         if (wrap.parentNode === output) output.removeChild(wrap);
       }
     }
-    resetWideParserState();
-    state.syncOutputBuffer = null;
-    state.syncOutputDeadline = 0;
-    state.syncFramingResidue = false;
     state.terminalSessionId = null;
+    state.terminalFitAddon = null;
+    state.terminalWriteQueue = Promise.resolve();
+    state.terminalRestoreGeneration = (state.terminalRestoreGeneration || 0) + 1;
     state.terminalOutput = "";
-    state.terminalOutputMarker = 0;
     state.terminalAutoFollow = true;
     state.showTerminalJumpToBottom = false;
     updateTerminalJumpToBottomButton();
@@ -38879,15 +38896,6 @@
       clearTimeout(state.softResyncTimer);
       state.softResyncTimer = null;
     }
-    if (state._resyncChunkTailTimer) {
-      clearTimeout(state._resyncChunkTailTimer);
-      state._resyncChunkTailTimer = null;
-    }
-    state._resyncChunkLastAt = 0;
-    state._resyncStatsWindowStart = 0;
-    state._resyncStatsCount = 0;
-    state._resyncLastWarnAt = 0;
-    state._resyncInProgress = false;
     state.lastResize = { cols: 0, rows: 0 };
     teardownJoystick();
   }
@@ -38898,27 +38906,34 @@
     });
     if (!selectedSess || selectedSess.status !== "running") return;
     if (isStructuredSession2(selectedSess)) return;
-    if (cols > 256) cols = 256;
-    if (rows > 160) rows = 160;
+    cols = Math.max(20, Math.min(Math.floor(cols), 1e3));
+    rows = Math.max(5, Math.min(Math.floor(rows), 500));
     var nextSize = { cols, rows };
     if (state.lastResize.cols !== nextSize.cols || state.lastResize.rows !== nextSize.rows) {
       state.lastResize = nextSize;
-      fetch("/api/sessions/" + state.selectedId + "/resize", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify(nextSize)
-      }).catch(function() {
-      });
+      if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+        state.ws.send(JSON.stringify({
+          type: "pty_resize",
+          sessionId: state.selectedId,
+          cols: nextSize.cols,
+          rows: nextSize.rows
+        }));
+      } else {
+        fetch("/api/sessions/" + state.selectedId + "/resize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify(nextSize)
+        }).catch(function() {
+        });
+      }
     }
   }
   function ensureTerminalFit(reason, options) {
     if (!state.terminal) return false;
-    var opts = options || {};
-    var forceReplay = opts.forceReplay === true;
     var el = document.getElementById("output");
     if (!el || el.offsetWidth === 0 || el.offsetHeight === 0) {
-      ensureTerminalFitWithRetry(reason || "fit-retry", { forceReplay });
+      ensureTerminalFitWithRetry(reason || "fit-retry");
       return false;
     }
     var shouldStickToBottom = state.terminalAutoFollow || isTerminalNearBottom();
@@ -38927,14 +38942,10 @@
     requestAnimationFrame(function() {
       requestAnimationFrame(function() {
         if (!state.terminal) return;
-        if (typeof state.terminal.remeasure === "function") {
-          state.terminal.remeasure();
+        if (state.terminalFitAddon && typeof state.terminalFitAddon.fit === "function") {
+          state.terminalFitAddon.fit();
         }
         sendTerminalResize(state.terminal.cols, state.terminal.rows);
-        var didResize = state.terminal.cols !== prevCols || state.terminal.rows !== prevRows;
-        if (!didResize && forceReplay && state.terminalOutput) {
-          softResyncTerminal2({ skipFit: true });
-        }
         if (shouldStickToBottom) {
           maybeScrollTerminalToBottom("force");
         }
@@ -38944,8 +38955,6 @@
   }
   function ensureTerminalFitWithRetry(reason, options) {
     if (!state.terminal) return;
-    var opts = options || {};
-    var forceReplay = opts.forceReplay !== false;
     var attempts = 0;
     var maxAttempts = 8;
     function tryFit() {
@@ -38953,7 +38962,7 @@
       var el = document.getElementById("output");
       if (el) void el.offsetHeight;
       if (el && el.offsetWidth > 0 && el.offsetHeight > 0) {
-        ensureTerminalFit(reason, { forceReplay });
+        ensureTerminalFit(reason);
         return;
       }
       if (++attempts >= maxAttempts) return;
@@ -39215,7 +39224,7 @@
   }
   function getTerminalViewport() {
     if (!state.terminal || !state.terminal.element) return null;
-    state.terminalViewportEl = state.terminal.element;
+    state.terminalViewportEl = state.terminal.element.querySelector(".xterm-viewport");
     return state.terminalViewportEl;
   }
   function clearTerminalScrollIdleTimer() {
@@ -39258,16 +39267,13 @@
     if (smooth) {
       viewport.scrollTo({ top: viewport.scrollHeight, behavior: "smooth" });
     } else {
-      viewport.scrollTop = viewport.scrollHeight;
+      state.terminal.scrollToBottom();
     }
   }
   function setTerminalManualScrollActive() {
     state.terminalAutoFollow = false;
     clearTerminalScrollIdleTimer();
     state.terminalProgrammaticScrollUntil = 0;
-    if (state.terminal && "_shouldScrollToBottom" in state.terminal) {
-      state.terminal._shouldScrollToBottom = false;
-    }
     updateTerminalJumpToBottomButton();
   }
   function maybeScrollTerminalToBottom(reason) {
@@ -39287,7 +39293,7 @@
     scrollTerminalToBottom(false);
     updateTerminalJumpToBottomButton();
   }
-  function initTerminalScrollbar2(container) {
+  function initTerminalScrollbar(container) {
     var scrollbar = document.createElement("div");
     scrollbar.className = "terminal-scrollbar";
     var track = document.createElement("div");
@@ -39441,288 +39447,13 @@
     });
     requestSyncScrollbar();
   }
-  function isEastAsianWide(cp) {
-    if (cp < 4352) return false;
-    return cp >= 4352 && cp <= 4447 || cp >= 9001 && cp <= 9002 || cp >= 11904 && cp <= 12350 || cp >= 12353 && cp <= 13311 || cp >= 13312 && cp <= 19903 || cp >= 19968 && cp <= 40959 || cp >= 40960 && cp <= 42191 || cp >= 44032 && cp <= 55203 || cp >= 63744 && cp <= 64255 || cp >= 65072 && cp <= 65103 || cp >= 65280 && cp <= 65376 || cp >= 65504 && cp <= 65510 || cp >= 126976 && cp <= 129535 || cp >= 131072 && cp <= 196605 || cp >= 196608 && cp <= 262141;
-  }
-  var WAND_WIDE_FILLER = "\u2060";
-  function createWideParserState() {
-    return { mode: "normal" };
-  }
-  function isAsciiNonEscape(s) {
-    return !/[^\x00-\x7f]/.test(s) && s.indexOf("\x1B") === -1;
-  }
-  function widePadAnsi2(data, st) {
-    if (!data) return "";
-    var s = String(data);
-    if (st.mode === "normal" && isAsciiNonEscape(s)) return s;
-    var out = "";
-    for (var i = 0; i < s.length; i++) {
-      var code = s.charCodeAt(i);
-      var cp = code;
-      var consumed = 1;
-      if (code >= 55296 && code <= 56319 && i + 1 < s.length) {
-        var lo = s.charCodeAt(i + 1);
-        if (lo >= 56320 && lo <= 57343) {
-          cp = (code - 55296) * 1024 + (lo - 56320) + 65536;
-          consumed = 2;
-        }
-      }
-      var ch = consumed === 2 ? s.substr(i, 2) : s.charAt(i);
-      switch (st.mode) {
-        case "normal":
-          if (cp === 27) {
-            st.mode = "esc";
-            out += ch;
-          } else if (cp === 155) {
-            st.mode = "csi";
-            out += ch;
-          } else if (cp === 157 || cp === 144 || cp === 158 || cp === 159) {
-            st.mode = "string";
-            out += ch;
-          } else {
-            out += ch;
-            if (isEastAsianWide(cp)) out += WAND_WIDE_FILLER;
-          }
-          break;
-        case "esc":
-          out += ch;
-          if (cp === 91) st.mode = "csi";
-          else if (cp === 93 || cp === 80 || cp === 88 || cp === 94 || cp === 95) st.mode = "string";
-          else st.mode = "normal";
-          break;
-        case "csi":
-          out += ch;
-          if (cp >= 64 && cp <= 126) st.mode = "normal";
-          break;
-        case "string":
-          out += ch;
-          if (cp === 7 || cp === 156) st.mode = "normal";
-          else if (cp === 27) st.mode = "string-esc";
-          break;
-        case "string-esc":
-          out += ch;
-          if (cp === 92) st.mode = "normal";
-          else st.mode = "string";
-          break;
-      }
-      i += consumed - 1;
-    }
-    return out;
-  }
-  var SYNC_OUTPUT_BEGIN = "\x1B[?2026h";
-  var SYNC_OUTPUT_END = "\x1B[?2026l";
-  var SYNC_OUTPUT_MAX_BUFFER_MS = 200;
-  var SYNC_OUTPUT_MAX_BYTES = 256 * 1024;
-  function processSyncOutputFraming(data) {
-    if (!data) return data;
-    if (state.syncOutputBuffer === null && data.indexOf(SYNC_OUTPUT_BEGIN) === -1) {
-      return data;
-    }
-    var out = "";
-    var i = 0;
-    while (i < data.length) {
-      if (state.syncOutputBuffer !== null) {
-        var endIdx = data.indexOf(SYNC_OUTPUT_END, i);
-        if (endIdx === -1) {
-          state.syncOutputBuffer += data.slice(i);
-          if (state.syncOutputBuffer.length > SYNC_OUTPUT_MAX_BYTES || Date.now() > state.syncOutputDeadline) {
-            out += state.syncOutputBuffer;
-            state.syncOutputBuffer = null;
-            state.syncFramingResidue = true;
-          }
-          return out;
-        }
-        state.syncOutputBuffer += data.slice(i, endIdx + SYNC_OUTPUT_END.length);
-        out += state.syncOutputBuffer;
-        state.syncOutputBuffer = null;
-        i = endIdx + SYNC_OUTPUT_END.length;
-      } else {
-        var beginIdx = data.indexOf(SYNC_OUTPUT_BEGIN, i);
-        if (beginIdx === -1) {
-          out += data.slice(i);
-          return out;
-        }
-        out += data.slice(i, beginIdx);
-        state.syncOutputBuffer = SYNC_OUTPUT_BEGIN;
-        state.syncOutputDeadline = Date.now() + SYNC_OUTPUT_MAX_BUFFER_MS;
-        i = beginIdx + SYNC_OUTPUT_BEGIN.length;
-      }
-    }
-    return out;
-  }
-  function wandTerminalWrite(terminal, data) {
-    if (!terminal || data == null) return;
-    if (!state.wideParserState) state.wideParserState = createWideParserState();
-    var padded = widePadAnsi2(data, state.wideParserState);
-    var framed = processSyncOutputFraming(padded);
-    var follow = state.terminalAutoFollow !== false;
-    if ("_shouldScrollToBottom" in terminal) {
-      terminal._shouldScrollToBottom = follow;
-    }
-    if (framed) terminal.write(framed);
-    if ("_shouldScrollToBottom" in terminal) {
-      terminal._shouldScrollToBottom = follow;
-    }
-    if (follow) {
-      state.terminalProgrammaticScrollUntil = Math.max(
-        state.terminalProgrammaticScrollUntil,
-        Date.now() + 120
-      );
-    }
-    maybeScheduleResyncForChunk(data);
-  }
-  function resetWideParserState() {
-    state.wideParserState = createWideParserState();
-  }
-  function stripWideFillerForCopy() {
-    if (typeof document === "undefined") return;
-    document.addEventListener("copy", function(e) {
-      var sel = window.getSelection && window.getSelection();
-      if (!sel || sel.isCollapsed) return;
-      var anchor = sel.anchorNode;
-      var node = anchor && anchor.nodeType === 3 ? anchor.parentNode : anchor;
-      var output = document.getElementById("output");
-      if (!output || !node || !output.contains(node)) return;
-      var text5 = sel.toString();
-      var cleaned = text5.split("\n").map(function(line) {
-        return line.split(WAND_WIDE_FILLER).join("").replace(/[ \t]+$/, "");
-      }).join("\n");
-      if (cleaned === text5) return;
-      if (e.clipboardData) {
-        e.clipboardData.setData("text/plain", cleaned);
-        e.preventDefault();
-      }
-    });
-  }
-  stripWideFillerForCopy();
   var CHAT_RENDER_LIVE_MS = 150;
   var CHAT_RENDER_IDLE_MS = 30;
   var CLIENT_OUTPUT_MAX = 160 * 1024;
   var CLIENT_OUTPUT_TRIM_AT = 192 * 1024;
-  function clampClientTerminalOutput(buf) {
-    if (!buf || buf.length <= CLIENT_OUTPUT_TRIM_AT) return buf;
-    var preTrimLen = buf.length;
-    var _adjustMarker = function(trimmedLen) {
-      if (typeof state === "undefined" || !state) return;
-      var mk = state.terminalOutputMarker | 0;
-      if (mk <= 0) return;
-      var dropped = preTrimLen - trimmedLen;
-      state.terminalOutputMarker = mk > dropped ? mk - dropped : 0;
-    };
-    var start = buf.length - CLIENT_OUTPUT_MAX;
-    if (start > 0 && start < buf.length) {
-      var c0 = buf.charCodeAt(start);
-      if (c0 >= 56320 && c0 <= 57343) start++;
-    }
-    var LOOKAHEAD = 4096;
-    var upper = Math.min(start + LOOKAHEAD, buf.length);
-    for (var i = start; i < upper; i++) {
-      if (buf.charCodeAt(i) === 10) {
-        var trimmed1 = buf.slice(i + 1);
-        _adjustMarker(trimmed1.length);
-        return trimmed1;
-      }
-    }
-    var lookback = Math.max(0, start - 256);
-    var escAt = -1;
-    for (var j = start - 1; j >= lookback; j--) {
-      var c = buf.charCodeAt(j);
-      if (c === 27) {
-        escAt = j;
-        break;
-      }
-      if (c === 7) break;
-      if (c >= 64 && c <= 126) break;
-    }
-    if (escAt !== -1) {
-      var terminated = false;
-      for (var k = escAt + 1; k < start; k++) {
-        var ck = buf.charCodeAt(k);
-        if (ck === 7) {
-          terminated = true;
-          break;
-        }
-        if (ck >= 64 && ck <= 126) {
-          terminated = true;
-          break;
-        }
-      }
-      if (!terminated) {
-        var ahead = Math.min(start + 256, buf.length);
-        for (var m = start; m < ahead; m++) {
-          var cm = buf.charCodeAt(m);
-          if (cm === 7 || cm >= 64 && cm <= 126) {
-            var trimmed2 = buf.slice(m + 1);
-            _adjustMarker(trimmed2.length);
-            return trimmed2;
-          }
-        }
-      }
-    }
-    var trimmed3 = buf.slice(start);
-    _adjustMarker(trimmed3.length);
-    return trimmed3;
-  }
-  function resetTerminal3() {
-    if (!state.terminal) return;
-    if (typeof state.terminal.reset === "function") {
-      state.terminal.reset();
-      resetWideParserState();
-      state.syncOutputBuffer = null;
-      state.syncOutputDeadline = 0;
-      return;
-    }
-    if (typeof state.terminal.write === "function") {
-      state.terminal.write("\x1Bc");
-    }
-    resetWideParserState();
-    state.syncOutputBuffer = null;
-    state.syncOutputDeadline = 0;
-  }
-  state._resyncStatsWindowStart = 0;
-  state._resyncStatsCount = 0;
-  state._resyncLastWarnAt = 0;
-  var RESYNC_BUDGET_WINDOW_MS = 5e3;
-  var RESYNC_BUDGET_MAX = 12;
-  var RESYNC_WARN_COOLDOWN_MS = 3e4;
-  state._resyncInProgress = false;
-  function softResyncTerminal2(options) {
-    if (!state.terminal || !state.terminalOutput) return false;
-    var opts = options || {};
-    var marker = state.terminalOutputMarker | 0;
-    if (marker < 0) marker = 0;
-    if (marker > state.terminalOutput.length) marker = state.terminalOutput.length;
-    var replaySource = marker > 0 ? state.terminalOutput.slice(marker) : state.terminalOutput;
-    var bufLen = replaySource.length;
-    var startedAt = typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
-    state._resyncInProgress = true;
-    try {
-      resetTerminal3();
-      wandTerminalWrite(state.terminal, replaySource);
-    } finally {
-      state._resyncInProgress = false;
-    }
-    state.lastTerminalResyncAt = Date.now();
-    maybeScrollTerminalToBottom("output");
-    if (!opts.skipFit) ensureTerminalFit("refresh");
-    var now = Date.now();
-    if (now - state._resyncStatsWindowStart > RESYNC_BUDGET_WINDOW_MS) {
-      state._resyncStatsWindowStart = now;
-      state._resyncStatsCount = 1;
-    } else {
-      state._resyncStatsCount++;
-      if (state._resyncStatsCount > RESYNC_BUDGET_MAX && now - state._resyncLastWarnAt > RESYNC_WARN_COOLDOWN_MS) {
-        state._resyncLastWarnAt = now;
-        var endedAt = typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
-        console.warn(
-          "[wand] softResyncTerminal high frequency",
-          "count=" + state._resyncStatsCount + "/" + Math.round((now - state._resyncStatsWindowStart) / 100) / 10 + "s",
-          "bufLen=" + bufLen,
-          "lastReplayMs=" + Math.round(endedAt - startedAt)
-        );
-      }
-    }
+  function softResyncTerminal2(_options) {
+    if (!state.terminal) return false;
+    state.terminal.refresh(0, Math.max(0, state.terminal.rows - 1));
     return true;
   }
   function scheduleSoftResyncTerminal(delayMs) {
@@ -39730,113 +39461,141 @@
     state.softResyncTimer = setTimeout(function() {
       state.softResyncTimer = null;
       softResyncTerminal2();
-    }, typeof delayMs === "number" ? delayMs : 150);
+    }, typeof delayMs === "number" ? delayMs : 0);
   }
-  var IN_PLACE_REDRAW_RE = /\x1b\[\d*(?:;\d*)?[ABCDfHJK]/;
-  var RESYNC_THROTTLE_MS = 1500;
-  var RESYNC_TAIL_MS = 800;
-  state._resyncChunkLastAt = 0;
-  state._resyncChunkTailTimer = null;
-  function maybeScheduleResyncForChunk(chunk) {
-    if (state._resyncInProgress) return;
-    if (!state.syncFramingResidue) return;
-    state.syncFramingResidue = false;
-    if (!chunk || typeof chunk !== "string") return;
-    if (chunk.indexOf("\x1B[") === -1) return;
-    if (!IN_PLACE_REDRAW_RE.test(chunk)) return;
-    var now = Date.now();
-    var sinceLast = now - state._resyncChunkLastAt;
-    if (sinceLast >= RESYNC_THROTTLE_MS) {
-      if (state._resyncChunkTailTimer) {
-        clearTimeout(state._resyncChunkTailTimer);
-        state._resyncChunkTailTimer = null;
-      }
-      state._resyncChunkLastAt = now;
-      softResyncTerminal2();
-      return;
+  function clampClientTerminalOutput(buffer) {
+    if (!buffer || buffer.length <= CLIENT_OUTPUT_TRIM_AT) return buffer;
+    return buffer.slice(-CLIENT_OUTPUT_MAX);
+  }
+  function sendPtySocketMessage(message) {
+    if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return false;
+    state.ws.send(JSON.stringify(message));
+    return true;
+  }
+  function sendPtyInput(data) {
+    if (!state.selectedId || !data) return false;
+    return sendPtySocketMessage({
+      type: "pty_input",
+      sessionId: state.selectedId,
+      data,
+      userInput: state.terminalInteractive === true
+    });
+  }
+  function acknowledgePtyOutput(sessionId, bytes) {
+    if (!sessionId || !(bytes > 0)) return;
+    sendPtySocketMessage({ type: "pty_ack", sessionId, bytes });
+  }
+  function wandTerminalWrite(terminal, data, ackBytes, sessionId) {
+    if (!terminal || data == null || data === "") {
+      if (ackBytes && sessionId) acknowledgePtyOutput(sessionId, ackBytes);
+      return Promise.resolve();
     }
-    if (state._resyncChunkTailTimer) return;
-    var wait = Math.max(RESYNC_TAIL_MS, RESYNC_THROTTLE_MS - sinceLast);
-    state._resyncChunkTailTimer = setTimeout(function() {
-      state._resyncChunkTailTimer = null;
-      state._resyncChunkLastAt = Date.now();
-      softResyncTerminal2();
-    }, wait);
+    var text5 = String(data);
+    var follow = state.terminalAutoFollow !== false;
+    var queue = state.terminalWriteQueue || Promise.resolve();
+    state.terminalWriteQueue = queue.catch(function() {
+    }).then(function() {
+      return new Promise(function(resolve) {
+        if (!state.terminal || terminal !== state.terminal) {
+          if (ackBytes && sessionId) acknowledgePtyOutput(sessionId, ackBytes);
+          resolve(null);
+          return;
+        }
+        terminal.write(text5, function() {
+          if (follow && terminal === state.terminal) terminal.scrollToBottom();
+          if (ackBytes && sessionId) acknowledgePtyOutput(sessionId, ackBytes);
+          resolve(null);
+        });
+      });
+    });
+    return state.terminalWriteQueue;
+  }
+  function resetTerminal2() {
+    if (!state.terminal) return;
+    state.terminal.reset();
+    state.terminal.clear();
+  }
+  function writeTerminalNow(terminal, data) {
+    return new Promise(function(resolve) {
+      if (!data) {
+        resolve(null);
+        return;
+      }
+      terminal.write(data, function() {
+        resolve(null);
+      });
+    });
+  }
+  function restoreTerminalState(sessionId, snapshot8, fallbackOutput) {
+    if (!snapshot8 || snapshot8.version !== 1) return false;
+    if (sessionId) state.terminalStatesBySession[sessionId] = snapshot8;
+    if (!state.terminal) return true;
+    var terminal = state.terminal;
+    var generation = (state.terminalRestoreGeneration || 0) + 1;
+    state.terminalRestoreGeneration = generation;
+    var queue = state.terminalWriteQueue || Promise.resolve();
+    state.terminalWriteQueue = queue.catch(function() {
+    }).then(async function() {
+      if (terminal !== state.terminal || generation !== state.terminalRestoreGeneration) return;
+      terminal.reset();
+      terminal.clear();
+      if (snapshot8.cols > 0 && snapshot8.rows > 0) terminal.resize(snapshot8.cols, snapshot8.rows);
+      await writeTerminalNow(terminal, String(snapshot8.data || ""));
+      var pending = Array.isArray(snapshot8.pending) ? snapshot8.pending : [];
+      for (var i = 0; i < pending.length; i++) {
+        var operation = pending[i] || {};
+        if (operation.type === "resize" && operation.cols > 0 && operation.rows > 0) {
+          terminal.resize(operation.cols, operation.rows);
+        } else if (operation.type === "data") {
+          await writeTerminalNow(terminal, String(operation.data || ""));
+        }
+      }
+      state.terminalSessionId = sessionId || null;
+      state.terminalOutput = String(fallbackOutput || "");
+      state.terminalAutoFollow = true;
+      if (state.terminalFitAddon && typeof state.terminalFitAddon.fit === "function") {
+        state.terminalFitAddon.fit();
+        sendTerminalResize(terminal.cols, terminal.rows);
+      }
+      terminal.scrollToBottom();
+      updateTerminalJumpToBottomButton();
+    });
+    return true;
   }
   function syncTerminalBuffer(sessionId, output, options) {
     if (!state.terminal) return false;
-    var normalizedOutput = normalizeTerminalOutput(output || "");
+    var rawOutput = String(output || "");
     var nextSessionId = sessionId || null;
     var opts = options || {};
-    var mode = opts.mode || "append";
-    var shouldScroll = opts.scroll !== false;
+    var replace = opts.mode === "replace";
     var sessionChanged = state.terminalSessionId !== nextSessionId;
-    var currentOutput = state.terminalOutput || "";
-    var liveChunkStream = !!(nextSessionId && state.terminalLiveStreamSessions[nextSessionId]);
+    var previousOutput = String(state.terminalOutput || "");
     var wrote = false;
-    if (normalizedOutput === currentOutput && !sessionChanged) {
-      if (shouldScroll) maybeScrollTerminalToBottom("output");
-      updateTerminalJumpToBottomButton();
-      return false;
-    }
-    if (sessionChanged) {
-      resetTerminal3();
-      currentOutput = "";
-      state.terminalOutput = "";
-      state.terminalOutputMarker = 0;
-      state.terminalAutoFollow = true;
-      clearTerminalScrollIdleTimer();
-      updateTerminalJumpToBottomButton();
-    }
-    if (mode === "replace") {
-      if (normalizedOutput !== currentOutput) {
-        resetTerminal3();
-        if (normalizedOutput) {
-          wandTerminalWrite(state.terminal, normalizedOutput);
-        }
-        wrote = true;
-      }
-    } else if (normalizedOutput.length < currentOutput.length && !sessionChanged) {
-      return false;
-    } else if (liveChunkStream && !sessionChanged && mode !== "replace" && currentOutput && !normalizedOutput.startsWith(currentOutput)) {
-      return false;
-    } else if (normalizedOutput.startsWith(currentOutput)) {
-      var delta = normalizedOutput.slice(currentOutput.length);
+    if (sessionChanged || replace) {
+      resetTerminal2();
+      if (rawOutput) wandTerminalWrite(state.terminal, rawOutput);
+      wrote = !!rawOutput || sessionChanged;
+    } else if (rawOutput.startsWith(previousOutput)) {
+      var delta = rawOutput.slice(previousOutput.length);
       if (delta) {
         wandTerminalWrite(state.terminal, delta);
         wrote = true;
       }
-    } else if (currentOutput && currentOutput.startsWith(normalizedOutput)) {
-      return false;
     } else {
-      resetTerminal3();
-      if (normalizedOutput) {
-        wandTerminalWrite(state.terminal, normalizedOutput);
-      }
-      wrote = true;
+      return false;
     }
     state.terminalSessionId = nextSessionId;
-    state.terminalOutput = normalizedOutput;
-    state.terminalOutputMarker = 0;
-    if (shouldScroll && (wrote || sessionChanged || mode === "replace")) {
-      maybeScrollTerminalToBottom(sessionChanged || mode === "replace" ? "force" : "output");
-    } else {
-      updateTerminalJumpToBottomButton();
-    }
-    if (sessionChanged) {
-      sendTerminalResize(state.terminal.cols, state.terminal.rows);
-    }
-    return wrote || sessionChanged;
+    state.terminalOutput = rawOutput;
+    if (opts.scroll !== false && wrote) maybeScrollTerminalToBottom("output");
+    if (sessionChanged) sendTerminalResize(state.terminal.cols, state.terminal.rows);
+    return wrote;
   }
-  function initTerminal2() {
+  function initTerminal() {
     var container = document.getElementById("output");
     if (!container || state.terminal || state.terminalInitializing) return;
-    if (typeof WTermLib === "undefined" || !WTermLib.WTerm) {
-      if (!state.terminalInitRetries) state.terminalInitRetries = 0;
-      if (state.terminalInitRetries < 10) {
-        state.terminalInitRetries++;
-        setTimeout(initTerminal2, 200);
-      }
+    if (typeof XTermLib === "undefined" || !XTermLib.Terminal) {
+      state.terminalInitRetries = (state.terminalInitRetries || 0) + 1;
+      if (state.terminalInitRetries < 10) setTimeout(initTerminal, 200);
       return;
     }
     state.terminalInitRetries = 0;
@@ -39857,39 +39616,59 @@
     var termWrap = document.createElement("div");
     termWrap.className = "terminal-scroll-wrap";
     container.appendChild(termWrap);
-    var term = new WTermLib.WTerm(termWrap, {
+    var wrapStyle = getComputedStyle(termWrap);
+    var terminalFont = wrapStyle.getPropertyValue("--term-font-family").trim() || "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+    var baseFontSize = document.documentElement.classList.contains("is-wand-embed-terminal") ? 10 : state.terminalBaseFontSize;
+    var fontSize = Math.max(8, Math.round(baseFontSize * Number(state.terminalScale || 1)));
+    var term = new XTermLib.Terminal({
       cols: 120,
       rows: 36,
-      autoResize: true,
+      allowProposedApi: true,
+      convertEol: false,
       cursorBlink: false,
-      onData: function() {
-        return;
-      },
-      onResize: function(cols, rows) {
-        sendTerminalResize(cols, rows);
-        if (state.terminal && state.terminalOutput) {
-          softResyncTerminal2({ skipFit: true });
-        }
+      // Keep stdin enabled so xterm can answer DA/DSR/window queries. User
+      // keystrokes are gated separately by the interaction-mode handler.
+      disableStdin: false,
+      fontFamily: terminalFont,
+      fontSize,
+      lineHeight: 1.25,
+      scrollback: 5e3,
+      theme: {
+        background: "#1f1b17",
+        foreground: "#f4eee6",
+        cursor: "#d88d60",
+        selectionBackground: "rgba(216, 141, 96, 0.3)"
       }
     });
-    var fontsReady = document.fonts && typeof document.fonts.ready === "object" ? Promise.race([document.fonts.ready, new Promise(function(r) {
-      setTimeout(r, 800);
+    var fitAddon = new XTermLib.FitAddon();
+    var unicodeAddon = new XTermLib.Unicode11Addon();
+    term.loadAddon(fitAddon);
+    term.loadAddon(unicodeAddon);
+    term.unicode.activeVersion = "11";
+    var fontsReady = document.fonts && typeof document.fonts.ready === "object" ? Promise.race([document.fonts.ready, new Promise(function(resolve) {
+      setTimeout(resolve, 800);
     })]) : Promise.resolve();
     fontsReady.then(function() {
-      return term.init();
-    }).then(function() {
+      term.open(termWrap);
+      term.attachCustomKeyEventHandler(function() {
+        return state.terminalInteractive === true;
+      });
+      var helperTextarea = termWrap.querySelector(".xterm-helper-textarea");
+      if (helperTextarea) helperTextarea.readOnly = !state.terminalInteractive;
       state.terminal = term;
+      state.terminalFitAddon = fitAddon;
+      state.terminalWriteQueue = Promise.resolve();
       state.terminalInitializing = false;
-      applyTerminalScale();
-      if (termWrap.isConnected) {
-        void termWrap.offsetHeight;
-        if (typeof term.remeasure === "function") {
-          try {
-            term.remeasure();
-          } catch (e) {
-          }
-        }
-      }
+      fitAddon.fit();
+      term.onData(function(data) {
+        sendPtyInput(data);
+      });
+      term.onBinary(function(data) {
+        if (state.terminalInteractive) sendPtyInput(data);
+      });
+      term.onResize(function(size4) {
+        sendTerminalResize(size4.cols, size4.rows);
+      });
       state.terminalAutoFollow = true;
       clearTerminalScrollIdleTimer();
       var viewport = getTerminalViewport();
@@ -39902,48 +39681,35 @@
           if (isTerminalAtBottom()) {
             state.terminalAutoFollow = true;
             clearTerminalScrollIdleTimer();
-            updateTerminalJumpToBottomButton();
-            return;
-          }
-          setTerminalManualScrollActive();
-        };
-        state.terminalViewportTouchStartHandler = function(e) {
-          if (e.touches && e.touches.length === 1) {
-            state.terminalTouchStartY = e.touches[0].clientY;
-          }
-        };
-        state.terminalViewportTouchHandler = function(e) {
-          if (!e.touches || e.touches.length !== 1) return;
-          if (typeof state.terminalTouchStartY !== "number") return;
-          if (e.touches[0].clientY - state.terminalTouchStartY > 4) {
+          } else {
             setTerminalManualScrollActive();
           }
+          updateTerminalJumpToBottomButton();
         };
         viewport.addEventListener("scroll", state.terminalViewportScrollHandler, { passive: true });
-        viewport.addEventListener("touchstart", state.terminalViewportTouchStartHandler, { passive: true });
-        viewport.addEventListener("touchmove", state.terminalViewportTouchHandler, { passive: true });
       }
-      state.terminalWheelHandler = function(e) {
-        if (e.deltaY < 0) {
-          setTerminalManualScrollActive();
-        }
-        e.stopPropagation();
+      state.terminalWheelHandler = function(event) {
+        if (event.deltaY < 0) setTerminalManualScrollActive();
+        event.stopPropagation();
       };
       container.addEventListener("wheel", state.terminalWheelHandler, { passive: true });
-      initTerminalScrollbar2(container);
+      initTerminalScrollbar(container);
       if (state.selectedId) {
-        var session = state.sessions.find(function(s) {
-          return s.id === state.selectedId;
+        var session = state.sessions.find(function(item) {
+          return item.id === state.selectedId;
         });
-        if (session) {
-          syncTerminalBuffer(session.id, session.output || "", { mode: "append", scroll: false });
+        var cachedState = session && state.terminalStatesBySession[session.id];
+        var terminalState = session && (session.terminalState || cachedState);
+        if (session && !restoreTerminalState(session.id, terminalState, session.output || "")) {
+          syncTerminalBuffer(session.id, session.output || "", { mode: "replace", scroll: false });
         }
       } else {
         wandTerminalWrite(term, "\u70B9\u51FB\u4E0A\u65B9\u300C\u65B0\u5BF9\u8BDD\u300D\u5F00\u59CB\u4F60\u7684\u7B2C\u4E00\u6B21\u5BF9\u8BDD\u3002\r\n");
       }
-      state.terminalClickHandler = function(e) {
+      state.terminalClickHandler = function(event) {
         if (hasActiveTerminalSelection()) return;
-        focusInputBox2(e);
+        if (state.terminalInteractive) term.focus();
+        else focusInputBox2(event);
       };
       container.addEventListener("click", state.terminalClickHandler);
       updateTerminalJumpToBottomButton();
@@ -39951,7 +39717,7 @@
       initTerminalJoystick();
       observeTerminalResize();
       startTerminalHealthCheck();
-      ensureTerminalFit("mount", { forceReplay: true });
+      ensureTerminalFit("mount");
       if (document.documentElement.classList.contains("is-wand-embed-terminal")) {
         [120, 350, 700].forEach(function(delay) {
           setTimeout(function() {
@@ -39959,9 +39725,13 @@
           }, delay);
         });
       }
-    }).catch(function(err) {
+    }).catch(function(error) {
       state.terminalInitializing = false;
-      console.error("[wand] wterm init failed:", err);
+      try {
+        term.dispose();
+      } catch (disposeError) {
+      }
+      console.error("[wand] xterm init failed:", error);
     });
   }
 
@@ -40737,7 +40507,7 @@
       }
       softResyncTerminal2();
       resetChatRenderCache({ preserveStickState: true });
-      scheduleChatRender3(true);
+      scheduleChatRender2(true);
     });
     var jumpBottomBtn = document.getElementById("terminal-jump-bottom");
     if (jumpBottomBtn) jumpBottomBtn.addEventListener("click", function() {
@@ -40831,7 +40601,7 @@
         });
       }
     }
-    initTerminal2();
+    initTerminal();
     setupMobileKeyboardHandlers();
     setupVisualViewportHandlers();
     attachQueueBarDelegates();
@@ -41174,7 +40944,7 @@
     return '<div class="app-container"><div id="sessions-drawer-backdrop" class="drawer-backdrop' + backdropClass + '"></div><div class="main-layout' + (state.sessionsDrawerOpen ? " sidebar-open" : "") + (isAnchored ? " sidebar-pinned" : "") + collapsedCls + '"><aside id="sessions-drawer" class="sidebar' + drawerClass + (isAnchored ? " pinned" : "") + sidebarCollapsedCls + '"><div class="sidebar-header"><div class="sidebar-header-main"><div class="topbar-logo-icon">W</div><span class="sidebar-title">\u4F1A\u8BDD</span><span class="session-count" id="session-count">' + String(state.sessions.filter(function(session) {
       var source = String(session && session.sessionSource || "").toLowerCase();
       return source !== "automation" && source !== "startup";
-    }).length) + '</span></div><div class="sidebar-header-actions"><div class="sidebar-header-more"><button id="sidebar-more-btn" class="btn btn-ghost btn-sm" type="button" title="\u66F4\u591A\u64CD\u4F5C"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg></button><div class="sidebar-header-overflow" id="sidebar-overflow-menu"><button class="overflow-item" id="sidebar-home-btn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg><span>\u56DE\u5230\u9996\u9875</span></button><button class="overflow-item" id="sidebar-refresh-btn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg><span>\u5237\u65B0\u9875\u9762</span></button></div></div><button id="sidebar-pin-btn" class="btn btn-ghost btn-sm sidebar-pin-toggle' + (state.sidebarPinned ? " pinned" : "") + '" type="button" title="' + (state.sidebarPinned ? "\u5DF2\u56FA\u5B9A\u5E38\u9A7B\uFF08\u70B9\u51FB\u89E3\u9664\u9501\u5B9A\uFF09" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B") + '" aria-label="' + (state.sidebarPinned ? "\u89E3\u9664\u56FA\u5B9A\u5E38\u9A7B" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B") + '" aria-pressed="' + (state.sidebarPinned ? "true" : "false") + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24z"/></svg></button><button id="sidebar-collapse-btn" class="btn btn-ghost btn-sm sidebar-collapse-toggle' + (isCollapsed ? " collapsed" : "") + '" type="button" title="' + (isCollapsed ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761") + '" aria-label="' + (isCollapsed ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761") + '">' + (isCollapsed ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="10 6 16 12 10 18"/><line x1="20" y1="5" x2="20" y2="19"/></svg>' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="14 6 8 12 14 18"/><line x1="4" y1="5" x2="4" y2="19"/></svg>') + '</button><button id="close-drawer-button" class="btn btn-ghost btn-icon sidebar-close drawer-close-btn" type="button" aria-label="\u5173\u95ED\u83DC\u5355"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button></div></div><div class="sidebar-body"><div id="sessions-panel"><div class="sessions-list" id="sessions-list">' + renderSessionsListContent() + '</div></div></div><div class="sidebar-footer"><button id="drawer-new-session-button" class="btn btn-primary btn-block"><span>+</span> \u65B0\u4F1A\u8BDD</button><div class="sidebar-footer-actions"><button id="missions-button" class="btn btn-ghost btn-sm" type="button" title="Agent Inbox"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16l2 10v6H2v-6L4 4zM2 14h6l2 3h4l2-3h6"/></svg><span>\u4EFB\u52A1</span></button><button id="file-panel-toggle-btn" class="btn btn-ghost btn-sm' + (state.filePanelOpen ? " active" : "") + '" type="button" title="\u67E5\u770B\u6587\u4EF6"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg><span>\u6587\u4EF6</span></button><button id="settings-button" class="btn btn-ghost btn-sm" type="button" title="\u8BBE\u7F6E"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>\u8BBE\u7F6E</span></button>' + (hasNativeBackToApp() ? '<button id="back-to-native-button" class="btn btn-ghost btn-sm sidebar-back-to-native" type="button" title="\u8FD4\u56DE App \u539F\u751F\u754C\u9762"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="10" y="3" width="11" height="18" rx="2"/><line x1="14" y1="17" x2="17" y2="17"/><polyline points="7 8 3 12 7 16"/></svg><span>\u8FD4\u56DEApp</span></button>' : "") + (hasNativeSwitchServer() ? '<button id="switch-server-button" class="btn btn-ghost btn-sm sidebar-switch-server" type="button" title="\u5207\u6362\u670D\u52A1\u5668"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg><span>\u5207\u6362</span></button>' : "") + '<button id="logout-button" class="btn btn-ghost btn-sm sidebar-logout" type="button" title="\u9000\u51FA\u767B\u5F55"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg><span>\u9000\u51FA</span></button></div></div></aside><main class="main-content"><div class="main-header-row"><div class="topbar-left"><button id="sessions-toggle-button" class="floating-sidebar-toggle' + (state.sessionsDrawerOpen ? " active" : "") + '" aria-label="\u5207\u6362\u4F1A\u8BDD\u4FA7\u680F" type="button"><span class="hamburger-icon"><span></span><span></span><span></span></span></button><span class="topbar-brand" aria-hidden="true">W</span></div><div class="topbar-center">' + (selectedSession ? '<span class="topbar-session-title' + (selectedSession.titleGenerating ? " title-generating" : "") + '"' + (selectedSession.titleGenerating ? ' aria-busy="true"' : "") + ' title="' + escapeHtml(selectedSession.description || selectedSession.command || "") + '">' + escapeHtml(selectedSession.title || shortCommand(selectedSession.command)) + '</span><span class="session-status-pill ' + getSessionStatusClass(selectedSession) + '" title="' + escapeHtml(getSessionStatusLabel(selectedSession)) + '"><span class="session-status-dot"></span><span class="session-status-text">' + escapeHtml(getSessionStatusLabel(selectedSession)) + '</span></span><span class="current-task hidden" id="current-task"></span>' + (selectedSession.cwd ? renderTailMarqueePath(selectedSession.cwd, "topbar-cwd", ' id="topbar-cwd" role="button" tabindex="0"') : "") : '<span class="topbar-tagline">Wand \u63A7\u5236\u53F0</span><span class="current-task hidden" id="current-task"></span>') + '</div><div class="topbar-right"><button id="topbar-file-button" class="topbar-btn square' + (state.filePanelOpen ? " active" : "") + '" type="button" aria-label="\u6587\u4EF6" title="\u67E5\u770B\u6587\u4EF6\uFF08\u53EF\u4FEE\u6539\u8DEF\u5F84\uFF09"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button><span id="topbar-git-slot" class="topbar-git-slot">' + renderTopbarGitBadgeHtml() + "</span>" + (selectedSession ? renderTopbarMoreMenuHtml(selectedSession) : "") + '</div></div><div id="file-panel-backdrop" class="file-panel-backdrop' + (state.filePanelOpen ? " open" : "") + '"></div><div id="file-side-panel" class="file-side-panel' + (state.filePanelOpen ? " open" : "") + '"><div class="file-side-panel-header"><div class="file-side-panel-title-group"><span class="file-side-panel-icon">' + wandFileIcon("folder-open", { size: 16 }) + '</span><span class="file-side-panel-title">\u6587\u4EF6</span></div><div class="file-side-panel-header-actions"><button class="file-side-panel-iconbtn" id="file-explorer-refresh" type="button" title="\u5237\u65B0" aria-label="\u5237\u65B0\u6587\u4EF6\u5217\u8868">' + wandFileIcon("refresh", { size: 15 }) + '</button><button id="file-side-panel-close" class="file-side-panel-iconbtn close" type="button" aria-label="\u5173\u95ED\u6587\u4EF6\u9762\u677F" title="\u5173\u95ED">' + wandFileIcon("x", { size: 16 }) + '</button></div></div><div class="file-side-panel-body"><div class="file-explorer-header"><button class="file-explorer-up" id="file-explorer-up" type="button" title="\u8FD4\u56DE\u4E0A\u7EA7\u76EE\u5F55" aria-label="\u8FD4\u56DE\u4E0A\u7EA7\u76EE\u5F55">' + wandFileIcon("arrow-up", { size: 15 }) + '</button><input type="text" class="file-explorer-path" id="file-explorer-cwd" value="' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" title="' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" placeholder="\u8F93\u5165\u8DEF\u5F84\u5E76\u56DE\u8F66..." spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" aria-label="\u5F53\u524D\u8DEF\u5F84\uFF0C\u53EF\u76F4\u63A5\u4FEE\u6539\u540E\u56DE\u8F66" /></div><div class="file-search-box"><span class="file-search-icon">' + wandFileIcon("search", { size: 14 }) + '</span><input type="text" id="file-search-input" class="file-search-input" placeholder="\u641C\u7D22\u5F53\u524D\u76EE\u5F55\u2026" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" /><button class="file-search-clear" id="file-search-clear" type="button" aria-label="\u6E05\u9664\u641C\u7D22" title="\u6E05\u9664">' + wandFileIcon("x", { size: 13 }) + '</button></div><div class="file-explorer" id="file-explorer">' + renderFileExplorer(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '</div></div></div><div id="output" class="terminal-container' + (state.selectedId ? "" : " hidden") + ' active"><div class="terminal-scale-overlay" aria-label="\u7EC8\u7AEF\u7F29\u653E\u63A7\u4EF6"><button id="terminal-scale-down-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="\u7F29\u5C0F">\u2212</button><span class="terminal-scale-overlay-label terminal-scale-label" id="terminal-scale-label-top">' + Math.round(state.terminalScale * 100) + '%</span><button id="terminal-scale-up-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="\u653E\u5927">+</button><span class="terminal-scale-overlay-divider"></span><button id="page-refresh-btn" class="terminal-scale-overlay-btn" type="button" title="\u5237\u65B0\u9875\u9762">\u21BB</button></div><button id="terminal-jump-bottom" class="terminal-jump-bottom' + (state.showTerminalJumpToBottom ? " visible" : "") + '" type="button" title="\u56DE\u5230\u5E95\u90E8" aria-label="\u56DE\u5230\u5E95\u90E8"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></button></div><div id="chat-output" class="chat-container hidden"><div id="chat-fold-bar" class="chat-fold-bar hidden" aria-live="polite"></div><button id="chat-unread-bubble" class="chat-unread-bubble" type="button" title="\u56DE\u5230\u6700\u65B0\u6D88\u606F" aria-label="\u56DE\u5230\u6700\u65B0\u6D88\u606F"><span class="chat-unread-bubble-icon"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></span><span class="chat-unread-bubble-count" aria-hidden="true"></span></button></div><div id="blank-chat" class="blank-chat' + (state.selectedId ? " hidden" : "") + '"><div class="blank-chat-inner"><div class="blank-chat-logo">W</div><h2 class="blank-chat-title">Wand</h2><p class="blank-chat-subtitle">\u652F\u6301\u7EC8\u7AEF PTY \u4F1A\u8BDD\u4E0E\u7ED3\u6784\u5316 chat \u4F1A\u8BDD\uFF0C\u4E24\u79CD\u6A21\u5F0F\u53EF\u5E76\u5B58\u3002</p><div class="blank-chat-tools"><button class="blank-chat-tool-btn" id="welcome-tool-claude" type="button"><span class="tool-icon">' + renderProviderLogoMarkup("claude") + '</span>\u65B0\u5EFA\u7EC8\u7AEF\u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-codex" type="button"><span class="tool-icon">' + renderProviderLogoMarkup("codex") + '</span>\u65B0\u5EFA Codex \u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-opencode" type="button"><span class="tool-icon">' + renderProviderLogoMarkup("opencode") + '</span>\u65B0\u5EFA OpenCode \u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-structured" type="button"><span class="tool-icon">' + iconSvg("chat", { size: 16, strokeWidth: 1.8 }) + '</span>\u65B0\u5EFA\u7ED3\u6784\u5316\u4F1A\u8BDD</button></div><div class="blank-chat-cwd-wrap"><div class="blank-chat-cwd" id="blank-chat-cwd" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" title="\u70B9\u51FB\u5207\u6362\u5DE5\u4F5C\u76EE\u5F55"><span class="blank-chat-cwd-icon">' + iconSvg("folder", { size: 13, strokeWidth: 1.8 }) + "</span>" + renderTailMarqueePath(getEffectiveCwd(), "blank-chat-cwd-path", ' id="blank-chat-cwd-path"') + '<span class="blank-chat-cwd-arrow">' + iconSvg("chevronDown", { size: 11, strokeWidth: 2 }) + '</span></div></div></div><div id="cross-session-queue-host"></div></div><div class="input-panel' + (state.selectedId ? "" : " hidden") + '"><div class="composer-top-row"><div id="todo-progress" class="todo-progress hidden"><button class="todo-progress-header" id="todo-progress-toggle" type="button" aria-expanded="false" aria-controls="todo-progress-body" aria-label="\u5C55\u5F00\u5F85\u529E\u5217\u8868"><div class="todo-progress-fill" id="todo-progress-fill" aria-hidden="true" style="--progress:0"></div><div class="todo-progress-left"><span class="todo-progress-ring" id="todo-progress-ring" aria-hidden="true" style="--progress:0"><svg width="16" height="16" viewBox="0 0 36 36"><circle class="todo-ring-track" cx="18" cy="18" r="15.5" fill="none" stroke-width="4"/><circle class="todo-ring-fill" cx="18" cy="18" r="15.5" fill="none" stroke-width="4" stroke-linecap="round"/></svg></span><span class="todo-progress-counter" id="todo-progress-counter"></span></div><div class="todo-progress-task-wrap"><span class="todo-progress-task" id="todo-progress-task"></span></div>' + iconSvg("chevronDown", { size: 14, strokeWidth: 2 }) + '</button></div><div class="todo-progress-body hidden" id="todo-progress-body"><ul class="todo-progress-list" id="todo-progress-list"></ul></div></div><div id="queue-bar-host" class="queue-bar-host" hidden></div><div class="input-composer-row"><div class="input-composer' + (String(currentDraft || "").trim() ? " has-text" : "") + '" role="group" aria-label="\u6D88\u606F\u7F16\u8F91\u5668"><div id="attachment-preview" class="attachment-preview hidden" aria-label="\u5F85\u53D1\u9001\u9644\u4EF6" aria-live="polite"></div><div class="composer-main-row"><div class="composer-input-wrap"><textarea id="input-box" class="input-textarea" aria-label="\u6D88\u606F\u8F93\u5165" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml(currentDraft) + '</textarea></div><div class="composer-actions-left" role="group" aria-label="\u6DFB\u52A0\u5185\u5BB9\u4E0E\u6743\u9650"><button id="attach-btn" class="btn-circle btn-circle-action" type="button" title="\u66F4\u591A" aria-label="\u66F4\u591A\u64CD\u4F5C" aria-haspopup="dialog" aria-controls="composer-plus-popover" aria-expanded="false">' + iconSvg("plus", { size: 18, strokeWidth: 2.2 }) + '</button><input type="file" id="file-upload-input" multiple tabindex="-1" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0);pointer-events:none"><div class="composer-status-row" id="composer-status-row">' + renderComposerConfigControlsHtml(selectedSession, "mode") + renderAutoApproveChip(selectedSession) + '<span class="permission-actions hidden" id="permission-actions"><span class="permission-actions-label" id="permission-actions-label" role="status" aria-live="polite" aria-atomic="true">\u7B49\u5F85\u6388\u6743</span><button id="approve-permission-btn" class="btn btn-permission btn-permission-approve" type="button">\u6279\u51C6</button><button id="deny-permission-btn" class="btn btn-permission btn-permission-deny" type="button">\u62D2\u7EDD</button></span>' + renderApprovalStatsBadge() + '</div></div><div class="composer-actions-right" role="group" aria-label="\u6A21\u578B\u4E0E\u53D1\u9001"><div class="composer-inline-config">' + renderComposerConfigControlsHtml(selectedSession, "runtime") + '</div><button class="prompt-optimize-btn" id="prompt-optimize-btn" type="button" title="\u4F18\u5316\u63D0\u793A\u8BCD" aria-label="\u4F18\u5316\u63D0\u793A\u8BCD">' + iconSvg("edit", { size: 15, strokeWidth: 1.9, cls: "prompt-optimize-icon" }) + '<span class="prompt-optimize-label">\u4F18\u5316</span><span class="prompt-optimize-spinner" aria-hidden="true"></span></button><button id="stop-button" class="btn-circle btn-circle-stop hidden" type="button" title="\u505C\u6B62" aria-label="\u505C\u6B62\u751F\u6210"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg></button><button id="voice-record-btn" class="btn-circle btn-circle-action btn-circle-voice" type="button" title="\u6309\u4F4F\u8BED\u97F3\u8F93\u5165" aria-label="\u6309\u4F4F\u8BED\u97F3\u8F93\u5165" aria-pressed="false"' + (state.terminalInteractive ? " disabled" : "") + ">" + iconSvg("mic", { size: 19, strokeWidth: 2 }) + '</button><button id="send-input-button" class="btn-circle btn-circle-send" type="button" title="\u53D1\u9001" aria-label="\u53D1\u9001\u6D88\u606F"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m6 11 6-6 6 6"/></svg></button></div></div></div></div><div class="composer-plus-popover hidden" id="composer-plus-popover" role="dialog" aria-modal="false" aria-label="\u66F4\u591A\u64CD\u4F5C" aria-hidden="true"><button class="plus-popover-item" id="plus-attach-item" type="button">' + iconSvg("paperclip", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) + '<span class="plus-popover-label">\u4E0A\u4F20\u9644\u4EF6</span></button><button class="plus-popover-item' + (state.terminalInteractive ? " is-on" : "") + '" id="terminal-interactive-toggle-top" type="button" aria-pressed="' + (state.terminalInteractive ? "true" : "false") + '">' + iconSvg("keyboard", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) + '<span class="plus-popover-label">\u7EC8\u7AEF\u4EA4\u4E92</span><span class="plus-popover-toggle-state">' + (state.terminalInteractive ? "\u5F00" : "\u5173") + '</span></button><div class="plus-popover-sep" aria-hidden="true"></div><div class="plus-popover-trio-wrap">' + renderComposerConfigControlsHtml(selectedSession) + "</div></div>" + renderClaudeSkillsPickerHtml(selectedSession) + // 语音实时转写气泡 —— 浮在输入框上方（.input-composer 之外，绕开它的 overflow:hidden）。
+    }).length) + '</span></div><div class="sidebar-header-actions"><div class="sidebar-header-more"><button id="sidebar-more-btn" class="btn btn-ghost btn-sm" type="button" title="\u66F4\u591A\u64CD\u4F5C"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg></button><div class="sidebar-header-overflow" id="sidebar-overflow-menu"><button class="overflow-item" id="sidebar-home-btn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg><span>\u56DE\u5230\u9996\u9875</span></button><button class="overflow-item" id="sidebar-refresh-btn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg><span>\u5237\u65B0\u9875\u9762</span></button></div></div><button id="sidebar-pin-btn" class="btn btn-ghost btn-sm sidebar-pin-toggle' + (state.sidebarPinned ? " pinned" : "") + '" type="button" title="' + (state.sidebarPinned ? "\u5DF2\u56FA\u5B9A\u5E38\u9A7B\uFF08\u70B9\u51FB\u89E3\u9664\u9501\u5B9A\uFF09" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B") + '" aria-label="' + (state.sidebarPinned ? "\u89E3\u9664\u56FA\u5B9A\u5E38\u9A7B" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B") + '" aria-pressed="' + (state.sidebarPinned ? "true" : "false") + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24z"/></svg></button><button id="sidebar-collapse-btn" class="btn btn-ghost btn-sm sidebar-collapse-toggle' + (isCollapsed ? " collapsed" : "") + '" type="button" title="' + (isCollapsed ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761") + '" aria-label="' + (isCollapsed ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761") + '">' + (isCollapsed ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="10 6 16 12 10 18"/><line x1="20" y1="5" x2="20" y2="19"/></svg>' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="14 6 8 12 14 18"/><line x1="4" y1="5" x2="4" y2="19"/></svg>') + '</button><button id="close-drawer-button" class="btn btn-ghost btn-icon sidebar-close drawer-close-btn" type="button" aria-label="\u5173\u95ED\u83DC\u5355"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button></div></div><div class="sidebar-body"><div id="sessions-panel"><div class="sessions-list" id="sessions-list">' + renderSessionsListContent() + '</div></div></div><div class="sidebar-footer"><button id="drawer-new-session-button" class="btn btn-primary btn-block"><span>+</span> \u65B0\u4F1A\u8BDD</button><div class="sidebar-footer-actions"><button id="missions-button" class="btn btn-ghost btn-sm" type="button" title="Agent Inbox"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16l2 10v6H2v-6L4 4zM2 14h6l2 3h4l2-3h6"/></svg><span>\u4EFB\u52A1</span></button><button id="file-panel-toggle-btn" class="btn btn-ghost btn-sm' + (state.filePanelOpen ? " active" : "") + '" type="button" title="\u67E5\u770B\u6587\u4EF6"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg><span>\u6587\u4EF6</span></button><button id="settings-button" class="btn btn-ghost btn-sm" type="button" title="\u8BBE\u7F6E"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>\u8BBE\u7F6E</span></button>' + (hasNativeBackToApp() ? '<button id="back-to-native-button" class="btn btn-ghost btn-sm sidebar-back-to-native" type="button" title="\u8FD4\u56DE App \u539F\u751F\u754C\u9762"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="10" y="3" width="11" height="18" rx="2"/><line x1="14" y1="17" x2="17" y2="17"/><polyline points="7 8 3 12 7 16"/></svg><span>\u8FD4\u56DEApp</span></button>' : "") + (hasNativeSwitchServer() ? '<button id="switch-server-button" class="btn btn-ghost btn-sm sidebar-switch-server" type="button" title="\u5207\u6362\u670D\u52A1\u5668"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg><span>\u5207\u6362</span></button>' : "") + '<button id="logout-button" class="btn btn-ghost btn-sm sidebar-logout" type="button" title="\u9000\u51FA\u767B\u5F55"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg><span>\u9000\u51FA</span></button></div></div></aside><main class="main-content"><div class="main-header-row"><div class="topbar-left"><button id="sessions-toggle-button" class="floating-sidebar-toggle' + (state.sessionsDrawerOpen ? " active" : "") + '" aria-label="\u5207\u6362\u4F1A\u8BDD\u4FA7\u680F" type="button"><span class="hamburger-icon"><span></span><span></span><span></span></span></button><span class="topbar-brand" aria-hidden="true">W</span></div><div class="topbar-center">' + (selectedSession ? '<span class="topbar-session-title' + (selectedSession.titleGenerating ? " title-generating" : "") + '"' + (selectedSession.titleGenerating ? ' aria-busy="true"' : "") + ' title="' + escapeHtml(selectedSession.description || selectedSession.command || "") + '">' + escapeHtml(selectedSession.title || shortCommand(selectedSession.command)) + '</span><span class="session-status-pill ' + getSessionStatusClass(selectedSession) + '" title="' + escapeHtml(getSessionStatusLabel(selectedSession)) + '"><span class="session-status-dot"></span><span class="session-status-text">' + escapeHtml(getSessionStatusLabel(selectedSession)) + '</span></span><span class="current-task hidden" id="current-task"></span>' + (selectedSession.cwd ? renderTailMarqueePath(selectedSession.cwd, "topbar-cwd", ' id="topbar-cwd" role="button" tabindex="0"') : "") : '<span class="topbar-tagline">Wand \u63A7\u5236\u53F0</span><span class="current-task hidden" id="current-task"></span>') + '</div><div class="topbar-right"><button id="topbar-file-button" class="topbar-btn square' + (state.filePanelOpen ? " active" : "") + '" type="button" aria-label="\u6587\u4EF6" title="\u67E5\u770B\u6587\u4EF6\uFF08\u53EF\u4FEE\u6539\u8DEF\u5F84\uFF09"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button><span id="topbar-git-slot" class="topbar-git-slot">' + renderTopbarGitBadgeHtml() + "</span>" + (selectedSession ? renderTopbarMoreMenuHtml(selectedSession) : "") + '</div></div><div id="file-panel-backdrop" class="file-panel-backdrop' + (state.filePanelOpen ? " open" : "") + '"></div><div id="file-side-panel" class="file-side-panel' + (state.filePanelOpen ? " open" : "") + '"><div class="file-side-panel-header"><div class="file-side-panel-title-group"><span class="file-side-panel-icon">' + wandFileIcon("folder-open", { size: 16 }) + '</span><span class="file-side-panel-title">\u6587\u4EF6</span></div><div class="file-side-panel-header-actions"><button class="file-side-panel-iconbtn" id="file-explorer-refresh" type="button" title="\u5237\u65B0" aria-label="\u5237\u65B0\u6587\u4EF6\u5217\u8868">' + wandFileIcon("refresh", { size: 15 }) + '</button><button id="file-side-panel-close" class="file-side-panel-iconbtn close" type="button" aria-label="\u5173\u95ED\u6587\u4EF6\u9762\u677F" title="\u5173\u95ED">' + wandFileIcon("x", { size: 16 }) + '</button></div></div><div class="file-side-panel-body"><div class="file-explorer-header"><button class="file-explorer-up" id="file-explorer-up" type="button" title="\u8FD4\u56DE\u4E0A\u7EA7\u76EE\u5F55" aria-label="\u8FD4\u56DE\u4E0A\u7EA7\u76EE\u5F55">' + wandFileIcon("arrow-up", { size: 15 }) + '</button><input type="text" class="file-explorer-path" id="file-explorer-cwd" value="' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" title="' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" placeholder="\u8F93\u5165\u8DEF\u5F84\u5E76\u56DE\u8F66..." spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" aria-label="\u5F53\u524D\u8DEF\u5F84\uFF0C\u53EF\u76F4\u63A5\u4FEE\u6539\u540E\u56DE\u8F66" /></div><div class="file-search-box"><span class="file-search-icon">' + wandFileIcon("search", { size: 14 }) + '</span><input type="text" id="file-search-input" class="file-search-input" placeholder="\u641C\u7D22\u5F53\u524D\u76EE\u5F55\u2026" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" /><button class="file-search-clear" id="file-search-clear" type="button" aria-label="\u6E05\u9664\u641C\u7D22" title="\u6E05\u9664">' + wandFileIcon("x", { size: 13 }) + '</button></div><div class="file-explorer" id="file-explorer">' + renderFileExplorer(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '</div></div></div><div id="output" class="terminal-container' + (state.selectedId ? "" : " hidden") + ' active"><div class="terminal-scale-overlay" aria-label="\u7EC8\u7AEF\u7F29\u653E\u63A7\u4EF6"><button id="terminal-scale-down-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="\u7F29\u5C0F">\u2212</button><span class="terminal-scale-overlay-label terminal-scale-label" id="terminal-scale-label-top">' + Math.round(state.terminalScale * 100) + '%</span><button id="terminal-scale-up-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="\u653E\u5927">+</button><span class="terminal-scale-overlay-divider"></span><button id="page-refresh-btn" class="terminal-scale-overlay-btn" type="button" title="\u5237\u65B0\u9875\u9762">\u21BB</button></div><button id="terminal-jump-bottom" class="terminal-jump-bottom' + (state.showTerminalJumpToBottom ? " visible" : "") + '" type="button" title="\u56DE\u5230\u5E95\u90E8" aria-label="\u56DE\u5230\u5E95\u90E8"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></button></div><div id="chat-output" class="chat-container hidden"><div id="chat-fold-bar" class="chat-fold-bar hidden" aria-live="polite"></div><button id="chat-unread-bubble" class="chat-unread-bubble" type="button" title="\u56DE\u5230\u6700\u65B0\u6D88\u606F" aria-label="\u56DE\u5230\u6700\u65B0\u6D88\u606F"><span class="chat-unread-bubble-icon"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></span><span class="chat-unread-bubble-count" aria-hidden="true"></span></button></div><div id="blank-chat" class="blank-chat' + (state.selectedId ? " hidden" : "") + '"><div class="blank-chat-inner"><div class="blank-chat-logo">W</div><h2 class="blank-chat-title">Wand</h2><p class="blank-chat-subtitle">\u652F\u6301\u7EC8\u7AEF PTY \u4F1A\u8BDD\u4E0E\u7ED3\u6784\u5316 chat \u4F1A\u8BDD\uFF0C\u4E24\u79CD\u6A21\u5F0F\u53EF\u5E76\u5B58\u3002</p><div class="blank-chat-tools"><button class="blank-chat-tool-btn" id="welcome-tool-claude" type="button"><span class="tool-icon">' + renderProviderLogoMarkup("claude") + '</span>\u65B0\u5EFA\u7EC8\u7AEF\u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-codex" type="button"><span class="tool-icon">' + renderProviderLogoMarkup("codex") + '</span>\u65B0\u5EFA Codex \u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-opencode" type="button"><span class="tool-icon">' + renderProviderLogoMarkup("opencode") + '</span>\u65B0\u5EFA OpenCode \u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-structured" type="button"><span class="tool-icon">' + iconSvg("chat", { size: 16, strokeWidth: 1.8 }) + '</span>\u65B0\u5EFA\u7ED3\u6784\u5316\u4F1A\u8BDD</button></div><div class="blank-chat-cwd-wrap"><div class="blank-chat-cwd" id="blank-chat-cwd" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" title="\u70B9\u51FB\u5207\u6362\u5DE5\u4F5C\u76EE\u5F55"><span class="blank-chat-cwd-icon">' + iconSvg("folder", { size: 13, strokeWidth: 1.8 }) + "</span>" + renderTailMarqueePath(getEffectiveCwd(), "blank-chat-cwd-path", ' id="blank-chat-cwd-path"') + '<span class="blank-chat-cwd-arrow">' + iconSvg("chevronDown", { size: 11, strokeWidth: 2 }) + '</span></div></div></div><div id="cross-session-queue-host"></div></div><div class="input-panel' + (state.selectedId ? "" : " hidden") + '"><div class="composer-top-row"><div id="todo-progress" class="todo-progress hidden"><button class="todo-progress-header" id="todo-progress-toggle" type="button" aria-expanded="false" aria-controls="todo-progress-body" aria-label="\u5C55\u5F00\u5F85\u529E\u5217\u8868"><div class="todo-progress-fill" id="todo-progress-fill" aria-hidden="true" style="--progress:0"></div><div class="todo-progress-left"><span class="todo-progress-ring" id="todo-progress-ring" aria-hidden="true" style="--progress:0"><svg width="16" height="16" viewBox="0 0 36 36"><circle class="todo-ring-track" cx="18" cy="18" r="15.5" fill="none" stroke-width="4"/><circle class="todo-ring-fill" cx="18" cy="18" r="15.5" fill="none" stroke-width="4" stroke-linecap="round"/></svg></span><span class="todo-progress-counter" id="todo-progress-counter"></span></div><div class="todo-progress-task-wrap"><span class="todo-progress-task" id="todo-progress-task"></span></div>' + iconSvg("chevronDown", { size: 14, strokeWidth: 2 }) + '</button></div><div class="todo-progress-body hidden" id="todo-progress-body"><ul class="todo-progress-list" id="todo-progress-list"></ul></div></div><div id="queue-bar-host" class="queue-bar-host" hidden></div><div class="input-composer-row"><div class="input-composer' + (String(currentDraft || "").trim() ? " has-text" : "") + (state.terminalInteractive ? " is-terminal-interactive" : "") + '" role="group" aria-label="\u6D88\u606F\u7F16\u8F91\u5668"><div id="attachment-preview" class="attachment-preview hidden" aria-label="\u5F85\u53D1\u9001\u9644\u4EF6" aria-live="polite"></div><div class="composer-main-row"><div class="composer-input-wrap"><textarea id="input-box" class="input-textarea" aria-label="\u6D88\u606F\u8F93\u5165" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml(currentDraft) + '</textarea></div><div class="composer-actions-left" role="group" aria-label="\u6DFB\u52A0\u5185\u5BB9\u4E0E\u6743\u9650"><button id="attach-btn" class="btn-circle btn-circle-action" type="button" title="\u66F4\u591A" aria-label="\u66F4\u591A\u64CD\u4F5C" aria-haspopup="dialog" aria-controls="composer-plus-popover" aria-expanded="false">' + iconSvg("plus", { size: 18, strokeWidth: 2.2 }) + '</button><input type="file" id="file-upload-input" multiple tabindex="-1" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0);pointer-events:none"><div class="composer-status-row" id="composer-status-row">' + renderComposerConfigControlsHtml(selectedSession, "mode") + renderAutoApproveChip(selectedSession) + '<span class="permission-actions hidden" id="permission-actions"><span class="permission-actions-label" id="permission-actions-label" role="status" aria-live="polite" aria-atomic="true">\u7B49\u5F85\u6388\u6743</span><button id="approve-permission-btn" class="btn btn-permission btn-permission-approve" type="button">\u6279\u51C6</button><button id="deny-permission-btn" class="btn btn-permission btn-permission-deny" type="button">\u62D2\u7EDD</button></span>' + renderApprovalStatsBadge() + '</div></div><div class="composer-actions-right" role="group" aria-label="\u6A21\u578B\u4E0E\u53D1\u9001"><div class="composer-inline-config">' + renderComposerConfigControlsHtml(selectedSession, "runtime") + '</div><button class="prompt-optimize-btn" id="prompt-optimize-btn" type="button" title="\u4F18\u5316\u63D0\u793A\u8BCD" aria-label="\u4F18\u5316\u63D0\u793A\u8BCD">' + iconSvg("edit", { size: 15, strokeWidth: 1.9, cls: "prompt-optimize-icon" }) + '<span class="prompt-optimize-label">\u4F18\u5316</span><span class="prompt-optimize-spinner" aria-hidden="true"></span></button><button id="stop-button" class="btn-circle btn-circle-stop hidden" type="button" title="\u505C\u6B62" aria-label="\u505C\u6B62\u751F\u6210"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg></button><button id="voice-record-btn" class="btn-circle btn-circle-action btn-circle-voice" type="button" title="\u6309\u4F4F\u8BED\u97F3\u8F93\u5165" aria-label="\u6309\u4F4F\u8BED\u97F3\u8F93\u5165" aria-pressed="false"' + (state.terminalInteractive ? " disabled" : "") + ">" + iconSvg("mic", { size: 19, strokeWidth: 2 }) + '</button><button id="send-input-button" class="btn-circle btn-circle-send" type="button" title="\u53D1\u9001" aria-label="\u53D1\u9001\u6D88\u606F"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m6 11 6-6 6 6"/></svg></button></div></div></div></div><div class="composer-plus-popover hidden" id="composer-plus-popover" role="dialog" aria-modal="false" aria-label="\u66F4\u591A\u64CD\u4F5C" aria-hidden="true"><button class="plus-popover-item" id="plus-attach-item" type="button">' + iconSvg("paperclip", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) + '<span class="plus-popover-label">\u4E0A\u4F20\u9644\u4EF6</span></button><button class="plus-popover-item' + (state.terminalInteractive ? " is-on" : "") + '" id="terminal-interactive-toggle-top" type="button" aria-pressed="' + (state.terminalInteractive ? "true" : "false") + '">' + iconSvg("keyboard", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) + '<span class="plus-popover-label">\u7EC8\u7AEF\u4EA4\u4E92</span><span class="plus-popover-toggle-state">' + (state.terminalInteractive ? "\u5F00" : "\u5173") + '</span></button><div class="plus-popover-sep" aria-hidden="true"></div><div class="plus-popover-trio-wrap">' + renderComposerConfigControlsHtml(selectedSession) + "</div></div>" + renderClaudeSkillsPickerHtml(selectedSession) + // 语音实时转写气泡 —— 浮在输入框上方（.input-composer 之外，绕开它的 overflow:hidden）。
     // 按住录音时显示，逐字展示识别文字；松手填回输入框。默认 hidden。
     '<div class="voice-transcript-bubble hidden" id="voice-transcript-bubble" aria-live="polite"><div class="voice-transcript-text" id="voice-transcript-text"></div><div class="voice-transcript-hint" id="voice-transcript-hint"><span class="voice-wave" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span class="voice-transcript-status" id="voice-transcript-status">\u6B63\u5728\u8046\u542C\u2026\u4E0A\u6ED1\u53D6\u6D88</span></div><span class="voice-bubble-arrow" aria-hidden="true"></span></div><p id="action-error" class="error-message hidden"></p></div></main></div></div>';
   }
@@ -42137,7 +41907,8 @@
     var computedMaxHeight = parseFloat(inputStyles.maxHeight || "");
     var maxHeight = Number.isFinite(computedMaxHeight) ? Math.max(minHeight, computedMaxHeight) : 120;
     var touchDevice = isTouchDevice();
-    if (!el.value || el.value.trim() === "") {
+    var terminalPassthrough = el.classList.contains("is-terminal-passthrough");
+    if (terminalPassthrough || !el.value || el.value.trim() === "") {
       el.style.height = minHeight + "px";
       el.style.minHeight = minHeight + "px";
       el.style.overflowY = touchDevice ? "auto" : "hidden";
@@ -42630,7 +42401,7 @@
     if (terminalInfo) terminalInfo.textContent = info;
     if (sessionSummary) sessionSummary.textContent = title;
     if (!structured) {
-      if (!state.terminal) initTerminal2();
+      if (!state.terminal) initTerminal();
     }
     applyCurrentView();
     restoreComposerStateForSession(sessionId);
@@ -42663,7 +42434,7 @@
         }
       }
     }
-    updateInteractiveControls3();
+    updateInteractiveControls2();
   }
   function refocusComposerAfterTouchSubmit(inputBox, sessionId) {
     if (!inputBox || !isTouchDevice()) return;
@@ -42712,7 +42483,7 @@
       inputBox.value = "";
       autoResizeInput(inputBox);
     }
-    updateInteractiveControls3();
+    updateInteractiveControls2();
     refocusComposerAfterTouchSubmit(inputBox, sessionId);
     var submission = { fingerprint, promise: null };
     activeSubmissions[fingerprint] = submission;
@@ -42770,7 +42541,7 @@
       if (Object.keys(activeSubmissions).length === 0 && state.composerSubmissionsBySession[sessionId] === activeSubmissions) {
         delete state.composerSubmissionsBySession[sessionId];
       }
-      updateInteractiveControls3();
+      updateInteractiveControls2();
     });
     submission.promise = submissionPromise;
     return submissionPromise;
@@ -43462,10 +43233,10 @@
           return new Promise(function(resolve) {
             setTimeout(resolve, delay);
           }).then(function() {
-            return queueDirectInput4(chunk, index2 === sequence.length - 1 ? shortcutKey : void 0, viewOverride, sessionId);
+            return queueDirectInput3(chunk, index2 === sequence.length - 1 ? shortcutKey : void 0, viewOverride, sessionId);
           });
         }
-        return queueDirectInput4(chunk, index2 === sequence.length - 1 ? shortcutKey : void 0, viewOverride, sessionId);
+        return queueDirectInput3(chunk, index2 === sequence.length - 1 ? shortcutKey : void 0, viewOverride, sessionId);
       });
     }, Promise.resolve());
   }
@@ -43478,19 +43249,20 @@
     }
     state.pendingMessages.push({ input, at: Date.now() });
   }
-  function _detectAndMarkClear(input) {
-    if (typeof input !== "string" || !input) return;
-    var stripped = input.replace(/\x1b\[200~/g, "").replace(/\x1b\[201~/g, "");
-    if (/(?:^|\n)\s*\/clear\s*(?:\r|\n|$)/.test(stripped)) {
-      if (typeof state !== "undefined" && state) {
-        state.terminalOutputMarker = (state.terminalOutput && state.terminalOutput.length) | 0;
-      }
-    }
-  }
-  function queueDirectInput4(input, shortcutKey, viewOverride, sessionId) {
+  function queueDirectInput3(input, shortcutKey, viewOverride, sessionId) {
     var targetSessionId = sessionId || state.selectedId;
     if (!input || !targetSessionId) return Promise.resolve();
-    _detectAndMarkClear(input);
+    var effectiveView = viewOverride || state.currentView;
+    if (effectiveView === "terminal" && targetSessionId === state.selectedId && state.ws && state.ws.readyState === WebSocket.OPEN) {
+      state.ws.send(JSON.stringify({
+        type: "pty_input",
+        sessionId: targetSessionId,
+        data: input,
+        shortcutKey,
+        userInput: true
+      }));
+      return Promise.resolve();
+    }
     state.messageQueue.push(input);
     state.inputQueue = state.inputQueue.then(function() {
       return postInput3(input, shortcutKey, viewOverride, targetSessionId, !!sessionId).finally(function() {
@@ -43698,7 +43470,7 @@
   }
   function sendTerminalSequence(sequence, shortcutKey) {
     if (!sequence) return;
-    queueDirectInput4(sequence, shortcutKey).catch(function() {
+    queueDirectInput3(sequence, shortcutKey).catch(function() {
     });
   }
   function focusTerminalInteractionTarget() {
@@ -43719,6 +43491,10 @@
     var next = !!enabled && isTerminalInteractionAvailable2();
     if (state.terminalInteractive === next) return;
     state.terminalInteractive = next;
+    if (state.terminal && state.terminal.element) {
+      var helperTextarea = state.terminal.element.querySelector(".xterm-helper-textarea");
+      if (helperTextarea) helperTextarea.readOnly = !next;
+    }
     if (next) {
       enableTerminalCapture();
       hideMiniKeyboard(false);
@@ -43728,7 +43504,9 @@
       disableTerminalCapture();
       clearModifiers();
     }
-    updateInteractiveControls3();
+    updateInteractiveControls2();
+    var composer = document.getElementById("input-box");
+    if (composer) autoResizeInput(composer);
   }
   function reconcileInteractiveState() {
     var selectedSession = state.sessions.find(function(session) {
@@ -43742,9 +43520,9 @@
     if ((!selectedSession || state.currentView !== "terminal") && state.keyboardPopupOpen) {
       state.keyboardPopupOpen = false;
     }
-    updateInteractiveControls3();
+    updateInteractiveControls2();
   }
-  function updateInteractiveControls3() {
+  function updateInteractiveControls2() {
     var selectedSession = state.sessions.find(function(session) {
       return session.id === state.selectedId;
     });
@@ -43790,6 +43568,7 @@
     }
     if (composerShell) {
       composerShell.classList.toggle("is-optimizing", promptOptimizeBusyForCurrent);
+      composerShell.classList.toggle("is-terminal-interactive", !!state.terminalInteractive);
     }
     var promptOptimizeBtn = document.getElementById("prompt-optimize-btn");
     if (promptOptimizeBtn) {
@@ -43856,7 +43635,7 @@
     if (node && node.nodeType === 3) node = node.parentNode;
     return !!(node && output.contains(node));
   }
-  function captureTerminalInput2(event) {
+  function captureTerminalInput(event) {
     if (!shouldCaptureTerminalEvent(event)) return;
     if (event.metaKey) return;
     var key = keyFromKeyboardEvent(event);
@@ -43880,13 +43659,20 @@
   }
   function closeKeyboardPopup() {
     state.keyboardPopupOpen = false;
-    updateInteractiveControls3();
+    updateInteractiveControls2();
   }
   function enableTerminalCapture() {
-    document.addEventListener("keydown", captureTerminalInput2, true);
+    if (state.terminal && state.terminal.element) {
+      var helperTextarea = state.terminal.element.querySelector(".xterm-helper-textarea");
+      if (helperTextarea) helperTextarea.readOnly = false;
+    }
   }
   function disableTerminalCapture() {
-    document.removeEventListener("keydown", captureTerminalInput2, true);
+    document.removeEventListener("keydown", captureTerminalInput, true);
+    if (state.terminal && state.terminal.element) {
+      var helperTextarea = state.terminal.element.querySelector(".xterm-helper-textarea");
+      if (helperTextarea) helperTextarea.readOnly = true;
+    }
   }
   function buildPtySequence(key, modifiers) {
     var mods = modifiers || { ctrl: false, alt: false, shift: false };
@@ -44630,7 +44416,7 @@
     }
   }
   state.chatRenderTimer = null;
-  function scheduleChatRender3(immediate) {
+  function scheduleChatRender2(immediate) {
     if (state.chatRenderTimer && !immediate) return;
     if (state.chatRenderTimer) clearTimeout(state.chatRenderTimer);
     if (immediate) {
@@ -44640,7 +44426,7 @@
     }
     try {
       window.__scheduleChatRender = function() {
-        scheduleChatRender3(true);
+        scheduleChatRender2(true);
       };
     } catch (e) {
     }
@@ -47389,9 +47175,6 @@
     var s = String(cmd || "").trim();
     return s.length <= 24 ? s || "\u672A\u9009\u62E9\u4F1A\u8BDD" : s.slice(0, 21) + "...";
   }
-  function normalizeTerminalOutput(value) {
-    return String(value || "").replace(/\r\r\n/g, "\r\n").replace(/\u0000/g, "");
-  }
 
   // src/web-ui/browser/worktree-merge-adapter.ts
   var MERGE_STATUSES = /* @__PURE__ */ new Set([
@@ -48567,7 +48350,7 @@
     }
     bindChatScrollListener();
     updateChatUnreadBubble();
-    updateInteractiveControls3();
+    updateInteractiveControls2();
     notifyLegacyUiChange("shell:view");
   }
   function updateSessionSnapshot(snapshot8) {
@@ -48611,7 +48394,11 @@
   }
   function subscribeToSession(sessionId) {
     if (!sessionId || !state.ws || state.ws.readyState !== WebSocket.OPEN) return;
-    state.ws.send(JSON.stringify({ type: "subscribe", sessionId }));
+    state.ws.send(JSON.stringify({
+      type: "subscribe",
+      sessionId,
+      capabilities: { ptyAck: true }
+    }));
   }
   function mergeServerSession(localSession, serverSession) {
     if (!localSession) return serverSession;
@@ -48720,6 +48507,9 @@
           delete state.attachmentsBySession[id];
         }
       });
+      Object.keys(state.terminalStatesBySession).forEach(function(id) {
+        if (!sessionIds.has(id)) delete state.terminalStatesBySession[id];
+      });
       state.sessions = serverSessions.map(function(serverSession) {
         var localSession = state.sessions.find(function(s) {
           return s.id === serverSession.id;
@@ -48766,7 +48556,7 @@
         });
         if (isStructuredSession2(sel)) {
           resetChatRenderCache({ preserveStickState: true });
-          scheduleChatRender3(true);
+          scheduleChatRender2(true);
         }
       }
       return reloadPromise.then(function() {
@@ -48841,16 +48631,15 @@
     if (kindEl && kindEl.textContent !== kindText) kindEl.textContent = kindText;
     updateAutoApproveIndicator();
     if (!state.terminal && terminalContainer && selectedSession && !isStructuredSession2(selectedSession)) {
-      initTerminal2();
+      initTerminal();
     }
     if (state.terminal && terminalContainer && selectedSession && !isStructuredSession2(selectedSession) && !terminalContainer.contains(state.terminal.element)) {
       teardownTerminal();
-      initTerminal2();
+      initTerminal();
     }
     if (!selectedSession) {
       state.terminalSessionId = null;
       state.terminalOutput = "";
-      state.terminalOutputMarker = 0;
     }
     if (state.terminal && selectedSession && state.currentView === "terminal") {
       maybeScrollTerminalToBottom("view");
@@ -49525,7 +49314,7 @@
       };
       var hardTimeout = setTimeout(settle, 2e3);
       try {
-        initTerminal2();
+        initTerminal();
       } catch (e) {
       }
       requestAnimationFrame(function() {
@@ -49573,7 +49362,7 @@
   function handleInputBoxKeydown(event) {
     if (isImeKeyboardEvent(event)) return;
     if (shouldCaptureTerminalEvent(event)) {
-      captureTerminalInput2(event);
+      captureTerminalInput(event);
       return;
     }
     if (event.key === "Enter") {
@@ -49611,7 +49400,7 @@
           stopSession();
         }
       } else {
-        queueDirectInput4(getControlInput("escape"), "escape");
+        queueDirectInput3(getControlInput("escape"), "escape");
       }
       return;
     }
@@ -49630,7 +49419,7 @@
         return;
       }
       event.preventDefault();
-      queueDirectInput4(getControlInput("ctrl_c"), "ctrl_c");
+      queueDirectInput3(getControlInput("ctrl_c"), "ctrl_c");
       return;
     }
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "d") {
@@ -49645,7 +49434,7 @@
         return;
       }
       event.preventDefault();
-      queueDirectInput4(getControlInput("ctrl_d"), "ctrl_d");
+      queueDirectInput3(getControlInput("ctrl_d"), "ctrl_d");
       return;
     }
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "l") {
@@ -49654,7 +49443,7 @@
       if (isStructuredSession2(clSess)) {
         return;
       }
-      queueDirectInput4(getControlInput("ctrl_l"), "ctrl_l");
+      queueDirectInput3(getControlInput("ctrl_l"), "ctrl_l");
       return;
     }
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "a") {
@@ -49670,7 +49459,7 @@
         return;
       }
       event.preventDefault();
-      queueDirectInput4(String.fromCharCode(24), "ctrl_x");
+      queueDirectInput3(String.fromCharCode(24), "ctrl_x");
       return;
     }
     if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
@@ -49752,7 +49541,7 @@
     if (items.length === 0) {
       bar.classList.add("hidden");
       bar.innerHTML = "";
-      updateInteractiveControls3();
+      updateInteractiveControls2();
       return;
     }
     bar.classList.remove("hidden");
@@ -49770,7 +49559,7 @@
         removePendingAttachment(parseInt(btn.getAttribute("data-index"), 10));
       });
     });
-    updateInteractiveControls3();
+    updateInteractiveControls2();
   }
   function uploadAttachments(sessionId, attachments) {
     var items = attachments || getPendingAttachments(sessionId);
@@ -49804,7 +49593,7 @@
     if (document.documentElement.classList.contains("is-wand-embed-terminal")) return false;
     var value = inputBox.value || "";
     if (!value) return false;
-    queueDirectInput4(value, "interactive_text").catch(function() {
+    queueDirectInput3(value, "interactive_text").catch(function() {
     });
     inputBox.value = "";
     autoResizeInput(inputBox);
@@ -49827,7 +49616,7 @@
     if (!pasted) return;
     event.preventDefault();
     if (state.terminalInteractive) {
-      queueDirectInput4(pasted, "paste").catch(function() {
+      queueDirectInput3(pasted, "paste").catch(function() {
       });
       return;
     }
@@ -49923,7 +49712,7 @@
     var focusWasOnOptimizeButton = document.activeElement === btn;
     var shouldKeepInputFocused = document.activeElement === inputBox || focusWasOnOptimizeButton;
     state.promptOptimizeRequest = request2;
-    updateInteractiveControls3();
+    updateInteractiveControls2();
     var payload = { text: raw };
     if (requestSessionId) payload.sessionId = requestSessionId;
     fetch("/api/optimize-prompt", {
@@ -49972,7 +49761,7 @@
       if (state.promptOptimizeRequest === request2) {
         state.promptOptimizeRequest = null;
       }
-      updateInteractiveControls3();
+      updateInteractiveControls2();
       if (shouldKeepInputFocused && state.selectedId === requestSessionId) {
         var currentInput = document.getElementById("input-box");
         if (currentInput) {
@@ -50006,7 +49795,7 @@
     var inputBox = el || document.getElementById("input-box");
     var hasText = !!(inputBox && String(inputBox.value || "").trim());
     composer.classList.toggle("has-text", hasText);
-    updateInteractiveControls3();
+    updateInteractiveControls2();
   }
 
   // src/web-ui/browser/utils.ts
@@ -50019,7 +49808,8 @@
     if (session.archived) return { active: false };
     var permBlocked = !!session.permissionBlocked;
     var inFlight = !!(isStructuredSession2(session) && session.structuredState && session.structuredState.inFlight);
-    var ptyRunning = !isStructuredSession2(session) && session.status === "running";
+    var providerCliRunning = session.providerCliActive !== false;
+    var ptyRunning = !isStructuredSession2(session) && session.status === "running" && providerCliRunning;
     return {
       active: inFlight || ptyRunning || permBlocked,
       inFlight,

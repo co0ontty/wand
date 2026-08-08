@@ -83,7 +83,7 @@ test("failed global install restores the package and CLI while preserving unrela
     "dist/web-ui/styles.js",
     "dist/web-ui/content/scripts.js",
     "dist/web-ui/content/styles.css",
-    "dist/web-ui/content/vendor/wterm/wterm.bundle.js",
+    "dist/web-ui/content/vendor/xterm/xterm.bundle.js",
     "dist/web-ui/content/vendor/qrcode/qrcode.bundle.js",
   ];
   for (const rel of runtimeFiles) {

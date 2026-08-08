@@ -615,7 +615,6 @@
       display: none !important;
     }
     .is-wand-embed-terminal .terminal-scroll-wrap {
-      padding: 8px 4px 6px;
       --term-font-family: "Roboto Mono", "Droid Sans Mono", "Noto Sans Mono", "Noto Sans Symbols 2", "Noto Sans Symbols", monospace;
       --term-font-size: 10px !important;
       --term-row-height: 15px !important;
@@ -638,6 +637,9 @@
       --term-color-13: #dbb1dc;
       --term-color-14: #9acbca;
       --term-color-15: #fff7ef;
+    }
+    .is-wand-embed-terminal .terminal-scroll-wrap .xterm {
+      padding: 8px 4px 6px;
     }
     .is-wand-embed-terminal .terminal-scroll-wrap ::selection {
       background: rgba(214, 123, 82, 0.28);
@@ -3134,17 +3136,16 @@
     .terminal-scroll-wrap {
       position: absolute;
       inset: 0;
-      overflow-y: auto;
+      overflow: hidden;
       overflow-x: hidden;
       scrollbar-width: none;
-      padding: 12px;
+      padding: 0;
       border-radius: 0;
       box-shadow: none;
       /* PC 端（Windows 125%/150% 缩放、Linux 1× DPR 等）字符渲染特别敏感：
        * 1) 默认子像素抗锯齿在彩色终端背景下视觉发虚 → 强制灰度抗锯齿；
        * 2) 等宽字体的连字（liga/calt）和 kerning 会让 ">=" / "->" 等
-       *    字符相邻时实际宽度变化，破坏 wterm 用 "W" 单字符测出的等宽
-       *    假设，累积下来就是字符错列；
+       *    字符相邻时实际宽度变化，破坏终端网格的等宽假设；
        * 3) text-rendering: geometricPrecision 让浏览器按字形几何排版，
        *    不再做 optimizeSpeed 的整数像素吸附，配合下面的整数 row-height
        *    让网格对齐稳定。 */
@@ -3184,6 +3185,19 @@
       --term-color-15: #fff7ef;
     }
 
+    .terminal-scroll-wrap .xterm {
+      height: 100%;
+      padding: 12px;
+    }
+
+    .terminal-scroll-wrap .xterm-viewport {
+      scrollbar-width: none;
+    }
+
+    .terminal-scroll-wrap .xterm-viewport::-webkit-scrollbar {
+      display: none;
+    }
+
     .terminal-scroll-wrap::-webkit-scrollbar {
       display: none;
     }
@@ -3192,7 +3206,7 @@
       background: rgba(214, 123, 82, 0.28);
     }
 
-    .terminal-scroll-wrap .term-grid {
+    .terminal-scroll-wrap .xterm-screen {
       min-height: 100%;
     }
 
@@ -14499,5 +14513,468 @@
       .session-provider-mark {
         width: 27px;
         height: 27px;
+      }
+    }
+
+    /* Web-only flat shell: native clients keep their existing touch-oriented
+       material while the browser surface follows the denser ORCA rhythm. */
+    html:not(.is-wand-app) .main-header-row {
+      background: var(--bg-elevated);
+      border-bottom-color: var(--border-subtle);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      box-shadow: none;
+    }
+
+    html:not(.is-wand-app) .sidebar {
+      background: var(--bg-elevated);
+      border-right: 1px solid var(--border-subtle);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      box-shadow: none;
+    }
+
+    html:not(.is-wand-app) .sidebar.pinned {
+      box-shadow: none;
+    }
+
+    html:not(.is-wand-app) .sidebar.open {
+      box-shadow: 10px 0 28px -22px rgba(40, 32, 26, 0.32);
+    }
+
+    html:not(.is-wand-app) .sidebar-footer {
+      padding: 10px 12px 12px;
+      border-top-color: var(--border-subtle);
+    }
+
+    html:not(.is-wand-app) .sidebar-footer-actions .btn {
+      border-color: transparent;
+      border-radius: 8px;
+      background: transparent;
+      box-shadow: none;
+      transform: none;
+    }
+
+    html:not(.is-wand-app) .sidebar-footer-actions .btn:hover {
+      border-color: transparent;
+      background: var(--bg-tertiary);
+      box-shadow: none;
+      transform: none;
+    }
+
+    html:not(.is-wand-app) .sidebar-footer-actions .btn:active {
+      transform: scale(0.97);
+    }
+
+    html:not(.is-wand-app) .sidebar-footer-actions .btn.active {
+      border-color: transparent;
+      background: var(--accent-muted);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      box-shadow: none;
+      transform: none;
+    }
+
+    html:not(.is-wand-app) .sidebar-footer .btn-primary,
+    html:not(.is-wand-app) .sidebar-footer .btn-primary:hover {
+      border-radius: 9px;
+      box-shadow: none;
+      transform: none;
+    }
+
+    html:not(.is-wand-app) .session-item {
+      border-color: transparent;
+      border-radius: 8px;
+      box-shadow: none;
+    }
+
+    html:not(.is-wand-app) .session-item:hover {
+      border-color: transparent;
+      background: color-mix(in srgb, var(--bg-tertiary) 62%, transparent);
+    }
+
+    html:not(.is-wand-app) .session-item.active {
+      border-color: transparent;
+      background: color-mix(in srgb, var(--accent-muted) 58%, transparent);
+      box-shadow: none;
+    }
+
+    html:not(.is-wand-app) .session-item.selected,
+    html:not(.is-wand-app) .session-item.session-managing.active {
+      border-color: transparent;
+      background: color-mix(in srgb, var(--accent-muted) 72%, transparent);
+      box-shadow: none;
+    }
+
+    html:not(.is-wand-app) .session-provider-mark {
+      border-color: transparent;
+      background: transparent;
+    }
+
+    html:not(.is-wand-app) .terminal-container {
+      margin-bottom: 4px;
+      border-color: rgba(140, 110, 85, 0.28);
+      border-radius: 10px;
+      background: var(--bg-terminal);
+      box-shadow: none;
+    }
+
+    html:not(.is-wand-app) .terminal-container:focus-within {
+      border-color: color-mix(in srgb, var(--accent) 48%, transparent);
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 10%, transparent);
+    }
+
+    html:not(.is-wand-app) .terminal-container.interactive {
+      border-color: color-mix(in srgb, var(--success) 54%, transparent);
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--success) 12%, transparent);
+    }
+
+    html:not(.is-wand-app) .input-panel {
+      --composer-panel-inline: clamp(8px, 1.2vw, 14px);
+      --composer-panel-right: var(--composer-panel-inline);
+      padding: 8px var(--composer-panel-inline) 10px;
+      padding-bottom: calc(10px + var(--input-safe-bottom, var(--safe-bottom, 0px)));
+      background: var(--bg-primary);
+    }
+
+    html:not(.is-wand-app) .input-composer {
+      --composer-action-size: 32px;
+      --composer-border: var(--border-default);
+      border-radius: 12px;
+      background: var(--bg-elevated);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      box-shadow: 0 1px 2px rgba(40, 32, 26, 0.045);
+    }
+
+    html:not(.is-wand-app) .input-composer:focus-within,
+    html:not(.is-wand-app) .input-composer.is-expanded {
+      border-color: color-mix(in srgb, var(--accent) 36%, var(--composer-border));
+      border-radius: 12px;
+      background: var(--bg-elevated);
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 9%, transparent);
+    }
+
+    html:not(.is-wand-app) .input-composer.in-flight {
+      border-color: var(--composer-border);
+      background: var(--bg-elevated);
+      box-shadow:
+        inset 0 2px 0 rgba(var(--accent-rgb, 197, 101, 61), 0.24),
+        0 1px 2px rgba(40, 32, 26, 0.045);
+    }
+
+    html:not(.is-wand-app) .input-composer.in-flight:focus-within {
+      border-color: color-mix(in srgb, var(--accent) 36%, var(--composer-border));
+      box-shadow:
+        inset 0 2px 0 rgba(var(--accent-rgb, 197, 101, 61), 0.24),
+        0 0 0 2px color-mix(in srgb, var(--accent) 9%, transparent);
+    }
+
+    html:not(.is-wand-app) .composer-main-row,
+    html:not(.is-wand-app) .input-composer:focus-within .composer-main-row,
+    html:not(.is-wand-app) .input-composer.is-expanded .composer-main-row {
+      grid-template-rows: minmax(48px, auto) 36px;
+      min-height: 84px;
+    }
+
+    html:not(.is-wand-app) .composer-input-wrap,
+    html:not(.is-wand-app) .input-composer:focus-within .composer-input-wrap,
+    html:not(.is-wand-app) .input-composer.is-expanded .composer-input-wrap {
+      min-height: 48px;
+    }
+
+    html:not(.is-wand-app) .composer-actions-left,
+    html:not(.is-wand-app) .input-composer:focus-within .composer-actions-left,
+    html:not(.is-wand-app) .input-composer.is-expanded .composer-actions-left {
+      padding: 2px 3px;
+    }
+
+    html:not(.is-wand-app) .composer-actions-right,
+    html:not(.is-wand-app) .input-composer:focus-within .composer-actions-right,
+    html:not(.is-wand-app) .input-composer.is-expanded .composer-actions-right {
+      padding: 2px 5px;
+    }
+
+    html:not(.is-wand-app) .composer-inline-config {
+      height: 32px;
+    }
+
+    html:not(.is-wand-app) .input-textarea {
+      min-height: 48px;
+      padding: 8px 10px 5px;
+      line-height: 1.45;
+    }
+
+    html:not(.is-wand-app) .input-composer.has-text .input-textarea {
+      padding-right: 10px;
+    }
+
+    html:not(.is-wand-app) .input-composer .prompt-optimize-btn,
+    html:not(.is-wand-app) .input-composer .composer-model-refresh-button,
+    html:not(.is-wand-app) .input-composer #attach-btn,
+    html:not(.is-wand-app) .input-composer .auto-approve-indicator,
+    html:not(.is-wand-app) .input-composer .auto-approve-indicator.active,
+    html:not(.is-wand-app) .input-composer .auto-approve-indicator.active:hover {
+      width: 32px;
+      min-width: 32px;
+      height: 32px;
+      min-height: 32px;
+      border-radius: 8px;
+    }
+
+    html:not(.is-wand-app) .input-composer .composer-config-chip,
+    html:not(.is-wand-app) .input-composer .approval-stats-badge {
+      min-height: 32px;
+      border-radius: 8px;
+    }
+
+    html:not(.is-wand-app) .composer-plus-popover {
+      bottom: calc(
+        50px
+        + var(--input-safe-bottom, var(--safe-bottom, 0px))
+        + var(--keyboard-offset, 0px)
+      );
+      padding: 5px;
+      border-color: var(--border-default);
+      border-radius: 10px;
+      background: var(--bg-elevated);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      box-shadow: 0 14px 34px -20px rgba(40, 32, 26, 0.38);
+    }
+
+    html:not(.is-wand-app) .composer-plus-popover .plus-popover-item {
+      min-height: 36px;
+      padding: 7px 8px;
+      border-radius: 7px;
+    }
+
+    html:not(.is-wand-app) .modal {
+      border-color: var(--border-default);
+      border-radius: 14px;
+      background: var(--bg-elevated);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      box-shadow: 0 18px 42px -24px rgba(20, 14, 8, 0.34);
+    }
+
+    html:not(.is-wand-app) .modal-backdrop {
+      background: rgba(20, 14, 8, 0.26);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+
+    @media (max-width: 640px) {
+      html:not(.is-wand-app) .input-panel {
+        --composer-panel-inline: max(6px, var(--wand-safe-left, 0px));
+        --composer-panel-right: max(6px, var(--wand-safe-right, 0px));
+        padding-top: 6px;
+        padding-right: var(--composer-panel-right);
+        padding-left: var(--composer-panel-inline);
+        padding-bottom: calc(
+          8px
+          + var(--input-safe-bottom, var(--safe-bottom, 0px))
+          + var(--keyboard-offset, 0px)
+        );
+      }
+
+      html:not(.is-wand-app) .input-composer,
+      html:not(.is-wand-app) .input-composer:focus-within,
+      html:not(.is-wand-app) .input-composer.is-expanded {
+        --composer-action-size: 44px;
+        border-radius: 14px;
+      }
+
+      html:not(.is-wand-app) .composer-main-row,
+      html:not(.is-wand-app) .input-composer:focus-within .composer-main-row,
+      html:not(.is-wand-app) .input-composer.is-expanded .composer-main-row {
+        grid-template-rows: minmax(52px, auto) 48px;
+        min-height: 100px;
+      }
+
+      html:not(.is-wand-app) .composer-input-wrap,
+      html:not(.is-wand-app) .input-composer:focus-within .composer-input-wrap,
+      html:not(.is-wand-app) .input-composer.is-expanded .composer-input-wrap {
+        min-height: 52px;
+      }
+
+      html:not(.is-wand-app) .input-textarea {
+        min-height: 52px;
+        padding: 9px 10px 6px;
+      }
+
+      html:not(.is-wand-app) .input-composer.has-text .input-textarea {
+        padding-right: 10px;
+      }
+
+      html:not(.is-wand-app) .composer-inline-config {
+        height: 44px;
+      }
+
+      html:not(.is-wand-app) .input-composer .prompt-optimize-btn,
+      html:not(.is-wand-app) .input-composer .composer-model-refresh-button,
+      html:not(.is-wand-app) .input-composer #attach-btn,
+      html:not(.is-wand-app) .input-composer .btn-circle-send,
+      html:not(.is-wand-app) .input-composer .auto-approve-indicator,
+      html:not(.is-wand-app) .input-composer .auto-approve-indicator.active,
+      html:not(.is-wand-app) .input-composer .auto-approve-indicator.active:hover {
+        width: 44px;
+        min-width: 44px;
+        height: 44px;
+        min-height: 44px;
+      }
+
+      html:not(.is-wand-app) .input-composer .composer-config-chip,
+      html:not(.is-wand-app) .input-composer .approval-stats-badge {
+        min-height: 44px;
+      }
+
+      html:not(.is-wand-app) .composer-plus-popover {
+        bottom: calc(
+          64px
+          + var(--input-safe-bottom, var(--safe-bottom, 0px))
+          + var(--keyboard-offset, 0px)
+        );
+        border-radius: 10px;
+      }
+    }
+
+    @media (pointer: coarse) and (min-width: 641px) {
+      html:not(.is-wand-app) .input-composer {
+        --composer-action-size: 44px;
+      }
+
+      html:not(.is-wand-app) .composer-main-row,
+      html:not(.is-wand-app) .input-composer:focus-within .composer-main-row,
+      html:not(.is-wand-app) .input-composer.is-expanded .composer-main-row {
+        grid-template-rows: minmax(54px, auto) 48px;
+        min-height: 102px;
+      }
+
+      html:not(.is-wand-app) .composer-input-wrap,
+      html:not(.is-wand-app) .input-composer:focus-within .composer-input-wrap,
+      html:not(.is-wand-app) .input-composer.is-expanded .composer-input-wrap,
+      html:not(.is-wand-app) .input-textarea {
+        min-height: 54px;
+      }
+
+      html:not(.is-wand-app) .composer-inline-config {
+        height: 44px;
+      }
+
+      html:not(.is-wand-app) .input-composer .prompt-optimize-btn,
+      html:not(.is-wand-app) .input-composer .composer-model-refresh-button,
+      html:not(.is-wand-app) .input-composer #attach-btn,
+      html:not(.is-wand-app) .input-composer .btn-circle-send,
+      html:not(.is-wand-app) .input-composer .auto-approve-indicator,
+      html:not(.is-wand-app) .input-composer .auto-approve-indicator.active,
+      html:not(.is-wand-app) .input-composer .auto-approve-indicator.active:hover {
+        width: 44px;
+        min-width: 44px;
+        height: 44px;
+        min-height: 44px;
+      }
+
+      html:not(.is-wand-app) .input-composer .composer-config-chip,
+      html:not(.is-wand-app) .input-composer .approval-stats-badge {
+        min-height: 44px;
+      }
+
+      html:not(.is-wand-app) .composer-plus-popover {
+        bottom: calc(
+          64px
+          + var(--input-safe-bottom, var(--safe-bottom, 0px))
+          + var(--keyboard-offset, 0px)
+        );
+      }
+    }
+
+    /* PTY passthrough keeps the controls available without reserving a full
+       drafting surface. The modifier is explicit so focus and placeholder
+       changes never cause layout shifts on their own. */
+    .input-composer.is-terminal-interactive .composer-main-row,
+    .input-composer.is-terminal-interactive:focus-within .composer-main-row,
+    .input-composer.is-terminal-interactive.is-expanded .composer-main-row {
+      grid-template-rows: 36px 40px;
+      min-height: 76px;
+    }
+
+    .input-composer.is-terminal-interactive .composer-input-wrap,
+    .input-composer.is-terminal-interactive:focus-within .composer-input-wrap,
+    .input-composer.is-terminal-interactive.is-expanded .composer-input-wrap {
+      min-height: 36px;
+    }
+
+    .input-composer.is-terminal-interactive .input-textarea {
+      min-height: 36px;
+      max-height: 36px;
+      padding: 7px 12px 4px;
+      overflow-y: hidden;
+    }
+
+    html:not(.is-wand-app) .input-composer.is-terminal-interactive .composer-main-row,
+    html:not(.is-wand-app) .input-composer.is-terminal-interactive:focus-within .composer-main-row,
+    html:not(.is-wand-app) .input-composer.is-terminal-interactive.is-expanded .composer-main-row {
+      grid-template-rows: 32px 36px;
+      min-height: 68px;
+    }
+
+    html:not(.is-wand-app) .input-composer.is-terminal-interactive .composer-input-wrap,
+    html:not(.is-wand-app) .input-composer.is-terminal-interactive:focus-within .composer-input-wrap,
+    html:not(.is-wand-app) .input-composer.is-terminal-interactive.is-expanded .composer-input-wrap {
+      min-height: 32px;
+    }
+
+    html:not(.is-wand-app) .input-composer.is-terminal-interactive .input-textarea {
+      min-height: 32px;
+      max-height: 32px;
+      padding: 5px 10px 3px;
+    }
+
+    @media (max-width: 640px) {
+      .input-composer.is-terminal-interactive .composer-main-row,
+      .input-composer.is-terminal-interactive:focus-within .composer-main-row,
+      .input-composer.is-terminal-interactive.is-expanded .composer-main-row,
+      html:not(.is-wand-app) .input-composer.is-terminal-interactive .composer-main-row,
+      html:not(.is-wand-app) .input-composer.is-terminal-interactive:focus-within .composer-main-row,
+      html:not(.is-wand-app) .input-composer.is-terminal-interactive.is-expanded .composer-main-row {
+        grid-template-rows: 40px 48px;
+        min-height: 88px;
+      }
+
+      .input-composer.is-terminal-interactive .composer-input-wrap,
+      .input-composer.is-terminal-interactive:focus-within .composer-input-wrap,
+      .input-composer.is-terminal-interactive.is-expanded .composer-input-wrap,
+      html:not(.is-wand-app) .input-composer.is-terminal-interactive .composer-input-wrap,
+      html:not(.is-wand-app) .input-composer.is-terminal-interactive:focus-within .composer-input-wrap,
+      html:not(.is-wand-app) .input-composer.is-terminal-interactive.is-expanded .composer-input-wrap,
+      .input-composer.is-terminal-interactive .input-textarea,
+      html:not(.is-wand-app) .input-composer.is-terminal-interactive .input-textarea {
+        min-height: 40px;
+        max-height: 40px;
+      }
+    }
+
+    @media (pointer: coarse) and (min-width: 641px) {
+      .input-composer.is-terminal-interactive .composer-main-row,
+      .input-composer.is-terminal-interactive:focus-within .composer-main-row,
+      .input-composer.is-terminal-interactive.is-expanded .composer-main-row,
+      html:not(.is-wand-app) .input-composer.is-terminal-interactive .composer-main-row,
+      html:not(.is-wand-app) .input-composer.is-terminal-interactive:focus-within .composer-main-row,
+      html:not(.is-wand-app) .input-composer.is-terminal-interactive.is-expanded .composer-main-row {
+        grid-template-rows: 40px 48px;
+        min-height: 88px;
+      }
+
+      .input-composer.is-terminal-interactive .composer-input-wrap,
+      .input-composer.is-terminal-interactive:focus-within .composer-input-wrap,
+      .input-composer.is-terminal-interactive.is-expanded .composer-input-wrap,
+      html:not(.is-wand-app) .input-composer.is-terminal-interactive .composer-input-wrap,
+      html:not(.is-wand-app) .input-composer.is-terminal-interactive:focus-within .composer-input-wrap,
+      html:not(.is-wand-app) .input-composer.is-terminal-interactive.is-expanded .composer-input-wrap,
+      .input-composer.is-terminal-interactive .input-textarea,
+      html:not(.is-wand-app) .input-composer.is-terminal-interactive .input-textarea {
+        min-height: 40px;
+        max-height: 40px;
       }
     }

@@ -296,28 +296,40 @@ test("IME confirmation is suppressed before terminal-interactive capture", async
     body: JSON.stringify([session]),
   }));
 
-  const sentInputs: string[] = [];
   await page.route(new RegExp(`/api/sessions/${session.id}(?:\\?.*)?$`), async (route) => {
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify(session),
     });
   });
-  await page.route(`**/api/sessions/${session.id}/input`, async (route) => {
-    sentInputs.push(route.request().postDataJSON().input);
-    await route.fulfill({
-      contentType: "application/json",
-      body: JSON.stringify({ ok: true }),
-    });
+  await page.addInitScript(() => {
+    const originalSend = WebSocket.prototype.send;
+    (window as any).__wandPtyInputs = [];
+    WebSocket.prototype.send = function(data) {
+      try {
+        const message = JSON.parse(String(data));
+        if (message.type === "pty_input") {
+          (window as any).__wandPtyInputs.push(message.data);
+        }
+      } catch {
+        // Preserve non-JSON frames untouched.
+      }
+      return originalSend.call(this, data);
+    };
   });
   await login(page);
   await switchSession(page, session.id);
 
   await page.locator("#attach-btn").click();
   const interactiveToggle = page.locator("#terminal-interactive-toggle-top");
+  const composerShell = page.locator(".input-composer");
+  const normalComposerHeight = await composerShell.evaluate((element) => element.getBoundingClientRect().height);
   await expect(interactiveToggle).toBeVisible();
   await interactiveToggle.click();
   await expect(interactiveToggle).toHaveAttribute("aria-pressed", "true");
+  await expect(composerShell).toHaveClass(/is-terminal-interactive/);
+  const terminalComposerHeight = await composerShell.evaluate((element) => element.getBoundingClientRect().height);
+  expect(terminalComposerHeight).toBeLessThan(normalComposerHeight);
 
   const input = page.locator("#input-box");
   await input.evaluate((element) => {
@@ -362,7 +374,7 @@ test("IME confirmation is suppressed before terminal-interactive capture", async
     element.dispatchEvent(event);
   });
   await page.waitForTimeout(20);
-  expect(sentInputs).toEqual(["拼音"]);
+  await expect.poll(() => page.evaluate(() => (window as any).__wandPtyInputs)).toEqual(["拼音"]);
 
   // Prove terminal capture is actually active rather than the test passing
   // because the listener was never installed.
@@ -373,7 +385,7 @@ test("IME confirmation is suppressed before terminal-interactive capture", async
       key: "x",
     }));
   });
-  await expect.poll(() => sentInputs).toEqual(["拼音", "x"]);
+  await expect.poll(() => page.evaluate(() => (window as any).__wandPtyInputs)).toEqual(["拼音", "x"]);
 });
 
 test("composer more menu follows keyboard focus and returns it on close", async ({ page }) => {

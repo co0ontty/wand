@@ -16,9 +16,9 @@ export function vendorAssetUrl(relPath: EmbeddedVendorAssetPath): string {
 export function renderApp(configPath: string): string {
   const cssStyles = getCSSStyles();
   const scriptContent = getScriptContent(configPath);
-  const wtermSrc = vendorAssetUrl("/vendor/wterm/wterm.bundle.js");
+  const xtermSrc = vendorAssetUrl("/vendor/xterm/xterm.bundle.js");
   const qrcodeSrc = vendorAssetUrl("/vendor/qrcode/qrcode.bundle.js");
-  const wtermCssHref = vendorAssetUrl("/vendor/wterm/terminal.css");
+  const xtermCssHref = vendorAssetUrl("/vendor/xterm/xterm.css");
 
   return `<!doctype html>
 <html lang="zh-CN">
@@ -31,7 +31,7 @@ export function renderApp(configPath: string): string {
   <meta name="theme-color" content="#1f1b17" media="(prefers-color-scheme: dark)" />
   <meta name="format-detection" content="telephone=no" />
   <meta name="msapplication-tap-highlight" content="no" />
-  <link rel="stylesheet" href="${wtermCssHref}" />
+  <link rel="stylesheet" href="${xtermCssHref}" />
   <style>
 ${cssStyles}
   </style>
@@ -39,7 +39,7 @@ ${cssStyles}
 <body>
   <div id="app"></div>
   <div id="overlay-root" data-wand-ui-root></div>
-${scriptOpen} src="${wtermSrc}">${scriptClose}
+${scriptOpen} src="${xtermSrc}">${scriptClose}
 ${scriptOpen} src="${qrcodeSrc}">${scriptClose}
 ${scriptOpen}>
 ${scriptContent}

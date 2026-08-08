@@ -528,6 +528,10 @@ export interface SessionSnapshot {
   automationId?: string;
   sessionKind?: SessionKind;
   provider?: SessionProvider;
+  /** True while the provider CLI owns the PTY; false after it returns to the persistent shell. */
+  providerCliActive?: boolean;
+  /** Provider CLI exit status; separate from exitCode, which belongs to the persistent PTY shell. */
+  providerCliExitCode?: number | null;
   runner?: SessionRunner;
   command: string;
   cwd: string;

@@ -115,21 +115,13 @@ import { openFilePreviewFromLegacy } from "./file-preview-adapter";
 
       export function applyTerminalScale() {
         if (!state.terminal || !state.terminal.element) return;
-        // 字号和行高都向上取整到整数像素：PC 端 1× DPR 下浏览器对亚像素
-        // 字号/行高的舍入策略不一致（fontSize 16.25 → 16 或 17，行高
-        // 19.5 → 19 或 20），相邻行/列的吸附方向不同就会让 wterm 网格
-        // 错位。强制整数 px 让 cell 高度、字符高度都稳定一致，等价于
-        // 之前桌面端必须按右上角缩放才能恢复的"整像素重排"路径。
         var rawFontSize = state.terminalBaseFontSize * state.terminalScale;
         var fontPx = Math.max(1, Math.round(rawFontSize));
-        var rowPx = Math.max(1, Math.round(rawFontSize * 1.5));
-        state.terminal.element.style.setProperty("--term-font-size", fontPx + "px");
-        state.terminal.element.style.setProperty("--term-row-height", rowPx + "px");
-        if (typeof state.terminal.remeasure === "function") {
-          requestAnimationFrame(function() {
-            if (state.terminal) state.terminal.remeasure();
-          });
-        }
+        state.terminal.options.fontSize = fontPx;
+        requestAnimationFrame(function() {
+          if (!state.terminal || !state.terminalFitAddon) return;
+          state.terminalFitAddon.fit();
+        });
       }
 
       export function updateScaleLabel() {

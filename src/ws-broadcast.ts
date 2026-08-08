@@ -9,6 +9,7 @@ import { readSessionCookie, type AuthService } from "./auth.js";
 import { blockWindowMessagesForTransport, windowMessagesForTransport } from "./message-truncator.js";
 import { boundSessionEventData, toSessionDetailDTO } from "./session-transport.js";
 import { enrichStructuredMessages } from "./structured-client-protocol.js";
+import type { PtyTerminalSnapshot } from "./pty-terminal-state.js";
 
 export type { ProcessEvent } from "./types.js";
 
@@ -30,6 +31,9 @@ const HEARTBEAT_INTERVAL_MS = 20_000;
  * 半开连接并 terminate。45s = 两个心跳周期再加 5s 容忍，可以避开偶发抖动。
  */
 const HEARTBEAT_STALE_MS = 45_000;
+const PTY_UNACKED_HIGH_WATER = 512 * 1024;
+const PTY_UNACKED_LOW_WATER = 128 * 1024;
+const MAX_PTY_INPUT_CHARS = 128 * 1024;
 
 // ── Types ──
 
@@ -54,6 +58,20 @@ interface WsClient {
    * 时间戳。心跳 tick 用它来判断半开连接。
    */
   lastSeenAt: number;
+  subscribedSessionId: string | null;
+  /** Whether this client explicitly opted into PTY byte acknowledgements. */
+  supportsPtyAck: boolean;
+  unackedPtyBytes: number;
+  ptyPausedSessionId: string | null;
+}
+
+export interface WsSessionPort {
+  getSession(id: string): SessionSnapshot | null;
+  getTerminalState?(id: string): PtyTerminalSnapshot | null;
+  sendPtyInput?(id: string, input: string, shortcutKey?: string, userInput?: boolean): void;
+  resizePty?(id: string, cols: number, rows: number): void;
+  pausePtyOutput?(id: string): void;
+  resumePtyOutput?(id: string): void;
 }
 
 interface ClientMessageWindow {
@@ -72,6 +90,8 @@ export class WsBroadcastManager {
   private outputDebounceCache = new Map<string, { event: ProcessEvent; timer: NodeJS.Timeout }>();
   private heartbeatTimer?: NodeJS.Timeout;
   private disposed = false;
+  private port?: WsSessionPort;
+  private readonly ptyPauseRefs = new Map<string, number>();
 
   private getCardDefaults: () => CardExpandDefaults;
   private useHttps: boolean;
@@ -112,8 +132,11 @@ export class WsBroadcastManager {
   }
 
   /** Set up connection handling. Should be called once during server startup. */
-  setup(getSession: (id: string) => SessionSnapshot | null): void {
+  setup(portOrGetSession: WsSessionPort | ((id: string) => SessionSnapshot | null)): void {
     if (this.disposed) return;
+    this.port = typeof portOrGetSession === "function"
+      ? { getSession: portOrGetSession }
+      : portOrGetSession;
     this.wss.on("connection", (ws, req) => {
       if (this.disposed) {
         ws.close(1012, "Server shutting down");
@@ -135,11 +158,15 @@ export class WsBroadcastManager {
         outputSeqBySession: new Map(),
         pendingResyncSessions: new Set(),
         lastSeenAt: Date.now(),
+        subscribedSessionId: null,
+        supportsPtyAck: false,
+        unackedPtyBytes: 0,
+        ptyPausedSessionId: null,
       };
       this.clients.add(client);
 
       ws.on("close", () => {
-        this.clients.delete(client);
+        this.discardClient(client, false);
       });
 
       ws.on("error", () => {
@@ -163,7 +190,13 @@ export class WsBroadcastManager {
             if (Number.isSafeInteger(msg.blockBudget) && msg.blockBudget > 0) {
               client.blockBudget = Math.min(msg.blockBudget, MAX_BLOCK_BUDGET);
             }
-            const snapshot = getSession(msg.sessionId);
+            this.releasePtyPause(client);
+            client.subscribedSessionId = null;
+            client.supportsPtyAck = msg.capabilities?.ptyAck === true;
+            this.flushOutput(msg.sessionId);
+            client.subscribedSessionId = msg.sessionId;
+            client.unackedPtyBytes = 0;
+            const snapshot = this.port?.getSession(msg.sessionId) ?? null;
             if (snapshot) {
               this.sendInit(client, msg.sessionId, snapshot, false);
             } else {
@@ -174,8 +207,35 @@ export class WsBroadcastManager {
               }));
             }
           } else if (msg.type === "resync" && msg.sessionId) {
-            const snapshot = getSession(msg.sessionId);
+            this.flushOutput(msg.sessionId);
+            const snapshot = this.port?.getSession(msg.sessionId) ?? null;
             if (snapshot) this.sendInit(client, msg.sessionId, snapshot, true);
+          } else if (msg.type === "pty_input" && msg.sessionId && typeof msg.data === "string") {
+            if (client.subscribedSessionId !== msg.sessionId || msg.data.length > MAX_PTY_INPUT_CHARS) return;
+            try {
+              this.port?.sendPtyInput?.(
+                msg.sessionId,
+                msg.data,
+                typeof msg.shortcutKey === "string" ? msg.shortcutKey : undefined,
+                msg.userInput !== false,
+              );
+            } catch (error) {
+              this.sendPtyError(client, msg.sessionId, error);
+            }
+          } else if (msg.type === "pty_resize" && msg.sessionId) {
+            if (client.subscribedSessionId !== msg.sessionId) return;
+            if (!Number.isFinite(msg.cols) || !Number.isFinite(msg.rows)) return;
+            try {
+              this.port?.resizePty?.(msg.sessionId, Math.floor(msg.cols), Math.floor(msg.rows));
+            } catch (error) {
+              this.sendPtyError(client, msg.sessionId, error);
+            }
+          } else if (msg.type === "pty_ack" && msg.sessionId && Number.isFinite(msg.bytes)) {
+            if (!client.supportsPtyAck || client.subscribedSessionId !== msg.sessionId) return;
+            client.unackedPtyBytes = Math.max(0, client.unackedPtyBytes - Math.max(0, Math.floor(msg.bytes)));
+            if (client.ptyPausedSessionId && client.unackedPtyBytes <= PTY_UNACKED_LOW_WATER) {
+              this.releasePtyPause(client);
+            }
           } else if (msg.type === "pong") {
             // 应用层 pong（对我们下发的 {type:"ping"} 的响应）。lastSeenAt
             // 已经在函数顶部刷新过了，这里不需要再做事；分支留着是为了
@@ -214,12 +274,11 @@ export class WsBroadcastManager {
       if (client.ws.readyState !== WebSocket.OPEN) {
         // 已经不是 OPEN 了，close handler 通常会清理；这里兜底防止集合里
         // 留下僵尸 entry。
-        this.clients.delete(client);
+        this.discardClient(client, false);
         continue;
       }
       if (now - client.lastSeenAt > HEARTBEAT_STALE_MS) {
-        try { client.ws.terminate(); } catch { /* ignore */ }
-        this.clients.delete(client);
+        this.discardClient(client, true);
         continue;
       }
       try {
@@ -288,7 +347,9 @@ export class WsBroadcastManager {
       return;
     }
 
-    // Non-output events are sent immediately
+    // Preserve PTY ordering: the final debounced bytes must arrive before an
+    // ended/status event for the same session.
+    this.flushOutput(event.sessionId);
     this.broadcast(event);
   }
 
@@ -321,7 +382,10 @@ export class WsBroadcastManager {
       sessionId,
       seq,
       ...(resync ? { resync: true } : {}),
-      data: toSessionDetailDTO(snapshot, { output: snapshot.output, ...windowed }),
+      data: {
+        ...toSessionDetailDTO(snapshot, { output: snapshot.output, ...windowed }),
+        terminalState: this.port?.getTerminalState?.(sessionId) ?? undefined,
+      },
     }));
   }
 
@@ -361,6 +425,10 @@ export class WsBroadcastManager {
     const boundedData = boundSessionEventData(event.data);
     const boundedEvent = boundedData === event.data ? event : { ...event, data: boundedData };
     const data = boundedData as Record<string, unknown> | undefined;
+    const isRawPtyOutput = event.type === "output"
+      && data?.incremental === true
+      && typeof data.chunk === "string";
+    const ptyBytes = isRawPtyOutput ? Buffer.byteLength(data!.chunk as string) : 0;
     const hasFullMessages = !!(data && !data.incremental && Array.isArray(data.messages));
     const rawMessages = hasFullMessages
       ? (data!.messages as SessionSnapshot["messages"])
@@ -390,6 +458,7 @@ export class WsBroadcastManager {
     };
     for (const client of this.clients) {
       if (client.ws.readyState !== WebSocket.OPEN) continue;
+      if (isRawPtyOutput && client.subscribedSessionId !== event.sessionId) continue;
 
       const clientEvent = eventForClient(client);
       // Stamp output events with a per-(client, session) sequence number so
@@ -400,11 +469,20 @@ export class WsBroadcastManager {
         client.outputSeqBySession.set(event.sessionId, seq);
         outgoing = { ...clientEvent, seq } as ProcessEvent;
       }
+      const usesPtyAckFlowControl = isRawPtyOutput && client.supportsPtyAck;
+      if (usesPtyAckFlowControl) {
+        outgoing = { ...outgoing, ptyBytes } as ProcessEvent;
+        client.unackedPtyBytes += ptyBytes;
+        if (client.unackedPtyBytes >= PTY_UNACKED_HIGH_WATER) {
+          this.acquirePtyPause(client, event.sessionId);
+        }
+      }
 
       // Backpressure only gates new business messages. The send pump must
       // keep draining messages that were already accepted; otherwise a queue
       // at the high-water mark can never reach the low-water mark again.
-      if (client.backpressurePaused || client.sendQueue.length >= MAX_QUEUE_SIZE) {
+      if (!usesPtyAckFlowControl
+        && (client.backpressurePaused || client.sendQueue.length >= MAX_QUEUE_SIZE)) {
         client.backpressurePaused = true;
         if (event.type === "output") client.pendingResyncSessions.add(event.sessionId);
         this.processWsQueue(client);
@@ -446,6 +524,7 @@ export class WsBroadcastManager {
   }
 
   private discardClient(client: WsClient, terminate: boolean): void {
+    this.releasePtyPause(client);
     client.sendQueue.length = 0;
     client.pendingResyncSessions.clear();
     client.sendInProgress = false;
@@ -454,6 +533,34 @@ export class WsBroadcastManager {
     if (terminate) {
       try { client.ws.terminate(); } catch { /* ignore */ }
     }
+  }
+
+  private acquirePtyPause(client: WsClient, sessionId: string): void {
+    if (client.ptyPausedSessionId === sessionId) return;
+    this.releasePtyPause(client);
+    client.ptyPausedSessionId = sessionId;
+    const next = (this.ptyPauseRefs.get(sessionId) ?? 0) + 1;
+    this.ptyPauseRefs.set(sessionId, next);
+    if (next === 1) this.port?.pausePtyOutput?.(sessionId);
+  }
+
+  private releasePtyPause(client: WsClient): void {
+    const sessionId = client.ptyPausedSessionId;
+    if (!sessionId) return;
+    client.ptyPausedSessionId = null;
+    const next = Math.max(0, (this.ptyPauseRefs.get(sessionId) ?? 1) - 1);
+    if (next === 0) {
+      this.ptyPauseRefs.delete(sessionId);
+      this.port?.resumePtyOutput?.(sessionId);
+    } else {
+      this.ptyPauseRefs.set(sessionId, next);
+    }
+  }
+
+  private sendPtyError(client: WsClient, sessionId: string, error: unknown): void {
+    if (client.ws.readyState !== WebSocket.OPEN) return;
+    const message = error instanceof Error ? error.message : String(error);
+    client.ws.send(JSON.stringify({ type: "pty_error", sessionId, error: message }));
   }
 
   private processWsQueue(client: WsClient): void {

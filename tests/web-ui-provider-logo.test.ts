@@ -25,6 +25,9 @@ test("ProviderLogo renders a distinct local brand mark for every supported provi
   assert.equal(new Set(rendered).size, PROVIDER_IDS.length);
   assert.match(rendered[2], /fill="#131010"/);
   assert.match(rendered[4], /fill="#2ADB5C"/);
+  assert.match(rendered[5], /viewBox="0 0 800 800"/);
+  assert.match(rendered[5], /fill-rule="evenodd"/);
+  assert.match(rendered[5], /M517\.36 400H634\.72V634\.72H517\.36Z/);
 });
 
 test("provider identity normalizes legacy executable names and keeps display labels consistent", () => {
@@ -39,4 +42,5 @@ test("provider identity normalizes legacy executable names and keeps display lab
   assert.equal(providerDisplayName("qoder"), "Qoder");
   assert.equal(providerDisplayName("custom-agent"), "custom-agent");
   assert.match(renderProviderLogoMarkup("opencode"), /data-provider-logo="opencode"/);
+  assert.match(renderProviderLogoMarkup("pi"), /viewBox="0 0 800 800"/);
 });

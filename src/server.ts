@@ -677,8 +677,8 @@ export async function startServer(
     res.setHeader("Cache-Control", "public, max-age=604800, immutable");
     res.type(asset.contentType).send(asset.content);
   };
-  app.get("/vendor/wterm/wterm.bundle.js", (req, res) => sendEmbeddedVendorAsset("/vendor/wterm/wterm.bundle.js", req, res));
-  app.get("/vendor/wterm/terminal.css", (req, res) => sendEmbeddedVendorAsset("/vendor/wterm/terminal.css", req, res));
+  app.get("/vendor/xterm/xterm.bundle.js", (req, res) => sendEmbeddedVendorAsset("/vendor/xterm/xterm.bundle.js", req, res));
+  app.get("/vendor/xterm/xterm.css", (req, res) => sendEmbeddedVendorAsset("/vendor/xterm/xterm.css", req, res));
   app.get("/vendor/qrcode/qrcode.bundle.js", (req, res) => sendEmbeddedVendorAsset("/vendor/qrcode/qrcode.bundle.js", req, res));
 
   // ── Web UI endpoints ──
@@ -1261,7 +1261,18 @@ export async function startServer(
     },
   });
   const wsManager = new WsBroadcastManager(wss, () => config.cardDefaults ?? {}, useHttps, authService);
-  wsManager.setup((id) => sessionRegistry.get(id));
+  wsManager.setup({
+    getSession: (id) => sessionRegistry.get(id),
+    getTerminalState: (id) => processes.getTerminalState(id),
+    sendPtyInput: (id, input, shortcutKey, userInput) => {
+      processes.sendInput(id, input, "terminal", shortcutKey, userInput);
+    },
+    resizePty: (id, cols, rows) => {
+      processes.resize(id, cols, rows);
+    },
+    pausePtyOutput: (id) => processes.pauseOutput(id),
+    resumePtyOutput: (id) => processes.resumeOutput(id),
+  });
   disconnectAuthenticatedSockets = () => wsManager.disconnectAll();
   wss.on("error", (err: NodeJS.ErrnoException) => {
     if (err.code === "EADDRINUSE") return;

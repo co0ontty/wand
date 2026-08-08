@@ -41,12 +41,21 @@ interface TestClient {
   pendingResyncSessions: Set<string>;
   blockBudget?: number;
   lastSeenAt: number;
+  subscribedSessionId: string | null;
+  supportsPtyAck: boolean;
+  unackedPtyBytes: number;
+  ptyPausedSessionId: string | null;
 }
 
 interface ManagerInternals {
   clients: Set<TestClient>;
+  port?: {
+    pausePtyOutput?(id: string): void;
+    resumePtyOutput?(id: string): void;
+  };
   broadcast(event: ProcessEvent): void;
   processWsQueue(client: TestClient): void;
+  releasePtyPause(client: TestClient): void;
 }
 
 function createHarness(): {
@@ -66,6 +75,10 @@ function createHarness(): {
     outputSeqBySession: new Map(),
     pendingResyncSessions: new Set(),
     lastSeenAt: Date.now(),
+    subscribedSessionId: null,
+    supportsPtyAck: false,
+    unackedPtyBytes: 0,
+    ptyPausedSessionId: null,
   };
   manager.clients.add(client);
   return { manager, client, socket };
@@ -139,4 +152,90 @@ test("a send callback error clears the queue even when a later callback succeeds
   assert.equal(client.sendQueue.length, 0);
   assert.equal(manager.clients.has(client), false);
   assert.equal(socket.terminated, true);
+});
+
+test("raw PTY output is scoped to the subscribed session and pauses until acknowledged", () => {
+  const first = createHarness();
+  const secondSocket = new ControlledSocket();
+  const secondClient: TestClient = {
+    ...first.client,
+    ws: secondSocket as unknown as WebSocket,
+    sendQueue: [],
+    lastOutputBySession: new Map(),
+    outputSeqBySession: new Map(),
+    pendingResyncSessions: new Set(),
+    subscribedSessionId: "session-b",
+    supportsPtyAck: true,
+    unackedPtyBytes: 0,
+    ptyPausedSessionId: null,
+  };
+  first.client.subscribedSessionId = "session-a";
+  first.client.supportsPtyAck = true;
+  first.manager.clients.add(secondClient);
+
+  const paused: string[] = [];
+  const resumed: string[] = [];
+  first.manager.port = {
+    pausePtyOutput: (id) => paused.push(id),
+    resumePtyOutput: (id) => resumed.push(id),
+  };
+  const chunk = "x".repeat(513 * 1024);
+  first.manager.broadcast({
+    type: "output",
+    sessionId: "session-a",
+    data: { incremental: true, chunk },
+  });
+
+  assert.equal(first.socket.sent.length, 1);
+  assert.equal(secondSocket.sent.length, 0, "a client must not receive another session's raw PTY bytes");
+  const sent = JSON.parse(first.socket.sent[0]) as { ptyBytes: number; data: { chunk: string } };
+  assert.equal(sent.ptyBytes, Buffer.byteLength(chunk));
+  assert.equal(sent.data.chunk, chunk);
+  assert.deepEqual(paused, ["session-a"]);
+
+  first.client.unackedPtyBytes = 0;
+  first.manager.releasePtyPause(first.client);
+  assert.deepEqual(resumed, ["session-a"]);
+});
+
+test("legacy PTY subscribers keep the bounded send queue", () => {
+  const { manager, client } = createHarness();
+  client.subscribedSessionId = "session-a";
+
+  for (let index = 0; index < 700; index += 1) {
+    manager.broadcast({
+      type: "output",
+      sessionId: "session-a",
+      data: { incremental: true, chunk: `chunk-${index}` },
+    });
+  }
+
+  assert.equal(client.sendQueue.length, 500);
+  assert.equal(client.backpressurePaused, true);
+  assert.equal(client.pendingResyncSessions.has("session-a"), true);
+  assert.equal(client.unackedPtyBytes, 0);
+  assert.equal(client.ptyPausedSessionId, null);
+});
+
+test("legacy PTY subscribers do not require acknowledgements", () => {
+  const { manager, client, socket } = createHarness();
+  client.subscribedSessionId = "session-a";
+
+  const paused: string[] = [];
+  manager.port = {
+    pausePtyOutput: (id) => paused.push(id),
+  };
+  const chunk = "x".repeat(513 * 1024);
+  manager.broadcast({
+    type: "output",
+    sessionId: "session-a",
+    data: { incremental: true, chunk },
+  });
+
+  assert.equal(socket.sent.length, 1);
+  const sent = JSON.parse(socket.sent[0]) as { ptyBytes?: number; data: { chunk: string } };
+  assert.equal(sent.ptyBytes, undefined);
+  assert.equal(sent.data.chunk, chunk);
+  assert.equal(client.unackedPtyBytes, 0);
+  assert.deepEqual(paused, []);
 });

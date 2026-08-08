@@ -5,7 +5,7 @@ import { JOYSTICK_ACTION_KEYS, JOYSTICK_BALL_SIZE, JOYSTICK_EDGE_MARGIN, JOYSTIC
 import { showToast } from "./notifications";
 import { render } from "./render";
 import { getPreferredMessages, isStructuredSession, updateDrawerState, updateSessionSnapshot } from "./session-engine";
-import { clampClientTerminalOutput, clearTerminalScrollIdleTimer, initTerminal, initTerminalScrollbar, isTerminalNearBottom, maybeScrollTerminalToBottom, resetTerminal, resetWideParserState, softResyncTerminal, syncTerminalBuffer, updateTerminalJumpToBottomButton, wandTerminalWrite, widePadAnsi } from "./terminal";
+import { clearTerminalScrollIdleTimer, isTerminalNearBottom, maybeScrollTerminalToBottom, updateTerminalJumpToBottomButton } from "./terminal";
 import { isMobileLayout } from "./file-browser";
 import { renderChat } from "./websocket";
 
@@ -795,13 +795,6 @@ import { renderChat } from "./websocket";
           var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
           if (!selectedSession || selectedSession.sessionKind === "structured") return;
           ensureTerminalFit("health");
-          var now = Date.now();
-          var chunkPause = state.lastChunkAt > 0 && (now - state.lastChunkAt > 300);
-          var resyncDue = (now - state.lastTerminalResyncAt) > 30000;
-          var dirtySinceResync = state.lastChunkAt > state.lastTerminalResyncAt;
-          if (resyncDue && dirtySinceResync && (chunkPause || selectedSession.status !== "running") && state.terminalOutput) {
-            softResyncTerminal();
-          }
         }, 5000);
       }
 
@@ -885,10 +878,11 @@ import { renderChat } from "./websocket";
         state.terminalScrollbarDragging = false;
         state.terminalScrollbarRafPending = false;
         if (state.terminal) {
-          state.terminal.destroy();
+          if (typeof state.terminal.dispose === "function") state.terminal.dispose();
+          else if (typeof state.terminal.destroy === "function") state.terminal.destroy();
           state.terminal = null;
         }
-        // wterm.destroy() 不移除 .terminal-scroll-wrap 节点，手动清掉防叠层。
+        // Dispose does not remove the wrapper node itself.
         if (output) {
           var staleWraps = output.querySelectorAll(".terminal-scroll-wrap");
           for (var i = 0; i < staleWraps.length; i++) {
@@ -896,13 +890,11 @@ import { renderChat } from "./websocket";
             if (wrap.parentNode === output) output.removeChild(wrap);
           }
         }
-        resetWideParserState();
-        state.syncOutputBuffer = null;
-        state.syncOutputDeadline = 0;
-        state.syncFramingResidue = false;
         state.terminalSessionId = null;
+        state.terminalFitAddon = null;
+        state.terminalWriteQueue = Promise.resolve();
+        state.terminalRestoreGeneration = (state.terminalRestoreGeneration || 0) + 1;
         state.terminalOutput = "";
-        state.terminalOutputMarker = 0;
         state.terminalAutoFollow = true;
         state.showTerminalJumpToBottom = false;
         updateTerminalJumpToBottomButton();
@@ -910,15 +902,6 @@ import { renderChat } from "./websocket";
           clearTimeout(state.softResyncTimer);
           state.softResyncTimer = null;
         }
-        if (state._resyncChunkTailTimer) {
-          clearTimeout(state._resyncChunkTailTimer);
-          state._resyncChunkTailTimer = null;
-        }
-        state._resyncChunkLastAt = 0;
-        state._resyncStatsWindowStart = 0;
-        state._resyncStatsCount = 0;
-        state._resyncLastWarnAt = 0;
-        state._resyncInProgress = false;
         state.lastResize = { cols: 0, rows: 0 };
         teardownJoystick();
       }
@@ -928,28 +911,34 @@ import { renderChat } from "./websocket";
         var selectedSess = state.sessions.find(function(s) { return s.id === state.selectedId; });
         if (!selectedSess || selectedSess.status !== "running") return;
         if (isStructuredSession(selectedSess)) return;
-        // clamp 到 wterm maxCols (256) 和后端 maxRows (160)。
-        if (cols > 256) cols = 256;
-        if (rows > 160) rows = 160;
+        cols = Math.max(20, Math.min(Math.floor(cols), 1000));
+        rows = Math.max(5, Math.min(Math.floor(rows), 500));
         var nextSize = { cols: cols, rows: rows };
         if (state.lastResize.cols !== nextSize.cols || state.lastResize.rows !== nextSize.rows) {
           state.lastResize = nextSize;
-          fetch("/api/sessions/" + state.selectedId + "/resize", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            credentials: "same-origin",
-            body: JSON.stringify(nextSize)
-          }).catch(function() {});
+          if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+            state.ws.send(JSON.stringify({
+              type: "pty_resize",
+              sessionId: state.selectedId,
+              cols: nextSize.cols,
+              rows: nextSize.rows
+            }));
+          } else {
+            fetch("/api/sessions/" + state.selectedId + "/resize", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "same-origin",
+              body: JSON.stringify(nextSize)
+            }).catch(function() {});
+          }
         }
       }
 
       export function ensureTerminalFit(reason?, options?) {
         if (!state.terminal) return false;
-        var opts = options || {};
-        var forceReplay = opts.forceReplay === true;
         var el = document.getElementById("output");
         if (!el || el.offsetWidth === 0 || el.offsetHeight === 0) {
-          ensureTerminalFitWithRetry(reason || "fit-retry", { forceReplay: forceReplay });
+          ensureTerminalFitWithRetry(reason || "fit-retry");
           return false;
         }
         // 提前快照 stick-to-bottom 意图，避免 rAF 期间 scroll 事件污染判定。
@@ -959,15 +948,10 @@ import { renderChat } from "./websocket";
         requestAnimationFrame(function() {
           requestAnimationFrame(function() {
             if (!state.terminal) return;
-            if (typeof state.terminal.remeasure === "function") {
-              state.terminal.remeasure();
+            if (state.terminalFitAddon && typeof state.terminalFitAddon.fit === "function") {
+              state.terminalFitAddon.fit();
             }
             sendTerminalResize(state.terminal.cols, state.terminal.rows);
-            var didResize = state.terminal.cols !== prevCols
-                         || state.terminal.rows !== prevRows;
-            if (!didResize && forceReplay && state.terminalOutput) {
-              softResyncTerminal({ skipFit: true });
-            }
             if (shouldStickToBottom) {
               maybeScrollTerminalToBottom("force");
             }
@@ -978,8 +962,6 @@ import { renderChat } from "./websocket";
 
       export function ensureTerminalFitWithRetry(reason?, options?) {
         if (!state.terminal) return;
-        var opts = options || {};
-        var forceReplay = opts.forceReplay !== false;
         var attempts = 0;
         var maxAttempts = 8;
         function tryFit() {
@@ -987,7 +969,7 @@ import { renderChat } from "./websocket";
           var el = document.getElementById("output");
           if (el) void el.offsetHeight;
           if (el && el.offsetWidth > 0 && el.offsetHeight > 0) {
-            ensureTerminalFit(reason, { forceReplay: forceReplay });
+            ensureTerminalFit(reason);
             return;
           }
           if (++attempts >= maxAttempts) return;

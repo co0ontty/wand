@@ -7,7 +7,7 @@ import { flushPendingMessages, buildMessagesForRender, isCurrentTerminalSession,
 import { _vibrate, notifyTaskEnded, clearSessionProgressNative, _syncWakeLock, showNotificationBubble, notifyTaskProgress, syncSessionProgressToNative, notifyPermissionRequest, notifyUpdateAvailable, showAutoUpdateOverlay, showRestartOverlay, showToast } from "./notifications";
 import { refreshAll, scheduleSessionListUpdate, subscribeToSession, updateSessionSnapshot, getPreferredMessages, loadSessions, selectSession, updateShellChrome, loadOutput, isAutoApproveImpliedByMode, applyCurrentView } from "./session-engine";
 import { getLastAssistantSummary } from "./session-ui";
-import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS, clampClientTerminalOutput, maybeScrollTerminalToBottom, resetTerminal, softResyncTerminal, syncTerminalBuffer, updateTerminalJumpToBottomButton, wandTerminalWrite } from "./terminal";
+import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS, clampClientTerminalOutput, maybeScrollTerminalToBottom, resetTerminal, restoreTerminalState, softResyncTerminal, syncTerminalBuffer, updateTerminalJumpToBottomButton, wandTerminalWrite } from "./terminal";
 import { ensureTerminalFitWithRetry, scheduleTerminalResize } from "./viewport";
 import { render, restoreLoginSession } from "./render";
 import { isBrowserReactShellMounted } from "./shell-runtime";
@@ -84,7 +84,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           // 也清掉 onmessage：close() 是异步的，TCP RST/Close 帧到达之前，浏览器
           // socket 缓冲区里可能还有几条 in-flight 帧没派发。一旦它们在新 ws 已
           // open + init 之后再触发，老 ws 的 output 会被 handleWebSocketMessage
-          // 当成"新增量"写进 wterm，造成"刚才那段又被画了一遍"。stale 心跳触发
+          // 当成"新增量"写进 xterm，造成"刚才那段又被画了一遍"。stale 心跳触发
           // 的 force reconnect 比 onclose 触发更早，老 ws 仍处于 OPEN，这个窗口
           // 更宽，必须显式 detach。
           try { stale.onmessage = null; } catch (e) { /* ignore */ }
@@ -171,6 +171,10 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
                     state.ws.send(JSON.stringify({ type: "pong", t: msg.t }));
                   } catch (sendErr) { /* ignore */ }
                 }
+                return;
+              }
+              if (msg && msg.type === "pty_error") {
+                showToast(msg.error || "终端输入失败", "error");
                 return;
               }
               if (msg && msg.type === "resync_required" && msg.sessionId) {
@@ -359,25 +363,12 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
                 // Fast path: write chunk directly to avoid full-output comparison.
                 state.lastChunkAt = Date.now();
                 state.terminalLiveStreamSessions[msg.sessionId] = true;
-                // 不再在 hot-path 调 maybeRefitTerminal/remeasure。它会偷偷把
-                // wterm 的 this.cols 改成新值，让 wterm 自己的 ResizeObserver
-                // 误判 newCols === this.cols 而跳过 wterm.resize() —— 那条路径
-                // 才会真正调 Renderer.setup() 重建 DOM 行。绕过它就让容器尺寸
-                // 变化的视觉错位无法被自愈，直到用户手动改窗口才修。现在让
-                // wterm 内部 ResizeObserver 独占 cols 跟踪职责。
-                wandTerminalWrite(state.terminal, msg.data.chunk);
-                // 同 syncTerminalBuffer 的 delta 分支：流式 chunk 不再触发
-                // softResyncTerminal，避免完整重放把 cursor-home + 重画的
-                // "被覆盖中间帧"反复塞进 scrollback。thinking→idle 兜底就够了。
+                wandTerminalWrite(state.terminal, msg.data.chunk, msg.ptyBytes, msg.sessionId);
                 state.terminalSessionId = msg.sessionId;
                 if (msg.data.output) {
-                  // R8: full output replace → marker 失效，重置为 0
-                  state.terminalOutput = clampClientTerminalOutput(normalizeTerminalOutput(msg.data.output));
-                  state.terminalOutputMarker = 0;
+                  state.terminalOutput = clampClientTerminalOutput(String(msg.data.output));
                 } else {
-                  // append-delta：buffer 延续，marker 保持（clampClientTerminalOutput
-                  // 内部已经按裁掉字节数同步缩减 marker）
-                  state.terminalOutput = clampClientTerminalOutput((state.terminalOutput || "") + normalizeTerminalOutput(msg.data.chunk));
+                  state.terminalOutput = clampClientTerminalOutput((state.terminalOutput || "") + String(msg.data.chunk));
                 }
                 maybeScrollTerminalToBottom("output");
                 updateTerminalJumpToBottomButton();
@@ -385,6 +376,10 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
                 // Fallback: no chunk available, use full-output comparison.
                 syncTerminalBuffer(msg.sessionId, msg.data.output || "", { mode: "append" });
               }
+            } else if (msg.ptyBytes && state.ws && state.ws.readyState === WebSocket.OPEN) {
+              // A session switch can race with a final in-flight chunk. It is no
+              // longer renderable here, but must still release server flow control.
+              state.ws.send(JSON.stringify({ type: "pty_ack", sessionId: msg.sessionId, bytes: msg.ptyBytes }));
             }
             break;
           case 'started':
@@ -510,27 +505,11 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
               renderChat(true);
               updateTaskDisplay();
               updateApprovalStats();
-              // 服务端 ring buffer 在多数场景下是当前已渲染输出的严格 superset
-              // （同一 PTY，buffer 只增不减）。这种情况下走 append delta 就够了，
-              // 不应该强制 replace。replace 会触发 resetTerminal + 全量重放整段
-              // output，wterm 把 ANSI cursor-home 重画的"中间帧"全部塞进
-              // scrollback，造成"同一段回答在 PTY 视图里被画 N 遍"——尤其是
-              // 锁屏 / 切回前台 / 心跳 stale 触发 reconnect 时，每次 init 都重放
-              // 一次，累积重复非常显著。
-              //
-              // 只有真的不连续（会话切换、ring buffer 截断了头部、output 不是
-              // currentOutput 的严格前缀延伸）才回退到 replace 的全量基线。
               var initOutput = msg.data.output || "";
-              var sameTerminalSession = state.terminalSessionId === msg.sessionId;
-              var currTerminalOutput = state.terminalOutput || "";
-              var canAppendDelta = sameTerminalSession
-                && currTerminalOutput.length > 0
-                && initOutput.length >= currTerminalOutput.length
-                && initOutput.startsWith(currTerminalOutput);
-              updateTerminalOutput(initOutput, msg.sessionId, canAppendDelta ? "append" : "replace");
-              // wterm 启动 cols=120，replace 写入可能落在错的列宽上；ResizeObserver
-              // 回调异步，用 fit-with-retry 兜一次确保按真实宽度重排。
-              ensureTerminalFitWithRetry("init");
+              if (!restoreTerminalState(msg.sessionId, msg.data.terminalState, initOutput)) {
+                updateTerminalOutput(initOutput, msg.sessionId, "replace");
+                ensureTerminalFitWithRetry("init");
+              }
             }
             break;
           case 'usage':

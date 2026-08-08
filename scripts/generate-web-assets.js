@@ -12,8 +12,8 @@ const outFile = path.join(root, "src", "web-ui", "embedded-assets.ts");
 const assets = [
   ["scriptsJs", "scripts.js", "application/javascript"],
   ["stylesCss", "styles.css", "text/css; charset=utf-8"],
-  ["wtermJs", path.join("vendor", "wterm", "wterm.bundle.js"), "application/javascript"],
-  ["wtermCss", path.join("vendor", "wterm", "terminal.css"), "text/css; charset=utf-8"],
+  ["xtermJs", path.join("vendor", "xterm", "xterm.bundle.js"), "application/javascript"],
+  ["xtermCss", path.join("vendor", "xterm", "xterm.css"), "text/css; charset=utf-8"],
   ["qrcodeJs", path.join("vendor", "qrcode", "qrcode.bundle.js"), "application/javascript"],
 ];
 
@@ -50,15 +50,15 @@ export const EMBEDDED_WEB_ASSETS = {
   scriptsJs: decode(${JSON.stringify(entries.scriptsJs.base64)}),
   stylesCss: decode(${JSON.stringify(entries.stylesCss.base64)}),
   vendor: {
-    "/vendor/wterm/wterm.bundle.js": {
-      content: decode(${JSON.stringify(entries.wtermJs.base64)}),
-      contentType: ${JSON.stringify(entries.wtermJs.contentType)},
-      hash: ${JSON.stringify(entries.wtermJs.hash)},
+    "/vendor/xterm/xterm.bundle.js": {
+      content: decode(${JSON.stringify(entries.xtermJs.base64)}),
+      contentType: ${JSON.stringify(entries.xtermJs.contentType)},
+      hash: ${JSON.stringify(entries.xtermJs.hash)},
     },
-    "/vendor/wterm/terminal.css": {
-      content: decode(${JSON.stringify(entries.wtermCss.base64)}),
-      contentType: ${JSON.stringify(entries.wtermCss.contentType)},
-      hash: ${JSON.stringify(entries.wtermCss.hash)},
+    "/vendor/xterm/xterm.css": {
+      content: decode(${JSON.stringify(entries.xtermCss.base64)}),
+      contentType: ${JSON.stringify(entries.xtermCss.contentType)},
+      hash: ${JSON.stringify(entries.xtermCss.hash)},
     },
     "/vendor/qrcode/qrcode.bundle.js": {
       content: decode(${JSON.stringify(entries.qrcodeJs.base64)}),

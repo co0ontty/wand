@@ -24,6 +24,8 @@ import { SessionTopicCoordinator } from "./session-topic.js";
 import { getErrorMessage } from "./error-utils.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
 import { resolveSessionCwd } from "./session-cwd.js";
+import { PtyTerminalState, type PtyTerminalSnapshot } from "./pty-terminal-state.js";
+import { buildPtyShellLaunchPlan, type PtyCliExitMarker } from "./pty-shell-launch.js";
 import {
   ProviderHistoryScanner,
   type ClaudeHistorySession,
@@ -183,6 +185,10 @@ interface SessionRecord extends SessionSnapshot {
   provider?: SessionProvider;
   processId: number | null;
   ptyProcess: IPty | null;
+  terminalState: PtyTerminalState | null;
+  providerShellMarker: PtyCliExitMarker | null;
+  providerCliActive: boolean;
+  providerCliExitCode: number | null;
   stopRequested: boolean;
   confirmWindow: string;
   ptyPermissionBlocked: boolean;
@@ -754,6 +760,10 @@ export class ProcessManager extends EventEmitter {
           provider,
           processId: null,
           ptyProcess: null,
+          terminalState: null,
+          providerShellMarker: null,
+          providerCliActive: false,
+          providerCliExitCode: snapshot.providerCliExitCode ?? null,
           stopRequested: false,
           confirmWindow: "",
           ptyPermissionBlocked: false,
@@ -801,6 +811,10 @@ export class ProcessManager extends EventEmitter {
           provider,
           processId: null,
           ptyProcess: null,
+          terminalState: null,
+          providerShellMarker: null,
+          providerCliActive: false,
+          providerCliExitCode: snapshot.providerCliExitCode ?? null,
           stopRequested: false,
           confirmWindow: "",
           ptyPermissionBlocked: false,
@@ -1006,6 +1020,12 @@ export class ProcessManager extends EventEmitter {
       : null;
     const initialClaudeSessionId = existingProviderSessionId ?? assignedProviderSessionId;
     const startedAt = new Date().toISOString();
+    const launchPlan = buildPtyShellLaunchPlan({
+      shell: this.config.shell,
+      command: processedCommand,
+      bareShell: opts?.interactiveShell === true,
+      providerCommand: provider !== undefined,
+    });
 
     const record: SessionRecord = {
       id,
@@ -1033,6 +1053,13 @@ export class ProcessManager extends EventEmitter {
       claudeSessionId: initialClaudeSessionId,
       processId: null,
       ptyProcess: null,
+      terminalState: new PtyTerminalState(
+        opts?.cols !== undefined ? clampDimension(opts.cols, 20, 1000) : 120,
+        opts?.rows !== undefined ? clampDimension(opts.rows, 5, 500) : 36,
+      ),
+      providerShellMarker: launchPlan.cliExitMarker,
+      providerCliActive: provider !== undefined,
+      providerCliExitCode: null,
       stopRequested: false,
       confirmWindow: "",
       ptyPermissionBlocked: false,
@@ -1056,11 +1083,8 @@ export class ProcessManager extends EventEmitter {
       approvalStats: { tool: 0, command: 0, file: 0, total: 0 },
       selectedModel: selectedModel ?? null,
       thinkingEffort: initialThinkingEffort,
-      // cols 上限 256：与 @wterm/dom WASM grid 的 maxCols 硬编码一致，
-      // 防止服务端按 >256 cols 让 Claude 用 CSI 绝对列定位写到 wterm 实际
-      // 渲染不到的列上（表现为"内容神奇复制下行"）。
-      ptyCols: opts?.cols !== undefined ? clampDimension(opts.cols, 20, 256) : 120,
-      ptyRows: opts?.rows !== undefined ? clampDimension(opts.rows, 10, 160) : 36,
+      ptyCols: opts?.cols !== undefined ? clampDimension(opts.cols, 20, 1000) : 120,
+      ptyRows: opts?.rows !== undefined ? clampDimension(opts.rows, 5, 500) : 36,
     };
 
     if (isClaudeProvider) {
@@ -1084,21 +1108,20 @@ export class ProcessManager extends EventEmitter {
     this.cleanupOldSessions();
 
 
-    const shellArgs = this.buildShellArgs(processedCommand, opts?.interactiveShell === true);
     // Self-heal node-pty's spawn-helper +x bit before every spawn: a self-update
     // can re-drop it after this server already ran its startup chmod, which would
     // otherwise make every PTY launch throw "posix_spawnp failed." until restart.
     ensureNodePtyHelperExecutable();
     let child: import("node-pty").IPty;
     try {
-      child = pty.spawn(this.config.shell, shellArgs, {
+      child = pty.spawn(this.config.shell, launchPlan.shellArgs, {
         cwd: resolvedCwd,
         env: buildChildEnv(this.config.inheritEnv !== false, {
           WAND_MODE: effectiveMode,
           WAND_AUTO_CONFIRM: record.autoApprovePermissions ? "1" : "0",
           WAND_AUTO_EDIT: effectiveMode === "auto-edit" ? "1" : "0"
         }),
-        name: "xterm-color",
+        name: "xterm-256color",
         // 使用 record 上由前端协商好的真实尺寸，避免"先 120 列、几百毫秒后再 resize"
         // 期间 provider TUI 用错列宽渲染出 \x1b[120G 这类绝对列定位序列。
         cols: record.ptyCols,
@@ -1144,6 +1167,11 @@ export class ProcessManager extends EventEmitter {
         current.ptyBridge.onExit(exitCode);
         current.ptyBridge.removeAllListeners();
       }
+      current.providerShellMarker = null;
+      if (current.providerCliActive) {
+        current.providerCliActive = false;
+        current.providerCliExitCode = exitCode;
+      }
       current.pendingEscalation = null;
       current.ptyPermissionBlocked = false;
       this.captureClaudeSessionId(current, { allowTimeWindowFallback: true });
@@ -1186,23 +1214,28 @@ export class ProcessManager extends EventEmitter {
       child.write("\r");
     };
 
-    child.onData((chunk: string) => {
+    child.onData((rawChunk: string) => {
       const rec = this.sessions.get(id);
       // PTYs may still drain data after kill(). A replacement session can use
       // the same id, so both record identity and the concrete PTY handle must
       // match before accepting the chunk.
       if (rec !== record || rec.ptyProcess !== child) return;
 
-      if (rec.ptyBridge) {
+      const boundary = rec.providerShellMarker?.consume(rawChunk) ?? { data: rawChunk, exitCode: null };
+      const chunk = boundary.data;
+
+      if (chunk) rec.terminalState?.write(chunk);
+
+      if (chunk && rec.ptyBridge) {
         rec.ptyBridge.processChunk(chunk);
         rec.output = rec.ptyBridge.getRawOutput();
-      } else {
+      } else if (chunk) {
         rec.output = appendWindow(rec.output, chunk, PTY_OUTPUT_MAX_SIZE);
       }
 
-      this.logger.appendPtyOutput(id, chunk);
+      if (chunk) this.logger.appendPtyOutput(id, chunk);
 
-      if (!rec.ptyBridge) {
+      if (chunk && !rec.ptyBridge) {
         this.emitEvent({
           type: "output",
           sessionId: id,
@@ -1222,7 +1255,7 @@ export class ProcessManager extends EventEmitter {
         process.stderr.write(`[wand] Captured Claude session ID: ${bridgeSessionId}\n`);
       }
 
-      if (!rec.claudeSessionId && rec.knownClaudeTaskIds) {
+      if (rec.providerCliActive && boundary.exitCode === null && !rec.claudeSessionId && rec.knownClaudeTaskIds) {
         rec.messages = snapshotMessages(rec);
         const discoveredTaskId = getLatestClaudeProjectSessionId({
           cwd: rec.cwd,
@@ -1238,16 +1271,25 @@ export class ProcessManager extends EventEmitter {
         }
       }
 
-      if (rec.autoApprovePermissions && !rec.ptyBridge && rec.provider === "claude") {
+      if (chunk && rec.providerCliActive && rec.autoApprovePermissions && !rec.ptyBridge && rec.provider === "claude") {
         this.autoConfirmWithRecord(rec, chunk, child);
       }
 
-      if (initialInput && !initialInputSent && (chunk.includes("❯") || chunk.includes("›"))) {
+      if (chunk && boundary.exitCode === null && initialInput && !initialInputSent && (chunk.includes("❯") || chunk.includes("›"))) {
         sendInitialInput();
+      }
+
+      if (boundary.exitCode !== null) {
+        this.finishProviderCli(record, boundary.exitCode);
       }
 
       this.schedulePersist(rec);
     });
+
+    if (launchPlan.commandToWrite) {
+      child.write(launchPlan.commandToWrite);
+      child.write("\r");
+    }
 
     if (initialInput) {
       record.initialInputTimer = setTimeout(() => {
@@ -1527,7 +1569,7 @@ export class ProcessManager extends EventEmitter {
     const record = this.mustGet(id);
     const normalized = model?.trim() || null;
     record.selectedModel = normalized;
-    if (record.provider === "claude" && record.status === "running" && record.ptyProcess) {
+    if (record.providerCliActive && record.provider === "claude" && record.status === "running" && record.ptyProcess) {
       const value = normalized && normalized !== "default" ? normalized : "default";
       record.ptyProcess.write(`/model ${value}\r`);
     }
@@ -1544,7 +1586,7 @@ export class ProcessManager extends EventEmitter {
     const record = this.mustGet(id);
     const normalized = normalizeThinkingEffort(effort);
     record.thinkingEffort = normalized;
-    if (record.provider === "claude" && record.status === "running" && record.ptyProcess) {
+    if (record.providerCliActive && record.provider === "claude" && record.status === "running" && record.ptyProcess) {
       record.ptyProcess.write(`/effort ${thinkingEffortToClaudeSlashEffort(normalized)}\r`);
     }
     this.persist(record);
@@ -1579,7 +1621,7 @@ export class ProcessManager extends EventEmitter {
     return this.snapshot(record);
   }
 
-  sendInput(id: string, input: string, view?: "chat" | "terminal", shortcutKey?: string): SessionSnapshot {
+  sendInput(id: string, input: string, view?: "chat" | "terminal", shortcutKey?: string, trackUserInput = true): SessionSnapshot {
     if (this.disposed) throw new Error("ProcessManager has been disposed.");
     const record = this.mustGet(id);
 
@@ -1610,7 +1652,7 @@ export class ProcessManager extends EventEmitter {
     }
 
     // Track user input via bridge for Chat mode
-    if (record.ptyBridge) {
+    if (record.ptyBridge && trackUserInput) {
       record.ptyBridge.onUserInput(input);
     }
 
@@ -1625,23 +1667,97 @@ export class ProcessManager extends EventEmitter {
       return this.snapshot(record);
     }
 
-    const safeCols = clampDimension(cols, 20, 256);
-    const safeRows = clampDimension(rows, 10, 160);
+    const safeCols = clampDimension(cols, 20, 1000);
+    const safeRows = clampDimension(rows, 5, 500);
     const changed = safeCols !== record.ptyCols || safeRows !== record.ptyRows;
+    if (!changed) return this.snapshot(record);
     record.ptyProcess.resize(safeCols, safeRows);
+    record.terminalState?.resize(safeCols, safeRows);
     record.ptyCols = safeCols;
     record.ptyRows = safeRows;
-    if (changed) {
-      // Notify every subscribed client of the new authoritative dimensions so
-      // any other tab/device can re-fit its terminal instead of rendering
-      // wrap-broken output sized for someone else's viewport.
-      this.emitEvent({
-        type: "status",
-        sessionId: id,
-        data: { ptyCols: safeCols, ptyRows: safeRows },
-      });
-    }
+    // Notify every subscribed client of the new authoritative dimensions so
+    // any other tab/device can re-fit its terminal instead of rendering
+    // wrap-broken output sized for someone else's viewport.
+    this.emitEvent({
+      type: "status",
+      sessionId: id,
+      data: { ptyCols: safeCols, ptyRows: safeRows },
+    });
     return this.snapshot(record);
+  }
+
+  getTerminalState(id: string): PtyTerminalSnapshot | null {
+    const record = this.sessions.get(id);
+    if (!record) return null;
+    if (!record.terminalState) {
+      record.terminalState = new PtyTerminalState(record.ptyCols, record.ptyRows, record.output || record.storedOutput);
+    }
+    return record.terminalState.snapshot();
+  }
+
+  pauseOutput(id: string): void {
+    const record = this.sessions.get(id);
+    if (record?.ptyProcess && record.status === "running") record.ptyProcess.pause();
+  }
+
+  resumeOutput(id: string): void {
+    const record = this.sessions.get(id);
+    if (record?.ptyProcess && record.status === "running") record.ptyProcess.resume();
+  }
+
+  /**
+   * Finalize provider-only state while leaving the owning PTY shell alive. The
+   * session itself remains running so terminal input can continue normally.
+   */
+  private finishProviderCli(record: SessionRecord, exitCode: number): void {
+    if (!record.providerCliActive) return;
+
+    record.providerCliActive = false;
+    record.providerCliExitCode = exitCode;
+    record.providerShellMarker = null;
+
+    if (record.claudeTaskDiscoveryTimer) {
+      clearTimeout(record.claudeTaskDiscoveryTimer);
+      record.claudeTaskDiscoveryTimer = null;
+    }
+    if (record.codexSessionDiscoveryTimer) {
+      clearTimeout(record.codexSessionDiscoveryTimer);
+      record.codexSessionDiscoveryTimer = null;
+    }
+    if (record.openCodeSessionDiscoveryTimer) {
+      clearTimeout(record.openCodeSessionDiscoveryTimer);
+      record.openCodeSessionDiscoveryTimer = null;
+    }
+    if (record.initialInputTimer) {
+      clearTimeout(record.initialInputTimer);
+      record.initialInputTimer = null;
+    }
+
+    if (record.ptyBridge) {
+      record.ptyBridge.onExit(exitCode);
+      record.messages = record.ptyBridge.getMessages();
+    }
+    record.pendingEscalation = null;
+    record.ptyPermissionBlocked = false;
+    this.captureClaudeSessionId(record, { allowTimeWindowFallback: true });
+    this.captureCodexSessionId(record, { allowTimeWindowFallback: true });
+    this.captureOpenCodeSessionId(record, { allowTimeWindowFallback: true });
+    if (record.ptyBridge) {
+      record.output = record.ptyBridge.getRawOutput();
+      record.ptyBridge.removeAllListeners();
+      record.ptyBridge = null;
+    }
+
+    this.flushPersist(record);
+    this.emitEvent({
+      type: "status",
+      sessionId: record.id,
+      data: {
+        providerCliActive: false,
+        providerCliExitCode: exitCode,
+        permissionBlocked: false,
+      },
+    });
   }
 
   stop(id: string): SessionSnapshot {
@@ -1668,6 +1784,8 @@ export class ProcessManager extends EventEmitter {
     }
 
     record.stopRequested = true;
+    record.providerCliActive = false;
+    record.providerShellMarker = null;
     // Kill any running child process (from JSON chat turns)
     if (record.childProcess) {
       record.childProcess.kill();
@@ -1740,6 +1858,8 @@ export class ProcessManager extends EventEmitter {
       record.ptyBridge.removeAllListeners();
       record.ptyBridge = null;
     }
+    record.terminalState?.dispose();
+    record.terminalState = null;
   }
 
   delete(id: string): void {
@@ -1792,6 +1912,8 @@ export class ProcessManager extends EventEmitter {
       record.ptyBridge.removeAllListeners();
       record.ptyBridge = null;
     }
+    record.terminalState?.dispose();
+    record.terminalState = null;
 
     // Delete from persistent storage BEFORE removing from in-memory map,
     // so a storage failure doesn't leave orphan records in the database.
@@ -1851,6 +1973,8 @@ export class ProcessManager extends EventEmitter {
       sessionSource: record.sessionSource ?? "interactive",
       automationId: record.automationId,
       provider: record.provider,
+      providerCliActive: record.providerCliActive,
+      providerCliExitCode: record.providerCliExitCode,
       runner: "pty",
       command: record.command,
       cwd: record.cwd,
@@ -2395,22 +2519,6 @@ export class ProcessManager extends EventEmitter {
       ...opts,
       interactiveShell: true,
     });
-  }
-
-  private buildShellArgs(command: string, interactiveShell = false): string[] {
-    if (interactiveShell) {
-      return os.platform() === "win32" ? [] : ["-l"];
-    }
-    if (os.platform() === "win32") {
-      return ["/d", "/s", "/c", command];
-    }
-    // -l: login shell — sources ~/.bash_profile, ~/.profile, etc., ensuring PATH
-    //      and other env vars set by profile files are available.
-    // -c: run the following command.
-    // Using -ic (interactive + command) skips login-shell initialization on many
-    // platforms, which causes commands that depend on profile-set env vars to fail
-    // immediately with "command not found" — a silent exit before onExit is ready.
-    return ["-lc", command];
   }
 
   private shouldAutoApprovePermissions(command: string, mode: ExecutionMode, provider?: SessionProvider): boolean {

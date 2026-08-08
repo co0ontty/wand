@@ -130,7 +130,7 @@ export function scheduleForegroundSync(reason: string, opts?: any) {
   // 节流只是为了防止 visibilitychange/focus/pageshow 在前台切换时
   // 连珠炮式触发同一份重连工作，不再借此延迟实际同步——之前用
   // 80ms 兜延迟的版本会在前台事件后再去 loadOutput 全量重写
-  // terminal，但 wterm cols 那时还没被 ResizeObserver 自适应到，
+  // terminal，但终端尺寸那时还没适配到稳定后的视口，
   // 写进去的全是按错列宽排版的内容，结果"切回前台/刷新页面 →
   // 中间一大段都看不到"反而成了常态。
   if (!immediate && now - state.lastForegroundSyncAt < 1500) return;
@@ -222,10 +222,10 @@ export function bindForegroundSyncListeners() {
   // 动画跟系统同步, 但带来一个副作用: window.innerHeight === visualViewport.height,
   // 导致 setupVisualViewportHandlers 里的 isKeyboardOpen 检测 (基于
   // offsetBottom) 永远是 false, 不会进 keyboard-open / keyboard-close 分支,
-  // 终端 forceReplay 路径也就不跑了。
+  // 终端 fit 路径也就不跑了。
   //
   // 这里直接听原生层的"键盘动画收尾"事件, 触发 ensureTerminalFit
-  // (forceReplay=true), 把 wterm 的网格按真实视口重排一遍。
+  // 把 xterm 网格按真实视口重新 fit。
   window.addEventListener("wand-ime-state", function(e: any) {
     var which = e && e.detail && e.detail.state;
     if (which === "shown" || which === "hidden") {
@@ -289,7 +289,7 @@ export function restoreLoginSession() {
         try {
           render({ skipShellChrome: true });
         } catch (_e) {
-          // render() may fail if external scripts (wterm) failed to load;
+          // render() may fail if external terminal assets failed to load;
           // continue with polling and session loading so the app remains functional
         }
         bindForegroundSyncListeners();
@@ -801,7 +801,7 @@ export function renderAppShell() {
           // 输入主行：正文独占上层书写区域；下层按参考布局分为
           // 「添加 / 权限」与「模型 / 思考 / 发送」两组，键盘顺序与视觉顺序一致。
           '<div class="input-composer-row">' +
-          '<div class="input-composer' + (String(currentDraft || "").trim() ? ' has-text' : '') + '" role="group" aria-label="消息编辑器">' +
+          '<div class="input-composer' + (String(currentDraft || "").trim() ? ' has-text' : '') + (state.terminalInteractive ? ' is-terminal-interactive' : '') + '" role="group" aria-label="消息编辑器">' +
             '<div id="attachment-preview" class="attachment-preview hidden" aria-label="待发送附件" aria-live="polite"></div>' +
             '<div class="composer-main-row">' +
               '<div class="composer-input-wrap">' +

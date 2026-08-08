@@ -11,7 +11,7 @@ import { activateSession, autoResizeInput, buildMessagesForRender, canAutoResume
 import { _apkVersion, _getNativePermission, _hasNativeBridge, _macAppVersion, _syncWakeLock, _vibrate, clearSessionProgressNative, hideError, notifyTaskEnded, openWandDialog, performRestart, sendBrowserNotification, showError, showNotificationBubble, showRestartOverlay, showToast, tryPlayNotificationSound, wandAlert, wandConfirm, wandPrompt } from "./notifications";
 import { bindForegroundSyncListeners, getEffectiveCwd, render, renderAppShell, resetChatRenderCache, updateOfflineBanner } from "./render";
 import { ensureClaudeHistoryLoaded, ensureCodexHistoryLoaded, loadClaudeHistory, loadCodexHistory, renderSessions, renderSessionsListContent } from "./sidebar";
-import { initTerminal, maybeScheduleResyncForChunk, maybeScrollTerminalToBottom, scheduleSoftResyncTerminal, syncTerminalBuffer, wandTerminalWrite } from "./terminal";
+import { initTerminal, maybeScrollTerminalToBottom, syncTerminalBuffer } from "./terminal";
 import { computeRunningSignal, renderStructuredStatusBar, updateRunningIndicators } from "./utils";
 import { ensureTerminalFit, ensureTerminalFitWithRetry, scheduleTerminalResize, teardownTerminal } from "./viewport";
 import { forceReconnectWebSocket, initWebSocket, setView, startPolling, stopPolling, updateAutoApproveIndicator, updateTaskDisplay } from "./websocket";
@@ -1355,15 +1355,7 @@ import { inferProviderIdFromCommand } from "../provider-identity";
           reconcileInteractiveState();
           updateTaskDisplay();
           // Escalation/permission toggles are the common trigger for CSI cursor-jump
-          // redraw sequences from Claude CLI. When they appear or dismiss, schedule a
-          // debounced terminal resync so residual DOM rows get cleaned up automatically
-          // — same fix the user used to have to reach for via the refresh button.
-          // R2 策略 A：移除 permissionBlocked / pendingEscalation 翻转触发的
-          // softResync。原本是为了"权限菜单消失后清掉残留 DOM 行"，但 softResync
-          // 全量重放在 fresh buffer 上会把 Claude 用相对位移画的菜单帧顺序堆叠
-          // （截图 2 的根因之一）。NEW-A（CSI ?2026 同步输出缓冲）已经把菜单帧
-          // 渲染原子化，R6（wandTerminalWrite 内的 maybeScheduleResyncForChunk）
-          // 在出现原地重绘序列时兜底。这条翻转触发现在是多余且有害的，已移除。
+          // xterm owns redraw state; status changes must never replay the PTY byte log.
         }
         // When a session transitions to a non-running state, try flushing cross-session queue
         if (normalizedSnapshot.status && normalizedSnapshot.status !== "running" && state.crossSessionQueue.length > 0) {
@@ -1374,7 +1366,11 @@ import { inferProviderIdFromCommand } from "../provider-identity";
 
       export function subscribeToSession(sessionId) {
         if (!sessionId || !state.ws || state.ws.readyState !== WebSocket.OPEN) return;
-        state.ws.send(JSON.stringify({ type: "subscribe", sessionId: sessionId }));
+        state.ws.send(JSON.stringify({
+          type: "subscribe",
+          sessionId: sessionId,
+          capabilities: { ptyAck: true },
+        }));
       }
 
       export function mergeServerSession(localSession, serverSession) {
@@ -1507,6 +1503,9 @@ import { inferProviderIdFromCommand } from "../provider-identity";
                 discardPendingAttachments(state.attachmentsBySession[id]);
                 delete state.attachmentsBySession[id];
               }
+            });
+            Object.keys(state.terminalStatesBySession).forEach(function(id) {
+              if (!sessionIds.has(id)) delete state.terminalStatesBySession[id];
             });
 
             state.sessions = serverSessions.map(function(serverSession) {
@@ -1658,7 +1657,6 @@ import { inferProviderIdFromCommand } from "../provider-identity";
         if (!selectedSession) {
           state.terminalSessionId = null;
           state.terminalOutput = "";
-          state.terminalOutputMarker = 0; // R8: 取消选中会话时重置 /clear marker
         }
         // 之前这里会用 selectedSession.output 再 syncTerminalBuffer 一次。
         // 但 updateShellChrome 在 updateSessionsList、status 推送、init
@@ -2422,9 +2420,9 @@ import { inferProviderIdFromCommand } from "../provider-identity";
         return body;
       }
 
-      // 会话创建路径：保证 wterm 已经按真实容器尺寸校准，再向服务端 POST
+      // 会话创建路径：保证 xterm 已按真实容器尺寸校准，再向服务端 POST
       // 新会话——否则 withTerminalDimensions 拿不到 cols/rows，body 不带尺寸
-      // → 服务端兜底 120/36 → Claude 按 120 列画 banner/box → wterm 实际渲
+      // → 服务端兜底 120/36 → Claude 按 120 列画 banner/box → 浏览器实际渲
       // 染宽 ≠ 120 → 横线断行（图 1 现象）。带 2s 兜底超时，避免
       // initTerminal 失败时 UI 永久卡在"创建会话"按钮。
       export function ensureTerminalReady() {

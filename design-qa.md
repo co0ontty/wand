@@ -1,5 +1,15 @@
 # Design QA — Web Composer Redesign
 
+## Browser Flat-Density Follow-up — 2026-08-07
+
+- The browser composer now follows the denser ORCA rhythm requested after the original comparison below. The previous `114px` / `22px` / `72px + 40px` measurements remain historical evidence, not the current browser target.
+- Desktop browser geometry is now an `86px` surface with a `12px` radius, a `48px` writing band, and a `36px` action rail. Panel padding is `8px clamp(8px, 1.2vw, 14px) 10px`.
+- The browser surface uses an opaque token background, a hairline border, and one `0 1px 2px` shadow. Focus preserves geometry and adds only a restrained accent border/ring.
+- Mobile browser empty geometry is `102px` (`52px + 48px`), and interactive controls retain `44px` touch targets. Textarea growth remains content-driven.
+- The refinement is scoped with `html:not(.is-wand-app)`, so Android and iOS WebViews retain the prior native-client geometry and material.
+
+The sections below document the earlier fidelity pass that this follow-up superseded for ordinary Web browsers.
+
 ## Comparison Target
 
 - Source visual truth: `/Users/co0ontty/.codex/visualizations/2026/07/30/019fb55b-c855-7f01-897d-da9362cff932/wand-composer-redesign/source.png`

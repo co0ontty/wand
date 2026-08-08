@@ -6,7 +6,6 @@ export interface AppState {
   terminal: any;
   terminalSessionId: string | null;
   terminalOutput: string;
-  terminalOutputMarker: number;
   terminalAutoFollow: boolean;
   currentView: string;
   currentMessages: any[];
@@ -54,20 +53,10 @@ export interface WandNativeInterface {
   backToNative?(): void;
 }
 
-export interface WTermInstance {
-  cols: number;
-  rows: number;
-  init?(): Promise<void>;
-  write(data: string): void;
-  destroy(): void;
-  remeasure?(): void;
-  resize?(cols: number, rows: number): void;
-  onData?(cb: (data: string) => void): void;
-  onResize?(cb: (info: { cols: number; rows: number }) => void): void;
-}
-
-export interface WTermLibInterface {
-  WTerm: new (container: HTMLElement, options: any) => WTermInstance;
+export interface XTermLibInterface {
+  Terminal: new (options?: any) => any;
+  FitAddon: new () => any;
+  Unicode11Addon: new () => any;
 }
 
 export interface SendError extends Error {
@@ -79,7 +68,7 @@ export interface SendError extends Error {
 
 declare global {
   var WandNative: WandNativeInterface;
-  var WTermLib: WTermLibInterface;
+  var XTermLib: XTermLibInterface;
 
   interface Window {
     __wandImeNative?: boolean;

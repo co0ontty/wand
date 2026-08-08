@@ -49,6 +49,8 @@ function sessionBase(snapshot: SessionSnapshot): SessionBaseDTO {
     automationId: snapshot.automationId,
     sessionKind: snapshot.sessionKind,
     provider: snapshot.provider,
+    providerCliActive: snapshot.providerCliActive,
+    providerCliExitCode: snapshot.providerCliExitCode,
     runner: snapshot.runner,
     command: snapshot.command,
     cwd: snapshot.cwd,

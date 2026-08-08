@@ -2715,4 +2715,28 @@ export const composerSelectStyles = String.raw`
     -webkit-backdrop-filter: none;
   }
 }
+
+html:not(.is-wand-app) .wand-ui-select-content.wand-composer-select-content {
+  border-color: var(--border-default);
+  border-radius: 10px;
+  padding: 5px;
+  background: var(--bg-elevated);
+  box-shadow: 0 14px 34px -20px rgba(40, 32, 26, 0.38);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+html:not(.is-wand-app) .wand-ui-select-item.wand-composer-select-item {
+  border-radius: 7px;
+}
+
+html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
+  min-height: 32px;
+}
+
+@media (max-width: 640px), (pointer: coarse) {
+  html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
+    min-height: 44px;
+  }
+}
 `;

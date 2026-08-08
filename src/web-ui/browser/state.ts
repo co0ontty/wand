@@ -63,36 +63,21 @@ export var state: AppState = {
   config: null,
   sessions: [],
   terminal: null,
+  terminalFitAddon: null,
+  terminalWriteQueue: Promise.resolve(),
+  terminalRestoreGeneration: 0,
+  // WS init can arrive before xterm finishes loading fonts/opening its DOM.
+  // Keep the authoritative emulator snapshot outside the replaceable session
+  // list so a concurrent /api/sessions refresh cannot lose it.
+  terminalStatesBySession: {},
   terminalFitInProgress: false,
   terminalSessionId: null,
   terminalOutput: "",
-  // R8: /clear marker。Claude 的 /clear 不发任何 ANSI 清屏序列，它只
-  // 就地把对话框重画成空、把旧对话推进 scrollback。但 wand 的
-  // state.terminalOutput 是 append-only buffer，softResync 一触发就
-  // 把 /clear 之前的历史全部重放回 wterm（用户看到"/clear 后短暂闪
-  // 回旧内容"）。marker 表示 buffer 里"用户上次 /clear 时刻的位置"，
-  // softResync 只重放 slice(marker)，从根上避免历史被重放。
-  terminalOutputMarker: 0,
   terminalLiveStreamSessions: {},
-  // CSI ?2026h..l 同步输出缓冲：begin 时拿到 "\x1b[?2026h" 后开始缓冲，
-  // end 时拿到 "\x1b[?2026l" 一次性 flush 给 wterm。null 表示当前不在
-  // sync 包帧内。@wterm/core 0.1.8 不实现 sync output，begin/end 之间
-  // 每个 write 立即落到 grid + mark dirty —— 跨 server-debounce 窗口
-  // 时浏览器看到中间帧 + 触发 softResync 时状态机被打断，正是
-  // askuserquestion 菜单多份叠加的最强候选根因。
-  syncOutputBuffer: null,
-  syncOutputDeadline: 0,
-  syncFramingResidue: false,
   lastChunkAt: 0,
   terminalHealthTimer: null,
-  lastTerminalResyncAt: 0,
   terminalAutoFollow: true,
-  // 程序触发的滚动（wand 主动 scrollTo / wterm 内部因 _shouldScrollToBottom=true
-  // 拽 scrollTop=scrollHeight）落到 scroll handler 时会被误判为"用户滚回严格
-  // 底部"，把 autoFollow 反转回 true，把用户刚 wheel 上滚的意图吞掉。
-  // 存"窗口截止时间戳"而非"开始时间戳"：不同调用方按各自动画长度延长窗口
-  // （瞬时 120ms 覆盖一次 rAF + 事件分发；smooth 500ms 覆盖 Chromium smooth
-  // scroll 动画），多次调用用 Math.max 合并、不会被短窗口缩短。
+  // Ignore scroll events caused by our own scroll-to-bottom operation.
   terminalProgrammaticScrollUntil: 0,
   terminalScrollIdleTimer: null,
   terminalScrollThreshold: 12,

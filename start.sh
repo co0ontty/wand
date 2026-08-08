@@ -133,6 +133,47 @@ run_privileged() {
 
 service_installed() { [[ -f "$UNIT_FILE" ]]; }
 
+service_confirmed_stopped() {
+  if [[ "$BACKEND" == "systemd" ]]; then
+    local base=() state
+    [[ "$SCOPE" == "user" ]] && base=(--user)
+    state="$(systemctl "${base[@]}" is-active "$SERVICE_NAME" 2>/dev/null || true)"
+    [[ "$state" == "inactive" || "$state" == "failed" ]]
+    return
+  fi
+
+  local domain target output status=0
+  [[ "$SCOPE" == "user" ]] && domain="gui/$(id -u)" || domain="system"
+  target="$domain/$LAUNCHD_LABEL"
+  output="$(launchctl print "$target" 2>&1)" || status=$?
+  [[ "$status" -ne 0 ]] && grep -Eqi 'could not find service|service .* not found' <<<"$output"
+}
+
+stop_service_for_install() {
+  local output status=0
+  output="$(run_privileged "$NODE_FOR_WAND" "$WAND_BIN" service:stop "$SCOPE_FLAG" -c "$CONFIG_PATH" --verbose 2>&1)" || status=$?
+
+  if [[ "$status" -ne 0 ]]; then
+    if service_confirmed_stopped; then
+      warn "service:stop 返回 exit ${status}，但服务管理器已确认服务停止，继续安装"
+      [[ -n "$output" ]] && printf '%s\n' "$output" >&2
+    else
+      [[ -n "$output" ]] && printf '%s\n' "$output" >&2
+      die "service:stop 失败且服务仍处于加载状态，已取消覆盖全局包"
+    fi
+  fi
+
+  # 从这里开始，任何后续失败都应该由 EXIT trap 尝试恢复原服务。
+  SERVICE_STOPPED_FOR_INSTALL=1
+  cleanup_stale_wand
+
+  if ! service_confirmed_stopped; then
+    [[ -n "$output" ]] && printf '%s\n' "$output" >&2
+    die "停止命令执行后服务仍处于加载状态，已取消覆盖全局包"
+  fi
+  ok "$SCOPE 服务已停止"
+}
+
 node_for_prefix() {
   local prefix="$1"
   if [[ -x "$prefix/bin/node" ]]; then
@@ -537,9 +578,7 @@ if [[ "$DO_INSTALL" == "1" ]]; then
 
   if service_installed && [[ -f "$WAND_BIN" || -x "$WAND_BIN" ]]; then
     msg "安装前先停止 $SCOPE 服务"
-    run_privileged "$NODE_FOR_WAND" "$WAND_BIN" service:stop "$SCOPE_FLAG" -c "$CONFIG_PATH" >/dev/null 2>&1 || die "service:stop 失败，已取消覆盖全局包"
-    SERVICE_STOPPED_FOR_INSTALL=1
-    cleanup_stale_wand
+    stop_service_for_install
   fi
   "$NPM_FOR_WAND" install -g --prefix "$WAND_PREFIX" "$PACK_DIR/$PACK_FILE" --no-audit --no-fund
   ok "本地 npm 包已安装到 $WAND_PREFIX"

@@ -85,6 +85,7 @@ class FakePty {
   readonly handleFlowControl = false;
   readonly writes: string[] = [];
   killed = false;
+  resizeCalls = 0;
   cols = 120;
   rows = 36;
   private readonly dataListeners = new Set<(data: string) => void>();
@@ -107,6 +108,7 @@ class FakePty {
   }
 
   resize(cols: number, rows: number): void {
+    this.resizeCalls += 1;
     this.cols = cols;
     this.rows = rows;
   }
@@ -165,9 +167,11 @@ test("Grok PTY launches the TUI with model, effort, and managed approval flags",
   });
   assert.equal(session.provider, "grok");
   assert.equal(session.runner, "pty");
+  assert.equal(session.providerCliActive, true);
   assert.match(session.claudeSessionId ?? "", /^[0-9a-f-]{36}$/);
   const shellArgs = spawnCalls[0][1] as string[];
-  assert.match(shellArgs.at(-1) ?? "", /^grok --model 'grok-4\.5' --effort 'high' --always-approve --session-id [0-9a-f-]{36}$/);
+  assert.equal(shellArgs[0], "-lic");
+  assert.match(shellArgs.at(-1) ?? "", /if grok --model 'grok-4\.5' --effort 'high' --always-approve --session-id [0-9a-f-]{36}/);
 });
 
 test("Qoder PTY launches the TUI with model and managed permission flags", (t) => {
@@ -180,7 +184,8 @@ test("Qoder PTY launches the TUI with model and managed permission flags", (t) =
   assert.equal(session.runner, "pty");
   assert.match(session.claudeSessionId ?? "", /^[0-9a-f-]{36}$/);
   const shellArgs = spawnCalls[0][1] as string[];
-  assert.match(shellArgs.at(-1) ?? "", /^qodercli --model 'performance' --permission-mode bypass_permissions --session-id [0-9a-f-]{36}$/);
+  assert.equal(shellArgs[0], "-lic");
+  assert.match(shellArgs.at(-1) ?? "", /if qodercli --model 'performance' --permission-mode bypass_permissions --session-id [0-9a-f-]{36}/);
 });
 
 test("Pi PTY launches the TUI with model and thinking flags", (t) => {
@@ -193,7 +198,8 @@ test("Pi PTY launches the TUI with model and thinking flags", (t) => {
   assert.equal(session.provider, "pi");
   assert.equal(session.runner, "pty");
   const shellArgs = spawnCalls[0][1] as string[];
-  assert.equal(shellArgs.at(-1), "pi --model 'openai/gpt-5.4' --thinking 'high'");
+  assert.equal(shellArgs[0], "-lic");
+  assert.match(shellArgs.at(-1) ?? "", /if pi --model 'openai\/gpt-5\.4' --thinking 'high'/);
 });
 
 test("command allowlist compares safe shell tokens instead of raw prefixes", () => {
@@ -229,17 +235,50 @@ test("ProcessManager rejects unsafe allowlist lookalikes before spawning", (t) =
 });
 
 test("bare shell sessions launch the configured login shell without provider metadata", (t) => {
-  const { manager, root, spawnCalls } = createHarness(t, ["claude"]);
+  const { manager, root, spawned, spawnCalls } = createHarness(t, ["claude"]);
 
   const session = manager.startShell(root, "default", { cols: 96, rows: 28 });
 
   assert.equal(session.sessionKind, "pty");
   assert.equal(session.provider, undefined);
+  assert.equal(session.providerCliActive, false);
   assert.equal(session.command, defaultConfig().shell);
   assert.equal(spawnCalls[0][0], defaultConfig().shell);
   assert.deepEqual(spawnCalls[0][1], process.platform === "win32" ? [] : ["-l"]);
   assert.equal(session.claudeSessionId, null);
   assert.equal(session.autoApprovePermissions, false);
+  manager.resize(session.id, 96, 28);
+  assert.equal(spawned[0].resizeCalls, 0, "an unchanged size must not signal SIGWINCH");
+  manager.resize(session.id, 100, 30);
+  assert.equal(spawned[0].resizeCalls, 1);
+});
+
+test("provider CLI exit returns to the live shell without parsing later shell commands as chat", (t) => {
+  const { manager, root, spawned, spawnCalls } = createHarness(t);
+  const session = manager.start("claude", root, "managed", undefined, {
+    provider: "claude",
+    reuseId: "provider-shell-fallback",
+  });
+  const wrapper = (spawnCalls[0][1] as string[])[1];
+  const token = /WAND_CLI_EXIT:([0-9a-f-]+):%s/.exec(wrapper)?.[1];
+  assert.ok(token);
+
+  spawned[0].emitData(`provider stopped\x1eWAND_CLI_EXIT:${token}:130\x1fshell prompt`);
+  const afterExit = manager.get(session.id)!;
+  assert.equal(afterExit.status, "running");
+  assert.equal(afterExit.providerCliActive, false);
+  assert.equal(afterExit.providerCliExitCode, 130);
+  assert.equal(afterExit.output.includes("WAND_CLI_EXIT"), false);
+  assert.match(afterExit.output, /provider stoppedshell prompt/);
+
+  manager.sendInput(session.id, "pwd\r", "terminal");
+  assert.deepEqual(manager.get(session.id)?.messages ?? [], []);
+  assert.equal(spawned[0].writes.at(-1), "pwd\r");
+
+  const writesBeforeModelChange = spawned[0].writes.length;
+  manager.setSessionModel(session.id, "sonnet");
+  manager.setSessionThinkingEffort(session.id, "deep");
+  assert.equal(spawned[0].writes.length, writesBeforeModelChange);
 });
 
 test("disabling auto approval persists the false value", (t) => {

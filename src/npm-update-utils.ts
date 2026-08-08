@@ -326,7 +326,7 @@ const REQUIRED_RUNTIME_FILES = [
   path.join("dist", "web-ui", "styles.js"),
   path.join("dist", "web-ui", "content", "scripts.js"),
   path.join("dist", "web-ui", "content", "styles.css"),
-  path.join("dist", "web-ui", "content", "vendor", "wterm", "wterm.bundle.js"),
+  path.join("dist", "web-ui", "content", "vendor", "xterm", "xterm.bundle.js"),
   path.join("dist", "web-ui", "content", "vendor", "qrcode", "qrcode.bundle.js"),
 ];
 
