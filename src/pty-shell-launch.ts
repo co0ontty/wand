@@ -26,6 +26,37 @@ function isKnownPosixShell(shell: string): boolean {
   return POSIX_SHELLS.has(path.basename(shell).toLowerCase());
 }
 
+/**
+ * Commands passed through `shell -c` bypass the interactive line editor, so
+ * zsh/bash do not add them to history automatically. Register only the actual
+ * provider command (never Wand's marker wrapper) before launching the CLI.
+ *
+ * Both implementations append instead of rewriting the history file. zsh's
+ * incremental append is skipped when the user's history-sharing option already
+ * persisted `print -s`, avoiding duplicate entries.
+ */
+function buildShellHistoryRegistration(command: string, shell: string): string[] {
+  const quotedCommand = quotePosixShell(command);
+  switch (path.basename(shell).toLowerCase()) {
+    case "zsh":
+      return [
+        `print -s -- ${quotedCommand} 2>/dev/null || :`,
+        "if [[ -n ${HISTFILE-} && ${SAVEHIST:-0} -gt 0 ]] "
+          + "&& [[ ! -o SHARE_HISTORY && ! -o INC_APPEND_HISTORY && ! -o INC_APPEND_HISTORY_TIME ]]; "
+          + "then fc -AI \"$HISTFILE\" 2>/dev/null || :; fi",
+      ];
+    case "bash":
+      return [
+        `history -s ${quotedCommand} 2>/dev/null || :`,
+        "history -a 2>/dev/null || :",
+      ];
+    default:
+      // Other POSIX shells do not share a portable, non-destructive API for
+      // inserting and incrementally persisting a history entry.
+      return [];
+  }
+}
+
 function longestMarkerPrefixSuffix(value: string, markerPrefix: string): number {
   const maxLength = Math.min(value.length, markerPrefix.length - 1);
   for (let length = maxLength; length > 0; length -= 1) {
@@ -92,6 +123,7 @@ function buildPosixProviderShellCommand(
   // Running the CLI as an `if` condition also prevents a user-set `errexit`
   // option from skipping the marker and fallback shell after a non-zero exit.
   return [
+    ...buildShellHistoryRegistration(command, shell),
     "trap ':' INT",
     `if ${command}; then __wand_cli_status=0; else __wand_cli_status=$?; fi`,
     `printf '\\036WAND_CLI_EXIT:${marker.token}:%s\\037' "$__wand_cli_status"`,

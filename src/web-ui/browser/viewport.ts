@@ -1,3 +1,4 @@
+import { computeFloatingPanelPosition } from "./floating-panel-position";
 import { state, writeStoredBoolean } from "./state";
 import { iconSvg, t } from "./i18n";
 import { escapeHtml } from "./utils";
@@ -404,6 +405,36 @@ import { renderChat } from "./websocket";
         }
       }
 
+      export function positionJoystickPanel() {
+        if (!state.joystickPanelEl || !state.joystickBallEl) return;
+        var viewport = window.visualViewport;
+        var bounds = {
+          left: viewport ? viewport.offsetLeft : 0,
+          top: viewport ? viewport.offsetTop : 0,
+          right: viewport ? viewport.offsetLeft + viewport.width : window.innerWidth,
+          bottom: viewport ? viewport.offsetTop + viewport.height : window.innerHeight
+        };
+        var anchor = state.joystickBallEl.getBoundingClientRect();
+        var panelWidth = state.joystickPanelEl.offsetWidth;
+        var panelHeight = state.joystickPanelEl.offsetHeight;
+        if (!panelWidth || !panelHeight) return;
+        var position = computeFloatingPanelPosition(
+          anchor,
+          bounds,
+          panelWidth,
+          panelHeight,
+          10,
+          JOYSTICK_EDGE_MARGIN
+        );
+        state.joystickPanelEl.style.right = "auto";
+        state.joystickPanelEl.style.bottom = "auto";
+        state.joystickPanelEl.style.left = position.left + "px";
+        state.joystickPanelEl.style.top = position.top + "px";
+        state.joystickPanelEl.style.transformOrigin = position.placement === "above"
+          ? "bottom right"
+          : "top right";
+      }
+
       export function renderJoystickPanel() {
         function keyBtn(key, label, cls) {
           return '<button type="button" class="wjp-key' + (cls ? " " + cls : "") +
@@ -475,9 +506,16 @@ import { renderChat } from "./websocket";
         });
         backdrop.addEventListener("click", function(e) { e.preventDefault(); e.stopPropagation(); });
 
-        state.joystickResizeHandler = function() { applyJoystickPosition(); };
+        state.joystickResizeHandler = function() {
+          applyJoystickPosition();
+          if (state.joystickPinnedOpen) positionJoystickPanel();
+        };
         window.addEventListener("resize", state.joystickResizeHandler);
         window.addEventListener("orientationchange", state.joystickResizeHandler);
+        if (window.visualViewport) {
+          window.visualViewport.addEventListener("resize", state.joystickResizeHandler);
+          window.visualViewport.addEventListener("scroll", state.joystickResizeHandler);
+        }
         updateJoystickVisibility();
       }
 
@@ -668,9 +706,7 @@ import { renderChat } from "./websocket";
       export function openJoystickPanel() {
         if (!state.joystickPanelEl || !state.joystickBallEl) return;
         state.joystickPinnedOpen = true;
-        var r = state.joystickBallEl.getBoundingClientRect();
-        state.joystickPanelEl.style.right = Math.max(JOYSTICK_EDGE_MARGIN, window.innerWidth - r.right) + "px";
-        state.joystickPanelEl.style.bottom = Math.max(JOYSTICK_EDGE_MARGIN, window.innerHeight - r.top + 10) + "px";
+        positionJoystickPanel();
         state.joystickPanelEl.classList.add("active");
         state.joystickBallEl.classList.add("panel-open");
         if (state.joystickBackdropEl) state.joystickBackdropEl.classList.add("active");
@@ -739,6 +775,10 @@ import { renderChat } from "./websocket";
         if (state.joystickResizeHandler) {
           window.removeEventListener("resize", state.joystickResizeHandler);
           window.removeEventListener("orientationchange", state.joystickResizeHandler);
+          if (window.visualViewport) {
+            window.visualViewport.removeEventListener("resize", state.joystickResizeHandler);
+            window.visualViewport.removeEventListener("scroll", state.joystickResizeHandler);
+          }
           state.joystickResizeHandler = null;
         }
         if (state.joystickRootEl && state.joystickRootEl.parentNode) {

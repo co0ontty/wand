@@ -11878,6 +11878,9 @@
       transition: opacity 0.18s var(--ease-out-expo), transform 0.22s var(--ease-spring), visibility 0s linear 0.18s;
       width: min(224px, calc(100vw - 36px));
       max-width: calc(100vw - 36px);
+      max-height: calc(100dvh - 16px);
+      overflow-y: auto;
+      overscroll-behavior: contain;
     }
     .wand-joystick-panel.active {
       pointer-events: auto;

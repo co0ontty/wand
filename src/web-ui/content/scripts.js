@@ -21734,9 +21734,9 @@
                     const y = event.clientY - pointerStartRef.current.y;
                     const hasSwipeMoveStarted = Boolean(swipeDeltaRef.current);
                     const isHorizontalSwipe = ["left", "right"].includes(context.swipeDirection);
-                    const clamp3 = ["left", "up"].includes(context.swipeDirection) ? Math.min : Math.max;
-                    const clampedX = isHorizontalSwipe ? clamp3(0, x) : 0;
-                    const clampedY = !isHorizontalSwipe ? clamp3(0, y) : 0;
+                    const clamp4 = ["left", "up"].includes(context.swipeDirection) ? Math.min : Math.max;
+                    const clampedX = isHorizontalSwipe ? clamp4(0, x) : 0;
+                    const clampedY = !isHorizontalSwipe ? clamp4(0, y) : 0;
                     const moveStartBuffer = event.pointerType === "touch" ? 10 : 2;
                     const delta = { x: clampedX, y: clampedY };
                     const eventDetail = { originalEvent: event, delta };
@@ -37327,6 +37327,29 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     });
   }
 
+  // src/web-ui/browser/floating-panel-position.ts
+  function clamp3(value, min2, max2) {
+    return Math.min(Math.max(value, min2), Math.max(min2, max2));
+  }
+  function computeFloatingPanelPosition(anchor, bounds, panelWidth, panelHeight, gap = 10, margin = 8) {
+    const minLeft = bounds.left + margin;
+    const maxLeft = bounds.right - margin - panelWidth;
+    const left = clamp3(anchor.right - panelWidth, minLeft, maxLeft);
+    const aboveTop = anchor.top - gap - panelHeight;
+    const belowTop = anchor.bottom + gap;
+    const roomAbove = anchor.top - gap - (bounds.top + margin);
+    const roomBelow = bounds.bottom - margin - (anchor.bottom + gap);
+    const placement = roomAbove >= panelHeight || roomAbove >= roomBelow ? "above" : "below";
+    const preferredTop = placement === "above" ? aboveTop : belowTop;
+    const minTop = bounds.top + margin;
+    const maxTop = bounds.bottom - margin - panelHeight;
+    return {
+      left,
+      top: clamp3(preferredTop, minTop, maxTop),
+      placement
+    };
+  }
+
   // src/web-ui/browser/websocket.ts
   function startPolling() {
     stopPolling();
@@ -38409,6 +38432,33 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     } catch (e) {
     }
   }
+  function positionJoystickPanel() {
+    if (!state.joystickPanelEl || !state.joystickBallEl) return;
+    var viewport = window.visualViewport;
+    var bounds = {
+      left: viewport ? viewport.offsetLeft : 0,
+      top: viewport ? viewport.offsetTop : 0,
+      right: viewport ? viewport.offsetLeft + viewport.width : window.innerWidth,
+      bottom: viewport ? viewport.offsetTop + viewport.height : window.innerHeight
+    };
+    var anchor = state.joystickBallEl.getBoundingClientRect();
+    var panelWidth = state.joystickPanelEl.offsetWidth;
+    var panelHeight = state.joystickPanelEl.offsetHeight;
+    if (!panelWidth || !panelHeight) return;
+    var position = computeFloatingPanelPosition(
+      anchor,
+      bounds,
+      panelWidth,
+      panelHeight,
+      10,
+      JOYSTICK_EDGE_MARGIN
+    );
+    state.joystickPanelEl.style.right = "auto";
+    state.joystickPanelEl.style.bottom = "auto";
+    state.joystickPanelEl.style.left = position.left + "px";
+    state.joystickPanelEl.style.top = position.top + "px";
+    state.joystickPanelEl.style.transformOrigin = position.placement === "above" ? "bottom right" : "top right";
+  }
   function renderJoystickPanel() {
     function keyBtn(key, label, cls) {
       return '<button type="button" class="wjp-key' + (cls ? " " + cls : "") + '" data-key="' + key + '">' + label + "</button>";
@@ -38467,9 +38517,14 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     });
     state.joystickResizeHandler = function() {
       applyJoystickPosition();
+      if (state.joystickPinnedOpen) positionJoystickPanel();
     };
     window.addEventListener("resize", state.joystickResizeHandler);
     window.addEventListener("orientationchange", state.joystickResizeHandler);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", state.joystickResizeHandler);
+      window.visualViewport.addEventListener("scroll", state.joystickResizeHandler);
+    }
     updateJoystickVisibility();
   }
   function suppressJoystickKeyboardFocus() {
@@ -38661,9 +38716,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   function openJoystickPanel() {
     if (!state.joystickPanelEl || !state.joystickBallEl) return;
     state.joystickPinnedOpen = true;
-    var r = state.joystickBallEl.getBoundingClientRect();
-    state.joystickPanelEl.style.right = Math.max(JOYSTICK_EDGE_MARGIN, window.innerWidth - r.right) + "px";
-    state.joystickPanelEl.style.bottom = Math.max(JOYSTICK_EDGE_MARGIN, window.innerHeight - r.top + 10) + "px";
+    positionJoystickPanel();
     state.joystickPanelEl.classList.add("active");
     state.joystickBallEl.classList.add("panel-open");
     if (state.joystickBackdropEl) state.joystickBackdropEl.classList.add("active");
@@ -38727,6 +38780,10 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     if (state.joystickResizeHandler) {
       window.removeEventListener("resize", state.joystickResizeHandler);
       window.removeEventListener("orientationchange", state.joystickResizeHandler);
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener("resize", state.joystickResizeHandler);
+        window.visualViewport.removeEventListener("scroll", state.joystickResizeHandler);
+      }
       state.joystickResizeHandler = null;
     }
     if (state.joystickRootEl && state.joystickRootEl.parentNode) {
