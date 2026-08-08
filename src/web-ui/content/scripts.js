@@ -39051,6 +39051,38 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     sendTerminalResize(state.terminal.cols, state.terminal.rows);
   }
 
+  // src/web-ui/browser/terminal-wheel.ts
+  var TERMINAL_WHEEL_PAGE_THRESHOLD_PX = 80;
+  var TERMINAL_WHEEL_PAGE_INTERVAL_MS = 80;
+  var TERMINAL_WHEEL_GESTURE_GAP_MS = 180;
+  function consumeTerminalWheelPage(event, state2, viewportHeight, now = Date.now()) {
+    if (!Number.isFinite(event.deltaY) || event.deltaY === 0) return 0;
+    var direction = event.deltaY < 0 ? -1 : 1;
+    var deltaPixels = Math.abs(normalizeWheelDeltaPixels(event, viewportHeight));
+    if (deltaPixels === 0) return 0;
+    if (state2.direction !== direction || now - state2.lastEventAt > TERMINAL_WHEEL_GESTURE_GAP_MS) {
+      state2.accumulatedPixels = 0;
+    }
+    state2.direction = direction;
+    state2.lastEventAt = now;
+    state2.accumulatedPixels += deltaPixels;
+    if (state2.accumulatedPixels < TERMINAL_WHEEL_PAGE_THRESHOLD_PX) return 0;
+    if (now - state2.lastPageAt < TERMINAL_WHEEL_PAGE_INTERVAL_MS) return 0;
+    state2.accumulatedPixels %= TERMINAL_WHEEL_PAGE_THRESHOLD_PX;
+    state2.lastPageAt = now;
+    return direction;
+  }
+  function terminalWheelPageSequence(direction) {
+    if (direction < 0) return "\x1B[5~";
+    if (direction > 0) return "\x1B[6~";
+    return "";
+  }
+  function normalizeWheelDeltaPixels(event, viewportHeight) {
+    if (event.deltaMode === 1) return event.deltaY * 16;
+    if (event.deltaMode === 2) return event.deltaY * Math.max(1, viewportHeight);
+    return event.deltaY;
+  }
+
   // src/web-ui/browser/terminal.ts
   function saveWorkingDir(path) {
     state.workingDir = path;
@@ -39709,6 +39741,28 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       term.open(termWrap);
       term.attachCustomKeyEventHandler(function() {
         return state.terminalInteractive === true;
+      });
+      var wheelPagingState = {
+        direction: 0,
+        accumulatedPixels: 0,
+        lastEventAt: 0,
+        lastPageAt: 0
+      };
+      term.attachCustomWheelEventHandler(function(event) {
+        if (term.buffer.active.type !== "alternate" || event.ctrlKey || event.metaKey || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) {
+          return true;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        var viewport2 = getTerminalViewport();
+        var direction = consumeTerminalWheelPage(
+          event,
+          wheelPagingState,
+          viewport2 ? viewport2.clientHeight : term.rows * fontSize * 1.25
+        );
+        var sequence = terminalWheelPageSequence(direction);
+        if (sequence) sendPtyInput(sequence);
+        return false;
       });
       var helperTextarea = termWrap.querySelector(".xterm-helper-textarea");
       if (helperTextarea) helperTextarea.readOnly = !state.terminalInteractive;
@@ -42461,10 +42515,35 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       if (!state.terminal) initTerminal();
     }
     applyCurrentView();
+    reconcileInteractiveState();
     restoreComposerStateForSession(sessionId);
-    focusInputBox2(true);
+    if (state.terminalInteractive) {
+      if (!isTouchDevice()) focusTerminalInteractionTarget();
+    } else {
+      focusInputBox2(true);
+    }
+    if (!structured && session && canAutoResumeSession(session)) {
+      resumeTerminalPageSession(session);
+    }
     if (!structured) ensureTerminalFit("view-switch", { forceReplay: true });
     notifyLegacyUiChange("session:view");
+  }
+  var terminalPageResumeSessionId = null;
+  function resumeTerminalPageSession(session) {
+    if (!session || terminalPageResumeSessionId === session.id || !canAutoResumeSession(session)) return;
+    terminalPageResumeSessionId = session.id;
+    resumeSession(session.id).then(function(data) {
+      if (!data || state.selectedId !== session.id) return;
+      updateSessionSnapshot(data);
+      updateSessionsList();
+      subscribeToSession(data.id);
+      return loadOutput(data.id).then(function() {
+        reconcileInteractiveState();
+        if (state.terminalInteractive && !isTouchDevice()) focusTerminalInteractionTarget();
+      });
+    }).finally(function() {
+      if (terminalPageResumeSessionId === session.id) terminalPageResumeSessionId = null;
+    });
   }
   function getComposerSubmissionFingerprint(value, attachments) {
     var attachmentPart = (attachments || []).map(function(item) {
@@ -43544,7 +43623,11 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     if (!isTerminalInteractionAvailable2()) return;
     setTerminalInteractive(!state.terminalInteractive);
   }
-  function setTerminalInteractive(enabled) {
+  function shouldUseTerminalPassthrough(session) {
+    return !!session && !isStructuredSession2(session) && session.status === "running" && state.currentView === "terminal";
+  }
+  function setTerminalInteractive(enabled, options) {
+    var opts = options || {};
     var next = !!enabled && isTerminalInteractionAvailable2();
     if (state.terminalInteractive === next) return;
     state.terminalInteractive = next;
@@ -43555,8 +43638,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     if (next) {
       enableTerminalCapture();
       hideMiniKeyboard(false);
-      focusTerminalInteractionTarget();
-      showToast("\u7EC8\u7AEF\u4EA4\u4E92\u6A21\u5F0F\u5DF2\u5F00\u542F", "info");
+      if (opts.focus !== false) focusTerminalInteractionTarget();
+      if (opts.announce !== false) showToast("\u7EC8\u7AEF\u4EA4\u4E92\u6A21\u5F0F\u5DF2\u5F00\u542F", "info");
     } else {
       disableTerminalCapture();
       clearModifiers();
@@ -43569,9 +43652,14 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     var selectedSession = state.sessions.find(function(session) {
       return session.id === state.selectedId;
     });
-    var shouldDisableInteractive = !selectedSession || selectedSession.status !== "running" || state.currentView !== "terminal";
+    var shouldUsePassthrough = shouldUseTerminalPassthrough(selectedSession);
+    var shouldDisableInteractive = !shouldUsePassthrough;
     if (shouldDisableInteractive && state.terminalInteractive) {
       setTerminalInteractive(false);
+      return;
+    }
+    if (shouldUsePassthrough && !state.terminalInteractive) {
+      setTerminalInteractive(true, { announce: false, focus: false });
       return;
     }
     if ((!selectedSession || state.currentView !== "terminal") && state.keyboardPopupOpen) {
@@ -43591,13 +43679,14 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     var promptOptimizeRequest = state.promptOptimizeRequest;
     var promptOptimizeBusyForCurrent = !!(promptOptimizeRequest && promptOptimizeRequest.sessionId === state.selectedId);
     var promptOptimizeBusyAnywhere = !!promptOptimizeRequest;
+    var terminalPassthrough = shouldUseTerminalPassthrough(selectedSession);
     var toggles = ["terminal-interactive-toggle-top"];
     toggles.forEach(function(id) {
       var toggle = document.getElementById(id);
       if (toggle) {
         toggle.classList.toggle("active", state.terminalInteractive);
         toggle.classList.toggle("is-on", state.terminalInteractive);
-        toggle.classList.toggle("hidden", structured || state.currentView !== "terminal" || !selectedSession);
+        toggle.classList.toggle("hidden", structured || state.currentView !== "terminal" || !selectedSession || terminalPassthrough);
         toggle.setAttribute("aria-pressed", state.terminalInteractive ? "true" : "false");
         var stateLabel = toggle.querySelector(".plus-popover-toggle-state");
         if (stateLabel) stateLabel.textContent = state.terminalInteractive ? "\u5F00" : "\u5173";
@@ -50399,6 +50488,9 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         document.documentElement.classList.add("is-wand-embed-terminal");
         if (params.get("nativeInput") === "1") {
           document.documentElement.classList.add("is-wand-native-input");
+        }
+        if (params.get("passthrough") === "1") {
+          document.documentElement.classList.add("is-wand-terminal-passthrough");
         }
       }
     } catch (e) {

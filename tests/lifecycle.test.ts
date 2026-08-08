@@ -132,7 +132,7 @@ async function waitFor(predicate: () => boolean, message: string): Promise<void>
   }
 }
 
-test("ProcessManager dispose clears timers, kills PTYs, flushes, and rejects new work", (t) => {
+test("ProcessManager dispose clears timers, kills PTYs, flushes, and rejects new work", async (t) => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-process-lifecycle-"));
   const originalSpawn = (pty as unknown as { spawn: typeof pty.spawn }).spawn;
   const fakePty = new FakePty();
@@ -148,7 +148,7 @@ test("ProcessManager dispose clears timers, kills PTYs, flushes, and rejects new
     storage as unknown as WandStorage,
     path.join(root, ".wand"),
   );
-  const started = manager.start("opencode", root, "default", undefined, {
+  const started = await manager.start("opencode", root, "default", undefined, {
     provider: "opencode",
     reuseId: "active-pty",
   });
@@ -183,7 +183,7 @@ test("ProcessManager dispose clears timers, kills PTYs, flushes, and rejects new
   assert.equal(record.initialInputTimer, null);
   assert.equal(record.claudeTaskDiscoveryTimer, null);
   assert.equal(record.codexSessionDiscoveryTimer, null);
-  assert.throws(() => manager.start("opencode", root, "default"), /disposed/);
+  await assert.rejects(manager.start("opencode", root, "default"), /disposed/);
   assert.throws(() => manager.sendInput(started.id, "late input"), /disposed/);
 });
 
@@ -321,8 +321,8 @@ test("ServerHandle close is idempotent, disposes managers, and detaches auth sto
 
   assert.doesNotThrow(() => handle.authService.revokeSession(token));
   assert.equal(handle.authService.validateSession(token), false);
-  assert.throws(
-    () => handle.processManager.start("opencode", root, "default"),
+  await assert.rejects(
+    handle.processManager.start("opencode", root, "default"),
     /disposed/,
   );
   assert.throws(

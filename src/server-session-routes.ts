@@ -525,14 +525,14 @@ function isPtyProviderCommand(provider: SessionProvider, command: string): boole
   return new RegExp(`^${executable}\\b`, "i").test(command.trim());
 }
 
-function startResumedPtySession(
+async function startResumedPtySession(
   processes: ProcessManager,
   existingSession: SessionSnapshot,
   sessionId: string,
   defaultMode: ExecutionMode,
   body: { mode?: ExecutionMode; cols?: number; rows?: number },
   initialInput?: string
-): SessionSnapshot {
+): Promise<SessionSnapshot> {
   if ((existingSession.sessionKind ?? "pty") !== "pty") {
     throw new Error("结构化会话不支持 PTY resume。");
   }
@@ -1293,7 +1293,7 @@ export function registerSessionRoutes(
     res.json({ wandProtocolVersion: WAND_PROTOCOL_VERSION, messages: slice, offset, total });
   });
 
-  app.post("/api/sessions/:id/resume", (req, res) => {
+  app.post("/api/sessions/:id/resume", asyncRoute(async (req, res) => {
     const sessionId = req.params.id;
     const body = req.body as { mode?: ExecutionMode; view?: "chat" | "terminal"; cols?: number; rows?: number };
     try {
@@ -1306,14 +1306,14 @@ export function registerSessionRoutes(
         res.status(400).json({ error: "结构化会话不支持 PTY resume。" });
         return;
       }
-      const newSnapshot = startResumedPtySession(processes, existingSession, sessionId, defaultMode, body);
+      const newSnapshot = await startResumedPtySession(processes, existingSession, sessionId, defaultMode, body);
       res.status(201).json(newSnapshot);
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法恢复会话。") });
     }
-  });
+  }));
 
-  app.post("/api/claude-sessions/:claudeSessionId/resume", (req, res) => {
+  app.post("/api/claude-sessions/:claudeSessionId/resume", asyncRoute(async (req, res) => {
     const claudeSessionId = String(req.params.claudeSessionId || "").trim();
     const body = req.body as { mode?: ExecutionMode; cwd?: string; cols?: number; rows?: number; sessionSource?: unknown; automationId?: unknown };
     try {
@@ -1349,7 +1349,7 @@ export function registerSessionRoutes(
         const resumeCommand = `claude --resume ${claudeSessionId}`;
         const reqCols = typeof body.cols === "number" && Number.isFinite(body.cols) ? body.cols : undefined;
         const reqRows = typeof body.rows === "number" && Number.isFinite(body.rows) ? body.rows : undefined;
-        const newSnapshot = processes.start(resumeCommand, existingSession.cwd, newMode, undefined, {
+        const newSnapshot = await processes.start(resumeCommand, existingSession.cwd, newMode, undefined, {
           reuseId: existingSession.id,
           cols: reqCols,
           rows: reqRows,
@@ -1366,7 +1366,7 @@ export function registerSessionRoutes(
         const resumeCommand = `claude --resume ${claudeSessionId}`;
         const reqCols = typeof body.cols === "number" && Number.isFinite(body.cols) ? body.cols : undefined;
         const reqRows = typeof body.rows === "number" && Number.isFinite(body.rows) ? body.rows : undefined;
-        const newSnapshot = processes.start(resumeCommand, cwd, newMode, undefined, {
+        const newSnapshot = await processes.start(resumeCommand, cwd, newMode, undefined, {
           cols: reqCols,
           rows: reqRows,
           ...(requestedOrigin ?? {}),
@@ -1376,7 +1376,7 @@ export function registerSessionRoutes(
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法按 Claude 会话 ID 恢复会话。") });
     }
-  });
+  }));
 
   app.post("/api/sessions/:id/input", asyncRoute(async (req, res) => {
     const body = req.body as InputRequest;
@@ -1413,7 +1413,7 @@ export function registerSessionRoutes(
       const existingSession = processes.get(sessionId) || storage.getSession(sessionId);
       const autoResumeInput = getAutoResumeInitialInput(existingSession, input, view, shortcutKey);
       if (autoResumeInput !== null && canAutoResumePtyForInput(existingSession, autoResumeInput)) {
-        const snapshot = startResumedPtySession(processes, existingSession, sessionId, defaultMode, {}, autoResumeInput);
+        const snapshot = await startResumedPtySession(processes, existingSession, sessionId, defaultMode, {}, autoResumeInput);
         res.json(sessionResponseDTO(snapshot));
         return;
       }

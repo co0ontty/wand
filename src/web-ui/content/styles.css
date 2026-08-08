@@ -14892,92 +14892,60 @@
       }
     }
 
-    /* PTY passthrough keeps the controls available without reserving a full
-       drafting surface. The modifier is explicit so focus and placeholder
-       changes never cause layout shifts on their own. */
+    /* PTY terminal view is a direct input surface. Keep the runtime controls,
+       but remove the separate drafting row so the next key belongs to xterm
+       and the terminal receives the reclaimed height. */
     .input-composer.is-terminal-interactive .composer-main-row,
     .input-composer.is-terminal-interactive:focus-within .composer-main-row,
     .input-composer.is-terminal-interactive.is-expanded .composer-main-row {
-      grid-template-rows: 36px 40px;
-      min-height: 76px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-rows: 48px;
+      min-height: 48px;
     }
 
     .input-composer.is-terminal-interactive .composer-input-wrap,
     .input-composer.is-terminal-interactive:focus-within .composer-input-wrap,
     .input-composer.is-terminal-interactive.is-expanded .composer-input-wrap {
-      min-height: 36px;
+      display: none;
     }
 
-    .input-composer.is-terminal-interactive .input-textarea {
-      min-height: 36px;
-      max-height: 36px;
-      padding: 7px 12px 4px;
-      overflow-y: hidden;
+    .input-composer.is-terminal-interactive .composer-actions-left,
+    .input-composer.is-terminal-interactive:focus-within .composer-actions-left,
+    .input-composer.is-terminal-interactive.is-expanded .composer-actions-left {
+      grid-column: 1;
+      grid-row: 1;
+    }
+
+    .input-composer.is-terminal-interactive .composer-actions-right,
+    .input-composer.is-terminal-interactive:focus-within .composer-actions-right,
+    .input-composer.is-terminal-interactive.is-expanded .composer-actions-right {
+      grid-column: 2;
+      grid-row: 1;
+    }
+
+    .input-composer.is-terminal-interactive .attachment-preview,
+    .input-composer.is-terminal-interactive #attach-btn,
+    .input-composer.is-terminal-interactive .prompt-optimize-btn,
+    .input-composer.is-terminal-interactive #voice-record-btn,
+    .input-composer.is-terminal-interactive #send-input-button {
+      display: none !important;
     }
 
     html:not(.is-wand-app) .input-composer.is-terminal-interactive .composer-main-row,
     html:not(.is-wand-app) .input-composer.is-terminal-interactive:focus-within .composer-main-row,
     html:not(.is-wand-app) .input-composer.is-terminal-interactive.is-expanded .composer-main-row {
-      grid-template-rows: 32px 36px;
-      min-height: 68px;
+      grid-template-rows: 40px;
+      min-height: 40px;
     }
 
-    html:not(.is-wand-app) .input-composer.is-terminal-interactive .composer-input-wrap,
-    html:not(.is-wand-app) .input-composer.is-terminal-interactive:focus-within .composer-input-wrap,
-    html:not(.is-wand-app) .input-composer.is-terminal-interactive.is-expanded .composer-input-wrap {
-      min-height: 32px;
-    }
-
-    html:not(.is-wand-app) .input-composer.is-terminal-interactive .input-textarea {
-      min-height: 32px;
-      max-height: 32px;
-      padding: 5px 10px 3px;
-    }
-
-    @media (max-width: 640px) {
+    @media (max-width: 640px), (pointer: coarse) and (min-width: 641px) {
       .input-composer.is-terminal-interactive .composer-main-row,
       .input-composer.is-terminal-interactive:focus-within .composer-main-row,
       .input-composer.is-terminal-interactive.is-expanded .composer-main-row,
       html:not(.is-wand-app) .input-composer.is-terminal-interactive .composer-main-row,
       html:not(.is-wand-app) .input-composer.is-terminal-interactive:focus-within .composer-main-row,
       html:not(.is-wand-app) .input-composer.is-terminal-interactive.is-expanded .composer-main-row {
-        grid-template-rows: 40px 48px;
-        min-height: 88px;
-      }
-
-      .input-composer.is-terminal-interactive .composer-input-wrap,
-      .input-composer.is-terminal-interactive:focus-within .composer-input-wrap,
-      .input-composer.is-terminal-interactive.is-expanded .composer-input-wrap,
-      html:not(.is-wand-app) .input-composer.is-terminal-interactive .composer-input-wrap,
-      html:not(.is-wand-app) .input-composer.is-terminal-interactive:focus-within .composer-input-wrap,
-      html:not(.is-wand-app) .input-composer.is-terminal-interactive.is-expanded .composer-input-wrap,
-      .input-composer.is-terminal-interactive .input-textarea,
-      html:not(.is-wand-app) .input-composer.is-terminal-interactive .input-textarea {
-        min-height: 40px;
-        max-height: 40px;
-      }
-    }
-
-    @media (pointer: coarse) and (min-width: 641px) {
-      .input-composer.is-terminal-interactive .composer-main-row,
-      .input-composer.is-terminal-interactive:focus-within .composer-main-row,
-      .input-composer.is-terminal-interactive.is-expanded .composer-main-row,
-      html:not(.is-wand-app) .input-composer.is-terminal-interactive .composer-main-row,
-      html:not(.is-wand-app) .input-composer.is-terminal-interactive:focus-within .composer-main-row,
-      html:not(.is-wand-app) .input-composer.is-terminal-interactive.is-expanded .composer-main-row {
-        grid-template-rows: 40px 48px;
-        min-height: 88px;
-      }
-
-      .input-composer.is-terminal-interactive .composer-input-wrap,
-      .input-composer.is-terminal-interactive:focus-within .composer-input-wrap,
-      .input-composer.is-terminal-interactive.is-expanded .composer-input-wrap,
-      html:not(.is-wand-app) .input-composer.is-terminal-interactive .composer-input-wrap,
-      html:not(.is-wand-app) .input-composer.is-terminal-interactive:focus-within .composer-input-wrap,
-      html:not(.is-wand-app) .input-composer.is-terminal-interactive.is-expanded .composer-input-wrap,
-      .input-composer.is-terminal-interactive .input-textarea,
-      html:not(.is-wand-app) .input-composer.is-terminal-interactive .input-textarea {
-        min-height: 40px;
-        max-height: 40px;
+        grid-template-rows: 48px;
+        min-height: 48px;
       }
     }

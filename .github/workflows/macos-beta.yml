@@ -1,0 +1,104 @@
+name: macOS Beta Release
+
+# Beta 包显式发布，避免每次 master push 都占用昂贵的 macOS runner。
+# 产品更新顺序：X.Y.Z < X.Y.Z-beta.YYYYMMDDHHMM.RUN.ATTEMPT.gSHA < X.Y.(Z+1)。
+on:
+  workflow_dispatch:
+    inputs:
+      base_version:
+        description: "基础稳定版本；留空时使用仓库最新稳定 v* tag"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos-beta:
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: false
+
+      - name: Checkout macOS submodule
+        run: |
+          set -euo pipefail
+          git submodule sync -- macos
+          for attempt in 1 2 3 4 5; do
+            if git submodule update --init --force -- macos; then
+              exit 0
+            fi
+            sleep $((attempt * 15))
+          done
+          exit 1
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Resolve Beta version
+        id: version
+        env:
+          REQUESTED_BASE: ${{ inputs.base_version }}
+        run: |
+          set -euo pipefail
+          BASE_VERSION="$REQUESTED_BASE"
+          if [[ -z "$BASE_VERSION" ]]; then
+            # awk 读完整个输入，避免 pipefail 下 head 提前退出导致上游 SIGPIPE。
+            BASE_VERSION="$(git tag --sort=-v:refname --list 'v*' | awk '
+              /^v[0-9]+\.[0-9]+\.[0-9]+$/ && !found { sub(/^v/, ""); print; found=1 }
+            ')"
+          fi
+          [[ "$BASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "Invalid base version: $BASE_VERSION" >&2
+            exit 1
+          }
+          STAMP="$(TZ=Asia/Shanghai date +%Y%m%d%H%M)"
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          VERSION="${BASE_VERSION}-beta.${STAMP}.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}.g${SHORT_SHA}"
+          ASSET_VERSION="${VERSION}+${STAMP}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "asset_version=$ASSET_VERSION" >> "$GITHUB_OUTPUT"
+          echo "build_stamp=$STAMP" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build and test
+        working-directory: macos
+        env:
+          WAND_BUILD_STAMP: ${{ steps.version.outputs.build_stamp }}
+          WAND_ASSET_VERSION: ${{ steps.version.outputs.asset_version }}
+        run: |
+          chmod +x build.sh scripts/generate-icons.swift scripts/generate-update-manifest.sh
+          xcodebuild -project Wand.xcodeproj -scheme Wand -destination 'platform=macOS' test
+          ./build.sh "${{ steps.version.outputs.version }}"
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wand-macos-${{ steps.version.outputs.asset_version }}
+          path: |
+            macos/dist/wand-v${{ steps.version.outputs.asset_version }}.zip
+            macos/dist/wand-v${{ steps.version.outputs.asset_version }}.dmg
+            macos/dist/wand-v${{ steps.version.outputs.version }}.update.json
+          if-no-files-found: error
+
+      - name: Publish GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          ZIP_ASSET: macos/dist/wand-v${{ steps.version.outputs.asset_version }}.zip
+          DMG_ASSET: macos/dist/wand-v${{ steps.version.outputs.asset_version }}.dmg
+          MANIFEST_ASSET: macos/dist/wand-v${{ steps.version.outputs.version }}.update.json
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "$TAG" \
+            --prerelease \
+            --notes "Wand macOS Beta $VERSION。Beta 客户端会校验更新清单、SHA-256 与应用签名。"
+          gh release upload "$TAG" "$ZIP_ASSET" "$DMG_ASSET" "$MANIFEST_ASSET" \
+            --repo "$GITHUB_REPOSITORY" --clobber

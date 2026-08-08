@@ -301,12 +301,12 @@ ensure_service_installed_and_running() {
       cleanup_stale_wand
     fi
     msg "$(sudo_prefix)$NODE_FOR_WAND $WAND_BIN service:install $SCOPE_FLAG -c $CONFIG_PATH"
-    run_privileged "$NODE_FOR_WAND" "$WAND_BIN" service:install "$SCOPE_FLAG" -c "$CONFIG_PATH" || die "service:install 失败"
+    run_privileged "$NODE_FOR_WAND" "$WAND_BIN" service:install "$SCOPE_FLAG" -c "$CONFIG_PATH" --verbose || die "service:install 失败"
     ok "服务 unit/plist 已重写并启动"
   else
     msg "未发现 $BACKEND $SCOPE service，开始首次注册"
     msg "$(sudo_prefix)$NODE_FOR_WAND $WAND_BIN service:install $SCOPE_FLAG -c $CONFIG_PATH"
-    run_privileged "$NODE_FOR_WAND" "$WAND_BIN" service:install "$SCOPE_FLAG" -c "$CONFIG_PATH" || die "service:install 失败"
+    run_privileged "$NODE_FOR_WAND" "$WAND_BIN" service:install "$SCOPE_FLAG" -c "$CONFIG_PATH" --verbose || die "service:install 失败"
     ok "已注册并启动 wand $SCOPE service"
   fi
 }

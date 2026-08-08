@@ -81,6 +81,8 @@ import { isLogBusActive, wandTuiLog } from "./tui/log-bus.js";
 import { EMBEDDED_WEB_ASSETS, type EmbeddedVendorAssetPath } from "./web-ui/embedded-assets.js";
 import { renderApp } from "./web-ui/index.js";
 import { WsBroadcastManager } from "./ws-broadcast.js";
+import { createTerminalHost } from "./terminal-daemon-client.js";
+import type { TerminalHost } from "./terminal-host.js";
 import { checkRateLimit, recordFailedLogin, resetRateLimit } from "./middleware/rate-limit.js";
 import {
   updateProviderClis,
@@ -568,7 +570,7 @@ export function isPortInUseError(error: unknown): error is PortInUseError {
 export async function startServer(
   config: WandConfig,
   configPath: string,
-  options: { modelRefreshOptions?: () => Partial<ModelRefreshOptions> } = {},
+  options: { modelRefreshOptions?: () => Partial<ModelRefreshOptions>; terminalHost?: TerminalHost } = {},
 ): Promise<ServerHandle> {
   // 关键：在创建 ProcessManager / 任何 spawn 之前先修 PATH。
   // 服务被注册为 systemd / launchd 时，unit 文件里的 PATH 是安装那一刻烧死的，
@@ -623,7 +625,8 @@ export async function startServer(
     config,
     repositoryUrl: PKG_REPO_URL,
   });
-  const processes = new ProcessManager(config, storage, configDir);
+  const terminalHost = options.terminalHost ?? await createTerminalHost(configPath);
+  const processes = new ProcessManager(config, storage, configDir, terminalHost);
   const structuredLogger = new SessionLogger(configDir, config.shortcutLogMaxBytes);
   const structuredSessions = new StructuredSessionManager(storage, config, structuredLogger);
   const sessionRegistry = new SessionRegistry(processes, structuredSessions, storage);
@@ -1142,7 +1145,7 @@ export async function startServer(
 
   // ── Session control ──
 
-  app.post("/api/commands", (req, res) => {
+  app.post("/api/commands", asyncRoute(async (req, res) => {
     const body = req.body as CommandRequest & { sessionSource?: unknown; automationId?: unknown };
     const interactiveShell = body.shell === true;
     if (!interactiveShell && !body.command?.trim()) {
@@ -1181,7 +1184,7 @@ export async function startServer(
         : undefined;
       const reqCols = typeof body.cols === "number" && Number.isFinite(body.cols) ? body.cols : undefined;
       const reqRows = typeof body.rows === "number" && Number.isFinite(body.rows) ? body.rows : undefined;
-      const snapshot = interactiveShell
+      const snapshot = await (interactiveShell
         ? processes.startShell(body.cwd, body.mode ?? "default", {
             worktreeEnabled: body.worktreeEnabled === true,
             cols: reqCols,
@@ -1202,13 +1205,13 @@ export async function startServer(
               thinkingEffort: body.thinkingEffort ?? config.defaultThinkingEffort,
               ...origin,
             }
-          );
+          ));
       recordRecentPath(storage, snapshot.cwd);
       res.status(201).json(snapshot);
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法启动命令。请检查命令是否安装。") });
     }
-  });
+  }));
 
   // ── WebSocket broadcast layer ──
 
@@ -1393,7 +1396,9 @@ export async function startServer(
 
   // Start configured background sessions after the server is already reachable.
   if (!testMode) {
-    processes.runStartupCommands();
+    void processes.runStartupCommands().catch((error) => {
+      console.error("[wand] Failed to start configured startup commands:", getErrorMessage(error));
+    });
   }
 
   // Model discovery runs exclusively in the server. Its first result is

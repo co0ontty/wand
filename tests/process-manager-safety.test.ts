@@ -158,9 +158,9 @@ function createHarness(t: test.TestContext, allowedCommandPrefixes: string[] = [
   return { manager, root, spawned, spawnCalls, storage };
 }
 
-test("Grok PTY launches the TUI with model, effort, and managed approval flags", (t) => {
+test("Grok PTY launches the TUI with model, effort, and managed approval flags", async (t) => {
   const { manager, root, spawnCalls } = createHarness(t);
-  const session = manager.start("grok", root, "managed", undefined, {
+  const session = await manager.start("grok", root, "managed", undefined, {
     provider: "grok",
     model: "grok-4.5",
     thinkingEffort: "deep",
@@ -174,9 +174,9 @@ test("Grok PTY launches the TUI with model, effort, and managed approval flags",
   assert.match(shellArgs.at(-1) ?? "", /if grok --model 'grok-4\.5' --effort 'high' --always-approve --session-id [0-9a-f-]{36}/);
 });
 
-test("Qoder PTY launches the TUI with model and managed permission flags", (t) => {
+test("Qoder PTY launches the TUI with model and managed permission flags", async (t) => {
   const { manager, root, spawnCalls } = createHarness(t);
-  const session = manager.start("qodercli", root, "managed", undefined, {
+  const session = await manager.start("qodercli", root, "managed", undefined, {
     provider: "qoder",
     model: "performance",
   });
@@ -188,9 +188,9 @@ test("Qoder PTY launches the TUI with model and managed permission flags", (t) =
   assert.match(shellArgs.at(-1) ?? "", /if qodercli --model 'performance' --permission-mode bypass_permissions --session-id [0-9a-f-]{36}/);
 });
 
-test("Pi PTY launches the TUI with model and thinking flags", (t) => {
+test("Pi PTY launches the TUI with model and thinking flags", async (t) => {
   const { manager, root, spawnCalls } = createHarness(t);
-  const session = manager.start("pi", root, "managed", undefined, {
+  const session = await manager.start("pi", root, "managed", undefined, {
     provider: "pi",
     model: "openai/gpt-5.4",
     thinkingEffort: "deep",
@@ -220,24 +220,24 @@ test("command allowlist compares safe shell tokens instead of raw prefixes", () 
   assert.equal(isCommandAllowedByPrefixes("claude 'unterminated", ["claude"]), false);
 });
 
-test("ProcessManager rejects unsafe allowlist lookalikes before spawning", (t) => {
+test("ProcessManager rejects unsafe allowlist lookalikes before spawning", async (t) => {
   const { manager, root, spawned } = createHarness(t, ["opencode"]);
 
-  assert.throws(
-    () => manager.start("opencode-malicious", root, "default", undefined, { provider: "opencode" }),
+  await assert.rejects(
+    manager.start("opencode-malicious", root, "default", undefined, { provider: "opencode" }),
     /not allowed/,
   );
-  assert.throws(
-    () => manager.start("opencode; evil", root, "default", undefined, { provider: "opencode" }),
+  await assert.rejects(
+    manager.start("opencode; evil", root, "default", undefined, { provider: "opencode" }),
     /not allowed/,
   );
   assert.equal(spawned.length, 0);
 });
 
-test("bare shell sessions launch the configured login shell without provider metadata", (t) => {
+test("bare shell sessions launch the configured login shell without provider metadata", async (t) => {
   const { manager, root, spawned, spawnCalls } = createHarness(t, ["claude"]);
 
-  const session = manager.startShell(root, "default", { cols: 96, rows: 28 });
+  const session = await manager.startShell(root, "default", { cols: 96, rows: 28 });
 
   assert.equal(session.sessionKind, "pty");
   assert.equal(session.provider, undefined);
@@ -253,9 +253,9 @@ test("bare shell sessions launch the configured login shell without provider met
   assert.equal(spawned[0].resizeCalls, 1);
 });
 
-test("provider CLI exit returns to the live shell without parsing later shell commands as chat", (t) => {
+test("provider CLI exit returns to the live shell without parsing later shell commands as chat", async (t) => {
   const { manager, root, spawned, spawnCalls } = createHarness(t);
-  const session = manager.start("claude", root, "managed", undefined, {
+  const session = await manager.start("claude", root, "managed", undefined, {
     provider: "claude",
     reuseId: "provider-shell-fallback",
   });
@@ -281,9 +281,9 @@ test("provider CLI exit returns to the live shell without parsing later shell co
   assert.equal(spawned[0].writes.length, writesBeforeModelChange);
 });
 
-test("disabling auto approval persists the false value", (t) => {
+test("disabling auto approval persists the false value", async (t) => {
   const { manager, root, storage } = createHarness(t);
-  const started = manager.start("claude", root, "full-access", undefined, {
+  const started = await manager.start("claude", root, "full-access", undefined, {
     provider: "claude",
     reuseId: "persist-false-auto-approve",
   });
@@ -318,19 +318,19 @@ test("disabling auto approval persists the false value", (t) => {
   assert.equal(restored.get(started.id)?.summary, "Persisted summary");
 });
 
-test("late PTY data and exit callbacks cannot mutate a reused session id", (t) => {
+test("late PTY data and exit callbacks cannot mutate a reused session id", async (t) => {
   const { manager, root, spawned, storage } = createHarness(t);
   const events: ProcessEvent[] = [];
   manager.on("process", (event) => events.push(event));
 
-  manager.start("opencode", root, "default", undefined, {
+  await manager.start("opencode", root, "default", undefined, {
     provider: "opencode",
     reuseId: "same-session",
   });
   const oldPty = spawned[0];
   oldPty.emitData("old output");
 
-  manager.start("opencode", root, "default", undefined, {
+  await manager.start("opencode", root, "default", undefined, {
     provider: "opencode",
     reuseId: "same-session",
   });
@@ -358,7 +358,7 @@ test("late PTY data and exit callbacks cannot mutate a reused session id", (t) =
 
 test("continuous PTY output checkpoints every throttle window and flushes on dispose", async (t) => {
   const { manager, root, spawned, storage } = createHarness(t);
-  const started = manager.start("opencode", root, "default", undefined, {
+  const started = await manager.start("opencode", root, "default", undefined, {
     provider: "opencode",
     reuseId: "continuous-output",
   });
@@ -380,9 +380,9 @@ test("continuous PTY output checkpoints every throttle window and flushes on dis
   assert.equal(storage.getSession(started.id)?.output, expectedOutput);
 });
 
-test("permission resolution requires a live matching escalation", (t) => {
+test("permission resolution requires a live matching escalation", async (t) => {
   const { manager, root, spawned } = createHarness(t);
-  const session = manager.start("opencode", root, "default", undefined, {
+  const session = await manager.start("opencode", root, "default", undefined, {
     provider: "opencode",
     reuseId: "permission-session",
   });

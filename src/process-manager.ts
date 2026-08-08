@@ -7,7 +7,6 @@ import process from "node:process";
 import os from "node:os";
 import { DatabaseSync } from "node:sqlite";
 
-import pty, { IPty } from "node-pty";
 import { WandStorage } from "./storage.js";
 import { SessionLogger, ShortcutLogContext } from "./session-logger.js";
 import { ApprovalPolicy, AutonomyPolicy, ChatOutputData, ConversationTurn, EscalationRequest, EscalationScope, ExecutionMode, ProcessEvent, ProcessEventHandler, SessionEvent, SessionProvider, SessionSnapshot, SessionSource, WandConfig } from "./types.js";
@@ -15,7 +14,6 @@ import { ClaudePtyBridge, type PermissionResolution } from "./claude-pty-bridge.
 import { truncateMessagesForTransport } from "./message-truncator.js";
 import { appendWindow, hasExplicitConfirmSyntax, hasPermissionActionContext, normalizePromptText, PTY_OUTPUT_MAX_SIZE } from "./pty-text-utils.js";
 import { buildChildEnv, isRunningAsRoot } from "./env-utils.js";
-import { ensureNodePtyHelperExecutable } from "./ensure-node-pty-helper.js";
 import { buildLanguageDirective, buildManagedAutonomyDirective } from "./language-prompt.js";
 import { prepareSessionWorktree } from "./git-worktree.js";
 import { getProviderCommandSessionId, getProviderResumeCommandSessionId } from "./resume-policy.js";
@@ -25,7 +23,15 @@ import { getErrorMessage } from "./error-utils.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
 import { resolveSessionCwd } from "./session-cwd.js";
 import { PtyTerminalState, type PtyTerminalSnapshot } from "./pty-terminal-state.js";
-import { buildPtyShellLaunchPlan, type PtyCliExitMarker } from "./pty-shell-launch.js";
+import { buildPtyShellLaunchPlan, PtyCliExitMarker } from "./pty-shell-launch.js";
+import {
+  InProcessTerminalHost,
+  type TerminalAttachResult,
+  type TerminalDataEvent,
+  type TerminalHost,
+  type TerminalProcess,
+  type TerminalSessionState,
+} from "./terminal-host.js";
 import {
   ProviderHistoryScanner,
   type ClaudeHistorySession,
@@ -184,7 +190,7 @@ export class SessionInputError extends Error {
 interface SessionRecord extends SessionSnapshot {
   provider?: SessionProvider;
   processId: number | null;
-  ptyProcess: IPty | null;
+  ptyProcess: TerminalProcess | null;
   terminalState: PtyTerminalState | null;
   providerShellMarker: PtyCliExitMarker | null;
   providerCliActive: boolean;
@@ -609,6 +615,20 @@ function snapshotMessages(record: Pick<SessionRecord, "ptyBridge" | "messages">)
   return record.ptyBridge?.getMessages() ?? record.messages;
 }
 
+function restoreTerminalState(state: TerminalSessionState): PtyTerminalState {
+  const snapshot = state.terminalSnapshot;
+  const terminal = new PtyTerminalState(
+    snapshot?.cols ?? state.cols,
+    snapshot?.rows ?? state.rows,
+    snapshot?.data ?? state.output,
+  );
+  for (const operation of snapshot?.pending ?? []) {
+    if (operation.type === "data") terminal.write(operation.data);
+    else terminal.resize(operation.cols, operation.rows);
+  }
+  return terminal;
+}
+
 const MAX_SESSIONS = 200;
 const ARCHIVE_AFTER_MS = 1000 * 60 * 60 * 24;
 const CONFIRM_WINDOW_SIZE = 800;
@@ -689,13 +709,16 @@ export class ProcessManager extends EventEmitter {
   private orphanRecoveredCount = 0;
   private readonly topicCoordinator = new SessionTopicCoordinator();
   private disposed = false;
+  private readonly terminalHost: TerminalHost;
 
   constructor(
     private readonly config: WandConfig,
     private readonly storage: WandStorage,
-    configDir?: string
+    configDir?: string,
+    terminalHost?: TerminalHost,
   ) {
     super();
+    this.terminalHost = terminalHost ?? new InProcessTerminalHost();
     this.logger = new SessionLogger(configDir || path.join(process.env.HOME || process.cwd(), ".wand"), config.shortcutLogMaxBytes);
     let startupCodexHistory: CodexHistorySession[] | null = null;
     const getStartupCodexHistory = (): CodexHistorySession[] => {
@@ -736,115 +759,63 @@ export class ProcessManager extends EventEmitter {
               })?.id ?? null
           : null;
       const restoredSessionId = resumeCommandSessionId ?? snapshot.claudeSessionId ?? sessionIdFromHistory;
-      // Sessions restored from storage have ptyProcess: null — the old server's PTY
-      // belongs to a dead process. Mark running sessions as exited so the UI
-      // reflects reality and users can start fresh sessions.
-      if (snapshot.status === "running") {
-        const recoveredMessages = recoverMessagesFromSnapshot(snapshot);
-        const updated = {
-          ...snapshot,
-          sessionSource: snapshot.sessionSource ?? "interactive",
-          status: "exited" as const,
-          endedAt: orphanEndedAt,
-          claudeSessionId: restoredSessionId ?? null,
-          messages: recoveredMessages.length > 0 ? recoveredMessages : snapshot.messages,
-        };
-        this.storage.saveSession(updated);
-        if (restoredSessionId && restoredSessionId !== snapshot.claudeSessionId) {
-          const label = isCodexCmd ? "Codex thread" : isOpenCodeCmd ? "OpenCode session" : "Claude session";
-          process.stderr.write(`[wand] Recovered ${label} ID for orphan PTY ${snapshot.id}: ${restoredSessionId}\n`);
-        }
-        this.sessions.set(snapshot.id, {
-          ...updated,
-          sessionSource: snapshot.sessionSource ?? "interactive",
-          provider,
-          processId: null,
-          ptyProcess: null,
-          terminalState: null,
-          providerShellMarker: null,
-          providerCliActive: false,
-          providerCliExitCode: snapshot.providerCliExitCode ?? null,
-          stopRequested: false,
-          confirmWindow: "",
-          ptyPermissionBlocked: false,
-          lastAutoConfirmAt: 0,
-          // Preserve a user-toggled auto-approve setting across server restarts
-          // instead of recomputing it from the command/mode pair.
-          autoApprovePermissions: snapshot.autoApprovePermissions
-            ?? this.shouldAutoApprovePermissions(snapshot.command, snapshot.mode, provider),
-          pendingEscalation: snapshot.pendingEscalation ?? null,
-          lastEscalationResult: snapshot.lastEscalationResult ?? null,
-          autonomyPolicy: snapshot.autonomyPolicy ?? this.defaultAutonomyPolicy(snapshot.mode),
-          approvalPolicy: snapshot.approvalPolicy ?? "ask-every-time",
-          allowedScopes: snapshot.allowedScopes ?? [],
-          rememberedEscalationScopes: new Set(),
-          rememberedEscalationTargets: new Set(),
-          storedOutput: snapshot.output,
-          messages: snapshot.messages ?? [],
-          childProcess: null,
-          ptyBridge: null,
-          knownClaudeTaskIds: undefined,
-          claudeTaskDiscoveryTimer: null,
-          knownClaudeProjectMtimes: isClaudeCmd ? listClaudeProjectSessionMtimes(updated.cwd) : undefined,
-          knownCodexSessionMtimes: isCodexCmd ? listCodexSessionMtimes(getStartupCodexHistory()) : undefined,
-          codexSessionDiscoveryTimer: null,
-          knownOpenCodeSessionMtimes: isOpenCodeCmd ? listOpenCodeSessionMtimes() : undefined,
-          openCodeSessionDiscoveryTimer: null,
-          claudeSessionId: restoredSessionId ?? updated.claudeSessionId,
-          approvalStats: snapshot.approvalStats ?? { tool: 0, command: 0, file: 0, total: 0 },
-          titleGenerating: false,
-          ptyCols: snapshot.ptyCols ?? 120,
-          ptyRows: snapshot.ptyRows ?? 36,
-        });
+      const attached = snapshot.status === "running"
+        ? this.terminalHost.attach(snapshot.id, snapshot.ptyOutputSeq ?? 0)
+        : null;
+      const live = attached?.process && attached.state.status === "running" ? attached : null;
+      const daemonEnded = attached && attached.state.status === "exited" ? attached : null;
+      const recoveredMessages = recoverMessagesFromSnapshot(snapshot);
+      const updated: SessionSnapshot = live
+        ? {
+            ...snapshot,
+            sessionSource: snapshot.sessionSource ?? "interactive",
+            status: "running",
+            exitCode: null,
+            endedAt: null,
+            output: live.state.output,
+            ptyOutputSeq: live.state.seq,
+            ptyLaunchMarkerToken: live.state.launchMarkerToken,
+            ptyCols: live.state.cols,
+            ptyRows: live.state.rows,
+            claudeSessionId: restoredSessionId ?? null,
+          }
+        : snapshot.status === "running"
+          ? {
+              ...snapshot,
+              sessionSource: snapshot.sessionSource ?? "interactive",
+              status: daemonEnded?.state.exitCode === 0 ? "exited" : daemonEnded ? "failed" : "exited",
+              exitCode: daemonEnded?.state.exitCode ?? null,
+              endedAt: orphanEndedAt,
+              output: daemonEnded?.state.output ?? snapshot.output,
+              ptyOutputSeq: daemonEnded?.state.seq ?? snapshot.ptyOutputSeq,
+              claudeSessionId: restoredSessionId ?? null,
+              messages: recoveredMessages.length > 0 ? recoveredMessages : snapshot.messages,
+            }
+          : restoredSessionId && restoredSessionId !== snapshot.claudeSessionId
+            ? { ...snapshot, claudeSessionId: restoredSessionId }
+            : snapshot;
+
+      if (updated !== snapshot || live) {
+        if (snapshot.status === "running") this.storage.saveSession(updated);
+        else this.storage.saveSessionMetadata(updated);
+      }
+      if (restoredSessionId && restoredSessionId !== snapshot.claudeSessionId) {
+        const label = isCodexCmd ? "Codex thread" : isOpenCodeCmd ? "OpenCode session" : "Claude session";
+        process.stderr.write(`[wand] Recovered ${label} ID for ${live ? "reattached" : "saved"} PTY ${snapshot.id}: ${restoredSessionId}\n`);
+      }
+
+      const record = this.makeRestoredRecord(updated, provider, live?.process ?? null, live?.state ?? null, {
+        isClaudeCmd,
+        isCodexCmd,
+        isOpenCodeCmd,
+        startupCodexHistory: getStartupCodexHistory,
+      });
+      this.sessions.set(snapshot.id, record);
+      if (live?.process) {
+        this.bindRestoredTerminal(record, live);
+        process.stderr.write(`[wand] Reattached live terminal ${snapshot.id} (pid ${live.process.pid}).\n`);
+      } else if (snapshot.status === "running") {
         this.orphanRecoveredCount += 1;
-      } else {
-        const updated = restoredSessionId && restoredSessionId !== snapshot.claudeSessionId
-          ? { ...snapshot, claudeSessionId: restoredSessionId }
-          : snapshot;
-        if (updated !== snapshot) {
-          this.storage.saveSessionMetadata(updated);
-          const label = isCodexCmd ? "Codex thread" : isOpenCodeCmd ? "OpenCode session" : "Claude session";
-          process.stderr.write(`[wand] Recovered ${label} ID for saved PTY ${snapshot.id}: ${restoredSessionId}\n`);
-        }
-        this.sessions.set(snapshot.id, {
-          ...updated,
-          provider,
-          processId: null,
-          ptyProcess: null,
-          terminalState: null,
-          providerShellMarker: null,
-          providerCliActive: false,
-          providerCliExitCode: snapshot.providerCliExitCode ?? null,
-          stopRequested: false,
-          confirmWindow: "",
-          ptyPermissionBlocked: false,
-          lastAutoConfirmAt: 0,
-          autoApprovePermissions: snapshot.autoApprovePermissions
-            ?? this.shouldAutoApprovePermissions(snapshot.command, snapshot.mode, provider),
-          pendingEscalation: snapshot.pendingEscalation ?? null,
-          lastEscalationResult: snapshot.lastEscalationResult ?? null,
-          autonomyPolicy: snapshot.autonomyPolicy ?? this.defaultAutonomyPolicy(snapshot.mode),
-          approvalPolicy: snapshot.approvalPolicy ?? "ask-every-time",
-          allowedScopes: snapshot.allowedScopes ?? [],
-          rememberedEscalationScopes: new Set(),
-          rememberedEscalationTargets: new Set(),
-          storedOutput: snapshot.output,
-          messages: snapshot.messages ?? [],
-          childProcess: null,
-          ptyBridge: null,
-          knownClaudeTaskIds: undefined,
-          claudeTaskDiscoveryTimer: null,
-          knownClaudeProjectMtimes: isClaudeCmd ? listClaudeProjectSessionMtimes(updated.cwd) : undefined,
-          knownCodexSessionMtimes: isCodexCmd ? listCodexSessionMtimes(getStartupCodexHistory()) : undefined,
-          codexSessionDiscoveryTimer: null,
-          knownOpenCodeSessionMtimes: isOpenCodeCmd ? listOpenCodeSessionMtimes() : undefined,
-          openCodeSessionDiscoveryTimer: null,
-          claudeSessionId: restoredSessionId ?? updated.claudeSessionId,
-          approvalStats: snapshot.approvalStats ?? { tool: 0, command: 0, file: 0, total: 0 },
-          titleGenerating: false,
-          ptyCols: snapshot.ptyCols ?? 120,
-          ptyRows: snapshot.ptyRows ?? 36,
-        });
       }
     }
     this.archiveExpiredSessions();
@@ -854,6 +825,226 @@ export class ProcessManager extends EventEmitter {
       }
     }, 60 * 1000);
     this.archiveTimer.unref?.();
+  }
+
+  private makeRestoredRecord(
+    snapshot: SessionSnapshot,
+    provider: SessionProvider | undefined,
+    ptyProcess: TerminalProcess | null,
+    terminal: TerminalSessionState | null,
+    history: {
+      isClaudeCmd: boolean;
+      isCodexCmd: boolean;
+      isOpenCodeCmd: boolean;
+      startupCodexHistory: () => CodexHistorySession[];
+    },
+  ): SessionRecord {
+    return {
+      ...snapshot,
+      sessionSource: snapshot.sessionSource ?? "interactive",
+      provider,
+      processId: ptyProcess?.pid ?? null,
+      ptyProcess,
+      terminalState: terminal ? restoreTerminalState(terminal) : null,
+      providerShellMarker: terminal?.launchMarkerToken ? new PtyCliExitMarker(terminal.launchMarkerToken) : null,
+      providerCliActive: ptyProcess ? snapshot.providerCliActive ?? provider !== undefined : false,
+      providerCliExitCode: snapshot.providerCliExitCode ?? null,
+      stopRequested: false,
+      confirmWindow: "",
+      ptyPermissionBlocked: false,
+      lastAutoConfirmAt: 0,
+      autoApprovePermissions: snapshot.autoApprovePermissions
+        ?? this.shouldAutoApprovePermissions(snapshot.command, snapshot.mode, provider),
+      pendingEscalation: snapshot.pendingEscalation ?? null,
+      lastEscalationResult: snapshot.lastEscalationResult ?? null,
+      autonomyPolicy: snapshot.autonomyPolicy ?? this.defaultAutonomyPolicy(snapshot.mode),
+      approvalPolicy: snapshot.approvalPolicy ?? "ask-every-time",
+      allowedScopes: snapshot.allowedScopes ?? [],
+      rememberedEscalationScopes: new Set(),
+      rememberedEscalationTargets: new Set(),
+      storedOutput: terminal?.output ?? snapshot.output,
+      output: terminal?.output ?? snapshot.output,
+      messages: snapshot.messages ?? [],
+      childProcess: null,
+      ptyBridge: null,
+      knownClaudeTaskIds: undefined,
+      claudeTaskDiscoveryTimer: null,
+      knownClaudeProjectMtimes: history.isClaudeCmd ? listClaudeProjectSessionMtimes(snapshot.cwd) : undefined,
+      knownCodexSessionMtimes: history.isCodexCmd ? listCodexSessionMtimes(history.startupCodexHistory()) : undefined,
+      codexSessionDiscoveryTimer: null,
+      knownOpenCodeSessionMtimes: history.isOpenCodeCmd ? listOpenCodeSessionMtimes() : undefined,
+      openCodeSessionDiscoveryTimer: null,
+      claudeSessionId: snapshot.claudeSessionId ?? null,
+      approvalStats: snapshot.approvalStats ?? { tool: 0, command: 0, file: 0, total: 0 },
+      titleGenerating: false,
+      ptyCols: terminal?.cols ?? snapshot.ptyCols ?? 120,
+      ptyRows: terminal?.rows ?? snapshot.ptyRows ?? 36,
+      ptyOutputSeq: terminal?.seq ?? snapshot.ptyOutputSeq ?? 0,
+      ptyLaunchMarkerToken: terminal?.launchMarkerToken ?? snapshot.ptyLaunchMarkerToken ?? null,
+    };
+  }
+
+  private bindRestoredTerminal(record: SessionRecord, attached: TerminalAttachResult): void {
+    const child = attached.process;
+    if (!child) return;
+
+    this.initializeClaudeBridge(record, record.output);
+
+    this.bindTerminalProcess(record, child);
+
+    // The daemon snapshot already contains replayed bytes. Consume only the
+    // private provider boundary marker here so semantic CLI state catches up
+    // without duplicating terminal output or bridge transcripts.
+    for (const event of attached.replay) {
+      const boundary = record.providerShellMarker?.consume(event.data);
+      record.ptyOutputSeq = Math.max(record.ptyOutputSeq ?? 0, event.seq);
+      if (boundary?.exitCode !== null && boundary?.exitCode !== undefined) {
+        this.finishProviderCli(record, boundary.exitCode);
+      }
+    }
+  }
+
+  private initializeClaudeBridge(record: SessionRecord, initialOutput: string): void {
+    if (record.provider !== "claude" || !record.providerCliActive) return;
+    record.ptyBridge?.removeAllListeners();
+    record.ptyBridge = new ClaudePtyBridge({
+      sessionId: record.id,
+      isClaudeCommand: true,
+      autoApprove: record.autoApprovePermissions,
+      initialMessages: record.messages,
+      initialOutput,
+    });
+    record.ptyBridge.on("event", (event: SessionEvent) => {
+      if (this.sessions.get(record.id) !== record) return;
+      this.handleBridgeEvent(record, event);
+    });
+  }
+
+  private bindTerminalProcess(
+    record: SessionRecord,
+    child: TerminalProcess,
+    onVisibleChunk?: (chunk: string) => void,
+  ): void {
+    child.onExit(({ exitCode }) => this.handleTerminalExit(record, child, exitCode));
+    child.onData((event) => this.handleTerminalData(record, child, event, onVisibleChunk));
+    if (record.ptyBridge) {
+      record.ptyBridge.setPtyWrite((input: string) => {
+        if (this.sessions.get(record.id) !== record || record.ptyProcess !== child) return;
+        child.write(input);
+      });
+    }
+  }
+
+  private handleTerminalExit(record: SessionRecord, child: TerminalProcess, exitCode: number): void {
+    const current = this.sessions.get(record.id);
+    // A stopped session can be resumed under the same public id before the old
+    // PTY emits its asynchronous exit event. Ignore that stale incarnation.
+    if (current !== record || current.ptyProcess !== child) return;
+    if (current.claudeTaskDiscoveryTimer) {
+      clearTimeout(current.claudeTaskDiscoveryTimer);
+      current.claudeTaskDiscoveryTimer = null;
+    }
+    if (current.codexSessionDiscoveryTimer) {
+      clearTimeout(current.codexSessionDiscoveryTimer);
+      current.codexSessionDiscoveryTimer = null;
+    }
+    if (current.openCodeSessionDiscoveryTimer) {
+      clearTimeout(current.openCodeSessionDiscoveryTimer);
+      current.openCodeSessionDiscoveryTimer = null;
+    }
+    if (current.initialInputTimer) {
+      clearTimeout(current.initialInputTimer);
+      current.initialInputTimer = null;
+    }
+    if (current.ptyBridge) {
+      current.ptyBridge.onExit(exitCode);
+      current.messages = current.ptyBridge.getMessages();
+      current.ptyBridge.removeAllListeners();
+      current.ptyBridge = null;
+    }
+    current.providerShellMarker = null;
+    current.ptyLaunchMarkerToken = null;
+    if (current.providerCliActive) {
+      current.providerCliActive = false;
+      current.providerCliExitCode = exitCode;
+    }
+    current.pendingEscalation = null;
+    current.ptyPermissionBlocked = false;
+    this.captureClaudeSessionId(current, { allowTimeWindowFallback: true });
+    this.captureCodexSessionId(current, { allowTimeWindowFallback: true });
+    this.captureOpenCodeSessionId(current, { allowTimeWindowFallback: true });
+    current.status = current.stopRequested ? "stopped" : exitCode === 0 ? "exited" : "failed";
+    current.exitCode = current.stopRequested ? null : exitCode;
+    current.endedAt = new Date().toISOString();
+    current.ptyProcess = null;
+    this.flushPersist(current, true);
+    this.emitEvent({ type: "ended", sessionId: record.id, data: this.snapshot(current) });
+  }
+
+  private handleTerminalData(
+    record: SessionRecord,
+    child: TerminalProcess,
+    event: TerminalDataEvent,
+    onVisibleChunk?: (chunk: string) => void,
+  ): void {
+    const current = this.sessions.get(record.id);
+    if (current !== record || current.ptyProcess !== child) return;
+
+    current.ptyOutputSeq = Math.max(current.ptyOutputSeq ?? 0, event.seq);
+    const boundary = current.providerShellMarker?.consume(event.data) ?? { data: event.data, exitCode: null };
+    const chunk = boundary.data;
+    if (chunk) current.terminalState?.write(chunk);
+
+    if (chunk && current.ptyBridge) {
+      current.ptyBridge.processChunk(chunk);
+      current.output = current.ptyBridge.getRawOutput();
+    } else if (chunk) {
+      current.output = appendWindow(current.output, chunk, PTY_OUTPUT_MAX_SIZE);
+    }
+    if (chunk) this.logger.appendPtyOutput(record.id, chunk);
+
+    if (chunk && !current.ptyBridge) {
+      this.emitEvent({
+        type: "output",
+        sessionId: record.id,
+        data: {
+          incremental: true,
+          chunk,
+          permissionBlocked: this.isPermissionBlocked(current),
+        },
+      });
+    }
+
+    const bridgeSessionId = current.ptyBridge?.getClaudeSessionId();
+    if (bridgeSessionId && bridgeSessionId !== current.claudeSessionId) {
+      current.claudeSessionId = bridgeSessionId;
+      this.markDirty(current.id, { metadata: true });
+      this.providerHistory.invalidate("claude");
+      process.stderr.write(`[wand] Captured Claude session ID: ${bridgeSessionId}\n`);
+    }
+
+    if (current.providerCliActive && boundary.exitCode === null && !current.claudeSessionId && current.knownClaudeTaskIds) {
+      current.messages = snapshotMessages(current);
+      const discoveredTaskId = getLatestClaudeProjectSessionId({
+        cwd: current.cwd,
+        startedAt: current.startedAt,
+        knownClaudeProjectMtimes: current.knownClaudeProjectMtimes,
+        messages: current.messages,
+      });
+      if (discoveredTaskId) {
+        current.claudeSessionId = discoveredTaskId;
+        this.markDirty(current.id, { metadata: true });
+        current.knownClaudeTaskIds.add(discoveredTaskId);
+        process.stderr.write(`[wand] Captured Claude project session ID: ${discoveredTaskId}\n`);
+      }
+    }
+
+    if (chunk && current.providerCliActive && current.autoApprovePermissions && !current.ptyBridge && current.provider === "claude") {
+      this.autoConfirmWithRecord(current, chunk, child);
+    }
+    if (chunk) onVisibleChunk?.(chunk);
+    if (boundary.exitCode !== null) this.finishProviderCli(current, boundary.exitCode);
+    this.schedulePersist(current);
   }
 
   on(_event: "process", listener: ProcessEventHandler): this {
@@ -883,8 +1074,8 @@ export class ProcessManager extends EventEmitter {
       if (record.ptyBridge) {
         record.messages = record.ptyBridge.getMessages();
       }
-      this.cleanupRecord(record);
-      if (wasRunning) {
+      this.cleanupRecord(record, !this.terminalHost.persistent);
+      if (wasRunning && !this.terminalHost.persistent) {
         record.stopRequested = true;
         record.status = "stopped";
         record.exitCode = null;
@@ -900,6 +1091,7 @@ export class ProcessManager extends EventEmitter {
     this.topicCoordinator.clear();
     this.removeAllListeners("process");
     this.logger.dispose();
+    this.terminalHost.disconnect();
   }
 
   private emitEvent(event: ProcessEvent): void {
@@ -944,6 +1136,7 @@ export class ProcessManager extends EventEmitter {
         }
       }
       this.sessions.delete(id);
+      this.terminalHost.forget(id);
       this.lastPersistedMessageState.delete(id);
       this.dirtySessions.delete(id);
       this.storage.deleteSession(id);
@@ -953,7 +1146,7 @@ export class ProcessManager extends EventEmitter {
     }
   }
 
-  start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: { resumedFromSessionId?: string; autoRecovered?: boolean; worktreeEnabled?: boolean; provider?: SessionProvider; model?: string; reuseId?: string; cols?: number; rows?: number; thinkingEffort?: SessionSnapshot["thinkingEffort"]; sessionSource?: SessionSource; automationId?: string; interactiveShell?: boolean }): SessionSnapshot {
+  async start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: { resumedFromSessionId?: string; autoRecovered?: boolean; worktreeEnabled?: boolean; provider?: SessionProvider; model?: string; reuseId?: string; cols?: number; rows?: number; thinkingEffort?: SessionSnapshot["thinkingEffort"]; sessionSource?: SessionSource; automationId?: string; interactiveShell?: boolean }): Promise<SessionSnapshot> {
     if (this.disposed) throw new Error("ProcessManager has been disposed.");
     if (!opts?.interactiveShell) this.assertCommandAllowed(command);
 
@@ -982,6 +1175,7 @@ export class ProcessManager extends EventEmitter {
         inheritedSessionSource = stored?.sessionSource;
         inheritedAutomationId = stored?.automationId;
       }
+      this.terminalHost.forget(id);
     }
     const worktreeSetup = opts?.worktreeEnabled
       ? prepareSessionWorktree({ cwd: baseCwd, sessionId: id })
@@ -1085,20 +1279,9 @@ export class ProcessManager extends EventEmitter {
       thinkingEffort: initialThinkingEffort,
       ptyCols: opts?.cols !== undefined ? clampDimension(opts.cols, 20, 1000) : 120,
       ptyRows: opts?.rows !== undefined ? clampDimension(opts.rows, 5, 500) : 36,
+      ptyOutputSeq: 0,
+      ptyLaunchMarkerToken: launchPlan.cliExitMarker?.token ?? null,
     };
-
-    if (isClaudeProvider) {
-      record.ptyBridge = new ClaudePtyBridge({
-        sessionId: id,
-        isClaudeCommand: true,
-        autoApprove: record.autoApprovePermissions,
-        initialMessages: priorMessages,
-      });
-      record.ptyBridge.on("event", (event: SessionEvent) => {
-        if (this.sessions.get(id) !== record) return;
-        this.handleBridgeEvent(record, event);
-      });
-    }
 
     this.sessions.set(id, record);
     this.persist(record, { forceFullSave: true });
@@ -1107,14 +1290,12 @@ export class ProcessManager extends EventEmitter {
     }
     this.cleanupOldSessions();
 
-
-    // Self-heal node-pty's spawn-helper +x bit before every spawn: a self-update
-    // can re-drop it after this server already ran its startup chmod, which would
-    // otherwise make every PTY launch throw "posix_spawnp failed." until restart.
-    ensureNodePtyHelperExecutable();
-    let child: import("node-pty").IPty;
+    let child: TerminalProcess;
     try {
-      child = pty.spawn(this.config.shell, launchPlan.shellArgs, {
+      const attached = await this.terminalHost.createOrAttach({
+        sessionId: id,
+        file: this.config.shell,
+        args: launchPlan.shellArgs,
         cwd: resolvedCwd,
         env: buildChildEnv(this.config.inheritEnv !== false, {
           WAND_MODE: effectiveMode,
@@ -1125,10 +1306,24 @@ export class ProcessManager extends EventEmitter {
         // 使用 record 上由前端协商好的真实尺寸，避免"先 120 列、几百毫秒后再 resize"
         // 期间 provider TUI 用错列宽渲染出 \x1b[120G 这类绝对列定位序列。
         cols: record.ptyCols,
-        rows: record.ptyRows
-      });
+        rows: record.ptyRows,
+        launchMarkerToken: launchPlan.cliExitMarker?.token,
+      }, record.ptyOutputSeq);
+      if (!attached.process || attached.state.status !== "running") {
+        throw new Error("Terminal host did not return a running process");
+      }
+      child = attached.process;
+      record.output = attached.state.output;
+      record.storedOutput = attached.state.output;
+      record.ptyOutputSeq = attached.state.seq;
+      record.ptyLaunchMarkerToken = attached.state.launchMarkerToken;
+      record.ptyCols = attached.state.cols;
+      record.ptyRows = attached.state.rows;
+      record.terminalState?.dispose();
+      record.terminalState = restoreTerminalState(attached.state);
+      this.initializeClaudeBridge(record, attached.state.output);
     } catch (err) {
-      console.error("[ProcessManager] pty.spawn threw", { sessionId: id, error: String(err) });
+      console.error("[ProcessManager] terminal spawn failed", { sessionId: id, error: String(err) });
       record.status = "failed";
       record.exitCode = -1;
       record.endedAt = new Date().toISOString();
@@ -1140,60 +1335,6 @@ export class ProcessManager extends EventEmitter {
     record.processId = child.pid;
     record.ptyProcess = child;
     record.status = "running";
-
-    child.onExit(({ exitCode }) => {
-      const current = this.sessions.get(id);
-      // A stopped session can be resumed under the same public id before the
-      // old PTY has emitted its asynchronous exit event. Never let that stale
-      // callback finalize or clear the replacement run.
-      if (current !== record || current.ptyProcess !== child) return;
-      if (current.claudeTaskDiscoveryTimer) {
-        clearTimeout(current.claudeTaskDiscoveryTimer);
-        current.claudeTaskDiscoveryTimer = null;
-      }
-      if (current.codexSessionDiscoveryTimer) {
-        clearTimeout(current.codexSessionDiscoveryTimer);
-        current.codexSessionDiscoveryTimer = null;
-      }
-      if (current.openCodeSessionDiscoveryTimer) {
-        clearTimeout(current.openCodeSessionDiscoveryTimer);
-        current.openCodeSessionDiscoveryTimer = null;
-      }
-      if (current.initialInputTimer) {
-        clearTimeout(current.initialInputTimer);
-        current.initialInputTimer = null;
-      }
-      if (current.ptyBridge) {
-        current.ptyBridge.onExit(exitCode);
-        current.ptyBridge.removeAllListeners();
-      }
-      current.providerShellMarker = null;
-      if (current.providerCliActive) {
-        current.providerCliActive = false;
-        current.providerCliExitCode = exitCode;
-      }
-      current.pendingEscalation = null;
-      current.ptyPermissionBlocked = false;
-      this.captureClaudeSessionId(current, { allowTimeWindowFallback: true });
-      this.captureCodexSessionId(current, { allowTimeWindowFallback: true });
-      this.captureOpenCodeSessionId(current, { allowTimeWindowFallback: true });
-      current.status = current.stopRequested ? "stopped" : exitCode === 0 ? "exited" : "failed";
-      current.exitCode = current.stopRequested ? null : exitCode;
-      current.endedAt = new Date().toISOString();
-      current.ptyProcess = null;
-      this.flushPersist(current, true);
-      this.emitEvent({ type: "ended", sessionId: id, data: this.snapshot(current) });
-    });
-
-    if (record.ptyBridge) {
-      record.ptyBridge.setPtyWrite((input: string) => {
-        if (this.sessions.get(id) !== record || record.ptyProcess !== child) return;
-        child.write(input);
-      });
-    }
-
-    this.emitEvent({ type: "started", sessionId: id, data: this.snapshot(record) });
-    if (initialInput) this.maybeGenerateSessionTopic(id, initialInput);
 
     let initialInputSent = false;
     const sendInitialInput = () => {
@@ -1214,77 +1355,11 @@ export class ProcessManager extends EventEmitter {
       child.write("\r");
     };
 
-    child.onData((rawChunk: string) => {
-      const rec = this.sessions.get(id);
-      // PTYs may still drain data after kill(). A replacement session can use
-      // the same id, so both record identity and the concrete PTY handle must
-      // match before accepting the chunk.
-      if (rec !== record || rec.ptyProcess !== child) return;
-
-      const boundary = rec.providerShellMarker?.consume(rawChunk) ?? { data: rawChunk, exitCode: null };
-      const chunk = boundary.data;
-
-      if (chunk) rec.terminalState?.write(chunk);
-
-      if (chunk && rec.ptyBridge) {
-        rec.ptyBridge.processChunk(chunk);
-        rec.output = rec.ptyBridge.getRawOutput();
-      } else if (chunk) {
-        rec.output = appendWindow(rec.output, chunk, PTY_OUTPUT_MAX_SIZE);
-      }
-
-      if (chunk) this.logger.appendPtyOutput(id, chunk);
-
-      if (chunk && !rec.ptyBridge) {
-        this.emitEvent({
-          type: "output",
-          sessionId: id,
-          data: {
-            incremental: true,
-            chunk,
-            permissionBlocked: this.isPermissionBlocked(rec),
-          },
-        });
-      }
-
-      const bridgeSessionId = rec.ptyBridge?.getClaudeSessionId();
-      if (bridgeSessionId && bridgeSessionId !== rec.claudeSessionId) {
-        rec.claudeSessionId = bridgeSessionId;
-        this.markDirty(rec.id, { metadata: true });
-        this.providerHistory.invalidate("claude");
-        process.stderr.write(`[wand] Captured Claude session ID: ${bridgeSessionId}\n`);
-      }
-
-      if (rec.providerCliActive && boundary.exitCode === null && !rec.claudeSessionId && rec.knownClaudeTaskIds) {
-        rec.messages = snapshotMessages(rec);
-        const discoveredTaskId = getLatestClaudeProjectSessionId({
-          cwd: rec.cwd,
-          startedAt: rec.startedAt,
-          knownClaudeProjectMtimes: rec.knownClaudeProjectMtimes,
-          messages: rec.messages
-        });
-        if (discoveredTaskId) {
-          rec.claudeSessionId = discoveredTaskId;
-          this.markDirty(rec.id, { metadata: true });
-          rec.knownClaudeTaskIds.add(discoveredTaskId);
-          process.stderr.write(`[wand] Captured Claude project session ID: ${discoveredTaskId}\n`);
-        }
-      }
-
-      if (chunk && rec.providerCliActive && rec.autoApprovePermissions && !rec.ptyBridge && rec.provider === "claude") {
-        this.autoConfirmWithRecord(rec, chunk, child);
-      }
-
-      if (chunk && boundary.exitCode === null && initialInput && !initialInputSent && (chunk.includes("❯") || chunk.includes("›"))) {
-        sendInitialInput();
-      }
-
-      if (boundary.exitCode !== null) {
-        this.finishProviderCli(record, boundary.exitCode);
-      }
-
-      this.schedulePersist(rec);
+    this.bindTerminalProcess(record, child, (chunk) => {
+      if (initialInput && !initialInputSent && (chunk.includes("❯") || chunk.includes("›"))) sendInitialInput();
     });
+    this.emitEvent({ type: "started", sessionId: id, data: this.snapshot(record) });
+    if (initialInput) this.maybeGenerateSessionTopic(id, initialInput);
 
     if (launchPlan.commandToWrite) {
       child.write(launchPlan.commandToWrite);
@@ -1715,6 +1790,7 @@ export class ProcessManager extends EventEmitter {
     record.providerCliActive = false;
     record.providerCliExitCode = exitCode;
     record.providerShellMarker = null;
+    record.ptyLaunchMarkerToken = null;
 
     if (record.claudeTaskDiscoveryTimer) {
       clearTimeout(record.claudeTaskDiscoveryTimer);
@@ -1786,6 +1862,7 @@ export class ProcessManager extends EventEmitter {
     record.stopRequested = true;
     record.providerCliActive = false;
     record.providerShellMarker = null;
+    record.ptyLaunchMarkerToken = null;
     // Kill any running child process (from JSON chat turns)
     if (record.childProcess) {
       record.childProcess.kill();
@@ -1819,7 +1896,7 @@ export class ProcessManager extends EventEmitter {
     return this.snapshot(record);
   }
 
-  private cleanupRecord(record: SessionRecord): void {
+  private cleanupRecord(record: SessionRecord, terminateTerminal = true): void {
     if (record.claudeTaskDiscoveryTimer) {
       clearTimeout(record.claudeTaskDiscoveryTimer);
       record.claudeTaskDiscoveryTimer = null;
@@ -1842,17 +1919,17 @@ export class ProcessManager extends EventEmitter {
       this.persistDebounceTimers.delete(record.id);
     }
     if (record.status === "running") {
-      record.stopRequested = true;
+      if (terminateTerminal) record.stopRequested = true;
       if (record.childProcess) {
         const child = record.childProcess;
         record.childProcess = null;
         child.kill();
       }
-      if (record.ptyProcess) {
+      if (record.ptyProcess && terminateTerminal) {
         const ptyProcess = record.ptyProcess;
-        record.ptyProcess = null;
         ptyProcess.kill();
       }
+      record.ptyProcess = null;
     }
     if (record.ptyBridge) {
       record.ptyBridge.removeAllListeners();
@@ -1915,6 +1992,8 @@ export class ProcessManager extends EventEmitter {
     record.terminalState?.dispose();
     record.terminalState = null;
 
+    this.terminalHost.forget(id);
+
     // Delete from persistent storage BEFORE removing from in-memory map,
     // so a storage failure doesn't leave orphan records in the database.
     this.storage.deleteSession(id);
@@ -1958,10 +2037,10 @@ export class ProcessManager extends EventEmitter {
     }
   }
 
-  runStartupCommands(): SessionSnapshot[] {
-    return this.config.startupCommands.map((command) =>
+  async runStartupCommands(): Promise<SessionSnapshot[]> {
+    return Promise.all(this.config.startupCommands.map((command) =>
       this.start(command, this.config.defaultCwd, this.config.defaultMode, undefined, { sessionSource: "startup" })
-    );
+    ));
   }
 
   private snapshot(record: SessionRecord): SessionSnapshot {
@@ -2012,6 +2091,8 @@ export class ProcessManager extends EventEmitter {
       thinkingEffort: record.thinkingEffort ?? null,
       ptyCols: record.ptyCols,
       ptyRows: record.ptyRows,
+      ptyOutputSeq: record.ptyOutputSeq ?? 0,
+      ptyLaunchMarkerToken: record.ptyLaunchMarkerToken ?? null,
     };
   }
 
@@ -2214,10 +2295,11 @@ export class ProcessManager extends EventEmitter {
           messages,
           snapshot.structuredState,
           dirty.output ? snapshot.output : undefined,
+          dirty.output ? snapshot.ptyOutputSeq : undefined,
         );
         dirty.output = false;
       } else if (dirty.output) {
-        this.storage.checkpointSessionOutput(record.id, snapshot.output);
+        this.storage.checkpointSessionOutput(record.id, snapshot.output, snapshot.ptyOutputSeq);
       }
     }
     if (shouldSaveMessages) this.lastPersistedMessageState.set(record.id, getPersistedMessageState(messages));
@@ -2314,7 +2396,7 @@ export class ProcessManager extends EventEmitter {
    * @deprecated Only retained for non-Claude-CLI sessions without ptyBridge.
    * For Claude CLI sessions, auto-approval is handled by ClaudePtyBridge.detectPermission().
    */
-  private autoConfirmWithRecord(record: SessionRecord, output: string, ptyProcess: IPty): void {
+  private autoConfirmWithRecord(record: SessionRecord, output: string, ptyProcess: TerminalProcess): void {
     if (!record.autoApprovePermissions) {
       return;
     }
@@ -2508,13 +2590,13 @@ export class ProcessManager extends EventEmitter {
   }
 
   /** Start a bare interactive login shell without a provider CLI. */
-  startShell(cwd: string | undefined, mode: ExecutionMode, opts?: {
+  async startShell(cwd: string | undefined, mode: ExecutionMode, opts?: {
     worktreeEnabled?: boolean;
     cols?: number;
     rows?: number;
     sessionSource?: SessionSource;
     automationId?: string;
-  }): SessionSnapshot {
+  }): Promise<SessionSnapshot> {
     return this.start(this.config.shell, cwd, mode, undefined, {
       ...opts,
       interactiveShell: true,

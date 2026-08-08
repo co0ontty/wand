@@ -10,6 +10,7 @@ import { applyCurrentView, closeSessionsDrawer, copyToClipboard, dismissDrawerIf
 import { ensureTerminalFit, initTerminalJoystick, initTerminalResizeHandle, observeTerminalResize, sendTerminalResize, startTerminalHealthCheck } from "./viewport";
 import { t } from "./i18n";
 import { batchDeleteSelected, clearAllClaudeHistory, clearSelections, confirmDelete, ensureClaudeHistoryLoaded, getVisibleClaudeHistorySessions, selectAllVisibleItems, toggleManageMode, toggleManagedItemSelection } from "./sidebar";
+import { consumeTerminalWheelPage, terminalWheelPageSequence, type TerminalWheelPagingState } from "./terminal-wheel";
 
       export function saveWorkingDir(path: string) {
         state.workingDir = path;
@@ -762,6 +763,38 @@ import { batchDeleteSelected, clearAllClaudeHistory, clearSelections, confirmDel
           term.open(termWrap);
           term.attachCustomKeyEventHandler(function() {
             return state.terminalInteractive === true;
+          });
+          var wheelPagingState: TerminalWheelPagingState = {
+            direction: 0,
+            accumulatedPixels: 0,
+            lastEventAt: 0,
+            lastPageAt: 0,
+          };
+          term.attachCustomWheelEventHandler(function(event: WheelEvent) {
+            // The normal buffer owns real xterm scrollback, so preserve xterm's
+            // native pixel/line scrolling there. Full-screen PTY applications
+            // use the alternate buffer, which has no local history; translate
+            // vertical wheel gestures into the page keys those TUIs understand.
+            if (
+              term.buffer.active.type !== "alternate"
+              || event.ctrlKey
+              || event.metaKey
+              || Math.abs(event.deltaY) <= Math.abs(event.deltaX)
+            ) {
+              return true;
+            }
+
+            event.preventDefault();
+            event.stopPropagation();
+            var viewport = getTerminalViewport();
+            var direction = consumeTerminalWheelPage(
+              event,
+              wheelPagingState,
+              viewport ? viewport.clientHeight : term.rows * fontSize * 1.25,
+            );
+            var sequence = terminalWheelPageSequence(direction);
+            if (sequence) sendPtyInput(sequence);
+            return false;
           });
           var helperTextarea = termWrap.querySelector(".xterm-helper-textarea") as HTMLTextAreaElement | null;
           if (helperTextarea) helperTextarea.readOnly = !state.terminalInteractive;

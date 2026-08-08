@@ -24,6 +24,8 @@ import { whichSync } from "../path-repair.js";
 import { computeRelaunch } from "../relaunch.js";
 import { ensureDatabaseFile, resolveDatabasePath, WandStorage } from "../storage.js";
 import { getErrorMessage } from "../error-utils.js";
+import { readTerminalDaemonPid } from "../terminal-daemon-server.js";
+import { isPidAlive } from "../pidfile.js";
 
 export interface CommandResult {
   ok: boolean;
@@ -181,6 +183,7 @@ function clipboardCandidates(): Array<{ cmd: string; args: string[] }> {
 // ─── 系统服务（systemd system / user / launchd） ─────────────────────────
 
 const LAUNCHD_LABEL = "com.wand.web";
+const LAUNCHD_TERMINAL_LABEL = "com.wand.terminald";
 
 /**
  * 服务安装的作用域：
@@ -471,8 +474,8 @@ function launchdDomain(scope: ServiceScope): string {
   return scope === "user" ? `gui/${currentUid()}` : "system";
 }
 
-function launchdTarget(scope: ServiceScope): string {
-  return `${launchdDomain(scope)}/${LAUNCHD_LABEL}`;
+function launchdTarget(scope: ServiceScope, label = LAUNCHD_LABEL): string {
+  return `${launchdDomain(scope)}/${label}`;
 }
 
 function currentUid(): number {
@@ -491,41 +494,115 @@ function matchLaunchdField(text: string, field: string): string | null {
   return match?.[1]?.trim() ?? null;
 }
 
-function launchdBootstrap(scope: ServiceScope, plist: string, successMessage: string): CommandResult {
-  const domain = launchdDomain(scope);
-  const target = launchdTarget(scope);
-  const bootout = spawnSync("launchctl", ["bootout", domain, plist], { encoding: "utf8", timeout: 10_000 });
-  const bootstrap = spawnSync("launchctl", ["bootstrap", domain, plist], { encoding: "utf8", timeout: 10_000 });
-  const enable = spawnSync("launchctl", ["enable", target], { encoding: "utf8", timeout: 10_000 });
-  const kickstart = spawnSync("launchctl", ["kickstart", "-k", target], { encoding: "utf8", timeout: 10_000 });
-  const detail = [
-    `target: ${target}`,
-    `bootout: ${formatSpawnResult(bootout)}`,
-    `bootstrap: ${formatSpawnResult(bootstrap)}`,
-    `enable: ${formatSpawnResult(enable)}`,
-    `kickstart: ${formatSpawnResult(kickstart)}`,
-  ].join("\n");
+const LAUNCHD_POLL_INTERVAL_MS = 100;
 
-  if (bootstrap.status !== 0 && !launchdIsAlreadyBootstrapped(bootstrap)) {
-    return { ok: false, message: `launchctl bootstrap 失败 (${target})`, detail };
-  }
-  if (enable.status !== 0) {
-    return { ok: false, message: `launchctl enable 失败 (${target})`, detail };
-  }
-  if (kickstart.status !== 0) {
-    const status = launchdStatus(scope);
-    if (status.state !== "active") {
-      return { ok: false, message: `launchctl kickstart 失败 (${target})`, detail };
-    }
-  }
-  return { ok: true, message: successMessage, detail };
+function sleepSync(ms: number): void {
+  const signal = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+  Atomics.wait(signal, 0, 0, ms);
 }
 
-function launchdBootout(scope: ServiceScope, plist: string, successMessage: string): CommandResult {
+function waitForLaunchdCondition(check: () => boolean, timeoutMs: number): boolean {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    if (check()) return true;
+    if (Date.now() >= deadline) return false;
+    sleepSync(Math.min(LAUNCHD_POLL_INTERVAL_MS, Math.max(1, deadline - Date.now())));
+  }
+}
+
+function launchdTargetIsLoaded(scope: ServiceScope, label = LAUNCHD_LABEL): boolean {
+  const printed = spawnSync("launchctl", ["print", launchdTarget(scope, label)], {
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  return printed.status === 0;
+}
+
+function waitForLaunchdTarget(scope: ServiceScope, loaded: boolean, timeoutMs: number, label = LAUNCHD_LABEL): boolean {
+  return waitForLaunchdCondition(() => launchdTargetIsLoaded(scope, label) === loaded, timeoutMs);
+}
+
+function waitForLaunchdActive(scope: ServiceScope, timeoutMs: number, label = LAUNCHD_LABEL): boolean {
+  return waitForLaunchdCondition(() => {
+    const printed = spawnSync("launchctl", ["print", launchdTarget(scope, label)], {
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    if (printed.status !== 0) return false;
+    const text = printed.stdout || "";
+    return Number(matchLaunchdField(text, "pid") || "0") > 0
+      || matchLaunchdField(text, "state") === "running";
+  }, timeoutMs);
+}
+
+function launchdBootstrap(scope: ServiceScope, plist: string, successMessage: string, label = LAUNCHD_LABEL): CommandResult {
   const domain = launchdDomain(scope);
-  const target = launchdTarget(scope);
+  const target = launchdTarget(scope, label);
   const bootout = spawnSync("launchctl", ["bootout", domain, plist], { encoding: "utf8", timeout: 10_000 });
-  if (bootout.status === 0 || launchdIsNotBootstrapped(bootout)) {
+  const detail: string[] = [
+    `target: ${target}`,
+    `bootout: ${formatSpawnResult(bootout)}`,
+  ];
+
+  // launchctl can return before the old job has fully disappeared. Starting a
+  // new job in that window often produces the unhelpful "Bootstrap failed: 5"
+  // error even though the plist is valid.
+  if (!waitForLaunchdTarget(scope, false, 2_000, label)) {
+    return {
+      ok: false,
+      message: `launchctl bootout 未生效 (${target})`,
+      detail: detail.join("\n"),
+    };
+  }
+
+  const bootstrapAttempts: Array<ReturnType<typeof spawnSync>> = [];
+  let loaded = false;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const bootstrap = spawnSync("launchctl", ["bootstrap", domain, plist], {
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    bootstrapAttempts.push(bootstrap);
+    loaded = waitForLaunchdTarget(scope, true, 750, label);
+    if (loaded) break;
+    if (!launchdIsTransientBootstrapFailure(bootstrap)) break;
+    sleepSync(250);
+  }
+  detail.push(...bootstrapAttempts.map((result, index) =>
+    `bootstrap${bootstrapAttempts.length > 1 ? ` #${index + 1}` : ""}: ${formatSpawnResult(result)}`
+  ));
+
+  if (!loaded) {
+    return { ok: false, message: `launchctl bootstrap 失败 (${target})`, detail: detail.join("\n") };
+  }
+
+  const enable = spawnSync("launchctl", ["enable", target], { encoding: "utf8", timeout: 10_000 });
+  detail.push(`enable: ${formatSpawnResult(enable)}`);
+  if (enable.status !== 0) {
+    return { ok: false, message: `launchctl enable 失败 (${target})`, detail: detail.join("\n") };
+  }
+
+  // RunAtLoad normally starts a freshly bootstrapped job. Avoid immediately
+  // killing that still-starting process with kickstart -k; only kick an idle
+  // job after giving launchd a short settling window.
+  if (waitForLaunchdActive(scope, 2_000, label)) {
+    detail.push("kickstart: skipped (already active)");
+    return { ok: true, message: successMessage, detail: detail.join("\n") };
+  }
+
+  const kickstart = spawnSync("launchctl", ["kickstart", target], { encoding: "utf8", timeout: 10_000 });
+  detail.push(`kickstart: ${formatSpawnResult(kickstart)}`);
+  if (!waitForLaunchdActive(scope, 2_000, label)) {
+    return { ok: false, message: `launchctl kickstart 失败 (${target})`, detail: detail.join("\n") };
+  }
+  return { ok: true, message: successMessage, detail: detail.join("\n") };
+}
+
+function launchdBootout(scope: ServiceScope, plist: string, successMessage: string, label = LAUNCHD_LABEL): CommandResult {
+  const domain = launchdDomain(scope);
+  const target = launchdTarget(scope, label);
+  const bootout = spawnSync("launchctl", ["bootout", domain, plist], { encoding: "utf8", timeout: 10_000 });
+  if (waitForLaunchdTarget(scope, false, 2_000, label)) {
     return {
       ok: true,
       message: successMessage,
@@ -539,14 +616,9 @@ function launchdBootout(scope: ServiceScope, plist: string, successMessage: stri
   };
 }
 
-function launchdIsAlreadyBootstrapped(result: ReturnType<typeof spawnSync>): boolean {
+function launchdIsTransientBootstrapFailure(result: ReturnType<typeof spawnSync>): boolean {
   const text = `${result.stdout || ""}\n${result.stderr || ""}`;
-  return /already bootstrapped|service already loaded|Bootstrap failed:\s*5/i.test(text);
-}
-
-function launchdIsNotBootstrapped(result: ReturnType<typeof spawnSync>): boolean {
-  const text = `${result.stdout || ""}\n${result.stderr || ""}`;
-  return /No such process|service is not loaded|Bootstrap failed:\s*3/i.test(text);
+  return /Bootstrap failed:\s*(?:5|37)|Input\/output error|resource busy|operation (?:now |in )?progress/i.test(text);
 }
 
 function formatSpawnResult(result: ReturnType<typeof spawnSync>): string {
@@ -611,6 +683,25 @@ function servicePathFor(scope: ServiceScope): string {
       : "/Library/LaunchDaemons/com.wand.web.plist";
   }
   return "";
+}
+
+function terminalServicePathFor(scope: ServiceScope): string {
+  if (process.platform === "linux") {
+    return scope === "user"
+      ? path.join(os.homedir(), ".config/systemd/user/wand-terminald.service")
+      : "/etc/systemd/system/wand-terminald.service";
+  }
+  if (process.platform === "darwin") {
+    return scope === "user"
+      ? path.join(os.homedir(), "Library/LaunchAgents/com.wand.terminald.plist")
+      : "/Library/LaunchDaemons/com.wand.terminald.plist";
+  }
+  return "";
+}
+
+function hasLiveTerminalDaemon(configPath: string): boolean {
+  const pid = readTerminalDaemonPid(configPath);
+  return pid !== null && isPidAlive(pid);
 }
 
 function readServiceEntrypointForUpdate(scope: ServiceScope): string | null {
@@ -764,6 +855,7 @@ function readFileStat(targetPath: string): { uid: number } {
 
 function installSystemdService(ctx: ServiceContext, scope: ServiceScope): CommandResult {
   const unitPath = servicePathFor(scope);
+  const terminalUnitPath = terminalServicePathFor(scope);
   const wandBin = resolveWandBin(ctx);
   const nodeBin = process.execPath;
   const nodeBinDir = path.dirname(nodeBin);
@@ -780,7 +872,7 @@ function installSystemdService(ctx: ServiceContext, scope: ServiceScope): Comman
   const commonExec = [
     "[Unit]",
     "Description=wand web console",
-    "After=network-online.target",
+    "After=network-online.target wand-terminald.service",
     "Wants=network-online.target",
     "",
     "[Service]",
@@ -820,9 +912,41 @@ function installSystemdService(ctx: ServiceContext, scope: ServiceScope): Comman
     ];
   }
   const unit = unitLines.join("\n");
+  const terminalCommon = [
+    "[Unit]",
+    "Description=wand persistent terminal host",
+    "After=network-online.target",
+    "Wants=network-online.target",
+    "",
+    "[Service]",
+    "Type=simple",
+    `ExecStart=${nodeBin} ${wandBin} terminald -c ${ctx.configPath}`,
+    `Environment=PATH=${servicePath}`,
+    "Restart=always",
+    "RestartSec=3",
+    "StandardOutput=journal",
+    "StandardError=journal",
+    "SyslogIdentifier=wand-terminald",
+  ];
+  const terminalUnit = [
+    ...terminalCommon,
+    ...(scope === "system"
+      ? [
+          `User=${runUser}`,
+          `WorkingDirectory=${runHome}`,
+          `Environment=HOME=${runHome}`,
+          "OOMScoreAdjust=-500",
+          "",
+          "[Install]",
+          "WantedBy=multi-user.target",
+        ]
+      : ["", "[Install]", "WantedBy=default.target"]),
+    "",
+  ].join("\n");
 
   try {
     mkdirSync(path.dirname(unitPath), { recursive: true });
+    writeFileSync(terminalUnitPath, terminalUnit, "utf8");
     writeFileSync(unitPath, unit, "utf8");
   } catch (err) {
     return { ok: false, message: `写入 unit 失败: ${getErrorMessage(err)}` };
@@ -830,6 +954,12 @@ function installSystemdService(ctx: ServiceContext, scope: ServiceScope): Comman
 
   const base = systemctlBaseArgs(scope);
   const reload = spawnSync("systemctl", [...base, "daemon-reload"], { encoding: "utf8" });
+  const terminalAlreadyLive = hasLiveTerminalDaemon(ctx.configPath);
+  const enableTerminal = spawnSync(
+    "systemctl",
+    [...base, "enable", ...(terminalAlreadyLive ? [] : ["--now"]), "wand-terminald.service"],
+    { encoding: "utf8" },
+  );
   const enable = spawnSync("systemctl", [...base, "enable", "--now", "wand.service"], { encoding: "utf8" });
   const hints = scope === "user"
     ? "提示: 若需登出后保持运行，请运行 `loginctl enable-linger $USER`"
@@ -837,12 +967,14 @@ function installSystemdService(ctx: ServiceContext, scope: ServiceScope): Comman
   const detail = [
     `scope: ${scope}`,
     `unit: ${unitPath}`,
+    `terminal unit: ${terminalUnitPath}`,
     `daemon-reload: ${reload.status === 0 ? "ok" : `failed (${reload.stderr.trim()})`}`,
+    `terminal enable${terminalAlreadyLive ? " (kept existing daemon)" : " --now"}: ${enableTerminal.status === 0 ? "ok" : `failed (${enableTerminal.stderr.trim()})`}`,
     `enable --now: ${enable.status === 0 ? "ok" : `failed (${enable.stderr.trim()})`}`,
     "",
     hints,
   ].join("\n");
-  if (enable.status !== 0) {
+  if (enableTerminal.status !== 0 || enable.status !== 0) {
     return {
       ok: false,
       message: `已写入 unit，但 systemctl ${scope === "user" ? "--user " : ""}启用失败`,
@@ -858,13 +990,16 @@ function installSystemdService(ctx: ServiceContext, scope: ServiceScope): Comman
 
 function uninstallSystemdService(scope: ServiceScope): CommandResult {
   const unitPath = servicePathFor(scope);
+  const terminalUnitPath = terminalServicePathFor(scope);
   if (!existsSync(unitPath)) {
     return { ok: false, message: `未检测到已安装的 systemd ${scope} 服务` };
   }
   const base = systemctlBaseArgs(scope);
   const stop = spawnSync("systemctl", [...base, "disable", "--now", "wand.service"], { encoding: "utf8" });
+  const stopTerminal = spawnSync("systemctl", [...base, "disable", "--now", "wand-terminald.service"], { encoding: "utf8" });
   try {
     unlinkSync(unitPath);
+    if (existsSync(terminalUnitPath)) unlinkSync(terminalUnitPath);
   } catch (err) {
     return { ok: false, message: `删除 unit 失败: ${getErrorMessage(err)}` };
   }
@@ -872,12 +1007,16 @@ function uninstallSystemdService(scope: ServiceScope): CommandResult {
   return {
     ok: true,
     message: `已卸载 systemd ${scope === "user" ? "用户" : "系统"}服务`,
-    detail: stop.status === 0 ? "disable --now: ok" : `disable --now: ${stop.stderr.trim()}`,
+    detail: [
+      stop.status === 0 ? "web disable --now: ok" : `web disable --now: ${stop.stderr.trim()}`,
+      stopTerminal.status === 0 ? "terminal disable --now: ok" : `terminal disable --now: ${stopTerminal.stderr.trim()}`,
+    ].join("\n"),
   };
 }
 
 function installLaunchdService(ctx: ServiceContext, scope: ServiceScope): CommandResult {
   const plistPath = servicePathFor(scope);
+  const terminalPlistPath = terminalServicePathFor(scope);
   const wandBin = resolveWandBin(ctx);
   const nodeBin = process.execPath;
   const nodeBinDir = path.dirname(nodeBin);
@@ -914,12 +1053,73 @@ ${userNameField}  <key>WorkingDirectory</key><string>${runHome}</string>
 </dict>
 </plist>
 `;
+  const terminalPlist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>${LAUNCHD_TERMINAL_LABEL}</string>
+${userNameField}  <key>WorkingDirectory</key><string>${runHome}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${nodeBin}</string>
+    <string>${wandBin}</string>
+    <string>terminald</string>
+    <string>-c</string>
+    <string>${ctx.configPath}</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>${servicePath}</string>
+    <key>HOME</key><string>${runHome}</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+</dict>
+</plist>
+`;
   try {
     mkdirSync(path.dirname(plistPath), { recursive: true });
+    writeFileSync(terminalPlistPath, terminalPlist, "utf8");
     writeFileSync(plistPath, plist, "utf8");
   } catch (err) {
     return { ok: false, message: `写入 plist 失败: ${getErrorMessage(err)}` };
   }
+  const terminalEnable = spawnSync(
+    "launchctl",
+    ["enable", launchdTarget(scope, LAUNCHD_TERMINAL_LABEL)],
+    { encoding: "utf8", timeout: 10_000 },
+  );
+  if (terminalEnable.status !== 0) {
+    return {
+      ok: false,
+      message: "已写入 plist，但持久终端宿主 enable 失败",
+      detail: formatSpawnResult(terminalEnable),
+    };
+  }
+  let terminalDetail: string;
+  if (launchdTargetIsLoaded(scope, LAUNCHD_TERMINAL_LABEL)) {
+    terminalDetail = `terminal: kept running (${launchdTarget(scope, LAUNCHD_TERMINAL_LABEL)})`;
+  } else if (hasLiveTerminalDaemon(ctx.configPath)) {
+    // A daemon started by an older/manual web process already owns live PTYs.
+    // Keep it untouched; the new plist will take ownership on the next boot.
+    terminalDetail = "terminal: existing standalone daemon kept running; plist enabled for next boot";
+  } else {
+    const terminalStarted = launchdBootstrap(
+      scope,
+      terminalPlistPath,
+      `已启动持久终端宿主: ${terminalPlistPath}`,
+      LAUNCHD_TERMINAL_LABEL,
+    );
+    if (!terminalStarted.ok) {
+      return {
+        ok: false,
+        message: "已写入 plist，但持久终端宿主启动失败",
+        detail: terminalStarted.detail,
+      };
+    }
+    terminalDetail = terminalStarted.detail ?? terminalStarted.message;
+  }
+
   const started = launchdBootstrap(
     scope,
     plistPath,
@@ -935,19 +1135,32 @@ ${userNameField}  <key>WorkingDirectory</key><string>${runHome}</string>
   return {
     ok: true,
     message: `已注册 launchd ${scope === "user" ? "用户代理" : "系统守护"}: ${plistPath}`,
-    detail: started.detail,
+    detail: [terminalDetail, started.detail].filter(Boolean).join("\n"),
   };
 }
 
 function uninstallLaunchdService(scope: ServiceScope): CommandResult {
   const plistPath = servicePathFor(scope);
+  const terminalPlistPath = terminalServicePathFor(scope);
   if (!existsSync(plistPath)) {
     return { ok: false, message: `未检测到已安装的 launchd ${scope} 服务` };
   }
   const stopped = launchdBootout(scope, plistPath, `已停止 launchd ${scope}`);
+  const stoppedTerminal = launchdBootout(
+    scope,
+    terminalPlistPath,
+    `已停止持久终端宿主 ${scope}`,
+    LAUNCHD_TERMINAL_LABEL,
+  );
   const disabled = spawnSync("launchctl", ["disable", launchdTarget(scope)], { encoding: "utf8", timeout: 10_000 });
+  const disabledTerminal = spawnSync(
+    "launchctl",
+    ["disable", launchdTarget(scope, LAUNCHD_TERMINAL_LABEL)],
+    { encoding: "utf8", timeout: 10_000 },
+  );
   try {
     unlinkSync(plistPath);
+    if (existsSync(terminalPlistPath)) unlinkSync(terminalPlistPath);
   } catch (err) {
     return { ok: false, message: `删除 plist 失败: ${getErrorMessage(err)}` };
   }
@@ -956,7 +1169,9 @@ function uninstallLaunchdService(scope: ServiceScope): CommandResult {
     message: `已卸载 launchd ${scope === "user" ? "用户代理" : "系统守护"}`,
     detail: [
       stopped.detail ?? stopped.message,
+      stoppedTerminal.detail ?? stoppedTerminal.message,
       `disable: ${formatSpawnResult(disabled)}`,
+      `terminal disable: ${formatSpawnResult(disabledTerminal)}`,
     ].join("\n"),
   };
 }

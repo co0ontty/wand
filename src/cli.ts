@@ -109,6 +109,11 @@ async function main(): Promise<void> {
       }
       break;
     }
+    case "terminald": {
+      const { runTerminalDaemon } = await import("./terminal-daemon-server.js");
+      await runTerminalDaemon(configPath);
+      break;
+    }
     case "config:path": {
       process.stdout.write(`${configPath}\n`);
       break;
@@ -228,6 +233,7 @@ function printHelp(): void {
 Commands:
   wand init                 Create default files in ~/.wand/
   wand web                  Start web console server (or attach to running one)
+  wand terminald            Run the persistent terminal owner (normally managed automatically)
   wand config:path          Print resolved config path
   wand config:show          Print current config
   wand config:password      Print current login password

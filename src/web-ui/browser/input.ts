@@ -773,13 +773,45 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           if (!state.terminal) initTerminal();
         }
         applyCurrentView();
+        reconcileInteractiveState();
         restoreComposerStateForSession(sessionId);
-        focusInputBox(true);
+        if (state.terminalInteractive) {
+          // Desktop terminal pages should be ready for the next keystroke.
+          // Touch devices wait for an explicit tap so merely opening a session
+          // never summons the software keyboard.
+          if (!isTouchDevice()) focusTerminalInteractionTarget();
+        } else {
+          focusInputBox(true);
+        }
+        if (!structured && session && canAutoResumeSession(session)) {
+          resumeTerminalPageSession(session);
+        }
         // Container just flipped from hidden -> visible (or geometry changed
         // because chat/terminal panels swapped). Refit now so the terminal
         // picks up the real cols/rows instead of keeping the stale ones.
         if (!structured) ensureTerminalFit("view-switch", { forceReplay: true });
         notifyLegacyUiChange("session:view");
+      }
+
+      var terminalPageResumeSessionId = null;
+
+      function resumeTerminalPageSession(session) {
+        if (!session || terminalPageResumeSessionId === session.id || !canAutoResumeSession(session)) return;
+        terminalPageResumeSessionId = session.id;
+        resumeSession(session.id)
+          .then(function(data) {
+            if (!data || state.selectedId !== session.id) return;
+            updateSessionSnapshot(data);
+            updateSessionsList();
+            subscribeToSession(data.id);
+            return loadOutput(data.id).then(function() {
+              reconcileInteractiveState();
+              if (state.terminalInteractive && !isTouchDevice()) focusTerminalInteractionTarget();
+            });
+          })
+          .finally(function() {
+            if (terminalPageResumeSessionId === session.id) terminalPageResumeSessionId = null;
+          });
       }
 
       export function getComposerSubmissionFingerprint(value, attachments) {
@@ -2136,7 +2168,15 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         setTerminalInteractive(!state.terminalInteractive);
       }
 
-      export function setTerminalInteractive(enabled) {
+      export function shouldUseTerminalPassthrough(session) {
+        return !!session
+          && !isStructuredSession(session)
+          && session.status === "running"
+          && state.currentView === "terminal";
+      }
+
+      export function setTerminalInteractive(enabled, options?) {
+        var opts = options || {};
         var next = !!enabled && isTerminalInteractionAvailable();
         if (state.terminalInteractive === next) return;
         state.terminalInteractive = next;
@@ -2147,8 +2187,8 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         if (next) {
           enableTerminalCapture();
           hideMiniKeyboard(false);
-          focusTerminalInteractionTarget();
-          showToast("终端交互模式已开启", "info");
+          if (opts.focus !== false) focusTerminalInteractionTarget();
+          if (opts.announce !== false) showToast("终端交互模式已开启", "info");
         } else {
           disableTerminalCapture();
           clearModifiers();
@@ -2162,9 +2202,14 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
 
       export function reconcileInteractiveState() {
         var selectedSession = state.sessions.find(function(session) { return session.id === state.selectedId; });
-        var shouldDisableInteractive = !selectedSession || selectedSession.status !== "running" || state.currentView !== "terminal";
+        var shouldUsePassthrough = shouldUseTerminalPassthrough(selectedSession);
+        var shouldDisableInteractive = !shouldUsePassthrough;
         if (shouldDisableInteractive && state.terminalInteractive) {
           setTerminalInteractive(false);
+          return;
+        }
+        if (shouldUsePassthrough && !state.terminalInteractive) {
+          setTerminalInteractive(true, { announce: false, focus: false });
           return;
         }
         if ((!selectedSession || state.currentView !== "terminal") && state.keyboardPopupOpen) {
@@ -2186,6 +2231,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         var promptOptimizeBusyForCurrent = !!(promptOptimizeRequest
           && promptOptimizeRequest.sessionId === state.selectedId);
         var promptOptimizeBusyAnywhere = !!promptOptimizeRequest;
+        var terminalPassthrough = shouldUseTerminalPassthrough(selectedSession);
         // 终端交互 toggle 现在挂在加号 popover 内。.active 保留兼容；
         // .is-on 给 popover-item 提供独立的"已开启"视觉；同时刷新 aria-pressed 与 "开/关" 文本。
         var toggles = ["terminal-interactive-toggle-top"];
@@ -2194,7 +2240,11 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           if (toggle) {
             toggle.classList.toggle("active", state.terminalInteractive);
             toggle.classList.toggle("is-on", state.terminalInteractive);
-            toggle.classList.toggle("hidden", structured || state.currentView !== "terminal" || !selectedSession);
+            // PTY terminal view is direct-manipulation by definition. Keep the
+            // legacy toggle in the DOM for old native-shell compatibility, but
+            // do not expose a switch that reconciliation would immediately
+            // force back on.
+            toggle.classList.toggle("hidden", structured || state.currentView !== "terminal" || !selectedSession || terminalPassthrough);
             toggle.setAttribute("aria-pressed", state.terminalInteractive ? "true" : "false");
             var stateLabel = toggle.querySelector(".plus-popover-toggle-state");
             if (stateLabel) stateLabel.textContent = state.terminalInteractive ? "开" : "关";

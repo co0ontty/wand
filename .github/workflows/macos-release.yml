@@ -11,7 +11,7 @@ on:
         required: false
         default: "0.0.0-dev"
       publish_release:
-        description: "上传到已有的 v<version> Release（同版本 DMG 已存在时自动跳过）"
+        description: "上传到已有的 v<version> Release（同名更新清单会被覆盖）"
         required: false
         type: boolean
         default: false
@@ -76,18 +76,13 @@ jobs:
         working-directory: macos
         env:
           WAND_BUILD_STAMP: ${{ steps.version.outputs.build_stamp }}
+          WAND_ASSET_VERSION: ${{ steps.version.outputs.asset_version }}
         run: |
           chmod +x build.sh
           chmod +x scripts/generate-icons.swift
+          chmod +x scripts/generate-update-manifest.sh
+          xcodebuild -project Wand.xcodeproj -scheme Wand -destination 'platform=macOS' test
           ./build.sh "${{ steps.version.outputs.version }}"
-
-      - name: Stamp artifact filenames
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-          ASSET_VERSION: ${{ steps.version.outputs.asset_version }}
-        run: |
-          mv "macos/dist/wand-v${VERSION}.dmg" "macos/dist/wand-v${ASSET_VERSION}.dmg"
-          mv "macos/dist/wand-v${VERSION}.zip" "macos/dist/wand-v${ASSET_VERSION}.zip"
 
       # 手动触发 / 任何情况下都上传为 artifact，方便直接在 Actions run 页面下载。
       - name: Upload macOS artifacts
@@ -97,58 +92,24 @@ jobs:
           path: |
             macos/dist/wand-v${{ steps.version.outputs.asset_version }}.zip
             macos/dist/wand-v${{ steps.version.outputs.asset_version }}.dmg
+            macos/dist/wand-v${{ steps.version.outputs.version }}.update.json
           if-no-files-found: error
-
-      # GitHub Release 是本地 gh 触发和 tag CI 共用的发布账本：同一个基础版本
-      # 已有同类产物时保留本次 Actions artifact 供验证，只补传 Release 中缺失的格式。
-      - name: Check whether macOS artifacts are already published
-        id: release_asset
-        if: startsWith(github.ref, 'refs/tags/') || inputs.publish_release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.version.outputs.release_tag }}
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          set -euo pipefail
-          ASSETS_JSON="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets 2>/dev/null || true)"
-          if [[ "$VERSION" == *+* ]]; then
-            STAMPED_PREFIX="wand-v${VERSION}."
-          else
-            STAMPED_PREFIX="wand-v${VERSION}+"
-          fi
-          if [[ -n "$ASSETS_JSON" ]]; then
-            DMG_EXISTS="$(jq -r --arg legacy "wand-v${VERSION}.dmg" --arg stamped "$STAMPED_PREFIX" \
-              'any(.assets[].name; (. == $legacy or startswith($stamped)) and endswith(".dmg"))' <<< "$ASSETS_JSON")"
-            ZIP_EXISTS="$(jq -r --arg legacy "wand-v${VERSION}.zip" --arg stamped "$STAMPED_PREFIX" \
-              'any(.assets[].name; (. == $legacy or startswith($stamped)) and endswith(".zip"))' <<< "$ASSETS_JSON")"
-          else
-            # Release notes workflow may not have created the tag's Release yet.
-            DMG_EXISTS=false
-            ZIP_EXISTS=false
-          fi
-          echo "dmg_exists=$DMG_EXISTS" >> "$GITHUB_OUTPUT"
-          echo "zip_exists=$ZIP_EXISTS" >> "$GITHUB_OUTPUT"
-          echo "Existing assets for v${VERSION}: DMG=$DMG_EXISTS ZIP=$ZIP_EXISTS"
 
       # Tag push always publishes. A local `gh workflow run` can opt in with
       # publish_release=true. Release body remains owned by release-notes.yml.
-      # Retry covers the short interval before that workflow creates the Release.
-      - name: Upload ZIP and DMG to GitHub Release
-        if: (startsWith(github.ref, 'refs/tags/') || inputs.publish_release) && (steps.release_asset.outputs.dmg_exists != 'true' || steps.release_asset.outputs.zip_exists != 'true')
+      # 清单使用固定文件名并随每次构建覆盖，确保它始终指向同一批带时间戳产物。
+      - name: Upload ZIP, DMG and update manifest to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/') || inputs.publish_release
         env:
           GH_TOKEN: ${{ github.token }}
           DMG_ASSET: macos/dist/wand-v${{ steps.version.outputs.asset_version }}.dmg
           ZIP_ASSET: macos/dist/wand-v${{ steps.version.outputs.asset_version }}.zip
-          DMG_EXISTS: ${{ steps.release_asset.outputs.dmg_exists }}
-          ZIP_EXISTS: ${{ steps.release_asset.outputs.zip_exists }}
+          MANIFEST_ASSET: macos/dist/wand-v${{ steps.version.outputs.version }}.update.json
           TAG: ${{ steps.version.outputs.release_tag }}
         run: |
           set -euo pipefail
-          ASSETS=()
-          [[ "$DMG_EXISTS" == true ]] || ASSETS+=("$DMG_ASSET")
-          [[ "$ZIP_EXISTS" == true ]] || ASSETS+=("$ZIP_ASSET")
           for attempt in 1 2 3 4 5; do
-            if gh release upload "$TAG" "${ASSETS[@]}" --repo "$GITHUB_REPOSITORY" --clobber; then
+            if gh release upload "$TAG" "$ZIP_ASSET" "$DMG_ASSET" "$MANIFEST_ASSET" --repo "$GITHUB_REPOSITORY" --clobber; then
               exit 0
             fi
             delay=$((attempt * 20))

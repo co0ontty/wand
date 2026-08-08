@@ -43,6 +43,7 @@ interface SessionRow {
   started_at: string;
   ended_at: string | null;
   output: string;
+  pty_output_seq: number;
   archived: number;
   archived_at: string | null;
   claude_session_id: string | null;
@@ -110,6 +111,9 @@ type DurableSessionOptions = Pick<SessionSnapshot,
   | "thinkingEffort"
   | "ptyCols"
   | "ptyRows"
+  | "ptyLaunchMarkerToken"
+  | "providerCliActive"
+  | "providerCliExitCode"
   | "currentTaskTitle"
   | "summary"
 >;
@@ -223,6 +227,9 @@ function serializeSessionOptions(snapshot: SessionSnapshot): string {
     thinkingEffort: snapshot.thinkingEffort,
     ptyCols: snapshot.ptyCols,
     ptyRows: snapshot.ptyRows,
+    ptyLaunchMarkerToken: snapshot.ptyLaunchMarkerToken,
+    providerCliActive: snapshot.providerCliActive,
+    providerCliExitCode: snapshot.providerCliExitCode,
     currentTaskTitle: snapshot.currentTaskTitle,
     summary: snapshot.summary,
   };
@@ -267,6 +274,13 @@ function parseSessionOptions(raw: string | null): DurableSessionOptions {
   }
   if (Number.isSafeInteger(parsed.ptyRows) && (parsed.ptyRows as number) > 0) {
     options.ptyRows = parsed.ptyRows as number;
+  }
+  if (parsed.ptyLaunchMarkerToken === null || typeof parsed.ptyLaunchMarkerToken === "string") {
+    options.ptyLaunchMarkerToken = parsed.ptyLaunchMarkerToken;
+  }
+  if (typeof parsed.providerCliActive === "boolean") options.providerCliActive = parsed.providerCliActive;
+  if (parsed.providerCliExitCode === null || Number.isSafeInteger(parsed.providerCliExitCode)) {
+    options.providerCliExitCode = parsed.providerCliExitCode as number | null;
   }
   if (typeof parsed.currentTaskTitle === "string") options.currentTaskTitle = parsed.currentTaskTitle;
   if (typeof parsed.summary === "string") options.summary = parsed.summary;
@@ -354,12 +368,12 @@ function mapWorktreeMergeFields(row: SessionRow): Pick<SessionSnapshot, "worktre
 }
 
 function sessionSelectFields(): string {
-  return `id, session_source, automation_id, provider, session_kind, runner, command, cwd, mode, status, exit_code, started_at, ended_at, output, archived, archived_at, claude_session_id, messages, queued_messages, queued_message_skills, structured_state
+  return `id, session_source, automation_id, provider, session_kind, runner, command, cwd, mode, status, exit_code, started_at, ended_at, output, pty_output_seq, archived, archived_at, claude_session_id, messages, queued_messages, queued_message_skills, structured_state
              , resumed_from_session_id, auto_recovered, worktree_enabled, worktree_info, worktree_merge_status, worktree_merge_info, title, description, session_options`;
 }
 
 function sessionPersistFields(): string {
-  return `id, session_source, automation_id, command, cwd, mode, status, exit_code, started_at, ended_at, output
+  return `id, session_source, automation_id, command, cwd, mode, status, exit_code, started_at, ended_at, output, pty_output_seq
              , archived, archived_at, claude_session_id, provider, session_kind, runner, messages, queued_messages, queued_message_skills, structured_state
              , resumed_from_session_id, auto_recovered, worktree_enabled, worktree_info, worktree_merge_status, worktree_merge_info, title, description, session_options`;
 }
@@ -375,6 +389,7 @@ function sessionPersistAssignments(): string {
              started_at = excluded.started_at,
              ended_at = excluded.ended_at,
              output = excluded.output,
+             pty_output_seq = excluded.pty_output_seq,
              archived = excluded.archived,
              archived_at = excluded.archived_at,
              claude_session_id = excluded.claude_session_id,
@@ -420,6 +435,7 @@ function sessionPersistValues(snapshot: SessionSnapshot): Array<string | number 
     snapshot.startedAt,
     snapshot.endedAt,
     snapshot.output,
+    snapshot.ptyOutputSeq ?? 0,
     snapshot.archived ? 1 : 0,
     snapshot.archivedAt,
     snapshot.claudeSessionId,
@@ -494,6 +510,7 @@ function mapSessionCore(row: SessionRow): SessionSnapshot {
     startedAt: row.started_at,
     endedAt: row.ended_at,
     output: row.output,
+    ptyOutputSeq: row.pty_output_seq,
     archived: Boolean(row.archived),
     archivedAt: row.archived_at,
     claudeSessionId: row.claude_session_id,
@@ -559,6 +576,7 @@ const INIT_SQL = `
     started_at TEXT NOT NULL,
     ended_at TEXT,
     output TEXT NOT NULL,
+    pty_output_seq INTEGER NOT NULL DEFAULT 0,
     archived INTEGER NOT NULL DEFAULT 0,
     archived_at TEXT,
     claude_session_id TEXT,
@@ -1202,7 +1220,7 @@ export class WandStorage {
       .prepare(
         `INSERT INTO command_sessions (
          ${sessionPersistFields()}
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            ${sessionPersistAssignments()}`
       )
@@ -1226,8 +1244,13 @@ export class WandStorage {
   }
 
   /** Checkpoint only the PTY/structured text output window. */
-  checkpointSessionOutput(id: string, output: string): void {
-    this.db.prepare("UPDATE command_sessions SET output = ? WHERE id = ?").run(output, id);
+  checkpointSessionOutput(id: string, output: string, ptyOutputSeq?: number): void {
+    if (ptyOutputSeq === undefined) {
+      this.db.prepare("UPDATE command_sessions SET output = ? WHERE id = ?").run(output, id);
+      return;
+    }
+    this.db.prepare("UPDATE command_sessions SET output = ?, pty_output_seq = ? WHERE id = ?")
+      .run(output, ptyOutputSeq, id);
   }
 
   /**
@@ -1239,9 +1262,10 @@ export class WandStorage {
     messages: ConversationTurn[],
     structuredState?: StructuredSessionState | null,
     output?: string,
+    ptyOutputSeq?: number,
   ): void {
     const assignments = ["messages = ?"];
-    const values: Array<string | null> = [JSON.stringify(messages)];
+    const values: Array<string | number | null> = [JSON.stringify(messages)];
     if (structuredState !== undefined) {
       assignments.push("structured_state = ?");
       values.push(structuredState ? JSON.stringify(structuredState) : null);
@@ -1249,6 +1273,10 @@ export class WandStorage {
     if (output !== undefined) {
       assignments.push("output = ?");
       values.push(output);
+    }
+    if (ptyOutputSeq !== undefined) {
+      assignments.push("pty_output_seq = ?");
+      values.push(ptyOutputSeq);
     }
     this.db
       .prepare(`UPDATE command_sessions SET ${assignments.join(", ")} WHERE id = ?`)
@@ -1418,6 +1446,7 @@ const SCHEMA_MIGRATIONS: ReadonlyArray<[column: string, sql: string]> = [
   ["worktree_merge_info", "ALTER TABLE command_sessions ADD COLUMN worktree_merge_info TEXT"],
   ["title", "ALTER TABLE command_sessions ADD COLUMN title TEXT"],
   ["description", "ALTER TABLE command_sessions ADD COLUMN description TEXT"],
+  ["pty_output_seq", "ALTER TABLE command_sessions ADD COLUMN pty_output_seq INTEGER NOT NULL DEFAULT 0"],
   ["session_options", `ALTER TABLE command_sessions ADD COLUMN session_options TEXT NOT NULL DEFAULT '{"schemaVersion":1}'`],
 ];
 

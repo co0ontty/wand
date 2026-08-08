@@ -600,6 +600,10 @@ export interface SessionSnapshot {
   ptyCols?: number;
   /** 当前 PTY 行数，由最近一次 resize 决定。 */
   ptyRows?: number;
+  /** terminal host 已处理并原子持久化的最后一个输出块序号；不进入客户端传输。 */
+  ptyOutputSeq?: number;
+  /** Internal shell-wrapper marker needed to keep parsing a daemon-owned PTY after reattach. */
+  ptyLaunchMarkerToken?: string | null;
 }
 
 // ── Session Event (PTY Bridge Output) ──

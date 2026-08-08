@@ -35,6 +35,7 @@ test("web entry preserves native URL, viewport, and global bridge contracts", ()
     "/WandPlatform\\/Android/",
     'params.get("embed") === "terminal"',
     'params.get("nativeInput") === "1"',
+    'params.get("passthrough") === "1"',
     "__wandNativeBackHooked",
   ]);
   includesAll("src/web-ui/browser/notifications.ts", ["handleNativeBack"]);
@@ -91,6 +92,12 @@ test("Android WebView preserves its half of the web/native protocol", () => {
     "onPermissionRequest",
     "setDownloadListener",
     "openNotificationSettings",
+  ]);
+  includesAll("android/app/src/main/java/com/wand/app/ui/screens/PtyTerminalScreen.kt", [
+    'appendQueryParameter("embed", "terminal")',
+    'appendQueryParameter("nativeInput", "1")',
+    'appendQueryParameter("passthrough", "1")',
+    "EnableTerminalPassthroughScript",
   ]);
 });
 

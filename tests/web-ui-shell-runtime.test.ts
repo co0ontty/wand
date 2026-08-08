@@ -132,14 +132,16 @@ test("terminal snapshots survive WebSocket init arriving before xterm mounts", (
   assert.match(sessions, /if \(!sessionIds\.has\(id\)\) delete state\.terminalStatesBySession\[id\]/);
 });
 
-test("terminal interaction compacts the composer without shrinking touch controls", () => {
+test("PTY terminal interaction hides the drafting surface and keeps direct controls", () => {
   const input = readFileSync(path.join(root, "src/web-ui/browser/input.ts"), "utf8");
   const render = readFileSync(path.join(root, "src/web-ui/browser/render.ts"), "utf8");
   const styles = readFileSync(path.join(root, "src/web-ui/content/styles.css"), "utf8");
 
   assert.match(input, /composerShell\.classList\.toggle\("is-terminal-interactive", !!state\.terminalInteractive\)/);
+  assert.match(input, /shouldUseTerminalPassthrough\(selectedSession\)/);
   assert.match(input, /var terminalPassthrough = el\.classList\.contains\("is-terminal-passthrough"\)/);
   assert.match(render, /state\.terminalInteractive \? ' is-terminal-interactive' : ''/);
-  assert.match(styles, /\.input-composer\.is-terminal-interactive \.composer-main-row[\s\S]*?grid-template-rows: 32px 36px;[\s\S]*?min-height: 68px;/);
-  assert.match(styles, /@media \(max-width: 640px\)[\s\S]*?\.input-composer\.is-terminal-interactive[\s\S]*?grid-template-rows: 40px 48px;/);
+  assert.match(styles, /\.input-composer\.is-terminal-interactive \.composer-input-wrap[\s\S]*?display: none;/);
+  assert.match(styles, /html:not\(\.is-wand-app\) \.input-composer\.is-terminal-interactive \.composer-main-row[\s\S]*?grid-template-rows: 40px;[\s\S]*?min-height: 40px;/);
+  assert.match(styles, /@media \(max-width: 640px\), \(pointer: coarse\)[\s\S]*?grid-template-rows: 48px;/);
 });

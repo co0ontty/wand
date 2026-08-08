@@ -62,13 +62,17 @@ configureBrowserShellCommands(createBrowserShellCommands());
 
   // 嵌入终端模式：原生壳（iOS）把 PTY 会话套在原生头部里，只需网页展示
   // 终端黑窗，隐藏侧边栏 / 顶栏 / 空白欢迎页。由 ?embed=terminal 触发；
-  // ?nativeInput=1 表示底部输入栏由原生组件渲染。
+  // ?nativeInput=1 表示底部输入栏由原生组件渲染；?passthrough=1 进一步声明
+  // 原生壳没有草稿输入层，xterm 是唯一输入目标。
   try {
     const params = new URL(window.location.href).searchParams;
     if (params.get("embed") === "terminal") {
       document.documentElement.classList.add('is-wand-embed-terminal');
       if (params.get("nativeInput") === "1") {
         document.documentElement.classList.add('is-wand-native-input');
+      }
+      if (params.get("passthrough") === "1") {
+        document.documentElement.classList.add('is-wand-terminal-passthrough');
       }
     }
   } catch (e) {}
