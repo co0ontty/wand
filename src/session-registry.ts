@@ -1,3 +1,4 @@
+import { cleanupWorktreeSync } from "./git-worktree.js";
 import type { ProcessManager } from "./process-manager.js";
 import type { StructuredSessionManager } from "./structured-session-manager.js";
 import type { WandStorage } from "./storage.js";
@@ -113,6 +114,15 @@ export class SessionRegistry {
   delete(id: string): SessionSnapshot | null {
     const snapshot = this.get(id);
     if (!snapshot) return null;
+    // Best-effort: tear down the session's isolated worktree (directory +
+    // branch) before removing the session record. Without this, deleting a
+    // session that was never merged leaves an orphan under `.wand-worktrees/`
+    // and a dangling `wand/*` branch forever — the merge path is the only
+    // other place that cleans them up. Force removal is intentional: deleting
+    // a session means discarding everything tied to it.
+    if (snapshot.worktree) {
+      try { cleanupWorktreeSync(snapshot.worktree); } catch { /* never block deletion */ }
+    }
     const owner = this.ownerOf(id);
     if (owner === "structured") this.structured.delete(id);
     else if (owner === "pty") this.processes.delete(id);

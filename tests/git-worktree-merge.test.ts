@@ -6,6 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
+  cleanupWorktreeSync,
   mergeSessionWorktreeAsync,
   prepareSessionWorktree,
   WorktreeMergeError,
@@ -162,4 +163,33 @@ test("mergeSessionWorktreeAsync preserves successful merge and serial cleanup se
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("cleanupWorktreeSync force-removes an unmerged session worktree and its branch", () => {
+  const root = mkdtempSync(join(tmpdir(), "wand-worktree-cleanup-"));
+  try {
+    const repo = initRepo(root);
+    const prepared = prepareSessionWorktree({ cwd: repo, sessionId: "cleanup-case" });
+    // Simulate a never-merged session: uncommitted changes live in the worktree.
+    writeFileSync(join(prepared.cwd, "dirty.txt"), "uncommitted\n");
+
+    assert.equal(existsSync(prepared.cwd), true);
+    assert.equal(refExists(repo, prepared.worktree.branch), true);
+
+    cleanupWorktreeSync(prepared.worktree);
+
+    assert.equal(existsSync(prepared.cwd), false);
+    assert.equal(refExists(repo, prepared.worktree.branch), false);
+
+    // Idempotent: re-cleaning an already-removed worktree must not throw.
+    assert.doesNotThrow(() => cleanupWorktreeSync(prepared.worktree));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("cleanupWorktreeSync is a no-op for null / undefined / missing repoRoot", () => {
+  assert.doesNotThrow(() => cleanupWorktreeSync(null));
+  assert.doesNotThrow(() => cleanupWorktreeSync(undefined));
+  assert.doesNotThrow(() => cleanupWorktreeSync({ path: "/nonexistent", branch: "x", repoRoot: undefined }));
 });

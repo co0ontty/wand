@@ -408,6 +408,21 @@ export async function cleanupSessionWorktreeAsync(options: WorktreeOperationOpti
   return cleanupMergedWorktreeAsync(await getMainRepoContextAsync(options));
 }
 
+/**
+ * Best-effort synchronous cleanup of a session/task worktree directory and its
+ * branch. Uses `--force` + `-D` (mirroring workspace-task deletion): deleting a
+ * session means discarding everything tied to it, including any uncommitted
+ * work in its isolated worktree. Any failure (already removed, locked, or a
+ * missing repo root) is swallowed so a stale or half-cleaned worktree can never
+ * block session deletion.
+ */
+export function cleanupWorktreeSync(worktree: { path: string; branch: string; repoRoot?: string } | null | undefined): void {
+  const repoRoot = worktree?.repoRoot;
+  if (!repoRoot) return;
+  try { runGit(["worktree", "remove", "--force", worktree.path], repoRoot); } catch { /* best effort */ }
+  try { runGit(["branch", "-D", worktree.branch], repoRoot); } catch { /* best effort */ }
+}
+
 /** Async HTTP-facing merge with serial, non-cancellable rollback. */
 export async function mergeSessionWorktreeAsync(options: WorktreeMergeOptions): Promise<WorktreeMergeResult> {
   const context = await getMainRepoContextAsync(options);

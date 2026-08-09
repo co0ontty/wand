@@ -49,7 +49,7 @@ function toast(message: string, tone?: "info" | "success" | "warning" | "danger"
 }
 
 // ── 极简内联图标（避免依赖 shell-sidebar 的私有 Icon）──
-function SvgIcon({ name, size = 14 }: { name: "chevron" | "file" | "plus" | "trash" | "check" | "close" | "branch" | "spark"; size?: number }) {
+function SvgIcon({ name, size = 14 }: { name: "chevron" | "file" | "plus" | "trash" | "check" | "close" | "branch" | "edit" | "spark"; size?: number }) {
   const common = {
     width: size, height: size, viewBox: "0 0 24 24", fill: "none",
     stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" as const, strokeLinejoin: "round" as const,
@@ -63,6 +63,7 @@ function SvgIcon({ name, size = 14 }: { name: "chevron" | "file" | "plus" | "tra
     case "check": return <svg {...common}><path d="M20 6L9 17l-5-5"/></svg>;
     case "close": return <svg {...common}><path d="M6 6l12 12M18 6L6 18"/></svg>;
     case "branch": return <svg {...common}><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 8.5v7M18 10.5c0 4-6 2.5-6 6.5"/></svg>;
+    case "edit": return <svg {...common}><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L8 18l-4 1 1-4z"/></svg>;
     case "spark": return <svg {...common}><path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8"/><circle cx="12" cy="12" r="3"/></svg>;
   }
 }
@@ -165,16 +166,80 @@ function TaskItem({
   task,
   active,
   onOpen,
+  onRename,
   onDelete,
 }: {
   task: WorkspaceTask;
   active: boolean;
   onOpen(): void;
+  onRename(name: string): Promise<void>;
   onDelete(): Promise<void>;
 }) {
   const [confirming, setConfirming] = React.useState(false);
+  const [renaming, setRenaming] = React.useState(false);
+  const [renameValue, setRenameValue] = React.useState(task.name);
+  const [renameError, setRenameError] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const isolated = Boolean(task.worktree);
+  const submitRename = async () => {
+    if (busy) return;
+    const trimmed = renameValue.trim();
+    if (!isValidName(trimmed)) {
+      setRenameError(trimmed ? "任务名称无效或过长（最多 80 字符）。" : "请输入任务名称。");
+      return;
+    }
+    if (trimmed === task.name) {
+      setRenaming(false);
+      return;
+    }
+    setBusy(true);
+    setRenameError("");
+    try {
+      await onRename(trimmed);
+      setRenaming(false);
+    } catch (renameFailure) {
+      setRenameError(presentError(renameFailure, "重命名任务失败。"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (renaming) {
+    return (
+      <form
+        className="workspace-task workspace-task-rename"
+        aria-busy={busy}
+        onSubmit={(event) => { event.preventDefault(); void submitRename(); }}
+      >
+        <span className="workspace-task-marker"><SvgIcon name="branch" size={13}/></span>
+        <span className="workspace-task-rename-field">
+          <input
+            className="workspace-task-rename-input"
+            value={renameValue}
+            disabled={busy}
+            maxLength={NAME_MAX}
+            autoFocus
+            aria-label={`重命名任务 ${task.name}`}
+            aria-invalid={Boolean(renameError) || undefined}
+            onChange={(event) => { setRenameValue(event.currentTarget.value); setRenameError(""); }}
+            onKeyDown={(event) => {
+              if (event.key !== "Escape") return;
+              event.preventDefault();
+              if (!busy) setRenaming(false);
+            }}
+          />
+          {renameError && <span className="workspace-task-rename-error" role="alert">{renameError}</span>}
+        </span>
+        <button type="submit" className="workspace-task-action confirm" disabled={busy} title="保存任务名称" aria-label="保存任务名称">
+          <SvgIcon name="check" size={13}/>
+        </button>
+        <button type="button" className="workspace-task-action cancel" disabled={busy} title="取消重命名" aria-label="取消重命名" onClick={() => setRenaming(false)}>
+          <SvgIcon name="close" size={13}/>
+        </button>
+      </form>
+    );
+  }
+
   return (
     <div
       className={classNames("workspace-task", active && "active", !isolated && "not-isolated")}
@@ -190,11 +255,28 @@ function TaskItem({
         onOpen();
       }}
     >
-      <span className="workspace-task-marker"><SvgIcon name={isolated ? "branch" : "file"} size={12}/></span>
+      <span className="workspace-task-marker"><SvgIcon name="branch" size={13}/></span>
       <span className="workspace-task-name">{task.name}</span>
       <span className={classNames("workspace-task-badge", isolated ? "isolated" : "shared")}>
         {isolated ? "隔离" : "共享"}
       </span>
+      {!confirming && (
+        <button
+          type="button"
+          className="workspace-task-action edit"
+          title="重命名任务"
+          aria-label={`重命名任务 ${task.name}`}
+          disabled={busy}
+          onClick={(event) => {
+            event.stopPropagation();
+            setRenameValue(task.name);
+            setRenameError("");
+            setRenaming(true);
+          }}
+        >
+          <SvgIcon name="edit" size={13}/>
+        </button>
+      )}
       {!confirming ? (
         <button
           type="button"
@@ -358,6 +440,13 @@ function WorkspaceItem({
     onActiveTaskOpen(created);
   };
 
+  const handleRenameTask = async (task: WorkspaceTask, name: string) => {
+    const updated = await httpWorkspacesRepository.updateTask(task.id, { name });
+    toast(`已将任务「${task.name}」重命名为「${updated.name}」`, "success");
+    await reload();
+    if (activeTaskId === task.id) onActiveTaskOpen(updated);
+  };
+
   const handleDeleteTask = async (task: WorkspaceTask) => {
     await httpWorkspacesRepository.deleteTask(task.id, true);
     await runtime()?.refreshSessions();
@@ -491,6 +580,7 @@ function WorkspaceItem({
                   task={task}
                   active={isActiveWorkspace && activeTaskId === task.id}
                   onOpen={() => onActiveTaskOpen(task)}
+                  onRename={(name) => handleRenameTask(task, name)}
                   onDelete={() => handleDeleteTask(task)}
                 />
               ))}

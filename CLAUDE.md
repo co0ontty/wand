@@ -6,10 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 npm install                # Install dependencies (requires Node.js >= 22.5.0)
-npm run check              # bundle browser scripts → regenerate embedded assets → tsc --noEmit (server tsconfig.json + browser tsconfig.browser.json)
-npm run build              # bundle wterm → bundle qrcode → bundle browser → generate embedded assets → tsc → copy+minify src/web-ui/content into dist/web-ui/ → stamp dist/build-info.json → fix dist permissions
-npm run dev                # bundle browser scripts + regenerate embedded assets, then run src/cli.ts web via tsx
+npm run check              # bundle xterm → bundle browser → regenerate embedded assets → tsc --noEmit (server tsconfig.json + browser tsconfig.browser.json + react tsconfig.react.json)
+npm run build              # bundle xterm → bundle qrcode → bundle browser → generate embedded assets → tsc → copy+minify src/web-ui/content into dist/web-ui/ → stamp dist/build-info.json → fix dist permissions
+npm run dev                # bundle xterm + bundle browser (dev) + regenerate embedded assets, then run src/cli.ts web via tsx
 npm test                   # run node:test suites via tsx (tests/*.test.ts)
+npm run test:browser       # npm run build then Playwright (tests/*.spec.ts); `test:browser:current` skips the rebuild
 node --test --import tsx tests/password-manager.test.ts  # run one test file
 node --test --import tsx --test-name-pattern "vaults" tests/password-manager.test.ts  # run matching tests
 node dist/cli.js init      # Create or refresh config + SQLite files
@@ -19,6 +20,11 @@ wand config:show           # Print merged runtime config
 wand config:set host 0.0.0.0  # Update a simple config value
 wand service:install          # Install + start as systemd (Linux) / launchd (macOS) service; --user for user-level
 wand service:status           # Service state; also :start :stop :restart :logs :uninstall
+wand terminald               # Run the persistent terminal/PTY owner (normally auto-spawned by `wand web`, not run by hand)
+wand config:password         # Print the current login password
+wand session:list            # JSON CLI over HTTP (also :read / :send / :wait) — auto-logs in to the local server
+wand inbox:list              # JSON CLI: list mission inbox items
+wand mission:list            # JSON CLI: also :create / :diff / :review / :review:send
 ```
 
 `wand web` is single-instance per config: if a wand instance is already running, it **attaches** (TUI or banner) instead of starting a second server. In a TTY it renders a neo-blessed TUI dashboard; set `WAND_NO_TUI=1` to force the plain one-line banner. `wand service:*` flags: `--user`/`--system` (default system, needs root), `--verbose`, `--lines <N>` (for `service:logs`).
@@ -59,13 +65,13 @@ wand web
 The runtime config file is `~/.wand/config.json` by default.
 
 **Repo-specific notes:**
-- `npm run dev` already runs `src/cli.ts web`; append CLI flags after `--`. It re-runs `bundle-browser` + `generate-web-assets` on each start, but does **not** rebundle wterm/qrcode.
+- `npm run dev` already runs `src/cli.ts web`; append CLI flags after `--`. It re-runs `bundle-xterm` + `bundle-browser` + `generate-web-assets` on each start, but does **not** rebundle qrcode.
 - `loadConfigWithStorage()` rewrites the config file with defaults merged in, so config-schema changes must also update `src/config.ts`.
-- Browser-side code lives in `src/web-ui/browser/*.ts` (entry `main.ts`). `scripts/bundle-browser.js` (esbuild) emits `src/web-ui/content/scripts.js` — that file is **generated, never hand-edit it**. `src/web-ui/content/styles.css` is still hand-edited source.
-- `scripts/generate-web-assets.js` minifies `scripts.js` + `styles.css` and base64-embeds them (plus the wterm/qrcode vendor bundles) into `src/web-ui/embedded-assets.ts` — also generated, never hand-edit. The server serves assets from this module; `styles.ts`/`scripts.ts` add an mtime-based cache so editing files under `dist/` is picked up without restarting.
+- Browser-side code lives in two layers: the legacy vanilla-TS modules in `src/web-ui/browser/*.ts` (entry `main.ts`) and the newer **React UI** in `src/web-ui/react/*.tsx` (Shell, Workspaces, Missions, settings, file-explorer, code-editor, quick-commit, worktree-merge, …). `scripts/bundle-browser.js` (esbuild) bundles **both** layers into a single `src/web-ui/content/scripts.js` — that file is **generated, never hand-edit it**. React code is type-checked separately by `tsconfig.react.json` (included in `npm run check`). `src/web-ui/content/styles.css` is still hand-edited source.
+- `scripts/generate-web-assets.js` minifies `scripts.js` + `styles.css` and base64-embeds them (plus the xterm/qrcode vendor bundles) into `src/web-ui/embedded-assets.ts` — also generated, never hand-edit. The server serves assets from this module; `styles.ts`/`scripts.ts` add an mtime-based cache so editing files under `dist/` is picked up without restarting.
 - `npm run build` must keep copying `src/web-ui/content/` into `dist/web-ui/`; the packaged app depends on those static assets.
-- `scripts/bundle-wterm.js` uses esbuild to bundle `@wterm/dom` into `src/web-ui/content/vendor/wterm/wterm.bundle.js` and copies `terminal.css` next to it. It also patches the renderer to strip an underline branch (`stripUnderlinePlugin`). After changing wterm-related code or upgrading `@wterm/dom`, you must re-run this script — `npm run dev` does not rebundle it automatically. The committed bundle is what the browser loads.
-- `scripts/bundle-qrcode.js` similarly bundles the `qrcode` npm package (entry `scripts/qrcode-entry.js`) into `src/web-ui/content/vendor/qrcode/qrcode.bundle.js`, used by the browser to render the mobile-connect QR code. Re-run it after upgrading `qrcode`. `npm run build` runs both vendor bundlers before `tsc`.
+- The terminal renderer is **xterm.js** (`@xterm/xterm` + `@xterm/addon-fit` / `addon-serialize` / `addon-unicode11` / `headless`). `scripts/bundle-xterm.js` (esbuild) bundles the browser entry (`scripts/xterm-entry.js`) into `src/web-ui/content/vendor/xterm/xterm.bundle.js` and copies `xterm.css` next to it. After upgrading `@xterm/*` or changing the entry, re-run this script — `npm run dev` re-runs it on each start, `npm run build` runs it first. (The project previously used `@wterm/dom`; it has been fully replaced — do not reintroduce wterm.)
+- `scripts/bundle-qrcode.js` bundles the `qrcode` npm package (entry `scripts/qrcode-entry.js`) into `src/web-ui/content/vendor/qrcode/qrcode.bundle.js`, used by the browser to render the mobile-connect QR code. Re-run it after upgrading `qrcode`. `npm run build` runs both vendor bundlers before `tsc`.
 
 ## Client Shells as Submodules
 
@@ -95,8 +101,9 @@ cd android
 # 下一个 release（patch+1 = base+100）仍高于任何同段 debug。
 # 历史教训：CI 曾另算一套小数字 versionCode，与本公式并存后，装过本地构建（大 versionCode）
 # 的设备升级任何 CI 包都会被系统按「降级」拒装（INSTALL_FAILED_VERSION_DOWNGRADE）。
+LATEST_TAG="$(git -C .. tag --list 'v[0-9]*' --sort=-v:refname | head -1)"
 ./gradlew assembleDebug \
-  -PAPP_VERSION_NAME="$(git describe --tags --abbrev=0 | sed 's/^v//')-debug.$(date +%m%d%H%M)"
+  -PAPP_VERSION_NAME="${LATEST_TAG#v}-debug.$(date +%m%d%H%M)"
 ```
 产物：`android/app/build/outputs/apk/debug/app-debug.apk`
 
@@ -110,6 +117,21 @@ cd android
 | 隔离测试 | `/tmp/wand-dev/` | `/tmp/wand-dev/android/` |
 
 如果同时在跑默认实例和隔离测试实例，APK 两个目录都要放，否则切到哪个实例就只能下到那边的版本。
+
+**Android 修改收尾规则（必须执行）：** 每次完成 Android 源码修改后，除非用户明确要求不部署，都必须用主仓库最高语义版本 tag 加 `-debug.MMDDHHMM` 重新编译一个带版本号的 APK，并复制到全局默认实例的 beta 更新目录 `~/.wand/android/`。禁止使用 `git describe --tags --abbrev=0` 取版本：同一提交带多个 tag 时它可能返回旧 tag；必须用 `git tag --list 'v[0-9]*' --sort=-v:refname | head -1` 按版本降序取最高 tag。不能只运行不带 `APP_VERSION_NAME` 的普通 `assembleDebug`，也不能只留下 `app/build/outputs/` 产物。文件名中的版本必须和 APK 内 `versionName` 完全一致，确保 `/api/android-apk-update?channel=beta` 能发现它。
+
+```bash
+VERSION="$(git tag --list 'v[0-9]*' --sort=-v:refname | head -1)"
+VERSION="${VERSION#v}-debug.$(date +%m%d%H%M)"
+(
+  cd android
+  ./gradlew :app:assembleDebug -PAPP_VERSION_NAME="$VERSION"
+)
+mkdir -p ~/.wand/android
+cp android/app/build/outputs/apk/debug/app-debug.apk ~/.wand/android/wand-v$VERSION.apk
+```
+
+隔离测试实例只有在本轮需要测试时再额外部署到 `/tmp/wand-dev/android/`。
 
 ```bash
 # 编译后同时部署到两个目录（按需）
@@ -262,7 +284,9 @@ cd ios && ./build.sh 1.16.0   # 仅 macOS + Xcode 15+；产物 dist/wand-v1.16.0
 
 **更新后服务自修复**（镜像 `install.sh`）：装包成功后调用 `src/service-self-repair.ts` 的 `repairServiceUnitAfterUpdate()` —— 若装了 systemd/launchd 服务，用 `preferGlobalBin` 重写 unit（ExecStart 钉到全局 `dist/cli.js`、`Environment=PATH` 取已被 `path-repair` 修复的 `process.env.PATH`）+ daemon-reload，解决「源码安装升级到 npm/GitHub 版后 ExecStart/PATH 失效、服务找不到」。重启统一走 `src/relaunch.ts` 的 `computeRelaunch()`：systemd 托管（存在 `INVOCATION_ID`）且已装服务时仅退出、交给 `Restart=always` 用新 unit 拉起，避免 detached 子进程与 systemd 抢单实例 pidfile 跑回旧二进制；否则 spawn 一个 detached 子进程（bin 优先全局安装）。
 
-**APK 的 beta 通道已实现**：`GET /api/android-apk-update?currentVersion=X&channel=stable|beta`（不带参默认 stable，兼容老客户端）——stable 只看正式版文件（版本号无 prerelease 后缀），beta 额外包含 `-debug.MMDDHHMM` 构建（本地 apkDir 是 beta 包唯一来源；GitHub 回退只有正式版，两通道共用）。更新提示的下载链接始终带 `?channel=`，保证「提示的版本」和「下载到的文件」同通道；裸 `/android/download`（网页下载页/二维码落地页）默认 beta = 目录里真正最新的包。Android 设置页「更新」区有 Beta 通道开关（SharedPreferences `update_beta_channel`，`ServerStore.isBetaChannel`），`UpdateManager.checkForUpdate` 按它带 channel 参数。`/api/settings`、`/api/android-apk` 管理视图固定 beta 视角（展示目录真实最新文件）。macOS DMG 的 beta 通道尚未实现。
+**APK 的 beta 通道已实现**：`GET /api/android-apk-update?currentVersion=X&channel=stable|beta`（不带参默认 stable，兼容老客户端）——stable 只看正式版文件（版本号无 prerelease 后缀），beta 额外包含 `-debug.MMDDHHMM` 构建（本地 apkDir 是 beta 包唯一来源；GitHub 回退只有正式版，两通道共用）。更新提示的下载链接始终带 `?channel=`，保证「提示的版本」和「下载到的文件」同通道；裸 `/android/download`（网页下载页/二维码落地页）默认 beta = 目录里真正最新的包。Android 设置页「更新」区有 Beta 通道开关（SharedPreferences `update_beta_channel`，`ServerStore.isBetaChannel`），`UpdateManager.checkForUpdate` 按它带 channel 参数。`/api/settings`、`/api/android-apk` 管理视图固定 beta 视角（展示目录真实最新文件）。
+
+**macOS 的 beta 通道走客户端清单校验**，不走服务端 channel 参数：`.github/workflows/macos-beta.yml`（手动 `workflow_dispatch`，跑在 `macos-26`）按基础版本 + `-beta.YYYYMMDDHHMM.RUN.ATTEMPT.gSHA` 出 beta DMG + ZIP + `*.update.json` 清单，作为 GitHub **prerelease**（tag `vX.Y.Z-beta...`）发布。版本顺序保证 `X.Y.Z < X.Y.Z-beta... < X.Y.(Z+1)`。beta 客户端拉清单后校验 SHA-256 与应用签名再安装。服务端 `/api/macos-dmg-update` 不带 channel（只解析最新 DMG），所以本地 `dmgDir` 混放 beta/正式包时以文件版本最高的为准。
 
 ## Publishing & Release
 
@@ -277,6 +301,7 @@ push tag 后四个 workflow 并行触发：
 - `.github/workflows/npm-release.yml`（`ubuntu-latest`）：从 tag 同步版本号到 `package.json` → `npm ci` → `npm run build` → `npm publish --access public`。需要仓库 secret **`NPM_TOKEN`**（npm Automation / Granular Access token，对 `@co0ontty/wand` 有读写权限）。
 - `.github/workflows/android-release.yml`（`ubuntu-latest`）：构建 APK 上传到对应 Release（**不动 release body**）。
 - `.github/workflows/macos-release.yml`（`macos-26`）：构建 DMG 上传到对应 Release（**不动 release body**）；也支持 `workflow_dispatch` 手动出包（产物走 Actions artifact，不发 release）。**iOS/macOS 构建钉在 `macos-26` 跑器**（默认 Xcode 26.x）：Liquid Glass 等 26 系统外观只对「用 26 SDK 链接」的 App 生效，老 SDK 产物会被系统按兼容模式渲染成旧外观；两端 `build.sh` 在 Xcode < 26 时会打印警告。
+- `.github/workflows/macos-beta.yml`（`macos-26`，仅手动 `workflow_dispatch`）：按需出 macOS beta 包（DMG + ZIP + `*.update.json` 清单），作为 GitHub **prerelease** 发布，不占每次 master push 的昂贵 macOS runner。版本号 `-beta.YYYYMMDDHHMM.RUN.ATTEMPT.gSHA`。
 - `.github/workflows/release-notes.yml`（`ubuntu-latest`）：**单点负责 release body**——从 `git log <prev-tag>..<current-tag>` 拼真 changelog（项目直接推 master 不走 PR，所以 `generate_release_notes` 拿到的 PR 列表是空的，必须自己从 commits 拼），再附上 Android / macOS 下载说明段落，最后用 `softprops/action-gh-release` 一次性写入 body。其他三个 release 工作流都不再 `append_body`，避免多源写 body 撞车。第一个 release 没有前 tag 时 fallback 成「列出 tag 之前的全部 commits」。
 
 **客户端无改动时跳过构建**：android-release / macos-release / ios-build 三个 workflow 在 tag 触发时会比较当前 tag 与上一个 tag（semver 降序的下一个）的 submodule 指针（`git rev-parse <tag>:<dir>`），指针没动就跳过整个构建、不往本 release 上传产物（ios / macos 的 `workflow_dispatch` 手动触发不受此限制，永远构建）。配套行为：
@@ -296,20 +321,22 @@ push tag 后四个 workflow 并行触发：
 - `.github/workflows/npm-release.yml` handles GitHub Actions npm publish on tag push (needs `NPM_TOKEN` secret).
 - `.github/workflows/android-release.yml` handles GitHub Actions APK builds on tag push.
 - `.github/workflows/macos-release.yml` handles GitHub Actions DMG builds on tag push, plus manual `workflow_dispatch` (runs on `macos-26` for the macOS 26 SDK / Liquid Glass).
+- `.github/workflows/macos-beta.yml` handles on-demand macOS beta builds (manual `workflow_dispatch`, `macos-26`): publishes a beta DMG + ZIP + `*.update.json` manifest as a GitHub prerelease.
 - `.github/workflows/release-notes.yml` owns the release body: generates a real changelog from `git log <prev>..<current>` (PR-based auto-notes are empty for this repo) and appends Android/macOS download sections. Other release workflows must NOT touch the body.
 - `.github/workflows/cleanup-old-releases.yml` prunes `.apk` / `.dmg` from older releases after each `release: published`, keeping the 10 most recent (by semver) intact. Manual `workflow_dispatch` accepts a `keep` input.
 
 ## Architecture
 
-`wand` is a Node.js web console for local CLI tools such as Claude Code and Codex. The app starts from a CLI command, serves a browser UI over Express + WebSocket, launches commands inside PTYs with `node-pty` (or as one-shot streamed processes for the structured runner), and persists session/auth state in SQLite under `~/.wand/`. A single session is tagged with a `SessionRunner` (`claude` / `codex` / etc.) and an `ExecutionMode` that picks between the PTY runner and the structured runner — see "Two session runners" below.
+`wand` is a Node.js web console for local AI CLI tools — **Claude Code, Codex, OpenCode, Grok, Qoder, and Pi** (`SessionProvider = "claude" | "codex" | "opencode" | "grok" | "qoder" | "pi"`). The app starts from a CLI command, serves a browser UI over Express + WebSocket, launches commands inside PTYs with `node-pty` (or as one-shot streamed processes for the structured runner), and persists session/auth state in SQLite under `~/.wand/`. PTYs are owned by an **out-of-process terminal daemon** (`wand terminald`) so shells survive web-server restarts and updates. A single session is tagged with a `SessionRunner` (e.g. `claude-cli`, `codex-cli-exec`, `pi-cli-json`, `pty`) and an `ExecutionMode` that picks between the PTY runner and the structured runner — see "Two session runners" below.
 
 ### Runtime flow
 
-1. `src/cli.ts` is the only entrypoint. It parses `wand init`, `wand web`, `config:*`, and `service:*`, resolves `-c/--config`, and always ensures config + SQLite files exist before startup. `wand web` is single-instance: if `pidfile.ts` reports a live instance it attaches over the IPC socket instead of starting a second server.
-2. `src/server.ts` wires the whole application together: Express routes, auth/session APIs, file browser APIs, update endpoints, static assets, and the `/ws` WebSocket server.
-3. `ProcessManager` in `src/process-manager.ts` is the core runtime owner for PTY-backed sessions. It launches commands, persists snapshots, handles resume/auto-recovery, watches for confirmation prompts, and bridges UI input back into the process.
-4. `ClaudePtyBridge` in `src/claude-pty-bridge.ts` parses Claude PTY output into structured conversation turns, permission events, task/tool updates, and captured Claude session IDs while preserving raw terminal output in parallel.
-5. The browser UI subscribes over `/ws` and renders the same session in two synchronized representations: terminal output and structured chat history.
+1. `src/cli.ts` is the only entrypoint. It parses `wand init`, `wand web`, `terminald`, `config:*`, `service:*`, and the JSON-over-HTTP commands (`session:*`, `inbox:*`, `mission:*` via `src/cli-api.ts`), resolves `-c/--config`, and always ensures config + SQLite files exist before startup. `wand web` is single-instance: if `pidfile.ts` reports a live instance it attaches over the IPC socket instead of starting a second server.
+2. `src/server.ts` is the composition root: it constructs `ProcessManager`, `StructuredSessionManager`, `SessionRegistry`, `Missions`, and `DistributionManager`, then delegates route registration to the `server-*-routes.ts` modules (session/resume, file, settings, mission, workspace, update). It also starts the `/ws` WebSocket server and serves static assets.
+3. On startup the server calls `createTerminalHost()` (`src/terminal-daemon-client.ts`) to **adopt or spawn the terminal daemon** (`wand terminald`, `src/terminal-daemon-server.ts`). PTYs live in the daemon, not the web process, so a `wand web` restart or self-update does not kill running shells. (In `WAND_TEST_MODE` it falls back to an in-process host.)
+4. `ProcessManager` in `src/process-manager.ts` is the core runtime owner for PTY-backed sessions. It launches commands through the terminal host, persists snapshots, handles resume/auto-recovery, watches for confirmation prompts, and bridges UI input back into the process.
+5. `ClaudePtyBridge` in `src/claude-pty-bridge.ts` parses Claude PTY output into structured conversation turns, permission events, task/tool updates, and captured Claude session IDs while preserving raw terminal output in parallel.
+6. The browser UI subscribes over `/ws` and renders the same session in two synchronized representations: terminal output (xterm.js) and structured chat history.
 
 When debugging a user-visible session bug, trace the full chain: `cli.ts` -> `server.ts` -> `process-manager.ts` -> `claude-pty-bridge.ts` -> web UI.
 
@@ -318,9 +345,23 @@ When debugging a user-visible session bug, trace the full chain: `cli.ts` -> `se
 A session can run in one of two modes, owned by different managers:
 
 - **PTY runner** (`src/process-manager.ts`) — interactive PTY-backed sessions for `claude` / `codex` / shells. This is the default and drives both the terminal view and (via `ClaudePtyBridge`) the structured chat view. Permission prompts, resume, archive/idle transitions and most lifecycle logic live here.
-- **Structured runner** (`src/structured-session-manager.ts`) — non-PTY sessions for prompts that don't need an interactive terminal. It runs Claude two ways: the CLI runner (`claude -p --output-format stream-json`) and the **Agent SDK** (`query()` from `@anthropic-ai/claude-agent-sdk`, with live handles tracked in `pendingSdkQueries` so a run can be interrupted). Both paths consume streamed JSON output; output debounce is 16 ms (`STREAM_EMIT_DEBOUNCE_MS`). It shares `WandStorage`, `SessionSnapshot`, and `ProcessEvent` types with the PTY runner, and can also use git worktrees via `prepareSessionWorktree()`. These runs are non-interactive — there is no permission prompt, so `mcp__*` tools fail rather than escalate.
+- **Structured runner** (`src/structured-session-manager.ts`) — non-PTY sessions for prompts that don't need an interactive terminal. It is **multi-provider**: a shared `StructuredRunnerAdapter` interface (`src/structured-runner.ts`) is implemented per provider in `src/structured-{claude,codex,opencode,grok,qoder,pi}-adapter.ts` (each with a matching `*-protocol.ts` for that provider's streamed JSON shape). Claude has two adapters — the CLI runner (`claude -p --output-format stream-json`) and the **Agent SDK** (`query()` from `@anthropic-ai/claude-agent-sdk`, with live handles tracked in `pendingSdkQueries` so a run can be interrupted). All adapters consume streamed JSON output; output debounce is 16 ms (`STREAM_EMIT_DEBOUNCE_MS`). The manager shares `WandStorage`, `SessionSnapshot`, and `ProcessEvent` types with the PTY runner, and can use git worktrees via `prepareSessionWorktree()`. These runs are non-interactive — there is no permission prompt, so `mcp__*` tools fail rather than escalate.
 
 When debugging session behavior, first check which runner owns the session — they share types but execute on independent code paths.
+
+### Terminal daemon and persistent shells
+
+PTYs no longer live inside the web server process. A standalone **terminal daemon** (`wand terminald`, `src/terminal-daemon-server.ts`) owns every PTY and keeps shells alive across web-server restarts, updates, and service reloads. The web server reaches it through `createTerminalHost()` in `src/terminal-daemon-client.ts`:
+
+- On startup it looks for a live daemon over a per-config unix socket + token (`terminalDaemonPaths()` in `src/terminal-daemon-protocol.ts`). If one exists it *adopts* it; otherwise it spawns `wand terminald -c <config>` as a detached child and waits for the socket. If the daemon is unavailable (or `WAND_TEST_MODE=1`) it falls back to `InProcessTerminalHost` — same `TerminalHost` API, non-persistent PTYs.
+- The wire protocol is newline-delimited JSON: `request`/`response` for `hello | list | createOrAttach | write | resize | kill | forget`, plus streamed `data`/`exit` `event`s carrying a monotonic chunk `seq` for gap-free reattach after reconnect.
+- **Shell preservation after the AI CLI exits** (`src/pty-shell-launch.ts`): POSIX shells are wrapped so the CLI runs in-process and, on exit, emits a `WAND_CLI_EXIT:<code>` marker into the stream; the daemon then keeps the underlying login shell alive so the user can keep typing. Blank terminal sessions (`SessionRunner = "pty"`) skip the CLI entirely and start a plain shell.
+- The daemon writes its pid to `~/.wand/.terminald-<hash>.pid` and its secret token to `.terminald-<hash>.token` (mode 0600) beside the config; the socket lives under `/tmp` to stay within macOS's ~100-byte unix-socket path limit. A service-managed successor never evicts a daemon that owns live PTYs — it waits for the previous one to exit.
+- `src/terminal-host.ts` is the shared terminal-state surface (`TerminalSessionState`, `appendTerminalChunkWindow`); `src/pty-terminal-state.ts` tracks the xterm-compatible emulator state used for resize/refit.
+
+### Session registry
+
+`src/session-registry.ts` is the single lookup layer over the two runners. Given a session id it reports which owner is live — `"structured"` (StructuredSessionManager), `"pty"` (ProcessManager), or `"storage"` (persisted only) — and returns slimmed snapshots (output/messages stripped) for list views. Routes and the Workspaces/Missions subsystems go through it instead of probing each manager directly.
 
 ### Process model: single instance, TUI, and system service
 
@@ -334,21 +375,28 @@ Auxiliary Claude features — quick-commit messages (`git-quick-commit.ts`) and 
 
 ### API and UI boundary
 
-`src/server.ts` is also the backend surface for the app. It serves:
+`src/server.ts` is the composition root and the backend surface for the app. It constructs the managers and registers routes from focused modules, then serves:
 - the single HTML shell from `renderApp()` in `src/web-ui/index.ts`
-- REST endpoints for auth, config/settings, sessions, path browsing/search, favorites/recent paths, command launch, resume, PTY input/resize, permission decisions, and updates
+- REST endpoints for auth, config/settings, sessions, path browsing/search, favorites/recent paths, command launch, resume, PTY input/resize, permission decisions, updates, **workspaces**, and **missions/inbox**
 - the `/ws` fanout used for live session state
 
-Session-specific HTTP routes live in `src/server-session-routes.ts`; `src/server.ts` remains the composition root that injects `ProcessManager`, storage, auth, and broadcast plumbing.
+Route modules split out of `server.ts`:
+- `src/server-session-routes.ts` — session create/resume, PTY input/resize, permission decisions, Claude-history resume
+- `src/server-file-routes.ts` — directory listing, file preview, upload/download, range streaming
+- `src/server-settings-routes.ts` — config/preferences, provider model catalogs, system-AI config
+- `src/server-workspace-routes.ts` — workspace layout CRUD, per-directory session grouping, worktree review/merge
+- `src/server-mission-routes.ts` — `/api/inbox` and `/api/mission*` (orchestration, attempts, diffs, review comments)
+- `src/server-update-routes.ts` — server self-update, APK/DMG distribution checks, provider-CLI updates
 
 Before adding a new abstraction, check whether the needed data can fit into an existing `/api/*` route or `ProcessEvent` payload.
 
 ### State and persistence
 
 - Config lives in `~/.wand/config.json`; `loadConfigWithStorage()` in `src/config.ts` loads the file, merges defaults (plus SQLite preference overrides), and writes the normalized result back to disk.
-- SQLite lives beside the config (`resolveDatabasePath(configPath)`), usually `~/.wand/wand.db`; `src/storage.ts` stores auth sessions, command sessions, app config overrides, Claude resume metadata, and serialized `ConversationTurn[]`.
-- Schema migration policy is additive only: `ensureCommandSessionSchema()` adds missing columns and never drops old ones.
+- SQLite lives beside the config (`resolveDatabasePath(configPath)`), usually `~/.wand/wand.db`; `src/storage.ts` stores auth sessions, command sessions, app-config overrides, Claude resume metadata, serialized `ConversationTurn[]`, **workspaces** + workspace tasks, **missions** + mission attempts + review comments + agent activity, session-directory names, and **password vaults/items** (`src/password-manager.ts`, covered by `tests/password-manager.test.ts`).
+- Schema migration policy is additive only: `ensureCommandSessionSchema()` and the workspace/mission `CREATE TABLE IF NOT EXISTS` blocks add missing columns/tables and never drop old ones.
 - `src/session-logger.ts` writes per-session artifacts under `~/.wand/sessions/<sessionId>/`, including rotating PTY logs, structured messages, metadata, native stream events, and shortcut interaction logs.
+- The **terminal daemon** keeps its own runtime artifacts beside the config: `.terminald-<hash>.pid`, `.terminald-<hash>.token` (0600), and a `/tmp/wand-terminald-<uid>-<hash>.sock` endpoint. Live PTY state is in the daemon's memory, not SQLite; `SessionRegistry` rehydrates snapshots from storage on reconnect.
 - Two more directories live **inside the session's working directory**, not under `~/.wand/`:
   - `<session.cwd>/.wand-uploads/` — uploaded files written by `src/upload-routes.ts` (10 MB per file, max 5 files per request, filenames sanitized to `[a-zA-Z0-9._-]`).
   - `.wand-worktrees/` (at the repo root when worktree mode is enabled) — per-session git worktrees created and cleaned up by `src/git-worktree.ts`. Snapshots store the worktree handle on `SessionSnapshot.worktree`.
@@ -378,19 +426,30 @@ A bug around blocked input, idle/archive transitions, or wrong permission state 
 
 ### UI structure
 
-The frontend is server-rendered, not a separate SPA build. `src/server.ts` serves one HTML document built by `renderApp()` in `src/web-ui/index.ts`, which inlines generated CSS and JavaScript and references vendor assets.
+The frontend is server-rendered HTML plus an in-browser React app. `src/server.ts` serves one HTML document built by `renderApp()` in `src/web-ui/index.ts`, which inlines generated CSS/JS and references vendor assets. On load, `src/web-ui/react/index.tsx` mounts a React tree next to the legacy `#app` and exposes business controllers on `window` (`__wandReactSettings`, `__wandReactWorkspaces`, `__wandReactMissions`, …).
+
+**Two coexisting UI layers** (`src/web-ui/react/feature-flags.ts`):
+- The **legacy vanilla-TS layer** (`src/web-ui/browser/*.ts`, entry `main.ts`) — terminal, chat-render, session-engine, websocket, i18n. Still the default for the terminal/chat surface.
+- The **React layer** (`src/web-ui/react/*.tsx`) — business overlays that no longer have a legacy twin (settings, new-session, folder-picker, quick-commit, worktree-merge, file-preview, missions, workspaces, restart-overlay) **plus** an optional authenticated **Shell** (`react/shell/`: sidebar + topbar + main content + file panel). `?reactUi=0` rolls back the generic React UI/Shell; `?reactShell=0` rolls back just the Shell while keeping React dialogs. Both default on; the migrated overlays stay mounted even when the Shell is rolled back because they have no legacy fallback.
 
 Asset pipeline (source → generated, never edit generated files by hand):
-- `src/web-ui/browser/*.ts` — the browser-side TypeScript modules (entry `main.ts`: state, websocket, terminal, chat-render, session-engine, i18n, …). Type-checked by `tsconfig.browser.json`.
-- → `scripts/bundle-browser.js` (esbuild) emits `src/web-ui/content/scripts.js` (generated).
+- `src/web-ui/browser/*.ts` + `src/web-ui/react/*.tsx` — the two browser-side layers. Type-checked by `tsconfig.browser.json` (browser) and `tsconfig.react.json` (react); both run in `npm run check`.
+- → `scripts/bundle-browser.js` (esbuild) bundles **both** layers into a single `src/web-ui/content/scripts.js` (generated).
 - `src/web-ui/content/styles.css` — hand-edited CSS source.
 - → `scripts/generate-web-assets.js` minifies and base64-embeds `scripts.js` + `styles.css` + vendor bundles into `src/web-ui/embedded-assets.ts` (generated).
 - `src/web-ui/styles.ts` / `scripts.ts` read from the embedded assets with an mtime-based cache, so edits to files under `dist/` are re-read on the next request without restarting.
-- `src/web-ui/content/vendor/wterm/wterm.bundle.js` + `terminal.css` — the wterm terminal renderer, regenerated by `scripts/bundle-wterm.js`; `vendor/qrcode/qrcode.bundle.js` by `scripts/bundle-qrcode.js`.
+- `src/web-ui/content/vendor/xterm/xterm.bundle.js` + `xterm.css` — the xterm.js terminal renderer, regenerated by `scripts/bundle-xterm.js`; `vendor/qrcode/qrcode.bundle.js` by `scripts/bundle-qrcode.js`.
 
-So a typical frontend change touches `src/web-ui/browser/*.ts` and/or `content/styles.css`, then `npm run dev` (or `npm run check`) regenerates `scripts.js` and `embedded-assets.ts` automatically.
+So a typical frontend change touches `src/web-ui/browser/*.ts` and/or `src/web-ui/react/*.tsx` and/or `content/styles.css`, then `npm run dev` (or `npm run check`) regenerates `scripts.js` and `embedded-assets.ts` automatically.
 
 Any build or packaging change that forgets to copy `src/web-ui/content/` into `dist/web-ui/` will break the packaged app even if dev mode still works.
+
+### Workspaces and Missions
+
+Two subsystems sit on top of the session runners:
+
+- **Workspaces** — a project-oriented view that groups sessions by working directory into a multi-pane window layout. Server side: `src/server-workspace-routes.ts` + `src/types.ts` (`LayoutNode`, `TaskWindowLayout`, `WorkspaceTaskWorktree`, `WorkspaceDefaultProvider`); React side: `src/web-ui/react/workspaces/` (controller/repository/host, window-layout + layout-tree builders, workspace-agent dialog, worktree review/merge dialog). A workspace can fan one prompt out into **parallel agent attempts** across providers, each in its own git worktree (`prepareSessionWorktree()`), then review and merge the results back.
+- **Missions** — agent task orchestration backed by `src/missions.ts` + `src/mission-types.ts` + `src/mission-diff.ts`, exposed by `src/server-mission-routes.ts` (`/api/inbox`, `/api/mission*`). A mission holds up to `MAX_ATTEMPTS` structured-session attempts, an activity feed, and review comments; finished attempts surface in an **inbox** (`missions.inbox()`). `buildMissionDiff` computes reviewable diffs that feed the React UI in `src/web-ui/react/missions/`. Missions drive the StructuredSessionManager, so they are non-interactive.
 
 ### Output parsing and transport
 
@@ -410,7 +469,9 @@ WebSocket clients connect to `/ws`, send `{type: "subscribe", sessionId}`, and r
 | `src/server.ts` | Express server, REST API, WebSocket, and web UI endpoints |
 | `src/server-session-routes.ts` | Session/resume/history HTTP routes and shared API error helpers |
 | `src/process-manager.ts` | PTY session orchestration, input/output routing, permission handling, resume/archive logic |
-| `src/structured-session-manager.ts` | Non-PTY runner that spawns `claude -p` and streams JSON output |
+| `src/structured-session-manager.ts` | Non-PTY runner — multi-provider; picks a `StructuredRunnerAdapter` per provider |
+| `src/structured-runner.ts` | `StructuredRunnerAdapter` interface shared by all providers |
+| `src/structured-{claude,codex,opencode,grok,qoder,pi}-adapter.ts` + `*-protocol.ts` | Per-provider streamed-JSON adapters for the structured runner |
 | `src/claude-pty-bridge.ts` | PTY output parser for structured chat, permissions, task tracking, and Claude session IDs |
 | `src/resume-policy.ts` | Heuristics for mapping Claude history/resume data back onto wand sessions |
 | `src/storage.ts` | SQLite persistence and additive schema migration helpers |
@@ -422,7 +483,7 @@ WebSocket clients connect to `/ws`, send `{type: "subscribe", sessionId}`, and r
 | `src/ws-broadcast.ts` | WebSocket broadcast manager for `/ws` fanout |
 | `src/git-worktree.ts` | Per-session git worktree create/merge/cleanup, backs `.wand-worktrees/` |
 | `src/upload-routes.ts` | `POST /api/sessions/:id/upload` — multer-backed uploads to `<cwd>/.wand-uploads/` |
-| `src/models.ts` | Built-in Claude model list, `claude --version` probing, model cache |
+| `src/models.ts` | Multi-provider model catalog, `claude --version`/provider probing, model cache |
 | `src/claude-sdk-runner.ts` | One-shot `runClaudePrint()` via the Agent SDK; `resolveSdkClaudeBinary()` prefers the system `claude` on PATH (kept fresh by user updates), falling back to the SDK's bundled native binary (musl/glibc aware). Shared by `structured-session-manager.ts`. Backs quick-commit + prompt-optimizer |
 | `src/git-quick-commit.ts` | Git status, quick commit (AI-generated message via `claude-sdk-runner`), tag, and push; wired into `server-session-routes.ts` |
 | `src/prompt-optimizer.ts` | One-shot prompt rewrite via `claude-sdk-runner`, exposed by a `server.ts` route |
@@ -443,12 +504,39 @@ WebSocket clients connect to `/ws`, send `{type: "subscribe", sessionId}`, and r
 | `src/middleware/rate-limit.ts` | Login / sensitive endpoint rate limiting |
 | `src/pty-text-utils.ts` | ANSI / control-sequence helpers for terminal output processing |
 | `src/message-truncator.ts` | Long-message truncation for chat persistence and broadcast |
-| `src/web-ui/` | Server-rendered HTML + browser assets. Browser source is `browser/*.ts`; `content/scripts.js`, `embedded-assets.ts`, and `content/vendor/*` bundles are generated — do not hand-edit |
+| `src/web-ui/` | Server-rendered HTML + assets. Two browser layers: legacy `browser/*.ts` and React `react/*.tsx` (Shell, Workspaces, Missions, overlays); `content/scripts.js`, `embedded-assets.ts`, and `content/vendor/*` bundles are generated — do not hand-edit |
+| `src/terminal-daemon-server.ts` | `wand terminald` — owns every PTY out-of-process so shells survive web-server restart/update |
+| `src/terminal-daemon-client.ts` | `createTerminalHost()` adopt-or-spawn the daemon + socket client |
+| `src/terminal-daemon-protocol.ts` | Newline-JSON daemon protocol; per-config socket/token/pid paths |
+| `src/terminal-host.ts` | Shared `TerminalHost` interface + terminal chunk windowing |
+| `src/pty-shell-launch.ts` | POSIX shell wrapper + `WAND_CLI_EXIT` marker keeping the shell alive after the CLI exits |
+| `src/pty-terminal-state.ts` | xterm-compatible emulator state for resize/refit |
+| `src/session-registry.ts` | Unified session lookup across PTY / structured / storage owners |
+| `src/session-transport.ts` | Session DTO shaping for list/detail over `/ws` + REST |
+| `src/session-topic.ts` | AI-generated session title/description |
+| `src/session-cwd.ts` | Session working-directory resolution + validation |
+| `src/session-ai-context.ts` | Resolve provider/model/thinking/system-AI for a session |
+| `src/missions.ts` + `mission-types.ts` + `mission-diff.ts` | Mission orchestration, attempts, review comments, reviewable diffs |
+| `src/server-workspace-routes.ts` | Workspace layout CRUD, per-directory session grouping, worktree review/merge |
+| `src/server-mission-routes.ts` | `/api/inbox` + `/api/mission*` routes |
+| `src/server-settings-routes.ts` | Config/preferences, provider model catalogs, system-AI config |
+| `src/server-update-routes.ts` | Server self-update, APK/DMG distribution checks, provider-CLI updates |
+| `src/server-file-routes.ts` | Directory listing, file preview, upload/download, range streaming |
+| `src/distribution-manager.ts` | Unified local-file + GitHub-release resolution for APK/DMG updates |
+| `src/provider-cli-updater.ts` | Update claude/codex/opencode/qoder/pi CLIs in place |
+| `src/provider-history-scanner.ts` | Scan provider history dirs (`~/.claude/projects/`, …) for resume binding |
+| `src/system-ai.ts` | Configurable system-AI routing for commit messages / session topics |
+| `src/cli-api.ts` | JSON-over-HTTP client behind `wand session:*` / `inbox:*` / `mission:*` |
+| `src/password-manager.ts` | Encrypted password vaults/items (SQLite-backed; `tests/password-manager.test.ts`) |
+| `src/runtime-config.ts` | Runtime config state + deployment keys |
+| `src/express-async.ts` | `asyncRoute` wrapper for Express handlers |
+| `src/request-limits.ts` | Bounded integer/size parsing for query params |
+| `src/claude-skills.ts` | Discover Claude skills (user/project frontmatter) |
 | `src/types.ts` | Shared contracts across CLI, server, storage, PTY bridge, and UI |
 
 ### REST surface
 
-The server exposes login/logout, config, session control, PTY input/resize, file browser, favorites, and quick-path endpoints from `src/server.ts` plus resume/history routes from `src/server-session-routes.ts`. If a frontend feature needs data, look for an existing `/api/*` route there before adding a new abstraction.
+The server exposes login/logout, config, sessions, PTY input/resize, file browser, favorites/quick-paths, **workspaces**, **missions/inbox**, and update/distribution endpoints. Routes are split across `src/server-session-routes.ts`, `server-file-routes.ts`, `server-settings-routes.ts`, `server-workspace-routes.ts`, `server-mission-routes.ts`, and `server-update-routes.ts`; `src/server.ts` is the composition root that registers them. The same surface is also reachable from the shell via the JSON CLI (`src/cli-api.ts`, `wand session:*` / `inbox:*` / `mission:*`). If a frontend feature needs data, look for an existing `/api/*` route there before adding a new abstraction.
 
 ## Code Style
 

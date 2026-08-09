@@ -37758,6 +37758,11 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("circle", { cx: "18", cy: "8", r: "2.5" }),
           /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M6 8.5v7M18 10.5c0 4-6 2.5-6 6.5" })
         ] });
+      case "edit":
+        return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M12 20h9" }),
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M16.5 3.5a2.1 2.1 0 013 3L8 18l-4 1 1-4z" })
+        ] });
       case "spark":
         return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("svg", { ...common, children: [
           /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8" }),
@@ -37841,11 +37846,79 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     task,
     active,
     onOpen,
+    onRename,
     onDelete
   }) {
     const [confirming, setConfirming] = React47.useState(false);
+    const [renaming, setRenaming] = React47.useState(false);
+    const [renameValue, setRenameValue] = React47.useState(task.name);
+    const [renameError, setRenameError] = React47.useState("");
     const [busy, setBusy] = React47.useState(false);
     const isolated = Boolean(task.worktree);
+    const submitRename = async () => {
+      if (busy) return;
+      const trimmed = renameValue.trim();
+      if (!isValidName(trimmed)) {
+        setRenameError(trimmed ? "\u4EFB\u52A1\u540D\u79F0\u65E0\u6548\u6216\u8FC7\u957F\uFF08\u6700\u591A 80 \u5B57\u7B26\uFF09\u3002" : "\u8BF7\u8F93\u5165\u4EFB\u52A1\u540D\u79F0\u3002");
+        return;
+      }
+      if (trimmed === task.name) {
+        setRenaming(false);
+        return;
+      }
+      setBusy(true);
+      setRenameError("");
+      try {
+        await onRename(trimmed);
+        setRenaming(false);
+      } catch (renameFailure) {
+        setRenameError(presentError8(renameFailure, "\u91CD\u547D\u540D\u4EFB\u52A1\u5931\u8D25\u3002"));
+      } finally {
+        setBusy(false);
+      }
+    };
+    if (renaming) {
+      return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
+        "form",
+        {
+          className: "workspace-task workspace-task-rename",
+          "aria-busy": busy,
+          onSubmit: (event) => {
+            event.preventDefault();
+            void submitRename();
+          },
+          children: [
+            /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "workspace-task-marker", children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(SvgIcon, { name: "branch", size: 13 }) }),
+            /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("span", { className: "workspace-task-rename-field", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+                "input",
+                {
+                  className: "workspace-task-rename-input",
+                  value: renameValue,
+                  disabled: busy,
+                  maxLength: NAME_MAX,
+                  autoFocus: true,
+                  "aria-label": `\u91CD\u547D\u540D\u4EFB\u52A1 ${task.name}`,
+                  "aria-invalid": Boolean(renameError) || void 0,
+                  onChange: (event) => {
+                    setRenameValue(event.currentTarget.value);
+                    setRenameError("");
+                  },
+                  onKeyDown: (event) => {
+                    if (event.key !== "Escape") return;
+                    event.preventDefault();
+                    if (!busy) setRenaming(false);
+                  }
+                }
+              ),
+              renameError && /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "workspace-task-rename-error", role: "alert", children: renameError })
+            ] }),
+            /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("button", { type: "submit", className: "workspace-task-action confirm", disabled: busy, title: "\u4FDD\u5B58\u4EFB\u52A1\u540D\u79F0", "aria-label": "\u4FDD\u5B58\u4EFB\u52A1\u540D\u79F0", children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(SvgIcon, { name: "check", size: 13 }) }),
+            /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("button", { type: "button", className: "workspace-task-action cancel", disabled: busy, title: "\u53D6\u6D88\u91CD\u547D\u540D", "aria-label": "\u53D6\u6D88\u91CD\u547D\u540D", onClick: () => setRenaming(false), children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(SvgIcon, { name: "close", size: 13 }) })
+          ]
+        }
+      );
+    }
     return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
       "div",
       {
@@ -37862,9 +37935,26 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           onOpen();
         },
         children: [
-          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "workspace-task-marker", children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(SvgIcon, { name: isolated ? "branch" : "file", size: 12 }) }),
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "workspace-task-marker", children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(SvgIcon, { name: "branch", size: 13 }) }),
           /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "workspace-task-name", children: task.name }),
           /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: classNames("workspace-task-badge", isolated ? "isolated" : "shared"), children: isolated ? "\u9694\u79BB" : "\u5171\u4EAB" }),
+          !confirming && /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+            "button",
+            {
+              type: "button",
+              className: "workspace-task-action edit",
+              title: "\u91CD\u547D\u540D\u4EFB\u52A1",
+              "aria-label": `\u91CD\u547D\u540D\u4EFB\u52A1 ${task.name}`,
+              disabled: busy,
+              onClick: (event) => {
+                event.stopPropagation();
+                setRenameValue(task.name);
+                setRenameError("");
+                setRenaming(true);
+              },
+              children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(SvgIcon, { name: "edit", size: 13 })
+            }
+          ),
           !confirming ? /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
             "button",
             {
@@ -38017,6 +38107,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       reloadWorkspaces();
       onActiveTaskOpen(created);
     };
+    const handleRenameTask = async (task, name) => {
+      const updated = await httpWorkspacesRepository.updateTask(task.id, { name });
+      toast(`\u5DF2\u5C06\u4EFB\u52A1\u300C${task.name}\u300D\u91CD\u547D\u540D\u4E3A\u300C${updated.name}\u300D`, "success");
+      await reload();
+      if (activeTaskId === task.id) onActiveTaskOpen(updated);
+    };
     const handleDeleteTask = async (task) => {
       await httpWorkspacesRepository.deleteTask(task.id, true);
       await runtime9()?.refreshSessions();
@@ -38160,6 +38256,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
               task,
               active: isActiveWorkspace && activeTaskId === task.id,
               onOpen: () => onActiveTaskOpen(task),
+              onRename: (name) => handleRenameTask(task, name),
               onDelete: () => handleDeleteTask(task)
             },
             task.id
@@ -44358,6 +44455,70 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     scrollTerminalToBottom(false);
     updateTerminalJumpToBottomButton();
   }
+  function initTerminalTouchScroll(surface, term) {
+    var touchId = null;
+    var lastY = 0;
+    var rowHeight = 16;
+    var pagingState = {
+      direction: 0,
+      accumulatedPixels: 0,
+      lastEventAt: 0,
+      lastPageAt: 0
+    };
+    surface.addEventListener("touchstart", function(e) {
+      if (e.touches.length !== 1) {
+        touchId = null;
+        return;
+      }
+      var t6 = e.touches[0];
+      touchId = t6.identifier;
+      lastY = t6.clientY;
+      var raw = getComputedStyle(surface).getPropertyValue("--term-row-height").trim();
+      var parsed = parseFloat(raw);
+      if (parsed > 0) rowHeight = parsed;
+      pagingState.direction = 0;
+      pagingState.accumulatedPixels = 0;
+      pagingState.lastEventAt = 0;
+      pagingState.lastPageAt = 0;
+    }, { passive: true });
+    surface.addEventListener("touchmove", function(e) {
+      if (touchId === null) return;
+      var touch = null;
+      for (var i = 0; i < e.touches.length; i++) {
+        if (e.touches[i].identifier === touchId) {
+          touch = e.touches[i];
+          break;
+        }
+      }
+      if (!touch) return;
+      var dy = touch.clientY - lastY;
+      lastY = touch.clientY;
+      if (dy === 0) return;
+      e.preventDefault();
+      var isAlternate = term.buffer.active.type === "alternate";
+      if (isAlternate) {
+        var direction = consumeTerminalWheelPage(
+          { deltaY: -dy, deltaMode: 0 },
+          pagingState,
+          term.rows * rowHeight,
+          Date.now()
+        );
+        var seq = terminalWheelPageSequence(direction);
+        if (seq) sendPtyInput(seq);
+      } else {
+        var lines = Math.round(dy / rowHeight);
+        if (lines !== 0) {
+          term.scrollLines(lines);
+          setTerminalManualScrollActive();
+        }
+      }
+    }, { passive: false });
+    function endTouch() {
+      touchId = null;
+    }
+    surface.addEventListener("touchend", endTouch, { passive: true });
+    surface.addEventListener("touchcancel", endTouch, { passive: true });
+  }
   function initTerminalScrollbar(container) {
     var scrollbar = document.createElement("div");
     scrollbar.className = "terminal-scrollbar";
@@ -44785,6 +44946,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       };
       container.addEventListener("wheel", state.terminalWheelHandler, { passive: true });
       initTerminalScrollbar(container);
+      initTerminalTouchScroll(termWrap, term);
       if (state.selectedId) {
         var session = state.sessions.find(function(item) {
           return item.id === state.selectedId;

@@ -350,6 +350,94 @@ import { consumeTerminalWheelPage, terminalWheelPageSequence, type TerminalWheel
         updateTerminalJumpToBottomButton();
       }
 
+      // ===== Touch scroll (mobile) =====
+      // xterm.js v6 ships no touch handler (its bindMouse() only wires
+      // mousedown + wheel), so on a touch device the scrollback is unreachable
+      // and full-screen TUIs (vim/less/htop) can't be paged. Drive both from a
+      // single-finger vertical drag on the terminal surface, mirroring the
+      // wheel path: normal buffer scrolls the xterm scrollback (content follows
+      // the finger), alternate buffer reuses the wheel→Page Up/Down paging.
+      // Bound on termWrap, which is recreated on every terminal re-init, so the
+      // listeners die with the node — no manual teardown is needed.
+      export function initTerminalTouchScroll(surface: HTMLElement, term: any) {
+        var touchId: number | null = null;
+        var lastY = 0;
+        var rowHeight = 16;
+        var pagingState: TerminalWheelPagingState = {
+          direction: 0,
+          accumulatedPixels: 0,
+          lastEventAt: 0,
+          lastPageAt: 0,
+        };
+
+        surface.addEventListener("touchstart", function(e: TouchEvent) {
+          if (e.touches.length !== 1) {
+            touchId = null;
+            return;
+          }
+          var t = e.touches[0];
+          touchId = t.identifier;
+          lastY = t.clientY;
+          // Re-read the row height per gesture: native shells (Android/iOS)
+          // inject --term-row-height via a <style> added after page load, so a
+          // one-shot read at init can still hold the pre-override default.
+          var raw = getComputedStyle(surface).getPropertyValue("--term-row-height").trim();
+          var parsed = parseFloat(raw);
+          if (parsed > 0) rowHeight = parsed;
+          // Fresh gesture: reset the paging accumulator so a slow start does
+          // not bleed into the next page decision.
+          pagingState.direction = 0;
+          pagingState.accumulatedPixels = 0;
+          pagingState.lastEventAt = 0;
+          pagingState.lastPageAt = 0;
+        }, { passive: true });
+
+        surface.addEventListener("touchmove", function(e: TouchEvent) {
+          if (touchId === null) return;
+          var touch: Touch | null = null;
+          for (var i = 0; i < e.touches.length; i++) {
+            if (e.touches[i].identifier === touchId) { touch = e.touches[i]; break; }
+          }
+          if (!touch) return;
+          var dy = touch.clientY - lastY;
+          lastY = touch.clientY;
+          if (dy === 0) return;
+
+          // Take over the gesture so the WebView neither bounces the page nor
+          // starts a text selection; this drag is a scroll.
+          e.preventDefault();
+
+          var isAlternate = term.buffer.active.type === "alternate";
+          if (isAlternate) {
+            // The wheel helper maps deltaY<0 → PageUp, deltaY>0 → PageDown.
+            // Touch uses natural scrolling (content follows the finger), so feed
+            // the inverted delta: finger up (dy<0) → PageDown (reveal newer).
+            var direction = consumeTerminalWheelPage(
+              { deltaY: -dy, deltaMode: 0 },
+              pagingState,
+              term.rows * rowHeight,
+              Date.now(),
+            );
+            var seq = terminalWheelPageSequence(direction);
+            if (seq) sendPtyInput(seq);
+          } else {
+            // Normal buffer: scroll the scrollback. scrollLines(+) moves toward
+            // older lines, matching finger-down (dy>0) revealing older output.
+            var lines = Math.round(dy / rowHeight);
+            if (lines !== 0) {
+              term.scrollLines(lines);
+              setTerminalManualScrollActive();
+            }
+          }
+        }, { passive: false });
+
+        function endTouch() {
+          touchId = null;
+        }
+        surface.addEventListener("touchend", endTouch, { passive: true });
+        surface.addEventListener("touchcancel", endTouch, { passive: true });
+      }
+
       // ===== Custom terminal scrollbar =====
       export function initTerminalScrollbar(container: HTMLElement) {
         var scrollbar = document.createElement("div");
@@ -841,6 +929,9 @@ import { consumeTerminalWheelPage, terminalWheelPageSequence, type TerminalWheel
           };
           container.addEventListener("wheel", state.terminalWheelHandler, { passive: true });
           initTerminalScrollbar(container);
+          // Mobile touch scroll: wired on the terminal surface so Android WebView,
+          // iOS WKWebView and mobile browsers can scroll scrollback / page TUIs.
+          initTerminalTouchScroll(termWrap, term);
 
           if (state.selectedId) {
             var session = state.sessions.find(function(item: any) { return item.id === state.selectedId; });

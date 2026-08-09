@@ -7,10 +7,10 @@ import { getErrorMessage } from "./error-utils.js";
 import { expandHomePath } from "./middleware/path-safety.js";
 import {
   checkSessionWorktreeMergeabilityAsync,
+  cleanupWorktreeSync,
   prepareSessionWorktree,
   resolveWorktreeTargetBranchAsync,
 } from "./git-worktree.js";
-import { runGit } from "./git-utils.js";
 import type { SessionRegistry } from "./session-registry.js";
 import type { WandStorage } from "./storage.js";
 import type { LayoutNode, PaneTab, SessionProvider, TaskWindowLayout, WorkspaceDefaultProvider, WorkspaceTaskWorktree } from "./types.js";
@@ -29,12 +29,6 @@ function resolveWorkspaceCwd(raw: unknown): string {
   if (!existsSync(resolved)) throw new Error(`目录不存在：${resolved}`);
   if (!statSync(resolved).isDirectory()) throw new Error(`不是目录：${resolved}`);
   return resolved;
-}
-
-function cleanupTaskWorktree(worktree: WorkspaceTaskWorktree | null): void {
-  if (!worktree?.repoRoot) return;
-  try { runGit(["worktree", "remove", "--force", worktree.path], worktree.repoRoot); } catch { /* best effort */ }
-  try { runGit(["branch", "-D", worktree.branch], worktree.repoRoot); } catch { /* best effort */ }
 }
 
 function deleteSessions(
@@ -253,7 +247,7 @@ export function registerWorkspaceRoutes(
         : []));
     }
     for (const task of tasks) {
-      if (cascade || task.worktree) cleanupTaskWorktree(task.worktree);
+      if (cascade || task.worktree) cleanupWorktreeSync(task.worktree);
     }
     storage.deleteWorkspace(existing.id, { cascade });
     res.json({ ok: true });
@@ -450,7 +444,7 @@ export function registerWorkspaceRoutes(
       );
     }
     // 尽力清理 worktree 与分支；失败不阻塞删除任务行。
-    if (cascade) cleanupTaskWorktree(existing.worktree);
+    if (cascade) cleanupWorktreeSync(existing.worktree);
     storage.deleteWorkspaceTask(existing.id, { cascade });
     res.json({ ok: true });
   });

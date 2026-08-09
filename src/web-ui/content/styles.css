@@ -15568,6 +15568,47 @@
       line-height: 1.25;
     }
 
+    .workspace-task-rename {
+      cursor: default;
+      align-items: flex-start;
+    }
+
+    .workspace-task-rename:hover {
+      background: color-mix(in srgb, var(--accent-muted) 28%, transparent);
+    }
+
+    .workspace-task-rename-field {
+      display: flex;
+      flex: 1;
+      min-width: 0;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .workspace-task-rename-input {
+      width: 100%;
+      min-width: 0;
+      height: 26px;
+      border: 1px solid var(--accent);
+      border-radius: 6px;
+      padding: 0 7px;
+      color: var(--text-primary);
+      background: var(--bg-elevated);
+      font: inherit;
+      font-size: 0.75rem;
+      outline: none;
+    }
+
+    .workspace-task-rename-input:focus {
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
+    }
+
+    .workspace-task-rename-error {
+      color: var(--danger);
+      font-size: 0.625rem;
+      line-height: 1.25;
+    }
+
     .workspace-task-badge {
       display: inline-flex;
       align-items: center;
