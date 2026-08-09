@@ -3242,15 +3242,15 @@
         return value;
       }
       var AbortControllerLocal = "undefined" !== typeof AbortController ? AbortController : function() {
-        var listeners10 = [], signal = this.signal = {
+        var listeners11 = [], signal = this.signal = {
           aborted: false,
           addEventListener: function(type, listener) {
-            listeners10.push(listener);
+            listeners11.push(listener);
           }
         };
         this.abort = function() {
           signal.aborted = true;
-          listeners10.forEach(function(listener) {
+          listeners11.forEach(function(listener) {
             return listener();
           });
         };
@@ -3302,33 +3302,33 @@
       function pingEngtangledActionScope() {
         if (0 === --currentEntangledPendingCount && null !== currentEntangledListeners) {
           null !== currentEntangledActionThenable && (currentEntangledActionThenable.status = "fulfilled");
-          var listeners10 = currentEntangledListeners;
+          var listeners11 = currentEntangledListeners;
           currentEntangledListeners = null;
           currentEntangledLane = 0;
           currentEntangledActionThenable = null;
-          for (var i = 0; i < listeners10.length; i++) (0, listeners10[i])();
+          for (var i = 0; i < listeners11.length; i++) (0, listeners11[i])();
         }
       }
       function chainThenableValue(thenable, result) {
-        var listeners10 = [], thenableWithOverride = {
+        var listeners11 = [], thenableWithOverride = {
           status: "pending",
           value: null,
           reason: null,
           then: function(resolve) {
-            listeners10.push(resolve);
+            listeners11.push(resolve);
           }
         };
         thenable.then(
           function() {
             thenableWithOverride.status = "fulfilled";
             thenableWithOverride.value = result;
-            for (var i = 0; i < listeners10.length; i++) (0, listeners10[i])(result);
+            for (var i = 0; i < listeners11.length; i++) (0, listeners11[i])(result);
           },
           function(error) {
             thenableWithOverride.status = "rejected";
             thenableWithOverride.reason = error;
-            for (error = 0; error < listeners10.length; error++)
-              (0, listeners10[error])(void 0);
+            for (error = 0; error < listeners11.length; error++)
+              (0, listeners11[error])(void 0);
           }
         );
         return thenableWithOverride;
@@ -10339,15 +10339,15 @@
         };
       }
       function accumulateTwoPhaseListeners(targetFiber, reactName) {
-        for (var captureName = reactName + "Capture", listeners10 = []; null !== targetFiber; ) {
+        for (var captureName = reactName + "Capture", listeners11 = []; null !== targetFiber; ) {
           var _instance2 = targetFiber, stateNode = _instance2.stateNode;
           _instance2 = _instance2.tag;
-          5 !== _instance2 && 26 !== _instance2 && 27 !== _instance2 || null === stateNode || (_instance2 = getListener(targetFiber, captureName), null != _instance2 && listeners10.unshift(
+          5 !== _instance2 && 26 !== _instance2 && 27 !== _instance2 || null === stateNode || (_instance2 = getListener(targetFiber, captureName), null != _instance2 && listeners11.unshift(
             createDispatchListener(targetFiber, _instance2, stateNode)
-          ), _instance2 = getListener(targetFiber, reactName), null != _instance2 && listeners10.push(
+          ), _instance2 = getListener(targetFiber, reactName), null != _instance2 && listeners11.push(
             createDispatchListener(targetFiber, _instance2, stateNode)
           ));
-          if (3 === targetFiber.tag) return listeners10;
+          if (3 === targetFiber.tag) return listeners11;
           targetFiber = targetFiber.return;
         }
         return [];
@@ -10360,18 +10360,18 @@
         return inst ? inst : null;
       }
       function accumulateEnterLeaveListenersForEvent(dispatchQueue, event, target, common, inCapturePhase) {
-        for (var registrationName = event._reactName, listeners10 = []; null !== target && target !== common; ) {
+        for (var registrationName = event._reactName, listeners11 = []; null !== target && target !== common; ) {
           var _instance3 = target, alternate = _instance3.alternate, stateNode = _instance3.stateNode;
           _instance3 = _instance3.tag;
           if (null !== alternate && alternate === common) break;
-          5 !== _instance3 && 26 !== _instance3 && 27 !== _instance3 || null === stateNode || (alternate = stateNode, inCapturePhase ? (stateNode = getListener(target, registrationName), null != stateNode && listeners10.unshift(
+          5 !== _instance3 && 26 !== _instance3 && 27 !== _instance3 || null === stateNode || (alternate = stateNode, inCapturePhase ? (stateNode = getListener(target, registrationName), null != stateNode && listeners11.unshift(
             createDispatchListener(target, stateNode, alternate)
-          )) : inCapturePhase || (stateNode = getListener(target, registrationName), null != stateNode && listeners10.push(
+          )) : inCapturePhase || (stateNode = getListener(target, registrationName), null != stateNode && listeners11.push(
             createDispatchListener(target, stateNode, alternate)
           )));
           target = target.return;
         }
-        0 !== listeners10.length && dispatchQueue.push({ event, listeners: listeners10 });
+        0 !== listeners11.length && dispatchQueue.push({ event, listeners: listeners11 });
       }
       var NORMALIZE_NEWLINES_REGEX = /\r\n?/g;
       var NORMALIZE_NULL_AND_REPLACEMENT_REGEX = /\u0000|\uFFFD/g;
@@ -13713,19 +13713,19 @@
     }
     return removed ? filtered : messages;
   }
-  function normalizeStructuredSnapshot(snapshot9, existingSession) {
-    if (!snapshot9 || !Array.isArray(snapshot9.messages)) {
-      return snapshot9;
+  function normalizeStructuredSnapshot(snapshot10, existingSession) {
+    if (!snapshot10 || !Array.isArray(snapshot10.messages)) {
+      return snapshot10;
     }
-    var sessionKind = snapshot9.sessionKind || existingSession && existingSession.sessionKind;
+    var sessionKind = snapshot10.sessionKind || existingSession && existingSession.sessionKind;
     if (sessionKind !== "structured") {
-      return snapshot9;
+      return snapshot10;
     }
-    var sanitizedMessages = stripRenderOnlyStructuredMessages(snapshot9.messages);
-    if (sanitizedMessages === snapshot9.messages) {
-      return snapshot9;
+    var sanitizedMessages = stripRenderOnlyStructuredMessages(snapshot10.messages);
+    if (sanitizedMessages === snapshot10.messages) {
+      return snapshot10;
     }
-    return Object.assign({}, snapshot9, { messages: sanitizedMessages });
+    return Object.assign({}, snapshot10, { messages: sanitizedMessages });
   }
   function saveStructuredQueue() {
     try {
@@ -22541,20 +22541,20 @@
         }
         throw error;
       }
-      const snapshot9 = aboutSnapshot(admin, "admin");
+      const snapshot10 = aboutSnapshot(admin, "admin");
       const origin = window.location?.origin ? `?origin=${encodeURIComponent(window.location.origin)}` : "";
       const [models, cliUpdates, connectCode] = await Promise.all([
         request("/api/models", { signal: options.signal }).catch(() => null),
         request("/api/provider-cli-updates", { signal: options.signal }).catch(() => null),
         request(`/api/app-connect-code${origin}`, { signal: options.signal }).catch(() => null)
       ]);
-      snapshot9.models = models ? normalizeModels(models) : null;
-      snapshot9.providerCliUpdates = cliUpdates;
-      snapshot9.connectCode = connectCode ? {
+      snapshot10.models = models ? normalizeModels(models) : null;
+      snapshot10.providerCliUpdates = cliUpdates;
+      snapshot10.connectCode = connectCode ? {
         code: stringValue(connectCode.code),
         url: stringValue(connectCode.url)
       } : null;
-      return snapshot9;
+      return snapshot10;
     }
     async execute(command, options = {}) {
       let result;
@@ -22995,12 +22995,12 @@
       ] }, source);
     }) : /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("div", { className: "wand-settings-empty", children: "\u6682\u65E0\u53EF\u7528\u5B89\u88C5\u5305" }) });
   }
-  function AboutSettingsTab({ snapshot: snapshot9, repository, refresh, toast: toast2, showRestart: showRestart2 }) {
+  function AboutSettingsTab({ snapshot: snapshot10, repository, refresh, toast: toast2, showRestart: showRestart2 }) {
     const [pending, setPending] = (0, import_react7.useState)("");
     const [status, setStatus] = (0, import_react7.useState)("");
     const [tone, setTone] = (0, import_react7.useState)("info");
     const [update, setUpdate] = (0, import_react7.useState)(null);
-    const about = snapshot9.about;
+    const about = snapshot10.about;
     async function action(name, task, success) {
       setPending(name);
       setStatus("");
@@ -23017,7 +23017,7 @@
         setPending("");
       }
     }
-    const cliItems = snapshot9.providerCliUpdates?.items || [];
+    const cliItems = snapshot10.providerCliUpdates?.items || [];
     const cliUpdates = cliItems.filter((item) => item.updateAvailable && item.updateSupported);
     return /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)("section", { className: "wand-settings-panel", "aria-label": "\u5173\u4E8E Wand", children: [
       /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)("header", { className: "wand-settings-panel-heading", children: [
@@ -23049,7 +23049,7 @@
           /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("dd", { children: /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("a", { href: about.repoUrl, target: "_blank", rel: "noopener noreferrer", children: about.repoUrl }) })
         ] }) : null
       ] }) }),
-      snapshot9.access === "admin" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(import_jsx_runtime30.Fragment, { children: [
+      snapshot10.access === "admin" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(import_jsx_runtime30.Fragment, { children: [
         /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(SettingsSection, { title: "\u4FDD\u6301\u5728\u6700\u65B0\u7248\u672C", description: `\u5F53\u524D ${about.version} \xB7 ${about.updateChannel === "beta" ? "Beta \u901A\u9053" : "Stable \u901A\u9053"}`, children: [
           /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)("div", { className: "wand-settings-update-deck", children: [
             /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("span", { className: "wand-settings-update-deck-icon", "aria-hidden": "true", children: "\u21BB" }),
@@ -23082,7 +23082,7 @@
             {
               label: "\u81EA\u52A8\u66F4\u65B0 Web \u670D\u52A1",
               description: "\u68C0\u6D4B\u5230\u65B0\u7248\u672C\u540E\u81EA\u52A8\u4E0B\u8F7D\u5B89\u88C5\u5E76\u91CD\u542F\u670D\u52A1\u3002",
-              checked: snapshot9.autoUpdate.web,
+              checked: snapshot10.autoUpdate.web,
               disabled: !!pending,
               onCheckedChange: (enabled) => void action("auto-web", async () => {
                 await repository.execute({ type: "autoUpdate.set", target: "web", enabled });
@@ -23096,7 +23096,7 @@
               const result = await repository.execute({ type: "webUpdate.install" });
               setStatus(result.message);
             }, void 0), children: "\u66F4\u65B0\u6216\u91CD\u65B0\u5B89\u88C5" }),
-            snapshot9.restartRequired ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsActionButton, { pending: pending === "restart", kind: "secondary", onClick: () => void action("restart", async () => {
+            snapshot10.restartRequired ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsActionButton, { pending: pending === "restart", kind: "secondary", onClick: () => void action("restart", async () => {
               try {
                 await repository.execute({ type: "server.restart" });
               } finally {
@@ -23121,7 +23121,7 @@
             {
               label: "\u81EA\u52A8\u66F4\u65B0\u5F00\u53D1 CLI",
               description: "\u670D\u52A1\u7AEF\u5B9A\u671F\u68C0\u67E5\u5E76\u8C03\u7528\u5404 CLI \u7684\u5B98\u65B9\u66F4\u65B0\u5668\u3002",
-              checked: snapshot9.autoUpdate.cli,
+              checked: snapshot10.autoUpdate.cli,
               disabled: !!pending,
               onCheckedChange: (enabled) => void action("auto-cli", async () => {
                 await repository.execute({ type: "autoUpdate.set", target: "cli", enabled });
@@ -23145,20 +23145,20 @@
           ] })
         ] })
       ] }) : null,
-      snapshot9.platform.kind === "browser" || snapshot9.platform.kind === "android" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(DistributionSection, { kind: "apk", title: "Android App", distribution: about.androidApk, currentVersion: snapshot9.platform.kind === "android" ? snapshot9.platform.appVersion : null, repository, toast: toast2 }) : null,
-      snapshot9.platform.kind === "browser" || snapshot9.platform.kind === "macos" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(DistributionSection, { kind: "dmg", title: "macOS App", distribution: about.macosDmg, currentVersion: snapshot9.platform.kind === "macos" ? snapshot9.platform.appVersion : null, repository, toast: toast2 }) : null,
-      snapshot9.access === "admin" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(import_jsx_runtime30.Fragment, { children: /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(SettingsSection, { title: "App \u8FDE\u63A5\u7801", description: "\u7C98\u8D34\u6216\u626B\u7801\u540E\u53EF\u8FDE\u63A5\u5F53\u524D\u670D\u52A1\uFF1B\u4FEE\u6539\u5BC6\u7801\u540E\u4F1A\u5931\u6548\u3002", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("code", { className: "wand-settings-connect-code", "aria-label": "App \u8FDE\u63A5\u7801", children: snapshot9.connectCode?.code || "\u6682\u4E0D\u53EF\u7528" }),
+      snapshot10.platform.kind === "browser" || snapshot10.platform.kind === "android" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(DistributionSection, { kind: "apk", title: "Android App", distribution: about.androidApk, currentVersion: snapshot10.platform.kind === "android" ? snapshot10.platform.appVersion : null, repository, toast: toast2 }) : null,
+      snapshot10.platform.kind === "browser" || snapshot10.platform.kind === "macos" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(DistributionSection, { kind: "dmg", title: "macOS App", distribution: about.macosDmg, currentVersion: snapshot10.platform.kind === "macos" ? snapshot10.platform.appVersion : null, repository, toast: toast2 }) : null,
+      snapshot10.access === "admin" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(import_jsx_runtime30.Fragment, { children: /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(SettingsSection, { title: "App \u8FDE\u63A5\u7801", description: "\u7C98\u8D34\u6216\u626B\u7801\u540E\u53EF\u8FDE\u63A5\u5F53\u524D\u670D\u52A1\uFF1B\u4FEE\u6539\u5BC6\u7801\u540E\u4F1A\u5931\u6548\u3002", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("code", { className: "wand-settings-connect-code", "aria-label": "App \u8FDE\u63A5\u7801", children: snapshot10.connectCode?.code || "\u6682\u4E0D\u53EF\u7528" }),
         /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)("div", { className: "wand-settings-button-row", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(WandButton, { disabled: !snapshot9.connectCode?.code, kind: "secondary", onClick: async () => {
-            await repository.execute({ type: "clipboard.copy", text: snapshot9.connectCode.code });
+          /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(WandButton, { disabled: !snapshot10.connectCode?.code, kind: "secondary", onClick: async () => {
+            await repository.execute({ type: "clipboard.copy", text: snapshot10.connectCode.code });
             toast2("\u8FDE\u63A5\u7801\u5DF2\u590D\u5236", "success");
           }, children: "\u590D\u5236\u8FDE\u63A5\u7801" }),
-          /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(WandButton, { disabled: !snapshot9.connectCode?.code, kind: "secondary", onClick: () => settingsStore.setNested("qr"), children: "\u653E\u5927\u8FDE\u63A5\u4E8C\u7EF4\u7801" })
+          /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(WandButton, { disabled: !snapshot10.connectCode?.code, kind: "secondary", onClick: () => settingsStore.setNested("qr"), children: "\u653E\u5927\u8FDE\u63A5\u4E8C\u7EF4\u7801" })
         ] })
       ] }) }) : null,
       status ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsStatus, { tone, children: status }) : null,
-      /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(ConnectCodeDialog, { code: snapshot9.connectCode?.code || "" })
+      /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(ConnectCodeDialog, { code: snapshot10.connectCode?.code || "" })
     ] });
   }
   var MODE_OPTIONS = [
@@ -23171,8 +23171,8 @@
     { value: "native", label: "\u539F\u751F\u6A21\u5F0F" },
     { value: "managed", label: "\u6258\u7BA1\u6A21\u5F0F" }
   ];
-  function generalFromSnapshot(snapshot9) {
-    const config = snapshot9.config;
+  function generalFromSnapshot(snapshot10) {
+    const config = snapshot10.config;
     return {
       host: config.host,
       port: config.port,
@@ -23260,13 +23260,13 @@
       }
     );
   }
-  function GeneralSettingsTab({ snapshot: snapshot9, repository, refresh, toast: toast2 }) {
-    const [form, setForm] = (0, import_react7.useState)(() => generalFromSnapshot(snapshot9));
+  function GeneralSettingsTab({ snapshot: snapshot10, repository, refresh, toast: toast2 }) {
+    const [form, setForm] = (0, import_react7.useState)(() => generalFromSnapshot(snapshot10));
     const [pending, setPending] = (0, import_react7.useState)(false);
     const [status, setStatus] = (0, import_react7.useState)("");
     const [tone, setTone] = (0, import_react7.useState)("info");
     const [errors, setErrors] = (0, import_react7.useState)({});
-    (0, import_react7.useEffect)(() => setForm(generalFromSnapshot(snapshot9)), [snapshot9]);
+    (0, import_react7.useEffect)(() => setForm(generalFromSnapshot(snapshot10)), [snapshot10]);
     function update(key, value) {
       setForm((current) => ({ ...current, [key]: value }));
       setErrors((current) => ({ ...current, [key]: "" }));
@@ -23360,8 +23360,8 @@
       /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(EnvironmentDialog, { repository })
     ] });
   }
-  function aiFromSnapshot(snapshot9) {
-    const config = snapshot9.config;
+  function aiFromSnapshot(snapshot10) {
+    const config = snapshot10.config;
     const withClientId = (profile) => ({
       ...profile,
       id: profile.id || createSystemAiRouteId(),
@@ -23460,14 +23460,14 @@
       route.baseUrl.trim() && route.model.trim() && (route.apiKey.trim() || route.hasApiKey)
     );
   }
-  function AiSettingsTab({ snapshot: snapshot9, repository, refresh, setSnapshot, toast: toast2 }) {
-    const [form, setForm] = (0, import_react7.useState)(() => aiFromSnapshot(snapshot9));
+  function AiSettingsTab({ snapshot: snapshot10, repository, refresh, setSnapshot, toast: toast2 }) {
+    const [form, setForm] = (0, import_react7.useState)(() => aiFromSnapshot(snapshot10));
     const [pending, setPending] = (0, import_react7.useState)("");
     const [status, setStatus] = (0, import_react7.useState)("");
     const [tone, setTone] = (0, import_react7.useState)("info");
     const [errors, setErrors] = (0, import_react7.useState)({});
     const [routeTests, setRouteTests] = (0, import_react7.useState)({});
-    (0, import_react7.useEffect)(() => setForm(aiFromSnapshot(snapshot9)), [snapshot9.config]);
+    (0, import_react7.useEffect)(() => setForm(aiFromSnapshot(snapshot10)), [snapshot10.config]);
     function update(key, value) {
       setForm((current) => ({ ...current, [key]: value }));
     }
@@ -23679,7 +23679,7 @@
         setPending("");
       }
     }
-    const models = snapshot9.models;
+    const models = snapshot10.models;
     const systemAiProfiles = systemAiRoutes(form.systemAi);
     const configuredSystemAiProfiles = systemAiProfiles.filter(routeIsComplete);
     const systemAiOrder = configuredSystemAiProfiles.map((profile) => `${SYSTEM_AI_SOURCE_LABELS[profile.source]} \xB7 ${profile.model}`).join(" \u2192 ");
@@ -23863,12 +23863,12 @@
     ] });
   }
   function NotificationSettingsTab(_props) {
-    const { snapshot: snapshot9, repository, setSnapshot, toast: toast2 } = _props;
-    const [preferences, setPreferences] = (0, import_react7.useState)(() => ({ ...snapshot9.notifications }));
+    const { snapshot: snapshot10, repository, setSnapshot, toast: toast2 } = _props;
+    const [preferences, setPreferences] = (0, import_react7.useState)(() => ({ ...snapshot10.notifications }));
     const [pending, setPending] = (0, import_react7.useState)("");
     const [status, setStatus] = (0, import_react7.useState)("");
     const [tone, setTone] = (0, import_react7.useState)("info");
-    (0, import_react7.useEffect)(() => setPreferences({ ...snapshot9.notifications }), [snapshot9.notifications]);
+    (0, import_react7.useEffect)(() => setPreferences({ ...snapshot10.notifications }), [snapshot10.notifications]);
     async function savePreference(value, preview = false) {
       setPending("preference");
       setStatus("");
@@ -23979,11 +23979,11 @@
           })
         }
       ) }) : null,
-      snapshot9.platform.canSetAppIcon ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsSection, { title: "\u5E94\u7528\u56FE\u6807", description: "\u5207\u6362 Wand \u7684\u684C\u9762\u56FE\u6807\uFF0C\u8FD4\u56DE\u7CFB\u7EDF\u684C\u9762\u540E\u751F\u6548\u3002", children: /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("div", { className: "wand-settings-button-row", role: "group", "aria-label": "\u5E94\u7528\u56FE\u6807", children: ["shorthair", "garfield"].map((icon) => /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(
+      snapshot10.platform.canSetAppIcon ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsSection, { title: "\u5E94\u7528\u56FE\u6807", description: "\u5207\u6362 Wand \u7684\u684C\u9762\u56FE\u6807\uFF0C\u8FD4\u56DE\u7CFB\u7EDF\u684C\u9762\u540E\u751F\u6548\u3002", children: /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("div", { className: "wand-settings-button-row", role: "group", "aria-label": "\u5E94\u7528\u56FE\u6807", children: ["shorthair", "garfield"].map((icon) => /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(
         WandButton,
         {
-          kind: snapshot9.platform.appIcon === icon ? "primary" : "secondary",
-          "aria-pressed": snapshot9.platform.appIcon === icon,
+          kind: snapshot10.platform.appIcon === icon ? "primary" : "secondary",
+          "aria-pressed": snapshot10.platform.appIcon === icon,
           onClick: async () => {
             await repository.execute({ type: "appIcon.set", icon });
             setSnapshot((current) => current ? {
@@ -24011,7 +24011,7 @@
               const result = await repository.execute({ type: "notification.settings.open" });
               return result.native ? "\u5DF2\u6253\u5F00 Wand \u7684\u7CFB\u7EDF\u901A\u77E5\u8BBE\u7F6E\uFF1B\u4FEE\u6539\u540E\u8FD4\u56DE\u6B64\u9875\u5373\u53EF\u3002" : "\u8BF7\u5728\u6D4F\u89C8\u5668\u7684\u7F51\u7AD9\u6743\u9650\u8BBE\u7F6E\u4E2D\u5141\u8BB8\u901A\u77E5\uFF0C\u7136\u540E\u5237\u65B0\u9875\u9762\u3002";
             }),
-            children: snapshot9.platform.kind === "android" ? "\u6253\u5F00\u7CFB\u7EDF\u901A\u77E5\u8BBE\u7F6E" : "\u5982\u4F55\u91CD\u7F6E\u6743\u9650"
+            children: snapshot10.platform.kind === "android" ? "\u6253\u5F00\u7CFB\u7EDF\u901A\u77E5\u8BBE\u7F6E" : "\u5982\u4F55\u91CD\u7F6E\u6743\u9650"
           }
         ) : null,
         /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsActionButton, { pending: pending === "test", kind: "secondary", onClick: () => void run3("test", async () => {
@@ -24028,7 +24028,7 @@
     ] });
   }
   function SecuritySettingsTab(_props) {
-    const { snapshot: snapshot9, repository, refresh, toast: toast2 } = _props;
+    const { snapshot: snapshot10, repository, refresh, toast: toast2 } = _props;
     const [password, setPassword] = (0, import_react7.useState)("");
     const [confirmation, setConfirmation] = (0, import_react7.useState)("");
     const [keyFile, setKeyFile] = (0, import_react7.useState)(null);
@@ -24113,7 +24113,7 @@
         ] }),
         /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsActionButton, { type: "submit", pending: pending === "password", kind: "primary", children: "\u4FEE\u6539\u5BC6\u7801\u5E76\u91CD\u65B0\u767B\u5F55" })
       ] }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(SettingsSection, { title: "SSL \u8BC1\u4E66", description: `\u5F53\u524D\u72B6\u6001\uFF1A${snapshot9.hasCert ? "\u5DF2\u5B89\u88C5\u8BC1\u4E66" : "\u672A\u5B89\u88C5\u8BC1\u4E66\uFF08\u4F7F\u7528\u81EA\u7B7E\u540D\u6216 HTTP\uFF09"}`, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(SettingsSection, { title: "SSL \u8BC1\u4E66", description: `\u5F53\u524D\u72B6\u6001\uFF1A${snapshot10.hasCert ? "\u5DF2\u5B89\u88C5\u8BC1\u4E66" : "\u672A\u5B89\u88C5\u8BC1\u4E66\uFF08\u4F7F\u7528\u81EA\u7B7E\u540D\u6216 HTTP\uFF09"}`, children: [
         /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)("div", { className: "wand-settings-file-grid", children: [
           /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)("label", { children: [
             /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("span", { children: "\u79C1\u94A5\u6587\u4EF6\uFF08server.key\uFF09" }),
@@ -24131,8 +24131,8 @@
       status ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsStatus, { tone, children: status }) : null
     ] });
   }
-  function PresetSettingsTab({ snapshot: snapshot9 }) {
-    const presets = snapshot9.config?.commandPresets || [];
+  function PresetSettingsTab({ snapshot: snapshot10 }) {
+    const presets = snapshot10.config?.commandPresets || [];
     return /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)("section", { className: "wand-settings-panel", "aria-label": "\u547D\u4EE4\u9884\u8BBE", children: [
       /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)("header", { className: "wand-settings-panel-heading", children: [
         /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("h2", { children: "\u547D\u4EE4\u9884\u8BBE" }),
@@ -24158,12 +24158,12 @@
     { key: "thinking", title: "\u601D\u8003\u8FC7\u7A0B", description: "\u6A21\u578B\u7684 Thinking \u5185\u5BB9" },
     { key: "toolGroup", title: "\u5DE5\u5177\u7EC4", description: "\u8FDE\u7EED\u540C\u7C7B\u5DE5\u5177\u8C03\u7528\u7684\u6298\u53E0\u7EC4" }
   ];
-  function DisplaySettingsTab({ snapshot: snapshot9, repository, refresh, toast: toast2 }) {
-    const [value, setValue] = (0, import_react7.useState)(() => ({ ...snapshot9.config.cardDefaults }));
+  function DisplaySettingsTab({ snapshot: snapshot10, repository, refresh, toast: toast2 }) {
+    const [value, setValue] = (0, import_react7.useState)(() => ({ ...snapshot10.config.cardDefaults }));
     const [pending, setPending] = (0, import_react7.useState)(false);
     const [status, setStatus] = (0, import_react7.useState)("");
     const [tone, setTone] = (0, import_react7.useState)("info");
-    (0, import_react7.useEffect)(() => setValue({ ...snapshot9.config.cardDefaults }), [snapshot9]);
+    (0, import_react7.useEffect)(() => setValue({ ...snapshot10.config.cardDefaults }), [snapshot10]);
     async function save() {
       setPending(true);
       setStatus("");
@@ -24263,8 +24263,8 @@
     };
     return /* @__PURE__ */ (0, import_jsx_runtime31.jsx)("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.8", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true", children: paths[tab] });
   }
-  function SettingsOverview({ snapshot: snapshot9 }) {
-    const version = snapshot9.platform.appVersion || snapshot9.about.version || "\u672A\u77E5\u7248\u672C";
+  function SettingsOverview({ snapshot: snapshot10 }) {
+    const version = snapshot10.platform.appVersion || snapshot10.about.version || "\u672A\u77E5\u7248\u672C";
     return /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)("section", { className: "wand-settings-overview", "aria-label": "\u5F53\u524D\u8BBE\u7F6E\u6982\u89C8", children: [
       /* @__PURE__ */ (0, import_jsx_runtime31.jsx)("span", { className: "wand-settings-overview-mark", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(SettingsTabIcon, { tab: "general" }) }),
       /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)("div", { className: "wand-settings-overview-copy", children: [
@@ -24273,9 +24273,9 @@
           /* @__PURE__ */ (0, import_jsx_runtime31.jsx)("span", { children: "\u8FDE\u63A5\u3001\u8BBE\u5907\u548C\u5DE5\u4F5C\u6D41\u504F\u597D\u90FD\u5728\u8FD9\u91CC\u8C03\u6574\u3002" })
         ] }),
         /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)("div", { className: "wand-settings-overview-pills", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(WandBadge, { tone: "success", children: snapshot9.access === "admin" ? "\u7BA1\u7406\u5458\u8FDE\u63A5" : "App \u8FDE\u63A5" }),
-          /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(WandBadge, { tone: snapshot9.about.updateChannel === "beta" ? "warning" : "info", children: snapshot9.about.updateChannel === "beta" ? "Beta \u901A\u9053" : "Stable \u901A\u9053" }),
-          /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(WandBadge, { tone: "accent", children: PLATFORM_LABELS[snapshot9.platform.kind] })
+          /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(WandBadge, { tone: "success", children: snapshot10.access === "admin" ? "\u7BA1\u7406\u5458\u8FDE\u63A5" : "App \u8FDE\u63A5" }),
+          /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(WandBadge, { tone: snapshot10.about.updateChannel === "beta" ? "warning" : "info", children: snapshot10.about.updateChannel === "beta" ? "Beta \u901A\u9053" : "Stable \u901A\u9053" }),
+          /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(WandBadge, { tone: "accent", children: PLATFORM_LABELS[snapshot10.platform.kind] })
         ] })
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)("code", { children: [
@@ -24320,10 +24320,10 @@
       setError("");
       try {
         await repository.execute({ type: "admin.login", password });
-        const snapshot9 = await repository.load();
-        if (snapshot9.access !== "admin") throw new Error("\u767B\u5F55\u6210\u529F\uFF0C\u4F46\u5F53\u524D\u4F1A\u8BDD\u4ECD\u6CA1\u6709\u7BA1\u7406\u6743\u9650\u3002");
+        const snapshot10 = await repository.load();
+        if (snapshot10.access !== "admin") throw new Error("\u767B\u5F55\u6210\u529F\uFF0C\u4F46\u5F53\u524D\u4F1A\u8BDD\u4ECD\u6CA1\u6709\u7BA1\u7406\u6743\u9650\u3002");
         setPassword("");
-        onAuthenticated(snapshot9);
+        onAuthenticated(snapshot10);
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : "\u7BA1\u7406\u5458\u767B\u5F55\u5931\u8D25\u3002");
       } finally {
@@ -24378,7 +24378,7 @@
       settingsStore.getSnapshot,
       settingsStore.getSnapshot
     );
-    const [snapshot9, setSnapshot] = (0, import_react8.useState)(null);
+    const [snapshot10, setSnapshot] = (0, import_react8.useState)(null);
     const [loading, setLoading] = (0, import_react8.useState)(false);
     const [loadError, setLoadError] = (0, import_react8.useState)("");
     const load = (0, import_react8.useCallback)(async (signal, quiet = false) => {
@@ -24404,8 +24404,8 @@
       wandOverlay.toast(message, { tone });
     }, []);
     const tabs = (0, import_react8.useMemo)(() => {
-      if (!snapshot9) return [];
-      const props = { snapshot: snapshot9, repository, refresh, setSnapshot, toast: toast2, showRestart: showRestart2 };
+      if (!snapshot10) return [];
+      const props = { snapshot: snapshot10, repository, refresh, setSnapshot, toast: toast2, showRestart: showRestart2 };
       const contentByTab = {
         general: /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(GeneralSettingsTab, { ...props }),
         ai: /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(AiSettingsTab, { ...props }),
@@ -24415,7 +24415,7 @@
         presets: /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(PresetSettingsTab, { ...props }),
         about: /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(AboutSettingsTab, { ...props })
       };
-      const order = snapshot9.access === "admin" ? ADMIN_TAB_ORDER : CONNECTED_APP_TAB_ORDER;
+      const order = snapshot10.access === "admin" ? ADMIN_TAB_ORDER : CONNECTED_APP_TAB_ORDER;
       return order.map((value) => ({
         value,
         label: /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)("span", { className: "wand-settings-tab-label", children: [
@@ -24427,8 +24427,8 @@
         ] }),
         content: contentByTab[value]
       }));
-    }, [refresh, repository, showRestart2, snapshot9, toast2]);
-    const selectedTab = snapshot9?.access === "admin" ? controller.tab : controller.tab === "about" ? "about" : "notifications";
+    }, [refresh, repository, showRestart2, snapshot10, toast2]);
+    const selectedTab = snapshot10?.access === "admin" ? controller.tab : controller.tab === "about" ? "about" : "notifications";
     return /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(
       WandDialogSurface,
       {
@@ -24448,9 +24448,9 @@
         children: loading ? /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(SettingsLoading, {}) : loadError ? /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)("div", { className: "wand-settings-load-error", role: "alert", children: [
           /* @__PURE__ */ (0, import_jsx_runtime31.jsx)("p", { children: loadError }),
           /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(WandButton, { kind: "primary", onClick: () => void load(), children: "\u91CD\u8BD5\u52A0\u8F7D\u8BBE\u7F6E" })
-        ] }) : snapshot9 ? /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)(import_jsx_runtime31.Fragment, { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(SettingsOverview, { snapshot: snapshot9 }),
-          snapshot9.access === "read-only" ? /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(
+        ] }) : snapshot10 ? /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)(import_jsx_runtime31.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(SettingsOverview, { snapshot: snapshot10 }),
+          snapshot10.access === "read-only" ? /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(
             ConnectedAppAccess,
             {
               repository,
@@ -26995,39 +26995,39 @@
       currentVersion
     };
   }
-  function waitingStatus(snapshot9) {
-    if (snapshot9.lastError) {
-      return `\u670D\u52A1\u6682\u4E0D\u53EF\u7528\uFF0C\u6B63\u5728\u7EE7\u7EED\u7B49\u5F85\uFF08${snapshot9.attempts}/${snapshot9.maxAttempts}\uFF09\u2026`;
+  function waitingStatus(snapshot10) {
+    if (snapshot10.lastError) {
+      return `\u670D\u52A1\u6682\u4E0D\u53EF\u7528\uFF0C\u6B63\u5728\u7EE7\u7EED\u7B49\u5F85\uFF08${snapshot10.attempts}/${snapshot10.maxAttempts}\uFF09\u2026`;
     }
-    if (snapshot9.attempts === 0) {
-      return snapshot9.mode === "auto-update" ? "\u6B63\u5728\u7B49\u5F85\u66F4\u65B0\u5B8C\u6210\u5E76\u91CD\u542F\u670D\u52A1\u2026" : "\u6B63\u5728\u7B49\u5F85\u670D\u52A1\u91CD\u65B0\u542F\u52A8\u2026";
+    if (snapshot10.attempts === 0) {
+      return snapshot10.mode === "auto-update" ? "\u6B63\u5728\u7B49\u5F85\u66F4\u65B0\u5B8C\u6210\u5E76\u91CD\u542F\u670D\u52A1\u2026" : "\u6B63\u5728\u7B49\u5F85\u670D\u52A1\u91CD\u65B0\u542F\u52A8\u2026";
     }
-    if (!snapshot9.readiness.instanceReady && !snapshot9.readiness.versionReady) {
-      return `\u6B63\u5728\u7B49\u5F85\u65B0\u670D\u52A1\u5B9E\u4F8B\u548C\u76EE\u6807\u7248\u672C\uFF08${snapshot9.attempts}/${snapshot9.maxAttempts}\uFF09\u2026`;
+    if (!snapshot10.readiness.instanceReady && !snapshot10.readiness.versionReady) {
+      return `\u6B63\u5728\u7B49\u5F85\u65B0\u670D\u52A1\u5B9E\u4F8B\u548C\u76EE\u6807\u7248\u672C\uFF08${snapshot10.attempts}/${snapshot10.maxAttempts}\uFF09\u2026`;
     }
-    if (!snapshot9.readiness.instanceReady) {
-      return `\u76EE\u6807\u7248\u672C\u5DF2\u5C31\u7EEA\uFF0C\u6B63\u5728\u7B49\u5F85\u65B0\u670D\u52A1\u5B9E\u4F8B\uFF08${snapshot9.attempts}/${snapshot9.maxAttempts}\uFF09\u2026`;
+    if (!snapshot10.readiness.instanceReady) {
+      return `\u76EE\u6807\u7248\u672C\u5DF2\u5C31\u7EEA\uFF0C\u6B63\u5728\u7B49\u5F85\u65B0\u670D\u52A1\u5B9E\u4F8B\uFF08${snapshot10.attempts}/${snapshot10.maxAttempts}\uFF09\u2026`;
     }
-    if (!snapshot9.readiness.versionReady) {
-      const expected = snapshot9.target.expectedVersion || snapshot9.latestVersion || "\u76EE\u6807\u7248\u672C";
-      return `\u65B0\u670D\u52A1\u5DF2\u542F\u52A8\uFF0C\u6B63\u5728\u7B49\u5F85\u7248\u672C ${expected}\uFF08${snapshot9.attempts}/${snapshot9.maxAttempts}\uFF09\u2026`;
+    if (!snapshot10.readiness.versionReady) {
+      const expected = snapshot10.target.expectedVersion || snapshot10.latestVersion || "\u76EE\u6807\u7248\u672C";
+      return `\u65B0\u670D\u52A1\u5DF2\u542F\u52A8\uFF0C\u6B63\u5728\u7B49\u5F85\u7248\u672C ${expected}\uFF08${snapshot10.attempts}/${snapshot10.maxAttempts}\uFF09\u2026`;
     }
-    return `\u6B63\u5728\u7B49\u5F85\u670D\u52A1\u5C31\u7EEA\uFF08${snapshot9.attempts}/${snapshot9.maxAttempts}\uFF09\u2026`;
+    return `\u6B63\u5728\u7B49\u5F85\u670D\u52A1\u5C31\u7EEA\uFF08${snapshot10.attempts}/${snapshot10.maxAttempts}\uFF09\u2026`;
   }
-  function restartOverlayPresentation(snapshot9) {
-    const isAutoUpdate = snapshot9.mode === "auto-update";
-    const title = isAutoUpdate ? "\u81EA\u52A8\u66F4\u65B0\u4E2D" : snapshot9.target.expectedVersion ? "\u6B63\u5728\u5B8C\u6210\u66F4\u65B0" : "\u670D\u52A1\u6B63\u5728\u91CD\u542F";
-    const description = isAutoUpdate ? `${snapshot9.currentVersion || "-"} \u2192 ${snapshot9.latestVersion || "-"}
-\u6B63\u5728\u4E0B\u8F7D\u5E76\u5B89\u88C5\u65B0\u7248\u672C\uFF0C\u5B8C\u6210\u540E\u5C06\u81EA\u52A8\u91CD\u542F\u3002` : snapshot9.target.expectedVersion ? "\u5B89\u88C5\u5B8C\u6210\u5E76\u542F\u52A8\u65B0\u7248\u672C\u540E\u5C06\u81EA\u52A8\u5237\u65B0\u9875\u9762\u3002" : "\u670D\u52A1\u6062\u590D\u540E\u5C06\u81EA\u52A8\u5237\u65B0\u9875\u9762\u3002";
+  function restartOverlayPresentation(snapshot10) {
+    const isAutoUpdate = snapshot10.mode === "auto-update";
+    const title = isAutoUpdate ? "\u81EA\u52A8\u66F4\u65B0\u4E2D" : snapshot10.target.expectedVersion ? "\u6B63\u5728\u5B8C\u6210\u66F4\u65B0" : "\u670D\u52A1\u6B63\u5728\u91CD\u542F";
+    const description = isAutoUpdate ? `${snapshot10.currentVersion || "-"} \u2192 ${snapshot10.latestVersion || "-"}
+\u6B63\u5728\u4E0B\u8F7D\u5E76\u5B89\u88C5\u65B0\u7248\u672C\uFF0C\u5B8C\u6210\u540E\u5C06\u81EA\u52A8\u91CD\u542F\u3002` : snapshot10.target.expectedVersion ? "\u5B89\u88C5\u5B8C\u6210\u5E76\u542F\u52A8\u65B0\u7248\u672C\u540E\u5C06\u81EA\u52A8\u5237\u65B0\u9875\u9762\u3002" : "\u670D\u52A1\u6062\u590D\u540E\u5C06\u81EA\u52A8\u5237\u65B0\u9875\u9762\u3002";
     let liveStatus = "";
-    if (snapshot9.phase === "checking") {
-      liveStatus = `\u6B63\u5728\u68C0\u67E5\u670D\u52A1\u72B6\u6001\uFF08${snapshot9.attempts}/${snapshot9.maxAttempts}\uFF09\u2026`;
-    } else if (snapshot9.phase === "ready") {
+    if (snapshot10.phase === "checking") {
+      liveStatus = `\u6B63\u5728\u68C0\u67E5\u670D\u52A1\u72B6\u6001\uFF08${snapshot10.attempts}/${snapshot10.maxAttempts}\uFF09\u2026`;
+    } else if (snapshot10.phase === "ready") {
       liveStatus = "\u65B0\u670D\u52A1\u548C\u76EE\u6807\u7248\u672C\u5747\u5DF2\u5C31\u7EEA\uFF0C\u6B63\u5728\u5237\u65B0\u9875\u9762\u2026";
-    } else if (snapshot9.phase === "timed-out") {
+    } else if (snapshot10.phase === "timed-out") {
       liveStatus = "\u7B49\u5F85\u670D\u52A1\u91CD\u542F\u8D85\u65F6\uFF0C\u8BF7\u624B\u52A8\u5237\u65B0\u9875\u9762\u3002";
-    } else if (snapshot9.phase === "waiting") {
-      liveStatus = waitingStatus(snapshot9);
+    } else if (snapshot10.phase === "waiting") {
+      liveStatus = waitingStatus(snapshot10);
     }
     return { title, description, liveStatus };
   }
@@ -27117,16 +27117,16 @@
     return typeof value === "string" ? value.trim() : "";
   }
   function createRestartOverlayController(dependencies) {
-    let snapshot9 = blankSnapshot();
+    let snapshot10 = blankSnapshot();
     let pollTimer = null;
     let deadlineTimer = null;
     let probeTimer = null;
     let request2 = null;
     let generation = 0;
-    const listeners10 = /* @__PURE__ */ new Set();
-    function publish9(patch) {
-      snapshot9 = { ...snapshot9, ...patch, revision: snapshot9.revision + 1 };
-      for (const listener of listeners10) listener();
+    const listeners11 = /* @__PURE__ */ new Set();
+    function publish10(patch) {
+      snapshot10 = { ...snapshot10, ...patch, revision: snapshot10.revision + 1 };
+      for (const listener of listeners11) listener();
     }
     function stopPollTimer() {
       if (pollTimer === null) return;
@@ -27158,13 +27158,13 @@
       abortProbe();
     }
     function timeOut(runGeneration) {
-      if (runGeneration !== generation || !snapshot9.open || snapshot9.phase === "ready" || snapshot9.phase === "timed-out") return;
+      if (runGeneration !== generation || !snapshot10.open || snapshot10.phase === "ready" || snapshot10.phase === "timed-out") return;
       stopSchedule();
       abortProbe();
-      publish9({ phase: "timed-out" });
+      publish10({ phase: "timed-out" });
     }
     function failReload(error) {
-      publish9({
+      publish10({
         phase: "timed-out",
         lastError: errorMessage(error)
       });
@@ -27177,14 +27177,14 @@
       }
     }
     async function poll(runGeneration) {
-      if (runGeneration !== generation || !snapshot9.open || snapshot9.phase === "timed-out" || snapshot9.phase === "ready") return;
+      if (runGeneration !== generation || !snapshot10.open || snapshot10.phase === "timed-out" || snapshot10.phase === "ready") return;
       if (request2 !== null) {
         abortProbe(new DOMException("Restart probe timed out.", "TimeoutError"));
       }
       const abort = new AbortController();
       request2 = abort;
-      const attempt = snapshot9.attempts + 1;
-      publish9({ phase: "checking", attempts: attempt, lastError: "" });
+      const attempt = snapshot10.attempts + 1;
+      publish10({ phase: "checking", attempts: attempt, lastError: "" });
       let removeAbortListener = () => {
       };
       const aborted = new Promise((_resolve, reject) => {
@@ -27205,10 +27205,10 @@
           dependencies.repository.loadConfig({ signal: abort.signal }),
           aborted
         ]);
-        if (abort.signal.aborted || runGeneration !== generation || request2 !== abort || !snapshot9.open) return;
-        const readiness = evaluateRestartReadiness(snapshot9.target, config);
+        if (abort.signal.aborted || runGeneration !== generation || request2 !== abort || !snapshot10.open) return;
+        const readiness = evaluateRestartReadiness(snapshot10.target, config);
         becameReady = readiness.ready;
-        publish9({
+        publish10({
           phase: readiness.ready ? "ready" : "waiting",
           readiness,
           lastError: ""
@@ -27218,12 +27218,12 @@
           reloadPage();
         }
       } catch (error) {
-        if (runGeneration !== generation || request2 !== abort || !snapshot9.open) return;
+        if (runGeneration !== generation || request2 !== abort || !snapshot10.open) return;
         if (abort.signal.aborted && abort.signal.reason instanceof DOMException) {
           if (abort.signal.reason.name !== "TimeoutError") return;
-          publish9({ phase: "waiting", lastError: "\u670D\u52A1\u72B6\u6001\u68C0\u67E5\u8D85\u65F6\uFF0C\u6B63\u5728\u91CD\u8BD5\u3002" });
+          publish10({ phase: "waiting", lastError: "\u670D\u52A1\u72B6\u6001\u68C0\u67E5\u8D85\u65F6\uFF0C\u6B63\u5728\u91CD\u8BD5\u3002" });
         } else {
-          publish9({ phase: "waiting", lastError: errorMessage(error) });
+          publish10({ phase: "waiting", lastError: errorMessage(error) });
         }
       } finally {
         removeAbortListener();
@@ -27232,7 +27232,7 @@
           request2 = null;
         }
       }
-      if (!becameReady && runGeneration === generation && snapshot9.open && attempt >= RESTART_MAX_ATTEMPTS) {
+      if (!becameReady && runGeneration === generation && snapshot10.open && attempt >= RESTART_MAX_ATTEMPTS) {
         timeOut(runGeneration);
       }
     }
@@ -27243,7 +27243,7 @@
         previousInstanceId: normalizedText(previousInstanceId),
         expectedVersion: normalizeRestartVersion(expectedVersion)
       };
-      snapshot9 = {
+      snapshot10 = {
         open: true,
         mode,
         phase: "waiting",
@@ -27260,9 +27260,9 @@
           currentVersion: ""
         },
         lastError: "",
-        revision: snapshot9.revision + 1
+        revision: snapshot10.revision + 1
       };
-      for (const listener of listeners10) listener();
+      for (const listener of listeners11) listener();
       const runGeneration = generation;
       pollTimer = dependencies.clock.setInterval(
         () => {
@@ -27295,25 +27295,25 @@
         );
       },
       manualRefresh() {
-        if (!snapshot9.open) return;
+        if (!snapshot10.open) return;
         reloadPage();
       },
       isOpen() {
-        return snapshot9.open;
+        return snapshot10.open;
       },
       subscribe(listener) {
-        listeners10.add(listener);
-        return () => listeners10.delete(listener);
+        listeners11.add(listener);
+        return () => listeners11.delete(listener);
       },
       getSnapshot() {
-        return snapshot9;
+        return snapshot10;
       },
       dispose() {
         generation += 1;
         stopPolling2();
-        if (!snapshot9.open && snapshot9.phase === "idle") return;
-        snapshot9 = blankSnapshot(snapshot9.revision + 1);
-        for (const listener of listeners10) listener();
+        if (!snapshot10.open && snapshot10.phase === "idle") return;
+        snapshot10 = blankSnapshot(snapshot10.revision + 1);
+        for (const listener of listeners11) listener();
       }
     };
   }
@@ -27520,25 +27520,25 @@
   function RestartOverlayHost({
     controller = restartOverlayController
   }) {
-    const snapshot9 = (0, import_react14.useSyncExternalStore)(
+    const snapshot10 = (0, import_react14.useSyncExternalStore)(
       controller.subscribe,
       controller.getSnapshot,
       controller.getSnapshot
     );
-    const presentation = restartOverlayPresentation(snapshot9);
+    const presentation = restartOverlayPresentation(snapshot10);
     const manualRefreshButton = (0, import_react14.useRef)(null);
     (0, import_react14.useEffect)(() => {
-      if (snapshot9.phase !== "timed-out") return;
+      if (snapshot10.phase !== "timed-out") return;
       manualRefreshButton.current?.focus();
-    }, [snapshot9.phase]);
-    const busy = snapshot9.phase === "waiting" || snapshot9.phase === "checking";
-    const progressValue = Math.min(snapshot9.attempts, snapshot9.maxAttempts);
+    }, [snapshot10.phase]);
+    const busy = snapshot10.phase === "waiting" || snapshot10.phase === "checking";
+    const progressValue = Math.min(snapshot10.attempts, snapshot10.maxAttempts);
     return /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)(import_jsx_runtime37.Fragment, { children: [
       /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("style", { "data-wand-restart-overlay-styles": true, children: restartOverlayStyles }),
       /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(
         WandDialogSurface,
         {
-          open: snapshot9.open,
+          open: snapshot10.open,
           onOpenChange: () => {
           },
           title: presentation.title,
@@ -27552,33 +27552,33 @@
           testId: "restart-overlay",
           dismissable: false,
           children: /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)("div", { className: "wand-restart-body", "aria-busy": busy, children: [
-            snapshot9.phase !== "timed-out" ? /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("div", { className: "wand-restart-spinner", "aria-hidden": "true" }) : null,
+            snapshot10.phase !== "timed-out" ? /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("div", { className: "wand-restart-spinner", "aria-hidden": "true" }) : null,
             /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(
               "p",
               {
                 className: "wand-restart-live",
-                role: snapshot9.phase === "timed-out" ? "alert" : "status",
-                "aria-live": snapshot9.phase === "timed-out" ? "assertive" : "polite",
+                role: snapshot10.phase === "timed-out" ? "alert" : "status",
+                "aria-live": snapshot10.phase === "timed-out" ? "assertive" : "polite",
                 "data-wand-autofocus": "true",
                 tabIndex: -1,
                 children: presentation.liveStatus
               }
             ),
-            snapshot9.phase !== "timed-out" ? /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)(import_jsx_runtime37.Fragment, { children: [
+            snapshot10.phase !== "timed-out" ? /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)(import_jsx_runtime37.Fragment, { children: [
               /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(
                 "progress",
                 {
                   className: "wand-restart-progress",
-                  max: snapshot9.maxAttempts,
+                  max: snapshot10.maxAttempts,
                   value: progressValue,
                   "aria-label": "\u7B49\u5F85\u670D\u52A1\u91CD\u542F\u8FDB\u5EA6"
                 }
               ),
               /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)("span", { className: "wand-restart-attempts", children: [
                 "\u5DF2\u68C0\u67E5 ",
-                snapshot9.attempts,
+                snapshot10.attempts,
                 " / ",
-                snapshot9.maxAttempts,
+                snapshot10.maxAttempts,
                 " \u6B21"
               ] })
             ] }) : /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(
@@ -28104,26 +28104,26 @@
     }
   };
   function createFilePreviewModule(options) {
-    const listeners10 = /* @__PURE__ */ new Set();
-    let snapshot9 = initialSnapshot();
+    const listeners11 = /* @__PURE__ */ new Set();
+    let snapshot10 = initialSnapshot();
     let runtime11 = options.runtime ?? defaultRuntime;
     let loadSequence = 0;
     let activeAbort = null;
-    function publish9(patch) {
-      snapshot9 = { ...snapshot9, ...patch, revision: snapshot9.revision + 1 };
-      for (const listener of listeners10) listener();
+    function publish10(patch) {
+      snapshot10 = { ...snapshot10, ...patch, revision: snapshot10.revision + 1 };
+      for (const listener of listeners11) listener();
     }
     function closeNow() {
       activeAbort?.abort();
       activeAbort = null;
       loadSequence += 1;
-      snapshot9 = initialSnapshot(snapshot9.revision + 1);
-      for (const listener of listeners10) listener();
+      snapshot10 = initialSnapshot(snapshot10.revision + 1);
+      for (const listener of listeners11) listener();
     }
     async function confirmDiscard(reason) {
-      if (!snapshot9.dirty || !snapshot9.request) return true;
+      if (!snapshot10.dirty || !snapshot10.request) return true;
       try {
-        return await runtime11.confirmDiscard(reason, snapshot9.request.path);
+        return await runtime11.confirmDiscard(reason, snapshot10.request.path);
       } catch (error) {
         runtime11.notify(unknownFailure(error, "\u65E0\u6CD5\u786E\u8BA4\u662F\u5426\u653E\u5F03\u4FEE\u6539\u3002").message, "error");
         return false;
@@ -28134,7 +28134,7 @@
       const abort = new AbortController();
       activeAbort = abort;
       const sequence = ++loadSequence;
-      publish9({
+      publish10({
         open: true,
         request: request2,
         status: "loading",
@@ -28151,14 +28151,14 @@
       });
       try {
         const outcome = await options.repository.load(request2.path, { signal: abort.signal });
-        if (sequence !== loadSequence || abort.signal.aborted || !snapshot9.open) return false;
+        if (sequence !== loadSequence || abort.signal.aborted || !snapshot10.open) return false;
         activeAbort = null;
         if (outcome.ok === false) {
-          publish9({ status: "error", failure: outcome.failure });
+          publish10({ status: "error", failure: outcome.failure });
           return false;
         }
         const baseline = outcome.file.kind === "text" ? outcome.file.content ?? "" : "";
-        publish9({
+        publish10({
           status: "ready",
           file: outcome.file,
           failure: null,
@@ -28167,9 +28167,9 @@
         });
         return true;
       } catch (error) {
-        if (sequence !== loadSequence || abort.signal.aborted || isAbort(error) || !snapshot9.open) return false;
+        if (sequence !== loadSequence || abort.signal.aborted || isAbort(error) || !snapshot10.open) return false;
         activeAbort = null;
-        publish9({ status: "error", failure: unknownFailure(error, "\u52A0\u8F7D\u9884\u89C8\u5931\u8D25") });
+        publish10({ status: "error", failure: unknownFailure(error, "\u52A0\u8F7D\u9884\u89C8\u5931\u8D25") });
         return false;
       }
     }
@@ -28184,11 +28184,11 @@
       }
     }
     async function execute(command) {
-      if (!snapshot9.open) return false;
+      if (!snapshot10.open) return false;
       switch (command.type) {
         case "close": {
-          if (snapshot9.saving) return false;
-          if (!snapshot9.dirty) {
+          if (snapshot10.saving) return false;
+          if (!snapshot10.dirty) {
             closeNow();
             return true;
           }
@@ -28197,52 +28197,52 @@
           return true;
         }
         case "navigate": {
-          if (snapshot9.editing || snapshot9.saving) return false;
-          const sibling = nextFilePreviewSibling(snapshot9.request, command.direction);
-          if (!sibling || !snapshot9.request) return false;
-          return load({ ...snapshot9.request, path: sibling.path });
+          if (snapshot10.editing || snapshot10.saving) return false;
+          const sibling = nextFilePreviewSibling(snapshot10.request, command.direction);
+          if (!sibling || !snapshot10.request) return false;
+          return load({ ...snapshot10.request, path: sibling.path });
         }
         case "edit.enter": {
-          if (snapshot9.status !== "ready" || snapshot9.file?.kind !== "text" || snapshot9.saving) return false;
-          const baseline = snapshot9.file.content ?? "";
-          publish9({ editing: true, draft: baseline, baseline, dirty: false, failure: null });
+          if (snapshot10.status !== "ready" || snapshot10.file?.kind !== "text" || snapshot10.saving) return false;
+          const baseline = snapshot10.file.content ?? "";
+          publish10({ editing: true, draft: baseline, baseline, dirty: false, failure: null });
           return true;
         }
         case "edit.change": {
-          if (!snapshot9.editing || snapshot9.saving) return false;
-          publish9({ draft: command.value, dirty: command.value !== snapshot9.baseline, failure: null });
+          if (!snapshot10.editing || snapshot10.saving) return false;
+          publish10({ draft: command.value, dirty: command.value !== snapshot10.baseline, failure: null });
           return true;
         }
         case "edit.revert": {
-          if (!snapshot9.editing || snapshot9.saving) return false;
-          publish9({ draft: snapshot9.baseline, dirty: false, failure: null });
+          if (!snapshot10.editing || snapshot10.saving) return false;
+          publish10({ draft: snapshot10.baseline, dirty: false, failure: null });
           return true;
         }
         case "edit.exit": {
-          if (!snapshot9.editing || snapshot9.saving) return false;
+          if (!snapshot10.editing || snapshot10.saving) return false;
           if (!await confirmDiscard("exit-edit")) return false;
-          publish9({ editing: false, draft: snapshot9.baseline, dirty: false, failure: null });
+          publish10({ editing: false, draft: snapshot10.baseline, dirty: false, failure: null });
           return true;
         }
         case "edit.save": {
-          if (!snapshot9.editing || snapshot9.saving || snapshot9.file?.kind !== "text" || !snapshot9.request) return false;
-          if (snapshot9.draft === snapshot9.baseline) {
+          if (!snapshot10.editing || snapshot10.saving || snapshot10.file?.kind !== "text" || !snapshot10.request) return false;
+          if (snapshot10.draft === snapshot10.baseline) {
             runtime11.notify("\u6CA1\u6709\u6539\u52A8", "info");
             return true;
           }
-          const path = snapshot9.request.path;
-          const draft = snapshot9.draft;
-          publish9({ saving: true, failure: null });
+          const path = snapshot10.request.path;
+          const draft = snapshot10.draft;
+          publish10({ saving: true, failure: null });
           try {
             const outcome = await options.repository.save(path, draft);
-            if (!snapshot9.open || snapshot9.request?.path !== path) return false;
+            if (!snapshot10.open || snapshot10.request?.path !== path) return false;
             if (outcome.ok === false) {
-              publish9({ saving: false, failure: outcome.failure });
+              publish10({ saving: false, failure: outcome.failure });
               runtime11.notify(outcome.failure.message, "error");
               return false;
             }
-            const currentFile = snapshot9.file;
-            publish9({
+            const currentFile = snapshot10.file;
+            publish10({
               saving: false,
               file: currentFile ? { ...currentFile, content: draft, size: outcome.result.size } : currentFile,
               baseline: draft,
@@ -28257,40 +28257,40 @@
             }
             return true;
           } catch (error) {
-            if (!snapshot9.open || snapshot9.request?.path !== path) return false;
+            if (!snapshot10.open || snapshot10.request?.path !== path) return false;
             const failure = unknownFailure(error, "\u4FDD\u5B58\u5931\u8D25\uFF1A\u7F51\u7EDC\u9519\u8BEF");
-            publish9({ saving: false, failure });
+            publish10({ saving: false, failure });
             runtime11.notify(failure.message, "error");
             return false;
           }
         }
         case "copy.path":
-          return snapshot9.file ? copy(snapshot9.file.path, "\u5DF2\u590D\u5236\u8DEF\u5F84") : false;
+          return snapshot10.file ? copy(snapshot10.file.path, "\u5DF2\u590D\u5236\u8DEF\u5F84") : false;
         case "copy.content":
-          return snapshot9.file?.kind === "text" ? copy(snapshot9.file.content ?? "", "\u5DF2\u590D\u5236\u5185\u5BB9") : false;
+          return snapshot10.file?.kind === "text" ? copy(snapshot10.file.content ?? "", "\u5DF2\u590D\u5236\u5185\u5BB9") : false;
         case "composer.path": {
-          if (!snapshot9.file) return false;
-          const appended = runtime11.appendToComposer(snapshot9.file.path);
+          if (!snapshot10.file) return false;
+          const appended = runtime11.appendToComposer(snapshot10.file.path);
           runtime11.notify(appended ? "\u5DF2\u7C98\u8D34\u5230\u8F93\u5165\u6846" : "\u65E0\u6CD5\u7C98\u8D34\u5230\u8F93\u5165\u6846", appended ? "success" : "error");
           return appended;
         }
         case "composer.cat": {
-          if (!snapshot9.file) return false;
-          const appended = runtime11.appendToComposer(`cat -- ${shellQuoteFilePath(snapshot9.file.path)}`);
+          if (!snapshot10.file) return false;
+          const appended = runtime11.appendToComposer(`cat -- ${shellQuoteFilePath(snapshot10.file.path)}`);
           runtime11.notify(appended ? "\u547D\u4EE4\u5DF2\u7C98\u8D34\u5230\u8F93\u5165\u6846" : "\u65E0\u6CD5\u7C98\u8D34\u5230\u8F93\u5165\u6846", appended ? "success" : "error");
           return appended;
         }
         case "view.wrap.toggle":
-          if (snapshot9.file?.kind !== "text" || snapshot9.editing) return false;
-          publish9({ wrap: !snapshot9.wrap });
+          if (snapshot10.file?.kind !== "text" || snapshot10.editing) return false;
+          publish10({ wrap: !snapshot10.wrap });
           return true;
         case "view.font.adjust":
-          if (snapshot9.file?.kind !== "text" || snapshot9.editing) return false;
-          publish9({ fontSize: clampFilePreviewFontSize(snapshot9.fontSize + command.delta) });
+          if (snapshot10.file?.kind !== "text" || snapshot10.editing) return false;
+          publish10({ fontSize: clampFilePreviewFontSize(snapshot10.fontSize + command.delta) });
           return true;
         case "view.image.zoom.toggle":
-          if (snapshot9.file?.kind !== "image" || snapshot9.editing) return false;
-          publish9({ imageZoomed: !snapshot9.imageZoomed });
+          if (snapshot10.file?.kind !== "image" || snapshot10.editing) return false;
+          publish10({ imageZoomed: !snapshot10.imageZoomed });
           return true;
       }
     }
@@ -28298,16 +28298,16 @@
       async open(input) {
         const request2 = normalizeFilePreviewRequest(input);
         if (!request2) return false;
-        if (snapshot9.open && snapshot9.request?.path === request2.path && !snapshot9.dirty) {
-          publish9({ request: request2 });
+        if (snapshot10.open && snapshot10.request?.path === request2.path && !snapshot10.dirty) {
+          publish10({ request: request2 });
           return true;
         }
-        if (snapshot9.open && snapshot9.dirty && !await confirmDiscard("replace")) return false;
+        if (snapshot10.open && snapshot10.dirty && !await confirmDiscard("replace")) return false;
         return load(request2);
       },
       execute,
       closeIfOpen() {
-        if (!snapshot9.open) return false;
+        if (!snapshot10.open) return false;
         void execute({ type: "close" });
         return true;
       },
@@ -28315,18 +28315,18 @@
         return this.closeIfOpen();
       },
       isOpen() {
-        return snapshot9.open;
+        return snapshot10.open;
       }
     };
     return {
       controller,
       store: {
         subscribe(listener) {
-          listeners10.add(listener);
-          return () => listeners10.delete(listener);
+          listeners11.add(listener);
+          return () => listeners11.delete(listener);
         },
         getSnapshot() {
-          return snapshot9;
+          return snapshot10;
         }
       },
       configureRuntime(adapter) {
@@ -28793,26 +28793,26 @@
         return /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("hr", {});
     }
   }
-  function TextPreview({ snapshot: snapshot9, file }) {
+  function TextPreview({ snapshot: snapshot10, file }) {
     const content = file.content ?? "";
     if (isMarkdownPreview(file)) {
       return /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(
         "div",
         {
-          className: `wand-file-preview-markdown${snapshot9.wrap ? " wrap" : ""}`,
-          style: { fontSize: `${snapshot9.fontSize}px` },
+          className: `wand-file-preview-markdown${snapshot10.wrap ? " wrap" : ""}`,
+          style: { fontSize: `${snapshot10.fontSize}px` },
           children: parseFilePreviewMarkdown(content).map((block, index2) => /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(MarkdownBlock, { block }, index2))
         }
       );
     }
     const lineCount = Math.max(1, content.split("\n").length);
-    return /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: `wand-file-preview-code${snapshot9.wrap ? " wrap" : ""}`, children: [
+    return /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: `wand-file-preview-code${snapshot10.wrap ? " wrap" : ""}`, children: [
       /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(
         "pre",
         {
           "aria-hidden": "true",
           className: "wand-file-preview-lines",
-          style: { fontSize: `${snapshot9.fontSize}px` },
+          style: { fontSize: `${snapshot10.fontSize}px` },
           children: Array.from({ length: lineCount }, (_value, index2) => index2 + 1).join("\n")
         }
       ),
@@ -28820,7 +28820,7 @@
         "pre",
         {
           className: "wand-file-preview-code-content",
-          style: { fontSize: `${snapshot9.fontSize}px` },
+          style: { fontSize: `${snapshot10.fontSize}px` },
           children: /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("code", { children: /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(CodeTokens, { tokens: tokenizeFilePreviewCode(content) }) })
         }
       )
@@ -28842,24 +28842,24 @@
       ] })
     ] });
   }
-  function PreviewBody({ snapshot: snapshot9, editorRef }) {
-    if (snapshot9.status === "loading") {
+  function PreviewBody({ snapshot: snapshot10, editorRef }) {
+    if (snapshot10.status === "loading") {
       return /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("div", { className: "wand-file-preview-state", role: "status", children: "\u6B63\u5728\u52A0\u8F7D\u9884\u89C8\u2026" });
     }
-    if (snapshot9.status === "error") {
+    if (snapshot10.status === "error") {
       return /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: "wand-file-preview-state wand-file-preview-error", role: "alert", children: [
         /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { "aria-hidden": "true", children: "!" }),
-        /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("strong", { children: snapshot9.failure?.message || "\u52A0\u8F7D\u9884\u89C8\u5931\u8D25" }),
-        snapshot9.failure?.size != null ? /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("small", { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("strong", { children: snapshot10.failure?.message || "\u52A0\u8F7D\u9884\u89C8\u5931\u8D25" }),
+        snapshot10.failure?.size != null ? /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("small", { children: [
           "\u6587\u4EF6\u5927\u5C0F\uFF1A",
-          formatFilePreviewSize(snapshot9.failure.size)
+          formatFilePreviewSize(snapshot10.failure.size)
         ] }) : null,
-        snapshot9.failure?.download ? /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(DownloadLink, { file: snapshot9.failure.download, label: "\u4ECD\u7136\u4E0B\u8F7D\u6587\u4EF6" }) : null
+        snapshot10.failure?.download ? /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(DownloadLink, { file: snapshot10.failure.download, label: "\u4ECD\u7136\u4E0B\u8F7D\u6587\u4EF6" }) : null
       ] });
     }
-    const file = snapshot9.file;
+    const file = snapshot10.file;
     if (!file) return /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("div", { className: "wand-file-preview-state", children: "\u9009\u62E9\u6587\u4EF6\u540E\u5C06\u5728\u8FD9\u91CC\u663E\u793A\u9884\u89C8\u3002" });
-    if (snapshot9.editing) {
+    if (snapshot10.editing) {
       return /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("div", { className: "wand-file-preview-editor", children: /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(
         "textarea",
         {
@@ -28870,7 +28870,7 @@
           autoCapitalize: "off",
           spellCheck: false,
           wrap: "off",
-          value: snapshot9.draft,
+          value: snapshot10.draft,
           onChange: (event) => run({ type: "edit.change", value: event.currentTarget.value }),
           onKeyDown: (event) => {
             if (event.key !== "Tab") return;
@@ -28878,7 +28878,7 @@
             const input = event.currentTarget;
             const start = input.selectionStart;
             const end = input.selectionEnd;
-            const value = `${snapshot9.draft.slice(0, start)}  ${snapshot9.draft.slice(end)}`;
+            const value = `${snapshot10.draft.slice(0, start)}  ${snapshot10.draft.slice(end)}`;
             run({ type: "edit.change", value });
             requestAnimationFrame(() => {
               input.selectionStart = start + 2;
@@ -28894,8 +28894,8 @@
           "button",
           {
             type: "button",
-            className: `wand-file-preview-image${snapshot9.imageZoomed ? " zoomed" : ""}`,
-            "aria-label": snapshot9.imageZoomed ? "\u7F29\u5C0F\u56FE\u7247" : "\u653E\u5927\u56FE\u7247",
+            className: `wand-file-preview-image${snapshot10.imageZoomed ? " zoomed" : ""}`,
+            "aria-label": snapshot10.imageZoomed ? "\u7F29\u5C0F\u56FE\u7247" : "\u653E\u5927\u56FE\u7247",
             onClick: () => run({ type: "view.image.zoom.toggle" }),
             children: /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("img", { src: file.rawUrl, alt: file.name })
           }
@@ -28917,14 +28917,14 @@
       case "binary":
         return /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(BinaryPreview, { file });
       default:
-        return /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(TextPreview, { snapshot: snapshot9, file });
+        return /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(TextPreview, { snapshot: snapshot10, file });
     }
   }
-  function PreviewToolbar({ snapshot: snapshot9 }) {
-    const previous = nextFilePreviewSibling(snapshot9.request, -1);
-    const next = nextFilePreviewSibling(snapshot9.request, 1);
-    const file = snapshot9.file;
-    return /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: `wand-file-preview-toolbar${snapshot9.editing ? " editing" : ""}`, "aria-label": "\u6587\u4EF6\u9884\u89C8\u5DE5\u5177\u680F", children: [
+  function PreviewToolbar({ snapshot: snapshot10 }) {
+    const previous = nextFilePreviewSibling(snapshot10.request, -1);
+    const next = nextFilePreviewSibling(snapshot10.request, 1);
+    const file = snapshot10.file;
+    return /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: `wand-file-preview-toolbar${snapshot10.editing ? " editing" : ""}`, "aria-label": "\u6587\u4EF6\u9884\u89C8\u5DE5\u5177\u680F", children: [
       /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: "wand-file-preview-toolbar-group", children: [
         /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(
           WandButton,
@@ -28933,7 +28933,7 @@
             kind: "ghost",
             "aria-label": "\u4E0A\u4E00\u4E2A\u6587\u4EF6",
             title: previous ? `\u4E0A\u4E00\u4E2A\u6587\u4EF6\uFF1A${previous.name}` : "\u6CA1\u6709\u4E0A\u4E00\u4E2A\u6587\u4EF6",
-            disabled: !previous || snapshot9.editing || snapshot9.saving,
+            disabled: !previous || snapshot10.editing || snapshot10.saving,
             onClick: () => run({ type: "navigate", direction: -1 }),
             children: "\u2190"
           }
@@ -28945,16 +28945,16 @@
             kind: "ghost",
             "aria-label": "\u4E0B\u4E00\u4E2A\u6587\u4EF6",
             title: next ? `\u4E0B\u4E00\u4E2A\u6587\u4EF6\uFF1A${next.name}` : "\u6CA1\u6709\u4E0B\u4E00\u4E2A\u6587\u4EF6",
-            disabled: !next || snapshot9.editing || snapshot9.saving,
+            disabled: !next || snapshot10.editing || snapshot10.saving,
             onClick: () => run({ type: "navigate", direction: 1 }),
             children: "\u2192"
           }
         )
       ] }),
-      snapshot9.editing ? /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: "wand-file-preview-toolbar-group wand-file-preview-edit-actions", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(WandButton, { kind: "primary", size: "small", disabled: snapshot9.saving, onClick: () => run({ type: "edit.save" }), children: snapshot9.saving ? "\u4FDD\u5B58\u4E2D\u2026" : "\u4FDD\u5B58" }),
-        /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(WandButton, { size: "small", disabled: snapshot9.saving || !snapshot9.dirty, onClick: () => run({ type: "edit.revert" }), children: "\u64A4\u9500\u6539\u52A8" }),
-        /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(WandButton, { size: "small", disabled: snapshot9.saving, onClick: () => run({ type: "edit.exit" }), children: "\u9000\u51FA\u7F16\u8F91" })
+      snapshot10.editing ? /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: "wand-file-preview-toolbar-group wand-file-preview-edit-actions", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(WandButton, { kind: "primary", size: "small", disabled: snapshot10.saving, onClick: () => run({ type: "edit.save" }), children: snapshot10.saving ? "\u4FDD\u5B58\u4E2D\u2026" : "\u4FDD\u5B58" }),
+        /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(WandButton, { size: "small", disabled: snapshot10.saving || !snapshot10.dirty, onClick: () => run({ type: "edit.revert" }), children: "\u64A4\u9500\u6539\u52A8" }),
+        /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(WandButton, { size: "small", disabled: snapshot10.saving, onClick: () => run({ type: "edit.exit" }), children: "\u9000\u51FA\u7F16\u8F91" })
       ] }) : file ? /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)(import_jsx_runtime38.Fragment, { children: [
         /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: "wand-file-preview-toolbar-group", children: [
           file.kind === "text" ? /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(WandButton, { kind: "primary", size: "small", onClick: () => run({ type: "edit.enter" }), children: "\u7F16\u8F91" }) : null,
@@ -28968,39 +28968,39 @@
             WandButton,
             {
               size: "small",
-              kind: snapshot9.wrap ? "primary" : "secondary",
-              "aria-pressed": snapshot9.wrap,
+              kind: snapshot10.wrap ? "primary" : "secondary",
+              "aria-pressed": snapshot10.wrap,
               onClick: () => run({ type: "view.wrap.toggle" }),
               children: "\u81EA\u52A8\u6362\u884C"
             }
           ),
           /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(WandButton, { size: "small", "aria-label": "\u7F29\u5C0F\u5B57\u53F7", onClick: () => run({ type: "view.font.adjust", delta: -1 }), children: "A\u2212" }),
-          /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { className: "wand-file-preview-font-size", "aria-label": `\u5B57\u53F7 ${snapshot9.fontSize}`, children: snapshot9.fontSize }),
+          /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { className: "wand-file-preview-font-size", "aria-label": `\u5B57\u53F7 ${snapshot10.fontSize}`, children: snapshot10.fontSize }),
           /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(WandButton, { size: "small", "aria-label": "\u653E\u5927\u5B57\u53F7", onClick: () => run({ type: "view.font.adjust", delta: 1 }), children: "A+" })
         ] }) : null
-      ] }) : snapshot9.failure?.download ? /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(DownloadLink, { file: snapshot9.failure.download }) : null
+      ] }) : snapshot10.failure?.download ? /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(DownloadLink, { file: snapshot10.failure.download }) : null
     ] });
   }
   function FilePreviewHost() {
-    const snapshot9 = (0, import_react15.useSyncExternalStore)(
+    const snapshot10 = (0, import_react15.useSyncExternalStore)(
       filePreviewStore.subscribe,
       filePreviewStore.getSnapshot,
       filePreviewStore.getSnapshot
     );
     const editorRef = (0, import_react15.useRef)(null);
     (0, import_react15.useEffect)(() => {
-      if (!snapshot9.editing) return;
+      if (!snapshot10.editing) return;
       const editor = editorRef.current;
       if (!editor) return;
       editor.focus();
       editor.setSelectionRange(0, 0);
       editor.scrollTop = 0;
-    }, [snapshot9.editing]);
-    const path = snapshot9.request?.path ?? "";
-    const title = snapshot9.file?.name || (path ? fileNameFromPath(path) : "\u6587\u4EF6\u9884\u89C8");
-    const file = snapshot9.file;
+    }, [snapshot10.editing]);
+    const path = snapshot10.request?.path ?? "";
+    const title = snapshot10.file?.name || (path ? fileNameFromPath(path) : "\u6587\u4EF6\u9884\u89C8");
+    const file = snapshot10.file;
     function handleKeyboard(event) {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s" && snapshot9.editing) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s" && snapshot10.editing) {
         event.preventDefault();
         event.stopPropagation();
         run({ type: "edit.save" });
@@ -29009,12 +29009,12 @@
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
-        run({ type: snapshot9.editing ? "edit.exit" : "close" });
+        run({ type: snapshot10.editing ? "edit.exit" : "close" });
         return;
       }
       const target = event.target;
       if (target instanceof HTMLElement && (target.matches("input, textarea") || target.isContentEditable)) return;
-      if (snapshot9.editing) return;
+      if (snapshot10.editing) return;
       if (event.key === "ArrowLeft") {
         event.preventDefault();
         run({ type: "navigate", direction: -1 });
@@ -29031,7 +29031,7 @@
       /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(
         WandDialogSurface,
         {
-          open: snapshot9.open,
+          open: snapshot10.open,
           onOpenChange: (open) => {
             if (!open) run({ type: "close" });
           },
@@ -29044,7 +29044,7 @@
           headerClassName: "wand-ui-dialog-heading wand-file-preview-header",
           closeLabel: "\u5173\u95ED\u6587\u4EF6\u9884\u89C8",
           testId: "file-preview-dialog",
-          dismissable: !snapshot9.saving && !snapshot9.editing,
+          dismissable: !snapshot10.saving && !snapshot10.editing,
           children: /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)(
             "div",
             {
@@ -29056,11 +29056,11 @@
                 /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: "wand-file-preview-title-meta", "aria-live": "polite", children: [
                   /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { className: "wand-file-preview-kind-icon", "aria-hidden": "true", children: file ? filePreviewIcon(file.kind) : "\u2026" }),
                   file ? /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { className: "wand-file-preview-kind", children: filePreviewKindLabel(file) }) : null,
-                  snapshot9.dirty ? /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { className: "wand-file-preview-dirty", children: "\u25CF \u672A\u4FDD\u5B58" }) : null
+                  snapshot10.dirty ? /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { className: "wand-file-preview-dirty", children: "\u25CF \u672A\u4FDD\u5B58" }) : null
                 ] }),
-                /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(PreviewToolbar, { snapshot: snapshot9 }),
-                snapshot9.status === "ready" && snapshot9.failure ? /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("p", { className: "wand-file-preview-inline-error", role: "alert", children: snapshot9.failure.message }) : null,
-                /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("div", { className: `wand-file-preview-body kind-${file?.kind ?? snapshot9.status}`, children: /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(PreviewBody, { snapshot: snapshot9, editorRef }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(PreviewToolbar, { snapshot: snapshot10 }),
+                snapshot10.status === "ready" && snapshot10.failure ? /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("p", { className: "wand-file-preview-inline-error", role: "alert", children: snapshot10.failure.message }) : null,
+                /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("div", { className: `wand-file-preview-body kind-${file?.kind ?? snapshot10.status}`, children: /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(PreviewBody, { snapshot: snapshot10, editorRef }) }),
                 file ? /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("footer", { className: "wand-file-preview-metadata", "aria-label": "\u6587\u4EF6\u5143\u6570\u636E", children: [
                   /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { children: formatFilePreviewSize(file.size) }),
                   /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { children: file.mime || file.ext.replace(/^\./, "") || file.kind }),
@@ -29110,12 +29110,12 @@
   // src/web-ui/react/composer-select/host.tsx
   var import_jsx_runtime39 = __toESM(require_jsx_runtime(), 1);
   function ComposerSelectHost() {
-    const snapshot9 = (0, import_react16.useSyncExternalStore)(
+    const snapshot10 = (0, import_react16.useSyncExternalStore)(
       composerSelectController.subscribe,
       composerSelectController.getSnapshot,
       composerSelectController.getSnapshot
     );
-    return snapshot9.mounts.map((mount) => (0, import_react_dom3.createPortal)(
+    return snapshot10.mounts.map((mount) => (0, import_react_dom3.createPortal)(
       /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(
         WandSelect,
         {
@@ -34152,15 +34152,15 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     }
   };
   function createCodeEditorModule(options) {
-    const listeners10 = /* @__PURE__ */ new Set();
-    let snapshot9 = initialSnapshot2();
+    const listeners11 = /* @__PURE__ */ new Set();
+    let snapshot10 = initialSnapshot2();
     let runtime11 = options.runtime ?? defaultRuntime2;
     let loadSequence = 0;
     let activeAbort = null;
     const files = /* @__PURE__ */ new Map();
-    function publish9(patch) {
-      snapshot9 = { ...snapshot9, ...patch, revision: snapshot9.revision + 1 };
-      for (const listener of listeners10) listener();
+    function publish10(patch) {
+      snapshot10 = { ...snapshot10, ...patch, revision: snapshot10.revision + 1 };
+      for (const listener of listeners11) listener();
     }
     function tabsFromFiles(activePath) {
       const tabs = [];
@@ -34171,13 +34171,13 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       return tabs;
     }
     function syncSnapshot(fileOverride) {
-      publish9({
-        tabs: tabsFromFiles(snapshot9.activePath),
-        file: fileOverride !== void 0 ? fileOverride : snapshot9.activePath ? files.get(snapshot9.activePath) ?? null : null
+      publish10({
+        tabs: tabsFromFiles(snapshot10.activePath),
+        file: fileOverride !== void 0 ? fileOverride : snapshot10.activePath ? files.get(snapshot10.activePath) ?? null : null
       });
     }
     async function confirmDiscard(reason) {
-      const active = snapshot9.activePath ? files.get(snapshot9.activePath) : null;
+      const active = snapshot10.activePath ? files.get(snapshot10.activePath) : null;
       if (!active || !active.dirty) return true;
       try {
         return await runtime11.confirmDiscard(reason, active.path);
@@ -34191,7 +34191,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       const abort = new AbortController();
       activeAbort = abort;
       const sequence = ++loadSequence;
-      publish9({
+      publish10({
         open: true,
         activePath: path,
         status: "loading",
@@ -34200,14 +34200,14 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       });
       try {
         const outcome = await options.repository.load(path, { signal: abort.signal });
-        if (sequence !== loadSequence || abort.signal.aborted || !snapshot9.open) return false;
+        if (sequence !== loadSequence || abort.signal.aborted || !snapshot10.open) return false;
         activeAbort = null;
         if (outcome.ok === false || !outcome.file) {
-          publish9({ status: "error", failure: outcome.failure ?? { message: "\u6253\u5F00\u6587\u4EF6\u5931\u8D25" } });
+          publish10({ status: "error", failure: outcome.failure ?? { message: "\u6253\u5F00\u6587\u4EF6\u5931\u8D25" } });
           return false;
         }
         files.set(path, outcome.file);
-        publish9({
+        publish10({
           status: "ready",
           file: outcome.file,
           failure: null,
@@ -34215,31 +34215,31 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         });
         return true;
       } catch (error) {
-        if (sequence !== loadSequence || abort.signal.aborted || isAbort2(error) || !snapshot9.open) return false;
+        if (sequence !== loadSequence || abort.signal.aborted || isAbort2(error) || !snapshot10.open) return false;
         activeAbort = null;
-        publish9({ status: "error", failure: unknownFailure2(error, "\u6253\u5F00\u6587\u4EF6\u5931\u8D25") });
+        publish10({ status: "error", failure: unknownFailure2(error, "\u6253\u5F00\u6587\u4EF6\u5931\u8D25") });
         return false;
       }
     }
     async function execute(command) {
       switch (command.type) {
         case "close": {
-          if (snapshot9.saving) return false;
-          const targetPath = command.path ?? snapshot9.activePath;
+          if (snapshot10.saving) return false;
+          const targetPath = command.path ?? snapshot10.activePath;
           if (!targetPath) return true;
           const target = files.get(targetPath);
           if (target?.dirty) {
-            const wasActive = snapshot9.activePath === targetPath;
+            const wasActive = snapshot10.activePath === targetPath;
             if (wasActive && !await confirmDiscard("close")) return false;
           }
           files.delete(targetPath);
           const remaining = tabsFromFiles(null).filter((tab) => tab.path !== targetPath);
           if (remaining.length === 0) {
-            publish9(initialSnapshot2(snapshot9.revision + 1));
+            publish10(initialSnapshot2(snapshot10.revision + 1));
             return true;
           }
-          const nextActive = snapshot9.activePath === targetPath ? remaining[0].path : snapshot9.activePath;
-          publish9({
+          const nextActive = snapshot10.activePath === targetPath ? remaining[0].path : snapshot10.activePath;
+          publish10({
             activePath: nextActive,
             file: nextActive ? files.get(nextActive) ?? null : null,
             tabs: remaining,
@@ -34248,10 +34248,10 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           return true;
         }
         case "activate": {
-          if (snapshot9.saving) return false;
-          if (snapshot9.activePath === command.path) return true;
+          if (snapshot10.saving) return false;
+          if (snapshot10.activePath === command.path) return true;
           const next = files.get(command.path) ?? null;
-          publish9({
+          publish10({
             activePath: command.path,
             file: next,
             status: next ? "ready" : "loading",
@@ -34263,8 +34263,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           return true;
         }
         case "change": {
-          if (!snapshot9.activePath || snapshot9.saving) return false;
-          const active = files.get(snapshot9.activePath);
+          if (!snapshot10.activePath || snapshot10.saving) return false;
+          const active = files.get(snapshot10.activePath);
           if (!active) return false;
           const updated = { ...active, draft: command.value, dirty: command.value !== active.baseline };
           files.set(active.path, updated);
@@ -34272,8 +34272,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           return true;
         }
         case "revert": {
-          if (!snapshot9.activePath) return false;
-          const active = files.get(snapshot9.activePath);
+          if (!snapshot10.activePath) return false;
+          const active = files.get(snapshot10.activePath);
           if (!active) return false;
           const reverted = { ...active, draft: active.baseline, dirty: false };
           files.set(active.path, reverted);
@@ -34281,20 +34281,20 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           return true;
         }
         case "save": {
-          if (!snapshot9.activePath || snapshot9.saving) return false;
-          const active = files.get(snapshot9.activePath);
+          if (!snapshot10.activePath || snapshot10.saving) return false;
+          const active = files.get(snapshot10.activePath);
           if (!active) return false;
           if (!active.dirty) {
             runtime11.notify("\u6CA1\u6709\u6539\u52A8", "info");
             return true;
           }
-          publish9({ saving: true, failure: null });
+          publish10({ saving: true, failure: null });
           try {
             const outcome = await options.repository.save(active.path, active.draft);
             const current = files.get(active.path) ?? null;
             if (!current) return false;
             if (outcome.ok === false) {
-              publish9({ saving: false, failure: outcome.failure });
+              publish10({ saving: false, failure: outcome.failure });
               runtime11.notify(outcome.failure.message, "error");
               return false;
             }
@@ -34308,8 +34308,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
               size: outcome.result.size
             };
             files.set(active.path, saved);
-            const activeFile = snapshot9.activePath ? files.get(snapshot9.activePath) ?? null : null;
-            publish9({ saving: false, file: activeFile, failure: null, tabs: tabsFromFiles(snapshot9.activePath) });
+            const activeFile = snapshot10.activePath ? files.get(snapshot10.activePath) ?? null : null;
+            publish10({ saving: false, file: activeFile, failure: null, tabs: tabsFromFiles(snapshot10.activePath) });
             runtime11.notify("\u5DF2\u4FDD\u5B58", "success");
             try {
               await runtime11.onSaved?.(active.path);
@@ -34317,26 +34317,26 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
             }
             return true;
           } catch (error) {
-            publish9({ saving: false, failure: unknownFailure2(error, "\u4FDD\u5B58\u5931\u8D25\uFF1A\u7F51\u7EDC\u9519\u8BEF") });
+            publish10({ saving: false, failure: unknownFailure2(error, "\u4FDD\u5B58\u5931\u8D25\uFF1A\u7F51\u7EDC\u9519\u8BEF") });
             runtime11.notify(unknownFailure2(error, "\u4FDD\u5B58\u5931\u8D25\uFF1A\u7F51\u7EDC\u9519\u8BEF").message, "error");
             return false;
           }
         }
         case "wrap.toggle":
-          publish9({ wrap: !snapshot9.wrap });
+          publish10({ wrap: !snapshot10.wrap });
           return true;
         case "font.adjust":
-          publish9({ fontSize: clampFilePreviewFontSize(snapshot9.fontSize + command.delta) });
+          publish10({ fontSize: clampFilePreviewFontSize(snapshot10.fontSize + command.delta) });
           return true;
       }
     }
     const controller = {
       async open(path) {
         const trimmed = path.trim();
-        if (!trimmed || snapshot9.saving) return false;
+        if (!trimmed || snapshot10.saving) return false;
         if (files.has(trimmed)) {
-          if (snapshot9.activePath === trimmed) {
-            publish9({ open: true });
+          if (snapshot10.activePath === trimmed) {
+            publish10({ open: true });
             return true;
           }
           return execute({ type: "activate", path: trimmed });
@@ -34348,10 +34348,10 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         files.clear();
         activeAbort?.abort();
         activeAbort = null;
-        publish9(initialSnapshot2(snapshot9.revision + 1));
+        publish10(initialSnapshot2(snapshot10.revision + 1));
       },
       isActive() {
-        return snapshot9.open && snapshot9.activePath !== null;
+        return snapshot10.open && snapshot10.activePath !== null;
       },
       hasDirty() {
         for (const file of files.values()) {
@@ -34364,11 +34364,11 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       controller,
       store: {
         subscribe(listener) {
-          listeners10.add(listener);
-          return () => listeners10.delete(listener);
+          listeners11.add(listener);
+          return () => listeners11.delete(listener);
         },
         getSnapshot() {
-          return snapshot9;
+          return snapshot10;
         }
       },
       configureRuntime(adapter) {
@@ -34587,30 +34587,30 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     const tokens = tokenizeFilePreviewCode(content);
     return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("code", { children: tokens.map((token, index2) => token.kind ? /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: `wand-file-preview-syntax-${token.kind}`, children: token.value }, index2) : /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(import_react20.Fragment, { children: token.value }, index2)) });
   }
-  function EditorBody({ snapshot: snapshot9, editorRef }) {
+  function EditorBody({ snapshot: snapshot10, editorRef }) {
     const contentRef = (0, import_react20.useRef)(null);
     const linesRef = (0, import_react20.useRef)(null);
-    if (snapshot9.status === "loading") {
+    if (snapshot10.status === "loading") {
       return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "wand-code-editor-state", role: "status", children: "\u6B63\u5728\u6253\u5F00\u6587\u4EF6\u2026" });
     }
-    if (snapshot9.status === "error") {
+    if (snapshot10.status === "error") {
       return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "wand-code-editor-state error", role: "alert", children: [
         /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { "aria-hidden": "true", children: "!" }),
-        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("strong", { children: snapshot9.failure?.message || "\u6253\u5F00\u6587\u4EF6\u5931\u8D25" })
+        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("strong", { children: snapshot10.failure?.message || "\u6253\u5F00\u6587\u4EF6\u5931\u8D25" })
       ] });
     }
-    const file = snapshot9.file;
+    const file = snapshot10.file;
     if (!file) return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "wand-code-editor-state", children: "\u9009\u62E9\u6587\u4EF6\u540E\u5C06\u5728\u8FD9\u91CC\u7F16\u8F91\u3002" });
     const content = file.draft;
     const lineCount = Math.max(1, content.split("\n").length);
-    return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "wand-code-editor-body", style: { fontSize: `${snapshot9.fontSize}px` }, children: [
+    return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "wand-code-editor-body", style: { fontSize: `${snapshot10.fontSize}px` }, children: [
       /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
         "pre",
         {
           ref: linesRef,
           className: "wand-code-editor-lines",
           "aria-hidden": "true",
-          style: { fontSize: `${snapshot9.fontSize}px` },
+          style: { fontSize: `${snapshot10.fontSize}px` },
           children: Array.from({ length: lineCount }, (_value, index2) => index2 + 1).join("\n")
         }
       ),
@@ -34667,49 +34667,49 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     }
   }
   function CodeEditorHost() {
-    const snapshot9 = (0, import_react20.useSyncExternalStore)(
+    const snapshot10 = (0, import_react20.useSyncExternalStore)(
       codeEditorStore.subscribe,
       codeEditorStore.getSnapshot,
       codeEditorStore.getSnapshot
     );
     const editorRef = (0, import_react20.useRef)(null);
     (0, import_react20.useEffect)(() => {
-      if (snapshot9.status !== "ready" || !snapshot9.file) return;
+      if (snapshot10.status !== "ready" || !snapshot10.file) return;
       const editor = editorRef.current;
       if (!editor) return;
       editor.focus();
-    }, [snapshot9.activePath, snapshot9.status]);
+    }, [snapshot10.activePath, snapshot10.status]);
     (0, import_react20.useEffect)(() => {
-      if (snapshot9.status !== "ready") return;
+      if (snapshot10.status !== "ready") return;
       const editor = editorRef.current;
       if (!editor) return;
       editor.scrollTop = 0;
-    }, [snapshot9.activePath]);
+    }, [snapshot10.activePath]);
     function handleKeydown(event) {
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
-        if (snapshot9.activePath) run2({ type: "close", path: snapshot9.activePath });
+        if (snapshot10.activePath) run2({ type: "close", path: snapshot10.activePath });
       }
     }
-    const hidden = !snapshot9.open || !snapshot9.activePath;
+    const hidden = !snapshot10.open || !snapshot10.activePath;
     return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(import_jsx_runtime43.Fragment, { children: [
       /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("style", { id: "wand-code-editor-styles", children: codeEditorStyles }),
       /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
         "div",
         {
-          className: `wand-code-editor-host${snapshot9.wrap ? " wrap" : ""}`,
+          className: `wand-code-editor-host${snapshot10.wrap ? " wrap" : ""}`,
           hidden,
           onKeyDownCapture: handleKeydown,
           "aria-hidden": hidden,
           children: [
-            snapshot9.tabs.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "wand-code-editor-tabs", role: "tablist", "aria-label": "\u6253\u5F00\u7684\u6587\u4EF6", children: snapshot9.tabs.map((tab) => /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+            snapshot10.tabs.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "wand-code-editor-tabs", role: "tablist", "aria-label": "\u6253\u5F00\u7684\u6587\u4EF6", children: snapshot10.tabs.map((tab) => /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
               "button",
               {
                 type: "button",
                 role: "tab",
-                "aria-selected": snapshot9.activePath === tab.path,
-                className: `wand-code-editor-tab${snapshot9.activePath === tab.path ? " active" : ""}`,
+                "aria-selected": snapshot10.activePath === tab.path,
+                className: `wand-code-editor-tab${snapshot10.activePath === tab.path ? " active" : ""}`,
                 title: tab.path,
                 onClick: () => run2({ type: "activate", path: tab.path }),
                 children: [
@@ -34732,17 +34732,17 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
               },
               tab.path
             )) }),
-            snapshot9.file && /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "wand-code-editor-toolbar", "aria-label": "\u7F16\u8F91\u5668\u5DE5\u5177\u680F", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "wand-code-editor-dirty-mark", children: snapshot9.file.dirty ? "\u25CF \u672A\u4FDD\u5B58" : "\u5DF2\u4FDD\u5B58" }),
+            snapshot10.file && /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "wand-code-editor-toolbar", "aria-label": "\u7F16\u8F91\u5668\u5DE5\u5177\u680F", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "wand-code-editor-dirty-mark", children: snapshot10.file.dirty ? "\u25CF \u672A\u4FDD\u5B58" : "\u5DF2\u4FDD\u5B58" }),
               /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "wand-code-editor-toolbar-spacer" }),
               /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
                 "button",
                 {
                   type: "button",
                   className: "wand-code-editor-btn primary",
-                  disabled: snapshot9.saving || !snapshot9.file.dirty,
+                  disabled: snapshot10.saving || !snapshot10.file.dirty,
                   onClick: () => run2({ type: "save" }),
-                  children: snapshot9.saving ? "\u4FDD\u5B58\u4E2D\u2026" : "\u4FDD\u5B58 (\u2318S)"
+                  children: snapshot10.saving ? "\u4FDD\u5B58\u4E2D\u2026" : "\u4FDD\u5B58 (\u2318S)"
                 }
               ),
               /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
@@ -34750,7 +34750,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                 {
                   type: "button",
                   className: "wand-code-editor-btn",
-                  disabled: snapshot9.saving || !snapshot9.file.dirty,
+                  disabled: snapshot10.saving || !snapshot10.file.dirty,
                   onClick: () => run2({ type: "revert" }),
                   children: "\u64A4\u9500\u6539\u52A8"
                 }
@@ -34761,7 +34761,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                   type: "button",
                   className: "wand-code-editor-btn",
                   onClick: () => run2({ type: "wrap.toggle" }),
-                  "aria-pressed": snapshot9.wrap,
+                  "aria-pressed": snapshot10.wrap,
                   children: "\u81EA\u52A8\u6362\u884C"
                 }
               ),
@@ -34775,7 +34775,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                   children: "A\u2212"
                 }
               ),
-              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { "aria-label": `\u5B57\u53F7 ${snapshot9.fontSize}`, children: snapshot9.fontSize }),
+              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { "aria-label": `\u5B57\u53F7 ${snapshot10.fontSize}`, children: snapshot10.fontSize }),
               /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
                 "button",
                 {
@@ -34787,8 +34787,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                 }
               )
             ] }),
-            snapshot9.status === "ready" && snapshot9.failure ? /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("p", { className: "wand-code-editor-inline-error", role: "alert", children: snapshot9.failure.message }) : null,
-            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(EditorBody, { snapshot: snapshot9, editorRef })
+            snapshot10.status === "ready" && snapshot10.failure ? /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("p", { className: "wand-code-editor-inline-error", role: "alert", children: snapshot10.failure.message }) : null,
+            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(EditorBody, { snapshot: snapshot10, editorRef })
           ]
         }
       )
@@ -34829,6 +34829,36 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     context = EMPTY;
     for (const listener of listeners9) listener();
   }
+
+  // src/web-ui/react/workspaces/workspace-agent-dialog-controller.ts
+  var EMPTY2 = { open: false, revision: 0 };
+  var snapshot9 = EMPTY2;
+  var listeners10 = /* @__PURE__ */ new Set();
+  function publish9(open) {
+    if (snapshot9.open === open) return;
+    snapshot9 = { open, revision: snapshot9.revision + 1 };
+    for (const listener of listeners10) listener();
+  }
+  var workspaceAgentDialogController = {
+    open() {
+      publish9(true);
+    },
+    close() {
+      publish9(false);
+    }
+  };
+  var workspaceAgentDialogStore = {
+    subscribe(listener) {
+      listeners10.add(listener);
+      return () => listeners10.delete(listener);
+    },
+    getSnapshot() {
+      return snapshot9;
+    },
+    getServerSnapshot() {
+      return EMPTY2;
+    }
+  };
 
   // src/web-ui/react/workspaces/workspace-tab-bar.tsx
   var React42 = __toESM(require_react(), 1);
@@ -34877,9 +34907,10 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     { value: "opencode", label: "OpenCode", description: "OpenCode CLI" },
     { value: "grok", label: "Grok", description: "Grok Build CLI" },
     { value: "qoder", label: "Qoder", description: "Qoder CLI" },
-    { value: "pi", label: "Pi", description: "Pi coding agent" }
+    { value: "pi", label: "Pi", description: "Pi coding agent" },
+    { value: "shell", label: "\u7A7A\u767D\u7EC8\u7AEF", description: "\u4EC5\u542F\u52A8\u7CFB\u7EDF Shell" }
   ];
-  var PROVIDER_VALUES2 = WORKSPACE_AGENT_OPTIONS.map((option) => option.value);
+  var TARGET_VALUES = WORKSPACE_AGENT_OPTIONS.map((option) => option.value);
   var RADIO_NAVIGATION_KEYS2 = /* @__PURE__ */ new Set([
     "ArrowLeft",
     "ArrowRight",
@@ -34890,7 +34921,27 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   ]);
   function presentError6(error) {
     if (error instanceof Error && error.message) return error.message;
-    return "\u65E0\u6CD5\u65B0\u5EFA Agent \u5BF9\u8BDD\uFF0C\u8BF7\u786E\u8BA4\u5BF9\u5E94 CLI \u5DF2\u6B63\u786E\u5B89\u88C5\u3002";
+    return "\u65E0\u6CD5\u65B0\u5EFA\u5DE5\u4F5C\u7A97\u53E3\uFF0C\u8BF7\u786E\u8BA4\u5BF9\u5E94 CLI \u6216 Shell \u914D\u7F6E\u6B63\u786E\u3002";
+  }
+  function TerminalIcon() {
+    return /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)(
+      "svg",
+      {
+        className: "wand-new-session-provider-logo",
+        viewBox: "0 0 24 24",
+        fill: "none",
+        stroke: "currentColor",
+        strokeWidth: "1.8",
+        strokeLinecap: "round",
+        strokeLinejoin: "round",
+        "aria-hidden": "true",
+        children: [
+          /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("path", { d: "m5 7 5 5-5 5" }),
+          /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("path", { d: "M12 17h7" }),
+          /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("rect", { x: "2.5", y: "3.5", width: "19", height: "17", rx: "3" })
+        ]
+      }
+    );
   }
   function WorkspaceAgentDialog({
     open,
@@ -34898,22 +34949,22 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     onConfirm,
     onDismiss
   }) {
-    const [provider, setProvider] = (0, import_react21.useState)(initialProvider);
+    const [target, setTarget] = (0, import_react21.useState)(initialProvider);
     const [submitting, setSubmitting] = (0, import_react21.useState)(false);
     const [error, setError] = (0, import_react21.useState)("");
-    const providerRefs = (0, import_react21.useRef)({});
+    const targetRefs = (0, import_react21.useRef)({});
     (0, import_react21.useEffect)(() => {
       if (!open) return;
-      setProvider(initialProvider);
+      setTarget(initialProvider);
       setSubmitting(false);
       setError("");
     }, [initialProvider, open]);
-    function navigateProvider(event, current) {
+    function navigateTarget(event, current) {
       if (!RADIO_NAVIGATION_KEYS2.has(event.key)) return;
       event.preventDefault();
-      const next = nextChoice(PROVIDER_VALUES2, current, event.key);
-      setProvider(next);
-      window.requestAnimationFrame(() => providerRefs.current[next]?.focus());
+      const next = nextChoice(TARGET_VALUES, current, event.key);
+      setTarget(next);
+      window.requestAnimationFrame(() => targetRefs.current[next]?.focus());
     }
     async function submit(event) {
       event.preventDefault();
@@ -34921,7 +34972,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       setSubmitting(true);
       setError("");
       try {
-        await onConfirm(provider);
+        await onConfirm(target);
         onDismiss();
       } catch (createError) {
         setError(presentError6(createError));
@@ -34936,36 +34987,36 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         onOpenChange: (nextOpen) => {
           if (!nextOpen) onDismiss();
         },
-        title: "\u9009\u62E9 Agent",
-        description: "\u5728\u5F53\u524D\u4EFB\u52A1\u7684\u540C\u4E00 worktree \u4E2D\u65B0\u589E\u4E00\u4E2A\u72EC\u7ACB\u5BF9\u8BDD\u3002",
+        title: "\u65B0\u5EFA\u5DE5\u4F5C\u7A97\u53E3",
+        description: "\u5728\u5F53\u524D\u4EFB\u52A1\u7684\u540C\u4E00 worktree \u4E2D\u9009\u62E9 Agent\uFF0C\u6216\u76F4\u63A5\u542F\u52A8\u7A7A\u767D\u7EC8\u7AEF\u3002",
         className: "wand-new-session-dialog wand-workspace-agent-dialog",
         overlayClassName: "wand-new-session-overlay",
         titleClassName: "wand-new-session-title",
         descriptionClassName: "wand-new-session-description",
         headerClassName: "wand-new-session-header",
-        closeLabel: "\u5173\u95ED Agent \u9009\u62E9",
+        closeLabel: "\u5173\u95ED\u5DE5\u4F5C\u7A97\u53E3\u9009\u62E9",
         testId: "workspace-agent-dialog",
         dismissable: !submitting,
         children: /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("form", { className: "wand-new-session-form", "aria-busy": submitting, onSubmit: (event) => void submit(event), children: [
           /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("div", { className: "wand-new-session-body wand-workspace-agent-body", children: [
             /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("fieldset", { className: "wand-new-session-fieldset", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("legend", { className: "wand-new-session-field-label", children: "Agent" }),
-              /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("div", { className: "wand-new-session-choices wand-workspace-agent-options", role: "radiogroup", "aria-label": "Agent", children: WORKSPACE_AGENT_OPTIONS.map((option) => /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)(
+              /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("legend", { className: "wand-new-session-field-label", children: "\u5DE5\u4F5C\u7A97\u53E3\u7C7B\u578B" }),
+              /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("div", { className: "wand-new-session-choices wand-workspace-agent-options", role: "radiogroup", "aria-label": "\u5DE5\u4F5C\u7A97\u53E3\u7C7B\u578B", children: WORKSPACE_AGENT_OPTIONS.map((option) => /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)(
                 "button",
                 {
                   ref: (element) => {
-                    providerRefs.current[option.value] = element;
+                    targetRefs.current[option.value] = element;
                   },
                   type: "button",
                   role: "radio",
-                  "aria-checked": provider === option.value,
-                  tabIndex: provider === option.value ? 0 : -1,
-                  className: `wand-new-session-choice wand-new-session-provider-choice${provider === option.value ? " active" : ""}`,
-                  "data-wand-autofocus": provider === option.value ? "" : void 0,
-                  onClick: () => setProvider(option.value),
-                  onKeyDown: (event) => navigateProvider(event, provider),
+                  "aria-checked": target === option.value,
+                  tabIndex: target === option.value ? 0 : -1,
+                  className: `wand-new-session-choice wand-new-session-provider-choice${target === option.value ? " active" : ""}`,
+                  "data-wand-autofocus": target === option.value ? "" : void 0,
+                  onClick: () => setTarget(option.value),
+                  onKeyDown: (event) => navigateTarget(event, target),
                   children: [
-                    /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(ProviderLogo, { provider: option.value, className: "wand-new-session-provider-logo" }),
+                    option.value === "shell" ? /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(TerminalIcon, {}) : /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(ProviderLogo, { provider: option.value, className: "wand-new-session-provider-logo" }),
                     /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "wand-new-session-choice-label", children: option.label }),
                     /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "wand-new-session-choice-description", children: option.description })
                   ]
@@ -34977,7 +35028,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           ] }),
           /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("div", { className: "wand-new-session-footer wand-workspace-agent-footer", children: [
             /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(WandButton, { kind: "ghost", disabled: submitting, onClick: onDismiss, children: "\u53D6\u6D88" }),
-            /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(WandButton, { kind: "primary", size: "large", type: "submit", disabled: submitting, children: submitting ? "\u6B63\u5728\u521B\u5EFA\u2026" : `\u4F7F\u7528 ${WORKSPACE_AGENT_OPTIONS.find((option) => option.value === provider)?.label ?? provider}` })
+            /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(WandButton, { kind: "primary", size: "large", type: "submit", disabled: submitting, children: submitting ? "\u6B63\u5728\u521B\u5EFA\u2026" : `\u521B\u5EFA ${WORKSPACE_AGENT_OPTIONS.find((option) => option.value === target)?.label ?? target}` })
           ] })
         ] })
       }
@@ -35370,17 +35421,23 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       workspaceContextStore.getSnapshot,
       workspaceContextStore.getServerSnapshot
     );
-    const snapshot9 = useUiStoreSnapshot();
+    const snapshot10 = useUiStoreSnapshot();
     const dispatch = useUiDispatch();
     const [refreshTick, setRefreshTick] = React42.useState(0);
-    const [agentDialogOpen, setAgentDialogOpen] = React42.useState(false);
+    const agentDialog = React42.useSyncExternalStore(
+      workspaceAgentDialogStore.subscribe,
+      workspaceAgentDialogStore.getSnapshot,
+      workspaceAgentDialogStore.getServerSnapshot
+    );
     const [moving, setMoving] = React42.useState(null);
     const [closingWindowId, setClosingWindowId] = React42.useState(null);
-    const selectedId = snapshot9.selected?.id ?? null;
+    const selectedId = snapshot10.selected?.id ?? null;
     const { detail, loading } = useActiveTaskDetail(context2.taskId, refreshTick, selectedId);
     React42.useEffect(() => {
       setMoving(null);
+      workspaceAgentDialogController.close();
     }, [context2.taskId]);
+    React42.useEffect(() => () => workspaceAgentDialogController.close(), []);
     React42.useEffect(() => {
       if (!moving) return;
       const cancel = (event) => {
@@ -35400,7 +35457,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       runtime7()?.saveTaskLayout(taskLayout);
     }, [context2.layout, context2.taskId, detail, taskLayout]);
     if (!context2.taskId) return null;
-    const handleNewSession = async (provider) => {
+    const handleNewSession = async (target) => {
       if (!context2.taskId || !context2.workspaceId) {
         throw new Error("\u5F53\u524D\u4EFB\u52A1\u4E0A\u4E0B\u6587\u5DF2\u5931\u6548\uFF0C\u8BF7\u91CD\u65B0\u6253\u5F00\u4EFB\u52A1\u540E\u91CD\u8BD5\u3002");
       }
@@ -35410,7 +35467,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         workspaceId: context2.workspaceId,
         taskId: context2.taskId,
         cwd: taskCwd,
-        provider
+        target
       };
       const result = await rt.newTaskSession(payload);
       const sessionId = typeof result === "string" ? result : null;
@@ -35421,7 +35478,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       rt.saveTaskLayout(next);
       void dispatch({ type: "session.select", id: sessionId });
       setRefreshTick((n) => n + 1);
-      rt.toast(`\u5DF2\u65B0\u5EFA ${workspaceProviderLabel(provider)} \u5BF9\u8BDD`, "success");
+      rt.toast(target === "shell" ? "\u5DF2\u65B0\u5EFA\u7A7A\u767D\u7EC8\u7AEF" : `\u5DF2\u65B0\u5EFA ${workspaceProviderLabel(target)} \u5BF9\u8BDD`, "success");
     };
     const selectWindow = (window2) => {
       const rt = runtime7();
@@ -35522,9 +35579,9 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           {
             type: "button",
             className: "workspace-tab-add",
-            title: "\u65B0\u5EFA Agent \u5BF9\u8BDD\uFF08\u5728\u540C\u4E00 worktree\uFF09",
-            "aria-label": "\u65B0\u5EFA Agent \u5BF9\u8BDD",
-            onClick: () => setAgentDialogOpen(true),
+            title: "\u65B0\u5EFA Agent \u6216\u7A7A\u767D\u7EC8\u7AEF\uFF08\u5728\u540C\u4E00 worktree\uFF09",
+            "aria-label": "\u65B0\u5EFA Agent \u6216\u7A7A\u767D\u7EC8\u7AEF",
+            onClick: () => workspaceAgentDialogController.open(),
             children: "+"
           }
         ),
@@ -35590,10 +35647,10 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(
         WorkspaceAgentDialog,
         {
-          open: agentDialogOpen,
+          open: agentDialog.open,
           initialProvider: context2.provider,
           onConfirm: handleNewSession,
-          onDismiss: () => setAgentDialogOpen(false)
+          onDismiss: () => workspaceAgentDialogController.close()
         }
       )
     ] });
@@ -36087,8 +36144,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     }
   };
   function createFileExplorerModule(options) {
-    const listeners10 = /* @__PURE__ */ new Set();
-    let snapshot9 = {
+    const listeners11 = /* @__PURE__ */ new Set();
+    let snapshot10 = {
       revision: 0,
       root: "",
       activeDir: "",
@@ -36101,12 +36158,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     let runtime11 = options.runtime ?? defaultRuntime3;
     const abortByDir = /* @__PURE__ */ new Map();
     let searchAbort = null;
-    function publish9(patch) {
-      snapshot9 = { ...snapshot9, ...patch, revision: snapshot9.revision + 1 };
-      for (const listener of listeners10) listener();
+    function publish10(patch) {
+      snapshot10 = { ...snapshot10, ...patch, revision: snapshot10.revision + 1 };
+      for (const listener of listeners11) listener();
     }
     function publishExpanded(expanded) {
-      publish9({ expanded: new Map(expanded) });
+      publish10({ expanded: new Map(expanded) });
     }
     function failureMessage(failure, fallback) {
       return failure?.message || fallback;
@@ -36116,13 +36173,13 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       previous?.abort();
       const abort = new AbortController();
       abortByDir.set(dirPath, abort);
-      const expanded = new Map(snapshot9.expanded);
+      const expanded = new Map(snapshot10.expanded);
       expanded.set(dirPath, { entries: [], status: "loading" });
       publishExpanded(expanded);
       try {
         const result = await options.repository.list(dirPath, abort.signal);
         if (abort.signal.aborted) return;
-        const next = new Map(snapshot9.expanded);
+        const next = new Map(snapshot10.expanded);
         if (result.ok && result.entries) {
           next.set(dirPath, { entries: result.entries, status: "loaded" });
         } else {
@@ -36135,7 +36192,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         publishExpanded(next);
       } catch (error) {
         if (abort.signal.aborted || isAbort3(error)) return;
-        const next = new Map(snapshot9.expanded);
+        const next = new Map(snapshot10.expanded);
         next.set(dirPath, {
           entries: [],
           status: "error",
@@ -36147,38 +36204,38 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       }
     }
     function refreshExpanded(dirPath, entries) {
-      const next = new Map(snapshot9.expanded);
+      const next = new Map(snapshot10.expanded);
       next.set(dirPath, { entries, status: "loaded" });
       publishExpanded(next);
     }
     function ensureRoot(root) {
       if (!root) return;
-      if (snapshot9.root !== root) {
-        publish9({ root, activeDir: root });
+      if (snapshot10.root !== root) {
+        publish10({ root, activeDir: root });
       }
-      if (!snapshot9.expanded.has(root)) {
+      if (!snapshot10.expanded.has(root)) {
         void loadDir(root);
       }
     }
     async function runSearch(query) {
       searchAbort?.abort();
-      if (!query.trim() || !snapshot9.root) {
-        publish9({ searchQuery: query, searchResults: null, searching: false });
+      if (!query.trim() || !snapshot10.root) {
+        publish10({ searchQuery: query, searchResults: null, searching: false });
         return;
       }
       const abort = new AbortController();
       searchAbort = abort;
-      publish9({ searchQuery: query, searching: true });
+      publish10({ searchQuery: query, searching: true });
       try {
-        const result = await options.repository.search(query.trim(), snapshot9.root, abort.signal);
+        const result = await options.repository.search(query.trim(), snapshot10.root, abort.signal);
         if (abort.signal.aborted) return;
-        publish9({
+        publish10({
           searching: false,
           searchResults: result.ok && result.results ? result.results : []
         });
       } catch (error) {
         if (abort.signal.aborted || isAbort3(error)) return;
-        publish9({ searching: false, searchResults: [] });
+        publish10({ searching: false, searchResults: [] });
       }
     }
     function joinPath2(dir, name) {
@@ -36190,9 +36247,9 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     function refreshAffected(affectedPath) {
       const parent = parentOf(affectedPath);
       const toRefresh = /* @__PURE__ */ new Set();
-      if (parent && snapshot9.expanded.has(parent)) toRefresh.add(parent);
-      if (snapshot9.root && snapshot9.expanded.has(snapshot9.root)) toRefresh.add(snapshot9.root);
-      if (snapshot9.expanded.has(affectedPath)) toRefresh.add(affectedPath);
+      if (parent && snapshot10.expanded.has(parent)) toRefresh.add(parent);
+      if (snapshot10.root && snapshot10.expanded.has(snapshot10.root)) toRefresh.add(snapshot10.root);
+      if (snapshot10.expanded.has(affectedPath)) toRefresh.add(affectedPath);
       for (const dir of toRefresh) void loadDir(dir);
     }
     async function execute(command) {
@@ -36207,7 +36264,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           return true;
         }
         case "toggle": {
-          const expanded = new Map(snapshot9.expanded);
+          const expanded = new Map(snapshot10.expanded);
           const existing = expanded.get(command.dir);
           if (existing) {
             expanded.delete(command.dir);
@@ -36222,7 +36279,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           return true;
         }
         case "refresh": {
-          const target = command.dir ?? snapshot9.root;
+          const target = command.dir ?? snapshot10.root;
           if (!target) return false;
           await loadDir(target);
           return true;
@@ -36233,12 +36290,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         }
         case "search.clear": {
           searchAbort?.abort();
-          publish9({ searchQuery: "", searchResults: null, searching: false });
+          publish10({ searchQuery: "", searchResults: null, searching: false });
           return true;
         }
         case "create.file": {
           const target = joinPath2(command.dir, command.name);
-          publish9({ busy: true });
+          publish10({ busy: true });
           try {
             const result = await options.repository.createFile(target);
             if (result.ok) {
@@ -36250,12 +36307,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
             }
             return result.ok;
           } finally {
-            publish9({ busy: false });
+            publish10({ busy: false });
           }
         }
         case "create.dir": {
           const target = joinPath2(command.dir, command.name);
-          publish9({ busy: true });
+          publish10({ busy: true });
           try {
             const result = await options.repository.createDir(target);
             if (result.ok) {
@@ -36266,11 +36323,11 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
             }
             return result.ok;
           } finally {
-            publish9({ busy: false });
+            publish10({ busy: false });
           }
         }
         case "rename": {
-          publish9({ busy: true });
+          publish10({ busy: true });
           try {
             const result = await options.repository.rename(command.from, command.to);
             if (result.ok) {
@@ -36281,17 +36338,17 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
             }
             return result.ok;
           } finally {
-            publish9({ busy: false });
+            publish10({ busy: false });
           }
         }
         case "delete": {
-          const isDir = snapshot9.expanded.has(command.path) || snapshot9.activeDir === command.path;
-          const parentEntries = snapshot9.expanded.get(parentOf(command.path))?.entries ?? [];
+          const isDir = snapshot10.expanded.has(command.path) || snapshot10.activeDir === command.path;
+          const parentEntries = snapshot10.expanded.get(parentOf(command.path))?.entries ?? [];
           const node = parentEntries.find((entry) => entry.path === command.path);
           const detectedIsDir = node?.type === "dir" || isDir;
           const confirmed = await runtime11.confirmDelete(command.path, detectedIsDir);
           if (!confirmed) return false;
-          publish9({ busy: true });
+          publish10({ busy: true });
           try {
             const result = await options.repository.delete(command.path);
             if (result.ok) {
@@ -36302,7 +36359,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
             }
             return result.ok;
           } finally {
-            publish9({ busy: false });
+            publish10({ busy: false });
           }
         }
       }
@@ -36317,11 +36374,11 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       controller,
       store: {
         subscribe(listener) {
-          listeners10.add(listener);
-          return () => listeners10.delete(listener);
+          listeners11.add(listener);
+          return () => listeners11.delete(listener);
         },
         getSnapshot() {
-          return snapshot9;
+          return snapshot10;
         }
       },
       configureRuntime(adapter) {
@@ -36691,7 +36748,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   function ExplorerRow({
     entry,
     depth,
-    snapshot: snapshot9,
+    snapshot: snapshot10,
     onToggle,
     onFileActivate,
     onContextMenu,
@@ -36702,10 +36759,10 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     setPendingCreate
   }) {
     const isDir = entry.type === "dir";
-    const nodeState = isDir ? snapshot9.expanded.get(entry.path) : void 0;
+    const nodeState = isDir ? snapshot10.expanded.get(entry.path) : void 0;
     const isOpen = Boolean(nodeState);
     const hasChildren = isDir && nodeState && nodeState.entries.length > 0;
-    const isActiveFile = !isDir && snapshot9.activeDir === parentOf2(entry.path);
+    const isActiveFile = !isDir && snapshot10.activeDir === parentOf2(entry.path);
     const badge = gitBadge(entry);
     const [renameDraft, setRenameDraft] = React44.useState(entry.name);
     React44.useEffect(() => {
@@ -36810,7 +36867,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           {
             entry: child,
             depth: depth + 1,
-            snapshot: snapshot9,
+            snapshot: snapshot10,
             onToggle,
             onFileActivate,
             onContextMenu,
@@ -36940,20 +36997,20 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     );
   }
   function FileExplorerHost({ root }) {
-    const snapshot9 = useFileExplorerSnapshot();
+    const snapshot10 = useFileExplorerSnapshot();
     const dispatch = fileExplorerController;
     const [contextMenu, setContextMenu] = React44.useState(null);
     const [renameState, setRenameState] = React44.useState(null);
     const [pendingCreate, setPendingCreate] = React44.useState(null);
-    const [searchInput, setSearchInput] = React44.useState(snapshot9.searchQuery);
+    const [searchInput, setSearchInput] = React44.useState(snapshot10.searchQuery);
     React44.useEffect(() => {
       if (root) dispatch.setRoot(root);
     }, [root, dispatch]);
     React44.useEffect(() => {
-      setSearchInput(snapshot9.searchQuery);
-    }, [snapshot9.searchQuery]);
-    const rootNode = snapshot9.root ? snapshot9.expanded.get(snapshot9.root) : void 0;
-    const showingSearch = snapshot9.searchQuery.trim().length > 0 && snapshot9.searchResults !== null;
+      setSearchInput(snapshot10.searchQuery);
+    }, [snapshot10.searchQuery]);
+    const rootNode = snapshot10.root ? snapshot10.expanded.get(snapshot10.root) : void 0;
+    const showingSearch = snapshot10.searchQuery.trim().length > 0 && snapshot10.searchResults !== null;
     const handleAction = async (action) => {
       const ctx = contextMenu;
       setContextMenu(null);
@@ -36992,8 +37049,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         notify(ok ? "\u5DF2\u590D\u5236\u8DEF\u5F84" : "\u590D\u5236\u5931\u8D25", ok ? "success" : "error");
         return;
       }
-      if (action === "copyRelative" && entry && snapshot9.root) {
-        const rel = relativePath(entry.path, snapshot9.root);
+      if (action === "copyRelative" && entry && snapshot10.root) {
+        const rel = relativePath(entry.path, snapshot10.root);
         const ok = await copyText(rel);
         notify(ok ? "\u5DF2\u590D\u5236\u76F8\u5BF9\u8DEF\u5F84" : "\u590D\u5236\u5931\u8D25", ok ? "success" : "error");
         return;
@@ -37013,7 +37070,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       /* @__PURE__ */ (0, import_jsx_runtime47.jsxs)("div", { className: "wand-file-explorer", onContextMenu: (event) => {
         if (event.target !== event.currentTarget) return;
         event.preventDefault();
-        setContextMenu({ x: event.clientX, y: event.clientY, entry: null, dir: snapshot9.activeDir || snapshot9.root });
+        setContextMenu({ x: event.clientX, y: event.clientY, entry: null, dir: snapshot10.activeDir || snapshot10.root });
       }, children: [
         /* @__PURE__ */ (0, import_jsx_runtime47.jsxs)("div", { className: "wand-file-explorer-toolbar", children: [
           /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("span", { className: "wand-file-explorer-title", children: "\u8D44\u6E90\u7BA1\u7406\u5668" }),
@@ -37024,8 +37081,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
               className: "wand-file-explorer-btn",
               title: "\u65B0\u5EFA\u6587\u4EF6",
               "aria-label": "\u65B0\u5EFA\u6587\u4EF6",
-              disabled: !snapshot9.root || snapshot9.busy,
-              onClick: () => setPendingCreate({ dir: snapshot9.activeDir || snapshot9.root, kind: "file" }),
+              disabled: !snapshot10.root || snapshot10.busy,
+              onClick: () => setPendingCreate({ dir: snapshot10.activeDir || snapshot10.root, kind: "file" }),
               children: /* @__PURE__ */ (0, import_jsx_runtime47.jsx)(ExplorerIcon, { name: "newFile", size: 15 })
             }
           ),
@@ -37036,8 +37093,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
               className: "wand-file-explorer-btn",
               title: "\u65B0\u5EFA\u6587\u4EF6\u5939",
               "aria-label": "\u65B0\u5EFA\u6587\u4EF6\u5939",
-              disabled: !snapshot9.root || snapshot9.busy,
-              onClick: () => setPendingCreate({ dir: snapshot9.activeDir || snapshot9.root, kind: "dir" }),
+              disabled: !snapshot10.root || snapshot10.busy,
+              onClick: () => setPendingCreate({ dir: snapshot10.activeDir || snapshot10.root, kind: "dir" }),
               children: /* @__PURE__ */ (0, import_jsx_runtime47.jsx)(ExplorerIcon, { name: "newFolder", size: 15 })
             }
           ),
@@ -37048,7 +37105,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
               className: "wand-file-explorer-btn",
               title: "\u5237\u65B0",
               "aria-label": "\u5237\u65B0",
-              disabled: !snapshot9.root || snapshot9.busy,
+              disabled: !snapshot10.root || snapshot10.busy,
               onClick: () => void dispatch.execute({ type: "refresh" }),
               children: /* @__PURE__ */ (0, import_jsx_runtime47.jsx)(ExplorerIcon, { name: "refresh", size: 15 })
             }
@@ -37063,7 +37120,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
               placeholder: "\u641C\u7D22\u6587\u4EF6\u2026",
               spellCheck: false,
               autoComplete: "off",
-              disabled: !snapshot9.root,
+              disabled: !snapshot10.root,
               onChange: (event) => {
                 const value = event.currentTarget.value;
                 setSearchInput(value);
@@ -37077,18 +37134,18 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
               }
             }
           ),
-          snapshot9.searching && /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("span", { "aria-hidden": "true", children: "\u2026" })
+          snapshot10.searching && /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("span", { "aria-hidden": "true", children: "\u2026" })
         ] }),
         /* @__PURE__ */ (0, import_jsx_runtime47.jsxs)("div", { className: "wand-file-explorer-tree", role: "tree", "aria-label": "\u6587\u4EF6\u6811", children: [
-          !snapshot9.root && /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("div", { className: "wand-file-explorer-empty", children: "\u5C1A\u672A\u9009\u62E9\u5DE5\u4F5C\u76EE\u5F55\u3002" }),
-          snapshot9.root && rootNode?.status === "loading" && !rootNode.entries.length && /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("div", { className: "wand-file-explorer-empty", children: "\u52A0\u8F7D\u4E2D\u2026" }),
-          snapshot9.root && rootNode?.status === "error" && /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("div", { className: "wand-file-explorer-empty", children: rootNode.error || "\u8BFB\u53D6\u76EE\u5F55\u5931\u8D25" }),
-          showingSearch ? snapshot9.searchResults && snapshot9.searchResults.length > 0 ? snapshot9.searchResults.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime47.jsx)(
+          !snapshot10.root && /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("div", { className: "wand-file-explorer-empty", children: "\u5C1A\u672A\u9009\u62E9\u5DE5\u4F5C\u76EE\u5F55\u3002" }),
+          snapshot10.root && rootNode?.status === "loading" && !rootNode.entries.length && /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("div", { className: "wand-file-explorer-empty", children: "\u52A0\u8F7D\u4E2D\u2026" }),
+          snapshot10.root && rootNode?.status === "error" && /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("div", { className: "wand-file-explorer-empty", children: rootNode.error || "\u8BFB\u53D6\u76EE\u5F55\u5931\u8D25" }),
+          showingSearch ? snapshot10.searchResults && snapshot10.searchResults.length > 0 ? snapshot10.searchResults.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime47.jsx)(
             ExplorerRow,
             {
               entry,
               depth: 0,
-              snapshot: snapshot9,
+              snapshot: snapshot10,
               onToggle: (dir) => void dispatch.execute({ type: "toggle", dir }),
               onFileActivate: (path) => void codeEditorController.open(path),
               onContextMenu: (state2) => setContextMenu(state2),
@@ -37100,7 +37157,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
             },
             entry.path
           )) : /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("div", { className: "wand-file-explorer-empty", children: "\u6CA1\u6709\u627E\u5230\u5339\u914D\u7684\u6587\u4EF6" }) : rootNode?.status === "loaded" && rootNode.entries.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime47.jsxs)(import_jsx_runtime47.Fragment, { children: [
-            pendingCreate && pendingCreate.dir === snapshot9.root && /* @__PURE__ */ (0, import_jsx_runtime47.jsx)(
+            pendingCreate && pendingCreate.dir === snapshot10.root && /* @__PURE__ */ (0, import_jsx_runtime47.jsx)(
               CreateInput,
               {
                 depth: 0,
@@ -37123,7 +37180,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
               {
                 entry,
                 depth: 0,
-                snapshot: snapshot9,
+                snapshot: snapshot10,
                 onToggle: (dir) => void dispatch.execute({ type: "toggle", dir }),
                 onFileActivate: (path) => void codeEditorController.open(path),
                 onContextMenu: (state2) => setContextMenu(state2),
@@ -37212,9 +37269,9 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     }
   }
   function ShellFilePanel({ explorerRef } = {}) {
-    const snapshot9 = useUiStoreSnapshot();
+    const snapshot10 = useUiStoreSnapshot();
     const dispatch = useUiDispatch();
-    const snapshotCwd = normalizeFilePanelCwd(snapshot9.topbar.cwd) || "/";
+    const snapshotCwd = normalizeFilePanelCwd(snapshot10.topbar.cwd) || "/";
     const [cwd, setCwd] = React45.useState(snapshotCwd);
     const committedCwd = React45.useRef(snapshotCwd);
     const editingCwd = React45.useRef(false);
@@ -37222,7 +37279,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       if (editingCwd.current) return;
       committedCwd.current = snapshotCwd;
       setCwd(snapshotCwd);
-    }, [snapshot9.selected?.id, snapshotCwd]);
+    }, [snapshot10.selected?.id, snapshotCwd]);
     const commitCwd = React45.useCallback(() => {
       const normalized = normalizeFilePanelCwd(cwd);
       if (!normalized) {
@@ -37240,7 +37297,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         "div",
         {
           id: "file-panel-backdrop",
-          className: classNames("file-panel-backdrop", snapshot9.layout.filePanelBackdropVisible && "open"),
+          className: classNames("file-panel-backdrop", snapshot10.layout.filePanelBackdropVisible && "open"),
           "aria-hidden": "true",
           onClick: () => void dispatch({ type: "layout.files.close" })
         }
@@ -37249,8 +37306,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         "div",
         {
           id: "file-side-panel",
-          className: classNames("file-side-panel", snapshot9.layout.filePanelOpen && "open"),
-          "aria-hidden": !snapshot9.layout.filePanelOpen,
+          className: classNames("file-side-panel", snapshot10.layout.filePanelOpen && "open"),
+          "aria-hidden": !snapshot10.layout.filePanelOpen,
           children: [
             /* @__PURE__ */ (0, import_jsx_runtime48.jsxs)("div", { className: "file-side-panel-header", children: [
               /* @__PURE__ */ (0, import_jsx_runtime48.jsxs)("div", { className: "file-side-panel-title-group", children: [
@@ -38992,34 +39049,34 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     ] });
   }
   function ShellSidebar() {
-    const snapshot9 = useUiStoreSnapshot();
+    const snapshot10 = useUiStoreSnapshot();
     const dispatch = useUiDispatch();
     const [moreOpen, setMoreOpen] = React47.useState(false);
     const [viewMode, setViewMode] = React47.useState(readSidebarViewMode);
-    const directories = useSessionDirectories(viewMode === "directories", snapshot9.revision);
-    const narrow = snapshot9.layout.sidebarPinned && snapshot9.layout.sidebarCollapsed;
+    const directories = useSessionDirectories(viewMode === "directories", snapshot10.revision);
+    const narrow = snapshot10.layout.sidebarPinned && snapshot10.layout.sidebarCollapsed;
     const sidebarClass = classNames(
       "sidebar",
-      snapshot9.layout.sessionsDrawerOpen && "open",
-      snapshot9.layout.sidebarAnchored && "pinned",
+      snapshot10.layout.sessionsDrawerOpen && "open",
+      snapshot10.layout.sidebarAnchored && "pinned",
       narrow && "collapsed"
     );
     const changeViewMode = (next) => {
       setViewMode(next);
       writeSidebarViewMode(next);
-      if (next === "directories" && snapshot9.sidebar.manageMode) {
+      if (next === "directories" && snapshot10.sidebar.manageMode) {
         void dispatch({ type: "session.manage.toggle" });
       }
     };
-    const fileExplorerRoot = snapshot9.topbar.cwd || snapshot9.selected?.cwd || "";
+    const fileExplorerRoot = snapshot10.topbar.cwd || snapshot10.selected?.cwd || "";
     const primaryAction = getShellSidebarPrimaryAction(viewMode);
-    const activeCount = viewMode === "directories" ? directories.data?.directoryCount ?? "\u2026" : viewMode === "files" ? "\u6587\u4EF6" : viewMode === "workspaces" ? "\u9879\u76EE" : snapshot9.sidebar.interactiveCount;
+    const activeCount = viewMode === "directories" ? directories.data?.directoryCount ?? "\u2026" : viewMode === "files" ? "\u6587\u4EF6" : viewMode === "workspaces" ? "\u9879\u76EE" : snapshot10.sidebar.interactiveCount;
     return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(import_jsx_runtime50.Fragment, { children: [
       /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
         "div",
         {
           id: "sessions-drawer-backdrop",
-          className: classNames("drawer-backdrop", snapshot9.layout.sessionsBackdropVisible && "open"),
+          className: classNames("drawer-backdrop", snapshot10.layout.sessionsBackdropVisible && "open"),
           "aria-hidden": "true",
           onClick: () => void dispatch({ type: "layout.drawer.close" })
         }
@@ -39100,7 +39157,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                   ]
                 }
               ) }),
-              snapshot9.viewport.mobile && /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(import_jsx_runtime50.Fragment, { children: [
+              snapshot10.viewport.mobile && /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(import_jsx_runtime50.Fragment, { children: [
                 /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
                   "button",
                   {
@@ -39129,7 +39186,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           ] }),
           /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "sidebar-header-controls", children: [
             /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(SidebarViewSwitch, { mode: viewMode, onChange: changeViewMode }),
-            !snapshot9.viewport.mobile && /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+            !snapshot10.viewport.mobile && /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
               SidebarCompactToggle,
               {
                 active: narrow,
@@ -39138,13 +39195,13 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
             )
           ] })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "sidebar-body", children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { id: "sessions-panel", children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "sessions-list", id: "sessions-list", children: narrow && viewMode !== "files" && viewMode !== "workspaces" ? /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(CollapsedSessions, { groups: snapshot9.sidebar.groups, dispatch }) : viewMode === "files" ? /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(FileExplorerHost, { root: fileExplorerRoot }) : viewMode === "directories" ? /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "sidebar-body", children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { id: "sessions-panel", children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "sessions-list", id: "sessions-list", children: narrow && viewMode !== "files" && viewMode !== "workspaces" ? /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(CollapsedSessions, { groups: snapshot10.sidebar.groups, dispatch }) : viewMode === "files" ? /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(FileExplorerHost, { root: fileExplorerRoot }) : viewMode === "directories" ? /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
           DirectoryTree,
           {
             response: directories.data,
             loading: directories.loading,
             error: directories.error,
-            selectedId: snapshot9.selected?.id ?? null,
+            selectedId: snapshot10.selected?.id ?? null,
             dispatch,
             renameDirectory: directories.rename
           }
@@ -39152,17 +39209,17 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
             ManageBar,
             {
-              manageMode: snapshot9.sidebar.manageMode,
-              selectedCount: snapshot9.sidebar.selectedCount,
-              totalCount: snapshot9.sidebar.totalCount,
+              manageMode: snapshot10.sidebar.manageMode,
+              selectedCount: snapshot10.sidebar.selectedCount,
+              totalCount: snapshot10.sidebar.totalCount,
               dispatch
             }
           ),
-          snapshot9.sidebar.totalCount === 0 ? /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "empty-state", children: [
+          snapshot10.sidebar.totalCount === 0 ? /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "empty-state", children: [
             /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("strong", { children: "\u8FD8\u6CA1\u6709\u4F1A\u8BDD\u8BB0\u5F55" }),
             /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("br", {}),
             "\u70B9\u51FB\u4E0A\u65B9\u300C\u65B0\u5BF9\u8BDD\u300D\u5F00\u59CB\u4F60\u7684\u7B2C\u4E00\u6B21\u5BF9\u8BDD\u3002"
-          ] }) : snapshot9.sidebar.groups.map((group) => /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(SessionGroup, { group, manageMode: snapshot9.sidebar.manageMode, dispatch }, group.kind))
+          ] }) : snapshot10.sidebar.groups.map((group) => /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(SessionGroup, { group, manageMode: snapshot10.sidebar.manageMode, dispatch }, group.kind))
         ] }) }) }) }),
         /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "sidebar-footer", children: [
           /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
@@ -39195,11 +39252,11 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                 ]
               }
             ),
-            snapshot9.viewport.mobile && /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
+            snapshot10.viewport.mobile && /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
               "button",
               {
                 id: "file-panel-toggle-btn",
-                className: classNames("btn btn-ghost btn-sm", snapshot9.layout.filePanelOpen && "active"),
+                className: classNames("btn btn-ghost btn-sm", snapshot10.layout.filePanelOpen && "active"),
                 type: "button",
                 title: "\u67E5\u770B\u6587\u4EF6",
                 onClick: () => void dispatch({ type: "layout.files.toggle" }),
@@ -39223,7 +39280,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                 ]
               }
             ),
-            snapshot9.capabilities.backToNative && /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
+            snapshot10.capabilities.backToNative && /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
               "button",
               {
                 id: "back-to-native-button",
@@ -39237,7 +39294,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                 ]
               }
             ),
-            snapshot9.capabilities.switchServer && /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
+            snapshot10.capabilities.switchServer && /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
               "button",
               {
                 id: "switch-server-button",
@@ -39346,13 +39403,13 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     );
   }
   function ShellTopbar() {
-    const snapshot9 = useUiStoreSnapshot();
+    const snapshot10 = useUiStoreSnapshot();
     const dispatch = useUiDispatch();
-    const selected = snapshot9.selected;
-    const moreOpen = snapshot9.layout.topbarMoreOpen;
+    const selected = snapshot10.selected;
+    const moreOpen = snapshot10.layout.topbarMoreOpen;
     const selectedActions = selected ? getShellSidebarEntryActions(selected, false) : null;
     const openFiles = () => {
-      if (!snapshot9.layout.filePanelOpen) void dispatch({ type: "layout.files.toggle" });
+      if (!snapshot10.layout.filePanelOpen) void dispatch({ type: "layout.files.toggle" });
     };
     const runMoreAction = (action) => {
       if (moreOpen) void dispatch({ type: "topbar.menu.toggle" });
@@ -39360,11 +39417,11 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     };
     return /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("div", { className: "main-header-row", children: [
       /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("div", { className: "topbar-left", children: [
-        snapshot9.viewport.mobile && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
+        snapshot10.viewport.mobile && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
           "button",
           {
             id: "sessions-toggle-button",
-            className: classNames("floating-sidebar-toggle", snapshot9.layout.sessionsDrawerOpen && "active"),
+            className: classNames("floating-sidebar-toggle", snapshot10.layout.sessionsDrawerOpen && "active"),
             "aria-label": "\u5207\u6362\u4F1A\u8BDD\u4FA7\u680F",
             type: "button",
             onClick: () => void dispatch({ type: "layout.drawer.toggle" }),
@@ -39375,57 +39432,57 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
             ] })
           }
         ),
-        !snapshot9.layout.sidebarAnchored && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "topbar-brand", "aria-hidden": "true", children: "W" })
+        !snapshot10.layout.sidebarAnchored && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "topbar-brand", "aria-hidden": "true", children: "W" })
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("div", { className: "topbar-center", children: selected ? /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(import_jsx_runtime51.Fragment, { children: [
         /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
           "span",
           {
-            className: classNames("topbar-session-title", snapshot9.topbar.titleGenerating && "title-generating"),
-            title: snapshot9.topbar.description || selected.title,
-            "aria-busy": snapshot9.topbar.titleGenerating || void 0,
-            children: snapshot9.topbar.title
+            className: classNames("topbar-session-title", snapshot10.topbar.titleGenerating && "title-generating"),
+            title: snapshot10.topbar.description || selected.title,
+            "aria-busy": snapshot10.topbar.titleGenerating || void 0,
+            children: snapshot10.topbar.title
           }
         ),
         /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(
           "span",
           {
-            className: classNames("session-status-pill", snapshot9.topbar.statusTone),
-            title: snapshot9.topbar.statusLabel,
+            className: classNames("session-status-pill", snapshot10.topbar.statusTone),
+            title: snapshot10.topbar.statusLabel,
             children: [
               /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "session-status-dot" }),
-              /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "session-status-text", children: snapshot9.topbar.statusLabel })
+              /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "session-status-text", children: snapshot10.topbar.statusLabel })
             ]
           }
         ),
         /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
           "span",
           {
-            className: classNames("current-task", !snapshot9.topbar.currentTask && "hidden"),
+            className: classNames("current-task", !snapshot10.topbar.currentTask && "hidden"),
             id: "current-task",
-            title: snapshot9.topbar.currentTask || void 0,
-            children: snapshot9.topbar.currentTask
+            title: snapshot10.topbar.currentTask || void 0,
+            children: snapshot10.topbar.currentTask
           }
         ),
-        snapshot9.topbar.cwd && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
+        snapshot10.topbar.cwd && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
           "span",
           {
             className: "topbar-cwd tail-marquee-path",
             id: "topbar-cwd",
             role: "button",
             tabIndex: 0,
-            title: snapshot9.topbar.cwd,
+            title: snapshot10.topbar.cwd,
             onClick: openFiles,
             onKeyDown: (event) => {
               if (event.key !== "Enter" && event.key !== " ") return;
               event.preventDefault();
               openFiles();
             },
-            children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "tail-marquee-path-inner", children: snapshot9.topbar.cwd })
+            children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "tail-marquee-path-inner", children: snapshot10.topbar.cwd })
           }
         )
       ] }) : /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(import_jsx_runtime51.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "topbar-tagline", children: snapshot9.topbar.title || "Wand \u63A7\u5236\u53F0" }),
+        /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "topbar-tagline", children: snapshot10.topbar.title || "Wand \u63A7\u5236\u53F0" }),
         /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "current-task hidden", id: "current-task" })
       ] }) }),
       /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("div", { className: "topbar-right", children: [
@@ -39433,7 +39490,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           "button",
           {
             id: "topbar-file-button",
-            className: classNames("topbar-btn square", snapshot9.layout.filePanelOpen && "active"),
+            className: classNames("topbar-btn square", snapshot10.layout.filePanelOpen && "active"),
             type: "button",
             "aria-label": "\u6587\u4EF6",
             title: "\u67E5\u770B\u6587\u4EF6\uFF08\u53EF\u4FEE\u6539\u8DEF\u5F84\uFF09",
@@ -39441,21 +39498,21 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
             children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(TopbarIcon, { name: "explorer" })
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { id: "topbar-git-slot", className: "topbar-git-slot", children: snapshot9.topbar.git && /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(
+        /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { id: "topbar-git-slot", className: "topbar-git-slot", children: snapshot10.topbar.git && /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(
           "button",
           {
             id: "topbar-git-badge",
             className: "topbar-git-badge",
             type: "button",
-            title: `${snapshot9.topbar.git.branch}  \xB7  ${snapshot9.topbar.git.clean ? "\u5DE5\u4F5C\u533A\u5E72\u51C0" : `${snapshot9.topbar.git.modifiedCount} \u4E2A\u6587\u4EF6\u5F85\u63D0\u4EA4`}`,
+            title: `${snapshot10.topbar.git.branch}  \xB7  ${snapshot10.topbar.git.clean ? "\u5DE5\u4F5C\u533A\u5E72\u51C0" : `${snapshot10.topbar.git.modifiedCount} \u4E2A\u6587\u4EF6\u5F85\u63D0\u4EA4`}`,
             "aria-label": "\u5FEB\u6377\u63D0\u4EA4",
             onClick: () => void dispatch({ type: "topbar.gitCommit" }),
             children: [
               /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(TopbarIcon, { name: "git", size: 14 }),
-              /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "topbar-git-branch", children: snapshot9.topbar.git.branch }),
-              snapshot9.topbar.git.clean ? /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "topbar-git-clean", "aria-hidden": "true", children: "\u2713" }) : /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("span", { className: "topbar-git-count", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "topbar-git-branch", children: snapshot10.topbar.git.branch }),
+              snapshot10.topbar.git.clean ? /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "topbar-git-clean", "aria-hidden": "true", children: "\u2713" }) : /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("span", { className: "topbar-git-count", children: [
                 "\xB7",
-                snapshot9.topbar.git.modifiedCount
+                snapshot10.topbar.git.modifiedCount
               ] })
             ]
           }
@@ -39606,7 +39663,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         return /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("path", { d: "M4 17l6-5-6-5M12 19h8" }) });
     }
   }
-  function ShellBlankChat({ className, cwd, queueRef }) {
+  function ShellBlankChat({ className, cwd, queueRef, workspaceTask }) {
     const dispatch = useUiDispatch();
     const quickStart2 = (tool) => {
       void dispatch(getShellWelcomeQuickStartAction(tool));
@@ -39615,7 +39672,28 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       void dispatch({ type: "folderPicker.open" });
     };
     return /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)("div", { id: "blank-chat", className, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)("div", { className: "blank-chat-inner", children: [
+      workspaceTask ? /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)("div", { className: "blank-chat-inner workspace-task-welcome", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("div", { className: "workspace-task-welcome-eyebrow", children: workspaceTask.workspaceName }),
+        /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("div", { className: "blank-chat-logo", children: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(WelcomeIcon, { name: "terminal", size: 28 }) }),
+        /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("h2", { className: "blank-chat-title", children: workspaceTask.taskName }),
+        /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("p", { className: "blank-chat-subtitle", children: "\u8FD9\u4E2A\u4EFB\u52A1\u8FD8\u6CA1\u6709\u5DE5\u4F5C\u7A97\u53E3\u3002\u9009\u62E9\u4E00\u4E2A Agent\uFF0C\u6216\u76F4\u63A5\u6253\u5F00\u7A7A\u767D\u7EC8\u7AEF\u3002" }),
+        /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("div", { className: "blank-chat-tools", children: /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)(
+          "button",
+          {
+            className: "workspace-task-welcome-action",
+            type: "button",
+            onClick: () => workspaceAgentDialogController.open(),
+            children: [
+              /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(WelcomeIcon, { name: "terminal", size: 17 }),
+              "\u9009\u62E9 Agent \u6216\u7A7A\u767D\u7EC8\u7AEF"
+            ]
+          }
+        ) }),
+        /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)("div", { className: "workspace-task-welcome-cwd", title: workspaceTask.cwd, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(WelcomeIcon, { name: "folder", size: 13 }),
+          /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("span", { children: workspaceTask.cwd })
+        ] })
+      ] }) : /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)("div", { className: "blank-chat-inner", children: [
         /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("div", { className: "blank-chat-logo", children: "W" }),
         /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("h2", { className: "blank-chat-title", children: "Wand" }),
         /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("p", { className: "blank-chat-subtitle", children: "\u652F\u6301\u7EC8\u7AEF PTY \u4F1A\u8BDD\u4E0E\u7ED3\u6784\u5316 chat \u4F1A\u8BDD\uFF0C\u4E24\u79CD\u6A21\u5F0F\u53EF\u5E76\u5B58\u3002" }),
@@ -39700,16 +39778,16 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     ] });
   }
   function ShellMainContent({ legacyRefs } = {}) {
-    const snapshot9 = useUiStoreSnapshot();
-    const classes2 = getShellLegacySlotClasses(snapshot9.legacyVisibility);
-    const cwd = snapshot9.topbar.cwd || "/";
+    const snapshot10 = useUiStoreSnapshot();
+    const classes2 = getShellLegacySlotClasses(snapshot10.legacyVisibility);
+    const cwd = snapshot10.topbar.cwd || "/";
     const context2 = React49.useSyncExternalStore(
       workspaceContextStore.subscribe,
       workspaceContextStore.getSnapshot,
       workspaceContextStore.getServerSnapshot
     );
     const inSplit = !!context2.taskId && activeWorkWindow(context2.layout)?.layout.type === "split";
-    return /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)("main", { className: `main-content${snapshot9.layout.filePanelOpen ? " file-panel-open" : ""}${inSplit ? " main-content-in-split" : ""}`, children: [
+    return /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)("main", { className: `main-content${snapshot10.layout.filePanelOpen ? " file-panel-open" : ""}${inSplit ? " main-content-in-split" : ""}`, children: [
       context2.taskId ? null : /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(ShellTopbar, {}),
       /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(ShellFilePanel, { explorerRef: legacyRefs?.fileExplorer }),
       /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(WorkspaceTabBar, {}),
@@ -39720,7 +39798,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         {
           className: classes2.blank,
           cwd,
-          queueRef: legacyRefs?.crossSessionQueue
+          queueRef: legacyRefs?.crossSessionQueue,
+          workspaceTask: context2.taskId ? {
+            workspaceName: context2.workspaceName,
+            taskName: context2.taskName,
+            cwd: context2.cwd
+          } : void 0
         }
       ),
       /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("div", { className: classes2.composer, ref: legacyRefs?.composer }),
@@ -39739,8 +39822,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     return classes2.join(" ");
   }
   function ShellAppFrame({ legacyRefs } = {}) {
-    const snapshot9 = useUiStoreSnapshot();
-    return /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("div", { className: "app-container", children: /* @__PURE__ */ (0, import_jsx_runtime53.jsxs)("div", { className: getShellLayoutClassName(snapshot9.layout), children: [
+    const snapshot10 = useUiStoreSnapshot();
+    return /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("div", { className: "app-container", children: /* @__PURE__ */ (0, import_jsx_runtime53.jsxs)("div", { className: getShellLayoutClassName(snapshot10.layout), children: [
       /* @__PURE__ */ (0, import_jsx_runtime53.jsx)(ShellSidebar, {}),
       /* @__PURE__ */ (0, import_jsx_runtime53.jsx)(ShellMainContent, { legacyRefs })
     ] }) });
@@ -39772,7 +39855,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     return Object.freeze(value);
   }
   function isolateSnapshot(data, revision, freeze) {
-    const snapshot9 = cloneValue({
+    const snapshot10 = cloneValue({
       auth: data.auth,
       viewport: data.viewport,
       capabilities: data.capabilities,
@@ -39783,7 +39866,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       legacyVisibility: data.legacyVisibility,
       revision
     });
-    return freeze ? freezeValue(snapshot9) : snapshot9;
+    return freeze ? freezeValue(snapshot10) : snapshot10;
   }
   function normalizeBatchMs(value) {
     const batchMs = value ?? 0;
@@ -40199,9 +40282,9 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   }
   function prepareFilePreviewForCompetingOverlay(openIntent) {
     if (!filePreviewController.isOpen()) return true;
-    const snapshot9 = filePreviewStore.getSnapshot();
-    if (snapshot9.saving) return false;
-    if (!snapshot9.dirty) {
+    const snapshot10 = filePreviewStore.getSnapshot();
+    if (snapshot10.saving) return false;
+    if (!snapshot10.dirty) {
       filePreviewController.closeIfOpen();
       return !filePreviewController.isOpen();
     }
@@ -41844,9 +41927,9 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       }
     });
   }
-  function restorePooledTerminalState(sessionId, snapshot9, fallbackOutput = "") {
-    if (!snapshot9 || snapshot9.version !== 1) return false;
-    if (sessionId) state.terminalStatesBySession[sessionId] = snapshot9;
+  function restorePooledTerminalState(sessionId, snapshot10, fallbackOutput = "") {
+    if (!snapshot10 || snapshot10.version !== 1) return false;
+    if (sessionId) state.terminalStatesBySession[sessionId] = snapshot10;
     setSessionOutput(sessionId, fallbackOutput);
     const handle = pool.get(sessionId);
     if (!handle || handle.disposed) return true;
@@ -41857,13 +41940,13 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       try {
         handle.terminal.reset();
         handle.terminal.clear();
-        if (snapshot9.cols > 0 && snapshot9.rows > 0) {
-          handle.terminal.resize(snapshot9.cols, snapshot9.rows);
+        if (snapshot10.cols > 0 && snapshot10.rows > 0) {
+          handle.terminal.resize(snapshot10.cols, snapshot10.rows);
         }
       } catch {
       }
-      await writeTerminal(handle, String(snapshot9.data || ""));
-      const pending = Array.isArray(snapshot9.pending) ? snapshot9.pending : [];
+      await writeTerminal(handle, String(snapshot10.data || ""));
+      const pending = Array.isArray(snapshot10.pending) ? snapshot10.pending : [];
       for (const operation of pending) {
         if (handle.disposed || generation !== handle.restoreGeneration) return;
         if (operation?.type === "resize" && operation.cols > 0 && operation.rows > 0) {
@@ -42089,43 +42172,43 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         }
         if (msg.data && msg.sessionId) {
           var isIncremental = !!msg.data.incremental;
-          var snapshot9 = { id: msg.sessionId };
+          var snapshot10 = { id: msg.sessionId };
           var topicMetadataChanged = false;
           if (!isIncremental && msg.data.output !== void 0) {
-            snapshot9.output = msg.data.output;
+            snapshot10.output = msg.data.output;
           }
           if (Object.prototype.hasOwnProperty.call(msg.data, "permissionBlocked")) {
-            snapshot9.permissionBlocked = !!msg.data.permissionBlocked;
+            snapshot10.permissionBlocked = !!msg.data.permissionBlocked;
           }
           if (Object.prototype.hasOwnProperty.call(msg.data, "queuedMessages")) {
-            snapshot9.queuedMessages = msg.data.queuedMessages || [];
+            snapshot10.queuedMessages = msg.data.queuedMessages || [];
             state.queueEpoch++;
           }
           if (msg.data.structuredState) {
-            snapshot9.structuredState = msg.data.structuredState;
+            snapshot10.structuredState = msg.data.structuredState;
           }
           if (msg.data.sessionKind) {
-            snapshot9.sessionKind = msg.data.sessionKind;
+            snapshot10.sessionKind = msg.data.sessionKind;
           }
           if (Object.prototype.hasOwnProperty.call(msg.data, "title")) {
-            snapshot9.title = msg.data.title;
+            snapshot10.title = msg.data.title;
             topicMetadataChanged = true;
           }
           if (Object.prototype.hasOwnProperty.call(msg.data, "description")) {
-            snapshot9.description = msg.data.description;
+            snapshot10.description = msg.data.description;
             topicMetadataChanged = true;
           }
           if (Object.prototype.hasOwnProperty.call(msg.data, "titleGenerating")) {
-            snapshot9.titleGenerating = !!msg.data.titleGenerating;
+            snapshot10.titleGenerating = !!msg.data.titleGenerating;
             topicMetadataChanged = true;
           }
           if (Object.prototype.hasOwnProperty.call(msg.data, "summary")) {
-            snapshot9.summary = msg.data.summary;
+            snapshot10.summary = msg.data.summary;
           }
           if (msg.data.messages) {
-            snapshot9.messages = msg.data.messages;
-            if (typeof msg.data.messageOffset === "number") snapshot9.messageOffset = msg.data.messageOffset;
-            if (typeof msg.data.messageTotal === "number") snapshot9.messageTotal = msg.data.messageTotal;
+            snapshot10.messages = msg.data.messages;
+            if (typeof msg.data.messageOffset === "number") snapshot10.messageOffset = msg.data.messageOffset;
+            if (typeof msg.data.messageTotal === "number") snapshot10.messageTotal = msg.data.messageTotal;
           } else if (isIncremental && msg.data.lastMessage) {
             var existingSession = state.sessions.find(function(s) {
               return s.id === msg.sessionId;
@@ -42141,28 +42224,28 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
               } else if (baseOffset + msgs.length < expectedCount) {
                 msgs.push(incoming);
               }
-              snapshot9.messages = msgs;
-              if (expectedCount > 0) snapshot9.messageTotal = expectedCount;
+              snapshot10.messages = msgs;
+              if (expectedCount > 0) snapshot10.messageTotal = expectedCount;
             }
           }
-          var isChunkOnly = isIncremental && msg.data.chunk && !msg.data.lastMessage && !snapshot9.messages && snapshot9.output === void 0 && !msg.data.structuredState && !msg.data.sessionKind;
+          var isChunkOnly = isIncremental && msg.data.chunk && !msg.data.lastMessage && !snapshot10.messages && snapshot10.output === void 0 && !msg.data.structuredState && !msg.data.sessionKind;
           if (isChunkOnly) {
             if (msg.data.permissionBlocked !== void 0) {
               var existingPB = state.sessions.find(function(s) {
                 return s.id === msg.sessionId;
               });
               if (existingPB && !!existingPB.permissionBlocked !== !!msg.data.permissionBlocked) {
-                updateSessionSnapshot(snapshot9);
+                updateSessionSnapshot(snapshot10);
                 if (msg.sessionId === state.selectedId) updateTaskDisplay();
               }
             }
-          } else if (snapshot9.output !== void 0 || snapshot9.messages || isIncremental || msg.data.permissionBlocked !== void 0 || snapshot9.title || snapshot9.description || snapshot9.titleGenerating !== void 0) {
-            updateSessionSnapshot(snapshot9);
+          } else if (snapshot10.output !== void 0 || snapshot10.messages || isIncremental || msg.data.permissionBlocked !== void 0 || snapshot10.title || snapshot10.description || snapshot10.titleGenerating !== void 0) {
+            updateSessionSnapshot(snapshot10);
             if (topicMetadataChanged) scheduleSessionListUpdate();
             if (msg.sessionId === state.selectedId) {
               var updatedSession = state.sessions.find(function(s) {
                 return s.id === msg.sessionId;
-              }) || snapshot9;
+              }) || snapshot10;
               state.currentMessages = buildMessagesForRender(updatedSession, getPreferredMessages(updatedSession, updatedSession.output, false));
               updateTaskDisplay();
               if (updatedSession.sessionKind === "structured" || msg.data.sessionKind === "structured") {
@@ -43271,14 +43354,14 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         throw new Error(p && p.error || "\u4E2D\u65AD\u5931\u8D25 (key=" + key + ")");
       });
       return res.json();
-    }).then(function(snapshot9) {
-      if (snapshot9 && snapshot9.id) {
-        updateSessionSnapshot(snapshot9);
-        if (snapshot9.id === state.selectedId) {
+    }).then(function(snapshot10) {
+      if (snapshot10 && snapshot10.id) {
+        updateSessionSnapshot(snapshot10);
+        if (snapshot10.id === state.selectedId) {
           var refreshed = state.sessions.find(function(s) {
-            return s.id === snapshot9.id;
-          }) || snapshot9;
-          state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, snapshot9.output, false));
+            return s.id === snapshot10.id;
+          }) || snapshot10;
+          state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, snapshot10.output, false));
           renderChat2(true);
           if (typeof updateQueueBar === "function") updateQueueBar();
         }
@@ -44193,9 +44276,9 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       });
     });
   }
-  function restoreTerminalState(sessionId, snapshot9, fallbackOutput) {
-    if (!snapshot9 || snapshot9.version !== 1) return false;
-    if (sessionId) state.terminalStatesBySession[sessionId] = snapshot9;
+  function restoreTerminalState(sessionId, snapshot10, fallbackOutput) {
+    if (!snapshot10 || snapshot10.version !== 1) return false;
+    if (sessionId) state.terminalStatesBySession[sessionId] = snapshot10;
     if (!state.terminal) return true;
     var terminal = state.terminal;
     var generation = (state.terminalRestoreGeneration || 0) + 1;
@@ -44206,9 +44289,9 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       if (terminal !== state.terminal || generation !== state.terminalRestoreGeneration) return;
       terminal.reset();
       terminal.clear();
-      if (snapshot9.cols > 0 && snapshot9.rows > 0) terminal.resize(snapshot9.cols, snapshot9.rows);
-      await writeTerminalNow(terminal, String(snapshot9.data || ""));
-      var pending = Array.isArray(snapshot9.pending) ? snapshot9.pending : [];
+      if (snapshot10.cols > 0 && snapshot10.rows > 0) terminal.resize(snapshot10.cols, snapshot10.rows);
+      await writeTerminalNow(terminal, String(snapshot10.data || ""));
+      var pending = Array.isArray(snapshot10.pending) ? snapshot10.pending : [];
       for (var i = 0; i < pending.length; i++) {
         var operation = pending[i] || {};
         if (operation.type === "resize" && operation.cols > 0 && operation.rows > 0) {
@@ -46708,12 +46791,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     if (index2 >= 0) latestQueue.splice(index2, 1);
     return latestQueue;
   }
-  function stripStaleStructuredQueueSnapshot(snapshot9, sessionId, requestRevision, requestQueueEpoch) {
-    if (!snapshot9 || !snapshot9.queuedMessages) return snapshot9;
+  function stripStaleStructuredQueueSnapshot(snapshot10, sessionId, requestRevision, requestQueueEpoch) {
+    if (!snapshot10 || !snapshot10.queuedMessages) return snapshot10;
     if (getStructuredQueueMutationRevision(sessionId) !== requestRevision || state.queueEpoch > requestQueueEpoch) {
-      delete snapshot9.queuedMessages;
+      delete snapshot10.queuedMessages;
     }
-    return snapshot9;
+    return snapshot10;
   }
   function continueStructuredSession(session, text6) {
     var normalizedText2 = typeof text6 === "string" ? text6.trim() : "";
@@ -46749,11 +46832,11 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         });
       }
       return res.json();
-    }).then(function(snapshot9) {
-      if (snapshot9 && snapshot9.id) {
-        stripStaleStructuredQueueSnapshot(snapshot9, session.id, queueRevision, queueEpoch);
-        updateSessionSnapshot(snapshot9);
-        if (snapshot9.id === state.selectedId) updateQueueBar();
+    }).then(function(snapshot10) {
+      if (snapshot10 && snapshot10.id) {
+        stripStaleStructuredQueueSnapshot(snapshot10, session.id, queueRevision, queueEpoch);
+        updateSessionSnapshot(snapshot10);
+        if (snapshot10.id === state.selectedId) updateQueueBar();
       }
     }).catch(function(err) {
       var rollbackQueue = removeOneQueuedMessage(session.id, text6, prevQueue.length);
@@ -47381,23 +47464,23 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         });
       }
       return res.json();
-    }).then(function(snapshot9) {
-      if (snapshot9 && snapshot9.error) {
-        throw new Error(snapshot9.error);
+    }).then(function(snapshot10) {
+      if (snapshot10 && snapshot10.error) {
+        throw new Error(snapshot10.error);
       }
-      if (snapshot9 && snapshot9.id) {
+      if (snapshot10 && snapshot10.id) {
         stripStaleStructuredQueueSnapshot(
-          snapshot9,
+          snapshot10,
           session.id,
           requestQueueRevision,
           epochBeforePost
         );
-        updateSessionSnapshot(snapshot9);
-        if (snapshot9.id === state.selectedId) {
+        updateSessionSnapshot(snapshot10);
+        if (snapshot10.id === state.selectedId) {
           var refreshedSession = state.sessions.find(function(s) {
-            return s.id === snapshot9.id;
-          }) || snapshot9;
-          state.currentMessages = buildMessagesForRender(refreshedSession, getPreferredMessages(refreshedSession, snapshot9.output, false));
+            return s.id === snapshot10.id;
+          }) || snapshot10;
+          state.currentMessages = buildMessagesForRender(refreshedSession, getPreferredMessages(refreshedSession, snapshot10.output, false));
           renderChat(true);
           updateStructuredQueueCounter();
         }
@@ -47632,20 +47715,20 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         });
       }
       return res.json();
-    }).then(function(snapshot9) {
-      if (snapshot9 && snapshot9.id) {
+    }).then(function(snapshot10) {
+      if (snapshot10 && snapshot10.id) {
         stripStaleStructuredQueueSnapshot(
-          snapshot9,
+          snapshot10,
           session.id,
           mutationRevision,
           mutationQueueEpoch
         );
-        updateSessionSnapshot(snapshot9);
-        if (snapshot9.id === state.selectedId) {
+        updateSessionSnapshot(snapshot10);
+        if (snapshot10.id === state.selectedId) {
           var refreshed = state.sessions.find(function(s) {
-            return s.id === snapshot9.id;
-          }) || snapshot9;
-          state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, snapshot9.output, false));
+            return s.id === snapshot10.id;
+          }) || snapshot10;
+          state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, snapshot10.output, false));
           renderChat(true);
           updateQueueBar();
         }
@@ -48054,17 +48137,17 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         });
       }
       return res.json();
-    }).then(function(snapshot9) {
-      if (snapshot9 && snapshot9.id) {
-        updateSessionSnapshot(snapshot9);
-        if (snapshot9.id === state.selectedId) {
-          if (snapshot9.messages && snapshot9.messages.length > 0) {
-            state.currentMessages = snapshot9.messages;
+    }).then(function(snapshot10) {
+      if (snapshot10 && snapshot10.id) {
+        updateSessionSnapshot(snapshot10);
+        if (snapshot10.id === state.selectedId) {
+          if (snapshot10.messages && snapshot10.messages.length > 0) {
+            state.currentMessages = snapshot10.messages;
           }
           renderChat(true);
         }
       }
-      return snapshot9;
+      return snapshot10;
     });
   }
   function getSelectedSession() {
@@ -48533,17 +48616,17 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         });
       }
       return res.json();
-    }).then(function(snapshot9) {
-      if (snapshot9 && snapshot9.id) {
-        updateSessionSnapshot(snapshot9);
-        if (snapshot9.id === state.selectedId) {
-          if (snapshot9.messages && snapshot9.messages.length > 0) {
-            state.currentMessages = snapshot9.messages;
+    }).then(function(snapshot10) {
+      if (snapshot10 && snapshot10.id) {
+        updateSessionSnapshot(snapshot10);
+        if (snapshot10.id === state.selectedId) {
+          if (snapshot10.messages && snapshot10.messages.length > 0) {
+            state.currentMessages = snapshot10.messages;
           }
           renderChat(true);
         }
       }
-      return snapshot9;
+      return snapshot10;
     });
   }
   function stopSession() {
@@ -53081,12 +53164,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     updateInteractiveControls2();
     notifyLegacyUiChange("shell:view");
   }
-  function updateSessionSnapshot(snapshot9) {
-    if (!snapshot9 || !snapshot9.id) return;
+  function updateSessionSnapshot(snapshot10) {
+    if (!snapshot10 || !snapshot10.id) return;
     var currentSession = state.sessions.find(function(session) {
-      return session.id === snapshot9.id;
+      return session.id === snapshot10.id;
     }) || null;
-    var normalizedSnapshot = normalizeStructuredSnapshot(snapshot9, currentSession);
+    var normalizedSnapshot = normalizeStructuredSnapshot(snapshot10, currentSession);
     if (Array.isArray(normalizedSnapshot.messages) && typeof normalizedSnapshot.messageOffset === "number") {
       var mw = mergeWindowedMessages(currentSession, normalizedSnapshot.messages, normalizedSnapshot.messageOffset, normalizedSnapshot.messageTotal);
       normalizedSnapshot.messages = mw.messages;
@@ -54093,13 +54176,20 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     });
   }
   function startSessionInCwd(cwd, options) {
-    var provider = options && options.provider || getPreferredTool();
-    var command = provider === "qoder" ? "qodercli" : provider;
-    var defaultMode = getSafeModeForTool2(provider, state.config && state.config.defaultMode ? state.config.defaultMode : "default");
-    state.preferredCommand = provider;
-    state.chatMode = getSafeModeForTool2(provider, state.chatMode);
-    var body = withTerminalDimensions({
-      command,
+    var shell = !!(options && options.shell);
+    var provider = shell ? "" : options && options.provider || getPreferredTool();
+    var defaultMode = shell ? "default" : getSafeModeForTool2(provider, state.config && state.config.defaultMode ? state.config.defaultMode : "default");
+    if (!shell) {
+      state.preferredCommand = provider;
+      state.chatMode = getSafeModeForTool2(provider, state.chatMode);
+    }
+    var body = shell ? withTerminalDimensions({
+      shell: true,
+      cwd,
+      mode: defaultMode,
+      sessionSource: "interactive"
+    }) : withTerminalDimensions({
+      command: provider === "qoder" ? "qodercli" : provider,
       provider,
       cwd,
       mode: defaultMode,
@@ -55157,7 +55247,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           provider: payload.provider,
           layout: null
         });
-        void httpWorkspacesRepository.getTask(payload.taskId).then(async (detail) => {
+        goHome();
+        void httpWorkspacesRepository.getTask(payload.taskId).then((detail) => {
           if (!detail) return;
           const sessionIds = orderWorkspaceSessions(detail.sessions).map((session) => session.id);
           if (sessionIds.length > 0) {
@@ -55169,17 +55260,10 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
             void httpWorkspacesRepository.saveTaskLayout(payload.taskId, layout).catch(() => {
             });
           } else {
-            const sessionId = await startSessionInCwd(payload.cwd, {
-              workspaceId: payload.workspaceId,
-              workspaceTaskId: payload.taskId,
-              provider: payload.provider
+            const layout = reconcileTaskWindowLayout(detail.layout, [], null);
+            setActiveWorkspaceContext({ layout });
+            void httpWorkspacesRepository.saveTaskLayout(payload.taskId, layout).catch(() => {
             });
-            if (typeof sessionId === "string" && sessionId) {
-              const layout = reconcileTaskWindowLayout(null, [sessionId], sessionId);
-              setActiveWorkspaceContext({ layout });
-              void httpWorkspacesRepository.saveTaskLayout(payload.taskId, layout).catch(() => {
-              });
-            }
           }
           dismissDrawerIfOverlay();
         }).catch(() => {
@@ -55189,7 +55273,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         return startSessionInCwd(payload.cwd, {
           workspaceId: payload.workspaceId,
           workspaceTaskId: payload.taskId,
-          provider: payload.provider
+          shell: payload.target === "shell",
+          provider: payload.target === "shell" ? void 0 : payload.target
         });
       },
       saveTaskLayout(layout) {

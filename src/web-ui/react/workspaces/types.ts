@@ -3,6 +3,9 @@
 
 export type WorkspaceProvider = "claude" | "codex" | "opencode" | "grok" | "qoder" | "pi";
 
+/** A task work window can run an Agent CLI or a bare login shell. */
+export type WorkspaceSessionTarget = WorkspaceProvider | "shell";
+
 export type PaneTab =
   | { id: string; kind: "session"; sessionId: string }
   | { id: string; kind: "editor"; path: string }
@@ -157,7 +160,7 @@ export interface NewTaskSessionPayload {
   workspaceId: string;
   taskId: string;
   cwd: string;
-  provider?: WorkspaceProvider;
+  target: WorkspaceSessionTarget;
 }
 
 export interface WorkspacesRuntimeAdapter {
@@ -172,7 +175,7 @@ export interface WorkspacesRuntimeAdapter {
   closeWorkspace(): void;
   /** 删除任务 / 项目后立即刷新会话列表，清掉已删除会话的选中态。 */
   refreshSessions(): void | Promise<unknown>;
-  /** 点击任务：在该任务的 worktree 目录启动一个绑定到任务的会话。 */
+  /** 点击任务：只恢复任务上下文与已有会话；空任务保持欢迎页。 */
   openTask(payload: OpenWorkspaceTaskPayload): void;
   /** 标签栏「+」：在该任务 worktree 再起一个绑定会话（返回 promise 以便标签栏刷新）。 */
   newTaskSession(payload: NewTaskSessionPayload): void | Promise<unknown>;

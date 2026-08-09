@@ -10500,6 +10500,76 @@
       opacity: 0.6;
       transition: transform var(--transition-fast);
     }
+
+    .workspace-task-welcome-eyebrow {
+      margin: 0 0 10px;
+      color: var(--accent);
+      font-size: 0.6875rem;
+      font-weight: 650;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .workspace-task-welcome .blank-chat-logo {
+      color: white;
+    }
+
+    .workspace-task-welcome-action {
+      display: inline-flex;
+      min-height: 42px;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      border: 1px solid color-mix(in srgb, var(--accent) 72%, transparent);
+      border-radius: 11px;
+      padding: 9px 16px;
+      color: white;
+      background: var(--accent);
+      box-shadow: 0 8px 20px color-mix(in srgb, var(--accent) 20%, transparent);
+      cursor: pointer;
+      font: inherit;
+      font-size: 0.8125rem;
+      font-weight: 600;
+      transition:
+        background-color 160ms cubic-bezier(0.23, 1, 0.32, 1),
+        box-shadow 160ms cubic-bezier(0.23, 1, 0.32, 1),
+        transform 140ms cubic-bezier(0.23, 1, 0.32, 1);
+    }
+
+    @media (hover: hover) and (pointer: fine) {
+      .workspace-task-welcome-action:hover {
+        background: color-mix(in srgb, var(--accent) 90%, black);
+        box-shadow: 0 10px 24px color-mix(in srgb, var(--accent) 25%, transparent);
+      }
+    }
+
+    .workspace-task-welcome-action:active {
+      transform: scale(0.97);
+    }
+
+    .workspace-task-welcome-action:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 3px;
+    }
+
+    .workspace-task-welcome-cwd {
+      display: flex;
+      max-width: min(420px, 100%);
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      margin: 12px auto 0;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      font-size: 0.6875rem;
+    }
+
+    .workspace-task-welcome-cwd span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     /* 此处历史遗留的 .chat-mode-select 全局规则会覆盖上面 .composer-pill 的统一字号 / 边框，
        已上移到 .composer-pill / .composer-pill-select 体系；这里只保留 outline / cursor 的兜底，
        不再设置 font-size / max-width，避免和 6938 行的统一样式打架。 */

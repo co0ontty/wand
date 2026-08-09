@@ -210,3 +210,13 @@ test("ShellMainContent uses UiStore actions and no forbidden legacy seam", () =>
   assert.doesNotMatch(source, /inSplit \? null : <WorkspaceTabBar\/>/);
   assert.doesNotMatch(source, /innerHTML|querySelector|getElementById|browser\/state|@radix-ui\/|\bfetch\s*\(/);
 });
+
+test("workspace task blank state offers an explicit Agent or shell choice", () => {
+  const source = readFileSync(
+    path.join(root, "src", "web-ui", "react", "shell", "shell-main-content.tsx"),
+    "utf8",
+  );
+  assert.match(source, /这个任务还没有工作窗口。选择一个 Agent，或直接打开空白终端。/);
+  assert.match(source, /workspaceAgentDialogController\.open\(\)/);
+  assert.match(source, /选择 Agent 或空白终端/);
+});

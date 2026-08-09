@@ -3,6 +3,7 @@ import * as React from "react";
 import { CodeEditorHost } from "../code-editor/host";
 import { ProviderLogo } from "../provider-logo";
 import { workspaceContextStore } from "../workspaces/workspace-context";
+import { workspaceAgentDialogController } from "../workspaces/workspace-agent-dialog-controller";
 import { WorkspaceTabBar } from "../workspaces/workspace-tab-bar";
 import { WorkspaceWindow } from "../workspaces/workspace-window";
 import { activeWorkWindow } from "../workspaces/window-layout";
@@ -82,10 +83,15 @@ function WelcomeIcon({ name, size }: {
   }
 }
 
-function ShellBlankChat({ className, cwd, queueRef }: {
+function ShellBlankChat({ className, cwd, queueRef, workspaceTask }: {
   className: string;
   cwd: string;
   queueRef?: React.Ref<HTMLDivElement>;
+  workspaceTask?: {
+    workspaceName: string;
+    taskName: string;
+    cwd: string;
+  };
 }) {
   const dispatch = useUiDispatch();
   const quickStart = (tool: ShellWelcomeQuickStart) => {
@@ -97,7 +103,28 @@ function ShellBlankChat({ className, cwd, queueRef }: {
 
   return (
     <div id="blank-chat" className={className}>
-      <div className="blank-chat-inner">
+      {workspaceTask ? (
+        <div className="blank-chat-inner workspace-task-welcome">
+          <div className="workspace-task-welcome-eyebrow">{workspaceTask.workspaceName}</div>
+          <div className="blank-chat-logo"><WelcomeIcon name="terminal" size={28}/></div>
+          <h2 className="blank-chat-title">{workspaceTask.taskName}</h2>
+          <p className="blank-chat-subtitle">这个任务还没有工作窗口。选择一个 Agent，或直接打开空白终端。</p>
+          <div className="blank-chat-tools">
+            <button
+              className="workspace-task-welcome-action"
+              type="button"
+              onClick={() => workspaceAgentDialogController.open()}
+            >
+              <WelcomeIcon name="terminal" size={17}/>
+              选择 Agent 或空白终端
+            </button>
+          </div>
+          <div className="workspace-task-welcome-cwd" title={workspaceTask.cwd}>
+            <WelcomeIcon name="folder" size={13}/>
+            <span>{workspaceTask.cwd}</span>
+          </div>
+        </div>
+      ) : <div className="blank-chat-inner">
         <div className="blank-chat-logo">W</div>
         <h2 className="blank-chat-title">Wand</h2>
         <p className="blank-chat-subtitle">支持终端 PTY 会话与结构化 chat 会话，两种模式可并存。</p>
@@ -163,7 +190,7 @@ function ShellBlankChat({ className, cwd, queueRef }: {
             </span>
           </div>
         </div>
-      </div>
+      </div>}
       <div id="cross-session-queue-host" ref={queueRef}/>
     </div>
   );
@@ -200,6 +227,11 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
         className={classes.blank}
         cwd={cwd}
         queueRef={legacyRefs?.crossSessionQueue}
+        workspaceTask={context.taskId ? {
+          workspaceName: context.workspaceName,
+          taskName: context.taskName,
+          cwd: context.cwd,
+        } : undefined}
       />
       <div className={classes.composer} ref={legacyRefs?.composer}/>
       {inSplit ? <WorkspaceWindow/> : null}

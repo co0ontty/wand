@@ -1,7 +1,7 @@
 import { configureWorkspacesRuntime } from "../react/workspaces/controller";
 import { clearActiveWorkspaceContext, setActiveWorkspaceContext } from "../react/workspaces/workspace-context";
 import { closeReactOverlays } from "./react-overlay-coordinator";
-import { dismissDrawerIfOverlay, refreshAll, selectSession, startSessionInCwd } from "./session-engine";
+import { dismissDrawerIfOverlay, goHome, refreshAll, selectSession, startSessionInCwd } from "./session-engine";
 import { getEffectiveCwd } from "./render";
 import { showToast } from "./notifications";
 import { confirmDelete } from "./sidebar";
@@ -81,9 +81,12 @@ export function installWorkspacesLegacyAdapter(): void {
         provider: payload.provider,
         layout: null,
       });
+      // 任务上下文已经切换，旧任务的终端不能继续挂在新任务标题下。
+      // 先即时进入任务欢迎/加载态；详情返回后再恢复已有会话。
+      goHome();
       // 已有会话的任务只恢复标签 / 布局，不因每次点击任务而偷偷再起一个会话。
-      // 新任务没有会话时才创建首个绑定会话。
-      void httpWorkspacesRepository.getTask(payload.taskId).then(async (detail) => {
+      // 空任务进入任务欢迎页，由用户主动选择 Agent 或空白终端。
+      void httpWorkspacesRepository.getTask(payload.taskId).then((detail) => {
         if (!detail) return;
         const sessionIds = orderWorkspaceSessions(detail.sessions).map((session) => session.id);
         if (sessionIds.length > 0) {
@@ -96,19 +99,12 @@ export function installWorkspacesLegacyAdapter(): void {
           setActiveWorkspaceContext({ layout });
           void httpWorkspacesRepository.saveTaskLayout(payload.taskId, layout).catch(() => { /* ignore */ });
         } else {
-          const sessionId = await startSessionInCwd(payload.cwd, {
-            workspaceId: payload.workspaceId,
-            workspaceTaskId: payload.taskId,
-            provider: payload.provider,
-          });
-          if (typeof sessionId === "string" && sessionId) {
-            const layout = reconcileTaskWindowLayout(null, [sessionId], sessionId);
-            setActiveWorkspaceContext({ layout });
-            void httpWorkspacesRepository.saveTaskLayout(payload.taskId, layout).catch(() => { /* ignore */ });
-          }
+          const layout = reconcileTaskWindowLayout(detail.layout, [], null);
+          setActiveWorkspaceContext({ layout });
+          void httpWorkspacesRepository.saveTaskLayout(payload.taskId, layout).catch(() => { /* ignore */ });
         }
         dismissDrawerIfOverlay();
-      }).catch(() => { /* startSessionInCwd 已展示具体错误 */ });
+      }).catch(() => { /* 任务详情加载失败时保留当前界面，等待下一次用户操作。 */ });
     },
     newTaskSession(payload: NewTaskSessionPayload) {
       // 标签栏「+」/ 窗格「+」：在同一任务 worktree 再起一个绑定会话；
@@ -116,7 +112,8 @@ export function installWorkspacesLegacyAdapter(): void {
       return startSessionInCwd(payload.cwd, {
         workspaceId: payload.workspaceId,
         workspaceTaskId: payload.taskId,
-        provider: payload.provider,
+        shell: payload.target === "shell",
+        provider: payload.target === "shell" ? undefined : payload.target,
       });
     },
     saveTaskLayout(layout: TaskWindowLayout | null) {

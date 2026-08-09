@@ -16,11 +16,15 @@ import type {
   NewTaskSessionPayload,
   TaskWindowLayout,
   WorkWindowLayout,
-  WorkspaceProvider,
+  WorkspaceSessionTarget,
   WorkspaceSessionSummary,
   WorkspaceTaskDetail,
 } from "./types";
 import { WorkspaceAgentDialog } from "./workspace-agent-dialog";
+import {
+  workspaceAgentDialogController,
+  workspaceAgentDialogStore,
+} from "./workspace-agent-dialog-controller";
 import { useUiDispatch, useUiStoreSnapshot } from "../shell/ui-store-react";
 import { classNames } from "../ui/class-names";
 import {
@@ -125,7 +129,11 @@ export function WorkspaceTabBar(): React.ReactElement | null {
   const snapshot = useUiStoreSnapshot();
   const dispatch = useUiDispatch();
   const [refreshTick, setRefreshTick] = React.useState(0);
-  const [agentDialogOpen, setAgentDialogOpen] = React.useState(false);
+  const agentDialog = React.useSyncExternalStore(
+    workspaceAgentDialogStore.subscribe,
+    workspaceAgentDialogStore.getSnapshot,
+    workspaceAgentDialogStore.getServerSnapshot,
+  );
   const [moving, setMoving] = React.useState<{ sessionId: string; dir: "h" | "v" } | null>(null);
   const [closingWindowId, setClosingWindowId] = React.useState<string | null>(null);
   const selectedId = snapshot.selected?.id ?? null;
@@ -133,7 +141,10 @@ export function WorkspaceTabBar(): React.ReactElement | null {
 
   React.useEffect(() => {
     setMoving(null);
+    workspaceAgentDialogController.close();
   }, [context.taskId]);
+
+  React.useEffect(() => () => workspaceAgentDialogController.close(), []);
 
   React.useEffect(() => {
     if (!moving) return;
@@ -162,7 +173,7 @@ export function WorkspaceTabBar(): React.ReactElement | null {
   // 无活动任务 → 不渲染标签栏（SSR 与 reactShell=0 兜底同样走这里）。
   if (!context.taskId) return null;
 
-  const handleNewSession = async (provider: WorkspaceProvider) => {
+  const handleNewSession = async (target: WorkspaceSessionTarget) => {
     if (!context.taskId || !context.workspaceId) {
       throw new Error("当前任务上下文已失效，请重新打开任务后重试。");
     }
@@ -172,7 +183,7 @@ export function WorkspaceTabBar(): React.ReactElement | null {
       workspaceId: context.workspaceId,
       taskId: context.taskId,
       cwd: taskCwd,
-      provider,
+      target,
     };
     const result = await rt.newTaskSession(payload);
     const sessionId = typeof result === "string" ? result : null;
@@ -184,7 +195,7 @@ export function WorkspaceTabBar(): React.ReactElement | null {
     void dispatch({ type: "session.select", id: sessionId });
     // 会话创建后立即重拉任务详情，新标签马上出现。
     setRefreshTick((n) => n + 1);
-    rt.toast(`已新建 ${workspaceProviderLabel(provider)} 对话`, "success");
+    rt.toast(target === "shell" ? "已新建空白终端" : `已新建 ${workspaceProviderLabel(target)} 对话`, "success");
   };
 
   const selectWindow = (window: WorkWindowLayout) => {
@@ -291,9 +302,9 @@ export function WorkspaceTabBar(): React.ReactElement | null {
         <button
           type="button"
           className="workspace-tab-add"
-          title="新建 Agent 对话（在同一 worktree）"
-          aria-label="新建 Agent 对话"
-          onClick={() => setAgentDialogOpen(true)}
+          title="新建 Agent 或空白终端（在同一 worktree）"
+          aria-label="新建 Agent 或空白终端"
+          onClick={() => workspaceAgentDialogController.open()}
         >
           +
         </button>
@@ -351,10 +362,10 @@ export function WorkspaceTabBar(): React.ReactElement | null {
         ×
       </button>
       <WorkspaceAgentDialog
-        open={agentDialogOpen}
+        open={agentDialog.open}
         initialProvider={context.provider}
         onConfirm={handleNewSession}
-        onDismiss={() => setAgentDialogOpen(false)}
+        onDismiss={() => workspaceAgentDialogController.close()}
       />
     </div>
   );

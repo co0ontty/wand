@@ -2491,20 +2491,31 @@ import { hasPooledTerminal } from "./terminal-pool";
        */
       export function startSessionInCwd(
         cwd: string,
-        options?: { workspaceId?: string; workspaceTaskId?: string; provider?: string },
+        options?: { workspaceId?: string; workspaceTaskId?: string; provider?: string; shell?: boolean },
       ): Promise<unknown> {
-        var provider = (options && options.provider) || getPreferredTool();
-        var command = provider === "qoder" ? "qodercli" : provider;
-        var defaultMode = getSafeModeForTool(provider, (state.config && state.config.defaultMode) ? state.config.defaultMode : "default");
-        state.preferredCommand = provider;
-        state.chatMode = getSafeModeForTool(provider, state.chatMode);
-        var body: Record<string, unknown> = withTerminalDimensions({
-          command: command,
-          provider: provider,
-          cwd: cwd,
-          mode: defaultMode,
-          sessionSource: "interactive",
-        });
+        var shell = !!(options && options.shell);
+        var provider = shell ? "" : ((options && options.provider) || getPreferredTool());
+        var defaultMode = shell
+          ? "default"
+          : getSafeModeForTool(provider, (state.config && state.config.defaultMode) ? state.config.defaultMode : "default");
+        if (!shell) {
+          state.preferredCommand = provider;
+          state.chatMode = getSafeModeForTool(provider, state.chatMode);
+        }
+        var body: Record<string, unknown> = shell
+          ? withTerminalDimensions({
+              shell: true,
+              cwd: cwd,
+              mode: defaultMode,
+              sessionSource: "interactive",
+            })
+          : withTerminalDimensions({
+              command: provider === "qoder" ? "qodercli" : provider,
+              provider: provider,
+              cwd: cwd,
+              mode: defaultMode,
+              sessionSource: "interactive",
+            });
         if (options && options.workspaceId) body.workspaceId = options.workspaceId;
         if (options && options.workspaceTaskId) body.workspaceTaskId = options.workspaceTaskId;
         return ensureTerminalReady().then(function() {

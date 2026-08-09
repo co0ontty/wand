@@ -93,8 +93,17 @@ test("workspace sessions use chronological tab order and stable labels", () => {
 test("new task conversations offer every supported Agent provider", () => {
   assert.deepEqual(
     WORKSPACE_AGENT_OPTIONS.map((option) => option.value),
-    ["claude", "codex", "opencode", "grok", "qoder", "pi"],
+    ["claude", "codex", "opencode", "grok", "qoder", "pi", "shell"],
   );
+  assert.equal(WORKSPACE_AGENT_OPTIONS.at(-1)?.label, "空白终端");
+});
+
+test("opening an empty workspace task keeps creation user-driven", () => {
+  const source = readFileSync(new URL("../src/web-ui/browser/workspaces-adapter.ts", import.meta.url), "utf8");
+  const openTask = source.slice(source.indexOf("openTask(payload"), source.indexOf("newTaskSession(payload"));
+  assert.match(openTask, /goHome\(\)/);
+  assert.match(openTask, /reconcileTaskWindowLayout\(detail\.layout, \[\], null\)/);
+  assert.doesNotMatch(openTask, /startSessionInCwd/);
 });
 
 test("workspaces toolbar exposes project creation without a manual refresh action", () => {
