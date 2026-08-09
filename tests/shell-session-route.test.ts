@@ -71,5 +71,7 @@ test("commands endpoint dispatches shell requests without a provider command", a
     cols: 92,
     rows: 27,
     sessionSource: "interactive",
+    workspaceId: undefined,
+    workspaceTaskId: undefined,
   }]]);
 });

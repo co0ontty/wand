@@ -278,6 +278,7 @@ test("WsBroadcastManager dispose clears heartbeat/output timers and terminates c
     lastOutputBySession: new Map(),
     outputSeqBySession: new Map(),
     pendingResyncSessions: new Set(),
+    ptySubscriptions: new Map(),
     lastSeenAt: Date.now(),
   });
   manager.emitEvent({ type: "output", sessionId: "deferred", data: { chunk: "never sent" } });

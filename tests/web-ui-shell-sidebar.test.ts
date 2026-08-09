@@ -13,6 +13,7 @@ import {
   UiStoreProvider,
   getSessionDirectoryLabels,
   getShellSidebarEntryActions,
+  getShellSidebarPrimaryAction,
   getSidebarEntryTarget,
   normalizeSessionDirectoryCustomName,
   type UiSessionVm,
@@ -287,7 +288,6 @@ test("ShellSidebar SSR preserves native ids, key classes, groups, and action con
     "sessions-drawer-backdrop",
     "sessions-drawer",
     "session-count",
-    "sidebar-pin-btn",
     "sidebar-collapse-btn",
     "close-drawer-button",
     "sessions-panel",
@@ -303,6 +303,8 @@ test("ShellSidebar SSR preserves native ids, key classes, groups, and action con
     assert.match(html, new RegExp(`id="${id}"`), `missing #${id}`);
   }
   assert.doesNotMatch(html, /id="switch-server-button"/);
+  assert.doesNotMatch(html, /id="sidebar-pin-btn"/);
+  assert.match(html, />项目<\/button>/);
   assert.match(html, /id="sessions-drawer" class="sidebar open pinned"/);
   assert.match(html, /id="sessions-drawer-backdrop" class="drawer-backdrop open"/);
   assert.match(html, /id="file-panel-toggle-btn" class="btn btn-ghost btn-sm active"/);
@@ -320,6 +322,34 @@ test("ShellSidebar SSR preserves native ids, key classes, groups, and action con
   assert.match(html, /class="session-kind-badge worktree-merge ready"/);
   assert.match(html, /data-provider-logo="claude"/);
   assert.match(html, /data-provider-logo="codex"/);
+});
+
+test("ShellSidebar desktop exposes one full-to-compact toggle", () => {
+  const base = fixture();
+  const html = renderSidebar(fixture({
+    viewport: { ...base.viewport, mobile: false },
+    capabilities: { backToNative: false, switchServer: false },
+  }));
+
+  assert.match(html, /class="sidebar-compact-toggle"[^>]*aria-label="收起为窄栏"[^>]*aria-pressed="false"/);
+  assert.doesNotMatch(html, /sidebar-layout-switch|data-layout-mode/);
+  assert.doesNotMatch(html, /id="sidebar-pin-btn"/);
+  assert.doesNotMatch(html, /id="sidebar-collapse-btn"/);
+  assert.doesNotMatch(html, /id="close-drawer-button"/);
+  assert.doesNotMatch(html, /id="file-panel-toggle-btn"/);
+
+  const compactHtml = renderSidebar(fixture({
+    viewport: { ...base.viewport, mobile: false },
+    capabilities: { backToNative: false, switchServer: false },
+    layout: {
+      ...base.layout,
+      sidebarCollapsed: true,
+    },
+  }));
+  assert.match(
+    compactHtml,
+    /class="sidebar-compact-toggle active"[^>]*aria-label="展开完整侧边栏"[^>]*aria-pressed="true"/,
+  );
 });
 
 test("ShellSidebar SSR renders managed selection and capability-gated controls", () => {
@@ -392,6 +422,19 @@ test("ShellSidebar SSR keeps the collapsed legacy tile contract", () => {
   assert.match(html, /data-expand-session-group="non-wand"/);
   assert.match(html, /data-collapsed-new-session="1"/);
   assert.doesNotMatch(html, /class="session-manage-bar/);
+});
+
+test("ShellSidebar primary action follows the active sidebar mode", () => {
+  assert.deepEqual(getShellSidebarPrimaryAction("sessions"), {
+    action: { type: "session.new" },
+    label: "新会话",
+    ariaLabel: "新建会话",
+  });
+  assert.deepEqual(getShellSidebarPrimaryAction("workspaces"), {
+    action: { type: "workspace.new" },
+    label: "新项目",
+    ariaLabel: "新建项目",
+  });
 });
 
 test("ShellSidebar source uses the UiStore hooks and no forbidden legacy seam", () => {

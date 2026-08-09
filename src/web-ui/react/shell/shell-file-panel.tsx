@@ -1,6 +1,8 @@
 import * as React from "react";
 
 import { classNames } from "../ui/class-names";
+import { fileExplorerController } from "../file-explorer/controller";
+import { FileExplorerHost } from "../file-explorer/host";
 import { useUiDispatch, useUiStoreSnapshot } from "./ui-store-react";
 
 export function normalizeFilePanelCwd(raw: string): string {
@@ -19,7 +21,7 @@ export function getParentFilePanelCwd(raw: string): string {
 }
 
 function FileIcon({ name, size = 16 }: {
-  name: "close" | "folder" | "refresh" | "search" | "up";
+  name: "close" | "folder" | "refresh" | "up";
   size?: number;
 }) {
   const common = {
@@ -38,7 +40,6 @@ function FileIcon({ name, size = 16 }: {
     case "close": return <svg {...common}><path d="M18 6L6 18M6 6l12 12"/></svg>;
     case "folder": return <svg {...common} className="wand-icon wand-icon-folder-open"><path d="M6 14l1.5-3A2 2 0 019.2 10H20a2 2 0 011.9 2.5l-1.5 6A2 2 0 0118.4 20H4a2 2 0 01-2-2V5a2 2 0 012-2h4l3 3h7a2 2 0 012 2v2"/></svg>;
     case "refresh": return <svg {...common}><path d="M21 12a9 9 0 11-3-6.7M21 4v5h-5"/></svg>;
-    case "search": return <svg {...common}><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>;
     case "up": return <svg {...common}><path d="M12 19V5M5 12l7-7 7 7"/></svg>;
   }
 }
@@ -53,7 +54,6 @@ export function ShellFilePanel({ explorerRef }: ShellFilePanelProps = {}) {
   const dispatch = useUiDispatch();
   const snapshotCwd = normalizeFilePanelCwd(snapshot.topbar.cwd) || "/";
   const [cwd, setCwd] = React.useState(snapshotCwd);
-  const [search, setSearch] = React.useState("");
   const committedCwd = React.useRef(snapshotCwd);
   const editingCwd = React.useRef(false);
 
@@ -101,7 +101,10 @@ export function ShellFilePanel({ explorerRef }: ShellFilePanelProps = {}) {
               type="button"
               title="刷新"
               aria-label="刷新文件列表"
-              onClick={() => void dispatch({ type: "layout.files.refresh" })}
+              onClick={() => {
+                void fileExplorerController.execute({ type: "refresh" });
+                void dispatch({ type: "layout.files.refresh" });
+              }}
             >
               <FileIcon name="refresh" size={15}/>
             </button>
@@ -170,41 +173,14 @@ export function ShellFilePanel({ explorerRef }: ShellFilePanelProps = {}) {
               }}
             />
           </div>
-          <div className="file-search-box">
-            <span className="file-search-icon"><FileIcon name="search" size={14}/></span>
-            <input
-              type="text"
-              id="file-search-input"
-              className="file-search-input"
-              value={search}
-              placeholder="搜索当前目录…"
-              autoComplete="off"
-              autoCorrect="off"
-              autoCapitalize="off"
-              spellCheck={false}
-              aria-label="搜索当前目录"
-              onChange={(event) => {
-                const next = event.currentTarget.value;
-                setSearch(next);
-                void dispatch({ type: "layout.files.search", query: next.trim() });
-              }}
-            />
-            <button
-              className={classNames("file-search-clear", search.trim() && "visible")}
-              id="file-search-clear"
-              type="button"
-              aria-label="清除搜索"
-              title="清除"
-              disabled={!search}
-              onClick={() => {
-                setSearch("");
-                void dispatch({ type: "layout.files.search.clear" });
-              }}
-            >
-              <FileIcon name="close" size={13}/>
-            </button>
-          </div>
-          <div className="file-explorer" id="file-explorer" ref={explorerRef}/>
+          <div
+            className="file-explorer legacy-file-explorer-host"
+            id="file-explorer"
+            ref={explorerRef}
+            hidden
+            aria-hidden="true"
+          />
+          <FileExplorerHost root={committedCwd.current}/>
         </div>
       </div>
     </>

@@ -63,9 +63,9 @@
       };
       var assign = Object.assign;
       var emptyObject = {};
-      function Component(props, context, updater) {
+      function Component(props, context2, updater) {
         this.props = props;
-        this.context = context;
+        this.context = context2;
         this.refs = emptyObject;
         this.updater = updater || ReactNoopUpdateQueue;
       }
@@ -83,9 +83,9 @@
       function ComponentDummy() {
       }
       ComponentDummy.prototype = Component.prototype;
-      function PureComponent(props, context, updater) {
+      function PureComponent(props, context2, updater) {
         this.props = props;
-        this.context = context;
+        this.context = context2;
         this.refs = emptyObject;
         this.updater = updater || ReactNoopUpdateQueue;
       }
@@ -221,11 +221,11 @@
         }
         return invokeCallback;
       }
-      function mapChildren(children, func, context) {
+      function mapChildren(children, func, context2) {
         if (null == children) return children;
         var result = [], count3 = 0;
         mapIntoArray(children, result, "", "", function(child) {
-          return func.call(context, child, count3++);
+          return func.call(context2, child, count3++);
         });
         return result;
       }
@@ -485,7 +485,7 @@
   var require_react_dom_production = __commonJS({
     "node_modules/react-dom/cjs/react-dom.production.js"(exports) {
       "use strict";
-      var React46 = require_react();
+      var React53 = require_react();
       function formatProdErrorMessage(code) {
         var url = "https://react.dev/errors/" + code;
         if (1 < arguments.length) {
@@ -525,7 +525,7 @@
           implementation
         };
       }
-      var ReactSharedInternals = React46.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+      var ReactSharedInternals = React53.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
       function getCrossOriginStringAs(as, input) {
         if ("font" === as) return "";
         if ("string" === typeof input)
@@ -946,7 +946,7 @@
     "node_modules/react-dom/cjs/react-dom-client.production.js"(exports) {
       "use strict";
       var Scheduler = require_scheduler();
-      var React46 = require_react();
+      var React53 = require_react();
       var ReactDOM6 = require_react_dom();
       function formatProdErrorMessage(code) {
         var url = "https://react.dev/errors/" + code;
@@ -1137,7 +1137,7 @@
         return null;
       }
       var isArrayImpl = Array.isArray;
-      var ReactSharedInternals = React46.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+      var ReactSharedInternals = React53.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
       var ReactDOMSharedInternals = ReactDOM6.__DOM_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
       var sharedNotPendingObject = {
         pending: false,
@@ -1196,9 +1196,9 @@
       }
       function pushHostContext(fiber) {
         null !== fiber.memoizedState && push(hostTransitionProviderCursor, fiber);
-        var context = contextStackCursor.current;
-        var JSCompiler_inline_result = getChildHostContextProd(context, fiber.type);
-        context !== JSCompiler_inline_result && (push(contextFiberStackCursor, fiber), push(contextStackCursor, JSCompiler_inline_result));
+        var context2 = contextStackCursor.current;
+        var JSCompiler_inline_result = getChildHostContextProd(context2, fiber.type);
+        context2 !== JSCompiler_inline_result && (push(contextFiberStackCursor, fiber), push(contextStackCursor, JSCompiler_inline_result));
       }
       function popHostContext(fiber) {
         contextFiberStackCursor.current === fiber && (pop(contextStackCursor), pop(contextFiberStackCursor));
@@ -1907,15 +1907,15 @@
         children === defaultValue && "" !== children && null !== children && (element.value = children);
         track(element);
       }
-      function setTextContent(node, text5) {
-        if (text5) {
+      function setTextContent(node, text6) {
+        if (text6) {
           var firstChild = node.firstChild;
           if (firstChild && firstChild === node.lastChild && 3 === firstChild.nodeType) {
-            firstChild.nodeValue = text5;
+            firstChild.nodeValue = text6;
             return;
           }
         }
-        node.textContent = text5;
+        node.textContent = text6;
       }
       var unitlessNumbers = new Set(
         "animationIterationCount aspectRatio borderImageOutset borderImageSlice borderImageWidth boxFlex boxFlexGroup boxOrdinalGroup columnCount columns flex flexGrow flexPositive flexShrink flexNegative flexOrder gridArea gridRow gridRowEnd gridRowSpan gridRowStart gridColumn gridColumnEnd gridColumnSpan gridColumnStart fontWeight lineClamp lineHeight opacity order orphans scale tabSize widows zIndex zoom fillOpacity floodOpacity stopOpacity strokeDasharray strokeDashoffset strokeMiterlimit strokeOpacity strokeWidth MozAnimationIterationCount MozBoxFlex MozBoxFlexGroup MozLineClamp msAnimationIterationCount msFlex msZoom msFlexGrow msFlexNegative msFlexOrder msFlexPositive msFlexShrink msGridColumn msGridColumnSpan msGridRow msGridRowSpan WebkitAnimationIterationCount WebkitBoxFlex WebKitBoxFlexGroup WebkitBoxOrdinalGroup WebkitColumnCount WebkitColumns WebkitFlex WebkitFlexGrow WebkitFlexPositive WebkitFlexShrink WebkitLineClamp".split(
@@ -3107,12 +3107,12 @@
       var valueCursor = createCursor(null);
       var currentlyRenderingFiber$1 = null;
       var lastContextDependency = null;
-      function pushProvider(providerFiber, context, nextValue) {
-        push(valueCursor, context._currentValue);
-        context._currentValue = nextValue;
+      function pushProvider(providerFiber, context2, nextValue) {
+        push(valueCursor, context2._currentValue);
+        context2._currentValue = nextValue;
       }
-      function popProvider(context) {
-        context._currentValue = valueCursor.current;
+      function popProvider(context2) {
+        context2._currentValue = valueCursor.current;
         pop(valueCursor);
       }
       function scheduleContextWorkOnParentPath(parent, renderLanes2, propagationRoot) {
@@ -3188,8 +3188,8 @@
             if (null === currentParent) throw Error(formatProdErrorMessage(387));
             currentParent = currentParent.memoizedProps;
             if (null !== currentParent) {
-              var context = parent.type;
-              objectIs(parent.pendingProps.value, currentParent.value) || (null !== current ? current.push(context) : current = [context]);
+              var context2 = parent.type;
+              objectIs(parent.pendingProps.value, currentParent.value) || (null !== current ? current.push(context2) : current = [context2]);
             }
           } else if (parent === hostTransitionProviderCursor.current) {
             currentParent = parent.alternate;
@@ -3223,34 +3223,34 @@
         workInProgress2 = workInProgress2.dependencies;
         null !== workInProgress2 && (workInProgress2.firstContext = null);
       }
-      function readContext(context) {
-        return readContextForConsumer(currentlyRenderingFiber$1, context);
+      function readContext(context2) {
+        return readContextForConsumer(currentlyRenderingFiber$1, context2);
       }
-      function readContextDuringReconciliation(consumer, context) {
+      function readContextDuringReconciliation(consumer, context2) {
         null === currentlyRenderingFiber$1 && prepareToReadContext(consumer);
-        return readContextForConsumer(consumer, context);
+        return readContextForConsumer(consumer, context2);
       }
-      function readContextForConsumer(consumer, context) {
-        var value = context._currentValue;
-        context = { context, memoizedValue: value, next: null };
+      function readContextForConsumer(consumer, context2) {
+        var value = context2._currentValue;
+        context2 = { context: context2, memoizedValue: value, next: null };
         if (null === lastContextDependency) {
           if (null === consumer) throw Error(formatProdErrorMessage(308));
-          lastContextDependency = context;
-          consumer.dependencies = { lanes: 0, firstContext: context };
+          lastContextDependency = context2;
+          consumer.dependencies = { lanes: 0, firstContext: context2 };
           consumer.flags |= 524288;
-        } else lastContextDependency = lastContextDependency.next = context;
+        } else lastContextDependency = lastContextDependency.next = context2;
         return value;
       }
       var AbortControllerLocal = "undefined" !== typeof AbortController ? AbortController : function() {
-        var listeners8 = [], signal = this.signal = {
+        var listeners10 = [], signal = this.signal = {
           aborted: false,
           addEventListener: function(type, listener) {
-            listeners8.push(listener);
+            listeners10.push(listener);
           }
         };
         this.abort = function() {
           signal.aborted = true;
-          listeners8.forEach(function(listener) {
+          listeners10.forEach(function(listener) {
             return listener();
           });
         };
@@ -3302,33 +3302,33 @@
       function pingEngtangledActionScope() {
         if (0 === --currentEntangledPendingCount && null !== currentEntangledListeners) {
           null !== currentEntangledActionThenable && (currentEntangledActionThenable.status = "fulfilled");
-          var listeners8 = currentEntangledListeners;
+          var listeners10 = currentEntangledListeners;
           currentEntangledListeners = null;
           currentEntangledLane = 0;
           currentEntangledActionThenable = null;
-          for (var i = 0; i < listeners8.length; i++) (0, listeners8[i])();
+          for (var i = 0; i < listeners10.length; i++) (0, listeners10[i])();
         }
       }
       function chainThenableValue(thenable, result) {
-        var listeners8 = [], thenableWithOverride = {
+        var listeners10 = [], thenableWithOverride = {
           status: "pending",
           value: null,
           reason: null,
           then: function(resolve) {
-            listeners8.push(resolve);
+            listeners10.push(resolve);
           }
         };
         thenable.then(
           function() {
             thenableWithOverride.status = "fulfilled";
             thenableWithOverride.value = result;
-            for (var i = 0; i < listeners8.length; i++) (0, listeners8[i])(result);
+            for (var i = 0; i < listeners10.length; i++) (0, listeners10[i])(result);
           },
           function(error) {
             thenableWithOverride.status = "rejected";
             thenableWithOverride.reason = error;
-            for (error = 0; error < listeners8.length; error++)
-              (0, listeners8[error])(void 0);
+            for (error = 0; error < listeners10.length; error++)
+              (0, listeners10[error])(void 0);
           }
         );
         return thenableWithOverride;
@@ -4056,24 +4056,24 @@
           workInProgress$jscomp$0.memoizedState = newState;
         }
       }
-      function callCallback(callback, context) {
+      function callCallback(callback, context2) {
         if ("function" !== typeof callback)
           throw Error(formatProdErrorMessage(191, callback));
-        callback.call(context);
+        callback.call(context2);
       }
-      function commitCallbacks(updateQueue, context) {
+      function commitCallbacks(updateQueue, context2) {
         var callbacks = updateQueue.callbacks;
         if (null !== callbacks)
           for (updateQueue.callbacks = null, updateQueue = 0; updateQueue < callbacks.length; updateQueue++)
-            callCallback(callbacks[updateQueue], context);
+            callCallback(callbacks[updateQueue], context2);
       }
       var currentTreeHiddenStackCursor = createCursor(null);
       var prevEntangledRenderLanesCursor = createCursor(0);
-      function pushHiddenContext(fiber, context) {
+      function pushHiddenContext(fiber, context2) {
         fiber = entangledRenderLanes;
         push(prevEntangledRenderLanesCursor, fiber);
-        push(currentTreeHiddenStackCursor, context);
-        entangledRenderLanes = fiber | context.baseLanes;
+        push(currentTreeHiddenStackCursor, context2);
+        entangledRenderLanes = fiber | context2.baseLanes;
       }
       function reuseHiddenContextOnStack() {
         push(prevEntangledRenderLanesCursor, entangledRenderLanes);
@@ -5829,51 +5829,51 @@
       function updateClassComponent(current, workInProgress2, Component, nextProps, renderLanes2) {
         prepareToReadContext(workInProgress2);
         if (null === workInProgress2.stateNode) {
-          var context = emptyContextObject, contextType = Component.contextType;
-          "object" === typeof contextType && null !== contextType && (context = readContext(contextType));
-          context = new Component(nextProps, context);
-          workInProgress2.memoizedState = null !== context.state && void 0 !== context.state ? context.state : null;
-          context.updater = classComponentUpdater;
-          workInProgress2.stateNode = context;
-          context._reactInternals = workInProgress2;
-          context = workInProgress2.stateNode;
-          context.props = nextProps;
-          context.state = workInProgress2.memoizedState;
-          context.refs = {};
+          var context2 = emptyContextObject, contextType = Component.contextType;
+          "object" === typeof contextType && null !== contextType && (context2 = readContext(contextType));
+          context2 = new Component(nextProps, context2);
+          workInProgress2.memoizedState = null !== context2.state && void 0 !== context2.state ? context2.state : null;
+          context2.updater = classComponentUpdater;
+          workInProgress2.stateNode = context2;
+          context2._reactInternals = workInProgress2;
+          context2 = workInProgress2.stateNode;
+          context2.props = nextProps;
+          context2.state = workInProgress2.memoizedState;
+          context2.refs = {};
           initializeUpdateQueue(workInProgress2);
           contextType = Component.contextType;
-          context.context = "object" === typeof contextType && null !== contextType ? readContext(contextType) : emptyContextObject;
-          context.state = workInProgress2.memoizedState;
+          context2.context = "object" === typeof contextType && null !== contextType ? readContext(contextType) : emptyContextObject;
+          context2.state = workInProgress2.memoizedState;
           contextType = Component.getDerivedStateFromProps;
           "function" === typeof contextType && (applyDerivedStateFromProps(
             workInProgress2,
             Component,
             contextType,
             nextProps
-          ), context.state = workInProgress2.memoizedState);
-          "function" === typeof Component.getDerivedStateFromProps || "function" === typeof context.getSnapshotBeforeUpdate || "function" !== typeof context.UNSAFE_componentWillMount && "function" !== typeof context.componentWillMount || (contextType = context.state, "function" === typeof context.componentWillMount && context.componentWillMount(), "function" === typeof context.UNSAFE_componentWillMount && context.UNSAFE_componentWillMount(), contextType !== context.state && classComponentUpdater.enqueueReplaceState(context, context.state, null), processUpdateQueue(workInProgress2, nextProps, context, renderLanes2), suspendIfUpdateReadFromEntangledAsyncAction(), context.state = workInProgress2.memoizedState);
-          "function" === typeof context.componentDidMount && (workInProgress2.flags |= 4194308);
+          ), context2.state = workInProgress2.memoizedState);
+          "function" === typeof Component.getDerivedStateFromProps || "function" === typeof context2.getSnapshotBeforeUpdate || "function" !== typeof context2.UNSAFE_componentWillMount && "function" !== typeof context2.componentWillMount || (contextType = context2.state, "function" === typeof context2.componentWillMount && context2.componentWillMount(), "function" === typeof context2.UNSAFE_componentWillMount && context2.UNSAFE_componentWillMount(), contextType !== context2.state && classComponentUpdater.enqueueReplaceState(context2, context2.state, null), processUpdateQueue(workInProgress2, nextProps, context2, renderLanes2), suspendIfUpdateReadFromEntangledAsyncAction(), context2.state = workInProgress2.memoizedState);
+          "function" === typeof context2.componentDidMount && (workInProgress2.flags |= 4194308);
           nextProps = true;
         } else if (null === current) {
-          context = workInProgress2.stateNode;
+          context2 = workInProgress2.stateNode;
           var unresolvedOldProps = workInProgress2.memoizedProps, oldProps = resolveClassComponentProps(Component, unresolvedOldProps);
-          context.props = oldProps;
-          var oldContext = context.context, contextType$jscomp$0 = Component.contextType;
+          context2.props = oldProps;
+          var oldContext = context2.context, contextType$jscomp$0 = Component.contextType;
           contextType = emptyContextObject;
           "object" === typeof contextType$jscomp$0 && null !== contextType$jscomp$0 && (contextType = readContext(contextType$jscomp$0));
           var getDerivedStateFromProps = Component.getDerivedStateFromProps;
-          contextType$jscomp$0 = "function" === typeof getDerivedStateFromProps || "function" === typeof context.getSnapshotBeforeUpdate;
+          contextType$jscomp$0 = "function" === typeof getDerivedStateFromProps || "function" === typeof context2.getSnapshotBeforeUpdate;
           unresolvedOldProps = workInProgress2.pendingProps !== unresolvedOldProps;
-          contextType$jscomp$0 || "function" !== typeof context.UNSAFE_componentWillReceiveProps && "function" !== typeof context.componentWillReceiveProps || (unresolvedOldProps || oldContext !== contextType) && callComponentWillReceiveProps(
+          contextType$jscomp$0 || "function" !== typeof context2.UNSAFE_componentWillReceiveProps && "function" !== typeof context2.componentWillReceiveProps || (unresolvedOldProps || oldContext !== contextType) && callComponentWillReceiveProps(
             workInProgress2,
-            context,
+            context2,
             nextProps,
             contextType
           );
           hasForceUpdate = false;
           var oldState = workInProgress2.memoizedState;
-          context.state = oldState;
-          processUpdateQueue(workInProgress2, nextProps, context, renderLanes2);
+          context2.state = oldState;
+          processUpdateQueue(workInProgress2, nextProps, context2, renderLanes2);
           suspendIfUpdateReadFromEntangledAsyncAction();
           oldContext = workInProgress2.memoizedState;
           unresolvedOldProps || oldState !== oldContext || hasForceUpdate ? ("function" === typeof getDerivedStateFromProps && (applyDerivedStateFromProps(
@@ -5889,29 +5889,29 @@
             oldState,
             oldContext,
             contextType
-          )) ? (contextType$jscomp$0 || "function" !== typeof context.UNSAFE_componentWillMount && "function" !== typeof context.componentWillMount || ("function" === typeof context.componentWillMount && context.componentWillMount(), "function" === typeof context.UNSAFE_componentWillMount && context.UNSAFE_componentWillMount()), "function" === typeof context.componentDidMount && (workInProgress2.flags |= 4194308)) : ("function" === typeof context.componentDidMount && (workInProgress2.flags |= 4194308), workInProgress2.memoizedProps = nextProps, workInProgress2.memoizedState = oldContext), context.props = nextProps, context.state = oldContext, context.context = contextType, nextProps = oldProps) : ("function" === typeof context.componentDidMount && (workInProgress2.flags |= 4194308), nextProps = false);
+          )) ? (contextType$jscomp$0 || "function" !== typeof context2.UNSAFE_componentWillMount && "function" !== typeof context2.componentWillMount || ("function" === typeof context2.componentWillMount && context2.componentWillMount(), "function" === typeof context2.UNSAFE_componentWillMount && context2.UNSAFE_componentWillMount()), "function" === typeof context2.componentDidMount && (workInProgress2.flags |= 4194308)) : ("function" === typeof context2.componentDidMount && (workInProgress2.flags |= 4194308), workInProgress2.memoizedProps = nextProps, workInProgress2.memoizedState = oldContext), context2.props = nextProps, context2.state = oldContext, context2.context = contextType, nextProps = oldProps) : ("function" === typeof context2.componentDidMount && (workInProgress2.flags |= 4194308), nextProps = false);
         } else {
-          context = workInProgress2.stateNode;
+          context2 = workInProgress2.stateNode;
           cloneUpdateQueue(current, workInProgress2);
           contextType = workInProgress2.memoizedProps;
           contextType$jscomp$0 = resolveClassComponentProps(Component, contextType);
-          context.props = contextType$jscomp$0;
+          context2.props = contextType$jscomp$0;
           getDerivedStateFromProps = workInProgress2.pendingProps;
-          oldState = context.context;
+          oldState = context2.context;
           oldContext = Component.contextType;
           oldProps = emptyContextObject;
           "object" === typeof oldContext && null !== oldContext && (oldProps = readContext(oldContext));
           unresolvedOldProps = Component.getDerivedStateFromProps;
-          (oldContext = "function" === typeof unresolvedOldProps || "function" === typeof context.getSnapshotBeforeUpdate) || "function" !== typeof context.UNSAFE_componentWillReceiveProps && "function" !== typeof context.componentWillReceiveProps || (contextType !== getDerivedStateFromProps || oldState !== oldProps) && callComponentWillReceiveProps(
+          (oldContext = "function" === typeof unresolvedOldProps || "function" === typeof context2.getSnapshotBeforeUpdate) || "function" !== typeof context2.UNSAFE_componentWillReceiveProps && "function" !== typeof context2.componentWillReceiveProps || (contextType !== getDerivedStateFromProps || oldState !== oldProps) && callComponentWillReceiveProps(
             workInProgress2,
-            context,
+            context2,
             nextProps,
             oldProps
           );
           hasForceUpdate = false;
           oldState = workInProgress2.memoizedState;
-          context.state = oldState;
-          processUpdateQueue(workInProgress2, nextProps, context, renderLanes2);
+          context2.state = oldState;
+          processUpdateQueue(workInProgress2, nextProps, context2, renderLanes2);
           suspendIfUpdateReadFromEntangledAsyncAction();
           var newState = workInProgress2.memoizedState;
           contextType !== getDerivedStateFromProps || oldState !== newState || hasForceUpdate || null !== current && null !== current.dependencies && checkIfContextChanged(current.dependencies) ? ("function" === typeof unresolvedOldProps && (applyDerivedStateFromProps(
@@ -5927,16 +5927,16 @@
             oldState,
             newState,
             oldProps
-          ) || null !== current && null !== current.dependencies && checkIfContextChanged(current.dependencies)) ? (oldContext || "function" !== typeof context.UNSAFE_componentWillUpdate && "function" !== typeof context.componentWillUpdate || ("function" === typeof context.componentWillUpdate && context.componentWillUpdate(nextProps, newState, oldProps), "function" === typeof context.UNSAFE_componentWillUpdate && context.UNSAFE_componentWillUpdate(
+          ) || null !== current && null !== current.dependencies && checkIfContextChanged(current.dependencies)) ? (oldContext || "function" !== typeof context2.UNSAFE_componentWillUpdate && "function" !== typeof context2.componentWillUpdate || ("function" === typeof context2.componentWillUpdate && context2.componentWillUpdate(nextProps, newState, oldProps), "function" === typeof context2.UNSAFE_componentWillUpdate && context2.UNSAFE_componentWillUpdate(
             nextProps,
             newState,
             oldProps
-          )), "function" === typeof context.componentDidUpdate && (workInProgress2.flags |= 4), "function" === typeof context.getSnapshotBeforeUpdate && (workInProgress2.flags |= 1024)) : ("function" !== typeof context.componentDidUpdate || contextType === current.memoizedProps && oldState === current.memoizedState || (workInProgress2.flags |= 4), "function" !== typeof context.getSnapshotBeforeUpdate || contextType === current.memoizedProps && oldState === current.memoizedState || (workInProgress2.flags |= 1024), workInProgress2.memoizedProps = nextProps, workInProgress2.memoizedState = newState), context.props = nextProps, context.state = newState, context.context = oldProps, nextProps = contextType$jscomp$0) : ("function" !== typeof context.componentDidUpdate || contextType === current.memoizedProps && oldState === current.memoizedState || (workInProgress2.flags |= 4), "function" !== typeof context.getSnapshotBeforeUpdate || contextType === current.memoizedProps && oldState === current.memoizedState || (workInProgress2.flags |= 1024), nextProps = false);
+          )), "function" === typeof context2.componentDidUpdate && (workInProgress2.flags |= 4), "function" === typeof context2.getSnapshotBeforeUpdate && (workInProgress2.flags |= 1024)) : ("function" !== typeof context2.componentDidUpdate || contextType === current.memoizedProps && oldState === current.memoizedState || (workInProgress2.flags |= 4), "function" !== typeof context2.getSnapshotBeforeUpdate || contextType === current.memoizedProps && oldState === current.memoizedState || (workInProgress2.flags |= 1024), workInProgress2.memoizedProps = nextProps, workInProgress2.memoizedState = newState), context2.props = nextProps, context2.state = newState, context2.context = oldProps, nextProps = contextType$jscomp$0) : ("function" !== typeof context2.componentDidUpdate || contextType === current.memoizedProps && oldState === current.memoizedState || (workInProgress2.flags |= 4), "function" !== typeof context2.getSnapshotBeforeUpdate || contextType === current.memoizedProps && oldState === current.memoizedState || (workInProgress2.flags |= 1024), nextProps = false);
         }
-        context = nextProps;
+        context2 = nextProps;
         markRef(current, workInProgress2);
         nextProps = 0 !== (workInProgress2.flags & 128);
-        context || nextProps ? (context = workInProgress2.stateNode, Component = nextProps && "function" !== typeof Component.getDerivedStateFromError ? null : context.render(), workInProgress2.flags |= 1, null !== current && nextProps ? (workInProgress2.child = reconcileChildFibers(
+        context2 || nextProps ? (context2 = workInProgress2.stateNode, Component = nextProps && "function" !== typeof Component.getDerivedStateFromError ? null : context2.render(), workInProgress2.flags |= 1, null !== current && nextProps ? (workInProgress2.child = reconcileChildFibers(
           workInProgress2,
           current.child,
           null,
@@ -5946,7 +5946,7 @@
           null,
           Component,
           renderLanes2
-        )) : reconcileChildren(current, workInProgress2, Component, renderLanes2), workInProgress2.memoizedState = context.state, current = workInProgress2.child) : current = bailoutOnAlreadyFinishedWork(
+        )) : reconcileChildren(current, workInProgress2, Component, renderLanes2), workInProgress2.memoizedState = context2.state, current = workInProgress2.child) : current = bailoutOnAlreadyFinishedWork(
           current,
           workInProgress2,
           renderLanes2
@@ -7300,13 +7300,13 @@
             insertOrAppendPlacementNode(node, before, parent), node = node.sibling;
       }
       function commitHostSingletonAcquisition(finishedWork) {
-        var singleton2 = finishedWork.stateNode, props = finishedWork.memoizedProps;
+        var singleton4 = finishedWork.stateNode, props = finishedWork.memoizedProps;
         try {
-          for (var type = finishedWork.type, attributes = singleton2.attributes; attributes.length; )
-            singleton2.removeAttributeNode(attributes[0]);
-          setInitialProperties(singleton2, type, props);
-          singleton2[internalInstanceKey] = finishedWork;
-          singleton2[internalPropsKey] = props;
+          for (var type = finishedWork.type, attributes = singleton4.attributes; attributes.length; )
+            singleton4.removeAttributeNode(attributes[0]);
+          setInitialProperties(singleton4, type, props);
+          singleton4[internalInstanceKey] = finishedWork;
+          singleton4[internalPropsKey] = props;
         } catch (error) {
           captureCommitPhaseError(finishedWork, finishedWork.return, error);
         }
@@ -10339,15 +10339,15 @@
         };
       }
       function accumulateTwoPhaseListeners(targetFiber, reactName) {
-        for (var captureName = reactName + "Capture", listeners8 = []; null !== targetFiber; ) {
+        for (var captureName = reactName + "Capture", listeners10 = []; null !== targetFiber; ) {
           var _instance2 = targetFiber, stateNode = _instance2.stateNode;
           _instance2 = _instance2.tag;
-          5 !== _instance2 && 26 !== _instance2 && 27 !== _instance2 || null === stateNode || (_instance2 = getListener(targetFiber, captureName), null != _instance2 && listeners8.unshift(
+          5 !== _instance2 && 26 !== _instance2 && 27 !== _instance2 || null === stateNode || (_instance2 = getListener(targetFiber, captureName), null != _instance2 && listeners10.unshift(
             createDispatchListener(targetFiber, _instance2, stateNode)
-          ), _instance2 = getListener(targetFiber, reactName), null != _instance2 && listeners8.push(
+          ), _instance2 = getListener(targetFiber, reactName), null != _instance2 && listeners10.push(
             createDispatchListener(targetFiber, _instance2, stateNode)
           ));
-          if (3 === targetFiber.tag) return listeners8;
+          if (3 === targetFiber.tag) return listeners10;
           targetFiber = targetFiber.return;
         }
         return [];
@@ -10360,18 +10360,18 @@
         return inst ? inst : null;
       }
       function accumulateEnterLeaveListenersForEvent(dispatchQueue, event, target, common, inCapturePhase) {
-        for (var registrationName = event._reactName, listeners8 = []; null !== target && target !== common; ) {
+        for (var registrationName = event._reactName, listeners10 = []; null !== target && target !== common; ) {
           var _instance3 = target, alternate = _instance3.alternate, stateNode = _instance3.stateNode;
           _instance3 = _instance3.tag;
           if (null !== alternate && alternate === common) break;
-          5 !== _instance3 && 26 !== _instance3 && 27 !== _instance3 || null === stateNode || (alternate = stateNode, inCapturePhase ? (stateNode = getListener(target, registrationName), null != stateNode && listeners8.unshift(
+          5 !== _instance3 && 26 !== _instance3 && 27 !== _instance3 || null === stateNode || (alternate = stateNode, inCapturePhase ? (stateNode = getListener(target, registrationName), null != stateNode && listeners10.unshift(
             createDispatchListener(target, stateNode, alternate)
-          )) : inCapturePhase || (stateNode = getListener(target, registrationName), null != stateNode && listeners8.push(
+          )) : inCapturePhase || (stateNode = getListener(target, registrationName), null != stateNode && listeners10.push(
             createDispatchListener(target, stateNode, alternate)
           )));
           target = target.return;
         }
-        0 !== listeners8.length && dispatchQueue.push({ event, listeners: listeners8 });
+        0 !== listeners10.length && dispatchQueue.push({ event, listeners: listeners10 });
       }
       var NORMALIZE_NEWLINES_REGEX = /\r\n?/g;
       var NORMALIZE_NULL_AND_REPLACEMENT_REGEX = /\u0000|\uFFFD/g;
@@ -11344,8 +11344,8 @@
         }
         return null;
       }
-      function canHydrateTextInstance(instance, text5, inRootOrSingleton) {
-        if ("" === text5) return null;
+      function canHydrateTextInstance(instance, text6, inRootOrSingleton) {
+        if ("" === text6) return null;
         for (; 3 !== instance.nodeType; ) {
           if ((1 !== instance.nodeType || "INPUT" !== instance.nodeName || "hidden" !== instance.type) && !inRootOrSingleton)
             return null;
@@ -12583,7 +12583,7 @@
           0 === i && attemptExplicitHydrationTarget(target);
         }
       };
-      var isomorphicReactPackageVersion$jscomp$inline_1840 = React46.version;
+      var isomorphicReactPackageVersion$jscomp$inline_1840 = React53.version;
       if ("19.2.7" !== isomorphicReactPackageVersion$jscomp$inline_1840)
         throw Error(
           formatProdErrorMessage(
@@ -12822,6 +12822,13 @@
     // v1 保留为 no-op：曾经这里会删除 wand-sidebar-pinned，导致升级或刷新时
     // 覆盖用户明确选择的侧栏状态。迁移函数必须只修正格式，不能抹掉偏好。
     function migrateSidebarPinDefault() {
+    },
+    // v2: desktop sidebar now has two states only: full (default) and compact.
+    // Clear the removed temporary/closed state once, while later user toggles
+    // continue to persist the compact preference normally.
+    function migrateSidebarToFullDefault() {
+      localStorage.setItem("wand-sidebar-pinned", "true");
+      localStorage.setItem("wand-sidebar-collapsed", "false");
     }
   ];
   (function runLocalStorageMigrations() {
@@ -12876,6 +12883,14 @@
         return null;
       }
     })(),
+    activeWorkspaceId: (function() {
+      try {
+        return localStorage.getItem("wand-active-workspace") || null;
+      } catch (e) {
+        return null;
+      }
+    })(),
+    activeWorkspaceTaskId: null,
     pollTimer: null,
     config: null,
     sessions: [],
@@ -12962,7 +12977,7 @@
     loginChecked: false,
     bootstrapping: true,
     sessionsDrawerOpen: readStoredBoolean("wand-sidebar-open", false),
-    // 新交互：桌面默认呼出即常驻；只有用户主动关闭过才记 "false"。
+    // 桌面仅保留完整 / 窄栏两态，完整侧栏为默认状态。
     sidebarPinned: readStoredBoolean("wand-sidebar-pinned", true),
     sidebarCollapsed: readStoredBoolean("wand-sidebar-collapsed", false),
     modeValue: "managed",
@@ -13698,19 +13713,19 @@
     }
     return removed ? filtered : messages;
   }
-  function normalizeStructuredSnapshot(snapshot8, existingSession) {
-    if (!snapshot8 || !Array.isArray(snapshot8.messages)) {
-      return snapshot8;
+  function normalizeStructuredSnapshot(snapshot9, existingSession) {
+    if (!snapshot9 || !Array.isArray(snapshot9.messages)) {
+      return snapshot9;
     }
-    var sessionKind = snapshot8.sessionKind || existingSession && existingSession.sessionKind;
+    var sessionKind = snapshot9.sessionKind || existingSession && existingSession.sessionKind;
     if (sessionKind !== "structured") {
-      return snapshot8;
+      return snapshot9;
     }
-    var sanitizedMessages = stripRenderOnlyStructuredMessages(snapshot8.messages);
-    if (sanitizedMessages === snapshot8.messages) {
-      return snapshot8;
+    var sanitizedMessages = stripRenderOnlyStructuredMessages(snapshot9.messages);
+    if (sanitizedMessages === snapshot9.messages) {
+      return snapshot9;
     }
-    return Object.assign({}, snapshot8, { messages: sanitizedMessages });
+    return Object.assign({}, snapshot9, { messages: sanitizedMessages });
   }
   function saveStructuredQueue() {
     try {
@@ -13956,7 +13971,7 @@
   }
 
   // src/web-ui/browser/shell-runtime.ts
-  var React45 = __toESM(require_react(), 1);
+  var React51 = __toESM(require_react(), 1);
   var import_react_dom4 = __toESM(require_react_dom(), 1);
   var import_client2 = __toESM(require_client(), 1);
 
@@ -14006,7 +14021,7 @@
   }
 
   // src/web-ui/react/overlay-host.tsx
-  var import_react18 = __toESM(require_react(), 1);
+  var import_react19 = __toESM(require_react(), 1);
 
   // src/web-ui/react/overlay-controller.tsx
   var nextId = 0;
@@ -14022,12 +14037,12 @@
     for (const listener of listeners) listener();
   }
   function dismissToast(id) {
-    const entry = toasts.find((toast) => toast.id === id);
+    const entry = toasts.find((toast2) => toast2.id === id);
     if (!entry || !entry.open) return;
-    toasts = toasts.map((toast) => toast.id === id ? { ...toast, open: false } : toast);
+    toasts = toasts.map((toast2) => toast2.id === id ? { ...toast2, open: false } : toast2);
     publish();
     window.setTimeout(() => {
-      toasts = toasts.filter((toast) => toast.id !== id);
+      toasts = toasts.filter((toast2) => toast2.id !== id);
       publish();
     }, 180);
   }
@@ -14180,17 +14195,17 @@
       const index2 = defaultContexts.length;
       defaultContexts = [...defaultContexts, defaultContext];
       const Provider2 = (props) => {
-        const { scope, children, ...context } = props;
+        const { scope, children, ...context2 } = props;
         const Context = scope?.[scopeName]?.[index2] || BaseContext;
-        const value = React2.useMemo(() => context, Object.values(context));
+        const value = React2.useMemo(() => context2, Object.values(context2));
         return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Context.Provider, { value, children });
       };
       Provider2.displayName = rootComponentName + "Provider";
       function useContext22(consumerName, scope, options = {}) {
         const { optional = false } = options;
         const Context = scope?.[scopeName]?.[index2] || BaseContext;
-        const context = React2.useContext(Context);
-        if (context) return context;
+        const context2 = React2.useContext(Context);
+        if (context2) return context2;
         if (defaultContext !== void 0) return defaultContext;
         if (optional) return void 0;
         throw new Error(`\`${consumerName}\` must be used within \`${rootComponentName}\``);
@@ -14525,18 +14540,18 @@
         onDismiss,
         ...layerProps
       } = props;
-      const context = React9.useContext(DismissableLayerContext);
+      const context2 = React9.useContext(DismissableLayerContext);
       const [node, setNode] = React9.useState(null);
       const ownerDocument = node?.ownerDocument ?? globalThis?.document;
       const [, force] = React9.useState({});
       const composedRefs = useComposedRefs(forwardedRef, setNode);
-      const layers = Array.from(context.layers);
+      const layers = Array.from(context2.layers);
       const [highestLayerWithOutsidePointerEventsDisabled] = [
-        ...context.layersWithOutsidePointerEventsDisabled
+        ...context2.layersWithOutsidePointerEventsDisabled
       ].slice(-1);
       const highestLayerWithOutsidePointerEventsDisabledIndex = highestLayerWithOutsidePointerEventsDisabled ? layers.indexOf(highestLayerWithOutsidePointerEventsDisabled) : -1;
       const index2 = node ? layers.indexOf(node) : -1;
-      const isBodyPointerEventsDisabled = context.layersWithOutsidePointerEventsDisabled.size > 0;
+      const isBodyPointerEventsDisabled = context2.layersWithOutsidePointerEventsDisabled.size > 0;
       const isPointerEventsEnabled = index2 >= highestLayerWithOutsidePointerEventsDisabledIndex;
       const isDeferredPointerDownOutsideRef = React9.useRef(false);
       const pointerDownOutside = usePointerDownOutside(
@@ -14549,18 +14564,18 @@
           ownerDocument,
           deferPointerDownOutside,
           isDeferredPointerDownOutsideRef,
-          dismissableSurfaces: context.dismissableSurfaces,
+          dismissableSurfaces: context2.dismissableSurfaces,
           shouldHandlePointerDownOutside: React9.useCallback(
             (target) => {
               if (!(target instanceof Node)) {
                 return false;
               }
-              const isPointerDownOnBranch = [...context.branches].some(
+              const isPointerDownOnBranch = [...context2.branches].some(
                 (branch) => branch.contains(target)
               );
               return isPointerEventsEnabled && !isPointerDownOnBranch;
             },
-            [context.branches, isPointerEventsEnabled]
+            [context2.branches, isPointerEventsEnabled]
           )
         }
       );
@@ -14569,7 +14584,7 @@
           return;
         }
         const target = event.target;
-        const isFocusInBranch = [...context.branches].some((branch) => branch.contains(target));
+        const isFocusInBranch = [...context2.branches].some((branch) => branch.contains(target));
         if (isFocusInBranch) return;
         onFocusOutside?.(event);
         onInteractOutside?.(event);
@@ -14596,31 +14611,31 @@
       React9.useEffect(() => {
         if (!node) return;
         if (disableOutsidePointerEvents) {
-          if (context.layersWithOutsidePointerEventsDisabled.size === 0) {
+          if (context2.layersWithOutsidePointerEventsDisabled.size === 0) {
             originalBodyPointerEvents = ownerDocument.body.style.pointerEvents;
             ownerDocument.body.style.pointerEvents = "none";
           }
-          context.layersWithOutsidePointerEventsDisabled.add(node);
+          context2.layersWithOutsidePointerEventsDisabled.add(node);
         }
-        context.layers.add(node);
+        context2.layers.add(node);
         dispatchUpdate();
         return () => {
           if (disableOutsidePointerEvents) {
-            context.layersWithOutsidePointerEventsDisabled.delete(node);
-            if (context.layersWithOutsidePointerEventsDisabled.size === 0) {
+            context2.layersWithOutsidePointerEventsDisabled.delete(node);
+            if (context2.layersWithOutsidePointerEventsDisabled.size === 0) {
               ownerDocument.body.style.pointerEvents = originalBodyPointerEvents;
             }
           }
         };
-      }, [node, ownerDocument, disableOutsidePointerEvents, context]);
+      }, [node, ownerDocument, disableOutsidePointerEvents, context2]);
       React9.useEffect(() => {
         return () => {
           if (!node) return;
-          context.layers.delete(node);
-          context.layersWithOutsidePointerEventsDisabled.delete(node);
+          context2.layers.delete(node);
+          context2.layersWithOutsidePointerEventsDisabled.delete(node);
           dispatchUpdate();
         };
-      }, [node, context]);
+      }, [node, context2]);
       React9.useEffect(() => {
         const handleUpdate = () => force({});
         document.addEventListener(CONTEXT_UPDATE, handleUpdate);
@@ -14648,33 +14663,33 @@
   DismissableLayer.displayName = DISMISSABLE_LAYER_NAME;
   var BRANCH_NAME = "DismissableLayerBranch";
   var DismissableLayerBranch = React9.forwardRef((props, forwardedRef) => {
-    const context = React9.useContext(DismissableLayerContext);
+    const context2 = React9.useContext(DismissableLayerContext);
     const ref = React9.useRef(null);
     const composedRefs = useComposedRefs(forwardedRef, ref);
     React9.useEffect(() => {
       const node = ref.current;
       if (node) {
-        context.branches.add(node);
+        context2.branches.add(node);
         return () => {
-          context.branches.delete(node);
+          context2.branches.delete(node);
         };
       }
-    }, [context.branches]);
+    }, [context2.branches]);
     return /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(Primitive.div, { ...props, ref: composedRefs });
   });
   DismissableLayerBranch.displayName = BRANCH_NAME;
   function useDismissableLayerSurface() {
-    const context = React9.useContext(DismissableLayerContext);
+    const context2 = React9.useContext(DismissableLayerContext);
     const [node, setNode] = React9.useState(null);
     React9.useEffect(() => {
       if (!node) {
         return;
       }
-      context.dismissableSurfaces.add(node);
+      context2.dismissableSurfaces.add(node);
       return () => {
-        context.dismissableSurfaces.delete(node);
+        context2.dismissableSurfaces.delete(node);
       };
-    }, [node, context.dismissableSurfaces]);
+    }, [node, context2.dismissableSurfaces]);
     return setNode;
   }
   var IS_TRUE = () => true;
@@ -16153,19 +16168,19 @@
   var DialogTrigger = React21.forwardRef(
     (props, forwardedRef) => {
       const { __scopeDialog, ...triggerProps } = props;
-      const context = useDialogContext(TRIGGER_NAME, __scopeDialog);
-      const composedTriggerRef = useComposedRefs(forwardedRef, context.triggerRef);
+      const context2 = useDialogContext(TRIGGER_NAME, __scopeDialog);
+      const composedTriggerRef = useComposedRefs(forwardedRef, context2.triggerRef);
       return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
         Primitive.button,
         {
           type: "button",
           "aria-haspopup": "dialog",
-          "aria-expanded": context.open,
-          "aria-controls": context.open ? context.contentId : void 0,
-          "data-state": getState(context.open),
+          "aria-expanded": context2.open,
+          "aria-controls": context2.open ? context2.contentId : void 0,
+          "data-state": getState(context2.open),
           ...triggerProps,
           ref: composedTriggerRef,
-          onClick: composeEventHandlers(props.onClick, context.onOpenToggle)
+          onClick: composeEventHandlers(props.onClick, context2.onOpenToggle)
         }
       );
     }
@@ -16177,8 +16192,8 @@
   });
   var DialogPortal = (props) => {
     const { __scopeDialog, forceMount, children, container } = props;
-    const context = useDialogContext(PORTAL_NAME2, __scopeDialog);
-    return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(PortalProvider, { scope: __scopeDialog, forceMount, children: React21.Children.map(children, (child) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Presence, { present: forceMount || context.open, children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Portal, { asChild: true, container, children: child }) })) });
+    const context2 = useDialogContext(PORTAL_NAME2, __scopeDialog);
+    return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(PortalProvider, { scope: __scopeDialog, forceMount, children: React21.Children.map(children, (child) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Presence, { present: forceMount || context2.open, children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Portal, { asChild: true, container, children: child }) })) });
   };
   DialogPortal.displayName = PORTAL_NAME2;
   var OVERLAY_NAME = "DialogOverlay";
@@ -16186,8 +16201,8 @@
     (props, forwardedRef) => {
       const portalContext = usePortalContext(OVERLAY_NAME, props.__scopeDialog);
       const { forceMount = portalContext.forceMount, ...overlayProps } = props;
-      const context = useDialogContext(OVERLAY_NAME, props.__scopeDialog);
-      return context.modal ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Presence, { present: forceMount || context.open, children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(DialogOverlayImpl, { ...overlayProps, ref: forwardedRef }) }) : null;
+      const context2 = useDialogContext(OVERLAY_NAME, props.__scopeDialog);
+      return context2.modal ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Presence, { present: forceMount || context2.open, children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(DialogOverlayImpl, { ...overlayProps, ref: forwardedRef }) }) : null;
     }
   );
   DialogOverlay.displayName = OVERLAY_NAME;
@@ -16195,16 +16210,16 @@
   var DialogOverlayImpl = React21.forwardRef(
     (props, forwardedRef) => {
       const { __scopeDialog, ...overlayProps } = props;
-      const context = useDialogContext(OVERLAY_NAME, __scopeDialog);
+      const context2 = useDialogContext(OVERLAY_NAME, __scopeDialog);
       const registerDismissableSurface = useDismissableLayerSurface();
       const composedRefs = useComposedRefs(forwardedRef, registerDismissableSurface);
       return (
         // Make sure `Content` is scrollable even when it doesn't live inside `RemoveScroll`
         // ie. when `Overlay` and `Content` are siblings
-        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Combination_default, { as: Slot, allowPinchZoom: true, shards: [context.contentRef], children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Combination_default, { as: Slot, allowPinchZoom: true, shards: [context2.contentRef], children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
           Primitive.div,
           {
-            "data-state": getState(context.open),
+            "data-state": getState(context2.open),
             ...overlayProps,
             ref: composedRefs,
             style: { pointerEvents: "auto", ...overlayProps.style }
@@ -16218,16 +16233,16 @@
     (props, forwardedRef) => {
       const portalContext = usePortalContext(CONTENT_NAME, props.__scopeDialog);
       const { forceMount = portalContext.forceMount, ...contentProps } = props;
-      const context = useDialogContext(CONTENT_NAME, props.__scopeDialog);
-      return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Presence, { present: forceMount || context.open, children: context.modal ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(DialogContentModal, { ...contentProps, ref: forwardedRef }) : /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(DialogContentNonModal, { ...contentProps, ref: forwardedRef }) });
+      const context2 = useDialogContext(CONTENT_NAME, props.__scopeDialog);
+      return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Presence, { present: forceMount || context2.open, children: context2.modal ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(DialogContentModal, { ...contentProps, ref: forwardedRef }) : /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(DialogContentNonModal, { ...contentProps, ref: forwardedRef }) });
     }
   );
   DialogContent.displayName = CONTENT_NAME;
   var DialogContentModal = React21.forwardRef(
     (props, forwardedRef) => {
-      const context = useDialogContext(CONTENT_NAME, props.__scopeDialog);
+      const context2 = useDialogContext(CONTENT_NAME, props.__scopeDialog);
       const contentRef = React21.useRef(null);
-      const composedRefs = useComposedRefs(forwardedRef, context.contentRef, contentRef);
+      const composedRefs = useComposedRefs(forwardedRef, context2.contentRef, contentRef);
       React21.useEffect(() => {
         const content = contentRef.current;
         if (content) return hideOthers(content);
@@ -16237,11 +16252,11 @@
         {
           ...props,
           ref: composedRefs,
-          trapFocus: context.open,
-          disableOutsidePointerEvents: context.open,
+          trapFocus: context2.open,
+          disableOutsidePointerEvents: context2.open,
           onCloseAutoFocus: composeEventHandlers(props.onCloseAutoFocus, (event) => {
             event.preventDefault();
-            context.triggerRef.current?.focus();
+            context2.triggerRef.current?.focus();
           }),
           onPointerDownOutside: composeEventHandlers(props.onPointerDownOutside, (event) => {
             const originalEvent = event.detail.originalEvent;
@@ -16259,7 +16274,7 @@
   );
   var DialogContentNonModal = React21.forwardRef(
     (props, forwardedRef) => {
-      const context = useDialogContext(CONTENT_NAME, props.__scopeDialog);
+      const context2 = useDialogContext(CONTENT_NAME, props.__scopeDialog);
       const hasInteractedOutsideRef = React21.useRef(false);
       const hasPointerDownOutsideRef = React21.useRef(false);
       return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
@@ -16272,7 +16287,7 @@
           onCloseAutoFocus: (event) => {
             props.onCloseAutoFocus?.(event);
             if (!event.defaultPrevented) {
-              if (!hasInteractedOutsideRef.current) context.triggerRef.current?.focus();
+              if (!hasInteractedOutsideRef.current) context2.triggerRef.current?.focus();
               event.preventDefault();
             }
             hasInteractedOutsideRef.current = false;
@@ -16287,7 +16302,7 @@
               }
             }
             const target = event.target;
-            const targetIsTrigger = context.triggerRef.current?.contains(target);
+            const targetIsTrigger = context2.triggerRef.current?.contains(target);
             if (targetIsTrigger) event.preventDefault();
             if (event.detail.originalEvent.type === "focusin" && hasPointerDownOutsideRef.current) {
               event.preventDefault();
@@ -16300,7 +16315,7 @@
   var DialogContentImpl = React21.forwardRef(
     (props, forwardedRef) => {
       const { __scopeDialog, trapFocus, onOpenAutoFocus, onCloseAutoFocus, ...contentProps } = props;
-      const context = useDialogContext(CONTENT_NAME, __scopeDialog);
+      const context2 = useDialogContext(CONTENT_NAME, __scopeDialog);
       useFocusGuards();
       return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(import_jsx_runtime8.Fragment, { children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
         FocusScope,
@@ -16314,14 +16329,14 @@
             DismissableLayer,
             {
               role: "dialog",
-              id: context.contentId,
-              "aria-describedby": context.descriptionId,
-              "aria-labelledby": context.titleId,
-              "data-state": getState(context.open),
+              id: context2.contentId,
+              "aria-describedby": context2.descriptionId,
+              "aria-labelledby": context2.titleId,
+              "data-state": getState(context2.open),
               ...contentProps,
               ref: forwardedRef,
               deferPointerDownOutside: true,
-              onDismiss: () => context.onOpenChange(false)
+              onDismiss: () => context2.onOpenChange(false)
             }
           )
         }
@@ -16332,8 +16347,8 @@
   var DialogTitle = React21.forwardRef(
     (props, forwardedRef) => {
       const { __scopeDialog, ...titleProps } = props;
-      const context = useDialogContext(TITLE_NAME, __scopeDialog);
-      return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Primitive.h2, { id: context.titleId, ...titleProps, ref: forwardedRef });
+      const context2 = useDialogContext(TITLE_NAME, __scopeDialog);
+      return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Primitive.h2, { id: context2.titleId, ...titleProps, ref: forwardedRef });
     }
   );
   DialogTitle.displayName = TITLE_NAME;
@@ -16341,8 +16356,8 @@
   var DialogDescription = React21.forwardRef(
     (props, forwardedRef) => {
       const { __scopeDialog, ...descriptionProps } = props;
-      const context = useDialogContext(DESCRIPTION_NAME, __scopeDialog);
-      return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Primitive.p, { id: context.descriptionId, ...descriptionProps, ref: forwardedRef });
+      const context2 = useDialogContext(DESCRIPTION_NAME, __scopeDialog);
+      return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Primitive.p, { id: context2.descriptionId, ...descriptionProps, ref: forwardedRef });
     }
   );
   DialogDescription.displayName = DESCRIPTION_NAME;
@@ -16350,14 +16365,14 @@
   var DialogClose = React21.forwardRef(
     (props, forwardedRef) => {
       const { __scopeDialog, ...closeProps } = props;
-      const context = useDialogContext(CLOSE_NAME, __scopeDialog);
+      const context2 = useDialogContext(CLOSE_NAME, __scopeDialog);
       return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
         Primitive.button,
         {
           type: "button",
           ...closeProps,
           ref: forwardedRef,
-          onClick: composeEventHandlers(props.onClick, () => context.onOpenChange(false))
+          onClick: composeEventHandlers(props.onClick, () => context2.onOpenChange(false))
         }
       );
     }
@@ -18562,9 +18577,9 @@
   var PopperAnchor = React27.forwardRef(
     (props, forwardedRef) => {
       const { __scopePopper, virtualRef, ...anchorProps } = props;
-      const context = usePopperContext(ANCHOR_NAME, __scopePopper);
+      const context2 = usePopperContext(ANCHOR_NAME, __scopePopper);
       const ref = React27.useRef(null);
-      const onAnchorChange = context.onAnchorChange;
+      const onAnchorChange = context2.onAnchorChange;
       const callbackRef = React27.useCallback(
         (node) => {
           ref.current = node;
@@ -18586,7 +18601,7 @@
           onAnchorChange(anchorRef.current);
         }
       });
-      const sideAndAlign = context.placementState && getSideAndAlignFromPlacement(context.placementState);
+      const sideAndAlign = context2.placementState && getSideAndAlignFromPlacement(context2.placementState);
       const placedSide = sideAndAlign?.[0];
       const placedAlign = sideAndAlign?.[1];
       return virtualRef ? null : /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(
@@ -18621,7 +18636,7 @@
         onPlaced,
         ...contentProps
       } = props;
-      const context = usePopperContext(CONTENT_NAME2, __scopePopper);
+      const context2 = usePopperContext(CONTENT_NAME2, __scopePopper);
       const [content, setContent] = React27.useState(null);
       const composedRefs = useComposedRefs(forwardedRef, setContent);
       const [arrow4, setArrow] = React27.useState(null);
@@ -18649,7 +18664,7 @@
           return cleanup;
         },
         elements: {
-          reference: context.anchor
+          reference: context2.anchor
         },
         middleware: [
           offset3({ mainAxis: sideOffset + arrowHeight, alignmentAxis: alignOffset }),
@@ -18687,7 +18702,7 @@
           })
         ]
       });
-      const setPlacementState = context.setPlacementState;
+      const setPlacementState = context2.setPlacementState;
       useLayoutEffect2(() => {
         setPlacementState(placement);
         return () => {
@@ -18910,9 +18925,9 @@
   var PopoverAnchor = React28.forwardRef(
     (props, forwardedRef) => {
       const { __scopePopover, ...anchorProps } = props;
-      const context = usePopoverContext(ANCHOR_NAME2, __scopePopover);
+      const context2 = usePopoverContext(ANCHOR_NAME2, __scopePopover);
       const popperScope = usePopperScope(__scopePopover);
-      const { onCustomAnchorAdd, onCustomAnchorRemove } = context;
+      const { onCustomAnchorAdd, onCustomAnchorRemove } = context2;
       React28.useEffect(() => {
         onCustomAnchorAdd();
         return () => onCustomAnchorRemove();
@@ -18925,23 +18940,23 @@
   var PopoverTrigger = React28.forwardRef(
     (props, forwardedRef) => {
       const { __scopePopover, ...triggerProps } = props;
-      const context = usePopoverContext(TRIGGER_NAME2, __scopePopover);
+      const context2 = usePopoverContext(TRIGGER_NAME2, __scopePopover);
       const popperScope = usePopperScope(__scopePopover);
-      const composedTriggerRef = useComposedRefs(forwardedRef, context.triggerRef);
+      const composedTriggerRef = useComposedRefs(forwardedRef, context2.triggerRef);
       const trigger = /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
         Primitive.button,
         {
           type: "button",
           "aria-haspopup": "dialog",
-          "aria-expanded": context.open,
-          "aria-controls": context.open ? context.contentId : void 0,
-          "data-state": getState2(context.open),
+          "aria-expanded": context2.open,
+          "aria-controls": context2.open ? context2.contentId : void 0,
+          "data-state": getState2(context2.open),
           ...triggerProps,
           ref: composedTriggerRef,
-          onClick: composeEventHandlers(props.onClick, context.onOpenToggle)
+          onClick: composeEventHandlers(props.onClick, context2.onOpenToggle)
         }
       );
-      return context.hasCustomAnchor ? trigger : /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(Anchor, { asChild: true, ...popperScope, children: trigger });
+      return context2.hasCustomAnchor ? trigger : /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(Anchor, { asChild: true, ...popperScope, children: trigger });
     }
   );
   PopoverTrigger.displayName = TRIGGER_NAME2;
@@ -18951,8 +18966,8 @@
   });
   var PopoverPortal = (props) => {
     const { __scopePopover, forceMount, children, container } = props;
-    const context = usePopoverContext(PORTAL_NAME3, __scopePopover);
-    return /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(PortalProvider2, { scope: __scopePopover, forceMount, children: /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(Presence, { present: forceMount || context.open, children: /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(Portal, { asChild: true, container, children }) }) });
+    const context2 = usePopoverContext(PORTAL_NAME3, __scopePopover);
+    return /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(PortalProvider2, { scope: __scopePopover, forceMount, children: /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(Presence, { present: forceMount || context2.open, children: /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(Portal, { asChild: true, container, children }) }) });
   };
   PopoverPortal.displayName = PORTAL_NAME3;
   var CONTENT_NAME3 = "PopoverContent";
@@ -18960,15 +18975,15 @@
     (props, forwardedRef) => {
       const portalContext = usePortalContext2(CONTENT_NAME3, props.__scopePopover);
       const { forceMount = portalContext.forceMount, ...contentProps } = props;
-      const context = usePopoverContext(CONTENT_NAME3, props.__scopePopover);
-      return /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(Presence, { present: forceMount || context.open, children: context.modal ? /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(PopoverContentModal, { ...contentProps, ref: forwardedRef }) : /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(PopoverContentNonModal, { ...contentProps, ref: forwardedRef }) });
+      const context2 = usePopoverContext(CONTENT_NAME3, props.__scopePopover);
+      return /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(Presence, { present: forceMount || context2.open, children: context2.modal ? /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(PopoverContentModal, { ...contentProps, ref: forwardedRef }) : /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(PopoverContentNonModal, { ...contentProps, ref: forwardedRef }) });
     }
   );
   PopoverContent.displayName = CONTENT_NAME3;
   var Slot2 = createSlot("PopoverContent.RemoveScroll");
   var PopoverContentModal = React28.forwardRef(
     (props, forwardedRef) => {
-      const context = usePopoverContext(CONTENT_NAME3, props.__scopePopover);
+      const context2 = usePopoverContext(CONTENT_NAME3, props.__scopePopover);
       const contentRef = React28.useRef(null);
       const composedRefs = useComposedRefs(forwardedRef, contentRef);
       const isRightClickOutsideRef = React28.useRef(false);
@@ -18981,11 +18996,11 @@
         {
           ...props,
           ref: composedRefs,
-          trapFocus: context.open,
+          trapFocus: context2.open,
           disableOutsidePointerEvents: true,
           onCloseAutoFocus: composeEventHandlers(props.onCloseAutoFocus, (event) => {
             event.preventDefault();
-            if (!isRightClickOutsideRef.current) context.triggerRef.current?.focus();
+            if (!isRightClickOutsideRef.current) context2.triggerRef.current?.focus();
           }),
           onPointerDownOutside: composeEventHandlers(
             props.onPointerDownOutside,
@@ -19008,7 +19023,7 @@
   );
   var PopoverContentNonModal = React28.forwardRef(
     (props, forwardedRef) => {
-      const context = usePopoverContext(CONTENT_NAME3, props.__scopePopover);
+      const context2 = usePopoverContext(CONTENT_NAME3, props.__scopePopover);
       const hasInteractedOutsideRef = React28.useRef(false);
       const hasPointerDownOutsideRef = React28.useRef(false);
       return /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
@@ -19021,7 +19036,7 @@
           onCloseAutoFocus: (event) => {
             props.onCloseAutoFocus?.(event);
             if (!event.defaultPrevented) {
-              if (!hasInteractedOutsideRef.current) context.triggerRef.current?.focus();
+              if (!hasInteractedOutsideRef.current) context2.triggerRef.current?.focus();
               event.preventDefault();
             }
             hasInteractedOutsideRef.current = false;
@@ -19036,7 +19051,7 @@
               }
             }
             const target = event.target;
-            const targetIsTrigger = context.triggerRef.current?.contains(target);
+            const targetIsTrigger = context2.triggerRef.current?.contains(target);
             if (targetIsTrigger) event.preventDefault();
             if (event.detail.originalEvent.type === "focusin" && hasPointerDownOutsideRef.current) {
               event.preventDefault();
@@ -19060,7 +19075,7 @@
         onInteractOutside,
         ...contentProps
       } = props;
-      const context = usePopoverContext(CONTENT_NAME3, __scopePopover);
+      const context2 = usePopoverContext(CONTENT_NAME3, __scopePopover);
       const popperScope = usePopperScope(__scopePopover);
       useFocusGuards();
       return /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
@@ -19080,14 +19095,14 @@
               onEscapeKeyDown,
               onPointerDownOutside,
               onFocusOutside,
-              onDismiss: () => context.onOpenChange(false),
+              onDismiss: () => context2.onOpenChange(false),
               deferPointerDownOutside: true,
               children: /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
                 Content,
                 {
-                  "data-state": getState2(context.open),
+                  "data-state": getState2(context2.open),
                   role: "dialog",
-                  id: context.contentId,
+                  id: context2.contentId,
                   ...popperScope,
                   ...contentProps,
                   ref: forwardedRef,
@@ -19114,14 +19129,14 @@
   var PopoverClose = React28.forwardRef(
     (props, forwardedRef) => {
       const { __scopePopover, ...closeProps } = props;
-      const context = usePopoverContext(CLOSE_NAME2, __scopePopover);
+      const context2 = usePopoverContext(CLOSE_NAME2, __scopePopover);
       return /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
         Primitive.button,
         {
           type: "button",
           ...closeProps,
           ref: forwardedRef,
-          onClick: composeEventHandlers(props.onClick, () => context.onOpenChange(false))
+          onClick: composeEventHandlers(props.onClick, () => context2.onOpenChange(false))
         }
       );
     }
@@ -19222,8 +19237,8 @@
     const CollectionSlot = React30.forwardRef(
       (props, forwardedRef) => {
         const { scope, children } = props;
-        const context = useCollectionContext(COLLECTION_SLOT_NAME, scope);
-        const composedRefs = useComposedRefs(forwardedRef, context.collectionRef);
+        const context2 = useCollectionContext(COLLECTION_SLOT_NAME, scope);
+        const composedRefs = useComposedRefs(forwardedRef, context2.collectionRef);
         return /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(CollectionSlotImpl, { ref: composedRefs, children });
       }
     );
@@ -19236,27 +19251,27 @@
         const { scope, children, ...itemData } = props;
         const ref = React30.useRef(null);
         const composedRefs = useComposedRefs(forwardedRef, ref);
-        const context = useCollectionContext(ITEM_SLOT_NAME, scope);
+        const context2 = useCollectionContext(ITEM_SLOT_NAME, scope);
         React30.useEffect(() => {
-          context.itemMap.set(ref, { ref, ...itemData });
-          return () => void context.itemMap.delete(ref);
+          context2.itemMap.set(ref, { ref, ...itemData });
+          return () => void context2.itemMap.delete(ref);
         });
         return /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(CollectionItemSlotImpl, { ...{ [ITEM_DATA_ATTR]: "" }, ref: composedRefs, children });
       }
     );
     CollectionItemSlot.displayName = ITEM_SLOT_NAME;
     function useCollection4(scope) {
-      const context = useCollectionContext(name + "CollectionConsumer", scope);
+      const context2 = useCollectionContext(name + "CollectionConsumer", scope);
       const getItems = React30.useCallback(() => {
-        const collectionNode = context.collectionRef.current;
+        const collectionNode = context2.collectionRef.current;
         if (!collectionNode) return [];
         const orderedNodes = Array.from(collectionNode.querySelectorAll(`[${ITEM_DATA_ATTR}]`));
-        const items = Array.from(context.itemMap.values());
+        const items = Array.from(context2.itemMap.values());
         const orderedItems = items.sort(
           (a, b) => orderedNodes.indexOf(a.ref.current) - orderedNodes.indexOf(b.ref.current)
         );
         return orderedItems;
-      }, [context.collectionRef, context.itemMap]);
+      }, [context2.collectionRef, context2.itemMap]);
       return getItems;
     }
     return [
@@ -19393,7 +19408,7 @@
         return optionsSet;
       });
     }, []);
-    const context = {
+    const context2 = {
       required,
       trigger,
       onTriggerChange: setTrigger,
@@ -19416,13 +19431,13 @@
       nativeSelectKey,
       isFormControl
     };
-    return /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(Root22, { ...popperScope, children: /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(SelectProviderImpl, { scope: __scopeSelect, ...context, children: /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(Collection.Provider, { scope: __scopeSelect, children: /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(Root22, { ...popperScope, children: /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(SelectProviderImpl, { scope: __scopeSelect, ...context2, children: /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(Collection.Provider, { scope: __scopeSelect, children: /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(
       SelectNativeOptionsProvider,
       {
         scope: __scopeSelect,
         onNativeOptionAdd: handleNativeOptionAdd,
         onNativeOptionRemove: handleNativeOptionRemove,
-        children: isFunction2(internal_do_not_use_render) ? internal_do_not_use_render(context) : children
+        children: isFunction2(internal_do_not_use_render) ? internal_do_not_use_render(context2) : children
       }
     ) }) }) });
   }
@@ -19452,26 +19467,26 @@
     (props, forwardedRef) => {
       const { __scopeSelect, disabled = false, ...triggerProps } = props;
       const popperScope = usePopperScope2(__scopeSelect);
-      const context = useSelectContext(TRIGGER_NAME3, __scopeSelect);
-      const isDisabled = context.disabled || disabled;
-      const composedRefs = useComposedRefs(forwardedRef, context.onTriggerChange);
+      const context2 = useSelectContext(TRIGGER_NAME3, __scopeSelect);
+      const isDisabled = context2.disabled || disabled;
+      const composedRefs = useComposedRefs(forwardedRef, context2.onTriggerChange);
       const getItems = useCollection(__scopeSelect);
       const pointerTypeRef = React34.useRef("touch");
       const [searchRef, handleTypeaheadSearch, resetTypeahead] = useTypeaheadSearch((search) => {
         const enabledItems = getItems().filter((item) => !item.disabled);
-        const currentItem = enabledItems.find((item) => item.value === context.value);
+        const currentItem = enabledItems.find((item) => item.value === context2.value);
         const nextItem = findNextItem(enabledItems, search, currentItem);
         if (nextItem !== void 0) {
-          context.onValueChange(nextItem.value);
+          context2.onValueChange(nextItem.value);
         }
       });
       const handleOpen = (pointerEvent) => {
         if (!isDisabled) {
-          context.onOpenChange(true);
+          context2.onOpenChange(true);
           resetTypeahead();
         }
         if (pointerEvent) {
-          context.triggerPointerDownPosRef.current = {
+          context2.triggerPointerDownPosRef.current = {
             x: Math.round(pointerEvent.pageX),
             y: Math.round(pointerEvent.pageY)
           };
@@ -19482,15 +19497,15 @@
         {
           type: "button",
           role: "combobox",
-          "aria-controls": context.open ? context.contentId : void 0,
-          "aria-expanded": context.open,
-          "aria-required": context.required,
+          "aria-controls": context2.open ? context2.contentId : void 0,
+          "aria-expanded": context2.open,
+          "aria-required": context2.required,
           "aria-autocomplete": "none",
-          dir: context.dir,
-          "data-state": context.open ? "open" : "closed",
+          dir: context2.dir,
+          "data-state": context2.open ? "open" : "closed",
           disabled: isDisabled,
           "data-disabled": isDisabled ? "" : void 0,
-          "data-placeholder": shouldShowPlaceholder(context.value) ? "" : void 0,
+          "data-placeholder": shouldShowPlaceholder(context2.value) ? "" : void 0,
           ...triggerProps,
           ref: composedRefs,
           onClick: composeEventHandlers(triggerProps.onClick, (event) => {
@@ -19529,14 +19544,14 @@
   var SelectValue = React34.forwardRef(
     (props, forwardedRef) => {
       const { __scopeSelect, className, style, children, placeholder = "", ...valueProps } = props;
-      const context = useSelectContext(VALUE_NAME, __scopeSelect);
-      const { onValueNodeHasChildrenChange } = context;
+      const context2 = useSelectContext(VALUE_NAME, __scopeSelect);
+      const { onValueNodeHasChildrenChange } = context2;
       const hasChildren = children !== void 0;
-      const composedRefs = useComposedRefs(forwardedRef, context.onValueNodeChange);
+      const composedRefs = useComposedRefs(forwardedRef, context2.onValueNodeChange);
       useLayoutEffect2(() => {
         onValueNodeHasChildrenChange(hasChildren);
       }, [onValueNodeHasChildrenChange, hasChildren]);
-      const showPlaceholder = shouldShowPlaceholder(context.value);
+      const showPlaceholder = shouldShowPlaceholder(context2.value);
       return /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(
         Primitive.span,
         {
@@ -19572,12 +19587,12 @@
     (props, forwardedRef) => {
       const portalContext = usePortalContext3(CONTENT_NAME4, props.__scopeSelect);
       const { forceMount = portalContext.forceMount, ...contentProps } = props;
-      const context = useSelectContext(CONTENT_NAME4, props.__scopeSelect);
+      const context2 = useSelectContext(CONTENT_NAME4, props.__scopeSelect);
       const [fragment, setFragment] = React34.useState();
       useLayoutEffect2(() => {
         setFragment(new DocumentFragment());
       }, []);
-      return /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(Presence, { present: forceMount || context.open, children: ({ present }) => present ? /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(SelectContentImpl, { ...contentProps, ref: forwardedRef }) : /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(SelectContentFragment, { ...contentProps, fragment }) });
+      return /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(Presence, { present: forceMount || context2.open, children: ({ present }) => present ? /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(SelectContentImpl, { ...contentProps, ref: forwardedRef }) : /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(SelectContentFragment, { ...contentProps, fragment }) });
     }
   );
   SelectContent.displayName = CONTENT_NAME4;
@@ -19617,7 +19632,7 @@
         //
         ...contentProps
       } = props;
-      const context = useSelectContext(CONTENT_NAME4, __scopeSelect);
+      const context2 = useSelectContext(CONTENT_NAME4, __scopeSelect);
       const [content, setContent] = React34.useState(null);
       const [viewport, setViewport] = React34.useState(null);
       const composedRefs = useComposedRefs(forwardedRef, setContent);
@@ -19657,7 +19672,7 @@
           focusSelectedItem();
         }
       }, [isPositioned, focusSelectedItem]);
-      const { onOpenChange, triggerPointerDownPosRef } = context;
+      const { onOpenChange, triggerPointerDownPosRef } = context2;
       React34.useEffect(() => {
         if (content) {
           let pointerMoveDelta = { x: 0, y: 0 };
@@ -19708,24 +19723,24 @@
       const itemRefCallback = React34.useCallback(
         (node, value, disabled) => {
           const isFirstValidItem = !firstValidItemFoundRef.current && !disabled;
-          const isSelectedItem = context.value !== void 0 && context.value === value;
+          const isSelectedItem = context2.value !== void 0 && context2.value === value;
           if (isSelectedItem || isFirstValidItem) {
             setSelectedItem(node);
             if (isFirstValidItem) firstValidItemFoundRef.current = true;
           }
         },
-        [context.value]
+        [context2.value]
       );
       const handleItemLeave = React34.useCallback(() => content?.focus(), [content]);
       const itemTextRefCallback = React34.useCallback(
         (node, value, disabled) => {
           const isFirstValidItem = !firstValidItemFoundRef.current && !disabled;
-          const isSelectedItem = context.value !== void 0 && context.value === value;
+          const isSelectedItem = context2.value !== void 0 && context2.value === value;
           if (isSelectedItem || isFirstValidItem) {
             setSelectedItemText(node);
           }
         },
-        [context.value]
+        [context2.value]
       );
       const SelectPosition = position === "popper" ? SelectPopperPosition : SelectItemAlignedPosition;
       const popperContentProps = SelectPosition === SelectPopperPosition ? {
@@ -19760,12 +19775,12 @@
             FocusScope,
             {
               asChild: true,
-              trapped: context.open,
+              trapped: context2.open,
               onMountAutoFocus: (event) => {
                 event.preventDefault();
               },
               onUnmountAutoFocus: composeEventHandlers(onCloseAutoFocus, (event) => {
-                context.trigger?.focus({ preventScroll: true });
+                context2.trigger?.focus({ preventScroll: true });
                 event.preventDefault();
               }),
               children: /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(
@@ -19776,14 +19791,14 @@
                   onEscapeKeyDown,
                   onPointerDownOutside,
                   onFocusOutside: (event) => event.preventDefault(),
-                  onDismiss: () => context.onOpenChange(false),
+                  onDismiss: () => context2.onOpenChange(false),
                   children: /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(
                     SelectPosition,
                     {
                       role: "listbox",
-                      id: context.contentId,
-                      "data-state": context.open ? "open" : "closed",
-                      dir: context.dir,
+                      id: context2.contentId,
+                      "data-state": context2.open ? "open" : "closed",
+                      dir: context2.dir,
                       onContextMenu: (event) => event.preventDefault(),
                       ...contentProps,
                       ...popperContentProps,
@@ -19830,7 +19845,7 @@
   var ITEM_ALIGNED_POSITION_NAME = "SelectItemAlignedPosition";
   var SelectItemAlignedPosition = React34.forwardRef((props, forwardedRef) => {
     const { __scopeSelect, onPlaced, ...popperProps } = props;
-    const context = useSelectContext(CONTENT_NAME4, __scopeSelect);
+    const context2 = useSelectContext(CONTENT_NAME4, __scopeSelect);
     const contentContext = useSelectContentContext(CONTENT_NAME4, __scopeSelect);
     const [contentWrapper, setContentWrapper] = React34.useState(null);
     const [content, setContent] = React34.useState(null);
@@ -19840,12 +19855,12 @@
     const shouldRepositionRef = React34.useRef(true);
     const { viewport, selectedItem, selectedItemText, focusSelectedItem } = contentContext;
     const position = React34.useCallback(() => {
-      if (context.trigger && context.valueNode && contentWrapper && content && viewport && selectedItem && selectedItemText) {
-        const triggerRect = context.trigger.getBoundingClientRect();
+      if (context2.trigger && context2.valueNode && contentWrapper && content && viewport && selectedItem && selectedItemText) {
+        const triggerRect = context2.trigger.getBoundingClientRect();
         const contentRect = content.getBoundingClientRect();
-        const valueNodeRect = context.valueNode.getBoundingClientRect();
+        const valueNodeRect = context2.valueNode.getBoundingClientRect();
         const itemTextRect = selectedItemText.getBoundingClientRect();
-        if (context.dir !== "rtl") {
+        if (context2.dir !== "rtl") {
           const itemTextOffset = itemTextRect.left - contentRect.left;
           const left = valueNodeRect.left - itemTextOffset;
           const leftDelta = triggerRect.left - left;
@@ -19928,14 +19943,14 @@
       }
     }, [
       getItems,
-      context.trigger,
-      context.valueNode,
+      context2.trigger,
+      context2.valueNode,
       contentWrapper,
       content,
       viewport,
       selectedItem,
       selectedItemText,
-      context.dir,
+      context2.dir,
       onPlaced
     ]);
     useLayoutEffect2(() => position(), [position]);
@@ -20124,9 +20139,9 @@
         textValue: textValueProp,
         ...itemProps
       } = props;
-      const context = useSelectContext(ITEM_NAME, __scopeSelect);
+      const context2 = useSelectContext(ITEM_NAME, __scopeSelect);
       const contentContext = useSelectContentContext(ITEM_NAME, __scopeSelect);
-      const isSelected = context.value === value;
+      const isSelected = context2.value === value;
       const [textValue, setTextValue] = React34.useState(textValueProp ?? "");
       const [isFocused, setIsFocused] = React34.useState(false);
       const handleItemRefCallback = useCallbackRef(
@@ -20137,8 +20152,8 @@
       const pointerTypeRef = React34.useRef("touch");
       const handleSelect = () => {
         if (!disabled) {
-          context.onValueChange(value);
-          context.onOpenChange(false);
+          context2.onValueChange(value);
+          context2.onOpenChange(false);
         }
       };
       return /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(
@@ -20224,7 +20239,7 @@
   var SelectItemText = React34.forwardRef(
     (props, forwardedRef) => {
       const { __scopeSelect, className, style, ...itemTextProps } = props;
-      const context = useSelectContext(ITEM_TEXT_NAME, __scopeSelect);
+      const context2 = useSelectContext(ITEM_TEXT_NAME, __scopeSelect);
       const contentContext = useSelectContentContext(ITEM_TEXT_NAME, __scopeSelect);
       const itemContext = useSelectItemContext(ITEM_TEXT_NAME, __scopeSelect);
       const nativeOptionsContext = useSelectNativeOptionsContext(ITEM_TEXT_NAME, __scopeSelect);
@@ -20250,7 +20265,7 @@
       }, [onNativeOptionAdd, onNativeOptionRemove, nativeOption]);
       return /* @__PURE__ */ (0, import_jsx_runtime19.jsxs)(import_jsx_runtime19.Fragment, { children: [
         /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(Primitive.span, { id: itemContext.textId, ...itemTextProps, ref: composedRefs }),
-        itemContext.isSelected && context.valueNode && !context.valueNodeHasChildren && !shouldShowPlaceholder(context.value) ? ReactDOM4.createPortal(itemTextProps.children, context.valueNode) : null
+        itemContext.isSelected && context2.valueNode && !context2.valueNodeHasChildren && !shouldShowPlaceholder(context2.value) ? ReactDOM4.createPortal(itemTextProps.children, context2.valueNode) : null
       ] });
     }
   );
@@ -20396,9 +20411,9 @@
   var BUBBLE_INPUT_NAME = "SelectBubbleInput";
   var SelectBubbleInput = React34.forwardRef(
     ({ __scopeSelect, ...props }, forwardedRef) => {
-      const context = useSelectContext(BUBBLE_INPUT_NAME, __scopeSelect);
-      const { value, onValueChange, required, disabled, name, autoComplete, form } = context;
-      const { nativeOptions, nativeSelectKey } = context;
+      const context2 = useSelectContext(BUBBLE_INPUT_NAME, __scopeSelect);
+      const { value, onValueChange, required, disabled, name, autoComplete, form } = context2;
+      const { nativeOptions, nativeSelectKey } = context2;
       const ref = React34.useRef(null);
       const composedRefs = useComposedRefs(forwardedRef, ref);
       const selectValue = value ?? "";
@@ -20614,7 +20629,7 @@
       // We set this to true by default so that events bubble to forms without JS (SSR)
       true
     );
-    const context = {
+    const context2 = {
       checked,
       setChecked,
       disabled,
@@ -20630,7 +20645,7 @@
       bubbleInput,
       setBubbleInput
     };
-    return /* @__PURE__ */ (0, import_jsx_runtime22.jsx)(SwitchProviderImpl, { scope: __scopeSwitch, ...context, children: isFunction3(internal_do_not_use_render) ? internal_do_not_use_render(context) : children });
+    return /* @__PURE__ */ (0, import_jsx_runtime22.jsx)(SwitchProviderImpl, { scope: __scopeSwitch, ...context2, children: isFunction3(internal_do_not_use_render) ? internal_do_not_use_render(context2) : children });
   }
   var TRIGGER_NAME4 = "SwitchTrigger";
   var SwitchTrigger = React35.forwardRef(
@@ -20734,12 +20749,12 @@
   var SwitchThumb = React35.forwardRef(
     (props, forwardedRef) => {
       const { __scopeSwitch, ...thumbProps } = props;
-      const context = useSwitchContext(THUMB_NAME, __scopeSwitch);
+      const context2 = useSwitchContext(THUMB_NAME, __scopeSwitch);
       return /* @__PURE__ */ (0, import_jsx_runtime22.jsx)(
         Primitive.span,
         {
-          "data-state": getState3(context.checked),
-          "data-disabled": context.disabled ? "" : void 0,
+          "data-state": getState3(context2.checked),
+          "data-disabled": context2.disabled ? "" : void 0,
           ...thumbProps,
           ref: forwardedRef
         }
@@ -21006,10 +21021,10 @@
       } = props;
       const autoId = useId();
       const id = tabStopId || autoId;
-      const context = useRovingFocusContext(ITEM_NAME2, __scopeRovingFocusGroup);
-      const isCurrentTabStop = context.currentTabStopId === id;
+      const context2 = useRovingFocusContext(ITEM_NAME2, __scopeRovingFocusGroup);
+      const isCurrentTabStop = context2.currentTabStopId === id;
       const getItems = useCollection2(__scopeRovingFocusGroup);
-      const { onFocusableItemAdd, onFocusableItemRemove, currentTabStopId } = context;
+      const { onFocusableItemAdd, onFocusableItemRemove, currentTabStopId } = context2;
       const isHydrated = useIsHydrated2();
       useLayoutEffect2(() => {
         if (!isHydrated || !focusable) {
@@ -21036,21 +21051,21 @@
             Primitive.span,
             {
               tabIndex: isCurrentTabStop ? 0 : -1,
-              "data-orientation": context.orientation,
+              "data-orientation": context2.orientation,
               ...itemProps,
               ref: forwardedRef,
               onMouseDown: composeEventHandlers(props.onMouseDown, (event) => {
                 if (!focusable) event.preventDefault();
-                else context.onItemFocus(id);
+                else context2.onItemFocus(id);
               }),
-              onFocus: composeEventHandlers(props.onFocus, () => context.onItemFocus(id)),
+              onFocus: composeEventHandlers(props.onFocus, () => context2.onItemFocus(id)),
               onKeyDown: composeEventHandlers(props.onKeyDown, (event) => {
                 if (event.key === "Tab" && event.shiftKey) {
-                  context.onItemShiftTab();
+                  context2.onItemShiftTab();
                   return;
                 }
                 if (event.target !== event.currentTarget) return;
-                const focusIntent = getFocusIntent(event, context.orientation, context.dir);
+                const focusIntent = getFocusIntent(event, context2.orientation, context2.dir);
                 if (focusIntent !== void 0) {
                   if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
                   event.preventDefault();
@@ -21060,7 +21075,7 @@
                   else if (focusIntent === "prev" || focusIntent === "next") {
                     if (focusIntent === "prev") candidateNodes.reverse();
                     const currentIndex = candidateNodes.indexOf(event.currentTarget);
-                    candidateNodes = context.loop ? wrapArray2(candidateNodes, currentIndex + 1) : candidateNodes.slice(currentIndex + 1);
+                    candidateNodes = context2.loop ? wrapArray2(candidateNodes, currentIndex + 1) : candidateNodes.slice(currentIndex + 1);
                   }
                   setTimeout(() => focusFirst2(candidateNodes));
                 }
@@ -21162,21 +21177,21 @@
   var TabsList = React38.forwardRef(
     (props, forwardedRef) => {
       const { __scopeTabs, loop = true, ...listProps } = props;
-      const context = useTabsContext(TAB_LIST_NAME, __scopeTabs);
+      const context2 = useTabsContext(TAB_LIST_NAME, __scopeTabs);
       const rovingFocusGroupScope = useRovingFocusGroupScope(__scopeTabs);
       return /* @__PURE__ */ (0, import_jsx_runtime25.jsx)(
         Root3,
         {
           asChild: true,
           ...rovingFocusGroupScope,
-          orientation: context.orientation,
-          dir: context.dir,
+          orientation: context2.orientation,
+          dir: context2.dir,
           loop,
           children: /* @__PURE__ */ (0, import_jsx_runtime25.jsx)(
             Primitive.div,
             {
               role: "tablist",
-              "aria-orientation": context.orientation,
+              "aria-orientation": context2.orientation,
               ...listProps,
               ref: forwardedRef
             }
@@ -21190,11 +21205,11 @@
   var TabsTrigger = React38.forwardRef(
     (props, forwardedRef) => {
       const { __scopeTabs, value, disabled = false, ...triggerProps } = props;
-      const context = useTabsContext(TRIGGER_NAME5, __scopeTabs);
+      const context2 = useTabsContext(TRIGGER_NAME5, __scopeTabs);
       const rovingFocusGroupScope = useRovingFocusGroupScope(__scopeTabs);
-      const triggerId = makeTriggerId(context.baseId, value);
-      const contentId = makeContentId(context.baseId, value);
-      const isSelected = value === context.value;
+      const triggerId = makeTriggerId(context2.baseId, value);
+      const contentId = makeContentId(context2.baseId, value);
+      const isSelected = value === context2.value;
       return /* @__PURE__ */ (0, import_jsx_runtime25.jsx)(
         Item,
         {
@@ -21217,7 +21232,7 @@
               ref: forwardedRef,
               onMouseDown: composeEventHandlers(props.onMouseDown, (event) => {
                 if (!disabled && event.button === 0 && event.ctrlKey === false) {
-                  context.onValueChange(value);
+                  context2.onValueChange(value);
                 } else {
                   event.preventDefault();
                 }
@@ -21227,13 +21242,13 @@
                   return;
                 }
                 if ([" ", "Enter"].includes(event.key)) {
-                  context.onValueChange(value);
+                  context2.onValueChange(value);
                 }
               }),
               onFocus: composeEventHandlers(props.onFocus, () => {
-                const isAutomaticActivation = context.activationMode !== "manual";
+                const isAutomaticActivation = context2.activationMode !== "manual";
                 if (!isSelected && !disabled && isAutomaticActivation) {
-                  context.onValueChange(value);
+                  context2.onValueChange(value);
                 }
               })
             }
@@ -21247,10 +21262,10 @@
   var TabsContent = React38.forwardRef(
     (props, forwardedRef) => {
       const { __scopeTabs, value, forceMount, children, ...contentProps } = props;
-      const context = useTabsContext(CONTENT_NAME5, __scopeTabs);
-      const triggerId = makeTriggerId(context.baseId, value);
-      const contentId = makeContentId(context.baseId, value);
-      const isSelected = value === context.value;
+      const context2 = useTabsContext(CONTENT_NAME5, __scopeTabs);
+      const triggerId = makeTriggerId(context2.baseId, value);
+      const contentId = makeContentId(context2.baseId, value);
+      const isSelected = value === context2.value;
       const isMountAnimationPreventedRef = React38.useRef(isSelected);
       React38.useEffect(() => {
         const rAF = requestAnimationFrame(() => isMountAnimationPreventedRef.current = false);
@@ -21260,7 +21275,7 @@
         Primitive.div,
         {
           "data-state": isSelected ? "active" : "inactive",
-          "data-orientation": context.orientation,
+          "data-orientation": context2.orientation,
           role: "tabpanel",
           "aria-labelledby": triggerId,
           hidden: !present,
@@ -21392,15 +21407,15 @@
         label = "Notifications ({hotkey})",
         ...viewportProps
       } = props;
-      const context = useToastProviderContext(VIEWPORT_NAME2, __scopeToast);
+      const context2 = useToastProviderContext(VIEWPORT_NAME2, __scopeToast);
       const getItems = useCollection3(__scopeToast);
       const wrapperRef = React39.useRef(null);
       const headFocusProxyRef = React39.useRef(null);
       const tailFocusProxyRef = React39.useRef(null);
       const ref = React39.useRef(null);
-      const composedRefs = useComposedRefs(forwardedRef, ref, context.onViewportChange);
+      const composedRefs = useComposedRefs(forwardedRef, ref, context2.onViewportChange);
       const hotkeyLabel = hotkey.join("+").replace(/Key/g, "").replace(/Digit/g, "");
-      const hasToasts = context.toastCount > 0;
+      const hasToasts = context2.toastCount > 0;
       React39.useEffect(() => {
         const handleKeyDown2 = (event) => {
           const isHotkeyPressed = hotkey.length !== 0 && hotkey.every((key) => event[key] || event.code === key);
@@ -21414,17 +21429,17 @@
         const viewport = ref.current;
         if (hasToasts && wrapper && viewport) {
           const handlePause = () => {
-            if (!context.isClosePausedRef.current) {
+            if (!context2.isClosePausedRef.current) {
               const pauseEvent = new CustomEvent(VIEWPORT_PAUSE);
               viewport.dispatchEvent(pauseEvent);
-              context.isClosePausedRef.current = true;
+              context2.isClosePausedRef.current = true;
             }
           };
           const handleResume = () => {
-            if (context.isClosePausedRef.current) {
+            if (context2.isClosePausedRef.current) {
               const resumeEvent = new CustomEvent(VIEWPORT_RESUME);
               viewport.dispatchEvent(resumeEvent);
-              context.isClosePausedRef.current = false;
+              context2.isClosePausedRef.current = false;
             }
           };
           const handleFocusOutResume = (event) => {
@@ -21450,7 +21465,7 @@
             window.removeEventListener("focus", handleResume);
           };
         }
-      }, [hasToasts, context.isClosePausedRef]);
+      }, [hasToasts, context2.isClosePausedRef]);
       const getSortedTabbableCandidates = React39.useCallback(
         ({ tabbingDirection }) => {
           const toastItems = getItems();
@@ -21535,7 +21550,7 @@
   var FocusProxy = React39.forwardRef(
     (props, forwardedRef) => {
       const { __scopeToast, onFocusFromOutsideViewport, ...proxyProps } = props;
-      const context = useToastProviderContext(FOCUS_PROXY_NAME, __scopeToast);
+      const context2 = useToastProviderContext(FOCUS_PROXY_NAME, __scopeToast);
       return /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(
         VisuallyHidden,
         {
@@ -21545,7 +21560,7 @@
           style: { position: "fixed" },
           onFocus: (event) => {
             const prevFocusedElement = event.relatedTarget;
-            const isFocusFromOutsideViewport = !context.viewport?.contains(prevFocusedElement);
+            const isFocusFromOutsideViewport = !context2.viewport?.contains(prevFocusedElement);
             if (isFocusFromOutsideViewport) onFocusFromOutsideViewport();
           }
         }
@@ -21627,19 +21642,19 @@
         onSwipeEnd,
         ...toastProps
       } = props;
-      const context = useToastProviderContext(TOAST_NAME, __scopeToast);
+      const context2 = useToastProviderContext(TOAST_NAME, __scopeToast);
       const [node, setNode] = React39.useState(null);
       const composedRefs = useComposedRefs(forwardedRef, setNode);
       const pointerStartRef = React39.useRef(null);
       const swipeDeltaRef = React39.useRef(null);
-      const duration = durationProp || context.duration;
+      const duration = durationProp || context2.duration;
       const closeTimerStartTimeRef = React39.useRef(0);
       const closeTimerRemainingTimeRef = React39.useRef(duration);
       const closeTimerRef = React39.useRef(0);
-      const { onToastAdd, onToastRemove } = context;
+      const { onToastAdd, onToastRemove } = context2;
       const handleClose = useCallbackRef(() => {
         const isFocusInToast = node?.contains(document.activeElement);
-        if (isFocusInToast) context.viewport?.focus();
+        if (isFocusInToast) context2.viewport?.focus();
         onClose();
       });
       const startTimer = React39.useCallback(
@@ -21652,7 +21667,7 @@
         [handleClose]
       );
       React39.useEffect(() => {
-        const viewport = context.viewport;
+        const viewport = context2.viewport;
         if (viewport) {
           const handleResume = () => {
             startTimer(closeTimerRemainingTimeRef.current);
@@ -21671,10 +21686,10 @@
             viewport.removeEventListener(VIEWPORT_RESUME, handleResume);
           };
         }
-      }, [context.viewport, duration, onPause, onResume, startTimer]);
+      }, [context2.viewport, duration, onPause, onResume, startTimer]);
       React39.useEffect(() => {
-        if (open && !context.isClosePausedRef.current) startTimer(duration);
-      }, [open, duration, context.isClosePausedRef, startTimer]);
+        if (open && !context2.isClosePausedRef.current) startTimer(duration);
+      }, [open, duration, context2.isClosePausedRef, startTimer]);
       React39.useEffect(() => {
         return () => {
           window.clearTimeout(closeTimerRef.current);
@@ -21687,7 +21702,7 @@
       const announceTextContent = React39.useMemo(() => {
         return node ? getAnnounceTextContent(node) : null;
       }, [node]);
-      if (!context.viewport) return null;
+      if (!context2.viewport) return null;
       return /* @__PURE__ */ (0, import_jsx_runtime27.jsxs)(import_jsx_runtime27.Fragment, { children: [
         announceTextContent && /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(
           ToastAnnounce,
@@ -21704,15 +21719,15 @@
             {
               asChild: true,
               onEscapeKeyDown: composeEventHandlers(onEscapeKeyDown, () => {
-                if (!context.isFocusedToastEscapeKeyDownRef.current) handleClose();
-                context.isFocusedToastEscapeKeyDownRef.current = false;
+                if (!context2.isFocusedToastEscapeKeyDownRef.current) handleClose();
+                context2.isFocusedToastEscapeKeyDownRef.current = false;
               }),
               children: /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(
                 Primitive.li,
                 {
                   tabIndex: 0,
                   "data-state": open ? "open" : "closed",
-                  "data-swipe-direction": context.swipeDirection,
+                  "data-swipe-direction": context2.swipeDirection,
                   ...toastProps,
                   ref: composedRefs,
                   style: { userSelect: "none", touchAction: "none", ...props.style },
@@ -21720,7 +21735,7 @@
                     if (event.key !== "Escape") return;
                     onEscapeKeyDown?.(event.nativeEvent);
                     if (!event.nativeEvent.defaultPrevented) {
-                      context.isFocusedToastEscapeKeyDownRef.current = true;
+                      context2.isFocusedToastEscapeKeyDownRef.current = true;
                       handleClose();
                     }
                   }),
@@ -21733,8 +21748,8 @@
                     const x = event.clientX - pointerStartRef.current.x;
                     const y = event.clientY - pointerStartRef.current.y;
                     const hasSwipeMoveStarted = Boolean(swipeDeltaRef.current);
-                    const isHorizontalSwipe = ["left", "right"].includes(context.swipeDirection);
-                    const clamp4 = ["left", "up"].includes(context.swipeDirection) ? Math.min : Math.max;
+                    const isHorizontalSwipe = ["left", "right"].includes(context2.swipeDirection);
+                    const clamp4 = ["left", "up"].includes(context2.swipeDirection) ? Math.min : Math.max;
                     const clampedX = isHorizontalSwipe ? clamp4(0, x) : 0;
                     const clampedY = !isHorizontalSwipe ? clamp4(0, y) : 0;
                     const moveStartBuffer = event.pointerType === "touch" ? 10 : 2;
@@ -21745,7 +21760,7 @@
                       handleAndDispatchCustomEvent2(TOAST_SWIPE_MOVE, onSwipeMove, eventDetail, {
                         discrete: false
                       });
-                    } else if (isDeltaInDirection(delta, context.swipeDirection, moveStartBuffer)) {
+                    } else if (isDeltaInDirection(delta, context2.swipeDirection, moveStartBuffer)) {
                       swipeDeltaRef.current = delta;
                       handleAndDispatchCustomEvent2(TOAST_SWIPE_START, onSwipeStart, eventDetail, {
                         discrete: false
@@ -21764,9 +21779,9 @@
                     swipeDeltaRef.current = null;
                     pointerStartRef.current = null;
                     if (delta) {
-                      const toast = event.currentTarget;
+                      const toast2 = event.currentTarget;
                       const eventDetail = { originalEvent: event, delta };
-                      if (isDeltaInDirection(delta, context.swipeDirection, context.swipeThreshold)) {
+                      if (isDeltaInDirection(delta, context2.swipeDirection, context2.swipeThreshold)) {
                         handleAndDispatchCustomEvent2(TOAST_SWIPE_END, onSwipeEnd, eventDetail, {
                           discrete: true
                         });
@@ -21780,7 +21795,7 @@
                           }
                         );
                       }
-                      toast.addEventListener("click", (event2) => event2.preventDefault(), {
+                      toast2.addEventListener("click", (event2) => event2.preventDefault(), {
                         once: true
                       });
                     }
@@ -21789,14 +21804,14 @@
               )
             }
           ) }),
-          context.viewport
+          context2.viewport
         ) })
       ] });
     }
   );
   var ToastAnnounce = (props) => {
     const { __scopeToast, children, ...announceProps } = props;
-    const context = useToastProviderContext(TOAST_NAME, __scopeToast);
+    const context2 = useToastProviderContext(TOAST_NAME, __scopeToast);
     const [renderAnnounceText, setRenderAnnounceText] = React39.useState(false);
     const [isAnnounced, setIsAnnounced] = React39.useState(false);
     useNextFrame(() => setRenderAnnounceText(true));
@@ -21804,8 +21819,8 @@
       const timer = window.setTimeout(() => setIsAnnounced(true), 1e3);
       return () => window.clearTimeout(timer);
     }, []);
-    return isAnnounced ? null : /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(Portal, { asChild: true, container: context.announcerContainer || void 0, children: /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(VisuallyHidden, { ...announceProps, children: renderAnnounceText && /* @__PURE__ */ (0, import_jsx_runtime27.jsxs)(import_jsx_runtime27.Fragment, { children: [
-      context.label,
+    return isAnnounced ? null : /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(Portal, { asChild: true, container: context2.announcerContainer || void 0, children: /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(VisuallyHidden, { ...announceProps, children: renderAnnounceText && /* @__PURE__ */ (0, import_jsx_runtime27.jsxs)(import_jsx_runtime27.Fragment, { children: [
+      context2.label,
       " ",
       children
     ] }) }) });
@@ -22443,15 +22458,15 @@
     try {
       const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
       if (!AudioContextCtor) return false;
-      const context = new AudioContextCtor();
-      const oscillator = context.createOscillator();
-      const gain = context.createGain();
+      const context2 = new AudioContextCtor();
+      const oscillator = context2.createOscillator();
+      const gain = context2.createGain();
       gain.gain.value = notificationSnapshot().volume / 100 * 0.08;
       oscillator.frequency.value = 660;
       oscillator.connect(gain);
-      gain.connect(context.destination);
+      gain.connect(context2.destination);
       oscillator.start();
-      oscillator.stop(context.currentTime + 0.12);
+      oscillator.stop(context2.currentTime + 0.12);
       return true;
     } catch {
       return false;
@@ -22510,8 +22525,8 @@
     }
   }
   var HttpSettingsRepository = class {
-    constructor(runtime7 = new BrowserSettingsRuntimeAdapter()) {
-      __publicField(this, "runtime", runtime7);
+    constructor(runtime11 = new BrowserSettingsRuntimeAdapter()) {
+      __publicField(this, "runtime", runtime11);
     }
     async load(options = {}) {
       if (options.canManageSettings === false) {
@@ -22526,20 +22541,20 @@
         }
         throw error;
       }
-      const snapshot8 = aboutSnapshot(admin, "admin");
+      const snapshot9 = aboutSnapshot(admin, "admin");
       const origin = window.location?.origin ? `?origin=${encodeURIComponent(window.location.origin)}` : "";
       const [models, cliUpdates, connectCode] = await Promise.all([
         request("/api/models", { signal: options.signal }).catch(() => null),
         request("/api/provider-cli-updates", { signal: options.signal }).catch(() => null),
         request(`/api/app-connect-code${origin}`, { signal: options.signal }).catch(() => null)
       ]);
-      snapshot8.models = models ? normalizeModels(models) : null;
-      snapshot8.providerCliUpdates = cliUpdates;
-      snapshot8.connectCode = connectCode ? {
+      snapshot9.models = models ? normalizeModels(models) : null;
+      snapshot9.providerCliUpdates = cliUpdates;
+      snapshot9.connectCode = connectCode ? {
         code: stringValue(connectCode.code),
         url: stringValue(connectCode.url)
       } : null;
-      return snapshot8;
+      return snapshot9;
     }
     async execute(command, options = {}) {
       let result;
@@ -22943,7 +22958,7 @@
     distribution,
     currentVersion,
     repository,
-    toast
+    toast: toast2
   }) {
     const assets = ["github", "local"].map((source) => ({ source, asset: distribution[source] })).filter((entry) => entry.asset !== null);
     if (!distribution.enabled && assets.length === 0 && !currentVersion) return null;
@@ -22972,7 +22987,7 @@
                 url: asset.downloadUrl,
                 fileName: asset.fileName
               });
-              toast("\u5DF2\u5F00\u59CB\u4E0B\u8F7D", "info");
+              toast2("\u5DF2\u5F00\u59CB\u4E0B\u8F7D", "info");
             },
             children: installable ? currentVersion ? "\u4E0B\u8F7D\u5E76\u5B89\u88C5" : "\u4E0B\u8F7D" : "\u5DF2\u5B89\u88C5"
           }
@@ -22980,12 +22995,12 @@
       ] }, source);
     }) : /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("div", { className: "wand-settings-empty", children: "\u6682\u65E0\u53EF\u7528\u5B89\u88C5\u5305" }) });
   }
-  function AboutSettingsTab({ snapshot: snapshot8, repository, refresh, toast, showRestart: showRestart2 }) {
+  function AboutSettingsTab({ snapshot: snapshot9, repository, refresh, toast: toast2, showRestart: showRestart2 }) {
     const [pending, setPending] = (0, import_react7.useState)("");
     const [status, setStatus] = (0, import_react7.useState)("");
     const [tone, setTone] = (0, import_react7.useState)("info");
     const [update, setUpdate] = (0, import_react7.useState)(null);
-    const about = snapshot8.about;
+    const about = snapshot9.about;
     async function action(name, task, success) {
       setPending(name);
       setStatus("");
@@ -23002,7 +23017,7 @@
         setPending("");
       }
     }
-    const cliItems = snapshot8.providerCliUpdates?.items || [];
+    const cliItems = snapshot9.providerCliUpdates?.items || [];
     const cliUpdates = cliItems.filter((item) => item.updateAvailable && item.updateSupported);
     return /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)("section", { className: "wand-settings-panel", "aria-label": "\u5173\u4E8E Wand", children: [
       /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)("header", { className: "wand-settings-panel-heading", children: [
@@ -23034,7 +23049,7 @@
           /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("dd", { children: /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("a", { href: about.repoUrl, target: "_blank", rel: "noopener noreferrer", children: about.repoUrl }) })
         ] }) : null
       ] }) }),
-      snapshot8.access === "admin" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(import_jsx_runtime30.Fragment, { children: [
+      snapshot9.access === "admin" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(import_jsx_runtime30.Fragment, { children: [
         /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(SettingsSection, { title: "\u4FDD\u6301\u5728\u6700\u65B0\u7248\u672C", description: `\u5F53\u524D ${about.version} \xB7 ${about.updateChannel === "beta" ? "Beta \u901A\u9053" : "Stable \u901A\u9053"}`, children: [
           /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)("div", { className: "wand-settings-update-deck", children: [
             /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("span", { className: "wand-settings-update-deck-icon", "aria-hidden": "true", children: "\u21BB" }),
@@ -23067,7 +23082,7 @@
             {
               label: "\u81EA\u52A8\u66F4\u65B0 Web \u670D\u52A1",
               description: "\u68C0\u6D4B\u5230\u65B0\u7248\u672C\u540E\u81EA\u52A8\u4E0B\u8F7D\u5B89\u88C5\u5E76\u91CD\u542F\u670D\u52A1\u3002",
-              checked: snapshot8.autoUpdate.web,
+              checked: snapshot9.autoUpdate.web,
               disabled: !!pending,
               onCheckedChange: (enabled) => void action("auto-web", async () => {
                 await repository.execute({ type: "autoUpdate.set", target: "web", enabled });
@@ -23081,7 +23096,7 @@
               const result = await repository.execute({ type: "webUpdate.install" });
               setStatus(result.message);
             }, void 0), children: "\u66F4\u65B0\u6216\u91CD\u65B0\u5B89\u88C5" }),
-            snapshot8.restartRequired ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsActionButton, { pending: pending === "restart", kind: "secondary", onClick: () => void action("restart", async () => {
+            snapshot9.restartRequired ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsActionButton, { pending: pending === "restart", kind: "secondary", onClick: () => void action("restart", async () => {
               try {
                 await repository.execute({ type: "server.restart" });
               } finally {
@@ -23106,7 +23121,7 @@
             {
               label: "\u81EA\u52A8\u66F4\u65B0\u5F00\u53D1 CLI",
               description: "\u670D\u52A1\u7AEF\u5B9A\u671F\u68C0\u67E5\u5E76\u8C03\u7528\u5404 CLI \u7684\u5B98\u65B9\u66F4\u65B0\u5668\u3002",
-              checked: snapshot8.autoUpdate.cli,
+              checked: snapshot9.autoUpdate.cli,
               disabled: !!pending,
               onCheckedChange: (enabled) => void action("auto-cli", async () => {
                 await repository.execute({ type: "autoUpdate.set", target: "cli", enabled });
@@ -23130,20 +23145,20 @@
           ] })
         ] })
       ] }) : null,
-      snapshot8.platform.kind === "browser" || snapshot8.platform.kind === "android" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(DistributionSection, { kind: "apk", title: "Android App", distribution: about.androidApk, currentVersion: snapshot8.platform.kind === "android" ? snapshot8.platform.appVersion : null, repository, toast }) : null,
-      snapshot8.platform.kind === "browser" || snapshot8.platform.kind === "macos" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(DistributionSection, { kind: "dmg", title: "macOS App", distribution: about.macosDmg, currentVersion: snapshot8.platform.kind === "macos" ? snapshot8.platform.appVersion : null, repository, toast }) : null,
-      snapshot8.access === "admin" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(import_jsx_runtime30.Fragment, { children: /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(SettingsSection, { title: "App \u8FDE\u63A5\u7801", description: "\u7C98\u8D34\u6216\u626B\u7801\u540E\u53EF\u8FDE\u63A5\u5F53\u524D\u670D\u52A1\uFF1B\u4FEE\u6539\u5BC6\u7801\u540E\u4F1A\u5931\u6548\u3002", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("code", { className: "wand-settings-connect-code", "aria-label": "App \u8FDE\u63A5\u7801", children: snapshot8.connectCode?.code || "\u6682\u4E0D\u53EF\u7528" }),
+      snapshot9.platform.kind === "browser" || snapshot9.platform.kind === "android" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(DistributionSection, { kind: "apk", title: "Android App", distribution: about.androidApk, currentVersion: snapshot9.platform.kind === "android" ? snapshot9.platform.appVersion : null, repository, toast: toast2 }) : null,
+      snapshot9.platform.kind === "browser" || snapshot9.platform.kind === "macos" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(DistributionSection, { kind: "dmg", title: "macOS App", distribution: about.macosDmg, currentVersion: snapshot9.platform.kind === "macos" ? snapshot9.platform.appVersion : null, repository, toast: toast2 }) : null,
+      snapshot9.access === "admin" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(import_jsx_runtime30.Fragment, { children: /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(SettingsSection, { title: "App \u8FDE\u63A5\u7801", description: "\u7C98\u8D34\u6216\u626B\u7801\u540E\u53EF\u8FDE\u63A5\u5F53\u524D\u670D\u52A1\uFF1B\u4FEE\u6539\u5BC6\u7801\u540E\u4F1A\u5931\u6548\u3002", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("code", { className: "wand-settings-connect-code", "aria-label": "App \u8FDE\u63A5\u7801", children: snapshot9.connectCode?.code || "\u6682\u4E0D\u53EF\u7528" }),
         /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)("div", { className: "wand-settings-button-row", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(WandButton, { disabled: !snapshot8.connectCode?.code, kind: "secondary", onClick: async () => {
-            await repository.execute({ type: "clipboard.copy", text: snapshot8.connectCode.code });
-            toast("\u8FDE\u63A5\u7801\u5DF2\u590D\u5236", "success");
+          /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(WandButton, { disabled: !snapshot9.connectCode?.code, kind: "secondary", onClick: async () => {
+            await repository.execute({ type: "clipboard.copy", text: snapshot9.connectCode.code });
+            toast2("\u8FDE\u63A5\u7801\u5DF2\u590D\u5236", "success");
           }, children: "\u590D\u5236\u8FDE\u63A5\u7801" }),
-          /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(WandButton, { disabled: !snapshot8.connectCode?.code, kind: "secondary", onClick: () => settingsStore.setNested("qr"), children: "\u653E\u5927\u8FDE\u63A5\u4E8C\u7EF4\u7801" })
+          /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(WandButton, { disabled: !snapshot9.connectCode?.code, kind: "secondary", onClick: () => settingsStore.setNested("qr"), children: "\u653E\u5927\u8FDE\u63A5\u4E8C\u7EF4\u7801" })
         ] })
       ] }) }) : null,
       status ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsStatus, { tone, children: status }) : null,
-      /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(ConnectCodeDialog, { code: snapshot8.connectCode?.code || "" })
+      /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(ConnectCodeDialog, { code: snapshot9.connectCode?.code || "" })
     ] });
   }
   var MODE_OPTIONS = [
@@ -23156,8 +23171,8 @@
     { value: "native", label: "\u539F\u751F\u6A21\u5F0F" },
     { value: "managed", label: "\u6258\u7BA1\u6A21\u5F0F" }
   ];
-  function generalFromSnapshot(snapshot8) {
-    const config = snapshot8.config;
+  function generalFromSnapshot(snapshot9) {
+    const config = snapshot9.config;
     return {
       host: config.host,
       port: config.port,
@@ -23245,13 +23260,13 @@
       }
     );
   }
-  function GeneralSettingsTab({ snapshot: snapshot8, repository, refresh, toast }) {
-    const [form, setForm] = (0, import_react7.useState)(() => generalFromSnapshot(snapshot8));
+  function GeneralSettingsTab({ snapshot: snapshot9, repository, refresh, toast: toast2 }) {
+    const [form, setForm] = (0, import_react7.useState)(() => generalFromSnapshot(snapshot9));
     const [pending, setPending] = (0, import_react7.useState)(false);
     const [status, setStatus] = (0, import_react7.useState)("");
     const [tone, setTone] = (0, import_react7.useState)("info");
     const [errors, setErrors] = (0, import_react7.useState)({});
-    (0, import_react7.useEffect)(() => setForm(generalFromSnapshot(snapshot8)), [snapshot8]);
+    (0, import_react7.useEffect)(() => setForm(generalFromSnapshot(snapshot9)), [snapshot9]);
     function update(key, value) {
       setForm((current) => ({ ...current, [key]: value }));
       setErrors((current) => ({ ...current, [key]: "" }));
@@ -23274,7 +23289,7 @@
         setStatus(result.restartRequired ? "\u914D\u7F6E\u5DF2\u4FDD\u5B58\uFF1BHost\u3001\u7AEF\u53E3\u3001HTTPS \u6216 Shell \u7684\u53D8\u5316\u9700\u8981\u91CD\u542F\u670D\u52A1\u540E\u751F\u6548\u3002" : "\u57FA\u672C\u914D\u7F6E\u5DF2\u4FDD\u5B58\u3002");
         setTone(result.restartRequired ? "warning" : "success");
         await refresh();
-        toast("\u57FA\u672C\u914D\u7F6E\u5DF2\u4FDD\u5B58", "success");
+        toast2("\u57FA\u672C\u914D\u7F6E\u5DF2\u4FDD\u5B58", "success");
       } catch (cause) {
         setStatus(messageOf(cause, "\u4FDD\u5B58\u57FA\u672C\u914D\u7F6E\u5931\u8D25\u3002"));
         setTone("error");
@@ -23345,8 +23360,8 @@
       /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(EnvironmentDialog, { repository })
     ] });
   }
-  function aiFromSnapshot(snapshot8) {
-    const config = snapshot8.config;
+  function aiFromSnapshot(snapshot9) {
+    const config = snapshot9.config;
     const withClientId = (profile) => ({
       ...profile,
       id: profile.id || createSystemAiRouteId(),
@@ -23445,14 +23460,14 @@
       route.baseUrl.trim() && route.model.trim() && (route.apiKey.trim() || route.hasApiKey)
     );
   }
-  function AiSettingsTab({ snapshot: snapshot8, repository, refresh, setSnapshot, toast }) {
-    const [form, setForm] = (0, import_react7.useState)(() => aiFromSnapshot(snapshot8));
+  function AiSettingsTab({ snapshot: snapshot9, repository, refresh, setSnapshot, toast: toast2 }) {
+    const [form, setForm] = (0, import_react7.useState)(() => aiFromSnapshot(snapshot9));
     const [pending, setPending] = (0, import_react7.useState)("");
     const [status, setStatus] = (0, import_react7.useState)("");
     const [tone, setTone] = (0, import_react7.useState)("info");
     const [errors, setErrors] = (0, import_react7.useState)({});
     const [routeTests, setRouteTests] = (0, import_react7.useState)({});
-    (0, import_react7.useEffect)(() => setForm(aiFromSnapshot(snapshot8)), [snapshot8.config]);
+    (0, import_react7.useEffect)(() => setForm(aiFromSnapshot(snapshot9)), [snapshot9.config]);
     function update(key, value) {
       setForm((current) => ({ ...current, [key]: value }));
     }
@@ -23656,7 +23671,7 @@
         setStatus(result.restartRequired ? "AI \u914D\u7F6E\u5DF2\u4FDD\u5B58\uFF1B\u90E8\u5206\u90E8\u7F72\u53D8\u5316\u7B49\u5F85\u91CD\u542F\u3002" : "AI \u4E0E\u6A21\u578B\u914D\u7F6E\u5DF2\u4FDD\u5B58\u3002");
         setTone(result.restartRequired ? "warning" : "success");
         await refresh();
-        toast("AI \u4E0E\u6A21\u578B\u914D\u7F6E\u5DF2\u4FDD\u5B58", "success");
+        toast2("AI \u4E0E\u6A21\u578B\u914D\u7F6E\u5DF2\u4FDD\u5B58", "success");
       } catch (cause) {
         setStatus(messageOf(cause, "\u4FDD\u5B58 AI \u914D\u7F6E\u5931\u8D25\u3002"));
         setTone("error");
@@ -23664,7 +23679,7 @@
         setPending("");
       }
     }
-    const models = snapshot8.models;
+    const models = snapshot9.models;
     const systemAiProfiles = systemAiRoutes(form.systemAi);
     const configuredSystemAiProfiles = systemAiProfiles.filter(routeIsComplete);
     const systemAiOrder = configuredSystemAiProfiles.map((profile) => `${SYSTEM_AI_SOURCE_LABELS[profile.source]} \xB7 ${profile.model}`).join(" \u2192 ");
@@ -23848,12 +23863,12 @@
     ] });
   }
   function NotificationSettingsTab(_props) {
-    const { snapshot: snapshot8, repository, setSnapshot, toast } = _props;
-    const [preferences, setPreferences] = (0, import_react7.useState)(() => ({ ...snapshot8.notifications }));
+    const { snapshot: snapshot9, repository, setSnapshot, toast: toast2 } = _props;
+    const [preferences, setPreferences] = (0, import_react7.useState)(() => ({ ...snapshot9.notifications }));
     const [pending, setPending] = (0, import_react7.useState)("");
     const [status, setStatus] = (0, import_react7.useState)("");
     const [tone, setTone] = (0, import_react7.useState)("info");
-    (0, import_react7.useEffect)(() => setPreferences({ ...snapshot8.notifications }), [snapshot8.notifications]);
+    (0, import_react7.useEffect)(() => setPreferences({ ...snapshot9.notifications }), [snapshot9.notifications]);
     async function savePreference(value, preview = false) {
       setPending("preference");
       setStatus("");
@@ -23869,7 +23884,7 @@
         setPending("");
       }
     }
-    async function run2(name, task) {
+    async function run3(name, task) {
       setPending(name);
       setStatus("");
       try {
@@ -23939,14 +23954,14 @@
             ariaLabel: "\u7CFB\u7EDF\u901A\u77E5\u94C3\u58F0",
             value: preferences.nativeSound || preferences.nativeSounds[0].id,
             options: preferences.nativeSounds.map((sound) => ({ value: sound.id, label: sound.name })),
-            onChange: (sound) => void run2("native-sound", async () => {
+            onChange: (sound) => void run3("native-sound", async () => {
               await repository.execute({ type: "notification.nativeSound.set", sound });
               setPreferences((current) => ({ ...current, nativeSound: sound }));
               return "\u901A\u77E5\u94C3\u58F0\u5DF2\u4FDD\u5B58\u3002";
             })
           }
         ) }),
-        /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsActionButton, { pending: pending === "sound-preview", kind: "secondary", onClick: () => void run2("sound-preview", async () => {
+        /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsActionButton, { pending: pending === "sound-preview", kind: "secondary", onClick: () => void run3("sound-preview", async () => {
           await repository.execute({ type: "notification.nativeSound.preview", sound: preferences.nativeSound || preferences.nativeSounds[0].id });
           return "\u5DF2\u64AD\u653E\u94C3\u58F0\u9884\u89C8\u3002";
         }), children: "\u8BD5\u542C\u94C3\u58F0" })
@@ -23957,32 +23972,32 @@
           label: "\u542F\u7528\u89E6\u611F\u53CD\u9988",
           checked: preferences.hapticsEnabled,
           disabled: pending === "haptics",
-          onCheckedChange: (enabled) => void run2("haptics", async () => {
+          onCheckedChange: (enabled) => void run3("haptics", async () => {
             await repository.execute({ type: "notification.haptics.set", enabled });
             setPreferences((current) => ({ ...current, hapticsEnabled: enabled }));
             return enabled ? "\u89E6\u611F\u53CD\u9988\u5DF2\u542F\u7528\u3002" : "\u89E6\u611F\u53CD\u9988\u5DF2\u5173\u95ED\u3002";
           })
         }
       ) }) : null,
-      snapshot8.platform.canSetAppIcon ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsSection, { title: "\u5E94\u7528\u56FE\u6807", description: "\u5207\u6362 Wand \u7684\u684C\u9762\u56FE\u6807\uFF0C\u8FD4\u56DE\u7CFB\u7EDF\u684C\u9762\u540E\u751F\u6548\u3002", children: /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("div", { className: "wand-settings-button-row", role: "group", "aria-label": "\u5E94\u7528\u56FE\u6807", children: ["shorthair", "garfield"].map((icon) => /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(
+      snapshot9.platform.canSetAppIcon ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsSection, { title: "\u5E94\u7528\u56FE\u6807", description: "\u5207\u6362 Wand \u7684\u684C\u9762\u56FE\u6807\uFF0C\u8FD4\u56DE\u7CFB\u7EDF\u684C\u9762\u540E\u751F\u6548\u3002", children: /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("div", { className: "wand-settings-button-row", role: "group", "aria-label": "\u5E94\u7528\u56FE\u6807", children: ["shorthair", "garfield"].map((icon) => /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(
         WandButton,
         {
-          kind: snapshot8.platform.appIcon === icon ? "primary" : "secondary",
-          "aria-pressed": snapshot8.platform.appIcon === icon,
+          kind: snapshot9.platform.appIcon === icon ? "primary" : "secondary",
+          "aria-pressed": snapshot9.platform.appIcon === icon,
           onClick: async () => {
             await repository.execute({ type: "appIcon.set", icon });
             setSnapshot((current) => current ? {
               ...current,
               platform: { ...current.platform, appIcon: icon }
             } : current);
-            toast("\u56FE\u6807\u5DF2\u5207\u6362\uFF0C\u8FD4\u56DE\u684C\u9762\u540E\u751F\u6548", "success");
+            toast2("\u56FE\u6807\u5DF2\u5207\u6362\uFF0C\u8FD4\u56DE\u684C\u9762\u540E\u751F\u6548", "success");
           },
           children: icon === "shorthair" ? "\u8D5B\u535A\u864E\u599E" : "\u52E4\u52B3\u521D\u4E8C"
         },
         icon
       )) }) }) : null,
       /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsSection, { title: "\u7CFB\u7EDF\u901A\u77E5", description: `\u6388\u6743\u72B6\u6001\uFF1A${permissionLabel}`, children: /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)("div", { className: "wand-settings-button-row", children: [
-        preferences.permission !== "granted" && preferences.permission !== "unsupported" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsActionButton, { pending: pending === "permission", kind: "primary", onClick: () => void run2("permission", async () => {
+        preferences.permission !== "granted" && preferences.permission !== "unsupported" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsActionButton, { pending: pending === "permission", kind: "primary", onClick: () => void run3("permission", async () => {
           const result = await repository.execute({ type: "notification.permission.request" });
           setPreferences((current) => ({ ...current, permission: result.permission }));
           return result.permission === "granted" ? "\u7CFB\u7EDF\u901A\u77E5\u5DF2\u6388\u6743\u3002" : "\u7CFB\u7EDF\u901A\u77E5\u5C1A\u672A\u6388\u6743\u3002";
@@ -23992,19 +24007,19 @@
           {
             pending: pending === "notification-settings",
             kind: "secondary",
-            onClick: () => void run2("notification-settings", async () => {
+            onClick: () => void run3("notification-settings", async () => {
               const result = await repository.execute({ type: "notification.settings.open" });
               return result.native ? "\u5DF2\u6253\u5F00 Wand \u7684\u7CFB\u7EDF\u901A\u77E5\u8BBE\u7F6E\uFF1B\u4FEE\u6539\u540E\u8FD4\u56DE\u6B64\u9875\u5373\u53EF\u3002" : "\u8BF7\u5728\u6D4F\u89C8\u5668\u7684\u7F51\u7AD9\u6743\u9650\u8BBE\u7F6E\u4E2D\u5141\u8BB8\u901A\u77E5\uFF0C\u7136\u540E\u5237\u65B0\u9875\u9762\u3002";
             }),
-            children: snapshot8.platform.kind === "android" ? "\u6253\u5F00\u7CFB\u7EDF\u901A\u77E5\u8BBE\u7F6E" : "\u5982\u4F55\u91CD\u7F6E\u6743\u9650"
+            children: snapshot9.platform.kind === "android" ? "\u6253\u5F00\u7CFB\u7EDF\u901A\u77E5\u8BBE\u7F6E" : "\u5982\u4F55\u91CD\u7F6E\u6743\u9650"
           }
         ) : null,
-        /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsActionButton, { pending: pending === "test", kind: "secondary", onClick: () => void run2("test", async () => {
+        /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsActionButton, { pending: pending === "test", kind: "secondary", onClick: () => void run3("test", async () => {
           const result = await repository.execute({ type: "notification.test" });
-          toast("\u6D4B\u8BD5\u901A\u77E5", "info");
+          toast2("\u6D4B\u8BD5\u901A\u77E5", "info");
           return `\u63D0\u793A\u97F3\uFF1A${result.sound === "passed" ? "\u901A\u8FC7" : "\u5931\u8D25"}\uFF1B\u6C14\u6CE1\uFF1A${result.bubble === "passed" ? "\u901A\u8FC7" : "\u5DF2\u5173\u95ED"}\uFF1B\u7CFB\u7EDF\uFF1A${result.system}`;
         }), children: "\u7ACB\u5373\u6D4B\u8BD5" }),
-        /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsActionButton, { pending: pending === "delayed-test", kind: "secondary", onClick: () => void run2("delayed-test", async () => {
+        /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsActionButton, { pending: pending === "delayed-test", kind: "secondary", onClick: () => void run3("delayed-test", async () => {
           await repository.execute({ type: "notification.test", delayMs: 1e4 });
           return "10 \u79D2\u5EF6\u8FDF\u901A\u77E5\u5DF2\u53D1\u9001\u3002";
         }), children: "10 \u79D2\u540E\u53D1\u9001" })
@@ -24013,7 +24028,7 @@
     ] });
   }
   function SecuritySettingsTab(_props) {
-    const { snapshot: snapshot8, repository, refresh, toast } = _props;
+    const { snapshot: snapshot9, repository, refresh, toast: toast2 } = _props;
     const [password, setPassword] = (0, import_react7.useState)("");
     const [confirmation, setConfirmation] = (0, import_react7.useState)("");
     const [keyFile, setKeyFile] = (0, import_react7.useState)(null);
@@ -24040,7 +24055,7 @@
         setConfirmation("");
         setStatus("\u5BC6\u7801\u4FEE\u6539\u6210\u529F\uFF1B\u6240\u6709\u65E7\u767B\u5F55\u4F1A\u8BDD\u5DF2\u5931\u6548\uFF0C\u6B63\u5728\u8FD4\u56DE\u767B\u5F55\u9875\u2026");
         setTone("success");
-        toast("\u5BC6\u7801\u5DF2\u4FEE\u6539\uFF0C\u8BF7\u91CD\u65B0\u767B\u5F55", "success");
+        toast2("\u5BC6\u7801\u5DF2\u4FEE\u6539\uFF0C\u8BF7\u91CD\u65B0\u767B\u5F55", "success");
         if (result.reauthenticationRequired) {
           window.setTimeout(() => {
             settingsStore.setNested(null);
@@ -24068,7 +24083,7 @@
         setStatus(result.restartRequired ? "\u8BC1\u4E66\u5DF2\u4E0A\u4F20\uFF0C\u91CD\u542F\u670D\u52A1\u540E\u751F\u6548\u3002" : "\u8BC1\u4E66\u5DF2\u4E0A\u4F20\u3002 ");
         setTone("success");
         await refresh();
-        toast("SSL \u8BC1\u4E66\u5DF2\u4E0A\u4F20", "success");
+        toast2("SSL \u8BC1\u4E66\u5DF2\u4E0A\u4F20", "success");
       } catch (cause) {
         setStatus(messageOf(cause, "\u4E0A\u4F20\u8BC1\u4E66\u5931\u8D25\u3002"));
         setTone("error");
@@ -24098,7 +24113,7 @@
         ] }),
         /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsActionButton, { type: "submit", pending: pending === "password", kind: "primary", children: "\u4FEE\u6539\u5BC6\u7801\u5E76\u91CD\u65B0\u767B\u5F55" })
       ] }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(SettingsSection, { title: "SSL \u8BC1\u4E66", description: `\u5F53\u524D\u72B6\u6001\uFF1A${snapshot8.hasCert ? "\u5DF2\u5B89\u88C5\u8BC1\u4E66" : "\u672A\u5B89\u88C5\u8BC1\u4E66\uFF08\u4F7F\u7528\u81EA\u7B7E\u540D\u6216 HTTP\uFF09"}`, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(SettingsSection, { title: "SSL \u8BC1\u4E66", description: `\u5F53\u524D\u72B6\u6001\uFF1A${snapshot9.hasCert ? "\u5DF2\u5B89\u88C5\u8BC1\u4E66" : "\u672A\u5B89\u88C5\u8BC1\u4E66\uFF08\u4F7F\u7528\u81EA\u7B7E\u540D\u6216 HTTP\uFF09"}`, children: [
         /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)("div", { className: "wand-settings-file-grid", children: [
           /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)("label", { children: [
             /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("span", { children: "\u79C1\u94A5\u6587\u4EF6\uFF08server.key\uFF09" }),
@@ -24116,8 +24131,8 @@
       status ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(SettingsStatus, { tone, children: status }) : null
     ] });
   }
-  function PresetSettingsTab({ snapshot: snapshot8 }) {
-    const presets = snapshot8.config?.commandPresets || [];
+  function PresetSettingsTab({ snapshot: snapshot9 }) {
+    const presets = snapshot9.config?.commandPresets || [];
     return /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)("section", { className: "wand-settings-panel", "aria-label": "\u547D\u4EE4\u9884\u8BBE", children: [
       /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)("header", { className: "wand-settings-panel-heading", children: [
         /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("h2", { children: "\u547D\u4EE4\u9884\u8BBE" }),
@@ -24143,12 +24158,12 @@
     { key: "thinking", title: "\u601D\u8003\u8FC7\u7A0B", description: "\u6A21\u578B\u7684 Thinking \u5185\u5BB9" },
     { key: "toolGroup", title: "\u5DE5\u5177\u7EC4", description: "\u8FDE\u7EED\u540C\u7C7B\u5DE5\u5177\u8C03\u7528\u7684\u6298\u53E0\u7EC4" }
   ];
-  function DisplaySettingsTab({ snapshot: snapshot8, repository, refresh, toast }) {
-    const [value, setValue] = (0, import_react7.useState)(() => ({ ...snapshot8.config.cardDefaults }));
+  function DisplaySettingsTab({ snapshot: snapshot9, repository, refresh, toast: toast2 }) {
+    const [value, setValue] = (0, import_react7.useState)(() => ({ ...snapshot9.config.cardDefaults }));
     const [pending, setPending] = (0, import_react7.useState)(false);
     const [status, setStatus] = (0, import_react7.useState)("");
     const [tone, setTone] = (0, import_react7.useState)("info");
-    (0, import_react7.useEffect)(() => setValue({ ...snapshot8.config.cardDefaults }), [snapshot8]);
+    (0, import_react7.useEffect)(() => setValue({ ...snapshot9.config.cardDefaults }), [snapshot9]);
     async function save() {
       setPending(true);
       setStatus("");
@@ -24157,7 +24172,7 @@
         setStatus("\u663E\u793A\u8BBE\u7F6E\u5DF2\u4FDD\u5B58\uFF0C\u5E76\u4F1A\u7ACB\u5373\u5E94\u7528\u4E8E\u4E4B\u540E\u6E32\u67D3\u7684\u5361\u7247\u3002");
         setTone("success");
         await refresh();
-        toast("\u663E\u793A\u8BBE\u7F6E\u5DF2\u4FDD\u5B58", "success");
+        toast2("\u663E\u793A\u8BBE\u7F6E\u5DF2\u4FDD\u5B58", "success");
       } catch (cause) {
         setStatus(messageOf(cause, "\u4FDD\u5B58\u663E\u793A\u8BBE\u7F6E\u5931\u8D25\u3002"));
         setTone("error");
@@ -24248,8 +24263,8 @@
     };
     return /* @__PURE__ */ (0, import_jsx_runtime31.jsx)("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.8", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true", children: paths[tab] });
   }
-  function SettingsOverview({ snapshot: snapshot8 }) {
-    const version = snapshot8.platform.appVersion || snapshot8.about.version || "\u672A\u77E5\u7248\u672C";
+  function SettingsOverview({ snapshot: snapshot9 }) {
+    const version = snapshot9.platform.appVersion || snapshot9.about.version || "\u672A\u77E5\u7248\u672C";
     return /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)("section", { className: "wand-settings-overview", "aria-label": "\u5F53\u524D\u8BBE\u7F6E\u6982\u89C8", children: [
       /* @__PURE__ */ (0, import_jsx_runtime31.jsx)("span", { className: "wand-settings-overview-mark", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(SettingsTabIcon, { tab: "general" }) }),
       /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)("div", { className: "wand-settings-overview-copy", children: [
@@ -24258,9 +24273,9 @@
           /* @__PURE__ */ (0, import_jsx_runtime31.jsx)("span", { children: "\u8FDE\u63A5\u3001\u8BBE\u5907\u548C\u5DE5\u4F5C\u6D41\u504F\u597D\u90FD\u5728\u8FD9\u91CC\u8C03\u6574\u3002" })
         ] }),
         /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)("div", { className: "wand-settings-overview-pills", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(WandBadge, { tone: "success", children: snapshot8.access === "admin" ? "\u7BA1\u7406\u5458\u8FDE\u63A5" : "App \u8FDE\u63A5" }),
-          /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(WandBadge, { tone: snapshot8.about.updateChannel === "beta" ? "warning" : "info", children: snapshot8.about.updateChannel === "beta" ? "Beta \u901A\u9053" : "Stable \u901A\u9053" }),
-          /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(WandBadge, { tone: "accent", children: PLATFORM_LABELS[snapshot8.platform.kind] })
+          /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(WandBadge, { tone: "success", children: snapshot9.access === "admin" ? "\u7BA1\u7406\u5458\u8FDE\u63A5" : "App \u8FDE\u63A5" }),
+          /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(WandBadge, { tone: snapshot9.about.updateChannel === "beta" ? "warning" : "info", children: snapshot9.about.updateChannel === "beta" ? "Beta \u901A\u9053" : "Stable \u901A\u9053" }),
+          /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(WandBadge, { tone: "accent", children: PLATFORM_LABELS[snapshot9.platform.kind] })
         ] })
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)("code", { children: [
@@ -24305,10 +24320,10 @@
       setError("");
       try {
         await repository.execute({ type: "admin.login", password });
-        const snapshot8 = await repository.load();
-        if (snapshot8.access !== "admin") throw new Error("\u767B\u5F55\u6210\u529F\uFF0C\u4F46\u5F53\u524D\u4F1A\u8BDD\u4ECD\u6CA1\u6709\u7BA1\u7406\u6743\u9650\u3002");
+        const snapshot9 = await repository.load();
+        if (snapshot9.access !== "admin") throw new Error("\u767B\u5F55\u6210\u529F\uFF0C\u4F46\u5F53\u524D\u4F1A\u8BDD\u4ECD\u6CA1\u6709\u7BA1\u7406\u6743\u9650\u3002");
         setPassword("");
-        onAuthenticated(snapshot8);
+        onAuthenticated(snapshot9);
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : "\u7BA1\u7406\u5458\u767B\u5F55\u5931\u8D25\u3002");
       } finally {
@@ -24363,7 +24378,7 @@
       settingsStore.getSnapshot,
       settingsStore.getSnapshot
     );
-    const [snapshot8, setSnapshot] = (0, import_react8.useState)(null);
+    const [snapshot9, setSnapshot] = (0, import_react8.useState)(null);
     const [loading, setLoading] = (0, import_react8.useState)(false);
     const [loadError, setLoadError] = (0, import_react8.useState)("");
     const load = (0, import_react8.useCallback)(async (signal, quiet = false) => {
@@ -24385,12 +24400,12 @@
       return () => abort.abort();
     }, [controller.open, load]);
     const refresh = (0, import_react8.useCallback)(async () => load(void 0, true), [load]);
-    const toast = (0, import_react8.useCallback)((message, tone = "info") => {
+    const toast2 = (0, import_react8.useCallback)((message, tone = "info") => {
       wandOverlay.toast(message, { tone });
     }, []);
     const tabs = (0, import_react8.useMemo)(() => {
-      if (!snapshot8) return [];
-      const props = { snapshot: snapshot8, repository, refresh, setSnapshot, toast, showRestart: showRestart2 };
+      if (!snapshot9) return [];
+      const props = { snapshot: snapshot9, repository, refresh, setSnapshot, toast: toast2, showRestart: showRestart2 };
       const contentByTab = {
         general: /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(GeneralSettingsTab, { ...props }),
         ai: /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(AiSettingsTab, { ...props }),
@@ -24400,7 +24415,7 @@
         presets: /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(PresetSettingsTab, { ...props }),
         about: /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(AboutSettingsTab, { ...props })
       };
-      const order = snapshot8.access === "admin" ? ADMIN_TAB_ORDER : CONNECTED_APP_TAB_ORDER;
+      const order = snapshot9.access === "admin" ? ADMIN_TAB_ORDER : CONNECTED_APP_TAB_ORDER;
       return order.map((value) => ({
         value,
         label: /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)("span", { className: "wand-settings-tab-label", children: [
@@ -24412,8 +24427,8 @@
         ] }),
         content: contentByTab[value]
       }));
-    }, [refresh, repository, showRestart2, snapshot8, toast]);
-    const selectedTab = snapshot8?.access === "admin" ? controller.tab : controller.tab === "about" ? "about" : "notifications";
+    }, [refresh, repository, showRestart2, snapshot9, toast2]);
+    const selectedTab = snapshot9?.access === "admin" ? controller.tab : controller.tab === "about" ? "about" : "notifications";
     return /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(
       WandDialogSurface,
       {
@@ -24433,9 +24448,9 @@
         children: loading ? /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(SettingsLoading, {}) : loadError ? /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)("div", { className: "wand-settings-load-error", role: "alert", children: [
           /* @__PURE__ */ (0, import_jsx_runtime31.jsx)("p", { children: loadError }),
           /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(WandButton, { kind: "primary", onClick: () => void load(), children: "\u91CD\u8BD5\u52A0\u8F7D\u8BBE\u7F6E" })
-        ] }) : snapshot8 ? /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)(import_jsx_runtime31.Fragment, { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(SettingsOverview, { snapshot: snapshot8 }),
-          snapshot8.access === "read-only" ? /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(
+        ] }) : snapshot9 ? /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)(import_jsx_runtime31.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(SettingsOverview, { snapshot: snapshot9 }),
+          snapshot9.access === "read-only" ? /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(
             ConnectedAppAccess,
             {
               repository,
@@ -24822,8 +24837,8 @@
   function ptyCommand(provider) {
     return provider === "qoder" ? "qodercli" : provider;
   }
-  function buildCreateRequest(form, defaults, context, dimensions = {}) {
-    const cwd = form.cwd.trim() || context.effectiveCwd.trim() || defaults.defaultCwd;
+  function buildCreateRequest(form, defaults, context2, dimensions = {}) {
+    const cwd = form.cwd.trim() || context2.effectiveCwd.trim() || defaults.defaultCwd;
     const terminalDimensions = {
       cols: Number.isFinite(dimensions.cols) && (dimensions.cols ?? 0) > 0 ? dimensions.cols : void 0,
       rows: Number.isFinite(dimensions.rows) && (dimensions.rows ?? 0) > 0 ? dimensions.rows : void 0
@@ -24852,8 +24867,8 @@
         command: ptyCommand(form.provider)
       };
     }
-    const model = context.selectedModels?.[form.provider]?.trim();
-    const thinkingEffort = context.thinkingEffort?.trim();
+    const model = context2.selectedModels?.[form.provider]?.trim();
+    const thinkingEffort = context2.thinkingEffort?.trim();
     return {
       ...base,
       kind: "structured",
@@ -25062,7 +25077,7 @@
     (0, import_react10.useEffect)(() => {
       if (!controller.open) return;
       const abort = new AbortController();
-      const runtime7 = newSessionStore.getRuntime();
+      const runtime11 = newSessionStore.getRuntime();
       setLoading(true);
       setSubmitting(false);
       setError("");
@@ -25073,7 +25088,7 @@
       setAdvancedOpen(false);
       void repository.load({ signal: abort.signal }).then((loaded) => {
         if (abort.signal.aborted) return;
-        const context = runtime7?.getContext();
+        const context2 = runtime11?.getContext();
         setDefaults(loaded);
         setForm({
           provider: loaded.config.defaultProvider,
@@ -25086,7 +25101,7 @@
           cwd: controller.initialCwd,
           worktreeEnabled: false
         });
-        if (!context) setError("\u65B0\u5EFA\u4F1A\u8BDD\u8FD0\u884C\u73AF\u5883\u5C1A\u672A\u5C31\u7EEA\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u540E\u91CD\u8BD5\u3002");
+        if (!context2) setError("\u65B0\u5EFA\u4F1A\u8BDD\u8FD0\u884C\u73AF\u5883\u5C1A\u672A\u5C31\u7EEA\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u540E\u91CD\u8BD5\u3002");
       }).catch((loadError) => {
         if (!abort.signal.aborted) setError(presentError(loadError, "\u65E0\u6CD5\u52A0\u8F7D\u65B0\u5EFA\u4F1A\u8BDD\u914D\u7F6E\u3002"));
       }).finally(() => {
@@ -25148,8 +25163,8 @@
     async function submit(event) {
       event.preventDefault();
       if (!form || !defaults || submitting) return;
-      const runtime7 = newSessionStore.getRuntime();
-      if (!runtime7) {
+      const runtime11 = newSessionStore.getRuntime();
+      if (!runtime11) {
         setError("\u65B0\u5EFA\u4F1A\u8BDD\u8FD0\u884C\u73AF\u5883\u5C1A\u672A\u5C31\u7EEA\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u540E\u91CD\u8BD5\u3002");
         return;
       }
@@ -25157,8 +25172,8 @@
       setSubmitting(true);
       setError("");
       try {
-        const dimensions = await runtime7.prepareCreate(form.kind);
-        const request2 = buildCreateRequest(form, defaults.config, runtime7.getContext(), dimensions);
+        const dimensions = await runtime11.prepareCreate(form.kind);
+        const request2 = buildCreateRequest(form, defaults.config, runtime11.getContext(), dimensions);
         void repository.savePreferences({
           ...request2.kind === "shell" ? {} : {
             defaultProvider: request2.provider,
@@ -25167,7 +25182,7 @@
           }
         }).catch((saveError) => console.warn("[wand] Failed to persist new-session defaults", saveError));
         const created = await repository.create(request2);
-        await runtime7.completeCreate(request2, created);
+        await runtime11.completeCreate(request2, created);
         newSessionController.close();
       } catch (createError) {
         setError(presentError(createError, creationFallback(form.provider, form.kind)));
@@ -25800,8 +25815,8 @@
     revision: 0
   };
   var listeners5 = /* @__PURE__ */ new Set();
-  function publish5(open, context) {
-    snapshot5 = { open, dismissable: true, context, revision: snapshot5.revision + 1 };
+  function publish5(open, context2) {
+    snapshot5 = { open, dismissable: true, context: context2, revision: snapshot5.revision + 1 };
     for (const listener of listeners5) listener();
   }
   function publishDismissable3(dismissable) {
@@ -25810,8 +25825,8 @@
     for (const listener of listeners5) listener();
   }
   var quickCommitController = {
-    open(context) {
-      const sessionId = context.sessionId.trim();
+    open(context2) {
+      const sessionId = context2.sessionId.trim();
       if (!runtime3 || !sessionId) return false;
       if (snapshot5.open && snapshot5.context?.sessionId === sessionId) return true;
       const nextContext = { sessionId };
@@ -25821,9 +25836,9 @@
     },
     close() {
       if (!snapshot5.open || !snapshot5.context) return;
-      const context = snapshot5.context;
+      const context2 = snapshot5.context;
       publish5(false, null);
-      runtime3?.onClose(context);
+      runtime3?.onClose(context2);
     },
     closeIfOpen() {
       if (!snapshot5.open || !snapshot5.dismissable) return false;
@@ -26194,9 +26209,9 @@
     const [pushError, setPushError] = (0, import_react12.useState)("");
     const generationAbort = (0, import_react12.useRef)(null);
     const messageInput = (0, import_react12.useRef)(null);
-    const context = controller.context;
+    const context2 = controller.context;
     (0, import_react12.useEffect)(() => {
-      if (!controller.open || !context) return;
+      if (!controller.open || !context2) return;
       const abort = new AbortController();
       generationAbort.current?.abort();
       generationAbort.current = null;
@@ -26209,7 +26224,7 @@
       setGenerating(false);
       setError("");
       setPushError("");
-      void repository.loadStatus(context.sessionId, { signal: abort.signal }).then((loaded) => {
+      void repository.loadStatus(context2.sessionId, { signal: abort.signal }).then((loaded) => {
         if (abort.signal.aborted) return;
         setStatus(loaded);
         if (!loaded.isGit) setError(loaded.error || "\u5F53\u524D\u76EE\u5F55\u4E0D\u662F Git \u4ED3\u5E93\u3002");
@@ -26223,7 +26238,7 @@
         generationAbort.current?.abort();
         generationAbort.current = null;
       };
-    }, [controller.open, controller.revision, context?.sessionId, repository]);
+    }, [controller.open, controller.revision, context2?.sessionId, repository]);
     (0, import_react12.useEffect)(() => {
       if (!controller.open || loading || !status || outcome) return;
       const frame = window.requestAnimationFrame(() => messageInput.current?.focus());
@@ -26241,14 +26256,14 @@
       }
     }
     async function generateSuggestion() {
-      if (!context || generating || submitting) return;
+      if (!context2 || generating || submitting) return;
       generationAbort.current?.abort();
       const abort = new AbortController();
       generationAbort.current = abort;
       setGenerating(true);
       setError("");
       try {
-        const suggestion = await repository.generate(context.sessionId, { signal: abort.signal });
+        const suggestion = await repository.generate(context2.sessionId, { signal: abort.signal });
         if (abort.signal.aborted) return;
         setForm((current) => ({
           message: current.message.trim() ? current.message : suggestion.message,
@@ -26265,8 +26280,8 @@
     }
     async function submit(event) {
       event?.preventDefault();
-      if (!context || !status || !canCommit) return;
-      const operationSessionId = context.sessionId;
+      if (!context2 || !status || !canCommit) return;
+      const operationSessionId = context2.sessionId;
       const operationRevision = quickCommitStore.getSnapshot().revision;
       const ownsCurrentSurface = () => quickCommitController.isCurrentLifecycle(operationRevision, operationSessionId);
       setSubmitting(true);
@@ -26312,8 +26327,8 @@
       }
     }
     async function pushAndClose() {
-      if (!context || !outcome || pushing) return;
-      const operationSessionId = context.sessionId;
+      if (!context2 || !outcome || pushing) return;
+      const operationSessionId = context2.sessionId;
       const operationRevision = quickCommitStore.getSnapshot().revision;
       const ownsCurrentSurface = () => quickCommitController.isCurrentLifecycle(operationRevision, operationSessionId);
       setPushing(true);
@@ -26515,8 +26530,8 @@
     revision: 0
   };
   var listeners6 = /* @__PURE__ */ new Set();
-  function publish6(open, context) {
-    snapshot6 = { open, dismissable: true, context, revision: snapshot6.revision + 1 };
+  function publish6(open, context2) {
+    snapshot6 = { open, dismissable: true, context: context2, revision: snapshot6.revision + 1 };
     for (const listener of listeners6) listener();
   }
   function publishDismissable4(dismissable) {
@@ -26525,10 +26540,10 @@
     for (const listener of listeners6) listener();
   }
   var worktreeMergeController = {
-    open(context) {
-      const sessionId = context.sessionId.trim();
+    open(context2) {
+      const sessionId = context2.sessionId.trim();
       if (!sessionId) return false;
-      const nextContext = { ...context, sessionId };
+      const nextContext = { ...context2, sessionId };
       if (snapshot6.open && snapshot6.context?.sessionId === sessionId && snapshot6.context.intent === nextContext.intent) return true;
       runtime4?.onOpen(nextContext);
       publish6(true, nextContext);
@@ -26536,9 +26551,9 @@
     },
     close() {
       if (!snapshot6.open || !snapshot6.context) return;
-      const context = snapshot6.context;
+      const context2 = snapshot6.context;
       publish6(false, null);
-      runtime4?.onClose(context);
+      runtime4?.onClose(context2);
     },
     closeIfOpen() {
       if (!snapshot6.open || !snapshot6.dismissable) return false;
@@ -26579,24 +26594,24 @@
   }
 
   // src/web-ui/react/worktree-merge/model.ts
-  function worktreeMergeAvailability(context) {
-    if (!context.sessionId.trim()) {
+  function worktreeMergeAvailability(context2) {
+    if (!context2.sessionId.trim()) {
       return { allowed: false, reason: "\u672A\u627E\u5230\u5BF9\u5E94\u4F1A\u8BDD\u3002" };
     }
-    if (context.sessionStatus === "running") {
+    if (context2.sessionStatus === "running") {
       return { allowed: false, reason: "\u4F1A\u8BDD\u4ECD\u5728\u8FD0\u884C\uFF0C\u8BF7\u7ED3\u675F\u540E\u518D\u5408\u5E76\u6216\u6E05\u7406\u3002" };
     }
-    if (context.mergeStatus === "merging") {
+    if (context2.mergeStatus === "merging") {
       return { allowed: false, reason: "Worktree \u6B63\u5728\u5408\u5E76\uFF0C\u8BF7\u7B49\u5F85\u5F53\u524D\u64CD\u4F5C\u5B8C\u6210\u3002" };
     }
-    if (context.intent === "cleanup") {
-      return context.cleanupPending === true ? { allowed: true, reason: "" } : { allowed: false, reason: "\u5F53\u524D worktree \u65E0\u9700\u8865\u507F\u6E05\u7406\u3002" };
+    if (context2.intent === "cleanup") {
+      return context2.cleanupPending === true ? { allowed: true, reason: "" } : { allowed: false, reason: "\u5F53\u524D worktree \u65E0\u9700\u8865\u507F\u6E05\u7406\u3002" };
     }
-    if (!context.sourceBranch?.trim() || !context.worktreePath?.trim()) {
+    if (!context2.sourceBranch?.trim() || !context2.worktreePath?.trim()) {
       return { allowed: false, reason: "\u8BE5\u4F1A\u8BDD\u6CA1\u6709\u53EF\u5408\u5E76\u7684 worktree \u4FE1\u606F\u3002" };
     }
-    if (context.mergeStatus === "merged") {
-      return context.cleanupPending ? { allowed: false, reason: "\u5206\u652F\u5DF2\u7ECF\u5408\u5E76\uFF0C\u8BF7\u6539\u4E3A\u91CD\u8BD5 worktree \u6E05\u7406\u3002" } : { allowed: false, reason: "\u8BE5 worktree \u5DF2\u5B8C\u6210\u5408\u5E76\u548C\u6E05\u7406\u3002" };
+    if (context2.mergeStatus === "merged") {
+      return context2.cleanupPending ? { allowed: false, reason: "\u5206\u652F\u5DF2\u7ECF\u5408\u5E76\uFF0C\u8BF7\u6539\u4E3A\u91CD\u8BD5 worktree \u6E05\u7406\u3002" } : { allowed: false, reason: "\u8BE5 worktree \u5DF2\u5B8C\u6210\u5408\u5E76\u548C\u6E05\u7406\u3002" };
     }
     return { allowed: true, reason: "" };
   }
@@ -26795,10 +26810,10 @@
       worktreeMergeStore.getSnapshot,
       worktreeMergeStore.getSnapshot
     );
-    const context = controller.context;
+    const context2 = controller.context;
     const availability = (0, import_react13.useMemo)(
-      () => context ? worktreeMergeAvailability(context) : { allowed: false, reason: "" },
-      [context]
+      () => context2 ? worktreeMergeAvailability(context2) : { allowed: false, reason: "" },
+      [context2]
     );
     const [inspection, setInspection] = (0, import_react13.useState)(null);
     const [mergeResult, setMergeResult] = (0, import_react13.useState)(null);
@@ -26807,21 +26822,21 @@
     const [error, setError] = (0, import_react13.useState)("");
     const cancelButton = (0, import_react13.useRef)(null);
     (0, import_react13.useEffect)(() => {
-      if (!controller.open || !context) return;
+      if (!controller.open || !context2) return;
       const abort = new AbortController();
       setInspection(null);
       setMergeResult(null);
       setSubmitting(false);
       setError("");
-      if (!availability.allowed || context.intent === "cleanup") {
+      if (!availability.allowed || context2.intent === "cleanup") {
         setLoading(false);
         return () => abort.abort();
       }
       setLoading(true);
-      void repository.inspect(context.sessionId, { signal: abort.signal }).then((result) => {
+      void repository.inspect(context2.sessionId, { signal: abort.signal }).then((result) => {
         if (!abort.signal.aborted) {
           setInspection(result);
-          worktreeMergeStore.getRuntime()?.onRepositoryChanged(context.sessionId);
+          worktreeMergeStore.getRuntime()?.onRepositoryChanged(context2.sessionId);
         }
       }).catch((inspectError) => {
         if (!abort.signal.aborted) {
@@ -26831,7 +26846,7 @@
         if (!abort.signal.aborted) setLoading(false);
       });
       return () => abort.abort();
-    }, [availability.allowed, context?.intent, context?.sessionId, controller.open, controller.revision, repository]);
+    }, [availability.allowed, context2?.intent, context2?.sessionId, controller.open, controller.revision, repository]);
     (0, import_react13.useEffect)(() => {
       if (!controller.open || loading) return;
       const frame = window.requestAnimationFrame(() => cancelButton.current?.focus());
@@ -26841,21 +26856,21 @@
       worktreeMergeStore.getRuntime()?.onRepositoryChanged(sessionId);
     }
     async function confirmMerge() {
-      if (!context || submitting || !canConfirmWorktreeMerge(inspection)) return;
+      if (!context2 || submitting || !canConfirmWorktreeMerge(inspection)) return;
       worktreeMergeController.setDismissable(false);
       setSubmitting(true);
       setError("");
       try {
-        const result = await repository.merge(context.sessionId);
+        const result = await repository.merge(context2.sessionId);
         setMergeResult(result);
-        notifyChanged(context.sessionId);
+        notifyChanged(context2.sessionId);
         const message = worktreeMergeResultMessage(result);
         worktreeMergeStore.getRuntime()?.toast(message, result.cleanupDone ? "success" : "info");
         if (result.cleanupDone) worktreeMergeController.close();
       } catch (mergeError) {
         if (mergeError instanceof WorktreeMergeRepositoryError && mergeError.result) {
           setMergeResult(mergeError.result);
-          notifyChanged(context.sessionId);
+          notifyChanged(context2.sessionId);
         }
         setError(presentError4(mergeError, "\u65E0\u6CD5\u5408\u5E76 worktree\u3002"));
       } finally {
@@ -26864,14 +26879,14 @@
       }
     }
     async function confirmCleanup() {
-      if (!context || submitting) return;
+      if (!context2 || submitting) return;
       worktreeMergeController.setDismissable(false);
       setSubmitting(true);
       setError("");
       try {
-        const result = await repository.cleanup(context.sessionId);
+        const result = await repository.cleanup(context2.sessionId);
         if (!result.ok) throw new Error("\u65E0\u6CD5\u6E05\u7406 worktree\u3002");
-        notifyChanged(context.sessionId);
+        notifyChanged(context2.sessionId);
         worktreeMergeStore.getRuntime()?.toast("\u5DF2\u5B8C\u6210 worktree \u6E05\u7406\u3002", "success");
         worktreeMergeController.close();
       } catch (cleanupError) {
@@ -26881,7 +26896,7 @@
         setSubmitting(false);
       }
     }
-    const cleanupRequired = context?.intent === "cleanup" || mergeResult != null && mergeResult.cleanupDone === false && !!mergeResult.mergeCommit;
+    const cleanupRequired = context2?.intent === "cleanup" || mergeResult != null && mergeResult.cleanupDone === false && !!mergeResult.mergeCommit;
     const mergeAllowed = availability.allowed && canConfirmWorktreeMerge(inspection);
     const title = cleanupRequired ? "\u6E05\u7406 Worktree" : "\u5408\u5E76 Worktree";
     const description = cleanupRequired ? "\u5B8C\u6210\u5DF2\u5408\u5E76\u5206\u652F\u9057\u7559\u7684 worktree \u6E05\u7406\u3002" : "\u68C0\u67E5\u5F53\u524D\u4EFB\u52A1\u5206\u652F\u5E76\u5B89\u5168\u5408\u5E76\u5230\u76EE\u6807\u5206\u652F\u3002";
@@ -26903,19 +26918,19 @@
         dismissable: !submitting,
         children: /* @__PURE__ */ (0, import_jsx_runtime36.jsxs)("div", { className: "wand-worktree-body", children: [
           /* @__PURE__ */ (0, import_jsx_runtime36.jsxs)("div", { className: "wand-worktree-content", "aria-busy": loading || submitting, children: [
-            context ? /* @__PURE__ */ (0, import_jsx_runtime36.jsxs)(import_jsx_runtime36.Fragment, { children: [
+            context2 ? /* @__PURE__ */ (0, import_jsx_runtime36.jsxs)(import_jsx_runtime36.Fragment, { children: [
               /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(
                 MergeDetail,
                 {
                   label: "\u6765\u6E90\u5206\u652F",
-                  value: inspection?.sourceBranch || context.sourceBranch || "-"
+                  value: inspection?.sourceBranch || context2.sourceBranch || "-"
                 }
               ),
               /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(
                 MergeDetail,
                 {
                   label: "\u5DE5\u4F5C\u76EE\u5F55",
-                  value: inspection?.worktreePath || context.worktreePath || "-"
+                  value: inspection?.worktreePath || context2.worktreePath || "-"
                 }
               )
             ] }) : null,
@@ -26924,7 +26939,7 @@
                 MergeDetail,
                 {
                   label: "\u76EE\u6807\u5206\u652F",
-                  value: mergeResult?.targetBranch || context?.targetBranch || "\u4E3B\u5206\u652F"
+                  value: mergeResult?.targetBranch || context2?.targetBranch || "\u4E3B\u5206\u652F"
                 }
               ),
               mergeResult?.mergeCommit ? /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(MergeDetail, { label: "\u5408\u5E76\u63D0\u4EA4", value: mergeResult.mergeCommit.slice(0, 12) }) : null,
@@ -26943,7 +26958,7 @@
                 children: availability.allowed ? "\u53D6\u6D88" : "\u5173\u95ED"
               }
             ),
-            cleanupRequired && availability.allowed ? /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(WandButton, { kind: "primary", disabled: submitting, onClick: () => void confirmCleanup(), children: submitting ? "\u6E05\u7406\u4E2D\u2026" : "\u91CD\u8BD5\u6E05\u7406" }) : context?.intent === "merge" && availability.allowed ? /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(
+            cleanupRequired && availability.allowed ? /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(WandButton, { kind: "primary", disabled: submitting, onClick: () => void confirmCleanup(), children: submitting ? "\u6E05\u7406\u4E2D\u2026" : "\u91CD\u8BD5\u6E05\u7406" }) : context2?.intent === "merge" && availability.allowed ? /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(
               WandButton,
               {
                 kind: "primary",
@@ -26980,39 +26995,39 @@
       currentVersion
     };
   }
-  function waitingStatus(snapshot8) {
-    if (snapshot8.lastError) {
-      return `\u670D\u52A1\u6682\u4E0D\u53EF\u7528\uFF0C\u6B63\u5728\u7EE7\u7EED\u7B49\u5F85\uFF08${snapshot8.attempts}/${snapshot8.maxAttempts}\uFF09\u2026`;
+  function waitingStatus(snapshot9) {
+    if (snapshot9.lastError) {
+      return `\u670D\u52A1\u6682\u4E0D\u53EF\u7528\uFF0C\u6B63\u5728\u7EE7\u7EED\u7B49\u5F85\uFF08${snapshot9.attempts}/${snapshot9.maxAttempts}\uFF09\u2026`;
     }
-    if (snapshot8.attempts === 0) {
-      return snapshot8.mode === "auto-update" ? "\u6B63\u5728\u7B49\u5F85\u66F4\u65B0\u5B8C\u6210\u5E76\u91CD\u542F\u670D\u52A1\u2026" : "\u6B63\u5728\u7B49\u5F85\u670D\u52A1\u91CD\u65B0\u542F\u52A8\u2026";
+    if (snapshot9.attempts === 0) {
+      return snapshot9.mode === "auto-update" ? "\u6B63\u5728\u7B49\u5F85\u66F4\u65B0\u5B8C\u6210\u5E76\u91CD\u542F\u670D\u52A1\u2026" : "\u6B63\u5728\u7B49\u5F85\u670D\u52A1\u91CD\u65B0\u542F\u52A8\u2026";
     }
-    if (!snapshot8.readiness.instanceReady && !snapshot8.readiness.versionReady) {
-      return `\u6B63\u5728\u7B49\u5F85\u65B0\u670D\u52A1\u5B9E\u4F8B\u548C\u76EE\u6807\u7248\u672C\uFF08${snapshot8.attempts}/${snapshot8.maxAttempts}\uFF09\u2026`;
+    if (!snapshot9.readiness.instanceReady && !snapshot9.readiness.versionReady) {
+      return `\u6B63\u5728\u7B49\u5F85\u65B0\u670D\u52A1\u5B9E\u4F8B\u548C\u76EE\u6807\u7248\u672C\uFF08${snapshot9.attempts}/${snapshot9.maxAttempts}\uFF09\u2026`;
     }
-    if (!snapshot8.readiness.instanceReady) {
-      return `\u76EE\u6807\u7248\u672C\u5DF2\u5C31\u7EEA\uFF0C\u6B63\u5728\u7B49\u5F85\u65B0\u670D\u52A1\u5B9E\u4F8B\uFF08${snapshot8.attempts}/${snapshot8.maxAttempts}\uFF09\u2026`;
+    if (!snapshot9.readiness.instanceReady) {
+      return `\u76EE\u6807\u7248\u672C\u5DF2\u5C31\u7EEA\uFF0C\u6B63\u5728\u7B49\u5F85\u65B0\u670D\u52A1\u5B9E\u4F8B\uFF08${snapshot9.attempts}/${snapshot9.maxAttempts}\uFF09\u2026`;
     }
-    if (!snapshot8.readiness.versionReady) {
-      const expected = snapshot8.target.expectedVersion || snapshot8.latestVersion || "\u76EE\u6807\u7248\u672C";
-      return `\u65B0\u670D\u52A1\u5DF2\u542F\u52A8\uFF0C\u6B63\u5728\u7B49\u5F85\u7248\u672C ${expected}\uFF08${snapshot8.attempts}/${snapshot8.maxAttempts}\uFF09\u2026`;
+    if (!snapshot9.readiness.versionReady) {
+      const expected = snapshot9.target.expectedVersion || snapshot9.latestVersion || "\u76EE\u6807\u7248\u672C";
+      return `\u65B0\u670D\u52A1\u5DF2\u542F\u52A8\uFF0C\u6B63\u5728\u7B49\u5F85\u7248\u672C ${expected}\uFF08${snapshot9.attempts}/${snapshot9.maxAttempts}\uFF09\u2026`;
     }
-    return `\u6B63\u5728\u7B49\u5F85\u670D\u52A1\u5C31\u7EEA\uFF08${snapshot8.attempts}/${snapshot8.maxAttempts}\uFF09\u2026`;
+    return `\u6B63\u5728\u7B49\u5F85\u670D\u52A1\u5C31\u7EEA\uFF08${snapshot9.attempts}/${snapshot9.maxAttempts}\uFF09\u2026`;
   }
-  function restartOverlayPresentation(snapshot8) {
-    const isAutoUpdate = snapshot8.mode === "auto-update";
-    const title = isAutoUpdate ? "\u81EA\u52A8\u66F4\u65B0\u4E2D" : snapshot8.target.expectedVersion ? "\u6B63\u5728\u5B8C\u6210\u66F4\u65B0" : "\u670D\u52A1\u6B63\u5728\u91CD\u542F";
-    const description = isAutoUpdate ? `${snapshot8.currentVersion || "-"} \u2192 ${snapshot8.latestVersion || "-"}
-\u6B63\u5728\u4E0B\u8F7D\u5E76\u5B89\u88C5\u65B0\u7248\u672C\uFF0C\u5B8C\u6210\u540E\u5C06\u81EA\u52A8\u91CD\u542F\u3002` : snapshot8.target.expectedVersion ? "\u5B89\u88C5\u5B8C\u6210\u5E76\u542F\u52A8\u65B0\u7248\u672C\u540E\u5C06\u81EA\u52A8\u5237\u65B0\u9875\u9762\u3002" : "\u670D\u52A1\u6062\u590D\u540E\u5C06\u81EA\u52A8\u5237\u65B0\u9875\u9762\u3002";
+  function restartOverlayPresentation(snapshot9) {
+    const isAutoUpdate = snapshot9.mode === "auto-update";
+    const title = isAutoUpdate ? "\u81EA\u52A8\u66F4\u65B0\u4E2D" : snapshot9.target.expectedVersion ? "\u6B63\u5728\u5B8C\u6210\u66F4\u65B0" : "\u670D\u52A1\u6B63\u5728\u91CD\u542F";
+    const description = isAutoUpdate ? `${snapshot9.currentVersion || "-"} \u2192 ${snapshot9.latestVersion || "-"}
+\u6B63\u5728\u4E0B\u8F7D\u5E76\u5B89\u88C5\u65B0\u7248\u672C\uFF0C\u5B8C\u6210\u540E\u5C06\u81EA\u52A8\u91CD\u542F\u3002` : snapshot9.target.expectedVersion ? "\u5B89\u88C5\u5B8C\u6210\u5E76\u542F\u52A8\u65B0\u7248\u672C\u540E\u5C06\u81EA\u52A8\u5237\u65B0\u9875\u9762\u3002" : "\u670D\u52A1\u6062\u590D\u540E\u5C06\u81EA\u52A8\u5237\u65B0\u9875\u9762\u3002";
     let liveStatus = "";
-    if (snapshot8.phase === "checking") {
-      liveStatus = `\u6B63\u5728\u68C0\u67E5\u670D\u52A1\u72B6\u6001\uFF08${snapshot8.attempts}/${snapshot8.maxAttempts}\uFF09\u2026`;
-    } else if (snapshot8.phase === "ready") {
+    if (snapshot9.phase === "checking") {
+      liveStatus = `\u6B63\u5728\u68C0\u67E5\u670D\u52A1\u72B6\u6001\uFF08${snapshot9.attempts}/${snapshot9.maxAttempts}\uFF09\u2026`;
+    } else if (snapshot9.phase === "ready") {
       liveStatus = "\u65B0\u670D\u52A1\u548C\u76EE\u6807\u7248\u672C\u5747\u5DF2\u5C31\u7EEA\uFF0C\u6B63\u5728\u5237\u65B0\u9875\u9762\u2026";
-    } else if (snapshot8.phase === "timed-out") {
+    } else if (snapshot9.phase === "timed-out") {
       liveStatus = "\u7B49\u5F85\u670D\u52A1\u91CD\u542F\u8D85\u65F6\uFF0C\u8BF7\u624B\u52A8\u5237\u65B0\u9875\u9762\u3002";
-    } else if (snapshot8.phase === "waiting") {
-      liveStatus = waitingStatus(snapshot8);
+    } else if (snapshot9.phase === "waiting") {
+      liveStatus = waitingStatus(snapshot9);
     }
     return { title, description, liveStatus };
   }
@@ -27102,16 +27117,16 @@
     return typeof value === "string" ? value.trim() : "";
   }
   function createRestartOverlayController(dependencies) {
-    let snapshot8 = blankSnapshot();
+    let snapshot9 = blankSnapshot();
     let pollTimer = null;
     let deadlineTimer = null;
     let probeTimer = null;
     let request2 = null;
     let generation = 0;
-    const listeners8 = /* @__PURE__ */ new Set();
-    function publish8(patch) {
-      snapshot8 = { ...snapshot8, ...patch, revision: snapshot8.revision + 1 };
-      for (const listener of listeners8) listener();
+    const listeners10 = /* @__PURE__ */ new Set();
+    function publish9(patch) {
+      snapshot9 = { ...snapshot9, ...patch, revision: snapshot9.revision + 1 };
+      for (const listener of listeners10) listener();
     }
     function stopPollTimer() {
       if (pollTimer === null) return;
@@ -27143,13 +27158,13 @@
       abortProbe();
     }
     function timeOut(runGeneration) {
-      if (runGeneration !== generation || !snapshot8.open || snapshot8.phase === "ready" || snapshot8.phase === "timed-out") return;
+      if (runGeneration !== generation || !snapshot9.open || snapshot9.phase === "ready" || snapshot9.phase === "timed-out") return;
       stopSchedule();
       abortProbe();
-      publish8({ phase: "timed-out" });
+      publish9({ phase: "timed-out" });
     }
     function failReload(error) {
-      publish8({
+      publish9({
         phase: "timed-out",
         lastError: errorMessage(error)
       });
@@ -27162,14 +27177,14 @@
       }
     }
     async function poll(runGeneration) {
-      if (runGeneration !== generation || !snapshot8.open || snapshot8.phase === "timed-out" || snapshot8.phase === "ready") return;
+      if (runGeneration !== generation || !snapshot9.open || snapshot9.phase === "timed-out" || snapshot9.phase === "ready") return;
       if (request2 !== null) {
         abortProbe(new DOMException("Restart probe timed out.", "TimeoutError"));
       }
       const abort = new AbortController();
       request2 = abort;
-      const attempt = snapshot8.attempts + 1;
-      publish8({ phase: "checking", attempts: attempt, lastError: "" });
+      const attempt = snapshot9.attempts + 1;
+      publish9({ phase: "checking", attempts: attempt, lastError: "" });
       let removeAbortListener = () => {
       };
       const aborted = new Promise((_resolve, reject) => {
@@ -27190,10 +27205,10 @@
           dependencies.repository.loadConfig({ signal: abort.signal }),
           aborted
         ]);
-        if (abort.signal.aborted || runGeneration !== generation || request2 !== abort || !snapshot8.open) return;
-        const readiness = evaluateRestartReadiness(snapshot8.target, config);
+        if (abort.signal.aborted || runGeneration !== generation || request2 !== abort || !snapshot9.open) return;
+        const readiness = evaluateRestartReadiness(snapshot9.target, config);
         becameReady = readiness.ready;
-        publish8({
+        publish9({
           phase: readiness.ready ? "ready" : "waiting",
           readiness,
           lastError: ""
@@ -27203,12 +27218,12 @@
           reloadPage();
         }
       } catch (error) {
-        if (runGeneration !== generation || request2 !== abort || !snapshot8.open) return;
+        if (runGeneration !== generation || request2 !== abort || !snapshot9.open) return;
         if (abort.signal.aborted && abort.signal.reason instanceof DOMException) {
           if (abort.signal.reason.name !== "TimeoutError") return;
-          publish8({ phase: "waiting", lastError: "\u670D\u52A1\u72B6\u6001\u68C0\u67E5\u8D85\u65F6\uFF0C\u6B63\u5728\u91CD\u8BD5\u3002" });
+          publish9({ phase: "waiting", lastError: "\u670D\u52A1\u72B6\u6001\u68C0\u67E5\u8D85\u65F6\uFF0C\u6B63\u5728\u91CD\u8BD5\u3002" });
         } else {
-          publish8({ phase: "waiting", lastError: errorMessage(error) });
+          publish9({ phase: "waiting", lastError: errorMessage(error) });
         }
       } finally {
         removeAbortListener();
@@ -27217,7 +27232,7 @@
           request2 = null;
         }
       }
-      if (!becameReady && runGeneration === generation && snapshot8.open && attempt >= RESTART_MAX_ATTEMPTS) {
+      if (!becameReady && runGeneration === generation && snapshot9.open && attempt >= RESTART_MAX_ATTEMPTS) {
         timeOut(runGeneration);
       }
     }
@@ -27228,7 +27243,7 @@
         previousInstanceId: normalizedText(previousInstanceId),
         expectedVersion: normalizeRestartVersion(expectedVersion)
       };
-      snapshot8 = {
+      snapshot9 = {
         open: true,
         mode,
         phase: "waiting",
@@ -27245,9 +27260,9 @@
           currentVersion: ""
         },
         lastError: "",
-        revision: snapshot8.revision + 1
+        revision: snapshot9.revision + 1
       };
-      for (const listener of listeners8) listener();
+      for (const listener of listeners10) listener();
       const runGeneration = generation;
       pollTimer = dependencies.clock.setInterval(
         () => {
@@ -27280,25 +27295,25 @@
         );
       },
       manualRefresh() {
-        if (!snapshot8.open) return;
+        if (!snapshot9.open) return;
         reloadPage();
       },
       isOpen() {
-        return snapshot8.open;
+        return snapshot9.open;
       },
       subscribe(listener) {
-        listeners8.add(listener);
-        return () => listeners8.delete(listener);
+        listeners10.add(listener);
+        return () => listeners10.delete(listener);
       },
       getSnapshot() {
-        return snapshot8;
+        return snapshot9;
       },
       dispose() {
         generation += 1;
         stopPolling2();
-        if (!snapshot8.open && snapshot8.phase === "idle") return;
-        snapshot8 = blankSnapshot(snapshot8.revision + 1);
-        for (const listener of listeners8) listener();
+        if (!snapshot9.open && snapshot9.phase === "idle") return;
+        snapshot9 = blankSnapshot(snapshot9.revision + 1);
+        for (const listener of listeners10) listener();
       }
     };
   }
@@ -27505,25 +27520,25 @@
   function RestartOverlayHost({
     controller = restartOverlayController
   }) {
-    const snapshot8 = (0, import_react14.useSyncExternalStore)(
+    const snapshot9 = (0, import_react14.useSyncExternalStore)(
       controller.subscribe,
       controller.getSnapshot,
       controller.getSnapshot
     );
-    const presentation = restartOverlayPresentation(snapshot8);
+    const presentation = restartOverlayPresentation(snapshot9);
     const manualRefreshButton = (0, import_react14.useRef)(null);
     (0, import_react14.useEffect)(() => {
-      if (snapshot8.phase !== "timed-out") return;
+      if (snapshot9.phase !== "timed-out") return;
       manualRefreshButton.current?.focus();
-    }, [snapshot8.phase]);
-    const busy = snapshot8.phase === "waiting" || snapshot8.phase === "checking";
-    const progressValue = Math.min(snapshot8.attempts, snapshot8.maxAttempts);
+    }, [snapshot9.phase]);
+    const busy = snapshot9.phase === "waiting" || snapshot9.phase === "checking";
+    const progressValue = Math.min(snapshot9.attempts, snapshot9.maxAttempts);
     return /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)(import_jsx_runtime37.Fragment, { children: [
       /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("style", { "data-wand-restart-overlay-styles": true, children: restartOverlayStyles }),
       /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(
         WandDialogSurface,
         {
-          open: snapshot8.open,
+          open: snapshot9.open,
           onOpenChange: () => {
           },
           title: presentation.title,
@@ -27537,33 +27552,33 @@
           testId: "restart-overlay",
           dismissable: false,
           children: /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)("div", { className: "wand-restart-body", "aria-busy": busy, children: [
-            snapshot8.phase !== "timed-out" ? /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("div", { className: "wand-restart-spinner", "aria-hidden": "true" }) : null,
+            snapshot9.phase !== "timed-out" ? /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("div", { className: "wand-restart-spinner", "aria-hidden": "true" }) : null,
             /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(
               "p",
               {
                 className: "wand-restart-live",
-                role: snapshot8.phase === "timed-out" ? "alert" : "status",
-                "aria-live": snapshot8.phase === "timed-out" ? "assertive" : "polite",
+                role: snapshot9.phase === "timed-out" ? "alert" : "status",
+                "aria-live": snapshot9.phase === "timed-out" ? "assertive" : "polite",
                 "data-wand-autofocus": "true",
                 tabIndex: -1,
                 children: presentation.liveStatus
               }
             ),
-            snapshot8.phase !== "timed-out" ? /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)(import_jsx_runtime37.Fragment, { children: [
+            snapshot9.phase !== "timed-out" ? /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)(import_jsx_runtime37.Fragment, { children: [
               /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(
                 "progress",
                 {
                   className: "wand-restart-progress",
-                  max: snapshot8.maxAttempts,
+                  max: snapshot9.maxAttempts,
                   value: progressValue,
                   "aria-label": "\u7B49\u5F85\u670D\u52A1\u91CD\u542F\u8FDB\u5EA6"
                 }
               ),
               /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)("span", { className: "wand-restart-attempts", children: [
                 "\u5DF2\u68C0\u67E5 ",
-                snapshot8.attempts,
+                snapshot9.attempts,
                 " / ",
-                snapshot8.maxAttempts,
+                snapshot9.maxAttempts,
                 " \u6B21"
               ] })
             ] }) : /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(
@@ -27903,13 +27918,13 @@
   }
 
   // src/web-ui/react/file-preview/platform-adapter.ts
-  async function copyTextToPlatformClipboard(text5) {
+  async function copyTextToPlatformClipboard(text6) {
     if (typeof WandNative !== "undefined" && typeof WandNative.copyToClipboard === "function") {
-      if (WandNative.copyToClipboard(text5) !== "ok") throw new Error("\u590D\u5236\u5230\u7CFB\u7EDF\u526A\u8D34\u677F\u5931\u8D25\u3002");
+      if (WandNative.copyToClipboard(text6) !== "ok") throw new Error("\u590D\u5236\u5230\u7CFB\u7EDF\u526A\u8D34\u677F\u5931\u8D25\u3002");
       return;
     }
     if (!globalThis.navigator?.clipboard?.writeText) throw new Error("\u5F53\u524D\u73AF\u5883\u65E0\u6CD5\u8BBF\u95EE\u526A\u8D34\u677F\u3002");
-    await globalThis.navigator.clipboard.writeText(text5);
+    await globalThis.navigator.clipboard.writeText(text6);
   }
 
   // src/web-ui/react/file-preview/repository.ts
@@ -28076,8 +28091,8 @@
       });
       return result.dismissed === false && result.action === true;
     },
-    async copyText(text5) {
-      await copyTextToPlatformClipboard(text5);
+    async copyText(text6) {
+      await copyTextToPlatformClipboard(text6);
     },
     appendToComposer() {
       return false;
@@ -28089,28 +28104,28 @@
     }
   };
   function createFilePreviewModule(options) {
-    const listeners8 = /* @__PURE__ */ new Set();
-    let snapshot8 = initialSnapshot();
-    let runtime7 = options.runtime ?? defaultRuntime;
+    const listeners10 = /* @__PURE__ */ new Set();
+    let snapshot9 = initialSnapshot();
+    let runtime11 = options.runtime ?? defaultRuntime;
     let loadSequence = 0;
     let activeAbort = null;
-    function publish8(patch) {
-      snapshot8 = { ...snapshot8, ...patch, revision: snapshot8.revision + 1 };
-      for (const listener of listeners8) listener();
+    function publish9(patch) {
+      snapshot9 = { ...snapshot9, ...patch, revision: snapshot9.revision + 1 };
+      for (const listener of listeners10) listener();
     }
     function closeNow() {
       activeAbort?.abort();
       activeAbort = null;
       loadSequence += 1;
-      snapshot8 = initialSnapshot(snapshot8.revision + 1);
-      for (const listener of listeners8) listener();
+      snapshot9 = initialSnapshot(snapshot9.revision + 1);
+      for (const listener of listeners10) listener();
     }
     async function confirmDiscard(reason) {
-      if (!snapshot8.dirty || !snapshot8.request) return true;
+      if (!snapshot9.dirty || !snapshot9.request) return true;
       try {
-        return await runtime7.confirmDiscard(reason, snapshot8.request.path);
+        return await runtime11.confirmDiscard(reason, snapshot9.request.path);
       } catch (error) {
-        runtime7.notify(unknownFailure(error, "\u65E0\u6CD5\u786E\u8BA4\u662F\u5426\u653E\u5F03\u4FEE\u6539\u3002").message, "error");
+        runtime11.notify(unknownFailure(error, "\u65E0\u6CD5\u786E\u8BA4\u662F\u5426\u653E\u5F03\u4FEE\u6539\u3002").message, "error");
         return false;
       }
     }
@@ -28119,7 +28134,7 @@
       const abort = new AbortController();
       activeAbort = abort;
       const sequence = ++loadSequence;
-      publish8({
+      publish9({
         open: true,
         request: request2,
         status: "loading",
@@ -28136,14 +28151,14 @@
       });
       try {
         const outcome = await options.repository.load(request2.path, { signal: abort.signal });
-        if (sequence !== loadSequence || abort.signal.aborted || !snapshot8.open) return false;
+        if (sequence !== loadSequence || abort.signal.aborted || !snapshot9.open) return false;
         activeAbort = null;
         if (outcome.ok === false) {
-          publish8({ status: "error", failure: outcome.failure });
+          publish9({ status: "error", failure: outcome.failure });
           return false;
         }
         const baseline = outcome.file.kind === "text" ? outcome.file.content ?? "" : "";
-        publish8({
+        publish9({
           status: "ready",
           file: outcome.file,
           failure: null,
@@ -28152,28 +28167,28 @@
         });
         return true;
       } catch (error) {
-        if (sequence !== loadSequence || abort.signal.aborted || isAbort(error) || !snapshot8.open) return false;
+        if (sequence !== loadSequence || abort.signal.aborted || isAbort(error) || !snapshot9.open) return false;
         activeAbort = null;
-        publish8({ status: "error", failure: unknownFailure(error, "\u52A0\u8F7D\u9884\u89C8\u5931\u8D25") });
+        publish9({ status: "error", failure: unknownFailure(error, "\u52A0\u8F7D\u9884\u89C8\u5931\u8D25") });
         return false;
       }
     }
-    async function copy(text5, successMessage) {
+    async function copy(text6, successMessage) {
       try {
-        await runtime7.copyText(text5);
-        runtime7.notify(successMessage, "success");
+        await runtime11.copyText(text6);
+        runtime11.notify(successMessage, "success");
         return true;
       } catch (error) {
-        runtime7.notify(unknownFailure(error, "\u590D\u5236\u5931\u8D25\u3002").message, "error");
+        runtime11.notify(unknownFailure(error, "\u590D\u5236\u5931\u8D25\u3002").message, "error");
         return false;
       }
     }
     async function execute(command) {
-      if (!snapshot8.open) return false;
+      if (!snapshot9.open) return false;
       switch (command.type) {
         case "close": {
-          if (snapshot8.saving) return false;
-          if (!snapshot8.dirty) {
+          if (snapshot9.saving) return false;
+          if (!snapshot9.dirty) {
             closeNow();
             return true;
           }
@@ -28182,52 +28197,52 @@
           return true;
         }
         case "navigate": {
-          if (snapshot8.editing || snapshot8.saving) return false;
-          const sibling = nextFilePreviewSibling(snapshot8.request, command.direction);
-          if (!sibling || !snapshot8.request) return false;
-          return load({ ...snapshot8.request, path: sibling.path });
+          if (snapshot9.editing || snapshot9.saving) return false;
+          const sibling = nextFilePreviewSibling(snapshot9.request, command.direction);
+          if (!sibling || !snapshot9.request) return false;
+          return load({ ...snapshot9.request, path: sibling.path });
         }
         case "edit.enter": {
-          if (snapshot8.status !== "ready" || snapshot8.file?.kind !== "text" || snapshot8.saving) return false;
-          const baseline = snapshot8.file.content ?? "";
-          publish8({ editing: true, draft: baseline, baseline, dirty: false, failure: null });
+          if (snapshot9.status !== "ready" || snapshot9.file?.kind !== "text" || snapshot9.saving) return false;
+          const baseline = snapshot9.file.content ?? "";
+          publish9({ editing: true, draft: baseline, baseline, dirty: false, failure: null });
           return true;
         }
         case "edit.change": {
-          if (!snapshot8.editing || snapshot8.saving) return false;
-          publish8({ draft: command.value, dirty: command.value !== snapshot8.baseline, failure: null });
+          if (!snapshot9.editing || snapshot9.saving) return false;
+          publish9({ draft: command.value, dirty: command.value !== snapshot9.baseline, failure: null });
           return true;
         }
         case "edit.revert": {
-          if (!snapshot8.editing || snapshot8.saving) return false;
-          publish8({ draft: snapshot8.baseline, dirty: false, failure: null });
+          if (!snapshot9.editing || snapshot9.saving) return false;
+          publish9({ draft: snapshot9.baseline, dirty: false, failure: null });
           return true;
         }
         case "edit.exit": {
-          if (!snapshot8.editing || snapshot8.saving) return false;
+          if (!snapshot9.editing || snapshot9.saving) return false;
           if (!await confirmDiscard("exit-edit")) return false;
-          publish8({ editing: false, draft: snapshot8.baseline, dirty: false, failure: null });
+          publish9({ editing: false, draft: snapshot9.baseline, dirty: false, failure: null });
           return true;
         }
         case "edit.save": {
-          if (!snapshot8.editing || snapshot8.saving || snapshot8.file?.kind !== "text" || !snapshot8.request) return false;
-          if (snapshot8.draft === snapshot8.baseline) {
-            runtime7.notify("\u6CA1\u6709\u6539\u52A8", "info");
+          if (!snapshot9.editing || snapshot9.saving || snapshot9.file?.kind !== "text" || !snapshot9.request) return false;
+          if (snapshot9.draft === snapshot9.baseline) {
+            runtime11.notify("\u6CA1\u6709\u6539\u52A8", "info");
             return true;
           }
-          const path = snapshot8.request.path;
-          const draft = snapshot8.draft;
-          publish8({ saving: true, failure: null });
+          const path = snapshot9.request.path;
+          const draft = snapshot9.draft;
+          publish9({ saving: true, failure: null });
           try {
             const outcome = await options.repository.save(path, draft);
-            if (!snapshot8.open || snapshot8.request?.path !== path) return false;
+            if (!snapshot9.open || snapshot9.request?.path !== path) return false;
             if (outcome.ok === false) {
-              publish8({ saving: false, failure: outcome.failure });
-              runtime7.notify(outcome.failure.message, "error");
+              publish9({ saving: false, failure: outcome.failure });
+              runtime11.notify(outcome.failure.message, "error");
               return false;
             }
-            const currentFile = snapshot8.file;
-            publish8({
+            const currentFile = snapshot9.file;
+            publish9({
               saving: false,
               file: currentFile ? { ...currentFile, content: draft, size: outcome.result.size } : currentFile,
               baseline: draft,
@@ -28235,47 +28250,47 @@
               dirty: false,
               failure: null
             });
-            runtime7.notify("\u5DF2\u4FDD\u5B58", "success");
+            runtime11.notify("\u5DF2\u4FDD\u5B58", "success");
             try {
-              await runtime7.onSaved(path);
+              await runtime11.onSaved(path);
             } catch {
             }
             return true;
           } catch (error) {
-            if (!snapshot8.open || snapshot8.request?.path !== path) return false;
+            if (!snapshot9.open || snapshot9.request?.path !== path) return false;
             const failure = unknownFailure(error, "\u4FDD\u5B58\u5931\u8D25\uFF1A\u7F51\u7EDC\u9519\u8BEF");
-            publish8({ saving: false, failure });
-            runtime7.notify(failure.message, "error");
+            publish9({ saving: false, failure });
+            runtime11.notify(failure.message, "error");
             return false;
           }
         }
         case "copy.path":
-          return snapshot8.file ? copy(snapshot8.file.path, "\u5DF2\u590D\u5236\u8DEF\u5F84") : false;
+          return snapshot9.file ? copy(snapshot9.file.path, "\u5DF2\u590D\u5236\u8DEF\u5F84") : false;
         case "copy.content":
-          return snapshot8.file?.kind === "text" ? copy(snapshot8.file.content ?? "", "\u5DF2\u590D\u5236\u5185\u5BB9") : false;
+          return snapshot9.file?.kind === "text" ? copy(snapshot9.file.content ?? "", "\u5DF2\u590D\u5236\u5185\u5BB9") : false;
         case "composer.path": {
-          if (!snapshot8.file) return false;
-          const appended = runtime7.appendToComposer(snapshot8.file.path);
-          runtime7.notify(appended ? "\u5DF2\u7C98\u8D34\u5230\u8F93\u5165\u6846" : "\u65E0\u6CD5\u7C98\u8D34\u5230\u8F93\u5165\u6846", appended ? "success" : "error");
+          if (!snapshot9.file) return false;
+          const appended = runtime11.appendToComposer(snapshot9.file.path);
+          runtime11.notify(appended ? "\u5DF2\u7C98\u8D34\u5230\u8F93\u5165\u6846" : "\u65E0\u6CD5\u7C98\u8D34\u5230\u8F93\u5165\u6846", appended ? "success" : "error");
           return appended;
         }
         case "composer.cat": {
-          if (!snapshot8.file) return false;
-          const appended = runtime7.appendToComposer(`cat -- ${shellQuoteFilePath(snapshot8.file.path)}`);
-          runtime7.notify(appended ? "\u547D\u4EE4\u5DF2\u7C98\u8D34\u5230\u8F93\u5165\u6846" : "\u65E0\u6CD5\u7C98\u8D34\u5230\u8F93\u5165\u6846", appended ? "success" : "error");
+          if (!snapshot9.file) return false;
+          const appended = runtime11.appendToComposer(`cat -- ${shellQuoteFilePath(snapshot9.file.path)}`);
+          runtime11.notify(appended ? "\u547D\u4EE4\u5DF2\u7C98\u8D34\u5230\u8F93\u5165\u6846" : "\u65E0\u6CD5\u7C98\u8D34\u5230\u8F93\u5165\u6846", appended ? "success" : "error");
           return appended;
         }
         case "view.wrap.toggle":
-          if (snapshot8.file?.kind !== "text" || snapshot8.editing) return false;
-          publish8({ wrap: !snapshot8.wrap });
+          if (snapshot9.file?.kind !== "text" || snapshot9.editing) return false;
+          publish9({ wrap: !snapshot9.wrap });
           return true;
         case "view.font.adjust":
-          if (snapshot8.file?.kind !== "text" || snapshot8.editing) return false;
-          publish8({ fontSize: clampFilePreviewFontSize(snapshot8.fontSize + command.delta) });
+          if (snapshot9.file?.kind !== "text" || snapshot9.editing) return false;
+          publish9({ fontSize: clampFilePreviewFontSize(snapshot9.fontSize + command.delta) });
           return true;
         case "view.image.zoom.toggle":
-          if (snapshot8.file?.kind !== "image" || snapshot8.editing) return false;
-          publish8({ imageZoomed: !snapshot8.imageZoomed });
+          if (snapshot9.file?.kind !== "image" || snapshot9.editing) return false;
+          publish9({ imageZoomed: !snapshot9.imageZoomed });
           return true;
       }
     }
@@ -28283,16 +28298,16 @@
       async open(input) {
         const request2 = normalizeFilePreviewRequest(input);
         if (!request2) return false;
-        if (snapshot8.open && snapshot8.request?.path === request2.path && !snapshot8.dirty) {
-          publish8({ request: request2 });
+        if (snapshot9.open && snapshot9.request?.path === request2.path && !snapshot9.dirty) {
+          publish9({ request: request2 });
           return true;
         }
-        if (snapshot8.open && snapshot8.dirty && !await confirmDiscard("replace")) return false;
+        if (snapshot9.open && snapshot9.dirty && !await confirmDiscard("replace")) return false;
         return load(request2);
       },
       execute,
       closeIfOpen() {
-        if (!snapshot8.open) return false;
+        if (!snapshot9.open) return false;
         void execute({ type: "close" });
         return true;
       },
@@ -28300,25 +28315,25 @@
         return this.closeIfOpen();
       },
       isOpen() {
-        return snapshot8.open;
+        return snapshot9.open;
       }
     };
     return {
       controller,
       store: {
         subscribe(listener) {
-          listeners8.add(listener);
-          return () => listeners8.delete(listener);
+          listeners10.add(listener);
+          return () => listeners10.delete(listener);
         },
         getSnapshot() {
-          return snapshot8;
+          return snapshot9;
         }
       },
       configureRuntime(adapter) {
-        const previous = runtime7;
-        runtime7 = adapter;
+        const previous = runtime11;
+        runtime11 = adapter;
         return () => {
-          if (runtime7 === adapter) runtime7 = previous;
+          if (runtime11 === adapter) runtime11 = previous;
         };
       }
     };
@@ -28778,26 +28793,26 @@
         return /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("hr", {});
     }
   }
-  function TextPreview({ snapshot: snapshot8, file }) {
+  function TextPreview({ snapshot: snapshot9, file }) {
     const content = file.content ?? "";
     if (isMarkdownPreview(file)) {
       return /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(
         "div",
         {
-          className: `wand-file-preview-markdown${snapshot8.wrap ? " wrap" : ""}`,
-          style: { fontSize: `${snapshot8.fontSize}px` },
+          className: `wand-file-preview-markdown${snapshot9.wrap ? " wrap" : ""}`,
+          style: { fontSize: `${snapshot9.fontSize}px` },
           children: parseFilePreviewMarkdown(content).map((block, index2) => /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(MarkdownBlock, { block }, index2))
         }
       );
     }
     const lineCount = Math.max(1, content.split("\n").length);
-    return /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: `wand-file-preview-code${snapshot8.wrap ? " wrap" : ""}`, children: [
+    return /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: `wand-file-preview-code${snapshot9.wrap ? " wrap" : ""}`, children: [
       /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(
         "pre",
         {
           "aria-hidden": "true",
           className: "wand-file-preview-lines",
-          style: { fontSize: `${snapshot8.fontSize}px` },
+          style: { fontSize: `${snapshot9.fontSize}px` },
           children: Array.from({ length: lineCount }, (_value, index2) => index2 + 1).join("\n")
         }
       ),
@@ -28805,7 +28820,7 @@
         "pre",
         {
           className: "wand-file-preview-code-content",
-          style: { fontSize: `${snapshot8.fontSize}px` },
+          style: { fontSize: `${snapshot9.fontSize}px` },
           children: /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("code", { children: /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(CodeTokens, { tokens: tokenizeFilePreviewCode(content) }) })
         }
       )
@@ -28827,24 +28842,24 @@
       ] })
     ] });
   }
-  function PreviewBody({ snapshot: snapshot8, editorRef }) {
-    if (snapshot8.status === "loading") {
+  function PreviewBody({ snapshot: snapshot9, editorRef }) {
+    if (snapshot9.status === "loading") {
       return /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("div", { className: "wand-file-preview-state", role: "status", children: "\u6B63\u5728\u52A0\u8F7D\u9884\u89C8\u2026" });
     }
-    if (snapshot8.status === "error") {
+    if (snapshot9.status === "error") {
       return /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: "wand-file-preview-state wand-file-preview-error", role: "alert", children: [
         /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { "aria-hidden": "true", children: "!" }),
-        /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("strong", { children: snapshot8.failure?.message || "\u52A0\u8F7D\u9884\u89C8\u5931\u8D25" }),
-        snapshot8.failure?.size != null ? /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("small", { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("strong", { children: snapshot9.failure?.message || "\u52A0\u8F7D\u9884\u89C8\u5931\u8D25" }),
+        snapshot9.failure?.size != null ? /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("small", { children: [
           "\u6587\u4EF6\u5927\u5C0F\uFF1A",
-          formatFilePreviewSize(snapshot8.failure.size)
+          formatFilePreviewSize(snapshot9.failure.size)
         ] }) : null,
-        snapshot8.failure?.download ? /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(DownloadLink, { file: snapshot8.failure.download, label: "\u4ECD\u7136\u4E0B\u8F7D\u6587\u4EF6" }) : null
+        snapshot9.failure?.download ? /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(DownloadLink, { file: snapshot9.failure.download, label: "\u4ECD\u7136\u4E0B\u8F7D\u6587\u4EF6" }) : null
       ] });
     }
-    const file = snapshot8.file;
+    const file = snapshot9.file;
     if (!file) return /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("div", { className: "wand-file-preview-state", children: "\u9009\u62E9\u6587\u4EF6\u540E\u5C06\u5728\u8FD9\u91CC\u663E\u793A\u9884\u89C8\u3002" });
-    if (snapshot8.editing) {
+    if (snapshot9.editing) {
       return /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("div", { className: "wand-file-preview-editor", children: /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(
         "textarea",
         {
@@ -28855,7 +28870,7 @@
           autoCapitalize: "off",
           spellCheck: false,
           wrap: "off",
-          value: snapshot8.draft,
+          value: snapshot9.draft,
           onChange: (event) => run({ type: "edit.change", value: event.currentTarget.value }),
           onKeyDown: (event) => {
             if (event.key !== "Tab") return;
@@ -28863,7 +28878,7 @@
             const input = event.currentTarget;
             const start = input.selectionStart;
             const end = input.selectionEnd;
-            const value = `${snapshot8.draft.slice(0, start)}  ${snapshot8.draft.slice(end)}`;
+            const value = `${snapshot9.draft.slice(0, start)}  ${snapshot9.draft.slice(end)}`;
             run({ type: "edit.change", value });
             requestAnimationFrame(() => {
               input.selectionStart = start + 2;
@@ -28879,8 +28894,8 @@
           "button",
           {
             type: "button",
-            className: `wand-file-preview-image${snapshot8.imageZoomed ? " zoomed" : ""}`,
-            "aria-label": snapshot8.imageZoomed ? "\u7F29\u5C0F\u56FE\u7247" : "\u653E\u5927\u56FE\u7247",
+            className: `wand-file-preview-image${snapshot9.imageZoomed ? " zoomed" : ""}`,
+            "aria-label": snapshot9.imageZoomed ? "\u7F29\u5C0F\u56FE\u7247" : "\u653E\u5927\u56FE\u7247",
             onClick: () => run({ type: "view.image.zoom.toggle" }),
             children: /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("img", { src: file.rawUrl, alt: file.name })
           }
@@ -28902,14 +28917,14 @@
       case "binary":
         return /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(BinaryPreview, { file });
       default:
-        return /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(TextPreview, { snapshot: snapshot8, file });
+        return /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(TextPreview, { snapshot: snapshot9, file });
     }
   }
-  function PreviewToolbar({ snapshot: snapshot8 }) {
-    const previous = nextFilePreviewSibling(snapshot8.request, -1);
-    const next = nextFilePreviewSibling(snapshot8.request, 1);
-    const file = snapshot8.file;
-    return /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: `wand-file-preview-toolbar${snapshot8.editing ? " editing" : ""}`, "aria-label": "\u6587\u4EF6\u9884\u89C8\u5DE5\u5177\u680F", children: [
+  function PreviewToolbar({ snapshot: snapshot9 }) {
+    const previous = nextFilePreviewSibling(snapshot9.request, -1);
+    const next = nextFilePreviewSibling(snapshot9.request, 1);
+    const file = snapshot9.file;
+    return /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: `wand-file-preview-toolbar${snapshot9.editing ? " editing" : ""}`, "aria-label": "\u6587\u4EF6\u9884\u89C8\u5DE5\u5177\u680F", children: [
       /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: "wand-file-preview-toolbar-group", children: [
         /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(
           WandButton,
@@ -28918,7 +28933,7 @@
             kind: "ghost",
             "aria-label": "\u4E0A\u4E00\u4E2A\u6587\u4EF6",
             title: previous ? `\u4E0A\u4E00\u4E2A\u6587\u4EF6\uFF1A${previous.name}` : "\u6CA1\u6709\u4E0A\u4E00\u4E2A\u6587\u4EF6",
-            disabled: !previous || snapshot8.editing || snapshot8.saving,
+            disabled: !previous || snapshot9.editing || snapshot9.saving,
             onClick: () => run({ type: "navigate", direction: -1 }),
             children: "\u2190"
           }
@@ -28930,16 +28945,16 @@
             kind: "ghost",
             "aria-label": "\u4E0B\u4E00\u4E2A\u6587\u4EF6",
             title: next ? `\u4E0B\u4E00\u4E2A\u6587\u4EF6\uFF1A${next.name}` : "\u6CA1\u6709\u4E0B\u4E00\u4E2A\u6587\u4EF6",
-            disabled: !next || snapshot8.editing || snapshot8.saving,
+            disabled: !next || snapshot9.editing || snapshot9.saving,
             onClick: () => run({ type: "navigate", direction: 1 }),
             children: "\u2192"
           }
         )
       ] }),
-      snapshot8.editing ? /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: "wand-file-preview-toolbar-group wand-file-preview-edit-actions", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(WandButton, { kind: "primary", size: "small", disabled: snapshot8.saving, onClick: () => run({ type: "edit.save" }), children: snapshot8.saving ? "\u4FDD\u5B58\u4E2D\u2026" : "\u4FDD\u5B58" }),
-        /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(WandButton, { size: "small", disabled: snapshot8.saving || !snapshot8.dirty, onClick: () => run({ type: "edit.revert" }), children: "\u64A4\u9500\u6539\u52A8" }),
-        /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(WandButton, { size: "small", disabled: snapshot8.saving, onClick: () => run({ type: "edit.exit" }), children: "\u9000\u51FA\u7F16\u8F91" })
+      snapshot9.editing ? /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: "wand-file-preview-toolbar-group wand-file-preview-edit-actions", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(WandButton, { kind: "primary", size: "small", disabled: snapshot9.saving, onClick: () => run({ type: "edit.save" }), children: snapshot9.saving ? "\u4FDD\u5B58\u4E2D\u2026" : "\u4FDD\u5B58" }),
+        /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(WandButton, { size: "small", disabled: snapshot9.saving || !snapshot9.dirty, onClick: () => run({ type: "edit.revert" }), children: "\u64A4\u9500\u6539\u52A8" }),
+        /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(WandButton, { size: "small", disabled: snapshot9.saving, onClick: () => run({ type: "edit.exit" }), children: "\u9000\u51FA\u7F16\u8F91" })
       ] }) : file ? /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)(import_jsx_runtime38.Fragment, { children: [
         /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: "wand-file-preview-toolbar-group", children: [
           file.kind === "text" ? /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(WandButton, { kind: "primary", size: "small", onClick: () => run({ type: "edit.enter" }), children: "\u7F16\u8F91" }) : null,
@@ -28953,39 +28968,39 @@
             WandButton,
             {
               size: "small",
-              kind: snapshot8.wrap ? "primary" : "secondary",
-              "aria-pressed": snapshot8.wrap,
+              kind: snapshot9.wrap ? "primary" : "secondary",
+              "aria-pressed": snapshot9.wrap,
               onClick: () => run({ type: "view.wrap.toggle" }),
               children: "\u81EA\u52A8\u6362\u884C"
             }
           ),
           /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(WandButton, { size: "small", "aria-label": "\u7F29\u5C0F\u5B57\u53F7", onClick: () => run({ type: "view.font.adjust", delta: -1 }), children: "A\u2212" }),
-          /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { className: "wand-file-preview-font-size", "aria-label": `\u5B57\u53F7 ${snapshot8.fontSize}`, children: snapshot8.fontSize }),
+          /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { className: "wand-file-preview-font-size", "aria-label": `\u5B57\u53F7 ${snapshot9.fontSize}`, children: snapshot9.fontSize }),
           /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(WandButton, { size: "small", "aria-label": "\u653E\u5927\u5B57\u53F7", onClick: () => run({ type: "view.font.adjust", delta: 1 }), children: "A+" })
         ] }) : null
-      ] }) : snapshot8.failure?.download ? /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(DownloadLink, { file: snapshot8.failure.download }) : null
+      ] }) : snapshot9.failure?.download ? /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(DownloadLink, { file: snapshot9.failure.download }) : null
     ] });
   }
   function FilePreviewHost() {
-    const snapshot8 = (0, import_react15.useSyncExternalStore)(
+    const snapshot9 = (0, import_react15.useSyncExternalStore)(
       filePreviewStore.subscribe,
       filePreviewStore.getSnapshot,
       filePreviewStore.getSnapshot
     );
     const editorRef = (0, import_react15.useRef)(null);
     (0, import_react15.useEffect)(() => {
-      if (!snapshot8.editing) return;
+      if (!snapshot9.editing) return;
       const editor = editorRef.current;
       if (!editor) return;
       editor.focus();
       editor.setSelectionRange(0, 0);
       editor.scrollTop = 0;
-    }, [snapshot8.editing]);
-    const path = snapshot8.request?.path ?? "";
-    const title = snapshot8.file?.name || (path ? fileNameFromPath(path) : "\u6587\u4EF6\u9884\u89C8");
-    const file = snapshot8.file;
+    }, [snapshot9.editing]);
+    const path = snapshot9.request?.path ?? "";
+    const title = snapshot9.file?.name || (path ? fileNameFromPath(path) : "\u6587\u4EF6\u9884\u89C8");
+    const file = snapshot9.file;
     function handleKeyboard(event) {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s" && snapshot8.editing) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s" && snapshot9.editing) {
         event.preventDefault();
         event.stopPropagation();
         run({ type: "edit.save" });
@@ -28994,12 +29009,12 @@
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
-        run({ type: snapshot8.editing ? "edit.exit" : "close" });
+        run({ type: snapshot9.editing ? "edit.exit" : "close" });
         return;
       }
       const target = event.target;
       if (target instanceof HTMLElement && (target.matches("input, textarea") || target.isContentEditable)) return;
-      if (snapshot8.editing) return;
+      if (snapshot9.editing) return;
       if (event.key === "ArrowLeft") {
         event.preventDefault();
         run({ type: "navigate", direction: -1 });
@@ -29016,7 +29031,7 @@
       /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(
         WandDialogSurface,
         {
-          open: snapshot8.open,
+          open: snapshot9.open,
           onOpenChange: (open) => {
             if (!open) run({ type: "close" });
           },
@@ -29029,7 +29044,7 @@
           headerClassName: "wand-ui-dialog-heading wand-file-preview-header",
           closeLabel: "\u5173\u95ED\u6587\u4EF6\u9884\u89C8",
           testId: "file-preview-dialog",
-          dismissable: !snapshot8.saving && !snapshot8.editing,
+          dismissable: !snapshot9.saving && !snapshot9.editing,
           children: /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)(
             "div",
             {
@@ -29041,11 +29056,11 @@
                 /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: "wand-file-preview-title-meta", "aria-live": "polite", children: [
                   /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { className: "wand-file-preview-kind-icon", "aria-hidden": "true", children: file ? filePreviewIcon(file.kind) : "\u2026" }),
                   file ? /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { className: "wand-file-preview-kind", children: filePreviewKindLabel(file) }) : null,
-                  snapshot8.dirty ? /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { className: "wand-file-preview-dirty", children: "\u25CF \u672A\u4FDD\u5B58" }) : null
+                  snapshot9.dirty ? /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { className: "wand-file-preview-dirty", children: "\u25CF \u672A\u4FDD\u5B58" }) : null
                 ] }),
-                /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(PreviewToolbar, { snapshot: snapshot8 }),
-                snapshot8.status === "ready" && snapshot8.failure ? /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("p", { className: "wand-file-preview-inline-error", role: "alert", children: snapshot8.failure.message }) : null,
-                /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("div", { className: `wand-file-preview-body kind-${file?.kind ?? snapshot8.status}`, children: /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(PreviewBody, { snapshot: snapshot8, editorRef }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(PreviewToolbar, { snapshot: snapshot9 }),
+                snapshot9.status === "ready" && snapshot9.failure ? /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("p", { className: "wand-file-preview-inline-error", role: "alert", children: snapshot9.failure.message }) : null,
+                /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("div", { className: `wand-file-preview-body kind-${file?.kind ?? snapshot9.status}`, children: /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(PreviewBody, { snapshot: snapshot9, editorRef }) }),
                 file ? /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("footer", { className: "wand-file-preview-metadata", "aria-label": "\u6587\u4EF6\u5143\u6570\u636E", children: [
                   /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { children: formatFilePreviewSize(file.size) }),
                   /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { children: file.mime || file.ext.replace(/^\./, "") || file.kind }),
@@ -29095,12 +29110,12 @@
   // src/web-ui/react/composer-select/host.tsx
   var import_jsx_runtime39 = __toESM(require_jsx_runtime(), 1);
   function ComposerSelectHost() {
-    const snapshot8 = (0, import_react16.useSyncExternalStore)(
+    const snapshot9 = (0, import_react16.useSyncExternalStore)(
       composerSelectController.subscribe,
       composerSelectController.getSnapshot,
       composerSelectController.getSnapshot
     );
-    return snapshot8.mounts.map((mount) => (0, import_react_dom3.createPortal)(
+    return snapshot9.mounts.map((mount) => (0, import_react_dom3.createPortal)(
       /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(
         WandSelect,
         {
@@ -29259,35 +29274,35 @@
     let newFile = null;
     let oldLine = 0;
     let newLine = 0;
-    return patch.split("\n").slice(0, 5e3).map((text5, index2) => {
-      if (text5.startsWith("--- ")) {
-        const path = text5.slice(4).replace(/^a\//, "");
+    return patch.split("\n").slice(0, 5e3).map((text6, index2) => {
+      if (text6.startsWith("--- ")) {
+        const path = text6.slice(4).replace(/^a\//, "");
         oldFile = path === "/dev/null" ? null : path;
       }
-      if (text5.startsWith("+++ ")) {
-        const path = text5.slice(4).replace(/^b\//, "");
+      if (text6.startsWith("+++ ")) {
+        const path = text6.slice(4).replace(/^b\//, "");
         newFile = path === "/dev/null" ? null : path;
       }
-      const hunk = text5.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      const hunk = text6.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
       if (hunk) {
         oldLine = Number(hunk[1]);
         newLine = Number(hunk[2]);
-        return { key: String(index2), text: text5, path: newFile ?? oldFile, line: null, side: "new", kind: "meta" };
+        return { key: String(index2), text: text6, path: newFile ?? oldFile, line: null, side: "new", kind: "meta" };
       }
-      if (text5.startsWith("+") && !text5.startsWith("+++")) {
+      if (text6.startsWith("+") && !text6.startsWith("+++")) {
         const line = newLine++;
-        return { key: String(index2), text: text5, path: newFile ?? oldFile, line, side: "new", kind: "add" };
+        return { key: String(index2), text: text6, path: newFile ?? oldFile, line, side: "new", kind: "add" };
       }
-      if (text5.startsWith("-") && !text5.startsWith("---")) {
+      if (text6.startsWith("-") && !text6.startsWith("---")) {
         const line = oldLine++;
-        return { key: String(index2), text: text5, path: oldFile ?? newFile, line, side: "old", kind: "remove" };
+        return { key: String(index2), text: text6, path: oldFile ?? newFile, line, side: "old", kind: "remove" };
       }
-      if (text5.startsWith(" ")) {
+      if (text6.startsWith(" ")) {
         const line = newLine++;
         oldLine++;
-        return { key: String(index2), text: text5, path: newFile ?? oldFile, line, side: "new", kind: "context" };
+        return { key: String(index2), text: text6, path: newFile ?? oldFile, line, side: "new", kind: "context" };
       }
-      return { key: String(index2), text: text5, path: newFile ?? oldFile, line: null, side: "new", kind: "meta" };
+      return { key: String(index2), text: text6, path: newFile ?? oldFile, line: null, side: "new", kind: "meta" };
     });
   }
   function splitPaths(value) {
@@ -29612,38 +29627,523 @@
     );
   }
 
-  // src/web-ui/react/overlay-host.tsx
+  // src/web-ui/react/workspaces/host.tsx
+  var import_react18 = __toESM(require_react(), 1);
+
+  // src/web-ui/react/workspaces/controller.ts
+  var runtime6 = null;
+  var snapshot8 = {
+    open: false,
+    dismissable: true,
+    initialCwd: "",
+    revision: 0
+  };
+  var listeners8 = /* @__PURE__ */ new Set();
+  function publish8(next) {
+    snapshot8 = { ...snapshot8, ...next, revision: snapshot8.revision + 1 };
+    for (const listener of listeners8) listener();
+  }
+  var workspacesController = {
+    open(initialCwd) {
+      runtime6?.onOpen();
+      publish8({ open: true, dismissable: true, initialCwd: initialCwd ?? "" });
+      return true;
+    },
+    close() {
+      if (!snapshot8.open) return;
+      publish8({ open: false });
+      runtime6?.onClose();
+    },
+    closeIfOpen() {
+      if (!snapshot8.open || !snapshot8.dismissable) return false;
+      this.close();
+      return true;
+    },
+    isOpen() {
+      return snapshot8.open;
+    },
+    setDismissable(dismissable) {
+      if (!snapshot8.open || snapshot8.dismissable === dismissable) return;
+      publish8({ dismissable });
+    }
+  };
+  var workspacesStore = {
+    subscribe(listener) {
+      listeners8.add(listener);
+      return () => listeners8.delete(listener);
+    },
+    getSnapshot() {
+      return snapshot8;
+    },
+    getRuntime() {
+      return runtime6;
+    }
+  };
+  function configureWorkspacesRuntime(adapter) {
+    runtime6 = adapter;
+    return () => {
+      if (runtime6 !== adapter) return;
+      if (snapshot8.open) workspacesController.close();
+      runtime6 = null;
+    };
+  }
+
+  // src/web-ui/react/workspaces/repository.ts
+  var PROVIDERS4 = /* @__PURE__ */ new Set([
+    "claude",
+    "codex",
+    "opencode",
+    "grok",
+    "qoder",
+    "pi"
+  ]);
+  function parseProvider(value) {
+    return typeof value === "string" && PROVIDERS4.has(value) ? value : void 0;
+  }
+  function text5(value, fallback = "") {
+    return typeof value === "string" ? value : fallback;
+  }
+  async function readJson3(response) {
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || body.error) {
+      throw new Error(typeof body.error === "string" ? body.error : `\u8BF7\u6C42\u5931\u8D25 (HTTP ${response.status})`);
+    }
+    return body;
+  }
+  function normalizePaths2(value) {
+    if (!Array.isArray(value)) return [];
+    return value.map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const record2 = item;
+      if (typeof record2.path !== "string" || !record2.path.trim()) return null;
+      const path = record2.path;
+      return {
+        path,
+        name: text5(record2.name, path.split("/").filter(Boolean).at(-1) ?? path)
+      };
+    }).filter((item) => item !== null);
+  }
+  var HttpWorkspacesRepository = class {
+    constructor(fetchImpl = (input, init) => globalThis.fetch(input, init)) {
+      __publicField(this, "fetchImpl", fetchImpl);
+    }
+    async list() {
+      const body = await readJson3(await this.fetchImpl("/api/workspaces", { credentials: "same-origin" }));
+      if (Array.isArray(body)) return body;
+      const wrapped = body;
+      return wrapped.workspaces ?? [];
+    }
+    async get(id) {
+      return readJson3(await this.fetchImpl(`/api/workspaces/${encodeURIComponent(id)}`, {
+        credentials: "same-origin"
+      }));
+    }
+    async create(request2) {
+      return readJson3(await this.fetchImpl("/api/workspaces", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify(request2)
+      }));
+    }
+    async update(id, patch) {
+      return readJson3(await this.fetchImpl(`/api/workspaces/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify(patch)
+      }));
+    }
+    async remove(id, cascade = false) {
+      await readJson3(await this.fetchImpl(
+        `/api/workspaces/${encodeURIComponent(id)}${cascade ? "?cascade=1" : ""}`,
+        { method: "DELETE", credentials: "same-origin" }
+      ));
+    }
+    async saveLayout(id, layout) {
+      const body = await readJson3(await this.fetchImpl(`/api/workspaces/${encodeURIComponent(id)}/layout`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ layout })
+      }));
+      return body.layout ?? null;
+    }
+    // ── 任务 ──
+    async listTasks(workspaceId) {
+      const body = await readJson3(await this.fetchImpl(
+        `/api/workspaces/${encodeURIComponent(workspaceId)}/tasks`,
+        { credentials: "same-origin" }
+      ));
+      return Array.isArray(body) ? body : [];
+    }
+    async createTask(workspaceId, request2) {
+      return readJson3(await this.fetchImpl(
+        `/api/workspaces/${encodeURIComponent(workspaceId)}/tasks`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify(request2)
+        }
+      ));
+    }
+    async getTask(taskId) {
+      return readJson3(await this.fetchImpl(
+        `/api/workspace-tasks/${encodeURIComponent(taskId)}`,
+        { credentials: "same-origin" }
+      ));
+    }
+    async updateTask(taskId, patch) {
+      return readJson3(await this.fetchImpl(
+        `/api/workspace-tasks/${encodeURIComponent(taskId)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify(patch)
+        }
+      ));
+    }
+    async deleteTask(taskId, cascade = false) {
+      await readJson3(await this.fetchImpl(
+        `/api/workspace-tasks/${encodeURIComponent(taskId)}${cascade ? "?cascade=1" : ""}`,
+        { method: "DELETE", credentials: "same-origin" }
+      ));
+    }
+    async saveTaskLayout(taskId, layout) {
+      const body = await readJson3(await this.fetchImpl(
+        `/api/workspace-tasks/${encodeURIComponent(taskId)}/layout`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ layout })
+        }
+      ));
+      return body.layout ?? null;
+    }
+    async deleteSessions(sessionIds) {
+      const ids = [...new Set(sessionIds.filter((id) => typeof id === "string" && id.trim().length > 0))];
+      if (ids.length === 0) return;
+      const body = await readJson3(await this.fetchImpl("/api/sessions/batch-delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ sessionIds: ids })
+      }));
+      if (Array.isArray(body.failed) && body.failed.length > 0) {
+        throw new Error(`\u6709 ${body.failed.length} \u4E2A\u7EC8\u7AEF\u65E0\u6CD5\u5173\u95ED\u3002`);
+      }
+    }
+  };
+  async function loadNewProjectDefaults(fetchImpl = (input, init) => globalThis.fetch(input, init), options = {}) {
+    const [configRes, recentRes] = await Promise.all([
+      fetchImpl("/api/config", { credentials: "same-origin", signal: options.signal }),
+      fetchImpl("/api/recent-paths", { credentials: "same-origin", signal: options.signal })
+    ]);
+    const config = await readJson3(configRes);
+    let recentPaths = [];
+    if (recentRes.ok) {
+      try {
+        recentPaths = normalizePaths2(await recentRes.json());
+      } catch {
+        recentPaths = [];
+      }
+    }
+    return {
+      defaultProvider: parseProvider(config.defaultProvider) ?? "claude",
+      defaultCwd: text5(config.defaultCwd),
+      recentPaths
+    };
+  }
+  async function suggestWorkspacePaths(query, fetchImpl = (input, init) => globalThis.fetch(input, init), options = {}) {
+    const trimmed = query.trim();
+    if (!trimmed) return [];
+    const response = await fetchImpl(`/api/path-suggestions?q=${encodeURIComponent(trimmed)}`, {
+      credentials: "same-origin",
+      signal: options.signal
+    });
+    if (!response.ok) return [];
+    return normalizePaths2(await response.json());
+  }
+  var httpWorkspacesRepository = new HttpWorkspacesRepository();
+
+  // src/web-ui/react/workspaces/host.tsx
   var import_jsx_runtime41 = __toESM(require_jsx_runtime(), 1);
+  var PROVIDERS5 = [
+    { value: "claude", label: "Claude", description: "\u5B8C\u6574 Claude \u4F1A\u8BDD\u80FD\u529B" },
+    { value: "codex", label: "Codex", description: "\u7ED3\u6784\u5316 JSONL \u6216 PTY \u4F1A\u8BDD" },
+    { value: "opencode", label: "OpenCode", description: "\u591A\u6A21\u578B\u7ED3\u6784\u5316\u6216 PTY \u4F1A\u8BDD" },
+    { value: "grok", label: "Grok", description: "Grok Build \u7ED3\u6784\u5316\u6216 PTY \u4F1A\u8BDD" },
+    { value: "qoder", label: "Qoder", description: "Qoder CLI \u7ED3\u6784\u5316\u6216 PTY \u4F1A\u8BDD" },
+    { value: "pi", label: "Pi", description: "Pi \u591A\u6A21\u578B\u7ED3\u6784\u5316\u6216 PTY \u4F1A\u8BDD" }
+  ];
+  function presentError5(error, fallback) {
+    if (!(error instanceof Error) || !error.message || error.message === "Failed to fetch") return fallback;
+    return error.message;
+  }
+  function WorkspacesHost({ repository = httpWorkspacesRepository }) {
+    const controller = (0, import_react18.useSyncExternalStore)(
+      workspacesStore.subscribe,
+      workspacesStore.getSnapshot,
+      workspacesStore.getSnapshot
+    );
+    const [defaults, setDefaults] = (0, import_react18.useState)(null);
+    const [name, setName] = (0, import_react18.useState)("");
+    const [cwd, setCwd] = (0, import_react18.useState)("");
+    const [provider, setProvider] = (0, import_react18.useState)("claude");
+    const [loading, setLoading] = (0, import_react18.useState)(false);
+    const [submitting, setSubmitting] = (0, import_react18.useState)(false);
+    const [error, setError] = (0, import_react18.useState)("");
+    const [suggestions, setSuggestions] = (0, import_react18.useState)([]);
+    const [suggestionsActive, setSuggestionsActive] = (0, import_react18.useState)(false);
+    (0, import_react18.useEffect)(() => {
+      if (!controller.open) return;
+      const abort = new AbortController();
+      setLoading(true);
+      setSubmitting(false);
+      setError("");
+      setDefaults(null);
+      setName("");
+      setCwd(controller.initialCwd);
+      setSuggestions([]);
+      setSuggestionsActive(false);
+      void loadNewProjectDefaults(void 0, { signal: abort.signal }).then((loaded) => {
+        if (abort.signal.aborted) return;
+        setDefaults(loaded);
+        setProvider(loaded.defaultProvider);
+        setCwd((current) => current || loaded.defaultCwd || workspacesStore.getRuntime()?.effectiveCwd() || "");
+      }).catch((loadError) => {
+        if (!abort.signal.aborted) setError(presentError5(loadError, "\u65E0\u6CD5\u52A0\u8F7D\u65B0\u5EFA\u9879\u76EE\u914D\u7F6E\u3002"));
+      }).finally(() => {
+        if (!abort.signal.aborted) setLoading(false);
+      });
+      return () => abort.abort();
+    }, [controller.initialCwd, controller.open, controller.revision]);
+    (0, import_react18.useEffect)(() => {
+      if (!controller.open || !suggestionsActive) return;
+      const abort = new AbortController();
+      const timer = window.setTimeout(() => {
+        void suggestWorkspacePaths(cwd, void 0, { signal: abort.signal }).then((items) => {
+          if (!abort.signal.aborted) setSuggestions(items);
+        }).catch(() => {
+          if (!abort.signal.aborted) setSuggestions([]);
+        });
+      }, 120);
+      return () => {
+        window.clearTimeout(timer);
+        abort.abort();
+      };
+    }, [controller.open, cwd, suggestionsActive]);
+    const effectiveCwd = cwd.trim() || workspacesStore.getRuntime()?.effectiveCwd() || defaults?.defaultCwd || "\u5F53\u524D\u5DE5\u4F5C\u76EE\u5F55";
+    async function submit(event) {
+      event.preventDefault();
+      if (submitting) return;
+      const runtime11 = workspacesStore.getRuntime();
+      if (!runtime11) {
+        setError("\u65B0\u5EFA\u9879\u76EE\u8FD0\u884C\u73AF\u5883\u5C1A\u672A\u5C31\u7EEA\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u540E\u91CD\u8BD5\u3002");
+        return;
+      }
+      const trimmedName = name.trim();
+      if (!trimmedName) {
+        setError("\u8BF7\u8F93\u5165\u9879\u76EE\u540D\u79F0\u3002");
+        return;
+      }
+      const trimmedCwd = cwd.trim() || runtime11.effectiveCwd();
+      if (!trimmedCwd) {
+        setError("\u8BF7\u9009\u62E9\u9879\u76EE\u76EE\u5F55\u3002");
+        return;
+      }
+      workspacesController.setDismissable(false);
+      setSubmitting(true);
+      setError("");
+      try {
+        const created = await repository.create({
+          name: trimmedName,
+          cwd: trimmedCwd,
+          defaultProvider: provider
+        });
+        runtime11.openWorkspace(created);
+        runtime11.toast(`\u5DF2\u521B\u5EFA\u9879\u76EE\u300C${created.name}\u300D`, "success");
+        workspacesController.close();
+      } catch (createError) {
+        setError(presentError5(createError, "\u521B\u5EFA\u9879\u76EE\u5931\u8D25\uFF0C\u8BF7\u68C0\u67E5\u76EE\u5F55\u662F\u5426\u6709\u6548\u3002"));
+      } finally {
+        workspacesController.setDismissable(true);
+        setSubmitting(false);
+      }
+    }
+    return /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+      WandDialogSurface,
+      {
+        open: controller.open,
+        onOpenChange: (open) => {
+          if (!open) workspacesController.close();
+        },
+        title: "\u65B0\u5EFA\u9879\u76EE",
+        description: "\u8D77\u4E00\u4E2A\u9879\u76EE\u540D\u3001\u9009\u62E9\u76EE\u5F55\u4E0E\u9ED8\u8BA4 IDE\u3002\u9879\u76EE\u4E0D\u4F1A\u81EA\u52A8\u542F\u52A8\u4EFB\u4F55\u4F1A\u8BDD\uFF0C\u7A0D\u540E\u5728\u6807\u7B7E\u91CC\u6309\u9700\u6DFB\u52A0\u3002",
+        className: "wand-new-session-dialog wand-new-project-dialog",
+        overlayClassName: "wand-new-session-overlay wand-new-project-overlay",
+        titleClassName: "wand-new-session-title wand-new-project-title",
+        descriptionClassName: "wand-new-session-description wand-new-project-description",
+        headerClassName: "wand-new-session-header wand-new-project-header",
+        closeLabel: "\u5173\u95ED\u65B0\u5EFA\u9879\u76EE",
+        testId: "new-project-dialog",
+        dismissable: !submitting,
+        children: loading ? /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("div", { className: "wand-new-session-loading wand-new-project-loading", role: "status", children: "\u6B63\u5728\u52A0\u8F7D\u65B0\u5EFA\u9879\u76EE\u914D\u7F6E\u2026" }) : /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("form", { className: "wand-new-session-form wand-new-project-form", "aria-busy": submitting, onSubmit: (event) => void submit(event), children: [
+          /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("div", { className: "wand-new-session-body wand-new-project-body", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("div", { className: "wand-new-session-field wand-new-project-field", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("label", { className: "wand-new-session-field-label wand-new-project-field-label", htmlFor: "wand-new-project-name", children: "\u9879\u76EE\u540D\u79F0" }),
+              /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+                "input",
+                {
+                  id: "wand-new-project-name",
+                  className: "wand-new-session-input wand-new-project-input",
+                  type: "text",
+                  value: name,
+                  placeholder: "\u4F8B\u5982\uFF1A\u6211\u7684\u5E94\u7528",
+                  autoComplete: "off",
+                  autoCorrect: "off",
+                  autoCapitalize: "off",
+                  spellCheck: false,
+                  "data-wand-autofocus": "",
+                  "aria-describedby": "wand-new-project-name-hint",
+                  onChange: (event) => setName(event.currentTarget.value)
+                }
+              ),
+              /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("p", { id: "wand-new-project-name-hint", className: "wand-new-session-field-hint wand-new-project-field-hint", children: "\u7528\u4E8E\u5728\u5DE5\u4F5C\u7A7A\u95F4\u5217\u8868\u91CC\u8BC6\u522B\u8FD9\u4E2A\u9879\u76EE\u3002" })
+            ] }),
+            /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("div", { className: "wand-new-session-field wand-new-project-field", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("label", { className: "wand-new-session-field-label wand-new-project-field-label", htmlFor: "wand-new-project-cwd", children: "\u9879\u76EE\u76EE\u5F55" }),
+              /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("div", { className: "wand-new-session-suggestions-wrap wand-new-project-suggestions-wrap", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+                  "input",
+                  {
+                    id: "wand-new-project-cwd",
+                    className: "wand-new-session-input wand-new-project-input",
+                    type: "text",
+                    value: cwd,
+                    placeholder: effectiveCwd,
+                    autoComplete: "off",
+                    autoCorrect: "off",
+                    autoCapitalize: "off",
+                    spellCheck: false,
+                    "aria-invalid": error.includes("\u76EE\u5F55") || void 0,
+                    "aria-describedby": "wand-new-project-cwd-hint",
+                    onFocus: () => setSuggestionsActive(true),
+                    onChange: (event) => setCwd(event.currentTarget.value),
+                    onBlur: () => window.setTimeout(() => setSuggestionsActive(false), 120)
+                  }
+                ),
+                suggestionsActive && suggestions.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("div", { className: "wand-new-session-suggestions wand-new-project-suggestions", role: "listbox", "aria-label": "\u9879\u76EE\u76EE\u5F55\u5EFA\u8BAE", children: suggestions.map((item) => /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)(
+                  "button",
+                  {
+                    type: "button",
+                    className: "wand-new-session-suggestion wand-new-project-suggestion",
+                    role: "option",
+                    "aria-selected": cwd === item.path,
+                    onMouseDown: (event) => event.preventDefault(),
+                    onClick: () => {
+                      setCwd(item.path);
+                      setSuggestionsActive(false);
+                    },
+                    children: [
+                      /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("strong", { children: item.name }),
+                      /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("small", { className: "wand-new-session-suggestion-path wand-new-project-suggestion-path", children: item.path })
+                    ]
+                  },
+                  item.path
+                )) }) : null
+              ] }),
+              /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("p", { id: "wand-new-project-cwd-hint", className: "wand-new-session-field-hint wand-new-project-field-hint", children: "\u9879\u76EE\u951A\u5B9A\u7684\u76EE\u5F55\uFF0C\u7559\u7A7A\u5219\u4F7F\u7528\u5F53\u524D\u76EE\u5F55\u3002" }),
+              defaults && defaults.recentPaths.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("div", { className: "wand-new-session-recent-paths wand-new-project-recent-paths", "aria-label": "\u6700\u8FD1\u4F7F\u7528\u7684\u76EE\u5F55", children: defaults.recentPaths.map((item) => /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+                "button",
+                {
+                  type: "button",
+                  className: `wand-new-session-recent-path wand-new-project-recent-path${cwd === item.path ? " active" : ""}`,
+                  title: item.path,
+                  "aria-pressed": cwd === item.path,
+                  onClick: () => setCwd(item.path),
+                  children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { className: "wand-new-session-recent-path-value wand-new-project-recent-path-value", children: item.path })
+                },
+                item.path
+              )) }) : null
+            ] }),
+            /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("fieldset", { className: "wand-new-session-field wand-new-session-fieldset wand-new-project-field wand-new-project-fieldset", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("legend", { className: "wand-new-session-field-label wand-new-project-field-label", children: "\u9ED8\u8BA4 IDE" }),
+              /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("div", { className: "wand-new-session-choices wand-new-project-providers", role: "radiogroup", "aria-label": "\u9ED8\u8BA4 IDE", children: PROVIDERS5.map((option) => /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)(
+                "button",
+                {
+                  type: "button",
+                  role: "radio",
+                  "aria-checked": provider === option.value,
+                  tabIndex: provider === option.value ? 0 : -1,
+                  className: `wand-new-session-choice wand-new-session-provider-choice wand-new-project-provider${provider === option.value ? " active" : ""}`,
+                  onClick: () => setProvider(option.value),
+                  children: [
+                    /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(ProviderLogo, { provider: option.value, className: "wand-new-session-provider-logo wand-new-project-provider-logo" }),
+                    /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { className: "wand-new-session-choice-label wand-new-project-provider-label", children: option.label }),
+                    /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("span", { className: "wand-new-session-choice-description wand-new-project-provider-description", children: option.description })
+                  ]
+                },
+                option.value
+              )) }),
+              /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("p", { className: "wand-new-session-field-hint wand-new-project-field-hint", children: "\u4E4B\u540E\u5728\u9879\u76EE\u91CC\u300C+\u300D\u65B0\u589E\u6807\u7B7E\u65F6\u4F1A\u9ED8\u8BA4\u7528\u8FD9\u4E2A IDE\uFF0C\u53EF\u5728\u6807\u7B7E\u91CC\u5355\u72EC\u5207\u6362\u3002" })
+            ] })
+          ] }),
+          /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)("div", { className: "wand-new-session-footer wand-new-project-footer", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+              WandButton,
+              {
+                kind: "primary",
+                size: "large",
+                type: "submit",
+                className: "wand-new-session-submit wand-new-project-submit",
+                disabled: submitting || !name.trim(),
+                children: submitting ? "\u6B63\u5728\u521B\u5EFA\u2026" : "\u521B\u5EFA\u9879\u76EE"
+              }
+            ),
+            error ? /* @__PURE__ */ (0, import_jsx_runtime41.jsx)("p", { className: "wand-new-session-error wand-new-project-error", role: "alert", children: error }) : null
+          ] })
+        ] })
+      }
+    );
+  }
+
+  // src/web-ui/react/overlay-host.tsx
+  var import_jsx_runtime42 = __toESM(require_jsx_runtime(), 1);
   function OverlayHost({ portalContainer }) {
-    const current = (0, import_react18.useSyncExternalStore)(
+    const current = (0, import_react19.useSyncExternalStore)(
       overlayStore.subscribe,
       overlayStore.getSnapshot,
       overlayStore.getSnapshot
     );
     const dialog = current.activeDialog;
-    return /* @__PURE__ */ (0, import_jsx_runtime41.jsxs)(PortalContainerProvider, { container: portalContainer, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(ComposerSelectHost, {}),
-      /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(MissionsHost, {}),
-      /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(SettingsHost, { showRestart: () => restartOverlayController.showRestart() }),
-      /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(NewSessionHost, {}),
-      /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(FolderPickerHost, {}),
-      /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(QuickCommitHost, {}),
-      /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(WorktreeMergeHost, {}),
-      /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(FilePreviewHost, {}),
-      /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(RestartOverlayHost, {}),
-      /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(WandToastRegion, { children: current.toasts.map((toast) => /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(PortalContainerProvider, { container: portalContainer, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(ComposerSelectHost, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(MissionsHost, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(WorkspacesHost, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(SettingsHost, { showRestart: () => restartOverlayController.showRestart() }),
+      /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(NewSessionHost, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(FolderPickerHost, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(QuickCommitHost, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(WorktreeMergeHost, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(FilePreviewHost, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(RestartOverlayHost, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(WandToastRegion, { children: current.toasts.map((toast2) => /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
         WandToastItem,
         {
-          open: toast.open,
-          title: toast.message,
-          description: toast.options.description,
-          tone: toast.options.tone,
-          duration: toast.options.duration,
-          onDismiss: () => overlayStore.dismissToast(toast.id)
+          open: toast2.open,
+          title: toast2.message,
+          description: toast2.options.description,
+          tone: toast2.options.tone,
+          duration: toast2.options.duration,
+          onDismiss: () => overlayStore.dismissToast(toast2.id)
         },
-        toast.id
+        toast2.id
       )) }),
-      dialog ? /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
+      dialog ? /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
         WandDialog,
         {
           open: true,
@@ -32249,6 +32749,43 @@
   color: var(--danger);
 }
 
+.wand-workspace-agent-dialog {
+  width: min(620px, calc(100vw - var(--wand-safe-left) - var(--wand-safe-right) - 32px));
+}
+
+.wand-workspace-agent-body {
+  padding-block: 22px;
+}
+
+.wand-workspace-agent-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.wand-workspace-agent-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.wand-workspace-agent-footer > .wand-ui-button-primary {
+  min-width: 150px;
+}
+
+.wand-new-project-providers {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.wand-new-project-provider {
+  min-height: 96px;
+}
+
+.wand-new-project-provider:active {
+  transform: scale(0.97);
+}
+
 .wand-folder-picker-overlay {
   position: fixed;
   inset: 0;
@@ -32733,6 +33270,10 @@
     border-radius: var(--radius-md);
   }
 
+  .wand-new-project-providers {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .wand-folder-picker-dialog {
     width: calc(100vw - var(--wand-safe-left) - var(--wand-safe-right) - 20px);
     max-height: calc(100dvh - var(--wand-safe-top) - var(--wand-safe-bottom) - 20px);
@@ -32860,6 +33401,7 @@
   .wand-new-session-footer { padding: 10px 18px calc(14px + var(--wand-safe-bottom)); }
   .wand-new-session-advanced-summary { max-width: 19ch; }
   .wand-new-session-input { font-size: 16px; }
+  .wand-workspace-agent-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 390px) {
@@ -33365,6 +33907,10 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         return commands2.openNewSession(action.cwd);
       case "missions.open":
         return commands2.openMissions?.();
+      case "workspace.new":
+        return commands2.openNewProject?.();
+      case "workspace.newAt":
+        return commands2.openNewProject?.(action.cwd);
       case "session.quickStart.claude":
         return commands2.quickStartClaudeTerminal();
       case "session.quickStart.codex":
@@ -33446,14 +33992,1001 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   }
 
   // src/web-ui/react/shell/shell-app.tsx
-  var React44 = __toESM(require_react(), 1);
+  var React50 = __toESM(require_react(), 1);
 
-  // src/web-ui/react/shell/shell-file-panel.tsx
+  // src/web-ui/react/shell/shell-main-content.tsx
+  var React49 = __toESM(require_react(), 1);
+
+  // src/web-ui/react/code-editor/host.tsx
   var React41 = __toESM(require_react(), 1);
+  var import_react20 = __toESM(require_react(), 1);
+
+  // src/web-ui/react/code-editor/repository.ts
+  function isRecord6(value) {
+    return !!value && typeof value === "object" && !Array.isArray(value);
+  }
+  function stringValue3(value, fallback = "") {
+    return typeof value === "string" ? value : fallback;
+  }
+  function finiteNumber4(value, fallback = 0) {
+    return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+  }
+  async function readJson4(response) {
+    try {
+      const value = await response.json();
+      return isRecord6(value) ? value : {};
+    } catch {
+      return {};
+    }
+  }
+  function failureFromResponse2(response, value, path, fallback) {
+    return {
+      message: stringValue3(value.error, `${fallback} (HTTP ${response.status})`),
+      status: response.status,
+      size: finiteNumber4(value.size, -1) >= 0 ? finiteNumber4(value.size) : void 0,
+      maxSize: finiteNumber4(value.maxSize, -1) >= 0 ? finiteNumber4(value.maxSize) : void 0
+    };
+  }
+  var HttpCodeEditorRepository = class {
+    constructor(fetchImpl = (input, init) => globalThis.fetch(input, init)) {
+      __publicField(this, "fetchImpl", fetchImpl);
+    }
+    async load(path, options = {}) {
+      const response = await this.fetchImpl(
+        `/api/file-preview?path=${encodeURIComponent(path)}`,
+        { credentials: "same-origin", signal: options.signal }
+      );
+      const value = await readJson4(response);
+      if (!response.ok || typeof value.error === "string") {
+        return { ok: false, failure: failureFromResponse2(response, value, path, "\u6253\u5F00\u6587\u4EF6\u5931\u8D25") };
+      }
+      const preview = normalizeFilePreview(value, path);
+      if (preview.kind !== "text") {
+        return {
+          ok: false,
+          failure: {
+            message: "\u4EC5\u652F\u6301\u7F16\u8F91\u6587\u672C\u6587\u4EF6\u3002",
+            status: 415,
+            size: preview.size
+          }
+        };
+      }
+      const content = preview.content ?? "";
+      const file = {
+        path: preview.path,
+        name: preview.name,
+        ext: preview.ext || fileExtension(preview.name),
+        lang: preview.lang,
+        size: preview.size ?? 0,
+        mime: preview.mime,
+        baseline: content,
+        draft: content,
+        dirty: false
+      };
+      return { ok: true, file };
+    }
+    async save(path, content) {
+      const response = await this.fetchImpl("/api/file-write", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path, content })
+      });
+      const value = await readJson4(response);
+      if (!response.ok || typeof value.error === "string") {
+        return { ok: false, failure: failureFromResponse2(response, value, path, "\u4FDD\u5B58\u6587\u4EF6\u5931\u8D25") };
+      }
+      return {
+        ok: true,
+        result: {
+          path: stringValue3(value.path, path),
+          size: Math.max(0, finiteNumber4(value.size, new TextEncoder().encode(content).byteLength)),
+          mtime: stringValue3(value.mtime) || void 0
+        }
+      };
+    }
+  };
+  var httpCodeEditorRepository = new HttpCodeEditorRepository();
+
+  // src/web-ui/react/code-editor/controller.ts
+  function initialSnapshot2(revision = 0) {
+    return {
+      open: false,
+      revision,
+      activePath: null,
+      tabs: [],
+      file: null,
+      status: "idle",
+      failure: null,
+      saving: false,
+      fontSize: defaultFilePreviewFontSize(),
+      wrap: false
+    };
+  }
+  function unknownFailure2(error, fallback) {
+    return {
+      message: error instanceof Error && error.message ? error.message : fallback
+    };
+  }
+  function isAbort2(error) {
+    return error instanceof DOMException && error.name === "AbortError";
+  }
+  function discardCopy(reason) {
+    if (reason === "switch") {
+      return {
+        title: "\u5207\u6362\u6587\u4EF6\uFF1F",
+        message: "\u5F53\u524D\u6587\u4EF6\u6709\u672A\u4FDD\u5B58\u7684\u6539\u52A8\uFF0C\u5207\u6362\u540E\u4F1A\u4E22\u5931\u3002"
+      };
+    }
+    if (reason === "replace") {
+      return {
+        title: "\u5173\u95ED\u7F16\u8F91\u5668\uFF1F",
+        message: "\u5F53\u524D\u6587\u4EF6\u6709\u672A\u4FDD\u5B58\u7684\u6539\u52A8\uFF0C\u5173\u95ED\u540E\u4F1A\u4E22\u5931\u3002"
+      };
+    }
+    return {
+      title: "\u5173\u95ED\u6587\u4EF6\uFF1F",
+      message: "\u5F53\u524D\u6587\u4EF6\u6709\u672A\u4FDD\u5B58\u7684\u6539\u52A8\uFF0C\u5173\u95ED\u540E\u4F1A\u4E22\u5931\u3002"
+    };
+  }
+  var defaultRuntime2 = {
+    async confirmDiscard(reason, path) {
+      const copy = discardCopy(reason);
+      const result = await wandOverlay.dialog({
+        title: copy.title,
+        description: copy.message,
+        tone: "warning",
+        actions: [
+          { label: "\u7EE7\u7EED\u7F16\u8F91", value: false, kind: "secondary", autoFocus: true },
+          { label: "\u653E\u5F03\u4FEE\u6539", value: true, kind: "danger" }
+        ],
+        dismissable: true
+      });
+      void path;
+      return result.dismissed === false && result.action === true;
+    },
+    notify(message, tone) {
+      wandOverlay.toast(message, { tone });
+    },
+    onSaved() {
+    }
+  };
+  function createCodeEditorModule(options) {
+    const listeners10 = /* @__PURE__ */ new Set();
+    let snapshot9 = initialSnapshot2();
+    let runtime11 = options.runtime ?? defaultRuntime2;
+    let loadSequence = 0;
+    let activeAbort = null;
+    const files = /* @__PURE__ */ new Map();
+    function publish9(patch) {
+      snapshot9 = { ...snapshot9, ...patch, revision: snapshot9.revision + 1 };
+      for (const listener of listeners10) listener();
+    }
+    function tabsFromFiles(activePath) {
+      const tabs = [];
+      for (const file of files.values()) {
+        tabs.push({ path: file.path, name: file.name, dirty: file.dirty });
+      }
+      void activePath;
+      return tabs;
+    }
+    function syncSnapshot(fileOverride) {
+      publish9({
+        tabs: tabsFromFiles(snapshot9.activePath),
+        file: fileOverride !== void 0 ? fileOverride : snapshot9.activePath ? files.get(snapshot9.activePath) ?? null : null
+      });
+    }
+    async function confirmDiscard(reason) {
+      const active = snapshot9.activePath ? files.get(snapshot9.activePath) : null;
+      if (!active || !active.dirty) return true;
+      try {
+        return await runtime11.confirmDiscard(reason, active.path);
+      } catch (error) {
+        runtime11.notify(unknownFailure2(error, "\u65E0\u6CD5\u786E\u8BA4\u662F\u5426\u653E\u5F03\u4FEE\u6539\u3002").message, "error");
+        return false;
+      }
+    }
+    async function load(path) {
+      activeAbort?.abort();
+      const abort = new AbortController();
+      activeAbort = abort;
+      const sequence = ++loadSequence;
+      publish9({
+        open: true,
+        activePath: path,
+        status: "loading",
+        file: null,
+        failure: null
+      });
+      try {
+        const outcome = await options.repository.load(path, { signal: abort.signal });
+        if (sequence !== loadSequence || abort.signal.aborted || !snapshot9.open) return false;
+        activeAbort = null;
+        if (outcome.ok === false || !outcome.file) {
+          publish9({ status: "error", failure: outcome.failure ?? { message: "\u6253\u5F00\u6587\u4EF6\u5931\u8D25" } });
+          return false;
+        }
+        files.set(path, outcome.file);
+        publish9({
+          status: "ready",
+          file: outcome.file,
+          failure: null,
+          tabs: tabsFromFiles(path)
+        });
+        return true;
+      } catch (error) {
+        if (sequence !== loadSequence || abort.signal.aborted || isAbort2(error) || !snapshot9.open) return false;
+        activeAbort = null;
+        publish9({ status: "error", failure: unknownFailure2(error, "\u6253\u5F00\u6587\u4EF6\u5931\u8D25") });
+        return false;
+      }
+    }
+    async function execute(command) {
+      switch (command.type) {
+        case "close": {
+          if (snapshot9.saving) return false;
+          const targetPath = command.path ?? snapshot9.activePath;
+          if (!targetPath) return true;
+          const target = files.get(targetPath);
+          if (target?.dirty) {
+            const wasActive = snapshot9.activePath === targetPath;
+            if (wasActive && !await confirmDiscard("close")) return false;
+          }
+          files.delete(targetPath);
+          const remaining = tabsFromFiles(null).filter((tab) => tab.path !== targetPath);
+          if (remaining.length === 0) {
+            publish9(initialSnapshot2(snapshot9.revision + 1));
+            return true;
+          }
+          const nextActive = snapshot9.activePath === targetPath ? remaining[0].path : snapshot9.activePath;
+          publish9({
+            activePath: nextActive,
+            file: nextActive ? files.get(nextActive) ?? null : null,
+            tabs: remaining,
+            status: nextActive ? "ready" : "idle"
+          });
+          return true;
+        }
+        case "activate": {
+          if (snapshot9.saving) return false;
+          if (snapshot9.activePath === command.path) return true;
+          const next = files.get(command.path) ?? null;
+          publish9({
+            activePath: command.path,
+            file: next,
+            status: next ? "ready" : "loading",
+            failure: null
+          });
+          if (!next) {
+            return load(command.path);
+          }
+          return true;
+        }
+        case "change": {
+          if (!snapshot9.activePath || snapshot9.saving) return false;
+          const active = files.get(snapshot9.activePath);
+          if (!active) return false;
+          const updated = { ...active, draft: command.value, dirty: command.value !== active.baseline };
+          files.set(active.path, updated);
+          syncSnapshot(updated);
+          return true;
+        }
+        case "revert": {
+          if (!snapshot9.activePath) return false;
+          const active = files.get(snapshot9.activePath);
+          if (!active) return false;
+          const reverted = { ...active, draft: active.baseline, dirty: false };
+          files.set(active.path, reverted);
+          syncSnapshot(reverted);
+          return true;
+        }
+        case "save": {
+          if (!snapshot9.activePath || snapshot9.saving) return false;
+          const active = files.get(snapshot9.activePath);
+          if (!active) return false;
+          if (!active.dirty) {
+            runtime11.notify("\u6CA1\u6709\u6539\u52A8", "info");
+            return true;
+          }
+          publish9({ saving: true, failure: null });
+          try {
+            const outcome = await options.repository.save(active.path, active.draft);
+            const current = files.get(active.path) ?? null;
+            if (!current) return false;
+            if (outcome.ok === false) {
+              publish9({ saving: false, failure: outcome.failure });
+              runtime11.notify(outcome.failure.message, "error");
+              return false;
+            }
+            const saved = {
+              ...current,
+              // 只把这次真正写入磁盘的内容设为 baseline；即使未来允许保存中继续
+              // 编辑，也不会把尚未落盘的新 draft 误标成已保存。
+              baseline: active.draft,
+              draft: current.draft,
+              dirty: current.draft !== active.draft,
+              size: outcome.result.size
+            };
+            files.set(active.path, saved);
+            const activeFile = snapshot9.activePath ? files.get(snapshot9.activePath) ?? null : null;
+            publish9({ saving: false, file: activeFile, failure: null, tabs: tabsFromFiles(snapshot9.activePath) });
+            runtime11.notify("\u5DF2\u4FDD\u5B58", "success");
+            try {
+              await runtime11.onSaved?.(active.path);
+            } catch {
+            }
+            return true;
+          } catch (error) {
+            publish9({ saving: false, failure: unknownFailure2(error, "\u4FDD\u5B58\u5931\u8D25\uFF1A\u7F51\u7EDC\u9519\u8BEF") });
+            runtime11.notify(unknownFailure2(error, "\u4FDD\u5B58\u5931\u8D25\uFF1A\u7F51\u7EDC\u9519\u8BEF").message, "error");
+            return false;
+          }
+        }
+        case "wrap.toggle":
+          publish9({ wrap: !snapshot9.wrap });
+          return true;
+        case "font.adjust":
+          publish9({ fontSize: clampFilePreviewFontSize(snapshot9.fontSize + command.delta) });
+          return true;
+      }
+    }
+    const controller = {
+      async open(path) {
+        const trimmed = path.trim();
+        if (!trimmed || snapshot9.saving) return false;
+        if (files.has(trimmed)) {
+          if (snapshot9.activePath === trimmed) {
+            publish9({ open: true });
+            return true;
+          }
+          return execute({ type: "activate", path: trimmed });
+        }
+        return load(trimmed);
+      },
+      execute,
+      closeAll() {
+        files.clear();
+        activeAbort?.abort();
+        activeAbort = null;
+        publish9(initialSnapshot2(snapshot9.revision + 1));
+      },
+      isActive() {
+        return snapshot9.open && snapshot9.activePath !== null;
+      },
+      hasDirty() {
+        for (const file of files.values()) {
+          if (file.dirty) return true;
+        }
+        return false;
+      }
+    };
+    return {
+      controller,
+      store: {
+        subscribe(listener) {
+          listeners10.add(listener);
+          return () => listeners10.delete(listener);
+        },
+        getSnapshot() {
+          return snapshot9;
+        }
+      },
+      configureRuntime(adapter) {
+        const previous = runtime11;
+        runtime11 = adapter;
+        return () => {
+          if (runtime11 === adapter) runtime11 = previous;
+        };
+      }
+    };
+  }
+  var singleton2 = createCodeEditorModule({ repository: httpCodeEditorRepository });
+  var codeEditorController = singleton2.controller;
+  var codeEditorStore = singleton2.store;
+  var configureCodeEditorRuntime = singleton2.configureRuntime;
+
+  // src/web-ui/react/code-editor/styles.ts
+  var codeEditorStyles = String.raw`
+.wand-code-editor-host {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary, #fff);
+  z-index: 12;
+}
+.wand-code-editor-host[hidden] { display: none !important; }
+
+.wand-code-editor-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  flex: 0 0 auto;
+  padding: 0 8px;
+  background: var(--bg-secondary, #f7f7f8);
+  border-bottom: 1px solid var(--border-subtle, #e5e7eb);
+  min-height: 36px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.wand-code-editor-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  margin: 4px 2px 0;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  background: transparent;
+  color: var(--text-secondary, #555);
+  font-size: 0.8125rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s;
+}
+.wand-code-editor-tab:hover { background: var(--bg-tertiary, #eee); color: var(--text-primary, #111); }
+.wand-code-editor-tab.active {
+  background: var(--bg-primary, #fff);
+  border-color: var(--border-subtle, #e5e7eb);
+  color: var(--text-primary, #111);
+}
+.wand-code-editor-tab-dirty {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent, #2563eb);
+  display: inline-block;
+  flex: 0 0 auto;
+}
+.wand-code-editor-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted, #999);
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 0;
+}
+.wand-code-editor-tab-close:hover { background: var(--bg-hover, #ddd); color: var(--text-primary, #111); }
+
+.wand-code-editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  background: var(--bg-primary, #fff);
+  border-bottom: 1px solid var(--border-subtle, #e5e7eb);
+  font-size: 0.8125rem;
+  color: var(--text-secondary, #555);
+  min-height: 32px;
+}
+.wand-code-editor-toolbar-spacer { flex: 1 1 auto; }
+.wand-code-editor-toolbar button.wand-code-editor-btn {
+  border: 1px solid var(--border-subtle, #e5e7eb);
+  background: var(--bg-secondary, #f7f7f8);
+  color: var(--text-primary, #111);
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+.wand-code-editor-toolbar button.wand-code-editor-btn:hover:not(:disabled) { background: var(--bg-tertiary, #eee); }
+.wand-code-editor-toolbar button.wand-code-editor-btn:disabled { opacity: 0.5; cursor: default; }
+.wand-code-editor-toolbar button.wand-code-editor-btn.primary {
+  background: var(--accent, #2563eb);
+  border-color: var(--accent, #2563eb);
+  color: #fff;
+}
+.wand-code-editor-dirty-mark {
+  color: var(--accent, #2563eb);
+  font-size: 0.75rem;
+}
+
+.wand-code-editor-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  background: var(--bg-primary, #fff);
+}
+.wand-code-editor-lines {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 12px 8px 12px 12px;
+  text-align: right;
+  color: var(--text-muted, #999);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  line-height: 1.55;
+  white-space: pre;
+  user-select: none;
+  overflow: hidden;
+  tab-size: 2;
+}
+.wand-code-editor-area {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: auto;
+}
+.wand-code-editor-content,
+.wand-code-editor-textarea {
+  margin: 0;
+  padding: 12px 14px;
+  border: 0;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: inherit;
+  line-height: 1.55;
+  white-space: pre;
+  tab-size: 2;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+.wand-code-editor-content {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  color: var(--text-primary, #111);
+}
+.wand-code-editor-content code { font-family: inherit; }
+.wand-code-editor-textarea {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--text-primary, #111);
+  resize: none;
+  outline: none;
+  overflow: hidden;
+}
+.wand-code-editor-textarea::selection { background: rgba(37, 99, 235, 0.22); }
+.wand-code-editor-host.wrap .wand-code-editor-content,
+.wand-code-editor-host.wrap .wand-code-editor-textarea { white-space: pre-wrap; overflow-wrap: break-word; }
+
+/* syntax highlight (reuses file-preview palette) */
+.wand-code-editor-content .wand-file-preview-syntax-keyword { color: #8250df; }
+.wand-code-editor-content .wand-file-preview-syntax-string { color: #0a7d37; }
+.wand-code-editor-content .wand-file-preview-syntax-number { color: #b35900; }
+.wand-code-editor-content .wand-file-preview-syntax-comment { color: #6a737d; font-style: italic; }
+.wand-code-editor-content .wand-file-preview-syntax-operator { color: #b2085f; }
+
+.wand-code-editor-state {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted, #999);
+  font-size: 0.875rem;
+  padding: 24px;
+  text-align: center;
+}
+.wand-code-editor-state.error { color: #c0392b; }
+.wand-code-editor-inline-error {
+  margin: 0;
+  padding: 6px 12px;
+  background: #fdecea;
+  color: #c0392b;
+  font-size: 0.8125rem;
+}
+`;
+
+  // src/web-ui/react/code-editor/host.tsx
+  var import_jsx_runtime43 = __toESM(require_jsx_runtime(), 1);
+  function run2(command) {
+    void codeEditorController.execute(command);
+  }
+  function SyntaxLayer({ content }) {
+    const tokens = tokenizeFilePreviewCode(content);
+    return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("code", { children: tokens.map((token, index2) => token.kind ? /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: `wand-file-preview-syntax-${token.kind}`, children: token.value }, index2) : /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(import_react20.Fragment, { children: token.value }, index2)) });
+  }
+  function EditorBody({ snapshot: snapshot9, editorRef }) {
+    const contentRef = (0, import_react20.useRef)(null);
+    const linesRef = (0, import_react20.useRef)(null);
+    if (snapshot9.status === "loading") {
+      return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "wand-code-editor-state", role: "status", children: "\u6B63\u5728\u6253\u5F00\u6587\u4EF6\u2026" });
+    }
+    if (snapshot9.status === "error") {
+      return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "wand-code-editor-state error", role: "alert", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { "aria-hidden": "true", children: "!" }),
+        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("strong", { children: snapshot9.failure?.message || "\u6253\u5F00\u6587\u4EF6\u5931\u8D25" })
+      ] });
+    }
+    const file = snapshot9.file;
+    if (!file) return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "wand-code-editor-state", children: "\u9009\u62E9\u6587\u4EF6\u540E\u5C06\u5728\u8FD9\u91CC\u7F16\u8F91\u3002" });
+    const content = file.draft;
+    const lineCount = Math.max(1, content.split("\n").length);
+    return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "wand-code-editor-body", style: { fontSize: `${snapshot9.fontSize}px` }, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+        "pre",
+        {
+          ref: linesRef,
+          className: "wand-code-editor-lines",
+          "aria-hidden": "true",
+          style: { fontSize: `${snapshot9.fontSize}px` },
+          children: Array.from({ length: lineCount }, (_value, index2) => index2 + 1).join("\n")
+        }
+      ),
+      /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "wand-code-editor-area", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("pre", { ref: contentRef, className: "wand-code-editor-content", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(SyntaxLayer, { content }) }),
+        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+          "textarea",
+          {
+            ref: editorRef,
+            className: "wand-code-editor-textarea",
+            "aria-label": `\u7F16\u8F91 ${file.name}`,
+            autoComplete: "off",
+            autoCorrect: "off",
+            autoCapitalize: "off",
+            spellCheck: false,
+            wrap: "off",
+            value: content,
+            onChange: (event) => run2({ type: "change", value: event.currentTarget.value }),
+            onKeyDown: (event) => handleEditorKeydown(event, content),
+            onScroll: (event) => {
+              const target = event.currentTarget;
+              const layer = contentRef.current;
+              if (layer) {
+                layer.scrollTop = target.scrollTop;
+                layer.scrollLeft = target.scrollLeft;
+              }
+              const lines = linesRef.current;
+              if (lines) lines.scrollTop = target.scrollTop;
+            }
+          }
+        )
+      ] })
+    ] });
+  }
+  function handleEditorKeydown(event, content) {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      event.stopPropagation();
+      run2({ type: "save" });
+      return;
+    }
+    if (event.key === "Tab") {
+      event.preventDefault();
+      const input = event.currentTarget;
+      const start = input.selectionStart;
+      const end = input.selectionEnd;
+      const value = `${content.slice(0, start)}  ${content.slice(end)}`;
+      run2({ type: "change", value });
+      requestAnimationFrame(() => {
+        input.selectionStart = start + 2;
+        input.selectionEnd = start + 2;
+      });
+      return;
+    }
+  }
+  function CodeEditorHost() {
+    const snapshot9 = (0, import_react20.useSyncExternalStore)(
+      codeEditorStore.subscribe,
+      codeEditorStore.getSnapshot,
+      codeEditorStore.getSnapshot
+    );
+    const editorRef = (0, import_react20.useRef)(null);
+    (0, import_react20.useEffect)(() => {
+      if (snapshot9.status !== "ready" || !snapshot9.file) return;
+      const editor = editorRef.current;
+      if (!editor) return;
+      editor.focus();
+    }, [snapshot9.activePath, snapshot9.status]);
+    (0, import_react20.useEffect)(() => {
+      if (snapshot9.status !== "ready") return;
+      const editor = editorRef.current;
+      if (!editor) return;
+      editor.scrollTop = 0;
+    }, [snapshot9.activePath]);
+    function handleKeydown(event) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (snapshot9.activePath) run2({ type: "close", path: snapshot9.activePath });
+      }
+    }
+    const hidden = !snapshot9.open || !snapshot9.activePath;
+    return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(import_jsx_runtime43.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("style", { id: "wand-code-editor-styles", children: codeEditorStyles }),
+      /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+        "div",
+        {
+          className: `wand-code-editor-host${snapshot9.wrap ? " wrap" : ""}`,
+          hidden,
+          onKeyDownCapture: handleKeydown,
+          "aria-hidden": hidden,
+          children: [
+            snapshot9.tabs.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "wand-code-editor-tabs", role: "tablist", "aria-label": "\u6253\u5F00\u7684\u6587\u4EF6", children: snapshot9.tabs.map((tab) => /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+              "button",
+              {
+                type: "button",
+                role: "tab",
+                "aria-selected": snapshot9.activePath === tab.path,
+                className: `wand-code-editor-tab${snapshot9.activePath === tab.path ? " active" : ""}`,
+                title: tab.path,
+                onClick: () => run2({ type: "activate", path: tab.path }),
+                children: [
+                  tab.dirty && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "wand-code-editor-tab-dirty", "aria-label": "\u672A\u4FDD\u5B58" }),
+                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "wand-code-editor-tab-name", children: tab.name }),
+                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+                    "span",
+                    {
+                      className: "wand-code-editor-tab-close",
+                      role: "button",
+                      "aria-label": `\u5173\u95ED ${tab.name}`,
+                      onClick: (event) => {
+                        event.stopPropagation();
+                        run2({ type: "close", path: tab.path });
+                      },
+                      children: "\u2715"
+                    }
+                  )
+                ]
+              },
+              tab.path
+            )) }),
+            snapshot9.file && /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "wand-code-editor-toolbar", "aria-label": "\u7F16\u8F91\u5668\u5DE5\u5177\u680F", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "wand-code-editor-dirty-mark", children: snapshot9.file.dirty ? "\u25CF \u672A\u4FDD\u5B58" : "\u5DF2\u4FDD\u5B58" }),
+              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "wand-code-editor-toolbar-spacer" }),
+              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+                "button",
+                {
+                  type: "button",
+                  className: "wand-code-editor-btn primary",
+                  disabled: snapshot9.saving || !snapshot9.file.dirty,
+                  onClick: () => run2({ type: "save" }),
+                  children: snapshot9.saving ? "\u4FDD\u5B58\u4E2D\u2026" : "\u4FDD\u5B58 (\u2318S)"
+                }
+              ),
+              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+                "button",
+                {
+                  type: "button",
+                  className: "wand-code-editor-btn",
+                  disabled: snapshot9.saving || !snapshot9.file.dirty,
+                  onClick: () => run2({ type: "revert" }),
+                  children: "\u64A4\u9500\u6539\u52A8"
+                }
+              ),
+              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+                "button",
+                {
+                  type: "button",
+                  className: "wand-code-editor-btn",
+                  onClick: () => run2({ type: "wrap.toggle" }),
+                  "aria-pressed": snapshot9.wrap,
+                  children: "\u81EA\u52A8\u6362\u884C"
+                }
+              ),
+              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+                "button",
+                {
+                  type: "button",
+                  className: "wand-code-editor-btn",
+                  "aria-label": "\u7F29\u5C0F\u5B57\u53F7",
+                  onClick: () => run2({ type: "font.adjust", delta: -1 }),
+                  children: "A\u2212"
+                }
+              ),
+              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { "aria-label": `\u5B57\u53F7 ${snapshot9.fontSize}`, children: snapshot9.fontSize }),
+              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+                "button",
+                {
+                  type: "button",
+                  className: "wand-code-editor-btn",
+                  "aria-label": "\u653E\u5927\u5B57\u53F7",
+                  onClick: () => run2({ type: "font.adjust", delta: 1 }),
+                  children: "A+"
+                }
+              )
+            ] }),
+            snapshot9.status === "ready" && snapshot9.failure ? /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("p", { className: "wand-code-editor-inline-error", role: "alert", children: snapshot9.failure.message }) : null,
+            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(EditorBody, { snapshot: snapshot9, editorRef })
+          ]
+        }
+      )
+    ] });
+  }
+
+  // src/web-ui/react/workspaces/workspace-context.ts
+  var EMPTY = {
+    workspaceId: null,
+    workspaceName: "",
+    taskId: null,
+    taskName: "",
+    cwd: "",
+    layout: null
+  };
+  var context = EMPTY;
+  var listeners9 = /* @__PURE__ */ new Set();
+  var workspaceContextStore = {
+    subscribe(listener) {
+      listeners9.add(listener);
+      return () => {
+        listeners9.delete(listener);
+      };
+    },
+    getSnapshot() {
+      return context;
+    },
+    getServerSnapshot() {
+      return EMPTY;
+    }
+  };
+  function setActiveWorkspaceContext(next) {
+    context = { ...context, ...next };
+    for (const listener of listeners9) listener();
+  }
+  function clearActiveWorkspaceContext() {
+    if (context === EMPTY) return;
+    context = EMPTY;
+    for (const listener of listeners9) listener();
+  }
+
+  // src/web-ui/react/workspaces/workspace-tab-bar.tsx
+  var React42 = __toESM(require_react(), 1);
+
+  // src/web-ui/react/workspaces/session-order.ts
+  function workspaceProviderLabel(provider) {
+    switch (provider) {
+      case "claude":
+        return "Claude";
+      case "codex":
+        return "Codex";
+      case "opencode":
+        return "OpenCode";
+      case "grok":
+        return "Grok";
+      case "qoder":
+        return "Qoder";
+      case "pi":
+        return "Pi";
+      default:
+        return "\u7EC8\u7AEF";
+    }
+  }
+  function orderWorkspaceSessions(sessions) {
+    return sessions.map((session, index2) => ({ session, index: index2, startedAt: Date.parse(session.startedAt || "") })).sort((left, right) => {
+      const leftHasTime = Number.isFinite(left.startedAt);
+      const rightHasTime = Number.isFinite(right.startedAt);
+      if (leftHasTime && rightHasTime && left.startedAt !== right.startedAt) {
+        return left.startedAt - right.startedAt;
+      }
+      if (leftHasTime !== rightHasTime) return leftHasTime ? -1 : 1;
+      return left.index - right.index;
+    }).map(({ session }) => session);
+  }
+  function workspaceSessionLabel(session, index2) {
+    const title = (session.title || "").trim();
+    return title || `${workspaceProviderLabel(session.provider)} ${index2 + 1}`;
+  }
+
+  // src/web-ui/react/workspaces/workspace-agent-dialog.tsx
+  var import_react21 = __toESM(require_react(), 1);
+  var import_jsx_runtime44 = __toESM(require_jsx_runtime(), 1);
+  var WORKSPACE_AGENT_OPTIONS = [
+    { value: "claude", label: "Claude", description: "Claude Code" },
+    { value: "codex", label: "Codex", description: "OpenAI Codex CLI" },
+    { value: "opencode", label: "OpenCode", description: "OpenCode CLI" },
+    { value: "grok", label: "Grok", description: "Grok Build CLI" },
+    { value: "qoder", label: "Qoder", description: "Qoder CLI" },
+    { value: "pi", label: "Pi", description: "Pi coding agent" }
+  ];
+  var PROVIDER_VALUES2 = WORKSPACE_AGENT_OPTIONS.map((option) => option.value);
+  var RADIO_NAVIGATION_KEYS2 = /* @__PURE__ */ new Set([
+    "ArrowLeft",
+    "ArrowRight",
+    "ArrowUp",
+    "ArrowDown",
+    "Home",
+    "End"
+  ]);
+  function presentError6(error) {
+    if (error instanceof Error && error.message) return error.message;
+    return "\u65E0\u6CD5\u65B0\u5EFA Agent \u5BF9\u8BDD\uFF0C\u8BF7\u786E\u8BA4\u5BF9\u5E94 CLI \u5DF2\u6B63\u786E\u5B89\u88C5\u3002";
+  }
+  function WorkspaceAgentDialog({
+    open,
+    initialProvider = "claude",
+    onConfirm,
+    onDismiss
+  }) {
+    const [provider, setProvider] = (0, import_react21.useState)(initialProvider);
+    const [submitting, setSubmitting] = (0, import_react21.useState)(false);
+    const [error, setError] = (0, import_react21.useState)("");
+    const providerRefs = (0, import_react21.useRef)({});
+    (0, import_react21.useEffect)(() => {
+      if (!open) return;
+      setProvider(initialProvider);
+      setSubmitting(false);
+      setError("");
+    }, [initialProvider, open]);
+    function navigateProvider(event, current) {
+      if (!RADIO_NAVIGATION_KEYS2.has(event.key)) return;
+      event.preventDefault();
+      const next = nextChoice(PROVIDER_VALUES2, current, event.key);
+      setProvider(next);
+      window.requestAnimationFrame(() => providerRefs.current[next]?.focus());
+    }
+    async function submit(event) {
+      event.preventDefault();
+      if (submitting) return;
+      setSubmitting(true);
+      setError("");
+      try {
+        await onConfirm(provider);
+        onDismiss();
+      } catch (createError) {
+        setError(presentError6(createError));
+      } finally {
+        setSubmitting(false);
+      }
+    }
+    return /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(
+      WandDialogSurface,
+      {
+        open,
+        onOpenChange: (nextOpen) => {
+          if (!nextOpen) onDismiss();
+        },
+        title: "\u9009\u62E9 Agent",
+        description: "\u5728\u5F53\u524D\u4EFB\u52A1\u7684\u540C\u4E00 worktree \u4E2D\u65B0\u589E\u4E00\u4E2A\u72EC\u7ACB\u5BF9\u8BDD\u3002",
+        className: "wand-new-session-dialog wand-workspace-agent-dialog",
+        overlayClassName: "wand-new-session-overlay",
+        titleClassName: "wand-new-session-title",
+        descriptionClassName: "wand-new-session-description",
+        headerClassName: "wand-new-session-header",
+        closeLabel: "\u5173\u95ED Agent \u9009\u62E9",
+        testId: "workspace-agent-dialog",
+        dismissable: !submitting,
+        children: /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("form", { className: "wand-new-session-form", "aria-busy": submitting, onSubmit: (event) => void submit(event), children: [
+          /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("div", { className: "wand-new-session-body wand-workspace-agent-body", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("fieldset", { className: "wand-new-session-fieldset", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("legend", { className: "wand-new-session-field-label", children: "Agent" }),
+              /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("div", { className: "wand-new-session-choices wand-workspace-agent-options", role: "radiogroup", "aria-label": "Agent", children: WORKSPACE_AGENT_OPTIONS.map((option) => /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)(
+                "button",
+                {
+                  ref: (element) => {
+                    providerRefs.current[option.value] = element;
+                  },
+                  type: "button",
+                  role: "radio",
+                  "aria-checked": provider === option.value,
+                  tabIndex: provider === option.value ? 0 : -1,
+                  className: `wand-new-session-choice wand-new-session-provider-choice${provider === option.value ? " active" : ""}`,
+                  "data-wand-autofocus": provider === option.value ? "" : void 0,
+                  onClick: () => setProvider(option.value),
+                  onKeyDown: (event) => navigateProvider(event, provider),
+                  children: [
+                    /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(ProviderLogo, { provider: option.value, className: "wand-new-session-provider-logo" }),
+                    /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "wand-new-session-choice-label", children: option.label }),
+                    /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "wand-new-session-choice-description", children: option.description })
+                  ]
+                },
+                option.value
+              )) })
+            ] }),
+            error ? /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("p", { className: "wand-new-session-error", role: "alert", children: error }) : null
+          ] }),
+          /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("div", { className: "wand-new-session-footer wand-workspace-agent-footer", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(WandButton, { kind: "ghost", disabled: submitting, onClick: onDismiss, children: "\u53D6\u6D88" }),
+            /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(WandButton, { kind: "primary", size: "large", type: "submit", disabled: submitting, children: submitting ? "\u6B63\u5728\u521B\u5EFA\u2026" : `\u4F7F\u7528 ${WORKSPACE_AGENT_OPTIONS.find((option) => option.value === provider)?.label ?? provider}` })
+          ] })
+        ] })
+      }
+    );
+  }
 
   // src/web-ui/react/shell/ui-store-react.tsx
-  var import_react19 = __toESM(require_react(), 1);
-  var UiStoreContext = (0, import_react19.createContext)(null);
+  var import_react22 = __toESM(require_react(), 1);
+  var UiStoreContext = (0, import_react22.createContext)(null);
   function createUiStoreExternalSource(store) {
     return {
       subscribe: (listener) => store.subscribe(listener),
@@ -33461,10 +34994,10 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     };
   }
   function UiStoreProvider({ store, children }) {
-    return (0, import_react19.createElement)(UiStoreContext.Provider, { value: store }, children);
+    return (0, import_react22.createElement)(UiStoreContext.Provider, { value: store }, children);
   }
   function useUiStore() {
-    const store = (0, import_react19.useContext)(UiStoreContext);
+    const store = (0, import_react22.useContext)(UiStoreContext);
     if (!store) {
       throw new Error("useUiStore must be used inside UiStoreProvider");
     }
@@ -33472,16 +35005,2175 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   }
   function useUiStoreSnapshot() {
     const store = useUiStore();
-    const source = (0, import_react19.useMemo)(() => createUiStoreExternalSource(store), [store]);
-    return (0, import_react19.useSyncExternalStore)(source.subscribe, source.getSnapshot, source.getSnapshot);
+    const source = (0, import_react22.useMemo)(() => createUiStoreExternalSource(store), [store]);
+    return (0, import_react22.useSyncExternalStore)(source.subscribe, source.getSnapshot, source.getSnapshot);
   }
   function useUiDispatch() {
     const store = useUiStore();
-    return (0, import_react19.useCallback)((action) => store.dispatch(action), [store]);
+    return (0, import_react22.useCallback)((action) => store.dispatch(action), [store]);
+  }
+
+  // src/web-ui/react/workspaces/layout-tree.ts
+  function mapPanes(node, fn) {
+    if (node.type === "pane") return fn(node);
+    const [left, right] = node.children;
+    return { ...node, children: [mapPanes(left, fn), mapPanes(right, fn)] };
+  }
+  function setRatioAtPath(layout, path, ratio) {
+    return setRatioAt(layout, path, 0, ratio);
+  }
+  function setRatioAt(node, path, depth, ratio) {
+    if (node.type === "pane") return node;
+    if (depth >= path.length) return { ...node, ratio };
+    const index2 = path[depth] ?? 0;
+    const [left, right] = node.children;
+    const next = index2 === 0 ? setRatioAt(left, path, depth + 1, ratio) : setRatioAt(right, path, depth + 1, ratio);
+    return { ...node, children: index2 === 0 ? [next, right] : [left, next] };
+  }
+  function clampActive(pane) {
+    const max2 = Math.max(0, pane.tabs.length - 1);
+    const active = pane.tabs.length === 0 ? 0 : Math.min(Math.max(0, pane.active), max2);
+    return active === pane.active ? pane : { type: "pane", active, tabs: pane.tabs };
+  }
+  function pruneEmpty(node) {
+    if (node.type === "pane") return node;
+    const [left, right] = node.children.map(pruneEmpty);
+    const leftEmpty = left.type === "pane" && left.tabs.length === 0;
+    const rightEmpty = right.type === "pane" && right.tabs.length === 0;
+    if (leftEmpty && rightEmpty) return left;
+    if (leftEmpty) return right;
+    if (rightEmpty) return left;
+    return { ...node, children: [left, right] };
+  }
+  function removeTab(layout, tabId) {
+    const next = mapPanes(layout, (pane) => {
+      const index2 = pane.tabs.findIndex((tab) => tab.id === tabId);
+      if (index2 < 0) return pane;
+      return { type: "pane", active: pane.active, tabs: pane.tabs.filter((tab) => tab.id !== tabId) };
+    });
+    return pruneEmpty(mapPanes(next, (pane) => clampActive(pane)));
+  }
+  function findLayoutTab(node, tabId) {
+    if (node.type === "pane") return node.tabs.find((tab) => tab.id === tabId);
+    return findLayoutTab(node.children[0], tabId) ?? findLayoutTab(node.children[1], tabId);
+  }
+
+  // src/web-ui/react/workspaces/window-layout.ts
+  function sessionPaneTab(sessionId) {
+    return { id: `tab-${sessionId}`, kind: "session", sessionId };
+  }
+  function paneWith(tab) {
+    return { type: "pane", tabs: [tab], active: 0 };
+  }
+  function layoutTabs(node) {
+    return node.type === "pane" ? node.tabs : [...layoutTabs(node.children[0]), ...layoutTabs(node.children[1])];
+  }
+  function layoutSessionIds(node) {
+    return layoutTabs(node).filter((tab) => tab.kind === "session").map((tab) => tab.sessionId);
+  }
+  function activeLayoutTab(node, preferredId) {
+    if (preferredId) {
+      const preferred = findLayoutTab(node, preferredId);
+      if (preferred) return preferred;
+    }
+    if (node.type === "pane") return node.tabs[node.active] ?? node.tabs[0];
+    return activeLayoutTab(node.children[0]) ?? activeLayoutTab(node.children[1]);
+  }
+  function activeWorkWindow(layout) {
+    if (!layout || layout.windows.length === 0) return null;
+    return layout.windows.find((window2) => window2.id === layout.activeWindowId) ?? layout.windows[0] ?? null;
+  }
+  function activeWorkWindowTab(layout) {
+    const window2 = activeWorkWindow(layout);
+    return window2 ? activeLayoutTab(window2.layout, window2.activeTabId) : void 0;
+  }
+  function isTaskWindowLayout(value) {
+    return Boolean(value && value.type === "windows" && Array.isArray(value.windows));
+  }
+  function uniqueWindowId(base, used) {
+    let candidate = base || "window";
+    let suffix = 2;
+    while (used.has(candidate)) candidate = `${base || "window"}-${suffix++}`;
+    used.add(candidate);
+    return candidate;
+  }
+  function windowIdForTab(tab) {
+    if (tab.kind === "session") return `window-${tab.sessionId}`;
+    return `window-${tab.id}`;
+  }
+  function normalizeNode(node, validSessions, seenTabs) {
+    if (node.type === "pane") {
+      const valid = node.tabs.filter((tab) => {
+        if (seenTabs.has(tab.id)) return false;
+        if (tab.kind === "session" && !validSessions.has(tab.sessionId)) return false;
+        seenTabs.add(tab.id);
+        return true;
+      });
+      if (valid.length === 0) return { node: { type: "pane", tabs: [], active: 0 }, extras: [] };
+      const preferred = node.tabs[node.active];
+      const keep = preferred && valid.some((tab) => tab.id === preferred.id) ? preferred : valid[0];
+      return {
+        node: paneWith(keep),
+        extras: valid.filter((tab) => tab.id !== keep.id)
+      };
+    }
+    const left = normalizeNode(node.children[0], validSessions, seenTabs);
+    const right = normalizeNode(node.children[1], validSessions, seenTabs);
+    const leftEmpty = layoutTabs(left.node).length === 0;
+    const rightEmpty = layoutTabs(right.node).length === 0;
+    const extras = [...left.extras, ...right.extras];
+    if (leftEmpty && rightEmpty) return { node: left.node, extras };
+    if (leftEmpty) return { node: right.node, extras };
+    if (rightEmpty) return { node: left.node, extras };
+    return {
+      node: { ...node, children: [left.node, right.node] },
+      extras
+    };
+  }
+  function reconcileTaskWindowLayout(persisted, sessionIds, preferredSessionId) {
+    const validSessions = new Set(sessionIds);
+    const sourceWindows = isTaskWindowLayout(persisted) ? persisted.windows : persisted ? [{ id: "window-legacy", layout: persisted }] : [];
+    const seenTabs = /* @__PURE__ */ new Set();
+    const usedWindowIds = /* @__PURE__ */ new Set();
+    const windows = [];
+    for (const source of sourceWindows) {
+      const normalized = normalizeNode(source.layout, validSessions, seenTabs);
+      const tabs = layoutTabs(normalized.node);
+      if (tabs.length > 0) {
+        const id = uniqueWindowId(source.id, usedWindowIds);
+        const active = activeLayoutTab(normalized.node, source.activeTabId);
+        windows.push({ id, layout: normalized.node, activeTabId: active?.id });
+      }
+      for (const extra of normalized.extras) {
+        const id = uniqueWindowId(windowIdForTab(extra), usedWindowIds);
+        windows.push({ id, layout: paneWith(extra), activeTabId: extra.id });
+      }
+    }
+    for (const sessionId of sessionIds) {
+      const tab = sessionPaneTab(sessionId);
+      if (seenTabs.has(tab.id)) continue;
+      seenTabs.add(tab.id);
+      const id = uniqueWindowId(windowIdForTab(tab), usedWindowIds);
+      windows.push({ id, layout: paneWith(tab), activeTabId: tab.id });
+    }
+    const persistedActive = isTaskWindowLayout(persisted) ? persisted.activeWindowId : null;
+    const preferredWindow = preferredSessionId ? windows.find((window2) => layoutSessionIds(window2.layout).includes(preferredSessionId)) : void 0;
+    const activeWindowId = preferredWindow?.id ?? windows.find((window2) => window2.id === persistedActive)?.id ?? windows[0]?.id ?? null;
+    return { type: "windows", windows, activeWindowId };
+  }
+  function activateWorkWindow(layout, windowId) {
+    if (!layout.windows.some((window2) => window2.id === windowId) || layout.activeWindowId === windowId) return layout;
+    return { ...layout, activeWindowId: windowId };
+  }
+  function focusWorkWindowTab(layout, windowId, tabId) {
+    let changed = layout.activeWindowId !== windowId;
+    const windows = layout.windows.map((window2) => {
+      if (window2.id !== windowId || !findLayoutTab(window2.layout, tabId)) return window2;
+      if (window2.activeTabId === tabId) return window2;
+      changed = true;
+      return { ...window2, activeTabId: tabId };
+    });
+    return changed ? { ...layout, activeWindowId: windowId, windows } : layout;
+  }
+  function replaceWorkWindowLayout(layout, windowId, nextRoot, activeTabId) {
+    const windows = layout.windows.map((window2) => window2.id === windowId ? {
+      ...window2,
+      layout: nextRoot,
+      activeTabId: activeLayoutTab(nextRoot, activeTabId ?? window2.activeTabId)?.id
+    } : window2);
+    return { ...layout, windows };
+  }
+  function addSessionWindow(layout, sessionId, activate = true) {
+    const existing = layout.windows.find((window3) => layoutSessionIds(window3.layout).includes(sessionId));
+    if (existing) return activate ? activateWorkWindow(layout, existing.id) : layout;
+    const tab = sessionPaneTab(sessionId);
+    const used = new Set(layout.windows.map((window3) => window3.id));
+    const window2 = {
+      id: uniqueWindowId(windowIdForTab(tab), used),
+      layout: paneWith(tab),
+      activeTabId: tab.id
+    };
+    return {
+      ...layout,
+      windows: [...layout.windows, window2],
+      activeWindowId: activate ? window2.id : layout.activeWindowId ?? window2.id
+    };
+  }
+  function findSessionTab(layout, sessionId) {
+    for (const window2 of layout.windows) {
+      const tab = layoutTabs(window2.layout).find((candidate) => candidate.kind === "session" && candidate.sessionId === sessionId);
+      if (tab) return tab;
+    }
+    return void 0;
+  }
+  function splitBesideTab(node, targetTabId, moving, dir) {
+    if (node.type === "pane") {
+      if (!node.tabs.some((tab) => tab.id === targetTabId)) return node;
+      return {
+        type: "split",
+        dir,
+        ratio: 0.5,
+        children: [node, paneWith(moving)]
+      };
+    }
+    if (findLayoutTab(node.children[0], targetTabId)) {
+      return { ...node, children: [splitBesideTab(node.children[0], targetTabId, moving, dir), node.children[1]] };
+    }
+    if (findLayoutTab(node.children[1], targetTabId)) {
+      return { ...node, children: [node.children[0], splitBesideTab(node.children[1], targetTabId, moving, dir)] };
+    }
+    return node;
+  }
+  function moveSessionBeside(layout, sourceSessionId, targetWindowId, targetTabId, dir) {
+    const moving = findSessionTab(layout, sourceSessionId);
+    const targetBefore = layout.windows.find((window2) => window2.id === targetWindowId);
+    const target = targetBefore && activeLayoutTab(targetBefore.layout, targetTabId ?? targetBefore.activeTabId);
+    if (!moving || !target || moving.id === target.id) return layout;
+    let windows = layout.windows.map((window2) => findLayoutTab(window2.layout, moving.id) ? { ...window2, layout: removeTab(window2.layout, moving.id) } : window2).filter((window2) => layoutTabs(window2.layout).length > 0);
+    const targetIndex = windows.findIndex((window2) => window2.id === targetWindowId);
+    if (targetIndex < 0) return layout;
+    const targetWindow = windows[targetIndex];
+    const nextTarget = {
+      ...targetWindow,
+      layout: splitBesideTab(targetWindow.layout, target.id, moving, dir),
+      activeTabId: moving.id
+    };
+    windows = windows.map((window2, index2) => index2 === targetIndex ? nextTarget : window2);
+    return { ...layout, windows, activeWindowId: targetWindowId };
+  }
+  function extractSessionWindow(layout, sessionId) {
+    const sourceIndex = layout.windows.findIndex((window2) => layoutSessionIds(window2.layout).includes(sessionId));
+    if (sourceIndex < 0) return layout;
+    const source = layout.windows[sourceIndex];
+    const moving = findSessionTab(layout, sessionId);
+    if (!moving) return layout;
+    if (layoutTabs(source.layout).length <= 1) return activateWorkWindow(layout, source.id);
+    const remaining = removeTab(source.layout, moving.id);
+    const used = new Set(layout.windows.map((window2) => window2.id));
+    const extracted = {
+      id: uniqueWindowId(windowIdForTab(moving), used),
+      layout: paneWith(moving),
+      activeTabId: moving.id
+    };
+    const windows = [...layout.windows];
+    windows.splice(sourceIndex, 1, { ...source, layout: remaining, activeTabId: activeLayoutTab(remaining)?.id }, extracted);
+    return { ...layout, windows, activeWindowId: extracted.id };
+  }
+  function activeWindowAfterRemoval(layout, removedIndex, removedWindowId, windows) {
+    if (windows.length === 0) return null;
+    if (layout.activeWindowId !== removedWindowId) {
+      return windows.some((window2) => window2.id === layout.activeWindowId) ? layout.activeWindowId : windows[0].id;
+    }
+    return windows[Math.max(0, removedIndex - 1)]?.id ?? windows[0].id;
+  }
+  function closeWorkWindow(layout, windowId) {
+    const index2 = layout.windows.findIndex((window2) => window2.id === windowId);
+    if (index2 < 0) return layout;
+    const windows = layout.windows.filter((window2) => window2.id !== windowId);
+    return {
+      ...layout,
+      windows,
+      activeWindowId: activeWindowAfterRemoval(layout, index2, windowId, windows)
+    };
+  }
+  function closeSessionPane(layout, sessionId) {
+    const windowIndex = layout.windows.findIndex((window2) => layoutSessionIds(window2.layout).includes(sessionId));
+    if (windowIndex < 0) return layout;
+    const source = layout.windows[windowIndex];
+    const tab = layoutTabs(source.layout).find((candidate) => candidate.kind === "session" && candidate.sessionId === sessionId);
+    if (!tab) return layout;
+    const nextRoot = removeTab(source.layout, tab.id);
+    if (layoutTabs(nextRoot).length === 0) return closeWorkWindow(layout, source.id);
+    const windows = layout.windows.map((window2, index2) => index2 === windowIndex ? {
+      ...source,
+      layout: nextRoot,
+      activeTabId: activeLayoutTab(nextRoot, source.activeTabId)?.id
+    } : window2);
+    return { ...layout, windows };
+  }
+  function ungroupWorkWindow(layout, windowId) {
+    const index2 = layout.windows.findIndex((window2) => window2.id === windowId);
+    if (index2 < 0) return layout;
+    const source = layout.windows[index2];
+    const tabs = layoutTabs(source.layout);
+    if (tabs.length <= 1) return layout;
+    const used = new Set(layout.windows.filter((window2) => window2.id !== windowId).map((window2) => window2.id));
+    const replacements = tabs.map((tab) => ({
+      id: uniqueWindowId(windowIdForTab(tab), used),
+      layout: paneWith(tab),
+      activeTabId: tab.id
+    }));
+    const activeTab = activeLayoutTab(source.layout, source.activeTabId) ?? tabs[0];
+    const active = replacements[tabs.findIndex((tab) => tab.id === activeTab.id)] ?? replacements[0];
+    const windows = [...layout.windows];
+    windows.splice(index2, 1, ...replacements);
+    return { ...layout, windows, activeWindowId: active?.id ?? null };
+  }
+
+  // src/web-ui/react/workspaces/workspace-tab-bar.tsx
+  var import_jsx_runtime45 = __toESM(require_jsx_runtime(), 1);
+  function runtime7() {
+    return workspacesStore.getRuntime();
+  }
+  function StatusDot({ status }) {
+    const tone = status === "running" || status === "thinking" || status === "waiting-input" ? "running" : status === "exited" || status === "failed" || status === "stopped" ? "ended" : "idle";
+    return /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("span", { className: classNames("workspace-tab-dot", tone), "aria-hidden": true });
+  }
+  function layoutsEqual(left, right) {
+    return left !== null && JSON.stringify(left) === JSON.stringify(right);
+  }
+  function windowPresentation(window2, sessionById) {
+    const ids = layoutSessionIds(window2.layout);
+    const active = activeLayoutTab(window2.layout, window2.activeTabId);
+    const activeSessionId = active?.kind === "session" ? active.sessionId : ids[0];
+    const meta = activeSessionId ? sessionById.get(activeSessionId) : void 0;
+    const base = meta ? workspaceSessionLabel(meta.session, meta.index) : "\u5DE5\u4F5C\u7A97\u53E3";
+    return {
+      label: ids.length > 1 ? `${base} \xB7 ${ids.length}` : base,
+      status: meta?.session.status,
+      count: ids.length
+    };
+  }
+  function useActiveTaskDetail(taskId, refreshTick, selectedSessionId) {
+    const [detail, setDetail] = React42.useState(null);
+    const [loading, setLoading] = React42.useState(false);
+    React42.useEffect(() => {
+      if (!taskId) {
+        setDetail(null);
+        return;
+      }
+      let cancelled = false;
+      let timer;
+      const load = async () => {
+        setLoading(true);
+        try {
+          const fetched = await httpWorkspacesRepository.getTask(taskId);
+          if (!cancelled) setDetail(fetched);
+        } catch {
+          if (!cancelled && !detail) setDetail(null);
+        } finally {
+          if (!cancelled) setLoading(false);
+        }
+      };
+      void load();
+      timer = window.setInterval(() => void load(), 4e3);
+      return () => {
+        cancelled = true;
+        if (timer !== void 0) window.clearInterval(timer);
+      };
+    }, [taskId, refreshTick, selectedSessionId]);
+    return { detail, loading };
+  }
+  function WorkspaceTabBar() {
+    const context2 = React42.useSyncExternalStore(
+      workspaceContextStore.subscribe,
+      workspaceContextStore.getSnapshot,
+      workspaceContextStore.getServerSnapshot
+    );
+    const snapshot9 = useUiStoreSnapshot();
+    const dispatch = useUiDispatch();
+    const [refreshTick, setRefreshTick] = React42.useState(0);
+    const [agentDialogOpen, setAgentDialogOpen] = React42.useState(false);
+    const [moving, setMoving] = React42.useState(null);
+    const [closingWindowId, setClosingWindowId] = React42.useState(null);
+    const selectedId = snapshot9.selected?.id ?? null;
+    const { detail, loading } = useActiveTaskDetail(context2.taskId, refreshTick, selectedId);
+    React42.useEffect(() => {
+      setMoving(null);
+    }, [context2.taskId]);
+    React42.useEffect(() => {
+      if (!moving) return;
+      const cancel = (event) => {
+        if (event.key === "Escape") setMoving(null);
+      };
+      window.addEventListener("keydown", cancel);
+      return () => window.removeEventListener("keydown", cancel);
+    }, [moving]);
+    const sessions = orderWorkspaceSessions(detail?.sessions ?? []);
+    const taskCwd = detail?.cwd ?? context2.cwd;
+    const sessionIds = sessions.map((session) => session.id);
+    const persistedLayout = context2.layout ?? detail?.layout ?? null;
+    const taskLayout = reconcileTaskWindowLayout(persistedLayout, sessionIds, selectedId);
+    const sessionById = new Map(sessions.map((session, index2) => [session.id, { session, index: index2 }]));
+    React42.useEffect(() => {
+      if (!context2.taskId || !detail || layoutsEqual(context2.layout, taskLayout)) return;
+      runtime7()?.saveTaskLayout(taskLayout);
+    }, [context2.layout, context2.taskId, detail, taskLayout]);
+    if (!context2.taskId) return null;
+    const handleNewSession = async (provider) => {
+      if (!context2.taskId || !context2.workspaceId) {
+        throw new Error("\u5F53\u524D\u4EFB\u52A1\u4E0A\u4E0B\u6587\u5DF2\u5931\u6548\uFF0C\u8BF7\u91CD\u65B0\u6253\u5F00\u4EFB\u52A1\u540E\u91CD\u8BD5\u3002");
+      }
+      const rt = runtime7();
+      if (!rt) throw new Error("\u5DE5\u4F5C\u7A7A\u95F4\u8FD0\u884C\u73AF\u5883\u5C1A\u672A\u5C31\u7EEA\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u540E\u91CD\u8BD5\u3002");
+      const payload = {
+        workspaceId: context2.workspaceId,
+        taskId: context2.taskId,
+        cwd: taskCwd,
+        provider
+      };
+      const result = await rt.newTaskSession(payload);
+      const sessionId = typeof result === "string" ? result : null;
+      if (!sessionId) throw new Error("\u670D\u52A1\u7AEF\u672A\u8FD4\u56DE\u65B0\u4F1A\u8BDD ID\u3002");
+      const latest = workspaceContextStore.getSnapshot().layout;
+      const base = reconcileTaskWindowLayout(latest, [...sessionIds, sessionId], selectedId);
+      const next = addSessionWindow(base, sessionId, true);
+      rt.saveTaskLayout(next);
+      void dispatch({ type: "session.select", id: sessionId });
+      setRefreshTick((n) => n + 1);
+      rt.toast(`\u5DF2\u65B0\u5EFA ${workspaceProviderLabel(provider)} \u5BF9\u8BDD`, "success");
+    };
+    const selectWindow = (window2) => {
+      const rt = runtime7();
+      if (!rt) return;
+      if (moving) {
+        const target = activeLayoutTab(window2.layout, window2.activeTabId);
+        const next2 = moveSessionBeside(taskLayout, moving.sessionId, window2.id, target?.id, moving.dir);
+        if (next2 !== taskLayout) {
+          rt.saveTaskLayout(next2);
+          const active2 = activeWorkWindowTab(next2);
+          if (active2?.kind === "session") void dispatch({ type: "session.select", id: active2.sessionId });
+        }
+        setMoving(null);
+        return;
+      }
+      const next = activateWorkWindow(taskLayout, window2.id);
+      rt.saveTaskLayout(next);
+      const active = activeLayoutTab(window2.layout, window2.activeTabId);
+      if (active?.kind === "session") void dispatch({ type: "session.select", id: active.sessionId });
+    };
+    const beginMove = (dir) => {
+      const active = activeWorkWindowTab(taskLayout);
+      if (active?.kind !== "session" || taskLayout.windows.length < 2) return;
+      setMoving({ sessionId: active.sessionId, dir });
+    };
+    const closeWindow = async (window2) => {
+      const rt = runtime7();
+      if (!rt || closingWindowId) return;
+      const sessionIds2 = layoutSessionIds(window2.layout);
+      setClosingWindowId(window2.id);
+      try {
+        if (!await rt.closeTaskSessions(sessionIds2, "window")) return;
+        const next = closeWorkWindow(taskLayout, window2.id);
+        rt.saveTaskLayout(next);
+        const active = activeWorkWindowTab(next);
+        if (active?.kind === "session") void dispatch({ type: "session.select", id: active.sessionId });
+        setMoving(null);
+        setRefreshTick((value) => value + 1);
+        rt.toast(sessionIds2.length > 1 ? `\u5DF2\u5173\u95ED ${sessionIds2.length} \u4E2A\u7EC8\u7AEF` : "\u5DF2\u5173\u95ED\u7EC8\u7AEF", "success");
+      } finally {
+        setClosingWindowId(null);
+      }
+    };
+    const handleClose = () => {
+      runtime7()?.closeWorkspace();
+      void dispatch({ type: "nav.home" });
+    };
+    return /* @__PURE__ */ (0, import_jsx_runtime45.jsxs)("div", { className: "workspace-tab-bar", role: "tablist", "aria-label": `\u4EFB\u52A1 ${context2.taskName} \u7684\u5DE5\u4F5C\u7A97\u53E3\u6807\u7B7E`, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime45.jsxs)("div", { className: "workspace-tab-bar-list", children: [
+        !loading && taskLayout.windows.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("span", { className: "workspace-tab-bar-empty", children: "\u8BE5\u4EFB\u52A1\u8FD8\u6CA1\u6709\u5DE5\u4F5C\u7A97\u53E3" }) : taskLayout.windows.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("span", { className: "workspace-tab-bar-empty", children: "\u52A0\u8F7D\u4E2D\u2026" }) : taskLayout.windows.map((window2) => {
+          const active = window2.id === taskLayout.activeWindowId;
+          const presentation = windowPresentation(window2, sessionById);
+          const containsMoving = moving ? layoutSessionIds(window2.layout).includes(moving.sessionId) : false;
+          return /* @__PURE__ */ (0, import_jsx_runtime45.jsxs)(
+            "div",
+            {
+              className: classNames("workspace-tab-item", active && "active"),
+              children: [
+                /* @__PURE__ */ (0, import_jsx_runtime45.jsxs)(
+                  "button",
+                  {
+                    type: "button",
+                    role: "tab",
+                    "aria-selected": active,
+                    className: classNames(
+                      "workspace-tab",
+                      active && "active",
+                      moving && !containsMoving && "move-target",
+                      containsMoving && "moving-source"
+                    ),
+                    title: moving && !containsMoving ? `\u628A\u5F53\u524D\u7EC8\u7AEF\u79FB\u5165\u300C${presentation.label}\u300D` : `${presentation.label}${presentation.count > 1 ? "\uFF08\u5206\u5C4F\u5DE5\u4F5C\u7A97\u53E3\uFF09" : ""}`,
+                    onClick: () => selectWindow(window2),
+                    children: [
+                      /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(StatusDot, { status: presentation.status }),
+                      /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("span", { className: "workspace-tab-label", children: presentation.label })
+                    ]
+                  }
+                ),
+                /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(
+                  "button",
+                  {
+                    type: "button",
+                    className: "workspace-tab-item-close",
+                    "aria-label": `\u5173\u95ED\u5DE5\u4F5C\u7A97\u53E3 ${presentation.label}`,
+                    title: "\u5173\u95ED\u8FD9\u4E2A\u5DE5\u4F5C\u7A97\u53E3",
+                    disabled: closingWindowId === window2.id,
+                    onClick: () => void closeWindow(window2),
+                    children: "\xD7"
+                  }
+                )
+              ]
+            },
+            window2.id
+          );
+        }),
+        /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(
+          "button",
+          {
+            type: "button",
+            className: "workspace-tab-add",
+            title: "\u65B0\u5EFA Agent \u5BF9\u8BDD\uFF08\u5728\u540C\u4E00 worktree\uFF09",
+            "aria-label": "\u65B0\u5EFA Agent \u5BF9\u8BDD",
+            onClick: () => setAgentDialogOpen(true),
+            children: "+"
+          }
+        ),
+        taskLayout.windows.length > 1 ? /* @__PURE__ */ (0, import_jsx_runtime45.jsxs)(import_jsx_runtime45.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(
+            "button",
+            {
+              type: "button",
+              className: classNames("workspace-tab-move", moving?.dir === "h" && "active"),
+              title: "\u628A\u5F53\u524D\u7EC8\u7AEF\u79FB\u5165\u53E6\u4E00\u4E2A\u5DE5\u4F5C\u7A97\u53E3\u5E76\u5DE6\u53F3\u5206\u5C4F",
+              "aria-label": "\u79FB\u52A8\u7EC8\u7AEF\u5E76\u5DE6\u53F3\u5206\u5C4F",
+              "aria-pressed": moving?.dir === "h",
+              onClick: () => moving?.dir === "h" ? setMoving(null) : beginMove("h"),
+              children: "\u21C6"
+            }
+          ),
+          /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(
+            "button",
+            {
+              type: "button",
+              className: classNames("workspace-tab-move", moving?.dir === "v" && "active"),
+              title: "\u628A\u5F53\u524D\u7EC8\u7AEF\u79FB\u5165\u53E6\u4E00\u4E2A\u5DE5\u4F5C\u7A97\u53E3\u5E76\u4E0A\u4E0B\u5206\u5C4F",
+              "aria-label": "\u79FB\u52A8\u7EC8\u7AEF\u5E76\u4E0A\u4E0B\u5206\u5C4F",
+              "aria-pressed": moving?.dir === "v",
+              onClick: () => moving?.dir === "v" ? setMoving(null) : beginMove("v"),
+              children: "\u21C5"
+            }
+          )
+        ] }) : null
+      ] }),
+      moving ? /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(
+        "button",
+        {
+          type: "button",
+          className: "workspace-tab-move-hint",
+          title: "\u53D6\u6D88\u79FB\u52A8",
+          onClick: () => setMoving(null),
+          children: "\u9009\u62E9\u76EE\u6807\u7A97\u53E3 \xB7 Esc \u53D6\u6D88"
+        }
+      ) : null,
+      /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(
+        "button",
+        {
+          type: "button",
+          className: "workspace-tab-files",
+          title: "\u6253\u5F00\u6587\u4EF6\u9762\u677F",
+          "aria-label": "\u6587\u4EF6",
+          onClick: () => void dispatch({ type: "layout.files.toggle" }),
+          children: "\u25A4"
+        }
+      ),
+      /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(
+        "button",
+        {
+          type: "button",
+          className: "workspace-tab-close",
+          title: "\u5173\u95ED\u4EFB\u52A1\u6807\u7B7E\u7EC4",
+          "aria-label": "\u5173\u95ED\u4EFB\u52A1\u6807\u7B7E\u7EC4",
+          onClick: handleClose,
+          children: "\xD7"
+        }
+      ),
+      /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(
+        WorkspaceAgentDialog,
+        {
+          open: agentDialogOpen,
+          initialProvider: context2.provider,
+          onConfirm: handleNewSession,
+          onDismiss: () => setAgentDialogOpen(false)
+        }
+      )
+    ] });
+  }
+
+  // src/web-ui/react/workspaces/workspace-window.tsx
+  var React43 = __toESM(require_react(), 1);
+  var import_jsx_runtime46 = __toESM(require_jsx_runtime(), 1);
+  function runtime8() {
+    return workspacesStore.getRuntime();
+  }
+  function paneLabel(tab, meta) {
+    if (tab.kind !== "session") return tab.kind;
+    const m = meta.get(tab.sessionId);
+    const title = (m?.title || "").trim();
+    if (title) return title;
+    return m?.provider ? workspaceProviderLabel(m.provider) : "\u4F1A\u8BDD";
+  }
+  function SessionPane({ sessionId }) {
+    const ref = React43.useRef(null);
+    React43.useEffect(() => {
+      const rt = runtime8();
+      const node = ref.current;
+      if (!rt || !node) return;
+      rt.mountSessionTerminal(sessionId, node);
+      return () => rt.unmountSessionTerminal(sessionId);
+    }, [sessionId]);
+    return /* @__PURE__ */ (0, import_jsx_runtime46.jsx)("div", { className: "ws-session-pane", ref });
+  }
+  function PaneEmpty() {
+    return /* @__PURE__ */ (0, import_jsx_runtime46.jsx)("div", { className: "ws-pane-empty", children: "\u8FD9\u4E2A\u7A97\u683C\u6CA1\u6709\u53EF\u663E\u793A\u7684\u7EC8\u7AEF" });
+  }
+  function PaneNode({ pane, path, api }) {
+    const activeTab = pane.tabs[pane.active] ?? pane.tabs[0];
+    const isPrimary = path.every((index2) => index2 === 0);
+    const sessionId = activeTab?.kind === "session" ? activeTab.sessionId : null;
+    const [scale, setScale] = React43.useState(() => {
+      const rt = runtime8();
+      return sessionId && rt ? rt.getSessionTerminalScale(sessionId) : 1;
+    });
+    React43.useEffect(() => {
+      const rt = runtime8();
+      setScale(sessionId && rt ? rt.getSessionTerminalScale(sessionId) : 1);
+    }, [sessionId]);
+    const changeScale = (next) => {
+      const rt = runtime8();
+      if (!sessionId || !rt) return;
+      setScale(rt.setSessionTerminalScale(sessionId, next));
+    };
+    return /* @__PURE__ */ (0, import_jsx_runtime46.jsxs)(
+      "div",
+      {
+        className: "ws-pane",
+        onPointerDownCapture: () => {
+          if (activeTab) api.focusTab(activeTab);
+        },
+        children: [
+          /* @__PURE__ */ (0, import_jsx_runtime46.jsxs)("div", { className: "ws-pane-toolbar", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime46.jsx)("span", { className: "ws-pane-title", title: activeTab ? paneLabel(activeTab, api.sessionMeta) : "\u7A7A\u7A97\u683C", children: activeTab ? paneLabel(activeTab, api.sessionMeta) : "\u7A7A\u7A97\u683C" }),
+            sessionId ? /* @__PURE__ */ (0, import_jsx_runtime46.jsxs)("div", { className: "ws-pane-scale", role: "group", "aria-label": `${paneLabel(activeTab, api.sessionMeta)} \u7EC8\u7AEF\u7F29\u653E`, children: [
+              /* @__PURE__ */ (0, import_jsx_runtime46.jsx)(
+                "button",
+                {
+                  type: "button",
+                  className: "ws-pane-scale-btn",
+                  "aria-label": "\u7F29\u5C0F\u7EC8\u7AEF",
+                  title: "\u7F29\u5C0F\u8FD9\u4E2A\u7EC8\u7AEF",
+                  onClick: (event) => {
+                    event.stopPropagation();
+                    changeScale(scale - 0.25);
+                  },
+                  children: "\u2212"
+                }
+              ),
+              /* @__PURE__ */ (0, import_jsx_runtime46.jsxs)(
+                "button",
+                {
+                  type: "button",
+                  className: "ws-pane-scale-value",
+                  "aria-label": `\u6062\u590D\u7EC8\u7AEF\u7F29\u653E\uFF0C\u5F53\u524D ${Math.round(scale * 100)}%`,
+                  title: "\u6062\u590D\u4E3A 100%",
+                  onClick: (event) => {
+                    event.stopPropagation();
+                    changeScale(1);
+                  },
+                  children: [
+                    Math.round(scale * 100),
+                    "%"
+                  ]
+                }
+              ),
+              /* @__PURE__ */ (0, import_jsx_runtime46.jsx)(
+                "button",
+                {
+                  type: "button",
+                  className: "ws-pane-scale-btn",
+                  "aria-label": "\u653E\u5927\u7EC8\u7AEF",
+                  title: "\u653E\u5927\u8FD9\u4E2A\u7EC8\u7AEF",
+                  onClick: (event) => {
+                    event.stopPropagation();
+                    changeScale(scale + 0.25);
+                  },
+                  children: "+"
+                }
+              )
+            ] }) : null,
+            activeTab?.kind === "session" ? /* @__PURE__ */ (0, import_jsx_runtime46.jsx)(
+              "button",
+              {
+                type: "button",
+                className: "ws-pane-btn extract",
+                title: "\u628A\u8FD9\u4E2A\u7EC8\u7AEF\u79FB\u51FA\u4E3A\u72EC\u7ACB\u5DE5\u4F5C\u7A97\u53E3 Tab",
+                "aria-label": "\u79FB\u51FA\u4E3A\u65B0 Tab",
+                onClick: (event) => {
+                  event.stopPropagation();
+                  api.extractTab(activeTab);
+                },
+                children: "\u2197"
+              }
+            ) : null,
+            activeTab?.kind === "session" ? /* @__PURE__ */ (0, import_jsx_runtime46.jsx)(
+              "button",
+              {
+                type: "button",
+                className: "ws-pane-btn close",
+                title: "\u5173\u95ED\u8FD9\u4E2A\u7EC8\u7AEF",
+                "aria-label": `\u5173\u95ED\u7EC8\u7AEF ${paneLabel(activeTab, api.sessionMeta)}`,
+                disabled: api.closingSessionId === activeTab.sessionId,
+                onClick: (event) => {
+                  event.stopPropagation();
+                  api.closeTab(activeTab);
+                },
+                children: "\xD7"
+              }
+            ) : null,
+            isPrimary ? /* @__PURE__ */ (0, import_jsx_runtime46.jsxs)(import_jsx_runtime46.Fragment, { children: [
+              /* @__PURE__ */ (0, import_jsx_runtime46.jsx)(
+                "button",
+                {
+                  type: "button",
+                  className: "ws-pane-btn files",
+                  title: "\u6253\u5F00\u6587\u4EF6\u9762\u677F",
+                  "aria-label": "\u6587\u4EF6",
+                  onClick: api.openFiles,
+                  children: "\u25A4"
+                }
+              ),
+              /* @__PURE__ */ (0, import_jsx_runtime46.jsx)(
+                "button",
+                {
+                  type: "button",
+                  className: "ws-pane-btn exit",
+                  title: "\u628A\u5F53\u524D\u5206\u5C4F\u62C6\u6210\u72EC\u7ACB\u5DE5\u4F5C\u7A97\u53E3 Tabs",
+                  "aria-label": "\u5168\u90E8\u79FB\u51FA\u4E3A\u72EC\u7ACB Tabs",
+                  onClick: api.ungroupWindow,
+                  children: "\u25EB"
+                }
+              )
+            ] }) : null
+          ] }),
+          /* @__PURE__ */ (0, import_jsx_runtime46.jsx)("div", { className: "ws-pane-content", children: activeTab && activeTab.kind === "session" ? /* @__PURE__ */ (0, import_jsx_runtime46.jsx)(SessionPane, { sessionId: activeTab.sessionId }) : /* @__PURE__ */ (0, import_jsx_runtime46.jsx)(PaneEmpty, {}) })
+        ]
+      }
+    );
+  }
+  function SplitNode({ node, path, api }) {
+    const [ratio, setRatio] = React43.useState(node.ratio);
+    const ratioRef = React43.useRef(node.ratio);
+    const containerRef = React43.useRef(null);
+    const dragging = React43.useRef(false);
+    React43.useEffect(() => {
+      ratioRef.current = node.ratio;
+      setRatio(node.ratio);
+    }, [node.ratio]);
+    const horizontal = node.dir === "h";
+    const onPointerDown = (event) => {
+      dragging.current = true;
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+      }
+    };
+    const onPointerMove = (event) => {
+      if (!dragging.current || !containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const raw = horizontal ? (event.clientX - rect.left) / rect.width : (event.clientY - rect.top) / rect.height;
+      const nextRatio = Math.max(0.1, Math.min(0.9, raw));
+      ratioRef.current = nextRatio;
+      setRatio(nextRatio);
+    };
+    const onPointerUp = () => {
+      if (!dragging.current) return;
+      dragging.current = false;
+      api.mutateRoot(setRatioAtPath(api.root, path, ratioRef.current));
+    };
+    return /* @__PURE__ */ (0, import_jsx_runtime46.jsxs)("div", { className: classNames("ws-split", horizontal ? "h" : "v"), ref: containerRef, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime46.jsx)("div", { className: "ws-split-child", style: { flexBasis: `${ratio * 100}%`, flexGrow: 0, flexShrink: 0 }, children: /* @__PURE__ */ (0, import_jsx_runtime46.jsx)(LayoutRenderer, { node: node.children[0], path: [...path, 0], api }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime46.jsx)(
+        "div",
+        {
+          className: classNames("ws-sash", horizontal ? "h" : "v"),
+          role: "separator",
+          "aria-orientation": horizontal ? "vertical" : "horizontal",
+          onPointerDown,
+          onPointerMove,
+          onPointerUp
+        }
+      ),
+      /* @__PURE__ */ (0, import_jsx_runtime46.jsx)("div", { className: "ws-split-child", style: { flex: 1 }, children: /* @__PURE__ */ (0, import_jsx_runtime46.jsx)(LayoutRenderer, { node: node.children[1], path: [...path, 1], api }) })
+    ] });
+  }
+  function LayoutRenderer({ node, path, api }) {
+    return node.type === "split" ? /* @__PURE__ */ (0, import_jsx_runtime46.jsx)(SplitNode, { node, path, api }) : /* @__PURE__ */ (0, import_jsx_runtime46.jsx)(PaneNode, { pane: node, path, api });
+  }
+  function useTaskSessionMeta(taskId) {
+    const [meta, setMeta] = React43.useState(/* @__PURE__ */ new Map());
+    React43.useEffect(() => {
+      if (!taskId) {
+        setMeta(/* @__PURE__ */ new Map());
+        return;
+      }
+      let cancelled = false;
+      const load = async () => {
+        try {
+          const detail = await httpWorkspacesRepository.getTask(taskId);
+          if (cancelled || !detail) return;
+          const next = /* @__PURE__ */ new Map();
+          orderWorkspaceSessions(detail.sessions).forEach((s, index2) => {
+            next.set(s.id, {
+              title: workspaceSessionLabel(s, index2),
+              provider: s.provider
+            });
+          });
+          setMeta(next);
+        } catch {
+        }
+      };
+      void load();
+      const timer = window.setInterval(() => void load(), 4e3);
+      return () => {
+        cancelled = true;
+        window.clearInterval(timer);
+      };
+    }, [taskId]);
+    return meta;
+  }
+  function WorkspaceWindow() {
+    const dispatch = useUiDispatch();
+    const [closingSessionId, setClosingSessionId] = React43.useState(null);
+    const context2 = React43.useSyncExternalStore(
+      workspaceContextStore.subscribe,
+      workspaceContextStore.getSnapshot,
+      workspaceContextStore.getServerSnapshot
+    );
+    const sessionMeta = useTaskSessionMeta(context2.taskId);
+    React43.useEffect(() => {
+      return () => {
+        runtime8()?.disposeAllSessionTerminals();
+      };
+    }, []);
+    const taskLayout = context2.layout;
+    const workWindow = activeWorkWindow(taskLayout);
+    if (!context2.taskId || !taskLayout || !workWindow || workWindow.layout.type !== "split") return null;
+    const root = workWindow.layout;
+    const rt = runtime8();
+    if (!rt) return null;
+    const api = {
+      root,
+      sessionMeta,
+      closingSessionId,
+      mutateRoot(next) {
+        rt.saveTaskLayout(replaceWorkWindowLayout(taskLayout, workWindow.id, next));
+      },
+      focusTab(tab) {
+        const next = focusWorkWindowTab(taskLayout, workWindow.id, tab.id);
+        if (next === taskLayout) return;
+        rt.saveTaskLayout(next);
+        if (tab.kind === "session") void dispatch({ type: "session.select", id: tab.sessionId });
+      },
+      async closeTab(tab) {
+        if (tab.kind !== "session" || closingSessionId) return;
+        setClosingSessionId(tab.sessionId);
+        try {
+          if (!await rt.closeTaskSessions([tab.sessionId], "terminal")) return;
+          const next = closeSessionPane(taskLayout, tab.sessionId);
+          rt.saveTaskLayout(next);
+          const active = activeWorkWindowTab(next);
+          if (active?.kind === "session") void dispatch({ type: "session.select", id: active.sessionId });
+          rt.toast("\u5DF2\u5173\u95ED\u7EC8\u7AEF", "success");
+        } finally {
+          setClosingSessionId(null);
+        }
+      },
+      extractTab(tab) {
+        if (tab.kind !== "session") return;
+        const next = extractSessionWindow(taskLayout, tab.sessionId);
+        rt.saveTaskLayout(next);
+        void dispatch({ type: "session.select", id: tab.sessionId });
+      },
+      ungroupWindow() {
+        const next = ungroupWorkWindow(taskLayout, workWindow.id);
+        rt.saveTaskLayout(next);
+        const active = activeWorkWindowTab(next);
+        if (active?.kind === "session") void dispatch({ type: "session.select", id: active.sessionId });
+      },
+      openFiles() {
+        void dispatch({ type: "layout.files.toggle" });
+      }
+    };
+    return /* @__PURE__ */ (0, import_jsx_runtime46.jsx)("div", { className: "workspace-window", children: /* @__PURE__ */ (0, import_jsx_runtime46.jsx)("div", { className: "workspace-window-body", children: /* @__PURE__ */ (0, import_jsx_runtime46.jsx)(LayoutRenderer, { node: root, path: [], api }) }) });
   }
 
   // src/web-ui/react/shell/shell-file-panel.tsx
-  var import_jsx_runtime42 = __toESM(require_jsx_runtime(), 1);
+  var React45 = __toESM(require_react(), 1);
+
+  // src/web-ui/react/file-explorer/repository.ts
+  function isRecord7(value) {
+    return !!value && typeof value === "object" && !Array.isArray(value);
+  }
+  function stringValue4(value, fallback = "") {
+    return typeof value === "string" ? value : fallback;
+  }
+  function finiteNumber5(value, fallback = 0) {
+    return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+  }
+  async function readJson5(response) {
+    try {
+      const value = await response.json();
+      return isRecord7(value) ? value : {};
+    } catch {
+      return {};
+    }
+  }
+  function failureFromResponse3(response, value, fallback) {
+    return {
+      message: stringValue4(value.error, `${fallback} (HTTP ${response.status})`),
+      status: response.status
+    };
+  }
+  function coerceEntry(record2) {
+    const path = stringValue4(record2.path);
+    const name = stringValue4(record2.name);
+    if (!path || !name) return null;
+    const type = record2.type === "dir" ? "dir" : "file";
+    const entry = { path, name, type };
+    if (typeof record2.size === "number" && Number.isFinite(record2.size)) entry.size = record2.size;
+    if (typeof record2.mtime === "string" && record2.mtime) entry.mtime = record2.mtime;
+    const git = isRecord7(record2.gitStatus) ? record2.gitStatus : void 0;
+    if (git) {
+      const status = {};
+      const stagedRaw = stringValue4(git.staged);
+      const unstagedRaw = stringValue4(git.unstaged);
+      if (stagedRaw === "added" || stagedRaw === "modified" || stagedRaw === "deleted" || stagedRaw === "renamed") {
+        status.staged = stagedRaw;
+      }
+      if (unstagedRaw === "modified" || unstagedRaw === "deleted") {
+        status.unstaged = unstagedRaw;
+      }
+      if (git.untracked) status.untracked = true;
+      entry.gitStatus = status;
+    }
+    return entry;
+  }
+  async function postMutation(fetchImpl, url, body, fallback, affectedPath) {
+    const response = await fetchImpl(url, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    const value = await readJson5(response);
+    if (!response.ok || typeof value.error === "string") {
+      return { ok: false, failure: failureFromResponse3(response, value, fallback) };
+    }
+    return { ok: true, affectedPath };
+  }
+  var HttpFileExplorerRepository = class {
+    constructor(fetchImpl = (input, init) => globalThis.fetch(input, init)) {
+      __publicField(this, "fetchImpl", fetchImpl);
+    }
+    async list(dirPath, signal) {
+      const response = await this.fetchImpl(
+        `/api/directory?q=${encodeURIComponent(dirPath)}&gitStatus=true`,
+        { credentials: "same-origin", signal }
+      );
+      const value = await readJson5(response);
+      if (!response.ok || typeof value.error === "string") {
+        return { ok: false, failure: failureFromResponse3(response, value, "\u8BFB\u53D6\u76EE\u5F55\u5931\u8D25") };
+      }
+      const rawItems = Array.isArray(value.items) ? value.items : [];
+      const entries = [];
+      for (const item of rawItems) {
+        const entry = isRecord7(item) ? coerceEntry(item) : null;
+        if (entry) entries.push(entry);
+      }
+      return {
+        ok: true,
+        entries,
+        truncated: Boolean(value.truncated),
+        total: finiteNumber5(value.total, entries.length)
+      };
+    }
+    async search(query, cwd, signal) {
+      const params = new URLSearchParams({ q: query, cwd, depth: "5", limit: "80" });
+      const response = await this.fetchImpl(
+        `/api/file-search?${params.toString()}`,
+        { credentials: "same-origin", signal }
+      );
+      const value = await readJson5(response);
+      if (!response.ok || typeof value.error === "string") {
+        return { ok: false, failure: failureFromResponse3(response, value, "\u641C\u7D22\u5931\u8D25") };
+      }
+      const rawResults = Array.isArray(value.results) ? value.results : [];
+      const results = [];
+      for (const item of rawResults) {
+        const entry = isRecord7(item) ? coerceEntry(item) : null;
+        if (entry) results.push(entry);
+      }
+      return { ok: true, results };
+    }
+    createFile(targetPath) {
+      return postMutation(this.fetchImpl, "/api/file-create", { path: targetPath }, "\u521B\u5EFA\u6587\u4EF6\u5931\u8D25", targetPath);
+    }
+    createDir(targetPath) {
+      return postMutation(this.fetchImpl, "/api/dir-create", { path: targetPath }, "\u521B\u5EFA\u6587\u4EF6\u5939\u5931\u8D25", targetPath);
+    }
+    rename(from, to) {
+      return postMutation(this.fetchImpl, "/api/file-rename", { from, to }, "\u91CD\u547D\u540D\u5931\u8D25", to);
+    }
+    delete(targetPath) {
+      return postMutation(this.fetchImpl, "/api/file-delete", { path: targetPath }, "\u5220\u9664\u5931\u8D25", targetPath);
+    }
+  };
+  var httpFileExplorerRepository = new HttpFileExplorerRepository();
+
+  // src/web-ui/react/file-explorer/controller.ts
+  function unknownFailure3(error, fallback) {
+    return { message: error instanceof Error && error.message ? error.message : fallback };
+  }
+  function isAbort3(error) {
+    return error instanceof DOMException && error.name === "AbortError";
+  }
+  function parentOf(inputPath) {
+    const normalized = inputPath.replace(/\\/g, "/").replace(/\/+$/, "");
+    if (!normalized || normalized === "/") return "/";
+    const index2 = normalized.lastIndexOf("/");
+    if (index2 <= 0) return "/";
+    return normalized.slice(0, index2);
+  }
+  var defaultRuntime3 = {
+    openFile() {
+    },
+    notify(message, tone) {
+      wandOverlay.toast(message, { tone });
+    },
+    async copyText(text6) {
+      try {
+        await copyTextToPlatformClipboard(text6);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    async confirmDelete(path, isDir) {
+      const result = await wandOverlay.dialog({
+        title: "\u786E\u8BA4\u5220\u9664",
+        description: `\u786E\u5B9A\u8981\u5220\u9664${isDir ? "\u6587\u4EF6\u5939" : "\u6587\u4EF6"}\u300C${path}\u300D\u5417\uFF1F\u6B64\u64CD\u4F5C\u4E0D\u53EF\u64A4\u9500\u3002`,
+        tone: "warning",
+        actions: [
+          { label: "\u53D6\u6D88", value: false, kind: "secondary", autoFocus: true },
+          { label: "\u5220\u9664", value: true, kind: "danger" }
+        ],
+        dismissable: true
+      });
+      return result.dismissed === false && result.action === true;
+    },
+    async promptForName(title, defaultValue) {
+      const result = await wandOverlay.dialog({
+        title,
+        input: { value: defaultValue, label: "\u540D\u79F0" },
+        actions: [
+          { label: "\u53D6\u6D88", value: "", kind: "secondary" },
+          { label: "\u786E\u8BA4", value: "confirm", kind: "primary", autoFocus: true }
+        ],
+        dismissable: true
+      });
+      if (result.dismissed === true) return null;
+      if (result.action !== "confirm") return null;
+      const value = (result.inputValue ?? "").trim();
+      return value || null;
+    }
+  };
+  function createFileExplorerModule(options) {
+    const listeners10 = /* @__PURE__ */ new Set();
+    let snapshot9 = {
+      revision: 0,
+      root: "",
+      activeDir: "",
+      expanded: /* @__PURE__ */ new Map(),
+      searchQuery: "",
+      searchResults: null,
+      searching: false,
+      busy: false
+    };
+    let runtime11 = options.runtime ?? defaultRuntime3;
+    const abortByDir = /* @__PURE__ */ new Map();
+    let searchAbort = null;
+    function publish9(patch) {
+      snapshot9 = { ...snapshot9, ...patch, revision: snapshot9.revision + 1 };
+      for (const listener of listeners10) listener();
+    }
+    function publishExpanded(expanded) {
+      publish9({ expanded: new Map(expanded) });
+    }
+    function failureMessage(failure, fallback) {
+      return failure?.message || fallback;
+    }
+    async function loadDir(dirPath) {
+      const previous = abortByDir.get(dirPath);
+      previous?.abort();
+      const abort = new AbortController();
+      abortByDir.set(dirPath, abort);
+      const expanded = new Map(snapshot9.expanded);
+      expanded.set(dirPath, { entries: [], status: "loading" });
+      publishExpanded(expanded);
+      try {
+        const result = await options.repository.list(dirPath, abort.signal);
+        if (abort.signal.aborted) return;
+        const next = new Map(snapshot9.expanded);
+        if (result.ok && result.entries) {
+          next.set(dirPath, { entries: result.entries, status: "loaded" });
+        } else {
+          next.set(dirPath, {
+            entries: [],
+            status: "error",
+            error: failureMessage(result.failure, "\u8BFB\u53D6\u76EE\u5F55\u5931\u8D25")
+          });
+        }
+        publishExpanded(next);
+      } catch (error) {
+        if (abort.signal.aborted || isAbort3(error)) return;
+        const next = new Map(snapshot9.expanded);
+        next.set(dirPath, {
+          entries: [],
+          status: "error",
+          error: unknownFailure3(error, "\u8BFB\u53D6\u76EE\u5F55\u5931\u8D25").message
+        });
+        publishExpanded(next);
+      } finally {
+        abortByDir.delete(dirPath);
+      }
+    }
+    function refreshExpanded(dirPath, entries) {
+      const next = new Map(snapshot9.expanded);
+      next.set(dirPath, { entries, status: "loaded" });
+      publishExpanded(next);
+    }
+    function ensureRoot(root) {
+      if (!root) return;
+      if (snapshot9.root !== root) {
+        publish9({ root, activeDir: root });
+      }
+      if (!snapshot9.expanded.has(root)) {
+        void loadDir(root);
+      }
+    }
+    async function runSearch(query) {
+      searchAbort?.abort();
+      if (!query.trim() || !snapshot9.root) {
+        publish9({ searchQuery: query, searchResults: null, searching: false });
+        return;
+      }
+      const abort = new AbortController();
+      searchAbort = abort;
+      publish9({ searchQuery: query, searching: true });
+      try {
+        const result = await options.repository.search(query.trim(), snapshot9.root, abort.signal);
+        if (abort.signal.aborted) return;
+        publish9({
+          searching: false,
+          searchResults: result.ok && result.results ? result.results : []
+        });
+      } catch (error) {
+        if (abort.signal.aborted || isAbort3(error)) return;
+        publish9({ searching: false, searchResults: [] });
+      }
+    }
+    function joinPath2(dir, name) {
+      const trimmedName = name.trim();
+      if (!trimmedName) return dir;
+      const base = dir.replace(/\/+$/, "");
+      return `${base}/${trimmedName}`;
+    }
+    function refreshAffected(affectedPath) {
+      const parent = parentOf(affectedPath);
+      const toRefresh = /* @__PURE__ */ new Set();
+      if (parent && snapshot9.expanded.has(parent)) toRefresh.add(parent);
+      if (snapshot9.root && snapshot9.expanded.has(snapshot9.root)) toRefresh.add(snapshot9.root);
+      if (snapshot9.expanded.has(affectedPath)) toRefresh.add(affectedPath);
+      for (const dir of toRefresh) void loadDir(dir);
+    }
+    async function execute(command) {
+      switch (command.type) {
+        case "setRoot": {
+          ensureRoot(command.root);
+          return true;
+        }
+        case "navigate": {
+          if (!command.dir) return false;
+          runtime11.openDirectory?.(command.dir);
+          return true;
+        }
+        case "toggle": {
+          const expanded = new Map(snapshot9.expanded);
+          const existing = expanded.get(command.dir);
+          if (existing) {
+            expanded.delete(command.dir);
+            publishExpanded(expanded);
+            return true;
+          }
+          await loadDir(command.dir);
+          return true;
+        }
+        case "expand": {
+          await loadDir(command.dir);
+          return true;
+        }
+        case "refresh": {
+          const target = command.dir ?? snapshot9.root;
+          if (!target) return false;
+          await loadDir(target);
+          return true;
+        }
+        case "search.start": {
+          await runSearch(command.query);
+          return true;
+        }
+        case "search.clear": {
+          searchAbort?.abort();
+          publish9({ searchQuery: "", searchResults: null, searching: false });
+          return true;
+        }
+        case "create.file": {
+          const target = joinPath2(command.dir, command.name);
+          publish9({ busy: true });
+          try {
+            const result = await options.repository.createFile(target);
+            if (result.ok) {
+              runtime11.notify("\u5DF2\u521B\u5EFA\u6587\u4EF6", "success");
+              refreshAffected(command.dir);
+              runtime11.openFile(target);
+            } else {
+              runtime11.notify(failureMessage(result.failure, "\u521B\u5EFA\u6587\u4EF6\u5931\u8D25"), "error");
+            }
+            return result.ok;
+          } finally {
+            publish9({ busy: false });
+          }
+        }
+        case "create.dir": {
+          const target = joinPath2(command.dir, command.name);
+          publish9({ busy: true });
+          try {
+            const result = await options.repository.createDir(target);
+            if (result.ok) {
+              runtime11.notify("\u5DF2\u521B\u5EFA\u6587\u4EF6\u5939", "success");
+              refreshAffected(command.dir);
+            } else {
+              runtime11.notify(failureMessage(result.failure, "\u521B\u5EFA\u6587\u4EF6\u5939\u5931\u8D25"), "error");
+            }
+            return result.ok;
+          } finally {
+            publish9({ busy: false });
+          }
+        }
+        case "rename": {
+          publish9({ busy: true });
+          try {
+            const result = await options.repository.rename(command.from, command.to);
+            if (result.ok) {
+              runtime11.notify("\u5DF2\u91CD\u547D\u540D", "success");
+              refreshAffected(parentOf(command.from));
+            } else {
+              runtime11.notify(failureMessage(result.failure, "\u91CD\u547D\u540D\u5931\u8D25"), "error");
+            }
+            return result.ok;
+          } finally {
+            publish9({ busy: false });
+          }
+        }
+        case "delete": {
+          const isDir = snapshot9.expanded.has(command.path) || snapshot9.activeDir === command.path;
+          const parentEntries = snapshot9.expanded.get(parentOf(command.path))?.entries ?? [];
+          const node = parentEntries.find((entry) => entry.path === command.path);
+          const detectedIsDir = node?.type === "dir" || isDir;
+          const confirmed = await runtime11.confirmDelete(command.path, detectedIsDir);
+          if (!confirmed) return false;
+          publish9({ busy: true });
+          try {
+            const result = await options.repository.delete(command.path);
+            if (result.ok) {
+              runtime11.notify("\u5DF2\u5220\u9664", "success");
+              refreshAffected(parentOf(command.path));
+            } else {
+              runtime11.notify(failureMessage(result.failure, "\u5220\u9664\u5931\u8D25"), "error");
+            }
+            return result.ok;
+          } finally {
+            publish9({ busy: false });
+          }
+        }
+      }
+    }
+    const controller = {
+      setRoot(root) {
+        ensureRoot(root);
+      },
+      execute
+    };
+    return {
+      controller,
+      store: {
+        subscribe(listener) {
+          listeners10.add(listener);
+          return () => listeners10.delete(listener);
+        },
+        getSnapshot() {
+          return snapshot9;
+        }
+      },
+      configureRuntime(adapter) {
+        const previous = runtime11;
+        runtime11 = adapter;
+        return () => {
+          if (runtime11 === adapter) runtime11 = previous;
+        };
+      }
+    };
+  }
+  var singleton3 = createFileExplorerModule({ repository: httpFileExplorerRepository });
+  var fileExplorerController = singleton3.controller;
+  var fileExplorerStore = singleton3.store;
+  var configureFileExplorerRuntime = singleton3.configureRuntime;
+
+  // src/web-ui/react/file-explorer/host.tsx
+  var React44 = __toESM(require_react(), 1);
+  var import_react23 = __toESM(require_react(), 1);
+
+  // src/web-ui/react/file-explorer/styles.ts
+  var fileExplorerStyles = String.raw`
+.wand-file-explorer {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  font-size: 0.8125rem;
+}
+.wand-file-explorer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-subtle, #e5e7eb);
+}
+.wand-file-explorer-title {
+  flex: 1 1 auto;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted, #999);
+  padding: 0 4px;
+}
+.wand-file-explorer-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary, #555);
+  border-radius: 5px;
+  cursor: pointer;
+  padding: 0;
+}
+.wand-file-explorer-btn:hover { background: var(--bg-tertiary, #eee); color: var(--text-primary, #111); }
+.wand-file-explorer-btn:disabled { opacity: 0.4; cursor: default; }
+
+.wand-file-explorer-search {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-subtle, #e5e7eb);
+}
+.wand-file-explorer-search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 1px solid var(--border-subtle, #e5e7eb);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 0.8125rem;
+  background: var(--bg-primary, #fff);
+  color: var(--text-primary, #111);
+}
+.wand-file-explorer-search input:focus { outline: none; border-color: var(--accent, #2563eb); }
+
+.wand-file-explorer-tree {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 0;
+  min-height: 0;
+}
+
+.wand-explorer-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+  user-select: none;
+  border-radius: 4px;
+  color: var(--text-primary, #111);
+  white-space: nowrap;
+  line-height: 1.45;
+}
+.wand-explorer-row:hover { background: var(--bg-hover, rgba(0,0,0,0.04)); }
+.wand-explorer-row.active { background: var(--bg-active, rgba(37,99,235,0.12)); }
+.wand-explorer-row.editing { background: transparent; cursor: default; }
+.wand-explorer-row.editing:hover { background: transparent; }
+.wand-explorer-chevron {
+  width: 12px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted, #999);
+  transition: transform 0.12s;
+}
+.wand-explorer-chevron.open { transform: rotate(90deg); }
+.wand-explorer-chevron.empty { visibility: hidden; }
+.wand-explorer-icon {
+  flex: 0 0 auto;
+  width: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.wand-explorer-icon svg,
+.wand-file-explorer-btn svg {
+  width: 15px;
+  height: 15px;
+  display: block;
+}
+.wand-explorer-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wand-explorer-git {
+  flex: 0 0 auto;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  width: 14px;
+  text-align: center;
+}
+.wand-explorer-git.git-modified { color: #e76f51; }
+.wand-explorer-git.git-added { color: #2a9d8f; }
+.wand-explorer-git.git-deleted { color: #c0392b; }
+.wand-explorer-git.git-renamed { color: #6f42c1; }
+.wand-explorer-git.git-untracked { color: #8a8a8a; }
+
+.wand-explorer-rename {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  flex: 1 1 auto;
+}
+.wand-explorer-rename input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 1px solid var(--accent, #2563eb);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 0.8125rem;
+  background: var(--bg-primary, #fff);
+  color: var(--text-primary, #111);
+}
+.wand-explorer-rename input:focus { outline: none; }
+
+.wand-explorer-context-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 168px;
+  background: var(--bg-primary, #fff);
+  border: 1px solid var(--border-subtle, #e5e7eb);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.16);
+  padding: 4px 0;
+}
+.wand-explorer-context-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary, #111);
+  font-size: 0.8125rem;
+  cursor: pointer;
+  text-align: left;
+}
+.wand-explorer-context-item:hover { background: var(--bg-hover, rgba(0,0,0,0.04)); }
+.wand-explorer-context-item.danger { color: #c0392b; }
+.wand-explorer-context-item:disabled { opacity: 0.4; cursor: default; }
+.wand-explorer-context-divider {
+  height: 1px;
+  background: var(--border-subtle, #e5e7eb);
+  margin: 4px 0;
+}
+
+.wand-file-explorer-empty {
+  padding: 24px 16px;
+  color: var(--text-muted, #999);
+  text-align: center;
+  font-size: 0.8125rem;
+}
+`;
+
+  // src/web-ui/react/file-explorer/host.tsx
+  var import_jsx_runtime47 = __toESM(require_jsx_runtime(), 1);
+  var IMAGE_EXT = /* @__PURE__ */ new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "bmp", "ico", "heic", "heif"]);
+  var MEDIA_EXT = /* @__PURE__ */ new Set(["mp4", "webm", "mov", "mkv", "m4v", "ogv", "mp3", "wav", "ogg", "m4a", "flac", "aac", "opus"]);
+  var ARCHIVE_EXT = /* @__PURE__ */ new Set(["zip", "tar", "gz", "tgz", "bz2", "7z", "rar", "xz"]);
+  var CODE_EXT = /* @__PURE__ */ new Set([
+    "ts",
+    "tsx",
+    "js",
+    "jsx",
+    "mjs",
+    "cjs",
+    "json",
+    "jsonc",
+    "yaml",
+    "yml",
+    "toml",
+    "ini",
+    "cfg",
+    "conf",
+    "env",
+    "py",
+    "rb",
+    "go",
+    "rs",
+    "java",
+    "c",
+    "cpp",
+    "h",
+    "hpp",
+    "cs",
+    "swift",
+    "kt",
+    "scala",
+    "php",
+    "sh",
+    "bash",
+    "zsh",
+    "fish",
+    "lua",
+    "sql",
+    "graphql",
+    "proto",
+    "vue",
+    "svelte",
+    "html",
+    "htm",
+    "xml",
+    "css",
+    "scss",
+    "less",
+    "md",
+    "markdown",
+    "mdx",
+    "txt",
+    "log",
+    "diff",
+    "patch"
+  ]);
+  function iconForEntry(entry, isOpen) {
+    if (entry.type === "dir") return isOpen ? "folderOpen" : "folder";
+    const name = entry.name.toLowerCase();
+    const dot = name.lastIndexOf(".");
+    const ext = dot >= 0 && dot < name.length - 1 ? name.slice(dot + 1) : "";
+    if (IMAGE_EXT.has(ext)) return "image";
+    if (MEDIA_EXT.has(ext)) return "media";
+    if (ARCHIVE_EXT.has(ext)) return "archive";
+    if (CODE_EXT.has(ext)) return "code";
+    return "file";
+  }
+  function ExplorerIcon({ name, size: size4 = 16 }) {
+    const common = {
+      className: "wand-fe-icon",
+      width: size4,
+      height: size4,
+      viewBox: "0 0 24 24",
+      fill: "none",
+      stroke: "currentColor",
+      strokeWidth: 1.8,
+      strokeLinecap: "round",
+      strokeLinejoin: "round",
+      "aria-hidden": true
+    };
+    switch (name) {
+      case "folder":
+        return /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("path", { d: "M4 20a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2z" }) });
+      case "folderOpen":
+        return /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("path", { d: "M6 14l1.5-3A2 2 0 0 1 9.2 10H20a2 2 0 0 1 1.9 2.5l-1.5 6A2 2 0 0 1 18.4 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4l3 3h7a2 2 0 0 1 2 2v2" }) });
+      case "file":
+        return /* @__PURE__ */ (0, import_jsx_runtime47.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("path", { d: "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" }),
+          /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("path", { d: "M14 3v5h5" })
+        ] });
+      case "image":
+        return /* @__PURE__ */ (0, import_jsx_runtime47.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("rect", { x: "3", y: "3", width: "18", height: "18", rx: "2" }),
+          /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("circle", { cx: "9", cy: "9", r: "2" }),
+          /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("path", { d: "m21 15-4.5-4.5L5 21" })
+        ] });
+      case "code":
+        return /* @__PURE__ */ (0, import_jsx_runtime47.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("path", { d: "m16 18 6-6-6-6" }),
+          /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("path", { d: "m8 6-6 6 6 6" })
+        ] });
+      case "media":
+        return /* @__PURE__ */ (0, import_jsx_runtime47.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("rect", { x: "3", y: "5", width: "18", height: "14", rx: "2" }),
+          /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("path", { d: "m10 9 5 3-5 3z" })
+        ] });
+      case "archive":
+        return /* @__PURE__ */ (0, import_jsx_runtime47.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("path", { d: "M4 4h16v4H4z" }),
+          /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("path", { d: "M5 8v12h14V8" }),
+          /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("path", { d: "M12 12v4" })
+        ] });
+      case "newFile":
+        return /* @__PURE__ */ (0, import_jsx_runtime47.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("path", { d: "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" }),
+          /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("path", { d: "M14 3v5h5" }),
+          /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("path", { d: "M12 12v6M9 15h6" })
+        ] });
+      case "newFolder":
+        return /* @__PURE__ */ (0, import_jsx_runtime47.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("path", { d: "M4 20a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2z" }),
+          /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("path", { d: "M12 11v6M9 14h6" })
+        ] });
+      case "refresh":
+        return /* @__PURE__ */ (0, import_jsx_runtime47.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("path", { d: "M21 12a9 9 0 1 1-3-6.7" }),
+          /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("path", { d: "M21 3v6h-6" })
+        ] });
+    }
+  }
+  function gitBadge(entry) {
+    const g = entry.gitStatus;
+    if (!g) return null;
+    if (g.staged === "added") return { text: "A", className: "git-added" };
+    if (g.staged === "modified") return { text: "M", className: "git-modified" };
+    if (g.staged === "deleted") return { text: "D", className: "git-deleted" };
+    if (g.staged === "renamed") return { text: "R", className: "git-renamed" };
+    if (g.unstaged === "modified") return { text: "M", className: "git-modified" };
+    if (g.unstaged === "deleted") return { text: "D", className: "git-deleted" };
+    if (g.untracked) return { text: "?", className: "git-untracked" };
+    return null;
+  }
+  function joinPath(dir, name) {
+    const trimmedName = name.trim();
+    if (!trimmedName) return dir;
+    const base = dir.replace(/\/+$/, "");
+    return `${base}/${trimmedName}`;
+  }
+  function parentOf2(inputPath) {
+    const normalized = inputPath.replace(/\\/g, "/").replace(/\/+$/, "");
+    if (!normalized || normalized === "/") return "/";
+    const index2 = normalized.lastIndexOf("/");
+    if (index2 <= 0) return "/";
+    return normalized.slice(0, index2);
+  }
+  function ExplorerRow({
+    entry,
+    depth,
+    snapshot: snapshot9,
+    onToggle,
+    onFileActivate,
+    onContextMenu,
+    renameState,
+    setRenameState,
+    onCreateChild,
+    pendingCreate,
+    setPendingCreate
+  }) {
+    const isDir = entry.type === "dir";
+    const nodeState = isDir ? snapshot9.expanded.get(entry.path) : void 0;
+    const isOpen = Boolean(nodeState);
+    const hasChildren = isDir && nodeState && nodeState.entries.length > 0;
+    const isActiveFile = !isDir && snapshot9.activeDir === parentOf2(entry.path);
+    const badge = gitBadge(entry);
+    const [renameDraft, setRenameDraft] = React44.useState(entry.name);
+    React44.useEffect(() => {
+      if (renameState?.path === entry.path) setRenameDraft(entry.name);
+    }, [renameState?.path, entry.name]);
+    const commitRename = async () => {
+      const newName = renameDraft.trim();
+      setRenameState(null);
+      if (!newName || newName === entry.name) return;
+      const target = joinPath(parentOf2(entry.path), newName);
+      if (target === entry.path) return;
+      await fileExplorerController.execute({ type: "rename", from: entry.path, to: target });
+    };
+    const isCreatingHere = pendingCreate?.dir === entry.path;
+    const isRenaming = renameState?.path === entry.path;
+    if (isRenaming) {
+      return /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("div", { className: "wand-explorer-row editing", style: { paddingLeft: 8 + depth * 12 }, children: /* @__PURE__ */ (0, import_jsx_runtime47.jsxs)("span", { className: "wand-explorer-rename", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("span", { className: "wand-explorer-icon", children: /* @__PURE__ */ (0, import_jsx_runtime47.jsx)(ExplorerIcon, { name: iconForEntry(entry, false) }) }),
+        /* @__PURE__ */ (0, import_jsx_runtime47.jsx)(
+          "input",
+          {
+            value: renameDraft,
+            autoFocus: true,
+            spellCheck: false,
+            onChange: (event) => setRenameDraft(event.currentTarget.value),
+            onClick: (event) => event.stopPropagation(),
+            onBlur: () => void commitRename(),
+            onKeyDown: (event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                event.currentTarget.blur();
+              } else if (event.key === "Escape") {
+                event.preventDefault();
+                setRenameState(null);
+              }
+            }
+          }
+        )
+      ] }) });
+    }
+    return /* @__PURE__ */ (0, import_jsx_runtime47.jsxs)(import_jsx_runtime47.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime47.jsxs)(
+        "div",
+        {
+          className: `wand-explorer-row${isActiveFile ? " active" : ""}`,
+          style: { paddingLeft: 8 + depth * 12 },
+          title: entry.path,
+          onClick: () => {
+            if (isDir) onToggle(entry.path);
+            else onFileActivate(entry.path);
+          },
+          onDoubleClick: () => {
+            if (isDir) {
+              void fileExplorerController.execute({ type: "navigate", dir: entry.path });
+            }
+          },
+          onContextMenu: (event) => {
+            event.preventDefault();
+            onContextMenu({ x: event.clientX, y: event.clientY, entry, dir: parentOf2(entry.path) });
+          },
+          children: [
+            /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("span", { className: `wand-explorer-chevron${isOpen ? " open" : ""}${isDir && !hasChildren ? " empty" : ""}`, "aria-hidden": "true", children: isDir ? "\u25B8" : "" }),
+            /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("span", { className: "wand-explorer-icon", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime47.jsx)(ExplorerIcon, { name: iconForEntry(entry, isOpen && isDir) }) }),
+            /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("span", { className: "wand-explorer-name", children: entry.name }),
+            badge && /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("span", { className: `wand-explorer-git ${badge.className}`, title: entry.path, children: badge.text })
+          ]
+        }
+      ),
+      isDir && isOpen && /* @__PURE__ */ (0, import_jsx_runtime47.jsxs)("div", { className: "wand-explorer-children", children: [
+        nodeState?.status === "loading" && /* @__PURE__ */ (0, import_jsx_runtime47.jsxs)("div", { className: "wand-explorer-row", style: { paddingLeft: 8 + (depth + 1) * 12, color: "var(--text-muted, #999)" }, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("span", { className: "wand-explorer-chevron empty" }),
+          /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("span", { className: "wand-explorer-name", children: "\u52A0\u8F7D\u4E2D\u2026" })
+        ] }),
+        nodeState?.status === "error" && /* @__PURE__ */ (0, import_jsx_runtime47.jsxs)("div", { className: "wand-explorer-row", style: { paddingLeft: 8 + (depth + 1) * 12, color: "#c0392b" }, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("span", { className: "wand-explorer-chevron empty" }),
+          /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("span", { className: "wand-explorer-name", children: nodeState.error || "\u8BFB\u53D6\u5931\u8D25" })
+        ] }),
+        nodeState?.status === "loaded" && nodeState.entries.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime47.jsxs)("div", { className: "wand-explorer-row", style: { paddingLeft: 8 + (depth + 1) * 12, color: "var(--text-muted, #999)" }, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("span", { className: "wand-explorer-chevron empty" }),
+          /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("span", { className: "wand-explorer-name", children: "\uFF08\u7A7A\u76EE\u5F55\uFF09" })
+        ] }),
+        isCreatingHere && pendingCreate && /* @__PURE__ */ (0, import_jsx_runtime47.jsx)(
+          CreateInput,
+          {
+            depth: depth + 1,
+            kind: pendingCreate.kind,
+            onCancel: () => setPendingCreate(null),
+            onSubmit: async (name) => {
+              const dir = pendingCreate.dir;
+              setPendingCreate(null);
+              if (!name) return;
+              await fileExplorerController.execute({
+                type: pendingCreate.kind === "file" ? "create.file" : "create.dir",
+                dir,
+                name
+              });
+            }
+          }
+        ),
+        nodeState?.status === "loaded" && nodeState.entries.map((child) => /* @__PURE__ */ (0, import_jsx_runtime47.jsx)(
+          ExplorerRow,
+          {
+            entry: child,
+            depth: depth + 1,
+            snapshot: snapshot9,
+            onToggle,
+            onFileActivate,
+            onContextMenu,
+            renameState,
+            setRenameState,
+            onCreateChild,
+            pendingCreate,
+            setPendingCreate
+          },
+          child.path
+        ))
+      ] }),
+      !isDir && isCreatingHere && pendingCreate && /* @__PURE__ */ (0, import_jsx_runtime47.jsx)(
+        CreateInput,
+        {
+          depth: depth + 1,
+          kind: pendingCreate.kind,
+          onCancel: () => setPendingCreate(null),
+          onSubmit: async (name) => {
+            const dir = pendingCreate.dir;
+            setPendingCreate(null);
+            if (!name) return;
+            await fileExplorerController.execute({
+              type: pendingCreate.kind === "file" ? "create.file" : "create.dir",
+              dir,
+              name
+            });
+          }
+        }
+      )
+    ] });
+  }
+  function CreateInput({
+    depth,
+    kind,
+    onCancel,
+    onSubmit
+  }) {
+    const [value, setValue] = React44.useState("");
+    return /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("div", { className: "wand-explorer-row editing", style: { paddingLeft: 8 + depth * 12 }, children: /* @__PURE__ */ (0, import_jsx_runtime47.jsxs)("span", { className: "wand-explorer-rename", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("span", { className: "wand-explorer-icon", children: /* @__PURE__ */ (0, import_jsx_runtime47.jsx)(ExplorerIcon, { name: kind === "file" ? "file" : "folder" }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime47.jsx)(
+        "input",
+        {
+          value,
+          autoFocus: true,
+          placeholder: kind === "file" ? "\u6587\u4EF6\u540D\uFF08\u56DE\u8F66\u521B\u5EFA\uFF0CEsc \u53D6\u6D88\uFF09" : "\u6587\u4EF6\u5939\u540D\uFF08\u56DE\u8F66\u521B\u5EFA\uFF0CEsc \u53D6\u6D88\uFF09",
+          spellCheck: false,
+          onChange: (event) => setValue(event.currentTarget.value),
+          onClick: (event) => event.stopPropagation(),
+          onBlur: () => value.trim() ? onSubmit(value) : onCancel(),
+          onKeyDown: (event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              onSubmit(value);
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              onCancel();
+            }
+          }
+        }
+      )
+    ] }) });
+  }
+  function ContextMenu({
+    state: state2,
+    onClose,
+    onAction
+  }) {
+    const ref = React44.useRef(null);
+    React44.useEffect(() => {
+      const handle = (event) => {
+        if (ref.current && !ref.current.contains(event.target)) onClose();
+      };
+      const scroll = () => onClose();
+      window.addEventListener("mousedown", handle, true);
+      window.addEventListener("scroll", scroll, true);
+      return () => {
+        window.removeEventListener("mousedown", handle, true);
+        window.removeEventListener("scroll", scroll, true);
+      };
+    }, [onClose]);
+    const vw = typeof window !== "undefined" ? window.innerWidth : 1024;
+    const vh = typeof window !== "undefined" ? window.innerHeight : 768;
+    const left = Math.min(state2.x, vw - 184);
+    const top = Math.min(state2.y, vh - 320);
+    const entry = state2.entry;
+    const isDir = entry?.type === "dir";
+    const targetDir = isDir && entry ? entry.path : state2.dir;
+    const item = (label, action, opts = {}) => /* @__PURE__ */ (0, import_jsx_runtime47.jsx)(
+      "button",
+      {
+        type: "button",
+        className: `wand-explorer-context-item${opts.danger ? " danger" : ""}`,
+        disabled: opts.disabled,
+        onClick: () => {
+          onAction(action);
+        },
+        children: label
+      }
+    );
+    return /* @__PURE__ */ (0, import_jsx_runtime47.jsxs)(
+      "div",
+      {
+        ref,
+        className: "wand-explorer-context-menu",
+        style: { left: Math.max(8, left), top: Math.max(8, top) },
+        role: "menu",
+        children: [
+          item("\u65B0\u5EFA\u6587\u4EF6", "newFile", { disabled: !targetDir }),
+          item("\u65B0\u5EFA\u6587\u4EF6\u5939", "newDir", { disabled: !targetDir }),
+          /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("div", { className: "wand-explorer-context-divider" }),
+          entry ? /* @__PURE__ */ (0, import_jsx_runtime47.jsxs)(import_jsx_runtime47.Fragment, { children: [
+            isDir ? item("\u8FDB\u5165\u6B64\u76EE\u5F55", "navigate") : item("\u6253\u5F00", "open"),
+            item("\u590D\u5236\u5B8C\u6574\u8DEF\u5F84", "copyPath"),
+            item("\u590D\u5236\u76F8\u5BF9\u8DEF\u5F84", "copyRelative"),
+            !isDir && item("\u4E0B\u8F7D\u6587\u4EF6", "download"),
+            /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("div", { className: "wand-explorer-context-divider" }),
+            item("\u91CD\u547D\u540D", "rename"),
+            item("\u5220\u9664", "delete", { danger: true })
+          ] }) : /* @__PURE__ */ (0, import_jsx_runtime47.jsxs)(import_jsx_runtime47.Fragment, { children: [
+            item("\u5237\u65B0", "refresh"),
+            item("\u590D\u5236\u76EE\u5F55\u8DEF\u5F84", "copyPath")
+          ] })
+        ]
+      }
+    );
+  }
+  function FileExplorerHost({ root }) {
+    const snapshot9 = useFileExplorerSnapshot();
+    const dispatch = fileExplorerController;
+    const [contextMenu, setContextMenu] = React44.useState(null);
+    const [renameState, setRenameState] = React44.useState(null);
+    const [pendingCreate, setPendingCreate] = React44.useState(null);
+    const [searchInput, setSearchInput] = React44.useState(snapshot9.searchQuery);
+    React44.useEffect(() => {
+      if (root) dispatch.setRoot(root);
+    }, [root, dispatch]);
+    React44.useEffect(() => {
+      setSearchInput(snapshot9.searchQuery);
+    }, [snapshot9.searchQuery]);
+    const rootNode = snapshot9.root ? snapshot9.expanded.get(snapshot9.root) : void 0;
+    const showingSearch = snapshot9.searchQuery.trim().length > 0 && snapshot9.searchResults !== null;
+    const handleAction = async (action) => {
+      const ctx = contextMenu;
+      setContextMenu(null);
+      if (!ctx) return;
+      const entry = ctx.entry;
+      if (action === "newFile") {
+        setPendingCreate({ dir: ctx.entry?.type === "dir" ? ctx.entry.path : ctx.dir, kind: "file" });
+        return;
+      }
+      if (action === "newDir") {
+        setPendingCreate({ dir: ctx.entry?.type === "dir" ? ctx.entry.path : ctx.dir, kind: "dir" });
+        return;
+      }
+      if (action === "navigate" && entry) {
+        void dispatch.execute({ type: "navigate", dir: entry.path });
+        return;
+      }
+      if (action === "open" && entry) {
+        codeEditorController.open(entry.path);
+        return;
+      }
+      if (action === "rename" && entry) {
+        setRenameState({ path: entry.path });
+        return;
+      }
+      if (action === "delete" && entry) {
+        void dispatch.execute({ type: "delete", path: entry.path });
+        return;
+      }
+      if (action === "refresh") {
+        void dispatch.execute({ type: "refresh", dir: ctx.dir });
+        return;
+      }
+      if (action === "copyPath" && entry) {
+        const ok = await copyText(entry.path);
+        notify(ok ? "\u5DF2\u590D\u5236\u8DEF\u5F84" : "\u590D\u5236\u5931\u8D25", ok ? "success" : "error");
+        return;
+      }
+      if (action === "copyRelative" && entry && snapshot9.root) {
+        const rel = relativePath(entry.path, snapshot9.root);
+        const ok = await copyText(rel);
+        notify(ok ? "\u5DF2\u590D\u5236\u76F8\u5BF9\u8DEF\u5F84" : "\u590D\u5236\u5931\u8D25", ok ? "success" : "error");
+        return;
+      }
+      if (action === "download" && entry) {
+        const a = document.createElement("a");
+        a.href = `/api/file-raw?download=1&path=${encodeURIComponent(entry.path)}`;
+        a.rel = "noopener";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        return;
+      }
+    };
+    return /* @__PURE__ */ (0, import_jsx_runtime47.jsxs)(import_jsx_runtime47.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("style", { id: "wand-file-explorer-styles", children: fileExplorerStyles }),
+      /* @__PURE__ */ (0, import_jsx_runtime47.jsxs)("div", { className: "wand-file-explorer", onContextMenu: (event) => {
+        if (event.target !== event.currentTarget) return;
+        event.preventDefault();
+        setContextMenu({ x: event.clientX, y: event.clientY, entry: null, dir: snapshot9.activeDir || snapshot9.root });
+      }, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime47.jsxs)("div", { className: "wand-file-explorer-toolbar", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("span", { className: "wand-file-explorer-title", children: "\u8D44\u6E90\u7BA1\u7406\u5668" }),
+          /* @__PURE__ */ (0, import_jsx_runtime47.jsx)(
+            "button",
+            {
+              type: "button",
+              className: "wand-file-explorer-btn",
+              title: "\u65B0\u5EFA\u6587\u4EF6",
+              "aria-label": "\u65B0\u5EFA\u6587\u4EF6",
+              disabled: !snapshot9.root || snapshot9.busy,
+              onClick: () => setPendingCreate({ dir: snapshot9.activeDir || snapshot9.root, kind: "file" }),
+              children: /* @__PURE__ */ (0, import_jsx_runtime47.jsx)(ExplorerIcon, { name: "newFile", size: 15 })
+            }
+          ),
+          /* @__PURE__ */ (0, import_jsx_runtime47.jsx)(
+            "button",
+            {
+              type: "button",
+              className: "wand-file-explorer-btn",
+              title: "\u65B0\u5EFA\u6587\u4EF6\u5939",
+              "aria-label": "\u65B0\u5EFA\u6587\u4EF6\u5939",
+              disabled: !snapshot9.root || snapshot9.busy,
+              onClick: () => setPendingCreate({ dir: snapshot9.activeDir || snapshot9.root, kind: "dir" }),
+              children: /* @__PURE__ */ (0, import_jsx_runtime47.jsx)(ExplorerIcon, { name: "newFolder", size: 15 })
+            }
+          ),
+          /* @__PURE__ */ (0, import_jsx_runtime47.jsx)(
+            "button",
+            {
+              type: "button",
+              className: "wand-file-explorer-btn",
+              title: "\u5237\u65B0",
+              "aria-label": "\u5237\u65B0",
+              disabled: !snapshot9.root || snapshot9.busy,
+              onClick: () => void dispatch.execute({ type: "refresh" }),
+              children: /* @__PURE__ */ (0, import_jsx_runtime47.jsx)(ExplorerIcon, { name: "refresh", size: 15 })
+            }
+          )
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime47.jsxs)("div", { className: "wand-file-explorer-search", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime47.jsx)(
+            "input",
+            {
+              type: "text",
+              value: searchInput,
+              placeholder: "\u641C\u7D22\u6587\u4EF6\u2026",
+              spellCheck: false,
+              autoComplete: "off",
+              disabled: !snapshot9.root,
+              onChange: (event) => {
+                const value = event.currentTarget.value;
+                setSearchInput(value);
+                void dispatch.execute({ type: "search.start", query: value });
+              },
+              onKeyDown: (event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  void dispatch.execute({ type: "search.clear" });
+                }
+              }
+            }
+          ),
+          snapshot9.searching && /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("span", { "aria-hidden": "true", children: "\u2026" })
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime47.jsxs)("div", { className: "wand-file-explorer-tree", role: "tree", "aria-label": "\u6587\u4EF6\u6811", children: [
+          !snapshot9.root && /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("div", { className: "wand-file-explorer-empty", children: "\u5C1A\u672A\u9009\u62E9\u5DE5\u4F5C\u76EE\u5F55\u3002" }),
+          snapshot9.root && rootNode?.status === "loading" && !rootNode.entries.length && /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("div", { className: "wand-file-explorer-empty", children: "\u52A0\u8F7D\u4E2D\u2026" }),
+          snapshot9.root && rootNode?.status === "error" && /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("div", { className: "wand-file-explorer-empty", children: rootNode.error || "\u8BFB\u53D6\u76EE\u5F55\u5931\u8D25" }),
+          showingSearch ? snapshot9.searchResults && snapshot9.searchResults.length > 0 ? snapshot9.searchResults.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime47.jsx)(
+            ExplorerRow,
+            {
+              entry,
+              depth: 0,
+              snapshot: snapshot9,
+              onToggle: (dir) => void dispatch.execute({ type: "toggle", dir }),
+              onFileActivate: (path) => void codeEditorController.open(path),
+              onContextMenu: (state2) => setContextMenu(state2),
+              renameState,
+              setRenameState,
+              onCreateChild: (dir, kind) => setPendingCreate({ dir, kind }),
+              pendingCreate,
+              setPendingCreate
+            },
+            entry.path
+          )) : /* @__PURE__ */ (0, import_jsx_runtime47.jsx)("div", { className: "wand-file-explorer-empty", children: "\u6CA1\u6709\u627E\u5230\u5339\u914D\u7684\u6587\u4EF6" }) : rootNode?.status === "loaded" && rootNode.entries.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime47.jsxs)(import_jsx_runtime47.Fragment, { children: [
+            pendingCreate && pendingCreate.dir === snapshot9.root && /* @__PURE__ */ (0, import_jsx_runtime47.jsx)(
+              CreateInput,
+              {
+                depth: 0,
+                kind: pendingCreate.kind,
+                onCancel: () => setPendingCreate(null),
+                onSubmit: async (name) => {
+                  const dir = pendingCreate.dir;
+                  setPendingCreate(null);
+                  if (!name) return;
+                  await dispatch.execute({
+                    type: pendingCreate.kind === "file" ? "create.file" : "create.dir",
+                    dir,
+                    name
+                  });
+                }
+              }
+            ),
+            rootNode.entries.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime47.jsx)(
+              ExplorerRow,
+              {
+                entry,
+                depth: 0,
+                snapshot: snapshot9,
+                onToggle: (dir) => void dispatch.execute({ type: "toggle", dir }),
+                onFileActivate: (path) => void codeEditorController.open(path),
+                onContextMenu: (state2) => setContextMenu(state2),
+                renameState,
+                setRenameState,
+                onCreateChild: (dir, kind) => setPendingCreate({ dir, kind }),
+                pendingCreate,
+                setPendingCreate
+              },
+              entry.path
+            ))
+          ] })
+        ] })
+      ] }),
+      contextMenu && /* @__PURE__ */ (0, import_jsx_runtime47.jsx)(
+        ContextMenu,
+        {
+          state: contextMenu,
+          onClose: () => setContextMenu(null),
+          onAction: (action) => void handleAction(action)
+        }
+      )
+    ] });
+  }
+  function useFileExplorerSnapshot() {
+    return (0, import_react23.useSyncExternalStore)(
+      fileExplorerStore.subscribe,
+      fileExplorerStore.getSnapshot,
+      fileExplorerStore.getSnapshot
+    );
+  }
+  async function copyText(text6) {
+    try {
+      await copyTextToPlatformClipboard(text6);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  function notify(message, tone) {
+    wandOverlay.toast(message, { tone });
+  }
+  function relativePath(target, base) {
+    if (!target.startsWith(base)) return target;
+    const rel = target.slice(base.length).replace(/^\/+/, "");
+    return rel || ".";
+  }
+
+  // src/web-ui/react/shell/shell-file-panel.tsx
+  var import_jsx_runtime48 = __toESM(require_jsx_runtime(), 1);
   function normalizeFilePanelCwd(raw) {
     let cwd = raw.trim();
     if (!cwd) return "";
@@ -33510,34 +37202,28 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     };
     switch (name) {
       case "close":
-        return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M18 6L6 18M6 6l12 12" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime48.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime48.jsx)("path", { d: "M18 6L6 18M6 6l12 12" }) });
       case "folder":
-        return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("svg", { ...common, className: "wand-icon wand-icon-folder-open", children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M6 14l1.5-3A2 2 0 019.2 10H20a2 2 0 011.9 2.5l-1.5 6A2 2 0 0118.4 20H4a2 2 0 01-2-2V5a2 2 0 012-2h4l3 3h7a2 2 0 012 2v2" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime48.jsx)("svg", { ...common, className: "wand-icon wand-icon-folder-open", children: /* @__PURE__ */ (0, import_jsx_runtime48.jsx)("path", { d: "M6 14l1.5-3A2 2 0 019.2 10H20a2 2 0 011.9 2.5l-1.5 6A2 2 0 0118.4 20H4a2 2 0 01-2-2V5a2 2 0 012-2h4l3 3h7a2 2 0 012 2v2" }) });
       case "refresh":
-        return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M21 12a9 9 0 11-3-6.7M21 4v5h-5" }) });
-      case "search":
-        return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("circle", { cx: "11", cy: "11", r: "7" }),
-          /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M21 21l-4.3-4.3" })
-        ] });
+        return /* @__PURE__ */ (0, import_jsx_runtime48.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime48.jsx)("path", { d: "M21 12a9 9 0 11-3-6.7M21 4v5h-5" }) });
       case "up":
-        return /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("path", { d: "M12 19V5M5 12l7-7 7 7" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime48.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime48.jsx)("path", { d: "M12 19V5M5 12l7-7 7 7" }) });
     }
   }
   function ShellFilePanel({ explorerRef } = {}) {
-    const snapshot8 = useUiStoreSnapshot();
+    const snapshot9 = useUiStoreSnapshot();
     const dispatch = useUiDispatch();
-    const snapshotCwd = normalizeFilePanelCwd(snapshot8.topbar.cwd) || "/";
-    const [cwd, setCwd] = React41.useState(snapshotCwd);
-    const [search, setSearch] = React41.useState("");
-    const committedCwd = React41.useRef(snapshotCwd);
-    const editingCwd = React41.useRef(false);
-    React41.useEffect(() => {
+    const snapshotCwd = normalizeFilePanelCwd(snapshot9.topbar.cwd) || "/";
+    const [cwd, setCwd] = React45.useState(snapshotCwd);
+    const committedCwd = React45.useRef(snapshotCwd);
+    const editingCwd = React45.useRef(false);
+    React45.useEffect(() => {
       if (editingCwd.current) return;
       committedCwd.current = snapshotCwd;
       setCwd(snapshotCwd);
-    }, [snapshot8.selected?.id, snapshotCwd]);
-    const commitCwd = React41.useCallback(() => {
+    }, [snapshot9.selected?.id, snapshotCwd]);
+    const commitCwd = React45.useCallback(() => {
       const normalized = normalizeFilePanelCwd(cwd);
       if (!normalized) {
         setCwd(committedCwd.current);
@@ -33549,30 +37235,30 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       void dispatch({ type: "layout.files.navigate", cwd: normalized });
     }, [cwd, dispatch]);
     const parentCwd = getParentFilePanelCwd(committedCwd.current);
-    return /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(import_jsx_runtime42.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime48.jsxs)(import_jsx_runtime48.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime48.jsx)(
         "div",
         {
           id: "file-panel-backdrop",
-          className: classNames("file-panel-backdrop", snapshot8.layout.filePanelBackdropVisible && "open"),
+          className: classNames("file-panel-backdrop", snapshot9.layout.filePanelBackdropVisible && "open"),
           "aria-hidden": "true",
           onClick: () => void dispatch({ type: "layout.files.close" })
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)(
+      /* @__PURE__ */ (0, import_jsx_runtime48.jsxs)(
         "div",
         {
           id: "file-side-panel",
-          className: classNames("file-side-panel", snapshot8.layout.filePanelOpen && "open"),
-          "aria-hidden": !snapshot8.layout.filePanelOpen,
+          className: classNames("file-side-panel", snapshot9.layout.filePanelOpen && "open"),
+          "aria-hidden": !snapshot9.layout.filePanelOpen,
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "file-side-panel-header", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "file-side-panel-title-group", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "file-side-panel-icon", children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(FileIcon, { name: "folder" }) }),
-                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "file-side-panel-title", children: "\u6587\u4EF6" })
+            /* @__PURE__ */ (0, import_jsx_runtime48.jsxs)("div", { className: "file-side-panel-header", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime48.jsxs)("div", { className: "file-side-panel-title-group", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime48.jsx)("span", { className: "file-side-panel-icon", children: /* @__PURE__ */ (0, import_jsx_runtime48.jsx)(FileIcon, { name: "folder" }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime48.jsx)("span", { className: "file-side-panel-title", children: "\u6587\u4EF6" })
               ] }),
-              /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "file-side-panel-header-actions", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+              /* @__PURE__ */ (0, import_jsx_runtime48.jsxs)("div", { className: "file-side-panel-header-actions", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime48.jsx)(
                   "button",
                   {
                     className: "file-side-panel-iconbtn",
@@ -33580,11 +37266,14 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                     type: "button",
                     title: "\u5237\u65B0",
                     "aria-label": "\u5237\u65B0\u6587\u4EF6\u5217\u8868",
-                    onClick: () => void dispatch({ type: "layout.files.refresh" }),
-                    children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(FileIcon, { name: "refresh", size: 15 })
+                    onClick: () => {
+                      void fileExplorerController.execute({ type: "refresh" });
+                      void dispatch({ type: "layout.files.refresh" });
+                    },
+                    children: /* @__PURE__ */ (0, import_jsx_runtime48.jsx)(FileIcon, { name: "refresh", size: 15 })
                   }
                 ),
-                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+                /* @__PURE__ */ (0, import_jsx_runtime48.jsx)(
                   "button",
                   {
                     id: "file-side-panel-close",
@@ -33593,14 +37282,14 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                     "aria-label": "\u5173\u95ED\u6587\u4EF6\u9762\u677F",
                     title: "\u5173\u95ED",
                     onClick: () => void dispatch({ type: "layout.files.close" }),
-                    children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(FileIcon, { name: "close" })
+                    children: /* @__PURE__ */ (0, import_jsx_runtime48.jsx)(FileIcon, { name: "close" })
                   }
                 )
               ] })
             ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "file-side-panel-body", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "file-explorer-header", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+            /* @__PURE__ */ (0, import_jsx_runtime48.jsxs)("div", { className: "file-side-panel-body", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime48.jsxs)("div", { className: "file-explorer-header", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime48.jsx)(
                   "button",
                   {
                     className: "file-explorer-up",
@@ -33615,10 +37304,10 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                       setCwd(parentCwd);
                       void dispatch({ type: "layout.files.up" });
                     },
-                    children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(FileIcon, { name: "up", size: 15 })
+                    children: /* @__PURE__ */ (0, import_jsx_runtime48.jsx)(FileIcon, { name: "up", size: 15 })
                   }
                 ),
-                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
+                /* @__PURE__ */ (0, import_jsx_runtime48.jsx)(
                   "input",
                   {
                     type: "text",
@@ -33656,46 +37345,17 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                   }
                 )
               ] }),
-              /* @__PURE__ */ (0, import_jsx_runtime42.jsxs)("div", { className: "file-search-box", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("span", { className: "file-search-icon", children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(FileIcon, { name: "search", size: 14 }) }),
-                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
-                  "input",
-                  {
-                    type: "text",
-                    id: "file-search-input",
-                    className: "file-search-input",
-                    value: search,
-                    placeholder: "\u641C\u7D22\u5F53\u524D\u76EE\u5F55\u2026",
-                    autoComplete: "off",
-                    autoCorrect: "off",
-                    autoCapitalize: "off",
-                    spellCheck: false,
-                    "aria-label": "\u641C\u7D22\u5F53\u524D\u76EE\u5F55",
-                    onChange: (event) => {
-                      const next = event.currentTarget.value;
-                      setSearch(next);
-                      void dispatch({ type: "layout.files.search", query: next.trim() });
-                    }
-                  }
-                ),
-                /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(
-                  "button",
-                  {
-                    className: classNames("file-search-clear", search.trim() && "visible"),
-                    id: "file-search-clear",
-                    type: "button",
-                    "aria-label": "\u6E05\u9664\u641C\u7D22",
-                    title: "\u6E05\u9664",
-                    disabled: !search,
-                    onClick: () => {
-                      setSearch("");
-                      void dispatch({ type: "layout.files.search.clear" });
-                    },
-                    children: /* @__PURE__ */ (0, import_jsx_runtime42.jsx)(FileIcon, { name: "close", size: 13 })
-                  }
-                )
-              ] }),
-              /* @__PURE__ */ (0, import_jsx_runtime42.jsx)("div", { className: "file-explorer", id: "file-explorer", ref: explorerRef })
+              /* @__PURE__ */ (0, import_jsx_runtime48.jsx)(
+                "div",
+                {
+                  className: "file-explorer legacy-file-explorer-host",
+                  id: "file-explorer",
+                  ref: explorerRef,
+                  hidden: true,
+                  "aria-hidden": "true"
+                }
+              ),
+              /* @__PURE__ */ (0, import_jsx_runtime48.jsx)(FileExplorerHost, { root: committedCwd.current })
             ] })
           ]
         }
@@ -33704,10 +37364,522 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   }
 
   // src/web-ui/react/shell/shell-topbar.tsx
-  var React43 = __toESM(require_react(), 1);
+  var React48 = __toESM(require_react(), 1);
 
   // src/web-ui/react/shell/shell-sidebar.tsx
-  var React42 = __toESM(require_react(), 1);
+  var React47 = __toESM(require_react(), 1);
+
+  // src/web-ui/react/workspaces/workspaces-panel.tsx
+  var React46 = __toESM(require_react(), 1);
+  var import_jsx_runtime49 = __toESM(require_jsx_runtime(), 1);
+  var NAME_MAX = 80;
+  function containsControlOrLineBreak(value) {
+    for (const ch of value) {
+      const code = ch.codePointAt(0);
+      if (code === void 0) continue;
+      if (code < 32 || code === 127 || code >= 128 && code <= 159 || code === 8232 || code === 8233) return true;
+    }
+    return false;
+  }
+  function presentError7(error, fallback) {
+    if (!(error instanceof Error) || !error.message || error.message === "Failed to fetch") return fallback;
+    return error.message;
+  }
+  function isValidName(value) {
+    const trimmed = value.trim();
+    if (!trimmed) return false;
+    if (Array.from(trimmed).length > NAME_MAX) return false;
+    return !containsControlOrLineBreak(trimmed);
+  }
+  function runtime9() {
+    return workspacesStore.getRuntime();
+  }
+  function toast(message, tone) {
+    runtime9()?.toast(message, tone);
+  }
+  function SvgIcon({ name, size: size4 = 14 }) {
+    const common = {
+      width: size4,
+      height: size4,
+      viewBox: "0 0 24 24",
+      fill: "none",
+      stroke: "currentColor",
+      strokeWidth: 2,
+      strokeLinecap: "round",
+      strokeLinejoin: "round",
+      "aria-hidden": true
+    };
+    switch (name) {
+      case "chevron":
+        return /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("path", { d: "M6 9l6 6 6-6" }) });
+      case "file":
+        return /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("path", { d: "M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" }) });
+      case "plus":
+        return /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("path", { d: "M12 5v14M5 12h14" }) });
+      case "trash":
+        return /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("path", { d: "M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" }) });
+      case "check":
+        return /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("path", { d: "M20 6L9 17l-5-5" }) });
+      case "close":
+        return /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("path", { d: "M6 6l12 12M18 6L6 18" }) });
+      case "branch":
+        return /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("circle", { cx: "6", cy: "6", r: "2.5" }),
+          /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("circle", { cx: "6", cy: "18", r: "2.5" }),
+          /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("circle", { cx: "18", cy: "8", r: "2.5" }),
+          /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("path", { d: "M6 8.5v7M18 10.5c0 4-6 2.5-6 6.5" })
+        ] });
+      case "spark":
+        return /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("path", { d: "M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8" }),
+          /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("circle", { cx: "12", cy: "12", r: "3" })
+        ] });
+    }
+  }
+  function useWorkspaces(refreshKey) {
+    const [workspaces, setWorkspaces] = React46.useState([]);
+    const [loading, setLoading] = React46.useState(false);
+    const [error, setError] = React46.useState("");
+    const generationRef = React46.useRef(0);
+    const abortRef = React46.useRef(null);
+    const reload = React46.useCallback(async (showLoading) => {
+      const generation = ++generationRef.current;
+      abortRef.current?.abort();
+      const abort = new AbortController();
+      abortRef.current = abort;
+      if (showLoading) setLoading(true);
+      try {
+        const items = await httpWorkspacesRepository.list();
+        if (generation === generationRef.current) {
+          setWorkspaces(items);
+          setError("");
+        }
+      } catch (fetchError) {
+        if (generation === generationRef.current) {
+          setError(presentError7(fetchError, "\u65E0\u6CD5\u52A0\u8F7D\u9879\u76EE\u5217\u8868\u3002"));
+        }
+      } finally {
+        if (generation === generationRef.current) {
+          abortRef.current = null;
+          setLoading(false);
+        }
+      }
+    }, []);
+    React46.useEffect(() => {
+      void reload(true);
+      const interval = window.setInterval(() => void reload(false), 6e3);
+      return () => {
+        window.clearInterval(interval);
+        generationRef.current += 1;
+        abortRef.current?.abort();
+        abortRef.current = null;
+      };
+    }, [reload, refreshKey]);
+    return { workspaces, loading, error, reload: () => void reload(false) };
+  }
+  function useWorkspaceTasks(workspaceId) {
+    const [tasks, setTasks] = React46.useState([]);
+    const [loading, setLoading] = React46.useState(false);
+    const [error, setError] = React46.useState("");
+    const generationRef = React46.useRef(0);
+    const reload = React46.useCallback(async () => {
+      if (!workspaceId) return;
+      const generation = ++generationRef.current;
+      setLoading(true);
+      try {
+        const items = await httpWorkspacesRepository.listTasks(workspaceId);
+        if (generation === generationRef.current) {
+          setTasks(items);
+          setError("");
+        }
+      } catch (fetchError) {
+        if (generation === generationRef.current) {
+          setError(presentError7(fetchError, "\u65E0\u6CD5\u52A0\u8F7D\u4EFB\u52A1\u5217\u8868\u3002"));
+        }
+      } finally {
+        if (generation === generationRef.current) setLoading(false);
+      }
+    }, [workspaceId]);
+    React46.useEffect(() => {
+      setTasks([]);
+      setError("");
+      if (!workspaceId) return;
+      void reload();
+    }, [workspaceId, reload]);
+    return { tasks, loading, error, reload };
+  }
+  function TaskItem({
+    task,
+    active,
+    onOpen,
+    onDelete
+  }) {
+    const [confirming, setConfirming] = React46.useState(false);
+    const [busy, setBusy] = React46.useState(false);
+    const isolated = Boolean(task.worktree);
+    return /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)(
+      "div",
+      {
+        className: classNames("workspace-task", active && "active", !isolated && "not-isolated"),
+        role: "button",
+        tabIndex: 0,
+        "aria-current": active ? "true" : void 0,
+        title: task.worktree ? task.worktree.path : "\u65E0 worktree\uFF08\u5728\u9879\u76EE\u76EE\u5F55\u76F4\u63A5\u8FD0\u884C\uFF09",
+        onClick: onOpen,
+        onKeyDown: (event) => {
+          if (event.target !== event.currentTarget) return;
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          onOpen();
+        },
+        children: [
+          /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("span", { className: "workspace-task-marker", children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(SvgIcon, { name: isolated ? "branch" : "file", size: 12 }) }),
+          /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("span", { className: "workspace-task-name", children: task.name }),
+          /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("span", { className: classNames("workspace-task-badge", isolated ? "isolated" : "shared"), children: isolated ? "\u9694\u79BB" : "\u5171\u4EAB" }),
+          !confirming ? /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(
+            "button",
+            {
+              type: "button",
+              className: "workspace-task-action delete",
+              title: "\u5220\u9664\u4EFB\u52A1\uFF08\u6E05\u7406 worktree\uFF09",
+              "aria-label": `\u5220\u9664\u4EFB\u52A1 ${task.name}`,
+              disabled: busy,
+              onClick: (event) => {
+                event.stopPropagation();
+                setConfirming(true);
+              },
+              children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(SvgIcon, { name: "trash", size: 13 })
+            }
+          ) : /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)("span", { className: "workspace-task-confirm", onClick: (event) => event.stopPropagation(), children: [
+            /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(
+              "button",
+              {
+                type: "button",
+                className: "workspace-task-action confirm",
+                title: "\u786E\u8BA4\u5220\u9664",
+                disabled: busy,
+                onClick: async () => {
+                  if (busy) return;
+                  setBusy(true);
+                  try {
+                    await onDelete();
+                  } finally {
+                    setBusy(false);
+                    setConfirming(false);
+                  }
+                },
+                children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(SvgIcon, { name: "check", size: 13 })
+              }
+            ),
+            /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(
+              "button",
+              {
+                type: "button",
+                className: "workspace-task-action cancel",
+                title: "\u53D6\u6D88",
+                disabled: busy,
+                onClick: () => setConfirming(false),
+                children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(SvgIcon, { name: "close", size: 13 })
+              }
+            )
+          ] })
+        ]
+      }
+    );
+  }
+  function NewTaskForm({
+    onCancel,
+    onCreate
+  }) {
+    const [value, setValue] = React46.useState("");
+    const [submitting, setSubmitting] = React46.useState(false);
+    const [error, setError] = React46.useState("");
+    const inputRef = React46.useRef(null);
+    React46.useEffect(() => {
+      const frame = requestAnimationFrame(() => {
+        inputRef.current?.focus();
+      });
+      return () => cancelAnimationFrame(frame);
+    }, []);
+    const submit = async () => {
+      if (submitting) return;
+      const trimmed = value.trim();
+      if (!isValidName(trimmed)) {
+        setError(trimmed ? "\u4EFB\u52A1\u540D\u79F0\u65E0\u6548\u6216\u8FC7\u957F\uFF08\u6700\u591A 80 \u5B57\u7B26\uFF09\u3002" : "\u8BF7\u8F93\u5165\u4EFB\u52A1\u540D\u79F0\u3002");
+        return;
+      }
+      setSubmitting(true);
+      setError("");
+      try {
+        await onCreate(trimmed);
+      } catch (createError) {
+        setError(presentError7(createError, "\u521B\u5EFA\u4EFB\u52A1\u5931\u8D25\u3002"));
+      } finally {
+        setSubmitting(false);
+      }
+    };
+    return /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)(
+      "form",
+      {
+        className: "workspace-new-task-form",
+        "aria-busy": submitting,
+        onSubmit: (event) => {
+          event.preventDefault();
+          void submit();
+        },
+        onKeyDown: (event) => {
+          if (event.key !== "Escape") return;
+          event.preventDefault();
+          event.stopPropagation();
+          if (!submitting) onCancel();
+        },
+        children: [
+          /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(
+            "input",
+            {
+              ref: inputRef,
+              className: "workspace-new-task-input",
+              type: "text",
+              value,
+              disabled: submitting,
+              placeholder: "\u4EFB\u52A1\u540D\u79F0\uFF08\u5982\uFF1A\u4FEE\u590D\u767B\u5F55\u6D41\u7A0B\uFF09",
+              autoComplete: "off",
+              spellCheck: false,
+              "aria-invalid": Boolean(error) || void 0,
+              onChange: (event) => {
+                setValue(event.currentTarget.value);
+                setError("");
+              }
+            }
+          ),
+          /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("button", { type: "submit", className: "workspace-new-task-btn save", disabled: submitting, title: "\u521B\u5EFA\u4EFB\u52A1", "aria-label": "\u521B\u5EFA\u4EFB\u52A1", children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(SvgIcon, { name: "check", size: 14 }) }),
+          /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("button", { type: "button", className: "workspace-new-task-btn", disabled: submitting, title: "\u53D6\u6D88", "aria-label": "\u53D6\u6D88", onClick: onCancel, children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(SvgIcon, { name: "close", size: 14 }) }),
+          error && /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("div", { className: "workspace-new-task-error", role: "alert", children: error })
+        ]
+      }
+    );
+  }
+  function WorkspaceItem({
+    workspace,
+    defaultExpanded,
+    activeWorkspaceId,
+    activeTaskId,
+    onActiveTaskOpen,
+    reloadWorkspaces
+  }) {
+    const [open, setOpen] = React46.useState(defaultExpanded);
+    const [creating, setCreating] = React46.useState(false);
+    const [confirmingDelete, setConfirmingDelete] = React46.useState(false);
+    const [deleting, setDeleting] = React46.useState(false);
+    const { tasks, loading, error, reload } = useWorkspaceTasks(open ? workspace.id : null);
+    React46.useEffect(() => {
+      if (defaultExpanded) setOpen(true);
+    }, [defaultExpanded]);
+    const handleCreate = async (name) => {
+      const created = await httpWorkspacesRepository.createTask(workspace.id, { name });
+      toast(`\u5DF2\u521B\u5EFA\u4EFB\u52A1\u300C${created.name}\u300D${created.isolated ? "\uFF08\u72EC\u7ACB worktree\uFF09" : ""}`, "success");
+      if (!created.isolated && created.worktreeError) {
+        toast(created.worktreeError, "warning");
+      }
+      setCreating(false);
+      await reload();
+      onActiveTaskOpen(created);
+    };
+    const handleDeleteTask = async (task) => {
+      await httpWorkspacesRepository.deleteTask(task.id, true);
+      await runtime9()?.refreshSessions();
+      if (activeTaskId === task.id) runtime9()?.openWorkspace(workspace);
+      toast(`\u5DF2\u5220\u9664\u4EFB\u52A1\u300C${task.name}\u300D`, "info");
+      await reload();
+    };
+    const handleDeleteWorkspace = async () => {
+      setDeleting(true);
+      try {
+        await httpWorkspacesRepository.remove(workspace.id, true);
+        await runtime9()?.refreshSessions();
+        if (activeWorkspaceId === workspace.id) runtime9()?.closeWorkspace();
+        toast(`\u5DF2\u5220\u9664\u9879\u76EE\u300C${workspace.name}\u300D`, "info");
+        setConfirmingDelete(false);
+        reloadWorkspaces();
+      } catch (deleteError) {
+        toast(presentError7(deleteError, "\u5220\u9664\u9879\u76EE\u5931\u8D25\u3002"), "danger");
+      } finally {
+        setDeleting(false);
+      }
+    };
+    const isActiveWorkspace = activeWorkspaceId === workspace.id;
+    return /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)("section", { className: classNames("workspace-item", isActiveWorkspace && "active-workspace"), children: [
+      /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)("div", { className: "workspace-row", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)(
+          "button",
+          {
+            type: "button",
+            className: "workspace-row-main",
+            "aria-expanded": open,
+            title: workspace.cwd,
+            onClick: () => setOpen((current) => !current),
+            children: [
+              /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(SvgIcon, { name: "chevron", size: 12 }),
+              /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(SvgIcon, { name: "file", size: 14 }),
+              /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)("span", { className: "workspace-row-label", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("span", { className: "workspace-row-name", children: workspace.name }),
+                /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("span", { className: "workspace-row-cwd", children: workspace.cwd })
+              ] }),
+              /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("span", { className: "workspace-row-count", "aria-label": `${tasks.length} \u4E2A\u4EFB\u52A1`, children: tasks.length })
+            ]
+          }
+        ),
+        /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)("span", { className: "workspace-row-actions", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)(
+            "button",
+            {
+              type: "button",
+              className: "workspace-row-action add",
+              title: "\u65B0\u5EFA\u4EFB\u52A1\uFF08\u72EC\u7ACB worktree\uFF09",
+              "aria-label": `\u5728 ${workspace.name} \u65B0\u5EFA\u4EFB\u52A1`,
+              "aria-expanded": creating,
+              onClick: (event) => {
+                event.stopPropagation();
+                setCreating(true);
+                setOpen(true);
+              },
+              children: [
+                /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(SvgIcon, { name: "plus", size: 14 }),
+                /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("span", { className: "workspace-row-action-label", children: creating ? "\u586B\u5199\u4E2D" : "\u65B0\u4EFB\u52A1" })
+              ]
+            }
+          ),
+          !confirmingDelete ? /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(
+            "button",
+            {
+              type: "button",
+              className: "workspace-row-action delete",
+              title: "\u5220\u9664\u9879\u76EE",
+              "aria-label": `\u5220\u9664\u9879\u76EE ${workspace.name}`,
+              disabled: deleting,
+              onClick: (event) => {
+                event.stopPropagation();
+                setConfirmingDelete(true);
+              },
+              children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(SvgIcon, { name: "trash", size: 13 })
+            }
+          ) : /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)("span", { className: "workspace-row-confirm", onClick: (event) => event.stopPropagation(), children: [
+            /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(
+              "button",
+              {
+                type: "button",
+                className: "workspace-row-action confirm",
+                title: "\u786E\u8BA4\u5220\u9664",
+                disabled: deleting,
+                onClick: handleDeleteWorkspace,
+                children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(SvgIcon, { name: "check", size: 13 })
+              }
+            ),
+            /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(
+              "button",
+              {
+                type: "button",
+                className: "workspace-row-action cancel",
+                title: "\u53D6\u6D88",
+                disabled: deleting,
+                onClick: () => setConfirmingDelete(false),
+                children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(SvgIcon, { name: "close", size: 13 })
+              }
+            )
+          ] })
+        ] })
+      ] }),
+      open && /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)("div", { className: "workspace-tasks", children: [
+        loading && tasks.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("div", { className: "workspace-tasks-state", children: "\u6B63\u5728\u52A0\u8F7D\u4EFB\u52A1\u2026" }) : error && tasks.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("div", { className: "workspace-tasks-state error", children: error }) : /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)(import_jsx_runtime49.Fragment, { children: [
+          tasks.map((task) => /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(
+            TaskItem,
+            {
+              task,
+              active: isActiveWorkspace && activeTaskId === task.id,
+              onOpen: () => onActiveTaskOpen(task),
+              onDelete: () => handleDeleteTask(task)
+            },
+            task.id
+          )),
+          tasks.length === 0 && !creating && /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("div", { className: "workspace-tasks-empty", children: "\u8FD8\u6CA1\u6709\u4EFB\u52A1\uFF0C\u70B9\u51FB\u300C+\u300D\u65B0\u5EFA\u4E00\u4E2A\uFF08\u6BCF\u4E2A\u4EFB\u52A1\u72EC\u5360\u4E00\u4E2A worktree\uFF09\u3002" })
+        ] }),
+        creating && /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(NewTaskForm, { onCancel: () => setCreating(false), onCreate: handleCreate })
+      ] })
+    ] });
+  }
+  function WorkspacesPanel() {
+    const controllerSnapshot = React46.useSyncExternalStore(
+      workspacesStore.subscribe,
+      workspacesStore.getSnapshot,
+      workspacesStore.getSnapshot
+    );
+    const [refreshTick, setRefreshTick] = React46.useState(0);
+    const lastOpenRef = React46.useRef(controllerSnapshot.open);
+    React46.useEffect(() => {
+      if (lastOpenRef.current && !controllerSnapshot.open) {
+        setRefreshTick((n) => n + 1);
+      }
+      lastOpenRef.current = controllerSnapshot.open;
+    }, [controllerSnapshot.open]);
+    const { workspaces, loading, error, reload } = useWorkspaces(refreshTick);
+    const activeContext = React46.useSyncExternalStore(
+      workspaceContextStore.subscribe,
+      workspaceContextStore.getSnapshot,
+      workspaceContextStore.getServerSnapshot
+    );
+    const activeWorkspaceId = activeContext.workspaceId;
+    const activeTaskId = activeContext.taskId;
+    const openTask = React46.useCallback((workspace, task) => {
+      const rt = runtime9();
+      const cwd = task.worktree?.path ?? workspace.cwd;
+      if (rt) {
+        const payload = {
+          workspaceId: workspace.id,
+          workspaceName: workspace.name,
+          taskId: task.id,
+          taskName: task.name,
+          cwd
+        };
+        if (workspace.defaultProvider) payload.provider = workspace.defaultProvider;
+        rt.openTask(payload);
+      } else {
+        toast("\u5DE5\u4F5C\u7A7A\u95F4\u8FD0\u884C\u73AF\u5883\u5C1A\u672A\u5C31\u7EEA\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u540E\u91CD\u8BD5\u3002", "warning");
+      }
+    }, []);
+    return /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)("div", { className: "workspaces-panel", "aria-label": "\u5DE5\u4F5C\u7A7A\u95F4\u4E0E\u4EFB\u52A1", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)("div", { className: "workspaces-panel-toolbar", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("span", { className: "workspaces-panel-title", children: "\u9879\u76EE / \u4EFB\u52A1" }),
+        /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(
+          "button",
+          {
+            type: "button",
+            className: "workspaces-panel-new-project",
+            title: "\u65B0\u5EFA\u9879\u76EE",
+            "aria-label": "\u65B0\u5EFA\u9879\u76EE",
+            onClick: () => workspacesController.open(),
+            children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(SvgIcon, { name: "plus", size: 14 })
+          }
+        )
+      ] }),
+      loading && workspaces.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("div", { className: "workspaces-panel-state", children: "\u6B63\u5728\u52A0\u8F7D\u9879\u76EE\u2026" }) : error && workspaces.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("div", { className: "workspaces-panel-state error", children: error }) : workspaces.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)("div", { className: "workspaces-panel-empty", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("strong", { children: "\u8FD8\u6CA1\u6709\u9879\u76EE" }),
+        /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("br", {}),
+        "\u70B9\u51FB\u300C\u65B0\u9879\u76EE\u300D\u521B\u5EFA\u4E00\u4E2A\u9879\u76EE\uFF0C\u518D\u5728\u91CC\u9762\u6DFB\u52A0\u4EFB\u52A1\u3002"
+      ] }) : /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("div", { className: "workspaces-list", children: workspaces.map((workspace) => /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(
+        WorkspaceItem,
+        {
+          workspace,
+          defaultExpanded: activeWorkspaceId === workspace.id,
+          activeWorkspaceId,
+          activeTaskId,
+          onActiveTaskOpen: (task) => openTask(workspace, task),
+          reloadWorkspaces: reload
+        },
+        workspace.id
+      )) }),
+      /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("div", { className: "workspaces-panel-hint", children: "\u6BCF\u4E2A\u4EFB\u52A1\u5728\u72EC\u7ACB\u7684 git worktree \u4E2D\u8FD0\u884C\uFF1B\u975E git \u76EE\u5F55\u5219\u5728\u9879\u76EE\u76EE\u5F55\u76F4\u63A5\u8FD0\u884C\u3002" })
+    ] });
+  }
 
   // src/web-ui/react/shell/session-directory-repository.ts
   var HttpSessionDirectoryRepository = class {
@@ -33754,7 +37926,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   var httpSessionDirectoryRepository = new HttpSessionDirectoryRepository();
 
   // src/web-ui/react/shell/shell-sidebar.tsx
-  var import_jsx_runtime43 = __toESM(require_jsx_runtime(), 1);
+  var import_jsx_runtime50 = __toESM(require_jsx_runtime(), 1);
   function getSidebarEntryTarget(entry) {
     if (entry.source.endsWith("-history")) return entry.source;
     return "session";
@@ -33805,59 +37977,63 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     };
     switch (name) {
       case "back":
-        return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("rect", { x: "10", y: "3", width: "11", height: "18", rx: "2" }),
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M7 8l-4 4 4 4M3 12h11" })
+        return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("rect", { x: "10", y: "3", width: "11", height: "18", rx: "2" }),
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M7 8l-4 4 4 4M3 12h11" })
         ] });
       case "check":
-        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M20 6L9 17l-5-5" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M20 6L9 17l-5-5" }) });
       case "chevron":
-        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M6 9l6 6 6-6" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M6 9l6 6 6-6" }) });
       case "cleanup":
       case "trash":
-        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" }) });
       case "close":
-        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M6 6l12 12M18 6L6 18" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M6 6l12 12M18 6L6 18" }) });
       case "edit":
-        return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M12 20h9" }),
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M16.5 3.5a2.1 2.1 0 013 3L8 18l-4 1 1-4z" })
+        return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M12 20h9" }),
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M16.5 3.5a2.1 2.1 0 013 3L8 18l-4 1 1-4z" })
         ] });
       case "file":
-        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" }) });
       case "gear":
-        return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("circle", { cx: "12", cy: "12", r: "3" }),
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M12 2v3M12 19v3M4.9 4.9L7 7M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1L7 17M17 7l2.1-2.1" })
+        return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("circle", { cx: "12", cy: "12", r: "3" }),
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M12 2v3M12 19v3M4.9 4.9L7 7M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1L7 17M17 7l2.1-2.1" })
         ] });
       case "history":
-        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M3 12a9 9 0 109-9 9.7 9.7 0 00-6.7 2.7L3 8M3 3v5h5M12 7v5l3 2" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M3 12a9 9 0 109-9 9.7 9.7 0 00-6.7 2.7L3 8M3 3v5h5M12 7v5l3 2" }) });
       case "inbox":
-        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M4 4h16l2 10v6H2v-6L4 4zM2 14h6l2 3h4l2-3h6" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M4 4h16l2 10v6H2v-6L4 4zM2 14h6l2 3h4l2-3h6" }) });
       case "logout":
-        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" }) });
       case "merge":
-        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M7 7h10M7 12h10M7 17h10M5 7L3 9l2 2M19 15l2 2-2 2" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M7 7h10M7 12h10M7 17h10M5 7L3 9l2 2M19 15l2 2-2 2" }) });
       case "more":
-        return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("circle", { cx: "12", cy: "5", r: "1" }),
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("circle", { cx: "12", cy: "12", r: "1" }),
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("circle", { cx: "12", cy: "19", r: "1" })
+        return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("circle", { cx: "12", cy: "5", r: "1" }),
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("circle", { cx: "12", cy: "12", r: "1" }),
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("circle", { cx: "12", cy: "19", r: "1" })
         ] });
-      case "pin":
-        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M12 17v5M5 17h14M9 12V6H8a2 2 0 010-4h8a2 2 0 010 4h-1v6" }) });
+      case "rail":
+        return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("rect", { x: "3", y: "4", width: "18", height: "16", rx: "3" }),
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M7 4v16" }),
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M11 8h6M11 12h6M11 16h4" })
+        ] });
       case "resume":
-        return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M1 4v6h6M3.5 15A9 9 0 109 3.6L3 10" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M1 4v6h6M3.5 15A9 9 0 109 3.6L3 10" }) });
       case "server":
-        return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("rect", { x: "2", y: "3", width: "20", height: "8", rx: "2" }),
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("rect", { x: "2", y: "13", width: "20", height: "8", rx: "2" }),
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M6 7h.01M6 17h.01" })
+        return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("rect", { x: "2", y: "3", width: "20", height: "8", rx: "2" }),
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("rect", { x: "2", y: "13", width: "20", height: "8", rx: "2" }),
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M6 7h.01M6 17h.01" })
         ] });
       case "spark":
-        return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("path", { d: "M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8" }),
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("circle", { cx: "12", cy: "12", r: "3" })
+        return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8" }),
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("circle", { cx: "12", cy: "12", r: "3" })
         ] });
     }
   }
@@ -33871,7 +38047,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     disabled,
     data
   }) {
-    return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
       "button",
       {
         type: "button",
@@ -33887,7 +38063,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           event.stopPropagation();
           void dispatch(action);
         },
-        children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: icon })
+        children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: icon })
       }
     );
   }
@@ -33897,8 +38073,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   }) {
     const target = getSidebarEntryTarget(entry);
     const legacyKind = target === "session" ? "sessions" : target === "codex-history" ? "codex" : "history";
-    return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("label", { className: "session-manage-check", onClick: (event) => event.stopPropagation(), children: [
-      /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("label", { className: "session-manage-check", onClick: (event) => event.stopPropagation(), children: [
+      /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
         "input",
         {
           type: "checkbox",
@@ -33910,7 +38086,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           onChange: () => void dispatch({ type: "session.manage.select", target, id: entry.id })
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", {})
+      /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", {})
     ] });
   }
   function WorktreeBadges({ entry }) {
@@ -33926,9 +38102,9 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       entry.worktree.branch && `Worktree: ${entry.worktree.branch}`,
       entry.worktree.path && `Path: ${entry.worktree.path}`
     ].filter(Boolean).join("\n");
-    return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(import_jsx_runtime43.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "session-kind-badge worktree", title: title || void 0, children: "Worktree" }),
-      entry.worktree.mergeStatus && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: classNames("session-kind-badge worktree-merge", entry.worktree.mergeStatus), children: labels[entry.worktree.mergeStatus] ?? entry.worktree.mergeStatus })
+    return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(import_jsx_runtime50.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "session-kind-badge worktree", title: title || void 0, children: "Worktree" }),
+      entry.worktree.mergeStatus && /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: classNames("session-kind-badge worktree-merge", entry.worktree.mergeStatus), children: labels[entry.worktree.mergeStatus] ?? entry.worktree.mergeStatus })
     ] });
   }
   function formatEntryTime(entry) {
@@ -33953,25 +38129,25 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   function ProviderMark({ entry }) {
     const label = providerDisplayName(entry.provider);
     const provider = normalizeProviderId(entry.provider);
-    return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
       "span",
       {
         className: classNames("session-provider-mark", `provider-${provider ?? "generic"}`),
         "aria-hidden": "true",
         title: label,
-        children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(ProviderLogo, { provider })
+        children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(ProviderLogo, { provider })
       }
     );
   }
   function PathReveal({ path }) {
-    const containerRef = React42.useRef(null);
-    const [overflow, setOverflow] = React42.useState(0);
+    const containerRef = React47.useRef(null);
+    const [overflow, setOverflow] = React47.useState(0);
     const normalized = path.replace(/\\/g, "/").replace(/\/$/, "");
     const separator = normalized.lastIndexOf("/");
     const prefix = separator >= 0 ? normalized.slice(0, separator + 1) : "";
     const leaf = separator >= 0 ? normalized.slice(separator + 1) : normalized;
     const staggerMs = Array.from(normalized).reduce((sum, character) => sum + character.charCodeAt(0), 0) % 1200;
-    React42.useLayoutEffect(() => {
+    React47.useLayoutEffect(() => {
       const container = containerRef.current;
       if (!container) return;
       const measure = () => {
@@ -33988,7 +38164,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     }, [normalized]);
     const travelSeconds = Math.max(4.8, overflow / 28);
     if (!path) return null;
-    return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
       "span",
       {
         ref: containerRef,
@@ -34000,9 +38176,9 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           "--tail-marquee-duration": `${Math.min(8, travelSeconds)}s`,
           "--tail-marquee-delay": `${1.8 + staggerMs / 1e3}s`
         },
-        children: /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("span", { className: "tail-marquee-path-inner", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "tail-marquee-prefix", children: prefix }),
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "tail-marquee-leaf", children: leaf })
+        children: /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("span", { className: "tail-marquee-path-inner", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "tail-marquee-prefix", children: prefix }),
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "tail-marquee-leaf", children: leaf })
         ] })
       }
     );
@@ -34020,7 +38196,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     const time = formatEntryTime(entry);
     const prominentStatus = !isHistory && (entry.permissionBlocked || entry.inFlight || ["running", "thinking", "waiting-input", "waiting_input", "reconnecting"].includes(entry.status));
     const prominentWarning = entry.permissionBlocked || ["waiting-input", "waiting_input", "reconnecting"].includes(entry.status);
-    return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+    return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
       "div",
       {
         className: classNames(
@@ -34047,7 +38223,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           activate();
         },
         children: [
-          !manageMode && !isHistory && actions.delete && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "session-swipe-bg", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+          !manageMode && !isHistory && actions.delete && /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "session-swipe-bg", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
             "button",
             {
               className: "session-swipe-delete",
@@ -34061,17 +38237,17 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                 void dispatch(actions.delete);
               },
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "trash", size: 18 }),
-                /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { children: "\u5220\u9664" })
+                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "trash", size: 18 }),
+                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { children: "\u5220\u9664" })
               ]
             }
           ) }),
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "session-item-content", children: /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "session-item-row", children: [
-            manageMode && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(ManageCheckbox, { entry, dispatch }),
-            /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "session-main", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "session-title-row", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "session-leading-slot", children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(ProviderMark, { entry }) }),
-                /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "session-item-content", children: /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "session-item-row", children: [
+            manageMode && /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(ManageCheckbox, { entry, dispatch }),
+            /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "session-main", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "session-title-row", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "session-leading-slot", children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(ProviderMark, { entry }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
                   "div",
                   {
                     className: classNames(
@@ -34083,24 +38259,24 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                   }
                 )
               ] }),
-              entry.description && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "session-description", children: entry.description }),
-              /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "session-meta", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "session-leading-slot session-time", children: time }),
-                isHistory ? /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(import_jsx_runtime43.Fragment, { children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("span", { className: "session-context session-context-recoverable", children: [
-                    /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "history", size: 11 }),
+              entry.description && /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "session-description", children: entry.description }),
+              /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "session-meta", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "session-leading-slot session-time", children: time }),
+                isHistory ? /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(import_jsx_runtime50.Fragment, { children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("span", { className: "session-context session-context-recoverable", children: [
+                    /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "history", size: 11 }),
                     "\u53EF\u6062\u590D"
                   ] }),
-                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(PathReveal, { path: entry.cwd })
-                ] }) : /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(import_jsx_runtime43.Fragment, { children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: classNames("session-status", entry.permissionBlocked ? "permission-blocked" : entry.inFlight ? "running" : entry.status), children: entry.statusLabel }),
-                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(PathReveal, { path: entry.cwd }),
-                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(WorktreeBadges, { entry })
+                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(PathReveal, { path: entry.cwd })
+                ] }) : /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(import_jsx_runtime50.Fragment, { children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: classNames("session-status", entry.permissionBlocked ? "permission-blocked" : entry.inFlight ? "running" : entry.status), children: entry.statusLabel }),
+                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(PathReveal, { path: entry.cwd }),
+                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(WorktreeBadges, { entry })
                 ] })
               ] })
             ] }),
-            !manageMode && /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("span", { className: "session-actions", children: [
-              actions.resume && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+            !manageMode && /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("span", { className: "session-actions", children: [
+              actions.resume && /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
                 ActionButton,
                 {
                   action: actions.resume,
@@ -34111,7 +38287,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                   data
                 }
               ),
-              actions.merge && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+              actions.merge && /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
                 ActionButton,
                 {
                   action: actions.merge,
@@ -34124,7 +38300,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                   data
                 }
               ),
-              actions.cleanup && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+              actions.cleanup && /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
                 ActionButton,
                 {
                   action: actions.cleanup,
@@ -34136,7 +38312,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                   data
                 }
               ),
-              actions.delete && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+              actions.delete && /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
                 ActionButton,
                 {
                   action: actions.delete,
@@ -34154,11 +38330,26 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       }
     );
   }
+  function getShellSidebarPrimaryAction(mode) {
+    if (mode === "workspaces") {
+      return {
+        action: { type: "workspace.new" },
+        label: "\u65B0\u9879\u76EE",
+        ariaLabel: "\u65B0\u5EFA\u9879\u76EE"
+      };
+    }
+    return {
+      action: { type: "session.new" },
+      label: "\u65B0\u4F1A\u8BDD",
+      ariaLabel: "\u65B0\u5EFA\u4F1A\u8BDD"
+    };
+  }
   var SIDEBAR_VIEW_MODE_KEY = "wand-sidebar-view-mode";
   function readSidebarViewMode() {
     if (typeof window === "undefined") return "sessions";
     try {
-      return window.localStorage.getItem(SIDEBAR_VIEW_MODE_KEY) === "directories" ? "directories" : "sessions";
+      const stored = window.localStorage.getItem(SIDEBAR_VIEW_MODE_KEY);
+      return stored === "workspaces" ? stored : "sessions";
     } catch {
       return "sessions";
     }
@@ -34244,13 +38435,13 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     };
   }
   function useSessionDirectories(enabled, refreshKey) {
-    const [data, setData] = React42.useState(null);
-    const [loading, setLoading] = React42.useState(false);
-    const [error, setError] = React42.useState("");
-    const loadGenerationRef = React42.useRef(0);
-    const activeLoadRef = React42.useRef(null);
-    const renameInFlightRef = React42.useRef(false);
-    const loadLatest = React42.useCallback(async (showLoading, propagateError = false) => {
+    const [data, setData] = React47.useState(null);
+    const [loading, setLoading] = React47.useState(false);
+    const [error, setError] = React47.useState("");
+    const loadGenerationRef = React47.useRef(0);
+    const activeLoadRef = React47.useRef(null);
+    const renameInFlightRef = React47.useRef(false);
+    const loadLatest = React47.useCallback(async (showLoading, propagateError = false) => {
       const generation = ++loadGenerationRef.current;
       activeLoadRef.current?.abort();
       const abort = new AbortController();
@@ -34264,7 +38455,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         }
       } catch (fetchError) {
         if (!abort.signal.aborted && generation === loadGenerationRef.current) {
-          const loadError = fetchError instanceof Error ? fetchError : new Error("\u65E0\u6CD5\u52A0\u8F7D\u4F1A\u8BDD\u76EE\u5F55");
+          const loadError = fetchError instanceof Error ? fetchError : new Error("\u65E0\u6CD5\u52A0\u8F7D\u9879\u76EE");
           setError(loadError.message);
           if (propagateError) throw loadError;
         }
@@ -34275,7 +38466,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         }
       }
     }, []);
-    React42.useEffect(() => {
+    React47.useEffect(() => {
       if (!enabled) return;
       setError("");
       void loadLatest(data === null);
@@ -34287,8 +38478,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         activeLoadRef.current = null;
       };
     }, [enabled, refreshKey, loadLatest]);
-    const rename = React42.useCallback(async (path, name) => {
-      if (renameInFlightRef.current) throw new Error("\u53E6\u4E00\u4E2A\u5DE5\u4F5C\u533A\u540D\u79F0\u6B63\u5728\u4FDD\u5B58\uFF0C\u8BF7\u7A0D\u5019\u3002");
+    const rename = React47.useCallback(async (path, name) => {
+      if (renameInFlightRef.current) throw new Error("\u53E6\u4E00\u4E2A\u9879\u76EE\u540D\u79F0\u6B63\u5728\u4FDD\u5B58\uFF0C\u8BF7\u7A0D\u5019\u3002");
       renameInFlightRef.current = true;
       setError("");
       loadGenerationRef.current += 1;
@@ -34327,21 +38518,21 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     renameDirectory
   }) {
     const activeWithin = nodeContainsActive(node, selectedId);
-    const [open, setOpen] = React42.useState(depth === 0 || activeWithin);
-    const [renaming, setRenaming] = React42.useState(false);
-    const [renameDraft, setRenameDraft] = React42.useState("");
-    const [renameError, setRenameError] = React42.useState("");
-    const [renameSaving, setRenameSaving] = React42.useState(false);
-    const renameInputRef = React42.useRef(null);
-    const renameTriggerRef = React42.useRef(null);
+    const [open, setOpen] = React47.useState(depth === 0 || activeWithin);
+    const [renaming, setRenaming] = React47.useState(false);
+    const [renameDraft, setRenameDraft] = React47.useState("");
+    const [renameError, setRenameError] = React47.useState("");
+    const [renameSaving, setRenameSaving] = React47.useState(false);
+    const renameInputRef = React47.useRef(null);
+    const renameTriggerRef = React47.useRef(null);
     const labels = getSessionDirectoryLabels(node);
     const renameLength = Array.from(renameDraft.trim()).length;
     const renameTooLong = renameLength > 80;
     const renameHasInvalidCharacters = /[\u0000-\u001F\u007F-\u009F\u2028\u2029]/u.test(renameDraft.trim());
-    React42.useEffect(() => {
+    React47.useEffect(() => {
       if (activeWithin) setOpen(true);
     }, [activeWithin]);
-    React42.useEffect(() => {
+    React47.useEffect(() => {
       if (!renaming) return;
       const frame = requestAnimationFrame(() => {
         renameInputRef.current?.focus();
@@ -34377,7 +38568,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         return;
       }
       if (renameTooLong || renameHasInvalidCharacters) {
-        setRenameError(renameHasInvalidCharacters ? "\u5DE5\u4F5C\u533A\u540D\u79F0\u4E0D\u80FD\u5305\u542B\u6362\u884C\u6216\u63A7\u5236\u5B57\u7B26" : "\u5DE5\u4F5C\u533A\u540D\u79F0\u6700\u591A 80 \u4E2A\u5B57\u7B26");
+        setRenameError(renameHasInvalidCharacters ? "\u9879\u76EE\u540D\u79F0\u4E0D\u80FD\u5305\u542B\u6362\u884C\u6216\u63A7\u5236\u5B57\u7B26" : "\u9879\u76EE\u540D\u79F0\u6700\u591A 80 \u4E2A\u5B57\u7B26");
         return;
       }
       setRenameSaving(true);
@@ -34387,18 +38578,18 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         setRenaming(false);
         restoreRenameTriggerFocus();
       } catch (error) {
-        setRenameError(error instanceof Error ? error.message : "\u65E0\u6CD5\u66F4\u65B0\u5DE5\u4F5C\u533A\u540D\u79F0");
+        setRenameError(error instanceof Error ? error.message : "\u65E0\u6CD5\u66F4\u65B0\u9879\u76EE\u540D\u79F0");
       } finally {
         setRenameSaving(false);
       }
     };
-    return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+    return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
       "section",
       {
         className: classNames("session-directory-node", activeWithin && "active-path"),
         style: { "--directory-depth": Math.min(depth, 6) },
         children: [
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "session-directory-row", children: renaming ? /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "session-directory-row", children: renaming ? /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
             "form",
             {
               className: "session-directory-rename-form",
@@ -34414,8 +38605,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                 cancelRename();
               },
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "file", size: 15 }),
-                /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "file", size: 15 }),
+                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
                   "input",
                   {
                     ref: renameInputRef,
@@ -34425,26 +38616,26 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                     autoComplete: "off",
                     spellCheck: false,
                     "aria-invalid": renameTooLong || renameHasInvalidCharacters || void 0,
-                    "aria-label": `\u4E3A ${node.name} \u8BBE\u7F6E\u5DE5\u4F5C\u533A\u540D\u79F0`,
-                    placeholder: "\u5DE5\u4F5C\u533A\u540D\u79F0\uFF08\u7559\u7A7A\u6062\u590D\u76EE\u5F55\u540D\uFF09",
+                    "aria-label": `\u4E3A ${node.name} \u8BBE\u7F6E\u9879\u76EE\u540D\u79F0`,
+                    placeholder: "\u9879\u76EE\u540D\u79F0\uFF08\u7559\u7A7A\u6062\u590D\u6587\u4EF6\u5939\u540D\uFF09",
                     onChange: (event) => {
                       setRenameDraft(event.currentTarget.value);
                       setRenameError("");
                     }
                   }
                 ),
-                /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
                   "button",
                   {
                     type: "submit",
                     className: "session-directory-rename-action save",
                     disabled: renameSaving || renameTooLong || renameHasInvalidCharacters,
                     title: "\u4FDD\u5B58\u540D\u79F0",
-                    "aria-label": "\u4FDD\u5B58\u5DE5\u4F5C\u533A\u540D\u79F0",
-                    children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "check", size: 14 })
+                    "aria-label": "\u4FDD\u5B58\u9879\u76EE\u540D\u79F0",
+                    children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "check", size: 14 })
                   }
                 ),
-                /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
                   "button",
                   {
                     type: "button",
@@ -34453,48 +38644,48 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                     title: "\u53D6\u6D88",
                     "aria-label": "\u53D6\u6D88\u91CD\u547D\u540D",
                     onClick: cancelRename,
-                    children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "close", size: 14 })
+                    children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "close", size: 14 })
                   }
                 )
               ]
             }
-          ) : /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(import_jsx_runtime43.Fragment, { children: [
-            /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+          ) : /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(import_jsx_runtime50.Fragment, { children: [
+            /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
               "button",
               {
                 type: "button",
                 className: "session-directory-main",
                 "aria-expanded": open,
-                "aria-label": `${labels.displayName}\uFF0C${node.totalCount} \u4E2A\u4F1A\u8BDD\uFF0C\u76EE\u5F55 ${labels.path}`,
+                "aria-label": `${labels.displayName} \u9879\u76EE\uFF0C${node.totalCount} \u4E2A\u4F1A\u8BDD\uFF0C\u8DEF\u5F84 ${labels.path}`,
                 title: labels.path,
                 onClick: () => {
                   if (hasContents) setOpen((current) => !current);
                 },
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "chevron", size: 12, className: classNames("session-directory-chevron", open && "open") }),
-                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "file", size: 15 }),
-                  /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("span", { className: "session-directory-label", children: [
-                    /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "session-directory-name", children: labels.displayName }),
-                    labels.directoryName && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "session-directory-default-name", children: labels.directoryName })
+                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "chevron", size: 12, className: classNames("session-directory-chevron", open && "open") }),
+                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "file", size: 15 }),
+                  /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("span", { className: "session-directory-label", children: [
+                    /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "session-directory-name", children: labels.displayName }),
+                    labels.directoryName && /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "session-directory-default-name", children: labels.directoryName })
                   ] }),
-                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "session-directory-count", "aria-label": `${node.totalCount} \u4E2A\u4F1A\u8BDD`, children: node.totalCount })
+                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "session-directory-count", "aria-label": `${node.totalCount} \u4E2A\u4F1A\u8BDD`, children: node.totalCount })
                 ]
               }
             ),
-            !node.synthetic && node.path && /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("span", { className: "session-directory-actions", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+            !node.synthetic && node.path && /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("span", { className: "session-directory-actions", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
                 "button",
                 {
                   ref: renameTriggerRef,
                   type: "button",
                   className: "session-directory-rename",
-                  title: `\u8BBE\u7F6E ${labels.displayName} \u7684\u5DE5\u4F5C\u533A\u540D\u79F0`,
-                  "aria-label": `\u91CD\u547D\u540D\u5DE5\u4F5C\u533A ${labels.displayName}`,
+                  title: `\u8BBE\u7F6E ${labels.displayName} \u7684\u9879\u76EE\u540D\u79F0`,
+                  "aria-label": `\u91CD\u547D\u540D\u9879\u76EE ${labels.displayName}`,
                   onClick: beginRename,
-                  children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "edit", size: 14 })
+                  children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "edit", size: 14 })
                 }
               ),
-              /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+              /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
                 "button",
                 {
                   type: "button",
@@ -34502,18 +38693,18 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                   title: `\u5728 ${node.path} \u65B0\u5EFA\u4F1A\u8BDD`,
                   "aria-label": `\u5728 ${node.path} \u65B0\u5EFA\u4F1A\u8BDD`,
                   onClick: () => void dispatch({ type: "session.newAt", cwd: node.path }),
-                  children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { "aria-hidden": "true", children: "\uFF0B" })
+                  children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { "aria-hidden": "true", children: "\uFF0B" })
                 }
               )
             ] })
           ] }) }),
-          renaming && (renameTooLong || renameHasInvalidCharacters || renameError) && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "session-directory-rename-error", role: "alert", children: renameHasInvalidCharacters ? "\u5DE5\u4F5C\u533A\u540D\u79F0\u4E0D\u80FD\u5305\u542B\u6362\u884C\u6216\u63A7\u5236\u5B57\u7B26" : renameTooLong ? `\u5DE5\u4F5C\u533A\u540D\u79F0\u6700\u591A 80 \u4E2A\u5B57\u7B26\uFF08\u5F53\u524D ${renameLength} \u4E2A\uFF09` : renameError }),
-          open && /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "session-directory-contents", children: [
-            node.entries.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "session-directory-sessions", children: node.entries.map((entry) => {
+          renaming && (renameTooLong || renameHasInvalidCharacters || renameError) && /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "session-directory-rename-error", role: "alert", children: renameHasInvalidCharacters ? "\u9879\u76EE\u540D\u79F0\u4E0D\u80FD\u5305\u542B\u6362\u884C\u6216\u63A7\u5236\u5B57\u7B26" : renameTooLong ? `\u9879\u76EE\u540D\u79F0\u6700\u591A 80 \u4E2A\u5B57\u7B26\uFF08\u5F53\u524D ${renameLength} \u4E2A\uFF09` : renameError }),
+          open && /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "session-directory-contents", children: [
+            node.entries.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "session-directory-sessions", children: node.entries.map((entry) => {
               const vm = directoryEntryToVm(entry, selectedId);
-              return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(SessionEntry, { entry: vm, manageMode: false, dispatch }, entry.key);
+              return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(SessionEntry, { entry: vm, manageMode: false, dispatch }, entry.key);
             }) }),
-            node.children.map((child) => /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+            node.children.map((child) => /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
               DirectoryNode,
               {
                 node: child,
@@ -34537,16 +38728,16 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     dispatch,
     renameDirectory
   }) {
-    if (loading && !response) return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "session-directory-state", children: "\u6B63\u5728\u6574\u7406\u76EE\u5F55\u2026" });
-    if (error && !response) return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "session-directory-state error", children: error });
+    if (loading && !response) return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "session-directory-state", children: "\u6B63\u5728\u6574\u7406\u9879\u76EE\u2026" });
+    if (error && !response) return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "session-directory-state error", children: error });
     if (!response || response.roots.length === 0) {
-      return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "empty-state", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("strong", { children: "\u8FD8\u6CA1\u6709\u4F1A\u8BDD\u76EE\u5F55" }),
-        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("br", {}),
-        "\u521B\u5EFA\u4F1A\u8BDD\u540E\u4F1A\u6309\u5DE5\u4F5C\u76EE\u5F55\u663E\u793A\u5728\u8FD9\u91CC\u3002"
+      return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "empty-state", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("strong", { children: "\u8FD8\u6CA1\u6709\u9879\u76EE" }),
+        /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("br", {}),
+        "\u521B\u5EFA\u4F1A\u8BDD\u540E\u4F1A\u6309\u5DE5\u4F5C\u8DEF\u5F84\u81EA\u52A8\u5F52\u5165\u9879\u76EE\u3002"
       ] });
     }
-    return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "session-directory-tree", "aria-label": "\u4F1A\u8BDD\u76EE\u5F55\u6811", children: response.roots.map((node) => /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "session-directory-tree", "aria-label": "\u9879\u76EE\u5217\u8868", children: response.roots.map((node) => /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
       DirectoryNode,
       {
         node,
@@ -34562,7 +38753,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     mode,
     onChange
   }) {
-    return /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "sidebar-view-switch", role: "tablist", "aria-label": "\u4FA7\u680F\u5C55\u793A\u65B9\u5F0F", children: ["sessions", "directories"].map((value) => /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "sidebar-view-switch", role: "tablist", "aria-label": "\u4FA7\u680F\u5C55\u793A\u65B9\u5F0F", children: ["sessions", "workspaces"].map((value) => /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
       "button",
       {
         type: "button",
@@ -34570,10 +38761,31 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         "aria-selected": mode === value,
         className: classNames(mode === value && "active"),
         onClick: () => onChange(value),
-        children: value === "sessions" ? "\u4F1A\u8BDD" : "\u76EE\u5F55"
+        children: value === "sessions" ? "\u4F1A\u8BDD" : "\u9879\u76EE"
       },
       value
     )) });
+  }
+  function SidebarCompactToggle({
+    active,
+    onToggle
+  }) {
+    const label = active ? "\u5C55\u5F00\u5B8C\u6574\u4FA7\u8FB9\u680F" : "\u6536\u8D77\u4E3A\u7A84\u680F";
+    return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
+      "button",
+      {
+        className: classNames("sidebar-compact-toggle", active && "active"),
+        type: "button",
+        "aria-label": label,
+        "aria-pressed": active,
+        title: label,
+        onClick: onToggle,
+        children: [
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "rail", size: 14 }),
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "sidebar-compact-toggle-label", children: label })
+        ]
+      }
+    );
   }
   function SessionGroup({
     group,
@@ -34581,14 +38793,14 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     dispatch
   }) {
     if (group.entries.length === 0) return null;
-    const entries = /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("section", { className: classNames(
+    const entries = /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("section", { className: classNames(
       "session-group",
       group.kind === "automation" && "automation-session-list",
       group.kind === "history" && "non-wand-session-list"
-    ), children: group.entries.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(SessionEntry, { entry, manageMode, dispatch }, `${entry.source}:${entry.id}`)) });
+    ), children: group.entries.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(SessionEntry, { entry, manageMode, dispatch }, `${entry.source}:${entry.id}`)) });
     if (group.kind === "wand") return entries;
     const automation = group.kind === "automation";
-    return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+    return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
       "details",
       {
         className: classNames(
@@ -34605,16 +38817,16 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           });
         },
         children: [
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
             "summary",
             {
               className: automation ? "automation-session-summary" : "non-wand-session-summary",
               title: automation ? "\u7531\u81EA\u52A8\u5316\u6216\u542F\u52A8\u4EFB\u52A1\u521B\u5EFA\uFF0C\u4E0D\u53C2\u4E0E\u666E\u901A Wand \u4F1A\u8BDD\u6392\u5E8F" : "Claude \u4E0E Codex \u7684\u672C\u673A\u539F\u751F\u4F1A\u8BDD\uFF0C\u4E0D\u53C2\u4E0E Wand \u4F1A\u8BDD\u6392\u5E8F",
               onClick: manageMode ? (event) => event.preventDefault() : void 0,
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: automation ? "automation-session-icon" : "non-wand-session-icon", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: automation ? "spark" : "history" }) }),
-                /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: automation ? "automation-session-title" : "non-wand-session-title", children: group.label }),
-                /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: automation ? "automation-session-icon" : "non-wand-session-icon", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: automation ? "spark" : "history" }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: automation ? "automation-session-title" : "non-wand-session-title", children: group.label }),
+                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
                   "span",
                   {
                     className: automation ? "automation-session-count" : "non-wand-session-count",
@@ -34622,7 +38834,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                     children: group.entries.length
                   }
                 ),
-                /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
                   Icon,
                   {
                     name: "chevron",
@@ -34644,23 +38856,23 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     dispatch
   }) {
     if (!manageMode) {
-      return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "session-manage-bar", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "sidebar-intro", children: "Wand \u4F1A\u8BDD" }),
-        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+      return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "session-manage-bar", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "sidebar-intro", children: "Wand \u4F1A\u8BDD" }),
+        /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
           "button",
           {
             className: "btn btn-ghost btn-xs session-manage-toggle",
             "data-action": "toggle-manage-mode",
             type: "button",
             onClick: () => void dispatch({ type: "session.manage.toggle" }),
-            children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { children: "\u7BA1\u7406" })
+            children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { children: "\u7BA1\u7406" })
           }
         )
       ] });
     }
     const allSelected = totalCount > 0 && selectedCount >= totalCount;
-    return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "session-manage-bar active", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "session-manage-bar active", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
         "button",
         {
           className: "session-manage-exit",
@@ -34669,15 +38881,15 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           "aria-label": "\u9000\u51FA\u7BA1\u7406\u6A21\u5F0F",
           title: "\u9000\u51FA\u7BA1\u7406\u6A21\u5F0F",
           onClick: () => void dispatch({ type: "session.manage.toggle" }),
-          children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "close" })
+          children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "close" })
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "session-manage-summary", children: selectedCount > 0 ? /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(import_jsx_runtime43.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "session-manage-count", children: selectedCount }),
-        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "session-manage-summary-label", children: "\u5DF2\u9009\u62E9" })
-      ] }) : /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "session-manage-summary-label muted", children: "\u9009\u62E9\u8981\u7BA1\u7406\u7684\u9879\u76EE" }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "session-manage-actions", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "session-manage-summary", children: selectedCount > 0 ? /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(import_jsx_runtime50.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "session-manage-count", children: selectedCount }),
+        /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "session-manage-summary-label", children: "\u5DF2\u9009\u62E9" })
+      ] }) : /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "session-manage-summary-label muted", children: "\u9009\u62E9\u8981\u7BA1\u7406\u7684\u9879\u76EE" }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "session-manage-actions", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
           "button",
           {
             className: "btn btn-ghost btn-xs",
@@ -34690,7 +38902,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
             children: allSelected ? "\u53D6\u6D88\u5168\u9009" : "\u5168\u9009"
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+        /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
           "button",
           {
             className: "btn btn-danger btn-xs",
@@ -34714,8 +38926,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     const wand = groups.find((group) => group.kind === "wand")?.entries ?? [];
     const automation = groups.find((group) => group.kind === "automation")?.entries ?? [];
     const history2 = groups.find((group) => group.kind === "history")?.entries ?? [];
-    return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "sidebar-collapsed-tiles", children: [
-      wand.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "sidebar-collapsed-tiles", children: [
+      wand.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
         "button",
         {
           className: classNames(
@@ -34728,11 +38940,11 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           title: entry.title,
           "aria-label": `${entry.title} \xB7 ${providerDisplayName(entry.provider)}`,
           onClick: () => void dispatch({ type: "session.select", id: entry.id }),
-          children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "sidebar-collapsed-provider-mark", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(ProviderLogo, { provider: entry.provider }) })
+          children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "sidebar-collapsed-provider-mark", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(ProviderLogo, { provider: entry.provider }) })
         },
         entry.id
       )),
-      automation.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+      automation.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
         "button",
         {
           className: classNames(
@@ -34745,12 +38957,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           "aria-label": `\u5C55\u5F00\u67E5\u770B ${automation.length} \u4E2A\u81EA\u52A8\u5316\u4F1A\u8BDD`,
           onClick: () => void dispatch({ type: "layout.drawer.expandGroup", group: "automation" }),
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "spark", size: 16 }),
-            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "non-wand-count-badge", children: automation.length > 99 ? "99+" : automation.length })
+            /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "spark", size: 16 }),
+            /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "non-wand-count-badge", children: automation.length > 99 ? "99+" : automation.length })
           ]
         }
       ),
-      history2.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+      history2.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
         "button",
         {
           className: "sidebar-collapsed-tile non-wand-count-tile",
@@ -34760,12 +38972,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           "aria-label": `\u5C55\u5F00\u67E5\u770B ${history2.length} \u4E2A\u975E Wand \u4F1A\u8BDD`,
           onClick: () => void dispatch({ type: "layout.drawer.expandGroup", group: "history" }),
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "history", size: 16 }),
-            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "non-wand-count-badge", children: history2.length > 99 ? "99+" : history2.length })
+            /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "history", size: 16 }),
+            /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "non-wand-count-badge", children: history2.length > 99 ? "99+" : history2.length })
           ]
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
         "button",
         {
           className: "sidebar-collapsed-tile add",
@@ -34774,188 +38986,202 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           title: "\u65B0\u5EFA\u4F1A\u8BDD",
           "aria-label": "\u65B0\u5EFA\u4F1A\u8BDD",
           onClick: () => void dispatch({ type: "session.new" }),
-          children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { "aria-hidden": "true", children: "\uFF0B" })
+          children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { "aria-hidden": "true", children: "\uFF0B" })
         }
       )
     ] });
   }
   function ShellSidebar() {
-    const snapshot8 = useUiStoreSnapshot();
+    const snapshot9 = useUiStoreSnapshot();
     const dispatch = useUiDispatch();
-    const [moreOpen, setMoreOpen] = React42.useState(false);
-    const [viewMode, setViewMode] = React42.useState(readSidebarViewMode);
-    const directories = useSessionDirectories(viewMode === "directories", snapshot8.revision);
-    const narrow = snapshot8.layout.sidebarPinned && snapshot8.layout.sidebarCollapsed;
+    const [moreOpen, setMoreOpen] = React47.useState(false);
+    const [viewMode, setViewMode] = React47.useState(readSidebarViewMode);
+    const directories = useSessionDirectories(viewMode === "directories", snapshot9.revision);
+    const narrow = snapshot9.layout.sidebarPinned && snapshot9.layout.sidebarCollapsed;
     const sidebarClass = classNames(
       "sidebar",
-      snapshot8.layout.sessionsDrawerOpen && "open",
-      snapshot8.layout.sidebarAnchored && "pinned",
+      snapshot9.layout.sessionsDrawerOpen && "open",
+      snapshot9.layout.sidebarAnchored && "pinned",
       narrow && "collapsed"
     );
     const changeViewMode = (next) => {
       setViewMode(next);
       writeSidebarViewMode(next);
-      if (next === "directories" && snapshot8.sidebar.manageMode) {
+      if (next === "directories" && snapshot9.sidebar.manageMode) {
         void dispatch({ type: "session.manage.toggle" });
       }
     };
-    return /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(import_jsx_runtime43.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+    const fileExplorerRoot = snapshot9.topbar.cwd || snapshot9.selected?.cwd || "";
+    const primaryAction = getShellSidebarPrimaryAction(viewMode);
+    const activeCount = viewMode === "directories" ? directories.data?.directoryCount ?? "\u2026" : viewMode === "files" ? "\u6587\u4EF6" : viewMode === "workspaces" ? "\u9879\u76EE" : snapshot9.sidebar.interactiveCount;
+    return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(import_jsx_runtime50.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
         "div",
         {
           id: "sessions-drawer-backdrop",
-          className: classNames("drawer-backdrop", snapshot8.layout.sessionsBackdropVisible && "open"),
+          className: classNames("drawer-backdrop", snapshot9.layout.sessionsBackdropVisible && "open"),
           "aria-hidden": "true",
           onClick: () => void dispatch({ type: "layout.drawer.close" })
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("aside", { id: "sessions-drawer", className: sidebarClass, "aria-label": "\u4F1A\u8BDD\u4FA7\u680F", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "sidebar-header", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "sidebar-header-main", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "topbar-logo-icon", children: "W" }),
-            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(SidebarViewSwitch, { mode: viewMode, onChange: changeViewMode }),
-            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { className: "session-count", id: "session-count", children: viewMode === "directories" ? directories.data?.directoryCount ?? "\u2026" : snapshot8.sidebar.interactiveCount })
-          ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "sidebar-header-actions", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "sidebar-header-more", children: /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
-              WandPopover,
-              {
-                open: moreOpen,
-                onOpenChange: setMoreOpen,
-                align: "end",
-                sideOffset: 6,
-                portalled: false,
-                forceMount: true,
-                showArrow: false,
-                contentId: "sidebar-overflow-menu",
-                contentRole: "menu",
-                ariaLabel: "\u4FA7\u680F\u66F4\u591A\u64CD\u4F5C",
-                className: classNames("sidebar-header-overflow", "wand-shell-menu-popover", moreOpen && "open"),
-                trigger: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
-                  "button",
-                  {
-                    id: "sidebar-more-btn",
-                    className: "btn btn-ghost btn-sm",
-                    type: "button",
-                    title: "\u66F4\u591A\u64CD\u4F5C",
-                    "aria-haspopup": "menu",
-                    "aria-expanded": moreOpen,
-                    "aria-controls": "sidebar-overflow-menu",
-                    children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "more" })
-                  }
-                ),
-                children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("aside", { id: "sessions-drawer", className: sidebarClass, "aria-label": "\u4F1A\u8BDD\u4FA7\u680F", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "sidebar-header", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "sidebar-header-primary", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "sidebar-header-main", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "topbar-logo-icon", children: "W" }),
+              /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "sidebar-title", children: "Wand" }),
+              /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+                "span",
+                {
+                  className: "session-count",
+                  id: "session-count",
+                  "aria-label": viewMode === "workspaces" ? "\u9879\u76EE" : `${activeCount} \u4E2A\u4F1A\u8BDD`,
+                  children: activeCount
+                }
+              )
+            ] }),
+            /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "sidebar-header-actions", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "sidebar-header-more", children: /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
+                WandPopover,
+                {
+                  open: moreOpen,
+                  onOpenChange: setMoreOpen,
+                  align: "end",
+                  sideOffset: 6,
+                  portalled: false,
+                  forceMount: true,
+                  showArrow: false,
+                  contentId: "sidebar-overflow-menu",
+                  contentRole: "menu",
+                  ariaLabel: "\u4FA7\u680F\u66F4\u591A\u64CD\u4F5C",
+                  className: classNames("sidebar-header-overflow", "wand-shell-menu-popover", moreOpen && "open"),
+                  trigger: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
                     "button",
                     {
-                      className: "overflow-item",
-                      id: "sidebar-home-btn",
+                      id: "sidebar-more-btn",
+                      className: "btn btn-ghost btn-sm",
                       type: "button",
-                      role: "menuitem",
-                      onClick: () => {
-                        setMoreOpen(false);
-                        void dispatch({ type: "nav.home" });
-                      },
-                      children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { children: "\u56DE\u5230\u9996\u9875" })
+                      title: "\u66F4\u591A\u64CD\u4F5C",
+                      "aria-haspopup": "menu",
+                      "aria-expanded": moreOpen,
+                      "aria-controls": "sidebar-overflow-menu",
+                      children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "more" })
                     }
                   ),
-                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
-                    "button",
-                    {
-                      className: "overflow-item",
-                      id: "sidebar-refresh-btn",
-                      type: "button",
-                      role: "menuitem",
-                      onClick: () => {
-                        setMoreOpen(false);
-                        void dispatch({ type: "nav.refresh" });
-                      },
-                      children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { children: "\u5237\u65B0\u9875\u9762" })
-                    }
-                  )
-                ]
-              }
-            ) }),
-            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
-              "button",
+                  children: [
+                    /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+                      "button",
+                      {
+                        className: "overflow-item",
+                        id: "sidebar-home-btn",
+                        type: "button",
+                        role: "menuitem",
+                        onClick: () => {
+                          setMoreOpen(false);
+                          void dispatch({ type: "nav.home" });
+                        },
+                        children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { children: "\u56DE\u5230\u9996\u9875" })
+                      }
+                    ),
+                    /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+                      "button",
+                      {
+                        className: "overflow-item",
+                        id: "sidebar-refresh-btn",
+                        type: "button",
+                        role: "menuitem",
+                        onClick: () => {
+                          setMoreOpen(false);
+                          void dispatch({ type: "nav.refresh" });
+                        },
+                        children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { children: "\u5237\u65B0\u9875\u9762" })
+                      }
+                    )
+                  ]
+                }
+              ) }),
+              snapshot9.viewport.mobile && /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(import_jsx_runtime50.Fragment, { children: [
+                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+                  "button",
+                  {
+                    id: "sidebar-collapse-btn",
+                    className: classNames("btn btn-ghost btn-sm sidebar-collapse-toggle", narrow && "collapsed"),
+                    type: "button",
+                    title: narrow ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761",
+                    "aria-label": narrow ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761",
+                    onClick: () => void dispatch({ type: "layout.drawer.collapse" }),
+                    children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "chevron" })
+                  }
+                ),
+                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+                  "button",
+                  {
+                    id: "close-drawer-button",
+                    className: "btn btn-ghost btn-icon sidebar-close drawer-close-btn",
+                    type: "button",
+                    "aria-label": "\u5173\u95ED\u4FA7\u680F",
+                    onClick: () => void dispatch({ type: "layout.drawer.close" }),
+                    children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "close" })
+                  }
+                )
+              ] })
+            ] })
+          ] }),
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "sidebar-header-controls", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(SidebarViewSwitch, { mode: viewMode, onChange: changeViewMode }),
+            !snapshot9.viewport.mobile && /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+              SidebarCompactToggle,
               {
-                id: "sidebar-pin-btn",
-                className: classNames("btn btn-ghost btn-sm sidebar-pin-toggle", snapshot8.layout.sidebarPinned && "pinned"),
-                type: "button",
-                title: snapshot8.layout.sidebarPinned ? "\u5DF2\u56FA\u5B9A\u5E38\u9A7B\uFF08\u70B9\u51FB\u89E3\u9664\u9501\u5B9A\uFF09" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B",
-                "aria-label": snapshot8.layout.sidebarPinned ? "\u89E3\u9664\u56FA\u5B9A\u5E38\u9A7B" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B",
-                "aria-pressed": snapshot8.layout.sidebarPinned,
-                onClick: () => void dispatch({ type: "layout.drawer.pin" }),
-                children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "pin" })
-              }
-            ),
-            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
-              "button",
-              {
-                id: "sidebar-collapse-btn",
-                className: classNames("btn btn-ghost btn-sm sidebar-collapse-toggle", narrow && "collapsed"),
-                type: "button",
-                title: narrow ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761",
-                "aria-label": narrow ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761",
-                onClick: () => void dispatch({ type: "layout.drawer.collapse" }),
-                children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "chevron" })
-              }
-            ),
-            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
-              "button",
-              {
-                id: "close-drawer-button",
-                className: "btn btn-ghost btn-icon sidebar-close drawer-close-btn",
-                type: "button",
-                "aria-label": "\u5173\u95ED\u83DC\u5355",
-                onClick: () => void dispatch({ type: "layout.drawer.close" }),
-                children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "close" })
+                active: narrow,
+                onToggle: () => void dispatch({ type: "layout.drawer.collapse" })
               }
             )
           ] })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "sidebar-body", children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { id: "sessions-panel", children: /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("div", { className: "sessions-list", id: "sessions-list", children: narrow ? /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(CollapsedSessions, { groups: snapshot8.sidebar.groups, dispatch }) : viewMode === "directories" ? /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "sidebar-body", children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { id: "sessions-panel", children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "sessions-list", id: "sessions-list", children: narrow && viewMode !== "files" && viewMode !== "workspaces" ? /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(CollapsedSessions, { groups: snapshot9.sidebar.groups, dispatch }) : viewMode === "files" ? /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(FileExplorerHost, { root: fileExplorerRoot }) : viewMode === "directories" ? /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
           DirectoryTree,
           {
             response: directories.data,
             loading: directories.loading,
             error: directories.error,
-            selectedId: snapshot8.selected?.id ?? null,
+            selectedId: snapshot9.selected?.id ?? null,
             dispatch,
             renameDirectory: directories.rename
           }
-        ) : /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(import_jsx_runtime43.Fragment, { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(
+        ) : viewMode === "workspaces" ? /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(WorkspacesPanel, {}) : /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(import_jsx_runtime50.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
             ManageBar,
             {
-              manageMode: snapshot8.sidebar.manageMode,
-              selectedCount: snapshot8.sidebar.selectedCount,
-              totalCount: snapshot8.sidebar.totalCount,
+              manageMode: snapshot9.sidebar.manageMode,
+              selectedCount: snapshot9.sidebar.selectedCount,
+              totalCount: snapshot9.sidebar.totalCount,
               dispatch
             }
           ),
-          snapshot8.sidebar.totalCount === 0 ? /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "empty-state", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("strong", { children: "\u8FD8\u6CA1\u6709\u4F1A\u8BDD\u8BB0\u5F55" }),
-            /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("br", {}),
+          snapshot9.sidebar.totalCount === 0 ? /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "empty-state", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("strong", { children: "\u8FD8\u6CA1\u6709\u4F1A\u8BDD\u8BB0\u5F55" }),
+            /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("br", {}),
             "\u70B9\u51FB\u4E0A\u65B9\u300C\u65B0\u5BF9\u8BDD\u300D\u5F00\u59CB\u4F60\u7684\u7B2C\u4E00\u6B21\u5BF9\u8BDD\u3002"
-          ] }) : snapshot8.sidebar.groups.map((group) => /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(SessionGroup, { group, manageMode: snapshot8.sidebar.manageMode, dispatch }, group.kind))
+          ] }) : snapshot9.sidebar.groups.map((group) => /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(SessionGroup, { group, manageMode: snapshot9.sidebar.manageMode, dispatch }, group.kind))
         ] }) }) }) }),
-        /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "sidebar-footer", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+        /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "sidebar-footer", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
             "button",
             {
               id: "drawer-new-session-button",
               className: "btn btn-primary btn-block",
               type: "button",
-              onClick: () => void dispatch({ type: "session.new" }),
+              "aria-label": primaryAction.ariaLabel,
+              onClick: () => void dispatch(primaryAction.action),
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { children: "+" }),
-                " \u65B0\u4F1A\u8BDD"
+                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { children: "+" }),
+                " ",
+                primaryAction.label
               ]
             }
           ),
-          /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)("div", { className: "sidebar-footer-actions", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "sidebar-footer-actions", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
               "button",
               {
                 id: "missions-button",
@@ -34964,26 +39190,26 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                 title: "Agent Inbox",
                 onClick: () => void dispatch({ type: "missions.open" }),
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "inbox", size: 16 }),
-                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { children: "\u4EFB\u52A1" })
+                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "inbox", size: 16 }),
+                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { children: "\u4EFB\u52A1" })
                 ]
               }
             ),
-            /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+            snapshot9.viewport.mobile && /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
               "button",
               {
                 id: "file-panel-toggle-btn",
-                className: classNames("btn btn-ghost btn-sm", snapshot8.layout.filePanelOpen && "active"),
+                className: classNames("btn btn-ghost btn-sm", snapshot9.layout.filePanelOpen && "active"),
                 type: "button",
                 title: "\u67E5\u770B\u6587\u4EF6",
                 onClick: () => void dispatch({ type: "layout.files.toggle" }),
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "file", size: 16 }),
-                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { children: "\u6587\u4EF6" })
+                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "file", size: 16 }),
+                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { children: "\u6587\u4EF6" })
                 ]
               }
             ),
-            /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+            /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
               "button",
               {
                 id: "settings-button",
@@ -34992,12 +39218,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                 title: "\u8BBE\u7F6E",
                 onClick: () => void dispatch({ type: "settings.open" }),
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "gear", size: 16 }),
-                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { children: "\u8BBE\u7F6E" })
+                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "gear", size: 16 }),
+                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { children: "\u8BBE\u7F6E" })
                 ]
               }
             ),
-            snapshot8.capabilities.backToNative && /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+            snapshot9.capabilities.backToNative && /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
               "button",
               {
                 id: "back-to-native-button",
@@ -35006,12 +39232,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                 title: "\u8FD4\u56DE App \u539F\u751F\u754C\u9762",
                 onClick: () => void dispatch({ type: "native.back" }),
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "back", size: 16 }),
-                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { children: "\u8FD4\u56DEApp" })
+                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "back", size: 16 }),
+                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { children: "\u8FD4\u56DEApp" })
                 ]
               }
             ),
-            snapshot8.capabilities.switchServer && /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+            snapshot9.capabilities.switchServer && /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
               "button",
               {
                 id: "switch-server-button",
@@ -35020,12 +39246,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                 title: "\u5207\u6362\u670D\u52A1\u5668",
                 onClick: () => void dispatch({ type: "native.switchServer" }),
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "server", size: 16 }),
-                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { children: "\u5207\u6362" })
+                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "server", size: 16 }),
+                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { children: "\u5207\u6362" })
                 ]
               }
             ),
-            /* @__PURE__ */ (0, import_jsx_runtime43.jsxs)(
+            /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
               "button",
               {
                 id: "logout-button",
@@ -35034,8 +39260,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                 title: "\u9000\u51FA\u767B\u5F55",
                 onClick: () => void dispatch({ type: "auth.logout" }),
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)(Icon, { name: "logout", size: 16 }),
-                  /* @__PURE__ */ (0, import_jsx_runtime43.jsx)("span", { children: "\u9000\u51FA" })
+                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "logout", size: 16 }),
+                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { children: "\u9000\u51FA" })
                 ]
               }
             )
@@ -35046,7 +39272,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   }
 
   // src/web-ui/react/shell/shell-topbar.tsx
-  var import_jsx_runtime44 = __toESM(require_jsx_runtime(), 1);
+  var import_jsx_runtime51 = __toESM(require_jsx_runtime(), 1);
   function TopbarIcon({ name, size: size4 = 16 }) {
     const common = {
       width: size4,
@@ -35061,31 +39287,37 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     };
     switch (name) {
       case "copy":
-        return /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("rect", { x: "9", y: "9", width: "13", height: "13", rx: "2" }),
-          /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("path", { d: "M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" })
+        return /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("rect", { x: "9", y: "9", width: "13", height: "13", rx: "2" }),
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" })
+        ] });
+      case "explorer":
+        return /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M8 3h7l4 4v11a2 2 0 01-2 2H8a2 2 0 01-2-2V5a2 2 0 012-2z" }),
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M15 3v4h4" }),
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M3 9h7l2 2v8a1 1 0 01-1 1H4a1 1 0 01-1-1z" })
         ] });
       case "file":
-        return /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("path", { d: "M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" }) });
       case "git":
-        return /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("svg", { ...common, className: "topbar-git-icon", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("circle", { cx: "6", cy: "6", r: "2" }),
-          /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("circle", { cx: "6", cy: "18", r: "2" }),
-          /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("circle", { cx: "18", cy: "9", r: "2" }),
-          /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("path", { d: "M6 8v8M18 11v1a3 3 0 01-3 3H9" })
+        return /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("svg", { ...common, className: "topbar-git-icon", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("circle", { cx: "6", cy: "6", r: "2" }),
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("circle", { cx: "6", cy: "18", r: "2" }),
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("circle", { cx: "18", cy: "9", r: "2" }),
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M6 8v8M18 11v1a3 3 0 01-3 3H9" })
         ] });
       case "hash":
-        return /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("path", { d: "M4 9h16M4 15h16M10 3L8 21M16 3l-2 18" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M4 9h16M4 15h16M10 3L8 21M16 3l-2 18" }) });
       case "merge":
-        return /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("path", { d: "M7 7h10M7 12h10M7 17h10M5 7L3 9l2 2M19 15l2 2-2 2" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M7 7h10M7 12h10M7 17h10M5 7L3 9l2 2M19 15l2 2-2 2" }) });
       case "more":
-        return /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("circle", { cx: "12", cy: "5", r: "1" }),
-          /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("circle", { cx: "12", cy: "12", r: "1" }),
-          /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("circle", { cx: "12", cy: "19", r: "1" })
+        return /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("circle", { cx: "12", cy: "5", r: "1" }),
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("circle", { cx: "12", cy: "12", r: "1" }),
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("circle", { cx: "12", cy: "19", r: "1" })
         ] });
       case "trash":
-        return /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("path", { d: "M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" }) });
     }
   }
   function MoreItem({
@@ -35097,7 +39329,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     disabled,
     onAction
   }) {
-    return /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)(
+    return /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(
       "button",
       {
         className: classNames("topbar-more-item", danger && "topbar-more-item-danger"),
@@ -35107,128 +39339,128 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         disabled,
         onClick: () => onAction(action),
         children: [
-          /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(TopbarIcon, { name: icon, size: 14 }),
-          /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { children: label })
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(TopbarIcon, { name: icon, size: 14 }),
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { children: label })
         ]
       }
     );
   }
   function ShellTopbar() {
-    const snapshot8 = useUiStoreSnapshot();
+    const snapshot9 = useUiStoreSnapshot();
     const dispatch = useUiDispatch();
-    const selected = snapshot8.selected;
-    const moreOpen = snapshot8.layout.topbarMoreOpen;
+    const selected = snapshot9.selected;
+    const moreOpen = snapshot9.layout.topbarMoreOpen;
     const selectedActions = selected ? getShellSidebarEntryActions(selected, false) : null;
     const openFiles = () => {
-      if (!snapshot8.layout.filePanelOpen) void dispatch({ type: "layout.files.toggle" });
+      if (!snapshot9.layout.filePanelOpen) void dispatch({ type: "layout.files.toggle" });
     };
     const runMoreAction = (action) => {
       if (moreOpen) void dispatch({ type: "topbar.menu.toggle" });
       void dispatch(action);
     };
-    return /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("div", { className: "main-header-row", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("div", { className: "topbar-left", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("div", { className: "main-header-row", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("div", { className: "topbar-left", children: [
+        snapshot9.viewport.mobile && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
           "button",
           {
             id: "sessions-toggle-button",
-            className: classNames("floating-sidebar-toggle", snapshot8.layout.sessionsDrawerOpen && "active"),
+            className: classNames("floating-sidebar-toggle", snapshot9.layout.sessionsDrawerOpen && "active"),
             "aria-label": "\u5207\u6362\u4F1A\u8BDD\u4FA7\u680F",
             type: "button",
             onClick: () => void dispatch({ type: "layout.drawer.toggle" }),
-            children: /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("span", { className: "hamburger-icon", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", {}),
-              /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", {}),
-              /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", {})
+            children: /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("span", { className: "hamburger-icon", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", {}),
+              /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", {}),
+              /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", {})
             ] })
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "topbar-brand", "aria-hidden": "true", children: "W" })
+        !snapshot9.layout.sidebarAnchored && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "topbar-brand", "aria-hidden": "true", children: "W" })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("div", { className: "topbar-center", children: selected ? /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)(import_jsx_runtime44.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("div", { className: "topbar-center", children: selected ? /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(import_jsx_runtime51.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
           "span",
           {
-            className: classNames("topbar-session-title", snapshot8.topbar.titleGenerating && "title-generating"),
-            title: snapshot8.topbar.description || selected.title,
-            "aria-busy": snapshot8.topbar.titleGenerating || void 0,
-            children: snapshot8.topbar.title
+            className: classNames("topbar-session-title", snapshot9.topbar.titleGenerating && "title-generating"),
+            title: snapshot9.topbar.description || selected.title,
+            "aria-busy": snapshot9.topbar.titleGenerating || void 0,
+            children: snapshot9.topbar.title
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)(
+        /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(
           "span",
           {
-            className: classNames("session-status-pill", snapshot8.topbar.statusTone),
-            title: snapshot8.topbar.statusLabel,
+            className: classNames("session-status-pill", snapshot9.topbar.statusTone),
+            title: snapshot9.topbar.statusLabel,
             children: [
-              /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "session-status-dot" }),
-              /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "session-status-text", children: snapshot8.topbar.statusLabel })
+              /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "session-status-dot" }),
+              /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "session-status-text", children: snapshot9.topbar.statusLabel })
             ]
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
           "span",
           {
-            className: classNames("current-task", !snapshot8.topbar.currentTask && "hidden"),
+            className: classNames("current-task", !snapshot9.topbar.currentTask && "hidden"),
             id: "current-task",
-            title: snapshot8.topbar.currentTask || void 0,
-            children: snapshot8.topbar.currentTask
+            title: snapshot9.topbar.currentTask || void 0,
+            children: snapshot9.topbar.currentTask
           }
         ),
-        snapshot8.topbar.cwd && /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(
+        snapshot9.topbar.cwd && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
           "span",
           {
             className: "topbar-cwd tail-marquee-path",
             id: "topbar-cwd",
             role: "button",
             tabIndex: 0,
-            title: snapshot8.topbar.cwd,
+            title: snapshot9.topbar.cwd,
             onClick: openFiles,
             onKeyDown: (event) => {
               if (event.key !== "Enter" && event.key !== " ") return;
               event.preventDefault();
               openFiles();
             },
-            children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "tail-marquee-path-inner", children: snapshot8.topbar.cwd })
+            children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "tail-marquee-path-inner", children: snapshot9.topbar.cwd })
           }
         )
-      ] }) : /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)(import_jsx_runtime44.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "topbar-tagline", children: snapshot8.topbar.title || "Wand \u63A7\u5236\u53F0" }),
-        /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "current-task hidden", id: "current-task" })
+      ] }) : /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(import_jsx_runtime51.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "topbar-tagline", children: snapshot9.topbar.title || "Wand \u63A7\u5236\u53F0" }),
+        /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "current-task hidden", id: "current-task" })
       ] }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("div", { className: "topbar-right", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("div", { className: "topbar-right", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
           "button",
           {
             id: "topbar-file-button",
-            className: classNames("topbar-btn square", snapshot8.layout.filePanelOpen && "active"),
+            className: classNames("topbar-btn square", snapshot9.layout.filePanelOpen && "active"),
             type: "button",
             "aria-label": "\u6587\u4EF6",
             title: "\u67E5\u770B\u6587\u4EF6\uFF08\u53EF\u4FEE\u6539\u8DEF\u5F84\uFF09",
             onClick: () => void dispatch({ type: "layout.files.toggle" }),
-            children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(TopbarIcon, { name: "file" })
+            children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(TopbarIcon, { name: "explorer" })
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { id: "topbar-git-slot", className: "topbar-git-slot", children: snapshot8.topbar.git && /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)(
+        /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { id: "topbar-git-slot", className: "topbar-git-slot", children: snapshot9.topbar.git && /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(
           "button",
           {
             id: "topbar-git-badge",
             className: "topbar-git-badge",
             type: "button",
-            title: `${snapshot8.topbar.git.branch}  \xB7  ${snapshot8.topbar.git.clean ? "\u5DE5\u4F5C\u533A\u5E72\u51C0" : `${snapshot8.topbar.git.modifiedCount} \u4E2A\u6587\u4EF6\u5F85\u63D0\u4EA4`}`,
+            title: `${snapshot9.topbar.git.branch}  \xB7  ${snapshot9.topbar.git.clean ? "\u5DE5\u4F5C\u533A\u5E72\u51C0" : `${snapshot9.topbar.git.modifiedCount} \u4E2A\u6587\u4EF6\u5F85\u63D0\u4EA4`}`,
             "aria-label": "\u5FEB\u6377\u63D0\u4EA4",
             onClick: () => void dispatch({ type: "topbar.gitCommit" }),
             children: [
-              /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(TopbarIcon, { name: "git", size: 14 }),
-              /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "topbar-git-branch", children: snapshot8.topbar.git.branch }),
-              snapshot8.topbar.git.clean ? /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("span", { className: "topbar-git-clean", "aria-hidden": "true", children: "\u2713" }) : /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)("span", { className: "topbar-git-count", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(TopbarIcon, { name: "git", size: 14 }),
+              /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "topbar-git-branch", children: snapshot9.topbar.git.branch }),
+              snapshot9.topbar.git.clean ? /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "topbar-git-clean", "aria-hidden": "true", children: "\u2713" }) : /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("span", { className: "topbar-git-count", children: [
                 "\xB7",
-                snapshot8.topbar.git.modifiedCount
+                snapshot9.topbar.git.modifiedCount
               ] })
             ]
           }
         ) }),
-        selected && /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("div", { className: "topbar-more-wrap", children: /* @__PURE__ */ (0, import_jsx_runtime44.jsxs)(
+        selected && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("div", { className: "topbar-more-wrap", children: /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(
           WandPopover,
           {
             open: moreOpen,
@@ -35244,7 +39476,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
             contentRole: "menu",
             ariaLabel: "\u5F53\u524D\u4F1A\u8BDD",
             className: classNames("topbar-more-menu", "wand-shell-menu-popover", !moreOpen && "hidden"),
-            trigger: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(
+            trigger: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
               "button",
               {
                 id: "topbar-more-button",
@@ -35255,11 +39487,11 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                 "aria-expanded": moreOpen,
                 "aria-controls": "topbar-more-menu",
                 title: "\u5F53\u524D\u4F1A\u8BDD\u64CD\u4F5C",
-                children: /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(TopbarIcon, { name: "more" })
+                children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(TopbarIcon, { name: "more" })
               }
             ),
             children: [
-              selected.claudeSessionId && /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(
+              selected.claudeSessionId && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
                 MoreItem,
                 {
                   action: { type: "topbar.copy", field: "providerSessionId" },
@@ -35269,7 +39501,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                   onAction: runMoreAction
                 }
               ),
-              selected.cwd && /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(
+              selected.cwd && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
                 MoreItem,
                 {
                   action: { type: "topbar.copy", field: "cwd" },
@@ -35279,7 +39511,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                   onAction: runMoreAction
                 }
               ),
-              /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(
+              /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
                 MoreItem,
                 {
                   action: { type: "topbar.copy", field: "sessionId" },
@@ -35289,8 +39521,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                   onAction: runMoreAction
                 }
               ),
-              /* @__PURE__ */ (0, import_jsx_runtime44.jsx)("div", { className: "topbar-more-divider", role: "separator" }),
-              selectedActions?.merge && /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(
+              /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("div", { className: "topbar-more-divider", role: "separator" }),
+              selectedActions?.merge && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
                 MoreItem,
                 {
                   action: selectedActions.merge,
@@ -35301,7 +39533,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                   onAction: runMoreAction
                 }
               ),
-              selectedActions?.cleanup && /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(
+              selectedActions?.cleanup && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
                 MoreItem,
                 {
                   action: selectedActions.cleanup,
@@ -35311,7 +39543,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                   onAction: runMoreAction
                 }
               ),
-              selectedActions?.delete && /* @__PURE__ */ (0, import_jsx_runtime44.jsx)(
+              selectedActions?.delete && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
                 MoreItem,
                 {
                   action: selectedActions.delete,
@@ -35330,7 +39562,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   }
 
   // src/web-ui/react/shell/shell-main-content.tsx
-  var import_jsx_runtime45 = __toESM(require_jsx_runtime(), 1);
+  var import_jsx_runtime52 = __toESM(require_jsx_runtime(), 1);
   function getShellLegacySlotClasses(visibility) {
     return {
       terminal: `terminal-container ${visibility.terminal ? "active" : "hidden"}`,
@@ -35365,13 +39597,13 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     };
     switch (name) {
       case "chat":
-        return /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("path", { d: "M21 15a4 4 0 01-4 4H8l-5 3V7a4 4 0 014-4h10a4 4 0 014 4z" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("path", { d: "M21 15a4 4 0 01-4 4H8l-5 3V7a4 4 0 014-4h10a4 4 0 014 4z" }) });
       case "chevron-down":
-        return /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("svg", { ...common, strokeWidth: 2, children: /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("path", { d: "M6 9l6 6 6-6" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("svg", { ...common, strokeWidth: 2, children: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("path", { d: "M6 9l6 6 6-6" }) });
       case "folder":
-        return /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("path", { d: "M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("path", { d: "M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" }) });
       case "terminal":
-        return /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("path", { d: "M4 17l6-5-6-5M12 19h8" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("path", { d: "M4 17l6-5-6-5M12 19h8" }) });
     }
   }
   function ShellBlankChat({ className, cwd, queueRef }) {
@@ -35382,13 +39614,13 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     const openFolderPicker2 = () => {
       void dispatch({ type: "folderPicker.open" });
     };
-    return /* @__PURE__ */ (0, import_jsx_runtime45.jsxs)("div", { id: "blank-chat", className, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime45.jsxs)("div", { className: "blank-chat-inner", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("div", { className: "blank-chat-logo", children: "W" }),
-        /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("h2", { className: "blank-chat-title", children: "Wand" }),
-        /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("p", { className: "blank-chat-subtitle", children: "\u652F\u6301\u7EC8\u7AEF PTY \u4F1A\u8BDD\u4E0E\u7ED3\u6784\u5316 chat \u4F1A\u8BDD\uFF0C\u4E24\u79CD\u6A21\u5F0F\u53EF\u5E76\u5B58\u3002" }),
-        /* @__PURE__ */ (0, import_jsx_runtime45.jsxs)("div", { className: "blank-chat-tools", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime45.jsxs)(
+    return /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)("div", { id: "blank-chat", className, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)("div", { className: "blank-chat-inner", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("div", { className: "blank-chat-logo", children: "W" }),
+        /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("h2", { className: "blank-chat-title", children: "Wand" }),
+        /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("p", { className: "blank-chat-subtitle", children: "\u652F\u6301\u7EC8\u7AEF PTY \u4F1A\u8BDD\u4E0E\u7ED3\u6784\u5316 chat \u4F1A\u8BDD\uFF0C\u4E24\u79CD\u6A21\u5F0F\u53EF\u5E76\u5B58\u3002" }),
+        /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)("div", { className: "blank-chat-tools", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)(
             "button",
             {
               className: "blank-chat-tool-btn",
@@ -35396,12 +39628,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
               type: "button",
               onClick: () => quickStart2("claude"),
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("span", { className: "tool-icon", children: /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(ProviderLogo, { provider: "claude" }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("span", { className: "tool-icon", children: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(ProviderLogo, { provider: "claude" }) }),
                 "\u65B0\u5EFA\u7EC8\u7AEF\u4F1A\u8BDD"
               ]
             }
           ),
-          /* @__PURE__ */ (0, import_jsx_runtime45.jsxs)(
+          /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)(
             "button",
             {
               className: "blank-chat-tool-btn",
@@ -35409,12 +39641,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
               type: "button",
               onClick: () => quickStart2("codex"),
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("span", { className: "tool-icon", children: /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(ProviderLogo, { provider: "codex" }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("span", { className: "tool-icon", children: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(ProviderLogo, { provider: "codex" }) }),
                 "\u65B0\u5EFA Codex \u4F1A\u8BDD"
               ]
             }
           ),
-          /* @__PURE__ */ (0, import_jsx_runtime45.jsxs)(
+          /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)(
             "button",
             {
               className: "blank-chat-tool-btn",
@@ -35422,12 +39654,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
               type: "button",
               onClick: () => quickStart2("opencode"),
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("span", { className: "tool-icon", children: /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(ProviderLogo, { provider: "opencode" }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("span", { className: "tool-icon", children: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(ProviderLogo, { provider: "opencode" }) }),
                 "\u65B0\u5EFA OpenCode \u4F1A\u8BDD"
               ]
             }
           ),
-          /* @__PURE__ */ (0, import_jsx_runtime45.jsxs)(
+          /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)(
             "button",
             {
               className: "blank-chat-tool-btn",
@@ -35435,13 +39667,13 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
               type: "button",
               onClick: () => quickStart2("structured"),
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("span", { className: "tool-icon", children: /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(WelcomeIcon, { name: "chat", size: 16 }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("span", { className: "tool-icon", children: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(WelcomeIcon, { name: "chat", size: 16 }) }),
                 "\u65B0\u5EFA\u7ED3\u6784\u5316\u4F1A\u8BDD"
               ]
             }
           )
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("div", { className: "blank-chat-cwd-wrap", children: /* @__PURE__ */ (0, import_jsx_runtime45.jsxs)(
+        /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("div", { className: "blank-chat-cwd-wrap", children: /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)(
           "div",
           {
             className: "blank-chat-cwd",
@@ -35457,26 +39689,33 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
               openFolderPicker2();
             },
             children: [
-              /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("span", { className: "blank-chat-cwd-icon", children: /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(WelcomeIcon, { name: "folder", size: 13 }) }),
-              /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("span", { className: "blank-chat-cwd-path tail-marquee-path", id: "blank-chat-cwd-path", title: cwd, children: /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("span", { className: "tail-marquee-path-inner", children: cwd }) }),
-              /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("span", { className: "blank-chat-cwd-arrow", id: "blank-chat-cwd-arrow", children: /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(WelcomeIcon, { name: "chevron-down", size: 11 }) })
+              /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("span", { className: "blank-chat-cwd-icon", children: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(WelcomeIcon, { name: "folder", size: 13 }) }),
+              /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("span", { className: "blank-chat-cwd-path tail-marquee-path", id: "blank-chat-cwd-path", title: cwd, children: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("span", { className: "tail-marquee-path-inner", children: cwd }) }),
+              /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("span", { className: "blank-chat-cwd-arrow", id: "blank-chat-cwd-arrow", children: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(WelcomeIcon, { name: "chevron-down", size: 11 }) })
             ]
           }
         ) })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("div", { id: "cross-session-queue-host", ref: queueRef })
+      /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("div", { id: "cross-session-queue-host", ref: queueRef })
     ] });
   }
   function ShellMainContent({ legacyRefs } = {}) {
-    const snapshot8 = useUiStoreSnapshot();
-    const classes2 = getShellLegacySlotClasses(snapshot8.legacyVisibility);
-    const cwd = snapshot8.topbar.cwd || "/";
-    return /* @__PURE__ */ (0, import_jsx_runtime45.jsxs)("main", { className: `main-content${snapshot8.layout.filePanelOpen ? " file-panel-open" : ""}`, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(ShellTopbar, {}),
-      /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(ShellFilePanel, { explorerRef: legacyRefs?.fileExplorer }),
-      /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("div", { id: "output", className: classes2.terminal, ref: legacyRefs?.terminal }),
-      /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("div", { id: "chat-output", className: classes2.chat, ref: legacyRefs?.chat }),
-      /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(
+    const snapshot9 = useUiStoreSnapshot();
+    const classes2 = getShellLegacySlotClasses(snapshot9.legacyVisibility);
+    const cwd = snapshot9.topbar.cwd || "/";
+    const context2 = React49.useSyncExternalStore(
+      workspaceContextStore.subscribe,
+      workspaceContextStore.getSnapshot,
+      workspaceContextStore.getServerSnapshot
+    );
+    const inSplit = !!context2.taskId && activeWorkWindow(context2.layout)?.layout.type === "split";
+    return /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)("main", { className: `main-content${snapshot9.layout.filePanelOpen ? " file-panel-open" : ""}${inSplit ? " main-content-in-split" : ""}`, children: [
+      context2.taskId ? null : /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(ShellTopbar, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(ShellFilePanel, { explorerRef: legacyRefs?.fileExplorer }),
+      /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(WorkspaceTabBar, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("div", { id: "output", className: classes2.terminal, ref: legacyRefs?.terminal }),
+      /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("div", { id: "chat-output", className: classes2.chat, ref: legacyRefs?.chat }),
+      /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(
         ShellBlankChat,
         {
           className: classes2.blank,
@@ -35484,12 +39723,14 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           queueRef: legacyRefs?.crossSessionQueue
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime45.jsx)("div", { className: classes2.composer, ref: legacyRefs?.composer })
+      /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("div", { className: classes2.composer, ref: legacyRefs?.composer }),
+      inSplit ? /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(WorkspaceWindow, {}) : null,
+      /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(CodeEditorHost, {})
     ] });
   }
 
   // src/web-ui/react/shell/shell-app.tsx
-  var import_jsx_runtime46 = __toESM(require_jsx_runtime(), 1);
+  var import_jsx_runtime53 = __toESM(require_jsx_runtime(), 1);
   function getShellLayoutClassName(layout) {
     const classes2 = ["main-layout"];
     if (layout.sessionsDrawerOpen) classes2.push("sidebar-open");
@@ -35498,14 +39739,14 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     return classes2.join(" ");
   }
   function ShellAppFrame({ legacyRefs } = {}) {
-    const snapshot8 = useUiStoreSnapshot();
-    return /* @__PURE__ */ (0, import_jsx_runtime46.jsx)("div", { className: "app-container", children: /* @__PURE__ */ (0, import_jsx_runtime46.jsxs)("div", { className: getShellLayoutClassName(snapshot8.layout), children: [
-      /* @__PURE__ */ (0, import_jsx_runtime46.jsx)(ShellSidebar, {}),
-      /* @__PURE__ */ (0, import_jsx_runtime46.jsx)(ShellMainContent, { legacyRefs })
+    const snapshot9 = useUiStoreSnapshot();
+    return /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("div", { className: "app-container", children: /* @__PURE__ */ (0, import_jsx_runtime53.jsxs)("div", { className: getShellLayoutClassName(snapshot9.layout), children: [
+      /* @__PURE__ */ (0, import_jsx_runtime53.jsx)(ShellSidebar, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime53.jsx)(ShellMainContent, { legacyRefs })
     ] }) });
   }
   function ShellApp({ store, legacyRefs }) {
-    return /* @__PURE__ */ (0, import_jsx_runtime46.jsx)(UiStoreProvider, { store, children: /* @__PURE__ */ (0, import_jsx_runtime46.jsx)(ShellAppFrame, { legacyRefs }) });
+    return /* @__PURE__ */ (0, import_jsx_runtime53.jsx)(UiStoreProvider, { store, children: /* @__PURE__ */ (0, import_jsx_runtime53.jsx)(ShellAppFrame, { legacyRefs }) });
   }
 
   // src/web-ui/react/shell/ui-store.ts
@@ -35531,7 +39772,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     return Object.freeze(value);
   }
   function isolateSnapshot(data, revision, freeze) {
-    const snapshot8 = cloneValue({
+    const snapshot9 = cloneValue({
       auth: data.auth,
       viewport: data.viewport,
       capabilities: data.capabilities,
@@ -35542,7 +39783,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       legacyVisibility: data.legacyVisibility,
       revision
     });
-    return freeze ? freezeValue(snapshot8) : snapshot8;
+    return freeze ? freezeValue(snapshot9) : snapshot9;
   }
   function normalizeBatchMs(value) {
     const batchMs = value ?? 0;
@@ -35699,7 +39940,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   };
 
   // src/web-ui/react/index.tsx
-  var import_jsx_runtime47 = __toESM(require_jsx_runtime(), 1);
+  var import_jsx_runtime54 = __toESM(require_jsx_runtime(), 1);
   var OVERLAY_ROOT_ID = "overlay-root";
   var REACT_MOUNT_ID = "wand-react-ui-mount";
   var PORTAL_CONTAINER_ID = "wand-react-ui-portals";
@@ -35731,6 +39972,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     window.__wandReactRestartOverlay = restartOverlayController;
     window.__wandReactFilePreview = filePreviewController;
     window.__wandReactMissions = missionsController;
+    window.__wandReactWorkspaces = workspacesController;
   }
   function startReactUi() {
     const overlayRoot = getOrCreateOverlayRoot();
@@ -35740,7 +39982,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       const mount = getOrCreateChild(overlayRoot, REACT_MOUNT_ID, "wand-ui-mount");
       const portals = getOrCreateChild(overlayRoot, PORTAL_CONTAINER_ID, "wand-ui-portals");
       activeRoot = (0, import_client.createRoot)(mount);
-      activeRoot.render(/* @__PURE__ */ (0, import_jsx_runtime47.jsx)(OverlayHost, { portalContainer: portals }));
+      activeRoot.render(/* @__PURE__ */ (0, import_jsx_runtime54.jsx)(OverlayHost, { portalContainer: portals }));
     }
     exposeBusinessControllers();
     overlayRoot.dataset.reactUi = genericUiEnabled ? "enabled" : "fallback";
@@ -35799,13 +40041,13 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
 
   // src/web-ui/browser/shell-runtime.ts
   var commands = null;
-  var runtime6 = null;
+  var runtime10 = null;
   function configureBrowserShellCommands(nextCommands) {
-    if (runtime6) throw new Error("Cannot replace browser shell commands after mount");
+    if (runtime10) throw new Error("Cannot replace browser shell commands after mount");
     commands = nextCommands;
   }
   function isBrowserReactShellMounted() {
-    return runtime6 !== null;
+    return runtime10 !== null;
   }
   function moveChildren(source, target) {
     while (source.firstChild) target.appendChild(source.firstChild);
@@ -35846,9 +40088,9 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       return "disabled";
     }
     if (!commands) throw new Error("Browser shell commands were not configured");
-    if (runtime6) {
-      if (runtime6.app !== app) throw new Error("React shell cannot move to a different #app root");
-      (0, import_react_dom4.flushSync)(() => runtime6?.store.publish({ sync: true, reason: "legacy:render" }));
+    if (runtime10) {
+      if (runtime10.app !== app) throw new Error("React shell cannot move to a different #app root");
+      (0, import_react_dom4.flushSync)(() => runtime10?.store.publish({ sync: true, reason: "legacy:render" }));
       return "updated";
     }
     const legacy = createLegacyRefs(createLegacyMarkup());
@@ -35856,11 +40098,11 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     app.replaceChildren();
     app.dataset.reactShell = "enabled";
     const root = (0, import_client2.createRoot)(app);
-    runtime6 = { app, root, store, hosts: legacy.hosts };
+    runtime10 = { app, root, store, hosts: legacy.hosts };
     try {
-      (0, import_react_dom4.flushSync)(() => root.render(React45.createElement(ShellApp, { store, legacyRefs: legacy.refs })));
+      (0, import_react_dom4.flushSync)(() => root.render(React51.createElement(ShellApp, { store, legacyRefs: legacy.refs })));
     } catch (error) {
-      runtime6 = null;
+      runtime10 = null;
       store.dispose();
       for (const host of legacy.hosts) host.dispose();
       delete app.dataset.reactShell;
@@ -35869,9 +40111,9 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     return "mounted";
   }
   function unmountBrowserReactShell() {
-    const active = runtime6;
+    const active = runtime10;
     if (!active) return;
-    runtime6 = null;
+    runtime10 = null;
     (0, import_react_dom4.flushSync)(() => active.root.unmount());
     active.store.dispose();
     for (const host of active.hosts) host.dispose();
@@ -35885,7 +40127,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     newSession: newSessionController,
     quickCommit: quickCommitController,
     settings: settingsController,
-    worktreeMerge: worktreeMergeController
+    worktreeMerge: worktreeMergeController,
+    workspaces: workspacesController
   };
   function closeReactOverlay(controller) {
     return !controller?.isOpen() || controller.closeIfOpen();
@@ -35924,8 +40167,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     activeDependencies = dependencies;
     disposeRuntime = configureFilePreviewRuntime({
       confirmDiscard: dependencies.confirmDiscard,
-      async copyText(text5) {
-        if (!await dependencies.copyText(text5)) throw new Error("\u590D\u5236\u5931\u8D25\u3002");
+      async copyText(text6) {
+        if (!await dependencies.copyText(text6)) throw new Error("\u590D\u5236\u5931\u8D25\u3002");
       },
       appendToComposer: dependencies.appendToComposer,
       notify: dependencies.notify,
@@ -35956,9 +40199,9 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   }
   function prepareFilePreviewForCompetingOverlay(openIntent) {
     if (!filePreviewController.isOpen()) return true;
-    const snapshot8 = filePreviewStore.getSnapshot();
-    if (snapshot8.saving) return false;
-    if (!snapshot8.dirty) {
+    const snapshot9 = filePreviewStore.getSnapshot();
+    if (snapshot9.saving) return false;
+    if (!snapshot9.dirty) {
       filePreviewController.closeIfOpen();
       return !filePreviewController.isOpen();
     }
@@ -35978,6 +40221,34 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       });
     }
     return false;
+  }
+
+  // src/web-ui/browser/file-explorer-adapter.ts
+  var React52 = __toESM(require_react(), 1);
+  var import_client3 = __toESM(require_client(), 1);
+  var explorerRoot = null;
+  var mountedContainer = null;
+  function mountFileExplorerHost(container, cwd) {
+    if (isBrowserReactShellMounted()) {
+      return;
+    }
+    if (explorerRoot && mountedContainer === container) {
+      fileExplorerController.setRoot(cwd);
+      return;
+    }
+    if (explorerRoot && mountedContainer !== container) {
+      unmountFileExplorerHost();
+    }
+    mountedContainer = container;
+    explorerRoot = (0, import_client3.createRoot)(container);
+    explorerRoot.render(React52.createElement(FileExplorerHost, { root: cwd }));
+  }
+  function unmountFileExplorerHost() {
+    if (explorerRoot) {
+      explorerRoot.unmount();
+      explorerRoot = null;
+    }
+    mountedContainer = null;
   }
 
   // src/web-ui/browser/file-browser.ts
@@ -36285,6 +40556,15 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       return;
     }
     state.fileExplorerCwd = cwd;
+    if (!isBrowserReactShellMounted()) {
+      mountFileExplorerHost(explorer, cwd);
+      if (cwdEl && cwdEl.tagName === "INPUT") {
+        if (document.activeElement !== cwdEl) {
+          cwdEl.value = cwd;
+        }
+      }
+      return;
+    }
     state.fileExplorerLoading = true;
     state.allFiles = [];
     state.fileExplorerTruncated = false;
@@ -36471,12 +40751,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     if (parent === cwd) return;
     refreshFileExplorer({ cwd: parent });
   }
-  function appendToComposer(text5) {
+  function appendToComposer(text6) {
     var inputBox = document.getElementById("input-box");
     if (!inputBox) return false;
     var current = inputBox.value || "";
     var sep = current && !current.endsWith(" ") && !current.endsWith("\n") ? " " : "";
-    inputBox.value = current + sep + text5;
+    inputBox.value = current + sep + text6;
     inputBox.dispatchEvent(new Event("input", { bubbles: true }));
     try {
       inputBox.focus();
@@ -36485,9 +40765,9 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     }
     return true;
   }
-  function copyTextSafely(text5) {
+  function copyTextSafely(text6) {
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      return navigator.clipboard.writeText(text5).then(function() {
+      return navigator.clipboard.writeText(text6).then(function() {
         return true;
       }).catch(function() {
         return fallback();
@@ -36497,7 +40777,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     function fallback() {
       try {
         var ta = document.createElement("textarea");
-        ta.value = text5;
+        ta.value = text6;
         ta.style.position = "fixed";
         ta.style.left = "-9999px";
         document.body.appendChild(ta);
@@ -36524,9 +40804,9 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     var fullPath = item.dataset.path || "";
     var type = item.dataset.type || "file";
     var cwd = state.fileExplorerCwd || "";
-    var relativePath = fullPath;
+    var relativePath2 = fullPath;
     if (cwd && fullPath.indexOf(cwd) === 0) {
-      relativePath = fullPath.slice(cwd.length).replace(/^\/+/, "") || ".";
+      relativePath2 = fullPath.slice(cwd.length).replace(/^\/+/, "") || ".";
     }
     var menu = document.createElement("div");
     menu.id = "file-context-menu";
@@ -36546,9 +40826,9 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         showToastIfPossible("\u5DF2\u590D\u5236\u8DEF\u5F84");
       });
     } });
-    if (relativePath && relativePath !== fullPath) {
+    if (relativePath2 && relativePath2 !== fullPath) {
       actions.push({ label: "\u590D\u5236\u76F8\u5BF9\u8DEF\u5F84", icon: "\u{1F4CB}", run: function() {
-        copyTextSafely(relativePath).then(function() {
+        copyTextSafely(relativePath2).then(function() {
           showToastIfPossible("\u5DF2\u590D\u5236\u76F8\u5BF9\u8DEF\u5F84");
         });
       } });
@@ -36810,9 +41090,9 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       var blocks = msg.content || [];
       for (var j = 0; j < blocks.length; j++) {
         if (blocks[j].type === "text" && blocks[j].text && blocks[j].text.trim()) {
-          var text5 = blocks[j].text.trim();
-          text5 = text5.replace(/^#+\s+/gm, "").replace(/\*\*/g, "").replace(/`/g, "");
-          var firstLine = text5.split("\n")[0].trim();
+          var text6 = blocks[j].text.trim();
+          text6 = text6.replace(/^#+\s+/gm, "").replace(/\*\*/g, "").replace(/`/g, "");
+          var firstLine = text6.split("\n")[0].trim();
           return firstLine.slice(0, 100);
         }
       }
@@ -37350,6 +41630,280 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     };
   }
 
+  // src/web-ui/browser/terminal-pool.ts
+  function appendSessionOutput(sessionId, chunk) {
+    const sessions = state.sessions;
+    const session = sessions.find((s) => s.id === sessionId);
+    if (!session) return;
+    session.output = clampClientTerminalOutput((session.output || "") + chunk);
+  }
+  function setSessionOutput(sessionId, output) {
+    const sessions = state.sessions;
+    const session = sessions.find((s) => s.id === sessionId);
+    if (!session) return;
+    session.output = clampClientTerminalOutput(output);
+  }
+  var pool = /* @__PURE__ */ new Map();
+  var sessionScales = /* @__PURE__ */ new Map();
+  function clampScale(value) {
+    return Math.round(Math.max(0.5, Math.min(2, value)) * 4) / 4;
+  }
+  function ws() {
+    return state.ws && state.ws.readyState === WebSocket.OPEN ? state.ws : null;
+  }
+  function sendJson(message) {
+    const socket = ws();
+    if (socket) socket.send(JSON.stringify(message));
+  }
+  function terminalFontFamily() {
+    const candidate = typeof getComputedStyle === "function" ? getComputedStyle(document.documentElement).getPropertyValue("--term-font-family").trim() : "";
+    return candidate || "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+  }
+  function terminalFontSize(scale = Number(state.terminalScale || 1)) {
+    const base = document.documentElement.classList.contains("is-wand-embed-terminal") ? 10 : state.terminalBaseFontSize || 13;
+    return Math.max(8, Math.round(base * scale));
+  }
+  function sendInput(sessionId, data) {
+    sendJson({ type: "pty_input", sessionId, data, userInput: state.terminalInteractive === true });
+  }
+  function sendResize(sessionId, cols, rows) {
+    const c = Math.max(20, Math.min(Math.floor(cols), 1e3));
+    const r = Math.max(5, Math.min(Math.floor(rows), 500));
+    sendJson({ type: "pty_resize", sessionId, cols: c, rows: r });
+  }
+  function fitAndSync(handle) {
+    if (handle.disposed) return;
+    try {
+      handle.fitAddon.fit();
+    } catch {
+    }
+    const cols = Number(handle.terminal.cols);
+    const rows = Number(handle.terminal.rows);
+    if (cols > 0 && rows > 0) sendResize(handle.sessionId, cols, rows);
+  }
+  function scheduleFitAndSync(handle) {
+    requestAnimationFrame(() => {
+      fitAndSync(handle);
+      requestAnimationFrame(() => fitAndSync(handle));
+    });
+    window.setTimeout(() => fitAndSync(handle), 120);
+  }
+  function getPooledTerminalScale(sessionId) {
+    return sessionScales.get(sessionId) ?? clampScale(Number(state.terminalScale || 1));
+  }
+  function setPooledTerminalScale(sessionId, value) {
+    const scale = clampScale(value);
+    sessionScales.set(sessionId, scale);
+    const handle = pool.get(sessionId);
+    if (!handle || handle.disposed) return scale;
+    handle.terminal.options.fontSize = terminalFontSize(scale);
+    scheduleFitAndSync(handle);
+    return scale;
+  }
+  function hasPooledTerminal(sessionId) {
+    return pool.has(sessionId);
+  }
+  function writeTerminal(handle, data) {
+    if (!data || handle.disposed) return Promise.resolve();
+    return new Promise((resolve) => {
+      try {
+        handle.terminal.write(data, () => resolve());
+      } catch {
+        resolve();
+      }
+    });
+  }
+  function createPooledTerminal(sessionId, container) {
+    if (!sessionId || !container) return false;
+    const existing = pool.get(sessionId);
+    if (existing && !existing.disposed) {
+      if (existing.container !== container) {
+        try {
+          existing.resizeObserver.disconnect();
+        } catch {
+        }
+        container.appendChild(existing.wrap);
+        existing.container = container;
+        existing.resizeObserver.observe(container);
+      }
+      scheduleFitAndSync(existing);
+      return true;
+    }
+    const XTermLib2 = globalThis.XTermLib;
+    if (!XTermLib2 || !XTermLib2.Terminal || !XTermLib2.FitAddon) return false;
+    const wrap = document.createElement("div");
+    wrap.className = "terminal-scroll-wrap pooled-terminal-wrap";
+    container.appendChild(wrap);
+    const term = new XTermLib2.Terminal({
+      cols: 120,
+      rows: 36,
+      allowProposedApi: true,
+      convertEol: false,
+      cursorBlink: false,
+      disableStdin: false,
+      fontFamily: terminalFontFamily(),
+      fontSize: terminalFontSize(getPooledTerminalScale(sessionId)),
+      lineHeight: 1.25,
+      scrollback: 5e3,
+      theme: {
+        background: "#1f1b17",
+        foreground: "#f4eee6",
+        cursor: "#d88d60",
+        selectionBackground: "rgba(216, 141, 96, 0.3)"
+      }
+    });
+    const fitAddon = new XTermLib2.FitAddon();
+    let unicodeAddon = null;
+    try {
+      if (XTermLib2.Unicode11Addon) {
+        unicodeAddon = new XTermLib2.Unicode11Addon();
+        term.loadAddon(unicodeAddon);
+        term.unicode.activeVersion = "11";
+      }
+    } catch {
+    }
+    term.loadAddon(fitAddon);
+    term.open(wrap);
+    try {
+      fitAddon.fit();
+    } catch {
+    }
+    term.onData((data) => sendInput(sessionId, data));
+    term.onBinary((data) => {
+      if (state.terminalInteractive) sendInput(sessionId, data);
+    });
+    term.onResize((size4) => sendResize(sessionId, size4.cols, size4.rows));
+    const resizeObserver = new ResizeObserver(() => {
+      const current = pool.get(sessionId);
+      if (current) fitAndSync(current);
+    });
+    resizeObserver.observe(container);
+    const handle = {
+      sessionId,
+      terminal: term,
+      fitAddon,
+      wrap,
+      container,
+      resizeObserver,
+      writeQueue: Promise.resolve(),
+      restoreGeneration: 0,
+      disposed: false
+    };
+    pool.set(sessionId, handle);
+    const session = state.sessions.find((item) => item.id === sessionId);
+    const cachedState = state.terminalStatesBySession?.[sessionId];
+    if (!restorePooledTerminalState(sessionId, session?.terminalState ?? cachedState, session?.output || "")) {
+      replacePooledTerminalOutput(sessionId, session?.output || "");
+    }
+    sendJson({ type: "subscribe", mode: "add", sessionId, capabilities: { ptyAck: true } });
+    scheduleFitAndSync(handle);
+    return true;
+  }
+  function resubscribePooledTerminals() {
+    for (const sessionId of pool.keys()) {
+      sendJson({ type: "subscribe", mode: "add", sessionId, capabilities: { ptyAck: true } });
+    }
+  }
+  function writePooledTerminal(sessionId, data, ackBytes) {
+    appendSessionOutput(sessionId, data);
+    const handle = pool.get(sessionId);
+    if (!handle || handle.disposed) {
+      if (ackBytes && sessionId) sendJson({ type: "pty_ack", sessionId, bytes: ackBytes });
+      return;
+    }
+    handle.writeQueue = handle.writeQueue.catch(() => {
+    }).then(async () => {
+      await writeTerminal(handle, data);
+      if (!handle.disposed) {
+        try {
+          handle.terminal.scrollToBottom();
+        } catch {
+        }
+      }
+      if (ackBytes && sessionId) sendJson({ type: "pty_ack", sessionId, bytes: ackBytes });
+    });
+  }
+  function replacePooledTerminalOutput(sessionId, output) {
+    setSessionOutput(sessionId, output);
+    const handle = pool.get(sessionId);
+    if (!handle || handle.disposed) return;
+    const generation = ++handle.restoreGeneration;
+    handle.writeQueue = handle.writeQueue.catch(() => {
+    }).then(async () => {
+      if (handle.disposed || generation !== handle.restoreGeneration) return;
+      try {
+        handle.terminal.reset();
+        handle.terminal.clear();
+      } catch {
+      }
+      await writeTerminal(handle, output);
+      if (handle.disposed || generation !== handle.restoreGeneration) return;
+      try {
+        handle.terminal.scrollToBottom();
+      } catch {
+      }
+    });
+  }
+  function restorePooledTerminalState(sessionId, snapshot9, fallbackOutput = "") {
+    if (!snapshot9 || snapshot9.version !== 1) return false;
+    if (sessionId) state.terminalStatesBySession[sessionId] = snapshot9;
+    setSessionOutput(sessionId, fallbackOutput);
+    const handle = pool.get(sessionId);
+    if (!handle || handle.disposed) return true;
+    const generation = ++handle.restoreGeneration;
+    handle.writeQueue = handle.writeQueue.catch(() => {
+    }).then(async () => {
+      if (handle.disposed || generation !== handle.restoreGeneration) return;
+      try {
+        handle.terminal.reset();
+        handle.terminal.clear();
+        if (snapshot9.cols > 0 && snapshot9.rows > 0) {
+          handle.terminal.resize(snapshot9.cols, snapshot9.rows);
+        }
+      } catch {
+      }
+      await writeTerminal(handle, String(snapshot9.data || ""));
+      const pending = Array.isArray(snapshot9.pending) ? snapshot9.pending : [];
+      for (const operation of pending) {
+        if (handle.disposed || generation !== handle.restoreGeneration) return;
+        if (operation?.type === "resize" && operation.cols > 0 && operation.rows > 0) {
+          try {
+            handle.terminal.resize(operation.cols, operation.rows);
+          } catch {
+          }
+        } else if (operation?.type === "data") {
+          await writeTerminal(handle, String(operation.data || ""));
+        }
+      }
+      if (handle.disposed || generation !== handle.restoreGeneration) return;
+      try {
+        fitAndSync(handle);
+        handle.terminal.scrollToBottom();
+      } catch {
+      }
+    });
+    return true;
+  }
+  function disposePooledTerminal(sessionId) {
+    const handle = pool.get(sessionId);
+    if (!handle) return;
+    handle.disposed = true;
+    try {
+      handle.resizeObserver.disconnect();
+    } catch {
+    }
+    try {
+      handle.terminal.dispose();
+    } catch {
+    }
+    if (handle.wrap.parentNode) handle.wrap.parentNode.removeChild(handle.wrap);
+    pool.delete(sessionId);
+    sendJson({ type: "unsubscribe", sessionId });
+  }
+  function disposeAllPooledTerminals() {
+    for (const sessionId of [...pool.keys()]) disposePooledTerminal(sessionId);
+  }
+
   // src/web-ui/browser/websocket.ts
   function startPolling() {
     stopPolling();
@@ -37440,9 +41994,13 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     var protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     var wsUrl = protocol + "//" + window.location.host + "/ws";
     try {
-      var ws = new WebSocket(wsUrl);
-      ws.onopen = function() {
-        state.ws = ws;
+      var ws2 = new WebSocket(wsUrl);
+      ws2.onopen = function() {
+        state.ws = ws2;
+        try {
+          window.__wandWs = ws2;
+        } catch (e) {
+        }
         state.wsConnected = true;
         state.lastWsMessageAt = Date.now();
         state.wsReconnectAttempts = 0;
@@ -37450,10 +42008,11 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         state.lastSeqBySession = {};
         startWsHeartbeatCheck();
         subscribeToSession(state.selectedId);
+        resubscribePooledTerminals();
         flushPendingMessages();
         ensureTerminalFitWithRetry("ws-reconnect");
       };
-      ws.onmessage = function(event) {
+      ws2.onmessage = function(event) {
         state.lastWsMessageAt = Date.now();
         try {
           var msg = JSON.parse(event.data);
@@ -37506,14 +42065,14 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         } catch (e) {
         }
       };
-      ws.onclose = function() {
+      ws2.onclose = function() {
         state.ws = null;
         state.wsConnected = false;
         stopWsHeartbeatCheck();
         scheduleWsReconnect();
       };
-      ws.onerror = function() {
-        ws.close();
+      ws2.onerror = function() {
+        ws2.close();
       };
       return true;
     } catch (e) {
@@ -37530,43 +42089,43 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         }
         if (msg.data && msg.sessionId) {
           var isIncremental = !!msg.data.incremental;
-          var snapshot8 = { id: msg.sessionId };
+          var snapshot9 = { id: msg.sessionId };
           var topicMetadataChanged = false;
           if (!isIncremental && msg.data.output !== void 0) {
-            snapshot8.output = msg.data.output;
+            snapshot9.output = msg.data.output;
           }
           if (Object.prototype.hasOwnProperty.call(msg.data, "permissionBlocked")) {
-            snapshot8.permissionBlocked = !!msg.data.permissionBlocked;
+            snapshot9.permissionBlocked = !!msg.data.permissionBlocked;
           }
           if (Object.prototype.hasOwnProperty.call(msg.data, "queuedMessages")) {
-            snapshot8.queuedMessages = msg.data.queuedMessages || [];
+            snapshot9.queuedMessages = msg.data.queuedMessages || [];
             state.queueEpoch++;
           }
           if (msg.data.structuredState) {
-            snapshot8.structuredState = msg.data.structuredState;
+            snapshot9.structuredState = msg.data.structuredState;
           }
           if (msg.data.sessionKind) {
-            snapshot8.sessionKind = msg.data.sessionKind;
+            snapshot9.sessionKind = msg.data.sessionKind;
           }
           if (Object.prototype.hasOwnProperty.call(msg.data, "title")) {
-            snapshot8.title = msg.data.title;
+            snapshot9.title = msg.data.title;
             topicMetadataChanged = true;
           }
           if (Object.prototype.hasOwnProperty.call(msg.data, "description")) {
-            snapshot8.description = msg.data.description;
+            snapshot9.description = msg.data.description;
             topicMetadataChanged = true;
           }
           if (Object.prototype.hasOwnProperty.call(msg.data, "titleGenerating")) {
-            snapshot8.titleGenerating = !!msg.data.titleGenerating;
+            snapshot9.titleGenerating = !!msg.data.titleGenerating;
             topicMetadataChanged = true;
           }
           if (Object.prototype.hasOwnProperty.call(msg.data, "summary")) {
-            snapshot8.summary = msg.data.summary;
+            snapshot9.summary = msg.data.summary;
           }
           if (msg.data.messages) {
-            snapshot8.messages = msg.data.messages;
-            if (typeof msg.data.messageOffset === "number") snapshot8.messageOffset = msg.data.messageOffset;
-            if (typeof msg.data.messageTotal === "number") snapshot8.messageTotal = msg.data.messageTotal;
+            snapshot9.messages = msg.data.messages;
+            if (typeof msg.data.messageOffset === "number") snapshot9.messageOffset = msg.data.messageOffset;
+            if (typeof msg.data.messageTotal === "number") snapshot9.messageTotal = msg.data.messageTotal;
           } else if (isIncremental && msg.data.lastMessage) {
             var existingSession = state.sessions.find(function(s) {
               return s.id === msg.sessionId;
@@ -37582,28 +42141,28 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
               } else if (baseOffset + msgs.length < expectedCount) {
                 msgs.push(incoming);
               }
-              snapshot8.messages = msgs;
-              if (expectedCount > 0) snapshot8.messageTotal = expectedCount;
+              snapshot9.messages = msgs;
+              if (expectedCount > 0) snapshot9.messageTotal = expectedCount;
             }
           }
-          var isChunkOnly = isIncremental && msg.data.chunk && !msg.data.lastMessage && !snapshot8.messages && snapshot8.output === void 0 && !msg.data.structuredState && !msg.data.sessionKind;
+          var isChunkOnly = isIncremental && msg.data.chunk && !msg.data.lastMessage && !snapshot9.messages && snapshot9.output === void 0 && !msg.data.structuredState && !msg.data.sessionKind;
           if (isChunkOnly) {
             if (msg.data.permissionBlocked !== void 0) {
               var existingPB = state.sessions.find(function(s) {
                 return s.id === msg.sessionId;
               });
               if (existingPB && !!existingPB.permissionBlocked !== !!msg.data.permissionBlocked) {
-                updateSessionSnapshot(snapshot8);
+                updateSessionSnapshot(snapshot9);
                 if (msg.sessionId === state.selectedId) updateTaskDisplay();
               }
             }
-          } else if (snapshot8.output !== void 0 || snapshot8.messages || isIncremental || msg.data.permissionBlocked !== void 0 || snapshot8.title || snapshot8.description || snapshot8.titleGenerating !== void 0) {
-            updateSessionSnapshot(snapshot8);
+          } else if (snapshot9.output !== void 0 || snapshot9.messages || isIncremental || msg.data.permissionBlocked !== void 0 || snapshot9.title || snapshot9.description || snapshot9.titleGenerating !== void 0) {
+            updateSessionSnapshot(snapshot9);
             if (topicMetadataChanged) scheduleSessionListUpdate();
             if (msg.sessionId === state.selectedId) {
               var updatedSession = state.sessions.find(function(s) {
                 return s.id === msg.sessionId;
-              }) || snapshot8;
+              }) || snapshot9;
               state.currentMessages = buildMessagesForRender(updatedSession, getPreferredMessages(updatedSession, updatedSession.output, false));
               updateTaskDisplay();
               if (updatedSession.sessionKind === "structured" || msg.data.sessionKind === "structured") {
@@ -37614,7 +42173,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
             }
           }
         }
-        if (msg.sessionId === state.selectedId && state.terminal && msg.data) {
+        if (msg.sessionId === state.selectedId && state.terminal && msg.data && !hasPooledTerminal(msg.sessionId)) {
           if (msg.data.chunk && isCurrentTerminalSession(msg.sessionId)) {
             state.lastChunkAt = Date.now();
             state.terminalLiveStreamSessions[msg.sessionId] = true;
@@ -37629,6 +42188,15 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
             updateTerminalJumpToBottomButton();
           } else if (!msg.data.incremental && Object.prototype.hasOwnProperty.call(msg.data, "output")) {
             syncTerminalBuffer(msg.sessionId, msg.data.output || "", { mode: "append" });
+          }
+        } else if (msg.data && hasPooledTerminal(msg.sessionId)) {
+          if (msg.data.chunk) {
+            writePooledTerminal(msg.sessionId, String(msg.data.chunk), msg.ptyBytes);
+          } else if (!msg.data.incremental && Object.prototype.hasOwnProperty.call(msg.data, "output")) {
+            replacePooledTerminalOutput(msg.sessionId, String(msg.data.output || ""));
+            if (msg.ptyBytes) state.ws.send(JSON.stringify({ type: "pty_ack", sessionId: msg.sessionId, bytes: msg.ptyBytes }));
+          } else if (msg.ptyBytes) {
+            state.ws.send(JSON.stringify({ type: "pty_ack", sessionId: msg.sessionId, bytes: msg.ptyBytes }));
           }
         } else if (msg.ptyBytes && state.ws && state.ws.readyState === WebSocket.OPEN) {
           state.ws.send(JSON.stringify({ type: "pty_ack", sessionId: msg.sessionId, bytes: msg.ptyBytes }));
@@ -37743,9 +42311,19 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           updateTaskDisplay();
           updateApprovalStats();
           var initOutput = msg.data.output || "";
-          if (!restoreTerminalState(msg.sessionId, msg.data.terminalState, initOutput)) {
+          if (hasPooledTerminal(msg.sessionId)) {
+            if (!restorePooledTerminalState(msg.sessionId, msg.data.terminalState, initOutput)) {
+              replacePooledTerminalOutput(msg.sessionId, initOutput);
+            }
+          } else if (!restoreTerminalState(msg.sessionId, msg.data.terminalState, initOutput)) {
             updateTerminalOutput(initOutput, msg.sessionId, "replace");
             ensureTerminalFitWithRetry("init");
+          }
+        } else if (msg.data && hasPooledTerminal(msg.sessionId)) {
+          updateSessionSnapshot(msg.data);
+          var pooledInitOutput = msg.data.output || "";
+          if (!restorePooledTerminalState(msg.sessionId, msg.data.terminalState, pooledInitOutput)) {
+            replacePooledTerminalOutput(msg.sessionId, pooledInitOutput);
           }
         }
         break;
@@ -38693,14 +43271,14 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         throw new Error(p && p.error || "\u4E2D\u65AD\u5931\u8D25 (key=" + key + ")");
       });
       return res.json();
-    }).then(function(snapshot8) {
-      if (snapshot8 && snapshot8.id) {
-        updateSessionSnapshot(snapshot8);
-        if (snapshot8.id === state.selectedId) {
+    }).then(function(snapshot9) {
+      if (snapshot9 && snapshot9.id) {
+        updateSessionSnapshot(snapshot9);
+        if (snapshot9.id === state.selectedId) {
           var refreshed = state.sessions.find(function(s) {
-            return s.id === snapshot8.id;
-          }) || snapshot8;
-          state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, snapshot8.output, false));
+            return s.id === snapshot9.id;
+          }) || snapshot9;
+          state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, snapshot9.output, false));
           renderChat2(true);
           if (typeof updateQueueBar === "function") updateQueueBar();
         }
@@ -39579,7 +44157,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       if (ackBytes && sessionId) acknowledgePtyOutput(sessionId, ackBytes);
       return Promise.resolve();
     }
-    var text5 = String(data);
+    var text6 = String(data);
     var follow = state.terminalAutoFollow !== false;
     var queue = state.terminalWriteQueue || Promise.resolve();
     state.terminalWriteQueue = queue.catch(function() {
@@ -39590,7 +44168,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           resolve(null);
           return;
         }
-        terminal.write(text5, function() {
+        terminal.write(text6, function() {
           if (follow && terminal === state.terminal) terminal.scrollToBottom();
           if (ackBytes && sessionId) acknowledgePtyOutput(sessionId, ackBytes);
           resolve(null);
@@ -39615,9 +44193,9 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       });
     });
   }
-  function restoreTerminalState(sessionId, snapshot8, fallbackOutput) {
-    if (!snapshot8 || snapshot8.version !== 1) return false;
-    if (sessionId) state.terminalStatesBySession[sessionId] = snapshot8;
+  function restoreTerminalState(sessionId, snapshot9, fallbackOutput) {
+    if (!snapshot9 || snapshot9.version !== 1) return false;
+    if (sessionId) state.terminalStatesBySession[sessionId] = snapshot9;
     if (!state.terminal) return true;
     var terminal = state.terminal;
     var generation = (state.terminalRestoreGeneration || 0) + 1;
@@ -39628,9 +44206,9 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       if (terminal !== state.terminal || generation !== state.terminalRestoreGeneration) return;
       terminal.reset();
       terminal.clear();
-      if (snapshot8.cols > 0 && snapshot8.rows > 0) terminal.resize(snapshot8.cols, snapshot8.rows);
-      await writeTerminalNow(terminal, String(snapshot8.data || ""));
-      var pending = Array.isArray(snapshot8.pending) ? snapshot8.pending : [];
+      if (snapshot9.cols > 0 && snapshot9.rows > 0) terminal.resize(snapshot9.cols, snapshot9.rows);
+      await writeTerminalNow(terminal, String(snapshot9.data || ""));
+      var pending = Array.isArray(snapshot9.pending) ? snapshot9.pending : [];
       for (var i = 0; i < pending.length; i++) {
         var operation = pending[i] || {};
         if (operation.type === "resize" && operation.cols > 0 && operation.rows > 0) {
@@ -39767,6 +44345,10 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       var helperTextarea = termWrap.querySelector(".xterm-helper-textarea");
       if (helperTextarea) helperTextarea.readOnly = !state.terminalInteractive;
       state.terminal = term;
+      try {
+        window.__wandTerminal = term;
+      } catch (e) {
+      }
       state.terminalFitAddon = fitAddon;
       state.terminalWriteQueue = Promise.resolve();
       state.terminalInitializing = false;
@@ -41241,16 +45823,16 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   function openNativeWandDialog(opts) {
     var title = opts.title == null ? "" : String(opts.title);
     var message = opts.message == null ? "" : String(opts.message);
-    var text5 = title && message ? title + "\n\n" + message : title || message;
+    var text6 = title && message ? title + "\n\n" + message : title || message;
     var buttons = Array.isArray(opts.buttons) && opts.buttons.length ? opts.buttons : [{ label: "\u597D", value: true, kind: "primary" }];
     if (opts.input) {
-      return Promise.resolve(window.prompt(text5, opts.inputValue == null ? "" : String(opts.inputValue)));
+      return Promise.resolve(window.prompt(text6, opts.inputValue == null ? "" : String(opts.inputValue)));
     }
     if (buttons.length <= 1) {
-      window.alert(text5);
+      window.alert(text6);
       return Promise.resolve(buttons[0]?.value);
     }
-    var accepted = window.confirm(text5);
+    var accepted = window.confirm(text6);
     if (!accepted) {
       return Promise.resolve(opts.cancelValue !== void 0 ? opts.cancelValue : false);
     }
@@ -41595,9 +46177,9 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   }
   var _progressSyncTimers = {};
   var _PROGRESS_SYNC_DEBOUNCE_MS = 30;
-  function _compactNotificationText(text5) {
-    if (!text5) return "";
-    var t6 = String(text5).replace(/^#+\s+/gm, "").replace(/\*\*/g, "").replace(/`/g, "").trim();
+  function _compactNotificationText(text6) {
+    if (!text6) return "";
+    var t6 = String(text6).replace(/^#+\s+/gm, "").replace(/\*\*/g, "").replace(/`/g, "").trim();
     var firstLine = t6.split("\n")[0].trim();
     if (firstLine.length > 100) firstLine = firstLine.slice(0, 100) + "\u2026";
     return firstLine;
@@ -41825,18 +46407,18 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     var subtitleEl = card.querySelector("#update-card-subtitle");
     var statusEl = card.querySelector("#update-card-status");
     var progressEl = card.querySelector("#update-card-progress");
-    function setStatus(text5, kind) {
+    function setStatus(text6, kind) {
       if (!statusEl) return;
-      statusEl.textContent = text5 || "";
+      statusEl.textContent = text6 || "";
       statusEl.classList.remove("hidden", "error", "success");
-      if (!text5) {
+      if (!text6) {
         statusEl.classList.add("hidden");
         return;
       }
       if (kind) statusEl.classList.add(kind);
     }
-    function setSubtitle(text5) {
-      if (subtitleEl) subtitleEl.textContent = text5 || "";
+    function setSubtitle(text6) {
+      if (subtitleEl) subtitleEl.textContent = text6 || "";
     }
     function setProgress(active) {
       if (!progressEl) return;
@@ -41914,8 +46496,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   // src/web-ui/browser/input.ts
   var voiceState = { recording: false, canceling: false, transcript: "", startY: 0 };
   var VOICE_CANCEL_THRESHOLD = 60;
-  function updateVoiceTranscript(text5) {
-    voiceState.transcript = text5 || "";
+  function updateVoiceTranscript(text6) {
+    voiceState.transcript = text6 || "";
     var textEl = document.getElementById("voice-transcript-text");
     if (textEl) textEl.textContent = voiceState.transcript;
     var bubble = document.getElementById("voice-transcript-bubble");
@@ -41969,10 +46551,10 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     if (e) e.preventDefault();
     voiceState.recording = false;
     var commit = !voiceState.canceling && !!voiceState.transcript.trim();
-    var text5 = voiceState.transcript;
+    var text6 = voiceState.transcript;
     resetVoiceRecordingUI();
     if (commit) {
-      commitVoiceTranscript(text5);
+      commitVoiceTranscript(text6);
     }
   }
   function cancelVoiceRecording(e) {
@@ -41993,9 +46575,9 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     var bubble = document.getElementById("voice-transcript-bubble");
     if (bubble) bubble.classList.add("hidden");
   }
-  function commitVoiceTranscript(text5) {
+  function commitVoiceTranscript(text6) {
     if (state.promptOptimizeRequest && state.promptOptimizeRequest.sessionId === state.selectedId) return;
-    var clean = (text5 || "").trim();
+    var clean = (text6 || "").trim();
     if (!clean) return;
     var box = document.getElementById("input-box");
     if (!box) return;
@@ -42117,24 +46699,24 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     structuredQueueMutationRevisionBySession[sessionId] = next;
     return next;
   }
-  function removeOneQueuedMessage(sessionId, text5, preferredIndex) {
+  function removeOneQueuedMessage(sessionId, text6, preferredIndex) {
     var latestSession = state.sessions.find(function(item) {
       return item.id === sessionId;
     });
     var latestQueue = latestSession && Array.isArray(latestSession.queuedMessages) ? latestSession.queuedMessages.slice() : [];
-    var index2 = typeof preferredIndex === "number" && latestQueue[preferredIndex] === text5 ? preferredIndex : latestQueue.lastIndexOf(text5);
+    var index2 = typeof preferredIndex === "number" && latestQueue[preferredIndex] === text6 ? preferredIndex : latestQueue.lastIndexOf(text6);
     if (index2 >= 0) latestQueue.splice(index2, 1);
     return latestQueue;
   }
-  function stripStaleStructuredQueueSnapshot(snapshot8, sessionId, requestRevision, requestQueueEpoch) {
-    if (!snapshot8 || !snapshot8.queuedMessages) return snapshot8;
+  function stripStaleStructuredQueueSnapshot(snapshot9, sessionId, requestRevision, requestQueueEpoch) {
+    if (!snapshot9 || !snapshot9.queuedMessages) return snapshot9;
     if (getStructuredQueueMutationRevision(sessionId) !== requestRevision || state.queueEpoch > requestQueueEpoch) {
-      delete snapshot8.queuedMessages;
+      delete snapshot9.queuedMessages;
     }
-    return snapshot8;
+    return snapshot9;
   }
-  function continueStructuredSession(session, text5) {
-    var normalizedText2 = typeof text5 === "string" ? text5.trim() : "";
+  function continueStructuredSession(session, text6) {
+    var normalizedText2 = typeof text6 === "string" ? text6.trim() : "";
     if (normalizedText2 && getLastStructuredSubmittedInput(session) === normalizedText2) {
       showToast("\u4E0E\u4E0A\u4E00\u6761\u6D88\u606F\u76F8\u540C\uFF0C\u5DF2\u5FFD\u7565\uFF0C\u4E0D\u4F1A\u52A0\u5165\u6392\u961F\u3002", "warning");
       return Promise.resolve();
@@ -42142,7 +46724,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     var idempotencyKey = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
     var prevQueue = Array.isArray(session.queuedMessages) ? session.queuedMessages.slice() : [];
     var nextQueue = prevQueue.slice();
-    nextQueue.push(text5);
+    nextQueue.push(text6);
     var queueRevision = bumpStructuredQueueMutationRevision(session.id);
     var queueEpoch = state.queueEpoch;
     updateSessionSnapshot({ id: session.id, queuedMessages: nextQueue });
@@ -42154,7 +46736,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
       body: JSON.stringify({
-        input: text5,
+        input: text6,
         idempotencyKey,
         ...supportsClaudeSkillSelection(session) ? { skills: getSelectedClaudeSkills(session) } : {}
       })
@@ -42167,24 +46749,24 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         });
       }
       return res.json();
-    }).then(function(snapshot8) {
-      if (snapshot8 && snapshot8.id) {
-        stripStaleStructuredQueueSnapshot(snapshot8, session.id, queueRevision, queueEpoch);
-        updateSessionSnapshot(snapshot8);
-        if (snapshot8.id === state.selectedId) updateQueueBar();
+    }).then(function(snapshot9) {
+      if (snapshot9 && snapshot9.id) {
+        stripStaleStructuredQueueSnapshot(snapshot9, session.id, queueRevision, queueEpoch);
+        updateSessionSnapshot(snapshot9);
+        if (snapshot9.id === state.selectedId) updateQueueBar();
       }
     }).catch(function(err) {
-      var rollbackQueue = removeOneQueuedMessage(session.id, text5, prevQueue.length);
+      var rollbackQueue = removeOneQueuedMessage(session.id, text6, prevQueue.length);
       bumpStructuredQueueMutationRevision(session.id);
       updateSessionSnapshot({ id: session.id, queuedMessages: rollbackQueue });
       if (session.id === state.selectedId) updateQueueBar();
       showToast(err && err.message || "\u6392\u961F\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5\u3002", "error");
     });
   }
-  function enqueueCrossSessionMessage(text5) {
+  function enqueueCrossSessionMessage(text6) {
     var target = getContinuationTargetSession();
     if (target && isStructuredSession2(target)) {
-      continueStructuredSession(target, text5);
+      continueStructuredSession(target, text6);
       return;
     }
     if (state.crossSessionQueue.length >= 10) {
@@ -42194,7 +46776,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     var id = "csq-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
     state.crossSessionQueue.push({
       id,
-      text: text5,
+      text: text6,
       cwd: getEffectiveCwd(),
       mode: state.chatMode || "managed",
       tool: getPreferredTool(),
@@ -42799,23 +47381,23 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         });
       }
       return res.json();
-    }).then(function(snapshot8) {
-      if (snapshot8 && snapshot8.error) {
-        throw new Error(snapshot8.error);
+    }).then(function(snapshot9) {
+      if (snapshot9 && snapshot9.error) {
+        throw new Error(snapshot9.error);
       }
-      if (snapshot8 && snapshot8.id) {
+      if (snapshot9 && snapshot9.id) {
         stripStaleStructuredQueueSnapshot(
-          snapshot8,
+          snapshot9,
           session.id,
           requestQueueRevision,
           epochBeforePost
         );
-        updateSessionSnapshot(snapshot8);
-        if (snapshot8.id === state.selectedId) {
+        updateSessionSnapshot(snapshot9);
+        if (snapshot9.id === state.selectedId) {
           var refreshedSession = state.sessions.find(function(s) {
-            return s.id === snapshot8.id;
-          }) || snapshot8;
-          state.currentMessages = buildMessagesForRender(refreshedSession, getPreferredMessages(refreshedSession, snapshot8.output, false));
+            return s.id === snapshot9.id;
+          }) || snapshot9;
+          state.currentMessages = buildMessagesForRender(refreshedSession, getPreferredMessages(refreshedSession, snapshot9.output, false));
           renderChat(true);
           updateStructuredQueueCounter();
         }
@@ -42871,18 +47453,18 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       throw error;
     });
   }
-  function updateInputHint(text5) {
+  function updateInputHint(text6) {
     var hint = document.querySelector(".input-hint");
-    if (hint) hint.textContent = text5;
+    if (hint) hint.textContent = text6;
   }
   function updateStructuredQueueCounter() {
     updateQueueBar();
   }
   var QUEUE_BAR_MAX = 10;
   var QUEUE_CHIP_MAX_TEXT = 26;
-  function queueChipTruncate(text5) {
-    if (typeof text5 !== "string") return "";
-    var s = text5.replace(/\s+/g, " ").trim();
+  function queueChipTruncate(text6) {
+    if (typeof text6 !== "string") return "";
+    var s = text6.replace(/\s+/g, " ").trim();
     if (s.length <= QUEUE_CHIP_MAX_TEXT) return s;
     return s.slice(0, QUEUE_CHIP_MAX_TEXT) + "\u2026";
   }
@@ -43050,20 +47632,20 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         });
       }
       return res.json();
-    }).then(function(snapshot8) {
-      if (snapshot8 && snapshot8.id) {
+    }).then(function(snapshot9) {
+      if (snapshot9 && snapshot9.id) {
         stripStaleStructuredQueueSnapshot(
-          snapshot8,
+          snapshot9,
           session.id,
           mutationRevision,
           mutationQueueEpoch
         );
-        updateSessionSnapshot(snapshot8);
-        if (snapshot8.id === state.selectedId) {
+        updateSessionSnapshot(snapshot9);
+        if (snapshot9.id === state.selectedId) {
           var refreshed = state.sessions.find(function(s) {
-            return s.id === snapshot8.id;
-          }) || snapshot8;
-          state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, snapshot8.output, false));
+            return s.id === snapshot9.id;
+          }) || snapshot9;
+          state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, snapshot9.output, false));
           renderChat(true);
           updateQueueBar();
         }
@@ -43352,8 +47934,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       });
     });
   }
-  function getTerminalSubmitChunks(session, text5) {
-    return [text5, String.fromCharCode(13)];
+  function getTerminalSubmitChunks(session, text6) {
+    return [text6, String.fromCharCode(13)];
   }
   function sendTerminalChunks(chunks, shortcutKey, delayMs, viewOverride, sessionId) {
     var sequence = Array.isArray(chunks) ? chunks.filter(function(chunk) {
@@ -43472,17 +48054,17 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         });
       }
       return res.json();
-    }).then(function(snapshot8) {
-      if (snapshot8 && snapshot8.id) {
-        updateSessionSnapshot(snapshot8);
-        if (snapshot8.id === state.selectedId) {
-          if (snapshot8.messages && snapshot8.messages.length > 0) {
-            state.currentMessages = snapshot8.messages;
+    }).then(function(snapshot9) {
+      if (snapshot9 && snapshot9.id) {
+        updateSessionSnapshot(snapshot9);
+        if (snapshot9.id === state.selectedId) {
+          if (snapshot9.messages && snapshot9.messages.length > 0) {
+            state.currentMessages = snapshot9.messages;
           }
           renderChat(true);
         }
       }
-      return snapshot8;
+      return snapshot9;
     });
   }
   function getSelectedSession() {
@@ -43581,8 +48163,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   function getPtySpecialSequence(key) {
     return ptySpecialKeyMap[key] || "";
   }
-  function getCtrlSequence(text5) {
-    var lower = text5.toLowerCase();
+  function getCtrlSequence(text6) {
+    var lower = text6.toLowerCase();
     if (lower >= "a" && lower <= "z") {
       return String.fromCharCode(lower.charCodeAt(0) - 96);
     }
@@ -43832,14 +48414,14 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     var mapped = getControlInput(key);
     if (mapped) return mapped;
     if (!key) return "";
-    var text5 = key.length === 1 ? key : "";
-    if (!text5) return "";
-    if (mods.shift) text5 = text5.toUpperCase();
+    var text6 = key.length === 1 ? key : "";
+    if (!text6) return "";
+    if (mods.shift) text6 = text6.toUpperCase();
     if (mods.ctrl) {
-      return getCtrlSequence(text5);
+      return getCtrlSequence(text6);
     }
-    if (mods.alt) return String.fromCharCode(27) + text5;
-    return text5;
+    if (mods.alt) return String.fromCharCode(27) + text6;
+    return text6;
   }
   function clearModifiers() {
     state.modifiers.ctrl = false;
@@ -43951,17 +48533,17 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         });
       }
       return res.json();
-    }).then(function(snapshot8) {
-      if (snapshot8 && snapshot8.id) {
-        updateSessionSnapshot(snapshot8);
-        if (snapshot8.id === state.selectedId) {
-          if (snapshot8.messages && snapshot8.messages.length > 0) {
-            state.currentMessages = snapshot8.messages;
+    }).then(function(snapshot9) {
+      if (snapshot9 && snapshot9.id) {
+        updateSessionSnapshot(snapshot9);
+        if (snapshot9.id === state.selectedId) {
+          if (snapshot9.messages && snapshot9.messages.length > 0) {
+            state.currentMessages = snapshot9.messages;
           }
           renderChat(true);
         }
       }
-      return snapshot8;
+      return snapshot9;
     });
   }
   function stopSession() {
@@ -44594,8 +49176,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   }
   function extractPtySystemInfo(output, messages) {
     if (!output || !messages || messages.length === 0) return [];
-    function stripAnsi2(text5) {
-      return text5.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "");
+    function stripAnsi2(text6) {
+      return text6.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "");
     }
     var clean = stripAnsi2(output);
     var systemInfo = [];
@@ -45255,8 +49837,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       btn.textContent = "\u590D\u5236";
       btn.addEventListener("click", function(e) {
         e.stopPropagation();
-        var text5 = bubble.innerText || bubble.textContent || "";
-        copyToClipboard(text5.trim(), null, function() {
+        var text6 = bubble.innerText || bubble.textContent || "";
+        copyToClipboard(text6.trim(), null, function() {
           btn.textContent = "\u5DF2\u590D\u5236";
           btn.classList.add("copied");
           setTimeout(function() {
@@ -45359,15 +49941,15 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     if (/^[<>│┆╎].*[<>│┆╎]$/.test(trimmed) && trimmed.length < 8) return true;
     return false;
   }
-  function stripAnsi(text5) {
-    return String(text5 || "").replace(/\x1b\][^\x07]*(\x07|\x1b\\)/g, "").replace(/\x1b\[(\d+)C/g, function(_match, count3) {
+  function stripAnsi(text6) {
+    return String(text6 || "").replace(/\x1b\][^\x07]*(\x07|\x1b\\)/g, "").replace(/\x1b\[(\d+)C/g, function(_match, count3) {
       return " ".repeat(Number(count3) || 1);
     }).replace(/\x1b\[[0-9;?]*[AB]/g, "\n").replace(/\x1b\[[0-9;?]*[su]/g, "").replace(/\x1b\[[0-9;?]*[HfJKr]/g, "\n").replace(/\x1bM/g, "\n").replace(/\x1b\[[0-9;?]*[ST]/g, "\n").replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "").replace(/\x1b[><=ePX^_]/g, "").replace(/[\u00a0\u200b-\u200d\ufeff]/g, " ").replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "").replace(/\r\n?/g, "\n").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n");
   }
   function parseMessages(output, command) {
     var messages = [];
     if (!output) return messages;
-    var text5 = String(output || "");
+    var text6 = String(output || "");
     var newline = String.fromCharCode(10);
     var carriageReturn = String.fromCharCode(13);
     var esc = String.fromCharCode(27);
@@ -45492,7 +50074,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       var codexActivityRe = /^(?:thinking|working|running|planning|applying|reading|searching|inspecting|reviewing|summarizing|editing|updating|writing|completed)\b/i;
       var rawCandidates = [];
       var candidateOrder = 0;
-      var rawSegments = text5.replace(/\r\n?/g, newline).split(newline);
+      var rawSegments = text6.replace(/\r\n?/g, newline).split(newline);
       for (var rs = 0; rs < rawSegments.length; rs++) {
         var cleanedSegment = stripCodexSegment2(rawSegments[rs]);
         var pieces = cleanedSegment.split(newline);
@@ -45528,7 +50110,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       var echoCandidates = candidates.filter(function(candidate) {
         return candidate.kind === "echo";
       });
-      var strippedOutput = stripAnsi(text5);
+      var strippedOutput = stripAnsi(text6);
       var strippedLines = strippedOutput.split(newline).map(function(line2) {
         return String(line2 || "").trimEnd();
       });
@@ -45594,7 +50176,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       nbsp + "|" + carriageReturn,
       "g"
     );
-    var ansiStripped = text5.replace(
+    var ansiStripped = text6.replace(
       ansiRegex,
       function(m) {
         return m === nbsp ? " " : m === carriageReturn ? newline : "";
@@ -45866,9 +50448,9 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     return getActiveLang() === "English" ? "Subtask" : "\u5B50\u4EFB\u52A1";
   }
   function catPrefixedSubagentName(name) {
-    var text5 = String(name || "").trim();
-    if (!text5) return "\u732B\u732B\u5B50 Agent";
-    return text5.indexOf("\u732B\u732B") === 0 ? text5 : "\u732B\u732B " + text5;
+    var text6 = String(name || "").trim();
+    if (!text6) return "\u732B\u732B\u5B50 Agent";
+    return text6.indexOf("\u732B\u732B") === 0 ? text6 : "\u732B\u732B " + text6;
   }
   function getSubagentDisplayName(sub) {
     var base = getSubagentBaseName(sub);
@@ -45882,9 +50464,9 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   }
   function renderSubagentReplyBubble(block, role) {
     if (!block || block.type !== "tool_result") return "";
-    var text5 = extractToolResultText(block.content);
+    var text6 = extractToolResultText(block.content);
     var isError = block.is_error === true;
-    var rawText = typeof text5 === "string" ? text5 : text5 == null ? "" : String(text5);
+    var rawText = typeof text6 === "string" ? text6 : text6 == null ? "" : String(text6);
     if (!isError && !rawText.trim()) {
       return '<div class="subagent-reply pending"><span class="subagent-reply-marker pending">' + escapeHtml(t("subagent.running")) + '</span><span class="typing-indicator"><span></span><span></span><span></span></span></div>';
     }
@@ -46004,7 +50586,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         continue;
       }
       if (isGroupableToolBlock(block)) {
-        var run2 = [{ block, index: i }];
+        var run3 = [{ block, index: i }];
         var j = i + 1;
         while (j < content.length) {
           if (content[j].type === "tool_result") {
@@ -46012,14 +50594,14 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
             continue;
           }
           if (isGroupableToolBlock(content[j])) {
-            run2.push({ block: content[j], index: j });
+            run3.push({ block: content[j], index: j });
             j++;
           } else {
             break;
           }
         }
-        if (run2.length >= 2) {
-          groups.push({ type: "group", items: run2, endIndex: j });
+        if (run3.length >= 2) {
+          groups.push({ type: "group", items: run3, endIndex: j });
         } else {
           groups.push({ type: "single", block, index: i });
         }
@@ -46136,8 +50718,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         else if (block.text) pushText(block.text);
       }
     }
-    var text5 = parts.join(" \xB7 ");
-    return text5.length > 180 ? text5.slice(0, 177) + "..." : text5;
+    var text6 = parts.join(" \xB7 ");
+    return text6.length > 180 ? text6.slice(0, 177) + "..." : text6;
   }
   function applyHistoryCollapse(chatMessages, selectedSession) {
     if (!chatMessages) return;
@@ -46449,8 +51031,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     }
     return '<div class="user-attachment-file" data-path="' + escapeHtml(p) + `" onclick="event.stopPropagation(); if(window.__openFilePreview)window.__openFilePreview(this.getAttribute('data-path'));"><span class="user-attachment-file-icon"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 1.5H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5.5L9 1.5z"/><path d="M9 1.5V5.5h4"/></svg></span><span class="user-attachment-file-name">` + escapeHtml(name) + "</span></div>";
   }
-  function renderUserText(text5) {
-    var raw = text5 || "";
+  function renderUserText(text6) {
+    var raw = text6 || "";
     var m = raw.match(ATTACHMENT_PREFIX_RE);
     if (!m) return escapeHtml(raw);
     var attachHtml = "";
@@ -46944,10 +51526,10 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     }
     return null;
   }
-  function formatAssistantResponse(text5) {
-    if (!text5) return "";
+  function formatAssistantResponse(text6) {
+    if (!text6) return "";
     var newline = String.fromCharCode(10);
-    var lines = text5.split(newline);
+    var lines = text6.split(newline);
     var cleanLines = [];
     var started = false;
     for (var i = 0; i < lines.length; i++) {
@@ -47037,10 +51619,10 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     }
     return out.join(NL);
   }
-  function renderMarkdown(text5) {
-    if (!text5) return "";
+  function renderMarkdown(text6) {
+    if (!text6) return "";
     var markdownLinks = [];
-    var result = escapeHtml(stashMarkdownLinks(String(text5)));
+    var result = escapeHtml(stashMarkdownLinks(String(text6)));
     var bt = String.fromCharCode(96);
     var newline = String.fromCharCode(10);
     function serverFilePathFromLink(target) {
@@ -47331,7 +51913,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     "failed"
   ]);
   var activeInstallation = null;
-  function isRecord6(value) {
+  function isRecord8(value) {
     return !!value && typeof value === "object" && !Array.isArray(value);
   }
   function optionalText(value) {
@@ -47346,8 +51928,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     if (!session) return null;
     const sessionId = optionalText(session.id);
     if (!sessionId) return null;
-    const worktree = isRecord6(session.worktree) ? session.worktree : {};
-    const mergeInfo = isRecord6(session.worktreeMergeInfo) ? session.worktreeMergeInfo : {};
+    const worktree = isRecord8(session.worktree) ? session.worktree : {};
+    const mergeInfo = isRecord8(session.worktreeMergeInfo) ? session.worktreeMergeInfo : {};
     const sourceBranch = optionalText(worktree.branch) ?? optionalText(session.worktreeBranch);
     const worktreePath = optionalText(worktree.path) ?? optionalText(session.worktreePath);
     const targetBranch = optionalText(mergeInfo.targetBranch);
@@ -47383,12 +51965,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   }
   function createRuntime(dependencies) {
     return {
-      onOpen(context) {
+      onOpen(context2) {
         closeCompetingReactOverlays2();
-        dependencies.onOpen?.(context);
+        dependencies.onOpen?.(context2);
       },
-      onClose(context) {
-        dependencies.onClose?.(context);
+      onClose(context2) {
+        dependencies.onClose?.(context2);
       },
       onRepositoryChanged(sessionId) {
         refreshSessions(dependencies, sessionId);
@@ -47427,15 +52009,15 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   }
   function openWorktreeMergeNow(installation, normalizedId, intent) {
     if (!closeCompetingReactOverlays2()) return false;
-    const context = buildWorktreeMergeOpenContext(
+    const context2 = buildWorktreeMergeOpenContext(
       installation.dependencies.getSession(normalizedId),
       intent
     );
-    if (!context) {
+    if (!context2) {
       installation.dependencies.toast("\u672A\u627E\u5230\u53EF\u64CD\u4F5C\u7684 worktree \u4F1A\u8BDD\u3002", "error");
       return false;
     }
-    if (worktreeMergeController.open(context)) return true;
+    if (worktreeMergeController.open(context2)) return true;
     installation.dependencies.toast("Worktree \u5408\u5E76\u754C\u9762\u5C1A\u672A\u5C31\u7EEA\uFF0C\u8BF7\u5237\u65B0\u540E\u91CD\u8BD5\u3002", "error");
     return false;
   }
@@ -48499,12 +53081,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     updateInteractiveControls2();
     notifyLegacyUiChange("shell:view");
   }
-  function updateSessionSnapshot(snapshot8) {
-    if (!snapshot8 || !snapshot8.id) return;
+  function updateSessionSnapshot(snapshot9) {
+    if (!snapshot9 || !snapshot9.id) return;
     var currentSession = state.sessions.find(function(session) {
-      return session.id === snapshot8.id;
+      return session.id === snapshot9.id;
     }) || null;
-    var normalizedSnapshot = normalizeStructuredSnapshot(snapshot8, currentSession);
+    var normalizedSnapshot = normalizeStructuredSnapshot(snapshot9, currentSession);
     if (Array.isArray(normalizedSnapshot.messages) && typeof normalizedSnapshot.messageOffset === "number") {
       var mw = mergeWindowedMessages(currentSession, normalizedSnapshot.messages, normalizedSnapshot.messageOffset, normalizedSnapshot.messageTotal);
       normalizedSnapshot.messages = mw.messages;
@@ -48542,6 +53124,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     if (!sessionId || !state.ws || state.ws.readyState !== WebSocket.OPEN) return;
     state.ws.send(JSON.stringify({
       type: "subscribe",
+      mode: hasPooledTerminal(sessionId) ? "add" : "replace",
       sessionId,
       capabilities: { ptyAck: true }
     }));
@@ -49163,13 +53746,13 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   function hideCollapsedTileBubble() {
     if (collapsedTileBubbleEl) collapsedTileBubbleEl.classList.remove("visible");
   }
-  function showCollapsedTileBubble(tile, text5) {
-    if (!text5) {
+  function showCollapsedTileBubble(tile, text6) {
+    if (!text6) {
       hideCollapsedTileBubble();
       return;
     }
     var bubble = ensureCollapsedTileBubble();
-    bubble.textContent = text5.length > 400 ? text5.slice(0, 400) + "\u2026" : text5;
+    bubble.textContent = text6.length > 400 ? text6.slice(0, 400) + "\u2026" : text6;
     var rect = tile.getBoundingClientRect();
     bubble.classList.add("visible");
     var bubbleRect = bubble.getBoundingClientRect();
@@ -49209,12 +53792,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       hideCollapsedTileBubble();
       return;
     }
-    var text5 = getCollapsedTileBubbleText(tile);
-    if (!text5) {
+    var text6 = getCollapsedTileBubbleText(tile);
+    if (!text6) {
       hideCollapsedTileBubble();
       return;
     }
-    showCollapsedTileBubble(tile, text5);
+    showCollapsedTileBubble(tile, text6);
   }
   function handleCollapsedTileLeave(event) {
     var related = event.relatedTarget;
@@ -49359,8 +53942,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     if (!prepareFilePreviewForCompetingOverlay(openSettingsModalNow)) return;
     openSettingsModalNow();
   }
-  function copyToClipboard(text5, triggerBtn, successCallback) {
-    if (!text5) return;
+  function copyToClipboard(text6, triggerBtn, successCallback) {
+    if (!text6) return;
     function onSuccess() {
       _vibrate("light");
       if (successCallback) {
@@ -49377,16 +53960,16 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     }
     if (_hasNativeBridge && typeof WandNative.copyToClipboard === "function") {
       try {
-        if (WandNative.copyToClipboard(text5) === "ok") {
+        if (WandNative.copyToClipboard(text6) === "ok") {
           onSuccess();
           return;
         }
       } catch (_e) {
       }
     }
-    navigator.clipboard.writeText(text5).then(onSuccess).catch(function() {
+    navigator.clipboard.writeText(text6).then(onSuccess).catch(function() {
       var ta = document.createElement("textarea");
-      ta.value = text5;
+      ta.value = text6;
       ta.style.position = "fixed";
       ta.style.opacity = "0";
       document.body.appendChild(ta);
@@ -49494,15 +54077,66 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         showToast(data.error, "error");
         return;
       }
-      state.selectedId = data.id;
+      var sessionId = String(data.id);
+      if (state.selectedId !== sessionId) teardownTerminal();
+      state.selectedId = sessionId;
       persistSelectedId();
-      state.drafts[data.id] = "";
+      state.drafts[sessionId] = "";
       resetChatRenderCache();
-      return refreshAll();
+      return Promise.resolve(refreshAll()).then(function() {
+        selectSession(sessionId);
+      });
     }).then(function() {
       focusInputBox2(true);
     }).catch(function() {
       showToast("\u65E0\u6CD5\u542F\u52A8\u4F1A\u8BDD\u3002", "error");
+    });
+  }
+  function startSessionInCwd(cwd, options) {
+    var provider = options && options.provider || getPreferredTool();
+    var command = provider === "qoder" ? "qodercli" : provider;
+    var defaultMode = getSafeModeForTool2(provider, state.config && state.config.defaultMode ? state.config.defaultMode : "default");
+    state.preferredCommand = provider;
+    state.chatMode = getSafeModeForTool2(provider, state.chatMode);
+    var body = withTerminalDimensions({
+      command,
+      provider,
+      cwd,
+      mode: defaultMode,
+      sessionSource: "interactive"
+    });
+    if (options && options.workspaceId) body.workspaceId = options.workspaceId;
+    if (options && options.workspaceTaskId) body.workspaceTaskId = options.workspaceTaskId;
+    return ensureTerminalReady().then(function() {
+      return fetch("/api/commands", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify(body)
+      });
+    }).then(function(res) {
+      return res.json();
+    }).then(function(data) {
+      if (data.error) {
+        throw new Error(String(data.error));
+      }
+      if (!data.id) throw new Error("\u670D\u52A1\u7AEF\u672A\u8FD4\u56DE\u65B0\u4F1A\u8BDD ID\u3002");
+      var sessionId = String(data.id);
+      if (state.selectedId !== sessionId) teardownTerminal();
+      state.selectedId = sessionId;
+      persistSelectedId();
+      state.drafts[sessionId] = "";
+      resetChatRenderCache();
+      return Promise.resolve(refreshAll()).then(function() {
+        selectSession(sessionId);
+        return sessionId;
+      });
+    }).then(function(sessionId) {
+      focusInputBox2(true);
+      return sessionId;
+    }).catch(function(error) {
+      showToast(error && error.message ? error.message : "\u65E0\u6CD5\u542F\u52A8\u4F1A\u8BDD\u3002", "error");
+      throw error;
     });
   }
   function handleInputBoxKeydown(event) {
@@ -50081,11 +54715,11 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
   function renderTailMarqueePath(value, className, attrs) {
-    var text5 = String(value || "");
-    var separator = Math.max(text5.lastIndexOf("/"), text5.lastIndexOf("\\"));
-    var prefix = separator >= 0 ? text5.slice(0, separator + 1) : "";
-    var leaf = separator >= 0 ? text5.slice(separator + 1) : text5;
-    return '<span class="' + className + ' tail-marquee-path" title="' + escapeHtml(text5) + '"' + (attrs || "") + '><span class="tail-marquee-path-inner"><span class="tail-marquee-prefix">' + escapeHtml(prefix) + '</span><span class="tail-marquee-leaf">' + escapeHtml(leaf) + "</span></span></span>";
+    var text6 = String(value || "");
+    var separator = Math.max(text6.lastIndexOf("/"), text6.lastIndexOf("\\"));
+    var prefix = separator >= 0 ? text6.slice(0, separator + 1) : "";
+    var leaf = separator >= 0 ? text6.slice(separator + 1) : text6;
+    return '<span class="' + className + ' tail-marquee-path" title="' + escapeHtml(text6) + '"' + (attrs || "") + '><span class="tail-marquee-path-inner"><span class="tail-marquee-prefix">' + escapeHtml(prefix) + '</span><span class="tail-marquee-leaf">' + escapeHtml(leaf) + "</span></span></span>";
   }
   var IMAGE_PATH_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico|heic|heif)$/i;
   function isImagePath(value) {
@@ -50126,12 +54760,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   }
   function setTailMarqueePathText(el, value) {
     if (!el) return;
-    var text5 = String(value || "");
+    var text6 = String(value || "");
     var inner = el.querySelector && el.querySelector(".tail-marquee-path-inner");
     if (inner) {
-      var separator = Math.max(text5.lastIndexOf("/"), text5.lastIndexOf("\\"));
-      var prefix = separator >= 0 ? text5.slice(0, separator + 1) : "";
-      var leaf = separator >= 0 ? text5.slice(separator + 1) : text5;
+      var separator = Math.max(text6.lastIndexOf("/"), text6.lastIndexOf("\\"));
+      var prefix = separator >= 0 ? text6.slice(0, separator + 1) : "";
+      var leaf = separator >= 0 ? text6.slice(separator + 1) : text6;
       inner.textContent = "";
       var prefixEl = document.createElement("span");
       prefixEl.className = "tail-marquee-prefix";
@@ -50140,8 +54774,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       leafEl.className = "tail-marquee-leaf";
       leafEl.textContent = leaf;
       inner.append(prefixEl, leafEl);
-    } else el.textContent = text5;
-    if (el.setAttribute) el.setAttribute("title", text5);
+    } else el.textContent = text6;
+    if (el.setAttribute) el.setAttribute("title", text6);
     scrollPathElementToEnd(el);
   }
   function scrollInputToEnd(input) {
@@ -50372,6 +55006,9 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       openMissions: () => {
         missionsController.open();
       },
+      openNewProject: (cwd) => {
+        workspacesController.open(cwd);
+      },
       quickStartClaudeTerminal: () => quickStart("claude"),
       quickStartCodexTerminal: () => quickStart("codex"),
       quickStartOpenCodeTerminal: () => quickStart("opencode"),
@@ -50462,6 +55099,153 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     });
   }
 
+  // src/web-ui/browser/workspaces-adapter.ts
+  var uninstall2 = null;
+  function installWorkspacesLegacyAdapter() {
+    if (uninstall2) return;
+    uninstall2 = configureWorkspacesRuntime({
+      onOpen() {
+        closeReactOverlays(["workspaces"]);
+        dismissDrawerIfOverlay();
+      },
+      onClose() {
+      },
+      effectiveCwd: getEffectiveCwd,
+      openWorkspace(workspace) {
+        state.activeWorkspaceId = workspace.id;
+        state.activeWorkspaceTaskId = null;
+        try {
+          localStorage.setItem("wand-active-workspace", workspace.id);
+        } catch (e) {
+        }
+        notifyLegacyUiChange("workspace:open");
+        setActiveWorkspaceContext({
+          workspaceId: workspace.id,
+          workspaceName: workspace.name,
+          taskId: null,
+          taskName: "",
+          cwd: workspace.cwd,
+          provider: workspace.defaultProvider,
+          layout: null
+        });
+      },
+      closeWorkspace() {
+        state.activeWorkspaceId = null;
+        state.activeWorkspaceTaskId = null;
+        try {
+          localStorage.removeItem("wand-active-workspace");
+        } catch (e) {
+        }
+        clearActiveWorkspaceContext();
+        notifyLegacyUiChange("workspace:close");
+      },
+      refreshSessions: refreshAll,
+      openTask(payload) {
+        state.activeWorkspaceId = payload.workspaceId;
+        state.activeWorkspaceTaskId = payload.taskId;
+        try {
+          localStorage.setItem("wand-active-workspace", payload.workspaceId);
+        } catch (e) {
+        }
+        notifyLegacyUiChange("workspace:open");
+        setActiveWorkspaceContext({
+          workspaceId: payload.workspaceId,
+          workspaceName: payload.workspaceName,
+          taskId: payload.taskId,
+          taskName: payload.taskName,
+          cwd: payload.cwd,
+          provider: payload.provider,
+          layout: null
+        });
+        void httpWorkspacesRepository.getTask(payload.taskId).then(async (detail) => {
+          if (!detail) return;
+          const sessionIds = orderWorkspaceSessions(detail.sessions).map((session) => session.id);
+          if (sessionIds.length > 0) {
+            const preferred = state.selectedId && sessionIds.includes(state.selectedId) ? state.selectedId : sessionIds[0];
+            const layout = reconcileTaskWindowLayout(detail.layout, sessionIds, preferred);
+            const active = activeWorkWindowTab(layout);
+            if (active?.kind === "session") selectSession(active.sessionId);
+            setActiveWorkspaceContext({ layout });
+            void httpWorkspacesRepository.saveTaskLayout(payload.taskId, layout).catch(() => {
+            });
+          } else {
+            const sessionId = await startSessionInCwd(payload.cwd, {
+              workspaceId: payload.workspaceId,
+              workspaceTaskId: payload.taskId,
+              provider: payload.provider
+            });
+            if (typeof sessionId === "string" && sessionId) {
+              const layout = reconcileTaskWindowLayout(null, [sessionId], sessionId);
+              setActiveWorkspaceContext({ layout });
+              void httpWorkspacesRepository.saveTaskLayout(payload.taskId, layout).catch(() => {
+              });
+            }
+          }
+          dismissDrawerIfOverlay();
+        }).catch(() => {
+        });
+      },
+      newTaskSession(payload) {
+        return startSessionInCwd(payload.cwd, {
+          workspaceId: payload.workspaceId,
+          workspaceTaskId: payload.taskId,
+          provider: payload.provider
+        });
+      },
+      saveTaskLayout(layout) {
+        const taskId = state.activeWorkspaceTaskId;
+        const nextWindow = activeWorkWindow(layout);
+        if (nextWindow?.layout.type !== "split") disposeAllPooledTerminals();
+        setActiveWorkspaceContext({ layout });
+        if (!taskId) return;
+        return httpWorkspacesRepository.saveTaskLayout(taskId, layout).catch(() => {
+        });
+      },
+      async closeTaskSessions(sessionIds, scope) {
+        const ids = [...new Set(sessionIds.filter(Boolean))];
+        if (ids.length === 0) return true;
+        const isWindow = scope === "window";
+        const confirmed = await confirmDelete(
+          isWindow && ids.length > 1 ? `\u5173\u95ED\u8FD9\u4E2A\u5DE5\u4F5C\u7A97\u53E3\uFF1F\u5176\u4E2D\u7684 ${ids.length} \u4E2A\u7EC8\u7AEF\u4F1A\u8BDD\u4F1A\u7ED3\u675F\u5E76\u88AB\u5220\u9664\u3002` : "\u5173\u95ED\u8FD9\u4E2A\u7EC8\u7AEF\uFF1F\u5F53\u524D\u4F1A\u8BDD\u4F1A\u7ED3\u675F\u5E76\u88AB\u5220\u9664\u3002",
+          {
+            title: isWindow ? "\u5173\u95ED\u5DE5\u4F5C\u7A97\u53E3" : "\u5173\u95ED\u7EC8\u7AEF",
+            okLabel: "\u5173\u95ED"
+          }
+        );
+        if (!confirmed) return false;
+        try {
+          await httpWorkspacesRepository.deleteSessions(ids);
+          ids.forEach((sessionId) => disposePooledTerminal(sessionId));
+          await refreshAll();
+          return true;
+        } catch (error) {
+          await refreshAll().catch(() => {
+          });
+          showToast(error instanceof Error ? error.message : "\u65E0\u6CD5\u5173\u95ED\u7EC8\u7AEF\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002", "danger");
+          return false;
+        }
+      },
+      mountSessionTerminal(sessionId, container) {
+        return createPooledTerminal(sessionId, container);
+      },
+      unmountSessionTerminal(sessionId) {
+        disposePooledTerminal(sessionId);
+      },
+      getSessionTerminalScale(sessionId) {
+        return getPooledTerminalScale(sessionId);
+      },
+      setSessionTerminalScale(sessionId, scale) {
+        return setPooledTerminalScale(sessionId, scale);
+      },
+      disposeAllSessionTerminals() {
+        disposeAllPooledTerminals();
+      },
+      toast(message, tone) {
+        showToast(message, tone);
+      }
+    });
+  }
+
   // src/web-ui/browser/main.ts
   installSettingsRuntimeBridge();
   configureBrowserShellCommands(createBrowserShellCommands());
@@ -50507,6 +55291,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   startReactUi();
   installNewSessionLegacyAdapter();
   installMissionsLegacyAdapter();
+  installWorkspacesLegacyAdapter();
   installFolderPickerLegacyAdapter();
   installWorktreeMergeLegacyAdapter({
     getSession(sessionId) {

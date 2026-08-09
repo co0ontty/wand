@@ -80,6 +80,10 @@ interface CreateStructuredSessionOptions {
   thinkingEffort?: SessionSnapshot["thinkingEffort"];
   sessionSource?: SessionSource;
   automationId?: string;
+  /** 所属工作空间 ID（多标签 / 分屏项目）。 */
+  workspaceId?: string;
+  /** 所属工作空间任务 ID（任务 = 独立 worktree + 一组标签）。 */
+  workspaceTaskId?: string;
   /**
    * 恢复用的初始会话 id：
    *   - Codex：历史 thread id，首条消息即 `codex exec ... resume <id>` 续接。
@@ -646,6 +650,8 @@ export class StructuredSessionManager {
       sessionKind: "structured",
       sessionSource: options.sessionSource ?? "interactive",
       automationId: options.automationId,
+      workspaceId: options.workspaceId,
+      workspaceTaskId: options.workspaceTaskId,
       provider,
       runner,
       command:

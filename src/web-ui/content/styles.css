@@ -596,17 +596,10 @@
       margin-right: 0;
     }
     .is-wand-embed-terminal .terminal-container {
-      margin: 0;
-      border-radius: 0;
-      border: 0;
-      border-left: 0;
-      border-right: 0;
       background: var(--embed-pty-bg);
-      box-shadow: none;
     }
     .is-wand-embed-terminal .terminal-container:focus-within,
     .is-wand-embed-terminal .terminal-container.interactive {
-      border-color: transparent;
       box-shadow: none;
     }
     .is-wand-embed-terminal .terminal-container::after,
@@ -3117,15 +3110,11 @@
       overflow: hidden;
       min-height: 0;
       min-width: 0;
-      margin: 0 6px 6px;
-      border-radius: var(--radius-md);
-      border: 1px solid rgba(140, 110, 85, 0.35);
-      box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.06),
-        0 8px 32px rgba(0, 0, 0, 0.35),
-        0 2px 8px rgba(0, 0, 0, 0.2);
+      margin: 0;
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
       position: relative;
-      transition: border-color var(--transition-normal), box-shadow var(--transition-normal);
     }
 
     .terminal-container.active {
@@ -3190,7 +3179,10 @@
       padding: 12px;
     }
 
+    /* Override xterm's hard-coded black viewport so terminal padding and
+       scrollback share the same surface. */
     .terminal-scroll-wrap .xterm-viewport {
+      background-color: transparent;
       scrollbar-width: none;
     }
 
@@ -3276,11 +3268,7 @@
     }
 
     .terminal-container:focus-within {
-      border-color: rgba(197, 101, 61, 0.5);
-      box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.08),
-        0 8px 32px rgba(0, 0, 0, 0.4),
-        0 0 0 2px rgba(197, 101, 61, 0.15);
+      box-shadow: inset 0 2px 0 var(--border-focus);
     }
 
     .terminal-resize-handle {
@@ -3323,11 +3311,7 @@
 
     /* ===== 终端交互模式指示器 ===== */
     .terminal-container.interactive {
-      border-color: rgba(79, 122, 88, 0.55);
-      box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.06),
-        0 0 0 2px rgba(79, 122, 88, 0.25),
-        0 8px 32px rgba(0, 0, 0, 0.35);
+      box-shadow: inset 0 2px 0 rgba(79, 122, 88, 0.55);
     }
 
     .terminal-container.interactive::before {
@@ -3504,12 +3488,6 @@
         0 10px 26px rgba(184, 92, 55, 0.36),
         inset 0 1px 0 rgba(255, 255, 255, 0.18),
         0 0 0 3px rgba(214, 123, 82, 0.35);
-    }
-
-    /* Terminal interactive mode indicator */
-    .terminal-container.interactive {
-      border-color: rgba(79, 122, 88, 0.5);
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 0 0 2px rgba(79, 122, 88, 0.25), var(--shadow-soft);
     }
 
     /* Mini keyboard FAB button */
@@ -9760,7 +9738,6 @@
         width: min(300px, calc(100vw - 20px));
         top: 0;
       }
-      .terminal-container { margin: 0 6px 6px; min-height: 0; }
       .btn { min-height: 40px; }
       .btn-sm { min-height: 36px; padding: 0 10px; font-size: 0.75rem; height: 36px; }
       .btn-icon { width: 36px; height: 36px; min-height: 36px; }
@@ -10174,11 +10151,6 @@
     @media (min-width: 391px) and (max-width: 420px) {
       /* 继承 max-width: 640px 的样式，此处仅做微调 */
 
-      .terminal-container {
-        margin: 0 6px 6px;
-        padding: 6px;
-      }
-
       .input-panel {
         padding: 6px 10px;
         padding-bottom: calc(8px + var(--input-safe-bottom, var(--safe-bottom, 0px)));
@@ -10198,11 +10170,6 @@
       .terminal-info { display: none; }
 
 
-
-      .terminal-container {
-        margin: 0 4px 4px;
-        padding: 4px;
-      }
 
       .input-panel {
         padding: 5px 6px;
@@ -10270,8 +10237,6 @@
 
       .terminal-container {
         min-height: 55vh;
-        margin: 6px;
-        padding: 8px;
       }
 
       .chat-container {
@@ -14615,21 +14580,15 @@
     }
 
     html:not(.is-wand-app) .terminal-container {
-      margin-bottom: 4px;
-      border-color: rgba(140, 110, 85, 0.28);
-      border-radius: 10px;
       background: var(--bg-terminal);
-      box-shadow: none;
     }
 
     html:not(.is-wand-app) .terminal-container:focus-within {
-      border-color: color-mix(in srgb, var(--accent) 48%, transparent);
-      box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 10%, transparent);
+      box-shadow: inset 0 2px 0 color-mix(in srgb, var(--accent) 48%, transparent);
     }
 
     html:not(.is-wand-app) .terminal-container.interactive {
-      border-color: color-mix(in srgb, var(--success) 54%, transparent);
-      box-shadow: 0 0 0 2px color-mix(in srgb, var(--success) 12%, transparent);
+      box-shadow: inset 0 2px 0 color-mix(in srgb, var(--success) 54%, transparent);
     }
 
     html:not(.is-wand-app) .input-panel {
@@ -14948,4 +14907,1244 @@
         grid-template-rows: 48px;
         min-height: 48px;
       }
+    }
+
+    /* =====================================================================
+       Desktop sidebar chrome: separate navigation from placement controls.
+       Scoped to the React shell so the legacy fallback keeps its old DOM.
+       ===================================================================== */
+    #app[data-react-shell="enabled"] .sidebar-header {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      justify-content: flex-start;
+      min-height: 92px;
+      padding: 11px 13px 10px;
+      gap: 9px;
+      background: color-mix(in srgb, var(--bg-elevated) 58%, transparent);
+      border-bottom-color: color-mix(in srgb, var(--border-subtle) 78%, transparent);
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-header-primary,
+    #app[data-react-shell="enabled"] .sidebar-header-controls {
+      display: flex;
+      align-items: center;
+      width: 100%;
+      min-width: 0;
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-header-primary {
+      min-height: 30px;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-header-main {
+      gap: 8px;
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-header-main .topbar-logo-icon {
+      width: 25px;
+      height: 25px;
+      border-radius: 8px;
+      font-size: 0.75rem;
+      box-shadow: 0 1px 3px color-mix(in srgb, var(--accent) 24%, transparent);
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-title {
+      font-size: 0.8125rem;
+      font-weight: 700;
+      letter-spacing: -0.015em;
+    }
+
+    #app[data-react-shell="enabled"] .session-count {
+      min-width: 21px;
+      padding: 2px 6px;
+      font-size: 0.625rem;
+      line-height: 1.35;
+      text-align: center;
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-header-actions .btn-ghost.btn-sm,
+    #app[data-react-shell="enabled"] .sidebar-header-actions .drawer-close-btn {
+      width: 28px;
+      min-width: 28px;
+      height: 28px;
+      min-height: 28px;
+      border-radius: 8px;
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-header-controls {
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-view-switch {
+      width: 124px;
+      height: 32px;
+      padding: 2px;
+      border-radius: 9px;
+      background: color-mix(in srgb, var(--bg-tertiary) 82%, transparent);
+      box-shadow: none;
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-view-switch button {
+      min-height: 26px;
+      padding-inline: 9px;
+      border-radius: 7px;
+      font-size: 0.6875rem;
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-view-switch button.active {
+      background: var(--bg-elevated);
+      box-shadow:
+        0 1px 3px rgba(40, 32, 26, 0.09),
+        inset 0 0 0 1px color-mix(in srgb, var(--border-subtle) 72%, transparent);
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-compact-toggle {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 34px;
+      min-width: 34px;
+      height: 32px;
+      padding: 0;
+      border: 1px solid color-mix(in srgb, var(--border-subtle) 82%, transparent);
+      border-radius: 9px;
+      color: var(--text-muted);
+      background: color-mix(in srgb, var(--bg-tertiary) 82%, transparent);
+      cursor: pointer;
+      transition:
+        color 140ms ease,
+        background-color 140ms ease,
+        border-color 140ms ease,
+        box-shadow 140ms ease,
+        transform 100ms ease;
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-compact-toggle:hover {
+      color: var(--text-primary);
+      border-color: color-mix(in srgb, var(--border-default) 86%, transparent);
+      background: var(--bg-elevated);
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-compact-toggle:active {
+      transform: scale(0.94);
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-compact-toggle.active {
+      color: var(--success);
+      border-color: color-mix(in srgb, var(--success) 30%, var(--border-subtle));
+      background: color-mix(in srgb, var(--success) 13%, var(--bg-elevated));
+      box-shadow:
+        inset 0 0 0 1px color-mix(in srgb, var(--success) 20%, transparent),
+        0 1px 3px color-mix(in srgb, var(--success) 16%, transparent);
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-compact-toggle.active::after {
+      content: "";
+      position: absolute;
+      right: 4px;
+      bottom: 4px;
+      width: 3px;
+      height: 3px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-compact-toggle-label {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    #app[data-react-shell="enabled"] .topbar-right {
+      gap: 6px;
+    }
+
+    #app[data-react-shell="enabled"] .topbar-btn.square {
+      width: 30px;
+      height: 30px;
+      min-height: 30px;
+      border-radius: 8px;
+    }
+
+    /* Narrow mode keeps the same active button in place. Pressing it expands
+       back to the default full sidebar. */
+    #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-header {
+      min-height: 52px;
+      padding: 10px;
+      flex-direction: row;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-header-primary,
+    #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-view-switch {
+      display: none;
+    }
+
+    #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-header-controls {
+      width: auto;
+      justify-content: center;
+    }
+
+
+    @media (max-width: 768px) {
+      #app[data-react-shell="enabled"] .sidebar-header {
+        min-height: 88px;
+        padding: 9px 11px 10px;
+      }
+
+      #app[data-react-shell="enabled"] .sidebar-header-controls {
+        justify-content: flex-start;
+      }
+
+      #app[data-react-shell="enabled"] .sidebar-view-switch {
+        width: 118px;
+      }
+
+      /* Mobile still uses its proven collapse/close buttons. In narrow mode
+         keep only the collapse button so the rail always has an exit. */
+      #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-header-primary {
+        display: flex;
+      }
+
+      #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-header-main,
+      #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-header-more,
+      #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-header-controls {
+        display: none;
+      }
+
+      #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-header-actions {
+        display: flex;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      #app[data-react-shell="enabled"] .sidebar-compact-toggle {
+        transition: none;
+      }
+    }
+
+    /* ── 工作空间 / 任务 面板 ── */
+
+    /* 面板容器与顶部工具条：对齐 .sessions-list 的内边距与 .session-group-title 的标题语汇 */
+    .workspaces-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 10px 10px 12px;
+      min-width: 0;
+    }
+
+    .workspaces-panel-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 2px 6px 8px;
+      border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 80%, transparent);
+    }
+
+    .workspaces-panel-title {
+      font-size: 0.6875rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-secondary);
+    }
+
+    .workspaces-panel-new-project {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border: 0;
+      border-radius: var(--radius-full);
+      padding: 0;
+      color: var(--text-muted);
+      background: transparent;
+      cursor: pointer;
+      transition: color 120ms ease, background-color 120ms ease, transform 100ms ease;
+    }
+
+    .workspaces-panel-new-project:hover {
+      color: var(--accent);
+      background: var(--accent-muted);
+    }
+
+    .workspaces-panel-new-project:active {
+      transform: scale(0.97);
+    }
+
+    .workspaces-panel-state {
+      padding: 24px 16px;
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      text-align: center;
+    }
+
+    .workspaces-panel-state.error {
+      color: var(--danger);
+    }
+
+    .workspaces-panel-empty {
+      padding: 40px 20px;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.8125rem;
+    }
+
+    .workspaces-panel-hint {
+      margin-top: 6px;
+      padding: 8px 6px 2px;
+      border-top: 1px solid color-mix(in srgb, var(--border-subtle) 70%, transparent);
+      color: var(--text-muted);
+      font-size: 0.625rem;
+      line-height: 1.4;
+    }
+
+    .workspaces-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    /* 工作空间（项目）行：复用 .session-directory-row 的圆角与 hover 语汇 */
+    .workspace-item {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      padding-bottom: 4px;
+    }
+
+    .workspace-item + .workspace-item {
+      padding-top: 4px;
+    }
+
+    .workspace-item.active-workspace > .workspace-row {
+      background: color-mix(in srgb, var(--accent-muted) 38%, transparent);
+    }
+
+    .workspace-row {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      border-radius: 10px;
+      transition: background-color 140ms ease;
+    }
+
+    .workspace-row:hover {
+      background: color-mix(in srgb, var(--accent-muted) 42%, transparent);
+    }
+
+    .workspace-row-main {
+      display: flex;
+      flex: 1;
+      min-width: 0;
+      min-height: 38px;
+      align-items: center;
+      gap: 7px;
+      border: 0;
+      border-radius: 9px;
+      padding: 5px 4px 5px 7px;
+      color: var(--text-secondary);
+      background: transparent;
+      font: inherit;
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .workspace-row-label {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      flex: 1;
+      gap: 1px;
+    }
+
+    .workspace-row-name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--text-primary);
+      font-size: 0.75rem;
+      font-weight: 620;
+      line-height: 1.25;
+    }
+
+    .workspace-row-cwd {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--text-muted);
+      font-size: 0.625rem;
+      font-weight: 500;
+      line-height: 1.15;
+    }
+
+    .workspace-row-count {
+      display: inline-flex;
+      min-width: 21px;
+      height: 19px;
+      align-items: center;
+      justify-content: center;
+      border-radius: 6px;
+      padding-inline: 5px;
+      color: var(--text-muted);
+      background: color-mix(in srgb, var(--bg-elevated) 78%, transparent);
+      font-size: 0.625rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .workspace-row-actions {
+      display: inline-flex;
+      flex: 0 0 auto;
+      align-items: center;
+      gap: 1px;
+    }
+
+    .workspace-row-action {
+      display: inline-flex;
+      width: 30px;
+      min-width: 30px;
+      height: 32px;
+      align-items: center;
+      justify-content: center;
+      border: 0;
+      border-radius: 9px;
+      padding: 0;
+      color: var(--text-muted);
+      background: transparent;
+      font-size: 1rem;
+      cursor: pointer;
+      opacity: 0.58;
+      transition: color 120ms ease, background-color 120ms ease, opacity 120ms ease, transform 100ms ease;
+    }
+
+    .workspace-row-action:hover {
+      color: var(--text-primary);
+      background: color-mix(in srgb, var(--bg-tertiary) 72%, transparent);
+      opacity: 1;
+    }
+
+    .workspace-row-action:active {
+      transform: scale(0.94);
+    }
+
+    .workspace-row-action.add {
+      width: auto;
+      min-width: 30px;
+      gap: 4px;
+      padding: 0 7px;
+      opacity: 0.82;
+    }
+
+    .workspace-row-action-label {
+      font-size: 0.625rem;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+
+    .workspace-row-action.add:hover {
+      color: var(--accent);
+      background: var(--accent-muted);
+    }
+
+    .workspace-row-action.delete:hover,
+    .workspace-row-action.cancel:hover {
+      color: var(--danger);
+      background: color-mix(in srgb, var(--danger) 12%, transparent);
+    }
+
+    .workspace-row-action.confirm:hover {
+      color: var(--success);
+      background: color-mix(in srgb, var(--success) 14%, transparent);
+    }
+
+    .workspace-row-confirm {
+      display: inline-flex;
+      align-items: center;
+      gap: 1px;
+    }
+
+    /* 任务列表：缩进 + 细左边线，呼应 .session-directory-sessions 的层级感 */
+    .workspace-tasks {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      margin: 2px 0 4px;
+      padding-left: 20px;
+      border-left: 1px solid color-mix(in srgb, var(--border-subtle) 80%, transparent);
+    }
+
+    .workspace-tasks-state {
+      padding: 8px 4px;
+      color: var(--text-muted);
+      font-size: 0.625rem;
+    }
+
+    .workspace-tasks-state.error {
+      color: var(--danger);
+    }
+
+    .workspace-tasks-empty {
+      padding: 4px 4px 6px;
+      color: var(--text-muted);
+      font-size: 0.625rem;
+      font-style: italic;
+    }
+
+    /* 任务行：紧凑的 .session-item 风格，hover/active 保持低噪声 */
+    .workspace-task {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      border: 0;
+      border-radius: 8px;
+      padding: 5px 6px;
+      color: var(--text-secondary);
+      background: transparent;
+      font: inherit;
+      cursor: pointer;
+      text-align: left;
+      transition: background-color 140ms ease, transform 100ms ease;
+      position: relative;
+    }
+
+    .workspace-task:hover {
+      background: color-mix(in srgb, var(--accent-muted) 38%, transparent);
+    }
+
+    .workspace-task:active {
+      transform: scale(0.99);
+    }
+
+    .workspace-task.active {
+      background: color-mix(in srgb, var(--accent-muted) 52%, transparent);
+      color: var(--text-primary);
+    }
+
+    .workspace-task.active::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 5px;
+      bottom: 5px;
+      width: 3px;
+      border-radius: 2px;
+      background: var(--accent);
+    }
+
+    .workspace-task.not-isolated {
+      opacity: 0.78;
+    }
+
+    .workspace-task-marker {
+      display: inline-flex;
+      flex: 0 0 auto;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-muted);
+    }
+
+    .workspace-task-name {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--text-primary);
+      font-size: 0.75rem;
+      line-height: 1.25;
+    }
+
+    .workspace-task-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: var(--radius-full);
+      padding: 1px 6px;
+      font-size: 0.625rem;
+      font-weight: 700;
+      line-height: 1.4;
+    }
+
+    .workspace-task-badge.isolated {
+      color: var(--success);
+      background: color-mix(in srgb, var(--success) 14%, transparent);
+    }
+
+    .workspace-task-badge.shared {
+      color: var(--text-muted);
+      background: color-mix(in srgb, var(--bg-elevated) 78%, transparent);
+    }
+
+    .workspace-task-action {
+      display: inline-flex;
+      width: 26px;
+      min-width: 26px;
+      height: 26px;
+      align-items: center;
+      justify-content: center;
+      border: 0;
+      border-radius: var(--radius-full);
+      padding: 0;
+      color: var(--text-muted);
+      background: transparent;
+      cursor: pointer;
+      opacity: 0.7;
+      transition: color 120ms ease, background-color 120ms ease, opacity 120ms ease, transform 100ms ease;
+    }
+
+    .workspace-task-action:hover {
+      color: var(--text-primary);
+      background: color-mix(in srgb, var(--bg-tertiary) 72%, transparent);
+      opacity: 1;
+    }
+
+    .workspace-task-action:active {
+      transform: scale(0.9);
+    }
+
+    .workspace-task-action.delete:hover,
+    .workspace-task-action.cancel:hover {
+      color: var(--danger);
+      background: color-mix(in srgb, var(--danger) 12%, transparent);
+    }
+
+    .workspace-task-action.confirm:hover {
+      color: var(--success);
+      background: color-mix(in srgb, var(--success) 14%, transparent);
+    }
+
+    .workspace-task-confirm {
+      display: inline-flex;
+      align-items: center;
+      gap: 1px;
+    }
+
+    /* 内联新建任务表单：输入框对齐 .session-directory-rename-input 的聚焦态 */
+    .workspace-new-task-form {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      width: 100%;
+      margin-top: 4px;
+      padding: 0 2px;
+    }
+
+    .workspace-new-task-input {
+      flex: 1;
+      min-width: 0;
+      height: 30px;
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 0 8px;
+      color: var(--text-primary);
+      background: var(--bg-elevated);
+      font: inherit;
+      font-size: 0.75rem;
+      outline: none;
+      transition: border-color 120ms ease, box-shadow 120ms ease;
+    }
+
+    .workspace-new-task-input::placeholder {
+      color: var(--text-muted);
+    }
+
+    .workspace-new-task-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 14%, transparent);
+    }
+
+    .workspace-new-task-btn {
+      display: inline-flex;
+      width: 30px;
+      min-width: 30px;
+      height: 30px;
+      align-items: center;
+      justify-content: center;
+      border: 0;
+      border-radius: 8px;
+      padding: 0;
+      color: var(--text-muted);
+      background: transparent;
+      cursor: pointer;
+      transition: color 120ms ease, background-color 120ms ease, transform 100ms ease;
+    }
+
+    .workspace-new-task-btn:hover {
+      color: var(--text-primary);
+      background: color-mix(in srgb, var(--bg-tertiary) 72%, transparent);
+    }
+
+    .workspace-new-task-btn:active {
+      transform: scale(0.94);
+    }
+
+    .workspace-new-task-btn.save {
+      color: var(--accent);
+    }
+
+    .workspace-new-task-btn.save:hover {
+      color: var(--text-primary);
+      background: var(--accent-muted);
+    }
+
+    .workspace-new-task-error {
+      width: 100%;
+      margin-top: 4px;
+      color: var(--danger);
+      font-size: 0.625rem;
+      line-height: 1.35;
+    }
+
+    @media (hover: none) {
+      .workspace-row-action,
+      .workspace-task-action {
+        opacity: 0.9;
+      }
+    }
+
+    /* ── 工作空间窗口：顶部标签栏 ── */
+    /* 渲染在主区终端槽位上方；仅当打开了某任务（workspaceContextStore.taskId 非空）时出现 */
+
+    .workspace-tab-bar {
+      display: flex;
+      align-items: stretch;
+      gap: 0;
+      padding: 0;
+      min-height: 36px;
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border-subtle);
+      font-size: 0.75rem;
+      user-select: none;
+      flex-shrink: 0;
+    }
+
+    .workspace-tab-bar-context {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding-right: 8px;
+      border-right: 1px solid var(--border-subtle);
+      flex-shrink: 0;
+      max-width: 220px;
+    }
+
+    .workspace-tab-bar-task {
+      font-weight: 600;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .workspace-tab-bar-badge.isolated {
+      flex-shrink: 0;
+      padding: 1px 6px;
+      border-radius: var(--radius-full);
+      font-size: 0.58rem;
+      font-weight: 600;
+      color: var(--accent);
+      background: var(--accent-muted);
+    }
+
+    .workspace-tab-bar-list {
+      display: flex;
+      align-items: stretch;
+      gap: 0;
+      flex: 1 1 auto;
+      min-width: 0;
+      overflow-x: auto;
+      scrollbar-width: thin;
+    }
+
+    .workspace-tab-bar-list::-webkit-scrollbar {
+      height: 4px;
+    }
+
+    .workspace-tab-bar-empty {
+      color: var(--text-muted);
+      font-size: 0.68rem;
+      white-space: nowrap;
+      padding: 10px 12px;
+    }
+
+    .workspace-tab-item {
+      position: relative;
+      flex: 0 0 auto;
+      display: flex;
+      min-width: 104px;
+      max-width: 220px;
+      border-right: 1px solid var(--border-subtle);
+    }
+
+    .workspace-tab-item.active {
+      background: var(--bg-elevated);
+      box-shadow: inset 0 2px 0 var(--accent);
+    }
+
+    .workspace-tab {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+      flex: 1 1 auto;
+      height: 36px;
+      padding: 0 5px 0 13px;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background-color 140ms ease, color 140ms ease;
+    }
+
+    .workspace-tab:hover {
+      background: color-mix(in srgb, var(--bg-elevated) 58%, transparent);
+      color: var(--text-primary);
+    }
+
+    .workspace-tab.active {
+      background: transparent;
+      color: var(--text-primary);
+    }
+
+    .workspace-tab-item-close {
+      flex: 0 0 auto;
+      width: 28px;
+      height: 36px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    .workspace-tab-item-close:hover {
+      color: var(--danger);
+      background: color-mix(in srgb, var(--danger) 12%, transparent);
+    }
+
+    .workspace-tab-item-close:active:not(:disabled) { transform: scale(0.9); }
+    .workspace-tab-item-close:disabled { cursor: wait; opacity: 0.48; }
+
+    .workspace-tab.moving-source {
+      color: #dff6e4;
+      background: color-mix(in srgb, #4f9d69 34%, var(--bg-elevated));
+      box-shadow: inset 0 2px 0 #69c984;
+    }
+
+    .workspace-tab.move-target {
+      color: var(--text-primary);
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 65%, transparent);
+    }
+
+    .workspace-tab.move-target:hover {
+      background: var(--accent-muted);
+      box-shadow: inset 0 0 0 2px var(--accent);
+    }
+
+    .workspace-tab-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .workspace-tab-dot.running {
+      background: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-glow);
+    }
+
+    .workspace-tab-dot.idle {
+      background: var(--text-muted);
+    }
+
+    .workspace-tab-dot.ended {
+      background: color-mix(in srgb, var(--text-muted) 55%, transparent);
+    }
+
+    .workspace-tab-label {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-weight: 500;
+    }
+
+    .workspace-tab-add {
+      flex-shrink: 0;
+      width: 36px;
+      height: 36px;
+      border-radius: 0;
+      border: 0;
+      border-right: 1px solid var(--border-subtle);
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 1rem;
+      line-height: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: color 140ms ease, background-color 140ms ease, transform 100ms ease;
+    }
+
+    .workspace-tab-add:hover {
+      color: var(--accent);
+      background: var(--accent-muted);
+    }
+
+    .workspace-tab-add:active:not(:disabled) {
+      transform: scale(0.94);
+    }
+
+    .workspace-tab-add:disabled {
+      cursor: wait;
+      opacity: 0.72;
+    }
+
+    .workspace-tab-files,
+    .workspace-tab-close {
+      flex-shrink: 0;
+      width: 36px;
+      height: 36px;
+      border-radius: 0;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 1.15rem;
+      line-height: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .workspace-tab-files {
+      border-right: 1px solid var(--border-subtle);
+      font-size: 0.9rem;
+    }
+
+    .workspace-tab-files:hover {
+      color: var(--accent);
+      background: var(--accent-muted);
+    }
+
+    .workspace-tab-close:hover {
+      color: var(--danger);
+      background: color-mix(in srgb, var(--danger) 12%, transparent);
+    }
+
+    /* ── 工作空间分屏窗口（P2）── */
+    /* 进入分屏：隐藏单例终端槽位（#output 仍挂载在 DOM，仅不可见）。 */
+    .main-content-in-split > #output,
+    .main-content-in-split > #chat-output,
+    .main-content-in-split > #blank-chat,
+    .main-content-in-split > .input-panel {
+      display: none !important;
+    }
+
+    .workspace-tab-move {
+      flex-shrink: 0;
+      width: 36px;
+      height: 36px;
+      padding: 0;
+      border-radius: 0;
+      border: 0;
+      border-right: 1px solid var(--border-subtle);
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 0.72rem;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .workspace-tab-move:hover,
+    .workspace-tab-move.active {
+      color: var(--accent);
+      background: var(--accent-muted);
+    }
+
+    .workspace-tab-move:active {
+      transform: scale(0.94);
+    }
+
+    .workspace-tab-move-hint {
+      flex-shrink: 0;
+      height: 36px;
+      padding: 0 11px;
+      border: 0;
+      border-left: 1px solid var(--border-subtle);
+      border-right: 1px solid var(--border-subtle);
+      background: color-mix(in srgb, #4f9d69 16%, var(--bg-secondary));
+      color: color-mix(in srgb, #69c984 82%, var(--text-primary));
+      font-size: 0.68rem;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+
+    .workspace-tab-move-hint:hover {
+      background: color-mix(in srgb, #4f9d69 24%, var(--bg-secondary));
+    }
+
+    .workspace-window {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-elevated);
+      border: 0;
+      border-radius: 0;
+      overflow: hidden;
+    }
+    .workspace-window-header {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--border-subtle);
+      background: color-mix(in srgb, var(--accent-muted) 60%, var(--bg-elevated));
+    }
+    .workspace-window-task {
+      font-weight: 600;
+      font-size: 0.85rem;
+      color: var(--text-primary);
+    }
+    .workspace-window-hint {
+      flex: 1 1 auto;
+      min-width: 0;
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .workspace-window-close {
+      flex-shrink: 0;
+      height: 26px;
+      padding: 0 12px;
+      border-radius: var(--radius-full);
+      border: 1px solid var(--border-subtle);
+      background: var(--bg-elevated);
+      color: var(--text-muted);
+      font-size: 0.74rem;
+      cursor: pointer;
+    }
+    .workspace-window-close:hover {
+      color: var(--danger);
+      border-color: var(--danger);
+    }
+    .workspace-window-body {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      padding: 0;
+      gap: 0;
+    }
+
+    /* 递归分屏：split 用 flex，水平横向 / 垂直纵向。 */
+    .ws-split {
+      display: flex;
+      min-width: 0;
+      min-height: 0;
+      flex: 1 1 auto;
+      gap: 0;
+    }
+    .ws-split.h { flex-direction: row; }
+    .ws-split.v { flex-direction: column; }
+    .ws-split-child {
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      overflow: hidden;
+    }
+
+    /* 分隔条 sash：拖拽调整比例。 */
+    .ws-sash {
+      flex-shrink: 0;
+      background: var(--border-subtle);
+      position: relative;
+      transition: background 0.12s ease;
+    }
+    .ws-sash.h {
+      width: 6px;
+      cursor: col-resize;
+    }
+    .ws-sash.v {
+      height: 6px;
+      cursor: row-resize;
+    }
+    .ws-sash:hover,
+    .ws-sash:active {
+      background: var(--accent-glow);
+    }
+
+    .ws-pane {
+      flex: 1 1 auto;
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      background: #1f1b17; /* 终端深底，与终端主题一致 */
+      border-radius: 0;
+      overflow: hidden;
+      position: relative;
+      border: 1px solid transparent;
+    }
+    .ws-pane.drop-center {
+      border-color: var(--accent);
+      box-shadow: inset 0 0 0 2px var(--accent-glow);
+    }
+
+    .ws-pane-toolbar {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      gap: 0;
+      min-height: 34px;
+      padding: 0;
+      background: rgba(0, 0, 0, 0.28);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .ws-pane-title {
+      flex: 1 1 auto;
+      display: flex;
+      align-items: center;
+      min-width: 0;
+      height: 34px;
+      padding: 0 11px;
+      color: #d8cfc4;
+      font-size: 0.76rem;
+      user-select: none;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .ws-pane-scale {
+      flex-shrink: 0;
+      height: 34px;
+      display: inline-flex;
+      align-items: stretch;
+      border-left: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .ws-pane-scale-btn,
+    .ws-pane-scale-value {
+      height: 34px;
+      padding: 0;
+      border: 0;
+      border-right: 1px solid rgba(255, 255, 255, 0.08);
+      background: transparent;
+      color: #c8bfb5;
+      font-size: 0.7rem;
+      cursor: pointer;
+    }
+
+    .ws-pane-scale-btn { width: 26px; }
+    .ws-pane-scale-value { width: 42px; font-variant-numeric: tabular-nums; }
+
+    .ws-pane-scale-btn:hover,
+    .ws-pane-scale-value:hover {
+      color: #fff;
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .ws-pane-scale-btn:active,
+    .ws-pane-scale-value:active {
+      transform: scale(0.94);
+    }
+
+    .ws-pane-btn {
+      flex-shrink: 0;
+      width: 34px;
+      height: 34px;
+      border-radius: 0;
+      border: 0;
+      border-right: 1px solid rgba(255, 255, 255, 0.08);
+      background: transparent;
+      color: #c8bfb5;
+      font-size: 0.85rem;
+      line-height: 1;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .ws-pane-btn:hover {
+      color: #fff;
+      background: var(--accent-muted);
+    }
+
+    .ws-pane-btn.close:hover {
+      color: #fff;
+      background: color-mix(in srgb, var(--danger) 72%, transparent);
+    }
+
+    .ws-pane-btn:active:not(:disabled) {
+      transform: scale(0.94);
+    }
+
+    .ws-pane-btn:disabled {
+      cursor: wait;
+      opacity: 0.64;
+    }
+
+    .ws-pane-btn.files {
+      margin-left: auto;
+    }
+
+    .ws-pane-content {
+      flex: 1 1 auto;
+      min-height: 0;
+      position: relative;
+      overflow: hidden;
+    }
+    .ws-session-pane {
+      position: absolute;
+      inset: 0;
+      /* xterm DOM renderer may replace several visible rows for every keystroke.
+       * This pane has a definite absolute size, so strict containment keeps that
+       * high-frequency layout/paint work inside the terminal instead of invalidating
+       * the complete workspace page. */
+      contain: strict;
+      isolation: isolate;
+    }
+    .ws-session-pane .terminal-scroll-wrap,
+    .ws-session-pane .pooled-terminal-wrap {
+      height: 100%;
+    }
+    .ws-pane-empty {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #7c736b;
+      font-size: 0.8rem;
+      text-align: center;
+      padding: 16px;
     }

@@ -1932,6 +1932,43 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   color: var(--danger);
 }
 
+.wand-workspace-agent-dialog {
+  width: min(620px, calc(100vw - var(--wand-safe-left) - var(--wand-safe-right) - 32px));
+}
+
+.wand-workspace-agent-body {
+  padding-block: 22px;
+}
+
+.wand-workspace-agent-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.wand-workspace-agent-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.wand-workspace-agent-footer > .wand-ui-button-primary {
+  min-width: 150px;
+}
+
+.wand-new-project-providers {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.wand-new-project-provider {
+  min-height: 96px;
+}
+
+.wand-new-project-provider:active {
+  transform: scale(0.97);
+}
+
 .wand-folder-picker-overlay {
   position: fixed;
   inset: 0;
@@ -2416,6 +2453,10 @@ export const sessionPickerAndWorktreeStyles = String.raw`
     border-radius: var(--radius-md);
   }
 
+  .wand-new-project-providers {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .wand-folder-picker-dialog {
     width: calc(100vw - var(--wand-safe-left) - var(--wand-safe-right) - 20px);
     max-height: calc(100dvh - var(--wand-safe-top) - var(--wand-safe-bottom) - 20px);
@@ -2543,6 +2584,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   .wand-new-session-footer { padding: 10px 18px calc(14px + var(--wand-safe-bottom)); }
   .wand-new-session-advanced-summary { max-width: 19ch; }
   .wand-new-session-input { font-size: 16px; }
+  .wand-workspace-agent-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 390px) {

@@ -76,6 +76,7 @@ test("multiple slow WebSocket clients receive independently bounded long-session
       lastOutputBySession: new Map(),
       outputSeqBySession: new Map(),
       pendingResyncSessions: new Set(),
+      ptySubscriptions: new Map(),
       blockBudget: 200,
       lastSeenAt: Date.now(),
     });

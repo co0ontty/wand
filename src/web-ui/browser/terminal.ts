@@ -799,6 +799,9 @@ import { consumeTerminalWheelPage, terminalWheelPageSequence, type TerminalWheel
           var helperTextarea = termWrap.querySelector(".xterm-helper-textarea") as HTMLTextAreaElement | null;
           if (helperTextarea) helperTextarea.readOnly = !state.terminalInteractive;
           state.terminal = term;
+          // Expose for native shells (macOS / iOS) that need cols/rows/scale
+          // without reaching into module-scoped state.
+          try { (window as any).__wandTerminal = term; } catch (e) {}
           state.terminalFitAddon = fitAddon;
           state.terminalWriteQueue = Promise.resolve();
           state.terminalInitializing = false;

@@ -29,6 +29,7 @@ import {
   normalizeComposerModelValue,
 } from "./composer-select-values";
 import { inferProviderIdFromCommand } from "../provider-identity";
+import { hasPooledTerminal } from "./terminal-pool";
 
       // 证书不受信任时浏览器会丢弃 Secure Cookie —— 密码正确也存不住登录态。
       // 这里揭示专用提示，并把「改用 HTTP」按钮指向同 host 的 http:// 地址。
@@ -1368,6 +1369,7 @@ import { inferProviderIdFromCommand } from "../provider-identity";
         if (!sessionId || !state.ws || state.ws.readyState !== WebSocket.OPEN) return;
         state.ws.send(JSON.stringify({
           type: "subscribe",
+          mode: hasPooledTerminal(sessionId) ? "add" : "replace",
           sessionId: sessionId,
           capabilities: { ptyAck: true },
         }));
@@ -2464,16 +2466,82 @@ import { inferProviderIdFromCommand } from "../provider-identity";
             showToast(data.error, "error");
             return;
           }
-          state.selectedId = data.id;
+          var sessionId = String(data.id);
+          if (state.selectedId !== sessionId) teardownTerminal();
+          state.selectedId = sessionId;
           persistSelectedId();
-          state.drafts[data.id] = "";
+          state.drafts[sessionId] = "";
           resetChatRenderCache();
-          return refreshAll();
+          return Promise.resolve(refreshAll()).then(function() {
+            // 会话进入本地列表后统一走 selectSession，补齐 websocket 订阅、
+            // 文件目录与输入区状态，避免标签已切换但终端仍显示上一会话。
+            selectSession(sessionId);
+          });
         })
         .then(function() { focusInputBox(true); })
         .catch(function() {
           showToast("无法启动会话。", "error");
         });
+      }
+
+      /**
+       * 在指定 cwd 启动一个交互式会话（用于工作空间任务：在任务独占的 worktree
+       * 目录里开会话，并绑定 workspaceId / workspaceTaskId）。镜像 quickStartSession，
+       * 但 cwd / 绑定关系由调用方显式传入。
+       */
+      export function startSessionInCwd(
+        cwd: string,
+        options?: { workspaceId?: string; workspaceTaskId?: string; provider?: string },
+      ): Promise<unknown> {
+        var provider = (options && options.provider) || getPreferredTool();
+        var command = provider === "qoder" ? "qodercli" : provider;
+        var defaultMode = getSafeModeForTool(provider, (state.config && state.config.defaultMode) ? state.config.defaultMode : "default");
+        state.preferredCommand = provider;
+        state.chatMode = getSafeModeForTool(provider, state.chatMode);
+        var body: Record<string, unknown> = withTerminalDimensions({
+          command: command,
+          provider: provider,
+          cwd: cwd,
+          mode: defaultMode,
+          sessionSource: "interactive",
+        });
+        if (options && options.workspaceId) body.workspaceId = options.workspaceId;
+        if (options && options.workspaceTaskId) body.workspaceTaskId = options.workspaceTaskId;
+        return ensureTerminalReady().then(function() {
+          return fetch("/api/commands", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify(body),
+          });
+        })
+          .then(function(res) { return res.json(); })
+          .then(function(data) {
+            if (data.error) {
+              throw new Error(String(data.error));
+            }
+            if (!data.id) throw new Error("服务端未返回新会话 ID。");
+            var sessionId = String(data.id);
+            if (state.selectedId !== sessionId) teardownTerminal();
+            state.selectedId = sessionId;
+            persistSelectedId();
+            state.drafts[sessionId] = "";
+            resetChatRenderCache();
+            return Promise.resolve(refreshAll()).then(function() {
+              // refreshAll 只刷新数据；selectSession 才会完成 websocket 订阅和
+              // 视图切换。两者缺一会让新标签继续显示旧终端缓冲区。
+              selectSession(sessionId);
+              return sessionId;
+            });
+          })
+          .then(function(sessionId) {
+            focusInputBox(true);
+            return sessionId;
+          })
+          .catch(function(error) {
+            showToast(error && error.message ? error.message : "无法启动会话。", "error");
+            throw error;
+          });
       }
 
       export function handleInputBoxKeydown(event) {

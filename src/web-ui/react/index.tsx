@@ -11,6 +11,7 @@ import { worktreeMergeController } from "./worktree-merge/controller";
 import { restartOverlayController } from "./restart-overlay/controller";
 import { filePreviewController } from "./file-preview/controller";
 import { missionsController } from "./missions/controller";
+import { workspacesController } from "./workspaces/controller";
 
 const OVERLAY_ROOT_ID = "overlay-root";
 const REACT_MOUNT_ID = "wand-react-ui-mount";
@@ -53,6 +54,7 @@ function exposeBusinessControllers(): void {
   window.__wandReactRestartOverlay = restartOverlayController;
   window.__wandReactFilePreview = filePreviewController;
   window.__wandReactMissions = missionsController;
+  window.__wandReactWorkspaces = workspacesController;
 }
 
 /**
@@ -147,6 +149,12 @@ export {
   missionsController,
   missionsStore,
 } from "./missions/controller";
+export {
+  configureWorkspacesRuntime,
+  workspacesController,
+  workspacesStore,
+  type WandWorkspacesController,
+} from "./workspaces/controller";
 export type {
   ActivityItem,
   CreateMissionRequest,

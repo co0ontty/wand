@@ -99,7 +99,6 @@ function renderWithStore(component: ReturnType<typeof createElement>, snapshot =
 test("ShellTopbar SSR preserves title, status, cwd, git, and menu contracts", () => {
   const html = renderWithStore(createElement(ShellTopbar));
   const requiredIds = [
-    "sessions-toggle-button",
     "current-task",
     "topbar-cwd",
     "topbar-file-button",
@@ -110,8 +109,8 @@ test("ShellTopbar SSR preserves title, status, cwd, git, and menu contracts", ()
   ];
   for (const id of requiredIds) assert.match(html, new RegExp(`id="${id}"`), `missing #${id}`);
 
-  assert.match(html, /class="floating-sidebar-toggle active"/);
-  assert.match(html, /class="topbar-brand"[^>]*>W</);
+  assert.doesNotMatch(html, /id="sessions-toggle-button"/);
+  assert.doesNotMatch(html, /class="topbar-brand"/);
   assert.match(html, /class="topbar-session-title title-generating"[^>]*aria-busy="true"[^>]*>Chrome migration</);
   assert.match(html, /class="session-status-pill idle"/);
   assert.match(html, /实现 Shell chrome/);
@@ -130,8 +129,16 @@ test("ShellTopbar SSR preserves title, status, cwd, git, and menu contracts", ()
 test("ShellTopbar SSR renders the home state and an empty stable git slot", () => {
   const base = fixture();
   const html = renderWithStore(createElement(ShellTopbar), fixture({
+    viewport: { ...base.viewport, mobile: true },
     selected: null,
-    layout: { ...base.layout, filePanelOpen: false, topbarMoreOpen: false },
+    layout: {
+      ...base.layout,
+      sessionsDrawerOpen: false,
+      sidebarPinned: false,
+      sidebarAnchored: false,
+      filePanelOpen: false,
+      topbarMoreOpen: false,
+    },
     topbar: {
       title: "Wand 控制台",
       description: "",
@@ -144,7 +151,9 @@ test("ShellTopbar SSR renders the home state and an empty stable git slot", () =
     },
   }));
 
+  assert.match(html, /id="sessions-toggle-button" class="floating-sidebar-toggle"/);
   assert.match(html, /class="topbar-tagline">Wand 控制台</);
+  assert.match(html, /class="topbar-brand"[^>]*>W</);
   assert.match(html, /<span id="topbar-git-slot" class="topbar-git-slot"><\/span>/);
   assert.doesNotMatch(html, /id="topbar-more-button"/);
   assert.doesNotMatch(html, /id="topbar-cwd"/);
@@ -160,7 +169,7 @@ test("file panel path helpers normalize navigation without accessing the DOM", (
   assert.equal(getParentFilePanelCwd("/"), "/");
 });
 
-test("ShellFilePanel SSR preserves controls and leaves #file-explorer childless", () => {
+test("ShellFilePanel SSR preserves the legacy slot and renders the React explorer", () => {
   const explorerRef = createRef<HTMLDivElement>();
   const html = renderWithStore(createElement(ShellFilePanel, { explorerRef }));
   const requiredIds = [
@@ -170,8 +179,6 @@ test("ShellFilePanel SSR preserves controls and leaves #file-explorer childless"
     "file-side-panel-close",
     "file-explorer-up",
     "file-explorer-cwd",
-    "file-search-input",
-    "file-search-clear",
     "file-explorer",
   ];
   for (const id of requiredIds) assert.match(html, new RegExp(`id="${id}"`), `missing #${id}`);
@@ -179,8 +186,8 @@ test("ShellFilePanel SSR preserves controls and leaves #file-explorer childless"
   assert.match(html, /id="file-panel-backdrop" class="file-panel-backdrop open"/);
   assert.match(html, /id="file-side-panel" class="file-side-panel open"/);
   assert.match(html, /id="file-explorer-cwd"[^>]*value="\/workspace\/wand"/);
-  assert.match(html, /<div class="file-explorer" id="file-explorer"><\/div>/);
-  assert.doesNotMatch(html, /id="file-tree"|tree-loading|加载中/);
+  assert.match(html, /<div class="file-explorer legacy-file-explorer-host" id="file-explorer" hidden="" aria-hidden="true"><\/div>/);
+  assert.match(html, /class="wand-file-explorer"/);
 });
 
 test("Shell chrome sources use UiStore hooks and no forbidden legacy seam", () => {
@@ -194,5 +201,6 @@ test("Shell chrome sources use UiStore hooks and no forbidden legacy seam", () =
     path.join(root, "src", "web-ui", "react", "shell", "shell-file-panel.tsx"),
     "utf8",
   );
-  assert.match(panelSource, /<div className="file-explorer" id="file-explorer" ref=\{explorerRef\}\/>/);
+  assert.match(panelSource, /className="file-explorer legacy-file-explorer-host"/);
+  assert.match(panelSource, /<FileExplorerHost root=\{committedCwd\.current\}\/>/);
 });

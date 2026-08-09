@@ -106,8 +106,9 @@ test("ShellMainContent SSR keeps all identity-stable legacy slots childless", ()
   assert.match(html, /^<main class="main-content">/);
   assert.match(html, /<div id="output" class="terminal-container active"><\/div>/);
   assert.match(html, /<div id="chat-output" class="chat-container hidden"><\/div>/);
-  assert.match(html, /<div class="input-panel"><\/div><\/main>$/);
-  assert.match(html, /<div class="file-explorer" id="file-explorer"><\/div>/);
+  assert.match(html, /<div class="input-panel"><\/div>.*<\/main>$/s);
+  assert.match(html, /<div class="file-explorer legacy-file-explorer-host" id="file-explorer" hidden="" aria-hidden="true"><\/div>/);
+  assert.match(html, /class="wand-file-explorer"/);
   assert.match(html, /<div id="blank-chat" class="blank-chat hidden">/);
   assert.match(html, /<div id="cross-session-queue-host"><\/div>/);
   assert.equal((html.match(/id="output"/g) ?? []).length, 1);
@@ -150,7 +151,7 @@ test("ShellMainContent SSR renders the complete React welcome state contract", (
   assert.match(html, /<div id="output" class="terminal-container hidden"><\/div>/);
   assert.match(html, /<div id="chat-output" class="chat-container hidden"><\/div>/);
   assert.match(html, /<div id="blank-chat" class="blank-chat">/);
-  assert.match(html, /<div class="input-panel hidden"><\/div><\/main>$/);
+  assert.match(html, /<div class="input-panel hidden"><\/div>.*<\/main>$/s);
   assert.match(html, /class="blank-chat-cwd-path tail-marquee-path" id="blank-chat-cwd-path"[^>]*>/);
   assert.match(html, /class="tail-marquee-path-inner">\/chosen\/project<\/span>/);
   assert.doesNotMatch(html, /blank-chat-cwd-dropdown|aria-controls=|aria-expanded=/);
@@ -204,5 +205,8 @@ test("ShellMainContent uses UiStore actions and no forbidden legacy seam", () =>
   assert.match(source, /<div id="chat-output" className=\{classes\.chat\} ref=\{legacyRefs\?\.chat\}\/>/);
   assert.match(source, /<div className=\{classes\.composer\} ref=\{legacyRefs\?\.composer\}\/>/);
   assert.match(source, /id="cross-session-queue-host" ref=\{queueRef\}/);
+  assert.match(source, /context\.taskId \? null : <ShellTopbar\/>/);
+  assert.match(source, /<WorkspaceTabBar\/>/);
+  assert.doesNotMatch(source, /inSplit \? null : <WorkspaceTabBar\/>/);
   assert.doesNotMatch(source, /innerHTML|querySelector|getElementById|browser\/state|@radix-ui\/|\bfetch\s*\(/);
 });

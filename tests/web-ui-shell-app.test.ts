@@ -127,7 +127,7 @@ test("ShellApp provides the store and composes one sidebar and one main content"
     assert.equal((html.match(/id="chat-output"/g) ?? []).length, 1);
     assert.match(html, /<div id="output" class="terminal-container active"><\/div>/);
     assert.match(html, /<div id="chat-output" class="chat-container hidden"><\/div>/);
-    assert.match(html, /<div class="input-panel"><\/div><\/main><\/div><\/div>$/);
+    assert.match(html, /<div class="input-panel"><\/div>.*<\/main><\/div><\/div>$/s);
   } finally {
     store.dispose();
   }

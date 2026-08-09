@@ -41,10 +41,7 @@ interface TestClient {
   pendingResyncSessions: Set<string>;
   blockBudget?: number;
   lastSeenAt: number;
-  subscribedSessionId: string | null;
-  supportsPtyAck: boolean;
-  unackedPtyBytes: number;
-  ptyPausedSessionId: string | null;
+  ptySubscriptions: Map<string, { supportsAck: boolean; unackedBytes: number; paused: boolean }>;
 }
 
 interface ManagerInternals {
@@ -55,7 +52,7 @@ interface ManagerInternals {
   };
   broadcast(event: ProcessEvent): void;
   processWsQueue(client: TestClient): void;
-  releasePtyPause(client: TestClient): void;
+  releasePtyPause(client: TestClient, sessionId: string): void;
 }
 
 function createHarness(): {
@@ -75,10 +72,7 @@ function createHarness(): {
     outputSeqBySession: new Map(),
     pendingResyncSessions: new Set(),
     lastSeenAt: Date.now(),
-    subscribedSessionId: null,
-    supportsPtyAck: false,
-    unackedPtyBytes: 0,
-    ptyPausedSessionId: null,
+    ptySubscriptions: new Map(),
   };
   manager.clients.add(client);
   return { manager, client, socket };
@@ -164,13 +158,9 @@ test("raw PTY output is scoped to the subscribed session and pauses until acknow
     lastOutputBySession: new Map(),
     outputSeqBySession: new Map(),
     pendingResyncSessions: new Set(),
-    subscribedSessionId: "session-b",
-    supportsPtyAck: true,
-    unackedPtyBytes: 0,
-    ptyPausedSessionId: null,
+    ptySubscriptions: new Map([["session-b", { supportsAck: true, unackedBytes: 0, paused: false }]]),
   };
-  first.client.subscribedSessionId = "session-a";
-  first.client.supportsPtyAck = true;
+  first.client.ptySubscriptions.set("session-a", { supportsAck: true, unackedBytes: 0, paused: false });
   first.manager.clients.add(secondClient);
 
   const paused: string[] = [];
@@ -193,14 +183,38 @@ test("raw PTY output is scoped to the subscribed session and pauses until acknow
   assert.equal(sent.data.chunk, chunk);
   assert.deepEqual(paused, ["session-a"]);
 
-  first.client.unackedPtyBytes = 0;
-  first.manager.releasePtyPause(first.client);
+  const firstSubscription = first.client.ptySubscriptions.get("session-a");
+  assert.ok(firstSubscription);
+  firstSubscription.unackedBytes = 0;
+  first.manager.releasePtyPause(first.client, "session-a");
   assert.deepEqual(resumed, ["session-a"]);
+});
+
+test("one client can receive raw PTY output from multiple subscribed panes", () => {
+  const { manager, client, socket } = createHarness();
+  client.ptySubscriptions.set("session-a", { supportsAck: true, unackedBytes: 0, paused: false });
+  client.ptySubscriptions.set("session-b", { supportsAck: true, unackedBytes: 0, paused: false });
+
+  manager.broadcast({
+    type: "output",
+    sessionId: "session-a",
+    data: { incremental: true, chunk: "left" },
+  });
+  manager.broadcast({
+    type: "output",
+    sessionId: "session-b",
+    data: { incremental: true, chunk: "right" },
+  });
+
+  assert.equal(socket.sent.length, 1, "the first message is in flight");
+  assert.equal(client.sendQueue.length, 1, "the second subscribed pane remains queued on the same socket");
+  assert.equal(client.ptySubscriptions.get("session-a")?.unackedBytes, 4);
+  assert.equal(client.ptySubscriptions.get("session-b")?.unackedBytes, 5);
 });
 
 test("legacy PTY subscribers keep the bounded send queue", () => {
   const { manager, client } = createHarness();
-  client.subscribedSessionId = "session-a";
+  client.ptySubscriptions.set("session-a", { supportsAck: false, unackedBytes: 0, paused: false });
 
   for (let index = 0; index < 700; index += 1) {
     manager.broadcast({
@@ -213,13 +227,13 @@ test("legacy PTY subscribers keep the bounded send queue", () => {
   assert.equal(client.sendQueue.length, 500);
   assert.equal(client.backpressurePaused, true);
   assert.equal(client.pendingResyncSessions.has("session-a"), true);
-  assert.equal(client.unackedPtyBytes, 0);
-  assert.equal(client.ptyPausedSessionId, null);
+  assert.equal(client.ptySubscriptions.get("session-a")?.unackedBytes, 0);
+  assert.equal(client.ptySubscriptions.get("session-a")?.paused, false);
 });
 
 test("legacy PTY subscribers do not require acknowledgements", () => {
   const { manager, client, socket } = createHarness();
-  client.subscribedSessionId = "session-a";
+  client.ptySubscriptions.set("session-a", { supportsAck: false, unackedBytes: 0, paused: false });
 
   const paused: string[] = [];
   manager.port = {
@@ -236,6 +250,6 @@ test("legacy PTY subscribers do not require acknowledgements", () => {
   const sent = JSON.parse(socket.sent[0]) as { ptyBytes?: number; data: { chunk: string } };
   assert.equal(sent.ptyBytes, undefined);
   assert.equal(sent.data.chunk, chunk);
-  assert.equal(client.unackedPtyBytes, 0);
+  assert.equal(client.ptySubscriptions.get("session-a")?.unackedBytes, 0);
   assert.deepEqual(paused, []);
 });

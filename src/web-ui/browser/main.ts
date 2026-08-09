@@ -34,6 +34,7 @@ import { refreshAll } from "./session-engine";
 import { openWandDialog, showToast } from "./notifications";
 import { installFilePreviewLegacyAdapter } from "./file-preview-adapter";
 import { installMissionsLegacyAdapter } from "./missions-adapter";
+import { installWorkspacesLegacyAdapter } from "./workspaces-adapter";
 import {
   appendToComposer,
   copyTextSafely,
@@ -91,6 +92,7 @@ configureBrowserShellCommands(createBrowserShellCommands());
 startReactUi();
 installNewSessionLegacyAdapter();
 installMissionsLegacyAdapter();
+installWorkspacesLegacyAdapter();
 installFolderPickerLegacyAdapter();
 installWorktreeMergeLegacyAdapter({
   getSession(sessionId) {

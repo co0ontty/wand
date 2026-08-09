@@ -1,6 +1,11 @@
 import * as React from "react";
 
+import { CodeEditorHost } from "../code-editor/host";
 import { ProviderLogo } from "../provider-logo";
+import { workspaceContextStore } from "../workspaces/workspace-context";
+import { WorkspaceTabBar } from "../workspaces/workspace-tab-bar";
+import { WorkspaceWindow } from "../workspaces/workspace-window";
+import { activeWorkWindow } from "../workspaces/window-layout";
 import { ShellFilePanel } from "./shell-file-panel";
 import { ShellTopbar } from "./shell-topbar";
 import { useUiDispatch, useUiStoreSnapshot } from "./ui-store-react";
@@ -172,11 +177,23 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
   const snapshot = useUiStoreSnapshot();
   const classes = getShellLegacySlotClasses(snapshot.legacyVisibility);
   const cwd = snapshot.topbar.cwd || "/";
+  const context = React.useSyncExternalStore(
+    workspaceContextStore.subscribe,
+    workspaceContextStore.getSnapshot,
+    workspaceContextStore.getServerSnapshot,
+  );
+  // 进入工作空间分屏：只隐藏单例终端槽位（#output/#chat-output/composer/blank），
+  // 顶部任务标签栏继续保留；多窗格内容改由 <WorkspaceWindow/> 和终端池渲染。
+  // #output 本身仍保留在 DOM（单例终端实例仍挂在上面，仅不可见），退出分屏后
+  // 用缓冲 output 重置即可恢复，无需重建终端。
+  const inSplit = !!context.taskId && activeWorkWindow(context.layout)?.layout.type === "split";
 
   return (
-    <main className={`main-content${snapshot.layout.filePanelOpen ? " file-panel-open" : ""}`}>
-      <ShellTopbar/>
+    <main className={`main-content${snapshot.layout.filePanelOpen ? " file-panel-open" : ""}${inSplit ? " main-content-in-split" : ""}`}>
+      {/* 任务内由标签条承担主区导航；不再叠一层重复的会话标题栏。 */}
+      {context.taskId ? null : <ShellTopbar/>}
       <ShellFilePanel explorerRef={legacyRefs?.fileExplorer}/>
+      <WorkspaceTabBar/>
       <div id="output" className={classes.terminal} ref={legacyRefs?.terminal}/>
       <div id="chat-output" className={classes.chat} ref={legacyRefs?.chat}/>
       <ShellBlankChat
@@ -185,6 +202,8 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
         queueRef={legacyRefs?.crossSessionQueue}
       />
       <div className={classes.composer} ref={legacyRefs?.composer}/>
+      {inSplit ? <WorkspaceWindow/> : null}
+      <CodeEditorHost/>
     </main>
   );
 }

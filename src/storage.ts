@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { SessionSnapshot, ConversationTurn, SessionKind, SessionProvider, SessionRunner, SessionSource, StructuredSessionState, WorktreeMergeInfo } from "./types.js";
+import { SessionSnapshot, ConversationTurn, SessionKind, SessionProvider, SessionRunner, SessionSource, StructuredSessionState, WorktreeMergeInfo, Workspace, LayoutNode, TaskWindowLayout, WorkspaceDefaultProvider, WorkspaceTask, WorkspaceTaskWorktree, WorkspaceTaskStatus } from "./types.js";
 import { normalizeSessionDirectory } from "./session-directory-tree.js";
 import type {
   AgentActivityItem,
@@ -32,6 +32,8 @@ interface SessionRow {
   id: string;
   session_source: string | null;
   automation_id: string | null;
+  workspace_id: string | null;
+  workspace_task_id: string | null;
   provider: SessionProvider | null;
   session_kind: SessionKind | null;
   runner: SessionRunner | null;
@@ -369,13 +371,89 @@ function mapWorktreeMergeFields(row: SessionRow): Pick<SessionSnapshot, "worktre
 
 function sessionSelectFields(): string {
   return `id, session_source, automation_id, provider, session_kind, runner, command, cwd, mode, status, exit_code, started_at, ended_at, output, pty_output_seq, archived, archived_at, claude_session_id, messages, queued_messages, queued_message_skills, structured_state
-             , resumed_from_session_id, auto_recovered, worktree_enabled, worktree_info, worktree_merge_status, worktree_merge_info, title, description, session_options`;
+             , resumed_from_session_id, auto_recovered, worktree_enabled, worktree_info, worktree_merge_status, worktree_merge_info, title, description, session_options, workspace_id, workspace_task_id`;
+}
+
+interface WorkspaceRow {
+  id: string;
+  name: string;
+  cwd: string;
+  default_provider: string | null;
+  layout_json: string | null;
+  created_at: string;
+  last_opened_at: string | null;
+}
+
+function mapWorkspaceRow(row: WorkspaceRow): Workspace {
+  return {
+    id: row.id,
+    name: row.name,
+    cwd: row.cwd,
+    defaultProvider: (row.default_provider ?? undefined) as Workspace["defaultProvider"],
+    layout: row.layout_json ? safeJsonParse<LayoutNode>(row.layout_json) ?? null : null,
+    createdAt: row.created_at,
+    lastOpenedAt: row.last_opened_at,
+  };
+}
+
+interface WorkspaceTaskRow {
+  id: string;
+  workspace_id: string;
+  name: string;
+  worktree_json: string | null;
+  layout_json: string | null;
+  status: string;
+  created_at: string;
+  last_opened_at: string | null;
+}
+
+function mapWorkspaceTaskWorktree(raw: string | null): WorkspaceTaskWorktree | null {
+  const parsed = safeJsonParse<WorkspaceTaskWorktree>(raw);
+  if (!parsed || typeof parsed.path !== "string" || typeof parsed.branch !== "string") return null;
+  return parsed;
+}
+
+function firstLayoutTabId(node: LayoutNode): string | undefined {
+  if (node.type === "pane") return node.tabs[node.active]?.id ?? node.tabs[0]?.id;
+  return firstLayoutTabId(node.children[0]) ?? firstLayoutTabId(node.children[1]);
+}
+
+/** 读取旧版单棵分屏树时就地包成一个工作窗口，避免升级后丢失布局。 */
+function mapWorkspaceTaskLayout(raw: string | null): TaskWindowLayout | null {
+  const parsed = safeJsonParse<unknown>(raw);
+  if (!parsed || typeof parsed !== "object") return null;
+  const record = parsed as Record<string, unknown>;
+  if (record.type === "windows" && Array.isArray(record.windows)) {
+    return parsed as TaskWindowLayout;
+  }
+  if (record.type === "pane" || record.type === "split") {
+    const legacy = parsed as LayoutNode;
+    return {
+      type: "windows",
+      windows: [{ id: "window-legacy", layout: legacy, activeTabId: firstLayoutTabId(legacy) }],
+      activeWindowId: "window-legacy",
+    };
+  }
+  return null;
+}
+
+function mapWorkspaceTaskRow(row: WorkspaceTaskRow): WorkspaceTask {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    name: row.name,
+    worktree: mapWorkspaceTaskWorktree(row.worktree_json),
+    layout: mapWorkspaceTaskLayout(row.layout_json),
+    status: (row.status === "done" ? "done" : "active") as WorkspaceTaskStatus,
+    createdAt: row.created_at,
+    lastOpenedAt: row.last_opened_at,
+  };
 }
 
 function sessionPersistFields(): string {
   return `id, session_source, automation_id, command, cwd, mode, status, exit_code, started_at, ended_at, output, pty_output_seq
              , archived, archived_at, claude_session_id, provider, session_kind, runner, messages, queued_messages, queued_message_skills, structured_state
-             , resumed_from_session_id, auto_recovered, worktree_enabled, worktree_info, worktree_merge_status, worktree_merge_info, title, description, session_options`;
+             , resumed_from_session_id, auto_recovered, worktree_enabled, worktree_info, worktree_merge_status, worktree_merge_info, title, description, session_options, workspace_id, workspace_task_id`;
 }
 
 function sessionPersistAssignments(): string {
@@ -408,7 +486,9 @@ function sessionPersistAssignments(): string {
              worktree_merge_info = excluded.worktree_merge_info,
              title = excluded.title,
              description = excluded.description,
-             session_options = excluded.session_options`;
+             session_options = excluded.session_options,
+             workspace_id = excluded.workspace_id,
+             workspace_task_id = excluded.workspace_task_id`;
 }
 
 function sessionRuntimeMetadataAssignments(): string {
@@ -455,6 +535,8 @@ function sessionPersistValues(snapshot: SessionSnapshot): Array<string | number 
     snapshot.title ?? null,
     snapshot.description ?? null,
     serializeSessionOptions(snapshot),
+    snapshot.workspaceId ?? null,
+    snapshot.workspaceTaskId ?? null,
   ];
 }
 
@@ -524,6 +606,8 @@ function mapSessionCore(row: SessionRow): SessionSnapshot {
     worktree: parseWorktreeInfo(row.worktree_info) ?? null,
     title: row.title ?? undefined,
     description: row.description ?? undefined,
+    workspaceId: row.workspace_id ?? undefined,
+    workspaceTaskId: row.workspace_task_id ?? undefined,
     ...mapWorktreeMergeFields(row),
     ...sessionOptions,
     ...(Object.prototype.hasOwnProperty.call(sessionOptions, "pendingEscalation")
@@ -704,6 +788,34 @@ const INIT_SQL = `
   CREATE UNIQUE INDEX IF NOT EXISTS idx_mission_attempts_session ON mission_attempts(session_id) WHERE session_id IS NOT NULL;
   CREATE INDEX IF NOT EXISTS idx_mission_comments_attempt ON mission_review_comments(attempt_id, status);
   CREATE INDEX IF NOT EXISTS idx_agent_activity_state ON agent_activity(state, updated_at);
+
+  CREATE TABLE IF NOT EXISTS workspaces (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    cwd TEXT NOT NULL,
+    default_provider TEXT,
+    layout_json TEXT,
+    created_at TEXT NOT NULL,
+    last_opened_at TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_workspaces_cwd ON workspaces(cwd);
+  CREATE INDEX IF NOT EXISTS idx_workspaces_last_opened ON workspaces(last_opened_at);
+
+  CREATE TABLE IF NOT EXISTS workspace_tasks (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    worktree_json TEXT,
+    layout_json TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL,
+    last_opened_at TEXT,
+    FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_workspace_tasks_workspace ON workspace_tasks(workspace_id);
+  CREATE INDEX IF NOT EXISTS idx_workspace_tasks_last_opened ON workspace_tasks(last_opened_at);
 `;
 
 export function ensureDatabaseFile(dbPath: string): boolean {
@@ -839,6 +951,234 @@ export class WandStorage {
            updated_at = excluded.updated_at`
       )
       .run(normalizedPath, normalizedName, nowIso());
+  }
+
+  // ============ Workspaces（多标签 / 分屏项目）============
+
+  listWorkspaces(): Workspace[] {
+    const rows = this.db
+      .prepare(
+        "SELECT id, name, cwd, default_provider, layout_json, created_at, last_opened_at FROM workspaces ORDER BY COALESCE(last_opened_at, created_at) DESC"
+      )
+      .all() as unknown as WorkspaceRow[];
+    return rows.map(mapWorkspaceRow);
+  }
+
+  getWorkspace(id: string): Workspace | null {
+    const row = this.db
+      .prepare(
+        "SELECT id, name, cwd, default_provider, layout_json, created_at, last_opened_at FROM workspaces WHERE id = ?"
+      )
+      .get(id) as unknown as WorkspaceRow | undefined;
+    return row ? mapWorkspaceRow(row) : null;
+  }
+
+  createWorkspace(input: {
+    name: string;
+    cwd: string;
+    defaultProvider?: WorkspaceDefaultProvider;
+  }): Workspace {
+    const id = crypto.randomUUID();
+    const createdAt = nowIso();
+    this.db
+      .prepare(
+        `INSERT INTO workspaces (id, name, cwd, default_provider, layout_json, created_at, last_opened_at)
+         VALUES (?, ?, ?, ?, NULL, ?, NULL)`
+      )
+      .run(id, input.name, input.cwd, input.defaultProvider ?? null, createdAt);
+    return {
+      id,
+      name: input.name,
+      cwd: input.cwd,
+      defaultProvider: input.defaultProvider,
+      layout: null,
+      createdAt,
+      lastOpenedAt: null,
+    };
+  }
+
+  updateWorkspace(id: string, patch: {
+    name?: string;
+    cwd?: string;
+    defaultProvider?: WorkspaceDefaultProvider | null;
+  }): void {
+    const assignments: string[] = [];
+    const values: Array<string | null> = [];
+    if (patch.name !== undefined) {
+      assignments.push("name = ?");
+      values.push(patch.name);
+    }
+    if (patch.cwd !== undefined) {
+      assignments.push("cwd = ?");
+      values.push(patch.cwd);
+    }
+    if (patch.defaultProvider !== undefined) {
+      assignments.push("default_provider = ?");
+      values.push(patch.defaultProvider ?? null);
+    }
+    if (assignments.length === 0) return;
+    this.db.prepare(`UPDATE workspaces SET ${assignments.join(", ")} WHERE id = ?`).run(...values, id);
+  }
+
+  saveWorkspaceLayout(id: string, layout: LayoutNode | null): void {
+    this.db
+      .prepare("UPDATE workspaces SET layout_json = ? WHERE id = ?")
+      .run(layout ? JSON.stringify(layout) : null, id);
+  }
+
+  touchWorkspace(id: string): void {
+    this.db.prepare("UPDATE workspaces SET last_opened_at = ? WHERE id = ?").run(nowIso(), id);
+  }
+
+  deleteWorkspace(id: string, options: { cascade?: boolean } = {}): void {
+    if (options.cascade) {
+      this.db.prepare(
+        `DELETE FROM command_sessions
+         WHERE workspace_id = ?
+            OR workspace_task_id IN (SELECT id FROM workspace_tasks WHERE workspace_id = ?)`,
+      ).run(id, id);
+    } else {
+      // 解绑：保留会话，同时清空 workspace 与即将级联删除的 task 归属。
+      this.db.prepare(
+        `UPDATE command_sessions
+         SET workspace_id = NULL, workspace_task_id = NULL
+         WHERE workspace_id = ?
+            OR workspace_task_id IN (SELECT id FROM workspace_tasks WHERE workspace_id = ?)`,
+      ).run(id, id);
+    }
+    this.db.prepare("DELETE FROM workspaces WHERE id = ?").run(id);
+  }
+
+  listSessionsByWorkspace(workspaceId: string): SessionSnapshot[] {
+    const rows = this.db
+      .prepare(
+        `${sessionRowQuery("SELECT")}
+         FROM command_sessions
+         WHERE workspace_id = ?
+         ORDER BY started_at DESC`
+      )
+      .all(workspaceId) as unknown as SessionRow[];
+    return rows.map((row) => this.mapSessionRow(row));
+  }
+
+  /** 显式更新某会话的工作空间归属（用于创建时绑定）。 */
+  setSessionWorkspaceId(sessionId: string, workspaceId: string | null): void {
+    this.db.prepare("UPDATE command_sessions SET workspace_id = ? WHERE id = ?").run(workspaceId, sessionId);
+  }
+
+  // ── Workspace tasks（任务 = 命名 + 独立 worktree + 一组标签）──
+
+  listWorkspaceTasks(workspaceId: string): WorkspaceTask[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, workspace_id, name, worktree_json, layout_json, status, created_at, last_opened_at
+         FROM workspace_tasks WHERE workspace_id = ?
+         ORDER BY COALESCE(last_opened_at, created_at) DESC`
+      )
+      .all(workspaceId) as unknown as WorkspaceTaskRow[];
+    return rows.map(mapWorkspaceTaskRow);
+  }
+
+  getWorkspaceTask(id: string): WorkspaceTask | null {
+    const row = this.db
+      .prepare(
+        `SELECT id, workspace_id, name, worktree_json, layout_json, status, created_at, last_opened_at
+         FROM workspace_tasks WHERE id = ?`
+      )
+      .get(id) as unknown as WorkspaceTaskRow | undefined;
+    return row ? mapWorkspaceTaskRow(row) : null;
+  }
+
+  createWorkspaceTask(input: {
+    workspaceId: string;
+    name: string;
+    worktree?: WorkspaceTaskWorktree | null;
+    status?: WorkspaceTaskStatus;
+  }): WorkspaceTask {
+    const id = crypto.randomUUID();
+    const createdAt = nowIso();
+    const status: WorkspaceTaskStatus = input.status ?? "active";
+    this.db
+      .prepare(
+        `INSERT INTO workspace_tasks (id, workspace_id, name, worktree_json, layout_json, status, created_at, last_opened_at)
+         VALUES (?, ?, ?, ?, NULL, ?, ?, NULL)`
+      )
+      .run(
+        id,
+        input.workspaceId,
+        input.name,
+        input.worktree ? JSON.stringify(input.worktree) : null,
+        status,
+        createdAt,
+      );
+    return {
+      id,
+      workspaceId: input.workspaceId,
+      name: input.name,
+      worktree: input.worktree ?? null,
+      layout: null,
+      status,
+      createdAt,
+      lastOpenedAt: null,
+    };
+  }
+
+  updateWorkspaceTask(id: string, patch: {
+    name?: string;
+    status?: WorkspaceTaskStatus;
+    worktree?: WorkspaceTaskWorktree | null;
+  }): void {
+    const assignments: string[] = [];
+    const values: Array<string | null> = [];
+    if (patch.name !== undefined) {
+      assignments.push("name = ?");
+      values.push(patch.name);
+    }
+    if (patch.status !== undefined) {
+      assignments.push("status = ?");
+      values.push(patch.status);
+    }
+    if (patch.worktree !== undefined) {
+      assignments.push("worktree_json = ?");
+      values.push(patch.worktree ? JSON.stringify(patch.worktree) : null);
+    }
+    if (assignments.length === 0) return;
+    this.db.prepare(`UPDATE workspace_tasks SET ${assignments.join(", ")} WHERE id = ?`).run(...values, id);
+  }
+
+  saveWorkspaceTaskLayout(id: string, layout: TaskWindowLayout | null): void {
+    this.db
+      .prepare("UPDATE workspace_tasks SET layout_json = ? WHERE id = ?")
+      .run(layout ? JSON.stringify(layout) : null, id);
+  }
+
+  touchWorkspaceTask(id: string): void {
+    this.db.prepare("UPDATE workspace_tasks SET last_opened_at = ? WHERE id = ?").run(nowIso(), id);
+  }
+
+  deleteWorkspaceTask(id: string, options: { cascade?: boolean } = {}): void {
+    if (options.cascade) {
+      this.db.prepare("DELETE FROM command_sessions WHERE workspace_task_id = ?").run(id);
+    } else {
+      this.db.prepare("UPDATE command_sessions SET workspace_task_id = NULL WHERE workspace_task_id = ?").run(id);
+    }
+    this.db.prepare("DELETE FROM workspace_tasks WHERE id = ?").run(id);
+  }
+
+  listSessionsByWorkspaceTask(taskId: string): SessionSnapshot[] {
+    const rows = this.db
+      .prepare(
+        `${sessionRowQuery("SELECT")}
+         FROM command_sessions
+         WHERE workspace_task_id = ?
+         ORDER BY started_at DESC`
+      )
+      .all(taskId) as unknown as SessionRow[];
+    return rows.map((row) => this.mapSessionRow(row));
+  }
+
+  setSessionWorkspaceTaskId(sessionId: string, taskId: string | null): void {
+    this.db.prepare("UPDATE command_sessions SET workspace_task_id = ? WHERE id = ?").run(taskId, sessionId);
   }
 
   /** Get password from database */
@@ -1220,7 +1560,7 @@ export class WandStorage {
       .prepare(
         `INSERT INTO command_sessions (
          ${sessionPersistFields()}
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            ${sessionPersistAssignments()}`
       )
@@ -1448,6 +1788,8 @@ const SCHEMA_MIGRATIONS: ReadonlyArray<[column: string, sql: string]> = [
   ["description", "ALTER TABLE command_sessions ADD COLUMN description TEXT"],
   ["pty_output_seq", "ALTER TABLE command_sessions ADD COLUMN pty_output_seq INTEGER NOT NULL DEFAULT 0"],
   ["session_options", `ALTER TABLE command_sessions ADD COLUMN session_options TEXT NOT NULL DEFAULT '{"schemaVersion":1}'`],
+  ["workspace_id", "ALTER TABLE command_sessions ADD COLUMN workspace_id TEXT"],
+  ["workspace_task_id", "ALTER TABLE command_sessions ADD COLUMN workspace_task_id TEXT"],
 ];
 
 const AUTH_SESSION_MIGRATIONS: ReadonlyArray<[column: string, sql: string]> = [

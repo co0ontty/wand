@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
@@ -106,6 +106,107 @@ test("extracted file routes preserve directory, preview, write, range, recent, a
     assert.equal(search.status, 200);
     const searchBody = await search.json() as { results: Array<{ name: string }> };
     assert.ok(searchBody.results.some((item) => item.name === "server-file-routes.ts"));
+
+    // ── File management routes (create / dir-create / rename / delete) ──
+    const newPath = path.join(root, "new-file.txt");
+    const createRes = await fetch(`${baseUrl}/api/file-create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: newPath }),
+    });
+    assert.equal(createRes.status, 200);
+    assert.equal(existsSync(newPath), true);
+    assert.equal(readFileSync(newPath, "utf8"), "");
+    const duplicateCreate = await fetch(`${baseUrl}/api/file-create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: newPath }),
+    });
+    assert.equal(duplicateCreate.status, 409);
+
+    const newDir = path.join(root, "sub-dir");
+    const dirRes = await fetch(`${baseUrl}/api/dir-create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: newDir }),
+    });
+    assert.equal(dirRes.status, 200);
+    assert.equal(existsSync(newDir), true);
+
+    const renamedPath = path.join(root, "renamed.txt");
+    const renameRes = await fetch(`${baseUrl}/api/file-rename`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ from: newPath, to: renamedPath }),
+    });
+    assert.equal(renameRes.status, 200);
+    assert.equal(existsSync(newPath), false);
+    assert.equal(existsSync(renamedPath), true);
+
+    const collisionSource = path.join(root, "collision-source.txt");
+    const collisionTarget = path.join(root, "collision-target.txt");
+    writeFileSync(collisionSource, "source");
+    writeFileSync(collisionTarget, "target");
+    const collisionRename = await fetch(`${baseUrl}/api/file-rename`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ from: collisionSource, to: collisionTarget }),
+    });
+    assert.equal(collisionRename.status, 409);
+    assert.equal(readFileSync(collisionSource, "utf8"), "source");
+    assert.equal(readFileSync(collisionTarget, "utf8"), "target");
+
+    const missingRename = await fetch(`${baseUrl}/api/file-rename`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ from: path.join(root, "nope"), to: path.join(root, "x") }),
+    });
+    assert.equal(missingRename.status, 404);
+
+    const nestedInDir = path.join(newDir, "child.txt");
+    const childCreate = await fetch(`${baseUrl}/api/file-create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: nestedInDir }),
+    });
+    assert.equal(childCreate.status, 200);
+
+    const deleteDirRes = await fetch(`${baseUrl}/api/file-delete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: newDir }),
+    });
+    assert.equal(deleteDirRes.status, 200);
+    assert.equal(existsSync(newDir), false);
+
+    const deleteFileRes = await fetch(`${baseUrl}/api/file-delete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: renamedPath }),
+    });
+    assert.equal(deleteFileRes.status, 200);
+    assert.equal(existsSync(renamedPath), false);
+
+    const deleteMissing = await fetch(`${baseUrl}/api/file-delete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: path.join(root, "ghost") }),
+    });
+    assert.equal(deleteMissing.status, 404);
+
+    // Blocked system path must be refused.
+    const blockedDelete = await fetch(`${baseUrl}/api/file-delete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: "/etc/hosts" }),
+    });
+    assert.equal(blockedDelete.status, 403);
+    const blockedCreate = await fetch(`${baseUrl}/api/file-create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: "/root/wand-test-blocked.txt" }),
+    });
+    assert.equal(blockedCreate.status, 403);
   } finally {
     await new Promise<void>((resolve, reject) => {
       server.close((error) => error ? reject(error) : resolve());

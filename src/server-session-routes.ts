@@ -713,7 +713,7 @@ export function registerSessionRoutes(
   });
 
   app.post("/api/structured-sessions", asyncRoute(async (req, res) => {
-    const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner; provider?: string; worktreeEnabled?: boolean; model?: string; thinkingEffort?: string; sessionSource?: unknown; automationId?: unknown };
+    const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner; provider?: string; worktreeEnabled?: boolean; model?: string; thinkingEffort?: string; sessionSource?: unknown; automationId?: unknown; workspaceId?: string; workspaceTaskId?: string };
     try {
       if (body.provider && body.provider !== "claude" && body.provider !== "codex" && body.provider !== "opencode" && body.provider !== "grok" && body.provider !== "qoder" && body.provider !== "pi") {
         res.status(400).json({ error: "结构化会话当前仅支持 Claude、Codex、OpenCode、Grok 或 Qoder provider。" });
@@ -734,6 +734,8 @@ export function registerSessionRoutes(
         thinkingEffort: typeof body.thinkingEffort === "string"
           ? (body.thinkingEffort as SessionSnapshot["thinkingEffort"])
           : config.defaultThinkingEffort,
+        workspaceId: body.workspaceId,
+        workspaceTaskId: body.workspaceTaskId,
         ...origin,
       });
       onSessionCreated?.(snapshot.cwd);

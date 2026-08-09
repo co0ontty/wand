@@ -8,6 +8,13 @@ import { _vibrate, notifyTaskEnded, clearSessionProgressNative, _syncWakeLock, s
 import { refreshAll, scheduleSessionListUpdate, subscribeToSession, updateSessionSnapshot, getPreferredMessages, loadSessions, selectSession, updateShellChrome, loadOutput, isAutoApproveImpliedByMode, applyCurrentView } from "./session-engine";
 import { getLastAssistantSummary } from "./session-ui";
 import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS, clampClientTerminalOutput, maybeScrollTerminalToBottom, resetTerminal, restoreTerminalState, softResyncTerminal, syncTerminalBuffer, updateTerminalJumpToBottomButton, wandTerminalWrite } from "./terminal";
+import {
+  hasPooledTerminal,
+  replacePooledTerminalOutput,
+  resubscribePooledTerminals,
+  restorePooledTerminalState,
+  writePooledTerminal,
+} from "./terminal-pool";
 import { ensureTerminalFitWithRetry, scheduleTerminalResize } from "./viewport";
 import { render, restoreLoginSession } from "./render";
 import { isBrowserReactShellMounted } from "./shell-runtime";
@@ -133,6 +140,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
 
           ws.onopen = function() {
             state.ws = ws;
+            try { (window as any).__wandWs = ws; } catch (e) {}
             state.wsConnected = true;
             state.lastWsMessageAt = Date.now();
             // Reset backoff on a successful connect so the next disconnect
@@ -147,6 +155,8 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
             startWsHeartbeatCheck();
             // Subscribe to current session if any
             subscribeToSession(state.selectedId);
+            // 分屏池的非活动会话也需要在新 socket 上重新订阅。
+            resubscribePooledTerminals();
             // Flush pending messages after reconnection
             flushPendingMessages();
             // Re-fit terminal on reconnect — the viewport may have changed
@@ -358,7 +368,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
               }
             }
             // Real-time terminal output
-            if (msg.sessionId === state.selectedId && state.terminal && msg.data) {
+            if (msg.sessionId === state.selectedId && state.terminal && msg.data && !hasPooledTerminal(msg.sessionId)) {
               if (msg.data.chunk && isCurrentTerminalSession(msg.sessionId)) {
                 // Fast path: write chunk directly to avoid full-output comparison.
                 state.lastChunkAt = Date.now();
@@ -375,6 +385,16 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
               } else if (!msg.data.incremental && Object.prototype.hasOwnProperty.call(msg.data, "output")) {
                 // Fallback: no chunk available, use full-output comparison.
                 syncTerminalBuffer(msg.sessionId, msg.data.output || "", { mode: "append" });
+              }
+            } else if (msg.data && hasPooledTerminal(msg.sessionId)) {
+              // 分屏池：该会话属于工作空间分屏的某个窗格，路由到对应池实例（与单例隔离）。
+              if (msg.data.chunk) {
+                writePooledTerminal(msg.sessionId, String(msg.data.chunk), msg.ptyBytes);
+              } else if (!msg.data.incremental && Object.prototype.hasOwnProperty.call(msg.data, "output")) {
+                replacePooledTerminalOutput(msg.sessionId, String(msg.data.output || ""));
+                if (msg.ptyBytes) state.ws.send(JSON.stringify({ type: "pty_ack", sessionId: msg.sessionId, bytes: msg.ptyBytes }));
+              } else if (msg.ptyBytes) {
+                state.ws.send(JSON.stringify({ type: "pty_ack", sessionId: msg.sessionId, bytes: msg.ptyBytes }));
               }
             } else if (msg.ptyBytes && state.ws && state.ws.readyState === WebSocket.OPEN) {
               // A session switch can race with a final in-flight chunk. It is no
@@ -506,9 +526,19 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
               updateTaskDisplay();
               updateApprovalStats();
               var initOutput = msg.data.output || "";
-              if (!restoreTerminalState(msg.sessionId, msg.data.terminalState, initOutput)) {
+              if (hasPooledTerminal(msg.sessionId)) {
+                if (!restorePooledTerminalState(msg.sessionId, msg.data.terminalState, initOutput)) {
+                  replacePooledTerminalOutput(msg.sessionId, initOutput);
+                }
+              } else if (!restoreTerminalState(msg.sessionId, msg.data.terminalState, initOutput)) {
                 updateTerminalOutput(initOutput, msg.sessionId, "replace");
                 ensureTerminalFitWithRetry("init");
+              }
+            } else if (msg.data && hasPooledTerminal(msg.sessionId)) {
+              updateSessionSnapshot(msg.data);
+              var pooledInitOutput = msg.data.output || "";
+              if (!restorePooledTerminalState(msg.sessionId, msg.data.terminalState, pooledInitOutput)) {
+                replacePooledTerminalOutput(msg.sessionId, pooledInitOutput);
               }
             }
             break;

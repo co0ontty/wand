@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { exec } from "node:child_process";
 import { createReadStream } from "node:fs";
-import { lstat, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
@@ -233,6 +233,122 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
       });
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "保存文件失败。") });
+    }
+  }));
+
+  app.post("/api/file-create", asyncRoute(async (req, res) => {
+    const body = (req.body ?? {}) as { path?: unknown };
+    const filePath = typeof body.path === "string" ? body.path.trim() : "";
+    if (!filePath) {
+      res.status(400).json({ error: "缺少 path 参数。" });
+      return;
+    }
+    const resolvedPath = path.resolve(filePath);
+    if (isBlockedFolderPath(resolvedPath)) {
+      res.status(403).json({ error: "访问被拒绝：无法在系统目录下创建文件。" });
+      return;
+    }
+    try {
+      await writeFile(resolvedPath, "", { flag: "wx", encoding: "utf-8" });
+      const fileStat = await stat(resolvedPath);
+      res.json({ ok: true, path: resolvedPath, size: fileStat.size, mtime: fileStat.mtime.toISOString() });
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code === "EEXIST") {
+        res.status(409).json({ error: "文件已存在。", path: resolvedPath });
+        return;
+      }
+      res.status(400).json({ error: getErrorMessage(error, "创建文件失败。") });
+    }
+  }));
+
+  app.post("/api/dir-create", asyncRoute(async (req, res) => {
+    const body = (req.body ?? {}) as { path?: unknown };
+    const dirPath = typeof body.path === "string" ? body.path.trim() : "";
+    if (!dirPath) {
+      res.status(400).json({ error: "缺少 path 参数。" });
+      return;
+    }
+    const resolvedPath = path.resolve(dirPath);
+    if (isBlockedFolderPath(resolvedPath)) {
+      res.status(403).json({ error: "访问被拒绝：无法在系统目录下创建文件夹。" });
+      return;
+    }
+    try {
+      await mkdir(resolvedPath, { recursive: true });
+      const fileStat = await stat(resolvedPath);
+      res.json({ ok: true, path: resolvedPath, mtime: fileStat.mtime.toISOString() });
+    } catch (error) {
+      res.status(400).json({ error: getErrorMessage(error, "创建文件夹失败。") });
+    }
+  }));
+
+  app.post("/api/file-rename", asyncRoute(async (req, res) => {
+    const body = (req.body ?? {}) as { from?: unknown; to?: unknown };
+    const fromRaw = typeof body.from === "string" ? body.from.trim() : "";
+    const toRaw = typeof body.to === "string" ? body.to.trim() : "";
+    if (!fromRaw || !toRaw) {
+      res.status(400).json({ error: "缺少 from 或 to 参数。" });
+      return;
+    }
+    const fromPath = path.resolve(fromRaw);
+    const toPath = path.resolve(toRaw);
+    if (isBlockedFolderPath(fromPath) || isBlockedFolderPath(toPath)) {
+      res.status(403).json({ error: "访问被拒绝：无法操作系统目录。" });
+      return;
+    }
+    if (fromPath === toPath) {
+      res.status(400).json({ error: "源路径与目标路径相同。" });
+      return;
+    }
+    try {
+      const fromStat = await lstat(fromPath);
+      try {
+        const toStat = await lstat(toPath);
+        // macOS 默认大小写不敏感；仅当两个路径实际指向同一 inode 时允许
+        // foo.ts → Foo.ts 这种大小写重命名，其余目标一律拒绝覆盖。
+        if (fromStat.dev !== toStat.dev || fromStat.ino !== toStat.ino) {
+          res.status(409).json({ error: "目标路径已存在。" });
+          return;
+        }
+      } catch (targetError) {
+        if ((targetError as NodeJS.ErrnoException).code !== "ENOENT") throw targetError;
+      }
+      await rename(fromPath, toPath);
+      res.json({ ok: true, from: fromPath, to: toPath });
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code === "ENOENT") {
+        res.status(404).json({ error: "源路径不存在。" });
+        return;
+      }
+      res.status(400).json({ error: getErrorMessage(error, "重命名/移动失败。") });
+    }
+  }));
+
+  app.post("/api/file-delete", asyncRoute(async (req, res) => {
+    const body = (req.body ?? {}) as { path?: unknown };
+    const targetPath = typeof body.path === "string" ? body.path.trim() : "";
+    if (!targetPath) {
+      res.status(400).json({ error: "缺少 path 参数。" });
+      return;
+    }
+    const resolvedPath = path.resolve(targetPath);
+    if (isBlockedFolderPath(resolvedPath)) {
+      res.status(403).json({ error: "访问被拒绝：无法删除系统目录。" });
+      return;
+    }
+    try {
+      const fileStat = await stat(resolvedPath);
+      await rm(resolvedPath, { recursive: fileStat.isDirectory(), force: false });
+      res.json({ ok: true, path: resolvedPath, wasDirectory: fileStat.isDirectory() });
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code === "ENOENT") {
+        res.status(404).json({ error: "路径不存在。" });
+        return;
+      }
+      res.status(400).json({ error: getErrorMessage(error, "删除失败。") });
     }
   }));
 

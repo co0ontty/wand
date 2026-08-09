@@ -45,6 +45,7 @@ import {
   ServerUpdateState,
 } from "./server-update-routes.js";
 import { parseSessionCreationOrigin, registerClaudeHistoryRoutes, registerSessionRoutes } from "./server-session-routes.js";
+import { registerWorkspaceRoutes } from "./server-workspace-routes.js";
 import { resolveSessionCwd } from "./session-cwd.js";
 import { getErrorMessage } from "./error-utils.js";
 import { asyncRoute, jsonErrorHandler } from "./express-async.js";
@@ -1103,6 +1104,7 @@ export async function startServer(
     recordRecentPath(storage, cwd);
   });
   registerClaudeHistoryRoutes(app, processes, structuredSessions, storage, sessionRegistry);
+  registerWorkspaceRoutes(app, storage, sessionRegistry);
   registerMissionRoutes(app, missions);
   registerUploadRoutes(app, processes);
 
@@ -1189,6 +1191,8 @@ export async function startServer(
             worktreeEnabled: body.worktreeEnabled === true,
             cols: reqCols,
             rows: reqRows,
+            workspaceId: body.workspaceId,
+            workspaceTaskId: body.workspaceTaskId,
             ...origin,
           })
         : processes.start(
@@ -1203,6 +1207,8 @@ export async function startServer(
               cols: reqCols,
               rows: reqRows,
               thinkingEffort: body.thinkingEffort ?? config.defaultThinkingEffort,
+              workspaceId: body.workspaceId,
+              workspaceTaskId: body.workspaceTaskId,
               ...origin,
             }
           ));

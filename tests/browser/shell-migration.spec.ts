@@ -30,7 +30,7 @@ test("React shell keeps all legacy host roots, draft, and selection stable", asy
   await page.locator("#topbar-file-button").click();
   await expect(page.locator("#file-side-panel")).toHaveClass(/open/);
   await page.locator("#file-explorer-refresh").click();
-  await expect(page.locator(".tree-item[data-type='file']").first()).toBeVisible();
+  await expect(page.locator(".wand-explorer-row").first()).toBeVisible();
   await page.locator("#file-side-panel-close").click();
   await page.evaluate(() => {
     document.querySelector<HTMLButtonElement>("#sessions-toggle-button")?.click();

@@ -1146,7 +1146,7 @@ export class ProcessManager extends EventEmitter {
     }
   }
 
-  async start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: { resumedFromSessionId?: string; autoRecovered?: boolean; worktreeEnabled?: boolean; provider?: SessionProvider; model?: string; reuseId?: string; cols?: number; rows?: number; thinkingEffort?: SessionSnapshot["thinkingEffort"]; sessionSource?: SessionSource; automationId?: string; interactiveShell?: boolean }): Promise<SessionSnapshot> {
+  async start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: { resumedFromSessionId?: string; autoRecovered?: boolean; worktreeEnabled?: boolean; provider?: SessionProvider; model?: string; reuseId?: string; cols?: number; rows?: number; thinkingEffort?: SessionSnapshot["thinkingEffort"]; sessionSource?: SessionSource; automationId?: string; workspaceId?: string; workspaceTaskId?: string; interactiveShell?: boolean }): Promise<SessionSnapshot> {
     if (this.disposed) throw new Error("ProcessManager has been disposed.");
     if (!opts?.interactiveShell) this.assertCommandAllowed(command);
 
@@ -1225,6 +1225,8 @@ export class ProcessManager extends EventEmitter {
       id,
       sessionSource: opts?.sessionSource ?? inheritedSessionSource ?? "interactive",
       automationId: opts?.automationId ?? inheritedAutomationId,
+      workspaceId: opts?.workspaceId,
+      workspaceTaskId: opts?.workspaceTaskId,
       provider,
       command,
       cwd: resolvedCwd,
@@ -2093,6 +2095,8 @@ export class ProcessManager extends EventEmitter {
       ptyRows: record.ptyRows,
       ptyOutputSeq: record.ptyOutputSeq ?? 0,
       ptyLaunchMarkerToken: record.ptyLaunchMarkerToken ?? null,
+      workspaceId: record.workspaceId,
+      workspaceTaskId: record.workspaceTaskId,
     };
   }
 
@@ -2596,6 +2600,8 @@ export class ProcessManager extends EventEmitter {
     rows?: number;
     sessionSource?: SessionSource;
     automationId?: string;
+    workspaceId?: string;
+    workspaceTaskId?: string;
   }): Promise<SessionSnapshot> {
     return this.start(this.config.shell, cwd, mode, undefined, {
       ...opts,

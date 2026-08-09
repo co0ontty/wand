@@ -338,6 +338,10 @@ export interface CommandRequest {
   rows?: number;
   /** 思考深度。null/缺省 视为 off（不启用思考）。 */
   thinkingEffort?: ThinkingEffort | null;
+  /** 创建会话时绑定到的工作空间 ID（多标签 / 分屏项目）。 */
+  workspaceId?: string;
+  /** 创建会话时绑定到的工作空间任务 ID（任务 = 独立 worktree + 一组标签）。 */
+  workspaceTaskId?: string;
 }
 
 export interface InputRequest {
@@ -526,6 +530,10 @@ export interface SessionSnapshot {
   sessionSource?: SessionSource;
   /** 自动化创建会话时关联的自动化任务 ID。 */
   automationId?: string;
+  /** 所属工作空间 ID（多标签 / 分屏项目）。会话在该工作空间窗口内作为一个标签。 */
+  workspaceId?: string;
+  /** 所属工作空间任务 ID；任务独占一个 worktree，其下所有会话共享该 worktree 目录。 */
+  workspaceTaskId?: string;
   sessionKind?: SessionKind;
   provider?: SessionProvider;
   /** True while the provider CLI owns the PTY; false after it returns to the persistent shell. */
@@ -604,6 +612,75 @@ export interface SessionSnapshot {
   ptyOutputSeq?: number;
   /** Internal shell-wrapper marker needed to keep parsing a daemon-owned PTY after reattach. */
   ptyLaunchMarkerToken?: string | null;
+}
+
+// ── Workspace（多标签 / 分屏项目，参考 Orca）──
+
+/** 工作空间默认 IDE；新建 Agent 标签时缺省回落到该 provider。 */
+export type WorkspaceDefaultProvider = SessionProvider;
+
+/** 工作空间内一个标签页：会话（IDE/终端）/ 编辑器 / 预览。 */
+export type PaneTab =
+  | { id: string; kind: "session"; sessionId: string }
+  | { id: string; kind: "editor"; path: string }
+  | { id: string; kind: "preview"; path: string };
+
+/**
+ * 标签 / 分屏布局树。叶子是 tabset（一组标签），内部节点是二分屏。
+ * `split.ratio` 为左/上子节点占比（0~1），由前端 allotment 回写持久化。
+ */
+export type LayoutNode =
+  | { type: "pane"; tabs: PaneTab[]; active: number }
+  | { type: "split"; dir: "h" | "v"; ratio: number; children: [LayoutNode, LayoutNode] };
+
+/** 顶部一个工作窗口 Tab；内部可以包含一棵终端分屏树。 */
+export interface WorkWindowLayout {
+  id: string;
+  layout: LayoutNode;
+  activeTabId?: string;
+}
+
+/** 任务级窗口集合：顶部 Tab 与 windows 一一对应。 */
+export interface TaskWindowLayout {
+  type: "windows";
+  windows: WorkWindowLayout[];
+  activeWindowId: string | null;
+}
+
+/** 项目 / 工作空间。锚定一个目录（如 wand 仓库），内含多个并行「任务」。 */
+export interface Workspace {
+  id: string;
+  name: string;
+  cwd: string;
+  defaultProvider?: WorkspaceDefaultProvider;
+  /**
+   * 工作空间级的布局占位（保留字段）。标签 / 分屏布局实际挂在 Task 上
+   * （见 WorkspaceTask.layout），因为每个任务独占一个 worktree 与一组标签。
+   */
+  layout: LayoutNode | null;
+  createdAt: string;
+  lastOpenedAt: string | null;
+}
+
+/** 任务所属 worktree 信息（复用 WorktreeInfo）；非 git 目录时为 null（退化为直接在项目目录运行）。 */
+export type WorkspaceTaskWorktree = WorktreeInfo;
+
+export type WorkspaceTaskStatus = "active" | "done";
+
+/**
+ * 工作空间内的一个「任务」：命名、独立 worktree 隔离、自带一组标签（LayoutNode）。
+ * 一个工作空间下可有多个任务，任务在侧栏列表里单独展示；每个任务的会话共享该任务的 worktree。
+ */
+export interface WorkspaceTask {
+  id: string;
+  workspaceId: string;
+  name: string;
+  worktree: WorkspaceTaskWorktree | null;
+  /** 该任务的工作窗口 Tabs；每个窗口内部可含一棵分屏树。 */
+  layout: TaskWindowLayout | null;
+  status: WorkspaceTaskStatus;
+  createdAt: string;
+  lastOpenedAt: string | null;
 }
 
 // ── Session Event (PTY Bridge Output) ──

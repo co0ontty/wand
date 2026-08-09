@@ -12,7 +12,14 @@ var LS_MIGRATIONS = [
   // v1 保留为 no-op：曾经这里会删除 wand-sidebar-pinned，导致升级或刷新时
   // 覆盖用户明确选择的侧栏状态。迁移函数必须只修正格式，不能抹掉偏好。
   function migrateSidebarPinDefault() {
-  }
+  },
+  // v2: desktop sidebar now has two states only: full (default) and compact.
+  // Clear the removed temporary/closed state once, while later user toggles
+  // continue to persist the compact preference normally.
+  function migrateSidebarToFullDefault() {
+    localStorage.setItem("wand-sidebar-pinned", "true");
+    localStorage.setItem("wand-sidebar-collapsed", "false");
+  },
 ];
 (function runLocalStorageMigrations() {
   try {
@@ -59,6 +66,10 @@ export var state: AppState = {
     } catch (e) {}
     try { return localStorage.getItem("wand-selected-session") || null; } catch (e) { return null; }
   })(),
+  activeWorkspaceId: (function() {
+    try { return localStorage.getItem("wand-active-workspace") || null; } catch (e) { return null; }
+  })(),
+  activeWorkspaceTaskId: null,
   pollTimer: null,
   config: null,
   sessions: [],
@@ -141,7 +152,7 @@ export var state: AppState = {
   loginChecked: false,
   bootstrapping: true,
   sessionsDrawerOpen: readStoredBoolean("wand-sidebar-open", false),
-  // 新交互：桌面默认呼出即常驻；只有用户主动关闭过才记 "false"。
+  // 桌面仅保留完整 / 窄栏两态，完整侧栏为默认状态。
   sidebarPinned: readStoredBoolean("wand-sidebar-pinned", true),
   sidebarCollapsed: readStoredBoolean("wand-sidebar-collapsed", false),
   modeValue: "managed",

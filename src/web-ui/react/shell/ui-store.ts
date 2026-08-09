@@ -112,6 +112,8 @@ export type UiAction =
   | { type: "session.new" }
   | { type: "session.newAt"; cwd: string }
   | { type: "missions.open" }
+  | { type: "workspace.new" }
+  | { type: "workspace.newAt"; cwd: string }
   | { type: "session.quickStart.claude" }
   | { type: "session.quickStart.codex" }
   | { type: "session.quickStart.opencode" }

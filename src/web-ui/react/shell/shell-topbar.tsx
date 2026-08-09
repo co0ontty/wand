@@ -10,7 +10,7 @@ import type { UiAction } from "./ui-store";
 void React;
 
 function TopbarIcon({ name, size = 16 }: {
-  name: "copy" | "file" | "git" | "hash" | "merge" | "more" | "trash";
+  name: "copy" | "explorer" | "file" | "git" | "hash" | "merge" | "more" | "trash";
   size?: number;
 }) {
   const common = {
@@ -26,6 +26,7 @@ function TopbarIcon({ name, size = 16 }: {
   };
   switch (name) {
     case "copy": return <svg {...common}><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>;
+    case "explorer": return <svg {...common}><path d="M8 3h7l4 4v11a2 2 0 01-2 2H8a2 2 0 01-2-2V5a2 2 0 012-2z"/><path d="M15 3v4h4"/><path d="M3 9h7l2 2v8a1 1 0 01-1 1H4a1 1 0 01-1-1z"/></svg>;
     case "file": return <svg {...common}><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>;
     case "git": return <svg {...common} className="topbar-git-icon"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="9" r="2"/><path d="M6 8v8M18 11v1a3 3 0 01-3 3H9"/></svg>;
     case "hash": return <svg {...common}><path d="M4 9h16M4 15h16M10 3L8 21M16 3l-2 18"/></svg>;
@@ -83,16 +84,18 @@ export function ShellTopbar() {
   return (
     <div className="main-header-row">
       <div className="topbar-left">
-        <button
-          id="sessions-toggle-button"
-          className={classNames("floating-sidebar-toggle", snapshot.layout.sessionsDrawerOpen && "active")}
-          aria-label="切换会话侧栏"
-          type="button"
-          onClick={() => void dispatch({ type: "layout.drawer.toggle" })}
-        >
-          <span className="hamburger-icon"><span/><span/><span/></span>
-        </button>
-        <span className="topbar-brand" aria-hidden="true">W</span>
+        {snapshot.viewport.mobile && (
+          <button
+            id="sessions-toggle-button"
+            className={classNames("floating-sidebar-toggle", snapshot.layout.sessionsDrawerOpen && "active")}
+            aria-label="切换会话侧栏"
+            type="button"
+            onClick={() => void dispatch({ type: "layout.drawer.toggle" })}
+          >
+            <span className="hamburger-icon"><span/><span/><span/></span>
+          </button>
+        )}
+        {!snapshot.layout.sidebarAnchored && <span className="topbar-brand" aria-hidden="true">W</span>}
       </div>
       <div className="topbar-center">
         {selected ? (
@@ -152,7 +155,7 @@ export function ShellTopbar() {
           title="查看文件（可修改路径）"
           onClick={() => void dispatch({ type: "layout.files.toggle" })}
         >
-          <TopbarIcon name="file"/>
+          <TopbarIcon name="explorer"/>
         </button>
         <span id="topbar-git-slot" className="topbar-git-slot">
           {snapshot.topbar.git && (

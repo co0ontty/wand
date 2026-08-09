@@ -9,6 +9,7 @@ export interface LegacyUiCommands {
   refreshPage(): void | Promise<unknown>;
   openNewSession(cwd?: string): void | Promise<unknown>;
   openMissions?(): void | Promise<unknown>;
+  openNewProject?(cwd?: string): void | Promise<unknown>;
   quickStartClaudeTerminal(): void | Promise<unknown>;
   quickStartCodexTerminal(): void | Promise<unknown>;
   quickStartOpenCodeTerminal(): void | Promise<unknown>;
@@ -58,6 +59,8 @@ export function applyLegacyUiAction(
     case "session.new": return commands.openNewSession();
     case "session.newAt": return commands.openNewSession(action.cwd);
     case "missions.open": return commands.openMissions?.();
+    case "workspace.new": return commands.openNewProject?.();
+    case "workspace.newAt": return commands.openNewProject?.(action.cwd);
     case "session.quickStart.claude": return commands.quickStartClaudeTerminal();
     case "session.quickStart.codex": return commands.quickStartCodexTerminal();
     case "session.quickStart.opencode": return commands.quickStartOpenCodeTerminal();

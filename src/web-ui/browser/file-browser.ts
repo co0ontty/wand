@@ -11,6 +11,7 @@ import { getConfigCwd } from "./chat-scroll";
 import { isBrowserReactShellMounted } from "./shell-runtime";
 import { notifyLegacyUiChange } from "./ui-store-bridge";
 import { openFilePreviewFromLegacy } from "./file-preview-adapter";
+import { mountFileExplorerHost, updateFileExplorerCwd } from "./file-explorer-adapter";
 
       export function isMobileLayout() {
         return window.innerWidth <= 768;
@@ -271,6 +272,19 @@ import { openFilePreviewFromLegacy } from "./file-preview-adapter";
           return;
         }
         state.fileExplorerCwd = cwd;
+
+        // Use new React FileExplorerHost for tree view
+        if (!isBrowserReactShellMounted()) {
+          mountFileExplorerHost(explorer, cwd);
+          if (cwdEl && cwdEl.tagName === "INPUT") {
+            if (document.activeElement !== cwdEl) {
+              (cwdEl as HTMLInputElement).value = cwd;
+            }
+          }
+          return;
+        }
+
+        // Legacy flat list fallback (should not reach here when React Shell is mounted)
         state.fileExplorerLoading = true;
         state.allFiles = [];
         state.fileExplorerTruncated = false;

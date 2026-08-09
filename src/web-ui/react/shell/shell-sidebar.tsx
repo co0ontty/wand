@@ -1,6 +1,8 @@
 import * as React from "react";
 import { normalizeProviderId, providerDisplayName } from "../../provider-identity";
+import { FileExplorerHost } from "../file-explorer/host";
 import { ProviderLogo } from "../provider-logo";
+import { WorkspacesPanel } from "../workspaces/workspaces-panel";
 import { WandPopover } from "../ui";
 import { classNames } from "../ui/class-names";
 
@@ -84,7 +86,7 @@ export function getShellSidebarEntryActions(
 
 function Icon({ name, size = 14, className }: {
   name: "back" | "check" | "chevron" | "cleanup" | "close" | "edit" | "file" | "gear"
-    | "history" | "inbox" | "logout" | "merge" | "more" | "pin" | "resume" | "server"
+    | "history" | "inbox" | "logout" | "merge" | "more" | "rail" | "resume" | "server"
     | "spark" | "trash";
   size?: number;
   className?: string;
@@ -129,8 +131,8 @@ function Icon({ name, size = 14, className }: {
       return <svg {...common}><path d="M7 7h10M7 12h10M7 17h10M5 7L3 9l2 2M19 15l2 2-2 2"/></svg>;
     case "more":
       return <svg {...common}><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>;
-    case "pin":
-      return <svg {...common}><path d="M12 17v5M5 17h14M9 12V6H8a2 2 0 010-4h8a2 2 0 010 4h-1v6"/></svg>;
+    case "rail":
+      return <svg {...common}><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 4v16"/><path d="M11 8h6M11 12h6M11 16h4"/></svg>;
     case "resume":
       return <svg {...common}><path d="M1 4v6h6M3.5 15A9 9 0 109 3.6L3 10"/></svg>;
     case "server":
@@ -479,16 +481,38 @@ function SessionEntry({
   );
 }
 
-type SidebarViewMode = "sessions" | "directories";
+export type SidebarViewMode = "sessions" | "directories" | "files" | "workspaces";
+
+export interface ShellSidebarPrimaryAction {
+  readonly action: UiAction;
+  readonly label: string;
+  readonly ariaLabel: string;
+}
+
+export function getShellSidebarPrimaryAction(mode: SidebarViewMode): ShellSidebarPrimaryAction {
+  if (mode === "workspaces") {
+    return {
+      action: { type: "workspace.new" },
+      label: "新项目",
+      ariaLabel: "新建项目",
+    };
+  }
+  return {
+    action: { type: "session.new" },
+    label: "新会话",
+    ariaLabel: "新建会话",
+  };
+}
 
 const SIDEBAR_VIEW_MODE_KEY = "wand-sidebar-view-mode";
 
 function readSidebarViewMode(): SidebarViewMode {
   if (typeof window === "undefined") return "sessions";
   try {
-    return window.localStorage.getItem(SIDEBAR_VIEW_MODE_KEY) === "directories"
-      ? "directories"
-      : "sessions";
+    const stored = window.localStorage.getItem(SIDEBAR_VIEW_MODE_KEY);
+    // 侧栏只保留两个稳定的一级入口。旧版的「目录 / 文件」选择在升级后
+    // 回到会话；文件仍可从主区文件按钮打开，不再与会话 / 项目抢一级层级。
+    return stored === "workspaces" ? stored : "sessions";
   } catch {
     return "sessions";
   }
@@ -619,7 +643,7 @@ function useSessionDirectories(enabled: boolean, refreshKey: number): {
       }
     } catch (fetchError: unknown) {
       if (!abort.signal.aborted && generation === loadGenerationRef.current) {
-        const loadError = fetchError instanceof Error ? fetchError : new Error("无法加载会话目录");
+        const loadError = fetchError instanceof Error ? fetchError : new Error("无法加载项目");
         setError(loadError.message);
         if (propagateError) throw loadError;
       }
@@ -647,7 +671,7 @@ function useSessionDirectories(enabled: boolean, refreshKey: number): {
   }, [enabled, refreshKey, loadLatest]);
 
   const rename = React.useCallback(async (path: string, name: string) => {
-    if (renameInFlightRef.current) throw new Error("另一个工作区名称正在保存，请稍候。");
+    if (renameInFlightRef.current) throw new Error("另一个项目名称正在保存，请稍候。");
     renameInFlightRef.current = true;
     setError("");
     loadGenerationRef.current += 1;
@@ -753,8 +777,8 @@ function DirectoryNode({
     }
     if (renameTooLong || renameHasInvalidCharacters) {
       setRenameError(renameHasInvalidCharacters
-        ? "工作区名称不能包含换行或控制字符"
-        : "工作区名称最多 80 个字符");
+        ? "项目名称不能包含换行或控制字符"
+        : "项目名称最多 80 个字符");
       return;
     }
     setRenameSaving(true);
@@ -764,7 +788,7 @@ function DirectoryNode({
       setRenaming(false);
       restoreRenameTriggerFocus();
     } catch (error) {
-      setRenameError(error instanceof Error ? error.message : "无法更新工作区名称");
+      setRenameError(error instanceof Error ? error.message : "无法更新项目名称");
     } finally {
       setRenameSaving(false);
     }
@@ -800,8 +824,8 @@ function DirectoryNode({
               autoComplete="off"
               spellCheck={false}
               aria-invalid={renameTooLong || renameHasInvalidCharacters || undefined}
-              aria-label={`为 ${node.name} 设置工作区名称`}
-              placeholder="工作区名称（留空恢复目录名）"
+              aria-label={`为 ${node.name} 设置项目名称`}
+              placeholder="项目名称（留空恢复文件夹名）"
               onChange={(event) => {
                 setRenameDraft(event.currentTarget.value);
                 setRenameError("");
@@ -812,7 +836,7 @@ function DirectoryNode({
               className="session-directory-rename-action save"
               disabled={renameSaving || renameTooLong || renameHasInvalidCharacters}
               title="保存名称"
-              aria-label="保存工作区名称"
+              aria-label="保存项目名称"
             >
               <Icon name="check" size={14}/>
             </button>
@@ -833,7 +857,7 @@ function DirectoryNode({
               type="button"
               className="session-directory-main"
               aria-expanded={open}
-              aria-label={`${labels.displayName}，${node.totalCount} 个会话，目录 ${labels.path}`}
+              aria-label={`${labels.displayName} 项目，${node.totalCount} 个会话，路径 ${labels.path}`}
               title={labels.path}
               onClick={() => { if (hasContents) setOpen((current) => !current); }}
             >
@@ -855,8 +879,8 @@ function DirectoryNode({
                   ref={renameTriggerRef}
                   type="button"
                   className="session-directory-rename"
-                  title={`设置 ${labels.displayName} 的工作区名称`}
-                  aria-label={`重命名工作区 ${labels.displayName}`}
+                  title={`设置 ${labels.displayName} 的项目名称`}
+                  aria-label={`重命名项目 ${labels.displayName}`}
                   onClick={beginRename}
                 >
                   <Icon name="edit" size={14}/>
@@ -878,9 +902,9 @@ function DirectoryNode({
       {renaming && (renameTooLong || renameHasInvalidCharacters || renameError) && (
         <div className="session-directory-rename-error" role="alert">
           {renameHasInvalidCharacters
-            ? "工作区名称不能包含换行或控制字符"
+            ? "项目名称不能包含换行或控制字符"
             : renameTooLong
-              ? `工作区名称最多 80 个字符（当前 ${renameLength} 个）`
+              ? `项目名称最多 80 个字符（当前 ${renameLength} 个）`
               : renameError}
         </div>
       )}
@@ -925,13 +949,13 @@ function DirectoryTree({
   dispatch(action: UiAction): void | Promise<unknown>;
   renameDirectory(path: string, name: string): Promise<void>;
 }) {
-  if (loading && !response) return <div className="session-directory-state">正在整理目录…</div>;
+  if (loading && !response) return <div className="session-directory-state">正在整理项目…</div>;
   if (error && !response) return <div className="session-directory-state error">{error}</div>;
   if (!response || response.roots.length === 0) {
-    return <div className="empty-state"><strong>还没有会话目录</strong><br/>创建会话后会按工作目录显示在这里。</div>;
+    return <div className="empty-state"><strong>还没有项目</strong><br/>创建会话后会按工作路径自动归入项目。</div>;
   }
   return (
-    <div className="session-directory-tree" aria-label="会话目录树">
+    <div className="session-directory-tree" aria-label="项目列表">
       {response.roots.map((node) => (
         <DirectoryNode
           key={node.path || node.name}
@@ -955,7 +979,7 @@ function SidebarViewSwitch({
 }) {
   return (
     <div className="sidebar-view-switch" role="tablist" aria-label="侧栏展示方式">
-      {(["sessions", "directories"] as const).map((value) => (
+      {(["sessions", "workspaces"] as const).map((value) => (
         <button
           key={value}
           type="button"
@@ -964,10 +988,33 @@ function SidebarViewSwitch({
           className={classNames(mode === value && "active")}
           onClick={() => onChange(value)}
         >
-          {value === "sessions" ? "会话" : "目录"}
+          {value === "sessions" ? "会话" : "项目"}
         </button>
       ))}
     </div>
+  );
+}
+
+function SidebarCompactToggle({
+  active,
+  onToggle,
+}: {
+  active: boolean;
+  onToggle(): void;
+}) {
+  const label = active ? "展开完整侧边栏" : "收起为窄栏";
+  return (
+    <button
+      className={classNames("sidebar-compact-toggle", active && "active")}
+      type="button"
+      aria-label={label}
+      aria-pressed={active}
+      title={label}
+      onClick={onToggle}
+    >
+      <Icon name="rail" size={14}/>
+      <span className="sidebar-compact-toggle-label">{label}</span>
+    </button>
   );
 }
 
@@ -1205,6 +1252,15 @@ export function ShellSidebar() {
       void dispatch({ type: "session.manage.toggle" });
     }
   };
+  const fileExplorerRoot = snapshot.topbar.cwd || snapshot.selected?.cwd || "";
+  const primaryAction = getShellSidebarPrimaryAction(viewMode);
+  const activeCount = viewMode === "directories"
+    ? directories.data?.directoryCount ?? "…"
+    : viewMode === "files"
+      ? "文件"
+      : viewMode === "workspaces"
+        ? "项目"
+        : snapshot.sidebar.interactiveCount;
 
   return (
     <>
@@ -1216,106 +1272,114 @@ export function ShellSidebar() {
       />
       <aside id="sessions-drawer" className={sidebarClass} aria-label="会话侧栏">
         <div className="sidebar-header">
-          <div className="sidebar-header-main">
-            <div className="topbar-logo-icon">W</div>
-            <SidebarViewSwitch mode={viewMode} onChange={changeViewMode}/>
-            <span className="session-count" id="session-count">
-              {viewMode === "directories"
-                ? directories.data?.directoryCount ?? "…"
-                : snapshot.sidebar.interactiveCount}
-            </span>
-          </div>
-          <div className="sidebar-header-actions">
-            <div className="sidebar-header-more">
-              <WandPopover
-                open={moreOpen}
-                onOpenChange={setMoreOpen}
-                align="end"
-                sideOffset={6}
-                portalled={false}
-                forceMount
-                showArrow={false}
-                contentId="sidebar-overflow-menu"
-                contentRole="menu"
-                ariaLabel="侧栏更多操作"
-                className={classNames("sidebar-header-overflow", "wand-shell-menu-popover", moreOpen && "open")}
-                trigger={(
-                  <button
-                    id="sidebar-more-btn"
-                    className="btn btn-ghost btn-sm"
-                    type="button"
-                    title="更多操作"
-                    aria-haspopup="menu"
-                    aria-expanded={moreOpen}
-                    aria-controls="sidebar-overflow-menu"
-                  >
-                    <Icon name="more"/>
-                  </button>
-                )}
+          <div className="sidebar-header-primary">
+            <div className="sidebar-header-main">
+              <div className="topbar-logo-icon">W</div>
+              <span className="sidebar-title">Wand</span>
+              <span
+                className="session-count"
+                id="session-count"
+                aria-label={viewMode === "workspaces" ? "项目" : `${activeCount} 个会话`}
               >
-                  <button
-                    className="overflow-item"
-                    id="sidebar-home-btn"
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMoreOpen(false);
-                      void dispatch({ type: "nav.home" });
-                    }}
-                  >
-                    <span>回到首页</span>
-                  </button>
-                  <button
-                    className="overflow-item"
-                    id="sidebar-refresh-btn"
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMoreOpen(false);
-                      void dispatch({ type: "nav.refresh" });
-                    }}
-                  >
-                    <span>刷新页面</span>
-                  </button>
-              </WandPopover>
+                {activeCount}
+              </span>
             </div>
-            <button
-              id="sidebar-pin-btn"
-              className={classNames("btn btn-ghost btn-sm sidebar-pin-toggle", snapshot.layout.sidebarPinned && "pinned")}
-              type="button"
-              title={snapshot.layout.sidebarPinned ? "已固定常驻（点击解除锁定）" : "固定侧栏常驻"}
-              aria-label={snapshot.layout.sidebarPinned ? "解除固定常驻" : "固定侧栏常驻"}
-              aria-pressed={snapshot.layout.sidebarPinned}
-              onClick={() => void dispatch({ type: "layout.drawer.pin" })}
-            >
-              <Icon name="pin"/>
-            </button>
-            <button
-              id="sidebar-collapse-btn"
-              className={classNames("btn btn-ghost btn-sm sidebar-collapse-toggle", narrow && "collapsed")}
-              type="button"
-              title={narrow ? "展开为全尺寸" : "收起为窄条"}
-              aria-label={narrow ? "展开为全尺寸" : "收起为窄条"}
-              onClick={() => void dispatch({ type: "layout.drawer.collapse" })}
-            >
-              <Icon name="chevron"/>
-            </button>
-            <button
-              id="close-drawer-button"
-              className="btn btn-ghost btn-icon sidebar-close drawer-close-btn"
-              type="button"
-              aria-label="关闭菜单"
-              onClick={() => void dispatch({ type: "layout.drawer.close" })}
-            >
-              <Icon name="close"/>
-            </button>
+            <div className="sidebar-header-actions">
+              <div className="sidebar-header-more">
+                <WandPopover
+                  open={moreOpen}
+                  onOpenChange={setMoreOpen}
+                  align="end"
+                  sideOffset={6}
+                  portalled={false}
+                  forceMount
+                  showArrow={false}
+                  contentId="sidebar-overflow-menu"
+                  contentRole="menu"
+                  ariaLabel="侧栏更多操作"
+                  className={classNames("sidebar-header-overflow", "wand-shell-menu-popover", moreOpen && "open")}
+                  trigger={(
+                    <button
+                      id="sidebar-more-btn"
+                      className="btn btn-ghost btn-sm"
+                      type="button"
+                      title="更多操作"
+                      aria-haspopup="menu"
+                      aria-expanded={moreOpen}
+                      aria-controls="sidebar-overflow-menu"
+                    >
+                      <Icon name="more"/>
+                    </button>
+                  )}
+                >
+                    <button
+                      className="overflow-item"
+                      id="sidebar-home-btn"
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setMoreOpen(false);
+                        void dispatch({ type: "nav.home" });
+                      }}
+                    >
+                      <span>回到首页</span>
+                    </button>
+                    <button
+                      className="overflow-item"
+                      id="sidebar-refresh-btn"
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setMoreOpen(false);
+                        void dispatch({ type: "nav.refresh" });
+                      }}
+                    >
+                      <span>刷新页面</span>
+                    </button>
+                </WandPopover>
+              </div>
+              {snapshot.viewport.mobile && (
+                <>
+                  <button
+                    id="sidebar-collapse-btn"
+                    className={classNames("btn btn-ghost btn-sm sidebar-collapse-toggle", narrow && "collapsed")}
+                    type="button"
+                    title={narrow ? "展开为全尺寸" : "收起为窄条"}
+                    aria-label={narrow ? "展开为全尺寸" : "收起为窄条"}
+                    onClick={() => void dispatch({ type: "layout.drawer.collapse" })}
+                  >
+                    <Icon name="chevron"/>
+                  </button>
+                  <button
+                    id="close-drawer-button"
+                    className="btn btn-ghost btn-icon sidebar-close drawer-close-btn"
+                    type="button"
+                    aria-label="关闭侧栏"
+                    onClick={() => void dispatch({ type: "layout.drawer.close" })}
+                  >
+                    <Icon name="close"/>
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+          <div className="sidebar-header-controls">
+            <SidebarViewSwitch mode={viewMode} onChange={changeViewMode}/>
+            {!snapshot.viewport.mobile && (
+              <SidebarCompactToggle
+                active={narrow}
+                onToggle={() => void dispatch({ type: "layout.drawer.collapse" })}
+              />
+            )}
           </div>
         </div>
         <div className="sidebar-body">
           <div id="sessions-panel">
             <div className="sessions-list" id="sessions-list">
-              {narrow ? (
+              {narrow && viewMode !== "files" && viewMode !== "workspaces" ? (
                 <CollapsedSessions groups={snapshot.sidebar.groups} dispatch={dispatch}/>
+              ) : viewMode === "files" ? (
+                <FileExplorerHost root={fileExplorerRoot}/>
               ) : viewMode === "directories" ? (
                 <DirectoryTree
                   response={directories.data}
@@ -1325,6 +1389,8 @@ export function ShellSidebar() {
                   dispatch={dispatch}
                   renameDirectory={directories.rename}
                 />
+              ) : viewMode === "workspaces" ? (
+                <WorkspacesPanel />
               ) : (
                 <>
                   <ManageBar
@@ -1350,9 +1416,10 @@ export function ShellSidebar() {
             id="drawer-new-session-button"
             className="btn btn-primary btn-block"
             type="button"
-            onClick={() => void dispatch({ type: "session.new" })}
+            aria-label={primaryAction.ariaLabel}
+            onClick={() => void dispatch(primaryAction.action)}
           >
-            <span>+</span> 新会话
+            <span>+</span> {primaryAction.label}
           </button>
           <div className="sidebar-footer-actions">
             <button
@@ -1364,15 +1431,17 @@ export function ShellSidebar() {
             >
               <Icon name="inbox" size={16}/><span>任务</span>
             </button>
-            <button
-              id="file-panel-toggle-btn"
-              className={classNames("btn btn-ghost btn-sm", snapshot.layout.filePanelOpen && "active")}
-              type="button"
-              title="查看文件"
-              onClick={() => void dispatch({ type: "layout.files.toggle" })}
-            >
-              <Icon name="file" size={16}/><span>文件</span>
-            </button>
+            {snapshot.viewport.mobile && (
+              <button
+                id="file-panel-toggle-btn"
+                className={classNames("btn btn-ghost btn-sm", snapshot.layout.filePanelOpen && "active")}
+                type="button"
+                title="查看文件"
+                onClick={() => void dispatch({ type: "layout.files.toggle" })}
+              >
+                <Icon name="file" size={16}/><span>文件</span>
+              </button>
+            )}
             <button
               id="settings-button"
               className="btn btn-ghost btn-sm"

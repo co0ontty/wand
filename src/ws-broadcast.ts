@@ -58,11 +58,12 @@ interface WsClient {
    * 时间戳。心跳 tick 用它来判断半开连接。
    */
   lastSeenAt: number;
-  subscribedSessionId: string | null;
-  /** Whether this client explicitly opted into PTY byte acknowledgements. */
-  supportsPtyAck: boolean;
-  unackedPtyBytes: number;
-  ptyPausedSessionId: string | null;
+  /** PTY subscriptions share one socket; flow control remains isolated per session. */
+  ptySubscriptions: Map<string, {
+    supportsAck: boolean;
+    unackedBytes: number;
+    paused: boolean;
+  }>;
 }
 
 export interface WsSessionPort {
@@ -158,10 +159,7 @@ export class WsBroadcastManager {
         outputSeqBySession: new Map(),
         pendingResyncSessions: new Set(),
         lastSeenAt: Date.now(),
-        subscribedSessionId: null,
-        supportsPtyAck: false,
-        unackedPtyBytes: 0,
-        ptyPausedSessionId: null,
+        ptySubscriptions: new Map(),
       };
       this.clients.add(client);
 
@@ -190,12 +188,19 @@ export class WsBroadcastManager {
             if (Number.isSafeInteger(msg.blockBudget) && msg.blockBudget > 0) {
               client.blockBudget = Math.min(msg.blockBudget, MAX_BLOCK_BUDGET);
             }
-            this.releasePtyPause(client);
-            client.subscribedSessionId = null;
-            client.supportsPtyAck = msg.capabilities?.ptyAck === true;
+            // 默认仍是历史的“切换当前会话”；分屏池显式用 mode:add 叠加订阅。
+            if (msg.mode !== "add") {
+              this.releaseAllPtyPauses(client);
+              client.ptySubscriptions.clear();
+            } else {
+              this.releasePtyPause(client, msg.sessionId);
+            }
+            client.ptySubscriptions.set(msg.sessionId, {
+              supportsAck: msg.capabilities?.ptyAck === true,
+              unackedBytes: 0,
+              paused: false,
+            });
             this.flushOutput(msg.sessionId);
-            client.subscribedSessionId = msg.sessionId;
-            client.unackedPtyBytes = 0;
             const snapshot = this.port?.getSession(msg.sessionId) ?? null;
             if (snapshot) {
               this.sendInit(client, msg.sessionId, snapshot, false);
@@ -206,12 +211,15 @@ export class WsBroadcastManager {
                 error: "Session not found",
               }));
             }
+          } else if (msg.type === "unsubscribe" && msg.sessionId) {
+            this.releasePtyPause(client, msg.sessionId);
+            client.ptySubscriptions.delete(msg.sessionId);
           } else if (msg.type === "resync" && msg.sessionId) {
             this.flushOutput(msg.sessionId);
             const snapshot = this.port?.getSession(msg.sessionId) ?? null;
             if (snapshot) this.sendInit(client, msg.sessionId, snapshot, true);
           } else if (msg.type === "pty_input" && msg.sessionId && typeof msg.data === "string") {
-            if (client.subscribedSessionId !== msg.sessionId || msg.data.length > MAX_PTY_INPUT_CHARS) return;
+            if (!client.ptySubscriptions.has(msg.sessionId) || msg.data.length > MAX_PTY_INPUT_CHARS) return;
             try {
               this.port?.sendPtyInput?.(
                 msg.sessionId,
@@ -223,7 +231,7 @@ export class WsBroadcastManager {
               this.sendPtyError(client, msg.sessionId, error);
             }
           } else if (msg.type === "pty_resize" && msg.sessionId) {
-            if (client.subscribedSessionId !== msg.sessionId) return;
+            if (!client.ptySubscriptions.has(msg.sessionId)) return;
             if (!Number.isFinite(msg.cols) || !Number.isFinite(msg.rows)) return;
             try {
               this.port?.resizePty?.(msg.sessionId, Math.floor(msg.cols), Math.floor(msg.rows));
@@ -231,10 +239,11 @@ export class WsBroadcastManager {
               this.sendPtyError(client, msg.sessionId, error);
             }
           } else if (msg.type === "pty_ack" && msg.sessionId && Number.isFinite(msg.bytes)) {
-            if (!client.supportsPtyAck || client.subscribedSessionId !== msg.sessionId) return;
-            client.unackedPtyBytes = Math.max(0, client.unackedPtyBytes - Math.max(0, Math.floor(msg.bytes)));
-            if (client.ptyPausedSessionId && client.unackedPtyBytes <= PTY_UNACKED_LOW_WATER) {
-              this.releasePtyPause(client);
+            const subscription = client.ptySubscriptions.get(msg.sessionId);
+            if (!subscription?.supportsAck) return;
+            subscription.unackedBytes = Math.max(0, subscription.unackedBytes - Math.max(0, Math.floor(msg.bytes)));
+            if (subscription.paused && subscription.unackedBytes <= PTY_UNACKED_LOW_WATER) {
+              this.releasePtyPause(client, msg.sessionId);
             }
           } else if (msg.type === "pong") {
             // 应用层 pong（对我们下发的 {type:"ping"} 的响应）。lastSeenAt
@@ -458,7 +467,7 @@ export class WsBroadcastManager {
     };
     for (const client of this.clients) {
       if (client.ws.readyState !== WebSocket.OPEN) continue;
-      if (isRawPtyOutput && client.subscribedSessionId !== event.sessionId) continue;
+      if (isRawPtyOutput && !client.ptySubscriptions.has(event.sessionId)) continue;
 
       const clientEvent = eventForClient(client);
       // Stamp output events with a per-(client, session) sequence number so
@@ -469,11 +478,12 @@ export class WsBroadcastManager {
         client.outputSeqBySession.set(event.sessionId, seq);
         outgoing = { ...clientEvent, seq } as ProcessEvent;
       }
-      const usesPtyAckFlowControl = isRawPtyOutput && client.supportsPtyAck;
+      const subscription = client.ptySubscriptions.get(event.sessionId);
+      const usesPtyAckFlowControl = isRawPtyOutput && subscription?.supportsAck === true;
       if (usesPtyAckFlowControl) {
         outgoing = { ...outgoing, ptyBytes } as ProcessEvent;
-        client.unackedPtyBytes += ptyBytes;
-        if (client.unackedPtyBytes >= PTY_UNACKED_HIGH_WATER) {
+        subscription.unackedBytes += ptyBytes;
+        if (subscription.unackedBytes >= PTY_UNACKED_HIGH_WATER) {
           this.acquirePtyPause(client, event.sessionId);
         }
       }
@@ -524,7 +534,7 @@ export class WsBroadcastManager {
   }
 
   private discardClient(client: WsClient, terminate: boolean): void {
-    this.releasePtyPause(client);
+    this.releaseAllPtyPauses(client);
     client.sendQueue.length = 0;
     client.pendingResyncSessions.clear();
     client.sendInProgress = false;
@@ -536,24 +546,30 @@ export class WsBroadcastManager {
   }
 
   private acquirePtyPause(client: WsClient, sessionId: string): void {
-    if (client.ptyPausedSessionId === sessionId) return;
-    this.releasePtyPause(client);
-    client.ptyPausedSessionId = sessionId;
+    const subscription = client.ptySubscriptions.get(sessionId);
+    if (!subscription || subscription.paused) return;
+    subscription.paused = true;
     const next = (this.ptyPauseRefs.get(sessionId) ?? 0) + 1;
     this.ptyPauseRefs.set(sessionId, next);
     if (next === 1) this.port?.pausePtyOutput?.(sessionId);
   }
 
-  private releasePtyPause(client: WsClient): void {
-    const sessionId = client.ptyPausedSessionId;
-    if (!sessionId) return;
-    client.ptyPausedSessionId = null;
+  private releasePtyPause(client: WsClient, sessionId: string): void {
+    const subscription = client.ptySubscriptions.get(sessionId);
+    if (!subscription?.paused) return;
+    subscription.paused = false;
     const next = Math.max(0, (this.ptyPauseRefs.get(sessionId) ?? 1) - 1);
     if (next === 0) {
       this.ptyPauseRefs.delete(sessionId);
       this.port?.resumePtyOutput?.(sessionId);
     } else {
       this.ptyPauseRefs.set(sessionId, next);
+    }
+  }
+
+  private releaseAllPtyPauses(client: WsClient): void {
+    for (const sessionId of client.ptySubscriptions.keys()) {
+      this.releasePtyPause(client, sessionId);
     }
   }
 

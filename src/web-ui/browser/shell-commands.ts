@@ -46,6 +46,7 @@ import { state, writeStoredBoolean } from "./state";
 import { openFolderPickerFromLegacy } from "./folder-picker-adapter";
 import { copySelectedSessionField } from "./terminal";
 import { missionsController } from "../react/missions/controller";
+import { workspacesController } from "../react/workspaces/controller";
 
 function managedKind(target: UiManageTarget): "sessions" | "history" | "codex" {
   if (target === "claude-history") return "history";
@@ -117,6 +118,7 @@ export function createBrowserShellCommands(): LegacyUiCommands {
     refreshPage: () => window.location.reload(),
     openNewSession: (cwd) => openSessionModal(cwd),
     openMissions: () => { missionsController.open(); },
+    openNewProject: (cwd) => { workspacesController.open(cwd); },
     quickStartClaudeTerminal: () => quickStart("claude"),
     quickStartCodexTerminal: () => quickStart("codex"),
     quickStartOpenCodeTerminal: () => quickStart("opencode"),
