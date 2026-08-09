@@ -116,6 +116,14 @@ export function installWorkspacesLegacyAdapter(): void {
         provider: payload.target === "shell" ? undefined : payload.target,
       });
     },
+    startWorktreeMergeAgent(payload) {
+      return startSessionInCwd(payload.cwd, {
+        workspaceId: payload.workspaceId,
+        provider: payload.provider,
+        mode: "managed",
+        initialInput: payload.prompt,
+      });
+    },
     saveTaskLayout(layout: TaskWindowLayout | null) {
       const taskId = state.activeWorkspaceTaskId;
       const nextWindow = activeWorkWindow(layout);

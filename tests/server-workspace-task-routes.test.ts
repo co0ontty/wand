@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
@@ -153,6 +153,62 @@ test("task in a non-git workspace degrades to no isolation", async () => {
     assert.equal(task.worktree, null);
     assert.equal(task.cwd, root);
     assert.ok(task.worktreeError, "非 git 目录应给出降级提示");
+  } finally {
+    await close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("project worktree review reports count, default branch, commits, and dirty state", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-project-worktrees-"));
+  git(["init", "-q", "-b", "main"], root);
+  writeFileSync(path.join(root, "README.md"), "base\n");
+  git(["add", "."], root);
+  git(["commit", "-q", "-m", "init"], root);
+
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const { baseUrl, close } = await startWorkspaceApp(storage);
+  try {
+    const workspace = await fetch(`${baseUrl}/api/workspaces`, json({ name: "Review", cwd: root }))
+      .then((response) => response.json() as Promise<{ id: string }>);
+    const committed = await fetch(`${baseUrl}/api/workspaces/${workspace.id}/tasks`, json({ name: "完成登录页" }))
+      .then((response) => response.json() as Promise<{ id: string; cwd: string }>);
+    writeFileSync(path.join(committed.cwd, "login.txt"), "login\n");
+    git(["add", "login.txt"], committed.cwd);
+    git(["commit", "-q", "-m", "feat: add login page"], committed.cwd);
+
+    const dirty = await fetch(`${baseUrl}/api/workspaces/${workspace.id}/tasks`, json({ name: "调整设置页" }))
+      .then((response) => response.json() as Promise<{ id: string; cwd: string }>);
+    writeFileSync(path.join(dirty.cwd, "settings.txt"), "draft\n");
+
+    const listed = await fetch(`${baseUrl}/api/workspaces`).then((response) => response.json() as Promise<Array<{ id: string; worktreeCount: number }>>);
+    assert.equal(listed.find((item) => item.id === workspace.id)?.worktreeCount, 2);
+
+    const response = await fetch(`${baseUrl}/api/workspaces/${workspace.id}/worktrees`);
+    assert.equal(response.status, 200);
+    const review = await response.json() as {
+      targetBranch: string;
+      repoRoot: string;
+      worktrees: Array<{
+        taskId: string;
+        state: string;
+        actionable: boolean;
+        aheadCount: number;
+        hasUncommittedChanges: boolean;
+        commits: Array<{ subject: string }>;
+      }>;
+    };
+    assert.equal(review.targetBranch, "main");
+    assert.equal(realpathSync(review.repoRoot), realpathSync(root));
+    assert.equal(review.worktrees.length, 2);
+    const committedReview = review.worktrees.find((item) => item.taskId === committed.id);
+    assert.equal(committedReview?.state, "ready");
+    assert.equal(committedReview?.aheadCount, 1);
+    assert.equal(committedReview?.commits[0]?.subject, "feat: add login page");
+    const dirtyReview = review.worktrees.find((item) => item.taskId === dirty.id);
+    assert.equal(dirtyReview?.state, "dirty");
+    assert.equal(dirtyReview?.hasUncommittedChanges, true);
+    assert.equal(dirtyReview?.actionable, true);
   } finally {
     await close();
     rmSync(root, { recursive: true, force: true });

@@ -15,6 +15,7 @@ import type {
   WorkspaceTaskDetail,
 } from "./types";
 import { classNames } from "../ui/class-names";
+import { WorkspaceWorktreeDialog } from "./workspace-worktree-dialog";
 
 const NAME_MAX = 80;
 // 名称禁止包含控制字符 / 换行 / Unicode 行分隔符；用码点判断，不在源码写字面控制字符。
@@ -335,7 +336,10 @@ function WorkspaceItem({
   const [creating, setCreating] = React.useState(false);
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
+  const [worktreeDialogOpen, setWorktreeDialogOpen] = React.useState(false);
   const { tasks, loading, error, reload } = useWorkspaceTasks(open ? workspace.id : null);
+  const worktreeCount = workspace.worktreeCount
+    ?? tasks.filter((task) => task.worktree !== null).length;
 
   React.useEffect(() => {
     if (defaultExpanded) setOpen(true);
@@ -349,6 +353,7 @@ function WorkspaceItem({
     }
     setCreating(false);
     await reload();
+    reloadWorkspaces();
     // 创建后直接打开该任务（在其 worktree 里启动会话）。
     onActiveTaskOpen(created);
   };
@@ -359,6 +364,7 @@ function WorkspaceItem({
     if (activeTaskId === task.id) runtime()?.openWorkspace(workspace);
     toast(`已删除任务「${task.name}」`, "info");
     await reload();
+    reloadWorkspaces();
   };
 
   const handleDeleteWorkspace = async () => {
@@ -375,6 +381,19 @@ function WorkspaceItem({
     } finally {
       setDeleting(false);
     }
+  };
+
+  const handleStartMergeAgent = async (prompt: string) => {
+    const rt = runtime();
+    if (!rt) throw new Error("工作空间运行环境尚未就绪，请刷新页面后重试。");
+    await rt.startWorktreeMergeAgent({
+      workspaceId: workspace.id,
+      cwd: workspace.cwd,
+      provider: workspace.defaultProvider,
+      prompt,
+    });
+    rt.openWorkspace(workspace);
+    rt.toast(`已启动 Agent，准备合并所选 Worktree 到项目默认分支。`, "success");
   };
 
   const isActiveWorkspace = activeWorkspaceId === workspace.id;
@@ -398,6 +417,20 @@ function WorkspaceItem({
           <span className="workspace-row-count" aria-label={`${tasks.length} 个任务`}>{tasks.length}</span>
         </button>
         <span className="workspace-row-actions">
+          <button
+            type="button"
+            className="workspace-row-action worktrees"
+            title={worktreeCount > 0 ? `查看并合并 ${worktreeCount} 个 Worktree` : "暂无 Worktree"}
+            aria-label={`${workspace.name} 的 Worktree：${worktreeCount} 个`}
+            disabled={worktreeCount === 0}
+            onClick={(event) => {
+              event.stopPropagation();
+              setWorktreeDialogOpen(true);
+            }}
+          >
+            <SvgIcon name="branch" size={13}/>
+            <span className="workspace-row-action-label">{worktreeCount}</span>
+          </button>
           <button
             type="button"
             className="workspace-row-action add"
@@ -471,6 +504,12 @@ function WorkspaceItem({
           )}
         </div>
       )}
+      <WorkspaceWorktreeDialog
+        open={worktreeDialogOpen}
+        workspace={workspace}
+        onStartAgent={handleStartMergeAgent}
+        onDismiss={() => setWorktreeDialogOpen(false)}
+      />
     </section>
   );
 }

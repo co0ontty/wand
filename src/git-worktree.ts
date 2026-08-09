@@ -71,6 +71,11 @@ interface CheckoutState {
   head: string;
 }
 
+export interface WorktreeTargetBranch {
+  repoRoot: string;
+  targetBranch: string;
+}
+
 const DEFAULT_WORKTREE_GIT_TIMEOUT_MS = 30_000;
 
 function resolveGitTimeout(value: number | undefined): number {
@@ -154,7 +159,8 @@ function buildCheckResult(
   context: MergeContext,
   aheadCount: number,
   hasDirtyChanges: boolean,
-  hasConflicts: boolean
+  hasConflicts: boolean,
+  commits: WorktreeMergeCheckResult["commits"],
 ): WorktreeMergeCheckResult {
   const ok = !hasDirtyChanges && aheadCount > 0 && !hasConflicts;
   return {
@@ -167,6 +173,7 @@ function buildCheckResult(
     aheadCount,
     hasConflicts,
     recommendedAction: hasConflicts ? "resolve-conflict" : aheadCount > 0 ? "merge" : "noop",
+    commits,
     reason: hasDirtyChanges
       ? "Worktree 中仍有未提交改动。"
       : aheadCount <= 0
@@ -227,10 +234,24 @@ async function getDefaultBaseBranchAsync(repoRoot: string, timeoutMs: number): P
   } catch { /* use local branches */ }
   let current = "master";
   try { current = await runWorktreeGitAsync(["branch", "--show-current"], repoRoot, timeoutMs) || "master"; } catch { /* fallback */ }
-  for (const candidate of ["master", "main", current]) {
+  for (const candidate of ["main", "master", current]) {
     if (candidate && await refExistsAsync(repoRoot, candidate, timeoutMs)) return candidate;
   }
   return "master";
+}
+
+/** Resolve one stable merge target for every worktree belonging to a project. */
+export async function resolveWorktreeTargetBranchAsync(
+  cwd: string,
+  gitTimeoutMs?: number,
+): Promise<WorktreeTargetBranch> {
+  const timeoutMs = resolveGitTimeout(gitTimeoutMs);
+  const checkoutRoot = await getRepoRootFromWorktreeAsync(path.resolve(cwd), timeoutMs);
+  const repoRoot = await getMainRepoRootAsync(checkoutRoot, timeoutMs);
+  return {
+    repoRoot,
+    targetBranch: await getDefaultBaseBranchAsync(repoRoot, timeoutMs),
+  };
 }
 
 async function getMainRepoContextAsync(options: WorktreeMergeOptions): Promise<MergeContext> {
@@ -263,6 +284,24 @@ async function checkConflictsAsync(context: MergeContext): Promise<boolean> {
   } catch {
     return true;
   }
+}
+
+async function listAheadCommitsAsync(context: MergeContext): Promise<WorktreeMergeCheckResult["commits"]> {
+  const output = await runWorktreeGitAsync([
+    "log",
+    "--max-count=50",
+    "--format=%H%x1f%h%x1f%s%x1e",
+    `${context.targetBranch}..${context.sourceBranch}`,
+  ], context.repoRoot, context.gitTimeoutMs);
+  return output
+    .split("\x1e")
+    .map((record) => record.trim())
+    .filter(Boolean)
+    .flatMap((record) => {
+      const [hash = "", shortHash = "", ...subjectParts] = record.split("\x1f");
+      if (!hash) return [];
+      return [{ hash, shortHash: shortHash || hash.slice(0, 7), subject: subjectParts.join("\x1f") }];
+    });
 }
 
 async function captureCheckoutStateAsync(context: MergeContext): Promise<CheckoutState> {
@@ -361,7 +400,8 @@ export async function checkSessionWorktreeMergeabilityAsync(options: WorktreeMer
     10,
   ) || 0;
   const conflicts = !dirty && aheadCount > 0 ? await checkConflictsAsync(context) : false;
-  return buildCheckResult(context, aheadCount, dirty, conflicts);
+  const commits = aheadCount > 0 ? await listAheadCommitsAsync(context) : [];
+  return buildCheckResult(context, aheadCount, dirty, conflicts, commits);
 }
 
 export async function cleanupSessionWorktreeAsync(options: WorktreeOperationOptions): Promise<boolean> {

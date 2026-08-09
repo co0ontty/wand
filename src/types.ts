@@ -227,6 +227,12 @@ export interface WorktreeMergeInfo {
   conflict?: boolean;
 }
 
+export interface WorktreeMergeCommit {
+  hash: string;
+  shortHash: string;
+  subject: string;
+}
+
 export interface WorktreeMergeCheckResult {
   ok: boolean;
   sourceBranch: string;
@@ -238,6 +244,8 @@ export interface WorktreeMergeCheckResult {
   hasConflicts: boolean;
   recommendedAction: "merge" | "noop" | "resolve-conflict";
   reason?: string;
+  /** Newest-first commit preview for project-level worktree review. */
+  commits: WorktreeMergeCommit[];
 }
 
 export interface WorktreeMergeResult {

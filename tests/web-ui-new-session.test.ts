@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -33,6 +34,11 @@ test("provider modes are clamped without leaking unsupported values", () => {
   assert.equal(safeMode("codex", "native", "default"), "full-access");
   assert.equal(safeMode("opencode", "auto-edit", "managed"), "managed");
   assert.equal(safeMode("claude", "native"), "native");
+});
+
+test("general new-session dialog does not expose worktree creation", () => {
+  const source = readFileSync(new URL("../src/web-ui/react/new-session/host.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /Worktree 模式|启用 Worktree 模式|wand-new-session-worktree/);
 });
 
 test("radio-card navigation wraps and skips values omitted by the caller", () => {

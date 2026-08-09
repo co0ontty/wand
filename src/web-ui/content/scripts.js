@@ -485,7 +485,7 @@
   var require_react_dom_production = __commonJS({
     "node_modules/react-dom/cjs/react-dom.production.js"(exports) {
       "use strict";
-      var React53 = require_react();
+      var React54 = require_react();
       function formatProdErrorMessage(code) {
         var url = "https://react.dev/errors/" + code;
         if (1 < arguments.length) {
@@ -525,7 +525,7 @@
           implementation
         };
       }
-      var ReactSharedInternals = React53.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+      var ReactSharedInternals = React54.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
       function getCrossOriginStringAs(as, input) {
         if ("font" === as) return "";
         if ("string" === typeof input)
@@ -946,7 +946,7 @@
     "node_modules/react-dom/cjs/react-dom-client.production.js"(exports) {
       "use strict";
       var Scheduler = require_scheduler();
-      var React53 = require_react();
+      var React54 = require_react();
       var ReactDOM6 = require_react_dom();
       function formatProdErrorMessage(code) {
         var url = "https://react.dev/errors/" + code;
@@ -1137,7 +1137,7 @@
         return null;
       }
       var isArrayImpl = Array.isArray;
-      var ReactSharedInternals = React53.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+      var ReactSharedInternals = React54.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
       var ReactDOMSharedInternals = ReactDOM6.__DOM_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
       var sharedNotPendingObject = {
         pending: false,
@@ -12583,7 +12583,7 @@
           0 === i && attemptExplicitHydrationTarget(target);
         }
       };
-      var isomorphicReactPackageVersion$jscomp$inline_1840 = React53.version;
+      var isomorphicReactPackageVersion$jscomp$inline_1840 = React54.version;
       if ("19.2.7" !== isomorphicReactPackageVersion$jscomp$inline_1840)
         throw Error(
           formatProdErrorMessage(
@@ -13971,7 +13971,7 @@
   }
 
   // src/web-ui/browser/shell-runtime.ts
-  var React51 = __toESM(require_react(), 1);
+  var React52 = __toESM(require_react(), 1);
   var import_react_dom4 = __toESM(require_react_dom(), 1);
   var import_client2 = __toESM(require_client(), 1);
 
@@ -24787,13 +24787,13 @@
     } catch {
       throw new Error(`\u8BF7\u6C42\u5931\u8D25 (HTTP ${response.status})`);
     }
-    const record2 = isRecord(data) ? data : {};
-    if (!response.ok || typeof record2.error === "string") {
-      const error = new Error(text(record2.error, `\u8BF7\u6C42\u5931\u8D25 (HTTP ${response.status})`));
+    const record3 = isRecord(data) ? data : {};
+    if (!response.ok || typeof record3.error === "string") {
+      const error = new Error(text(record3.error, `\u8BF7\u6C42\u5931\u8D25 (HTTP ${response.status})`));
       error.status = response.status;
       throw error;
     }
-    return record2;
+    return record3;
   }
   function normalizeConfig2(value) {
     return {
@@ -25347,79 +25347,52 @@
                   onClick: () => setAdvancedOpen((open) => !open),
                   children: [
                     /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("span", { children: "\u9AD8\u7EA7\u9009\u9879" }),
-                    /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)("span", { className: "wand-new-session-advanced-summary", children: [
-                      form.kind === "shell" ? "Shell \u73AF\u5883" : selectedMode?.label ?? "\u6807\u51C6",
-                      " \xB7 ",
-                      form.worktreeEnabled ? "Worktree \u5DF2\u5F00\u542F" : "\u4E0D\u4F7F\u7528 Worktree"
-                    ] })
+                    /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("span", { className: "wand-new-session-advanced-summary", children: form.kind === "shell" ? "Shell \u73AF\u5883" : selectedMode?.label ?? "\u6807\u51C6" })
                   ]
                 }
               ),
-              advancedOpen ? /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)("div", { id: "wand-new-session-advanced-content", className: "wand-new-session-advanced-content", children: [
-                form.kind !== "shell" ? /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)("fieldset", { className: "wand-new-session-field wand-new-session-fieldset", children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("legend", { className: "wand-new-session-field-label", children: "\u6A21\u5F0F" }),
-                  /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("div", { className: "wand-new-session-choices wand-new-session-mode-choices", role: "radiogroup", "aria-label": "\u6267\u884C\u6A21\u5F0F", children: MODES2.map((mode) => {
-                    const disabled = !supported.has(mode.value);
-                    return /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(
-                      "button",
-                      {
-                        type: "button",
-                        role: "radio",
-                        "aria-checked": form.mode === mode.value,
-                        "aria-disabled": disabled,
-                        tabIndex: form.mode === mode.value ? 0 : -1,
-                        ref: (element) => {
-                          modeRefs.current[mode.value] = element;
-                        },
-                        disabled,
-                        className: `wand-new-session-choice${form.mode === mode.value ? " active" : ""}${disabled ? " disabled" : ""}`,
-                        onClick: () => selectMode(mode.value),
-                        onKeyDown: (event) => navigateChoice(
-                          event,
-                          form.mode,
-                          supportedModesForProvider,
-                          selectMode,
-                          modeRefs
-                        ),
-                        children: [
-                          /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("span", { className: "wand-new-session-choice-label", children: mode.label }),
-                          /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("span", { className: "wand-new-session-choice-description", children: mode.description })
-                        ]
-                      },
-                      mode.value
-                    );
-                  }) }),
-                  /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("p", { className: "wand-new-session-field-hint", children: modeHint(form.provider, form.mode) })
-                ] }) : /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("p", { className: "wand-new-session-field-hint", children: "\u7A7A\u767D\u7EC8\u7AEF\u4F7F\u7528\u670D\u52A1\u7AEF\u914D\u7F6E\u7684\u767B\u5F55 Shell\uFF0C\u4E0D\u5E94\u7528 AI \u6743\u9650\u6A21\u5F0F\u3002" }),
-                /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)("div", { className: "wand-new-session-worktree", children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)("div", { children: [
-                    /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("strong", { children: "Worktree \u6A21\u5F0F" }),
-                    /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("span", { children: "\u4E3A\u672C\u6B21\u4F1A\u8BDD\u521B\u5EFA\u72EC\u7ACB\u7684 Git worktree \u4E0E\u5206\u652F\u3002" })
-                  ] }),
-                  /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(
-                    WandSwitch,
+              advancedOpen ? /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("div", { id: "wand-new-session-advanced-content", className: "wand-new-session-advanced-content", children: form.kind !== "shell" ? /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)("fieldset", { className: "wand-new-session-field wand-new-session-fieldset", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("legend", { className: "wand-new-session-field-label", children: "\u6A21\u5F0F" }),
+                /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("div", { className: "wand-new-session-choices wand-new-session-mode-choices", role: "radiogroup", "aria-label": "\u6267\u884C\u6A21\u5F0F", children: MODES2.map((mode) => {
+                  const disabled = !supported.has(mode.value);
+                  return /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(
+                    "button",
                     {
-                      id: "wand-new-session-worktree",
-                      checked: form.worktreeEnabled,
-                      ariaLabel: "\u542F\u7528 Worktree \u6A21\u5F0F",
-                      onCheckedChange: (worktreeEnabled) => {
-                        setForm({ ...form, worktreeEnabled });
-                        if (worktreeEnabled) setAdvancedOpen(true);
-                      }
-                    }
-                  )
-                ] })
-              ] }) : null
+                      type: "button",
+                      role: "radio",
+                      "aria-checked": form.mode === mode.value,
+                      "aria-disabled": disabled,
+                      tabIndex: form.mode === mode.value ? 0 : -1,
+                      ref: (element) => {
+                        modeRefs.current[mode.value] = element;
+                      },
+                      disabled,
+                      className: `wand-new-session-choice${form.mode === mode.value ? " active" : ""}${disabled ? " disabled" : ""}`,
+                      onClick: () => selectMode(mode.value),
+                      onKeyDown: (event) => navigateChoice(
+                        event,
+                        form.mode,
+                        supportedModesForProvider,
+                        selectMode,
+                        modeRefs
+                      ),
+                      children: [
+                        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("span", { className: "wand-new-session-choice-label", children: mode.label }),
+                        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("span", { className: "wand-new-session-choice-description", children: mode.description })
+                      ]
+                    },
+                    mode.value
+                  );
+                }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("p", { className: "wand-new-session-field-hint", children: modeHint(form.provider, form.mode) })
+              ] }) : /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("p", { className: "wand-new-session-field-hint", children: "\u7A7A\u767D\u7EC8\u7AEF\u4F7F\u7528\u670D\u52A1\u7AEF\u914D\u7F6E\u7684\u767B\u5F55 Shell\uFF0C\u4E0D\u5E94\u7528 AI \u6743\u9650\u6A21\u5F0F\u3002" }) }) : null
             ] })
           ] }),
           /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)("div", { className: "wand-new-session-summary", "aria-live": "polite", children: [
             /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("span", { children: "\u5373\u5C06\u542F\u52A8" }),
             /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("strong", { children: form.kind === "shell" ? "\u7A7A\u767D\u7EC8\u7AEF \xB7 Shell" : `${PROVIDERS2.find((provider) => provider.value === form.provider)?.label} \xB7 ${form.kind === "structured" ? "\u7ED3\u6784\u5316" : "PTY"}` }),
             /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("span", { title: effectiveCwd, children: effectiveCwd }),
-            /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)("span", { children: [
-              form.kind === "shell" ? "\u4E0D\u542F\u52A8 CLI" : selectedMode?.label ?? "\u6807\u51C6",
-              form.worktreeEnabled ? " \xB7 Worktree" : ""
-            ] })
+            /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("span", { children: form.kind === "shell" ? "\u4E0D\u542F\u52A8 CLI" : selectedMode?.label ?? "\u6807\u51C6" })
           ] }),
           /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)("div", { className: "wand-new-session-footer", children: [
             /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(
@@ -25541,9 +25514,9 @@
     if (!payload || typeof payload !== "object") {
       throw new Error("\u76EE\u5F55\u670D\u52A1\u8FD4\u56DE\u4E86\u65E0\u6548\u6570\u636E\u3002");
     }
-    const record2 = payload;
-    const currentPath = typeof record2.currentPath === "string" && record2.currentPath.trim() ? record2.currentPath : requestedPath;
-    const rawItems = Array.isArray(record2.items) ? record2.items : [];
+    const record3 = payload;
+    const currentPath = typeof record3.currentPath === "string" && record3.currentPath.trim() ? record3.currentPath : requestedPath;
+    const rawItems = Array.isArray(record3.items) ? record3.items : [];
     const items = [];
     for (const rawItem of rawItems) {
       if (!rawItem || typeof rawItem !== "object") continue;
@@ -25984,9 +25957,9 @@
     } catch {
       throw new Error(`${fallback} (HTTP ${response.status})`);
     }
-    const record2 = isRecord2(value) ? value : {};
-    if (!response.ok) throw new Error(text2(record2.error, `${fallback} (HTTP ${response.status})`));
-    return record2;
+    const record3 = isRecord2(value) ? value : {};
+    if (!response.ok) throw new Error(text2(record3.error, `${fallback} (HTTP ${response.status})`));
+    return record3;
   }
   function normalizeFiles(value) {
     if (!Array.isArray(value)) return [];
@@ -26006,26 +25979,26 @@
     });
   }
   function normalizeQuickCommitStatus(value) {
-    const record2 = isRecord2(value) ? value : {};
-    const files = normalizeFiles(record2.files);
-    const rawLastCommit = isRecord2(record2.lastCommit) ? record2.lastCommit : null;
+    const record3 = isRecord2(value) ? value : {};
+    const files = normalizeFiles(record3.files);
+    const rawLastCommit = isRecord2(record3.lastCommit) ? record3.lastCommit : null;
     const lastCommit = rawLastCommit ? {
       hash: text2(rawLastCommit.hash),
       shortHash: text2(rawLastCommit.shortHash),
       subject: text2(rawLastCommit.subject)
     } : void 0;
     return {
-      isGit: record2.isGit === true,
-      branch: text2(record2.branch),
-      modifiedCount: Math.max(0, finiteNumber(record2.modifiedCount, files.length)),
+      isGit: record3.isGit === true,
+      branch: text2(record3.branch),
+      modifiedCount: Math.max(0, finiteNumber(record3.modifiedCount, files.length)),
       files,
-      head: text2(record2.head),
-      ahead: Math.max(0, finiteNumber(record2.ahead)),
-      behind: Math.max(0, finiteNumber(record2.behind)),
+      head: text2(record3.head),
+      ahead: Math.max(0, finiteNumber(record3.ahead)),
+      behind: Math.max(0, finiteNumber(record3.behind)),
       lastCommit,
-      latestTag: text2(record2.latestTag),
-      hasSubmodule: record2.hasSubmodule === true || files.some((file) => file.isSubmodule),
-      error: typeof record2.error === "string" ? record2.error : void 0
+      latestTag: text2(record3.latestTag),
+      hasSubmodule: record3.hasSubmodule === true || files.some((file) => file.isSubmodule),
+      error: typeof record3.error === "string" ? record3.error : void 0
     };
   }
   var HttpQuickCommitRepository = class {
@@ -26702,16 +26675,16 @@
     } catch {
       throw new WorktreeMergeRepositoryError(`${fallback} (HTTP ${response.status})`, "", null, response.status);
     }
-    const record2 = isRecord3(value) ? value : {};
-    if (!response.ok || typeof record2.error === "string") {
+    const record3 = isRecord3(value) ? value : {};
+    if (!response.ok || typeof record3.error === "string") {
       throw new WorktreeMergeRepositoryError(
-        text3(record2.error, `${fallback} (HTTP ${response.status})`),
-        text3(record2.errorCode),
-        isRecord3(record2.result) ? normalizeWorktreeMergeResult(record2.result) : null,
+        text3(record3.error, `${fallback} (HTTP ${response.status})`),
+        text3(record3.errorCode),
+        isRecord3(record3.result) ? normalizeWorktreeMergeResult(record3.result) : null,
         response.status
       );
     }
-    return record2;
+    return record3;
   }
   var HttpWorktreeMergeRepository = class {
     constructor(fetchImpl = (input, init) => globalThis.fetch(input, init)) {
@@ -27072,14 +27045,14 @@
           response.status
         );
       }
-      const record2 = isRecord4(value) ? value : {};
-      if (!response.ok || typeof record2.error === "string") {
+      const record3 = isRecord4(value) ? value : {};
+      if (!response.ok || typeof record3.error === "string") {
         throw new RestartOverlayRepositoryError(
-          text4(record2.error) || `\u670D\u52A1\u5C1A\u672A\u5C31\u7EEA\uFF08HTTP ${response.status}\uFF09\u3002`,
+          text4(record3.error) || `\u670D\u52A1\u5C1A\u672A\u5C31\u7EEA\uFF08HTTP ${response.status}\uFF09\u3002`,
           response.status
         );
       }
-      return normalizeRestartOverlayConfig(record2);
+      return normalizeRestartOverlayConfig(record3);
     }
   };
   var httpRestartOverlayRepository = new HttpRestartOverlayRepository();
@@ -27975,19 +27948,19 @@
     return failure;
   }
   function normalizeFilePreview(value, requestedPath) {
-    const record2 = isRecord5(value) ? value : {};
-    const path = stringValue2(record2.path, requestedPath).trim() || requestedPath;
-    const name = stringValue2(record2.name, fileNameFromPath(path));
-    const kind = previewKind(record2.kind);
-    const content = kind === "text" ? stringValue2(record2.content) : void 0;
+    const record3 = isRecord5(value) ? value : {};
+    const path = stringValue2(record3.path, requestedPath).trim() || requestedPath;
+    const name = stringValue2(record3.name, fileNameFromPath(path));
+    const kind = previewKind(record3.kind);
+    const content = kind === "text" ? stringValue2(record3.content) : void 0;
     return {
       kind,
       path,
       name,
-      ext: stringValue2(record2.ext, fileExtension(name)),
-      size: Math.max(0, finiteNumber3(record2.size)),
-      mime: stringValue2(record2.mime) || void 0,
-      lang: stringValue2(record2.lang) || void 0,
+      ext: stringValue2(record3.ext, fileExtension(name)),
+      size: Math.max(0, finiteNumber3(record3.size)),
+      mime: stringValue2(record3.mime) || void 0,
+      lang: stringValue2(record3.lang) || void 0,
       content,
       rawUrl: rawUrl(path),
       url: rawUrl(path, true)
@@ -29703,6 +29676,56 @@
   function text5(value, fallback = "") {
     return typeof value === "string" ? value : fallback;
   }
+  function record2(value) {
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  }
+  function finiteCount(value) {
+    return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+  }
+  function worktreeState(value) {
+    return value === "dirty" || value === "conflict" || value === "empty" || value === "unavailable" ? value : "ready";
+  }
+  function normalizeWorkspaceWorktree(value) {
+    const item = record2(value);
+    const taskId = text5(item.taskId).trim();
+    const branch = text5(item.branch).trim();
+    const worktreePath = text5(item.path).trim();
+    if (!taskId || !branch || !worktreePath) return null;
+    const commits = Array.isArray(item.commits) ? item.commits.flatMap((candidate) => {
+      const commit = record2(candidate);
+      const hash = text5(commit.hash).trim();
+      if (!hash) return [];
+      return [{
+        hash,
+        shortHash: text5(commit.shortHash, hash.slice(0, 7)),
+        subject: text5(commit.subject)
+      }];
+    }) : [];
+    return {
+      taskId,
+      taskName: text5(item.taskName, branch),
+      taskStatus: item.taskStatus === "done" ? "done" : "active",
+      branch,
+      path: worktreePath,
+      baseRef: text5(item.baseRef),
+      state: worktreeState(item.state),
+      actionable: item.actionable === true,
+      reason: text5(item.reason),
+      aheadCount: finiteCount(item.aheadCount),
+      hasUncommittedChanges: item.hasUncommittedChanges === true,
+      hasConflicts: item.hasConflicts === true,
+      commits
+    };
+  }
+  function normalizeWorkspaceWorktreeOverview(value) {
+    const result = record2(value);
+    return {
+      workspaceId: text5(result.workspaceId),
+      repoRoot: text5(result.repoRoot),
+      targetBranch: text5(result.targetBranch),
+      worktrees: Array.isArray(result.worktrees) ? result.worktrees.map(normalizeWorkspaceWorktree).filter((item) => item !== null) : []
+    };
+  }
   async function readJson3(response) {
     const body = await response.json().catch(() => ({}));
     if (!response.ok || body.error) {
@@ -29714,12 +29737,12 @@
     if (!Array.isArray(value)) return [];
     return value.map((item) => {
       if (!item || typeof item !== "object") return null;
-      const record2 = item;
-      if (typeof record2.path !== "string" || !record2.path.trim()) return null;
-      const path = record2.path;
+      const record3 = item;
+      if (typeof record3.path !== "string" || !record3.path.trim()) return null;
+      const path = record3.path;
       return {
         path,
-        name: text5(record2.name, path.split("/").filter(Boolean).at(-1) ?? path)
+        name: text5(record3.name, path.split("/").filter(Boolean).at(-1) ?? path)
       };
     }).filter((item) => item !== null);
   }
@@ -29822,6 +29845,13 @@
         }
       ));
       return body.layout ?? null;
+    }
+    async listWorktrees(workspaceId, options = {}) {
+      const body = await readJson3(await this.fetchImpl(
+        `/api/workspaces/${encodeURIComponent(workspaceId)}/worktrees`,
+        { credentials: "same-origin", signal: options.signal }
+      ));
+      return normalizeWorkspaceWorktreeOverview(body);
     }
     async deleteSessions(sessionIds) {
       const ids = [...new Set(sessionIds.filter((id) => typeof id === "string" && id.trim().length > 0))];
@@ -33992,10 +34022,10 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   }
 
   // src/web-ui/react/shell/shell-app.tsx
-  var React50 = __toESM(require_react(), 1);
+  var React51 = __toESM(require_react(), 1);
 
   // src/web-ui/react/shell/shell-main-content.tsx
-  var React49 = __toESM(require_react(), 1);
+  var React50 = __toESM(require_react(), 1);
 
   // src/web-ui/react/code-editor/host.tsx
   var React41 = __toESM(require_react(), 1);
@@ -35990,15 +36020,15 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       status: response.status
     };
   }
-  function coerceEntry(record2) {
-    const path = stringValue4(record2.path);
-    const name = stringValue4(record2.name);
+  function coerceEntry(record3) {
+    const path = stringValue4(record3.path);
+    const name = stringValue4(record3.name);
     if (!path || !name) return null;
-    const type = record2.type === "dir" ? "dir" : "file";
+    const type = record3.type === "dir" ? "dir" : "file";
     const entry = { path, name, type };
-    if (typeof record2.size === "number" && Number.isFinite(record2.size)) entry.size = record2.size;
-    if (typeof record2.mtime === "string" && record2.mtime) entry.mtime = record2.mtime;
-    const git = isRecord7(record2.gitStatus) ? record2.gitStatus : void 0;
+    if (typeof record3.size === "number" && Number.isFinite(record3.size)) entry.size = record3.size;
+    if (typeof record3.mtime === "string" && record3.mtime) entry.mtime = record3.mtime;
+    const git = isRecord7(record3.gitStatus) ? record3.gitStatus : void 0;
     if (git) {
       const status = {};
       const stagedRaw = stringValue4(git.staged);
@@ -37421,14 +37451,256 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   }
 
   // src/web-ui/react/shell/shell-topbar.tsx
-  var React48 = __toESM(require_react(), 1);
+  var React49 = __toESM(require_react(), 1);
 
   // src/web-ui/react/shell/shell-sidebar.tsx
-  var React47 = __toESM(require_react(), 1);
+  var React48 = __toESM(require_react(), 1);
 
   // src/web-ui/react/workspaces/workspaces-panel.tsx
+  var React47 = __toESM(require_react(), 1);
+
+  // src/web-ui/react/workspaces/workspace-worktree-dialog.tsx
   var React46 = __toESM(require_react(), 1);
+
+  // src/web-ui/react/workspaces/workspace-worktree-model.ts
+  function workspaceWorktreeSummary(worktree) {
+    const commit = worktree.commits[0]?.subject.trim();
+    if (commit && commit !== worktree.taskName.trim()) return `${worktree.taskName} \xB7 ${commit}`;
+    return worktree.taskName || commit || worktree.branch;
+  }
+  function buildWorkspaceMergeAgentPrompt(workspace, overview, selectedTaskIds) {
+    const selected = new Set(selectedTaskIds);
+    const worktrees = overview.worktrees.filter((worktree) => selected.has(worktree.taskId) && worktree.actionable);
+    if (!overview.targetBranch) throw new Error("\u65E0\u6CD5\u8BC6\u522B\u9879\u76EE\u9ED8\u8BA4\u5206\u652F\u3002");
+    if (worktrees.length === 0) throw new Error("\u8BF7\u81F3\u5C11\u9009\u62E9\u4E00\u4E2A\u6709\u5F85\u5408\u5E76\u6539\u52A8\u7684 Worktree\u3002");
+    const manifest = worktrees.map((worktree, index2) => ({
+      order: index2 + 1,
+      task: worktree.taskName,
+      branch: worktree.branch,
+      worktreePath: worktree.path,
+      baseRef: worktree.baseRef || null,
+      uncommittedChanges: worktree.hasUncommittedChanges,
+      potentialConflict: worktree.hasConflicts,
+      commitsAhead: worktree.aheadCount,
+      commitSubjects: worktree.commits.map((commit) => commit.subject).filter(Boolean)
+    }));
+    return [
+      `\u4F60\u662F Wand \u4E3A\u9879\u76EE\u300C${workspace.name}\u300D\u542F\u52A8\u7684 Worktree \u5408\u5E76 Agent\u3002`,
+      `\u9879\u76EE\u4E3B\u5DE5\u4F5C\u533A\uFF1A${overview.repoRoot || workspace.cwd}`,
+      `\u552F\u4E00\u76EE\u6807\u5206\u652F\uFF1A${overview.targetBranch}`,
+      "",
+      "\u8BF7\u6309\u6E05\u5355\u987A\u5E8F\u5BA1\u67E5\u5E76\u5408\u5E76\u6240\u9009 Worktree\uFF1A",
+      JSON.stringify(manifest, null, 2),
+      "",
+      "\u6267\u884C\u8981\u6C42\uFF1A",
+      "1. \u5148\u8BFB\u53D6\u9879\u76EE\u5185\u9002\u7528\u7684 AGENTS.md/agent.md \u4E0E\u4ED3\u5E93\u7EA6\u5B9A\uFF0C\u518D\u68C0\u67E5\u4E3B\u5DE5\u4F5C\u533A\u548C\u6BCF\u4E2A Worktree \u7684\u771F\u5B9E Git \u72B6\u6001\u3002",
+      "2. \u5BF9\u6709\u672A\u63D0\u4EA4\u6539\u52A8\u7684 Worktree\uFF0C\u5148\u7406\u89E3\u6539\u52A8\u3001\u5B8C\u6210\u5FC5\u8981\u9A8C\u8BC1\uFF0C\u5E76\u521B\u5EFA\u6E05\u6670\u7684\u63D0\u4EA4\uFF1B\u4E0D\u5F97\u4E22\u5F03\u6216\u8986\u76D6\u73B0\u6709\u7528\u6237\u6539\u52A8\u3002",
+      `3. \u53EA\u628A\u6E05\u5355\u4E2D\u7684\u5206\u652F\u5408\u5E76\u5230 ${overview.targetBranch}\uFF0C\u6309\u6E05\u5355\u987A\u5E8F\u9010\u4E2A\u5904\u7406\uFF1B\u4E0D\u8981\u6539\u4E3A\u5176\u4ED6\u76EE\u6807\u5206\u652F\u3002`,
+      "4. \u9047\u5230\u51B2\u7A81\u65F6\u7406\u89E3\u53CC\u65B9\u610F\u56FE\u540E\u89E3\u51B3\u5E76\u9A8C\u8BC1\uFF1B\u82E5\u65E0\u6CD5\u5B89\u5168\u5224\u65AD\uFF0C\u505C\u6B62\u5728\u53EF\u6062\u590D\u72B6\u6001\u5E76\u6E05\u695A\u62A5\u544A\uFF0C\u4E0D\u8981\u5F3A\u884C\u8986\u76D6\u3002",
+      "5. \u5408\u5E76\u5B8C\u6210\u540E\u8FD0\u884C\u4E0E\u6539\u52A8\u76F8\u79F0\u7684\u6D4B\u8BD5\u3002\u4E0D\u8981 push\uFF0C\u4E5F\u4E0D\u8981\u5220\u9664 Worktree\u3001\u4EFB\u52A1\u5206\u652F\u6216 Wand \u7684\u9879\u76EE\u4EFB\u52A1\u8BB0\u5F55\u3002",
+      "6. \u6700\u540E\u6C47\u62A5\u6BCF\u4E2A Worktree \u7684\u63D0\u4EA4/\u5408\u5E76\u7ED3\u679C\u3001\u6D4B\u8BD5\u7ED3\u679C\uFF0C\u4EE5\u53CA\u4EFB\u4F55\u4ECD\u9700\u4EBA\u5DE5\u5904\u7406\u7684\u95EE\u9898\u3002"
+    ].join("\n");
+  }
+
+  // src/web-ui/react/workspaces/workspace-worktree-dialog.tsx
   var import_jsx_runtime49 = __toESM(require_jsx_runtime(), 1);
+  var STATE_META = {
+    ready: { label: "\u5F85\u5408\u5E76", tone: "ready" },
+    dirty: { label: "\u6709\u672A\u63D0\u4EA4\u6539\u52A8", tone: "dirty" },
+    conflict: { label: "\u53EF\u80FD\u51B2\u7A81", tone: "conflict" },
+    empty: { label: "\u5DF2\u540C\u6B65", tone: "empty" },
+    unavailable: { label: "\u4E0D\u53EF\u7528", tone: "unavailable" }
+  };
+  function BranchIcon({ size: size4 = 18 }) {
+    return /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)(
+      "svg",
+      {
+        width: size4,
+        height: size4,
+        viewBox: "0 0 24 24",
+        fill: "none",
+        stroke: "currentColor",
+        strokeWidth: "1.8",
+        strokeLinecap: "round",
+        strokeLinejoin: "round",
+        "aria-hidden": "true",
+        children: [
+          /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("circle", { cx: "6", cy: "5", r: "2.5" }),
+          /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("circle", { cx: "6", cy: "19", r: "2.5" }),
+          /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("circle", { cx: "18", cy: "8", r: "2.5" }),
+          /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("path", { d: "M6 7.5v9M18 10.5c0 4-6 2.5-6 6.5" })
+        ]
+      }
+    );
+  }
+  function presentError7(error, fallback) {
+    if (!(error instanceof Error) || !error.message || error.message === "Failed to fetch") return fallback;
+    return error.message;
+  }
+  function WorktreeBubble({
+    worktree,
+    selected,
+    first,
+    onToggle
+  }) {
+    const meta = STATE_META[worktree.state];
+    const disabled = !worktree.actionable;
+    const details = [
+      worktree.aheadCount > 0 ? `${worktree.aheadCount} commits` : "",
+      worktree.hasUncommittedChanges ? "\u5DE5\u4F5C\u533A\u6709\u6539\u52A8" : "",
+      worktree.hasConflicts ? "\u9700\u5904\u7406\u51B2\u7A81" : ""
+    ].filter(Boolean).join(" \xB7 ") || worktree.reason || "\u6CA1\u6709\u65B0\u7684\u5F85\u5408\u5E76\u6539\u52A8";
+    return /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)(
+      "button",
+      {
+        type: "button",
+        role: "checkbox",
+        "aria-checked": selected,
+        disabled,
+        className: `workspace-worktree-bubble is-${meta.tone}${selected ? " is-selected" : ""}`,
+        "data-wand-autofocus": first ? "" : void 0,
+        onClick: onToggle,
+        children: [
+          /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("span", { className: "workspace-worktree-bubble-check", "aria-hidden": "true", children: selected ? "\u2713" : "" }),
+          /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)("span", { className: "workspace-worktree-bubble-copy", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("strong", { children: workspaceWorktreeSummary(worktree) }),
+            /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("code", { title: worktree.path, children: worktree.branch }),
+            /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("small", { children: details })
+          ] }),
+          /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("span", { className: `workspace-worktree-state is-${meta.tone}`, children: meta.label })
+        ]
+      }
+    );
+  }
+  function WorkspaceWorktreeDialog({
+    open,
+    workspace,
+    repository = httpWorkspacesRepository,
+    onStartAgent,
+    onDismiss
+  }) {
+    const [overview, setOverview] = React46.useState(null);
+    const [selected, setSelected] = React46.useState(/* @__PURE__ */ new Set());
+    const [loading, setLoading] = React46.useState(false);
+    const [submitting, setSubmitting] = React46.useState(false);
+    const [error, setError] = React46.useState("");
+    React46.useEffect(() => {
+      if (!open) return;
+      const abort = new AbortController();
+      setOverview(null);
+      setSelected(/* @__PURE__ */ new Set());
+      setLoading(true);
+      setSubmitting(false);
+      setError("");
+      void repository.listWorktrees(workspace.id, { signal: abort.signal }).then((result) => {
+        if (!abort.signal.aborted) setOverview(result);
+      }).catch((loadError) => {
+        if (!abort.signal.aborted) setError(presentError7(loadError, "\u65E0\u6CD5\u8BFB\u53D6\u9879\u76EE Worktree\u3002"));
+      }).finally(() => {
+        if (!abort.signal.aborted) setLoading(false);
+      });
+      return () => abort.abort();
+    }, [open, repository, workspace.id]);
+    const actionable = overview?.worktrees.filter((worktree) => worktree.actionable) ?? [];
+    const selectedCount = actionable.filter((worktree) => selected.has(worktree.taskId)).length;
+    function toggle(taskId) {
+      setSelected((current) => {
+        const next = new Set(current);
+        if (next.has(taskId)) next.delete(taskId);
+        else next.add(taskId);
+        return next;
+      });
+    }
+    function toggleAll() {
+      if (selectedCount === actionable.length) {
+        setSelected(/* @__PURE__ */ new Set());
+        return;
+      }
+      setSelected(new Set(actionable.map((worktree) => worktree.taskId)));
+    }
+    async function submit() {
+      if (!overview || selectedCount === 0 || submitting) return;
+      setSubmitting(true);
+      setError("");
+      try {
+        const prompt = buildWorkspaceMergeAgentPrompt(workspace, overview, [...selected]);
+        await onStartAgent(prompt);
+        onDismiss();
+      } catch (startError) {
+        setError(presentError7(startError, "\u65E0\u6CD5\u542F\u52A8 Worktree \u5408\u5E76 Agent\u3002"));
+      } finally {
+        setSubmitting(false);
+      }
+    }
+    const target = overview?.targetBranch || "\u9879\u76EE\u9ED8\u8BA4\u5206\u652F";
+    const count3 = overview?.worktrees.length ?? workspace.worktreeCount ?? 0;
+    return /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)(
+      WandDialogSurface,
+      {
+        open,
+        onOpenChange: (nextOpen) => {
+          if (!nextOpen) onDismiss();
+        },
+        title: "\u9879\u76EE Worktrees",
+        description: `${workspace.name} \xB7 ${count3} \u4E2A Worktree \xB7 \u9ED8\u8BA4\u5408\u5E76\u5230 ${target}`,
+        className: "workspace-worktree-dialog",
+        overlayClassName: "workspace-worktree-overlay",
+        titleClassName: "workspace-worktree-title",
+        descriptionClassName: "workspace-worktree-description",
+        headerClassName: "workspace-worktree-header",
+        closeLabel: "\u5173\u95ED\u9879\u76EE Worktree",
+        testId: "workspace-worktree-dialog",
+        dismissable: !submitting,
+        children: [
+          /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)("div", { className: "workspace-worktree-body", "aria-busy": loading || submitting, children: [
+            /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)("section", { className: "workspace-worktree-lens", "aria-label": "\u5408\u5E76\u76EE\u6807", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("span", { className: "workspace-worktree-lens-icon", children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(BranchIcon, {}) }),
+              /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)("span", { children: [
+                /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("small", { children: "\u5408\u5E76\u76EE\u6807" }),
+                /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("strong", { children: target })
+              ] }),
+              /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("code", { title: overview?.repoRoot || workspace.cwd, children: overview?.repoRoot || workspace.cwd })
+            ] }),
+            loading ? /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("p", { className: "workspace-worktree-loading", role: "status", children: "\u6B63\u5728\u68C0\u67E5\u6240\u6709 Worktree\u2026" }) : overview && overview.worktrees.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)("fieldset", { className: "workspace-worktree-picker", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)("legend", { children: [
+                /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("span", { children: "\u9009\u62E9\u8981\u4EA4\u7ED9 Agent \u5408\u5E76\u7684 Worktree" }),
+                actionable.length > 1 ? /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("button", { type: "button", disabled: submitting, onClick: toggleAll, children: selectedCount === actionable.length ? "\u53D6\u6D88\u5168\u9009" : "\u5168\u9009\u53EF\u5408\u5E76\u9879" }) : null
+              ] }),
+              /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("div", { className: "workspace-worktree-bubbles", children: overview.worktrees.map((worktree, index2) => /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(
+                WorktreeBubble,
+                {
+                  worktree,
+                  selected: selected.has(worktree.taskId),
+                  first: index2 === 0,
+                  onToggle: () => toggle(worktree.taskId)
+                },
+                worktree.taskId
+              )) })
+            ] }) : overview ? /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("p", { className: "workspace-worktree-empty", children: "\u8FD9\u4E2A\u9879\u76EE\u8FD8\u6CA1\u6709\u72EC\u7ACB Worktree\u3002\u8BF7\u5148\u65B0\u5EFA\u4EFB\u52A1\u3002" }) : null,
+            error ? /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("p", { className: "workspace-worktree-error", role: "alert", children: error }) : null
+          ] }),
+          /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)("footer", { className: "workspace-worktree-footer", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("span", { children: selectedCount > 0 ? `\u5DF2\u9009\u62E9 ${selectedCount} \u4E2A` : "\u9009\u62E9\u540E\u4F1A\u542F\u52A8\u4E00\u4E2A\u6258\u7BA1 Agent" }),
+            /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)("div", { children: [
+              /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(WandButton, { kind: "ghost", disabled: submitting, onClick: onDismiss, children: "\u53D6\u6D88" }),
+              /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(
+                WandButton,
+                {
+                  kind: "primary",
+                  disabled: loading || submitting || selectedCount === 0,
+                  onClick: () => void submit(),
+                  children: submitting ? "\u6B63\u5728\u542F\u52A8 Agent\u2026" : `\u542F\u52A8 Agent \u5408\u5E76${selectedCount ? ` ${selectedCount} \u4E2A` : ""}`
+                }
+              )
+            ] })
+          ] })
+        ]
+      }
+    );
+  }
+
+  // src/web-ui/react/workspaces/workspaces-panel.tsx
+  var import_jsx_runtime50 = __toESM(require_jsx_runtime(), 1);
   var NAME_MAX = 80;
   function containsControlOrLineBreak(value) {
     for (const ch of value) {
@@ -37438,7 +37710,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     }
     return false;
   }
-  function presentError7(error, fallback) {
+  function presentError8(error, fallback) {
     if (!(error instanceof Error) || !error.message || error.message === "Failed to fetch") return fallback;
     return error.message;
   }
@@ -37468,38 +37740,38 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     };
     switch (name) {
       case "chevron":
-        return /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("path", { d: "M6 9l6 6 6-6" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M6 9l6 6 6-6" }) });
       case "file":
-        return /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("path", { d: "M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" }) });
       case "plus":
-        return /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("path", { d: "M12 5v14M5 12h14" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M12 5v14M5 12h14" }) });
       case "trash":
-        return /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("path", { d: "M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" }) });
       case "check":
-        return /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("path", { d: "M20 6L9 17l-5-5" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M20 6L9 17l-5-5" }) });
       case "close":
-        return /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("path", { d: "M6 6l12 12M18 6L6 18" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M6 6l12 12M18 6L6 18" }) });
       case "branch":
-        return /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("circle", { cx: "6", cy: "6", r: "2.5" }),
-          /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("circle", { cx: "6", cy: "18", r: "2.5" }),
-          /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("circle", { cx: "18", cy: "8", r: "2.5" }),
-          /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("path", { d: "M6 8.5v7M18 10.5c0 4-6 2.5-6 6.5" })
+        return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("circle", { cx: "6", cy: "6", r: "2.5" }),
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("circle", { cx: "6", cy: "18", r: "2.5" }),
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("circle", { cx: "18", cy: "8", r: "2.5" }),
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M6 8.5v7M18 10.5c0 4-6 2.5-6 6.5" })
         ] });
       case "spark":
-        return /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("path", { d: "M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8" }),
-          /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("circle", { cx: "12", cy: "12", r: "3" })
+        return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8" }),
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("circle", { cx: "12", cy: "12", r: "3" })
         ] });
     }
   }
   function useWorkspaces(refreshKey) {
-    const [workspaces, setWorkspaces] = React46.useState([]);
-    const [loading, setLoading] = React46.useState(false);
-    const [error, setError] = React46.useState("");
-    const generationRef = React46.useRef(0);
-    const abortRef = React46.useRef(null);
-    const reload = React46.useCallback(async (showLoading) => {
+    const [workspaces, setWorkspaces] = React47.useState([]);
+    const [loading, setLoading] = React47.useState(false);
+    const [error, setError] = React47.useState("");
+    const generationRef = React47.useRef(0);
+    const abortRef = React47.useRef(null);
+    const reload = React47.useCallback(async (showLoading) => {
       const generation = ++generationRef.current;
       abortRef.current?.abort();
       const abort = new AbortController();
@@ -37513,7 +37785,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         }
       } catch (fetchError) {
         if (generation === generationRef.current) {
-          setError(presentError7(fetchError, "\u65E0\u6CD5\u52A0\u8F7D\u9879\u76EE\u5217\u8868\u3002"));
+          setError(presentError8(fetchError, "\u65E0\u6CD5\u52A0\u8F7D\u9879\u76EE\u5217\u8868\u3002"));
         }
       } finally {
         if (generation === generationRef.current) {
@@ -37522,7 +37794,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         }
       }
     }, []);
-    React46.useEffect(() => {
+    React47.useEffect(() => {
       void reload(true);
       const interval = window.setInterval(() => void reload(false), 6e3);
       return () => {
@@ -37535,11 +37807,11 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     return { workspaces, loading, error, reload: () => void reload(false) };
   }
   function useWorkspaceTasks(workspaceId) {
-    const [tasks, setTasks] = React46.useState([]);
-    const [loading, setLoading] = React46.useState(false);
-    const [error, setError] = React46.useState("");
-    const generationRef = React46.useRef(0);
-    const reload = React46.useCallback(async () => {
+    const [tasks, setTasks] = React47.useState([]);
+    const [loading, setLoading] = React47.useState(false);
+    const [error, setError] = React47.useState("");
+    const generationRef = React47.useRef(0);
+    const reload = React47.useCallback(async () => {
       if (!workspaceId) return;
       const generation = ++generationRef.current;
       setLoading(true);
@@ -37551,13 +37823,13 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         }
       } catch (fetchError) {
         if (generation === generationRef.current) {
-          setError(presentError7(fetchError, "\u65E0\u6CD5\u52A0\u8F7D\u4EFB\u52A1\u5217\u8868\u3002"));
+          setError(presentError8(fetchError, "\u65E0\u6CD5\u52A0\u8F7D\u4EFB\u52A1\u5217\u8868\u3002"));
         }
       } finally {
         if (generation === generationRef.current) setLoading(false);
       }
     }, [workspaceId]);
-    React46.useEffect(() => {
+    React47.useEffect(() => {
       setTasks([]);
       setError("");
       if (!workspaceId) return;
@@ -37571,10 +37843,10 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     onOpen,
     onDelete
   }) {
-    const [confirming, setConfirming] = React46.useState(false);
-    const [busy, setBusy] = React46.useState(false);
+    const [confirming, setConfirming] = React47.useState(false);
+    const [busy, setBusy] = React47.useState(false);
     const isolated = Boolean(task.worktree);
-    return /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)(
+    return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
       "div",
       {
         className: classNames("workspace-task", active && "active", !isolated && "not-isolated"),
@@ -37590,10 +37862,10 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           onOpen();
         },
         children: [
-          /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("span", { className: "workspace-task-marker", children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(SvgIcon, { name: isolated ? "branch" : "file", size: 12 }) }),
-          /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("span", { className: "workspace-task-name", children: task.name }),
-          /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("span", { className: classNames("workspace-task-badge", isolated ? "isolated" : "shared"), children: isolated ? "\u9694\u79BB" : "\u5171\u4EAB" }),
-          !confirming ? /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "workspace-task-marker", children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(SvgIcon, { name: isolated ? "branch" : "file", size: 12 }) }),
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "workspace-task-name", children: task.name }),
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: classNames("workspace-task-badge", isolated ? "isolated" : "shared"), children: isolated ? "\u9694\u79BB" : "\u5171\u4EAB" }),
+          !confirming ? /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
             "button",
             {
               type: "button",
@@ -37605,10 +37877,10 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                 event.stopPropagation();
                 setConfirming(true);
               },
-              children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(SvgIcon, { name: "trash", size: 13 })
+              children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(SvgIcon, { name: "trash", size: 13 })
             }
-          ) : /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)("span", { className: "workspace-task-confirm", onClick: (event) => event.stopPropagation(), children: [
-            /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(
+          ) : /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("span", { className: "workspace-task-confirm", onClick: (event) => event.stopPropagation(), children: [
+            /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
               "button",
               {
                 type: "button",
@@ -37625,10 +37897,10 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                     setConfirming(false);
                   }
                 },
-                children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(SvgIcon, { name: "check", size: 13 })
+                children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(SvgIcon, { name: "check", size: 13 })
               }
             ),
-            /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(
+            /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
               "button",
               {
                 type: "button",
@@ -37636,7 +37908,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                 title: "\u53D6\u6D88",
                 disabled: busy,
                 onClick: () => setConfirming(false),
-                children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(SvgIcon, { name: "close", size: 13 })
+                children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(SvgIcon, { name: "close", size: 13 })
               }
             )
           ] })
@@ -37648,11 +37920,11 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     onCancel,
     onCreate
   }) {
-    const [value, setValue] = React46.useState("");
-    const [submitting, setSubmitting] = React46.useState(false);
-    const [error, setError] = React46.useState("");
-    const inputRef = React46.useRef(null);
-    React46.useEffect(() => {
+    const [value, setValue] = React47.useState("");
+    const [submitting, setSubmitting] = React47.useState(false);
+    const [error, setError] = React47.useState("");
+    const inputRef = React47.useRef(null);
+    React47.useEffect(() => {
       const frame = requestAnimationFrame(() => {
         inputRef.current?.focus();
       });
@@ -37670,12 +37942,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       try {
         await onCreate(trimmed);
       } catch (createError) {
-        setError(presentError7(createError, "\u521B\u5EFA\u4EFB\u52A1\u5931\u8D25\u3002"));
+        setError(presentError8(createError, "\u521B\u5EFA\u4EFB\u52A1\u5931\u8D25\u3002"));
       } finally {
         setSubmitting(false);
       }
     };
-    return /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)(
+    return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
       "form",
       {
         className: "workspace-new-task-form",
@@ -37691,7 +37963,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           if (!submitting) onCancel();
         },
         children: [
-          /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
             "input",
             {
               ref: inputRef,
@@ -37709,9 +37981,9 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
               }
             }
           ),
-          /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("button", { type: "submit", className: "workspace-new-task-btn save", disabled: submitting, title: "\u521B\u5EFA\u4EFB\u52A1", "aria-label": "\u521B\u5EFA\u4EFB\u52A1", children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(SvgIcon, { name: "check", size: 14 }) }),
-          /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("button", { type: "button", className: "workspace-new-task-btn", disabled: submitting, title: "\u53D6\u6D88", "aria-label": "\u53D6\u6D88", onClick: onCancel, children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(SvgIcon, { name: "close", size: 14 }) }),
-          error && /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("div", { className: "workspace-new-task-error", role: "alert", children: error })
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("button", { type: "submit", className: "workspace-new-task-btn save", disabled: submitting, title: "\u521B\u5EFA\u4EFB\u52A1", "aria-label": "\u521B\u5EFA\u4EFB\u52A1", children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(SvgIcon, { name: "check", size: 14 }) }),
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("button", { type: "button", className: "workspace-new-task-btn", disabled: submitting, title: "\u53D6\u6D88", "aria-label": "\u53D6\u6D88", onClick: onCancel, children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(SvgIcon, { name: "close", size: 14 }) }),
+          error && /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "workspace-new-task-error", role: "alert", children: error })
         ]
       }
     );
@@ -37724,12 +37996,14 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     onActiveTaskOpen,
     reloadWorkspaces
   }) {
-    const [open, setOpen] = React46.useState(defaultExpanded);
-    const [creating, setCreating] = React46.useState(false);
-    const [confirmingDelete, setConfirmingDelete] = React46.useState(false);
-    const [deleting, setDeleting] = React46.useState(false);
+    const [open, setOpen] = React47.useState(defaultExpanded);
+    const [creating, setCreating] = React47.useState(false);
+    const [confirmingDelete, setConfirmingDelete] = React47.useState(false);
+    const [deleting, setDeleting] = React47.useState(false);
+    const [worktreeDialogOpen, setWorktreeDialogOpen] = React47.useState(false);
     const { tasks, loading, error, reload } = useWorkspaceTasks(open ? workspace.id : null);
-    React46.useEffect(() => {
+    const worktreeCount = workspace.worktreeCount ?? tasks.filter((task) => task.worktree !== null).length;
+    React47.useEffect(() => {
       if (defaultExpanded) setOpen(true);
     }, [defaultExpanded]);
     const handleCreate = async (name) => {
@@ -37740,6 +38014,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       }
       setCreating(false);
       await reload();
+      reloadWorkspaces();
       onActiveTaskOpen(created);
     };
     const handleDeleteTask = async (task) => {
@@ -37748,6 +38023,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       if (activeTaskId === task.id) runtime9()?.openWorkspace(workspace);
       toast(`\u5DF2\u5220\u9664\u4EFB\u52A1\u300C${task.name}\u300D`, "info");
       await reload();
+      reloadWorkspaces();
     };
     const handleDeleteWorkspace = async () => {
       setDeleting(true);
@@ -37759,15 +38035,27 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         setConfirmingDelete(false);
         reloadWorkspaces();
       } catch (deleteError) {
-        toast(presentError7(deleteError, "\u5220\u9664\u9879\u76EE\u5931\u8D25\u3002"), "danger");
+        toast(presentError8(deleteError, "\u5220\u9664\u9879\u76EE\u5931\u8D25\u3002"), "danger");
       } finally {
         setDeleting(false);
       }
     };
+    const handleStartMergeAgent = async (prompt) => {
+      const rt = runtime9();
+      if (!rt) throw new Error("\u5DE5\u4F5C\u7A7A\u95F4\u8FD0\u884C\u73AF\u5883\u5C1A\u672A\u5C31\u7EEA\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u540E\u91CD\u8BD5\u3002");
+      await rt.startWorktreeMergeAgent({
+        workspaceId: workspace.id,
+        cwd: workspace.cwd,
+        provider: workspace.defaultProvider,
+        prompt
+      });
+      rt.openWorkspace(workspace);
+      rt.toast(`\u5DF2\u542F\u52A8 Agent\uFF0C\u51C6\u5907\u5408\u5E76\u6240\u9009 Worktree \u5230\u9879\u76EE\u9ED8\u8BA4\u5206\u652F\u3002`, "success");
+    };
     const isActiveWorkspace = activeWorkspaceId === workspace.id;
-    return /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)("section", { className: classNames("workspace-item", isActiveWorkspace && "active-workspace"), children: [
-      /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)("div", { className: "workspace-row", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)(
+    return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("section", { className: classNames("workspace-item", isActiveWorkspace && "active-workspace"), children: [
+      /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "workspace-row", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
           "button",
           {
             type: "button",
@@ -37776,18 +38064,36 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
             title: workspace.cwd,
             onClick: () => setOpen((current) => !current),
             children: [
-              /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(SvgIcon, { name: "chevron", size: 12 }),
-              /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(SvgIcon, { name: "file", size: 14 }),
-              /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)("span", { className: "workspace-row-label", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("span", { className: "workspace-row-name", children: workspace.name }),
-                /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("span", { className: "workspace-row-cwd", children: workspace.cwd })
+              /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(SvgIcon, { name: "chevron", size: 12 }),
+              /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(SvgIcon, { name: "file", size: 14 }),
+              /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("span", { className: "workspace-row-label", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "workspace-row-name", children: workspace.name }),
+                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "workspace-row-cwd", children: workspace.cwd })
               ] }),
-              /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("span", { className: "workspace-row-count", "aria-label": `${tasks.length} \u4E2A\u4EFB\u52A1`, children: tasks.length })
+              /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "workspace-row-count", "aria-label": `${tasks.length} \u4E2A\u4EFB\u52A1`, children: tasks.length })
             ]
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)("span", { className: "workspace-row-actions", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)(
+        /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("span", { className: "workspace-row-actions", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
+            "button",
+            {
+              type: "button",
+              className: "workspace-row-action worktrees",
+              title: worktreeCount > 0 ? `\u67E5\u770B\u5E76\u5408\u5E76 ${worktreeCount} \u4E2A Worktree` : "\u6682\u65E0 Worktree",
+              "aria-label": `${workspace.name} \u7684 Worktree\uFF1A${worktreeCount} \u4E2A`,
+              disabled: worktreeCount === 0,
+              onClick: (event) => {
+                event.stopPropagation();
+                setWorktreeDialogOpen(true);
+              },
+              children: [
+                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(SvgIcon, { name: "branch", size: 13 }),
+                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "workspace-row-action-label", children: worktreeCount })
+              ]
+            }
+          ),
+          /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
             "button",
             {
               type: "button",
@@ -37801,12 +38107,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                 setOpen(true);
               },
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(SvgIcon, { name: "plus", size: 14 }),
-                /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("span", { className: "workspace-row-action-label", children: creating ? "\u586B\u5199\u4E2D" : "\u65B0\u4EFB\u52A1" })
+                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(SvgIcon, { name: "plus", size: 14 }),
+                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "workspace-row-action-label", children: creating ? "\u586B\u5199\u4E2D" : "\u65B0\u4EFB\u52A1" })
               ]
             }
           ),
-          !confirmingDelete ? /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(
+          !confirmingDelete ? /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
             "button",
             {
               type: "button",
@@ -37818,10 +38124,10 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                 event.stopPropagation();
                 setConfirmingDelete(true);
               },
-              children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(SvgIcon, { name: "trash", size: 13 })
+              children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(SvgIcon, { name: "trash", size: 13 })
             }
-          ) : /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)("span", { className: "workspace-row-confirm", onClick: (event) => event.stopPropagation(), children: [
-            /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(
+          ) : /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("span", { className: "workspace-row-confirm", onClick: (event) => event.stopPropagation(), children: [
+            /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
               "button",
               {
                 type: "button",
@@ -37829,10 +38135,10 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                 title: "\u786E\u8BA4\u5220\u9664",
                 disabled: deleting,
                 onClick: handleDeleteWorkspace,
-                children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(SvgIcon, { name: "check", size: 13 })
+                children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(SvgIcon, { name: "check", size: 13 })
               }
             ),
-            /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(
+            /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
               "button",
               {
                 type: "button",
@@ -37840,15 +38146,15 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                 title: "\u53D6\u6D88",
                 disabled: deleting,
                 onClick: () => setConfirmingDelete(false),
-                children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(SvgIcon, { name: "close", size: 13 })
+                children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(SvgIcon, { name: "close", size: 13 })
               }
             )
           ] })
         ] })
       ] }),
-      open && /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)("div", { className: "workspace-tasks", children: [
-        loading && tasks.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("div", { className: "workspace-tasks-state", children: "\u6B63\u5728\u52A0\u8F7D\u4EFB\u52A1\u2026" }) : error && tasks.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("div", { className: "workspace-tasks-state error", children: error }) : /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)(import_jsx_runtime49.Fragment, { children: [
-          tasks.map((task) => /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(
+      open && /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "workspace-tasks", children: [
+        loading && tasks.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "workspace-tasks-state", children: "\u6B63\u5728\u52A0\u8F7D\u4EFB\u52A1\u2026" }) : error && tasks.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "workspace-tasks-state error", children: error }) : /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(import_jsx_runtime50.Fragment, { children: [
+          tasks.map((task) => /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
             TaskItem,
             {
               task,
@@ -37858,35 +38164,44 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
             },
             task.id
           )),
-          tasks.length === 0 && !creating && /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("div", { className: "workspace-tasks-empty", children: "\u8FD8\u6CA1\u6709\u4EFB\u52A1\uFF0C\u70B9\u51FB\u300C+\u300D\u65B0\u5EFA\u4E00\u4E2A\uFF08\u6BCF\u4E2A\u4EFB\u52A1\u72EC\u5360\u4E00\u4E2A worktree\uFF09\u3002" })
+          tasks.length === 0 && !creating && /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "workspace-tasks-empty", children: "\u8FD8\u6CA1\u6709\u4EFB\u52A1\uFF0C\u70B9\u51FB\u300C+\u300D\u65B0\u5EFA\u4E00\u4E2A\uFF08\u6BCF\u4E2A\u4EFB\u52A1\u72EC\u5360\u4E00\u4E2A worktree\uFF09\u3002" })
         ] }),
-        creating && /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(NewTaskForm, { onCancel: () => setCreating(false), onCreate: handleCreate })
-      ] })
+        creating && /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(NewTaskForm, { onCancel: () => setCreating(false), onCreate: handleCreate })
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+        WorkspaceWorktreeDialog,
+        {
+          open: worktreeDialogOpen,
+          workspace,
+          onStartAgent: handleStartMergeAgent,
+          onDismiss: () => setWorktreeDialogOpen(false)
+        }
+      )
     ] });
   }
   function WorkspacesPanel() {
-    const controllerSnapshot = React46.useSyncExternalStore(
+    const controllerSnapshot = React47.useSyncExternalStore(
       workspacesStore.subscribe,
       workspacesStore.getSnapshot,
       workspacesStore.getSnapshot
     );
-    const [refreshTick, setRefreshTick] = React46.useState(0);
-    const lastOpenRef = React46.useRef(controllerSnapshot.open);
-    React46.useEffect(() => {
+    const [refreshTick, setRefreshTick] = React47.useState(0);
+    const lastOpenRef = React47.useRef(controllerSnapshot.open);
+    React47.useEffect(() => {
       if (lastOpenRef.current && !controllerSnapshot.open) {
         setRefreshTick((n) => n + 1);
       }
       lastOpenRef.current = controllerSnapshot.open;
     }, [controllerSnapshot.open]);
     const { workspaces, loading, error, reload } = useWorkspaces(refreshTick);
-    const activeContext = React46.useSyncExternalStore(
+    const activeContext = React47.useSyncExternalStore(
       workspaceContextStore.subscribe,
       workspaceContextStore.getSnapshot,
       workspaceContextStore.getServerSnapshot
     );
     const activeWorkspaceId = activeContext.workspaceId;
     const activeTaskId = activeContext.taskId;
-    const openTask = React46.useCallback((workspace, task) => {
+    const openTask = React47.useCallback((workspace, task) => {
       const rt = runtime9();
       const cwd = task.worktree?.path ?? workspace.cwd;
       if (rt) {
@@ -37903,10 +38218,10 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         toast("\u5DE5\u4F5C\u7A7A\u95F4\u8FD0\u884C\u73AF\u5883\u5C1A\u672A\u5C31\u7EEA\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u540E\u91CD\u8BD5\u3002", "warning");
       }
     }, []);
-    return /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)("div", { className: "workspaces-panel", "aria-label": "\u5DE5\u4F5C\u7A7A\u95F4\u4E0E\u4EFB\u52A1", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)("div", { className: "workspaces-panel-toolbar", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("span", { className: "workspaces-panel-title", children: "\u9879\u76EE / \u4EFB\u52A1" }),
-        /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "workspaces-panel", "aria-label": "\u5DE5\u4F5C\u7A7A\u95F4\u4E0E\u4EFB\u52A1", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "workspaces-panel-toolbar", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "workspaces-panel-title", children: "\u9879\u76EE / \u4EFB\u52A1" }),
+        /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
           "button",
           {
             type: "button",
@@ -37914,15 +38229,15 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
             title: "\u65B0\u5EFA\u9879\u76EE",
             "aria-label": "\u65B0\u5EFA\u9879\u76EE",
             onClick: () => workspacesController.open(),
-            children: /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(SvgIcon, { name: "plus", size: 14 })
+            children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(SvgIcon, { name: "plus", size: 14 })
           }
         )
       ] }),
-      loading && workspaces.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("div", { className: "workspaces-panel-state", children: "\u6B63\u5728\u52A0\u8F7D\u9879\u76EE\u2026" }) : error && workspaces.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("div", { className: "workspaces-panel-state error", children: error }) : workspaces.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime49.jsxs)("div", { className: "workspaces-panel-empty", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("strong", { children: "\u8FD8\u6CA1\u6709\u9879\u76EE" }),
-        /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("br", {}),
+      loading && workspaces.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "workspaces-panel-state", children: "\u6B63\u5728\u52A0\u8F7D\u9879\u76EE\u2026" }) : error && workspaces.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "workspaces-panel-state error", children: error }) : workspaces.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "workspaces-panel-empty", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("strong", { children: "\u8FD8\u6CA1\u6709\u9879\u76EE" }),
+        /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("br", {}),
         "\u70B9\u51FB\u300C\u65B0\u9879\u76EE\u300D\u521B\u5EFA\u4E00\u4E2A\u9879\u76EE\uFF0C\u518D\u5728\u91CC\u9762\u6DFB\u52A0\u4EFB\u52A1\u3002"
-      ] }) : /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("div", { className: "workspaces-list", children: workspaces.map((workspace) => /* @__PURE__ */ (0, import_jsx_runtime49.jsx)(
+      ] }) : /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "workspaces-list", children: workspaces.map((workspace) => /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
         WorkspaceItem,
         {
           workspace,
@@ -37934,7 +38249,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         },
         workspace.id
       )) }),
-      /* @__PURE__ */ (0, import_jsx_runtime49.jsx)("div", { className: "workspaces-panel-hint", children: "\u6BCF\u4E2A\u4EFB\u52A1\u5728\u72EC\u7ACB\u7684 git worktree \u4E2D\u8FD0\u884C\uFF1B\u975E git \u76EE\u5F55\u5219\u5728\u9879\u76EE\u76EE\u5F55\u76F4\u63A5\u8FD0\u884C\u3002" })
+      /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "workspaces-panel-hint", children: "\u6BCF\u4E2A\u4EFB\u52A1\u5728\u72EC\u7ACB\u7684 git worktree \u4E2D\u8FD0\u884C\uFF1B\u975E git \u76EE\u5F55\u5219\u5728\u9879\u76EE\u76EE\u5F55\u76F4\u63A5\u8FD0\u884C\u3002" })
     ] });
   }
 
@@ -37983,7 +38298,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   var httpSessionDirectoryRepository = new HttpSessionDirectoryRepository();
 
   // src/web-ui/react/shell/shell-sidebar.tsx
-  var import_jsx_runtime50 = __toESM(require_jsx_runtime(), 1);
+  var import_jsx_runtime51 = __toESM(require_jsx_runtime(), 1);
   function getSidebarEntryTarget(entry) {
     if (entry.source.endsWith("-history")) return entry.source;
     return "session";
@@ -38034,63 +38349,63 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     };
     switch (name) {
       case "back":
-        return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("rect", { x: "10", y: "3", width: "11", height: "18", rx: "2" }),
-          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M7 8l-4 4 4 4M3 12h11" })
+        return /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("rect", { x: "10", y: "3", width: "11", height: "18", rx: "2" }),
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M7 8l-4 4 4 4M3 12h11" })
         ] });
       case "check":
-        return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M20 6L9 17l-5-5" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M20 6L9 17l-5-5" }) });
       case "chevron":
-        return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M6 9l6 6 6-6" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M6 9l6 6 6-6" }) });
       case "cleanup":
       case "trash":
-        return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" }) });
       case "close":
-        return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M6 6l12 12M18 6L6 18" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M6 6l12 12M18 6L6 18" }) });
       case "edit":
-        return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M12 20h9" }),
-          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M16.5 3.5a2.1 2.1 0 013 3L8 18l-4 1 1-4z" })
+        return /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M12 20h9" }),
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M16.5 3.5a2.1 2.1 0 013 3L8 18l-4 1 1-4z" })
         ] });
       case "file":
-        return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" }) });
       case "gear":
-        return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("circle", { cx: "12", cy: "12", r: "3" }),
-          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M12 2v3M12 19v3M4.9 4.9L7 7M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1L7 17M17 7l2.1-2.1" })
+        return /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("circle", { cx: "12", cy: "12", r: "3" }),
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M12 2v3M12 19v3M4.9 4.9L7 7M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1L7 17M17 7l2.1-2.1" })
         ] });
       case "history":
-        return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M3 12a9 9 0 109-9 9.7 9.7 0 00-6.7 2.7L3 8M3 3v5h5M12 7v5l3 2" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M3 12a9 9 0 109-9 9.7 9.7 0 00-6.7 2.7L3 8M3 3v5h5M12 7v5l3 2" }) });
       case "inbox":
-        return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M4 4h16l2 10v6H2v-6L4 4zM2 14h6l2 3h4l2-3h6" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M4 4h16l2 10v6H2v-6L4 4zM2 14h6l2 3h4l2-3h6" }) });
       case "logout":
-        return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" }) });
       case "merge":
-        return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M7 7h10M7 12h10M7 17h10M5 7L3 9l2 2M19 15l2 2-2 2" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M7 7h10M7 12h10M7 17h10M5 7L3 9l2 2M19 15l2 2-2 2" }) });
       case "more":
-        return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("circle", { cx: "12", cy: "5", r: "1" }),
-          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("circle", { cx: "12", cy: "12", r: "1" }),
-          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("circle", { cx: "12", cy: "19", r: "1" })
+        return /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("circle", { cx: "12", cy: "5", r: "1" }),
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("circle", { cx: "12", cy: "12", r: "1" }),
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("circle", { cx: "12", cy: "19", r: "1" })
         ] });
       case "rail":
-        return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("rect", { x: "3", y: "4", width: "18", height: "16", rx: "3" }),
-          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M7 4v16" }),
-          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M11 8h6M11 12h6M11 16h4" })
+        return /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("rect", { x: "3", y: "4", width: "18", height: "16", rx: "3" }),
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M7 4v16" }),
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M11 8h6M11 12h6M11 16h4" })
         ] });
       case "resume":
-        return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M1 4v6h6M3.5 15A9 9 0 109 3.6L3 10" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M1 4v6h6M3.5 15A9 9 0 109 3.6L3 10" }) });
       case "server":
-        return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("rect", { x: "2", y: "3", width: "20", height: "8", rx: "2" }),
-          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("rect", { x: "2", y: "13", width: "20", height: "8", rx: "2" }),
-          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M6 7h.01M6 17h.01" })
+        return /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("rect", { x: "2", y: "3", width: "20", height: "8", rx: "2" }),
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("rect", { x: "2", y: "13", width: "20", height: "8", rx: "2" }),
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M6 7h.01M6 17h.01" })
         ] });
       case "spark":
-        return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("path", { d: "M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8" }),
-          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("circle", { cx: "12", cy: "12", r: "3" })
+        return /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8" }),
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("circle", { cx: "12", cy: "12", r: "3" })
         ] });
     }
   }
@@ -38104,7 +38419,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     disabled,
     data
   }) {
-    return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
       "button",
       {
         type: "button",
@@ -38120,7 +38435,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           event.stopPropagation();
           void dispatch(action);
         },
-        children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: icon })
+        children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(Icon, { name: icon })
       }
     );
   }
@@ -38130,8 +38445,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   }) {
     const target = getSidebarEntryTarget(entry);
     const legacyKind = target === "session" ? "sessions" : target === "codex-history" ? "codex" : "history";
-    return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("label", { className: "session-manage-check", onClick: (event) => event.stopPropagation(), children: [
-      /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("label", { className: "session-manage-check", onClick: (event) => event.stopPropagation(), children: [
+      /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
         "input",
         {
           type: "checkbox",
@@ -38143,7 +38458,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           onChange: () => void dispatch({ type: "session.manage.select", target, id: entry.id })
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", {})
+      /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", {})
     ] });
   }
   function WorktreeBadges({ entry }) {
@@ -38159,9 +38474,9 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       entry.worktree.branch && `Worktree: ${entry.worktree.branch}`,
       entry.worktree.path && `Path: ${entry.worktree.path}`
     ].filter(Boolean).join("\n");
-    return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(import_jsx_runtime50.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "session-kind-badge worktree", title: title || void 0, children: "Worktree" }),
-      entry.worktree.mergeStatus && /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: classNames("session-kind-badge worktree-merge", entry.worktree.mergeStatus), children: labels[entry.worktree.mergeStatus] ?? entry.worktree.mergeStatus })
+    return /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(import_jsx_runtime51.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "session-kind-badge worktree", title: title || void 0, children: "Worktree" }),
+      entry.worktree.mergeStatus && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: classNames("session-kind-badge worktree-merge", entry.worktree.mergeStatus), children: labels[entry.worktree.mergeStatus] ?? entry.worktree.mergeStatus })
     ] });
   }
   function formatEntryTime(entry) {
@@ -38186,25 +38501,25 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   function ProviderMark({ entry }) {
     const label = providerDisplayName(entry.provider);
     const provider = normalizeProviderId(entry.provider);
-    return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
       "span",
       {
         className: classNames("session-provider-mark", `provider-${provider ?? "generic"}`),
         "aria-hidden": "true",
         title: label,
-        children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(ProviderLogo, { provider })
+        children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(ProviderLogo, { provider })
       }
     );
   }
   function PathReveal({ path }) {
-    const containerRef = React47.useRef(null);
-    const [overflow, setOverflow] = React47.useState(0);
+    const containerRef = React48.useRef(null);
+    const [overflow, setOverflow] = React48.useState(0);
     const normalized = path.replace(/\\/g, "/").replace(/\/$/, "");
     const separator = normalized.lastIndexOf("/");
     const prefix = separator >= 0 ? normalized.slice(0, separator + 1) : "";
     const leaf = separator >= 0 ? normalized.slice(separator + 1) : normalized;
     const staggerMs = Array.from(normalized).reduce((sum, character) => sum + character.charCodeAt(0), 0) % 1200;
-    React47.useLayoutEffect(() => {
+    React48.useLayoutEffect(() => {
       const container = containerRef.current;
       if (!container) return;
       const measure = () => {
@@ -38221,7 +38536,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     }, [normalized]);
     const travelSeconds = Math.max(4.8, overflow / 28);
     if (!path) return null;
-    return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
       "span",
       {
         ref: containerRef,
@@ -38233,9 +38548,9 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           "--tail-marquee-duration": `${Math.min(8, travelSeconds)}s`,
           "--tail-marquee-delay": `${1.8 + staggerMs / 1e3}s`
         },
-        children: /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("span", { className: "tail-marquee-path-inner", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "tail-marquee-prefix", children: prefix }),
-          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "tail-marquee-leaf", children: leaf })
+        children: /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("span", { className: "tail-marquee-path-inner", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "tail-marquee-prefix", children: prefix }),
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "tail-marquee-leaf", children: leaf })
         ] })
       }
     );
@@ -38253,7 +38568,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     const time = formatEntryTime(entry);
     const prominentStatus = !isHistory && (entry.permissionBlocked || entry.inFlight || ["running", "thinking", "waiting-input", "waiting_input", "reconnecting"].includes(entry.status));
     const prominentWarning = entry.permissionBlocked || ["waiting-input", "waiting_input", "reconnecting"].includes(entry.status);
-    return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
+    return /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(
       "div",
       {
         className: classNames(
@@ -38280,7 +38595,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           activate();
         },
         children: [
-          !manageMode && !isHistory && actions.delete && /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "session-swipe-bg", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
+          !manageMode && !isHistory && actions.delete && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("div", { className: "session-swipe-bg", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(
             "button",
             {
               className: "session-swipe-delete",
@@ -38294,17 +38609,17 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                 void dispatch(actions.delete);
               },
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "trash", size: 18 }),
-                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { children: "\u5220\u9664" })
+                /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(Icon, { name: "trash", size: 18 }),
+                /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { children: "\u5220\u9664" })
               ]
             }
           ) }),
-          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "session-item-content", children: /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "session-item-row", children: [
-            manageMode && /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(ManageCheckbox, { entry, dispatch }),
-            /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "session-main", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "session-title-row", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "session-leading-slot", children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(ProviderMark, { entry }) }),
-                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("div", { className: "session-item-content", children: /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("div", { className: "session-item-row", children: [
+            manageMode && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(ManageCheckbox, { entry, dispatch }),
+            /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("div", { className: "session-main", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("div", { className: "session-title-row", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "session-leading-slot", children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(ProviderMark, { entry }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
                   "div",
                   {
                     className: classNames(
@@ -38316,24 +38631,24 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                   }
                 )
               ] }),
-              entry.description && /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "session-description", children: entry.description }),
-              /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "session-meta", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "session-leading-slot session-time", children: time }),
-                isHistory ? /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(import_jsx_runtime50.Fragment, { children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("span", { className: "session-context session-context-recoverable", children: [
-                    /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "history", size: 11 }),
+              entry.description && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("div", { className: "session-description", children: entry.description }),
+              /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("div", { className: "session-meta", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "session-leading-slot session-time", children: time }),
+                isHistory ? /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(import_jsx_runtime51.Fragment, { children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("span", { className: "session-context session-context-recoverable", children: [
+                    /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(Icon, { name: "history", size: 11 }),
                     "\u53EF\u6062\u590D"
                   ] }),
-                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(PathReveal, { path: entry.cwd })
-                ] }) : /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(import_jsx_runtime50.Fragment, { children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: classNames("session-status", entry.permissionBlocked ? "permission-blocked" : entry.inFlight ? "running" : entry.status), children: entry.statusLabel }),
-                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(PathReveal, { path: entry.cwd }),
-                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(WorktreeBadges, { entry })
+                  /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(PathReveal, { path: entry.cwd })
+                ] }) : /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(import_jsx_runtime51.Fragment, { children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: classNames("session-status", entry.permissionBlocked ? "permission-blocked" : entry.inFlight ? "running" : entry.status), children: entry.statusLabel }),
+                  /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(PathReveal, { path: entry.cwd }),
+                  /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(WorktreeBadges, { entry })
                 ] })
               ] })
             ] }),
-            !manageMode && /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("span", { className: "session-actions", children: [
-              actions.resume && /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+            !manageMode && /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("span", { className: "session-actions", children: [
+              actions.resume && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
                 ActionButton,
                 {
                   action: actions.resume,
@@ -38344,7 +38659,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                   data
                 }
               ),
-              actions.merge && /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+              actions.merge && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
                 ActionButton,
                 {
                   action: actions.merge,
@@ -38357,7 +38672,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                   data
                 }
               ),
-              actions.cleanup && /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+              actions.cleanup && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
                 ActionButton,
                 {
                   action: actions.cleanup,
@@ -38369,7 +38684,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                   data
                 }
               ),
-              actions.delete && /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+              actions.delete && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
                 ActionButton,
                 {
                   action: actions.delete,
@@ -38492,13 +38807,13 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     };
   }
   function useSessionDirectories(enabled, refreshKey) {
-    const [data, setData] = React47.useState(null);
-    const [loading, setLoading] = React47.useState(false);
-    const [error, setError] = React47.useState("");
-    const loadGenerationRef = React47.useRef(0);
-    const activeLoadRef = React47.useRef(null);
-    const renameInFlightRef = React47.useRef(false);
-    const loadLatest = React47.useCallback(async (showLoading, propagateError = false) => {
+    const [data, setData] = React48.useState(null);
+    const [loading, setLoading] = React48.useState(false);
+    const [error, setError] = React48.useState("");
+    const loadGenerationRef = React48.useRef(0);
+    const activeLoadRef = React48.useRef(null);
+    const renameInFlightRef = React48.useRef(false);
+    const loadLatest = React48.useCallback(async (showLoading, propagateError = false) => {
       const generation = ++loadGenerationRef.current;
       activeLoadRef.current?.abort();
       const abort = new AbortController();
@@ -38523,7 +38838,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         }
       }
     }, []);
-    React47.useEffect(() => {
+    React48.useEffect(() => {
       if (!enabled) return;
       setError("");
       void loadLatest(data === null);
@@ -38535,7 +38850,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         activeLoadRef.current = null;
       };
     }, [enabled, refreshKey, loadLatest]);
-    const rename = React47.useCallback(async (path, name) => {
+    const rename = React48.useCallback(async (path, name) => {
       if (renameInFlightRef.current) throw new Error("\u53E6\u4E00\u4E2A\u9879\u76EE\u540D\u79F0\u6B63\u5728\u4FDD\u5B58\uFF0C\u8BF7\u7A0D\u5019\u3002");
       renameInFlightRef.current = true;
       setError("");
@@ -38575,21 +38890,21 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     renameDirectory
   }) {
     const activeWithin = nodeContainsActive(node, selectedId);
-    const [open, setOpen] = React47.useState(depth === 0 || activeWithin);
-    const [renaming, setRenaming] = React47.useState(false);
-    const [renameDraft, setRenameDraft] = React47.useState("");
-    const [renameError, setRenameError] = React47.useState("");
-    const [renameSaving, setRenameSaving] = React47.useState(false);
-    const renameInputRef = React47.useRef(null);
-    const renameTriggerRef = React47.useRef(null);
+    const [open, setOpen] = React48.useState(depth === 0 || activeWithin);
+    const [renaming, setRenaming] = React48.useState(false);
+    const [renameDraft, setRenameDraft] = React48.useState("");
+    const [renameError, setRenameError] = React48.useState("");
+    const [renameSaving, setRenameSaving] = React48.useState(false);
+    const renameInputRef = React48.useRef(null);
+    const renameTriggerRef = React48.useRef(null);
     const labels = getSessionDirectoryLabels(node);
     const renameLength = Array.from(renameDraft.trim()).length;
     const renameTooLong = renameLength > 80;
     const renameHasInvalidCharacters = /[\u0000-\u001F\u007F-\u009F\u2028\u2029]/u.test(renameDraft.trim());
-    React47.useEffect(() => {
+    React48.useEffect(() => {
       if (activeWithin) setOpen(true);
     }, [activeWithin]);
-    React47.useEffect(() => {
+    React48.useEffect(() => {
       if (!renaming) return;
       const frame = requestAnimationFrame(() => {
         renameInputRef.current?.focus();
@@ -38640,13 +38955,13 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         setRenameSaving(false);
       }
     };
-    return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
+    return /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(
       "section",
       {
         className: classNames("session-directory-node", activeWithin && "active-path"),
         style: { "--directory-depth": Math.min(depth, 6) },
         children: [
-          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "session-directory-row", children: renaming ? /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("div", { className: "session-directory-row", children: renaming ? /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(
             "form",
             {
               className: "session-directory-rename-form",
@@ -38662,8 +38977,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                 cancelRename();
               },
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "file", size: 15 }),
-                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+                /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(Icon, { name: "file", size: 15 }),
+                /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
                   "input",
                   {
                     ref: renameInputRef,
@@ -38681,7 +38996,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                     }
                   }
                 ),
-                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+                /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
                   "button",
                   {
                     type: "submit",
@@ -38689,10 +39004,10 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                     disabled: renameSaving || renameTooLong || renameHasInvalidCharacters,
                     title: "\u4FDD\u5B58\u540D\u79F0",
                     "aria-label": "\u4FDD\u5B58\u9879\u76EE\u540D\u79F0",
-                    children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "check", size: 14 })
+                    children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(Icon, { name: "check", size: 14 })
                   }
                 ),
-                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+                /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
                   "button",
                   {
                     type: "button",
@@ -38701,13 +39016,13 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                     title: "\u53D6\u6D88",
                     "aria-label": "\u53D6\u6D88\u91CD\u547D\u540D",
                     onClick: cancelRename,
-                    children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "close", size: 14 })
+                    children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(Icon, { name: "close", size: 14 })
                   }
                 )
               ]
             }
-          ) : /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(import_jsx_runtime50.Fragment, { children: [
-            /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
+          ) : /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(import_jsx_runtime51.Fragment, { children: [
+            /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(
               "button",
               {
                 type: "button",
@@ -38719,18 +39034,18 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                   if (hasContents) setOpen((current) => !current);
                 },
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "chevron", size: 12, className: classNames("session-directory-chevron", open && "open") }),
-                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "file", size: 15 }),
-                  /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("span", { className: "session-directory-label", children: [
-                    /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "session-directory-name", children: labels.displayName }),
-                    labels.directoryName && /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "session-directory-default-name", children: labels.directoryName })
+                  /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(Icon, { name: "chevron", size: 12, className: classNames("session-directory-chevron", open && "open") }),
+                  /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(Icon, { name: "file", size: 15 }),
+                  /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("span", { className: "session-directory-label", children: [
+                    /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "session-directory-name", children: labels.displayName }),
+                    labels.directoryName && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "session-directory-default-name", children: labels.directoryName })
                   ] }),
-                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "session-directory-count", "aria-label": `${node.totalCount} \u4E2A\u4F1A\u8BDD`, children: node.totalCount })
+                  /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "session-directory-count", "aria-label": `${node.totalCount} \u4E2A\u4F1A\u8BDD`, children: node.totalCount })
                 ]
               }
             ),
-            !node.synthetic && node.path && /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("span", { className: "session-directory-actions", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+            !node.synthetic && node.path && /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("span", { className: "session-directory-actions", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
                 "button",
                 {
                   ref: renameTriggerRef,
@@ -38739,10 +39054,10 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                   title: `\u8BBE\u7F6E ${labels.displayName} \u7684\u9879\u76EE\u540D\u79F0`,
                   "aria-label": `\u91CD\u547D\u540D\u9879\u76EE ${labels.displayName}`,
                   onClick: beginRename,
-                  children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "edit", size: 14 })
+                  children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(Icon, { name: "edit", size: 14 })
                 }
               ),
-              /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+              /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
                 "button",
                 {
                   type: "button",
@@ -38750,18 +39065,18 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                   title: `\u5728 ${node.path} \u65B0\u5EFA\u4F1A\u8BDD`,
                   "aria-label": `\u5728 ${node.path} \u65B0\u5EFA\u4F1A\u8BDD`,
                   onClick: () => void dispatch({ type: "session.newAt", cwd: node.path }),
-                  children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { "aria-hidden": "true", children: "\uFF0B" })
+                  children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { "aria-hidden": "true", children: "\uFF0B" })
                 }
               )
             ] })
           ] }) }),
-          renaming && (renameTooLong || renameHasInvalidCharacters || renameError) && /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "session-directory-rename-error", role: "alert", children: renameHasInvalidCharacters ? "\u9879\u76EE\u540D\u79F0\u4E0D\u80FD\u5305\u542B\u6362\u884C\u6216\u63A7\u5236\u5B57\u7B26" : renameTooLong ? `\u9879\u76EE\u540D\u79F0\u6700\u591A 80 \u4E2A\u5B57\u7B26\uFF08\u5F53\u524D ${renameLength} \u4E2A\uFF09` : renameError }),
-          open && /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "session-directory-contents", children: [
-            node.entries.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "session-directory-sessions", children: node.entries.map((entry) => {
+          renaming && (renameTooLong || renameHasInvalidCharacters || renameError) && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("div", { className: "session-directory-rename-error", role: "alert", children: renameHasInvalidCharacters ? "\u9879\u76EE\u540D\u79F0\u4E0D\u80FD\u5305\u542B\u6362\u884C\u6216\u63A7\u5236\u5B57\u7B26" : renameTooLong ? `\u9879\u76EE\u540D\u79F0\u6700\u591A 80 \u4E2A\u5B57\u7B26\uFF08\u5F53\u524D ${renameLength} \u4E2A\uFF09` : renameError }),
+          open && /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("div", { className: "session-directory-contents", children: [
+            node.entries.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("div", { className: "session-directory-sessions", children: node.entries.map((entry) => {
               const vm = directoryEntryToVm(entry, selectedId);
-              return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(SessionEntry, { entry: vm, manageMode: false, dispatch }, entry.key);
+              return /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(SessionEntry, { entry: vm, manageMode: false, dispatch }, entry.key);
             }) }),
-            node.children.map((child) => /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+            node.children.map((child) => /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
               DirectoryNode,
               {
                 node: child,
@@ -38785,16 +39100,16 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     dispatch,
     renameDirectory
   }) {
-    if (loading && !response) return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "session-directory-state", children: "\u6B63\u5728\u6574\u7406\u9879\u76EE\u2026" });
-    if (error && !response) return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "session-directory-state error", children: error });
+    if (loading && !response) return /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("div", { className: "session-directory-state", children: "\u6B63\u5728\u6574\u7406\u9879\u76EE\u2026" });
+    if (error && !response) return /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("div", { className: "session-directory-state error", children: error });
     if (!response || response.roots.length === 0) {
-      return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "empty-state", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("strong", { children: "\u8FD8\u6CA1\u6709\u9879\u76EE" }),
-        /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("br", {}),
+      return /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("div", { className: "empty-state", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("strong", { children: "\u8FD8\u6CA1\u6709\u9879\u76EE" }),
+        /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("br", {}),
         "\u521B\u5EFA\u4F1A\u8BDD\u540E\u4F1A\u6309\u5DE5\u4F5C\u8DEF\u5F84\u81EA\u52A8\u5F52\u5165\u9879\u76EE\u3002"
       ] });
     }
-    return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "session-directory-tree", "aria-label": "\u9879\u76EE\u5217\u8868", children: response.roots.map((node) => /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("div", { className: "session-directory-tree", "aria-label": "\u9879\u76EE\u5217\u8868", children: response.roots.map((node) => /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
       DirectoryNode,
       {
         node,
@@ -38810,7 +39125,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     mode,
     onChange
   }) {
-    return /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "sidebar-view-switch", role: "tablist", "aria-label": "\u4FA7\u680F\u5C55\u793A\u65B9\u5F0F", children: ["sessions", "workspaces"].map((value) => /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("div", { className: "sidebar-view-switch", role: "tablist", "aria-label": "\u4FA7\u680F\u5C55\u793A\u65B9\u5F0F", children: ["sessions", "workspaces"].map((value) => /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
       "button",
       {
         type: "button",
@@ -38828,7 +39143,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     onToggle
   }) {
     const label = active ? "\u5C55\u5F00\u5B8C\u6574\u4FA7\u8FB9\u680F" : "\u6536\u8D77\u4E3A\u7A84\u680F";
-    return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
+    return /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(
       "button",
       {
         className: classNames("sidebar-compact-toggle", active && "active"),
@@ -38838,8 +39153,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         title: label,
         onClick: onToggle,
         children: [
-          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "rail", size: 14 }),
-          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "sidebar-compact-toggle-label", children: label })
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(Icon, { name: "rail", size: 14 }),
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "sidebar-compact-toggle-label", children: label })
         ]
       }
     );
@@ -38850,14 +39165,14 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     dispatch
   }) {
     if (group.entries.length === 0) return null;
-    const entries = /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("section", { className: classNames(
+    const entries = /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("section", { className: classNames(
       "session-group",
       group.kind === "automation" && "automation-session-list",
       group.kind === "history" && "non-wand-session-list"
-    ), children: group.entries.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(SessionEntry, { entry, manageMode, dispatch }, `${entry.source}:${entry.id}`)) });
+    ), children: group.entries.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(SessionEntry, { entry, manageMode, dispatch }, `${entry.source}:${entry.id}`)) });
     if (group.kind === "wand") return entries;
     const automation = group.kind === "automation";
-    return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
+    return /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(
       "details",
       {
         className: classNames(
@@ -38874,16 +39189,16 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           });
         },
         children: [
-          /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(
             "summary",
             {
               className: automation ? "automation-session-summary" : "non-wand-session-summary",
               title: automation ? "\u7531\u81EA\u52A8\u5316\u6216\u542F\u52A8\u4EFB\u52A1\u521B\u5EFA\uFF0C\u4E0D\u53C2\u4E0E\u666E\u901A Wand \u4F1A\u8BDD\u6392\u5E8F" : "Claude \u4E0E Codex \u7684\u672C\u673A\u539F\u751F\u4F1A\u8BDD\uFF0C\u4E0D\u53C2\u4E0E Wand \u4F1A\u8BDD\u6392\u5E8F",
               onClick: manageMode ? (event) => event.preventDefault() : void 0,
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: automation ? "automation-session-icon" : "non-wand-session-icon", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: automation ? "spark" : "history" }) }),
-                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: automation ? "automation-session-title" : "non-wand-session-title", children: group.label }),
-                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+                /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: automation ? "automation-session-icon" : "non-wand-session-icon", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(Icon, { name: automation ? "spark" : "history" }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: automation ? "automation-session-title" : "non-wand-session-title", children: group.label }),
+                /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
                   "span",
                   {
                     className: automation ? "automation-session-count" : "non-wand-session-count",
@@ -38891,7 +39206,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                     children: group.entries.length
                   }
                 ),
-                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+                /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
                   Icon,
                   {
                     name: "chevron",
@@ -38913,23 +39228,23 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     dispatch
   }) {
     if (!manageMode) {
-      return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "session-manage-bar", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "sidebar-intro", children: "Wand \u4F1A\u8BDD" }),
-        /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+      return /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("div", { className: "session-manage-bar", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "sidebar-intro", children: "Wand \u4F1A\u8BDD" }),
+        /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
           "button",
           {
             className: "btn btn-ghost btn-xs session-manage-toggle",
             "data-action": "toggle-manage-mode",
             type: "button",
             onClick: () => void dispatch({ type: "session.manage.toggle" }),
-            children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { children: "\u7BA1\u7406" })
+            children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { children: "\u7BA1\u7406" })
           }
         )
       ] });
     }
     const allSelected = totalCount > 0 && selectedCount >= totalCount;
-    return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "session-manage-bar active", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("div", { className: "session-manage-bar active", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
         "button",
         {
           className: "session-manage-exit",
@@ -38938,15 +39253,15 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           "aria-label": "\u9000\u51FA\u7BA1\u7406\u6A21\u5F0F",
           title: "\u9000\u51FA\u7BA1\u7406\u6A21\u5F0F",
           onClick: () => void dispatch({ type: "session.manage.toggle" }),
-          children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "close" })
+          children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(Icon, { name: "close" })
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "session-manage-summary", children: selectedCount > 0 ? /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(import_jsx_runtime50.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "session-manage-count", children: selectedCount }),
-        /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "session-manage-summary-label", children: "\u5DF2\u9009\u62E9" })
-      ] }) : /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "session-manage-summary-label muted", children: "\u9009\u62E9\u8981\u7BA1\u7406\u7684\u9879\u76EE" }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "session-manage-actions", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("div", { className: "session-manage-summary", children: selectedCount > 0 ? /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(import_jsx_runtime51.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "session-manage-count", children: selectedCount }),
+        /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "session-manage-summary-label", children: "\u5DF2\u9009\u62E9" })
+      ] }) : /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "session-manage-summary-label muted", children: "\u9009\u62E9\u8981\u7BA1\u7406\u7684\u9879\u76EE" }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("div", { className: "session-manage-actions", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
           "button",
           {
             className: "btn btn-ghost btn-xs",
@@ -38959,7 +39274,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
             children: allSelected ? "\u53D6\u6D88\u5168\u9009" : "\u5168\u9009"
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
+        /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(
           "button",
           {
             className: "btn btn-danger btn-xs",
@@ -38983,8 +39298,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     const wand = groups.find((group) => group.kind === "wand")?.entries ?? [];
     const automation = groups.find((group) => group.kind === "automation")?.entries ?? [];
     const history2 = groups.find((group) => group.kind === "history")?.entries ?? [];
-    return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "sidebar-collapsed-tiles", children: [
-      wand.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("div", { className: "sidebar-collapsed-tiles", children: [
+      wand.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
         "button",
         {
           className: classNames(
@@ -38997,11 +39312,11 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           title: entry.title,
           "aria-label": `${entry.title} \xB7 ${providerDisplayName(entry.provider)}`,
           onClick: () => void dispatch({ type: "session.select", id: entry.id }),
-          children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "sidebar-collapsed-provider-mark", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(ProviderLogo, { provider: entry.provider }) })
+          children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "sidebar-collapsed-provider-mark", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(ProviderLogo, { provider: entry.provider }) })
         },
         entry.id
       )),
-      automation.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
+      automation.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(
         "button",
         {
           className: classNames(
@@ -39014,12 +39329,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           "aria-label": `\u5C55\u5F00\u67E5\u770B ${automation.length} \u4E2A\u81EA\u52A8\u5316\u4F1A\u8BDD`,
           onClick: () => void dispatch({ type: "layout.drawer.expandGroup", group: "automation" }),
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "spark", size: 16 }),
-            /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "non-wand-count-badge", children: automation.length > 99 ? "99+" : automation.length })
+            /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(Icon, { name: "spark", size: 16 }),
+            /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "non-wand-count-badge", children: automation.length > 99 ? "99+" : automation.length })
           ]
         }
       ),
-      history2.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
+      history2.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(
         "button",
         {
           className: "sidebar-collapsed-tile non-wand-count-tile",
@@ -39029,12 +39344,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           "aria-label": `\u5C55\u5F00\u67E5\u770B ${history2.length} \u4E2A\u975E Wand \u4F1A\u8BDD`,
           onClick: () => void dispatch({ type: "layout.drawer.expandGroup", group: "history" }),
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "history", size: 16 }),
-            /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "non-wand-count-badge", children: history2.length > 99 ? "99+" : history2.length })
+            /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(Icon, { name: "history", size: 16 }),
+            /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "non-wand-count-badge", children: history2.length > 99 ? "99+" : history2.length })
           ]
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
         "button",
         {
           className: "sidebar-collapsed-tile add",
@@ -39043,7 +39358,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           title: "\u65B0\u5EFA\u4F1A\u8BDD",
           "aria-label": "\u65B0\u5EFA\u4F1A\u8BDD",
           onClick: () => void dispatch({ type: "session.new" }),
-          children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { "aria-hidden": "true", children: "\uFF0B" })
+          children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { "aria-hidden": "true", children: "\uFF0B" })
         }
       )
     ] });
@@ -39051,8 +39366,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   function ShellSidebar() {
     const snapshot10 = useUiStoreSnapshot();
     const dispatch = useUiDispatch();
-    const [moreOpen, setMoreOpen] = React47.useState(false);
-    const [viewMode, setViewMode] = React47.useState(readSidebarViewMode);
+    const [moreOpen, setMoreOpen] = React48.useState(false);
+    const [viewMode, setViewMode] = React48.useState(readSidebarViewMode);
     const directories = useSessionDirectories(viewMode === "directories", snapshot10.revision);
     const narrow = snapshot10.layout.sidebarPinned && snapshot10.layout.sidebarCollapsed;
     const sidebarClass = classNames(
@@ -39071,8 +39386,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     const fileExplorerRoot = snapshot10.topbar.cwd || snapshot10.selected?.cwd || "";
     const primaryAction = getShellSidebarPrimaryAction(viewMode);
     const activeCount = viewMode === "directories" ? directories.data?.directoryCount ?? "\u2026" : viewMode === "files" ? "\u6587\u4EF6" : viewMode === "workspaces" ? "\u9879\u76EE" : snapshot10.sidebar.interactiveCount;
-    return /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(import_jsx_runtime50.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(import_jsx_runtime51.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
         "div",
         {
           id: "sessions-drawer-backdrop",
@@ -39081,13 +39396,13 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           onClick: () => void dispatch({ type: "layout.drawer.close" })
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("aside", { id: "sessions-drawer", className: sidebarClass, "aria-label": "\u4F1A\u8BDD\u4FA7\u680F", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "sidebar-header", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "sidebar-header-primary", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "sidebar-header-main", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "topbar-logo-icon", children: "W" }),
-              /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { className: "sidebar-title", children: "Wand" }),
-              /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("aside", { id: "sessions-drawer", className: sidebarClass, "aria-label": "\u4F1A\u8BDD\u4FA7\u680F", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("div", { className: "sidebar-header", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("div", { className: "sidebar-header-primary", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("div", { className: "sidebar-header-main", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("div", { className: "topbar-logo-icon", children: "W" }),
+              /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "sidebar-title", children: "Wand" }),
+              /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
                 "span",
                 {
                   className: "session-count",
@@ -39097,8 +39412,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                 }
               )
             ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "sidebar-header-actions", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "sidebar-header-more", children: /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
+            /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("div", { className: "sidebar-header-actions", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("div", { className: "sidebar-header-more", children: /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(
                 WandPopover,
                 {
                   open: moreOpen,
@@ -39112,7 +39427,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                   contentRole: "menu",
                   ariaLabel: "\u4FA7\u680F\u66F4\u591A\u64CD\u4F5C",
                   className: classNames("sidebar-header-overflow", "wand-shell-menu-popover", moreOpen && "open"),
-                  trigger: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+                  trigger: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
                     "button",
                     {
                       id: "sidebar-more-btn",
@@ -39122,11 +39437,11 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                       "aria-haspopup": "menu",
                       "aria-expanded": moreOpen,
                       "aria-controls": "sidebar-overflow-menu",
-                      children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "more" })
+                      children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(Icon, { name: "more" })
                     }
                   ),
                   children: [
-                    /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+                    /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
                       "button",
                       {
                         className: "overflow-item",
@@ -39137,10 +39452,10 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                           setMoreOpen(false);
                           void dispatch({ type: "nav.home" });
                         },
-                        children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { children: "\u56DE\u5230\u9996\u9875" })
+                        children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { children: "\u56DE\u5230\u9996\u9875" })
                       }
                     ),
-                    /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+                    /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
                       "button",
                       {
                         className: "overflow-item",
@@ -39151,14 +39466,14 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                           setMoreOpen(false);
                           void dispatch({ type: "nav.refresh" });
                         },
-                        children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { children: "\u5237\u65B0\u9875\u9762" })
+                        children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { children: "\u5237\u65B0\u9875\u9762" })
                       }
                     )
                   ]
                 }
               ) }),
-              snapshot10.viewport.mobile && /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(import_jsx_runtime50.Fragment, { children: [
-                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+              snapshot10.viewport.mobile && /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(import_jsx_runtime51.Fragment, { children: [
+                /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
                   "button",
                   {
                     id: "sidebar-collapse-btn",
@@ -39167,10 +39482,10 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                     title: narrow ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761",
                     "aria-label": narrow ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761",
                     onClick: () => void dispatch({ type: "layout.drawer.collapse" }),
-                    children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "chevron" })
+                    children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(Icon, { name: "chevron" })
                   }
                 ),
-                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+                /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
                   "button",
                   {
                     id: "close-drawer-button",
@@ -39178,15 +39493,15 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                     type: "button",
                     "aria-label": "\u5173\u95ED\u4FA7\u680F",
                     onClick: () => void dispatch({ type: "layout.drawer.close" }),
-                    children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "close" })
+                    children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(Icon, { name: "close" })
                   }
                 )
               ] })
             ] })
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "sidebar-header-controls", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(SidebarViewSwitch, { mode: viewMode, onChange: changeViewMode }),
-            !snapshot10.viewport.mobile && /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("div", { className: "sidebar-header-controls", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(SidebarViewSwitch, { mode: viewMode, onChange: changeViewMode }),
+            !snapshot10.viewport.mobile && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
               SidebarCompactToggle,
               {
                 active: narrow,
@@ -39195,7 +39510,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
             )
           ] })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "sidebar-body", children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { id: "sessions-panel", children: /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("div", { className: "sessions-list", id: "sessions-list", children: narrow && viewMode !== "files" && viewMode !== "workspaces" ? /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(CollapsedSessions, { groups: snapshot10.sidebar.groups, dispatch }) : viewMode === "files" ? /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(FileExplorerHost, { root: fileExplorerRoot }) : viewMode === "directories" ? /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("div", { className: "sidebar-body", children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("div", { id: "sessions-panel", children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("div", { className: "sessions-list", id: "sessions-list", children: narrow && viewMode !== "files" && viewMode !== "workspaces" ? /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(CollapsedSessions, { groups: snapshot10.sidebar.groups, dispatch }) : viewMode === "files" ? /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(FileExplorerHost, { root: fileExplorerRoot }) : viewMode === "directories" ? /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
           DirectoryTree,
           {
             response: directories.data,
@@ -39205,8 +39520,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
             dispatch,
             renameDirectory: directories.rename
           }
-        ) : viewMode === "workspaces" ? /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(WorkspacesPanel, {}) : /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(import_jsx_runtime50.Fragment, { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(
+        ) : viewMode === "workspaces" ? /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(WorkspacesPanel, {}) : /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(import_jsx_runtime51.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
             ManageBar,
             {
               manageMode: snapshot10.sidebar.manageMode,
@@ -39215,14 +39530,14 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
               dispatch
             }
           ),
-          snapshot10.sidebar.totalCount === 0 ? /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "empty-state", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("strong", { children: "\u8FD8\u6CA1\u6709\u4F1A\u8BDD\u8BB0\u5F55" }),
-            /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("br", {}),
+          snapshot10.sidebar.totalCount === 0 ? /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("div", { className: "empty-state", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("strong", { children: "\u8FD8\u6CA1\u6709\u4F1A\u8BDD\u8BB0\u5F55" }),
+            /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("br", {}),
             "\u70B9\u51FB\u4E0A\u65B9\u300C\u65B0\u5BF9\u8BDD\u300D\u5F00\u59CB\u4F60\u7684\u7B2C\u4E00\u6B21\u5BF9\u8BDD\u3002"
-          ] }) : snapshot10.sidebar.groups.map((group) => /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(SessionGroup, { group, manageMode: snapshot10.sidebar.manageMode, dispatch }, group.kind))
+          ] }) : snapshot10.sidebar.groups.map((group) => /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(SessionGroup, { group, manageMode: snapshot10.sidebar.manageMode, dispatch }, group.kind))
         ] }) }) }) }),
-        /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "sidebar-footer", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
+        /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("div", { className: "sidebar-footer", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(
             "button",
             {
               id: "drawer-new-session-button",
@@ -39231,14 +39546,14 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
               "aria-label": primaryAction.ariaLabel,
               onClick: () => void dispatch(primaryAction.action),
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { children: "+" }),
+                /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { children: "+" }),
                 " ",
                 primaryAction.label
               ]
             }
           ),
-          /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)("div", { className: "sidebar-footer-actions", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
+          /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("div", { className: "sidebar-footer-actions", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(
               "button",
               {
                 id: "missions-button",
@@ -39247,12 +39562,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                 title: "Agent Inbox",
                 onClick: () => void dispatch({ type: "missions.open" }),
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "inbox", size: 16 }),
-                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { children: "\u4EFB\u52A1" })
+                  /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(Icon, { name: "inbox", size: 16 }),
+                  /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { children: "\u4EFB\u52A1" })
                 ]
               }
             ),
-            snapshot10.viewport.mobile && /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
+            snapshot10.viewport.mobile && /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(
               "button",
               {
                 id: "file-panel-toggle-btn",
@@ -39261,12 +39576,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                 title: "\u67E5\u770B\u6587\u4EF6",
                 onClick: () => void dispatch({ type: "layout.files.toggle" }),
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "file", size: 16 }),
-                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { children: "\u6587\u4EF6" })
+                  /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(Icon, { name: "file", size: 16 }),
+                  /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { children: "\u6587\u4EF6" })
                 ]
               }
             ),
-            /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
+            /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(
               "button",
               {
                 id: "settings-button",
@@ -39275,12 +39590,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                 title: "\u8BBE\u7F6E",
                 onClick: () => void dispatch({ type: "settings.open" }),
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "gear", size: 16 }),
-                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { children: "\u8BBE\u7F6E" })
+                  /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(Icon, { name: "gear", size: 16 }),
+                  /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { children: "\u8BBE\u7F6E" })
                 ]
               }
             ),
-            snapshot10.capabilities.backToNative && /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
+            snapshot10.capabilities.backToNative && /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(
               "button",
               {
                 id: "back-to-native-button",
@@ -39289,12 +39604,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                 title: "\u8FD4\u56DE App \u539F\u751F\u754C\u9762",
                 onClick: () => void dispatch({ type: "native.back" }),
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "back", size: 16 }),
-                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { children: "\u8FD4\u56DEApp" })
+                  /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(Icon, { name: "back", size: 16 }),
+                  /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { children: "\u8FD4\u56DEApp" })
                 ]
               }
             ),
-            snapshot10.capabilities.switchServer && /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
+            snapshot10.capabilities.switchServer && /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(
               "button",
               {
                 id: "switch-server-button",
@@ -39303,12 +39618,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                 title: "\u5207\u6362\u670D\u52A1\u5668",
                 onClick: () => void dispatch({ type: "native.switchServer" }),
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "server", size: 16 }),
-                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { children: "\u5207\u6362" })
+                  /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(Icon, { name: "server", size: 16 }),
+                  /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { children: "\u5207\u6362" })
                 ]
               }
             ),
-            /* @__PURE__ */ (0, import_jsx_runtime50.jsxs)(
+            /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(
               "button",
               {
                 id: "logout-button",
@@ -39317,8 +39632,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                 title: "\u9000\u51FA\u767B\u5F55",
                 onClick: () => void dispatch({ type: "auth.logout" }),
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)(Icon, { name: "logout", size: 16 }),
-                  /* @__PURE__ */ (0, import_jsx_runtime50.jsx)("span", { children: "\u9000\u51FA" })
+                  /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(Icon, { name: "logout", size: 16 }),
+                  /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { children: "\u9000\u51FA" })
                 ]
               }
             )
@@ -39329,7 +39644,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   }
 
   // src/web-ui/react/shell/shell-topbar.tsx
-  var import_jsx_runtime51 = __toESM(require_jsx_runtime(), 1);
+  var import_jsx_runtime52 = __toESM(require_jsx_runtime(), 1);
   function TopbarIcon({ name, size: size4 = 16 }) {
     const common = {
       width: size4,
@@ -39344,37 +39659,37 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     };
     switch (name) {
       case "copy":
-        return /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("rect", { x: "9", y: "9", width: "13", height: "13", rx: "2" }),
-          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" })
+        return /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("rect", { x: "9", y: "9", width: "13", height: "13", rx: "2" }),
+          /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("path", { d: "M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" })
         ] });
       case "explorer":
-        return /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M8 3h7l4 4v11a2 2 0 01-2 2H8a2 2 0 01-2-2V5a2 2 0 012-2z" }),
-          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M15 3v4h4" }),
-          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M3 9h7l2 2v8a1 1 0 01-1 1H4a1 1 0 01-1-1z" })
+        return /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("path", { d: "M8 3h7l4 4v11a2 2 0 01-2 2H8a2 2 0 01-2-2V5a2 2 0 012-2z" }),
+          /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("path", { d: "M15 3v4h4" }),
+          /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("path", { d: "M3 9h7l2 2v8a1 1 0 01-1 1H4a1 1 0 01-1-1z" })
         ] });
       case "file":
-        return /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("path", { d: "M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" }) });
       case "git":
-        return /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("svg", { ...common, className: "topbar-git-icon", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("circle", { cx: "6", cy: "6", r: "2" }),
-          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("circle", { cx: "6", cy: "18", r: "2" }),
-          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("circle", { cx: "18", cy: "9", r: "2" }),
-          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M6 8v8M18 11v1a3 3 0 01-3 3H9" })
+        return /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)("svg", { ...common, className: "topbar-git-icon", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("circle", { cx: "6", cy: "6", r: "2" }),
+          /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("circle", { cx: "6", cy: "18", r: "2" }),
+          /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("circle", { cx: "18", cy: "9", r: "2" }),
+          /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("path", { d: "M6 8v8M18 11v1a3 3 0 01-3 3H9" })
         ] });
       case "hash":
-        return /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M4 9h16M4 15h16M10 3L8 21M16 3l-2 18" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("path", { d: "M4 9h16M4 15h16M10 3L8 21M16 3l-2 18" }) });
       case "merge":
-        return /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M7 7h10M7 12h10M7 17h10M5 7L3 9l2 2M19 15l2 2-2 2" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("path", { d: "M7 7h10M7 12h10M7 17h10M5 7L3 9l2 2M19 15l2 2-2 2" }) });
       case "more":
-        return /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("svg", { ...common, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("circle", { cx: "12", cy: "5", r: "1" }),
-          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("circle", { cx: "12", cy: "12", r: "1" }),
-          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("circle", { cx: "12", cy: "19", r: "1" })
+        return /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)("svg", { ...common, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("circle", { cx: "12", cy: "5", r: "1" }),
+          /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("circle", { cx: "12", cy: "12", r: "1" }),
+          /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("circle", { cx: "12", cy: "19", r: "1" })
         ] });
       case "trash":
-        return /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("path", { d: "M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("path", { d: "M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" }) });
     }
   }
   function MoreItem({
@@ -39386,7 +39701,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     disabled,
     onAction
   }) {
-    return /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(
+    return /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)(
       "button",
       {
         className: classNames("topbar-more-item", danger && "topbar-more-item-danger"),
@@ -39396,8 +39711,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         disabled,
         onClick: () => onAction(action),
         children: [
-          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(TopbarIcon, { name: icon, size: 14 }),
-          /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { children: label })
+          /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(TopbarIcon, { name: icon, size: 14 }),
+          /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("span", { children: label })
         ]
       }
     );
@@ -39415,9 +39730,9 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       if (moreOpen) void dispatch({ type: "topbar.menu.toggle" });
       void dispatch(action);
     };
-    return /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("div", { className: "main-header-row", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("div", { className: "topbar-left", children: [
-        snapshot10.viewport.mobile && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)("div", { className: "main-header-row", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)("div", { className: "topbar-left", children: [
+        snapshot10.viewport.mobile && /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(
           "button",
           {
             id: "sessions-toggle-button",
@@ -39425,17 +39740,17 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
             "aria-label": "\u5207\u6362\u4F1A\u8BDD\u4FA7\u680F",
             type: "button",
             onClick: () => void dispatch({ type: "layout.drawer.toggle" }),
-            children: /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("span", { className: "hamburger-icon", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", {}),
-              /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", {}),
-              /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", {})
+            children: /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)("span", { className: "hamburger-icon", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("span", {}),
+              /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("span", {}),
+              /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("span", {})
             ] })
           }
         ),
-        !snapshot10.layout.sidebarAnchored && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "topbar-brand", "aria-hidden": "true", children: "W" })
+        !snapshot10.layout.sidebarAnchored && /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("span", { className: "topbar-brand", "aria-hidden": "true", children: "W" })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("div", { className: "topbar-center", children: selected ? /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(import_jsx_runtime51.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("div", { className: "topbar-center", children: selected ? /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)(import_jsx_runtime52.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(
           "span",
           {
             className: classNames("topbar-session-title", snapshot10.topbar.titleGenerating && "title-generating"),
@@ -39444,18 +39759,18 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
             children: snapshot10.topbar.title
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(
+        /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)(
           "span",
           {
             className: classNames("session-status-pill", snapshot10.topbar.statusTone),
             title: snapshot10.topbar.statusLabel,
             children: [
-              /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "session-status-dot" }),
-              /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "session-status-text", children: snapshot10.topbar.statusLabel })
+              /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("span", { className: "session-status-dot" }),
+              /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("span", { className: "session-status-text", children: snapshot10.topbar.statusLabel })
             ]
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(
           "span",
           {
             className: classNames("current-task", !snapshot10.topbar.currentTask && "hidden"),
@@ -39464,7 +39779,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
             children: snapshot10.topbar.currentTask
           }
         ),
-        snapshot10.topbar.cwd && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
+        snapshot10.topbar.cwd && /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(
           "span",
           {
             className: "topbar-cwd tail-marquee-path",
@@ -39478,15 +39793,15 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
               event.preventDefault();
               openFiles();
             },
-            children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "tail-marquee-path-inner", children: snapshot10.topbar.cwd })
+            children: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("span", { className: "tail-marquee-path-inner", children: snapshot10.topbar.cwd })
           }
         )
-      ] }) : /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(import_jsx_runtime51.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "topbar-tagline", children: snapshot10.topbar.title || "Wand \u63A7\u5236\u53F0" }),
-        /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "current-task hidden", id: "current-task" })
+      ] }) : /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)(import_jsx_runtime52.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("span", { className: "topbar-tagline", children: snapshot10.topbar.title || "Wand \u63A7\u5236\u53F0" }),
+        /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("span", { className: "current-task hidden", id: "current-task" })
       ] }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("div", { className: "topbar-right", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)("div", { className: "topbar-right", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(
           "button",
           {
             id: "topbar-file-button",
@@ -39495,10 +39810,10 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
             "aria-label": "\u6587\u4EF6",
             title: "\u67E5\u770B\u6587\u4EF6\uFF08\u53EF\u4FEE\u6539\u8DEF\u5F84\uFF09",
             onClick: () => void dispatch({ type: "layout.files.toggle" }),
-            children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(TopbarIcon, { name: "explorer" })
+            children: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(TopbarIcon, { name: "explorer" })
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { id: "topbar-git-slot", className: "topbar-git-slot", children: snapshot10.topbar.git && /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(
+        /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("span", { id: "topbar-git-slot", className: "topbar-git-slot", children: snapshot10.topbar.git && /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)(
           "button",
           {
             id: "topbar-git-badge",
@@ -39508,16 +39823,16 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
             "aria-label": "\u5FEB\u6377\u63D0\u4EA4",
             onClick: () => void dispatch({ type: "topbar.gitCommit" }),
             children: [
-              /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(TopbarIcon, { name: "git", size: 14 }),
-              /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "topbar-git-branch", children: snapshot10.topbar.git.branch }),
-              snapshot10.topbar.git.clean ? /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("span", { className: "topbar-git-clean", "aria-hidden": "true", children: "\u2713" }) : /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)("span", { className: "topbar-git-count", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(TopbarIcon, { name: "git", size: 14 }),
+              /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("span", { className: "topbar-git-branch", children: snapshot10.topbar.git.branch }),
+              snapshot10.topbar.git.clean ? /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("span", { className: "topbar-git-clean", "aria-hidden": "true", children: "\u2713" }) : /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)("span", { className: "topbar-git-count", children: [
                 "\xB7",
                 snapshot10.topbar.git.modifiedCount
               ] })
             ]
           }
         ) }),
-        selected && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("div", { className: "topbar-more-wrap", children: /* @__PURE__ */ (0, import_jsx_runtime51.jsxs)(
+        selected && /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("div", { className: "topbar-more-wrap", children: /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)(
           WandPopover,
           {
             open: moreOpen,
@@ -39533,7 +39848,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
             contentRole: "menu",
             ariaLabel: "\u5F53\u524D\u4F1A\u8BDD",
             className: classNames("topbar-more-menu", "wand-shell-menu-popover", !moreOpen && "hidden"),
-            trigger: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
+            trigger: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(
               "button",
               {
                 id: "topbar-more-button",
@@ -39544,11 +39859,11 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                 "aria-expanded": moreOpen,
                 "aria-controls": "topbar-more-menu",
                 title: "\u5F53\u524D\u4F1A\u8BDD\u64CD\u4F5C",
-                children: /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(TopbarIcon, { name: "more" })
+                children: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(TopbarIcon, { name: "more" })
               }
             ),
             children: [
-              selected.claudeSessionId && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
+              selected.claudeSessionId && /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(
                 MoreItem,
                 {
                   action: { type: "topbar.copy", field: "providerSessionId" },
@@ -39558,7 +39873,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                   onAction: runMoreAction
                 }
               ),
-              selected.cwd && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
+              selected.cwd && /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(
                 MoreItem,
                 {
                   action: { type: "topbar.copy", field: "cwd" },
@@ -39568,7 +39883,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                   onAction: runMoreAction
                 }
               ),
-              /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
+              /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(
                 MoreItem,
                 {
                   action: { type: "topbar.copy", field: "sessionId" },
@@ -39578,8 +39893,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                   onAction: runMoreAction
                 }
               ),
-              /* @__PURE__ */ (0, import_jsx_runtime51.jsx)("div", { className: "topbar-more-divider", role: "separator" }),
-              selectedActions?.merge && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
+              /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("div", { className: "topbar-more-divider", role: "separator" }),
+              selectedActions?.merge && /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(
                 MoreItem,
                 {
                   action: selectedActions.merge,
@@ -39590,7 +39905,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                   onAction: runMoreAction
                 }
               ),
-              selectedActions?.cleanup && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
+              selectedActions?.cleanup && /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(
                 MoreItem,
                 {
                   action: selectedActions.cleanup,
@@ -39600,7 +39915,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
                   onAction: runMoreAction
                 }
               ),
-              selectedActions?.delete && /* @__PURE__ */ (0, import_jsx_runtime51.jsx)(
+              selectedActions?.delete && /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(
                 MoreItem,
                 {
                   action: selectedActions.delete,
@@ -39619,7 +39934,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   }
 
   // src/web-ui/react/shell/shell-main-content.tsx
-  var import_jsx_runtime52 = __toESM(require_jsx_runtime(), 1);
+  var import_jsx_runtime53 = __toESM(require_jsx_runtime(), 1);
   function getShellLegacySlotClasses(visibility) {
     return {
       terminal: `terminal-container ${visibility.terminal ? "active" : "hidden"}`,
@@ -39654,13 +39969,13 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     };
     switch (name) {
       case "chat":
-        return /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("path", { d: "M21 15a4 4 0 01-4 4H8l-5 3V7a4 4 0 014-4h10a4 4 0 014 4z" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("path", { d: "M21 15a4 4 0 01-4 4H8l-5 3V7a4 4 0 014-4h10a4 4 0 014 4z" }) });
       case "chevron-down":
-        return /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("svg", { ...common, strokeWidth: 2, children: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("path", { d: "M6 9l6 6 6-6" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("svg", { ...common, strokeWidth: 2, children: /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("path", { d: "M6 9l6 6 6-6" }) });
       case "folder":
-        return /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("path", { d: "M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("path", { d: "M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" }) });
       case "terminal":
-        return /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("path", { d: "M4 17l6-5-6-5M12 19h8" }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("svg", { ...common, children: /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("path", { d: "M4 17l6-5-6-5M12 19h8" }) });
     }
   }
   function ShellBlankChat({ className, cwd, queueRef, workspaceTask }) {
@@ -39671,34 +39986,34 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     const openFolderPicker2 = () => {
       void dispatch({ type: "folderPicker.open" });
     };
-    return /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)("div", { id: "blank-chat", className, children: [
-      workspaceTask ? /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)("div", { className: "blank-chat-inner workspace-task-welcome", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("div", { className: "workspace-task-welcome-eyebrow", children: workspaceTask.workspaceName }),
-        /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("div", { className: "blank-chat-logo", children: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(WelcomeIcon, { name: "terminal", size: 28 }) }),
-        /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("h2", { className: "blank-chat-title", children: workspaceTask.taskName }),
-        /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("p", { className: "blank-chat-subtitle", children: "\u8FD9\u4E2A\u4EFB\u52A1\u8FD8\u6CA1\u6709\u5DE5\u4F5C\u7A97\u53E3\u3002\u9009\u62E9\u4E00\u4E2A Agent\uFF0C\u6216\u76F4\u63A5\u6253\u5F00\u7A7A\u767D\u7EC8\u7AEF\u3002" }),
-        /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("div", { className: "blank-chat-tools", children: /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)(
+    return /* @__PURE__ */ (0, import_jsx_runtime53.jsxs)("div", { id: "blank-chat", className, children: [
+      workspaceTask ? /* @__PURE__ */ (0, import_jsx_runtime53.jsxs)("div", { className: "blank-chat-inner workspace-task-welcome", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("div", { className: "workspace-task-welcome-eyebrow", children: workspaceTask.workspaceName }),
+        /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("div", { className: "blank-chat-logo", children: /* @__PURE__ */ (0, import_jsx_runtime53.jsx)(WelcomeIcon, { name: "terminal", size: 28 }) }),
+        /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("h2", { className: "blank-chat-title", children: workspaceTask.taskName }),
+        /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("p", { className: "blank-chat-subtitle", children: "\u8FD9\u4E2A\u4EFB\u52A1\u8FD8\u6CA1\u6709\u5DE5\u4F5C\u7A97\u53E3\u3002\u9009\u62E9\u4E00\u4E2A Agent\uFF0C\u6216\u76F4\u63A5\u6253\u5F00\u7A7A\u767D\u7EC8\u7AEF\u3002" }),
+        /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("div", { className: "blank-chat-tools", children: /* @__PURE__ */ (0, import_jsx_runtime53.jsxs)(
           "button",
           {
             className: "workspace-task-welcome-action",
             type: "button",
             onClick: () => workspaceAgentDialogController.open(),
             children: [
-              /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(WelcomeIcon, { name: "terminal", size: 17 }),
+              /* @__PURE__ */ (0, import_jsx_runtime53.jsx)(WelcomeIcon, { name: "terminal", size: 17 }),
               "\u9009\u62E9 Agent \u6216\u7A7A\u767D\u7EC8\u7AEF"
             ]
           }
         ) }),
-        /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)("div", { className: "workspace-task-welcome-cwd", title: workspaceTask.cwd, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(WelcomeIcon, { name: "folder", size: 13 }),
-          /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("span", { children: workspaceTask.cwd })
+        /* @__PURE__ */ (0, import_jsx_runtime53.jsxs)("div", { className: "workspace-task-welcome-cwd", title: workspaceTask.cwd, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime53.jsx)(WelcomeIcon, { name: "folder", size: 13 }),
+          /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("span", { children: workspaceTask.cwd })
         ] })
-      ] }) : /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)("div", { className: "blank-chat-inner", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("div", { className: "blank-chat-logo", children: "W" }),
-        /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("h2", { className: "blank-chat-title", children: "Wand" }),
-        /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("p", { className: "blank-chat-subtitle", children: "\u652F\u6301\u7EC8\u7AEF PTY \u4F1A\u8BDD\u4E0E\u7ED3\u6784\u5316 chat \u4F1A\u8BDD\uFF0C\u4E24\u79CD\u6A21\u5F0F\u53EF\u5E76\u5B58\u3002" }),
-        /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)("div", { className: "blank-chat-tools", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)(
+      ] }) : /* @__PURE__ */ (0, import_jsx_runtime53.jsxs)("div", { className: "blank-chat-inner", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("div", { className: "blank-chat-logo", children: "W" }),
+        /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("h2", { className: "blank-chat-title", children: "Wand" }),
+        /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("p", { className: "blank-chat-subtitle", children: "\u652F\u6301\u7EC8\u7AEF PTY \u4F1A\u8BDD\u4E0E\u7ED3\u6784\u5316 chat \u4F1A\u8BDD\uFF0C\u4E24\u79CD\u6A21\u5F0F\u53EF\u5E76\u5B58\u3002" }),
+        /* @__PURE__ */ (0, import_jsx_runtime53.jsxs)("div", { className: "blank-chat-tools", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime53.jsxs)(
             "button",
             {
               className: "blank-chat-tool-btn",
@@ -39706,12 +40021,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
               type: "button",
               onClick: () => quickStart2("claude"),
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("span", { className: "tool-icon", children: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(ProviderLogo, { provider: "claude" }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("span", { className: "tool-icon", children: /* @__PURE__ */ (0, import_jsx_runtime53.jsx)(ProviderLogo, { provider: "claude" }) }),
                 "\u65B0\u5EFA\u7EC8\u7AEF\u4F1A\u8BDD"
               ]
             }
           ),
-          /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)(
+          /* @__PURE__ */ (0, import_jsx_runtime53.jsxs)(
             "button",
             {
               className: "blank-chat-tool-btn",
@@ -39719,12 +40034,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
               type: "button",
               onClick: () => quickStart2("codex"),
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("span", { className: "tool-icon", children: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(ProviderLogo, { provider: "codex" }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("span", { className: "tool-icon", children: /* @__PURE__ */ (0, import_jsx_runtime53.jsx)(ProviderLogo, { provider: "codex" }) }),
                 "\u65B0\u5EFA Codex \u4F1A\u8BDD"
               ]
             }
           ),
-          /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)(
+          /* @__PURE__ */ (0, import_jsx_runtime53.jsxs)(
             "button",
             {
               className: "blank-chat-tool-btn",
@@ -39732,12 +40047,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
               type: "button",
               onClick: () => quickStart2("opencode"),
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("span", { className: "tool-icon", children: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(ProviderLogo, { provider: "opencode" }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("span", { className: "tool-icon", children: /* @__PURE__ */ (0, import_jsx_runtime53.jsx)(ProviderLogo, { provider: "opencode" }) }),
                 "\u65B0\u5EFA OpenCode \u4F1A\u8BDD"
               ]
             }
           ),
-          /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)(
+          /* @__PURE__ */ (0, import_jsx_runtime53.jsxs)(
             "button",
             {
               className: "blank-chat-tool-btn",
@@ -39745,13 +40060,13 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
               type: "button",
               onClick: () => quickStart2("structured"),
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("span", { className: "tool-icon", children: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(WelcomeIcon, { name: "chat", size: 16 }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("span", { className: "tool-icon", children: /* @__PURE__ */ (0, import_jsx_runtime53.jsx)(WelcomeIcon, { name: "chat", size: 16 }) }),
                 "\u65B0\u5EFA\u7ED3\u6784\u5316\u4F1A\u8BDD"
               ]
             }
           )
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("div", { className: "blank-chat-cwd-wrap", children: /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)(
+        /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("div", { className: "blank-chat-cwd-wrap", children: /* @__PURE__ */ (0, import_jsx_runtime53.jsxs)(
           "div",
           {
             className: "blank-chat-cwd",
@@ -39767,33 +40082,33 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
               openFolderPicker2();
             },
             children: [
-              /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("span", { className: "blank-chat-cwd-icon", children: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(WelcomeIcon, { name: "folder", size: 13 }) }),
-              /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("span", { className: "blank-chat-cwd-path tail-marquee-path", id: "blank-chat-cwd-path", title: cwd, children: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("span", { className: "tail-marquee-path-inner", children: cwd }) }),
-              /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("span", { className: "blank-chat-cwd-arrow", id: "blank-chat-cwd-arrow", children: /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(WelcomeIcon, { name: "chevron-down", size: 11 }) })
+              /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("span", { className: "blank-chat-cwd-icon", children: /* @__PURE__ */ (0, import_jsx_runtime53.jsx)(WelcomeIcon, { name: "folder", size: 13 }) }),
+              /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("span", { className: "blank-chat-cwd-path tail-marquee-path", id: "blank-chat-cwd-path", title: cwd, children: /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("span", { className: "tail-marquee-path-inner", children: cwd }) }),
+              /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("span", { className: "blank-chat-cwd-arrow", id: "blank-chat-cwd-arrow", children: /* @__PURE__ */ (0, import_jsx_runtime53.jsx)(WelcomeIcon, { name: "chevron-down", size: 11 }) })
             ]
           }
         ) })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("div", { id: "cross-session-queue-host", ref: queueRef })
+      /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("div", { id: "cross-session-queue-host", ref: queueRef })
     ] });
   }
   function ShellMainContent({ legacyRefs } = {}) {
     const snapshot10 = useUiStoreSnapshot();
     const classes2 = getShellLegacySlotClasses(snapshot10.legacyVisibility);
     const cwd = snapshot10.topbar.cwd || "/";
-    const context2 = React49.useSyncExternalStore(
+    const context2 = React50.useSyncExternalStore(
       workspaceContextStore.subscribe,
       workspaceContextStore.getSnapshot,
       workspaceContextStore.getServerSnapshot
     );
     const inSplit = !!context2.taskId && activeWorkWindow(context2.layout)?.layout.type === "split";
-    return /* @__PURE__ */ (0, import_jsx_runtime52.jsxs)("main", { className: `main-content${snapshot10.layout.filePanelOpen ? " file-panel-open" : ""}${inSplit ? " main-content-in-split" : ""}`, children: [
-      context2.taskId ? null : /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(ShellTopbar, {}),
-      /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(ShellFilePanel, { explorerRef: legacyRefs?.fileExplorer }),
-      /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(WorkspaceTabBar, {}),
-      /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("div", { id: "output", className: classes2.terminal, ref: legacyRefs?.terminal }),
-      /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("div", { id: "chat-output", className: classes2.chat, ref: legacyRefs?.chat }),
-      /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime53.jsxs)("main", { className: `main-content${snapshot10.layout.filePanelOpen ? " file-panel-open" : ""}${inSplit ? " main-content-in-split" : ""}`, children: [
+      context2.taskId ? null : /* @__PURE__ */ (0, import_jsx_runtime53.jsx)(ShellTopbar, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime53.jsx)(ShellFilePanel, { explorerRef: legacyRefs?.fileExplorer }),
+      /* @__PURE__ */ (0, import_jsx_runtime53.jsx)(WorkspaceTabBar, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("div", { id: "output", className: classes2.terminal, ref: legacyRefs?.terminal }),
+      /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("div", { id: "chat-output", className: classes2.chat, ref: legacyRefs?.chat }),
+      /* @__PURE__ */ (0, import_jsx_runtime53.jsx)(
         ShellBlankChat,
         {
           className: classes2.blank,
@@ -39806,14 +40121,14 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           } : void 0
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime52.jsx)("div", { className: classes2.composer, ref: legacyRefs?.composer }),
-      inSplit ? /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(WorkspaceWindow, {}) : null,
-      /* @__PURE__ */ (0, import_jsx_runtime52.jsx)(CodeEditorHost, {})
+      /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("div", { className: classes2.composer, ref: legacyRefs?.composer }),
+      inSplit ? /* @__PURE__ */ (0, import_jsx_runtime53.jsx)(WorkspaceWindow, {}) : null,
+      /* @__PURE__ */ (0, import_jsx_runtime53.jsx)(CodeEditorHost, {})
     ] });
   }
 
   // src/web-ui/react/shell/shell-app.tsx
-  var import_jsx_runtime53 = __toESM(require_jsx_runtime(), 1);
+  var import_jsx_runtime54 = __toESM(require_jsx_runtime(), 1);
   function getShellLayoutClassName(layout) {
     const classes2 = ["main-layout"];
     if (layout.sessionsDrawerOpen) classes2.push("sidebar-open");
@@ -39823,13 +40138,13 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   }
   function ShellAppFrame({ legacyRefs } = {}) {
     const snapshot10 = useUiStoreSnapshot();
-    return /* @__PURE__ */ (0, import_jsx_runtime53.jsx)("div", { className: "app-container", children: /* @__PURE__ */ (0, import_jsx_runtime53.jsxs)("div", { className: getShellLayoutClassName(snapshot10.layout), children: [
-      /* @__PURE__ */ (0, import_jsx_runtime53.jsx)(ShellSidebar, {}),
-      /* @__PURE__ */ (0, import_jsx_runtime53.jsx)(ShellMainContent, { legacyRefs })
+    return /* @__PURE__ */ (0, import_jsx_runtime54.jsx)("div", { className: "app-container", children: /* @__PURE__ */ (0, import_jsx_runtime54.jsxs)("div", { className: getShellLayoutClassName(snapshot10.layout), children: [
+      /* @__PURE__ */ (0, import_jsx_runtime54.jsx)(ShellSidebar, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime54.jsx)(ShellMainContent, { legacyRefs })
     ] }) });
   }
   function ShellApp({ store, legacyRefs }) {
-    return /* @__PURE__ */ (0, import_jsx_runtime53.jsx)(UiStoreProvider, { store, children: /* @__PURE__ */ (0, import_jsx_runtime53.jsx)(ShellAppFrame, { legacyRefs }) });
+    return /* @__PURE__ */ (0, import_jsx_runtime54.jsx)(UiStoreProvider, { store, children: /* @__PURE__ */ (0, import_jsx_runtime54.jsx)(ShellAppFrame, { legacyRefs }) });
   }
 
   // src/web-ui/react/shell/ui-store.ts
@@ -40023,7 +40338,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   };
 
   // src/web-ui/react/index.tsx
-  var import_jsx_runtime54 = __toESM(require_jsx_runtime(), 1);
+  var import_jsx_runtime55 = __toESM(require_jsx_runtime(), 1);
   var OVERLAY_ROOT_ID = "overlay-root";
   var REACT_MOUNT_ID = "wand-react-ui-mount";
   var PORTAL_CONTAINER_ID = "wand-react-ui-portals";
@@ -40065,7 +40380,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       const mount = getOrCreateChild(overlayRoot, REACT_MOUNT_ID, "wand-ui-mount");
       const portals = getOrCreateChild(overlayRoot, PORTAL_CONTAINER_ID, "wand-ui-portals");
       activeRoot = (0, import_client.createRoot)(mount);
-      activeRoot.render(/* @__PURE__ */ (0, import_jsx_runtime54.jsx)(OverlayHost, { portalContainer: portals }));
+      activeRoot.render(/* @__PURE__ */ (0, import_jsx_runtime55.jsx)(OverlayHost, { portalContainer: portals }));
     }
     exposeBusinessControllers();
     overlayRoot.dataset.reactUi = genericUiEnabled ? "enabled" : "fallback";
@@ -40183,7 +40498,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     const root = (0, import_client2.createRoot)(app);
     runtime10 = { app, root, store, hosts: legacy.hosts };
     try {
-      (0, import_react_dom4.flushSync)(() => root.render(React51.createElement(ShellApp, { store, legacyRefs: legacy.refs })));
+      (0, import_react_dom4.flushSync)(() => root.render(React52.createElement(ShellApp, { store, legacyRefs: legacy.refs })));
     } catch (error) {
       runtime10 = null;
       store.dispose();
@@ -40307,7 +40622,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   }
 
   // src/web-ui/browser/file-explorer-adapter.ts
-  var React52 = __toESM(require_react(), 1);
+  var React53 = __toESM(require_react(), 1);
   var import_client3 = __toESM(require_client(), 1);
   var explorerRoot = null;
   var mountedContainer = null;
@@ -40324,7 +40639,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     }
     mountedContainer = container;
     explorerRoot = (0, import_client3.createRoot)(container);
-    explorerRoot.render(React52.createElement(FileExplorerHost, { root: cwd }));
+    explorerRoot.render(React53.createElement(FileExplorerHost, { root: cwd }));
   }
   function unmountFileExplorerHost() {
     if (explorerRoot) {
@@ -50912,7 +51227,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     if (!Array.isArray(allMessages)) return suffix;
     var bucketsByName = /* @__PURE__ */ new Map();
     var seenTaskIds = /* @__PURE__ */ new Set();
-    function record2(sub2) {
+    function record3(sub2) {
       if (!sub2 || !sub2.taskId) return;
       if (seenTaskIds.has(sub2.taskId)) return;
       seenTaskIds.add(sub2.taskId);
@@ -50928,7 +51243,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         var b = m.content[j];
         if (!b) continue;
         var sub = b.__subagent || (b.type === "tool_use" ? deriveLegacySubagent(b) : null);
-        if (sub) record2(sub);
+        if (sub) record3(sub);
       }
     }
     bucketsByName.forEach(function(taskIds) {
@@ -54178,7 +54493,10 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   function startSessionInCwd(cwd, options) {
     var shell = !!(options && options.shell);
     var provider = shell ? "" : options && options.provider || getPreferredTool();
-    var defaultMode = shell ? "default" : getSafeModeForTool2(provider, state.config && state.config.defaultMode ? state.config.defaultMode : "default");
+    var defaultMode = shell ? "default" : getSafeModeForTool2(
+      provider,
+      options && options.mode || (state.config && state.config.defaultMode ? state.config.defaultMode : "default")
+    );
     if (!shell) {
       state.preferredCommand = provider;
       state.chatMode = getSafeModeForTool2(provider, state.chatMode);
@@ -54193,6 +54511,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       provider,
       cwd,
       mode: defaultMode,
+      initialInput: options && options.initialInput,
       sessionSource: "interactive"
     });
     if (options && options.workspaceId) body.workspaceId = options.workspaceId;
@@ -55275,6 +55594,14 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           workspaceTaskId: payload.taskId,
           shell: payload.target === "shell",
           provider: payload.target === "shell" ? void 0 : payload.target
+        });
+      },
+      startWorktreeMergeAgent(payload) {
+        return startSessionInCwd(payload.cwd, {
+          workspaceId: payload.workspaceId,
+          provider: payload.provider,
+          mode: "managed",
+          initialInput: payload.prompt
         });
       },
       saveTaskLayout(layout) {

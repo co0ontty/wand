@@ -27,7 +27,14 @@ import {
 import type { LayoutNode, PaneTab } from "../src/web-ui/react/workspaces/types.js";
 import { WORKSPACE_AGENT_OPTIONS } from "../src/web-ui/react/workspaces/workspace-agent-dialog.js";
 import { WorkspacesPanel } from "../src/web-ui/react/workspaces/workspaces-panel.js";
-import { HttpWorkspacesRepository } from "../src/web-ui/react/workspaces/repository.js";
+import {
+  HttpWorkspacesRepository,
+  normalizeWorkspaceWorktreeOverview,
+} from "../src/web-ui/react/workspaces/repository.js";
+import {
+  buildWorkspaceMergeAgentPrompt,
+  workspaceWorktreeSummary,
+} from "../src/web-ui/react/workspaces/workspace-worktree-model.js";
 import { sessionPickerAndWorktreeStyles } from "../src/web-ui/react/styles/features.js";
 import {
   activeWorkWindow,
@@ -201,6 +208,68 @@ test("workspace repository closes terminal sessions with the batch endpoint", as
   assert.equal(requests[0].input, "/api/sessions/batch-delete");
   assert.equal(requests[0].init?.method, "POST");
   assert.deepEqual(JSON.parse(String(requests[0].init?.body)), { sessionIds: ["a", "b"] });
+});
+
+test("workspace worktree review normalizes cards and builds one bounded merge Agent mission", async () => {
+  const requests: string[] = [];
+  const repository = new HttpWorkspacesRepository(async (input) => {
+    requests.push(String(input));
+    return new Response(JSON.stringify({
+      workspaceId: "workspace-1",
+      repoRoot: "/repo",
+      targetBranch: "main",
+      worktrees: [{
+        taskId: "task-1",
+        taskName: "登录流程",
+        taskStatus: "active",
+        branch: "wand/login-1",
+        path: "/repo/.wand-worktrees/login-1",
+        state: "dirty",
+        actionable: true,
+        aheadCount: 2,
+        hasUncommittedChanges: true,
+        hasConflicts: false,
+        commits: [{ hash: "abcdef123", subject: "feat: add login" }],
+      }, {
+        taskId: "task-empty",
+        taskName: "已完成任务",
+        branch: "wand/done-1",
+        path: "/repo/.wand-worktrees/done-1",
+        state: "empty",
+        actionable: false,
+        commits: [],
+      }],
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  });
+  const overview = await repository.listWorktrees("workspace-1");
+  assert.equal(requests[0], "/api/workspaces/workspace-1/worktrees");
+  assert.equal(overview.worktrees[0].commits[0].shortHash, "abcdef1");
+  assert.equal(workspaceWorktreeSummary(overview.worktrees[0]), "登录流程 · feat: add login");
+
+  const prompt = buildWorkspaceMergeAgentPrompt({
+    id: "workspace-1",
+    name: "Wand",
+    cwd: "/repo",
+    layout: null,
+    createdAt: "2026-08-09T00:00:00.000Z",
+    lastOpenedAt: null,
+  }, overview, ["task-1", "task-empty"]);
+  assert.match(prompt, /唯一目标分支：main/);
+  assert.match(prompt, /wand\/login-1/);
+  assert.doesNotMatch(prompt, /wand\/done-1/);
+  assert.match(prompt, /不要 push，也不要删除 Worktree/);
+
+  const normalized = normalizeWorkspaceWorktreeOverview({ worktrees: [{ branch: "missing task" }] });
+  assert.deepEqual(normalized.worktrees, []);
+});
+
+test("project rows expose a worktree count bubble and a multi-select dialog", () => {
+  const panel = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
+  const dialog = readFileSync(new URL("../src/web-ui/react/workspaces/workspace-worktree-dialog.tsx", import.meta.url), "utf8");
+  assert.match(panel, /workspace-row-action worktrees/);
+  assert.match(panel, /startWorktreeMergeAgent/);
+  assert.match(dialog, /role="checkbox"/);
+  assert.match(dialog, /启动 Agent 合并/);
 });
 
 test("legacy pane tabsets migrate into independent work windows", () => {

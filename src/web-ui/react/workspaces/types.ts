@@ -41,6 +41,8 @@ export interface Workspace {
   layout: LayoutNode | null;
   createdAt: string;
   lastOpenedAt: string | null;
+  /** Number of task-owned worktrees currently registered under this project. */
+  worktreeCount?: number;
 }
 
 /** GET /api/workspaces/:id 额外带回该项目下的会话列表。 */
@@ -94,6 +96,37 @@ export interface WorkspaceTaskDetail extends WorkspaceTask {
   sessions: WorkspaceSessionSummary[];
 }
 
+export type WorkspaceWorktreeState = "ready" | "dirty" | "conflict" | "empty" | "unavailable";
+
+export interface WorkspaceWorktreeCommit {
+  hash: string;
+  shortHash: string;
+  subject: string;
+}
+
+export interface WorkspaceWorktreeReview {
+  taskId: string;
+  taskName: string;
+  taskStatus: WorkspaceTaskStatus;
+  branch: string;
+  path: string;
+  baseRef: string;
+  state: WorkspaceWorktreeState;
+  actionable: boolean;
+  reason: string;
+  aheadCount: number;
+  hasUncommittedChanges: boolean;
+  hasConflicts: boolean;
+  commits: readonly WorkspaceWorktreeCommit[];
+}
+
+export interface WorkspaceWorktreeOverview {
+  workspaceId: string;
+  repoRoot: string;
+  targetBranch: string;
+  worktrees: readonly WorkspaceWorktreeReview[];
+}
+
 export interface CreateWorkspaceTaskRequest {
   name: string;
   baseRef?: string;
@@ -141,6 +174,8 @@ export interface WorkspacesRepository {
   updateTask(taskId: string, patch: UpdateWorkspaceTaskRequest): Promise<WorkspaceTask>;
   deleteTask(taskId: string, cascade?: boolean): Promise<void>;
   saveTaskLayout(taskId: string, layout: TaskWindowLayout | null): Promise<TaskWindowLayout | null>;
+  /** Project-level review data used by the multi-worktree merge Agent launcher. */
+  listWorktrees(workspaceId: string, options?: { signal?: AbortSignal }): Promise<WorkspaceWorktreeOverview>;
   /** 关闭工作窗口 / 终端时批量结束并删除其底层会话。 */
   deleteSessions(sessionIds: readonly string[]): Promise<void>;
 }
@@ -163,6 +198,13 @@ export interface NewTaskSessionPayload {
   target: WorkspaceSessionTarget;
 }
 
+export interface StartWorkspaceMergeAgentPayload {
+  workspaceId: string;
+  cwd: string;
+  provider?: WorkspaceProvider;
+  prompt: string;
+}
+
 export interface WorkspacesRuntimeAdapter {
   /** 对话框打开/关闭的副作用钩子（关其它覆盖层等）。 */
   onOpen(): void;
@@ -179,6 +221,8 @@ export interface WorkspacesRuntimeAdapter {
   openTask(payload: OpenWorkspaceTaskPayload): void;
   /** 标签栏「+」：在该任务 worktree 再起一个绑定会话（返回 promise 以便标签栏刷新）。 */
   newTaskSession(payload: NewTaskSessionPayload): void | Promise<unknown>;
+  /** Start one managed Agent at the project checkout to merge selected task worktrees. */
+  startWorktreeMergeAgent(payload: StartWorkspaceMergeAgentPayload): void | Promise<unknown>;
   /** 工作窗口 / 分屏布局变更后回写持久化 + 更新活动上下文。 */
   saveTaskLayout(layout: TaskWindowLayout | null): void | Promise<unknown>;
   /** 确认并关闭底层会话；取消或失败时返回 false，调用方不得移除布局。 */

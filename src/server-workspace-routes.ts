@@ -5,7 +5,11 @@ import type { Express } from "express";
 import { asyncRoute } from "./express-async.js";
 import { getErrorMessage } from "./error-utils.js";
 import { expandHomePath } from "./middleware/path-safety.js";
-import { prepareSessionWorktree } from "./git-worktree.js";
+import {
+  checkSessionWorktreeMergeabilityAsync,
+  prepareSessionWorktree,
+  resolveWorktreeTargetBranchAsync,
+} from "./git-worktree.js";
 import { runGit } from "./git-utils.js";
 import type { SessionRegistry } from "./session-registry.js";
 import type { WandStorage } from "./storage.js";
@@ -42,6 +46,13 @@ function deleteSessions(
     if (sessions) sessions.deleteWithProviderHistory(sessionId);
     else storage.deleteSession(sessionId);
   }
+}
+
+function workspaceWithWorktreeCount(storage: WandStorage, workspace: NonNullable<ReturnType<WandStorage["getWorkspace"]>>) {
+  const worktreeCount = storage.listWorkspaceTasks(workspace.id)
+    .filter((task) => task.worktree !== null)
+    .length;
+  return { ...workspace, worktreeCount };
 }
 
 // ── Layout validation / sanitization（前端 PUT 与测试共用）──
@@ -154,7 +165,7 @@ export function registerWorkspaceRoutes(
 ): void {
   // 列出所有项目（按最近打开排序）
   app.get("/api/workspaces", (_req, res) => {
-    res.json(storage.listWorkspaces());
+    res.json(storage.listWorkspaces().map((workspace) => workspaceWithWorktreeCount(storage, workspace)));
   });
 
   // 新建项目：名称 + 目录 + 默认 IDE，不启动会话
@@ -174,7 +185,7 @@ export function registerWorkspaceRoutes(
     }
     const defaultProvider = parseDefaultProvider(body.defaultProvider);
     const workspace = storage.createWorkspace({ name, cwd, defaultProvider });
-    res.status(201).json(workspace);
+    res.status(201).json({ ...workspace, worktreeCount: 0 });
   }));
 
   // 项目详情：meta + 会话 + 布局；访问即更新 lastOpenedAt
@@ -185,7 +196,10 @@ export function registerWorkspaceRoutes(
       return;
     }
     storage.touchWorkspace(workspace.id);
-    res.json({ ...workspace, sessions: storage.listSessionsByWorkspace(workspace.id) });
+    res.json({
+      ...workspaceWithWorktreeCount(storage, workspace),
+      sessions: storage.listSessionsByWorkspace(workspace.id),
+    });
   });
 
   // 改名 / 目录 / 默认 IDE
@@ -213,7 +227,8 @@ export function registerWorkspaceRoutes(
       if (parsed) patch.defaultProvider = parsed;
     }
     storage.updateWorkspace(existing.id, patch);
-    res.json(storage.getWorkspace(existing.id));
+    const updated = storage.getWorkspace(existing.id);
+    res.json(updated ? workspaceWithWorktreeCount(storage, updated) : null);
   });
 
   // 删除项目；cascade=true 连带删会话，否则仅解绑
@@ -268,6 +283,84 @@ export function registerWorkspaceRoutes(
     }
     res.json(storage.listWorkspaceTasks(workspace.id));
   });
+
+  // 项目级 Worktree 总览：一次解析默认目标分支，再为每个任务读取可合并状态。
+  app.get("/api/workspaces/:id/worktrees", asyncRoute(async (req, res) => {
+    const workspace = storage.getWorkspace(req.params.id);
+    if (!workspace) {
+      res.status(404).json({ error: "未找到该项目。" });
+      return;
+    }
+    const tasks = storage.listWorkspaceTasks(workspace.id).filter((task) => task.worktree !== null);
+    if (tasks.length === 0) {
+      res.json({ workspaceId: workspace.id, repoRoot: workspace.cwd, targetBranch: "", worktrees: [] });
+      return;
+    }
+
+    let target: Awaited<ReturnType<typeof resolveWorktreeTargetBranchAsync>>;
+    try {
+      target = await resolveWorktreeTargetBranchAsync(workspace.cwd);
+    } catch (error) {
+      res.status(400).json({ error: getErrorMessage(error, "无法识别项目默认分支。") });
+      return;
+    }
+
+    const worktrees = await Promise.all(tasks.map(async (task) => {
+      const worktree = task.worktree as WorkspaceTaskWorktree;
+      try {
+        const inspection = await checkSessionWorktreeMergeabilityAsync({
+          worktree,
+          targetBranch: target.targetBranch,
+        });
+        const actionable = inspection.hasUncommittedChanges || inspection.aheadCount > 0;
+        const state = inspection.hasUncommittedChanges
+          ? "dirty"
+          : inspection.hasConflicts
+            ? "conflict"
+            : inspection.aheadCount > 0
+              ? "ready"
+              : "empty";
+        return {
+          taskId: task.id,
+          taskName: task.name,
+          taskStatus: task.status,
+          branch: worktree.branch,
+          path: worktree.path,
+          baseRef: worktree.baseRef ?? "",
+          state,
+          actionable,
+          reason: inspection.reason ?? "",
+          aheadCount: inspection.aheadCount,
+          hasUncommittedChanges: inspection.hasUncommittedChanges,
+          hasConflicts: inspection.hasConflicts,
+          commits: inspection.commits,
+        };
+      } catch (error) {
+        return {
+          taskId: task.id,
+          taskName: task.name,
+          taskStatus: task.status,
+          branch: worktree.branch,
+          path: worktree.path,
+          baseRef: worktree.baseRef ?? "",
+          state: "unavailable",
+          actionable: false,
+          reason: getErrorMessage(error, "无法读取 Worktree 状态。"),
+          aheadCount: 0,
+          hasUncommittedChanges: false,
+          hasConflicts: false,
+          commits: [],
+        };
+      }
+    }));
+
+    res.json({
+      workspaceId: workspace.id,
+      repoRoot: target.repoRoot,
+      targetBranch: target.targetBranch,
+      worktrees,
+    });
+  }));
 
   // 新建任务：命名 + 创建独立 worktree（非 git 仓库时退化为直接用项目目录）
   app.post("/api/workspaces/:id/tasks", asyncRoute(async (req, res) => {

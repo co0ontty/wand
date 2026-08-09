@@ -12,6 +12,9 @@ import type {
   WorkspaceProvider,
   WorkspaceTask,
   WorkspaceTaskDetail,
+  WorkspaceWorktreeOverview,
+  WorkspaceWorktreeReview,
+  WorkspaceWorktreeState,
   WorkspacesRepository,
 } from "./types";
 
@@ -27,6 +30,67 @@ function parseProvider(value: unknown): WorkspaceProvider | undefined {
 
 function text(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function finiteCount(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+}
+
+function worktreeState(value: unknown): WorkspaceWorktreeState {
+  return value === "dirty" || value === "conflict" || value === "empty" || value === "unavailable"
+    ? value
+    : "ready";
+}
+
+function normalizeWorkspaceWorktree(value: unknown): WorkspaceWorktreeReview | null {
+  const item = record(value);
+  const taskId = text(item.taskId).trim();
+  const branch = text(item.branch).trim();
+  const worktreePath = text(item.path).trim();
+  if (!taskId || !branch || !worktreePath) return null;
+  const commits = Array.isArray(item.commits) ? item.commits.flatMap((candidate) => {
+    const commit = record(candidate);
+    const hash = text(commit.hash).trim();
+    if (!hash) return [];
+    return [{
+      hash,
+      shortHash: text(commit.shortHash, hash.slice(0, 7)),
+      subject: text(commit.subject),
+    }];
+  }) : [];
+  return {
+    taskId,
+    taskName: text(item.taskName, branch),
+    taskStatus: item.taskStatus === "done" ? "done" : "active",
+    branch,
+    path: worktreePath,
+    baseRef: text(item.baseRef),
+    state: worktreeState(item.state),
+    actionable: item.actionable === true,
+    reason: text(item.reason),
+    aheadCount: finiteCount(item.aheadCount),
+    hasUncommittedChanges: item.hasUncommittedChanges === true,
+    hasConflicts: item.hasConflicts === true,
+    commits,
+  };
+}
+
+export function normalizeWorkspaceWorktreeOverview(value: unknown): WorkspaceWorktreeOverview {
+  const result = record(value);
+  return {
+    workspaceId: text(result.workspaceId),
+    repoRoot: text(result.repoRoot),
+    targetBranch: text(result.targetBranch),
+    worktrees: Array.isArray(result.worktrees)
+      ? result.worktrees.map(normalizeWorkspaceWorktree).filter((item): item is WorkspaceWorktreeReview => item !== null)
+      : [],
+  };
 }
 
 async function readJson<T = Record<string, unknown>>(response: Response): Promise<T> {
@@ -163,6 +227,17 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
       },
     ));
     return body.layout ?? null;
+  }
+
+  async listWorktrees(
+    workspaceId: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<WorkspaceWorktreeOverview> {
+    const body = await readJson<unknown>(await this.fetchImpl(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/worktrees`,
+      { credentials: "same-origin", signal: options.signal },
+    ));
+    return normalizeWorkspaceWorktreeOverview(body);
   }
 
   async deleteSessions(sessionIds: readonly string[]): Promise<void> {

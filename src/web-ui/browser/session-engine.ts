@@ -2491,13 +2491,24 @@ import { hasPooledTerminal } from "./terminal-pool";
        */
       export function startSessionInCwd(
         cwd: string,
-        options?: { workspaceId?: string; workspaceTaskId?: string; provider?: string; shell?: boolean },
+        options?: {
+          workspaceId?: string;
+          workspaceTaskId?: string;
+          provider?: string;
+          shell?: boolean;
+          mode?: string;
+          initialInput?: string;
+        },
       ): Promise<unknown> {
         var shell = !!(options && options.shell);
         var provider = shell ? "" : ((options && options.provider) || getPreferredTool());
         var defaultMode = shell
           ? "default"
-          : getSafeModeForTool(provider, (state.config && state.config.defaultMode) ? state.config.defaultMode : "default");
+          : getSafeModeForTool(
+              provider,
+              (options && options.mode)
+                || ((state.config && state.config.defaultMode) ? state.config.defaultMode : "default"),
+            );
         if (!shell) {
           state.preferredCommand = provider;
           state.chatMode = getSafeModeForTool(provider, state.chatMode);
@@ -2514,6 +2525,7 @@ import { hasPooledTerminal } from "./terminal-pool";
               provider: provider,
               cwd: cwd,
               mode: defaultMode,
+              initialInput: options && options.initialInput,
               sessionSource: "interactive",
             });
         if (options && options.workspaceId) body.workspaceId = options.workspaceId;

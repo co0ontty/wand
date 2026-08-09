@@ -10,7 +10,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { ProviderLogo } from "../provider-logo";
-import { WandButton, WandDialogSurface, WandSwitch } from "../ui";
+import { WandButton, WandDialogSurface } from "../ui";
 import { newSessionController, newSessionStore } from "./controller";
 import {
   buildCreateRequest,
@@ -457,7 +457,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
               >
                 <span>高级选项</span>
                 <span className="wand-new-session-advanced-summary">
-                  {form.kind === "shell" ? "Shell 环境" : selectedMode?.label ?? "标准"} · {form.worktreeEnabled ? "Worktree 已开启" : "不使用 Worktree"}
+                  {form.kind === "shell" ? "Shell 环境" : selectedMode?.label ?? "标准"}
                 </span>
               </button>
               {advancedOpen ? (
@@ -497,21 +497,6 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                   </fieldset> : (
                     <p className="wand-new-session-field-hint">空白终端使用服务端配置的登录 Shell，不应用 AI 权限模式。</p>
                   )}
-                  <div className="wand-new-session-worktree">
-                    <div>
-                      <strong>Worktree 模式</strong>
-                      <span>为本次会话创建独立的 Git worktree 与分支。</span>
-                    </div>
-                    <WandSwitch
-                      id="wand-new-session-worktree"
-                      checked={form.worktreeEnabled}
-                      ariaLabel="启用 Worktree 模式"
-                      onCheckedChange={(worktreeEnabled) => {
-                        setForm({ ...form, worktreeEnabled });
-                        if (worktreeEnabled) setAdvancedOpen(true);
-                      }}
-                    />
-                  </div>
                 </div>
               ) : null}
             </section>
@@ -523,7 +508,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
               ? "空白终端 · Shell"
               : `${PROVIDERS.find((provider) => provider.value === form.provider)?.label} · ${form.kind === "structured" ? "结构化" : "PTY"}`}</strong>
             <span title={effectiveCwd}>{effectiveCwd}</span>
-            <span>{form.kind === "shell" ? "不启动 CLI" : selectedMode?.label ?? "标准"}{form.worktreeEnabled ? " · Worktree" : ""}</span>
+            <span>{form.kind === "shell" ? "不启动 CLI" : selectedMode?.label ?? "标准"}</span>
           </div>
 
           <div className="wand-new-session-footer">
