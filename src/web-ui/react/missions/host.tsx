@@ -5,7 +5,6 @@ import { WandButton, WandDialogSurface } from "../ui";
 import { missionsController, missionsStore } from "./controller";
 import { httpMissionsRepository } from "./repository";
 import type {
-  ActivityItem,
   MissionAttempt,
   MissionDetails,
   MissionDiff,
@@ -75,31 +74,6 @@ function splitPaths(value: string): string[] {
   return value.split(/[\n,]/).map((item) => item.trim()).filter(Boolean);
 }
 
-function ActivitySection({ title, items, openSession }: {
-  title: string;
-  items: ActivityItem[];
-  openSession(sessionId: string): void;
-}) {
-  if (!items.length) return null;
-  return (
-    <section className="wand-missions-section">
-      <h3>{title}<span>{items.length}</span></h3>
-      <div className="wand-missions-card-list">
-        {items.map((item) => (
-          <button className="wand-missions-activity" key={item.sessionId} onClick={() => openSession(item.sessionId)}>
-            <span className={`wand-missions-state-dot is-${item.state}`}/>
-            <span className="wand-missions-activity-copy">
-              <strong>{item.title}</strong>
-              <small>{item.summary || item.cwd || "暂无摘要"}</small>
-            </span>
-            <span className={`wand-missions-state is-${item.state}`}>{STATE_LABELS[item.state]}</span>
-          </button>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 function AttemptCard({ attempt, onOpen, onDiff }: {
   attempt: MissionAttempt;
   onOpen(): void;
@@ -122,9 +96,7 @@ function AttemptCard({ attempt, onOpen, onDiff }: {
 
 export function MissionsHost({ repository = httpMissionsRepository }: { repository?: MissionsRepository }) {
   const controller = useSyncExternalStore(missionsStore.subscribe, missionsStore.getSnapshot, missionsStore.getSnapshot);
-  const [tab, setTab] = useState<"inbox" | "missions">("inbox");
   const [missions, setMissions] = useState<MissionDetails[]>([]);
-  const [inbox, setInbox] = useState<ActivityItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -145,9 +117,8 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
   const diffLines = useMemo(() => diff ? parseDiff(diff.patch) : [], [diff]);
 
   const refresh = async () => {
-    const [nextMissions, nextInbox] = await Promise.all([repository.list(), repository.inbox()]);
+    const nextMissions = await repository.list();
     setMissions(nextMissions);
-    setInbox(nextInbox);
     setSelectedId((current) => current && nextMissions.some((mission) => mission.id === current) ? current : nextMissions[0]?.id ?? null);
   };
 
@@ -161,7 +132,6 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
   }, [controller.open, controller.revision]);
 
   const openSession = (sessionId: string) => {
-    void repository.markRead(sessionId).catch(() => undefined);
     void missionsStore.getRuntime()?.openSession(sessionId);
     missionsController.close();
   };
@@ -175,7 +145,7 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
         baseRef: baseRef.trim() || undefined,
         sharedDirectories: splitPaths(sharedPaths), copyPaths: splitPaths(copyPaths),
       });
-      setCreating(false); setPrompt(""); setTitle(""); setSelectedId(created.id); setTab("missions");
+      setCreating(false); setPrompt(""); setTitle(""); setSelectedId(created.id);
       await refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "创建任务失败。");
@@ -211,9 +181,6 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
     finally { setBusy(false); }
   };
 
-  const needsYou = inbox.filter((item) => item.state === "needs_input" || item.state === "needs_permission");
-  const working = inbox.filter((item) => item.state === "working");
-  const done = inbox.filter((item) => item.state === "done" || item.state === "failed");
   const pendingComments = selected && diffAttempt
     ? selected.comments.filter((comment) => comment.attemptId === diffAttempt.id && comment.status === "pending")
     : [];
@@ -221,8 +188,8 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
   return (
     <WandDialogSurface
       open={controller.open}
-      title="Agent Inbox"
-      description="并行分派任务、查看需要你介入的会话，并把 Diff 意见一次性发回 Agent。"
+      title="并行任务"
+      description="把同一个目标分派给多个 Agent，在独立 worktree 中并行尝试，并审查 Diff。"
       className="wand-missions-dialog"
       overlayClassName="wand-missions-overlay"
       headerClassName="wand-missions-header"
@@ -231,86 +198,74 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
       onOpenChange={(open) => { if (!open) missionsController.close(); }}
     >
       <div className="wand-missions-toolbar">
-        <div className="wand-missions-tabs" role="tablist">
-          <button className={tab === "inbox" ? "active" : ""} onClick={() => setTab("inbox")}>Inbox{needsYou.length ? <b>{needsYou.length}</b> : null}</button>
-          <button className={tab === "missions" ? "active" : ""} onClick={() => setTab("missions")}>任务 <span>{missions.length}</span></button>
-        </div>
-        <WandButton kind="primary" size="small" onClick={() => { setCreating(true); setTab("missions"); }}>＋ 新任务</WandButton>
+        <span className="wand-missions-toolbar-note">{missions.length} 个任务</span>
+        <WandButton kind="primary" size="small" onClick={() => setCreating(true)}>＋ 新任务</WandButton>
       </div>
 
       {error ? <div className="wand-missions-error" role="alert">{error}</div> : null}
 
       <div className="wand-missions-body">
-        {tab === "inbox" ? (
-          <div className="wand-missions-inbox">
-            <ActivitySection title="需要你" items={needsYou} openSession={openSession}/>
-            <ActivitySection title="执行中" items={working} openSession={openSession}/>
-            <ActivitySection title="已结束" items={done} openSession={openSession}/>
-            {!inbox.length ? <div className="wand-missions-empty">目前没有 Agent 活动。</div> : null}
-          </div>
-        ) : (
-          <div className="wand-missions-workspace">
-            <aside className="wand-missions-list">
-              {missions.map((mission) => (
-                <button key={mission.id} className={selected?.id === mission.id ? "active" : ""} onClick={() => { setSelectedId(mission.id); setDiff(null); }}>
-                  <strong>{mission.title}</strong>
-                  <small>{mission.attempts.length} 个 Agent · {STATE_LABELS[mission.status]}</small>
-                </button>
-              ))}
-              {!missions.length ? <div className="wand-missions-empty">创建一个任务，让多个 Agent 在独立 worktree 中并行尝试。</div> : null}
-            </aside>
-            <main className="wand-missions-detail">
-              {selected ? (
-                <>
-                  <div className="wand-missions-detail-head">
-                    <div><h2>{selected.title}</h2><p>{selected.cwd} · 基线 {selected.worktree.baseRef || "当前分支"}</p></div>
-                    <span className={`wand-missions-state is-${selected.status}`}>{STATE_LABELS[selected.status]}</span>
-                  </div>
-                  <p className="wand-missions-prompt">{selected.prompt}</p>
-                  <div className="wand-missions-attempt-grid">
-                    {selected.attempts.map((attempt) => (
-                      <AttemptCard key={attempt.id} attempt={attempt} onOpen={() => attempt.sessionId && openSession(attempt.sessionId)} onDiff={() => void openDiff(selected, attempt)}/>
-                    ))}
-                  </div>
-                  {diff && diffAttempt ? (
-                    <section className="wand-missions-review">
-                      <div className="wand-missions-review-head">
-                        <div><h3>{diffAttempt.provider} Diff</h3><span>{diff.files.length} 个文件{diff.truncated ? " · 内容已截断" : ""}</span></div>
-                        <WandButton size="small" kind="ghost" onClick={() => setDiff(null)}>收起</WandButton>
+        <div className="wand-missions-workspace">
+          <aside className="wand-missions-list">
+            {missions.map((mission) => (
+              <button key={mission.id} className={selected?.id === mission.id ? "active" : ""} onClick={() => { setSelectedId(mission.id); setDiff(null); }}>
+                <strong>{mission.title}</strong>
+                <small>{mission.attempts.length} 个 Agent · {STATE_LABELS[mission.status]}</small>
+              </button>
+            ))}
+            {!missions.length ? <div className="wand-missions-empty">创建一个任务，让多个 Agent 在独立 worktree 中并行尝试。</div> : null}
+          </aside>
+          <main className="wand-missions-detail">
+            {selected ? (
+              <>
+                <div className="wand-missions-detail-head">
+                  <div><h2>{selected.title}</h2><p>{selected.cwd} · 基线 {selected.worktree.baseRef || "当前分支"}</p></div>
+                  <span className={`wand-missions-state is-${selected.status}`}>{STATE_LABELS[selected.status]}</span>
+                </div>
+                <p className="wand-missions-prompt">{selected.prompt}</p>
+                <div className="wand-missions-attempt-grid">
+                  {selected.attempts.map((attempt) => (
+                    <AttemptCard key={attempt.id} attempt={attempt} onOpen={() => attempt.sessionId && openSession(attempt.sessionId)} onDiff={() => void openDiff(selected, attempt)}/>
+                  ))}
+                </div>
+                {diff && diffAttempt ? (
+                  <section className="wand-missions-review">
+                    <div className="wand-missions-review-head">
+                      <div><h3>{diffAttempt.provider} Diff</h3><span>{diff.files.length} 个文件{diff.truncated ? " · 内容已截断" : ""}</span></div>
+                      <WandButton size="small" kind="ghost" onClick={() => setDiff(null)}>收起</WandButton>
+                    </div>
+                    <div className="wand-missions-diff" role="list" aria-label="任务 Diff">
+                      {diffLines.map((line) => (
+                        <button
+                          key={line.key}
+                          className={`is-${line.kind}`}
+                          disabled={!line.path || line.line === null}
+                          title={line.path && line.line ? `在 ${line.path}:${line.line} 添加意见` : undefined}
+                          onClick={() => line.path && setReviewTarget({ filePath: line.path, line: line.line, side: line.side })}
+                        >
+                          <span>{line.line ?? ""}</span><code>{line.text || " "}</code>
+                        </button>
+                      ))}
+                    </div>
+                    {reviewTarget ? (
+                      <div className="wand-missions-comment-form">
+                        <label>{reviewTarget.filePath}{reviewTarget.line ? `:${reviewTarget.line}` : ""}</label>
+                        <textarea value={reviewBody} onChange={(event) => setReviewBody(event.target.value)} placeholder="写下具体、可执行的修改意见…"/>
+                        <WandButton kind="primary" size="small" disabled={busy || !reviewBody.trim()} onClick={() => void addComment()}>加入 Review</WandButton>
                       </div>
-                      <div className="wand-missions-diff" role="list" aria-label="任务 Diff">
-                        {diffLines.map((line) => (
-                          <button
-                            key={line.key}
-                            className={`is-${line.kind}`}
-                            disabled={!line.path || line.line === null}
-                            title={line.path && line.line ? `在 ${line.path}:${line.line} 添加意见` : undefined}
-                            onClick={() => line.path && setReviewTarget({ filePath: line.path, line: line.line, side: line.side })}
-                          >
-                            <span>{line.line ?? ""}</span><code>{line.text || " "}</code>
-                          </button>
-                        ))}
+                    ) : null}
+                    {pendingComments.length ? (
+                      <div className="wand-missions-pending-review">
+                        <div>{pendingComments.map((comment) => <p key={comment.id}><strong>{comment.filePath}{comment.line ? `:${comment.line}` : ""}</strong>{comment.body}</p>)}</div>
+                        <WandButton kind="primary" disabled={busy} onClick={() => void sendReview()}>发送 {pendingComments.length} 条意见</WandButton>
                       </div>
-                      {reviewTarget ? (
-                        <div className="wand-missions-comment-form">
-                          <label>{reviewTarget.filePath}{reviewTarget.line ? `:${reviewTarget.line}` : ""}</label>
-                          <textarea value={reviewBody} onChange={(event) => setReviewBody(event.target.value)} placeholder="写下具体、可执行的修改意见…"/>
-                          <WandButton kind="primary" size="small" disabled={busy || !reviewBody.trim()} onClick={() => void addComment()}>加入 Review</WandButton>
-                        </div>
-                      ) : null}
-                      {pendingComments.length ? (
-                        <div className="wand-missions-pending-review">
-                          <div>{pendingComments.map((comment) => <p key={comment.id}><strong>{comment.filePath}{comment.line ? `:${comment.line}` : ""}</strong>{comment.body}</p>)}</div>
-                          <WandButton kind="primary" disabled={busy} onClick={() => void sendReview()}>发送 {pendingComments.length} 条意见</WandButton>
-                        </div>
-                      ) : null}
-                    </section>
-                  ) : null}
-                </>
-              ) : <div className="wand-missions-empty">选择或创建一个任务。</div>}
-            </main>
-          </div>
-        )}
+                    ) : null}
+                  </section>
+                ) : null}
+              </>
+            ) : <div className="wand-missions-empty">选择或创建一个任务。</div>}
+          </main>
+        </div>
       </div>
 
       {creating ? (

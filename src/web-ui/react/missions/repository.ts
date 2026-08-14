@@ -1,5 +1,4 @@
 import type {
-  ActivityItem,
   CreateMissionRequest,
   MissionDetails,
   MissionDiff,
@@ -19,11 +18,6 @@ export class HttpMissionsRepository implements MissionsRepository {
   async list(): Promise<MissionDetails[]> {
     const body = await json<{ missions: MissionDetails[] }>(await this.fetchImpl("/api/missions", { credentials: "same-origin" }));
     return body.missions ?? [];
-  }
-
-  async inbox(): Promise<ActivityItem[]> {
-    const body = await json<{ items: ActivityItem[] }>(await this.fetchImpl("/api/inbox", { credentials: "same-origin" }));
-    return body.items ?? [];
   }
 
   async create(request: CreateMissionRequest): Promise<MissionDetails> {
@@ -48,13 +42,6 @@ export class HttpMissionsRepository implements MissionsRepository {
       method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin", body: "{}",
     }));
     return body.comments ?? [];
-  }
-
-  async markRead(sessionId?: string): Promise<void> {
-    await json(await this.fetchImpl("/api/inbox/read", {
-      method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin",
-      body: JSON.stringify(sessionId ? { sessionId } : {}),
-    }));
   }
 }
 

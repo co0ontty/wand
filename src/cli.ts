@@ -191,7 +191,6 @@ async function main(): Promise<void> {
     case "session:read":
     case "session:send":
     case "session:wait":
-    case "inbox:list":
     case "mission:list":
     case "mission:create":
     case "mission:diff":
@@ -244,7 +243,6 @@ Agent runtime:
   wand session:read <id>    Read a complete session snapshot
   wand session:send <id> <text>
   wand session:wait <id> [--timeout 900]
-  wand inbox:list           List global Agent Inbox items
   wand mission:list         List parallel tasks
   wand mission:create --prompt <text> --cwd <path> --providers claude,codex
   wand mission:diff <mission-id> <attempt-id>
@@ -301,7 +299,6 @@ async function runAgentCliCommand(command: string, args: string[], configPath: s
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
     }
-    case "inbox:list": return output(await api.get("/api/inbox"));
     case "mission:list": return output(await api.get("/api/missions"));
     case "mission:create": {
       const prompt = required(readFlagValue(args, "--prompt"), "wand mission:create --prompt <text> --cwd <path> --providers claude,codex");

@@ -43,6 +43,8 @@ export interface Workspace {
   lastOpenedAt: string | null;
   /** Number of task-owned worktrees currently registered under this project. */
   worktreeCount?: number;
+  /** Number of sessions bound to this project (including task-owned ones). */
+  sessionCount?: number;
 }
 
 /** GET /api/workspaces/:id 额外带回该项目下的会话列表。 */
@@ -55,6 +57,7 @@ export interface WorkspaceSessionSummary {
   status?: string;
   cwd?: string;
   startedAt?: string;
+  workspaceTaskId?: string;
 }
 
 export interface WorkspaceDetail extends Workspace {
@@ -217,6 +220,8 @@ export interface WorkspacesRuntimeAdapter {
   closeWorkspace(): void;
   /** 删除任务 / 项目后立即刷新会话列表，清掉已删除会话的选中态。 */
   refreshSessions(): void | Promise<unknown>;
+  /** 选中并打开一个已有会话（项目里的独立会话与会话列表共用同一条记录）。 */
+  selectSession(sessionId: string): void;
   /** 点击任务：只恢复任务上下文与已有会话；空任务保持欢迎页。 */
   openTask(payload: OpenWorkspaceTaskPayload): void;
   /** 标签栏「+」：在该任务 worktree 再起一个绑定会话（返回 promise 以便标签栏刷新）。 */

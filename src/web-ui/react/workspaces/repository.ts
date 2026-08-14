@@ -122,9 +122,16 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
 
   async list(): Promise<Workspace[]> {
     const body = await readJson<unknown>(await this.fetchImpl("/api/workspaces", { credentials: "same-origin" }));
-    if (Array.isArray(body)) return body as Workspace[];
-    const wrapped = body as { workspaces?: Workspace[] };
-    return wrapped.workspaces ?? [];
+    const items = Array.isArray(body) ? body : (body as { workspaces?: unknown }).workspaces;
+    if (!Array.isArray(items)) return [];
+    return items.map((item) => {
+      const workspace = record(item);
+      return {
+        ...(item as Workspace),
+        sessionCount: finiteCount(workspace.sessionCount),
+        worktreeCount: finiteCount(workspace.worktreeCount),
+      };
+    });
   }
 
   async get(id: string): Promise<WorkspaceDetail> {

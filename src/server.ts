@@ -47,6 +47,7 @@ import {
 import { parseSessionCreationOrigin, registerClaudeHistoryRoutes, registerSessionRoutes } from "./server-session-routes.js";
 import { registerWorkspaceRoutes } from "./server-workspace-routes.js";
 import { resolveSessionCwd } from "./session-cwd.js";
+import { resolveWorkspaceIdForNewSession } from "./workspace-binding.js";
 import { getErrorMessage } from "./error-utils.js";
 import { asyncRoute, jsonErrorHandler } from "./express-async.js";
 import {
@@ -1186,18 +1187,20 @@ export async function startServer(
         : undefined;
       const reqCols = typeof body.cols === "number" && Number.isFinite(body.cols) ? body.cols : undefined;
       const reqRows = typeof body.rows === "number" && Number.isFinite(body.rows) ? body.rows : undefined;
+      const sessionCwd = resolveSessionCwd(body.cwd, config.defaultCwd);
+      const workspaceId = resolveWorkspaceIdForNewSession(storage, sessionCwd, body.workspaceId);
       const snapshot = await (interactiveShell
-        ? processes.startShell(body.cwd, body.mode ?? "default", {
+        ? processes.startShell(sessionCwd, body.mode ?? "default", {
             worktreeEnabled: body.worktreeEnabled === true,
             cols: reqCols,
             rows: reqRows,
-            workspaceId: body.workspaceId,
+            workspaceId,
             workspaceTaskId: body.workspaceTaskId,
             ...origin,
           })
         : processes.start(
             command,
-            body.cwd,
+            sessionCwd,
             body.mode ?? config.defaultMode,
             initialInput || undefined,
             {
@@ -1207,7 +1210,7 @@ export async function startServer(
               cols: reqCols,
               rows: reqRows,
               thinkingEffort: body.thinkingEffort ?? config.defaultThinkingEffort,
-              workspaceId: body.workspaceId,
+              workspaceId,
               workspaceTaskId: body.workspaceTaskId,
               ...origin,
             }

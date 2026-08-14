@@ -1200,7 +1200,7 @@ export const settingsAndQuickCommitStyles = String.raw`
 
 `;
 
-/** Agent Inbox and task-race workspace. */
+/** Parallel-task workspace. */
 export const missionsStyles = String.raw`
 .wand-missions-overlay { position: fixed; inset: 0; z-index: 34; background: var(--bg-overlay); backdrop-filter: blur(6px); pointer-events: auto; }
 .wand-missions-dialog { position: fixed; inset: max(24px, var(--wand-safe-top)) max(24px, var(--wand-safe-right)) max(24px, var(--wand-safe-bottom)) max(24px, var(--wand-safe-left)); z-index: 35; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border-subtle); border-radius: 20px; color: var(--text-primary); background: color-mix(in srgb, var(--bg-elevated) 94%, transparent); box-shadow: 0 24px 70px rgb(0 0 0 / 24%); pointer-events: auto; }
@@ -1209,26 +1209,9 @@ export const missionsStyles = String.raw`
 .wand-missions-title { margin: 0; font-size: 1.2rem; letter-spacing: -.02em; }
 .wand-missions-description { margin: 4px 0 0; color: var(--text-secondary); font-size: var(--font-size-sm); }
 .wand-missions-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border-subtle); padding: 0 20px 12px; }
-.wand-missions-tabs { display: flex; gap: 4px; padding: 3px; border-radius: 10px; background: var(--bg-secondary); }
-.wand-missions-tabs button { display: flex; align-items: center; gap: 7px; min-height: 34px; border: 0; border-radius: 8px; padding: 0 13px; color: var(--text-secondary); background: transparent; cursor: pointer; }
-.wand-missions-tabs button.active { color: var(--text-primary); background: var(--bg-elevated); box-shadow: 0 1px 3px rgb(0 0 0 / 10%); }
-.wand-missions-tabs b { display: grid; min-width: 18px; height: 18px; place-items: center; border-radius: 9px; color: white; background: var(--danger); font-size: 10px; }
+.wand-missions-toolbar-note { color: var(--text-secondary); font-size: var(--font-size-sm); }
 .wand-missions-error { margin: 10px 20px 0; border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent); border-radius: 10px; padding: 9px 12px; color: var(--danger); background: var(--danger-muted); font-size: var(--font-size-sm); }
 .wand-missions-body { flex: 1; min-height: 0; overflow: hidden; }
-.wand-missions-inbox { height: 100%; overflow: auto; padding: 18px 20px 28px; }
-.wand-missions-section + .wand-missions-section { margin-top: 24px; }
-.wand-missions-section h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 9px; font-size: var(--font-size-sm); }
-.wand-missions-section h3 span { color: var(--text-muted); font-size: var(--font-size-xs); }
-.wand-missions-card-list { display: grid; gap: 8px; }
-.wand-missions-activity { display: flex; align-items: center; width: 100%; gap: 12px; border: 1px solid var(--border-subtle); border-radius: 13px; padding: 12px 13px; color: inherit; background: var(--bg-secondary); text-align: left; cursor: pointer; }
-.wand-missions-activity:hover { border-color: color-mix(in srgb, var(--accent) 38%, var(--border-subtle)); background: color-mix(in srgb, var(--accent-muted) 36%, var(--bg-secondary)); }
-.wand-missions-state-dot { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 50%; background: var(--text-muted); }
-.wand-missions-state-dot.is-working { background: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent); }
-.wand-missions-state-dot.is-needs_input,.wand-missions-state-dot.is-needs_permission { background: var(--warning); }
-.wand-missions-state-dot.is-failed { background: var(--danger); }
-.wand-missions-activity-copy { display: grid; flex: 1; min-width: 0; gap: 3px; }
-.wand-missions-activity-copy strong,.wand-missions-activity-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wand-missions-activity-copy small { color: var(--text-secondary); }
 .wand-missions-state { flex: 0 0 auto; border-radius: 999px; padding: 4px 8px; color: var(--text-secondary); background: var(--bg-tertiary); font-size: 10px; font-weight: 650; }
 .wand-missions-state.is-working,.wand-missions-state.is-running { color: var(--accent); background: var(--accent-muted); }
 .wand-missions-state.is-needs_input,.wand-missions-state.is-needs_permission { color: var(--warning); background: var(--warning-muted); }

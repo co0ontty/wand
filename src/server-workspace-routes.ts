@@ -13,7 +13,12 @@ import {
 } from "./git-worktree.js";
 import type { SessionRegistry } from "./session-registry.js";
 import type { WandStorage } from "./storage.js";
+import { resolveSessionDisplayTitle } from "./session-transport.js";
 import type { LayoutNode, PaneTab, SessionProvider, TaskWindowLayout, WorkspaceDefaultProvider, WorkspaceTaskWorktree } from "./types.js";
+import {
+  attachUnboundSessionsToWorkspace,
+  backfillSessionWorkspaces,
+} from "./workspace-binding.js";
 
 const PROVIDERS: ReadonlySet<string> = new Set(["claude", "codex", "opencode", "grok", "qoder", "pi"]);
 
@@ -42,11 +47,17 @@ function deleteSessions(
   }
 }
 
-function workspaceWithWorktreeCount(storage: WandStorage, workspace: NonNullable<ReturnType<WandStorage["getWorkspace"]>>) {
+function workspaceWithCounts(
+  storage: WandStorage,
+  workspace: NonNullable<ReturnType<WandStorage["getWorkspace"]>>,
+  sessionCounts?: Map<string, number>,
+) {
   const worktreeCount = storage.listWorkspaceTasks(workspace.id)
     .filter((task) => task.worktree !== null)
     .length;
-  return { ...workspace, worktreeCount };
+  const sessionCount = sessionCounts?.get(workspace.id)
+    ?? storage.listSessionsByWorkspace(workspace.id).length;
+  return { ...workspace, worktreeCount, sessionCount };
 }
 
 // ── Layout validation / sanitization（前端 PUT 与测试共用）──
@@ -159,7 +170,9 @@ export function registerWorkspaceRoutes(
 ): void {
   // 列出所有项目（按最近打开排序）
   app.get("/api/workspaces", (_req, res) => {
-    res.json(storage.listWorkspaces().map((workspace) => workspaceWithWorktreeCount(storage, workspace)));
+    backfillSessionWorkspaces(storage);
+    const sessionCounts = storage.countSessionsByWorkspace();
+    res.json(storage.listWorkspaces().map((workspace) => workspaceWithCounts(storage, workspace, sessionCounts)));
   });
 
   // 新建项目：名称 + 目录 + 默认 IDE，不启动会话
@@ -179,7 +192,8 @@ export function registerWorkspaceRoutes(
     }
     const defaultProvider = parseDefaultProvider(body.defaultProvider);
     const workspace = storage.createWorkspace({ name, cwd, defaultProvider });
-    res.status(201).json({ ...workspace, worktreeCount: 0 });
+    const attached = attachUnboundSessionsToWorkspace(storage, workspace);
+    res.status(201).json({ ...workspace, worktreeCount: 0, sessionCount: attached });
   }));
 
   // 项目详情：meta + 会话 + 布局；访问即更新 lastOpenedAt
@@ -191,8 +205,11 @@ export function registerWorkspaceRoutes(
     }
     storage.touchWorkspace(workspace.id);
     res.json({
-      ...workspaceWithWorktreeCount(storage, workspace),
-      sessions: storage.listSessionsByWorkspace(workspace.id),
+      ...workspaceWithCounts(storage, workspace),
+      sessions: storage.listSessionsByWorkspace(workspace.id).map((session) => ({
+        ...session,
+        title: resolveSessionDisplayTitle(session),
+      })),
     });
   });
 
@@ -222,7 +239,7 @@ export function registerWorkspaceRoutes(
     }
     storage.updateWorkspace(existing.id, patch);
     const updated = storage.getWorkspace(existing.id);
-    res.json(updated ? workspaceWithWorktreeCount(storage, updated) : null);
+    res.json(updated ? workspaceWithCounts(storage, updated) : null);
   });
 
   // 删除项目；cascade=true 连带删会话，否则仅解绑

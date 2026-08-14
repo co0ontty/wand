@@ -4,7 +4,6 @@ import path from "node:path";
 
 import { buildMissionDiff } from "./mission-diff.js";
 import type {
-  AgentActivityItem,
   AgentActivityState,
   CreateMissionInput,
   CreateReviewCommentInput,
@@ -105,8 +104,8 @@ function reviewPrompt(comments: MissionReviewComment[]): string {
 }
 
 /**
- * Deep task-orchestration module. Callers create missions, observe one inbox,
- * and review diffs without coordinating session/worktree/storage details.
+ * Deep task-orchestration module. Callers create missions and review diffs
+ * without coordinating session/worktree/storage details.
  */
 export class Missions {
   constructor(
@@ -122,15 +121,6 @@ export class Missions {
   get(id: string): MissionDetails | null {
     const mission = this.storage.getMission(id);
     return mission ? this.details(mission) : null;
-  }
-
-  inbox(): AgentActivityItem[] {
-    this.seedInbox();
-    return this.storage.listAgentActivity();
-  }
-
-  markInboxRead(sessionId?: string): void {
-    this.storage.markAgentActivityRead(sessionId);
   }
 
   create(input: CreateMissionInput): MissionDetails {
@@ -166,38 +156,22 @@ export class Missions {
     return this.get(mission.id)!;
   }
 
-  ingest(event: ProcessEvent): AgentActivityItem | null {
-    if (!event.sessionId || event.sessionId === "__system__") return null;
+  ingest(event: ProcessEvent): void {
+    if (!event.sessionId || event.sessionId === "__system__") return;
     const snapshot = this.sessions.getLatest(event.sessionId);
-    if (!snapshot) return null;
+    if (!snapshot) return;
     const attempt = this.storage.getMissionAttemptBySession(event.sessionId);
-    const mission = attempt ? this.storage.getMission(attempt.missionId) : null;
+    if (!attempt) return;
     const state = activityState(snapshot, event);
     const updatedAt = nowIso();
-    const item: AgentActivityItem = {
-      sessionId: snapshot.id,
-      missionId: attempt?.missionId ?? null,
-      attemptId: attempt?.id ?? null,
-      state,
-      title: mission?.title || snapshot.title || `${snapshot.provider ?? "agent"} 会话`,
+    this.storage.saveMissionAttempt({
+      ...attempt,
+      state: state as MissionAttemptState,
       summary: sessionSummary(snapshot),
-      provider: snapshot.provider ?? snapshot.structuredState?.provider ?? null,
-      cwd: snapshot.cwd || null,
+      error: state === "failed" ? snapshot.structuredState?.lastError ?? "任务执行失败" : null,
       updatedAt,
-      readAt: null,
-    };
-    this.storage.upsertAgentActivity(item);
-    if (attempt) {
-      this.storage.saveMissionAttempt({
-        ...attempt,
-        state: state as MissionAttemptState,
-        summary: item.summary,
-        error: state === "failed" ? snapshot.structuredState?.lastError ?? "任务执行失败" : null,
-        updatedAt,
-      });
-      this.refreshMissionStatus(attempt.missionId);
-    }
-    return item;
+    });
+    this.refreshMissionStatus(attempt.missionId);
   }
 
   diff(missionId: string, attemptId: string): MissionDiff {
@@ -287,11 +261,6 @@ export class Missions {
         updatedAt: nowIso(),
       };
       this.storage.saveMissionAttempt(attempt);
-      this.storage.upsertAgentActivity({
-        sessionId: session.id, missionId: mission.id, attemptId, state: "working",
-        title: mission.title, summary: `已分派给 ${provider}`, provider, cwd: session.cwd,
-        updatedAt: attempt.updatedAt, readAt: null,
-      });
       const completion = this.structured.sendMessage(session.id, mission.prompt);
       completion.catch((error) => {
         console.error(`[Missions] Attempt ${attemptId} failed after dispatch:`, error);
@@ -302,28 +271,6 @@ export class Missions {
         state: "failed",
         error: error instanceof Error ? error.message : String(error),
         updatedAt: nowIso(),
-      });
-    }
-  }
-
-  private seedInbox(): void {
-    const existing = new Set(this.storage.listAgentActivity().map((item) => item.sessionId));
-    for (const snapshot of this.sessions.listSlim()) {
-      if (existing.has(snapshot.id)) continue;
-      const attempt = this.storage.getMissionAttemptBySession(snapshot.id);
-      const mission = attempt ? this.storage.getMission(attempt.missionId) : null;
-      const at = nowIso();
-      this.storage.upsertAgentActivity({
-        sessionId: snapshot.id,
-        missionId: attempt?.missionId ?? null,
-        attemptId: attempt?.id ?? null,
-        state: activityState(snapshot),
-        title: mission?.title || snapshot.title || `${snapshot.provider ?? "agent"} 会话`,
-        summary: sessionSummary(snapshot),
-        provider: snapshot.provider ?? snapshot.structuredState?.provider ?? null,
-        cwd: snapshot.cwd || null,
-        updatedAt: snapshot.endedAt || snapshot.startedAt || at,
-        readAt: at,
       });
     }
   }

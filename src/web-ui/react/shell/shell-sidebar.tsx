@@ -1426,7 +1426,7 @@ export function ShellSidebar() {
               id="missions-button"
               className="btn btn-ghost btn-sm"
               type="button"
-              title="Agent Inbox"
+              title="并行任务"
               onClick={() => void dispatch({ type: "missions.open" })}
             >
               <Icon name="inbox" size={16}/><span>任务</span>

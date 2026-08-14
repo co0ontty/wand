@@ -67,6 +67,10 @@ export function installWorkspacesLegacyAdapter(): void {
       notifyLegacyUiChange("workspace:close");
     },
     refreshSessions: refreshAll,
+    selectSession(sessionId: string) {
+      selectSession(sessionId);
+      dismissDrawerIfOverlay();
+    },
     openTask(payload: OpenWorkspaceTaskPayload) {
       state.activeWorkspaceId = payload.workspaceId;
       state.activeWorkspaceTaskId = payload.taskId;

@@ -15504,6 +15504,82 @@
       font-style: italic;
     }
 
+    .workspace-session {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      border: 0;
+      border-radius: 8px;
+      padding: 5px 6px;
+      color: var(--text-secondary);
+      background: transparent;
+      font: inherit;
+      cursor: pointer;
+      text-align: left;
+      transition: background-color 140ms ease, transform 100ms ease;
+      position: relative;
+    }
+
+    .workspace-session:hover {
+      background: color-mix(in srgb, var(--accent-muted) 38%, transparent);
+    }
+
+    .workspace-session:active {
+      transform: scale(0.99);
+    }
+
+    .workspace-session.active {
+      background: color-mix(in srgb, var(--accent-muted) 52%, transparent);
+      color: var(--text-primary);
+    }
+
+    .workspace-session.active::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 5px;
+      bottom: 5px;
+      width: 3px;
+      border-radius: 2px;
+      background: var(--accent);
+    }
+
+    .workspace-session-mark {
+      display: inline-flex;
+      flex: 0 0 auto;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+    }
+
+    .workspace-session-mark .wand-provider-logo {
+      width: 14px;
+      height: 14px;
+    }
+
+    .workspace-session-name {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--text-primary);
+      font-size: 0.75rem;
+      line-height: 1.25;
+    }
+
+    .workspace-session-kind {
+      flex: 0 0 auto;
+      border-radius: var(--radius-full);
+      padding: 1px 6px;
+      color: var(--text-muted);
+      background: color-mix(in srgb, var(--bg-elevated) 78%, transparent);
+      font-size: 0.625rem;
+      font-weight: 700;
+      line-height: 1.4;
+    }
+
     /* 任务行：紧凑的 .session-item 风格，hover/active 保持低噪声 */
     .workspace-task {
       display: flex;

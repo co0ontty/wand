@@ -156,7 +156,6 @@ export {
   type WandWorkspacesController,
 } from "./workspaces/controller";
 export type {
-  ActivityItem,
   CreateMissionRequest,
   MissionDetails,
   MissionDiff,

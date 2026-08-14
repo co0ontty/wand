@@ -1066,6 +1066,39 @@ export class WandStorage {
     this.db.prepare("UPDATE command_sessions SET workspace_id = ? WHERE id = ?").run(workspaceId, sessionId);
   }
 
+  /** Lightweight count of persisted sessions grouped by workspace. */
+  countSessionsByWorkspace(): Map<string, number> {
+    const rows = this.db
+      .prepare(
+        `SELECT workspace_id AS id, COUNT(*) AS n
+         FROM command_sessions
+         WHERE workspace_id IS NOT NULL AND workspace_id != ''
+         GROUP BY workspace_id`,
+      )
+      .all() as unknown as Array<{ id: string; n: number }>;
+    return new Map(rows.map((row) => [row.id, Number(row.n) || 0]));
+  }
+
+  /** Sessions not yet attached to a project. Omits messages/output. */
+  listUnboundSessionBindings(): Array<{
+    id: string;
+    cwd: string;
+    worktree: SessionSnapshot["worktree"];
+  }> {
+    const rows = this.db
+      .prepare(
+        `SELECT id, cwd, worktree_info
+         FROM command_sessions
+         WHERE workspace_id IS NULL OR workspace_id = ''`,
+      )
+      .all() as unknown as Array<{ id: string; cwd: string; worktree_info: string | null }>;
+    return rows.map((row) => ({
+      id: row.id,
+      cwd: row.cwd,
+      worktree: parseWorktreeInfo(row.worktree_info) ?? null,
+    }));
+  }
+
   // ── Workspace tasks（任务 = 命名 + 独立 worktree + 一组标签）──
 
   listWorkspaceTasks(workspaceId: string): WorkspaceTask[] {
@@ -1416,7 +1449,7 @@ export class WandStorage {
     this.db.prepare("DELETE FROM auth_sessions WHERE expires_at < ?").run(now);
   }
 
-  // ============ Missions / Agent Inbox ============
+  // ============ Missions ============
 
   saveMission(mission: Mission): void {
     this.db.prepare(

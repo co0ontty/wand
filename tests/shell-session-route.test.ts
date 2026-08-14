@@ -66,12 +66,22 @@ test("commands endpoint dispatches shell requests without a provider command", a
   const created = await response.json() as SessionSnapshot;
   assert.equal(created.id, "shell-route-1");
   assert.equal(created.provider, undefined);
-  assert.deepEqual(calls, [[root, "default", {
-    worktreeEnabled: false,
-    cols: 92,
-    rows: 27,
-    sessionSource: "interactive",
-    workspaceId: undefined,
-    workspaceTaskId: undefined,
-  }]]);
+  assert.equal(calls.length, 1);
+  const [cwd, mode, opts] = calls[0] as [string, string, {
+    worktreeEnabled?: boolean;
+    cols?: number;
+    rows?: number;
+    sessionSource?: string;
+    workspaceId?: string;
+    workspaceTaskId?: string;
+  }];
+  assert.equal(cwd, root);
+  assert.equal(mode, "default");
+  assert.equal(opts.worktreeEnabled, false);
+  assert.equal(opts.cols, 92);
+  assert.equal(opts.rows, 27);
+  assert.equal(opts.sessionSource, "interactive");
+  assert.equal(typeof opts.workspaceId, "string");
+  assert.ok(opts.workspaceId);
+  assert.equal(opts.workspaceTaskId, undefined);
 });

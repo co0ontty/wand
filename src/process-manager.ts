@@ -1161,12 +1161,16 @@ export class ProcessManager extends EventEmitter {
     let priorMessages: ConversationTurn[] = [];
     let inheritedSessionSource: SessionSource | undefined;
     let inheritedAutomationId: string | undefined;
+    let inheritedWorkspaceId: string | undefined;
+    let inheritedWorkspaceTaskId: string | undefined;
     if (opts?.reuseId) {
       const oldRecord = this.sessions.get(id);
       if (oldRecord) {
         priorMessages = oldRecord.ptyBridge?.getMessages() ?? oldRecord.messages ?? [];
         inheritedSessionSource = oldRecord.sessionSource;
         inheritedAutomationId = oldRecord.automationId;
+        inheritedWorkspaceId = oldRecord.workspaceId;
+        inheritedWorkspaceTaskId = oldRecord.workspaceTaskId;
         this.cleanupRecord(oldRecord);
         this.sessions.delete(id);
       } else {
@@ -1174,6 +1178,8 @@ export class ProcessManager extends EventEmitter {
         priorMessages = stored?.messages ?? [];
         inheritedSessionSource = stored?.sessionSource;
         inheritedAutomationId = stored?.automationId;
+        inheritedWorkspaceId = stored?.workspaceId;
+        inheritedWorkspaceTaskId = stored?.workspaceTaskId;
       }
       this.terminalHost.forget(id);
     }
@@ -1225,8 +1231,8 @@ export class ProcessManager extends EventEmitter {
       id,
       sessionSource: opts?.sessionSource ?? inheritedSessionSource ?? "interactive",
       automationId: opts?.automationId ?? inheritedAutomationId,
-      workspaceId: opts?.workspaceId,
-      workspaceTaskId: opts?.workspaceTaskId,
+      workspaceId: opts?.workspaceId ?? inheritedWorkspaceId,
+      workspaceTaskId: opts?.workspaceTaskId ?? inheritedWorkspaceTaskId,
       provider,
       command,
       cwd: resolvedCwd,

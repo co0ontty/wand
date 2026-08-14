@@ -627,7 +627,7 @@ export function renderAppShell() {
         '<div class="sidebar-footer">' +
           '<button id="drawer-new-session-button" class="btn btn-primary btn-block"><span>+</span> 新会话</button>' +
           '<div class="sidebar-footer-actions">' +
-            '<button id="missions-button" class="btn btn-ghost btn-sm" type="button" title="Agent Inbox">' +
+            '<button id="missions-button" class="btn btn-ghost btn-sm" type="button" title="并行任务">' +
               '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16l2 10v6H2v-6L4 4zM2 14h6l2 3h4l2-3h6"/></svg>' +
               '<span>任务</span>' +
             '</button>' +

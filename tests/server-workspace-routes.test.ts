@@ -58,11 +58,12 @@ test("workspace CRUD + layout round-trip via REST", async () => {
     // 合法创建（不启动会话）→ 201
     res = await fetch(`${baseUrl}/api/workspaces`, json({ name: "Acme", cwd: root, defaultProvider: "codex" }));
     assert.equal(res.status, 201);
-    const ws = await res.json() as { id: string; name: string; cwd: string; defaultProvider: string; layout: unknown };
+    const ws = await res.json() as { id: string; name: string; cwd: string; defaultProvider: string; layout: unknown; sessionCount?: number };
     assert.equal(ws.name, "Acme");
     assert.equal(ws.cwd, root);
     assert.equal(ws.defaultProvider, "codex");
     assert.equal(ws.layout, null);
+    assert.equal(ws.sessionCount, 0);
     const id = ws.id;
 
     // 列表
@@ -172,6 +173,56 @@ test("sessions bind to a workspace and are listed under it", () => {
   assert.equal(storage.getSession(taskSession.id)?.workspaceTaskId, undefined);
 
   rmSync(root, { recursive: true, force: true });
+});
+
+test("listing workspaces backfills unbound sessions into directory projects", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-workspace-backfill-route-"));
+  const other = mkdtempSync(path.join(os.tmpdir(), "wand-workspace-backfill-other-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const config = { ...defaultConfig(), defaultCwd: root, structuredRunner: "sdk" as const };
+  const manager = new StructuredSessionManager(storage, config);
+  const existing = storage.createWorkspace({ name: "Existing", cwd: root });
+  const inExisting = manager.createSession({ cwd: root, mode: config.defaultMode });
+  const needsProject = manager.createSession({ cwd: other, mode: config.defaultMode });
+  const { baseUrl, close } = await startWorkspaceApp(storage);
+  try {
+    const res = await fetch(`${baseUrl}/api/workspaces`);
+    assert.equal(res.status, 200);
+    const list = await res.json() as Array<{ id: string; cwd: string; name: string; sessionCount: number }>;
+    const existingItem = list.find((item) => item.id === existing.id);
+    assert.ok(existingItem);
+    assert.equal(existingItem.sessionCount, 1);
+    const created = list.find((item) => item.cwd === other);
+    assert.ok(created);
+    assert.equal(created.sessionCount, 1);
+    assert.equal(storage.getSession(inExisting.id)?.workspaceId, existing.id);
+    assert.equal(storage.getSession(needsProject.id)?.workspaceId, created.id);
+  } finally {
+    manager.dispose();
+    await close();
+    rmSync(root, { recursive: true, force: true });
+    rmSync(other, { recursive: true, force: true });
+  }
+});
+
+test("creating a workspace attaches matching unbound sessions", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-workspace-absorb-route-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const config = { ...defaultConfig(), defaultCwd: root, structuredRunner: "sdk" as const };
+  const manager = new StructuredSessionManager(storage, config);
+  const session = manager.createSession({ cwd: root, mode: config.defaultMode });
+  const { baseUrl, close } = await startWorkspaceApp(storage);
+  try {
+    const res = await fetch(`${baseUrl}/api/workspaces`, json({ name: "Absorb", cwd: root }));
+    assert.equal(res.status, 201);
+    const created = await res.json() as { id: string; sessionCount: number };
+    assert.equal(created.sessionCount, 1);
+    assert.equal(storage.getSession(session.id)?.workspaceId, created.id);
+  } finally {
+    manager.dispose();
+    await close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("sanitizeLayout rejects malformed input and normalizes valid trees", () => {

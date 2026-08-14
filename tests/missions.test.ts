@@ -32,7 +32,7 @@ function repo(t: TestContext): string {
   return root;
 }
 
-test("mission persistence keeps attempts, inbox state, and review lifecycle together", (t) => {
+test("mission persistence keeps attempts and review lifecycle together", (t) => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-mission-db-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const storage = new WandStorage(path.join(root, "wand.db"));
@@ -111,7 +111,7 @@ test("task worktree honors a base ref and safely hydrates ignored copy/share pat
   assert.equal(readFileSync(path.join(prepared.cwd, ".env.local"), "utf8"), "TOKEN=test\n");
 });
 
-test("mission HTTP routes expose inbox/tasks and validate dispatch before spawning", async (t) => {
+test("mission HTTP routes expose tasks and validate dispatch before spawning", async (t) => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-mission-http-"));
   const previousTestMode = process.env.WAND_TEST_MODE;
   process.env.WAND_TEST_MODE = "1";

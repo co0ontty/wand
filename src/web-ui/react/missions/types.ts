@@ -1,6 +1,5 @@
 export type MissionProvider = "claude" | "codex" | "opencode" | "grok" | "qoder" | "pi";
-export type ActivityState = "working" | "needs_input" | "needs_permission" | "done" | "failed";
-export type AttemptState = ActivityState | "queued";
+export type AttemptState = "working" | "needs_input" | "needs_permission" | "done" | "failed" | "queued";
 
 export interface MissionAttempt {
   id: string;
@@ -41,19 +40,6 @@ export interface MissionDetails {
   comments: ReviewComment[];
 }
 
-export interface ActivityItem {
-  sessionId: string;
-  missionId: string | null;
-  attemptId: string | null;
-  state: ActivityState;
-  title: string;
-  summary: string | null;
-  provider: MissionProvider | null;
-  cwd: string | null;
-  updatedAt: string;
-  readAt: string | null;
-}
-
 export interface MissionDiff {
   missionId: string;
   attemptId: string;
@@ -75,12 +61,10 @@ export interface CreateMissionRequest {
 
 export interface MissionsRepository {
   list(): Promise<MissionDetails[]>;
-  inbox(): Promise<ActivityItem[]>;
   create(request: CreateMissionRequest): Promise<MissionDetails>;
   diff(missionId: string, attemptId: string): Promise<MissionDiff>;
   addComment(missionId: string, attemptId: string, input: { filePath: string; line: number | null; side: "old" | "new"; body: string }): Promise<ReviewComment>;
   sendReview(missionId: string, attemptId: string): Promise<ReviewComment[]>;
-  markRead(sessionId?: string): Promise<void>;
 }
 
 export interface MissionsRuntimeAdapter {

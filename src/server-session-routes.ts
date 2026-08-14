@@ -37,6 +37,10 @@ import {
   normalizeSessionDirectory,
   type SessionDirectoryNode,
 } from "./session-directory-tree.js";
+import {
+  projectCwdForSession,
+  resolveWorkspaceIdForNewSession,
+} from "./workspace-binding.js";
 
 export function parseExecutionMode(value: unknown, fallback: ExecutionMode): ExecutionMode {
   if (value === undefined) return fallback;
@@ -527,6 +531,7 @@ function isPtyProviderCommand(provider: SessionProvider, command: string): boole
 
 async function startResumedPtySession(
   processes: ProcessManager,
+  storage: WandStorage,
   existingSession: SessionSnapshot,
   sessionId: string,
   defaultMode: ExecutionMode,
@@ -564,6 +569,9 @@ async function startResumedPtySession(
     provider,
     model: existingSession.selectedModel ?? undefined,
     thinkingEffort: existingSession.thinkingEffort ?? undefined,
+    workspaceId: existingSession.workspaceId
+      ?? resolveWorkspaceIdForNewSession(storage, projectCwdForSession(existingSession) || existingSession.cwd),
+    workspaceTaskId: existingSession.workspaceTaskId,
   });
 }
 
@@ -722,8 +730,9 @@ export function registerSessionRoutes(
       const provider: SessionProvider = body.provider === "codex" || body.provider === "opencode" || body.provider === "grok" || body.provider === "qoder" || body.provider === "pi" ? body.provider : "claude";
       const rawModel = typeof body.model === "string" ? body.model.trim() : "";
       const origin = parseSessionCreationOrigin(body);
+      const cwd = resolveSessionCwd(body.cwd, config.defaultCwd);
       const snapshot = structured.createSession({
-        cwd: resolveSessionCwd(body.cwd, config.defaultCwd),
+        cwd,
         mode: parseExecutionMode(body.mode, defaultMode),
         provider,
         // Omit runner to let StructuredSessionManager apply the configured
@@ -734,7 +743,7 @@ export function registerSessionRoutes(
         thinkingEffort: typeof body.thinkingEffort === "string"
           ? (body.thinkingEffort as SessionSnapshot["thinkingEffort"])
           : config.defaultThinkingEffort,
-        workspaceId: body.workspaceId,
+        workspaceId: resolveWorkspaceIdForNewSession(storage, cwd, body.workspaceId),
         workspaceTaskId: body.workspaceTaskId,
         ...origin,
       });
@@ -1308,7 +1317,7 @@ export function registerSessionRoutes(
         res.status(400).json({ error: "结构化会话不支持 PTY resume。" });
         return;
       }
-      const newSnapshot = await startResumedPtySession(processes, existingSession, sessionId, defaultMode, body);
+      const newSnapshot = await startResumedPtySession(processes, storage, existingSession, sessionId, defaultMode, body);
       res.status(201).json(newSnapshot);
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法恢复会话。") });
@@ -1355,6 +1364,9 @@ export function registerSessionRoutes(
           reuseId: existingSession.id,
           cols: reqCols,
           rows: reqRows,
+          workspaceId: existingSession.workspaceId
+            ?? resolveWorkspaceIdForNewSession(storage, projectCwdForSession(existingSession) || existingSession.cwd),
+          workspaceTaskId: existingSession.workspaceTaskId,
           ...(requestedOrigin ?? {}),
         });
         res.status(201).json({ resumedClaudeSessionId: claudeSessionId, ...sessionResponseDTO(newSnapshot) });
@@ -1371,6 +1383,7 @@ export function registerSessionRoutes(
         const newSnapshot = await processes.start(resumeCommand, cwd, newMode, undefined, {
           cols: reqCols,
           rows: reqRows,
+          workspaceId: resolveWorkspaceIdForNewSession(storage, cwd),
           ...(requestedOrigin ?? {}),
         });
         res.status(201).json({ resumedClaudeSessionId: claudeSessionId, ...sessionResponseDTO(newSnapshot) });
@@ -1415,7 +1428,7 @@ export function registerSessionRoutes(
       const existingSession = processes.get(sessionId) || storage.getSession(sessionId);
       const autoResumeInput = getAutoResumeInitialInput(existingSession, input, view, shortcutKey);
       if (autoResumeInput !== null && canAutoResumePtyForInput(existingSession, autoResumeInput)) {
-        const snapshot = await startResumedPtySession(processes, existingSession, sessionId, defaultMode, {}, autoResumeInput);
+        const snapshot = await startResumedPtySession(processes, storage, existingSession, sessionId, defaultMode, {}, autoResumeInput);
         res.json(sessionResponseDTO(snapshot));
         return;
       }
@@ -1459,6 +1472,7 @@ export function registerSessionRoutes(
         runner: "codex-cli-exec",
         worktreeEnabled: body.worktreeEnabled === true,
         claudeSessionId: threadId,
+        workspaceId: resolveWorkspaceIdForNewSession(storage, cwd),
         ...origin,
       });
       onSessionCreated?.(cwd);
@@ -1499,6 +1513,7 @@ export function registerSessionRoutes(
         runner: "opencode-cli-run",
         worktreeEnabled: body.worktreeEnabled === true,
         claudeSessionId: sessionId,
+        workspaceId: resolveWorkspaceIdForNewSession(storage, cwd),
         ...parseSessionCreationOrigin(body),
       });
       onSessionCreated?.(cwd);
@@ -1533,6 +1548,7 @@ export function registerSessionRoutes(
         runner: "qoder-cli-print",
         worktreeEnabled: body.worktreeEnabled === true,
         claudeSessionId: sessionId,
+        workspaceId: resolveWorkspaceIdForNewSession(storage, cwd),
         ...parseSessionCreationOrigin(body),
       });
       onSessionCreated?.(cwd);

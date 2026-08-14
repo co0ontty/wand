@@ -1,6 +1,5 @@
-// 工作空间（项目）> 任务 侧栏面板。列出所有项目，每个项目可展开看其下的任务；
-// 任务以独立 worktree 隔离（非 git 目录退化为直接用项目目录）。
-// 这里只做「项目 / 任务」的增删与打开；标签 / 分屏布局留到 P2。
+// 工作空间（项目）侧栏面板。列出所有项目，每个项目可展开看目录下的会话和隔离任务。
+// 普通会话按 cwd 归入对应项目；任务仍以独立 worktree 隔离。
 
 import * as React from "react";
 
@@ -11,10 +10,13 @@ import type {
   OpenWorkspaceTaskPayload,
   Workspace,
   WorkspaceProvider,
+  WorkspaceSessionSummary,
   WorkspaceTask,
   WorkspaceTaskDetail,
 } from "./types";
 import { classNames } from "../ui/class-names";
+import { ProviderLogo } from "../provider-logo";
+import { orderWorkspaceSessions, workspaceSessionLabel } from "./session-order";
 import { WorkspaceWorktreeDialog } from "./workspace-worktree-dialog";
 
 const NAME_MAX = 80;
@@ -49,7 +51,7 @@ function toast(message: string, tone?: "info" | "success" | "warning" | "danger"
 }
 
 // ── 极简内联图标（避免依赖 shell-sidebar 的私有 Icon）──
-function SvgIcon({ name, size = 14 }: { name: "chevron" | "file" | "plus" | "trash" | "check" | "close" | "branch" | "edit" | "spark"; size?: number }) {
+function SvgIcon({ name, size = 14 }: { name: "chevron" | "file" | "plus" | "trash" | "check" | "close" | "branch" | "edit" | "spark" | "chat"; size?: number }) {
   const common = {
     width: size, height: size, viewBox: "0 0 24 24", fill: "none",
     stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" as const, strokeLinejoin: "round" as const,
@@ -65,6 +67,7 @@ function SvgIcon({ name, size = 14 }: { name: "chevron" | "file" | "plus" | "tra
     case "branch": return <svg {...common}><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 8.5v7M18 10.5c0 4-6 2.5-6 6.5"/></svg>;
     case "edit": return <svg {...common}><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L8 18l-4 1 1-4z"/></svg>;
     case "spark": return <svg {...common}><path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8"/><circle cx="12" cy="12" r="3"/></svg>;
+    case "chat": return <svg {...common}><path d="M21 12a8 8 0 01-8 8H7l-4 3V12a8 8 0 018-8h2a8 8 0 018 5z"/></svg>;
   }
 }
 
@@ -158,6 +161,89 @@ function useWorkspaceTasks(workspaceId: string | null): {
   }, [workspaceId, reload]);
 
   return { tasks, loading, error, reload };
+}
+
+function standaloneWorkspaceSessions(sessions: readonly WorkspaceSessionSummary[]): WorkspaceSessionSummary[] {
+  return orderWorkspaceSessions(sessions.filter((session) => !session.workspaceTaskId)).reverse();
+}
+
+function useWorkspaceSessions(workspaceId: string | null): {
+  sessions: WorkspaceSessionSummary[];
+  loading: boolean;
+  error: string;
+  reload: () => Promise<void>;
+} {
+  const [sessions, setSessions] = React.useState<WorkspaceSessionSummary[]>([]);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState("");
+  const generationRef = React.useRef(0);
+
+  const reload = React.useCallback(async (): Promise<void> => {
+    if (!workspaceId) return;
+    const generation = ++generationRef.current;
+    setLoading(true);
+    try {
+      const detail = await httpWorkspacesRepository.get(workspaceId);
+      if (generation === generationRef.current) {
+        setSessions(standaloneWorkspaceSessions(detail.sessions ?? []));
+        setError("");
+      }
+    } catch (fetchError) {
+      if (generation === generationRef.current) {
+        setError(presentError(fetchError, "无法加载会话列表。"));
+      }
+    } finally {
+      if (generation === generationRef.current) setLoading(false);
+    }
+  }, [workspaceId]);
+
+  React.useEffect(() => {
+    setSessions([]);
+    setError("");
+    if (!workspaceId) return;
+    void reload();
+  }, [workspaceId, reload]);
+
+  return { sessions, loading, error, reload };
+}
+
+// ── 项目内的独立会话 ──
+
+function WorkspaceSessionItem({
+  session,
+  index,
+  active,
+  onOpen,
+}: {
+  session: WorkspaceSessionSummary;
+  index: number;
+  active: boolean;
+  onOpen(): void;
+}) {
+  return (
+    <div
+      className={classNames("workspace-session", active && "active")}
+      role="button"
+      tabIndex={0}
+      aria-current={active ? "true" : undefined}
+      title={session.cwd || session.title || session.id}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        onOpen();
+      }}
+    >
+      <span className="workspace-session-mark" aria-hidden="true">
+        <ProviderLogo provider={session.provider}/>
+      </span>
+      <span className="workspace-session-name">{workspaceSessionLabel(session, index)}</span>
+      {session.sessionKind === "pty" && (
+        <span className="workspace-session-kind">终端</span>
+      )}
+    </div>
+  );
 }
 
 // ── 任务行 ──
@@ -404,14 +490,18 @@ function WorkspaceItem({
   defaultExpanded,
   activeWorkspaceId,
   activeTaskId,
+  activeSessionId,
   onActiveTaskOpen,
+  onOpenSession,
   reloadWorkspaces,
 }: {
   workspace: Workspace;
   defaultExpanded: boolean;
   activeWorkspaceId: string | null;
   activeTaskId: string | null;
+  activeSessionId: string | null;
   onActiveTaskOpen(task: WorkspaceTask): void;
+  onOpenSession(session: WorkspaceSessionSummary): void;
   reloadWorkspaces(): void;
 }) {
   const [open, setOpen] = React.useState(defaultExpanded);
@@ -420,8 +510,15 @@ function WorkspaceItem({
   const [deleting, setDeleting] = React.useState(false);
   const [worktreeDialogOpen, setWorktreeDialogOpen] = React.useState(false);
   const { tasks, loading, error, reload } = useWorkspaceTasks(open ? workspace.id : null);
+  const {
+    sessions,
+    loading: sessionsLoading,
+    error: sessionsError,
+    reload: reloadSessions,
+  } = useWorkspaceSessions(open ? workspace.id : null);
   const worktreeCount = workspace.worktreeCount
     ?? tasks.filter((task) => task.worktree !== null).length;
+  const sessionCount = workspace.sessionCount ?? sessions.length;
 
   React.useEffect(() => {
     if (defaultExpanded) setOpen(true);
@@ -435,6 +532,7 @@ function WorkspaceItem({
     }
     setCreating(false);
     await reload();
+    await reloadSessions();
     reloadWorkspaces();
     // 创建后直接打开该任务（在其 worktree 里启动会话）。
     onActiveTaskOpen(created);
@@ -453,6 +551,7 @@ function WorkspaceItem({
     if (activeTaskId === task.id) runtime()?.openWorkspace(workspace);
     toast(`已删除任务「${task.name}」`, "info");
     await reload();
+    await reloadSessions();
     reloadWorkspaces();
   };
 
@@ -503,7 +602,7 @@ function WorkspaceItem({
             <span className="workspace-row-name">{workspace.name}</span>
             <span className="workspace-row-cwd">{workspace.cwd}</span>
           </span>
-          <span className="workspace-row-count" aria-label={`${tasks.length} 个任务`}>{tasks.length}</span>
+          <span className="workspace-row-count" aria-label={`${sessionCount} 个会话`}>{sessionCount}</span>
         </button>
         <span className="workspace-row-actions">
           <button
@@ -568,12 +667,21 @@ function WorkspaceItem({
       </div>
       {open && (
         <div className="workspace-tasks">
-          {loading && tasks.length === 0 ? (
-            <div className="workspace-tasks-state">正在加载任务…</div>
-          ) : error && tasks.length === 0 ? (
-            <div className="workspace-tasks-state error">{error}</div>
+          {(loading || sessionsLoading) && tasks.length === 0 && sessions.length === 0 ? (
+            <div className="workspace-tasks-state">正在加载…</div>
+          ) : (error || sessionsError) && tasks.length === 0 && sessions.length === 0 ? (
+            <div className="workspace-tasks-state error">{error || sessionsError}</div>
           ) : (
             <>
+              {sessions.map((session, index) => (
+                <WorkspaceSessionItem
+                  key={session.id}
+                  session={session}
+                  index={index}
+                  active={isActiveWorkspace && !activeTaskId && activeSessionId === session.id}
+                  onOpen={() => onOpenSession(session)}
+                />
+              ))}
               {tasks.map((task) => (
                 <TaskItem
                   key={task.id}
@@ -584,8 +692,8 @@ function WorkspaceItem({
                   onDelete={() => handleDeleteTask(task)}
                 />
               ))}
-              {tasks.length === 0 && !creating && (
-                <div className="workspace-tasks-empty">还没有任务，点击「+」新建一个（每个任务独占一个 worktree）。</div>
+              {tasks.length === 0 && sessions.length === 0 && !creating && (
+                <div className="workspace-tasks-empty">还没有会话。在「会话」里新建，或点击「+」创建隔离任务。</div>
               )}
             </>
           )}
@@ -634,6 +742,8 @@ export function WorkspacesPanel() {
   const activeWorkspaceId = activeContext.workspaceId;
   const activeTaskId = activeContext.taskId;
 
+  const [activeSessionId, setActiveSessionId] = React.useState<string | null>(null);
+
   const openTask = React.useCallback((workspace: Workspace, task: WorkspaceTask) => {
     const rt = runtime();
     const cwd = task.worktree?.path ?? workspace.cwd;
@@ -646,16 +756,28 @@ export function WorkspacesPanel() {
         cwd,
       };
       if (workspace.defaultProvider) payload.provider = workspace.defaultProvider as WorkspaceProvider;
+      setActiveSessionId(null);
       rt.openTask(payload);
     } else {
       toast("工作空间运行环境尚未就绪，请刷新页面后重试。", "warning");
     }
   }, []);
 
+  const openSession = React.useCallback((workspace: Workspace, session: WorkspaceSessionSummary) => {
+    const rt = runtime();
+    if (!rt) {
+      toast("工作空间运行环境尚未就绪，请刷新页面后重试。", "warning");
+      return;
+    }
+    setActiveSessionId(session.id);
+    rt.openWorkspace(workspace);
+    rt.selectSession(session.id);
+  }, []);
+
   return (
     <div className="workspaces-panel" aria-label="工作空间与任务">
       <div className="workspaces-panel-toolbar">
-        <span className="workspaces-panel-title">项目 / 任务</span>
+        <span className="workspaces-panel-title">项目 / 会话</span>
         <button
           type="button"
           className="workspaces-panel-new-project"
@@ -673,7 +795,7 @@ export function WorkspacesPanel() {
       ) : workspaces.length === 0 ? (
         <div className="workspaces-panel-empty">
           <strong>还没有项目</strong><br/>
-          点击「新项目」创建一个项目，再在里面添加任务。
+          新建会话会按目录自动归入项目；也可以点「+」手动创建。
         </div>
       ) : (
         <div className="workspaces-list">
@@ -684,14 +806,16 @@ export function WorkspacesPanel() {
               defaultExpanded={activeWorkspaceId === workspace.id}
               activeWorkspaceId={activeWorkspaceId}
               activeTaskId={activeTaskId}
+              activeSessionId={activeSessionId}
               onActiveTaskOpen={(task) => openTask(workspace, task)}
+              onOpenSession={(session) => openSession(workspace, session)}
               reloadWorkspaces={reload}
             />
           ))}
         </div>
       )}
       <div className="workspaces-panel-hint">
-        每个任务在独立的 git worktree 中运行；非 git 目录则在项目目录直接运行。
+        同一目录的会话归到同一个项目。隔离任务仍使用独立 git worktree。
       </div>
     </div>
   );
