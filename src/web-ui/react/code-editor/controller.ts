@@ -24,7 +24,7 @@ export interface CodeEditorModuleOptions {
   runtime?: CodeEditorRuntimeAdapter;
 }
 
-export interface CodeEditorStore {
+interface CodeEditorStore {
   subscribe(listener: Listener): () => void;
   getSnapshot(): CodeEditorSnapshot;
 }

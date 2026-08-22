@@ -547,7 +547,7 @@ function wandWarn(message: string, hint?: string): void {
 
 // ── Main server ──
 
-export interface ServerUrl {
+interface ServerUrl {
   url: string;
   scheme: "HTTP" | "HTTPS";
 }

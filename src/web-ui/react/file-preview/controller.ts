@@ -26,7 +26,7 @@ export interface FilePreviewModuleOptions {
   runtime?: FilePreviewRuntimeAdapter;
 }
 
-export interface FilePreviewStore {
+interface FilePreviewStore {
   subscribe(listener: Listener): () => void;
   getSnapshot(): FilePreviewSnapshot;
 }

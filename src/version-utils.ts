@@ -4,7 +4,7 @@
  */
 
 /** 从任意文本中提取 X.Y.Z[-prerelease][+build] 形式的版本号（带捕获组）。 */
-export const SEMVER_PATTERN = /(\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?(?:\+[A-Za-z0-9.-]+)?)/;
+const SEMVER_PATTERN = /(\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?(?:\+[A-Za-z0-9.-]+)?)/;
 
 /** 提取文本中的第一个语义化版本号，没有则返回 null。 */
 export function extractSemver(text: string): string | null {

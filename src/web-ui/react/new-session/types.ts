@@ -60,7 +60,7 @@ interface NewSessionCreateRequestBase {
   sessionSource: "interactive";
 }
 
-export interface StructuredNewSessionCreateRequest extends NewSessionCreateRequestBase {
+interface StructuredNewSessionCreateRequest extends NewSessionCreateRequestBase {
   kind: "structured";
   provider: NewSessionProvider;
   runner: string;
@@ -68,7 +68,7 @@ export interface StructuredNewSessionCreateRequest extends NewSessionCreateReque
   thinkingEffort?: string;
 }
 
-export interface PtyNewSessionCreateRequest extends NewSessionCreateRequestBase {
+interface PtyNewSessionCreateRequest extends NewSessionCreateRequestBase {
   kind: "pty";
   provider: NewSessionProvider;
   command: string;
@@ -76,7 +76,7 @@ export interface PtyNewSessionCreateRequest extends NewSessionCreateRequestBase 
   rows?: number;
 }
 
-export interface ShellNewSessionCreateRequest extends NewSessionCreateRequestBase {
+interface ShellNewSessionCreateRequest extends NewSessionCreateRequestBase {
   kind: "shell";
   shell: true;
   cols?: number;

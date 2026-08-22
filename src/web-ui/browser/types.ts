@@ -27,7 +27,7 @@ export interface AppState {
   isOnline: boolean;
 }
 
-export interface WandNativeInterface {
+interface WandNativeInterface {
   sendNotification(title: string, body: string, tag: string): void;
   vibrate(pattern?: string): void;
   setKeepScreenOn(on: boolean): void;
@@ -57,7 +57,7 @@ export interface WandNativeInterface {
   backToNative?(): void;
 }
 
-export interface XTermLibInterface {
+interface XTermLibInterface {
   Terminal: new (options?: any) => any;
   FitAddon: new () => any;
   Unicode11Addon: new () => any;

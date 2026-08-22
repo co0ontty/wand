@@ -1,4 +1,4 @@
-export type FolderPickerItemType = "parent" | "dir";
+type FolderPickerItemType = "parent" | "dir";
 
 export interface FolderPickerItem {
   path: string;

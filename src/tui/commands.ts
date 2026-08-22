@@ -195,7 +195,7 @@ const LAUNCHD_TERMINAL_LABEL = "com.wand.terminald";
  * 默认 system。
  */
 export type ServiceScope = "system" | "user";
-export const DEFAULT_SERVICE_SCOPE: ServiceScope = "system";
+const DEFAULT_SERVICE_SCOPE: ServiceScope = "system";
 
 export interface ServiceContext {
   configPath: string;

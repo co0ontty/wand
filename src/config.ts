@@ -289,7 +289,7 @@ function stripPreferenceFields(config: WandConfig): Partial<WandConfig> {
  * 把 JSON 的值搬到 DB。注意：必须在 mergeWithDefaults 之前操作 raw input，
  * 这样能区分"用户显式写过 X" 和 "X 是 mergeWithDefaults 注入的默认值"。
  */
-export function migrateLegacyPreferencesToDb(rawJsonInput: Partial<WandConfig> | null | undefined, storage: WandStorage): void {
+function migrateLegacyPreferencesToDb(rawJsonInput: Partial<WandConfig> | null | undefined, storage: WandStorage): void {
   if (!rawJsonInput || typeof rawJsonInput !== "object") return;
   for (const key of PREFERENCE_KEYS) {
     if (!(key in rawJsonInput)) continue;
@@ -549,7 +549,7 @@ function defaultCardExpandDefaults(): CardExpandDefaults {
   };
 }
 
-export function normalizeCardDefaults(input: unknown): CardExpandDefaults {
+function normalizeCardDefaults(input: unknown): CardExpandDefaults {
   if (!input || typeof input !== "object") return defaultCardExpandDefaults();
   const raw = input as Record<string, unknown>;
   return {

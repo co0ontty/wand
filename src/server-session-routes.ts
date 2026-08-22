@@ -255,7 +255,7 @@ type ProviderHistorySession = {
   provider?: "claude" | "codex" | "opencode" | "qoder";
 };
 
-export type SessionListPageEntry = {
+type SessionListPageEntry = {
   type: "managed";
   key: string;
   sortTimestamp: number;
@@ -284,7 +284,7 @@ function sessionSortTimestamp(snapshot: SessionSnapshot): number {
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
-export function buildSessionListEntries(
+function buildSessionListEntries(
   sessions: SessionSnapshot[],
 ): SessionListPageEntry[] {
   return sessions.map<SessionListPageEntry>((session) => ({

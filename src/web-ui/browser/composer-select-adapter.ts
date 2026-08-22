@@ -6,7 +6,7 @@ import {
 } from "../react/composer-select/controller";
 import type { WandSelectOption } from "../react/ui";
 
-export interface BrowserComposerSelectDefinition {
+interface BrowserComposerSelectDefinition {
   readonly value: string;
   readonly options: ReadonlyArray<WandSelectOption>;
   readonly ariaLabel: string;

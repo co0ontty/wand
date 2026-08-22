@@ -51,7 +51,7 @@ export function buildOpenCodeArgs(session: SessionSnapshot): string[] {
   return args;
 }
 
-export function openCodeToolName(name: string): string {
+function openCodeToolName(name: string): string {
   const mapped: Record<string, string> = {
     bash: "Bash",
     shell: "Bash",

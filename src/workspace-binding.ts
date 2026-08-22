@@ -40,7 +40,7 @@ export function findWorkspaceByCwd(storage: WandStorage, cwd: string): Workspace
   return storage.listWorkspaces().find((workspace) => normalizeProjectCwd(workspace.cwd) === normalized) ?? null;
 }
 
-export function defaultWorkspaceNameForCwd(storage: WandStorage, cwd: string): string {
+function defaultWorkspaceNameForCwd(storage: WandStorage, cwd: string): string {
   const normalized = normalizeProjectCwd(cwd);
   if (!normalized) return "未命名项目";
   const custom = storage.listSessionDirectoryNames().get(normalized);

@@ -20,7 +20,7 @@ const ROOT_FALLBACK_ALLOWED_TOOLS = [
   "Bash", "Edit", "Write", "Read", "Glob", "Grep", "NotebookEdit", "WebFetch", "WebSearch",
 ];
 
-export type WandPermissionMode = "default" | "acceptEdits" | "bypassPermissions";
+type WandPermissionMode = "default" | "acceptEdits" | "bypassPermissions";
 
 export interface PermissionPolicy {
   permissionMode: WandPermissionMode;

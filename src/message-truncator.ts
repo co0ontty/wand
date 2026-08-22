@@ -14,7 +14,7 @@ const SUMMARY_LENGTH = 100;
  * 滚动到顶时按需分页拉取。移动端 WebSocket 单帧上限（iOS 默认 1 MiB）下，长会话一次
  * 全量下发会撑爆帧导致反复断连——窗口化是根治手段，64MB 提帧只是兜底。
  */
-export const MESSAGE_WINDOW_SIZE = 40;
+const MESSAGE_WINDOW_SIZE = 40;
 
 /**
  * 块级窗口的默认预算：init/REST 默认只下发最近这么多个「内容块」（跨 turn 累计，
@@ -24,7 +24,7 @@ export const MESSAGE_WINDOW_SIZE = 40;
  * 块级窗口是对这种会话的根治手段。仅在客户端显式带 blockBudget 时启用（iOS），
  * Web/Android 走原有 turn 级路径不受影响。
  */
-export const MESSAGE_BLOCK_WINDOW = 60;
+const MESSAGE_BLOCK_WINDOW = 60;
 
 export interface WindowedMessages {
   /** 已截断 + 窗口化后的 turn 列表（最近 windowSize 条）。 */

@@ -101,7 +101,7 @@ export interface WorkspaceTaskDetail extends WorkspaceTask {
 
 export type WorkspaceWorktreeState = "ready" | "dirty" | "conflict" | "empty" | "unavailable";
 
-export interface WorkspaceWorktreeCommit {
+interface WorkspaceWorktreeCommit {
   hash: string;
   shortHash: string;
   subject: string;
@@ -201,7 +201,7 @@ export interface NewTaskSessionPayload {
   target: WorkspaceSessionTarget;
 }
 
-export interface StartWorkspaceMergeAgentPayload {
+interface StartWorkspaceMergeAgentPayload {
   workspaceId: string;
   cwd: string;
   provider?: WorkspaceProvider;

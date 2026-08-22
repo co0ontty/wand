@@ -40,7 +40,7 @@ export function resetRateLimit(ip: string): void {
   loginAttempts.delete(ip);
 }
 
-export function cleanupRateLimiter(): void {
+function cleanupRateLimiter(): void {
   const now = Date.now();
   for (const [ip, record] of loginAttempts.entries()) {
     if (now > record.resetAt) {

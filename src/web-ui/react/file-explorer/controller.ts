@@ -20,7 +20,7 @@ export interface FileExplorerModuleOptions {
   runtime?: FileExplorerRuntimeAdapter;
 }
 
-export interface FileExplorerStore {
+interface FileExplorerStore {
   subscribe(listener: Listener): () => void;
   getSnapshot(): FileExplorerSnapshot;
 }

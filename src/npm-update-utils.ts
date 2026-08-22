@@ -41,7 +41,7 @@ import { compareWandInstallOrder, extractSemver } from "./version-utils.js";
 
 const execFileAsync = promisify(execFile);
 
-export const PACKAGE_NAME = "@co0ontty/wand";
+const PACKAGE_NAME = "@co0ontty/wand";
 const PACKAGE_SCOPE = "@co0ontty";
 const PACKAGE_BASENAME = "wand";
 const DEFAULT_NPM_BIN = process.platform === "win32" ? "npm.cmd" : "npm";
@@ -69,7 +69,7 @@ export function normalizeUpdateChannel(value: unknown): UpdateChannel {
   return value === "beta" ? "beta" : "stable";
 }
 
-export function getUpdateDistTag(channel: UpdateChannel): "latest" | "beta" {
+function getUpdateDistTag(channel: UpdateChannel): "latest" | "beta" {
   return channel === "beta" ? "beta" : "latest";
 }
 
@@ -81,7 +81,7 @@ function cleanVersion(value: string): string {
   return value.trim().replace(/^v/, "");
 }
 
-export function getStableTagVersion(version: string): string {
+function getStableTagVersion(version: string): string {
   return cleanVersion(version).split("+")[0]?.split("-")[0] ?? cleanVersion(version);
 }
 
@@ -198,7 +198,7 @@ async function runNpmAsync(args: string[], timeoutMs: number): Promise<void> {
 /**
  * 解析当前 `npm root -g` 的目录。失败返回 null。
  */
-export function getNpmGlobalRoot(): string | null {
+function getNpmGlobalRoot(): string | null {
   try {
     const res = runNpmSync(["root", "-g"], 10_000);
     if (res.status !== 0) return null;
@@ -248,7 +248,7 @@ function pathEntryExists(targetPath: string): boolean {
  * 同步执行，best-effort：找不到 npm root、目录不存在、无权限删除等都不会抛错。
  * 返回被清理的目录列表，方便调用方记录日志。
  */
-export function cleanupNpmLeftovers(): { removed: string[]; errors: string[] } {
+function cleanupNpmLeftovers(): { removed: string[]; errors: string[] } {
   const removed: string[] = [];
   const errors: string[] = [];
   const root = getNpmGlobalRoot();

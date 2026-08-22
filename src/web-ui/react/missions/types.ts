@@ -1,5 +1,5 @@
 export type MissionProvider = "claude" | "codex" | "opencode" | "grok" | "qoder" | "pi";
-export type AttemptState = "working" | "needs_input" | "needs_permission" | "done" | "failed" | "queued";
+type AttemptState = "working" | "needs_input" | "needs_permission" | "done" | "failed" | "queued";
 
 export interface MissionAttempt {
   id: string;

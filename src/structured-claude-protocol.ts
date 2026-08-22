@@ -80,7 +80,7 @@ export function normalizeClaudeToolInput(name: unknown, input: unknown): Record<
   return record;
 }
 
-export function extractClaudeUsage(source: Record<string, unknown> | undefined): ConversationTurn["usage"] {
+function extractClaudeUsage(source: Record<string, unknown> | undefined): ConversationTurn["usage"] {
   if (!source || !source.usage || typeof source.usage !== "object") return undefined;
   const usage = source.usage as Record<string, unknown>;
   const value = {

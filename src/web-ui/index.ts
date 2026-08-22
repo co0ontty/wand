@@ -9,7 +9,7 @@ import { getScriptContent } from "./scripts.js";
 const scriptClose = String.fromCharCode(60, 47) + "script>";
 const scriptOpen = "<" + "script";
 
-export function vendorAssetUrl(relPath: EmbeddedVendorAssetPath): string {
+function vendorAssetUrl(relPath: EmbeddedVendorAssetPath): string {
   return `${relPath}?v=${EMBEDDED_WEB_ASSETS.vendor[relPath].hash}`;
 }
 

@@ -1,4 +1,4 @@
-export interface DirectoryManagedSession {
+interface DirectoryManagedSession {
   id: string;
   sessionSource?: string;
   provider?: string;

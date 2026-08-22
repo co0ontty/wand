@@ -37,7 +37,7 @@ export interface TuiDeps {
   onExit: (reason: ExitReason) => void | Promise<void>;
 }
 
-export type ExitReason = "user" | "signal" | "error";
+type ExitReason = "user" | "signal" | "error";
 
 export interface TuiHandle {
   isActive: boolean;

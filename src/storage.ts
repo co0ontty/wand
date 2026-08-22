@@ -622,9 +622,9 @@ function sessionRowQuery(base: string): string {
   return `${base} ${sessionSelectFields()}`;
 }
 
-export const DEFAULT_DB_FILE = "wand.db";
+const DEFAULT_DB_FILE = "wand.db";
 
-export type AuthPrincipalKind = "browser-admin" | "connected-app";
+type AuthPrincipalKind = "browser-admin" | "connected-app";
 export type AuthScope = "admin" | "sessions" | "files" | "password-vault" | "session-preferences";
 
 export interface AuthPrincipal {

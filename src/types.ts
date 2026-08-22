@@ -1,6 +1,6 @@
 export type SessionKind = "pty" | "structured";
 export type SessionProvider = "claude" | "codex" | "opencode" | "grok" | "qoder" | "pi";
-export type CommitAiSource = "cli" | "api";
+type CommitAiSource = "cli" | "api";
 export type SessionRunner = "claude-cli" | "claude-cli-print" | "claude-sdk" | "codex-cli-exec" | "opencode-cli-run" | "grok-cli-headless" | "qoder-cli-print" | "pi-cli-json" | "pty";
 export type SessionSource = "interactive" | "automation" | "startup";
 
@@ -9,9 +9,9 @@ export type ExecutionMode = "assist" | "agent" | "agent-max" | "default" | "auto
 export type AutonomyPolicy = "assist" | "agent" | "agent-max";
 export type ApprovalPolicy = "ask-every-time" | "approve-once" | "remember-this-turn";
 export type EscalationScope = "write_file" | "run_command" | "network" | "outside_workspace" | "dangerous_shell" | "unknown";
-export type EscalationRunner = "json" | "pty";
-export type EscalationResolution = "approve_once" | "approve_turn" | "deny" | "fallback_manual";
-export type EscalationSource = "tool_permission_request" | "sandbox_hard_block" | "workspace_policy_limit" | "cli_capability_limit" | "unknown";
+type EscalationRunner = "json" | "pty";
+type EscalationResolution = "approve_once" | "approve_turn" | "deny" | "fallback_manual";
+type EscalationSource = "tool_permission_request" | "sandbox_hard_block" | "workspace_policy_limit" | "cli_capability_limit" | "unknown";
 
 /** WebSocket / ProcessManager event envelope used throughout the app. */
 export interface ProcessEvent {
@@ -35,20 +35,20 @@ export interface EscalationRequest {
   reason: string;
 }
 
-export interface TurnRequest {
+interface TurnRequest {
   message: string;
   autonomyPolicy?: AutonomyPolicy;
   approvalPolicy?: ApprovalPolicy;
   allowedScopes?: EscalationScope[];
 }
 
-export interface CommandPreset {
+interface CommandPreset {
   label: string;
   command: string;
   mode?: ExecutionMode;
 }
 
-export interface StructuredChatPersonaRoleConfig {
+interface StructuredChatPersonaRoleConfig {
   name?: string;
   avatar?: string;
 }
@@ -159,7 +159,7 @@ export interface WandConfig {
 }
 
 export type SystemAiProtocol = "openai" | "anthropic";
-export type SystemAiAuthHeader = "bearer" | "x-api-key";
+type SystemAiAuthHeader = "bearer" | "x-api-key";
 
 export interface SystemAiConfig {
   /** 设置页路由的稳定标识，用于重排后安全地关联已保存密钥。 */
@@ -205,7 +205,7 @@ export interface ClaudeModelInfo {
   defaultReasoningEffort?: string;
 }
 
-export interface ReasoningEffortInfo {
+interface ReasoningEffortInfo {
   effort: string;
   description?: string;
 }
@@ -454,19 +454,19 @@ export interface SubagentMeta {
   taskDescription?: string;
 }
 
-export interface TextBlock {
+interface TextBlock {
   type: "text";
   text: string;
   __subagent?: SubagentMeta;
 }
 
-export interface ThinkingBlock {
+interface ThinkingBlock {
   type: "thinking";
   thinking: string;
   __subagent?: SubagentMeta;
 }
 
-export interface StructuredQuestionOption {
+interface StructuredQuestionOption {
   label: string;
   description?: string;
 }
@@ -489,7 +489,7 @@ export interface StructuredTaskItem {
  * Wand-owned semantic projection of provider-specific tools. Clients should
  * render this field and treat `name` / `input` as a legacy fallback only.
  */
-export type ToolUseSemantic =
+type ToolUseSemantic =
   | { kind: "question_request"; questions: StructuredQuestion[] }
   | { kind: "task_list"; items: StructuredTaskItem[] };
 
@@ -703,7 +703,7 @@ export interface WorkspaceTask {
 // ── Session Event (PTY Bridge Output) ──
 
 /** Unified event type emitted by ClaudePtyBridge for WebSocket broadcast */
-export type SessionEventType =
+type SessionEventType =
   | "output.raw"          // Raw PTY output for terminal view
   | "output.chat"         // Structured chat content update
   | "chat.turn"           // Conversation turn completed

@@ -6,7 +6,7 @@ export interface FilePreviewSibling {
   type?: "file" | "dir";
 }
 
-export interface FilePreviewDownload {
+interface FilePreviewDownload {
   path: string;
   name: string;
   url: string;
@@ -34,7 +34,7 @@ export type FilePreviewLoadResult =
   | { ok: true; file: FilePreviewFile }
   | { ok: false; failure: FilePreviewFailure };
 
-export interface FilePreviewSaveResult {
+interface FilePreviewSaveResult {
   path: string;
   size: number;
   mtime?: string;
@@ -70,7 +70,7 @@ export interface FilePreviewRuntimeAdapter {
   onSaved(path: string): void | Promise<void>;
 }
 
-export type FilePreviewStatus = "idle" | "loading" | "ready" | "error";
+type FilePreviewStatus = "idle" | "loading" | "ready" | "error";
 
 export interface FilePreviewSnapshot {
   open: boolean;

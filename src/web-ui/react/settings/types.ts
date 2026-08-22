@@ -7,17 +7,17 @@ export type SettingsTab =
   | "presets"
   | "display";
 
-export type SettingsAccess = "admin" | "read-only";
-export type SettingsProvider = "claude" | "codex" | "opencode";
+type SettingsAccess = "admin" | "read-only";
+type SettingsProvider = "claude" | "codex" | "opencode";
 /** Providers that have per-session default model preferences. */
-export type SettingsModelProvider = SettingsProvider | "grok" | "qoder" | "pi";
-export type SettingsCliProvider = SettingsProvider | "qoder" | "pi";
-export type SettingsUpdateChannel = "stable" | "beta";
-export type SettingsAutoUpdateTarget = "web" | "apk" | "dmg" | "cli";
+type SettingsModelProvider = SettingsProvider | "grok" | "qoder" | "pi";
+type SettingsCliProvider = SettingsProvider | "qoder" | "pi";
+type SettingsUpdateChannel = "stable" | "beta";
+type SettingsAutoUpdateTarget = "web" | "apk" | "dmg" | "cli";
 export type SettingsDistributionKind = "apk" | "dmg" | "ipa";
 export type SettingsDistributionSource = "github" | "local";
 export type SettingsNotificationPermission = "granted" | "denied" | "default" | "unsupported";
-export type SettingsPlatformKind = "browser" | "android" | "ios" | "macos";
+type SettingsPlatformKind = "browser" | "android" | "ios" | "macos";
 
 export interface SettingsBuildInfo {
   commit: string | null;
@@ -62,7 +62,7 @@ export interface SettingsAbout {
   iosIpa: SettingsDistribution;
 }
 
-export interface SettingsCommandPreset {
+interface SettingsCommandPreset {
   label: string;
   command: string;
   mode?: string;
@@ -76,7 +76,7 @@ export interface SettingsCardDefaults {
   toolGroup: boolean;
 }
 
-export type SettingsExecutionMode =
+type SettingsExecutionMode =
   | "default"
   | "assist"
   | "agent"
@@ -102,7 +102,7 @@ export interface SettingsSystemAi {
   fallbacks?: SettingsSystemAi[];
 }
 
-export interface SettingsSystemAiTestResult {
+interface SettingsSystemAiTestResult {
   ok: true;
   source: SettingsSystemAi["source"];
   requestedModel: string;
@@ -174,7 +174,7 @@ export interface SettingsModelCatalog {
   defaultModels: Record<SettingsModelProvider, string>;
 }
 
-export interface SettingsProviderCliStatus {
+interface SettingsProviderCliStatus {
   id: SettingsCliProvider;
   label: string;
   command: string;
@@ -188,7 +188,7 @@ export interface SettingsProviderCliStatus {
   error?: string;
 }
 
-export interface SettingsProviderCliResult {
+interface SettingsProviderCliResult {
   id: SettingsCliProvider;
   label: string;
   ok: boolean;
@@ -199,7 +199,7 @@ export interface SettingsProviderCliResult {
   output?: string;
 }
 
-export interface SettingsProviderCliUpdates {
+interface SettingsProviderCliUpdates {
   items: SettingsProviderCliStatus[];
   checkedAt: string | null;
   updating: boolean;
@@ -208,12 +208,12 @@ export interface SettingsProviderCliUpdates {
   ok?: boolean;
 }
 
-export interface SettingsConnectCode {
+interface SettingsConnectCode {
   code: string;
   url: string;
 }
 
-export interface SettingsNativeSound {
+interface SettingsNativeSound {
   id: string;
   name: string;
 }
@@ -296,7 +296,7 @@ export interface SettingsAiInput {
   systemAi: SettingsSystemAi;
 }
 
-export interface SettingsSaveResult {
+interface SettingsSaveResult {
   ok: boolean;
   config: SettingsConfig;
   desiredConfig: SettingsConfig;
@@ -304,7 +304,7 @@ export interface SettingsSaveResult {
   restartRequired: boolean;
 }
 
-export interface SettingsEnvironmentEntry {
+interface SettingsEnvironmentEntry {
   name: string;
   value: string;
   length: number;
@@ -328,7 +328,7 @@ export interface SettingsWebUpdate {
   build?: SettingsBuildInfo;
 }
 
-export interface SettingsWebUpdateInstallResult {
+interface SettingsWebUpdateInstallResult {
   ok: boolean;
   message: string;
   restartRequired: boolean;
@@ -338,7 +338,7 @@ export interface SettingsWebUpdateInstallResult {
   logPath?: string;
 }
 
-export interface SettingsNotificationTestResult {
+interface SettingsNotificationTestResult {
   sound: "passed" | "failed";
   bubble: "passed" | "disabled";
   system: "passed" | "denied" | "unsupported" | "failed";

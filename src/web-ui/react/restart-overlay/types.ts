@@ -1,6 +1,6 @@
 export type RestartOverlayMode = "restart" | "auto-update";
 
-export type RestartOverlayPhase =
+type RestartOverlayPhase =
   | "idle"
   | "waiting"
   | "checking"

@@ -34,7 +34,7 @@ export interface LegacySnapshotState {
   gitStatusSessionId?: string | null;
 }
 
-export interface LegacySession {
+interface LegacySession {
   id?: string;
   provider?: string;
   command?: string;
@@ -64,7 +64,7 @@ export interface LegacySession {
   worktreeMergeStatus?: string;
 }
 
-export interface LegacyHistorySession {
+interface LegacyHistorySession {
   claudeSessionId?: string;
   provider?: string;
   cwd?: string;
@@ -77,7 +77,7 @@ export interface LegacyHistorySession {
   managedByWand?: boolean;
 }
 
-export interface LegacyGitStatus {
+interface LegacyGitStatus {
   isGit?: boolean;
   branch?: string;
   modifiedCount?: number;

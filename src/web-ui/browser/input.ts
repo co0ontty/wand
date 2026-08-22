@@ -198,15 +198,6 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         syncComposerHasText(el);
       }
 
-      export function isSessionRunning(sessionId) {
-        if (!sessionId) return false;
-        var session = state.sessions.find(function(item) { return item.id === sessionId; });
-        if (isStructuredSession(session)) {
-          return !!(session.structuredState && session.structuredState.inFlight);
-        }
-        return !!session && session.status === "running";
-      }
-
       // ── 跨会话排队 ──
 
       export var _queueLaunching = false; // 防止并发 launch
@@ -2722,7 +2713,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         _swipedItem = null;
       }
 
-      export function startCommand(command, cwd, errorEl) {
+      function startCommand(command, cwd, errorEl) {
         if (command === "claude" || command === "codex" || command === "opencode") {
           state.preferredCommand = command;
           state.chatMode = getSafeModeForTool(command, state.chatMode);
@@ -3182,18 +3173,6 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
       export function syncInputBoxForCurrentState(inputBox) {
         bindInputTouchScroll(inputBox);
         syncInputBoxLayout(inputBox);
-      }
-
-      export function focusInputCaret(inputBox) {
-        focusInputWithSelection(inputBox);
-      }
-
-      export function resetInputViewport() {
-        resetInputPanelViewportSpacing();
-      }
-
-      export function settleInputViewport(inputBox) {
-        restoreInputBoxViewport(inputBox);
       }
 
       export function refreshInputBoxState(inputBox) {

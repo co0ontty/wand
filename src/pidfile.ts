@@ -30,7 +30,7 @@ export interface PidInfo {
   socket: string;
 }
 
-export function pidfilePath(configPath: string): string {
+function pidfilePath(configPath: string): string {
   return path.resolve(path.dirname(configPath), "wand.pid");
 }
 

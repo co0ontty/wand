@@ -118,7 +118,7 @@ const KEYWORDS = new Set([
 
 const CODE_TOKEN = /\/\/[^\n]*|#[^\n]*|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`|\b(?:0x[\da-fA-F]+|0b[01]+|\d+(?:\.\d+)?)\b|\b[A-Za-z_$][\w$]*\b|[+\-*/%=<>!&|^~?:]+/g;
 
-export type FilePreviewCodeTokenKind = "comment" | "string" | "number" | "keyword" | "operator";
+type FilePreviewCodeTokenKind = "comment" | "string" | "number" | "keyword" | "operator";
 
 export interface FilePreviewCodeToken {
   value: string;
@@ -164,7 +164,7 @@ export type FilePreviewMarkdownInline =
   | { type: "code" | "strong" | "emphasis" | "delete"; value: string }
   | { type: "link" | "image"; value: string; url: string };
 
-export type FilePreviewTableAlignment = "left" | "center" | "right" | undefined;
+type FilePreviewTableAlignment = "left" | "center" | "right" | undefined;
 
 export type FilePreviewMarkdownBlock =
   | { type: "paragraph" | "blockquote"; content: FilePreviewMarkdownInline[] }

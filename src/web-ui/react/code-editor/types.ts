@@ -16,7 +16,7 @@ export interface CodeEditorFile {
   dirty: boolean;
 }
 
-export type CodeEditorStatus = "idle" | "loading" | "ready" | "error" | "unsupported";
+type CodeEditorStatus = "idle" | "loading" | "ready" | "error" | "unsupported";
 
 export interface CodeEditorTab {
   path: string;
@@ -45,7 +45,7 @@ export interface CodeEditorLoadResult {
   failure?: FilePreviewFailure;
 }
 
-export interface CodeEditorSaveResult {
+interface CodeEditorSaveResult {
   path: string;
   size: number;
   mtime?: string;

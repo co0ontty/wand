@@ -11,7 +11,7 @@ import type {
 } from "../react/file-preview/types";
 import { closeReactOverlays } from "./react-overlay-coordinator";
 
-export interface LegacyFilePreviewItem {
+interface LegacyFilePreviewItem {
   path?: unknown;
   name?: unknown;
   type?: unknown;

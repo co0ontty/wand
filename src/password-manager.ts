@@ -53,7 +53,7 @@ export interface PasswordVaultItemFilter {
   limit?: number;
 }
 
-export interface PasswordIssue {
+interface PasswordIssue {
   itemId: string;
   title: string;
   kind: "weak_password" | "reused_password" | "missing_url" | "old_password" | "passkey_available";
@@ -135,7 +135,7 @@ export function normalizePasswordItemInput(input: PasswordVaultItemInput): Requi
   };
 }
 
-export function normalizeUrls(urls: unknown): string[] {
+function normalizeUrls(urls: unknown): string[] {
   if (!Array.isArray(urls)) return [];
   const out: string[] = [];
   for (const value of urls) {
@@ -146,7 +146,7 @@ export function normalizeUrls(urls: unknown): string[] {
   return out.slice(0, 20);
 }
 
-export function normalizeStoredUrl(value: string): string | null {
+function normalizeStoredUrl(value: string): string | null {
   const raw = value.trim();
   if (!raw) return null;
   try {
@@ -376,7 +376,7 @@ export function generateTotpCode(secret: string, timeMs = Date.now(), digits = 6
   return String(code).padStart(digits, "0");
 }
 
-export function decodeTotpSecret(secret: string): Buffer {
+function decodeTotpSecret(secret: string): Buffer {
   const cleaned = secret.replace(/\s+/g, "").replace(/=+$/g, "").toUpperCase();
   if (!cleaned) throw new Error("TOTP secret is required.");
   if (/^[0-9a-f]+$/i.test(cleaned) && cleaned.length % 2 === 0) {

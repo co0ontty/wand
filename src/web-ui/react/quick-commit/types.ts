@@ -8,7 +8,7 @@ export interface QuickCommitOpenContext {
   sessionId: string;
 }
 
-export interface QuickCommitSubmoduleState {
+interface QuickCommitSubmoduleState {
   commitChanged: boolean;
   hasTrackedChanges: boolean;
   hasUntracked: boolean;
@@ -94,7 +94,7 @@ export interface QuickCommitRepository {
   push(sessionId: string, input: QuickCommitPushInput): Promise<QuickCommitPushResponse>;
 }
 
-export type QuickCommitToastTone = "success" | "error" | "info";
+type QuickCommitToastTone = "success" | "error" | "info";
 
 /** Bridge back to the legacy shell without exposing its DOM or state to React. */
 export interface QuickCommitRuntimeAdapter {

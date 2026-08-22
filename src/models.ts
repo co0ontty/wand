@@ -64,17 +64,17 @@ const PI_FALLBACK_MODELS: ClaudeModelInfo[] = [
   { id: "default", label: "跟随 Pi 默认", alias: true },
 ];
 
-export interface ModelCacheStorage {
+interface ModelCacheStorage {
   getConfigValue(key: string): string | null;
   setConfigValue(key: string, value: string): void;
 }
 
-export interface ModelCommandOptions {
+interface ModelCommandOptions {
   env: NodeJS.ProcessEnv;
   timeout: number;
 }
 
-export interface ModelCommandResult {
+interface ModelCommandResult {
   stdout: string;
   stderr: string;
 }
@@ -85,12 +85,12 @@ export type ModelCommandRunner = (
   options: ModelCommandOptions,
 ) => Promise<ModelCommandResult>;
 
-export interface ClaudeModelsApiEntry {
+interface ClaudeModelsApiEntry {
   id: string;
   display_name?: string;
 }
 
-export interface ClaudeModelsApi {
+interface ClaudeModelsApi {
   list(): AsyncIterable<ClaudeModelsApiEntry>;
 }
 

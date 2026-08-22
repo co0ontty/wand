@@ -15,7 +15,7 @@ export interface SessionRow {
 }
 
 /** 把绝对路径压缩为友好显示：`~/foo` 或者长路径只保留尾部。 */
-export function shortenCwd(cwd: string, max = 28): string {
+function shortenCwd(cwd: string, max = 28): string {
   const home = os.homedir();
   let out = cwd;
   if (home && cwd.startsWith(home)) out = "~" + cwd.slice(home.length);

@@ -3,7 +3,7 @@ import { enrichStructuredMessages, WAND_PROTOCOL_VERSION } from "./structured-cl
 
 export const SESSION_TRANSPORT_OUTPUT_LIMIT = 200_000;
 
-export type SessionBaseDTO = Omit<SessionSnapshot, "output" | "messages" | "title" | "ptyOutputSeq" | "ptyLaunchMarkerToken"> & {
+type SessionBaseDTO = Omit<SessionSnapshot, "output" | "messages" | "title" | "ptyOutputSeq" | "ptyLaunchMarkerToken"> & {
   /** Canonical server-resolved title. Clients must not invent their own fallback. */
   title: string;
   /** Alias of claudeSessionId; that field stores every provider's native resume id. */

@@ -1,13 +1,13 @@
 import type { ProviderId } from "../../provider-identity";
 
 export type UiAuthPhase = "booting" | "anonymous" | "authenticated";
-export type UiView = "terminal" | "chat";
-export type UiSessionKind = "pty" | "structured";
+type UiView = "terminal" | "chat";
+type UiSessionKind = "pty" | "structured";
 export type UiProvider = ProviderId | (string & {});
 export type UiSessionStatus = "running" | "idle" | "stopped" | "exited" | "failed" | (string & {});
 export type UiNativeHistoryProvider = "claude" | "codex" | "opencode" | "qoder";
-export type UiSessionSource = "wand" | "automation" | `${UiNativeHistoryProvider}-history`;
-export type UiSidebarGroupKind = "wand" | "automation" | "history";
+type UiSessionSource = "wand" | "automation" | `${UiNativeHistoryProvider}-history`;
+type UiSidebarGroupKind = "wand" | "automation" | "history";
 export type UiManageTarget = "session" | `${UiNativeHistoryProvider}-history`;
 
 export interface UiSessionVm {

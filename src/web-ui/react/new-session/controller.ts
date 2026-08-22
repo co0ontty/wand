@@ -7,7 +7,7 @@ export interface NewSessionControllerSnapshot {
   revision: number;
 }
 
-export interface NewSessionOpenOptions {
+interface NewSessionOpenOptions {
   initialCwd?: string;
 }
 

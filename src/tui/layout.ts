@@ -32,9 +32,9 @@ export interface HeaderInfo {
   serviceInstalled: boolean;
 }
 
-export type ToastLevel = "info" | "warn" | "error" | "success";
+type ToastLevel = "info" | "warn" | "error" | "success";
 
-export interface ConfirmOptions {
+interface ConfirmOptions {
   title: string;
   body: string;
   yes?: string;
@@ -52,7 +52,7 @@ export interface ServicePanelView {
   lastAction?: string;
 }
 
-export interface ServicePanelHandlers {
+interface ServicePanelHandlers {
   onStart: () => void | Promise<void>;
   onStop: () => void | Promise<void>;
   onRestart: () => void | Promise<void>;

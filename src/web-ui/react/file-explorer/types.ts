@@ -1,6 +1,6 @@
 import type { FilePreviewFailure } from "../file-preview/types";
 
-export type FileExplorerEntryType = "file" | "dir";
+type FileExplorerEntryType = "file" | "dir";
 
 export interface FileExplorerEntry {
   path: string;
@@ -45,7 +45,7 @@ export interface FileExplorerRepository {
   delete(path: string): Promise<FileExplorerMutationResult>;
 }
 
-export type FileExplorerNodeStatus = "idle" | "loading" | "loaded" | "error";
+type FileExplorerNodeStatus = "idle" | "loading" | "loaded" | "error";
 
 export interface FileExplorerNodeState {
   entries: FileExplorerEntry[];
@@ -79,7 +79,7 @@ export type FileExplorerCommand =
   | { type: "rename"; from: string; to: string }
   | { type: "delete"; path: string };
 
-export type FileExplorerNoticeTone = "success" | "error" | "info";
+type FileExplorerNoticeTone = "success" | "error" | "info";
 
 export interface FileExplorerRuntimeAdapter {
   /** Called when a file is clicked — opens it in the editor. */

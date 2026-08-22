@@ -54,7 +54,7 @@ interface DialogEntry {
   resolve(result: OverlayDialogResult<unknown>): void;
 }
 
-export interface ToastEntry {
+interface ToastEntry {
   id: number;
   message: string;
   options: OverlayToastOptions;

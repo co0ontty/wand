@@ -5,7 +5,7 @@ export type MissionStatus = "dispatching" | "running" | "needs_input" | "complet
 export type MissionAttemptState = AgentActivityState | "queued";
 export type MissionReviewStatus = "pending" | "sent" | "resolved";
 
-export interface MissionWorktreeOptions {
+interface MissionWorktreeOptions {
   baseRef?: string;
   sharedDirectories?: string[];
   copyPaths?: string[];

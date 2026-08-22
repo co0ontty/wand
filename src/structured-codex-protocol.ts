@@ -87,7 +87,7 @@ const CODEX_DIFF_MAX_EDIT_DISTANCE = 512;
 const CODEX_DIFF_MAX_CHARS = 32 * 1024;
 const CODEX_DIFF_CONTEXT_LINES = 3;
 
-export interface CodexFileSnapshot {
+interface CodexFileSnapshot {
   exists: boolean;
   text: string | null;
   unavailableReason?: string;

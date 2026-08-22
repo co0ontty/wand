@@ -8,7 +8,7 @@ import type { SessionProvider, SystemAiConfig, SystemAiProtocol } from "./types.
 const SYSTEM_AI_TIMEOUT_MS = 60_000;
 const SYSTEM_AI_ROUTE_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 
-export class SystemAiError extends Error {
+class SystemAiError extends Error {
   constructor(message: string, public readonly code: string) {
     super(message);
     this.name = "SystemAiError";

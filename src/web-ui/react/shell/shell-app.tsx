@@ -12,7 +12,7 @@ export type ShellLayoutState = Pick<
   "sessionsDrawerOpen" | "sidebarAnchored" | "sidebarPinned" | "sidebarCollapsed"
 >;
 
-export interface ShellAppFrameProps {
+interface ShellAppFrameProps {
   readonly legacyRefs?: Readonly<ShellMainContentRefs>;
 }
 
