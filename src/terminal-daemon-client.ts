@@ -24,6 +24,9 @@ import {
 } from "./terminal-host.js";
 import { appendWindow, PTY_OUTPUT_MAX_SIZE } from "./pty-text-utils.js";
 
+const TERMINAL_DAEMON_RECONNECT_INITIAL_MS = 500;
+const TERMINAL_DAEMON_RECONNECT_MAX_MS = 10_000;
+
 interface PendingRequest {
   resolve(value: unknown): void;
   reject(error: Error): void;
@@ -130,6 +133,10 @@ export class TerminalDaemonClient implements TerminalHost {
   private readonly inventory = new Map<string, TerminalSessionState>();
   private readonly handles = new Map<string, RemoteTerminalProcess>();
   private readonly pendingEvents = new Map<string, TerminalDaemonEvent[]>();
+  private disposed = false;
+  private reconnectTimer: NodeJS.Timeout | null = null;
+  private reconnectDelayMs = TERMINAL_DAEMON_RECONNECT_INITIAL_MS;
+  private reconnectFailureLogged = false;
 
   constructor(
     private readonly socketPath: string,
@@ -137,6 +144,7 @@ export class TerminalDaemonClient implements TerminalHost {
   ) {}
 
   async connect(): Promise<void> {
+    if (this.disposed) throw new Error("Terminal daemon client disposed");
     if (this.socket && !this.socket.destroyed) return;
     const socket = net.createConnection(this.socketPath);
     socket.setNoDelay(true);
@@ -152,12 +160,28 @@ export class TerminalDaemonClient implements TerminalHost {
       socket.once("error", onError);
     });
     socket.on("data", (data) => this.consume(data.toString("utf8")));
-    socket.on("close", () => this.rejectPending(new Error("Terminal daemon disconnected")));
-    socket.on("error", (error) => this.rejectPending(error));
-    await this.request("hello");
-    const sessions = await this.request("list") as TerminalSessionState[];
-    this.inventory.clear();
-    for (const session of sessions) this.inventory.set(session.sessionId, session);
+    socket.on("close", () => this.handleDisconnect());
+    socket.on("error", (error) => {
+      this.rejectPending(error instanceof Error ? error : new Error(String(error)));
+      this.handleDisconnect();
+    });
+    try {
+      await this.request("hello");
+      const previous = new Map(this.inventory);
+      const sessions = await this.request("list") as TerminalSessionState[];
+      this.inventory.clear();
+      for (const session of sessions) this.inventory.set(session.sessionId, session);
+      if (previous.size > 0) {
+        this.reconcileAfterReconnect(previous);
+        process.stderr.write("[wand] Reconnected to terminal daemon; reconciled PTY inventory.\n");
+      }
+    } catch (error) {
+      if (!this.disposed) {
+        try { socket.destroy(); } catch { /* best-effort cleanup */ }
+        this.handleDisconnect();
+      }
+      throw error;
+    }
   }
 
   attach(sessionId: string, afterSeq = 0): TerminalAttachResult | null {
@@ -182,12 +206,85 @@ export class TerminalDaemonClient implements TerminalHost {
   }
 
   disconnect(): void {
+    this.disposed = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     const socket = this.socket;
     this.socket = null;
     if (socket && !socket.destroyed) socket.destroy();
     this.rejectPending(new Error("Terminal daemon client disposed"));
     this.handles.clear();
     this.pendingEvents.clear();
+  }
+
+  /**
+   * Socket teardown path. Without a reconnect, a daemon restart would leave
+   * every RemoteTerminalProcess silently dead while ProcessManager keeps the
+   * session status at "running" forever.
+   */
+  private handleDisconnect(): void {
+    if (this.socket?.destroyed) this.socket = null;
+    this.rejectPending(new Error("Terminal daemon disconnected"));
+    if (this.disposed) return;
+    this.scheduleReconnect();
+  }
+
+  private scheduleReconnect(): void {
+    if (this.disposed || this.reconnectTimer) return;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      void this.tryReconnect();
+    }, this.reconnectDelayMs);
+    this.reconnectTimer.unref?.();
+    this.reconnectDelayMs = Math.min(this.reconnectDelayMs * 2, TERMINAL_DAEMON_RECONNECT_MAX_MS);
+  }
+
+  private async tryReconnect(): Promise<void> {
+    if (this.disposed) return;
+    try {
+      await this.connect();
+      this.reconnectDelayMs = TERMINAL_DAEMON_RECONNECT_INITIAL_MS;
+      this.reconnectFailureLogged = false;
+    } catch (error) {
+      if (this.disposed) return;
+      if (!this.reconnectFailureLogged) {
+        this.reconnectFailureLogged = true;
+        process.stderr.write(`[wand] Terminal daemon reconnect failed: ${error instanceof Error ? error.message : String(error)}\n`);
+      }
+      this.scheduleReconnect();
+    }
+  }
+
+  /**
+   * Diff the pre-disconnect inventory against the daemon's fresh `list`.
+   * Sessions that vanished (daemon restart/forget) or exited while we were
+   * disconnected get a synthetic exit delivered to their existing handle so
+   * ProcessManager finalizes them; live sessions replay chunks missed during
+   * the gap.
+   */
+  private reconcileAfterReconnect(previous: Map<string, TerminalSessionState>): void {
+    for (const [sessionId, oldState] of previous) {
+      const current = this.inventory.get(sessionId);
+      const handle = this.handles.get(sessionId);
+      const handleMatches = !!handle && handle.incarnationId === oldState.incarnationId;
+      const stillRunning = !!current
+        && current.incarnationId === oldState.incarnationId
+        && current.status === "running";
+      if (stillRunning && handleMatches) {
+        for (const chunk of current!.chunks) {
+          if (chunk.seq > oldState.seq) handle!.acceptData(chunk);
+        }
+        continue;
+      }
+      const exitedOnDaemon = !!current
+        && current.incarnationId === oldState.incarnationId
+        && current.status === "exited";
+      const exitCode = exitedOnDaemon ? current!.exitCode ?? -1 : -1;
+      this.handles.delete(sessionId);
+      if (handleMatches) handle!.acceptExit({ exitCode });
+    }
   }
 
   async request(method: TerminalDaemonRequest["method"], params?: Record<string, unknown>): Promise<unknown> {

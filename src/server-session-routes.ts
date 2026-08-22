@@ -255,19 +255,12 @@ type ProviderHistorySession = {
   provider?: "claude" | "codex" | "opencode" | "qoder";
 };
 
-export type SessionListPageEntry =
-  | {
-    type: "managed";
-    key: string;
-    sortTimestamp: number;
-    session: ReturnType<typeof toSessionListItemDTO>;
-  }
-  | {
-    type: "recoverable";
-    key: string;
-    sortTimestamp: number;
-    history: ProviderHistorySession & { provider: "claude" | "codex" | "opencode" | "qoder" };
-  };
+export type SessionListPageEntry = {
+  type: "managed";
+  key: string;
+  sortTimestamp: number;
+  session: ReturnType<typeof toSessionListItemDTO>;
+};
 
 export interface SessionListPage {
   entries: SessionListPageEntry[];
@@ -293,38 +286,13 @@ function sessionSortTimestamp(snapshot: SessionSnapshot): number {
 
 export function buildSessionListEntries(
   sessions: SessionSnapshot[],
-  claudeHistory: ProviderHistorySession[],
-  codexHistory: ProviderHistorySession[],
-  hiddenHistoryIds: Set<string>,
-  openCodeHistory: ProviderHistorySession[] = [],
-  qoderHistory: ProviderHistorySession[] = [],
 ): SessionListPageEntry[] {
-  const managed = sessions.map<SessionListPageEntry>((session) => ({
+  return sessions.map<SessionListPageEntry>((session) => ({
     type: "managed",
     key: `session-${session.id}`,
     sortTimestamp: sessionSortTimestamp(session),
     session: toSessionListItemDTO(session),
-  }));
-  const recoverable = [
-    ...markManagedProviderHistory(claudeHistory, sessions, "claude"),
-    ...markManagedProviderHistory(codexHistory, sessions, "codex"),
-    ...markManagedProviderHistory(openCodeHistory, sessions, "opencode"),
-    ...markManagedProviderHistory(qoderHistory, sessions, "qoder"),
-  ].flatMap<SessionListPageEntry>((history) => {
-    const provider = history.provider === "codex" || history.provider === "opencode" || history.provider === "qoder"
-      ? history.provider
-      : "claude";
-    if (!history.hasConversation || history.managedByWand || hiddenHistoryIds.has(history.claudeSessionId)) {
-      return [];
-    }
-    return [{
-      type: "recoverable",
-      key: `recoverable-${provider}-${history.claudeSessionId}`,
-      sortTimestamp: history.mtimeMs,
-      history: { ...history, provider },
-    }];
-  });
-  return [...managed, ...recoverable].sort((left, right) => {
+  })).sort((left, right) => {
     const timestampOrder = right.sortTimestamp - left.sortTimestamp;
     return timestampOrder || left.key.localeCompare(right.key);
   });
@@ -348,22 +316,10 @@ function sessionListRevision(
 
 export function buildSessionListPage(
   sessions: SessionSnapshot[],
-  claudeHistory: ProviderHistorySession[],
-  codexHistory: ProviderHistorySession[],
-  hiddenHistoryIds: Set<string>,
   offset: number,
   limit: number,
-  openCodeHistory: ProviderHistorySession[] = [],
-  qoderHistory: ProviderHistorySession[] = [],
 ): SessionListPage {
-  const entries = buildSessionListEntries(
-    sessions,
-    claudeHistory,
-    codexHistory,
-    hiddenHistoryIds,
-    openCodeHistory,
-    qoderHistory,
-  );
+  const entries = buildSessionListEntries(sessions);
   const boundedOffset = Math.min(Math.max(offset, 0), entries.length);
   const revision = sessionListRevision(entries);
   return {
@@ -376,24 +332,12 @@ export function buildSessionListPage(
 
 export function buildSessionDirectoryTree(
   sessions: SessionSnapshot[],
-  claudeHistory: ProviderHistorySession[],
-  codexHistory: ProviderHistorySession[],
-  hiddenHistoryIds: Set<string>,
-  openCodeHistory: ProviderHistorySession[] = [],
-  qoderHistory: ProviderHistorySession[] = [],
   customNames: ReadonlyMap<string, string> = new Map(),
 ): SessionDirectoryTreeResponse {
-  const entries = buildSessionListEntries(
-    sessions,
-    claudeHistory,
-    codexHistory,
-    hiddenHistoryIds,
-    openCodeHistory,
-    qoderHistory,
-  );
+  const entries = buildSessionListEntries(sessions);
   const tree = buildDirectoryTree(entries.map((entry) => ({
     entry,
-    cwd: entry.type === "managed" ? entry.session.cwd : entry.history.cwd,
+    cwd: entry.session.cwd,
     sortTimestamp: entry.sortTimestamp,
   })), "未知目录", customNames);
   const appliedCustomNames: Array<readonly [string, string]> = [];
@@ -636,11 +580,6 @@ export function registerSessionRoutes(
 
   const currentDirectoryTree = (): SessionDirectoryTreeResponse => buildSessionDirectoryTree(
     sessions.listSlim(),
-    processes.listClaudeHistorySessions(),
-    processes.listCodexHistorySessions(),
-    getHiddenClaudeSessionIds(storage),
-    processes.listOpenCodeHistorySessions(),
-    processes.listQoderHistorySessions(),
     storage.listSessionDirectoryNames(),
   );
 
@@ -650,16 +589,7 @@ export function registerSessionRoutes(
       const limit = parseBoundedInteger(req.query.limit, 40, 1, 200);
       const requestedRevision = typeof req.query.revision === "string" ? req.query.revision : "";
       const currentSessions = sessions.listSlim();
-      const page = buildSessionListPage(
-        currentSessions,
-        processes.listClaudeHistorySessions(),
-        processes.listCodexHistorySessions(),
-        getHiddenClaudeSessionIds(storage),
-        offset,
-        limit,
-        processes.listOpenCodeHistorySessions(),
-        processes.listQoderHistorySessions(),
-      );
+      const page = buildSessionListPage(currentSessions, offset, limit);
       if (offset > 0 && requestedRevision !== page.revision) {
         res.status(409).json({ error: "会话列表已更新，请重新加载。", revision: page.revision });
         return;
@@ -1429,10 +1359,18 @@ export function registerSessionRoutes(
       const autoResumeInput = getAutoResumeInitialInput(existingSession, input, view, shortcutKey);
       if (autoResumeInput !== null && canAutoResumePtyForInput(existingSession, autoResumeInput)) {
         const snapshot = await startResumedPtySession(processes, storage, existingSession, sessionId, defaultMode, {}, autoResumeInput);
+        if (body.responseMode === "accepted") {
+          res.status(202).json({ accepted: true });
+          return;
+        }
         res.json(sessionResponseDTO(snapshot));
         return;
       }
       const snapshot = processes.sendInput(sessionId, input, view, shortcutKey);
+      if (body.responseMode === "accepted") {
+        res.status(202).json({ accepted: true });
+        return;
+      }
       res.json(sessionResponseDTO(snapshot));
     } catch (error) {
       const response = getInputErrorResponse(error, sessionId);
@@ -1668,23 +1606,12 @@ export function registerClaudeHistoryRoutes(
   processes: ProcessManager,
   _structured: StructuredSessionManager,
   storage: WandStorage,
-  sessionRegistry: SessionRegistry,
+  _sessionRegistry: SessionRegistry,
 ): void {
+  // Kept as an empty compatibility endpoint for older native clients. Wand no
+  // longer imports provider-native history into its session list.
   app.get("/api/claude-history", (_req, res) => {
-    try {
-      const history = markManagedProviderHistory(
-        processes.listClaudeHistorySessions(),
-        sessionRegistry.listSlim(),
-        "claude",
-      );
-      const hidden = getHiddenClaudeSessionIds(storage);
-      const filtered = hidden.size > 0
-        ? history.filter((s: { claudeSessionId?: string }) => !s.claudeSessionId || !hidden.has(s.claudeSessionId))
-        : history;
-      res.json(filtered);
-    } catch (error) {
-      res.status(500).json({ error: getErrorMessage(error, "无法扫描 Claude 历史会话。") });
-    }
+    res.json([]);
   });
 
   app.delete("/api/claude-history/:claudeSessionId", (req, res) => {
@@ -1789,20 +1716,7 @@ export function registerClaudeHistoryRoutes(
   // hidden 集合与 claude 共用（id 全局唯一，不会冲突）。
 
   app.get("/api/codex-history", (_req, res) => {
-    try {
-      const history = markManagedProviderHistory(
-        processes.listCodexHistorySessions(),
-        sessionRegistry.listSlim(),
-        "codex",
-      );
-      const hidden = getHiddenClaudeSessionIds(storage);
-      const filtered = hidden.size > 0
-        ? history.filter((s) => !hidden.has(s.claudeSessionId))
-        : history;
-      res.json(filtered);
-    } catch (error) {
-      res.status(500).json({ error: getErrorMessage(error, "无法扫描 Codex 历史会话。") });
-    }
+    res.json([]);
   });
 
   app.delete("/api/codex-history/:threadId", (req, res) => {
@@ -1885,17 +1799,7 @@ export function registerClaudeHistoryRoutes(
 
   for (const config of externalHistoryProviders) {
     app.get(`/api/${config.provider}-history`, (_req, res) => {
-      try {
-        const history = markManagedProviderHistory(
-          config.list(),
-          sessionRegistry.listSlim(),
-          config.provider,
-        );
-        const hidden = getHiddenClaudeSessionIds(storage);
-        res.json(hidden.size > 0 ? history.filter((session) => !hidden.has(session.claudeSessionId)) : history);
-      } catch (error) {
-        res.status(500).json({ error: getErrorMessage(error, `无法扫描 ${config.label} 历史会话。`) });
-      }
+      res.json([]);
     });
 
     app.delete(`/api/${config.provider}-history/:sessionId`, (req, res) => {

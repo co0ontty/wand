@@ -207,54 +207,6 @@ function sessionToVm(
   };
 }
 
-function historyToVm(
-  history: LegacyHistorySession,
-  provider: "claude" | "codex",
-  state: LegacySnapshotState,
-  selected: Readonly<Record<string, boolean>>,
-): UiSessionVm {
-  const id = asString(history.claudeSessionId);
-  const historyStartedAt = history.timestamp
-    || (Number.isFinite(history.mtimeMs) && Number(history.mtimeMs) > 0
-      ? new Date(Number(history.mtimeMs)).toISOString()
-      : undefined);
-  return {
-    id,
-    source: provider === "codex" ? "codex-history" : "claude-history",
-    provider,
-    kind: "pty",
-    title: asString(history.firstUserMessage)
-      || asString(history.title)
-      || asString(history.summary)
-      || "（空会话）",
-    description: "",
-    cwd: asString(history.cwd, defaultCwd(state)),
-    status: "stopped",
-    statusLabel: "历史",
-    active: false,
-    selected: Boolean(selected[id]),
-    resumable: Boolean(id),
-    permissionBlocked: false,
-    inFlight: false,
-    titleGenerating: false,
-    ...(historyStartedAt ? { startedAt: historyStartedAt } : {}),
-    ...(id ? { claudeSessionId: id } : {}),
-  };
-}
-
-function visibleHistory(
-  histories: readonly LegacyHistorySession[] | undefined,
-  managedIds: ReadonlySet<string>,
-): LegacyHistorySession[] {
-  return (histories ?? []).filter((history) => {
-    const id = asString(history.claudeSessionId);
-    return Boolean(id)
-      && Boolean(history.hasConversation)
-      && !history.managedByWand
-      && !managedIds.has(id);
-  });
-}
-
 function sortSessionVms(entries: UiSessionVm[]): UiSessionVm[] {
   return entries.sort((left, right) => timestamp(right.startedAt) - timestamp(left.startedAt));
 }
@@ -266,26 +218,11 @@ export function deriveLegacyUiSnapshot(
 ): UiSnapshotData {
   const sessions = state.sessions ?? [];
   const sessionSelection = state.selectedSessionIds ?? {};
-  const claudeSelection = state.selectedClaudeHistoryIds ?? {};
-  const codexSelection = state.selectedCodexHistoryIds ?? {};
   const sessionVms = sessions.map((session) => sessionToVm(session, state, sessionSelection));
   const selected = sessionVms.find((session) => session.id === state.selectedId) ?? null;
   const selectedLegacy = sessions.find((session) => session.id === state.selectedId) ?? null;
-  const managedProviderIds = new Set(
-    sessions.map((session) => asString(session.claudeSessionId)).filter(Boolean),
-  );
   const wand = sortSessionVms(sessionVms.filter((session) => session.source === "wand"));
   const automation = sortSessionVms(sessionVms.filter((session) => session.source === "automation"));
-  const histories: UiSessionVm[] = [];
-  if (state.claudeHistoryLoaded) {
-    histories.push(...visibleHistory(state.claudeHistory, managedProviderIds)
-      .map((history) => historyToVm(history, "claude", state, claudeSelection)));
-  }
-  if (state.codexHistoryLoaded) {
-    histories.push(...visibleHistory(state.codexHistory, managedProviderIds)
-      .map((history) => historyToVm(history, "codex", state, codexSelection)));
-  }
-  histories.sort((left, right) => timestamp(right.startedAt) - timestamp(left.startedAt));
 
   const mobile = environment.width <= 768;
   const drawerOpen = Boolean(state.sessionsDrawerOpen);
@@ -295,9 +232,7 @@ export function deriveLegacyUiSnapshot(
   const structuredSelected = selected?.kind === "structured";
   const currentView = structuredSelected || state.currentView === "chat" ? "chat" : "terminal";
   const manageMode = Boolean(state.sessionsManageMode);
-  const selectedCount = countSelected(sessionSelection)
-    + countSelected(claudeSelection)
-    + countSelected(codexSelection);
+  const selectedCount = countSelected(sessionSelection);
   const effectiveCwd = selected?.cwd ?? defaultCwd(state);
   const gitStatus = selected
     && state.gitStatusSessionId === selected.id
@@ -335,7 +270,7 @@ export function deriveLegacyUiSnapshot(
     selected,
     sidebar: {
       interactiveCount: sessions.filter((session) => !isAutomation(session)).length,
-      totalCount: wand.length + automation.length + histories.length,
+      totalCount: wand.length + automation.length,
       manageMode,
       selectedCount,
       groups: [
@@ -345,12 +280,6 @@ export function deriveLegacyUiSnapshot(
           label: "自动化",
           expanded: manageMode || Boolean(environment.automationExpanded),
           entries: automation,
-        },
-        {
-          kind: "history",
-          label: "非 Wand 会话",
-          expanded: manageMode || Boolean(environment.historyExpanded),
-          entries: histories,
         },
       ],
     },

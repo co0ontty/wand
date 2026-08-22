@@ -72,8 +72,8 @@ test("session directory response includes managed entries and stable revision", 
     session("new", "/workspace/wand", "2026-08-06T12:00:00.000Z"),
     session("old", "/workspace/wand", "2026-08-06T11:00:00.000Z"),
   ];
-  const first = buildSessionDirectoryTree(sessions, [], [], new Set());
-  const second = buildSessionDirectoryTree(sessions, [], [], new Set());
+  const first = buildSessionDirectoryTree(sessions);
+  const second = buildSessionDirectoryTree(sessions);
 
   assert.equal(first.roots[0].path, "/workspace/wand");
   assert.equal(first.roots[0].directCount, 2);
@@ -101,23 +101,13 @@ test("custom workspace names are exposed without replacing filesystem names", ()
 
 test("session directory revision changes when a visible workspace name changes", () => {
   const sessions = [session("named", "/workspace/wand", "2026-08-06T12:00:00.000Z")];
-  const unnamed = buildSessionDirectoryTree(sessions, [], [], new Set());
+  const unnamed = buildSessionDirectoryTree(sessions);
   const named = buildSessionDirectoryTree(
     sessions,
-    [],
-    [],
-    new Set(),
-    [],
-    [],
     new Map([["/workspace/wand", "Wand 工作区"]]),
   );
   const repeated = buildSessionDirectoryTree(
     sessions,
-    [],
-    [],
-    new Set(),
-    [],
-    [],
     new Map([["/workspace/wand", "Wand 工作区"]]),
   );
 

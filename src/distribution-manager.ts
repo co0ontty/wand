@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { mkdir, readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
@@ -23,6 +25,8 @@ export interface ResolvedDistributionAsset {
   size: number;
   source: "local" | "github";
   releaseNotes?: string;
+  /** 本地分发文件的 SHA-256（hex）；GitHub 来源不提供，客户端据此跳过校验。 */
+  sha256?: string;
 }
 
 interface GitHubDistributionAsset {
@@ -111,10 +115,25 @@ export class DistributionManager {
     } : null;
     const github = githubApk ? { ...githubApk, source: "github" as const } : null;
 
+    let winner: ResolvedDistributionAsset | null;
     if (local && github) {
-      return compareApkInstallOrder(github.version, local.version) > 0 ? github : local;
+      winner = compareApkInstallOrder(github.version, local.version) > 0 ? github : local;
+    } else {
+      winner = local ?? github;
     }
-    return local ?? github;
+    // 本地分发的 APK 附带 SHA-256，客户端下载后校验（GitHub 来源走正规 TLS，不提供）。
+    if (winner?.source === "local" && localApk) {
+      try {
+        const fileStat = await stat(localApk.filePath);
+        winner = {
+          ...winner,
+          sha256: await this.computeLocalFileSha256(localApk.filePath, fileStat.size, fileStat.mtimeMs),
+        };
+      } catch {
+        // 哈希计算失败不阻断更新检查；客户端拿到空 sha256 会跳过校验。
+      }
+    }
+    return winner;
   }
 
   async resolveAndroidDownload(channel: ApkUpdateChannel = "beta"): Promise<LocalDistributionAsset | null> {
@@ -173,6 +192,27 @@ export class DistributionManager {
       androidApk: this.buildSettings("apk", apkDir, this.options.config.android?.enabled === true, localApk, githubApk),
       macosDmg: this.buildSettings("dmg", dmgDir, this.options.config.macos?.enabled === true, localDmg, githubDmg),
     };
+  }
+
+  private readonly sha256Cache = new Map<string, { key: string; digest: string }>();
+
+  /**
+   * 计算本地分发文件的 SHA-256（hex）。按 path + size + mtime 缓存：更新检查
+   * 可能被多个客户端频繁触发，避免每次都全量读盘。
+   */
+  private async computeLocalFileSha256(filePath: string, size: number, mtimeMs: number): Promise<string> {
+    const key = `${size}:${mtimeMs}`;
+    const cached = this.sha256Cache.get(filePath);
+    if (cached && cached.key === key) return cached.digest;
+    const digest = await new Promise<string>((resolve, reject) => {
+      const hash = createHash("sha256");
+      const stream = createReadStream(filePath);
+      stream.on("error", reject);
+      stream.on("data", (chunk) => hash.update(chunk));
+      stream.on("end", () => resolve(hash.digest("hex")));
+    });
+    this.sha256Cache.set(filePath, { key, digest });
+    return digest;
   }
 
   private async refreshConfig(): Promise<void> {

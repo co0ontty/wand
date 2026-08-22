@@ -78,47 +78,31 @@ document.addEventListener("click", function(event) {
       export function getSessionEntryGroups() {
         var wandEntries: any[] = [];
         var automationEntries: any[] = [];
-        var nonWandEntries: any[] = [];
         state.sessions.forEach(function(s: any) {
           var t = s.startedAt ? new Date(s.startedAt).getTime() : 0;
           var entry = { kind: "session", ref: s, t: isFinite(t) ? t : 0 };
           (isAutomationSession(s) ? automationEntries : wandEntries).push(entry);
         });
-        if (state.claudeHistoryLoaded) {
-          getVisibleClaudeHistorySessions().forEach(function(h: any) {
-            var t = h.timestamp ? new Date(h.timestamp).getTime() : Number(h.mtimeMs) || 0;
-            if (!isFinite(t)) t = Number(h.mtimeMs) || 0;
-            nonWandEntries.push({ kind: "history", ref: h, t: t });
-          });
-        }
-        if (state.codexHistoryLoaded) {
-          getVisibleCodexHistorySessions().forEach(function(h: any) {
-            var t = h.timestamp ? new Date(h.timestamp).getTime() : Number(h.mtimeMs) || 0;
-            nonWandEntries.push({ kind: "codex", ref: h, t: isFinite(t) ? t : 0 });
-          });
-        }
         return {
           wand: sortSessionEntries(wandEntries),
-          automation: sortSessionEntries(automationEntries),
-          nonWand: sortSessionEntries(nonWandEntries)
+          automation: sortSessionEntries(automationEntries)
         };
       }
 
       export function getSessionEntries() {
         var groups = getSessionEntryGroups();
-        return groups.wand.concat(groups.automation, groups.nonWand);
+        return groups.wand.concat(groups.automation);
       }
 
       export function renderSessions() {
         var groups: any[] = [];
         groups.push(renderSessionManageBar());
         var entries = getSessionEntryGroups();
-        if (entries.wand.length + entries.automation.length + entries.nonWand.length === 0) {
+        if (entries.wand.length + entries.automation.length === 0) {
           return renderSessionManageBar() + '<div class="empty-state"><strong>还没有会话记录</strong><br>点击上方「新对话」开始你的第一次对话。</div>';
         }
         if (entries.wand.length > 0) groups.push(renderSessionEntries(entries.wand));
         if (entries.automation.length > 0) groups.push(renderAutomationSessionGroup(entries.automation));
-        if (entries.nonWand.length > 0) groups.push(renderNonWandSessionGroup(entries.nonWand));
         return groups.join("");
       }
 
@@ -150,18 +134,11 @@ document.addEventListener("click", function(event) {
               '<span class="non-wand-count-badge">' + (automationCount > 99 ? "99+" : automationCount) + '</span>' +
             '</button>'
           : '';
-        var nonWandCount = entries.nonWand.length;
-        var nonWandTile = nonWandCount > 0
-          ? '<button class="sidebar-collapsed-tile non-wand-count-tile" type="button" data-expand-session-group="non-wand" title="展开查看 ' + nonWandCount + ' 个非 Wand 会话" aria-label="展开查看 ' + nonWandCount + ' 个非 Wand 会话">' +
-              '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 109-9 9.75 9.75 0 00-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></svg>' +
-              '<span class="non-wand-count-badge">' + (nonWandCount > 99 ? "99+" : nonWandCount) + '</span>' +
-            '</button>'
-          : '';
         // 窄条底部固定一个「+」快速新建会话方块，替代被隐藏的 footer 新会话入口。
         var addTile = '<button class="sidebar-collapsed-tile add" type="button" data-collapsed-new-session="1" title="新建会话" aria-label="新建会话">' +
           '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>' +
           '</button>';
-        return '<div class="sidebar-collapsed-tiles">' + tiles + automationTile + nonWandTile + addTile + '</div>';
+        return '<div class="sidebar-collapsed-tiles">' + tiles + automationTile + addTile + '</div>';
       }
 
       export function renderSessionsListContent() {
@@ -180,9 +157,7 @@ document.addEventListener("click", function(event) {
         }
 
         var sessionCount = getSelectedSessionIds().length;
-        var historyCount = getSelectedClaudeHistoryIds().length;
-        var codexCount = getSelectedCodexHistoryIds().length;
-        var totalCount = sessionCount + historyCount + codexCount;
+        var totalCount = sessionCount;
         var hasAny = totalCount > 0;
         var selectable = countSelectableItems();
         var allSelected = selectable > 0 && totalCount >= selectable;
@@ -280,10 +255,6 @@ document.addEventListener("click", function(event) {
 
       export function toggleManageMode(force?: any) {
         state.sessionsManageMode = typeof force === "boolean" ? force : !state.sessionsManageMode;
-        if (state.sessionsManageMode && (!state.claudeHistoryLoaded || !state.codexHistoryLoaded)) {
-          // 进入管理模式即后台补齐两个 provider，让计数从一开始覆盖完整列表。
-          ensureClaudeHistoryLoaded().then(updateSessionsList);
-        }
         if (!state.sessionsManageMode) {
           clearManageSelections();
           closeSwipedItem();
@@ -296,33 +267,17 @@ document.addEventListener("click", function(event) {
       }
 
       export function countSelectableItems() {
-        return getSelectableSessions().length + getVisibleClaudeHistorySessions().length + getVisibleCodexHistorySessions().length;
+        return getSelectableSessions().length;
       }
 
       export function selectAllVisibleItems() {
-        // 全选语义 = 选中所有可管理项（会话 + 全部 Claude 历史）。历史在登录后
-        // 异步扫描，若用户在扫描完成前点「全选」，state.claudeHistory 仍为空会漏选，
-        // 删除时表现为"只删了已加载的，跨目录/未扫完的历史还在"。这里先确保历史
-        // 加载完成再全选。
-        if (!state.claudeHistoryLoaded || !state.codexHistoryLoaded) {
-          ensureClaudeHistoryLoaded().then(selectAllVisibleItems);
-          return;
-        }
         var nextSessionIds: any = {};
         getSelectableSessions().forEach(function(session: any) {
           nextSessionIds[session.id] = true;
         });
-        var nextHistoryIds: any = {};
-        getVisibleClaudeHistorySessions().forEach(function(session: any) {
-          nextHistoryIds[session.claudeSessionId] = true;
-        });
-        var nextCodexIds: any = {};
-        getVisibleCodexHistorySessions().forEach(function(session: any) {
-          nextCodexIds[session.claudeSessionId] = true;
-        });
         state.selectedSessionIds = nextSessionIds;
-        state.selectedClaudeHistoryIds = nextHistoryIds;
-        state.selectedCodexHistoryIds = nextCodexIds;
+        state.selectedClaudeHistoryIds = {};
+        state.selectedCodexHistoryIds = {};
         updateSessionsList();
       }
 
@@ -367,59 +322,25 @@ document.addEventListener("click", function(event) {
 
       export function batchDeleteSelected() {
         var sessionIds = getSelectedSessionIds();
-        var historyIds = getSelectedClaudeHistoryIds();
-        var codexIds = getSelectedCodexHistoryIds();
-        var managedProviderIds = state.sessions
-          .filter(function(session: any) { return sessionIds.indexOf(session.id) !== -1; })
-          .map(function(session: any) { return session.claudeSessionId; })
-          .filter(Boolean);
-        var total = sessionIds.length + historyIds.length + codexIds.length;
+        var total = sessionIds.length;
         if (!total) return;
         confirmDelete('确认删除所选 ' + total + ' 项吗？此操作无法撤销。', {
           title: "删除所选 " + total + " 项",
         }).then(function(ok: any) {
           if (!ok) return;
 
-          var requests: any[] = [];
-          if (sessionIds.length > 0) {
-            requests.push(fetch('/api/sessions/batch-delete', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              credentials: 'same-origin',
-              body: JSON.stringify({ sessionIds: sessionIds })
-            }).then(function(res) { return res.json(); }));
-          }
-          if (historyIds.length > 0) {
-            requests.push(fetch('/api/claude-history/batch-delete', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              credentials: 'same-origin',
-              body: JSON.stringify({ claudeSessionIds: historyIds })
-            }).then(function(res) { return res.json(); }));
-          }
-          if (codexIds.length > 0) {
-            requests.push(fetch('/api/codex-history/batch-delete', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              credentials: 'same-origin',
-              body: JSON.stringify({ claudeSessionIds: codexIds })
-            }).then(function(res) { return res.json(); }));
-          }
-
-          Promise.all(requests)
+          fetch('/api/sessions/batch-delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ sessionIds: sessionIds })
+          })
+            .then(function(res) { return res.json(); })
             .then(function() {
               if (sessionIds.indexOf(state.selectedId) !== -1) {
                 state.selectedId = null;
                 persistSelectedId();
               }
-              state.claudeHistory = state.claudeHistory.filter(function(session: any) {
-                return historyIds.indexOf(session.claudeSessionId) === -1
-                  && managedProviderIds.indexOf(session.claudeSessionId) === -1;
-              });
-              state.codexHistory = state.codexHistory.filter(function(session: any) {
-                return codexIds.indexOf(session.claudeSessionId) === -1
-                  && managedProviderIds.indexOf(session.claudeSessionId) === -1;
-              });
               clearManageSelections();
               return refreshAll();
             })

@@ -117,6 +117,7 @@ test("provider history scanner exposes resumable OpenCode and Qoder sessions cre
     database.exec(`
       CREATE TABLE session (
         id TEXT PRIMARY KEY,
+        parent_id TEXT,
         directory TEXT NOT NULL,
         title TEXT NOT NULL,
         time_created INTEGER NOT NULL,
@@ -129,12 +130,22 @@ test("provider history scanner exposes resumable OpenCode and Qoder sessions cre
       );
     `);
     const openCodeId = "ses_external_123";
-    database.prepare("INSERT INTO session VALUES (?, ?, ?, ?, ?)").run(
+    database.prepare("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?)").run(
       openCodeId,
+      null,
       cwd,
       "External OpenCode work",
       Date.parse("2026-07-20T00:00:00.000Z"),
       Date.parse("2026-07-20T00:02:00.000Z"),
+    );
+    const openCodeSubagentId = "ses_external_subagent";
+    database.prepare("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?)").run(
+      openCodeSubagentId,
+      openCodeId,
+      cwd,
+      "OpenCode subagent",
+      Date.parse("2026-07-20T00:01:00.000Z"),
+      Date.parse("2026-07-20T00:03:00.000Z"),
     );
     database.prepare("INSERT INTO message VALUES (?, ?, ?)").run("message-user", openCodeId, JSON.stringify({ role: "user" }));
     database.prepare("INSERT INTO message VALUES (?, ?, ?)").run("message-assistant", openCodeId, JSON.stringify({ role: "assistant" }));

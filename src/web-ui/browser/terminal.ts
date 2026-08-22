@@ -10,7 +10,7 @@ import { applyCurrentView, closeSessionsDrawer, copyToClipboard, dismissDrawerIf
 import { ensureTerminalFit, initTerminalJoystick, initTerminalResizeHandle, observeTerminalResize, sendTerminalResize, startTerminalHealthCheck } from "./viewport";
 import { t } from "./i18n";
 import { batchDeleteSelected, clearAllClaudeHistory, clearSelections, confirmDelete, ensureClaudeHistoryLoaded, getVisibleClaudeHistorySessions, selectAllVisibleItems, toggleManageMode, toggleManagedItemSelection } from "./sidebar";
-import { consumeTerminalWheelPage, terminalWheelPageSequence, type TerminalWheelPagingState } from "./terminal-wheel";
+import { consumeTerminalTouchPage, consumeTerminalWheelPage, terminalWheelPageSequence, type TerminalTouchPagingState, type TerminalWheelPagingState } from "./terminal-wheel";
 
       export function saveWorkingDir(path: string) {
         state.workingDir = path;
@@ -351,24 +351,72 @@ import { consumeTerminalWheelPage, terminalWheelPageSequence, type TerminalWheel
       }
 
       // ===== Touch scroll (mobile) =====
-      // xterm.js v6 ships no touch handler (its bindMouse() only wires
+      // xterm.js ships no touch handler (its bindMouse() only wires
       // mousedown + wheel), so on a touch device the scrollback is unreachable
       // and full-screen TUIs (vim/less/htop) can't be paged. Drive both from a
       // single-finger vertical drag on the terminal surface, mirroring the
-      // wheel path: normal buffer scrolls the xterm scrollback (content follows
-      // the finger), alternate buffer reuses the wheel→Page Up/Down paging.
-      // Bound on termWrap, which is recreated on every terminal re-init, so the
-      // listeners die with the node — no manual teardown is needed.
+      // wheel path: normal buffer scrolls the xterm scrollback pixel-for-pixel
+      // (content follows the finger), alternate buffer pages with the
+      // touch-specific accumulator or, when the app enabled mouse reporting,
+      // a synthesized SGR wheel press at the touched cell. Bound on termWrap,
+      // which is recreated on every terminal re-init, so the listeners die
+      // with the node — no manual teardown is needed.
       export function initTerminalTouchScroll(surface: HTMLElement, term: any) {
         var touchId: number | null = null;
         var lastY = 0;
         var rowHeight = 16;
-        var pagingState: TerminalWheelPagingState = {
-          direction: 0,
+        var carryPixels = 0;
+        var travelPixels = 0;
+        var pagingState: TerminalTouchPagingState = {
           accumulatedPixels: 0,
-          lastEventAt: 0,
           lastPageAt: 0,
         };
+
+        // The --term-row-height CSS var is a design token, not the renderer's
+        // truth: xterm sizes .xterm-screen to cols×cell / rows×cell inline.
+        // Read the real cell height so scrollLines keeps up with the finger.
+        function readCellHeight(): number {
+          try {
+            var screen = surface.querySelector(".xterm-screen");
+            if (screen && term.rows > 0) {
+              var height = (screen as HTMLElement).clientHeight / term.rows;
+              if (height > 4) return height;
+            }
+          } catch (e) {}
+          var raw = getComputedStyle(surface).getPropertyValue("--term-row-height").trim();
+          var parsed = parseFloat(raw);
+          return parsed > 0 ? parsed : 16;
+        }
+
+        function mouseReportingActive(): boolean {
+          try {
+            return !!term.element && term.element.classList.contains("enable-mouse-events");
+          } catch (e) {
+            return false;
+          }
+        }
+
+        // vim(mouse=a)/tmux route wheel events per pane/window; a raw
+        // PageDown key moves the cursor or hits the outer app instead, which
+        // reads as "wrong direction". Speak SGR wheel at the touched cell.
+        function touchWheelSequence(direction: -1 | 1, touch: Touch): string {
+          var cols = term.cols || 80;
+          var rows = term.rows || 24;
+          var col = 1;
+          var row = 1;
+          try {
+            var screen = surface.querySelector(".xterm-screen") as HTMLElement | null;
+            if (screen) {
+              var rect = screen.getBoundingClientRect();
+              if (rect.width > 0 && rect.height > 0) {
+                col = Math.min(cols, Math.max(1, Math.floor((touch.clientX - rect.left) / (rect.width / cols)) + 1));
+                row = Math.min(rows, Math.max(1, Math.floor((touch.clientY - rect.top) / (rect.height / rows)) + 1));
+              }
+            }
+          } catch (e) {}
+          var button = direction > 0 ? 65 : 64;
+          return "\u001b[<" + button + ";" + col + ";" + row + "M";
+        }
 
         surface.addEventListener("touchstart", function(e: TouchEvent) {
           if (e.touches.length !== 1) {
@@ -378,17 +426,12 @@ import { consumeTerminalWheelPage, terminalWheelPageSequence, type TerminalWheel
           var t = e.touches[0];
           touchId = t.identifier;
           lastY = t.clientY;
-          // Re-read the row height per gesture: native shells (Android/iOS)
-          // inject --term-row-height via a <style> added after page load, so a
-          // one-shot read at init can still hold the pre-override default.
-          var raw = getComputedStyle(surface).getPropertyValue("--term-row-height").trim();
-          var parsed = parseFloat(raw);
-          if (parsed > 0) rowHeight = parsed;
-          // Fresh gesture: reset the paging accumulator so a slow start does
-          // not bleed into the next page decision.
-          pagingState.direction = 0;
+          // Re-read per gesture: native shells inject font-size overrides and
+          // refits change the cell metrics after page load.
+          rowHeight = readCellHeight();
+          carryPixels = 0;
+          travelPixels = 0;
           pagingState.accumulatedPixels = 0;
-          pagingState.lastEventAt = 0;
           pagingState.lastPageAt = 0;
         }, { passive: true });
 
@@ -399,36 +442,43 @@ import { consumeTerminalWheelPage, terminalWheelPageSequence, type TerminalWheel
             if (e.touches[i].identifier === touchId) { touch = e.touches[i]; break; }
           }
           if (!touch) return;
+          // Claim the gesture before any early return: once the WebView
+          // latches a native pan on .xterm-viewport, later preventDefault
+          // calls are ignored and native + manual scrolling fight each other.
+          if (e.cancelable) e.preventDefault();
           var dy = touch.clientY - lastY;
           lastY = touch.clientY;
           if (dy === 0) return;
-
-          // Take over the gesture so the WebView neither bounces the page nor
-          // starts a text selection; this drag is a scroll.
-          e.preventDefault();
+          travelPixels += Math.abs(dy);
 
           var isAlternate = term.buffer.active.type === "alternate";
           if (isAlternate) {
-            // The wheel helper maps deltaY<0 → PageUp, deltaY>0 → PageDown.
-            // Touch uses natural scrolling (content follows the finger), so feed
-            // the inverted delta: finger up (dy<0) → PageDown (reveal newer).
-            var direction = consumeTerminalWheelPage(
-              { deltaY: -dy, deltaMode: 0 },
-              pagingState,
-              term.rows * rowHeight,
-              Date.now(),
-            );
-            var seq = terminalWheelPageSequence(direction);
-            if (seq) sendPtyInput(seq);
-          } else {
-            // Normal buffer: scroll the scrollback. scrollLines(+) moves toward
-            // older lines, matching finger-down (dy>0) revealing older output.
-            var lines = Math.round(dy / rowHeight);
-            if (lines !== 0) {
-              term.scrollLines(lines);
-              setTerminalManualScrollActive();
+            // Natural scrolling: finger up (dy<0) reveals newer content, fed
+            // in as positive pixels → PageDown (or SGR wheel down).
+            var direction = consumeTerminalTouchPage(-dy, pagingState, Date.now());
+            if (direction !== 0) {
+              var sequence = mouseReportingActive()
+                ? touchWheelSequence(direction, touch)
+                : terminalWheelPageSequence(direction);
+              if (sequence) sendPtyInput(sequence);
             }
+            return;
           }
+
+          // Normal buffer: pixel-accurate scrollback. Whole rows scroll now
+          // and the sub-row remainder carries into the next event, so slow
+          // drags keep up with the finger instead of dropping every
+          // sub-rowHeight move.
+          carryPixels += dy;
+          var lines = Math.trunc(carryPixels / rowHeight);
+          if (lines !== 0) {
+            carryPixels -= lines * rowHeight;
+            term.scrollLines(lines);
+          }
+          // Detach auto-follow on the first deliberate movement (before a
+          // whole row accrues) so streaming writes stop snapping the viewport
+          // back to the bottom mid-drag.
+          if (travelPixels > 8) setTerminalManualScrollActive();
         }, { passive: false });
 
         function endTouch() {
@@ -671,7 +721,6 @@ import { consumeTerminalWheelPage, terminalWheelPageSequence, type TerminalWheel
           return Promise.resolve();
         }
         var text = String(data);
-        var follow = state.terminalAutoFollow !== false;
         var queue = state.terminalWriteQueue || Promise.resolve();
         state.terminalWriteQueue = queue.catch(function() {}).then(function() {
           return new Promise(function(resolve) {
@@ -681,7 +730,15 @@ import { consumeTerminalWheelPage, terminalWheelPageSequence, type TerminalWheel
               return;
             }
             terminal.write(text, function() {
-              if (follow && terminal === state.terminal) terminal.scrollToBottom();
+              // Check the live flag instead of a snapshot taken at enqueue
+              // time: a chunk queued before the user scrolled up must not
+              // yank the viewport back to the bottom mid-drag. Going through
+              // scrollTerminalToBottom also opens the programmatic-scroll
+              // window so the viewport scroll handler doesn't read our own
+              // bottom-snap as "the user returned to the bottom".
+              if (terminal === state.terminal && state.terminalAutoFollow !== false) {
+                scrollTerminalToBottom(false);
+              }
               if (ackBytes && sessionId) acknowledgePtyOutput(sessionId, ackBytes);
               resolve(null);
             });

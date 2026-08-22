@@ -30,6 +30,7 @@ interface ResolvedUpdateAsset {
   size: number;
   source: "local" | "github";
   releaseNotes?: string;
+  sha256?: string;
 }
 
 export interface PublicUpdateRoutesDependencies {
@@ -66,6 +67,8 @@ export function registerPublicUpdateRoutes(app: Express, deps: PublicUpdateRoute
       source: latest.source,
       channel,
       releaseNotes: updateAvailable ? (latest.releaseNotes ?? null) : null,
+      // 本地分发时为 hex SHA-256，Android 客户端下载后校验；GitHub 来源为 null。
+      sha256: updateAvailable ? (latest.sha256 ?? null) : null,
     });
   }));
 

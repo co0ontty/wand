@@ -10,7 +10,7 @@ import { loadGitStatus, updateTopbarGitBadge } from "./git-commit";
 import { activateSession, autoResizeInput, buildMessagesForRender, canAutoResumeSession, captureTerminalInput, closeKeyboardPopup, closeSwipedItem, flushCrossSessionQueue, focusInputBox, getControlInput, hasActiveTerminalSelection, hideMiniKeyboard, isImeKeyboardEvent, queueDirectInput, reconcileInteractiveState, renderCrossSessionQueue, sendInputFromBox, setTerminalInteractive, shouldCaptureTerminalEvent, stopSession, switchToSessionView, updateInteractiveControls, updateStructuredQueueCounter, updateVoiceTranscript } from "./input";
 import { _apkVersion, _getNativePermission, _hasNativeBridge, _macAppVersion, _syncWakeLock, _vibrate, clearSessionProgressNative, hideError, notifyTaskEnded, openWandDialog, performRestart, sendBrowserNotification, showError, showNotificationBubble, showRestartOverlay, showToast, tryPlayNotificationSound, wandAlert, wandConfirm, wandPrompt } from "./notifications";
 import { bindForegroundSyncListeners, getEffectiveCwd, render, renderAppShell, resetChatRenderCache, updateOfflineBanner } from "./render";
-import { ensureClaudeHistoryLoaded, ensureCodexHistoryLoaded, loadClaudeHistory, loadCodexHistory, renderSessions, renderSessionsListContent } from "./sidebar";
+import { renderSessions, renderSessionsListContent } from "./sidebar";
 import { initTerminal, maybeScrollTerminalToBottom, syncTerminalBuffer } from "./terminal";
 import { computeRunningSignal, renderStructuredStatusBar, updateRunningIndicators } from "./utils";
 import { ensureTerminalFit, ensureTerminalFitWithRetry, scheduleTerminalResize, teardownTerminal } from "./viewport";
@@ -108,15 +108,6 @@ import { hasPooledTerminal } from "./terminal-pool";
         .then(function() {
           startPolling();
           render();
-          // Match the restored-session startup path: a fresh password login
-          // should also populate local Claude/Codex history after first paint.
-          // Without this warm-up, non-Wand sessions stay empty until reload or
-          // until the user enters manage mode.
-          if (!state.claudeHistoryLoaded) {
-            setTimeout(function() {
-              if (!state.claudeHistoryLoaded) ensureClaudeHistoryLoaded();
-            }, 600);
-          }
         })
         .catch(function(error) {
           if (error === "handled") return;

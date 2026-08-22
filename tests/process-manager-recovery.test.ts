@@ -144,11 +144,13 @@ test("ProcessManager recovers an OpenCode ses_* id from its local session index"
   mkdirSync(cwd, { recursive: true });
   mkdirSync(dbDir, { recursive: true });
   const db = new DatabaseSync(path.join(dbDir, "opencode.db"));
-  db.exec("CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, time_created INTEGER, time_updated INTEGER)");
+  db.exec("CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT, directory TEXT, time_created INTEGER, time_updated INTEGER)");
   const startedAtMs = Date.now() - 20_000;
   const endedAtMs = startedAtMs + 10_000;
-  db.prepare("INSERT INTO session (id, directory, time_created, time_updated) VALUES (?, ?, ?, ?)")
-    .run("ses_wand_resume", cwd, startedAtMs + 1_000, endedAtMs - 1_000);
+  db.prepare("INSERT INTO session (id, parent_id, directory, time_created, time_updated) VALUES (?, ?, ?, ?, ?)")
+    .run("ses_wand_resume", null, cwd, startedAtMs + 1_000, endedAtMs - 1_000);
+  db.prepare("INSERT INTO session (id, parent_id, directory, time_created, time_updated) VALUES (?, ?, ?, ?, ?)")
+    .run("ses_subagent", "ses_wand_resume", cwd, startedAtMs + 2_000, endedAtMs);
   db.close();
 
   const storedSession: SessionSnapshot = {

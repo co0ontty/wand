@@ -545,34 +545,6 @@ function directoryEntryToVm(
   entry: DirectorySessionEntry,
   selectedId: string | null,
 ): UiSessionVm {
-  if (entry.type === "recoverable") {
-    const provider = entry.history.provider === "codex"
-      || entry.history.provider === "opencode"
-      || entry.history.provider === "qoder"
-      ? entry.history.provider
-      : "claude";
-    return {
-      id: entry.history.claudeSessionId,
-      source: `${provider}-history`,
-      provider,
-      kind: "pty",
-      title: entry.history.firstUserMessage || "（空会话）",
-      description: "",
-      cwd: entry.history.cwd || "",
-      status: "stopped",
-      statusLabel: "历史",
-      active: false,
-      selected: false,
-      resumable: true,
-      permissionBlocked: false,
-      inFlight: false,
-      titleGenerating: false,
-      startedAt: entry.history.timestamp
-        || (entry.history.mtimeMs ? new Date(entry.history.mtimeMs).toISOString() : undefined),
-      claudeSessionId: entry.history.claudeSessionId,
-    };
-  }
-
   const session = entry.session;
   const id = session.id;
   const status = session.status || "idle";
@@ -690,7 +662,7 @@ function useSessionDirectories(enabled: boolean, refreshKey: number): {
 
 function nodeContainsActive(node: SessionDirectoryNode, selectedId: string | null): boolean {
   if (!selectedId) return false;
-  return node.entries.some((entry) => entry.type === "managed" && entry.session.id === selectedId)
+  return node.entries.some((entry) => entry.session.id === selectedId)
     || node.children.some((child) => nodeContainsActive(child, selectedId));
 }
 

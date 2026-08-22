@@ -11,7 +11,7 @@ import express from "express";
 import { defaultConfig } from "../src/config.js";
 import { jsonErrorHandler } from "../src/express-async.js";
 import { ProcessManager } from "../src/process-manager.js";
-import { registerSessionRoutes } from "../src/server-session-routes.js";
+import { registerClaudeHistoryRoutes, registerSessionRoutes } from "../src/server-session-routes.js";
 import { SessionRegistry } from "../src/session-registry.js";
 import { WandStorage } from "../src/storage.js";
 import { StructuredSessionManager } from "../src/structured-session-manager.js";
@@ -26,6 +26,7 @@ test("session HTTP interface preserves create, list, update, detail, and delete 
   const app = express();
   app.use(express.json());
   registerSessionRoutes(app, processes, structured, storage, config.defaultMode, config, sessions);
+  registerClaudeHistoryRoutes(app, processes, structured, storage, sessions);
   app.use(jsonErrorHandler);
   const server = createServer(app);
 
@@ -56,6 +57,12 @@ test("session HTTP interface preserves create, list, update, detail, and delete 
     const listed = await listResponse.json() as Array<{ id: string; output: string }>;
     assert.deepEqual(listed.map((session) => session.id), [created.id]);
     assert.equal(listed[0].output, "");
+
+    for (const provider of ["claude", "codex", "opencode", "qoder"]) {
+      const historyResponse = await fetch(`${baseUrl}/api/${provider}-history`);
+      assert.equal(historyResponse.status, 200);
+      assert.deepEqual(await historyResponse.json(), []);
+    }
 
     const firstPageResponse = await fetch(`${baseUrl}/api/session-list?offset=0&limit=1`);
     assert.equal(firstPageResponse.status, 200);

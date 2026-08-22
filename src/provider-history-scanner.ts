@@ -483,6 +483,10 @@ export class ProviderHistoryScanner {
     let database: DatabaseSync | null = null;
     try {
       database = new DatabaseSync(this.openCodeDatabasePath, { readOnly: true });
+      const sessionColumns = database.prepare("PRAGMA table_info(session)").all() as Array<{ name?: unknown }>;
+      const rootSessionFilter = sessionColumns.some((column) => column.name === "parent_id")
+        ? "WHERE session.parent_id IS NULL"
+        : "";
       const rows = database.prepare(`
         SELECT
           session.id AS id,
@@ -494,6 +498,7 @@ export class ProviderHistoryScanner {
           SUM(CASE WHEN json_extract(message.data, '$.role') = 'assistant' THEN 1 ELSE 0 END) AS assistant_count
         FROM session
         LEFT JOIN message ON message.session_id = session.id
+        ${rootSessionFilter}
         GROUP BY session.id
         ORDER BY session.time_updated DESC
         LIMIT 1000

@@ -84,4 +84,30 @@ test("commands endpoint dispatches shell requests without a provider command", a
   assert.equal(typeof opts.workspaceId, "string");
   assert.ok(opts.workspaceId);
   assert.equal(opts.workspaceTaskId, undefined);
+
+  const inputCalls: Array<[string, string, string | undefined, string | undefined]> = [];
+  handle.processManager.get = ((id: string) => id === created.id ? created : undefined) as
+    typeof handle.processManager.get;
+  handle.processManager.sendInput = ((id, input, view, shortcutKey) => {
+    inputCalls.push([id, input, view, shortcutKey]);
+    return { ...created, output: "x".repeat(200_000) };
+  }) as typeof handle.processManager.sendInput;
+
+  const inputResponse = await fetch(`${handle.urls[0]!.url}/api/sessions/${created.id}/input`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${appToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      input: "\r",
+      view: "terminal",
+      shortcutKey: "enter_text",
+      responseMode: "accepted",
+    }),
+  });
+
+  assert.equal(inputResponse.status, 202);
+  assert.deepEqual(await inputResponse.json(), { accepted: true });
+  assert.deepEqual(inputCalls, [[created.id, "\r", "terminal", "enter_text"]]);
 });

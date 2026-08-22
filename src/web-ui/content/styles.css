@@ -3131,6 +3131,11 @@
       padding: 0;
       border-radius: 0;
       box-shadow: none;
+      /* 终端滚动由 initTerminalTouchScroll / wheel 处理器全权驱动：
+       * 不声明 touch-action 时，首个未拦截的 touchmove 会让 WebView 把
+       * 手势锁给 .xterm-viewport 的原生滚动，与手动 scrollLines 叠加成
+       * 双倍速/惯性漂移。禁掉合成器层面的接管，滚动权始终归 JS。 */
+      touch-action: none;
       /* PC 端（Windows 125%/150% 缩放、Linux 1× DPR 等）字符渲染特别敏感：
        * 1) 默认子像素抗锯齿在彩色终端背景下视觉发虚 → 强制灰度抗锯齿；
        * 2) 等宽字体的连字（liga/calt）和 kerning 会让 ">=" / "->" 等

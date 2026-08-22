@@ -33672,59 +33672,17 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       } : {}
     };
   }
-  function historyToVm(history2, provider, state2, selected) {
-    const id = asString(history2.claudeSessionId);
-    const historyStartedAt = history2.timestamp || (Number.isFinite(history2.mtimeMs) && Number(history2.mtimeMs) > 0 ? new Date(Number(history2.mtimeMs)).toISOString() : void 0);
-    return {
-      id,
-      source: provider === "codex" ? "codex-history" : "claude-history",
-      provider,
-      kind: "pty",
-      title: asString(history2.firstUserMessage) || asString(history2.title) || asString(history2.summary) || "\uFF08\u7A7A\u4F1A\u8BDD\uFF09",
-      description: "",
-      cwd: asString(history2.cwd, defaultCwd(state2)),
-      status: "stopped",
-      statusLabel: "\u5386\u53F2",
-      active: false,
-      selected: Boolean(selected[id]),
-      resumable: Boolean(id),
-      permissionBlocked: false,
-      inFlight: false,
-      titleGenerating: false,
-      ...historyStartedAt ? { startedAt: historyStartedAt } : {},
-      ...id ? { claudeSessionId: id } : {}
-    };
-  }
-  function visibleHistory(histories, managedIds) {
-    return (histories ?? []).filter((history2) => {
-      const id = asString(history2.claudeSessionId);
-      return Boolean(id) && Boolean(history2.hasConversation) && !history2.managedByWand && !managedIds.has(id);
-    });
-  }
   function sortSessionVms(entries) {
     return entries.sort((left, right) => timestamp(right.startedAt) - timestamp(left.startedAt));
   }
   function deriveLegacyUiSnapshot(state2, environment) {
     const sessions = state2.sessions ?? [];
     const sessionSelection = state2.selectedSessionIds ?? {};
-    const claudeSelection = state2.selectedClaudeHistoryIds ?? {};
-    const codexSelection = state2.selectedCodexHistoryIds ?? {};
     const sessionVms = sessions.map((session) => sessionToVm(session, state2, sessionSelection));
     const selected = sessionVms.find((session) => session.id === state2.selectedId) ?? null;
     const selectedLegacy = sessions.find((session) => session.id === state2.selectedId) ?? null;
-    const managedProviderIds = new Set(
-      sessions.map((session) => asString(session.claudeSessionId)).filter(Boolean)
-    );
     const wand = sortSessionVms(sessionVms.filter((session) => session.source === "wand"));
     const automation = sortSessionVms(sessionVms.filter((session) => session.source === "automation"));
-    const histories = [];
-    if (state2.claudeHistoryLoaded) {
-      histories.push(...visibleHistory(state2.claudeHistory, managedProviderIds).map((history2) => historyToVm(history2, "claude", state2, claudeSelection)));
-    }
-    if (state2.codexHistoryLoaded) {
-      histories.push(...visibleHistory(state2.codexHistory, managedProviderIds).map((history2) => historyToVm(history2, "codex", state2, codexSelection)));
-    }
-    histories.sort((left, right) => timestamp(right.startedAt) - timestamp(left.startedAt));
     const mobile = environment.width <= 768;
     const drawerOpen = Boolean(state2.sessionsDrawerOpen);
     const sidebarPinned = Boolean(state2.sidebarPinned);
@@ -33733,7 +33691,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     const structuredSelected = selected?.kind === "structured";
     const currentView = structuredSelected || state2.currentView === "chat" ? "chat" : "terminal";
     const manageMode = Boolean(state2.sessionsManageMode);
-    const selectedCount = countSelected(sessionSelection) + countSelected(claudeSelection) + countSelected(codexSelection);
+    const selectedCount = countSelected(sessionSelection);
     const effectiveCwd = selected?.cwd ?? defaultCwd(state2);
     const gitStatus = selected && state2.gitStatusSessionId === selected.id && state2.gitStatus?.isGit ? {
       branch: asString(state2.gitStatus.branch, "?"),
@@ -33766,7 +33724,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       selected,
       sidebar: {
         interactiveCount: sessions.filter((session) => !isAutomation(session)).length,
-        totalCount: wand.length + automation.length + histories.length,
+        totalCount: wand.length + automation.length,
         manageMode,
         selectedCount,
         groups: [
@@ -33776,12 +33734,6 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
             label: "\u81EA\u52A8\u5316",
             expanded: manageMode || Boolean(environment.automationExpanded),
             entries: automation
-          },
-          {
-            kind: "history",
-            label: "\u975E Wand \u4F1A\u8BDD",
-            expanded: manageMode || Boolean(environment.historyExpanded),
-            entries: histories
           }
         ]
       },
@@ -38885,28 +38837,6 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     return labels[status] ?? status;
   }
   function directoryEntryToVm(entry, selectedId) {
-    if (entry.type === "recoverable") {
-      const provider = entry.history.provider === "codex" || entry.history.provider === "opencode" || entry.history.provider === "qoder" ? entry.history.provider : "claude";
-      return {
-        id: entry.history.claudeSessionId,
-        source: `${provider}-history`,
-        provider,
-        kind: "pty",
-        title: entry.history.firstUserMessage || "\uFF08\u7A7A\u4F1A\u8BDD\uFF09",
-        description: "",
-        cwd: entry.history.cwd || "",
-        status: "stopped",
-        statusLabel: "\u5386\u53F2",
-        active: false,
-        selected: false,
-        resumable: true,
-        permissionBlocked: false,
-        inFlight: false,
-        titleGenerating: false,
-        startedAt: entry.history.timestamp || (entry.history.mtimeMs ? new Date(entry.history.mtimeMs).toISOString() : void 0),
-        claudeSessionId: entry.history.claudeSessionId
-      };
-    }
     const session = entry.session;
     const id = session.id;
     const status = session.status || "idle";
@@ -39004,7 +38934,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   }
   function nodeContainsActive(node, selectedId) {
     if (!selectedId) return false;
-    return node.entries.some((entry) => entry.type === "managed" && entry.session.id === selectedId) || node.children.some((child) => nodeContainsActive(child, selectedId));
+    return node.entries.some((entry) => entry.session.id === selectedId) || node.children.some((child) => nodeContainsActive(child, selectedId));
   }
   function getSessionDirectoryLabels(node) {
     const customName = node.customName?.trim() ?? "";
@@ -41757,41 +41687,25 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   function getSessionEntryGroups() {
     var wandEntries = [];
     var automationEntries = [];
-    var nonWandEntries = [];
     state.sessions.forEach(function(s) {
       var t6 = s.startedAt ? new Date(s.startedAt).getTime() : 0;
       var entry = { kind: "session", ref: s, t: isFinite(t6) ? t6 : 0 };
       (isAutomationSession(s) ? automationEntries : wandEntries).push(entry);
     });
-    if (state.claudeHistoryLoaded) {
-      getVisibleClaudeHistorySessions().forEach(function(h) {
-        var t6 = h.timestamp ? new Date(h.timestamp).getTime() : Number(h.mtimeMs) || 0;
-        if (!isFinite(t6)) t6 = Number(h.mtimeMs) || 0;
-        nonWandEntries.push({ kind: "history", ref: h, t: t6 });
-      });
-    }
-    if (state.codexHistoryLoaded) {
-      getVisibleCodexHistorySessions().forEach(function(h) {
-        var t6 = h.timestamp ? new Date(h.timestamp).getTime() : Number(h.mtimeMs) || 0;
-        nonWandEntries.push({ kind: "codex", ref: h, t: isFinite(t6) ? t6 : 0 });
-      });
-    }
     return {
       wand: sortSessionEntries(wandEntries),
-      automation: sortSessionEntries(automationEntries),
-      nonWand: sortSessionEntries(nonWandEntries)
+      automation: sortSessionEntries(automationEntries)
     };
   }
   function renderSessions() {
     var groups = [];
     groups.push(renderSessionManageBar());
     var entries = getSessionEntryGroups();
-    if (entries.wand.length + entries.automation.length + entries.nonWand.length === 0) {
+    if (entries.wand.length + entries.automation.length === 0) {
       return renderSessionManageBar() + '<div class="empty-state"><strong>\u8FD8\u6CA1\u6709\u4F1A\u8BDD\u8BB0\u5F55</strong><br>\u70B9\u51FB\u4E0A\u65B9\u300C\u65B0\u5BF9\u8BDD\u300D\u5F00\u59CB\u4F60\u7684\u7B2C\u4E00\u6B21\u5BF9\u8BDD\u3002</div>';
     }
     if (entries.wand.length > 0) groups.push(renderSessionEntries(entries.wand));
     if (entries.automation.length > 0) groups.push(renderAutomationSessionGroup(entries.automation));
-    if (entries.nonWand.length > 0) groups.push(renderNonWandSessionGroup(entries.nonWand));
     return groups.join("");
   }
   function isSidebarNarrow() {
@@ -41814,10 +41728,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       return entry.ref.id === state.selectedId;
     });
     var automationTile = automationCount > 0 ? '<button class="sidebar-collapsed-tile automation-count-tile' + (automationActive ? " active-group" : "") + '" type="button" data-expand-session-group="automation" title="\u5C55\u5F00\u67E5\u770B ' + automationCount + ' \u4E2A\u81EA\u52A8\u5316\u4F1A\u8BDD" aria-label="\u5C55\u5F00\u67E5\u770B ' + automationCount + ' \u4E2A\u81EA\u52A8\u5316\u4F1A\u8BDD"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v4"/><path d="M12 18v4"/><path d="M4.93 4.93l2.83 2.83"/><path d="M16.24 16.24l2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="M4.93 19.07l2.83-2.83"/><path d="M16.24 7.76l2.83-2.83"/><circle cx="12" cy="12" r="3"/></svg><span class="non-wand-count-badge">' + (automationCount > 99 ? "99+" : automationCount) + "</span></button>" : "";
-    var nonWandCount = entries.nonWand.length;
-    var nonWandTile = nonWandCount > 0 ? '<button class="sidebar-collapsed-tile non-wand-count-tile" type="button" data-expand-session-group="non-wand" title="\u5C55\u5F00\u67E5\u770B ' + nonWandCount + ' \u4E2A\u975E Wand \u4F1A\u8BDD" aria-label="\u5C55\u5F00\u67E5\u770B ' + nonWandCount + ' \u4E2A\u975E Wand \u4F1A\u8BDD"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 109-9 9.75 9.75 0 00-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></svg><span class="non-wand-count-badge">' + (nonWandCount > 99 ? "99+" : nonWandCount) + "</span></button>" : "";
     var addTile = '<button class="sidebar-collapsed-tile add" type="button" data-collapsed-new-session="1" title="\u65B0\u5EFA\u4F1A\u8BDD" aria-label="\u65B0\u5EFA\u4F1A\u8BDD"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>';
-    return '<div class="sidebar-collapsed-tiles">' + tiles + automationTile + nonWandTile + addTile + "</div>";
+    return '<div class="sidebar-collapsed-tiles">' + tiles + automationTile + addTile + "</div>";
   }
   function renderSessionsListContent() {
     return isSidebarNarrow() ? renderCollapsedSessionTiles() : renderSessions();
@@ -41827,9 +41739,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       return '<div class="session-manage-bar"><span class="sidebar-intro">Wand \u4F1A\u8BDD</span><button class="btn btn-ghost btn-xs session-manage-toggle" data-action="toggle-manage-mode" type="button"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><span>\u7BA1\u7406</span></button></div>';
     }
     var sessionCount = getSelectedSessionIds().length;
-    var historyCount = getSelectedClaudeHistoryIds().length;
-    var codexCount = getSelectedCodexHistoryIds().length;
-    var totalCount = sessionCount + historyCount + codexCount;
+    var totalCount = sessionCount;
     var hasAny = totalCount > 0;
     var selectable = countSelectableItems();
     var allSelected = selectable > 0 && totalCount >= selectable;
@@ -41847,10 +41757,6 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     }).join("");
     html += "</section>";
     return html;
-  }
-  function renderNonWandSessionGroup(entries) {
-    var expanded = state.sessionsManageMode || readStoredBoolean(NON_WAND_SESSIONS_EXPANDED_KEY, false);
-    return '<details class="non-wand-session-group' + (state.sessionsManageMode ? " manage-mode" : "") + '"' + (expanded ? " open" : "") + '><summary class="non-wand-session-summary" title="Claude \u4E0E Codex \u7684\u672C\u673A\u539F\u751F\u4F1A\u8BDD\uFF0C\u4E0D\u53C2\u4E0E Wand \u4F1A\u8BDD\u6392\u5E8F"><span class="non-wand-session-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 109-9 9.75 9.75 0 00-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></svg></span><span class="non-wand-session-title">\u975E Wand \u4F1A\u8BDD</span><span class="non-wand-session-count" aria-label="' + entries.length + ' \u4E2A\u4F1A\u8BDD">' + entries.length + '</span><svg class="non-wand-session-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></summary>' + renderSessionEntries(entries, "non-wand-session-list") + "</details>";
   }
   function renderAutomationSessionGroup(entries) {
     var expanded = state.sessionsManageMode || readStoredBoolean(AUTOMATION_SESSIONS_EXPANDED_KEY, false);
@@ -41870,16 +41776,6 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       return !!state.selectedSessionIds[id];
     });
   }
-  function getSelectedClaudeHistoryIds() {
-    return Object.keys(state.selectedClaudeHistoryIds).filter(function(id) {
-      return !!state.selectedClaudeHistoryIds[id];
-    });
-  }
-  function getSelectedCodexHistoryIds() {
-    return Object.keys(state.selectedCodexHistoryIds).filter(function(id) {
-      return !!state.selectedCodexHistoryIds[id];
-    });
-  }
   function clearManageSelections() {
     state.selectedSessionIds = {};
     state.selectedClaudeHistoryIds = {};
@@ -41887,9 +41783,6 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   }
   function toggleManageMode(force) {
     state.sessionsManageMode = typeof force === "boolean" ? force : !state.sessionsManageMode;
-    if (state.sessionsManageMode && (!state.claudeHistoryLoaded || !state.codexHistoryLoaded)) {
-      ensureClaudeHistoryLoaded().then(updateSessionsList);
-    }
     if (!state.sessionsManageMode) {
       clearManageSelections();
       closeSwipedItem();
@@ -41900,28 +41793,16 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     return state.sessions.slice();
   }
   function countSelectableItems() {
-    return getSelectableSessions().length + getVisibleClaudeHistorySessions().length + getVisibleCodexHistorySessions().length;
+    return getSelectableSessions().length;
   }
   function selectAllVisibleItems() {
-    if (!state.claudeHistoryLoaded || !state.codexHistoryLoaded) {
-      ensureClaudeHistoryLoaded().then(selectAllVisibleItems);
-      return;
-    }
     var nextSessionIds = {};
     getSelectableSessions().forEach(function(session) {
       nextSessionIds[session.id] = true;
     });
-    var nextHistoryIds = {};
-    getVisibleClaudeHistorySessions().forEach(function(session) {
-      nextHistoryIds[session.claudeSessionId] = true;
-    });
-    var nextCodexIds = {};
-    getVisibleCodexHistorySessions().forEach(function(session) {
-      nextCodexIds[session.claudeSessionId] = true;
-    });
     state.selectedSessionIds = nextSessionIds;
-    state.selectedClaudeHistoryIds = nextHistoryIds;
-    state.selectedCodexHistoryIds = nextCodexIds;
+    state.selectedClaudeHistoryIds = {};
+    state.selectedCodexHistoryIds = {};
     updateSessionsList();
   }
   function clearSelections() {
@@ -41948,61 +41829,24 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   }
   function batchDeleteSelected() {
     var sessionIds = getSelectedSessionIds();
-    var historyIds = getSelectedClaudeHistoryIds();
-    var codexIds = getSelectedCodexHistoryIds();
-    var managedProviderIds = state.sessions.filter(function(session) {
-      return sessionIds.indexOf(session.id) !== -1;
-    }).map(function(session) {
-      return session.claudeSessionId;
-    }).filter(Boolean);
-    var total = sessionIds.length + historyIds.length + codexIds.length;
+    var total = sessionIds.length;
     if (!total) return;
     confirmDelete("\u786E\u8BA4\u5220\u9664\u6240\u9009 " + total + " \u9879\u5417\uFF1F\u6B64\u64CD\u4F5C\u65E0\u6CD5\u64A4\u9500\u3002", {
       title: "\u5220\u9664\u6240\u9009 " + total + " \u9879"
     }).then(function(ok) {
       if (!ok) return;
-      var requests = [];
-      if (sessionIds.length > 0) {
-        requests.push(fetch("/api/sessions/batch-delete", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "same-origin",
-          body: JSON.stringify({ sessionIds })
-        }).then(function(res) {
-          return res.json();
-        }));
-      }
-      if (historyIds.length > 0) {
-        requests.push(fetch("/api/claude-history/batch-delete", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "same-origin",
-          body: JSON.stringify({ claudeSessionIds: historyIds })
-        }).then(function(res) {
-          return res.json();
-        }));
-      }
-      if (codexIds.length > 0) {
-        requests.push(fetch("/api/codex-history/batch-delete", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "same-origin",
-          body: JSON.stringify({ claudeSessionIds: codexIds })
-        }).then(function(res) {
-          return res.json();
-        }));
-      }
-      Promise.all(requests).then(function() {
+      fetch("/api/sessions/batch-delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ sessionIds })
+      }).then(function(res) {
+        return res.json();
+      }).then(function() {
         if (sessionIds.indexOf(state.selectedId) !== -1) {
           state.selectedId = null;
           persistSelectedId();
         }
-        state.claudeHistory = state.claudeHistory.filter(function(session) {
-          return historyIds.indexOf(session.claudeSessionId) === -1 && managedProviderIds.indexOf(session.claudeSessionId) === -1;
-        });
-        state.codexHistory = state.codexHistory.filter(function(session) {
-          return codexIds.indexOf(session.claudeSessionId) === -1 && managedProviderIds.indexOf(session.claudeSessionId) === -1;
-        });
         clearManageSelections();
         return refreshAll();
       }).catch(function() {
@@ -42013,16 +41857,16 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   }
   function clearAllClaudeHistory() {
     var cutoff = Date.now() - 24 * 60 * 60 * 1e3;
-    var visibleHistory2 = getVisibleClaudeHistorySessions().filter(function(s) {
+    var visibleHistory = getVisibleClaudeHistorySessions().filter(function(s) {
       return !s.timestamp || new Date(s.timestamp).getTime() <= cutoff;
     });
-    if (!visibleHistory2.length) return;
-    return confirmDelete("\u786E\u8BA4\u6E05\u7A7A\u5F53\u524D\u663E\u793A\u7684 " + visibleHistory2.length + " \u6761 Claude \u5386\u53F2\u5417\uFF1F", {
+    if (!visibleHistory.length) return;
+    return confirmDelete("\u786E\u8BA4\u6E05\u7A7A\u5F53\u524D\u663E\u793A\u7684 " + visibleHistory.length + " \u6761 Claude \u5386\u53F2\u5417\uFF1F", {
       title: "\u6E05\u7A7A Claude \u5386\u53F2",
       okLabel: "\u6E05\u7A7A"
     }).then(function(ok) {
       if (!ok) return;
-      var deleteIds = visibleHistory2.map(function(session) {
+      var deleteIds = visibleHistory.map(function(session) {
         return session.claudeSessionId;
       });
       return fetch("/api/claude-history/batch-delete", {
@@ -42130,15 +41974,6 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       _codexHistoryLoadingPromise = null;
     });
     return _codexHistoryLoadingPromise;
-  }
-  function getVisibleCodexHistorySessions() {
-    var managedIds = /* @__PURE__ */ new Set();
-    state.sessions.forEach(function(s) {
-      if (s.claudeSessionId) managedIds.add(s.claudeSessionId);
-    });
-    return state.codexHistory.filter(function(s) {
-      return s.hasConversation && !s.managedByWand && !managedIds.has(s.claudeSessionId);
-    });
   }
 
   // src/web-ui/browser/floating-panel-position.ts
@@ -42880,6 +42715,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           }
           if (Object.prototype.hasOwnProperty.call(msg.data, "exitCode")) {
             statusUpdate.exitCode = msg.data.exitCode;
+          }
+          if (Object.prototype.hasOwnProperty.call(msg.data, "providerCliActive")) {
+            statusUpdate.providerCliActive = !!msg.data.providerCliActive;
+          }
+          if (Object.prototype.hasOwnProperty.call(msg.data, "providerCliExitCode")) {
+            statusUpdate.providerCliExitCode = msg.data.providerCliExitCode;
           }
           if (msg.data.structuredState) {
             statusUpdate.structuredState = msg.data.structuredState;
@@ -44184,6 +44025,18 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     state2.lastPageAt = now;
     return direction;
   }
+  var TERMINAL_TOUCH_PAGE_THRESHOLD_PX = 60;
+  var TERMINAL_TOUCH_PAGE_INTERVAL_MS = 80;
+  function consumeTerminalTouchPage(deltaPixels, state2, now = Date.now()) {
+    if (!Number.isFinite(deltaPixels) || deltaPixels === 0) return 0;
+    state2.accumulatedPixels += deltaPixels;
+    if (Math.abs(state2.accumulatedPixels) < TERMINAL_TOUCH_PAGE_THRESHOLD_PX) return 0;
+    if (now - state2.lastPageAt < TERMINAL_TOUCH_PAGE_INTERVAL_MS) return 0;
+    var direction = state2.accumulatedPixels > 0 ? 1 : -1;
+    state2.accumulatedPixels -= direction * TERMINAL_TOUCH_PAGE_THRESHOLD_PX;
+    state2.lastPageAt = now;
+    return direction;
+  }
   function terminalWheelPageSequence(direction) {
     if (direction < 0) return "\x1B[5~";
     if (direction > 0) return "\x1B[6~";
@@ -44498,12 +44351,51 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     var touchId = null;
     var lastY = 0;
     var rowHeight = 16;
+    var carryPixels = 0;
+    var travelPixels = 0;
     var pagingState = {
-      direction: 0,
       accumulatedPixels: 0,
-      lastEventAt: 0,
       lastPageAt: 0
     };
+    function readCellHeight() {
+      try {
+        var screen = surface.querySelector(".xterm-screen");
+        if (screen && term.rows > 0) {
+          var height = screen.clientHeight / term.rows;
+          if (height > 4) return height;
+        }
+      } catch (e) {
+      }
+      var raw = getComputedStyle(surface).getPropertyValue("--term-row-height").trim();
+      var parsed = parseFloat(raw);
+      return parsed > 0 ? parsed : 16;
+    }
+    function mouseReportingActive() {
+      try {
+        return !!term.element && term.element.classList.contains("enable-mouse-events");
+      } catch (e) {
+        return false;
+      }
+    }
+    function touchWheelSequence(direction, touch) {
+      var cols = term.cols || 80;
+      var rows = term.rows || 24;
+      var col = 1;
+      var row = 1;
+      try {
+        var screen = surface.querySelector(".xterm-screen");
+        if (screen) {
+          var rect = screen.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            col = Math.min(cols, Math.max(1, Math.floor((touch.clientX - rect.left) / (rect.width / cols)) + 1));
+            row = Math.min(rows, Math.max(1, Math.floor((touch.clientY - rect.top) / (rect.height / rows)) + 1));
+          }
+        }
+      } catch (e) {
+      }
+      var button = direction > 0 ? 65 : 64;
+      return "\x1B[<" + button + ";" + col + ";" + row + "M";
+    }
     surface.addEventListener("touchstart", function(e) {
       if (e.touches.length !== 1) {
         touchId = null;
@@ -44512,12 +44404,10 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       var t6 = e.touches[0];
       touchId = t6.identifier;
       lastY = t6.clientY;
-      var raw = getComputedStyle(surface).getPropertyValue("--term-row-height").trim();
-      var parsed = parseFloat(raw);
-      if (parsed > 0) rowHeight = parsed;
-      pagingState.direction = 0;
+      rowHeight = readCellHeight();
+      carryPixels = 0;
+      travelPixels = 0;
       pagingState.accumulatedPixels = 0;
-      pagingState.lastEventAt = 0;
       pagingState.lastPageAt = 0;
     }, { passive: true });
     surface.addEventListener("touchmove", function(e) {
@@ -44530,27 +44420,27 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         }
       }
       if (!touch) return;
+      if (e.cancelable) e.preventDefault();
       var dy = touch.clientY - lastY;
       lastY = touch.clientY;
       if (dy === 0) return;
-      e.preventDefault();
+      travelPixels += Math.abs(dy);
       var isAlternate = term.buffer.active.type === "alternate";
       if (isAlternate) {
-        var direction = consumeTerminalWheelPage(
-          { deltaY: -dy, deltaMode: 0 },
-          pagingState,
-          term.rows * rowHeight,
-          Date.now()
-        );
-        var seq = terminalWheelPageSequence(direction);
-        if (seq) sendPtyInput(seq);
-      } else {
-        var lines = Math.round(dy / rowHeight);
-        if (lines !== 0) {
-          term.scrollLines(lines);
-          setTerminalManualScrollActive();
+        var direction = consumeTerminalTouchPage(-dy, pagingState, Date.now());
+        if (direction !== 0) {
+          var sequence = mouseReportingActive() ? touchWheelSequence(direction, touch) : terminalWheelPageSequence(direction);
+          if (sequence) sendPtyInput(sequence);
         }
+        return;
       }
+      carryPixels += dy;
+      var lines = Math.trunc(carryPixels / rowHeight);
+      if (lines !== 0) {
+        carryPixels -= lines * rowHeight;
+        term.scrollLines(lines);
+      }
+      if (travelPixels > 8) setTerminalManualScrollActive();
     }, { passive: false });
     function endTouch() {
       touchId = null;
@@ -44756,7 +44646,6 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       return Promise.resolve();
     }
     var text6 = String(data);
-    var follow = state.terminalAutoFollow !== false;
     var queue = state.terminalWriteQueue || Promise.resolve();
     state.terminalWriteQueue = queue.catch(function() {
     }).then(function() {
@@ -44767,7 +44656,9 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           return;
         }
         terminal.write(text6, function() {
-          if (follow && terminal === state.terminal) terminal.scrollToBottom();
+          if (terminal === state.terminal && state.terminalAutoFollow !== false) {
+            scrollTerminalToBottom(false);
+          }
           if (ackBytes && sessionId) acknowledgePtyOutput(sessionId, ackBytes);
           resolve(null);
         });
@@ -45986,12 +45877,6 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     } else if (!state.ws || state.ws.readyState !== WebSocket.OPEN && state.ws.readyState !== WebSocket.CONNECTING) {
       initWebSocket();
     }
-    if (state.claudeHistoryLoaded) {
-      loadClaudeHistory();
-    }
-    if (state.codexHistoryLoaded) {
-      loadCodexHistory();
-    }
     return loadSessions({ skipSelectedOutputReload: true }).catch(function(e) {
       console.error("[wand] foreground sync failed:", reason, e);
     });
@@ -46089,11 +45974,6 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         }
         if (_macAppVersion) {
           checkDmgAutoUpdate();
-        }
-        if (!state.claudeHistoryLoaded) {
-          setTimeout(function() {
-            if (!state.claudeHistoryLoaded) ensureClaudeHistoryLoaded();
-          }, 600);
         }
       });
     }).catch(function() {
@@ -52728,11 +52608,6 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     }).then(function() {
       startPolling();
       render();
-      if (!state.claudeHistoryLoaded) {
-        setTimeout(function() {
-          if (!state.claudeHistoryLoaded) ensureClaudeHistoryLoaded();
-        }, 600);
-      }
     }).catch(function(error) {
       if (error === "handled") return;
       console.error("[wand] Login error:", error);

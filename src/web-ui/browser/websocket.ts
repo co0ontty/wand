@@ -565,6 +565,15 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
               if (Object.prototype.hasOwnProperty.call(msg.data, 'exitCode')) {
                 statusUpdate.exitCode = msg.data.exitCode;
               }
+              // finishProviderCli 只推 status 事件（CLI 退出但外层 shell 还活着）。
+              // 不透传这两个字段的话，前端 computeRunningSignal 会一直把
+              // providerCliActive 当 true，运行徽标/停止按钮常亮不熄。
+              if (Object.prototype.hasOwnProperty.call(msg.data, 'providerCliActive')) {
+                statusUpdate.providerCliActive = !!msg.data.providerCliActive;
+              }
+              if (Object.prototype.hasOwnProperty.call(msg.data, 'providerCliExitCode')) {
+                statusUpdate.providerCliExitCode = msg.data.providerCliExitCode;
+              }
               if (msg.data.structuredState) {
                 statusUpdate.structuredState = msg.data.structuredState;
               } else if (Object.prototype.hasOwnProperty.call(msg.data, 'status')) {

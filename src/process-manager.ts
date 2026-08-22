@@ -510,8 +510,12 @@ function listOpenCodeSessionCandidates(): OpenCodeSessionCandidate[] {
   let db: DatabaseSync | null = null;
   try {
     db = new DatabaseSync(dbPath, { readOnly: true });
+    const sessionColumns = db.prepare("PRAGMA table_info(session)").all() as Array<{ name?: unknown }>;
+    const rootSessionFilter = sessionColumns.some((column) => column.name === "parent_id")
+      ? "WHERE parent_id IS NULL"
+      : "";
     const rows = db.prepare(
-      "SELECT id, directory, time_created, time_updated FROM session ORDER BY time_updated DESC LIMIT 500",
+      `SELECT id, directory, time_created, time_updated FROM session ${rootSessionFilter} ORDER BY time_updated DESC LIMIT 500`,
     ).all() as Array<{ id: unknown; directory: unknown; time_created: unknown; time_updated: unknown }>;
     return rows.flatMap((row) => {
       if (typeof row.id !== "string" || typeof row.directory !== "string") return [];
@@ -2673,10 +2677,8 @@ export class ProcessManager extends EventEmitter {
         const escapedModel = trimmedModel.replace(/'/g, "'\\''");
         result += ` --model '${escapedModel}'`;
       }
-      const variant = thinkingEffortToOpenCodeVariant(thinkingEffort ?? null);
-      if (variant && !/--variant(?:\s|=)/.test(result)) {
-        result += ` --variant '${variant.replace(/'/g, "'\\''")}'`;
-      }
+      // thinkingEffort → --variant 仅适用于 `opencode run`（结构化 runner）；
+      // 交互 TUI（裸 `opencode`）没有该选项，注入会导致 CLI 直接报错退出。
       if ((mode === "managed" || mode === "full-access" || mode === "auto-edit") && !/--auto(?:\s|$)/.test(result)) {
         result += " --auto";
       }

@@ -360,6 +360,8 @@ export interface InputRequest {
    * and continue receiving progress through the existing event stream.
    */
   respondImmediately?: boolean;
+  /** PTY input can request a small acknowledgement instead of a full session detail payload. */
+  responseMode?: "snapshot" | "accepted";
   /** Current UI view: "chat" or "terminal". Chat view uses PTY-derived structured messages. */
   view?: "chat" | "terminal";
   autonomyPolicy?: AutonomyPolicy;

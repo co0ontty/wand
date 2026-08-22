@@ -1,5 +1,3 @@
-import type { UiNativeHistoryProvider } from "./ui-store";
-
 export interface DirectoryManagedSession {
   id: string;
   sessionSource?: string;
@@ -27,18 +25,12 @@ export interface DirectoryManagedSession {
   worktreeMergeStatus?: string;
 }
 
-export interface DirectoryHistorySession {
-  claudeSessionId: string;
-  provider?: UiNativeHistoryProvider;
-  cwd?: string;
-  firstUserMessage?: string;
-  timestamp?: string;
-  mtimeMs?: number;
-}
-
-export type DirectorySessionEntry =
-  | { type: "managed"; key: string; sortTimestamp: number; session: DirectoryManagedSession }
-  | { type: "recoverable"; key: string; sortTimestamp: number; history: DirectoryHistorySession };
+export type DirectorySessionEntry = {
+  type: "managed";
+  key: string;
+  sortTimestamp: number;
+  session: DirectoryManagedSession;
+};
 
 export interface SessionDirectoryNode {
   path: string;

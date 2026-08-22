@@ -53,6 +53,43 @@ export function consumeTerminalWheelPage(
   return direction;
 }
 
+export type TerminalTouchPagingState = {
+  accumulatedPixels: number;
+  lastPageAt: number;
+};
+
+export const TERMINAL_TOUCH_PAGE_THRESHOLD_PX = 60;
+export const TERMINAL_TOUCH_PAGE_INTERVAL_MS = 80;
+
+/**
+ * Turn a single-finger drag into a discrete PTY page direction.
+ *
+ * Touch streams jitter ±1px between events; the wheel helper resets its
+ * accumulator on every direction flip, so a slow careful swipe would never
+ * reach the threshold. Accumulate signed pixels instead: jitter cancels
+ * itself out, and a deliberate direction change must first overcome at most
+ * one threshold of carry before paging the other way (natural hysteresis).
+ *
+ * deltaPixels > 0 means "reveal newer content" (PageDown); the caller applies
+ * the natural-scrolling inversion when feeding finger movement in.
+ */
+export function consumeTerminalTouchPage(
+  deltaPixels: number,
+  state: TerminalTouchPagingState,
+  now: number = Date.now(),
+): -1 | 0 | 1 {
+  if (!Number.isFinite(deltaPixels) || deltaPixels === 0) return 0;
+
+  state.accumulatedPixels += deltaPixels;
+  if (Math.abs(state.accumulatedPixels) < TERMINAL_TOUCH_PAGE_THRESHOLD_PX) return 0;
+  if (now - state.lastPageAt < TERMINAL_TOUCH_PAGE_INTERVAL_MS) return 0;
+
+  var direction: -1 | 1 = state.accumulatedPixels > 0 ? 1 : -1;
+  state.accumulatedPixels -= direction * TERMINAL_TOUCH_PAGE_THRESHOLD_PX;
+  state.lastPageAt = now;
+  return direction;
+}
+
 export function terminalWheelPageSequence(direction: -1 | 0 | 1): string {
   if (direction < 0) return "\u001b[5~";
   if (direction > 0) return "\u001b[6~";

@@ -202,6 +202,24 @@ test("Pi PTY launches the TUI with model and thinking flags", async (t) => {
   assert.match(shellArgs.at(-1) ?? "", /if pi --model 'openai\/gpt-5\.4' --thinking 'high'/);
 });
 
+test("OpenCode PTY never injects --variant (TUI-only flags must stay on `opencode run`)", async (t) => {
+  const { manager, root, spawnCalls } = createHarness(t);
+  // --variant belongs to the `opencode run` subcommand only; the interactive
+  // TUI rejects it and exits. thinkingEffort must not leak into the TUI command.
+  const session = await manager.start("opencode", root, "full-access", undefined, {
+    provider: "opencode",
+    model: "opencode/big-pickle",
+    thinkingEffort: "max",
+  });
+  assert.equal(session.provider, "opencode");
+  assert.equal(session.runner, "pty");
+  const shellArgs = spawnCalls[0][1] as string[];
+  assert.equal(shellArgs[0], "-lic");
+  const launched = shellArgs.at(-1) ?? "";
+  assert.match(launched, /if opencode --model 'opencode\/big-pickle' --auto/);
+  assert.doesNotMatch(launched, /--variant/);
+});
+
 test("command allowlist compares safe shell tokens instead of raw prefixes", () => {
   assert.equal(isCommandAllowedByPrefixes("claude --resume abc", ["claude"]), true);
   assert.equal(isCommandAllowedByPrefixes("MODEL=sonnet claude --help", ["claude"]), false);

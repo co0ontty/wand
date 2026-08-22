@@ -61,6 +61,7 @@ test("extracted public update routes preserve metadata, channel, range, and miss
       source: "local",
       channel: "stable",
       releaseNotes: "notes",
+      sha256: null,
     });
 
     const betaAfterRelease = await fetch(
@@ -77,6 +78,7 @@ test("extracted public update routes preserve metadata, channel, range, and miss
       source: "local",
       channel: "beta",
       releaseNotes: "notes",
+      sha256: null,
     });
 
     const range = await fetch(`${baseUrl}/android/download?channel=stable`, { headers: { Range: "bytes=4-10" } });

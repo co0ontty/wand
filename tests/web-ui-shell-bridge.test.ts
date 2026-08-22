@@ -168,8 +168,8 @@ test("legacy snapshot derivation projects the complete shell state and excludes 
   assert.equal(snapshot.selected?.statusLabel, "思考中");
   assert.equal(snapshot.selected?.inFlight, true);
   assert.equal(snapshot.sidebar.interactiveCount, 2);
-  assert.equal(snapshot.sidebar.totalCount, 5);
-  assert.equal(snapshot.sidebar.selectedCount, 3);
+  assert.equal(snapshot.sidebar.totalCount, 3);
+  assert.equal(snapshot.sidebar.selectedCount, 1);
   assert.deepEqual(snapshot.sidebar.groups.map((group) => [
     group.kind,
     group.expanded,
@@ -177,7 +177,6 @@ test("legacy snapshot derivation projects the complete shell state and excludes 
   ]), [
     ["wand", true, ["structured-1", "pty-1"]],
     ["automation", true, ["automation-1"]],
-    ["history", true, ["codex-1", "history-1"]],
   ]);
   assert.deepEqual(snapshot.sidebar.groups[0].entries[1].worktree, {
     enabled: true,
