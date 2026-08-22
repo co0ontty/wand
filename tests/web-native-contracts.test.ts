@@ -59,6 +59,13 @@ test("web source preserves native events, safe-area variables, and selector hook
     "--app-viewport-height",
     "wand-joystick-root",
   ]);
+  includesAll("src/web-ui/browser/input.ts", [
+    "shouldLockNativeInputTerminalIme",
+    "lockNativeInputTerminalIme",
+    "installNativeInputImeGuard",
+    "is-wand-native-input",
+    "is-wand-terminal-passthrough",
+  ]);
   includesAll("src/web-ui/content/styles.css", [
     "--app-inset-top",
     "--app-inset-bottom",
@@ -119,6 +126,24 @@ test("Apple WebViews preserve deep links, bridge globals, and terminal hooks", (
     ".is-wand-embed-terminal .input-panel",
     ".is-wand-embed-terminal .notification-bubble.update-card",
     ".is-wand-embed-terminal .terminal-container",
+    "__wandNativeInputImeGuard",
+    "suppressEmbeddedTerminalIme",
+  ]);
+  includesAll("ios/Wand/NativeComposer.swift", [
+    "IMEAwareComposerTextView",
+    "markedTextRange",
+    "composerShouldApplyExternalText",
+    "composerShouldSubmitReturn",
+    "composerDraftIsSendable",
+  ]);
+  includesAll("ios/Wand/ChatView.swift", [
+    "IMEAwareComposerTextView",
+    "composerIsComposing",
+  ]);
+  includesAll("ios/Wand/SessionDestinationView.swift", [
+    "IMEAwareComposerTextView",
+    "composerIsComposing",
+    "suppressEmbeddedTerminalIme",
   ]);
   includesAll("ios/Wand/WebBridge.swift", [
     "wand-ios-ime-state",

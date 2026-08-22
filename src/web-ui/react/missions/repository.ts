@@ -1,5 +1,6 @@
 import type {
   CreateMissionRequest,
+  InboxItem,
   MissionDetails,
   MissionDiff,
   MissionsRepository,
@@ -18,6 +19,20 @@ export class HttpMissionsRepository implements MissionsRepository {
   async list(): Promise<MissionDetails[]> {
     const body = await json<{ missions: MissionDetails[] }>(await this.fetchImpl("/api/missions", { credentials: "same-origin" }));
     return body.missions ?? [];
+  }
+
+  async listInbox(): Promise<InboxItem[]> {
+    const body = await json<{ items: InboxItem[] }>(await this.fetchImpl("/api/inbox", { credentials: "same-origin" }));
+    return body.items ?? [];
+  }
+
+  async markInboxRead(sessionId?: string): Promise<void> {
+    await json(await this.fetchImpl("/api/inbox/read", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify(sessionId ? { sessionId } : {}),
+    }));
   }
 
   async create(request: CreateMissionRequest): Promise<MissionDetails> {

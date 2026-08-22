@@ -13,10 +13,12 @@ function createFixture(releases: unknown[] = []) {
   const config = {
     android: { enabled: true, apkDir: "android", currentApkFile: "" },
     macos: { enabled: true, dmgDir: "macos", currentDmgFile: "" },
+    ios: { enabled: true, ipaDir: "ios", currentIpaFile: "" },
   } as WandConfig;
   writeFileSync(configPath, JSON.stringify(config));
   mkdirSync(path.join(root, "android"));
   mkdirSync(path.join(root, "macos"));
+  mkdirSync(path.join(root, "ios"));
   let fetchCount = 0;
   const manager = new DistributionManager({
     configDir: root,
@@ -90,19 +92,24 @@ test("DistributionManager hot-refreshes config and builds settings for both arti
   try {
     writeFileSync(path.join(fixture.root, "android", "wand-v2.1.0.apk"), "apk");
     writeFileSync(path.join(fixture.root, "macos", "wand-v2.2.0.dmg"), "dmg");
+    writeFileSync(path.join(fixture.root, "ios", "wand-v2.3.0.ipa"), "ipa");
 
     const settings = await fixture.manager.getSettings();
     assert.equal(settings.androidApk.fileName, "wand-v2.1.0.apk");
     assert.equal(settings.androidApk.hasApk, true);
     assert.equal(settings.macosDmg.fileName, "wand-v2.2.0.dmg");
     assert.equal(settings.macosDmg.hasDmg, true);
+    assert.equal(settings.iosIpa.fileName, "wand-v2.3.0.ipa");
+    assert.equal(settings.iosIpa.hasIpa, true);
 
     writeFileSync(fixture.configPath, JSON.stringify({
       android: { enabled: false },
       macos: { enabled: false },
+      ios: { enabled: false },
     }));
     assert.equal(await fixture.manager.resolveAndroidDownload("beta"), null);
     assert.equal(await fixture.manager.resolveMacosDownload(), null);
+    assert.equal(await fixture.manager.resolveIosDownload(), null);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }

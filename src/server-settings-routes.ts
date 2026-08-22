@@ -26,6 +26,7 @@ import {
 interface SettingsDistributionPayload {
   androidApk: Record<string, unknown>;
   macosDmg: Record<string, unknown>;
+  iosIpa: Record<string, unknown>;
 }
 
 interface SettingsBuildInfo {
@@ -94,11 +95,13 @@ function publicSystemAi(systemAi: WandConfig["systemAi"]): Record<string, unknow
 function publicDistributionInfo(distribution: SettingsDistributionPayload): SettingsDistributionPayload {
   const androidApk = { ...distribution.androidApk };
   const macosDmg = { ...distribution.macosDmg };
+  const iosIpa = { ...distribution.iosIpa };
   // These server filesystem paths are useful to administrators, but the About
   // panel only needs versions, sizes, and download URLs.
   delete androidApk.apkDir;
   delete macosDmg.dmgDir;
-  return { androidApk, macosDmg };
+  delete iosIpa.ipaDir;
+  return { androidApk, macosDmg, iosIpa };
 }
 
 export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesDependencies): void {

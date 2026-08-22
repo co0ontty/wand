@@ -403,8 +403,12 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
             }
             break;
           case 'started':
-            // New session started
-            loadSessions();
+            if (msg.data && msg.data.id) {
+              updateSessionSnapshot(msg.data);
+            } else {
+              updateSessionSnapshot({ id: msg.sessionId, status: "running" });
+            }
+            scheduleSessionListUpdate();
             break;
           case 'ended': {
             // Build snapshot from server data; use updateSessionSnapshot so the
@@ -504,10 +508,8 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
               updateShellChrome();
             }
 
-            loadSessions().then(function() {
-              // After sessions list is refreshed, try to flush cross-session queue
-              flushCrossSessionQueue();
-            });
+            scheduleSessionListUpdate();
+            flushCrossSessionQueue();
             if (msg.sessionId === state.selectedId) {
               if (!isStructuredEnded) {
                 loadOutput(msg.sessionId);

@@ -32,6 +32,8 @@ test("extracted public update routes preserve metadata, channel, range, and miss
     },
     async resolveLatestDmg() { return null; },
     async resolveMacosDownload() { return null; },
+    async resolveLatestIpa() { return null; },
+    async resolveIosDownload() { return null; },
   });
   app.use(jsonErrorHandler);
   const server = createServer(app);
@@ -88,6 +90,8 @@ test("extracted public update routes preserve metadata, channel, range, and miss
 
     const missingDmg = await fetch(`${baseUrl}/macos/download`);
     assert.equal(missingDmg.status, 404);
+    const missingIpa = await fetch(`${baseUrl}/ios/download`);
+    assert.equal(missingIpa.status, 404);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     rmSync(root, { recursive: true, force: true });

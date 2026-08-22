@@ -318,6 +318,7 @@ test("settings validate atomically, persist without secrets, and password rotati
     const connectedAbout = await connectedAboutResponse.json() as Record<string, unknown> & {
       androidApk?: Record<string, unknown>;
       macosDmg?: Record<string, unknown>;
+      iosIpa?: Record<string, unknown>;
     };
     assert.equal(connectedAbout.settingsAccess, "read-only");
     assert.equal(typeof connectedAbout.version, "string");
@@ -325,6 +326,7 @@ test("settings validate atomically, persist without secrets, and password rotati
     assert.equal("autoUpdate" in connectedAbout, false);
     assert.equal("apkDir" in (connectedAbout.androidApk ?? {}), false);
     assert.equal("dmgDir" in (connectedAbout.macosDmg ?? {}), false);
+    assert.equal("ipaDir" in (connectedAbout.iosIpa ?? {}), false);
     assert.equal((await fetch(`${baseUrl}/api/app-connect-code`, { headers: connectedHeaders })).status, 403);
     assert.equal((await fetch(`${baseUrl}/api/settings/env-preview`, { headers: connectedHeaders })).status, 200);
     assert.equal((await fetch(`${baseUrl}/api/settings/env-preview?reveal=1`, { headers: connectedHeaders })).status, 403);

@@ -3,7 +3,7 @@ import { escapeHtml } from "./utils";
 import { doRenderChat, scheduleChatRender } from "./chat-render";
 import { bindChatScrollListener, persistSelectedId } from "./chat-scroll";
 import { isMobileLayout } from "./file-browser";
-import { _swipeState, closeSwipedItem, deleteClaudeHistoryDirectory, deleteSession, executeDeleteHistory, focusInputBox, getHistoryItemsByCwd, getSelectedSession, handleDeleteCodexHistoryAction, handleResumeAction, handleResumeCodexHistoryAction, handleResumeHistoryAction, hasActiveTerminalSelection, resumeClaudeHistorySession, resumeCodexHistorySession, resumeSessionFromList, setDeletingState, switchToSessionView } from "./input";
+import { _swipeState, closeSwipedItem, deleteClaudeHistoryDirectory, deleteSession, executeDeleteHistory, focusInputBox, getHistoryItemsByCwd, getSelectedSession, handleDeleteCodexHistoryAction, handleResumeAction, handleResumeCodexHistoryAction, handleResumeHistoryAction, hasActiveTerminalSelection, installNativeInputImeGuard, lockNativeInputTerminalIme, resumeClaudeHistorySession, resumeCodexHistorySession, resumeSessionFromList, setDeletingState, shouldLockNativeInputTerminalIme, switchToSessionView } from "./input";
 import { showToast } from "./notifications";
 import { render } from "./render";
 import { applyCurrentView, closeSessionsDrawer, copyToClipboard, dismissDrawerIfOverlay, isStructuredSession, loadSessions, openSessionModal, openWorktreeMergeModal, retryWorktreeCleanup, selectSession, updateSessionsList } from "./session-engine";
@@ -942,7 +942,11 @@ import { consumeTerminalTouchPage, consumeTerminalWheelPage, terminalWheelPageSe
             return false;
           });
           var helperTextarea = termWrap.querySelector(".xterm-helper-textarea") as HTMLTextAreaElement | null;
-          if (helperTextarea) helperTextarea.readOnly = !state.terminalInteractive;
+          if (helperTextarea) {
+            helperTextarea.readOnly = shouldLockNativeInputTerminalIme() ? true : !state.terminalInteractive;
+          }
+          installNativeInputImeGuard();
+          lockNativeInputTerminalIme();
           state.terminal = term;
           // Expose for native shells (macOS / iOS) that need cols/rows/scale
           // without reaching into module-scoped state.
@@ -1003,6 +1007,10 @@ import { consumeTerminalTouchPage, consumeTerminalWheelPage, terminalWheelPageSe
 
           state.terminalClickHandler = function(event: MouseEvent) {
             if (hasActiveTerminalSelection()) return;
+            if (shouldLockNativeInputTerminalIme()) {
+              lockNativeInputTerminalIme();
+              return;
+            }
             if (state.terminalInteractive) term.focus();
             else focusInputBox(event);
           };

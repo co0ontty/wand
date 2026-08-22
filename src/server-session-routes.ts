@@ -594,6 +594,16 @@ export function registerSessionRoutes(
         res.status(409).json({ error: "会话列表已更新，请重新加载。", revision: page.revision });
         return;
       }
+      if (offset === 0 && requestedRevision && requestedRevision === page.revision) {
+        res.json({
+          unchanged: true,
+          entries: [],
+          offset: 0,
+          total: page.total,
+          revision: page.revision,
+        });
+        return;
+      }
       res.json(page);
     } catch (error) {
       res.status(500).json({ error: getErrorMessage(error, "无法加载会话列表。") });

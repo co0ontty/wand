@@ -218,6 +218,7 @@ function normalizeAbout(value: unknown): SettingsAbout {
     },
     androidApk: normalizeDistribution(input.androidApk),
     macosDmg: normalizeDistribution(input.macosDmg),
+    iosIpa: normalizeDistribution(input.iosIpa),
   };
 }
 

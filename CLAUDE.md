@@ -188,7 +188,7 @@ adb install -r -d app/build/outputs/apk/debug/app-debug.apk
 
 ## macOS DMG Build & Deployment
 
-项目包含一个 macOS WebView 壳应用（SwiftUI + WKWebView），源码在 `macos/` 目录（git submodule → `co0ontty/wand-macos`）。
+项目包含一个 macOS **原生三栏客户端**（会话列表 / 聊天 / Inspector，WKWebView 只做嵌入 PTY 与「打开网页版」），源码在 `macos/` 目录（git submodule → `co0ontty/wand-macos`）。
 
 **编译 DMG（仅 macOS）：**
 ```bash
@@ -259,7 +259,7 @@ App 启动 5 秒后异步调 `/api/macos-dmg-update?currentVersion=<X>` → 弹 
 
 ## iOS IPA Build & Sideload
 
-项目包含一个 iOS **原生 SwiftUI 客户端**（会话列表 / 聊天 / 输入 / 权限审批直连 REST + `/ws`，WKWebView 仅作「网页版」兜底入口），源码在 `ios/` 目录（git submodule → `co0ontty/wand-ios`）。原生化是为了根治 WebView 在移动端的键盘重叠、状态栏错位问题；与 `macos/`（纯 WebView 壳）不再对称。协议对接速查与完整安装手册见 `ios/README.md`。聊天输入栏带**按住说话端侧语音识别**（`SpeechRecognizerService.swift`）：SFSpeechRecognizer 端侧听写模型优先（`requiresOnDeviceRecognition`，设备没下载模型时降级 Apple 服务器识别），只需 Info.plist 两条隐私描述、零 entitlement，免费自签不受影响。
+项目包含一个 iOS **原生 SwiftUI 客户端**（会话列表 / 聊天 / 输入 / 权限审批直连 REST + `/ws`，WKWebView 仅作「网页版」兜底入口），源码在 `ios/` 目录（git submodule → `co0ontty/wand-ios`）。原生化是为了根治 WebView 在移动端的键盘重叠、状态栏错位问题；与 `macos/` 原生三栏壳也不再是「纯 WebView」。协议对接速查与完整安装手册见 `ios/README.md`。聊天输入栏带**按住说话端侧语音识别**（`SpeechRecognizerService.swift`）：SFSpeechRecognizer 端侧听写模型优先（`requiresOnDeviceRecognition`，设备没下载模型时降级 Apple 服务器识别），只需 Info.plist 两条隐私描述、零 entitlement，免费自签不受影响。
 
 **编译（产物是未签名 IPA）：**
 ```bash
@@ -267,24 +267,53 @@ cd ios && ./build.sh 1.16.0   # 仅 macOS + Xcode 15+；产物 dist/wand-v1.16.0
 ```
 没有 Mac 时用 GitHub Actions：`.github/workflows/ios-build.yml` 支持 `workflow_dispatch` 手动触发（IPA 作为 artifact 下载）；push `v*` tag 时也会把 IPA 上传到对应 Release。`cleanup-old-releases.yml` 同样清理老 release 的 `.ipa`。
 
+**部署 IPA 供本地下载：**
+
+服务端通过 `config.ios.ipaDir`（相对于 config 目录）查找 IPA 文件，按版本号取最新的。需要在 `config.json` 里把 `ios.enabled` 改成 `true`。
+
+| 环境 | Config 目录 | IPA 目录 |
+|------|------------|---------|
+| 默认 | `~/.wand/` | `~/.wand/ios/` |
+| 隔离测试 | `/tmp/wand-dev/` | `/tmp/wand-dev/ios/` |
+
+```bash
+VERSION="$(git tag --list 'v[0-9]*' --sort=-v:refname | head -1)"
+VERSION="${VERSION#v}-debug.$(date +%m%d%H%M)"
+(cd ios && ./build.sh "$VERSION")
+mkdir -p ~/.wand/ios
+cp ios/dist/wand-v$VERSION.ipa ~/.wand/ios/
+```
+
 **与 Android/macOS 壳的关键差异：**
 - **不签名**：`build.sh` 用 `CODE_SIGNING_ALLOWED=NO` 出未签名 IPA，签名在**安装时**由 sideload 工具（AltStore / SideStore / Sideloadly / TrollStore）用用户自己的免费 Apple ID 现场完成。免费 Apple ID 限制：证书 7 天过期、同时最多 3 个自签 App。
-- **没有应用内自动更新**：iOS 自签名应用无法自我安装更新（系统限制），所以没有 `UpdateChecker`/`DmgInstaller`，服务端也**没有** iOS 更新端点（不存在 `config.ios`/`ipaDir`，不像 `apkDir`/`dmgDir`）。更新靠 sideload 工具续签或重新安装。
+- **没有应用内自动更新**：iOS 自签名应用无法自我安装更新（系统限制），所以没有 `UpdateChecker`/`DmgInstaller`。服务端提供本地下载（`config.ios.ipaDir`，默认 `~/.wand/ios/`，`GET /ios/download`），设置页可下载 IPA 再交给 SideStore/AltStore 安装；没有应用内检查/安装端点。
 - **无 entitlements 文件**：刻意保持零特殊权限，最大化免费账号签名兼容性。
 - bundle id `com.wand.app` 与 macOS 端一致；sideload 工具签名时可能改写它，属正常现象。
+
+**iOS 模拟器（本机开发/测试环境）：**
+- Xcode 26.6 已自带运行时 iOS 26.5 / 27.0，**无需再 `xcodebuild -downloadPlatform`**。
+- 专用模拟器设备（`xcrun simctl list devices`）：`Wand Debug`（iPhone）、`Wand Live Activity QA`（灵动岛测试）、`Wand iPad Debug`（iPad）。跑单测/构建直接按名字引用，**不要臆造 `iPhone 16` 之类不存在的设备名**。
+- 本机未配签名，xcodebuild 一律带 `CODE_SIGNING_ALLOWED=NO`；只做编译验证可用 `generic/platform=iOS Simulator`：
+  ```bash
+  cd ios
+  xcodebuild -project Wand.xcodeproj -scheme Wand \
+    -destination 'platform=iOS Simulator,name=Wand Debug' \
+    -configuration Debug CODE_SIGNING_ALLOWED=NO test
+  ```
+- `xcrun simctl list devices available` 偶发输出为空，用不带 `available` 的 `xcrun simctl list devices` 确认设备。
 
 ## Update Channels & Self-Repair
 
 服务端更新（`src/server.ts` 的 `/api/update`、`performAutoUpdate`，以及 TUI installUpdate）支持两个通道，状态存在 SQLite app_config 的 `updateChannel`（`stable` | `beta`，默认 stable），设置页「Web 端」更新区有「Beta 通道」开关，对应 `GET/POST /api/update-channel`。
 
 - **stable**：`npm install -g @co0ontty/wand@latest`，按 semver 判定更新（`checkNpmLatestVersion` + `compareSemver`）。
-- **beta**：`npm install -g github:co0ontty/wand#beta`，更新到「最新 commit 构建」。`.github/workflows/beta-branch.yml` 在每次 push master 时 `npm run build`（设 `WAND_BUILD_CHANNEL=beta`），把含预编译 `dist/` 的产物 force-push 到 `beta` 分支；因为 beta 分支带 dist 且无 `prepare` 脚本，`npm install` 免现场构建、免装 devDeps。是否有更新按 commit SHA 比对：本地 `dist/build-info.json` 的 `commit` vs `https://raw.githubusercontent.com/co0ontty/wand/beta/dist/build-info.json` 的 `commit`（`checkBetaUpdate`）。切回 stable 时，若当前跑的是 beta 构建会强制提示可更新，便于装回干净正式版。
+- **beta**：`npm install -g @co0ontty/wand@beta`。`.github/workflows/beta-branch.yml` 在每次 push master 时 `npm run build`（设 `WAND_BUILD_CHANNEL=beta`），把含预编译 `dist/` 的产物 force-push 到 `beta` 分支；因为 beta 分支带 dist 且无 `prepare` 脚本，`npm install` 免现场构建、免装 devDeps。是否有更新按 `npm view @co0ontty/wand@beta version` 比版本。`dist/build-info.json` 只给 UI 展示（commit / builtAt / channel），不参与更新判定。切回 stable 时，若当前跑的是 beta 构建会强制提示可更新，便于装回干净正式版。
 
-`dist/build-info.json`（`{ commit, builtAt, version, channel }`）由 `scripts/stamp-build-info.js` 在 `npm run build` 末尾生成，server 端 `readBuildInfo()` 读它做 beta 比对与 UI 展示。正式版（本地 / publish.sh / npm-release CI）stamp `channel=stable`，beta 分支 CI stamp `channel=beta`。
+`dist/build-info.json`（`{ commit, builtAt, version, channel }`）由 `scripts/stamp-build-info.js` 在 `npm run build` 末尾生成。正式版（本地 / publish.sh / npm-release CI）stamp `channel=stable`，beta 分支 CI stamp `channel=beta`。
 
 **更新后服务自修复**（镜像 `install.sh`）：装包成功后调用 `src/service-self-repair.ts` 的 `repairServiceUnitAfterUpdate()` —— 若装了 systemd/launchd 服务，用 `preferGlobalBin` 重写 unit（ExecStart 钉到全局 `dist/cli.js`、`Environment=PATH` 取已被 `path-repair` 修复的 `process.env.PATH`）+ daemon-reload，解决「源码安装升级到 npm/GitHub 版后 ExecStart/PATH 失效、服务找不到」。重启统一走 `src/relaunch.ts` 的 `computeRelaunch()`：systemd 托管（存在 `INVOCATION_ID`）且已装服务时仅退出、交给 `Restart=always` 用新 unit 拉起，避免 detached 子进程与 systemd 抢单实例 pidfile 跑回旧二进制；否则 spawn 一个 detached 子进程（bin 优先全局安装）。
 
-**APK 的 beta 通道已实现**：`GET /api/android-apk-update?currentVersion=X&channel=stable|beta`（不带参默认 stable，兼容老客户端）——stable 只看正式版文件（版本号无 prerelease 后缀），beta 额外包含 `-debug.MMDDHHMM` 构建（本地 apkDir 是 beta 包唯一来源；GitHub 回退只有正式版，两通道共用）。更新提示的下载链接始终带 `?channel=`，保证「提示的版本」和「下载到的文件」同通道；裸 `/android/download`（网页下载页/二维码落地页）默认 beta = 目录里真正最新的包。Android 设置页「更新」区有 Beta 通道开关（SharedPreferences `update_beta_channel`，`ServerStore.isBetaChannel`），`UpdateManager.checkForUpdate` 按它带 channel 参数。`/api/settings`、`/api/android-apk` 管理视图固定 beta 视角（展示目录真实最新文件）。
+**APK 的 beta 通道已实现**：`GET /api/android-apk-update?currentVersion=X&channel=stable|beta`（不带参默认 stable，兼容老客户端）——stable 只看正式版文件（版本号无 prerelease 后缀），beta 额外包含 `-debug.MMDDHHMM` 构建（本地 apkDir 是 beta 包唯一来源；GitHub 回退只有正式版，两通道共用）。更新提示的下载链接始终带 `?channel=`，保证「提示的版本」和「下载到的文件」同通道；裸 `/android/download` 默认 **stable**，与无参检查接口一致。要最新 debug 包请显式带 `?channel=beta`（网页下载页 / 二维码应带上该参数）。Android 设置页「更新」区有 Beta 通道开关（SharedPreferences `update_beta_channel`，`ServerStore.isBetaChannel`），`UpdateManager.checkForUpdate` 按它带 channel 参数。`/api/settings`、`/api/android-apk` 管理视图固定 beta 视角（展示目录真实最新文件）。
 
 **macOS 的 beta 通道走客户端清单校验**，不走服务端 channel 参数：`.github/workflows/macos-beta.yml`（手动 `workflow_dispatch`，跑在 `macos-26`）按基础版本 + `-beta.YYYYMMDDHHMM.RUN.ATTEMPT.gSHA` 出 beta DMG + ZIP + `*.update.json` 清单，作为 GitHub **prerelease**（tag `vX.Y.Z-beta...`）发布。版本顺序保证 `X.Y.Z < X.Y.Z-beta... < X.Y.(Z+1)`。beta 客户端拉清单后校验 SHA-256 与应用签名再安装。服务端 `/api/macos-dmg-update` 不带 channel（只解析最新 DMG），所以本地 `dmgDir` 混放 beta/正式包时以文件版本最高的为准。
 
@@ -419,8 +448,8 @@ If resume buttons, recovered sessions, or chat history look wrong, inspect those
 ### Lifecycle and permissions
 
 Two cross-cutting systems shape session behavior:
-- `src/session-lifecycle.ts` marks sessions as initializing/running/thinking/waiting-input/idle/archived and performs timeout-driven idle/archive transitions.
-- `ProcessManager` + `ClaudePtyBridge` detect permission prompts, track approval policy (`ask-every-time`, `approve-once`, `remember-this-turn`), keep per-session approval stats, and convert Claude CLI prompt text into structured escalation state for the UI.
+- `ProcessManager` and `StructuredSessionManager` own archive timers and status (`idle` / `running` / `exited` / `failed` / `stopped`). There is no separate `session-lifecycle.ts`; thinking / waiting-input are implied by `inFlight`, `permissionBlocked`, and `isResponding`.
+- `ProcessManager` + `ClaudePtyBridge` detect permission prompts, track approval policy (`ask-every-time`, `approve-once`, `remember-this-turn`), keep per-session approval stats, and convert Claude CLI prompt text into structured escalation state for the UI. Structured sessions do not have runtime permission prompts.
 
 A bug around blocked input, idle/archive transitions, or wrong permission state is usually not just a UI issue; check lifecycle state and permission detection before changing rendering.
 
@@ -476,7 +505,7 @@ WebSocket clients connect to `/ws`, send `{type: "subscribe", sessionId}`, and r
 | `src/resume-policy.ts` | Heuristics for mapping Claude history/resume data back onto wand sessions |
 | `src/storage.ts` | SQLite persistence and additive schema migration helpers |
 | `src/config.ts` | Default config, merge logic, config path resolution |
-| `src/session-lifecycle.ts` | Idle/thinking/waiting/archive state machine |
+| `src/process-manager.ts` / `src/structured-session-manager.ts` | Session status, archive timers, and permission / queue state |
 | `src/session-logger.ts` | File-based logs under `~/.wand/sessions/` |
 | `src/auth.ts` | Session token creation, validation, and revocation |
 | `src/cert.ts` | Self-signed HTTPS certificate generation and loading |

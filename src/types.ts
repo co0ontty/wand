@@ -83,6 +83,12 @@ export interface MacosDmgConfig {
   currentDmgFile?: string;
 }
 
+export interface IosIpaConfig {
+  enabled?: boolean;
+  ipaDir?: string;
+  currentIpaFile?: string;
+}
+
 export interface WandConfig {
   host: string;
   port: number;
@@ -117,6 +123,7 @@ export interface WandConfig {
   appSecret?: string;
   android?: AndroidApkConfig;
   macos?: MacosDmgConfig;
+  ios?: IosIpaConfig;
   /** Default expand/collapse state for card types in structured chat view */
   cardDefaults?: CardExpandDefaults;
   /** 新建会话时默认使用的 Claude 模型（别名或完整 ID）。留空则不传 --model，由 claude 自行决定。 */

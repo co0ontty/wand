@@ -82,6 +82,7 @@ function adminPayload(): Record<string, unknown> {
     autoUpdate: { web: false, apk: false, dmg: false, cli: false },
     androidApk: { enabled: false },
     macosDmg: { enabled: false },
+    iosIpa: { enabled: false },
   };
 }
 
@@ -170,6 +171,7 @@ test("403 admin response falls back to the public About snapshot", async () => {
       build: {},
       androidApk: {},
       macosDmg: {},
+      iosIpa: {},
     });
     throw new Error(`unexpected request ${url}`);
   };

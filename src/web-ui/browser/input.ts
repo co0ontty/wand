@@ -2175,6 +2175,44 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           && state.currentView === "terminal";
       }
 
+      export function isNativeInputEmbed() {
+        return document.documentElement.classList.contains("is-wand-native-input");
+      }
+
+      // iOS 原生输入栏（nativeInput=1 且没有 passthrough）必须独占 IME。
+      // xterm 隐藏 textarea 一旦抢到焦点，中文组字会打进看不见的终端，
+      // 再由原生框发送一次，PI TUI 就会出现「输不进去 / 重复输入」。
+      export function shouldLockNativeInputTerminalIme() {
+        return isNativeInputEmbed()
+          && !document.documentElement.classList.contains("is-wand-terminal-passthrough");
+      }
+
+      export function lockNativeInputTerminalIme() {
+        if (!shouldLockNativeInputTerminalIme()) return false;
+        if (state.terminal && state.terminal.element) {
+          var helperTextarea = state.terminal.element.querySelector(".xterm-helper-textarea");
+          if (helperTextarea) {
+            helperTextarea.readOnly = true;
+            helperTextarea.setAttribute("aria-readonly", "true");
+            if (document.activeElement === helperTextarea) {
+              try { helperTextarea.blur(); } catch (err) {}
+            }
+          }
+        }
+        return true;
+      }
+
+      var nativeInputImeGuardInstalled = false;
+      export function installNativeInputImeGuard() {
+        if (nativeInputImeGuardInstalled || !shouldLockNativeInputTerminalIme()) return;
+        nativeInputImeGuardInstalled = true;
+        document.addEventListener("focusin", function(event) {
+          var target = event.target as HTMLElement | null;
+          if (!target || !target.classList || !target.classList.contains("xterm-helper-textarea")) return;
+          lockNativeInputTerminalIme();
+        }, true);
+      }
+
       export function setTerminalInteractive(enabled, options?) {
         var opts = options || {};
         var next = !!enabled && isTerminalInteractionAvailable();
@@ -2182,12 +2220,12 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         state.terminalInteractive = next;
         if (state.terminal && state.terminal.element) {
           var helperTextarea = state.terminal.element.querySelector(".xterm-helper-textarea");
-          if (helperTextarea) helperTextarea.readOnly = !next;
+          if (helperTextarea) helperTextarea.readOnly = shouldLockNativeInputTerminalIme() ? true : !next;
         }
         if (next) {
           enableTerminalCapture();
           hideMiniKeyboard(false);
-          if (opts.focus !== false) focusTerminalInteractionTarget();
+          if (opts.focus !== false && !shouldLockNativeInputTerminalIme()) focusTerminalInteractionTarget();
           if (opts.announce !== false) showToast("终端交互模式已开启", "info");
         } else {
           disableTerminalCapture();
@@ -2421,7 +2459,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
       export function enableTerminalCapture() {
         if (state.terminal && state.terminal.element) {
           var helperTextarea = state.terminal.element.querySelector(".xterm-helper-textarea");
-          if (helperTextarea) helperTextarea.readOnly = false;
+          if (helperTextarea) helperTextarea.readOnly = shouldLockNativeInputTerminalIme() ? true : false;
         }
       }
 
@@ -3299,6 +3337,10 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
       }
 
       export function focusTerminalContainer() {
+        if (shouldLockNativeInputTerminalIme()) {
+          lockNativeInputTerminalIme();
+          return;
+        }
         var output = document.getElementById("output");
         if (!output) return;
         output.setAttribute("tabindex", "0");

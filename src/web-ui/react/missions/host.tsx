@@ -5,6 +5,7 @@ import { WandButton, WandDialogSurface } from "../ui";
 import { missionsController, missionsStore } from "./controller";
 import { httpMissionsRepository } from "./repository";
 import type {
+  InboxItem,
   MissionAttempt,
   MissionDetails,
   MissionDiff,
@@ -96,6 +97,7 @@ function AttemptCard({ attempt, onOpen, onDiff }: {
 
 export function MissionsHost({ repository = httpMissionsRepository }: { repository?: MissionsRepository }) {
   const controller = useSyncExternalStore(missionsStore.subscribe, missionsStore.getSnapshot, missionsStore.getSnapshot);
+  const [inbox, setInbox] = useState<InboxItem[]>([]);
   const [missions, setMissions] = useState<MissionDetails[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -117,8 +119,12 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
   const diffLines = useMemo(() => diff ? parseDiff(diff.patch) : [], [diff]);
 
   const refresh = async () => {
-    const nextMissions = await repository.list();
+    const [nextMissions, nextInbox] = await Promise.all([
+      repository.list(),
+      repository.listInbox().catch(() => [] as InboxItem[]),
+    ]);
     setMissions(nextMissions);
+    setInbox(nextInbox);
     setSelectedId((current) => current && nextMissions.some((mission) => mission.id === current) ? current : nextMissions[0]?.id ?? null);
   };
 
@@ -207,6 +213,24 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
       <div className="wand-missions-body">
         <div className="wand-missions-workspace">
           <aside className="wand-missions-list">
+            {inbox.length ? (
+              <div className="wand-missions-inbox">
+                <strong>收件箱</strong>
+                {inbox.map((item) => (
+                  <button
+                    key={item.sessionId}
+                    type="button"
+                    onClick={() => {
+                      void repository.markInboxRead(item.sessionId).catch(() => undefined);
+                      if (item.sessionId) void openSession(item.sessionId);
+                    }}
+                  >
+                    <strong>{item.title}</strong>
+                    <small>{STATE_LABELS[item.state] || item.state}{item.summary ? ` · ${item.summary}` : ""}</small>
+                  </button>
+                ))}
+              </div>
+            ) : null}
             {missions.map((mission) => (
               <button key={mission.id} className={selected?.id === mission.id ? "active" : ""} onClick={() => { setSelectedId(mission.id); setDiff(null); }}>
                 <strong>{mission.title}</strong>

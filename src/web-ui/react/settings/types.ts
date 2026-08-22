@@ -14,7 +14,7 @@ export type SettingsModelProvider = SettingsProvider | "grok" | "qoder" | "pi";
 export type SettingsCliProvider = SettingsProvider | "qoder" | "pi";
 export type SettingsUpdateChannel = "stable" | "beta";
 export type SettingsAutoUpdateTarget = "web" | "apk" | "dmg" | "cli";
-export type SettingsDistributionKind = "apk" | "dmg";
+export type SettingsDistributionKind = "apk" | "dmg" | "ipa";
 export type SettingsDistributionSource = "github" | "local";
 export type SettingsNotificationPermission = "granted" | "denied" | "default" | "unsupported";
 export type SettingsPlatformKind = "browser" | "android" | "ios" | "macos";
@@ -59,6 +59,7 @@ export interface SettingsAbout {
   build: SettingsBuildInfo;
   androidApk: SettingsDistribution;
   macosDmg: SettingsDistribution;
+  iosIpa: SettingsDistribution;
 }
 
 export interface SettingsCommandPreset {

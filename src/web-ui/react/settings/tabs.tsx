@@ -287,6 +287,9 @@ export function AboutSettingsTab({ snapshot, repository, refresh, toast, showRes
       {snapshot.platform.kind === "browser" || snapshot.platform.kind === "macos" ? (
         <DistributionSection kind="dmg" title="macOS App" distribution={about.macosDmg} currentVersion={snapshot.platform.kind === "macos" ? snapshot.platform.appVersion : null} repository={repository} toast={toast} />
       ) : null}
+      {snapshot.platform.kind === "browser" || snapshot.platform.kind === "ios" ? (
+        <DistributionSection kind="ipa" title="iOS App" distribution={about.iosIpa} currentVersion={snapshot.platform.kind === "ios" ? snapshot.platform.appVersion : null} repository={repository} toast={toast} />
+      ) : null}
 
       {snapshot.access === "admin" ? (
         <>

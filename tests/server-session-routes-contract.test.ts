@@ -70,6 +70,15 @@ test("session HTTP interface preserves create, list, update, detail, and delete 
     assert.deepEqual(firstPage.entries.map((entry) => entry.key), [`session-${created.id}`]);
     assert.equal(typeof firstPage.revision, "string");
 
+    const unchangedResponse = await fetch(
+      `${baseUrl}/api/session-list?offset=0&limit=1&revision=${encodeURIComponent(firstPage.revision)}`,
+    );
+    assert.equal(unchangedResponse.status, 200);
+    const unchanged = await unchangedResponse.json() as { unchanged?: boolean; entries: unknown[]; revision: string };
+    assert.equal(unchanged.unchanged, true);
+    assert.deepEqual(unchanged.entries, []);
+    assert.equal(unchanged.revision, firstPage.revision);
+
     const directoriesResponse = await fetch(`${baseUrl}/api/session-directories`);
     assert.equal(directoriesResponse.status, 200);
     type DirectoryNode = {

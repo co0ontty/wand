@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
-import { AndroidApkConfig, CardExpandDefaults, ExecutionMode, MacosDmgConfig, SessionProvider, StructuredChatPersonaConfig, ThinkingEffort, WandConfig } from "./types.js";
+import { AndroidApkConfig, CardExpandDefaults, ExecutionMode, IosIpaConfig, MacosDmgConfig, SessionProvider, StructuredChatPersonaConfig, ThinkingEffort, WandConfig } from "./types.js";
 import type { WandStorage } from "./storage.js";
 import { isRunningAsRoot } from "./env-utils.js";
 import { normalizeSystemAiConfig, systemAiProfiles } from "./system-ai.js";
@@ -82,6 +82,7 @@ export const defaultConfig = (): WandConfig => ({
   language: "",
   android: defaultAndroidApkConfig(),
   macos: defaultMacosDmgConfig(),
+  ios: defaultIosIpaConfig(),
   cardDefaults: defaultCardExpandDefaults(),
   defaultModel: "",
   defaultCodexModel: "",
@@ -606,6 +607,29 @@ function normalizeMacosDmgConfig(input: unknown): MacosDmgConfig | undefined {
   };
 }
 
+function defaultIosIpaConfig(): IosIpaConfig {
+  return {
+    enabled: false,
+    ipaDir: "ios",
+    currentIpaFile: "",
+  };
+}
+
+function normalizeIosIpaConfig(input: unknown): IosIpaConfig | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const defaults = defaultIosIpaConfig();
+  const iosInput = input as Record<string, unknown>;
+  return {
+    enabled: typeof iosInput.enabled === "boolean" ? iosInput.enabled : defaults.enabled,
+    ipaDir: typeof iosInput.ipaDir === "string" && iosInput.ipaDir.trim()
+      ? iosInput.ipaDir.trim()
+      : defaults.ipaDir,
+    currentIpaFile: typeof iosInput.currentIpaFile === "string"
+      ? iosInput.currentIpaFile.trim()
+      : defaults.currentIpaFile,
+  };
+}
+
 function normalizeStructuredChatPersona(input: unknown): StructuredChatPersonaConfig | undefined {
   if (!input || typeof input !== "object") return undefined;
 
@@ -679,6 +703,7 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
       : crypto.randomBytes(32).toString("hex"),
     android: normalizeAndroidApkConfig(input.android) ?? defaults.android,
     macos: normalizeMacosDmgConfig(input.macos) ?? defaults.macos,
+    ios: normalizeIosIpaConfig(input.ios) ?? defaults.ios,
     cardDefaults: normalizeCardDefaults(input.cardDefaults),
     defaultProvider: input.defaultProvider === "codex" || input.defaultProvider === "opencode" || input.defaultProvider === "grok" || input.defaultProvider === "qoder" || input.defaultProvider === "pi" ? input.defaultProvider : "claude",
     defaultSessionKind: input.defaultSessionKind === "pty" ? "pty" : "structured",

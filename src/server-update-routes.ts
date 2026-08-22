@@ -38,6 +38,8 @@ export interface PublicUpdateRoutesDependencies {
   resolveAndroidDownload(channel: "stable" | "beta"): Promise<DownloadAsset | null>;
   resolveLatestDmg(): Promise<ResolvedUpdateAsset | null>;
   resolveMacosDownload(): Promise<DownloadAsset | null>;
+  resolveLatestIpa(): Promise<ResolvedUpdateAsset | null>;
+  resolveIosDownload(): Promise<DownloadAsset | null>;
 }
 
 export function registerPublicUpdateRoutes(app: Express, deps: PublicUpdateRoutesDependencies): void {
@@ -125,6 +127,21 @@ export function registerPublicUpdateRoutes(app: Express, deps: PublicUpdateRoute
       readErrorMessage: "读取 DMG 文件失败。",
     });
   }));
+
+  app.get("/ios/download", asyncRoute(async (req, res) => {
+    const asset = await deps.resolveIosDownload();
+    if (!asset) {
+      res.status(404).json({ error: "当前没有可下载的 IPA 文件。" });
+      return;
+    }
+    streamFileWithRange(req, res, {
+      filePath: asset.filePath,
+      size: asset.size,
+      contentType: "application/octet-stream",
+      disposition: `attachment; filename="${encodeURIComponent(asset.fileName)}"`,
+      readErrorMessage: "读取 IPA 文件失败。",
+    });
+  }));
 }
 
 export class ServerUpdateState {
@@ -149,7 +166,7 @@ export interface AdminUpdateRoutesDependencies {
   configPath: string;
   requireAdmin: RequestHandler;
   state: ServerUpdateState;
-  getDistributionSettings(): Promise<{ androidApk: Record<string, unknown>; macosDmg: Record<string, unknown> }>;
+  getDistributionSettings(): Promise<{ androidApk: Record<string, unknown>; macosDmg: Record<string, unknown>; iosIpa: Record<string, unknown> }>;
   modelCatalog: ModelCatalogService;
   getUpdateChannel(): UpdateChannel;
   checkLatestPackageVersion(channel: UpdateChannel, forceRefresh?: boolean): Promise<PackageUpdateInfo>;
@@ -166,6 +183,9 @@ export function registerAdminUpdateRoutes(app: Express, deps: AdminUpdateRoutesD
   }));
   app.get("/api/macos-dmg", requireAdmin, asyncRoute(async (_req, res) => {
     res.json((await deps.getDistributionSettings()).macosDmg);
+  }));
+  app.get("/api/ios-ipa", requireAdmin, asyncRoute(async (_req, res) => {
+    res.json((await deps.getDistributionSettings()).iosIpa);
   }));
 
   app.get("/api/provider-cli-updates", requireAdmin, asyncRoute(async (req, res) => {

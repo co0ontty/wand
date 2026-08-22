@@ -1223,8 +1223,8 @@ import { hasPooledTerminal } from "./terminal-pool";
         });
       }
 
-      export function createStructuredSession(prompt?, cwdOverride?, modeOverride?, worktreeEnabled?) {
-        var provider = getProviderKey(state.sessionTool);
+      export function createStructuredSession(prompt?, cwdOverride?, modeOverride?, worktreeEnabled?, extra?) {
+        var provider = (extra && extra.provider) || getProviderKey(state.sessionTool);
         var modelPref = getChatModelForProvider(provider) || getConfigDefaultModelForProvider(provider);
         var thinkingPref = state.chatThinking || "off";
         var structuredRunner = provider === "codex"
@@ -1247,7 +1247,9 @@ import { hasPooledTerminal } from "./terminal-pool";
           worktreeEnabled: worktreeEnabled === true,
           model: modelPref || undefined,
           thinkingEffort: thinkingPref,
-          sessionSource: "interactive"
+          sessionSource: "interactive",
+          workspaceId: extra && extra.workspaceId,
+          workspaceTaskId: extra && extra.workspaceTaskId,
         };
         return fetch("/api/structured-sessions", {
           method: "POST",
@@ -1370,6 +1372,17 @@ import { hasPooledTerminal } from "./terminal-pool";
         if (!localSession) return serverSession;
 
         var merged = Object.assign({}, localSession, serverSession);
+        var slimList = !Array.isArray(serverSession.messages)
+          && (typeof serverSession.output !== "string");
+        if (slimList) {
+          if (Array.isArray(localSession.messages) && !Array.isArray(serverSession.messages)) {
+            merged.messages = localSession.messages;
+          }
+          if (typeof localSession.output === "string" && typeof serverSession.output !== "string") {
+            merged.output = localSession.output;
+          }
+          return merged;
+        }
         var localOutput = localSession.output || "";
         var serverOutput = serverSession.output || "";
         var keepLocalOutput = localOutput.length > serverOutput.length;
@@ -2487,12 +2500,31 @@ import { hasPooledTerminal } from "./terminal-pool";
           workspaceTaskId?: string;
           provider?: string;
           shell?: boolean;
+          kind?: "structured" | "pty";
           mode?: string;
           initialInput?: string;
         },
       ): Promise<unknown> {
         var shell = !!(options && options.shell);
         var provider = shell ? "" : ((options && options.provider) || getPreferredTool());
+        var kind = shell
+          ? "pty"
+          : ((options && options.kind)
+            || (state.config && state.config.defaultSessionKind)
+            || "structured");
+        if (kind === "structured") {
+          return createStructuredSession(
+            options && options.initialInput,
+            cwd,
+            options && options.mode,
+            false,
+            {
+              workspaceId: options && options.workspaceId,
+              workspaceTaskId: options && options.workspaceTaskId,
+              provider: provider,
+            },
+          );
+        }
         var defaultMode = shell
           ? "default"
           : getSafeModeForTool(

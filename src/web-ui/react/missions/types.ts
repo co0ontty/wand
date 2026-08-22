@@ -59,8 +59,23 @@ export interface CreateMissionRequest {
   copyPaths?: string[];
 }
 
+export interface InboxItem {
+  sessionId: string;
+  missionId: string | null;
+  attemptId: string | null;
+  state: string;
+  title: string;
+  summary: string | null;
+  provider: string | null;
+  cwd: string | null;
+  updatedAt: string;
+  readAt: string | null;
+}
+
 export interface MissionsRepository {
   list(): Promise<MissionDetails[]>;
+  listInbox(): Promise<InboxItem[]>;
+  markInboxRead(sessionId?: string): Promise<void>;
   create(request: CreateMissionRequest): Promise<MissionDetails>;
   diff(missionId: string, attemptId: string): Promise<MissionDiff>;
   addComment(missionId: string, attemptId: string, input: { filePath: string; line: number | null; side: "old" | "new"; body: string }): Promise<ReviewComment>;

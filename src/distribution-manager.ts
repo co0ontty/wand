@@ -51,6 +51,7 @@ interface CachedGitHubAsset {
 export interface DistributionSettings {
   androidApk: Record<string, unknown>;
   macosDmg: Record<string, unknown>;
+  iosIpa: Record<string, unknown>;
 }
 
 export interface DistributionManagerOptions {
@@ -179,18 +180,50 @@ export class DistributionManager {
     });
   }
 
+  async resolveLatestIpa(): Promise<ResolvedDistributionAsset | null> {
+    const localIpa = await this.resolveIosDownload();
+    if (localIpa?.version) {
+      return {
+        version: localIpa.version,
+        downloadUrl: localIpa.downloadUrl,
+        fileName: localIpa.fileName,
+        size: localIpa.size,
+        source: "local",
+      };
+    }
+    const github = await this.fetchGitHubAsset(".ipa");
+    return github ? { ...github, source: "github" } : null;
+  }
+
+  async resolveIosDownload(): Promise<LocalDistributionAsset | null> {
+    await this.refreshConfig();
+    const { config, configDir } = this.options;
+    if (config.ios?.enabled !== true) return null;
+    return this.resolveLocalAsset({
+      directory: resolveConfiguredDir(configDir, config.ios.ipaDir, "ios"),
+      extension: ".ipa",
+      configuredFile: config.ios.currentIpaFile,
+      downloadUrl: "/ios/download",
+      compareVersions: compareSemver,
+    });
+  }
+
   async getSettings(): Promise<DistributionSettings> {
-    const [localApk, githubApk, localDmg, githubDmg] = await Promise.all([
+    const [localApk, githubApk, localDmg, githubDmg, localIpa, githubIpa] = await Promise.all([
       this.resolveAndroidDownload("beta"),
       this.fetchGitHubAsset(".apk"),
       this.resolveMacosDownload(),
       this.fetchGitHubAsset(".dmg"),
+      this.resolveIosDownload(),
+      this.fetchGitHubAsset(".ipa"),
     ]);
     const apkDir = resolveConfiguredDir(this.options.configDir, this.options.config.android?.apkDir, "android");
     const dmgDir = resolveConfiguredDir(this.options.configDir, this.options.config.macos?.dmgDir, "macos");
+    const ipaDir = resolveConfiguredDir(this.options.configDir, this.options.config.ios?.ipaDir, "ios");
     return {
       androidApk: this.buildSettings("apk", apkDir, this.options.config.android?.enabled === true, localApk, githubApk),
       macosDmg: this.buildSettings("dmg", dmgDir, this.options.config.macos?.enabled === true, localDmg, githubDmg),
+      iosIpa: this.buildSettings("ipa", ipaDir, this.options.config.ios?.enabled === true, localIpa, githubIpa),
     };
   }
 
@@ -245,11 +278,22 @@ export class DistributionManager {
         config.macos.currentDmgFile = typeof macos.currentDmgFile === "string" ? macos.currentDmgFile.trim() : "";
       }
     }
+    const ios = asRecord(raw.ios);
+    if (ios) {
+      config.ios = { ...(config.ios ?? {}) };
+      if (typeof ios.enabled === "boolean") config.ios.enabled = ios.enabled;
+      if (Object.hasOwn(ios, "ipaDir")) {
+        config.ios.ipaDir = typeof ios.ipaDir === "string" && ios.ipaDir.trim() ? ios.ipaDir.trim() : "ios";
+      }
+      if (Object.hasOwn(ios, "currentIpaFile")) {
+        config.ios.currentIpaFile = typeof ios.currentIpaFile === "string" ? ios.currentIpaFile.trim() : "";
+      }
+    }
   }
 
   private async resolveLocalAsset(options: {
     directory: string;
-    extension: ".apk" | ".dmg";
+    extension: ".apk" | ".dmg" | ".ipa";
     configuredFile?: string;
     downloadUrl: string;
     compareVersions(a: string, b: string): number;
@@ -295,7 +339,7 @@ export class DistributionManager {
   }
 
   private async readLocalAsset(filePath: string, options: {
-    extension: ".apk" | ".dmg";
+    extension: ".apk" | ".dmg" | ".ipa";
     downloadUrl: string;
     acceptVersion?: (version: string | null) => boolean;
   }): Promise<LocalDistributionAsset | null> {
@@ -319,7 +363,7 @@ export class DistributionManager {
     }
   }
 
-  private async fetchGitHubAsset(extension: ".apk" | ".dmg"): Promise<GitHubDistributionAsset | null> {
+  private async fetchGitHubAsset(extension: ".apk" | ".dmg" | ".ipa"): Promise<GitHubDistributionAsset | null> {
     const cached = this.githubCache.get(extension);
     if (cached && this.now() - cached.timestamp < GITHUB_CACHE_TTL_MS) return cached.asset;
     try {
@@ -365,7 +409,7 @@ export class DistributionManager {
   }
 
   private buildSettings(
-    kind: "apk" | "dmg",
+    kind: "apk" | "dmg" | "ipa",
     directory: string,
     enabled: boolean,
     local: LocalDistributionAsset | null,
@@ -376,8 +420,8 @@ export class DistributionManager {
       : github
         ? { ...github, updatedAt: null, source: "github" as const }
         : null;
-    const hasKey = kind === "apk" ? "hasApk" : "hasDmg";
-    const dirKey = kind === "apk" ? "apkDir" : "dmgDir";
+    const hasKey = kind === "apk" ? "hasApk" : kind === "dmg" ? "hasDmg" : "hasIpa";
+    const dirKey = kind === "apk" ? "apkDir" : kind === "dmg" ? "dmgDir" : "ipaDir";
     return {
       enabled,
       [dirKey]: directory,

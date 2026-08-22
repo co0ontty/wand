@@ -22241,7 +22241,8 @@
         channel: nullableString(build.channel)
       },
       androidApk: normalizeDistribution(input.androidApk),
-      macosDmg: normalizeDistribution(input.macosDmg)
+      macosDmg: normalizeDistribution(input.macosDmg),
+      iosIpa: normalizeDistribution(input.iosIpa)
     };
   }
   function normalizeModels(value) {
@@ -23147,6 +23148,7 @@
       ] }) : null,
       snapshot10.platform.kind === "browser" || snapshot10.platform.kind === "android" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(DistributionSection, { kind: "apk", title: "Android App", distribution: about.androidApk, currentVersion: snapshot10.platform.kind === "android" ? snapshot10.platform.appVersion : null, repository, toast: toast2 }) : null,
       snapshot10.platform.kind === "browser" || snapshot10.platform.kind === "macos" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(DistributionSection, { kind: "dmg", title: "macOS App", distribution: about.macosDmg, currentVersion: snapshot10.platform.kind === "macos" ? snapshot10.platform.appVersion : null, repository, toast: toast2 }) : null,
+      snapshot10.platform.kind === "browser" || snapshot10.platform.kind === "ios" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(DistributionSection, { kind: "ipa", title: "iOS App", distribution: about.iosIpa, currentVersion: snapshot10.platform.kind === "ios" ? snapshot10.platform.appVersion : null, repository, toast: toast2 }) : null,
       snapshot10.access === "admin" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(import_jsx_runtime30.Fragment, { children: /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(SettingsSection, { title: "App \u8FDE\u63A5\u7801", description: "\u7C98\u8D34\u6216\u626B\u7801\u540E\u53EF\u8FDE\u63A5\u5F53\u524D\u670D\u52A1\uFF1B\u4FEE\u6539\u5BC6\u7801\u540E\u4F1A\u5931\u6548\u3002", children: [
         /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("code", { className: "wand-settings-connect-code", "aria-label": "App \u8FDE\u63A5\u7801", children: snapshot10.connectCode?.code || "\u6682\u4E0D\u53EF\u7528" }),
         /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)("div", { className: "wand-settings-button-row", children: [
@@ -29178,6 +29180,18 @@
       const body = await json(await this.fetchImpl("/api/missions", { credentials: "same-origin" }));
       return body.missions ?? [];
     }
+    async listInbox() {
+      const body = await json(await this.fetchImpl("/api/inbox", { credentials: "same-origin" }));
+      return body.items ?? [];
+    }
+    async markInboxRead(sessionId) {
+      await json(await this.fetchImpl("/api/inbox/read", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify(sessionId ? { sessionId } : {})
+      }));
+    }
     async create(request2) {
       return json(await this.fetchImpl("/api/missions", {
         method: "POST",
@@ -29287,6 +29301,7 @@
   }
   function MissionsHost({ repository = httpMissionsRepository }) {
     const controller = (0, import_react17.useSyncExternalStore)(missionsStore.subscribe, missionsStore.getSnapshot, missionsStore.getSnapshot);
+    const [inbox, setInbox] = (0, import_react17.useState)([]);
     const [missions, setMissions] = (0, import_react17.useState)([]);
     const [selectedId, setSelectedId] = (0, import_react17.useState)(null);
     const [creating, setCreating] = (0, import_react17.useState)(false);
@@ -29306,8 +29321,12 @@
     const selected = missions.find((mission) => mission.id === selectedId) ?? missions[0] ?? null;
     const diffLines = (0, import_react17.useMemo)(() => diff ? parseDiff(diff.patch) : [], [diff]);
     const refresh = async () => {
-      const nextMissions = await repository.list();
+      const [nextMissions, nextInbox] = await Promise.all([
+        repository.list(),
+        repository.listInbox().catch(() => [])
+      ]);
       setMissions(nextMissions);
+      setInbox(nextInbox);
       setSelectedId((current) => current && nextMissions.some((mission) => mission.id === current) ? current : nextMissions[0]?.id ?? null);
     };
     (0, import_react17.useEffect)(() => {
@@ -29413,6 +29432,27 @@
           error ? /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("div", { className: "wand-missions-error", role: "alert", children: error }) : null,
           /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("div", { className: "wand-missions-body", children: /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("div", { className: "wand-missions-workspace", children: [
             /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("aside", { className: "wand-missions-list", children: [
+              inbox.length ? /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("div", { className: "wand-missions-inbox", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("strong", { children: "\u6536\u4EF6\u7BB1" }),
+                inbox.map((item) => /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)(
+                  "button",
+                  {
+                    type: "button",
+                    onClick: () => {
+                      void repository.markInboxRead(item.sessionId).catch(() => void 0);
+                      if (item.sessionId) void openSession(item.sessionId);
+                    },
+                    children: [
+                      /* @__PURE__ */ (0, import_jsx_runtime40.jsx)("strong", { children: item.title }),
+                      /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("small", { children: [
+                        STATE_LABELS[item.state] || item.state,
+                        item.summary ? ` \xB7 ${item.summary}` : ""
+                      ] })
+                    ]
+                  },
+                  item.sessionId
+                ))
+              ] }) : null,
               missions.map((mission) => /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)("button", { className: selected?.id === mission.id ? "active" : "", onClick: () => {
                 setSelectedId(mission.id);
                 setDiff(null);
@@ -42572,7 +42612,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         }
         break;
       case "started":
-        loadSessions();
+        if (msg.data && msg.data.id) {
+          updateSessionSnapshot(msg.data);
+        } else {
+          updateSessionSnapshot({ id: msg.sessionId, status: "running" });
+        }
+        scheduleSessionListUpdate();
         break;
       case "ended": {
         var endedStatus = msg.data && msg.data.status ? msg.data.status : "exited";
@@ -42655,9 +42700,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         if (msg.sessionId === state.selectedId) {
           updateShellChrome();
         }
-        loadSessions().then(function() {
-          flushCrossSessionQueue();
-        });
+        scheduleSessionListUpdate();
+        flushCrossSessionQueue();
         if (msg.sessionId === state.selectedId) {
           if (!isStructuredEnded) {
             loadOutput(msg.sessionId);
@@ -44105,7 +44149,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
             state.selectedId = data.id;
             persistSelectedId();
             state.drafts[data.id] = "";
-            loadSessions().then(function() {
+            loadSessions2().then(function() {
               selectSession(data.id);
             });
           }
@@ -44221,7 +44265,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
             state.selectedId = data.id;
             persistSelectedId();
             state.drafts[data.id] = "";
-            loadSessions().then(function() {
+            loadSessions2().then(function() {
               selectSession(data.id);
               dismissDrawerIfOverlay();
             });
@@ -44254,7 +44298,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           state.selectedId = data.id;
           persistSelectedId();
           state.drafts[data.id] = "";
-          loadSessions().then(function() {
+          loadSessions2().then(function() {
             selectSession(data.id);
             dismissDrawerIfOverlay();
           });
@@ -44832,7 +44876,11 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
         return false;
       });
       var helperTextarea = termWrap.querySelector(".xterm-helper-textarea");
-      if (helperTextarea) helperTextarea.readOnly = !state.terminalInteractive;
+      if (helperTextarea) {
+        helperTextarea.readOnly = shouldLockNativeInputTerminalIme() ? true : !state.terminalInteractive;
+      }
+      installNativeInputImeGuard();
+      lockNativeInputTerminalIme();
       state.terminal = term;
       try {
         window.__wandTerminal = term;
@@ -44891,6 +44939,10 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       }
       state.terminalClickHandler = function(event) {
         if (hasActiveTerminalSelection()) return;
+        if (shouldLockNativeInputTerminalIme()) {
+          lockNativeInputTerminalIme();
+          return;
+        }
         if (state.terminalInteractive) term.focus();
         else focusInputBox2(event);
       };
@@ -45877,7 +45929,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     } else if (!state.ws || state.ws.readyState !== WebSocket.OPEN && state.ws.readyState !== WebSocket.CONNECTING) {
       initWebSocket();
     }
-    return loadSessions({ skipSelectedOutputReload: true }).catch(function(e) {
+    return loadSessions2({ skipSelectedOutputReload: true }).catch(function(e) {
       console.error("[wand] foreground sync failed:", reason, e);
     });
   }
@@ -48687,6 +48739,39 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   function shouldUseTerminalPassthrough(session) {
     return !!session && !isStructuredSession2(session) && session.status === "running" && state.currentView === "terminal";
   }
+  function isNativeInputEmbed() {
+    return document.documentElement.classList.contains("is-wand-native-input");
+  }
+  function shouldLockNativeInputTerminalIme() {
+    return isNativeInputEmbed() && !document.documentElement.classList.contains("is-wand-terminal-passthrough");
+  }
+  function lockNativeInputTerminalIme() {
+    if (!shouldLockNativeInputTerminalIme()) return false;
+    if (state.terminal && state.terminal.element) {
+      var helperTextarea = state.terminal.element.querySelector(".xterm-helper-textarea");
+      if (helperTextarea) {
+        helperTextarea.readOnly = true;
+        helperTextarea.setAttribute("aria-readonly", "true");
+        if (document.activeElement === helperTextarea) {
+          try {
+            helperTextarea.blur();
+          } catch (err) {
+          }
+        }
+      }
+    }
+    return true;
+  }
+  var nativeInputImeGuardInstalled = false;
+  function installNativeInputImeGuard() {
+    if (nativeInputImeGuardInstalled || !shouldLockNativeInputTerminalIme()) return;
+    nativeInputImeGuardInstalled = true;
+    document.addEventListener("focusin", function(event) {
+      var target = event.target;
+      if (!target || !target.classList || !target.classList.contains("xterm-helper-textarea")) return;
+      lockNativeInputTerminalIme();
+    }, true);
+  }
   function setTerminalInteractive(enabled, options) {
     var opts = options || {};
     var next = !!enabled && isTerminalInteractionAvailable2();
@@ -48694,12 +48779,12 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     state.terminalInteractive = next;
     if (state.terminal && state.terminal.element) {
       var helperTextarea = state.terminal.element.querySelector(".xterm-helper-textarea");
-      if (helperTextarea) helperTextarea.readOnly = !next;
+      if (helperTextarea) helperTextarea.readOnly = shouldLockNativeInputTerminalIme() ? true : !next;
     }
     if (next) {
       enableTerminalCapture();
       hideMiniKeyboard(false);
-      if (opts.focus !== false) focusTerminalInteractionTarget();
+      if (opts.focus !== false && !shouldLockNativeInputTerminalIme()) focusTerminalInteractionTarget();
       if (opts.announce !== false) showToast("\u7EC8\u7AEF\u4EA4\u4E92\u6A21\u5F0F\u5DF2\u5F00\u542F", "info");
     } else {
       disableTerminalCapture();
@@ -48871,7 +48956,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   function enableTerminalCapture() {
     if (state.terminal && state.terminal.element) {
       var helperTextarea = state.terminal.element.querySelector(".xterm-helper-textarea");
-      if (helperTextarea) helperTextarea.readOnly = false;
+      if (helperTextarea) helperTextarea.readOnly = shouldLockNativeInputTerminalIme() ? true : false;
     }
   }
   function disableTerminalCapture() {
@@ -49467,6 +49552,10 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     focusInputWithSelection(inputBox);
   }
   function focusTerminalContainer() {
+    if (shouldLockNativeInputTerminalIme()) {
+      lockNativeInputTerminalIme();
+      return;
+    }
     var output = document.getElementById("output");
     if (!output) return;
     output.setAttribute("tabindex", "0");
@@ -52662,7 +52751,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     render();
   }
   function refreshAll() {
-    return loadSessions();
+    return loadSessions2();
   }
   function getModeLabel(mode) {
     return mode === "full-access" ? "\u5B8C\u5168\u8BBF\u95EE" : mode === "default" ? "\u9ED8\u8BA4" : mode === "native" ? "\u539F\u751F" : mode === "auto-edit" ? "\u81EA\u52A8\u7F16\u8F91" : mode === "managed" ? "\u6258\u7BA1" : mode;
@@ -52774,7 +52863,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   }
   function recoverLatestSessionConfigMutation(sessionId, message) {
     clearPendingSessionConfig(sessionId);
-    Promise.resolve(loadSessions()).catch(function() {
+    Promise.resolve(loadSessions2()).catch(function() {
     }).finally(function() {
       refreshAllChatModeTrios2();
     });
@@ -53479,8 +53568,8 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       if (failure && failure.latest) recoverLatestSessionConfigMutation(session.id, "\u5207\u6362\u6A21\u5F0F\u5931\u8D25");
     });
   }
-  function createStructuredSession(prompt, cwdOverride, modeOverride, worktreeEnabled) {
-    var provider = getProviderKey(state.sessionTool);
+  function createStructuredSession(prompt, cwdOverride, modeOverride, worktreeEnabled, extra) {
+    var provider = extra && extra.provider || getProviderKey(state.sessionTool);
     var modelPref = getChatModelForProvider(provider) || getConfigDefaultModelForProvider(provider);
     var thinkingPref = state.chatThinking || "off";
     var structuredRunner2 = provider === "codex" ? "codex-cli-exec" : provider === "opencode" ? "opencode-cli-run" : provider === "grok" ? "grok-cli-headless" : provider === "qoder" ? "qoder-cli-print" : provider === "pi" ? "pi-cli-json" : state.config && state.config.structuredRunner === "sdk" ? "claude-sdk" : state.structuredRunner || "claude-cli-print";
@@ -53493,7 +53582,9 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       worktreeEnabled: worktreeEnabled === true,
       model: modelPref || void 0,
       thinkingEffort: thinkingPref,
-      sessionSource: "interactive"
+      sessionSource: "interactive",
+      workspaceId: extra && extra.workspaceId,
+      workspaceTaskId: extra && extra.workspaceTaskId
     };
     return fetch("/api/structured-sessions", {
       method: "POST",
@@ -53606,6 +53697,16 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   function mergeServerSession(localSession, serverSession) {
     if (!localSession) return serverSession;
     var merged = Object.assign({}, localSession, serverSession);
+    var slimList = !Array.isArray(serverSession.messages) && typeof serverSession.output !== "string";
+    if (slimList) {
+      if (Array.isArray(localSession.messages) && !Array.isArray(serverSession.messages)) {
+        merged.messages = localSession.messages;
+      }
+      if (typeof localSession.output === "string" && typeof serverSession.output !== "string") {
+        merged.output = localSession.output;
+      }
+      return merged;
+    }
     var localOutput = localSession.output || "";
     var serverOutput = serverSession.output || "";
     var keepLocalOutput = localOutput.length > serverOutput.length;
@@ -53687,7 +53788,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     });
     return recent ? recent.id : sessions[0].id;
   }
-  function loadSessions(options) {
+  function loadSessions2(options) {
     var opts = options || {};
     return fetch("/api/sessions", { credentials: "same-origin" }).then(function(res) {
       if (res.status === 401) {
@@ -53891,7 +53992,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
           state.selectedId = null;
           persistSelectedId();
         }
-        loadSessions();
+        loadSessions2();
         return;
       }
       updateSessionSnapshot(data);
@@ -54569,6 +54670,20 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   function startSessionInCwd(cwd, options) {
     var shell = !!(options && options.shell);
     var provider = shell ? "" : options && options.provider || getPreferredTool();
+    var kind = shell ? "pty" : options && options.kind || state.config && state.config.defaultSessionKind || "structured";
+    if (kind === "structured") {
+      return createStructuredSession(
+        options && options.initialInput,
+        cwd,
+        options && options.mode,
+        false,
+        {
+          workspaceId: options && options.workspaceId,
+          workspaceTaskId: options && options.workspaceTaskId,
+          provider
+        }
+      );
+    }
     var defaultMode = shell ? "default" : getSafeModeForTool2(
       provider,
       options && options.mode || (state.config && state.config.defaultMode ? state.config.defaultMode : "default")
@@ -55412,7 +55527,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       saveWorkingDir(request2.cwd);
       resetChatRenderCache();
       syncComposerModeSelect();
-      await loadSessions();
+      await loadSessions2();
       syncComposerModelSelect(state.sessions.find((session) => session.id === created.id) || null);
       selectSession(created.id);
       dismissDrawerIfOverlay();
@@ -55573,7 +55688,7 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
       },
       effectiveCwd: getEffectiveCwd,
       async openSession(sessionId) {
-        await loadSessions();
+        await loadSessions2();
         if (!state.sessions.some((session) => session.id === sessionId)) return;
         state.selectedId = sessionId;
         persistSelectedId();
