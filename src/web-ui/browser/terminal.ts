@@ -469,7 +469,12 @@ import { consumeTerminalTouchPage, consumeTerminalWheelPage, terminalWheelPageSe
           // and the sub-row remainder carries into the next event, so slow
           // drags keep up with the finger instead of dropping every
           // sub-rowHeight move.
-          carryPixels += dy;
+          // Natural scrolling: content follows the finger. xterm's
+          // scrollLines(+n) moves the viewport toward NEWER rows (scrollTop
+          // grows), so a downward drag (dy>0) that should reveal older rows
+          // above must feed in -dy — the same inversion the alternate-buffer
+          // path applies before paging.
+          carryPixels -= dy;
           var lines = Math.trunc(carryPixels / rowHeight);
           if (lines !== 0) {
             carryPixels -= lines * rowHeight;
