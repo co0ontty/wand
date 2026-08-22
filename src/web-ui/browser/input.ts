@@ -19,8 +19,8 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
 
       // 改为在识别回调里调用 updateVoiceTranscript(累积文本) 即可，交互层不用动。
       // ─────────────────────────────────────────────────────────────────
-      export var voiceState = { recording: false, canceling: false, transcript: "", startY: 0 };
-      export var VOICE_CANCEL_THRESHOLD = 60; // 按住后上滑超过该像素进入"松开取消"态
+      var voiceState = { recording: false, canceling: false, transcript: "", startY: 0 };
+      var VOICE_CANCEL_THRESHOLD = 60; // 按住后上滑超过该像素进入"松开取消"态
 
       // STT 唯一注入点：写入累积文字并刷新气泡内容。
       // 网页端目前没有可用的语音识别后端（移动端走原生客户端的端侧 STT）；
@@ -102,7 +102,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
       }
 
       // 复位录音相关 UI（按钮 + 气泡），不改变是否处于语音模式。
-      export function resetVoiceRecordingUI() {
+      function resetVoiceRecordingUI() {
         voiceState.canceling = false;
         var btn = document.getElementById("voice-record-btn");
         if (btn) {
@@ -118,7 +118,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
 
       // 把识别文字填回输入框（追加在已有草稿后、不覆盖），光标停末尾。
       // 复用 setDraftValue + autoResizeInput，与提示词优化填回 textarea 同一套范式。
-      export function commitVoiceTranscript(text) {
+      function commitVoiceTranscript(text) {
         if (state.promptOptimizeRequest
           && state.promptOptimizeRequest.sessionId === state.selectedId) return;
         var clean = (text || "").trim();
@@ -200,9 +200,9 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
 
       // ── 跨会话排队 ──
 
-      export var _queueLaunching = false; // 防止并发 launch
+      var _queueLaunching = false; // 防止并发 launch
 
-      export function sessionIsBusyForQueue(s) {
+      function sessionIsBusyForQueue(s) {
         if (!s || s.archived) return false;
         if (isStructuredSession(s)) {
           return !!(s.structuredState && s.structuredState.inFlight);
@@ -210,14 +210,14 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         return s.status === "running";
       }
 
-      export function hasAnyBusySession() {
+      function hasAnyBusySession() {
         return state.sessions.some(sessionIsBusyForQueue);
       }
 
       // 选出用户「想继续的那个会话」：当前选中且仍在忙的优先，否则取最近启动、
       // 仍在忙的那个。enqueueCrossSessionMessage 只在 hasAnyBusySession() 为真时
       // 被调用，所以这里几乎总能拿到一个目标。
-      export function getContinuationTargetSession() {
+      function getContinuationTargetSession() {
         var candidates = state.sessions.filter(sessionIsBusyForQueue);
         if (candidates.length === 0) return null;
         if (state.selectedId) {
@@ -233,7 +233,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
       // 把一条消息送进某个结构化会话的服务端排队。沿用 inFlight→排队、当前回复
       // 结束后自动 --resume 续接的既有路径（与输入框上方「排队发送」按钮同一条
       // 链路），因此排队的这条消息天然带着该会话之前所有轮次的上下文。
-      export function getLastStructuredSubmittedInput(session) {
+      function getLastStructuredSubmittedInput(session) {
         if (!session) return "";
         var queue = Array.isArray(session.queuedMessages) ? session.queuedMessages : [];
         for (var qi = queue.length - 1; qi >= 0; qi--) {
@@ -263,20 +263,20 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
       // never replace a newer optimistic queue. Keep a lightweight
       // per-session revision and strip stale `queuedMessages` snapshots while
       // still accepting the rest of the server session update.
-      export var structuredQueueMutationRevisionBySession = {};
+      var structuredQueueMutationRevisionBySession = {};
 
-      export function getStructuredQueueMutationRevision(sessionId) {
+      function getStructuredQueueMutationRevision(sessionId) {
         return sessionId ? structuredQueueMutationRevisionBySession[sessionId] || 0 : 0;
       }
 
-      export function bumpStructuredQueueMutationRevision(sessionId) {
+      function bumpStructuredQueueMutationRevision(sessionId) {
         if (!sessionId) return 0;
         var next = getStructuredQueueMutationRevision(sessionId) + 1;
         structuredQueueMutationRevisionBySession[sessionId] = next;
         return next;
       }
 
-      export function removeOneQueuedMessage(sessionId, text, preferredIndex?) {
+      function removeOneQueuedMessage(sessionId, text, preferredIndex?) {
         var latestSession = state.sessions.find(function(item) { return item.id === sessionId; });
         var latestQueue = latestSession && Array.isArray(latestSession.queuedMessages)
           ? latestSession.queuedMessages.slice()
@@ -289,7 +289,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         return latestQueue;
       }
 
-      export function stripStaleStructuredQueueSnapshot(snapshot, sessionId, requestRevision, requestQueueEpoch) {
+      function stripStaleStructuredQueueSnapshot(snapshot, sessionId, requestRevision, requestQueueEpoch) {
         if (!snapshot || !snapshot.queuedMessages) return snapshot;
         if (getStructuredQueueMutationRevision(sessionId) !== requestRevision
             || state.queueEpoch > requestQueueEpoch) {
@@ -298,7 +298,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         return snapshot;
       }
 
-      export function continueStructuredSession(session, text) {
+      function continueStructuredSession(session, text) {
         var normalizedText = typeof text === "string" ? text.trim() : "";
         if (normalizedText && getLastStructuredSubmittedInput(session) === normalizedText) {
           showToast("与上一条消息相同，已忽略，不会加入排队。", "warning");
@@ -354,7 +354,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           });
       }
 
-      export function enqueueCrossSessionMessage(text) {
+      function enqueueCrossSessionMessage(text) {
         // 关键修复：以前这里无脑把消息塞进 crossSessionQueue，等空闲后用
         // /api/commands 起一个「全新会话」发送 —— 新会话不带任何历史，于是
         // 「第 2 条消息没有第 1 条的上下文」。正确做法是把它送回「正在忙的那个
@@ -386,7 +386,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         showToast("已排队，将在空闲后自动开始新会话。", "info");
       }
 
-      export function launchQueueItem(item) {
+      function launchQueueItem(item) {
         if (_queueLaunching) return;
         _queueLaunching = true;
         fetch("/api/commands", {
@@ -422,7 +422,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         });
       }
 
-      export function sendQueueItemNow(queueId) {
+      function sendQueueItemNow(queueId) {
         var idx = state.crossSessionQueue.findIndex(function(q) { return q.id === queueId; });
         if (idx < 0) return;
         var item = state.crossSessionQueue.splice(idx, 1)[0];
@@ -459,7 +459,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         });
       }
 
-      export function cancelQueueItem(queueId) {
+      function cancelQueueItem(queueId) {
         var idx = state.crossSessionQueue.findIndex(function(q) { return q.id === queueId; });
         if (idx < 0) return;
         state.crossSessionQueue.splice(idx, 1);
@@ -479,7 +479,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         launchQueueItem(item);
       }
 
-      export function formatQueueAge(queuedAt) {
+      function formatQueueAge(queuedAt) {
         var sec = Math.floor((Date.now() - queuedAt) / 1000);
         if (sec < 60) return sec + "s";
         var min = Math.floor(sec / 60);
@@ -801,14 +801,14 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           });
       }
 
-      export function getComposerSubmissionFingerprint(value, attachments) {
+      function getComposerSubmissionFingerprint(value, attachments) {
         var attachmentPart = (attachments || []).map(function(item) {
           return [item.name || "", item.size || 0, item.file && item.file.lastModified || 0].join(":");
         }).join("|");
         return String(value || "").trim() + "\u0000" + attachmentPart;
       }
 
-      export function restoreFailedComposerSubmission(sessionId, value, attachments) {
+      function restoreFailedComposerSubmission(sessionId, value, attachments) {
         var currentDraft = getDraftValueForSession(sessionId);
         var restoredDraft = value;
         if (currentDraft && currentDraft !== value) {
@@ -829,7 +829,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         updateInteractiveControls();
       }
 
-      export function refocusComposerAfterTouchSubmit(inputBox, sessionId) {
+      function refocusComposerAfterTouchSubmit(inputBox, sessionId) {
         if (!inputBox || !isTouchDevice()) return;
         var refocus = function() {
           if (state.selectedId !== sessionId || !inputBox.isConnected || inputBox.disabled) return;
@@ -968,10 +968,10 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
       // 流式 30s 不响应 → 这 30s 里再点发送全被这里静默 drop，看起来"排队 / 立即发送
       // 都没效果"。改成时间戳 + 短窗口（350ms）只挡真正的连击。idempotencyKey 已经
       // 在后端兜底防 webview 网络层重发，这里的 hot-path 守门只需要应付 UI 双触发。
-      export var _structuredLastSubmitAt = {};
-      export var DUPLICATE_SUBMIT_WINDOW_MS = 350;
+      var _structuredLastSubmitAt = {};
+      var DUPLICATE_SUBMIT_WINDOW_MS = 350;
 
-      export function postStructuredInput(input, inputBox, session, opts) {
+      function postStructuredInput(input, inputBox, session, opts) {
         opts = opts || {};
         // interrupt:true 现在只来自 Cmd/Ctrl+Enter 快捷键，或点队列气泡触发的
         // queueBarPromoteIndex()。普通 Enter / 点发送在上一条还在流式时默认走
@@ -1225,10 +1225,10 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
       // 数据源：session.queuedMessages（后端 WS + postStructuredInput 乐观更新）。
       // ──────────────────────────────────────────────────────────────────────────
 
-      export var QUEUE_BAR_MAX = 10;            // 后端硬上限
-      export var QUEUE_CHIP_MAX_TEXT = 26;      // 单行气泡字数上限（一行一个，右侧贴边）
+      var QUEUE_BAR_MAX = 10;            // 后端硬上限
+      var QUEUE_CHIP_MAX_TEXT = 26;      // 单行气泡字数上限（一行一个，右侧贴边）
 
-      export function queueChipTruncate(text) {
+      function queueChipTruncate(text) {
         if (typeof text !== "string") return "";
         var s = text.replace(/\s+/g, " ").trim();
         if (s.length <= QUEUE_CHIP_MAX_TEXT) return s;
@@ -1241,14 +1241,14 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         return !!state.queueBarExpanded;
       }
 
-      export function setQueueBarExpanded(expanded) {
+      function setQueueBarExpanded(expanded) {
         if (!!state.queueBarExpanded === !!expanded) return;
         state.queueBarExpanded = !!expanded;
         var bar = document.querySelector(".queue-bar");
         if (bar) bar.classList.toggle("expanded", !!expanded);
       }
 
-      export function renderQueueBarHtml(items, inFlight, atCapacity) {
+      function renderQueueBarHtml(items, inFlight, atCapacity) {
         var n = items.length;
         var barClass = "queue-bar";
         if (atCapacity) barClass += " queue-bar-capacity";
@@ -1328,7 +1328,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
       }
 
       // ── 单条删除 / 全部清空 / 队首插队 ──
-      export function rollbackQueueOptimistic(session, prevQueue, expectedRevision?) {
+      function rollbackQueueOptimistic(session, prevQueue, expectedRevision?) {
         if (typeof expectedRevision === "number"
             && getStructuredQueueMutationRevision(session.id) !== expectedRevision) {
           updateQueueBar();
@@ -1342,7 +1342,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         updateQueueBar();
       }
 
-      export function queueBarDeleteItem(index) {
+      function queueBarDeleteItem(index) {
         var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
         if (!session) return;
         var queue = Array.isArray(session.queuedMessages) ? session.queuedMessages.slice() : [];
@@ -1372,7 +1372,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         });
       }
 
-      export function queueBarClearAll() {
+      function queueBarClearAll() {
         var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
         if (!session) return;
         var prev = Array.isArray(session.queuedMessages) ? session.queuedMessages.slice() : [];
@@ -1407,7 +1407,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
       // - inFlight：interrupt + preserveQueue（中断当前回复，保留其它排队）
       // - 非 inFlight：当作普通新消息发出去
       // 用户路径：点输入框上方的气泡（chip）→ 这里。
-      export function queueBarPromoteIndex(index) {
+      function queueBarPromoteIndex(index) {
         if (state.queueBarPromoting) return;
         var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
         if (!session) return;
@@ -1478,7 +1478,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
       // 单条气泡的 pointerdown 也会进这里，但 queue.length <= 1 时直接返回，让
       // 系统 click 事件穿透到 #queue-bar-host 的 click delegate（那里再判断"点击
       // 气泡 → 立即发送"）。
-      export function queueBarDragStart(ev, chipEl) {
+      function queueBarDragStart(ev, chipEl) {
         var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
         if (!session) return;
         var queue = Array.isArray(session.queuedMessages) ? session.queuedMessages.slice() : [];
@@ -1526,7 +1526,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
 
       // 给定 origIndex / target / 真实 rects，算出新排列下每个 sibling 的目标 top。
       // 用真实高度而不是固定 shift，因为 expanded chip 比 collapsed 高很多。
-      export function queueBarComputeNewTops(origIndex, target, rects, gap) {
+      function queueBarComputeNewTops(origIndex, target, rects, gap) {
         var n = rects.length;
         var order = [];
         for (var i = 0; i < n; i++) order.push(i);
@@ -1549,7 +1549,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         return newTops;
       }
 
-      export function queueBarDragMove(ev) {
+      function queueBarDragMove(ev) {
         var d = state.queueBarDrag;
         if (!d || ev.pointerId !== d.pointerId) return;
         ev.preventDefault();
@@ -1577,7 +1577,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         }
       }
 
-      export function queueBarDragEnd(ev) {
+      function queueBarDragEnd(ev) {
         var d = state.queueBarDrag;
         if (!d || (ev && ev.pointerId !== d.pointerId)) return;
         try { d.handleEl.releasePointerCapture(d.pointerId); } catch (_e) {}
@@ -1711,7 +1711,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         updateStructuredQueueCounter();
       }
 
-      export function getInputErrorMessage(error) {
+      function getInputErrorMessage(error) {
         var selectedSession = getSelectedSession();
         var isCodex = selectedSession && selectedSession.provider === "codex";
         if (error && (error.errorCode === "SESSION_NOT_RUNNING" || error.errorCode === "SESSION_NO_PTY")) {
@@ -1727,7 +1727,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           : "会话暂不可用；若存在 Claude 历史会话，将自动尝试恢复。");
       }
 
-      export function buildInputError(payload) {
+      function buildInputError(payload) {
         var err = new Error((payload && payload.error) || "会话已结束。") as SendError;
         if (payload && typeof payload === "object") {
           err.errorCode = payload.errorCode || null;
@@ -1737,11 +1737,11 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         return err;
       }
 
-      export function isSessionUnavailableError(error) {
+      function isSessionUnavailableError(error) {
         return error && (error.errorCode === "SESSION_NOT_RUNNING" || error.errorCode === "SESSION_NO_PTY" || error.errorCode === "SESSION_NOT_FOUND");
       }
 
-      export function markSessionStopped(sessionId, status) {
+      function markSessionStopped(sessionId, status) {
         if (!sessionId) return;
         updateSessionSnapshot({ id: sessionId, status: status || "exited" });
       }
@@ -1755,7 +1755,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           && session.status !== "running" && session.claudeSessionId);
       }
 
-      export function ensureSessionReadyForInput(session, errorEl?) {
+      function ensureSessionReadyForInput(session, errorEl?) {
         if (!session) {
           showToast("会话不存在，请重新选择或新建会话。", "error");
           return Promise.resolve(null);
@@ -1783,13 +1783,13 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         });
       }
 
-      export function getTerminalSubmitChunks(session, text) {
+      function getTerminalSubmitChunks(session, text) {
         // 文本与回车分两个 chunk 发，避免 CLI 的 bracketed paste 检测把末尾
         // \r 并入粘贴内容导致只换行不提交。
         return [text, String.fromCharCode(13)];
       }
 
-      export function sendTerminalChunks(chunks, shortcutKey, delayMs, viewOverride, sessionId?) {
+      function sendTerminalChunks(chunks, shortcutKey, delayMs, viewOverride, sessionId?) {
         var sequence = Array.isArray(chunks) ? chunks.filter(function(chunk) { return !!chunk; }) : [];
         if (sequence.length === 0) {
           return Promise.resolve();
@@ -1811,9 +1811,9 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
 
       // pendingMessages 缓存 ws 离线时的输入，重连后回放。每条带时间戳，
       // flush 时丢弃过期项——离线 >TTL 后回放老按键序列只会让 PTY 错位。
-      export var PENDING_INPUT_TTL_MS = 5000;
-      export var PENDING_INPUT_MAX = 100;
-      export function enqueuePendingInput(input) {
+      var PENDING_INPUT_TTL_MS = 5000;
+      var PENDING_INPUT_MAX = 100;
+      function enqueuePendingInput(input) {
         if (!input) return;
         if (state.pendingMessages.length >= PENDING_INPUT_MAX) {
           state.pendingMessages.shift();
@@ -1994,7 +1994,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         return true;
       }
 
-      export var keyboardEventKeyMap = {
+      var keyboardEventKeyMap = {
         Esc: "escape",
         ArrowUp: "up",
         ArrowDown: "down",
@@ -2012,7 +2012,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         " ": "space"
       };
 
-      export var ptySpecialKeyMap = {
+      var ptySpecialKeyMap = {
         space: " ",
         tab: String.fromCharCode(9),
         shift_tab: String.fromCharCode(27) + "[Z",
@@ -2025,7 +2025,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         insert: String.fromCharCode(27) + "[2~"
       };
 
-      export var ctrlSymbolMap = {
+      var ctrlSymbolMap = {
         " ": 0,
         "[": 27,
         "\\": 28,
@@ -2047,13 +2047,13 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         { key: "shift_tab", label: "Shift+Tab" }
       ];
 
-      export var ignoredInteractiveTargetIds = new Set([
+      var ignoredInteractiveTargetIds = new Set([
         "mini-keyboard-fab",
         "mini-keyboard-toggle",
         "terminal-interactive-toggle"
       ]);
 
-      export function shouldIgnoreInteractiveTarget(target) {
+      function shouldIgnoreInteractiveTarget(target) {
         if (!target) return false;
         if (ignoredInteractiveTargetIds.has(target.id)) return true;
         // React/Radix overlays own their keyboard contract. In terminal-interactive
@@ -2064,17 +2064,17 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         ));
       }
 
-      export var modifierKeySet = new Set(["ctrl", "alt", "shift"]);
+      var modifierKeySet = new Set(["ctrl", "alt", "shift"]);
 
-      export function isModifierKey(key) {
+      function isModifierKey(key) {
         return modifierKeySet.has(key);
       }
 
-      export function getPtySpecialSequence(key) {
+      function getPtySpecialSequence(key) {
         return ptySpecialKeyMap[key] || "";
       }
 
-      export function getCtrlSequence(text) {
+      function getCtrlSequence(text) {
         var lower = text.toLowerCase();
         if (lower >= "a" && lower <= "z") {
           return String.fromCharCode(lower.charCodeAt(0) - 96);
@@ -2085,11 +2085,11 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         return "";
       }
 
-      export function keyFromKeyboardEvent(event) {
+      function keyFromKeyboardEvent(event) {
         return keyboardEventKeyMap[event.key] || event.key;
       }
 
-      export function getModifierStateFromEvent(event, key) {
+      function getModifierStateFromEvent(event, key) {
         return {
           ctrl: event.ctrlKey,
           alt: event.altKey,
@@ -2105,7 +2105,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         queueDirectInput(sequence, shortcutKey).catch(function() {});
       }
 
-      export function focusTerminalInteractionTarget() {
+      function focusTerminalInteractionTarget() {
         focusTerminalContainer();
       }
 
@@ -2123,14 +2123,14 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         setTerminalInteractive(!state.terminalInteractive);
       }
 
-      export function shouldUseTerminalPassthrough(session) {
+      function shouldUseTerminalPassthrough(session) {
         return !!session
           && !isStructuredSession(session)
           && session.status === "running"
           && state.currentView === "terminal";
       }
 
-      export function isNativeInputEmbed() {
+      function isNativeInputEmbed() {
         return document.documentElement.classList.contains("is-wand-native-input");
       }
 
@@ -2394,7 +2394,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         scheduleSoftResyncTerminal(500);
       }
 
-      export function updateKeyboardPopupUI() {
+      function updateKeyboardPopupUI() {
         updateJoystickPanelUI();
       }
 
@@ -2403,14 +2403,14 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         updateInteractiveControls();
       }
 
-      export function enableTerminalCapture() {
+      function enableTerminalCapture() {
         if (state.terminal && state.terminal.element) {
           var helperTextarea = state.terminal.element.querySelector(".xterm-helper-textarea");
           if (helperTextarea) helperTextarea.readOnly = shouldLockNativeInputTerminalIme() ? true : false;
         }
       }
 
-      export function disableTerminalCapture() {
+      function disableTerminalCapture() {
         document.removeEventListener("keydown", captureTerminalInput, true);
         if (state.terminal && state.terminal.element) {
           var helperTextarea = state.terminal.element.querySelector(".xterm-helper-textarea");
@@ -2448,7 +2448,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         updateModifierUI();
       }
 
-      export function updateModifierUI() {
+      function updateModifierUI() {
         var keyboard = document.getElementById("mini-keyboard");
         if (!keyboard) return;
         ["ctrl", "alt", "shift"].forEach(function(name) {
@@ -2530,7 +2530,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         });
       }
 
-      export function sendInputDirect(input) {
+      function sendInputDirect(input) {
         if (!input || !state.selectedId) return Promise.resolve();
         // 同 postInput：flushPendingMessages 重连后批量回放离线消息时，
         // 用户可能已在切到别的会话，必须用本次请求的 sessionId 快照。
@@ -2697,7 +2697,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
       // ── Swipe-to-delete gesture ──
 
       export var _swipeState = null;
-      export var _swipedItem = null;
+      var _swipedItem = null;
 
       export function closeSwipedItem() {
         if (_swipedItem) {
@@ -2745,9 +2745,9 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         });
       }
 
-      export var _resumeInProgress = false;
+      var _resumeInProgress = false;
 
-      export function resumeSession(sessionId, errorEl?) {
+      function resumeSession(sessionId, errorEl?) {
         if (!sessionId || _resumeInProgress) return Promise.resolve(null);
         _resumeInProgress = true;
         return fetch("/api/sessions/" + encodeURIComponent(sessionId) + "/resume", {
@@ -3067,7 +3067,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           });
       }
 
-      export function isTouchDevice() {
+      function isTouchDevice() {
         return "ontouchstart" in window || navigator.maxTouchPoints > 0;
       }
 
@@ -3081,7 +3081,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         focusInputWithSelection(inputBox);
       }
 
-      export function updateInputPanelViewportSpacing() {
+      function updateInputPanelViewportSpacing() {
         // 键盘空间通过 syncAppViewportHeight 让 body 跟随 visualViewport 收缩处理；
         // 这里清掉历史遗留的 --keyboard-offset 避免双重补偿。
         var inputPanel = document.querySelector('.input-panel') as HTMLElement | null;
@@ -3089,13 +3089,13 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         inputPanel.style.removeProperty('--keyboard-offset');
       }
 
-      export function resetInputPanelViewportSpacing() {
+      function resetInputPanelViewportSpacing() {
         var inputPanel = document.querySelector('.input-panel') as HTMLElement | null;
         if (!inputPanel) return;
         inputPanel.style.removeProperty('--keyboard-offset');
       }
 
-      export function restoreInputBoxViewport(inputBox) {
+      function restoreInputBoxViewport(inputBox) {
         if (!inputBox) return;
         var start = inputBox.selectionStart;
         var end = inputBox.selectionEnd;
@@ -3118,7 +3118,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         }, { passive: true });
       }
 
-      export function syncInputBoxLayout(inputBox) {
+      function syncInputBoxLayout(inputBox) {
         if (!inputBox) return;
         autoResizeInput(inputBox);
         restoreInputBoxViewport(inputBox);
@@ -3158,19 +3158,19 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         });
       }
 
-      export function adjustInputBoxSelection(inputBox) {
+      function adjustInputBoxSelection(inputBox) {
         if (!inputBox) return;
         inputBox.setSelectionRange(inputBox.value.length, inputBox.value.length);
         restoreInputBoxViewport(inputBox);
       }
 
-      export function focusInputWithSelection(inputBox) {
+      function focusInputWithSelection(inputBox) {
         if (!inputBox) return;
         inputBox.focus({ preventScroll: true });
         adjustInputBoxSelection(inputBox);
       }
 
-      export function syncInputBoxForCurrentState(inputBox) {
+      function syncInputBoxForCurrentState(inputBox) {
         bindInputTouchScroll(inputBox);
         syncInputBoxLayout(inputBox);
       }
@@ -3197,7 +3197,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         inputBox.scrollTop = inputBox.scrollHeight;
       }
 
-      export function focusInputFromTap() {
+      function focusInputFromTap() {
         if (state.terminalInteractive) {
           focusTerminalContainer();
           return;
@@ -3212,7 +3212,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         focusInputWithSelection(inputBox);
       }
 
-      export function focusTerminalContainer() {
+      function focusTerminalContainer() {
         if (shouldLockNativeInputTerminalIme()) {
           lockNativeInputTerminalIme();
           return;

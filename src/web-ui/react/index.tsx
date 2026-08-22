@@ -90,120 +90,25 @@ export function startReactUi(): WandOverlay | null {
   return wandOverlay;
 }
 
-export { wandOverlay } from "./overlay-controller";
-export type {
-  OverlayDialogAction,
-  OverlayDialogOptions,
-  OverlayDialogResult,
-  OverlayToastHandle,
-  OverlayToastOptions,
-  WandOverlay,
-} from "./overlay-controller";
-export {
-  isReactShellEnabled,
-  isReactUiEnabled,
-  REACT_SHELL_STORAGE_KEY,
-  REACT_UI_STORAGE_KEY,
-} from "./feature-flags";
-export { settingsController, settingsStore } from "./settings/controller";
-export {
-  composerSelectController,
-  type ComposerSelectControl,
-  type ComposerSelectMount,
-  type ComposerSelectScope,
-  type ComposerSelectSnapshot,
-} from "./composer-select/controller";
-export {
-  configureNewSessionRuntime,
-  newSessionController,
-  newSessionStore,
-} from "./new-session/controller";
-export {
-  configureFolderPickerRuntime,
-  folderPickerController,
-  folderPickerStore,
-} from "./folder-picker/controller";
-export {
-  configureQuickCommitRuntime,
-  quickCommitController,
-  quickCommitStore,
-} from "./quick-commit/controller";
-export {
-  configureWorktreeMergeRuntime,
-  worktreeMergeController,
-  worktreeMergeStore,
-} from "./worktree-merge/controller";
-export {
-  restartOverlayController,
-  showAutoUpdate,
-  showRestart,
-} from "./restart-overlay/controller";
-export {
-  configureFilePreviewRuntime,
-  createFilePreviewModule,
-  filePreviewController,
-  filePreviewStore,
-} from "./file-preview/controller";
-export {
-  configureMissionsRuntime,
-  missionsController,
-  missionsStore,
-} from "./missions/controller";
-export {
-  configureWorkspacesRuntime,
-  workspacesController,
-  workspacesStore,
-  type WandWorkspacesController,
-} from "./workspaces/controller";
-export type {
-  CreateMissionRequest,
-  MissionDetails,
-  MissionDiff,
-  MissionsRepository,
-  MissionsRuntimeAdapter,
-} from "./missions/types";
-export type {
-  NewSessionCreateRequest,
-  NewSessionCreated,
-  NewSessionRepository,
-  NewSessionRuntimeAdapter,
-} from "./new-session/types";
-export type {
-  FolderPickerItem,
-  FolderPickerListing,
-  FolderPickerRepository,
-  FolderPickerRuntimeAdapter,
-} from "./folder-picker/types";
-export type {
-  QuickCommitAction,
-  QuickCommitInput,
-  QuickCommitOpenContext,
-  QuickCommitRepository,
-  QuickCommitRuntimeAdapter,
-  QuickCommitStatus,
-} from "./quick-commit/types";
-export type {
-  WorktreeCleanupResult,
-  WorktreeMergeCommit,
-  WorktreeMergeInspection,
-  WorktreeMergeIntent,
-  WorktreeMergeOpenContext,
-  WorktreeMergeRepository,
-  WorktreeMergeResult,
-  WorktreeMergeRuntimeAdapter,
-  WorktreeMergeStatus,
-} from "./worktree-merge/types";
-export type {
-  FilePreviewCommand,
-  FilePreviewFailure,
-  FilePreviewFile,
-  FilePreviewKind,
-  FilePreviewOpenRequest,
-  FilePreviewRepository,
-  FilePreviewRuntimeAdapter,
-  FilePreviewSnapshot,
-  WandFilePreviewController,
-} from "./file-preview/types";
-export type { SettingsRepository, SettingsSnapshot } from "./settings/types";
+
+export {WandOverlay} from "./overlay-controller";
+export {isReactShellEnabled} from "./feature-flags";
+
+
+export {configureNewSessionRuntime} from "./new-session/controller";
+export {configureFolderPickerRuntime, folderPickerController} from "./folder-picker/controller";
+
+
+
+
+
+
+
+export {NewSessionCreateRequest, NewSessionCreated, NewSessionRuntimeAdapter} from "./new-session/types";
+export {FolderPickerRuntimeAdapter} from "./folder-picker/types";
+
+
+
+
 export * from "./shell";
 export * from "./ui";

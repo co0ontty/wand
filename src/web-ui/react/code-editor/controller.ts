@@ -352,4 +352,4 @@ const singleton = createCodeEditorModule({ repository: httpCodeEditorRepository 
 
 export const codeEditorController = singleton.controller;
 export const codeEditorStore = singleton.store;
-export const configureCodeEditorRuntime = singleton.configureRuntime;
+const configureCodeEditorRuntime = singleton.configureRuntime;

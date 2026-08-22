@@ -19,7 +19,7 @@ export type SettingsDistributionSource = "github" | "local";
 export type SettingsNotificationPermission = "granted" | "denied" | "default" | "unsupported";
 type SettingsPlatformKind = "browser" | "android" | "ios" | "macos";
 
-export interface SettingsBuildInfo {
+interface SettingsBuildInfo {
   commit: string | null;
   shortCommit: string | null;
   builtAt: string | null;

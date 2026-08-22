@@ -358,4 +358,4 @@ const singleton = createFileExplorerModule({ repository: httpFileExplorerReposit
 
 export const fileExplorerController = singleton.controller;
 export const fileExplorerStore = singleton.store;
-export const configureFileExplorerRuntime = singleton.configureRuntime;
+const configureFileExplorerRuntime = singleton.configureRuntime;

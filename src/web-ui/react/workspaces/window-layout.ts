@@ -8,7 +8,7 @@ import type {
 
 export type PersistedTaskLayout = TaskWindowLayout | LayoutNode | null;
 
-export function sessionPaneTab(sessionId: string): PaneTab {
+function sessionPaneTab(sessionId: string): PaneTab {
   return { id: `tab-${sessionId}`, kind: "session", sessionId };
 }
 
@@ -16,7 +16,7 @@ function paneWith(tab: PaneTab): LayoutNode {
   return { type: "pane", tabs: [tab], active: 0 };
 }
 
-export function layoutTabs(node: LayoutNode): PaneTab[] {
+function layoutTabs(node: LayoutNode): PaneTab[] {
   return node.type === "pane"
     ? node.tabs
     : [...layoutTabs(node.children[0]), ...layoutTabs(node.children[1])];

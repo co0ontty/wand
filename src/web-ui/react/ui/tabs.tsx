@@ -2,7 +2,7 @@ import * as TabsPrimitive from "@radix-ui/react-tabs";
 import type { ReactNode } from "react";
 import { classNames } from "./class-names";
 
-export interface WandTabItem {
+interface WandTabItem {
   value: string;
   label: ReactNode;
   content: ReactNode;

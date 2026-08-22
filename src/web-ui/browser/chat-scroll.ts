@@ -7,7 +7,7 @@ import { render } from "./render";
 
 // TODO: import from correct module when created
 
-export function getChatScrollElement() {
+function getChatScrollElement() {
   var chatOutput = document.getElementById("chat-output");
   if (!chatOutput) {
     state.chatScrollElement = null;
@@ -252,7 +252,7 @@ export function bindChatScrollListener() {
 }
 
 /** Load older messages: first expand the local window, then fetch earlier pages from the server. */
-export function loadMoreChatMessages() {
+function loadMoreChatMessages() {
   // 本地还有没展开的：先扩大渲染窗口。
   if (state.chatRenderedCount < state.currentMessages.length) {
     state.chatRenderedCount += state.chatPageSize;
@@ -267,7 +267,7 @@ export function loadMoreChatMessages() {
 }
 
 // Observe the "load more" sentinel for auto-loading when scrolled into view
-export var _loadMoreObserver: any = null;
+var _loadMoreObserver: any = null;
 export function observeLoadMoreSentinel() {
   if (_loadMoreObserver) { _loadMoreObserver.disconnect(); _loadMoreObserver = null; }
   var sentinel = document.getElementById("chat-load-more-sentinel");
@@ -313,7 +313,7 @@ export function getStructuredQueuedInputs(session: any) {
   return state.structuredInputQueue;
 }
 
-export function getSelectedStructuredQueuedInputs() {
+function getSelectedStructuredQueuedInputs() {
   var session = state.sessions.find(function(s: any) { return s.id === state.selectedId; });
   return getStructuredQueuedInputs(session);
 }
@@ -323,17 +323,17 @@ export function syncStructuredQueueFromSession(session: any) {
   state.structuredInputQueue = Array.isArray(queued) ? queued.slice() : [];
 }
 
-export function hasRenderOnlyStructuredBlock(message: any, marker: string) {
+function hasRenderOnlyStructuredBlock(message: any, marker: string) {
   return !!(message && Array.isArray(message.content) && message.content.some(function(block: any) {
     return block && typeof block === "object" && block[marker];
   }));
 }
 
-export function isQueuedStructuredMessage(message: any) {
+function isQueuedStructuredMessage(message: any) {
   return !!(message && message.role === "user" && hasRenderOnlyStructuredBlock(message, "__queued"));
 }
 
-export function isProcessingStructuredMessage(message: any) {
+function isProcessingStructuredMessage(message: any) {
   return !!(message && message.role === "assistant" && hasRenderOnlyStructuredBlock(message, "__processing"));
 }
 
@@ -431,7 +431,7 @@ export function getConfigCwd() {
   return (state.config && state.config.defaultCwd) || "/tmp";
 }
 
-export function loadChatExpandStateMap() {
+function loadChatExpandStateMap() {
   try {
     var saved = localStorage.getItem(CHAT_EXPAND_STATE_STORAGE_KEY);
     if (!saved) return {};
@@ -442,7 +442,7 @@ export function loadChatExpandStateMap() {
   }
 }
 
-export function saveChatExpandStateMap(map: any) {
+function saveChatExpandStateMap(map: any) {
   try {
     if (!map || Object.keys(map).length === 0) {
       localStorage.removeItem(CHAT_EXPAND_STATE_STORAGE_KEY);
@@ -454,7 +454,7 @@ export function saveChatExpandStateMap(map: any) {
   }
 }
 
-export function getCurrentChatExpandState() {
+function getCurrentChatExpandState() {
   var sessionId = state.selectedId;
   if (!sessionId) return {};
   var map = loadChatExpandStateMap();
@@ -507,7 +507,7 @@ export function getElementExpandKey(el: any) {
   return el.dataset.expandKey || "";
 }
 
-export function isElementExpanded(el: any, kind: string) {
+function isElementExpanded(el: any, kind: string) {
   if (!el) return false;
   switch (kind) {
     case "tool-card":

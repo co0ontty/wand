@@ -161,7 +161,7 @@ function normalizeStoredUrl(value: string): string | null {
   }
 }
 
-export function urlsMatch(storedUrl: string, pageUrl: string): boolean {
+function urlsMatch(storedUrl: string, pageUrl: string): boolean {
   try {
     const stored = new URL(normalizeStoredUrl(storedUrl) ?? storedUrl);
     const page = new URL(pageUrl);

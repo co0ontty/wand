@@ -234,7 +234,7 @@ export interface WorktreeMergeInfo {
   conflict?: boolean;
 }
 
-export interface WorktreeMergeCommit {
+interface WorktreeMergeCommit {
   hash: string;
   shortHash: string;
   subject: string;
@@ -651,7 +651,7 @@ export type LayoutNode =
   | { type: "split"; dir: "h" | "v"; ratio: number; children: [LayoutNode, LayoutNode] };
 
 /** 顶部一个工作窗口 Tab；内部可以包含一棵终端分屏树。 */
-export interface WorkWindowLayout {
+interface WorkWindowLayout {
   id: string;
   layout: LayoutNode;
   activeTabId?: string;

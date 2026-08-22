@@ -1,6 +1,5 @@
 import {
   fileExtension,
-  fileNameFromPath,
 } from "../file-preview/model";
 import { normalizeFilePreview } from "../file-preview/repository";
 import type { FilePreviewFailure } from "../file-preview/types";
@@ -51,7 +50,7 @@ function failureFromResponse(
 }
 
 /** Adapter that loads/saves text files through the existing REST endpoints. */
-export class HttpCodeEditorRepository implements CodeEditorRepository {
+class HttpCodeEditorRepository implements CodeEditorRepository {
   constructor(
     private readonly fetchImpl: FetchLike = (input, init) => globalThis.fetch(input, init),
   ) {}
@@ -117,5 +116,3 @@ export class HttpCodeEditorRepository implements CodeEditorRepository {
 }
 
 export const httpCodeEditorRepository = new HttpCodeEditorRepository();
-
-export { fileNameFromPath };

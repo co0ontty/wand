@@ -12,7 +12,7 @@ import { state } from "./state";
 //   - params 支持 "{name}" 占位符替换，避免在调用点拼字符串。
 //   - 缺 key 时回退到中文表，再没有就返回 key 本身（debug 友好）。
 export var I18N_DEFAULT_LANG = "中文";
-export var I18N: Record<string, Record<string, string>> = {
+var I18N: Record<string, Record<string, string>> = {
   "中文": {
     "subagent.tag": "子代理",
     "subagent.handoff": "{parent} 让 {sub} 帮忙",
@@ -99,7 +99,7 @@ export function t(key: string, params?: Record<string, string>): string {
 // 替代页面里散落的 emoji（🛡 / ⌨ / 📁 / 🔔 …）。这些 emoji 在系统字体里渲染成
 // 彩色卡通形态，与项目温暖米色 + 棕橙的复古主题视觉冲突明显。这里集中维护
 // currentColor 线性 SVG，让图标跟随父级文字颜色变化，hover / active 状态自然继承。
-export var ICON_PATHS: Record<string, string> = {
+var ICON_PATHS: Record<string, string> = {
   // shape sets — 24x24 viewbox, currentColor stroke
   shield:    '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
   shieldCheck: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/>',

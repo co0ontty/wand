@@ -1,6 +1,6 @@
 import type { WandButtonKind, WandDialogTone, WandToastTone } from "./ui";
 
-export interface OverlayDialogAction<T> {
+interface OverlayDialogAction<T> {
   label: string;
   value: T;
   kind?: WandButtonKind;
@@ -31,7 +31,7 @@ export interface OverlayToastOptions {
   duration?: number;
 }
 
-export interface OverlayToastHandle {
+interface OverlayToastHandle {
   readonly id: number;
   dismiss(): void;
 }

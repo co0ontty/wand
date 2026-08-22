@@ -29,7 +29,7 @@ export function mountFileExplorerHost(container: HTMLElement, cwd: string): void
   explorerRoot.render(React.createElement(FileExplorerHost, { root: cwd }));
 }
 
-export function unmountFileExplorerHost(): void {
+function unmountFileExplorerHost(): void {
   if (explorerRoot) {
     explorerRoot.unmount();
     explorerRoot = null;

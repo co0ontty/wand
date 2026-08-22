@@ -1,4 +1,4 @@
-export function turnContentVolume(turn: any): number {
+function turnContentVolume(turn: any): number {
   if (!turn || !Array.isArray(turn.content)) return 0;
   var total = 0;
   for (var i = 0; i < turn.content.length; i++) {

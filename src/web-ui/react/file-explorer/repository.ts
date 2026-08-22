@@ -87,7 +87,7 @@ async function postMutation(
   return { ok: true, affectedPath };
 }
 
-export class HttpFileExplorerRepository implements FileExplorerRepository {
+class HttpFileExplorerRepository implements FileExplorerRepository {
   constructor(
     private readonly fetchImpl: FetchLike = (input, init) => globalThis.fetch(input, init),
   ) {}

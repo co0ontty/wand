@@ -10,9 +10,9 @@ export type TerminalWheelLikeEvent = {
   deltaMode: number;
 };
 
-export const TERMINAL_WHEEL_PAGE_THRESHOLD_PX = 80;
-export const TERMINAL_WHEEL_PAGE_INTERVAL_MS = 80;
-export const TERMINAL_WHEEL_GESTURE_GAP_MS = 180;
+const TERMINAL_WHEEL_PAGE_THRESHOLD_PX = 80;
+const TERMINAL_WHEEL_PAGE_INTERVAL_MS = 80;
+const TERMINAL_WHEEL_GESTURE_GAP_MS = 180;
 
 /**
  * Turn a vertical wheel/trackpad gesture into a discrete PTY page direction.
@@ -59,7 +59,7 @@ export type TerminalTouchPagingState = {
 };
 
 export const TERMINAL_TOUCH_PAGE_THRESHOLD_PX = 60;
-export const TERMINAL_TOUCH_PAGE_INTERVAL_MS = 80;
+const TERMINAL_TOUCH_PAGE_INTERVAL_MS = 80;
 
 /**
  * Turn a single-finger drag into a discrete PTY page direction.

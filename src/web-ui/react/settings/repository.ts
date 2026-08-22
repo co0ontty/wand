@@ -26,7 +26,7 @@ export interface SettingsRuntimeAdapter {
   configSaved(config: SettingsConfig): void;
 }
 
-export class BrowserSettingsRuntimeAdapter implements SettingsRuntimeAdapter {
+class BrowserSettingsRuntimeAdapter implements SettingsRuntimeAdapter {
   notificationPreferencesChanged(preferences: SettingsNotificationPreferences): void {
     window.dispatchEvent(new CustomEvent("wand-settings-notifications-changed", { detail: preferences }));
   }

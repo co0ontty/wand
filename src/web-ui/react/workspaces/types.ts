@@ -66,10 +66,10 @@ export interface WorkspaceDetail extends Workspace {
 
 // ── 任务（Task = 命名 + 独立 worktree + 一组标签）──
 
-export type WorkspaceTaskStatus = "active" | "done";
+type WorkspaceTaskStatus = "active" | "done";
 
 /** 任务所属 worktree 信息；非 git 目录时为 null（退化为直接在项目目录运行）。 */
-export interface WorkspaceTaskWorktree {
+interface WorkspaceTaskWorktree {
   branch: string;
   path: string;
   baseRef?: string;

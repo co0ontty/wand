@@ -10,19 +10,19 @@ import { clearTerminalScrollIdleTimer, isTerminalNearBottom, maybeScrollTerminal
 import { isMobileLayout } from "./file-browser";
 import { renderChat } from "./websocket";
 
-      export var appViewportBaselineWidth = 0;
-      export var appViewportBaselineHeight = 0;
-      export var closedViewportBaselineUntil = 0;
+      var appViewportBaselineWidth = 0;
+      var appViewportBaselineHeight = 0;
+      var closedViewportBaselineUntil = 0;
       // iOS 原生壳键盘收起冷却：收起动画期间 visualViewport 尺寸抖动会让
       // detectKeyboardOpen 误判为 "键盘仍打开"，导致 --app-viewport-top
       // 残留正值、输入框偏下。冷却期内抑制弱信号的 "仍打开" 判定。
-      export var keyboardDismissCooldownUntil = 0;
+      var keyboardDismissCooldownUntil = 0;
 
-      export function isIosNativeViewportMode() {
+      function isIosNativeViewportMode() {
         return window.__wandIosNative === true;
       }
 
-      export function markClosedViewportBaselineWindow(durationMs) {
+      function markClosedViewportBaselineWindow(durationMs) {
         closedViewportBaselineUntil = Math.max(
           closedViewportBaselineUntil,
           Date.now() + (durationMs || 1800)
@@ -37,7 +37,7 @@ import { renderChat } from "./websocket";
         }, 30);
       }
 
-      export function getFullViewportHeight(vv) {
+      function getFullViewportHeight(vv) {
         return Math.max(
           window.innerHeight || 0,
           vv && vv.height || 0,
@@ -46,7 +46,7 @@ import { renderChat } from "./websocket";
         );
       }
 
-      export function refreshAppViewportBaseline(vv) {
+      function refreshAppViewportBaseline(vv) {
         var root = document.documentElement;
         var width = Math.max(
           window.innerWidth || 0,
@@ -65,7 +65,7 @@ import { renderChat } from "./websocket";
 
       // iOS 原生壳键盘收起后 visualViewport 可能残留偏移或高度不足，
       // 用已知基线兜住避免底部留白。
-      export function shouldUseFullViewport(isKeyboardOpen, offsetTop, height, baselineHeight) {
+      function shouldUseFullViewport(isKeyboardOpen, offsetTop, height, baselineHeight) {
         if (isKeyboardOpen || !isIosNativeViewportMode()) return false;
         return offsetTop > 0 || baselineHeight > height + 1;
       }
@@ -101,7 +101,7 @@ import { renderChat } from "./websocket";
         }
       }
 
-      export function isEditableFocusTarget(el) {
+      function isEditableFocusTarget(el) {
         if (!el) return false;
         var tag = el.tagName;
         if (tag === "TEXTAREA") return true;
@@ -370,7 +370,7 @@ import { renderChat } from "./websocket";
         document.addEventListener("touchend", state.resizeTouchEnd);
       }
 
-      export function isJoystickAvailable() {
+      function isJoystickAvailable() {
         // The PTY remote is part of the session controls, not a mobile-only
         // affordance. Keep it available at every web viewport size so desktop
         // PTY sessions do not lose the floating entry point.
@@ -379,7 +379,7 @@ import { renderChat } from "./websocket";
           && !isStructuredSession(selectedSession);
       }
 
-      export function clampJoystickPos(pos) {
+      function clampJoystickPos(pos) {
         var maxRight = Math.max(JOYSTICK_EDGE_MARGIN, window.innerWidth - JOYSTICK_BALL_SIZE - JOYSTICK_EDGE_MARGIN);
         var maxBottom = Math.max(JOYSTICK_EDGE_MARGIN, window.innerHeight - JOYSTICK_BALL_SIZE - JOYSTICK_EDGE_MARGIN);
         return {
@@ -388,14 +388,14 @@ import { renderChat } from "./websocket";
         };
       }
 
-      export function applyJoystickPosition() {
+      function applyJoystickPosition() {
         if (!state.joystickBallEl) return;
         var pos = clampJoystickPos(state.joystickPos || { right: 18, bottom: 96 });
         state.joystickBallEl.style.right = pos.right + "px";
         state.joystickBallEl.style.bottom = pos.bottom + "px";
       }
 
-      export function saveJoystickPosition(right, bottom) {
+      function saveJoystickPosition(right, bottom) {
         var pos = clampJoystickPos({ right: right, bottom: bottom });
         state.joystickPos = pos;
         try {
@@ -405,7 +405,7 @@ import { renderChat } from "./websocket";
         }
       }
 
-      export function positionJoystickPanel() {
+      function positionJoystickPanel() {
         if (!state.joystickPanelEl || !state.joystickBallEl) return;
         var viewport = window.visualViewport;
         var bounds = {
@@ -435,7 +435,7 @@ import { renderChat } from "./websocket";
           : "top right";
       }
 
-      export function renderJoystickPanel() {
+      function renderJoystickPanel() {
         function keyBtn(key, label, cls) {
           return '<button type="button" class="wjp-key' + (cls ? " " + cls : "") +
             '" data-key="' + key + '">' + label + "</button>";
@@ -519,7 +519,7 @@ import { renderChat } from "./websocket";
         updateJoystickVisibility();
       }
 
-      export function suppressJoystickKeyboardFocus() {
+      function suppressJoystickKeyboardFocus() {
         if (!document.documentElement.classList.contains("is-wand-native-input")) return;
         var active = document.activeElement as HTMLElement | null;
         if (active && typeof active.blur === "function") {
@@ -533,7 +533,7 @@ import { renderChat } from "./websocket";
         }, 0);
       }
 
-      export function onJoystickPointerDown(e) {
+      function onJoystickPointerDown(e) {
         if (!isJoystickAvailable()) return;
         if ((e.pointerType === "mouse" || e.pointerType === "pen") && e.button !== 0) return;
         if (state.joystickPointerId !== null) return;
@@ -557,14 +557,14 @@ import { renderChat } from "./websocket";
         document.addEventListener("pointercancel", state.joystickUpHandler);
       }
 
-      export function enterJoystickMoveMode() {
+      function enterJoystickMoveMode() {
         state.joystickGesture = "move";
         if (state.joystickPinnedOpen) closeJoystickPanel();
         if (state.joystickBallEl) state.joystickBallEl.classList.add("dragging");
         if (state.joystickBackdropEl) state.joystickBackdropEl.classList.add("active");
       }
 
-      export function moveJoystickBallTo(clientX, clientY) {
+      function moveJoystickBallTo(clientX, clientY) {
         if (!state.joystickBallEl) return;
         var pos = clampJoystickPos({
           right: window.innerWidth - clientX - JOYSTICK_BALL_SIZE / 2,
@@ -574,7 +574,7 @@ import { renderChat } from "./websocket";
         state.joystickBallEl.style.bottom = pos.bottom + "px";
       }
 
-      export function onJoystickPointerMove(e) {
+      function onJoystickPointerMove(e) {
         if (e.pointerId !== state.joystickPointerId || !state.joystickBallEl) return;
         e.preventDefault();
         if (state.joystickGesture === "move") {
@@ -597,7 +597,7 @@ import { renderChat } from "./websocket";
         }
       }
 
-      export function onJoystickPointerUp(e) {
+      function onJoystickPointerUp(e) {
         if (e.pointerId !== state.joystickPointerId) return;
         if (state.joystickLongPressTimer) {
           clearTimeout(state.joystickLongPressTimer);
@@ -615,7 +615,7 @@ import { renderChat } from "./websocket";
         endJoystickGesture();
       }
 
-      export function endJoystickGesture() {
+      function endJoystickGesture() {
         if (state.joystickLongPressTimer) {
           clearTimeout(state.joystickLongPressTimer);
           state.joystickLongPressTimer = null;
@@ -641,7 +641,7 @@ import { renderChat } from "./websocket";
         state.joystickPressStart = null;
       }
 
-      export function sendJoystickKey(key) {
+      function sendJoystickKey(key) {
         if (key === "ctrl" || key === "alt" || key === "shift") {
           state.modifiers[key] = !state.modifiers[key];
           updateJoystickPanelUI();
@@ -668,7 +668,7 @@ import { renderChat } from "./websocket";
         scheduleShortcutResync();
       }
 
-      export function interruptStructuredSessionFromJoystick(session, key) {
+      function interruptStructuredSessionFromJoystick(session, key) {
         if (!session || !session.id) return;
         fetch("/api/structured-sessions/" + session.id + "/messages", {
           method: "POST",
@@ -698,12 +698,12 @@ import { renderChat } from "./websocket";
         });
       }
 
-      export function toggleJoystickPanel() {
+      function toggleJoystickPanel() {
         if (state.joystickPinnedOpen) closeJoystickPanel();
         else openJoystickPanel();
       }
 
-      export function openJoystickPanel() {
+      function openJoystickPanel() {
         if (!state.joystickPanelEl || !state.joystickBallEl) return;
         state.joystickPinnedOpen = true;
         positionJoystickPanel();
@@ -713,7 +713,7 @@ import { renderChat } from "./websocket";
         updateJoystickPanelUI();
       }
 
-      export function closeJoystickPanel() {
+      function closeJoystickPanel() {
         state.joystickPinnedOpen = false;
         if (state.joystickPanelEl) state.joystickPanelEl.classList.remove("active");
         if (state.joystickBallEl) state.joystickBallEl.classList.remove("panel-open");
@@ -730,7 +730,7 @@ import { renderChat } from "./websocket";
         });
       }
 
-      export function onJoystickPanelClick(e) {
+      function onJoystickPanelClick(e) {
         var closeBtn = e.target && e.target.closest ? e.target.closest(".wjp-close") : null;
         if (closeBtn) {
           e.preventDefault();
@@ -758,7 +758,7 @@ import { renderChat } from "./websocket";
         }
       }
 
-      export function teardownJoystick() {
+      function teardownJoystick() {
         if (state.joystickLongPressTimer) {
           clearTimeout(state.joystickLongPressTimer);
           state.joystickLongPressTimer = null;
@@ -838,7 +838,7 @@ import { renderChat } from "./websocket";
         }, 5000);
       }
 
-      export function stopTerminalHealthCheck() {
+      function stopTerminalHealthCheck() {
         if (state.terminalHealthTimer) {
           clearInterval(state.terminalHealthTimer);
           state.terminalHealthTimer = null;
@@ -1034,7 +1034,7 @@ import { renderChat } from "./websocket";
         }, delay);
       }
 
-      export function syncTerminalSize() {
+      function syncTerminalSize() {
         if (!state.terminal) return;
         var shouldStickToBottom = state.terminalAutoFollow || isTerminalNearBottom();
         if (shouldStickToBottom) {

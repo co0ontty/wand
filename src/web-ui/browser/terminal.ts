@@ -22,7 +22,7 @@ import { consumeTerminalTouchPage, consumeTerminalWheelPage, terminalWheelPageSe
         addRecentPath(path);
       }
 
-      export function addRecentPath(path: string) {
+      function addRecentPath(path: string) {
         return fetch("/api/recent-paths", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -31,7 +31,7 @@ import { consumeTerminalTouchPage, consumeTerminalWheelPage, terminalWheelPageSe
         }).catch(function() {});
       }
 
-      export function activateSessionItem(sessionId: string) {
+      function activateSessionItem(sessionId: string) {
         var session = state.sessions.find(function(s: any) { return s.id === sessionId; });
         if (session && session.status !== "running" && !isStructuredSession(session)) {
           resumeSessionFromList(sessionId);
@@ -253,7 +253,7 @@ import { consumeTerminalTouchPage, consumeTerminalWheelPage, terminalWheelPageSe
         });
       }
 
-      export function getTerminalViewport() {
+      function getTerminalViewport() {
         if (!state.terminal || !state.terminal.element) return null;
         state.terminalViewportEl = state.terminal.element.querySelector(".xterm-viewport");
         return state.terminalViewportEl;
@@ -294,14 +294,14 @@ import { consumeTerminalTouchPage, consumeTerminalWheelPage, terminalWheelPageSe
       // 翻回 true。不能用 isTerminalNearBottom 的 12px 阈值，否则用户在底部小幅
       // 向上滚时，wheel handler 把 autoFollow 设 false 后紧接着触发的 scroll
       // 事件会因为"还没滚出阈值"而把 autoFollow 反转回 true，丢失用户意图。
-      export function isTerminalAtBottom() {
+      function isTerminalAtBottom() {
         var viewport = getTerminalViewport();
         if (!viewport) return true;
         var distance = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop;
         return distance <= 2;
       }
 
-      export function scrollTerminalToBottom(smooth?: boolean) {
+      function scrollTerminalToBottom(smooth?: boolean) {
         if (!state.terminal) return;
         var viewport = getTerminalViewport();
         if (!viewport) return;
@@ -322,7 +322,7 @@ import { consumeTerminalTouchPage, consumeTerminalWheelPage, terminalWheelPageSe
         }
       }
 
-      export function setTerminalManualScrollActive() {
+      function setTerminalManualScrollActive() {
         state.terminalAutoFollow = false;
         clearTerminalScrollIdleTimer();
         state.terminalProgrammaticScrollUntil = 0;
@@ -361,7 +361,7 @@ import { consumeTerminalTouchPage, consumeTerminalWheelPage, terminalWheelPageSe
       // a synthesized SGR wheel press at the touched cell. Bound on termWrap,
       // which is recreated on every terminal re-init, so the listeners die
       // with the node — no manual teardown is needed.
-      export function initTerminalTouchScroll(surface: HTMLElement, term: any) {
+      function initTerminalTouchScroll(surface: HTMLElement, term: any) {
         var touchId: number | null = null;
         var lastY = 0;
         var rowHeight = 16;
@@ -489,7 +489,7 @@ import { consumeTerminalTouchPage, consumeTerminalWheelPage, terminalWheelPageSe
       }
 
       // ===== Custom terminal scrollbar =====
-      export function initTerminalScrollbar(container: HTMLElement) {
+      function initTerminalScrollbar(container: HTMLElement) {
         var scrollbar = document.createElement("div");
         scrollbar.className = "terminal-scrollbar";
         var track = document.createElement("div");
@@ -672,8 +672,8 @@ import { consumeTerminalTouchPage, consumeTerminalWheelPage, terminalWheelPageSe
       // keep older UI call sites harmless without rewriting or replaying PTY bytes.
       export var CHAT_RENDER_LIVE_MS = 150;
       export var CHAT_RENDER_IDLE_MS = 30;
-      export var CLIENT_OUTPUT_MAX = 160 * 1024;
-      export var CLIENT_OUTPUT_TRIM_AT = 192 * 1024;
+      var CLIENT_OUTPUT_MAX = 160 * 1024;
+      var CLIENT_OUTPUT_TRIM_AT = 192 * 1024;
 
       export function softResyncTerminal(_options?: any) {
         if (!state.terminal) return false;
@@ -698,7 +698,7 @@ import { consumeTerminalTouchPage, consumeTerminalWheelPage, terminalWheelPageSe
         return true;
       }
 
-      export function sendPtyInput(data: string) {
+      function sendPtyInput(data: string) {
         if (!state.selectedId || !data) return false;
         return sendPtySocketMessage({
           type: "pty_input",

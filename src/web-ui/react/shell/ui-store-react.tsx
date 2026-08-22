@@ -37,7 +37,7 @@ export function UiStoreProvider({ store, children }: UiStoreProviderProps) {
   return createElement(UiStoreContext.Provider, { value: store }, children);
 }
 
-export function useUiStore(): UiStore {
+function useUiStore(): UiStore {
   const store = useContext(UiStoreContext);
   if (!store) {
     throw new Error("useUiStore must be used inside UiStoreProvider");

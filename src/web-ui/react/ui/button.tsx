@@ -2,7 +2,7 @@ import { forwardRef, type ComponentPropsWithoutRef } from "react";
 import { classNames } from "./class-names";
 
 export type WandButtonKind = "primary" | "secondary" | "outline" | "ghost" | "danger";
-export type WandButtonSize = "small" | "medium" | "large";
+type WandButtonSize = "small" | "medium" | "large";
 
 export interface WandButtonProps extends ComponentPropsWithoutRef<"button"> {
   kind?: WandButtonKind;

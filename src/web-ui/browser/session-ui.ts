@@ -3,7 +3,7 @@ import { escapeHtml, renderTailMarqueePath } from "./utils";
 import { isStructuredSession } from "./session-engine";
 import { renderManageCheckbox } from "./sidebar";
 
-      export function timeAgo(isoString) {
+      function timeAgo(isoString) {
         if (!isoString) return "";
         var now = Date.now();
         var then = new Date(isoString).getTime();
@@ -19,7 +19,7 @@ import { renderManageCheckbox } from "./sidebar";
         return Math.floor(days / 30) + "个月前";
       }
 
-      export function elapsedTime(isoString) {
+      function elapsedTime(isoString) {
         if (!isoString) return "";
         var now = Date.now();
         var then = new Date(isoString).getTime();
@@ -58,7 +58,7 @@ import { renderManageCheckbox } from "./sidebar";
       }
 
       /** Get a human-readable activity description for a running session */
-      export function getSessionActivityDesc(session) {
+      function getSessionActivityDesc(session) {
         if (!session) return "";
         if (session.permissionBlocked) return "等待你的授权";
         if (session.status !== "running") return "";
@@ -222,7 +222,7 @@ import { renderManageCheckbox } from "./sidebar";
         '</div>';
       }
 
-      export function getWorktreeMergeStatusLabel(session) {
+      function getWorktreeMergeStatusLabel(session) {
         if (!session || !session.worktreeMergeStatus) return "";
         var labels = {
           ready: "可合并",
@@ -234,13 +234,13 @@ import { renderManageCheckbox } from "./sidebar";
         return labels[session.worktreeMergeStatus] || "";
       }
 
-      export function renderWorktreeMergeBadge(session) {
+      function renderWorktreeMergeBadge(session) {
         var label = getWorktreeMergeStatusLabel(session);
         if (!label) return "";
         return '<span class="session-kind-badge worktree-merge ' + escapeHtml(session.worktreeMergeStatus || "") + '">' + escapeHtml(label) + '</span>';
       }
 
-      export function renderWorktreeBadge(session) {
+      function renderWorktreeBadge(session) {
         if (!session || !session.worktreeEnabled) return "";
         var titleParts = [];
         if (session.worktree && session.worktree.branch) {

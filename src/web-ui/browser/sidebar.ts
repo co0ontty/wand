@@ -64,7 +64,7 @@ document.addEventListener("click", function(event) {
 
 // Functions defined in other modules (scripts.js IIFE scope)
 
-      export function isAutomationSession(session: any) {
+      function isAutomationSession(session: any) {
         var source = String(session && session.sessionSource || "").toLowerCase();
         return source === "automation" || source === "startup";
       }
@@ -75,7 +75,7 @@ document.addEventListener("click", function(event) {
 
       // 三个来源各自在组内按时间倒序，辅助会话不会再改变普通 Wand 会话
       // 的展示顺序或窄栏编号。缺失来源按 interactive 兼容旧数据。
-      export function getSessionEntryGroups() {
+      function getSessionEntryGroups() {
         var wandEntries: any[] = [];
         var automationEntries: any[] = [];
         state.sessions.forEach(function(s: any) {
@@ -101,13 +101,13 @@ document.addEventListener("click", function(event) {
         return groups.join("");
       }
 
-      export function isSidebarNarrow() {
+      function isSidebarNarrow() {
         // 桌面: pinned + collapsed = 56px 窄条。
         // 手机: pinned + collapsed 同样允许窄条（pin 单独不在手机生效，但 collapsed 是窄条形态的标志）。
         return !!state.sidebarPinned && !!state.sidebarCollapsed;
       }
 
-      export function renderCollapsedSessionTiles() {
+      function renderCollapsedSessionTiles() {
         var entries = getSessionEntryGroups();
         var tiles = entries.wand.map(function(e: any, i: any) {
           var idx = i + 1;
@@ -140,7 +140,7 @@ document.addEventListener("click", function(event) {
         return isSidebarNarrow() ? renderCollapsedSessionTiles() : renderSessions();
       }
 
-      export function renderSessionManageBar() {
+      function renderSessionManageBar() {
         if (!state.sessionsManageMode) {
           return '<div class="session-manage-bar">' +
             '<span class="sidebar-intro">Wand 会话</span>' +
@@ -179,7 +179,7 @@ document.addEventListener("click", function(event) {
         '</div>';
       }
 
-      export function renderSessionEntries(entries: any, extraClass?: any) {
+      function renderSessionEntries(entries: any, extraClass?: any) {
         var html = '<section class="session-group' + (extraClass ? ' ' + extraClass : '') + '">';
         html += entries.map(function(e: any) {
           return e.kind === "session"
@@ -190,7 +190,7 @@ document.addEventListener("click", function(event) {
         return html;
       }
 
-      export function renderAutomationSessionGroup(entries: any) {
+      function renderAutomationSessionGroup(entries: any) {
         var expanded = state.sessionsManageMode || readStoredBoolean(AUTOMATION_SESSIONS_EXPANDED_KEY, false);
         return '<details class="automation-session-group' + (state.sessionsManageMode ? ' manage-mode' : '') + '"' + (expanded ? ' open' : '') + '>' +
           '<summary class="automation-session-summary" title="由自动化或启动任务创建，不参与普通 Wand 会话排序">' +
@@ -215,11 +215,11 @@ document.addEventListener("click", function(event) {
         });
       }
 
-      export function getSelectedSessionIds() {
+      function getSelectedSessionIds() {
         return Object.keys(state.selectedSessionIds).filter(function(id) { return !!state.selectedSessionIds[id]; });
       }
 
-      export function clearManageSelections() {
+      function clearManageSelections() {
         state.selectedSessionIds = {};
         state.selectedClaudeHistoryIds = {};
         state.selectedCodexHistoryIds = {};
@@ -234,11 +234,11 @@ document.addEventListener("click", function(event) {
         updateSessionsList();
       }
 
-      export function getSelectableSessions() {
+      function getSelectableSessions() {
         return state.sessions.slice();
       }
 
-      export function countSelectableItems() {
+      function countSelectableItems() {
         return getSelectableSessions().length;
       }
 
@@ -359,7 +359,7 @@ document.addEventListener("click", function(event) {
         });
       }
 
-      export function renderClaudeHistoryItem(session: any, kind: any) {
+      function renderClaudeHistoryItem(session: any, kind: any) {
         var isCodex = kind === "codex";
         var rAct = isCodex ? "resume-codex-history" : "resume-history";
         var dAct = isCodex ? "delete-codex-history" : "delete-history";
@@ -392,7 +392,7 @@ document.addEventListener("click", function(event) {
           '</div>' +
         '</div>';
       }
-      export function formatHistoryTime(isoStr: any) {
+      function formatHistoryTime(isoStr: any) {
         if (!isoStr) return "";
         try {
           var d = new Date(isoStr);

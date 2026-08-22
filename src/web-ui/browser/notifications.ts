@@ -196,10 +196,10 @@ export function wandPrompt(message: any, defaultValue?: any, options?: any) {
 
 // ── Notification Bubble System ──
 
-export var notificationStack: { id: number; el: HTMLElement }[] = [];
-export var notificationIdCounter = 0;
-export var NOTIFICATION_GAP = 6;
-export var NOTIFICATION_TOP = 16;
+var notificationStack: { id: number; el: HTMLElement }[] = [];
+var notificationIdCounter = 0;
+var NOTIFICATION_GAP = 6;
+var NOTIFICATION_TOP = 16;
 
 /**
  * Show an in-app notification bubble at bottom-right.
@@ -278,7 +278,7 @@ export function showNotificationBubble(opts: any) {
   };
 }
 
-export function dismissNotification(id: number) {
+function dismissNotification(id: number) {
   var idx = -1;
   for (var i = 0; i < notificationStack.length; i++) {
     if (notificationStack[i].id === id) { idx = i; break; }
@@ -293,7 +293,7 @@ export function dismissNotification(id: number) {
   }, 300);
 }
 
-export function repositionNotifications() {
+function repositionNotifications() {
   var top = NOTIFICATION_TOP;
   for (var i = 0; i < notificationStack.length; i++) {
     notificationStack[i].el.style.top = top + "px";
@@ -335,9 +335,9 @@ export var _hasNativeBridge = typeof WandNative !== "undefined" && typeof WandNa
 // Extract WandApp/<version> from User-Agent (set by both Android and macOS shells).
 // We distinguish platforms by the additional WandPlatform/<name> token —
 // macOS UA ends with "WandApp/X WandPlatform/macOS".
-export var _wandAppMatch = navigator.userAgent.match(/WandApp\/([^\s]+)/);
-export var _isMacApp = /WandPlatform\/macOS/.test(navigator.userAgent);
-export var _isAndroidApp = !!_wandAppMatch && !_isMacApp;
+var _wandAppMatch = navigator.userAgent.match(/WandApp\/([^\s]+)/);
+var _isMacApp = /WandPlatform\/macOS/.test(navigator.userAgent);
+var _isAndroidApp = !!_wandAppMatch && !_isMacApp;
 export var _apkVersion = (_wandAppMatch && _isAndroidApp) ? _wandAppMatch[1] : null;
 export var _macAppVersion = (_wandAppMatch && _isMacApp) ? _wandAppMatch[1] : null;
 
@@ -385,7 +385,7 @@ export function requestNotificationPermission() {
   }
 }
 
-export function _shouldSendSystemNotification(opts?: any) {
+function _shouldSendSystemNotification(opts?: any) {
   var options = opts || {};
   if (options.onlyWhenHidden && !document.hidden) return false;
   if (options.skipWhenSelectedSessionId && options.skipWhenSelectedSessionId === state.selectedId && !document.hidden) {
@@ -394,7 +394,7 @@ export function _shouldSendSystemNotification(opts?: any) {
   return true;
 }
 
-export function _isNotificationThrottled(tag: string, minIntervalMs: number) {
+function _isNotificationThrottled(tag: string, minIntervalMs: number) {
   if (!tag || !minIntervalMs || minIntervalMs <= 0) return false;
   var lastAt = state.notificationHistory[tag] || 0;
   var now = Date.now();
@@ -512,13 +512,13 @@ export function notifyTaskEnded(sessionId: string, title: string, body: string) 
 
 // ── Native Live Progress Sync ──
 
-export var _progressSyncTimers: Record<string, any> = {};
-export var _PROGRESS_SYNC_DEBOUNCE_MS = 30;
+var _progressSyncTimers: Record<string, any> = {};
+var _PROGRESS_SYNC_DEBOUNCE_MS = 30;
 
 // Strip markdown formatting and clamp to a single short line so the
 // native Live Activity / lock-screen card stays readable. 100 chars
 // matches getLastAssistantSummary; OPPO truncates harder anyway.
-export function _compactNotificationText(text: string) {
+function _compactNotificationText(text: string) {
   if (!text) return "";
   var t = String(text)
     .replace(/^#+\s+/gm, "")
@@ -542,7 +542,7 @@ export function syncSessionProgressToNative(sessionId: string) {
   }, _PROGRESS_SYNC_DEBOUNCE_MS);
 }
 
-export function _doSyncSessionProgress(sessionId: string) {
+function _doSyncSessionProgress(sessionId: string) {
   var session = state.sessions.find(function(s: any) { return s.id === sessionId; });
   if (!session) return;
 
@@ -713,7 +713,7 @@ export function clearSessionProgressNative(sessionId: string) {
  * Play a soft, rounded notification chime using Web Audio API.
  * Two ascending sine tones with smooth gain envelope — gentle on the ears.
  */
-export function playNotificationSound() {
+function playNotificationSound() {
   if (!state.notifSound) return;
   _doPlaySound();
 }
@@ -727,7 +727,7 @@ export function tryPlayNotificationSound() {
   return _doPlaySound();
 }
 
-export function _doPlaySound() {
+function _doPlaySound() {
   try {
     var AudioCtx = (window as any).AudioContext || (window as any).webkitAudioContext;
     if (!AudioCtx) return false;
@@ -771,7 +771,7 @@ export function _doPlaySound() {
  * Show an interactive update bubble that allows updating and restarting
  * directly from the notification, without navigating to settings.
  */
-export function showUpdateBubble(currentVer: string, latestVer: string) {
+function showUpdateBubble(currentVer: string, latestVer: string) {
   // Prevent duplicate bubbles
   if (state._updateBubbleShown) return;
   state._updateBubbleShown = true;
@@ -908,7 +908,7 @@ export function showUpdateBubble(currentVer: string, latestVer: string) {
 }
 
 // Restart driver used by the new update card.
-export function performRestartCard(btn: HTMLButtonElement, labelEl: HTMLElement | null, subtitleEl: HTMLElement | null, statusEl: HTMLElement | null, progressEl: HTMLElement | null) {
+function performRestartCard(btn: HTMLButtonElement, labelEl: HTMLElement | null, subtitleEl: HTMLElement | null, statusEl: HTMLElement | null, progressEl: HTMLElement | null) {
   fetch("/api/restart", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

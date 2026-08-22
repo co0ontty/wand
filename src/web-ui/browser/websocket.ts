@@ -54,13 +54,13 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
       // 浏览器在 background 时 setInterval 会被节流到 ~1Hz 或更慢，但
       // 我们也在 visibilitychange→visible 里做了一次主动评估，所以
       // 切回前台时不会拖很久才发现 stale。
-      export var WS_HEARTBEAT_CHECK_MS = 10_000;
-      export var WS_HEARTBEAT_STALE_MS = 40_000;
-      export function startWsHeartbeatCheck() {
+      var WS_HEARTBEAT_CHECK_MS = 10_000;
+      var WS_HEARTBEAT_STALE_MS = 40_000;
+      function startWsHeartbeatCheck() {
         stopWsHeartbeatCheck();
         state.wsHeartbeatCheckTimer = setInterval(evaluateWsHeartbeatStale, WS_HEARTBEAT_CHECK_MS);
       }
-      export function stopWsHeartbeatCheck() {
+      function stopWsHeartbeatCheck() {
         if (state.wsHeartbeatCheckTimer) {
           clearInterval(state.wsHeartbeatCheckTimer);
           state.wsHeartbeatCheckTimer = null;
@@ -103,7 +103,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         initWebSocket(reason);
       }
 
-      export function scheduleWsReconnect() {
+      function scheduleWsReconnect() {
         if (state.wsReconnectTimer) return;
         // Don't burn battery reconnecting while hidden — the resume
         // listener will kick a fresh connect when we're foreground.
@@ -250,7 +250,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         }
       }
 
-      export function handleWebSocketMessage(msg: any) {
+      function handleWebSocketMessage(msg: any) {
         switch (msg.type) {
           case 'output':
             // For structured sessions, output may be "" during streaming — check messages too.
@@ -734,7 +734,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         }
       }
 
-      export function updateApprovalStats() {
+      function updateApprovalStats() {
         var container = document.getElementById("approval-stats");
         if (!container) return;
         var selectedSession = state.sessions.find(function(s: any) { return s.id === state.selectedId; });
@@ -884,7 +884,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         }
       }
 
-      export function updateTerminalOutput(output: any, sessionId: any, mode?: any) {
+      function updateTerminalOutput(output: any, sessionId: any, mode?: any) {
         if (!state.terminal) return false;
         return syncTerminalBuffer(sessionId || state.selectedId, output, { mode: mode || "append" });
       }
@@ -936,7 +936,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
       }
 
       state.chatRenderTimer = null;
-      export function scheduleChatRender(immediate?: boolean) {
+      function scheduleChatRender(immediate?: boolean) {
         if (state.chatRenderTimer && !immediate) return;
         if (state.chatRenderTimer) clearTimeout(state.chatRenderTimer);
         if (immediate) {

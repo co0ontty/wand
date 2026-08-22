@@ -1,27 +1,13 @@
 // Radix imports stay inside this directory. Business modules consume these
 // Wand interfaces so the implementation can change without spreading a
 // third-party interface across the application.
-export { WandBadge, type WandBadgeProps, type WandBadgeTone } from "./badge";
-export { WandButton, type WandButtonKind, type WandButtonProps, type WandButtonSize } from "./button";
-export {
-  WandDialog,
-  WandDialogSurface,
-  type WandDialogAction,
-  type WandDialogInput,
-  type WandDialogProps,
-  type WandDialogSurfaceProps,
-  type WandDialogTone,
-} from "./dialog";
-export { WandPopover, type WandPopoverProps } from "./popover";
-export { WandSelect, type WandSelectOption, type WandSelectProps } from "./select";
-export { WandSkeleton, type WandSkeletonProps } from "./skeleton";
-export { WandSwitch, type WandSwitchProps } from "./switch";
-export { WandTabs, type WandTabItem, type WandTabsProps } from "./tabs";
-export {
-  WandToastItem,
-  WandToastRegion,
-  type WandToastItemProps,
-  type WandToastRegionProps,
-  type WandToastTone,
-} from "./toast";
+export {WandBadge} from "./badge";
+export {WandButton, type WandButtonKind} from "./button";
+export {WandDialog, WandDialogSurface, type WandDialogTone} from "./dialog";
+export {WandPopover} from "./popover";
+export {WandSelect, type WandSelectOption} from "./select";
+export {WandSkeleton} from "./skeleton";
+export {WandSwitch} from "./switch";
+export {WandTabs} from "./tabs";
+export {WandToastItem, WandToastRegion, type WandToastTone} from "./toast";
 export { PortalContainerProvider } from "./portal-context";

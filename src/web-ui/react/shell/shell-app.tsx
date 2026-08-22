@@ -30,7 +30,7 @@ export function getShellLayoutClassName(layout: Readonly<ShellLayoutState>): str
 }
 
 /** Provider-independent frame kept public for isolated rendering and tests. */
-export function ShellAppFrame({ legacyRefs }: ShellAppFrameProps = {}) {
+function ShellAppFrame({ legacyRefs }: ShellAppFrameProps = {}) {
   const snapshot = useUiStoreSnapshot();
   return (
     <div className="app-container">

@@ -137,7 +137,7 @@ import { mountFileExplorerHost, updateFileExplorerCwd } from "./file-explorer-ad
       // toolbar/header buttons. Those render inconsistently across OSes and don't
       // visually convey their action. These SVG icons are stroke-based, follow
       // currentColor, and stay crisp at any zoom.
-      export var WAND_FILE_ICONS = {
+      var WAND_FILE_ICONS = {
         "chevron-left":  '<path d="M15 18l-6-6 6-6"/>',
         "arrow-up":      '<path d="M12 19V5"/><path d="M5 12l7-7 7 7"/>',
         "refresh":       '<path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/>',
@@ -187,7 +187,7 @@ import { mountFileExplorerHost, updateFileExplorerCwd } from "./file-explorer-ad
 
       // ── File tree helpers ──
 
-      export var FILE_ICON_MAP = {
+      var FILE_ICON_MAP = {
         // images
         png: "🖼️", jpg: "🖼️", jpeg: "🖼️", gif: "🖼️", webp: "🖼️", svg: "🖼️",
         avif: "🖼️", bmp: "🖼️", ico: "🖼️", heic: "🖼️", heif: "🖼️",
@@ -219,7 +219,7 @@ import { mountFileExplorerHost, updateFileExplorerCwd } from "./file-explorer-ad
         ttf: "🔤", otf: "🔤", woff: "🔤", woff2: "🔤", eot: "🔤",
       };
 
-      export function getFileIcon(item) {
+      function getFileIcon(item) {
         if (!item) return "📄";
         if (item.type === "dir") return "📁";
         var name = (item.name || "").toLowerCase();
@@ -234,7 +234,7 @@ import { mountFileExplorerHost, updateFileExplorerCwd } from "./file-explorer-ad
         return FILE_ICON_MAP[ext] || "📄";
       }
 
-      export function formatFileSize(bytes) {
+      function formatFileSize(bytes) {
         if (typeof bytes !== "number" || !isFinite(bytes) || bytes < 0) return "";
         if (bytes < 1024) return bytes + " B";
         var kb = bytes / 1024;
@@ -245,14 +245,14 @@ import { mountFileExplorerHost, updateFileExplorerCwd } from "./file-explorer-ad
         return (gb >= 10 ? Math.round(gb) : gb.toFixed(1)) + " GB";
       }
 
-      export function formatRelativeTime(iso) {
+      function formatRelativeTime(iso) {
         if (!iso) return "";
         var t = Date.parse(iso);
         if (isNaN(t)) return "";
         return new Date(t).toLocaleString();
       }
 
-      export function getEffectiveExplorerCwd() {
+      function getEffectiveExplorerCwd() {
         if (state.fileExplorerCwd) return state.fileExplorerCwd;
         if (state.selectedId) {
           var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
@@ -370,7 +370,7 @@ import { mountFileExplorerHost, updateFileExplorerCwd } from "./file-explorer-ad
         attachFileTreeListeners();
       }
 
-      export function renderFileTreeItem(item, depth?) {
+      function renderFileTreeItem(item, depth?) {
         depth = depth || 0;
         var name = escapeHtml(item.name);
         var isDir = item.type === "dir";
@@ -394,7 +394,7 @@ import { mountFileExplorerHost, updateFileExplorerCwd } from "./file-explorer-ad
         '</div>';
       }
 
-      export function renderGitStatusBadge(gitStatus) {
+      function renderGitStatusBadge(gitStatus) {
         if (!gitStatus) return null;
         if (gitStatus.staged === "added") return { text: "A", class: "git-added", title: "已暂存（新增）" };
         if (gitStatus.staged === "modified") return { text: "M", class: "git-modified", title: "已暂存（修改）" };
@@ -406,7 +406,7 @@ import { mountFileExplorerHost, updateFileExplorerCwd } from "./file-explorer-ad
         return null;
       }
 
-      export function attachFileTreeListeners() {
+      function attachFileTreeListeners() {
         var tree = document.getElementById("file-tree");
         if (!tree) return;
         tree.querySelectorAll(".tree-item[data-type='dir']").forEach(function(item) {
@@ -446,7 +446,7 @@ import { mountFileExplorerHost, updateFileExplorerCwd } from "./file-explorer-ad
         });
       }
 
-      export function toggleTreeNode(item) {
+      function toggleTreeNode(item) {
         var p = item.dataset.path;
         var toggle = item.querySelector(".tree-toggle");
         var children = item.nextElementSibling;
@@ -539,7 +539,7 @@ import { mountFileExplorerHost, updateFileExplorerCwd } from "./file-explorer-ad
         document.removeEventListener("scroll", dismissFileContextMenu, true);
       }
 
-      export function showFileContextMenu(x, y, item) {
+      function showFileContextMenu(x, y, item) {
         dismissFileContextMenu();
         var fullPath = item.dataset.path || "";
         var type = item.dataset.type || "file";

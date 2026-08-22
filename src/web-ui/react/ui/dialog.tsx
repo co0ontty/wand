@@ -11,14 +11,14 @@ import { usePortalContainer } from "./portal-context";
 
 export type WandDialogTone = "info" | "warning" | "danger" | "success" | "question";
 
-export interface WandDialogAction<T> {
+interface WandDialogAction<T> {
   label: string;
   value: T;
   kind?: WandButtonKind;
   autoFocus?: boolean;
 }
 
-export interface WandDialogInput {
+interface WandDialogInput {
   value?: string;
   placeholder?: string;
   label?: string;

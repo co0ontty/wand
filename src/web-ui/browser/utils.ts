@@ -8,8 +8,8 @@ import { isStructuredSession } from "./session-engine";
 // ── Structured session status bar (in-flight timer) ──
 state._statusBarTimerId = null;
 state._statusBarStartTime = 0;
-export var _runningIndicatorsTimerId: any = null;
-export var _runningIndicatorsStartTime = 0;
+var _runningIndicatorsTimerId: any = null;
+var _runningIndicatorsStartTime = 0;
 
 // 计算会话整体的"在跑"信号，统一驱动顶部进度条/徽章计时/气泡呼吸条。
 export function computeRunningSignal(session: any) {

@@ -13,7 +13,7 @@ async function json<T>(response: Response): Promise<T> {
   return body as T;
 }
 
-export class HttpMissionsRepository implements MissionsRepository {
+class HttpMissionsRepository implements MissionsRepository {
   constructor(private readonly fetchImpl: typeof fetch = (input, init) => globalThis.fetch(input, init)) {}
 
   async list(): Promise<MissionDetails[]> {

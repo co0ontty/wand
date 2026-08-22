@@ -13,7 +13,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
 import { shouldExtractPtySystemInfo } from "./pty-system-info";
 import { getToolDisplayName, getToolIcon } from "./tool-identity";
 
-export { getToolDisplayName, getToolIcon } from "./tool-identity";
+
 
       export function renderChat(forceFullRender?) {
         if (state.renderPending && !forceFullRender) return;
@@ -60,7 +60,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         }, delay);
       }
       // Extract system info from PTY output that's not in structured messages
-      export function extractPtySystemInfo(output, messages) {
+      function extractPtySystemInfo(output, messages) {
         if (!output || !messages || messages.length === 0) return [];
         
         // Strip ANSI escape sequences
@@ -628,7 +628,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
       // refreshChatUnreadDivider（分割线渲染）、updateChatUnreadBubble（气泡 UI）。
 
       // --- Todo progress bar ---
-      export var todoExpanded = false;
+      var todoExpanded = false;
       // Use event delegation for todo toggle (more robust than binding to specific element)
       document.addEventListener("click", function(e) {
         var target = e.target;
@@ -698,7 +698,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
 
       // 从本 turn 的 TaskCreate / TaskUpdate 增量调用还原出 TodoWrite 形态的列表。
       // 返回 null 表示这个 turn 根本没用 Task* 工具（让上层维持旧行为/隐藏进度条）。
-      export function reconstructTodosFromTaskTools(messages, startIdx) {
+      function reconstructTodosFromTaskTools(messages, startIdx) {
         // 先按 tool_use_id 收集所有 tool_result 文本——TaskCreate 分配的任务 id
         // 只在结果文本里（"Task #N created successfully: …"），input 里没有。
         var resultById = {};
@@ -766,7 +766,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         return list.length ? list : null;
       }
 
-      export function updateTodoProgress(messages) {
+      function updateTodoProgress(messages) {
         // 只看"当前 turn"里的 TodoWrite——即最后一条 user 消息之后的那段。
         // 不限制范围的话，上一轮留下的进度条会在新一轮（哪怕新一轮根本没用
         // TodoWrite）里阴魂不散地重现。
@@ -912,7 +912,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         syncChatMessagesPaddingForTodoBody();
       }
 
-      export function attachCopyHandler(el) {
+      function attachCopyHandler(el) {
         el.querySelectorAll(".code-copy").forEach(function(btn) {
           btn.addEventListener("click", function() {
             var codeBlock = btn.closest(".code-block");
@@ -928,7 +928,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         });
       }
 
-      export function attachAllCopyHandlers(container) {
+      function attachAllCopyHandlers(container) {
         container.querySelectorAll(".code-copy").forEach(function(btn) {
           var clone = btn.cloneNode(true);
           btn.parentNode.replaceChild(clone, btn);
@@ -947,7 +947,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         attachMessageCopyButtons(container);
       }
 
-      export function attachMessageCopyButtons(container) {
+      function attachMessageCopyButtons(container) {
         var isTouch = window.matchMedia("(pointer: coarse)").matches;
         if (!isTouch) return;
         container.querySelectorAll(".chat-message").forEach(function(msgEl) {
@@ -1026,7 +1026,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
 
       // ===== Terminal copy button for mobile =====
 
-      export function isNoiseLine(line) {
+      function isNoiseLine(line) {
         if (!line) return false;
         var trimmed = String(line).trim();
         if (!trimmed) return false;
@@ -1076,7 +1076,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         return false;
       }
 
-      export function stripAnsi(text) {
+      function stripAnsi(text) {
         return String(text || "")
           .replace(/\x1b\][^\x07]*(\x07|\x1b\\)/g, "")
           .replace(/\x1b\[(\d+)C/g, function(_match, count) { return " ".repeat(Number(count) || 1); })
@@ -1602,8 +1602,8 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
       // 统一的 10×10 猫咪 grid 模板：父 assistant = 加菲（橙），user = 美短（灰），
       // subagent = 一组按 taskId/agentType 哈希选色的备选 palette。同一模板让多个
       // 角色看起来是"同种生物的不同毛色"，群聊感更自然。
-      export var _AVATAR_T = "transparent";
-      export function buildPixelSvg(grid, size?) {
+      var _AVATAR_T = "transparent";
+      function buildPixelSvg(grid, size?) {
         var s = size || 3;
         var w = grid[0].length * s;
         var h = grid.length * s;
@@ -1617,7 +1617,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         }
         return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + w + ' ' + h + '" class="pixel-avatar-svg">' + rects + '</svg>';
       }
-      export function buildCatGrid(palette) {
+      function buildCatGrid(palette) {
         // palette: { base, dark, light, accent, eye, mouth, nose }
         var T = _AVATAR_T;
         var b = palette.base;
@@ -1640,17 +1640,17 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
           [T,T,T,b,T,T,b,T,T,T],
         ];
       }
-      export var GARFIELD_PALETTE = {
+      var GARFIELD_PALETTE = {
         base: "#F0923A", dark: "#C46A1A", light: "#F0923A",
         accent: "#FFFFFF", eye: "#2D2D2D", mouth: "#F28B9A", nose: "#E87D5A",
       };
-      export var SHORTHAIR_PALETTE = {
+      var SHORTHAIR_PALETTE = {
         base: "#9EAAB8", dark: "#6B7B8D", light: "#C5CED8",
         accent: "#FFFFFF", eye: "#7EC88B", mouth: "#F28B9A",
       };
       // 子 agent palette 池。色相与父/用户都拉开距离，避免群聊里多只猫颜色相近难辨认。
       // primary 用来暴露成 CSS 变量 --agent-color，给气泡左边框 / handoff 文字着色。
-      export var SUBAGENT_PALETTES = [
+      var SUBAGENT_PALETTES = [
         { base: "#5A8FE0", dark: "#2E5BB3", light: "#9CC0F2", accent: "#FFFFFF", eye: "#FFD66E", mouth: "#F28B9A", primary: "#5A8FE0" }, // 蓝猫
         { base: "#A06FE0", dark: "#6B45A8", light: "#C8A4F2", accent: "#FFFFFF", eye: "#FFE36E", mouth: "#F28B9A", primary: "#A06FE0" }, // 紫猫
         { base: "#7BB76B", dark: "#4F8A40", light: "#A9D49C", accent: "#FFFFFF", eye: "#2D2D2D", mouth: "#F28B9A", primary: "#7BB76B" }, // 抹茶猫
@@ -1659,7 +1659,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         { base: "#4A4A60", dark: "#1F1F2E", light: "#6E6E84", accent: "#F5F5F5", eye: "#FFD66E", mouth: "#F28B9A", primary: "#4A4A60" }, // 黑猫
         { base: "#D8A85A", dark: "#9C7028", light: "#EBC78A", accent: "#FFFFFF", eye: "#2D2D2D", mouth: "#F28B9A", primary: "#D8A85A" }, // 焦糖猫
       ];
-      export function hashStringToIndex(str, mod) {
+      function hashStringToIndex(str, mod) {
         var s = String(str || "");
         var h = 0;
         for (var i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
@@ -1667,7 +1667,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
       }
       // agentType → 中文名映射。命中映射就用映射名，否则用 agentType 原文；
       // 都没有则退化为 "协作猫·<taskId 后 4 位>"。
-      export var SUBAGENT_NAME_MAP = {
+      var SUBAGENT_NAME_MAP = {
         "general-purpose": "万能猫",
         "Explore": "侦探猫",
         "code-explorer": "侦探猫",
@@ -1686,26 +1686,26 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
       // 撞车。doRenderChat 在每次 render 前预扫一遍 messages，把"同显示名 ≥ 2"
       // 的 taskId 各自分配一个 "#1 / #2 / ..." 后缀，按首次出现顺序稳定。
       // 单实例不加后缀，避免视觉噪音。
-      export var _subagentSuffixMap = null;
-      export function getSubagentBaseName(sub) {
+      var _subagentSuffixMap = null;
+      function getSubagentBaseName(sub) {
         if (!sub) return "";
         var agentType = sub.agentType || "";
         if (agentType && SUBAGENT_NAME_MAP[agentType]) return SUBAGENT_NAME_MAP[agentType];
         if (agentType) return agentType;
         return getActiveLang() === "English" ? "Subtask" : "子任务";
       }
-      export function catPrefixedSubagentName(name) {
+      function catPrefixedSubagentName(name) {
         var text = String(name || "").trim();
         if (!text) return "猫猫子 Agent";
         return text.indexOf("猫猫") === 0 ? text : "猫猫 " + text;
       }
-      export function getSubagentDisplayName(sub) {
+      function getSubagentDisplayName(sub) {
         var base = getSubagentBaseName(sub);
         if (!base) return base;
         var suffix = (_subagentSuffixMap && sub && sub.taskId) ? _subagentSuffixMap.get(sub.taskId) : null;
         return catPrefixedSubagentName(suffix ? base + suffix : base);
       }
-      export function getSubagentPalette(sub) {
+      function getSubagentPalette(sub) {
         // 哈希优先用 agentType，让同类型 agent 跨 turn 颜色稳定；没有 agentType 时
         // 退化用 taskId，至少同 turn 内同一只猫颜色稳定。
         var seed = (sub && (sub.agentType || sub.taskId)) || "subagent";
@@ -1714,7 +1714,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
       // subagent 最终回复（父 Task 的 tool_result）——现在外层 .subagent-panel 已经
       // 负责整段折叠 / 滚动，这里只需把"任务完成 / 失败"做个轻量标记块，markdown
       // 内容平铺，让 panel 的 body 滚动条统一接管。
-      export function renderSubagentReplyBubble(block, role) {
+      function renderSubagentReplyBubble(block, role) {
         if (!block || block.type !== "tool_result") return "";
         var text = extractToolResultText(block.content);
         var isError = block.is_error === true;
@@ -1747,7 +1747,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         user: buildPixelSvg(buildCatGrid(SHORTHAIR_PALETTE)),
       };
 
-      export var DEFAULT_CHAT_PERSONA = {
+      var DEFAULT_CHAT_PERSONA = {
         user: {
           name: "赛博虎妞",
           avatarSvg: PIXEL_AVATAR.user
@@ -1758,7 +1758,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         }
       };
 
-      export function getStructuredChatPersona(role) {
+      function getStructuredChatPersona(role) {
         var configPersona = state.config && state.config.structuredChatPersona;
         var roleConfig = configPersona && configPersona[role] ? configPersona[role] : null;
         var defaults = DEFAULT_CHAT_PERSONA[role] || DEFAULT_CHAT_PERSONA.assistant;
@@ -1773,17 +1773,17 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         };
       }
 
-      export function renderAvatarFallback(svg) {
+      function renderAvatarFallback(svg) {
         return '<div class="pixel-avatar">' + svg + '</div>';
       }
 
-      export function handleChatAvatarImageError(img, role) {
+      function handleChatAvatarImageError(img, role) {
         if (!img || !img.parentNode) return;
         var persona = getStructuredChatPersona(role === "user" ? "user" : "assistant");
         img.outerHTML = renderAvatarFallback(persona.avatarSvg);
       }
 
-      export function chatAvatar(role) {
+      function chatAvatar(role) {
         var personaRole = role === "user" ? "user" : "assistant";
         var persona = getStructuredChatPersona(personaRole);
         var avatarInner = persona.avatar
@@ -1795,7 +1795,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         '</div>';
       }
 
-      export function renderChatMessage(msg, roundUsage, messageIndex, legacyTaskMap) {
+      function renderChatMessage(msg, roundUsage, messageIndex, legacyTaskMap) {
         // Thinking card (deep thought) — from PTY parsing
         if (msg.role === "thinking") {
           // 空 / 全空白的 thinking 没有任何信息量，渲染出来只是一条带"展开"的紫色窄条，
@@ -1840,7 +1840,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         '</div>';
       }
 
-      export function buildToolResultMap(contentBlocks) {
+      function buildToolResultMap(contentBlocks) {
         var toolResults = {};
         if (!Array.isArray(contentBlocks)) return toolResults;
         for (var i = 0; i < contentBlocks.length; i++) {
@@ -1857,7 +1857,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         return toolResults;
       }
 
-      export function pickToolResultForDisplay(toolResults, toolUseId) {
+      function pickToolResultForDisplay(toolResults, toolUseId) {
         var entries = toolResults && toolUseId ? toolResults[toolUseId] : null;
         if (!entries || !entries.length) return null;
         for (var i = 0; i < entries.length - 1; i++) {
@@ -1868,7 +1868,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         return entries[entries.length - 1];
       }
 
-      export function hasRecoveredToolNoise(toolResults, toolUseId) {
+      function hasRecoveredToolNoise(toolResults, toolUseId) {
         var entries = toolResults && toolUseId ? toolResults[toolUseId] : null;
         if (!entries || entries.length < 2) return false;
         for (var i = 0; i < entries.length - 1; i++) {
@@ -1879,19 +1879,19 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         return false;
       }
 
-      export function renderRecoveredToolHint(toolName) {
+      function renderRecoveredToolHint(toolName) {
         return '<div class="structured-tool-hint">已自动恢复一次 ' + escapeHtml(getToolDisplayName(toolName)) + ' 参数问题</div>';
       }
 
       // ── 连续同类工具调用分组 ──
       // 注意：禁止把 Task/Agent 加入 GROUPABLE_TOOLS——它们由 renderContentBlock 入口屏蔽返空，
       // 加入分组会导致空 group 包裹一堆空字符串，留下视觉空盒子。
-      export var GROUPABLE_TOOLS = { Read: 1, Glob: 1, Grep: 1, WebFetch: 1, WebSearch: 1, TodoRead: 1 };
+      var GROUPABLE_TOOLS = { Read: 1, Glob: 1, Grep: 1, WebFetch: 1, WebSearch: 1, TodoRead: 1 };
 
       // 图片相关的操作不并入 tool-group：并到默认折叠的 group 里，body 整体
       // display:none 会把内联缩略图一起藏掉。单独成卡时缩略图常驻可见，符合
       // “对话里的图片操作默认直接显示、不折叠”。
-      export function isGroupableToolBlock(block) {
+      function isGroupableToolBlock(block) {
         if (!block || block.type !== "tool_use" || !GROUPABLE_TOOLS[block.name]) return false;
         if (block.name === "Read") {
           var input = block.input || {};
@@ -1900,7 +1900,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         return true;
       }
 
-      export function groupConsecutiveTools(content) {
+      function groupConsecutiveTools(content) {
         var groups = [];
         var i = 0;
         while (i < content.length) {
@@ -1930,9 +1930,9 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         return groups;
       }
 
-      export var TOOL_GROUP_LABELS = { Read: "读取", Glob: "搜索", Grep: "搜索", WebFetch: "抓取", WebSearch: "搜索", TodoRead: "待办" };
+      var TOOL_GROUP_LABELS = { Read: "读取", Glob: "搜索", Grep: "搜索", WebFetch: "抓取", WebSearch: "搜索", TodoRead: "待办" };
 
-      export function renderToolGroup(items, role, toolResults, messageKey, options?: any) {
+      function renderToolGroup(items, role, toolResults, messageKey, options?: any) {
         var opts = options || {};
         // Count by tool name
         var counts = {};
@@ -1996,7 +1996,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
 
       // 折叠态：隐藏摘要卡之后的所有兄弟（DOM 顺序 newest→oldest，摘要卡之后 = 历史区），
       // 但保留「加载更早」哨兵可见。
-      export function applyHistoryHiddenState(summaryEl, expanded) {
+      function applyHistoryHiddenState(summaryEl, expanded) {
         var node = summaryEl.nextElementSibling;
         while (node) {
           if (!node.classList.contains("chat-load-more")) {
@@ -2009,7 +2009,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
 
       // ===== 自动折叠横条（已禁用）=====
       // 保留清理入口，用来移除旧版本可能已经插入 DOM 的顶部固定横条和隐藏态。
-      export function applyAutoFoldBar(chatOutput, chatMessages, allMessages, renderIsInitial) {
+      function applyAutoFoldBar(chatOutput, chatMessages, allMessages, renderIsInitial) {
         void allMessages;
         void renderIsInitial;
         if (!chatOutput || !chatMessages) return;
@@ -2063,7 +2063,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         return text.length > 180 ? text.slice(0, 177) + "..." : text;
       }
 
-      export function applyHistoryCollapse(chatMessages, selectedSession) {
+      function applyHistoryCollapse(chatMessages, selectedSession) {
         if (!chatMessages) return;
         var allMessages = state.currentMessages || [];
         var lastUserIdx = -1;
@@ -2148,7 +2148,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
 
       // 老消息（SQLite 历史 turn）后端还没盖章。前端给 name === "Task"/"Agent"
       // 或 input.subagent_type 非空的 tool_use 虚拟盖章，让现有 multi-agent 渲染路径吃到。
-      export function deriveLegacySubagent(block) {
+      function deriveLegacySubagent(block) {
         if (!block || block.type !== "tool_use") return null;
         var input = block.input || {};
         var agentType = typeof input.subagent_type === "string" ? input.subagent_type : null;
@@ -2161,7 +2161,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
       }
 
       // tool_result 老消息靠 tool_use_id 关联 task。由外层预扫一遍 messages，构建 task id → meta 的 map。
-      export function collectLegacyTaskIdMap(allMessages) {
+      function collectLegacyTaskIdMap(allMessages) {
         var map = new Map();
         if (!Array.isArray(allMessages)) return map;
         for (var i = 0; i < allMessages.length; i++) {
@@ -2182,7 +2182,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
       // bucket key 走 getSubagentBaseName(sub)：不同 agentType 但相同中文名（比如
       // "Explore" 和 "code-explorer" 都映射 "侦探猫"）也算冲突，得分别加后缀。
       // 单实例不进 map，调用方就不会拼后缀。
-      export function collectSubagentSuffixMap(allMessages) {
+      function collectSubagentSuffixMap(allMessages) {
         var suffix = new Map();
         if (!Array.isArray(allMessages)) return suffix;
         var bucketsByName = new Map(); // displayName -> ordered list of unique taskIds
@@ -2219,7 +2219,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
       // 输出每段附带原数组中的 firstIndex，方便渲染时 expand key 用全局 index
       // 避免不同段冲突。
       // legacyTaskMap：老消息没有 __subagent 盖章时，按 tool_use_id 反查兜底。
-      export function splitTurnBySubagent(blocks, legacyTaskMap) {
+      function splitTurnBySubagent(blocks, legacyTaskMap) {
         var segs = [];
         if (!Array.isArray(blocks) || !blocks.length) return segs;
         var current = null;
@@ -2251,7 +2251,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
 
       // 渲染一段内的 blocks。独立 group consecutive tools，避免父/子 agent 的工具
       // 调用跨边界被合并；grp.index 偏移到原数组全局位置，保持 expand key 唯一。
-      export function buildSegmentBlocksHtml(segmentBlocks, segmentFirstIndex, role, toolResults, messageKey, options?: any) {
+      function buildSegmentBlocksHtml(segmentBlocks, segmentFirstIndex, role, toolResults, messageKey, options?: any) {
         var html = "";
         var opts = options || {};
         try {
@@ -2283,7 +2283,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
       // 行，避免与 assistant turn 的 handoff 重复。
       // TODO：嵌套 subagent（子 subagent 在外层 subagent 段内再切）时，
       // parentPersonaName 应是外层 subagent.name 而不是固定父 persona；目前先不处理。
-      export function buildMultiAgentHtml(segments, role, parentPersonaName, toolResults, messageKey, options) {
+      function buildMultiAgentHtml(segments, role, parentPersonaName, toolResults, messageKey, options) {
         var opts = options || {};
         var showHandoff = opts.showHandoff !== false; // 默认 true；user turn 传 false
         var html = "";
@@ -2325,7 +2325,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
       //   │ <tool 卡 2>                                       │     固定高度 + 内部滚动
       //   │ <... 最终回复 ...>                                │     + 内部 overflow-y:auto
       //   └───────────────────────────────────────────────────┘
-      export function buildSubagentPanelHtml(seg, parentPersonaName, segHtml, messageKey, includeHandoff) {
+      function buildSubagentPanelHtml(seg, parentPersonaName, segHtml, messageKey, includeHandoff) {
         var sub = seg.subagent;
         var subPalette = getSubagentPalette(sub);
         var subName = getSubagentDisplayName(sub);
@@ -2367,7 +2367,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         '</div>';
       }
 
-      export function countRenderableSegmentBlocks(blocks) {
+      function countRenderableSegmentBlocks(blocks) {
         if (!Array.isArray(blocks)) return 0;
         var count = 0;
         for (var i = 0; i < blocks.length; i++) {
@@ -2381,7 +2381,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         return Math.max(1, count);
       }
 
-      export function renderStructuredMessage(msg, roundUsage, messageIndex, legacyTaskMap) {
+      function renderStructuredMessage(msg, roundUsage, messageIndex, legacyTaskMap) {
         var role = msg.role;
         var messageKey = getMessageKey(msg, messageIndex);
         var usageHtml = role === "assistant" ? renderUsageSummaryHtml(roundUsage) : "";
@@ -2479,7 +2479,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
       // 其余路径给个可点的小文件块，正文保持原样转义。
       var ATTACHMENT_PREFIX_RE = /^\s*\[附件已上传，请查看以下文件:\n([\s\S]*?)\]\n+/;
 
-      export function renderUserAttachmentBlock(rawPath) {
+      function renderUserAttachmentBlock(rawPath) {
         var p = (rawPath || "").trim();
         if (!p) return "";
         var name = p.split("/").pop() || p;
@@ -2504,7 +2504,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
       }
 
       // 渲染用户文本：剥离附件前缀，附件渲染成缩略图 / 文件块（在上），正文转义（在下）。
-      export function renderUserText(text) {
+      function renderUserText(text) {
         var raw = text || "";
         var m = raw.match(ATTACHMENT_PREFIX_RE);
         if (!m) return escapeHtml(raw);
@@ -2519,7 +2519,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         return wrap + body;
       }
 
-      export function renderContentBlock(block, role, toolResults, index, messageKey, options?: any) {
+      function renderContentBlock(block, role, toolResults, index, messageKey, options?: any) {
         var opts = options || {};
         if (!block || !block.type) return "";
 
@@ -2598,7 +2598,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         }
       }
 
-      export function renderInlineTool(block, toolResult, toolName, fileInfo, extraInfo, messageKey, index, options?: any) {
+      function renderInlineTool(block, toolResult, toolName, fileInfo, extraInfo, messageKey, index, options?: any) {
         var opts = options || {};
         var toolId = block.id || "tool-" + toolName;
         var expandKey = buildExpandKey("inline-tool", [messageKey, toolId || index, index]);
@@ -2733,7 +2733,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
       }
 
       // Terminal-style display for Bash commands
-      export function renderTerminalTool(block, toolResult, toolName, messageKey, index, options?: any) {
+      function renderTerminalTool(block, toolResult, toolName, messageKey, index, options?: any) {
         var opts = options || {};
         var inputData = block.input || {};
         var command = inputData.command || inputData.cmd || "";
@@ -2815,7 +2815,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         return "";
       }
 
-      export function renderDiffTool(block, toolResult, toolName, messageKey, index, options?: any) {
+      function renderDiffTool(block, toolResult, toolName, messageKey, index, options?: any) {
         var opts = options || {};
         var inputData = block.input || {};
         var path = inputData.file_path || inputData.path || "";
@@ -2910,7 +2910,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         '</div>';
       }
 
-      export function renderUnifiedDiffLines(diff) {
+      function renderUnifiedDiffLines(diff) {
         var lines = String(diff || "").split("\n");
         var limit = 600;
         var html = "";
@@ -2928,7 +2928,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         return html || renderEmptyDiff("");
       }
 
-      export function renderEmptyDiff(path) {
+      function renderEmptyDiff(path) {
         var suffix = path ? "，可打开文件查看当前内容" : "";
         return '<div class="diff-empty">Codex 未提供内联 diff' + suffix + '。</div>';
       }
@@ -2938,7 +2938,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         return '<pre class="inline-tool-result-text" style="max-height: 300px; overflow-y: auto;">' + escapeHtml(content) + '</pre>';
       }
 
-      export function renderToolUseCard(block, toolResult, index, messageKey, options?: any) {
+      function renderToolUseCard(block, toolResult, index, messageKey, options?: any) {
         var opts = options || {};
         var toolName = block.name || "unknown";
         var toolId = block.id || "tool-" + toolName + "-" + (typeof index === "number" ? index : 0);
@@ -3139,7 +3139,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         '</div>';
       }
 
-      export function generateInputSummary(toolName, input) {
+      function generateInputSummary(toolName, input) {
         // 生成工具输入的简洁摘要，避免显示完整 JSON
         if (!input || typeof input !== "object") return "";
 
@@ -3222,7 +3222,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         return keys.length + " 个参数";
       }
 
-      export function extractFileInfo(toolName, input) {
+      function extractFileInfo(toolName, input) {
         if (!input) return null;
         var path = input.file_path || input.path || input.cwd;
         if (path) {
@@ -3236,7 +3236,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
       }
 
       // Format assistant response with Markdown rendering and cleanup
-      export function formatAssistantResponse(text) {
+      function formatAssistantResponse(text) {
         if (!text) return "";
 
         // Clean up the text
@@ -3288,7 +3288,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         return deduped.join(newline);
       }
 
-      export function parseMarkdownTables(source) {
+      function parseMarkdownTables(source) {
         var NL = "\n";
         var lines = source.split(NL);
         var out = [];
@@ -3347,7 +3347,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         return out.join(NL);
       }
 
-      export function renderMarkdown(text) {
+      function renderMarkdown(text) {
         if (!text) return "";
 
         var markdownLinks = [];
@@ -3655,7 +3655,7 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         return '<div class="markdown-content">' + result + '</div>';
       }
 
-      export function highlightCode(code, lang) {
+      function highlightCode(code, lang) {
         // Syntax highlighting - escape HTML for display
         code = code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
         return code;
