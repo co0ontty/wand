@@ -8,6 +8,7 @@ interface DirectoryManagedSession {
   cwd?: string;
   status?: string;
   permissionBlocked?: boolean;
+  ptyBusy?: boolean;
   structuredState?: { inFlight?: boolean } | null;
   startedAt?: string;
   endedAt?: string;

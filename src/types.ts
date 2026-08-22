@@ -557,6 +557,13 @@ export interface SessionSnapshot {
   providerCliActive?: boolean;
   /** Provider CLI exit status; separate from exitCode, which belongs to the persistent PTY shell. */
   providerCliExitCode?: number | null;
+  /**
+   * PTY 会话本轮是否正在生成回复（provider CLI busy）。语义对齐 structured 的
+   * structuredState.inFlight：turn 开始置 true，回复结束/进程退出清 false。
+   * 运行时信号，不持久化，服务重启后视为 false。目前仅 Claude PTY（bridge）能精确判定；
+   * 其余 provider 不产生该信号（undefined），客户端应回落到旧行为。
+   */
+  ptyBusy?: boolean;
   runner?: SessionRunner;
   command: string;
   cwd: string;

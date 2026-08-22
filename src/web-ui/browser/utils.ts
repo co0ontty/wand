@@ -11,6 +11,20 @@ state._statusBarStartTime = 0;
 var _runningIndicatorsTimerId: any = null;
 var _runningIndicatorsStartTime = 0;
 
+// 计算 PTY 会话本轮是否真的在生成。provider CLI 会话需要 ptyBusy 信号（目前只有
+// Claude bridge 能给出）；裸 shell 没有 provider，保持旧行为（进程活着即在跑）。
+var _PROVIDER_CLI_IDS = { claude: 1, codex: 1, opencode: 1, grok: 1, qoder: 1, pi: 1 };
+function isProviderCliSession(session: any) {
+  return !!(session.provider && (_PROVIDER_CLI_IDS as Record<string, number>)[session.provider]);
+}
+
+export function ptyTurnActive(session: any) {
+  if (!session || session.status !== "running") return false;
+  if (isStructuredSession(session)) return false;
+  if (isProviderCliSession(session)) return session.ptyBusy === true;
+  return true;
+}
+
 // 计算会话整体的"在跑"信号，统一驱动顶部进度条/徽章计时/气泡呼吸条。
 export function computeRunningSignal(session: any) {
   if (!session) return { active: false };
@@ -19,9 +33,7 @@ export function computeRunningSignal(session: any) {
   var inFlight = !!(isStructuredSession(session)
     && session.structuredState && session.structuredState.inFlight);
   var providerCliRunning = session.providerCliActive !== false;
-  var ptyRunning = !isStructuredSession(session)
-    && session.status === "running"
-    && providerCliRunning;
+  var ptyRunning = ptyTurnActive(session) && providerCliRunning;
   return {
     active: inFlight || ptyRunning || permBlocked,
     inFlight: inFlight,

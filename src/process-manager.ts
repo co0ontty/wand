@@ -215,6 +215,8 @@ interface SessionRecord extends SessionSnapshot {
   childProcess: ChildProcess | null;
   /** PTY bridge for parsing output and emitting events */
   ptyBridge: ClaudePtyBridge | null;
+  /** 运行时每轮忙碌信号（对齐 structured inFlight）；由 bridge 事件驱动，不持久化 */
+  ptyBusy?: boolean;
   /** Current PTY dimensions, last applied by resize(). */
   ptyCols: number;
   ptyRows: number;
@@ -910,6 +912,7 @@ export class ProcessManager extends EventEmitter {
 
   private initializeClaudeBridge(record: SessionRecord, initialOutput: string): void {
     if (record.provider !== "claude" || !record.providerCliActive) return;
+    record.ptyBusy = false;
     record.ptyBridge?.removeAllListeners();
     record.ptyBridge = new ClaudePtyBridge({
       sessionId: record.id,
@@ -972,6 +975,7 @@ export class ProcessManager extends EventEmitter {
       current.providerCliActive = false;
       current.providerCliExitCode = exitCode;
     }
+    current.ptyBusy = false;
     current.pendingEscalation = null;
     current.ptyPermissionBlocked = false;
     this.captureClaudeSessionId(current, { allowTimeWindowFallback: true });
@@ -1803,6 +1807,7 @@ export class ProcessManager extends EventEmitter {
     record.providerCliExitCode = exitCode;
     record.providerShellMarker = null;
     record.ptyLaunchMarkerToken = null;
+    record.ptyBusy = false;
 
     if (record.claudeTaskDiscoveryTimer) {
       clearTimeout(record.claudeTaskDiscoveryTimer);
@@ -1875,6 +1880,7 @@ export class ProcessManager extends EventEmitter {
     record.providerCliActive = false;
     record.providerShellMarker = null;
     record.ptyLaunchMarkerToken = null;
+    record.ptyBusy = false;
     // Kill any running child process (from JSON chat turns)
     if (record.childProcess) {
       record.childProcess.kill();
@@ -2066,6 +2072,7 @@ export class ProcessManager extends EventEmitter {
       provider: record.provider,
       providerCliActive: record.providerCliActive,
       providerCliExitCode: record.providerCliExitCode,
+      ptyBusy: record.ptyBridge ? record.ptyBridge.isResponding() : record.ptyBusy === true,
       runner: "pty",
       command: record.command,
       cwd: record.cwd,
@@ -2473,6 +2480,18 @@ export class ProcessManager extends EventEmitter {
         const rawMessages = record.ptyBridge?.getMessages() ?? [];
         const isStreaming = record.status === "running";
         const bridgeData = event.data as ChatOutputData | undefined;
+
+        // 每轮忙碌信号：turn 开始置 true，回复结束清 false。只在翻转时广播，
+        // 避免流式期间每个 chunk 都发 status 事件。
+        const responding = bridgeData?.isResponding === true;
+        if (record.ptyBusy !== responding) {
+          record.ptyBusy = responding;
+          this.emitEvent({
+            type: "status",
+            sessionId: event.sessionId,
+            data: { ptyBusy: responding },
+          });
+        }
 
         const data: Record<string, unknown> = {
           permissionBlocked: this.isPermissionBlocked(record),

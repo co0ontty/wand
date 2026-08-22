@@ -53,6 +53,7 @@ function sessionBase(snapshot: SessionSnapshot): SessionBaseDTO {
     provider: snapshot.provider,
     providerCliActive: snapshot.providerCliActive,
     providerCliExitCode: snapshot.providerCliExitCode,
+    ptyBusy: snapshot.ptyBusy === true,
     runner: snapshot.runner,
     command: snapshot.command,
     cwd: snapshot.cwd,

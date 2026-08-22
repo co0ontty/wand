@@ -339,6 +339,14 @@ export class ClaudePtyBridge extends EventEmitter {
     return this.permissionState.isBlocked;
   }
 
+  /**
+   * Per-turn busy signal: true while an assistant response is streaming.
+   * Mirrors chatState.phase so ProcessManager can expose ptyBusy on the snapshot.
+   */
+  isResponding(): boolean {
+    return !this._exited && this.chatState.phase === "responding";
+  }
+
   getPermissionState(): PermissionState {
     return this.permissionState;
   }

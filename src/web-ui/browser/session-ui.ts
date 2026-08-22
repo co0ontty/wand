@@ -1,5 +1,5 @@
 import { state } from "./state";
-import { escapeHtml, renderTailMarqueePath } from "./utils";
+import { escapeHtml, ptyTurnActive, renderTailMarqueePath } from "./utils";
 import { isStructuredSession } from "./session-engine";
 import { renderManageCheckbox } from "./sidebar";
 
@@ -36,6 +36,11 @@ import { renderManageCheckbox } from "./sidebar";
         if (!session) return "";
         if (session.permissionBlocked) return "等待授权";
         if (isStructuredSession(session) && session.structuredState && session.structuredState.inFlight) return "思考中";
+        // provider CLI 进程活着但本轮已结束 → 显示空闲而不是运行中
+        if (session.status === "running"
+          && session.provider
+          && !isStructuredSession(session)
+          && session.ptyBusy !== true) return "空闲";
         var statusMap = {
           "idle": "空闲",
           "stopped": "已停止",
@@ -54,6 +59,7 @@ import { renderManageCheckbox } from "./sidebar";
         if (!session) return "";
         if (session.permissionBlocked) return "permission-blocked";
         if (isStructuredSession(session) && session.structuredState && session.structuredState.inFlight) return "running";
+        if (session.status === "running" && session.provider && session.ptyBusy !== true) return "idle";
         return session.status || "";
       }
 
@@ -126,7 +132,8 @@ import { renderManageCheckbox } from "./sidebar";
         var metaStatusClass = getSessionStatusClass(session);
         var prominentStatus = session.permissionBlocked
           || (isStructuredSession(session) && session.structuredState && session.structuredState.inFlight)
-          || ["running", "thinking", "waiting-input", "waiting_input", "reconnecting"].indexOf(session.status) !== -1;
+          || ptyTurnActive(session)
+          || ["thinking", "waiting-input", "waiting_input", "reconnecting"].indexOf(session.status) !== -1;
         var prominentWarning = session.permissionBlocked
           || ["waiting-input", "waiting_input", "reconnecting"].indexOf(session.status) !== -1;
         var prominentClass = prominentStatus
@@ -165,7 +172,7 @@ import { renderManageCheckbox } from "./sidebar";
         // Activity description for running sessions
         var activityDesc = getSessionActivityDesc(session);
         var activityHtml = "";
-        if (session.status === "running" && activityDesc) {
+        if (ptyTurnActive(session) && activityDesc) {
           activityHtml = '<div class="session-activity">' + escapeHtml(activityDesc) + '</div>';
         }
         var descriptionHtml = session.description
@@ -174,7 +181,7 @@ import { renderManageCheckbox } from "./sidebar";
 
         // Time display
         var timeDisplay = "";
-        if (session.status === "running") {
+        if (ptyTurnActive(session)) {
           timeDisplay = '<span class="session-time" title="已运行 ' + escapeHtml(elapsedTime(session.startedAt)) + '">' + escapeHtml(elapsedTime(session.startedAt)) + '</span>';
         } else if (session.endedAt) {
           timeDisplay = '<span class="session-time" title="' + escapeHtml(new Date(session.endedAt).toLocaleString()) + '">' + escapeHtml(timeAgo(session.endedAt)) + '</span>';

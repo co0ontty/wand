@@ -322,9 +322,25 @@ import { consumeTerminalTouchPage, consumeTerminalWheelPage, terminalWheelPageSe
         }
       }
 
+      // 用户手动上滚进入浏览模式后，闲置这段时间就自动平滑回到底部并恢复
+      // 跟随（「翻到哪停在哪，停一会儿不动再回滚」）。期间任何一次新的
+      // 滚动/触摸都会重新计时。
+      var TERMINAL_SCROLL_IDLE_RETURN_MS = 20000;
+
+      function armTerminalScrollIdleReturn() {
+        clearTerminalScrollIdleTimer();
+        state.terminalScrollIdleTimer = setTimeout(function() {
+          state.terminalScrollIdleTimer = null;
+          if (!state.terminal || state.terminalAutoFollow) return;
+          state.terminalAutoFollow = true;
+          scrollTerminalToBottom(true);
+          updateTerminalJumpToBottomButton();
+        }, TERMINAL_SCROLL_IDLE_RETURN_MS);
+      }
+
       function setTerminalManualScrollActive() {
         state.terminalAutoFollow = false;
-        clearTerminalScrollIdleTimer();
+        armTerminalScrollIdleReturn();
         state.terminalProgrammaticScrollUntil = 0;
         updateTerminalJumpToBottomButton();
       }
@@ -779,6 +795,14 @@ import { consumeTerminalTouchPage, consumeTerminalWheelPage, terminalWheelPageSe
         var queue = state.terminalWriteQueue || Promise.resolve();
         state.terminalWriteQueue = queue.catch(function() {}).then(async function() {
           if (terminal !== state.terminal || generation !== state.terminalRestoreGeneration) return;
+          // WS 重连 / 前台恢复会全量 reset+replay。若用户正停在 scrollback
+          // 里阅读，这里不能把他拽回底部：先记下距底部距离，重放完按原距离
+          // 复位视口，保持手动浏览模式（闲置回底由 idle 计时器接管）。
+          var wasManualBrowsing = state.terminalAutoFollow === false;
+          var prevViewport = getTerminalViewport();
+          var manualDistanceFromBottom = prevViewport
+            ? Math.max(0, prevViewport.scrollHeight - prevViewport.clientHeight - prevViewport.scrollTop)
+            : 0;
           terminal.reset();
           terminal.clear();
           if (snapshot.cols > 0 && snapshot.rows > 0) terminal.resize(snapshot.cols, snapshot.rows);
@@ -794,12 +818,29 @@ import { consumeTerminalTouchPage, consumeTerminalWheelPage, terminalWheelPageSe
           }
           state.terminalSessionId = sessionId || null;
           state.terminalOutput = String(fallbackOutput || "");
-          state.terminalAutoFollow = true;
-          if (state.terminalFitAddon && typeof state.terminalFitAddon.fit === "function") {
-            state.terminalFitAddon.fit();
-            sendTerminalResize(terminal.cols, terminal.rows);
+          if (wasManualBrowsing && manualDistanceFromBottom > 2) {
+            // 用户正在往上翻页：保持他的阅读位置和手动模式，不强行贴底。
+            state.terminalAutoFollow = false;
+            if (state.terminalFitAddon && typeof state.terminalFitAddon.fit === "function") {
+              state.terminalFitAddon.fit();
+              sendTerminalResize(terminal.cols, terminal.rows);
+            }
+            var restoredViewport = getTerminalViewport();
+            if (restoredViewport) {
+              restoredViewport.scrollTop = Math.max(
+                0,
+                restoredViewport.scrollHeight - restoredViewport.clientHeight - manualDistanceFromBottom
+              );
+            }
+            armTerminalScrollIdleReturn();
+          } else {
+            state.terminalAutoFollow = true;
+            if (state.terminalFitAddon && typeof state.terminalFitAddon.fit === "function") {
+              state.terminalFitAddon.fit();
+              sendTerminalResize(terminal.cols, terminal.rows);
+            }
+            terminal.scrollToBottom();
           }
-          terminal.scrollToBottom();
           updateTerminalJumpToBottomButton();
         });
         return true;

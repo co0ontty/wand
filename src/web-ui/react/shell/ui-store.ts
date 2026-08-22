@@ -25,6 +25,11 @@ export interface UiSessionVm {
   resumable: boolean;
   permissionBlocked: boolean;
   inFlight: boolean;
+  /**
+   * 本轮是否真的在生成：structured 看 inFlight；PTY 裸 shell 看进程存活；
+   * PTY provider CLI 看 ptyBusy。用于运行徽标/计时器/prominent 展示。
+   */
+  turnActive: boolean;
   titleGenerating: boolean;
   startedAt?: string;
   endedAt?: string;
@@ -42,6 +47,16 @@ export interface UiSidebarGroupVm {
   label: string;
   expanded: boolean;
   entries: readonly Readonly<UiSessionVm>[];
+}
+
+/** provider CLI（非裸 shell）进程存活但本轮已结束 → 会话应展示为空闲而非运行中。 */
+export function isIdleAtPrompt(
+  kind: UiSessionKind,
+  status: string,
+  provider: UiProvider,
+  ptyBusy: boolean,
+): boolean {
+  return kind === "pty" && Boolean(provider) && status === "running" && !ptyBusy;
 }
 
 /**

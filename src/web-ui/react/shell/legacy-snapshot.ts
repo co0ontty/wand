@@ -6,6 +6,7 @@ import type {
   UiSessionVm,
   UiSnapshotData,
 } from "./ui-store";
+import { isIdleAtPrompt } from "./ui-store";
 
 export interface LegacySnapshotState {
   selectedId?: string | null;
@@ -47,6 +48,7 @@ interface LegacySession {
   cwd?: string;
   status?: string;
   permissionBlocked?: boolean;
+  ptyBusy?: boolean;
   structuredState?: { inFlight?: boolean } | null;
   startedAt?: string;
   endedAt?: string;
@@ -133,15 +135,21 @@ function isAutomation(session: LegacySession): boolean {
 
 function sessionStatusLabel(session: LegacySession): string {
   if (session.permissionBlocked) return "等待授权";
-  if (session.sessionKind === "structured" && session.structuredState?.inFlight) return "思考中";
+  const kind = session.sessionKind === "structured" ? "structured" : "pty";
+  if (kind === "structured" && session.structuredState?.inFlight) return "思考中";
   const status = asString(session.status, "idle");
+  // provider CLI 进程活着但本轮已结束 → 空闲而不是运行中
+  if (isIdleAtPrompt(kind, status, session.provider ?? "", Boolean(session.ptyBusy))) return "空闲";
   return STATUS_LABELS[status] ?? status;
 }
 
 function sessionStatusTone(session: LegacySession): string {
   if (session.permissionBlocked) return "permission-blocked";
-  if (session.sessionKind === "structured" && session.structuredState?.inFlight) return "running";
-  return asString(session.status);
+  const kind = session.sessionKind === "structured" ? "structured" : "pty";
+  if (kind === "structured" && session.structuredState?.inFlight) return "running";
+  const status = asString(session.status);
+  if (isIdleAtPrompt(kind, status, session.provider ?? "", Boolean(session.ptyBusy))) return "idle";
+  return status;
 }
 
 function defaultCwd(state: LegacySnapshotState): string {
@@ -174,6 +182,10 @@ function sessionToVm(
   const kind = session.sessionKind === "structured" ? "structured" : "pty";
   const worktreeEnabled = Boolean(session.worktree?.enabled ?? session.worktreeEnabled);
   const source = isAutomation(session) ? "automation" : "wand";
+  const structuredInFlight = kind === "structured" && Boolean(session.structuredState?.inFlight);
+  const turnActive = kind === "structured"
+    ? structuredInFlight
+    : status === "running" && (!Boolean(explicitProvider) || Boolean(session.ptyBusy));
 
   return {
     id,
@@ -191,7 +203,8 @@ function sessionToVm(
       && status !== "running"
       && Boolean(session.claudeSessionId),
     permissionBlocked: Boolean(session.permissionBlocked),
-    inFlight: Boolean(session.structuredState?.inFlight),
+    inFlight: structuredInFlight,
+    turnActive,
     titleGenerating: Boolean(session.titleGenerating),
     ...(session.startedAt ? { startedAt: session.startedAt } : {}),
     ...(session.endedAt ? { endedAt: session.endedAt } : {}),

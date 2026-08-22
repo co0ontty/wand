@@ -20,6 +20,7 @@ import type {
   UiSessionVm,
   UiSidebarGroupVm,
 } from "./ui-store";
+import { isIdleAtPrompt } from "./ui-store";
 
 export interface ShellSidebarEntryActions {
   readonly primary: UiAction;
@@ -237,7 +238,7 @@ function formatEntryTime(entry: Readonly<UiSessionVm>): string {
   if (!value) return "";
   const parsed = new Date(value);
   if (!Number.isFinite(parsed.getTime())) return "";
-  if (!entry.endedAt && entry.status === "running" && entry.startedAt) {
+  if (!entry.endedAt && entry.turnActive && entry.startedAt) {
     const seconds = Math.max(0, Math.floor((Date.now() - new Date(entry.startedAt).getTime()) / 1000));
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
@@ -335,7 +336,8 @@ function SessionEntry({
   const prominentStatus = !isHistory && (
     entry.permissionBlocked
     || entry.inFlight
-    || ["running", "thinking", "waiting-input", "waiting_input", "reconnecting"].includes(entry.status)
+    || entry.turnActive
+    || ["thinking", "waiting-input", "waiting_input", "reconnecting"].includes(entry.status)
   );
   const prominentWarning = entry.permissionBlocked
     || ["waiting-input", "waiting_input", "reconnecting"].includes(entry.status);
@@ -412,9 +414,11 @@ function SessionEntry({
                 <>
                   <span className={classNames("session-status", entry.permissionBlocked
                     ? "permission-blocked"
-                    : entry.inFlight
+                    : (entry.inFlight || (entry.turnActive && entry.status === "running"))
                       ? "running"
-                      : entry.status)}>
+                      : entry.status === "running" && Boolean(entry.provider) && entry.kind === "pty"
+                        ? "idle"
+                        : entry.status)}>
                     {entry.statusLabel}
                   </span>
                   <PathReveal path={entry.cwd}/>
@@ -524,9 +528,15 @@ function writeSidebarViewMode(mode: SidebarViewMode): void {
   } catch {}
 }
 
-function statusLabel(status: string, permissionBlocked: boolean, inFlight: boolean): string {
+function statusLabel(
+  status: string,
+  permissionBlocked: boolean,
+  inFlight: boolean,
+  idleAtPrompt: boolean,
+): string {
   if (permissionBlocked) return "等待授权";
   if (inFlight) return "思考中";
+  if (idleAtPrompt) return "空闲";
   const labels: Record<string, string> = {
     idle: "空闲",
     stopped: "已停止",
@@ -548,8 +558,13 @@ function directoryEntryToVm(
   const session = entry.session;
   const id = session.id;
   const status = session.status || "idle";
+  const kind = session.sessionKind === "structured" ? "structured" : "pty";
   const permissionBlocked = Boolean(session.permissionBlocked);
   const inFlight = Boolean(session.structuredState?.inFlight);
+  const idleAtPrompt = isIdleAtPrompt(kind, status, session.provider ?? "", Boolean(session.ptyBusy));
+  const turnActive = kind === "structured"
+    ? inFlight
+    : status === "running" && (!Boolean(session.provider) || Boolean(session.ptyBusy));
   const worktreeEnabled = Boolean(session.worktree?.enabled ?? session.worktreeEnabled);
   return {
     id,
@@ -562,7 +577,7 @@ function directoryEntryToVm(
     description: session.description || "",
     cwd: session.cwd || "",
     status,
-    statusLabel: statusLabel(status, permissionBlocked, inFlight),
+    statusLabel: statusLabel(status, permissionBlocked, inFlight, idleAtPrompt),
     active: id === selectedId,
     selected: false,
     resumable: session.sessionKind !== "structured"
@@ -570,6 +585,7 @@ function directoryEntryToVm(
       && Boolean(session.claudeSessionId),
     permissionBlocked,
     inFlight,
+    turnActive,
     titleGenerating: Boolean(session.titleGenerating),
     startedAt: session.startedAt,
     endedAt: session.endedAt,

@@ -106,7 +106,9 @@ test("PTY running indicators stop when the provider exits into its retained shel
   const utils = readFileSync(path.join(root, "src/web-ui/browser/utils.ts"), "utf8");
   const sessions = readFileSync(path.join(root, "src/web-ui/browser/session-engine.ts"), "utf8");
   assert.match(utils, /session\.providerCliActive !== false/);
-  assert.match(utils, /session\.status === "running"\s*&& providerCliRunning/);
+  // provider CLI 会话必须 ptyBusy 信号才显示运行中；裸 shell 保持进程存活即运行
+  assert.match(utils, /var ptyRunning = ptyTurnActive\(session\) && providerCliRunning;/);
+  assert.match(utils, /if \(isProviderCliSession\(session\)\) return session\.ptyBusy === true;/);
   assert.match(sessions, /capabilities: \{ ptyAck: true \}/);
 });
 

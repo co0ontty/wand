@@ -8,6 +8,7 @@ import test from "node:test";
 import pty, { type IPty } from "node-pty";
 import { defaultConfig } from "../src/config.js";
 import { isCommandAllowedByPrefixes, ProcessManager } from "../src/process-manager.js";
+import { toSessionListItemDTO } from "../src/session-transport.js";
 import type { EscalationRequest, ProcessEvent, SessionSnapshot } from "../src/types.js";
 import type { WandStorage } from "../src/storage.js";
 
@@ -444,4 +445,30 @@ test("permission resolution requires a live matching escalation", async (t) => {
   assert.equal(resolved.pendingEscalation, undefined);
   assert.equal(resolved.lastEscalationResult?.requestId, "request-1");
   assert.equal(resolved.lastEscalationResult?.resolution, "approve_turn");
+});
+
+test("Claude PTY exposes per-turn ptyBusy on snapshots", async (t) => {
+  const { manager, root, spawned } = createHarness(t);
+  const session = await manager.start("claude", root, "managed", undefined, {
+    provider: "claude",
+  });
+  // 空闲在提示符：进程活着但本轮未开始 → ptyBusy false
+  assert.equal(session.ptyBusy, false);
+  assert.equal(toSessionListItemDTO(session).ptyBusy, false);
+
+  // 用户发送输入 → bridge onUserInput → busy true
+  manager.sendInput(session.id, "hello\r", "terminal");
+  assert.equal(manager.get(session.id)?.ptyBusy, true);
+
+  // CLI 回显输入并以空提示符结束本轮（bare "❯" 行是 noise，需要 "❯ Try" 才判定完成）
+  spawned[0].emitData("hello\r\n");
+  spawned[0].emitData("\r\n❯ Try\r\n");
+  assert.equal(manager.get(session.id)?.ptyBusy, false);
+
+  // 进程退出 → busy 保持 false，status 翻转为 exited
+  spawned[0].emitExit(0);
+  await delay(20);
+  const afterExit = manager.get(session.id);
+  assert.equal(afterExit?.status, "exited");
+  assert.equal(afterExit?.ptyBusy, false);
 });
