@@ -61,7 +61,3 @@ export function syncBrowserComposerSelects(config: BrowserComposerSelectConfig):
   });
   composerSelectController.sync(mounts);
 }
-
-export function clearBrowserComposerSelects(): void {
-  composerSelectController.clear();
-}

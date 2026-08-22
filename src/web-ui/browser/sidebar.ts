@@ -89,11 +89,6 @@ document.addEventListener("click", function(event) {
         };
       }
 
-      export function getSessionEntries() {
-        var groups = getSessionEntryGroups();
-        return groups.wand.concat(groups.automation);
-      }
-
       export function renderSessions() {
         var groups: any[] = [];
         groups.push(renderSessionManageBar());
@@ -195,21 +190,6 @@ document.addEventListener("click", function(event) {
         return html;
       }
 
-      export function renderNonWandSessionGroup(entries: any) {
-        var expanded = state.sessionsManageMode || readStoredBoolean(NON_WAND_SESSIONS_EXPANDED_KEY, false);
-        return '<details class="non-wand-session-group' + (state.sessionsManageMode ? ' manage-mode' : '') + '"' + (expanded ? ' open' : '') + '>' +
-          '<summary class="non-wand-session-summary" title="Claude 与 Codex 的本机原生会话，不参与 Wand 会话排序">' +
-            '<span class="non-wand-session-icon" aria-hidden="true">' +
-              '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 109-9 9.75 9.75 0 00-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></svg>' +
-            '</span>' +
-            '<span class="non-wand-session-title">非 Wand 会话</span>' +
-            '<span class="non-wand-session-count" aria-label="' + entries.length + ' 个会话">' + entries.length + '</span>' +
-            '<svg class="non-wand-session-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>' +
-          '</summary>' +
-          renderSessionEntries(entries, "non-wand-session-list") +
-        '</details>';
-      }
-
       export function renderAutomationSessionGroup(entries: any) {
         var expanded = state.sessionsManageMode || readStoredBoolean(AUTOMATION_SESSIONS_EXPANDED_KEY, false);
         return '<details class="automation-session-group' + (state.sessionsManageMode ? ' manage-mode' : '') + '"' + (expanded ? ' open' : '') + '>' +
@@ -237,14 +217,6 @@ document.addEventListener("click", function(event) {
 
       export function getSelectedSessionIds() {
         return Object.keys(state.selectedSessionIds).filter(function(id) { return !!state.selectedSessionIds[id]; });
-      }
-
-      export function getSelectedClaudeHistoryIds() {
-        return Object.keys(state.selectedClaudeHistoryIds).filter(function(id) { return !!state.selectedClaudeHistoryIds[id]; });
-      }
-
-      export function getSelectedCodexHistoryIds() {
-        return Object.keys(state.selectedCodexHistoryIds).filter(function(id) { return !!state.selectedCodexHistoryIds[id]; });
       }
 
       export function clearManageSelections() {
@@ -502,14 +474,4 @@ document.addEventListener("click", function(event) {
           _codexHistoryLoadingPromise = null;
         });
         return _codexHistoryLoadingPromise;
-      }
-
-      export function getVisibleCodexHistorySessions() {
-        var managedIds = new Set();
-        state.sessions.forEach(function(s: any) {
-          if (s.claudeSessionId) managedIds.add(s.claudeSessionId);
-        });
-        return state.codexHistory.filter(function(s: any) {
-          return s.hasConversation && !s.managedByWand && !managedIds.has(s.claudeSessionId);
-        });
       }

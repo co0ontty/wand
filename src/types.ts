@@ -758,11 +758,6 @@ export interface SessionIdData {
   claudeSessionId: string;
 }
 
-export interface TaskData {
-  title: string;
-  tool?: string;
-}
-
 export interface SessionEndData {
   exitCode: number | null;
 }

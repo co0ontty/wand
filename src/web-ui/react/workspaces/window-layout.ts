@@ -367,6 +367,3 @@ export function ungroupWorkWindow(layout: TaskWindowLayout, windowId: string): T
   return { ...layout, windows, activeWindowId: active?.id ?? null };
 }
 
-export function taskWindowContainingTab(layout: TaskWindowLayout, tabId: string): WorkWindowLayout | undefined {
-  return layout.windows.find((window) => Boolean(findLayoutTab(window.layout, tabId)));
-}

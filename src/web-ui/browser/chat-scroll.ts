@@ -30,14 +30,6 @@ export function isChatNearBottom(chatMsgs?: any) {
   return Math.abs(el.scrollTop) < state.chatScrollThreshold;
 }
 
-// 没有手动 toggle 了——是否贴底完全由用户的滚动行为决定。
-// 这个函数只用来在某些场景（点未读气泡）下显式把状态扳回 true。
-export function setChatStickToBottom(enabled: any) {
-  state.chatStickToBottom = !!enabled;
-  if (state.chatStickToBottom) clearChatUnread({ removeDivider: true });
-  updateChatUnreadBubble();
-}
-
 export function clearChatUnread(options?: any) {
   options = options || {};
   var hadUnread = state.chatUnreadCount > 0 || state.chatUnreadStartIndex >= 0;

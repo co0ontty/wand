@@ -687,8 +687,6 @@ import { consumeTerminalTouchPage, consumeTerminalWheelPage, terminalWheelPageSe
           softResyncTerminal();
         }, typeof delayMs === "number" ? delayMs : 0);
       }
-      export function maybeScheduleResyncForChunk(_chunk?: any) {}
-
       export function clampClientTerminalOutput(buffer: string) {
         if (!buffer || buffer.length <= CLIENT_OUTPUT_TRIM_AT) return buffer;
         return buffer.slice(-CLIENT_OUTPUT_MAX);

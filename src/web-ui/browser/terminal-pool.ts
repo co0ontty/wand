@@ -115,10 +115,6 @@ export function hasPooledTerminal(sessionId: string): boolean {
   return pool.has(sessionId);
 }
 
-export function getPooledTerminal(sessionId: string): PooledTerminal | undefined {
-  return pool.get(sessionId);
-}
-
 function writeTerminal(handle: PooledTerminal, data: string): Promise<void> {
   if (!data || handle.disposed) return Promise.resolve();
   return new Promise<void>((resolve) => {
@@ -310,18 +306,6 @@ export function restorePooledTerminalState(
     } catch { /* ignore */ }
   });
   return true;
-}
-
-export function fitPooledTerminal(sessionId: string): void {
-  const handle = pool.get(sessionId);
-  if (!handle || handle.disposed) return;
-  fitAndSync(handle);
-}
-
-export function focusPooledTerminal(sessionId: string): void {
-  const handle = pool.get(sessionId);
-  if (!handle || handle.disposed) return;
-  try { handle.terminal.focus(); } catch { /* ignore */ }
 }
 
 /** 释放单个池实例（窗格关闭 / 会话移除时）。 */

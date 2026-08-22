@@ -29,8 +29,6 @@ export interface FileExplorerSearchResult {
   failure?: FilePreviewFailure;
 }
 
-export type FileExplorerMutationKind = "createFile" | "createDir" | "rename" | "delete";
-
 export interface FileExplorerMutationResult {
   ok: boolean;
   failure?: FilePreviewFailure;

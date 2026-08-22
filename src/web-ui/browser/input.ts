@@ -207,10 +207,6 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         return !!session && session.status === "running";
       }
 
-      export function isSelectedSessionRunning() {
-        return isSessionRunning(state.selectedId);
-      }
-
       // ── 跨会话排队 ──
 
       export var _queueLaunching = false; // 防止并发 launch
@@ -1759,23 +1755,6 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         updateSessionSnapshot({ id: sessionId, status: status || "exited" });
       }
 
-      export function hasRealConversationHistory(session) {
-        if (!session || !Array.isArray(session.messages) || session.messages.length < 2) {
-          return false;
-        }
-        var hasUser = session.messages.some(function(turn) {
-          return turn && turn.role === "user" && Array.isArray(turn.content) && turn.content.some(function(block) {
-            return block && block.type === "text" && typeof block.text === "string" && block.text.trim().length > 0;
-          });
-        });
-        var hasAssistant = session.messages.some(function(turn) {
-          return turn && turn.role === "assistant" && Array.isArray(turn.content) && turn.content.some(function(block) {
-            return block && block.type === "text" && typeof block.text === "string" && block.text.trim().length > 0;
-          });
-        });
-        return hasUser && hasAssistant;
-      }
-
       export function canAutoResumeSession(session) {
         // 只要是受支持的 provider PTY + 非运行中 + 有可恢复历史 id，
         // 就允许在用户发送时静默触发恢复。不再要求 messages 里同时
@@ -1849,13 +1828,6 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           state.pendingMessages.shift();
         }
         state.pendingMessages.push({ input: input, at: Date.now() });
-      }
-
-      export function queueOfflineTerminalChunks(chunks) {
-        var sequence = Array.isArray(chunks) ? chunks.filter(function(chunk) { return !!chunk; }) : [];
-        sequence.forEach(function(chunk) {
-          enqueuePendingInput(chunk);
-        });
       }
 
       export function queueDirectInput(input, shortcutKey?, viewOverride?, sessionId?) {
@@ -1982,16 +1954,8 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         });
       }
 
-      export function sendDirectInput(input) {
-        return queueDirectInput(input);
-      }
-
       export function getSelectedSession() {
         return state.sessions.find(function(session) { return session.id === state.selectedId; }) || null;
-      }
-
-      export function getTerminalSubmitSequence(session) {
-        return session && session.provider === "codex" ? "\n" : String.fromCharCode(13);
       }
 
       export function isTerminalInteractionAvailable() {
@@ -2443,14 +2407,6 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         updateJoystickPanelUI();
       }
 
-      export function handleKeyboardToggle(event) {
-        event.preventDefault();
-        event.stopPropagation();
-        if (state.currentView !== "terminal" || !state.selectedId) return;
-        state.keyboardPopupOpen = !state.keyboardPopupOpen;
-        updateInteractiveControls();
-      }
-
       export function closeKeyboardPopup() {
         state.keyboardPopupOpen = false;
         updateInteractiveControls();
@@ -2832,39 +2788,6 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         .finally(function() { _resumeInProgress = false; });
       }
 
-      export function resumeClaudeSessionById(claudeSessionId, errorEl) {
-        if (!claudeSessionId) return Promise.resolve(null);
-        return fetch("/api/claude-sessions/" + encodeURIComponent(claudeSessionId) + "/resume", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "same-origin",
-          body: JSON.stringify(withTerminalDimensions({
-            mode: state.chatMode || state.config.defaultMode || "default"
-          }))
-        })
-        .then(function(res) { return res.json(); })
-        .then(function(data) {
-          if (data.error) {
-            if (errorEl) showError(errorEl, data.error);
-            else showToast(data.error, "error");
-            return null;
-          }
-          state.claudeHistory = state.claudeHistory.filter(function(s) {
-            return s.claudeSessionId !== claudeSessionId;
-          });
-          state.selectedId = data.id;
-          persistSelectedId();
-          state.drafts[data.id] = "";
-          return data;
-        })
-        .catch(function(error) {
-          var message = (error && error.message) || "无法按 Claude 会话 ID 恢复会话。";
-          if (errorEl) showError(errorEl, message);
-          else showToast(message, "error");
-          return null;
-        });
-      }
-
       export function activateSession(data) {
         if (!data || !data.id) return Promise.resolve();
         state.selectedId = data.id;
@@ -3167,15 +3090,6 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         focusInputWithSelection(inputBox);
       }
 
-      export function scrollLatestMessageIntoView() {
-        var chatMessages = document.querySelector('.chat-messages');
-        if (!chatMessages) return;
-        // column-reverse: scrollTop=0 is the visual bottom.
-        // Use direct scrollTop instead of scrollIntoView() to avoid
-        // shifting ancestor containers and causing the input box to jump.
-        chatMessages.scrollTop = 0;
-      }
-
       export function updateInputPanelViewportSpacing() {
         // 键盘空间通过 syncAppViewportHeight 让 body 跟随 visualViewport 收缩处理；
         // 这里清掉历史遗留的 --keyboard-offset 避免双重补偿。
@@ -3274,11 +3188,6 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         focusInputWithSelection(inputBox);
       }
 
-      export function updateInputViewportState(inputBox) {
-        updateInputPanelViewportSpacing();
-        restoreInputBoxViewport(inputBox);
-      }
-
       export function resetInputViewport() {
         resetInputPanelViewportSpacing();
       }
@@ -3287,20 +3196,8 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         restoreInputBoxViewport(inputBox);
       }
 
-      export function focusInputBoxFromTap(inputBox) {
-        focusInputCaret(inputBox);
-      }
-
       export function refreshInputBoxState(inputBox) {
         syncInputBoxForCurrentState(inputBox);
-      }
-
-      export function clearInputViewportState() {
-        resetInputViewport();
-      }
-
-      export function finalizeInputViewportUpdate(inputBox) {
-        settleInputViewport(inputBox);
       }
 
       export function shouldAdjustForKeyboard(vv, inputBox) {

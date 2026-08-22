@@ -947,9 +947,6 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         attachMessageCopyButtons(container);
       }
 
-      // ===== Mobile message copy (long-press or tap copy button) =====
-      export var _msgCopyState = { timer: null, activeBtn: null };
-
       export function attachMessageCopyButtons(container) {
         var isTouch = window.matchMedia("(pointer: coarse)").matches;
         if (!isTouch) return;
@@ -1714,16 +1711,6 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         var seed = (sub && (sub.agentType || sub.taskId)) || "subagent";
         return SUBAGENT_PALETTES[hashStringToIndex(seed, SUBAGENT_PALETTES.length)];
       }
-      export function subagentAvatarHtml(sub) {
-        var palette = getSubagentPalette(sub);
-        var name = getSubagentDisplayName(sub);
-        var svg = buildPixelSvg(buildCatGrid(palette));
-        return '<div class="chat-message-avatar assistant subagent" style="--agent-color:' + palette.primary + '">' +
-          '<div class="pixel-avatar">' + svg + '</div>' +
-          '<span class="avatar-name">' + escapeHtml(name) + '</span>' +
-        '</div>';
-      }
-
       // subagent 最终回复（父 Task 的 tool_result）——现在外层 .subagent-panel 已经
       // 负责整段折叠 / 滚动，这里只需把"任务完成 / 失败"做个轻量标记块，markdown
       // 内容平铺，让 panel 的 body 滚动条统一接管。
@@ -2006,48 +1993,6 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         if (chevron) (chevron as HTMLElement).style.transform = expanded ? "" : "rotate(180deg)";
         persistElementExpandState(el, "tool-group");
       };
-
-      // ── 历史折叠 ──
-      // 发新消息后，把"最后一条用户消息"之前的历史折叠成一张摘要卡，展示被折叠区间
-      // 里的轮次 / 工具调用 / 子代理 / 失败数量，点一下展开。做成 render 之后的「后处理」
-      // 而非改 fullRenderChat 的拼串逻辑——后者那套 column-reverse + 增量/流式 DOM diff
-      // 很脆弱。摘要卡不是 .chat-message，现有 querySelectorAll(".chat-message:not(.system-info)")
-      // 天然忽略它，计数 / 锚点 / 流式替换都不受影响。
-      export function computeHistoryStats(allMessages, historyIndices) {
-        var rounds = 0, tools = 0, errors = 0;
-        var agentIds = {};
-        for (var i = 0; i < historyIndices.length; i++) {
-          var msg = allMessages[historyIndices[i]];
-          if (!msg) continue;
-          if (msg.role === "user") rounds++;
-          var content = msg.content;
-          if (!Array.isArray(content)) continue;
-          for (var j = 0; j < content.length; j++) {
-            var block = content[j];
-            if (!block) continue;
-            if (block.__subagent && block.__subagent.taskId) agentIds[block.__subagent.taskId] = 1;
-            if (block.type === "tool_use") {
-              tools++;
-              var legacy = deriveLegacySubagent(block);
-              if (legacy && legacy.taskId) agentIds[legacy.taskId] = 1;
-            } else if (block.type === "tool_result" && block.is_error) {
-              errors++;
-            }
-          }
-        }
-        var agents = 0;
-        for (var k in agentIds) { if (Object.prototype.hasOwnProperty.call(agentIds, k)) agents++; }
-        return { rounds: rounds, tools: tools, agents: agents, errors: errors };
-      }
-
-      export function buildHistorySummaryMetaText(stats) {
-        var parts = [];
-        parts.push(t("history.rounds", { n: String(stats.rounds) }));
-        if (stats.tools > 0) parts.push(t("history.tools", { n: String(stats.tools) }));
-        if (stats.agents > 0) parts.push(t("history.agents", { n: String(stats.agents) }));
-        if (stats.errors > 0) parts.push(t("history.errors", { n: String(stats.errors) }));
-        return parts.join(" · ");
-      }
 
       // 折叠态：隐藏摘要卡之后的所有兄弟（DOM 顺序 newest→oldest，摘要卡之后 = 历史区），
       // 但保留「加载更早」哨兵可见。

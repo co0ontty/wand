@@ -115,15 +115,6 @@ export function renderBrowserReactShell(
   return "mounted";
 }
 
-export function publishBrowserReactShell(reason: string, sync = false): void {
-  if (!runtime) return;
-  if (sync) {
-    flushSync(() => runtime?.store.publish({ sync: true, reason }));
-    return;
-  }
-  runtime.store.publish({ reason });
-}
-
 export function unmountBrowserReactShell(): void {
   const active = runtime;
   if (!active) return;

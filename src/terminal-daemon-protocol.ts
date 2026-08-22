@@ -71,8 +71,3 @@ export function terminalDaemonPaths(configPath: string): TerminalDaemonPaths {
     pidPath: path.join(dir, `.terminald-${suffix}.pid`),
   };
 }
-
-export function terminalDaemonRuntimeLabel(configPath: string): string {
-  const suffix = createHash("sha256").update(path.resolve(configPath)).digest("hex").slice(0, 8);
-  return `wand-terminald-${os.userInfo().uid}-${suffix}`;
-}
