@@ -4,7 +4,7 @@ import { normalizeTerminalOutput, doRenderChat } from "./chat-render";
 import { clearStructuredQueuePersistence } from "./chat-scroll";
 import { mergeAssistantTurn } from "./message-reconciliation";
 import { flushPendingMessages, buildMessagesForRender, isCurrentTerminalSession, updateInputHint, flushStructuredInputQueue, updateStructuredQueueCounter, setTerminalInteractive, flushCrossSessionQueue, reconcileInteractiveState, getSelectedSession, closeKeyboardPopup } from "./input";
-import { _vibrate, notifyTaskEnded, clearSessionProgressNative, _syncWakeLock, showNotificationBubble, notifyTaskProgress, syncSessionProgressToNative, notifyPermissionRequest, notifyUpdateAvailable, showAutoUpdateOverlay, showRestartOverlay, showToast } from "./notifications";
+import { notifyTaskEnded, clearSessionProgressNative, _syncWakeLock, showNotificationBubble, notifyTaskProgress, syncSessionProgressToNative, notifyPermissionRequest, notifyUpdateAvailable, showAutoUpdateOverlay, showRestartOverlay, showToast } from "./notifications";
 import { refreshAll, scheduleSessionListUpdate, subscribeToSession, updateSessionSnapshot, getPreferredMessages, loadSessions, selectSession, updateShellChrome, loadOutput, isAutoApproveImpliedByMode, applyCurrentView } from "./session-engine";
 import { getLastAssistantSummary } from "./session-ui";
 import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS, clampClientTerminalOutput, maybeScrollTerminalToBottom, resetTerminal, restoreTerminalState, softResyncTerminal, syncTerminalBuffer, updateTerminalJumpToBottomButton, wandTerminalWrite } from "./terminal";
@@ -452,7 +452,6 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
             } else {
               endedNotifBody = endedSession ? (endedSession.command || msg.sessionId) : msg.sessionId;
             }
-            _vibrate(endedIsError ? "error" : "success");
             notifyTaskEnded(msg.sessionId, endedNotifTitle, endedNotifBody);
             clearSessionProgressNative(msg.sessionId);
             _syncWakeLock();
@@ -576,6 +575,9 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
               if (Object.prototype.hasOwnProperty.call(msg.data, 'providerCliExitCode')) {
                 statusUpdate.providerCliExitCode = msg.data.providerCliExitCode;
               }
+              if (Object.prototype.hasOwnProperty.call(msg.data, 'ptyBusy')) {
+                statusUpdate.ptyBusy = !!msg.data.ptyBusy;
+              }
               if (msg.data.structuredState) {
                 statusUpdate.structuredState = msg.data.structuredState;
               } else if (Object.prototype.hasOwnProperty.call(msg.data, 'status')) {
@@ -610,7 +612,6 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
                 } else {
                   permBody += "\n" + permDetail;
                 }
-                _vibrate("medium");
                 notifyPermissionRequest(msg.sessionId, permBody);
                 // In-app bubble if not currently viewing this session
                 if (msg.sessionId !== state.selectedId) {
@@ -768,7 +769,6 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
       }
 
       export function approvePermission() {
-        _vibrate("light");
         if (!state.selectedId) return;
         var approveBtn = document.getElementById("approve-permission-btn") as HTMLButtonElement | null;
         var denyBtn = document.getElementById("deny-permission-btn") as HTMLButtonElement | null;
@@ -797,7 +797,6 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
       }
 
       export function denyPermission() {
-        _vibrate("light");
         if (!state.selectedId) return;
         var approveBtn = document.getElementById("approve-permission-btn") as HTMLButtonElement | null;
         var denyBtn = document.getElementById("deny-permission-btn") as HTMLButtonElement | null;

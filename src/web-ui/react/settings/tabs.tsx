@@ -1205,28 +1205,6 @@ export function NotificationSettingsTab(_props: SettingsTabProps) {
         </SettingsSection>
       ) : null}
 
-      {snapshot.platform.canSetAppIcon ? (
-        <SettingsSection title="应用图标" description="切换 Wand 的桌面图标，返回系统桌面后生效。">
-          <div className="wand-settings-button-row" role="group" aria-label="应用图标">
-            {(["shorthair", "garfield"] as const).map((icon) => (
-              <WandButton
-                key={icon}
-                kind={snapshot.platform.appIcon === icon ? "primary" : "secondary"}
-                aria-pressed={snapshot.platform.appIcon === icon}
-                onClick={async () => {
-                  await repository.execute({ type: "appIcon.set", icon });
-                  setSnapshot((current) => current ? {
-                    ...current,
-                    platform: { ...current.platform, appIcon: icon },
-                  } : current);
-                  toast("图标已切换，返回桌面后生效", "success");
-                }}
-              >{icon === "shorthair" ? "赛博虎妞" : "勤劳初二"}</WandButton>
-            ))}
-          </div>
-        </SettingsSection>
-      ) : null}
-
       <SettingsSection title="系统通知" description={`授权状态：${permissionLabel}`}>
         <div className="wand-settings-button-row">
           {preferences.permission !== "granted" && preferences.permission !== "unsupported" ? (

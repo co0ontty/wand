@@ -341,11 +341,6 @@ var _isAndroidApp = !!_wandAppMatch && !_isMacApp;
 export var _apkVersion = (_wandAppMatch && _isAndroidApp) ? _wandAppMatch[1] : null;
 export var _macAppVersion = (_wandAppMatch && _isMacApp) ? _wandAppMatch[1] : null;
 
-export function _vibrate(pattern?: string) {
-  if (!_hasNativeBridge || typeof WandNative.vibrate !== "function") return;
-  try { WandNative.vibrate(pattern || "light"); } catch (_e) {}
-}
-
 export function _syncWakeLock() {
   if (!_hasNativeBridge) return;
   var anyActive = state.sessions.some(function(s: any) {

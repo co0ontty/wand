@@ -8,7 +8,7 @@ import { attachEventListeners } from "./events";
 import { applyTerminalScale, isMobileLayout, refreshFileExplorer, setFilePanelOpen, shouldShowSessionsBackdrop, updateFilePanelCwd, updateLayoutState } from "./file-browser";
 import { loadGitStatus, updateTopbarGitBadge } from "./git-commit";
 import { activateSession, autoResizeInput, buildMessagesForRender, canAutoResumeSession, captureTerminalInput, closeKeyboardPopup, closeSwipedItem, flushCrossSessionQueue, focusInputBox, getControlInput, hasActiveTerminalSelection, hideMiniKeyboard, isImeKeyboardEvent, queueDirectInput, reconcileInteractiveState, renderCrossSessionQueue, sendInputFromBox, setTerminalInteractive, shouldCaptureTerminalEvent, stopSession, switchToSessionView, updateInteractiveControls, updateStructuredQueueCounter, updateVoiceTranscript } from "./input";
-import { _apkVersion, _getNativePermission, _hasNativeBridge, _macAppVersion, _syncWakeLock, _vibrate, clearSessionProgressNative, hideError, notifyTaskEnded, openWandDialog, performRestart, sendBrowserNotification, showError, showNotificationBubble, showRestartOverlay, showToast, tryPlayNotificationSound, wandAlert, wandConfirm, wandPrompt } from "./notifications";
+import { _apkVersion, _getNativePermission, _hasNativeBridge, _macAppVersion, _syncWakeLock, clearSessionProgressNative, hideError, notifyTaskEnded, openWandDialog, performRestart, sendBrowserNotification, showError, showNotificationBubble, showRestartOverlay, showToast, tryPlayNotificationSound, wandAlert, wandConfirm, wandPrompt } from "./notifications";
 import { bindForegroundSyncListeners, getEffectiveCwd, render, renderAppShell, resetChatRenderCache, updateOfflineBanner } from "./render";
 import { renderSessions, renderSessionsListContent } from "./sidebar";
 import { initTerminal, maybeScrollTerminalToBottom, syncTerminalBuffer } from "./terminal";
@@ -2340,7 +2340,6 @@ import { hasPooledTerminal } from "./terminal-pool";
       export function copyToClipboard(text, triggerBtn?, successCallback?) {
         if (!text) return;
         function onSuccess() {
-          _vibrate("light");
           if (successCallback) { successCallback(); return; }
           if (triggerBtn) {
             var orig = triggerBtn.textContent;

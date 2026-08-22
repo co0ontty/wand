@@ -232,8 +232,6 @@ export interface SettingsNotificationPreferences {
 export interface SettingsPlatformSnapshot {
   kind: SettingsPlatformKind;
   appVersion: string | null;
-  appIcon: string | null;
-  canSetAppIcon: boolean;
   canInstallDistribution: boolean;
   hasNativeNotifications: boolean;
 }
@@ -246,7 +244,6 @@ export interface SettingsCapabilities {
   manageConnectCode: boolean;
   nativeSounds: boolean;
   haptics: boolean;
-  appIcon: boolean;
   installDistribution: boolean;
 }
 
@@ -378,8 +375,7 @@ export type SettingsCommand =
   | { type: "notification.test"; delayMs?: number }
   | { type: "notification.nativeSound.set"; sound: string }
   | { type: "notification.nativeSound.preview"; sound: string }
-  | { type: "notification.haptics.set"; enabled: boolean }
-  | { type: "appIcon.set"; icon: "shorthair" | "garfield" };
+  | { type: "notification.haptics.set"; enabled: boolean };
 
 interface SettingsCommandResultMap {
   "admin.login": { ok: boolean };
@@ -410,7 +406,6 @@ interface SettingsCommandResultMap {
   "notification.nativeSound.set": { sound: string };
   "notification.nativeSound.preview": { played: boolean };
   "notification.haptics.set": { enabled: boolean };
-  "appIcon.set": { icon: string };
 }
 
 export type SettingsCommandResult<C extends SettingsCommand = SettingsCommand> =

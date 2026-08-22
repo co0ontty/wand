@@ -29,7 +29,6 @@ export interface AppState {
 
 interface WandNativeInterface {
   sendNotification(title: string, body: string, tag: string): void;
-  vibrate(pattern?: string): void;
   setKeepScreenOn(on: boolean): void;
   startKeepAlive(): void;
   stopKeepAlive(): void;
@@ -40,8 +39,6 @@ interface WandNativeInterface {
   clearSessionProgress(sessionId: string): void;
   copyToClipboard(text: string): string;
   downloadUpdate(url: string, fileName?: string, source?: string): void;
-  getAppIcon(): string;
-  setAppIcon(name: string): void;
   getNotificationSound(): string;
   isNotificationSoundEnabled?(): boolean;
   setNotificationSound(sound: string): void;

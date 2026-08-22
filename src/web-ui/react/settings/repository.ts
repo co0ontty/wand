@@ -300,16 +300,10 @@ function platformSnapshot(): SettingsPlatformSnapshot {
       : /WandPlatform\/macOS/.test(ua) || (window as Window & { __wandMacNative?: boolean }).__wandMacNative === true
         ? "macos"
         : "browser";
-  let appIcon: string | null = null;
-  if (bridge?.getAppIcon) {
-    try { appIcon = bridge.getAppIcon() || null; } catch { /* noop */ }
-  }
   const appVersion = ua.match(/WandApp\/([^\s]+)/)?.[1] || null;
   return {
     kind,
     appVersion,
-    appIcon,
-    canSetAppIcon: typeof bridge?.setAppIcon === "function",
     canInstallDistribution: typeof bridge?.downloadUpdate === "function",
     hasNativeNotifications: typeof bridge?.sendNotification === "function",
   };
@@ -352,7 +346,6 @@ function capabilities(access: "admin" | "read-only", platform: SettingsPlatformS
     manageConnectCode: admin,
     nativeSounds: platform.hasNativeNotifications,
     haptics: notificationSnapshot().hapticsEnabled !== null,
-    appIcon: platform.canSetAppIcon,
     installDistribution: platform.canInstallDistribution,
   };
 }
@@ -684,14 +677,9 @@ export class HttpSettingsRepository implements SettingsRepository {
       }
       case "notification.haptics.set": {
         nativeBridge()?.setHapticEnabled?.(command.enabled);
-        if (command.enabled) nativeBridge()?.vibrate?.("medium");
         result = { enabled: command.enabled };
         break;
       }
-      case "appIcon.set":
-        nativeBridge()?.setAppIcon?.(command.icon);
-        result = { icon: command.icon };
-        break;
     }
     return result as SettingsCommandResult<C>;
   }
