@@ -12,10 +12,12 @@ function sendMissionError(res: Response, error: unknown): void {
 
 export function registerMissionRoutes(app: Express, missions: Missions): void {
   app.get("/api/inbox", (_req, res) => {
-    res.json({ items: [] });
+    res.json({ items: missions.inbox() });
   });
 
-  app.post("/api/inbox/read", (_req, res) => {
+  app.post("/api/inbox/read", (req, res) => {
+    const sessionId = typeof req.body?.sessionId === "string" ? req.body.sessionId.trim() : "";
+    missions.markInboxRead(sessionId || undefined);
     res.json({ ok: true });
   });
 

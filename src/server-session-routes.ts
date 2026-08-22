@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { Express } from "express";
+import type { Express, Request, Response } from "express";
 
 import { ProcessManager, SessionInputError } from "./process-manager.js";
 import { StructuredSessionManager } from "./structured-session-manager.js";
@@ -1248,7 +1248,7 @@ export function registerSessionRoutes(
         return;
       }
       const newSnapshot = await startResumedPtySession(processes, storage, existingSession, sessionId, defaultMode, body);
-      res.status(201).json(newSnapshot);
+      res.status(201).json(sessionResponseDTO(newSnapshot));
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法恢复会话。") });
     }
@@ -1495,6 +1495,57 @@ export function registerSessionRoutes(
       res.status(400).json({ error: getErrorMessage(error, "无法按 Qoder 会话 ID 恢复会话。") });
     }
   });
+
+  const resumeNamedStructuredSession = (
+    req: Request,
+    res: Response,
+    spec: { provider: SessionProvider; runner: SessionRunner; label: string },
+  ): void => {
+    const sessionId = String(req.params.sessionId || "").trim();
+    const body = req.body as { mode?: ExecutionMode; cwd?: string; worktreeEnabled?: boolean; sessionSource?: unknown; automationId?: unknown };
+    try {
+      if (!isSafeProviderSessionId(sessionId)) {
+        res.status(400).json({ error: `${spec.label} 会话 ID 格式无效。` });
+        return;
+      }
+      const cwd = body.cwd?.trim();
+      if (!cwd) {
+        res.status(400).json({ error: "无法确定工作目录 (cwd)，无法恢复。" });
+        return;
+      }
+      const snapshot = structured.createSession({
+        cwd,
+        mode: parseExecutionMode(body.mode, defaultMode),
+        provider: spec.provider,
+        runner: spec.runner,
+        worktreeEnabled: body.worktreeEnabled === true,
+        claudeSessionId: sessionId,
+        workspaceId: resolveWorkspaceIdForNewSession(storage, cwd),
+        ...parseSessionCreationOrigin(body),
+      });
+      onSessionCreated?.(cwd);
+      res.status(201).json({ resumedClaudeSessionId: sessionId, ...sessionResponseDTO(snapshot) });
+    } catch (error) {
+      res.status(400).json({ error: getErrorMessage(error, `无法按 ${spec.label} 会话 ID 恢复会话。`) });
+    }
+  };
+
+  app.post("/api/grok-sessions/:sessionId/resume", (req, res) => {
+    resumeNamedStructuredSession(req, res, {
+      provider: "grok",
+      runner: "grok-cli-headless",
+      label: "Grok",
+    });
+  });
+
+  app.post("/api/pi-sessions/:sessionId/resume", (req, res) => {
+    resumeNamedStructuredSession(req, res, {
+      provider: "pi",
+      runner: "pi-cli-json",
+      label: "Pi",
+    });
+  });
+
   app.post("/api/sessions/:id/resize", (req, res) => {
     const body = req.body as ResizeRequest;
     try {
@@ -1512,7 +1563,7 @@ export function registerSessionRoutes(
   app.post("/api/sessions/:id/approve-permission", (req, res) => {
     try {
       if (sessions.ownerOf(req.params.id) === "structured") {
-        res.status(400).json({ error: "结构化会话不需要终端权限操作。" });
+        res.status(404).json({ error: "结构化会话没有运行时授权请求。" });
         return;
       }
       const snapshot = sessions.get(req.params.id);
@@ -1520,7 +1571,7 @@ export function registerSessionRoutes(
         res.status(400).json({ error: "Codex provider 不支持权限批准操作。" });
         return;
       }
-      res.json(processes.approvePermission(req.params.id));
+      res.json(sessionResponseDTO(processes.approvePermission(req.params.id)));
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法批准该授权请求。") });
     }
@@ -1529,7 +1580,7 @@ export function registerSessionRoutes(
   app.post("/api/sessions/:id/deny-permission", (req, res) => {
     try {
       if (sessions.ownerOf(req.params.id) === "structured") {
-        res.status(400).json({ error: "结构化会话不需要终端权限操作。" });
+        res.status(404).json({ error: "结构化会话没有运行时授权请求。" });
         return;
       }
       const snapshot = sessions.get(req.params.id);
@@ -1537,7 +1588,7 @@ export function registerSessionRoutes(
         res.status(400).json({ error: "Codex provider 不支持权限拒绝操作。" });
         return;
       }
-      res.json(processes.denyPermission(req.params.id));
+      res.json(sessionResponseDTO(processes.denyPermission(req.params.id)));
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法拒绝该授权请求。") });
     }
@@ -1546,7 +1597,7 @@ export function registerSessionRoutes(
   app.post("/api/sessions/:id/toggle-auto-approve", (req, res) => {
     try {
       if (sessions.ownerOf(req.params.id) === "structured") {
-        res.status(400).json({ error: "结构化会话不需要切换终端自动批准。" });
+        res.status(404).json({ error: "结构化会话没有运行时授权请求。" });
         return;
       }
       const snapshot = sessions.get(req.params.id);
@@ -1554,7 +1605,7 @@ export function registerSessionRoutes(
         res.status(400).json({ error: "Codex provider 不支持自动批准切换。" });
         return;
       }
-      res.json(processes.toggleAutoApprove(req.params.id));
+      res.json(sessionResponseDTO(processes.toggleAutoApprove(req.params.id)));
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法切换自动批准状态。") });
     }
@@ -1570,10 +1621,10 @@ export function registerSessionRoutes(
         return;
       }
       if (sessions.ownerOf(req.params.id) === "structured") {
-        res.json(structured.resolveEscalation(req.params.id, requestId, resolution));
+        res.status(404).json({ error: "结构化会话没有运行时授权请求。" });
         return;
       }
-      res.json(processes.resolveEscalation(req.params.id, requestId, resolution));
+      res.json(sessionResponseDTO(processes.resolveEscalation(req.params.id, requestId, resolution)));
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法处理该授权请求。") });
     }
@@ -1582,10 +1633,10 @@ export function registerSessionRoutes(
   app.post("/api/sessions/:id/stop", (req, res) => {
     try {
       if (sessions.ownerOf(req.params.id) === "structured") {
-        res.json(structured.stop(req.params.id));
+        res.json(sessionResponseDTO(structured.stop(req.params.id)));
         return;
       }
-      res.json(processes.stop(req.params.id));
+      res.json(sessionResponseDTO(processes.stop(req.params.id)));
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法停止会话。") });
     }
@@ -1608,8 +1659,9 @@ export function registerClaudeHistoryRoutes(
   storage: WandStorage,
   _sessionRegistry: SessionRegistry,
 ): void {
-  // Kept as an empty compatibility endpoint for older native clients. Wand no
-  // longer imports provider-native history into its session list.
+  // Intentional compatibility stub: older native clients still GET these
+  // endpoints. Wand no longer imports provider-native history into its session
+  // list, so the supported response remains an empty array.
   app.get("/api/claude-history", (_req, res) => {
     res.json([]);
   });
@@ -1796,6 +1848,12 @@ export function registerClaudeHistoryRoutes(
       remove: (ids: string[]) => processes.deleteQoderHistoryFiles(ids),
     },
   ];
+
+  for (const provider of ["grok", "pi"] as const) {
+    app.get(`/api/${provider}-history`, (_req, res) => {
+      res.json([]);
+    });
+  }
 
   for (const config of externalHistoryProviders) {
     app.get(`/api/${config.provider}-history`, (_req, res) => {

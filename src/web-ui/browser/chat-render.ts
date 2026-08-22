@@ -44,6 +44,8 @@ export { getToolDisplayName, getToolIcon } from "./tool-identity";
         // （用来让 applyAutoFoldBar 重新决定是否折叠）。
         try { (window as any).__scheduleChatRender = function() { scheduleChatRender(true); }; } catch (e) {}
         var selectedForDelay = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        // PTY chat is a text scrape; structured chat has tool/thinking blocks.
+        // Do not synthesize fake tool_use cards on the PTY path.
         var isActiveStream = selectedForDelay && selectedForDelay.status === "running"
           && selectedForDelay.sessionKind !== "structured";
         // 活跃流时拉到 LIVE 减少高频重渲；空闲时用 IDLE 快速响应。

@@ -576,7 +576,7 @@ export interface SessionSnapshot {
     resolution: EscalationResolution;
     reason: string;
   } | null;
-  /** Claude Code 会话 ID，用于 --resume 恢复会话 */
+  /** Native resume id for every provider (Claude UUID, Codex thread, OpenCode ses_*, …). Wire alias: providerSessionId. */
   claudeSessionId: string | null;
   /** Structured conversation messages derived from PTY output. */
   messages?: ConversationTurn[];

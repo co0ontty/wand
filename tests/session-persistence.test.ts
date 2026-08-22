@@ -135,3 +135,38 @@ test("streaming checkpoints are bounded, trailing, and authoritative on dispose"
   assert.equal(durable?.output, "chunk-500");
   assert.equal(durable?.messages?.[0]?.content.length, 10_000);
 });
+
+test("structured restore marks an interrupted in-flight turn and keeps the queue", (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-structured-restore-"));
+  const dbPath = path.join(root, "wand.db");
+  const storage = new WandStorage(dbPath);
+  const first = new StructuredSessionManager(storage, { ...defaultConfig(), defaultCwd: root });
+  const session = first.createSession({ cwd: root, mode: "assist", provider: "claude" });
+  storage.saveSession({
+    ...session,
+    status: "running",
+    queuedMessages: ["continue"],
+    queuedMessageSkills: [["review"]],
+    structuredState: {
+      provider: "claude",
+      runner: "claude-cli-print",
+      lastError: null,
+      inFlight: true,
+      activeRequestId: "req-1",
+    },
+  });
+  first.dispose();
+
+  const restored = new StructuredSessionManager(storage, { ...defaultConfig(), defaultCwd: root });
+  t.after(() => {
+    restored.dispose();
+    storage.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+  const snapshot = restored.get(session.id);
+  assert.equal(snapshot?.status, "idle");
+  assert.equal(snapshot?.structuredState?.inFlight, false);
+  assert.equal(snapshot?.structuredState?.lastError, "服务重启，上一轮已中断。");
+  assert.deepEqual(snapshot?.queuedMessages, ["continue"]);
+  assert.deepEqual(snapshot?.queuedMessageSkills, [["review"]]);
+});

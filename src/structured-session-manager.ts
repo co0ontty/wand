@@ -350,7 +350,9 @@ export class StructuredSessionManager {
           provider,
           runner,
           model: snapshot.structuredState?.model ?? snapshot.selectedModel ?? undefined,
-          lastError: snapshot.structuredState?.lastError ?? null,
+          lastError: snapshot.status === "running"
+            ? "服务重启，上一轮已中断。"
+            : snapshot.structuredState?.lastError ?? null,
           inFlight: false,
           activeRequestId: null,
         },

@@ -191,6 +191,7 @@ async function main(): Promise<void> {
     case "session:read":
     case "session:send":
     case "session:wait":
+    case "inbox:list":
     case "mission:list":
     case "mission:create":
     case "mission:diff":
@@ -240,6 +241,7 @@ Commands:
 
 Agent runtime:
   wand session:list         List sessions as JSON
+  wand inbox:list           List mission inbox items as JSON
   wand session:read <id>    Read a complete session snapshot
   wand session:send <id> <text>
   wand session:wait <id> [--timeout 900]
@@ -277,6 +279,7 @@ async function runAgentCliCommand(command: string, args: string[], configPath: s
   };
 
   switch (command) {
+    case "inbox:list": return output(await api.get("/api/inbox"));
     case "session:list": return output(await api.get("/api/sessions"));
     case "session:read": {
       const id = required(args[1], "wand session:read <id>");

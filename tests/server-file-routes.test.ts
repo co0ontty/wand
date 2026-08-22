@@ -107,6 +107,14 @@ test("extracted file routes preserve directory, preview, write, range, recent, a
     const searchBody = await search.json() as { results: Array<{ name: string }> };
     assert.ok(searchBody.results.some((item) => item.name === "server-file-routes.ts"));
 
+    const outsideCwd = await fetch(`${baseUrl}/api/file-search?q=sample&cwd=${encodeURIComponent(root)}&depth=0`);
+    assert.equal(outsideCwd.status, 200);
+    const outsideBody = await outsideCwd.json() as { results: Array<{ name: string }> };
+    assert.ok(outsideBody.results.some((item) => item.name === "sample.txt"));
+
+    const blocked = await fetch(`${baseUrl}/api/file-search?q=passwd&cwd=${encodeURIComponent("/etc")}`);
+    assert.equal(blocked.status, 403);
+
     // ── File management routes (create / dir-create / rename / delete) ──
     const newPath = path.join(root, "new-file.txt");
     const createRes = await fetch(`${baseUrl}/api/file-create`, {

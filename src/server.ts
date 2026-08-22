@@ -65,11 +65,11 @@ import { isServiceInstalled } from "./tui/commands.js";
 import {
   checkManagedServiceUpdatePreflight,
 } from "./update-helper.js";
+import { toSessionDetailDTO } from "./session-transport.js";
 import { registerUploadRoutes } from "./upload-routes.js";
 import { optimizePrompt, PromptOptimizeError } from "./prompt-optimizer.js";
 import { resolveDatabasePath, WandStorage, type AuthPrincipal, type AuthScope } from "./storage.js";
 import {
-  DEFAULT_BROWSER_EXTENSION_BASE_URL,
   buildPasswordSecurityReport,
   generatePassword,
   generateTotpCode,
@@ -329,7 +329,11 @@ function getEffectivePassword(storage: WandStorage, config: WandConfig): string 
   return storage.getPassword() ?? config.password;
 }
 
-function authenticateBearerAppToken(req: Request, storage: WandStorage, config: WandConfig): AuthPrincipal | null {
+function authenticateBearerAppToken(
+  req: { headers: { authorization?: string | string[] } },
+  storage: WandStorage,
+  config: WandConfig,
+): AuthPrincipal | null {
   const header = firstHeaderValue(req.headers.authorization);
   if (!header?.startsWith("Bearer ")) return null;
   const token = header.slice("Bearer ".length).trim();
@@ -343,10 +347,25 @@ function authenticateBearerAppToken(req: Request, storage: WandStorage, config: 
   }
 }
 
-function appTokenLoginPayload(storage: WandStorage, config: WandConfig): { appToken: string; serverUrl: string } {
+function resolveRequestServerUrl(req: Request, config: WandConfig, useHttps: boolean): string {
+  const requestProtocol = getPublicRequestProtocol(req, useHttps ? "https" : "http");
+  const requestHost = getPublicRequestHost(req, config);
+  const originHeader = firstHeaderValue(req.headers.origin);
+  const browserOrigin = isBrowserExtensionOrigin(originHeader)
+    ? undefined
+    : normalizePublicOrigin(originHeader);
+  return resolveAppConnectOrigin(browserOrigin ?? `${requestProtocol}://${requestHost}`, config);
+}
+
+function appTokenLoginPayload(
+  req: Request,
+  storage: WandStorage,
+  config: WandConfig,
+  useHttps: boolean,
+): { appToken: string; serverUrl: string } {
   return {
     appToken: generateAppToken(getEffectivePassword(storage, config), config.appSecret ?? ""),
-    serverUrl: DEFAULT_BROWSER_EXTENSION_BASE_URL,
+    serverUrl: resolveRequestServerUrl(req, config, useHttps),
   };
 }
 
@@ -693,7 +712,7 @@ export async function startServer(
     res.type("html").send(renderApp(configPath));
   });
 
-  app.get("/api/structured-chat-avatar/:role", asyncRoute(async (req, res) => {
+  app.get("/api/structured-chat-avatar/:role", requireAuth, asyncRoute(async (req, res) => {
     const role = req.params.role === "user" || req.params.role === "assistant"
       ? req.params.role
       : null;
@@ -799,7 +818,7 @@ export async function startServer(
     res.json({
       ok: true,
       principal,
-      ...(client === "browser-extension" ? appTokenLoginPayload(storage, config) : {}),
+      ...(client === "browser-extension" ? appTokenLoginPayload(req, storage, config, useHttps) : {}),
     });
   });
 
@@ -844,17 +863,28 @@ export async function startServer(
     "/api/config",
     "/api/models",
     "/api/sessions",
+    "/api/session-list",
     "/api/session-directories",
     "/api/structured-sessions",
     "/api/commands",
     "/api/claude-skills",
     "/api/claude-history",
     "/api/codex-history",
+    "/api/opencode-history",
+    "/api/qoder-history",
+    "/api/grok-history",
+    "/api/pi-history",
     "/api/claude-sessions",
     "/api/codex-sessions",
+    "/api/opencode-sessions",
+    "/api/qoder-sessions",
+    "/api/grok-sessions",
+    "/api/pi-sessions",
     "/api/optimize-prompt",
     "/api/inbox",
     "/api/missions",
+    "/api/workspaces",
+    "/api/workspace-tasks",
   ], requireSessions);
   app.use([
     "/api/directory",
@@ -864,6 +894,13 @@ export async function startServer(
     "/api/file-preview",
     "/api/file-raw",
     "/api/file-write",
+    "/api/file-create",
+    "/api/dir-create",
+    "/api/file-rename",
+    "/api/file-delete",
+    "/api/quick-paths",
+    "/api/validate-path",
+    "/api/file-search",
   ], requireFiles);
   app.use("/api/browser-extension", requirePasswordVault);
 
@@ -925,10 +962,10 @@ export async function startServer(
     }
   });
 
-  app.get("/api/browser-extension/status", (_req, res) => {
+  app.get("/api/browser-extension/status", (req, res) => {
     res.json({
       ok: true,
-      serverUrl: DEFAULT_BROWSER_EXTENSION_BASE_URL,
+      serverUrl: resolveRequestServerUrl(req, config, useHttps),
       features: {
         loginAutofill: true,
         saveLogins: true,
@@ -1216,7 +1253,7 @@ export async function startServer(
             }
           ));
       recordRecentPath(storage, snapshot.cwd);
-      res.status(201).json(snapshot);
+      res.status(201).json(toSessionDetailDTO(snapshot));
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法启动命令。请检查命令是否安装。") });
     }
@@ -1272,7 +1309,13 @@ export async function startServer(
       concurrencyLimit: 10,
     },
   });
-  const wsManager = new WsBroadcastManager(wss, () => config.cardDefaults ?? {}, useHttps, authService);
+  const wsManager = new WsBroadcastManager(
+    wss,
+    () => config.cardDefaults ?? {},
+    useHttps,
+    authService,
+    (req) => authenticateBearerAppToken(req, storage, config) !== null,
+  );
   wsManager.setup({
     getSession: (id) => sessionRegistry.get(id),
     getTerminalState: (id) => processes.getTerminalState(id),

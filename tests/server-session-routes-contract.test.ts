@@ -209,3 +209,80 @@ test("session HTTP interface preserves create, list, update, detail, and delete 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("session list and detail DTOs keep workspace binding and queue skills", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-session-dto-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const config = { ...defaultConfig(), defaultCwd: root, startupCommands: [] };
+  const processes = new ProcessManager(config, storage, root);
+  const structured = new StructuredSessionManager(storage, config);
+  const sessions = new SessionRegistry(processes, structured, storage);
+  const app = express();
+  app.use(express.json());
+  registerSessionRoutes(app, processes, structured, storage, config.defaultMode, config, sessions);
+  app.use(jsonErrorHandler);
+  const server = createServer(app);
+
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+
+  try {
+    const address = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+    const createdResponse = await fetch(`${baseUrl}/api/structured-sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        cwd: root,
+        provider: "opencode",
+        mode: "assist",
+        workspaceId: "ws-dto",
+        workspaceTaskId: "task-dto",
+      }),
+    });
+    assert.equal(createdResponse.status, 201);
+    const created = await createdResponse.json() as {
+      id: string;
+      workspaceId?: string;
+      workspaceTaskId?: string;
+    };
+    assert.equal(created.workspaceId, "ws-dto");
+    assert.equal(created.workspaceTaskId, "task-dto");
+
+    const listed = await (await fetch(`${baseUrl}/api/sessions`)).json() as Array<{
+      id: string;
+      workspaceId?: string;
+      workspaceTaskId?: string;
+    }>;
+    const item = listed.find((session) => session.id === created.id);
+    assert.ok(item);
+    assert.equal(item.workspaceId, "ws-dto");
+    assert.equal(item.workspaceTaskId, "task-dto");
+
+    const page = await (await fetch(`${baseUrl}/api/session-list?limit=10`)).json() as {
+      entries: Array<{ session: { id: string; workspaceId?: string; workspaceTaskId?: string } }>;
+    };
+    const pageItem = page.entries.find((entry) => entry.session.id === created.id);
+    assert.ok(pageItem);
+    assert.equal(pageItem.session.workspaceId, "ws-dto");
+    assert.equal(pageItem.session.workspaceTaskId, "task-dto");
+
+    const detail = await (await fetch(`${baseUrl}/api/sessions/${created.id}`)).json() as {
+      workspaceId?: string;
+      workspaceTaskId?: string;
+    };
+    assert.equal(detail.workspaceId, "ws-dto");
+    assert.equal(detail.workspaceTaskId, "task-dto");
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    processes.dispose();
+    structured.dispose();
+    storage.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

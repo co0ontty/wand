@@ -3,6 +3,7 @@
  * Handles debounced output events, backpressure control, and client subscriptions.
  */
 
+import type { IncomingMessage } from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
 import type { CardExpandDefaults, ConversationTurn, SessionSnapshot, ProcessEvent } from "./types.js";
 import { readSessionCookie, type AuthService } from "./auth.js";
@@ -97,17 +98,20 @@ export class WsBroadcastManager {
   private getCardDefaults: () => CardExpandDefaults;
   private useHttps: boolean;
   private authService?: Pick<AuthService, "validateSession">;
+  private authenticateRequest?: (req: IncomingMessage) => boolean;
 
   constructor(
     wss: WebSocketServer,
     getCardDefaults?: () => CardExpandDefaults,
     useHttps = false,
     authService?: Pick<AuthService, "validateSession">,
+    authenticateRequest?: (req: IncomingMessage) => boolean,
   ) {
     this.wss = wss;
     this.getCardDefaults = getCardDefaults ?? (() => ({}));
     this.useHttps = useHttps;
     this.authService = authService;
+    this.authenticateRequest = authenticateRequest;
   }
 
   /** Immediately disconnect all authenticated clients after global revocation. */
@@ -144,8 +148,8 @@ export class WsBroadcastManager {
         return;
       }
       const sessionToken = readSessionCookie(req, this.useHttps);
-
-      if (!sessionToken || !this.authService?.validateSession(sessionToken)) {
+      const cookieOk = !!sessionToken && !!this.authService?.validateSession(sessionToken);
+      if (!cookieOk && !this.authenticateRequest?.(req)) {
         ws.close(1008, "Unauthorized");
         return;
       }

@@ -6,6 +6,8 @@ export const SESSION_TRANSPORT_OUTPUT_LIMIT = 200_000;
 export type SessionBaseDTO = Omit<SessionSnapshot, "output" | "messages" | "title" | "ptyOutputSeq" | "ptyLaunchMarkerToken"> & {
   /** Canonical server-resolved title. Clients must not invent their own fallback. */
   title: string;
+  /** Alias of claudeSessionId; that field stores every provider's native resume id. */
+  providerSessionId?: string | null;
 };
 
 export interface SessionListItemDTO extends SessionBaseDTO {
@@ -72,7 +74,9 @@ function sessionBase(snapshot: SessionSnapshot): SessionBaseDTO {
     pendingEscalation: snapshot.pendingEscalation,
     lastEscalationResult: snapshot.lastEscalationResult,
     claudeSessionId: snapshot.claudeSessionId,
+    providerSessionId: snapshot.claudeSessionId,
     queuedMessages: snapshot.queuedMessages,
+    queuedMessageSkills: snapshot.queuedMessageSkills,
     structuredState: snapshot.structuredState,
     resumedFromSessionId: snapshot.resumedFromSessionId,
     autoRecovered: snapshot.autoRecovered,
@@ -81,7 +85,10 @@ function sessionBase(snapshot: SessionSnapshot): SessionBaseDTO {
     summary: snapshot.summary,
     title: resolveSessionDisplayTitle(snapshot),
     description: snapshot.description,
+    titleGenerating: snapshot.titleGenerating,
     currentTaskTitle: snapshot.currentTaskTitle,
+    workspaceId: snapshot.workspaceId,
+    workspaceTaskId: snapshot.workspaceTaskId,
     selectedModel: snapshot.selectedModel,
     thinkingEffort: snapshot.thinkingEffort,
     ptyCols: snapshot.ptyCols,

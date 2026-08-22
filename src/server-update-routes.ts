@@ -73,7 +73,7 @@ export function registerPublicUpdateRoutes(app: Express, deps: PublicUpdateRoute
   }));
 
   app.get("/android/download", asyncRoute(async (req, res) => {
-    const channel = req.query.channel === "stable" ? "stable" : "beta";
+    const channel = req.query.channel === "beta" ? "beta" : "stable";
     const asset = await deps.resolveAndroidDownload(channel);
     if (!asset) {
       res.status(404).json({ error: "当前没有可下载的 APK 文件。" });

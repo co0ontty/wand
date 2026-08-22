@@ -17,6 +17,8 @@ import type {
 import {
   DEFAULT_PASSWORD_VAULT_ID,
   DEFAULT_PASSWORD_VAULT_NAME,
+  decryptVaultSecret,
+  encryptVaultSecret,
   itemMatchesFilter,
   normalizePasswordItemInput,
   normalizeVaultName,
@@ -1239,6 +1241,16 @@ export class WandStorage {
     this.setConfigValue("appSecret", value);
   }
 
+  private encryptStoredPassword(password: string | undefined): string | null {
+    if (!password) return null;
+    const secret = this.getAppSecret();
+    return secret ? encryptVaultSecret(password, secret) : password;
+  }
+
+  private decryptPasswordItem(item: PasswordVaultItem): PasswordVaultItem {
+    return { ...item, password: decryptVaultSecret(item.password, this.getAppSecret()) };
+  }
+
   // ============ Browser Extension Password Vault Methods ============
 
   ensureDefaultPasswordVault(): void {
@@ -1291,7 +1303,8 @@ export class WandStorage {
     const limit = typeof filter.limit === "number" && Number.isFinite(filter.limit)
       ? Math.max(1, Math.min(200, Math.floor(filter.limit)))
       : 100;
-    return rows.map(mapPasswordItemRow).filter((item) => itemMatchesFilter(item, filter)).slice(0, limit);
+    return rows.map((row) => this.decryptPasswordItem(mapPasswordItemRow(row)))
+      .filter((item) => itemMatchesFilter(item, filter)).slice(0, limit);
   }
 
   getPasswordItem(id: string): PasswordVaultItem | null {
@@ -1303,7 +1316,7 @@ export class WandStorage {
          WHERE id = ? AND archived = 0`
       )
       .get(id) as PasswordVaultItemRow | undefined;
-    return row ? mapPasswordItemRow(row) : null;
+    return row ? this.decryptPasswordItem(mapPasswordItemRow(row)) : null;
   }
 
   createPasswordItem(input: PasswordVaultItemInput): PasswordVaultItem {
@@ -1328,7 +1341,7 @@ export class WandStorage {
         normalized.type,
         normalized.title,
         normalized.username ?? null,
-        normalized.password ?? null,
+        this.encryptStoredPassword(normalized.password),
         JSON.stringify(normalized.urls),
         normalized.notes ?? null,
         JSON.stringify(normalized.fields),
@@ -1375,7 +1388,7 @@ export class WandStorage {
         normalized.type,
         normalized.title,
         normalized.username ?? null,
-        normalized.password ?? null,
+        this.encryptStoredPassword(normalized.password),
         JSON.stringify(normalized.urls),
         normalized.notes ?? null,
         JSON.stringify(normalized.fields),
@@ -1811,6 +1824,8 @@ const SCHEMA_MIGRATIONS: ReadonlyArray<[column: string, sql: string]> = [
   ["queued_message_skills", "ALTER TABLE command_sessions ADD COLUMN queued_message_skills TEXT"],
   ["structured_state", "ALTER TABLE command_sessions ADD COLUMN structured_state TEXT"],
   ["resumed_from_session_id", "ALTER TABLE command_sessions ADD COLUMN resumed_from_session_id TEXT"],
+  // Legacy column: never written by current persist helpers. Kept because
+  // schema migrations are additive-only and must not DROP columns.
   ["resumed_to_session_id", "ALTER TABLE command_sessions ADD COLUMN resumed_to_session_id TEXT"],
   ["auto_recovered", "ALTER TABLE command_sessions ADD COLUMN auto_recovered INTEGER NOT NULL DEFAULT 0"],
   ["worktree_enabled", "ALTER TABLE command_sessions ADD COLUMN worktree_enabled INTEGER NOT NULL DEFAULT 0"],

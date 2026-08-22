@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { buildMissionDiff } from "./mission-diff.js";
 import type {
+  AgentActivityItem,
   AgentActivityState,
   CreateMissionInput,
   CreateReviewCommentInput,
@@ -171,7 +172,27 @@ export class Missions {
       error: state === "failed" ? snapshot.structuredState?.lastError ?? "任务执行失败" : null,
       updatedAt,
     });
+    this.storage.upsertAgentActivity({
+      sessionId: event.sessionId,
+      missionId: attempt.missionId,
+      attemptId: attempt.id,
+      state,
+      title: snapshot.title?.trim() || snapshot.summary?.trim() || firstPromptLine(this.storage.getMission(attempt.missionId)?.prompt ?? ""),
+      summary: sessionSummary(snapshot),
+      provider: snapshot.provider ?? attempt.provider,
+      cwd: snapshot.cwd,
+      updatedAt,
+      readAt: null,
+    });
     this.refreshMissionStatus(attempt.missionId);
+  }
+
+  inbox(): AgentActivityItem[] {
+    return this.storage.listAgentActivity();
+  }
+
+  markInboxRead(sessionId?: string): void {
+    this.storage.markAgentActivityRead(sessionId);
   }
 
   diff(missionId: string, attemptId: string): MissionDiff {

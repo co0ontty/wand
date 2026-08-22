@@ -310,6 +310,41 @@ export interface PasswordGeneratorOptions {
   symbols?: boolean;
 }
 
+const VAULT_CIPHER_PREFIX = "enc:v1:";
+
+function deriveVaultKey(secret: string): Buffer {
+  return crypto.createHash("sha256").update(secret, "utf8").digest();
+}
+
+/** AES-256-GCM at-rest wrapper. Legacy plaintext values pass through on read. */
+export function encryptVaultSecret(plaintext: string, secret: string): string {
+  if (!plaintext || !secret) return plaintext;
+  if (plaintext.startsWith(VAULT_CIPHER_PREFIX)) return plaintext;
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", deriveVaultKey(secret), iv);
+  const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  return `${VAULT_CIPHER_PREFIX}${iv.toString("base64url")}.${cipher.getAuthTag().toString("base64url")}.${encrypted.toString("base64url")}`;
+}
+
+export function decryptVaultSecret(value: string | undefined, secret: string | null): string | undefined {
+  if (!value) return undefined;
+  if (!value.startsWith(VAULT_CIPHER_PREFIX)) return value;
+  if (!secret) return undefined;
+  try {
+    const [ivB64, tagB64, dataB64] = value.slice(VAULT_CIPHER_PREFIX.length).split(".");
+    if (!ivB64 || !tagB64 || !dataB64) return undefined;
+    const decipher = crypto.createDecipheriv("aes-256-gcm", deriveVaultKey(secret), Buffer.from(ivB64, "base64url"));
+    decipher.setAuthTag(Buffer.from(tagB64, "base64url"));
+    return Buffer.concat([decipher.update(Buffer.from(dataB64, "base64url")), decipher.final()]).toString("utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+export function isEncryptedVaultSecret(value: string | undefined): boolean {
+  return typeof value === "string" && value.startsWith(VAULT_CIPHER_PREFIX);
+}
+
 export function generatePassword(options: PasswordGeneratorOptions = {}): string {
   const length = clampInteger(options.length ?? 20, 8, 80);
   const lower = "abcdefghijkmnopqrstuvwxyz";

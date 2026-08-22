@@ -7,10 +7,14 @@ import { defaultConfig } from "../src/config.js";
 import {
   DEFAULT_BROWSER_EXTENSION_BASE_URL,
   buildPasswordSecurityReport,
+  decryptVaultSecret,
+  encryptVaultSecret,
   generatePassword,
   generateTotpCode,
+  isEncryptedVaultSecret,
   scorePasswordStrength,
 } from "../src/password-manager.js";
+import { DatabaseSync } from "node:sqlite";
 import { startServer } from "../src/server.js";
 import { WandStorage } from "../src/storage.js";
 import { generatePassword as generateExtensionPassword } from "../browser-extension/shared/password-tools.mjs";
@@ -33,6 +37,38 @@ test("password generator, strength scoring, and TOTP match expected behavior", (
   assert.equal(scorePasswordStrength("password"), 0);
   assert.ok(scorePasswordStrength(password) >= 70);
   assert.equal(generateTotpCode("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", 59_000, 8, 30), "94287082");
+});
+
+test("vault secrets encrypt at rest and still decrypt for API reads", () => {
+  const secret = "0123456789abcdef0123456789abcdef";
+  const cipher = encryptVaultSecret("CorrectHorseBatteryStaple", secret);
+  assert.equal(isEncryptedVaultSecret(cipher), true);
+  assert.equal(cipher.includes("CorrectHorseBatteryStaple"), false);
+  assert.equal(decryptVaultSecret(cipher, secret), "CorrectHorseBatteryStaple");
+  assert.equal(decryptVaultSecret("legacy-plain", secret), "legacy-plain");
+
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wand-vault-enc-"));
+  const dbPath = path.join(dir, "wand.db");
+  const storage = new WandStorage(dbPath);
+  try {
+    storage.setAppSecret(secret);
+    const item = storage.createPasswordItem({
+      type: "login",
+      title: "Encrypted",
+      username: "ada",
+      password: "hunter2-secret",
+      urls: ["https://example.com"],
+    });
+    assert.equal(item.password, "hunter2-secret");
+    const db = new DatabaseSync(dbPath);
+    const row = db.prepare("SELECT password FROM password_items WHERE id = ?").get(item.id) as { password: string };
+    db.close();
+    assert.equal(row.password.includes("hunter2-secret"), false);
+    assert.equal(isEncryptedVaultSecret(row.password), true);
+  } finally {
+    storage.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("browser extension shared tools align with server defaults", () => {
@@ -172,7 +208,7 @@ test("server issues browser extension token and protects password vault APIs", a
     const loginBody = await login.json() as { appToken?: string; serverUrl?: string };
     assert.equal(login.status, 200);
     assert.ok(loginBody.appToken);
-    assert.equal(loginBody.serverUrl, DEFAULT_BROWSER_EXTENSION_BASE_URL);
+    assert.equal(loginBody.serverUrl, baseUrl);
 
     const authHeaders = {
       "Content-Type": "application/json",

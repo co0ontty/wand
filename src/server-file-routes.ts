@@ -506,15 +506,20 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
 
   app.get("/api/file-search", asyncRoute(async (req, res) => {
     const query = typeof req.query.q === "string" ? req.query.q.trim().slice(0, 256) : "";
-    const cwd = typeof req.query.cwd === "string" ? req.query.cwd : process.cwd();
+    const cwd = typeof req.query.cwd === "string" ? req.query.cwd : defaultCwd;
     const maxDepth = parseBoundedInteger(req.query.depth, 5, 0, 8);
     const maxResults = parseBoundedInteger(req.query.limit, 50, 1, 200);
     const ignoredDirectories = new Set([".git", "node_modules", ".next", "dist", "build", "coverage", ".wand-uploads"]);
     const maxVisitedEntries = 20_000;
-    const allowedBase = process.cwd();
-    const resolvedCwd = path.resolve(allowedBase, cwd);
-    if (!isPathWithinBase(resolvedCwd, allowedBase)) {
-      res.status(403).json({ error: "访问被拒绝：路径必须在项目目录内。" });
+    let resolvedCwd: string;
+    try {
+      resolvedCwd = normalizeFolderPath(cwd);
+    } catch {
+      res.status(400).json({ error: "无效的搜索目录。" });
+      return;
+    }
+    if (isBlockedFolderPath(resolvedCwd)) {
+      res.status(403).json({ error: "访问被拒绝：不能搜索系统目录。" });
       return;
     }
     if (!query) {
