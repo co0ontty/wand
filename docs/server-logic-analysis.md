@@ -439,7 +439,7 @@ Review：评论 → `sendReview` 拼成一段反馈 prompt 再 `sendMessage`。D
 **Web 包**
 
 - 通道在 SQLite `updateChannel`：`stable` → `npm i -g @co0ontty/wand@latest`；`beta` → `@co0ontty/wand@beta`
-- 现行代码用 `npm view` 比版本，**不是** `CLAUDE.md` 写的 `build-info.json` SHA 对比。`build-info.json` 只给 UI 展示
+- 现行代码用 `npm view` 比版本，**不是**旧文档写的 `build-info.json` SHA 对比。`build-info.json` 只给 UI 展示
 - 手动 `/api/update` 走脱离进程的 update-helper
 - `autoUpdateWeb` 则进程内装，再 `repairServiceUnitAfterUpdate` + `computeRelaunch`
 - systemd / launchd 托管 → 只退出，交给 `Restart=always`；否则 spawn 全局 `dist/cli.js`
@@ -523,7 +523,7 @@ Review：评论 → `sendReview` 拼成一段反馈 prompt 再 `sendMessage`。D
 
 1. `session-lifecycle.ts` 已不存在；没有 `thinking` / `waiting-input` 状态机
 2. Inbox / `agent_activity` / `wand inbox:list` 未落地
-3. 密码库未加密（`CLAUDE.md` 写成 encrypted）
+3. 密码库曾为明文（旧 `CLAUDE.md` 写成 encrypted；P0 已修复为 AES-256-GCM）
 4. Beta 自更新现在是 `npm view @co0ontty/wand@beta`，不是 GitHub `build-info.json` SHA
 5. Provider history GET 恒为空
 6. Structured 的 escalation API 是死面
@@ -598,7 +598,7 @@ P2 里 **Inbox（#10）优先于其它半成品**：表已经建了，前端也�
 | # | 问题 | 建议 |
 | --- | --- | --- |
 | 15 | `claudeSessionId` 被所有 provider 复用 | 新加 `providerSessionId` 别名并双写一段时间，或至少在类型注释里写清 |
-| 16 | `CLAUDE.md` / `AGENT.md` 过时 | 删掉不存在的 `session-lifecycle.ts`、`inbox:list`、beta SHA 对比、encrypted vault 表述；改成指向本文 |
+| 16 | 旧 `CLAUDE.md` / `agent.md` 过时 | 已完成：`CLAUDE.md` 删除，指南并入 `AGENTS.md`；过时表述清掉并指向本文 |
 | 17 | `resumed_to_session_id` 列在、写入路径不在 | 确认无读取后再从文档拿掉；不要为它写新逻辑 |
 | 18 | 公开头像 `/api/structured-chat-avatar/:role` 无鉴权 | 风险低（本地图片）。若 persona 可能指向敏感路径，再收紧到已登录 |
 

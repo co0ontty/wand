@@ -386,6 +386,6 @@ Web 文件面板 / 预览 / 编辑器：
 7. 原生能 REST 不能 WS：旧客户端没 cookie；新服务端已接受 Bearer，旧包仍要先 login。
 8. 原生点「更新服务端」403：connected-app 不是 admin。App 自己的 APK/DMG 更新走另一条公开/会话接口。
 9. macOS 标题不闪、工作空间绑不上聊天顶栏：原生 `SessionSnapshot` 还没解析 `title` / `titleGenerating` / `workspaceId`。
-10. `CLAUDE.md` 仍写 macOS 是纯 WebView 壳，已经过时；以 `MainShellView` 为准。
+10. 旧 `CLAUDE.md`（已删除，指南并入 `AGENTS.md`）曾写 macOS 是纯 WebView 壳；壳结构以 `MainShellView` 为准。
 
 服务端行为以 `docs/server-logic-analysis.md` 为准。两端对不上时，以服务端契约改客户端，不要在 PTY bridge 里伪造 tool block。

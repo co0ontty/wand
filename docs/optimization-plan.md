@@ -121,7 +121,7 @@ iOS/Android/macOS ChatStore UI、`GET /api/config` 的 `canManageSettings`（已
 | Web inbox | 侧栏「任务」仍是 Missions；若要收件箱，单独入口打 `GET /api/inbox` |
 | Android 工作空间 | 补建项目、worktree 总览、合并（对齐 iOS，不要另起交互） |
 | 工作空间「+」开 structured | 现在 `startSessionInCwd` 只 `POST /api/commands`（PTY） |
-| 文档 | `CLAUDE.md` 仍写 macOS 纯 WebView，改成 `MainShellView` |
+| 文档 | 旧 `CLAUDE.md` 写的 macOS 纯 WebView 表述已随文件删除移除；壳结构以 `MainShellView` 为准 |
 
 ---
 
@@ -159,4 +159,4 @@ iOS/Android/macOS ChatStore UI、`GET /api/config` 的 `canManageSettings`（已
 | 2 | `macos/Wand/WandModels.swift`、`android/.../data/WandApi.kt`、`android/.../ui/ChatStore.kt` |
 | 3 | `ios/Wand/SessionListStore.swift`、Android 列表 store、`src/web-ui/browser/session-engine.ts`、`websocket.ts` |
 | 4 | 各端权限 UI、`src/web-ui/react/settings`、`GET /api/config` 的 `canManageSettings` |
-| 5 | `src/web-ui/react/missions`、`android/.../workspaces/`、`CLAUDE.md` |
+| 5 | `src/web-ui/react/missions`、`android/.../workspaces/`、`AGENTS.md` |
