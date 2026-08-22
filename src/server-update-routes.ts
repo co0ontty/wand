@@ -36,6 +36,8 @@ interface ResolvedUpdateAsset {
 export interface PublicUpdateRoutesDependencies {
   resolveLatestApk(channel: "stable" | "beta"): Promise<ResolvedUpdateAsset | null>;
   resolveAndroidDownload(channel: "stable" | "beta"): Promise<DownloadAsset | null>;
+  /** 计算本地分发文件的 SHA-256（hex）；失败返回 null，下载响应不带哈希头。 */
+  computeAssetSha256(asset: DownloadAsset): Promise<string | null>;
   resolveLatestDmg(): Promise<ResolvedUpdateAsset | null>;
   resolveMacosDownload(): Promise<DownloadAsset | null>;
   resolveLatestIpa(): Promise<ResolvedUpdateAsset | null>;
@@ -81,11 +83,17 @@ export function registerPublicUpdateRoutes(app: Express, deps: PublicUpdateRoute
       res.status(404).json({ error: "当前没有可下载的 APK 文件。" });
       return;
     }
+    // 响应头携带实际发送字节的 SHA-256：check 与 download 之间 APK 目录若被
+    // 重新构建/覆盖，客户端以响应头为准，避免用过期 check 快照误报校验失败。
+    const headers: Record<string, string> = {};
+    const sha256 = await deps.computeAssetSha256(asset).catch(() => null);
+    if (sha256) headers["X-APK-Sha256"] = sha256;
     streamFileWithRange(req, res, {
       filePath: asset.filePath,
       size: asset.size,
       contentType: "application/vnd.android.package-archive",
       disposition: `attachment; filename="${encodeURIComponent(asset.fileName)}"`,
+      headers,
       readErrorMessage: "读取 APK 文件失败。",
     });
   }));

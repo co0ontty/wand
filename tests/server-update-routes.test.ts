@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
@@ -29,6 +30,9 @@ test("extracted public update routes preserve metadata, channel, range, and miss
     },
     async resolveAndroidDownload(channel) {
       return channel === "stable" ? { fileName: "wand.apk", filePath: apkPath, size: 11 } : null;
+    },
+    async computeAssetSha256(asset) {
+      return createHash("sha256").update(readFileSync(asset.filePath)).digest("hex");
     },
     async resolveLatestDmg() { return null; },
     async resolveMacosDownload() { return null; },
@@ -87,6 +91,15 @@ test("extracted public update routes preserve metadata, channel, range, and miss
     assert.equal(range.status, 206);
     assert.equal(range.headers.get("content-range"), "bytes 4-10/11");
     assert.equal(await range.text(), "payload");
+
+    // 下载响应必须携带实际发送字节的 SHA-256，客户端以响应头为准做完整性校验。
+    const full = await fetch(`${baseUrl}/android/download?channel=stable`);
+    assert.equal(full.status, 200);
+    const body = await full.arrayBuffer();
+    assert.equal(
+      full.headers.get("x-apk-sha256"),
+      createHash("sha256").update(new Uint8Array(body)).digest("hex"),
+    );
 
     const missingDmg = await fetch(`${baseUrl}/macos/download`);
     assert.equal(missingDmg.status, 404);

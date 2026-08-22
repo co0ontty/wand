@@ -230,6 +230,19 @@ export class DistributionManager {
   private readonly sha256Cache = new Map<string, { key: string; digest: string }>();
 
   /**
+   * 计算本地分发资产的 SHA-256（hex），供下载路由写入 X-APK-Sha256 响应头。
+   * 计算失败返回 null，调用方按无哈希处理。
+   */
+  async computeAssetSha256(asset: LocalDistributionAsset): Promise<string | null> {
+    try {
+      const fileStat = await stat(asset.filePath);
+      return await this.computeLocalFileSha256(asset.filePath, fileStat.size, fileStat.mtimeMs);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * 计算本地分发文件的 SHA-256（hex）。按 path + size + mtime 缓存：更新检查
    * 可能被多个客户端频繁触发，避免每次都全量读盘。
    */
