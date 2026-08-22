@@ -93,7 +93,7 @@ PTY 输入服务端原样写入终端，客户端必须拆成**先文本、后�
 
 生成产物（禁止手改）：
 
-- `src/web-ui/content/scripts.js`（esbuild 打包两层 browser 代码）
+- `src/web-ui/content/scripts.js`（esbuild 打包两层 browser 代码，不入库）
 - `src/web-ui/embedded-assets.ts`（压缩 base64 内嵌，不入库）
 - `src/web-ui/content/vendor/xterm/*`、`content/vendor/qrcode/*`（vendor bundle）
 - `dist/` 全部
