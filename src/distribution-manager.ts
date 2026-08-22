@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { mkdir, readdir, readFile, stat } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 
 import type { WandConfig } from "./types.js";
@@ -88,6 +88,30 @@ function extractArtifactVersion(fileName: string, extension: string): string | n
   return extractSemver(fileName.replace(new RegExp(`\\${extension}$`, "i"), ""));
 }
 
+/**
+ * 本地分发候选的统一排序：版本新者优先（调用方提供比较器），解析不出版本的
+ * 文件排在有版本的后面，同版本按修改时间新者优先。resolveLocalAsset 的挑选
+ * 和 pruneAndroidApkDirectory 的「保最新」判定共用这一份规则。
+ */
+function compareLocalAssetCandidates(
+  a: { name: string; mtimeMs: number },
+  b: { name: string; mtimeMs: number },
+  extension: ".apk" | ".dmg" | ".ipa",
+  compareVersions: (a: string, b: string) => number,
+): number {
+  const aVersion = extractArtifactVersion(a.name, extension);
+  const bVersion = extractArtifactVersion(b.name, extension);
+  if (aVersion && bVersion) {
+    const comparison = compareVersions(bVersion, aVersion);
+    if (comparison !== 0) return comparison;
+  } else if (aVersion) {
+    return -1;
+  } else if (bVersion) {
+    return 1;
+  }
+  return b.mtimeMs - a.mtimeMs;
+}
+
 function isPrerelease(version: string | null): boolean {
   return !!version && version.includes("-");
 }
@@ -150,6 +174,63 @@ export class DistributionManager {
       compareVersions: compareApkInstallOrder,
       acceptVersion: channel === "stable" ? (version) => !isPrerelease(version) : undefined,
     });
+  }
+
+  /**
+   * 清理 Android 分发目录，只保留最新的一个 APK。在设备开始下载 Beta 包时
+   * 触发（见 /android/download 路由）：debug 构建每次都带独立时间戳版本号，
+   * 不清理会按构建次数无限堆积。
+   *
+   * 永不删除两类文件：
+   * - keepFileName：本次正在下发的文件（理论上就是最新的，防御性保留）；
+   * - config.android.currentApkFile 固定指向的文件（stable 通道可能仍在用）。
+   *
+   * 「最新」的判定与 resolveLocalAsset 的选择规则一致（见
+   * compareLocalAssetCandidates）。返回删除的文件名与释放字节数；目录不存在、
+   * 只剩一个包等情形都是空操作。单个文件删除失败不阻断其余清理。
+   */
+  async pruneAndroidApkDirectory(keepFileName?: string): Promise<{ deleted: string[]; freedBytes: number }> {
+    await this.refreshConfig();
+    const { config, configDir } = this.options;
+    if (config.android?.enabled !== true) return { deleted: [], freedBytes: 0 };
+    const directory = resolveConfiguredDir(configDir, config.android.apkDir, "android");
+    let entries;
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch {
+      return { deleted: [], freedBytes: 0 };
+    }
+    const apks = entries.filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".apk"));
+    if (apks.length === 0) return { deleted: [], freedBytes: 0 };
+    const candidates = await Promise.all(apks.map(async (entry) => ({
+      name: entry.name,
+      filePath: path.join(directory, entry.name),
+      fileStat: await stat(path.join(directory, entry.name)),
+    })));
+    const sorted = [...candidates].sort((a, b) =>
+      compareLocalAssetCandidates(
+        { name: a.name, mtimeMs: a.fileStat.mtimeMs },
+        { name: b.name, mtimeMs: b.fileStat.mtimeMs },
+        ".apk",
+        compareApkInstallOrder,
+      ));
+    const keepNames = new Set<string>([sorted[0].name]);
+    const pinned = config.android.currentApkFile?.trim();
+    if (pinned) keepNames.add(path.basename(pinned));
+    if (keepFileName) keepNames.add(keepFileName);
+    const deleted: string[] = [];
+    let freedBytes = 0;
+    for (const candidate of sorted) {
+      if (keepNames.has(candidate.name)) continue;
+      try {
+        await unlink(candidate.filePath);
+        deleted.push(candidate.name);
+        freedBytes += candidate.fileStat.size;
+      } catch {
+        // 清理是尽力而为；删不掉（如正被另一个下载流读取）留到下次触发。
+      }
+    }
+    return { deleted, freedBytes };
   }
 
   async resolveLatestDmg(): Promise<ResolvedDistributionAsset | null> {
@@ -326,19 +407,12 @@ export class DistributionManager {
     }))).filter(({ entry }) => options.acceptVersion?.(extractArtifactVersion(entry.name, options.extension)) ?? true);
     if (candidates.length === 0) return null;
 
-    candidates.sort((a, b) => {
-      const aVersion = extractArtifactVersion(a.entry.name, options.extension);
-      const bVersion = extractArtifactVersion(b.entry.name, options.extension);
-      if (aVersion && bVersion) {
-        const comparison = options.compareVersions(bVersion, aVersion);
-        if (comparison !== 0) return comparison;
-      } else if (aVersion) {
-        return -1;
-      } else if (bVersion) {
-        return 1;
-      }
-      return b.fileStat.mtimeMs - a.fileStat.mtimeMs;
-    });
+    candidates.sort((a, b) => compareLocalAssetCandidates(
+      { name: a.entry.name, mtimeMs: a.fileStat.mtimeMs },
+      { name: b.entry.name, mtimeMs: b.fileStat.mtimeMs },
+      options.extension,
+      options.compareVersions,
+    ));
     const selected = candidates[0];
     return {
       fileName: selected.entry.name,

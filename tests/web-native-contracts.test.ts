@@ -87,7 +87,8 @@ test("web source preserves native events, safe-area variables, and selector hook
 test("Android WebView preserves its half of the web/native protocol", () => {
   includesAll("android/app/src/main/java/com/wand/app/MainActivity.java", [
     "window.handleNativeBack",
-    "window._onNativePermissionResult",
+    // window._onNativePermissionResult 已随通知权限桥接一并移除（1168cfa），
+    // web 侧保留防御性回调并有 resume / timeout 兑底，不再要求原生端实现。
     "wand-android-resume",
     "wand-android-network",
     "wand-ime-state",
@@ -98,7 +99,7 @@ test("Android WebView preserves its half of the web/native protocol", () => {
     "onCreateWindow",
     "onPermissionRequest",
     "setDownloadListener",
-    "openNotificationSettings",
+    // openNotificationSettings 已随通知权限桥接一并移除（1168cfa）。
   ]);
   includesAll("android/app/src/main/java/com/wand/app/ui/screens/PtyTerminalScreen.kt", [
     'appendQueryParameter("embed", "terminal")',

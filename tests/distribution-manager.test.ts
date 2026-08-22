@@ -114,3 +114,75 @@ test("DistributionManager hot-refreshes config and builds settings for both arti
     rmSync(fixture.root, { recursive: true, force: true });
   }
 });
+
+test("pruneAndroidApkDirectory keeps only the newest APK", async () => {
+  const fixture = createFixture();
+  try {
+    const dir = path.join(fixture.root, "android");
+    writeFileSync(path.join(dir, "wand-v4.44.0-debug.08211000.apk"), "old-1");
+    writeFileSync(path.join(dir, "wand-v4.45.0.apk"), "stable");
+    writeFileSync(path.join(dir, "wand-v4.46.0-debug.08221200.apk"), "newest");
+    // 非 APK 文件不受影响。
+    writeFileSync(path.join(dir, "notes.txt"), "keep me");
+
+    const pruned = await fixture.manager.pruneAndroidApkDirectory(
+      "wand-v4.46.0-debug.08221200.apk");
+
+    assert.deepEqual(pruned.deleted.sort(), [
+      "wand-v4.44.0-debug.08211000.apk",
+      "wand-v4.45.0.apk",
+    ]);
+    assert.equal(pruned.freedBytes, "old-1".length + "stable".length);
+    const remaining = (await import("node:fs")).readdirSync(dir).sort();
+    assert.deepEqual(remaining, ["notes.txt", "wand-v4.46.0-debug.08221200.apk"]);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("pruneAndroidApkDirectory never deletes the pinned currentApkFile", async () => {
+  const fixture = createFixture();
+  try {
+    const dir = path.join(fixture.root, "android");
+    writeFileSync(path.join(dir, "wand-v4.44.0.apk"), "pinned-stable");
+    writeFileSync(path.join(dir, "wand-v4.45.0.apk"), "mid");
+    writeFileSync(path.join(dir, "wand-v4.46.0-debug.08221200.apk"), "newest");
+    writeFileSync(fixture.configPath, JSON.stringify({
+      android: { enabled: true, apkDir: "android", currentApkFile: "wand-v4.44.0.apk" },
+      macos: { enabled: false },
+      ios: { enabled: false },
+    }));
+
+    const pruned = await fixture.manager.pruneAndroidApkDirectory(
+      "wand-v4.46.0-debug.08221200.apk");
+
+    assert.deepEqual(pruned.deleted, ["wand-v4.45.0.apk"]);
+    const remaining = (await import("node:fs")).readdirSync(dir).sort();
+    assert.deepEqual(remaining, [
+      "wand-v4.44.0.apk",
+      "wand-v4.46.0-debug.08221200.apk",
+    ]);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("pruneAndroidApkDirectory is a no-op when android distribution is disabled", async () => {
+  const fixture = createFixture();
+  try {
+    const dir = path.join(fixture.root, "android");
+    writeFileSync(path.join(dir, "wand-v4.44.0.apk"), "a");
+    writeFileSync(path.join(dir, "wand-v4.45.0.apk"), "b");
+    writeFileSync(fixture.configPath, JSON.stringify({
+      android: { enabled: false },
+      macos: { enabled: false },
+      ios: { enabled: false },
+    }));
+
+    const pruned = await fixture.manager.pruneAndroidApkDirectory();
+    assert.deepEqual(pruned, { deleted: [], freedBytes: 0 });
+    assert.equal((await import("node:fs")).readdirSync(dir).length, 2);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
