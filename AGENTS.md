@@ -28,7 +28,6 @@ npm install                # 依赖安装
 npm run check              # bundle xterm/browser → 再生成 embedded assets → tsc（server + browser + react 三套 tsconfig）
 npm run build              # 全量：vendor bundle → 编译 → 拷贝/压缩 web 内容进 dist/ → stamp build-info.json → 修权限
 npm test                   # node:test 套件（tests/*.test.ts）
-npm run test:browser       # npm run build + Playwright（tests/*.spec.ts）；test:browser:current 跳过重建
 npm run dev -- -c /tmp/wand-test/config.json   # 隔离开发实例
 ```
 

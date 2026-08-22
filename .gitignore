@@ -10,20 +10,14 @@ output
 debug-*.mjs
 *.png
 !docs/screenshots/*.png
-avatar-seed.txt
 .wand-uploads/
 .wand-worktrees/
-.claude-*-plan.md
 .dev-pack/
 
 # 前端内嵌兜底资产：由 scripts/generate-web-assets.js 在 build/check/dev 时自动生成，
 # 是构建产物而非源码，不入库（避免 2MB base64 逐版本提交撑大 .git 仓库）。
 src/web-ui/embedded-assets.ts
-.claude/worktrees/
 
 # IDE / 工具本地状态，不该入库
 .qoder/
-.zcode/
-
-# 本地 debug APK 分发目录（APK 走 ~/.wand/android/ 或 GitHub Release，不进 git）
-beta/
+.claude/
