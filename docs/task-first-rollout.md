@@ -4,8 +4,8 @@
 > 目标形态、服务端契约、各端进度、已发现问题与排期。深入行为分析仍见
 > `server-logic-analysis.md` / `client-logic-analysis.md` / `optimization-plan.md`（切片 6 为本文件的源头条目）。
 
-**状态（2026-08-23）：服务端 + Web + Android 任务一级容器已完成；iOS / macOS 已接入任务聚合。**
-Android 已移除「会话 / 项目」与「任务 / 项目」双层切换，根页固定为目录组 → 任务 → 会话；实现与验收证据见 §4 Android 与 §6.1。
+**状态（2026-08-23）：服务端 + Web + Android + iOS + macOS 任务一级容器已完成。**
+各端根页统一为目录组 → 任务 → 会话；「会话 / 项目」与「任务 / 项目」双层切换已移除。实现与验收证据见 §4。
 
 ## 1. 目标形态
 
@@ -37,26 +37,27 @@ Android 已移除「会话 / 项目」与「任务 / 项目」双层切换，根
 
 ## 4. 多端同步进度
 
-### iOS（进行中）
+### iOS（✅ 任务一级容器已完成）
 
 | 项 | 状态 |
 | --- | --- |
 | `createWorkspaceTask` 增加 `worktree: Bool?`（缺省不发，显式 false 才发 `worktree:false`） | ✅ |
-| 模型 `WorkspaceTaskSummary` + `TaskDirectoryGroup`（含 `isSynthetic`） | ✅ |
+| 模型 `WorkspaceTaskSummary` + `TaskDirectoryGroup`（含 `isSynthetic`、`totalSessions` / `listedSessionCount`） | ✅ |
 | API `listTaskGroups()`（GET /api/tasks） | ✅ |
-| Store：`taskGroups` published + `loadTaskGroups(force:)`（失败静默降级保留旧数据）+ `createTask(name:directory:worktree:)`（find-or-create 项目 → 建任务 → 刷新聚合） | ✅ |
-| 单测：worktree 参数省略/显式 false、聚合 JSON 解码（合成组、isolated、standalone） | ✅ 全过 |
-| UI：新建任务 Sheet（名称 + 目录建议 + worktree Toggle），替换原 alert（alert 放不下 Toggle） | ✅ |
-| UI：「任务 / 项目」分段视图，任务模式消费 `/api/tasks` 聚合；根分区「项目」改名「任务」；未分组会话折叠区 | ✅ |
-| 顺带修复存量 409 恢复 bug（见问题 #1）；全量 94 测试通过；已推送 `0a470e1` | ✅ |
+| Store：`taskGroups` + `createTask` find-or-create + `clearTaskSessions` + `openTask(preferredSessionId:)` | ✅ |
+| UI：根页固定任务列表，移除「会话 / 任务」与「任务 / 项目」分段 | ✅ |
+| UI：任务行展开会话、行内「＋」建终端、单独删终端、「清空会话(n)」 | ✅ |
+| UI：合成目录也可「＋」建任务；并行任务创建绑定当前 `taskId` | ✅ |
+| 单测：聚合 JSON（含 totalSessions 缺省回退）、worktree 参数、409 恢复 | ✅ |
 
 验证方式：`cd ios && xcodebuild test -project Wand.xcodeproj -scheme Wand -destination 'platform=iOS Simulator,name=Wand Debug'`
 
-### macOS（✅ 已完成）
+### macOS（✅ 任务一级容器已完成）
 
-- 与 iOS 同套改造：API/Store/模型（worktree 开关 + /api/tasks 聚合）+ 任务/项目分段视图 + 新建任务 Sheet（名称/目录/worktree Toggle）
-- 侧栏分区与主按钮改为「任务 / 新任务」；主区空态改引导建任务
-- 新增契约测试 WorkspaceTaskContractTests（对齐 iOS，防两端漂移）
+- 侧栏根页固定任务聚合：移除「会话 / 任务」与「任务 / 项目」分段；主按钮固定「新建任务」
+- 任务行展开会话、行内「＋」建终端、单独删终端、「清空会话(n)」；合成目录可建任务
+- Missions 创建绑定当前任务 `taskId`，并预填任务目录
+- 契约测试覆盖 totalSessions 解码与缺省回退
 
 ### Android（✅ 任务一级容器已完成）
 
