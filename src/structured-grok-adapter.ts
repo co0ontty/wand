@@ -1,12 +1,13 @@
 import { spawn } from "node:child_process";
 
+import { startStructuredCli } from "./structured-exec-pump.js";
+import type { StructuredExecHost } from "./structured-exec-host.js";
 import { thinkingEffortToGrokEffort } from "./structured-provider-common.js";
 import type {
   StructuredRunnerAdapter,
   StructuredRunnerContext,
   StructuredRunnerExecution,
   StructuredRunnerObserver,
-  StructuredRunnerResult,
   StructuredRunnerTurnState,
 } from "./structured-runner.js";
 import type { SessionSnapshot } from "./types.js";
@@ -79,75 +80,44 @@ export function applyGrokEvent(state: GrokTurnState, event: Record<string, unkno
 }
 
 export class GrokRunner implements StructuredRunnerAdapter {
-  constructor(private readonly spawnProcess: typeof spawn = spawn) {}
+  constructor(
+    private readonly spawnProcess: typeof spawn = spawn,
+    private readonly execHost?: StructuredExecHost,
+  ) {}
 
   start(context: StructuredRunnerContext, observer: StructuredRunnerObserver): StructuredRunnerExecution {
     const args = buildGrokArgs(context.session, context.prompt);
-    const spawnedAt = new Date().toISOString();
-    const child = this.spawnProcess("grok", args, {
-      cwd: context.session.cwd,
-      env: context.env,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
     const state: GrokTurnState = {
       blocks: [],
       result: "",
       sessionId: context.session.claudeSessionId,
       model: context.session.selectedModel ?? context.session.structuredState?.model,
     };
-    let lineBuffer = "";
-    let stderr = "";
     let primaryError: string | null = null;
-    let settled = false;
-
-    const finish = (exitCode: number | null, signal: NodeJS.Signals | null, spawnError?: NodeJS.ErrnoException): StructuredRunnerResult => ({
-      state, exitCode, signal, stderr, primaryError, ...(spawnError ? { spawnError } : {}),
-    });
-    const processLine = (line: string): void => {
-      if (!observer.isActive()) return;
-      const trimmed = line.trim();
-      if (!trimmed) return;
-      try {
-        const event = JSON.parse(trimmed) as Record<string, unknown>;
-        observer.onEvent?.(event);
-        primaryError = applyGrokEvent(state, event) ?? primaryError;
-        observer.onUpdate(state);
-      } catch { /* Grok diagnostics belong on stderr; ignore non-JSON stdout defensively. */ }
-    };
-    const completion = new Promise<StructuredRunnerResult>((resolve) => {
-      child.stdout?.on("data", (chunk: Buffer) => {
-        if (!observer.isActive()) return;
-        const text = chunk.toString();
-        observer.onStdout?.(text);
-        lineBuffer += text;
-        const lines = lineBuffer.split("\n");
-        lineBuffer = lines.pop() ?? "";
-        for (const line of lines) processLine(line);
-      });
-      child.stderr?.on("data", (chunk: Buffer) => {
-        if (!observer.isActive()) return;
-        const text = chunk.toString();
-        observer.onStderr?.(text);
-        stderr += text;
-      });
-      child.on("error", (error) => {
-        if (settled) return;
-        settled = true;
-        resolve(finish(null, null, error as NodeJS.ErrnoException));
-      });
-      child.on("close", (exitCode, signal) => {
-        if (settled) return;
-        settled = true;
-        if (lineBuffer.trim()) processLine(lineBuffer);
-        resolve(finish(exitCode, signal));
-      });
-    });
-    return {
+    return startStructuredCli({
+      sessionId: context.session.id,
+      file: "grok",
       args,
-      spawnedAt,
-      pid: child.pid ?? null,
-      completion,
-      interrupt: () => { try { child.kill("SIGTERM"); } catch { /* best effort */ } },
-    };
+      cwd: context.session.cwd,
+      env: context.env,
+      observer,
+      execHost: this.execHost,
+      spawnProcess: this.spawnProcess,
+      createState: () => state,
+      processLine: (line) => {
+        if (!observer.isActive()) return;
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        try {
+          const event = JSON.parse(trimmed) as Record<string, unknown>;
+          observer.onEvent?.(event);
+          primaryError = applyGrokEvent(state, event) ?? primaryError;
+          observer.onUpdate(state);
+        } catch { /* Grok diagnostics belong on stderr; ignore non-JSON stdout defensively. */ }
+      },
+      finalize: (ctx, exitCode, signal, spawnError) => ({
+        state, exitCode, signal, stderr: ctx.stderr, primaryError, ...(spawnError ? { spawnError } : {}),
+      }),
+    });
   }
 }

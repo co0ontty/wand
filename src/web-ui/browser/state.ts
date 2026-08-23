@@ -90,7 +90,6 @@ export var state: AppState = {
   terminalAutoFollow: true,
   // Ignore scroll events caused by our own scroll-to-bottom operation.
   terminalProgrammaticScrollUntil: 0,
-  terminalScrollIdleTimer: null,
   terminalScrollThreshold: 12,
   showTerminalJumpToBottom: false,
   terminalViewportEl: null,

@@ -2,9 +2,10 @@ import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 
+import type { StructuredRunState, StructuredSpawnRequest } from "./structured-exec-host.js";
 import type { TerminalSessionState, TerminalSpawnRequest } from "./terminal-host.js";
 
-export const TERMINAL_DAEMON_PROTOCOL_VERSION = 1;
+export const TERMINAL_DAEMON_PROTOCOL_VERSION = 2;
 
 export interface TerminalDaemonPaths {
   socketPath: string;
@@ -17,7 +18,19 @@ export type TerminalDaemonRequest = {
   id: number;
   token: string;
   protocolVersion: number;
-  method: "hello" | "list" | "createOrAttach" | "write" | "resize" | "kill" | "forget";
+  method:
+    | "hello"
+    | "list"
+    | "createOrAttach"
+    | "write"
+    | "resize"
+    | "kill"
+    | "forget"
+    | "structuredSpawn"
+    | "structuredAttach"
+    | "structuredList"
+    | "structuredKill"
+    | "structuredForget";
   params?: Record<string, unknown>;
 };
 
@@ -35,14 +48,23 @@ export type TerminalDaemonResponse = {
 
 export type TerminalDaemonEvent = {
   kind: "event";
-  event: "data" | "exit";
+  // PTY events use data/exit; structured run events use sdata/sexit and carry
+  // the structured runId in sessionId plus a stream selector.
+  event: "data" | "exit" | "sdata" | "sexit";
   sessionId: string;
   incarnationId: string;
   data?: string;
   seq?: number;
   exitCode?: number;
   signal?: number;
+  stream?: "stdout" | "stderr";
 };
+
+export interface TerminalDaemonStructuredAttachPayload {
+  state: StructuredRunState | null;
+}
+
+export interface TerminalDaemonStructuredSpawnParams extends StructuredSpawnRequest {}
 
 export interface TerminalDaemonCreateParams extends TerminalSpawnRequest {
   afterSeq?: number;

@@ -62,6 +62,7 @@ class FakeDaemon {
   private readonly sockets = new Set<net.Socket>();
   private bufferBySocket = new WeakMap<net.Socket, string>();
   sessions: TerminalSessionState[] = [];
+  runs: unknown[] = [];
 
   constructor(
     private readonly socketPath: string,
@@ -128,6 +129,9 @@ class FakeDaemon {
         break;
       case "list":
         result = this.sessions;
+        break;
+      case "structuredList":
+        result = this.runs;
         break;
       case "createOrAttach": {
         const sessionId = String((request as { params?: { sessionId?: string } }).params?.sessionId ?? "");

@@ -1,9 +1,10 @@
-import { spawn } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
 import { isRunningAsRoot } from "./env-utils.js";
+import { startStructuredCli } from "./structured-exec-pump.js";
+import type { StructuredExecHost } from "./structured-exec-host.js";
 import { buildLanguageDirective, buildManagedAutonomyDirective } from "./language-prompt.js";
 import { thinkingEffortToClaudeCliEffort, thinkingEffortToSdkBudget } from "./structured-provider-common.js";
 import { ClaudeCliProtocolReducer } from "./structured-claude-protocol.js";
@@ -139,7 +140,10 @@ export interface ClaudeCliRunnerOptions {
 
 /** Owns the Claude print-mode process and its stream-json protocol. */
 export class ClaudeCliRunner implements StructuredRunnerAdapter {
-  constructor(private readonly options: ClaudeCliRunnerOptions = {}) {}
+  constructor(
+    private readonly options: ClaudeCliRunnerOptions = {},
+    private readonly execHost?: StructuredExecHost,
+  ) {}
 
   start(context: StructuredRunnerContext, observer: StructuredRunnerObserver): StructuredRunnerExecution {
     const permissionPolicy = derivePermissionPolicy(
@@ -151,91 +155,50 @@ export class ClaudeCliRunner implements StructuredRunnerAdapter {
       permissionPolicy,
       systemPromptParts: buildAppendSystemPromptParts(this.options.language?.(), context.session.mode),
     });
-    const spawnedAt = new Date().toISOString();
-    const child = spawn("claude", args, {
+    const reducer = new ClaudeCliProtocolReducer(context.session);
+    let killedForQuestion = false;
+    let stdoutTail = "";
+    return startStructuredCli({
+      sessionId: context.session.id,
+      file: "claude",
+      args,
       cwd: context.session.cwd,
       env: context.env,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    child.stdin?.end(context.prompt);
-
-    const reducer = new ClaudeCliProtocolReducer(context.session);
-    let lineBuffer = "";
-    let stderr = "";
-    let stdoutTail = "";
-    let settled = false;
-    let killedForQuestion = false;
-    const result = (
-      exitCode: number | null,
-      signal: NodeJS.Signals | null,
-      spawnError?: NodeJS.ErrnoException,
-    ): StructuredRunnerResult => ({
-      state: reducer.state,
-      exitCode,
-      signal,
-      stderr,
-      stdoutTail,
-      primaryError: null,
-      stopReason: killedForQuestion ? "ask-user-question" : undefined,
-      spawnError,
-    });
-    const processLine = (line: string): void => {
-      if (!observer.isActive()) return;
-      const trimmed = line.trim();
-      if (!trimmed) return;
-      let event: unknown;
-      try { event = JSON.parse(trimmed); } catch { return; }
-      if (event && typeof event === "object" && !Array.isArray(event)) {
-        observer.onEvent?.(event as Record<string, unknown>);
-      }
-      if (reducer.apply(event, context.session.mode === "managed")) {
-        observer.onUpdate(reducer.state);
-      }
-      if (reducer.askUserQuestionDetected && !killedForQuestion) {
-        killedForQuestion = true;
-        try { child.kill("SIGTERM"); } catch { /* best effort */ }
-      }
-    };
-
-    const completion = new Promise<StructuredRunnerResult>((resolve) => {
-      child.stdout?.on("data", (chunk: Buffer) => {
+      stdinData: context.prompt,
+      observer,
+      execHost: this.execHost,
+      createState: () => reducer.state,
+      processLine: (line, ctx) => {
         if (!observer.isActive()) return;
-        const text = chunk.toString();
-        observer.onStdout?.(text);
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        let event: unknown;
+        try { event = JSON.parse(trimmed); } catch { return; }
+        if (event && typeof event === "object" && !Array.isArray(event)) {
+          observer.onEvent?.(event as Record<string, unknown>);
+        }
+        if (reducer.apply(event, context.session.mode === "managed")) {
+          observer.onUpdate(reducer.state);
+        }
+        if (reducer.askUserQuestionDetected && !killedForQuestion) {
+          killedForQuestion = true;
+          ctx.requestStop();
+        }
+      },
+      onStdoutText: (text) => {
         const trimmed = text.trim();
         if (trimmed) stdoutTail = trimmed.slice(-1024);
-        lineBuffer += text;
-        const lines = lineBuffer.split("\n");
-        lineBuffer = lines.pop() ?? "";
-        for (const line of lines) processLine(line);
-      });
-      child.stderr?.on("data", (chunk: Buffer) => {
-        if (!observer.isActive()) return;
-        const text = chunk.toString();
-        observer.onStderr?.(text);
-        stderr += text;
-      });
-      child.on("error", (error) => {
-        if (settled) return;
-        settled = true;
-        resolve(result(null, null, error as NodeJS.ErrnoException));
-      });
-      child.on("close", (exitCode, signal) => {
-        if (settled) return;
-        settled = true;
-        if (lineBuffer.trim()) processLine(lineBuffer);
-        lineBuffer = "";
-        resolve(result(exitCode, signal));
-      });
-    });
-    return {
-      args,
-      spawnedAt,
-      pid: child.pid ?? null,
-      completion,
-      interrupt: () => {
-        try { child.kill("SIGTERM"); } catch { /* best effort */ }
       },
-    };
+      finalize: (ctx, exitCode, signal, spawnError) => ({
+        state: reducer.state,
+        exitCode,
+        signal,
+        stderr: ctx.stderr,
+        stdoutTail,
+        primaryError: null,
+        stopReason: killedForQuestion ? "ask-user-question" : undefined,
+        spawnError,
+      }),
+    });
   }
 }

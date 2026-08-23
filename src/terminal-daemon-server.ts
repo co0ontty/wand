@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
@@ -6,6 +7,11 @@ import path from "node:path";
 import pty from "node-pty";
 
 import { ensureNodePtyHelperExecutable } from "./ensure-node-pty-helper.js";
+import {
+  STRUCTURED_RUN_LOG_MAX_CHARS,
+  type StructuredRunState,
+  type StructuredSpawnRequest,
+} from "./structured-exec-host.js";
 import {
   TERMINAL_DAEMON_PROTOCOL_VERSION,
   terminalDaemonPaths,
@@ -47,6 +53,24 @@ interface DaemonClient {
   buffer: string;
 }
 
+interface DaemonStructuredRun {
+  request: StructuredSpawnRequest;
+  incarnationId: string;
+  child: ChildProcess | null;
+  pid: number;
+  status: "running" | "exited";
+  exitCode: number | null;
+  signal: number | null;
+  stdoutSeq: number;
+  stderrSeq: number;
+  stdoutLog: string;
+  stderrLog: string;
+  stdoutTruncated: boolean;
+  stderrTruncated: boolean;
+}
+
+const MAX_STRUCTURED_RUNS = 256;
+
 const MAX_REQUEST_BUFFER = 4 * 1024 * 1024;
 
 export async function runTerminalDaemon(configPath: string): Promise<void> {
@@ -74,6 +98,7 @@ export async function runTerminalDaemon(configPath: string): Promise<void> {
 
   const sessions = new Map<string, DaemonSession>();
   const clients = new Set<DaemonClient>();
+  const structuredRuns = new Map<string, DaemonStructuredRun>();
 
   const send = (socket: net.Socket, message: TerminalDaemonResponse | TerminalDaemonEvent): void => {
     if (!socket.destroyed && socket.writable) socket.write(`${JSON.stringify(message)}\n`);
@@ -177,6 +202,138 @@ export async function runTerminalDaemon(configPath: string): Promise<void> {
     session.terminalState.dispose();
   };
 
+  // ---------------------------------------------------------------------------
+  // Structured CLI runs: plain child_process ownership with full replay logs.
+  // ---------------------------------------------------------------------------
+
+  const appendRunLog = (run: DaemonStructuredRun, stream: "stdout" | "stderr", data: string): number => {
+    const seq = stream === "stdout" ? ++run.stdoutSeq : ++run.stderrSeq;
+    if (stream === "stdout") {
+      run.stdoutLog += data;
+      if (run.stdoutLog.length > STRUCTURED_RUN_LOG_MAX_CHARS) {
+        run.stdoutLog = run.stdoutLog.slice(-STRUCTURED_RUN_LOG_MAX_CHARS);
+        run.stdoutTruncated = true;
+      }
+    } else {
+      run.stderrLog += data;
+      if (run.stderrLog.length > STRUCTURED_RUN_LOG_MAX_CHARS) {
+        run.stderrLog = run.stderrLog.slice(-STRUCTURED_RUN_LOG_MAX_CHARS);
+        run.stderrTruncated = true;
+      }
+    }
+    return seq;
+  };
+
+  const serializeStructuredRun = (run: DaemonStructuredRun): StructuredRunState => ({
+    runId: run.request.runId,
+    incarnationId: run.incarnationId,
+    pid: run.pid,
+    status: run.status,
+    exitCode: run.exitCode,
+    signal: run.signal,
+    stdoutSeq: run.stdoutSeq,
+    stderrSeq: run.stderrSeq,
+    stdoutLog: run.stdoutLog,
+    stderrLog: run.stderrLog,
+    stdoutTruncated: run.stdoutTruncated,
+    stderrTruncated: run.stderrTruncated,
+  });
+
+  /** Evict oldest exited records once the map outgrows its bound. */
+  const evictStaleStructuredRuns = (): void => {
+    if (structuredRuns.size <= MAX_STRUCTURED_RUNS) return;
+    for (const [runId, run] of structuredRuns) {
+      if (structuredRuns.size <= MAX_STRUCTURED_RUNS) break;
+      if (run.status === "exited") structuredRuns.delete(runId);
+    }
+  };
+
+  const structuredSpawn = (request: StructuredSpawnRequest): StructuredRunState => {
+    const existing = structuredRuns.get(request.runId);
+    if (existing && existing.status === "running") return serializeStructuredRun(existing);
+    const wantsStdin = typeof request.stdinData === "string";
+    const child = nodeSpawn(request.file, request.args, {
+      cwd: request.cwd,
+      env: request.env,
+      stdio: wantsStdin ? ["pipe", "pipe", "pipe"] : ["ignore", "pipe", "pipe"],
+    });
+    if (wantsStdin) child.stdin?.end(request.stdinData);
+    const run: DaemonStructuredRun = {
+      request,
+      incarnationId: randomUUID(),
+      child,
+      pid: child.pid ?? -1,
+      status: "running",
+      exitCode: null,
+      signal: null,
+      stdoutSeq: 0,
+      stderrSeq: 0,
+      stdoutLog: "",
+      stderrLog: "",
+      stdoutTruncated: false,
+      stderrTruncated: false,
+    };
+    structuredRuns.set(request.runId, run);
+    evictStaleStructuredRuns();
+
+    child.stdout?.on("data", (chunk: Buffer | string) => {
+      const text = chunk.toString();
+      const seq = appendRunLog(run, "stdout", text);
+      broadcast({
+        kind: "event",
+        event: "sdata",
+        sessionId: run.request.runId,
+        incarnationId: run.incarnationId,
+        stream: "stdout",
+        data: text,
+        seq,
+      });
+    });
+    child.stderr?.on("data", (chunk: Buffer | string) => {
+      const text = chunk.toString();
+      const seq = appendRunLog(run, "stderr", text);
+      broadcast({
+        kind: "event",
+        event: "sdata",
+        sessionId: run.request.runId,
+        incarnationId: run.incarnationId,
+        stream: "stderr",
+        data: text,
+        seq,
+      });
+    });
+    child.on("error", () => {
+      // Spawn failures surface via close with no exit code; keep the record so
+      // attach still reports a terminal state to late adopters.
+    });
+    child.on("close", (code, signalName) => {
+      if (structuredRuns.get(run.request.runId) !== run || run.child !== child) return;
+      run.child = null;
+      run.status = "exited";
+      run.exitCode = code;
+      run.signal = signalName === null || signalName === undefined ? null : Number(signalName) || signalNumberFromName(signalName);
+      broadcast({
+        kind: "event",
+        event: "sexit",
+        sessionId: run.request.runId,
+        incarnationId: run.incarnationId,
+        exitCode: run.exitCode ?? undefined,
+        signal: run.signal ?? undefined,
+      });
+    });
+    return serializeStructuredRun(run);
+  };
+
+  const structuredForget = (runId: string): void => {
+    const run = structuredRuns.get(runId);
+    if (!run) return;
+    structuredRuns.delete(runId);
+    if (run.child) {
+      try { run.child.kill("SIGTERM"); } catch { /* best-effort explicit deletion */ }
+      run.child = null;
+    }
+  };
+
   const handleRequest = (client: DaemonClient, request: TerminalDaemonRequest): void => {
     if (request.token !== token) {
       send(client.socket, { kind: "response", id: request.id, ok: false, error: "Unauthorized" });
@@ -237,6 +394,30 @@ export async function runTerminalDaemon(configPath: string): Promise<void> {
           forget(String(params.sessionId ?? ""));
           result = { ok: true };
           break;
+        case "structuredSpawn":
+          result = structuredSpawn(params as unknown as StructuredSpawnRequest);
+          break;
+        case "structuredAttach": {
+          const run = structuredRuns.get(String(params.runId ?? ""));
+          result = { state: run ? serializeStructuredRun(run) : null };
+          break;
+        }
+        case "structuredList":
+          result = Array.from(structuredRuns.values(), serializeStructuredRun);
+          break;
+        case "structuredKill": {
+          const run = structuredRuns.get(String(params.runId ?? ""));
+          const signal = typeof params.signal === "string" ? params.signal : "SIGTERM";
+          if (run?.child) {
+            try { run.child.kill(signal as NodeJS.Signals); } catch { /* best-effort interruption */ }
+          }
+          result = { ok: true };
+          break;
+        }
+        case "structuredForget":
+          structuredForget(String(params.runId ?? ""));
+          result = { ok: true };
+          break;
       }
       send(client.socket, { kind: "response", id: request.id, ok: true, result });
     } catch (error) {
@@ -293,6 +474,7 @@ export async function runTerminalDaemon(configPath: string): Promise<void> {
 
   const shutdown = (): void => {
     for (const sessionId of Array.from(sessions.keys())) forget(sessionId);
+    for (const runId of Array.from(structuredRuns.keys())) structuredForget(runId);
     for (const client of clients) client.socket.destroy();
     server.close(() => process.exit(0));
     cleanupDaemonFiles(paths.socketPath, paths.tokenPath, paths.pidPath);
@@ -324,6 +506,16 @@ function isProcessAlive(pid: number): boolean {
   } catch {
     return false;
   }
+}
+
+function signalNumberFromName(signalName: string): number {
+  const table: Record<string, number> = {
+    SIGHUP: 1, SIGINT: 2, SIGQUIT: 3, SIGILL: 4, SIGTRAP: 5, SIGABRT: 6,
+    SIGBUS: 7, SIGFPE: 8, SIGKILL: 9, SIGUSR1: 10, SIGSEGV: 11, SIGUSR2: 12,
+    SIGPIPE: 13, SIGALRM: 14, SIGTERM: 15, SIGCHLD: 17, SIGCONT: 18,
+    SIGSTOP: 19, SIGTSTP: 20,
+  };
+  return table[signalName] ?? 0;
 }
 
 function waitForProcessExit(pid: number): Promise<void> {

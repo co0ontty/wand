@@ -22,6 +22,15 @@ import {
   type TerminalSessionState,
   type TerminalSpawnRequest,
 } from "./terminal-host.js";
+import {
+  STRUCTURED_RUN_LOG_MAX_CHARS,
+  type StructuredExecHost,
+  type StructuredExecProcess,
+  type StructuredExitEvent,
+  type StructuredSpawnRequest,
+  type StructuredStreamEvent,
+  type StructuredRunState,
+} from "./structured-exec-host.js";
 import { appendWindow, PTY_OUTPUT_MAX_SIZE } from "./pty-text-utils.js";
 
 const TERMINAL_DAEMON_RECONNECT_INITIAL_MS = 500;
@@ -124,7 +133,123 @@ class RemoteTerminalProcess implements TerminalProcess {
   }
 }
 
-export class TerminalDaemonClient implements TerminalHost {
+/** Client-side handle for a daemon-owned structured CLI run. */
+class RemoteStructuredProcess implements StructuredExecProcess {
+  private readonly streamListeners = new Set<(event: StructuredStreamEvent) => void>();
+  private readonly exitListeners = new Set<(event: StructuredExitEvent) => void>()
+  private paused = false;
+  private pausedEvents: StructuredStreamEvent[] = [];
+  private undeliveredEvents: StructuredStreamEvent[] = [];
+  private pendingExit: StructuredExitEvent | null = null;
+  private lastStdoutSeq = 0;
+  private lastStderrSeq = 0;
+
+  constructor(
+    readonly runId: string,
+    readonly incarnationId: string,
+    readonly pid: number,
+    private readonly client: TerminalDaemonClient,
+  ) {}
+
+  interrupt(signal?: string): void {
+    void this.client.request("structuredKill", { runId: this.runId, signal }).catch((error) =>
+      this.client.reportOperationError(this.runId, error),
+    );
+  }
+
+  onStream(listener: (event: StructuredStreamEvent) => void): { dispose(): void } {
+    this.streamListeners.add(listener);
+    if (this.undeliveredEvents.length > 0) {
+      const pending = this.undeliveredEvents;
+      this.undeliveredEvents = [];
+      queueMicrotask(() => {
+        if (!this.streamListeners.has(listener)) return;
+        for (const event of pending) listener(event);
+      });
+    }
+    return { dispose: () => this.streamListeners.delete(listener) };
+  }
+
+  onExit(listener: (event: StructuredExitEvent) => void): { dispose(): void } {
+    this.exitListeners.add(listener);
+    const pending = this.pendingExit;
+    if (pending) {
+      queueMicrotask(() => {
+        if (this.exitListeners.has(listener)) listener(pending);
+      });
+    }
+    return { dispose: () => this.exitListeners.delete(listener) };
+  }
+
+  acceptStream(event: StructuredStreamEvent): void {
+    this.deliveredChars[event.stream] += event.data.length;
+    if (event.stream === "stdout") this.lastStdoutSeq = Math.max(this.lastStdoutSeq, event.seq);
+    else this.lastStderrSeq = Math.max(this.lastStderrSeq, event.seq);
+    if (this.paused) {
+      this.pausedEvents.push(event);
+      return;
+    }
+    if (this.streamListeners.size === 0) {
+      this.undeliveredEvents.push(event);
+      if (this.undeliveredEvents.length > 4096) this.undeliveredEvents.shift();
+      return;
+    }
+    this.emitStream(event);
+  }
+
+  acceptExit(event: StructuredExitEvent): void {
+    this.pendingExit = event;
+    for (const listener of Array.from(this.exitListeners)) listener(event);
+  }
+
+  /** Gap-free catch-up from the daemon's full replay logs after a reconnect. */
+  replayFromLogs(state: StructuredRunState): void {
+    const stdoutDelta = alignedDelta(state.stdoutLog, state.stdoutTruncated, this.deliveredChars.stdout);
+    if (stdoutDelta === null) {
+      process.stderr.write(`[wand] structured run ${this.runId} stdout log no longer aligns with delivered output; skipping catch-up\n`);
+    } else if (stdoutDelta) {
+      this.acceptStream({ stream: "stdout", data: stdoutDelta, seq: ++this.syntheticSeq });
+    }
+    const stderrDelta = alignedDelta(state.stderrLog, state.stderrTruncated, this.deliveredChars.stderr);
+    if (stderrDelta === null) {
+      process.stderr.write(`[wand] structured run ${this.runId} stderr log no longer aligns with delivered output; skipping catch-up\n`);
+    } else if (stderrDelta) {
+      this.acceptStream({ stream: "stderr", data: stderrDelta, seq: ++this.syntheticSeq });
+    }
+  }
+
+  pause(): void {
+    this.paused = true;
+  }
+
+  resume(): void {
+    if (!this.paused) return;
+    this.paused = false;
+    const pending = this.pausedEvents;
+    this.pausedEvents = [];
+    for (const event of pending) this.emitStream(event);
+  }
+
+  private emitStream(event: StructuredStreamEvent): void {
+    for (const listener of Array.from(this.streamListeners)) listener(event);
+  }
+
+  private readonly deliveredChars = { stdout: 0, stderr: 0 };
+  private syntheticSeq = 1_000_000_000_000;
+}
+
+/**
+ * Deliver the suffix of the daemon's replay log beyond what this handle has
+ * already seen. Returns null when alignment is impossible (head-truncated log
+ * or watermark beyond the log), in which case callers skip catch-up.
+ */
+function alignedDelta(log: string, truncated: boolean, deliveredChars: number): string | null {
+  if (truncated) return null;
+  if (log.length < deliveredChars) return null;
+  return log.slice(deliveredChars);
+}
+
+export class TerminalDaemonClient implements TerminalHost, StructuredExecHost {
   readonly persistent = true;
   private socket: net.Socket | null = null;
   private buffer = "";
@@ -133,6 +258,9 @@ export class TerminalDaemonClient implements TerminalHost {
   private readonly inventory = new Map<string, TerminalSessionState>();
   private readonly handles = new Map<string, RemoteTerminalProcess>();
   private readonly pendingEvents = new Map<string, TerminalDaemonEvent[]>();
+  private readonly structuredInventory = new Map<string, StructuredRunState>();
+  private readonly structuredHandles = new Map<string, RemoteStructuredProcess>();
+  private readonly pendingStructuredEvents = new Map<string, TerminalDaemonEvent[]>();
   private disposed = false;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private reconnectDelayMs = TERMINAL_DAEMON_RECONNECT_INITIAL_MS;
@@ -175,6 +303,7 @@ export class TerminalDaemonClient implements TerminalHost {
         this.reconcileAfterReconnect(previous);
         process.stderr.write("[wand] Reconnected to terminal daemon; reconciled PTY inventory.\n");
       }
+      await this.refreshStructuredAfterReconnect();
     } catch (error) {
       if (!this.disposed) {
         try { socket.destroy(); } catch { /* best-effort cleanup */ }
@@ -205,6 +334,92 @@ export class TerminalDaemonClient implements TerminalHost {
     void this.request("forget", { sessionId }).catch((error) => this.reportOperationError(sessionId, error));
   }
 
+  // ---------------------------------------------------------------------------
+  // StructuredExecHost: daemon-owned CLI runs that survive web restarts.
+  // ---------------------------------------------------------------------------
+
+  async spawnStructured(request: StructuredSpawnRequest): Promise<StructuredExecProcess> {
+    const existingHandle = this.structuredHandles.get(request.runId);
+    const existing = this.structuredInventory.get(request.runId);
+    if (existingHandle && existing?.status === "running" && existing.incarnationId === existingHandle.incarnationId) {
+      return existingHandle;
+    }
+    this.structuredHandles.delete(request.runId);
+    const state = await this.request("structuredSpawn", { ...request }) as StructuredRunState;
+    return this.handleFromState(state, existingHandle ?? null);
+  }
+
+  async attachRun(runId: string): Promise<StructuredRunState | null> {
+    const payload = await this.request("structuredAttach", { runId }) as { state: StructuredRunState | null };
+    if (!payload.state) return null;
+    this.structuredInventory.set(runId, payload.state);
+    return payload.state;
+  }
+
+  async adoptRun(runId: string): Promise<StructuredExecProcess | null> {
+    const state = await this.attachRun(runId);
+    if (!state || state.status !== "running") return null;
+    const existing = this.structuredHandles.get(runId);
+    if (existing && existing.incarnationId === state.incarnationId) return existing;
+    return this.handleFromState(state, existing ?? null);
+  }
+
+  async listRuns(): Promise<StructuredRunState[]> {
+    const result = await this.request("structuredList") as unknown;
+    // Defensive against protocol skew with older daemons that answer unknown
+    // methods with a generic { ok: true }.
+    return Array.isArray(result) ? (result as StructuredRunState[]) : [];
+  }
+
+  forgetRun(runId: string): void {
+    this.structuredInventory.delete(runId);
+    this.structuredHandles.delete(runId);
+    this.pendingStructuredEvents.delete(runId);
+    void this.request("structuredForget", { runId }).catch((error) => this.reportOperationError(runId, error));
+  }
+
+  /** Refresh the structured inventory and catch live handles up after a reconnect. */
+  private async refreshStructuredAfterReconnect(): Promise<void> {
+    const previous = new Map(this.structuredInventory);
+    let runs: StructuredRunState[];
+    try {
+      runs = await this.listRuns();
+    } catch {
+      return; // socket died again mid-refresh; next reconnect retries
+    }
+    this.structuredInventory.clear();
+    for (const run of runs) this.structuredInventory.set(run.runId, run);
+    for (const [runId, oldState] of previous) {
+      const current = this.structuredInventory.get(runId);
+      const handle = this.structuredHandles.get(runId);
+      if (!handle || handle.incarnationId !== oldState.incarnationId) continue;
+      if (current && current.status === "running") {
+        handle.replayFromLogs(current);
+        continue;
+      }
+      // Run exited while we were disconnected.
+      this.structuredHandles.delete(runId);
+      handle.acceptExit({ exitCode: current?.exitCode ?? -1, signal: current?.signal ?? null });
+    }
+  }
+
+  private handleFromState(state: StructuredRunState, reuse: RemoteStructuredProcess | null): RemoteStructuredProcess {
+    this.structuredInventory.set(state.runId, state);
+    if (state.status !== "running") {
+      this.structuredHandles.delete(state.runId);
+      return reuse ?? new RemoteStructuredProcess(state.runId, state.incarnationId, state.pid, this);
+    }
+    let process = this.structuredHandles.get(state.runId) ?? null;
+    if (!process || process.incarnationId !== state.incarnationId) {
+      process = new RemoteStructuredProcess(state.runId, state.incarnationId, state.pid, this);
+      this.structuredHandles.set(state.runId, process);
+      const pending = this.pendingStructuredEvents.get(state.runId) ?? [];
+      this.pendingStructuredEvents.delete(state.runId);
+      for (const event of pending) this.routeStructuredEvent(event);
+    }
+    return process;
+  }
+
   disconnect(): void {
     this.disposed = true;
     if (this.reconnectTimer) {
@@ -217,6 +432,8 @@ export class TerminalDaemonClient implements TerminalHost {
     this.rejectPending(new Error("Terminal daemon client disposed"));
     this.handles.clear();
     this.pendingEvents.clear();
+    this.structuredHandles.clear();
+    this.pendingStructuredEvents.clear();
   }
 
   /**
@@ -363,6 +580,10 @@ export class TerminalDaemonClient implements TerminalHost {
   }
 
   private routeEvent(event: TerminalDaemonEvent): void {
+    if (event.event === "sdata" || event.event === "sexit") {
+      this.routeStructuredEvent(event);
+      return;
+    }
     const state = this.inventory.get(event.sessionId);
     if (state && state.incarnationId === event.incarnationId) {
       if (event.event === "data" && typeof event.data === "string" && typeof event.seq === "number") {
@@ -386,6 +607,48 @@ export class TerminalDaemonClient implements TerminalHost {
     } else if (event.event === "exit") {
       handle.acceptExit({ exitCode: event.exitCode ?? -1, signal: event.signal });
       this.handles.delete(event.sessionId);
+    }
+  }
+
+  /** Structured run events update the inventory and feed live handles. */
+  private routeStructuredEvent(event: TerminalDaemonEvent): void {
+    const state = this.structuredInventory.get(event.sessionId);
+    if (state && state.incarnationId === event.incarnationId) {
+      if (event.event === "sdata" && typeof event.data === "string" && typeof event.seq === "number") {
+        const stream = event.stream === "stderr" ? "stderr" : "stdout";
+        if (stream === "stdout") state.stdoutSeq = Math.max(state.stdoutSeq, event.seq);
+        else state.stderrSeq = Math.max(state.stderrSeq, event.seq);
+        if (stream === "stdout") {
+          state.stdoutLog += event.data;
+          if (state.stdoutLog.length > STRUCTURED_RUN_LOG_MAX_CHARS) {
+            state.stdoutLog = state.stdoutLog.slice(-STRUCTURED_RUN_LOG_MAX_CHARS);
+            state.stdoutTruncated = true;
+          }
+        } else {
+          state.stderrLog += event.data;
+          if (state.stderrLog.length > STRUCTURED_RUN_LOG_MAX_CHARS) {
+            state.stderrLog = state.stderrLog.slice(-STRUCTURED_RUN_LOG_MAX_CHARS);
+            state.stderrTruncated = true;
+          }
+        }
+      } else if (event.event === "sexit") {
+        state.status = "exited";
+        state.exitCode = event.exitCode ?? null;
+        state.signal = event.signal ?? null;
+      }
+    }
+    const handle = this.structuredHandles.get(event.sessionId);
+    if (!handle || handle.incarnationId !== event.incarnationId) {
+      const pending = this.pendingStructuredEvents.get(event.sessionId) ?? [];
+      pending.push(event);
+      this.pendingStructuredEvents.set(event.sessionId, pending.slice(-2048));
+      return;
+    }
+    if (event.event === "sdata" && typeof event.data === "string" && typeof event.seq === "number") {
+      handle.acceptStream({ stream: event.stream === "stderr" ? "stderr" : "stdout", data: event.data, seq: event.seq });
+    } else if (event.event === "sexit") {
+      handle.acceptExit({ exitCode: event.exitCode ?? null, signal: event.signal ?? null });
+      this.structuredHandles.delete(event.sessionId);
     }
   }
 

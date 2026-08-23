@@ -1,12 +1,13 @@
 import { spawn } from "node:child_process";
 
+import { startStructuredCli } from "./structured-exec-pump.js";
+import type { StructuredExecHost } from "./structured-exec-host.js";
 import { thinkingEffortToPiLevel } from "./structured-provider-common.js";
 import type {
   StructuredRunnerAdapter,
   StructuredRunnerContext,
   StructuredRunnerExecution,
   StructuredRunnerObserver,
-  StructuredRunnerResult,
   StructuredRunnerTurnState,
 } from "./structured-runner.js";
 import type { ContentBlock, SessionSnapshot } from "./types.js";
@@ -85,33 +86,35 @@ export function applyPiEvent(state: StructuredRunnerTurnState, event: Record<str
 }
 
 export class PiRunner implements StructuredRunnerAdapter {
-  constructor(private readonly spawnProcess: typeof spawn = spawn) {}
+  constructor(
+    private readonly spawnProcess: typeof spawn = spawn,
+    private readonly execHost?: StructuredExecHost,
+  ) {}
 
   start(context: StructuredRunnerContext, observer: StructuredRunnerObserver): StructuredRunnerExecution {
     const args = buildPiArgs(context.session, context.prompt);
-    const spawnedAt = new Date().toISOString();
-    const child = this.spawnProcess("pi", args, { cwd: context.session.cwd, env: context.env, stdio: ["ignore", "pipe", "pipe"] });
     const state: StructuredRunnerTurnState = { blocks: [], result: "", sessionId: context.session.claudeSessionId, model: context.session.selectedModel ?? undefined };
-    let lineBuffer = "", stderr = "", primaryError: string | null = null, settled = false;
-    const result = (exitCode: number | null, signal: NodeJS.Signals | null, spawnError?: NodeJS.ErrnoException): StructuredRunnerResult => ({ state, exitCode, signal, stderr, primaryError, ...(spawnError ? { spawnError } : {}) });
-    const processLine = (line: string) => {
-      if (!observer.isActive() || !line.trim()) return;
-      try {
-        const event = JSON.parse(line) as Record<string, unknown>;
-        observer.onEvent?.(event);
-        primaryError = applyPiEvent(state, event) ?? primaryError;
-        observer.onUpdate(state);
-      } catch { /* Pi stdout is NDJSON; ignore non-protocol noise. */ }
-    };
-    const completion = new Promise<StructuredRunnerResult>((resolve) => {
-      child.stdout?.on("data", (chunk: Buffer) => {
-        const text = chunk.toString(); observer.onStdout?.(text); lineBuffer += text;
-        const lines = lineBuffer.split("\n"); lineBuffer = lines.pop() ?? ""; lines.forEach(processLine);
-      });
-      child.stderr?.on("data", (chunk: Buffer) => { const text = chunk.toString(); observer.onStderr?.(text); stderr += text; });
-      child.on("error", (error) => { if (!settled) { settled = true; resolve(result(null, null, error as NodeJS.ErrnoException)); } });
-      child.on("close", (code, signal) => { if (!settled) { settled = true; processLine(lineBuffer); resolve(result(code, signal)); } });
+    let primaryError: string | null = null;
+    return startStructuredCli({
+      sessionId: context.session.id,
+      file: "pi",
+      args,
+      cwd: context.session.cwd,
+      env: context.env,
+      observer,
+      execHost: this.execHost,
+      spawnProcess: this.spawnProcess,
+      createState: () => state,
+      processLine: (line) => {
+        if (!observer.isActive() || !line.trim()) return;
+        try {
+          const event = JSON.parse(line) as Record<string, unknown>;
+          observer.onEvent?.(event);
+          primaryError = applyPiEvent(state, event) ?? primaryError;
+          observer.onUpdate(state);
+        } catch { /* Pi stdout is NDJSON; ignore non-protocol noise. */ }
+      },
+      finalize: (ctx, exitCode, signal, spawnError) => ({ state, exitCode, signal, stderr: ctx.stderr, primaryError, ...(spawnError ? { spawnError } : {}) }),
     });
-    return { args, spawnedAt, pid: child.pid ?? null, completion, interrupt: () => { try { child.kill("SIGTERM"); } catch { /* best effort */ } } };
   }
 }

@@ -8,8 +8,10 @@ import pty from "node-pty";
 
 import { buildPtyShellLaunchPlan, PtyCliExitMarker } from "../src/pty-shell-launch.js";
 
-async function waitForOutput(read: () => string, expected: string): Promise<void> {
-  const deadline = Date.now() + 3_000;
+async function waitForOutput(read: () => string, expected: string, timeoutMs = 10_000): Promise<void> {
+  // 全量套件下 node --test 会并行拉起几十个测试进程，zsh 启动 + PTY 回显的
+  // 尾延迟远高于空载单跑。给足余量避免负载抖动造成假失败。
+  const deadline = Date.now() + timeoutMs;
   while (!read().includes(expected)) {
     if (Date.now() >= deadline) {
       throw new Error(`Timed out waiting for PTY output: ${expected}; received ${JSON.stringify(read())}`);
@@ -18,8 +20,8 @@ async function waitForOutput(read: () => string, expected: string): Promise<void
   }
 }
 
-async function waitForCondition(check: () => boolean, failure: () => string): Promise<void> {
-  const deadline = Date.now() + 3_000;
+async function waitForCondition(check: () => boolean, failure: () => string, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
   while (!check()) {
     if (Date.now() >= deadline) throw new Error(failure());
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
@@ -104,12 +106,25 @@ test("zsh fallback recalls the provider command with the up arrow", {
   });
   let output = "";
   child.onData((chunk) => { output += chunk; });
-  t.after(() => {
+  t.after(async () => {
+    // zsh 退出时会异步 flush HISTFILE；不等它退完就删目录会跟写历史赛跑，
+    // 偶发 ENOTEMPTY。先等退出事件（封顶 1.5s），再用带重试的 rmSync 兜底。
+    const exited = new Promise<void>((resolve) => child.onExit(() => resolve()));
     try { child.kill(); } catch { /* already exited */ }
-    rmSync(root, { recursive: true, force: true });
+    await Promise.race([
+      exited,
+      new Promise<void>((resolve) => setTimeout(resolve, 1_500)),
+    ]);
+    rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
   });
 
   await waitForOutput(() => output, "WAND_HISTORY_PROMPT> ");
+  // SHARE_HISTORY 下 zsh 是增量写历史文件的，提示符出现不等于已落盘——等它
+  // 出现再断言次数，否则高负载下会读到半空的文件误报失败。
+  await waitForCondition(
+    () => /printf WAND_PROVIDER_RAN/.test(readFileSync(historyFile, "utf8")),
+    () => `the provider command never reached the history file`,
+  );
   assert.equal(
     readFileSync(historyFile, "utf8").match(/printf WAND_PROVIDER_RAN/g)?.length,
     1,

@@ -18,6 +18,7 @@ import { SessionTopicCoordinator } from "./session-topic.js";
 import { resolveSessionCwd } from "./session-cwd.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
 import { CodexRunner } from "./structured-codex-adapter.js";
+import { CodexProtocolReducer } from "./structured-codex-protocol.js";
 import { normalizeStructuredToolResultContent } from "./structured-content.js";
 import {
   buildAppendSystemPromptParts,
@@ -33,12 +34,18 @@ import {
   stampParentTaskResults,
   stampSelfTask,
   tagSubagentBlocks,
+  ClaudeCliProtocolReducer,
   type TaskMetaMap,
 } from "./structured-claude-protocol.js";
-import { OpenCodeRunner } from "./structured-opencode-adapter.js";
-import { GrokRunner } from "./structured-grok-adapter.js";
+import { OpenCodeRunner, applyOpenCodeEvent } from "./structured-opencode-adapter.js";
+import { GrokRunner, applyGrokEvent } from "./structured-grok-adapter.js";
 import { QoderRunner } from "./structured-qoder-adapter.js";
-import { PiRunner } from "./structured-pi-adapter.js";
+import { PiRunner, applyPiEvent } from "./structured-pi-adapter.js";
+import {
+  structuredRunId,
+  type StructuredExecHost,
+  type StructuredRunState,
+} from "./structured-exec-host.js";
 import type { StructuredRunnerAdapter, StructuredRunnerExecution, StructuredRunnerTurnState } from "./structured-runner.js";
 import {
   defaultStructuredRunner,
@@ -94,6 +101,118 @@ class PersistedStructuredRunnerError extends Error {
 }
 
 interface StreamingTurnState extends StructuredRunnerTurnState {}
+
+/** Line-at-a-time protocol replayer used to rebuild turn state from daemon logs. */
+interface ReplayProcessor {
+  state: StructuredRunnerTurnState;
+  stderr: string;
+  primaryError: string | null;
+  errors?: string[];
+  stdoutTail?: string;
+  stopReason?: "ask-user-question";
+  askUserQuestionDetected?: boolean;
+  /** Feed one complete stdout line; returns true when turn state changed. */
+  feed(line: string): boolean;
+}
+
+function buildReplayProcessor(session: SessionSnapshot): ReplayProcessor {
+  const runner = session.runner;
+  if (runner === "codex-cli-exec") {
+    const reducer = new CodexProtocolReducer(session);
+    return {
+      state: reducer.state,
+      stderr: "",
+      get primaryError() { return reducer.primaryError; },
+      get errors() { return reducer.errors; },
+      feed: (line) => {
+        const trimmed = line.trim();
+        if (!trimmed) return false;
+        let event: unknown;
+        try { event = JSON.parse(trimmed); } catch { return false; }
+        return reducer.apply(event);
+      },
+    };
+  }
+  if (runner === "claude-cli-print" || runner === "qoder-cli-print") {
+    const reducer = new ClaudeCliProtocolReducer(session);
+    const managed = session.mode === "managed";
+    const processor: ReplayProcessor = {
+      state: reducer.state,
+      stderr: "",
+      primaryError: null,
+      stdoutTail: "",
+      get askUserQuestionDetected() { return reducer.askUserQuestionDetected; },
+      get stopReason() { return reducer.askUserQuestionDetected ? "ask-user-question" as const : undefined; },
+      feed: (line) => {
+        const trimmed = line.trim();
+        if (!trimmed) return false;
+        processor.stdoutTail = trimmed.slice(-1024);
+        let event: unknown;
+        try { event = JSON.parse(trimmed); } catch { return false; }
+        if (runner === "qoder-cli-print" && event && typeof event === "object" && !Array.isArray(event)) {
+          const record = event as Record<string, unknown>;
+          if (record.type === "result" && record.subtype !== "success") {
+            const errors = Array.isArray(record.errors)
+              ? record.errors.filter((item): item is string => typeof item === "string")
+              : [];
+            processor.primaryError = errors.join("\n") || "Qoder CLI execution failed";
+          }
+        }
+        return reducer.apply(event, managed);
+      },
+    };
+    return processor;
+  }
+  // grok-cli-headless / opencode-cli-run / pi-cli-json share the same shape.
+  const state: StructuredRunnerTurnState = {
+    blocks: [],
+    result: "",
+    sessionId: session.claudeSessionId,
+    model: session.selectedModel ?? session.structuredState?.model,
+    ...(runner === "opencode-cli-run" ? { usage: undefined } : {}),
+  };
+  const processor: ReplayProcessor = {
+    state,
+    stderr: "",
+    primaryError: null,
+    feed: (line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return false;
+      let event: Record<string, unknown>;
+      try { event = JSON.parse(trimmed) as Record<string, unknown>; } catch { return false; }
+      const error = runner === "grok-cli-headless"
+        ? applyGrokEvent(state as Parameters<typeof applyGrokEvent>[0], event)
+        : runner === "opencode-cli-run"
+          ? applyOpenCodeEvent(state, event)
+          : applyPiEvent(state, event);
+      if (error) processor.primaryError = error;
+      return true;
+    },
+  };
+  return processor;
+}
+
+function recoveredCommandLabel(runner: SessionRunner | undefined): string {
+  switch (runner) {
+    case "codex-cli-exec": return "codex exec";
+    case "opencode-cli-run": return "opencode run";
+    case "grok-cli-headless": return "grok -p --output-format streaming-json";
+    case "qoder-cli-print": return "qodercli -p --output-format stream-json";
+    case "pi-cli-json": return "pi --mode json";
+    default: return "claude -p";
+  }
+}
+
+function numericToSignal(signal: number | null): NodeJS.Signals | null {
+  if (signal === null || signal === 0) return null;
+  const names: Record<number, NodeJS.Signals> = {
+    1: "SIGHUP", 2: "SIGINT", 3: "SIGQUIT", 4: "SIGILL", 5: "SIGTRAP", 6: "SIGABRT",
+    7: "SIGBUS", 8: "SIGFPE", 9: "SIGKILL", 10: "SIGUSR1", 11: "SIGSEGV", 12: "SIGUSR2",
+    13: "SIGPIPE", 14: "SIGALRM", 15: "SIGTERM", 17: "SIGCHLD", 18: "SIGCONT",
+    19: "SIGSTOP", 20: "SIGTSTP",
+  };
+  return names[signal] ?? "SIGTERM";
+}
 
 
 const STREAM_EMIT_DEBOUNCE_MS = 16;
@@ -296,6 +415,8 @@ export class StructuredSessionManager {
   private readonly grokRunner: StructuredRunnerAdapter;
   private readonly qoderRunner: StructuredRunnerAdapter;
   private readonly piRunner: StructuredRunnerAdapter;
+  /** Structured CLI runs that were mid-flight when the previous web process died. */
+  private pendingRecoveryIds: string[] = [];
   private disposed = false;
 
   constructor(
@@ -304,13 +425,14 @@ export class StructuredSessionManager {
     private readonly logger: SessionLogger | null = null,
     private readonly sdkQueryFactory: typeof sdkQuery = sdkQuery,
     runners: StructuredSessionManagerRunners = {},
+    private readonly execHost?: StructuredExecHost,
   ) {
-    this.claudeCliRunner = runners.claudeCli ?? new ClaudeCliRunner({ language: () => this.config.language });
-    this.codexRunner = runners.codex ?? new CodexRunner();
-    this.openCodeRunner = runners.opencode ?? new OpenCodeRunner();
-    this.grokRunner = runners.grok ?? new GrokRunner();
-    this.qoderRunner = runners.qoder ?? new QoderRunner();
-    this.piRunner = runners.pi ?? new PiRunner();
+    this.claudeCliRunner = runners.claudeCli ?? new ClaudeCliRunner({ language: () => this.config.language }, this.execHost);
+    this.codexRunner = runners.codex ?? new CodexRunner(undefined, this.execHost);
+    this.openCodeRunner = runners.opencode ?? new OpenCodeRunner(undefined, this.execHost);
+    this.grokRunner = runners.grok ?? new GrokRunner(undefined, this.execHost);
+    this.qoderRunner = runners.qoder ?? new QoderRunner(undefined, this.execHost);
+    this.piRunner = runners.pi ?? new PiRunner(undefined, this.execHost);
     for (const snapshot of this.storage.loadSessions()) {
       if ((snapshot.sessionKind ?? "pty") !== "structured") continue;
       const restoredStatus = snapshot.status === "running" ? "idle" : snapshot.status;
@@ -324,6 +446,9 @@ export class StructuredSessionManager {
       const runner = isStructuredRunnerForProvider(provider, storedRunner)
         ? storedRunner
         : defaultStructuredRunner(provider, this.config.structuredRunner);
+      if (snapshot.status === "running" && runner !== "claude-sdk") {
+        this.pendingRecoveryIds.push(snapshot.id);
+      }
       const restored: SessionSnapshot = {
         ...snapshot,
         sessionKind: "structured",
@@ -401,9 +526,13 @@ export class StructuredSessionManager {
         .filter((session) => session.structuredState?.inFlight)
         .map((session) => session.id),
     ]);
+    // With a persistent exec host the daemon keeps CLI runs alive across web
+    // restarts; leave them in-flight so recoverDetachedRuns() can re-attach.
+    const detachSafe = this.execHost?.persistent === true;
     for (const id of activeSessionIds) {
       const session = this.sessions.get(id);
       if (!session) continue;
+      if (detachSafe && session.runner !== "claude-sdk") continue;
       const cancelled: SessionSnapshot = {
         ...session,
         status: "idle",
@@ -422,7 +551,10 @@ export class StructuredSessionManager {
       try { this.saveAuthoritativeSession(cancelled); } catch { /* best-effort shutdown flush */ }
     }
 
-    for (const execution of this.pendingRunnerExecutions.values()) execution.interrupt();
+    for (const [executionId, execution] of this.pendingRunnerExecutions) {
+      if (detachSafe && this.sessions.get(executionId)?.runner !== "claude-sdk") continue;
+      execution.interrupt();
+    }
     for (const query of this.pendingSdkQueries.values()) {
       void query.interrupt().catch(() => { /* ignore */ });
     }
@@ -439,6 +571,266 @@ export class StructuredSessionManager {
     this.lastStreamSaveAt.clear();
     this.topicCoordinator.clear();
     this.emitEvent = null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Detached-run recovery: re-attach CLI runs that kept going inside terminald
+  // while the previous web process was down.
+  // ---------------------------------------------------------------------------
+
+  /** Called once after startup wiring; safe to skip when no host or candidates. */
+  async recoverDetachedRuns(): Promise<void> {
+    if (this.disposed || this.execHost?.persistent !== true || this.pendingRecoveryIds.length === 0) return;
+    const ids = this.pendingRecoveryIds;
+    this.pendingRecoveryIds = [];
+    let runs: StructuredRunState[];
+    try {
+      runs = await this.execHost.listRuns();
+    } catch (error) {
+      process.stderr.write(`[wand] structured run recovery skipped: ${getErrorMessage(error)}\n`);
+      return;
+    }
+    const byRunId = new Map(runs.map((run) => [run.runId, run]));
+    for (const sessionId of ids) {
+      const state = byRunId.get(structuredRunId(sessionId));
+      const session = this.sessions.get(sessionId);
+      if (!state || !session) continue;
+      try {
+        await this.resumeDetachedRun(session, state);
+      } catch (error) {
+        console.error(`[WAND] structured run recovery failed for ${sessionId}:`, error);
+      }
+    }
+  }
+
+  private async resumeDetachedRun(snapshot: SessionSnapshot, initialState: StructuredRunState): Promise<void> {
+    const sessionId = snapshot.id;
+    if (!this.execHost || !snapshot.structuredState) return;
+    const requestId = `recover-${initialState.incarnationId}`;
+
+    // Re-arm the in-flight marker so UI and request guards treat the resumed
+    // turn like any other streaming turn.
+    const resumed: SessionSnapshot = {
+      ...snapshot,
+      status: "running",
+      exitCode: null,
+      endedAt: null,
+      structuredState: {
+        ...(snapshot.structuredState as StructuredSessionState),
+        inFlight: true,
+        activeRequestId: requestId,
+        lastError: null,
+      },
+    };
+    this.sessions.set(sessionId, resumed);
+    this.saveAuthoritativeSession(resumed);
+    this.emitStructuredSnapshot(resumed);
+    process.stderr.write(`[wand] resuming structured run for session ${sessionId} (daemon pid ${initialState.pid})\n`);
+
+    const processor = buildReplayProcessor(resumed);
+    let emitTimer: ReturnType<typeof setTimeout> | null = null;
+    const syncTurn = (turnState: StructuredRunnerTurnState): void => {
+      const current = this.currentSessionForRequest(sessionId, requestId);
+      if (!current) return;
+      const turn: ConversationTurn = {
+        role: "assistant",
+        content: this.compactContentBlocks([...turnState.blocks], turnState.result),
+        usage: turnState.usage,
+      };
+      const messages = [...(current.messages ?? [])];
+      if (messages[messages.length - 1]?.role === "assistant") messages[messages.length - 1] = turn;
+      else messages.push(turn);
+      const patched: SessionSnapshot = {
+        ...current,
+        claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
+        messages,
+        output: turnState.result || current.output,
+        structuredState: {
+          ...(current.structuredState as StructuredSessionState),
+          model: turnState.model ?? current.structuredState?.model,
+        },
+      };
+      this.sessions.set(sessionId, patched);
+      this.saveStreamingSnapshot(patched);
+    };
+    const flushEmit = (): void => {
+      if (emitTimer) this.clearStreamEmitTimer(emitTimer);
+      emitTimer = null;
+      const current = this.currentSessionForRequest(sessionId, requestId);
+      if (current) {
+        this.emit({ type: "output", sessionId, data: buildIncrementalStructuredPayload(current, this.config.cardDefaults ?? {}) });
+      }
+    };
+    const scheduleEmit = (): void => {
+      if (!emitTimer) emitTimer = this.trackStreamEmitTimer(setTimeout(flushEmit, STREAM_EMIT_DEBOUNCE_MS));
+    };
+    const onApplied = (changed: boolean): void => {
+      if (changed) {
+        syncTurn(processor.state);
+        scheduleEmit();
+      }
+      if (processor.askUserQuestionDetected && runningHandle) {
+        runningHandle.interrupt();
+      }
+    };
+
+    let runningHandle: Awaited<ReturnType<StructuredExecHost["adoptRun"]>> = null;
+    let fedChars = 0;
+    const snapshotChars = initialState.stdoutLog.length;
+    const feedLine = (line: string): void => {
+      onApplied(processor.feed(line));
+    };
+    const feedDelta = (text: string): void => {
+      // Skip the portion already covered by the attach snapshot to avoid
+      // double-feeding overlapping events buffered during adoption.
+      if (fedChars < snapshotChars) {
+        const remaining = snapshotChars - fedChars;
+        if (text.length <= remaining) {
+          fedChars += text.length;
+          return;
+        }
+        text = text.slice(remaining);
+        fedChars = snapshotChars;
+      }
+      fedChars += text.length;
+      carry += text;
+      const lines = carry.split("\n");
+      carry = lines.pop() ?? "";
+      for (const line of lines) feedLine(line);
+    };
+    let carry = "";
+
+    const feedFullLog = (): void => {
+      const log = initialState.stdoutLog;
+      const lines = log.split("\n");
+      const tail = lines.pop() ?? "";
+      for (const line of lines) feedLine(line);
+      if (tail.trim()) feedLine(tail);
+    };
+
+    if (initialState.status === "exited") {
+      feedFullLog();
+      this.finalizeRecoveredRun(sessionId, requestId, processor, {
+        exitCode: initialState.exitCode,
+        signal: initialState.signal === null ? null : numericToSignal(initialState.signal),
+        stderr: initialState.stderrLog,
+        stdoutTruncated: initialState.stdoutTruncated,
+      });
+      flushEmit();
+      return;
+    }
+
+    // Still running: replay what we have, then subscribe live. Events that
+    // arrive between snapshot and subscription are deduped via fedChars.
+    {
+      const lines = initialState.stdoutLog.split("\n");
+      carry = lines.pop() ?? "";
+      for (const line of lines) feedLine(line);
+      fedChars = initialState.stdoutLog.length - carry.length;
+    }
+    runningHandle = await this.execHost.adoptRun(structuredRunId(sessionId));
+    if (!runningHandle) {
+      // Run vanished between listing and adoption; fall back to failure notes.
+      this.finalizeRecoveredRun(sessionId, requestId, processor, {
+        exitCode: null,
+        signal: null,
+        stderr: initialState.stderrLog,
+        stdoutTruncated: false,
+        lost: true,
+      });
+      flushEmit();
+      return;
+    }
+    runningHandle.onStream((event) => {
+      if (event.stream === "stdout") feedDelta(event.data);
+      else processor.stderr += event.data;
+    });
+    runningHandle.onExit((event) => {
+      if (carry.trim()) feedLine(carry);
+      carry = "";
+      this.finalizeRecoveredRun(sessionId, requestId, processor, {
+        exitCode: event.exitCode,
+        signal: event.signal === null ? null : numericToSignal(event.signal),
+        stderr: processor.stderr,
+        stdoutTruncated: initialState.stdoutTruncated,
+      });
+      flushEmit();
+    });
+  }
+
+  private finalizeRecoveredRun(
+    sessionId: string,
+    requestId: string,
+    processor: ReplayProcessor,
+    outcome: {
+      exitCode: number | null;
+      signal: NodeJS.Signals | null;
+      stderr: string;
+      stdoutTruncated: boolean;
+      lost?: boolean;
+    },
+  ): void {
+    this.execHost?.forgetRun(structuredRunId(sessionId));
+    if (!this.isCurrentRequest(sessionId, requestId)) return;
+    const current = this.sessions.get(sessionId);
+    if (!current) return;
+
+    const commandLabel = recoveredCommandLabel(current.runner);
+    const interruptedForQuestion = processor.stopReason === "ask-user-question";
+    const failedExit = outcome.lost
+      || outcome.stdoutTruncated
+      || (outcome.exitCode !== null && outcome.exitCode !== 0)
+      || outcome.signal !== null;
+    if ((processor.primaryError || failedExit) && !interruptedForQuestion) {
+      const errorText = outcome.lost
+        ? "服务重启后运行进程已丢失，本轮未能完成。"
+        : this.formatStructuredExitError(commandLabel, outcome.exitCode, outcome.signal, {
+            stderr: outcome.stderr.slice(-4096),
+            primary: processor.primaryError,
+            extras: processor.errors,
+            stdoutTail: processor.stdoutTail,
+          });
+      const failed = this.finishStructuredFailure(
+        current,
+        typeof outcome.exitCode === "number" ? outcome.exitCode : 1,
+        errorText,
+        processor.state,
+      );
+      this.sessions.set(sessionId, failed);
+      this.saveAuthoritativeSession(failed);
+      this.emitStructuredSnapshot(failed);
+      this.emitStructuredSnapshot(failed, "ended");
+      return;
+    }
+
+    const messages = this.buildCompletedAssistantMessages(current, processor.state);
+    const keepRunning = interruptedForQuestion;
+    const finished: SessionSnapshot = {
+      ...current,
+      status: keepRunning ? "running" : "idle",
+      exitCode: keepRunning ? null : 0,
+      endedAt: keepRunning ? null : new Date().toISOString(),
+      output: processor.state.result,
+      claudeSessionId: processor.state.sessionId ?? current.claudeSessionId,
+      messages,
+      pendingEscalation: null,
+      permissionBlocked: false,
+      structuredState: {
+        ...(current.structuredState as StructuredSessionState),
+        model: processor.state.model ?? current.structuredState?.model,
+        inFlight: false,
+        activeRequestId: null,
+        lastError: null,
+      },
+    };
+    this.sessions.set(sessionId, finished);
+    this.saveAuthoritativeSession(finished);
+    this.emitStructuredSnapshot(finished);
+    if (!keepRunning) this.emitStructuredSnapshot(finished, "ended");
+
+    if ((finished.queuedMessages?.length ?? 0) > 0) {
+      setImmediate(() => { void this.flushNextQueuedMessage(sessionId); });
+    }
   }
 
   private trackStreamEmitTimer(timer: NodeJS.Timeout): NodeJS.Timeout {
@@ -1271,6 +1663,9 @@ export class StructuredSessionManager {
   private releasePendingRunnerExecution(sessionId: string, execution: StructuredRunnerExecution): boolean {
     if (this.pendingRunnerExecutions.get(sessionId) !== execution) return false;
     this.pendingRunnerExecutions.delete(sessionId);
+    // Drop the daemon-side record once the manager has taken over completion;
+    // no-op for the in-process fallback host.
+    this.execHost?.forgetRun(structuredRunId(sessionId));
     return true;
   }
 

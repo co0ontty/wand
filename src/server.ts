@@ -83,7 +83,7 @@ import { isLogBusActive, wandTuiLog } from "./tui/log-bus.js";
 import { EMBEDDED_WEB_ASSETS, type EmbeddedVendorAssetPath } from "./web-ui/embedded-assets.js";
 import { renderApp } from "./web-ui/index.js";
 import { WsBroadcastManager } from "./ws-broadcast.js";
-import { createTerminalHost } from "./terminal-daemon-client.js";
+import { createTerminalHost, TerminalDaemonClient } from "./terminal-daemon-client.js";
 import type { TerminalHost } from "./terminal-host.js";
 import { checkRateLimit, recordFailedLogin, resetRateLimit } from "./middleware/rate-limit.js";
 import {
@@ -649,7 +649,10 @@ export async function startServer(
   const terminalHost = options.terminalHost ?? await createTerminalHost(configPath);
   const processes = new ProcessManager(config, storage, configDir, terminalHost);
   const structuredLogger = new SessionLogger(configDir, config.shortcutLogMaxBytes);
-  const structuredSessions = new StructuredSessionManager(storage, config, structuredLogger);
+  // Only the daemon-backed host keeps structured CLI runs alive across restarts;
+  // the in-process fallback keeps the legacy die-with-server lifecycle.
+  const structuredExecHost = terminalHost instanceof TerminalDaemonClient ? terminalHost : undefined;
+  const structuredSessions = new StructuredSessionManager(storage, config, structuredLogger, undefined, {}, structuredExecHost);
   const sessionRegistry = new SessionRegistry(processes, structuredSessions, storage);
   const missions = new Missions(storage, structuredSessions, sessionRegistry);
   const updateState = new ServerUpdateState();
@@ -1343,6 +1346,9 @@ export async function startServer(
     missions.ingest(event);
     wsManager.emitEvent(event);
   });
+  // Re-attach structured CLI runs that kept going inside terminald while the
+  // previous web process was down; fire-and-forget, failures are logged inside.
+  void structuredSessions.recoverDetachedRuns();
 
   // ── Restart endpoint (needs server + wss in scope) ──
 

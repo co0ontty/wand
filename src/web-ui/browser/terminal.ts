@@ -259,13 +259,6 @@ import { consumeTerminalTouchPage, consumeTerminalWheelPage, terminalWheelPageSe
         return state.terminalViewportEl;
       }
 
-      export function clearTerminalScrollIdleTimer() {
-        if (state.terminalScrollIdleTimer) {
-          clearTimeout(state.terminalScrollIdleTimer);
-          state.terminalScrollIdleTimer = null;
-        }
-      }
-
       export function updateTerminalJumpToBottomButton() {
         var button = document.getElementById("terminal-jump-bottom");
         var shouldShow = !!state.selectedId
@@ -322,25 +315,10 @@ import { consumeTerminalTouchPage, consumeTerminalWheelPage, terminalWheelPageSe
         }
       }
 
-      // 用户手动上滚进入浏览模式后，闲置这段时间就自动平滑回到底部并恢复
-      // 跟随（「翻到哪停在哪，停一会儿不动再回滚」）。期间任何一次新的
-      // 滚动/触摸都会重新计时。
-      var TERMINAL_SCROLL_IDLE_RETURN_MS = 20000;
-
-      function armTerminalScrollIdleReturn() {
-        clearTerminalScrollIdleTimer();
-        state.terminalScrollIdleTimer = setTimeout(function() {
-          state.terminalScrollIdleTimer = null;
-          if (!state.terminal || state.terminalAutoFollow) return;
-          state.terminalAutoFollow = true;
-          scrollTerminalToBottom(true);
-          updateTerminalJumpToBottomButton();
-        }, TERMINAL_SCROLL_IDLE_RETURN_MS);
-      }
-
+      // 用户上滚进入浏览模式后不再自动回底：保持 autoFollow=false，把控制权
+      // 交给左下角的「回到底部」按钮——只有用户点按钮才恢复贴底跟随。
       function setTerminalManualScrollActive() {
         state.terminalAutoFollow = false;
-        armTerminalScrollIdleReturn();
         state.terminalProgrammaticScrollUntil = 0;
         updateTerminalJumpToBottomButton();
       }
@@ -350,7 +328,6 @@ import { consumeTerminalTouchPage, consumeTerminalWheelPage, terminalWheelPageSe
         var force = reason === "force";
         if (force) {
           state.terminalAutoFollow = true;
-          clearTerminalScrollIdleTimer();
           scrollTerminalToBottom(false);
           updateTerminalJumpToBottomButton();
           return;
@@ -797,7 +774,7 @@ import { consumeTerminalTouchPage, consumeTerminalWheelPage, terminalWheelPageSe
           if (terminal !== state.terminal || generation !== state.terminalRestoreGeneration) return;
           // WS 重连 / 前台恢复会全量 reset+replay。若用户正停在 scrollback
           // 里阅读，这里不能把他拽回底部：先记下距底部距离，重放完按原距离
-          // 复位视口，保持手动浏览模式（闲置回底由 idle 计时器接管）。
+          // 复位视口，保持手动浏览模式（是否回底由用户点「回到底部」按钮决定）。
           var wasManualBrowsing = state.terminalAutoFollow === false;
           var prevViewport = getTerminalViewport();
           var manualDistanceFromBottom = prevViewport
@@ -832,7 +809,6 @@ import { consumeTerminalTouchPage, consumeTerminalWheelPage, terminalWheelPageSe
                 restoredViewport.scrollHeight - restoredViewport.clientHeight - manualDistanceFromBottom
               );
             }
-            armTerminalScrollIdleReturn();
           } else {
             state.terminalAutoFollow = true;
             if (state.terminalFitAddon && typeof state.terminalFitAddon.fit === "function") {
@@ -1009,7 +985,6 @@ import { consumeTerminalTouchPage, consumeTerminalWheelPage, terminalWheelPageSe
           });
 
           state.terminalAutoFollow = true;
-          clearTerminalScrollIdleTimer();
           var viewport = getTerminalViewport();
           if (viewport) {
             state.terminalViewportScrollHandler = function() {
@@ -1019,7 +994,6 @@ import { consumeTerminalTouchPage, consumeTerminalWheelPage, terminalWheelPageSe
               }
               if (isTerminalAtBottom()) {
                 state.terminalAutoFollow = true;
-                clearTerminalScrollIdleTimer();
               } else {
                 setTerminalManualScrollActive();
               }

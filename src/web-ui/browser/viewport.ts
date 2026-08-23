@@ -6,7 +6,7 @@ import { JOYSTICK_ACTION_KEYS, JOYSTICK_BALL_SIZE, JOYSTICK_EDGE_MARGIN, JOYSTIC
 import { showToast } from "./notifications";
 import { render } from "./render";
 import { getPreferredMessages, isStructuredSession, updateDrawerState, updateSessionSnapshot } from "./session-engine";
-import { clearTerminalScrollIdleTimer, isTerminalNearBottom, maybeScrollTerminalToBottom, updateTerminalJumpToBottomButton } from "./terminal";
+import { isTerminalNearBottom, maybeScrollTerminalToBottom, updateTerminalJumpToBottomButton } from "./terminal";
 import { isMobileLayout } from "./file-browser";
 import { renderChat } from "./websocket";
 
@@ -879,7 +879,6 @@ import { renderChat } from "./websocket";
             state[pair[1]] = null;
           }
         });
-        clearTerminalScrollIdleTimer();
         var output = document.getElementById("output");
         if (state.terminalViewportEl) {
           if (state.terminalViewportScrollHandler) {
