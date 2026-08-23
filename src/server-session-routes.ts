@@ -831,8 +831,9 @@ export function registerSessionRoutes(
       res.status(400).json({ error: "下标无效。" });
       return;
     }
+    const expectedText = typeof req.body?.expectedText === "string" ? req.body.expectedText : undefined;
     try {
-      const snapshot = structured.deleteQueuedMessage(req.params.id, index);
+      const snapshot = structured.deleteQueuedMessage(req.params.id, index, expectedText);
       res.json(sessionResponseDTO(snapshot));
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法删除排队消息。") });

@@ -1357,12 +1357,15 @@ export class StructuredSessionManager {
     return updated;
   }
 
-  /** Remove a single queued message by index. */
-  deleteQueuedMessage(sessionId: string, index: number): SessionSnapshot {
+  /** Remove a single queued message only while index and text still identify the same item. */
+  deleteQueuedMessage(sessionId: string, index: number, expectedText?: string): SessionSnapshot {
     const session = this.requireSession(sessionId);
     const queue = session.queuedMessages ?? [];
     if (!Number.isInteger(index) || index < 0 || index >= queue.length) {
       throw new Error("队列中没有该条消息（可能已被处理）。");
+    }
+    if (expectedText !== undefined && queue[index] !== expectedText) {
+      throw new Error("排队消息已变化，请按最新顺序重试。");
     }
     const next = queue.slice(0, index).concat(queue.slice(index + 1));
     const skills = session.queuedMessageSkills ?? [];

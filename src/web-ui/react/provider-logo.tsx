@@ -1,6 +1,7 @@
 import * as React from "react";
 
 import {
+  CLAUDE_BRAND_COLOR,
   CLAUDE_LOGO_PATH,
   CODEX_LOGO_PATH,
   GROK_LOGO_PATHS,
@@ -96,7 +97,22 @@ export function ProviderLogo({ provider, className }: ProviderLogoProps) {
     );
   }
 
-  if (normalized === "claude" || normalized === "codex") {
+  if (normalized === "claude") {
+    return (
+      <svg
+        className={logoClass}
+        viewBox="0 0 24 24"
+        fill={CLAUDE_BRAND_COLOR}
+        aria-hidden="true"
+        focusable="false"
+        data-provider-logo="claude"
+      >
+        <path d={CLAUDE_LOGO_PATH}/>
+      </svg>
+    );
+  }
+
+  if (normalized === "codex") {
     return (
       <svg
         className={logoClass}
@@ -104,9 +120,9 @@ export function ProviderLogo({ provider, className }: ProviderLogoProps) {
         fill="currentColor"
         aria-hidden="true"
         focusable="false"
-        data-provider-logo={normalized}
+        data-provider-logo="codex"
       >
-        <path d={normalized === "claude" ? CLAUDE_LOGO_PATH : CODEX_LOGO_PATH}/>
+        <path d={CODEX_LOGO_PATH}/>
       </svg>
     );
   }

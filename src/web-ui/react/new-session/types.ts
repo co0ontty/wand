@@ -40,6 +40,7 @@ export interface NewSessionPreferencePatch {
   defaultProvider?: NewSessionProvider;
   defaultSessionKind?: NewSessionPreferenceKind;
   defaultMode?: NewSessionMode;
+  defaultTaskWorktree?: boolean;
 }
 
 export interface NewSessionRuntimeContext {

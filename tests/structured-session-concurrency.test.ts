@@ -348,7 +348,13 @@ test("queued SDK messages retain their selected skills through queue operations"
   manager.reorderQueuedMessages(session.id, [1, 0]);
   assert.deepEqual(manager.get(session.id)?.queuedMessageSkills, [["testing"], ["review"]]);
 
-  manager.deleteQueuedMessage(session.id, 0);
+  assert.throws(
+    () => manager.deleteQueuedMessage(session.id, 0, "second"),
+    /排队消息已变化/,
+  );
+  assert.deepEqual(manager.get(session.id)?.queuedMessages, ["third", "second"]);
+
+  manager.deleteQueuedMessage(session.id, 0, "third");
   assert.deepEqual(manager.get(session.id)?.queuedMessages, ["second"]);
   assert.deepEqual(manager.get(session.id)?.queuedMessageSkills, [["review"]]);
 

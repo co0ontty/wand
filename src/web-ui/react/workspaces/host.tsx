@@ -6,6 +6,7 @@ import { type FormEvent, useEffect, useState, useSyncExternalStore } from "react
 
 import { WandButton, WandDialogSurface, WandIcon, WandSwitch } from "../ui";
 import { workspacesController, workspacesStore } from "./controller";
+import { httpNewSessionRepository } from "../new-session/repository";
 import {
   httpWorkspacesRepository,
   loadNewProjectDefaults,
@@ -74,6 +75,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
       .then((loaded) => {
         if (abort.signal.aborted) return;
         setDefaults(loaded);
+        setWorktreeEnabled(loaded.defaultTaskWorktree);
         setCwd((current) => current || loaded.defaultCwd || workspacesStore.getRuntime()?.effectiveCwd() || "");
       })
       .catch((loadError) => {
@@ -279,7 +281,10 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
               </span>
               <WandSwitch
                 checked={worktreeEnabled}
-                onCheckedChange={setWorktreeEnabled}
+                onCheckedChange={(checked) => {
+                  setWorktreeEnabled(checked);
+                  void httpNewSessionRepository.savePreferences({ defaultTaskWorktree: checked }).catch(() => undefined);
+                }}
                 ariaLabel="是否为新任务创建独立 worktree"
               />
             </div>
@@ -289,7 +294,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
             <span>即将创建</span>
             <strong>{name.trim() || "未命名任务"}</strong>
             <span title={effectiveCwd}>{effectiveCwd}</span>
-            <span>{worktreeEnabled ? "独立 worktree" : "共享目录"}</span>
+            <span>{worktreeEnabled ? "独立 worktree" : "共享"}</span>
           </div>
 
           <div className="wand-new-session-footer wand-new-project-footer">

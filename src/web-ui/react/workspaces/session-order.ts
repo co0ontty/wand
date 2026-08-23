@@ -38,3 +38,19 @@ export function workspaceSessionLabel(session: WorkspaceSessionSummary, index: n
   const title = (session.title || "").trim();
   return title || `${workspaceProviderLabel(session.provider)} ${index + 1}`;
 }
+
+/** 侧栏列表用：目录名/路径叶子不要再当终端标题，避免三层都叫同一个文件夹名。 */
+export function listSessionLabel(
+  session: WorkspaceSessionSummary,
+  index: number,
+  parentNames: readonly string[] = [],
+): string {
+  const title = (session.title || "").trim();
+  const leaf = (session.cwd || "").replace(/\\/g, "/").replace(/\/+$/, "").split("/").filter(Boolean).at(-1) || "";
+  const repeatsParent = Boolean(title) && (
+    parentNames.some((name) => name.toLowerCase() === title.toLowerCase()) ||
+    Boolean(leaf) && title.toLowerCase() === leaf.toLowerCase()
+  );
+  if (title && !repeatsParent) return title;
+  return `${workspaceProviderLabel(session.provider)} ${index + 1}`;
+}

@@ -30,6 +30,7 @@ const DEFAULT_CONFIG_FILE = "config.json";
 export const PREFERENCE_KEYS = [
   "defaultProvider",
   "defaultSessionKind",
+  "defaultTaskWorktree",
   "defaultMode",
   "defaultCwd",
   "defaultModel",
@@ -68,6 +69,7 @@ export const defaultConfig = (): WandConfig => ({
   password: "change-me",
   defaultProvider: "claude",
   defaultSessionKind: "structured",
+  defaultTaskWorktree: true,
   // 非 root 启动时才有资格用 Claude 的 permission-bypass（root 会被 Claude CLI 拒绝），
   // 所以这种环境下把默认执行模式抬到「托管」——开箱即得自动确认权限的全自主体验。
   // root 启动则保守回落到「default」（托管在 root 下也只能降级成 acceptEdits）。
@@ -316,6 +318,10 @@ export function applyStoragePreferences(config: WandConfig, storage: WandStorage
     const v = storage.getPreference<string>(preferenceStorageKey("defaultSessionKind"), defaults.defaultSessionKind ?? "structured");
     if (v === "pty" || v === "structured") config.defaultSessionKind = v;
   }
+  if (storage.hasPreference(preferenceStorageKey("defaultTaskWorktree"))) {
+    const v = storage.getPreference<boolean>(preferenceStorageKey("defaultTaskWorktree"), defaults.defaultTaskWorktree ?? true);
+    if (typeof v === "boolean") config.defaultTaskWorktree = v;
+  }
   if (storage.hasPreference(preferenceStorageKey("defaultMode"))) {
     const v = storage.getPreference<string>(preferenceStorageKey("defaultMode"), defaults.defaultMode);
     if (isExecutionMode(v)) config.defaultMode = v;
@@ -408,6 +414,12 @@ export function writePreferenceToStorage(
       if (value !== "pty" && value !== "structured") throw new Error(`无效会话类型: ${value}`);
       storage.setPreference(dbKey, value);
       config.defaultSessionKind = value;
+      break;
+    }
+    case "defaultTaskWorktree": {
+      if (typeof value !== "boolean") throw new Error("defaultTaskWorktree 必须是布尔值。");
+      storage.setPreference(dbKey, value);
+      config.defaultTaskWorktree = value;
       break;
     }
     case "defaultMode": {
@@ -707,6 +719,7 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
     cardDefaults: normalizeCardDefaults(input.cardDefaults),
     defaultProvider: input.defaultProvider === "codex" || input.defaultProvider === "opencode" || input.defaultProvider === "grok" || input.defaultProvider === "qoder" || input.defaultProvider === "pi" ? input.defaultProvider : "claude",
     defaultSessionKind: input.defaultSessionKind === "pty" ? "pty" : "structured",
+    defaultTaskWorktree: typeof input.defaultTaskWorktree === "boolean" ? input.defaultTaskWorktree : defaults.defaultTaskWorktree,
     defaultModel: typeof input.defaultModel === "string" ? input.defaultModel.trim() : defaults.defaultModel,
     defaultCodexModel: typeof input.defaultCodexModel === "string" ? input.defaultCodexModel.trim() : defaults.defaultCodexModel,
     defaultOpenCodeModel: typeof input.defaultOpenCodeModel === "string" ? input.defaultOpenCodeModel.trim() : defaults.defaultOpenCodeModel,

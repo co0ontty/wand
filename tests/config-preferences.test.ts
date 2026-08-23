@@ -85,13 +85,16 @@ test("new-session provider and kind preferences round-trip through storage", () 
 
   writePreferenceToStorage(config, storage, "defaultProvider", "codex");
   writePreferenceToStorage(config, storage, "defaultSessionKind", "pty");
+  writePreferenceToStorage(config, storage, "defaultTaskWorktree", false);
 
   assert.equal(config.defaultProvider, "codex");
   assert.equal(config.defaultSessionKind, "pty");
+  assert.equal(config.defaultTaskWorktree, false);
 
   const restored = applyStoragePreferences(defaultConfig(), storage);
   assert.equal(restored.defaultProvider, "codex");
   assert.equal(restored.defaultSessionKind, "pty");
+  assert.equal(restored.defaultTaskWorktree, false);
 });
 
 test("OpenCode provider and model preferences round-trip through storage", () => {

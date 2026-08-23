@@ -6,6 +6,9 @@ export type WorkspaceProvider = "claude" | "codex" | "opencode" | "grok" | "qode
 /** A task work window can run an Agent CLI or a bare login shell. */
 export type WorkspaceSessionTarget = WorkspaceProvider | "shell";
 
+/** Agent 窗口的运行形态；空白终端固定为 PTY。 */
+export type WorkspaceSessionKind = "structured" | "pty";
+
 export type PaneTab =
   | { id: string; kind: "session"; sessionId: string }
   | { id: string; kind: "editor"; path: string }
@@ -182,6 +185,8 @@ export interface RecentPath {
 export interface NewProjectDefaults {
   defaultProvider: WorkspaceProvider;
   defaultCwd: string;
+  defaultSessionKind: WorkspaceSessionKind;
+  defaultTaskWorktree: boolean;
   recentPaths: RecentPath[];
 }
 
@@ -223,6 +228,7 @@ export interface NewTaskSessionPayload {
   taskId: string;
   cwd: string;
   target: WorkspaceSessionTarget;
+  kind?: WorkspaceSessionKind;
 }
 
 interface StartWorkspaceMergeAgentPayload {

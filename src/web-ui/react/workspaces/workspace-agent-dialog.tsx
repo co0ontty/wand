@@ -7,9 +7,10 @@ import {
 } from "react";
 
 import { nextChoice, type ChoiceNavigationKey } from "../new-session/choice-navigation";
+import { httpNewSessionRepository } from "../new-session/repository";
 import { ProviderLogo } from "../provider-logo";
 import { WandButton, WandDialogSurface, WandIcon } from "../ui";
-import type { WorkspaceProvider, WorkspaceSessionTarget } from "./types";
+import type { WorkspaceProvider, WorkspaceSessionKind, WorkspaceSessionTarget } from "./types";
 
 export const WORKSPACE_AGENT_OPTIONS: ReadonlyArray<{
   value: WorkspaceSessionTarget;
@@ -25,6 +26,11 @@ export const WORKSPACE_AGENT_OPTIONS: ReadonlyArray<{
   { value: "shell", label: "空白终端", description: "仅启动系统 Shell" },
 ];
 
+const KIND_OPTIONS: ReadonlyArray<{ value: WorkspaceSessionKind; label: string; description: string }> = [
+  { value: "structured", label: "结构化", description: "智能对话模式" },
+  { value: "pty", label: "PTY", description: "原始 CLI 终端" },
+];
+
 const TARGET_VALUES = WORKSPACE_AGENT_OPTIONS.map((option) => option.value);
 const RADIO_NAVIGATION_KEYS = new Set<ChoiceNavigationKey>([
   "ArrowLeft",
@@ -38,7 +44,8 @@ const RADIO_NAVIGATION_KEYS = new Set<ChoiceNavigationKey>([
 export interface WorkspaceAgentDialogProps {
   open: boolean;
   initialProvider?: WorkspaceProvider;
-  onConfirm(target: WorkspaceSessionTarget): void | Promise<void>;
+  initialKind?: WorkspaceSessionKind;
+  onConfirm(target: WorkspaceSessionTarget, kind: WorkspaceSessionKind): void | Promise<void>;
   onDismiss(): void;
 }
 
@@ -53,20 +60,38 @@ function presentError(error: unknown): string {
 export function WorkspaceAgentDialog({
   open,
   initialProvider = "claude",
+  initialKind = "structured",
   onConfirm,
   onDismiss,
 }: WorkspaceAgentDialogProps) {
   const [target, setTarget] = useState<WorkspaceSessionTarget>(initialProvider);
+  const [kind, setKind] = useState<WorkspaceSessionKind>(initialKind);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const targetRefs = useRef<Partial<Record<WorkspaceSessionTarget, HTMLButtonElement | null>>>({});
 
   useEffect(() => {
     if (!open) return;
-    setTarget(initialProvider);
+    let cancelled = false;
     setSubmitting(false);
     setError("");
-  }, [initialProvider, open]);
+    setTarget(initialProvider);
+    setKind(initialKind === "pty" ? "pty" : "structured");
+    void fetch("/api/config", { credentials: "same-origin" })
+      .then((response) => response.ok ? response.json() : null)
+      .then((config: { defaultProvider?: string; defaultSessionKind?: string } | null) => {
+        if (cancelled || !config) return;
+        const savedProvider = WORKSPACE_AGENT_OPTIONS.some((option) => option.value === config.defaultProvider)
+          ? config.defaultProvider as WorkspaceSessionTarget
+          : null;
+        if (savedProvider && savedProvider !== "shell") setTarget(savedProvider);
+        if (config.defaultSessionKind === "pty" || config.defaultSessionKind === "structured") {
+          setKind(config.defaultSessionKind);
+        }
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [initialKind, initialProvider, open]);
 
   function navigateTarget(
     event: KeyboardEvent<HTMLButtonElement>,
@@ -85,7 +110,7 @@ export function WorkspaceAgentDialog({
     setSubmitting(true);
     setError("");
     try {
-      await onConfirm(target);
+      await onConfirm(target, target === "shell" ? "pty" : kind);
       onDismiss();
     } catch (createError) {
       setError(presentError(createError));
@@ -124,7 +149,12 @@ export function WorkspaceAgentDialog({
                   tabIndex={target === option.value ? 0 : -1}
                   className={`wand-new-session-choice wand-new-session-provider-choice${target === option.value ? " active" : ""}`}
                   data-wand-autofocus={target === option.value ? "" : undefined}
-                  onClick={() => setTarget(option.value)}
+                  onClick={() => {
+                    setTarget(option.value);
+                    if (option.value !== "shell") {
+                      void httpNewSessionRepository.savePreferences({ defaultProvider: option.value }).catch(() => undefined);
+                    }
+                  }}
                   onKeyDown={(event) => navigateTarget(event, target)}
                 >
                   {option.value === "shell"
@@ -136,6 +166,29 @@ export function WorkspaceAgentDialog({
               ))}
             </div>
           </fieldset>
+          {target !== "shell" ? (
+            <fieldset className="wand-new-session-fieldset">
+              <legend className="wand-new-session-field-label">会话类型</legend>
+              <div className="wand-new-session-choices" role="radiogroup" aria-label="会话类型">
+                {KIND_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={kind === option.value}
+                    className={`wand-new-session-choice wand-new-session-kind-choice${kind === option.value ? " active" : ""}`}
+                    onClick={() => {
+                      setKind(option.value);
+                      void httpNewSessionRepository.savePreferences({ defaultSessionKind: option.value }).catch(() => undefined);
+                    }}
+                  >
+                    <span className="wand-new-session-choice-label">{option.label}</span>
+                    <span className="wand-new-session-choice-description">{option.description}</span>
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+          ) : null}
           {error ? <p className="wand-new-session-error" role="alert">{error}</p> : null}
         </div>
         <div className="wand-new-session-footer wand-workspace-agent-footer">

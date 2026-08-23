@@ -113,12 +113,21 @@ export function installWorkspacesLegacyAdapter(): void {
     },
     newTaskSession(payload: NewTaskSessionPayload) {
       // 标签栏「+」/ 窗格「+」：在同一任务 worktree 再起一个绑定会话；
-      // startSessionInCwd 在 resolve 前已把新会话写入 state.selectedId，resolve 时回传给调用方建 tab。
-      return startSessionInCwd(payload.cwd, {
+      // startSessionInCwd 在 resolve 前已把新会话写入 state.selectedId。
+      // PTY 路径回传 sessionId 字符串，结构化路径回传会话对象，这里统一成 id。
+      return Promise.resolve(startSessionInCwd(payload.cwd, {
         workspaceId: payload.workspaceId,
         workspaceTaskId: payload.taskId,
         shell: payload.target === "shell",
         provider: payload.target === "shell" ? undefined : payload.target,
+        kind: payload.target === "shell" ? "pty" : (payload.kind ?? "structured"),
+      })).then((created) => {
+        if (typeof created === "string" && created) return created;
+        if (created && typeof created === "object" && "id" in created) {
+          const id = (created as { id?: unknown }).id;
+          if (typeof id === "string" && id) return id;
+        }
+        return undefined;
       });
     },
     startWorktreeMergeAgent(payload) {

@@ -1256,7 +1256,7 @@ export const missionsStyles = String.raw`
 .wand-missions-create input,.wand-missions-create textarea,.wand-missions-comment-form textarea { box-sizing: border-box; width: 100%; border: 1px solid var(--border-subtle); border-radius: 9px; padding: 9px 10px; color: var(--text-primary); background: var(--bg-primary); font: inherit; }
 .wand-missions-create textarea { min-height: 120px; resize: vertical; }
 .wand-missions-provider-picker { display: grid; grid-template-columns: repeat(3,1fr); gap: 7px; }
-.wand-missions-provider-picker label { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border-subtle); border-radius: 10px; padding: 9px; cursor: pointer; }.wand-missions-provider-picker label.active { border-color: var(--accent); background: var(--accent-muted); }.wand-missions-provider-picker svg { width: 19px; height: 19px; }.wand-missions-provider-picker input { width: auto; }
+.wand-missions-provider-picker label { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border-subtle); border-radius: 10px; padding: 9px; cursor: pointer; }.wand-missions-provider-picker label.active { border-color: var(--accent); background: var(--accent-muted); }.wand-missions-provider-picker svg { width: 19px; height: 19px; color: var(--text-primary); }.wand-missions-provider-picker input { width: auto; }
 .wand-missions-create details { display: grid; gap: 10px; border: 1px solid var(--border-subtle); border-radius: 10px; padding: 10px; }.wand-missions-create details[open] summary { margin-bottom: 10px; }.wand-missions-create details label + label { margin-top: 9px; }
 .wand-missions-create-actions { justify-content: flex-end; }
 @media (max-width: 760px) { .wand-missions-dialog { inset: var(--wand-safe-top) 0 var(--wand-safe-bottom); border-radius: 0; }.wand-missions-description { display: none; }.wand-missions-workspace { grid-template-columns: 1fr; }.wand-missions-list { max-height: 160px; border-right: 0; border-bottom: 1px solid var(--border-subtle); }.wand-missions-comment-form { grid-template-columns: 1fr; }.wand-missions-provider-picker { grid-template-columns: repeat(2,1fr); } }
@@ -1478,7 +1478,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   width: 21px;
   height: 21px;
   margin-bottom: 2px;
-  color: var(--text-secondary);
+  color: var(--text-primary);
 }
 
 .wand-new-session-provider-logo.wand-provider-logo-opencode,
@@ -1486,7 +1486,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   border-radius: 5px;
 }
 
-.wand-new-session-choice.active .wand-new-session-provider-logo {
+.wand-new-session-choice.active .wand-new-session-provider-logo.wand-provider-logo-generic {
   color: var(--accent);
 }
 

@@ -108,6 +108,8 @@ export interface WandConfig {
   defaultProvider?: SessionProvider;
   /** 新建会话时默认使用的承载类型。 */
   defaultSessionKind?: SessionKind;
+  /** 新建任务时是否默认开启独立 worktree。 */
+  defaultTaskWorktree?: boolean;
   defaultMode: ExecutionMode;
   shell: string;
   defaultCwd: string;

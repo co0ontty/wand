@@ -21,12 +21,17 @@ import {
   wrapInSplit,
 } from "../src/web-ui/react/workspaces/layout-tree.js";
 import {
+  listSessionLabel,
   orderWorkspaceSessions,
   workspaceSessionLabel,
 } from "../src/web-ui/react/workspaces/session-order.js";
 import type { LayoutNode, PaneTab } from "../src/web-ui/react/workspaces/types.js";
 import { WORKSPACE_AGENT_OPTIONS } from "../src/web-ui/react/workspaces/workspace-agent-dialog.js";
-import { WorkspacesPanel } from "../src/web-ui/react/workspaces/workspaces-panel.js";
+import {
+  WorkspacesPanel,
+  shortenWorkspacePath,
+  workspacePathLeaf,
+} from "../src/web-ui/react/workspaces/workspaces-panel.js";
 import {
   HttpWorkspacesRepository,
   normalizeWorkspaceWorktreeOverview,
@@ -87,6 +92,17 @@ test("taskSplitLayout keeps an empty sibling when there is only one session", ()
   assert.deepEqual((layout.children[1] as Extract<LayoutNode, { type: "pane" }>).tabs, []);
 });
 
+test("list session labels skip titles that only repeat the directory name", () => {
+  assert.equal(
+    listSessionLabel({ id: "s1", provider: "pi", title: "wand", cwd: "/Users/me/wand" }, 0, ["wand"]),
+    "Pi 1",
+  );
+  assert.equal(
+    listSessionLabel({ id: "s1", provider: "pi", title: "修侧栏" }, 0, ["wand"]),
+    "修侧栏",
+  );
+});
+
 test("workspace sessions use chronological tab order and stable labels", () => {
   const sessions = orderWorkspaceSessions([
     { id: "new", provider: "claude", startedAt: "2026-08-09T10:02:00.000Z" },
@@ -103,6 +119,9 @@ test("new task conversations offer every supported Agent provider", () => {
     ["claude", "codex", "opencode", "grok", "qoder", "pi", "shell"],
   );
   assert.equal(WORKSPACE_AGENT_OPTIONS.at(-1)?.label, "空白终端");
+  const source = readFileSync(new URL("../src/web-ui/react/workspaces/workspace-agent-dialog.tsx", import.meta.url), "utf8");
+  assert.match(source, /value: "structured".*智能对话模式/s);
+  assert.match(source, /会话类型/);
 });
 
 test("opening an empty workspace task keeps creation user-driven", () => {
@@ -119,6 +138,25 @@ test("workspaces panel steers creation to the empty-state CTA without manual ref
   assert.doesNotMatch(html, /workspaces-panel-toolbar|workspaces-panel-new-project/);
   assert.match(html, /aria-label="新建任务"/);
   assert.doesNotMatch(html, /刷新项目列表|workspaces-panel-refresh/);
+});
+
+test("workspace path captions keep the leaf and hide redundant absolute prefixes", () => {
+  assert.equal(workspacePathLeaf("/Users/me/Self/vibe_coding/wand"), "wand");
+  assert.equal(shortenWorkspacePath("/Users/me/Self/vibe_coding/wand"), "…/vibe_coding/wand");
+  assert.equal(shortenWorkspacePath("/tmp/wand"), "/tmp/wand");
+  assert.equal(shortenWorkspacePath("wand"), "wand");
+});
+
+test("task list treats directories as group headers and exposes per-terminal delete", () => {
+  const panel = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
+  const styles = readFileSync(new URL("../src/web-ui/content/styles.css", import.meta.url), "utf8");
+  assert.match(panel, /workspace-row-count-label/);
+  assert.match(panel, /删除终端/);
+  assert.match(panel, /onDeleteSession/);
+  assert.match(panel, /workspace-session-action delete/);
+  assert.match(styles, /\.workspace-item\s*\{[^}]*border-radius:\s*12px/s);
+  assert.match(styles, /\.workspace-tasks\s*\{[^}]*border-left/s);
+  assert.match(styles, /\.workspace-task-name\s*\{[^}]*font-size:\s*var\(--font-size-sm\)/s);
 });
 
 test("new project dialog has shared dialog styling and a responsive provider grid", () => {

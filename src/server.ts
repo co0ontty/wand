@@ -300,6 +300,7 @@ const CONNECTED_APP_PREFERENCE_KEYS = new Set([
   "defaultThinkingEffort",
   "defaultProvider",
   "defaultSessionKind",
+  "defaultTaskWorktree",
 ]);
 
 function requireAdminOrSessionPreferences(req: Request, res: Response, next: NextFunction): void {
@@ -918,6 +919,7 @@ export async function startServer(
       port: config.port,
       defaultProvider: config.defaultProvider ?? "claude",
       defaultSessionKind: config.defaultSessionKind ?? "structured",
+      defaultTaskWorktree: config.defaultTaskWorktree !== false,
       defaultMode: config.defaultMode,
       defaultCwd: config.defaultCwd,
       defaultModel: defaultModels.claude,

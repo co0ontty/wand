@@ -16,6 +16,7 @@ import type {
   NewTaskSessionPayload,
   TaskWindowLayout,
   WorkWindowLayout,
+  WorkspaceSessionKind,
   WorkspaceSessionTarget,
   WorkspaceSessionSummary,
   WorkspaceTaskDetail,
@@ -173,7 +174,7 @@ export function WorkspaceTabBar(): React.ReactElement | null {
   // 无活动任务 → 不渲染标签栏（SSR 与 reactShell=0 兜底同样走这里）。
   if (!context.taskId) return null;
 
-  const handleNewSession = async (target: WorkspaceSessionTarget) => {
+  const handleNewSession = async (target: WorkspaceSessionTarget, kind: WorkspaceSessionKind) => {
     if (!context.taskId || !context.workspaceId) {
       throw new Error("当前任务上下文已失效，请重新打开任务后重试。");
     }
@@ -184,6 +185,7 @@ export function WorkspaceTabBar(): React.ReactElement | null {
       taskId: context.taskId,
       cwd: taskCwd,
       target,
+      kind,
     };
     const result = await rt.newTaskSession(payload);
     const sessionId = typeof result === "string" ? result : null;

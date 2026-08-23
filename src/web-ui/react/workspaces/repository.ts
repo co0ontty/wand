@@ -289,6 +289,8 @@ export async function loadNewProjectDefaults(
   return {
     defaultProvider: parseProvider(config.defaultProvider) ?? "claude",
     defaultCwd: text(config.defaultCwd),
+    defaultSessionKind: config.defaultSessionKind === "pty" ? "pty" : "structured",
+    defaultTaskWorktree: config.defaultTaskWorktree !== false,
     recentPaths,
   };
 }
