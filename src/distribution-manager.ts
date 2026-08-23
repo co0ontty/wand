@@ -25,7 +25,7 @@ export interface ResolvedDistributionAsset {
   size: number;
   source: "local" | "github";
   releaseNotes?: string;
-  /** 本地分发文件的 SHA-256（hex）；GitHub 来源不提供，客户端据此跳过校验。 */
+  /** 本地文件哈希或 GitHub Release asset.digest；客户端下载后校验。 */
   sha256?: string;
 }
 
@@ -35,12 +35,20 @@ interface GitHubDistributionAsset {
   fileName: string;
   size: number;
   releaseNotes?: string;
+  sha256?: string;
+}
+
+export interface GitHubApkDownload {
+  remoteUrl: string;
+  fileName: string;
+  size: number;
+  sha256?: string;
 }
 
 interface GitHubReleaseAssetHit {
   tagName: string;
   body?: string;
-  asset: { name: string; browser_download_url: string; size: number };
+  asset: { name: string; browser_download_url: string; size: number; digest?: string };
 }
 
 interface CachedGitHubAsset {
@@ -72,6 +80,31 @@ const GITHUB_CACHE_TTL_MS = 10 * 60 * 1000;
 export function extractUpdateSummary(releaseBody: string): string {
   const summary = releaseBody.split(/\r?\n---\s*(?:\r?\n|$)/, 1)[0]?.trim() ?? "";
   return summary.slice(0, 500);
+}
+
+/**
+ * GitHub Release 文件名带 semver build metadata（`wand-v4.48.0+202608232136.apk`）。
+ * `+` 在 content URI / 部分 OEM 安装器里会被当成空格，下载成功后无法拉起安装。
+ * 落盘和对外 fileName 都改成 `-`，版本比较仍用原始 GitHub 文件名提取的 version。
+ */
+export function sanitizeApkFileName(fileName: string): string {
+  const base = fileName.replace(/^.*[/\\]/, "").trim() || "wand-update.apk";
+  const replaced = base.replaceAll("+", "-").replace(/[^A-Za-z0-9._-]+/g, "-");
+  if (!replaced.toLowerCase().endsWith(".apk")) return `${replaced || "wand-update"}.apk`;
+  return replaced;
+}
+
+/** 解析 GitHub Release asset.digest（`sha256:<hex>`）；格式不对返回 undefined。 */
+export function parseGithubDigest(digest: string | undefined): string | undefined {
+  if (!digest) return undefined;
+  const match = /^sha256:([a-fA-F0-9]{64})$/.exec(digest.trim());
+  return match ? match[1].toLowerCase() : undefined;
+}
+
+export function githubApkProxyPath(channel?: ApkUpdateChannel): string {
+  return channel
+    ? `/android/download?channel=${channel}&source=github`
+    : "/android/download?source=github";
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -138,7 +171,14 @@ export class DistributionManager {
       size: localApk.size,
       source: "local" as const,
     } : null;
-    const github = githubApk ? { ...githubApk, source: "github" as const } : null;
+    const github = githubApk ? {
+      ...githubApk,
+      source: "github" as const,
+      // 手机不要直连 GitHub CDN：检查接口能通只说明 wand server 能访问 api.github.com，
+      // objects/release-assets.githubusercontent.com 在移动网上经常被重置。
+      fileName: sanitizeApkFileName(githubApk.fileName),
+      downloadUrl: githubApkProxyPath(channel),
+    } : null;
 
     let winner: ResolvedDistributionAsset | null;
     if (local && github) {
@@ -146,7 +186,7 @@ export class DistributionManager {
     } else {
       winner = local ?? github;
     }
-    // 本地分发的 APK 附带 SHA-256，客户端下载后校验（GitHub 来源走正规 TLS，不提供）。
+    // 本地分发现算 SHA-256；GitHub 来源用 Release digest，随 spread 带上。
     if (winner?.source === "local" && localApk) {
       try {
         const fileStat = await stat(localApk.filePath);
@@ -159,6 +199,21 @@ export class DistributionManager {
       }
     }
     return winner;
+  }
+
+  /**
+   * 给 `/android/download?source=github` 用：原始 GitHub URL 只留在服务端，
+   * 客户端只拿到同源代理地址。fileName 已去掉 `+`。
+   */
+  async resolveGitHubApkDownload(): Promise<GitHubApkDownload | null> {
+    const asset = await this.fetchGitHubAsset(".apk");
+    if (!asset) return null;
+    return {
+      remoteUrl: asset.downloadUrl,
+      fileName: sanitizeApkFileName(asset.fileName),
+      size: asset.size,
+      sha256: asset.sha256,
+    };
   }
 
   async resolveAndroidDownload(channel: ApkUpdateChannel = "beta"): Promise<LocalDistributionAsset | null> {
@@ -459,11 +514,13 @@ export class DistributionManager {
       const version = extractArtifactVersion(hit.asset.name, extension)
         ?? extractArtifactVersion(hit.tagName, extension)
         ?? hit.tagName.replace(/^v/, "");
+      const sha256 = parseGithubDigest(hit.asset.digest);
       const asset: GitHubDistributionAsset = {
         version,
         downloadUrl: hit.asset.browser_download_url,
         fileName: hit.asset.name,
         size: hit.asset.size,
+        ...(sha256 ? { sha256 } : {}),
         ...(extension === ".apk" && hit.body ? { releaseNotes: extractUpdateSummary(hit.body) } : {}),
       };
       this.githubCache.set(extension, { asset, timestamp: this.now() });
@@ -485,7 +542,7 @@ export class DistributionManager {
       body?: string;
       draft?: boolean;
       prerelease?: boolean;
-      assets: Array<{ name: string; browser_download_url: string; size: number }>;
+      assets: Array<{ name: string; browser_download_url: string; size: number; digest?: string }>;
     }>;
     for (const release of releases) {
       if (release.draft || release.prerelease) continue;
@@ -502,11 +559,18 @@ export class DistributionManager {
     local: LocalDistributionAsset | null,
     github: GitHubDistributionAsset | null,
   ): Record<string, unknown> {
-    const selected = local
+    let selected = local
       ? { ...local, source: "local" as const }
       : github
         ? { ...github, updatedAt: null, source: "github" as const }
         : null;
+    if (kind === "apk" && selected?.source === "github" && github) {
+      selected = {
+        ...selected,
+        fileName: sanitizeApkFileName(github.fileName),
+        downloadUrl: githubApkProxyPath(),
+      };
+    }
     const hasKey = kind === "apk" ? "hasApk" : kind === "dmg" ? "hasDmg" : "hasIpa";
     const dirKey = kind === "apk" ? "apkDir" : kind === "dmg" ? "dmgDir" : "ipaDir";
     return {

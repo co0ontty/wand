@@ -56,6 +56,7 @@ export interface WorkspaceSessionSummary {
   provider?: WorkspaceProvider;
   sessionKind?: string;
   runner?: string;
+  command?: string;
   title?: string;
   status?: string;
   cwd?: string;

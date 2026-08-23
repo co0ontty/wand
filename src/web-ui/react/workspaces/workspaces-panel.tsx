@@ -1,6 +1,6 @@
 // 侧栏「任务」面板 —— 唯一的会话入口。视觉层级是：
 // 目录（分组元数据）→ 任务（一级容器）→ 终端/会话。
-// 展开任务可看到其终端，行内「+」在任务目录新建会话；每条终端可单独关闭删除。
+// 任务默认展开其终端；行内「+」在任务目录新建会话；每条终端可单独关闭删除。
 // 未绑定任务的旧会话以「未分组会话」归入所在目录组，不会失联。
 
 import * as React from "react";
@@ -21,7 +21,7 @@ import type {
 } from "./types";
 import { classNames } from "../ui/class-names";
 import { WandIcon, workspaceTaskIconName } from "../ui";
-import { ProviderLogo } from "../provider-logo";
+import { SessionProviderMark } from "./session-mark";
 import { listSessionLabel, workspaceSessionLabel } from "./session-order";
 
 const NAME_MAX = 80;
@@ -165,7 +165,7 @@ function TaskSessionItem({
         onClick={onOpen}
       >
         <span className="workspace-session-mark" aria-hidden="true">
-          <ProviderLogo provider={session.provider}/>
+          <SessionProviderMark session={session}/>
         </span>
         <span className="workspace-session-name">{label}</span>
         {session.sessionKind === "pty" && (
@@ -251,7 +251,7 @@ function TaskItem({
   onRename(name: string): Promise<void>;
   onDelete(): Promise<void>;
 }) {
-  const [open, setOpen] = React.useState(false);
+  const [open, setOpen] = React.useState(true);
   const [confirming, setConfirming] = React.useState(false);
   const [clearConfirming, setClearConfirming] = React.useState(false);
   const [renaming, setRenaming] = React.useState(false);

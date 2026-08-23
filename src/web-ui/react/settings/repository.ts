@@ -166,7 +166,7 @@ function normalizeConfig(value: unknown): SettingsConfig {
     https: input.https === true,
     defaultMode,
     defaultCwd: stringValue(input.defaultCwd),
-    shell: stringValue(input.shell, "/bin/bash"),
+    shell: stringValue(input.shell, "/bin/zsh"),
     language: stringValue(input.language),
     structuredRunner: input.structuredRunner === "sdk" ? "sdk" : "cli",
     inheritEnv: input.inheritEnv !== false,

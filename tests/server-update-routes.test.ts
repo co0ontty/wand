@@ -110,3 +110,62 @@ test("extracted public update routes preserve metadata, channel, range, and miss
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("GitHub APK downloads are proxied through the wand server", async () => {
+  const remote = createServer((req, res) => {
+    assert.equal(req.headers["user-agent"], "wand-server");
+    res.writeHead(200, {
+      "content-type": "application/octet-stream",
+      "content-length": "11",
+    });
+    res.end("apk-payload");
+  });
+  await new Promise<void>((resolve, reject) => {
+    remote.once("error", reject);
+    remote.listen(0, "127.0.0.1", () => {
+      remote.off("error", reject);
+      resolve();
+    });
+  });
+
+  const app = express();
+  const remoteAddress = remote.address() as AddressInfo;
+  registerPublicUpdateRoutes(app, {
+    async resolveLatestApk() { return null; },
+    async resolveAndroidDownload() { return null; },
+    async resolveGitHubApkDownload() {
+      return {
+        remoteUrl: `http://127.0.0.1:${remoteAddress.port}/wand-v3.0.0%2B1.apk`,
+        fileName: "wand-v3.0.0-1.apk",
+        size: 11,
+        sha256: "abc123",
+      };
+    },
+    async computeAssetSha256() { return null; },
+    async resolveLatestDmg() { return null; },
+    async resolveMacosDownload() { return null; },
+    async resolveLatestIpa() { return null; },
+    async resolveIosDownload() { return null; },
+  });
+  app.use(jsonErrorHandler);
+  const server = createServer(app);
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+
+  try {
+    const address = server.address() as AddressInfo;
+    const missing = await fetch(`http://127.0.0.1:${address.port}/android/download?source=github`);
+    assert.equal(missing.status, 200);
+    assert.equal(missing.headers.get("x-apk-sha256"), "abc123");
+    assert.equal(missing.headers.get("content-length"), "11");
+    assert.equal(await missing.text(), "apk-payload");
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await new Promise<void>((resolve, reject) => remote.close((error) => error ? reject(error) : resolve()));
+  }
+});

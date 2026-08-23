@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import os from "node:os";
 import test from "node:test";
 
-import { applyStoragePreferences, defaultConfig, writePreferenceToStorage } from "../src/config.js";
+import { applyStoragePreferences, defaultConfig, resolveDefaultShell, writePreferenceToStorage } from "../src/config.js";
 import type { WandStorage } from "../src/storage.js";
 
 class FakePreferenceStorage {
@@ -19,6 +20,20 @@ class FakePreferenceStorage {
     return this.values.has(key);
   }
 }
+
+test("default shell follows the account login shell instead of a hardcoded bash", () => {
+  if (process.platform === "win32") {
+    assert.equal(resolveDefaultShell(), process.env.COMSPEC || "cmd.exe");
+    return;
+  }
+  const loginShell = os.userInfo().shell;
+  if (loginShell) {
+    assert.equal(resolveDefaultShell(), loginShell);
+    assert.equal(defaultConfig().shell, loginShell);
+  } else {
+    assert.ok(resolveDefaultShell().length > 0);
+  }
+});
 
 test("commit CLI and model preferences update live config and restore from storage", () => {
   const storage = new FakePreferenceStorage() as unknown as WandStorage;

@@ -47,7 +47,9 @@ test("POSIX provider commands return to a persistent interactive login shell", (
   );
   assert.match(plan.shellArgs[1], /if codex --model 'gpt-5'/);
   assert.match(plan.shellArgs[1], /WAND_CLI_EXIT:marker-token:%s/);
-  assert.match(plan.shellArgs[1], /exec '\/bin\/zsh' -l$/);
+  assert.match(plan.shellArgs[1], /1049l/);
+  assert.match(plan.shellArgs[1], /stty sane/);
+  assert.match(plan.shellArgs[1], /exec '\/bin\/zsh' -il$/);
   assert.equal(plan.commandToWrite, undefined);
   assert.ok(plan.cliExitMarker);
 });
@@ -141,6 +143,59 @@ test("zsh fallback recalls the provider command with the up arrow", {
   assert.match(readFileSync(historyFile, "utf8"), /printf WAND_PROVIDER_RAN/);
 });
 
+test("Ctrl+C after a provider command lands in an interactive login shell", {
+  skip: !existsSync("/bin/zsh"),
+}, async (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-pty-fallback-"));
+  writeFileSync(
+    path.join(root, ".zshrc"),
+    ["PS1='WAND_FALLBACK> '", "unsetopt ZLE", "unsetopt PROMPT_SP"].join("\n"),
+  );
+
+  const plan = buildPtyShellLaunchPlan({
+    shell: "/bin/zsh",
+    command: "printf WAND_PROVIDER_RUNNING; sleep 30",
+    bareShell: false,
+    providerCommand: true,
+    platform: process.platform,
+    markerToken: "fallback-marker",
+  });
+  const child = pty.spawn("/bin/zsh", plan.shellArgs, {
+    cwd: root,
+    env: {
+      PATH: process.env.PATH,
+      HOME: root,
+      ZDOTDIR: root,
+      SHELL: "/bin/zsh",
+      TERM: "xterm-256color",
+      LANG: "C.UTF-8",
+      LC_CTYPE: "C.UTF-8",
+    },
+    cols: 100,
+    rows: 30,
+  });
+  let output = "";
+  let exited = false;
+  child.onData((chunk) => { output += chunk; });
+  child.onExit(() => { exited = true; });
+  t.after(async () => {
+    const done = new Promise<void>((resolve) => child.onExit(() => resolve()));
+    try { child.kill(); } catch { /* already exited */ }
+    await Promise.race([
+      done,
+      new Promise<void>((resolve) => setTimeout(resolve, 1_500)),
+    ]);
+    rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
+  });
+
+  await waitForOutput(() => output, "WAND_PROVIDER_RUNNING");
+  child.write("\x03");
+  await waitForOutput(() => output, "WAND_FALLBACK> ");
+  assert.equal(exited, false, "Ctrl+C must not kill the persistent PTY shell");
+  child.write("printf WAND_SHELL_OK\\n\r");
+  await waitForOutput(() => output, "WAND_SHELL_OK");
+});
+
 test("bare shells and one-shot non-provider commands preserve their distinct lifecycles", () => {
   const shell = buildPtyShellLaunchPlan({
     shell: "/bin/bash",
@@ -149,7 +204,7 @@ test("bare shells and one-shot non-provider commands preserve their distinct lif
     providerCommand: false,
     platform: "linux",
   });
-  assert.deepEqual(shell.shellArgs, ["-l"]);
+  assert.deepEqual(shell.shellArgs, ["-il"]);
   assert.equal(shell.cliExitMarker, null);
 
   const oneShot = buildPtyShellLaunchPlan({

@@ -15332,9 +15332,10 @@
       height: 16px;
     }
 
-    .workspace-session-mark .wand-provider-logo {
-      width: 13px;
-      height: 13px;
+    .workspace-session-mark .wand-provider-logo,
+    .workspace-session-mark > svg {
+      width: 14px;
+      height: 14px;
     }
 
     .workspace-session-name {
@@ -16328,6 +16329,15 @@
       background: color-mix(in srgb, var(--text-muted) 55%, transparent);
     }
 
+    .workspace-tab-logo,
+    .workspace-tab-logo.wand-provider-logo,
+    .ws-pane-logo,
+    .ws-pane-logo.wand-provider-logo {
+      width: 14px;
+      height: 14px;
+      flex: 0 0 auto;
+    }
+
     .workspace-tab-label {
       min-width: 0;
       overflow: hidden;
@@ -16577,6 +16587,7 @@
       flex: 1 1 auto;
       display: flex;
       align-items: center;
+      gap: 7px;
       min-width: 0;
       height: 34px;
       padding: 0 11px;

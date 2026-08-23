@@ -263,7 +263,9 @@ test("bare shell sessions launch the configured login shell without provider met
   assert.equal(session.providerCliActive, false);
   assert.equal(session.command, defaultConfig().shell);
   assert.equal(spawnCalls[0][0], defaultConfig().shell);
-  assert.deepEqual(spawnCalls[0][1], process.platform === "win32" ? [] : ["-l"]);
+  assert.deepEqual(spawnCalls[0][1], process.platform === "win32" ? [] : ["-il"]);
+  const spawnOpts = spawnCalls[0][2] as { env?: NodeJS.ProcessEnv };
+  assert.equal(spawnOpts.env?.SHELL, defaultConfig().shell);
   assert.equal(session.claudeSessionId, null);
   assert.equal(session.autoApprovePermissions, false);
   manager.resize(session.id, 96, 28);

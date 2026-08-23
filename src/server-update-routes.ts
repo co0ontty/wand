@@ -1,5 +1,9 @@
-import type { Express, RequestHandler } from "express";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 
+import type { Express, Request, RequestHandler, Response } from "express";
+
+import type { GitHubApkDownload } from "./distribution-manager.js";
 import { getErrorMessage } from "./error-utils.js";
 import { asyncRoute } from "./express-async.js";
 import type { ModelCatalogService } from "./models.js";
@@ -36,6 +40,8 @@ interface ResolvedUpdateAsset {
 export interface PublicUpdateRoutesDependencies {
   resolveLatestApk(channel: "stable" | "beta"): Promise<ResolvedUpdateAsset | null>;
   resolveAndroidDownload(channel: "stable" | "beta"): Promise<DownloadAsset | null>;
+  /** GitHub 来源由服务端代拉，避免手机直连 CDN。测试 stub 可不实现。 */
+  resolveGitHubApkDownload?(): Promise<GitHubApkDownload | null>;
   /** Beta 包下发时清理分发目录，只保留最新一个 APK（可选，测试 stub 可不实现）。 */
   pruneAndroidApkDirectory?(keepFileName?: string): Promise<{ deleted: string[]; freedBytes: number }>;
   /** 计算本地分发文件的 SHA-256（hex）；失败返回 null，下载响应不带哈希头。 */
@@ -44,6 +50,50 @@ export interface PublicUpdateRoutesDependencies {
   resolveMacosDownload(): Promise<DownloadAsset | null>;
   resolveLatestIpa(): Promise<ResolvedUpdateAsset | null>;
   resolveIosDownload(): Promise<DownloadAsset | null>;
+}
+
+const GITHUB_PROXY_TIMEOUT_MS = 5 * 60 * 1000;
+
+async function proxyGitHubApk(
+  _req: Request,
+  res: Response,
+  asset: GitHubApkDownload,
+  fetchImpl: typeof fetch = fetch,
+): Promise<void> {
+  let remote: globalThis.Response;
+  try {
+    remote = await fetchImpl(asset.remoteUrl, {
+      headers: {
+        "User-Agent": "wand-server",
+        Accept: "application/octet-stream",
+      },
+      redirect: "follow",
+      signal: AbortSignal.timeout(GITHUB_PROXY_TIMEOUT_MS),
+    });
+  } catch (error) {
+    res.status(502).json({ error: getErrorMessage(error, "从 GitHub 下载安装包失败。") });
+    return;
+  }
+  if (!remote.ok || !remote.body) {
+    res.status(502).json({ error: `从 GitHub 下载安装包失败（HTTP ${remote.status}）。` });
+    return;
+  }
+  const remoteLength = Number(remote.headers.get("content-length"));
+  const size = Number.isFinite(remoteLength) && remoteLength > 0 ? remoteLength : asset.size;
+  res.status(200);
+  res.setHeader("Content-Type", "application/vnd.android.package-archive");
+  res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(asset.fileName)}"`);
+  if (size > 0) res.setHeader("Content-Length", String(size));
+  if (asset.sha256) res.setHeader("X-APK-Sha256", asset.sha256);
+  try {
+    await pipeline(Readable.fromWeb(remote.body as import("node:stream/web").ReadableStream), res);
+  } catch (error) {
+    if (!res.headersSent) {
+      res.status(502).json({ error: getErrorMessage(error, "从 GitHub 下载安装包失败。") });
+      return;
+    }
+    res.destroy();
+  }
 }
 
 export function registerPublicUpdateRoutes(app: Express, deps: PublicUpdateRoutesDependencies): void {
@@ -73,12 +123,21 @@ export function registerPublicUpdateRoutes(app: Express, deps: PublicUpdateRoute
       source: latest.source,
       channel,
       releaseNotes: updateAvailable ? (latest.releaseNotes ?? null) : null,
-      // 本地分发时为 hex SHA-256，Android 客户端下载后校验；GitHub 来源为 null。
+      // 本地文件哈希或 GitHub Release digest；客户端下载后校验。
       sha256: updateAvailable ? (latest.sha256 ?? null) : null,
     });
   }));
 
   app.get("/android/download", asyncRoute(async (req, res) => {
+    if (req.query.source === "github") {
+      const remote = deps.resolveGitHubApkDownload ? await deps.resolveGitHubApkDownload() : null;
+      if (!remote) {
+        res.status(404).json({ error: "当前没有可下载的 GitHub APK 文件。" });
+        return;
+      }
+      await proxyGitHubApk(req, res, remote);
+      return;
+    }
     const channel = req.query.channel === "beta" ? "beta" : "stable";
     const asset = await deps.resolveAndroidDownload(channel);
     if (!asset) {

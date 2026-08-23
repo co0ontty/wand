@@ -1796,15 +1796,20 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         }
         var delay = typeof delayMs === "number" ? delayMs : 0;
         return sequence.reduce(function(promise, chunk, index) {
+          // 文本段和单独的 "\r" 都带 enter_text：服务端用它判断这是整段提交，
+          // 从而给 PTY 会话生成标题；中间若有其它 chunk 则不打标。
+          var key = shortcutKey && (index === 0 || index === sequence.length - 1)
+            ? shortcutKey
+            : undefined;
           return promise.then(function() {
             if (index > 0 && delay > 0) {
               return new Promise(function(resolve) {
                 setTimeout(resolve, delay);
               }).then(function() {
-                return queueDirectInput(chunk, index === sequence.length - 1 ? shortcutKey : undefined, viewOverride, sessionId);
+                return queueDirectInput(chunk, key, viewOverride, sessionId);
               });
             }
-            return queueDirectInput(chunk, index === sequence.length - 1 ? shortcutKey : undefined, viewOverride, sessionId);
+            return queueDirectInput(chunk, key, viewOverride, sessionId);
           });
         }, Promise.resolve());
       }

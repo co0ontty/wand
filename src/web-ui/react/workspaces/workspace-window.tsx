@@ -14,6 +14,7 @@ import {
   workspaceSessionLabel,
 } from "./session-order";
 import type { LayoutNode, PaneTab } from "./types";
+import { SessionProviderMark } from "./session-mark";
 import { classNames } from "../ui/class-names";
 import { useUiDispatch } from "../shell/ui-store-react";
 import {
@@ -33,6 +34,7 @@ function runtime() {
 interface SessionMeta {
   title?: string;
   provider?: string;
+  command?: string;
 }
 
 interface WindowApi {
@@ -76,6 +78,7 @@ function PaneNode({ pane, path, api }: { pane: Extract<LayoutNode, { type: "pane
   const activeTab = pane.tabs[pane.active] ?? pane.tabs[0];
   const isPrimary = path.every((index) => index === 0);
   const sessionId = activeTab?.kind === "session" ? activeTab.sessionId : null;
+  const sessionMeta = sessionId ? api.sessionMeta.get(sessionId) : undefined;
   const [scale, setScale] = React.useState(() => {
     const rt = runtime();
     return sessionId && rt ? rt.getSessionTerminalScale(sessionId) : 1;
@@ -101,6 +104,7 @@ function PaneNode({ pane, path, api }: { pane: Extract<LayoutNode, { type: "pane
     >
       <div className="ws-pane-toolbar">
         <span className="ws-pane-title" title={activeTab ? paneLabel(activeTab, api.sessionMeta) : "空窗格"}>
+          {sessionMeta ? <SessionProviderMark session={sessionMeta} className="ws-pane-logo"/> : null}
           {activeTab ? paneLabel(activeTab, api.sessionMeta) : "空窗格"}
         </span>
         {sessionId ? (
@@ -266,6 +270,7 @@ function useTaskSessionMeta(taskId: string | null): Map<string, SessionMeta> {
           next.set(s.id, {
             title: workspaceSessionLabel(s, index),
             provider: s.provider,
+            command: s.command,
           });
         });
         setMeta(next);

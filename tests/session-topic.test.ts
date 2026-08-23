@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   collectSessionTopicMessages,
   SessionTopicCoordinator,
+  shouldGenerateSessionTopicFromPtyInput,
   type SessionTopic,
 } from "../src/session-topic.js";
 import type { ConversationTurn } from "../src/types.js";
@@ -55,4 +56,12 @@ test("SessionTopicCoordinator coalesces new turns and discards stale titles", as
   assert.deepEqual(topics, [{ title: "共同标题", description: "共同描述" }]);
   assert.deepEqual(generating, [true, false]);
   coordinator.clear();
+});
+
+test("PTY terminal keystrokes do not request a title unless the composer submitted", () => {
+  assert.equal(shouldGenerateSessionTopicFromPtyInput("chat"), true);
+  assert.equal(shouldGenerateSessionTopicFromPtyInput(undefined), true);
+  assert.equal(shouldGenerateSessionTopicFromPtyInput("terminal"), false);
+  assert.equal(shouldGenerateSessionTopicFromPtyInput("terminal", "enter_text"), true);
+  assert.equal(shouldGenerateSessionTopicFromPtyInput("terminal", "ctrl_c"), false);
 });

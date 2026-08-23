@@ -313,6 +313,7 @@ export function registerWorkspaceRoutes(
       provider: session.provider,
       sessionKind: session.sessionKind,
       runner: session.runner,
+      command: session.command,
       title: resolveSessionDisplayTitle(session),
       status: session.status,
       cwd: session.cwd,

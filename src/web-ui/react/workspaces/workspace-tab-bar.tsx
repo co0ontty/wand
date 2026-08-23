@@ -7,6 +7,7 @@ import * as React from "react";
 import { workspaceContextStore } from "./workspace-context";
 import { workspacesStore } from "./controller";
 import { httpWorkspacesRepository } from "./repository";
+import { SessionProviderMark } from "./session-mark";
 import {
   orderWorkspaceSessions,
   workspaceProviderLabel,
@@ -64,7 +65,7 @@ function layoutsEqual(left: TaskWindowLayout | null, right: TaskWindowLayout): b
 function windowPresentation(
   window: WorkWindowLayout,
   sessionById: ReadonlyMap<string, { session: WorkspaceSessionSummary; index: number }>,
-): { label: string; status?: string; count: number } {
+): { label: string; status?: string; count: number; session?: WorkspaceSessionSummary } {
   const ids = layoutSessionIds(window.layout);
   const active = activeLayoutTab(window.layout, window.activeTabId);
   const activeSessionId = active?.kind === "session" ? active.sessionId : ids[0];
@@ -74,6 +75,7 @@ function windowPresentation(
     label: ids.length > 1 ? `${base} · ${ids.length}` : base,
     status: meta?.session.status,
     count: ids.length,
+    session: meta?.session,
   };
 }
 
@@ -285,6 +287,9 @@ export function WorkspaceTabBar(): React.ReactElement | null {
                   onClick={() => selectWindow(window)}
                 >
                   <StatusDot status={presentation.status} />
+                  {presentation.session ? (
+                    <SessionProviderMark session={presentation.session} className="workspace-tab-logo"/>
+                  ) : null}
                   <span className="workspace-tab-label">{presentation.label}</span>
                 </button>
                 <button

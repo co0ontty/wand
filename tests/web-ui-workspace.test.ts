@@ -24,6 +24,7 @@ import {
   listSessionLabel,
   orderWorkspaceSessions,
   workspaceSessionLabel,
+  workspaceSessionProvider,
 } from "../src/web-ui/react/workspaces/session-order.js";
 import type { LayoutNode, PaneTab } from "../src/web-ui/react/workspaces/types.js";
 import { WORKSPACE_AGENT_OPTIONS } from "../src/web-ui/react/workspaces/workspace-agent-dialog.js";
@@ -103,6 +104,22 @@ test("list session labels skip titles that only repeat the directory name", () =
   );
 });
 
+test("workspace session labels ignore PTY cwd fallback titles and infer CLI from command", () => {
+  assert.equal(
+    workspaceSessionLabel({ id: "s1", provider: "claude", title: "wand", cwd: "/repo/wand" }, 0),
+    "Claude 1",
+  );
+  assert.equal(workspaceSessionProvider({ command: "codex --search" }), "codex");
+  assert.equal(
+    workspaceSessionLabel({ id: "s2", command: "codex", title: "wand", cwd: "/repo/wand" }, 0),
+    "Codex 1",
+  );
+  assert.equal(
+    workspaceSessionLabel({ id: "s3", provider: "claude", title: "修权限弹窗" }, 1),
+    "修权限弹窗",
+  );
+});
+
 test("workspace sessions use chronological tab order and stable labels", () => {
   const sessions = orderWorkspaceSessions([
     { id: "new", provider: "claude", startedAt: "2026-08-09T10:02:00.000Z" },
@@ -157,6 +174,22 @@ test("task list treats directories as group headers and exposes per-terminal del
   assert.match(styles, /\.workspace-item\s*\{[^}]*border-radius:\s*12px/s);
   assert.match(styles, /\.workspace-tasks\s*\{[^}]*border-left/s);
   assert.match(styles, /\.workspace-task-name\s*\{[^}]*font-size:\s*var\(--font-size-sm\)/s);
+});
+
+test("task session lists default to expanded so terminals stay visible after reload", () => {
+  const panel = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
+  assert.match(panel, /const \[open, setOpen\] = React\.useState\(true\);\s*const \[confirming, setConfirming\]/);
+});
+
+test("task session rows and work-window tabs render each CLI logo", () => {
+  const panel = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
+  const tabs = readFileSync(new URL("../src/web-ui/react/workspaces/workspace-tab-bar.tsx", import.meta.url), "utf8");
+  const input = readFileSync(new URL("../src/web-ui/browser/input.ts", import.meta.url), "utf8");
+  const processManager = readFileSync(new URL("../src/process-manager.ts", import.meta.url), "utf8");
+  assert.match(panel, /SessionProviderMark session=\{session\}/);
+  assert.match(tabs, /SessionProviderMark session=\{presentation\.session\}/);
+  assert.match(input, /index === 0 \|\| index === sequence\.length - 1/);
+  assert.match(processManager, /shouldGenerateSessionTopicFromPtyInput\(view, shortcutKey\)/);
 });
 
 test("new project dialog has shared dialog styling and a responsive provider grid", () => {

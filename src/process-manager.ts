@@ -18,7 +18,7 @@ import { buildLanguageDirective, buildManagedAutonomyDirective } from "./languag
 import { prepareSessionWorktree } from "./git-worktree.js";
 import { getProviderCommandSessionId, getProviderResumeCommandSessionId } from "./resume-policy.js";
 import { normalizeThinkingEffort, thinkingEffortToClaudeCliEffort, thinkingEffortToClaudeSlashEffort, thinkingEffortToCodexReasoningEffort, thinkingEffortToOpenCodeVariant, thinkingEffortToPiLevel } from "./structured-provider-common.js";
-import { SessionTopicCoordinator } from "./session-topic.js";
+import { SessionTopicCoordinator, shouldGenerateSessionTopicFromPtyInput } from "./session-topic.js";
 import { getErrorMessage } from "./error-utils.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
 import { resolveSessionCwd } from "./session-cwd.js";
@@ -1316,7 +1316,10 @@ export class ProcessManager extends EventEmitter {
         env: buildChildEnv(this.config.inheritEnv !== false, {
           WAND_MODE: effectiveMode,
           WAND_AUTO_CONFIRM: record.autoApprovePermissions ? "1" : "0",
-          WAND_AUTO_EDIT: effectiveMode === "auto-edit" ? "1" : "0"
+          WAND_AUTO_EDIT: effectiveMode === "auto-edit" ? "1" : "0",
+          SHELL: this.config.shell,
+          LANG: process.env.LANG || process.env.LC_ALL || process.env.LC_CTYPE || "C.UTF-8",
+          LC_CTYPE: process.env.LC_CTYPE || process.env.LANG || process.env.LC_ALL || "C.UTF-8",
         }),
         name: "xterm-256color",
         // 使用 record 上由前端协商好的真实尺寸，避免"先 120 列、几百毫秒后再 resize"
@@ -1727,7 +1730,7 @@ export class ProcessManager extends EventEmitter {
       console.error(`[ProcessManager] Rejecting input: session ${id} has no PTY`);
       throw new SessionInputError("Session is not running.", "SESSION_NO_PTY", id, record.status);
     }
-    if (view !== "terminal") this.maybeGenerateSessionTopic(id, input);
+    if (shouldGenerateSessionTopicFromPtyInput(view, shortcutKey)) this.maybeGenerateSessionTopic(id, input);
 
     // Log shortcut key interactions for auto-confirm and mode analysis
     if (shortcutKey) {

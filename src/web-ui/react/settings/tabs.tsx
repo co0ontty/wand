@@ -510,7 +510,7 @@ export function GeneralSettingsTab({ snapshot, repository, refresh, toast }: Set
             <SettingsTextInput id="settings-default-cwd" value={form.defaultCwd} placeholder="/home/user" onChange={(value) => update("defaultCwd", value)} />
           </SettingsField>
           <SettingsField label="Shell" htmlFor="settings-shell" error={errors.shell}>
-            <SettingsTextInput id="settings-shell" value={form.shell} invalid={!!errors.shell} placeholder="/bin/bash" onChange={(value) => update("shell", value)} />
+            <SettingsTextInput id="settings-shell" value={form.shell} invalid={!!errors.shell} placeholder="/bin/zsh" onChange={(value) => update("shell", value)} />
           </SettingsField>
         </SettingsGrid>
       </SettingsSection>

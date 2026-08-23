@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { existsSync } from "node:fs";
 import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { AndroidApkConfig, CardExpandDefaults, ExecutionMode, IosIpaConfig, MacosDmgConfig, SessionProvider, StructuredChatPersonaConfig, ThinkingEffort, WandConfig } from "./types.js";
@@ -62,6 +63,26 @@ export function isPreferenceKey(key: string): key is PreferenceKey {
   return PREFERENCE_KEY_SET.has(key);
 }
 
+/**
+ * The user's login shell from passwd, then $SHELL, then a platform default.
+ * Launchd / systemd usually omit $SHELL, so falling back to /bin/bash made PTY
+ * sessions look like a generic sh even when the account default is zsh.
+ */
+export function resolveDefaultShell(): string {
+  if (process.platform === "win32") {
+    return process.env.COMSPEC || "cmd.exe";
+  }
+  try {
+    const loginShell = os.userInfo().shell?.trim();
+    if (loginShell) return loginShell;
+  } catch {
+    // userInfo() throws when the process has no passwd entry.
+  }
+  const envShell = process.env.SHELL?.trim();
+  if (envShell) return envShell;
+  return process.platform === "darwin" ? "/bin/zsh" : "/bin/bash";
+}
+
 export const defaultConfig = (): WandConfig => ({
   host: "127.0.0.1",
   port: 8443,
@@ -76,7 +97,7 @@ export const defaultConfig = (): WandConfig => ({
   // 注意：defaultMode 是偏好字段，只存 SQLite、不写 config.json（见 stripPreferenceFields），
   // 这里仅作为「用户从未在设置里显式选过模式」时的回落值——显式选择始终优先。
   defaultMode: isRunningAsRoot() ? "default" : "managed",
-  shell: process.env.SHELL || "/bin/bash",
+  shell: resolveDefaultShell(),
   defaultCwd: process.cwd(),
   startupCommands: [],
   allowedCommandPrefixes: [],

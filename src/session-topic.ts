@@ -3,6 +3,17 @@ import type { ConversationTurn } from "./types.js";
 
 const MAX_PROMPT_LENGTH = 12_000;
 
+/**
+ * PTY 终端视图里，只有底部输入框整段提交（shortcutKey=enter_text）才总结标题。
+ * 逐键 pty_input / 方向键 / 单独回车不能触发，避免把按键当主题。
+ */
+export function shouldGenerateSessionTopicFromPtyInput(
+  view?: "chat" | "terminal",
+  shortcutKey?: string,
+): boolean {
+  return view !== "terminal" || shortcutKey === "enter_text";
+}
+
 export interface SessionTopic {
   title: string;
   description: string;

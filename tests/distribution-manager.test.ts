@@ -4,7 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { DistributionManager, extractUpdateSummary } from "../src/distribution-manager.js";
+import {
+  DistributionManager,
+  extractUpdateSummary,
+  parseGithubDigest,
+  sanitizeApkFileName,
+} from "../src/distribution-manager.js";
 import type { WandConfig } from "../src/types.js";
 
 function createFixture(releases: unknown[] = []) {
@@ -59,9 +64,10 @@ test("DistributionManager compares local and GitHub APKs and caches the external
     tag_name: "v3.0.0",
     body: "## 更新内容\n\n- Android 修复\n\n---\n\n## macOS DMG\n\nmacOS 安装说明",
     assets: [{
-      name: "wand-v3.0.0.apk",
-      browser_download_url: "https://example.test/wand-v3.0.0.apk",
+      name: "wand-v3.0.0+202607041230.apk",
+      browser_download_url: "https://example.test/wand-v3.0.0%2B202607041230.apk",
       size: 42,
+      digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     }],
   }]);
   try {
@@ -69,11 +75,17 @@ test("DistributionManager compares local and GitHub APKs and caches the external
 
     const first = await fixture.manager.resolveLatestApk("stable");
     const second = await fixture.manager.resolveLatestApk("stable");
+    const proxied = await fixture.manager.resolveGitHubApkDownload();
 
     assert.equal(first?.source, "github");
-    assert.equal(first?.version, "3.0.0");
+    assert.equal(first?.version, "3.0.0+202607041230");
+    assert.equal(first?.fileName, "wand-v3.0.0-202607041230.apk");
+    assert.equal(first?.downloadUrl, "/android/download?channel=stable&source=github");
+    assert.equal(first?.sha256, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
     assert.equal(first?.releaseNotes, "## 更新内容\n\n- Android 修复");
     assert.deepEqual(second, first);
+    assert.equal(proxied?.remoteUrl, "https://example.test/wand-v3.0.0%2B202607041230.apk");
+    assert.equal(proxied?.fileName, "wand-v3.0.0-202607041230.apk");
     assert.equal(fixture.fetchCount(), 1);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
@@ -85,6 +97,23 @@ test("extractUpdateSummary excludes platform download instructions from Android 
     extractUpdateSummary("更新内容\r\n---\r\n## Android APK\r\n安装说明"),
     "更新内容",
   );
+});
+
+test("sanitizeApkFileName replaces GitHub build-metadata plus signs", () => {
+  assert.equal(
+    sanitizeApkFileName("wand-v4.48.0+202608232136.apk"),
+    "wand-v4.48.0-202608232136.apk",
+  );
+  assert.equal(sanitizeApkFileName("../evil+name.apk"), "evil-name.apk");
+});
+
+test("parseGithubDigest only accepts sha256 hex digests", () => {
+  assert.equal(
+    parseGithubDigest("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  );
+  assert.equal(parseGithubDigest("sha256:deadbeef"), undefined);
+  assert.equal(parseGithubDigest(undefined), undefined);
 });
 
 test("DistributionManager hot-refreshes config and builds settings for both artifacts", async () => {

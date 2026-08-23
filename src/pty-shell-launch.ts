@@ -112,6 +112,16 @@ export class PtyCliExitMarker {
   }
 }
 
+function buildTerminalRestoreCommand(): string {
+  // Provider TUIs often die on Ctrl+C without leaving the alternate screen or
+  // resetting mouse / bracketed-paste / application-keypad modes. Restore a
+  // normal interactive tty before handing the session to the user's shell.
+  return [
+    "printf '\\033[?1049l\\033[?25h\\033[m\\033[?1000l\\033[?1002l\\033[?1003l\\033[?1006l\\033[?2004l\\r\\n'",
+    "stty sane 2>/dev/null || :",
+  ].join("; ");
+}
+
 function buildPosixProviderShellCommand(
   command: string,
   shell: string,
@@ -127,7 +137,10 @@ function buildPosixProviderShellCommand(
     "trap ':' INT",
     `if ${command}; then __wand_cli_status=0; else __wand_cli_status=$?; fi`,
     `printf '\\036WAND_CLI_EXIT:${marker.token}:%s\\037' "$__wand_cli_status"`,
-    `exec ${quotePosixShell(shell)} -l`,
+    buildTerminalRestoreCommand(),
+    // -i forces an interactive prompt even if tty detection is confused after a
+    // TUI teardown; -l matches Terminal.app / iTerm login-shell startup files.
+    `exec ${quotePosixShell(shell)} -il`,
   ].join("; ");
 }
 
@@ -147,7 +160,7 @@ export function buildPtyShellLaunchPlan(options: {
   const platform = options.platform ?? os.platform();
   if (options.bareShell) {
     return {
-      shellArgs: platform === "win32" ? [] : ["-l"],
+      shellArgs: platform === "win32" ? [] : ["-il"],
       cliExitMarker: null,
     };
   }
@@ -165,7 +178,7 @@ export function buildPtyShellLaunchPlan(options: {
     const marker = new PtyCliExitMarker(options.markerToken);
     return {
       // Interactive + login initialization matches a real terminal before the
-      // provider starts; `exec <shell> -l` becomes the persistent prompt after it exits.
+      // provider starts; `exec <shell> -il` becomes the persistent prompt after it exits.
       shellArgs: ["-lic", buildPosixProviderShellCommand(options.command, options.shell, marker)],
       cliExitMarker: marker,
     };

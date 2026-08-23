@@ -1,4 +1,5 @@
-import type { WorkspaceSessionSummary } from "./types";
+import { inferProviderIdFromCommand } from "../../provider-identity";
+import type { WorkspaceProvider, WorkspaceSessionSummary } from "./types";
 
 /** 工作区内统一使用的 provider 展示名，保证单窗格与分屏标签一致。 */
 export function workspaceProviderLabel(provider?: string): string {
@@ -11,6 +12,38 @@ export function workspaceProviderLabel(provider?: string): string {
     case "pi": return "Pi";
     default: return "终端";
   }
+}
+
+/** 任务列表 / 标签栏用：缺 provider 时从启动命令回推 CLI。 */
+export function workspaceSessionProvider(
+  session: { provider?: string; command?: string },
+): WorkspaceProvider | undefined {
+  if (
+    session.provider === "claude"
+    || session.provider === "codex"
+    || session.provider === "opencode"
+    || session.provider === "grok"
+    || session.provider === "qoder"
+    || session.provider === "pi"
+  ) {
+    return session.provider;
+  }
+  return inferProviderIdFromCommand(session.command) ?? undefined;
+}
+
+function sessionCwdLeaf(session: Pick<WorkspaceSessionSummary, "cwd">): string {
+  return (session.cwd || "").replace(/\\/g, "/").replace(/\/+$/, "").split("/").filter(Boolean).at(-1) || "";
+}
+
+function isGenericSessionTitle(
+  session: Pick<WorkspaceSessionSummary, "title" | "cwd">,
+  parentNames: readonly string[] = [],
+): boolean {
+  const title = (session.title || "").trim();
+  if (!title) return true;
+  const leaf = sessionCwdLeaf(session);
+  if (leaf && title.toLowerCase() === leaf.toLowerCase()) return true;
+  return parentNames.some((name) => name.toLowerCase() === title.toLowerCase());
 }
 
 /**
@@ -35,8 +68,8 @@ export function orderWorkspaceSessions(
 }
 
 export function workspaceSessionLabel(session: WorkspaceSessionSummary, index: number): string {
-  const title = (session.title || "").trim();
-  return title || `${workspaceProviderLabel(session.provider)} ${index + 1}`;
+  if (!isGenericSessionTitle(session)) return (session.title || "").trim();
+  return `${workspaceProviderLabel(workspaceSessionProvider(session))} ${index + 1}`;
 }
 
 /** 侧栏列表用：目录名/路径叶子不要再当终端标题，避免三层都叫同一个文件夹名。 */
@@ -45,12 +78,6 @@ export function listSessionLabel(
   index: number,
   parentNames: readonly string[] = [],
 ): string {
-  const title = (session.title || "").trim();
-  const leaf = (session.cwd || "").replace(/\\/g, "/").replace(/\/+$/, "").split("/").filter(Boolean).at(-1) || "";
-  const repeatsParent = Boolean(title) && (
-    parentNames.some((name) => name.toLowerCase() === title.toLowerCase()) ||
-    Boolean(leaf) && title.toLowerCase() === leaf.toLowerCase()
-  );
-  if (title && !repeatsParent) return title;
-  return `${workspaceProviderLabel(session.provider)} ${index + 1}`;
+  if (!isGenericSessionTitle(session, parentNames)) return (session.title || "").trim();
+  return `${workspaceProviderLabel(workspaceSessionProvider(session))} ${index + 1}`;
 }
