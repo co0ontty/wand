@@ -125,6 +125,34 @@ iOS/Android/macOS ChatStore UI、`GET /api/config` 的 `canManageSettings`（已
 
 ---
 
+## 切片 6 — 任务一级容器（Web 已落地，多端同步中）
+
+> **详细计划与进度已迁移至 `docs/task-first-rollout.md`（单一事实来源），本节保留摘要。**
+
+**状态（2026-08-23）：Web 端已落地并验收；iOS API/Store 层已对齐；以下为预期内的遗留问题，按需排期。**
+
+**已落地（Web）：**
+
+- 「新建任务」为一级入口：任务名 + 目录（目录级归属）+ 可选独立 worktree（`POST /api/workspaces/:id/tasks` 新增 `worktree?: boolean`，`false` 时跳过隔离）
+- 同一目录自动 find-or-create 隐式项目，用户不再感知「项目」层
+- **侧栏统一为任务视图（2026-08-23 二次迭代）**：移除「会话 / 任务」切换与散会话平铺列表；主按钮固定「新任务」。未绑定任务的旧会话由 `/api/tasks` 以 `standaloneSessions` 归入所在目录组展示（含无项目目录的合成组），不会失联；原生历史 / 自动化分组附加在任务列表之后保留可达
+- **无任务欢迎页统一（同日）**：移除按 provider 的快捷建会话按钮与目录选择器，唯一入口为「新建任务」；`session.quickStart.*` 动作映射保留但 React 层不再触发
+- 任务行展开看归属会话，行内「＋」在任务内新建会话（不选目录，绑定 `workspaceTaskId`）
+
+**遗留问题（预期内，暂不做）：**
+
+| # | 项 | 说明 | 触及 |
+| --- | --- | --- | --- |
+| 1 | 原生客户端同步 | iOS / Android / macOS 的 workspace/task API 封装还是旧语义：没有任务一级入口、没有 `worktree:false` 开关、没有 `/api/tasks` 聚合。服务端改动全部向后兼容（缺省 `worktree` 仍尝试建隔离），旧版客户端不受影响，但拿不到新流程。对齐时优先 iOS，再 macOS / Android | 各端 workspaces/task 封装层 |
+| 2 | Missions（并行任务）未合并 | 「并行任务」仍是独立概念（一个 prompt 分派多 provider + review diff）。若要并入任务模型，可作为任务详情页的「派发多 Agent」动作，复用 attempt/worktree 机制 | `src/missions.ts`、`src/web-ui/react/missions/` |
+| 3 | 批量管理模式随散会话列表下线 | 侧栏「管理」（批量删除/全选）依附于旧散会话列表，已一并移除。删除入口：任务删除（连带会话）、原生历史分组内的单条删除。若需要批量清理再单独设计 | `src/web-ui/react/shell/shell-sidebar.tsx` |
+| 4 | `/api/tasks` 无分页 | 聚合接口全量返回所有目录组的任务与会话摘要；数据量大后需要分页或按 workspaceId 过滤参数 | `src/server-workspace-routes.ts` |
+| 5 | 旧「目录」侧栏视图代码已删、CSS 残留 | 目录树的 TSX/交互已从 shell-sidebar 删除；`styles.css` 里 `.session-directory-*` / `.sidebar-view-switch` 样式仍在（legacy browser UI 与历史分组还在用部分类名），确认无用后再清理 | `src/web-ui/content/styles.css` |
+| 6 | 任务内新建会话的布局竞态 | 从侧栏任务行「＋」建会话：先 `openTask`（异步拉详情恢复布局）再 `newTaskSession`；两端完成顺序不同但最终都选中新会话。若出现标签丢失，需把「创建会话」改为 openTask 完成后再执行 | `workspaces-panel.tsx`、`workspaces-adapter.ts` |
+| 7 | Missions 按钮改名为「并行」 | 底栏原「任务」按钮（Missions 对话框）改为「并行」，避免与新任务视图混淆；后续按 #2 并入后可移除 | `shell-sidebar.tsx` |
+
+---
+
 ## 明确不做
 
 - 合并 PTY / structured runner
