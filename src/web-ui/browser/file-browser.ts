@@ -158,6 +158,13 @@ import { mountFileExplorerHost, updateFileExplorerCwd } from "./file-explorer-ad
         "send-to-input": '<path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/>',
         "terminal":      '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>',
         "folder-open":   '<path d="M6 14l1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H18a2 2 0 0 1 2 2v2"/>',
+        "folder":        '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
+        "file":          '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="14 3 14 9 20 9"/>',
+        "image":         '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-4.5-4.5L5 21"/>',
+        "media":         '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3z"/>',
+        "archive":       '<path d="M4 4h16v4H4z"/><path d="M5 8v12h14V8"/><path d="M12 12v4"/>',
+        "code":          '<path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/>',
+        "markdown":      '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 15V9l3 4 3-4v6"/>',
         "info":          '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>',
       };
 
@@ -187,51 +194,28 @@ import { mountFileExplorerHost, updateFileExplorerCwd } from "./file-explorer-ad
 
       // ── File tree helpers ──
 
-      var FILE_ICON_MAP = {
-        // images
-        png: "🖼️", jpg: "🖼️", jpeg: "🖼️", gif: "🖼️", webp: "🖼️", svg: "🖼️",
-        avif: "🖼️", bmp: "🖼️", ico: "🖼️", heic: "🖼️", heif: "🖼️",
-        // pdf / doc
-        pdf: "📕", doc: "📘", docx: "📘", odt: "📘",
-        xls: "📊", xlsx: "📊", csv: "📊", tsv: "📊",
-        ppt: "📙", pptx: "📙",
-        // video / audio
-        mp4: "🎬", webm: "🎬", mov: "🎬", mkv: "🎬", m4v: "🎬", ogv: "🎬",
-        mp3: "🎵", wav: "🎵", ogg: "🎵", m4a: "🎵", flac: "🎵", aac: "🎵", opus: "🎵",
-        // archives
-        zip: "📦", tar: "📦", gz: "📦", tgz: "📦", bz2: "📦", "7z": "📦", rar: "📦", xz: "📦",
-        // markup / docs
-        md: "📝", markdown: "📝", mdx: "📝", rst: "📝", txt: "📝", log: "📝",
-        // web / styles
-        html: "🌐", htm: "🌐", xml: "🌐",
-        css: "🎨", scss: "🎨", less: "🎨",
-        // configs
-        json: "⚙️", jsonc: "⚙️", yaml: "⚙️", yml: "⚙️", toml: "⚙️",
-        ini: "⚙️", cfg: "⚙️", conf: "⚙️", env: "⚙️", editorconfig: "⚙️",
-        // code (default 📜)
-        ts: "📜", tsx: "📜", js: "📜", jsx: "📜", mjs: "📜", cjs: "📜",
-        py: "📜", rb: "📜", go: "📜", rs: "📜", java: "📜", c: "📜", cpp: "📜",
-        h: "📜", hpp: "📜", cs: "📜", swift: "📜", kt: "📜", scala: "📜",
-        php: "📜", sh: "📜", bash: "📜", zsh: "📜", fish: "📜", lua: "📜",
-        sql: "📜", graphql: "📜", proto: "📜", vue: "📜", svelte: "📜",
-        diff: "📜", patch: "📜",
-        // fonts / binary
-        ttf: "🔤", otf: "🔤", woff: "🔤", woff2: "🔤", eot: "🔤",
+      var FILE_KIND_MAP = {
+        png: "image", jpg: "image", jpeg: "image", gif: "image", webp: "image", svg: "image",
+        avif: "image", bmp: "image", ico: "image", heic: "image", heif: "image",
+        pdf: "file",
+        mp4: "media", webm: "media", mov: "media", mkv: "media", m4v: "media", ogv: "media",
+        mp3: "media", wav: "media", ogg: "media", m4a: "media", flac: "media", aac: "media", opus: "media",
+        zip: "archive", tar: "archive", gz: "archive", tgz: "archive", bz2: "archive",
+        "7z": "archive", rar: "archive", xz: "archive",
+        md: "markdown", markdown: "markdown", mdx: "markdown",
+        txt: "file", log: "file",
+        ts: "code", tsx: "code", js: "code", jsx: "code", mjs: "code", cjs: "code",
+        py: "code", rb: "code", go: "code", rs: "code", java: "code", c: "code", cpp: "code",
+        html: "code", css: "code", json: "code", yaml: "code", yml: "code",
       };
 
-      function getFileIcon(item) {
-        if (!item) return "📄";
-        if (item.type === "dir") return "📁";
+      function getFileIcon(item, open?) {
+        if (!item) return wandFileIcon("file", { size: 14 });
+        if (item.type === "dir") return wandFileIcon(open ? "folder-open" : "folder", { size: 14 });
         var name = (item.name || "").toLowerCase();
-        // basename-only matches first
-        if (name === "dockerfile") return "🐳";
-        if (name === "makefile") return "🛠️";
-        if (name === "license") return "📜";
-        if (name === "readme") return "📝";
         var dot = name.lastIndexOf(".");
-        if (dot < 0 || dot === name.length - 1) return "📄";
-        var ext = name.slice(dot + 1);
-        return FILE_ICON_MAP[ext] || "📄";
+        if (dot < 0 || dot === name.length - 1) return wandFileIcon("file", { size: 14 });
+        return wandFileIcon(FILE_KIND_MAP[name.slice(dot + 1)] || "file", { size: 14 });
       }
 
       function formatFileSize(bytes) {
@@ -455,15 +439,14 @@ import { mountFileExplorerHost, updateFileExplorerCwd } from "./file-explorer-ad
           var isOpen = children.classList.contains("open");
           children.classList.toggle("open");
           if (toggle) toggle.classList.toggle("open", !isOpen);
-          // swap folder icon between 📁 and 📂
           var iconEl = item.querySelector(".tree-icon");
-          if (iconEl) iconEl.textContent = isOpen ? "📁" : "📂";
+          if (iconEl) iconEl.innerHTML = wandFileIcon(isOpen ? "folder" : "folder-open", { size: 14 });
           return;
         }
 
         if (toggle) toggle.classList.add("open");
         var iconEl2 = item.querySelector(".tree-icon");
-        if (iconEl2) iconEl2.textContent = "📂";
+        if (iconEl2) iconEl2.innerHTML = wandFileIcon("folder-open", { size: 14 });
         var url = "/api/directory?q=" + encodeURIComponent(p) +
           "&gitStatus=true";
         fetch(url, { credentials: "same-origin" })
@@ -554,23 +537,23 @@ import { mountFileExplorerHost, updateFileExplorerCwd } from "./file-explorer-ad
         menu.className = "file-context-menu";
         var actions = [];
         if (type === "file") {
-          actions.push({ label: "打开预览", icon: "👁", run: function() { openFilePreview(fullPath); } });
+          actions.push({ label: "打开预览", icon: wandFileIcon("eye", { size: 14 }), run: function() { openFilePreview(fullPath); } });
         } else {
-          actions.push({ label: "进入此目录", icon: "📂", run: function() { refreshFileExplorer({ cwd: fullPath }); } });
+          actions.push({ label: "进入此目录", icon: wandFileIcon("folder-open", { size: 14 }), run: function() { refreshFileExplorer({ cwd: fullPath }); } });
         }
-        actions.push({ label: "复制完整路径", icon: "📋", run: function() {
+        actions.push({ label: "复制完整路径", icon: wandFileIcon("clipboard", { size: 14 }), run: function() {
           copyTextSafely(fullPath).then(function() { showToastIfPossible("已复制路径"); });
         }});
         if (relativePath && relativePath !== fullPath) {
-          actions.push({ label: "复制相对路径", icon: "📋", run: function() {
+          actions.push({ label: "复制相对路径", icon: wandFileIcon("clipboard", { size: 14 }), run: function() {
             copyTextSafely(relativePath).then(function() { showToastIfPossible("已复制相对路径"); });
           }});
         }
-        actions.push({ label: "粘贴路径到输入框", icon: "✏️", run: function() {
+        actions.push({ label: "粘贴路径到输入框", icon: wandFileIcon("edit", { size: 14 }), run: function() {
           if (appendToComposer(fullPath)) showToastIfPossible("已粘贴到输入框");
         }});
         if (type === "file") {
-          actions.push({ label: "下载文件", icon: "⬇", run: function() {
+          actions.push({ label: "下载文件", icon: wandFileIcon("download", { size: 14 }), run: function() {
             var a = document.createElement("a");
             a.href = "/api/file-raw?download=1&path=" + encodeURIComponent(fullPath);
             a.rel = "noopener";

@@ -4,6 +4,7 @@
 export {WandBadge} from "./badge";
 export {WandButton, type WandButtonKind} from "./button";
 export {WandDialog, WandDialogSurface, type WandDialogTone} from "./dialog";
+export {WandIcon, workspaceTaskIconName, type WandIconName} from "./icons";
 export {WandPopover} from "./popover";
 export {WandSelect, type WandSelectOption} from "./select";
 export {WandSkeleton} from "./skeleton";

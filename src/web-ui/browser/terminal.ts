@@ -908,7 +908,7 @@ import { consumeTerminalTouchPage, consumeTerminalWheelPage, terminalWheelPageSe
           lineHeight: 1.25,
           scrollback: 5000,
           theme: {
-            background: "#1f1b17",
+            background: "#17120f",
             foreground: "#f4eee6",
             cursor: "#d88d60",
             selectionBackground: "rgba(216, 141, 96, 0.3)"

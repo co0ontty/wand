@@ -17,6 +17,8 @@ export interface Mission {
   prompt: string;
   cwd: string;
   status: MissionStatus;
+  /** 可选关联的任务（workspace task）：派发的 attempt 会话绑定该任务。 */
+  taskId?: string | null;
   worktree: MissionWorktreeOptions;
   createdAt: string;
   updatedAt: string;
@@ -88,6 +90,8 @@ export interface CreateMissionInput {
   title?: string;
   cwd: string;
   providers: SessionProvider[];
+  /** 关联到指定 workspace task；派发会话将绑定 workspaceTaskId。 */
+  taskId?: string;
   baseRef?: string;
   sharedDirectories?: string[];
   copyPaths?: string[];

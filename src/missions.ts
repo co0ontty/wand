@@ -142,6 +142,7 @@ export class Missions {
       prompt,
       cwd,
       status: "dispatching",
+      taskId: input.taskId?.trim() || null,
       worktree: {
         baseRef: input.baseRef?.trim() || undefined,
         sharedDirectories: normalizeStringList(input.sharedDirectories, "sharedDirectories"),
@@ -262,13 +263,20 @@ export class Missions {
         cwd: mission.cwd,
         mode: "agent",
         provider,
-        worktreeEnabled: true,
-        worktreeSpec: {
-          baseRef: mission.worktree.baseRef,
-          taskName: `${mission.title}-${provider}`,
-          sharedDirectories: mission.worktree.sharedDirectories,
-          copyPaths: mission.worktree.copyPaths,
-        },
+        // 关联任务的派发直接落在任务目录（不再叠加一层隔离），
+        // 会话绑定 workspaceTaskId，出现在该任务下。
+        worktreeEnabled: mission.taskId ? false : true,
+        ...(mission.taskId ? { workspaceTaskId: mission.taskId } : {}),
+        ...(!mission.taskId
+          ? {
+              worktreeSpec: {
+                baseRef: mission.worktree.baseRef,
+                taskName: `${mission.title}-${provider}`,
+                sharedDirectories: mission.worktree.sharedDirectories,
+                copyPaths: mission.worktree.copyPaths,
+              },
+            }
+          : {}),
         sessionSource: "automation",
         automationId: mission.id,
       });

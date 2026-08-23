@@ -7,7 +7,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { WandButton, WandDialogSurface } from "../ui";
+import { WandButton, WandDialogSurface, WandIcon } from "../ui";
 import { settingsStore } from "./controller";
 import {
   SettingsActionButton,
@@ -210,7 +210,7 @@ export function AboutSettingsTab({ snapshot, repository, refresh, toast, showRes
         <>
           <SettingsSection title="保持在最新版本" description={`当前 ${about.version} · ${about.updateChannel === "beta" ? "Beta 通道" : "Stable 通道"}`}>
             <div className="wand-settings-update-deck">
-              <span className="wand-settings-update-deck-icon" aria-hidden="true">↻</span>
+              <span className="wand-settings-update-deck-icon" aria-hidden="true"><WandIcon name="refresh" size={18} strokeWidth={1.8}/></span>
               <div>
                 <strong>检查并管理 Web 服务更新</strong>
                 <span>{update?.latest || about.latestVersion ? "已获取可用版本信息" : "选择检查更新以获取最新版本。"}</span>

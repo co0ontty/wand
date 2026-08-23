@@ -7,6 +7,7 @@ import {
 } from "react";
 import { WandButton, type WandButtonKind } from "./button";
 import { classNames } from "./class-names";
+import { WandIcon, type WandIconName } from "./icons";
 import { usePortalContainer } from "./portal-context";
 
 export type WandDialogTone = "info" | "warning" | "danger" | "success" | "question";
@@ -54,13 +55,20 @@ export interface WandDialogSurfaceProps {
   onOpenChange(open: boolean): void;
 }
 
-const defaultIcons: Record<WandDialogTone, ReactNode> = {
-  info: "i",
-  warning: "!",
-  danger: "!",
-  success: "✓",
-  question: "?",
+const defaultIcons: Record<WandDialogTone, WandIconName> = {
+  info: "info",
+  warning: "warning",
+  danger: "warning",
+  success: "check",
+  question: "question",
 };
+
+function resolveDialogIcon(tone: WandDialogTone, icon?: ReactNode): ReactNode {
+  if (icon == null || icon === "" || icon === "i" || icon === "!" || icon === "✓" || icon === "?") {
+    return <WandIcon name={defaultIcons[tone]} size={18} strokeWidth={1.8} />;
+  }
+  return icon;
+}
 
 /** Composable feature dialog that keeps Radix, portals and focus inside ui/**. */
 export function WandDialogSurface({
@@ -206,7 +214,7 @@ export function WandDialog<T>({
               aria-hidden="true"
               className={classNames("wand-ui-dialog-icon", `wand-ui-dialog-icon-${tone}`)}
             >
-              {icon ?? defaultIcons[tone]}
+              {resolveDialogIcon(tone, icon)}
             </div>
             <div className="wand-ui-dialog-heading">
               <DialogPrimitive.Title className="wand-ui-dialog-title">

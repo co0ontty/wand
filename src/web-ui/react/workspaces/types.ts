@@ -99,6 +99,26 @@ export interface WorkspaceTaskDetail extends WorkspaceTask {
   sessions: WorkspaceSessionSummary[];
 }
 
+/** GET /api/tasks 聚合行：任务 + 运行期派生字段；目录信息在 TaskDirectoryGroup 上。 */
+export type TaskSummary = WorkspaceTaskDetail & {
+  /** 使用 maxSessions 截断时的真实会话总数（未截断时等于 sessions.length）。 */
+  totalSessions?: number;
+};
+
+/**
+ * GET /api/tasks 返回的目录组：任务一级容器的分组维度。
+ * 未绑定任务的会话以 standaloneSessions 归入所在目录（synthetic 组表示该
+ * 目录没有项目实体，仅用于展示，不能在其中建任务）。
+ */
+export interface TaskDirectoryGroup {
+  workspaceId: string;
+  workspaceName: string;
+  workspaceCwd: string;
+  synthetic?: boolean;
+  tasks: TaskSummary[];
+  standaloneSessions: WorkspaceSessionSummary[];
+}
+
 export type WorkspaceWorktreeState = "ready" | "dirty" | "conflict" | "empty" | "unavailable";
 
 interface WorkspaceWorktreeCommit {
@@ -133,6 +153,8 @@ export interface WorkspaceWorktreeOverview {
 export interface CreateWorkspaceTaskRequest {
   name: string;
   baseRef?: string;
+  /** 显式 false 时跳过独立 worktree，会话直接跑在项目目录；缺省为 true。 */
+  worktree?: boolean;
 }
 
 export interface UpdateWorkspaceTaskRequest {
@@ -165,6 +187,8 @@ export interface NewProjectDefaults {
 
 export interface WorkspacesRepository {
   list(): Promise<Workspace[]>;
+  /** 目录分组的任务聚合列表（GET /api/tasks），供侧栏「任务」视图一次拉全。 */
+  listTaskGroups(): Promise<TaskDirectoryGroup[]>;
   get(id: string): Promise<WorkspaceDetail>;
   create(request: CreateWorkspaceRequest): Promise<Workspace>;
   update(id: string, patch: UpdateWorkspaceRequest): Promise<Workspace>;
@@ -222,8 +246,12 @@ export interface WorkspacesRuntimeAdapter {
   refreshSessions(): void | Promise<unknown>;
   /** 选中并打开一个已有会话（项目里的独立会话与会话列表共用同一条记录）。 */
   selectSession(sessionId: string): void;
-  /** 点击任务：只恢复任务上下文与已有会话；空任务保持欢迎页。 */
-  openTask(payload: OpenWorkspaceTaskPayload): void;
+  /**
+   * 点击任务：只恢复任务上下文与已有会话；空任务保持欢迎页。
+   * 返回 Promise 时表示详情恢复完成；调用方若紧接着要在该任务里建会话，
+   * 必须先 await，避免恢复流程用旧快照覆盖新会话的选中态。
+   */
+  openTask(payload: OpenWorkspaceTaskPayload): void | Promise<void>;
   /** 标签栏「+」：在该任务 worktree 再起一个绑定会话（返回 promise 以便标签栏刷新）。 */
   newTaskSession(payload: NewTaskSessionPayload): void | Promise<unknown>;
   /** Start one managed Agent at the project checkout to merge selected task worktrees. */

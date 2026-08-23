@@ -1,7 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { useSyncExternalStore } from "react";
 import { wandOverlay } from "../overlay-controller";
-import { WandBadge, WandButton, WandDialogSurface, WandSkeleton, WandTabs } from "../ui";
+import { WandBadge, WandButton, WandDialogSurface, WandIcon, WandSkeleton, WandTabs } from "../ui";
 import { settingsController, settingsStore } from "./controller";
 import { httpSettingsRepository } from "./repository";
 import {
@@ -75,7 +75,7 @@ function SettingsOverview({ snapshot }: { snapshot: SettingsSnapshot }) {
   const version = snapshot.platform.appVersion || snapshot.about.version || "未知版本";
   return (
     <section className="wand-settings-overview" aria-label="当前设置概览">
-      <span className="wand-settings-overview-mark" aria-hidden="true"><SettingsTabIcon tab="general" /></span>
+      <span className="wand-settings-overview-mark" aria-hidden="true"><WandIcon name="gear" size={18} strokeWidth={1.8} /></span>
       <div className="wand-settings-overview-copy">
         <div>
           <strong>系统设置</strong>

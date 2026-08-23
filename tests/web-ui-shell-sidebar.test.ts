@@ -11,15 +11,12 @@ import {
   MemoryUiAdapter,
   ShellSidebar,
   UiStoreProvider,
-  getSessionDirectoryLabels,
   getShellSidebarEntryActions,
   getShellSidebarPrimaryAction,
   getSidebarEntryTarget,
-  normalizeSessionDirectoryCustomName,
   type UiSessionVm,
   type UiSnapshotData,
 } from "../src/web-ui/react/shell/index.js";
-import { HttpSessionDirectoryRepository } from "../src/web-ui/react/shell/session-directory-repository.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -201,87 +198,6 @@ test("sidebar entry helpers map primary and secondary actions without legacy sta
   });
 });
 
-test("directory labels prefer a custom workspace name without losing the real directory", () => {
-  assert.deepEqual(getSessionDirectoryLabels({
-    name: "wand",
-    customName: "  核心工作区  ",
-    path: "/workspace/wand",
-  }), {
-    displayName: "核心工作区",
-    directoryName: "wand",
-    path: "/workspace/wand",
-  });
-  assert.deepEqual(getSessionDirectoryLabels({
-    name: "wand",
-    customName: "   ",
-    path: "/workspace/wand",
-  }), {
-    displayName: "wand",
-    directoryName: "",
-    path: "/workspace/wand",
-  });
-  assert.deepEqual(getSessionDirectoryLabels({
-    name: "wand",
-    customName: "wand",
-    path: "/workspace/wand",
-  }), {
-    displayName: "wand",
-    directoryName: "",
-    path: "/workspace/wand",
-  });
-  assert.equal(normalizeSessionDirectoryCustomName("  wand  ", "wand"), "");
-  assert.equal(normalizeSessionDirectoryCustomName("  核心工作区  ", "wand"), "核心工作区");
-});
-
-test("session directory repository saves trimmed workspace names and surfaces server errors", async () => {
-  const calls: Array<{ url: string; init?: RequestInit }> = [];
-  const repository = new HttpSessionDirectoryRepository((async (input, init) => {
-    calls.push({ url: String(input), init });
-    if (calls.length === 1) {
-      return new Response(JSON.stringify({
-        roots: [{
-          path: "/workspace/wand",
-          name: "wand",
-          customName: "核心工作区",
-          synthetic: false,
-          directCount: 0,
-          totalCount: 0,
-          latestTimestamp: 0,
-          entries: [],
-          children: [],
-        }],
-        totalSessions: 0,
-        directoryCount: 1,
-        revision: "r1",
-      }), { status: 200, headers: { "Content-Type": "application/json" } });
-    }
-    return new Response(JSON.stringify({
-      ok: true,
-      path: "/workspace/wand",
-      name: "新名称",
-    }), { status: 200, headers: { "Content-Type": "application/json" } });
-  }) as typeof fetch);
-
-  const tree = await repository.load();
-  assert.equal(tree.roots[0]?.customName, "核心工作区");
-  assert.deepEqual(await repository.rename("/workspace/wand", "  新名称  "), {
-    ok: true,
-    path: "/workspace/wand",
-    name: "新名称",
-  });
-  assert.equal(calls[1]?.url, "/api/session-directories/name");
-  assert.equal(calls[1]?.init?.method, "PUT");
-  assert.deepEqual(JSON.parse(String(calls[1]?.init?.body)), {
-    path: "/workspace/wand",
-    name: "新名称",
-  });
-
-  const denied = new HttpSessionDirectoryRepository((async () => new Response(JSON.stringify({
-    error: "该目录不存在",
-  }), { status: 404, headers: { "Content-Type": "application/json" } })) as typeof fetch);
-  await assert.rejects(denied.rename("/missing", "name"), /该目录不存在/);
-});
-
 test("ShellSidebar SSR preserves native ids, key classes, groups, and action contracts", () => {
   const html = renderSidebar(fixture());
   const requiredIds = [
@@ -304,24 +220,19 @@ test("ShellSidebar SSR preserves native ids, key classes, groups, and action con
   }
   assert.doesNotMatch(html, /id="switch-server-button"/);
   assert.doesNotMatch(html, /id="sidebar-pin-btn"/);
-  assert.match(html, />项目<\/button>/);
+  // 统一任务视图：不再有「会话/任务」切换，也不再有独立的新会话主按钮。
+  assert.doesNotMatch(html, />会话<\/button>/);
+  assert.match(html, /aria-label="新建任务"/);
   assert.match(html, /id="sessions-drawer" class="sidebar open pinned"/);
   assert.match(html, /id="sessions-drawer-backdrop" class="drawer-backdrop open"/);
   assert.match(html, /id="file-panel-toggle-btn" class="btn btn-ghost btn-sm active"/);
+  // 原生历史与自动化分组仍可达（附加在任务列表之后），但 wand 散会话平铺列表已下线。
   assert.match(html, /class="automation-session-group"/);
   assert.match(html, /class="non-wand-session-group" open=""/);
-  assert.match(html, /data-session-id="session-1"/);
   assert.match(html, /data-claude-history-id="codex-history-1"/);
-  assert.match(html, /data-action="resume"/);
   assert.match(html, /data-action="resume-codex-history"/);
   assert.match(html, /data-action="delete-codex-history"/);
-  assert.match(html, /data-action="swipe-delete-session"/);
-  assert.match(html, /data-action="worktree-merge"/);
-  assert.match(html, /data-action="worktree-cleanup"/);
-  assert.match(html, /class="session-item active"/);
-  assert.match(html, /class="session-kind-badge worktree-merge ready"/);
-  assert.match(html, /data-provider-logo="claude"/);
-  assert.match(html, /data-provider-logo="codex"/);
+  assert.doesNotMatch(html, /class="session-manage-bar/);
 });
 
 test("ShellSidebar desktop exposes one full-to-compact toggle", () => {
@@ -352,88 +263,48 @@ test("ShellSidebar desktop exposes one full-to-compact toggle", () => {
   );
 });
 
-test("ShellSidebar SSR renders managed selection and capability-gated controls", () => {
+test("ShellSidebar SSR retires manage mode but keeps capability-gated controls", () => {
   const base = fixture();
-  const selectedGroups = base.sidebar.groups.map((group) => ({
-    ...group,
-    entries: group.entries.map((entry, index) => ({
-      ...entry,
-      selected: group.kind === "wand" && index === 0,
-    })),
-  }));
   const html = renderSidebar(fixture({
     capabilities: { backToNative: false, switchServer: true },
     sidebar: {
       ...base.sidebar,
       manageMode: true,
       selectedCount: 1,
-      groups: selectedGroups,
     },
   }));
 
-  assert.match(html, /class="session-manage-bar active"/);
-  assert.match(html, /data-action="delete-selected"/);
-  assert.match(html, /data-action="clear-selection"|data-action="select-all-visible"/);
-  assert.match(html, /data-action="toggle-selection"/);
-  assert.match(html, /class="session-item active selected session-managing"/);
-  assert.doesNotMatch(html, /data-action="resume"/);
-  assert.doesNotMatch(html, /data-action="delete-session"/);
+  // 批量管理模式随散会话列表一起下线。
+  assert.doesNotMatch(html, /class="session-manage-bar/);
+  assert.doesNotMatch(html, /data-action="delete-selected"/);
+  assert.doesNotMatch(html, /data-action="toggle-selection"/);
+  // 能力开关按钮仍在。
   assert.doesNotMatch(html, /id="back-to-native-button"/);
   assert.match(html, /id="switch-server-button"/);
-  assert.match(html, /class="automation-session-group manage-mode" open=""/);
-  assert.match(html, /class="non-wand-session-group manage-mode" open=""/);
 });
 
-test("ShellSidebar SSR keeps the collapsed legacy tile contract", () => {
+test("ShellSidebar collapsed rail still renders the unified task panel", () => {
   const base = fixture();
-  const groups = base.sidebar.groups.map((group) => group.kind === "wand"
-    ? {
-        ...group,
-        entries: group.entries.map((entry, index) => index === 1
-          ? { ...entry, provider: "codex" as const }
-          : entry),
-      }
-    : group);
   const html = renderSidebar(fixture({
     layout: {
       ...base.layout,
       sidebarCollapsed: true,
     },
-    sidebar: {
-      ...base.sidebar,
-      groups,
-    },
   }));
 
+  // 窄栏不再有散会话磁贴，改为极简任务轨：只有「新建任务」入口。
   assert.match(html, /id="sessions-drawer" class="sidebar open pinned collapsed"/);
-  assert.match(html, /class="sidebar-collapsed-tiles"/);
-  assert.match(html, /data-collapsed-session-id="session-1"/);
-  const collapsedSessionButtons = html.match(
-    /<button[^>]+data-collapsed-session-id="[^"]+"[^>]*>[\s\S]*?<\/button>/g,
-  ) ?? [];
-  assert.equal(collapsedSessionButtons.length, 2);
-  assert.match(collapsedSessionButtons[0] ?? "", /class="sidebar-collapsed-tile provider-claude active"/);
-  assert.match(collapsedSessionButtons[1] ?? "", /class="sidebar-collapsed-tile provider-codex"/);
-  assert.match(collapsedSessionButtons[0] ?? "", /data-provider-logo="claude"/);
-  assert.match(collapsedSessionButtons[1] ?? "", /data-provider-logo="codex"/);
-  assert.doesNotMatch(collapsedSessionButtons.join(""), />\s*[12]\s*<\/button>/);
-  assert.match(collapsedSessionButtons[0] ?? "", /aria-label="Main session · Claude"/);
-  assert.match(html, /data-expand-session-group="automation"/);
-  assert.match(html, /data-expand-session-group="non-wand"/);
-  assert.match(html, /data-collapsed-new-session="1"/);
+  assert.doesNotMatch(html, /class="sidebar-collapsed-tiles"[^>]*>[\s\S]*任务列表/);
+  assert.doesNotMatch(html, /aria-label="任务列表"/);
+  assert.match(html, /aria-label="新建任务"/);
   assert.doesNotMatch(html, /class="session-manage-bar/);
 });
 
-test("ShellSidebar primary action follows the active sidebar mode", () => {
-  assert.deepEqual(getShellSidebarPrimaryAction("sessions"), {
-    action: { type: "session.new" },
-    label: "新会话",
-    ariaLabel: "新建会话",
-  });
-  assert.deepEqual(getShellSidebarPrimaryAction("workspaces"), {
+test("ShellSidebar primary action is always 新任务", () => {
+  assert.deepEqual(getShellSidebarPrimaryAction(), {
     action: { type: "workspace.new" },
-    label: "新项目",
-    ariaLabel: "新建项目",
+    label: "新任务",
+    ariaLabel: "新建任务",
   });
 });
 

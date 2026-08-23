@@ -1,5 +1,6 @@
 import * as React from "react";
 
+import { WandIcon } from "../ui";
 import { classNames } from "../ui/class-names";
 import { fileExplorerController } from "../file-explorer/controller";
 import { FileExplorerHost } from "../file-explorer/host";
@@ -18,30 +19,6 @@ export function getParentFilePanelCwd(raw: string): string {
   if (!cwd || cwd === "/") return cwd || "/";
   const parent = cwd.replace(/\/[^/]+$/, "");
   return parent || "/";
-}
-
-function FileIcon({ name, size = 16 }: {
-  name: "close" | "folder" | "refresh" | "up";
-  size?: number;
-}) {
-  const common = {
-    className: `wand-icon wand-icon-${name}`,
-    width: size,
-    height: size,
-    viewBox: "0 0 24 24",
-    fill: "none",
-    stroke: "currentColor",
-    strokeWidth: 2,
-    strokeLinecap: "round" as const,
-    strokeLinejoin: "round" as const,
-    "aria-hidden": true,
-  };
-  switch (name) {
-    case "close": return <svg {...common}><path d="M18 6L6 18M6 6l12 12"/></svg>;
-    case "folder": return <svg {...common} className="wand-icon wand-icon-folder-open"><path d="M6 14l1.5-3A2 2 0 019.2 10H20a2 2 0 011.9 2.5l-1.5 6A2 2 0 0118.4 20H4a2 2 0 01-2-2V5a2 2 0 012-2h4l3 3h7a2 2 0 012 2v2"/></svg>;
-    case "refresh": return <svg {...common}><path d="M21 12a9 9 0 11-3-6.7M21 4v5h-5"/></svg>;
-    case "up": return <svg {...common}><path d="M12 19V5M5 12l7-7 7 7"/></svg>;
-  }
 }
 
 export interface ShellFilePanelProps {
@@ -91,7 +68,7 @@ export function ShellFilePanel({ explorerRef }: ShellFilePanelProps = {}) {
       >
         <div className="file-side-panel-header">
           <div className="file-side-panel-title-group">
-            <span className="file-side-panel-icon"><FileIcon name="folder"/></span>
+            <span className="file-side-panel-icon"><WandIcon name="explorer" size={16} className="wand-icon wand-icon-explorer"/></span>
             <span className="file-side-panel-title">文件</span>
           </div>
           <div className="file-side-panel-header-actions">
@@ -106,7 +83,7 @@ export function ShellFilePanel({ explorerRef }: ShellFilePanelProps = {}) {
                 void dispatch({ type: "layout.files.refresh" });
               }}
             >
-              <FileIcon name="refresh" size={15}/>
+              <WandIcon name="refresh" size={15} className="wand-icon wand-icon-refresh"/>
             </button>
             <button
               id="file-side-panel-close"
@@ -116,7 +93,7 @@ export function ShellFilePanel({ explorerRef }: ShellFilePanelProps = {}) {
               title="关闭"
               onClick={() => void dispatch({ type: "layout.files.close" })}
             >
-              <FileIcon name="close"/>
+              <WandIcon name="close" size={16} className="wand-icon wand-icon-close"/>
             </button>
           </div>
         </div>
@@ -136,7 +113,7 @@ export function ShellFilePanel({ explorerRef }: ShellFilePanelProps = {}) {
                 void dispatch({ type: "layout.files.up" });
               }}
             >
-              <FileIcon name="up" size={15}/>
+              <WandIcon name="up" size={15} className="wand-icon wand-icon-up"/>
             </button>
             <input
               type="text"

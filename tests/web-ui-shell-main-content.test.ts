@@ -134,27 +134,18 @@ test("ShellMainContent SSR renders the complete React welcome state contract", (
   }));
 
   for (const id of [
-    "welcome-tool-claude",
-    "welcome-tool-codex",
-    "welcome-tool-opencode",
-    "welcome-tool-structured",
-    "blank-chat-cwd",
-    "blank-chat-cwd-path",
-    "blank-chat-cwd-arrow",
+    "welcome-new-task",
     "cross-session-queue-host",
   ]) {
     assert.match(html, new RegExp(`id="${id}"`), `missing #${id}`);
   }
-  for (const provider of ["claude", "codex", "opencode"]) {
-    assert.match(html, new RegExp(`data-provider-logo="${provider}"`), `missing ${provider} logo`);
-  }
+  // 统一任务入口：欢迎页不再有按 provider 的快捷建会话按钮与目录选择器。
+  assert.doesNotMatch(html, /welcome-tool-|blank-chat-cwd/);
+  assert.match(html, /新建任务/);
   assert.match(html, /<div id="output" class="terminal-container hidden"><\/div>/);
   assert.match(html, /<div id="chat-output" class="chat-container hidden"><\/div>/);
   assert.match(html, /<div id="blank-chat" class="blank-chat">/);
   assert.match(html, /<div class="input-panel hidden"><\/div>.*<\/main>$/s);
-  assert.match(html, /class="blank-chat-cwd-path tail-marquee-path" id="blank-chat-cwd-path"[^>]*>/);
-  assert.match(html, /class="tail-marquee-path-inner">\/chosen\/project<\/span>/);
-  assert.doesNotMatch(html, /blank-chat-cwd-dropdown|aria-controls=|aria-expanded=/);
 });
 
 test("legacy slot visibility projection preserves hidden and active semantics", () => {
@@ -209,6 +200,17 @@ test("ShellMainContent uses UiStore actions and no forbidden legacy seam", () =>
   assert.match(source, /<WorkspaceTabBar\/>/);
   assert.doesNotMatch(source, /inSplit \? null : <WorkspaceTabBar\/>/);
   assert.doesNotMatch(source, /innerHTML|querySelector|getElementById|browser\/state|@radix-ui\/|\bfetch\s*\(/);
+});
+
+test("no-task welcome steers to task creation instead of loose sessions", () => {
+  const source = readFileSync(
+    path.join(root, "src", "web-ui", "react", "shell", "shell-main-content.tsx"),
+    "utf8",
+  );
+  // 欢迎页不再提供绕过任务的快捷建会话按钮，统一引导到「新建任务」。
+  assert.match(source, /id="welcome-new-task"/);
+  assert.match(source, /type: "workspace\.new"/);
+  assert.doesNotMatch(source, /welcome-tool-claude|新建终端会话|新建结构化会话/);
 });
 
 test("workspace task blank state offers an explicit Agent or shell choice", () => {

@@ -24,11 +24,11 @@ import { closeReactOverlays } from "./react-overlay-coordinator";
         var count = state.gitStatus.modifiedCount || 0;
         var titleText = branch + (count ? "  ·  " + count + " 个文件待提交" : "  ·  工作区干净");
         return '<button id="topbar-git-badge" class="topbar-git-badge" type="button" title="' + escapeHtml(titleText) + '" aria-label="快捷提交">'
-          + '<svg class="topbar-git-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="9" r="2"/><path d="M6 8v8"/><path d="M18 11v1a3 3 0 0 1-3 3H9"/></svg>'
+          + '<svg class="topbar-git-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3v6M12 15v6"/></svg>'
           + '<span class="topbar-git-branch">' + escapeHtml(branch) + '</span>'
           + (count > 0
               ? '<span class="topbar-git-count">·' + count + '</span>'
-              : '<span class="topbar-git-clean" aria-hidden="true">✓</span>')
+              : '<span class="topbar-git-clean" aria-hidden="true">' + iconSvg("check", { size: 11, strokeWidth: 2.2 }) + '</span>')
           + '</button>';
       }
 

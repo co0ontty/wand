@@ -27,8 +27,8 @@ export function renderApp(configPath: string): string {
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
   <title>Wand Console</title>
   <meta name="description" content="Local CLI Console for Vibe Coding - Manage terminal sessions from your browser" />
-  <meta name="theme-color" content="#f6f1e8" media="(prefers-color-scheme: light)" />
-  <meta name="theme-color" content="#1f1b17" media="(prefers-color-scheme: dark)" />
+  <meta name="theme-color" content="#f5f3ee" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#13110f" media="(prefers-color-scheme: dark)" />
   <meta name="format-detection" content="telephone=no" />
   <meta name="msapplication-tap-highlight" content="no" />
   <link rel="stylesheet" href="${xtermCssHref}" />

@@ -8,6 +8,7 @@ import test, { type TestContext } from "node:test";
 import { defaultConfig } from "../src/config.js";
 import { prepareSessionWorktree } from "../src/git-worktree.js";
 import { buildMissionDiff } from "../src/mission-diff.js";
+import { Missions } from "../src/missions.js";
 import type { Mission, MissionAttempt, MissionReviewComment } from "../src/mission-types.js";
 import { WandStorage } from "../src/storage.js";
 import { startServer } from "../src/server.js";
@@ -38,7 +39,7 @@ test("mission persistence keeps attempts and review lifecycle together", (t) => 
   const storage = new WandStorage(path.join(root, "wand.db"));
   const mission: Mission = {
     id: "mission-1", title: "Parallel fix", prompt: "Fix it", cwd: root,
-    status: "running", worktree: { baseRef: "main", sharedDirectories: ["shared-cache"], copyPaths: [] },
+    status: "running", taskId: null, worktree: { baseRef: "main", sharedDirectories: ["shared-cache"], copyPaths: [] },
     createdAt: "2026-08-05T00:00:00.000Z", updatedAt: "2026-08-05T00:00:01.000Z",
   };
   const attempt: MissionAttempt = {
@@ -152,4 +153,42 @@ test("mission HTTP routes expose tasks and validate dispatch before spawning", a
   });
   assert.equal(invalid.status, 400);
   assert.match(JSON.stringify(await invalid.json()), /工作目录不存在/);
+});
+
+test("missions linked to a task bind dispatched sessions to it", (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-mission-task-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+
+  const created: Array<Record<string, unknown>> = [];
+  const structuredStub = {
+    createSession(input: Record<string, unknown>) {
+      created.push(input);
+      return { id: `sess-${created.length}`, worktree: null };
+    },
+    sendMessage(): Promise<void> {
+      return Promise.resolve();
+    },
+    get(): null {
+      return null;
+    },
+  } as unknown as ConstructorParameters<typeof Missions>[1];
+  const missions = new Missions(storage, structuredStub, {} as ConstructorParameters<typeof Missions>[2]);
+
+  // 关联任务：attempt 会话绑定 workspaceTaskId，且不再叠加隔离 worktree。
+  const linked = missions.create({
+    prompt: "并行修",
+    cwd: root,
+    providers: ["codex"],
+    taskId: "task-1",
+  });
+  assert.equal(linked.taskId, "task-1");
+  assert.ok(created.length >= 1);
+  assert.equal(created[0].workspaceTaskId, "task-1");
+  assert.equal(created[0].worktreeEnabled, false);
+
+  // 未关联任务：保持旧行为（独立 worktree、无 workspaceTaskId）。
+  missions.create({ prompt: "并行修二", cwd: root, providers: ["codex"] });
+  assert.equal(created[1].worktreeEnabled, true);
+  assert.ok(!("workspaceTaskId" in created[1]));
 });

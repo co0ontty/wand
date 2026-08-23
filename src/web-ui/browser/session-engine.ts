@@ -661,7 +661,7 @@ import { hasPooledTerminal } from "./terminal-pool";
         return '<div class="composer-config-controls composer-config-controls-' + escapeHtml(scope) + '" data-config-scope="' + escapeHtml(scope) + '" role="group" aria-label="' + ariaLabel + '" title="' + escapeHtml(title) + '">' +
           (showMode
             ? '<span class="composer-config-chip composer-config-chip-mode" data-mode-control-pill="mode" title="模式：' + escapeHtml(modeLabel) + '">' +
-                iconSvg("shield", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) +
+                iconSvg("sliders", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) +
                 renderComposerSelectHost("mode", scope) +
               '</span>'
             : "") +

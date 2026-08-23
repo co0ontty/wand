@@ -323,7 +323,10 @@ export const filePreviewStyles = String.raw`
   box-shadow: var(--shadow-sm);
   text-align: center;
 }
-.wand-file-preview-binary-icon { font-size: 44px; color: var(--accent-active); }
+.wand-file-preview-binary-icon { color: var(--accent-active); }
+.wand-file-preview-binary-icon svg,
+.wand-file-preview-media-icon svg,
+.wand-file-preview-kind-icon svg { display: block; }
 .wand-file-preview-binary-meta { display: flex; gap: 7px; color: var(--text-muted); }
 .wand-file-preview-binary > code { max-width: 100%; overflow-wrap: anywhere; color: var(--text-secondary); font-family: var(--font-mono); }
 .wand-file-preview-binary-actions { display: flex; gap: 8px; margin-top: 6px; }

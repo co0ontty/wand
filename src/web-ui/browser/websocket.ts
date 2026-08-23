@@ -460,7 +460,6 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
                 title: endedNotifTitle,
                 body: endedNotifBody,
                 type: endedIsError ? "warning" : "success",
-                icon: endedIsError ? "!" : "✓",
                 duration: 6000,
                 actionLabel: "查看",
                 action: function() { selectSession(msg.sessionId); }
@@ -619,7 +618,6 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
                     title: "需要你的授权",
                     body: permBody,
                     type: "warning",
-                    icon: "!",
                     duration: 0,
                     actionLabel: "去处理",
                     action: function() {
@@ -755,7 +753,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           '<span class="approval-stats-popup" id="approval-stats-popup">' +
             '<span class="approval-stats-popup-title">自动批准统计</span>' +
             (stats.command > 0 ? '<span class="approval-stats-row"><span class="approval-stats-row-icon">' + iconSvg("terminal", { size: 12, strokeWidth: 1.8 }) + '</span><span class="approval-stats-row-label">命令执行</span><span class="approval-stats-row-count">' + stats.command + '</span></span>' : '') +
-            (stats.file > 0 ? '<span class="approval-stats-row"><span class="approval-stats-row-icon">' + iconSvg("edit", { size: 12, strokeWidth: 1.8 }) + '</span><span class="approval-stats-row-label">文件写入</span><span class="approval-stats-row-count">' + stats.file + '</span></span>' : '') +
+            (stats.file > 0 ? '<span class="approval-stats-row"><span class="approval-stats-row-icon">' + iconSvg("file", { size: 12, strokeWidth: 1.8 }) + '</span><span class="approval-stats-row-label">文件写入</span><span class="approval-stats-row-count">' + stats.file + '</span></span>' : '') +
             (stats.tool > 0 ? '<span class="approval-stats-row"><span class="approval-stats-row-icon">' + iconSvg("wrench", { size: 12, strokeWidth: 1.8 }) + '</span><span class="approval-stats-row-label">其他工具</span><span class="approval-stats-row-count">' + stats.tool + '</span></span>' : '') +
             '<span class="approval-stats-row approval-stats-row-total"><span class="approval-stats-row-icon">' + iconSvg("sigma", { size: 12, strokeWidth: 1.8 }) + '</span><span class="approval-stats-row-label">合计</span><span class="approval-stats-row-count">' + stats.total + '</span></span>' +
           '</span>';

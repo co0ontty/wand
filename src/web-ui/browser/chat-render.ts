@@ -334,7 +334,7 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
             if (sysInfo) {
               html += '<div class="chat-message system-info">' +
                 '<div class="system-info-card">' +
-                  '<div class="system-info-header">ℹ️ 系统信息</div>' +
+                  '<div class="system-info-header">' + iconSvg("info", { size: 13, strokeWidth: 1.8 }) + '<span>系统信息</span></div>' +
                   '<div class="system-info-content">' + escapeHtml(sysInfo.content) + '</div>' +
                 '</div>' +
               '</div>';
@@ -895,7 +895,11 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
             var st = t.status || "pending";
             var itemClass = st === "in_progress" ? "active" : st === "completed" ? "done" : "";
             var iconClass = st === "in_progress" ? "active" : st === "completed" ? "done" : "pending";
-            var icon = st === "completed" ? "✓" : st === "in_progress" ? "›" : "○";
+            var icon = st === "completed"
+              ? iconSvg("check", { size: 12, strokeWidth: 2.2 })
+              : st === "in_progress"
+                ? iconSvg("chevronRight", { size: 12, strokeWidth: 2.2 })
+                : iconSvg("circle", { size: 12, strokeWidth: 2 });
             html += '<li class="todo-progress-item ' + itemClass + '">' +
               '<span class="todo-item-icon ' + iconClass + '">' + icon + '</span>' +
               '<span>' + escapeHtml(t.content || "") + '</span>' +
@@ -1732,7 +1736,9 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
         var displayText = rawText.trim() ? rawText : t("subagent.no_output");
         var bodyHtml = rawText.trim() ? renderMarkdown(displayText) : escapeHtml(displayText);
         var markerLabel = isError ? t("subagent.task.failed") : t("subagent.task.done");
-        var markerSymbol = isError ? "✗" : "✓";
+        var markerSymbol = isError
+          ? iconSvg("close", { size: 12, strokeWidth: 2.2 })
+          : iconSvg("check", { size: 12, strokeWidth: 2.2 });
 
         return '<div class="subagent-reply final' + (isError ? ' error' : '') + '">' +
           '<div class="subagent-reply-marker ' + (isError ? 'error' : 'done') + '">' +
@@ -1807,7 +1813,7 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
           var thinkingExpanded = thinkingPersisted === null ? getCardDefault("thinking") : thinkingPersisted;
           return '<div class="chat-message thinking">' +
             '<div class="thinking-inline thinking-pty ' + (thinkingExpanded ? 'expanded' : 'collapsed') + '" data-expand-kind="thinking" data-expand-key="' + escapeHtml(thinkingKey) + '" data-thinking="' + escapeHtml(ptyThinkingText) + '" onclick="__thinkingToggle(this)">' +
-              '<span class="thinking-inline-icon">⦿</span>' +
+              '<span class="thinking-inline-icon">' + iconSvg("spark", { size: 12, strokeWidth: 1.8 }) + '</span>' +
               '<span class="thinking-inline-preview">' + escapeHtml(ptyThinkingText) + '</span>' +
               '<span class="thinking-inline-action">' + (thinkingExpanded ? '收起' : '展开') + '</span>' +
             '</div>' +
@@ -1949,7 +1955,11 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
           if (!tr) { allDone = false; }
           else if (tr.is_error) { anyError = true; }
         }
-        var statusIcon = !allDone ? "…" : (anyError ? "✗" : "✓");
+        var statusIcon = !allDone
+          ? "…"
+          : (anyError
+            ? iconSvg("close", { size: 11, strokeWidth: 2.2 })
+            : iconSvg("check", { size: 11, strokeWidth: 2.2 }));
         var statusClass = !allDone ? "pending" : (anyError ? "error" : "done");
         // Summary text
         var parts = [];
@@ -2548,7 +2558,7 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
             if (isStreaming) {
               return '<div class="thinking-inline thinking-streaming" data-thinking="">' +
                 '<div class="thinking-streaming-inner">' +
-                  '<span class="thinking-streaming-icon spinning">⦿</span>' +
+                  '<span class="thinking-streaming-icon spinning">' + iconSvg("spark", { size: 12, strokeWidth: 1.8 }) + '</span>' +
                   '<div class="thinking-streaming-text"></div>' +
                 '</div>' +
               '</div>';
@@ -2561,7 +2571,7 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
             var thinkingPersisted = getPersistedExpandState(thinkingKey);
           var thinkingExpanded = thinkingPersisted === null ? getCardDefault("thinking") : thinkingPersisted;
             return '<div class="thinking-inline ' + (thinkingExpanded ? 'expanded' : 'collapsed') + '" data-expand-kind="thinking" data-expand-key="' + escapeHtml(thinkingKey) + '" data-thinking="' + escapeHtml(thinkingText) + '" onclick="__thinkingToggle(this)">' +
-              '<span class="thinking-inline-icon">⦿</span>' +
+              '<span class="thinking-inline-icon">' + iconSvg("spark", { size: 12, strokeWidth: 1.8 }) + '</span>' +
               '<span class="thinking-inline-preview">' + escapeHtml(thinkingExpanded ? thinkingText : preview) + '</span>' +
               '<span class="thinking-inline-action">' + (thinkingExpanded ? '收起' : '展开') + '</span>' +
             '</div>';
@@ -2589,7 +2599,7 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
             try { unknownJson = JSON.stringify(block, null, 2); } catch (_e) { unknownJson = "{}"; }
             return '<div class="unknown-block collapsed" onclick="this.classList.toggle(\'collapsed\')">' +
               '<div class="unknown-block-header">' +
-                '<span class="unknown-block-icon">?</span>' +
+                '<span class="unknown-block-icon">' + iconSvg("question", { size: 13, strokeWidth: 1.8 }) + '</span>' +
                 '<span class="unknown-block-label">未识别的内容块：' + escapeHtml(unknownType) + '</span>' +
                 '<span class="unknown-block-toggle">▼</span>' +
               '</div>' +
@@ -2608,7 +2618,9 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
 
         var isError = toolResult && toolResult.is_error;
         var hasResult = resultContent.length > 0;
-        var statusIcon = isError ? "✗" : (hasResult ? "✓" : "…");
+        var statusIcon = isError
+          ? iconSvg("close", { size: 11, strokeWidth: 2.2 })
+          : (hasResult ? iconSvg("check", { size: 11, strokeWidth: 2.2 }) : "…");
 
         // Build the inline preview line
         var icon = "";
@@ -3064,7 +3076,9 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
               ' data-expand-kind="tool-card"' +
               ' data-expand-key="' + escapeHtml(askExpandKey) + '">' +
               '<div class="tool-use-header" data-tool-toggle onclick="__tcToggle(event,this)">' +
-                '<span class="tool-use-icon">' + (isAnswered ? '✓' : '?') + '</span>' +
+                '<span class="tool-use-icon">' + (isAnswered
+                  ? iconSvg("check", { size: 13, strokeWidth: 2 })
+                  : iconSvg("question", { size: 13, strokeWidth: 1.8 })) + '</span>' +
                 '<span class="tool-use-name">提问</span>' +
                 headerSummary +
                 answeredSummary +

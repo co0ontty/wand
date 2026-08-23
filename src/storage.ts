@@ -733,6 +733,7 @@ const INIT_SQL = `
     prompt TEXT NOT NULL,
     cwd TEXT NOT NULL,
     status TEXT NOT NULL,
+    task_id TEXT,
     base_ref TEXT,
     shared_directories TEXT NOT NULL DEFAULT '[]',
     copy_paths TEXT NOT NULL DEFAULT '[]',
@@ -829,6 +830,12 @@ export function ensureDatabaseFile(dbPath: string): boolean {
   db.exec(INIT_SQL);
   ensureAuthSessionSchema(db);
   ensureCommandSessionSchema(db);
+  {
+    const missionColumns = db.prepare("PRAGMA table_info(missions)").all() as Array<{ name: string }>;
+    if (missionColumns.length > 0 && !missionColumns.some((column) => column.name === "task_id")) {
+      db.exec("ALTER TABLE missions ADD COLUMN task_id TEXT");
+    }
+  }
   db.close();
   chmodSync(dbPath, 0o600);
   return created;
@@ -1467,13 +1474,13 @@ export class WandStorage {
   saveMission(mission: Mission): void {
     this.db.prepare(
       `INSERT INTO missions (
-         id, title, prompt, cwd, status, base_ref, shared_directories, copy_paths, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         id, title, prompt, cwd, status, base_ref, shared_directories, copy_paths, created_at, updated_at, task_id
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          title = excluded.title, prompt = excluded.prompt, cwd = excluded.cwd,
          status = excluded.status, base_ref = excluded.base_ref,
          shared_directories = excluded.shared_directories, copy_paths = excluded.copy_paths,
-         updated_at = excluded.updated_at`
+         updated_at = excluded.updated_at, task_id = excluded.task_id`
     ).run(
       mission.id,
       mission.title,
@@ -1485,6 +1492,7 @@ export class WandStorage {
       JSON.stringify(mission.worktree.copyPaths ?? []),
       mission.createdAt,
       mission.updatedAt,
+      mission.taskId ?? null,
     );
   }
 
@@ -1728,6 +1736,7 @@ function mapMissionRow(row: Record<string, unknown>): Mission {
       sharedDirectories: safeJsonParse<string[]>(typeof row.shared_directories === "string" ? row.shared_directories : null) ?? [],
       copyPaths: safeJsonParse<string[]>(typeof row.copy_paths === "string" ? row.copy_paths : null) ?? [],
     },
+    taskId: typeof row.task_id === "string" ? row.task_id : null,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
   };

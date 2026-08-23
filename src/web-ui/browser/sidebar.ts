@@ -125,7 +125,7 @@ document.addEventListener("click", function(event) {
         var automationActive = entries.automation.some(function(entry: any) { return entry.ref.id === state.selectedId; });
         var automationTile = automationCount > 0
           ? '<button class="sidebar-collapsed-tile automation-count-tile' + (automationActive ? ' active-group' : '') + '" type="button" data-expand-session-group="automation" title="展开查看 ' + automationCount + ' 个自动化会话" aria-label="展开查看 ' + automationCount + ' 个自动化会话">' +
-              '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v4"/><path d="M12 18v4"/><path d="M4.93 4.93l2.83 2.83"/><path d="M16.24 16.24l2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="M4.93 19.07l2.83-2.83"/><path d="M16.24 7.76l2.83-2.83"/><circle cx="12" cy="12" r="3"/></svg>' +
+              '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></svg>' +
               '<span class="non-wand-count-badge">' + (automationCount > 99 ? "99+" : automationCount) + '</span>' +
             '</button>'
           : '';
@@ -195,7 +195,7 @@ document.addEventListener("click", function(event) {
         return '<details class="automation-session-group' + (state.sessionsManageMode ? ' manage-mode' : '') + '"' + (expanded ? ' open' : '') + '>' +
           '<summary class="automation-session-summary" title="由自动化或启动任务创建，不参与普通 Wand 会话排序">' +
             '<span class="automation-session-icon" aria-hidden="true">' +
-              '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="M12 18v4"/><path d="M4.93 4.93l2.83 2.83"/><path d="M16.24 16.24l2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="M4.93 19.07l2.83-2.83"/><path d="M16.24 7.76l2.83-2.83"/><circle cx="12" cy="12" r="3"/></svg>' +
+              '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></svg>' +
             '</span>' +
             '<span class="automation-session-title">自动化</span>' +
             '<span class="automation-session-count" aria-label="' + entries.length + ' 个会话">' + entries.length + '</span>' +

@@ -5,7 +5,7 @@
       --bg-tertiary: #ece8e1;
       --bg-elevated: #fcfaf6;
       --bg-surface: rgba(255, 253, 249, 0.62);
-      --bg-terminal: #1f1b17;
+      --bg-terminal: #17120f;
       --bg-overlay: rgba(42, 28, 18, 0.4);
 
       /* ===== 边框系统 ===== */
@@ -49,6 +49,12 @@
 
       --info: #4a6fa5;
       --info-muted: rgba(74, 111, 165, 0.14);
+
+      --permission: #c28a20;
+      --permission-muted: rgba(194, 138, 32, 0.14);
+
+      --thinking: #6f6da3;
+      --thinking-muted: rgba(111, 109, 163, 0.12);
 
       /* ===== 阴影系统 ===== */
       --shadow-xs: 0 1px 3px rgba(89, 58, 32, 0.04);
@@ -113,289 +119,74 @@
     }
 
     /* ── 会话侧栏：时间视图 / 目录树视图 ─────────────────────── */
-    .sidebar-view-switch {
-      display: inline-grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      width: 116px;
-      min-width: 0;
-      padding: 2px;
-      border: 1px solid color-mix(in srgb, var(--border-subtle) 82%, transparent);
-      border-radius: 9px;
-      background: color-mix(in srgb, var(--bg-secondary) 78%, transparent);
-      box-shadow: inset 0 1px 1px rgba(89, 58, 32, 0.04);
-    }
 
-    .sidebar-view-switch button {
-      min-width: 0;
-      min-height: 26px;
-      border: 0;
-      border-radius: 7px;
-      padding: 0 8px;
-      color: var(--text-muted);
-      background: transparent;
-      font: inherit;
-      font-size: 0.6875rem;
-      font-weight: 650;
-      cursor: pointer;
-      transition: color 140ms ease, background-color 140ms ease, box-shadow 140ms ease, transform 100ms ease;
-    }
 
-    .sidebar-view-switch button:hover {
-      color: var(--text-primary);
-    }
 
-    .sidebar-view-switch button:active {
-      transform: scale(0.97);
-    }
 
-    .sidebar-view-switch button.active {
-      color: var(--text-primary);
-      background: color-mix(in srgb, var(--bg-elevated) 94%, white);
-      box-shadow: 0 1px 4px rgba(89, 58, 32, 0.11), inset 0 1px 0 rgba(255, 255, 255, 0.72);
-    }
 
-    .session-directory-tree {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-      padding: 4px 2px 12px;
-    }
 
-    .session-directory-node {
-      min-width: 0;
-    }
 
-    .session-directory-row {
-      display: flex;
-      min-width: 0;
-      align-items: center;
-      gap: 2px;
-      padding-left: calc(var(--directory-depth, 0) * 12px);
-      border-radius: 10px;
-    }
 
-    .session-directory-row:hover,
-    .session-directory-node.active-path > .session-directory-row {
-      background: color-mix(in srgb, var(--accent-muted) 42%, transparent);
-    }
 
-    .session-directory-main {
-      display: flex;
-      min-width: 0;
-      min-height: 38px;
-      flex: 1;
-      align-items: center;
-      gap: 7px;
-      border: 0;
-      border-radius: 9px;
-      padding: 5px 4px 5px 7px;
-      color: var(--text-secondary);
-      background: transparent;
-      font: inherit;
-      cursor: pointer;
-      text-align: left;
-    }
 
-    .session-directory-main:active {
-      transform: scale(0.99);
-    }
 
-    .session-directory-main > svg,
-    .session-directory-rename-form > svg {
-      flex: 0 0 auto;
-    }
 
-    .session-directory-chevron {
-      flex: 0 0 auto;
-      transform: rotate(-90deg);
-      transition: transform 160ms var(--ease-out-expo);
-    }
 
-    .session-directory-chevron.open {
-      transform: rotate(0deg);
-    }
 
-    .session-directory-label {
-      min-width: 0;
-      flex: 1;
-      display: grid;
-      gap: 1px;
-    }
 
-    .session-directory-name,
-    .session-directory-default-name {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
 
-    .session-directory-name {
-      color: var(--text-primary);
-      font-size: 0.75rem;
-      font-weight: 620;
-      line-height: 1.25;
-    }
 
-    .session-directory-default-name {
-      color: var(--text-muted);
-      font-size: 0.625rem;
-      font-weight: 500;
-      line-height: 1.15;
-    }
 
-    .session-directory-count {
-      display: inline-flex;
-      min-width: 21px;
-      height: 19px;
-      align-items: center;
-      justify-content: center;
-      border-radius: 6px;
-      padding-inline: 5px;
-      color: var(--text-muted);
-      background: color-mix(in srgb, var(--bg-elevated) 78%, transparent);
-      font-size: 0.625rem;
-      font-weight: 700;
-      font-variant-numeric: tabular-nums;
-    }
 
-    .session-directory-actions {
-      display: inline-flex;
-      flex: 0 0 auto;
-      align-items: center;
-      gap: 1px;
-    }
 
-    .session-directory-add,
-    .session-directory-rename,
-    .session-directory-rename-action {
-      display: inline-flex;
-      width: 30px;
-      min-width: 30px;
-      height: 32px;
-      align-items: center;
-      justify-content: center;
-      border: 0;
-      border-radius: 9px;
-      color: var(--text-muted);
-      background: transparent;
-      font-size: 1rem;
-      cursor: pointer;
-      opacity: 0.58;
-      transition: color 120ms ease, background-color 120ms ease, opacity 120ms ease, transform 100ms ease;
-    }
 
-    .session-directory-rename {
-      opacity: 0.36;
-    }
 
-    .session-directory-row:hover .session-directory-add,
-    .session-directory-row:hover .session-directory-rename,
-    .session-directory-add:focus-visible,
-    .session-directory-rename:focus-visible {
-      color: var(--accent);
-      background: var(--accent-muted);
-      opacity: 1;
-    }
 
-    .session-directory-add:active,
-    .session-directory-rename:active,
-    .session-directory-rename-action:active {
-      transform: scale(0.94);
-    }
 
-    .session-directory-rename-form {
-      display: flex;
-      min-width: 0;
-      min-height: 38px;
-      flex: 1;
-      align-items: center;
-      gap: 6px;
-      padding: 3px 2px 3px 9px;
-    }
 
-    .session-directory-rename-input {
-      width: 0;
-      min-width: 0;
-      height: 30px;
-      flex: 1;
-      border: 1px solid var(--accent);
-      border-radius: 8px;
-      padding: 0 8px;
-      color: var(--text-primary);
-      background: var(--bg-elevated);
-      box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 14%, transparent);
-      font: inherit;
-      font-size: 0.75rem;
-      outline: none;
-    }
 
-    .session-directory-rename-input::placeholder {
-      color: var(--text-muted);
-    }
 
-    .session-directory-rename-action {
-      height: 30px;
-      color: var(--text-muted);
-      opacity: 1;
-    }
 
-    .session-directory-rename-action:hover {
-      color: var(--text-primary);
-      background: color-mix(in srgb, var(--bg-tertiary) 72%, transparent);
-    }
 
-    .session-directory-rename-action.save {
-      color: var(--accent);
-      background: var(--accent-muted);
-    }
 
-    .session-directory-rename-action:disabled {
-      cursor: not-allowed;
-      opacity: 0.56;
-    }
 
-    .session-directory-rename-input:disabled {
-      cursor: wait;
-      opacity: 0.56;
-    }
 
-    .session-directory-rename-error {
-      margin: 0 8px 5px calc(var(--directory-depth, 0) * 12px + 9px);
-      color: var(--danger);
-      font-size: 0.625rem;
-      line-height: 1.35;
-    }
 
-    .session-directory-contents {
-      min-width: 0;
-    }
 
-    .session-directory-sessions {
-      margin: 2px 0 5px calc(var(--directory-depth, 0) * 8px + 12px);
-      padding-left: 5px;
-      border-left: 1px solid color-mix(in srgb, var(--border-subtle) 80%, transparent);
-    }
 
-    .session-directory-sessions .session-item {
-      margin-block: 2px;
-    }
 
-    .session-directory-state {
-      padding: 34px 16px;
-      color: var(--text-muted);
-      font-size: 0.75rem;
-      text-align: center;
-    }
 
-    .session-directory-state.error {
-      color: var(--danger);
-    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     @media (hover: none) {
-      .session-directory-add,
-      .session-directory-rename {
-        opacity: 0.9;
-      }
+
     }
 
     @media (max-width: 640px) {
@@ -404,38 +195,19 @@
         flex: 1;
       }
 
-      .sidebar-view-switch {
-        width: 108px;
-      }
-
       .sidebar-header-main .session-count {
         display: none;
       }
 
-      .session-directory-main {
-        min-height: 44px;
-      }
 
-      .session-directory-add,
-      .session-directory-rename {
-        width: 36px;
-        min-width: 36px;
-        height: 40px;
-      }
 
-      .session-directory-rename-form {
-        min-height: 44px;
-      }
+
+
+
     }
 
     @media (prefers-reduced-motion: reduce) {
-      .session-directory-chevron,
-      .sidebar-view-switch button,
-      .session-directory-add,
-      .session-directory-rename,
-      .session-directory-rename-action {
-        transition: none;
-      }
+
     }
 
     /* 尊重用户的减少动画偏好。
@@ -614,7 +386,7 @@
       --term-fg: #f5eadc;
       --term-bg: transparent;
       --term-cursor: #d67b52;
-      --term-color-0: #1f1b17;
+      --term-color-0: var(--bg-terminal);
       --term-color-1: #d27766;
       --term-color-2: #7fa36f;
       --term-color-3: #d5a35b;
@@ -2382,7 +2154,7 @@
     .session-status.running { background: var(--success-muted); color: var(--success); }
     .session-status.failed { background: var(--danger-muted); color: var(--danger); }
     .session-status.stopped { background: var(--warning-muted); color: var(--warning); }
-    .session-status.permission-blocked { background: rgba(240, 165, 0, 0.14); color: #d18b00; }
+    .session-status.permission-blocked { background: var(--permission-muted); color: var(--permission); }
     /* Quiet "done" states — no filled pill, just a dot + muted text, so a long
        list of finished sessions doesn't read as a stack of grey boxes. */
     .session-status.exited,
@@ -3106,7 +2878,7 @@
       background:
         radial-gradient(circle at top right, rgba(91, 58, 34, 0.2), transparent 35%),
         radial-gradient(circle at bottom left, rgba(197, 101, 61, 0.08), transparent 40%),
-        linear-gradient(180deg, #2a221c 0%, #1f1b17 50%, #1a1613 100%);
+        linear-gradient(180deg, #2a221c 0%, var(--bg-terminal) 50%, #1a1613 100%);
       overflow: hidden;
       min-height: 0;
       min-width: 0;
@@ -3161,7 +2933,7 @@
        * px 路径让 line-height 与 row 高保持单一真相源。 */
       --term-line-height: var(--term-row-height);
       --term-row-height: 20px;
-      --term-color-0: #1f1b17;
+      --term-color-0: var(--bg-terminal);
       --term-color-1: #d27766;
       --term-color-2: #7fa36f;
       --term-color-3: #d5a35b;
@@ -5139,18 +4911,18 @@
       box-sizing: border-box;
       padding: 3px 8px;
       border-radius: 6px;
-      background: rgba(138, 108, 178, 0.04);
+      background: color-mix(in srgb, var(--thinking) 8%, transparent);
       cursor: pointer;
       font-size: 0.75rem;
       line-height: 1.4;
-      color: rgba(138, 108, 178, 0.55);
+      color: color-mix(in srgb, var(--thinking) 55%, transparent);
       transition: background var(--transition-fast), color var(--transition-fast);
       word-break: break-word;
       overflow-wrap: break-word;
     }
     .thinking-inline:hover {
-      background: rgba(138, 108, 178, 0.08);
-      color: rgba(138, 108, 178, 0.8);
+      background: color-mix(in srgb, var(--thinking) 14%, transparent);
+      color: color-mix(in srgb, var(--thinking) 80%, transparent);
     }
     .thinking-inline.expanded {
       color: var(--text-secondary);
@@ -5178,17 +4950,17 @@
     .thinking-inline-action {
       flex-shrink: 0;
       font-size: 0.625rem;
-      color: rgba(138, 108, 178, 0.4);
+      color: color-mix(in srgb, var(--thinking) 40%, transparent);
       padding: 0 4px;
       border-radius: 3px;
-      background: rgba(138, 108, 178, 0.08);
+      background: color-mix(in srgb, var(--thinking) 14%, transparent);
       margin-left: auto;
     }
     .thinking-inline:hover .thinking-inline-action {
-      color: rgba(138, 108, 178, 0.7);
+      color: color-mix(in srgb, var(--thinking) 70%, transparent);
     }
     .thinking-inline.thinking-pty {
-      background: rgba(138, 108, 178, 0.03);
+      background: color-mix(in srgb, var(--thinking) 6%, transparent);
     }
 
     /* Streaming thinking: 3-line scrollable area during thinking */
@@ -5199,11 +4971,11 @@
       margin: 2px 0;
       padding: 3px 8px;
       border-radius: 6px;
-      background: rgba(138, 108, 178, 0.04);
+      background: color-mix(in srgb, var(--thinking) 8%, transparent);
       cursor: default;
       font-size: 0.75rem;
       line-height: 1.4;
-      color: rgba(138, 108, 178, 0.55);
+      color: color-mix(in srgb, var(--thinking) 55%, transparent);
     }
     .thinking-streaming-inner {
       display: flex;
@@ -5222,19 +4994,19 @@
       font-family: var(--font-mono);
       font-size: 0.75rem;
       line-height: 1.5;
-      color: rgba(138, 108, 178, 0.8);
+      color: color-mix(in srgb, var(--thinking) 80%, transparent);
       white-space: pre-wrap;
       word-break: break-word;
       max-height: 4.5em; /* ~3 lines */
       overflow-y: auto;
       scrollbar-width: thin;
-      scrollbar-color: rgba(138, 108, 178, 0.3) transparent;
+      scrollbar-color: color-mix(in srgb, var(--thinking) 30%, transparent) transparent;
     }
     .thinking-streaming-text::-webkit-scrollbar {
       width: 4px;
     }
     .thinking-streaming-text::-webkit-scrollbar-thumb {
-      background: rgba(138, 108, 178, 0.3);
+      background: color-mix(in srgb, var(--thinking) 30%, transparent);
       border-radius: 2px;
     }
 
@@ -5821,7 +5593,7 @@
       box-sizing: border-box;
       border: 1px solid rgba(15, 12, 9, 0.6);
       border-radius: var(--radius-sm);
-      background: #1f1b17;
+      background: var(--bg-terminal);
       box-shadow:
         0 1px 0 rgba(255, 255, 255, 0.04) inset,
         0 2px 12px rgba(15, 12, 9, 0.18);
@@ -5913,7 +5685,7 @@
       padding: 12px 14px 14px;
       background:
         linear-gradient(180deg, rgba(0, 0, 0, 0.18) 0%, rgba(0, 0, 0, 0) 24px),
-        #1f1b17;
+        var(--bg-terminal);
     }
     .term-command {
       font-family: var(--font-mono);
@@ -6288,7 +6060,7 @@
       margin: 12px 0;
       border-radius: var(--radius-md);
       overflow: hidden;
-      background: #1f1b17;
+      background: var(--bg-terminal);
       border: 1px solid rgba(122, 91, 64, 0.35);
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
     }
@@ -6872,7 +6644,7 @@
     }
     .permission-actions-label {
       font-size: 0.7rem;
-      color: #d18b00;
+      color: var(--permission);
       max-width: 180px;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -6893,12 +6665,12 @@
       cursor: not-allowed;
     }
     .btn-permission-approve {
-      background: rgba(240, 165, 0, 0.15);
-      color: #d18b00;
-      border-color: rgba(240, 165, 0, 0.3);
+      background: var(--permission-muted);
+      color: var(--permission);
+      border-color: color-mix(in srgb, var(--permission) 30%, transparent);
     }
     .btn-permission-approve:hover:not(:disabled) {
-      background: rgba(240, 165, 0, 0.25);
+      background: color-mix(in srgb, var(--permission) 25%, transparent);
     }
     .btn-permission-deny {
       background: transparent;
@@ -10462,6 +10234,18 @@
     }
     .blank-chat-tool-btn .tool-icon {
       font-size: 1.125rem;
+    }
+    /* 欢迎页唯一主行动：新建任务（统一任务入口） */
+    .blank-chat-tool-btn.welcome-new-task {
+      min-width: 180px;
+      justify-content: center;
+      border-color: var(--accent);
+      background: var(--accent-muted);
+      color: var(--accent);
+      font-weight: 650;
+    }
+    .blank-chat-tool-btn.welcome-new-task:hover {
+      background: color-mix(in srgb, var(--accent) 16%, transparent);
     }
     /* Blank-chat CWD inline selector */
     .blank-chat-cwd-wrap {
@@ -15000,8 +14784,7 @@
       border-bottom-color: color-mix(in srgb, var(--border-subtle) 78%, transparent);
     }
 
-    #app[data-react-shell="enabled"] .sidebar-header-primary,
-    #app[data-react-shell="enabled"] .sidebar-header-controls {
+    #app[data-react-shell="enabled"] .sidebar-header-primary {
       display: flex;
       align-items: center;
       width: 100%;
@@ -15049,32 +14832,11 @@
       border-radius: 8px;
     }
 
-    #app[data-react-shell="enabled"] .sidebar-header-controls {
-      justify-content: space-between;
-      gap: 8px;
-    }
 
-    #app[data-react-shell="enabled"] .sidebar-view-switch {
-      width: 124px;
-      height: 32px;
-      padding: 2px;
-      border-radius: 9px;
-      background: color-mix(in srgb, var(--bg-tertiary) 82%, transparent);
-      box-shadow: none;
-    }
 
-    #app[data-react-shell="enabled"] .sidebar-view-switch button {
-      min-height: 26px;
-      padding-inline: 9px;
-      border-radius: 7px;
-      font-size: 0.6875rem;
-    }
 
-    #app[data-react-shell="enabled"] .sidebar-view-switch button.active {
-      background: var(--bg-elevated);
-      box-shadow:
-        0 1px 3px rgba(40, 32, 26, 0.09),
-        inset 0 0 0 1px color-mix(in srgb, var(--border-subtle) 72%, transparent);
+    #app[data-react-shell="enabled"] .sidebar-rail-icon.is-collapsed {
+      transform: scaleX(-1);
     }
 
     #app[data-react-shell="enabled"] .sidebar-compact-toggle {
@@ -15162,29 +14924,16 @@
       justify-content: center;
     }
 
-    #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-header-primary,
-    #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-view-switch {
+    #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-header-primary {
       display: none;
     }
 
-    #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-header-controls {
-      width: auto;
-      justify-content: center;
-    }
 
 
     @media (max-width: 768px) {
       #app[data-react-shell="enabled"] .sidebar-header {
         min-height: 88px;
         padding: 9px 11px 10px;
-      }
-
-      #app[data-react-shell="enabled"] .sidebar-header-controls {
-        justify-content: flex-start;
-      }
-
-      #app[data-react-shell="enabled"] .sidebar-view-switch {
-        width: 118px;
       }
 
       /* Mobile still uses its proven collapse/close buttons. In narrow mode
@@ -15194,8 +14943,7 @@
       }
 
       #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-header-main,
-      #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-header-more,
-      #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-header-controls {
+      #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-header-more {
         display: none;
       }
 
@@ -15213,53 +14961,13 @@
     /* ── 工作空间 / 任务 面板 ── */
 
     /* 面板容器与顶部工具条：对齐 .sessions-list 的内边距与 .session-group-title 的标题语汇 */
+    /* 面板顶部不再有独立工具条：头部「任务」徽章 + 底部「新任务」主按钮已覆盖。 */
     .workspaces-panel {
       display: flex;
       flex-direction: column;
-      gap: 8px;
-      padding: 10px 10px 12px;
+      gap: 6px;
+      padding: 8px 8px 10px;
       min-width: 0;
-    }
-
-    .workspaces-panel-toolbar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      padding: 2px 6px 8px;
-      border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 80%, transparent);
-    }
-
-    .workspaces-panel-title {
-      font-size: 0.6875rem;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--text-secondary);
-    }
-
-    .workspaces-panel-new-project {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 28px;
-      height: 28px;
-      border: 0;
-      border-radius: var(--radius-full);
-      padding: 0;
-      color: var(--text-muted);
-      background: transparent;
-      cursor: pointer;
-      transition: color 120ms ease, background-color 120ms ease, transform 100ms ease;
-    }
-
-    .workspaces-panel-new-project:hover {
-      color: var(--accent);
-      background: var(--accent-muted);
-    }
-
-    .workspaces-panel-new-project:active {
-      transform: scale(0.97);
     }
 
     .workspaces-panel-state {
@@ -15274,10 +14982,18 @@
     }
 
     .workspaces-panel-empty {
-      padding: 40px 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      padding: 48px 20px;
       text-align: center;
       color: var(--text-muted);
       font-size: 0.8125rem;
+    }
+
+    .workspaces-empty-new-task {
+      margin-top: 2px;
     }
 
     .workspaces-panel-hint {
@@ -15296,13 +15012,7 @@
       min-width: 0;
     }
 
-    /* 工作空间（项目）行：复用 .session-directory-row 的圆角与 hover 语汇 */
-    .workspace-item {
-      display: flex;
-      flex-direction: column;
-      min-width: 0;
-      padding-bottom: 4px;
-    }
+
 
     .workspace-item + .workspace-item {
       padding-top: 4px;
@@ -15482,15 +15192,7 @@
       gap: 1px;
     }
 
-    /* 任务列表：缩进 + 细左边线，呼应 .session-directory-sessions 的层级感 */
-    .workspace-tasks {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-      margin: 2px 0 4px;
-      padding-left: 20px;
-      border-left: 1px solid color-mix(in srgb, var(--border-subtle) 80%, transparent);
-    }
+
 
     .workspace-tasks-state {
       padding: 8px 4px;
@@ -15630,6 +15332,203 @@
       opacity: 0.78;
     }
 
+    /* 任务分组容器（任务 + 展开的会话列表）与行内折叠箭头 */
+    .workspace-task-group {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    .workspace-task-group .workspace-task-chevron {
+      flex: 0 0 auto;
+      color: var(--text-muted);
+      transition: transform 140ms ease;
+    }
+
+    .workspace-task-group .workspace-task-chevron.open {
+      transform: rotate(180deg);
+    }
+
+    .workspace-task-chevron-btn {
+      display: inline-flex;
+      flex: 0 0 auto;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      padding: 0;
+      border: 0;
+      border-radius: 5px;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+    }
+
+    .workspace-task-chevron-btn:hover {
+      color: var(--text-primary);
+      background: color-mix(in srgb, var(--accent-muted) 45%, transparent);
+    }
+
+    .workspace-task-sessions {
+      /* 与任务名起始位置对齐（chevron + marker 的宽度之和） */
+      margin: 1px 0 3px 37px;
+      padding-left: 8px;
+      border-left: 2px solid color-mix(in srgb, var(--border-subtle) 70%, transparent);
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+
+    .workspace-loose-session-list {
+      margin-left: 14px;
+    }
+
+    /* 任务内「清空会话」：两段确认的轻量批量删除入口 */
+    .workspace-clear-sessions {
+      align-self: flex-start;
+      border: 0;
+      border-radius: 6px;
+      padding: 2px 6px;
+      color: var(--text-muted);
+      background: transparent;
+      font: inherit;
+      font-size: 0.625rem;
+      cursor: pointer;
+    }
+
+    .workspace-clear-sessions:hover {
+      color: var(--danger);
+      background: color-mix(in srgb, var(--danger) 10%, transparent);
+    }
+
+    .workspace-clear-sessions-confirm {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.625rem;
+      color: var(--danger);
+    }
+
+    .workspace-clear-sessions-confirm button {
+      border: 0;
+      border-radius: 6px;
+      padding: 2px 8px;
+      font: inherit;
+      font-size: 0.625rem;
+      cursor: pointer;
+      color: var(--text-secondary);
+      background: var(--bg-elevated);
+    }
+
+    .workspace-clear-sessions-confirm button:first-of-type {
+      color: #fff;
+      background: var(--danger);
+    }
+
+    .workspace-task-meta {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      flex: 0 0 auto;
+    }
+
+    .workspace-task-count {
+      min-width: 16px;
+      padding: 0 5px;
+      border-radius: 8px;
+      text-align: center;
+      font-size: 0.625rem;
+      font-weight: 700;
+      line-height: 1.5;
+      color: var(--text-muted);
+      background: color-mix(in srgb, var(--bg-elevated) 78%, transparent);
+    }
+
+    .workspace-task-action.add:hover {
+      color: var(--accent);
+    }
+
+    /* 任务行操作按钮默认隐藏，悬停/键盘聚焦行时显现；触屏设备常驻。 */
+    .workspace-task-action.add,
+    .workspace-task-action.edit {
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 120ms ease, color 120ms ease, background-color 120ms ease;
+    }
+
+    .workspace-task:hover .workspace-task-action.add,
+    .workspace-task:hover .workspace-task-action.edit,
+    .workspace-task:focus-within .workspace-task-action.add,
+    .workspace-task:focus-within .workspace-task-action.edit {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .workspace-task-action.add[disabled],
+    .workspace-task-action.edit[disabled] {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    @media (hover: none) {
+      .workspace-task-action.add,
+      .workspace-task-action.edit {
+        opacity: 0.82;
+        pointer-events: auto;
+      }
+    }
+
+    /* 目录组内的「未分组会话」折叠区：旧散会话在任务视图里的容身之所 */
+    .workspace-loose-sessions {
+      margin-top: 2px;
+      min-width: 0;
+    }
+
+    .workspace-loose-sessions > summary {
+      display: flex;
+      align-items: center;
+      padding: 3px 6px;
+      border-radius: 6px;
+      color: var(--text-muted);
+      font-size: 0.6875rem;
+      line-height: 1.4;
+      cursor: pointer;
+      list-style: none;
+    }
+
+    .workspace-loose-sessions > summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .workspace-loose-sessions > summary::before {
+      content: '';
+      width: 0;
+      height: 0;
+      margin-right: 5px;
+      border-left: 4px solid currentColor;
+      border-top: 3px solid transparent;
+      border-bottom: 3px solid transparent;
+      transition: transform 140ms ease;
+    }
+
+    .workspace-loose-sessions[open] > summary::before {
+      transform: rotate(90deg);
+    }
+
+    .workspace-loose-sessions > summary:hover {
+      color: var(--text-secondary);
+      background: color-mix(in srgb, var(--accent-muted) 30%, transparent);
+    }
+
+    .workspace-loose-session-list {
+      margin: 1px 0 3px 10px;
+      padding-left: 8px;
+      border-left: 2px solid color-mix(in srgb, var(--border-subtle) 60%, transparent);
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+
     .workspace-task-marker {
       display: inline-flex;
       flex: 0 0 auto;
@@ -15755,15 +15654,7 @@
       gap: 1px;
     }
 
-    /* 内联新建任务表单：输入框对齐 .session-directory-rename-input 的聚焦态 */
-    .workspace-new-task-form {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      width: 100%;
-      margin-top: 4px;
-      padding: 0 2px;
-    }
+
 
     .workspace-new-task-input {
       flex: 1;
@@ -16534,7 +16425,7 @@
       min-height: 0;
       display: flex;
       flex-direction: column;
-      background: #1f1b17; /* 终端深底，与终端主题一致 */
+      background: var(--bg-terminal); /* 终端深底，与终端主题一致 */
       border-radius: 0;
       overflow: hidden;
       position: relative;

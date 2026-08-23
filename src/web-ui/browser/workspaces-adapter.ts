@@ -90,7 +90,8 @@ export function installWorkspacesLegacyAdapter(): void {
       goHome();
       // 已有会话的任务只恢复标签 / 布局，不因每次点击任务而偷偷再起一个会话。
       // 空任务进入任务欢迎页，由用户主动选择 Agent 或空白终端。
-      void httpWorkspacesRepository.getTask(payload.taskId).then((detail) => {
+      // 返回 Promise：调用方（如侧栏「＋」建会话）需等恢复完成再动作。
+      return httpWorkspacesRepository.getTask(payload.taskId).then((detail) => {
         if (!detail) return;
         const sessionIds = orderWorkspaceSessions(detail.sessions).map((session) => session.id);
         if (sessionIds.length > 0) {

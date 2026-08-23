@@ -7,11 +7,11 @@ import {
   useRef,
   useSyncExternalStore,
 } from "react";
-import { WandButton, WandDialogSurface } from "../ui";
+import { WandButton, WandDialogSurface, WandIcon } from "../ui";
 import { filePreviewController, filePreviewStore } from "./controller";
 import {
   fileNameFromPath,
-  filePreviewIcon,
+  filePreviewIconName,
   filePreviewKindLabel,
   formatFilePreviewSize,
   isMarkdownPreview,
@@ -156,7 +156,7 @@ function TextPreview({ snapshot, file }: { snapshot: FilePreviewSnapshot; file: 
 function BinaryPreview({ file }: { file: FilePreviewFile }) {
   return (
     <div className="wand-file-preview-binary">
-      <span className="wand-file-preview-binary-icon" aria-hidden="true">◇</span>
+      <span className="wand-file-preview-binary-icon" aria-hidden="true"><WandIcon name="binary" size={44} strokeWidth={1.6}/></span>
       <strong>{file.name}</strong>
       <div className="wand-file-preview-binary-meta">
         <span>{file.ext.replace(/^\./, "") || "未知格式"}</span>
@@ -247,7 +247,7 @@ function PreviewBody({ snapshot, editorRef }: {
     case "audio":
       return (
         <div className="wand-file-preview-media wand-file-preview-audio">
-          <span className="wand-file-preview-media-icon" aria-hidden="true">♫</span>
+          <span className="wand-file-preview-media-icon" aria-hidden="true"><WandIcon name="audio" size={28} strokeWidth={1.6}/></span>
           <strong>{file.name}</strong>
           <audio controls preload="metadata" src={file.rawUrl}>您的浏览器不支持音频预览。</audio>
           <span>{formatFilePreviewSize(file.size)}</span>
@@ -411,7 +411,7 @@ export function FilePreviewHost() {
       >
         <div className="wand-file-preview-title-meta" aria-live="polite">
           <span className="wand-file-preview-kind-icon" aria-hidden="true">
-            {file ? filePreviewIcon(file.kind) : "…"}
+            {file ? <WandIcon name={filePreviewIconName(file.kind)} size={14} strokeWidth={1.8}/> : "…"}
           </span>
           {file ? <span className="wand-file-preview-kind">{filePreviewKindLabel(file)}</span> : null}
           {snapshot.dirty ? <span className="wand-file-preview-dirty">● 未保存</span> : null}

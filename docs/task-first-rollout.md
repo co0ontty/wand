@@ -81,15 +81,17 @@
 
 ## 6. 遗留问题（承接 optimization-plan 切片 6）
 
-| # | 项 | 触及 |
+**状态（2026-08-23 二次迭代）：#1–#6 全部完成。**
+
+| # | 项 | 状态 |
 | --- | --- | --- |
-| 1 | 原生客户端同步 ← 本文档主体 | 各端仓库 |
-| 2 | Missions 并入任务模型（作为任务详情的派发多 Agent 动作） | `src/missions.ts`、react/missions |
-| 3 | 批量管理模式随散会话列表下线，批量删除暂无入口 | shell-sidebar |
-| 4 | `/api/tasks` 无分页 | server-workspace-routes |
-| 5 | `.session-directory-*` CSS 残留（legacy browser UI 仍在用部分类名） | styles.css |
-| 6 | 任务内建会话布局竞态观察点（openTask 与 newTaskSession 时序） | workspaces-panel/adapter |
-| 7 | 旧版回滚层（`?reactUi=0`）仍是旧 UX，属预期，不做同步 | browser/*.ts |
+| 1 | 原生客户端同步 | ✅ 三端完成（见 §4） |
+| 2 | Missions 并入任务模型：`Mission.taskId` 可选关联；关联任务的派发直接落在任务目录（不叠加隔离）且会话绑定 `workspaceTaskId`；Web 打开并行任务时若处于任务上下文自动关联并提示 | ✅ |
+| 3 | 批量删除入口：任务展开区提供「清空会话(n)」（两段确认），走 batch-delete 接口 | ✅ |
+| 4 | `/api/tasks` 参数化：`workspaceId` 过滤、`limit`（每目录任务数）、`maxSessions`（每任务内嵌会话数，附 `totalSessions` 真实总数） | ✅ |
+| 5 | `.session-directory-*` 死样式清理：确认 React 层与 legacy 浏览器层均无使用方后整体删除；服务端 `/api/session-directories` 与 `session-directory-tree.ts`（workspace binding 在用）保留 | ✅ |
+| 6 | 任务内建会话布局竞态：`openTask` 返回恢复完成的 Promise，侧栏「＋」建会话前先 await，不再被旧快照覆盖选中态 | ✅ |
+| 7 | 旧版回滚层（`?reactUi=0`）仍是旧 UX，属预期，不做同步 | 📌 保留 |
 
 ## 7. 验证基线
 

@@ -13,7 +13,7 @@ import type {
 
 type ExplorerIconName =
   | "folder" | "folderOpen" | "file" | "image" | "code" | "media" | "archive"
-  | "newFile" | "newFolder" | "refresh";
+  | "pdf" | "markdown" | "newFile" | "newFolder" | "refresh";
 
 // Monochrome stroke glyphs — replace the old per-type emoji map with a small,
 // currentColor set so the explorer reads like a minimal IDE tree, not a wall of
@@ -21,11 +21,14 @@ type ExplorerIconName =
 const IMAGE_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "bmp", "ico", "heic", "heif"]);
 const MEDIA_EXT = new Set(["mp4", "webm", "mov", "mkv", "m4v", "ogv", "mp3", "wav", "ogg", "m4a", "flac", "aac", "opus"]);
 const ARCHIVE_EXT = new Set(["zip", "tar", "gz", "tgz", "bz2", "7z", "rar", "xz"]);
+const MARKDOWN_EXT = new Set(["md", "markdown", "mdx"]);
+const TEXT_EXT = new Set(["txt", "log"]);
+const PDF_EXT = new Set(["pdf"]);
 const CODE_EXT = new Set([
   "ts", "tsx", "js", "jsx", "mjs", "cjs", "json", "jsonc", "yaml", "yml", "toml", "ini", "cfg", "conf", "env",
   "py", "rb", "go", "rs", "java", "c", "cpp", "h", "hpp", "cs", "swift", "kt", "scala", "php", "sh", "bash",
   "zsh", "fish", "lua", "sql", "graphql", "proto", "vue", "svelte", "html", "htm", "xml", "css", "scss", "less",
-  "md", "markdown", "mdx", "txt", "log", "diff", "patch",
+  "diff", "patch",
 ]);
 
 function iconForEntry(entry: FileExplorerEntry, isOpen: boolean): ExplorerIconName {
@@ -36,6 +39,9 @@ function iconForEntry(entry: FileExplorerEntry, isOpen: boolean): ExplorerIconNa
   if (IMAGE_EXT.has(ext)) return "image";
   if (MEDIA_EXT.has(ext)) return "media";
   if (ARCHIVE_EXT.has(ext)) return "archive";
+  if (PDF_EXT.has(ext)) return "pdf";
+  if (MARKDOWN_EXT.has(ext)) return "markdown";
+  if (TEXT_EXT.has(ext)) return "file";
   if (CODE_EXT.has(ext)) return "code";
   return "file";
 }
@@ -61,6 +67,8 @@ function ExplorerIcon({ name, size = 16 }: { name: ExplorerIconName; size?: numb
     case "code": return <svg {...common}><path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/></svg>;
     case "media": return <svg {...common}><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3z"/></svg>;
     case "archive": return <svg {...common}><path d="M4 4h16v4H4z"/><path d="M5 8v12h14V8"/><path d="M12 12v4"/></svg>;
+    case "pdf": return <svg {...common}><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M8 13h5M8 17h8"/></svg>;
+    case "markdown": return <svg {...common}><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 15V9l3 4 3-4v6"/></svg>;
     case "newFile": return <svg {...common}><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 12v6M9 15h6"/></svg>;
     case "newFolder": return <svg {...common}><path d="M4 20a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2z"/><path d="M12 11v6M9 14h6"/></svg>;
     case "refresh": return <svg {...common}><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>;

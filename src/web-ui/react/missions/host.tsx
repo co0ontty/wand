@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { workspaceContextStore } from "../workspaces/workspace-context";
 
 import { ProviderLogo } from "../provider-logo";
 import { WandButton, WandDialogSurface } from "../ui";
@@ -116,6 +117,12 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
   const [reviewBody, setReviewBody] = useState("");
 
   const selected = missions.find((mission) => mission.id === selectedId) ?? missions[0] ?? null;
+  const activeTaskContext = useSyncExternalStore(
+    workspaceContextStore.subscribe,
+    workspaceContextStore.getSnapshot,
+    workspaceContextStore.getServerSnapshot,
+  );
+  const linkedTaskName = creating && activeTaskContext.taskId ? activeTaskContext.taskName : null;
   const diffLines = useMemo(() => diff ? parseDiff(diff.patch) : [], [diff]);
 
   const refresh = async () => {
@@ -150,6 +157,8 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
         title: title.trim() || undefined, prompt, cwd, providers: [...providers],
         baseRef: baseRef.trim() || undefined,
         sharedDirectories: splitPaths(sharedPaths), copyPaths: splitPaths(copyPaths),
+        // 打开并行任务时若处于某个任务的上下文中，派发会话归属该任务。
+        taskId: workspaceContextStore.getSnapshot().taskId ?? undefined,
       });
       setCreating(false); setPrompt(""); setTitle(""); setSelectedId(created.id);
       await refresh();
@@ -298,6 +307,9 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
             <div className="wand-missions-create-head"><div><h2>并行任务</h2><p>每个 Provider 会获得独立 branch 与 worktree。</p></div><button type="button" onClick={() => setCreating(false)}>×</button></div>
             <label>任务标题（可选）<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="例如：重构会话恢复流程"/></label>
             <label>目标<textarea autoFocus required value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="描述清楚完成条件、限制和验证要求…"/></label>
+            {linkedTaskName ? (
+              <p className="wand-missions-linked-task">派发的 Agent 会话将关联到当前任务「{linkedTaskName}」。</p>
+            ) : null}
             <label>项目目录<input required value={cwd} onChange={(event) => setCwd(event.target.value)}/></label>
             <div className="wand-missions-provider-picker">
               {PROVIDERS.map((provider) => (

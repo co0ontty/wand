@@ -467,7 +467,7 @@ export function renderApprovalStatsBadge() {
     '<span class="approval-stats-popup" id="approval-stats-popup">' +
       '<span class="approval-stats-popup-title">自动批准统计</span>' +
       (stats.command > 0 ? '<span class="approval-stats-row"><span class="approval-stats-row-icon">' + iconSvg("terminal", { size: 12, strokeWidth: 1.8 }) + '</span><span class="approval-stats-row-label">命令执行</span><span class="approval-stats-row-count">' + stats.command + '</span></span>' : '') +
-      (stats.file > 0 ? '<span class="approval-stats-row"><span class="approval-stats-row-icon">' + iconSvg("edit", { size: 12, strokeWidth: 1.8 }) + '</span><span class="approval-stats-row-label">文件写入</span><span class="approval-stats-row-count">' + stats.file + '</span></span>' : '') +
+      (stats.file > 0 ? '<span class="approval-stats-row"><span class="approval-stats-row-icon">' + iconSvg("file", { size: 12, strokeWidth: 1.8 }) + '</span><span class="approval-stats-row-label">文件写入</span><span class="approval-stats-row-count">' + stats.file + '</span></span>' : '') +
       (stats.tool > 0 ? '<span class="approval-stats-row"><span class="approval-stats-row-icon">' + iconSvg("wrench", { size: 12, strokeWidth: 1.8 }) + '</span><span class="approval-stats-row-label">其他工具</span><span class="approval-stats-row-count">' + stats.tool + '</span></span>' : '') +
       '<span class="approval-stats-row approval-stats-row-total"><span class="approval-stats-row-icon">' + iconSvg("sigma", { size: 12, strokeWidth: 1.8 }) + '</span><span class="approval-stats-row-label">合计</span><span class="approval-stats-row-count">' + stats.total + '</span></span>' +
     '</span>' +
@@ -715,7 +715,7 @@ export function renderAppShell() {
             '<span class="terminal-scale-overlay-label terminal-scale-label" id="terminal-scale-label-top">' + Math.round(state.terminalScale * 100) + '%</span>' +
             '<button id="terminal-scale-up-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="放大">+</button>' +
             '<span class="terminal-scale-overlay-divider"></span>' +
-            '<button id="page-refresh-btn" class="terminal-scale-overlay-btn" type="button" title="刷新页面">↻</button>' +
+            '<button id="page-refresh-btn" class="terminal-scale-overlay-btn" type="button" title="刷新页面">' + iconSvg("refresh", { size: 13, strokeWidth: 2 }) + '</button>' +
           '</div>' +
           '<button id="terminal-jump-bottom" class="terminal-jump-bottom' + (state.showTerminalJumpToBottom ? ' visible' : '') + '" type="button" title="回到底部" aria-label="回到底部"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></button>' +
         '</div>' +
@@ -816,7 +816,7 @@ export function renderAppShell() {
                   renderComposerConfigControlsHtml(selectedSession, "runtime") +
                 '</div>' +
                 '<button class="prompt-optimize-btn" id="prompt-optimize-btn" type="button" title="优化提示词" aria-label="优化提示词">' +
-                  iconSvg("edit", { size: 15, strokeWidth: 1.9, cls: "prompt-optimize-icon" }) +
+                  iconSvg("sparkle", { size: 15, strokeWidth: 1.9, cls: "prompt-optimize-icon" }) +
                   '<span class="prompt-optimize-label">优化</span>' +
                   '<span class="prompt-optimize-spinner" aria-hidden="true"></span>' +
                 '</button>' +

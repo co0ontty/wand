@@ -87,14 +87,16 @@ export function filePreviewKindLabel(file: Pick<FilePreviewFile, "kind" | "lang"
   return labels[file.kind] || file.ext.replace(/^\./, "") || file.kind;
 }
 
-export function filePreviewIcon(kind: FilePreviewKind): string {
+export function filePreviewIconName(kind: FilePreviewKind): "image" | "pdf" | "video" | "audio" | "binary" | "file" {
   switch (kind) {
-    case "image": return "▧";
-    case "pdf": return "PDF";
-    case "video": return "▶";
-    case "audio": return "♫";
-    case "binary": return "◇";
-    default: return "≡";
+    case "image":
+    case "pdf":
+    case "video":
+    case "audio":
+    case "binary":
+      return kind;
+    default:
+      return "file";
   }
 }
 

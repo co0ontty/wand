@@ -1,6 +1,6 @@
 import * as React from "react";
 
-import { WandButton, WandDialogSurface } from "../ui";
+import { WandButton, WandDialogSurface, WandIcon } from "../ui";
 import { httpWorkspacesRepository } from "./repository";
 import {
   buildWorkspaceMergeAgentPrompt,
@@ -29,26 +29,7 @@ const STATE_META: Record<WorkspaceWorktreeReview["state"], { label: string; tone
   unavailable: { label: "不可用", tone: "unavailable" },
 };
 
-function BranchIcon({ size = 18 }: { size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="6" cy="5" r="2.5" />
-      <circle cx="6" cy="19" r="2.5" />
-      <circle cx="18" cy="8" r="2.5" />
-      <path d="M6 7.5v9M18 10.5c0 4-6 2.5-6 6.5" />
-    </svg>
-  );
-}
+
 
 function presentError(error: unknown, fallback: string): string {
   if (!(error instanceof Error) || !error.message || error.message === "Failed to fetch") return fallback;
@@ -83,7 +64,7 @@ function WorktreeBubble({
       data-wand-autofocus={first ? "" : undefined}
       onClick={onToggle}
     >
-      <span className="workspace-worktree-bubble-check" aria-hidden="true">{selected ? "✓" : ""}</span>
+      <span className="workspace-worktree-bubble-check" aria-hidden="true">{selected ? <WandIcon name="check" size={12}/> : ""}</span>
       <span className="workspace-worktree-bubble-copy">
         <strong>{workspaceWorktreeSummary(worktree)}</strong>
         <code title={worktree.path}>{worktree.branch}</code>
@@ -182,7 +163,7 @@ export function WorkspaceWorktreeDialog({
     >
       <div className="workspace-worktree-body" aria-busy={loading || submitting}>
         <section className="workspace-worktree-lens" aria-label="合并目标">
-          <span className="workspace-worktree-lens-icon"><BranchIcon /></span>
+          <span className="workspace-worktree-lens-icon"><WandIcon name="branch" size={18} strokeWidth={1.8}/></span>
           <span>
             <small>合并目标</small>
             <strong>{target}</strong>

@@ -1,6 +1,6 @@
 import * as React from "react";
 
-import { WandPopover } from "../ui";
+import { WandIcon, WandPopover, type WandIconName } from "../ui";
 import { classNames } from "../ui/class-names";
 
 import { getShellSidebarEntryActions } from "./shell-sidebar";
@@ -8,33 +8,6 @@ import { useUiDispatch, useUiStoreSnapshot } from "./ui-store-react";
 import type { UiAction } from "./ui-store";
 
 void React;
-
-function TopbarIcon({ name, size = 16 }: {
-  name: "copy" | "explorer" | "file" | "git" | "hash" | "merge" | "more" | "trash";
-  size?: number;
-}) {
-  const common = {
-    width: size,
-    height: size,
-    viewBox: "0 0 24 24",
-    fill: "none",
-    stroke: "currentColor",
-    strokeWidth: 2,
-    strokeLinecap: "round" as const,
-    strokeLinejoin: "round" as const,
-    "aria-hidden": true,
-  };
-  switch (name) {
-    case "copy": return <svg {...common}><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>;
-    case "explorer": return <svg {...common}><path d="M8 3h7l4 4v11a2 2 0 01-2 2H8a2 2 0 01-2-2V5a2 2 0 012-2z"/><path d="M15 3v4h4"/><path d="M3 9h7l2 2v8a1 1 0 01-1 1H4a1 1 0 01-1-1z"/></svg>;
-    case "file": return <svg {...common}><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>;
-    case "git": return <svg {...common} className="topbar-git-icon"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="9" r="2"/><path d="M6 8v8M18 11v1a3 3 0 01-3 3H9"/></svg>;
-    case "hash": return <svg {...common}><path d="M4 9h16M4 15h16M10 3L8 21M16 3l-2 18"/></svg>;
-    case "merge": return <svg {...common}><path d="M7 7h10M7 12h10M7 17h10M5 7L3 9l2 2M19 15l2 2-2 2"/></svg>;
-    case "more": return <svg {...common}><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>;
-    case "trash": return <svg {...common}><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>;
-  }
-}
 
 function MoreItem({
   action,
@@ -48,7 +21,7 @@ function MoreItem({
   action: UiAction;
   actionName: string;
   label: string;
-  icon: "copy" | "file" | "hash" | "merge" | "trash";
+  icon: Extract<WandIconName, "copy" | "folder" | "hash" | "merge" | "trash">;
   danger?: boolean;
   disabled?: boolean;
   onAction(action: UiAction): void;
@@ -62,7 +35,7 @@ function MoreItem({
       disabled={disabled}
       onClick={() => onAction(action)}
     >
-      <TopbarIcon name={icon} size={14}/><span>{label}</span>
+      <WandIcon name={icon} size={14}/><span>{label}</span>
     </button>
   );
 }
@@ -155,7 +128,7 @@ export function ShellTopbar() {
           title="查看文件（可修改路径）"
           onClick={() => void dispatch({ type: "layout.files.toggle" })}
         >
-          <TopbarIcon name="explorer"/>
+          <WandIcon name="explorer"/>
         </button>
         <span id="topbar-git-slot" className="topbar-git-slot">
           {snapshot.topbar.git && (
@@ -169,10 +142,10 @@ export function ShellTopbar() {
               aria-label="快捷提交"
               onClick={() => void dispatch({ type: "topbar.gitCommit" })}
             >
-              <TopbarIcon name="git" size={14}/>
+              <WandIcon name="git" size={14} className="topbar-git-icon"/>
               <span className="topbar-git-branch">{snapshot.topbar.git.branch}</span>
               {snapshot.topbar.git.clean
-                ? <span className="topbar-git-clean" aria-hidden="true">✓</span>
+                ? <span className="topbar-git-clean" aria-hidden="true"><WandIcon name="check" size={11}/></span>
                 : <span className="topbar-git-count">·{snapshot.topbar.git.modifiedCount}</span>}
             </button>
           )}
@@ -204,7 +177,7 @@ export function ShellTopbar() {
                   aria-controls="topbar-more-menu"
                   title="当前会话操作"
                 >
-                  <TopbarIcon name="more"/>
+                  <WandIcon name="more"/>
                 </button>
               )}
             >
@@ -226,7 +199,7 @@ export function ShellTopbar() {
                   action={{ type: "topbar.copy", field: "cwd" }}
                   actionName="copy-cwd"
                   label="复制工作目录"
-                  icon="file"
+                  icon="folder"
                   onAction={runMoreAction}
                 />
               )}
@@ -253,7 +226,7 @@ export function ShellTopbar() {
                   action={selectedActions.cleanup}
                   actionName="worktree-cleanup"
                   label="重试 worktree 清理"
-                  icon="merge"
+                  icon="trash"
                   onAction={runMoreAction}
                 />
               )}

@@ -8,7 +8,7 @@ import {
 
 import { nextChoice, type ChoiceNavigationKey } from "../new-session/choice-navigation";
 import { ProviderLogo } from "../provider-logo";
-import { WandButton, WandDialogSurface } from "../ui";
+import { WandButton, WandDialogSurface, WandIcon } from "../ui";
 import type { WorkspaceProvider, WorkspaceSessionTarget } from "./types";
 
 export const WORKSPACE_AGENT_OPTIONS: ReadonlyArray<{
@@ -47,24 +47,7 @@ function presentError(error: unknown): string {
   return "无法新建工作窗口，请确认对应 CLI 或 Shell 配置正确。";
 }
 
-function TerminalIcon(): React.ReactElement {
-  return (
-    <svg
-      className="wand-new-session-provider-logo"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="m5 7 5 5-5 5" />
-      <path d="M12 17h7" />
-      <rect x="2.5" y="3.5" width="19" height="17" rx="3" />
-    </svg>
-  );
-}
+
 
 /** Shared work-window picker for every task-level add entry. */
 export function WorkspaceAgentDialog({
@@ -145,7 +128,7 @@ export function WorkspaceAgentDialog({
                   onKeyDown={(event) => navigateTarget(event, target)}
                 >
                   {option.value === "shell"
-                    ? <TerminalIcon />
+                    ? <WandIcon name="terminal" size={20} className="wand-new-session-provider-logo" strokeWidth={1.8} />
                     : <ProviderLogo provider={option.value} className="wand-new-session-provider-logo" />}
                   <span className="wand-new-session-choice-label">{option.label}</span>
                   <span className="wand-new-session-choice-description">{option.description}</span>

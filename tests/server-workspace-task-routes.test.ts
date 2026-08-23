@@ -159,6 +159,97 @@ test("task in a non-git workspace degrades to no isolation", async () => {
   }
 });
 
+test("task creation can skip worktree isolation and /api/tasks aggregates across projects", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-task-flat-"));
+  git(["init", "-q", "-b", "main"], root);
+  writeFileSync(path.join(root, "README.md"), "hello\n");
+  git(["add", "."], root);
+  git(["commit", "-q", "-m", "init"], root);
+
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const { baseUrl, close } = await startWorkspaceApp(storage);
+  try {
+    const ws = await fetch(`${baseUrl}/api/workspaces`, json({ name: "Wand", cwd: root })).then((r) => r.json() as Promise<{ id: string }>);
+
+    // worktree:false → 即使在 git 仓库里也不建隔离，直接跑在项目目录。
+    let res = await fetch(`${baseUrl}/api/workspaces/${ws.id}/tasks`, json({ name: "共享目录任务", worktree: false }));
+    assert.equal(res.status, 201);
+    const shared = await res.json() as { id: string; isolated: boolean; worktree: unknown; cwd: string; worktreeError?: string };
+    assert.equal(shared.isolated, false);
+    assert.equal(shared.worktree, null);
+    assert.equal(shared.cwd, root);
+    assert.equal(shared.worktreeError, undefined);
+
+    // 缺省行为不变：默认尝试建隔离 worktree。
+    res = await fetch(`${baseUrl}/api/workspaces/${ws.id}/tasks`, json({ name: "隔离任务" }));
+    assert.equal(res.status, 201);
+    const isolated = await res.json() as { id: string; isolated: boolean; cwd: string };
+    assert.equal(isolated.isolated, true);
+
+    // 绑定一个会话到共享任务；另建一个不绑任务的散会话，应归入同目录组的
+    // standaloneSessions（未分组会话）。
+    const config = { ...defaultConfig(), defaultCwd: root, structuredRunner: "sdk" as const };
+    const manager = new StructuredSessionManager(storage, config);
+    const boundSession = manager.createSession({
+      cwd: shared.cwd,
+      mode: config.defaultMode,
+      workspaceId: ws.id,
+      workspaceTaskId: shared.id,
+    });
+    const looseSession = manager.createSession({ cwd: root, mode: config.defaultMode });
+
+    res = await fetch(`${baseUrl}/api/tasks`);
+    assert.equal(res.status, 200);
+    const groups = await res.json() as Array<{
+      workspaceId: string; workspaceName: string; workspaceCwd: string; synthetic?: boolean;
+      tasks: Array<{ id: string; isolated: boolean; cwd: string; sessions: Array<{ id: string }> }>;
+      standaloneSessions: Array<{ id: string }>;
+    }>;
+    assert.equal(groups.length, 1);
+    const group = groups[0];
+    assert.equal(group.workspaceId, ws.id);
+    assert.equal(group.workspaceName, "Wand");
+    assert.equal(realpathSync(group.workspaceCwd), realpathSync(root));
+    assert.equal(group.synthetic, undefined);
+    // 目录组带回全部任务（隔离 + 共享）。
+    assert.equal(group.tasks.length, 2);
+    const sharedRow = group.tasks.find((task) => task.id === shared.id);
+    assert.ok(sharedRow);
+    assert.equal(sharedRow.isolated, false);
+    assert.equal(sharedRow.cwd, root);
+    assert.deepEqual(sharedRow.sessions.map((session) => session.id), [boundSession.id]);
+    const isolatedRow = group.tasks.find((task) => task.id === isolated.id);
+    assert.ok(isolatedRow);
+    assert.equal(isolatedRow.isolated, true);
+    assert.equal(isolatedRow.sessions.length, 0);
+    // 散会话不出现在任何任务下，而是归入目录组的未分组合话。
+    assert.deepEqual(group.standaloneSessions.map((session) => session.id), [looseSession.id]);
+
+    // 查询参数：workspaceId 过滤 + limit/maxSessions 截断。
+    res = await fetch(`${baseUrl}/api/tasks?workspaceId=${ws.id}&limit=1&maxSessions=1`);
+    assert.equal(res.status, 200);
+    const filtered = await res.json() as Array<{
+      workspaceId: string;
+      tasks: Array<{ id: string; sessions: Array<unknown>; totalSessions: number }>;
+    }>;
+    assert.equal(filtered.length, 1);
+    assert.equal(filtered[0].workspaceId, ws.id);
+    assert.equal(filtered[0].tasks.length, 1);
+    // limit=1 截断后保留一个任务；其会话被 maxSessions=1 截短，但
+    // totalSessions 仍报告真实总数，供前端展示「还有 N 条」。
+    const truncated = filtered[0].tasks[0];
+    assert.ok(truncated.sessions.length <= 1);
+    assert.equal(typeof truncated.totalSessions, "number");
+
+    // 不存在的 workspaceId → 空数组而不是全量。
+    res = await fetch(`${baseUrl}/api/tasks?workspaceId=nonexistent`);
+    assert.deepEqual(await res.json(), []);
+  } finally {
+    await close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("project worktree review reports count, default branch, commits, and dirty state", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-project-worktrees-"));
   git(["init", "-q", "-b", "main"], root);

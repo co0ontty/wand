@@ -23,6 +23,10 @@ test("tool icon classification handles provider prefixes, MCP namespaces, and ca
     ["update_plan", "todo"],
     ["wait", "wait"],
     ["custom_provider_tool", "generic"],
+    ["eval_javascript", "generic"],
+    ["runtime_status", "generic"],
+    ["get_secret", "generic"],
+    ["get_file", "read"],
   ]);
 
   for (const [name, expected] of cases) {

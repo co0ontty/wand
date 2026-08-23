@@ -442,10 +442,10 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
   app.get("/api/quick-paths", asyncRoute(async (_req, res) => {
     const home = process.env.HOME || process.env.USERPROFILE || "/home";
     res.json([
-      { path: "/tmp", name: "临时目录", icon: "🗑️" },
-      { path: home, name: "主目录", icon: "🏠" },
-      { path: process.cwd(), name: "当前目录", icon: "📂" },
-      { path: "/", name: "根目录", icon: "📁" },
+      { path: "/tmp", name: "临时目录", icon: "folder" },
+      { path: home, name: "主目录", icon: "home" },
+      { path: process.cwd(), name: "当前目录", icon: "folder" },
+      { path: "/", name: "根目录", icon: "folder" },
     ]);
   }));
 

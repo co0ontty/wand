@@ -15,6 +15,7 @@ import type {
   WorkspaceWorktreeOverview,
   WorkspaceWorktreeReview,
   WorkspaceWorktreeState,
+  TaskDirectoryGroup,
   WorkspacesRepository,
 } from "./types";
 
@@ -132,6 +133,11 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
         worktreeCount: finiteCount(workspace.worktreeCount),
       };
     });
+  }
+
+  async listTaskGroups(): Promise<TaskDirectoryGroup[]> {
+    const body = await readJson<unknown>(await this.fetchImpl("/api/tasks", { credentials: "same-origin" }));
+    return Array.isArray(body) ? (body as TaskDirectoryGroup[]) : [];
   }
 
   async get(id: string): Promise<WorkspaceDetail> {

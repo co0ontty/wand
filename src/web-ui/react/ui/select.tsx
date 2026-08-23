@@ -1,6 +1,7 @@
 import * as SelectPrimitive from "@radix-ui/react-select";
 import * as React from "react";
 import { classNames } from "./class-names";
+import { WandIcon } from "./icons";
 import { usePortalContainer } from "./portal-context";
 
 export interface WandSelectOption {
@@ -84,7 +85,7 @@ export function WandSelect({
               >
                 <SelectPrimitive.ItemText>{option.label}</SelectPrimitive.ItemText>
                 <SelectPrimitive.ItemIndicator className="wand-ui-select-indicator">
-                  ✓
+                  <WandIcon name="check" size={12}/>
                 </SelectPrimitive.ItemIndicator>
               </SelectPrimitive.Item>
             ))}

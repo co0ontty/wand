@@ -1,4 +1,5 @@
 import { state, writeStoredBoolean } from "./state";
+import { iconSvg } from "./i18n";
 import { escapeHtml } from "./utils";
 import { persistSelectedId } from "./chat-scroll";
 import { setFilePanelOpen, isMobileLayout } from "./file-browser";
@@ -222,7 +223,8 @@ export function showNotificationBubble(opts: any) {
 
   var id = ++notificationIdCounter;
   var type = opts.type || "info";
-  var icon = opts.icon || (type === "warning" ? "!" : type === "success" ? "✓" : "i");
+  var iconName = type === "warning" ? "warning" : type === "success" ? "check" : "info";
+  var icon = iconSvg(iconName, { size: 14, strokeWidth: 1.8 });
   var duration = opts.duration !== undefined ? opts.duration : 8000;
 
   var bubble = document.createElement("div");

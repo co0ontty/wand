@@ -1237,7 +1237,7 @@ export const missionsStyles = String.raw`
 .wand-missions-review { margin-top: 18px; border: 1px solid var(--border-subtle); border-radius: 14px; overflow: hidden; }
 .wand-missions-review-head { padding: 11px 13px; background: var(--bg-secondary); }
 .wand-missions-review-head span { color: var(--text-secondary); font-size: var(--font-size-xs); }
-.wand-missions-diff { max-height: 48vh; overflow: auto; background: #101214; }
+.wand-missions-diff { max-height: 48vh; overflow: auto; background: var(--bg-terminal); }
 .wand-missions-diff button { display: grid; grid-template-columns: 54px minmax(max-content, 1fr); width: 100%; min-width: max-content; border: 0; padding: 0; color: #c9d1d9; background: transparent; text-align: left; }
 .wand-missions-diff button:not(:disabled):hover { outline: 1px solid var(--accent); outline-offset: -1px; cursor: crosshair; }
 .wand-missions-diff button > span { padding: 2px 8px; color: #6e7681; background: rgb(255 255 255 / 3%); text-align: right; user-select: none; }
@@ -1942,6 +1942,76 @@ export const sessionPickerAndWorktreeStyles = String.raw`
 .wand-new-project-providers {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* ── 新建任务：worktree 开关卡片 + 提交摘要 ── */
+
+.wand-new-task-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--border-subtle, #e2d8cc) 82%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-tertiary, #f7f2ea) 62%, transparent);
+  transition: border-color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
+}
+
+.wand-new-task-option[data-checked] {
+  border-color: color-mix(in srgb, var(--accent, #8a5a2b) 42%, transparent);
+  background: color-mix(in srgb, var(--accent-muted, rgba(138, 90, 43, 0.12)) 55%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent, #8a5a2b) 16%, transparent);
+}
+
+.wand-new-task-option-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  color: var(--text-muted, #7a6a58);
+  background: color-mix(in srgb, var(--bg-elevated, #fffaf3) 82%, transparent);
+}
+
+.wand-new-task-option[data-checked] .wand-new-task-option-icon {
+  color: var(--accent, #8a5a2b);
+  background: color-mix(in srgb, var(--accent-muted, rgba(138, 90, 43, 0.12)) 72%, transparent);
+}
+
+.wand-new-task-option-text {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wand-new-task-option-label {
+  font-size: 0.8125rem;
+  font-weight: 650;
+  color: var(--text-primary, #2d2419);
+}
+
+.wand-new-task-option-hint {
+  overflow: hidden;
+  font-size: 0.6875rem;
+  line-height: 1.45;
+  color: var(--text-muted, #7a6a58);
+}
+
+.wand-new-task-option .wand-ui-switch-row {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.wand-new-task-summary strong {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wand-new-project-provider {

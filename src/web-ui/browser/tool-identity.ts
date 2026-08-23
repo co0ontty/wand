@@ -63,12 +63,12 @@ export function getToolIconKind(toolName: unknown): ToolIconKind {
   if (/github|(^|[_/])git|commit|pull_request|merge_request|branch/.test(name)) return "git";
   if (/browser|(^|[_/])web|fetch|http|url|navigate|page_|click_link/.test(name)) return "web";
   if (/grep|glob|search|find|query|lookup/.test(name)) return "search";
-  if (/bash|exec|command|terminal|shell|stdin|repl|run_code|javascript|(^|_)js($|_)/.test(name)) return "terminal";
+  if (/bash|exec|command|terminal|shell|stdin|repl|run_code/.test(name) || /repl/.test(raw)) return "terminal";
   if (/apply_patch|patch|edit|(^|_)write($|_)|write_file|create_file|save_file|replace|format_file/.test(name)) return "edit";
   if (/agent|task|subagent|spawn|collaborat|followup|interrupt|delegate|send_input/.test(name)) return "agent";
-  if (/read|open|load|list|get_|inspect|view/.test(name)) return "read";
+  if (/read|open|load|list|inspect|view|get_file/.test(name)) return "read";
   if (/think|reason/.test(name)) return "thinking";
-  if (/wait|time|sleep|poll|monitor/.test(name)) return "wait";
+  if (/(^|_)(wait|sleep|poll|monitor)($|_)/.test(name) || name === "wait") return "wait";
   if (/exit|stop|kill|cancel|terminate/.test(name)) return "exit";
   return "generic";
 }

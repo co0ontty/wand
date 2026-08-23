@@ -14,7 +14,7 @@ import {
 import type { SessionRegistry } from "./session-registry.js";
 import type { WandStorage } from "./storage.js";
 import { resolveSessionDisplayTitle } from "./session-transport.js";
-import type { LayoutNode, PaneTab, SessionProvider, TaskWindowLayout, WorkspaceDefaultProvider, WorkspaceTaskWorktree } from "./types.js";
+import type { LayoutNode, PaneTab, SessionProvider, SessionSnapshot, TaskWindowLayout, WorkspaceDefaultProvider, WorkspaceTaskWorktree } from "./types.js";
 import {
   attachUnboundSessionsToWorkspace,
   backfillSessionWorkspaces,
@@ -285,6 +285,107 @@ export function registerWorkspaceRoutes(
 
   // ── 任务（Task = 命名 + 独立 worktree + 一组标签）──
 
+  // 目录组为一级容器的任务聚合列表，供侧栏「任务」视图一次拉全。
+  app.get("/api/tasks", (req, res) => {
+    // 查询参数：workspaceId 过滤单目录；limit 截断每目录任务数；
+    // maxSessions 截断每任务内嵌会话数（大数据量时控制响应体积）。
+    const workspaceFilter = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
+    const parseBoundedCount = (raw: unknown): number | null => {
+      const value = Number(raw);
+      return Number.isFinite(value) && value > 0 ? Math.min(Math.floor(value), 500) : null;
+    };
+    const taskLimit = parseBoundedCount(req.query.limit);
+    const sessionLimit = parseBoundedCount(req.query.maxSessions);
+    backfillSessionWorkspaces(storage);
+    const workspaces = storage.listWorkspaces();
+    // 目录组为一级容器：任务归属目录；未绑定任务的会话以 standaloneSessions
+    // 归入所在目录的组（含无项目的合成组），保证没有会话在任务视图里失联。
+    interface TaskDirectoryGroup {
+      workspaceId: string;
+      workspaceName: string;
+      workspaceCwd: string;
+      synthetic?: boolean;
+      tasks: unknown[];
+      standaloneSessions: unknown[];
+    }
+    const summarize = (session: SessionSnapshot) => ({
+      id: session.id,
+      provider: session.provider,
+      sessionKind: session.sessionKind,
+      runner: session.runner,
+      title: resolveSessionDisplayTitle(session),
+      status: session.status,
+      cwd: session.cwd,
+      startedAt: session.startedAt,
+    });
+    const visibleWorkspaces = workspaceFilter
+      ? workspaces.filter((workspace) => workspace.id === workspaceFilter)
+      : workspaces;
+    const groups = new Map<string, TaskDirectoryGroup>();
+    for (const workspace of visibleWorkspaces) {
+      groups.set(workspace.id, {
+        workspaceId: workspace.id,
+        workspaceName: workspace.name,
+        workspaceCwd: workspace.cwd,
+        tasks: storage.listWorkspaceTasks(workspace.id)
+          .slice(0, taskLimit ?? undefined)
+          .map((task) => {
+            const allSessions = storage.listSessionsByWorkspaceTask(task.id);
+            const sessions = allSessions
+              .slice(0, sessionLimit ?? undefined)
+              .map((session) => ({
+                ...summarize(session),
+                workspaceTaskId: task.id,
+              }));
+            return {
+              ...task,
+              cwd: task.worktree?.path ?? workspace.cwd,
+              isolated: task.worktree !== null,
+              sessions,
+              totalSessions: allSessions.length,
+            };
+          }),
+        standaloneSessions: [],
+      });
+    }
+    const taskBoundSessionIds = new Set<string>();
+    for (const workspace of workspaces) {
+      for (const task of storage.listWorkspaceTasks(workspace.id)) {
+        for (const session of storage.listSessionsByWorkspaceTask(task.id)) taskBoundSessionIds.add(session.id);
+      }
+    }
+    for (const session of storage.loadSessions()) {
+      if (taskBoundSessionIds.has(session.id)) continue;
+      const direct = session.workspaceId ? groups.get(session.workspaceId) : undefined;
+      let group = direct && !direct.synthetic ? direct : undefined;
+      const resolved = session.cwd ? path.resolve(session.cwd) : "";
+      if (!group && resolved) {
+        group = [...groups.values()].find((candidate) => !candidate.synthetic && candidate.workspaceCwd === resolved);
+      }
+      // 过滤模式下不创建合成组：不属于目标目录的会话直接排除。
+      if (!group && resolved && !workspaceFilter) {
+        const id = `cwd:${resolved}`;
+        let synthetic = groups.get(id);
+        if (!synthetic) {
+          synthetic = {
+            workspaceId: id,
+            workspaceName: resolved.split("/").filter(Boolean).at(-1) || resolved,
+            workspaceCwd: resolved,
+            synthetic: true,
+            tasks: [],
+            standaloneSessions: [],
+          };
+          groups.set(id, synthetic);
+        }
+        group = synthetic;
+      }
+      // workspaceId 过滤时，不属于目标目录组的会话直接排除（含合成组）。
+      if (workspaceFilter && group?.workspaceId !== workspaceFilter) continue;
+      group?.standaloneSessions.push(summarize(session));
+    }
+    res.json([...groups.values()]);
+  });
+
   // 列出某工作空间下的任务
   app.get("/api/workspaces/:id/tasks", (req, res) => {
     const workspace = storage.getWorkspace(req.params.id);
@@ -373,33 +474,37 @@ export function registerWorkspaceRoutes(
     });
   }));
 
-  // 新建任务：命名 + 创建独立 worktree（非 git 仓库时退化为直接用项目目录）
+  // 新建任务：命名 + 可选独立 worktree（默认尝试创建，非 git 仓库时退化为直接用项目目录；
+  // 显式传 worktree:false 时跳过隔离，会话直接跑在项目目录）。
   app.post("/api/workspaces/:id/tasks", asyncRoute(async (req, res) => {
     const workspace = storage.getWorkspace(req.params.id);
     if (!workspace) {
       res.status(404).json({ error: "未找到该项目。" });
       return;
     }
-    const body = req.body as { name?: unknown; baseRef?: unknown };
+    const body = req.body as { name?: unknown; baseRef?: unknown; worktree?: unknown };
     const name = typeof body.name === "string" ? body.name.trim() : "";
     if (!name) {
       res.status(400).json({ error: "请输入任务名称。" });
       return;
     }
     const baseRef = typeof body.baseRef === "string" && body.baseRef.trim() ? body.baseRef.trim() : undefined;
+    const wantWorktree = body.worktree !== false;
     let worktree: WorkspaceTaskWorktree | null = null;
     let worktreeError: string | undefined;
-    try {
-      const setup = prepareSessionWorktree({
-        cwd: workspace.cwd,
-        // 用随机短 id 作分支后缀，避免同名任务撞分支。
-        sessionId: crypto.randomUUID(),
-        spec: { taskName: name, baseRef },
-      });
-      worktree = setup.worktree;
-    } catch (error) {
-      // 非 git 仓库 / 基线不存在：任务照常创建，但无 worktree 隔离。
-      worktreeError = getErrorMessage(error, "无法创建 worktree，将在项目目录直接运行。");
+    if (wantWorktree) {
+      try {
+        const setup = prepareSessionWorktree({
+          cwd: workspace.cwd,
+          // 用随机短 id 作分支后缀，避免同名任务撞分支。
+          sessionId: crypto.randomUUID(),
+          spec: { taskName: name, baseRef },
+        });
+        worktree = setup.worktree;
+      } catch (error) {
+        // 非 git 仓库 / 基线不存在：任务照常创建，但无 worktree 隔离。
+        worktreeError = getErrorMessage(error, "无法创建 worktree，将在项目目录直接运行。");
+      }
     }
     const task = storage.createWorkspaceTask({ workspaceId: workspace.id, name, worktree });
     res.status(201).json({

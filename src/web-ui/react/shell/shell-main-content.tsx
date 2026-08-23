@@ -1,7 +1,7 @@
 import * as React from "react";
 
+import { WandIcon } from "../ui";
 import { CodeEditorHost } from "../code-editor/host";
-import { ProviderLogo } from "../provider-logo";
 import { workspaceContextStore } from "../workspaces/workspace-context";
 import { workspaceAgentDialogController } from "../workspaces/workspace-agent-dialog-controller";
 import { WorkspaceTabBar } from "../workspaces/workspace-tab-bar";
@@ -56,36 +56,10 @@ export function getShellWelcomeQuickStartAction(tool: ShellWelcomeQuickStart): U
   }
 }
 
-function WelcomeIcon({ name, size }: {
-  name: "chat" | "chevron-down" | "folder" | "terminal";
-  size: number;
-}) {
-  const common = {
-    width: size,
-    height: size,
-    viewBox: "0 0 24 24",
-    fill: "none",
-    stroke: "currentColor",
-    strokeWidth: 1.8,
-    strokeLinecap: "round" as const,
-    strokeLinejoin: "round" as const,
-    "aria-hidden": true,
-  };
-  switch (name) {
-    case "chat":
-      return <svg {...common}><path d="M21 15a4 4 0 01-4 4H8l-5 3V7a4 4 0 014-4h10a4 4 0 014 4z"/></svg>;
-    case "chevron-down":
-      return <svg {...common} strokeWidth={2}><path d="M6 9l6 6 6-6"/></svg>;
-    case "folder":
-      return <svg {...common}><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>;
-    case "terminal":
-      return <svg {...common}><path d="M4 17l6-5-6-5M12 19h8"/></svg>;
-  }
-}
 
-function ShellBlankChat({ className, cwd, queueRef, workspaceTask }: {
+
+function ShellBlankChat({ className, queueRef, workspaceTask }: {
   className: string;
-  cwd: string;
   queueRef?: React.Ref<HTMLDivElement>;
   workspaceTask?: {
     workspaceName: string;
@@ -94,19 +68,13 @@ function ShellBlankChat({ className, cwd, queueRef, workspaceTask }: {
   };
 }) {
   const dispatch = useUiDispatch();
-  const quickStart = (tool: ShellWelcomeQuickStart) => {
-    void dispatch(getShellWelcomeQuickStartAction(tool));
-  };
-  const openFolderPicker = () => {
-    void dispatch({ type: "folderPicker.open" });
-  };
 
   return (
     <div id="blank-chat" className={className}>
       {workspaceTask ? (
         <div className="blank-chat-inner workspace-task-welcome">
           <div className="workspace-task-welcome-eyebrow">{workspaceTask.workspaceName}</div>
-          <div className="blank-chat-logo"><WelcomeIcon name="terminal" size={28}/></div>
+          <div className="blank-chat-logo"><WandIcon name="task" size={28} strokeWidth={1.8}/></div>
           <h2 className="blank-chat-title">{workspaceTask.taskName}</h2>
           <p className="blank-chat-subtitle">这个任务还没有工作窗口。选择一个 Agent，或直接打开空白终端。</p>
           <div className="blank-chat-tools">
@@ -115,80 +83,29 @@ function ShellBlankChat({ className, cwd, queueRef, workspaceTask }: {
               type="button"
               onClick={() => workspaceAgentDialogController.open()}
             >
-              <WelcomeIcon name="terminal" size={17}/>
+              <WandIcon name="spark" size={17} strokeWidth={1.8}/>
               选择 Agent 或空白终端
             </button>
           </div>
           <div className="workspace-task-welcome-cwd" title={workspaceTask.cwd}>
-            <WelcomeIcon name="folder" size={13}/>
+            <WandIcon name="folder" size={13} strokeWidth={1.8}/>
             <span>{workspaceTask.cwd}</span>
           </div>
         </div>
       ) : <div className="blank-chat-inner">
         <div className="blank-chat-logo">W</div>
         <h2 className="blank-chat-title">Wand</h2>
-        <p className="blank-chat-subtitle">支持终端 PTY 会话与结构化 chat 会话，两种模式可并存。</p>
+        <p className="blank-chat-subtitle">一切从任务开始：新建任务时选目录，之后在任务里建会话无需再选目录。</p>
         <div className="blank-chat-tools">
           <button
-            className="blank-chat-tool-btn"
-            id="welcome-tool-claude"
+            className="blank-chat-tool-btn welcome-new-task"
+            id="welcome-new-task"
             type="button"
-            onClick={() => quickStart("claude")}
+            onClick={() => void dispatch({ type: "workspace.new" })}
           >
-            <span className="tool-icon"><ProviderLogo provider="claude"/></span>
-            新建终端会话
+            <span className="tool-icon"><WandIcon name="task" size={16} strokeWidth={1.8}/></span>
+            新建任务
           </button>
-          <button
-            className="blank-chat-tool-btn"
-            id="welcome-tool-codex"
-            type="button"
-            onClick={() => quickStart("codex")}
-          >
-            <span className="tool-icon"><ProviderLogo provider="codex"/></span>
-            新建 Codex 会话
-          </button>
-          <button
-            className="blank-chat-tool-btn"
-            id="welcome-tool-opencode"
-            type="button"
-            onClick={() => quickStart("opencode")}
-          >
-            <span className="tool-icon"><ProviderLogo provider="opencode"/></span>
-            新建 OpenCode 会话
-          </button>
-          <button
-            className="blank-chat-tool-btn"
-            id="welcome-tool-structured"
-            type="button"
-            onClick={() => quickStart("structured")}
-          >
-            <span className="tool-icon"><WelcomeIcon name="chat" size={16}/></span>
-            新建结构化会话
-          </button>
-        </div>
-        <div className="blank-chat-cwd-wrap">
-          <div
-            className="blank-chat-cwd"
-            id="blank-chat-cwd"
-            role="button"
-            tabIndex={0}
-            aria-haspopup="dialog"
-            title={`当前工作目录：${cwd}`}
-            onClick={openFolderPicker}
-            onKeyDown={(event) => {
-              if (event.key !== "Enter" && event.key !== " ") return;
-              event.preventDefault();
-              openFolderPicker();
-            }}
-          >
-            <span className="blank-chat-cwd-icon"><WelcomeIcon name="folder" size={13}/></span>
-            <span className="blank-chat-cwd-path tail-marquee-path" id="blank-chat-cwd-path" title={cwd}>
-              <span className="tail-marquee-path-inner">{cwd}</span>
-            </span>
-            <span className="blank-chat-cwd-arrow" id="blank-chat-cwd-arrow">
-              <WelcomeIcon name="chevron-down" size={11}/>
-            </span>
-          </div>
         </div>
       </div>}
       <div id="cross-session-queue-host" ref={queueRef}/>
@@ -203,7 +120,6 @@ function ShellBlankChat({ className, cwd, queueRef, workspaceTask }: {
 export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
   const snapshot = useUiStoreSnapshot();
   const classes = getShellLegacySlotClasses(snapshot.legacyVisibility);
-  const cwd = snapshot.topbar.cwd || "/";
   const context = React.useSyncExternalStore(
     workspaceContextStore.subscribe,
     workspaceContextStore.getSnapshot,
@@ -225,7 +141,6 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
       <div id="chat-output" className={classes.chat} ref={legacyRefs?.chat}/>
       <ShellBlankChat
         className={classes.blank}
-        cwd={cwd}
         queueRef={legacyRefs?.crossSessionQueue}
         workspaceTask={context.taskId ? {
           workspaceName: context.workspaceName,

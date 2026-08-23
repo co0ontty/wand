@@ -113,10 +113,11 @@ test("opening an empty workspace task keeps creation user-driven", () => {
   assert.doesNotMatch(openTask, /startSessionInCwd/);
 });
 
-test("workspaces toolbar exposes project creation without a manual refresh action", () => {
+test("workspaces panel steers creation to the empty-state CTA without manual refresh", () => {
   const html = renderToStaticMarkup(createElement(WorkspacesPanel));
-  assert.match(html, /class="workspaces-panel-new-project"/);
-  assert.match(html, /aria-label="新建项目"/);
+  // 面板顶部不再有独立工具条；新建入口在空态 CTA（与底部主按钮、目录组「＋」并存）。
+  assert.doesNotMatch(html, /workspaces-panel-toolbar|workspaces-panel-new-project/);
+  assert.match(html, /aria-label="新建任务"/);
   assert.doesNotMatch(html, /刷新项目列表|workspaces-panel-refresh/);
 });
 

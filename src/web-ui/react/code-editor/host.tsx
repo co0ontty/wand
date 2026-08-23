@@ -1,6 +1,7 @@
 import * as React from "react";
 import { Fragment, type KeyboardEvent, type RefObject, useEffect, useRef, useSyncExternalStore } from "react";
 import { tokenizeFilePreviewCode, type FilePreviewCodeToken } from "../file-preview/model";
+import { WandIcon } from "../ui";
 import { codeEditorController, codeEditorStore } from "./controller";
 import { codeEditorStyles } from "./styles";
 import type { CodeEditorSnapshot } from "./types";
@@ -171,7 +172,7 @@ export function CodeEditorHost() {
                     run({ type: "close", path: tab.path });
                   }}
                 >
-                  ✕
+                  <WandIcon name="close" size={11}/>
                 </span>
               </button>
             ))}

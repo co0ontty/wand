@@ -54,6 +54,8 @@ export interface CreateMissionRequest {
   prompt: string;
   cwd: string;
   providers: MissionProvider[];
+  /** 关联到当前任务（workspace task）：派发的会话绑定该任务。 */
+  taskId?: string;
   baseRef?: string;
   sharedDirectories?: string[];
   copyPaths?: string[];
