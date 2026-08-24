@@ -37,9 +37,103 @@ interface PendingTopicState {
   request: SessionTopicRequest;
 }
 
+const TITLE_MAX_LENGTH = 24;
+const DESCRIPTION_MAX_LENGTH = 120;
+
 function cleanTopicText(value: unknown, maxLength: number): string {
   if (typeof value !== "string") return "";
   return value.replace(/\s+/g, " ").trim().slice(0, maxLength);
+}
+
+function normalizeComparableTitle(value: string): string {
+  return value.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+export function isSameSessionTitle(left: string, right: string): boolean {
+  const first = normalizeComparableTitle(left);
+  const second = normalizeComparableTitle(right);
+  return Boolean(first && second && first === second);
+}
+
+/** Parent task / directory names must not become a terminal's displayed title. */
+export function collectSessionTopicBlocklist(input: {
+  taskName?: string | null;
+  workspaceName?: string | null;
+  cwd?: string;
+}): string[] {
+  const cwd = (input.cwd ?? "").replace(/[\\/]+$/, "");
+  return [...new Set(
+    [input.taskName, input.workspaceName, cwd.split(/[\\/]/).pop()]
+      .map((value) => value?.replace(/\s+/g, " ").trim() ?? "")
+      .filter(Boolean),
+  )];
+}
+
+export function shouldAcceptGeneratedSessionTitle(
+  title: string,
+  blockedTitles: readonly string[] = [],
+): boolean {
+  const cleaned = title.replace(/\s+/g, " ").trim();
+  if (!cleaned || cleaned === "会话") return false;
+  return !blockedTitles.some((blocked) => isSameSessionTitle(cleaned, blocked));
+}
+
+function clipTitle(value: string, maxLength = TITLE_MAX_LENGTH): string {
+  if (value.length <= maxLength) return value;
+  const sliced = value.slice(0, maxLength);
+  const lastSpace = sliced.lastIndexOf(" ");
+  if (lastSpace >= Math.floor(maxLength * 0.55)) return sliced.slice(0, lastSpace);
+  return sliced;
+}
+
+/** Immediate title from the user's command, without waiting for the model. */
+export function summarizeSessionTitleFromInput(
+  input: string,
+  options: { blockedTitles?: readonly string[] } = {},
+): string {
+  const blockedTitles = options.blockedTitles ?? [];
+  const lines = input
+    .split(/\r?\n/)
+    .map((part) => part.replace(/^#+\s*/, "").replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  const fallback = clipTitle(lines[0] ?? "");
+  for (const line of lines) {
+    const title = clipTitle(line);
+    if (shouldAcceptGeneratedSessionTitle(title, blockedTitles)) return title;
+  }
+  return fallback;
+}
+
+export function summarizeSessionDescriptionFromInput(input: string): string {
+  return cleanTopicText(input, DESCRIPTION_MAX_LENGTH);
+}
+
+export function provisionalSessionTopic(
+  input: string,
+  blockedTitles: readonly string[] = [],
+): SessionTopic | null {
+  const title = summarizeSessionTitleFromInput(input, { blockedTitles });
+  if (!title) return null;
+  return {
+    title,
+    description: summarizeSessionDescriptionFromInput(input) || title,
+  };
+}
+
+export function sessionTopicBlocklistForSnapshot(
+  snapshot: { cwd?: string; workspaceTaskId?: string },
+  storage: {
+    getWorkspaceTask(id: string): { name: string; workspaceId: string } | null;
+    getWorkspace(id: string): { name: string } | null;
+  },
+): string[] {
+  const task = snapshot.workspaceTaskId ? storage.getWorkspaceTask(snapshot.workspaceTaskId) : null;
+  const workspace = task ? storage.getWorkspace(task.workspaceId) : null;
+  return collectSessionTopicBlocklist({
+    taskName: task?.name,
+    workspaceName: workspace?.name,
+    cwd: snapshot.cwd,
+  });
 }
 
 function parseTopic(raw: string): SessionTopic | null {
@@ -47,8 +141,8 @@ function parseTopic(raw: string): SessionTopic | null {
   if (!json) return null;
   try {
     const parsed = JSON.parse(json) as { title?: unknown; description?: unknown };
-    const title = cleanTopicText(parsed.title, 40);
-    const description = cleanTopicText(parsed.description, 120);
+    const title = cleanTopicText(parsed.title, TITLE_MAX_LENGTH);
+    const description = cleanTopicText(parsed.description, DESCRIPTION_MAX_LENGTH);
     return title && description ? { title, description } : null;
   } catch {
     return null;
@@ -101,11 +195,12 @@ export async function generateSessionTopic(
   if (!input) throw new Error("没有可总结的用户消息。");
   const outputLanguage = language?.trim() || "与用户消息相同的语言";
   const prompt = [
-    "请综合总结下面这段用户与编码助手对话中的所有用户消息，用于会话列表展示。",
+    "请综合总结下面这段用户与编码助手对话中的所有用户消息，用于单个终端/会话的列表标题。",
     `使用${outputLanguage}输出。`,
     "只输出一个 JSON 对象，不要 Markdown、解释或额外文字。",
     '格式：{"title":"不超过20个字的具体主题标题","description":"不超过60个字的一句话任务描述"}',
-    "标题避免使用“关于”“请求”“任务”等空泛词，描述保留当前整体目标、关键对象和新增要求。",
+    "标题必须概括该会话用户命令自己的具体工作，不要复述项目名、目录名或上级任务标题，也不要使用“关于”“请求”“任务”等空泛词。",
+    "描述保留当前整体目标、关键对象和新增要求。",
     "后续轮次与前面目标有关时必须共同概括；发生目标切换时优先反映最新目标，同时保留仍有效的上下文。",
     "",
     "按发送顺序排列的用户消息：",

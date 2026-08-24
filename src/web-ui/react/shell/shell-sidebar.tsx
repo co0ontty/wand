@@ -668,6 +668,9 @@ export function ShellSidebar() {
               <div className="sessions-list" id="sessions-list">
                 <WorkspacesPanel
                   selectedSessionId={snapshot.selected?.id ?? null}
+                  sessionTitles={Object.fromEntries(snapshot.sidebar.groups.flatMap((group) => (
+                    group.entries.map((entry) => [entry.id, entry.title] as const)
+                  )))}
                   extraGroups={snapshot.sidebar.groups
                     .filter((group) => group.kind !== "wand")
                     .map((group) => (

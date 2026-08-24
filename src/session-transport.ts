@@ -1,5 +1,9 @@
 import type { ConversationTurn, SessionSnapshot } from "./types.js";
 import { enrichStructuredMessages, WAND_PROTOCOL_VERSION } from "./structured-client-protocol.js";
+import {
+  shouldAcceptGeneratedSessionTitle,
+  summarizeSessionTitleFromInput,
+} from "./session-topic.js";
 
 export const SESSION_TRANSPORT_OUTPUT_LIMIT = 200_000;
 
@@ -33,14 +37,20 @@ function cleanDisplayTitle(value: string | undefined): string {
 }
 
 /** Resolve every client-visible title on the server so all clients show the same value. */
-export function resolveSessionDisplayTitle(snapshot: SessionSnapshot): string {
-  for (const candidate of [snapshot.title, snapshot.description, snapshot.summary]) {
+export function resolveSessionDisplayTitle(
+  snapshot: SessionSnapshot,
+  blockedTitles: readonly string[] = [],
+): string {
+  for (const candidate of [snapshot.title, snapshot.description]) {
     const title = cleanDisplayTitle(candidate);
-    if (title) return title;
+    if (title && shouldAcceptGeneratedSessionTitle(title, blockedTitles)) return title;
   }
+  const fromSummary = summarizeSessionTitleFromInput(snapshot.summary ?? "", { blockedTitles });
+  if (fromSummary && shouldAcceptGeneratedSessionTitle(fromSummary, blockedTitles)) return fromSummary;
   const cwd = snapshot.cwd.replace(/[\\/]+$/, "");
   const directory = cleanDisplayTitle(cwd.split(/[\\/]/).pop());
-  return directory || "会话";
+  if (directory && shouldAcceptGeneratedSessionTitle(directory, blockedTitles)) return directory;
+  return "会话";
 }
 
 /** Explicit allow-list separating the server's session object from its wire DTO. */

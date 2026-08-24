@@ -9,14 +9,15 @@ import { workspacesStore } from "./controller";
 import { httpWorkspacesRepository } from "./repository";
 import { setRatioAtPath } from "./layout-tree";
 import {
+  listSessionLabel,
   orderWorkspaceSessions,
+  withLiveSessionTitle,
   workspaceProviderLabel,
-  workspaceSessionLabel,
 } from "./session-order";
-import type { LayoutNode, PaneTab } from "./types";
+import type { LayoutNode, PaneTab, WorkspaceSessionSummary } from "./types";
 import { SessionProviderMark } from "./session-mark";
 import { classNames } from "../ui/class-names";
-import { useUiDispatch } from "../shell/ui-store-react";
+import { useUiDispatch, useUiStoreSnapshot } from "../shell/ui-store-react";
 import {
   activeWorkWindow,
   activeWorkWindowTab,
@@ -253,11 +254,15 @@ function LayoutRenderer({ node, path, api }: { node: LayoutNode; path: readonly 
 }
 
 /** 轮询任务详情，拿会话标题/provider 给窗格标题显示。 */
-function useTaskSessionMeta(taskId: string | null): Map<string, SessionMeta> {
-  const [meta, setMeta] = React.useState<Map<string, SessionMeta>>(new Map());
+function useTaskSessionMeta(
+  taskId: string | null,
+  parentNames: readonly string[] = [],
+  liveTitles: ReadonlyMap<string, string> = new Map(),
+): Map<string, SessionMeta> {
+  const [sessions, setSessions] = React.useState<WorkspaceSessionSummary[]>([]);
   React.useEffect(() => {
     if (!taskId) {
-      setMeta(new Map());
+      setSessions([]);
       return;
     }
     let cancelled = false;
@@ -265,33 +270,39 @@ function useTaskSessionMeta(taskId: string | null): Map<string, SessionMeta> {
       try {
         const detail = await httpWorkspacesRepository.getTask(taskId);
         if (cancelled || !detail) return;
-        const next = new Map<string, SessionMeta>();
-        orderWorkspaceSessions(detail.sessions).forEach((s, index) => {
-          next.set(s.id, {
-            title: workspaceSessionLabel(s, index),
-            provider: s.provider,
-            command: s.command,
-          });
-        });
-        setMeta(next);
+        setSessions(orderWorkspaceSessions(detail.sessions));
       } catch { /* ignore */ }
     };
     void load();
     const timer = window.setInterval(() => void load(), 4_000);
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [taskId]);
+  const meta = new Map<string, SessionMeta>();
+  sessions.forEach((s, index) => {
+    const session = withLiveSessionTitle(s, liveTitles.get(s.id));
+    meta.set(s.id, {
+      title: listSessionLabel(session, index, parentNames),
+      provider: session.provider,
+      command: session.command,
+    });
+  });
   return meta;
 }
 
 export function WorkspaceWindow(): React.ReactElement | null {
   const dispatch = useUiDispatch();
+  const snapshot = useUiStoreSnapshot();
   const [closingSessionId, setClosingSessionId] = React.useState<string | null>(null);
   const context = React.useSyncExternalStore(
     workspaceContextStore.subscribe,
     workspaceContextStore.getSnapshot,
     workspaceContextStore.getServerSnapshot,
   );
-  const sessionMeta = useTaskSessionMeta(context.taskId);
+  const parentNames = [context.taskName, context.workspaceName].map((name) => name.trim()).filter(Boolean);
+  const liveTitles = new Map(snapshot.sidebar.groups.flatMap((group) => (
+    group.entries.map((entry) => [entry.id, entry.title] as const)
+  )));
+  const sessionMeta = useTaskSessionMeta(context.taskId, parentNames, liveTitles);
 
   // 分屏关闭 / 任务切换时，释放所有池终端。
   React.useEffect(() => {

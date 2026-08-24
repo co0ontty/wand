@@ -51,6 +51,17 @@ test("server owns title fallback instead of using transient task state", () => {
   assert.equal(resolveSessionDisplayTitle(snapshot({ cwd: "/" })), "会话");
 });
 
+test("server prefers a command summary over the parent task title", () => {
+  assert.equal(resolveSessionDisplayTitle(snapshot({
+    title: "重构会话恢复流程",
+    summary: "先把 resume-policy 的时间窗收紧",
+  }), ["重构会话恢复流程", "wand"]), "先把 resume-policy 的时间窗收紧");
+  assert.equal(resolveSessionDisplayTitle(snapshot({
+    title: "wand",
+    cwd: "/repo/wand",
+  }), ["重构会话恢复流程", "wand"]), "会话");
+});
+
 test("session DTOs expose workspace binding, queue skills, and title-generating state", () => {
   const source = snapshot({
     workspaceId: "ws-1",

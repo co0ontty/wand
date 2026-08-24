@@ -14,7 +14,12 @@ import { truncateMessagesForTransport } from "./message-truncator.js";
 import { buildChildEnv } from "./env-utils.js";
 import { getErrorMessage } from "./error-utils.js";
 import { resolveSdkClaudeBinary } from "./claude-sdk-runner.js";
-import { SessionTopicCoordinator } from "./session-topic.js";
+import {
+  provisionalSessionTopic,
+  SessionTopicCoordinator,
+  sessionTopicBlocklistForSnapshot,
+  shouldAcceptGeneratedSessionTitle,
+} from "./session-topic.js";
 import { resolveSessionCwd } from "./session-cwd.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
 import { CodexRunner } from "./structured-codex-adapter.js";
@@ -997,6 +1002,11 @@ export class StructuredSessionManager {
   private maybeGenerateSessionTopic(id: string, input: string): void {
     const session = this.sessions.get(id);
     if (this.disposed || !session || !input.trim()) return;
+    const blockedTitles = sessionTopicBlocklistForSnapshot(session, this.storage);
+    const provisional = provisionalSessionTopic(input, blockedTitles);
+    if (provisional && (session.title !== provisional.title || session.description !== provisional.description)) {
+      this.setSessionTopic(id, provisional.title, provisional.description);
+    }
     this.topicCoordinator.request(id, {
       messages: session.messages,
       input,
@@ -1007,7 +1017,9 @@ export class StructuredSessionManager {
         if (!this.disposed) this.setSessionTopicGenerating(id, generating);
       },
       onTopic: ({ title, description }) => {
-        if (!this.disposed && this.sessions.has(id)) this.setSessionTopic(id, title, description);
+        if (!this.disposed && this.sessions.has(id) && shouldAcceptGeneratedSessionTitle(title, blockedTitles)) {
+          this.setSessionTopic(id, title, description);
+        }
       },
       onError: (error) => {
         console.error(`[StructuredSessionManager] Failed to generate session topic ${id}:`, getErrorMessage(error));

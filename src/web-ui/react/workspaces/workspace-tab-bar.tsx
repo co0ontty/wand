@@ -9,9 +9,10 @@ import { workspacesStore } from "./controller";
 import { httpWorkspacesRepository } from "./repository";
 import { SessionProviderMark } from "./session-mark";
 import {
+  listSessionLabel,
   orderWorkspaceSessions,
+  withLiveSessionTitle,
   workspaceProviderLabel,
-  workspaceSessionLabel,
 } from "./session-order";
 import type {
   NewTaskSessionPayload,
@@ -65,12 +66,13 @@ function layoutsEqual(left: TaskWindowLayout | null, right: TaskWindowLayout): b
 function windowPresentation(
   window: WorkWindowLayout,
   sessionById: ReadonlyMap<string, { session: WorkspaceSessionSummary; index: number }>,
+  parentNames: readonly string[] = [],
 ): { label: string; status?: string; count: number; session?: WorkspaceSessionSummary } {
   const ids = layoutSessionIds(window.layout);
   const active = activeLayoutTab(window.layout, window.activeTabId);
   const activeSessionId = active?.kind === "session" ? active.sessionId : ids[0];
   const meta = activeSessionId ? sessionById.get(activeSessionId) : undefined;
-  const base = meta ? workspaceSessionLabel(meta.session, meta.index) : "工作窗口";
+  const base = meta ? listSessionLabel(meta.session, meta.index, parentNames) : "工作窗口";
   return {
     label: ids.length > 1 ? `${base} · ${ids.length}` : base,
     status: meta?.session.status,
@@ -158,7 +160,12 @@ export function WorkspaceTabBar(): React.ReactElement | null {
     return () => window.removeEventListener("keydown", cancel);
   }, [moving]);
 
-  const sessions = orderWorkspaceSessions(detail?.sessions ?? []);
+  const parentNames = [context.taskName, context.workspaceName].map((name) => name.trim()).filter(Boolean);
+  const liveTitles = new Map(snapshot.sidebar.groups.flatMap((group) => (
+    group.entries.map((entry) => [entry.id, entry.title] as const)
+  )));
+  const sessions = orderWorkspaceSessions(detail?.sessions ?? [])
+    .map((session) => withLiveSessionTitle(session, liveTitles.get(session.id)));
   const taskCwd = detail?.cwd ?? context.cwd;
   const sessionIds = sessions.map((session) => session.id);
   // 打开任务时宿主会先同步写入 taskId，再异步恢复 layout。此处若只看暂时为
@@ -262,7 +269,7 @@ export function WorkspaceTabBar(): React.ReactElement | null {
         ) : (
           taskLayout.windows.map((window) => {
             const active = window.id === taskLayout.activeWindowId;
-            const presentation = windowPresentation(window, sessionById);
+            const presentation = windowPresentation(window, sessionById, parentNames);
             const containsMoving = moving
               ? layoutSessionIds(window.layout).includes(moving.sessionId)
               : false;

@@ -13,6 +13,7 @@ import {
 } from "./git-worktree.js";
 import type { SessionRegistry } from "./session-registry.js";
 import type { WandStorage } from "./storage.js";
+import { collectSessionTopicBlocklist } from "./session-topic.js";
 import { resolveSessionDisplayTitle } from "./session-transport.js";
 import type { LayoutNode, PaneTab, SessionProvider, SessionSnapshot, TaskWindowLayout, WorkspaceDefaultProvider, WorkspaceTaskWorktree } from "./types.js";
 import {
@@ -21,6 +22,17 @@ import {
 } from "./workspace-binding.js";
 
 const PROVIDERS: ReadonlySet<string> = new Set(["claude", "codex", "opencode", "grok", "qoder", "pi"]);
+
+function workspaceSessionTitle(
+  session: SessionSnapshot,
+  names: { taskName?: string | null; workspaceName?: string | null } = {},
+): string {
+  return resolveSessionDisplayTitle(session, collectSessionTopicBlocklist({
+    taskName: names.taskName,
+    workspaceName: names.workspaceName,
+    cwd: session.cwd,
+  }));
+}
 
 function parseDefaultProvider(value: unknown): WorkspaceDefaultProvider | undefined {
   return typeof value === "string" && PROVIDERS.has(value) ? (value as SessionProvider) : undefined;
@@ -208,7 +220,7 @@ export function registerWorkspaceRoutes(
       ...workspaceWithCounts(storage, workspace),
       sessions: storage.listSessionsByWorkspace(workspace.id).map((session) => ({
         ...session,
-        title: resolveSessionDisplayTitle(session),
+        title: workspaceSessionTitle(session, { workspaceName: workspace.name }),
       })),
     });
   });
@@ -308,13 +320,13 @@ export function registerWorkspaceRoutes(
       tasks: unknown[];
       standaloneSessions: unknown[];
     }
-    const summarize = (session: SessionSnapshot) => ({
+    const summarize = (session: SessionSnapshot, names: { taskName?: string; workspaceName?: string } = {}) => ({
       id: session.id,
       provider: session.provider,
       sessionKind: session.sessionKind,
       runner: session.runner,
       command: session.command,
-      title: resolveSessionDisplayTitle(session),
+      title: workspaceSessionTitle(session, names),
       status: session.status,
       cwd: session.cwd,
       startedAt: session.startedAt,
@@ -335,7 +347,7 @@ export function registerWorkspaceRoutes(
             const sessions = allSessions
               .slice(0, sessionLimit ?? undefined)
               .map((session) => ({
-                ...summarize(session),
+                ...summarize(session, { taskName: task.name, workspaceName: workspace.name }),
                 workspaceTaskId: task.id,
               }));
             return {
@@ -382,7 +394,9 @@ export function registerWorkspaceRoutes(
       }
       // workspaceId 过滤时，不属于目标目录组的会话直接排除（含合成组）。
       if (workspaceFilter && group?.workspaceId !== workspaceFilter) continue;
-      group?.standaloneSessions.push(summarize(session));
+      group?.standaloneSessions.push(summarize(session, {
+        workspaceName: group.workspaceName,
+      }));
     }
     res.json([...groups.values()]);
   });
@@ -528,7 +542,13 @@ export function registerWorkspaceRoutes(
     res.json({
       ...task,
       cwd: task.worktree?.path ?? workspace?.cwd ?? "",
-      sessions: storage.listSessionsByWorkspaceTask(task.id),
+      sessions: storage.listSessionsByWorkspaceTask(task.id).map((session) => ({
+        ...session,
+        title: workspaceSessionTitle(session, {
+          taskName: task.name,
+          workspaceName: workspace?.name,
+        }),
+      })),
     });
   });
 

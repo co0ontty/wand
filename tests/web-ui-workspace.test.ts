@@ -23,11 +23,18 @@ import {
 import {
   listSessionLabel,
   orderWorkspaceSessions,
+  withLiveSessionTitle,
   workspaceSessionLabel,
   workspaceSessionProvider,
 } from "../src/web-ui/react/workspaces/session-order.js";
 import type { LayoutNode, PaneTab } from "../src/web-ui/react/workspaces/types.js";
 import { WORKSPACE_AGENT_OPTIONS } from "../src/web-ui/react/workspaces/workspace-agent-dialog.js";
+import {
+  isDirectoryExpanded,
+  isTaskSessionsExpanded,
+  showsDirectoryDisclosure,
+  showsTaskSessionDisclosure,
+} from "../src/web-ui/react/workspaces/task-tree.js";
 import {
   WorkspacesPanel,
   shortenWorkspacePath,
@@ -93,13 +100,17 @@ test("taskSplitLayout keeps an empty sibling when there is only one session", ()
   assert.deepEqual((layout.children[1] as Extract<LayoutNode, { type: "pane" }>).tabs, []);
 });
 
-test("list session labels skip titles that only repeat the directory name", () => {
+test("list session labels skip titles that only repeat the directory or task name", () => {
   assert.equal(
     listSessionLabel({ id: "s1", provider: "pi", title: "wand", cwd: "/Users/me/wand" }, 0, ["wand"]),
     "Pi 1",
   );
   assert.equal(
-    listSessionLabel({ id: "s1", provider: "pi", title: "修侧栏" }, 0, ["wand"]),
+    listSessionLabel({ id: "s1", provider: "pi", title: "重构会话恢复流程" }, 0, ["wand", "重构会话恢复流程"]),
+    "Pi 1",
+  );
+  assert.equal(
+    listSessionLabel({ id: "s1", provider: "pi", title: "修侧栏" }, 0, ["wand", "重构会话恢复流程"]),
     "修侧栏",
   );
 });
@@ -117,6 +128,18 @@ test("workspace session labels ignore PTY cwd fallback titles and infer CLI from
   assert.equal(
     workspaceSessionLabel({ id: "s3", provider: "claude", title: "修权限弹窗" }, 1),
     "修权限弹窗",
+  );
+  assert.equal(
+    listSessionLabel({ id: "s4", provider: "claude", title: "重构会话恢复流程" }, 0, ["重构会话恢复流程"]),
+    "Claude 1",
+  );
+  assert.equal(
+    withLiveSessionTitle({ id: "s5", title: "Claude 1" }, "收紧 resume 时间窗").title,
+    "收紧 resume 时间窗",
+  );
+  assert.equal(
+    withLiveSessionTitle({ id: "s6", title: "Claude 1" }, "claude").title,
+    "Claude 1",
   );
 });
 
@@ -174,11 +197,23 @@ test("task list treats directories as group headers and exposes per-terminal del
   assert.match(styles, /\.workspace-item\s*\{[^}]*border-radius:\s*12px/s);
   assert.match(styles, /\.workspace-tasks\s*\{[^}]*border-left/s);
   assert.match(styles, /\.workspace-task-name\s*\{[^}]*font-size:\s*var\(--font-size-sm\)/s);
+  assert.match(styles, /\.workspace-task-name\s*\{[^}]*-webkit-line-clamp:\s*2/s);
+  assert.doesNotMatch(panel, /isolated \? "隔离" : "共享"/);
+  assert.match(styles, /\.workspace-session-main\s*\{[^}]*padding:\s*4px 6px 4px 12px/s);
+  assert.match(styles, /\.workspace-session\.active > \.workspace-session-main::before\s*\{[^}]*left:\s*4px/s);
 });
 
 test("task session lists default to expanded so terminals stay visible after reload", () => {
   const panel = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
-  assert.match(panel, /const \[open, setOpen\] = React\.useState\(true\);\s*const \[confirming, setConfirming\]/);
+  assert.match(panel, /const \[collapsed, setCollapsed\] = React\.useState\(false\);\s*const \[confirming, setConfirming\]/);
+  assert.match(panel, /canCollapseSessions && \(/);
+  assert.equal(showsDirectoryDisclosure(1), false);
+  assert.equal(showsDirectoryDisclosure(2), true);
+  assert.equal(isDirectoryExpanded(true, 1), true);
+  assert.equal(showsTaskSessionDisclosure(0), false);
+  assert.equal(isTaskSessionsExpanded(true, 0), true);
+  assert.equal(isTaskSessionsExpanded(true, 2), false);
+  assert.equal(isTaskSessionsExpanded(false, 2), true);
 });
 
 test("task session rows and work-window tabs render each CLI logo", () => {
@@ -188,8 +223,12 @@ test("task session rows and work-window tabs render each CLI logo", () => {
   const processManager = readFileSync(new URL("../src/process-manager.ts", import.meta.url), "utf8");
   assert.match(panel, /SessionProviderMark session=\{session\}/);
   assert.match(tabs, /SessionProviderMark session=\{presentation\.session\}/);
+  assert.match(tabs, /listSessionLabel\(meta\.session, meta\.index, parentNames\)/);
   assert.match(input, /index === 0 \|\| index === sequence\.length - 1/);
   assert.match(processManager, /shouldGenerateSessionTopicFromPtyInput\(view, shortcutKey\)/);
+  assert.match(processManager, /provisionalSessionTopic\(prompt, blockedTitles\)/);
+  const structured = readFileSync(new URL("../src/structured-session-manager.ts", import.meta.url), "utf8");
+  assert.match(structured, /provisionalSessionTopic\(input, blockedTitles\)/);
 });
 
 test("new project dialog has shared dialog styling and a responsive provider grid", () => {

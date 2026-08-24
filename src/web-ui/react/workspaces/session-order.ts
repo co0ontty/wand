@@ -40,10 +40,10 @@ function isGenericSessionTitle(
   parentNames: readonly string[] = [],
 ): boolean {
   const title = (session.title || "").trim();
-  if (!title) return true;
+  if (!title || title === "会话") return true;
   const leaf = sessionCwdLeaf(session);
   if (leaf && title.toLowerCase() === leaf.toLowerCase()) return true;
-  return parentNames.some((name) => name.toLowerCase() === title.toLowerCase());
+  return parentNames.some((name) => typeof name === "string" && name.toLowerCase() === title.toLowerCase());
 }
 
 /**
@@ -72,7 +72,7 @@ export function workspaceSessionLabel(session: WorkspaceSessionSummary, index: n
   return `${workspaceProviderLabel(workspaceSessionProvider(session))} ${index + 1}`;
 }
 
-/** 侧栏列表用：目录名/路径叶子不要再当终端标题，避免三层都叫同一个文件夹名。 */
+/** 侧栏 / 详情共用：目录名、任务名不要再当终端标题。 */
 export function listSessionLabel(
   session: WorkspaceSessionSummary,
   index: number,
@@ -80,4 +80,27 @@ export function listSessionLabel(
 ): string {
   if (!isGenericSessionTitle(session, parentNames)) return (session.title || "").trim();
   return `${workspaceProviderLabel(workspaceSessionProvider(session))} ${index + 1}`;
+}
+
+function isCommandFallbackTitle(title: string): boolean {
+  const normalized = title.trim().toLowerCase();
+  return !normalized
+    || normalized === "会话"
+    || normalized === "wand 会话"
+    || normalized === "claude"
+    || normalized === "codex"
+    || normalized === "opencode"
+    || normalized === "grok"
+    || normalized === "qoder"
+    || normalized === "pi"
+    || normalized === "终端";
+}
+
+export function withLiveSessionTitle<T extends { title?: string }>(
+  session: T,
+  liveTitle?: string,
+): T {
+  const title = (liveTitle || "").trim();
+  if (!title || isCommandFallbackTitle(title)) return session;
+  return { ...session, title };
 }

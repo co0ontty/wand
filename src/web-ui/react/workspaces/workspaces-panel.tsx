@@ -22,7 +22,13 @@ import type {
 import { classNames } from "../ui/class-names";
 import { WandIcon, workspaceTaskIconName } from "../ui";
 import { SessionProviderMark } from "./session-mark";
-import { listSessionLabel, workspaceSessionLabel } from "./session-order";
+import { listSessionLabel, withLiveSessionTitle } from "./session-order";
+import {
+  isDirectoryExpanded,
+  isTaskSessionsExpanded,
+  showsDirectoryDisclosure,
+  showsTaskSessionDisclosure,
+} from "./task-tree";
 
 const NAME_MAX = 80;
 
@@ -140,6 +146,7 @@ function TaskSessionItem({
   session,
   index,
   parentNames,
+  liveTitle,
   active,
   onOpen,
   onDelete,
@@ -147,13 +154,15 @@ function TaskSessionItem({
   session: WorkspaceSessionSummary;
   index: number;
   parentNames?: readonly string[];
+  liveTitle?: string;
   active: boolean;
   onOpen(): void;
   onDelete(): Promise<void>;
 }) {
   const [confirming, setConfirming] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
-  const label = listSessionLabel(session, index, parentNames);
+  const labeled = withLiveSessionTitle(session, liveTitle);
+  const label = listSessionLabel(labeled, index, parentNames);
 
   return (
     <div className={classNames("workspace-session", active && "active", confirming && "confirming")}>
@@ -227,6 +236,7 @@ function TaskSessionItem({
 function TaskItem({
   task,
   parentNames,
+  liveTitles,
   activeTaskId,
   activeSessionId,
   onOpen,
@@ -239,6 +249,7 @@ function TaskItem({
 }: {
   task: TaskSummary;
   parentNames: readonly string[];
+  liveTitles?: Readonly<Record<string, string>>;
   activeTaskId: string | null;
   activeSessionId: string | null;
   onOpen(): void;
@@ -251,7 +262,7 @@ function TaskItem({
   onRename(name: string): Promise<void>;
   onDelete(): Promise<void>;
 }) {
-  const [open, setOpen] = React.useState(true);
+  const [collapsed, setCollapsed] = React.useState(false);
   const [confirming, setConfirming] = React.useState(false);
   const [clearConfirming, setClearConfirming] = React.useState(false);
   const [renaming, setRenaming] = React.useState(false);
@@ -261,8 +272,12 @@ function TaskItem({
   const isolated = Boolean(task.worktree);
   const isActive = activeTaskId === task.id;
 
+  const sessionCount = task.sessions.length;
+  const canCollapseSessions = showsTaskSessionDisclosure(sessionCount);
+  const open = isTaskSessionsExpanded(collapsed, sessionCount);
+
   React.useEffect(() => {
-    if (isActive) setOpen(true);
+    if (isActive) setCollapsed(false);
   }, [isActive]);
 
   const submitRename = async () => {
@@ -295,9 +310,11 @@ function TaskItem({
         aria-busy={busy}
         onSubmit={(event) => { event.preventDefault(); void submitRename(); }}
       >
-        <span className={classNames("workspace-task-marker", isolated ? "isolated" : "shared")}>
-          <WandIcon name={workspaceTaskIconName(isolated)} size={12}/>
-        </span>
+        {isolated ? (
+          <span className="workspace-task-marker isolated" aria-hidden="true">
+            <WandIcon name={workspaceTaskIconName(true)} size={12}/>
+          </span>
+        ) : null}
         <span className="workspace-task-rename-field">
           <input
             className="workspace-task-rename-input"
@@ -326,49 +343,46 @@ function TaskItem({
     );
   }
 
-  const sessionCount = task.sessions.length;
-
   return (
     <div className={classNames("workspace-task-group", isActive && "active", open && "is-open")}>
       <div
         className={classNames("workspace-task", isActive && "active", !isolated && "not-isolated")}
         role="button"
         tabIndex={0}
-        aria-expanded={open}
+        aria-expanded={canCollapseSessions ? open : undefined}
         aria-current={isActive ? "true" : undefined}
         title={task.worktree ? task.worktree.path : `无 worktree（在 ${task.cwd} 直接运行）`}
-        onClick={() => { setOpen(true); onOpen(); }}
+        onClick={() => { setCollapsed(false); onOpen(); }}
         onKeyDown={(event) => {
           if (event.target !== event.currentTarget) return;
           if (event.key !== "Enter" && event.key !== " ") return;
           event.preventDefault();
-          setOpen(true);
+          setCollapsed(false);
           onOpen();
         }}
       >
-        <button
-          type="button"
-          className="workspace-task-chevron-btn"
-          aria-label={open ? `收起任务 ${task.name} 的终端` : `展开任务 ${task.name} 的终端`}
-          aria-expanded={open}
-          title={open ? "收起" : "展开终端"}
-          onClick={(event) => {
-            event.stopPropagation();
-            setOpen((current) => !current);
-          }}
-        >
-          <WandIcon name="chevron" size={11} className={classNames("workspace-task-chevron", open && "open")}/>
-        </button>
-        <span className={classNames("workspace-task-marker", isolated ? "isolated" : "shared")}>
-          <WandIcon name={workspaceTaskIconName(isolated)} size={12}/>
-        </span>
+        {isolated ? (
+          <span className="workspace-task-marker isolated" title="隔离 worktree" aria-label="隔离 worktree">
+            <WandIcon name={workspaceTaskIconName(true)} size={12}/>
+          </span>
+        ) : null}
         <span className="workspace-task-name">{task.name}</span>
         <span className="workspace-task-meta">
-          <span className={classNames("workspace-task-badge", isolated ? "isolated" : "shared")}>
-            {isolated ? "隔离" : "共享"}
-          </span>
-          {sessionCount > 0 && (
-            <span className="workspace-task-count" aria-label={`${sessionCount} 个终端`}>{sessionCount}</span>
+          {canCollapseSessions && (
+            <button
+              type="button"
+              className="workspace-task-chevron-btn"
+              aria-label={open ? `收起任务 ${task.name} 的终端` : `展开任务 ${task.name} 的终端`}
+              aria-expanded={open}
+              title={open ? "收起" : "展开终端"}
+              onClick={(event) => {
+                event.stopPropagation();
+                setCollapsed((current) => !current);
+              }}
+            >
+              <span className="workspace-task-count" aria-hidden="true">{sessionCount}</span>
+              <WandIcon name="chevron" size={11} className={classNames("workspace-task-chevron", open && "open")}/>
+            </button>
           )}
         </span>
         {!confirming && (
@@ -381,7 +395,7 @@ function TaskItem({
               disabled={busy}
               onClick={(event) => {
                 event.stopPropagation();
-                setOpen(true);
+                setCollapsed(false);
                 onOpen();
                 onRequestNewSession();
               }}
@@ -462,6 +476,7 @@ function TaskItem({
                 session={session}
                 index={index}
                 parentNames={[...parentNames, task.name]}
+                liveTitle={liveTitles?.[session.id]}
                 active={activeSessionId === session.id}
                 onOpen={() => onOpenSession(session)}
                 onDelete={() => onDeleteSession(session)}
@@ -513,6 +528,8 @@ function TaskItem({
 
 function TaskGroupSection({
   group,
+  directoryCount,
+  liveTitles,
   activeWorkspaceId,
   activeTaskId,
   activeSessionId,
@@ -522,6 +539,8 @@ function TaskGroupSection({
   onTasksChanged,
 }: {
   group: TaskDirectoryGroup;
+  directoryCount: number;
+  liveTitles?: Readonly<Record<string, string>>;
   activeWorkspaceId: string | null;
   activeTaskId: string | null;
   activeSessionId: string | null;
@@ -530,12 +549,15 @@ function TaskGroupSection({
   onRequestNewSessionInTask(task: TaskSummary): void;
   onTasksChanged(): Promise<void>;
 }) {
-  const [open, setOpen] = React.useState(true);
-  const [looseOpen, setLooseOpen] = React.useState(false);
+  const [collapsed, setCollapsed] = React.useState(false);
+  const [looseCollapsed, setLooseCollapsed] = React.useState(false);
   const [worktreeDialogOpen, setWorktreeDialogOpen] = React.useState(false);
+  const collapsible = showsDirectoryDisclosure(directoryCount);
+  const open = isDirectoryExpanded(collapsed, directoryCount);
+  const looseOpen = !looseCollapsed;
 
   React.useEffect(() => {
-    if (activeWorkspaceId === group.workspaceId) setOpen(true);
+    if (activeWorkspaceId === group.workspaceId) setCollapsed(false);
   }, [activeWorkspaceId, group.workspaceId]);
 
   const handleDeleteTask = async (task: TaskSummary) => {
@@ -581,12 +603,14 @@ function TaskGroupSection({
       <div className="workspace-row">
         <button
           type="button"
-          className="workspace-row-main"
-          aria-expanded={open}
+          className={classNames("workspace-row-main", !collapsible && "is-static")}
+          aria-expanded={collapsible ? open : undefined}
           title={group.workspaceCwd}
-          onClick={() => setOpen((current) => !current)}
+          onClick={() => {
+            if (!collapsible) return;
+            setCollapsed((current) => !current);
+          }}
         >
-          <WandIcon name="chevron" size={11} className={classNames("workspace-row-chevron", open && "open")}/>
           <span className="workspace-row-icon" aria-hidden="true">
             <WandIcon name="folder" size={13}/>
           </span>
@@ -597,6 +621,9 @@ function TaskGroupSection({
             </span>
             {showPath ? <span className="workspace-row-cwd">{pathCaption}</span> : null}
           </span>
+          {collapsible ? (
+            <WandIcon name="chevron" size={11} className={classNames("workspace-row-chevron", open && "open")}/>
+          ) : null}
           <span
             className="workspace-row-count"
             aria-label={`${taskCount} 个任务，${sessionTotal} 个终端`}
@@ -643,6 +670,7 @@ function TaskGroupSection({
               key={task.id}
               task={task}
               parentNames={[group.workspaceName]}
+              liveTitles={liveTitles}
               activeTaskId={activeTaskId}
               activeSessionId={activeSessionId}
               onOpen={() => onActiveTaskOpen(group, task)}
@@ -653,7 +681,11 @@ function TaskGroupSection({
                 await handleDeleteSessions(ids, task, `已清空任务「${task.name}」的 ${ids.length} 个终端`);
               }}
               onDeleteSession={async (session) => {
-                const label = workspaceSessionLabel(session, task.sessions.indexOf(session));
+                const label = listSessionLabel(
+                  withLiveSessionTitle(session, liveTitles?.[session.id]),
+                  task.sessions.indexOf(session),
+                  [group.workspaceName, task.name],
+                );
                 await handleDeleteSessions([session.id], task, `已删除终端「${label}」`);
               }}
               onRename={async (name) => {
@@ -671,7 +703,7 @@ function TaskGroupSection({
             <details
               className="workspace-loose-sessions"
               open={looseOpen}
-              onToggle={(event) => setLooseOpen(event.currentTarget.open)}
+              onToggle={(event) => setLooseCollapsed(!event.currentTarget.open)}
             >
               <summary>未分组会话（{group.standaloneSessions.length}）</summary>
               <div className="workspace-loose-session-list">
@@ -681,12 +713,17 @@ function TaskGroupSection({
                     session={session}
                     index={index}
                     parentNames={[group.workspaceName]}
+                    liveTitle={liveTitles?.[session.id]}
                     active={activeSessionId === session.id}
                     onOpen={() => onOpenSession(group, session)}
                     onDelete={() => handleDeleteSessions(
                       [session.id],
                       null,
-                      `已删除终端「${workspaceSessionLabel(session, index)}」`,
+                      `已删除终端「${listSessionLabel(
+                        withLiveSessionTitle(session, liveTitles?.[session.id]),
+                        index,
+                        [group.workspaceName],
+                      )}」`,
                     )}
                   />
                 ))}
@@ -716,9 +753,12 @@ function TaskGroupSection({
 
 export function WorkspacesPanel({
   selectedSessionId = null,
+  sessionTitles = null,
   extraGroups = null,
 }: {
   selectedSessionId?: string | null;
+  /** 实时会话标题（WS 已生成的命令摘要），覆盖轮询列表里的旧 title。 */
+  sessionTitles?: Readonly<Record<string, string>> | null;
   /** 侧栏附加分组（原生历史 / 自动化等），渲染在任务列表之后。 */
   extraGroups?: React.ReactNode;
 } = {}) {
@@ -837,6 +877,8 @@ export function WorkspacesPanel({
             <TaskGroupSection
               key={group.workspaceId}
               group={group}
+              directoryCount={groups.length}
+              liveTitles={sessionTitles ?? undefined}
               activeWorkspaceId={activeWorkspaceId}
               activeTaskId={activeTaskId}
               activeSessionId={selectedSessionId}
