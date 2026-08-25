@@ -6,7 +6,7 @@ import { JOYSTICK_ACTION_KEYS, JOYSTICK_BALL_SIZE, JOYSTICK_EDGE_MARGIN, JOYSTIC
 import { showToast } from "./notifications";
 import { render } from "./render";
 import { getPreferredMessages, isStructuredSession, updateDrawerState, updateSessionSnapshot } from "./session-engine";
-import { isTerminalNearBottom, maybeScrollTerminalToBottom, updateTerminalJumpToBottomButton } from "./terminal";
+import { maybeScrollTerminalToBottom, updateTerminalJumpToBottomButton } from "./terminal";
 import { isMobileLayout } from "./file-browser";
 import { renderChat } from "./websocket";
 
@@ -202,7 +202,9 @@ import { renderChat } from "./websocket";
           }
 
           if (!keyboardOpen && isKeyboardOpen) {
-            var wasStickToBottom = state.terminalAutoFollow || isTerminalNearBottom();
+            // SCROLL-3: 只看 terminalAutoFollow。用户上滚进入手动浏览模式后，
+            // 键盘弹起引发的 fit / 重排不得把他拽回底部——回底只能靠点按钮。
+            var wasStickToBottom = state.terminalAutoFollow;
             ensureTerminalFit("keyboard-open", { forceReplay: true });
             if (!window.__wandImeNative) {
               setTimeout(function() { syncAppViewportHeight(true); }, 220);
@@ -211,6 +213,8 @@ import { renderChat } from "./websocket";
             if (wasStickToBottom) {
               setTimeout(function() {
                 if (!state.terminal) return;
+                // 延迟窗口内用户可能已 wheel 上滚：再查一次 live 标志。
+                if (!state.terminalAutoFollow) return;
                 maybeScrollTerminalToBottom("force");
               }, 220);
             }
@@ -981,7 +985,11 @@ import { renderChat } from "./websocket";
           return false;
         }
         // 提前快照 stick-to-bottom 意图，避免 rAF 期间 scroll 事件污染判定。
-        var shouldStickToBottom = state.terminalAutoFollow || isTerminalNearBottom();
+        // SCROLL-3: 只认 terminalAutoFollow——手动浏览模式（autoFollow=false）下
+        // fit / resize 一律不拽底，即使当前位置仍在底部阈值内；是否回底由
+        // 用户点「回到底部」按钮决定。快照之外再叠加 rAF 内的 live 复查：
+        // 若用户恰好在两帧之间 wheel 上滚，这里不能覆盖他的意图。
+        var shouldStickToBottom = state.terminalAutoFollow;
         var prevCols = state.terminal.cols;
         var prevRows = state.terminal.rows;
         requestAnimationFrame(function() {
@@ -991,8 +999,10 @@ import { renderChat } from "./websocket";
               state.terminalFitAddon.fit();
             }
             sendTerminalResize(state.terminal.cols, state.terminal.rows);
-            if (shouldStickToBottom) {
+            if (shouldStickToBottom && state.terminalAutoFollow) {
               maybeScrollTerminalToBottom("force");
+            } else {
+              updateTerminalJumpToBottomButton();
             }
           });
         });
@@ -1035,8 +1045,9 @@ import { renderChat } from "./websocket";
 
       function syncTerminalSize() {
         if (!state.terminal) return;
-        var shouldStickToBottom = state.terminalAutoFollow || isTerminalNearBottom();
-        if (shouldStickToBottom) {
+        // SCROLL-3: 手动浏览模式下 resize 不拽底（原实现 "|| isTerminalNearBottom()"
+        // 会在距底 12px 内把上滚用户强行拉回去并重新开启跟随）。
+        if (state.terminalAutoFollow) {
           maybeScrollTerminalToBottom("force");
         }
         sendTerminalResize(state.terminal.cols, state.terminal.rows);

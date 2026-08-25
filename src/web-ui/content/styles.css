@@ -3207,7 +3207,7 @@
 
     .terminal-jump-bottom {
       position: absolute;
-      left: 14px;
+      right: 14px;
       bottom: 16px;
       display: inline-flex;
       align-items: center;
@@ -9792,12 +9792,12 @@
         opacity: 0.6;
       }
 
-      /* 回到底部按钮 - 紧凑（左下角） */
+      /* 回到底部按钮 - 紧凑（右下角） */
       .terminal-jump-bottom {
         width: 32px;
         height: 32px;
         padding: 0;
-        left: 10px;
+        right: 10px;
         bottom: 12px;
       }
 
@@ -15590,8 +15590,16 @@
     @media (hover: none) {
       .workspace-task-action.add,
       .workspace-task-action.edit,
-      .workspace-task-action.delete,
+      .workspace-task-action.delete {
+        opacity: 0.82;
+        pointer-events: auto;
+      }
       .workspace-session-action {
+        opacity: 0;
+        pointer-events: none;
+      }
+      .workspace-session.active .workspace-session-action,
+      .workspace-session.confirming .workspace-session-action {
         opacity: 0.82;
         pointer-events: auto;
       }
@@ -16172,8 +16180,11 @@
 
     @media (hover: none) {
       .workspace-row-action,
-      .workspace-task-action,
-      .workspace-session-action {
+      .workspace-task-action {
+        opacity: 0.9;
+      }
+      .workspace-session.active .workspace-session-action,
+      .workspace-session.confirming .workspace-session-action {
         opacity: 0.9;
       }
     }
@@ -16295,6 +16306,16 @@
       font-size: 0.95rem;
       line-height: 1;
       cursor: pointer;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 120ms ease, color 120ms ease, background-color 120ms ease;
+    }
+
+    .workspace-tab-item:hover .workspace-tab-item-close,
+    .workspace-tab-item:focus-within .workspace-tab-item-close,
+    .workspace-tab-item.active .workspace-tab-item-close {
+      opacity: 1;
+      pointer-events: auto;
     }
 
     .workspace-tab-item-close:hover {

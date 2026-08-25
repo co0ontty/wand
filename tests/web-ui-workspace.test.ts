@@ -201,6 +201,8 @@ test("task list treats directories as group headers and exposes per-terminal del
   assert.doesNotMatch(panel, /isolated \? "隔离" : "共享"/);
   assert.match(styles, /\.workspace-session-main\s*\{[^}]*padding:\s*4px 6px 4px 12px/s);
   assert.match(styles, /\.workspace-session\.active > \.workspace-session-main::before\s*\{[^}]*left:\s*4px/s);
+  assert.match(styles, /\.workspace-session\.active \.workspace-session-action[\s\S]*?pointer-events:\s*auto/);
+  assert.match(styles, /\.workspace-tab-item\.active \.workspace-tab-item-close[\s\S]*?pointer-events:\s*auto/);
 });
 
 test("task session lists default to expanded so terminals stay visible after reload", () => {
