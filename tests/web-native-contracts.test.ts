@@ -117,6 +117,7 @@ test("Apple WebViews preserve deep links, bridge globals, and terminal hooks", (
     'URLQueryItem(name: "session", value: sessionId)',
     'URLQueryItem(name: "embed", value: "terminal")',
     'URLQueryItem(name: "nativeInput", value: "1")',
+    'URLQueryItem(name: "passthrough", value: "1")',
     "WandPlatform/iOS",
     "terminal-scale-down-top",
     "terminal-scale-label-top",
@@ -128,6 +129,8 @@ test("Apple WebViews preserve deep links, bridge globals, and terminal hooks", (
     ".is-wand-embed-terminal .notification-bubble.update-card",
     ".is-wand-embed-terminal .terminal-container",
     "__wandNativeInputImeGuard",
+    "restoreEmbeddedTerminalInput",
+    "refitEmbeddedTerminalViewport",
     "suppressEmbeddedTerminalIme",
   ]);
   includesAll("ios/Wand/NativeComposer.swift", [
