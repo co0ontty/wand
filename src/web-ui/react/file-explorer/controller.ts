@@ -3,7 +3,6 @@ import { copyTextToPlatformClipboard } from "../file-preview/platform-adapter";
 import { httpFileExplorerRepository } from "./repository";
 import type {
   FileExplorerCommand,
-  FileExplorerEntry,
   FileExplorerNodeState,
   FileExplorerRepository,
   FileExplorerRuntimeAdapter,
@@ -153,12 +152,6 @@ export function createFileExplorerModule(options: FileExplorerModuleOptions): Fi
     } finally {
       abortByDir.delete(dirPath);
     }
-  }
-
-  function refreshExpanded(dirPath: string, entries: FileExplorerEntry[]): void {
-    const next = new Map(snapshot.expanded as ExpandedMap);
-    next.set(dirPath, { entries, status: "loaded" });
-    publishExpanded(next);
   }
 
   function ensureRoot(root: string): void {
@@ -358,4 +351,3 @@ const singleton = createFileExplorerModule({ repository: httpFileExplorerReposit
 
 export const fileExplorerController = singleton.controller;
 export const fileExplorerStore = singleton.store;
-const configureFileExplorerRuntime = singleton.configureRuntime;

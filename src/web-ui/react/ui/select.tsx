@@ -4,6 +4,8 @@ import { classNames } from "./class-names";
 import { WandIcon } from "./icons";
 import { usePortalContainer } from "./portal-context";
 
+void React;
+
 export interface WandSelectOption {
   value: string;
   label: string;

@@ -77,10 +77,9 @@ export function WorkspaceAgentDialog({
     setError("");
     setTarget(initialProvider);
     setKind(initialKind === "pty" ? "pty" : "structured");
-    void fetch("/api/config", { credentials: "same-origin" })
-      .then((response) => response.ok ? response.json() : null)
-      .then((config: { defaultProvider?: string; defaultSessionKind?: string } | null) => {
-        if (cancelled || !config) return;
+    void httpNewSessionRepository.loadConfig()
+      .then((config) => {
+        if (cancelled) return;
         const savedProvider = WORKSPACE_AGENT_OPTIONS.some((option) => option.value === config.defaultProvider)
           ? config.defaultProvider as WorkspaceSessionTarget
           : null;

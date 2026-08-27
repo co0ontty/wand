@@ -10,7 +10,7 @@ import type {
   StructuredRunnerObserver,
   StructuredRunnerTurnState,
 } from "./structured-runner.js";
-import type { ContentBlock, SessionSnapshot } from "./types.js";
+import type { SessionSnapshot } from "./types.js";
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;

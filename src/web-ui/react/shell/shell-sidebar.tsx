@@ -557,11 +557,12 @@ export function ShellSidebar() {
               <div className="topbar-logo-icon">W</div>
               <span className="sidebar-title">Wand</span>
               <span
-                className="session-count"
+                className="session-count sidebar-view-label"
                 id="session-count"
-                aria-label="任务"
+                aria-label="当前视图：任务"
               >
-                任务
+                <WandIcon name="task" size={11}/>
+                <span>任务</span>
               </span>
             </div>
             <div className="sidebar-header-actions">
@@ -689,7 +690,8 @@ export function ShellSidebar() {
             aria-label={primaryAction.ariaLabel}
             onClick={() => void dispatch(primaryAction.action)}
           >
-            <span>+</span> {primaryAction.label}
+            <WandIcon name="plus" size={16}/>
+            <span>{primaryAction.label}</span>
           </button>
           <div className="sidebar-footer-actions">
             <button

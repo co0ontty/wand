@@ -190,14 +190,19 @@ test("workspace path captions keep the leaf and hide redundant absolute prefixes
 test("task list treats directories as group headers and exposes per-terminal delete", () => {
   const panel = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
   const styles = readFileSync(new URL("../src/web-ui/content/styles.css", import.meta.url), "utf8");
-  assert.match(panel, /workspace-row-count-label/);
+  assert.match(panel, /workspaces-overview/);
+  assert.match(panel, /workspace-row-stats/);
   assert.match(panel, /删除终端/);
   assert.match(panel, /onDeleteSession/);
   assert.match(panel, /workspace-session-action delete/);
-  assert.match(styles, /\.workspace-item\s*\{[^}]*border-radius:\s*12px/s);
+  assert.match(styles, /\.workspace-item\s*\{[^}]*border-radius:\s*8px/s);
   assert.match(styles, /\.workspace-tasks\s*\{[^}]*border-left/s);
+  assert.match(styles, /\.workspace-task-main\s*\{[^}]*cursor:\s*pointer/s);
   assert.match(styles, /\.workspace-task-name\s*\{[^}]*font-size:\s*var\(--font-size-sm\)/s);
   assert.match(styles, /\.workspace-task-name\s*\{[^}]*-webkit-line-clamp:\s*2/s);
+  assert.match(panel, /workspace-task-count-label">终端/);
+  assert.match(panel, /className="workspace-task-menu"/);
+  assert.doesNotMatch(panel, /role="button"[\s\S]{0,500}workspace-task-action/);
   assert.doesNotMatch(panel, /isolated \? "隔离" : "共享"/);
   assert.match(styles, /\.workspace-session-main\s*\{[^}]*padding:\s*4px 6px 4px 12px/s);
   assert.match(styles, /\.workspace-session\.active > \.workspace-session-main::before\s*\{[^}]*left:\s*4px/s);
@@ -208,7 +213,7 @@ test("task list treats directories as group headers and exposes per-terminal del
 test("task session lists default to expanded so terminals stay visible after reload", () => {
   const panel = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
   assert.match(panel, /const \[collapsed, setCollapsed\] = React\.useState\(false\);\s*const \[confirming, setConfirming\]/);
-  assert.match(panel, /canCollapseSessions && \(/);
+  assert.match(panel, /canCollapseSessions \? \(/);
   assert.equal(showsDirectoryDisclosure(1), false);
   assert.equal(showsDirectoryDisclosure(2), true);
   assert.equal(isDirectoryExpanded(true, 1), true);

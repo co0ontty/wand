@@ -905,15 +905,6 @@ import { hasPooledTerminal } from "./terminal-pool";
         return options;
       }
 
-      export function renderChatModelOptions(selected, session) {
-        var normalized = normalizeComposerModelValue(selected);
-        return getChatModelSelectOptions(selected, session).map(function(option) {
-          return '<option value="' + escapeHtml(option.value) + '"' + (option.value === normalized ? " selected" : "") + '>' +
-            escapeHtml(option.label) +
-          '</option>';
-        }).join("");
-      }
-
       // Raw 选项优先显示模型 ID，并以简短状态标识候选的验证状态。
       export function renderChatModelOptionsRaw(selected, session) {
         var models = getModelsForCurrentProvider(session);
@@ -2815,15 +2806,6 @@ import { hasPooledTerminal } from "./terminal-pool";
         });
       }
 
-      export function clearAttachments(sessionId?) {
-        var id = sessionId === undefined ? state.selectedId : sessionId;
-        if (!id) return;
-        var items = getPendingAttachments(id);
-        discardPendingAttachments(items);
-        state.attachmentsBySession[id] = [];
-        if (id === state.selectedId) renderAttachmentPreview();
-      }
-
       export function renderAttachmentPreview() {
         var bar = document.getElementById("attachment-preview");
         if (!bar) return;
@@ -2921,11 +2903,6 @@ import { hasPooledTerminal } from "./terminal-pool";
         }
       }
 
-      export function queueDraftInput(text) {
-        queueDirectInput(text);
-        setDraftValue(getDraftValue() + text);
-      }
-
       export function getDraftValueForSession(sessionId) {
         if (!sessionId) return "";
         if (state.drafts[sessionId] !== undefined) {
@@ -2938,10 +2915,6 @@ import { hasPooledTerminal } from "./terminal-pool";
           state.drafts[sessionId] = "";
         }
         return state.drafts[sessionId];
-      }
-
-      export function getDraftValue() {
-        return getDraftValueForSession(state.selectedId);
       }
 
       export function setDraftValueForSession(sessionId, value, skipDom?) {

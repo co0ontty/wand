@@ -41,11 +41,6 @@ import {
   reconcileTaskWindowLayout,
 } from "./window-layout";
 
-function presentError(error: unknown, fallback: string): string {
-  if (!(error instanceof Error) || !error.message || error.message === "Failed to fetch") return fallback;
-  return error.message;
-}
-
 function runtime() {
   return workspacesStore.getRuntime();
 }

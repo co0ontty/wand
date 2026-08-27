@@ -198,21 +198,6 @@ import { missionsController } from "../react/missions/controller";
           }
         }
       };
-      // Update streaming thinking content (called from WebSocket handler)
-      export function updateStreamingThinking(text: string) {
-        var el = document.querySelector(".thinking-streaming");
-        if (el) {
-          var textEl = el.querySelector(".thinking-streaming-text");
-          if (textEl) {
-            // Show last 3 lines in scrollable area
-            var lines = text.split("\n");
-            var displayLines = lines.slice(-3);
-            (textEl as HTMLElement).textContent = displayLines.join("\n");
-            // Auto-scroll to bottom
-            (textEl as HTMLElement).scrollTop = (textEl as HTMLElement).scrollHeight;
-          }
-        }
-      }
       // ── AskUserQuestion handlers: select → render → submit ──
       (window as any).__askSelect = function(toolUseId: any, qIdx: any, optIdx: any, isMulti: any) {
         var sel = state.askUserSelections[toolUseId];

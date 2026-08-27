@@ -1045,7 +1045,7 @@ import { renderChat } from "./websocket";
 
       function syncTerminalSize() {
         if (!state.terminal) return;
-        // SCROLL-3: 手动浏览模式下 resize 不拽底（原实现 "|| isTerminalNearBottom()"
+        // SCROLL-3: 手动浏览模式下 resize 不拽底（原实现的宽松近底判断
         // 会在距底 12px 内把上滚用户强行拉回去并重新开启跟随）。
         if (state.terminalAutoFollow) {
           maybeScrollTerminalToBottom("force");

@@ -13,7 +13,6 @@ import type {
   StructuredRunnerContext,
   StructuredRunnerExecution,
   StructuredRunnerObserver,
-  StructuredRunnerResult,
 } from "./structured-runner.js";
 import type { ExecutionMode, SessionSnapshot } from "./types.js";
 

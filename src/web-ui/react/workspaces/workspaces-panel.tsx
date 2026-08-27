@@ -20,7 +20,7 @@ import type {
   WorkspaceSessionSummary,
 } from "./types";
 import { classNames } from "../ui/class-names";
-import { WandIcon, workspaceTaskIconName } from "../ui";
+import { WandIcon, WandPopover, workspaceTaskIconName } from "../ui";
 import { SessionProviderMark } from "./session-mark";
 import { listSessionLabel, withLiveSessionTitle } from "./session-order";
 import {
@@ -265,6 +265,7 @@ function TaskItem({
   const [collapsed, setCollapsed] = React.useState(false);
   const [confirming, setConfirming] = React.useState(false);
   const [clearConfirming, setClearConfirming] = React.useState(false);
+  const [taskMenuOpen, setTaskMenuOpen] = React.useState(false);
   const [renaming, setRenaming] = React.useState(false);
   const [renameValue, setRenameValue] = React.useState(task.name);
   const [renameError, setRenameError] = React.useState("");
@@ -345,47 +346,45 @@ function TaskItem({
 
   return (
     <div className={classNames("workspace-task-group", isActive && "active", open && "is-open")}>
-      <div
-        className={classNames("workspace-task", isActive && "active", !isolated && "not-isolated")}
-        role="button"
-        tabIndex={0}
-        aria-expanded={canCollapseSessions ? open : undefined}
-        aria-current={isActive ? "true" : undefined}
-        title={task.worktree ? task.worktree.path : `无 worktree（在 ${task.cwd} 直接运行）`}
-        onClick={() => { setCollapsed(false); onOpen(); }}
-        onKeyDown={(event) => {
-          if (event.target !== event.currentTarget) return;
-          if (event.key !== "Enter" && event.key !== " ") return;
-          event.preventDefault();
-          setCollapsed(false);
-          onOpen();
-        }}
-      >
-        {isolated ? (
-          <span className="workspace-task-marker isolated" title="隔离 worktree" aria-label="隔离 worktree">
-            <WandIcon name={workspaceTaskIconName(true)} size={12}/>
-          </span>
-        ) : null}
-        <span className="workspace-task-name">{task.name}</span>
+      <div className={classNames("workspace-task", isActive && "active", !isolated && "not-isolated")}>
+        <button
+          type="button"
+          className="workspace-task-main"
+          aria-expanded={canCollapseSessions ? open : undefined}
+          aria-current={isActive ? "true" : undefined}
+          title={task.worktree ? task.worktree.path : `无 worktree（在 ${task.cwd} 直接运行）`}
+          onClick={() => { setCollapsed(false); onOpen(); }}
+        >
+          {isolated ? (
+            <span className="workspace-task-marker isolated" title="隔离 worktree" aria-label="隔离 worktree">
+              <WandIcon name={workspaceTaskIconName(true)} size={12}/>
+            </span>
+          ) : null}
+          <span className="workspace-task-name">{task.name}</span>
+        </button>
         <span className="workspace-task-meta">
-          {canCollapseSessions && (
+          {canCollapseSessions ? (
             <button
               type="button"
               className="workspace-task-chevron-btn"
               aria-label={open ? `收起任务 ${task.name} 的终端` : `展开任务 ${task.name} 的终端`}
               aria-expanded={open}
-              title={open ? "收起" : "展开终端"}
-              onClick={(event) => {
-                event.stopPropagation();
-                setCollapsed((current) => !current);
-              }}
+              title={open ? "收起终端" : "展开终端"}
+              onClick={() => setCollapsed((current) => !current)}
             >
-              <span className="workspace-task-count" aria-hidden="true">{sessionCount}</span>
-              <WandIcon name="chevron" size={11} className={classNames("workspace-task-chevron", open && "open")}/>
+              <WandIcon name="terminal" size={11}/>
+              <span className="workspace-task-count">{sessionCount}</span>
+              <span className="workspace-task-count-label">终端</span>
+              <WandIcon name="chevron" size={10} className={classNames("workspace-task-chevron", open && "open")}/>
             </button>
+          ) : (
+            <span className="workspace-task-empty-count" aria-label="暂无终端">
+              <WandIcon name="terminal" size={11}/>
+              暂无终端
+            </span>
           )}
         </span>
-        {!confirming && (
+        {!confirming ? (
           <>
             <button
               type="button"
@@ -393,8 +392,7 @@ function TaskItem({
               title={`在「${task.name}」中新建终端`}
               aria-label={`在任务 ${task.name} 中新建终端`}
               disabled={busy}
-              onClick={(event) => {
-                event.stopPropagation();
+              onClick={() => {
                 setCollapsed(false);
                 onOpen();
                 onRequestNewSession();
@@ -402,43 +400,62 @@ function TaskItem({
             >
               <WandIcon name="plus" size={13}/>
             </button>
-            <button
-              type="button"
-              className="workspace-task-action edit"
-              title="重命名任务"
-              aria-label={`重命名任务 ${task.name}`}
-              disabled={busy}
-              onClick={(event) => {
-                event.stopPropagation();
-                setRenameValue(task.name);
-                setRenameError("");
-                setRenaming(true);
-              }}
+            <WandPopover
+              open={taskMenuOpen}
+              onOpenChange={setTaskMenuOpen}
+              align="end"
+              sideOffset={5}
+              showArrow={false}
+              contentRole="menu"
+              ariaLabel={`任务 ${task.name} 的更多操作`}
+              className="workspace-task-menu"
+              trigger={(
+                <button
+                  type="button"
+                  className="workspace-task-action more"
+                  title="更多任务操作"
+                  aria-label={`任务 ${task.name} 的更多操作`}
+                  disabled={busy}
+                >
+                  <WandIcon name="more" size={13}/>
+                </button>
+              )}
             >
-              <WandIcon name="edit" size={13}/>
-            </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="workspace-task-menu-item"
+                onClick={() => {
+                  setTaskMenuOpen(false);
+                  setRenameValue(task.name);
+                  setRenameError("");
+                  setRenaming(true);
+                }}
+              >
+                <WandIcon name="edit" size={13}/>
+                <span>重命名任务</span>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="workspace-task-menu-item danger"
+                onClick={() => {
+                  setTaskMenuOpen(false);
+                  setConfirming(true);
+                }}
+              >
+                <WandIcon name="trash" size={13}/>
+                <span>{isolated ? "删除任务并清理 Worktree" : "删除任务"}</span>
+              </button>
+            </WandPopover>
           </>
-        )}
-        {!confirming ? (
-          <button
-            type="button"
-            className="workspace-task-action delete"
-            title={isolated ? "删除任务（清理 worktree）" : "删除任务"}
-            aria-label={`删除任务 ${task.name}`}
-            disabled={busy}
-            onClick={(event) => {
-              event.stopPropagation();
-              setConfirming(true);
-            }}
-          >
-            <WandIcon name="trash" size={13}/>
-          </button>
         ) : (
-          <span className="workspace-task-confirm" onClick={(event) => event.stopPropagation()}>
+          <span className="workspace-task-confirm">
             <button
               type="button"
               className="workspace-task-action confirm"
-              title="确认删除"
+              title="确认删除任务"
+              aria-label={`确认删除任务 ${task.name}`}
               disabled={busy}
               onClick={async () => {
                 if (busy) return;
@@ -456,7 +473,8 @@ function TaskItem({
             <button
               type="button"
               className="workspace-task-action cancel"
-              title="取消"
+              title="取消删除"
+              aria-label="取消删除任务"
               disabled={busy}
               onClick={() => setConfirming(false)}
             >
@@ -489,7 +507,8 @@ function TaskItem({
               className="workspace-clear-sessions"
               onClick={(event) => { event.stopPropagation(); setClearConfirming(true); }}
             >
-              清空全部终端（{sessionCount}）
+              <WandIcon name="trash" size={11}/>
+              <span>清空 {sessionCount} 个终端</span>
             </button>
           )}
           {sessionCount > 1 && clearConfirming && (
@@ -619,18 +638,17 @@ function TaskGroupSection({
               <span className="workspace-row-title">{group.workspaceName}</span>
               {group.synthetic ? <span className="workspace-row-flag">未归档</span> : null}
             </span>
-            {showPath ? <span className="workspace-row-cwd">{pathCaption}</span> : null}
+            <span className="workspace-row-detail">
+              {showPath ? <span className="workspace-row-cwd">{pathCaption}</span> : null}
+              <span className="workspace-row-stats" aria-label={`${taskCount} 项任务，${sessionTotal} 个终端`}>
+                <span><strong>{taskCount}</strong> 任务</span>
+                <span><strong>{sessionTotal}</strong> 终端</span>
+              </span>
+            </span>
           </span>
           {collapsible ? (
             <WandIcon name="chevron" size={11} className={classNames("workspace-row-chevron", open && "open")}/>
           ) : null}
-          <span
-            className="workspace-row-count"
-            aria-label={`${taskCount} 个任务，${sessionTotal} 个终端`}
-          >
-            {taskCount}
-            <span className="workspace-row-count-label">任务</span>
-          </span>
         </button>
         <span className="workspace-row-actions">
           {!group.synthetic && (
@@ -851,6 +869,12 @@ export function WorkspacesPanel({
   }, [openTask, reload]);
 
   const hasContent = groups.some((group) => group.tasks.length > 0 || group.standaloneSessions.length > 0);
+  const taskTotal = groups.reduce((sum, group) => sum + group.tasks.length, 0);
+  const terminalTotal = groups.reduce((sum, group) => (
+    sum
+      + group.standaloneSessions.length
+      + group.tasks.reduce((taskSum, task) => taskSum + task.sessions.length, 0)
+  ), 0);
 
   return (
     <div className="workspaces-panel" aria-label="任务列表">
@@ -868,32 +892,48 @@ export function WorkspacesPanel({
             aria-label="新建任务"
             onClick={() => workspacesController.open()}
           >
-            ＋ 新建任务
+            <WandIcon name="plus" size={13}/>
+            <span>新建任务</span>
           </button>
         </div>
       ) : (
-        <div className="workspaces-list">
-          {groups.map((group) => (
-            <TaskGroupSection
-              key={group.workspaceId}
-              group={group}
-              directoryCount={groups.length}
-              liveTitles={sessionTitles ?? undefined}
-              activeWorkspaceId={activeWorkspaceId}
-              activeTaskId={activeTaskId}
-              activeSessionId={selectedSessionId}
-              onActiveTaskOpen={openTask}
-              onOpenSession={openSession}
-              onRequestNewSessionInTask={(task) => setPendingNewSessionTask(task)}
-              onTasksChanged={reload}
-            />
-          ))}
-        </div>
+        <>
+          <div
+            className="workspaces-overview"
+            aria-label={`${groups.length} 个目录，${taskTotal} 项任务，${terminalTotal} 个终端`}
+          >
+            <span className="workspaces-overview-stat">
+              <WandIcon name="folder" size={12}/><strong>{groups.length}</strong><span>目录</span>
+            </span>
+            <span className="workspaces-overview-divider" aria-hidden="true"/>
+            <span className="workspaces-overview-stat">
+              <WandIcon name="task" size={12}/><strong>{taskTotal}</strong><span>任务</span>
+            </span>
+            <span className="workspaces-overview-divider" aria-hidden="true"/>
+            <span className="workspaces-overview-stat">
+              <WandIcon name="terminal" size={12}/><strong>{terminalTotal}</strong><span>终端</span>
+            </span>
+          </div>
+          <div className="workspaces-list">
+            {groups.map((group) => (
+              <TaskGroupSection
+                key={group.workspaceId}
+                group={group}
+                directoryCount={groups.length}
+                liveTitles={sessionTitles ?? undefined}
+                activeWorkspaceId={activeWorkspaceId}
+                activeTaskId={activeTaskId}
+                activeSessionId={selectedSessionId}
+                onActiveTaskOpen={openTask}
+                onOpenSession={openSession}
+                onRequestNewSessionInTask={(task) => setPendingNewSessionTask(task)}
+                onTasksChanged={reload}
+              />
+            ))}
+          </div>
+        </>
       )}
       {extraGroups}
-      <div className="workspaces-panel-hint">
-        目录只是分组；点开任务可管理其中的终端。
-      </div>
       {pendingNewSessionTask !== null ? (
         <WorkspaceAgentDialog
           open

@@ -38,7 +38,6 @@ async function readJson(response: Response): Promise<JsonRecord> {
 function failureFromResponse(
   response: Response,
   value: JsonRecord,
-  path: string,
   fallback: string,
 ): FilePreviewFailure {
   return {
@@ -65,7 +64,7 @@ class HttpCodeEditorRepository implements CodeEditorRepository {
     );
     const value = await readJson(response);
     if (!response.ok || typeof value.error === "string") {
-      return { ok: false, failure: failureFromResponse(response, value, path, "打开文件失败") };
+      return { ok: false, failure: failureFromResponse(response, value, "打开文件失败") };
     }
     const preview = normalizeFilePreview(value, path);
     if (preview.kind !== "text") {
@@ -102,7 +101,7 @@ class HttpCodeEditorRepository implements CodeEditorRepository {
     });
     const value = await readJson(response);
     if (!response.ok || typeof value.error === "string") {
-      return { ok: false, failure: failureFromResponse(response, value, path, "保存文件失败") };
+      return { ok: false, failure: failureFromResponse(response, value, "保存文件失败") };
     }
     return {
       ok: true,

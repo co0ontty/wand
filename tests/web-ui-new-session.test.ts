@@ -206,6 +206,11 @@ test("HTTP repository serializes preferences and loads the latest server default
   assert.equal(loaded.config.defaultProvider, "opencode");
   assert.equal(loaded.config.defaultSessionKind, "pty");
   assert.deepEqual(loaded.recentPaths, [{ path: "/repo", name: "repo" }]);
+
+  calls.length = 0;
+  const configOnly = await repository.loadConfig();
+  assert.equal(configOnly.defaultProvider, "opencode");
+  assert.deepEqual(calls.map((call) => call.url), ["/api/config"]);
 });
 
 test("HTTP repository selects the endpoint and surfaces server creation errors", async () => {

@@ -173,13 +173,17 @@ export class HttpNewSessionRepository implements NewSessionRepository {
     private readonly fetchImpl: FetchLike = (input, init) => globalThis.fetch(input, init),
   ) {}
 
-  async load(options: NewSessionLoadOptions = {}): Promise<NewSessionDefaults> {
+  async loadConfig(options: NewSessionLoadOptions = {}): Promise<NewSessionConfig> {
     await this.preferenceWrite.catch(() => undefined);
-    const configResponse = await this.fetchImpl("/api/config", {
+    const response = await this.fetchImpl("/api/config", {
       credentials: "same-origin",
       signal: options.signal,
     });
-    const config = normalizeConfig(await readJson(configResponse));
+    return normalizeConfig(await readJson(response));
+  }
+
+  async load(options: NewSessionLoadOptions = {}): Promise<NewSessionDefaults> {
+    const config = await this.loadConfig(options);
     const recentPaths = await this.fetchImpl("/api/recent-paths", {
       credentials: "same-origin",
       signal: options.signal,

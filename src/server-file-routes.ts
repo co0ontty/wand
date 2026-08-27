@@ -9,7 +9,7 @@ import type { Express, Request, Response } from "express";
 
 import { getErrorMessage } from "./error-utils.js";
 import { asyncRoute } from "./express-async.js";
-import { isBlockedFolderPath, isPathWithinBase, normalizeFolderPath } from "./middleware/path-safety.js";
+import { isBlockedFolderPath, normalizeFolderPath } from "./middleware/path-safety.js";
 import { parseBoundedInteger } from "./request-limits.js";
 import type { WandStorage } from "./storage.js";
 import type {

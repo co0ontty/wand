@@ -265,8 +265,8 @@ import { consumeTerminalTouchPage, consumeTerminalWheelPage, terminalWheelPageSe
           && state.currentView === "terminal"
           && !state.terminalAutoFollow
           // SCROLL-2: 隐藏判据用严格 2px(isTerminalAtBottom) 而非 12px。否则距底
-          // 3–12px 区间 autoFollow 恒 false(scroll handler 只在 ≤2px 才恢复)却又
-          // 因 isTerminalNearBottom()=true 隐藏按钮 → 既不跟随又无回底入口的死区。
+          // 3–12px 区间 autoFollow 恒 false(scroll handler 只在 ≤2px 才恢复)，但
+          // 旧的 12px near-bottom 判定为 true，隐藏按钮后会形成既不跟随又无回底入口的死区。
           && !isTerminalAtBottom();
         state.showTerminalJumpToBottom = shouldShow;
         if (button) {
@@ -276,15 +276,8 @@ import { consumeTerminalTouchPage, consumeTerminalWheelPage, terminalWheelPageSe
         if (termContainer) termContainer.classList.toggle("has-jump-btn", shouldShow);
       }
 
-      export function isTerminalNearBottom() {
-        var viewport = getTerminalViewport();
-        if (!viewport) return true;
-        var distance = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop;
-        return distance <= state.terminalScrollThreshold;
-      }
-
       // 严格"真正到底"判定（仅亚像素 jitter 容忍）：用于把 autoFollow 从 false
-      // 翻回 true。不能用 isTerminalNearBottom 的 12px 阈值，否则用户在底部小幅
+      // 翻回 true。不能用旧的 12px near-bottom 阈值，否则用户在底部小幅
       // 向上滚时，wheel handler 把 autoFollow 设 false 后紧接着触发的 scroll
       // 事件会因为"还没滚出阈值"而把 autoFollow 反转回 true，丢失用户意图。
       function isTerminalAtBottom() {
