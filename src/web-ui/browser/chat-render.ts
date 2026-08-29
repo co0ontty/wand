@@ -6,7 +6,7 @@ import { copyTextSafely, showToastIfPossible, openFilePreview, appendToComposer,
 import { buildMessagesForRender, focusInputBox, getSelectedSession } from "./input";
 import { showToast, syncSessionProgressToNative, wandConfirm } from "./notifications";
 import { render } from "./render";
-import { copyToClipboard, getPreferredMessages, isRecoverableToolError, isStructuredSession, renderChatModeTrioHtml, selectSession, shouldRequestChatFormat } from "./session-engine";
+import { copyToClipboard, getPreferredMessages, isRecoverableToolError, selectSession, shouldRequestChatFormat } from "./session-engine";
 import { renderStructuredStatusBar, updateRunningIndicators } from "./utils";
 import { getCardDefault, snapCollapsedSubagentPanelsToBottom } from "./events";
 import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
@@ -187,18 +187,10 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
 
         if (allMessages.length === 0) {
           if (state.lastRenderedEmpty !== "empty") {
-            // 结构化空会话在提示下方提供一次三件套入口。开聊后统一从 composer /
-            // 加号 popover 修改，不把“当前设置”重复伪装成每条历史消息的发送快照。
-            var emptyTrioHtml = "";
-            if (isStructuredSession(selectedSession)) {
-              emptyTrioHtml = '<div class="empty-state-trio-wrap">' +
-                '<div class="empty-state-trio-hint">默认会按以下设置发送，可点击调整：</div>' +
-                renderChatModeTrioHtml(selectedSession, { kind: "dropdown" }) +
-              '</div>';
-            }
+            // 结构化空会话只显示提示。模式/模型/思考在底部 composer 一直可见，
+            // 不再在空态里重复渲染同一组下拉，避免同页两处控件让用户不知道点哪个。
             renderChatEmptyState(chatOutput,
-              '<div class="empty-state"><strong>对话已开始</strong><br>在下方输入框发送消息，Claude 会自动回复。</div>' +
-              emptyTrioHtml
+              '<div class="empty-state"><strong>对话已开始</strong><br>在下方输入框发送消息，Claude 会自动回复。</div>'
             );
             state.lastRenderedEmpty = "empty";
             state.lastRenderedMsgCount = 0;

@@ -311,7 +311,10 @@ import { renderChat } from "./websocket";
 
         var resizeHandle = document.createElement("div");
         resizeHandle.className = "terminal-resize-handle";
-        resizeHandle.innerHTML = "&#8942;";
+        resizeHandle.setAttribute("role", "separator");
+        resizeHandle.setAttribute("aria-orientation", "horizontal");
+        resizeHandle.setAttribute("aria-label", "调整终端高度");
+        resizeHandle.innerHTML = '<span aria-hidden="true">&#8942;</span>';
         container.appendChild(resizeHandle);
 
         var isResizing = false;

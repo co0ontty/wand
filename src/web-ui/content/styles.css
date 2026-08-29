@@ -14751,7 +14751,11 @@
     .input-composer.is-terminal-interactive #attach-btn,
     .input-composer.is-terminal-interactive .prompt-optimize-btn,
     .input-composer.is-terminal-interactive #voice-record-btn,
-    .input-composer.is-terminal-interactive #send-input-button {
+    .input-composer.is-terminal-interactive #send-input-button,
+    /* PTY / 空白终端下 Agent-only 的模式/模型/思考 chips 一律隐藏：
+       这些设置只影响结构化会话；PTY 里的 CLI 自己管权限与模型，露出来只会误导。 */
+    .input-composer.is-terminal-interactive .composer-status-row,
+    .input-composer.is-terminal-interactive .composer-inline-config {
       display: none !important;
     }
 
