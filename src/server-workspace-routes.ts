@@ -34,6 +34,39 @@ function workspaceSessionTitle(
   }));
 }
 
+function liveSession(
+  session: SessionSnapshot,
+  registry?: SessionRegistry,
+): SessionSnapshot {
+  return registry?.getLatest(session.id) ?? session;
+}
+
+function workspaceSessionSummary(
+  session: SessionSnapshot,
+  names: { taskName?: string | null; workspaceName?: string | null } = {},
+  registry?: SessionRegistry,
+) {
+  const live = liveSession(session, registry);
+  return {
+    id: live.id,
+    provider: live.provider,
+    sessionKind: live.sessionKind,
+    runner: live.runner,
+    command: live.command,
+    title: workspaceSessionTitle(live, names),
+    status: live.status,
+    ptyBusy: live.ptyBusy === true,
+    providerCliActive: live.providerCliActive,
+    inFlight: live.structuredState?.inFlight === true,
+    cwd: live.cwd,
+    startedAt: live.startedAt,
+  };
+}
+
+function tasksRevision(groups: readonly unknown[]): string {
+  return crypto.createHash("sha256").update(JSON.stringify(groups)).digest("base64url");
+}
+
 function parseDefaultProvider(value: unknown): WorkspaceDefaultProvider | undefined {
   return typeof value === "string" && PROVIDERS.has(value) ? (value as SessionProvider) : undefined;
 }
@@ -219,8 +252,8 @@ export function registerWorkspaceRoutes(
     res.json({
       ...workspaceWithCounts(storage, workspace),
       sessions: storage.listSessionsByWorkspace(workspace.id).map((session) => ({
-        ...session,
-        title: workspaceSessionTitle(session, { workspaceName: workspace.name }),
+        ...workspaceSessionSummary(session, { workspaceName: workspace.name }, sessions),
+        workspaceTaskId: session.workspaceTaskId,
       })),
     });
   });
@@ -320,17 +353,10 @@ export function registerWorkspaceRoutes(
       tasks: unknown[];
       standaloneSessions: unknown[];
     }
-    const summarize = (session: SessionSnapshot, names: { taskName?: string; workspaceName?: string } = {}) => ({
-      id: session.id,
-      provider: session.provider,
-      sessionKind: session.sessionKind,
-      runner: session.runner,
-      command: session.command,
-      title: workspaceSessionTitle(session, names),
-      status: session.status,
-      cwd: session.cwd,
-      startedAt: session.startedAt,
-    });
+    const summarize = (
+      session: SessionSnapshot,
+      names: { taskName?: string; workspaceName?: string } = {},
+    ) => workspaceSessionSummary(session, names, sessions);
     const visibleWorkspaces = workspaceFilter
       ? workspaces.filter((workspace) => workspace.id === workspaceFilter)
       : workspaces;
@@ -398,7 +424,17 @@ export function registerWorkspaceRoutes(
         workspaceName: group.workspaceName,
       }));
     }
-    res.json([...groups.values()]);
+    const payload = [...groups.values()];
+    const revision = tasksRevision(payload);
+    if (typeof req.query.revision === "string") {
+      if (req.query.revision === revision) {
+        res.json({ unchanged: true, revision, groups: [] });
+        return;
+      }
+      res.json({ unchanged: false, revision, groups: payload });
+      return;
+    }
+    res.json(payload);
   });
 
   // 列出某工作空间下的任务
@@ -543,11 +579,11 @@ export function registerWorkspaceRoutes(
       ...task,
       cwd: task.worktree?.path ?? workspace?.cwd ?? "",
       sessions: storage.listSessionsByWorkspaceTask(task.id).map((session) => ({
-        ...session,
-        title: workspaceSessionTitle(session, {
+        ...workspaceSessionSummary(session, {
           taskName: task.name,
           workspaceName: workspace?.name,
-        }),
+        }, sessions),
+        workspaceTaskId: task.id,
       })),
     });
   });

@@ -93,14 +93,17 @@ function isCommandFallbackTitle(title: string): boolean {
     || normalized === "grok"
     || normalized === "qoder"
     || normalized === "pi"
-    || normalized === "终端";
+    || normalized === "终端"
+    || /^(claude|codex|opencode|grok|qoder|pi|终端)\s+\d+$/i.test(normalized);
 }
 
-export function withLiveSessionTitle<T extends { title?: string }>(
+export function withLiveSessionTitle<T extends { title?: string; cwd?: string }>(
   session: T,
   liveTitle?: string,
+  parentNames: readonly string[] = [],
 ): T {
   const title = (liveTitle || "").trim();
   if (!title || isCommandFallbackTitle(title)) return session;
+  if (isGenericSessionTitle({ ...session, title }, parentNames)) return session;
   return { ...session, title };
 }

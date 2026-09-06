@@ -105,6 +105,8 @@ test("extracted public update routes preserve metadata, channel, range, and miss
     assert.equal(missingDmg.status, 404);
     const missingIpa = await fetch(`${baseUrl}/ios/download`);
     assert.equal(missingIpa.status, 404);
+    const missingIosUpdate = await fetch(`${baseUrl}/api/ios-ipa-update`);
+    assert.equal(missingIosUpdate.status, 400);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     rmSync(root, { recursive: true, force: true });
@@ -167,5 +169,74 @@ test("GitHub APK downloads are proxied through the wand server", async () => {
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await new Promise<void>((resolve, reject) => remote.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("iOS OTA update routes expose check, manifest, and install page", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-ios-update-routes-"));
+  const ipaPath = path.join(root, "wand-v4.52.0.ipa");
+  writeFileSync(ipaPath, "ipa-payload");
+  const app = express();
+  registerPublicUpdateRoutes(app, {
+    async resolveLatestApk() { return null; },
+    async resolveAndroidDownload() { return null; },
+    async computeAssetSha256() { return null; },
+    async resolveLatestDmg() { return null; },
+    async resolveMacosDownload() { return null; },
+    async resolveLatestIpa() {
+      return {
+        version: "4.52.0",
+        downloadUrl: "/ios/download",
+        fileName: "wand-v4.52.0.ipa",
+        size: 11,
+        source: "local",
+      };
+    },
+    async resolveIosDownload() {
+      return { fileName: "wand-v4.52.0.ipa", filePath: ipaPath, size: 11 };
+    },
+  });
+  app.use(jsonErrorHandler);
+  const server = createServer(app);
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+  try {
+    const address = server.address() as AddressInfo;
+    const origin = "https://home.huniu.fun:8443";
+    const metadata = await fetch(
+      `http://127.0.0.1:${address.port}/api/ios-ipa-update?currentVersion=0.0.0&origin=${encodeURIComponent(origin)}`,
+    );
+    assert.equal(metadata.status, 200);
+    const body = await metadata.json() as {
+      updateAvailable: boolean;
+      latestVersion: string;
+      installUrl: string;
+      manifestUrl: string;
+      otaReady: boolean;
+      otaBlockers: string[];
+    };
+    assert.equal(body.updateAvailable, true);
+    assert.equal(body.latestVersion, "4.52.0");
+    assert.equal(body.manifestUrl, `${origin}/ios/manifest.plist`);
+    assert.equal(body.installUrl.startsWith("itms-services://"), true);
+    assert.equal(body.otaReady, false);
+    assert.ok(body.otaBlockers.includes("unsigned-ipa"));
+
+    const manifest = await fetch(`http://127.0.0.1:${address.port}/ios/manifest.plist?origin=${encodeURIComponent(origin)}`);
+    assert.equal(manifest.status, 200);
+    assert.match(manifest.headers.get("content-type") ?? "", /xml/);
+    assert.match(await manifest.text(), /https:\/\/home\.huniu\.fun:8443\/ios\/download/);
+
+    const installPage = await fetch(`http://127.0.0.1:${address.port}/ios/install?origin=${encodeURIComponent(origin)}`);
+    assert.equal(installPage.status, 200);
+    assert.match(await installPage.text(), /itms-services:\/\//);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    rmSync(root, { recursive: true, force: true });
   }
 });

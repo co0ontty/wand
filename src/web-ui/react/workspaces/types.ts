@@ -62,6 +62,9 @@ export interface WorkspaceSessionSummary {
   cwd?: string;
   startedAt?: string;
   workspaceTaskId?: string;
+  ptyBusy?: boolean;
+  providerCliActive?: boolean;
+  inFlight?: boolean;
 }
 
 export interface WorkspaceDetail extends Workspace {

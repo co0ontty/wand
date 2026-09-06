@@ -165,9 +165,10 @@ export var state: AppState = {
         opencode: localStorage.getItem("wand-chat-model-opencode") || "",
         grok: localStorage.getItem("wand-chat-model-grok") || "",
         qoder: localStorage.getItem("wand-chat-model-qoder") || "",
+        pi: localStorage.getItem("wand-chat-model-pi") || "",
       };
     } catch (e) {
-      return { claude: "", codex: "", opencode: "", grok: "", qoder: "" };
+      return { claude: "", codex: "", opencode: "", grok: "", qoder: "", pi: "" };
     }
   })(),
   chatModel: (function() {

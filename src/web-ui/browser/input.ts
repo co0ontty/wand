@@ -2,7 +2,7 @@ import type { SendError } from "./types";
 import { state, readStoredBoolean, writeStoredBoolean } from "./state";
 import { t, iconSvg } from "./i18n";
 import { computeRunningSignal, escapeHtml } from "./utils";
-import { renderChat, scheduleChatRender, shortCommand } from "./chat-render";
+import { renderChat, scheduleChatRender, sessionChromeTitle, shortCommand } from "./chat-render";
 import { bindChatScrollListener, clearStructuredQueuePersistence, getConfigCwd, getStructuredQueuedInputs, persistCrossSessionQueue, persistSelectedId, prepareChatBottomFollow, restoreStructuredQueue, saveStructuredQueue, stripRenderOnlyStructuredMessages, syncStructuredQueueFromSession } from "./chat-scroll";
 import { isMobileLayout, updateFilePanelCwd } from "./file-browser";
 import { loadGitStatus } from "./git-commit";
@@ -750,7 +750,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           state.currentView = "terminal";
         }
 
-        var title = session ? shortCommand(session.command) : "Wand";
+        var title = session ? sessionChromeTitle(session, "Wand") : "Wand";
         var info = session ? getSessionStatusLabel(session) : "开始对话";
         if (terminalTitle) terminalTitle.textContent = title;
         if (terminalInfo) terminalInfo.textContent = info;
@@ -1764,7 +1764,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           return Promise.resolve(session);
         }
         if (!canAutoResumeSession(session)) {
-          var providerLabels = { claude: "Claude", codex: "Codex", opencode: "OpenCode", grok: "Grok", qoder: "Qoder" };
+          var providerLabels = { claude: "Claude", codex: "Codex", opencode: "OpenCode", grok: "Grok", qoder: "Qoder", pi: "Pi" };
           var providerLabel = (session && providerLabels[session.provider]) || "Provider";
           showToast("该会话没有可恢复的 " + providerLabel + " 历史上下文，请新建会话。", "error");
           return Promise.resolve(null);
@@ -2719,18 +2719,20 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
       }
 
       function startCommand(command, cwd, errorEl) {
-        if (command === "claude" || command === "codex" || command === "opencode") {
+        var knownProvider = command === "claude" || command === "codex" || command === "opencode"
+          || command === "grok" || command === "qoder" || command === "pi";
+        if (knownProvider) {
           state.preferredCommand = command;
           state.chatMode = getSafeModeForTool(command, state.chatMode);
         }
-        var modelPref = (command === "claude" || command === "codex" || command === "opencode") ? getChatModelForProvider(command) : "";
+        var modelPref = knownProvider ? getChatModelForProvider(command) : "";
         return fetch("/api/commands", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
           body: JSON.stringify(withTerminalDimensions({
             command: command,
-            provider: command === "claude" || command === "codex" || command === "opencode" ? command : undefined,
+            provider: knownProvider ? command : undefined,
             cwd: cwd || "",
             mode: state.chatMode || state.config.defaultMode || "default",
             model: modelPref || undefined,

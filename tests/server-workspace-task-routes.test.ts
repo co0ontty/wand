@@ -224,6 +224,25 @@ test("task creation can skip worktree isolation and /api/tasks aggregates across
     assert.equal(isolatedRow.sessions.length, 0);
     // 散会话不出现在任何任务下，而是归入目录组的未分组合话。
     assert.deepEqual(group.standaloneSessions.map((session) => session.id), [looseSession.id]);
+    assert.equal("ptyBusy" in (sharedRow.sessions[0] as { ptyBusy?: boolean }), true);
+
+    const pageResponse = await fetch(`${baseUrl}/api/tasks?revision=`);
+    assert.equal(pageResponse.status, 200);
+    const page = await pageResponse.json() as {
+      unchanged: boolean;
+      revision: string;
+      groups: Array<{ workspaceId: string }>;
+    };
+    assert.equal(page.unchanged, false);
+    assert.ok(page.revision);
+    assert.equal(page.groups[0]?.workspaceId, ws.id);
+    const unchangedResponse = await fetch(
+      `${baseUrl}/api/tasks?revision=${encodeURIComponent(page.revision)}`,
+    );
+    const unchanged = await unchangedResponse.json() as { unchanged: boolean; revision: string; groups: unknown[] };
+    assert.equal(unchanged.unchanged, true);
+    assert.equal(unchanged.revision, page.revision);
+    assert.deepEqual(unchanged.groups, []);
 
     // 查询参数：workspaceId 过滤 + limit/maxSessions 截断。
     res = await fetch(`${baseUrl}/api/tasks?workspaceId=${ws.id}&limit=1&maxSessions=1`);

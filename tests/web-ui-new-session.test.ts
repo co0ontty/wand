@@ -41,6 +41,13 @@ test("general new-session dialog does not expose worktree creation", () => {
   assert.doesNotMatch(source, /Worktree 模式|启用 Worktree 模式|wand-new-session-worktree/);
 });
 
+test("new-session runtime adapter forwards every provider model preference", () => {
+  const source = readFileSync(new URL("../src/web-ui/browser/new-session-adapter.ts", import.meta.url), "utf8");
+  for (const provider of ["claude", "codex", "opencode", "grok", "qoder", "pi"]) {
+    assert.match(source, new RegExp(`${provider}: getChatModelForProvider\\("${provider}"\\)`));
+  }
+});
+
 test("radio-card navigation wraps and skips values omitted by the caller", () => {
   const providers = ["claude", "codex", "opencode", "grok", "qoder"] as const;
   assert.equal(nextChoice(providers, "claude", "ArrowLeft"), "qoder");
@@ -62,7 +69,12 @@ test("create-request builder preserves structured and PTY legacy contracts", () 
   };
   const context = {
     effectiveCwd: "/effective",
-    selectedModels: { claude: "claude-sonnet", codex: "gpt-5" },
+    selectedModels: {
+      claude: "claude-sonnet",
+      codex: "gpt-5",
+      qoder: "lite",
+      pi: "xai/grok-4.6",
+    },
     thinkingEffort: "deep",
   };
 
@@ -117,6 +129,13 @@ test("create-request builder preserves structured and PTY legacy contracts", () 
     mode: "managed",
     worktreeEnabled: false,
   }, config, context).runner, "qoder-cli-print");
+  assert.equal(buildCreateRequest({
+    provider: "qoder",
+    kind: "structured",
+    cwd: "/repo",
+    mode: "managed",
+    worktreeEnabled: false,
+  }, config, context).model, "lite");
 
   assert.equal(buildCreateRequest({
     provider: "pi",
@@ -125,6 +144,13 @@ test("create-request builder preserves structured and PTY legacy contracts", () 
     mode: "managed",
     worktreeEnabled: false,
   }, config, context).runner, "pi-cli-json");
+  assert.equal(buildCreateRequest({
+    provider: "pi",
+    kind: "structured",
+    cwd: "/repo",
+    mode: "managed",
+    worktreeEnabled: false,
+  }, config, context).model, "xai/grok-4.6");
 
   assert.equal(buildCreateRequest({
     provider: "pi",

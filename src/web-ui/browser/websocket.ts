@@ -336,11 +336,14 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
                 }
               }
 
-              // Fast path: chunk-only incremental events skip expensive chat update
+              // Fast path: chunk-only incremental events skip expensive chat update.
+              // Title metadata must not take this path — PTY echo can debounce-merge
+              // {title} into {incremental,chunk}, and dropping it leaves the old title.
               var isChunkOnly = isIncremental && msg.data.chunk
                 && !msg.data.lastMessage && !snapshot.messages
                 && snapshot.output === undefined
-                && !msg.data.structuredState && !msg.data.sessionKind;
+                && !msg.data.structuredState && !msg.data.sessionKind
+                && !topicMetadataChanged;
 
               if (isChunkOnly) {
                 // Only update permissionBlocked if it actually changed
@@ -632,7 +635,24 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
               if (msg.data.approvalStats) {
                 statusUpdate.approvalStats = msg.data.approvalStats;
               }
+              var topicMetadataChanged = false;
+              if (Object.prototype.hasOwnProperty.call(msg.data, 'title')) {
+                statusUpdate.title = msg.data.title;
+                topicMetadataChanged = true;
+              }
+              if (Object.prototype.hasOwnProperty.call(msg.data, 'description')) {
+                statusUpdate.description = msg.data.description;
+                topicMetadataChanged = true;
+              }
+              if (Object.prototype.hasOwnProperty.call(msg.data, 'summary')) {
+                statusUpdate.summary = msg.data.summary;
+              }
+              if (Object.prototype.hasOwnProperty.call(msg.data, 'titleGenerating')) {
+                statusUpdate.titleGenerating = !!msg.data.titleGenerating;
+                topicMetadataChanged = true;
+              }
               updateSessionSnapshot(statusUpdate);
+              if (topicMetadataChanged) scheduleSessionListUpdate();
               syncSessionProgressToNative(msg.sessionId);
               _syncWakeLock();
               if (msg.sessionId === state.selectedId) {

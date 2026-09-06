@@ -160,7 +160,7 @@ export function WorkspaceTabBar(): React.ReactElement | null {
     group.entries.map((entry) => [entry.id, entry.title] as const)
   )));
   const sessions = orderWorkspaceSessions(detail?.sessions ?? [])
-    .map((session) => withLiveSessionTitle(session, liveTitles.get(session.id)));
+    .map((session) => withLiveSessionTitle(session, liveTitles.get(session.id), parentNames));
   const taskCwd = detail?.cwd ?? context.cwd;
   const sessionIds = sessions.map((session) => session.id);
   // 打开任务时宿主会先同步写入 taskId，再异步恢复 layout。此处若只看暂时为

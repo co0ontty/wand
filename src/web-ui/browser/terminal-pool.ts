@@ -7,6 +7,7 @@
 // websocket.ts 的输出分发里用 hasPooledTerminal() 把对应 chunk 路由进来（见 writePooledTerminal）。
 
 import { clampClientTerminalOutput } from "./terminal";
+import { consumeTerminalWheelLines, consumeTerminalWheelPage, terminalWheelPageSequence, type TerminalWheelPagingState, type TerminalWheelScrollState } from "./terminal-wheel";
 import { state } from "./state";
 
 /** 把 chunk 追加进该会话在 state.sessions 里的 output 缓冲（带 clamp），供将来 remount 回放，避免丢字。 */
@@ -33,6 +34,9 @@ interface PooledTerminal {
   container: HTMLElement;
   resizeObserver: ResizeObserver;
   writeQueue: Promise<void>;
+  wheelPagingState: TerminalWheelPagingState;
+  wheelScrollState: TerminalWheelScrollState;
+  autoFollow: boolean;
   restoreGeneration: number;
   disposed: boolean;
 }
@@ -195,6 +199,73 @@ export function createPooledTerminal(sessionId: string, container: HTMLElement):
   });
   resizeObserver.observe(container);
 
+  // Wheel handling is installed in the capture phase for the same reason as
+  // the main terminal: relying on xterm's native viewport scroll is not
+  // consistent when the pane layout hides the browser scrollbar.
+  const wheelPagingState: TerminalWheelPagingState = {
+    direction: 0,
+    accumulatedPixels: 0,
+    lastEventAt: 0,
+    lastPageAt: 0,
+  };
+  const wheelScrollState: TerminalWheelScrollState = {
+    accumulatedPixels: 0,
+    lastEventAt: 0,
+  };
+  const terminalCellHeight = (): number => {
+    try {
+      const screen = wrap.querySelector(".xterm-screen") as HTMLElement | null;
+      if (screen && term.rows > 0) {
+        const measured = screen.clientHeight / term.rows;
+        if (measured > 4) return measured;
+      }
+    } catch { /* use fallback */ }
+    return Math.max(1, terminalFontSize(getPooledTerminalScale(sessionId)) * 1.25);
+  };
+  wrap.addEventListener("wheel", (event: WheelEvent) => {
+    if (
+      event.ctrlKey
+      || event.metaKey
+      || Math.abs(event.deltaY) <= Math.abs(event.deltaX)
+    ) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    if (term.buffer.active.type === "alternate") {
+      const direction = consumeTerminalWheelPage(
+        event,
+        wheelPagingState,
+        container.clientHeight || term.rows * terminalCellHeight(),
+      );
+      const sequence = terminalWheelPageSequence(direction);
+      if (sequence) sendInput(sessionId, sequence);
+      return;
+    }
+
+    if (event.deltaY < 0) {
+      // A user scrolling up is reading history; subsequent output must not
+      // keep snapping this pane back to the newest line.
+      const current = pool.get(sessionId);
+      if (current) current.autoFollow = false;
+    }
+    const lines = consumeTerminalWheelLines(
+      event,
+      wheelScrollState,
+      terminalCellHeight(),
+      container.clientHeight || term.rows * terminalCellHeight(),
+    );
+    if (lines !== 0) term.scrollLines(lines);
+    if (term.buffer.active.ydisp >= term.buffer.active.ybase) {
+      const current = pool.get(sessionId);
+      if (current) current.autoFollow = true;
+    }
+  }, { capture: true, passive: false });
+
+  term.onScroll(() => {
+    const current = pool.get(sessionId);
+    if (current && term.buffer.active.ydisp >= term.buffer.active.ybase) current.autoFollow = true;
+  });
+
   const handle: PooledTerminal = {
     sessionId,
     terminal: term,
@@ -203,6 +274,9 @@ export function createPooledTerminal(sessionId: string, container: HTMLElement):
     container,
     resizeObserver,
     writeQueue: Promise.resolve(),
+    wheelPagingState,
+    wheelScrollState,
+    autoFollow: true,
     restoreGeneration: 0,
     disposed: false,
   };
@@ -244,7 +318,9 @@ export function writePooledTerminal(sessionId: string, data: string, ackBytes?: 
   handle.writeQueue = handle.writeQueue.catch(() => {}).then(async () => {
     await writeTerminal(handle, data);
     if (!handle.disposed) {
-      try { handle.terminal.scrollToBottom(); } catch { /* ignore */ }
+      try {
+        if (handle.autoFollow) handle.terminal.scrollToBottom();
+      } catch { /* ignore */ }
     }
     if (ackBytes && sessionId) sendJson({ type: "pty_ack", sessionId, bytes: ackBytes });
   });

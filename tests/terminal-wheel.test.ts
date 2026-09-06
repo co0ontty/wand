@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   consumeTerminalTouchPage,
+  consumeTerminalWheelLines,
   consumeTerminalWheelPage,
   TERMINAL_TOUCH_PAGE_THRESHOLD_PX,
   terminalWheelPageSequence,
@@ -19,12 +20,43 @@ function pagingState(): TerminalWheelPagingState {
   };
 }
 
+function wheelScrollState() {
+  return {
+    accumulatedPixels: 0,
+    lastEventAt: 0,
+  };
+}
+
 function touchState(): TerminalTouchPagingState {
   return {
     accumulatedPixels: 0,
     lastPageAt: 0,
   };
 }
+
+test("terminal wheel scrolling moves normal-buffer history by measured rows", () => {
+  const state = wheelScrollState();
+
+  assert.equal(consumeTerminalWheelLines({ deltaY: -10, deltaMode: 0 }, state, 20, 600, 1_000), 0);
+  assert.equal(consumeTerminalWheelLines({ deltaY: -15, deltaMode: 0 }, state, 20, 600, 1_020), -1);
+  assert.equal(consumeTerminalWheelLines({ deltaY: 45, deltaMode: 0 }, state, 20, 600, 1_040), 2);
+});
+
+test("terminal wheel scrolling handles line and page delta modes", () => {
+  const lineState = wheelScrollState();
+  const pageState = wheelScrollState();
+
+  assert.equal(consumeTerminalWheelLines({ deltaY: -2, deltaMode: 1 }, lineState, 20, 600, 1_000), -1);
+  assert.equal(consumeTerminalWheelLines({ deltaY: 1, deltaMode: 2 }, pageState, 20, 600, 1_000), 30);
+});
+
+test("terminal wheel scrolling discards stale sub-row carry between gestures", () => {
+  const state = wheelScrollState();
+
+  assert.equal(consumeTerminalWheelLines({ deltaY: -10, deltaMode: 0 }, state, 20, 600, 1_000), 0);
+  assert.equal(consumeTerminalWheelLines({ deltaY: -10, deltaMode: 0 }, state, 20, 600, 1_300), 0);
+  assert.equal(state.accumulatedPixels, -10);
+});
 
 test("terminal wheel paging accumulates trackpad pixels before paging", () => {
   const state = pagingState();

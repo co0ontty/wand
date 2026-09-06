@@ -1,6 +1,6 @@
 # Wand 客户端操作逻辑
 
-最后更新：2026-08-22
+最后更新：2026-09-06
 
 配套文档：`docs/server-logic-analysis.md`（服务端真源）。本文只写**用户在客户端做了什么、客户端怎么调服务端、各端哪里不一致**。查会话执行 bug 仍先看服务端 `SessionRegistry.ownerOf`；查「点了没反应 / 输入错乱 / 列表丢绑定」再看本文。
 
@@ -136,7 +136,7 @@ iOS / Android 新建页同样按 kind 打 structured 或 commands，并在任务
 | `output` + `messages` | 替换 | 忽略聊天字段 |
 | `output` + `incremental` + `lastMessage` | 末条同 role 则替换，否则按 `messageCount` 追加 | 忽略 |
 | `output` + `chunk` | **忽略**（避免 TUI 垃圾进聊天） | `wandTerminalWrite` / 池终端 |
-| `status` | 权限、mode、model、`providerCliActive`、`titleGenerating` | resize 校准 |
+| `status` | 权限、mode、model、`providerCliActive`、`titleGenerating`、`ptyBusy` | resize 校准 |
 | `ended` / `notification` | 停转圈、系统重启/更新条 | 壳保活时会话仍 running |
 
 系统通知 `sessionId: "__system__"`：restart / update / auto-update-*。
@@ -151,7 +151,7 @@ Web 还盯 `seq`：`init` 校准，`output` 必须 `prev+1`，跳号就 `resync`
 - Android `SessionWatcher`、iOS 系统 socket：一条**不订阅**的全局 WS，只吃 `notification` / 列表动态（依赖服务端对未订阅连接仍广播非 raw-PTY 事件）
 - Android ChatStore **先 REST 快照再连 WS**；iOS 立刻连
 - PTY 页：原生顶栏 + `embed=terminal&nativeInput=1` WebView + 原生底栏
-- macOS 的 `SessionSnapshot` **没有**解析 `title` / `titleGenerating` / `workspaceId` / `workspaceTaskId`，标题只能从 `summary` 凑，聊天顶栏没有生成中动画
+- 标题以服务端 `title` 为准，客户端不得用任务名 / cwd 自行兜底。`ptyBusy` 区分 provider CLI「本轮生成中」与「停在提示符」；三端 `isResponding` 对齐 Web `ptyTurnActive`（structured 看 `inFlight`，provider PTY 看 `ptyBusy`）
 
 ---
 
@@ -178,28 +178,17 @@ Claude SDK 的 skills 勾选只活在 `state.selectedClaudeSkillsBySession`，�
 
 服务端 `sendInput` 原样写入 PTY。客户端负责拆包，**不要** `text + "\n"` 代替回车。
 
-**Web 终端 / 聊天提交 PTY**（`getTerminalSubmitChunks`）：
+**所有端的 composer 提交**都拆成两包，**文本段和单独的 `\r` 都带 `shortcutKey=enter_text`**。服务端只在 terminal 视图看到 `enter_text` 时才把该包（或非空文本）收成会话标题；只给回车打标会总结空字符串。
 
 ```
-[text, "\r"]
+[text + enter_text, "\r" + enter_text]
 ```
 
-终端视图优先走 WS `pty_input`（低延迟）；聊天视图或 WS 未开则 `POST /api/sessions/:id/input`，`view: "chat"|"terminal"`，最后一包带 `shortcutKey`。
+终端视图优先走 WS `pty_input`（低延迟）；聊天视图或 WS 未开则 `POST /api/sessions/:id/input`。原生 PTY 写入用 `responseMode: "accepted"`，不要为每个按键解码整份 snapshot。已结束的 PTY 先 `POST /api/sessions/:id/resume`。
 
-**iOS**（`sendPtyInput`）：HTTP 两包，中间 30ms；文本与 `\r` 进同一条 `ptyInputTail` 队列，快捷键不能插进两者之间。`shortcutKey` 回车为 `enter_text`。已结束的 PTY 先 `POST /api/sessions/:id/resume`。
+AskUser 在 PTY 上同样走两包 helper（iOS `ptyInputSubmission` / Android `ptyComposerSubmitChunks`），不要 `text+"\n"`。
 
-**Android 原生 PTY 页**（`PtyTerminalScreen.sendPtyDraft`）：与 iOS 相同，文本再 `\r` + `enter_text`。
-
-**Android / macOS / iOS 的聊天页对 PTY**（以及 AskUser 在 PTY 上的提交）仍有 `text + "\n"` 旧路径。Android 聊天页实际只开 structured，这条多半是死代码，但 AskUser 若落到 PTY 仍会踩。
-
-其它差异：
-
-- iOS 两包 input 带 `responseMode: "accepted"`，不等整份 snapshot
-- macOS 两包都走完整 `sendInput`（解码整份 snapshot），更重
-- Android structured 发送后**不**把 202 snapshot `apply`、也不 `requestResync`（iOS 会）
-- iOS `isResponding` 把 PTY 的 `running` / `providerCliActive` 也算进去；Android / macOS 只看 structured `inFlight`
-
-快捷键（Ctrl-C 等）只发控制字符，不附带假回车。`shortcutKey` 用于服务端 shortcut 日志，不是协议必填，但回车应标 `enter_text` 以便自动 resume 认出「真文本提交」。
+快捷键（Ctrl-C 等）只发控制字符，不附带假回车。`shortcutKey` 用于服务端 shortcut 日志和标题判定：composer 回车必须是 `enter_text`。
 
 ### 6.3 离线
 
@@ -310,7 +299,7 @@ Web 文件面板 / 预览 / 编辑器：
 - 改偏好：`POST /api/settings/config`（connected-app 只能改默认 provider/model/mode/kind/thinking）
 - 模型目录：`GET /api/models`（客户端不自己探 CLI）
 - 提示词优化：`POST /api/optimize-prompt`
-- 更新：admin `GET/POST /api/update*`；Android `GET /api/android-apk-update?channel=`；macOS `GET /api/macos-dmg-update`；iOS 无更新接口
+- 更新：admin `GET/POST /api/update*`；Android `GET /api/android-apk-update?channel=`；macOS `GET /api/macos-dmg-update`；iOS `GET /api/ios-ipa-update` + `/ios/manifest.plist`
 
 ---
 
@@ -347,7 +336,7 @@ Web 文件面板 / 预览 / 编辑器：
 | 工作空间 | 完整分屏 | 完整 + 合并 agent | 完整 + 合并 agent | 仅任务窗，无建项目/合并 | 无 |
 | Missions | React（不打 inbox） | 原生 | 原生 | 原生 | 无 |
 | 文件树 | React | **原生** FilePanel | 网页兜底 | 网页兜底 | 无 |
-| 客户端更新 | `/api/update`（admin） | GitHub ZIP/DMG + 可选服务端 DMG | 无 IPA 更新 | `/api/android-apk-update` | 无 |
+| 客户端更新 | `/api/update`（admin） | GitHub ZIP/DMG + 可选服务端 DMG | `/api/ios-ipa-update` + OTA | `/api/android-apk-update` | 无 |
 | 装服务端 npm 包 | 设置页（admin） | 横幅会 403 | 横幅会 403 | 横幅会 403 | — |
 | 语音 | 无 | 无 | SFSpeech | sherpa + 系统兜底 | 无 |
 | 密码库 | 无 | 无 | 无 | 无 | 全部 |

@@ -4,7 +4,7 @@ import { mkdir, readdir, readFile, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 
 import type { WandConfig } from "./types.js";
-import { compareApkInstallOrder, compareSemver, extractSemver } from "./version-utils.js";
+import { compareApkInstallOrder, compareSemver, compareWandInstallOrder, extractSemver } from "./version-utils.js";
 
 export type ApkUpdateChannel = "stable" | "beta";
 
@@ -340,7 +340,7 @@ export class DistributionManager {
       extension: ".ipa",
       configuredFile: config.ios.currentIpaFile,
       downloadUrl: "/ios/download",
-      compareVersions: compareSemver,
+      compareVersions: compareWandInstallOrder,
     });
   }
 

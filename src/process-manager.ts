@@ -2146,7 +2146,9 @@ export class ProcessManager extends EventEmitter {
     record.description = description;
     const snapshot = this.snapshot(record);
     this.storage.updateSessionRuntimeMetadata({ ...snapshot, titleGenerating: undefined });
-    this.emitEvent({ type: "output", sessionId: id, data: { title, description, summary: description } });
+    // status, not output: PTY chunks share the output debounce window, and a
+    // merged incremental+chunk frame is treated as chunk-only by the web client.
+    this.emitEvent({ type: "status", sessionId: id, data: { title, description, summary: description } });
     return snapshot;
   }
 
@@ -2154,7 +2156,7 @@ export class ProcessManager extends EventEmitter {
     const record = this.sessions.get(id);
     if (!record || record.titleGenerating === titleGenerating) return;
     record.titleGenerating = titleGenerating;
-    this.emitEvent({ type: "output", sessionId: id, data: { titleGenerating } });
+    this.emitEvent({ type: "status", sessionId: id, data: { titleGenerating } });
   }
 
   /**

@@ -141,6 +141,14 @@ test("workspace session labels ignore PTY cwd fallback titles and infer CLI from
     withLiveSessionTitle({ id: "s6", title: "Claude 1" }, "claude").title,
     "Claude 1",
   );
+  assert.equal(
+    withLiveSessionTitle({ id: "s7", title: "收紧 resume 时间窗", cwd: "/repo/wand" }, "wand").title,
+    "收紧 resume 时间窗",
+  );
+  assert.equal(
+    withLiveSessionTitle({ id: "s8", title: "收紧 resume 时间窗" }, "Claude 1").title,
+    "收紧 resume 时间窗",
+  );
 });
 
 test("workspace sessions use chronological tab order and stable labels", () => {
@@ -234,6 +242,10 @@ test("task session rows and work-window tabs render each CLI logo", () => {
   assert.match(input, /index === 0 \|\| index === sequence\.length - 1/);
   assert.match(processManager, /shouldGenerateSessionTopicFromPtyInput\(view, shortcutKey\)/);
   assert.match(processManager, /provisionalSessionTopic\(prompt, blockedTitles\)/);
+  assert.match(processManager, /type: "status", sessionId: id, data: \{ title, description, summary: description \}/);
+  const websocket = readFileSync(new URL("../src/web-ui/browser/websocket.ts", import.meta.url), "utf8");
+  assert.match(websocket, /!topicMetadataChanged/);
+  assert.match(websocket, /statusUpdate\.title = msg\.data\.title/);
   const structured = readFileSync(new URL("../src/structured-session-manager.ts", import.meta.url), "utf8");
   assert.match(structured, /provisionalSessionTopic\(input, blockedTitles\)/);
 });

@@ -3,7 +3,7 @@ import { renderProviderLogoMarkup } from "../provider-identity";
 import { t, iconSvg } from "./i18n";
 import { computeRunningSignal, escapeHtml, refreshTailMarqueePaths, renderTailMarqueePath, scrollPathElementToEnd, scrollInputToEnd, updateRunningIndicators } from "./utils";
 import { getConfigCwd } from "./chat-scroll";
-import { renderChatEmptyState, shortCommand } from "./chat-render";
+import { renderChatEmptyState, sessionChromeTitle, shortCommand } from "./chat-render";
 import { attachEventListeners } from "./events";
 import { shouldShowSessionsBackdrop, isMobileLayout, refreshFileExplorer, renderFileExplorer, wandFileIcon } from "./file-browser";
 import { loadGitStatus, renderTopbarGitBadgeHtml, renderTopbarMoreMenuHtml } from "./git-commit";
@@ -551,7 +551,7 @@ export function renderLogin() {
 export function renderAppShell() {
   var scriptClose = String.fromCharCode(60) + String.fromCharCode(47) + "script>";
   var selectedSession = state.sessions.find(function(s: any) { return s.id === state.selectedId; });
-  var terminalTitle = selectedSession ? shortCommand(selectedSession.command) : "未选择会话";
+  var terminalTitle = selectedSession ? sessionChromeTitle(selectedSession, "未选择会话") : "未选择会话";
   var terminalInfo = selectedSession ? (selectedSession.mode + " | " + selectedSession.status) : "点击上方「新对话」开始";
   var currentDraft = state.selectedId ? (state.drafts[state.selectedId] || "") : "";
   var drawerClass = state.sessionsDrawerOpen ? " open" : "";

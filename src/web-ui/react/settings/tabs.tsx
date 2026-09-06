@@ -164,14 +164,28 @@ function DistributionSection({
     <SettingsSection title={title} description={currentVersion ? `当前 App 版本：${currentVersion}` : "客户端下载与版本信息"}>
       {assets.length ? assets.map(({ source, asset }) => {
         const installable = !currentVersion || isNewerVersion(asset!.version, currentVersion);
+        const iosOta = kind === "ipa" && source === "local";
         return (
           <div className="wand-settings-download-row" key={source}>
             <div><strong>{source === "github" ? "线上版本" : "本地版本"}</strong><span>{asset!.version ? `v${asset!.version}` : asset!.fileName} · {formatBytes(asset!.size)}</span></div>
             <WandButton
               kind="secondary"
               disabled={!installable}
-              aria-label={`${installable ? "下载" : "已安装"}${title}${source === "github" ? "线上版本" : "本地版本"}`}
+              aria-label={`${installable ? (iosOta ? "安装" : "下载") : "已安装"}${title}${source === "github" ? "线上版本" : "本地版本"}`}
               onClick={async () => {
+                if (iosOta) {
+                  const manifestUrl = `${window.location.origin}/ios/manifest.plist`;
+                  const installUrl = `itms-services://?action=download-manifest&url=${encodeURIComponent(manifestUrl)}`;
+                  const iOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+                  const safari = /Safari/.test(navigator.userAgent) && !/CriOS|FxiOS|EdgiOS/.test(navigator.userAgent);
+                  if (iOS && safari) {
+                    window.location.href = installUrl;
+                  } else {
+                    window.open("/ios/install", "_blank", "noopener");
+                  }
+                  toast(iOS ? "已打开 iOS 安装" : "请用 iPhone Safari 打开安装页", "info");
+                  return;
+                }
                 await repository.execute({
                   type: "distribution.download",
                   kind,
@@ -181,7 +195,7 @@ function DistributionSection({
                 });
                 toast("已开始下载", "info");
               }}
-            >{installable ? (currentVersion ? "下载并安装" : "下载") : "已安装"}</WandButton>
+            >{installable ? (currentVersion ? (iosOta ? "安装更新" : "下载并安装") : (iosOta ? "安装" : "下载")) : "已安装"}</WandButton>
           </div>
         );
       }) : <div className="wand-settings-empty">暂无可用安装包</div>}

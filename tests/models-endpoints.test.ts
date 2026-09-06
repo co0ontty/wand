@@ -27,6 +27,16 @@ function createCommandRunner(): ModelCommandRunner {
         stderr: "",
       };
     }
+    if (file === "pi" && args.join(" ") === "--list-models") {
+      return {
+        stdout: [
+          "provider   model          context",
+          "xai        grok-4.6       500K",
+          "codex-llm  claude-opus-5  128K",
+        ].join("\n"),
+        stderr: "",
+      };
+    }
     throw new Error(`Unavailable command: ${file} ${args.join(" ")}`);
   };
 }
@@ -97,6 +107,7 @@ test("model endpoints expose the server snapshot to apps while only admins can r
     const refreshedBody = await refreshed.json() as {
       models: Array<{ id: string; availability?: string }>;
       qoderModels: Array<{ id: string; label: string }>;
+      piModels: Array<{ id: string; label: string }>;
       changed: boolean;
       revision: string;
     };
@@ -109,6 +120,13 @@ test("model endpoints expose the server snapshot to apps while only admins can r
       [
         { id: "qoder-frontier-1", label: "Frontier Model" },
         { id: "zhipu/glm5.2-cp", label: "Custom Model" },
+      ],
+    );
+    assert.deepEqual(
+      refreshedBody.piModels.filter((model) => ["xai/grok-4.6", "codex-llm/claude-opus-5"].includes(model.id)),
+      [
+        { id: "xai/grok-4.6", label: "xai/grok-4.6" },
+        { id: "codex-llm/claude-opus-5", label: "codex-llm/claude-opus-5" },
       ],
     );
 

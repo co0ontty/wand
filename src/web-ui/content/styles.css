@@ -14107,7 +14107,7 @@
       min-height: 36px;
       margin: 0 2px 8px;
       padding: 3px 4px 3px 9px;
-      border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 72%, transparent);
+      border-bottom: 0;
       border-radius: 0;
     }
 
@@ -14981,6 +14981,104 @@
 
     /* ── 工作空间 / 任务 面板 ── */
 
+    /* ── 任务 / 项目分视图 ── */
+    .sidebar-view-switch {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 3px;
+      margin: 2px 10px 10px;
+      padding: 3px;
+      border: 1px solid color-mix(in srgb, var(--border-subtle) 84%, transparent);
+      border-radius: 9px;
+      background: color-mix(in srgb, var(--bg-tertiary) 46%, transparent);
+    }
+
+    .sidebar-view-tab {
+      display: inline-flex;
+      min-height: 29px;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      border: 0;
+      border-radius: 7px;
+      color: var(--text-muted);
+      background: transparent;
+      font: inherit;
+      font-size: var(--font-size-xs);
+      font-weight: 650;
+      cursor: pointer;
+      transition: color 140ms ease, background-color 140ms ease, transform 120ms ease;
+    }
+
+    .sidebar-view-tab:hover { color: var(--text-primary); background: color-mix(in srgb, var(--bg-elevated) 74%, transparent); }
+    .sidebar-view-tab.active { color: var(--text-primary); background: var(--bg-elevated); box-shadow: 0 1px 2px color-mix(in srgb, #000 16%, transparent); }
+    .sidebar-view-tab:active { transform: scale(0.97); }
+
+    .projects-panel { display: flex; flex-direction: column; gap: 8px; padding: 0 2px 12px; }
+    .projects-panel-heading { display: flex; align-items: center; justify-content: space-between; padding: 4px 6px 3px; color: var(--text-secondary); font-size: var(--font-size-xs); font-weight: 700; }
+    .projects-panel-add { display: inline-grid; width: 24px; height: 24px; place-items: center; border: 0; border-radius: 7px; color: var(--text-muted); background: transparent; cursor: pointer; }
+    .projects-panel-add:hover { color: var(--accent); background: var(--accent-muted); }
+    .projects-panel-list { display: grid; gap: 4px; }
+    .projects-panel-item { display: grid; grid-template-columns: 30px minmax(0, 1fr); align-items: center; gap: 8px; min-width: 0; border: 1px solid transparent; border-radius: 9px; padding: 7px; color: var(--text-secondary); background: transparent; font: inherit; text-align: left; cursor: pointer; transition: background-color 140ms ease, border-color 140ms ease, transform 120ms ease; }
+    .projects-panel-item:hover { border-color: var(--border-subtle); background: color-mix(in srgb, var(--bg-elevated) 68%, transparent); }
+    .projects-panel-item:active { transform: scale(0.985); }
+    .projects-panel-item-icon { display: inline-grid; width: 30px; height: 30px; place-items: center; border-radius: 8px; color: var(--accent); background: var(--accent-muted); }
+    .projects-panel-item-copy { display: grid; min-width: 0; gap: 2px; }
+    .projects-panel-item-copy strong { overflow: hidden; color: var(--text-primary); font-size: var(--font-size-xs); text-overflow: ellipsis; white-space: nowrap; }
+    .projects-panel-item-copy small { overflow: hidden; color: var(--text-muted); font-size: 0.625rem; text-overflow: ellipsis; white-space: nowrap; }
+    .projects-panel-state { padding: 24px 10px; color: var(--text-muted); font-size: var(--font-size-xs); text-align: center; }
+    .projects-panel-state.error { color: var(--danger); }
+    .projects-panel-empty { display: grid; justify-items: center; gap: 5px; border: 1px dashed var(--border-subtle); border-radius: 10px; padding: 18px 10px; color: var(--text-secondary); background: transparent; font: inherit; font-size: var(--font-size-xs); cursor: pointer; }
+    .projects-panel-empty small { color: var(--text-muted); font-size: 0.625rem; }
+    .projects-panel-empty-mark { display: inline-grid; width: 30px; height: 30px; place-items: center; border-radius: 9px; color: var(--accent); background: var(--accent-muted); }
+
+    .projects-main-content { overflow: auto; }
+    .projects-dashboard { width: min(1120px, calc(100% - 64px)); margin: 0 auto; padding: clamp(42px, 8vh, 96px) 0 72px; }
+    .projects-dashboard-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; min-height: 160px; padding-bottom: 30px; }
+    .projects-dashboard-kicker { margin: 0 0 10px; color: var(--accent); font-size: var(--font-size-xs); font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+    .projects-dashboard-hero h1 { margin: 0; color: var(--text-primary); font-size: clamp(2rem, 3.8vw, 3.25rem); letter-spacing: -0.045em; line-height: 1; }
+    .projects-dashboard-hero p:last-child { max-width: 520px; margin: 14px 0 0; color: var(--text-secondary); font-size: var(--font-size-base); line-height: 1.5; }
+    .projects-dashboard-hero-mark { display: grid; width: 132px; height: 132px; place-items: center; border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border-subtle)); border-radius: 32px; color: var(--accent); background: radial-gradient(circle at 30% 25%, var(--accent-muted), transparent 65%), color-mix(in srgb, var(--bg-elevated) 72%, transparent); transform: rotate(-5deg); }
+    .projects-dashboard-toolbar { display: flex; align-items: end; justify-content: space-between; gap: 20px; border-top: 1px solid var(--border-subtle); padding: 28px 0 14px; }
+    .projects-dashboard-toolbar h2 { display: inline; margin: 0; color: var(--text-primary); font-size: 1.1rem; letter-spacing: -0.02em; }
+    .projects-dashboard-toolbar > div:first-child span { margin-left: 8px; color: var(--text-muted); font-size: var(--font-size-xs); }
+    .projects-dashboard-actions { display: flex; align-items: center; gap: 8px; }
+    .projects-dashboard-search { display: inline-flex; width: min(230px, 32vw); min-height: 34px; align-items: center; gap: 7px; border: 1px solid var(--border-subtle); border-radius: 9px; padding: 0 10px; color: var(--text-muted); background: color-mix(in srgb, var(--bg-elevated) 70%, transparent); }
+    .projects-dashboard-search input { width: 100%; border: 0; outline: 0; color: var(--text-primary); background: transparent; font: inherit; font-size: var(--font-size-xs); }
+    .projects-dashboard-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-muted); }
+    .projects-dashboard-new { display: inline-flex; min-height: 34px; align-items: center; gap: 6px; border: 1px solid var(--accent-active); border-radius: 9px; padding: 0 12px; color: var(--text-inverse); background: var(--accent-active); font: inherit; font-size: var(--font-size-xs); font-weight: 700; cursor: pointer; transition: transform 120ms ease, filter 140ms ease; }
+    .projects-dashboard-new:hover { filter: brightness(0.92); }
+    .projects-dashboard-new:active { transform: scale(0.97); }
+    .projects-dashboard-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .projects-dashboard-card { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; grid-template-rows: auto auto; align-items: center; gap: 5px 11px; min-height: 112px; border: 1px solid var(--border-subtle); border-radius: 14px; padding: 17px; color: var(--text-primary); background: color-mix(in srgb, var(--bg-elevated) 64%, transparent); font: inherit; text-align: left; cursor: pointer; transition: border-color 150ms ease, background-color 150ms ease, transform 150ms ease, box-shadow 150ms ease; }
+    .projects-dashboard-card:hover { border-color: color-mix(in srgb, var(--accent) 38%, var(--border-subtle)); background: color-mix(in srgb, var(--accent-muted) 24%, var(--bg-elevated)); box-shadow: 0 10px 24px color-mix(in srgb, #000 15%, transparent); transform: translateY(-2px); }
+    .projects-dashboard-card:active { transform: translateY(0) scale(0.99); }
+    .projects-dashboard-card-icon { display: inline-grid; grid-row: 1 / span 2; width: 40px; height: 40px; place-items: center; border-radius: 11px; color: var(--accent); background: var(--accent-muted); }
+    .projects-dashboard-card-copy { display: grid; min-width: 0; gap: 4px; }
+    .projects-dashboard-card-copy strong { overflow: hidden; font-size: var(--font-size-sm); text-overflow: ellipsis; white-space: nowrap; }
+    .projects-dashboard-card-copy small { overflow: hidden; color: var(--text-muted); font-family: var(--font-mono); font-size: 0.625rem; text-overflow: ellipsis; white-space: nowrap; }
+    .projects-dashboard-card-meta { display: flex; grid-column: 2 / span 2; gap: 8px; color: var(--text-muted); font-size: 0.625rem; }
+    .projects-dashboard-card-arrow { grid-column: 3; grid-row: 1; color: var(--text-muted); transform: rotate(180deg); }
+    .projects-dashboard-state { padding: 52px 0; color: var(--text-muted); text-align: center; }
+    .projects-dashboard-state.error { color: var(--danger); }
+    .projects-dashboard-empty { display: grid; justify-items: center; gap: 8px; padding: 68px 20px; border: 1px dashed var(--border-subtle); border-radius: 16px; color: var(--text-muted); text-align: center; }
+    .projects-dashboard-empty strong { color: var(--text-primary); font-size: var(--font-size-base); }
+    .projects-dashboard-empty-icon { display: grid; width: 48px; height: 48px; place-items: center; border-radius: 14px; color: var(--accent); background: var(--accent-muted); }
+    .projects-dashboard-empty button { margin-top: 8px; border: 0; border-radius: 8px; padding: 8px 12px; color: var(--text-inverse); background: var(--accent-active); font: inherit; font-size: var(--font-size-xs); font-weight: 700; cursor: pointer; }
+
+    @media (max-width: 900px) {
+      .projects-dashboard { width: min(100% - 32px, 680px); padding-top: 34px; }
+      .projects-dashboard-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .projects-dashboard-hero-mark { width: 96px; height: 96px; border-radius: 24px; }
+    }
+    @media (max-width: 600px) {
+      .projects-dashboard-toolbar { align-items: stretch; flex-direction: column; }
+      .projects-dashboard-actions { justify-content: stretch; }
+      .projects-dashboard-search { flex: 1; width: auto; }
+      .projects-dashboard-grid { grid-template-columns: 1fr; }
+      .projects-dashboard-hero-mark { display: none; }
+    }
+
     /* 面板容器与顶部工具条：对齐 .sessions-list 的内边距与 .session-group-title 的标题语汇 */
     /* 面板顶部不再有独立工具条：头部「任务」徽章 + 底部「新任务」主按钮已覆盖。 */
     /* 任务列表：目录是分组头，任务是一级行，终端缩进在任务下。 */
@@ -15125,18 +15223,6 @@
 
     .workspace-row-chevron.open {
       transform: rotate(0deg);
-    }
-
-    .workspace-row-icon {
-      display: inline-flex;
-      flex: 0 0 auto;
-      width: 22px;
-      height: 22px;
-      align-items: center;
-      justify-content: center;
-      border-radius: 7px;
-      color: var(--accent);
-      background: color-mix(in srgb, var(--accent-muted) 80%, transparent);
     }
 
     .workspace-row-label {
@@ -16909,5 +16995,283 @@
         min-height: 32px;
         border-radius: 8px;
         padding-inline: 8px;
+      }
+    }
+
+    /* ── 任务侧栏：目录标题、任务行、会话行三层平行排版 ── */
+    #app[data-react-shell="enabled"] .workspaces-panel {
+      gap: 18px;
+      padding: 2px 2px 14px;
+    }
+
+    #app[data-react-shell="enabled"] .workspaces-overview {
+      min-height: 22px;
+      justify-content: flex-start;
+      gap: 9px;
+      padding: 0 8px;
+      color: var(--text-muted);
+      font-size: 0.625rem;
+    }
+
+    #app[data-react-shell="enabled"] .workspaces-overview-stat {
+      gap: 4px;
+    }
+
+    #app[data-react-shell="enabled"] .workspaces-overview-stat > svg,
+    #app[data-react-shell="enabled"] .workspace-session-mark,
+    #app[data-react-shell="enabled"] .workspace-session-kind,
+    #app[data-react-shell="enabled"] .workspace-task-chevron-btn [data-icon="terminal"] {
+      display: none;
+    }
+
+    #app[data-react-shell="enabled"] .workspaces-overview-divider {
+      width: 3px;
+      height: 3px;
+      border-radius: 50%;
+      background: var(--border-strong);
+    }
+
+    #app[data-react-shell="enabled"] .workspaces-list {
+      gap: 20px;
+    }
+
+    /* Directory is a header, rather than a bordered card. */
+    #app[data-react-shell="enabled"] .workspace-item,
+    #app[data-react-shell="enabled"] .workspace-item.active-workspace {
+      min-width: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      overflow: visible;
+    }
+
+    #app[data-react-shell="enabled"] .workspace-row {
+      min-height: 48px;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 4px 4px 8px 8px;
+      border-bottom: 0;
+    }
+
+    #app[data-react-shell="enabled"] .workspace-row-main {
+      min-height: 36px;
+      gap: 4px;
+      padding: 2px 0;
+      border-radius: 0;
+    }
+
+    #app[data-react-shell="enabled"] .workspace-row-main:hover,
+    #app[data-react-shell="enabled"] .workspace-row-main.is-static:hover {
+      background: transparent;
+    }
+
+    #app[data-react-shell="enabled"] .workspace-row-label {
+      gap: 3px;
+    }
+
+    #app[data-react-shell="enabled"] .workspace-row-name {
+      color: var(--text-primary);
+      font-size: 0.8125rem;
+      font-weight: 700;
+      letter-spacing: -0.005em;
+      line-height: 1.3;
+    }
+
+    #app[data-react-shell="enabled"] .workspace-row-detail {
+      gap: 7px;
+    }
+
+    #app[data-react-shell="enabled"] .workspace-row-cwd {
+      color: var(--text-muted);
+      font-size: 0.625rem;
+      font-weight: 450;
+    }
+
+    #app[data-react-shell="enabled"] .workspace-row-stats {
+      gap: 5px;
+      color: var(--text-muted);
+      font-size: 0.59375rem;
+    }
+
+    #app[data-react-shell="enabled"] .workspace-row-stats > span + span::before {
+      margin-right: 5px;
+      color: var(--border-strong);
+    }
+
+    #app[data-react-shell="enabled"] .workspace-row-stats strong {
+      color: var(--text-secondary);
+      font-size: 0.625rem;
+    }
+
+    #app[data-react-shell="enabled"] .workspace-row-chevron {
+      order: -1;
+      margin: 10px 0 0 -2px;
+      color: var(--text-muted);
+    }
+
+    #app[data-react-shell="enabled"] .workspace-row-actions {
+      padding-top: 5px;
+    }
+
+    /* One level of indentation is enough: the left edge is shared by tasks
+       and their sessions, while the smaller session type establishes depth. */
+    #app[data-react-shell="enabled"] .workspace-tasks {
+      gap: 4px;
+      margin: 5px 0 0 16px;
+      padding: 0;
+      border-left: 0;
+    }
+
+    #app[data-react-shell="enabled"] .workspace-task {
+      min-height: 34px;
+      gap: 4px;
+      padding: 3px 4px 3px 0;
+      border-radius: 7px;
+    }
+
+    #app[data-react-shell="enabled"] .workspace-task:hover {
+      background: color-mix(in srgb, var(--bg-elevated) 62%, transparent);
+    }
+
+    #app[data-react-shell="enabled"] .workspace-task.active {
+      background: color-mix(in srgb, var(--accent-muted) 56%, transparent);
+      box-shadow: none;
+    }
+
+    #app[data-react-shell="enabled"] .workspace-task-main {
+      min-height: 28px;
+      gap: 5px;
+      padding: 3px 5px;
+    }
+
+    #app[data-react-shell="enabled"] .workspace-task-marker {
+      width: 4px;
+      height: 4px;
+      margin: 0 3px 0 1px;
+      border-radius: 50%;
+      background: var(--text-muted);
+    }
+
+    #app[data-react-shell="enabled"] .workspace-task-marker.isolated {
+      background: var(--success);
+    }
+
+    #app[data-react-shell="enabled"] .workspace-task-marker svg {
+      display: none;
+    }
+
+    #app[data-react-shell="enabled"] .workspace-task-name {
+      color: var(--text-primary);
+      font-size: 0.75rem;
+      font-weight: 650;
+    }
+
+    #app[data-react-shell="enabled"] .workspace-task.active .workspace-task-name {
+      color: var(--accent-active);
+    }
+
+    #app[data-react-shell="enabled"] .workspace-task-chevron-btn {
+      min-width: 17px;
+      height: 22px;
+      gap: 2px;
+      padding: 0 2px;
+      background: transparent;
+    }
+
+    #app[data-react-shell="enabled"] .workspace-task-sessions,
+    #app[data-react-shell="enabled"] .workspace-loose-session-list {
+      gap: 2px;
+      margin: 2px 0 4px;
+      padding: 0;
+      border-left: 0;
+    }
+
+    #app[data-react-shell="enabled"] .workspace-task-sessions {
+      margin-top: 1px;
+    }
+
+    #app[data-react-shell="enabled"] .workspace-session {
+      min-height: 30px;
+    }
+
+    #app[data-react-shell="enabled"] .workspace-session-main {
+      min-height: 30px;
+      gap: 5px;
+      padding: 5px 7px;
+      border-radius: 6px;
+      color: var(--text-secondary);
+    }
+
+    #app[data-react-shell="enabled"] .workspace-session-main:hover {
+      background: color-mix(in srgb, var(--bg-elevated) 62%, transparent);
+    }
+
+    #app[data-react-shell="enabled"] .workspace-session.active > .workspace-session-main {
+      background: color-mix(in srgb, var(--accent-muted) 72%, transparent);
+    }
+
+    #app[data-react-shell="enabled"] .workspace-session.active > .workspace-session-main::before {
+      left: 0;
+      top: 8px;
+      bottom: 8px;
+      width: 3px;
+      background: var(--accent);
+    }
+
+    #app[data-react-shell="enabled"] .workspace-session-name {
+      color: inherit;
+      font-size: 0.6875rem;
+      line-height: 1.35;
+    }
+
+    #app[data-react-shell="enabled"] .workspace-session.active .workspace-session-name {
+      color: var(--text-primary);
+      font-weight: 600;
+    }
+
+    #app[data-react-shell="enabled"] .workspace-clear-sessions {
+      margin: 3px 0 0 5px;
+      padding: 3px 5px;
+      font-size: 0.625rem;
+    }
+
+    @media (hover: hover) and (pointer: fine) {
+      #app[data-react-shell="enabled"] .workspace-session-action {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      #app[data-react-shell="enabled"] .workspace-session:hover .workspace-session-action,
+      #app[data-react-shell="enabled"] .workspace-session:focus-within .workspace-session-action,
+      #app[data-react-shell="enabled"] .workspace-session.confirming .workspace-session-action {
+        opacity: 0.9;
+        pointer-events: auto;
+      }
+    }
+
+    #app[data-react-shell="enabled"] .workspace-loose-sessions {
+      margin-top: 8px;
+    }
+
+    #app[data-react-shell="enabled"] .workspace-loose-sessions > summary {
+      padding: 4px 5px;
+      font-size: 0.6875rem;
+    }
+
+    @media (max-width: 768px) {
+      #app[data-react-shell="enabled"] .workspaces-panel {
+        padding-inline: 0;
+      }
+
+      #app[data-react-shell="enabled"] .workspaces-list {
+        gap: 14px;
+      }
+
+      #app[data-react-shell="enabled"] .workspace-row {
+        padding-left: 5px;
+      }
+
+      #app[data-react-shell="enabled"] .workspace-tasks {
+        margin-left: 12px;
       }
     }

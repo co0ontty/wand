@@ -15,10 +15,21 @@ import {
   type ProviderCliId,
   type ProviderCliUpdateStatus,
 } from "./provider-cli-updater.js";
+import {
+  absoluteUrl,
+  buildIosInstallPage,
+  buildIosOtaManifest,
+  buildItmsServicesUrl,
+  collectIosOtaBlockers,
+  formatIosAssetSize,
+  inspectIpa,
+  normalizePublicOrigin,
+  publicOriginFromRequest,
+} from "./ios-ota.js";
 import { streamFileWithRange } from "./server-file-routes.js";
 import type { WandStorage } from "./storage.js";
 import type { WandConfig } from "./types.js";
-import { compareApkInstallOrder, compareSemver } from "./version-utils.js";
+import { compareApkInstallOrder, compareSemver, compareWandInstallOrder } from "./version-utils.js";
 import { canUseDetachedUpdateHelper, startDetachedUpdateHelper } from "./update-helper.js";
 
 interface DownloadAsset {
@@ -211,6 +222,81 @@ export function registerPublicUpdateRoutes(app: Express, deps: PublicUpdateRoute
     });
   }));
 
+  app.get("/api/ios-ipa-update", asyncRoute(async (req, res) => {
+    const currentVersion = typeof req.query.currentVersion === "string" ? req.query.currentVersion.trim() : "";
+    if (!currentVersion) {
+      res.status(400).json({ error: "Missing currentVersion query parameter." });
+      return;
+    }
+    const payload = await resolveIosOtaPayload(req, deps);
+    if (!payload) {
+      res.json({
+        updateAvailable: false,
+        currentVersion,
+        latestVersion: null,
+        downloadUrl: null,
+        installUrl: null,
+        manifestUrl: null,
+        installPageUrl: null,
+        fileName: null,
+        size: null,
+        source: null,
+        signed: false,
+        otaReady: false,
+        otaBlockers: [],
+        bundleId: null,
+      });
+      return;
+    }
+    const updateAvailable = compareWandInstallOrder(payload.latestVersion, currentVersion) > 0;
+    res.json({
+      updateAvailable,
+      currentVersion,
+      latestVersion: payload.latestVersion,
+      downloadUrl: updateAvailable ? payload.downloadUrl : null,
+      installUrl: updateAvailable ? payload.installUrl : null,
+      manifestUrl: payload.manifestUrl,
+      installPageUrl: payload.installPageUrl,
+      fileName: updateAvailable ? payload.fileName : null,
+      size: updateAvailable ? payload.size : null,
+      source: payload.source,
+      signed: payload.signed,
+      otaReady: payload.otaReady,
+      otaBlockers: payload.otaBlockers,
+      bundleId: payload.bundleId,
+    });
+  }));
+
+  app.get("/ios/manifest.plist", asyncRoute(async (req, res) => {
+    const payload = await resolveIosOtaPayload(req, deps);
+    if (!payload) {
+      res.status(404).type("text/plain").send("当前没有可安装的 IPA 文件。");
+      return;
+    }
+    res.setHeader("Content-Type", "text/xml; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache");
+    res.send(payload.manifest);
+  }));
+
+  app.get("/ios/install", asyncRoute(async (req, res) => {
+    const payload = await resolveIosOtaPayload(req, deps);
+    if (!payload) {
+      res.status(404).type("text/plain").send("当前没有可安装的 IPA 文件。");
+      return;
+    }
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache");
+    res.send(buildIosInstallPage({
+      title: payload.title,
+      version: payload.latestVersion,
+      sizeLabel: formatIosAssetSize(payload.size),
+      installUrl: payload.installUrl ?? "#",
+      downloadUrl: payload.downloadUrl,
+      signed: payload.signed,
+      https: payload.origin.startsWith("https://"),
+    }));
+  }));
+
   app.get("/ios/download", asyncRoute(async (req, res) => {
     const asset = await deps.resolveIosDownload();
     if (!asset) {
@@ -225,6 +311,88 @@ export function registerPublicUpdateRoutes(app: Express, deps: PublicUpdateRoute
       readErrorMessage: "读取 IPA 文件失败。",
     });
   }));
+}
+
+interface IosOtaPayload {
+  latestVersion: string;
+  downloadUrl: string;
+  installUrl: string | null;
+  manifestUrl: string;
+  installPageUrl: string;
+  fileName: string;
+  size: number;
+  source: "local" | "github";
+  signed: boolean;
+  otaReady: boolean;
+  otaBlockers: string[];
+  bundleId: string;
+  title: string;
+  origin: string;
+  manifest: string;
+}
+
+async function resolveIosOtaPayload(
+  req: Request,
+  deps: PublicUpdateRoutesDependencies,
+): Promise<IosOtaPayload | null> {
+  const latest = await deps.resolveLatestIpa();
+  const local = await deps.resolveIosDownload();
+  if (!latest && !local) return null;
+  const origin = normalizePublicOrigin(typeof req.query.origin === "string" ? req.query.origin : undefined)
+    ?? publicOriginFromRequest(req)
+    ?? "";
+  const source = local ? "local" as const : (latest?.source ?? "github");
+  const fileName = local?.fileName ?? latest?.fileName ?? "wand.ipa";
+  const size = local?.size ?? latest?.size ?? 0;
+  const latestVersion = latest?.version ?? "0.0.0";
+  const metadata = local
+    ? await inspectIpa(local.filePath, { version: latestVersion }).catch(() => ({
+      bundleId: "com.wand.app",
+      bundleVersion: latestVersion,
+      bundleBuild: latestVersion,
+      title: "Wand",
+      signed: false,
+    }))
+    : {
+      bundleId: "com.wand.app",
+      bundleVersion: latestVersion,
+      bundleBuild: latestVersion,
+      title: "Wand",
+      signed: false,
+    };
+  const downloadPath = latest?.downloadUrl ?? "/ios/download";
+  const downloadUrl = origin ? absoluteUrl(origin, downloadPath) : downloadPath;
+  const manifestUrl = origin ? absoluteUrl(origin, "/ios/manifest.plist") : "/ios/manifest.plist";
+  const installPageUrl = origin ? absoluteUrl(origin, "/ios/install") : "/ios/install";
+  const blockers = collectIosOtaBlockers({
+    signed: metadata.signed,
+    origin,
+    source,
+  });
+  const otaReady = blockers.length === 0;
+  const manifest = buildIosOtaManifest({
+    ipaUrl: downloadUrl,
+    bundleId: metadata.bundleId,
+    bundleVersion: metadata.bundleVersion,
+    title: metadata.title,
+  });
+  return {
+    latestVersion: metadata.bundleVersion || latestVersion,
+    downloadUrl,
+    installUrl: origin ? buildItmsServicesUrl(manifestUrl) : null,
+    manifestUrl,
+    installPageUrl,
+    fileName,
+    size,
+    source,
+    signed: metadata.signed,
+    otaReady,
+    otaBlockers: blockers,
+    bundleId: metadata.bundleId,
+    title: metadata.title,
+    origin,
+    manifest,
+  };
 }
 
 export class ServerUpdateState {

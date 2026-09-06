@@ -63,3 +63,20 @@ test("session list page clamps offsets and limits the returned window", () => {
   );
   assert.notEqual(changed.revision, firstPage.revision);
 });
+
+test("session list revision changes when title or ptyBusy change", () => {
+  const base = [session("s1", "2026-07-18T12:00:00.000Z")];
+  const first = buildSessionListPage(base, 0, 40);
+  const titled = buildSessionListPage(
+    [{ ...base[0], title: "收紧 resume 时间窗" }],
+    0,
+    40,
+  );
+  const busy = buildSessionListPage(
+    [{ ...base[0], ptyBusy: true }],
+    0,
+    40,
+  );
+  assert.notEqual(titled.revision, first.revision);
+  assert.notEqual(busy.revision, first.revision);
+});

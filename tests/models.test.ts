@@ -9,6 +9,7 @@ import {
   parseCodexModels,
   parseGrokModels,
   parseOpenCodeModels,
+  parsePiModels,
   parseQoderModels,
   refreshModels,
 } from "../src/models.js";
@@ -42,6 +43,7 @@ function createCommandRunner(
     if (file === "opencode") throw new Error("not installed");
     if (file === "grok") throw new Error("not installed");
     if (file === "qodercli") throw new Error("not installed");
+    if (file === "pi") throw new Error("not installed");
     throw new Error(`Unexpected command: ${key}`);
   };
 }
@@ -150,6 +152,32 @@ test("Grok model discovery falls back when output is empty", () => {
   assert.equal(models.some((model) => model.id === "grok-4.5"), true);
 });
 
+test("Pi model discovery parses provider/model table rows", () => {
+  const models = parsePiModels([
+    "provider   model                context  max-out  thinking  images",
+    "codex-llm  claude-opus-5        128K     16.4K    yes       no",
+    "\x1b[1mxai\x1b[0m        grok-4.6             500K     500K     yes       yes",
+    "xai        grok-4.6             500K     500K     yes       yes",
+    "cloudflare-workers-ai  @cf/moonshotai/kimi-k2.6  128K  16.4K  no  no",
+    "Unsafe     model;rm-rf          128K     16K      no        no",
+  ].join("\n"));
+
+  assert.deepEqual(models.map((model) => model.id), [
+    "default",
+    "codex-llm/claude-opus-5",
+    "xai/grok-4.6",
+    "cloudflare-workers-ai/@cf/moonshotai/kimi-k2.6",
+  ]);
+  assert.equal(models[0]?.alias, true);
+  assert.equal(models.find((model) => model.id === "xai/grok-4.6")?.label, "xai/grok-4.6");
+});
+
+test("Pi model discovery falls back when output is empty", () => {
+  const models = parsePiModels("provider  model  context\n");
+  assert.deepEqual(models.map((model) => model.id), ["default"]);
+  assert.equal(models[0]?.alias, true);
+});
+
 test("Qoder model catalog exposes the official tier aliases", async () => {
   const result = await refreshModels(refreshOptions());
   assert.deepEqual(result.qoderModels.map((model) => model.id), [
@@ -191,6 +219,9 @@ test("server model catalog persists every provider and writes only when its cont
     if (file === "opencode" && args.join(" ") === "--version") return { stdout: "1.2.3\n", stderr: "" };
     if (file === "grok" && args.join(" ") === "models") return { stdout: "Default model: grok-4.5\n* grok-4.5\n* grok-3", stderr: "" };
     if (file === "qodercli" && args.join(" ") === "--list-models") return { stdout: qoderOutput, stderr: "" };
+    if (file === "pi" && args.join(" ") === "--list-models") {
+      return { stdout: "provider  model     context\nxai       grok-4.6  500K\n", stderr: "" };
+    }
     throw new Error(`Unexpected command: ${file} ${args.join(" ")}`);
   };
   const options = (): ModelRefreshOptions => ({ env: {}, storage, commandRunner: runner, now: () => now });
@@ -202,6 +233,7 @@ test("server model catalog persists every provider and writes only when its cont
   assert.deepEqual(first.opencodeModels.map((model) => model.id), ["default", "openai/gpt-5.4"]);
   assert.deepEqual(first.grokModels.map((model) => model.id), ["default", "grok-4.5", "grok-3"]);
   assert.equal(first.qoderModels.some((model) => model.id === "qoder-frontier-1"), true);
+  assert.deepEqual(first.piModels.map((model) => model.id), ["default", "xai/grok-4.6"]);
   const firstRaw = storage.getRaw(MODEL_CATALOG_CACHE_KEY);
   assert.ok(firstRaw);
 
@@ -252,6 +284,7 @@ test("server model catalog coalesces concurrent refreshes", async () => {
     if (file === "opencode" && args[0] === "models") return { stdout: "", stderr: "" };
     if (file === "opencode") return { stdout: "1.2.3\n", stderr: "" };
     if (file === "grok") return { stdout: "", stderr: "" };
+    if (file === "pi") return { stdout: "", stderr: "" };
     throw new Error(`Unexpected command: ${file}`);
   };
   const catalog = new ModelCatalogService(() => ({ env: {}, storage, commandRunner: runner }));
@@ -261,8 +294,8 @@ test("server model catalog coalesces concurrent refreshes", async () => {
   allowQoder?.();
   const [firstResult, secondResult] = await Promise.all([first, second]);
   assert.equal(firstResult.revision, secondResult.revision);
-  // claude, codex, opencode models/version, grok, qoder: one server scan.
-  assert.equal(calls, 6);
+  // claude, codex, opencode models/version, grok, qoder, pi: one server scan.
+  assert.equal(calls, 7);
 });
 
 test("Claude candidates merge configured, verified, and Models API entries without asserting entitlement", async () => {

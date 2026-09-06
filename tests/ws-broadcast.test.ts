@@ -50,6 +50,7 @@ interface ManagerInternals {
     pausePtyOutput?(id: string): void;
     resumePtyOutput?(id: string): void;
   };
+  emitEvent(event: ProcessEvent): void;
   broadcast(event: ProcessEvent): void;
   processWsQueue(client: TestClient): void;
   releasePtyPause(client: TestClient, sessionId: string): void;
@@ -252,4 +253,63 @@ test("legacy PTY subscribers do not require acknowledgements", () => {
   assert.equal(sent.data.chunk, chunk);
   assert.equal(client.ptySubscriptions.get("session-a")?.unackedBytes, 0);
   assert.deepEqual(paused, []);
+});
+
+function waitForOutputDebounce(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 30));
+}
+
+test("session topic output is not merged into raw PTY chunks", async () => {
+  const { manager, client, socket } = createHarness();
+  client.ptySubscriptions.set("session-a", { supportsAck: false, unackedBytes: 0, paused: false });
+
+  manager.emitEvent({
+    type: "output",
+    sessionId: "session-a",
+    data: { title: "修侧栏标题", description: "把命令总结写进终端标题" },
+  });
+  manager.emitEvent({
+    type: "output",
+    sessionId: "session-a",
+    data: { incremental: true, chunk: "echo" },
+  });
+  await waitForOutputDebounce();
+  await drainAll(client, socket);
+
+  const sent = socket.sent.map((message) => JSON.parse(message) as {
+    type: string;
+    data?: { title?: string; chunk?: string };
+  });
+  assert.equal(sent.length, 2);
+  assert.equal(sent[0].data?.title, "修侧栏标题");
+  assert.equal(sent[0].data?.chunk, undefined);
+  assert.equal(sent[1].data?.chunk, "echo");
+  assert.equal(sent[1].data?.title, undefined);
+});
+
+test("session topic status flushes pending PTY bytes before the new title", async () => {
+  const { manager, client, socket } = createHarness();
+  client.ptySubscriptions.set("session-a", { supportsAck: false, unackedBytes: 0, paused: false });
+
+  manager.emitEvent({
+    type: "output",
+    sessionId: "session-a",
+    data: { incremental: true, chunk: "prompt" },
+  });
+  manager.emitEvent({
+    type: "status",
+    sessionId: "session-a",
+    data: { title: "修侧栏标题", description: "把命令总结写进终端标题" },
+  });
+  await drainAll(client, socket);
+
+  const sent = socket.sent.map((message) => JSON.parse(message) as {
+    type: string;
+    data?: { title?: string; chunk?: string };
+  });
+  assert.equal(sent.length, 2);
+  assert.equal(sent[0].type, "output");
+  assert.equal(sent[0].data?.chunk, "prompt");
+  assert.equal(sent[1].type, "status");
+  assert.equal(sent[1].data?.title, "修侧栏标题");
 });

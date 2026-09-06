@@ -2,7 +2,7 @@ import { state, readStoredBoolean, writeStoredBoolean, configPath } from "./stat
 import { mergeWindowedMessages } from "./message-reconciliation";
 import { t, iconSvg } from "./i18n";
 import { escapeHtml, formatElapsedShort, refreshTailMarqueePaths } from "./utils";
-import { ensureChatMessagesContainer, extractToolResultText, parseMessages, renderChat, scheduleChatRender, shortCommand } from "./chat-render";
+import { ensureChatMessagesContainer, extractToolResultText, parseMessages, renderChat, scheduleChatRender, sessionChromeTitle } from "./chat-render";
 import { bindChatScrollListener, clearStructuredQueuePersistence, normalizeStructuredSnapshot, persistSelectedId, restoreStructuredQueue, saveStructuredQueue, scrollChatToBottom, stripRenderOnlyStructuredMessages, syncStructuredQueueFromSession, updateChatUnreadBubble } from "./chat-scroll";
 import { attachEventListeners } from "./events";
 import { applyTerminalScale, isMobileLayout, refreshFileExplorer, setFilePanelOpen, shouldShowSessionsBackdrop, updateFilePanelCwd, updateLayoutState } from "./file-browser";
@@ -852,7 +852,7 @@ import { hasPooledTerminal } from "./terminal-pool";
       export function setChatModelForProvider(provider, model) {
         var key = getProviderKey(provider);
         var normalized = (model || "").trim();
-        if (!state.chatModels) state.chatModels = { claude: "", codex: "", opencode: "", grok: "", qoder: "" };
+        if (!state.chatModels) state.chatModels = { claude: "", codex: "", opencode: "", grok: "", qoder: "", pi: "" };
         state.chatModels[key] = normalized;
         state.chatModel = normalized;
         try {
@@ -1611,7 +1611,7 @@ import { hasPooledTerminal } from "./terminal-pool";
           hideMiniKeyboard();
           closeKeyboardPopup();
         }
-        var terminalTitle = selectedSession ? shortCommand(selectedSession.command) : "Wand";
+        var terminalTitle = selectedSession ? sessionChromeTitle(selectedSession, "Wand") : "Wand";
         var terminalInfo = selectedSession ? getSessionStatusLabel(selectedSession) : "开始对话";
         var summaryEl = document.querySelector(".session-summary-value");
         var titleEl = document.getElementById("terminal-title");
@@ -1620,7 +1620,7 @@ import { hasPooledTerminal } from "./terminal-pool";
         if (!reactShellActive && topbarTitleEl && selectedSession) {
           topbarTitleEl.classList.remove("topbar-tagline");
           topbarTitleEl.classList.add("topbar-session-title");
-          topbarTitleEl.textContent = selectedSession.title || shortCommand(selectedSession.command);
+          topbarTitleEl.textContent = sessionChromeTitle(selectedSession, "Wand");
           topbarTitleEl.setAttribute("title", selectedSession.description || selectedSession.command || "");
         }
         var blankChat = document.getElementById("blank-chat");

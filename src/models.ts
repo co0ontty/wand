@@ -20,10 +20,11 @@ const CLAUDE_PROBE_TIMEOUT_MS = 15_000;
 const MAX_CLAUDE_MODEL_PROBES = 12;
 const CLAUDE_PROBE_CONCURRENCY = 3;
 const MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
-// Qoder returns both tier/frontier IDs (for example `glm51`) and custom
-// provider IDs (for example `zhipu/glm5.2-cp`). Keep this intentionally
-// conservative because these values are later forwarded to `--model`.
-const QODER_MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
+// Shared catalog IDs are later forwarded to `--model`. Qoder and Pi both use
+// provider-qualified values (`zhipu/glm5.2-cp`, `xai/grok-4.6`); Pi also emits
+// `@` in some Cloudflare-style ids.
+const QODER_MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$/;
+const PI_MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,63}\/[A-Za-z0-9@][A-Za-z0-9._:@/-]{0,127}$/;
 
 const CLAUDE_BUILTIN_MODELS: ClaudeModelInfo[] = [
   {
@@ -465,6 +466,18 @@ async function probeQoderModels(
   }
 }
 
+async function probePiModels(
+  runner: ModelCommandRunner,
+  env: NodeJS.ProcessEnv,
+): Promise<ProbeResult<ClaudeModelInfo[]>> {
+  try {
+    const { stdout } = await runner("pi", ["--list-models"], { env, timeout: 8000 });
+    return { ok: true, value: parsePiModels(stdout) };
+  } catch {
+    return { ok: false };
+  }
+}
+
 function createOfficialModelsApi(apiKey: string): ClaudeModelsApi {
   const client = new Anthropic({ apiKey });
   return {
@@ -615,6 +628,33 @@ export function parseQoderModels(stdout: string): ClaudeModelInfo[] {
     if (inModelList && QODER_MODEL_ID_PATTERN.test(line)) add(line, line);
   }
   return [...cloneModels(QODER_FALLBACK_MODELS), ...discovered];
+}
+
+/**
+ * Parse `pi --list-models`.
+ *
+ * Pi prints a padEnd-aligned table whose selectable `--model` value is
+ * `provider/id` (for example `xai/grok-4.6`). The first two columns are the
+ * only ones we keep; context / max-out / thinking / images are display-only.
+ */
+export function parsePiModels(stdout: string): ClaudeModelInfo[] {
+  const discovered: ClaudeModelInfo[] = [];
+  const seen = new Set(["default"]);
+  for (const rawLine of stdout.split(/\r?\n/)) {
+    const line = rawLine.replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "").trim();
+    if (!line || /^provider\s+model\b/i.test(line)) continue;
+    const match = line.match(/^(\S+)\s+(\S+)\s+(\S+)/);
+    if (!match || !/^\d/.test(match[3])) continue;
+    const id = `${match[1]}/${match[2]}`;
+    if (!PI_MODEL_ID_PATTERN.test(id) || id.length > 128 || seen.has(id)) continue;
+    seen.add(id);
+    discovered.push({ id, label: id });
+  }
+  if (!discovered.length) return cloneModels(PI_FALLBACK_MODELS);
+  return [
+    { id: "default", label: "跟随 Pi 默认", alias: true },
+    ...discovered,
+  ];
 }
 
 /** Parse `opencode models`, whose stable machine-friendly output is one provider/model id per line. */
@@ -838,12 +878,13 @@ async function discoverModelCache(
   const now = options.now?.() ?? new Date();
   const env = resolveProbeEnv(options);
   const runner = options.commandRunner ?? defaultCommandRunner;
-  const [claudeVersionProbe, codexProbe, opencodeProbe, grokProbe, qoderProbe, apiProbe] = await Promise.all([
+  const [claudeVersionProbe, codexProbe, opencodeProbe, grokProbe, qoderProbe, piProbe, apiProbe] = await Promise.all([
     probeClaudeVersion(runner, env),
     probeCodexModels(runner, env),
     probeOpenCode(runner, env),
     probeGrokModels(runner, env),
     probeQoderModels(runner, env),
+    probePiModels(runner, env),
     listClaudeModelsFromApi(options, env),
   ]);
   const claudeVersion = claudeVersionProbe.ok ? claudeVersionProbe.value : previous.claudeVersion;
@@ -875,7 +916,7 @@ async function discoverModelCache(
     opencodeModels: opencodeProbe.models.ok ? opencodeProbe.models.value : cloneModels(previous.opencodeModels),
     grokModels: grokProbe.ok ? grokProbe.value : cloneModels(previous.grokModels),
     qoderModels: qoderProbe.ok ? qoderProbe.value : cloneModels(previous.qoderModels),
-    piModels: cloneModels(previous.piModels),
+    piModels: piProbe.ok ? piProbe.value : cloneModels(previous.piModels),
     claudeVersion,
     opencodeVersion: opencodeProbe.version.ok ? opencodeProbe.version.value : previous.opencodeVersion,
     refreshedAt: now.toISOString(),

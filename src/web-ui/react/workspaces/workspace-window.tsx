@@ -279,7 +279,7 @@ function useTaskSessionMeta(
   }, [taskId]);
   const meta = new Map<string, SessionMeta>();
   sessions.forEach((s, index) => {
-    const session = withLiveSessionTitle(s, liveTitles.get(s.id));
+    const session = withLiveSessionTitle(s, liveTitles.get(s.id), parentNames);
     meta.set(s.id, {
       title: listSessionLabel(session, index, parentNames),
       provider: session.provider,

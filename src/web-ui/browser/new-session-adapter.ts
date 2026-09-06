@@ -42,6 +42,8 @@ const legacyRuntime: NewSessionRuntimeAdapter = {
         codex: getChatModelForProvider("codex"),
         opencode: getChatModelForProvider("opencode"),
         grok: getChatModelForProvider("grok"),
+        qoder: getChatModelForProvider("qoder"),
+        pi: getChatModelForProvider("pi"),
       },
       thinkingEffort: state.chatThinking || "off",
     };

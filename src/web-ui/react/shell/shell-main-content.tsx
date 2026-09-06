@@ -11,6 +11,8 @@ import { ShellFilePanel } from "./shell-file-panel";
 import { ShellTopbar } from "./shell-topbar";
 import { useUiDispatch, useUiStoreSnapshot } from "./ui-store-react";
 import type { UiAction, UiSnapshotData } from "./ui-store";
+import { shellNavigationStore } from "./shell-navigation";
+import { ProjectsDashboard } from "../workspaces/projects-dashboard";
 
 export type ShellWelcomeQuickStart = "claude" | "codex" | "opencode" | "structured";
 
@@ -119,6 +121,11 @@ function ShellBlankChat({ className, queueRef, workspaceTask }: {
  */
 export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
   const snapshot = useUiStoreSnapshot();
+  const activeView = React.useSyncExternalStore(
+    shellNavigationStore.subscribe,
+    shellNavigationStore.getSnapshot,
+    shellNavigationStore.getSnapshot,
+  );
   const classes = getShellLegacySlotClasses(snapshot.legacyVisibility);
   const context = React.useSyncExternalStore(
     workspaceContextStore.subscribe,
@@ -130,6 +137,10 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
   // #output 本身仍保留在 DOM（单例终端实例仍挂在上面，仅不可见），退出分屏后
   // 用缓冲 output 重置即可恢复，无需重建终端。
   const inSplit = !!context.taskId && activeWorkWindow(context.layout)?.layout.type === "split";
+
+  if (activeView === "projects" && !snapshot.selected && !context.taskId) {
+    return <main className="main-content projects-main-content"><ProjectsDashboard/></main>;
+  }
 
   return (
     <main className={`main-content${snapshot.layout.filePanelOpen ? " file-panel-open" : ""}${inSplit ? " main-content-in-split" : ""}`}>

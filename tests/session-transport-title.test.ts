@@ -51,6 +51,10 @@ test("server owns title fallback instead of using transient task state", () => {
   assert.equal(resolveSessionDisplayTitle(snapshot({ cwd: "/" })), "会话");
 });
 
+test("session DTOs do not use the cwd leaf as a live title", () => {
+  assert.equal(toSessionListItemDTO(snapshot({ cwd: "/repo/wand" })).title, "会话");
+});
+
 test("server prefers a command summary over the parent task title", () => {
   assert.equal(resolveSessionDisplayTitle(snapshot({
     title: "重构会话恢复流程",

@@ -3672,6 +3672,15 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
         return s.length <= 24 ? s || "未选择会话" : s.slice(0, 21) + "...";
       }
 
+      export function sessionChromeTitle(session, fallback) {
+        var title = session && typeof session.title === "string"
+          ? session.title.replace(/\s+/g, " ").trim()
+          : "";
+        if (title) return title;
+        if (session && session.command) return shortCommand(session.command);
+        return fallback || "Wand";
+      }
+
       export function normalizeTerminalOutput(value) {
         return String(value || "")
           .replace(/\r\r\n/g, "\r\n")

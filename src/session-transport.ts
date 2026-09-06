@@ -1,6 +1,7 @@
 import type { ConversationTurn, SessionSnapshot } from "./types.js";
 import { enrichStructuredMessages, WAND_PROTOCOL_VERSION } from "./structured-client-protocol.js";
 import {
+  collectSessionTopicBlocklist,
   shouldAcceptGeneratedSessionTitle,
   summarizeSessionTitleFromInput,
 } from "./session-topic.js";
@@ -94,7 +95,10 @@ function sessionBase(snapshot: SessionSnapshot): SessionBaseDTO {
     autoApprovePermissions: snapshot.autoApprovePermissions,
     approvalStats: snapshot.approvalStats,
     summary: snapshot.summary,
-    title: resolveSessionDisplayTitle(snapshot),
+    title: resolveSessionDisplayTitle(
+      snapshot,
+      collectSessionTopicBlocklist({ cwd: snapshot.cwd }),
+    ),
     description: snapshot.description,
     titleGenerating: snapshot.titleGenerating,
     currentTaskTitle: snapshot.currentTaskTitle,

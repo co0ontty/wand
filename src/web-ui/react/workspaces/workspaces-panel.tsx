@@ -161,7 +161,7 @@ function TaskSessionItem({
 }) {
   const [confirming, setConfirming] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
-  const labeled = withLiveSessionTitle(session, liveTitle);
+  const labeled = withLiveSessionTitle(session, liveTitle, parentNames);
   const label = listSessionLabel(labeled, index, parentNames);
 
   return (
@@ -630,9 +630,6 @@ function TaskGroupSection({
             setCollapsed((current) => !current);
           }}
         >
-          <span className="workspace-row-icon" aria-hidden="true">
-            <WandIcon name="folder" size={13}/>
-          </span>
           <span className="workspace-row-label">
             <span className="workspace-row-name">
               <span className="workspace-row-title">{group.workspaceName}</span>
@@ -700,7 +697,7 @@ function TaskGroupSection({
               }}
               onDeleteSession={async (session) => {
                 const label = listSessionLabel(
-                  withLiveSessionTitle(session, liveTitles?.[session.id]),
+                  withLiveSessionTitle(session, liveTitles?.[session.id], [group.workspaceName, task.name]),
                   task.sessions.indexOf(session),
                   [group.workspaceName, task.name],
                 );
@@ -738,7 +735,7 @@ function TaskGroupSection({
                       [session.id],
                       null,
                       `已删除终端「${listSessionLabel(
-                        withLiveSessionTitle(session, liveTitles?.[session.id]),
+                        withLiveSessionTitle(session, liveTitles?.[session.id], [group.workspaceName]),
                         index,
                         [group.workspaceName],
                       )}」`,

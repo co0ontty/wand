@@ -302,7 +302,14 @@ function sessionListRevision(
   entries: readonly SessionListPageEntry[],
   directoryNames: ReadonlyArray<readonly [path: string, name: string]> = [],
 ): string {
-  const entryState = entries.map((entry) => [entry.key, entry.sortTimestamp]);
+  const entryState = entries.map((entry) => [
+    entry.key,
+    entry.sortTimestamp,
+    entry.session.title,
+    entry.session.status,
+    entry.session.ptyBusy === true,
+    entry.session.structuredState?.inFlight === true,
+  ]);
   const revisionState = directoryNames.length === 0
     ? entryState
     : {

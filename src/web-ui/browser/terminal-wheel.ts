@@ -5,10 +5,17 @@ export type TerminalWheelPagingState = {
   lastPageAt: number;
 };
 
+export type TerminalWheelScrollState = {
+  accumulatedPixels: number;
+  lastEventAt: number;
+};
+
 export type TerminalWheelLikeEvent = {
   deltaY: number;
   deltaMode: number;
 };
+
+const TERMINAL_WHEEL_SCROLL_GESTURE_GAP_MS = 180;
 
 const TERMINAL_WHEEL_PAGE_THRESHOLD_PX = 80;
 const TERMINAL_WHEEL_PAGE_INTERVAL_MS = 80;
@@ -88,6 +95,30 @@ export function consumeTerminalTouchPage(
   state.accumulatedPixels -= direction * TERMINAL_TOUCH_PAGE_THRESHOLD_PX;
   state.lastPageAt = now;
   return direction;
+}
+
+export function consumeTerminalWheelLines(
+  event: TerminalWheelLikeEvent,
+  state: TerminalWheelScrollState,
+  lineHeight: number,
+  viewportHeight: number,
+  now: number = Date.now(),
+): number {
+  if (!Number.isFinite(event.deltaY) || event.deltaY === 0) return 0;
+
+  var pixels = normalizeWheelDeltaPixels(event, viewportHeight);
+  if (!Number.isFinite(pixels) || pixels === 0) return 0;
+  if (now - state.lastEventAt > TERMINAL_WHEEL_SCROLL_GESTURE_GAP_MS) {
+    state.accumulatedPixels = 0;
+  }
+  state.lastEventAt = now;
+
+  var height = Number.isFinite(lineHeight) && lineHeight > 0 ? lineHeight : 16;
+  state.accumulatedPixels += pixels;
+  var lines = Math.trunc(state.accumulatedPixels / height);
+  if (lines === 0) return 0;
+  state.accumulatedPixels -= lines * height;
+  return lines;
 }
 
 export function terminalWheelPageSequence(direction: -1 | 0 | 1): string {

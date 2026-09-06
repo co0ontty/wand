@@ -153,12 +153,15 @@ cd android && SKIP_INSTALL=1 APK_DIST_DIR="$HOME/.wand/android" ./debug.sh
 
 ```bash
 cd macos && ./build.sh <version>    # Universal Binary, ad-hoc 签名, dist/wand-v<version>.dmg
-cd ios   && ./build.sh <version>    # 未签名 IPA（CODE_SIGNING_ALLOWED=NO），sideload 安装
+cd ios && IPA_DIST_DIR="$HOME/.wand/ios" ./build.sh    # 未签名 IPA 编完即丢进更新目录
 ```
 
 - macOS ad-hoc 自签，无公证；换签名身份会让老用户被 Gatekeeper 拦截。
-- iOS 不签名、无应用内更新；模拟器设备用真实存在的名字（`Wand Debug`、`Wand Live Activity QA`、`Wand iPad Debug`，见 `xcrun simctl list devices`），编译验证加 `CODE_SIGNING_ALLOWED=NO`。
+- iOS 构建仍是 `CODE_SIGNING_ALLOWED=NO`。模拟器设备用真实存在的名字（`Wand Debug`、`Wand Live Activity QA`、`Wand iPad Debug`，见 `xcrun simctl list devices`）。
 - 分发目录：默认实例 `~/.wand/macos|ios/`，隔离测试 `/tmp/wand-dev/macos|ios/`。macOS 需在 config 开 `macos.enabled`。
+- 每次 iOS 改动收尾都要重新编译带版本号的 IPA 并部署到 `~/.wand/ios/`（用户明确说不用才可跳过），并验证 `/api/ios-ipa-update?currentVersion=0.0.0` 返回新版本。无参数 `./build.sh` 的版本形如 `X.Y.Z-debug.MMDDHHMM`，规则与 Android 相同。
+- iOS 在线更新走 Apple OTA：公开 `GET /api/ios-ipa-update`、`GET /ios/manifest.plist`、`GET /ios/install`。安装链接是 `itms-services://?action=download-manifest&url=<HTTPS manifest>`，不经过第三方分发站。未签名 IPA 只能被检查到，系统安装会失败；签发后的包放到同一目录即可覆盖安装。
+- 公开 HTTPS origin 由反代决定（例如 `https://home.huniu.fun:8443/`）。manifest 里的 IPA URL 必须是系统信任的 HTTPS 绝对地址。
 
 ### Mobile UX 对齐规范
 
@@ -173,7 +176,7 @@ cd ios   && ./build.sh <version>    # 未签名 IPA（CODE_SIGNING_ALLOWED=NO）
 
 - 更新通道存 SQLite `updateChannel`（stable/beta）。stable → `@co0ontty/wand@latest`；beta → `@beta`（beta 分支 CI 带 prebuilt dist）。更新判定用 `npm view` 比版本；`dist/build-info.json` 只给 UI 展示。
 - 更新后自修复：`repairServiceUnitAfterUpdate()` 重写 systemd/launchd unit；重启策略见 `src/relaunch.ts`。
-- APK beta 通道走 `?channel=beta`（本地 apkDir 是唯一 beta 来源）；macOS beta 走 GitHub prerelease 清单校验。
+- APK beta 通道走 `?channel=beta`（本地 apkDir 是唯一 beta 来源）；macOS beta 走 GitHub prerelease 清单校验。iOS 走 `/api/ios-ipa-update` + `/ios/manifest.plist`（本地 `ipaDir` 签发后 OTA）。
 
 正式发布全部由 tag 驱动：push 一个 `v*` tag，GitHub Actions 并行出 npm 包 / APK / DMG / release notes。相关 workflow：`npm-release.yml`、`android-release.yml`、`macos-release.yml`、`macos-beta.yml`、`ios-build.yml`、`release-notes.yml`、`beta-branch.yml`、`cleanup-old-releases.yml`。
 

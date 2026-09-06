@@ -36,6 +36,40 @@ const PTY_UNACKED_HIGH_WATER = 512 * 1024;
 const PTY_UNACKED_LOW_WATER = 128 * 1024;
 const MAX_PTY_INPUT_CHARS = 128 * 1024;
 
+function asEventData(data: unknown): Record<string, unknown> {
+  return data && typeof data === "object" && !Array.isArray(data)
+    ? data as Record<string, unknown>
+    : {};
+}
+
+function isRawPtyChunkData(data: Record<string, unknown>): boolean {
+  return data.incremental === true && typeof data.chunk === "string";
+}
+
+function hasSessionTopicData(data: Record<string, unknown>): boolean {
+  return "title" in data || "description" in data || "titleGenerating" in data;
+}
+
+function outputEventShapeMismatch(
+  prevData: Record<string, unknown>,
+  curData: Record<string, unknown>,
+): boolean {
+  const prevHasMessages = "messages" in prevData && prevData.messages !== undefined;
+  const prevHasLastMsg = "lastMessage" in prevData && prevData.lastMessage !== undefined;
+  const curHasMessages = "messages" in curData && curData.messages !== undefined;
+  const curHasLastMsg = "lastMessage" in curData && curData.lastMessage !== undefined;
+  if (
+    (prevHasMessages && curHasLastMsg && !curHasMessages)
+    || (prevHasLastMsg && curHasMessages && !curHasLastMsg)
+  ) {
+    return true;
+  }
+  // Title metadata must not ride along with raw PTY bytes: the web client
+  // treats incremental+chunk as chunk-only and drops title/titleGenerating.
+  return hasSessionTopicData(prevData) !== hasSessionTopicData(curData)
+    && (isRawPtyChunkData(prevData) || isRawPtyChunkData(curData));
+}
+
 // ── Types ──
 
 interface WsClient {
@@ -310,8 +344,8 @@ export class WsBroadcastManager {
     if (event.type === "output") {
       const existing = this.outputDebounceCache.get(event.sessionId);
       if (existing) {
-        const prevData = (existing.event.data as Record<string, unknown> | undefined) ?? {};
-        const curData = (event.data as Record<string, unknown> | undefined) ?? {};
+        const prevData = asEventData(existing.event.data);
+        const curData = asEventData(event.data);
 
         // 跨"事件形状"不能简单 shallow-merge：
         //   - 全量事件（带 messages）+ 增量事件（带 lastMessage，不带 messages）
@@ -320,15 +354,10 @@ export class WsBroadcastManager {
         //     表现是"刷新页面才出来的消失文字"。
         //   - 反过来：增量在前，全量在后，cur 覆盖 prev 后 incremental 仍为 true
         //     而 messages 来自 cur——这种顺序原本是安全的，但风险一致就一起处理。
+        //   - 会话标题不能并进 raw PTY chunk：web 的 chunk-only 快路径会丢掉 title。
         // 形状不一致时 flush 上一条立即广播，新事件单独开窗口。这样客户端永远
         // 不会在一条 WS 消息里同时看到 messages 和 lastMessage 两种语义。
-        const prevHasMessages = "messages" in prevData && prevData.messages !== undefined;
-        const prevHasLastMsg = "lastMessage" in prevData && prevData.lastMessage !== undefined;
-        const curHasMessages = "messages" in curData && curData.messages !== undefined;
-        const curHasLastMsg = "lastMessage" in curData && curData.lastMessage !== undefined;
-        const shapeMismatch =
-          (prevHasMessages && curHasLastMsg && !curHasMessages) ||
-          (prevHasLastMsg && curHasMessages && !curHasLastMsg);
+        const shapeMismatch = outputEventShapeMismatch(prevData, curData);
 
         if (shapeMismatch) {
           clearTimeout(existing.timer);

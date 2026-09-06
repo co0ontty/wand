@@ -10,7 +10,7 @@ import { applyCurrentView, closeSessionsDrawer, copyToClipboard, dismissDrawerIf
 import { ensureTerminalFit, initTerminalJoystick, initTerminalResizeHandle, observeTerminalResize, sendTerminalResize, startTerminalHealthCheck } from "./viewport";
 import { t } from "./i18n";
 import { batchDeleteSelected, clearAllClaudeHistory, clearSelections, confirmDelete, ensureClaudeHistoryLoaded, getVisibleClaudeHistorySessions, selectAllVisibleItems, toggleManageMode, toggleManagedItemSelection } from "./sidebar";
-import { consumeTerminalTouchPage, consumeTerminalWheelPage, terminalWheelPageSequence, type TerminalTouchPagingState, type TerminalWheelPagingState } from "./terminal-wheel";
+import { consumeTerminalTouchPage, consumeTerminalWheelLines, consumeTerminalWheelPage, terminalWheelPageSequence, type TerminalTouchPagingState, type TerminalWheelPagingState, type TerminalWheelScrollState } from "./terminal-wheel";
 
       export function saveWorkingDir(path: string) {
         state.workingDir = path;
@@ -928,32 +928,63 @@ import { consumeTerminalTouchPage, consumeTerminalWheelPage, terminalWheelPageSe
             lastEventAt: 0,
             lastPageAt: 0,
           };
-          term.attachCustomWheelEventHandler(function(event: WheelEvent) {
-            // The normal buffer owns real xterm scrollback, so preserve xterm's
-            // native pixel/line scrolling there. Full-screen PTY applications
-            // use the alternate buffer, which has no local history; translate
-            // vertical wheel gestures into the page keys those TUIs understand.
+          var wheelScrollState: TerminalWheelScrollState = {
+            accumulatedPixels: 0,
+            lastEventAt: 0,
+          };
+
+          function terminalCellHeight(): number {
+            try {
+              var screen = termWrap.querySelector(".xterm-screen") as HTMLElement | null;
+              if (screen && term.rows > 0) {
+                var measured = screen.clientHeight / term.rows;
+                if (measured > 4) return measured;
+              }
+            } catch (e) {}
+            return Math.max(1, fontSize * 1.25);
+          }
+
+          // Do not rely on xterm's browser-native viewport scrolling here. The
+          // viewport is intentionally hidden by Wand's layout, and in some
+          // browsers the wheel is consumed by the xterm helper textarea before
+          // the scroll container gets a chance to move. Handling the gesture at
+          // the wrapper capture phase makes mouse wheels and trackpads behave
+          // consistently while preserving the alternate-buffer TUI path.
+          termWrap.addEventListener("wheel", function(event: WheelEvent) {
             if (
-              term.buffer.active.type !== "alternate"
-              || event.ctrlKey
+              event.ctrlKey
               || event.metaKey
               || Math.abs(event.deltaY) <= Math.abs(event.deltaX)
             ) {
-              return true;
+              return;
             }
 
             event.preventDefault();
             event.stopPropagation();
-            var viewport = getTerminalViewport();
-            var direction = consumeTerminalWheelPage(
+
+            if (term.buffer.active.type === "alternate") {
+              var viewport = getTerminalViewport();
+              var direction = consumeTerminalWheelPage(
+                event,
+                wheelPagingState,
+                viewport ? viewport.clientHeight : term.rows * terminalCellHeight(),
+              );
+              var sequence = terminalWheelPageSequence(direction);
+              if (sequence) sendPtyInput(sequence);
+              return;
+            }
+
+            // xterm's scrollLines uses negative values for older rows and
+            // positive values for newer rows, matching DOM wheel deltaY.
+            if (event.deltaY < 0) setTerminalManualScrollActive();
+            var lines = consumeTerminalWheelLines(
               event,
-              wheelPagingState,
-              viewport ? viewport.clientHeight : term.rows * fontSize * 1.25,
+              wheelScrollState,
+              terminalCellHeight(),
+              term.rows * terminalCellHeight(),
             );
-            var sequence = terminalWheelPageSequence(direction);
-            if (sequence) sendPtyInput(sequence);
-            return false;
-          });
+            if (lines !== 0) term.scrollLines(lines);
+          }, { capture: true, passive: false });
           var helperTextarea = termWrap.querySelector(".xterm-helper-textarea") as HTMLTextAreaElement | null;
           if (helperTextarea) {
             helperTextarea.readOnly = shouldLockNativeInputTerminalIme() ? true : !state.terminalInteractive;
