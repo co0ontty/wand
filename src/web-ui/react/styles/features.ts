@@ -31,12 +31,12 @@ export const settingsAndQuickCommitStyles = String.raw`
 .wand-settings-dialog {
   display: flex;
   flex-direction: column;
-  width: min(1080px, calc(100vw - var(--wand-safe-left) - var(--wand-safe-right) - 48px));
-  height: min(790px, calc(100dvh - var(--wand-safe-top) - var(--wand-safe-bottom) - 48px));
+  width: min(1120px, calc(100vw - var(--wand-safe-left) - var(--wand-safe-right) - 40px));
+  height: min(820px, calc(100dvh - var(--wand-safe-top) - var(--wand-safe-bottom) - 40px));
   min-height: 520px;
   overflow: hidden;
-  border-color: var(--border-subtle);
-  border-radius: 20px;
+  border-color: color-mix(in srgb, var(--border-subtle) 92%, transparent);
+  border-radius: 22px;
 }
 
 .wand-settings-nested-dialog {
@@ -288,7 +288,7 @@ export const settingsAndQuickCommitStyles = String.raw`
 
 .wand-settings-tabs {
   display: grid;
-  grid-template-columns: 246px minmax(0, 1fr);
+  grid-template-columns: 220px minmax(0, 1fr);
   flex: 1;
   min-height: 0;
   overflow: hidden;
@@ -414,9 +414,9 @@ export const settingsAndQuickCommitStyles = String.raw`
 .wand-settings-panel {
   box-sizing: border-box;
   width: 100%;
-  max-width: 820px;
+  max-width: 860px;
   margin: 0 auto;
-  padding: 25px 26px 36px;
+  padding: 28px 32px 40px;
 }
 
 .wand-settings-panel-heading {
@@ -433,11 +433,11 @@ export const settingsAndQuickCommitStyles = String.raw`
 .wand-settings-section-heading h3 { font-size: var(--font-size-base); }
 
 .wand-settings-section {
-  margin-bottom: 18px;
-  border: 1px solid color-mix(in srgb, var(--border-default) 72%, transparent);
-  border-radius: 15px;
-  background: color-mix(in srgb, var(--bg-elevated) 76%, transparent);
-  box-shadow: 0 1px 1px color-mix(in srgb, var(--text-primary) 4%, transparent);
+  margin-bottom: 16px;
+  border: 1px solid color-mix(in srgb, var(--border-default) 62%, transparent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--bg-elevated) 82%, transparent);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text-primary) 3%, transparent);
   backdrop-filter: blur(14px) saturate(120%);
   transition: border-color 160ms ease, box-shadow 160ms ease;
 }
@@ -452,8 +452,8 @@ export const settingsAndQuickCommitStyles = String.raw`
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 72%, transparent);
-  padding: 15px 17px 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 62%, transparent);
+  padding: 16px 19px 15px;
 }
 
 .wand-settings-section-action { flex: 0 0 auto; }
@@ -729,6 +729,37 @@ export const settingsAndQuickCommitStyles = String.raw`
 .wand-settings-update-deck span { color: var(--text-secondary); font-size: var(--font-size-xs); }
 .wand-settings-update-primary { min-width: 112px; }
 
+.wand-settings-connect {
+  display: grid;
+  gap: 12px;
+}
+
+.wand-settings-connect-qr {
+  display: flex;
+  justify-content: center;
+}
+
+.wand-settings-connect-qr canvas {
+  display: block;
+  width: 220px;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: #ffffff;
+}
+
+.wand-settings-connect-code-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: start;
+}
+
+.wand-settings-connect-code-row .wand-settings-connect-code {
+  flex: 1 1 220px;
+}
+
 .wand-settings-connect-code {
   display: block;
   overflow: auto;
@@ -741,10 +772,6 @@ export const settingsAndQuickCommitStyles = String.raw`
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
-
-.wand-settings-qr-dialog { align-items: stretch; }
-.wand-settings-qr-dialog canvas { align-self: center; max-width: calc(100% - 32px); height: auto; margin: 18px; border-radius: var(--radius-sm); }
-.wand-settings-qr-dialog .wand-settings-connect-code { margin: 0 18px; }
 
 .wand-settings-env-toolbar {
   display: grid;

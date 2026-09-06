@@ -75,47 +75,69 @@ function isNewerVersion(candidate: string | null, current: string | null): boole
   return false;
 }
 
-function ConnectCodeDialog({ code }: { code: string }) {
-  const controller = useSyncExternalStore(settingsStore.subscribe, settingsStore.getSnapshot, settingsStore.getSnapshot);
+function ConnectCodePanel({
+  code,
+  repository,
+  toast,
+}: {
+  code: string;
+  repository: SettingsRepository;
+  toast: SettingsTabProps["toast"];
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [qrError, setQrError] = useState("");
+
   useEffect(() => {
-    if (controller.nested !== "qr" || !canvasRef.current) return;
-    const library = window.QRCodeLib;
-    if (!library || typeof library.toCanvas !== "function") {
-      setQrError("二维码库未加载，可复制连接码。 ");
+    const canvas = canvasRef.current;
+    if (!code || !canvas) {
+      setQrError("");
       return;
     }
+    const library = window.QRCodeLib;
+    if (!library || typeof library.toCanvas !== "function") {
+      setQrError("二维码库未加载，可复制连接码。");
+      return;
+    }
+    let cancelled = false;
     setQrError("");
     try {
-      library.toCanvas(canvasRef.current, code, {
-        width: Math.max(240, Math.min(420, window.innerWidth * 0.72)),
+      library.toCanvas(canvas, code, {
+        width: 220,
         margin: 2,
         errorCorrectionLevel: "M",
         color: { dark: "#1f1b17", light: "#ffffff" },
-      }, (error: unknown) => { if (error) setQrError("二维码生成失败，可复制连接码。"); });
+      }, (error: unknown) => {
+        if (!cancelled && error) setQrError("二维码生成失败，可复制连接码。");
+      });
     } catch {
-      setQrError("二维码生成失败，可复制连接码。");
+      if (!cancelled) setQrError("二维码生成失败，可复制连接码。");
     }
-  }, [code, controller.nested]);
+    return () => { cancelled = true; };
+  }, [code]);
+
+  async function copyCode() {
+    if (!code) return;
+    await repository.execute({ type: "clipboard.copy", text: code });
+    toast("连接码已复制", "success");
+  }
+
   return (
-    <WandDialogSurface
-      open={controller.nested === "qr"}
-      onOpenChange={(open) => { if (!open) settingsStore.setNested(null); }}
-      title="App 连接二维码"
-      description="用 Wand App 扫一扫，连接当前服务器。"
-      className="wand-settings-nested-dialog wand-settings-qr-dialog"
-      overlayClassName="wand-settings-nested-overlay"
-      headerClassName="wand-settings-header"
-      titleClassName="wand-settings-title"
-      descriptionClassName="wand-settings-description"
-      closeLabel="关闭连接二维码"
-      testId="settings-connect-qr-dialog"
-    >
-      <canvas ref={canvasRef} aria-label="App 连接二维码" />
-      {qrError ? <SettingsStatus tone="warning">{qrError}</SettingsStatus> : null}
-      <code className="wand-settings-connect-code">{code}</code>
-    </WandDialogSurface>
+    <SettingsSection title="App 连接码" description="用 Wand App 扫码或粘贴连接码；修改密码后会失效。">
+      {code ? (
+        <div className="wand-settings-connect">
+          <div className="wand-settings-connect-qr" data-testid="settings-connect-qr">
+            <canvas ref={canvasRef} aria-label="App 连接二维码" />
+          </div>
+          {qrError ? <SettingsStatus tone="warning">{qrError}</SettingsStatus> : null}
+          <div className="wand-settings-connect-code-row">
+            <code className="wand-settings-connect-code" aria-label="App 连接码">{code}</code>
+            <WandButton kind="secondary" onClick={() => void copyCode()}>复制连接码</WandButton>
+          </div>
+        </div>
+      ) : (
+        <code className="wand-settings-connect-code" aria-label="App 连接码">暂不可用</code>
+      )}
+    </SettingsSection>
   );
 }
 
@@ -292,18 +314,9 @@ export function AboutSettingsTab({ snapshot, repository, refresh, toast, showRes
       ) : null}
 
       {snapshot.access === "admin" ? (
-        <>
-          <SettingsSection title="App 连接码" description="粘贴或扫码后可连接当前服务；修改密码后会失效。">
-            <code className="wand-settings-connect-code" aria-label="App 连接码">{snapshot.connectCode?.code || "暂不可用"}</code>
-            <div className="wand-settings-button-row">
-              <WandButton disabled={!snapshot.connectCode?.code} kind="secondary" onClick={async () => { await repository.execute({ type: "clipboard.copy", text: snapshot.connectCode!.code }); toast("连接码已复制", "success"); }}>复制连接码</WandButton>
-              <WandButton disabled={!snapshot.connectCode?.code} kind="secondary" onClick={() => settingsStore.setNested("qr")}>放大连接二维码</WandButton>
-            </div>
-          </SettingsSection>
-        </>
+        <ConnectCodePanel code={snapshot.connectCode?.code || ""} repository={repository} toast={toast} />
       ) : null}
       {status ? <SettingsStatus tone={tone}>{status}</SettingsStatus> : null}
-      <ConnectCodeDialog code={snapshot.connectCode?.code || ""} />
     </section>
   );
 }
@@ -1131,7 +1144,7 @@ export function NotificationSettingsTab(_props: SettingsTabProps) {
       <header className="wand-settings-panel-heading">
         <h2>通知</h2><p>设置提示音、应用内气泡和系统通知的行为。</p>
       </header>
-      <SettingsSection title="通知偏好" description="这些偏好会立即应用，无需点击保存。">
+      <SettingsSection title="通知偏好">
         <SettingsToggle
           label="播放提示音"
           description="重要通知到达时播放柔和提示音。"
@@ -1191,7 +1204,7 @@ export function NotificationSettingsTab(_props: SettingsTabProps) {
       ) : null}
 
       {preferences.hapticsEnabled !== null ? (
-        <SettingsSection title="触感反馈" description="按钮操作和任务完成时提供振动反馈。">
+        <SettingsSection title="触感反馈">
           <SettingsToggle
             label="启用触感反馈"
             checked={preferences.hapticsEnabled}
@@ -1410,7 +1423,7 @@ export function DisplaySettingsTab({ snapshot, repository, refresh, toast }: Set
       <header className="wand-settings-panel-heading">
         <h2>显示</h2><p>设置各类结果卡片的默认展开状态。</p>
       </header>
-      <SettingsSection title="默认展开的卡片" description="手动展开或收起仍会按会话记录。">
+      <SettingsSection title="默认展开的卡片">
         {CARD_OPTIONS.map((option) => (
           <SettingsToggle
             key={option.key}

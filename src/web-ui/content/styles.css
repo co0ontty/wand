@@ -1,10 +1,10 @@
     :root {
       /* ===== 背景色系统 ===== */
-      --bg-primary: #f5f3ee;
-      --bg-secondary: rgba(255, 253, 249, 0.86);
-      --bg-tertiary: #ece8e1;
-      --bg-elevated: #fcfaf6;
-      --bg-surface: rgba(255, 253, 249, 0.62);
+      --bg-primary: #f1eadf;
+      --bg-secondary: rgba(248, 242, 232, 0.9);
+      --bg-tertiary: #e7dccd;
+      --bg-elevated: #f8f1e6;
+      --bg-surface: rgba(248, 242, 232, 0.72);
       --bg-terminal: #17120f;
       --bg-overlay: rgba(42, 28, 18, 0.4);
 
@@ -469,15 +469,16 @@
       height: 100%;
       /* 兜底背景：iOS Safari 在键盘弹起 / 地址栏收起 / 安全区时
          body 可能短于 html，露出的部分必须也是奶油色，否则会看到默认白底。 */
-      background-color: #f5f3ee;
+      background-color: #f1eadf;
     }
 
     body {
       font-family: var(--font-sans);
       background:
-        radial-gradient(circle at 8% -4%, rgba(197, 101, 61, 0.034), transparent 42%),
-        radial-gradient(circle at 102% 42%, rgba(180, 155, 134, 0.024), transparent 30%),
-        #f5f3ee;
+        radial-gradient(circle at 8% -4%, rgba(197, 101, 61, 0.045), transparent 42%),
+        radial-gradient(circle at 102% 42%, rgba(180, 155, 134, 0.045), transparent 30%),
+        linear-gradient(135deg, rgba(255, 250, 240, 0.22), transparent 42%),
+        #f1eadf;
       color: var(--text-primary);
       min-height: 100vh;
       min-height: 100dvh;
@@ -16863,4 +16864,50 @@
       font-size: 0.8rem;
       text-align: center;
       padding: 16px;
+    }
+
+    /* Layout refinement: keep the sidebar calm and information-dense without
+       making each session look like a separate floating card. */
+    @media (min-width: 769px) {
+      .sidebar {
+        width: min(288px, calc(100vw - 24px));
+        border-right-color: color-mix(in srgb, var(--border-subtle) 78%, transparent);
+        box-shadow: 10px 0 30px color-mix(in srgb, var(--text-primary) 7%, transparent);
+      }
+
+      .sidebar-header {
+        min-height: 58px;
+        padding: 11px 14px 10px;
+      }
+
+      .sidebar-header-primary { gap: 12px; }
+      .sidebar-header-main { gap: 9px; }
+      .sidebar-title { font-size: 0.95rem; letter-spacing: -0.015em; }
+      .sidebar-view-label { margin-left: 2px; }
+
+      .sidebar-body {
+        padding: 10px 8px 12px;
+      }
+
+      .sidebar-footer {
+        padding: 12px 12px 14px;
+        border-top-color: color-mix(in srgb, var(--border-subtle) 72%, transparent);
+      }
+
+      .sidebar-footer > .btn-primary {
+        min-height: 40px;
+        border-radius: 10px;
+        box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 18%, transparent);
+      }
+
+      .sidebar-footer-actions {
+        gap: 4px;
+        margin-top: 8px;
+      }
+
+      .sidebar-footer-actions .btn {
+        min-height: 32px;
+        border-radius: 8px;
+        padding-inline: 8px;
+      }
     }

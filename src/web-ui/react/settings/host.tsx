@@ -21,14 +21,14 @@ export interface SettingsHostProps {
   showRestart?: () => void;
 }
 
-const TAB_LABELS: Record<SettingsTab, { title: string; description: string }> = {
-  general: { title: "基本配置", description: "连接、模式与运行环境" },
-  ai: { title: "AI 与模型", description: "默认模型、API 路由与 Commit" },
-  notifications: { title: "通知", description: "提示音与系统通知" },
-  display: { title: "显示", description: "卡片默认展开行为" },
-  security: { title: "安全", description: "密码与证书" },
-  presets: { title: "命令预设", description: "查看已有预设" },
-  about: { title: "关于", description: "版本、更新与连接方式" },
+const TAB_LABELS: Record<SettingsTab, { title: string }> = {
+  general: { title: "基本配置" },
+  ai: { title: "AI 与模型" },
+  notifications: { title: "通知" },
+  display: { title: "显示" },
+  security: { title: "安全" },
+  presets: { title: "命令预设" },
+  about: { title: "关于" },
 };
 
 const ADMIN_TAB_ORDER: SettingsTab[] = [
@@ -79,7 +79,7 @@ function SettingsOverview({ snapshot }: { snapshot: SettingsSnapshot }) {
       <div className="wand-settings-overview-copy">
         <div>
           <strong>系统设置</strong>
-          <span>连接、设备和工作流偏好都在这里调整。</span>
+          <span>集中管理 Wand 的运行偏好。</span>
         </div>
         <div className="wand-settings-overview-pills">
           <WandBadge tone="success">{snapshot.access === "admin" ? "管理员连接" : "App 连接"}</WandBadge>
@@ -250,7 +250,6 @@ export function SettingsHost({
           <span className="wand-settings-tab-icon"><SettingsTabIcon tab={value} /></span>
           <span className="wand-settings-tab-copy">
             <strong>{TAB_LABELS[value].title}</strong>
-            <span>{TAB_LABELS[value].description}</span>
           </span>
         </span>
       ),
@@ -269,7 +268,6 @@ export function SettingsHost({
       open={controller.open}
       onOpenChange={(open) => { if (!open) settingsController.close(); }}
       title="系统设置"
-      description="调整应用配置、通知、安全和显示偏好"
       className="wand-settings-dialog"
       overlayClassName="wand-settings-overlay"
       titleClassName="wand-settings-title"

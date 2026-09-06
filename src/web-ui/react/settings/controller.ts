@@ -1,6 +1,6 @@
 import type { SettingsTab } from "./types";
 
-export type SettingsNestedView = "environment" | "qr" | null;
+export type SettingsNestedView = "environment" | null;
 
 export interface SettingsControllerSnapshot {
   open: boolean;

@@ -461,6 +461,10 @@ export function notifyTaskProgress(sessionId: string, task: any) {
 }
 
 export function notifyUpdateAvailable(currentVersion: string, latestVersion: string) {
+  // /api/update 需要 admin scope；Android/iOS/macOS 原生壳与浏览器插件都以 connected-app
+  // 身份登录，点「立即更新」必然 403（当前连接没有执行此操作的权限）。这些客户端有各自
+  // 的原生更新通道（UpdateManager / DMG / IPA），不需要走服务器 npm 升级。
+  if (!state.config || state.config.canManageSettings === false) return;
   showUpdateBubble(currentVersion || "-", latestVersion || "-");
   sendBrowserNotification(
     "Wand 发现新版本",
