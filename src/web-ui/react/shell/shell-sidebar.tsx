@@ -2,7 +2,6 @@ import * as React from "react";
 import { normalizeProviderId, providerDisplayName } from "../../provider-identity";
 import { ProviderLogo } from "../provider-logo";
 import { WorkspacesPanel } from "../workspaces/workspaces-panel";
-import { workspacesController } from "../workspaces/controller";
 import { WandIcon, WandPopover, type WandIconName } from "../ui";
 import { classNames } from "../ui/class-names";
 
@@ -670,14 +669,6 @@ export function ShellSidebar() {
               </div>
             ) : (
               <div className="sessions-list" id="sessions-list">
-                <nav className="sidebar-primary-nav" aria-label="主要功能">
-                  <button type="button" className="sidebar-primary-nav-item is-primary" onClick={() => void dispatch({ type: "workspace.new" })}>
-                    <WandIcon name="plus" size={16}/><span>新建任务</span>
-                  </button>
-                  <button type="button" className="sidebar-primary-nav-item" onClick={() => workspacesController.open(undefined, "project")}>
-                    <WandIcon name="branch" size={16}/><span>新建项目</span>
-                  </button>
-                </nav>
                 <WorkspacesPanel
                   headingLabel="项目"
                   selectedSessionId={snapshot.selected?.id ?? null}

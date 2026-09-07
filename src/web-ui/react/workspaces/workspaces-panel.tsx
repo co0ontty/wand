@@ -261,7 +261,7 @@ function TaskItem({
   onRename(name: string): Promise<void>;
   onDelete(): Promise<void>;
 }) {
-  const [collapsed, setCollapsed] = React.useState(false);
+  const [collapsed, setCollapsed] = React.useState(true);
   const [confirming, setConfirming] = React.useState(false);
   const [clearConfirming, setClearConfirming] = React.useState(false);
   const [taskMenuOpen, setTaskMenuOpen] = React.useState(false);
@@ -371,17 +371,10 @@ function TaskItem({
               title={open ? "收起终端" : "展开终端"}
               onClick={() => setCollapsed((current) => !current)}
             >
-              <WandIcon name="terminal" size={11}/>
               <span className="workspace-task-count">{sessionCount}</span>
-              <span className="workspace-task-count-label">终端</span>
               <WandIcon name="chevron" size={10} className={classNames("workspace-task-chevron", open && "open")}/>
             </button>
-          ) : (
-            <span className="workspace-task-empty-count" aria-label="暂无终端">
-              <WandIcon name="terminal" size={11}/>
-              暂无终端
-            </span>
-          )}
+          ) : null}
         </span>
         {!confirming ? (
           <>
@@ -482,24 +475,20 @@ function TaskItem({
           </span>
         )}
       </div>
-      {open && (
+      {open && sessionCount > 0 && (
         <div className="workspace-task-sessions">
-          {sessionCount === 0 ? (
-            <div className="workspace-tasks-empty">还没有终端。点右侧「＋」在这个任务里新建。</div>
-          ) : (
-            task.sessions.map((session, index) => (
-              <TaskSessionItem
-                key={session.id}
-                session={session}
-                index={index}
-                parentNames={[...parentNames, task.name]}
-                liveTitle={liveTitles?.[session.id]}
-                active={activeSessionId === session.id}
-                onOpen={() => onOpenSession(session)}
-                onDelete={() => onDeleteSession(session)}
-              />
-            ))
-          )}
+          {task.sessions.map((session, index) => (
+            <TaskSessionItem
+              key={session.id}
+              session={session}
+              index={index}
+              parentNames={[...parentNames, task.name]}
+              liveTitle={liveTitles?.[session.id]}
+              active={activeSessionId === session.id}
+              onOpen={() => onOpenSession(session)}
+              onDelete={() => onDeleteSession(session)}
+            />
+          ))}
           {sessionCount > 1 && !clearConfirming && (
             <button
               type="button"
@@ -623,10 +612,6 @@ function TaskGroupSection({
   };
 
   const taskCount = group.tasks.length;
-  const sessionTotal = group.tasks.reduce((sum, task) => sum + task.sessions.length, 0)
-    + group.standaloneSessions.length;
-  const pathCaption = shortenWorkspacePath(group.workspaceCwd);
-  const showPath = Boolean(pathCaption) && pathCaption !== group.workspaceName;
 
   return (
     <section
@@ -664,14 +649,12 @@ function TaskGroupSection({
               <span className="workspace-row-title">{group.workspaceName}</span>
               {group.synthetic ? <span className="workspace-row-flag">未归档</span> : null}
             </span>
-            <span className="workspace-row-detail">
-              {showPath ? <span className="workspace-row-cwd">{pathCaption}</span> : null}
-              <span className="workspace-row-stats" aria-label={`${taskCount} 项任务，${sessionTotal} 个终端`}>
-                <span><strong>{taskCount}</strong> 任务</span>
-                <span><strong>{sessionTotal}</strong> 终端</span>
-              </span>
-            </span>
           </span>
+          {taskCount > 0 ? (
+            <span className="workspace-row-count" aria-label={`${taskCount} 项任务`}>
+              {taskCount}
+            </span>
+          ) : null}
           <WandIcon name="chevron" size={11} className={classNames("workspace-row-chevron", open && "open")}/>
         </button>
         <span className="workspace-row-actions">
@@ -783,9 +766,6 @@ function TaskGroupSection({
               onDelete={() => handleDeleteTask(task)}
             />
           ))}
-          {group.tasks.length === 0 && (
-            <div className="workspace-tasks-empty">这个目录还没有任务。</div>
-          )}
           {group.standaloneSessions.length > 0 && (
             <details
               className="workspace-loose-sessions"
@@ -954,11 +934,6 @@ export function WorkspacesPanel({
   const hasContent = groups.some((group) => group.tasks.length > 0 || group.standaloneSessions.length > 0);
   const standaloneTaskTotal = globalGroup?.tasks.length ?? 0;
   const taskTotal = projectGroups.reduce((sum, group) => sum + group.tasks.length, 0);
-  const terminalTotal = projectGroups.reduce((sum, group) => (
-    sum
-      + group.standaloneSessions.length
-      + group.tasks.reduce((taskSum, task) => taskSum + task.sessions.length, 0)
-  ), 0);
 
   const sessionRefresh = React.useRef(true);
   React.useEffect(() => {
@@ -1002,8 +977,7 @@ export function WorkspacesPanel({
         <div className="workspaces-panel-state error">{error}</div>
       ) : !hasContent ? (
         <div className="workspaces-panel-empty">
-          <strong>还没有任务</strong><br/>
-          可以先建一个不依赖项目的任务，或新建项目后再在项目下建任务。
+          <strong>还没有任务</strong>
           <button
             type="button"
             className="btn btn-primary btn-sm workspaces-empty-new-task"
@@ -1094,24 +1068,7 @@ export function WorkspacesPanel({
             </div>
           ) : null}
           {projectGroups.length > 0 ? (
-            <>
-              <div
-                className="workspaces-overview"
-                aria-label={`${projectGroups.length} 个项目，${taskTotal} 项任务，${terminalTotal} 个终端`}
-              >
-                <span className="workspaces-overview-stat">
-                  <WandIcon name="folder" size={12}/><strong>{projectGroups.length}</strong><span>项目</span>
-                </span>
-                <span className="workspaces-overview-divider" aria-hidden="true"/>
-                <span className="workspaces-overview-stat">
-                  <WandIcon name="task" size={12}/><strong>{taskTotal}</strong><span>任务</span>
-                </span>
-                <span className="workspaces-overview-divider" aria-hidden="true"/>
-                <span className="workspaces-overview-stat">
-                  <WandIcon name="terminal" size={12}/><strong>{terminalTotal}</strong><span>终端</span>
-                </span>
-              </div>
-              <div className="workspaces-list">
+            <div className="workspaces-list">
                 {projectGroups.map((group) => (
                   <TaskGroupSection
                     key={group.workspaceId}
@@ -1127,8 +1084,7 @@ export function WorkspacesPanel({
                     onTasksChanged={reload}
                   />
                 ))}
-              </div>
-            </>
+            </div>
           ) : null}
         </>
       )}

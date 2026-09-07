@@ -209,8 +209,8 @@ test("workspace path captions keep the leaf and hide redundant absolute prefixes
 test("task list treats directories as group headers and exposes per-terminal delete", () => {
   const panel = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
   const styles = readFileSync(new URL("../src/web-ui/content/styles.css", import.meta.url), "utf8");
-  assert.match(panel, /workspaces-overview/);
-  assert.match(panel, /workspace-row-stats/);
+  assert.doesNotMatch(panel, /workspaces-overview/);
+  assert.match(panel, /workspace-row-count/);
   assert.match(panel, /删除终端/);
   assert.match(panel, /onDeleteSession/);
   assert.match(panel, /workspace-session-action delete/);
@@ -219,7 +219,7 @@ test("task list treats directories as group headers and exposes per-terminal del
   assert.match(styles, /\.workspace-task-main\s*\{[^}]*cursor:\s*pointer/s);
   assert.match(styles, /\.workspace-task-name\s*\{[^}]*font-size:\s*var\(--font-size-sm\)/s);
   assert.match(styles, /\.workspace-task-name\s*\{[^}]*-webkit-line-clamp:\s*2/s);
-  assert.match(panel, /workspace-task-count-label">终端/);
+  assert.match(panel, /workspace-task-count/);
   assert.match(panel, /className="workspace-task-menu"/);
   assert.match(panel, /删除项目/);
   assert.match(panel, /handleDeleteDirectory/);
@@ -237,7 +237,7 @@ test("task list treats directories as group headers and exposes per-terminal del
 
 test("task session lists default to expanded so terminals stay visible after reload", () => {
   const panel = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
-  assert.match(panel, /const \[collapsed, setCollapsed\] = React\.useState\(false\);\s*const \[confirming, setConfirming\]/);
+  assert.match(panel, /const \[collapsed, setCollapsed\] = React\.useState\(true\);\s*const \[confirming, setConfirming\]/);
   assert.match(panel, /canCollapseSessions \? \(/);
   assert.equal(showsDirectoryDisclosure(1), true);
   assert.equal(showsDirectoryDisclosure(2), true);

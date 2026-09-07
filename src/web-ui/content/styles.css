@@ -15115,22 +15115,38 @@
     }
 
     #app[data-react-shell="enabled"] .workspaces-panel {
-      padding-top: 12px;
+      padding-top: 4px;
     }
 
     #app[data-react-shell="enabled"] .workspaces-panel-heading {
-      min-height: 28px;
-      padding-left: 10px;
-      padding-right: 6px;
+      min-height: 26px;
+      padding: 0 8px 2px 10px;
     }
 
     #app[data-react-shell="enabled"] .workspaces-panel-heading-toggle {
       font-size: 0.6875rem;
-      letter-spacing: 0.08em;
+      font-weight: 650;
+      letter-spacing: 0.04em;
+      text-transform: none;
     }
 
     #app[data-react-shell="enabled"] .workspaces-panel-content {
-      gap: 6px;
+      gap: 10px;
+    }
+
+    #app[data-react-shell="enabled"] .workspaces-global-heading {
+      padding: 0 10px;
+      color: var(--text-muted);
+      font-size: 0.6875rem;
+      font-weight: 650;
+      letter-spacing: 0.04em;
+    }
+
+    #app[data-react-shell="enabled"] .workspace-row-count {
+      margin-left: auto;
+      color: var(--text-muted);
+      font-size: 0.6875rem;
+      font-variant-numeric: tabular-nums;
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -15416,6 +15432,13 @@
       min-width: 0;
       flex: 1;
       gap: 1px;
+    }
+
+    .workspace-row-count {
+      flex: 0 0 auto;
+      color: var(--text-muted);
+      font-size: 0.6875rem;
+      font-variant-numeric: tabular-nums;
     }
 
     .workspace-row-name {
@@ -17218,7 +17241,7 @@
     }
 
     #app[data-react-shell="enabled"] .workspaces-list {
-      gap: 20px;
+      gap: 8px;
     }
 
     /* Directory is a header, rather than a bordered card. */
@@ -17232,16 +17255,16 @@
     }
 
     #app[data-react-shell="enabled"] .workspace-row {
-      min-height: 48px;
-      align-items: flex-start;
-      gap: 8px;
-      padding: 4px 4px 8px 8px;
+      min-height: 30px;
+      align-items: center;
+      gap: 4px;
+      padding: 1px 4px 1px 8px;
       border-bottom: 0;
     }
 
     #app[data-react-shell="enabled"] .workspace-row-main {
-      min-height: 36px;
-      gap: 4px;
+      min-height: 28px;
+      gap: 6px;
       padding: 2px 0;
       border-radius: 0;
     }
@@ -17258,60 +17281,34 @@
     #app[data-react-shell="enabled"] .workspace-row-name {
       color: var(--text-primary);
       font-size: 0.8125rem;
-      font-weight: 700;
-      letter-spacing: -0.005em;
-      line-height: 1.3;
-    }
-
-    #app[data-react-shell="enabled"] .workspace-row-detail {
-      gap: 7px;
-    }
-
-    #app[data-react-shell="enabled"] .workspace-row-cwd {
-      color: var(--text-muted);
-      font-size: 0.625rem;
-      font-weight: 450;
-    }
-
-    #app[data-react-shell="enabled"] .workspace-row-stats {
-      gap: 5px;
-      color: var(--text-muted);
-      font-size: 0.59375rem;
-    }
-
-    #app[data-react-shell="enabled"] .workspace-row-stats > span + span::before {
-      margin-right: 5px;
-      color: var(--border-strong);
-    }
-
-    #app[data-react-shell="enabled"] .workspace-row-stats strong {
-      color: var(--text-secondary);
-      font-size: 0.625rem;
+      font-weight: 650;
+      letter-spacing: -0.01em;
+      line-height: 1.25;
     }
 
     #app[data-react-shell="enabled"] .workspace-row-chevron {
       order: -1;
-      margin: 10px 0 0 -2px;
+      margin: 0 0 0 -2px;
       color: var(--text-muted);
     }
 
     #app[data-react-shell="enabled"] .workspace-row-actions {
-      padding-top: 5px;
+      padding-top: 0;
     }
 
     /* One level of indentation is enough: the left edge is shared by tasks
        and their sessions, while the smaller session type establishes depth. */
     #app[data-react-shell="enabled"] .workspace-tasks {
-      gap: 4px;
-      margin: 5px 0 0 16px;
+      gap: 1px;
+      margin: 2px 0 0 16px;
       padding: 0;
       border-left: 0;
     }
 
     #app[data-react-shell="enabled"] .workspace-task {
-      min-height: 34px;
-      gap: 4px;
-      padding: 3px 4px 3px 0;
+      min-height: 28px;
+      gap: 2px;
+      padding: 1px 4px 1px 0;
       border-radius: 7px;
     }
 
