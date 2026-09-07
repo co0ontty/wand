@@ -18,6 +18,8 @@ export function ComposerSelectHost() {
       placeholder={mount.placeholder}
       displayValue={mount.displayValue}
       disabled={mount.disabled}
+      searchable={mount.control === "model"}
+      searchPlaceholder="搜索模型"
       className={`wand-composer-select-trigger wand-composer-select-trigger-${mount.control}`}
       contentClassName={`wand-composer-select-content wand-composer-select-content-${mount.control}`}
       itemClassName="wand-composer-select-item"

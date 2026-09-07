@@ -76,7 +76,7 @@ printf '%s\n' \
     "run", "--format", "json", "--thinking",
     "--model", "anthropic/claude-sonnet-4-6",
     "--variant", "high",
-    "--dangerously-skip-permissions",
+    "--auto",
   ]);
 
   await manager.sendMessage(created.id, "again");

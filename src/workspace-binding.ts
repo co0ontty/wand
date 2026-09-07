@@ -37,7 +37,8 @@ export function projectCwdForSession(session: {
 export function findWorkspaceByCwd(storage: WandStorage, cwd: string): Workspace | null {
   const normalized = normalizeProjectCwd(cwd);
   if (!normalized) return null;
-  return storage.listWorkspaces().find((workspace) => normalizeProjectCwd(workspace.cwd) === normalized) ?? null;
+  const matches = storage.listWorkspaces().filter((workspace) => normalizeProjectCwd(workspace.cwd) === normalized);
+  return matches.find((workspace) => workspace.kind !== "global") ?? matches[0] ?? null;
 }
 
 function defaultWorkspaceNameForCwd(storage: WandStorage, cwd: string): string {

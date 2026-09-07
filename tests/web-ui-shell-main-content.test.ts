@@ -218,7 +218,7 @@ test("workspace task blank state offers an explicit Agent or shell choice", () =
     path.join(root, "src", "web-ui", "react", "shell", "shell-main-content.tsx"),
     "utf8",
   );
-  assert.match(source, /这个任务还没有工作窗口。选择一个 Agent，或直接打开空白终端。/);
-  assert.match(source, /workspaceAgentDialogController\.open\(\)/);
-  assert.match(source, /选择 Agent 或空白终端/);
+  assert.match(source, /这个任务还没有工作窗口。选择 CLI 工具，以及结构化或 PTY。/);
+  assert.match(source, /WorkspaceWelcomeChooser/);
+  assert.match(source, /项目还是空白的。选择 CLI 工具和结构化 \/ PTY，开始第一个任务。/);
 });

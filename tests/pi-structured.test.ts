@@ -80,3 +80,33 @@ test("Pi errors surface the provider message", () => {
     message: { role: "assistant", stopReason: "error", errorMessage: "missing API key" },
   }), "missing API key");
 });
+
+test("Pi reconstructs assistant text from message_end and text_end when deltas are missing", () => {
+  const fromEnd = { blocks: [], result: "", sessionId: null };
+  assert.equal(applyPiEvent(fromEnd, {
+    type: "message_end",
+    message: {
+      role: "assistant",
+      model: "gpt-test",
+      content: [
+        { type: "thinking", thinking: "plan" },
+        { type: "text", text: "Hello from Pi" },
+      ],
+      usage: { input: 3, output: 2, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } },
+    },
+  }), null);
+  assert.equal(fromEnd.result, "Hello from Pi");
+  assert.equal(fromEnd.model, "gpt-test");
+  assert.deepEqual(fromEnd.blocks, [
+    { type: "thinking", thinking: "plan" },
+    { type: "text", text: "Hello from Pi" },
+  ]);
+
+  const fromTextEnd = { blocks: [], result: "", sessionId: null };
+  applyPiEvent(fromTextEnd, {
+    type: "message_update",
+    assistantMessageEvent: { type: "text_end", contentIndex: 0, content: "final answer" },
+  });
+  assert.equal(fromTextEnd.result, "final answer");
+  assert.deepEqual(fromTextEnd.blocks, [{ type: "text", text: "final answer" }]);
+});

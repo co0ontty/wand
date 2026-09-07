@@ -2,10 +2,9 @@ import * as React from "react";
 import { normalizeProviderId, providerDisplayName } from "../../provider-identity";
 import { ProviderLogo } from "../provider-logo";
 import { WorkspacesPanel } from "../workspaces/workspaces-panel";
-import { ProjectsPanel } from "../workspaces/projects-panel";
+import { workspacesController } from "../workspaces/controller";
 import { WandIcon, WandPopover, type WandIconName } from "../ui";
 import { classNames } from "../ui/class-names";
-import { shellNavigationStore, type ShellView } from "./shell-navigation";
 
 import { useUiDispatch, useUiStoreSnapshot } from "./ui-store-react";
 import type {
@@ -534,11 +533,6 @@ function SessionGroup({
 export function ShellSidebar() {
   const snapshot = useUiStoreSnapshot();
   const dispatch = useUiDispatch();
-  const activeView = React.useSyncExternalStore(
-    shellNavigationStore.subscribe,
-    shellNavigationStore.getSnapshot,
-    shellNavigationStore.getSnapshot,
-  );
   const [moreOpen, setMoreOpen] = React.useState(false);
   const narrow = snapshot.layout.sidebarPinned && snapshot.layout.sidebarCollapsed;
   const sidebarClass = classNames(
@@ -548,9 +542,7 @@ export function ShellSidebar() {
     narrow && "collapsed",
   );
   const primaryAction = getShellSidebarPrimaryAction();
-  const footerAction = activeView === "projects"
-    ? { label: "新建项目", ariaLabel: "新建项目", action: { type: "workspace.new" } as UiAction }
-    : primaryAction;
+  const footerAction = primaryAction;
 
   return (
     <>
@@ -560,7 +552,7 @@ export function ShellSidebar() {
         aria-hidden="true"
         onClick={() => void dispatch({ type: "layout.drawer.close" })}
       />
-      <aside id="sessions-drawer" className={sidebarClass} aria-label="任务侧栏">
+      <aside id="sessions-drawer" className={sidebarClass} aria-label="项目与任务侧栏">
         <div className="sidebar-header">
           <div className="sidebar-header-primary">
             <div className="sidebar-header-main">
@@ -653,22 +645,6 @@ export function ShellSidebar() {
             </div>
           </div>
         </div>
-        <nav className="sidebar-view-switch" aria-label="工作区视图">
-          {([ ["tasks", "task", "任务"], ["projects", "branch", "项目"] ] as const).map(([value, icon, label]) => (
-            <button
-              key={value}
-              type="button"
-              className={classNames("sidebar-view-tab", activeView === value && "active")}
-              aria-current={activeView === value ? "page" : undefined}
-              onClick={() => {
-                shellNavigationStore.setView(value as ShellView);
-                if (activeView !== value) void dispatch({ type: "nav.home" });
-              }}
-            >
-              <WandIcon name={icon} size={14}/><span>{label}</span>
-            </button>
-          ))}
-        </nav>
         <div className="sidebar-body">
           <div id="sessions-panel">
             {narrow ? (
@@ -685,19 +661,26 @@ export function ShellSidebar() {
               </div>
             ) : (
               <div className="sessions-list" id="sessions-list">
-                {activeView === "projects" ? <ProjectsPanel/> : (
-                  <WorkspacesPanel
-                    selectedSessionId={snapshot.selected?.id ?? null}
-                    sessionTitles={Object.fromEntries(snapshot.sidebar.groups.flatMap((group) => (
-                      group.entries.map((entry) => [entry.id, entry.title] as const)
-                    )))}
-                    extraGroups={snapshot.sidebar.groups
-                      .filter((group) => group.kind !== "wand")
-                      .map((group) => (
-                        <SessionGroup key={group.kind} group={group} manageMode={false} dispatch={dispatch}/>
-                      ))}
-                  />
-                )}
+                <nav className="sidebar-primary-nav" aria-label="主要功能">
+                  <button type="button" className="sidebar-primary-nav-item is-primary" onClick={() => void dispatch({ type: "workspace.new" })}>
+                    <WandIcon name="plus" size={16}/><span>新建任务</span>
+                  </button>
+                  <button type="button" className="sidebar-primary-nav-item" onClick={() => workspacesController.open(undefined, "project")}>
+                    <WandIcon name="branch" size={16}/><span>新建项目</span>
+                  </button>
+                </nav>
+                <WorkspacesPanel
+                  headingLabel="项目"
+                  selectedSessionId={snapshot.selected?.id ?? null}
+                  sessionTitles={Object.fromEntries(snapshot.sidebar.groups.flatMap((group) => (
+                    group.entries.map((entry) => [entry.id, entry.title] as const)
+                  )))}
+                  extraGroups={snapshot.sidebar.groups
+                    .filter((group) => group.kind !== "wand")
+                    .map((group) => (
+                      <SessionGroup key={group.kind} group={group} manageMode={false} dispatch={dispatch}/>
+                    ))}
+                />
               </div>
             )}
           </div>
@@ -714,15 +697,6 @@ export function ShellSidebar() {
             <span>{footerAction.label}</span>
           </button>
           <div className="sidebar-footer-actions">
-            <button
-              id="missions-button"
-              className="btn btn-ghost btn-sm"
-              type="button"
-              title="并行任务（多 Agent 分派）"
-              onClick={() => void dispatch({ type: "missions.open" })}
-            >
-              <WandIcon name="parallel" size={16}/><span>并行</span>
-            </button>
             {snapshot.viewport.mobile && (
               <button
                 id="file-panel-toggle-btn"

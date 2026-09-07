@@ -58,6 +58,8 @@ export function installWorkspacesLegacyAdapter(): void {
         provider: workspace.defaultProvider,
         layout: null,
       });
+      goHome();
+      dismissDrawerIfOverlay();
     },
     closeWorkspace() {
       state.activeWorkspaceId = null;

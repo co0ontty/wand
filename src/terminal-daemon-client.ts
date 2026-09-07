@@ -405,19 +405,42 @@ export class TerminalDaemonClient implements TerminalHost, StructuredExecHost {
 
   private handleFromState(state: StructuredRunState, reuse: RemoteStructuredProcess | null): RemoteStructuredProcess {
     this.structuredInventory.set(state.runId, state);
-    if (state.status !== "running") {
-      this.structuredHandles.delete(state.runId);
-      return reuse ?? new RemoteStructuredProcess(state.runId, state.incarnationId, state.pid, this);
-    }
     let process = this.structuredHandles.get(state.runId) ?? null;
     if (!process || process.incarnationId !== state.incarnationId) {
-      process = new RemoteStructuredProcess(state.runId, state.incarnationId, state.pid, this);
-      this.structuredHandles.set(state.runId, process);
-      const pending = this.pendingStructuredEvents.get(state.runId) ?? [];
-      this.pendingStructuredEvents.delete(state.runId);
-      for (const event of pending) this.routeStructuredEvent(event);
+      process = reuse && reuse.incarnationId === state.incarnationId
+        ? reuse
+        : new RemoteStructuredProcess(state.runId, state.incarnationId, state.pid, this);
+    }
+    if (state.status === "running") this.structuredHandles.set(state.runId, process);
+    else this.structuredHandles.delete(state.runId);
+
+    // Events can arrive (and the child can even exit) before this RPC returns.
+    // Always drain the backlog onto THIS handle. If the run already finished,
+    // also replay daemon logs and synthesize exit so a fast Codex/Pi turn is
+    // not lost just because listeners were not attached yet.
+    const pending = this.pendingStructuredEvents.get(state.runId) ?? [];
+    this.pendingStructuredEvents.delete(state.runId);
+    for (const event of pending) this.deliverStructuredEvent(process, event);
+    if (state.status !== "running") {
+      process.replayFromLogs(state);
+      process.acceptExit({ exitCode: state.exitCode, signal: state.signal });
     }
     return process;
+  }
+
+  private deliverStructuredEvent(handle: RemoteStructuredProcess, event: TerminalDaemonEvent): void {
+    if (event.incarnationId !== handle.incarnationId) return;
+    if (event.event === "sdata" && typeof event.data === "string" && typeof event.seq === "number") {
+      handle.acceptStream({
+        stream: event.stream === "stderr" ? "stderr" : "stdout",
+        data: event.data,
+        seq: event.seq,
+      });
+      return;
+    }
+    if (event.event === "sexit") {
+      handle.acceptExit({ exitCode: event.exitCode ?? null, signal: event.signal ?? null });
+    }
   }
 
   disconnect(): void {

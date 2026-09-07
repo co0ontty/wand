@@ -9,12 +9,15 @@ import type {
   StructuredRunnerExecution,
   StructuredRunnerObserver,
 } from "./structured-runner.js";
+import { thinkingEffortToQoderEffort } from "./structured-provider-common.js";
 import type { SessionSnapshot } from "./types.js";
 
 export function buildQoderArgs(session: SessionSnapshot, prompt: string): string[] {
   const args = ["-p", prompt, "--output-format", "stream-json"];
   const model = session.selectedModel?.trim();
   if (model && model !== "default") args.push("--model", model);
+  const effort = thinkingEffortToQoderEffort(session.thinkingEffort);
+  if (effort) args.push("--reasoning-effort", effort);
 
   if (
     session.autoApprovePermissions === true

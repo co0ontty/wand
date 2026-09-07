@@ -455,6 +455,48 @@ export const foundationStyles = String.raw`
   padding: 2px;
 }
 
+.wand-ui-select-content.wand-ui-select-searchable {
+  display: flex;
+  flex-direction: column;
+  min-width: max(var(--radix-popover-trigger-width, 0px), 220px);
+}
+
+.wand-ui-select-search {
+  flex: 0 0 auto;
+  padding: 2px 4px 8px;
+}
+
+.wand-ui-select-search-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xs);
+  padding: 6px 10px;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  outline: none;
+}
+
+.wand-ui-select-search-input:focus {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border-default));
+}
+
+.wand-ui-select-searchable .wand-ui-select-viewport {
+  max-height: min(260px, calc(var(--radix-popover-content-available-height, 70vh) - 58px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.wand-ui-select-empty {
+  padding: 12px 10px;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  text-align: center;
+}
+
 .wand-ui-select-item {
   position: relative;
   display: flex;

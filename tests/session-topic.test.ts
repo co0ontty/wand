@@ -4,6 +4,9 @@ import test from "node:test";
 import {
   collectSessionTopicBlocklist,
   collectSessionTopicMessages,
+  consumePtyInputForTopic,
+  createPtyTopicLineBuffer,
+  isPtyTypedTopicCandidate,
   provisionalSessionTopic,
   SessionTopicCoordinator,
   shouldAcceptGeneratedSessionTitle,
@@ -68,6 +71,43 @@ test("PTY terminal keystrokes do not request a title unless the composer submitt
   assert.equal(shouldGenerateSessionTopicFromPtyInput("terminal"), false);
   assert.equal(shouldGenerateSessionTopicFromPtyInput("terminal", "enter_text"), true);
   assert.equal(shouldGenerateSessionTopicFromPtyInput("terminal", "ctrl_c"), false);
+});
+
+test("PTY terminal keystrokes assemble a title after enter", () => {
+  const buffer = createPtyTopicLineBuffer();
+  assert.equal(consumePtyInputForTopic(buffer, "修", "terminal"), null);
+  assert.equal(consumePtyInputForTopic(buffer, "权限", "terminal"), null);
+  assert.equal(consumePtyInputForTopic(buffer, "弹窗", "terminal"), null);
+  assert.equal(consumePtyInputForTopic(buffer, "\r", "terminal"), "修权限弹窗");
+  assert.equal(buffer.text, "");
+});
+
+test("PTY terminal composer enter_text still titles immediately", () => {
+  const buffer = createPtyTopicLineBuffer();
+  consumePtyInputForTopic(buffer, "stale", "terminal");
+  assert.equal(
+    consumePtyInputForTopic(buffer, "修权限弹窗的文案", "terminal", "enter_text"),
+    "修权限弹窗的文案",
+  );
+  assert.equal(consumePtyInputForTopic(buffer, "\r", "terminal", "enter_text"), null);
+});
+
+test("PTY terminal noise does not become a session title", () => {
+  const buffer = createPtyTopicLineBuffer();
+  assert.equal(isPtyTypedTopicCandidate("pwd"), false);
+  assert.equal(isPtyTypedTopicCandidate("y"), false);
+  assert.equal(isPtyTypedTopicCandidate("/compact"), false);
+  assert.equal(isPtyTypedTopicCandidate("fix login"), true);
+  assert.equal(consumePtyInputForTopic(buffer, "pwd\r", "terminal"), null);
+  assert.equal(consumePtyInputForTopic(buffer, "y\r", "terminal"), null);
+  assert.equal(consumePtyInputForTopic(buffer, "\x1b[A\r", "terminal"), null);
+  consumePtyInputForTopic(buffer, "hello", "terminal");
+  assert.equal(consumePtyInputForTopic(buffer, "\x03", "terminal"), null);
+  assert.equal(consumePtyInputForTopic(buffer, "\r", "terminal"), null);
+  consumePtyInputForTopic(buffer, "fix login", "terminal");
+  consumePtyInputForTopic(buffer, "\x7f\x7f\x7f\x7f\x7f", "terminal");
+  consumePtyInputForTopic(buffer, "auth", "terminal");
+  assert.equal(consumePtyInputForTopic(buffer, "\r", "terminal"), "fix auth");
 });
 
 test("command titles skip the parent task name and keep the specific ask", () => {

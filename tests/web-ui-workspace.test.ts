@@ -167,7 +167,7 @@ test("new task conversations offer every supported Agent provider", () => {
     ["claude", "codex", "opencode", "grok", "qoder", "pi", "shell"],
   );
   assert.equal(WORKSPACE_AGENT_OPTIONS.at(-1)?.label, "空白终端");
-  const source = readFileSync(new URL("../src/web-ui/react/workspaces/workspace-agent-dialog.tsx", import.meta.url), "utf8");
+  const source = readFileSync(new URL("../src/web-ui/react/workspaces/workspace-agent-picker.tsx", import.meta.url), "utf8");
   assert.match(source, /value: "structured".*智能对话模式/s);
   assert.match(source, /会话类型/);
 });
@@ -178,6 +178,17 @@ test("opening an empty workspace task keeps creation user-driven", () => {
   assert.match(openTask, /goHome\(\)/);
   assert.match(openTask, /reconcileTaskWindowLayout\(detail\.layout, \[\], null\)/);
   assert.doesNotMatch(openTask, /startSessionInCwd/);
+  const openWorkspace = source.slice(source.indexOf("openWorkspace(workspace"), source.indexOf("closeWorkspace()"));
+  assert.match(openWorkspace, /goHome\(\)/);
+});
+
+test("new task dialog can create a standalone task without find-or-create project", () => {
+  const source = readFileSync(new URL("../src/web-ui/react/workspaces/host.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /findOrCreateWorkspace/);
+  assert.match(source, /createStandaloneTask/);
+  assert.match(source, /WorkspaceAgentPicker/);
+  assert.match(source, /全局临时目录/);
+  assert.match(source, /openWorkspace\(createdProject\)/);
 });
 
 test("workspaces panel steers creation to the empty-state CTA without manual refresh", () => {
@@ -240,7 +251,7 @@ test("task session rows and work-window tabs render each CLI logo", () => {
   assert.match(tabs, /SessionProviderMark session=\{presentation\.session\}/);
   assert.match(tabs, /listSessionLabel\(meta\.session, meta\.index, parentNames\)/);
   assert.match(input, /index === 0 \|\| index === sequence\.length - 1/);
-  assert.match(processManager, /shouldGenerateSessionTopicFromPtyInput\(view, shortcutKey\)/);
+  assert.match(processManager, /consumePtyInputForTopic\(record\.ptyTopicDraft, input, view, shortcutKey\)/);
   assert.match(processManager, /provisionalSessionTopic\(prompt, blockedTitles\)/);
   assert.match(processManager, /type: "status", sessionId: id, data: \{ title, description, summary: description \}/);
   const websocket = readFileSync(new URL("../src/web-ui/browser/websocket.ts", import.meta.url), "utf8");

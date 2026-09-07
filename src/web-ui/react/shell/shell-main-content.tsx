@@ -3,16 +3,17 @@ import * as React from "react";
 import { WandIcon } from "../ui";
 import { CodeEditorHost } from "../code-editor/host";
 import { workspaceContextStore } from "../workspaces/workspace-context";
-import { workspaceAgentDialogController } from "../workspaces/workspace-agent-dialog-controller";
+import { workspacesStore } from "../workspaces/controller";
+import { httpWorkspacesRepository } from "../workspaces/repository";
+import { WorkspaceWelcomeChooser } from "../workspaces/workspace-agent-picker";
 import { WorkspaceTabBar } from "../workspaces/workspace-tab-bar";
 import { WorkspaceWindow } from "../workspaces/workspace-window";
 import { activeWorkWindow } from "../workspaces/window-layout";
+import type { WorkspaceSessionKind, WorkspaceSessionTarget } from "../workspaces/types";
 import { ShellFilePanel } from "./shell-file-panel";
 import { ShellTopbar } from "./shell-topbar";
 import { useUiDispatch, useUiStoreSnapshot } from "./ui-store-react";
 import type { UiAction, UiSnapshotData } from "./ui-store";
-import { shellNavigationStore } from "./shell-navigation";
-import { ProjectsDashboard } from "../workspaces/projects-dashboard";
 
 export type ShellWelcomeQuickStart = "claude" | "codex" | "opencode" | "structured";
 
@@ -60,44 +61,98 @@ export function getShellWelcomeQuickStartAction(tool: ShellWelcomeQuickStart): U
 
 
 
-function ShellBlankChat({ className, queueRef, workspaceTask }: {
+function presentStartError(error: unknown, fallback: string): Error {
+  if (error instanceof Error && error.message && error.message !== "Failed to fetch") return error;
+  return new Error(fallback);
+}
+
+function ShellBlankChat({ className, queueRef, workspaceTask, workspaceProject }: {
   className: string;
   queueRef?: React.Ref<HTMLDivElement>;
   workspaceTask?: {
+    workspaceId: string;
     workspaceName: string;
+    taskId: string;
     taskName: string;
+    cwd: string;
+  };
+  workspaceProject?: {
+    workspaceId: string;
+    workspaceName: string;
     cwd: string;
   };
 }) {
   const dispatch = useUiDispatch();
 
+  const startInTask = async (target: WorkspaceSessionTarget, kind: WorkspaceSessionKind) => {
+    if (!workspaceTask) return;
+    const runtime = workspacesStore.getRuntime();
+    if (!runtime) throw new Error("工作空间运行环境尚未就绪，请刷新页面后重试。");
+    try {
+      await runtime.newTaskSession({
+        workspaceId: workspaceTask.workspaceId,
+        taskId: workspaceTask.taskId,
+        cwd: workspaceTask.cwd,
+        target,
+        kind,
+      });
+    } catch (error) {
+      throw presentStartError(error, "无法在任务中启动会话。");
+    }
+  };
+
+  const startInProject = async (target: WorkspaceSessionTarget, kind: WorkspaceSessionKind) => {
+    if (!workspaceProject) return;
+    const runtime = workspacesStore.getRuntime();
+    if (!runtime) throw new Error("工作空间运行环境尚未就绪，请刷新页面后重试。");
+    try {
+      const created = await httpWorkspacesRepository.createTask(workspaceProject.workspaceId, {
+        name: "新任务",
+        worktree: false,
+      });
+      await Promise.resolve(runtime.openTask({
+        workspaceId: workspaceProject.workspaceId,
+        workspaceName: workspaceProject.workspaceName,
+        taskId: created.id,
+        taskName: created.name,
+        cwd: created.cwd || workspaceProject.cwd,
+      }));
+      await runtime.newTaskSession({
+        workspaceId: workspaceProject.workspaceId,
+        taskId: created.id,
+        cwd: created.cwd || workspaceProject.cwd,
+        target,
+        kind,
+      });
+    } catch (error) {
+      throw presentStartError(error, "无法在项目中启动会话。");
+    }
+  };
+
   return (
     <div id="blank-chat" className={className}>
       {workspaceTask ? (
-        <div className="blank-chat-inner workspace-task-welcome">
-          <div className="workspace-task-welcome-eyebrow">{workspaceTask.workspaceName}</div>
-          <div className="blank-chat-logo"><WandIcon name="task" size={28} strokeWidth={1.8}/></div>
-          <h2 className="blank-chat-title">{workspaceTask.taskName}</h2>
-          <p className="blank-chat-subtitle">这个任务还没有工作窗口。选择一个 Agent，或直接打开空白终端。</p>
-          <div className="blank-chat-tools">
-            <button
-              className="workspace-task-welcome-action"
-              type="button"
-              onClick={() => workspaceAgentDialogController.open()}
-            >
-              <WandIcon name="spark" size={17} strokeWidth={1.8}/>
-              选择 Agent 或空白终端
-            </button>
-          </div>
-          <div className="workspace-task-welcome-cwd" title={workspaceTask.cwd}>
-            <WandIcon name="folder" size={13} strokeWidth={1.8}/>
-            <span>{workspaceTask.cwd}</span>
-          </div>
-        </div>
+        <WorkspaceWelcomeChooser
+          eyebrow={workspaceTask.workspaceName || undefined}
+          title={workspaceTask.taskName}
+          subtitle="这个任务还没有工作窗口。选择 CLI 工具，以及结构化或 PTY。"
+          cwd={workspaceTask.cwd}
+          submitLabel="启动 "
+          onStart={startInTask}
+        />
+      ) : workspaceProject ? (
+        <WorkspaceWelcomeChooser
+          eyebrow="项目"
+          title={workspaceProject.workspaceName}
+          subtitle="项目还是空白的。选择 CLI 工具和结构化 / PTY，开始第一个任务。"
+          cwd={workspaceProject.cwd}
+          submitLabel="开始 "
+          onStart={startInProject}
+        />
       ) : <div className="blank-chat-inner">
         <div className="blank-chat-logo">W</div>
         <h2 className="blank-chat-title">Wand</h2>
-        <p className="blank-chat-subtitle">一切从任务开始：新建任务时选目录，之后在任务里建会话无需再选目录。</p>
+        <p className="blank-chat-subtitle">可以先建一个不依赖项目的任务，或新建项目后再在目录下工作。</p>
         <div className="blank-chat-tools">
           <button
             className="blank-chat-tool-btn welcome-new-task"
@@ -121,11 +176,6 @@ function ShellBlankChat({ className, queueRef, workspaceTask }: {
  */
 export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
   const snapshot = useUiStoreSnapshot();
-  const activeView = React.useSyncExternalStore(
-    shellNavigationStore.subscribe,
-    shellNavigationStore.getSnapshot,
-    shellNavigationStore.getSnapshot,
-  );
   const classes = getShellLegacySlotClasses(snapshot.legacyVisibility);
   const context = React.useSyncExternalStore(
     workspaceContextStore.subscribe,
@@ -138,10 +188,6 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
   // 用缓冲 output 重置即可恢复，无需重建终端。
   const inSplit = !!context.taskId && activeWorkWindow(context.layout)?.layout.type === "split";
 
-  if (activeView === "projects" && !snapshot.selected && !context.taskId) {
-    return <main className="main-content projects-main-content"><ProjectsDashboard/></main>;
-  }
-
   return (
     <main className={`main-content${snapshot.layout.filePanelOpen ? " file-panel-open" : ""}${inSplit ? " main-content-in-split" : ""}`}>
       {/* 任务内由标签条承担主区导航；不再叠一层重复的会话标题栏。 */}
@@ -153,9 +199,16 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
       <ShellBlankChat
         className={classes.blank}
         queueRef={legacyRefs?.crossSessionQueue}
-        workspaceTask={context.taskId ? {
+        workspaceTask={context.taskId && context.workspaceId ? {
+          workspaceId: context.workspaceId,
           workspaceName: context.workspaceName,
+          taskId: context.taskId,
           taskName: context.taskName,
+          cwd: context.cwd,
+        } : undefined}
+        workspaceProject={!context.taskId && context.workspaceId ? {
+          workspaceId: context.workspaceId,
+          workspaceName: context.workspaceName,
           cwd: context.cwd,
         } : undefined}
       />

@@ -685,7 +685,12 @@ import { missionsController } from "../react/missions/controller";
           });
           plusPopover.addEventListener("keydown", function(e) {
             var target = e.target as HTMLElement;
-            if (e.target instanceof HTMLSelectElement || target.matches('[role="combobox"], .wand-ui-select-trigger')) return;
+            if (
+              e.target instanceof HTMLSelectElement ||
+              e.target instanceof HTMLInputElement ||
+              target.matches('[role="combobox"], .wand-ui-select-trigger, .wand-ui-select-search-input') ||
+              (typeof target.closest === "function" && target.closest(".wand-composer-select-content"))
+            ) return;
             if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
             var controls = Array.from(plusPopover!.querySelectorAll<HTMLElement>(
               'button:not([disabled]):not(.hidden), select:not([disabled]), [tabindex]:not([tabindex="-1"])'

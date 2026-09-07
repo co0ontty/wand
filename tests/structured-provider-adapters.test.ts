@@ -85,7 +85,7 @@ test("OpenCode adapter maps args and stream events without session lifecycle sta
     "run", "--format", "json", "--thinking",
     "--model", "anthropic/claude-sonnet-4-6",
     "--variant", "ultra",
-    "--dangerously-skip-permissions",
+    "--auto",
     "--session", "oc-1",
   ]);
 
@@ -142,6 +142,33 @@ test("Grok adapter maps official streaming-json chunks, usage, and resume argume
     totalCostUsd: 0.25,
   });
   assert.equal(applyGrokEvent(state, { type: "error", message: "boom" }), "boom");
+
+  const tools = { blocks: [], result: "", sessionId: null };
+  applyGrokEvent(tools, {
+    type: "tool_call",
+    toolCallId: "call_1",
+    title: "Read",
+    kind: "read",
+    status: "in_progress",
+    toolName: "read_file",
+    rawInput: { path: "src/main.rs" },
+  });
+  applyGrokEvent(tools, {
+    type: "tool_call_update",
+    toolCallId: "call_1",
+    status: "completed",
+    rawOutput: { lines: 42 },
+  });
+  applyGrokEvent(tools, {
+    method: "session/update",
+    params: { update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "ok" } } },
+  });
+  assert.equal(tools.result, "ok");
+  assert.deepEqual(tools.blocks, [
+    { type: "tool_use", id: "call_1", name: "Read", description: "Read", input: { path: "src/main.rs" } },
+    { type: "tool_result", tool_use_id: "call_1", content: "{\"lines\":42}", is_error: false },
+    { type: "text", text: "ok" },
+  ]);
 });
 
 test("Qoder adapter emits print, model, permission, and resume arguments", () => {
@@ -159,4 +186,11 @@ test("Qoder adapter emits print, model, permission, and resume arguments", () =>
   ]);
 
   assert.ok(buildQoderArgs(session({ mode: "auto-edit" }), "hello").includes("accept_edits"));
+  assert.deepEqual(buildQoderArgs(session({
+    provider: "qoder",
+    runner: "qoder-cli-print",
+    thinkingEffort: "deep",
+  }), "hello").slice(0, 6), [
+    "-p", "hello", "--output-format", "stream-json", "--reasoning-effort", "high",
+  ]);
 });

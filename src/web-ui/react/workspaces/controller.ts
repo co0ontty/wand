@@ -1,10 +1,14 @@
 import type { WorkspacesRuntimeAdapter } from "./types";
 
+export type WorkspaceCreationKind = "project" | "task";
+
 export interface WorkspacesControllerSnapshot {
   open: boolean;
   dismissable: boolean;
-  /** 对话框打开时预填的项目目录（如从某目录「在此新建项目」触发）。 */
+  /** 对话框打开时预填的项目目录（如从某目录「在此新建任务」触发）。 */
   initialCwd: string;
+  /** 打开对话框时的创建分类；任务可以从任意目录入口独立创建。 */
+  initialKind: WorkspaceCreationKind;
   revision: number;
 }
 
@@ -15,6 +19,7 @@ let snapshot: WorkspacesControllerSnapshot = {
   open: false,
   dismissable: true,
   initialCwd: "",
+  initialKind: "task",
   revision: 0,
 };
 const listeners = new Set<Listener>();
@@ -25,7 +30,7 @@ function publish(next: Partial<WorkspacesControllerSnapshot>): void {
 }
 
 export interface WandWorkspacesController {
-  open(initialCwd?: string): boolean;
+  open(initialCwd?: string, kind?: WorkspaceCreationKind): boolean;
   close(): void;
   closeIfOpen(): boolean;
   isOpen(): boolean;
@@ -33,9 +38,9 @@ export interface WandWorkspacesController {
 }
 
 export const workspacesController: WandWorkspacesController = {
-  open(initialCwd?: string): boolean {
+  open(initialCwd?: string, kind: WorkspaceCreationKind = "task"): boolean {
     runtime?.onOpen();
-    publish({ open: true, dismissable: true, initialCwd: initialCwd ?? "" });
+    publish({ open: true, dismissable: true, initialCwd: initialCwd ?? "", initialKind: kind });
     return true;
   },
   close(): void {

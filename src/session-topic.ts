@@ -1,17 +1,132 @@
 import { callConfiguredAiText, type QuickCommitAiOptions } from "./git-quick-commit.js";
+import { skipAnsiSequence } from "./pty-text-utils.js";
 import type { ConversationTurn } from "./types.js";
 
 const MAX_PROMPT_LENGTH = 12_000;
+const PTY_TOPIC_DRAFT_MAX = 4_000;
 
 /**
- * PTY 终端视图里，只有底部输入框整段提交（shortcutKey=enter_text）才总结标题。
- * 逐键 pty_input / 方向键 / 单独回车不能触发，避免把按键当主题。
+ * PTY 底部输入框整段提交（shortcutKey=enter_text）会总结标题。
+ * 终端直通键入没有这个标记：服务端把可打印字符拼成一行，回车后再总结。
+ * 方向键 / 单独回车 / y/n / 控制序列不能触发，避免把按键当主题。
  */
 export function shouldGenerateSessionTopicFromPtyInput(
   view?: "chat" | "terminal",
   shortcutKey?: string,
 ): boolean {
   return view !== "terminal" || shortcutKey === "enter_text";
+}
+
+export interface PtyTopicLineBuffer {
+  text: string;
+}
+
+export function createPtyTopicLineBuffer(): PtyTopicLineBuffer {
+  return { text: "" };
+}
+
+function stripTrailingNewlines(input: string): string {
+  return input.replace(/[\r\n]+$/g, "").trim();
+}
+
+function popCodePoint(text: string): string {
+  const chars = Array.from(text);
+  chars.pop();
+  return chars.join("");
+}
+
+/** Raw TTY lines that are almost certainly not a user prompt. */
+export function isPtyTypedTopicCandidate(prompt: string): boolean {
+  if (!prompt) return false;
+  if (/^[yn]$/i.test(prompt)) return false;
+  if (/^\d+$/.test(prompt)) return false;
+  if (/^\/[a-z][\w-]*$/i.test(prompt)) return false;
+  if (/[\u3400-\u9fff]/.test(prompt)) return true;
+  if (/\s/.test(prompt) && prompt.length >= 2) return true;
+  return prompt.length >= 8;
+}
+
+function flushPtyTopicDraft(buffer: PtyTopicLineBuffer): string | null {
+  const prompt = buffer.text.replace(/\s+/g, " ").trim();
+  buffer.text = "";
+  return isPtyTypedTopicCandidate(prompt) ? prompt : null;
+}
+
+function consumeRawPtyTopicLine(buffer: PtyTopicLineBuffer, input: string): string | null {
+  let submitted: string | null = null;
+  let i = 0;
+  while (i < input.length) {
+    const code = input.charCodeAt(i);
+    if (code === 0x1b) {
+      i = skipAnsiSequence(input, i);
+      continue;
+    }
+    if (code === 0x0d) {
+      const flushed = flushPtyTopicDraft(buffer);
+      if (flushed && !submitted) submitted = flushed;
+      i += input.charCodeAt(i + 1) === 0x0a ? 2 : 1;
+      continue;
+    }
+    if (code === 0x08 || code === 0x7f) {
+      buffer.text = popCodePoint(buffer.text);
+      i += 1;
+      continue;
+    }
+    if (code === 0x03 || code === 0x15) {
+      buffer.text = "";
+      i += 1;
+      continue;
+    }
+    if (code === 0x0a) {
+      if (buffer.text) buffer.text += "\n";
+      i += 1;
+      continue;
+    }
+    if (code < 32) {
+      i += 1;
+      continue;
+    }
+    const point = input.codePointAt(i) ?? code;
+    buffer.text += String.fromCodePoint(point);
+    i += point > 0xffff ? 2 : 1;
+    if (buffer.text.length > PTY_TOPIC_DRAFT_MAX) {
+      buffer.text = buffer.text.slice(-PTY_TOPIC_DRAFT_MAX);
+    }
+  }
+  return submitted;
+}
+
+/**
+ * Decide whether this PTY write completes a user prompt worth summarizing.
+ * Mutates `buffer` so keystroke-by-keystroke terminal input can be assembled.
+ */
+export function consumePtyInputForTopic(
+  buffer: PtyTopicLineBuffer,
+  input: string,
+  view?: "chat" | "terminal",
+  shortcutKey?: string,
+): string | null {
+  if (view !== "terminal") {
+    buffer.text = "";
+    const prompt = stripTrailingNewlines(input);
+    return prompt && shouldGenerateSessionTopicFromPtyInput(view, shortcutKey) ? prompt : null;
+  }
+  if (shortcutKey === "enter_text") {
+    buffer.text = "";
+    return stripTrailingNewlines(input) || null;
+  }
+  if (shortcutKey) {
+    if (
+      shortcutKey === "ctrl_c"
+      || shortcutKey === "ctrl_u"
+      || shortcutKey === "ctrl_d"
+      || shortcutKey === "escape"
+    ) {
+      buffer.text = "";
+    }
+    return null;
+  }
+  return consumeRawPtyTopicLine(buffer, input);
 }
 
 export interface SessionTopic {

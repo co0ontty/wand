@@ -673,11 +673,17 @@ export interface TaskWindowLayout {
   activeWindowId: string | null;
 }
 
+export type WorkspaceKind = "project" | "global";
+
+/** Hidden workspace that owns standalone tasks without a user project. */
+export const GLOBAL_WORKSPACE_ID = "wand-global";
+
 /** 项目 / 工作空间。锚定一个目录（如 wand 仓库），内含多个并行「任务」。 */
 export interface Workspace {
   id: string;
   name: string;
   cwd: string;
+  kind?: WorkspaceKind;
   defaultProvider?: WorkspaceDefaultProvider;
   /**
    * 工作空间级的布局占位（保留字段）。标签 / 分屏布局实际挂在 Task 上
@@ -702,6 +708,8 @@ export interface WorkspaceTask {
   workspaceId: string;
   name: string;
   worktree: WorkspaceTaskWorktree | null;
+  /** Optional directory override; empty/undefined falls back to the workspace cwd. */
+  cwd?: string;
   /** 该任务的工作窗口 Tabs；每个窗口内部可含一棵分屏树。 */
   layout: TaskWindowLayout | null;
   status: WorkspaceTaskStatus;

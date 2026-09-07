@@ -53,6 +53,7 @@ interface LegacySession {
   startedAt?: string;
   endedAt?: string;
   claudeSessionId?: string;
+  workspaceTaskId?: string;
   currentTaskTitle?: string;
   worktree?: {
     enabled?: boolean;
@@ -209,6 +210,7 @@ function sessionToVm(
     ...(session.startedAt ? { startedAt: session.startedAt } : {}),
     ...(session.endedAt ? { endedAt: session.endedAt } : {}),
     ...(session.claudeSessionId ? { claudeSessionId: session.claudeSessionId } : {}),
+    ...(session.workspaceTaskId ? { workspaceTaskId: session.workspaceTaskId } : {}),
     ...(worktreeEnabled ? {
       worktree: {
         enabled: true,

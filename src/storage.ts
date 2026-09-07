@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { SessionSnapshot, ConversationTurn, SessionKind, SessionProvider, SessionRunner, SessionSource, StructuredSessionState, WorktreeMergeInfo, Workspace, LayoutNode, TaskWindowLayout, WorkspaceDefaultProvider, WorkspaceTask, WorkspaceTaskWorktree, WorkspaceTaskStatus } from "./types.js";
+import { SessionSnapshot, ConversationTurn, SessionKind, SessionProvider, SessionRunner, SessionSource, StructuredSessionState, WorktreeMergeInfo, Workspace, LayoutNode, TaskWindowLayout, WorkspaceDefaultProvider, WorkspaceKind, WorkspaceTask, WorkspaceTaskWorktree, WorkspaceTaskStatus, GLOBAL_WORKSPACE_ID } from "./types.js";
 import { normalizeSessionDirectory } from "./session-directory-tree.js";
 import type {
   AgentActivityItem,
@@ -380,10 +380,15 @@ interface WorkspaceRow {
   id: string;
   name: string;
   cwd: string;
+  kind: string | null;
   default_provider: string | null;
   layout_json: string | null;
   created_at: string;
   last_opened_at: string | null;
+}
+
+function mapWorkspaceKind(raw: string | null | undefined): WorkspaceKind {
+  return raw === "global" ? "global" : "project";
 }
 
 function mapWorkspaceRow(row: WorkspaceRow): Workspace {
@@ -391,6 +396,7 @@ function mapWorkspaceRow(row: WorkspaceRow): Workspace {
     id: row.id,
     name: row.name,
     cwd: row.cwd,
+    kind: mapWorkspaceKind(row.kind),
     defaultProvider: (row.default_provider ?? undefined) as Workspace["defaultProvider"],
     layout: row.layout_json ? safeJsonParse<LayoutNode>(row.layout_json) ?? null : null,
     createdAt: row.created_at,
@@ -405,6 +411,7 @@ interface WorkspaceTaskRow {
   worktree_json: string | null;
   layout_json: string | null;
   status: string;
+  cwd: string | null;
   created_at: string;
   last_opened_at: string | null;
 }
@@ -440,11 +447,13 @@ function mapWorkspaceTaskLayout(raw: string | null): TaskWindowLayout | null {
 }
 
 function mapWorkspaceTaskRow(row: WorkspaceTaskRow): WorkspaceTask {
+  const cwd = typeof row.cwd === "string" && row.cwd.trim() ? row.cwd : undefined;
   return {
     id: row.id,
     workspaceId: row.workspace_id,
     name: row.name,
     worktree: mapWorkspaceTaskWorktree(row.worktree_json),
+    ...(cwd ? { cwd } : {}),
     layout: mapWorkspaceTaskLayout(row.layout_json),
     status: (row.status === "done" ? "done" : "active") as WorkspaceTaskStatus,
     createdAt: row.created_at,
@@ -796,6 +805,7 @@ const INIT_SQL = `
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     cwd TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'project',
     default_provider TEXT,
     layout_json TEXT,
     created_at TEXT NOT NULL,
@@ -812,6 +822,7 @@ const INIT_SQL = `
     worktree_json TEXT,
     layout_json TEXT,
     status TEXT NOT NULL DEFAULT 'active',
+    cwd TEXT,
     created_at TEXT NOT NULL,
     last_opened_at TEXT,
     FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
@@ -820,6 +831,19 @@ const INIT_SQL = `
   CREATE INDEX IF NOT EXISTS idx_workspace_tasks_workspace ON workspace_tasks(workspace_id);
   CREATE INDEX IF NOT EXISTS idx_workspace_tasks_last_opened ON workspace_tasks(last_opened_at);
 `;
+
+function ensureWorkspaceSchema(db: DatabaseSync): void {
+  const workspaceColumns = db.prepare("PRAGMA table_info(workspaces)").all() as Array<{ name: string }>;
+  const workspaceNames = new Set(workspaceColumns.map((column) => column.name));
+  if (workspaceColumns.length > 0 && !workspaceNames.has("kind")) {
+    db.exec("ALTER TABLE workspaces ADD COLUMN kind TEXT NOT NULL DEFAULT 'project'");
+  }
+  const taskColumns = db.prepare("PRAGMA table_info(workspace_tasks)").all() as Array<{ name: string }>;
+  const taskNames = new Set(taskColumns.map((column) => column.name));
+  if (taskColumns.length > 0 && !taskNames.has("cwd")) {
+    db.exec("ALTER TABLE workspace_tasks ADD COLUMN cwd TEXT");
+  }
+}
 
 export function ensureDatabaseFile(dbPath: string): boolean {
   const dir = path.dirname(dbPath);
@@ -830,6 +854,7 @@ export function ensureDatabaseFile(dbPath: string): boolean {
   db.exec(INIT_SQL);
   ensureAuthSessionSchema(db);
   ensureCommandSessionSchema(db);
+  ensureWorkspaceSchema(db);
   {
     const missionColumns = db.prepare("PRAGMA table_info(missions)").all() as Array<{ name: string }>;
     if (missionColumns.length > 0 && !missionColumns.some((column) => column.name === "task_id")) {
@@ -843,17 +868,24 @@ export function ensureDatabaseFile(dbPath: string): boolean {
 
 export class WandStorage {
   private readonly db: DatabaseSync;
+  private readonly dbPath: string;
 
   constructor(dbPath: string) {
     const dir = path.dirname(dbPath);
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     chmodSync(dir, 0o700);
+    this.dbPath = dbPath;
     this.db = new DatabaseSync(dbPath);
     chmodSync(dbPath, 0o600);
     this.db.exec(INIT_SQL);
     ensureAuthSessionSchema(this.db);
     ensureCommandSessionSchema(this.db);
+    ensureWorkspaceSchema(this.db);
     this.ensureDefaultPasswordVault();
+  }
+
+  directory(): string {
+    return path.dirname(this.dbPath);
   }
 
   close(): void {
@@ -967,7 +999,7 @@ export class WandStorage {
   listWorkspaces(): Workspace[] {
     const rows = this.db
       .prepare(
-        "SELECT id, name, cwd, default_provider, layout_json, created_at, last_opened_at FROM workspaces ORDER BY COALESCE(last_opened_at, created_at) DESC"
+        "SELECT id, name, cwd, kind, default_provider, layout_json, created_at, last_opened_at FROM workspaces ORDER BY COALESCE(last_opened_at, created_at) DESC"
       )
       .all() as unknown as WorkspaceRow[];
     return rows.map(mapWorkspaceRow);
@@ -976,34 +1008,52 @@ export class WandStorage {
   getWorkspace(id: string): Workspace | null {
     const row = this.db
       .prepare(
-        "SELECT id, name, cwd, default_provider, layout_json, created_at, last_opened_at FROM workspaces WHERE id = ?"
+        "SELECT id, name, cwd, kind, default_provider, layout_json, created_at, last_opened_at FROM workspaces WHERE id = ?"
       )
       .get(id) as unknown as WorkspaceRow | undefined;
     return row ? mapWorkspaceRow(row) : null;
   }
 
   createWorkspace(input: {
+    id?: string;
     name: string;
     cwd: string;
+    kind?: WorkspaceKind;
     defaultProvider?: WorkspaceDefaultProvider;
   }): Workspace {
-    const id = crypto.randomUUID();
+    const id = input.id?.trim() || crypto.randomUUID();
+    const kind: WorkspaceKind = input.kind === "global" ? "global" : "project";
     const createdAt = nowIso();
     this.db
       .prepare(
-        `INSERT INTO workspaces (id, name, cwd, default_provider, layout_json, created_at, last_opened_at)
-         VALUES (?, ?, ?, ?, NULL, ?, NULL)`
+        `INSERT INTO workspaces (id, name, cwd, kind, default_provider, layout_json, created_at, last_opened_at)
+         VALUES (?, ?, ?, ?, ?, NULL, ?, NULL)`
       )
-      .run(id, input.name, input.cwd, input.defaultProvider ?? null, createdAt);
+      .run(id, input.name, input.cwd, kind, input.defaultProvider ?? null, createdAt);
     return {
       id,
       name: input.name,
       cwd: input.cwd,
+      kind,
       defaultProvider: input.defaultProvider,
       layout: null,
       createdAt,
       lastOpenedAt: null,
     };
+  }
+
+  ensureGlobalWorkspace(): Workspace {
+    const existing = this.getWorkspace(GLOBAL_WORKSPACE_ID)
+      ?? this.listWorkspaces().find((workspace) => workspace.kind === "global");
+    if (existing) return existing;
+    const scratch = path.join(this.directory(), "scratch");
+    mkdirSync(scratch, { recursive: true, mode: 0o700 });
+    return this.createWorkspace({
+      id: GLOBAL_WORKSPACE_ID,
+      name: "全局任务",
+      cwd: scratch,
+      kind: "global",
+    });
   }
 
   updateWorkspace(id: string, patch: {
@@ -1113,7 +1163,7 @@ export class WandStorage {
   listWorkspaceTasks(workspaceId: string): WorkspaceTask[] {
     const rows = this.db
       .prepare(
-        `SELECT id, workspace_id, name, worktree_json, layout_json, status, created_at, last_opened_at
+        `SELECT id, workspace_id, name, worktree_json, layout_json, status, cwd, created_at, last_opened_at
          FROM workspace_tasks WHERE workspace_id = ?
          ORDER BY COALESCE(last_opened_at, created_at) DESC`
       )
@@ -1124,7 +1174,7 @@ export class WandStorage {
   getWorkspaceTask(id: string): WorkspaceTask | null {
     const row = this.db
       .prepare(
-        `SELECT id, workspace_id, name, worktree_json, layout_json, status, created_at, last_opened_at
+        `SELECT id, workspace_id, name, worktree_json, layout_json, status, cwd, created_at, last_opened_at
          FROM workspace_tasks WHERE id = ?`
       )
       .get(id) as unknown as WorkspaceTaskRow | undefined;
@@ -1135,15 +1185,17 @@ export class WandStorage {
     workspaceId: string;
     name: string;
     worktree?: WorkspaceTaskWorktree | null;
+    cwd?: string | null;
     status?: WorkspaceTaskStatus;
   }): WorkspaceTask {
     const id = crypto.randomUUID();
     const createdAt = nowIso();
     const status: WorkspaceTaskStatus = input.status ?? "active";
+    const cwd = typeof input.cwd === "string" && input.cwd.trim() ? input.cwd.trim() : null;
     this.db
       .prepare(
-        `INSERT INTO workspace_tasks (id, workspace_id, name, worktree_json, layout_json, status, created_at, last_opened_at)
-         VALUES (?, ?, ?, ?, NULL, ?, ?, NULL)`
+        `INSERT INTO workspace_tasks (id, workspace_id, name, worktree_json, layout_json, status, cwd, created_at, last_opened_at)
+         VALUES (?, ?, ?, ?, NULL, ?, ?, ?, NULL)`
       )
       .run(
         id,
@@ -1151,6 +1203,7 @@ export class WandStorage {
         input.name,
         input.worktree ? JSON.stringify(input.worktree) : null,
         status,
+        cwd,
         createdAt,
       );
     return {
@@ -1158,6 +1211,7 @@ export class WandStorage {
       workspaceId: input.workspaceId,
       name: input.name,
       worktree: input.worktree ?? null,
+      ...(cwd ? { cwd } : {}),
       layout: null,
       status,
       createdAt,

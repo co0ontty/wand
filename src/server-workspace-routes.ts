@@ -15,7 +15,7 @@ import type { SessionRegistry } from "./session-registry.js";
 import type { WandStorage } from "./storage.js";
 import { collectSessionTopicBlocklist } from "./session-topic.js";
 import { resolveSessionDisplayTitle } from "./session-transport.js";
-import type { LayoutNode, PaneTab, SessionProvider, SessionSnapshot, TaskWindowLayout, WorkspaceDefaultProvider, WorkspaceTaskWorktree } from "./types.js";
+import { GLOBAL_WORKSPACE_ID, type LayoutNode, type PaneTab, type SessionProvider, type SessionSnapshot, type TaskWindowLayout, type Workspace, type WorkspaceDefaultProvider, type WorkspaceTask, type WorkspaceTaskWorktree } from "./types.js";
 import {
   attachUnboundSessionsToWorkspace,
   backfillSessionWorkspaces,
@@ -90,6 +90,62 @@ function deleteSessions(
     if (sessions) sessions.deleteWithProviderHistory(sessionId);
     else storage.deleteSession(sessionId);
   }
+}
+
+function isGlobalWorkspace(workspace: Pick<Workspace, "kind" | "id">): boolean {
+  return workspace.kind === "global" || workspace.id === GLOBAL_WORKSPACE_ID;
+}
+
+function taskRuntimeCwd(task: WorkspaceTask, workspace: Pick<Workspace, "cwd"> | null | undefined): string {
+  return task.worktree?.path ?? task.cwd ?? workspace?.cwd ?? "";
+}
+
+function createTaskForWorkspace(
+  storage: WandStorage,
+  workspace: Workspace,
+  body: { name?: unknown; baseRef?: unknown; worktree?: unknown; cwd?: unknown },
+): {
+  task: WorkspaceTask;
+  cwd: string;
+  isolated: boolean;
+  worktreeError?: string;
+} {
+  const name = typeof body.name === "string" ? body.name.trim() : "";
+  if (!name) throw new Error("请输入任务名称。");
+  let mountedCwd: string | undefined;
+  if (body.cwd !== undefined && body.cwd !== null && String(body.cwd).trim()) {
+    mountedCwd = resolveWorkspaceCwd(body.cwd);
+  }
+  const baseRef = typeof body.baseRef === "string" && body.baseRef.trim() ? body.baseRef.trim() : undefined;
+  const runCwd = mountedCwd ?? workspace.cwd;
+  const wantWorktree = body.worktree === true || (body.worktree !== false && !isGlobalWorkspace(workspace));
+  let worktree: WorkspaceTaskWorktree | null = null;
+  let worktreeError: string | undefined;
+  if (wantWorktree) {
+    try {
+      const setup = prepareSessionWorktree({
+        cwd: runCwd,
+        sessionId: crypto.randomUUID(),
+        spec: { taskName: name, baseRef },
+      });
+      worktree = setup.worktree;
+    } catch (error) {
+      worktreeError = getErrorMessage(error, "无法创建 worktree，将在项目目录直接运行。");
+    }
+  }
+  const storedCwd = mountedCwd && mountedCwd !== workspace.cwd ? mountedCwd : undefined;
+  const task = storage.createWorkspaceTask({
+    workspaceId: workspace.id,
+    name,
+    worktree,
+    cwd: storedCwd,
+  });
+  return {
+    task,
+    cwd: taskRuntimeCwd(task, workspace),
+    isolated: worktree !== null,
+    worktreeError,
+  };
 }
 
 function workspaceWithCounts(
@@ -217,7 +273,9 @@ export function registerWorkspaceRoutes(
   app.get("/api/workspaces", (_req, res) => {
     backfillSessionWorkspaces(storage);
     const sessionCounts = storage.countSessionsByWorkspace();
-    res.json(storage.listWorkspaces().map((workspace) => workspaceWithCounts(storage, workspace, sessionCounts)));
+    res.json(storage.listWorkspaces()
+      .filter((workspace) => !isGlobalWorkspace(workspace))
+      .map((workspace) => workspaceWithCounts(storage, workspace, sessionCounts)));
   });
 
   // 新建项目：名称 + 目录 + 默认 IDE，不启动会话
@@ -295,6 +353,10 @@ export function registerWorkspaceRoutes(
       res.status(404).json({ error: "未找到该项目。" });
       return;
     }
+    if (isGlobalWorkspace(existing)) {
+      res.status(400).json({ error: "不能删除全局任务空间。" });
+      return;
+    }
     const tasks = storage.listWorkspaceTasks(existing.id);
     if (cascade) {
       deleteSessions(storage, sessions, [
@@ -330,6 +392,24 @@ export function registerWorkspaceRoutes(
 
   // ── 任务（Task = 命名 + 独立 worktree + 一组标签）──
 
+  // 不依赖项目的独立任务：挂到隐藏的全局空间，目录可省略（使用全局临时目录）。
+  app.post("/api/tasks", asyncRoute(async (req, res) => {
+    const workspace = storage.ensureGlobalWorkspace();
+    try {
+      const created = createTaskForWorkspace(storage, workspace, req.body as {
+        name?: unknown; baseRef?: unknown; worktree?: unknown; cwd?: unknown;
+      });
+      res.status(201).json({
+        ...created.task,
+        cwd: created.cwd,
+        isolated: created.isolated,
+        worktreeError: created.worktreeError,
+      });
+    } catch (error) {
+      res.status(400).json({ error: getErrorMessage(error, "创建任务失败。") });
+    }
+  }));
+
   // 目录组为一级容器的任务聚合列表，供侧栏「任务」视图一次拉全。
   app.get("/api/tasks", (req, res) => {
     // 查询参数：workspaceId 过滤单目录；limit 截断每目录任务数；
@@ -350,6 +430,7 @@ export function registerWorkspaceRoutes(
       workspaceName: string;
       workspaceCwd: string;
       synthetic?: boolean;
+      global?: boolean;
       tasks: unknown[];
       standaloneSessions: unknown[];
     }
@@ -362,10 +443,12 @@ export function registerWorkspaceRoutes(
       : workspaces;
     const groups = new Map<string, TaskDirectoryGroup>();
     for (const workspace of visibleWorkspaces) {
+      const global = isGlobalWorkspace(workspace);
       groups.set(workspace.id, {
         workspaceId: workspace.id,
-        workspaceName: workspace.name,
+        workspaceName: global ? "全局" : workspace.name,
         workspaceCwd: workspace.cwd,
+        ...(global ? { global: true } : {}),
         tasks: storage.listWorkspaceTasks(workspace.id)
           .slice(0, taskLimit ?? undefined)
           .map((task) => {
@@ -373,12 +456,12 @@ export function registerWorkspaceRoutes(
             const sessions = allSessions
               .slice(0, sessionLimit ?? undefined)
               .map((session) => ({
-                ...summarize(session, { taskName: task.name, workspaceName: workspace.name }),
+                ...summarize(session, { taskName: task.name, workspaceName: global ? undefined : workspace.name }),
                 workspaceTaskId: task.id,
               }));
             return {
               ...task,
-              cwd: task.worktree?.path ?? workspace.cwd,
+              cwd: taskRuntimeCwd(task, workspace),
               isolated: task.worktree !== null,
               sessions,
               totalSessions: allSessions.length,
@@ -399,7 +482,8 @@ export function registerWorkspaceRoutes(
       let group = direct && !direct.synthetic ? direct : undefined;
       const resolved = session.cwd ? path.resolve(session.cwd) : "";
       if (!group && resolved) {
-        group = [...groups.values()].find((candidate) => !candidate.synthetic && candidate.workspaceCwd === resolved);
+        const cwdMatches = [...groups.values()].filter((candidate) => !candidate.synthetic && candidate.workspaceCwd === resolved);
+        group = cwdMatches.find((candidate) => !candidate.global) ?? cwdMatches[0];
       }
       // 过滤模式下不创建合成组：不属于目标目录的会话直接排除。
       if (!group && resolved && !workspaceFilter) {
@@ -424,7 +508,9 @@ export function registerWorkspaceRoutes(
         workspaceName: group.workspaceName,
       }));
     }
-    const payload = [...groups.values()];
+    const payload = [...groups.values()]
+      .filter((group) => !group.global || group.tasks.length > 0 || group.standaloneSessions.length > 0)
+      .sort((left, right) => Number(Boolean(right.global)) - Number(Boolean(left.global)));
     const revision = tasksRevision(payload);
     if (typeof req.query.revision === "string") {
       if (req.query.revision === revision) {
@@ -533,37 +619,19 @@ export function registerWorkspaceRoutes(
       res.status(404).json({ error: "未找到该项目。" });
       return;
     }
-    const body = req.body as { name?: unknown; baseRef?: unknown; worktree?: unknown };
-    const name = typeof body.name === "string" ? body.name.trim() : "";
-    if (!name) {
-      res.status(400).json({ error: "请输入任务名称。" });
-      return;
+    try {
+      const created = createTaskForWorkspace(storage, workspace, req.body as {
+        name?: unknown; baseRef?: unknown; worktree?: unknown; cwd?: unknown;
+      });
+      res.status(201).json({
+        ...created.task,
+        cwd: created.cwd,
+        isolated: created.isolated,
+        worktreeError: created.worktreeError,
+      });
+    } catch (error) {
+      res.status(400).json({ error: getErrorMessage(error, "创建任务失败。") });
     }
-    const baseRef = typeof body.baseRef === "string" && body.baseRef.trim() ? body.baseRef.trim() : undefined;
-    const wantWorktree = body.worktree !== false;
-    let worktree: WorkspaceTaskWorktree | null = null;
-    let worktreeError: string | undefined;
-    if (wantWorktree) {
-      try {
-        const setup = prepareSessionWorktree({
-          cwd: workspace.cwd,
-          // 用随机短 id 作分支后缀，避免同名任务撞分支。
-          sessionId: crypto.randomUUID(),
-          spec: { taskName: name, baseRef },
-        });
-        worktree = setup.worktree;
-      } catch (error) {
-        // 非 git 仓库 / 基线不存在：任务照常创建，但无 worktree 隔离。
-        worktreeError = getErrorMessage(error, "无法创建 worktree，将在项目目录直接运行。");
-      }
-    }
-    const task = storage.createWorkspaceTask({ workspaceId: workspace.id, name, worktree });
-    res.status(201).json({
-      ...task,
-      cwd: worktree?.path ?? workspace.cwd,
-      isolated: worktree !== null,
-      worktreeError,
-    });
   }));
 
   // 任务详情：meta + 该任务下的会话；访问即更新 lastOpenedAt
@@ -577,7 +645,7 @@ export function registerWorkspaceRoutes(
     const workspace = storage.getWorkspace(task.workspaceId);
     res.json({
       ...task,
-      cwd: task.worktree?.path ?? workspace?.cwd ?? "",
+      cwd: taskRuntimeCwd(task, workspace),
       sessions: storage.listSessionsByWorkspaceTask(task.id).map((session) => ({
         ...workspaceSessionSummary(session, {
           taskName: task.name,

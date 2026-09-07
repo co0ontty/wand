@@ -1338,7 +1338,7 @@ async function runQuickCommitFallbackCli(opts: QuickCommitOptions, priorError: s
       inheritEnv: opts.inheritEnv,
     });
   } else if (provider === "opencode") {
-    const args = ["run", "--format", "json", "--dangerously-skip-permissions"];
+    const args = ["run", "--format", "json", "--auto"];
     const model = opts.model?.trim();
     if (model && model !== "default") args.push("--model", model);
     const variant = thinkingEffortToOpenCodeVariant(opts.thinkingEffort ?? "off");

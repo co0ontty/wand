@@ -626,6 +626,17 @@ function TaskGroupSection({
           aria-expanded={collapsible ? open : undefined}
           title={group.workspaceCwd}
           onClick={() => {
+            if (!group.synthetic && group.tasks.length === 0) {
+              runtime()?.openWorkspace({
+                id: group.workspaceId,
+                name: group.workspaceName,
+                cwd: group.workspaceCwd,
+                layout: null,
+                createdAt: "",
+                lastOpenedAt: null,
+              });
+              return;
+            }
             if (!collapsible) return;
             setCollapsed((current) => !current);
           }}
@@ -656,7 +667,7 @@ function TaskGroupSection({
               aria-label={`在目录 ${group.workspaceName} 新建任务`}
               onClick={(event) => {
                 event.stopPropagation();
-                workspacesController.open(group.workspaceCwd);
+                workspacesController.open(group.workspaceCwd, "task");
               }}
             >
               <WandIcon name="plus" size={14}/>
@@ -770,12 +781,17 @@ export function WorkspacesPanel({
   selectedSessionId = null,
   sessionTitles = null,
   extraGroups = null,
+  headingLabel = "任务",
+  headingCount,
 }: {
   selectedSessionId?: string | null;
   /** 实时会话标题（WS 已生成的命令摘要），覆盖轮询列表里的旧 title。 */
   sessionTitles?: Readonly<Record<string, string>> | null;
   /** 侧栏附加分组（原生历史 / 自动化等），渲染在任务列表之后。 */
   extraGroups?: React.ReactNode;
+  /** 侧栏分区标题；空间聚合视图使用「空间」。 */
+  headingLabel?: string;
+  headingCount?: number;
 } = {}) {
   // 订阅控制器：新建任务对话框关闭时刷新列表（创建后立即出现）。
   const controllerSnapshot = React.useSyncExternalStore(
@@ -804,6 +820,7 @@ export function WorkspacesPanel({
   const activeWorkspaceId = activeContext.workspaceId;
   const activeTaskId = activeContext.taskId;
 
+  const [panelCollapsed, setPanelCollapsed] = React.useState(false);
   // 任务行「＋」的 Agent 选择器：先记下目标任务，确认后在该任务目录内新建会话。
   const [pendingNewSessionTask, setPendingNewSessionTask] = React.useState<TaskSummary | null>(null);
 
@@ -815,7 +832,7 @@ export function WorkspacesPanel({
     }
     const payload: OpenWorkspaceTaskPayload = {
       workspaceId: group.workspaceId,
-      workspaceName: group.workspaceName,
+      workspaceName: group.global ? "" : group.workspaceName,
       taskId: task.id,
       taskName: task.name,
       cwd: task.cwd,
@@ -830,7 +847,7 @@ export function WorkspacesPanel({
       toast("工作空间运行环境尚未就绪，请刷新页面后重试。", "warning");
       return;
     }
-    if (!group.synthetic) {
+    if (!group.synthetic && !group.global) {
       rt.openWorkspace({
         id: group.workspaceId,
         name: group.workspaceName,
@@ -865,8 +882,11 @@ export function WorkspacesPanel({
     await reload();
   }, [openTask, reload]);
 
+  const globalGroup = groups.find((group) => group.global);
+  const projectGroups = groups.filter((group) => !group.global);
   const hasContent = groups.some((group) => group.tasks.length > 0 || group.standaloneSessions.length > 0);
   const taskTotal = groups.reduce((sum, group) => sum + group.tasks.length, 0);
+  const standaloneTaskTotal = globalGroup?.tasks.length ?? 0;
   const terminalTotal = groups.reduce((sum, group) => (
     sum
       + group.standaloneSessions.length
@@ -874,20 +894,45 @@ export function WorkspacesPanel({
   ), 0);
 
   return (
-    <div className="workspaces-panel" aria-label="任务列表">
-      {loading && groups.length === 0 ? (
+    <section className={classNames("workspaces-panel", panelCollapsed && "is-collapsed")} aria-label={headingLabel}>
+      <div className="workspaces-panel-heading">
+        <button
+          type="button"
+          className="workspaces-panel-heading-toggle"
+          aria-expanded={!panelCollapsed}
+          aria-controls="workspaces-panel-content"
+          onClick={() => setPanelCollapsed((current) => !current)}
+        >
+          <WandIcon name="chevron" size={11} className={classNames("workspaces-panel-chevron", !panelCollapsed && "open")}/>
+          <span>{headingLabel}</span>
+          <span className="workspaces-panel-heading-count">
+            {headingCount ?? (headingLabel === "空间" || headingLabel === "项目" ? projectGroups.length : taskTotal)}
+          </span>
+        </button>
+        <button
+          type="button"
+          className="workspaces-panel-add"
+          onClick={() => workspacesController.open(undefined, headingLabel === "项目" || headingLabel === "空间" ? "project" : "task")}
+          aria-label={headingLabel === "项目" || headingLabel === "空间" ? "新建项目" : "新建任务"}
+          title={headingLabel === "项目" || headingLabel === "空间" ? "新建项目" : "新建任务"}
+        >
+          <WandIcon name="plus" size={14}/>
+        </button>
+      </div>
+      {!panelCollapsed ? <div id="workspaces-panel-content" className="workspaces-panel-content">
+        {loading && groups.length === 0 ? (
         <div className="workspaces-panel-state">正在加载任务…</div>
       ) : error && groups.length === 0 ? (
         <div className="workspaces-panel-state error">{error}</div>
       ) : !hasContent ? (
         <div className="workspaces-panel-empty">
           <strong>还没有任务</strong><br/>
-          任务归属目录，之后在任务里新建终端无需再选目录。
+          可以先建一个不依赖项目的任务，或新建项目后再在项目下建任务。
           <button
             type="button"
             className="btn btn-primary btn-sm workspaces-empty-new-task"
             aria-label="新建任务"
-            onClick={() => workspacesController.open()}
+            onClick={() => workspacesController.open(undefined, "task")}
           >
             <WandIcon name="plus" size={13}/>
             <span>新建任务</span>
@@ -895,42 +940,98 @@ export function WorkspacesPanel({
         </div>
       ) : (
         <>
-          <div
-            className="workspaces-overview"
-            aria-label={`${groups.length} 个目录，${taskTotal} 项任务，${terminalTotal} 个终端`}
-          >
-            <span className="workspaces-overview-stat">
-              <WandIcon name="folder" size={12}/><strong>{groups.length}</strong><span>目录</span>
-            </span>
-            <span className="workspaces-overview-divider" aria-hidden="true"/>
-            <span className="workspaces-overview-stat">
-              <WandIcon name="task" size={12}/><strong>{taskTotal}</strong><span>任务</span>
-            </span>
-            <span className="workspaces-overview-divider" aria-hidden="true"/>
-            <span className="workspaces-overview-stat">
-              <WandIcon name="terminal" size={12}/><strong>{terminalTotal}</strong><span>终端</span>
-            </span>
-          </div>
-          <div className="workspaces-list">
-            {groups.map((group) => (
-              <TaskGroupSection
-                key={group.workspaceId}
-                group={group}
-                directoryCount={groups.length}
-                liveTitles={sessionTitles ?? undefined}
-                activeWorkspaceId={activeWorkspaceId}
-                activeTaskId={activeTaskId}
-                activeSessionId={selectedSessionId}
-                onActiveTaskOpen={openTask}
-                onOpenSession={openSession}
-                onRequestNewSessionInTask={(task) => setPendingNewSessionTask(task)}
-                onTasksChanged={reload}
-              />
-            ))}
-          </div>
+          {globalGroup && globalGroup.tasks.length > 0 ? (
+            <div className="workspaces-global-tasks" aria-label="独立任务">
+              <div className="workspaces-global-heading">
+                <span>独立任务</span>
+                <span className="workspaces-panel-heading-count">{standaloneTaskTotal}</span>
+              </div>
+              <div className="workspace-tasks is-global">
+                {[...globalGroup.tasks].sort((left, right) => taskRecency(right).localeCompare(taskRecency(left))).map((task) => (
+                  <TaskItem
+                    key={task.id}
+                    task={task}
+                    parentNames={[]}
+                    liveTitles={sessionTitles ?? undefined}
+                    activeTaskId={activeTaskId}
+                    activeSessionId={selectedSessionId}
+                    onOpen={() => openTask(globalGroup, task)}
+                    onOpenSession={(session) => openSession(globalGroup, session)}
+                    onRequestNewSession={() => setPendingNewSessionTask(task)}
+                    onClearSessions={async () => {
+                      const ids = task.sessions.map((session) => session.id);
+                      await removeSessions(ids, task);
+                      toast(`已清空任务「${task.name}」的 ${ids.length} 个终端`, "info");
+                      await reload();
+                    }}
+                    onDeleteSession={async (session) => {
+                      const label = listSessionLabel(
+                        withLiveSessionTitle(session, sessionTitles?.[session.id], [task.name]),
+                        task.sessions.indexOf(session),
+                        [task.name],
+                      );
+                      await removeSessions([session.id], task);
+                      toast(`已删除终端「${label}」`, "info");
+                      await reload();
+                    }}
+                    onRename={async (name) => {
+                      const updated = await httpWorkspacesRepository.updateTask(task.id, { name });
+                      toast(`已将任务「${task.name}」重命名为「${updated.name}」`, "success");
+                      await reload();
+                    }}
+                    onDelete={async () => {
+                      await httpWorkspacesRepository.deleteTask(task.id, true);
+                      await runtime()?.refreshSessions();
+                      if (activeTaskId === task.id) runtime()?.closeWorkspace();
+                      toast(`已删除任务「${task.name}」`, "info");
+                      await reload();
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {projectGroups.length > 0 ? (
+            <>
+              <div
+                className="workspaces-overview"
+                aria-label={`${projectGroups.length} 个项目，${taskTotal} 项任务，${terminalTotal} 个终端`}
+              >
+                <span className="workspaces-overview-stat">
+                  <WandIcon name="folder" size={12}/><strong>{projectGroups.length}</strong><span>项目</span>
+                </span>
+                <span className="workspaces-overview-divider" aria-hidden="true"/>
+                <span className="workspaces-overview-stat">
+                  <WandIcon name="task" size={12}/><strong>{taskTotal}</strong><span>任务</span>
+                </span>
+                <span className="workspaces-overview-divider" aria-hidden="true"/>
+                <span className="workspaces-overview-stat">
+                  <WandIcon name="terminal" size={12}/><strong>{terminalTotal}</strong><span>终端</span>
+                </span>
+              </div>
+              <div className="workspaces-list">
+                {projectGroups.map((group) => (
+                  <TaskGroupSection
+                    key={group.workspaceId}
+                    group={group}
+                    directoryCount={projectGroups.length}
+                    liveTitles={sessionTitles ?? undefined}
+                    activeWorkspaceId={activeWorkspaceId}
+                    activeTaskId={activeTaskId}
+                    activeSessionId={selectedSessionId}
+                    onActiveTaskOpen={openTask}
+                    onOpenSession={openSession}
+                    onRequestNewSessionInTask={(task) => setPendingNewSessionTask(task)}
+                    onTasksChanged={reload}
+                  />
+                ))}
+              </div>
+            </>
+          ) : null}
         </>
       )}
-      {extraGroups}
+      </div> : null}
+      {!panelCollapsed ? extraGroups : null}
       {pendingNewSessionTask !== null ? (
         <WorkspaceAgentDialog
           open
@@ -947,6 +1048,6 @@ export function WorkspacesPanel({
           onDismiss={() => setPendingNewSessionTask(null)}
         />
       ) : null}
-    </div>
+    </section>
   );
 }

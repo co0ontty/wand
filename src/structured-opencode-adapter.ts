@@ -46,7 +46,7 @@ export function buildOpenCodeArgs(session: SessionSnapshot): string[] {
     || session.mode === "managed"
     || session.mode === "auto-edit"
   ) {
-    args.push("--dangerously-skip-permissions");
+    args.push("--auto");
   }
   if (session.claudeSessionId) args.push("--session", session.claudeSessionId);
   return args;

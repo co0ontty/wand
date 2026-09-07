@@ -10181,6 +10181,18 @@
       max-width: 560px;
       text-align: center;
     }
+    .blank-chat-inner.workspace-session-welcome {
+      max-width: min(720px, 100%);
+      text-align: left;
+    }
+    .workspace-welcome-form {
+      display: grid;
+      gap: 16px;
+    }
+    .workspace-welcome-form .wand-ui-button-primary,
+    .workspace-welcome-form .wand-new-session-submit {
+      width: 100%;
+    }
     .blank-chat-logo {
       width: 56px;
       height: 56px;
@@ -14979,6 +14991,141 @@
       }
     }
 
+    /* Sidebar information architecture: primary destinations first, then
+       standalone tasks, followed by tasks grouped by project space. */
+    #app[data-react-shell="enabled"] .sidebar-primary-nav {
+      display: grid;
+      gap: 2px;
+      padding: 2px 0 14px;
+      border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 72%, transparent);
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-primary-nav-item {
+      display: grid;
+      grid-template-columns: 22px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px;
+      min-height: 34px;
+      padding: 0 10px;
+      border: 0;
+      border-radius: 8px;
+      color: var(--text-secondary);
+      background: transparent;
+      font: inherit;
+      font-size: 0.8125rem;
+      text-align: left;
+      cursor: pointer;
+      transition: color 140ms ease, background-color 140ms ease, transform 120ms ease;
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-primary-nav-item svg {
+      color: var(--text-muted);
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-primary-nav-item:hover {
+      color: var(--text-primary);
+      background: color-mix(in srgb, var(--bg-hover, var(--bg-tertiary)) 76%, transparent);
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-primary-nav-item:hover svg {
+      color: var(--text-secondary);
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-primary-nav-item:active {
+      transform: scale(0.985);
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-primary-nav-item.is-primary {
+      color: var(--text-primary);
+      font-weight: 600;
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-primary-nav-item.is-primary svg {
+      color: var(--accent);
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-primary-nav-hint {
+      color: var(--text-muted);
+      font-size: 0.6875rem;
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-task-panel {
+      padding: 12px 0 8px;
+      border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 72%, transparent);
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-section-heading {
+      display: flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 0 6px;
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-section-heading-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 28px;
+      padding: 0 4px;
+      border: 0;
+      color: var(--text-secondary);
+      background: transparent;
+      font: inherit;
+      font-size: 0.6875rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      cursor: pointer;
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-section-chevron {
+      color: var(--text-muted);
+      transform: rotate(-90deg);
+      transition: transform 160ms ease;
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-section-chevron.open {
+      transform: rotate(0deg);
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-section-count {
+      color: var(--text-muted);
+      font-size: 0.625rem;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0;
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-task-list {
+      display: grid;
+      gap: 2px;
+      padding-top: 3px;
+    }
+
+    #app[data-react-shell="enabled"] .workspaces-panel {
+      padding-top: 12px;
+    }
+
+    #app[data-react-shell="enabled"] .workspaces-panel-heading {
+      min-height: 28px;
+      padding-left: 10px;
+      padding-right: 6px;
+    }
+
+    #app[data-react-shell="enabled"] .workspaces-panel-heading-toggle {
+      font-size: 0.6875rem;
+      letter-spacing: 0.08em;
+    }
+
+    #app[data-react-shell="enabled"] .workspaces-panel-content {
+      gap: 6px;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      #app[data-react-shell="enabled"] .sidebar-primary-nav-item,
+      #app[data-react-shell="enabled"] .sidebar-section-chevron {
+        transition: none;
+      }
+    }
+
     /* ── 工作空间 / 任务 面板 ── */
 
     /* ── 任务 / 项目分视图 ── */
@@ -15030,6 +15177,12 @@
     .projects-panel-state.error { color: var(--danger); }
     .projects-panel-empty { display: grid; justify-items: center; gap: 5px; border: 1px dashed var(--border-subtle); border-radius: 10px; padding: 18px 10px; color: var(--text-secondary); background: transparent; font: inherit; font-size: var(--font-size-xs); cursor: pointer; }
     .projects-panel-empty small { color: var(--text-muted); font-size: 0.625rem; }
+    .projects-panel-heading-toggle { display: inline-flex; min-width: 0; align-items: center; gap: 6px; border: 0; padding: 0; color: inherit; background: transparent; font: inherit; cursor: pointer; }
+    .projects-panel-heading-count, .workspaces-panel-heading-count { color: var(--text-muted); font-size: 0.625rem; font-weight: 550; }
+    .projects-panel-chevron, .workspaces-panel-chevron { color: var(--text-muted); transform: rotate(-90deg); transition: transform 160ms ease; }
+    .projects-panel-chevron.open, .workspaces-panel-chevron.open { transform: rotate(0deg); }
+    .projects-panel-content { display: flex; flex-direction: column; gap: 8px; }
+
     .projects-panel-empty-mark { display: inline-grid; width: 30px; height: 30px; place-items: center; border-radius: 9px; color: var(--accent); background: var(--accent-muted); }
 
     .projects-main-content { overflow: auto; }
@@ -15089,6 +15242,24 @@
       padding: 0 0 8px;
       min-width: 0;
     }
+
+    .workspaces-panel-heading { display: flex; align-items: center; justify-content: space-between; padding: 4px 6px 3px; color: var(--text-secondary); font-size: var(--font-size-xs); font-weight: 700; }
+    .workspaces-panel-heading-toggle { display: inline-flex; min-width: 0; align-items: center; gap: 6px; border: 0; padding: 0; color: inherit; background: transparent; font: inherit; cursor: pointer; }
+    .workspaces-panel-add { display: inline-grid; width: 24px; height: 24px; place-items: center; border: 0; border-radius: 7px; color: var(--text-muted); background: transparent; cursor: pointer; }
+    .workspaces-panel-add:hover { color: var(--accent); background: var(--accent-muted); }
+    .workspaces-panel-content { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+    .workspaces-global-tasks { display: flex; flex-direction: column; gap: 6px; padding-bottom: 10px; }
+    .workspaces-global-heading {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 4px;
+      color: var(--text-secondary);
+      font-size: var(--font-size-xs);
+      font-weight: 700;
+      letter-spacing: 0.06em;
+    }
+    .workspace-tasks.is-global { padding-left: 0; border-left: 0; }
 
     .workspaces-panel-state {
       padding: 24px 16px;

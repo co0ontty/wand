@@ -1943,7 +1943,18 @@ export const sessionPickerAndWorktreeStyles = String.raw`
 }
 
 .wand-workspace-agent-dialog {
-  width: min(620px, calc(100vw - var(--wand-safe-left) - var(--wand-safe-right) - 32px));
+  inset: var(--wand-safe-top) var(--wand-safe-right) var(--wand-safe-bottom) var(--wand-safe-left);
+  top: var(--wand-safe-top);
+  left: var(--wand-safe-left);
+  width: auto;
+  max-height: none;
+  border-radius: 0;
+  transform: none;
+}
+
+.wand-workspace-agent-dialog .wand-new-session-form {
+  min-height: 0;
+  flex: 1;
 }
 
 .wand-workspace-agent-body {
@@ -1972,6 +1983,47 @@ export const sessionPickerAndWorktreeStyles = String.raw`
 }
 
 /* ── 新建任务：worktree 开关卡片 + 提交摘要 ── */
+
+.wand-workspace-creation-kind {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  margin-bottom: 18px;
+  padding: 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-tertiary) 42%, transparent);
+}
+
+.wand-workspace-creation-kind-option {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--text-muted);
+  background: transparent;
+  font: inherit;
+  font-size: var(--font-size-xs);
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.wand-workspace-creation-kind-option:hover,
+.wand-workspace-creation-kind-option.active {
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+}
+
+.wand-workspace-creation-kind-option.active {
+  box-shadow: 0 1px 2px color-mix(in srgb, #000 14%, transparent);
+}
+
+.wand-workspace-project-select {
+  appearance: auto;
+}
 
 .wand-new-task-option {
   display: flex;
@@ -2769,8 +2821,18 @@ export const composerSelectStyles = String.raw`
 }
 
 .wand-composer-select-content-mode { min-width: min(210px, calc(100vw - 28px)); }
-.wand-composer-select-content-model { min-width: min(260px, calc(100vw - 28px)); }
+.wand-composer-select-content-model { min-width: min(280px, calc(100vw - 28px)); }
 .wand-composer-select-content-thinking { min-width: min(170px, calc(100vw - 28px)); }
+
+.wand-composer-select-content .wand-ui-select-search-input {
+  min-height: 32px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-secondary) 88%, transparent);
+}
+
+.wand-composer-select-content.wand-ui-select-searchable .wand-ui-select-viewport {
+  max-height: min(240px, calc(var(--radix-popover-content-available-height, 70vh) - 64px));
+}
 
 .wand-ui-select-item.wand-composer-select-item {
   min-height: 36px;

@@ -34,6 +34,8 @@ export interface UiSessionVm {
   startedAt?: string;
   endedAt?: string;
   claudeSessionId?: string;
+  /** Present when the session belongs to a named workspace task. */
+  workspaceTaskId?: string;
   worktree?: Readonly<{
     enabled: boolean;
     branch?: string;

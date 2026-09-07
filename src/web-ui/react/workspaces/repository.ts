@@ -1,4 +1,5 @@
 import type {
+  CreateStandaloneTaskRequest,
   CreateWorkspaceRequest,
   CreateWorkspaceTaskRequest,
   LayoutNode,
@@ -201,6 +202,15 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
         body: JSON.stringify(request),
       },
     ));
+  }
+
+  async createStandaloneTask(request: CreateStandaloneTaskRequest): Promise<WorkspaceTaskDetail> {
+    return readJson<WorkspaceTaskDetail>(await this.fetchImpl("/api/tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify(request),
+    }));
   }
 
   async getTask(taskId: string): Promise<WorkspaceTaskDetail> {

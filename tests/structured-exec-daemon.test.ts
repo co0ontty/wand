@@ -153,6 +153,40 @@ test("daemon-owned structured runs survive client reconnect and replay full logs
   }
 });
 
+test("daemon-owned structured spawn still delivers stdout and exit when the child finishes before subscribe", async () => {
+  const configPath = path.join(mkdtempSync(path.join(tmpdir(), "wand-structured-fast-exit-")), "config.json");
+  const daemon = startDaemonProcess(configPath);
+  try {
+    const paths = terminalDaemonPaths(configPath);
+    const waitForToken = async (): Promise<string> => {
+      for (let i = 0; i < 100; i++) {
+        try { return readFileSync(paths.tokenPath, "utf8").trim(); } catch { /* not yet */ }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      throw new Error("terminal daemon token never appeared");
+    };
+    const token = await waitForToken();
+    const client = new TerminalDaemonClient(paths.socketPath, token);
+    await client.connect();
+    const handle = await client.spawnStructured({
+      runId: structuredRunId("s-fast-exit"),
+      file: NODE,
+      args: ["-e", "process.stdout.write('{\"n\":1}\\n'); process.stderr.write('diag\\n'); process.exit(7);"],
+      cwd: tmpdir(),
+      env: {},
+    });
+    const collected = collect(handle);
+    await Promise.race([collected.done, new Promise((resolve) => setTimeout(resolve, 5000))]);
+    assert.ok(collected.stdout.includes('{"n":1}'), `stdout=${JSON.stringify(collected.stdout)}`);
+    assert.ok(collected.stderr.includes("diag"), `stderr=${JSON.stringify(collected.stderr)}`);
+    assert.equal(collected.exit?.exitCode, 7);
+    client.forgetRun(structuredRunId("s-fast-exit"));
+    client.disconnect();
+  } finally {
+    daemon.kill("SIGTERM");
+  }
+});
+
 async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 5000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {

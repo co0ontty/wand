@@ -19,11 +19,13 @@ import { prepareSessionWorktree } from "./git-worktree.js";
 import { getProviderCommandSessionId, getProviderResumeCommandSessionId } from "./resume-policy.js";
 import { normalizeThinkingEffort, thinkingEffortToClaudeCliEffort, thinkingEffortToClaudeSlashEffort, thinkingEffortToCodexReasoningEffort, thinkingEffortToOpenCodeVariant, thinkingEffortToPiLevel } from "./structured-provider-common.js";
 import {
+  consumePtyInputForTopic,
+  createPtyTopicLineBuffer,
   provisionalSessionTopic,
   SessionTopicCoordinator,
   sessionTopicBlocklistForSnapshot,
   shouldAcceptGeneratedSessionTitle,
-  shouldGenerateSessionTopicFromPtyInput,
+  type PtyTopicLineBuffer,
 } from "./session-topic.js";
 import { getErrorMessage } from "./error-utils.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
@@ -232,6 +234,8 @@ interface SessionRecord extends SessionSnapshot {
   claudeTaskDiscoveryTimer?: NodeJS.Timeout | null;
   /** Timer for delayed initial input delivery */
   initialInputTimer?: NodeJS.Timeout | null;
+  /** Assembles terminal-view keystrokes into a prompt for session titles. */
+  ptyTopicDraft?: PtyTopicLineBuffer;
   /** Claude project jsonl mtimes visible before this session started */
   knownClaudeProjectMtimes?: Map<string, number>;
   /** Codex rollout mtimes visible before this session started */
@@ -1736,7 +1740,9 @@ export class ProcessManager extends EventEmitter {
       console.error(`[ProcessManager] Rejecting input: session ${id} has no PTY`);
       throw new SessionInputError("Session is not running.", "SESSION_NO_PTY", id, record.status);
     }
-    if (shouldGenerateSessionTopicFromPtyInput(view, shortcutKey)) this.maybeGenerateSessionTopic(id, input);
+    if (!record.ptyTopicDraft) record.ptyTopicDraft = createPtyTopicLineBuffer();
+    const topicInput = consumePtyInputForTopic(record.ptyTopicDraft, input, view, shortcutKey);
+    if (topicInput) this.maybeGenerateSessionTopic(id, topicInput);
 
     // Log shortcut key interactions for auto-confirm and mode analysis
     if (shortcutKey) {

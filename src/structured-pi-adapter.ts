@@ -41,6 +41,57 @@ export function piToolName(name: string): string {
   return mapped[name.toLowerCase()] ?? `Pi/${name}`;
 }
 
+function applyPiAssistantMessage(state: StructuredRunnerTurnState, message: Record<string, unknown>): string | null {
+  if (typeof message.model === "string") state.model = message.model;
+  const usage = record(message.usage);
+  const cost = record(usage?.cost);
+  if (usage) {
+    state.usage = {
+      inputTokens: typeof usage.input === "number" ? usage.input : 0,
+      outputTokens: typeof usage.output === "number" ? usage.output : 0,
+      cacheReadInputTokens: typeof usage.cacheRead === "number" ? usage.cacheRead : 0,
+      cacheCreationInputTokens: typeof usage.cacheWrite === "number" ? usage.cacheWrite : 0,
+      totalCostUsd: typeof cost?.total === "number" ? cost.total : 0,
+    };
+  }
+
+  const texts: string[] = [];
+  const thinkings: string[] = [];
+  const parts = Array.isArray(message.content) ? message.content : [];
+  for (const part of parts) {
+    const item = record(part);
+    if (!item) continue;
+    if (item.type === "text") {
+      const text = typeof item.text === "string" ? item.text : textContent(item);
+      if (text) texts.push(text);
+    } else if (item.type === "thinking") {
+      const thinking = typeof item.thinking === "string"
+        ? item.thinking
+        : typeof item.text === "string" ? item.text : "";
+      if (thinking) thinkings.push(thinking);
+    }
+  }
+  const thinking = thinkings.join("");
+  if (thinking && !state.blocks.some((block) => block.type === "thinking")) {
+    state.blocks.push({ type: "thinking", thinking });
+  }
+  const text = texts.join("");
+  if (text) {
+    const lastText = [...state.blocks].reverse().find((block) => block.type === "text");
+    if (lastText?.type === "text") {
+      if (text.length >= lastText.text.length) lastText.text = text;
+    } else {
+      state.blocks.push({ type: "text", text });
+    }
+    if (text.length >= state.result.length) state.result = text;
+  }
+
+  if (message.stopReason === "error") {
+    return typeof message.errorMessage === "string" ? message.errorMessage : "Pi CLI execution failed";
+  }
+  return null;
+}
+
 export function applyPiEvent(state: StructuredRunnerTurnState, event: Record<string, unknown>): string | null {
   if (event.type === "session" && typeof event.id === "string") state.sessionId = event.id;
   if (event.type === "message_update") {
@@ -55,6 +106,15 @@ export function applyPiEvent(state: StructuredRunnerTurnState, event: Record<str
       const last = state.blocks.at(-1);
       if (last?.type === "thinking") last.thinking += delta;
       else state.blocks.push({ type: "thinking", thinking: delta });
+    } else if (update?.type === "text_end" && typeof update.content === "string" && update.content) {
+      const last = state.blocks.at(-1);
+      if (last?.type === "text") last.text = update.content;
+      else state.blocks.push({ type: "text", text: update.content });
+      if (update.content.length >= state.result.length) state.result = update.content;
+    } else if (update?.type === "thinking_end" && typeof update.content === "string" && update.content) {
+      const last = state.blocks.at(-1);
+      if (last?.type === "thinking") last.thinking = update.content;
+      else state.blocks.push({ type: "thinking", thinking: update.content });
     }
   }
   if (event.type === "tool_execution_start") {
@@ -66,20 +126,17 @@ export function applyPiEvent(state: StructuredRunnerTurnState, event: Record<str
     const id = typeof event.toolCallId === "string" ? event.toolCallId : "unknown";
     state.blocks.push({ type: "tool_result", tool_use_id: id, content: textContent(event.result), is_error: event.isError === true });
   }
-  if (event.type === "message_end") {
+  if (event.type === "message_end" || event.type === "turn_end") {
     const message = record(event.message);
-    if (message?.role === "assistant") {
-      if (typeof message.model === "string") state.model = message.model;
-      const usage = record(message.usage);
-      const cost = record(usage?.cost);
-      if (usage) state.usage = {
-        inputTokens: typeof usage.input === "number" ? usage.input : 0,
-        outputTokens: typeof usage.output === "number" ? usage.output : 0,
-        cacheReadInputTokens: typeof usage.cacheRead === "number" ? usage.cacheRead : 0,
-        cacheCreationInputTokens: typeof usage.cacheWrite === "number" ? usage.cacheWrite : 0,
-        totalCostUsd: typeof cost?.total === "number" ? cost.total : 0,
-      };
-      if (message.stopReason === "error") return typeof message.errorMessage === "string" ? message.errorMessage : "Pi CLI execution failed";
+    if (message?.role === "assistant") return applyPiAssistantMessage(state, message);
+  }
+  if (event.type === "agent_end" && Array.isArray(event.messages)) {
+    for (const raw of event.messages) {
+      const message = record(raw);
+      if (message?.role === "assistant") {
+        const error = applyPiAssistantMessage(state, message);
+        if (error) return error;
+      }
     }
   }
   return null;

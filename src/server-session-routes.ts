@@ -671,7 +671,7 @@ export function registerSessionRoutes(
     const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner; provider?: string; worktreeEnabled?: boolean; model?: string; thinkingEffort?: string; sessionSource?: unknown; automationId?: unknown; workspaceId?: string; workspaceTaskId?: string };
     try {
       if (body.provider && body.provider !== "claude" && body.provider !== "codex" && body.provider !== "opencode" && body.provider !== "grok" && body.provider !== "qoder" && body.provider !== "pi") {
-        res.status(400).json({ error: "结构化会话当前仅支持 Claude、Codex、OpenCode、Grok 或 Qoder provider。" });
+        res.status(400).json({ error: "结构化会话当前仅支持 Claude、Codex、OpenCode、Grok、Qoder 或 Pi provider。" });
         return;
       }
       const provider: SessionProvider = body.provider === "codex" || body.provider === "opencode" || body.provider === "grok" || body.provider === "qoder" || body.provider === "pi" ? body.provider : "claude";

@@ -40,6 +40,7 @@ export interface Workspace {
   id: string;
   name: string;
   cwd: string;
+  kind?: "project" | "global";
   defaultProvider?: WorkspaceProvider;
   layout: LayoutNode | null;
   createdAt: string;
@@ -88,6 +89,7 @@ export interface WorkspaceTask {
   workspaceId: string;
   name: string;
   worktree: WorkspaceTaskWorktree | null;
+  cwd?: string;
   layout: TaskWindowLayout | null;
   status: WorkspaceTaskStatus;
   createdAt: string;
@@ -122,6 +124,8 @@ export interface TaskDirectoryGroup {
   workspaceName: string;
   workspaceCwd: string;
   synthetic?: boolean;
+  /** Hidden global workspace that holds standalone tasks. */
+  global?: boolean;
   tasks: TaskSummary[];
   standaloneSessions: WorkspaceSessionSummary[];
 }
@@ -160,7 +164,15 @@ export interface WorkspaceWorktreeOverview {
 export interface CreateWorkspaceTaskRequest {
   name: string;
   baseRef?: string;
+  /** Optional directory override, used by standalone tasks that mount a folder. */
+  cwd?: string;
   /** 显式 false 时跳过独立 worktree，会话直接跑在项目目录；缺省为 true。 */
+  worktree?: boolean;
+}
+
+export interface CreateStandaloneTaskRequest {
+  name: string;
+  cwd?: string;
   worktree?: boolean;
 }
 
@@ -206,6 +218,7 @@ export interface WorkspacesRepository {
   // 任务
   listTasks(workspaceId: string): Promise<WorkspaceTask[]>;
   createTask(workspaceId: string, request: CreateWorkspaceTaskRequest): Promise<WorkspaceTaskDetail>;
+  createStandaloneTask(request: CreateStandaloneTaskRequest): Promise<WorkspaceTaskDetail>;
   getTask(taskId: string): Promise<WorkspaceTaskDetail>;
   updateTask(taskId: string, patch: UpdateWorkspaceTaskRequest): Promise<WorkspaceTask>;
   deleteTask(taskId: string, cascade?: boolean): Promise<void>;

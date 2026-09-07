@@ -7,7 +7,7 @@ import {
   ComposerSelectController,
   type ComposerSelectMount,
 } from "../src/web-ui/react/composer-select/controller.ts";
-import { WandSelect } from "../src/web-ui/react/ui/select.tsx";
+import { filterSelectOptions, WandSelect } from "../src/web-ui/react/ui/select.tsx";
 import {
   normalizeAvailableComposerValue,
   normalizeComposerModelValue,
@@ -57,6 +57,36 @@ test("WandSelect accepts the composer default-model empty value", () => {
   assert.match(html, /aria-label="模型"/);
 });
 
+test("filterSelectOptions matches model id and label keywords", () => {
+  const options = [
+    { value: "", label: "默认 · Claude Sonnet 4.6" },
+    { value: "claude-opus-4-6", label: "Opus 4.6" },
+    { value: "openai/gpt-5.4", label: "GPT-5.4" },
+    { value: "moonshot/kimi-k2.5", label: "Kimi K2.5" },
+  ];
+  assert.deepEqual(filterSelectOptions(options, "  ").map((item) => item.value), options.map((item) => item.value));
+  assert.deepEqual(filterSelectOptions(options, "opus").map((item) => item.value), ["claude-opus-4-6"]);
+  assert.deepEqual(filterSelectOptions(options, "GPT 5.4").map((item) => item.value), ["openai/gpt-5.4"]);
+  assert.deepEqual(filterSelectOptions(options, "默认").map((item) => item.value), [""]);
+  assert.equal(filterSelectOptions(options, "kimi xyz").length, 0);
+});
+
+test("searchable WandSelect keeps the composer trigger contract", () => {
+  const html = renderToStaticMarkup(React.createElement(WandSelect, {
+    value: "",
+    placeholder: "默认",
+    ariaLabel: "模型",
+    searchable: true,
+    searchPlaceholder: "搜索模型",
+    options: [
+      { value: "", label: "默认 · 跟随服务端" },
+      { value: "sonnet", label: "Sonnet" },
+    ],
+  }));
+  assert.match(html, /role="combobox"|aria-haspopup="listbox"/);
+  assert.match(html, /aria-label="模型"/);
+});
+
 test("composer select values always resolve to a rendered option", () => {
   assert.equal(normalizeComposerModelValue("default"), "");
   assert.equal(normalizeComposerModelValue("sonnet"), "sonnet");
@@ -88,4 +118,6 @@ test("composer config markup delegates selection to the React WandSelect host", 
   assert.match(renderBlock, /data-models-refresh-scope/);
   assert.doesNotMatch(renderBlock, /<select/);
   assert.match(host, /<WandSelect/);
+  assert.match(host, /searchable=\{mount.control === "model"\}/);
+  assert.match(host, /searchPlaceholder="搜索模型"/);
 });

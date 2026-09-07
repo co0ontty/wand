@@ -364,3 +364,54 @@ test("sessions bind to a workspace task and are listed under it", () => {
 
   rmSync(root, { recursive: true, force: true });
 });
+
+test("standalone tasks use the global scratch workspace and stay off the project list", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-task-global-"));
+  const mounted = mkdtempSync(path.join(os.tmpdir(), "wand-task-mounted-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const { baseUrl, close } = await startWorkspaceApp(storage);
+  try {
+    let res = await fetch(`${baseUrl}/api/tasks`, json({ name: "  " }));
+    assert.equal(res.status, 400);
+
+    res = await fetch(`${baseUrl}/api/tasks`, json({ name: "随口问问" }));
+    assert.equal(res.status, 201);
+    const standalone = await res.json() as {
+      id: string; name: string; workspaceId: string; cwd: string; isolated: boolean;
+    };
+    assert.equal(standalone.name, "随口问问");
+    assert.equal(standalone.isolated, false);
+    assert.ok(standalone.cwd.includes("scratch"));
+    assert.equal(existsSync(standalone.cwd), true);
+
+    res = await fetch(`${baseUrl}/api/workspaces`);
+    const projects = await res.json() as Array<{ id: string; kind?: string }>;
+    assert.equal(projects.length, 0);
+    assert.equal(projects.some((project) => project.id === standalone.workspaceId), false);
+
+    res = await fetch(`${baseUrl}/api/tasks`, json({ name: "挂目录的独立任务", cwd: mounted, worktree: false }));
+    assert.equal(res.status, 201);
+    const mountedTask = await res.json() as { id: string; cwd: string; isolated: boolean };
+    assert.equal(mountedTask.isolated, false);
+    assert.equal(realpathSync(mountedTask.cwd), realpathSync(mounted));
+
+    res = await fetch(`${baseUrl}/api/tasks`);
+    const groups = await res.json() as Array<{
+      workspaceId: string; global?: boolean; tasks: Array<{ id: string }>;
+    }>;
+    assert.equal(groups.length, 1);
+    assert.equal(groups[0].global, true);
+    assert.deepEqual(groups[0].tasks.map((task) => task.id).sort(), [standalone.id, mountedTask.id].sort());
+
+    const project = await fetch(`${baseUrl}/api/workspaces`, json({ name: "Acme", cwd: root }))
+      .then((response) => response.json() as Promise<{ id: string }>);
+    res = await fetch(`${baseUrl}/api/workspaces`);
+    const listed = await res.json() as Array<{ id: string }>;
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0].id, project.id);
+  } finally {
+    await close();
+    rmSync(root, { recursive: true, force: true });
+    rmSync(mounted, { recursive: true, force: true });
+  }
+});

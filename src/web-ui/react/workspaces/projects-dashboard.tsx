@@ -41,14 +41,14 @@ export function ProjectsDashboard(): React.ReactElement {
         <div><h2>我的项目</h2><span>{projects.length} 个项目</span></div>
         <div className="projects-dashboard-actions">
           <label className="projects-dashboard-search"><WandIcon name="eye" size={15}/><input value={query} onChange={(event) => setQuery(event.currentTarget.value)} placeholder="搜索项目" aria-label="搜索项目"/></label>
-          <button type="button" className="projects-dashboard-new" onClick={() => workspacesController.open()}><WandIcon name="plus" size={15}/>新建项目</button>
+          <button type="button" className="projects-dashboard-new" onClick={() => workspacesController.open(undefined, "project")}><WandIcon name="plus" size={15}/>新建项目</button>
         </div>
       </div>
 
       {loading ? <div className="projects-dashboard-state">加载项目中…</div> : null}
       {error ? <div className="projects-dashboard-state error">{error}</div> : null}
       {!loading && !error && filtered.length === 0 ? (
-        <div className="projects-dashboard-empty"><span className="projects-dashboard-empty-icon"><WandIcon name="folder" size={22}/></span><strong>{query ? "没有匹配的项目" : "还没有项目"}</strong><span>{query ? "换个关键词试试" : "创建第一个项目，开始组织你的任务"}</span>{!query ? <button type="button" onClick={() => workspacesController.open()}>＋ 新建项目</button> : null}</div>
+        <div className="projects-dashboard-empty"><span className="projects-dashboard-empty-icon"><WandIcon name="folder" size={22}/></span><strong>{query ? "没有匹配的项目" : "还没有项目"}</strong><span>{query ? "换个关键词试试" : "创建第一个项目，开始组织你的任务"}</span>{!query ? <button type="button" onClick={() => workspacesController.open(undefined, "project")}>＋ 新建项目</button> : null}</div>
       ) : null}
       <div className="projects-dashboard-grid">
         {filtered.map((project) => (

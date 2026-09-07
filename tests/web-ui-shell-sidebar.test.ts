@@ -203,7 +203,6 @@ test("ShellSidebar SSR preserves native ids, key classes, groups, and action con
   const requiredIds = [
     "sessions-drawer-backdrop",
     "sessions-drawer",
-    "session-count",
     "sidebar-collapse-btn",
     "close-drawer-button",
     "sessions-panel",
