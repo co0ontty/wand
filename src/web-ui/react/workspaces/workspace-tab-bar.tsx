@@ -137,7 +137,7 @@ export function WorkspaceTabBar(): React.ReactElement | null {
   const [moving, setMoving] = React.useState<{ sessionId: string; dir: "h" | "v" } | null>(null);
   const [closingWindowId, setClosingWindowId] = React.useState<string | null>(null);
   const selectedId = snapshot.selected?.id ?? null;
-  const { detail, loading } = useActiveTaskDetail(context.taskId, refreshTick, selectedId);
+  const { detail } = useActiveTaskDetail(context.taskId, refreshTick, selectedId);
 
   React.useEffect(() => {
     setMoving(null);
@@ -175,8 +175,9 @@ export function WorkspaceTabBar(): React.ReactElement | null {
     runtime()?.saveTaskLayout(taskLayout);
   }, [context.layout, context.taskId, detail, taskLayout]);
 
-  // 无活动任务 → 不渲染标签栏（SSR 与 reactShell=0 兜底同样走这里）。
-  if (!context.taskId) return null;
+  // 无活动任务，或还没有任何工作窗口：让主区全页 CLI 选择桌面单独出现，
+  // 避免空标签栏和选择器叠在一起。
+  if (!context.taskId || taskLayout.windows.length === 0) return null;
 
   const handleNewSession = async (target: WorkspaceSessionTarget, kind: WorkspaceSessionKind) => {
     if (!context.taskId || !context.workspaceId) {
@@ -257,12 +258,7 @@ export function WorkspaceTabBar(): React.ReactElement | null {
   return (
     <div className="workspace-tab-bar" role="tablist" aria-label={`任务 ${context.taskName} 的工作窗口标签`}>
       <div className="workspace-tab-bar-list">
-        {!loading && taskLayout.windows.length === 0 ? (
-          <span className="workspace-tab-bar-empty">该任务还没有工作窗口</span>
-        ) : taskLayout.windows.length === 0 ? (
-          <span className="workspace-tab-bar-empty">加载中…</span>
-        ) : (
-          taskLayout.windows.map((window) => {
+        {taskLayout.windows.map((window) => {
             const active = window.id === taskLayout.activeWindowId;
             const presentation = windowPresentation(window, sessionById, parentNames);
             const containsMoving = moving
@@ -306,8 +302,7 @@ export function WorkspaceTabBar(): React.ReactElement | null {
                 </button>
               </div>
             );
-          })
-        )}
+          })}
         <button
           type="button"
           className="workspace-tab-add"

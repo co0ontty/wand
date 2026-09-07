@@ -137,7 +137,7 @@ function ShellBlankChat({ className, queueRef, workspaceTask, workspaceProject }
         <WorkspaceWelcomeChooser
           eyebrow={workspaceTask.workspaceName || undefined}
           title={workspaceTask.taskName}
-          subtitle="这个任务还没有工作窗口。选择 CLI 工具，以及结构化或 PTY。"
+          subtitle="选择 CLI 工具，以及结构化或 PTY，开始这个任务。"
           cwd={workspaceTask.cwd}
           submitLabel="启动 "
           onStart={startInTask}

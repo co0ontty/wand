@@ -1943,18 +1943,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
 }
 
 .wand-workspace-agent-dialog {
-  inset: var(--wand-safe-top) var(--wand-safe-right) var(--wand-safe-bottom) var(--wand-safe-left);
-  top: var(--wand-safe-top);
-  left: var(--wand-safe-left);
-  width: auto;
-  max-height: none;
-  border-radius: 0;
-  transform: none;
-}
-
-.wand-workspace-agent-dialog .wand-new-session-form {
-  min-height: 0;
-  flex: 1;
+  width: min(620px, calc(100vw - var(--wand-safe-left) - var(--wand-safe-right) - 32px));
 }
 
 .wand-workspace-agent-body {

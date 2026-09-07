@@ -180,6 +180,14 @@ test("opening an empty workspace task keeps creation user-driven", () => {
   assert.doesNotMatch(openTask, /startSessionInCwd/);
   const openWorkspace = source.slice(source.indexOf("openWorkspace(workspace"), source.indexOf("closeWorkspace()"));
   assert.match(openWorkspace, /goHome\(\)/);
+  const newTaskSession = source.slice(source.indexOf("newTaskSession(payload"));
+  assert.match(newTaskSession, /reconcileTaskWindowLayout\(current, \[\.\.\.existing, sessionId\], sessionId\)/);
+});
+
+test("empty task tab bar yields to the full-page CLI desktop", () => {
+  const source = readFileSync(new URL("../src/web-ui/react/workspaces/workspace-tab-bar.tsx", import.meta.url), "utf8");
+  assert.match(source, /!context\.taskId \|\| taskLayout\.windows\.length === 0/);
+  assert.doesNotMatch(source, /该任务还没有工作窗口/);
 });
 
 test("new task dialog can create a standalone task without find-or-create project", () => {

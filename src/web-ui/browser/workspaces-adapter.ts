@@ -1,5 +1,5 @@
 import { configureWorkspacesRuntime } from "../react/workspaces/controller";
-import { clearActiveWorkspaceContext, setActiveWorkspaceContext } from "../react/workspaces/workspace-context";
+import { clearActiveWorkspaceContext, setActiveWorkspaceContext, workspaceContextStore } from "../react/workspaces/workspace-context";
 import { closeReactOverlays } from "./react-overlay-coordinator";
 import { dismissDrawerIfOverlay, goHome, refreshAll, selectSession, startSessionInCwd } from "./session-engine";
 import { getEffectiveCwd } from "./render";
@@ -19,6 +19,7 @@ import { orderWorkspaceSessions } from "../react/workspaces/session-order";
 import {
   activeWorkWindow,
   activeWorkWindowTab,
+  layoutSessionIds,
   reconcileTaskWindowLayout,
 } from "../react/workspaces/window-layout";
 import type {
@@ -114,7 +115,7 @@ export function installWorkspacesLegacyAdapter(): void {
       }).catch(() => { /* 任务详情加载失败时保留当前界面，等待下一次用户操作。 */ });
     },
     newTaskSession(payload: NewTaskSessionPayload) {
-      // 标签栏「+」/ 窗格「+」：在同一任务 worktree 再起一个绑定会话；
+      // 标签栏「+」/ 窗格「+」/ 空白桌面：在同一任务 worktree 再起一个绑定会话；
       // startSessionInCwd 在 resolve 前已把新会话写入 state.selectedId。
       // PTY 路径回传 sessionId 字符串，结构化路径回传会话对象，这里统一成 id。
       return Promise.resolve(startSessionInCwd(payload.cwd, {
@@ -124,12 +125,22 @@ export function installWorkspacesLegacyAdapter(): void {
         provider: payload.target === "shell" ? undefined : payload.target,
         kind: payload.target === "shell" ? "pty" : (payload.kind ?? "structured"),
       })).then((created) => {
-        if (typeof created === "string" && created) return created;
-        if (created && typeof created === "object" && "id" in created) {
-          const id = (created as { id?: unknown }).id;
-          if (typeof id === "string" && id) return id;
+        const sessionId = typeof created === "string" && created
+          ? created
+          : (created && typeof created === "object" && "id" in created && typeof created.id === "string" && created.id
+            ? created.id
+            : undefined);
+        if (!sessionId) return undefined;
+        if (state.activeWorkspaceTaskId === payload.taskId) {
+          const current = workspaceContextStore.getSnapshot().layout;
+          const existing = current
+            ? current.windows.flatMap((window) => layoutSessionIds(window.layout))
+            : [];
+          const next = reconcileTaskWindowLayout(current, [...existing, sessionId], sessionId);
+          setActiveWorkspaceContext({ layout: next });
+          void httpWorkspacesRepository.saveTaskLayout(payload.taskId, next).catch(() => { /* ignore */ });
         }
-        return undefined;
+        return sessionId;
       });
     },
     startWorktreeMergeAgent(payload) {
