@@ -194,44 +194,38 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
         return;
       }
 
-      if (selectedProject) {
-        const created = await repository.createTask(selectedProject.id, {
+      const created = selectedProject
+        ? await repository.createTask(selectedProject.id, {
           name: trimmedName,
           worktree: worktreeEnabled,
+        })
+        : await repository.createStandaloneTask({
+          name: trimmedName,
+          cwd: mountedCwd || undefined,
+          worktree: mountedCwd ? worktreeEnabled : false,
         });
-        await startTaskSession(selectedProject, created);
+      const workspace = selectedProject ?? {
+        id: created.workspaceId,
+        name: "",
+        kind: "global" as const,
+        defaultProvider: defaults?.defaultProvider,
+      };
+      try {
+        await startTaskSession(workspace, created);
         if (!created.isolated && created.worktreeError) {
           runtime.toast(created.worktreeError, "warning");
         } else {
           runtime.toast(
-            `已创建任务「${created.name}」${created.isolated ? "（独立 worktree）" : ""}`,
+            selectedProject
+              ? `已创建任务「${created.name}」${created.isolated ? "（独立 worktree）" : ""}`
+              : mountedCwd
+                ? `已创建独立任务「${created.name}」`
+                : `已创建独立任务「${created.name}」（全局临时目录）`,
             "success",
           );
         }
-        workspacesController.close();
-        return;
-      }
-
-      const created = await repository.createStandaloneTask({
-        name: trimmedName,
-        cwd: mountedCwd || undefined,
-        worktree: mountedCwd ? worktreeEnabled : false,
-      });
-      await startTaskSession({
-        id: created.workspaceId,
-        name: "",
-        kind: "global",
-        defaultProvider: defaults?.defaultProvider,
-      }, created);
-      if (!created.isolated && created.worktreeError) {
-        runtime.toast(created.worktreeError, "warning");
-      } else {
-        runtime.toast(
-          mountedCwd
-            ? `已创建独立任务「${created.name}」`
-            : `已创建独立任务「${created.name}」（全局临时目录）`,
-          "success",
-        );
+      } catch (sessionError) {
+        runtime.toast(presentError(sessionError, "任务已创建，但无法启动会话。"), "warning");
       }
       workspacesController.close();
     } catch (createError) {

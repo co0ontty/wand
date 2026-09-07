@@ -26,7 +26,6 @@ import { listSessionLabel, withLiveSessionTitle } from "./session-order";
 import {
   isDirectoryExpanded,
   isTaskSessionsExpanded,
-  showsDirectoryDisclosure,
   showsTaskSessionDisclosure,
 } from "./task-tree";
 
@@ -571,9 +570,11 @@ function TaskGroupSection({
   const [collapsed, setCollapsed] = React.useState(false);
   const [looseCollapsed, setLooseCollapsed] = React.useState(false);
   const [worktreeDialogOpen, setWorktreeDialogOpen] = React.useState(false);
-  const collapsible = showsDirectoryDisclosure(directoryCount);
+  const [confirmingDelete, setConfirmingDelete] = React.useState(false);
+  const [deleting, setDeleting] = React.useState(false);
   const open = isDirectoryExpanded(collapsed, directoryCount);
   const looseOpen = !looseCollapsed;
+  const canDelete = !group.synthetic && !group.global;
 
   React.useEffect(() => {
     if (activeWorkspaceId === group.workspaceId) setCollapsed(false);
@@ -585,6 +586,23 @@ function TaskGroupSection({
     if (activeTaskId === task.id) runtime()?.closeWorkspace();
     toast(`已删除任务「${task.name}」`, "info");
     await onTasksChanged();
+  };
+
+  const handleDeleteDirectory = async () => {
+    if (!canDelete || deleting) return;
+    setDeleting(true);
+    try {
+      await httpWorkspacesRepository.remove(group.workspaceId, true);
+      await runtime()?.refreshSessions();
+      if (activeWorkspaceId === group.workspaceId) runtime()?.closeWorkspace();
+      toast(`已删除项目「${group.workspaceName}」`, "info");
+      await onTasksChanged();
+    } catch (cause) {
+      toast(presentError(cause, "无法删除项目。"), "danger");
+    } finally {
+      setDeleting(false);
+      setConfirmingDelete(false);
+    }
   };
 
   const handleStartMergeAgent = async (prompt: string) => {
@@ -622,11 +640,11 @@ function TaskGroupSection({
       <div className="workspace-row">
         <button
           type="button"
-          className={classNames("workspace-row-main", !collapsible && "is-static")}
-          aria-expanded={collapsible ? open : undefined}
+          className="workspace-row-main"
+          aria-expanded={open}
           title={group.workspaceCwd}
           onClick={() => {
-            if (!group.synthetic && group.tasks.length === 0) {
+            if (!group.synthetic && !group.global && group.tasks.length === 0) {
               runtime()?.openWorkspace({
                 id: group.workspaceId,
                 name: group.workspaceName,
@@ -635,9 +653,9 @@ function TaskGroupSection({
                 createdAt: "",
                 lastOpenedAt: null,
               });
+              setCollapsed(false);
               return;
             }
-            if (!collapsible) return;
             setCollapsed((current) => !current);
           }}
         >
@@ -654,9 +672,7 @@ function TaskGroupSection({
               </span>
             </span>
           </span>
-          {collapsible ? (
-            <WandIcon name="chevron" size={11} className={classNames("workspace-row-chevron", open && "open")}/>
-          ) : null}
+          <WandIcon name="chevron" size={11} className={classNames("workspace-row-chevron", open && "open")}/>
         </button>
         <span className="workspace-row-actions">
           {!group.synthetic && (
@@ -687,6 +703,51 @@ function TaskGroupSection({
               <WandIcon name="merge" size={13}/>
             </button>
           )}
+          {canDelete && !confirmingDelete ? (
+            <button
+              type="button"
+              className="workspace-row-action delete"
+              title={`删除项目 ${group.workspaceName}`}
+              aria-label={`删除项目 ${group.workspaceName}`}
+              disabled={deleting}
+              onClick={(event) => {
+                event.stopPropagation();
+                setConfirmingDelete(true);
+              }}
+            >
+              <WandIcon name="trash" size={13}/>
+            </button>
+          ) : null}
+          {canDelete && confirmingDelete ? (
+            <span className="workspace-row-confirm">
+              <button
+                type="button"
+                className="workspace-row-action confirm"
+                title="确认删除项目及其任务"
+                aria-label={`确认删除项目 ${group.workspaceName}`}
+                disabled={deleting}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void handleDeleteDirectory();
+                }}
+              >
+                <WandIcon name="trash" size={13}/>
+              </button>
+              <button
+                type="button"
+                className="workspace-row-action cancel"
+                title="取消删除"
+                aria-label="取消删除项目"
+                disabled={deleting}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setConfirmingDelete(false);
+                }}
+              >
+                <WandIcon name="close" size={13}/>
+              </button>
+            </span>
+          ) : null}
         </span>
       </div>
       {open && (
@@ -847,6 +908,12 @@ export function WorkspacesPanel({
       toast("工作空间运行环境尚未就绪，请刷新页面后重试。", "warning");
       return;
     }
+    const task = group.tasks.find((item) => item.id === session.workspaceTaskId)
+      ?? group.tasks.find((item) => item.sessions.some((entry) => entry.id === session.id));
+    if (task) {
+      void Promise.resolve(openTask(group, task)).then(() => rt.selectSession(session.id));
+      return;
+    }
     if (!group.synthetic && !group.global) {
       rt.openWorkspace({
         id: group.workspaceId,
@@ -858,7 +925,7 @@ export function WorkspacesPanel({
       });
     }
     rt.selectSession(session.id);
-  }, []);
+  }, [openTask]);
 
   const newSessionInTask = React.useCallback(async (
     group: TaskDirectoryGroup,
@@ -885,13 +952,22 @@ export function WorkspacesPanel({
   const globalGroup = groups.find((group) => group.global);
   const projectGroups = groups.filter((group) => !group.global);
   const hasContent = groups.some((group) => group.tasks.length > 0 || group.standaloneSessions.length > 0);
-  const taskTotal = groups.reduce((sum, group) => sum + group.tasks.length, 0);
   const standaloneTaskTotal = globalGroup?.tasks.length ?? 0;
-  const terminalTotal = groups.reduce((sum, group) => (
+  const taskTotal = projectGroups.reduce((sum, group) => sum + group.tasks.length, 0);
+  const terminalTotal = projectGroups.reduce((sum, group) => (
     sum
       + group.standaloneSessions.length
       + group.tasks.reduce((taskSum, task) => taskSum + task.sessions.length, 0)
   ), 0);
+
+  const sessionRefresh = React.useRef(true);
+  React.useEffect(() => {
+    if (sessionRefresh.current) {
+      sessionRefresh.current = false;
+      return;
+    }
+    setRefreshTick((n) => n + 1);
+  }, [selectedSessionId, activeTaskId]);
 
   return (
     <section className={classNames("workspaces-panel", panelCollapsed && "is-collapsed")} aria-label={headingLabel}>
@@ -940,7 +1016,7 @@ export function WorkspacesPanel({
         </div>
       ) : (
         <>
-          {globalGroup && globalGroup.tasks.length > 0 ? (
+          {globalGroup && (globalGroup.tasks.length > 0 || globalGroup.standaloneSessions.length > 0) ? (
             <div className="workspaces-global-tasks" aria-label="独立任务">
               <div className="workspaces-global-heading">
                 <span>独立任务</span>
@@ -988,6 +1064,32 @@ export function WorkspacesPanel({
                     }}
                   />
                 ))}
+                {globalGroup.standaloneSessions.length > 0 ? (
+                  <details className="workspace-loose-sessions" open>
+                    <summary>未分组会话（{globalGroup.standaloneSessions.length}）</summary>
+                    <div className="workspace-loose-session-list">
+                      {globalGroup.standaloneSessions.map((session, index) => (
+                        <TaskSessionItem
+                          key={session.id}
+                          session={session}
+                          index={index}
+                          parentNames={[]}
+                          liveTitle={sessionTitles?.[session.id]}
+                          active={selectedSessionId === session.id}
+                          onOpen={() => openSession(globalGroup, session)}
+                          onDelete={async () => {
+                            await removeSessions([session.id], null);
+                            toast(`已删除终端「${listSessionLabel(
+                              withLiveSessionTitle(session, sessionTitles?.[session.id]),
+                              index,
+                            )}」`, "info");
+                            await reload();
+                          }}
+                        />
+                      ))}
+                    </div>
+                  </details>
+                ) : null}
               </div>
             </div>
           ) : null}

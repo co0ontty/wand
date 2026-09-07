@@ -1,4 +1,4 @@
-import { type FormEvent, type KeyboardEvent, useRef, useState } from "react";
+import { type FormEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
 
 import { nextChoice, type ChoiceNavigationKey } from "../new-session/choice-navigation";
 import { httpNewSessionRepository } from "../new-session/repository";
@@ -151,6 +151,23 @@ export function WorkspaceWelcomeChooser({
   const [kind, setKind] = useState<WorkspaceSessionKind>("structured");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    void httpNewSessionRepository.loadConfig()
+      .then((config) => {
+        if (cancelled) return;
+        const savedProvider = WORKSPACE_AGENT_OPTIONS.some((option) => option.value === config.defaultProvider)
+          ? config.defaultProvider as WorkspaceSessionTarget
+          : null;
+        if (savedProvider && savedProvider !== "shell") setTarget(savedProvider);
+        if (config.defaultSessionKind === "pty" || config.defaultSessionKind === "structured") {
+          setKind(config.defaultSessionKind);
+        }
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();

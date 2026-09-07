@@ -650,6 +650,15 @@ export function ShellSidebar() {
             {narrow ? (
               <div className="sidebar-collapsed-tiles" aria-label="任务快捷操作">
                 <button
+                  className="sidebar-collapsed-tile expand"
+                  type="button"
+                  title="展开完整侧边栏"
+                  aria-label="展开完整侧边栏"
+                  onClick={() => void dispatch({ type: "layout.drawer.collapse" })}
+                >
+                  <WandIcon name="rail" size={16} className="sidebar-rail-icon is-collapsed"/>
+                </button>
+                <button
                   className="sidebar-collapsed-tile add"
                   type="button"
                   title={footerAction.label}

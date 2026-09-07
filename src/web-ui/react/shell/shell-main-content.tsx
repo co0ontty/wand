@@ -96,6 +96,7 @@ function ShellBlankChat({ className, queueRef, workspaceTask, workspaceProject }
         target,
         kind,
       });
+      void runtime.refreshSessions();
     } catch (error) {
       throw presentStartError(error, "无法在任务中启动会话。");
     }
@@ -124,6 +125,7 @@ function ShellBlankChat({ className, queueRef, workspaceTask, workspaceProject }
         target,
         kind,
       });
+      void runtime.refreshSessions();
     } catch (error) {
       throw presentStartError(error, "无法在项目中启动会话。");
     }

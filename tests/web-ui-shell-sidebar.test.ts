@@ -291,12 +291,14 @@ test("ShellSidebar collapsed rail still renders the unified task panel", () => {
     },
   }));
 
-  // 窄栏不再有散会话磁贴，改为极简任务轨：只有「新建任务」入口。
+  // 窄栏不再有散会话磁贴，改为极简任务轨：展开入口 + 新建任务。
   assert.match(html, /id="sessions-drawer" class="sidebar open pinned collapsed"/);
   assert.doesNotMatch(html, /class="sidebar-collapsed-tiles"[^>]*>[\s\S]*任务列表/);
   assert.doesNotMatch(html, /aria-label="任务列表"/);
+  assert.match(html, /aria-label="展开完整侧边栏"/);
   assert.match(html, /aria-label="新建任务"/);
   assert.doesNotMatch(html, /class="session-manage-bar/);
+
 });
 
 test("ShellSidebar primary action is always 新任务", () => {
