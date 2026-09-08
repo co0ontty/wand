@@ -623,16 +623,36 @@ export async function startServer(
   const storage = new WandStorage(resolveDatabasePath(configPath));
   const runtimeConfig = new RuntimeConfigState(config);
   const authService = new AuthService(storage);
+    // Helper to get current default models from storage (not from startup-captured config)
+  // This allows model preferences to update in real-time when user changes config via UI
+  const getCurrentDefaultModels = (): { claude: string; codex: string; opencode: string; grok: string; qoder: string; pi: string } => {
+    // Try to read from storage first (most up-to-date via UI settings)
+    // Falls back to config values for deployment settings
+    const prefStorage = storage;
+    if (prefStorage) {
+      return {
+        claude: prefStorage.getPreference("pref:defaultModel", config.defaultModel ?? ""),
+        codex: prefStorage.getPreference("pref:defaultCodexModel", config.defaultCodexModel ?? ""),
+        opencode: prefStorage.getPreference("pref:defaultOpenCodeModel", config.defaultOpenCodeModel ?? ""),
+        grok: prefStorage.getPreference("pref:defaultGrokModel", config.defaultGrokModel ?? ""),
+        qoder: prefStorage.getPreference("pref:defaultQoderModel", config.defaultQoderModel ?? ""),
+        pi: prefStorage.getPreference("pref:defaultPiModel", config.defaultPiModel ?? ""),
+      };
+    }
+    return getProviderDefaultModels(config);
+  };
+
   const getModelRefreshOptions = (): ModelRefreshOptions => {
     const injected = options.modelRefreshOptions?.() ?? {};
+    const currentDefaults = getCurrentDefaultModels();
     return {
       storage,
       inheritEnv: config.inheritEnv !== false,
       apiKey: process.env.ANTHROPIC_API_KEY,
       ...injected,
       configuredClaudeModels: [
-        getProviderDefaultModels(config).claude,
-        config.commitCli === "claude" ? config.commitModel : undefined,
+        currentDefaults.claude,
+        config.commitCli === "claude" ? (storage.getPreference("pref:commitModel", config.commitModel) ?? "") : undefined,
         ...(injected.configuredClaudeModels ?? []),
       ],
     };

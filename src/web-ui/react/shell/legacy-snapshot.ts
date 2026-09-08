@@ -222,8 +222,20 @@ function sessionToVm(
   };
 }
 
-function sortSessionVms(entries: UiSessionVm[]): UiSessionVm[] {
-  return entries.sort((left, right) => timestamp(right.startedAt) - timestamp(left.startedAt));
+/** 使用索引作为二级排序键，避免 startedAt 相同或缺失时导致位置跳动 */
+function sortSessionVms(entries: UiSessionVm[], allSessions: readonly LegacySession[]): UiSessionVm[] {
+  const sessionIdToIndex = new Map<string, number>();
+  allSessions.forEach((session, index) => {
+    if (session.id) sessionIdToIndex.set(session.id, index);
+  });
+  return entries.sort((left, right) => {
+    const leftTime = timestamp(left.startedAt);
+    const rightTime = timestamp(right.startedAt);
+    if (leftTime !== rightTime) {
+      return rightTime - leftTime;
+    }
+    return (sessionIdToIndex.get(right.id) ?? 0) - (sessionIdToIndex.get(left.id) ?? 0);
+  });
 }
 
 /** Derives the complete low-frequency React shell contract from legacy state. */
@@ -236,8 +248,8 @@ export function deriveLegacyUiSnapshot(
   const sessionVms = sessions.map((session) => sessionToVm(session, state, sessionSelection));
   const selected = sessionVms.find((session) => session.id === state.selectedId) ?? null;
   const selectedLegacy = sessions.find((session) => session.id === state.selectedId) ?? null;
-  const wand = sortSessionVms(sessionVms.filter((session) => session.source === "wand"));
-  const automation = sortSessionVms(sessionVms.filter((session) => session.source === "automation"));
+  const wand = sortSessionVms(sessionVms.filter((session) => session.source === "wand"), sessions);
+  const automation = sortSessionVms(sessionVms.filter((session) => session.source === "automation"), sessions);
 
   const mobile = environment.width <= 768;
   const drawerOpen = Boolean(state.sessionsDrawerOpen);

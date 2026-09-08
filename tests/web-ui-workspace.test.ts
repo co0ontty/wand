@@ -40,6 +40,9 @@ import {
   shortenWorkspacePath,
   workspacePathLeaf,
 } from "../src/web-ui/react/workspaces/workspaces-panel.js";
+import { SidebarDisclosure } from "../src/web-ui/react/workspaces/sidebar-disclosure.js";
+import { formatTaskRecency, sidebarSelection, taskActivity } from "../src/web-ui/react/workspaces/sidebar-task-meta.js";
+import type { TaskDirectoryGroup, TaskSummary } from "../src/web-ui/react/workspaces/types.js";
 import {
   HttpWorkspacesRepository,
   normalizeWorkspaceWorktreeOverview,
@@ -207,6 +210,70 @@ test("workspaces panel steers creation to the empty-state CTA without manual ref
   assert.doesNotMatch(html, /刷新项目列表|workspaces-panel-refresh/);
 });
 
+test("sidebar disclosure keeps content mounted but inert when collapsed", () => {
+  const collapsed = renderToStaticMarkup(createElement(SidebarDisclosure, {
+    id: "task-terminals", open: false, children: createElement("button", null, "终端"),
+  }));
+  assert.match(collapsed, /data-open="false" inert="" aria-hidden="true"/);
+  assert.match(collapsed, /<button>终端<\/button>/);
+  const expanded = renderToStaticMarkup(createElement(SidebarDisclosure, {
+    id: "task-terminals", open: true, children: "终端",
+  }));
+  assert.doesNotMatch(expanded, /inert=/);
+  assert.match(expanded, /data-open="true" aria-hidden="false"/);
+});
+
+test("task recency handles minute, hour, day, invalid and future timestamps", () => {
+  const now = new Date(2026, 8, 8, 12).getTime();
+  const ago = (minutes: number): string => new Date(now - minutes * 60_000).toISOString();
+  assert.equal(formatTaskRecency(ago(0), now), "刚刚");
+  assert.equal(formatTaskRecency(ago(-10), now), "刚刚");
+  assert.equal(formatTaskRecency(ago(59), now), "59分");
+  assert.equal(formatTaskRecency(ago(60), now), "1时");
+  assert.equal(formatTaskRecency(ago(1_440), now), "1天");
+  assert.equal(formatTaskRecency(ago(10_080), now), "9/1");
+  assert.equal(formatTaskRecency(new Date(2025, 11, 1).toISOString(), now), "2025/12/1");
+  assert.equal(formatTaskRecency("not-a-date", now), "");
+});
+
+test("task activity reflects live turns, not merely a running shell process", () => {
+  const task: TaskSummary = {
+    id: "task", workspaceId: "workspace", name: "任务", cwd: "/workspace", worktree: null,
+    layout: null, status: "active", isolated: false, createdAt: "", lastOpenedAt: null, sessions: [],
+  };
+  assert.equal(taskActivity(task), null);
+  assert.equal(taskActivity({ ...task, sessions: [{ id: "shell", status: "running" }] }), null);
+  assert.equal(taskActivity({ ...task, sessions: [{ id: "pty", ptyBusy: true }] }), "running");
+  assert.equal(taskActivity({ ...task, sessions: [{ id: "structured", inFlight: true }] }), "running");
+  assert.equal(taskActivity({ ...task, sessions: [
+    { id: "busy", inFlight: true }, { id: "failed", status: "failed" },
+  ] }), "attention");
+});
+
+test("sidebar restores task selection from a selected session without overriding an explicit workspace", () => {
+  const groups: TaskDirectoryGroup[] = [{
+    workspaceId: "global", workspaceName: "独立任务", workspaceCwd: "/scratch", global: true,
+    standaloneSessions: [{ id: "loose" }],
+    tasks: [{
+      id: "task", workspaceId: "global", name: "任务", cwd: "/scratch", worktree: null,
+      layout: null, status: "active", isolated: false, createdAt: "", lastOpenedAt: null,
+      sessions: [{ id: "terminal" }],
+    }],
+  }];
+  const empty = { workspaceId: null, taskId: null };
+  assert.deepEqual(sidebarSelection(groups, empty, "terminal"), { workspaceId: "global", taskId: "task" });
+  assert.deepEqual(sidebarSelection(groups, empty, "loose"), { workspaceId: "global", taskId: null });
+  assert.deepEqual(sidebarSelection(groups, empty, "missing"), empty);
+  assert.deepEqual(sidebarSelection(groups, { workspaceId: "other", taskId: null }, "terminal"), {
+    workspaceId: "other", taskId: null,
+  });
+});
+
+test("switching from a project to a standalone task clears the inherited directory", () => {
+  const source = readFileSync(new URL("../src/web-ui/react/workspaces/host.tsx", import.meta.url), "utf8");
+  assert.match(source, /setCwd\(project\?\.cwd \?\? ""\)/);
+});
+
 test("workspace path captions keep the leaf and hide redundant absolute prefixes", () => {
   assert.equal(workspacePathLeaf("/Users/me/Self/vibe_coding/wand"), "wand");
   assert.equal(shortenWorkspacePath("/Users/me/Self/vibe_coding/wand"), "…/vibe_coding/wand");
@@ -231,7 +298,7 @@ test("task list treats directories as group headers and exposes per-terminal del
   assert.match(panel, /className="workspace-task-menu"/);
   assert.match(panel, /删除项目/);
   assert.match(panel, /handleDeleteDirectory/);
-  assert.match(panel, /workspace-row-action delete/);
+  assert.match(panel, /className="workspace-task-menu-item danger"/);
   assert.doesNotMatch(panel, /role="button"[\s\S]{0,500}workspace-task-action/);
   assert.doesNotMatch(panel, /isolated \? "隔离" : "共享"/);
   assert.doesNotMatch(panel, /if \(!collapsible\) return/);
@@ -243,9 +310,11 @@ test("task list treats directories as group headers and exposes per-terminal del
   assert.match(styles, /\.workspace-tab-item\.active \.workspace-tab-item-close[\s\S]*?pointer-events:\s*auto/);
 });
 
-test("task session lists default to expanded so terminals stay visible after reload", () => {
+test("task session lists default to collapsed and retain explicit disclosure preferences", () => {
   const panel = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
-  assert.match(panel, /const \[collapsed, setCollapsed\] = React\.useState\(true\);\s*const \[confirming, setConfirming\]/);
+  assert.match(panel, /useSidebarCollapsed\(`task\.\$\{task.id\}`, true\)/);
+  assert.match(panel, /useSidebarCollapsed\(`project\.\$\{group.workspaceId\}`\)/);
+  assert.doesNotMatch(panel, /if \(isActive\) setCollapsed|setCollapsed\(false\); onOpen/);
   assert.match(panel, /canCollapseSessions \? \(/);
   assert.equal(showsDirectoryDisclosure(1), true);
   assert.equal(showsDirectoryDisclosure(2), true);
@@ -419,10 +488,10 @@ test("workspace worktree review normalizes cards and builds one bounded merge Ag
   assert.deepEqual(normalized.worktrees, []);
 });
 
-test("project rows expose a worktree count bubble and a multi-select dialog", () => {
+test("project menus retain worktree management and a multi-select dialog", () => {
   const panel = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
   const dialog = readFileSync(new URL("../src/web-ui/react/workspaces/workspace-worktree-dialog.tsx", import.meta.url), "utf8");
-  assert.match(panel, /workspace-row-action worktrees/);
+  assert.match(panel, /查看并合并 Worktree/);
   assert.match(panel, /startWorktreeMergeAgent/);
   assert.match(dialog, /role="checkbox"/);
   assert.match(dialog, /启动 Agent 合并/);

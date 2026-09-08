@@ -999,7 +999,7 @@ export class WandStorage {
   listWorkspaces(): Workspace[] {
     const rows = this.db
       .prepare(
-        "SELECT id, name, cwd, kind, default_provider, layout_json, created_at, last_opened_at FROM workspaces ORDER BY COALESCE(last_opened_at, created_at) DESC"
+        "SELECT id, name, cwd, kind, default_provider, layout_json, created_at, last_opened_at FROM workspaces ORDER BY created_at ASC, id ASC"
       )
       .all() as unknown as WorkspaceRow[];
     return rows.map(mapWorkspaceRow);

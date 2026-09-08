@@ -75,14 +75,21 @@ document.addEventListener("click", function(event) {
 
       // 三个来源各自在组内按时间倒序，辅助会话不会再改变普通 Wand 会话
       // 的展示顺序或窄栏编号。缺失来源按 interactive 兼容旧数据。
+      // 使用原始索引作为二级排序键，避免 startedAt 相同或缺失时位置跳动。
       function getSessionEntryGroups() {
         var wandEntries: any[] = [];
         var automationEntries: any[] = [];
-        state.sessions.forEach(function(s: any) {
+        state.sessions.forEach(function(s: any, idx: number) {
           var t = s.startedAt ? new Date(s.startedAt).getTime() : 0;
-          var entry = { kind: "session", ref: s, t: isFinite(t) ? t : 0 };
+          var entry = { kind: "session", ref: s, t: isFinite(t) ? t : 0, idx: idx };
           (isAutomationSession(s) ? automationEntries : wandEntries).push(entry);
         });
+        function sortSessionEntries(entries: any[]) {
+          return entries.sort(function(a, b) {
+            if (a.t !== b.t) return b.t - a.t;
+            return b.idx - a.idx;
+          });
+        }
         return {
           wand: sortSessionEntries(wandEntries),
           automation: sortSessionEntries(automationEntries)

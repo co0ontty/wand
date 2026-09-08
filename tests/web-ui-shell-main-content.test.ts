@@ -222,3 +222,13 @@ test("workspace task blank state offers an explicit Agent or shell choice", () =
   assert.match(source, /WorkspaceWelcomeChooser/);
   assert.match(source, /项目还是空白的。选择 CLI 工具和结构化 \/ PTY，开始第一个任务。/);
 });
+
+test("mobile tasks keep a sidebar navigation entry even without terminal windows", () => {
+  const source = readFileSync(
+    path.join(root, "src", "web-ui", "react", "shell", "shell-main-content.tsx"), "utf8",
+  );
+  assert.match(source, /context\.taskId && snapshot\.viewport\.mobile &&/);
+  assert.match(source, /aria-label="打开任务与项目"/);
+  assert.match(source, /aria-controls="sessions-drawer"/);
+  assert.match(source, /dispatch\(\{ type: "layout\.drawer\.toggle" \}\)/);
+});

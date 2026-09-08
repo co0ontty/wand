@@ -319,7 +319,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
                     const nextId = event.currentTarget.value;
                     const project = projects.find((item) => item.id === nextId);
                     setSelectedProjectId(nextId);
-                    if (project) setCwd(project.cwd);
+                    setCwd(project?.cwd ?? "");
                   }}
                 >
                   <option value="">不挂项目（独立任务）</option>

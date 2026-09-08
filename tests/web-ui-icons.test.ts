@@ -38,7 +38,7 @@ test("WandIcon stamps a data-icon matching the semantic name", () => {
   assert.doesNotMatch(html, /M12 2v4M12 18v4/);
 });
 
-test("sidebar footer maps settings and missions to distinct glyphs", () => {
+test("sidebar navigation maps settings and automation to distinct glyphs", () => {
   const selected: UiSessionVm = {
     id: "session-1",
     source: "wand",
@@ -99,7 +99,7 @@ test("sidebar footer maps settings and missions to distinct glyphs", () => {
       createElement(ShellSidebar),
     ));
     assert.match(html, /id="settings-button"[^>]*>[\s\S]*?data-icon="gear"/);
-    assert.match(html, /id="missions-button"[^>]*>[\s\S]*?data-icon="parallel"/);
+    assert.match(html, /id="missions-button"[^>]*>[\s\S]*?data-icon="zap"/);
     assert.match(html, /id="file-panel-toggle-btn"[^>]*>[\s\S]*?data-icon="explorer"/);
     assert.doesNotMatch(html, /data-icon="inbox"/);
   } finally {

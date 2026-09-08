@@ -1,6 +1,6 @@
 # Wand 客户端操作逻辑
 
-最后更新：2026-09-06
+最后更新：2026-09-08
 
 配套文档：`docs/server-logic-analysis.md`（服务端真源）。本文只写**用户在客户端做了什么、客户端怎么调服务端、各端哪里不一致**。查会话执行 bug 仍先看服务端 `SessionRegistry.ownerOf`；查「点了没反应 / 输入错乱 / 列表丢绑定」再看本文。
 
@@ -62,6 +62,23 @@ restoreLoginSession()
 ---
 
 ## 3. 会话列表与选中
+
+### Web 任务 / 项目侧栏
+
+React 侧栏沿用 `cb99d89` 的独立任务模型和 `4c82f39` 的终端默认收起策略：
+
+- 顶部「新建任务」默认创建独立任务，无须先建项目；首页、自动化是独立入口，设置留在底部。
+- 下方依次为「任务」和「项目」两区。任务区展示全局工作空间的独立任务；项目区按目录分组，项目行的「＋」预选该项目，新建项目只由项目区入口触发。
+- 点击任务只打开任务，不自动展开终端。终端数量旁的箭头独立控制展开；任务的更多菜单保留新建终端、重命名、清空终端及删除。项目菜单保留 Worktree 管理和二次确认删除。
+- 分区、项目和任务折叠状态存于当前 origin 的 `localStorage`（`wand.sidebar.*`）；刷新、切换窄栏不会丢失。收起内容保留挂载，但立即 `inert`，不可被 Tab 聚焦。
+- 标题单行省略，悬停可查看完整名称与目录；右侧展示最近打开时间或运行 / 待处理状态。目录折叠采用 180ms 高度过渡，键盘操作和减少动态效果模式禁用过渡。
+- `GET /api/tasks` 每 6 秒刷新；后台刷新失败保留上次列表并提供重试。原生历史 / 自动化会话分组仍在两区之后，不会丢失旧会话。
+- 窄栏区分独立任务与项目，不截断任务入口；手机忽略桌面的窄栏偏好。由项目切回独立任务时清掉继承目录，避免独立任务误在之前的项目目录运行。
+- 手机进入任务后保留「打开任务与项目」导航按钮，即使任务没有终端，也能重新打开侧栏切换任务。页面恢复到已选中的终端时，侧栏通过任务 / 会话归属恢复高亮，不强制展开终端列表。
+
+相关实现：`shell/shell-sidebar.tsx`、`workspaces/workspaces-panel.tsx`、`workspaces/sidebar-disclosure.tsx`（均位于 `src/web-ui/react/`）。
+
+### 会话传输
 
 | 端 | 拉列表 | 选中 |
 | --- | --- | --- |
@@ -267,7 +284,7 @@ Android 窄一截：能列项目/任务、改任务、存 layout、在任务里�
 | Inbox | `GET /api/inbox`（`agent_activity`）；`POST /api/inbox/read` |
 | CLI | `wand mission:*`、`wand inbox:list` |
 
-Web React `missions/` 走 missions 路由，**不会打** `/api/inbox`。侧栏「任务」打开的是 Missions 叠层，不是 inbox。Inbox 目前是 CLI / JSON（`wand inbox:list`）和原生若自行封装的表面。
+Web React `missions/` 走 missions 路由，**不会打** `/api/inbox`。侧栏「自动化」打开的是 Missions 叠层，不是 inbox，也不是独立任务区。Inbox 目前是 CLI / JSON（`wand inbox:list`）和原生若自行封装的表面。
 
 macOS 有原生 `MissionsView`。iOS / Android 也有 mission 模型，能力以各端 API 封装为准。
 

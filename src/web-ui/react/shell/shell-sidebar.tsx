@@ -432,7 +432,7 @@ export function getShellSidebarPrimaryAction(): ShellSidebarPrimaryAction {
   // 侧栏统一为任务视图：主按钮固定为「新任务」，不再有独立的「新会话」入口。
   return {
     action: { type: "workspace.new" },
-    label: "新任务",
+    label: "新建任务",
     ariaLabel: "新建任务",
   };
 }
@@ -533,7 +533,7 @@ export function ShellSidebar() {
   const snapshot = useUiStoreSnapshot();
   const dispatch = useUiDispatch();
   const [moreOpen, setMoreOpen] = React.useState(false);
-  const narrow = snapshot.layout.sidebarPinned && snapshot.layout.sidebarCollapsed;
+  const narrow = !snapshot.viewport.mobile && snapshot.layout.sidebarPinned && snapshot.layout.sidebarCollapsed;
   const sidebarClass = classNames(
     "sidebar",
     snapshot.layout.sessionsDrawerOpen && "open",
@@ -541,7 +541,6 @@ export function ShellSidebar() {
     narrow && "collapsed",
   );
   const primaryAction = getShellSidebarPrimaryAction();
-  const footerAction = primaryAction;
 
   return (
     <>
@@ -624,9 +623,9 @@ export function ShellSidebar() {
                     id="sidebar-collapse-btn"
                     className={classNames("btn btn-ghost btn-sm sidebar-collapse-toggle", narrow && "collapsed")}
                     type="button"
-                    title={narrow ? "展开为全尺寸" : "收起为窄条"}
-                    aria-label={narrow ? "展开为全尺寸" : "收起为窄条"}
-                    onClick={() => void dispatch({ type: "layout.drawer.collapse" })}
+                    title="收起侧栏"
+                    aria-label="收起侧栏"
+                    onClick={() => void dispatch({ type: "layout.drawer.close" })}
                   >
                     <WandIcon name="chevronLeft"/>
                   </button>
@@ -644,33 +643,37 @@ export function ShellSidebar() {
             </div>
           </div>
         </div>
+        <nav className="sidebar-feature-nav" aria-label="功能菜单">
+          <button
+            id="drawer-new-session-button"
+            className="sidebar-new-task"
+            type="button"
+            title="新建任务，不必先创建项目"
+            aria-label={primaryAction.ariaLabel}
+            onClick={() => void dispatch(primaryAction.action)}
+          >
+            <WandIcon name="plus" size={18}/><span>{primaryAction.label}</span>
+          </button>
+          <button type="button" title="首页" onClick={() => void dispatch({ type: "nav.home" })}>
+            <WandIcon name="home" size={17}/><span>首页</span>
+          </button>
+          <button id="missions-button" type="button" title="自动化任务" onClick={() => void dispatch({ type: "missions.open" })}>
+            <WandIcon name="zap" size={17}/><span>自动化</span>
+          </button>
+        </nav>
         <div className="sidebar-body">
           <div id="sessions-panel">
             {narrow ? (
-              <div className="sidebar-collapsed-tiles" aria-label="任务快捷操作">
-                <button
-                  className="sidebar-collapsed-tile expand"
-                  type="button"
-                  title="展开完整侧边栏"
-                  aria-label="展开完整侧边栏"
-                  onClick={() => void dispatch({ type: "layout.drawer.collapse" })}
-                >
-                  <WandIcon name="rail" size={16} className="sidebar-rail-icon is-collapsed"/>
-                </button>
-                <button
-                  className="sidebar-collapsed-tile add"
-                  type="button"
-                  title={footerAction.label}
-                  aria-label={footerAction.ariaLabel}
-                  onClick={() => void dispatch({ type: "workspace.new" })}
-                >
-                  <span aria-hidden="true">＋</span>
-                </button>
-              </div>
+              <>
+                <WorkspacesPanel
+                  compact
+                  onExpand={() => void dispatch({ type: "layout.drawer.collapse" })}
+                  selectedSessionId={snapshot.selected?.id ?? null}
+                />
+              </>
             ) : (
               <div className="sessions-list" id="sessions-list">
                 <WorkspacesPanel
-                  headingLabel="项目"
                   selectedSessionId={snapshot.selected?.id ?? null}
                   sessionTitles={Object.fromEntries(snapshot.sidebar.groups.flatMap((group) => (
                     group.entries.map((entry) => [entry.id, entry.title] as const)
@@ -686,17 +689,16 @@ export function ShellSidebar() {
           </div>
         </div>
         <div className="sidebar-footer">
-          <button
-            id="drawer-new-session-button"
-            className="btn btn-primary btn-block"
-            type="button"
-            aria-label={footerAction.ariaLabel}
-            onClick={() => void dispatch(footerAction.action)}
-          >
-            <WandIcon name="plus" size={16}/>
-            <span>{footerAction.label}</span>
-          </button>
           <div className="sidebar-footer-actions">
+            <button
+              id="settings-button"
+              className="btn btn-ghost btn-sm"
+              type="button"
+              title="设置"
+              onClick={() => void dispatch({ type: "settings.open" })}
+            >
+              <WandIcon name="gear" size={16}/><span>设置</span>
+            </button>
             {snapshot.viewport.mobile && (
               <button
                 id="file-panel-toggle-btn"
@@ -708,15 +710,7 @@ export function ShellSidebar() {
                 <WandIcon name="explorer" size={16}/><span>文件</span>
               </button>
             )}
-            <button
-              id="settings-button"
-              className="btn btn-ghost btn-sm"
-              type="button"
-              title="设置"
-              onClick={() => void dispatch({ type: "settings.open" })}
-            >
-              <WandIcon name="gear" size={16}/><span>设置</span>
-            </button>
+
             {snapshot.capabilities.backToNative && (
               <button
                 id="back-to-native-button"

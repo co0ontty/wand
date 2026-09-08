@@ -576,21 +576,6 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
               refreshChatUnreadDivider(chatMessages);
               updateChatUnreadBubble();
             });
-            var newestMsgEl = chatMessages.querySelector(".chat-message");
-            var allCards = chatMessages.querySelectorAll(".tool-use-card, .inline-diff[data-expand-key]");
-            var newestCard = null;
-            allCards.forEach(function(c) {
-              var cardKey = getElementExpandKey(c);
-              if (getPersistedExpandState(cardKey) !== null) return;
-              // Never collapse unanswered AskUserQuestion cards
-              if (c.classList.contains("ask-user") && !c.classList.contains("ask-user-answered")) return;
-              if (newestMsgEl && newestMsgEl.contains(c)) {
-                if (!newestCard) newestCard = c;
-                else c.classList.add("collapsed");
-              } else {
-                c.classList.add("collapsed");
-              }
-            });
           }
         } else if (msgCount < existingCount) {
           fullRenderChat();
@@ -2090,7 +2075,9 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
           var historical = idx < lastUserIdx;
           var key = buildExpandKey(historical ? "assistant-reply-history" : "assistant-reply-current", [getMessageKey(allMessages[idx], idx)]);
           var persisted = getPersistedExpandState(key);
-          var expanded = persisted === null ? !historical : persisted;
+          // 最新轮次的 assistant 回复始终展开，不沿用历史持久化折叠状态；
+          // 只有历史轮次才尊重用户之前的展开/折叠偏好。
+          var expanded = historical ? (persisted === null ? false : persisted) : true;
           var disclosure = el.querySelector(":scope > .assistant-reply-disclosure");
           if (!disclosure) {
             disclosure = document.createElement("button");

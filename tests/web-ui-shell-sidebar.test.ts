@@ -285,6 +285,7 @@ test("ShellSidebar SSR retires manage mode but keeps capability-gated controls",
 test("ShellSidebar collapsed rail still renders the unified task panel", () => {
   const base = fixture();
   const html = renderSidebar(fixture({
+    viewport: { ...base.viewport, mobile: false },
     layout: {
       ...base.layout,
       sidebarCollapsed: true,
@@ -301,12 +302,32 @@ test("ShellSidebar collapsed rail still renders the unified task panel", () => {
 
 });
 
-test("ShellSidebar primary action is always 新任务", () => {
+test("ShellSidebar primary action always creates a task", () => {
   assert.deepEqual(getShellSidebarPrimaryAction(), {
     action: { type: "workspace.new" },
-    label: "新任务",
+    label: "新建任务",
     ariaLabel: "新建任务",
   });
+});
+
+test("ShellSidebar keeps creation above two distinct sections and settings in the footer", () => {
+  const html = renderSidebar(fixture());
+  const createIndex = html.indexOf('id="drawer-new-session-button"');
+  const tasksIndex = html.indexOf('aria-label="独立任务"');
+  const projectsIndex = html.indexOf('aria-label="项目"');
+  assert.ok(createIndex > 0 && createIndex < tasksIndex);
+  assert.ok(tasksIndex < projectsIndex);
+  assert.ok(html.indexOf('id="settings-button"') > html.indexOf('class="sidebar-footer"'));
+  assert.equal(html.match(/id="drawer-new-session-button"/g)?.length, 1);
+  assert.match(html, /aria-label="新建项目"/);
+});
+
+test("mobile drawer ignores the desktop compact preference", () => {
+  const base = fixture();
+  const html = renderSidebar(fixture({ layout: { ...base.layout, sidebarCollapsed: true } }));
+  assert.doesNotMatch(html, /class="sidebar open pinned collapsed"/);
+  assert.match(html, /aria-label="独立任务"/);
+  assert.match(html, /aria-label="项目"/);
 });
 
 test("ShellSidebar source uses the UiStore hooks and no forbidden legacy seam", () => {

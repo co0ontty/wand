@@ -178,6 +178,7 @@ function ShellBlankChat({ className, queueRef, workspaceTask, workspaceProject }
  */
 export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
   const snapshot = useUiStoreSnapshot();
+  const dispatch = useUiDispatch();
   const classes = getShellLegacySlotClasses(snapshot.legacyVisibility);
   const context = React.useSyncExternalStore(
     workspaceContextStore.subscribe,
@@ -194,6 +195,16 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
     <main className={`main-content${snapshot.layout.filePanelOpen ? " file-panel-open" : ""}${inSplit ? " main-content-in-split" : ""}`}>
       {/* 任务内由标签条承担主区导航；不再叠一层重复的会话标题栏。 */}
       {context.taskId ? null : <ShellTopbar/>}
+      {context.taskId && snapshot.viewport.mobile && (
+        <nav className="workspace-mobile-navigation" aria-label="任务导航">
+          <button type="button" aria-label="打开任务与项目" title="打开任务与项目"
+            aria-expanded={snapshot.layout.sessionsDrawerOpen} aria-controls="sessions-drawer"
+            onClick={() => void dispatch({ type: "layout.drawer.toggle" })}>
+            <WandIcon name="rail" size={19}/>
+          </button>
+          <span title={context.taskName}>{context.taskName || "任务"}</span>
+        </nav>
+      )}
       <ShellFilePanel explorerRef={legacyRefs?.fileExplorer}/>
       <WorkspaceTabBar/>
       <div id="output" className={classes.terminal} ref={legacyRefs?.terminal}/>

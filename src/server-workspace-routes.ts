@@ -269,7 +269,7 @@ export function registerWorkspaceRoutes(
   storage: WandStorage,
   sessions?: SessionRegistry,
 ): void {
-  // 列出所有项目（按最近打开排序）
+  // 列出所有项目（按创建时间升序，保证项目层级稳定）
   app.get("/api/workspaces", (_req, res) => {
     backfillSessionWorkspaces(storage);
     const sessionCounts = storage.countSessionsByWorkspace();
