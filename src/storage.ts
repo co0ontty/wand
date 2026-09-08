@@ -712,6 +712,16 @@ const INIT_SQL = `
     updated_at TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS connectors (
+    provider TEXT PRIMARY KEY,
+    token TEXT NOT NULL DEFAULT '',
+    api_url TEXT NOT NULL DEFAULT '',
+    username TEXT,
+    connected_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS password_items (
     id TEXT PRIMARY KEY,
     vault_id TEXT NOT NULL,
@@ -845,6 +855,22 @@ function ensureWorkspaceSchema(db: DatabaseSync): void {
   }
 }
 
+function ensureConnectorSchema(db: DatabaseSync): void {
+  // The table is created by INIT_SQL for new databases; this repairs an
+  // existing wand.db that predates the connector feature (additive-only).
+  const columns = db.prepare("PRAGMA table_info(connectors)").all() as Array<{ name: string }>;
+  const names = new Set(columns.map((column) => column.name));
+  if (names.size === 0) return;
+  const migrations: ReadonlyArray<[column: string, sql: string]> = [
+    ["api_url", "ALTER TABLE connectors ADD COLUMN api_url TEXT NOT NULL DEFAULT ''"],
+    ["username", "ALTER TABLE connectors ADD COLUMN username TEXT"],
+    ["connected_at", "ALTER TABLE connectors ADD COLUMN connected_at TEXT"],
+  ];
+  for (const [column, sql] of migrations) {
+    if (!names.has(column)) db.exec(sql);
+  }
+}
+
 export function ensureDatabaseFile(dbPath: string): boolean {
   const dir = path.dirname(dbPath);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -855,6 +881,7 @@ export function ensureDatabaseFile(dbPath: string): boolean {
   ensureAuthSessionSchema(db);
   ensureCommandSessionSchema(db);
   ensureWorkspaceSchema(db);
+  ensureConnectorSchema(db);
   {
     const missionColumns = db.prepare("PRAGMA table_info(missions)").all() as Array<{ name: string }>;
     if (missionColumns.length > 0 && !missionColumns.some((column) => column.name === "task_id")) {
@@ -881,6 +908,7 @@ export class WandStorage {
     ensureAuthSessionSchema(this.db);
     ensureCommandSessionSchema(this.db);
     ensureWorkspaceSchema(this.db);
+    ensureConnectorSchema(this.db);
     this.ensureDefaultPasswordVault();
   }
 
@@ -1474,6 +1502,69 @@ export class WandStorage {
       .prepare("UPDATE password_items SET archived = 1, updated_at = ? WHERE id = ? AND archived = 0")
       .run(now, id);
     return result.changes > 0;
+  }
+
+  // ============ Connector Methods ============
+  // 第三方服务凭据（GitHub 等）。token 用与密码库同一把 at-rest 密钥加密，
+  // 解密只在服务端发生，绝不通过 /api/settings 回传明文。
+
+  getConnectorToken(provider: string): string | null {
+    const row = this.db
+      .prepare("SELECT token FROM connectors WHERE provider = ?")
+      .get(provider) as { token: string } | undefined;
+    if (!row) return null;
+    const decrypted = decryptVaultSecret(row.token, this.getAppSecret());
+    return decrypted ?? "";
+  }
+
+  getConnectorMeta(provider: string): ConnectorMeta | null {
+    const row = this.db
+      .prepare("SELECT provider, api_url, username, connected_at, updated_at FROM connectors WHERE provider = ?")
+      .get(provider) as ConnectorRow | undefined;
+    if (!row) return null;
+    return {
+      provider: row.provider,
+      apiUrl: row.api_url || null,
+      username: row.username ?? null,
+      connectedAt: row.connected_at ?? null,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  saveConnector(
+    provider: string,
+    input: { token?: string | null; apiUrl?: string | null; username?: string | null; markConnected?: boolean },
+  ): ConnectorMeta {
+    const now = nowIso();
+    const existing = this.getConnectorMeta(provider);
+    const token = input.token === undefined || input.token === null || input.token === ""
+      ? this.getConnectorToken(provider) ?? ""
+      : input.token;
+    const apiUrl = input.apiUrl === undefined ? (existing?.apiUrl ?? "") : input.apiUrl;
+    const username = input.username === undefined ? (existing?.username ?? null) : input.username;
+    const connectedAt = input.markConnected === false ? (existing?.connectedAt ?? now) : now;
+    const encrypted = this.encryptConnectorToken(token);
+    this.db.prepare(
+      `INSERT INTO connectors (provider, token, api_url, username, connected_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(provider) DO UPDATE SET
+         token = excluded.token,
+         api_url = excluded.api_url,
+         username = excluded.username,
+         connected_at = excluded.connected_at,
+         updated_at = excluded.updated_at`,
+    ).run(provider, encrypted, apiUrl, username, connectedAt, now, now);
+    return { provider, apiUrl: apiUrl || null, username, connectedAt, updatedAt: now };
+  }
+
+  deleteConnector(provider: string): boolean {
+    return this.db.prepare("DELETE FROM connectors WHERE provider = ?").run(provider).changes > 0;
+  }
+
+  private encryptConnectorToken(token: string): string {
+    if (!token) return "";
+    const secret = this.getAppSecret();
+    return secret ? encryptVaultSecret(token, secret) : token;
   }
 
   // ============ Auth Session Methods ============

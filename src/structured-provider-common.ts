@@ -104,6 +104,7 @@ export function thinkingEffortToPiLevel(effort: SessionSnapshot["thinkingEffort"
   if (!effort || effort === "off") return "off";
   if (effort === "standard") return "low";
   if (effort === "deep") return "high";
-  if (effort === "max") return "xhigh";
+  // Pi uses `max`; `xhigh` is a Codex-only level and makes Pi reject the run.
+  if (effort === "max") return "max";
   return effort.startsWith("codex:") ? effort.slice("codex:".length) || null : null;
 }

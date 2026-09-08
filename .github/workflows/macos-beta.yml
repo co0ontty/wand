@@ -13,6 +13,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: macos-beta-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build-macos-beta:
     runs-on: macos-26
@@ -36,7 +40,16 @@ jobs:
           exit 1
 
       - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode.app
+        run: |
+          set -euo pipefail
+          for developer_dir in /Applications/Xcode*.app/Contents/Developer; do
+            if [[ -x "$developer_dir/usr/bin/xcodebuild" ]]; then
+              export DEVELOPER_DIR="$developer_dir"
+              echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
+              break
+            fi
+          done
+          xcodebuild -version
 
       - name: Resolve Beta version
         id: version
@@ -71,7 +84,7 @@ jobs:
           WAND_ASSET_VERSION: ${{ steps.version.outputs.asset_version }}
         run: |
           chmod +x build.sh scripts/generate-icons.swift scripts/generate-update-manifest.sh
-          xcodebuild -project Wand.xcodeproj -scheme Wand -destination 'platform=macOS' test
+          xcodebuild -project Wand.xcodeproj -scheme Wand -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/WandDerivedData" test
           ./build.sh "${{ steps.version.outputs.version }}"
 
       - name: Upload workflow artifacts

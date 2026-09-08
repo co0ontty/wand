@@ -22,6 +22,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: macos-release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build-macos:
     # 钉 macos-26：默认 Xcode 26.x（macOS 26 SDK）。同 ios-build.yml——
@@ -50,7 +54,16 @@ jobs:
           exit 1
 
       - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode.app
+        run: |
+          set -euo pipefail
+          for developer_dir in /Applications/Xcode*.app/Contents/Developer; do
+            if [[ -x "$developer_dir/usr/bin/xcodebuild" ]]; then
+              export DEVELOPER_DIR="$developer_dir"
+              echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
+              break
+            fi
+          done
+          xcodebuild -version
 
       - name: Resolve version
         id: version
@@ -81,7 +94,7 @@ jobs:
           chmod +x build.sh
           chmod +x scripts/generate-icons.swift
           chmod +x scripts/generate-update-manifest.sh
-          xcodebuild -project Wand.xcodeproj -scheme Wand -destination 'platform=macOS' test
+          xcodebuild -project Wand.xcodeproj -scheme Wand -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/WandDerivedData" test
           ./build.sh "${{ steps.version.outputs.version }}"
 
       # 手动触发 / 任何情况下都上传为 artifact，方便直接在 Actions run 页面下载。
