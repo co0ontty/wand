@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { startStructuredCli } from "./structured-exec-pump.js";
 import type { StructuredExecHost } from "./structured-exec-host.js";
 import { CodexProtocolReducer } from "./structured-codex-protocol.js";
+import { whichSync } from "./path-repair.js";
 import type { SessionSnapshot } from "./types.js";
 import { thinkingEffortToCodexReasoningEffort } from "./structured-provider-common.js";
 import type {
@@ -48,10 +49,11 @@ export class CodexRunner implements StructuredRunnerAdapter {
 
   start(context: StructuredRunnerContext, observer: StructuredRunnerObserver): StructuredRunnerExecution {
     const args = buildCodexArgs(context.session);
+    const file = whichSync("codex", { env: context.env }) ?? "codex";
     const reducer = new CodexProtocolReducer(context.session);
     return startStructuredCli({
       sessionId: context.session.id,
-      file: "codex",
+      file,
       args,
       cwd: context.session.cwd,
       env: context.env,
