@@ -1,6 +1,22 @@
+export interface SettingsGithubConnector {
+  provider: "github";
+  connected: boolean;
+  apiUrl: string | null;
+  username: string | null;
+  connectedAt: string | null;
+  updatedAt: string | null;
+  scopes: string[];
+}
+
+export interface SettingsGithubConnectInput {
+  token: string;
+  apiUrl?: string;
+}
+
 export type SettingsTab =
   | "about"
   | "general"
+  | "connectors"
   | "ai"
   | "notifications"
   | "security"
@@ -245,6 +261,7 @@ export interface SettingsCapabilities {
   nativeSounds: boolean;
   haptics: boolean;
   installDistribution: boolean;
+  manageConnectors: boolean;
 }
 
 export interface SettingsSnapshot {
@@ -262,6 +279,7 @@ export interface SettingsSnapshot {
   connectCode: SettingsConnectCode | null;
   notifications: SettingsNotificationPreferences;
   platform: SettingsPlatformSnapshot;
+  github: SettingsGithubConnector;
 }
 
 export interface SettingsLoadOptions {
@@ -352,6 +370,9 @@ export type SettingsCommand =
   | { type: "models.refresh" }
   | { type: "systemAi.import" }
   | { type: "systemAi.test"; route: SettingsSystemAi }
+  | { type: "github.connect"; value: SettingsGithubConnectInput }
+  | { type: "github.disconnect" }
+  | { type: "github.request"; method: "GET" | "POST" | "PATCH"; path: string; body?: Record<string, unknown> }
   | { type: "webUpdate.check" }
   | { type: "webUpdate.install" }
   | { type: "server.restart" }
@@ -388,6 +409,9 @@ interface SettingsCommandResultMap {
   "models.refresh": SettingsModelCatalog;
   "systemAi.import": { ok: boolean; count: number; systemAi: SettingsSystemAi };
   "systemAi.test": SettingsSystemAiTestResult;
+  "github.connect": SettingsGithubConnector;
+  "github.disconnect": { ok: boolean; connected: false };
+  "github.request": unknown;
   "webUpdate.check": SettingsWebUpdate;
   "webUpdate.install": SettingsWebUpdateInstallResult;
   "server.restart": { ok: boolean; message: string };

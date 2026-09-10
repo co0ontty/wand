@@ -92,6 +92,23 @@ interface PasswordVaultItemRow {
   password_updated_at: string | null;
 }
 
+interface ConnectorRow {
+  provider: string;
+  token: string;
+  api_url: string;
+  username: string | null;
+  connected_at: string | null;
+  updated_at: string;
+}
+
+export interface ConnectorMeta {
+  provider: string;
+  apiUrl: string | null;
+  username: string | null;
+  connectedAt: string | null;
+  updatedAt: string;
+}
+
 function safeJsonParse<T>(raw: string | null): T | undefined {
   if (!raw) return undefined;
   try {
@@ -840,7 +857,64 @@ const INIT_SQL = `
 
   CREATE INDEX IF NOT EXISTS idx_workspace_tasks_workspace ON workspace_tasks(workspace_id);
   CREATE INDEX IF NOT EXISTS idx_workspace_tasks_last_opened ON workspace_tasks(last_opened_at);
+
+  CREATE TABLE IF NOT EXISTS github_issue_bindings (
+    owner TEXT NOT NULL,
+    repo TEXT NOT NULL,
+    issue_number INTEGER NOT NULL,
+    session_id TEXT NOT NULL,
+    bound_at TEXT NOT NULL,
+    PRIMARY KEY (owner, repo, issue_number, session_id),
+    FOREIGN KEY (session_id) REFERENCES command_sessions(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_github_issue_bindings_session ON github_issue_bindings(session_id);
+
+  CREATE TABLE IF NOT EXISTS wand_tasks (
+    id TEXT PRIMARY KEY,
+    identifier TEXT,
+    workspace_id TEXT,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'todo',
+    priority TEXT NOT NULL DEFAULT 'none',
+    labels_json TEXT NOT NULL DEFAULT '[]',
+    due_date TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE SET NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_wand_tasks_board ON wand_tasks(workspace_id, status, sort_order, updated_at);
+  CREATE TABLE IF NOT EXISTS wand_task_sessions (
+    task_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    bound_at TEXT NOT NULL,
+    PRIMARY KEY (task_id, session_id),
+    FOREIGN KEY (task_id) REFERENCES wand_tasks(id) ON DELETE CASCADE,
+    FOREIGN KEY (session_id) REFERENCES command_sessions(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_wand_task_sessions_session ON wand_task_sessions(session_id);
+  CREATE TABLE IF NOT EXISTS taskboard_session_bindings (
+    task_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    bound_at TEXT NOT NULL,
+    PRIMARY KEY (task_id, session_id),
+    FOREIGN KEY (session_id) REFERENCES command_sessions(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_taskboard_session_bindings_session ON taskboard_session_bindings(session_id);
 `;
+
+function ensureWandTaskSchema(db: DatabaseSync): void {
+  const columns = db.prepare("PRAGMA table_info(wand_tasks)").all() as Array<{ name: string }>;
+  const names = new Set(columns.map((column) => column.name));
+  if (columns.length > 0 && !names.has("identifier")) db.exec("ALTER TABLE wand_tasks ADD COLUMN identifier TEXT");
+  if (columns.length > 0 && !names.has("due_date")) db.exec("ALTER TABLE wand_tasks ADD COLUMN due_date TEXT");
+  if (columns.length > 0) {
+    const rows = db.prepare("SELECT id FROM wand_tasks WHERE identifier IS NULL OR identifier = '' ORDER BY created_at, id").all() as Array<{ id: string }>;
+    const update = db.prepare("UPDATE wand_tasks SET identifier = ? WHERE id = ?");
+    rows.forEach((row, index) => update.run(`TASK-${index + 1}`, row.id));
+  }
+}
 
 function ensureWorkspaceSchema(db: DatabaseSync): void {
   const workspaceColumns = db.prepare("PRAGMA table_info(workspaces)").all() as Array<{ name: string }>;
@@ -908,6 +982,7 @@ export class WandStorage {
     ensureAuthSessionSchema(this.db);
     ensureCommandSessionSchema(this.db);
     ensureWorkspaceSchema(this.db);
+    ensureWandTaskSchema(this.db);
     ensureConnectorSchema(this.db);
     this.ensureDefaultPasswordVault();
   }
@@ -1287,6 +1362,100 @@ export class WandStorage {
       this.db.prepare("UPDATE command_sessions SET workspace_task_id = NULL WHERE workspace_task_id = ?").run(id);
     }
     this.db.prepare("DELETE FROM workspace_tasks WHERE id = ?").run(id);
+  }
+
+  listWandTasks(workspaceId?: string | null): import("./task-types.js").WandTask[] {
+    const rows = this.db.prepare(
+      `SELECT id, identifier, workspace_id, title, description, status, priority, labels_json, due_date, sort_order, created_at, updated_at
+       FROM wand_tasks ${workspaceId === undefined ? "" : "WHERE workspace_id IS ?"}
+       ORDER BY status, sort_order, updated_at DESC`,
+    ).all(...(workspaceId === undefined ? [] : [workspaceId])) as unknown as Array<Record<string, unknown>>;
+    return rows.map((row) => ({
+      id: String(row.id),
+      identifier: typeof row.identifier === "string" && row.identifier ? row.identifier : `TASK-${String(row.id).slice(0, 6)}`,
+      workspaceId: typeof row.workspace_id === "string" ? row.workspace_id : null,
+      title: String(row.title),
+      description: String(row.description ?? ""),
+      status: row.status === "doing" || row.status === "done" ? row.status : "todo",
+      priority: row.priority === "low" || row.priority === "medium" || row.priority === "high" || row.priority === "urgent" ? row.priority : "none",
+      labels: (() => { const parsed = safeJsonParse<unknown>(String(row.labels_json ?? "[]")); return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : []; })(),
+      dueDate: typeof row.due_date === "string" ? row.due_date : null,
+      sortOrder: Number(row.sort_order) || 0,
+      createdAt: String(row.created_at),
+      updatedAt: String(row.updated_at),
+    }));
+  }
+
+  getWandTask(id: string): import("./task-types.js").WandTask | null {
+    return this.listWandTasks().find((task) => task.id === id) ?? null;
+  }
+
+  createWandTask(input: { workspaceId?: string | null; title: string; description?: string; status?: import("./task-types.js").WandTaskStatus; priority?: import("./task-types.js").WandTaskPriority; labels?: string[]; dueDate?: string | null }): import("./task-types.js").WandTask {
+    const id = crypto.randomUUID(); const now = nowIso();
+    const status = input.status ?? "todo"; const priority = input.priority ?? "none";
+    const max = this.db.prepare("SELECT COALESCE(MAX(sort_order), -1) AS value FROM wand_tasks WHERE workspace_id IS ? AND status = ?").get(input.workspaceId ?? null, status) as { value?: number } | undefined;
+    const numberRow = this.db.prepare("SELECT COALESCE(MAX(CAST(substr(identifier, 6) AS INTEGER)), 0) AS value FROM wand_tasks WHERE identifier GLOB 'TASK-[0-9]*'").get() as { value?: number } | undefined;
+    const identifier = `TASK-${(numberRow?.value ?? 0) + 1}`;
+    this.db.prepare(`INSERT INTO wand_tasks (id, identifier, workspace_id, title, description, status, priority, labels_json, due_date, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, identifier, input.workspaceId ?? null, input.title, input.description ?? "", status, priority, JSON.stringify(input.labels ?? []), input.dueDate ?? null, (max?.value ?? -1) + 1, now, now);
+    return this.getWandTask(id)!;
+  }
+
+  updateWandTask(id: string, patch: Partial<Pick<import("./task-types.js").WandTask, "workspaceId" | "title" | "description" | "status" | "priority" | "labels" | "dueDate" | "sortOrder">>): import("./task-types.js").WandTask | null {
+    const current = this.getWandTask(id); if (!current) return null;
+    const next = { ...current, ...patch, updatedAt: nowIso() };
+    this.db.prepare(`UPDATE wand_tasks SET workspace_id = ?, title = ?, description = ?, status = ?, priority = ?, labels_json = ?, due_date = ?, sort_order = ?, updated_at = ? WHERE id = ?`).run(next.workspaceId, next.title, next.description, next.status, next.priority, JSON.stringify(next.labels), next.dueDate, next.sortOrder, next.updatedAt, id);
+    return next;
+  }
+
+  deleteWandTask(id: string): void { this.db.prepare("DELETE FROM wand_tasks WHERE id = ?").run(id); }
+
+  listWandTaskSessionIds(taskId: string): string[] {
+    const rows = this.db.prepare("SELECT session_id FROM wand_task_sessions WHERE task_id = ? ORDER BY bound_at ASC").all(taskId) as unknown as Array<{ session_id: string }>;
+    return rows.map((row) => row.session_id);
+  }
+
+  bindWandTaskSession(taskId: string, sessionId: string): void {
+    if (!this.getWandTask(taskId)) throw new Error("未找到该任务。");
+    if (!this.getSession(sessionId)) throw new Error("未找到该会话。");
+    this.db.prepare("INSERT OR IGNORE INTO wand_task_sessions (task_id, session_id, bound_at) VALUES (?, ?, ?)").run(taskId, sessionId, nowIso());
+  }
+
+  unbindWandTaskSession(taskId: string, sessionId: string): void { this.db.prepare("DELETE FROM wand_task_sessions WHERE task_id = ? AND session_id = ?").run(taskId, sessionId); }
+
+  bindTaskboardTaskSession(taskId: string, sessionId: string): void {
+    if (!this.getSession(sessionId)) throw new Error("未找到该会话。");
+    this.db.prepare("INSERT OR IGNORE INTO taskboard_session_bindings (task_id, session_id, bound_at) VALUES (?, ?, ?)").run(taskId, sessionId, nowIso());
+  }
+
+  listTaskboardTaskSessions(taskId: string): string[] {
+    const rows = this.db.prepare("SELECT session_id FROM taskboard_session_bindings WHERE task_id = ? ORDER BY rowid ASC").all(taskId) as unknown as Array<{ session_id: string }>;
+    return rows.map((row) => row.session_id);
+  }
+
+  unbindTaskboardTaskSession(taskId: string, sessionId: string): void {
+    this.db.prepare("DELETE FROM taskboard_session_bindings WHERE task_id = ? AND session_id = ?").run(taskId, sessionId);
+  }
+
+  listGithubIssueBindings(owner: string, repo: string, issueNumber: number): Array<{ sessionId: string; boundAt: string }> {
+    const rows = this.db.prepare(
+      `SELECT session_id, bound_at FROM github_issue_bindings
+       WHERE owner = ? AND repo = ? AND issue_number = ? ORDER BY bound_at ASC`,
+    ).all(owner, repo, issueNumber) as unknown as Array<{ session_id: string; bound_at: string }>;
+    return rows.map((row) => ({ sessionId: row.session_id, boundAt: row.bound_at }));
+  }
+
+  bindGithubIssueSession(owner: string, repo: string, issueNumber: number, sessionId: string): void {
+    if (!this.getSession(sessionId)) throw new Error("未找到该会话。");
+    this.db.prepare(
+      `INSERT OR IGNORE INTO github_issue_bindings (owner, repo, issue_number, session_id, bound_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run(owner, repo, issueNumber, sessionId, nowIso());
+  }
+
+  unbindGithubIssueSession(owner: string, repo: string, issueNumber: number, sessionId: string): void {
+    this.db.prepare(
+      `DELETE FROM github_issue_bindings WHERE owner = ? AND repo = ? AND issue_number = ? AND session_id = ?`,
+    ).run(owner, repo, issueNumber, sessionId);
   }
 
   listSessionsByWorkspaceTask(taskId: string): SessionSnapshot[] {

@@ -20,10 +20,9 @@ export const settingsAndQuickCommitStyles = String.raw`
   z-index: 31;
   box-sizing: border-box;
   color: var(--text-primary);
-  background: color-mix(in srgb, var(--bg-elevated) 78%, transparent);
-  border: 1px solid color-mix(in srgb, white 55%, var(--border-subtle));
-  box-shadow: 0 1px 3px color-mix(in srgb, var(--text-primary) 7%, transparent);
-  backdrop-filter: blur(18px) saturate(130%);
+  background: var(--bg-elevated);
+  border: 1px solid color-mix(in srgb, var(--border-strong) 58%, transparent);
+  box-shadow: 0 24px 70px color-mix(in srgb, #241a12 22%, transparent), 0 4px 14px color-mix(in srgb, #241a12 10%, transparent);
   transform: translate(-50%, -50%);
   pointer-events: auto;
 }
@@ -63,13 +62,12 @@ export const settingsAndQuickCommitStyles = String.raw`
 .wand-settings-header {
   display: flex;
   flex: 0 0 auto;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 20px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 76%, transparent);
-  padding: 17px 20px 16px;
-  background: color-mix(in srgb, var(--bg-elevated) 68%, transparent);
-  backdrop-filter: blur(18px) saturate(130%);
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 20px 24px 18px;
+  background: var(--bg-elevated);
 }
 
 .wand-settings-title {
@@ -91,13 +89,12 @@ export const settingsAndQuickCommitStyles = String.raw`
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 12px;
-  margin: 14px 18px 0;
-  border: 1px solid color-mix(in srgb, var(--accent) 17%, var(--border-subtle));
-  border-radius: 16px;
-  padding: 13px 14px;
-  background: color-mix(in srgb, var(--bg-elevated) 82%, var(--accent-muted));
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--text-primary) 5%, transparent);
+  gap: 14px;
+  margin: 16px 24px 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  padding: 14px 16px;
+  background: var(--bg-secondary);
 }
 
 .wand-settings-overview-mark,
@@ -288,36 +285,35 @@ export const settingsAndQuickCommitStyles = String.raw`
 
 .wand-settings-tabs {
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-columns: 240px minmax(0, 1fr);
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  margin-top: 16px;
+  border-top: 1px solid var(--border-subtle);
 }
 
 .wand-settings-tabs > .wand-ui-tabs-list {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
   box-sizing: border-box;
   overflow: auto;
-  border-right: 1px solid color-mix(in srgb, var(--border-subtle) 76%, transparent);
+  border-right: 1px solid var(--border-subtle);
   border-radius: 0;
-  padding: 13px 11px;
-  background: color-mix(in srgb, var(--bg-secondary) 82%, var(--bg-primary));
+  padding: 18px 14px;
+  background: var(--bg-secondary);
 }
 
 .wand-settings-tabs > .wand-ui-tabs-list .wand-ui-tabs-trigger {
   position: relative;
-  min-height: 52px;
+  min-height: 48px;
   border: 1px solid transparent;
-  border-radius: 10px;
-  padding: 8px 11px;
+  border-radius: 9px;
+  padding: 8px 12px;
   text-align: left;
   box-shadow: none;
-  transition:
-    color 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    background-color 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    border-color 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: color 140ms ease, background-color 140ms ease, border-color 140ms ease, transform 140ms ease;
 }
 
 .wand-settings-tabs > .wand-ui-tabs-list .wand-ui-tabs-trigger:hover:not(:disabled) {
@@ -403,7 +399,7 @@ export const settingsAndQuickCommitStyles = String.raw`
   margin: 0;
   overflow: auto;
   overscroll-behavior: contain;
-  background: color-mix(in srgb, var(--bg-primary) 58%, var(--bg-elevated));
+  background: var(--bg-primary);
 }
 
 .wand-ui-popover-content.wand-shell-menu-popover {
@@ -414,9 +410,9 @@ export const settingsAndQuickCommitStyles = String.raw`
 .wand-settings-panel {
   box-sizing: border-box;
   width: 100%;
-  max-width: 860px;
+  max-width: 900px;
   margin: 0 auto;
-  padding: 28px 32px 40px;
+  padding: 32px 40px 48px;
 }
 
 .wand-settings-panel-heading {
@@ -433,27 +429,26 @@ export const settingsAndQuickCommitStyles = String.raw`
 .wand-settings-section-heading h3 { font-size: var(--font-size-base); }
 
 .wand-settings-section {
-  margin-bottom: 16px;
-  border: 1px solid color-mix(in srgb, var(--border-default) 62%, transparent);
-  border-radius: 16px;
-  background: color-mix(in srgb, var(--bg-elevated) 82%, transparent);
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--text-primary) 3%, transparent);
-  backdrop-filter: blur(14px) saturate(120%);
+  margin-bottom: 18px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text-primary) 4%, transparent);
   transition: border-color 160ms ease, box-shadow 160ms ease;
 }
 
 .wand-settings-section:hover {
-  border-color: color-mix(in srgb, var(--border-strong) 74%, transparent);
-  box-shadow: 0 5px 18px color-mix(in srgb, var(--text-primary) 5%, transparent);
+  border-color: var(--border-strong);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--text-primary) 6%, transparent);
 }
 
 .wand-settings-section-heading {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 62%, transparent);
-  padding: 16px 19px 15px;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 18px 20px 16px;
 }
 
 .wand-settings-section-action { flex: 0 0 auto; }
@@ -461,8 +456,8 @@ export const settingsAndQuickCommitStyles = String.raw`
 .wand-settings-section-body {
   display: flex;
   flex-direction: column;
-  gap: 15px;
-  padding: 17px;
+  gap: 18px;
+  padding: 20px;
 }
 
 .wand-settings-grid {
@@ -572,10 +567,10 @@ export const settingsAndQuickCommitStyles = String.raw`
 .wand-settings-input {
   box-sizing: border-box;
   width: 100%;
-  min-height: 40px;
+  min-height: 42px;
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-sm);
-  padding: 8px 10px;
+  border-radius: 8px;
+  padding: 9px 11px;
   color: var(--text-primary);
   background: var(--bg-primary);
   font: inherit;
@@ -2615,7 +2610,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
 
   .wand-settings-header { padding: 14px 15px 13px; }
   .wand-settings-description { display: none; }
-  .wand-settings-overview { gap: 10px; margin: 8px 12px 0; padding: 11px; }
+  .wand-settings-overview { gap: 10px; margin: 10px 12px 0; padding: 12px; }
   .wand-settings-overview-copy > div:first-child span { display: none; }
   .wand-settings-overview > code { align-self: flex-start; }
   .wand-settings-app-access { grid-template-columns: minmax(0, 1fr); margin: 8px 12px 0; }
@@ -2626,6 +2621,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
+    margin-top: 12px;
   }
 
   .wand-settings-tabs > .wand-ui-tabs-list {
@@ -2663,11 +2659,11 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   .wand-settings-tab-icon svg { width: 15px; height: 15px; }
   .wand-settings-tab-copy > span { display: none; }
   .wand-settings-tabs > .wand-ui-tabs-content { grid-column: 1; grid-row: 2; }
-  .wand-settings-panel { padding: 20px 14px 28px; }
-  .wand-settings-panel-heading { margin-bottom: 18px; }
-  .wand-settings-section { margin-bottom: 14px; border-radius: 14px; }
-  .wand-settings-section-heading { padding: 14px; }
-  .wand-settings-section-body { padding: 14px; }
+  .wand-settings-panel { padding: 24px 14px 32px; }
+  .wand-settings-panel-heading { margin-bottom: 20px; }
+  .wand-settings-section { margin-bottom: 14px; border-radius: 12px; }
+  .wand-settings-section-heading { padding: 15px 14px; }
+  .wand-settings-section-body { padding: 15px 14px; }
   .wand-settings-grid, .wand-settings-file-grid, .wand-settings-env-toolbar { grid-template-columns: minmax(0, 1fr); }
   .wand-settings-route .wand-settings-field:last-child { grid-column: auto; }
   .wand-settings-route-toolbar, .wand-settings-route-heading { align-items: flex-start; }

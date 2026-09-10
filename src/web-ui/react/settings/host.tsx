@@ -6,6 +6,7 @@ import { settingsController, settingsStore } from "./controller";
 import { httpSettingsRepository } from "./repository";
 import {
   AboutSettingsTab,
+  GithubSettingsTab,
   AiSettingsTab,
   DisplaySettingsTab,
   GeneralSettingsTab,
@@ -21,17 +22,19 @@ export interface SettingsHostProps {
   showRestart?: () => void;
 }
 
-const TAB_LABELS: Record<SettingsTab, { title: string }> = {
-  general: { title: "基本配置" },
-  ai: { title: "AI 与模型" },
-  notifications: { title: "通知" },
-  display: { title: "显示" },
-  security: { title: "安全" },
-  presets: { title: "命令预设" },
-  about: { title: "关于" },
+const TAB_LABELS: Record<SettingsTab, { title: string; description: string }> = {
+  connectors: { title: "连接器", description: "GitHub 与外部服务" },
+  general: { title: "基本配置", description: "服务与工作环境" },
+  ai: { title: "AI 与模型", description: "模型和 API 线路" },
+  notifications: { title: "通知", description: "声音与系统提醒" },
+  display: { title: "显示", description: "界面外观偏好" },
+  security: { title: "安全", description: "密码与证书" },
+  presets: { title: "命令预设", description: "常用命令模板" },
+  about: { title: "关于", description: "版本与更新" },
 };
 
 const ADMIN_TAB_ORDER: SettingsTab[] = [
+  "connectors",
   "general",
   "ai",
   "notifications",
@@ -55,6 +58,7 @@ const PLATFORM_LABELS = {
 
 function SettingsTabIcon({ tab }: { tab: SettingsTab }) {
   const paths: Record<SettingsTab, ReactNode> = {
+    connectors: <><path d="M8 7h8M8 17h8" /><path d="M6 5a2 2 0 1 0 0 4 2 2 0 0 0 0-4ZM18 15a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z" /></>,
     general: <><path d="M4 7h10M18 7h2M4 17h2M10 17h10" /><circle cx="16" cy="7" r="2" /><circle cx="8" cy="17" r="2" /></>,
     ai: <><path d="m12 3 1.25 3.75L17 8l-3.75 1.25L12 13l-1.25-3.75L7 8l3.75-1.25L12 3Z" /><path d="m18 14 .75 2.25L21 17l-2.25.75L18 20l-.75-2.25L15 17l2.25-.75L18 14ZM6 13l.75 2.25L9 16l-2.25.75L6 19l-.75-2.25L3 16l2.25-.75L6 13Z" /></>,
     notifications: <><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 7h18s-3 0-3-7Z" /><path d="M10 20h4" /></>,
@@ -234,6 +238,7 @@ export function SettingsHost({
     if (!snapshot) return [];
     const props = { snapshot, repository, refresh, setSnapshot, toast, showRestart };
     const contentByTab: Record<SettingsTab, ReactNode> = {
+      connectors: <GithubSettingsTab {...props} />,
       general: <GeneralSettingsTab {...props} />,
       ai: <AiSettingsTab {...props} />,
       notifications: <NotificationSettingsTab {...props} />,
@@ -250,6 +255,7 @@ export function SettingsHost({
           <span className="wand-settings-tab-icon"><SettingsTabIcon tab={value} /></span>
           <span className="wand-settings-tab-copy">
             <strong>{TAB_LABELS[value].title}</strong>
+            <span>{TAB_LABELS[value].description}</span>
           </span>
         </span>
       ),

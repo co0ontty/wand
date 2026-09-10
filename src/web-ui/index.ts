@@ -26,6 +26,7 @@ export function renderApp(configPath: string): string {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
   <title>Wand Console</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%2313110f'/%3E%3Ctext x='32' y='44' text-anchor='middle' font-size='40' font-family='Arial,sans-serif' font-weight='700' fill='%23f5f3ee'%3EW%3C/text%3E%3C/svg%3E" />
   <meta name="description" content="Local CLI Console for Vibe Coding - Manage terminal sessions from your browser" />
   <meta name="theme-color" content="#f5f3ee" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#13110f" media="(prefers-color-scheme: dark)" />

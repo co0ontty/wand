@@ -11,6 +11,8 @@ import { WorkspaceWindow } from "../workspaces/workspace-window";
 import { activeWorkWindow } from "../workspaces/window-layout";
 import type { WorkspaceSessionKind, WorkspaceSessionTarget } from "../workspaces/types";
 import { ShellFilePanel } from "./shell-file-panel";
+import { TaskBoardHost } from "../issues/task-board-host";
+import { taskBoardController, taskBoardStore } from "../issues/task-board-controller";
 import { ShellTopbar } from "./shell-topbar";
 import { useUiDispatch, useUiStoreSnapshot } from "./ui-store-react";
 import type { UiAction, UiSnapshotData } from "./ui-store";
@@ -179,6 +181,7 @@ function ShellBlankChat({ className, queueRef, workspaceTask, workspaceProject }
 export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
   const snapshot = useUiStoreSnapshot();
   const dispatch = useUiDispatch();
+  const taskBoard = React.useSyncExternalStore(taskBoardStore.subscribe, taskBoardStore.getSnapshot, taskBoardStore.getSnapshot);
   const classes = getShellLegacySlotClasses(snapshot.legacyVisibility);
   const context = React.useSyncExternalStore(
     workspaceContextStore.subscribe,
@@ -191,8 +194,15 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
   // 用缓冲 output 重置即可恢复，无需重建终端。
   const inSplit = !!context.taskId && activeWorkWindow(context.layout)?.layout.type === "split";
 
+  if (taskBoard.open) {
+    return <main className="main-content task-board-main-content"><TaskBoardHost onOpenSession={(sessionId) => {
+      taskBoardController.close();
+      dispatch({ type: "session.select", id: sessionId });
+    }} /></main>;
+  }
+
   return (
-    <main className={`main-content${snapshot.layout.filePanelOpen ? " file-panel-open" : ""}${inSplit ? " main-content-in-split" : ""}`}>
+    <main inert={snapshot.layout.sessionsBackdropVisible} className={`main-content${snapshot.layout.filePanelOpen ? " file-panel-open" : ""}${inSplit ? " main-content-in-split" : ""}`}>
       {/* 任务内由标签条承担主区导航；不再叠一层重复的会话标题栏。 */}
       {context.taskId ? null : <ShellTopbar/>}
       {context.taskId && snapshot.viewport.mobile && (

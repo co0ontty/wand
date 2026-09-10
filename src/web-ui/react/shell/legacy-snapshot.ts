@@ -53,6 +53,7 @@ interface LegacySession {
   startedAt?: string;
   endedAt?: string;
   claudeSessionId?: string;
+  workspaceId?: string;
   workspaceTaskId?: string;
   currentTaskTitle?: string;
   worktree?: {
@@ -210,6 +211,7 @@ function sessionToVm(
     ...(session.startedAt ? { startedAt: session.startedAt } : {}),
     ...(session.endedAt ? { endedAt: session.endedAt } : {}),
     ...(session.claudeSessionId ? { claudeSessionId: session.claudeSessionId } : {}),
+    ...(session.workspaceId ? { workspaceId: session.workspaceId } : {}),
     ...(session.workspaceTaskId ? { workspaceTaskId: session.workspaceTaskId } : {}),
     ...(worktreeEnabled ? {
       worktree: {
@@ -254,7 +256,7 @@ export function deriveLegacyUiSnapshot(
   const mobile = environment.width <= 768;
   const drawerOpen = Boolean(state.sessionsDrawerOpen);
   const sidebarPinned = Boolean(state.sidebarPinned);
-  const sidebarCollapsed = Boolean(state.sidebarCollapsed);
+  const sidebarCollapsed = !mobile && sidebarPinned && Boolean(state.sidebarCollapsed);
   const filePanelOpen = Boolean(state.filePanelOpen);
   const structuredSelected = selected?.kind === "structured";
   const currentView = structuredSelected || state.currentView === "chat" ? "chat" : "terminal";
@@ -287,7 +289,7 @@ export function deriveLegacyUiSnapshot(
       sessionsDrawerOpen: drawerOpen,
       sidebarPinned,
       sidebarCollapsed,
-      sidebarAnchored: sidebarCollapsed || (!mobile && (sidebarPinned || drawerOpen)),
+      sidebarAnchored: !mobile && (sidebarPinned || drawerOpen),
       sessionsBackdropVisible: drawerOpen && (mobile || !sidebarPinned),
       filePanelOpen,
       filePanelBackdropVisible: filePanelOpen && mobile,

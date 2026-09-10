@@ -162,7 +162,7 @@ export interface WorkspaceWorktreeOverview {
 }
 
 export interface CreateWorkspaceTaskRequest {
-  name: string;
+  name?: string;
   baseRef?: string;
   /** Optional directory override, used by standalone tasks that mount a folder. */
   cwd?: string;
@@ -171,7 +171,7 @@ export interface CreateWorkspaceTaskRequest {
 }
 
 export interface CreateStandaloneTaskRequest {
-  name: string;
+  name?: string;
   cwd?: string;
   worktree?: boolean;
 }

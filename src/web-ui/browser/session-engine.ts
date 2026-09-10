@@ -29,7 +29,8 @@ import {
   normalizeComposerModelValue,
 } from "./composer-select-values";
 import { inferProviderIdFromCommand } from "../provider-identity";
-import { hasPooledTerminal } from "./terminal-pool";
+import { hasPooledTerminal, isPooledTerminalBracketedPasteMode } from "./terminal-pool";
+import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardImageExtension, isClipboardImageMimeType } from "./pty-paste";
 
       // 证书不受信任时浏览器会丢弃 Secure Cookie —— 密码正确也存不住登录态。
       // 这里揭示专用提示，并把「改用 HTTP」按钮指向同 host 的 http:// 地址。
@@ -2746,14 +2747,136 @@ import { hasPooledTerminal } from "./terminal-pool";
         return /^image\/(png|jpe?g|gif|webp|bmp|svg\+xml)/.test(type);
       }
 
+      function runningPtyAttachmentSession(sessionId?) {
+        var session = sessionId
+          ? state.sessions.find(function(item) { return item.id === sessionId; })
+          : getSelectedSession();
+        return state.currentView === "terminal"
+          && session
+          && !isStructuredSession(session)
+          && session.status === "running"
+          ? session
+          : null;
+      }
+
+      function ptyPasteTargetSessionId(event) {
+        var target = event && event.target as HTMLElement | null;
+        if (!target || typeof target.closest !== "function") return null;
+        var pooledHost = target.closest("[data-pty-session-id]") as HTMLElement | null;
+        if (pooledHost && pooledHost.dataset.ptySessionId) {
+          return pooledHost.dataset.ptySessionId;
+        }
+        if (target.closest("#output, .xterm")) return state.selectedId;
+        if (state.terminalInteractive && target.closest("#input-box")) return state.selectedId;
+        return null;
+      }
+
+      function attachmentEntry(file, index?) {
+        var originalName = typeof file.name === "string" ? file.name.trim() : "";
+        var isImage = isClipboardImageMimeType(file.type);
+        var fallbackName = isImage
+          ? "clipboard-image-" + Date.now() + "-" + ((index || 0) + 1)
+            + clipboardImageExtension(file.type)
+          : "attachment-" + Date.now() + "-" + ((index || 0) + 1);
+        var imageNameHasExtension = /\.(?:png|jpe?g|gif|webp|bmp|svg)$/i.test(originalName);
+        return {
+          file: file,
+          // Clipboard APIs sometimes name image blobs simply "blob". Give
+          // those files a real image suffix so Codex's path/image validation
+          // does not have to guess from the bytes alone.
+          name: isImage && !imageNameHasExtension ? fallbackName : (originalName || fallbackName),
+          size: file.size,
+          previewUrl: null,
+        };
+      }
+
+      function validAttachmentEntries(files) {
+        var entries = [];
+        var list = (Array.from(files || []) as File[]).slice(0, 5);
+        if ((files && files.length || 0) > 5) {
+          showToast("一次最多粘贴或上传 5 个附件。", "warning");
+        }
+        for (var i = 0; i < list.length; i++) {
+          var file = list[i];
+          if (!file) continue;
+          if (file.size > ATTACH_MAX_SIZE) {
+            showToast("文件过大（上限 10 MB）: " + (file.name || "剪贴板图片"), "error");
+            continue;
+          }
+          entries.push(attachmentEntry(file, i));
+        }
+        return entries;
+      }
+
+      export function shouldBracketPtyPaste(sessionId, provider) {
+        if (!provider) {
+          var targetSession = state.sessions.find(function(item) { return item.id === sessionId; });
+          provider = targetSession && (targetSession.provider
+            || inferProviderIdFromCommand(targetSession.command || ""));
+        }
+        if (String(provider || "").toLowerCase() === "codex") return true;
+        if (hasPooledTerminal(sessionId)) {
+          return isPooledTerminalBracketedPasteMode(sessionId);
+        }
+        return !!(state.terminal && state.terminal.modes && state.terminal.modes.bracketedPasteMode);
+      }
+
+      function pasteUploadedPathsIntoPty(sessionId, uploadedFiles, bracketedPaste) {
+        return uploadedFiles.reduce(function(promise, uploaded) {
+          return promise.then(function() {
+            var path = uploaded && typeof uploaded.savedPath === "string"
+              ? uploaded.savedPath
+              : "";
+            if (!path) return undefined;
+            // Codex only recognizes a pasted image path inside a terminal paste
+            // event. Raw PTY text becomes ordinary key input and never reaches
+            // its image attachment path. Preserve one paste boundary per file
+            // so multiple images become separate [Image #N] attachments.
+            return queueDirectInput(
+              buildTerminalPathPasteSequence(path, bracketedPaste),
+              "paste",
+              "terminal",
+              sessionId,
+            );
+          });
+        }, Promise.resolve());
+      }
+
+      export function pasteFilesIntoPty(files, targetSessionId?) {
+        var session = runningPtyAttachmentSession(targetSessionId);
+        if (!session) return false;
+        var entries = validAttachmentEntries(files);
+        if (!entries.length) return true;
+        var sessionId = session.id;
+        var provider = session.provider || inferProviderIdFromCommand(session.command || "");
+        var imageCount = entries.filter(function(entry) {
+          return isClipboardImageMimeType(entry.file && entry.file.type);
+        }).length;
+        var bracketedPaste = shouldBracketPtyPaste(sessionId, provider);
+        showToast(imageCount === entries.length ? "正在粘贴图片…" : "正在上传附件…", "info");
+        uploadAttachments(sessionId, entries)
+          .then(function(uploadedFiles) {
+            return pasteUploadedPathsIntoPty(sessionId, uploadedFiles, bracketedPaste).then(function() {
+              var countLabel = imageCount === entries.length
+                ? entries.length + " 张图片"
+                : entries.length + " 个附件";
+              var target = provider === "codex" ? "Codex" : "CLI";
+              showToast("已将 " + countLabel + "粘贴到 " + target + " 输入区。", "info");
+            });
+          })
+          .catch(function(error) {
+            showToast("附件粘贴失败: " + ((error && error.message) || error), "error");
+          });
+        return true;
+      }
+
       export function addPendingAttachment(file) {
         if (!file) return;
         if (!state.selectedId) return;
-        if (file.size > ATTACH_MAX_SIZE) {
-          showToast("文件过大（上限 10 MB）: " + file.name, "error");
-          return;
-        }
-        var entry = { file: file, name: file.name, size: file.size, previewUrl: null };
+        if (state.terminalInteractive && pasteFilesIntoPty([file])) return;
+        var entries = validAttachmentEntries([file]);
+        if (!entries.length) return;
+        var entry = entries[0];
         if (isImageType(file.type)) {
           entry.previewUrl = URL.createObjectURL(file);
         }
@@ -2878,23 +3001,59 @@ import { hasPooledTerminal } from "./terminal-pool";
         return true;
       }
 
-      export function handleInputPaste(event) {
-        var items = event.clipboardData && event.clipboardData.items;
-        if (items && !state.terminalInteractive) {
+      function clipboardImageFiles(event) {
+        var clipboard = event && event.clipboardData;
+        if (!clipboard) return [];
+        var files = [];
+        var items = clipboard.items;
+        if (items) {
           for (var i = 0; i < items.length; i++) {
-            if (items[i].type.indexOf("image/") === 0) {
-              event.preventDefault();
-              var file = items[i].getAsFile();
-              if (file) addPendingAttachment(file);
-              return;
+            if (!isClipboardImageMimeType(items[i].type)) continue;
+            var file = items[i].getAsFile();
+            if (file) files.push(file);
+          }
+        }
+        if (!files.length && clipboard.files) {
+          for (var j = 0; j < clipboard.files.length; j++) {
+            if (isClipboardImageMimeType(clipboard.files[j].type)) {
+              files.push(clipboard.files[j]);
             }
           }
+        }
+        return files;
+      }
+
+      export function handlePtyImagePaste(event) {
+        var sessionId = ptyPasteTargetSessionId(event);
+        if (!sessionId || !runningPtyAttachmentSession(sessionId)) return false;
+        var files = clipboardImageFiles(event);
+        if (!files.length) return false;
+        event.preventDefault();
+        return pasteFilesIntoPty(files, sessionId);
+      }
+
+      export function handleInputPaste(event) {
+        var imageFiles = clipboardImageFiles(event);
+        if (imageFiles.length) {
+          event.preventDefault();
+          if (state.terminalInteractive && pasteFilesIntoPty(imageFiles)) return;
+          for (var i = 0; i < imageFiles.length; i++) {
+            addPendingAttachment(imageFiles[i]);
+          }
+          return;
         }
         var pasted = event.clipboardData && event.clipboardData.getData("text");
         if (!pasted) return;
         event.preventDefault();
         if (state.terminalInteractive) {
-          queueDirectInput(pasted, "paste").catch(function() {});
+          // Preserve browser paste semantics across the remote PTY. Codex uses
+          // this event boundary for large-paste handling and image-path attach.
+          var session = getSelectedSession();
+          var provider = session && (session.provider || inferProviderIdFromCommand(session.command || ""));
+          queueDirectInput(
+            buildTerminalPasteSequence(pasted, shouldBracketPtyPaste(state.selectedId, provider)),
+            "paste",
+          ).catch(function() {});
           return;
         }
         var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;

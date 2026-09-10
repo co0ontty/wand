@@ -119,6 +119,11 @@ export function hasPooledTerminal(sessionId: string): boolean {
   return pool.has(sessionId);
 }
 
+export function isPooledTerminalBracketedPasteMode(sessionId: string): boolean {
+  const handle = pool.get(sessionId);
+  return !!handle?.terminal?.modes?.bracketedPasteMode;
+}
+
 function writeTerminal(handle: PooledTerminal, data: string): Promise<void> {
   if (!data || handle.disposed) return Promise.resolve();
   return new Promise<void>((resolve) => {
@@ -151,6 +156,7 @@ export function createPooledTerminal(sessionId: string, container: HTMLElement):
 
   const wrap = document.createElement("div");
   wrap.className = "terminal-scroll-wrap pooled-terminal-wrap";
+  wrap.dataset.ptySessionId = sessionId;
   container.appendChild(wrap);
 
   const term = new XTermLib.Terminal({

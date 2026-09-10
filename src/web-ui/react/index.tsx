@@ -12,6 +12,8 @@ import { restartOverlayController } from "./restart-overlay/controller";
 import { filePreviewController } from "./file-preview/controller";
 import { missionsController } from "./missions/controller";
 import { workspacesController } from "./workspaces/controller";
+import { githubIssuesController } from "./issues/controller";
+import { taskBoardController } from "./issues/task-board-controller";
 
 const OVERLAY_ROOT_ID = "overlay-root";
 const REACT_MOUNT_ID = "wand-react-ui-mount";
@@ -55,6 +57,8 @@ function exposeBusinessControllers(): void {
   window.__wandReactFilePreview = filePreviewController;
   window.__wandReactMissions = missionsController;
   window.__wandReactWorkspaces = workspacesController;
+  window.__wandReactGithubIssues = githubIssuesController;
+  window.__wandReactTaskBoard = taskBoardController;
 }
 
 /**

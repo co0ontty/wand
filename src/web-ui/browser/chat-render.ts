@@ -1791,7 +1791,7 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
           return '<div class="chat-message thinking">' +
             '<div class="thinking-inline thinking-pty ' + (thinkingExpanded ? 'expanded' : 'collapsed') + '" data-expand-kind="thinking" data-expand-key="' + escapeHtml(thinkingKey) + '" data-thinking="' + escapeHtml(ptyThinkingText) + '" onclick="__thinkingToggle(this)">' +
               '<span class="thinking-inline-icon">' + iconSvg("spark", { size: 12, strokeWidth: 1.8 }) + '</span>' +
-              '<span class="thinking-inline-preview">' + escapeHtml(ptyThinkingText) + '</span>' +
+              '<span class="thinking-inline-preview">' + escapeHtml(thinkingExpanded ? ptyThinkingText : '深度思考') + '</span>' +
               '<span class="thinking-inline-action">' + (thinkingExpanded ? '收起' : '展开') + '</span>' +
             '</div>' +
           '</div>';
@@ -2545,10 +2545,10 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
             // 非流式分支：thinking 字段是空字符串时，UI 上只会出现一条带"展开"
             // 的紫色窄条，展开了也是空——直接不渲染，避免视觉噪音。
             if (!thinkingText.trim()) return "";
-            var preview = thinkingText.length > 60 ? thinkingText.slice(0, 57) + "…" : thinkingText;
             var thinkingKey = buildExpandKey("thinking", [messageKey, index]);
             var thinkingPersisted = getPersistedExpandState(thinkingKey);
-          var thinkingExpanded = thinkingPersisted === null ? getCardDefault("thinking") : thinkingPersisted;
+            var thinkingExpanded = thinkingPersisted === null ? getCardDefault("thinking") : thinkingPersisted;
+            var preview = thinkingExpanded ? thinkingText : "深度思考";
             return '<div class="thinking-inline ' + (thinkingExpanded ? 'expanded' : 'collapsed') + '" data-expand-kind="thinking" data-expand-key="' + escapeHtml(thinkingKey) + '" data-thinking="' + escapeHtml(thinkingText) + '" onclick="__thinkingToggle(this)">' +
               '<span class="thinking-inline-icon">' + iconSvg("spark", { size: 12, strokeWidth: 1.8 }) + '</span>' +
               '<span class="thinking-inline-preview">' + escapeHtml(thinkingExpanded ? thinkingText : preview) + '</span>' +

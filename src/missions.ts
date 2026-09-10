@@ -42,9 +42,29 @@ function firstPromptLine(prompt: string): string {
   return line.length > 72 ? `${line.slice(0, 69)}…` : line;
 }
 
+const ACTIVITY_NOISE = /(?:⏵⏵|⎿|bypasspermissions|shift\+tab|esc to interrupt|tip:|worked for|total messages:|ran playwright code)/i;
+
+function cleanActivityText(value: string, maxLength: number): string | null {
+  const normalized = value.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
+  if (!normalized || ACTIVITY_NOISE.test(normalized)) return null;
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1).trimEnd()}…` : normalized;
+}
+
+function cleanActivityTitle(value: string): { title: string; summary: string | null } {
+  const normalized = value.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
+  const match = normalized.match(/^(.*?)\s+(执行中|已完成|失败|等待答复|等待授权)\s*[·:]?\s*(.*)$/);
+  if (!match) return { title: cleanActivityText(normalized, 72) || "Agent 会话", summary: null };
+  return {
+    title: cleanActivityText(match[1], 72) || "Agent 会话",
+    summary: cleanActivityText(match[3], 160),
+  };
+}
+
 function sessionSummary(snapshot: SessionSnapshot): string | null {
-  if (snapshot.description?.trim()) return snapshot.description.trim();
-  if (snapshot.currentTaskTitle?.trim()) return snapshot.currentTaskTitle.trim();
+  const direct = cleanActivityText(snapshot.description?.trim() || "", 160);
+  if (direct) return direct;
+  const taskTitle = cleanActivityText(snapshot.currentTaskTitle?.trim() || "", 160);
+  if (taskTitle) return taskTitle;
   const messages = snapshot.messages ?? [];
   for (let turnIndex = messages.length - 1; turnIndex >= 0; turnIndex--) {
     const text = messages[turnIndex].content
@@ -52,9 +72,10 @@ function sessionSummary(snapshot: SessionSnapshot): string | null {
       .map((block) => block.text.trim())
       .filter(Boolean)
       .join(" ");
-    if (text) return text.length > 240 ? `${text.slice(0, 237)}…` : text;
+    const cleaned = cleanActivityText(text, 160);
+    if (cleaned) return cleaned;
   }
-  return snapshot.summary?.trim() || null;
+  return cleanActivityText(snapshot.summary?.trim() || "", 160);
 }
 
 function hasUnansweredQuestion(messages: ConversationTurn[] | undefined): boolean {
@@ -173,12 +194,15 @@ export class Missions {
       error: state === "failed" ? snapshot.structuredState?.lastError ?? "任务执行失败" : null,
       updatedAt,
     });
+    const mission = this.storage.getMission(attempt.missionId);
     this.storage.upsertAgentActivity({
       sessionId: event.sessionId,
       missionId: attempt.missionId,
       attemptId: attempt.id,
       state,
-      title: snapshot.title?.trim() || snapshot.summary?.trim() || firstPromptLine(this.storage.getMission(attempt.missionId)?.prompt ?? ""),
+      // The session title can contain provider TUI status chrome. Inbox items
+      // belong to the mission, so keep their title stable and human-readable.
+      title: mission?.title || firstPromptLine(mission?.prompt ?? ""),
       summary: sessionSummary(snapshot),
       provider: snapshot.provider ?? attempt.provider,
       cwd: snapshot.cwd,
@@ -189,7 +213,17 @@ export class Missions {
   }
 
   inbox(): AgentActivityItem[] {
-    return this.storage.listAgentActivity();
+    return this.storage.listAgentActivity().map((item) => {
+      const mission = item.missionId ? this.storage.getMission(item.missionId) : null;
+      const legacyTitle = cleanActivityTitle(item.title);
+      return {
+        ...item,
+        // Older rows may have been populated from a provider TUI title. Prefer
+        // the mission title at read time so existing inbox data is repaired too.
+        title: mission?.title || legacyTitle.title,
+        summary: cleanActivityText(item.summary ?? "", 160) || legacyTitle.summary,
+      };
+    });
   }
 
   markInboxRead(sessionId?: string): void {

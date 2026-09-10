@@ -1,0 +1,4 @@
+interface:
+  display_name: "Manage Taskboard"
+  short_description: "Manage projects and issues with taskctl CLI"
+  default_prompt: "Manage the referenced taskboard issue with taskctl and keep its status synchronized."

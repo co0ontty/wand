@@ -7,7 +7,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { WandButton, WandDialogSurface, WandIcon } from "../ui";
+import { WandBadge, WandButton, WandDialogSurface, WandIcon } from "../ui";
 import { settingsStore } from "./controller";
 import {
   SettingsActionButton,
@@ -330,6 +330,96 @@ export function AboutSettingsTab({ snapshot, repository, refresh, toast, showRes
       {snapshot.access === "admin" ? (
         <ConnectCodePanel code={snapshot.connectCode?.code || ""} repository={repository} toast={toast} />
       ) : null}
+      {status ? <SettingsStatus tone={tone}>{status}</SettingsStatus> : null}
+    </section>
+  );
+}
+
+export function GithubSettingsTab({ snapshot, repository, refresh, setSnapshot, toast }: SettingsTabProps) {
+  const [token, setToken] = useState("");
+  const [apiUrl, setApiUrl] = useState(snapshot.github.apiUrl || "https://api.github.com");
+  const [pending, setPending] = useState("");
+  const [status, setStatus] = useState("");
+  const [tone, setTone] = useState<StatusTone>("info");
+
+  useEffect(() => {
+    setApiUrl(snapshot.github.apiUrl || "https://api.github.com");
+    setToken("");
+  }, [snapshot.github]);
+
+  async function connect() {
+    if (!token.trim()) {
+      setStatus("请输入 GitHub Fine-grained Personal Access Token。");
+      setTone("error");
+      return;
+    }
+    setPending("connect");
+    setStatus("");
+    try {
+      const next = await repository.execute({ type: "github.connect", value: { token, apiUrl: apiUrl.trim() || undefined } });
+      setToken("");
+      setSnapshot((current) => current ? { ...current, github: next } : current);
+      setStatus(`已连接 GitHub 账号 ${next.username || ""}。`);
+      setTone("success");
+      toast("GitHub 已连接", "success");
+      await refresh();
+    } catch (cause) {
+      setStatus(messageOf(cause, "连接 GitHub 失败。"));
+      setTone("error");
+    } finally {
+      setPending("");
+    }
+  }
+
+  async function disconnect() {
+    setPending("disconnect");
+    setStatus("");
+    try {
+      await repository.execute({ type: "github.disconnect" });
+      await refresh();
+      setStatus("GitHub 已断开，已删除本地保存的 Token。");
+      setTone("success");
+      toast("GitHub 已断开", "success");
+    } catch (cause) {
+      setStatus(messageOf(cause, "断开 GitHub 失败。"));
+      setTone("error");
+    } finally {
+      setPending("");
+    }
+  }
+
+  const connector = snapshot.github;
+  return (
+    <section className="wand-settings-panel" aria-label="连接器">
+      <header className="wand-settings-panel-heading">
+        <h2>连接器</h2><p>连接外部服务，让 Wand 可以在你的授权范围内读取和处理协作数据。</p>
+      </header>
+      <SettingsSection title="GitHub" description="使用 Fine-grained Token，建议只授权需要操作的仓库和权限。">
+        <div className="wand-settings-update-deck">
+          <span className="wand-settings-update-deck-icon" aria-hidden="true"><WandIcon name="git" size={18} strokeWidth={1.8}/></span>
+          <div>
+            <strong>{connector.connected ? `已连接：${connector.username || "GitHub 账号"}` : "尚未连接"}</strong>
+            <span>{connector.connected ? `连接地址：${connector.apiUrl || "https://api.github.com"}` : "连接后可读取仓库、Issue、Pull Request，并执行创建和更新操作。"}</span>
+          </div>
+          <WandBadge tone={connector.connected ? "success" : "info"}>{connector.connected ? "已连接" : "未连接"}</WandBadge>
+        </div>
+        <SettingsGrid>
+          <SettingsField label="Fine-grained Token" htmlFor="settings-github-token" hint="保存后不会再次显示；留空不会覆盖已有 Token。">
+            <SettingsTextInput id="settings-github-token" type="password" autoComplete="new-password" value={token} disabled={!!pending} placeholder={connector.connected ? "输入新 Token 以轮换" : "github_pat_…"} onChange={setToken} />
+          </SettingsField>
+          <SettingsField label="GitHub API 地址" htmlFor="settings-github-api-url" hint="GitHub.com 使用默认地址；GitHub Enterprise 可填对应 API 地址。">
+            <SettingsTextInput id="settings-github-api-url" type="url" autoComplete="url" value={apiUrl} disabled={!!pending} placeholder="https://api.github.com" onChange={setApiUrl} />
+          </SettingsField>
+        </SettingsGrid>
+        {connector.connected && connector.scopes.length ? <SettingsStatus tone="info">Token 权限：{connector.scopes.join("、")}</SettingsStatus> : null}
+        <div className="wand-settings-button-row">
+          <SettingsActionButton pending={pending === "connect"} kind="primary" onClick={() => void connect()}>{connector.connected ? "验证并轮换 Token" : "连接 GitHub"}</SettingsActionButton>
+          {connector.connected ? <SettingsActionButton pending={pending === "disconnect"} kind="secondary" onClick={() => void disconnect()}>断开并删除 Token</SettingsActionButton> : null}
+        </div>
+        <SettingsStatus tone="warning">
+          Token 会加密保存在当前 Wand 配置目录的 SQLite 数据库中，不会写入 config.json，也不会回传到浏览器。创建 Token：<a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">GitHub Fine-grained tokens</a>。
+        </SettingsStatus>
+      </SettingsSection>
       {status ? <SettingsStatus tone={tone}>{status}</SettingsStatus> : null}
     </section>
   );

@@ -20,6 +20,7 @@ import { SessionProviderMark } from "./session-mark";
 import { listSessionLabel, withLiveSessionTitle } from "./session-order";
 import { SidebarDisclosure, useSidebarCollapsed } from "./sidebar-disclosure";
 import { formatTaskRecency, sidebarSelection, taskActivity, taskRecency } from "./sidebar-task-meta";
+import { compactTaskLabel, filterSidebarGroups } from "./sidebar-search";
 import {
   isDirectoryExpanded,
   isTaskSessionsExpanded,
@@ -560,6 +561,7 @@ function TaskGroupSection({
   onOpenSession,
   onRequestNewSessionInTask,
   onTasksChanged,
+  onNavigate,
 }: {
   group: TaskDirectoryGroup;
   now: number;
@@ -572,6 +574,7 @@ function TaskGroupSection({
   onOpenSession(group: TaskDirectoryGroup, session: WorkspaceSessionSummary): void;
   onRequestNewSessionInTask(task: TaskSummary): void;
   onTasksChanged(): Promise<void>;
+  onNavigate?: () => void;
 }) {
   const [collapsed, toggleCollapsed] = useSidebarCollapsed(`project.${group.workspaceId}`);
   const [looseCollapsed, setLooseCollapsed] = React.useState(false);
@@ -774,7 +777,7 @@ function TaskGroupSection({
         <div className="workspace-tasks">
           {taskCount === 0 && group.standaloneSessions.length === 0 && !group.synthetic && (
             <button type="button" className="workspaces-empty-action"
-              onClick={() => workspacesController.open(group.workspaceCwd, "task")}>
+              onClick={() => { onNavigate?.(); workspacesController.open(group.workspaceCwd, "task"); }}>
               <WandIcon name="plus" size={13}/><span>创建第一个任务</span>
             </button>
           )}
@@ -915,7 +918,7 @@ function CompactWorkspaceTree({
                   onClick={() => onOpenTask(group, task)}
                 >
                   <span className="sidebar-collapsed-task-branch" aria-hidden="true"/>
-                  <span className="sidebar-collapsed-task-dot" aria-hidden="true"/>
+                  <span className="sidebar-collapsed-task-label" aria-hidden="true">{compactTaskLabel(task.name)}</span>
                 </button>
               ))}
             </div>
@@ -931,6 +934,9 @@ export function WorkspacesPanel({
   extraGroups = null,
   compact = false,
   onExpand,
+  onNavigate,
+  searchQuery = "",
+  onSearchChange,
 }: {
   selectedSessionId?: string | null;
   /** 实时会话标题（WS 已生成的命令摘要），覆盖轮询列表里的旧 title。 */
@@ -940,6 +946,9 @@ export function WorkspacesPanel({
   /** 窄栏模式下保留项目 → 任务的紧凑目录层级。 */
   compact?: boolean;
   onExpand?: () => void;
+  onNavigate?: () => void;
+  searchQuery?: string;
+  onSearchChange?: (query: string) => void;
 } = {}) {
   // 订阅控制器：新建任务对话框关闭时刷新列表（创建后立即出现）。
   const controllerSnapshot = React.useSyncExternalStore(
@@ -958,6 +967,7 @@ export function WorkspacesPanel({
   }, [controllerSnapshot.open]);
 
   const { groups, loading, error, reload } = useTaskGroups(refreshTick);
+  const visibleGroups = filterSidebarGroups(groups, searchQuery, sessionTitles ?? {});
 
   // 活动高亮统一读 workspaceContextStore（主区标签栏与这里共用同一来源，
   // 关闭工作区窗口时这里也会同步取消高亮）。
@@ -983,6 +993,7 @@ export function WorkspacesPanel({
   const [pendingNewSessionTask, setPendingNewSessionTask] = React.useState<TaskSummary | null>(null);
 
   const openTask = React.useCallback((group: TaskDirectoryGroup, task: TaskSummary): unknown => {
+    onNavigate?.();
     const rt = runtime();
     if (!rt) {
       toast("工作空间运行环境尚未就绪，请刷新页面后重试。", "warning");
@@ -997,9 +1008,10 @@ export function WorkspacesPanel({
     };
     // 可能返回恢复完成的 Promise；调用方按需 await（见 newSessionInTask）。
     return rt.openTask(payload);
-  }, []);
+  }, [onNavigate]);
 
   const openSession = React.useCallback((group: TaskDirectoryGroup, session: WorkspaceSessionSummary) => {
+    onNavigate?.();
     const rt = runtime();
     if (!rt) {
       toast("工作空间运行环境尚未就绪，请刷新页面后重试。", "warning");
@@ -1022,7 +1034,7 @@ export function WorkspacesPanel({
       });
     }
     rt.selectSession(session.id);
-  }, [openTask]);
+  }, [onNavigate, openTask]);
 
   const newSessionInTask = React.useCallback(async (
     group: TaskDirectoryGroup,
@@ -1046,8 +1058,8 @@ export function WorkspacesPanel({
     await reload();
   }, [openTask, reload]);
 
-  const globalGroup = groups.find((group) => group.global);
-  const projectGroups = groups.filter((group) => !group.global);
+  const globalGroup = visibleGroups.find((group) => group.global);
+  const projectGroups = visibleGroups.filter((group) => !group.global);
   const standaloneTaskTotal = globalGroup?.tasks.length ?? 0;
 
   const sessionRefresh = React.useRef(true);
@@ -1093,7 +1105,7 @@ export function WorkspacesPanel({
         <button
           type="button"
           className="workspaces-panel-add"
-          onClick={() => workspacesController.open(undefined, "project")}
+          onClick={() => { onNavigate?.(); workspacesController.open(undefined, "project"); }}
           aria-label="新建项目"
           title="新建项目"
         >
@@ -1113,6 +1125,26 @@ export function WorkspacesPanel({
         </div>
       ) : (
         <>
+          <label className="sidebar-search">
+            <WandIcon name="hash" size={14}/>
+            <input
+              type="search"
+              value={searchQuery}
+              placeholder="搜索任务或会话"
+              aria-label="搜索任务或会话"
+              onChange={(event) => onSearchChange?.(event.currentTarget.value)}
+            />
+            {searchQuery ? (
+              <button type="button" aria-label="清除搜索" title="清除搜索" onClick={() => onSearchChange?.("")}>
+                <WandIcon name="close" size={12}/>
+              </button>
+            ) : null}
+          </label>
+          {searchQuery && visibleGroups.length === 0 ? (
+            <div className="sidebar-search-empty">没有找到匹配的任务或会话。</div>
+          ) : null}
+          {!searchQuery || visibleGroups.length > 0 ? (
+            <div className="sidebar-results">
             <section className="workspaces-global-tasks" aria-label="独立任务">
               <div className="workspaces-panel-heading">
                 <button type="button" className="workspaces-panel-heading-toggle" title="独立任务，不依赖任何项目"
@@ -1123,7 +1155,7 @@ export function WorkspacesPanel({
                   <span className="workspaces-panel-heading-count">{standaloneTaskTotal}</span>
                 </button>
                 <button type="button" className="workspaces-panel-add" title="新建独立任务" aria-label="新建独立任务"
-                  onClick={() => workspacesController.open(undefined, "task")}><WandIcon name="plus" size={14}/></button>
+                  onClick={() => { onNavigate?.(); workspacesController.open(undefined, "task"); }}><WandIcon name="plus" size={14}/></button>
               </div>
               <SidebarDisclosure id={standaloneId} open={!standaloneCollapsed}>
               {globalGroup ? (
@@ -1139,7 +1171,7 @@ export function WorkspacesPanel({
                     activeSessionId={selectedSessionId}
                     onOpen={() => openTask(globalGroup, task)}
                     onOpenSession={(session) => openSession(globalGroup, session)}
-                    onRequestNewSession={() => setPendingNewSessionTask(task)}
+                    onRequestNewSession={() => { onNavigate?.(); setPendingNewSessionTask(task); }}
                     onClearSessions={async () => {
                       const ids = task.sessions.map((session) => session.id);
                       await removeSessions(ids, task);
@@ -1202,7 +1234,7 @@ export function WorkspacesPanel({
                 <div className="workspaces-section-empty">
                   <span>随时开始，不必先建项目。</span>
                   <button type="button" className="workspaces-empty-action" aria-label="新建任务"
-                    onClick={() => workspacesController.open(undefined, "task")}>
+                    onClick={() => { onNavigate?.(); workspacesController.open(undefined, "task"); }}>
                     <WandIcon name="plus" size={13}/><span>开始一个任务</span>
                   </button>
                 </div>
@@ -1226,8 +1258,9 @@ export function WorkspacesPanel({
                     activeSessionId={selectedSessionId}
                     onActiveTaskOpen={openTask}
                     onOpenSession={openSession}
-                    onRequestNewSessionInTask={(task) => setPendingNewSessionTask(task)}
+                    onRequestNewSessionInTask={(task) => { onNavigate?.(); setPendingNewSessionTask(task); }}
                     onTasksChanged={reload}
+                    onNavigate={onNavigate}
                   />
                 ))}
             </div>
@@ -1235,13 +1268,15 @@ export function WorkspacesPanel({
             <div className="workspaces-section-empty">
               <span>把同一目录的任务放在一起。</span>
               <button type="button" className="workspaces-empty-action"
-                onClick={() => workspacesController.open(undefined, "project")}>
+                onClick={() => { onNavigate?.(); workspacesController.open(undefined, "project"); }}>
                 <WandIcon name="folder" size={13}/><span>创建第一个项目</span>
               </button>
             </div>
           )}
             </SidebarDisclosure>
           </section>
+            </div>
+          ) : null}
         </>
       )}
       {error && groups.length > 0 && (

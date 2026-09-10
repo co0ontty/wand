@@ -2,7 +2,10 @@
 
 本文件是本仓库所有编码 agent 的**唯一操作指南**。原 `CLAUDE.md` 已删除，其内容已并入本文；深入的行为分析见 `docs/`（服务端 `docs/server-logic-analysis.md`、客户端 `docs/client-logic-analysis.md`、优化排期 `docs/optimization-plan.md`）。
 
-## Project Snapshot
+## 项目记忆
+
+- 只要当前项目的 Android 客户端发生改动，收尾时必须重新编译带版本号的 beta APK，并部署到 `~/.wand/android/` Beta 更新目录；同时验证 `/api/android-apk-update?currentVersion=0.0.0&channel=beta` 能返回新版本。除非用户明确要求跳过，否则不得省略。
+
 
 `wand` 是本机 AI CLI 工具的 Node.js Web 控制台，支持 Claude Code、Codex、OpenCode、Grok、Qoder、Pi 六个 provider。Express + WebSocket 服务浏览器 UI；会话跑在 PTY 或结构化非 PTY 进程里；PTY 由**独立的 terminal daemon**（`wand terminald`）持有，web 重启 / 自更新不杀 shell。配置、鉴权、会话状态持久化在激活配置文件所在目录。
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
@@ -64,9 +64,11 @@ test("task creation makes an isolated worktree in a git workspace", async () => 
   try {
     const ws = await fetch(`${baseUrl}/api/workspaces`, json({ name: "Wand", cwd: root })).then((r) => r.json() as Promise<{ id: string }>);
 
-    // 空名 → 400
+    // 空名自动生成默认任务名称
     let res = await fetch(`${baseUrl}/api/workspaces/${ws.id}/tasks`, json({ name: "  " }));
-    assert.equal(res.status, 400);
+    assert.equal(res.status, 201);
+    const unnamed = await res.json() as { id: string; name: string };
+    assert.equal(unnamed.name, "未命名任务");
 
     // 合法任务 → 201 + worktree 隔离
     res = await fetch(`${baseUrl}/api/workspaces/${ws.id}/tasks`, json({ name: "重构恢复流程" }));
@@ -84,8 +86,8 @@ test("task creation makes an isolated worktree in a git workspace", async () => 
     // 列表
     res = await fetch(`${baseUrl}/api/workspaces/${ws.id}/tasks`);
     const list = await res.json() as Array<{ id: string; name: string }>;
-    assert.equal(list.length, 1);
-    assert.equal(list[0].id, task.id);
+    assert.equal(list.length, 2);
+    assert.ok(list.some((item) => item.id === task.id));
 
     // 详情含 sessions（空）
     res = await fetch(`${baseUrl}/api/workspace-tasks/${task.id}`);
@@ -365,6 +367,47 @@ test("sessions bind to a workspace task and are listed under it", () => {
   rmSync(root, { recursive: true, force: true });
 });
 
+test("task list reassigns stale workspace bindings by the session path", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-task-path-"));
+  const first = path.join(root, "first");
+  const second = path.join(root, "second");
+  mkdirSync(first);
+  mkdirSync(second);
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const { baseUrl, close } = await startWorkspaceApp(storage);
+  try {
+    const firstWorkspace = storage.createWorkspace({ name: "第一项目", cwd: first });
+    const secondWorkspace = storage.createWorkspace({ name: "第二项目", cwd: second });
+    const manager = new StructuredSessionManager(storage, {
+      ...defaultConfig(),
+      defaultCwd: second,
+      structuredRunner: "sdk",
+    });
+    // 模拟旧数据：workspaceId 仍指向第一项目，但会话实际 cwd 已在第二项目。
+    const stale = manager.createSession({
+      cwd: second,
+      mode: "chat",
+      workspaceId: firstWorkspace.id,
+    });
+
+    const response = await fetch(`${baseUrl}/api/tasks`);
+    assert.equal(response.status, 200);
+    const groups = await response.json() as Array<{
+      workspaceId: string;
+      standaloneSessions: Array<{ id: string }>;
+    }>;
+    assert.deepEqual(groups.find((group) => group.workspaceId === firstWorkspace.id)?.standaloneSessions, []);
+    assert.deepEqual(
+      groups.find((group) => group.workspaceId === secondWorkspace.id)?.standaloneSessions.map((session) => session.id),
+      [stale.id],
+    );
+  } finally {
+    await close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+
 test("standalone tasks use the global scratch workspace and stay off the project list", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-task-global-"));
   const mounted = mkdtempSync(path.join(os.tmpdir(), "wand-task-mounted-"));
@@ -372,7 +415,9 @@ test("standalone tasks use the global scratch workspace and stay off the project
   const { baseUrl, close } = await startWorkspaceApp(storage);
   try {
     let res = await fetch(`${baseUrl}/api/tasks`, json({ name: "  " }));
-    assert.equal(res.status, 400);
+    assert.equal(res.status, 201);
+    const unnamed = await res.json() as { id: string; name: string };
+    assert.equal(unnamed.name, "未命名任务");
 
     res = await fetch(`${baseUrl}/api/tasks`, json({ name: "随口问问" }));
     assert.equal(res.status, 201);
@@ -397,11 +442,18 @@ test("standalone tasks use the global scratch workspace and stay off the project
 
     res = await fetch(`${baseUrl}/api/tasks`);
     const groups = await res.json() as Array<{
-      workspaceId: string; global?: boolean; tasks: Array<{ id: string }>;
+      workspaceId: string; workspaceCwd: string; workspaceName: string; global?: boolean; synthetic?: boolean;
+      tasks: Array<{ id: string }>;
     }>;
-    assert.equal(groups.length, 1);
-    assert.equal(groups[0].global, true);
-    assert.deepEqual(groups[0].tasks.map((task) => task.id).sort(), [standalone.id, mountedTask.id].sort());
+    // 无项目任务按实际目录分组：临时目录仍留在全局组，挂载目录进入合成目录组。
+    const globalGroup = groups.find((group) => group.global);
+    assert.ok(globalGroup);
+    assert.deepEqual(globalGroup.tasks.map((task) => task.id).sort(), [unnamed.id, standalone.id].sort());
+    const mountedGroup = groups.find((group) => group.tasks.some((task) => task.id === mountedTask.id));
+    assert.ok(mountedGroup);
+    assert.equal(mountedGroup.synthetic, true);
+    assert.equal(realpathSync(mountedGroup.workspaceCwd), realpathSync(mounted));
+    assert.deepEqual(mountedGroup.tasks.map((task) => task.id), [mountedTask.id]);
 
     const project = await fetch(`${baseUrl}/api/workspaces`, json({ name: "Acme", cwd: root }))
       .then((response) => response.json() as Promise<{ id: string }>);

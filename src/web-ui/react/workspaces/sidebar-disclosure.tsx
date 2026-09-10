@@ -1,6 +1,9 @@
 import * as React from "react";
 
-export function useSidebarCollapsed(key: string, defaultCollapsed = false): [boolean, () => void] {
+export function useSidebarCollapsed(
+  key: string,
+  defaultCollapsed = false,
+): [boolean, () => void, (collapsed: boolean) => void] {
   const storageKey = `wand.sidebar.${key}`;
   const [collapsed, setCollapsed] = React.useState(() => {
     try {
@@ -10,16 +13,15 @@ export function useSidebarCollapsed(key: string, defaultCollapsed = false): [boo
       return defaultCollapsed;
     }
   });
-  const toggle = (): void => {
-    const next = !collapsed;
+  const update = React.useCallback((next: boolean): void => {
     setCollapsed(next);
     try {
       window.localStorage.setItem(storageKey, String(next));
     } catch {
       return;
     }
-  };
-  return [collapsed, toggle];
+  }, [storageKey]);
+  return [collapsed, () => update(!collapsed), update];
 }
 
 export function SidebarDisclosure({

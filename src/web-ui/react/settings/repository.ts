@@ -8,6 +8,7 @@ import type {
   SettingsConfig,
   SettingsDistribution,
   SettingsDistributionAsset,
+  SettingsGithubConnector,
   SettingsExecuteOptions,
   SettingsLoadOptions,
   SettingsModelCatalog,
@@ -141,6 +142,19 @@ function normalizeSystemAi(value: unknown, includeFallbacks = true): SettingsSys
     normalized.fallbacks = input.fallbacks.map((profile) => normalizeSystemAi(profile, false));
   }
   return normalized;
+}
+
+function normalizeGithubConnector(value: unknown): SettingsGithubConnector {
+  const input = record(value);
+  return {
+    provider: "github",
+    connected: input.connected === true,
+    apiUrl: nullableString(input.apiUrl),
+    username: nullableString(input.username),
+    connectedAt: nullableString(input.connectedAt),
+    updatedAt: nullableString(input.updatedAt),
+    scopes: Array.isArray(input.scopes) ? input.scopes.filter((scope): scope is string => typeof scope === "string") : [],
+  };
 }
 
 function normalizeConfig(value: unknown): SettingsConfig {
@@ -347,6 +361,7 @@ function capabilities(access: "admin" | "read-only", platform: SettingsPlatformS
     nativeSounds: platform.hasNativeNotifications,
     haptics: notificationSnapshot().hapticsEnabled !== null,
     installDistribution: platform.canInstallDistribution,
+    manageConnectors: admin,
   };
 }
 
@@ -397,6 +412,7 @@ function aboutSnapshot(input: JsonRecord, access: "admin" | "read-only"): Settin
     connectCode: null,
     notifications: notificationSnapshot(),
     platform,
+    github: normalizeGithubConnector(input.githubConnector),
   };
 }
 
@@ -515,6 +531,7 @@ export class HttpSettingsRepository implements SettingsRepository {
       code: stringValue(connectCode.code),
       url: stringValue(connectCode.url),
     } : null;
+    snapshot.github = normalizeGithubConnector(admin.githubConnector);
     return snapshot;
   }
 
@@ -592,6 +609,20 @@ export class HttpSettingsRepository implements SettingsRepository {
         result = { channel: channel.channel, update };
         break;
       }
+      case "github.connect":
+        result = await post("/api/connectors/github", command.value, options.signal);
+        break;
+      case "github.disconnect":
+        result = await request("/api/connectors/github", { method: "DELETE", signal: options.signal });
+        break;
+      case "github.request":
+        result = await request(`/api/github${command.path}`, {
+          method: command.method,
+          headers: command.body ? { "Content-Type": "application/json" } : undefined,
+          body: command.body ? JSON.stringify(command.body) : undefined,
+          signal: options.signal,
+        });
+        break;
       case "connectCode.load": {
         const origin = window.location?.origin ? `?origin=${encodeURIComponent(window.location.origin)}` : "";
         result = await request(`/api/app-connect-code${origin}`, { signal: options.signal });

@@ -127,6 +127,13 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
   const isProject = creationKind === "project";
   const mountedCwd = cwd.trim();
+  const setTaskCwd = (nextCwd: string): void => {
+    setCwd(nextCwd);
+    if (!isProject) {
+      const matchingProject = projects.find((project) => normalizeDir(project.cwd) === normalizeDir(nextCwd));
+      setSelectedProjectId(matchingProject?.id ?? "");
+    }
+  };
   const hasDirectory = Boolean(selectedProject || mountedCwd);
   const effectiveCwd = selectedProject?.cwd
     || mountedCwd
@@ -168,8 +175,8 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
       return;
     }
     const trimmedName = name.trim();
-    if (!trimmedName) {
-      setError(isProject ? "请输入项目名称。" : "请输入任务名称。");
+    if (isProject && !trimmedName) {
+      setError("请输入项目名称。");
       return;
     }
     workspacesController.setDismissable(false);
@@ -196,11 +203,11 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
 
       const created = selectedProject
         ? await repository.createTask(selectedProject.id, {
-          name: trimmedName,
+          name: trimmedName || undefined,
           worktree: worktreeEnabled,
         })
         : await repository.createStandaloneTask({
-          name: trimmedName,
+          name: trimmedName || undefined,
           cwd: mountedCwd || undefined,
           worktree: mountedCwd ? worktreeEnabled : false,
         });
@@ -305,7 +312,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
                 aria-describedby="wand-new-task-name-hint"
                 onChange={(event) => setName(event.currentTarget.value)}
               />
-              <p id="wand-new-task-name-hint" className="wand-new-session-field-hint wand-new-project-field-hint">{isProject ? "用于在项目列表里识别这个项目。" : "用于在任务列表里识别这个任务。"}</p>
+              <p id="wand-new-task-name-hint" className="wand-new-session-field-hint wand-new-project-field-hint">{isProject ? "用于在项目列表里识别这个项目。" : "可选；留空时会在发布任务后自动命名。"}</p>
             </div>
 
             {!isProject ? (
@@ -348,7 +355,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
                     aria-invalid={error.includes("目录") || undefined}
                     aria-describedby="wand-new-task-cwd-hint"
                     onFocus={() => setSuggestionsActive(true)}
-                    onChange={(event) => setCwd(event.currentTarget.value)}
+                    onChange={(event) => setTaskCwd(event.currentTarget.value)}
                     onBlur={() => window.setTimeout(() => setSuggestionsActive(false), 120)}
                   />
                   {suggestionsActive && suggestions.length > 0 ? (
@@ -362,7 +369,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
                           aria-selected={cwd === item.path}
                           onMouseDown={(event) => event.preventDefault()}
                           onClick={() => {
-                            setCwd(item.path);
+                            setTaskCwd(item.path);
                             setSuggestionsActive(false);
                           }}
                         >
@@ -387,7 +394,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
                         className={`wand-new-session-recent-path wand-new-project-recent-path${cwd === item.path ? " active" : ""}`}
                         title={item.path}
                         aria-pressed={cwd === item.path}
-                        onClick={() => setCwd(item.path)}
+                        onClick={() => setTaskCwd(item.path)}
                       >
                         <span className="wand-new-session-recent-path-value wand-new-project-recent-path-value">{item.path}</span>
                       </button>
@@ -445,7 +452,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
               size="large"
               type="submit"
               className="wand-new-session-submit wand-new-project-submit"
-              disabled={submitting || !name.trim()}
+              disabled={submitting || (isProject && !name.trim())}
             >
               {submitting ? "正在创建…" : isProject ? "创建项目" : "创建任务"}
             </WandButton>

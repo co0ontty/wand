@@ -16,6 +16,7 @@ import type { ModelCatalogService } from "./models.js";
 import { DEPLOYMENT_CONFIG_KEYS, type RuntimeConfigState } from "./runtime-config.js";
 import type { WandStorage } from "./storage.js";
 import type { SystemAiConfig, WandConfig } from "./types.js";
+import type { GithubConnectorStatus } from "./github-connector.js";
 import {
   callSystemAiText,
   discoverCliSystemAiConfigs,
@@ -57,6 +58,7 @@ export interface ServerSettingsRoutesDependencies {
   getCachedUpdateInfo(): { updateAvailable: boolean; latest: string | null } | null;
   getUpdateChannel(): "stable" | "beta";
   getDistributionSettings(): Promise<SettingsDistributionPayload>;
+  getGithubConnector(): GithubConnectorStatus;
   modelCatalog: ModelCatalogService;
   resolveAppConnectCode(req: Request): { code: string; url: string };
 }
@@ -150,6 +152,7 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
       activeConfig: publicConfig(config),
       restartRequired: runtimeConfig.hasPendingRestart(),
       hasCert: existsSync(path.join(configDir, "server.key")) && existsSync(path.join(configDir, "server.crt")),
+      githubConnector: deps.getGithubConnector(),
       updateAvailable: cachedUpdate?.updateAvailable ?? false,
       latestVersion: cachedUpdate?.latest ?? null,
       updateChannel: deps.getUpdateChannel(),

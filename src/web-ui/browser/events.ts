@@ -8,7 +8,7 @@ import { loadGitStatus, openQuickCommitModal } from "./git-commit";
 import { attachQueueBarDelegates, bindInputTouchScroll, cancelVoiceRecording, createSessionFromInput, createSessionFromWelcomeInput, deleteClaudeHistoryDirectory, deleteClaudeHistorySession, deleteSession, focusInputBox, getHistoryItemsByCwd, getSelectedSession, handleDeleteCodexHistoryAction, handleInputBoxBlur, handleInputBoxFocus, handleResumeAction, handleResumeCodexHistoryAction, handleResumeHistoryAction, handleVoiceMove, initSwipeToDelete, postInput, queueDirectInput, refreshInputBoxState, resumeSessionFromList, sendOrStart, setupMobileKeyboardHandlers, startAndActivateCommand, startVoiceRecording, stopSession, stopVoiceRecording, toggleTerminalInteractive, updateQueueBar, welcomeInputSend } from "./input";
 import { hideError, showToast } from "./notifications";
 import { render, resetChatRenderCache } from "./render";
-import { addPendingAttachment, backToNativeApp, closeClaudeSkillsPicker, closePlusPopover, closeSessionsDrawer, copyToClipboard, createStructuredSession, dismissDrawerIfOverlay, getSafeModeForTool, handleCollapsedTileHover, handleCollapsedTileLeave, handleInputBoxKeydown, handleInputPaste, handleInteractiveTextInput, hideCollapsedTileBubble, isStructuredSession, loadSessions, login, logout, onChatModeChange, onChatModelChange, onChatThinkingChange, openSessionModal, openSettingsModal, openWorktreeMergeModal, optimizePromptText, positionSidebarOverflowMenu, quickStartSession, refreshAll, refreshAllChatModeTrios, refreshAvailableModels, retryWorktreeCleanup, selectSession, setDraftValue, switchServer, syncComposerHasText, toggleClaudeSkill, toggleClaudeSkillsPicker, togglePlusPopover, toggleSessionsDrawer, toggleSidebarCollapsed, toggleSidebarPin } from "./session-engine";
+import { addPendingAttachment, backToNativeApp, closeClaudeSkillsPicker, closePlusPopover, closeSessionsDrawer, copyToClipboard, createStructuredSession, dismissDrawerIfOverlay, getSafeModeForTool, handleCollapsedTileHover, handleCollapsedTileLeave, handleInputBoxKeydown, handleInputPaste, handleInteractiveTextInput, handlePtyImagePaste, hideCollapsedTileBubble, isStructuredSession, loadSessions, login, logout, onChatModeChange, onChatModelChange, onChatThinkingChange, openSessionModal, openSettingsModal, openWorktreeMergeModal, optimizePromptText, positionSidebarOverflowMenu, quickStartSession, refreshAll, refreshAllChatModeTrios, refreshAvailableModels, retryWorktreeCleanup, selectSession, setDraftValue, switchServer, syncComposerHasText, toggleClaudeSkill, toggleClaudeSkillsPicker, togglePlusPopover, toggleSessionsDrawer, toggleSidebarCollapsed, toggleSidebarPin } from "./session-engine";
 import { batchDeleteSelected, clearSelections, confirmDelete, renderSessions, selectAllVisibleItems, toggleManageMode, toggleManagedItemSelection } from "./sidebar";
 import { copySelectedSessionField, handleSessionItemClick, handleSessionItemKeydown, initTerminal, maybeScrollTerminalToBottom, softResyncTerminal } from "./terminal";
 import { ensureTerminalFit, setupVisualViewportHandlers, teardownTerminal } from "./viewport";
@@ -100,7 +100,7 @@ import { missionsController } from "../react/missions/controller";
         } else {
           el.classList.remove("expanded");
           el.classList.add("collapsed");
-          var preview = (el.dataset.thinking || "").slice(0, 57) + ((el.dataset.thinking || "").length > 60 ? "…" : "");
+          var preview = "深度思考";
           el.querySelector(".thinking-inline-preview").textContent = preview;
           var action = el.querySelector(".thinking-inline-action");
           if (action) action.textContent = "展开";
@@ -285,6 +285,16 @@ import { missionsController } from "../react/missions/controller";
       export function bindGlobalListenersOnce() {
         if (state.__globalListenersBound) return;
         state.__globalListenersBound = true;
+
+        // Browser clipboard images have no textual PTY representation. Capture
+        // them while either the composer proxy or xterm itself owns focus,
+        // upload them into the session cwd, then paste the resulting local path
+        // into the CLI as a real bracketed-paste event.
+        document.addEventListener("paste", function(event) {
+          if (handlePtyImagePaste(event)) {
+            event.stopPropagation();
+          }
+        }, true);
 
         // sidebar overflow 菜单：外点 / 视口变化时关闭
         document.addEventListener("click", function() {

@@ -8,13 +8,14 @@ import { isMobileLayout, updateFilePanelCwd } from "./file-browser";
 import { loadGitStatus } from "./git-commit";
 import { showToast, wandConfirm, wandAlert, wandPrompt, openWandDialog, showError, hideError, sendBrowserNotification, _syncWakeLock } from "./notifications";
 import { render, resetChatRenderCache, getEffectiveCwd } from "./render";
-import { applyCurrentView, buildAttachmentPrefix, canSendComposer, discardPendingAttachments, dismissDrawerIfOverlay, getChatModelForProvider, getComposerPlaceholder, getComposerTool, getDraftValueForSession, getPendingAttachments, getPreferredMessages, getPreferredTool, getSafeModeForTool, getSelectedClaudeSkills, isStructuredSession, loadOutput, loadSessions, refreshAll, replaceComposerSelection, restoreComposerStateForSession, restorePendingAttachments, selectSession, setDraftValue, setDraftValueForSession, shouldRequestChatFormat, subscribeToSession, supportsClaudeSkillSelection, syncComposerHasText, takePendingAttachments, updateSessionSnapshot, updateSessionsList, uploadAttachments, withTerminalDimensions } from "./session-engine";
+import { applyCurrentView, buildAttachmentPrefix, canSendComposer, discardPendingAttachments, dismissDrawerIfOverlay, getChatModelForProvider, getComposerPlaceholder, getComposerTool, getDraftValueForSession, getPendingAttachments, getPreferredMessages, getPreferredTool, getSafeModeForTool, getSelectedClaudeSkills, isStructuredSession, loadOutput, loadSessions, refreshAll, replaceComposerSelection, restoreComposerStateForSession, restorePendingAttachments, selectSession, setDraftValue, setDraftValueForSession, shouldBracketPtyPaste, shouldRequestChatFormat, subscribeToSession, supportsClaudeSkillSelection, syncComposerHasText, takePendingAttachments, updateSessionSnapshot, updateSessionsList, uploadAttachments, withTerminalDimensions } from "./session-engine";
 import { renderSessions, loadClaudeHistory, loadCodexHistory, ensureClaudeHistoryLoaded, ensureCodexHistoryLoaded, confirmDelete } from "./sidebar";
 import { initTerminal, maybeScrollTerminalToBottom, scheduleSoftResyncTerminal } from "./terminal";
 import { ensureTerminalFit, scheduleClosedViewportBaselineWindow, sendTerminalResize, syncAppViewportHeight, teardownTerminal, updateJoystickPanelUI, updateJoystickVisibility } from "./viewport";
 import { setView, initWebSocket, forceReconnectWebSocket } from "./websocket";
 import { getSessionStatusLabel } from "./session-ui";
 import { isBrowserReactShellMounted } from "./shell-runtime";
+import { buildTerminalPathPasteSequence, isClipboardImageMimeType } from "./pty-paste";
 import { notifyLegacyUiChange } from "./ui-store-bridge";
 
       // 改为在识别回调里调用 updateVoiceTranscript(累积文本) 即可，交互层不用动。
@@ -901,9 +902,39 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
             });
           })
           .then(function(uploadedFiles) {
-            var prefix = buildAttachmentPrefix(uploadedFiles);
             var hasText = !!value.trim();
-            var finalValue = prefix + (hasText ? value : (uploadedFiles.length ? "请查看附件。" : ""));
+            var finalValue = buildAttachmentPrefix(uploadedFiles)
+              + (hasText ? value : (uploadedFiles.length ? "请查看附件。" : ""));
+
+            // PTY CLIs receive their image attachments through the terminal's
+            // paste protocol, not through a textual "[附件已上传]" prefix. The
+            // latter is only meaningful to structured runners, and Codex treats
+            // it as ordinary prompt text. Keep non-image attachments on the old
+            // textual path while sending each uploaded image as its own pasted
+            // path, so Codex can convert it into an [Image #N] attachment.
+            var ptyAttachmentChunks = null;
+            if (!isStructuredSession(selectedSession) && uploadedFiles.length) {
+              var imageFiles = uploadedFiles.filter(function(file) {
+                return isClipboardImageMimeType(file && (file.mimeType || file.type))
+                  || /\.(?:png|jpe?g|gif|webp|bmp|svg)$/i.test(file && file.originalName || "");
+              });
+              if (imageFiles.length) {
+                var otherFiles = uploadedFiles.filter(function(file) {
+                  return imageFiles.indexOf(file) < 0;
+                });
+                var ptyText = buildAttachmentPrefix(otherFiles)
+                  + (hasText ? value : (otherFiles.length ? "请查看附件。" : ""));
+                var ptyBracketedPaste = shouldBracketPtyPaste(
+                  selectedSession.id,
+                  selectedSession.provider,
+                );
+                ptyAttachmentChunks = imageFiles.map(function(file) {
+                  return buildTerminalPathPasteSequence(file.savedPath, ptyBracketedPaste);
+                });
+                if (ptyText) ptyAttachmentChunks.push(ptyText);
+                ptyAttachmentChunks.push(String.fromCharCode(13));
+              }
+            }
 
             // Clear todo progress bar at the start of a new user turn
             var todoEl = document.getElementById("todo-progress");
@@ -916,7 +947,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
               });
             }
 
-            var submitChunks = getTerminalSubmitChunks(selectedSession, finalValue);
+            var submitChunks = ptyAttachmentChunks || getTerminalSubmitChunks(selectedSession, finalValue);
             if (state.selectedId !== sessionId) {
               throw new Error("发送前会话已切换，原草稿已恢复。");
             }

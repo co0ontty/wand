@@ -269,6 +269,14 @@ test("sidebar restores task selection from a selected session without overriding
   });
 });
 
+test("new task dialog follows the selected directory instead of retaining an old project", () => {
+  const source = readFileSync(new URL("../src/web-ui/react/workspaces/host.tsx", import.meta.url), "utf8");
+  assert.match(source, /const setTaskCwd = \(nextCwd: string\): void =>/);
+  assert.match(source, /setSelectedProjectId\(matchingProject\?\.id \?\? ""\)/);
+  assert.match(source, /onChange=\{\(event\) => setTaskCwd\(event\.currentTarget\.value\)\}/);
+  assert.match(source, /createStandaloneTask\([\s\S]*cwd: mountedCwd \|\| undefined/);
+});
+
 test("switching from a project to a standalone task clears the inherited directory", () => {
   const source = readFileSync(new URL("../src/web-ui/react/workspaces/host.tsx", import.meta.url), "utf8");
   assert.match(source, /setCwd\(project\?\.cwd \?\? ""\)/);
@@ -650,4 +658,21 @@ test("addTabAtPath appends a tab to the targeted pane", () => {
   if (right.type !== "pane") throw new Error("expected pane");
   assert.deepEqual(right.tabs.map((tab) => tab.id), ["b", "c"]);
   assert.equal(right.active, 1);
+});
+
+test("sidebar search keeps matching tasks and sessions while preserving directory scope", async () => {
+  const { filterSidebarGroups } = await import("../src/web-ui/react/workspaces/sidebar-search.js");
+  const groups = [{
+    workspaceId: "workspace-1", workspaceName: "Wand", workspaceCwd: "/work/wand",
+    tasks: [{
+      id: "task-1", workspaceId: "workspace-1", name: "修复侧栏", cwd: "/work/wand",
+      worktree: null, isolated: false, layout: null, status: "active" as const,
+      createdAt: "2026-09-09T00:00:00Z", lastOpenedAt: null,
+      sessions: [{ id: "session-1", title: "移动端检查", cwd: "/work/wand", provider: "claude", sessionKind: "structured" as const }],
+    }], standaloneSessions: [],
+  }];
+  const result = filterSidebarGroups(groups, "移动端", { "session-1": "移动端检查" });
+  assert.equal(result.length, 1);
+  assert.equal(result[0].tasks.length, 1);
+  assert.equal(filterSidebarGroups(groups, "不存在").length, 0);
 });

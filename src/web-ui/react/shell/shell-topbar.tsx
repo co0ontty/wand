@@ -57,11 +57,13 @@ export function ShellTopbar() {
   return (
     <div className="main-header-row">
       <div className="topbar-left">
-        {snapshot.viewport.mobile && (
+        {(snapshot.viewport.mobile || !snapshot.layout.sidebarAnchored) && (
           <button
             id="sessions-toggle-button"
             className={classNames("floating-sidebar-toggle", snapshot.layout.sessionsDrawerOpen && "active")}
             aria-label="切换会话侧栏"
+            aria-expanded={snapshot.layout.sessionsDrawerOpen}
+            aria-controls="sessions-drawer"
             type="button"
             onClick={() => void dispatch({ type: "layout.drawer.toggle" })}
           >

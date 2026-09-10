@@ -19,6 +19,8 @@ import { GLOBAL_WORKSPACE_ID, type LayoutNode, type PaneTab, type SessionProvide
 import {
   attachUnboundSessionsToWorkspace,
   backfillSessionWorkspaces,
+  normalizeProjectCwd,
+  projectCwdForSession,
 } from "./workspace-binding.js";
 
 const PROVIDERS: ReadonlySet<string> = new Set(["claude", "codex", "opencode", "grok", "qoder", "pi"]);
@@ -111,10 +113,14 @@ function createTaskForWorkspace(
   worktreeError?: string;
 } {
   const name = typeof body.name === "string" ? body.name.trim() : "";
-  if (!name) throw new Error("请输入任务名称。");
+  const taskName = name || "未命名任务";
   let mountedCwd: string | undefined;
   if (body.cwd !== undefined && body.cwd !== null && String(body.cwd).trim()) {
     mountedCwd = resolveWorkspaceCwd(body.cwd);
+  }
+  if (mountedCwd && !isGlobalWorkspace(workspace)
+    && normalizeProjectCwd(mountedCwd) !== normalizeProjectCwd(workspace.cwd)) {
+    throw new Error("任务目录与所属项目不一致，请先选择对应项目，或创建独立任务。");
   }
   const baseRef = typeof body.baseRef === "string" && body.baseRef.trim() ? body.baseRef.trim() : undefined;
   const runCwd = mountedCwd ?? workspace.cwd;
@@ -126,7 +132,7 @@ function createTaskForWorkspace(
       const setup = prepareSessionWorktree({
         cwd: runCwd,
         sessionId: crypto.randomUUID(),
-        spec: { taskName: name, baseRef },
+        spec: { taskName, baseRef },
       });
       worktree = setup.worktree;
     } catch (error) {
@@ -136,9 +142,9 @@ function createTaskForWorkspace(
   const storedCwd = mountedCwd && mountedCwd !== workspace.cwd ? mountedCwd : undefined;
   const task = storage.createWorkspaceTask({
     workspaceId: workspace.id,
-    name,
-    worktree,
+    name: taskName,
     cwd: storedCwd,
+    worktree,
   });
   return {
     task,
@@ -449,26 +455,61 @@ export function registerWorkspaceRoutes(
         workspaceName: global ? "全局" : workspace.name,
         workspaceCwd: workspace.cwd,
         ...(global ? { global: true } : {}),
-        tasks: storage.listWorkspaceTasks(workspace.id)
-          .slice(0, taskLimit ?? undefined)
-          .map((task) => {
-            const allSessions = storage.listSessionsByWorkspaceTask(task.id);
-            const sessions = allSessions
-              .slice(0, sessionLimit ?? undefined)
-              .map((session) => ({
-                ...summarize(session, { taskName: task.name, workspaceName: global ? undefined : workspace.name }),
-                workspaceTaskId: task.id,
-              }));
-            return {
-              ...task,
-              cwd: taskRuntimeCwd(task, workspace),
-              isolated: task.worktree !== null,
-              sessions,
-              totalSessions: allSessions.length,
-            };
-          }),
+        tasks: [],
         standaloneSessions: [],
       });
+    }
+    const syntheticGroupForCwd = (cwd: string): TaskDirectoryGroup => {
+      const normalized = normalizeProjectCwd(cwd);
+      const existingProject = [...groups.values()].find((candidate) => !candidate.synthetic
+        && !candidate.global && normalizeProjectCwd(candidate.workspaceCwd) === normalized);
+      if (existingProject) return existingProject;
+      const id = `cwd:${normalized}`;
+      const existing = groups.get(id);
+      if (existing) return existing;
+      const created: TaskDirectoryGroup = {
+        workspaceId: id,
+        workspaceName: normalized.split("/").filter(Boolean).at(-1) || normalized,
+        workspaceCwd: normalized,
+        synthetic: true,
+        tasks: [],
+        standaloneSessions: [],
+      };
+      groups.set(id, created);
+      return created;
+    };
+    const appendTask = (
+      target: TaskDirectoryGroup,
+      workspace: Workspace,
+      task: ReturnType<WandStorage["listWorkspaceTasks"]>[number],
+    ) => {
+      const allSessions = storage.listSessionsByWorkspaceTask(task.id);
+      const sessions = allSessions
+        .slice(0, sessionLimit ?? undefined)
+        .map((session) => ({
+          ...summarize(session, { taskName: task.name, workspaceName: isGlobalWorkspace(workspace) ? undefined : workspace.name }),
+          workspaceTaskId: task.id,
+        }));
+      target.tasks.push({
+        ...task,
+        cwd: taskRuntimeCwd(task, workspace),
+        isolated: task.worktree !== null,
+        sessions,
+        totalSessions: allSessions.length,
+      });
+    };
+    for (const workspace of visibleWorkspaces) {
+      const base = groups.get(workspace.id);
+      if (!base) continue;
+      const global = isGlobalWorkspace(workspace);
+      for (const task of storage.listWorkspaceTasks(workspace.id).slice(0, taskLimit ?? undefined)) {
+        const taskCwd = taskRuntimeCwd(task, workspace);
+        const target = global && taskCwd
+          && normalizeProjectCwd(taskCwd) !== normalizeProjectCwd(workspace.cwd)
+          ? syntheticGroupForCwd(taskCwd)
+          : base;
+        appendTask(target, workspace, task);
+      }
     }
     const taskBoundSessionIds = new Set<string>();
     for (const workspace of workspaces) {
@@ -479,10 +520,16 @@ export function registerWorkspaceRoutes(
     for (const session of storage.loadSessions()) {
       if (taskBoundSessionIds.has(session.id)) continue;
       const direct = session.workspaceId ? groups.get(session.workspaceId) : undefined;
-      let group = direct && !direct.synthetic ? direct : undefined;
-      const resolved = session.cwd ? path.resolve(session.cwd) : "";
+      const resolved = projectCwdForSession(session);
+      // 持久化的 workspaceId 可能来自旧目录或目录迁移；path 与项目目录不一致时，
+      // 必须按当前实际目录归类，避免不同项目的会话混入同一组。
+      let group = direct && !direct.synthetic
+        && normalizeProjectCwd(direct.workspaceCwd) === resolved
+        ? direct
+        : undefined;
       if (!group && resolved) {
-        const cwdMatches = [...groups.values()].filter((candidate) => !candidate.synthetic && candidate.workspaceCwd === resolved);
+        const cwdMatches = [...groups.values()].filter((candidate) => !candidate.synthetic
+          && normalizeProjectCwd(candidate.workspaceCwd) === resolved);
         group = cwdMatches.find((candidate) => !candidate.global) ?? cwdMatches[0];
       }
       // 过滤模式下不创建合成组：不属于目标目录的会话直接排除。

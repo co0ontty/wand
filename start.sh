@@ -104,7 +104,7 @@ UNIT_FILE="$(service_file_for "$SCOPE")"
 OTHER_UNIT_FILE="$(service_file_for "$OTHER_SCOPE")"
 
 if [[ ( "$ACTION" == "install-and-restart" || "$ACTION" == "restart-only" ) && -f "$OTHER_UNIT_FILE" ]]; then
-  die "同时存在 $OTHER_SCOPE 服务：$OTHER_UNIT_FILE。请先卸载它，避免两个服务抢占同一端口。"
+  die "同时存在 ${OTHER_SCOPE} 服务：${OTHER_UNIT_FILE}。请先卸载它，避免两个服务抢占同一端口。"
 fi
 
 USE_SUDO=0

@@ -1,6 +1,6 @@
 {
   "name": "@co0ontty/wand",
-  "version": "4.55.2",
+  "version": "4.55.3",
   "description": "A web console for Claude Code, Codex, OpenCode, and other local CLI tools.",
   "type": "module",
   "bin": {
@@ -13,7 +13,8 @@
   },
   "files": [
     "dist",
-    "browser-extension"
+    "browser-extension",
+    "vendor"
   ],
   "preferGlobal": true,
   "scripts": {
@@ -56,6 +57,7 @@
     "node-pty": "^1.1.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
+    "smol-toml": "^1.8.0",
     "ws": "^8.19.0"
   },
   "devDependencies": {

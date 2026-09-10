@@ -17,6 +17,7 @@ import { FilePreviewHost } from "./file-preview/host";
 import { ComposerSelectHost } from "./composer-select/host";
 import { MissionsHost } from "./missions/host";
 import { WorkspacesHost } from "./workspaces/host";
+import { GithubIssuesHost } from "./issues/host";
 
 export interface OverlayHostProps {
   portalContainer: HTMLElement;
@@ -35,6 +36,7 @@ export function OverlayHost({ portalContainer }: OverlayHostProps) {
       <ComposerSelectHost />
       <MissionsHost />
       <WorkspacesHost />
+      <GithubIssuesHost />
       <SettingsHost showRestart={() => restartOverlayController.showRestart()} />
       <NewSessionHost />
       <FolderPickerHost />

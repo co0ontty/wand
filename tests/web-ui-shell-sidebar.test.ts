@@ -222,7 +222,8 @@ test("ShellSidebar SSR preserves native ids, key classes, groups, and action con
   // 统一任务视图：不再有「会话/任务」切换，也不再有独立的新会话主按钮。
   assert.doesNotMatch(html, />会话<\/button>/);
   assert.match(html, /aria-label="新建任务"/);
-  assert.match(html, /id="sessions-drawer" class="sidebar open pinned"/);
+  assert.doesNotMatch(html, /<button[^>]*title="首页"/);
+  assert.match(html, /id="sessions-drawer" class="sidebar open"/);
   assert.match(html, /id="sessions-drawer-backdrop" class="drawer-backdrop open"/);
   assert.match(html, /id="file-panel-toggle-btn" class="btn btn-ghost btn-sm active"/);
   // 原生历史与自动化分组仍可达（附加在任务列表之后），但 wand 散会话平铺列表已下线。

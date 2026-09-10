@@ -4,7 +4,9 @@ import { ProviderLogo } from "../provider-logo";
 import { WorkspacesPanel } from "../workspaces/workspaces-panel";
 import { WandIcon, WandPopover, type WandIconName } from "../ui";
 import { classNames } from "../ui/class-names";
+import { sidebarSearchMatches } from "../workspaces/sidebar-search";
 
+import { useSidebarDrawer } from "./use-sidebar-drawer";
 import { useUiDispatch, useUiStoreSnapshot } from "./ui-store-react";
 import type {
   UiAction,
@@ -533,14 +535,31 @@ export function ShellSidebar() {
   const snapshot = useUiStoreSnapshot();
   const dispatch = useUiDispatch();
   const [moreOpen, setMoreOpen] = React.useState(false);
+  const [searchQuery, setSearchQuery] = React.useState("");
   const narrow = !snapshot.viewport.mobile && snapshot.layout.sidebarPinned && snapshot.layout.sidebarCollapsed;
   const sidebarClass = classNames(
     "sidebar",
     snapshot.layout.sessionsDrawerOpen && "open",
-    snapshot.layout.sidebarAnchored && "pinned",
+    !snapshot.viewport.mobile && snapshot.layout.sidebarAnchored && "pinned",
     narrow && "collapsed",
   );
   const primaryAction = getShellSidebarPrimaryAction();
+  const visible = snapshot.layout.sessionsDrawerOpen || (!snapshot.viewport.mobile && snapshot.layout.sidebarAnchored);
+  const overlay = visible && (snapshot.viewport.mobile || !snapshot.layout.sidebarPinned);
+  const drawerRef = useSidebarDrawer(overlay, () => void dispatch({ type: "layout.drawer.close" }));
+  const bodyRef = React.useRef<HTMLDivElement>(null);
+  const scrollPositions = React.useRef({ full: 0, compact: 0 });
+  React.useLayoutEffect(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    const mode = narrow ? "compact" : "full";
+    body.scrollTop = scrollPositions.current[mode];
+    return () => { scrollPositions.current[mode] = body.scrollTop; };
+  }, [narrow]);
+  const navigate = (action: UiAction): void => {
+    if (overlay) void dispatch({ type: "layout.drawer.close" });
+    void dispatch(action);
+  };
 
   return (
     <>
@@ -550,7 +569,10 @@ export function ShellSidebar() {
         aria-hidden="true"
         onClick={() => void dispatch({ type: "layout.drawer.close" })}
       />
-      <aside id="sessions-drawer" className={sidebarClass} aria-label="项目与任务侧栏">
+      <aside id="sessions-drawer" ref={drawerRef} className={sidebarClass}
+        aria-label="项目与任务侧栏" role={overlay ? "dialog" : undefined}
+        aria-modal={overlay || undefined} aria-hidden={!visible || undefined}
+        inert={!visible} tabIndex={-1}>
         <div className="sidebar-header">
           <div className="sidebar-header-primary">
             <div className="sidebar-header-main">
@@ -592,7 +614,7 @@ export function ShellSidebar() {
                       role="menuitem"
                       onClick={() => {
                         setMoreOpen(false);
-                        void dispatch({ type: "nav.home" });
+                        navigate({ type: "nav.home" });
                       }}
                     >
                       <span>回到首页</span>
@@ -621,10 +643,11 @@ export function ShellSidebar() {
                 <>
                   <button
                     id="sidebar-collapse-btn"
-                    className={classNames("btn btn-ghost btn-sm sidebar-collapse-toggle", narrow && "collapsed")}
+                    className="btn btn-ghost btn-sm sidebar-collapse-toggle legacy-sidebar-collapse"
                     type="button"
                     title="收起侧栏"
                     aria-label="收起侧栏"
+                    tabIndex={-1}
                     onClick={() => void dispatch({ type: "layout.drawer.close" })}
                   >
                     <WandIcon name="chevronLeft"/>
@@ -650,42 +673,54 @@ export function ShellSidebar() {
             type="button"
             title="新建任务，不必先创建项目"
             aria-label={primaryAction.ariaLabel}
-            onClick={() => void dispatch(primaryAction.action)}
+            onClick={() => navigate(primaryAction.action)}
           >
             <WandIcon name="plus" size={18}/><span>{primaryAction.label}</span>
           </button>
-          <button type="button" title="首页" onClick={() => void dispatch({ type: "nav.home" })}>
-            <WandIcon name="home" size={17}/><span>首页</span>
-          </button>
-          <button id="missions-button" type="button" title="自动化任务" onClick={() => void dispatch({ type: "missions.open" })}>
+          <button id="missions-button" type="button" title="自动化任务" onClick={() => navigate({ type: "missions.open" })}>
             <WandIcon name="zap" size={17}/><span>自动化</span>
           </button>
+          <button id="issues-button" type="button" title="Todo 任务看板" onClick={() => {
+            if (overlay) void dispatch({ type: "layout.drawer.close" });
+            window.__wandReactTaskBoard?.open(snapshot.selected?.workspaceId ?? "", snapshot.selected?.id ?? "");
+          }}>
+            <WandIcon name="clipboard" size={17}/><span>任务</span>
+          </button>
+          <button id="github-issues-button" type="button" title="GitHub 议题" onClick={() => {
+            if (overlay) void dispatch({ type: "layout.drawer.close" });
+            window.__wandReactGithubIssues?.open(snapshot.selected?.id ?? "");
+          }}>
+            <WandIcon name="git" size={17}/><span>GitHub</span>
+          </button>
         </nav>
-        <div className="sidebar-body">
+        <div className="sidebar-body" ref={bodyRef}>
           <div id="sessions-panel">
-            {narrow ? (
-              <>
-                <WorkspacesPanel
-                  compact
-                  onExpand={() => void dispatch({ type: "layout.drawer.collapse" })}
-                  selectedSessionId={snapshot.selected?.id ?? null}
-                />
-              </>
-            ) : (
-              <div className="sessions-list" id="sessions-list">
-                <WorkspacesPanel
-                  selectedSessionId={snapshot.selected?.id ?? null}
-                  sessionTitles={Object.fromEntries(snapshot.sidebar.groups.flatMap((group) => (
-                    group.entries.map((entry) => [entry.id, entry.title] as const)
-                  )))}
-                  extraGroups={snapshot.sidebar.groups
-                    .filter((group) => group.kind !== "wand")
-                    .map((group) => (
-                      <SessionGroup key={group.kind} group={group} manageMode={false} dispatch={dispatch}/>
-                    ))}
-                />
-              </div>
-            )}
+            <div className="sessions-list" id="sessions-list">
+              <WorkspacesPanel
+                compact={narrow}
+                onExpand={() => void dispatch({ type: "layout.drawer.collapse" })}
+                onNavigate={overlay ? () => void dispatch({ type: "layout.drawer.close" }) : undefined}
+                searchQuery={searchQuery}
+                onSearchChange={setSearchQuery}
+                selectedSessionId={snapshot.selected?.id ?? null}
+                sessionTitles={Object.fromEntries(snapshot.sidebar.groups.flatMap((group) => (
+                  group.entries.map((entry) => [entry.id, entry.title] as const)
+                )))}
+                extraGroups={snapshot.sidebar.groups
+                  .filter((group) => group.kind !== "wand")
+                  .map((group) => ({
+                    ...group,
+                    entries: searchQuery.trim()
+                      ? group.entries.filter((entry) => sidebarSearchMatches(
+                        searchQuery, entry.title, entry.description, entry.cwd, entry.provider,
+                      ))
+                      : group.entries,
+                  }))
+                  .map((group) => (
+                    <SessionGroup key={group.kind} group={group} manageMode={false} dispatch={dispatch}/>
+                  ))}
+              />
+            </div>
           </div>
         </div>
         <div className="sidebar-footer">
@@ -695,7 +730,7 @@ export function ShellSidebar() {
               className="btn btn-ghost btn-sm"
               type="button"
               title="设置"
-              onClick={() => void dispatch({ type: "settings.open" })}
+              onClick={() => navigate({ type: "settings.open" })}
             >
               <WandIcon name="gear" size={16}/><span>设置</span>
             </button>
@@ -705,7 +740,7 @@ export function ShellSidebar() {
                 className={classNames("btn btn-ghost btn-sm", snapshot.layout.filePanelOpen && "active")}
                 type="button"
                 title="查看文件"
-                onClick={() => void dispatch({ type: "layout.files.toggle" })}
+                onClick={() => navigate({ type: "layout.files.toggle" })}
               >
                 <WandIcon name="explorer" size={16}/><span>文件</span>
               </button>
@@ -717,7 +752,7 @@ export function ShellSidebar() {
                 className="btn btn-ghost btn-sm sidebar-back-to-native"
                 type="button"
                 title="返回 App 原生界面"
-                onClick={() => void dispatch({ type: "native.back" })}
+                onClick={() => navigate({ type: "native.back" })}
               >
                 <WandIcon name="back" size={16}/><span>返回App</span>
               </button>
@@ -728,7 +763,7 @@ export function ShellSidebar() {
                 className="btn btn-ghost btn-sm sidebar-switch-server"
                 type="button"
                 title="切换服务器"
-                onClick={() => void dispatch({ type: "native.switchServer" })}
+                onClick={() => navigate({ type: "native.switchServer" })}
               >
                 <WandIcon name="server" size={16}/><span>切换</span>
               </button>
@@ -738,7 +773,7 @@ export function ShellSidebar() {
               className="btn btn-ghost btn-sm sidebar-logout"
               type="button"
               title="退出登录"
-              onClick={() => void dispatch({ type: "auth.logout" })}
+              onClick={() => navigate({ type: "auth.logout" })}
             >
               <WandIcon name="logout" size={16}/><span>退出</span>
             </button>
