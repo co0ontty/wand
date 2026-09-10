@@ -597,25 +597,31 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
               if (Object.prototype.hasOwnProperty.call(msg.data, 'permissionBlocked')) {
                 statusUpdate.permissionBlocked = !!msg.data.permissionBlocked;
               }
-              if (msg.data.permissionRequest) {
+              if (msg.data.pendingEscalation) {
+                statusUpdate.pendingEscalation = msg.data.pendingEscalation;
+              } else if (msg.data.permissionRequest) {
                 statusUpdate.pendingEscalation = {
                   scope: msg.data.permissionRequest.scope,
                   target: msg.data.permissionRequest.target,
                   reason: msg.data.permissionRequest.prompt
                 };
-                // Browser notification for permission waiting (background tab)
+              }
+              if (msg.data.pendingEscalation || msg.data.permissionRequest) {
                 var permSession = state.sessions.find(function(s: any) { return s.id === msg.sessionId; });
                 var permTaskName = permSession ? (permSession.summary || permSession.command || msg.sessionId) : msg.sessionId;
-                var permDetail = msg.data.permissionRequest.prompt || "需要权限审批";
-                var permTarget = msg.data.permissionRequest.target;
+                var permPrompt = msg.data.pendingEscalation
+                  ? (msg.data.pendingEscalation.reason || "需要权限审批")
+                  : (msg.data.permissionRequest.prompt || "需要权限审批");
+                var permTarget = msg.data.pendingEscalation
+                  ? msg.data.pendingEscalation.target
+                  : msg.data.permissionRequest.target;
                 var permBody = permTaskName;
                 if (permTarget) {
-                  permBody += "\n" + permDetail + " · " + permTarget;
+                  permBody += "\n" + permPrompt + " · " + permTarget;
                 } else {
-                  permBody += "\n" + permDetail;
+                  permBody += "\n" + permPrompt;
                 }
                 notifyPermissionRequest(msg.sessionId, permBody);
-                // In-app bubble if not currently viewing this session
                 if (msg.sessionId !== state.selectedId) {
                   showNotificationBubble({
                     title: "需要你的授权",
@@ -728,8 +734,10 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
             permissionActionsEl.classList.remove("hidden");
             // Hide approve/deny buttons when auto-approve is active
             var approveBtn = document.getElementById("approve-permission-btn");
+            var approveTurnBtn = document.getElementById("approve-turn-permission-btn");
             var denyBtn = document.getElementById("deny-permission-btn");
             if (approveBtn) approveBtn.classList.toggle("hidden", !!isAutoApprove);
+            if (approveTurnBtn) approveTurnBtn.classList.toggle("hidden", !!isAutoApprove || !pendingEscalation);
             if (denyBtn) denyBtn.classList.toggle("hidden", !!isAutoApprove);
           }
           // Hide top task bar — permission info is already shown in the composer
@@ -786,15 +794,29 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         }
       }
 
-      export function approvePermission() {
+      function permissionActionButtons() {
+        return {
+          approveBtn: document.getElementById("approve-permission-btn") as HTMLButtonElement | null,
+          approveTurnBtn: document.getElementById("approve-turn-permission-btn") as HTMLButtonElement | null,
+          denyBtn: document.getElementById("deny-permission-btn") as HTMLButtonElement | null,
+        };
+      }
+
+      function setPermissionButtonsDisabled(disabled: boolean) {
+        var buttons = permissionActionButtons();
+        if (buttons.approveBtn) buttons.approveBtn.disabled = disabled;
+        if (buttons.approveTurnBtn) buttons.approveTurnBtn.disabled = disabled;
+        if (buttons.denyBtn) buttons.denyBtn.disabled = disabled;
+      }
+
+      function postPermissionAction(url: string, body: Record<string, string> | undefined, fallbackError: string) {
         if (!state.selectedId) return;
-        var approveBtn = document.getElementById("approve-permission-btn") as HTMLButtonElement | null;
-        var denyBtn = document.getElementById("deny-permission-btn") as HTMLButtonElement | null;
-        if (approveBtn) approveBtn.disabled = true;
-        if (denyBtn) denyBtn.disabled = true;
-        fetch("/api/sessions/" + encodeURIComponent(state.selectedId) + "/approve-permission", {
+        setPermissionButtonsDisabled(true);
+        fetch(url, {
           method: "POST",
-          credentials: "same-origin"
+          credentials: "same-origin",
+          headers: body ? { "content-type": "application/json" } : undefined,
+          body: body ? JSON.stringify(body) : undefined,
         })
           .then(function(res) { return res.json(); })
           .then(function(data: any) {
@@ -806,40 +828,41 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
             updateTaskDisplay();
           })
           .catch(function(error: any) {
-            showToast((error && error.message) || "无法批准授权。", "error");
+            showToast((error && error.message) || fallbackError, "error");
           })
           .finally(function() {
-            if (approveBtn) approveBtn.disabled = false;
-            if (denyBtn) denyBtn.disabled = false;
+            setPermissionButtonsDisabled(false);
           });
       }
 
+      export function approvePermission() {
+        postPermissionAction(
+          "/api/sessions/" + encodeURIComponent(state.selectedId || "") + "/approve-permission",
+          undefined,
+          "无法批准授权。",
+        );
+      }
+
+      export function approveTurnPermission() {
+        var selectedSession = state.sessions.find(function(s: any) { return s.id === state.selectedId; });
+        var requestId = selectedSession && selectedSession.pendingEscalation && selectedSession.pendingEscalation.requestId;
+        if (!state.selectedId || !requestId) {
+          approvePermission();
+          return;
+        }
+        postPermissionAction(
+          "/api/sessions/" + encodeURIComponent(state.selectedId) + "/escalations/" + encodeURIComponent(requestId) + "/resolve",
+          { resolution: "approve_turn" },
+          "无法批准授权。",
+        );
+      }
+
       export function denyPermission() {
-        if (!state.selectedId) return;
-        var approveBtn = document.getElementById("approve-permission-btn") as HTMLButtonElement | null;
-        var denyBtn = document.getElementById("deny-permission-btn") as HTMLButtonElement | null;
-        if (approveBtn) approveBtn.disabled = true;
-        if (denyBtn) denyBtn.disabled = true;
-        fetch("/api/sessions/" + encodeURIComponent(state.selectedId) + "/deny-permission", {
-          method: "POST",
-          credentials: "same-origin"
-        })
-          .then(function(res) { return res.json(); })
-          .then(function(data: any) {
-            if (data && data.error) {
-              showToast(data.error, "error");
-              return;
-            }
-            updateSessionSnapshot(data);
-            updateTaskDisplay();
-          })
-          .catch(function(error: any) {
-            showToast((error && error.message) || "无法拒绝授权。", "error");
-          })
-          .finally(function() {
-            if (approveBtn) approveBtn.disabled = false;
-            if (denyBtn) denyBtn.disabled = false;
-          });
+        postPermissionAction(
+          "/api/sessions/" + encodeURIComponent(state.selectedId || "") + "/deny-permission",
+          undefined,
+          "无法拒绝授权。",
+        );
       }
 
       export function toggleAutoApprove() {

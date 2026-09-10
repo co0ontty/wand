@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { query as sdkQuery, type Options as SdkOptions, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { query as sdkQuery, type CanUseTool, type Options as SdkOptions, type PermissionResult, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 
 import { prepareSessionWorktree, type WorktreeSetupSpec } from "./git-worktree.js";
 
 import { SessionLogger } from "./session-logger.js";
 import { WandStorage } from "./storage.js";
 import {
-  CardExpandDefaults, ContentBlock, ConversationTurn, EscalationScope,
+  CardExpandDefaults, ContentBlock, ConversationTurn, EscalationRequest, EscalationScope,
   ExecutionMode, ProcessEvent, SessionProvider, SessionRunner, SessionSnapshot, SessionSource, StructuredSessionState,
   WandConfig,
 } from "./types.js";
@@ -31,6 +31,7 @@ import {
   ClaudeCliRunner,
   derivePermissionPolicy,
 } from "./structured-claude-adapter.js";
+import { inferStructuredEscalation, structuredPermissionDenied } from "./structured-permission.js";
 import {
   captureTaskMeta,
   extractClaudeAssistantMessage,
@@ -388,6 +389,16 @@ export class StructuredSessionManager {
    * Only populated while an SDK call is in flight.
    */
   private readonly pendingSdkQueries = new Map<string, { interrupt(): Promise<void> }>();
+  /** In-flight canUseTool waiters. One pending prompt per session. */
+  private readonly pendingPermissions = new Map<string, {
+    requestId: string;
+    resolve: (result: PermissionResult) => void;
+  }>();
+  /** approve_turn memory, scoped to the current SDK query. */
+  private readonly turnApprovalMemory = new Map<string, {
+    scopes: Set<EscalationScope>;
+    targets: Set<string>;
+  }>();
   private readonly interruptedWith = new Map<string, string>();
   private readonly interruptedSkills = new Map<string, string[]>();
   /**
@@ -560,6 +571,11 @@ export class StructuredSessionManager {
       if (detachSafe && this.sessions.get(executionId)?.runner !== "claude-sdk") continue;
       execution.interrupt();
     }
+    for (const [sessionId, waiter] of this.pendingPermissions) {
+      waiter.resolve(structuredPermissionDenied("服务已关闭"));
+      this.pendingPermissions.delete(sessionId);
+    }
+    this.turnApprovalMemory.clear();
     for (const query of this.pendingSdkQueries.values()) {
       void query.interrupt().catch(() => { /* ignore */ });
     }
@@ -1312,11 +1328,15 @@ export class StructuredSessionManager {
       if (!this.isCurrentRequest(id, requestId)) {
         return current;
       }
+      this.settlePendingPermission(id, undefined, structuredPermissionDenied("会话执行失败"));
+      this.turnApprovalMemory.delete(id);
       const failed: SessionSnapshot = {
         ...current,
         status: "failed",
         exitCode: 1,
         endedAt: new Date().toISOString(),
+        pendingEscalation: null,
+        permissionBlocked: false,
         structuredState: {
           ...(current.structuredState as StructuredSessionState),
           inFlight: false,
@@ -1533,10 +1553,39 @@ export class StructuredSessionManager {
   toggleAutoApprove(sessionId: string): SessionSnapshot {
     const session = this.requireSession(sessionId);
     const newVal = !session.autoApprovePermissions;
+    if (newVal && session.pendingEscalation) {
+      const resolved = this.resolveEscalation(sessionId, session.pendingEscalation.requestId, "approve_once");
+      const updated: SessionSnapshot = { ...resolved, autoApprovePermissions: true };
+      this.sessions.set(sessionId, updated);
+      this.storage.updateSessionRuntimeMetadata(updated);
+      this.emit({
+        type: "status",
+        sessionId,
+        data: { sessionKind: "structured", autoApprovePermissions: true },
+      });
+      return updated;
+    }
     const updated: SessionSnapshot = { ...session, autoApprovePermissions: newVal };
     this.sessions.set(sessionId, updated);
     this.storage.updateSessionRuntimeMetadata(updated);
+    this.emit({
+      type: "status",
+      sessionId,
+      data: { sessionKind: "structured", autoApprovePermissions: newVal },
+    });
     return updated;
+  }
+
+  approvePermission(sessionId: string): SessionSnapshot {
+    const pending = this.requireSession(sessionId).pendingEscalation;
+    if (!pending) throw new Error("当前会话没有待处理的授权请求。");
+    return this.resolveEscalation(sessionId, pending.requestId, "approve_once");
+  }
+
+  denyPermission(sessionId: string): SessionSnapshot {
+    const pending = this.requireSession(sessionId).pendingEscalation;
+    if (!pending) throw new Error("当前会话没有待处理的授权请求。");
+    return this.resolveEscalation(sessionId, pending.requestId, "deny");
   }
 
   /** Resolve a specific escalation by requestId. */
@@ -1557,6 +1606,16 @@ export class StructuredSessionManager {
     if (approved && scope) {
       this.incrementApprovalStats(session, scope);
     }
+    if (approved && resolution === "approve_turn") {
+      this.rememberTurnApproval(sessionId, pending.scope, pending.target);
+    }
+    this.settlePendingPermission(
+      sessionId,
+      pending.requestId,
+      approved
+        ? { behavior: "allow" }
+        : structuredPermissionDenied("User rejected permission request"),
+    );
     const updated: SessionSnapshot = {
       ...session,
       pendingEscalation: null,
@@ -1578,6 +1637,8 @@ export class StructuredSessionManager {
   }
 
   stop(id: string): SessionSnapshot {
+    this.settlePendingPermission(id, undefined, structuredPermissionDenied("已停止"));
+    this.turnApprovalMemory.delete(id);
     const session = this.requireSession(id);
     this.interruptedWith.delete(id);
     this.interruptedSkills.delete(id);
@@ -1626,6 +1687,8 @@ export class StructuredSessionManager {
   }
 
   delete(id: string): void {
+    this.settlePendingPermission(id, undefined, structuredPermissionDenied("会话已删除"));
+    this.turnApprovalMemory.delete(id);
     const runnerExecution = this.pendingRunnerExecutions.get(id);
     const sdkQuery = this.pendingSdkQueries.get(id);
     const sdkAbort = this.pendingSdkAbort.get(id);
@@ -1772,6 +1835,134 @@ export class StructuredSessionManager {
     }
     stats.total++;
     session.approvalStats = stats;
+  }
+
+  private rememberTurnApproval(sessionId: string, scope: EscalationScope, target?: string): void {
+    let memory = this.turnApprovalMemory.get(sessionId);
+    if (!memory) {
+      memory = { scopes: new Set(), targets: new Set() };
+      this.turnApprovalMemory.set(sessionId, memory);
+    }
+    memory.scopes.add(scope);
+    if (target) memory.targets.add(target);
+  }
+
+  private settlePendingPermission(
+    sessionId: string,
+    requestId: string | undefined,
+    result: PermissionResult,
+  ): void {
+    const waiter = this.pendingPermissions.get(sessionId);
+    if (!waiter) return;
+    if (requestId !== undefined && waiter.requestId !== requestId) return;
+    this.pendingPermissions.delete(sessionId);
+    waiter.resolve(result);
+  }
+
+  private async handleCanUseTool(
+    sessionId: string,
+    requestId: string,
+    toolName: string,
+    input: Record<string, unknown>,
+    ctx: Parameters<CanUseTool>[2],
+  ): Promise<PermissionResult> {
+    const deny = (message: string): PermissionResult => structuredPermissionDenied(message);
+    if (ctx.signal.aborted || this.disposed) return deny("已取消");
+    const current = this.currentSessionForRequest(sessionId, requestId);
+    if (!current) return deny("会话已结束");
+
+    const inferred = inferStructuredEscalation(toolName, input, ctx);
+    if (current.autoApprovePermissions) {
+      this.incrementApprovalStats(current, inferred.scope);
+      this.storage.updateSessionRuntimeMetadata(current);
+      return { behavior: "allow" };
+    }
+    const memory = this.turnApprovalMemory.get(sessionId);
+    if (memory && (memory.scopes.has(inferred.scope) || (inferred.target && memory.targets.has(inferred.target)))) {
+      return { behavior: "allow" };
+    }
+
+    const existing = this.pendingPermissions.get(sessionId);
+    if (existing) {
+      await new Promise<PermissionResult>((resolve) => {
+        const previous = existing.resolve;
+        existing.resolve = (result) => {
+          previous(result);
+          resolve(result);
+        };
+      });
+      if (ctx.signal.aborted || this.disposed) return deny("已取消");
+      return this.handleCanUseTool(sessionId, requestId, toolName, input, ctx);
+    }
+
+    const escalation: EscalationRequest = {
+      requestId: ctx.toolUseID ? `sdk-${ctx.toolUseID}` : `sdk-${Date.now()}`,
+      scope: inferred.scope,
+      runner: "json",
+      source: "tool_permission_request",
+      target: inferred.target,
+      reason: inferred.reason,
+    };
+
+    return await new Promise<PermissionResult>((resolve) => {
+      let settled = false;
+      const finish = (result: PermissionResult) => {
+        if (settled) return;
+        settled = true;
+        ctx.signal.removeEventListener("abort", onAbort);
+        if (this.pendingPermissions.get(sessionId)?.requestId === escalation.requestId) {
+          this.pendingPermissions.delete(sessionId);
+        }
+        resolve(result);
+      };
+      const onAbort = () => {
+        finish(deny("已取消"));
+        const latest = this.currentSessionForRequest(sessionId, requestId);
+        if (latest?.pendingEscalation?.requestId === escalation.requestId) {
+          const cleared: SessionSnapshot = {
+            ...latest,
+            pendingEscalation: null,
+            permissionBlocked: false,
+          };
+          this.sessions.set(sessionId, cleared);
+          this.storage.updateSessionRuntimeMetadata(cleared);
+          this.emit({
+            type: "status",
+            sessionId,
+            data: { permissionBlocked: false, sessionKind: "structured" },
+          });
+        }
+      };
+      ctx.signal.addEventListener("abort", onAbort, { once: true });
+      this.pendingPermissions.set(sessionId, { requestId: escalation.requestId, resolve: finish });
+
+      const latest = this.currentSessionForRequest(sessionId, requestId);
+      if (!latest || ctx.signal.aborted) {
+        finish(deny("会话已结束"));
+        return;
+      }
+      const updated: SessionSnapshot = {
+        ...latest,
+        pendingEscalation: escalation,
+        permissionBlocked: true,
+      };
+      this.sessions.set(sessionId, updated);
+      this.storage.updateSessionRuntimeMetadata(updated);
+      this.emit({
+        type: "status",
+        sessionId,
+        data: {
+          sessionKind: "structured",
+          permissionBlocked: true,
+          permissionRequest: {
+            scope: escalation.scope,
+            target: escalation.target,
+            prompt: escalation.reason,
+          },
+          pendingEscalation: escalation,
+        },
+      });
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -2515,6 +2706,7 @@ export class StructuredSessionManager {
   ): Promise<void> {
     const abortController = new AbortController();
     this.pendingSdkAbort.set(sessionId, abortController);
+    this.turnApprovalMemory.delete(sessionId);
 
     const isManaged = session.mode === "managed";
     let killedForAskUserQuestion = false;
@@ -2535,6 +2727,11 @@ export class StructuredSessionManager {
       env: sdkEnv as Record<string, string | undefined>,
       permissionMode: permPolicy.permissionMode,
       ...(permPolicy.permissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
+      ...(permPolicy.permissionMode !== "bypassPermissions"
+        ? {
+            canUseTool: (toolName, input, ctx) => this.handleCanUseTool(sessionId, requestId, toolName, input, ctx),
+          }
+        : {}),
       ...(permPolicy.allowedTools ? { allowedTools: permPolicy.allowedTools } : {}),
       ...(isManaged ? { disallowedTools: ["AskUserQuestion"] } : {}),
       skills,
@@ -2924,6 +3121,8 @@ export class StructuredSessionManager {
     }
 
     // Cleanup
+    this.settlePendingPermission(sessionId, undefined, structuredPermissionDenied("本轮已结束"));
+    this.turnApprovalMemory.delete(sessionId);
     const releasedAbort = this.releasePendingSdkAbort(sessionId, abortController);
     const releasedQuery = this.releasePendingSdkQuery(sessionId, queryHandle);
     if (releasedAbort || releasedQuery) this.cancelStreamingCheckpointTimer(sessionId);

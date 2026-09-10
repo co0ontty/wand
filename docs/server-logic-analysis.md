@@ -260,7 +260,7 @@ ExecutionMode   = assist | agent | agent-max | default | auto-edit
 - `providerCliActive`：PTY 上 CLI 是否还占着终端；CLI 退后会话仍 `running`（底下是 login shell）
 - `structuredState`：`{ provider, runner, model, lastError, inFlight, activeRequestId }`
 - `queuedMessages` 只属于 structured
-- `pendingEscalation` 实际只属于 Claude PTY
+- `pendingEscalation` 属于 Claude PTY，以及 Claude SDK structured 的 `canUseTool` 桥接
 
 `ConversationTurn` = user/assistant + `text | thinking | tool_use | tool_result`。PTY 聊天是对 TUI 文本的启发式投影，**没有 tool block**；结构化路径才有完整块模型。
 
@@ -572,7 +572,7 @@ Review：评论 → `sendReview` 拼成一段反馈 prompt 再 `sendMessage`。D
 
 - Inbox：`Missions.ingest` 写 `agent_activity`，`GET /api/inbox` / `POST /api/inbox/read` / `wand inbox:list` 接上
 - History GET：保持 `[]` 作为旧客户端兼容契约
-- Structured 权限路由改为 404
+- Structured 权限路由：Claude SDK 经 `canUseTool` 桥接审批；无 pending 时 400
 - 补上 `/api/grok-sessions/:id/resume`、`/api/pi-sessions/:id/resume` 与 history GET 空壳
 - 聊天渲染按 `sessionKind` 分叉，不在 PTY 路径伪造 tool block
 
@@ -580,7 +580,7 @@ Review：评论 → `sendReview` 拼成一段反馈 prompt 再 `sendMessage`。D
 | --- | --- | --- | --- | --- |
 | 10 | Inbox | HTTP 恒 `{ items: [] }`；`agent_activity` 表和 `upsertAgentActivity` 无调用方；CLI `inbox:list` 不存在 | 要么 `Missions.ingest` 写 activity 并接上 inbox；要么删路由 / 表 / 文档，避免双真源 | `src/server-mission-routes.ts`、`src/storage.ts`、`src/missions.ts` |
 | 11 | Provider history GET 恒 `[]` | DELETE / hide 仍有效，列表是兼容空壳 | 若 UI 已不展示原生历史，删 GET 或改 410；若还要展示，接 `provider-history-scanner` | `src/server-session-routes.ts` |
-| 12 | Structured `resolveEscalation` / 权限路由 | structured 从不设 `pendingEscalation`，这些 API 只会 400 | 结构化路径直接 404 / 从文档摘掉；不要让客户端以为能批准 | `src/structured-session-manager.ts`、session routes |
+| 12 | Structured `resolveEscalation` / 权限路由 | Claude SDK structured 经 `canUseTool` 写入 `pendingEscalation`；print 模式和其他 provider 仍无 waiter | SDK 路径接批准/拒绝；无 pending 时 400 | `src/structured-session-manager.ts`、session routes |
 | 13 | Grok / Pi 无独立 resume / history 路由 | 只能走通用 `/api/sessions/:id/resume`，和 Codex / OpenCode / Qoder 不对称 | 需要原生历史恢复时再补；现在先在文档写清楚 | `src/server-session-routes.ts` |
 | 14 | PTY 聊天 vs structured 块模型 | Claude PTY 是启发式刮字，没有 tool / thinking block | 不要强行合成假 tool block。聊天渲染必须按 `sessionKind` 分叉 | `src/claude-pty-bridge.ts`、前端 chat-render |
 

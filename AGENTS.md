@@ -71,7 +71,7 @@ WebSocket fanout:   src/ws-broadcast.ts -> src/web-ui/browser/websocket.ts
 | SQLite 持久化与只加不删迁移 | `src/storage.ts` |
 | 共享契约 | `src/types.ts` |
 
-两套 runner 共享类型和存储，**不共享执行代码**；改一边不会自动影响另一边。Structured 是非交互的，没有运行时权限提示。
+两套 runner 共享类型和存储，**不共享执行代码**；改一边不会自动影响另一边。Claude SDK structured 在 default 权限下通过 `canUseTool` 桥接运行时审批；`claude-cli-print` 和其他 structured provider 仍无运行时权限提示。
 
 ## Session 输入契约（最容易写错）
 

@@ -1581,7 +1581,7 @@ export function registerSessionRoutes(
   app.post("/api/sessions/:id/approve-permission", (req, res) => {
     try {
       if (sessions.ownerOf(req.params.id) === "structured") {
-        res.status(404).json({ error: "结构化会话没有运行时授权请求。" });
+        res.json(sessionResponseDTO(structured.approvePermission(req.params.id)));
         return;
       }
       const snapshot = sessions.get(req.params.id);
@@ -1598,7 +1598,7 @@ export function registerSessionRoutes(
   app.post("/api/sessions/:id/deny-permission", (req, res) => {
     try {
       if (sessions.ownerOf(req.params.id) === "structured") {
-        res.status(404).json({ error: "结构化会话没有运行时授权请求。" });
+        res.json(sessionResponseDTO(structured.denyPermission(req.params.id)));
         return;
       }
       const snapshot = sessions.get(req.params.id);
@@ -1615,7 +1615,7 @@ export function registerSessionRoutes(
   app.post("/api/sessions/:id/toggle-auto-approve", (req, res) => {
     try {
       if (sessions.ownerOf(req.params.id) === "structured") {
-        res.status(404).json({ error: "结构化会话没有运行时授权请求。" });
+        res.json(sessionResponseDTO(structured.toggleAutoApprove(req.params.id)));
         return;
       }
       const snapshot = sessions.get(req.params.id);
@@ -1639,7 +1639,7 @@ export function registerSessionRoutes(
         return;
       }
       if (sessions.ownerOf(req.params.id) === "structured") {
-        res.status(404).json({ error: "结构化会话没有运行时授权请求。" });
+        res.json(sessionResponseDTO(structured.resolveEscalation(req.params.id, requestId, resolution)));
         return;
       }
       res.json(sessionResponseDTO(processes.resolveEscalation(req.params.id, requestId, resolution)));

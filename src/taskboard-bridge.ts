@@ -155,7 +155,18 @@ export function taskboardIntegrationScript(): string {
       });
   };
   const scan = () => document.querySelectorAll("[data-task-id]").forEach(setup);
-  new MutationObserver(scan).observe(document.documentElement, {childList:true, subtree:true});
+  let readyAnnounced = false;
+  const announceReady = (repeat = false) => {
+    const root = document.getElementById("root");
+    if (!root || !root.childElementCount || window.parent === window || (readyAnnounced && !repeat)) return;
+    readyAnnounced = true;
+    window.parent.postMessage({type:"wand-taskboard-ready"}, location.origin);
+  };
+  new MutationObserver(() => { scan(); announceReady(); }).observe(document.documentElement, {childList:true, subtree:true});
+  window.addEventListener("load", () => announceReady());
+  window.addEventListener("message", (event) => {
+    if (event.origin === location.origin && event.source === window.parent && event.data?.type === "wand-taskboard-ready-request") announceReady(true);
+  });
   scan();
 })();
 </script>`;

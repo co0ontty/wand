@@ -1040,7 +1040,8 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
       }
 
       // 自动批准 chip：与原 .auto-approve-indicator 等价，但用统一的 .composer-pill 风格放主行。
-      // Codex 会话固定全权限不可切；结构化 Claude 会话后端 toggle-auto-approve 路由会拒绝。
+      // Codex 会话固定全权限不可切。Claude SDK structured 的开关会影响下一轮 permissionMode，
+      // 当前回合若正等审批，打开开关会直接批准这次请求。
       // 当会话已经处于 managed / full-access 模式时，"自动批准"语义已经由模式表达，
       // 重复显示一个独立 chip 只会占用空间又制造歧义 —— 此时直接折叠掉。
       export function isAutoApproveImpliedByMode(session) {

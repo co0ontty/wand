@@ -806,6 +806,7 @@ export function renderAppShell() {
                   '<span class="permission-actions hidden" id="permission-actions">' +
                     '<span class="permission-actions-label" id="permission-actions-label" role="status" aria-live="polite" aria-atomic="true">等待授权</span>' +
                     '<button id="approve-permission-btn" class="btn btn-permission btn-permission-approve" type="button">批准</button>' +
+                    '<button id="approve-turn-permission-btn" class="btn btn-permission btn-permission-approve hidden" type="button">本轮允许</button>' +
                     '<button id="deny-permission-btn" class="btn btn-permission btn-permission-deny" type="button">拒绝</button>' +
                   '</span>' +
                   renderApprovalStatsBadge() +

@@ -217,11 +217,11 @@ Web 把 PTY 按键缓存在 `pendingMessages`（最多 100，TTL 5s），重连�
 
 ### 权限
 
-只对 **Claude PTY** 有运行时弹窗。
+**Claude PTY** 与 **Claude SDK structured**（`permissionMode=default`）有运行时弹窗。
 
-- Web：`status.permissionBlocked` / `pendingEscalation` → 批准 / 拒绝 / 本轮记住 → `POST .../approve-permission` | `deny-permission` | `escalations/:id/resolve`
-- iOS / Android：同样 HTTP；无结构化 escalation 时退回旧 `permissionBlocked` 条
-- Structured：客户端不应画批准条。服务端现对这类路由回 404
+- Web：`status.permissionBlocked` / `pendingEscalation` → 批准 / 拒绝 / 本轮允许 → `POST .../approve-permission` | `deny-permission` | `escalations/:id/resolve`
+- iOS / Android / macOS：同样 HTTP；无结构化 escalation 时退回旧 `permissionBlocked` 条
+- `claude-cli-print` 和其他 structured provider 没有 `canUseTool`，这些路由在没有 pending 时 400
 - Codex PTY：客户端应禁用批准（服务端 400）
 
 `toggle-auto-approve` 只影响 Wand 侧自动回车，改不了已经 spawn 出去的 CLI flag。换 mode 中途同样如此。

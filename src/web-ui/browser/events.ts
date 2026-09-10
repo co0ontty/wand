@@ -12,7 +12,7 @@ import { addPendingAttachment, backToNativeApp, closeClaudeSkillsPicker, closePl
 import { batchDeleteSelected, clearSelections, confirmDelete, renderSessions, selectAllVisibleItems, toggleManageMode, toggleManagedItemSelection } from "./sidebar";
 import { copySelectedSessionField, handleSessionItemClick, handleSessionItemKeydown, initTerminal, maybeScrollTerminalToBottom, softResyncTerminal } from "./terminal";
 import { ensureTerminalFit, setupVisualViewportHandlers, teardownTerminal } from "./viewport";
-import { approvePermission, denyPermission, toggleAutoApprove } from "./websocket";
+import { approvePermission, approveTurnPermission, denyPermission, toggleAutoApprove } from "./websocket";
 import { isBrowserReactShellMounted } from "./shell-runtime";
 import { missionsController } from "../react/missions/controller";
 
@@ -573,6 +573,8 @@ import { missionsController } from "../react/missions/controller";
         }
         var approvePermissionBtn = document.getElementById("approve-permission-btn");
         if (approvePermissionBtn) approvePermissionBtn.addEventListener("click", approvePermission);
+        var approveTurnPermissionBtn = document.getElementById("approve-turn-permission-btn");
+        if (approveTurnPermissionBtn) approveTurnPermissionBtn.addEventListener("click", approveTurnPermission);
         var denyPermissionBtn = document.getElementById("deny-permission-btn");
         if (denyPermissionBtn) denyPermissionBtn.addEventListener("click", denyPermission);
         var sendBtn = document.getElementById("send-input-button");
