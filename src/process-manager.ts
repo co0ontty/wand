@@ -28,6 +28,7 @@ import {
   type PtyTopicLineBuffer,
 } from "./session-topic.js";
 import { getErrorMessage } from "./error-utils.js";
+import { describePtySpawnFailure } from "./ensure-node-pty-helper.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
 import { resolveSessionCwd } from "./session-cwd.js";
 import { PtyTerminalState, type PtyTerminalSnapshot } from "./pty-terminal-state.js";
@@ -1353,12 +1354,14 @@ export class ProcessManager extends EventEmitter {
       this.initializeClaudeBridge(record, attached.state.output);
     } catch (err) {
       console.error("[ProcessManager] terminal spawn failed", { sessionId: id, error: String(err) });
-      record.status = "failed";
-      record.exitCode = -1;
-      record.endedAt = new Date().toISOString();
-      record.ptyProcess = null;
-      this.persist(record, { forceFullSave: true, metadataDirty: true });
-      return this.snapshot(record);
+      this.cleanupRecord(record, false);
+      this.sessions.delete(id);
+      this.lastPersistedMessageState.delete(id);
+      this.dirtySessions.delete(id);
+      this.terminalHost.forget(id);
+      try { this.storage.deleteSession(id); } catch { /* best-effort spawn-failure cleanup */ }
+      try { this.logger.deleteSession(id); } catch { /* best-effort spawn-failure cleanup */ }
+      throw new Error(describePtySpawnFailure(err));
     }
 
     record.processId = child.pid;

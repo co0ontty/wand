@@ -110,6 +110,8 @@ async function main(): Promise<void> {
       break;
     }
     case "terminald": {
+      const { ensureNodePtyHelperExecutable } = await import("./ensure-node-pty-helper.js");
+      ensureNodePtyHelperExecutable();
       const { runTerminalDaemon } = await import("./terminal-daemon-server.js");
       await runTerminalDaemon(configPath);
       break;

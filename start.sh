@@ -279,6 +279,16 @@ repair_global_package_permissions() {
   sudo chown -R "$(id -u):$(id -g)" "$scope_dir"
 }
 
+restore_node_pty_spawn_helper() {
+  local prebuilds="$WAND_PREFIX/lib/node_modules/@co0ontty/wand/node_modules/node-pty/prebuilds"
+  [[ -d "$prebuilds" ]] || return 0
+  local helper
+  while IFS= read -r helper; do
+    [[ -n "$helper" ]] || continue
+    chmod +x "$helper" 2>/dev/null || true
+  done < <(find "$prebuilds" -name spawn-helper -type f 2>/dev/null || true)
+}
+
 cleanup_npm_package_temps() {
   local scope_dir="$WAND_PREFIX/lib/node_modules/@co0ontty"
   [[ -d "$scope_dir" ]] || return 0
@@ -582,6 +592,10 @@ if [[ "$DO_INSTALL" == "1" ]]; then
   fi
   "$NPM_FOR_WAND" install -g --prefix "$WAND_PREFIX" "$PACK_DIR/$PACK_FILE" --no-audit --no-fund
   ok "本地 npm 包已安装到 $WAND_PREFIX"
+  # npm 可能把全局包重新写成 root 所有、并丢掉 spawn-helper 的 +x。
+  # 安装后再修一次，避免随后每一次新建 PTY 都 posix_spawnp failed。
+  repair_global_package_permissions
+  restore_node_pty_spawn_helper
   refresh_wand_runtime
   verify_installed_beta
 fi

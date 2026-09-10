@@ -339,6 +339,35 @@ test("disabling auto approval persists the false value", async (t) => {
   assert.equal(restored.get(started.id)?.summary, "Persisted summary");
 });
 
+test("PTY spawn failures raise instead of leaving a failed session row", async (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-pm-spawn-fail-"));
+  const storage = new FakeStorage();
+  const host = {
+    persistent: false,
+    attach() { return null; },
+    async createOrAttach() { throw new Error("posix_spawnp failed."); },
+    forget() {},
+    disconnect() {},
+  };
+  const manager = new ProcessManager(
+    { ...defaultConfig(), defaultCwd: root, startupCommands: [] },
+    storage as unknown as WandStorage,
+    path.join(root, ".wand"),
+    host as never,
+  );
+  t.after(() => {
+    manager.dispose();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  await assert.rejects(
+    () => manager.startShell(root, "default"),
+    /spawn-helper/,
+  );
+  assert.equal(manager.listSlim().length, 0);
+  assert.equal(storage.loadSessions().length, 0);
+});
+
 test("late PTY data and exit callbacks cannot mutate a reused session id", async (t) => {
   const { manager, root, spawned, storage } = createHarness(t);
   const events: ProcessEvent[] = [];
