@@ -37,7 +37,6 @@ import { StructuredSessionManager } from "./structured-session-manager.js";
 import { recordRecentPath, registerFileRoutes } from "./server-file-routes.js";
 import { registerSettingsRoutes } from "./server-settings-routes.js";
 import { registerGithubRoutes } from "./server-github-routes.js";
-import { startTaskboardBridge } from "./taskboard-bridge.js";
 import { registerTaskRoutes } from "./server-task-routes.js";
 import { getGithubConnectorStatus } from "./github-connector.js";
 import { registerMissionRoutes } from "./server-mission-routes.js";
@@ -694,20 +693,6 @@ export async function startServer(
   const requireSessions = buildRequireScope("sessions");
   const requireFiles = buildRequireScope("files");
   const requirePasswordVault = buildRequireScope("password-vault");
-  const taskboardBridge = await startTaskboardBridge(configDir, storage, sessionRegistry, structuredSessions, config.defaultCwd);
-  app.use("/taskboard", (req, res, next) => {
-    // Taskboard's immutable Vite assets are safe to serve without the Wand
-    // session cookie. This matters behind HTTPS reverse proxies where iframe
-    // subresource requests may not carry the parent authentication cookie.
-    const staticAsset = req.path.startsWith("/assets/")
-      || /^\/[^/]+\.(?:css|js|map|svg|png|jpg|jpeg|webp|ico)$/.test(req.path);
-    if (staticAsset) {
-      taskboardBridge.handler(req, res, next);
-      return;
-    }
-    requireAuth(req, res, next);
-  });
-  app.use("/taskboard", taskboardBridge.handler);
   // Route-specific parsers must run before the global parser. Once body-parser
   // has consumed a request, a later express.json() cannot tighten or widen it.
   app.use("/api/optimize-prompt", express.json({ limit: "256kb" }));
@@ -1156,7 +1141,8 @@ export async function startServer(
   });
 
   registerGithubRoutes(app, { storage, requireAdmin, sessions: sessionRegistry });
-  registerTaskRoutes(app, storage, sessionRegistry, requireAdmin);
+  // 任务管理与 Missions 一样只需登录：原生 connected-app 也要能列/建/派发。
+  registerTaskRoutes(app, { storage, sessions: sessionRegistry, structured: structuredSessions, config });
 
   registerAdminUpdateRoutes(app, {
     storage,
@@ -1752,7 +1738,6 @@ export async function startServer(
       try { structuredLogger.dispose(); } catch { /* best-effort shutdown */ }
       try { wsManager.dispose(); } catch { /* best-effort shutdown */ }
       try { wss.close(); } catch { /* ignore */ }
-      try { await taskboardBridge.close(); } catch { /* best-effort shutdown */ }
 
       try {
         await serverClosed;

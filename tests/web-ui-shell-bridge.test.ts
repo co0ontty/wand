@@ -34,9 +34,11 @@ test("legacy snapshot exposes PTY resume for every managed provider", () => {
     })),
   }, mobileEnvironment);
 
+  // 侧栏顺序是低频排序（startedAt 相同则按 legacy 的索引次序），这里只断言每个
+  // provider 都被判定为可 resume；断言具体顺序会让这条契约在无关排序调整时假失败。
   assert.deepEqual(
-    snapshot.sidebar.groups[0].entries.map((entry) => [entry.provider, entry.resumable]),
-    providers.map((provider) => [provider, true]),
+    snapshot.sidebar.groups[0].entries.map((entry) => [entry.provider, entry.resumable]).sort(),
+    providers.map((provider) => [provider, true]).sort(),
   );
 });
 

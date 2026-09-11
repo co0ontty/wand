@@ -1,6 +1,10 @@
 import { spawn } from "node:child_process";
 
-import type { StructuredExecHost, StructuredExecProcess } from "./structured-exec-host.js";
+import {
+  createUtf8TextDecoder,
+  type StructuredExecHost,
+  type StructuredExecProcess,
+} from "./structured-exec-host.js";
 import type {
   StructuredRunnerExecution,
   StructuredRunnerObserver,
@@ -89,7 +93,7 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
   };
 
   const handleStdoutText = (text: string): void => {
-    if (!observer.isActive()) return;
+    if (!text || !observer.isActive()) return;
     observer.onStdout?.(text);
     options.onStdoutText?.(text);
     lineBuffer += text;
@@ -99,14 +103,13 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
   };
 
   const handleStderrText = (text: string): void => {
-    if (!observer.isActive()) return;
+    if (!text || !observer.isActive()) return;
     observer.onStderr?.(text);
     ctx.stderr += text;
   };
 
-  const useRemoteHost = options.execHost?.persistent === true;
-  if (useRemoteHost) {
-    const host = options.execHost!;
+  const host = options.execHost;
+  if (host?.persistent) {
     const request: Parameters<StructuredExecHost["spawnStructured"]>[0] = {
       runId: `structured:${options.sessionId}`,
       file: options.file,
@@ -144,12 +147,16 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
     });
     if (wantsStdin) child.stdin?.end(options.stdinData);
     source = { pid: child.pid ?? null, interrupt: () => child.kill("SIGTERM") };
-    child.stdout?.on("data", (chunk: Buffer) => handleStdoutText(chunk.toString()));
-    child.stderr?.on("data", (chunk: Buffer) => handleStderrText(chunk.toString()));
+    const stdoutDecoder = createUtf8TextDecoder();
+    const stderrDecoder = createUtf8TextDecoder();
+    child.stdout?.on("data", (chunk: Buffer) => handleStdoutText(stdoutDecoder.write(chunk)));
+    child.stderr?.on("data", (chunk: Buffer) => handleStderrText(stderrDecoder.write(chunk)));
     child.on("error", (error) => finish(null, null, error as NodeJS.ErrnoException));
-    child.on("close", (exitCode, signalName) =>
-      finish(exitCode, signalName === null || signalName === undefined ? null : signalName),
-    );
+    child.on("close", (exitCode, signalName) => {
+      handleStdoutText(stdoutDecoder.end());
+      handleStderrText(stderrDecoder.end());
+      finish(exitCode, signalName === null || signalName === undefined ? null : signalName);
+    });
     sourceReady = Promise.resolve();
   }
 

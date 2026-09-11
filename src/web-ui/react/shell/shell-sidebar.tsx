@@ -6,6 +6,7 @@ import { WandIcon, WandPopover, type WandIconName } from "../ui";
 import { classNames } from "../ui/class-names";
 import { sidebarSearchMatches } from "../workspaces/sidebar-search";
 
+import { taskBoardController, taskBoardStore } from "../issues/task-board-controller";
 import { useSidebarDrawer } from "./use-sidebar-drawer";
 import { useUiDispatch, useUiStoreSnapshot } from "./ui-store-react";
 import type {
@@ -534,6 +535,7 @@ function SessionGroup({
 export function ShellSidebar() {
   const snapshot = useUiStoreSnapshot();
   const dispatch = useUiDispatch();
+  const taskBoard = React.useSyncExternalStore(taskBoardStore.subscribe, taskBoardStore.getSnapshot, taskBoardStore.getSnapshot);
   const [moreOpen, setMoreOpen] = React.useState(false);
   const [searchQuery, setSearchQuery] = React.useState("");
   const narrow = !snapshot.viewport.mobile && snapshot.layout.sidebarPinned && snapshot.layout.sidebarCollapsed;
@@ -556,7 +558,11 @@ export function ShellSidebar() {
     body.scrollTop = scrollPositions.current[mode];
     return () => { scrollPositions.current[mode] = body.scrollTop; };
   }, [narrow]);
+  const leaveBoard = (): void => {
+    taskBoardController.close();
+  };
   const navigate = (action: UiAction): void => {
+    leaveBoard();
     if (overlay) void dispatch({ type: "layout.drawer.close" });
     void dispatch(action);
   };
@@ -680,11 +686,11 @@ export function ShellSidebar() {
           <button id="missions-button" type="button" title="自动化任务" onClick={() => navigate({ type: "missions.open" })}>
             <WandIcon name="zap" size={17}/><span>自动化</span>
           </button>
-          <button id="issues-button" type="button" title="Todo 任务看板" onClick={() => {
+          <button id="task-board-button" type="button" title="任务管理" aria-current={taskBoard.open ? "page" : undefined} onClick={() => {
             if (overlay) void dispatch({ type: "layout.drawer.close" });
-            window.__wandReactTaskBoard?.open(snapshot.selected?.workspaceId ?? "", snapshot.selected?.id ?? "");
+            taskBoardController.open(snapshot.selected?.workspaceId ?? "", snapshot.selected?.id ?? "");
           }}>
-            <WandIcon name="clipboard" size={17}/><span>任务</span>
+            <WandIcon name="clipboard" size={17}/><span>任务管理</span>
           </button>
           <button id="github-issues-button" type="button" title="GitHub 议题" onClick={() => {
             if (overlay) void dispatch({ type: "layout.drawer.close" });
@@ -699,7 +705,10 @@ export function ShellSidebar() {
               <WorkspacesPanel
                 compact={narrow}
                 onExpand={() => void dispatch({ type: "layout.drawer.collapse" })}
-                onNavigate={overlay ? () => void dispatch({ type: "layout.drawer.close" }) : undefined}
+                onNavigate={() => {
+                  leaveBoard();
+                  if (overlay) void dispatch({ type: "layout.drawer.close" });
+                }}
                 searchQuery={searchQuery}
                 onSearchChange={setSearchQuery}
                 selectedSessionId={snapshot.selected?.id ?? null}

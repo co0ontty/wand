@@ -8,6 +8,8 @@ export interface CodeEditorFile {
   lang?: string;
   size: number;
   mime?: string;
+  /** ISO mtime captured when the file was last loaded or successfully saved. */
+  mtime?: string;
   /** Latest saved content (baseline for dirty tracking). Empty for non-text files. */
   baseline: string;
   /** Current in-memory draft. */
@@ -51,18 +53,32 @@ interface CodeEditorSaveResult {
   mtime?: string;
 }
 
+export interface CodeEditorSaveConflict {
+  message: string;
+  path: string;
+  size?: number;
+  mtime?: string;
+}
+
 export type CodeEditorSaveOutcome =
   | { ok: true; result: CodeEditorSaveResult }
+  | { ok: false; conflict: CodeEditorSaveConflict }
   | { ok: false; failure: FilePreviewFailure };
 
 export interface CodeEditorLoadOptions {
   signal?: AbortSignal;
 }
 
+export interface CodeEditorSaveOptions {
+  expectedMtime?: string;
+  expectedSize?: number;
+  overwrite?: boolean;
+}
+
 /** Remote-owned seam: HTTP load/save adapter. */
 export interface CodeEditorRepository {
   load(path: string, options?: CodeEditorLoadOptions): Promise<CodeEditorLoadResult>;
-  save(path: string, content: string): Promise<CodeEditorSaveOutcome>;
+  save(path: string, content: string, options?: CodeEditorSaveOptions): Promise<CodeEditorSaveOutcome>;
 }
 
 export type CodeEditorCommand =
@@ -76,8 +92,11 @@ export type CodeEditorCommand =
 
 export type CodeEditorDiscardReason = "close" | "switch" | "replace";
 
+export type CodeEditorConflictChoice = "reload" | "overwrite" | "cancel";
+
 export interface CodeEditorRuntimeAdapter {
   confirmDiscard(reason: CodeEditorDiscardReason, path: string): Promise<boolean>;
+  confirmConflict?(path: string): Promise<CodeEditorConflictChoice>;
   notify(message: string, tone: "success" | "error" | "info" | "warning"): void;
   /** Called after a successful save so the file explorer can refresh. */
   onSaved?(path: string): void | Promise<void>;

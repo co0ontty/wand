@@ -1,9 +1,24 @@
 export type WandTaskStatus = "todo" | "doing" | "done";
 export type WandTaskPriority = "none" | "low" | "medium" | "high" | "urgent";
 
+/** 任务派发时选择的 CLI 工具；空串表示尚未指定。 */
+export type WandTaskAgentProvider = "claude" | "codex" | "opencode" | "grok" | "qoder" | "pi";
+export type WandTaskAgentModel = string;
+export type WandTaskAgentEffort = "off" | "standard" | "deep" | "max";
+
+/** 任务上的默认派发配置：先选工具 / 模型 / 思考深度，再一键交给 Agent。 */
+export interface WandTaskAgent {
+  provider: WandTaskAgentProvider;
+  /** 具体模型 ID；"default" 表示跟随服务端为该 provider 选择的默认模型。 */
+  model: WandTaskAgentModel;
+  thinkingEffort: WandTaskAgentEffort;
+}
+
 export interface WandTask {
   id: string;
   workspaceId: string | null;
+  /** 关联的侧栏工作任务；归档/新建时用来对账，不随 WorkspaceTask 删除而消失。 */
+  workspaceTaskId: string | null;
   identifier: string;
   title: string;
   description: string;
@@ -12,6 +27,8 @@ export interface WandTask {
   labels: string[];
   dueDate: string | null;
   sortOrder: number;
+  /** 该任务绑定的执行 Agent；null 表示还没指定。 */
+  agent: WandTaskAgent | null;
   createdAt: string;
   updatedAt: string;
 }

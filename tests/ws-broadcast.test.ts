@@ -129,7 +129,41 @@ test("high-water backpressure keeps draining and proactively emits resync_requir
       && message.sessionId === "needs-resync"
       && message.reason === "backpressure_drop"
   )), "low-water recovery should send a resync notice without waiting for another business event");
-  assert.equal(sentMessages.some((message) => message.sessionId === "dropped-999"), false);
+  assert.equal(
+    sentMessages.some((message) => message.sessionId === "dropped-999" && message.type !== "resync_required"),
+    false,
+    "dropped status payloads must not be delivered after the high-water mark",
+  );
+  assert.ok(sentMessages.some((message) => (
+    message.type === "resync_required"
+      && message.sessionId === "dropped-999"
+      && message.reason === "backpressure_drop"
+  )), "dropped non-output events must still request a snapshot resync");
+});
+
+test("dropped ended and status events also enqueue resync_required", async () => {
+  const { manager, client, socket } = createHarness();
+
+  manager.broadcast({ type: "status", sessionId: "in-flight" });
+  for (let index = 0; index < 500; index += 1) {
+    manager.broadcast({ type: "status", sessionId: `queued-${index}` });
+  }
+  assert.equal(client.backpressurePaused, true);
+
+  manager.broadcast({ type: "ended", sessionId: "turn-finished" });
+  manager.broadcast({ type: "status", sessionId: "turn-finished", data: { inFlight: false } });
+  assert.equal(client.pendingResyncSessions.has("turn-finished"), true);
+  assert.equal(client.sendQueue.length, 500, "ended/status drops must not grow the paused queue");
+
+  socket.settleNext();
+  await drainAll(client, socket);
+
+  const sentMessages = socket.sent.map((message) => JSON.parse(message) as Record<string, unknown>);
+  assert.ok(sentMessages.some((message) => (
+    message.type === "resync_required"
+      && message.sessionId === "turn-finished"
+      && message.reason === "backpressure_drop"
+  )), "dropping ended/status under backpressure must still request a snapshot resync");
 });
 
 test("a send callback error clears the queue even when a later callback succeeds", () => {

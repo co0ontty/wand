@@ -1,643 +1,278 @@
 # Wand 服务端逻辑分析
 
-最后更新：2026-08-22
+最后核对：2026-09-10。代码基线：主仓库 `d240da17b4bfee37b304e0a51c90506979357d8c`。
 
-范围：`src/` 服务端（CLI、Express、两套 session runner、terminal daemon、存储、workspace / mission、更新）。客户端怎么点、怎么发输入见配套文档 `docs/client-logic-analysis.md`。后续优化排期见 `docs/optimization-plan.md`。
+本文描述**当前实现**，不把历史缺陷或未来设计写成现状。客户端操作见 `client-logic-analysis.md`；问题证据、优先级、实施与验收计划统一见 `optimization-plan.md`。本次仅更新文档，没有实施修复。
 
-用途：后续下钻和排期。查任何会话 bug，**先看 `SessionRegistry.ownerOf(id)` 是 `structured` / `pty` / `storage`**，再进对应 manager。查「点了没反应 / 回车没提交 / 列表丢绑定」先看客户端文档。
+核对方法：枚举自有代码目录，沿入口 → 路由 → owner → 存储/进程 → HTTP/WS → 客户端追踪主要交互，辅以针对性测试和隔离探针。不是逐行安全审计，也未对六种真实 provider、全部平台设备和外部服务做运行验收。完整覆盖表及验证限制见计划 §1、§6。
 
----
+## 1. 系统与数据流总览
 
-## 1. 它是什么
+```text
+Web / Android / iOS / macOS / JSON CLI / 浏览器扩展
+  ├─ REST：鉴权、创建、命令、查询、文件、设置、更新
+  └─ /ws：快照、增量、通知；订阅后的 PTY 输入与流控
+         │
+         ▼
+cli.ts → server.ts（组合根）
+  ├─ SessionRegistry → StructuredSessionManager → provider Adapter
+  │                    ├─ CLI → StructuredExecHost → terminald 或本进程
+  │                    └─ Claude SDK → web 进程内 query + canUseTool
+  ├─ SessionRegistry → ProcessManager → TerminalHost → terminald / 测试 host
+  ├─ WandStorage + SessionLogger
+  ├─ WorkspaceTask / Missions / GitHub connector
+```
 
-`wand` 是本机 AI CLI 的 Web 控制台。一个 Node 进程（`src/cli.ts` → `src/server.ts`）同时做四件事：
+PTY 与 structured 共享 `SessionSnapshot`、DTO、存储、事件，不共享执行状态机。
 
-1. Express HTTP + `/ws`，给浏览器 / 原生客户端 / JSON CLI 用
-2. **PTY runner**（`ProcessManager`）跑交互式终端（Claude / Codex / … TUI 或纯 shell）
-3. **Structured runner**（`StructuredSessionManager`）跑非交互流式会话
-4. SQLite + 文件制品持久化
+排查会话先调用 `SessionRegistry.ownerOf(id)`：`structured` → `pty` → `storage`。不要仅按 URL、provider 或界面外观推断执行路径。
 
-PTY 不在 web 进程里：默认由独立的 `wand terminald` 持有，所以 `wand web` 重启 / 自更新不会杀掉正在跑的 shell。
+## 2. CLI、启动与关停
 
-两套 runner **共享类型和存储，不共享执行、权限、恢复代码**。
+主要文件：`cli.ts`、`pidfile.ts`、`tui/*`、`terminal-host.ts`、`server.ts`。
 
----
+1. `-c/--config` 决定 config、SQLite、会话制品与分发目录；单实例按 config 路径隔离。
+2. `wand web` 探测 pidfile / IPC；已有实例则 attach 或打印访问地址，不再开第二个服务。
+3. 修复 PATH 与 node-pty helper 权限，创建存储、运行配置、模型目录、分发管理器。
+4. 创建 TerminalHost、两个 manager、SessionRegistry、Missions。
+5. 挂 HTTP/WS，连接事件广播，再异步执行 `recoverDetachedRuns()`。
+6. 非测试模式下运行启动命令、模型刷新、包与 provider CLI 更新检查。
 
-## 2. 进程模型与 CLI
+`wand session:*`、`mission:*`、`inbox:list` 经 `cli-api.ts` 登录本机 HTTP，并不直接操纵 manager。TUI/attach 通过 IPC 读状态和发管理命令。`service:*` 管理 systemd/launchd。
 
-入口只有 `src/cli.ts`。全局 `-c/--config` 决定整套数据目录（默认 `~/.wand/`）。
+关停必须分别理解：
 
-| 命令 | 作用 |
+| 对象 | 当前行为 |
 | --- | --- |
-| `init` | 建 config + SQLite，首次生成随机密码 |
-| `web` | 启动服务，或 attach 到已有实例 |
-| `terminald` | PTY 守护进程（通常由 web 自动拉起） |
-| `config:path` / `show` / `password` / `set` | 配置读写。密码和偏好写 DB，部署项写 JSON |
-| `session:list` / `read` / `send` / `wait` | 对本地 HTTP 的 JSON 封装，**需要已在跑的 web** |
-| `mission:list` / `create` / `diff` / `review` / `review:send` | 同上 |
-| `service:install` / `uninstall` / `start` / `stop` / `restart` / `status` / `logs` | systemd / launchd |
+| daemon 持有的 PTY | web dispose 解绑；终端进程保留 |
+| daemon 持有的 structured CLI | 保留执行；下次 web 尝试领养与回放 |
+| Claude SDK / 本进程 structured CLI | 中断；不能承诺跨 web 重启续流 |
+| WS / 定时器 / logger / SQLite | 停止广播、释放资源 |
 
-`wand inbox:list` 现已实现，对应 `GET /api/inbox`。
 
-### `wand web` 启动顺序
+常用开关：`WAND_TEST_MODE=1` 使用测试/进程内路径并跳过部分后台任务；`WAND_DISABLE_UPDATE_CHECK=1` 关闭更新检查；`WAND_NO_TUI` 控制 TUI。测试模式不能替代真实 daemon 生命周期测试。
 
-```
-resolveConfigPath
-  → shouldUseTui()          # WAND_NO_TUI / 非 TTY / Windows 无 WT_SESSION → banner
-  → loadConfig + 建 DB
-  → discoverAttachableInstance(pidfile + wand.sock)
-       已有实例 → attach TUI 或打印 URL 后退出
-  → ensureNodePtyHelperExecutable()
-  → startServer()
-       EADDRINUSE → 再尝试 attach / 探测是否本服务占用
-  → 写 pidfile + 开 IPC
-  → TUI 或一行 banner
-```
+## 3. 配置、持久化与所有权
 
-单实例按 **config 路径** 隔离，不是全局一个。Windows 没有 unix socket，attach 不可用。
-
-`shouldUseTui()`：`WAND_NO_TUI` 有值、stdout/stderr 非 TTY、或 Windows 且没有 `WT_SESSION` → 不用 TUI。服务 unit 一律带 `WAND_NO_TUI=1`。
-
----
-
-## 3. 组合根：`startServer()` 造了什么
-
-`src/server.ts` 是唯一组合根。构造顺序（有依赖）：
-
-```
-repairRuntimePath + deepRepairRuntimePath     # 服务 PATH 过期兜底
-express + WandStorage
-RuntimeConfigState                            # 热更偏好 vs 需重启的部署项
-AuthService
-ModelCatalogService                           # 全服唯一模型发现者
-DistributionManager                           # APK/DMG
-createTerminalHost()                          # 领养或拉起 terminald
-ProcessManager                                # PTY
-SessionLogger + StructuredSessionManager
-SessionRegistry                               # 统一查找
-Missions                                      # 只调度 structured
-HTTP(S) + WebSocketServer + WsBroadcastManager
-```
-
-事件接线：
-
-```
-ProcessManager "process"  ──┐
-                            ├─→ Missions.ingest
-StructuredSessionManager ───┘   WsBroadcastManager.emitEvent
-```
-
-WS 回写 PTY 只走 `ProcessManager`：`sendInput` / `resize` / `pauseOutput` / `resumeOutput`。
-
-构造函数里就会恢复会话，**listen 之前**：
-
-- PTY：对 `status === running` 的记录 `terminalHost.attach`。daemon 还活着就重绑；死了 / 丢了就标 exited/failed，累加 `orphanRecoveredCount`
-- Structured：任何 `running` **强制打回 `idle`，`inFlight = false`**。进行中的一轮不会跨 web 重启存活
-
-启动后（非 `WAND_TEST_MODE`）：跑 `startupCommands`、模型目录 30 分钟刷新、npm / provider-CLI 自动更新定时器。
-
-环境开关：
-
-| 变量 | 作用 |
-| --- | --- |
-| `WAND_NO_TUI` | 强制 banner |
-| `WAND_TEST_MODE=1` | 进程内 PTY，跳过启动命令 / 模型刷新 / 更新检查 |
-| `WAND_DISABLE_UPDATE_CHECK=1` | 只关更新检查 |
-| `WAND_PATH_REPAIR_DISABLE` / `_DEEP_DISABLE` | 关 PATH 自修 |
-| `INVOCATION_ID` / `XPC_SERVICE_NAME=com.wand.web` | 托管重启时只退出、不 spawn |
-
----
-
-## 4. 配置与四类状态
-
-状态分四个桶，不要混用：
-
-| 桶 | 放哪 | 例子 |
+| 状态 | 真源 | 相关实现 |
 | --- | --- | --- |
-| 部署 / 启动 | `config.json`（0600，原子写） | `host/port/https/tls/shell`、`startupCommands`、`allowedCommandPrefixes`、APK/DMG 目录 |
-| 偏好 | SQLite `app_config` 的 `pref:*` | 默认 provider / 模型 / 模式、`systemAi`、语言、`inheritEnv` |
-| 密钥 | SQLite | `password`、`appSecret`（绝不回写 JSON） |
-| 大件 / 运行时 | 文件或 daemon 内存 | PTY 日志、worktree、上传、daemon 里的 PTY |
+| 部署项：host/port/TLS/shell/启动命令/分发目录 | config.json | `config.ts`、`runtime-config.ts` |
+| 偏好、更新通道、模型缓存 | SQLite `app_config` | `storage.ts`、`models.ts` |
+| 登录凭据、appSecret、连接器 token、密码库 | SQLite | `auth.ts`、`storage.ts`、`password-manager.ts` |
+| 会话运行态 | owner manager；持久化为 checkpoint | 两个 manager、`session-logger.ts` |
+| PTY/CLI 进程及回放日志 | terminald 或本进程 host | `terminal-daemon-*`、`structured-exec-*` |
+| WorkspaceTask、Missions、WandTask、会话绑定 | Wand SQLite | workspace/mission/task routes |
+| 上传 / worktree / 分发包 | 文件系统 | upload / git / distribution 模块 |
 
-`loadConfigWithStorage()`：读 JSON → 把老 JSON 偏好 / 密码迁到 DB（仅当 DB 还没有）→ 合并默认值 → 用 DB 覆盖 → 调和 `appSecret` → 必要时把 JSON 里残留的偏好 / 密钥剥掉再写回。
+`loadConfigWithStorage()` 会迁移旧 JSON 偏好/密钥、合并默认值，并可能写回配置。排查与验证不要随意加载真实用户配置。
 
-`RuntimeConfigState`：`host/port/https/shell` 改了要重启；偏好热生效。
+SQLite 迁移只加表/列。`saveSession`、标量 metadata 更新、消息/output checkpoint 是不同写路径；文件制品与 SQLite 互补，不能只查一个。
 
----
+**加密范围须说准确：** 存在 appSecret 时，新写入的 `password_items.password`、`notes`、`fields`（JSON 整体）和 connector token 使用 `enc:v1:` AES-256-GCM；读取兼容旧明文。因此密码库里可包含 TOTP、卡信息、passkey 私钥的字段也已纳入加密。但 appSecret 同在该数据目录，这不等于可抵御整个数据目录泄露（R09）。
 
-## 5. 鉴权
+## 4. 鉴权与路由覆盖
 
-两种主体：
-
-| Principal | 怎么拿到 | 权限 |
+| 主体 | 获取方式 | 权限 |
 | --- | --- | --- |
-| `browser-admin` | 密码登录 | `admin`（隐含全部） |
-| `connected-app` | `appToken` 登录或 `Authorization: Bearer` | `sessions` + `files` + `password-vault` + `session-preferences` |
+| browser-admin | 密码登录 | admin，隐含其它 scope |
+| connected-app | appToken 登录或 Bearer | sessions、files、password-vault、session-preferences |
 
-密码以 DB 为准（`storage.getPassword() ?? config.password`）。首次 `init` 会生成随机密码。改密码会吊销全部 cookie 会话并踢掉所有 WS。
+appToken 由 appSecret 与密码派生；改密码撤销 cookie 并断开已认证 WS，旧 appToken 随之失效。REST **和 WS 都已支持 cookie / Bearer appToken**；原生当前仍大量使用先登录得到的 endpoint-scoped cookie。
 
-Cookie（12 小时，httpOnly，SameSite=strict）：
+公开路由包括站点 shell、登录/会话探测、原生包检查/分发、iOS OTA；头像已经要求登录。HTTPS 与 HTTP 使用不同 cookie 名，避免 Secure cookie 相互干扰。
 
-- HTTPS：`__Host-wand_session` + 兼容名 `wand_session`
-- HTTP：`wand_session_local` + `wand_session`
+`/api/*` 在业务前经过 `requireAuth`。会话/文件前缀另外挂 scope；GitHub connector、GitHub API、`/api/wand-tasks` 显式要求 admin。
 
-分名字是为了躲浏览器 Strict Secure Cookies：HTTPS 留下的 Secure cookie 会挡住同名 HTTP Set-Cookie。
+**新路径不是自动继承所有中间件：**
 
-`appToken` = `HMAC-SHA256(appSecret, password)` 的 hex。改密码或 `appSecret` 会让所有二维码 / 扩展 token 失效。`POST /api/login` 带 `client:"browser-extension"` 时额外返回 `{ appToken, serverUrl }`。
+- `/api/tasks` GET/POST 没有出现在 `requireSessions` 前缀列表，虽然仍要求登录。
+- 当前 connected-app 本就有 sessions/files，不能把后一项直接宣称为已证实越权；应补全能力矩阵和回归测试（R02）。
 
-登录限流：每 IP 15 分钟 10 次失败（内存）。
+## 5. HTTP 契约与会话 DTO
 
-**WS 只认 cookie，不认 Bearer。** 原生客户端必须先 login 拿 cookie，才能连 `/ws`。
+主要入口：`server-session-routes.ts`、`session-transport.ts`。
 
-公开、不鉴权：`/`、vendor、`/api/login`、`/api/logout`、`/api/session-check`、头像、APK/DMG 检查与下载、HTTPS 下的 `/cert/server.crt`。
-
-之后所有 `/api/*` 先 `requireAuth`，再按前缀套 scope。下列路由只要求「已登录」，不在 sessions / files 前缀名单上：
-
-- `GET /api/session-list`
-- workspace 全家
-- `POST /api/file-create` / `dir-create` / `file-rename` / `file-delete`
-- `GET /api/quick-paths` / `validate-path` / `file-search`
-- `POST /api/opencode-sessions/:id/resume`、`/api/qoder-sessions/:id/resume`
-
-当前只有两种 principal，connected-app 已带 `sessions` + `files`，所以多数不是立刻可利用的越权。这是防御深度缺口，不是现网必炸洞。
-
----
-
-## 6. HTTP 表面
-
-没有 `Router`，全部挂在同一个 Express `app` 上。中间件顺序：
-
-1. 路由级 JSON 限额（optimize-prompt 256kb、file-write 2mb）再全局 1mb
-2. compression
-3. 关服时 503
-4. 浏览器扩展 CORS
-5. 公开路由 → `requireAuth` → scope → 业务路由
-6. `jsonErrorHandler`
-
-### 6.1 会话
-
-| 路径 | 含义 |
+| 操作 | 路径 / 结果 |
 | --- | --- |
-| `POST /api/commands` | 开 **PTY**（`shell:true` 则纯 shell） |
-| `POST /api/structured-sessions` | 开 structured（可带首条 prompt） |
-| `GET /api/sessions` / `/api/session-list` | 列表。后者分页 + revision 冲突 409 |
-| `GET /api/sessions/:id` | 详情 DTO。`?format=chat` 才带消息窗 |
-| `POST /api/sessions/:id/input` | 统一输入：structured 走队列 / 中断；PTY 可自动 resume |
-| `POST /api/sessions/:id/{model,thinking-effort,mode}` | 写到 owner manager |
-| structured 的 `messages` / `queued*` | 队列、提升、清空 |
-| `resume` / `claude-sessions` / `codex-sessions` / `opencode-sessions` / `qoder-sessions` | 各 provider 恢复入口不同 |
-| `approve/deny-permission`、`escalations/:id/resolve` | **实际只对 Claude PTY 有用** |
-| `stop` / `DELETE` / `batch-delete` | stop：PTY 杀进程；structured 回到 idle |
-| git / worktree / upload / tool-content | 挂在 session cwd 上 |
+| 新建 PTY / shell | `POST /api/commands`；`shell:true` 表示纯 shell |
+| 新建 structured | `POST /api/structured-sessions`；可携首条 prompt |
+| 列表 | `GET /api/sessions`；`GET /api/session-list` 分页/探测 |
+| 详情 / 历史窗 | `GET /api/sessions/:id?format=chat`；`.../messages` |
+| 统一输入 | `POST /api/sessions/:id/input`，按 owner/kind 分流 |
+| structured 队列 | `.../messages`、`queued`、`queued/:index/promote` 等 |
+| 配置变更 | `.../model`、`thinking-effort`、`mode` |
+| 权限 | approve/deny、`escalations/:requestId/resolve` |
+| 生命周期 | resume / stop / delete / batch-delete |
+| 文件/Git | upload、tool-content、git-status、quick-commit、worktree 等 |
 
-列表 DTO 剥掉 `output` / `messages`。详情用 `src/session-transport.ts`：标题由服务端裁定（title → description → summary → 目录名 →「会话」），output 截到 20 万字符，消息默认 40 turn 窗口。
+DTO 已携带 `workspaceId`、`workspaceTaskId`、`queuedMessageSkills`、`titleGenerating`、`ptyBusy`，并提供 `providerSessionId`（兼容别名）。`claudeSessionId` 仍保存所有 provider 的原生 resume ID，不应直接删列改名。
 
-`sessionBase()` **没有**带上 `workspaceId` / `workspaceTaskId` / `queuedMessageSkills` / `titleGenerating`。列表和多数详情响应会丢掉这些字段。
+- 列表 `output:""`，不附全量 messages；标题由服务端统一裁定。
+- 详情有 `wandProtocolVersion`、output 窗口与 offset/total；默认 output 上限 200,000 字符。
+- 聊天支持 turn 窗口，也支持 `blockBudget` 及首 turn 的块级 offset；不能只按 turn 数判断响应大小。
+- `offset=0` 且 revision 未变的 session-list 返回 `unchanged:true`；后续分页 revision 不一致返回 409。
+- `respondImmediately:true` 的 structured 输入返回 202 快照，表示接收/启动，不表示执行完成。
+- PTY `responseMode:"accepted"` 只返回轻量确认，不应每个按键拉整份详情。
 
-`POST /api/commands` 和部分 PTY 权限 / resume 仍返回**裸 `SessionSnapshot`**，和 DTO 路径不一致。
+Provider history GET 仍返回兼容空数组；Claude/Codex/OpenCode/Qoder/Grok/Pi 均有对应恢复入口。原生历史恢复与 Wand 会话原 ID 的 resume 不是一个契约，不能把空 history GET 当成磁盘没有历史。
 
-Provider history 的 **GET 全是空数组**（不再把原生历史灌进列表）。DELETE / hide 仍有效（删文件 + `hidden_claude_session_ids`）。
+## 6. 输入、审批与执行状态
 
-没有 grok / pi 的独立 history / resume 路由；它们走通用 `/api/sessions/:id/resume`。
+### PTY
 
-### 6.2 文件
-
-目录列表、预览、原文 range、写入、创建、重命名、删除、搜索、最近路径、快捷路径。`/etc` `/root` `/boot` 被挡。`file-search` **锁在 `process.cwd()` 下**，不是 session cwd。
-
-上传：`POST /api/sessions/:id/upload`，最多 5 个、每个 10MB，写到 `<cwd>/.wand-uploads/`。
-
-### 6.3 设置 / 模型 / 提示词
-
-`/api/config` 给客户端启动用（无密码）。`/api/settings*` 管部署 + 偏好。`/api/models` 只读缓存；刷新是 admin。`/api/optimize-prompt` 是一次性改写，不是会话。`/api/claude-skills?cwd=` 扫 `~/.claude/skills` 和项目 skills。
-
----
-
-## 7. WebSocket `/ws`
-
-同一 HTTP(S) 服务器，path `/ws`，maxPayload 256KB（只收控制消息）。
-
-客户端 → 服务端：
-
-| type | 作用 |
-| --- | --- |
-| `subscribe` | 订阅会话。默认替换全部；`mode:"add"` 叠加上（分屏）。可带 `blockBudget`、`capabilities.ptyAck` |
-| `unsubscribe` / `resync` | 退订 / 要全量 init |
-| `pty_input` / `pty_resize` | 必须已订阅。输入上限 128KB |
-| `pty_ack` | 流量控制：未确认字节 >512KB 暂停 PTY，<128KB 恢复 |
-| `pong` | 心跳 |
-
-服务端 → 客户端：`init`、`error`、`pty_error`、`resync_required`、`ping`，以及 `ProcessEvent`：
-
-```
-type: output | status | started | ended | usage | task | notification
-sessionId, data?, seq?   # seq 只打在 output 上，用来发现丢包
+```text
+创建 → running（provider CLI 活跃）
+    → 一轮输入/输出，ptyBusy 区分生成中与提示符
+    → CLI 退出，wrapper 转 login shell：仍可能 running
+    → stop / shell 退出：stopped / exited / failed
 ```
 
-系统通知用 `sessionId: "__system__"`（restart / update / auto-update-*）。
+`providerCliActive` 不是 `ptyBusy`，`status=running` 也不等于 AI 正在回答。POSIX provider wrapper 用私有退出标记识别 CLI 结束。
 
-Output 16ms 防抖。每客户端队列上限 500，超了**丢掉 output** 并在排空后发 `resync_required`。未订阅的会话收不到原始 PTY 块。心跳 20s，45s 无帧则掐连接。
+服务端 `sendInput` 原样写 PTY。composer 必须发“文本包”再发单独 `"\r"`；当前各端 composer 两包均标 `shortcutKey:"enter_text"`，终端文本包用于标题捕获。控制键只传实际控制字符。详见客户端 §6。
 
----
+Claude PTY bridge 从 TUI 启发式提取权限、ID、聊天文本；不生成假的 tool_use/thinking block。Codex PTY 当前强制 full-access，不应承诺可运行时审批。
 
-## 8. 会话数据模型
+### Structured
 
-核心类型在 `src/types.ts`。
-
-```
-SessionKind     = pty | structured
-SessionProvider = claude | codex | opencode | grok | qoder | pi
-SessionRunner   = claude-cli | claude-cli-print | claude-sdk
-                  | codex-cli-exec | opencode-cli-run | grok-cli-headless
-                  | qoder-cli-print | pi-cli-json | pty
-ExecutionMode   = assist | agent | agent-max | default | auto-edit
-                  | full-access | native | managed
+```text
+create → idle
+send → running / inFlight / activeRequestId
+     ├─ 流式 output + checkpoint
+     ├─ pending permission / AskUserQuestion
+     ├─ 后续消息排队（最多 10；重复拒绝）
+     └─ 完成 → idle → 调度下一条
+stop / interrupt → 终止当前 generation，按队列策略处理后续输入
 ```
 
-`SessionSnapshot` 两边共用。要点：
+`activeRequestId` 是屏蔽旧回调的关键；错误和完成不得用旧快照覆盖新的 turn。停止 structured 后回 idle，而非永久不可发送。
 
-- `status`：`idle | running | exited | failed | stopped`。**没有** `thinking` / `waiting-input`；那些由 `inFlight`、`permissionBlocked`、`isResponding` 暗示
-- `claudeSessionId` 名不副实：Claude UUID、Codex thread、OpenCode `ses_*`、Grok/Qoder UUID 都塞这里
-- `providerCliActive`：PTY 上 CLI 是否还占着终端；CLI 退后会话仍 `running`（底下是 login shell）
-- `structuredState`：`{ provider, runner, model, lastError, inFlight, activeRequestId }`
-- `queuedMessages` 只属于 structured
-- `pendingEscalation` 属于 Claude PTY，以及 Claude SDK structured 的 `canUseTool` 桥接
+Claude SDK 默认权限模式经 `canUseTool` 产生 pending escalation；approve_once、approve_turn、deny 及 stop 释放 waiter 均已有测试。Claude print 和其它 structured Adapter 没有相同运行时审批机制。没有 pending 时返回错误，不应渲染“必定可批准”的按钮。
 
-`ConversationTurn` = user/assistant + `text | thinking | tool_use | tool_result`。PTY 聊天是对 TUI 文本的启发式投影，**没有 tool block**；结构化路径才有完整块模型。
+模型/思考/模式对 structured 通常下一轮生效；PTY 某些 provider 可发 CLI 内命令，但不能笼统认为已启动进程的所有权限 flag 都可热改。
 
-`SessionRegistry` 查找顺序：structured 内存 → PTY `getOwned` → SQLite。列表同序去重，按 `startedAt` 降序。删除时先尽力拆 worktree。
+## 7. Terminal daemon 与 structured 恢复
 
-归档：两边都是每 60s 扫，非 running 且结束超过 **24h** 标 archived。PTY 还有硬顶：会话数 ≥200 时删 7 天以上的已归档。
+主要文件：`terminal-daemon-protocol.ts`、client/server、`structured-exec-host.ts`、`structured-exec-pump.ts`、`resume-policy.ts`。
 
-`src/session-lifecycle.ts` **不存在**。生命周期散落在两个 manager 里。
+PTY daemon 以 config 路径哈希区分 socket/token/pid；客户端重连对账并补 seq。终端显示快照由 headless xterm 提供，浏览器消费原始字节。
 
----
+**当前已不再是“所有 structured 重启必定中断”：**
 
-## 9. 两套 runner
+1. manager 构造时先把原 running 记录归一为 idle，并暂记中断提示；非 SDK 记录加入恢复候选。
+2. 服务端接好事件后异步 `recoverDetachedRuns()`；persistent exec host 才能列出、领养 surviving CLI。
+3. 根据 provider 的回放 processor 重放 stdout，继续接 live output/exit；成功恢复重新设 inFlight，清中断提示。
+4. SDK、本进程 fallback、daemon 中不存在的 run 不具有这条续流保证；日志截断也影响完整恢复。
 
-### 9.1 PTY：`ProcessManager`
+需要验证而未在本次真实环境复现的窗口：恢复完成前再次发送、list→adopt 期间新增/半行输出、恢复中断线或连续重启、被截断的回放日志、SDK 正常关停后的中断提示（R07）。不要只凭“进程活着”认定消息、队列和 UI 已完全恢复。
 
-入口：`POST /api/commands` → `start()` / `startShell()`。
+**已修复的字节流问题：** pump 曾按 Buffer 块直接 `.toString()`，中文字符字节跨块时出现替换字符；daemon 的 CLI 输出、socket 帧、TUI attach socket 与 daemon client socket 也有同类位置。现统一在字节流 seam 使用有状态 UTF-8 解码（`createUtf8TextDecoder` / `StringDecoder`），流结束先 flush 再宣告 exit（R03）。这与 PTY WebView 常见的列宽乱码是两类问题。
 
-启动：
+## 8. WebSocket 订阅、合流与背压
 
-1. 非 shell 要过 `allowedCommandPrefixes`；拒绝未引号的 `; | & < > \` $()`
-2. cwd 必须是已存在目录
-3. 可选 worktree → cwd 变成 `.wand-worktrees/...`
-4. Codex PTY **强制 `full-access`**
-5. `processCommandForMode` 注入模型 / 思考 / 权限 flag
-6. Grok/Qoder 预先分配 `--session-id`（TUI 抓 ID 不可靠）
-7. `buildPtyShellLaunchPlan` 包一层 POSIX wrapper
-8. 先落库 `running`，再 `terminalHost.createOrAttach`
-9. Claude 且 CLI 仍活跃 → 挂 `ClaudePtyBridge`
-10. 有 `initialInput` 就等提示符或 3s，再写 `input+\r`
+主要文件：`ws-broadcast.ts`、客户端 `websocket.ts` / `WandSocket`。
 
-**Shell 保活**（`pty-shell-launch.ts`）：provider + POSIX shell 时，CLI 在 wrapper 里跑完后打印 `\x1eWAND_CLI_EXIT:<token>:<code>\x1f`，再 `exec` login shell。会话保持 `running`，用户可以继续敲命令。非 provider 命令走 `shell -lc`，命令死 PTY 就死。
+- `subscribe` 默认替换订阅；Web 分屏使用 `mode:"add"`。`resync` 请求新的 init。
+- `pty_input` / resize 要求订阅对应 PTY；ACK-capable 客户端按未确认字节数暂停/恢复 PTY。
+- output 约 16ms 合流；不同 payload 形状先 flush，避免 messages/lastMessage/raw chunk 混成歧义事件。
+- 非 output 事件前 flush output，保证最终文字在 ended/status 前到达。
+- output 按客户端/会话打 seq；缺口或 `resync_required` 触发快照恢复。
+- 未订阅的 raw PTY 不广播；**非 raw 的结构化/状态事件仍可全局 fanout**，原生全局通知 socket 利用这一点。
+- 心跳负责断线检测；HTTP 快照、WS init 和本地乐观状态仍需独立处理新旧顺序。
 
-输入：必须 running。聊天视图会触发标题生成。客户端约定是**先发文本再单独发 `\r`**，不要用 `text+"\n"` 代替回车。
+当前非 ACK 背压分支会丢新业务事件，不仅 output；但只有丢 output 才记录 pending resync。若最后只丢 ended/status，UI 可能没有主动纠正信号。这是静态确认的协议缺口，尚未复现真实慢网络卡死（R06）。
 
-权限（**仅 Claude PTY**）：
+## 9. “任务”的四套实体不能混同
 
-- 模式 `full-access | auto-edit | managed | native` 或 root → 自动批准
-- 否则 bridge 扫 TUI 文本，设 `pendingEscalation`，UI 回 `\r` 或 `n\r`
-- Codex PTY 没有权限 UI
-
-`stop()` 立刻杀 PTY → `stopped`。`dispose()`：持久 daemon 只解绑不杀；进程内 host 才杀。
-
-### 9.2 Structured：`StructuredSessionManager`
-
-`createSession` 只建 **idle** 行，第一条消息才 spawn。
-
-Runner 选择：
-
-| Provider | Runner |
-| --- | --- |
-| Claude | `config.structuredRunner === "sdk"` → `claude-sdk`，否则 `claude-cli-print` |
-| Codex | `codex-cli-exec` |
-| OpenCode | `opencode-cli-run` |
-| Grok | `grok-cli-headless` |
-| Qoder | `qoder-cli-print` |
-| Pi | `pi-cli-json` |
-
-`sendMessage`：
-
-- 已在飞：可 `interrupt`（记下 prompt，杀进程，结束后重发）；否则入队，最多 10 条；重复文本 409
-- 否则追加 user turn，`inFlight=true`，新 `activeRequestId`（防过期回调）
-- adapter 流式更新，16ms 广播，1s checkpoint
-- 正常结束 → `idle`，再冲队列
-- `AskUserQuestion`：CLI 杀进程用文本伪装回答；SDK 走真 `tool_result`
-- `ExitPlanMode` 自动续一句 “Plan approved…”
-
-**没有运行时权限提示。** 策略写进 CLI flag / SDK options。`resolveEscalation` 基本是死 API。
-
-`stop()` → **idle**（不是 stopped），会话还能再发。Web 重启丢掉 in-flight 一轮，只保留上次 checkpoint 的 messages。
-
-### 9.3 ClaudePtyBridge
-
-只在 `provider === claude && providerCliActive` 时挂上。
-
-从 PTY 抽：
-
-- 原始输出（终端视图）
-- Claude session UUID（16KB 窗口正则）
-- 权限提示（启发式：intent + confirm 语法 + 动作上下文）
-- 聊天文本（跳过回显，用光秃 `❯` 判断一轮结束）——**不是** tool / thinking 解析
-
-自动批准有三层：严格检测延迟回车、关键词分数兜底、3s 静默探测。`approve_turn` 记到下一轮 `chat.turn`。
-
-### 9.4 Provider 差异
-
-| | Claude | Codex | OpenCode | Grok | Qoder | Pi |
-| --- | --- | --- | --- | --- | --- | --- |
-| PTY 权限 UI | 有 | 无，强制 full-access | `--auto` | `--always-approve` | `--permission-mode` | 无 |
-| PTY 抓 ID | bridge + `~/.claude/projects` | `~/.codex` | `opencode.db` | 预分配 | 预分配 | 无特判 |
-| PTY resume | `--resume` | `resume <uuid>` | `--session` | `--resume` | `--resume` | `--session` |
-| Structured 命令 | `claude -p --output-format stream-json` 或 Agent SDK | `codex exec --json` | `opencode run --format json` | `grok -p --output-format streaming-json` | `qodercli -p stream-json` | `pi --mode json --print` |
-| 历史 resume HTTP | `/api/claude-sessions` → **PTY** | `/api/codex-sessions` → **新 structured** | 同左 | 无专线 | 同 Codex | 无专线 |
-
-Claude structured 有两条后端，由 `structuredRunner` 选。SDK 优先系统 PATH 上的 `claude`。`runClaudePrint()` **不是**会话 runner，给标题 / commit / 提示词优化用，`tools: []`，不持久化。
-
----
-
-## 10. Terminal daemon 与 Resume
-
-### Daemon
-
-路径按 `sha256(configPath)[:12]`：
-
-- socket：`/tmp/wand-terminald-<uid>-<suffix>.sock`（躲 macOS ~100 字节限制）
-- token：`<configDir>/.terminald-<suffix>.token`（0600）
-- pid：`<configDir>/.terminald-<suffix>.pid`
-
-协议：换行 JSON，v1。请求 `hello | list | createOrAttach | write | resize | kill | forget`。事件 `data | exit`，带单调 `seq`，重连可补洞。
-
-`createTerminalHost`：测试模式 → 进程内；否则领养已有 socket；有活 pid 就等 5s **绝不踢掉还握着 PTY 的 daemon**；否则 spawn detached `wand terminald`；再失败才进程内。
-
-客户端断线 500ms–10s 退避重连，对账后补 seq 或合成 exit。
-
-`PtyTerminalState` 是 headless xterm（scrollback 5000），只给重连快照用。浏览器仍吃原始字节。
-
-### Resume
-
-`src/resume-policy.ts` 只负责**拼命令字符串**。真正发现 ID 在 `process-manager.ts`。
-
-活着时：只在「同 cwd、启动后新出现、时间近、**恰好一个**」时绑定。多个新文件 → 不绑。
-
-退出时才允许时间窗兜底（`startedAt-30s` ~ `endedAt+30s`），仍要求唯一。
-
-Claude 还要求 JSONL 里真有对话（至少 2 行 user+assistant），且 Wand messages 里已有 user turn。
-
-不安全的 ID 不会插进命令行（`isSafeProviderSessionId`）。
-
-PTY 上对已结束会话再 `input`：若有 provider + `claudeSessionId` + 真文本，会先 resume 再用这段作 `initialInput`。
-
-Structured 的 history resume **不导入**原生聊天记录，只预填 `claudeSessionId`，下一轮 `sendMessage` 带上 resume flag。
-
----
-
-## 11. Workspaces vs Missions
-
-两个上层系统，都建在 runner 之上，**自己不执行模型**。
-
-### Workspace（项目 / 分屏）
-
-数据：`Workspace`（一个 cwd）→ `WorkspaceTask[]`（命名工作流，可独占 worktree）→ 布局树（pane/split，tab 可以是 session / editor / preview）。
-
-- `POST /api/workspaces` **只建项目，不开会话**
-- 新会话通过 `resolveWorkspaceIdForNewSession`：显式 id，否则按**项目 cwd** find-or-create
-- worktree 会话归属 **repo root**，不是 `.wand-worktrees/...`
-- 列表时 `backfillSessionWorkspaces` 把孤儿会话收进项目
-- 并行多 provider 是 **前端**在同一 task 下连开多个 session，共用该 task 的 worktree
-
-布局校验：`sanitizeLayout` / `sanitizeTaskLayout`（老的单棵树会升成一个 `window-legacy`）。
-
-### Mission（多 provider 编排）
-
-只走 **StructuredSessionManager**。最多 6 个 provider。
-
-创建：校验 prompt / cwd → 落库 `dispatching` → 每个 provider 一个 attempt → `createSession({ mode:"agent", worktreeEnabled, sessionSource:"automation" })` → **每家一个独立 worktree** → `sendMessage(prompt)`。
-
-`ingest(ProcessEvent)` 把会话状态滚成 attempt：`needs_permission` / `needs_input`（未答 AskUserQuestion）/ `failed` / `working` / `done`。任务状态再聚合。
-
-Review：评论 → `sendReview` 拼成一段反馈 prompt 再 `sendMessage`。Diff：`git diff` vs `baseRef`，补丁上限 2MB。
-
-**Inbox 是空的。** `GET /api/inbox` 固定 `{ items: [] }`。`agent_activity` 表和 `upsertAgentActivity` 在存储层存在，**没有任何调用方**。
-
-### Worktree（`git-worktree.ts`）
-
-`prepareSessionWorktree`：要 git 仓库 → 解析 `baseRef` 成 **commit**（钉死基线）→ 分支 `wand/<task>-<id前缀>` → `<repo>/.wand-worktrees/<...>` → 复制 `copyPaths`、符号链接 `sharedDirectories`。失败回滚。
-
-合并：脏工作区 / 无提交 / 冲突 / `MERGE_HEAD` 已在 → 拒。`merge --no-ff`，失败 abort 并恢复 HEAD。会话还在 running 时不能合。删除会话会 `cleanupWorktreeSync` 强拆。
-
----
-
-## 12. 更新、分发、其它子系统
-
-### 更新
-
-三条线互不替代。
-
-**Web 包**
-
-- 通道在 SQLite `updateChannel`：`stable` → `npm i -g @co0ontty/wand@latest`；`beta` → `@co0ontty/wand@beta`
-- 现行代码用 `npm view` 比版本，**不是**旧文档写的 `build-info.json` SHA 对比。`build-info.json` 只给 UI 展示
-- 手动 `/api/update` 走脱离进程的 update-helper
-- `autoUpdateWeb` 则进程内装，再 `repairServiceUnitAfterUpdate` + `computeRelaunch`
-- systemd / launchd 托管 → 只退出，交给 `Restart=always`；否则 spawn 全局 `dist/cli.js`
-
-**Provider CLI**
-
-`claude` / `codex` / `opencode` / `qodercli` / `pi` 各自 `xxx update`。识别 npm / brew / native。成功后刷新模型目录。开机 2 分钟后第一次，再每 30 分钟。
-
-**APK / DMG**
-
-`DistributionManager`：本地目录按 mtime / 版本，比不过再扫 GitHub 最近 30 个 release，版本从**文件名**抽。
-
-- APK：`?channel=stable|beta`。beta 含 `-debug.MMDDHHMM`。比较用 `compareApkInstallOrder`（同三段 debug > release）
-- DMG：无 channel，谁版本高用谁
-- `/android/download` 默认 **beta**；检查接口默认 **stable**
-- `autoUpdateApk` / `Dmg` 只是开关，服务端不推包
-- iOS 没有更新接口
-
-### 其它
-
-| 模块 | 做什么 |
-| --- | --- |
-| `system-ai.ts` | Wand 自用直连 HTTP（标题、commit、提示词）。openai / anthropic 协议 + fallbacks |
-| `models.ts` | 唯一模型发现者，结果进 `app_config`。客户端只读快照 |
-| `session-topic.ts` | 用户消息触发，调 AI 出 `{title,description}` |
-| `git-quick-commit.ts` | 不是 runner。对 session cwd 做 status / commit / tag / push |
-| `prompt-optimizer.ts` | 一次性改写，≤8000 字 |
-| `language-prompt.ts` | 语言指令，注入所有 runner 和 one-shot |
-| `password-manager.ts` + `/api/browser-extension/*` | 保险库 CRUD、生成器、TOTP、安全报告。库内密码是 **明文 TEXT** |
-| `claude-skills.ts` | 扫 SKILL.md frontmatter |
-| `provider-history-scanner.ts` | 只读扫原生历史，供 resume UI |
-| `session-logger.ts` | `<configDir>/sessions/<id>/` 文件制品 |
-| `path-repair.ts` | 服务 PATH 追加工具链 + login shell PATH |
-| `tui/` | neo-blessed 仪表盘 + `service:*` + attach IPC |
-| `cli-api.ts` | 登录 `127.0.0.1`，忽略 TLS，30s / 20MB |
-
-`DEFAULT_BROWSER_EXTENSION_BASE_URL` 硬编码为 `https://home.huniu.fun:8183`，login / status 会把它当 `serverUrl` 返回。
-
----
-
-## 13. SQLite 表
-
-数据库：`<configDir>/wand.db`（0600）。迁移只加列 / 加表，从不 DROP。
-
-| 表 | 角色 |
-| --- | --- |
-| `auth_sessions` | cookie token + principal |
-| `command_sessions` | 所有会话目录（含 bounded output / messages JSON、`session_options` 袋） |
-| `app_config` | 密钥、偏好、更新开关、模型缓存、隐藏历史 id、最近路径 |
-| `session_directory_names` | 侧栏目录自定义名 |
-| `password_vaults` / `password_items` | 密码库（明文） |
-| `missions` / `mission_attempts` / `mission_review_comments` | 任务编排 |
-| `agent_activity` | **死表**，inbox 未接线 |
-| `workspaces` / `workspace_tasks` | 项目与任务 |
-
-热路径：`saveSession` 全量；`updateSessionRuntimeMetadata` 只标量；`checkpointSessionMessages/Output` 给流式。`saveSession` 自己不开事务，好让 checkpoint 进调用方事务。
-
-`workspace_id` / `workspace_task_id` 在新库上也是 ALTER 补上的。
-
----
-
-## 14. 后续下钻入口
-
-| 现象 | 先看 |
-| --- | --- |
-| 起不来 / 双开 / attach | `cli.ts` → `pidfile.ts` → `tui/ipc-*` |
-| 登录 / cookie / 扩展 token | `auth.ts` + `server.ts` login + `appSecret` |
-| 列表 / 详情字段不对 | `session-registry.ts` → `session-transport.ts` |
-| 终端乱、重连丢字、CLI 退后还能敲 | daemon + `pty-shell-launch.ts` + `pty-terminal-state.ts` + WS ack |
-| 聊天块 / 工具 / 队列 / 中断 | **先确认 structured**，再 manager + 对应 adapter |
-| Claude TUI 权限弹窗 | `claude-pty-bridge.ts` + `ProcessManager.resolvePermission` |
-| Resume 绑错 / 没绑 | `process-manager` 发现逻辑 + `resume-policy.ts` |
-| 标题 / commit / 优化 | `session-topic` / `git-quick-commit` / `prompt-optimizer` + `system-ai` |
-| 工作空间分屏 / 合并 | `server-workspace-routes` + `git-worktree` + `workspace-binding` |
-| 多模型并行任务 | `missions.ts`（不是 workspace dialog） |
-| 自更新后起不来 | `npm-update-utils` → `service-self-repair` → `relaunch` |
-
----
-
-## 15. 文档与代码的偏差
-
-1. `session-lifecycle.ts` 已不存在；没有 `thinking` / `waiting-input` 状态机
-2. Inbox / `agent_activity` / `wand inbox:list` 未落地
-3. 密码库曾为明文（旧 `CLAUDE.md` 写成 encrypted；P0 已修复为 AES-256-GCM）
-4. Beta 自更新现在是 `npm view @co0ontty/wand@beta`，不是 GitHub `build-info.json` SHA
-5. Provider history GET 恒为空
-6. Structured 的 escalation API 是死面
-7. `claudeSessionId` 被所有 provider 复用
-8. PTY 聊天和 structured 块模型会漂移——渲染问题先分清来源
-
----
-
-# 问题修复优先级
-
-原则：先修会丢数据、错绑状态、或已经在线上协议里伤客户端的问题；半成品要么补完要么删掉，不要留双真源；文档偏差最后清。
-
-优先级含义：
-
-- **P0**：现网会错、会泄密、或客户端已经依赖却拿不到的字段。建议立刻修。
-- **P1**：行为不一致，用户能踩到，但有绕路。下一轮该做。
-- **P2**：半成品 / 死面。修或删，二选一。
-- **P3**：命名、文档、清理。不挡功能。
-
----
-
-### P0 — 立刻修（已完成，2026-08-22）
-
-| # | 问题 | 处理 |
+| 名称 | 真源 / 标识 | 用途 |
 | --- | --- | --- |
-| 1 | 会话 DTO 丢掉字段 | `sessionBase()` 已带上 `workspaceId` / `workspaceTaskId` / `queuedMessageSkills` / `titleGenerating` |
-| 2 | 密码库明文落盘 | `enc:v1:` AES-256-GCM，密钥来自 `appSecret`；读路径兼容明文旧行 |
-| 3 | 扩展 `serverUrl` 写死 | login / status 改为当前请求的公开 origin |
+| WorkspaceTask | `workspace_tasks`，`workspaceTaskId` | 会话容器、cwd/worktree、窗口布局 |
+| Mission / attempt | missions 系列表，`automationId` | 多 provider 派发、review、状态聚合 |
+| WandTask（任务管理） | `wand_tasks` / `wand_task_sessions` | 原生任务管理看板；可绑定项目与 CLI 工具并派发会话 |
 
----
+它们不是同一个 task ID，状态不会自然同步。GitHub issue 另以 owner/repo/number 关联会话。任务管理绑定的项目就是 Wand Workspace。
 
-### P1 — 下一轮该做（已完成，2026-08-22）
+### WorkspaceTask
 
-| # | 问题 | 影响 | 建议改法 | 关键文件 |
-| --- | --- | --- | --- | --- |
-| 4 | `POST /api/commands` 和部分 PTY 权限 / resume 返回裸 `SessionSnapshot` | 和 `SessionDetailDTO` 双协议。客户端有的吃 DTO 窗口字段，有的吃全量 output / messages，容易截断或漏 `wandProtocolVersion` | 统一走 `sessionResponseDTO` | `src/server.ts`、`src/server-session-routes.ts` |
-| 5 | Structured 重启丢 in-flight | web 一重启，进行中的一轮变 idle，只留上次 checkpoint。用户看到「停了」，队列也不会自动续 | 恢复时若有未完成 user turn / 非空队列，标可恢复并提供续跑；至少在 UI 上明确「已中断」 | `src/structured-session-manager.ts` |
-| 6 | `file-search` 锁在 `process.cwd()` | 服务当 systemd 跑时 cwd 常是 `/` 或 unit 目录，搜索不是 session / workspace 目录 | 以请求里的 `cwd`（并做 path-safety）为根 | `src/server-file-routes.ts` |
-| 7 | Scope 名单漏路由 | workspace、文件创建删除、OpenCode/Qoder resume、`/api/session-list` 只要求已登录。现在两种 principal 碰巧都够用；以后加只读 principal 会漏 | 把它们挂到 `requireSessions` / `requireFiles` | `src/server.ts` |
-| 8 | WS 不认 Bearer | 只带 `Authorization` 的客户端能打 REST、连不上 `/ws` | 握手时同时接受 cookie 和 Bearer appToken | `src/ws-broadcast.ts`、`src/server.ts` |
-| 9 | `/android/download` 默认 beta，检查接口默认 stable | 网页扫码下到 debug 包，客户端检查却说没更新（或反过来） | 下载和无参检查对齐同一默认通道；文档写死 | `src/server-update-routes.ts` |
+- `POST /api/tasks` 可创建独立任务，属于 global workspace；可不选项目/目录。
+- 项目任务走 `POST /api/workspaces/:id/tasks`；runtime cwd 顺序为 task worktree → task.cwd → workspace.cwd。
+- 项目任务未传 worktree 时默认尝试隔离；global 独立任务默认不隔离。
+- **显式 `worktree:true` 创建失败也会降级**，返回 `isolated:false` + `worktreeError`，不是强保证。需更明确的用户确认（R10）。
+- `GET /api/tasks` 支持 workspaceId、limit、maxSessions、revision；不带 revision 返回数组，带 revision 返回 `{unchanged,revision,groups}`。
+- limit 是每 workspace 的截断，不是完整游标分页。带 `revision` 时先用存储指纹 + slim 会话状态做廉价比对，unchanged 不再拼 groups。
+- 任务详情 GET 会 touch lastOpenedAt；布局 PUT 校验树形数据，但没有版本条件，多端可最后写入覆盖（R11）。
+- 删除非隔离任务默认解绑；隔离任务即使未显式 cascade 也要删除其会话并清 worktree，避免 cwd 悬空。清理失败/未提交改动的可见性仍需验证。
 
----
+### Missions / Inbox
 
-### P2 — 半成品：补完或删掉（已完成，2026-08-22）
+Missions 只调 structured。无关联任务时每 attempt 创建 worktree；传 taskId 后使用绑定任务上下文，不再叠加隔离。并行共享目录的改动冲突需与用户预期明确区分。
 
-- Inbox：`Missions.ingest` 写 `agent_activity`，`GET /api/inbox` / `POST /api/inbox/read` / `wand inbox:list` 接上
-- History GET：保持 `[]` 作为旧客户端兼容契约
-- Structured 权限路由：Claude SDK 经 `canUseTool` 桥接审批；无 pending 时 400
-- 补上 `/api/grok-sessions/:id/resume`、`/api/pi-sessions/:id/resume` 与 history GET 空壳
-- 聊天渲染按 `sessionKind` 分叉，不在 PTY 路径伪造 tool block
+`ingest` 聚合 working/needs_permission/needs_input/failed/done，已写入 `agent_activity`。`GET /api/inbox`、read 和 CLI 已接线，不是空壳。Web Missions 并不因此自动具备 Inbox UI。
 
-| # | 问题 | 现状 | 建议 | 关键文件 |
-| --- | --- | --- | --- | --- |
-| 10 | Inbox | HTTP 恒 `{ items: [] }`；`agent_activity` 表和 `upsertAgentActivity` 无调用方；CLI `inbox:list` 不存在 | 要么 `Missions.ingest` 写 activity 并接上 inbox；要么删路由 / 表 / 文档，避免双真源 | `src/server-mission-routes.ts`、`src/storage.ts`、`src/missions.ts` |
-| 11 | Provider history GET 恒 `[]` | DELETE / hide 仍有效，列表是兼容空壳 | 若 UI 已不展示原生历史，删 GET 或改 410；若还要展示，接 `provider-history-scanner` | `src/server-session-routes.ts` |
-| 12 | Structured `resolveEscalation` / 权限路由 | Claude SDK structured 经 `canUseTool` 写入 `pendingEscalation`；print 模式和其他 provider 仍无 waiter | SDK 路径接批准/拒绝；无 pending 时 400 | `src/structured-session-manager.ts`、session routes |
-| 13 | Grok / Pi 无独立 resume / history 路由 | 只能走通用 `/api/sessions/:id/resume`，和 Codex / OpenCode / Qoder 不对称 | 需要原生历史恢复时再补；现在先在文档写清楚 | `src/server-session-routes.ts` |
-| 14 | PTY 聊天 vs structured 块模型 | Claude PTY 是启发式刮字，没有 tool / thinking block | 不要强行合成假 tool block。聊天渲染必须按 `sessionKind` 分叉 | `src/claude-pty-bridge.ts`、前端 chat-render |
+review 发送经 `sendMessage`：请求被接受（入队或启动）后才标 sent；同步/微任务失败保持 pending。整轮执行失败只记日志，不再把已接受的评论改回 pending。
 
-P2 里 **Inbox（#10）优先于其它半成品**：表已经建了，前端也有 inbox 入口，空壳最容易被当成活功能来排 bug。
+## 10. 任务管理与 GitHub 新交互
 
----
+### 任务管理
 
-### P3 — 文档、命名、清理（已完成，2026-08-22）
+`TaskBoardHost` 是 Wand 原生 React 面板，直接读写 `/api/wand-tasks`，不再有 iframe、回环子服务或 postMessage 握手。原生客户端走同一套 API（登录即可，不要求 admin）。
 
-- DTO 增加 `providerSessionId` 别名
-- `CLAUDE.md` 去掉不存在的 `session-lifecycle.ts`，并更正 beta 更新与 vault 加密表述
-- `resumed_to_session_id` 标注为只加不删的遗留列
-- 头像接口改为需要登录
+指派：`POST /api/wand-tasks/:id/dispatch` → cwd 取任务绑定的项目目录（未绑定则 `config.defaultCwd`）→ 创建 structured（automation source、不新建 worktree）→ 写 `wand_task_sessions` binding → 发送 prompt → 202。它不会自动成为 WorkspaceTask，也不经 Missions attempt 状态机。
 
-| # | 问题 | 建议 |
+还需补：指派去重、异步失败状态回写（当前派发失败只进 console）、真实 provider CLI 端到端验收。
+
+### GitHub
+
+设置连接 token → `connectGithub` 调 `/user` 校验 → connector 存储；Issues UI → Wand admin routes → GitHub。绑定存在 Wand SQLite，不是发到 GitHub 的 label/comment。
+
+已复现：校验 token 前先改共享 connector，晚到失败回滚能删除较新成功连接。请求也未设置应用层截止时间。UI 的 repo 输入与已加载列表上下文没有绑定，缺少请求 generation 与创建 pending 保护（R05）。
+
+## 11. 文件、上传与 Git
+
+目录、预览、raw、搜索、写入与增删改名在 `server-file-routes.ts`。搜索已使用请求 cwd。path-safety 当前阻止特定系统目录，**不是完整文件系统沙箱**；符号链接、真实路径和父目录校验需要单独核验。
+
+文件写采用同目录临时文件 + rename，避免半写。`POST /api/file-write` 接受可选 `expectedMtime` / `expectedSize`，不匹配返回 409 和当前 stat，不覆盖外部更新。
+
+上传最多 5 个文件、单文件 10MB，落到会话 cwd 的 `.wand-uploads/`；路由通过 ProcessManager.get 的兼容查找取得会话。优化时应统一 Registry seam，并保留 structured 上传回归。
+
+快捷提交、生成说明、tag、push、worktree merge 都会触及真实工作区：
+
+- `generateCommitMessageOnly()` 当前先执行 `git add -A`，**生成文案也会改变暂存区**。
+- quick-commit 的 fallback、子模块提交/推送与主仓库提交不是一条原子事务。
+- merge 有脏工作区/冲突检查及失败恢复，但多入口对同仓库同时写仍需单独验证。
+- 删除 worktree 可能强制丢弃未合并内容，不能当成单纯删列表项（R10）。
+
+## 12. 模型、系统 AI、扩展与更新
+
+`models.ts` 为唯一模型目录发现者；客户端只读缓存。`system-ai.ts`、`claude-sdk-runner.ts`、session-topic、prompt-optimizer 与 git 文案生成属于 one-shot 辅助调用，不等于会话执行。首条文本触发标题时还要遵守 pending/旧回调防覆盖。
+
+浏览器扩展：content script 捕获/填充 → background 按消息分派 → Bearer REST；popup/options 管理连接与条目；passkey 路径按浏览器能力启用，并在发给内容脚本前去掉私钥字段。服务端返回当前请求 origin；代码仍有历史默认地址常量，不能写成“运行时 origin 已完全不存在默认值”。
+
+更新分线：
+
+| 对象 | 当前路线 |
+| --- | --- |
+| Wand npm | stable/beta 通道，npm view 比版本；手动 detached helper 或自动更新，再服务自修复/relaunch |
+| provider CLI | 各工具更新器；成功刷新模型目录 |
+| Android | 本地 beta 唯一来源；无 channel 的检查与下载均默认 stable |
+| macOS | 服务端 DMG 分发与原生 MacUpdateManager 路径分别核对；不可概括成一个通道 |
+| iOS | 本地 IPA 检查 + manifest/install/download OTA；未签名包可被发现，但不能据此承诺系统安装成功 |
+
+`dist/build-info.json` 只是展示信息，不是 beta 更新判定唯一依据。原生 connected-app 无 npm 更新管理权限，App 包更新与服务端更新必须分开呈现。
+
+## 13. 当前文档纠偏与后续入口
+
+本次删除了旧版正文中与“已完成”表相互冲突的描述：DTO 漏字段、WS 不认 Bearer、Inbox 死表、SDK 无审批、iOS 无更新、所有 structured 重启必丢等。2026-08-22/23 的完成记录只代表当时范围，不能当作当前全功能验收。
+
+| 现象 | 下钻入口 | 计划 |
 | --- | --- | --- |
-| 15 | `claudeSessionId` 被所有 provider 复用 | 新加 `providerSessionId` 别名并双写一段时间，或至少在类型注释里写清 |
-| 16 | 旧 `CLAUDE.md` / `agent.md` 过时 | 已完成：`CLAUDE.md` 删除，指南并入 `AGENTS.md`；过时表述清掉并指向本文 |
-| 17 | `resumed_to_session_id` 列在、写入路径不在 | 确认无读取后再从文档拿掉；不要为它写新逻辑 |
-| 18 | 公开头像 `/api/structured-chat-avatar/:role` 无鉴权 | 风险低（本地图片）。若 persona 可能指向敏感路径，再收紧到已登录 |
-
----
-
-## 16. 建议实施顺序
-
-不要平行铺开。按这个切片：
-
-1. **切片 A（P0，协议 / 密钥）**  
-   DTO 补字段 → 扩展 `serverUrl` 改成请求 origin → 密码库 at-rest 加密（可单独 PR，含迁移）。
-2. **切片 B（P1，响应与恢复）**  
-   PTY 创建 / 权限 / resume 统一 DTO → structured 重启后续跑或明确中断 → `file-search` 根目录。
-3. **切片 C（P1 收尾）**  
-   scope 名单补齐 → WS 接受 Bearer → APK 通道默认对齐。
-4. **切片 D（P2）**  
-   Inbox 二选一（落地或删除）。其余死面随手清。
-5. **切片 E（P3）**  
-   文档和命名。不要单独开一轮只改名字。
-
-每片做完用：
-
-```bash
-npm run check
-npm test
-```
-
-会话 / DTO / 权限相关改动再补针对 `session-transport`、`server-session-routes`、`password-manager` 的单测。
-
----
-
-## 17. 本轮明确不修
-
-这些是架构取舍，不是漏修：
-
-- 两套 runner 继续分开，不合并
-- PTY 聊天继续做文本投影，不在 bridge 里伪造 tool_use
-- Structured 继续无运行时权限提示
-- Codex PTY 继续强制 full-access
-- iOS 继续没有应用内更新
-- 单实例按 config 路径隔离
-- Schema 继续只加不删
+| 真正字符损坏 / 恢复后消息不对 | structured-exec-pump、daemon 解码、recoverDetachedRuns | R03、R07 |
+| 编辑器覆盖外部文件 | file-write + code-editor repository/controller | R04 |
+| GitHub 连接/列表串状态 | github-connector + issues host | R05 |
+| 慢客户端不停止转圈 | ws-broadcast 背压、客户端 reducer | R06 |
+| 原生模型/队列回退 | 各端 ChatStore、WandSocket | R08 |
+| 密码库敏感字段范围 | storage + password-manager + extension | R09 |
+| worktree/暂存区/删除意外 | workspace routes、git-*、Registry | R10 |
+| 布局/review/任务状态错位 | workspace/missions/storage | R11–R12 |
+| 大列表阻塞 | tasks 聚合、Registry.listSlim、storage 查询 | R13 |
+| 契约测试与实际行为冲突 | web-native-contracts、原生 WebView | R14 |

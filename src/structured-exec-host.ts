@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { StringDecoder } from "node:string_decoder";
 
 /**
  * Ownership seam for structured CLI runs, mirroring TerminalHost for PTYs.
@@ -67,6 +68,35 @@ export interface StructuredExecHost {
   forgetRun(runId: string): void;
 }
 
+/**
+ * Stateful UTF-8 decoder for structured CLI stdout/stderr.
+ * Incomplete sequences are held across chunks. end() discards a trailing
+ * incomplete sequence instead of emitting U+FFFD replacement characters.
+ * Call this at the byte-stream seam, before line splitting or log append.
+ */
+export interface Utf8TextDecoder {
+  write(chunk: Buffer | string): string;
+  end(): string;
+}
+
+export function createUtf8TextDecoder(): Utf8TextDecoder {
+  const decoder = new StringDecoder("utf8");
+  let ended = false;
+  return {
+    write(chunk: Buffer | string): string {
+      if (ended) return "";
+      if (typeof chunk === "string") return chunk;
+      return decoder.write(chunk);
+    },
+    end(): string {
+      if (ended) return "";
+      ended = true;
+      decoder.end();
+      return "";
+    },
+  };
+}
+
 /** Resolve a stable daemon-side key for a session's active structured run. */
 export function structuredRunId(sessionId: string): string {
   return `structured:${sessionId}`;
@@ -76,11 +106,45 @@ class InProcessStructuredExecProcess implements StructuredExecProcess {
   readonly incarnationId = randomUUID();
   private stdoutSeq = 0;
   private stderrSeq = 0;
+  private readonly stdoutDecoder = createUtf8TextDecoder();
+  private readonly stderrDecoder = createUtf8TextDecoder();
+  private readonly streamEvents: StructuredStreamEvent[] = [];
+  private readonly streamListeners = new Set<(event: StructuredStreamEvent) => void>();
+  private readonly exitListeners = new Set<(event: StructuredExitEvent) => void>();
+  private exitEvent: StructuredExitEvent | null = null;
 
   constructor(
     readonly runId: string,
     private readonly child: import("node:child_process").ChildProcess,
-  ) {}
+  ) {
+    const emit = (stream: "stdout" | "stderr", data: string): void => {
+      if (!data) return;
+      const event: StructuredStreamEvent = {
+        stream,
+        data,
+        seq: stream === "stdout" ? ++this.stdoutSeq : ++this.stderrSeq,
+      };
+      this.streamEvents.push(event);
+      for (const listener of this.streamListeners) listener(event);
+    };
+    this.child.stdout?.on("data", (chunk: Buffer | string) => emit("stdout", this.stdoutDecoder.write(chunk)));
+    this.child.stderr?.on("data", (chunk: Buffer | string) => emit("stderr", this.stderrDecoder.write(chunk)));
+    const settleExit = (event: StructuredExitEvent): void => {
+      if (this.exitEvent) return;
+      // Flush pending bytes before announcing exit; decoders no-op once ended.
+      emit("stdout", this.stdoutDecoder.end());
+      emit("stderr", this.stderrDecoder.end());
+      this.exitEvent = event;
+      for (const listener of this.exitListeners) listener(event);
+    };
+    this.child.on("close", (code, signal) => {
+      settleExit({
+        exitCode: code,
+        signal: signal === null || signal === undefined ? null : osSignalNumber(signal),
+      });
+    });
+    this.child.on("error", () => settleExit({ exitCode: null, signal: null }));
+  }
 
   get pid(): number {
     return this.child.pid ?? -1;
@@ -91,40 +155,18 @@ class InProcessStructuredExecProcess implements StructuredExecProcess {
   }
 
   onStream(listener: (event: StructuredStreamEvent) => void): { dispose(): void } {
-    const stdoutHandler = (chunk: Buffer | string): void =>
-      listener({ stream: "stdout", data: chunk.toString(), seq: ++this.stdoutSeq });
-    const stderrHandler = (chunk: Buffer | string): void =>
-      listener({ stream: "stderr", data: chunk.toString(), seq: ++this.stderrSeq });
-    this.child.stdout?.on("data", stdoutHandler);
-    this.child.stderr?.on("data", stderrHandler);
-    return {
-      dispose: () => {
-        this.child.stdout?.off("data", stdoutHandler);
-        this.child.stderr?.off("data", stderrHandler);
-      },
-    };
+    for (const event of this.streamEvents) listener(event);
+    this.streamListeners.add(listener);
+    return { dispose: () => { this.streamListeners.delete(listener); } };
   }
 
   onExit(listener: (event: StructuredExitEvent) => void): { dispose(): void } {
-    let settled = false;
-    const closeHandler = (code: number | null, signal: NodeJS.Signals | null): void => {
-      if (settled) return;
-      settled = true;
-      listener({ exitCode: code, signal: signal === null || signal === undefined ? null : osSignalNumber(signal) });
-    };
-    const errorHandler = (): void => {
-      if (settled) return;
-      settled = true;
-      listener({ exitCode: null, signal: null });
-    };
-    this.child.on("close", closeHandler);
-    this.child.on("error", errorHandler);
-    return {
-      dispose: () => {
-        this.child.off("close", closeHandler);
-        this.child.off("error", errorHandler);
-      },
-    };
+    if (this.exitEvent) {
+      listener(this.exitEvent);
+      return { dispose: () => { /* already delivered */ } };
+    }
+    this.exitListeners.add(listener);
+    return { dispose: () => { this.exitListeners.delete(listener); } };
   }
 }
 
@@ -144,18 +186,16 @@ export class InProcessStructuredExecHost implements StructuredExecHost {
     });
     if (wantsStdin) child.stdin?.end(request.stdinData);
     const wrapped = new InProcessStructuredExecProcess(request.runId, child);
+    // Keep exited records until forgetRun so a late attach can still answer.
     this.processes.set(request.runId, wrapped);
-    wrapped.onExit(() => {
-      // Keep exited records until forgetRun so attachRun can still answer.
-    });
     return wrapped;
   }
 
-  async attachRun(): Promise<StructuredRunState | null> {
+  async attachRun(_runId: string): Promise<StructuredRunState | null> {
     return null;
   }
 
-  async adoptRun(): Promise<StructuredExecProcess | null> {
+  async adoptRun(_runId: string): Promise<StructuredExecProcess | null> {
     return null;
   }
 

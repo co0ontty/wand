@@ -41,7 +41,13 @@ import {
   workspacePathLeaf,
 } from "../src/web-ui/react/workspaces/workspaces-panel.js";
 import { SidebarDisclosure } from "../src/web-ui/react/workspaces/sidebar-disclosure.js";
-import { formatTaskRecency, sidebarSelection, taskActivity } from "../src/web-ui/react/workspaces/sidebar-task-meta.js";
+import {
+  formatTaskRecency,
+  orderSidebarGroups,
+  orderSidebarTasks,
+  sidebarSelection,
+  taskActivity,
+} from "../src/web-ui/react/workspaces/sidebar-task-meta.js";
 import type { TaskDirectoryGroup, TaskSummary } from "../src/web-ui/react/workspaces/types.js";
 import {
   HttpWorkspacesRepository,
@@ -179,6 +185,8 @@ test("opening an empty workspace task keeps creation user-driven", () => {
   const source = readFileSync(new URL("../src/web-ui/browser/workspaces-adapter.ts", import.meta.url), "utf8");
   const openTask = source.slice(source.indexOf("openTask(payload"), source.indexOf("newTaskSession(payload"));
   assert.match(openTask, /goHome\(\)/);
+  assert.match(openTask, /const generation = \+\+openTaskGeneration/);
+  assert.match(openTask, /if \(generation !== openTaskGeneration\) return;/);
   assert.match(openTask, /reconcileTaskWindowLayout\(detail\.layout, \[\], null\)/);
   assert.doesNotMatch(openTask, /startSessionInCwd/);
   const openWorkspace = source.slice(source.indexOf("openWorkspace(workspace"), source.indexOf("closeWorkspace()"));
@@ -234,6 +242,39 @@ test("task recency handles minute, hour, day, invalid and future timestamps", ()
   assert.equal(formatTaskRecency(ago(10_080), now), "9/1");
   assert.equal(formatTaskRecency(new Date(2025, 11, 1).toISOString(), now), "2025/12/1");
   assert.equal(formatTaskRecency("not-a-date", now), "");
+});
+
+test("sidebar lists keep created order with new items first", () => {
+  const older: TaskSummary = {
+    id: "old", workspaceId: "ws", name: "旧任务", cwd: "/ws", worktree: null,
+    layout: null, status: "active", isolated: false,
+    createdAt: "2026-01-01T00:00:00Z", lastOpenedAt: "2026-06-01T00:00:00Z", sessions: [],
+  };
+  const newer: TaskSummary = {
+    id: "new", workspaceId: "ws", name: "新任务", cwd: "/ws", worktree: null,
+    layout: null, status: "active", isolated: false,
+    createdAt: "2026-05-01T00:00:00Z", lastOpenedAt: "2026-02-01T00:00:00Z", sessions: [],
+  };
+  assert.deepEqual(orderSidebarTasks([older, newer]).map((task) => task.id), ["new", "old"]);
+
+  const groups: TaskDirectoryGroup[] = [
+    {
+      workspaceId: "old-folder", workspaceName: "旧目录", workspaceCwd: "/old",
+      createdAt: "2026-01-01T00:00:00Z", tasks: [older], standaloneSessions: [],
+    },
+    {
+      workspaceId: "new-folder", workspaceName: "新目录", workspaceCwd: "/new",
+      createdAt: "2026-05-01T00:00:00Z", tasks: [newer], standaloneSessions: [],
+    },
+    {
+      workspaceId: "global", workspaceName: "独立任务", workspaceCwd: "/scratch", global: true,
+      createdAt: "2025-01-01T00:00:00Z", tasks: [], standaloneSessions: [],
+    },
+  ];
+  assert.deepEqual(
+    orderSidebarGroups(groups).map((group) => group.workspaceId),
+    ["global", "new-folder", "old-folder"],
+  );
 });
 
 test("task activity reflects live turns, not merely a running shell process", () => {
@@ -322,6 +363,9 @@ test("task session lists default to collapsed and retain explicit disclosure pre
   const panel = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
   assert.match(panel, /useSidebarCollapsed\(`task\.\$\{task.id\}`, true\)/);
   assert.match(panel, /useSidebarCollapsed\(`project\.\$\{group.workspaceId\}`\)/);
+  assert.match(panel, /useSidebarCollapsed\(`loose\.\$\{group.workspaceId\}`\)/);
+  assert.match(panel, /orderSidebarTasks\(group.tasks\)/);
+  assert.doesNotMatch(panel, /taskRecency\(right\)\.localeCompare\(taskRecency\(left\)\)/);
   assert.doesNotMatch(panel, /if \(isActive\) setCollapsed|setCollapsed\(false\); onOpen/);
   assert.match(panel, /canCollapseSessions \? \(/);
   assert.equal(showsDirectoryDisclosure(1), true);
@@ -675,4 +719,95 @@ test("sidebar search keeps matching tasks and sessions while preserving director
   assert.equal(result.length, 1);
   assert.equal(result[0].tasks.length, 1);
   assert.equal(filterSidebarGroups(groups, "不存在").length, 0);
+});
+
+function manageTask(
+  id: string,
+  name: string,
+  sessions: Array<{ id: string }> = [],
+  lastOpenedAt: string | null = null,
+) {
+  return {
+    id,
+    workspaceId: "workspace-1",
+    name,
+    cwd: "/work",
+    worktree: null,
+    isolated: false,
+    layout: null,
+    status: "active" as const,
+    createdAt: "2026-09-09T00:00:00Z",
+    lastOpenedAt,
+    sessions,
+  };
+}
+
+test("sidebar multi-select delete cascades task terminals and keeps leftover sessions", async () => {
+  const {
+    EMPTY_SIDEBAR_MANAGE_SELECTION,
+    collectManagedIds,
+    describeManagedDeletion,
+    pruneManagedSelection,
+    resolveManagedDeletion,
+    sidebarManageCount,
+    toggleManagedSession,
+    toggleManagedTask,
+  } = await import("../src/web-ui/react/workspaces/sidebar-manage.js");
+  const groups = [{
+    workspaceId: "workspace-1",
+    workspaceName: "Wand",
+    workspaceCwd: "/work",
+    tasks: [
+      manageTask("task-1", "修复侧栏", [{ id: "session-1" }, { id: "session-2" }]),
+      manageTask("task-2", "文档", [{ id: "session-3" }]),
+    ],
+    standaloneSessions: [{ id: "loose-1" }],
+  }];
+  let selection = toggleManagedTask(EMPTY_SIDEBAR_MANAGE_SELECTION, "task-1");
+  selection = toggleManagedSession(selection, "session-1");
+  selection = toggleManagedSession(selection, "loose-1");
+  assert.equal(sidebarManageCount(selection), 3);
+  const resolved = resolveManagedDeletion(selection, groups);
+  assert.deepEqual([...resolved.taskIds], ["task-1"]);
+  assert.deepEqual([...resolved.sessionIds], ["loose-1"]);
+  assert.equal(describeManagedDeletion(resolved), "1 个任务和1 个终端");
+  const pruned = pruneManagedSelection({
+    taskIds: ["task-1", "gone"],
+    sessionIds: ["session-1", "missing"],
+  }, groups);
+  assert.deepEqual([...pruned.taskIds], ["task-1"]);
+  assert.deepEqual([...pruned.sessionIds], ["session-1"]);
+  const all = collectManagedIds(groups);
+  assert.equal(all.taskIds.length, 2);
+  assert.equal(all.sessionIds.length, 4);
+});
+
+test("collapsed rail prefers the active and attention tasks and caps overflow", async () => {
+  const { collapsedRailTasks } = await import("../src/web-ui/react/workspaces/sidebar-manage.js");
+  const groups = [{
+    workspaceId: "workspace-1",
+    workspaceName: "Wand",
+    workspaceCwd: "/work",
+    tasks: [
+      manageTask("idle", "旧任务", [], "2026-09-01T00:00:00Z"),
+      manageTask("active", "当前任务", [], "2026-09-08T00:00:00Z"),
+      manageTask("attention", "待处理", [{ id: "blocked", status: "waiting-input" }], "2026-09-07T00:00:00Z"),
+      manageTask("running", "运行中", [{ id: "busy", inFlight: true }], "2026-09-06T00:00:00Z"),
+    ],
+    standaloneSessions: [],
+  }];
+  const rail = collapsedRailTasks(groups, "active", 3);
+  assert.deepEqual(rail.items.map((item) => item.task.id), ["active", "attention", "running"]);
+  assert.equal(rail.overflow, 1);
+});
+
+test("workspaces panel exposes multi-select and a compact task rail", () => {
+  const html = renderToStaticMarkup(createElement(WorkspacesPanel));
+  assert.match(html, /aria-label="多选任务和终端"/);
+  assert.match(html, />选择</);
+  const panel = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
+  assert.match(panel, /CompactTaskRail/);
+  assert.match(panel, /sidebar-collapsed-rail/);
+  assert.doesNotMatch(panel, /CompactWorkspaceTree/);
+  assert.doesNotMatch(panel, /sidebar-collapsed-task-branch/);
 });

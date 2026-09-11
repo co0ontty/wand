@@ -139,6 +139,15 @@ import { missionsController } from "../react/missions/controller";
           // 直接赋 scrollHeight 即可，浏览器会自动钳到合法上界。
           body.scrollTop = body.scrollHeight;
         }
+        // 展开的活动折叠窗口同样是固定高度滚动区：流式刷新后锚定尾部，
+        // 让用户持续看到最新到达的思考 / 工具活动。折叠态没有 body 高度，
+        // 跳过（display:none 下 scrollTop 无意义）。
+        var activities = container.querySelectorAll('.chat-activity[data-follow-tail="true"][data-expanded="true"]');
+        for (var a = 0; a < activities.length; a++) {
+          var actBody = activities[a].querySelector(".chat-activity-body");
+          if (!actBody || actBody.style.display === "none") continue;
+          actBody.scrollTop = actBody.scrollHeight;
+        }
       }
       // 聊天里内联图片缩略图点击 → 打开文件预览弹层（复用文件浏览器同款模态）。
       (window as any).__openFilePreview = function(p: any) {

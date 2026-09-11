@@ -1,25 +1,46 @@
-# Taskboard 集成
+# 任务管理（Wand 原生）
 
-Wand 的「任务」入口现在嵌入 `vendor/codex-taskboard` 的完整 Web Taskboard，而不是重新实现一套简化看板。
+「任务管理」是 Wand 自己的原生面板（原「议题看板」），**不再嵌入外部 Codex Taskboard**。历史版本曾
+通过 `src/taskboard-bridge.ts` 拉起一个回环子服务并用 iframe 展示
+`vendor/codex-taskboard`；那条链路已整体移除。
 
-## 来源
+## 现状
 
-- 上游：`https://github.com/chuspeeism/dashi-taskboard`
-- 固定版本：`c346e8e16c9cf6d61969d826d33fe7f6b5bcbc8f`
-- 许可证：Apache-2.0，许可证副本保存在 `vendor/codex-taskboard/LICENSE`
+- 数据真源是 Wand SQLite 的 `wand_tasks` / `wand_task_sessions`（见 `src/storage.ts`）。
+- 前端是 `src/web-ui/react/issues/`：`task-board-host.tsx`（原生 React 面板）、
+  `task-board-repository.ts`（`/api/wand-tasks*`）、`task-board-agent.ts`（CLI 工具、
+  模型目录、分组排序等纯逻辑）、`task-board-controller.ts`（打开状态）。
+- 服务端是 `src/server-task-routes.ts`，挂在 `/api/wand-tasks`，登录即可（与 Missions 相同，不要求 admin）。
+- 看板「归档」不会删行，只把状态标成 `done`；侧栏手动新建的工作任务若还没有看板卡片，会按项目/任务名自动补一张并填好标题、项目与目录。
+- 打开看板走独立路由 `?view=taskboard`（旧 `?view=issues` 仍识别），绝对定位盖在主内容区上面，不再是浮层 iframe，也不再卸载 `#output` 等终端槽位。打开时 CSS 隐藏会话顶栏、标签栏和输入框，避免它们被 flex 顶到看板上方。侧栏点任务/会话、看板「返回」、浏览器后退都会离开看板。原生客户端走同一套 API。
 
-## 运行方式
+## 任务 → 项目目录
 
-- `vendor/codex-taskboard/dist/web` 是上游 Vite 产物，包含 Dashboard、议题看板、列表视图、甘特图、筛选、显示设置、项目管理、议题编辑器、评论、附件、关系和本地 AI 面板。
-- Wand 启动时通过 `src/taskboard-bridge.ts` 启动一个回环 Taskboard 子服务。
-- `/taskboard/*` 由 Wand 鉴权后反向代理到该子服务。
-- 子服务数据写入当前 Wand 配置目录下的 `taskboard/`，不会污染上游仓库或默认 Wand 数据库。
-- iframe 启动时携带当前 Wand 会话 ID；代理注入的 fetch 适配器把 `X-Wand-Session-Id` 传给每个任务写操作，并将关联保存到 Wand SQLite 的 `taskboard_session_bindings`。
-- 任务卡片会展示已绑定的 Wand 会话及 provider；可直接打开会话，或把当前会话绑定到任务。
-- 绑定不是 Codex 专属：Claude、Codex、OpenCode、Grok、Qoder、Pi 的结构化和 PTY 会话都按 Wand session id 统一处理。
+任务可绑定一个 Wand 项目（`wand_tasks.workspace_id`，`ON DELETE SET NULL`）：
 
-更新上游版本时，需要同时重新生成 `dist/web`，并重新检查 `server/` / `shared/` 与 Wand 的会话、项目和鉴权适配层。
+- 未指定项目时 `workspaceId = null`，派发 Agent 会落到 `config.defaultCwd`。
+- 指定项目后，列表 DTO 带上 `workspace: { id, name, cwd }`，卡片显示项目名。
+- 删除项目时任务自动回到「未指定项目」，不会留下悬空引用。
 
-## Wand Agent 指派
+## 任务 → CLI 工具与派发
 
-任务卡片中的「+ 指派 Agent」由 Wand bridge 注入，不改写上游 Taskboard 的 Codex-only assignee 数据模型。指派弹窗可选择 Claude、Codex、OpenCode、Grok、Qoder、Pi，以及服务端模型目录中的模型和 Wand 的思考深度（关闭 / 标准 / 深入 / 最大）。确认后会创建一个结构化 Wand 会话、把任务提示词发送给它，并写入 `taskboard_session_bindings`；卡片随后显示 Agent、模型和思考深度，点击即可打开会话。
+任务可以预设「CLI 工具 + 模型 + 思考深度」（`wand_tasks.agent_json`）：
+
+- 可选 Claude / Codex / OpenCode / Grok / Qoder / Pi；模型下拉来自 `/api/models`，
+  按 provider 过滤，并始终保留一项「跟随服务端默认」。
+- `POST /api/wand-tasks/:id/dispatch` 用该配置创建结构化 Wand 会话，cwd 取任务项目
+  目录，把任务标题 + 描述作为首个 prompt 发出，并把会话绑定回该任务
+  （`wand_task_sessions`）。派发成功后任务自动从 `todo` 推进到 `doing`。
+- 卡片上会列出已绑定会话（provider + 模型），点击即可跳到该会话。
+
+## 与其它「任务」实体的关系
+
+Wand 仍有四套并存的实体，见 `docs/server-logic-analysis.md` §9。任务管理只负责
+WandTask；它不会自动变成 WorkspaceTask 或 Mission attempt，状态也不互相同步。
+侧栏「任务」仍是 WorkspaceTask（会话容器），底部「任务管理」是看板。
+
+## 界面约定
+
+原生看板的布局与交互对标 `https://github.com/chuspeeism/dashi-taskboard`：
+44px 顶栏（项目切换 / 看板·列表 / 搜索 / 显示设置）、彩色列头、列内「+」新建、
+卡片拖拽换列、点击进入全页详情。指派 Agent 仍只属于单条任务。

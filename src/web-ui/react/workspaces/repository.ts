@@ -136,9 +136,16 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
     });
   }
 
-  async listTaskGroups(): Promise<TaskDirectoryGroup[]> {
-    const body = await readJson<unknown>(await this.fetchImpl("/api/tasks", { credentials: "same-origin" }));
-    return Array.isArray(body) ? (body as TaskDirectoryGroup[]) : [];
+  async listTaskGroups(revision?: string): Promise<{ groups: TaskDirectoryGroup[]; revision?: string; unchanged: boolean }> {
+    const query = revision ? `?revision=${encodeURIComponent(revision)}` : "";
+    const body = await readJson<unknown>(await this.fetchImpl(`/api/tasks${query}`, { credentials: "same-origin" }));
+    if (Array.isArray(body)) return { groups: body as TaskDirectoryGroup[], unchanged: false };
+    const record = body && typeof body === "object" ? body as { groups?: TaskDirectoryGroup[]; revision?: string; unchanged?: boolean } : {};
+    return {
+      groups: Array.isArray(record.groups) ? record.groups : [],
+      revision: typeof record.revision === "string" ? record.revision : undefined,
+      unchanged: record.unchanged === true,
+    };
   }
 
   async get(id: string): Promise<WorkspaceDetail> {
@@ -239,17 +246,21 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
     ));
   }
 
-  async saveTaskLayout(taskId: string, layout: TaskWindowLayout | null): Promise<TaskWindowLayout | null> {
-    const body = await readJson<{ layout: TaskWindowLayout | null }>(await this.fetchImpl(
+  async saveTaskLayout(
+    taskId: string,
+    layout: TaskWindowLayout | null,
+    layoutRevision?: number,
+  ): Promise<{ layout: TaskWindowLayout | null; layoutRevision?: number }> {
+    const body = await readJson<{ layout: TaskWindowLayout | null; layoutRevision?: number }>(await this.fetchImpl(
       `/api/workspace-tasks/${encodeURIComponent(taskId)}/layout`,
       {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify({ layout }),
+        body: JSON.stringify({ layout, layoutRevision }),
       },
     ));
-    return body.layout ?? null;
+    return { layout: body.layout ?? null, layoutRevision: body.layoutRevision };
   }
 
   async listWorktrees(

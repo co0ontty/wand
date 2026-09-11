@@ -3,14 +3,17 @@ import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
+import { StringDecoder } from "node:string_decoder";
 
 import pty from "node-pty";
 
 import { ensureNodePtyHelperExecutable } from "./ensure-node-pty-helper.js";
 import {
   STRUCTURED_RUN_LOG_MAX_CHARS,
+  createUtf8TextDecoder,
   type StructuredRunState,
   type StructuredSpawnRequest,
+  type Utf8TextDecoder,
 } from "./structured-exec-host.js";
 import {
   TERMINAL_DAEMON_PROTOCOL_VERSION,
@@ -51,6 +54,7 @@ interface DaemonClient {
   socket: net.Socket;
   authenticated: boolean;
   buffer: string;
+  decoder: StringDecoder;
 }
 
 interface DaemonStructuredRun {
@@ -67,6 +71,8 @@ interface DaemonStructuredRun {
   stderrLog: string;
   stdoutTruncated: boolean;
   stderrTruncated: boolean;
+  stdoutDecoder: Utf8TextDecoder;
+  stderrDecoder: Utf8TextDecoder;
 }
 
 const MAX_STRUCTURED_RUNS = 256;
@@ -272,35 +278,30 @@ export async function runTerminalDaemon(configPath: string): Promise<void> {
       stderrLog: "",
       stdoutTruncated: false,
       stderrTruncated: false,
+      stdoutDecoder: createUtf8TextDecoder(),
+      stderrDecoder: createUtf8TextDecoder(),
     };
     structuredRuns.set(request.runId, run);
     evictStaleStructuredRuns();
 
-    child.stdout?.on("data", (chunk: Buffer | string) => {
-      const text = chunk.toString();
-      const seq = appendRunLog(run, "stdout", text);
+    const emitDecoded = (stream: "stdout" | "stderr", text: string): void => {
+      if (!text) return;
+      const seq = appendRunLog(run, stream, text);
       broadcast({
         kind: "event",
         event: "sdata",
         sessionId: run.request.runId,
         incarnationId: run.incarnationId,
-        stream: "stdout",
+        stream,
         data: text,
         seq,
       });
+    };
+    child.stdout?.on("data", (chunk: Buffer | string) => {
+      emitDecoded("stdout", run.stdoutDecoder.write(chunk));
     });
     child.stderr?.on("data", (chunk: Buffer | string) => {
-      const text = chunk.toString();
-      const seq = appendRunLog(run, "stderr", text);
-      broadcast({
-        kind: "event",
-        event: "sdata",
-        sessionId: run.request.runId,
-        incarnationId: run.incarnationId,
-        stream: "stderr",
-        data: text,
-        seq,
-      });
+      emitDecoded("stderr", run.stderrDecoder.write(chunk));
     });
     child.on("error", () => {
       // Spawn failures surface via close with no exit code; keep the record so
@@ -308,6 +309,8 @@ export async function runTerminalDaemon(configPath: string): Promise<void> {
     });
     child.on("close", (code, signalName) => {
       if (structuredRuns.get(run.request.runId) !== run || run.child !== child) return;
+      emitDecoded("stdout", run.stdoutDecoder.end());
+      emitDecoded("stderr", run.stderrDecoder.end());
       run.child = null;
       run.status = "exited";
       run.exitCode = code;
@@ -431,11 +434,11 @@ export async function runTerminalDaemon(configPath: string): Promise<void> {
   };
 
   const server = net.createServer((socket) => {
-    const client: DaemonClient = { socket, authenticated: false, buffer: "" };
+    const client: DaemonClient = { socket, authenticated: false, buffer: "", decoder: new StringDecoder("utf8") };
     clients.add(client);
     socket.setNoDelay(true);
     socket.on("data", (data) => {
-      client.buffer += data.toString("utf8");
+      client.buffer += client.decoder.write(data);
       if (client.buffer.length > MAX_REQUEST_BUFFER) {
         socket.destroy();
         return;

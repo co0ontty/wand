@@ -39,6 +39,37 @@ test("password generator, strength scoring, and TOTP match expected behavior", (
   assert.equal(generateTotpCode("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", 59_000, 8, 30), "94287082");
 });
 
+test("notes and fields encrypt at rest and still decrypt for API reads", () => {
+  const secret = "0123456789abcdef0123456789abcdef";
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wand-vault-fields-"));
+  const dbPath = path.join(dir, "wand.db");
+  const storage = new WandStorage(dbPath);
+  try {
+    storage.setAppSecret(secret);
+    const item = storage.createPasswordItem({
+      type: "login",
+      title: "Secrets",
+      username: "ada",
+      password: "hunter2-secret",
+      notes: "private notebook",
+      fields: { totpSecret: "GEZDGNBVGY3TQOJQ", cardNumber: "4111111111111111" },
+      urls: ["https://example.com"],
+    });
+    assert.equal(item.notes, "private notebook");
+    assert.equal(item.fields.totpSecret, "GEZDGNBVGY3TQOJQ");
+    const db = new DatabaseSync(dbPath);
+    const row = db.prepare("SELECT notes, fields FROM password_items WHERE id = ?").get(item.id) as { notes: string; fields: string };
+    db.close();
+    assert.equal(row.notes.includes("private notebook"), false);
+    assert.equal(row.fields.includes("4111111111111111"), false);
+    assert.equal(isEncryptedVaultSecret(row.notes), true);
+    assert.equal(isEncryptedVaultSecret(row.fields), true);
+  } finally {
+    storage.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("vault secrets encrypt at rest and still decrypt for API reads", () => {
   const secret = "0123456789abcdef0123456789abcdef";
   const cipher = encryptVaultSecret("CorrectHorseBatteryStaple", secret);

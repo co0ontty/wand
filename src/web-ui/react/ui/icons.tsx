@@ -41,6 +41,7 @@ export type WandIconName =
   | "rail"
   | "refresh"
   | "resume"
+  | "search"
   | "server"
   | "spark"
   | "sparkle"
@@ -159,6 +160,8 @@ export function WandIcon({
       return <svg {...common}><path d="M21 12a9 9 0 11-3-6.7"/><path d="M21 3v6h-6"/></svg>;
     case "resume":
       return <svg {...common}><path d="M1 4v6h6M3.5 15A9 9 0 109 3.6L3 10"/></svg>;
+    case "search":
+      return <svg {...common}><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>;
     case "server":
       return <svg {...common}><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/></svg>;
     case "spark":

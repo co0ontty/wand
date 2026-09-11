@@ -126,7 +126,7 @@ test("Apple WebViews preserve deep links, bridge globals, and terminal hooks", (
     ".is-wand-embed-terminal .wand-joystick-root",
     ".is-wand-embed-terminal .terminal-scroll-wrap",
     ".is-wand-embed-terminal .input-panel",
-    ".is-wand-embed-terminal .notification-bubble.update-card",
+    ".is-wand-embed-terminal .notification-bubble",
     ".is-wand-embed-terminal .terminal-container",
     "__wandNativeInputImeGuard",
     "restoreEmbeddedTerminalInput",
@@ -245,5 +245,38 @@ test("subagent role windows stay compact, avatar-free, and follow the newest con
     "private let subagentWindowContentHeight: CGFloat = 280",
     "subagentTailRefreshToken(items)",
     "proxy.scrollTo(tailAnchorID, anchor: .bottom)",
+  ]);
+});
+
+test("activity folds stay consecutive and split when prose arrives", () => {
+  includesAll("src/web-ui/browser/chat-render.ts", [
+    "flushPendingActivity(false)",
+    "flushPendingActivity(true)",
+    "opts.isTrailing",
+    "isFoldableActivityBlock",
+    'class="chat-activity-top"',
+  ]);
+  assert.doesNotMatch(
+    source("src/web-ui/browser/chat-render.ts"),
+    /正文在上、活动状态条在下/,
+    "Web must not collect every activity run under all prose",
+  );
+
+  includesAll("android/app/src/main/java/com/wand/app/ui/screens/ChatBlocks.kt", [
+    "连续思考/工具收成一条压缩条",
+    "fun activityFoldSegments(",
+    "renderItems.last() is SegmentRenderItem.Activity",
+  ]);
+
+  includesAll("ios/Wand/ChatView.swift", [
+    "struct ActivityFoldCard",
+    "isActivityGroupOpen(group)",
+    "summarizeActivityItems",
+  ]);
+
+  includesAll("macos/Wand/ChatView.swift", [
+    "struct ActivityFoldCard",
+    "isActivityGroupOpen(group)",
+    "summarizeActivityItems",
   ]);
 });

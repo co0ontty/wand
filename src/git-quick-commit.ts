@@ -680,20 +680,23 @@ export async function callConfiguredAiText(
   return callCliAiText(prompt, cwd, language, opts);
 }
 
-async function collectStagedDiff(cwd: string): Promise<string> {
-  let diff: string;
-  try {
-    diff = await runGitAsync(["diff", "--cached", "--submodule=log"], cwd, 5000);
-  } catch {
-    diff = "";
-  }
-  if (!diff) {
+/** Read the unstaged + staged tree without touching the index. */
+async function collectWorkingTreeDiff(cwd: string): Promise<string> {
+  const candidates: Array<[string[], number]> = [
+    [["diff", "HEAD", "--submodule=log"], 5000],
+    [["diff", "--cached", "--submodule=log"], 5000],
+    [["diff", "HEAD", "--name-only"], 3000],
+  ];
+  let diff = "";
+  for (const [args, timeout] of candidates) {
     try {
-      diff = await runGitAsync(["diff", "--cached", "--name-only"], cwd, 3000);
+      diff = await runGitAsync(args, cwd, timeout);
     } catch {
-      diff = "(no diff available)";
+      diff = "";
     }
+    if (diff) break;
   }
+  if (!diff) diff = "(no diff available)";
   if (diff.length > MAX_DIFF_FOR_AI) {
     diff = diff.slice(0, MAX_DIFF_FOR_AI) + "\n\n... (diff truncated) ...";
   }
@@ -701,7 +704,7 @@ async function collectStagedDiff(cwd: string): Promise<string> {
 }
 
 async function generateCommitMessage(cwd: string, language: string, ai: QuickCommitAiOptions = {}): Promise<string> {
-  const diff = await collectStagedDiff(cwd);
+  const diff = await collectWorkingTreeDiff(cwd);
   const lang = language.trim() || "中文";
   const prompt = `阅读以下 git diff，用${lang}写一条简洁的 commit message。要求：祈使句，不超过 50 字，描述「做了什么」。只输出 message 本身，不要引号、不要 Markdown 格式、不要任何额外说明。\n\n${diff}`;
   const raw = await callConfiguredAiText(prompt, cwd, language, ai);
@@ -747,7 +750,7 @@ async function generateCommitMessageWithTag(
   language: string,
   ai: QuickCommitAiOptions = {},
 ): Promise<GenerateCommitMessageResult> {
-  const diff = await collectStagedDiff(cwd);
+  const diff = await collectWorkingTreeDiff(cwd);
   let latestTag: string | undefined;
   try {
     latestTag = await runGitAsync(["describe", "--tags", "--abbrev=0"], cwd) || undefined;
@@ -795,11 +798,7 @@ export async function generateCommitMessageOnly(
   if (!cwd || !existsSync(cwd)) {
     throw new QuickCommitError("工作目录不存在。", "CWD_MISSING");
   }
-  try {
-    await runGitAsync(["add", "-A"], cwd, 5000);
-  } catch {
-    // best-effort staging so the diff is complete
-  }
+  // Read the working tree as-is. Generating a message must not stage files.
   return generateCommitMessageWithTag(cwd, language, ai);
 }
 

@@ -2077,7 +2077,7 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
           var persisted = getPersistedExpandState(key);
           // 最新轮次的 assistant 回复始终展开，不沿用历史持久化折叠状态；
           // 只有历史轮次才尊重用户之前的展开/折叠偏好。
-          var expanded = historical ? (persisted === null ? false : persisted) : true;
+          var expanded = persisted === null ? true : persisted;
           var disclosure = el.querySelector(":scope > .assistant-reply-disclosure");
           if (!disclosure) {
             disclosure = document.createElement("button");
@@ -2238,11 +2238,293 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
         return segs;
       }
 
+      // ===== Codex 风格「活动折叠」=========================================
+      // 一次 assistant turn 里模型往往产生几十段 thinking + 工具调用，逐条铺开会把
+      // 对话流撑成几千像素的高墙（线上实测单 turn 可达 3600px）。参考 Codex app：
+      //   · 连续的 thinking / 工具调用收成一条状态条；
+      //   · 正文、图片、子 agent 回复保持原位，出现即打断当前条并显示在它下方；
+      //   · 后面再有思考 / 工具，另起一条，而不是整轮活动捏到正文底下。
+      //   · 点一下展开是固定高度的窗口，内部自动滚动显示最新活动详情。
+      // 子 agent 段（inSubagentPanel）不再二次折叠——它本身已经是固定高度角色窗口。
+      var ACTIVITY_FOLD_ENABLED = true;
+      // 当前正在渲染的消息在 state.currentMessages 里的全局下标。渲染是同步单线程的，
+      // 在 renderStructuredMessage 入口设置一次即可让下游活动折叠判断运行态。
+      var _currentMessageGlobalIndex = -1;
+
+      // tool_result 只有一种情况会渲染出可见内容：父 Task 的最终回复气泡。
+      function isVisibleSubagentReply(block) {
+        return !!(block && block.type === "tool_result" && block.__subagent &&
+          block.__subagent.taskId === block.tool_use_id);
+      }
+
+      // 参与折叠但折叠后一行都渲染不出来的空块（空 thinking / 配对后返回空的
+      // tool_result / 被入口屏蔽的父 Task tool_use），统计时跳过。
+      function isHiddenActivityBlock(block) {
+        if (!block) return true;
+        if (block.type === "thinking") return !String(block.thinking || "").trim();
+        if (block.type === "tool_use" && block.__subagent && block.__subagent.taskId === block.id &&
+            (block.name === "Task" || block.name === "Agent")) return true;
+        if (block.type === "tool_result" && !isVisibleSubagentReply(block)) return true;
+        return false;
+      }
+
+      // 这个 tool_use 最终会渲染出图片吗？路径命中图片扩展名，或它的 tool_result
+      // 里带 image content block，都算。这类块必须常驻可见（不能被折叠藏起来）。
+      function toolBlockShowsImage(block, toolResults) {
+        if (!block || block.type !== "tool_use") return false;
+        var input = block.input || {};
+        var candidate = input.file_path || input.path || input.url || "";
+        if (typeof candidate === "string" && isImagePath(candidate)) return true;
+        var result = block.id && toolResults ? pickToolResultForDisplay(toolResults, block.id) : null;
+        if (result && extractToolResultImages(result.content).length > 0) return true;
+        return false;
+      }
+
+      function isFoldableActivityBlock(block, toolResults) {
+        if (!block) return false;
+        if (block.type === "thinking") return true;
+        if (block.type === "tool_use") {
+          // 图片相关的调用直接常驻渲染缩略图，不折进默认折叠的窗口里藏起来。
+          if (toolBlockShowsImage(block, toolResults)) return false;
+          return true;
+        }
+        if (block.type === "tool_result") return !isVisibleSubagentReply(block);
+        return false;
+      }
+
+      function truncateInline(value, max) {
+        var text = String(value || "").replace(/\s+/g, " ").trim();
+        if (!text) return "";
+        return text.length > max ? text.slice(0, max - 1) + "…" : text;
+      }
+
+      function tailInline(value, max) {
+        var text = String(value || "").replace(/\s+/g, " ").trim();
+        if (!text) return "";
+        return text.length > max ? "…" + text.slice(-(max - 1)) : text;
+      }
+
+      function fileNameOf(path) {
+        var text = String(path || "");
+        var idx = text.lastIndexOf("/");
+        return idx >= 0 ? text.slice(idx + 1) : text;
+      }
+
+      function activityKindOf(name) {
+        var lower = String(name || "").toLowerCase();
+        if (/read|inspect|view|open|list|load/.test(lower)) return "read";
+        if (/bash|exec|command|shell|stdin|terminal/.test(lower)) return "command";
+        if (/grep|glob|search|find|query|lookup/.test(lower)) return "search";
+        if (/edit|write|patch|replace|notebook/.test(lower)) return "edit";
+        if (/web|fetch|http|url|browser/.test(lower)) return "web";
+        return "other";
+      }
+
+      // 单条活动的「人类可读」描述，用作折叠条的最新内容文本。
+      function activityItemLabel(block) {
+        if (!block) return "";
+        if (block.type === "thinking") {
+          var think = tailInline(block.thinking, 240);
+          return think || "深度思考";
+        }
+        if (block.type !== "tool_use") return "";
+        var name = block.name || "工具";
+        var input = block.input || {};
+        if (name === "Bash") {
+          var cmd = input.command || input.cmd || "";
+          return cmd ? "运行 " + truncateInline(cmd, 240) : "运行命令";
+        }
+        if (name === "Read") {
+          var readPath = input.file_path || input.path || "";
+          return readPath ? "读取 " + truncateInline(readPath, 240) : "读取文件";
+        }
+        if (name === "Grep" || name === "Glob" || name === "WebSearch") {
+          var q = input.pattern || input.query || "";
+          return q ? "搜索 " + truncateInline(q, 240) : "搜索";
+        }
+        if (name === "WebFetch") {
+          var url = input.url || "";
+          return url ? "抓取 " + truncateInline(url, 240) : "抓取网页";
+        }
+        if (name === "Edit" || name === "Write" || name === "MultiEdit") {
+          var editPath = input.file_path || input.path || "";
+          var verb = name === "Write" ? "写入 " : "修改 ";
+          return verb + (editPath ? truncateInline(editPath, 240) : "文件");
+        }
+        return getToolDisplayName(name);
+      }
+
+      var ACTIVITY_KIND_META = {
+        read: "浏览", command: "命令", search: "搜索",
+        edit: "编辑", web: "网页", other: "调用", thinking: "思考"
+      };
+
+      // 本轮 assistant turn 是否还在流式生成。只有「最后一条消息 + inFlight」
+      // 才算活跃，避免历史 turn 的状态条常亮。
+      function isTurnActivityLive(messageIndex) {
+        var total = Array.isArray(state.currentMessages) ? state.currentMessages.length : 0;
+        if (typeof messageIndex !== "number" || messageIndex !== total - 1) return false;
+        var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        if (!session) return false;
+        return !!(session.structuredState && session.structuredState.inFlight) && session.status === "running";
+      }
+
+      // 当前消息尾部是否「悬而未决」：末尾是 thinking，或还没拿到 tool_result 的
+      // tool_use。尾部落到正文（text）就说明模型开始收敛作答，活动不再是运行中。
+      function isMessageActivityOpen(messageIndex) {
+        var msgs = state.currentMessages;
+        var msg = Array.isArray(msgs) ? msgs[messageIndex] : null;
+        if (!msg || !Array.isArray(msg.content)) return false;
+        var results = buildToolResultMap(msg.content);
+        for (var i = msg.content.length - 1; i >= 0; i--) {
+          var tail = msg.content[i];
+          if (!tail || !tail.type) continue;
+          if (tail.type === "text") return false;
+          if (tail.type === "thinking") return true;
+          if (tail.type === "tool_use") return !pickToolResultForDisplay(results, tail.id);
+          if (tail.type === "tool_result") return false;
+        }
+        return false;
+      }
+
+      function summarizeActivityRun(items, toolResults) {
+        var counts = { read: 0, command: 0, search: 0, edit: 0, web: 0, other: 0, thinking: 0 };
+        var latest = "";
+        for (var i = 0; i < items.length; i++) {
+          var block = items[i].block;
+          if (isHiddenActivityBlock(block)) continue;
+          if (block.type === "thinking") {
+            counts.thinking++;
+            var thinkLabel = activityItemLabel(block);
+            if (thinkLabel) latest = thinkLabel;
+            continue;
+          }
+          if (block.type !== "tool_use") continue;
+          counts[activityKindOf(block.name)]++;
+          var label = activityItemLabel(block);
+          if (label) latest = label;
+        }
+        var parts = [];
+        for (var kind in ACTIVITY_KIND_META) {
+          if (counts[kind] > 0) parts.push(ACTIVITY_KIND_META[kind] + " " + counts[kind]);
+        }
+        return {
+          latest: latest || "处理中",
+          meta: parts.join(" · ")
+        };
+      }
+
+      function renderActivityFold(items, role, toolResults, messageKey, segmentFirstIndex, options?: any) {
+        var opts = options || {};
+        var visible = [];
+        for (var i = 0; i < items.length; i++) {
+          if (!isHiddenActivityBlock(items[i].block)) visible.push(items[i]);
+        }
+        // 全是空块（空 thinking / 已被消费的 tool_result）：保持旧行为不渲染，
+        // 避免留下一个只有外框的空气盒子。
+        if (!visible.length) return "";
+
+        var summary = summarizeActivityRun(items, toolResults);
+        // 运行态：只有「当前正在流式生成的最后一条 assistant 消息」里、位于消息
+        // 尾部、且还没被正文截断的那一段才算运行中。中间被正文切开的条一律已完成。
+        var running = !!opts.isTrailing &&
+          isTurnActivityLive(_currentMessageGlobalIndex) &&
+          isMessageActivityOpen(_currentMessageGlobalIndex);
+        // expand key 只绑 run 的起点，流式期间不断追加 item 也不会让已展开的
+        // 用户视图被重置回折叠态。
+        var runStart = items.length ? items[0].index : 0;
+        var expandKey = buildExpandKey("activity", [messageKey, segmentFirstIndex, runStart]);
+        var persisted = getPersistedExpandState(expandKey);
+        var expanded = persisted === null ? false : persisted;
+
+        var blocksOnly = [];
+        for (var b = 0; b < items.length; b++) blocksOnly.push(items[b].block);
+        var bodyHtml = buildSegmentBlocksHtml(
+          blocksOnly,
+          segmentFirstIndex + runStart,
+          role,
+          toolResults,
+          messageKey,
+          Object.assign({}, opts, { noActivityFold: true })
+        );
+
+        return '<div class="chat-activity' + (running ? ' is-running' : '') + '" ' +
+            'data-expand-kind="activity" ' +
+            'data-expand-key="' + escapeHtml(expandKey) + '" ' +
+            'data-follow-tail="true" ' +
+            'data-expanded="' + (expanded ? "true" : "false") + '">' +
+          '<button type="button" class="chat-activity-summary" aria-expanded="' + (expanded ? "true" : "false") + '" onclick="__activityToggle(this)">' +
+            '<span class="chat-activity-top">' +
+              (summary.meta ? '<span class="chat-activity-meta">' + escapeHtml(summary.meta) + '</span>' : "") +
+              '<span class="chat-activity-count">' + visible.length + '</span>' +
+              '<span class="chat-activity-chevron">' + iconSvg("chevronDown", { size: 14, strokeWidth: 2 }) + '</span>' +
+            '</span>' +
+            '<span class="chat-activity-latest">' + escapeHtml(summary.latest) + '</span>' +
+          '</button>' +
+          '<div class="chat-activity-body" aria-hidden="' + (expanded ? "false" : "true") + '"' +
+            (expanded ? '' : ' style="display:none"') + '>' + bodyHtml + '</div>' +
+        '</div>';
+      }
+
+      // 展开 / 收起活动窗口。展开时内部滚动到尾部（显示最新活动），
+      // 折叠时只留状态条。状态按 expand key 持久化到 localStorage。
+      (window as any).__activityToggle = function(btn) {
+        var wrap = btn && btn.closest ? btn.closest(".chat-activity") : null;
+        if (!wrap) return;
+        var nowExpanded = wrap.getAttribute("data-expanded") !== "true";
+        wrap.setAttribute("data-expanded", nowExpanded ? "true" : "false");
+        if (btn.setAttribute) btn.setAttribute("aria-expanded", nowExpanded ? "true" : "false");
+        var body = wrap.querySelector(".chat-activity-body");
+        if (body) {
+          body.style.display = nowExpanded ? "block" : "none";
+          body.setAttribute("aria-hidden", nowExpanded ? "false" : "true");
+          if (nowExpanded) {
+            // 展开的瞬间先跳到底部，之后每次流式刷新由 tail 跟随逻辑接管。
+            body.scrollTop = body.scrollHeight;
+          }
+        }
+        var key = wrap.getAttribute("data-expand-key");
+        if (key) setPersistedExpandState(key, nowExpanded);
+      };
+
       // 渲染一段内的 blocks。独立 group consecutive tools，避免父/子 agent 的工具
       // 调用跨边界被合并；grp.index 偏移到原数组全局位置，保持 expand key 唯一。
       function buildSegmentBlocksHtml(segmentBlocks, segmentFirstIndex, role, toolResults, messageKey, options?: any) {
         var html = "";
         var opts = options || {};
+        // 活动折叠：连续 thinking / 工具调用收成一条状态条；正文、图片、子 agent
+        // 回复保持原位，出现即打断当前条。子 agent 段不再二次折叠。
+        if (ACTIVITY_FOLD_ENABLED && !opts.noActivityFold && !opts.inSubagentPanel && role === "assistant") {
+          try {
+            var pendingActivity = [];
+            var flushPendingActivity = function(isTrailing) {
+              if (!pendingActivity.length) return;
+              html += renderActivityFold(
+                pendingActivity,
+                role,
+                toolResults,
+                messageKey,
+                segmentFirstIndex,
+                Object.assign({}, opts, { isTrailing: !!isTrailing })
+              );
+              pendingActivity = [];
+            };
+            for (var fi = 0; fi < segmentBlocks.length; fi++) {
+              var fBlock = segmentBlocks[fi];
+              if (isHiddenActivityBlock(fBlock)) continue;
+              if (isFoldableActivityBlock(fBlock, toolResults)) {
+                pendingActivity.push({ block: fBlock, index: fi });
+              } else {
+                flushPendingActivity(false);
+                html += renderContentBlock(fBlock, role, toolResults, fi + segmentFirstIndex, messageKey, opts);
+              }
+            }
+            flushPendingActivity(true);
+            return html;
+          } catch (e) {
+            html = "";
+          }
+        }
         try {
           var groups = groupConsecutiveTools(segmentBlocks);
           for (var g = 0; g < groups.length; g++) {
@@ -2371,6 +2653,7 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
       }
 
       function renderStructuredMessage(msg, roundUsage, messageIndex, legacyTaskMap) {
+        _currentMessageGlobalIndex = typeof messageIndex === "number" ? messageIndex : -1;
         var role = msg.role;
         var messageKey = getMessageKey(msg, messageIndex);
         var usageHtml = role === "assistant" ? renderUsageSummaryHtml(roundUsage) : "";
@@ -2678,22 +2961,28 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
 
         var isTruncated = toolResult && toolResult._truncated === true;
 
-        // Read 读到图片时，直接在卡片里内联缩略图预览（点击放大用文件预览弹层）。
-        // 走的是文件浏览器同款 /api/file-raw 端点；加载失败（被删/超限 413）则隐藏整块。
+        // 图片直接内联展示，不让用户去点开 JSON 或猜路径。
+        //   · path 命中图片扩展名 → 走文件浏览器同款 /api/file-raw
+        //   · tool_result 内联 image content block（base64 / url）→ 直接 data URI
+        // 两种来源都可能出现，合并渲染；加载失败（被删 / 超限）则隐藏整块。
         var imageHtml = "";
-        if (toolName === "Read") {
-          var imgPath = inputData.file_path || inputData.path || fileInfo || "";
-          if (imgPath && isImagePath(imgPath)) {
-            var imgSrc = "/api/file-raw?path=" + encodeURIComponent(imgPath);
-            imageHtml = '<div class="inline-tool-image" onclick="event.stopPropagation();">' +
-              '<img class="inline-tool-image-thumb" loading="lazy" ' +
-                'src="' + imgSrc + '" ' +
-                'alt="' + escapeHtml(path) + '" ' +
-                'data-path="' + escapeHtml(imgPath) + '" ' +
-                'onclick="event.stopPropagation(); if(window.__openFilePreview)window.__openFilePreview(this.getAttribute(\'data-path\'));" ' +
-                'onerror="var w=this.closest(\'.inline-tool-image\'); if(w)w.style.display=\'none\';" />' +
-            '</div>';
-          }
+        var imgPath = inputData.file_path || inputData.path || fileInfo || "";
+        if (imgPath && isImagePath(imgPath)) {
+          var imgSrc = "/api/file-raw?path=" + encodeURIComponent(imgPath);
+          imageHtml += '<div class="inline-tool-image" onclick="event.stopPropagation();">' +
+            '<img class="inline-tool-image-thumb" loading="lazy" ' +
+              'src="' + imgSrc + '" ' +
+              'alt="' + escapeHtml(imgPath) + '" ' +
+              'data-path="' + escapeHtml(imgPath) + '" ' +
+              'onclick="event.stopPropagation(); if(window.__openFilePreview)window.__openFilePreview(this.getAttribute(\'data-path\'));" ' +
+              'onerror="var w=this.closest(\'.inline-tool-image\'); if(w)w.style.display=\'none\';" />' +
+          '</div>';
+        }
+        var inlineResultImages = toolResult ? extractToolResultImages(toolResult.content) : [];
+        for (var ri = 0; ri < inlineResultImages.length; ri++) {
+          imageHtml += '<div class="inline-tool-image" onclick="event.stopPropagation();">' +
+            '<img class="inline-tool-image-thumb" loading="lazy" src="' + inlineResultImages[ri].src + '" alt="工具返回图片" />' +
+          '</div>';
         }
 
         var extraInfoHtml = meta ? '<span class="inline-tool-meta">' + escapeHtml(meta) + '</span>' : '';
@@ -2789,6 +3078,35 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
           '</div>' +
         '</div>';
       }
+      // tool_result 里可能内联 image content block（Anthropic 原生支持
+      // `[{type:"image", source:{type:"base64", media_type, data}}]`，Read 读图片 /
+      // 截图 / view_image 等都会走到这里）。老逻辑把整个数组 JSON.stringify 出来，
+      // 用户看到的是一大坨 base64。这里把图片块抽成可直接 <img> 的 data URI。
+      export function extractToolResultImages(content) {
+        if (!Array.isArray(content)) return [];
+        var images = [];
+        for (var i = 0; i < content.length; i++) {
+          var item = content[i];
+          if (!item || typeof item !== "object") continue;
+          var src = "";
+          if (item.type === "image") {
+            var source = item.source || {};
+            if (source.type === "base64" && source.data) {
+              src = "data:" + (source.media_type || "image/png") + ";base64," + source.data;
+            } else if (typeof source.url === "string") {
+              src = source.url;
+            } else if (typeof item.url === "string") {
+              src = item.url;
+            }
+          } else if (item.type === "image_url") {
+            var imageUrl = item.image_url;
+            src = typeof imageUrl === "string" ? imageUrl : (imageUrl && imageUrl.url) || "";
+          }
+          if (src) images.push({ src: src });
+        }
+        return images;
+      }
+
       export function extractToolResultText(content) {
         if (!content) return "";
         if (typeof content === "string") return content;
@@ -2796,6 +3114,8 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
           return content.map(function(item) {
             if (!item || typeof item !== "object") return "";
             if (item.type === "text" && typeof item.text === "string") return item.text;
+            // 图片块已经由 extractToolResultImages 单独渲染，不要把 base64 塞进正文。
+            if (item.type === "image" || item.type === "image_url") return "";
             try {
               return JSON.stringify(item);
             } catch (e) {
@@ -3106,6 +3426,15 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
           } else {
             resultHtml = '<span class="tool-use-result-empty">无输出</span>';
           }
+          // 结果里内联的图片（截图 / 读图 / 工具生成的图）直接展示，不塞 JSON。
+          var cardImages = extractToolResultImages(toolResult.content);
+          if (cardImages.length > 0) {
+            resultHtml = cardImages.map(function(img) {
+              return '<div class="inline-tool-image" onclick="event.stopPropagation();">' +
+                '<img class="inline-tool-image-thumb" loading="lazy" src="' + img.src + '" alt="工具返回图片" />' +
+              '</div>';
+            }).join("") + resultHtml;
+          }
         } else {
           headerIcon = getToolIcon(toolName);
         }
@@ -3114,6 +3443,11 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
         var persistedExpanded = getPersistedExpandState(expandKey);
         var cardDefaultExpand = getCardDefault("editCards");
         var shouldExpand = opts.forceExpandedToolBodies ? true : (persistedExpanded === null ? cardDefaultExpand : persistedExpanded);
+        // 带图片的工具卡默认展开：折叠会把整块 body（含缩略图）藏掉，
+        // 与「图片直接展示」的诉求冲突。
+        if (!opts.forceExpandedToolBodies && toolResult && extractToolResultImages(toolResult.content).length > 0) {
+          shouldExpand = true;
+        }
         var tcTruncated = toolResult && toolResult._truncated === true;
         var collapsedClass = shouldExpand ? "" : " collapsed";
         var toggleHtml = '<span class="tool-use-toggle">▼</span>';

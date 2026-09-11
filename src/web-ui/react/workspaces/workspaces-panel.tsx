@@ -19,13 +19,33 @@ import { WandIcon, WandPopover, workspaceTaskIconName } from "../ui";
 import { SessionProviderMark } from "./session-mark";
 import { listSessionLabel, withLiveSessionTitle } from "./session-order";
 import { SidebarDisclosure, useSidebarCollapsed } from "./sidebar-disclosure";
-import { formatTaskRecency, sidebarSelection, taskActivity, taskRecency } from "./sidebar-task-meta";
-import { compactTaskLabel, filterSidebarGroups } from "./sidebar-search";
+import {
+  formatTaskRecency,
+  orderSidebarGroups,
+  orderSidebarTasks,
+  sidebarSelection,
+  taskActivity,
+  taskRecency,
+} from "./sidebar-task-meta";
+import { filterSidebarGroups } from "./sidebar-search";
 import {
   isDirectoryExpanded,
   isTaskSessionsExpanded,
   showsTaskSessionDisclosure,
 } from "./task-tree";
+import {
+  COLLAPSED_RAIL_LIMIT,
+  EMPTY_SIDEBAR_MANAGE_SELECTION,
+  collapsedRailTasks,
+  collectManagedIds,
+  describeManagedDeletion,
+  pruneManagedSelection,
+  resolveManagedDeletion,
+  sidebarManageCount,
+  toggleManagedSession,
+  toggleManagedTask,
+  type SidebarManageSelection,
+} from "./sidebar-manage";
 
 const NAME_MAX = 80;
 
@@ -102,16 +122,17 @@ function useTaskGroups(refreshKey: number): {
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState("");
   const generationRef = React.useRef(0);
+  const revisionRef = React.useRef<string | undefined>(undefined);
 
   const reload = React.useCallback(async (): Promise<void> => {
     const generation = ++generationRef.current;
     setLoading(true);
     try {
-      const items = await httpWorkspacesRepository.listTaskGroups();
-      if (generation === generationRef.current) {
-        setGroups(items);
-        setError("");
-      }
+      const page = await httpWorkspacesRepository.listTaskGroups(revisionRef.current);
+      if (generation !== generationRef.current) return;
+      if (page.revision) revisionRef.current = page.revision;
+      if (!page.unchanged) setGroups(page.groups);
+      setError("");
     } catch (fetchError) {
       if (generation === generationRef.current) {
         setError(presentError(fetchError, "无法加载任务列表。"));
@@ -135,12 +156,30 @@ function useTaskGroups(refreshKey: number): {
 
 // ── 会话行（任务内 / 未分组的会话共用）──
 
+function ManageCheck({
+  checked,
+  label,
+}: {
+  checked: boolean;
+  label: string;
+}) {
+  return (
+    <span className={classNames("workspace-manage-check", checked && "checked")} aria-hidden="true">
+      <input type="checkbox" tabIndex={-1} checked={checked} readOnly aria-label={label}/>
+      <span/>
+    </span>
+  );
+}
+
 function TaskSessionItem({
   session,
   index,
   parentNames,
   liveTitle,
   active,
+  manageMode = false,
+  selected = false,
+  onToggleSelect,
   onOpen,
   onDelete,
 }: {
@@ -149,6 +188,9 @@ function TaskSessionItem({
   parentNames?: readonly string[];
   liveTitle?: string;
   active: boolean;
+  manageMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?(): void;
   onOpen(): void;
   onDelete(): Promise<void>;
 }) {
@@ -156,16 +198,25 @@ function TaskSessionItem({
   const [busy, setBusy] = React.useState(false);
   const labeled = withLiveSessionTitle(session, liveTitle, parentNames);
   const label = listSessionLabel(labeled, index, parentNames);
+  const activate = manageMode ? (onToggleSelect ?? onOpen) : onOpen;
 
   return (
-    <div className={classNames("workspace-session", active && "active", confirming && "confirming")}>
+    <div className={classNames(
+      "workspace-session",
+      active && "active",
+      confirming && "confirming",
+      manageMode && "managing",
+      manageMode && selected && "selected",
+    )}>
       <button
         type="button"
         className="workspace-session-main"
         aria-current={active ? "true" : undefined}
+        aria-pressed={manageMode ? selected : undefined}
         title={session.cwd || session.title || session.id}
-        onClick={onOpen}
+        onClick={activate}
       >
+        {manageMode && <ManageCheck checked={selected} label={`选择终端 ${label}`}/>}
         <span className="workspace-session-mark" aria-hidden="true">
           <SessionProviderMark session={session}/>
         </span>
@@ -174,7 +225,7 @@ function TaskSessionItem({
           <span className="workspace-session-kind">终端</span>
         )}
       </button>
-      {confirming ? (
+      {manageMode ? null : confirming ? (
         <span className="workspace-session-confirm">
           <button
             type="button"
@@ -233,6 +284,11 @@ function TaskItem({
   liveTitles,
   activeTaskId,
   activeSessionId,
+  manageMode = false,
+  selected = false,
+  selectedSessionIds,
+  onToggleSelect,
+  onToggleSession,
   onOpen,
   onOpenSession,
   onRequestNewSession,
@@ -247,6 +303,11 @@ function TaskItem({
   liveTitles?: Readonly<Record<string, string>>;
   activeTaskId: string | null;
   activeSessionId: string | null;
+  manageMode?: boolean;
+  selected?: boolean;
+  selectedSessionIds?: ReadonlySet<string>;
+  onToggleSelect?(): void;
+  onToggleSession?(sessionId: string): void;
   onOpen(): void;
   onOpenSession(session: WorkspaceSessionSummary): void;
   /** 请求在该任务中新建会话；由上层弹出 Agent 选择器后回调。 */
@@ -337,15 +398,29 @@ function TaskItem({
   }
 
   return (
-    <div className={classNames("workspace-task-group", isActive && "active", open && "is-open")}>
-      <div className={classNames("workspace-task", isActive && "active", !isolated && "not-isolated")}>
+    <div className={classNames(
+      "workspace-task-group",
+      isActive && "active",
+      open && "is-open",
+      manageMode && "managing",
+      manageMode && selected && "selected",
+    )}>
+      <div className={classNames(
+        "workspace-task",
+        isActive && "active",
+        !isolated && "not-isolated",
+        manageMode && "managing",
+        manageMode && selected && "selected",
+      )}>
         <button
           type="button"
           className="workspace-task-main"
           aria-current={isActive ? "true" : undefined}
+          aria-pressed={manageMode ? selected : undefined}
           title={`${task.name}\n${task.worktree?.path ?? task.cwd}`}
-          onClick={onOpen}
+          onClick={manageMode ? (onToggleSelect ?? onOpen) : onOpen}
         >
+          {manageMode && <ManageCheck checked={selected} label={`选择任务 ${task.name}`}/>}
           {isolated ? (
             <span className="workspace-task-marker isolated" title="隔离 worktree" aria-label="隔离 worktree">
               <WandIcon name={workspaceTaskIconName(true)} size={12}/>
@@ -378,7 +453,7 @@ function TaskItem({
             </button>
           ) : null}
         </span>
-        {!confirming ? (
+        {manageMode ? null : !confirming ? (
           <>
             <WandPopover
               open={taskMenuOpen}
@@ -488,6 +563,9 @@ function TaskItem({
               parentNames={[...parentNames, task.name]}
               liveTitle={liveTitles?.[session.id]}
               active={activeSessionId === session.id}
+              manageMode={manageMode}
+              selected={selectedSessionIds?.has(session.id) ?? false}
+              onToggleSelect={() => onToggleSession?.(session.id)}
               onOpen={() => onOpenSession(session)}
               onDelete={() => onDeleteSession(session)}
             />
@@ -557,6 +635,10 @@ function TaskGroupSection({
   activeWorkspaceId,
   activeTaskId,
   activeSessionId,
+  manageMode = false,
+  selection,
+  onToggleTask,
+  onToggleSession,
   onActiveTaskOpen,
   onOpenSession,
   onRequestNewSessionInTask,
@@ -570,6 +652,10 @@ function TaskGroupSection({
   activeWorkspaceId: string | null;
   activeTaskId: string | null;
   activeSessionId: string | null;
+  manageMode?: boolean;
+  selection?: SidebarManageSelection;
+  onToggleTask?(taskId: string): void;
+  onToggleSession?(sessionId: string): void;
   onActiveTaskOpen(group: TaskDirectoryGroup, task: TaskSummary): void;
   onOpenSession(group: TaskDirectoryGroup, session: WorkspaceSessionSummary): void;
   onRequestNewSessionInTask(task: TaskSummary): void;
@@ -577,7 +663,7 @@ function TaskGroupSection({
   onNavigate?: () => void;
 }) {
   const [collapsed, toggleCollapsed] = useSidebarCollapsed(`project.${group.workspaceId}`);
-  const [looseCollapsed, setLooseCollapsed] = React.useState(false);
+  const [looseCollapsed, toggleLooseCollapsed] = useSidebarCollapsed(`loose.${group.workspaceId}`);
   const [worktreeDialogOpen, setWorktreeDialogOpen] = React.useState(false);
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
@@ -781,7 +867,7 @@ function TaskGroupSection({
               <WandIcon name="plus" size={13}/><span>创建第一个任务</span>
             </button>
           )}
-          {[...group.tasks].sort((left, right) => taskRecency(right).localeCompare(taskRecency(left))).map((task) => (
+          {orderSidebarTasks(group.tasks).map((task) => (
             <TaskItem
               key={task.id}
               task={task}
@@ -790,6 +876,11 @@ function TaskGroupSection({
               liveTitles={liveTitles}
               activeTaskId={activeTaskId}
               activeSessionId={activeSessionId}
+              manageMode={manageMode}
+              selected={selection?.taskIds.includes(task.id) ?? false}
+              selectedSessionIds={selection ? new Set(selection.sessionIds) : undefined}
+              onToggleSelect={() => onToggleTask?.(task.id)}
+              onToggleSession={onToggleSession}
               onOpen={() => onActiveTaskOpen(group, task)}
               onOpenSession={(session) => onOpenSession(group, session)}
               onRequestNewSession={() => onRequestNewSessionInTask(task)}
@@ -817,7 +908,10 @@ function TaskGroupSection({
             <details
               className="workspace-loose-sessions"
               open={looseOpen}
-              onToggle={(event) => setLooseCollapsed(!event.currentTarget.open)}
+              onToggle={(event) => {
+                if (event.currentTarget.open === looseOpen) return;
+                toggleLooseCollapsed();
+              }}
             >
               <summary>未分组会话（{group.standaloneSessions.length}）</summary>
               <div className="workspace-loose-session-list">
@@ -829,6 +923,9 @@ function TaskGroupSection({
                     parentNames={[group.workspaceName]}
                     liveTitle={liveTitles?.[session.id]}
                     active={activeSessionId === session.id}
+                    manageMode={manageMode}
+                    selected={selection?.sessionIds.includes(session.id) ?? false}
+                    onToggleSelect={() => onToggleSession?.(session.id)}
                     onOpen={() => onOpenSession(group, session)}
                     onDelete={() => handleDeleteSessions(
                       [session.id],
@@ -863,11 +960,10 @@ function TaskGroupSection({
   );
 }
 
-function CompactWorkspaceTree({
+function CompactTaskRail({
   groups,
   loading,
   error,
-  activeWorkspaceId,
   activeTaskId,
   onOpenTask,
   onExpand,
@@ -875,7 +971,6 @@ function CompactWorkspaceTree({
   groups: readonly TaskDirectoryGroup[];
   loading: boolean;
   error: string;
-  activeWorkspaceId: string | null;
   activeTaskId: string | null;
   onOpenTask(group: TaskDirectoryGroup, task: TaskSummary): void;
   onExpand(): void;
@@ -887,44 +982,53 @@ function CompactWorkspaceTree({
     return <div className="sidebar-collapsed-tree-state error" title={error} aria-label={error}>!</div>;
   }
 
-  const visibleGroups = [...groups].sort((left, right) => Number(Boolean(right.global)) - Number(Boolean(left.global)));
+  const rail = collapsedRailTasks(groups, activeTaskId, COLLAPSED_RAIL_LIMIT);
+  if (rail.items.length === 0) {
+    return <div className="sidebar-collapsed-rail" aria-label="最近任务"/>;
+  }
   return (
-    <div className="sidebar-collapsed-workspaces" aria-label="项目与任务目录">
-      {visibleGroups.map((group) => {
-        const active = activeWorkspaceId === group.workspaceId;
+    <div className="sidebar-collapsed-rail" aria-label="最近任务">
+      {rail.items.map((item) => {
+        const group = groups.find((candidate) => candidate.workspaceId === item.workspaceId);
+        const title = item.global ? item.task.name : `${item.workspaceName} / ${item.task.name}`;
         return (
-          <div
-            key={group.workspaceId}
-            className={classNames("sidebar-collapsed-workspace", active && "active")}
-            title={`${group.global ? "独立任务" : group.workspaceName}：${group.tasks.length} 项任务`}
+          <button
+            key={item.task.id}
+            type="button"
+            className={classNames(
+              "sidebar-collapsed-rail-task",
+              activeTaskId === item.task.id && "active",
+              item.activity && `activity-${item.activity}`,
+            )}
+            title={title}
+            aria-label={item.global ? `打开独立任务 ${item.task.name}` : `打开项目 ${item.workspaceName} 中的任务 ${item.task.name}`}
+            aria-current={activeTaskId === item.task.id ? "true" : undefined}
+            onClick={() => {
+              if (!group) {
+                onExpand();
+                return;
+              }
+              onOpenTask(group, item.task);
+            }}
           >
-            <button
-              type="button"
-              className="sidebar-collapsed-workspace-mark"
-              aria-label={group.global ? "展开独立任务" : `展开项目 ${group.workspaceName}`}
-              onClick={onExpand}
-            >
-              <WandIcon name={group.global ? "task" : "folder"} size={15}/>
-              {group.tasks.length > 0 && <span className="sidebar-collapsed-count">{group.tasks.length > 9 ? "9+" : group.tasks.length}</span>}
-            </button>
-            <div className="sidebar-collapsed-task-list">
-              {[...group.tasks].sort((left, right) => taskRecency(right).localeCompare(taskRecency(left))).map((task) => (
-                <button
-                  key={task.id}
-                  type="button"
-                  className={classNames("sidebar-collapsed-task", activeTaskId === task.id && "active")}
-                  title={group.global ? task.name : `${group.workspaceName} / ${task.name}`}
-                  aria-label={group.global ? `打开独立任务 ${task.name}` : `打开项目 ${group.workspaceName} 中的任务 ${task.name}`}
-                  onClick={() => onOpenTask(group, task)}
-                >
-                  <span className="sidebar-collapsed-task-branch" aria-hidden="true"/>
-                  <span className="sidebar-collapsed-task-label" aria-hidden="true">{compactTaskLabel(task.name)}</span>
-                </button>
-              ))}
-            </div>
-          </div>
+            <WandIcon name={workspaceTaskIconName(Boolean(item.task.worktree))} size={15}/>
+            {item.activity ? (
+              <span className={classNames("sidebar-collapsed-rail-dot", item.activity)} aria-hidden="true"/>
+            ) : null}
+          </button>
         );
       })}
+      {rail.overflow > 0 ? (
+        <button
+          type="button"
+          className="sidebar-collapsed-rail-more"
+          title={`还有 ${rail.overflow} 个任务，展开侧栏查看`}
+          aria-label={`展开侧栏，还有 ${rail.overflow} 个任务`}
+          onClick={onExpand}
+        >
+          +{rail.overflow > 9 ? "9" : rail.overflow}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -967,7 +1071,7 @@ export function WorkspacesPanel({
   }, [controllerSnapshot.open]);
 
   const { groups, loading, error, reload } = useTaskGroups(refreshTick);
-  const visibleGroups = filterSidebarGroups(groups, searchQuery, sessionTitles ?? {});
+  const visibleGroups = orderSidebarGroups(filterSidebarGroups(groups, searchQuery, sessionTitles ?? {}));
 
   // 活动高亮统一读 workspaceContextStore（主区标签栏与这里共用同一来源，
   // 关闭工作区窗口时这里也会同步取消高亮）。
@@ -982,6 +1086,7 @@ export function WorkspacesPanel({
 
   const [panelCollapsed, togglePanel] = useSidebarCollapsed("projects");
   const [standaloneCollapsed, toggleStandalone] = useSidebarCollapsed("tasks");
+  const [globalLooseCollapsed, toggleGlobalLoose] = useSidebarCollapsed("loose.global");
   const [now, setNow] = React.useState(Date.now);
   const projectsId = React.useId();
   const standaloneId = React.useId();
@@ -991,6 +1096,25 @@ export function WorkspacesPanel({
   }, []);
   // 任务行「＋」的 Agent 选择器：先记下目标任务，确认后在该任务目录内新建会话。
   const [pendingNewSessionTask, setPendingNewSessionTask] = React.useState<TaskSummary | null>(null);
+  const [manageMode, setManageMode] = React.useState(false);
+  const [selection, setSelection] = React.useState<SidebarManageSelection>(EMPTY_SIDEBAR_MANAGE_SELECTION);
+  const [confirmingManageDelete, setConfirmingManageDelete] = React.useState(false);
+  const [manageBusy, setManageBusy] = React.useState(false);
+  const prunedSelection = pruneManagedSelection(selection, visibleGroups);
+  const selectedCount = sidebarManageCount(prunedSelection);
+  const visibleManaged = collectManagedIds(visibleGroups);
+  const allVisibleSelected = selectedCount > 0
+    && prunedSelection.taskIds.length === visibleManaged.taskIds.length
+    && prunedSelection.sessionIds.length === visibleManaged.sessionIds.length;
+  const selectedSessionIdSet = React.useMemo(
+    () => new Set(prunedSelection.sessionIds),
+    [prunedSelection.sessionIds],
+  );
+  const exitManageMode = React.useCallback(() => {
+    setManageMode(false);
+    setSelection(EMPTY_SIDEBAR_MANAGE_SELECTION);
+    setConfirmingManageDelete(false);
+  }, []);
 
   const openTask = React.useCallback((group: TaskDirectoryGroup, task: TaskSummary): unknown => {
     onNavigate?.();
@@ -1071,14 +1195,42 @@ export function WorkspacesPanel({
     setRefreshTick((n) => n + 1);
   }, [selectedSessionId, activeTaskId]);
 
+  const deleteManagedSelection = async (): Promise<void> => {
+    if (manageBusy) return;
+    const resolved = resolveManagedDeletion(prunedSelection, visibleGroups);
+    if (sidebarManageCount(resolved) === 0) return;
+    setManageBusy(true);
+    try {
+      for (const taskId of resolved.taskIds) {
+        await httpWorkspacesRepository.deleteTask(taskId, true);
+        if (activeTaskId === taskId) runtime()?.closeWorkspace();
+      }
+      if (resolved.sessionIds.length > 0) {
+        const ownedTask = visibleGroups
+          .flatMap((group) => group.tasks)
+          .find((task) => task.sessions.some((session) => resolved.sessionIds.includes(session.id))) ?? null;
+        await removeSessions(resolved.sessionIds, ownedTask);
+      } else {
+        await runtime()?.refreshSessions();
+      }
+      toast(`已删除${describeManagedDeletion(resolved)}`, "info");
+      exitManageMode();
+      await reload();
+    } catch (cause) {
+      toast(presentError(cause, "无法删除所选项目。"), "danger");
+    } finally {
+      setManageBusy(false);
+      setConfirmingManageDelete(false);
+    }
+  };
+
   if (compact) {
     return (
-      <section className="workspaces-panel workspaces-panel-compact" aria-label="项目与任务目录">
-        <CompactWorkspaceTree
+      <section className="workspaces-panel workspaces-panel-compact" aria-label="最近任务">
+        <CompactTaskRail
           groups={groups}
           loading={loading}
           error={error}
-          activeWorkspaceId={activeWorkspaceId}
           activeTaskId={activeTaskId}
           onOpenTask={(group, task) => { void openTask(group, task); }}
           onExpand={() => onExpand?.()}
@@ -1125,21 +1277,76 @@ export function WorkspacesPanel({
         </div>
       ) : (
         <>
-          <label className="sidebar-search">
-            <WandIcon name="hash" size={14}/>
-            <input
-              type="search"
-              value={searchQuery}
-              placeholder="搜索任务或会话"
-              aria-label="搜索任务或会话"
-              onChange={(event) => onSearchChange?.(event.currentTarget.value)}
-            />
-            {searchQuery ? (
-              <button type="button" aria-label="清除搜索" title="清除搜索" onClick={() => onSearchChange?.("")}>
-                <WandIcon name="close" size={12}/>
+          {manageMode ? (
+            <div className="sidebar-manage-bar" role="toolbar" aria-label="批量操作">
+              <span className="sidebar-manage-count">{selectedCount > 0 ? `已选择 ${selectedCount} 项` : "点选任务或终端"}</span>
+              <button
+                type="button"
+                className="sidebar-manage-action"
+                disabled={manageBusy}
+                onClick={() => {
+                  setSelection(allVisibleSelected ? EMPTY_SIDEBAR_MANAGE_SELECTION : visibleManaged);
+                  setConfirmingManageDelete(false);
+                }}
+              >
+                {allVisibleSelected ? "取消全选" : "全选"}
               </button>
-            ) : null}
-          </label>
+              {confirmingManageDelete ? (
+                <>
+                  <button type="button" className="sidebar-manage-action" disabled={manageBusy} onClick={() => setConfirmingManageDelete(false)}>返回</button>
+                  <button
+                    type="button"
+                    className="sidebar-manage-action danger"
+                    disabled={manageBusy || selectedCount === 0}
+                    onClick={() => { void deleteManagedSelection(); }}
+                  >
+                    {manageBusy ? "正在删除…" : "确认删除"}
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="sidebar-manage-action danger"
+                  disabled={manageBusy || selectedCount === 0}
+                  onClick={() => setConfirmingManageDelete(true)}
+                >
+                  删除
+                </button>
+              )}
+              <button type="button" className="sidebar-manage-action" disabled={manageBusy} onClick={exitManageMode}>完成</button>
+            </div>
+          ) : (
+            <div className="sidebar-toolbar">
+              <label className="sidebar-search">
+                <WandIcon name="hash" size={14}/>
+                <input
+                  type="search"
+                  value={searchQuery}
+                  placeholder="搜索任务或会话"
+                  aria-label="搜索任务或会话"
+                  onChange={(event) => onSearchChange?.(event.currentTarget.value)}
+                />
+                {searchQuery ? (
+                  <button type="button" aria-label="清除搜索" title="清除搜索" onClick={() => onSearchChange?.("")}>
+                    <WandIcon name="close" size={12}/>
+                  </button>
+                ) : null}
+              </label>
+              <button
+                type="button"
+                className="sidebar-manage-toggle"
+                title="多选任务和终端"
+                aria-label="多选任务和终端"
+                onClick={() => {
+                  setManageMode(true);
+                  setSelection(EMPTY_SIDEBAR_MANAGE_SELECTION);
+                  setConfirmingManageDelete(false);
+                }}
+              >
+                选择
+              </button>
+            </div>
+          )}
           {searchQuery && visibleGroups.length === 0 ? (
             <div className="sidebar-search-empty">没有找到匹配的任务或会话。</div>
           ) : null}
@@ -1160,7 +1367,7 @@ export function WorkspacesPanel({
               <SidebarDisclosure id={standaloneId} open={!standaloneCollapsed}>
               {globalGroup ? (
               <div className="workspace-tasks is-global">
-                {[...globalGroup.tasks].sort((left, right) => taskRecency(right).localeCompare(taskRecency(left))).map((task) => (
+                {orderSidebarTasks(globalGroup.tasks).map((task) => (
                   <TaskItem
                     key={task.id}
                     task={task}
@@ -1169,6 +1376,11 @@ export function WorkspacesPanel({
                     liveTitles={sessionTitles ?? undefined}
                     activeTaskId={activeTaskId}
                     activeSessionId={selectedSessionId}
+                    manageMode={manageMode}
+                    selected={prunedSelection.taskIds.includes(task.id)}
+                    selectedSessionIds={selectedSessionIdSet}
+                    onToggleSelect={() => setSelection((current) => toggleManagedTask(current, task.id))}
+                    onToggleSession={(sessionId) => setSelection((current) => toggleManagedSession(current, sessionId))}
                     onOpen={() => openTask(globalGroup, task)}
                     onOpenSession={(session) => openSession(globalGroup, session)}
                     onRequestNewSession={() => { onNavigate?.(); setPendingNewSessionTask(task); }}
@@ -1203,7 +1415,14 @@ export function WorkspacesPanel({
                   />
                 ))}
                 {globalGroup.standaloneSessions.length > 0 ? (
-                  <details className="workspace-loose-sessions" open>
+                  <details
+                    className="workspace-loose-sessions"
+                    open={!globalLooseCollapsed}
+                    onToggle={(event) => {
+                      if (event.currentTarget.open === !globalLooseCollapsed) return;
+                      toggleGlobalLoose();
+                    }}
+                  >
                     <summary>未分组会话（{globalGroup.standaloneSessions.length}）</summary>
                     <div className="workspace-loose-session-list">
                       {globalGroup.standaloneSessions.map((session, index) => (
@@ -1214,6 +1433,9 @@ export function WorkspacesPanel({
                           parentNames={[]}
                           liveTitle={sessionTitles?.[session.id]}
                           active={selectedSessionId === session.id}
+                          manageMode={manageMode}
+                          selected={selectedSessionIdSet.has(session.id)}
+                          onToggleSelect={() => setSelection((current) => toggleManagedSession(current, session.id))}
                           onOpen={() => openSession(globalGroup, session)}
                           onDelete={async () => {
                             await removeSessions([session.id], null);
@@ -1256,6 +1478,10 @@ export function WorkspacesPanel({
                     activeWorkspaceId={activeWorkspaceId}
                     activeTaskId={activeTaskId}
                     activeSessionId={selectedSessionId}
+                    manageMode={manageMode}
+                    selection={prunedSelection}
+                    onToggleTask={(taskId) => setSelection((current) => toggleManagedTask(current, taskId))}
+                    onToggleSession={(sessionId) => setSelection((current) => toggleManagedSession(current, sessionId))}
                     onActiveTaskOpen={openTask}
                     onOpenSession={openSession}
                     onRequestNewSessionInTask={(task) => { onNavigate?.(); setPendingNewSessionTask(task); }}
@@ -1285,7 +1511,7 @@ export function WorkspacesPanel({
           <button type="button" className="workspaces-empty-action" onClick={() => void reload()}>重试</button>
         </div>
       )}
-      {extraGroups}
+      {manageMode ? null : extraGroups}
       {pendingNewSessionTask !== null ? (
         <WorkspaceAgentDialog
           open

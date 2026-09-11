@@ -11,4 +11,4 @@ export {WandSkeleton} from "./skeleton";
 export {WandSwitch} from "./switch";
 export {WandTabs} from "./tabs";
 export {WandToastItem, WandToastRegion, type WandToastTone} from "./toast";
-export { PortalContainerProvider } from "./portal-context";
+export { PortalContainerProvider, REACT_UI_PORTALS_ID } from "./portal-context";

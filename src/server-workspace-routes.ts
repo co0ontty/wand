@@ -22,6 +22,7 @@ import {
   normalizeProjectCwd,
   projectCwdForSession,
 } from "./workspace-binding.js";
+import { archiveBoardTaskForWorkspaceTask, ensureBoardTaskForWorkspaceTask } from "./wand-task-sync.js";
 
 const PROVIDERS: ReadonlySet<string> = new Set(["claude", "codex", "opencode", "grok", "qoder", "pi"]);
 
@@ -65,8 +66,36 @@ function workspaceSessionSummary(
   };
 }
 
-function tasksRevision(groups: readonly unknown[]): string {
-  return crypto.createHash("sha256").update(JSON.stringify(groups)).digest("base64url");
+function cheapTasksRevision(storage: WandStorage, registry?: SessionRegistry): string {
+  const fingerprint = [
+    storage.tasksAggregateFingerprint(),
+    ...(registry?.listSlim() ?? []).map((session) => [
+      session.id,
+      session.status,
+      session.ptyBusy === true ? 1 : 0,
+      session.providerCliActive ? 1 : 0,
+      session.structuredState?.inFlight === true ? 1 : 0,
+      session.title ?? "",
+      session.workspaceId ?? "",
+      session.workspaceTaskId ?? "",
+    ]),
+  ];
+  return crypto.createHash("sha256").update(JSON.stringify(fingerprint)).digest("base64url");
+}
+
+function compareCreatedDesc(left?: string | null, right?: string | null): number {
+  const a = typeof left === "string" ? left.trim() : "";
+  const b = typeof right === "string" ? right.trim() : "";
+  if (a === b) return 0;
+  if (!a) return 1;
+  if (!b) return -1;
+  return b.localeCompare(a);
+}
+
+function rememberCreatedAt(target: { createdAt?: string }, iso?: string | null): void {
+  const value = typeof iso === "string" ? iso.trim() : "";
+  if (!value) return;
+  if (!target.createdAt || value < target.createdAt) target.createdAt = value;
 }
 
 function parseDefaultProvider(value: unknown): WorkspaceDefaultProvider | undefined {
@@ -124,7 +153,8 @@ function createTaskForWorkspace(
   }
   const baseRef = typeof body.baseRef === "string" && body.baseRef.trim() ? body.baseRef.trim() : undefined;
   const runCwd = mountedCwd ?? workspace.cwd;
-  const wantWorktree = body.worktree === true || (body.worktree !== false && !isGlobalWorkspace(workspace));
+  const requireWorktree = body.worktree === true;
+  const wantWorktree = requireWorktree || (body.worktree !== false && !isGlobalWorkspace(workspace));
   let worktree: WorkspaceTaskWorktree | null = null;
   let worktreeError: string | undefined;
   if (wantWorktree) {
@@ -136,6 +166,9 @@ function createTaskForWorkspace(
       });
       worktree = setup.worktree;
     } catch (error) {
+      if (requireWorktree) {
+        throw new Error(getErrorMessage(error, "无法创建隔离 worktree。"));
+      }
       worktreeError = getErrorMessage(error, "无法创建 worktree，将在项目目录直接运行。");
     }
   }
@@ -146,6 +179,7 @@ function createTaskForWorkspace(
     cwd: storedCwd,
     worktree,
   });
+  ensureBoardTaskForWorkspaceTask(storage, task, workspace);
   return {
     task,
     cwd: taskRuntimeCwd(task, workspace),
@@ -275,7 +309,7 @@ export function registerWorkspaceRoutes(
   storage: WandStorage,
   sessions?: SessionRegistry,
 ): void {
-  // 列出所有项目（按创建时间升序，保证项目层级稳定）
+  // 列出所有项目（按创建时间降序：新建在前，打开不会改位置）
   app.get("/api/workspaces", (_req, res) => {
     backfillSessionWorkspaces(storage);
     const sessionCounts = storage.countSessionsByWorkspace();
@@ -420,6 +454,15 @@ export function registerWorkspaceRoutes(
   app.get("/api/tasks", (req, res) => {
     // 查询参数：workspaceId 过滤单目录；limit 截断每目录任务数；
     // maxSessions 截断每任务内嵌会话数（大数据量时控制响应体积）。
+    const hasRevisionQuery = typeof req.query.revision === "string";
+    const requestedRevision = hasRevisionQuery ? req.query.revision : "";
+    if (hasRevisionQuery && requestedRevision) {
+      const cheap = cheapTasksRevision(storage, sessions);
+      if (requestedRevision === cheap) {
+        res.json({ unchanged: true, revision: cheap, groups: [] });
+        return;
+      }
+    }
     const workspaceFilter = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
     const parseBoundedCount = (raw: unknown): number | null => {
       const value = Number(raw);
@@ -435,6 +478,7 @@ export function registerWorkspaceRoutes(
       workspaceId: string;
       workspaceName: string;
       workspaceCwd: string;
+      createdAt?: string;
       synthetic?: boolean;
       global?: boolean;
       tasks: unknown[];
@@ -454,6 +498,7 @@ export function registerWorkspaceRoutes(
         workspaceId: workspace.id,
         workspaceName: global ? "全局" : workspace.name,
         workspaceCwd: workspace.cwd,
+        createdAt: workspace.createdAt,
         ...(global ? { global: true } : {}),
         tasks: [],
         standaloneSessions: [],
@@ -497,6 +542,7 @@ export function registerWorkspaceRoutes(
         sessions,
         totalSessions: allSessions.length,
       });
+      if (target.synthetic) rememberCreatedAt(target, task.createdAt);
     };
     for (const workspace of visibleWorkspaces) {
       const base = groups.get(workspace.id);
@@ -547,24 +593,28 @@ export function registerWorkspaceRoutes(
           };
           groups.set(id, synthetic);
         }
+        rememberCreatedAt(synthetic, session.startedAt);
         group = synthetic;
       }
       // workspaceId 过滤时，不属于目标目录组的会话直接排除（含合成组）。
       if (workspaceFilter && group?.workspaceId !== workspaceFilter) continue;
-      group?.standaloneSessions.push(summarize(session, {
+      if (!group) continue;
+      group.standaloneSessions.push(summarize(session, {
         workspaceName: group.workspaceName,
       }));
+      if (group.synthetic) rememberCreatedAt(group, session.startedAt);
     }
     const payload = [...groups.values()]
       .filter((group) => !group.global || group.tasks.length > 0 || group.standaloneSessions.length > 0)
-      .sort((left, right) => Number(Boolean(right.global)) - Number(Boolean(left.global)));
-    const revision = tasksRevision(payload);
-    if (typeof req.query.revision === "string") {
-      if (req.query.revision === revision) {
-        res.json({ unchanged: true, revision, groups: [] });
-        return;
-      }
-      res.json({ unchanged: false, revision, groups: payload });
+      .sort((left, right) => {
+        const global = Number(Boolean(right.global)) - Number(Boolean(left.global));
+        if (global) return global;
+        const created = compareCreatedDesc(left.createdAt, right.createdAt);
+        if (created) return created;
+        return String(left.workspaceId).localeCompare(String(right.workspaceId));
+      });
+    if (hasRevisionQuery) {
+      res.json({ unchanged: false, revision: cheapTasksRevision(storage, sessions), groups: payload });
       return;
     }
     res.json(payload);
@@ -659,7 +709,7 @@ export function registerWorkspaceRoutes(
   }));
 
   // 新建任务：命名 + 可选独立 worktree（默认尝试创建，非 git 仓库时退化为直接用项目目录；
-  // 显式传 worktree:false 时跳过隔离，会话直接跑在项目目录）。
+  // 显式 worktree:false 跳过隔离；显式 worktree:true 失败则 400，不静默降级）。
   app.post("/api/workspaces/:id/tasks", asyncRoute(async (req, res) => {
     const workspace = storage.getWorkspace(req.params.id);
     if (!workspace) {
@@ -715,6 +765,7 @@ export function registerWorkspaceRoutes(
     if (typeof body.name === "string" && body.name.trim()) patch.name = body.name.trim();
     if (body.status === "active" || body.status === "done") patch.status = body.status;
     storage.updateWorkspaceTask(existing.id, patch);
+    if (patch.status === "done") archiveBoardTaskForWorkspaceTask(storage, existing.id);
     res.json(storage.getWorkspaceTask(existing.id));
   });
 
@@ -739,6 +790,9 @@ export function registerWorkspaceRoutes(
     }
     // 尽力清理 worktree 与分支；失败不阻塞删除任务行。
     if (cascade) cleanupWorktreeSync(existing.worktree);
+    archiveBoardTaskForWorkspaceTask(storage, existing.id);
+    const board = storage.getWandTaskByWorkspaceTaskId(existing.id);
+    if (board) storage.updateWandTask(board.id, { workspaceTaskId: null });
     storage.deleteWorkspaceTask(existing.id, { cascade });
     res.json({ ok: true });
   });
@@ -750,9 +804,20 @@ export function registerWorkspaceRoutes(
       res.status(404).json({ error: "未找到该任务。" });
       return;
     }
-    const body = req.body as { layout?: unknown };
+    const body = req.body as { layout?: unknown; layoutRevision?: unknown };
     const layout = sanitizeTaskLayout(body === null || typeof body !== "object" ? undefined : body.layout);
-    storage.saveWorkspaceTaskLayout(existing.id, layout);
-    res.json({ ok: true, layout });
+    const expected = typeof body.layoutRevision === "number" && Number.isFinite(body.layoutRevision)
+      ? Math.floor(body.layoutRevision)
+      : undefined;
+    const saved = storage.saveWorkspaceTaskLayout(existing.id, layout, expected);
+    if (!saved.ok) {
+      res.status(409).json({
+        error: "布局已被其他端更新。",
+        layout: saved.layout,
+        layoutRevision: saved.layoutRevision,
+      });
+      return;
+    }
+    res.json({ ok: true, layout, layoutRevision: saved.layoutRevision });
   });
 }

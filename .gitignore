@@ -14,10 +14,6 @@ debug-*.mjs
 .wand-worktrees/
 .dev-pack/
 
-# Taskboard 只引入了上游预构建的 Web 产物，没有前端源码可在 Wand 构建时重新生成。
-!vendor/codex-taskboard/dist/
-!vendor/codex-taskboard/dist/**
-
 # 前端内嵌兜底资产：由 scripts/generate-web-assets.js 在 build/check/dev 时自动生成，
 # 是构建产物而非源码，不入库（避免 2MB base64 逐版本提交撑大 .git 仓库）。
 src/web-ui/embedded-assets.ts

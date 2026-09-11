@@ -118,6 +118,22 @@ function safeJsonParse<T>(raw: string | null): T | undefined {
   }
 }
 
+/**
+ * `wand_tasks.agent_json` 的读侧校验。历史行 / 手工写坏的值都退化成 null，
+ * 前端据此显示「未指定 CLI 工具」，而不是渲染出半个派发配置。
+ */
+export function parseWandTaskAgent(raw: unknown): import("./task-types.js").WandTaskAgent | null {
+  const value = typeof raw === "string" ? safeJsonParse<Record<string, unknown>>(raw) : undefined;
+  if (!value || typeof value !== "object") return null;
+  const provider = value.provider;
+  const model = value.model;
+  const thinkingEffort = value.thinkingEffort;
+  if (provider !== "claude" && provider !== "codex" && provider !== "opencode" && provider !== "grok" && provider !== "qoder" && provider !== "pi") return null;
+  if (typeof model !== "string" || !model.trim() || model.trim().length > 128) return null;
+  if (thinkingEffort !== "off" && thinkingEffort !== "standard" && thinkingEffort !== "deep" && thinkingEffort !== "max") return null;
+  return { provider, model: model.trim(), thinkingEffort };
+}
+
 const SESSION_OPTIONS_SCHEMA_VERSION = 1 as const;
 
 type DurableSessionOptions = Pick<SessionSnapshot,
@@ -431,6 +447,7 @@ interface WorkspaceTaskRow {
   cwd: string | null;
   created_at: string;
   last_opened_at: string | null;
+  layout_revision: number | null;
 }
 
 function mapWorkspaceTaskWorktree(raw: string | null): WorkspaceTaskWorktree | null {
@@ -475,6 +492,7 @@ function mapWorkspaceTaskRow(row: WorkspaceTaskRow): WorkspaceTask {
     status: (row.status === "done" ? "done" : "active") as WorkspaceTaskStatus,
     createdAt: row.created_at,
     lastOpenedAt: row.last_opened_at,
+    layoutRevision: Number(row.layout_revision ?? 0) || 0,
   };
 }
 
@@ -545,8 +563,8 @@ function sessionPersistValues(snapshot: SessionSnapshot): Array<string | number 
     snapshot.output,
     snapshot.ptyOutputSeq ?? 0,
     snapshot.archived ? 1 : 0,
-    snapshot.archivedAt,
-    snapshot.claudeSessionId,
+    snapshot.archivedAt ?? null,
+    snapshot.claudeSessionId ?? null,
     snapshot.provider ?? null,
     snapshot.sessionKind ?? "pty",
     snapshot.runner ?? null,
@@ -580,8 +598,8 @@ function sessionRuntimeMetadataValues(snapshot: SessionSnapshot): Array<string |
     snapshot.startedAt,
     snapshot.endedAt,
     snapshot.archived ? 1 : 0,
-    snapshot.archivedAt,
-    snapshot.claudeSessionId,
+    snapshot.archivedAt ?? null,
+    snapshot.claudeSessionId ?? null,
     snapshot.provider ?? null,
     snapshot.sessionKind ?? "pty",
     snapshot.runner ?? null,
@@ -852,6 +870,7 @@ const INIT_SQL = `
     cwd TEXT,
     created_at TEXT NOT NULL,
     last_opened_at TEXT,
+    layout_revision INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
   );
 
@@ -880,6 +899,8 @@ const INIT_SQL = `
     labels_json TEXT NOT NULL DEFAULT '[]',
     due_date TEXT,
     sort_order INTEGER NOT NULL DEFAULT 0,
+    agent_json TEXT,
+    workspace_task_id TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE SET NULL
@@ -894,14 +915,6 @@ const INIT_SQL = `
     FOREIGN KEY (session_id) REFERENCES command_sessions(id) ON DELETE CASCADE
   );
   CREATE INDEX IF NOT EXISTS idx_wand_task_sessions_session ON wand_task_sessions(session_id);
-  CREATE TABLE IF NOT EXISTS taskboard_session_bindings (
-    task_id TEXT NOT NULL,
-    session_id TEXT NOT NULL,
-    bound_at TEXT NOT NULL,
-    PRIMARY KEY (task_id, session_id),
-    FOREIGN KEY (session_id) REFERENCES command_sessions(id) ON DELETE CASCADE
-  );
-  CREATE INDEX IF NOT EXISTS idx_taskboard_session_bindings_session ON taskboard_session_bindings(session_id);
 `;
 
 function ensureWandTaskSchema(db: DatabaseSync): void {
@@ -909,7 +922,14 @@ function ensureWandTaskSchema(db: DatabaseSync): void {
   const names = new Set(columns.map((column) => column.name));
   if (columns.length > 0 && !names.has("identifier")) db.exec("ALTER TABLE wand_tasks ADD COLUMN identifier TEXT");
   if (columns.length > 0 && !names.has("due_date")) db.exec("ALTER TABLE wand_tasks ADD COLUMN due_date TEXT");
+  // 任务的默认派发配置（CLI 工具 / 模型 / 思考深度）。只加列，历史行保持 NULL。
+  if (columns.length > 0 && !names.has("agent_json")) db.exec("ALTER TABLE wand_tasks ADD COLUMN agent_json TEXT");
+  if (columns.length > 0 && !names.has("workspace_task_id")) db.exec("ALTER TABLE wand_tasks ADD COLUMN workspace_task_id TEXT");
   if (columns.length > 0) {
+    // Index creation must wait until the column exists on legacy databases.
+    // INIT_SQL cannot create it: CREATE TABLE IF NOT EXISTS is a no-op on old
+    // wand_tasks, and CREATE INDEX would then fail with "no such column".
+    db.exec("CREATE INDEX IF NOT EXISTS idx_wand_tasks_workspace_task ON wand_tasks(workspace_task_id)");
     const rows = db.prepare("SELECT id FROM wand_tasks WHERE identifier IS NULL OR identifier = '' ORDER BY created_at, id").all() as Array<{ id: string }>;
     const update = db.prepare("UPDATE wand_tasks SET identifier = ? WHERE id = ?");
     rows.forEach((row, index) => update.run(`TASK-${index + 1}`, row.id));
@@ -926,6 +946,9 @@ function ensureWorkspaceSchema(db: DatabaseSync): void {
   const taskNames = new Set(taskColumns.map((column) => column.name));
   if (taskColumns.length > 0 && !taskNames.has("cwd")) {
     db.exec("ALTER TABLE workspace_tasks ADD COLUMN cwd TEXT");
+  }
+  if (taskColumns.length > 0 && !taskNames.has("layout_revision")) {
+    db.exec("ALTER TABLE workspace_tasks ADD COLUMN layout_revision INTEGER NOT NULL DEFAULT 0");
   }
 }
 
@@ -955,6 +978,7 @@ export function ensureDatabaseFile(dbPath: string): boolean {
   ensureAuthSessionSchema(db);
   ensureCommandSessionSchema(db);
   ensureWorkspaceSchema(db);
+  ensureWandTaskSchema(db);
   ensureConnectorSchema(db);
   {
     const missionColumns = db.prepare("PRAGMA table_info(missions)").all() as Array<{ name: string }>;
@@ -1102,7 +1126,7 @@ export class WandStorage {
   listWorkspaces(): Workspace[] {
     const rows = this.db
       .prepare(
-        "SELECT id, name, cwd, kind, default_provider, layout_json, created_at, last_opened_at FROM workspaces ORDER BY created_at ASC, id ASC"
+        "SELECT id, name, cwd, kind, default_provider, layout_json, created_at, last_opened_at FROM workspaces ORDER BY created_at DESC, id DESC"
       )
       .all() as unknown as WorkspaceRow[];
     return rows.map(mapWorkspaceRow);
@@ -1266,9 +1290,9 @@ export class WandStorage {
   listWorkspaceTasks(workspaceId: string): WorkspaceTask[] {
     const rows = this.db
       .prepare(
-        `SELECT id, workspace_id, name, worktree_json, layout_json, status, cwd, created_at, last_opened_at
+        `SELECT id, workspace_id, name, worktree_json, layout_json, status, cwd, created_at, last_opened_at, layout_revision
          FROM workspace_tasks WHERE workspace_id = ?
-         ORDER BY COALESCE(last_opened_at, created_at) DESC`
+         ORDER BY created_at DESC, id DESC`
       )
       .all(workspaceId) as unknown as WorkspaceTaskRow[];
     return rows.map(mapWorkspaceTaskRow);
@@ -1277,7 +1301,7 @@ export class WandStorage {
   getWorkspaceTask(id: string): WorkspaceTask | null {
     const row = this.db
       .prepare(
-        `SELECT id, workspace_id, name, worktree_json, layout_json, status, cwd, created_at, last_opened_at
+        `SELECT id, workspace_id, name, worktree_json, layout_json, status, cwd, created_at, last_opened_at, layout_revision
          FROM workspace_tasks WHERE id = ?`
       )
       .get(id) as unknown as WorkspaceTaskRow | undefined;
@@ -1345,10 +1369,22 @@ export class WandStorage {
     this.db.prepare(`UPDATE workspace_tasks SET ${assignments.join(", ")} WHERE id = ?`).run(...values, id);
   }
 
-  saveWorkspaceTaskLayout(id: string, layout: TaskWindowLayout | null): void {
+  saveWorkspaceTaskLayout(
+    id: string,
+    layout: TaskWindowLayout | null,
+    expectedRevision?: number,
+  ): { ok: true; layoutRevision: number } | { ok: false; conflict: true; layoutRevision: number; layout: TaskWindowLayout | null } {
+    const current = this.getWorkspaceTask(id);
+    if (!current) throw new Error("未找到该任务。");
+    const currentRevision = current.layoutRevision ?? 0;
+    if (expectedRevision !== undefined && expectedRevision !== currentRevision) {
+      return { ok: false, conflict: true, layoutRevision: currentRevision, layout: current.layout };
+    }
+    const nextRevision = currentRevision + 1;
     this.db
-      .prepare("UPDATE workspace_tasks SET layout_json = ? WHERE id = ?")
-      .run(layout ? JSON.stringify(layout) : null, id);
+      .prepare("UPDATE workspace_tasks SET layout_json = ?, layout_revision = ? WHERE id = ?")
+      .run(layout ? JSON.stringify(layout) : null, nextRevision, id);
+    return { ok: true, layoutRevision: nextRevision };
   }
 
   touchWorkspaceTask(id: string): void {
@@ -1364,16 +1400,46 @@ export class WandStorage {
     this.db.prepare("DELETE FROM workspace_tasks WHERE id = ?").run(id);
   }
 
+  tasksAggregateFingerprint(): string {
+    const sessions = this.db.prepare(
+      `SELECT COUNT(*) AS count,
+              COALESCE(MAX(started_at), '') AS started,
+              COALESCE(MAX(ended_at), '') AS ended,
+              COALESCE(MAX(title), '') AS title
+       FROM command_sessions`
+    ).get() as { count: number; started: string; ended: string; title: string };
+    const tasks = this.db.prepare(
+      `SELECT COUNT(*) AS count,
+              COALESCE(MAX(created_at), '') AS created,
+              COALESCE(MAX(last_opened_at), '') AS opened,
+              COALESCE(MAX(layout_revision), 0) AS revision
+       FROM workspace_tasks`
+    ).get() as { count: number; created: string; opened: string; revision: number };
+    const workspaces = this.db.prepare(
+      `SELECT COUNT(*) AS count, COALESCE(MAX(last_opened_at), '') AS opened FROM workspaces`
+    ).get() as { count: number; opened: string };
+    return JSON.stringify({
+      sessions,
+      tasks,
+      workspaces,
+    });
+  }
+
   listWandTasks(workspaceId?: string | null): import("./task-types.js").WandTask[] {
     const rows = this.db.prepare(
-      `SELECT id, identifier, workspace_id, title, description, status, priority, labels_json, due_date, sort_order, created_at, updated_at
+      `SELECT id, identifier, workspace_id, workspace_task_id, title, description, status, priority, labels_json, due_date, sort_order, agent_json, created_at, updated_at
        FROM wand_tasks ${workspaceId === undefined ? "" : "WHERE workspace_id IS ?"}
        ORDER BY status, sort_order, updated_at DESC`,
     ).all(...(workspaceId === undefined ? [] : [workspaceId])) as unknown as Array<Record<string, unknown>>;
-    return rows.map((row) => ({
+    return rows.map((row) => this.mapWandTaskRow(row));
+  }
+
+  private mapWandTaskRow(row: Record<string, unknown>): import("./task-types.js").WandTask {
+    return {
       id: String(row.id),
       identifier: typeof row.identifier === "string" && row.identifier ? row.identifier : `TASK-${String(row.id).slice(0, 6)}`,
       workspaceId: typeof row.workspace_id === "string" ? row.workspace_id : null,
+      workspaceTaskId: typeof row.workspace_task_id === "string" && row.workspace_task_id ? row.workspace_task_id : null,
       title: String(row.title),
       description: String(row.description ?? ""),
       status: row.status === "doing" || row.status === "done" ? row.status : "todo",
@@ -1381,36 +1447,55 @@ export class WandStorage {
       labels: (() => { const parsed = safeJsonParse<unknown>(String(row.labels_json ?? "[]")); return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : []; })(),
       dueDate: typeof row.due_date === "string" ? row.due_date : null,
       sortOrder: Number(row.sort_order) || 0,
+      agent: parseWandTaskAgent(row.agent_json),
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at),
-    }));
+    };
   }
 
   getWandTask(id: string): import("./task-types.js").WandTask | null {
     return this.listWandTasks().find((task) => task.id === id) ?? null;
   }
 
-  createWandTask(input: { workspaceId?: string | null; title: string; description?: string; status?: import("./task-types.js").WandTaskStatus; priority?: import("./task-types.js").WandTaskPriority; labels?: string[]; dueDate?: string | null }): import("./task-types.js").WandTask {
+  getWandTaskByWorkspaceTaskId(workspaceTaskId: string): import("./task-types.js").WandTask | null {
+    const row = this.db.prepare(
+      `SELECT id, identifier, workspace_id, workspace_task_id, title, description, status, priority, labels_json, due_date, sort_order, agent_json, created_at, updated_at
+       FROM wand_tasks WHERE workspace_task_id = ? ORDER BY updated_at DESC LIMIT 1`,
+    ).get(workspaceTaskId) as Record<string, unknown> | undefined;
+    return row ? this.mapWandTaskRow(row) : null;
+  }
+
+  findUnlinkedWandTask(workspaceId: string, title: string): import("./task-types.js").WandTask | null {
+    const row = this.db.prepare(
+      `SELECT id, identifier, workspace_id, workspace_task_id, title, description, status, priority, labels_json, due_date, sort_order, agent_json, created_at, updated_at
+       FROM wand_tasks
+       WHERE workspace_id IS ? AND title = ? AND (workspace_task_id IS NULL OR workspace_task_id = '')
+       ORDER BY updated_at DESC LIMIT 1`,
+    ).get(workspaceId, title) as Record<string, unknown> | undefined;
+    return row ? this.mapWandTaskRow(row) : null;
+  }
+
+  createWandTask(input: { workspaceId?: string | null; workspaceTaskId?: string | null; title: string; description?: string; status?: import("./task-types.js").WandTaskStatus; priority?: import("./task-types.js").WandTaskPriority; labels?: string[]; dueDate?: string | null; agent?: import("./task-types.js").WandTaskAgent | null }): import("./task-types.js").WandTask {
     const id = crypto.randomUUID(); const now = nowIso();
     const status = input.status ?? "todo"; const priority = input.priority ?? "none";
     const max = this.db.prepare("SELECT COALESCE(MAX(sort_order), -1) AS value FROM wand_tasks WHERE workspace_id IS ? AND status = ?").get(input.workspaceId ?? null, status) as { value?: number } | undefined;
     const numberRow = this.db.prepare("SELECT COALESCE(MAX(CAST(substr(identifier, 6) AS INTEGER)), 0) AS value FROM wand_tasks WHERE identifier GLOB 'TASK-[0-9]*'").get() as { value?: number } | undefined;
     const identifier = `TASK-${(numberRow?.value ?? 0) + 1}`;
-    this.db.prepare(`INSERT INTO wand_tasks (id, identifier, workspace_id, title, description, status, priority, labels_json, due_date, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, identifier, input.workspaceId ?? null, input.title, input.description ?? "", status, priority, JSON.stringify(input.labels ?? []), input.dueDate ?? null, (max?.value ?? -1) + 1, now, now);
+    this.db.prepare(`INSERT INTO wand_tasks (id, identifier, workspace_id, workspace_task_id, title, description, status, priority, labels_json, due_date, sort_order, agent_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, identifier, input.workspaceId ?? null, input.workspaceTaskId ?? null, input.title, input.description ?? "", status, priority, JSON.stringify(input.labels ?? []), input.dueDate ?? null, (max?.value ?? -1) + 1, input.agent ? JSON.stringify(input.agent) : null, now, now);
     return this.getWandTask(id)!;
   }
 
-  updateWandTask(id: string, patch: Partial<Pick<import("./task-types.js").WandTask, "workspaceId" | "title" | "description" | "status" | "priority" | "labels" | "dueDate" | "sortOrder">>): import("./task-types.js").WandTask | null {
+  updateWandTask(id: string, patch: Partial<Pick<import("./task-types.js").WandTask, "workspaceId" | "workspaceTaskId" | "title" | "description" | "status" | "priority" | "labels" | "dueDate" | "sortOrder" | "agent">>): import("./task-types.js").WandTask | null {
     const current = this.getWandTask(id); if (!current) return null;
     const next = { ...current, ...patch, updatedAt: nowIso() };
-    this.db.prepare(`UPDATE wand_tasks SET workspace_id = ?, title = ?, description = ?, status = ?, priority = ?, labels_json = ?, due_date = ?, sort_order = ?, updated_at = ? WHERE id = ?`).run(next.workspaceId, next.title, next.description, next.status, next.priority, JSON.stringify(next.labels), next.dueDate, next.sortOrder, next.updatedAt, id);
+    this.db.prepare(`UPDATE wand_tasks SET workspace_id = ?, workspace_task_id = ?, title = ?, description = ?, status = ?, priority = ?, labels_json = ?, due_date = ?, sort_order = ?, agent_json = ?, updated_at = ? WHERE id = ?`).run(next.workspaceId, next.workspaceTaskId, next.title, next.description, next.status, next.priority, JSON.stringify(next.labels), next.dueDate, next.sortOrder, next.agent ? JSON.stringify(next.agent) : null, next.updatedAt, id);
     return next;
   }
 
   deleteWandTask(id: string): void { this.db.prepare("DELETE FROM wand_tasks WHERE id = ?").run(id); }
 
   listWandTaskSessionIds(taskId: string): string[] {
-    const rows = this.db.prepare("SELECT session_id FROM wand_task_sessions WHERE task_id = ? ORDER BY bound_at ASC").all(taskId) as unknown as Array<{ session_id: string }>;
+    const rows = this.db.prepare("SELECT session_id FROM wand_task_sessions WHERE task_id = ? ORDER BY rowid ASC, session_id ASC").all(taskId) as unknown as Array<{ session_id: string }>;
     return rows.map((row) => row.session_id);
   }
 
@@ -1421,20 +1506,6 @@ export class WandStorage {
   }
 
   unbindWandTaskSession(taskId: string, sessionId: string): void { this.db.prepare("DELETE FROM wand_task_sessions WHERE task_id = ? AND session_id = ?").run(taskId, sessionId); }
-
-  bindTaskboardTaskSession(taskId: string, sessionId: string): void {
-    if (!this.getSession(sessionId)) throw new Error("未找到该会话。");
-    this.db.prepare("INSERT OR IGNORE INTO taskboard_session_bindings (task_id, session_id, bound_at) VALUES (?, ?, ?)").run(taskId, sessionId, nowIso());
-  }
-
-  listTaskboardTaskSessions(taskId: string): string[] {
-    const rows = this.db.prepare("SELECT session_id FROM taskboard_session_bindings WHERE task_id = ? ORDER BY rowid ASC").all(taskId) as unknown as Array<{ session_id: string }>;
-    return rows.map((row) => row.session_id);
-  }
-
-  unbindTaskboardTaskSession(taskId: string, sessionId: string): void {
-    this.db.prepare("DELETE FROM taskboard_session_bindings WHERE task_id = ? AND session_id = ?").run(taskId, sessionId);
-  }
 
   listGithubIssueBindings(owner: string, repo: string, issueNumber: number): Array<{ sessionId: string; boundAt: string }> {
     const rows = this.db.prepare(
@@ -1499,14 +1570,23 @@ export class WandStorage {
     this.setConfigValue("appSecret", value);
   }
 
-  private encryptStoredPassword(password: string | undefined): string | null {
-    if (!password) return null;
+  /** Encrypt an at-rest secret with the vault key; plaintext when no key exists. */
+  private encryptStoredSecret(value: string | undefined): string | null {
+    if (!value) return null;
     const secret = this.getAppSecret();
-    return secret ? encryptVaultSecret(password, secret) : password;
+    return secret ? encryptVaultSecret(value, secret) : value;
   }
 
-  private decryptPasswordItem(item: PasswordVaultItem): PasswordVaultItem {
-    return { ...item, password: decryptVaultSecret(item.password, this.getAppSecret()) };
+  private decryptPasswordItem(item: PasswordItemRowFields, raw: PasswordVaultItemRow): PasswordVaultItem {
+    const secret = this.getAppSecret();
+    const notes = decryptVaultSecret(raw.notes ?? undefined, secret);
+    const fieldsJson = decryptVaultSecret(raw.fields, secret) ?? raw.fields;
+    return {
+      ...item,
+      password: decryptVaultSecret(raw.password ?? undefined, secret),
+      notes,
+      fields: decodePasswordFields(fieldsJson),
+    };
   }
 
   // ============ Browser Extension Password Vault Methods ============
@@ -1561,7 +1641,7 @@ export class WandStorage {
     const limit = typeof filter.limit === "number" && Number.isFinite(filter.limit)
       ? Math.max(1, Math.min(200, Math.floor(filter.limit)))
       : 100;
-    return rows.map((row) => this.decryptPasswordItem(mapPasswordItemRow(row)))
+    return rows.map((row) => this.decryptPasswordItem(mapPasswordItemRow(row), row))
       .filter((item) => itemMatchesFilter(item, filter)).slice(0, limit);
   }
 
@@ -1574,7 +1654,7 @@ export class WandStorage {
          WHERE id = ? AND archived = 0`
       )
       .get(id) as PasswordVaultItemRow | undefined;
-    return row ? this.decryptPasswordItem(mapPasswordItemRow(row)) : null;
+    return row ? this.decryptPasswordItem(mapPasswordItemRow(row), row) : null;
   }
 
   createPasswordItem(input: PasswordVaultItemInput): PasswordVaultItem {
@@ -1599,10 +1679,10 @@ export class WandStorage {
         normalized.type,
         normalized.title,
         normalized.username ?? null,
-        this.encryptStoredPassword(normalized.password),
+        this.encryptStoredSecret(normalized.password),
         JSON.stringify(normalized.urls),
-        normalized.notes ?? null,
-        JSON.stringify(normalized.fields),
+        this.encryptStoredSecret(normalized.notes),
+        this.encryptStoredSecret(JSON.stringify(normalized.fields)) ?? "{}",
         JSON.stringify(normalized.tags),
         normalized.favorite ? 1 : 0,
         now,
@@ -1646,10 +1726,10 @@ export class WandStorage {
         normalized.type,
         normalized.title,
         normalized.username ?? null,
-        this.encryptStoredPassword(normalized.password),
+        this.encryptStoredSecret(normalized.password),
         JSON.stringify(normalized.urls),
-        normalized.notes ?? null,
-        JSON.stringify(normalized.fields),
+        this.encryptStoredSecret(normalized.notes),
+        this.encryptStoredSecret(JSON.stringify(normalized.fields)) ?? "{}",
         JSON.stringify(normalized.tags),
         normalized.favorite ? 1 : 0,
         now,
@@ -1731,9 +1811,7 @@ export class WandStorage {
   }
 
   private encryptConnectorToken(token: string): string {
-    if (!token) return "";
-    const secret = this.getAppSecret();
-    return secret ? encryptVaultSecret(token, secret) : token;
+    return this.encryptStoredSecret(token) ?? "";
   }
 
   // ============ Auth Session Methods ============
@@ -2113,17 +2191,30 @@ function mapPasswordVaultRow(row: PasswordVaultRow): PasswordVault {
   };
 }
 
-function mapPasswordItemRow(row: PasswordVaultItemRow): PasswordVaultItem {
+type PasswordItemRowFields = Omit<PasswordVaultItem, "fields">;
+
+/** Parse the (possibly encrypted) `fields` JSON column into a string map. */
+function decodePasswordFields(json: string | null): Record<string, string> {
+  if (!json) return {};
+  try {
+    const parsed = JSON.parse(json) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return Object.fromEntries(
+      Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function mapPasswordItemRow(row: PasswordVaultItemRow): PasswordItemRowFields {
   return {
     id: row.id,
     vaultId: row.vault_id,
     type: row.type,
     title: row.title,
     username: row.username ?? undefined,
-    password: row.password ?? undefined,
     urls: safeJsonParse<string[]>(row.urls)?.filter((item): item is string => typeof item === "string") ?? [],
-    notes: row.notes ?? undefined,
-    fields: safeJsonParse<Record<string, string>>(row.fields) ?? {},
     tags: safeJsonParse<string[]>(row.tags)?.filter((item): item is string => typeof item === "string") ?? [],
     favorite: Boolean(row.favorite),
     createdAt: row.created_at,

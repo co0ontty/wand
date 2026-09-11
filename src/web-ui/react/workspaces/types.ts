@@ -94,6 +94,7 @@ export interface WorkspaceTask {
   status: WorkspaceTaskStatus;
   createdAt: string;
   lastOpenedAt: string | null;
+  layoutRevision?: number;
 }
 
 /** POST/GET 任务路由的返回：在 WorkspaceTask 基础上带回运行期派生字段。 */
@@ -123,6 +124,8 @@ export interface TaskDirectoryGroup {
   workspaceId: string;
   workspaceName: string;
   workspaceCwd: string;
+  /** Folder birth time. New folders sort first; opening never changes this. */
+  createdAt?: string;
   synthetic?: boolean;
   /** Hidden global workspace that holds standalone tasks. */
   global?: boolean;
@@ -209,7 +212,7 @@ export interface NewProjectDefaults {
 export interface WorkspacesRepository {
   list(): Promise<Workspace[]>;
   /** 目录分组的任务聚合列表（GET /api/tasks），供侧栏「任务」视图一次拉全。 */
-  listTaskGroups(): Promise<TaskDirectoryGroup[]>;
+  listTaskGroups(revision?: string): Promise<{ groups: TaskDirectoryGroup[]; revision?: string; unchanged: boolean }>;
   get(id: string): Promise<WorkspaceDetail>;
   create(request: CreateWorkspaceRequest): Promise<Workspace>;
   update(id: string, patch: UpdateWorkspaceRequest): Promise<Workspace>;
@@ -222,7 +225,7 @@ export interface WorkspacesRepository {
   getTask(taskId: string): Promise<WorkspaceTaskDetail>;
   updateTask(taskId: string, patch: UpdateWorkspaceTaskRequest): Promise<WorkspaceTask>;
   deleteTask(taskId: string, cascade?: boolean): Promise<void>;
-  saveTaskLayout(taskId: string, layout: TaskWindowLayout | null): Promise<TaskWindowLayout | null>;
+  saveTaskLayout(taskId: string, layout: TaskWindowLayout | null, layoutRevision?: number): Promise<{ layout: TaskWindowLayout | null; layoutRevision?: number }>;
   /** Project-level review data used by the multi-worktree merge Agent launcher. */
   listWorktrees(workspaceId: string, options?: { signal?: AbortSignal }): Promise<WorkspaceWorktreeOverview>;
   /** 关闭工作窗口 / 终端时批量结束并删除其底层会话。 */

@@ -527,7 +527,12 @@ export class WsBroadcastManager {
       if (!usesPtyAckFlowControl
         && (client.backpressurePaused || client.sendQueue.length >= MAX_QUEUE_SIZE)) {
         client.backpressurePaused = true;
-        if (event.type === "output") client.pendingResyncSessions.add(event.sessionId);
+        // Dropped output, ended, and status are all reconstructable only via
+        // a fresh init. Recording only output left clients spinning when the
+        // last dropped frame was ended/status.
+        if (typeof event.sessionId === "string" && event.sessionId) {
+          client.pendingResyncSessions.add(event.sessionId);
+        }
         this.processWsQueue(client);
         continue;
       }

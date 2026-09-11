@@ -57,6 +57,31 @@ function collect(
   return collected;
 }
 
+test("in-process structured host reassembles UTF-8 split across chunks", async () => {
+  const host = new InProcessStructuredExecHost();
+  const jsonLine = '{"text":"你好🙂"}';
+  const payload = jsonLine + "\n";
+  const script = [
+    `const bytes = Buffer.from(${JSON.stringify(payload)});`,
+    "process.stdout.write(bytes.subarray(0, 10));",
+    "process.stdout.write(bytes.subarray(10));",
+    "process.exit(0);",
+  ].join("\n");
+  const handle = await host.spawnStructured({
+    runId: structuredRunId("s-utf8"),
+    file: NODE,
+    args: ["-e", script],
+    cwd: tmpdir(),
+    env: {},
+  });
+  const collected = collect(handle);
+  await Promise.race([collected.done, new Promise((r) => setTimeout(r, 5000))]);
+  assert.ok(collected.stdout.includes(jsonLine), `stdout=${JSON.stringify(collected.stdout)}`);
+  assert.ok(!collected.stdout.includes("\uFFFD"), `replacement in stdout=${JSON.stringify(collected.stdout)}`);
+  assert.equal(collected.exit?.exitCode, 0);
+  host.forgetRun(structuredRunId("s-utf8"));
+});
+
 test("in-process structured host spawns, streams, and reports exit", async () => {
   const host = new InProcessStructuredExecHost();
   assert.equal(host.persistent, false);
@@ -148,6 +173,98 @@ test("daemon-owned structured runs survive client reconnect and replay full logs
     secondClient.forgetRun(structuredRunId("s-reconnect"));
     await waitFor(async () => (await secondClient.attachRun(structuredRunId("s-reconnect"))) === null);
     secondClient.disconnect();
+  } finally {
+    daemon.kill("SIGTERM");
+  }
+});
+
+test("daemon-owned structured runs round-trip a Chinese+emoji JSON line split mid-character", async () => {
+  const configPath = path.join(mkdtempSync(path.join(tmpdir(), "wand-structured-utf8-")), "config.json");
+  const daemon = startDaemonProcess(configPath);
+  try {
+    const paths = terminalDaemonPaths(configPath);
+    const waitForToken = async (): Promise<string> => {
+      for (let i = 0; i < 100; i++) {
+        try { return readFileSync(paths.tokenPath, "utf8").trim(); } catch { /* not yet */ }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      throw new Error("terminal daemon token never appeared");
+    };
+    const token = await waitForToken();
+    const client = new TerminalDaemonClient(paths.socketPath, token);
+    await client.connect();
+    const jsonLine = '{"text":"你好🙂"}';
+    const script = `
+      const line = ${JSON.stringify(jsonLine)} + "\\n";
+      const bytes = Buffer.from(line, "utf8");
+      process.stdout.write(bytes.subarray(0, 16)); // mid 🙂
+      setTimeout(() => {
+        process.stdout.write(bytes.subarray(16));
+        process.exit(0);
+      }, 200);
+    `;
+    const handle = await client.spawnStructured({
+      runId: structuredRunId("s-utf8-live"),
+      file: NODE,
+      args: ["-e", script],
+      cwd: tmpdir(),
+      env: {},
+    });
+    const collected = collect(handle);
+    await Promise.race([collected.done, new Promise((resolve) => setTimeout(resolve, 5000))]);
+    assert.ok(collected.stdout.includes(jsonLine), `live stdout=${JSON.stringify(collected.stdout)}`);
+    assert.ok(!collected.stdout.includes("\uFFFD"));
+    const attached = await client.attachRun(structuredRunId("s-utf8-live"));
+    assert.ok(attached);
+    assert.ok(attached!.stdoutLog.includes(jsonLine), `replay log=${JSON.stringify(attached!.stdoutLog)}`);
+    assert.ok(!attached!.stdoutLog.includes("\uFFFD"));
+    assert.equal(attached!.stdoutTruncated, false);
+    client.forgetRun(structuredRunId("s-utf8-live"));
+    client.disconnect();
+  } finally {
+    daemon.kill("SIGTERM");
+  }
+});
+
+test("incomplete UTF-8 at process exit does not inject replacement characters into daemon logs", async () => {
+  const configPath = path.join(mkdtempSync(path.join(tmpdir(), "wand-structured-trunc-")), "config.json");
+  const daemon = startDaemonProcess(configPath);
+  try {
+    const paths = terminalDaemonPaths(configPath);
+    const waitForToken = async (): Promise<string> => {
+      for (let i = 0; i < 100; i++) {
+        try { return readFileSync(paths.tokenPath, "utf8").trim(); } catch { /* not yet */ }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      throw new Error("terminal daemon token never appeared");
+    };
+    const token = await waitForToken();
+    const client = new TerminalDaemonClient(paths.socketPath, token);
+    await client.connect();
+    const jsonLine = '{"text":"你好🙂"}';
+    const script = `
+      const bytes = Buffer.from(${JSON.stringify(jsonLine)}, "utf8");
+      process.stdout.write(bytes.subarray(0, 10)); // mid 你, then exit
+      process.exit(0);
+    `;
+    const handle = await client.spawnStructured({
+      runId: structuredRunId("s-utf8-trunc"),
+      file: NODE,
+      args: ["-e", script],
+      cwd: tmpdir(),
+      env: {},
+    });
+    const collected = collect(handle);
+    await Promise.race([collected.done, new Promise((resolve) => setTimeout(resolve, 5000))]);
+    assert.equal(collected.exit?.exitCode, 0);
+    assert.ok(!collected.stdout.includes("\uFFFD"), `live stdout=${JSON.stringify(collected.stdout)}`);
+    const attached = await client.attachRun(structuredRunId("s-utf8-trunc"));
+    assert.ok(attached);
+    assert.equal(attached!.stdoutTruncated, false);
+    assert.ok(!attached!.stdoutLog.includes("\uFFFD"), `replay log=${JSON.stringify(attached!.stdoutLog)}`);
+    assert.equal(attached!.stdoutLog, '{"text":"');
+    client.forgetRun(structuredRunId("s-utf8-trunc"));
+    client.disconnect();
   } finally {
     daemon.kill("SIGTERM");
   }

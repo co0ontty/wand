@@ -24,15 +24,17 @@ test("GitHub issue bindings persist and deduplicate session links", () => {
   }
 });
 
-test("Taskboard bindings accept every Wand structured provider", () => {
-  const root = mkdtempSync(path.join(os.tmpdir(), "wand-taskboard-provider-binding-"));
+test("Wand-task bindings accept every Wand structured provider", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-task-provider-binding-"));
   const storage = new WandStorage(path.join(root, "wand.db"));
   const manager = new StructuredSessionManager(storage, { ...defaultConfig(), defaultCwd: root });
+  const task = storage.createWandTask({ title: "多 provider 议题" });
   try {
     const providers = ["claude", "codex", "opencode", "grok", "qoder", "pi"] as const;
     const ids = providers.map((provider) => manager.createSession({ cwd: root, provider, mode: provider === "codex" ? "full-access" : "default" }).id);
-    ids.forEach((id) => storage.bindTaskboardTaskSession("taskboard-task", id));
-    assert.deepEqual(storage.listTaskboardTaskSessions("taskboard-task"), ids);
+    ids.forEach((id) => storage.bindWandTaskSession(task.id, id));
+    assert.deepEqual(new Set(storage.listWandTaskSessionIds(task.id)), new Set(ids));
+    assert.equal(storage.listWandTaskSessionIds(task.id).length, ids.length);
   } finally {
     manager.dispose();
     storage.close();

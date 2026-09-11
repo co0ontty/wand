@@ -142,6 +142,24 @@ test("task creation makes an isolated worktree in a git workspace", async () => 
   }
 });
 
+test("explicit worktree:true fails instead of silently degrading", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-task-require-worktree-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const { baseUrl, close } = await startWorkspaceApp(storage);
+  try {
+    const ws = await fetch(`${baseUrl}/api/workspaces`, json({ name: "Plain", cwd: root })).then((r) => r.json() as Promise<{ id: string }>);
+    const res = await fetch(`${baseUrl}/api/workspaces/${ws.id}/tasks`, json({ name: "必须隔离", worktree: true }));
+    assert.equal(res.status, 400);
+    const body = await res.json() as { error?: string };
+    assert.match(body.error ?? "", /worktree|隔离|git/i);
+    const tasks = await fetch(`${baseUrl}/api/workspaces/${ws.id}/tasks`).then((r) => r.json() as Promise<unknown[]>);
+    assert.equal(tasks.length, 0);
+  } finally {
+    await close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("task in a non-git workspace degrades to no isolation", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-task-nogit-"));
   const storage = new WandStorage(path.join(root, "wand.db"));
@@ -228,7 +246,7 @@ test("task creation can skip worktree isolation and /api/tasks aggregates across
     assert.deepEqual(group.standaloneSessions.map((session) => session.id), [looseSession.id]);
     assert.equal("ptyBusy" in (sharedRow.sessions[0] as { ptyBusy?: boolean }), true);
 
-    const pageResponse = await fetch(`${baseUrl}/api/tasks?revision=`);
+    const pageResponse = await fetch(`${baseUrl}/api/tasks?revision=probe`);
     assert.equal(pageResponse.status, 200);
     const page = await pageResponse.json() as {
       unchanged: boolean;
@@ -465,5 +483,126 @@ test("standalone tasks use the global scratch workspace and stay off the project
     await close();
     rmSync(root, { recursive: true, force: true });
     rmSync(mounted, { recursive: true, force: true });
+  }
+});
+
+
+test("task list keeps created order and puts new folders and tasks first", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-task-order-"));
+  const olderDir = path.join(root, "older");
+  const newerDir = path.join(root, "newer");
+  mkdirSync(olderDir);
+  mkdirSync(newerDir);
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const { baseUrl, close } = await startWorkspaceApp(storage);
+  try {
+    const older = storage.createWorkspace({ name: "旧项目", cwd: olderDir });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const newer = storage.createWorkspace({ name: "新项目", cwd: newerDir });
+    const olderFirst = storage.createWorkspaceTask({ workspaceId: older.id, name: "旧任务" });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const olderSecond = storage.createWorkspaceTask({ workspaceId: older.id, name: "新任务" });
+    storage.touchWorkspaceTask(olderFirst.id);
+
+    const listed = await fetch(`${baseUrl}/api/workspaces`).then((res) => res.json() as Promise<Array<{ id: string }>>);
+    assert.deepEqual(listed.map((workspace) => workspace.id), [newer.id, older.id]);
+
+    const groups = await fetch(`${baseUrl}/api/tasks`).then((res) => res.json() as Promise<Array<{
+      workspaceId: string;
+      createdAt?: string;
+      tasks: Array<{ id: string }>;
+    }>>);
+    assert.deepEqual(
+      groups.filter((group) => !group.workspaceId.startsWith("cwd:")).map((group) => group.workspaceId),
+      [newer.id, older.id],
+    );
+    const olderGroup = groups.find((group) => group.workspaceId === older.id);
+    assert.deepEqual(olderGroup?.tasks.map((task) => task.id), [olderSecond.id, olderFirst.id]);
+  } finally {
+    await close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("cheap /api/tasks revision skips rebuilding groups when unchanged", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-tasks-revision-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const { baseUrl, close } = await startWorkspaceApp(storage);
+  try {
+    const first = await fetch(`${baseUrl}/api/tasks?revision=missing`);
+    assert.equal(first.status, 200);
+    const body = await first.json() as { unchanged?: boolean; revision?: string; groups?: unknown[] };
+    assert.equal(body.unchanged, false);
+    assert.ok(typeof body.revision === "string" && body.revision.length > 0);
+    const second = await fetch(`${baseUrl}/api/tasks?revision=${encodeURIComponent(body.revision)}`);
+    const again = await second.json() as { unchanged?: boolean; groups?: unknown[] };
+    assert.equal(again.unchanged, true);
+    assert.deepEqual(again.groups, []);
+  } finally {
+    await close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("task layout PUT conflicts when the expected revision is stale", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-layout-revision-"));
+  git(["init", "-q", "-b", "main"], root);
+  writeFileSync(path.join(root, "README.md"), "hello\n");
+  git(["add", "."], root);
+  git(["commit", "-q", "-m", "init"], root);
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const { baseUrl, close } = await startWorkspaceApp(storage);
+  try {
+    const ws = await fetch(`${baseUrl}/api/workspaces`, json({ name: "Wand", cwd: root })).then((r) => r.json() as Promise<{ id: string }>);
+    const created = await fetch(`${baseUrl}/api/workspaces/${ws.id}/tasks`, json({ name: "布局", worktree: false })).then((r) => r.json() as Promise<{ id: string }>);
+    const layout = { type: "windows", windows: [], activeWindowId: null };
+    const first = await fetch(`${baseUrl}/api/workspace-tasks/${created.id}/layout`, json({ layout, layoutRevision: 0 }, "PUT"));
+    assert.equal(first.status, 200);
+    const saved = await first.json() as { layoutRevision?: number };
+    assert.equal(saved.layoutRevision, 1);
+    const stale = await fetch(`${baseUrl}/api/workspace-tasks/${created.id}/layout`, json({ layout, layoutRevision: 0 }, "PUT"));
+    assert.equal(stale.status, 409);
+  } finally {
+    await close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("creating a workspace task fills a board card and reuses a matching unlinked one", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-task-board-sync-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const { baseUrl, close } = await startWorkspaceApp(storage);
+  try {
+    const ws = await fetch(`${baseUrl}/api/workspaces`, json({ name: "Wand", cwd: root }))
+      .then((r) => r.json() as Promise<{ id: string; name: string; cwd: string }>);
+    const preexisting = storage.createWandTask({
+      workspaceId: ws.id,
+      title: "登录页",
+      description: "旧卡片",
+    });
+
+    const created = await fetch(`${baseUrl}/api/workspaces/${ws.id}/tasks`, json({ name: "登录页", worktree: false }))
+      .then((r) => r.json() as Promise<{ id: string; name: string }>);
+    const linked = storage.getWandTaskByWorkspaceTaskId(created.id);
+    assert.ok(linked);
+    assert.equal(linked!.id, preexisting.id);
+    assert.equal(linked!.workspaceTaskId, created.id);
+    assert.equal(linked!.status, "todo");
+
+    const second = await fetch(`${baseUrl}/api/workspaces/${ws.id}/tasks`, json({ name: "设置页", worktree: false }))
+      .then((r) => r.json() as Promise<{ id: string; name: string }>);
+    const fresh = storage.getWandTaskByWorkspaceTaskId(second.id);
+    assert.ok(fresh);
+    assert.notEqual(fresh!.id, preexisting.id);
+    assert.equal(fresh!.title, "设置页");
+    assert.match(fresh!.description, /项目：Wand/);
+    assert.match(fresh!.description, /目录：/);
+
+    const archived = await fetch(`${baseUrl}/api/workspace-tasks/${second.id}`, json({ status: "done" }, "PATCH"));
+    assert.equal(archived.status, 200);
+    assert.equal(storage.getWandTask(fresh!.id)?.status, "done");
+  } finally {
+    await close();
+    rmSync(root, { recursive: true, force: true });
   }
 });

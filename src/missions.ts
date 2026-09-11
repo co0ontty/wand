@@ -252,7 +252,7 @@ export class Missions {
     return comment;
   }
 
-  sendReview(missionId: string, attemptId: string, commentIds?: string[]): MissionReviewComment[] {
+  async sendReview(missionId: string, attemptId: string, commentIds?: string[]): Promise<MissionReviewComment[]> {
     const attempt = this.requireAttempt(missionId, attemptId);
     if (!attempt.sessionId) throw new Error("这个 attempt 没有关联会话。");
     const selected = this.storage.listMissionReviewComments(missionId, attemptId)
@@ -260,11 +260,23 @@ export class Missions {
     if (selected.length === 0) throw new Error("没有待发送的 review 意见。");
     const session = this.structured.get(attempt.sessionId);
     if (!session) throw new Error("任务会话当前不可用。");
-    const completion = this.structured.sendMessage(attempt.sessionId, reviewPrompt(selected));
-    completion.catch((error) => {
+    const commentIdsToSend = selected.map((comment) => comment.id);
+    const accepted = this.structured.sendMessage(attempt.sessionId, reviewPrompt(selected));
+    // sendMessage settles after the whole turn. Treat microtask acceptance as
+    // "queued or started"; a synchronous/microtask rejection stays pending.
+    try {
+      await Promise.race([
+        accepted,
+        new Promise<void>((resolve) => setImmediate(resolve)),
+      ]);
+    } catch (error) {
       console.error(`[Missions] Review dispatch failed for ${attempt.id}:`, error);
+      throw error;
+    }
+    accepted.catch((error) => {
+      console.error(`[Missions] Review execution failed for ${attempt.id}:`, error);
     });
-    this.storage.updateMissionReviewStatus(selected.map((comment) => comment.id), "sent");
+    this.storage.updateMissionReviewStatus(commentIdsToSend, "sent");
     this.storage.saveMissionAttempt({ ...attempt, state: "working", updatedAt: nowIso() });
     this.refreshMissionStatus(missionId);
     return this.storage.listMissionReviewComments(missionId, attemptId);

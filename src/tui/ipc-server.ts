@@ -6,6 +6,7 @@
 
 import net from "node:net";
 import { chmodSync, chownSync, existsSync, statSync, unlinkSync } from "node:fs";
+import { StringDecoder } from "node:string_decoder";
 import path from "node:path";
 import { IpcRequest, IpcResponseErr, IpcResponseOk, IpcSnapshotData } from "./ipc-protocol.js";
 import { getErrorMessage } from "../error-utils.js";
@@ -31,8 +32,9 @@ export function startIpcServer(deps: IpcServerDeps): IpcServerHandle | null {
 
   const server = net.createServer((conn) => {
     let buf = "";
+    const decoder = new StringDecoder("utf8");
     conn.on("data", (chunk) => {
-      buf += chunk.toString("utf8");
+      buf += decoder.write(chunk);
       let idx: number;
       while ((idx = buf.indexOf("\n")) >= 0) {
         const line = buf.slice(0, idx).trim();

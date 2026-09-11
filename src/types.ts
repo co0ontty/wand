@@ -715,6 +715,7 @@ export interface WorkspaceTask {
   status: WorkspaceTaskStatus;
   createdAt: string;
   lastOpenedAt: string | null;
+  layoutRevision?: number;
 }
 
 // ── Session Event (PTY Bridge Output) ──

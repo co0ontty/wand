@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import net from "node:net";
 import { spawn } from "node:child_process";
 import process from "node:process";
+import { StringDecoder } from "node:string_decoder";
 
 import {
   TERMINAL_DAEMON_PROTOCOL_VERSION,
@@ -253,6 +254,8 @@ export class TerminalDaemonClient implements TerminalHost, StructuredExecHost {
   readonly persistent = true;
   private socket: net.Socket | null = null;
   private buffer = "";
+  /** Decodes daemon NDJSON frames without splitting multi-byte chars. */
+  private decoder = new StringDecoder("utf8");
   private nextRequestId = 1;
   private readonly pending = new Map<number, PendingRequest>();
   private readonly inventory = new Map<string, TerminalSessionState>();
@@ -287,7 +290,10 @@ export class TerminalDaemonClient implements TerminalHost, StructuredExecHost {
       socket.once("connect", onConnect);
       socket.once("error", onError);
     });
-    socket.on("data", (data) => this.consume(data.toString("utf8")));
+    // Each socket decodes from a clean slate; a half-written character from a
+    // previous connection must not leak into the next frame.
+    this.decoder = new StringDecoder("utf8");
+    socket.on("data", (data) => this.consume(this.decoder.write(data)));
     socket.on("close", () => this.handleDisconnect());
     socket.on("error", (error) => {
       this.rejectPending(error instanceof Error ? error : new Error(String(error)));

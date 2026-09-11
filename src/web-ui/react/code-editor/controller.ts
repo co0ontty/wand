@@ -6,6 +6,7 @@ import {
 import { httpCodeEditorRepository } from "./repository";
 import type {
   CodeEditorCommand,
+  CodeEditorConflictChoice,
   CodeEditorDiscardReason,
   CodeEditorFile,
   CodeEditorLoadResult,
@@ -93,7 +94,22 @@ const defaultRuntime: CodeEditorRuntimeAdapter = {
       dismissable: true,
     });
     void path;
-    return result.dismissed === false && result.action === true;
+    return "action" in result && result.action === true;
+  },
+
+  async confirmConflict(path): Promise<CodeEditorConflictChoice> {
+    const result = await wandOverlay.dialog<CodeEditorConflictChoice>({
+      title: "磁盘文件已更改",
+      description: `「${path}」在打开后被外部修改。重新加载会丢弃当前草稿；覆盖会用编辑器内容替换磁盘文件。`,
+      tone: "warning",
+      actions: [
+        { label: "取消", value: "cancel", kind: "secondary", autoFocus: true },
+        { label: "重新加载", value: "reload", kind: "secondary" },
+        { label: "仍要覆盖", value: "overwrite", kind: "danger" },
+      ],
+      dismissable: true,
+    });
+    return "action" in result ? result.action : "cancel";
   },
 
   notify(message, tone): void {
@@ -183,6 +199,80 @@ export function createCodeEditorModule(options: CodeEditorModuleOptions): CodeEd
     }
   }
 
+  async function confirmConflict(path: string): Promise<CodeEditorConflictChoice> {
+    if (!runtime.confirmConflict) return "cancel";
+    try {
+      return await runtime.confirmConflict(path);
+    } catch (error) {
+      runtime.notify(unknownFailure(error, "无法确认是否覆盖外部修改。").message, "error");
+      return "cancel";
+    }
+  }
+
+  function applySavedFile(path: string, writtenDraft: string, size: number, mtime?: string): void {
+    const current = files.get(path);
+    if (!current) return;
+    const saved: CodeEditorFile = {
+      ...current,
+      // 只把这次真正写入磁盘的内容设为 baseline；即使未来允许保存中继续
+      // 编辑，也不会把尚未落盘的新 draft 误标成已保存。
+      baseline: writtenDraft,
+      draft: current.draft,
+      dirty: current.draft !== writtenDraft,
+      size,
+      mtime,
+    };
+    files.set(path, saved);
+    const activeFile = snapshot.activePath ? files.get(snapshot.activePath) ?? null : null;
+    publish({ saving: false, file: activeFile, failure: null, tabs: tabsFromFiles(snapshot.activePath) });
+  }
+
+  async function saveFile(active: CodeEditorFile, opts: { overwrite: boolean }): Promise<boolean> {
+    publish({ saving: true, failure: null });
+    const writtenDraft = active.draft;
+    try {
+      const outcome = await options.repository.save(active.path, writtenDraft, {
+        expectedMtime: active.mtime,
+        expectedSize: active.size,
+        overwrite: opts.overwrite,
+      });
+      const current = files.get(active.path) ?? null;
+      if (!current) {
+        publish({ saving: false });
+        return false;
+      }
+      if (outcome.ok === false && "conflict" in outcome) {
+        publish({ saving: false, failure: { message: outcome.conflict.message, status: 409, size: outcome.conflict.size } });
+        runtime.notify(outcome.conflict.message, "warning");
+        const choice = await confirmConflict(active.path);
+        if (choice === "reload") {
+          const reloaded = await load(active.path);
+          if (reloaded) runtime.notify("已重新加载磁盘文件", "info");
+          return reloaded;
+        }
+        if (choice === "overwrite") {
+          const latest = files.get(active.path);
+          if (!latest) return false;
+          return saveFile(latest, { overwrite: true });
+        }
+        return false;
+      }
+      if (outcome.ok === false) {
+        publish({ saving: false, failure: outcome.failure });
+        runtime.notify(outcome.failure.message, "error");
+        return false;
+      }
+      applySavedFile(active.path, writtenDraft, outcome.result.size, outcome.result.mtime);
+      runtime.notify("已保存", "success");
+      try { await runtime.onSaved?.(active.path); } catch { /* best-effort refresh */ }
+      return true;
+    } catch (error) {
+      publish({ saving: false, failure: unknownFailure(error, "保存失败：网络错误") });
+      runtime.notify(unknownFailure(error, "保存失败：网络错误").message, "error");
+      return false;
+    }
+  }
+
   async function execute(command: CodeEditorCommand): Promise<boolean> {
     switch (command.type) {
       case "close": {
@@ -225,7 +315,7 @@ export function createCodeEditorModule(options: CodeEditorModuleOptions): CodeEd
         return true;
       }
       case "change": {
-        if (!snapshot.activePath || snapshot.saving) return false;
+        if (!snapshot.activePath) return false;
         const active = files.get(snapshot.activePath);
         if (!active) return false;
         const updated: CodeEditorFile = { ...active, draft: command.value, dirty: command.value !== active.baseline };
@@ -250,36 +340,7 @@ export function createCodeEditorModule(options: CodeEditorModuleOptions): CodeEd
           runtime.notify("没有改动", "info");
           return true;
         }
-        publish({ saving: true, failure: null });
-        try {
-          const outcome = await options.repository.save(active.path, active.draft);
-          const current = files.get(active.path) ?? null;
-          if (!current) return false;
-          if (outcome.ok === false) {
-            publish({ saving: false, failure: outcome.failure });
-            runtime.notify(outcome.failure.message, "error");
-            return false;
-          }
-          const saved: CodeEditorFile = {
-            ...current,
-            // 只把这次真正写入磁盘的内容设为 baseline；即使未来允许保存中继续
-            // 编辑，也不会把尚未落盘的新 draft 误标成已保存。
-            baseline: active.draft,
-            draft: current.draft,
-            dirty: current.draft !== active.draft,
-            size: outcome.result.size,
-          };
-          files.set(active.path, saved);
-          const activeFile = snapshot.activePath ? files.get(snapshot.activePath) ?? null : null;
-          publish({ saving: false, file: activeFile, failure: null, tabs: tabsFromFiles(snapshot.activePath) });
-          runtime.notify("已保存", "success");
-          try { await runtime.onSaved?.(active.path); } catch { /* best-effort refresh */ }
-          return true;
-        } catch (error) {
-          publish({ saving: false, failure: unknownFailure(error, "保存失败：网络错误") });
-          runtime.notify(unknownFailure(error, "保存失败：网络错误").message, "error");
-          return false;
-        }
+        return saveFile(active, { overwrite: false });
       }
       case "wrap.toggle":
         publish({ wrap: !snapshot.wrap });

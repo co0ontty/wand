@@ -170,12 +170,6 @@ export function ensureNodePtyHelperExecutable(): void {
   }
 }
 
-export function resetNodePtyHelperStateForTests(): void {
-  cachedVendorHelperPath = null;
-  patchedVendorHelperPath = null;
-  patchedExecutableHelperPath = null;
-}
-
 export function describePtySpawnFailure(error: unknown): string {
   const message = getErrorMessage(error, "无法启动终端。");
   if (/posix_spawnp failed/i.test(message)) {

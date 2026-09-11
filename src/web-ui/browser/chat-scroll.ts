@@ -528,6 +528,8 @@ function isElementExpanded(el: any, kind: string) {
       return el.getAttribute("data-expanded") === "true";
     case "subagent-panel":
       return el.getAttribute("data-expanded") === "true";
+    case "activity":
+      return el.getAttribute("data-expanded") === "true";
     default:
       return false;
   }
@@ -585,6 +587,18 @@ export function applyExpandedState(el: any, kind: string, expanded: boolean) {
         subToggleBtn.setAttribute("aria-expanded", expanded ? "true" : "false");
         subToggleBtn.setAttribute("aria-label", expanded ? "收起子代理回复" : "展开子代理回复全文");
       }
+      break;
+    }
+    case "activity": {
+      el.setAttribute("data-expanded", expanded ? "true" : "false");
+      var activityBody = el.querySelector(".chat-activity-body");
+      if (activityBody) {
+        activityBody.style.display = expanded ? "block" : "none";
+        activityBody.setAttribute("aria-hidden", expanded ? "false" : "true");
+        if (expanded) activityBody.scrollTop = activityBody.scrollHeight;
+      }
+      var activitySummary = el.querySelector(".chat-activity-summary");
+      if (activitySummary) activitySummary.setAttribute("aria-expanded", expanded ? "true" : "false");
       break;
     }
     case "subagent-panel": {

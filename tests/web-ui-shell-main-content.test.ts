@@ -199,6 +199,9 @@ test("ShellMainContent uses UiStore actions and no forbidden legacy seam", () =>
   assert.match(source, /context\.taskId \? null : <ShellTopbar\/>/);
   assert.match(source, /<WorkspaceTabBar\/>/);
   assert.doesNotMatch(source, /inSplit \? null : <WorkspaceTabBar\/>/);
+  // 任务管理是叠层路由，不能替换 <main>，否则 #output 被卸载后会话回不去。
+  assert.match(source, /taskBoard\.open \? <TaskBoardHost/);
+  assert.doesNotMatch(source, /if \(taskBoard\.open\) \{\s*return <main/s);
   assert.doesNotMatch(source, /innerHTML|querySelector|getElementById|browser\/state|@radix-ui\/|\bfetch\s*\(/);
 });
 

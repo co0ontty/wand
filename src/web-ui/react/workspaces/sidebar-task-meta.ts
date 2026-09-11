@@ -26,6 +26,57 @@ export function taskRecency(task: TaskSummary): string {
   return task.lastOpenedAt ?? task.createdAt;
 }
 
+/** Newer createdAt first; missing timestamps sink; id is a stable tiebreaker. */
+export function compareCreatedDesc(
+  left?: string | null,
+  right?: string | null,
+  leftId = "",
+  rightId = "",
+): number {
+  const a = (left ?? "").trim();
+  const b = (right ?? "").trim();
+  if (a !== b) {
+    if (!a) return 1;
+    if (!b) return -1;
+    return b.localeCompare(a);
+  }
+  return rightId.localeCompare(leftId);
+}
+
+export function orderSidebarTasks<T extends { id: string; createdAt?: string | null }>(
+  tasks: readonly T[],
+): T[] {
+  return [...tasks].sort((left, right) => (
+    compareCreatedDesc(left.createdAt, right.createdAt, left.id, right.id)
+  ));
+}
+
+export function groupCreatedAt(group: TaskDirectoryGroup): string {
+  if (group.createdAt?.trim()) return group.createdAt.trim();
+  const times = [
+    ...group.tasks.map((task) => task.createdAt),
+    ...group.standaloneSessions.map((session) => session.startedAt ?? ""),
+  ].filter((value) => value.trim());
+  if (times.length === 0) return "";
+  return times.reduce((oldest, value) => (value < oldest ? value : oldest));
+}
+
+/** Global group first, then newest folders. Opening a task must not reshuffle. */
+export function orderSidebarGroups(
+  groups: readonly TaskDirectoryGroup[],
+): TaskDirectoryGroup[] {
+  return [...groups].sort((left, right) => {
+    const global = Number(Boolean(right.global)) - Number(Boolean(left.global));
+    if (global) return global;
+    return compareCreatedDesc(
+      groupCreatedAt(left),
+      groupCreatedAt(right),
+      left.workspaceId,
+      right.workspaceId,
+    );
+  });
+}
+
 export function formatTaskRecency(timestamp: string, now: number): string {
   const date = new Date(timestamp);
   if (!Number.isFinite(date.getTime())) return "";

@@ -1,5 +1,6 @@
 import type { Express, Response } from "express";
 
+import { asyncRoute } from "./express-async.js";
 import { getErrorMessage } from "./error-utils.js";
 import type { CreateMissionInput, CreateReviewCommentInput } from "./mission-types.js";
 import type { Missions } from "./missions.js";
@@ -8,6 +9,11 @@ function sendMissionError(res: Response, error: unknown): void {
   const message = getErrorMessage(error, "任务操作失败。");
   const missing = /^(任务不存在|任务 attempt 不存在)|没有关联会话|当前不可用/.test(message);
   res.status(missing ? 404 : 400).json({ error: message });
+}
+
+function commentIdsFrom(body: unknown): string[] {
+  if (!body || typeof body !== "object" || !Array.isArray((body as { commentIds?: unknown }).commentIds)) return [];
+  return (body as { commentIds: unknown[] }).commentIds.filter((id): id is string => typeof id === "string");
 }
 
 export function registerMissionRoutes(app: Express, missions: Missions): void {
@@ -70,23 +76,18 @@ export function registerMissionRoutes(app: Express, missions: Missions): void {
     }
   });
 
-  app.post("/api/missions/:missionId/attempts/:attemptId/review/send", (req, res) => {
+  app.post("/api/missions/:missionId/attempts/:attemptId/review/send", asyncRoute(async (req, res) => {
     try {
-      const commentIds = Array.isArray(req.body?.commentIds)
-        ? req.body.commentIds.filter((id: unknown): id is string => typeof id === "string")
-        : undefined;
-      res.status(202).json({ comments: missions.sendReview(req.params.missionId, req.params.attemptId, commentIds) });
+      const commentIds = Array.isArray(req.body?.commentIds) ? commentIdsFrom(req.body) : undefined;
+      res.status(202).json({ comments: await missions.sendReview(req.params.missionId, req.params.attemptId, commentIds) });
     } catch (error) {
       sendMissionError(res, error);
     }
-  });
+  }));
 
   app.post("/api/missions/:missionId/attempts/:attemptId/review/resolve", (req, res) => {
     try {
-      const commentIds = Array.isArray(req.body?.commentIds)
-        ? req.body.commentIds.filter((id: unknown): id is string => typeof id === "string")
-        : [];
-      res.json({ comments: missions.resolveReview(req.params.missionId, req.params.attemptId, commentIds) });
+      res.json({ comments: missions.resolveReview(req.params.missionId, req.params.attemptId, commentIdsFrom(req.body)) });
     } catch (error) {
       sendMissionError(res, error);
     }

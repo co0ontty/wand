@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import test from "node:test";
 
-import { getGitStatusAsync, runPush, runQuickCommit, runQuickCommitWithFallback } from "../src/git-quick-commit.js";
+import { generateCommitMessageOnly, getGitStatusAsync, runPush, runQuickCommit, runQuickCommitWithFallback } from "../src/git-quick-commit.js";
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, {
@@ -243,6 +243,29 @@ test("Claude quick-commit fallback grants only git Bash commands without bypassi
       if (previousArgsFile === undefined) delete process.env.WAND_CLAUDE_ARGS_FILE;
       else process.env.WAND_CLAUDE_ARGS_FILE = previousArgsFile;
     }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+
+test("generateCommitMessageOnly does not stage unstaged files", async () => {
+  const root = mkdtempSync(join(tmpdir(), "wand-commit-message-only-"));
+  try {
+    initRepo(root);
+    writeFileSync(join(root, "tracked.txt"), "hello\n");
+    git(root, "add", "tracked.txt");
+    git(root, "commit", "-m", "initial");
+    writeFileSync(join(root, "tracked.txt"), "hello world\n");
+    writeFileSync(join(root, "unstaged.txt"), "new\n");
+    const before = git(root, "status", "--porcelain");
+    await generateCommitMessageOnly(root, "中文").catch(() => undefined);
+    // AI may fail in tests; generating a message still must not stage files.
+    const after = git(root, "status", "--porcelain");
+    assert.equal(after, before);
+    assert.match(after, /M tracked\.txt/);
+    assert.match(after, /\?\? unstaged\.txt/);
+    assert.equal(git(root, "diff", "--cached", "--name-only"), "");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

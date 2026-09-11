@@ -3,6 +3,7 @@ import { exec } from "node:child_process";
 import { createReadStream } from "node:fs";
 import { lstat, mkdir, readdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import type { Stats } from "node:fs";
 import process from "node:process";
 import { promisify } from "node:util";
 import type { Express, Request, Response } from "express";
@@ -148,7 +149,7 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
           size: fileStat.size,
           mime,
         };
-        res.json(payload);
+        res.json({ ...payload, mtime: fileStat.mtime.toISOString() });
         return;
       }
       if (fileStat.size > MAX_TEXT_PREVIEW_SIZE) {
@@ -171,14 +172,19 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
         lang: getLanguageFromExt(ext, filePath),
         content,
       };
-      res.json(payload);
+      res.json({ ...payload, mtime: fileStat.mtime.toISOString() });
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "Failed to read file") });
     }
   }));
 
   app.post("/api/file-write", asyncRoute(async (req, res) => {
-    const body = (req.body ?? {}) as { path?: unknown; content?: unknown };
+    const body = (req.body ?? {}) as {
+      path?: unknown;
+      content?: unknown;
+      expectedMtime?: unknown;
+      expectedSize?: unknown;
+    };
     const filePath = typeof body.path === "string" ? body.path : "";
     const content = typeof body.content === "string" ? body.content : null;
     if (!filePath || content === null) {
@@ -214,6 +220,16 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
       const baseName = path.basename(resolvedPath);
       if (classifyFile(ext, baseName) !== "text") {
         res.status(415).json({ error: "仅支持编辑文本类文件。" });
+        return;
+      }
+      if (fileChangedSince(body.expectedMtime, body.expectedSize, fileStat)) {
+        res.status(409).json({
+          error: "文件已被外部修改。",
+          errorCode: "FILE_CHANGED",
+          path: resolvedPath,
+          size: fileStat.size,
+          mtime: fileStat.mtime.toISOString(),
+        });
         return;
       }
       const tmpPath = path.join(path.dirname(resolvedPath), `.${baseName}.wand-tmp-${crypto.randomBytes(6).toString("hex")}`);
@@ -740,6 +756,35 @@ const RAW_MAX_BYTES_BY_KIND: Record<FilePreviewKind, number> = {
   audio: 200 * 1024 * 1024,
   binary: 50 * 1024 * 1024,
 };
+
+/** Compare an optional client baseline (mtime and/or size) against the live file. */
+function fileChangedSince(expectedMtime: unknown, expectedSize: unknown, actual: Stats): boolean {
+  const mtime = parseExpectedMtime(expectedMtime);
+  if (mtime && !mtimeEquals(mtime, actual.mtime)) return true;
+  const size = parseExpectedSize(expectedSize);
+  return size !== undefined && size !== actual.size;
+}
+
+function parseExpectedMtime(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return new Date(value).toISOString();
+  return "";
+}
+
+function parseExpectedSize(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+function mtimeEquals(expected: string, actual: Date): boolean {
+  if (expected === actual.toISOString()) return true;
+  const parsed = Date.parse(expected);
+  return Number.isFinite(parsed) && parsed === actual.getTime();
+}
 
 function classifyFile(ext: string, baseName: string): FilePreviewKind {
   const lowerExt = ext.toLowerCase();

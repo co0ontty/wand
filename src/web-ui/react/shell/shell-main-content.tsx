@@ -194,15 +194,8 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
   // 用缓冲 output 重置即可恢复，无需重建终端。
   const inSplit = !!context.taskId && activeWorkWindow(context.layout)?.layout.type === "split";
 
-  if (taskBoard.open) {
-    return <main className="main-content task-board-main-content"><TaskBoardHost onOpenSession={(sessionId) => {
-      taskBoardController.close();
-      dispatch({ type: "session.select", id: sessionId });
-    }} /></main>;
-  }
-
   return (
-    <main inert={snapshot.layout.sessionsBackdropVisible} className={`main-content${snapshot.layout.filePanelOpen ? " file-panel-open" : ""}${inSplit ? " main-content-in-split" : ""}`}>
+    <main inert={snapshot.layout.sessionsBackdropVisible} className={`main-content${snapshot.layout.filePanelOpen ? " file-panel-open" : ""}${inSplit ? " main-content-in-split" : ""}${taskBoard.open ? " task-board-main-content" : ""}`}>
       {/* 任务内由标签条承担主区导航；不再叠一层重复的会话标题栏。 */}
       {context.taskId ? null : <ShellTopbar/>}
       {context.taskId && snapshot.viewport.mobile && (
@@ -238,6 +231,17 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
       <div className={classes.composer} ref={legacyRefs?.composer}/>
       {inSplit ? <WorkspaceWindow/> : null}
       <CodeEditorHost/>
+      {/* 看板是独立路由，不能替换 <main>：#output 等 LegacyHost 槽位必须一直挂着。 */}
+      {taskBoard.open ? <TaskBoardHost
+        onBack={() => taskBoardController.close()}
+        onOpenSidebar={snapshot.viewport.mobile
+          ? () => void dispatch({ type: "layout.drawer.toggle" })
+          : undefined}
+        onOpenSession={(sessionId) => {
+          taskBoardController.close();
+          dispatch({ type: "session.select", id: sessionId });
+        }}
+      /> : null}
     </main>
   );
 }

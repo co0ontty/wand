@@ -13,11 +13,11 @@ import { filePreviewController } from "./file-preview/controller";
 import { missionsController } from "./missions/controller";
 import { workspacesController } from "./workspaces/controller";
 import { githubIssuesController } from "./issues/controller";
-import { taskBoardController } from "./issues/task-board-controller";
+import { installTaskBoardHistory, taskBoardController } from "./issues/task-board-controller";
+import { REACT_UI_PORTALS_ID } from "./ui/portal-context";
 
 const OVERLAY_ROOT_ID = "overlay-root";
 const REACT_MOUNT_ID = "wand-react-ui-mount";
-const PORTAL_CONTAINER_ID = "wand-react-ui-portals";
 
 let activeRoot: Root | null = null;
 
@@ -59,6 +59,7 @@ function exposeBusinessControllers(): void {
   window.__wandReactWorkspaces = workspacesController;
   window.__wandReactGithubIssues = githubIssuesController;
   window.__wandReactTaskBoard = taskBoardController;
+  installTaskBoardHistory();
 }
 
 /**
@@ -76,7 +77,7 @@ export function startReactUi(): WandOverlay | null {
   if (!activeRoot) {
     installReactUiStyles();
     const mount = getOrCreateChild(overlayRoot, REACT_MOUNT_ID, "wand-ui-mount");
-    const portals = getOrCreateChild(overlayRoot, PORTAL_CONTAINER_ID, "wand-ui-portals");
+    const portals = getOrCreateChild(overlayRoot, REACT_UI_PORTALS_ID, "wand-ui-portals");
     activeRoot = createRoot(mount);
     activeRoot.render(<OverlayHost portalContainer={portals} />);
   }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
@@ -42,16 +42,27 @@ test("extracted file routes preserve directory, preview, write, range, recent, a
 
     const preview = await fetch(`${baseUrl}/api/file-preview?path=${encodeURIComponent(filePath)}`);
     assert.equal(preview.status, 200);
-    assert.deepEqual(await preview.json(), {
-      kind: "text",
-      path: filePath,
-      name: "sample.txt",
-      ext: ".txt",
-      size: 11,
-      mime: "application/octet-stream",
-      lang: "plaintext",
-      content: "hello world",
-    });
+    const previewBody = await preview.json() as {
+      kind: string;
+      path: string;
+      name: string;
+      ext: string;
+      size: number;
+      mime: string;
+      lang: string;
+      content: string;
+      mtime?: string;
+    };
+    assert.equal(previewBody.kind, "text");
+    assert.equal(previewBody.path, filePath);
+    assert.equal(previewBody.name, "sample.txt");
+    assert.equal(previewBody.ext, ".txt");
+    assert.equal(previewBody.size, 11);
+    assert.equal(previewBody.mime, "application/octet-stream");
+    assert.equal(previewBody.lang, "plaintext");
+    assert.equal(previewBody.content, "hello world");
+    assert.equal(typeof previewBody.mtime, "string");
+    assert.ok(previewBody.mtime);
 
     const ranged = await fetch(`${baseUrl}/api/file-raw?path=${encodeURIComponent(filePath)}`, {
       headers: { Range: "bytes=6-10" },
@@ -86,6 +97,66 @@ test("extracted file routes preserve directory, preview, write, range, recent, a
     });
     assert.equal(write.status, 200);
     assert.equal(readFileSync(filePath, "utf8"), "updated");
+    const writeBody = await write.json() as { mtime?: string; size?: number };
+    assert.equal(typeof writeBody.mtime, "string");
+
+    const matchingWrite = await fetch(`${baseUrl}/api/file-write`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        path: filePath,
+        content: "matched",
+        expectedMtime: writeBody.mtime,
+        expectedSize: writeBody.size,
+      }),
+    });
+    assert.equal(matchingWrite.status, 200);
+    assert.equal(readFileSync(filePath, "utf8"), "matched");
+    const matchingBody = await matchingWrite.json() as { mtime?: string };
+
+    writeFileSync(filePath, "external agent changes");
+    const later = new Date(Date.now() + 2000);
+    utimesSync(filePath, later, later);
+    const staleWrite = await fetch(`${baseUrl}/api/file-write`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        path: filePath,
+        content: "stale editor draft",
+        expectedMtime: matchingBody.mtime,
+      }),
+    });
+    assert.equal(staleWrite.status, 409);
+    const staleBody = await staleWrite.json() as { errorCode?: string; mtime?: string; size?: number };
+    assert.equal(staleBody.errorCode, "FILE_CHANGED");
+    assert.equal(typeof staleBody.mtime, "string");
+    assert.equal(readFileSync(filePath, "utf8"), "external agent changes");
+
+    const overwriteWrite = await fetch(`${baseUrl}/api/file-write`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: filePath, content: "explicit overwrite" }),
+    });
+    assert.equal(overwriteWrite.status, 200);
+    assert.equal(readFileSync(filePath, "utf8"), "explicit overwrite");
+
+    const dirWrite = await fetch(`${baseUrl}/api/file-write`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: root, content: "nope" }),
+    });
+    assert.equal(dirWrite.status, 400);
+    assert.equal(existsSync(root), true);
+
+    const pngPath = path.join(root, "binary.png");
+    writeFileSync(pngPath, "not really png");
+    const binaryWrite = await fetch(`${baseUrl}/api/file-write`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: pngPath, content: "still binary" }),
+    });
+    assert.equal(binaryWrite.status, 415);
+    assert.equal(readFileSync(pngPath, "utf8"), "not really png");
 
     const validate = await fetch(`${baseUrl}/api/validate-path?path=${encodeURIComponent(root)}`);
     assert.equal(validate.status, 200);

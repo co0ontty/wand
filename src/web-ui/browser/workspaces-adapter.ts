@@ -30,6 +30,20 @@ import type {
 } from "../react/workspaces/types";
 
 let uninstall: (() => void) | null = null;
+let openTaskGeneration = 0;
+let layoutRevisionByTask = new Map<string, number>();
+
+function rememberLayoutRevision(taskId: string | null | undefined, revision: number | undefined): void {
+  if (!taskId || typeof revision !== "number" || !Number.isFinite(revision)) return;
+  layoutRevisionByTask.set(taskId, revision);
+}
+
+function currentLayoutRevision(taskId: string | null | undefined): number | undefined {
+  if (!taskId) return undefined;
+  return layoutRevisionByTask.get(taskId);
+}
+
+
 
 /**
  * 把浏览器侧的「当前 cwd / 打开工作空间 / 打开任务 / toast / 终端池」能力接进 React 工作空间面板。
@@ -75,6 +89,7 @@ export function installWorkspacesLegacyAdapter(): void {
       dismissDrawerIfOverlay();
     },
     openTask(payload: OpenWorkspaceTaskPayload) {
+      const generation = ++openTaskGeneration;
       state.activeWorkspaceId = payload.workspaceId;
       state.activeWorkspaceTaskId = payload.taskId;
       try { localStorage.setItem("wand-active-workspace", payload.workspaceId); } catch (e) {}
@@ -95,6 +110,7 @@ export function installWorkspacesLegacyAdapter(): void {
       // 空任务进入任务欢迎页，由用户主动选择 Agent 或空白终端。
       // 返回 Promise：调用方（如侧栏「＋」建会话）需等恢复完成再动作。
       return httpWorkspacesRepository.getTask(payload.taskId).then((detail) => {
+        if (generation !== openTaskGeneration) return;
         if (!detail) return;
         const sessionIds = orderWorkspaceSessions(detail.sessions).map((session) => session.id);
         if (sessionIds.length > 0) {
@@ -104,12 +120,18 @@ export function installWorkspacesLegacyAdapter(): void {
           const layout = reconcileTaskWindowLayout(detail.layout, sessionIds, preferred);
           const active = activeWorkWindowTab(layout);
           if (active?.kind === "session") selectSession(active.sessionId);
-          setActiveWorkspaceContext({ layout });
-          void httpWorkspacesRepository.saveTaskLayout(payload.taskId, layout).catch(() => { /* ignore */ });
+          rememberLayoutRevision(payload.taskId, detail.layoutRevision);
+          setActiveWorkspaceContext({ layout, layoutRevision: detail.layoutRevision });
+          void httpWorkspacesRepository.saveTaskLayout(payload.taskId, layout, currentLayoutRevision(payload.taskId)).then((saved) => {
+            rememberLayoutRevision(payload.taskId, saved.layoutRevision);
+          }).catch(() => { /* ignore */ });
         } else {
           const layout = reconcileTaskWindowLayout(detail.layout, [], null);
-          setActiveWorkspaceContext({ layout });
-          void httpWorkspacesRepository.saveTaskLayout(payload.taskId, layout).catch(() => { /* ignore */ });
+          rememberLayoutRevision(payload.taskId, detail.layoutRevision);
+          setActiveWorkspaceContext({ layout, layoutRevision: detail.layoutRevision });
+          void httpWorkspacesRepository.saveTaskLayout(payload.taskId, layout, currentLayoutRevision(payload.taskId)).then((saved) => {
+            rememberLayoutRevision(payload.taskId, saved.layoutRevision);
+          }).catch(() => { /* ignore */ });
         }
         dismissDrawerIfOverlay();
       }).catch(() => { /* 任务详情加载失败时保留当前界面，等待下一次用户操作。 */ });
@@ -138,7 +160,9 @@ export function installWorkspacesLegacyAdapter(): void {
             : [];
           const next = reconcileTaskWindowLayout(current, [...existing, sessionId], sessionId);
           setActiveWorkspaceContext({ layout: next });
-          void httpWorkspacesRepository.saveTaskLayout(payload.taskId, next).catch(() => { /* ignore */ });
+          void httpWorkspacesRepository.saveTaskLayout(payload.taskId, next, currentLayoutRevision(payload.taskId)).then((saved) => {
+            rememberLayoutRevision(payload.taskId, saved.layoutRevision);
+          }).catch(() => { /* ignore */ });
         }
         return sessionId;
       });
@@ -157,7 +181,10 @@ export function installWorkspacesLegacyAdapter(): void {
       if (nextWindow?.layout.type !== "split") disposeAllPooledTerminals();
       setActiveWorkspaceContext({ layout });
       if (!taskId) return;
-      return httpWorkspacesRepository.saveTaskLayout(taskId, layout).catch(() => { /* ignore */ });
+      return httpWorkspacesRepository.saveTaskLayout(taskId, layout, currentLayoutRevision(taskId)).then((saved) => {
+        rememberLayoutRevision(taskId, saved.layoutRevision);
+        if (saved.layoutRevision !== undefined) setActiveWorkspaceContext({ layoutRevision: saved.layoutRevision });
+      }).catch(() => { /* ignore stale/offline layout writes */ });
     },
     async closeTaskSessions(sessionIds, scope) {
       const ids = [...new Set(sessionIds.filter(Boolean))];

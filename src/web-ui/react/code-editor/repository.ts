@@ -8,6 +8,8 @@ import type {
   CodeEditorLoadOptions,
   CodeEditorLoadResult,
   CodeEditorRepository,
+  CodeEditorSaveConflict,
+  CodeEditorSaveOptions,
   CodeEditorSaveOutcome,
 } from "./types";
 
@@ -48,8 +50,17 @@ function failureFromResponse(
   };
 }
 
+function conflictFromResponse(value: JsonRecord, path: string, fallback: string): CodeEditorSaveConflict {
+  return {
+    message: stringValue(value.error, fallback),
+    path: stringValue(value.path, path) || path,
+    size: finiteNumber(value.size, -1) >= 0 ? finiteNumber(value.size) : undefined,
+    mtime: stringValue(value.mtime) || undefined,
+  };
+}
+
 /** Adapter that loads/saves text files through the existing REST endpoints. */
-class HttpCodeEditorRepository implements CodeEditorRepository {
+export class HttpCodeEditorRepository implements CodeEditorRepository {
   constructor(
     private readonly fetchImpl: FetchLike = (input, init) => globalThis.fetch(input, init),
   ) {}
@@ -85,6 +96,7 @@ class HttpCodeEditorRepository implements CodeEditorRepository {
       lang: preview.lang,
       size: preview.size ?? 0,
       mime: preview.mime,
+      mtime: stringValue(value.mtime) || undefined,
       baseline: content,
       draft: content,
       dirty: false,
@@ -92,14 +104,28 @@ class HttpCodeEditorRepository implements CodeEditorRepository {
     return { ok: true, file };
   }
 
-  async save(path: string, content: string): Promise<CodeEditorSaveOutcome> {
+  async save(
+    path: string,
+    content: string,
+    options: CodeEditorSaveOptions = {},
+  ): Promise<CodeEditorSaveOutcome> {
+    const body: Record<string, unknown> = { path, content };
+    if (!options.overwrite) {
+      if (options.expectedMtime) body.expectedMtime = options.expectedMtime;
+      if (typeof options.expectedSize === "number" && Number.isFinite(options.expectedSize)) {
+        body.expectedSize = options.expectedSize;
+      }
+    }
     const response = await this.fetchImpl("/api/file-write", {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path, content }),
+      body: JSON.stringify(body),
     });
     const value = await readJson(response);
+    if (response.status === 409) {
+      return { ok: false, conflict: conflictFromResponse(value, path, "文件已被外部修改。") };
+    }
     if (!response.ok || typeof value.error === "string") {
       return { ok: false, failure: failureFromResponse(response, value, "保存文件失败") };
     }

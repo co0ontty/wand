@@ -1,397 +1,262 @@
-# Wand 客户端操作逻辑
+# Wand 客户端操作与交互逻辑
 
-最后更新：2026-09-08
+最后核对：2026-09-10。主仓库基线 `d240da1`；Android `dc4dc6a`，iOS `d10a456`，macOS `b0a545e`。
 
-配套文档：`docs/server-logic-analysis.md`（服务端真源）。本文只写**用户在客户端做了什么、客户端怎么调服务端、各端哪里不一致**。查会话执行 bug 仍先看服务端 `SessionRegistry.ownerOf`；查「点了没反应 / 输入错乱 / 列表丢绑定」再看本文。
+本文按用户操作描述当前调用、状态真源与端间差异。服务端机制见 `server-logic-analysis.md`，待办及验证证据见 `optimization-plan.md`。本次为代码核对和有限隔离验证，**没有完成多端真实设备验收，也没有实施修复**。
 
----
+## 1. 客户端与入口
 
-## 1. 客户端有哪些
+| 客户端 | 当前形态 | 主要代码 |
+| --- | --- | --- |
+| Web | Legacy runtime + React Shell/面板；议题看板为原生 React 面板 | `src/web-ui/browser/`、`src/web-ui/react/` |
+| Android | Compose 列表/任务/聊天/原生 PTY 外壳；WebView 显示终端与网页兜底 | `android/app/src/main/java/com/wand/app/`，含 Kotlin 和 Java 桥接 |
+| iOS | SwiftUI 原生列表/任务/聊天/PTY 外壳，WKWebView 显示终端 | `ios/Wand/` |
+| macOS | 原生三栏、聊天、文件面板与任务；WKWebView 用于终端/网页 | `macos/Wand/`，不是纯 WebView 壳 |
+| 扩展 | MV3 background + popup/options + content script | `browser-extension/` |
+| JSON CLI / TUI | HTTP 客户端与 IPC 管理入口 | `src/cli-api.ts`、`src/cli.ts`、`src/tui/` |
 
-| 表面 | 形态 | 入口 | 鉴权 |
-| --- | --- | --- | --- |
-| Web 浏览器 | 服务端渲染 HTML + 内联 JS | `GET /` → `src/web-ui/` | 密码登录，cookie；**browser-admin** |
-| macOS App | **原生三栏**（会话 / 聊天 / Inspector），不是纯 WebView。WKWebView 只做嵌入 PTY 和「打开网页版」 | `macos/Wand/MainShellView.swift` | 扫码 appToken → cookie；**connected-app** |
-| iOS App | 原生列表 / 聊天 / PTY 壳；WebView 仅网页版兜底 + 嵌入终端 | `ios/Wand/` | 同 macOS；cookie 在 endpoint 级 `SelfSignedSession` |
-| Android App | Compose 原生层；WebView 仅网页版。Cookie **不**拷进系统 `CookieManager`（按端口隔离） | `android/` | 同 iOS；进 WebView 前走 `WandWebSession` |
-| 浏览器扩展 | MV3 密码库 / 自动填充 | `browser-extension/` | `client:"browser-extension"` 登录拿 appToken，之后 Bearer |
-| JSON CLI | `wand session:*` / `inbox:*` / `mission:*` | `src/cli.ts` → `cli-api.ts` | 用 config 密码登录 `127.0.0.1` |
+Web Legacy 管会话/输入/WS/xterm；React 经 adapter、ui-store bridge 操作同一 runtime，不应建立第二份 session 真源。`?reactUi=0`、`?reactShell=0` 是旧界面回退，不保证与新信息架构一致。
 
-Web 内部还有两层，不要当成两个 App：
-
-- **Legacy**（`src/web-ui/browser/*.ts`）：登录、会话列表合并、WS、聊天渲染、xterm、输入、PTY
-- **React**（`src/web-ui/react/`）：Shell、新建会话、设置、工作空间、任务、文件预览/编辑器、快捷提交、worktree 合并
-
-React 通过 `*-adapter.ts` 调 legacy 的 `selectSession` / `refreshAll` / 终端池。回滚：`?reactUi=0` 关整个 React UI/Shell；`?reactShell=0` 只回退 Shell，对话框仍在。
-
-原生壳识别：UA 含 `WandApp/`、`WandPlatform/iOS|Android|macOS`。PTY 嵌入：`?embed=terminal&nativeInput=1&passthrough=1`。
-
----
-
-## 2. 开机与登录
+## 2. 连接、登录、换服务器与退出
 
 ### Web
 
-```
-restoreLoginSession()
-  GET /api/session-check          # 不鉴权，避免未登录刷 401
-  未登录 → 画登录页
-  已登录 → GET /api/config
-         → render + startPolling()
-         → refreshAll() = GET /api/sessions
-         → GET /api/models
-         → 如有 APK/DMG 版本号则查更新
+```text
+restoreLoginSession → /api/session-check
+  未登录 → 登录页 → POST /api/login → GET /api/config 验证 cookie
+  已登录 → config / models / 会话列表 → WS + 任务聚合
 ```
 
-登录：`POST /api/login { password }`（`credentials: "same-origin"`）→ 立刻 `GET /api/config` 验证 cookie 真存住了。HTTPS 下密码对但 config 401，当成证书不被信任，提示导入 `/cert/server.crt`。
-
-登出：`POST /api/logout`，清 `state.config` / sessions / 终端。
-
-### 原生 / macOS
-
-1. 扫设置页二维码：`GET /api/app-connect-code` → `base64(url#appToken)`
-2. `POST /api/login { appToken }` → connected-app cookie
-3. 之后 REST 带 cookie；**WS 只认 cookie**（Bearer 是后来补的，旧包仍靠 cookie）
-4. macOS `WandAuth.loginWithToken` 把 Set-Cookie 写进 `WKHTTPCookieStore` 再 load `GET /`
-5. 扩展：`{ password, client: "browser-extension" }` → `{ appToken, serverUrl }`，`serverUrl` 现为**当前请求 origin**
-
-原生没有 admin。`POST /api/update`、改部署项、上传证书会 **403**。扫码进 App 后看到的「服务端可更新」横幅若去装 npm 包，会失败。connected-app 只能改 session 偏好（默认 provider / 模型 / 模式 / kind / thinking）。
-
-冷启动 cookie 是空的：iOS `NativeRootView.authenticate()`、Android `WandApp` 每次进程起来都会用存着的 appToken 再 login 一次。REST 401 同样静默重登再试。裸 URL（没 token）先探 `session-check`，401 就提示用连接码。
-
----
-
-## 3. 会话列表与选中
-
-### Web 任务 / 项目侧栏
-
-React 侧栏沿用 `cb99d89` 的独立任务模型和 `4c82f39` 的终端默认收起策略：
-
-- 顶部「新建任务」默认创建独立任务，无须先建项目；首页、自动化是独立入口，设置留在底部。
-- 下方依次为「任务」和「项目」两区。任务区展示全局工作空间的独立任务；项目区按目录分组，项目行的「＋」预选该项目，新建项目只由项目区入口触发。
-- 点击任务只打开任务，不自动展开终端。终端数量旁的箭头独立控制展开；任务的更多菜单保留新建终端、重命名、清空终端及删除。项目菜单保留 Worktree 管理和二次确认删除。
-- 分区、项目和任务折叠状态存于当前 origin 的 `localStorage`（`wand.sidebar.*`）；刷新、切换窄栏不会丢失。收起内容保留挂载，但立即 `inert`，不可被 Tab 聚焦。
-- 标题单行省略，悬停可查看完整名称与目录；右侧展示最近打开时间或运行 / 待处理状态。目录折叠采用 180ms 高度过渡，键盘操作和减少动态效果模式禁用过渡。
-- `GET /api/tasks` 每 6 秒刷新；后台刷新失败保留上次列表并提供重试。原生历史 / 自动化会话分组仍在两区之后，不会丢失旧会话。
-- 窄栏区分独立任务与项目，不截断任务入口；手机忽略桌面的窄栏偏好。由项目切回独立任务时清掉继承目录，避免独立任务误在之前的项目目录运行。
-- 手机进入任务后保留「打开任务与项目」导航按钮，即使任务没有终端，也能重新打开侧栏切换任务。页面恢复到已选中的终端时，侧栏通过任务 / 会话归属恢复高亮，不强制展开终端列表。
-
-相关实现：`shell/shell-sidebar.tsx`、`workspaces/workspaces-panel.tsx`、`workspaces/sidebar-disclosure.tsx`（均位于 `src/web-ui/react/`）。
-
-### 会话传输
-
-| 端 | 拉列表 | 选中 |
-| --- | --- | --- |
-| Web | `GET /api/sessions`（`loadSessions`），和本地 `state.sessions` 做 `mergeServerSession` | `selectSession(id)`：拆旧终端、清队列、拉详情、`subscribe` |
-| iOS / Android / macOS | 主路径 `GET /api/session-list?offset&limit&revision`（10s 轮询）。404 才回退 `GET /api/sessions` + 各 `*-history` | structured → Chat；否则 PTY 页 |
-| Web 侧栏目录 | `GET /api/session-directories`，改名 `PUT /api/session-directories/name` | 点目录项仍 `selectSession` |
-
-`mergeServerSession` 会保住比服务端更长的本地 output / 未完成 assistant 占位（`__processing`），避免列表刷新把正在流的一轮打回「已结束」。
-
-选中后 Web 再 `GET /api/sessions/:id?format=chat`（`loadOutput`），structured 才要消息窗。列表 DTO 没有 messages/output。
-
-标题以服务端 `title` 为准（`resolveSessionDisplayTitle`）。`titleGenerating` 只用于动画。
-
----
-
-## 4. 新建会话
-
-两条创建入口，打的不是同一个 API。
-
-### 4.1 通用「新对话」
-
-React `new-session/repository.ts`：
-
-| 用户选 | HTTP |
-| --- | --- |
-| 结构化 | `POST /api/structured-sessions`（cwd / mode / provider / runner / model / thinkingEffort / worktreeEnabled） |
-| 终端 / 指定 CLI | `POST /api/commands`（command / provider / cwd / mode / cols / rows） |
-| 纯 shell | `POST /api/commands { shell: true }` |
-
-创建成功后 adapter `selectSession(id)`。PTY 创建前 `ensureTerminalReady()`，把当前 xterm 的 cols/rows 带上。
-
-这条路径**不传** `workspaceId` / `workspaceTaskId`。服务端按 cwd find-or-create 项目。
-
-同一套 API 还有几条旁路，不要漏：
-
-| UI | 函数 | 实际打的接口 |
-| --- | --- | --- |
-| 欢迎页 / 空会话直接回车 | `sendOrStart` / `createSessionFromInput` | `POST /api/commands`，带 `initialInput` |
-| 一键 Claude / Codex | `quickStartSession` | `POST /api/commands`（PTY，无首条） |
-| 跨会话排队冲刷（PTY） | `launchQueueItem` | **新开** `POST /api/commands`，不续旧会话 |
-| 跨会话排队冲刷（structured） | `continueStructuredSession` | 原会话 `POST .../messages` |
-
-### 4.2 工作空间任务里的「+」
-
-`session-engine.startSessionInCwd`：**只打** `POST /api/commands`（PTY），显式带 `workspaceId` / `workspaceTaskId`，cwd 用任务 worktree。
-
-并行多 provider 是前端连开多个 session，不是 `POST /api/missions`。
-
-### 4.3 原生
-
-iOS / Android 新建页同样按 kind 打 structured 或 commands，并在任务上下文里带 binding。Qoder 命令名要写成 `qodercli`（服务端也会把裸 `qoder` 改掉）。
-
----
-
-## 5. 实时通道
-
-所有会盯着某一会话的客户端都走 `/ws`（cookie）。
-
-### Web `websocket.ts`
-
-- `startPolling()` 优先 `initWebSocket()`，失败才 1.6s HTTP 轮询
-- 连上后对当前选中会话 `subscribe`；分屏池里的 PTY 用 `mode: "add"` + `capabilities.ptyAck: true`
-- 服务端 20s ping；浏览器 10s 检查，40s 无帧则 `forceReconnectWebSocket`
-- 切后台不重连，回前台强制重连
-- `resync` / `resync_required` → 再拉 init，终端走 `softResyncTerminal`
-
-消息合流（iOS `ChatStore` 注释与此对齐）：
-
-| 事件 | 聊天 | 终端 |
-| --- | --- | --- |
-| `init` | 用详情 DTO 整表替换 | 恢复 `terminalState` 或全量 output |
-| `output` + `messages` | 替换 | 忽略聊天字段 |
-| `output` + `incremental` + `lastMessage` | 末条同 role 则替换，否则按 `messageCount` 追加 | 忽略 |
-| `output` + `chunk` | **忽略**（避免 TUI 垃圾进聊天） | `wandTerminalWrite` / 池终端 |
-| `status` | 权限、mode、model、`providerCliActive`、`titleGenerating`、`ptyBusy` | resize 校准 |
-| `ended` / `notification` | 停转圈、系统重启/更新条 | 壳保活时会话仍 running |
-
-系统通知 `sessionId: "__system__"`：restart / update / auto-update-*。
-
-Web 还盯 `seq`：`init` 校准，`output` 必须 `prev+1`，跳号就 `resync` 并丢弃该帧。`loadOutput` 在 WS 已连上时**不会**把 HTTP 全文写进 xterm（磁盘 transcript 远大于 WS 环形缓冲，双写会重画一段）。HTTP 详情只管聊天 messages 和元数据。
+密码登录获得 browser-admin。登出清服务端 cookie 会话与本地会话/终端状态。设置部署项、npm 更新、GitHub 等需要 admin，不能仅以“已登录”判断按钮可用。
 
 ### 原生
 
-- 每个详情一个 `WandSocket`，`subscribe { sessionId }`
-- **只有 iOS** 带 `blockBudget: 60`，详情也带 `?format=chat&blockBudget=60`，并可按块翻 `GET .../messages?turn&blockOffset`
-- Android / macOS 仍是 turn 窗口，不传 `blockBudget`
-- Android `SessionWatcher`、iOS 系统 socket：一条**不订阅**的全局 WS，只吃 `notification` / 列表动态（依赖服务端对未订阅连接仍广播非 raw-PTY 事件）
-- Android ChatStore **先 REST 快照再连 WS**；iOS 立刻连
-- PTY 页：原生顶栏 + `embed=terminal&nativeInput=1` WebView + 原生底栏
-- 标题以服务端 `title` 为准，客户端不得用任务名 / cwd 自行兜底。`ptyBusy` 区分 provider CLI「本轮生成中」与「停在提示符」；三端 `isResponding` 对齐 Web `ptyTurnActive`（structured 看 `inFlight`，provider PTY 看 `ptyBusy`）
+连接码包含 endpoint 和 appToken。冷启动先用 token 登录，REST 遇 401 可重登一次；iOS/Android 的网络层按 endpoint 隔离 cookie/认证。进入嵌入网页还有 WebView 会话准备，不能假设原生 HTTP 的 cookie 自动出现在网页内。
 
----
+WS 服务端已支持 cookie 和 Bearer；“原生能 REST 不能 WS”仍要核对客户端是否把对应 endpoint 的认证带入握手。
 
-## 6. 发送输入（最容易写错的契约）
+原生一般是 connected-app，不是管理员。iOS 的服务端更新横幅已用 `canManageSettings` 控制安装按钮；其它端不能仅因为有 App 更新入口就推断能安装服务端 npm 包。议题看板/GitHub 在原生网页兜底中的能力与授权还需专门验收（R02）。
 
-先看 `sessionKind`。
+换服务器时应取消旧请求、socket、通知和草稿上下文。iOS 的 endpoint/redirect 隔离、Android 的 ServerProfiles/WandHttp 已有专门实现，后续需保持跨 host/port 不泄露凭据，而不是恢复成全局共享 cookie。
+
+## 3. 首屏、列表与导航
+
+### Web 的几种“任务”入口
+
+| 用户看到的入口 | 实际打开 | 服务端真源 |
+| --- | --- | --- |
+| 新建任务 / 侧栏任务与项目树 | WorkspaceTask 容器 | `/api/tasks`、`/api/workspaces` |
+| 底部「任务管理」按钮 | 原生 React 看板 | `/api/wand-tasks*` |
+| 「自动化」 | Missions | `/api/missions` |
+| 「GitHub」 | Issues 对话框 | `/api/github/*` |
+
+当前不是“侧栏任务 = Missions”，也不再是 2026-08-23 记录中的“项目完全不可见”。独立任务与项目区均可见。旧 `wand_tasks` 看板 CRUD 仍在代码与数据库里，但当前 `TaskBoardHost` 渲染的是 vendor iframe。
+
+`WorkspacesPanel` 约每 6 秒请求 `/api/tasks`；失败保留旧列表。折叠、窄栏和选中态存在本地。点击任务与展开其终端列表是不同动作；移动端必须保留返回任务/项目导航。
+
+任务内会话摘要来自聚合接口；具体输出/消息来自选中后的详情和 WS。目录分组可能是合成组，其分组 ID 不一定是该 task 的真正 workspaceId，创建/导航应使用 task 自身绑定。
+
+### 原生
+
+- 三端都已接入 `listTaskGroups` / 任务根导航，不再属于“原生任务同步尚未开始”。
+- Android TaskListState 使用 `/api/tasks?revision=` 并处理 unchanged；SessionListState 保留给历史、通知、快捷方式等辅助用途。
+- iOS/macOS WorkspaceAPI 当前仍请求数组形态的 `/api/tasks`，没有使用该聚合的 revision 快路径。
+- `/api/session-list` 已有分页 revision/unchanged；不能把旧“每 10 秒必定全量重绘”直接当现状。
+
+### 选中会话
+
+Web `selectSession` → 切旧终端/视图、保存选中 ID → HTTP 详情与 WS subscribe；分屏终端池另保留 add 订阅。原生按 sessionKind 进入 Chat 或 PTY 页。
+
+`mergeServerSession` 保留本地进行中的消息/output，以免 slim 列表覆盖流式状态；这不是“服务端越旧越可信”。标题用服务端 DTO，`titleGenerating` 驱动动画。
+
+## 4. 创建任务与会话
+
+### 创建容器
+
+- 独立任务：`POST /api/tasks`，cwd 可不填，使用 global workspace 的上下文。
+- 项目任务：`POST /api/workspaces/:id/tasks`，绑定项目目录。
+- 创建项目本身不会启动模型。
+- worktree 创建可能失败降级；客户端要展示 `isolated/worktreeError`。显式要求隔离是否允许自动回退，是本轮计划的安全交互决策（R10），不是已经修好的功能。
+
+### 在任务里加会话
+
+当前 Web `startSessionInCwd`、iOS/macOS `workspaceTaskWindowRequest`、Android `createWorkspaceTaskWindowRequest` 都可按 kind 选择：
+
+| 选择 | 请求 |
+| --- | --- |
+| structured Agent | `POST /api/structured-sessions` |
+| PTY Agent | `POST /api/commands` |
+| 空白 shell | `POST /api/commands {shell:true}` |
+
+任务内请求带 cwd、workspaceId、workspaceTaskId；Qoder 映射 `qodercli`。旧文档“任务内＋只开 PTY”已失效。
+
+Web 同任务“先 openTask 再建会话”已有 await，**但跨任务 A→B 的详情响应仍缺少当前 task generation 校验**；晚到 A 可覆盖 B 的布局/选中会话（R11）。不能把已修复的同任务创建顺序问题与这一风险混为一谈。
+
+通用新会话、快捷启动、空输入区启动和兼容 deep link 仍是旁路。审查绑定时需逐一检查入口，不能只测任务行上的＋。
+
+## 5. 实时通道与消息合并
+
+| 事件 | 客户端应该理解为 |
+| --- | --- |
+| init | 窗口化权威快照；含 offset/total，不一定是全部历史 |
+| output + messages | 消息窗口替换/衔接 |
+| output + incremental/lastMessage | 尾 turn 更新；按 messageCount/offset 合并 |
+| output + chunk | 原始 PTY，只交终端，不当聊天正文 |
+| status | 权限、模型、标题、inFlight/ptyBusy 等元数据 |
+| ended | 当前执行结束；PTY CLI 退出与底层 shell 退出需区分 |
+| resync_required / seq gap | 主动拉 init，不能继续猜缺失内容 |
+
+Web WS 优先、HTTP 轮询兜底，后台/前台有重连策略。HTTP 详情在 WS 活跃时不应再次把全量 transcript 写入 xterm，否则会重复绘制。
+
+原生详情各有 WandSocket；Android SessionWatcher / iOS 系统 socket 还处理全局通知。它们不是没有会话订阅就完全收不到消息。
+
+| 端 | 详情窗口与启动顺序 |
+| --- | --- |
+| iOS | REST/WS 使用 blockBudget=60；支持首 turn 分块加载；有晚到 REST 保护 |
+| Android | turn 窗口；ChatStore 先 REST、模型/配置，再连详情 WS |
+| macOS | ChatStore 常规详情/WS 仍按 turn；API 另有 blockBudget overload，WorkspaceStore 会使用 |
+| Web | turn 窗口和终端池；已有 seq/resync 与 output 单写保护 |
+
+后续统一的是消息新旧顺序、窗口语义与性能上限，不是要求所有端具备 Web 分屏（R06–R08）。
+
+## 6. 输入、队列与中断契约
 
 ### 6.1 Structured
 
-| 端 | 行为 |
-| --- | --- |
-| Web | `POST /api/structured-sessions/:id/messages`，或统一 `POST /api/sessions/:id/input`。进行中则入队（最多 10，重复 409） |
-| iOS / Android | 乐观插入 user turn；`respondImmediately: true` 拿 202，不阻塞等整轮。进行中则本地先推进队再 POST |
+发送通常走统一 input 或 structured messages；客户端乐观插入 user turn，进行中则显示排队。202 只表示服务端接收/调度，不表示回复成功。
 
-AskUserQuestion：选项存在客户端 `askUserSelections`（流式会重建 DOM，不能放组件 state）。提交时把答案当下一轮 input（服务端会包成 tool_result）。
+- Android 已应用发送返回的快照，并 requestResync；iOS 同样协调发送/实时结果。
+- macOS structured send 当前丢弃返回的 snapshot，随后 requestResync；与其它端仍不完全相同。
+- 排队、提升、删除、清空分别调用 queued 路由；服务端是队列真源。
+- Web 有 queueEpoch 防旧 HTTP 回包；原生删/清队列仍有“失败直接恢复整份旧数组”的位置，需防止覆盖新 WS 队列（R08）。
 
-中断：`POST .../messages { interrupt: true }`。Web 上 Cmd/Ctrl+Enter 或队列「立刻发送」走这条；摇杆 Ctrl+C / Esc 对 structured 是 `{ input:"", interrupt:true, preserveQueue:true }`，对 PTY 是往终端写 `\x1b`。
+AskUserQuestion 的选择暂存客户端，流式替换不应丢选择；提交交给对应 runner 处理，SDK 与 CLI 的回答机制不同。
 
-Web 结构化还有同会话队列条：删一条 / 清空 / 提升 / 拖拽排序，分别打 `DELETE/PATCH/POST .../queued*`。`queuedMessages` 以服务端为准；本地有 `queueEpoch`，过期 HTTP 回包会被剥掉队列字段。
+中断要明确是否保留队列。structured 是协议字段 interrupt/preserveQueue，不是把 Ctrl-C 字节当 prompt；PTY 则发送真实控制字符。
 
-Claude SDK 的 skills 勾选只活在 `state.selectedClaudeSkillsBySession`，下次 send 才放进 body。不写进 Snapshot。
+### 6.2 PTY：文本与回车拆包
 
-### 6.2 PTY — 必须「文本」再「回车」
+所有端 composer 的当前实现已对齐：
 
-服务端 `sendInput` 原样写入 PTY。客户端负责拆包，**不要** `text + "\n"` 代替回车。
-
-**所有端的 composer 提交**都拆成两包，**文本段和单独的 `\r` 都带 `shortcutKey=enter_text`**。服务端只在 terminal 视图看到 `enter_text` 时才把该包（或非空文本）收成会话标题；只给回车打标会总结空字符串。
-
-```
-[text + enter_text, "\r" + enter_text]
+```text
+{input: 文本, view, shortcutKey: "enter_text"}
+  → 约 30ms（原生 helper）
+{input: "\r", view, shortcutKey: "enter_text"}
 ```
 
-终端视图优先走 WS `pty_input`（低延迟）；聊天视图或 WS 未开则 `POST /api/sessions/:id/input`。原生 PTY 写入用 `responseMode: "accepted"`，不要为每个按键解码整份 snapshot。已结束的 PTY 先 `POST /api/sessions/:id/resume`。
+不要改成 `text + "\n"`。终端文本包也标 enter_text，以便服务端捕获标题。PTY AskUser 已使用对应拆包路径；旧文档中 Android ChatStore/iOS AskUser/macOS 聊天仍发送 `\n` 的断言应删除。
 
-AskUser 在 PTY 上同样走两包 helper（iOS `ptyInputSubmission` / Android `ptyComposerSubmitChunks`），不要 `text+"\n"`。
+实现入口：Web `getTerminalSubmitChunks`；iOS `PtyInputProtocol.swift` / ChatStore.sendPtyInput；Android `ptyComposerSubmitChunks` / PtyTerminalScreen；macOS ChatStore.sendPtyInput。
 
-快捷键（Ctrl-C 等）只发控制字符，不附带假回车。`shortcutKey` 用于服务端 shortcut 日志和标题判定：composer 回车必须是 `enter_text`。
+终端视图优先 WS pty_input；HTTP 写用 responseMode=accepted。结束的 PTY 先 resume 再输入。两包中第二包失败时不能盲目重发全文，避免重复执行（验收项，非本次已复现问题）。
 
-### 6.3 离线
+### 6.3 离线、粘贴与附件
 
-Web 把 PTY 按键缓存在 `pendingMessages`（最多 100，TTL 5s），重连后回放。超过 TTL 丢弃，避免把过期按键打进新提示符。
+Web pending PTY 输入有数量/TTL 限制，过期丢弃以免重连后输入旧命令；它不是持久可靠消息队列。
 
----
+`pty-paste.ts` 协调文本、图片上传与路径插入；原生 WebView 桥接也有剪贴板/文件入口。目标必须绑定粘贴开始时的 session/cwd，晚到上传不能串到后来切换的会话。IME 候选确认不能当发送回车。
 
-## 7. 权限、模式、模型
+附件上传与模型执行不是同一步；上传成功但发送失败时，应能保留重试内容而不假装消息已执行。后续跨端验收同时覆盖文字、中文输入法、图片、后台切换和第二包失败。
 
-### 权限
+## 7. 权限、模型与“正在回答”
 
-**Claude PTY** 与 **Claude SDK structured**（`permissionMode=default`）有运行时弹窗。
+- Claude PTY 和 Claude SDK structured/default 都可以有 pendingEscalation。
+- print/其它 structured 无同等运行时审批；不能依据 structured 一刀切隐藏所有权限卡，也不能一律显示批准按钮。
+- 审批失败/已过期后应 resync，别只乐观消掉卡片。
+- structured 看 inFlight；provider PTY 看 ptyBusy；底层 shell running 不代表模型回答中。
+- 重启提示要区分 CLI 恢复中、恢复成功、SDK 已中断。当前服务端恢复有临时 idle/lastError，UI 不应把瞬时状态当最终结论。
 
-- Web：`status.permissionBlocked` / `pendingEscalation` → 批准 / 拒绝 / 本轮允许 → `POST .../approve-permission` | `deny-permission` | `escalations/:id/resolve`
-- iOS / Android / macOS：同样 HTTP；无结构化 escalation 时退回旧 `permissionBlocked` 条
-- `claude-cli-print` 和其他 structured provider 没有 `canUseTool`，这些路由在没有 pending 时 400
-- Codex PTY：客户端应禁用批准（服务端 400）
+配置 mutation：Web 已串行；iOS 有发送尾队列和 revision；Android 有 Mutex/generation 与 pending 字段保护。macOS setModel/setThinkingEffort 仍各起 Task 并 apply 整份返回快照，快速切换可发生旧回包覆盖新选择（R08）。不是三端都已完全对齐。
 
-`toggle-auto-approve` 只影响 Wand 侧自动回车，改不了已经 spawn 出去的 CLI flag。换 mode 中途同样如此。
+## 8. 恢复、停止、删除与通知
 
-### 模型 / 思考 / 模式
-
-`POST /api/sessions/:id/{model,thinking-effort,mode}`。
-
-- Structured：下一轮 spawn 生效
-- PTY Claude：额外往终端打 `/model`、`/effort`
-- Web 用 mutation 队列，避免连点乱序
-- iOS 用 revision，丢弃过期回包，防止旧 snapshot 盖掉刚选的模型
-
----
-
-## 8. 恢复、停止、删除
-
-| 用户动作 | 客户端 | 服务端 |
-| --- | --- | --- |
-| 继续已结束的 PTY | `POST /api/sessions/:id/resume` | 同 id 重拉 CLI，`reuseId` |
-| 从原生历史恢复 | `POST /api/{claude,codex,opencode,qoder,grok,pi}-sessions/:id/resume` | Claude → PTY；其它 → 新 structured 壳，不导入历史 |
-| 对已结束 PTY 再打字 | iOS 先 resume；服务端 input 路由也会自动 resume | 文本当 `initialInput` |
-| 停止 | `POST /api/sessions/:id/stop` | PTY 杀进程；structured 回 idle |
-| 删除 | `DELETE /api/sessions/:id` | 拆 worktree + 尽量删原生历史 |
-
-Web 侧栏仍会打 `GET /api/claude-history` 等。这些 GET **恒为 `[]`**，删除 hide 仍可用。不要把空列表当「没有历史文件」。
-
----
-
-## 9. 工作空间
-
-数据：项目（cwd）→ 任务（可选独立 worktree）→ 窗口布局树（session / editor / preview）。
-
-Web：
-
-1. `GET /api/workspaces`（服务端会 backfill 孤儿会话）
-2. 打开项目：只改 `state.activeWorkspaceId` + React context，**不开会话**
-3. 建任务：`POST /api/workspaces/:id/tasks`
-4. 任务里加会话：`startSessionInCwd`（PTY + binding）
-5. 分屏：`PUT /api/workspace-tasks/:id/layout`；多 PTY 用 `terminal-pool`，subscribe `mode:add`
-6. 合并：`POST /api/sessions/:id/worktree/merge/check` → `merge` → `cleanup`
-
-iOS / macOS：`WorkspaceStore` 对齐上述 REST，含建项目、worktree 总览、合并 agent。任务里加窗仍是 `POST /api/commands` + binding（**只开 PTY**）。
-
-Android 窄一截：能列项目/任务、改任务、存 layout、在任务里开 PTY/shell 窗。**没有**原生建/改/删项目、没有 worktree 总览、没有合并 agent。
-
-列表 DTO 现已带 `workspaceId` / `workspaceTaskId`。客户端分组应信这两个字段，不要只靠 cwd。
-
----
-
-## 10. Missions / Inbox
-
-编排在服务端 `Missions`，只跑 structured。
-
-| 操作 | API |
+| 动作 | 语义 |
 | --- | --- |
-| 列表 / 创建 | `GET/POST /api/missions` |
-| 看 diff | `GET .../attempts/:id/diff` |
-| 写评论 / 发给 agent / 标记已解决 | `POST .../comments`、`.../review/send`、`.../review/resolve` |
-| Inbox | `GET /api/inbox`（`agent_activity`）；`POST /api/inbox/read` |
-| CLI | `wand mission:*`、`wand inbox:list` |
+| 继续已结束的 Wand PTY | 通用 resume，尽量复用 Wand ID |
+| 从 provider 原生历史恢复 | provider-specific resume；可新建 Wand 壳，structured 不自动导入全部原生日志 |
+| 停止 structured | 当前回合结束，会话回 idle，仍能发消息 |
+| 停止 PTY | 停终端进程；与仅 provider CLI 退回 shell 不同 |
+| 删除会话/任务 | 可能包含终止执行、历史清理、worktree 强拆，必须清楚提示范围 |
+| 通知点击 | 由 session ID/deep link 找回任务上下文，而不是再创建一条会话 |
 
-Web React `missions/` 走 missions 路由，**不会打** `/api/inbox`。侧栏「自动化」打开的是 Missions 叠层，不是 inbox，也不是独立任务区。Inbox 目前是 CLI / JSON（`wand inbox:list`）和原生若自行封装的表面。
+批量清空在任务操作中已经存在，不再需要从零恢复旧平铺列表。隔离任务删除默认级联与非隔离默认解绑不同。通知/Live Activity/launcher 快捷方式分别有自己的 store，回退与进程重建需验证 ID 仍可达。
 
-macOS 有原生 `MissionsView`。iOS / Android 也有 mission 模型，能力以各端 API 封装为准。
+## 9. 工作空间、分屏与布局
 
-创建任务后「打开会话」只是 `selectSession(attempt.sessionId)`，叠层自己不发聊天。
+Web：任务详情 → reconcile 布局 → 终端池/文件页签 → 保存 layout；打开任务也可能触发布局修复写回。保存失败当前有忽略异常的位置，不能认为服务器必定保存成功。
 
----
+原生 WorkspaceStore/WorkspaceWorkflow 负责窗口创建、会话 binding、布局对账和工作树审查。Android 已有创建 workspace、worktree overview、merge Agent API/UI，不再是“完全没有项目创建和合并”。是否所有项目增删改入口都与桌面一致，仍需按 UI 可达性验收。
 
-## 11. 文件、Git、设置
+跨端同时改 layout 没有 revision/CAS 防覆盖；任务 A/B 请求乱序也属于这一条链路（R11）。应先明确恢复与保存 Interface，再重构代码，而不是再加一层镜像 store。
 
-### 文件
+## 10. 议题看板、GitHub、Missions 与 Inbox
 
-Web 文件面板 / 预览 / 编辑器：
+### 任务管理
 
-- 列目录 `GET /api/directory`，预览 `GET /api/file-preview`，原文 `GET /api/file-raw`
-- 写 `POST /api/file-write`，创建/改名/删另有路由
-- 上传 `POST /api/sessions/:id/upload` → `<cwd>/.wand-uploads/`
-- 搜索 `GET /api/file-search?q=&cwd=`（cwd 为搜索根，不再锁 `process.cwd()`）
+Web 主区 iframe，经 ready/ready-request 握手结束 loading；超时显示失败/重试。打开绑定会话使用 postMessage，并校验 origin/source。
 
-编辑器未保存草稿只在浏览器。切预览会确认丢弃。
+卡片「派发 Agent」选 provider/model/thinking → `POST /api/wand-tasks/:id/dispatch` 创建 structured + binding + prompt。它不是把 WandTask ID 填进 workspaceTaskId。provider 切换会丢弃不在新目录里的模型，未加载目录时提交 `default`。
 
-### 快捷提交
+当前 session ID 在 iframe 创建时放进 query。切换/重新打开时必须核对上下文；卡片 binding 的一次性 loaded 标志也不是实时状态同步机制。看板内置 AI 与 Wand Agent 的执行、权限、数据目录不应混淆。
 
-挂在当前会话 cwd：`GET .../git-status`、`POST .../quick-commit`、`generate-commit-message`、`git/tag-head`、`git/push`。Web / iOS / Android 共用同一套 REST。
+### GitHub
 
-### 设置
+设置中连接 token；Issues 对话框输入 owner/repo → 列 issue → 为每个 issue 读本地绑定。服务端代理要求 admin。
 
-- 读启动配置：`GET /api/config`
-- 完整设置：`GET /api/settings`（admin）
-- 改偏好：`POST /api/settings/config`（connected-app 只能改默认 provider/model/mode/kind/thinking）
-- 模型目录：`GET /api/models`（客户端不自己探 CLI）
-- 提示词优化：`POST /api/optimize-prompt`
-- 更新：admin `GET/POST /api/update*`；Android `GET /api/android-apk-update?channel=`；macOS `GET /api/macos-dmg-update`；iOS `GET /api/ios-ipa-update` + `/ios/manifest.plist`
+当前 owner/repo 是可编辑 state，而已加载列表没有固定的 loadedRepo 身份；输入改为 B 后操作仍显示的 A issue，可能对 B 的同号 issue 操作。创建按钮也缺少 pending 去重，列表加载是 1+N 请求。服务器连接校验另有晚到失败回滚问题（R05）。
 
----
+### Missions / Inbox
 
-## 12. 只活在客户端的状态
+自动化创建 mission，打开 attempt 只是 selectSession；diff/review 有独立 API。Missions 可以关联 WorkspaceTask，但仍是不同实体。
 
-服务端 `SessionSnapshot` **没有**这些东西：
+Inbox 服务端和 CLI 已有；Web Missions 不消费 `/api/inbox`，没有因此自动变成收件箱。跨端是否新增统一 Inbox 入口是产品计划项，不是修复一个“空后端”（R12）。
 
-| 状态 | 在哪 |
-| --- | --- |
-| 输入草稿 / 附件 | `state.drafts`、`attachmentsBySession` |
-| 跨会话排队 | `state.crossSessionQueue`（`wand-cross-session-queue`，最多 10） |
-| Claude skills 勾选 | `state.selectedClaudeSkillsBySession` |
-| 聊天贴底、未读、AskUser 选项 | `chatStickToBottom`、`askUserSelections` |
-| xterm 实例与本地 fit | `state.terminal`、`terminal-pool`、cols/rows 回写服务端 |
-| 侧栏开合、当前视图 chat/terminal | localStorage + `state.currentView` |
-| 当前工作空间（未写进 URL） | `wand-active-workspace` |
-| React feature flags | query / `localStorage`，默认开 |
-| 扩展 vault 的本地缓存 | 扩展 storage |
+## 11. 文件、快捷提交与设置
 
-重载页面会丢草稿和 AskUser 未提交选择；会话本身在 SQLite / daemon。
+- Web 文件树/预览/编辑器经独立 repository/controller；macOS 有原生文件面板，移动端有预览/网页兜底。
+- Web editor 草稿在内存，当前保存没有外部版本条件，能覆盖 Agent 刚改过的文件（已复现，R04）。
+- 快捷提交共用服务端 REST，但生成文案也会 `git add -A`；取消弹窗不代表暂存区没变（R10）。
+- 设置区分部署项与会话偏好；App 自己的 APK/IPA/DMG 与服务端 npm 更新是两条线。
+- 语音最终进入 composer/send 链路：iOS SpeechRecognizerService；Android VoiceInputController + VoiceSessionStateMachine（recording/canceling/awaiting_final）。迟到 final、取消与切会话应只提交一次，不能另起不受保护的输入路径。
 
----
+## 12. 本地状态与恢复保证
 
-## 13. 平台能力对照
-
-| 能力 | Web | macOS | iOS | Android | 扩展 |
-| --- | --- | --- | --- | --- | --- |
-| 主体身份 | browser-admin | connected-app | connected-app | connected-app | Bearer + password-vault |
-| 结构化聊天 | 完整 | 原生 `ChatView` | 原生完整 | 原生完整 | 无 |
-| PTY 终端 | xterm / 分屏池 | 嵌入 WebView + 原生底栏 | 原生壳 + 嵌入 WebView | 同左 | 无 |
-| PTY 回车拆包 | 文本 + `\r` | 终端正确；聊天旧路径 `\n` | 终端正确；AskUser 仍 `\n` | **PTY 页正确；ChatStore 仍 `\n`** | — |
-| WS 窗口 | turn；可 `mode:add` | turn；单订阅 | **blockBudget=60**；单订阅 | turn；单订阅 | — |
-| `titleGenerating` | 有 | **模型没解析** | 有 | 有 | — |
-| 工作空间 | 完整分屏 | 完整 + 合并 agent | 完整 + 合并 agent | 仅任务窗，无建项目/合并 | 无 |
-| Missions | React（不打 inbox） | 原生 | 原生 | 原生 | 无 |
-| 文件树 | React | **原生** FilePanel | 网页兜底 | 网页兜底 | 无 |
-| 客户端更新 | `/api/update`（admin） | GitHub ZIP/DMG + 可选服务端 DMG | `/api/ios-ipa-update` + OTA | `/api/android-apk-update` | 无 |
-| 装服务端 npm 包 | 设置页（admin） | 横幅会 403 | 横幅会 403 | 横幅会 403 | — |
-| 语音 | 无 | 无 | SFSpeech | sherpa + 系统兜底 | 无 |
-| 密码库 | 无 | 无 | 无 | 无 | 全部 |
-
----
-
-## 14. 操作 → 模块 → API（速查）
-
-| 用户操作 | Web 模块 | API |
+| 状态 | 当前主要位置 | 不应误认为 |
 | --- | --- | --- |
-| 打开站点 | `render.restoreLoginSession` | `GET /api/session-check` → `/api/config` |
-| 登录 | `session-engine.login` | `POST /api/login` |
-| 刷列表 | `loadSessions` | `GET /api/sessions` |
-| 点开会话 | `selectSession` | `GET /api/sessions/:id` + WS `subscribe` |
-| 新建 structured | `react/new-session` | `POST /api/structured-sessions` |
-| 新建 PTY / shell | 同上 / `startSessionInCwd` | `POST /api/commands` |
-| 聊天发送 | `input.sendInputFromBox` | structured `.../messages`；PTY `.../input` 或 WS `pty_input` |
-| 终端打字 | xterm → `queueDirectInput` | WS `pty_input` |
-| 批准权限 | 聊天卡片 | `POST .../approve-permission` |
-| 换模型 | composer trio | `POST .../model` |
-| 工作空间开任务 | `workspaces-adapter` | `POST /api/workspaces/:id/tasks` |
-| 合并 worktree | `worktree-merge` | `POST .../worktree/merge` |
-| 快捷提交 | `quick-commit` / `git-commit` | `POST .../quick-commit` |
-| 设置 | `react/settings` | `GET/POST /api/settings*` |
+| Web 输入/附件/AskUser 选择 | Legacy state / 内存 | 已持久化到服务器 |
+| Web 跨会话队列、侧栏/外观 | localStorage | structured 服务端队列 |
+| Android 会话草稿 | SessionDraftStore + Saver | 所有冷启动场景都永久保存 |
+| iOS/macOS composer 与选择 | View/ChatStore 等 | 跟服务端 Snapshot 同生命周期 |
+| 原生 endpoint/token | ServerStore/ServerProfiles/Auth | 可以跨服务器重用 cookie |
+| xterm/fit/滚动/贴底 | Web runtime / terminal-pool | 新 init 必須重放全量 transcript |
+| 任务管理状态 | `/api/wand-tasks` | WorkspaceTask 布局的一部分 |
 
----
+草稿持久化如要扩展，应先确定 endpoint+session 分区、过期清理、敏感信息处理与上传孤儿文件策略，不默认把所有聊天明文长期落盘。
 
-## 15. 查客户端问题怎么走
+## 13. 已纠正的端间能力表
 
-1. 先确认端：Web legacy / Web React / iOS / Android 聊天 / Android PTY / macOS WebView。
-2. 确认 `sessionKind`。structured 的块、队列、中断与 PTY 的刮字、权限、回车不是同一条路。
-3. 输入类：对照 §6。Android 聊天页对 PTY 仍可能发 `\n`。
-4. 列表缺项目绑定：看 DTO 是否带 `workspaceId`（服务端已补），以及创建时走的是通用新建还是 `startSessionInCwd`。
-5. 「思考中转个不停」：看 `mergeServerSession` 是否在保本地 `inFlight`，以及 WS `activeRequestId` 是否还对得上。
-6. 嵌入终端乱码：先查 cols/rows 和 `embed=terminal` 的 CSS fit，不是 UTF-8。
-7. 原生能 REST 不能 WS：旧客户端没 cookie；新服务端已接受 Bearer，旧包仍要先 login。
-8. 原生点「更新服务端」403：connected-app 不是 admin。App 自己的 APK/DMG 更新走另一条公开/会话接口。
-9. macOS 标题不闪、工作空间绑不上聊天顶栏：原生 `SessionSnapshot` 还没解析 `title` / `titleGenerating` / `workspaceId`。
-10. 旧 `CLAUDE.md`（已删除，指南并入 `AGENTS.md`）曾写 macOS 是纯 WebView 壳；壳结构以 `MainShellView` 为准。
+| 能力 | Web | iOS | Android | macOS |
+| --- | --- | --- | --- | --- |
+| composer PTY 拆包 | 已有 | 已有，含 AskUser | 已有，含 ChatStore | 已有，含聊天路径 |
+| title/titleGenerating/任务 binding | 已有 | 已有 | 已有 | 已解析，不再是 DTO 缺口 |
+| 任务内 structured / PTY / shell | 已有 | 已有 | 已有 | 已有 |
+| SDK pending 审批 | 已接 | 已接 | 已接 | 已接 |
+| 模型 mutation 乱序保护 | 队列/revision | 尾队列/revision | Mutex/generation | 待对齐 |
+| `/api/tasks` revision 快路径 | 未用 | 未用 | 已用 | 未用 |
+| 聊天块预算 | 当前主要 turn 窗口 | REST+WS 块预算 | turn 窗口 | API 部分支持，聊天未完整接入 |
+| 议题看板/GitHub | 任务管理已接入；GitHub 仍为 Web 入口 | 任务管理已接入 | 任务管理已接入 | 任务管理已接入 |
+| 客户端更新 | 服务端包管理 | IPA/OTA | APK | MacUpdateManager / DMG 路径 |
 
-服务端行为以 `docs/server-logic-analysis.md` 为准。两端对不上时，以服务端契约改客户端，不要在 PTY bridge 里伪造 tool block。
+“已接”表示在当前代码里存在调用和处理，不代替本次未做的真机验收。
+
+## 14. 排查速查与后续计划
+
+1. 明确客户端、endpoint、会话 kind/owner，以及 WorkspaceTask/议题/Mission 的真实 ID。
+2. 输入异常查 §6；不要继续照旧计划修已经消失的 `text+"\n"` 分支。
+3. 回复丢失/卡住查 HTTP 与 WS 的到达顺序、seq、activeRequestId、消息窗口 offset。
+4. 任务标题与内容不符查 openTask 跨任务 generation、layout 保存回包，而不仅是侧栏高亮。
+5. PTY 显示错位先查 fit/字号；structured JSON 中文变 `�` 则查字节流解码。
+6. 更新 403 查 principal；App 版本更新不等于服务端更新。
+7. 本轮 Apple WebView 契约测试失败：断言要求 `.notification-bubble.update-card`，iOS 当前注入更宽的 `.notification-bubble` 隐藏规则。先验证实际行为，再修正测试，不能据此断言通知必定露出（R14）。
+
+优化计划按 R01–R14 排期；历史任务一级容器完成记录保留在 `task-first-rollout.md`，只作为历史，不覆盖本文当前基线。

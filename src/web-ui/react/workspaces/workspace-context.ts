@@ -21,6 +21,8 @@ export interface ActiveWorkspaceContext {
    * 内部是 split 时渲染 <WorkspaceWindow/>（终端池，多窗格并存）。
    */
   layout: TaskWindowLayout | null;
+  /** Conditional-save token for the current task layout. */
+  layoutRevision?: number;
 }
 
 type Listener = () => void;
@@ -32,6 +34,7 @@ const EMPTY: ActiveWorkspaceContext = {
   taskName: "",
   cwd: "",
   layout: null,
+  layoutRevision: undefined,
 };
 
 let context: ActiveWorkspaceContext = EMPTY;
