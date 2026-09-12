@@ -63,7 +63,7 @@ WS 服务端已支持 cookie 和 Bearer；“原生能 REST 不能 WS”仍要�
 ### 原生
 
 - 三端都已接入 `listTaskGroups` / 任务根导航，不再属于“原生任务同步尚未开始”。
-- Android TaskListState 使用 `/api/tasks?revision=` 并处理 unchanged；SessionListState 保留给历史、通知、快捷方式等辅助用途。
+- Android TaskListState 使用 `/api/tasks?revision=` 并处理 unchanged；`SessionListState` 已在任务一级容器落地时删除，历史/通知/launcher 快捷方式改由 `WandApi.listSessions()` 直接提供。
 - iOS/macOS WorkspaceAPI 当前仍请求数组形态的 `/api/tasks`，没有使用该聚合的 revision 快路径。
 - `/api/session-list` 已有分页 revision/unchanged；不能把旧“每 10 秒必定全量重绘”直接当现状。
 

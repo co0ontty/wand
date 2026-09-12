@@ -2,7 +2,9 @@
 
 最后更新：2026-09-10（代码已按本计划实施）。配套：`server-logic-analysis.md`、`client-logic-analysis.md`。
 
-**状态：R01–R14 已落地并有针对性测试。** 后续又完成了 R09 的加密范围扩大（`notes`/`fields` 加密落盘）、R03 的 TUI/daemon client 字节流补漏、R11 的 layout revision / review 入队判定，以及议题看板从 vendor iframe 重写为 Wand 原生 React 面板（R01 收尾，vendor 链路已删除）。服务端简化后已跑 `npm run check` 与相关测试；未做真机验收。Android 未改代码，无需重打 APK。
+**状态：R01–R14 已落地并有针对性测试。** 后续又完成了 R09 的加密范围扩大（`notes`/`fields` 加密落盘）、R03 的 TUI/daemon client 字节流补漏、R11 的 layout revision / review 入队判定，以及议题看板从 vendor iframe 重写为 Wand 原生 React 面板（R01 收尾，vendor 链路已删除）。服务端简化后已跑 `npm run check` 与相关测试；未做真机验收。
+
+随后又做了一轮**服务端 + Android 客户端代码简化**（本轮）：服务端拆出 `server-app-connect.ts` / `server-request.ts` / `server-vault-routes.ts` / `server-resume-routes.ts`；Android 删除零调用 API 与仅测试用转发层、把 provider 映射收敛成一张 `WandProvider` 表。Android 已跑 `testDebugUnitTest`（259 项全绿）并重新编译 APK；未做真机验收。
 
 ## 0. 计划怎么读
 
@@ -342,6 +344,12 @@ npm run build && node dist/cli.js web -c /tmp/wand-dev/config.json
 - `taskboard-vendor.md`（议题看板）、`browser-extension.md` 继续写集成细节；与主分析冲突时以主分析 + 本计划为准。
 - 不要在分析文末再堆一套与计划重复的 P0 表。
 
+### 7.1 本轮跨端简化约定
+
+- Android 单测不得只为生产代码里的“测试专用转发函数”存在；测试直接走真实入口（如 `NavState.Saver`），否则把转发层删掉。
+- provider 的展示名/模型目录/runner/CLI 名只写在 `data/ProviderRules.kt` 的 `WandProvider` 枚举里，新增 provider 不改散落的 `when`。
+- 零调用即删，不保留“以后可能用”的公开 API；删除后同步删掉只覆盖它的测试。
+
 附录里的旧切片状态用于审计“当时做了什么”，不用于判断现在是否还要做。
 
 ---
@@ -367,7 +375,10 @@ npm run build && node dist/cli.js web -c /tmp/wand-dev/config.json
 | 主题 | 文件 |
 | --- | --- |
 | 组合根 / 鉴权挂载 | `src/server.ts` |
-| 会话 HTTP | `src/server-session-routes.ts`、`src/session-transport.ts` |
+| 公开 origin / App 连接码 | `src/server-app-connect.ts` |
+| 路由共享解析与错误回包 | `src/server-request.ts` |
+| 浏览器扩展密码库 | `src/server-vault-routes.ts` |
+| 会话 HTTP | `src/server-session-routes.ts`、`src/server-resume-routes.ts`、`src/session-transport.ts` |
 | 两套 runner | `src/process-manager.ts`、`src/structured-session-manager.ts` |
 | structured 字节流 / 恢复 | `src/structured-exec-pump.ts`、`src/structured-exec-host.ts`、`src/terminal-daemon-server.ts` |
 | WS | `src/ws-broadcast.ts`、`src/web-ui/browser/websocket.ts` |
