@@ -286,8 +286,24 @@ test("dispatching an issue creates a structured session in the issue workspace a
     assert.equal(payload.session.cwd, storage.directory());
     assert.ok(registry.get(payload.session.id));
 
+    const again = await fetch(`${url}/api/wand-tasks/${issue.id}/dispatch`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    assert.equal(again.status, 400);
+    assert.match((await again.json() as { error: string }).error, /提示词/);
+
+    const second = await fetch(`${url}/api/wand-tasks/${issue.id}/dispatch`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ prompt: "再看一遍构建" }),
+    });
+    assert.equal(second.status, 202);
+    const secondPayload = await second.json() as { session: { id: string } };
+
     const detail = await fetch(`${url}/api/wand-tasks/${issue.id}`).then(jsonOf<{ status: string; sessionIds: string[] }>);
-    assert.deepEqual(detail.sessionIds, [payload.session.id]);
+    assert.deepEqual(detail.sessionIds, [payload.session.id, secondPayload.session.id]);
     assert.equal(detail.status, "doing");
   });
 });

@@ -179,9 +179,8 @@ printf '%s\\n' \\
   assert.equal(session.automationId, `wand-task:${created.id}`);
   assert.equal(session.claudeSessionId, "thread-e2e", "provider 原生 resume id 必须回写");
   assert.equal(session.messages.at(-1)?.content?.[0]?.text, "已收到任务");
-  // 任务标题 + 描述作为首个 prompt 交给 CLI。
+  // 这次派发的提示词作为首个 prompt 交给 CLI。
   const prompt = readFileSync(captured, "utf8");
-  assert.match(prompt, /跑通任务管理/);
   assert.match(prompt, /验证原生看板能派发 Agent/);
 
   // 5. 列表 DTO 反映推进后的状态与绑定会话。

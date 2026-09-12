@@ -26,7 +26,7 @@ test("session HTTP interface preserves create, list, update, detail, and delete 
   const app = express();
   app.use(express.json());
   registerSessionRoutes(app, processes, structured, storage, config.defaultMode, config, sessions);
-  registerClaudeHistoryRoutes(app, processes, structured, storage, sessions);
+  registerClaudeHistoryRoutes(app, processes, storage);
   app.use(jsonErrorHandler);
   const server = createServer(app);
 

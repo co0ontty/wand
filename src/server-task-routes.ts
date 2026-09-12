@@ -321,12 +321,12 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies | W
   });
 
   /**
-   * 用任务上选定的 CLI 工具开一个结构化会话，把任务标题 + 描述作为首个 prompt
-   * 发过去，并把会话绑定回该任务。cwd 取任务所属项目目录；未指定项目时用全局默认目录。
+   * 用选定的 CLI 工具开一个结构化会话，把这次派发的 prompt 作为首条消息，
+   * 并把会话绑定回该任务。cwd 取任务所属项目目录；未指定项目时用全局默认目录。
    */
   app.post("/api/wand-tasks/:id/dispatch", guard, asyncRoute(async (req, res) => {
     try {
-      const task = storage.getWandTask(req.params.id);
+      let task = storage.getWandTask(req.params.id);
       if (!task) {
         res.status(404).json({ error: "未找到该任务。" });
         return;
@@ -338,9 +338,18 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies | W
         : parseTaskAgent(body.agent);
       if (!agent) throw new Error("请先为该任务选择 CLI 工具。");
       writeTaskBoardLastAgent(storage, agent);
+      if (body.workspaceId !== undefined) {
+        const workspaceId = body.workspaceId === null ? null : text(body.workspaceId) || null;
+        if (workspaceId && !storage.getWorkspace(workspaceId)) throw new Error("项目不存在。");
+        task = storage.updateWandTask(task.id, { workspaceId }) ?? task;
+      }
       const workspace = task.workspaceId ? storage.getWorkspace(task.workspaceId) : null;
       if (task.workspaceId && !workspace) throw new Error("任务所属项目已被删除，请重新指定。");
       const cwd = workspace?.cwd || config.defaultCwd;
+      const requestedPrompt = text(body.prompt);
+      const existingSessions = storage.listWandTaskSessionIds(task.id).length;
+      if (existingSessions > 0 && !requestedPrompt) throw new Error("请输入提示词。");
+      const prompt = requestedPrompt || task.description.trim() || task.title || "执行此任务";
       const model = agent.model === "default" ? "" : agent.model;
       const session = structured.createSession({
         cwd,
@@ -356,8 +365,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies | W
       });
       storage.updateWandTask(task.id, { agent, status: task.status === "todo" ? "doing" : task.status });
       storage.bindWandTaskSession(task.id, session.id);
-      const prompt = [task.title, task.description.trim()].filter(Boolean).join("\n\n");
-      const completion = structured.sendMessage(session.id, prompt || task.title || "执行此任务");
+      const completion = structured.sendMessage(session.id, prompt);
       completion.catch((error) => console.error(`[WandTask] Agent dispatch failed for ${task.id}:`, error));
       res.status(202).json({
         ok: true,

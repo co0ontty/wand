@@ -89,9 +89,17 @@ export const taskBoardRepository = {
   remove(id: string): Promise<void> {
     return request(`/api/wand-tasks/${encodeURIComponent(id)}`, { method: "DELETE" }).then(() => undefined);
   },
-  /** 用任务上选定的 CLI 工具开一个结构化会话并绑定回该任务。 */
-  dispatch(id: string, agent: WandTaskAgent): Promise<IssueDispatchResult> {
-    return request(`/api/wand-tasks/${encodeURIComponent(id)}/dispatch`, json({ agent }));
+  /** 用选定的 CLI 工具开一个结构化会话；prompt 作为这次派发的首条消息。 */
+  dispatch(
+    id: string,
+    agent: WandTaskAgent,
+    extra?: { prompt?: string; workspaceId?: string | null },
+  ): Promise<IssueDispatchResult> {
+    return request(`/api/wand-tasks/${encodeURIComponent(id)}/dispatch`, json({
+      agent,
+      ...(extra?.prompt != null ? { prompt: extra.prompt } : {}),
+      ...(extra && "workspaceId" in extra ? { workspaceId: extra.workspaceId ?? null } : {}),
+    }));
   },
   /** 任务面板上次选用的 CLI 工具 / 模型 / 思考深度。 */
   agentDefaults(): Promise<WandTaskAgent> {

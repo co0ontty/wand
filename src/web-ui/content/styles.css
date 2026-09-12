@@ -19957,6 +19957,23 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav > .
   cursor: pointer;
 }
 .task-board-agent-session:hover { background: color-mix(in srgb, var(--text-primary) 8%, transparent); }
+.task-board-agent-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin-top: 4px;
+  border: 1px dashed color-mix(in srgb, var(--text-primary) 18%, transparent);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.task-board-agent-add:hover {
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  color: var(--text-primary);
+}
 .task-board-agent-session strong {
   flex: 1 1 auto;
   min-width: 0;

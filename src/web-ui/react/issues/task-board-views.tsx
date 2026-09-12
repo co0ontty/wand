@@ -650,7 +650,7 @@ export function TaskBoardAgentSessionList({
   const groups = groupIssueSessionsByAgent(sessions, assigned);
   if (groups.length === 0) {
     return <div className="task-board-agent-list" aria-label="指派记录">
-      <p className="task-board-agent-empty">还没有指派 Agent。描述会作为第一次派发的任务内容。</p>
+      <p className="task-board-agent-empty">还没有指派 Agent。</p>
     </div>;
   }
   return <div className="task-board-agent-list" aria-label="已指派的 Agent">

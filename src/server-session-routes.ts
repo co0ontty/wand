@@ -244,17 +244,6 @@ export function deleteSessionWithProviderHistory(
   addToHiddenClaudeSessionIds(storage, [providerSessionId]);
 }
 
-type ProviderHistorySession = {
-  claudeSessionId: string;
-  cwd: string;
-  firstUserMessage: string;
-  timestamp: string;
-  mtimeMs: number;
-  hasConversation: boolean;
-  managedByWand: boolean;
-  provider?: "claude" | "codex" | "opencode" | "qoder";
-};
-
 type SessionListPageEntry = {
   type: "managed";
   key: string;
@@ -369,41 +358,6 @@ function directoryTreeContainsPath(
   return nodes.some((node) => (
     (!node.synthetic && node.path === directoryPath)
     || directoryTreeContainsPath(node.children, directoryPath)
-  ));
-}
-
-/**
- * Provider history is scanned by ProcessManager, but structured sessions live
- * in StructuredSessionManager. Annotate against the combined session list so a
- * structured conversation is not also exposed as a recoverable native history
- * entry. Return copies for matches because ProcessManager caches scan results.
- */
-export function markManagedProviderHistory<T extends ProviderHistorySession>(
-  history: T[],
-  sessions: SessionSnapshot[],
-  provider: "claude" | "codex" | "opencode" | "qoder",
-): T[] {
-  const managedIds = new Set<string>();
-  for (const session of sessions) {
-    const sessionProvider = session.provider
-      ?? session.structuredState?.provider
-      ?? (/^codex\b/i.test(session.command.trim())
-        ? "codex"
-        : /^opencode\b/i.test(session.command.trim())
-          ? "opencode"
-          : /^qodercli\b/i.test(session.command.trim())
-            ? "qoder"
-            : "claude");
-    const providerSessionId = session.claudeSessionId?.trim();
-    if (sessionProvider === provider && providerSessionId) {
-      managedIds.add(providerSessionId);
-    }
-  }
-
-  return history.map((entry) => (
-    entry.managedByWand || !managedIds.has(entry.claudeSessionId)
-      ? entry
-      : { ...entry, managedByWand: true }
   ));
 }
 
@@ -1673,36 +1627,93 @@ export function registerSessionRoutes(
 export function registerClaudeHistoryRoutes(
   app: Express,
   processes: ProcessManager,
-  _structured: StructuredSessionManager,
   storage: WandStorage,
-  _sessionRegistry: SessionRegistry,
 ): void {
-  // Intentional compatibility stub: older native clients still GET these
-  // endpoints. Wand no longer imports provider-native history into its session
-  // list, so the supported response remains an empty array.
-  app.get("/api/claude-history", (_req, res) => {
-    res.json([]);
-  });
+  // Older clients still GET these endpoints. Wand no longer imports provider-native
+  // history into its session list, so the supported list response stays empty.
+  for (const provider of ["claude", "codex", "opencode", "qoder", "grok", "pi"] as const) {
+    app.get(`/api/${provider}-history`, (_req, res) => {
+      res.json([]);
+    });
+  }
 
-  app.delete("/api/claude-history/:claudeSessionId", (req, res) => {
-    const claudeSessionId = req.params.claudeSessionId?.trim();
-    if (!claudeSessionId) {
-      res.status(400).json({ error: "会话 ID 不能为空。" });
-      return;
-    }
-    const session = processes.listClaudeHistorySessions().find((s) => s.claudeSessionId === claudeSessionId);
-    if (session) {
-      processes.deleteClaudeHistoryFiles([{ claudeSessionId, cwd: session.cwd }]);
-      removeFromHiddenClaudeSessionIds(storage, [claudeSessionId]);
-    } else {
-      const hidden = getHiddenClaudeSessionIds(storage);
-      if (!hidden.has(claudeSessionId)) {
-        hidden.add(claudeSessionId);
-        saveHiddenClaudeSessionIds(storage, hidden);
+  const historyFiles = {
+    claude: {
+      list: () => processes.listClaudeHistorySessions(),
+      remove: (ids: string[]) => {
+        const cwdById = new Map(
+          processes.listClaudeHistorySessions().map((session) => [session.claudeSessionId, session.cwd]),
+        );
+        return processes.deleteClaudeHistoryFiles(ids.flatMap((id) => {
+          const cwd = cwdById.get(id);
+          return cwd ? [{ claudeSessionId: id, cwd }] : [];
+        }));
+      },
+    },
+    codex: {
+      list: () => processes.listCodexHistorySessions(),
+      remove: (ids: string[]) => processes.deleteCodexHistoryFiles(ids),
+    },
+    opencode: {
+      list: () => processes.listOpenCodeHistorySessions(),
+      remove: (ids: string[]) => processes.deleteOpenCodeHistorySessions(ids),
+    },
+    qoder: {
+      list: () => processes.listQoderHistorySessions(),
+      remove: (ids: string[]) => processes.deleteQoderHistoryFiles(ids),
+    },
+  } as const;
+
+  const deleteHistory = (provider: keyof typeof historyFiles, ids: string[]): number => {
+    const existing = new Set(
+      historyFiles[provider].list()
+        .map((session) => session.claudeSessionId)
+        .filter((id): id is string => Boolean(id)),
+    );
+    const toDelete = ids.filter((id) => existing.has(id));
+    const toHide = ids.filter((id) => !existing.has(id));
+    const deleted = historyFiles[provider].remove(toDelete);
+    removeFromHiddenClaudeSessionIds(storage, toDelete);
+    addToHiddenClaudeSessionIds(storage, toHide);
+    return deleted + toHide.length;
+  };
+
+  const registerHistoryMutations = (
+    provider: keyof typeof historyFiles,
+    param: string,
+    label: string,
+  ): void => {
+    app.delete(`/api/${provider}-history/:${param}`, (req, res) => {
+      const id = req.params[param]?.trim();
+      if (!id) {
+        res.status(400).json({ error: "会话 ID 不能为空。" });
+        return;
       }
-    }
-    res.json({ ok: true });
-  });
+      try {
+        deleteHistory(provider, [id]);
+        res.json({ ok: true });
+      } catch (error) {
+        res.status(500).json({ error: getErrorMessage(error, `无法删除 ${label} 历史会话。`) });
+      }
+    });
+
+    app.post(`/api/${provider}-history/batch-delete`, (req, res) => {
+      const ids: string[] = Array.isArray(req.body?.claudeSessionIds)
+        ? req.body.claudeSessionIds.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0)
+        : [];
+      if (ids.length === 0) {
+        res.status(400).json({ error: "至少提供一个历史会话 ID。" });
+        return;
+      }
+      try {
+        res.json({ ok: true, deleted: deleteHistory(provider, ids) });
+      } catch (error) {
+        res.status(500).json({ error: getErrorMessage(error, `无法批量删除 ${label} 历史会话。`) });
+      }
+    });
+  };
+
+  registerHistoryMutations("claude", "claudeSessionId", "Claude");
 
   app.delete("/api/claude-history", (req, res) => {
     const cwd = typeof req.query.cwd === "string" ? req.query.cwd.trim() : "";
@@ -1712,211 +1723,18 @@ export function registerClaudeHistoryRoutes(
     }
 
     try {
-      const sessions = processes.listClaudeHistorySessions();
-      const toDelete: { claudeSessionId: string; cwd: string }[] = [];
-
-      for (const session of sessions) {
-        if (session.claudeSessionId && session.cwd === cwd) {
-          toDelete.push({ claudeSessionId: session.claudeSessionId, cwd: session.cwd });
-        }
-      }
-
+      const toDelete = processes.listClaudeHistorySessions()
+        .filter((session) => session.claudeSessionId && session.cwd === cwd)
+        .map((session) => ({ claudeSessionId: session.claudeSessionId, cwd: session.cwd }));
       const deleted = processes.deleteClaudeHistoryFiles(toDelete);
-      removeFromHiddenClaudeSessionIds(storage, toDelete.map((s) => s.claudeSessionId));
-
+      removeFromHiddenClaudeSessionIds(storage, toDelete.map((session) => session.claudeSessionId));
       res.json({ ok: true, deleted });
     } catch (error) {
       res.status(500).json({ error: getErrorMessage(error, "无法删除该目录下的历史会话。") });
     }
   });
 
-  app.post("/api/claude-history/batch-delete", (req, res) => {
-    const claudeSessionIds = Array.isArray(req.body?.claudeSessionIds)
-      ? req.body.claudeSessionIds.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0)
-      : [];
-
-    if (claudeSessionIds.length === 0) {
-      res.status(400).json({ error: "至少提供一个历史会话 ID。" });
-      return;
-    }
-
-    try {
-      const allSessions = processes.listClaudeHistorySessions();
-      const sessionMap = new Map<string, string>();
-      for (const s of allSessions) {
-        if (s.claudeSessionId) sessionMap.set(s.claudeSessionId, s.cwd);
-      }
-
-      const toDelete: { claudeSessionId: string; cwd: string }[] = [];
-      const toHide: string[] = [];
-
-      for (const id of claudeSessionIds) {
-        const cwd = sessionMap.get(id);
-        if (cwd) {
-          toDelete.push({ claudeSessionId: id, cwd });
-        } else {
-          toHide.push(id);
-        }
-      }
-
-      const deleted = processes.deleteClaudeHistoryFiles(toDelete);
-      removeFromHiddenClaudeSessionIds(storage, toDelete.map((s) => s.claudeSessionId));
-
-      if (toHide.length > 0) {
-        const hidden = getHiddenClaudeSessionIds(storage);
-        let added = 0;
-        for (const id of toHide) {
-          if (!hidden.has(id)) {
-            hidden.add(id);
-            added++;
-          }
-        }
-        if (added > 0) saveHiddenClaudeSessionIds(storage, hidden);
-      }
-
-      res.json({ ok: true, deleted: deleted + toHide.length });
-    } catch (error) {
-      res.status(500).json({ error: getErrorMessage(error, "无法批量删除历史会话。") });
-    }
-  });
-
-  // ── Codex history（~/.codex/sessions/ 扫描，对齐 Claude 历史区） ──
-  // codex 历史的"恢复"是新建一个结构化 codex 会话并预填 thread id（存进 claudeSessionId
-  // 字段），用户发第一条消息时 buildCodexArgs 自动拼 `codex exec ... resume <thread_id>`。
-  // hidden 集合与 claude 共用（id 全局唯一，不会冲突）。
-
-  app.get("/api/codex-history", (_req, res) => {
-    res.json([]);
-  });
-
-  app.delete("/api/codex-history/:threadId", (req, res) => {
-    const threadId = req.params.threadId?.trim();
-    if (!threadId) {
-      res.status(400).json({ error: "会话 ID 不能为空。" });
-      return;
-    }
-    const exists = processes.listCodexHistorySessions().some((s) => s.claudeSessionId === threadId);
-    if (exists) {
-      processes.deleteCodexHistoryFiles([threadId]);
-      removeFromHiddenClaudeSessionIds(storage, [threadId]);
-    } else {
-      const hidden = getHiddenClaudeSessionIds(storage);
-      if (!hidden.has(threadId)) {
-        hidden.add(threadId);
-        saveHiddenClaudeSessionIds(storage, hidden);
-      }
-    }
-    res.json({ ok: true });
-  });
-
-  app.post("/api/codex-history/batch-delete", (req, res) => {
-    const threadIds = Array.isArray(req.body?.claudeSessionIds)
-      ? req.body.claudeSessionIds.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0)
-      : [];
-    if (threadIds.length === 0) {
-      res.status(400).json({ error: "至少提供一个历史会话 ID。" });
-      return;
-    }
-    try {
-      const existing = new Set(processes.listCodexHistorySessions().map((s) => s.claudeSessionId));
-      const toDelete: string[] = [];
-      const toHide: string[] = [];
-      for (const id of threadIds) {
-        if (existing.has(id)) toDelete.push(id);
-        else toHide.push(id);
-      }
-
-      const deleted = processes.deleteCodexHistoryFiles(toDelete);
-      removeFromHiddenClaudeSessionIds(storage, toDelete);
-
-      if (toHide.length > 0) {
-        const hidden = getHiddenClaudeSessionIds(storage);
-        let added = 0;
-        for (const id of toHide) {
-          if (!hidden.has(id)) {
-            hidden.add(id);
-            added++;
-          }
-        }
-        if (added > 0) saveHiddenClaudeSessionIds(storage, hidden);
-      }
-
-      res.json({ ok: true, deleted: deleted + toHide.length });
-    } catch (error) {
-      res.status(500).json({ error: getErrorMessage(error, "无法批量删除历史会话。") });
-    }
-  });
-
-  const externalHistoryProviders: Array<{
-    provider: "opencode" | "qoder";
-    label: string;
-    list: () => ProviderHistorySession[];
-    remove: (ids: string[]) => number;
-  }> = [
-    {
-      provider: "opencode" as const,
-      label: "OpenCode",
-      list: () => processes.listOpenCodeHistorySessions(),
-      remove: (ids: string[]) => processes.deleteOpenCodeHistorySessions(ids),
-    },
-    {
-      provider: "qoder" as const,
-      label: "Qoder",
-      list: () => processes.listQoderHistorySessions(),
-      remove: (ids: string[]) => processes.deleteQoderHistoryFiles(ids),
-    },
-  ];
-
-  for (const provider of ["grok", "pi"] as const) {
-    app.get(`/api/${provider}-history`, (_req, res) => {
-      res.json([]);
-    });
-  }
-
-  for (const config of externalHistoryProviders) {
-    app.get(`/api/${config.provider}-history`, (_req, res) => {
-      res.json([]);
-    });
-
-    app.delete(`/api/${config.provider}-history/:sessionId`, (req, res) => {
-      const sessionId = req.params.sessionId?.trim();
-      if (!sessionId) {
-        res.status(400).json({ error: "会话 ID 不能为空。" });
-        return;
-      }
-      try {
-        const exists = config.list().some((session) => session.claudeSessionId === sessionId);
-        if (exists) {
-          config.remove([sessionId]);
-          removeFromHiddenClaudeSessionIds(storage, [sessionId]);
-        } else {
-          addToHiddenClaudeSessionIds(storage, [sessionId]);
-        }
-        res.json({ ok: true });
-      } catch (error) {
-        res.status(500).json({ error: getErrorMessage(error, `无法删除 ${config.label} 历史会话。`) });
-      }
-    });
-
-    app.post(`/api/${config.provider}-history/batch-delete`, (req, res) => {
-      const sessionIds: string[] = Array.isArray(req.body?.claudeSessionIds)
-        ? req.body.claudeSessionIds.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0)
-        : [];
-      if (sessionIds.length === 0) {
-        res.status(400).json({ error: "至少提供一个历史会话 ID。" });
-        return;
-      }
-      try {
-        const existing = new Set(config.list().map((session) => session.claudeSessionId));
-        const toDelete = sessionIds.filter((id) => existing.has(id));
-        const toHide = sessionIds.filter((id) => !existing.has(id));
-        const deleted = config.remove(toDelete);
-        removeFromHiddenClaudeSessionIds(storage, toDelete);
-        addToHiddenClaudeSessionIds(storage, toHide);
-        res.json({ ok: true, deleted: deleted + toHide.length });
-      } catch (error) {
-        res.status(500).json({ error: getErrorMessage(error, `无法批量删除 ${config.label} 历史会话。`) });
-      }
-    });
-  }
+  registerHistoryMutations("codex", "threadId", "Codex");
+  registerHistoryMutations("opencode", "sessionId", "OpenCode");
+  registerHistoryMutations("qoder", "sessionId", "Qoder");
 }

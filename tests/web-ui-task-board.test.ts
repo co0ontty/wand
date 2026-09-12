@@ -160,14 +160,15 @@ test("create form can assign the first agent from the description", () => {
   assert.match(composer, /第一次指派的思考深度/);
   assert.match(host, /作为第一个 Agent 的指派内容/);
   assert.match(host, /submitDescription && isDispatchableIssueAgent\(draft\.agent\)/);
-  assert.match(host, /taskBoardRepository\.dispatch\(created\.id, draft\.agent\)/);
+  assert.match(host, /taskBoardRepository\.dispatch\(created\.id, draft\.agent/);
   assert.match(host, /创建并指派/);
 
   assert.match(editor, /指派 Agent/);
-  assert.match(editor, /同一任务可以派给多个 Agent/);
+  assert.match(editor, /先输入提示词，再选参数直接派发/);
   assert.match(editor, /任务 CLI 工具/);
   assert.match(editor, /任务模型/);
   assert.match(editor, /任务思考深度/);
+  assert.match(host, /task-board-agent-add/);
   assert.match(host, /TaskBoardAgentSessionList/);
   assert.match(host, /TaskBoardAgentChips/);
 

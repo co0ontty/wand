@@ -1182,7 +1182,7 @@ export async function startServer(
   registerSessionRoutes(app, processes, structuredSessions, storage, config.defaultMode, config, sessionRegistry, (cwd) => {
     recordRecentPath(storage, cwd);
   });
-  registerClaudeHistoryRoutes(app, processes, structuredSessions, storage, sessionRegistry);
+  registerClaudeHistoryRoutes(app, processes, storage);
   registerWorkspaceRoutes(app, storage, sessionRegistry);
   registerMissionRoutes(app, missions);
   registerUploadRoutes(app, processes);

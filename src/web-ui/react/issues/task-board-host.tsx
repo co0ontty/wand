@@ -265,7 +265,10 @@ export function TaskBoardHost({
       // 第一条描述就是当前任务的第一次指派：有描述就立刻派给所选 Agent。
       if (submitDescription && isDispatchableIssueAgent(draft.agent)) {
         try {
-          const result = await taskBoardRepository.dispatch(created.id, draft.agent);
+          const result = await taskBoardRepository.dispatch(created.id, draft.agent, {
+            prompt: submitDescription,
+            workspaceId: draft.workspaceId || null,
+          });
           setNotice(`${issueAgentProviderLabel(result.session.provider)} 已开始处理「${created.title}」`);
         } catch (cause) {
           setError(cause instanceof Error ? cause.message : "任务已创建，但第一次指派失败。");
@@ -303,11 +306,14 @@ export function TaskBoardHost({
     });
   }, [reload, runFor, selectedId]);
 
-  const dispatchTask = React.useCallback(async (task: WandTaskListed, agent: WandTaskAgent): Promise<void> => {
+  const dispatchTask = React.useCallback(async (task: WandTaskListed, agent: WandTaskAgent, prompt: string): Promise<void> => {
     rememberAgent(agent);
     await runFor(task.id, async () => {
-      await taskBoardRepository.update(task.id, { agent });
-      const result = await taskBoardRepository.dispatch(task.id, agent);
+      await taskBoardRepository.update(task.id, { agent, workspaceId: task.workspaceId });
+      const result = await taskBoardRepository.dispatch(task.id, agent, {
+        prompt: prompt.trim(),
+        workspaceId: task.workspaceId,
+      });
       setNotice(`${issueAgentProviderLabel(result.session.provider)} 已开始处理「${task.title}」`);
       await reload();
     });
@@ -442,7 +448,9 @@ export function TaskBoardHost({
         {task.status === "done" ? <TaskBoardCompleteButton onClick={() => void patchTask(task.id, { status: "done" })}/> : null}
       </div>
       <h3 id={`task-${task.id}-title`}>{task.title}</h3>
-      {display.body && task.description ? <p className="task-board-card-body">{task.description}</p> : null}
+      {display.body && task.description && task.sessions.length === 0 && !task.agent
+        ? <p className="task-board-card-body">{task.description}</p>
+        : null}
       <TaskBoardProgressRow task={task}/>
       <div className="task-board-card-meta" aria-label="任务属性">
         <TaskBoardProjectChip name={task.workspace ? task.workspace.name : "未指定项目"}/>
@@ -658,7 +666,7 @@ export function TaskBoardHost({
         rememberAgent(agent);
       }}
       onPatch={(patch) => void patchTask(selected.id, patch)}
-      onDispatch={() => void dispatchTask(selected, detailAgentValue)}
+      onDispatch={(prompt) => void dispatchTask(selected, detailAgentValue, prompt)}
       onRemove={() => void removeTask(selected)}
       onOpenSession={onOpenSession}
       onClose={() => setSelectedId("")}
@@ -704,7 +712,7 @@ export function TaskBoardHost({
         setContextMenu(null);
       }}
       onDispatch={() => {
-        void dispatchTask(contextTask, agentOf(contextTask, lastAgentRef.current));
+        void dispatchTask(contextTask, agentOf(contextTask, lastAgentRef.current), contextTask.description);
         setContextMenu(null);
       }}
       onArchive={() => {
@@ -891,21 +899,35 @@ function IssueDetail({
   workspaceOptions: ReturnType<typeof issueWorkspaceOptions>;
   onAgentChange(agent: WandTaskAgent): void;
   onPatch(patch: Parameters<typeof taskBoardRepository.update>[1]): void;
-  onDispatch(): void;
+  onDispatch(prompt: string): void;
   onRemove(): void;
   onOpenSession?: (sessionId: string) => void;
   onClose(): void;
 }): React.ReactElement {
   const [title, setTitle] = React.useState(task.title);
-  const [description, setDescription] = React.useState(task.description);
   const [labelDraft, setLabelDraft] = React.useState(task.labels.join(", "));
+  const hasAgents = task.sessions.length > 0;
+  const [composeOpen, setComposeOpen] = React.useState(!hasAgents);
+  const [composePrompt, setComposePrompt] = React.useState(hasAgents ? "" : task.description);
   const knownLabels = collectIssueLabels([task]);
+  const workspaceSelectOptions = React.useMemo(() => {
+    const options = [...workspaceOptions];
+    if (task.workspaceId && task.workspace && !options.some((item) => item.value === task.workspaceId)) {
+      options.splice(1, 0, {
+        value: task.workspace.id,
+        label: `${task.workspace.name} · ${task.workspace.cwd}`,
+      });
+    }
+    return options;
+  }, [task.workspace, task.workspaceId, workspaceOptions]);
 
   React.useEffect(() => {
     setTitle(task.title);
-    setDescription(task.description);
     setLabelDraft(task.labels.join(", "));
-  }, [task.id, task.title, task.description, task.labels]);
+    const assigned = task.sessions.length > 0;
+    setComposeOpen(!assigned);
+    setComposePrompt(assigned ? "" : task.description);
+  }, [task.id, task.title, task.description, task.labels, task.sessions.length]);
 
   return <div className="task-board-detail" aria-label="任务详情">
     <div className="task-board-detail-scroll">
@@ -930,27 +952,92 @@ function IssueDetail({
               onPatch({ title: title.trim() });
             }}
           />
-          <textarea
-            className="task-board-detail-body"
-            rows={8}
-            value={description}
-            placeholder="添加描述…"
-            aria-label="任务描述"
-            disabled={busy}
-            onChange={(event) => {
-              const value = event.currentTarget.value;
-              setDescription(value);
-            }}
-            onBlur={() => {
-              if (description === task.description) return;
-              onPatch({ description });
-            }}
-          />
           <TaskBoardAgentSessionList
             sessions={task.sessions}
             assigned={task.agent}
             onOpenSession={onOpenSession}
           />
+          {composeOpen ? <section className="task-board-native-assign" aria-label="指派 Agent">
+            <div className="task-board-native-assign-head">
+              <strong>{task.sessions.length > 0 ? "再指派一个 Agent" : "指派 Agent"}</strong>
+              <small>先输入提示词，再选参数直接派发</small>
+            </div>
+            <textarea
+              className="task-board-detail-body"
+              rows={5}
+              value={composePrompt}
+              placeholder="输入这次派给 Agent 的提示词…"
+              aria-label="派发提示词"
+              disabled={busy}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+                setComposePrompt(value);
+              }}
+            />
+            <div className="task-board-native-editor-grid is-assign">
+              <IssueField label="CLI 工具">
+                <WandSelect
+                  value={agent.provider}
+                  options={ISSUE_AGENT_PROVIDERS.map((entry) => ({ value: entry.value, label: entry.label }))}
+                  ariaLabel="任务 CLI 工具"
+                  className="task-board-native-select"
+                  disabled={busy}
+                  onValueChange={(provider) => onAgentChange(
+                    withIssueAgentProvider(agent, provider as WandTaskAgent["provider"], catalog),
+                  )}
+                />
+              </IssueField>
+              <IssueField label="模型">
+                <WandSelect
+                  value={agent.model}
+                  options={issueAgentModelOptions(catalog, agent.provider)}
+                  ariaLabel="任务模型"
+                  searchable
+                  searchPlaceholder="搜索模型"
+                  className="task-board-native-select"
+                  disabled={busy}
+                  onValueChange={(model) => onAgentChange({ ...agent, model })}
+                />
+              </IssueField>
+              <IssueField label="思考深度">
+                <WandSelect
+                  value={agent.thinkingEffort}
+                  options={ISSUE_AGENT_EFFORTS.map((entry) => ({ value: entry.value, label: entry.label }))}
+                  ariaLabel="任务思考深度"
+                  className="task-board-native-select"
+                  disabled={busy}
+                  onValueChange={(effort) => onAgentChange({
+                    ...agent,
+                    thinkingEffort: effort as WandTaskAgent["thinkingEffort"],
+                  })}
+                />
+              </IssueField>
+            </div>
+            <div className="task-board-native-editor-actions">
+              {task.sessions.length > 0 ? <WandButton kind="ghost" size="small" disabled={busy} onClick={() => setComposeOpen(false)}>取消</WandButton> : null}
+              <WandButton
+                kind="primary"
+                size="small"
+                className="task-board-native-dispatch"
+                disabled={busy || !composePrompt.trim()}
+                onClick={() => onDispatch(composePrompt)}
+              >
+                <WandIcon name="spark" size={14}/>
+                {busy ? "正在派发…" : "派发 Agent"}
+              </WandButton>
+            </div>
+          </section> : <button
+            type="button"
+            className="task-board-agent-add"
+            aria-label="再指派一个 Agent"
+            disabled={busy}
+            onClick={() => {
+              setComposePrompt("");
+              setComposeOpen(true);
+            }}
+          >
+            <WandIcon name="plus" size={16}/>
+          </button>}
         </div>
         <aside className="task-board-detail-properties" aria-label="属性">
           <h2>属性</h2>
@@ -977,7 +1064,7 @@ function IssueDetail({
           <IssueField label="项目目录">
             <WandSelect
               value={issueWorkspaceSelectValue(task.workspaceId)}
-              options={workspaceOptions}
+              options={workspaceSelectOptions}
               ariaLabel="任务项目"
               placeholder="选择项目目录"
               searchable
@@ -1020,55 +1107,6 @@ function IssueDetail({
               {task.labels.map((label) => <TaskBoardLabelChip key={label} label={label}/>)}
             </div>}
           </IssueField>
-          <section className="task-board-native-assign" aria-label="指派 Agent">
-            <div className="task-board-native-assign-head">
-              <strong>{task.sessions.length > 0 ? "再指派一个 Agent" : "指派 Agent"}</strong>
-              <small>同一任务可以派给多个 Agent</small>
-            </div>
-            <div className="task-board-native-editor-grid is-assign">
-              <IssueField label="CLI 工具">
-                <WandSelect
-                  value={agent.provider}
-                  options={ISSUE_AGENT_PROVIDERS.map((entry) => ({ value: entry.value, label: entry.label }))}
-                  ariaLabel="任务 CLI 工具"
-                  className="task-board-native-select"
-                  disabled={busy}
-                  onValueChange={(provider) => onAgentChange(
-                    withIssueAgentProvider(agent, provider as WandTaskAgent["provider"], catalog),
-                  )}
-                />
-              </IssueField>
-              <IssueField label="模型">
-                <WandSelect
-                  value={agent.model}
-                  options={issueAgentModelOptions(catalog, agent.provider)}
-                  ariaLabel="任务模型"
-                  searchable
-                  searchPlaceholder="搜索模型"
-                  className="task-board-native-select"
-                  disabled={busy}
-                  onValueChange={(model) => onAgentChange({ ...agent, model })}
-                />
-              </IssueField>
-              <IssueField label="思考深度">
-                <WandSelect
-                  value={agent.thinkingEffort}
-                  options={ISSUE_AGENT_EFFORTS.map((entry) => ({ value: entry.value, label: entry.label }))}
-                  ariaLabel="任务思考深度"
-                  className="task-board-native-select"
-                  disabled={busy}
-                  onValueChange={(effort) => onAgentChange({
-                    ...agent,
-                    thinkingEffort: effort as WandTaskAgent["thinkingEffort"],
-                  })}
-                />
-              </IssueField>
-            </div>
-            <WandButton kind="primary" size="small" className="task-board-native-dispatch" disabled={busy} onClick={onDispatch}>
-              <WandIcon name="spark" size={14}/>
-              {busy ? "正在派发…" : task.sessions.length > 0 ? "再派发一次" : "派发 Agent"}
-            </WandButton>
-          </section>
           <div className="task-board-native-editor-actions">
             <WandButton kind="danger" size="small" className="task-board-native-remove" disabled={busy} onClick={onRemove}>归档</WandButton>
           </div>
