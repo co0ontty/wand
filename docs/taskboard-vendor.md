@@ -14,6 +14,23 @@
 - 看板「归档」不会删行，只把状态标成 `done`；侧栏手动新建的工作任务若还没有看板卡片，会按项目/任务名自动补一张并填好标题、项目与目录。
 - 打开看板走独立路由 `?view=taskboard`（旧 `?view=issues` 仍识别），绝对定位盖在主内容区上面，不再是浮层 iframe，也不再卸载 `#output` 等终端槽位。打开时 CSS 隐藏会话顶栏、标签栏和输入框，避免它们被 flex 顶到看板上方。侧栏点任务/会话、看板「返回」、浏览器后退都会离开看板。原生客户端走同一套 API。
 
+## 标题可选（留空自动生成）
+
+`wand_tasks.title` 在 API 层是**可选**字段；`title_source` 记录标题来源（`user` / `auto`，只加列，历史行读取时视为 `user`）。
+
+- `POST /api/wand-tasks` 只要 `title` 或 `description` 有一个非空即可：
+  - 给了 `title` → `titleSource = "user"`，永远不再被生成器覆盖。
+  - 没给 `title` → 先用描述首个有意义的行占位（`provisionalTaskTitleFromDescription`），
+    同时 `titleSource = "auto"`，响应**立即返回**，不等模型。
+- 服务端随后在后台用描述总结一个标题（`src/task-title.ts` → `generateWandTaskTitle`），
+  AI 来源与其它会话周边 AI 动作一致（`resolveSystemAiContext`：默认 provider + 默认模型，
+  直连 API 可用时优先）。多次建任务会排队而不是丢弃。
+- 写入前会检查 `titleSource` 仍是 `auto`，用户自己改过标题就不覆盖；`PATCH` 带 `title`
+  一律把来源标回 `user`。模型返回 provider 报错文案、整段解释或多句文字时拒绝落库，
+  保留占位标题，只打一条服务端日志。
+- 客户端因此**创建后需要再刷新一次**：Web 用 `taskBoardRepository.get()` 短轮询，
+  Android 用 `getBoardTask`，iOS/macOS 用 `getBoardTask`，超时就保留占位标题。
+
 ## 任务 → 项目目录
 
 任务可绑定一个 Wand 项目（`wand_tasks.workspace_id`，`ON DELETE SET NULL`）：
@@ -42,5 +59,10 @@ WandTask；它不会自动变成 WorkspaceTask 或 Mission attempt，状态也�
 ## 界面约定
 
 原生看板的布局与交互对标 `https://github.com/chuspeeism/dashi-taskboard`：
-44px 顶栏（项目切换 / 看板·列表 / 搜索 / 显示设置）、彩色列头、列内「+」新建、
-卡片拖拽换列、点击进入全页详情。指派 Agent 仍只属于单条任务。
+44px 顶栏（项目切换 / 仪表盘·议题看板·列表·甘特图 / 搜索 / 筛选 / 显示设置）、
+彩色列头与状态图标、列内「+」新建、卡片拖拽换列、处理中光泽与会话气泡、
+点击进入全页详情。指派 Agent（CLI 工具 / 模型 / 思考深度）仍只属于单条任务。
+
+新建任务对话框里**标题是可选字段**：标签写「任务标题」+「可选」徽标，输入框比描述框小
+（Web 端 14px / 单行，不再是与描述争视觉重量的 18px 大标题），占位文案说明「留空按描述
+自动生成」。标题与描述同时为空时不能提交。

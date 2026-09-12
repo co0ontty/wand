@@ -901,6 +901,7 @@ const INIT_SQL = `
     sort_order INTEGER NOT NULL DEFAULT 0,
     agent_json TEXT,
     workspace_task_id TEXT,
+    title_source TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE SET NULL
@@ -925,6 +926,8 @@ function ensureWandTaskSchema(db: DatabaseSync): void {
   // 任务的默认派发配置（CLI 工具 / 模型 / 思考深度）。只加列，历史行保持 NULL。
   if (columns.length > 0 && !names.has("agent_json")) db.exec("ALTER TABLE wand_tasks ADD COLUMN agent_json TEXT");
   if (columns.length > 0 && !names.has("workspace_task_id")) db.exec("ALTER TABLE wand_tasks ADD COLUMN workspace_task_id TEXT");
+  // 标题来源：'user' = 用户手写，'auto' = 由描述自动生成。只加列，历史行保持 NULL（读取时视为 user）。
+  if (columns.length > 0 && !names.has("title_source")) db.exec("ALTER TABLE wand_tasks ADD COLUMN title_source TEXT");
   if (columns.length > 0) {
     // Index creation must wait until the column exists on legacy databases.
     // INIT_SQL cannot create it: CREATE TABLE IF NOT EXISTS is a no-op on old
@@ -1427,7 +1430,7 @@ export class WandStorage {
 
   listWandTasks(workspaceId?: string | null): import("./task-types.js").WandTask[] {
     const rows = this.db.prepare(
-      `SELECT id, identifier, workspace_id, workspace_task_id, title, description, status, priority, labels_json, due_date, sort_order, agent_json, created_at, updated_at
+      `SELECT id, identifier, workspace_id, workspace_task_id, title, title_source, description, status, priority, labels_json, due_date, sort_order, agent_json, created_at, updated_at
        FROM wand_tasks ${workspaceId === undefined ? "" : "WHERE workspace_id IS ?"}
        ORDER BY status, sort_order, updated_at DESC`,
     ).all(...(workspaceId === undefined ? [] : [workspaceId])) as unknown as Array<Record<string, unknown>>;
@@ -1441,6 +1444,7 @@ export class WandStorage {
       workspaceId: typeof row.workspace_id === "string" ? row.workspace_id : null,
       workspaceTaskId: typeof row.workspace_task_id === "string" && row.workspace_task_id ? row.workspace_task_id : null,
       title: String(row.title),
+      titleSource: row.title_source === "auto" ? "auto" : "user",
       description: String(row.description ?? ""),
       status: row.status === "doing" || row.status === "done" ? row.status : "todo",
       priority: row.priority === "low" || row.priority === "medium" || row.priority === "high" || row.priority === "urgent" ? row.priority : "none",
@@ -1459,7 +1463,7 @@ export class WandStorage {
 
   getWandTaskByWorkspaceTaskId(workspaceTaskId: string): import("./task-types.js").WandTask | null {
     const row = this.db.prepare(
-      `SELECT id, identifier, workspace_id, workspace_task_id, title, description, status, priority, labels_json, due_date, sort_order, agent_json, created_at, updated_at
+      `SELECT id, identifier, workspace_id, workspace_task_id, title, title_source, description, status, priority, labels_json, due_date, sort_order, agent_json, created_at, updated_at
        FROM wand_tasks WHERE workspace_task_id = ? ORDER BY updated_at DESC LIMIT 1`,
     ).get(workspaceTaskId) as Record<string, unknown> | undefined;
     return row ? this.mapWandTaskRow(row) : null;
@@ -1467,7 +1471,7 @@ export class WandStorage {
 
   findUnlinkedWandTask(workspaceId: string, title: string): import("./task-types.js").WandTask | null {
     const row = this.db.prepare(
-      `SELECT id, identifier, workspace_id, workspace_task_id, title, description, status, priority, labels_json, due_date, sort_order, agent_json, created_at, updated_at
+      `SELECT id, identifier, workspace_id, workspace_task_id, title, title_source, description, status, priority, labels_json, due_date, sort_order, agent_json, created_at, updated_at
        FROM wand_tasks
        WHERE workspace_id IS ? AND title = ? AND (workspace_task_id IS NULL OR workspace_task_id = '')
        ORDER BY updated_at DESC LIMIT 1`,
@@ -1475,20 +1479,20 @@ export class WandStorage {
     return row ? this.mapWandTaskRow(row) : null;
   }
 
-  createWandTask(input: { workspaceId?: string | null; workspaceTaskId?: string | null; title: string; description?: string; status?: import("./task-types.js").WandTaskStatus; priority?: import("./task-types.js").WandTaskPriority; labels?: string[]; dueDate?: string | null; agent?: import("./task-types.js").WandTaskAgent | null }): import("./task-types.js").WandTask {
+  createWandTask(input: { workspaceId?: string | null; workspaceTaskId?: string | null; title: string; titleSource?: import("./task-types.js").WandTaskTitleSource; description?: string; status?: import("./task-types.js").WandTaskStatus; priority?: import("./task-types.js").WandTaskPriority; labels?: string[]; dueDate?: string | null; agent?: import("./task-types.js").WandTaskAgent | null }): import("./task-types.js").WandTask {
     const id = crypto.randomUUID(); const now = nowIso();
     const status = input.status ?? "todo"; const priority = input.priority ?? "none";
     const max = this.db.prepare("SELECT COALESCE(MAX(sort_order), -1) AS value FROM wand_tasks WHERE workspace_id IS ? AND status = ?").get(input.workspaceId ?? null, status) as { value?: number } | undefined;
     const numberRow = this.db.prepare("SELECT COALESCE(MAX(CAST(substr(identifier, 6) AS INTEGER)), 0) AS value FROM wand_tasks WHERE identifier GLOB 'TASK-[0-9]*'").get() as { value?: number } | undefined;
     const identifier = `TASK-${(numberRow?.value ?? 0) + 1}`;
-    this.db.prepare(`INSERT INTO wand_tasks (id, identifier, workspace_id, workspace_task_id, title, description, status, priority, labels_json, due_date, sort_order, agent_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, identifier, input.workspaceId ?? null, input.workspaceTaskId ?? null, input.title, input.description ?? "", status, priority, JSON.stringify(input.labels ?? []), input.dueDate ?? null, (max?.value ?? -1) + 1, input.agent ? JSON.stringify(input.agent) : null, now, now);
+    this.db.prepare(`INSERT INTO wand_tasks (id, identifier, workspace_id, workspace_task_id, title, title_source, description, status, priority, labels_json, due_date, sort_order, agent_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, identifier, input.workspaceId ?? null, input.workspaceTaskId ?? null, input.title, input.titleSource ?? "user", input.description ?? "", status, priority, JSON.stringify(input.labels ?? []), input.dueDate ?? null, (max?.value ?? -1) + 1, input.agent ? JSON.stringify(input.agent) : null, now, now);
     return this.getWandTask(id)!;
   }
 
-  updateWandTask(id: string, patch: Partial<Pick<import("./task-types.js").WandTask, "workspaceId" | "workspaceTaskId" | "title" | "description" | "status" | "priority" | "labels" | "dueDate" | "sortOrder" | "agent">>): import("./task-types.js").WandTask | null {
+  updateWandTask(id: string, patch: Partial<Pick<import("./task-types.js").WandTask, "workspaceId" | "workspaceTaskId" | "title" | "titleSource" | "description" | "status" | "priority" | "labels" | "dueDate" | "sortOrder" | "agent">>): import("./task-types.js").WandTask | null {
     const current = this.getWandTask(id); if (!current) return null;
     const next = { ...current, ...patch, updatedAt: nowIso() };
-    this.db.prepare(`UPDATE wand_tasks SET workspace_id = ?, workspace_task_id = ?, title = ?, description = ?, status = ?, priority = ?, labels_json = ?, due_date = ?, sort_order = ?, agent_json = ?, updated_at = ? WHERE id = ?`).run(next.workspaceId, next.workspaceTaskId, next.title, next.description, next.status, next.priority, JSON.stringify(next.labels), next.dueDate, next.sortOrder, next.agent ? JSON.stringify(next.agent) : null, next.updatedAt, id);
+    this.db.prepare(`UPDATE wand_tasks SET workspace_id = ?, workspace_task_id = ?, title = ?, title_source = ?, description = ?, status = ?, priority = ?, labels_json = ?, due_date = ?, sort_order = ?, agent_json = ?, updated_at = ? WHERE id = ?`).run(next.workspaceId, next.workspaceTaskId, next.title, next.titleSource, next.description, next.status, next.priority, JSON.stringify(next.labels), next.dueDate, next.sortOrder, next.agent ? JSON.stringify(next.agent) : null, next.updatedAt, id);
     return next;
   }
 
@@ -1496,6 +1500,11 @@ export class WandStorage {
 
   listWandTaskSessionIds(taskId: string): string[] {
     const rows = this.db.prepare("SELECT session_id FROM wand_task_sessions WHERE task_id = ? ORDER BY rowid ASC, session_id ASC").all(taskId) as unknown as Array<{ session_id: string }>;
+    return rows.map((row) => row.session_id);
+  }
+
+  listBoundWandTaskSessionIds(): string[] {
+    const rows = this.db.prepare("SELECT session_id FROM wand_task_sessions").all() as unknown as Array<{ session_id: string }>;
     return rows.map((row) => row.session_id);
   }
 

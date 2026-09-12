@@ -5,7 +5,7 @@ import type {
   WandTaskPriority,
   WandTaskStatus,
 } from "../../../task-types";
-import type { IssueWorkspace } from "./task-board-agent";
+import { normalizeIssueAgentDefaults, type IssueWorkspace } from "./task-board-agent";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
@@ -19,6 +19,9 @@ const json = (body: unknown, method = "POST"): RequestInit => ({
   headers: { "content-type": "application/json" },
   body: JSON.stringify(body),
 });
+
+let agentDefaultsWrite = Promise.resolve();
+
 
 /** GET /api/wand-tasks 返回的任务：附带头部所需的工作空间与已绑定会话。 */
 export interface WandTaskListed extends WandTaskDetail {
@@ -62,6 +65,7 @@ export const taskBoardRepository = {
   },
   create(input: {
     workspaceId: string | null;
+    /** 可选：留空时由服务端按描述自动生成标题。 */
     title: string;
     description: string;
     status: WandTaskStatus;
@@ -72,9 +76,13 @@ export const taskBoardRepository = {
   }): Promise<WandTaskListed> {
     return request("/api/wand-tasks", json(input));
   },
+  /** 单条任务：新建后用来确认后台自动标题是否已经生成。 */
+  get(id: string): Promise<WandTaskListed> {
+    return request(`/api/wand-tasks/${encodeURIComponent(id)}`);
+  },
   update(
     id: string,
-    patch: Partial<Pick<WandTask, "title" | "description" | "status" | "priority" | "labels" | "dueDate" | "workspaceId" | "sortOrder" | "agent">>,
+    patch: Partial<Pick<WandTask, "title" | "titleSource" | "description" | "status" | "priority" | "labels" | "dueDate" | "workspaceId" | "sortOrder" | "agent">>,
   ): Promise<WandTaskListed> {
     return request(`/api/wand-tasks/${encodeURIComponent(id)}`, json(patch, "PATCH"));
   },
@@ -84,6 +92,21 @@ export const taskBoardRepository = {
   /** 用任务上选定的 CLI 工具开一个结构化会话并绑定回该任务。 */
   dispatch(id: string, agent: WandTaskAgent): Promise<IssueDispatchResult> {
     return request(`/api/wand-tasks/${encodeURIComponent(id)}/dispatch`, json({ agent }));
+  },
+  /** 任务面板上次选用的 CLI 工具 / 模型 / 思考深度。 */
+  agentDefaults(): Promise<WandTaskAgent> {
+    return request("/api/wand-task-agent-defaults")
+      .then((payload) => normalizeIssueAgentDefaults(payload))
+      .catch(() => normalizeIssueAgentDefaults(null));
+  },
+  saveAgentDefaults(agent: WandTaskAgent): Promise<void> {
+    const write = agentDefaultsWrite
+      .catch(() => undefined)
+      .then(async () => {
+        await request("/api/wand-task-agent-defaults", json(agent, "PUT"));
+      });
+    agentDefaultsWrite = write;
+    return write;
   },
 };
 

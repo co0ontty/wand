@@ -1,6 +1,5 @@
 import * as React from "react";
 import type { WandTaskAgent, WandTaskPriority, WandTaskStatus } from "../../../task-types";
-import { ProviderLogo } from "../provider-logo";
 import {
   WandButton,
   WandDialogSurface,
@@ -11,50 +10,61 @@ import {
 } from "../ui";
 import { classNames } from "../ui/class-names";
 import {
+  collectIssueLabels,
   createDefaultIssueAgent,
   DEFAULT_ISSUE_BOARD_DISPLAY,
   dropIndexFromPoint,
+  EMPTY_ISSUE_FILTERS,
   filterIssues,
-  formatIssueStamp,
   groupIssuesByStatus,
   ISSUE_AGENT_EFFORTS,
   ISSUE_AGENT_PROVIDERS,
   ISSUE_BOARD_VIEWS,
   ISSUE_COLUMNS,
+  ISSUE_PRIORITIES,
+  isDispatchableIssueAgent,
   issueAgentModelOptions,
   issueAgentProviderLabel,
-  issueStatusTone,
+  issueDueStamp,
+  issueFilterCount,
+  issueIsOverdue,
   issueWorkspaceIdFromSelect,
   issueWorkspaceOptions,
   issueWorkspaceSelectValue,
   normalizeIssueModelCatalog,
   readIssueBoardDisplay,
   reorderIssues,
+  resolveIssueAgent,
   sortIssues,
   withIssueAgentProvider,
   writeIssueBoardDisplay,
   type IssueBoardDisplay,
+  type IssueBoardFilters,
   type IssueBoardView,
+  type IssueGanttZoom,
   type IssueModelCatalog,
 } from "./task-board-agent";
 import { taskBoardController, taskBoardStore } from "./task-board-controller";
 import { taskBoardRepository, type IssueWorkspace, type WandTaskListed } from "./task-board-repository";
-
-const PRIORITY_OPTIONS: ReadonlyArray<{ value: WandTaskPriority; label: string }> = [
-  { value: "none", label: "无优先级" },
-  { value: "urgent", label: "紧急" },
-  { value: "high", label: "高" },
-  { value: "medium", label: "中" },
-  { value: "low", label: "低" },
-];
-
-const PRIORITY_LABELS: Record<WandTaskPriority, string> = {
-  none: "无优先级",
-  low: "低",
-  medium: "中",
-  high: "高",
-  urgent: "紧急",
-};
+import {
+  TaskBoardAgentChips,
+  TaskBoardAgentSessionList,
+  TaskBoardCompleteButton,
+  TaskBoardContextMenu,
+  TaskBoardConversationButton,
+  TaskBoardDashboard,
+  TaskBoardDisplayMenu,
+  TaskBoardFilterMenu,
+  TaskBoardGantt,
+  TaskBoardLabelChip,
+  TaskBoardListView,
+  TaskBoardPriorityChip,
+  TaskBoardProcessingRow,
+  TaskBoardProgressRow,
+  TaskBoardProjectChip,
+  TaskBoardStatusGlyph,
+} from "./task-board-views";
+import { TaskBoardSearchIcon } from "./task-board-icons";
 
 const TASK_MIME = "application/x-wand-task";
 
@@ -64,14 +74,30 @@ interface DraftState {
   description: string;
   status: WandTaskStatus;
   priority: WandTaskPriority;
+  dueDate: string;
+  labels: string;
+  agent: WandTaskAgent;
 }
 
-function emptyDraft(workspaceId: string, status: WandTaskStatus = "todo"): DraftState {
-  return { workspaceId, title: "", description: "", status, priority: "none" };
+function emptyDraft(workspaceId: string, status: WandTaskStatus = "todo", agent: WandTaskAgent = createDefaultIssueAgent()): DraftState {
+  return { workspaceId, title: "", description: "", status, priority: "none", dueDate: "", labels: "", agent };
 }
 
-function agentOf(task: WandTaskListed): WandTaskAgent {
-  return task.agent ?? createDefaultIssueAgent();
+// 自动生成标题是后台完成的，创建响应里只有描述首行占位；这里短轮询几次，拿到模型标题就刷新。
+const AUTO_TITLE_POLL_DELAYS_MS = [1_200, 2_000, 3_000, 5_000, 8_000];
+
+async function refreshGeneratedTitle(taskId: string, placeholder: string, reload: () => Promise<void>): Promise<void> {
+  for (const delay of AUTO_TITLE_POLL_DELAYS_MS) {
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    await reload();
+    const task = await taskBoardRepository.get(taskId).catch(() => null);
+    // 标题还是占位值说明后台还没总结完（或总结失败），继续等到下一次轮询。
+    if (task && task.title && task.title !== placeholder) return;
+  }
+}
+
+function agentOf(task: WandTaskListed, lastAgent?: WandTaskAgent | null): WandTaskAgent {
+  return resolveIssueAgent(task.agent, lastAgent);
 }
 
 function columnOf(status: WandTaskStatus) {
@@ -83,25 +109,6 @@ function IssueField({ label, children }: { label: string; children: React.ReactN
     <span className="task-board-native-field-label">{label}</span>
     {children}
   </label>;
-}
-
-function StatusGlyph({ status }: { status: WandTaskStatus }) {
-  const tone = issueStatusTone(status);
-  return <span className={`task-board-status-glyph is-${tone}`} aria-hidden="true">
-    {tone === "done"
-      ? <WandIcon name="check" size={11} strokeWidth={2.2}/>
-      : tone === "progress"
-        ? <WandIcon name="circle" size={11} strokeWidth={2.2}/>
-        : <WandIcon name="circle" size={11} strokeWidth={1.6}/>}
-  </span>;
-}
-
-function PriorityMark({ priority }: { priority: WandTaskPriority }) {
-  if (priority === "none") return null;
-  return <span className={`task-board-priority is-${priority}`} title={`${PRIORITY_LABELS[priority]}优先级`}>
-    <WandIcon name={priority === "urgent" || priority === "high" ? "warning" : "up"} size={11} strokeWidth={2}/>
-    {PRIORITY_LABELS[priority]}
-  </span>;
 }
 
 export interface TaskBoardHostProps {
@@ -127,6 +134,9 @@ export function TaskBoardHost({
   const [query, setQuery] = React.useState("");
   const [view, setView] = React.useState<IssueBoardView>("board");
   const [display, setDisplay] = React.useState<IssueBoardDisplay>(DEFAULT_ISSUE_BOARD_DISPLAY);
+  const [filters, setFilters] = React.useState<IssueBoardFilters>(EMPTY_ISSUE_FILTERS);
+  const [ganttZoom, setGanttZoom] = React.useState<IssueGanttZoom>("week");
+  const [ganttHideCompleted, setGanttHideCompleted] = React.useState(false);
   const [filterWorkspaceId, setFilterWorkspaceId] = React.useState("");
   const [projectMenuOpen, setProjectMenuOpen] = React.useState(false);
   const [projectQuery, setProjectQuery] = React.useState("");
@@ -136,6 +146,9 @@ export function TaskBoardHost({
   const [draft, setDraft] = React.useState<DraftState>(() => emptyDraft(""));
   const [selectedId, setSelectedId] = React.useState("");
   const [detailAgent, setDetailAgent] = React.useState<WandTaskAgent | null>(null);
+  const [lastAgent, setLastAgent] = React.useState<WandTaskAgent>(() => createDefaultIssueAgent());
+  const lastAgentRef = React.useRef(lastAgent);
+  lastAgentRef.current = lastAgent;
   const [collapsedList, setCollapsedList] = React.useState<Record<WandTaskStatus, boolean>>({
     todo: false,
     doing: false,
@@ -143,8 +156,10 @@ export function TaskBoardHost({
   });
   const [draggedId, setDraggedId] = React.useState("");
   const [dropStatus, setDropStatus] = React.useState<WandTaskStatus | "">("");
+  const [contextMenu, setContextMenu] = React.useState<{ taskId: string; x: number; y: number } | null>(null);
   const loadGenerationRef = React.useRef(0);
   const titleRef = React.useRef<HTMLTextAreaElement>(null);
+  const searchRef = React.useRef<HTMLInputElement>(null);
 
   const reload = React.useCallback(async (): Promise<void> => {
     const generation = ++loadGenerationRef.current;
@@ -172,6 +187,12 @@ export function TaskBoardHost({
     void taskBoardRepository.models()
       .then((payload) => setCatalog(normalizeIssueModelCatalog(payload)))
       .catch(() => setCatalog(null));
+    void taskBoardRepository.agentDefaults()
+      .then((next) => {
+        lastAgentRef.current = next;
+        setLastAgent(next);
+      })
+      .catch(() => undefined);
   }, [controller.open, controller.revision, reload]);
 
   React.useEffect(() => {
@@ -182,7 +203,9 @@ export function TaskBoardHost({
     setCreateOpen(false);
     setQuery("");
     setView("board");
+    setFilters(EMPTY_ISSUE_FILTERS);
     setProjectMenuOpen(false);
+    setContextMenu(null);
   }, [controller.revision, controller.open]);
 
   React.useEffect(() => {
@@ -208,35 +231,59 @@ export function TaskBoardHost({
     writeIssueBoardDisplay(next);
   }, []);
 
+  const rememberAgent = React.useCallback((agent: WandTaskAgent) => {
+    if (!isDispatchableIssueAgent(agent)) return;
+    lastAgentRef.current = agent;
+    setLastAgent(agent);
+    void taskBoardRepository.saveAgentDefaults(agent);
+  }, []);
+
   const openCreate = React.useCallback((status: WandTaskStatus = "todo") => {
-    setDraft(emptyDraft(filterWorkspaceId || controller.workspaceId, status));
+    setDraft(emptyDraft(filterWorkspaceId || controller.workspaceId, status, lastAgentRef.current));
     setCreateExpanded(false);
     setCreateOpen(true);
     requestAnimationFrame(() => titleRef.current?.focus());
   }, [controller.workspaceId, filterWorkspaceId]);
 
   const createTask = React.useCallback(async (): Promise<void> => {
-    if (!draft.title.trim() || loading) return;
+    const submitTitle = draft.title.trim();
+    const submitDescription = draft.description.trim();
+    // 标题是可选字段：只写描述也能创建，标题由服务端按描述自动生成。
+    if ((!submitTitle && !submitDescription) || loading) return;
     await runFor("__create__", async () => {
-      await taskBoardRepository.create({
+      const created = await taskBoardRepository.create({
         workspaceId: draft.workspaceId || null,
-        title: draft.title.trim(),
-        description: draft.description.trim(),
+        title: submitTitle,
+        description: submitDescription,
         status: draft.status,
         priority: draft.priority,
-        labels: [],
-        agent: null,
+        labels: draft.labels.split(/[,，]/).map((label) => label.trim()).filter(Boolean),
+        dueDate: draft.dueDate || null,
+        agent: draft.agent,
       });
+      rememberAgent(draft.agent);
+      // 第一条描述就是当前任务的第一次指派：有描述就立刻派给所选 Agent。
+      if (submitDescription && isDispatchableIssueAgent(draft.agent)) {
+        try {
+          const result = await taskBoardRepository.dispatch(created.id, draft.agent);
+          setNotice(`${issueAgentProviderLabel(result.session.provider)} 已开始处理「${created.title}」`);
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : "任务已创建，但第一次指派失败。");
+        }
+      }
       if (createMore) {
-        setDraft(emptyDraft(draft.workspaceId, draft.status));
+        setDraft(emptyDraft(draft.workspaceId, draft.status, draft.agent));
         requestAnimationFrame(() => titleRef.current?.focus());
       } else {
         setCreateOpen(false);
-        setDraft(emptyDraft(draft.workspaceId));
+        setDraft(emptyDraft(draft.workspaceId, "todo", draft.agent));
       }
       await reload();
+      if (!submitTitle && created.titleSource === "auto") {
+        void refreshGeneratedTitle(created.id, created.title, reload);
+      }
     });
-  }, [createMore, draft, loading, reload, runFor]);
+  }, [createMore, draft, loading, rememberAgent, reload, runFor]);
 
   const patchTask = React.useCallback(async (id: string, patch: Parameters<typeof taskBoardRepository.update>[1]) => {
     await runFor(id, async () => {
@@ -257,13 +304,14 @@ export function TaskBoardHost({
   }, [reload, runFor, selectedId]);
 
   const dispatchTask = React.useCallback(async (task: WandTaskListed, agent: WandTaskAgent): Promise<void> => {
+    rememberAgent(agent);
     await runFor(task.id, async () => {
       await taskBoardRepository.update(task.id, { agent });
       const result = await taskBoardRepository.dispatch(task.id, agent);
       setNotice(`${issueAgentProviderLabel(result.session.provider)} 已开始处理「${task.title}」`);
       await reload();
     });
-  }, [reload, runFor]);
+  }, [reload, rememberAgent, runFor]);
 
   const dropTask = React.useCallback(async (status: WandTaskStatus, taskId: string, beforeIndex: number) => {
     const patches = reorderIssues(tasks, taskId, status, beforeIndex);
@@ -282,7 +330,7 @@ export function TaskBoardHost({
   }, [reload, runFor, tasks]);
 
   const selected = tasks.find((task) => task.id === selectedId) ?? null;
-  const visible = sortIssues(filterIssues(tasks, query, filterWorkspaceId));
+  const visible = sortIssues(filterIssues(tasks, query, filterWorkspaceId, filters));
   const grouped = groupIssuesByStatus(visible);
   const workspaceOptions = issueWorkspaceOptions(workspaces);
   const projectName = filterWorkspaceId
@@ -296,14 +344,16 @@ export function TaskBoardHost({
   const mainColumns = ISSUE_COLUMNS.filter((column) => display.mainStatuses.includes(column.status));
   const otherColumns = ISSUE_COLUMNS.filter((column) => !display.mainStatuses.includes(column.status));
   const detailBusy = selected ? busyId === selected.id : false;
-  const detailAgentValue = detailAgent ?? (selected ? agentOf(selected) : createDefaultIssueAgent());
+  const detailAgentValue = detailAgent ?? (selected ? agentOf(selected, lastAgent) : lastAgent);
+  const contextTask = contextMenu ? tasks.find((task) => task.id === contextMenu.taskId) ?? null : null;
+  const filterActive = issueFilterCount(filters) > 0;
 
   React.useEffect(() => {
     if (!selected) {
       setDetailAgent(null);
       return;
     }
-    setDetailAgent(agentOf(selected));
+    setDetailAgent(agentOf(selected, lastAgentRef.current));
   }, [selected?.id, selected?.agent]);
 
   React.useEffect(() => {
@@ -321,6 +371,20 @@ export function TaskBoardHost({
   React.useEffect(() => {
     if (!controller.open) return;
     const onKey = (event: KeyboardEvent): void => {
+      const target = event.target;
+      const typing = target instanceof HTMLElement && (
+        target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable
+      );
+      if (event.key === "/" && !typing) {
+        event.preventDefault();
+        searchRef.current?.focus();
+        return;
+      }
+      if (event.key === "c" && !typing && !event.metaKey && !event.ctrlKey) {
+        event.preventDefault();
+        openCreate("todo");
+        return;
+      }
       if (event.key !== "Escape") return;
       if (createOpen) {
         setCreateOpen(false);
@@ -334,7 +398,7 @@ export function TaskBoardHost({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [controller.open, createOpen, onBack, selectedId]);
+  }, [controller.open, createOpen, onBack, openCreate, selectedId]);
 
   if (!controller.open) return null;
 
@@ -362,6 +426,10 @@ export function TaskBoardHost({
         setDraggedId("");
         setDropStatus("");
       }}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        setContextMenu({ taskId: task.id, x: event.clientX, y: event.clientY });
+      }}
     >
       <button
         type="button"
@@ -371,42 +439,28 @@ export function TaskBoardHost({
       />
       <div className="task-board-card-topline">
         <span className="task-board-card-id">ID: {task.identifier}</span>
+        {task.status === "done" ? <TaskBoardCompleteButton onClick={() => void patchTask(task.id, { status: "done" })}/> : null}
       </div>
       <h3 id={`task-${task.id}-title`}>{task.title}</h3>
       {display.body && task.description ? <p className="task-board-card-body">{task.description}</p> : null}
+      <TaskBoardProgressRow task={task}/>
       <div className="task-board-card-meta" aria-label="任务属性">
-        <span className="task-board-chip" title={task.workspace?.cwd ?? "未指定项目目录"}>
-          <WandIcon name="folder" size={12}/>
-          <span>{task.workspace ? task.workspace.name : "未指定项目"}</span>
-        </span>
-        <PriorityMark priority={task.priority}/>
-        {task.labels.slice(0, 2).map((label) => <span key={label} className="task-board-chip is-label">{label}</span>)}
-        {task.dueDate ? <span className="task-board-chip">{formatIssueStamp(task.dueDate)}</span> : null}
-        <span className={classNames("task-board-chip", !assigned && "is-muted")}>
-          {assigned
-            ? <>
-                <ProviderLogo provider={assigned.provider} className="task-board-agent-logo"/>
-                {issueAgentProviderLabel(assigned.provider)}
-              </>
-            : "未指派"}
-        </span>
+        <TaskBoardProjectChip name={task.workspace ? task.workspace.name : "未指定项目"}/>
+        <TaskBoardPriorityChip priority={task.priority}/>
+        {task.labels.slice(0, 2).map((label) => <TaskBoardLabelChip key={label} label={label}/>)}
+        {task.labels.length > 2 ? <span className="task-board-label-more">+{task.labels.length - 2}</span> : null}
+        {task.dueDate ? <span className={classNames("task-board-due", issueIsOverdue(task.dueDate, task.status) && "is-overdue")}>
+          {issueDueStamp(task.dueDate)}
+        </span> : null}
+        <TaskBoardAgentChips sessions={task.sessions} assigned={assigned}/>
       </div>
-      {task.sessions.length > 0 && <div className="task-board-card-sessions">
-        {task.sessions.map((session) => <button
-          key={session.id}
-          type="button"
-          className="task-board-session"
-          title={session.title || session.id}
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            onOpenSession?.(session.id);
-          }}
-        >
-          <ProviderLogo provider={session.provider} className="task-board-agent-logo"/>
-          {issueAgentProviderLabel(session.provider)}
-        </button>)}
-      </div>}
+      {task.status === "doing"
+        ? <TaskBoardProcessingRow task={task} onOpenSession={onOpenSession}/>
+        : task.sessions.length > 0
+          ? <div className="task-board-card-sessions">
+              <TaskBoardConversationButton sessions={task.sessions} onOpen={onOpenSession}/>
+            </div>
+          : null}
     </article>;
   };
 
@@ -438,7 +492,7 @@ export function TaskBoardHost({
     >
       <header className="task-board-column-head">
         <div className="task-board-column-heading">
-          <StatusGlyph status={status}/>
+          <TaskBoardStatusGlyph status={status}/>
           <h2 id={`column-${status}`}>{column.label}{items.length > 0 ? ` ${items.length}` : ""}</h2>
         </div>
         <div className="task-board-column-actions">
@@ -470,10 +524,19 @@ export function TaskBoardHost({
     <header className="task-board-workspace-header">
       <div className="task-board-kicker">
         {onOpenSidebar ? (
-          <button type="button" className="task-board-icon-button" aria-label="打开任务与项目" onClick={onOpenSidebar}>
+          <button type="button" className="task-board-icon-button" aria-label="打开任务" onClick={onOpenSidebar}>
             <WandIcon name="rail" size={14}/>
           </button>
         ) : null}
+        <button
+          type="button"
+          className="task-board-icon-button"
+          aria-label="返回"
+          title="返回"
+          onClick={() => onBack ? onBack() : taskBoardController.close()}
+        >
+          <WandIcon name="chevronLeft" size={14}/>
+        </button>
         <div className="task-board-project-switcher">
           <button
             type="button"
@@ -529,7 +592,7 @@ export function TaskBoardHost({
         </div>
       </div>
 
-      <div className="task-board-view-tabs" role="tablist" aria-label="看板视图">
+      {!selected && <div className="task-board-view-tabs" role="tablist" aria-label="看板视图">
         {ISSUE_BOARD_VIEWS.map((entry) => <button
           key={entry.value}
           type="button"
@@ -540,34 +603,49 @@ export function TaskBoardHost({
         >
           {entry.label}
         </button>)}
-      </div>
+      </div>}
 
       <div className="task-board-header-actions">
-        <label className={classNames("task-board-search", query && "has-value")}>
-          <WandIcon name="search" size={13}/>
-          <input
-            type="search"
-            value={query}
-            placeholder="搜索任务"
-            aria-label="搜索任务"
-            onChange={(event) => {
-              const value = event.currentTarget.value;
-              setQuery(value);
-            }}
-          />
-        </label>
-        <WandButton kind="ghost" size="small" onClick={() => void reload()} disabled={loading}>
-          <WandIcon name="refresh" size={14} className={loading ? "is-spinning" : undefined}/>{loading ? "加载中…" : "刷新"}
-        </WandButton>
-        <WandPopoverDisplay display={display} onChange={persistDisplay}/>
-        <WandButton kind="ghost" size="small" onClick={() => onBack ? onBack() : taskBoardController.close()}>
-          <WandIcon name="chevronLeft" size={14}/>返回
-        </WandButton>
+        {!selected && <>
+          <label className={classNames("task-board-search", query && "has-value")}>
+            <TaskBoardSearchIcon size={13}/>
+            <input
+              ref={searchRef}
+              type="search"
+              value={query}
+              placeholder="搜索任务"
+              aria-label="搜索任务"
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+                setQuery(value);
+              }}
+            />
+            {!query && <kbd>/</kbd>}
+          </label>
+          {(view === "board" || view === "list" || view === "gantt") && <TaskBoardFilterMenu
+            tasks={tasks}
+            filters={filters}
+            onChange={setFilters}
+          />}
+          {view === "board" && <TaskBoardDisplayMenu display={display} onChange={persistDisplay}/>}
+          <button
+            type="button"
+            className="task-board-icon-button task-board-create-button"
+            aria-label="新建任务"
+            title="新建议题 (C)"
+            onClick={() => openCreate("todo")}
+          >
+            <WandIcon name="plus" size={14}/>
+          </button>
+        </>}
       </div>
     </header>
 
     {error && <p className="task-board-native-banner is-error" role="alert">{error}</p>}
     {notice && <p className="task-board-native-banner is-notice" role="status">{notice}</p>}
+    {filterActive && !selected && <p className="task-board-native-banner is-notice" role="status">
+      当前筛选已启用
+    </p>}
 
     {selected ? <IssueDetail
       task={selected}
@@ -575,50 +653,34 @@ export function TaskBoardHost({
       catalog={catalog}
       agent={detailAgentValue}
       workspaceOptions={workspaceOptions}
-      onAgentChange={setDetailAgent}
+      onAgentChange={(agent) => {
+        setDetailAgent(agent);
+        rememberAgent(agent);
+      }}
       onPatch={(patch) => void patchTask(selected.id, patch)}
       onDispatch={() => void dispatchTask(selected, detailAgentValue)}
       onRemove={() => void removeTask(selected)}
       onOpenSession={onOpenSession}
       onClose={() => setSelectedId("")}
-    /> : view === "list" ? <div className="task-board-list-view">
-      {ISSUE_COLUMNS.map((column) => {
-        const items = grouped[column.status];
-        const collapsed = collapsedList[column.status];
-        return <section key={column.status} className={`task-board-list-group is-${column.status}`}>
-          <button
-            type="button"
-            className="task-board-list-header"
-            aria-expanded={!collapsed}
-            onClick={() => setCollapsedList((current) => ({ ...current, [column.status]: !current[column.status] }))}
-          >
-            <WandIcon name={collapsed ? "chevronLeft" : "chevron"} size={12}/>
-            <StatusGlyph status={column.status}/>
-            <strong>{column.label}</strong>
-            <span>{items.length}</span>
-          </button>
-          {!collapsed && <div className="task-board-list-rows">
-            {items.length === 0 && <p className="task-board-column-empty">{column.empty}</p>}
-            {items.map((task) => <button
-              key={task.id}
-              type="button"
-              className="task-board-list-row"
-              onClick={() => setSelectedId(task.id)}
-            >
-              <span className="task-board-list-title">
-                <small>{task.identifier}</small>
-                <strong>{task.title}</strong>
-              </span>
-              <span className="task-board-list-meta">
-                <PriorityMark priority={task.priority}/>
-                <span>{task.workspace?.name ?? "未指定项目"}</span>
-                <time>{formatIssueStamp(task.updatedAt)}</time>
-              </span>
-            </button>)}
-          </div>}
-        </section>;
-      })}
-    </div> : <div className={classNames("task-board-layout", otherColumns.length > 0 && "has-other-tasks")}>
+    /> : view === "dashboard" ? <TaskBoardDashboard
+      projectName={projectName}
+      tasks={visible}
+      onOpen={setSelectedId}
+      onOpenSession={onOpenSession}
+    /> : view === "list" ? <TaskBoardListView
+      grouped={grouped}
+      collapsed={collapsedList}
+      onToggle={(status) => setCollapsedList((current) => ({ ...current, [status]: !current[status] }))}
+      onOpen={setSelectedId}
+      onOpenSession={onOpenSession}
+    /> : view === "gantt" ? <TaskBoardGantt
+      grouped={grouped}
+      zoom={ganttZoom}
+      hideCompleted={ganttHideCompleted}
+      onZoom={setGanttZoom}
+      onHideCompleted={setGanttHideCompleted}
+      onOpen={setSelectedId}
+    /> : <div className={classNames("task-board-layout", otherColumns.length > 0 && "has-other-tasks")}>
       <div className="task-board-scroll">
         <div className="task-board-board" style={{ "--main-column-count": Math.max(mainColumns.length, 1) } as React.CSSProperties}>
           {mainColumns.map((column) => renderColumn(column.status))}
@@ -629,6 +691,29 @@ export function TaskBoardHost({
       </aside>}
     </div>}
 
+    {contextTask && contextMenu && <TaskBoardContextMenu
+      x={contextMenu.x}
+      y={contextMenu.y}
+      task={contextTask}
+      onOpen={() => {
+        setSelectedId(contextTask.id);
+        setContextMenu(null);
+      }}
+      onCopy={() => {
+        void navigator.clipboard?.writeText(contextTask.identifier);
+        setContextMenu(null);
+      }}
+      onDispatch={() => {
+        void dispatchTask(contextTask, agentOf(contextTask, lastAgentRef.current));
+        setContextMenu(null);
+      }}
+      onArchive={() => {
+        void removeTask(contextTask);
+        setContextMenu(null);
+      }}
+      onClose={() => setContextMenu(null)}
+    />}
+
     <WandDialogSurface
       open={createOpen}
       title="新建任务"
@@ -636,6 +721,7 @@ export function TaskBoardHost({
       overlayClassName="wand-ui-dialog-overlay task-board-create-overlay"
       titleClassName="task-board-create-title"
       headerClassName="task-board-create-heading"
+      description="标题可选。填写描述并选择 Agent 后，这段描述会作为第一次指派发出。"
       closeLabel="关闭编辑器"
       onOpenChange={(open) => {
         if (!open) setCreateOpen(false);
@@ -648,25 +734,32 @@ export function TaskBoardHost({
           void createTask();
         }}
       >
-        <textarea
-          ref={titleRef}
-          className="task-board-create-title-input"
-          rows={1}
-          value={draft.title}
-          placeholder="任务标题"
-          aria-label="任务标题"
-          maxLength={240}
-          onChange={(event) => {
-            const value = event.currentTarget.value.replace(/\n/g, "");
-            setDraft((current) => ({ ...current, title: value }));
-          }}
-        />
+        {/* 标题是可选字段：留空就按描述自动生成，所以这里刻意做得比描述框更轻。 */}
+        <div className="task-board-create-title-field">
+          <span className="task-board-create-title-label" id="task-board-create-title-label">
+            任务标题
+            <em>可选</em>
+          </span>
+          <textarea
+            ref={titleRef}
+            className="task-board-create-title-input"
+            rows={1}
+            value={draft.title}
+            placeholder="不填写则按描述自动生成"
+            aria-labelledby="task-board-create-title-label"
+            maxLength={240}
+            onChange={(event) => {
+              const value = event.currentTarget.value.replace(/\n/g, "");
+              setDraft((current) => ({ ...current, title: value }));
+            }}
+          />
+        </div>
         <textarea
           className="task-board-create-body-input"
           rows={4}
           value={draft.description}
-          placeholder="添加描述…"
-          aria-label="任务描述"
+          placeholder="添加描述…（将作为第一个 Agent 的指派内容）"
+          aria-label="任务描述（作为第一次指派）"
           onChange={(event) => {
             const value = event.currentTarget.value;
             setDraft((current) => ({ ...current, description: value }));
@@ -692,11 +785,63 @@ export function TaskBoardHost({
           />
           <WandSelect
             value={draft.priority}
-            options={PRIORITY_OPTIONS.map((entry) => ({ value: entry.value, label: entry.label }))}
+            options={ISSUE_PRIORITIES.map((entry) => ({ value: entry.value, label: entry.label }))}
             ariaLabel="优先级"
             className="task-board-native-select"
             onValueChange={(priority) => setDraft((current) => ({ ...current, priority: priority as WandTaskPriority }))}
           />
+          <label className="task-board-due-field">
+            <span>截止日期</span>
+            <input
+              type="date"
+              value={draft.dueDate}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+                setDraft((current) => ({ ...current, dueDate: value }));
+              }}
+            />
+          </label>
+          <WandSelect
+            value={draft.agent.provider}
+            options={ISSUE_AGENT_PROVIDERS.map((entry) => ({ value: entry.value, label: entry.label }))}
+            ariaLabel="第一次指派的 CLI 工具"
+            className="task-board-native-select"
+            onValueChange={(provider) => setDraft((current) => ({
+              ...current,
+              agent: withIssueAgentProvider(current.agent, provider as WandTaskAgent["provider"], catalog),
+            }))}
+          />
+          <WandSelect
+            value={draft.agent.model}
+            options={issueAgentModelOptions(catalog, draft.agent.provider)}
+            ariaLabel="第一次指派的模型"
+            searchable
+            searchPlaceholder="搜索模型"
+            className="task-board-native-select"
+            onValueChange={(model) => setDraft((current) => ({ ...current, agent: { ...current.agent, model } }))}
+          />
+          <WandSelect
+            value={draft.agent.thinkingEffort}
+            options={ISSUE_AGENT_EFFORTS.map((entry) => ({ value: entry.value, label: entry.label }))}
+            ariaLabel="第一次指派的思考深度"
+            className="task-board-native-select"
+            onValueChange={(effort) => setDraft((current) => ({
+              ...current,
+              agent: { ...current.agent, thinkingEffort: effort as WandTaskAgent["thinkingEffort"] },
+            }))}
+          />
+          <label className="task-board-due-field">
+            <span>标签</span>
+            <input
+              type="text"
+              value={draft.labels}
+              placeholder="用逗号分隔"
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+                setDraft((current) => ({ ...current, labels: value }));
+              }}
+            />
+          </label>
         </div>
         <div className="task-board-create-footer">
           <WandSwitch
@@ -713,56 +858,17 @@ export function TaskBoardHost({
           >
             <WandIcon name={createExpanded ? "chevron" : "up"} size={14}/>
           </button>
-          <WandButton kind="primary" type="submit" disabled={!draft.title.trim() || busyId === "__create__"}>
-            {busyId === "__create__" ? "正在保存…" : "创建任务"}
+          <WandButton
+            kind="primary"
+            type="submit"
+            disabled={(!draft.title.trim() && !draft.description.trim()) || busyId === "__create__"}
+          >
+            {busyId === "__create__" ? "正在保存…" : draft.description.trim() ? "创建并指派" : "创建任务"}
           </WandButton>
         </div>
       </form>
     </WandDialogSurface>
   </section>;
-}
-
-function WandPopoverDisplay({
-  display,
-  onChange,
-}: {
-  display: IssueBoardDisplay;
-  onChange(next: IssueBoardDisplay): void;
-}): React.ReactElement {
-  return <details className="task-board-display">
-    <summary className="task-board-icon-button" aria-label="显示设置" title="显示设置">
-      <WandIcon name="eye" size={14}/>
-    </summary>
-    <div className="task-board-display-menu" role="dialog" aria-label="显示设置">
-      <strong>显示设置</strong>
-      <WandSwitch
-        checked={display.body}
-        onCheckedChange={(body) => onChange({ ...display, body })}
-        ariaLabel="显示正文"
-        label="正文"
-      />
-      <p>主列</p>
-      {ISSUE_COLUMNS.map((column) => {
-        const checked = display.mainStatuses.includes(column.status);
-        return <label key={column.status} className="task-board-display-status">
-          <input
-            type="checkbox"
-            checked={checked}
-            onChange={() => {
-              const mainStatuses = checked
-                ? display.mainStatuses.filter((status) => status !== column.status)
-                : [...display.mainStatuses, column.status];
-              onChange({
-                ...display,
-                mainStatuses: mainStatuses.length > 0 ? mainStatuses : [column.status],
-              });
-            }}
-          />
-          {column.label}
-        </label>;
-      })}
-    </div>
-  </details>;
 }
 
 function IssueDetail({
@@ -792,11 +898,14 @@ function IssueDetail({
 }): React.ReactElement {
   const [title, setTitle] = React.useState(task.title);
   const [description, setDescription] = React.useState(task.description);
+  const [labelDraft, setLabelDraft] = React.useState(task.labels.join(", "));
+  const knownLabels = collectIssueLabels([task]);
 
   React.useEffect(() => {
     setTitle(task.title);
     setDescription(task.description);
-  }, [task.id, task.title, task.description]);
+    setLabelDraft(task.labels.join(", "));
+  }, [task.id, task.title, task.description, task.labels]);
 
   return <div className="task-board-detail" aria-label="任务详情">
     <div className="task-board-detail-scroll">
@@ -805,6 +914,7 @@ function IssueDetail({
           <button type="button" className="task-board-detail-back" onClick={onClose}>
             <WandIcon name="chevronLeft" size={14}/>返回任务管理
           </button>
+          <p className="task-board-detail-id">ID: {task.identifier}</p>
           <textarea
             className="task-board-detail-title"
             rows={1}
@@ -836,17 +946,11 @@ function IssueDetail({
               onPatch({ description });
             }}
           />
-          {task.sessions.length > 0 && <div className="task-board-card-sessions">
-            {task.sessions.map((session) => <button
-              key={session.id}
-              type="button"
-              className="task-board-session"
-              onClick={() => onOpenSession?.(session.id)}
-            >
-              <ProviderLogo provider={session.provider} className="task-board-agent-logo"/>
-              {issueAgentProviderLabel(session.provider)}{session.model ? ` · ${session.model}` : ""}
-            </button>)}
-          </div>}
+          <TaskBoardAgentSessionList
+            sessions={task.sessions}
+            assigned={task.agent}
+            onOpenSession={onOpenSession}
+          />
         </div>
         <aside className="task-board-detail-properties" aria-label="属性">
           <h2>属性</h2>
@@ -863,7 +967,7 @@ function IssueDetail({
           <IssueField label="优先级">
             <WandSelect
               value={task.priority}
-              options={PRIORITY_OPTIONS.map((entry) => ({ value: entry.value, label: entry.label }))}
+              options={ISSUE_PRIORITIES.map((entry) => ({ value: entry.value, label: entry.label }))}
               ariaLabel="任务优先级"
               className="task-board-native-select"
               disabled={busy}
@@ -883,10 +987,43 @@ function IssueDetail({
               onValueChange={(value) => onPatch({ workspaceId: issueWorkspaceIdFromSelect(value) })}
             />
           </IssueField>
+          <IssueField label="截止日期">
+            <input
+              type="date"
+              className="task-board-detail-date"
+              value={task.dueDate ?? ""}
+              disabled={busy}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+                onPatch({ dueDate: value || null });
+              }}
+            />
+          </IssueField>
+          <IssueField label="标签">
+            <input
+              type="text"
+              className="task-board-detail-date"
+              value={labelDraft}
+              placeholder="用逗号分隔"
+              disabled={busy}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+                setLabelDraft(value);
+              }}
+              onBlur={() => {
+                const labels = labelDraft.split(/[,，]/).map((label) => label.trim()).filter(Boolean);
+                if (labels.join("\0") === task.labels.join("\0")) return;
+                onPatch({ labels });
+              }}
+            />
+            {knownLabels.length > 0 && <div className="task-board-card-meta">
+              {task.labels.map((label) => <TaskBoardLabelChip key={label} label={label}/>)}
+            </div>}
+          </IssueField>
           <section className="task-board-native-assign" aria-label="指派 Agent">
             <div className="task-board-native-assign-head">
-              <strong>指派 Agent</strong>
-              <small>只作用于这条任务</small>
+              <strong>{task.sessions.length > 0 ? "再指派一个 Agent" : "指派 Agent"}</strong>
+              <small>同一任务可以派给多个 Agent</small>
             </div>
             <div className="task-board-native-editor-grid is-assign">
               <IssueField label="CLI 工具">
@@ -940,3 +1077,4 @@ function IssueDetail({
     </div>
   </div>;
 }
+

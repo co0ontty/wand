@@ -4,12 +4,18 @@ import test from "node:test";
 
 import {
   createDefaultIssueAgent,
+  EMPTY_ISSUE_FILTERS,
   filterIssues,
   groupIssuesByStatus,
   ISSUE_AGENT_PROVIDERS,
+  ISSUE_BOARD_VIEWS,
+  ISSUE_COLUMNS,
   ISSUE_NO_WORKSPACE,
   isDispatchableIssueAgent,
   issueAgentModelOptions,
+  normalizeIssueAgentDefaults,
+  resolveIssueAgent,
+  issueBoardStats,
   issueWorkspaceIdFromSelect,
   issueWorkspaceOptions,
   issueWorkspaceSelectValue,
@@ -17,6 +23,8 @@ import {
   reorderIssues,
   sortIssues,
   withIssueAgentProvider,
+  groupIssueSessionsByAgent,
+  listIssueAgents,
 } from "../src/web-ui/react/issues/task-board-agent.ts";
 import {
   isTaskBoardView,
@@ -78,6 +86,21 @@ test("dispatch guard only accepts supported providers with a model and effort", 
   assert.equal(isDispatchableIssueAgent({ provider: "claude", model: "x", thinkingEffort: "insane" as never }), false);
 });
 
+test("unassigned issues reuse the last selected agent defaults", () => {
+  const last = { provider: "pi" as const, model: "gpt-5", thinkingEffort: "deep" as const };
+  const assigned = { provider: "codex" as const, model: "gpt-5.1", thinkingEffort: "max" as const };
+
+  // 任务自己有配置时，不能被面板上次选择覆盖。
+  assert.deepEqual(resolveIssueAgent(assigned, last), assigned);
+  // 未指派时沿用上次的工具 / 模型 / 思考深度。
+  assert.deepEqual(resolveIssueAgent(null, last), last);
+  assert.deepEqual(resolveIssueAgent(undefined, last), last);
+  // 从未保存过时仍是 Claude 默认，避免空下拉。
+  assert.deepEqual(resolveIssueAgent(null), createDefaultIssueAgent());
+  assert.deepEqual(normalizeIssueAgentDefaults(last), last);
+  assert.deepEqual(normalizeIssueAgentDefaults({ provider: "cursor", model: "x", thinkingEffort: "off" }), createDefaultIssueAgent());
+});
+
 test("issue helpers expose columns, grouping, sorting, and workspace options", () => {
   const tasks = [
     { id: "b", status: "doing" as const, sortOrder: 1, updatedAt: "2026-01-02" },
@@ -112,6 +135,8 @@ test("native board host talks to the Wand task API instead of the removed taskbo
   const host = readFileSync(new URL("../src/web-ui/react/issues/task-board-host.tsx", import.meta.url), "utf8");
   assert.match(host, /taskBoardRepository\.dispatch\(/);
   assert.match(host, /taskBoardRepository\.workspaces\(/);
+  assert.match(host, /taskBoardRepository\.agentDefaults\(/);
+  assert.match(host, /saveAgentDefaults\(/);
   assert.match(host, /WandSelect/);
   assert.match(host, /issueWorkspaceOptions/);
   assert.doesNotMatch(host, /iframe/);
@@ -122,38 +147,51 @@ test("native board host talks to the Wand task API instead of the removed taskbo
   assert.doesNotMatch(host, /wand-taskboard-ready/);
 });
 
-test("assignment belongs to each issue, not to a board-wide create form", () => {
+test("create form can assign the first agent from the description", () => {
   const host = readFileSync(new URL("../src/web-ui/react/issues/task-board-host.tsx", import.meta.url), "utf8");
-  const composer = host.slice(host.indexOf("task-board-native-composer"), host.indexOf("task-board-create-properties"));
+  const composer = host.slice(host.indexOf("task-board-native-composer"), host.indexOf("task-board-create-footer"));
   const editor = host.slice(host.indexOf("task-board-native-assign"));
 
-  // 新建弹窗只收标题 / 项目目录 / 说明，不再带全局 CLI 工具或模型下拉。
   assert.match(composer, /任务标题/);
+  assert.match(composer, /可选/);
+  assert.match(composer, /按描述自动生成/);
   assert.match(host, /指定项目目录/);
-  assert.doesNotMatch(composer, /CLI 工具/);
-  assert.doesNotMatch(composer, /思考深度/);
+  assert.match(composer, /第一次指派的 CLI 工具/);
+  assert.match(composer, /第一次指派的思考深度/);
+  assert.match(host, /作为第一个 Agent 的指派内容/);
+  assert.match(host, /submitDescription && isDispatchableIssueAgent\(draft\.agent\)/);
+  assert.match(host, /taskBoardRepository\.dispatch\(created\.id, draft\.agent\)/);
+  assert.match(host, /创建并指派/);
 
-  // 打开单条任务详情时才有「指派 Agent」及其工具 / 模型 / 思考深度。
   assert.match(editor, /指派 Agent/);
+  assert.match(editor, /同一任务可以派给多个 Agent/);
   assert.match(editor, /任务 CLI 工具/);
   assert.match(editor, /任务模型/);
   assert.match(editor, /任务思考深度/);
+  assert.match(host, /TaskBoardAgentSessionList/);
+  assert.match(host, /TaskBoardAgentChips/);
 
-  // 新建任务不带 Agent，指派由用户在该任务上决定。
-  assert.match(host, /agent: null/);
+  assert.match(host, /!draft\.title\.trim\(\) && !draft\.description\.trim\(\)/);
+  assert.match(host, /created\.titleSource === "auto"/);
+  assert.match(host, /taskBoardRepository\.get\(taskId\)/);
 });
 
 test("board host mirrors dashi layout: header tabs, column create, drag, and detail", () => {
   const host = readFileSync(new URL("../src/web-ui/react/issues/task-board-host.tsx", import.meta.url), "utf8");
   assert.match(host, /task-board-workspace-header/);
   assert.match(host, /ISSUE_BOARD_VIEWS/);
+  assert.match(host, /view === "dashboard"/);
   assert.match(host, /view === "list"/);
+  assert.match(host, /view === "gantt"/);
+  assert.match(host, /TaskBoardFilterMenu/);
   assert.match(host, /在\$\{column.label\}中新建任务/);
   assert.match(host, /application\/x-wand-task/);
   assert.match(host, /dropIndexFromPoint/);
   assert.match(host, /返回任务管理/);
   assert.match(host, /新建任务/);
   assert.match(host, /创建更多/);
+  assert.deepEqual(ISSUE_BOARD_VIEWS.map((entry) => entry.value), ["dashboard", "board", "list", "gantt"]);
+  assert.deepEqual(ISSUE_COLUMNS.map((column) => column.status), ["todo", "doing", "done"]);
 });
 
 test("create dialog keeps modal positioning so title and selects stay visible", () => {
@@ -169,6 +207,10 @@ test("create dialog keeps modal positioning so title and selects stay visible", 
   assert.match(styles, /\.task-board-create-dialog[^{]*\{[^}]*position:\s*fixed/s);
   assert.match(styles, /\.task-board-create-dialog[^{]*\{[^}]*transform:\s*translate\(-50%, -50%\)/s);
   assert.match(styles, /\.task-board-create-title-input,[\s\S]*color:\s*var\(--text-primary\)/);
+  // 可选标题不做成第二个大标题：字号要明显小于原先 18px 的样式。
+  const titleInputRule = /\.task-board-create-title-input \{([^}]*)\}/.exec(styles)?.[1] ?? "";
+  assert.match(titleInputRule, /font-size:\s*(?:1[0-6]|\d)px/);
+  assert.match(styles, /\.task-board-create-title-label \{[^}]*font-size:\s*var\(--font-size-xs\)/s);
 
   // 看板在 Shell 里，不在 OverlayHost 的 PortalProvider 下；下拉/弹层要回落到同一 portals 根。
   assert.match(portal, /document\.getElementById\(REACT_UI_PORTALS_ID\)/);
@@ -186,6 +228,15 @@ test("filter and reorder helpers keep board columns compact", () => {
   const moved = reorderIssues(tasks, "a", "doing", 0);
   assert.deepEqual(moved.filter((entry) => entry.status === "doing").map((entry) => entry.id), ["a", "c"]);
   assert.deepEqual(moved.find((entry) => entry.id === "b"), { id: "b", status: "todo", sortOrder: 0 });
+  assert.deepEqual(
+    filterIssues(tasks, "", "", { ...EMPTY_ISSUE_FILTERS, statuses: ["doing"] }).map((task) => task.id),
+    ["c"],
+  );
+  assert.equal(issueBoardStats([
+    { status: "todo" as const, priority: "high" as const, dueDate: "2000-01-01" },
+    { status: "doing" as const, priority: "none" as const, dueDate: null },
+    { status: "done" as const, priority: "low" as const, dueDate: null },
+  ]).remaining, 2);
 });
 
 test("task board is a first-class view=taskboard route that does not unmount the shell", () => {
@@ -231,4 +282,22 @@ test("task board is a first-class view=taskboard route that does not unmount the
   assert.match(sidebar, /aria-current=\{taskBoard\.open \? "page" : undefined\}/);
   assert.match(host, /chevronLeft[^\n]*>返回/);
   assert.doesNotMatch(host, /返回会话/);
+});
+
+test("task detail groups sessions by the agents that actually ran", () => {
+  const claude = { provider: "claude" as const, model: "opus", thinkingEffort: "deep" as const };
+  const groups = groupIssueSessionsByAgent([
+    { id: "s1", provider: "claude", title: "修登录", status: "running", model: "opus", thinkingEffort: "deep" },
+    { id: "s2", provider: "claude", title: "补测试", status: "exited", model: "sonnet", thinkingEffort: "off" },
+    { id: "s3", provider: "codex", title: "实现 API", status: "idle", model: "gpt-5", thinkingEffort: "standard" },
+  ], claude);
+  assert.deepEqual(groups.map((group) => group.provider), ["claude", "codex"]);
+  assert.deepEqual(groups[0]!.sessions.map((session) => session.id), ["s1", "s2"]);
+  assert.deepEqual(groups[1]!.sessions.map((session) => session.id), ["s3"]);
+  assert.deepEqual(listIssueAgents(groups.flatMap((group) => group.sessions), claude).map((agent) => agent.provider), ["claude", "codex"]);
+
+  const pending = groupIssueSessionsByAgent([], { provider: "pi", model: "default", thinkingEffort: "off" });
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0]!.provider, "pi");
+  assert.equal(pending[0]!.sessions.length, 0);
 });

@@ -103,6 +103,17 @@ export interface WandConfig {
     certPath?: string;
     keyPath?: string;
   };
+  /**
+   * 对外公开的访问地址（如 `https://home.example.com:8443`）。
+   *
+   * TLS 由 L4 反代（nginx stream / Nginx Proxy Manager 的 TCP stream）终止时，node 收到的是
+   * 明文 HTTP，既没有 `X-Forwarded-Proto` 也没有真实 scheme，`/api/app-connect-code` 与
+   * `/api/login` 的 `serverUrl` 会把 `https://host:tls-port` 误判成 `http://host:tls-port`，
+   * 手机扫描连接码后对 TLS 端口发明文请求，报“连不上服务端”。
+   *
+   * 填了就以这里为准（含 scheme），不再猜测。留空则沿用请求头 / 浏览器 origin 推断。
+   */
+  publicOrigin?: string;
   password: string;
   /** 新建会话时默认使用的 Provider。 */
   defaultProvider?: SessionProvider;

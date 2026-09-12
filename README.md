@@ -95,6 +95,7 @@ Common options:
 | `https` | `false` | Enable HTTPS with an auto-generated self-signed certificate |
 | `password` | random | Login password |
 | `language` | `""` | Preferred Claude response language |
+| `publicOrigin` | unset | Public URL clients should use, e.g. `https://home.example.com:8443`. Required when TLS terminates in an L4 proxy |
 
 ### System Service
 
@@ -262,6 +263,7 @@ wand config:set port 9443
 | `https` | `false` | 启用 HTTPS（自签证书自动生成） |
 | `password` | (随机生成) | 登录密码 |
 | `language` | `""` | Claude 回复语言偏好 |
+| `publicOrigin` | 未设置 | 客户端应使用的公开访问地址，如 `https://home.example.com:8443`。TLS 在 L4 反代终止时必填 |
 
 ### 系统服务
 

@@ -576,7 +576,7 @@ export function ShellSidebar() {
         onClick={() => void dispatch({ type: "layout.drawer.close" })}
       />
       <aside id="sessions-drawer" ref={drawerRef} className={sidebarClass}
-        aria-label="项目与任务侧栏" role={overlay ? "dialog" : undefined}
+        aria-label="任务侧栏" role={overlay ? "dialog" : undefined}
         aria-modal={overlay || undefined} aria-hidden={!visible || undefined}
         inert={!visible} tabIndex={-1}>
         <div className="sidebar-header">
@@ -677,7 +677,7 @@ export function ShellSidebar() {
             id="drawer-new-session-button"
             className="sidebar-new-task"
             type="button"
-            title="新建任务，不必先创建项目"
+            title="新建任务"
             aria-label={primaryAction.ariaLabel}
             onClick={() => navigate(primaryAction.action)}
           >

@@ -352,6 +352,10 @@ function authenticateBearerAppToken(
 }
 
 function resolveRequestServerUrl(req: Request, config: WandConfig, useHttps: boolean): string {
+  // 配置了公开 origin 就优先用它：TLS 在 L4 反代（nginx stream / NPM TCP stream）终止时
+  // node 只看到明文 HTTP，既没有 X-Forwarded-Proto 也没有正确的 scheme，猜不出来。
+  const configuredOrigin = normalizePublicOrigin(config.publicOrigin);
+  if (configuredOrigin) return resolveAppConnectOrigin(configuredOrigin, config);
   const requestProtocol = getPublicRequestProtocol(req, useHttps ? "https" : "http");
   const requestHost = getPublicRequestHost(req, config);
   const originHeader = firstHeaderValue(req.headers.origin);
@@ -1131,10 +1135,14 @@ export async function startServer(
     modelCatalog,
     resolveAppConnectCode: (req) => {
       const effectivePassword = getEffectivePassword(storage, config);
+      const configuredOrigin = normalizePublicOrigin(config.publicOrigin);
       const requestProtocol = getPublicRequestProtocol(req, useHttps ? "https" : "http");
       const requestHost = getPublicRequestHost(req, config);
       const browserOrigin = normalizePublicOrigin(firstQueryStringValue(req.query.origin));
-      const serverUrl = resolveAppConnectOrigin(browserOrigin ?? `${requestProtocol}://${requestHost}`, config);
+      const serverUrl = resolveAppConnectOrigin(
+        configuredOrigin ?? browserOrigin ?? `${requestProtocol}://${requestHost}`,
+        config,
+      );
       const token = generateAppToken(effectivePassword, config.appSecret ?? "");
       return { code: encodeConnectCode(serverUrl, token), url: serverUrl };
     },

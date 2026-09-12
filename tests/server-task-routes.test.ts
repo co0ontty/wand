@@ -7,7 +7,7 @@ import test from "node:test";
 import express from "express";
 import { defaultConfig } from "../src/config.js";
 import { jsonErrorHandler } from "../src/express-async.js";
-import { registerTaskRoutes } from "../src/server-task-routes.js";
+import { registerTaskRoutes, whenWandTaskTitlesSettled } from "../src/server-task-routes.js";
 import { SessionRegistry } from "../src/session-registry.js";
 import { StructuredSessionManager } from "../src/structured-session-manager.js";
 import { WandStorage } from "../src/storage.js";
@@ -20,10 +20,16 @@ interface Harness {
   close: () => Promise<void>;
 }
 
-function start(storage: WandStorage, manager: StructuredSessionManager, registry: SessionRegistry, config = defaultConfig()): Promise<Harness> {
+function start(
+  storage: WandStorage,
+  manager: StructuredSessionManager,
+  registry: SessionRegistry,
+  config = defaultConfig(),
+  extra: Partial<Pick<Parameters<typeof registerTaskRoutes>[1] & object, "generateTitle">> = {},
+): Promise<Harness> {
   const app = express();
   app.use(express.json());
-  registerTaskRoutes(app, { storage, sessions: registry, structured: manager, config });
+  registerTaskRoutes(app, { storage, sessions: registry, structured: manager, config, ...extra });
   app.use(jsonErrorHandler);
   const server = createServer(app);
   return new Promise((resolve, reject) => {
@@ -42,14 +48,19 @@ function start(storage: WandStorage, manager: StructuredSessionManager, registry
   });
 }
 
-async function withHarness(run: (ctx: Harness) => Promise<void>): Promise<void> {
+async function withHarness(
+  run: (ctx: Harness) => Promise<void>,
+  options: { generateTitle?: (description: string) => Promise<string> } = {},
+): Promise<void> {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-task-board-"));
   const storage = new WandStorage(path.join(root, "wand.db"));
   const config = { ...defaultConfig(), defaultCwd: root };
   const manager = new StructuredSessionManager(storage, config);
   // Task routes only ever read the registry, so the PTY manager can stay absent.
   const registry = new SessionRegistry({ getOwned: () => null } as never, manager, storage);
-  const harness = await start(storage, manager, registry, config);
+  const harness = await start(storage, manager, registry, config, options.generateTitle
+    ? { generateTitle: ((description: string) => options.generateTitle!(description)) as never }
+    : {});
   try {
     await run(harness);
   } finally {
@@ -129,8 +140,84 @@ test("tasks can be pointed at a workspace and expose its directory", async () =>
   });
 });
 
-test("tasks persist and validate the selected CLI tool", async () => {
+test("a task can be created from the description alone and gets a generated title", async () => {
+  const calls: string[] = [];
+  await withHarness(async ({ url, storage }) => {
+    const created = await fetch(`${url}/api/wand-tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "", description: "修复 Android 终端输入乱码\n另外检查列宽" }),
+    }).then(jsonOf<{ id: string; title: string; titleSource: string }>);
+
+    // 创建请求立刻返回：先给描述首行占位，不阻塞等模型。
+    assert.equal(created.title, "修复 Android 终端输入乱码");
+    assert.equal(created.titleSource, "auto");
+
+    await whenWandTaskTitlesSettled();
+    const stored = storage.getWandTask(created.id);
+    assert.equal(stored?.title, "终端乱码修复");
+    assert.equal(stored?.titleSource, "auto");
+    assert.deepEqual(calls, ["修复 Android 终端输入乱码\n另外检查列宽"]);
+    assert.equal(created.title.length > 0, true);
+  }, { generateTitle: async (description) => { calls.push(description); return "终端乱码修复"; } });
+});
+
+test("an explicit title is never replaced by the generator", async () => {
+  const calls: string[] = [];
+  await withHarness(async ({ url, storage }) => {
+    const created = await fetch(`${url}/api/wand-tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "我自己写的标题", description: "描述" }),
+    }).then(jsonOf<{ id: string; title: string; titleSource: string }>);
+
+    assert.equal(created.title, "我自己写的标题");
+    assert.equal(created.titleSource, "user");
+    await whenWandTaskTitlesSettled();
+    assert.equal(storage.getWandTask(created.id)?.title, "我自己写的标题");
+    assert.deepEqual(calls, []);
+  }, { generateTitle: async (description) => { calls.push(description); return "自动标题"; } });
+});
+
+test("a task needs a title or a description", async () => {
   await withHarness(async ({ url }) => {
+    const blank = await fetch(url + "/api/wand-tasks", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "   ", description: "  " }),
+    });
+    assert.equal(blank.status, 400);
+    assert.match((await blank.json() as { error: string }).error, /任务标题或任务描述/);
+  });
+});
+
+test("editing the title of an auto-titled task keeps the manual title", async () => {
+  let release = (): void => {};
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await withHarness(async ({ url, storage }) => {
+    const created = await fetch(`${url}/api/wand-tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ description: "先建一张只有描述的任务" }),
+    }).then(jsonOf<{ id: string; titleSource: string }>);
+    assert.equal(created.titleSource, "auto");
+
+    // 后台还没总结完，用户自己先改了标题；PATCH 要把它标回 user。
+    const patched = await fetch(`${url}/api/wand-tasks/${created.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "用户改过的标题" }),
+    }).then(jsonOf<{ title: string; titleSource: string }>);
+    assert.equal(patched.title, "用户改过的标题");
+    assert.equal(patched.titleSource, "user");
+
+    release();
+    await whenWandTaskTitlesSettled();
+    assert.equal(storage.getWandTask(created.id)?.title, "用户改过的标题");
+  }, { generateTitle: async () => { await gate; return "迟到的自动标题"; } });
+});
+
+test("tasks persist and validate the selected CLI tool", async () => {  await withHarness(async ({ url }) => {
     const created = await fetch(`${url}/api/wand-tasks`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -277,5 +364,53 @@ test("deleting a board task archives it as done instead of removing it", async (
     assert.equal(listed[0]!.id, created.id);
     assert.equal(listed[0]!.status, "done");
     assert.equal(storage.getWorkspaceTask(work.id)?.status, "done");
+  });
+});
+
+test("task board remembers last selected agent defaults", async () => {
+  await withHarness(async ({ url }) => {
+    const initial = await fetch(`${url}/api/wand-task-agent-defaults`)
+      .then(jsonOf<{ provider: string; model: string; thinkingEffort: string }>);
+    assert.deepEqual(initial, { provider: "claude", model: "default", thinkingEffort: "off" });
+
+    const saved = await fetch(`${url}/api/wand-task-agent-defaults`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ provider: "pi", model: "gpt-5", thinkingEffort: "deep" }),
+    }).then(jsonOf<{ provider: string; model: string; thinkingEffort: string }>);
+    assert.deepEqual(saved, { provider: "pi", model: "gpt-5", thinkingEffort: "deep" });
+
+    const loaded = await fetch(`${url}/api/wand-task-agent-defaults`)
+      .then(jsonOf<{ provider: string; model: string; thinkingEffort: string }>);
+    assert.deepEqual(loaded, saved);
+
+    const created = await fetch(`${url}/api/wand-tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title: "沿用上次选择",
+        agent: { provider: "codex", model: "gpt-5.1", thinkingEffort: "max" },
+      }),
+    }).then(jsonOf<{ id: string }>);
+    const afterCreate = await fetch(`${url}/api/wand-task-agent-defaults`)
+      .then(jsonOf<{ provider: string }>);
+    assert.equal(afterCreate.provider, "codex");
+
+    await fetch(`${url}/api/wand-tasks/${created.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agent: { provider: "grok", model: "grok-4", thinkingEffort: "standard" } }),
+    });
+    const afterPatch = await fetch(`${url}/api/wand-task-agent-defaults`)
+      .then(jsonOf<{ provider: string; thinkingEffort: string }>);
+    assert.equal(afterPatch.provider, "grok");
+    assert.equal(afterPatch.thinkingEffort, "standard");
+
+    const invalid = await fetch(`${url}/api/wand-task-agent-defaults`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ provider: "cursor", model: "x", thinkingEffort: "off" }),
+    });
+    assert.equal(invalid.status, 400);
   });
 });

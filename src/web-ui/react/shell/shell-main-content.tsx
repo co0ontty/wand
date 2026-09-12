@@ -156,7 +156,7 @@ function ShellBlankChat({ className, queueRef, workspaceTask, workspaceProject }
       ) : <div className="blank-chat-inner">
         <div className="blank-chat-logo">W</div>
         <h2 className="blank-chat-title">Wand</h2>
-        <p className="blank-chat-subtitle">可以先建一个不依赖项目的任务，或新建项目后再在目录下工作。</p>
+        <p className="blank-chat-subtitle">创建一个任务，选择目录和 CLI，开始工作。</p>
         <div className="blank-chat-tools">
           <button
             className="blank-chat-tool-btn welcome-new-task"
@@ -200,7 +200,7 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
       {context.taskId ? null : <ShellTopbar/>}
       {context.taskId && snapshot.viewport.mobile && (
         <nav className="workspace-mobile-navigation" aria-label="任务导航">
-          <button type="button" aria-label="打开任务与项目" title="打开任务与项目"
+          <button type="button" aria-label="打开任务" title="打开任务"
             aria-expanded={snapshot.layout.sessionsDrawerOpen} aria-controls="sessions-drawer"
             onClick={() => void dispatch({ type: "layout.drawer.toggle" })}>
             <WandIcon name="rail" size={19}/>

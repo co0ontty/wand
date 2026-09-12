@@ -14,6 +14,9 @@ export interface WandTaskAgent {
   thinkingEffort: WandTaskAgentEffort;
 }
 
+/** 任务标题来源；标题是可选字段，留空时由服务端按描述自动生成。 */
+export type WandTaskTitleSource = "user" | "auto";
+
 export interface WandTask {
   id: string;
   workspaceId: string | null;
@@ -21,6 +24,8 @@ export interface WandTask {
   workspaceTaskId: string | null;
   identifier: string;
   title: string;
+  /** 'user' = 用户自己填的标题；'auto' = 用户留空后按描述自动生成。 */
+  titleSource: WandTaskTitleSource;
   description: string;
   status: WandTaskStatus;
   priority: WandTaskPriority;

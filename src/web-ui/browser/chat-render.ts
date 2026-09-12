@@ -2427,9 +2427,9 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
         var summary = summarizeActivityRun(items, toolResults);
         // 运行态：只有「当前正在流式生成的最后一条 assistant 消息」里、位于消息
         // 尾部、且还没被正文截断的那一段才算运行中。中间被正文切开的条一律已完成。
-        var running = !!opts.isTrailing &&
-          isTurnActivityLive(_currentMessageGlobalIndex) &&
-          isMessageActivityOpen(_currentMessageGlobalIndex);
+        // 只要这条还在当前轮尾部、会话仍在跑，就保持「进行中」：工具刚结束、
+        // 下一轮思考还没到时也算运行，避免被误当成卡住/结束。
+        var running = !!opts.isTrailing && isTurnActivityLive(_currentMessageGlobalIndex);
         // expand key 只绑 run 的起点，流式期间不断追加 item 也不会让已展开的
         // 用户视图被重置回折叠态。
         var runStart = items.length ? items[0].index : 0;
@@ -2459,7 +2459,9 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
               '<span class="chat-activity-count">' + visible.length + '</span>' +
               '<span class="chat-activity-chevron">' + iconSvg("chevronDown", { size: 14, strokeWidth: 2 }) + '</span>' +
             '</span>' +
-            '<span class="chat-activity-latest">' + escapeHtml(summary.latest) + '</span>' +
+            '<span class="chat-activity-latest">' +
+              '<span class="chat-activity-latest-text">' + escapeHtml(summary.latest) + '</span>' +
+            '</span>' +
           '</button>' +
           '<div class="chat-activity-body" aria-hidden="' + (expanded ? "false" : "true") + '"' +
             (expanded ? '' : ' style="display:none"') + '>' + bodyHtml + '</div>' +

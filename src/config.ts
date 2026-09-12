@@ -692,6 +692,19 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
     ...input,
     // Ensure https is boolean
     https: typeof input.https === "boolean" ? input.https : defaults.https,
+    // 只接受不带路径/查询/凭据的 http(s) origin；写了非法值就当作没配。
+    publicOrigin: (() => {
+      const raw = typeof input.publicOrigin === "string" ? input.publicOrigin.trim() : "";
+      if (!raw) return undefined;
+      try {
+        const parsed = new URL(raw);
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return undefined;
+        if (!parsed.hostname || parsed.username || parsed.password) return undefined;
+        return parsed.origin;
+      } catch {
+        return undefined;
+      }
+    })(),
     tls: (() => {
       if (!input.tls || typeof input.tls !== "object") return undefined;
       const certPath = typeof input.tls.certPath === "string" ? input.tls.certPath.trim() : "";

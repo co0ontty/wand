@@ -3,16 +3,43 @@ import { getDefaultModelForProvider } from "./config.js";
 import { asyncRoute } from "./express-async.js";
 import { getErrorMessage } from "./error-utils.js";
 import { parseWandTaskAgent, type WandStorage } from "./storage.js";
+import { generateWandTaskTitle, provisionalTaskTitleFromDescription, TASK_TITLE_MAX_LENGTH } from "./task-title.js";
+import type { QuickCommitAiOptions } from "./git-quick-commit.js";
+import { resolveSystemAiContext } from "./session-ai-context.js";
 import type { SessionRegistry } from "./session-registry.js";
 import type { StructuredSessionManager } from "./structured-session-manager.js";
-import type { WandTaskAgent, WandTaskAgentEffort, WandTaskAgentProvider, WandTaskPriority, WandTaskStatus } from "./task-types.js";
-import { archiveBoardTask } from "./wand-task-sync.js";
+import type { WandTaskAgent, WandTaskAgentEffort, WandTaskAgentProvider, WandTaskPriority, WandTaskStatus, WandTaskTitleSource } from "./task-types.js";
+import { archiveBoardTask, syncUngroupedSessionsToBoard } from "./wand-task-sync.js";
 import type { SessionProvider, SessionSnapshot, WandConfig } from "./types.js";
 
 const STATUSES = new Set<WandTaskStatus>(["todo", "doing", "done"]);
 const PRIORITIES = new Set<WandTaskPriority>(["none", "low", "medium", "high", "urgent"]);
 const AGENT_PROVIDERS = new Set<WandTaskAgentProvider>(["claude", "codex", "opencode", "grok", "qoder", "pi"]);
 const AGENT_EFFORTS = new Set<WandTaskAgentEffort>(["off", "standard", "deep", "max"]);
+const TASK_BOARD_LAST_AGENT_KEY = "pref:taskBoardLastAgent";
+
+function defaultTaskBoardAgent(): WandTaskAgent {
+  return { provider: "claude", model: "default", thinkingEffort: "off" };
+}
+
+/** 任务面板上次选用的 CLI 工具 / 模型 / 思考深度；从未保存过时回落到 Claude 默认。 */
+export function readTaskBoardLastAgent(storage: WandStorage): WandTaskAgent {
+  const raw = storage.getPreference<unknown>(TASK_BOARD_LAST_AGENT_KEY, null);
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return defaultTaskBoardAgent();
+  try {
+    return parseTaskAgent(raw) ?? defaultTaskBoardAgent();
+  } catch {
+    return defaultTaskBoardAgent();
+  }
+}
+
+export function writeTaskBoardLastAgent(storage: WandStorage, agent: WandTaskAgent): void {
+  storage.setPreference(TASK_BOARD_LAST_AGENT_KEY, {
+    provider: agent.provider,
+    model: agent.model,
+    thinkingEffort: agent.thinkingEffort,
+  });
+}
 
 export interface TaskRouteDependencies {
   storage: WandStorage;
@@ -20,6 +47,8 @@ export interface TaskRouteDependencies {
   structured?: StructuredSessionManager;
   config?: WandConfig;
   requireAdmin?: RequestHandler;
+  /** 可注入的任务标题生成器；测试里换成同步桩，避免真的起 CLI。 */
+  generateTitle?: typeof generateWandTaskTitle;
 }
 
 function dateValue(value: unknown): string | null | undefined {
@@ -98,6 +127,61 @@ function sendTaskError(res: Response, error: unknown, fallback: string): void {
   res.status(400).json({ error: getErrorMessage(error, fallback) });
 }
 
+/**
+ * 用户没写标题时，先用描述首行当占位标题，再由后台模型总结一个更好的。
+ * 全程不阻塞创建请求：失败只是保留占位标题，不返回错误、也不覆盖用户后来改的标题。
+ * 多次建任务会排队而不是丢弃，保证每张卡片最终都会拿到标题。
+ */
+let titleGenerationChain: Promise<void> = Promise.resolve();
+
+function scheduleWandTaskTitleGeneration(
+  storage: WandStorage,
+  taskId: string,
+  description: string,
+  options: {
+    cwd?: string;
+    config?: WandConfig;
+    generateTitle: typeof generateWandTaskTitle;
+  },
+): void {
+  const cwd = options.cwd || options.config?.defaultCwd || process.cwd();
+  const run = async (): Promise<void> => {
+    try {
+      const title = await options.generateTitle(description, cwd, options.config?.language ?? "", taskTitleAiOptions(options.config));
+      const current = storage.getWandTask(taskId);
+      // 用户已经自己写了标题（原生端 / 面板编辑）就不要覆盖。
+      if (!current || current.titleSource !== "auto") return;
+      const clipped = title.slice(0, TASK_TITLE_MAX_LENGTH);
+      if (!clipped || clipped === current.title) return;
+      storage.updateWandTask(taskId, { title: clipped });
+    } catch (error) {
+      console.error(`[WandTask] Failed to auto-generate title for ${taskId}:`, getErrorMessage(error));
+    }
+  };
+  titleGenerationChain = titleGenerationChain.then(run, run);
+}
+
+/** 等待排队中的标题生成全部结束；只有测试用，避免用例轮询。 */
+export function whenWandTaskTitlesSettled(): Promise<void> {
+  return titleGenerationChain;
+}
+
+/** 自动生成标题没有会话上下文，按「默认 provider + 默认模型」解析，与提示词优化一致。 */
+function taskTitleAiOptions(config?: WandConfig): QuickCommitAiOptions {
+  if (!config) return {};
+  const provider = config.defaultProvider ?? "claude";
+  const defaultSession = {
+    provider,
+    structuredState: undefined,
+    runner: undefined,
+    command: provider === "qoder" ? "qodercli" : provider,
+    selectedModel: null,
+    thinkingEffort: config.defaultThinkingEffort,
+  };
+  // resolveSystemAiContext 会在直连 API 可用且已启用时优先走 API，否则回落到 CLI。
+  return resolveSystemAiContext(defaultSession, config);
+}
+
 export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies | WandStorage, sessionsLegacy?: SessionRegistry, requireAdminLegacy?: RequestHandler): void {
   // 兼容旧的 positional 调用；新代码统一用对象形式的依赖。
   const resolved: TaskRouteDependencies = deps && typeof deps === "object" && "storage" in deps
@@ -108,29 +192,60 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies | W
   const dto = (task: ReturnType<WandStorage["getWandTask"]>) => taskDto(resolved, task);
 
   app.get("/api/wand-tasks", guard, (req, res) => {
+    try {
+      syncUngroupedSessionsToBoard(storage);
+    } catch (error) {
+      console.error("[WandTask] Failed to sync ungrouped sessions onto the board:", getErrorMessage(error));
+    }
     const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : undefined;
     res.json(storage.listWandTasks(workspaceId).map((task) => dto(task)));
+  });
+  app.get("/api/wand-task-agent-defaults", guard, (_req, res) => {
+    res.json(readTaskBoardLastAgent(storage));
+  });
+  app.put("/api/wand-task-agent-defaults", guard, (req, res) => {
+    try {
+      const agent = parseTaskAgent(req.body);
+      if (!agent) throw new Error("请选择有效的 CLI 工具。");
+      writeTaskBoardLastAgent(storage, agent);
+      res.json(agent);
+    } catch (error) {
+      sendTaskError(res, error, "无法保存 Agent 默认选项。");
+    }
   });
   app.post("/api/wand-tasks", guard, (req, res) => {
     try {
       const body = bodyObject(req.body);
-      const title = text(body.title);
-      if (!title) throw new Error("任务标题不能为空。");
       const workspaceId = body.workspaceId === null ? null : text(body.workspaceId) || null;
       if (workspaceId && !storage.getWorkspace(workspaceId)) throw new Error("项目不存在。");
+      const description = text(body.description);
+      // 标题是可选字段：用户不写就先用描述首行占位，再由模型在后台覆盖。
+      const providedTitle = text(body.title);
+      if (!providedTitle && !description) throw new Error("请填写任务标题或任务描述。");
+      const titleSource: WandTaskTitleSource = providedTitle ? "user" : "auto";
+      const title = providedTitle || provisionalTaskTitleFromDescription(description) || "新建任务";
       const status = STATUSES.has(body.status as WandTaskStatus) ? body.status as WandTaskStatus : "todo";
       const priority = PRIORITIES.has(body.priority as WandTaskPriority) ? body.priority as WandTaskPriority : "none";
       const agent = body.agent === undefined ? null : parseTaskAgent(body.agent);
+      if (agent) writeTaskBoardLastAgent(storage, agent);
       const task = storage.createWandTask({
         workspaceId,
         title,
-        description: text(body.description),
+        titleSource,
+        description,
         status,
         priority,
         labels: labelsFrom(body.labels),
         dueDate: dateValue(body.dueDate) ?? null,
         agent,
       });
+      if (titleSource === "auto") {
+        scheduleWandTaskTitleGeneration(storage, task.id, description, {
+          cwd: workspaceId ? storage.getWorkspace(workspaceId)?.cwd : undefined,
+          config,
+          generateTitle: resolved.generateTitle ?? generateWandTaskTitle,
+        });
+      }
       res.status(201).json(dto(task));
     } catch (error) {
       sendTaskError(res, error, "无法创建任务。");
@@ -141,9 +256,11 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies | W
       const body = bodyObject(req.body);
       const patch: Parameters<WandStorage["updateWandTask"]>[1] = {};
       if (body.title !== undefined) {
+        // 显式改标题（包括原生端的可编辑标题框）都算用户自己写的。
         const value = text(body.title);
         if (!value) throw new Error("任务标题不能为空。");
         patch.title = value;
+        patch.titleSource = "user";
       }
       if (body.description !== undefined) patch.description = text(body.description);
       if (body.status !== undefined) {
@@ -161,7 +278,10 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies | W
         if (workspaceId && !storage.getWorkspace(workspaceId)) throw new Error("项目不存在。");
         patch.workspaceId = workspaceId || null;
       }
-      if (body.agent !== undefined) patch.agent = parseTaskAgent(body.agent);
+      if (body.agent !== undefined) {
+        patch.agent = parseTaskAgent(body.agent);
+        if (patch.agent) writeTaskBoardLastAgent(storage, patch.agent);
+      }
       if (body.sortOrder !== undefined && Number.isFinite(Number(body.sortOrder))) {
         patch.sortOrder = Math.floor(Number(body.sortOrder));
       }
@@ -217,6 +337,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies | W
         ? task.agent ?? parseWandTaskAgent(JSON.stringify(body))
         : parseTaskAgent(body.agent);
       if (!agent) throw new Error("请先为该任务选择 CLI 工具。");
+      writeTaskBoardLastAgent(storage, agent);
       const workspace = task.workspaceId ? storage.getWorkspace(task.workspaceId) : null;
       if (task.workspaceId && !workspace) throw new Error("任务所属项目已被删除，请重新指定。");
       const cwd = workspace?.cwd || config.defaultCwd;
@@ -231,6 +352,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies | W
         sessionSource: "automation",
         automationId: `wand-task:${task.id}`,
         workspaceId: task.workspaceId ?? undefined,
+        workspaceTaskId: task.workspaceTaskId ?? undefined,
       });
       storage.updateWandTask(task.id, { agent, status: task.status === "todo" ? "doing" : task.status });
       storage.bindWandTaskSession(task.id, session.id);

@@ -311,24 +311,24 @@ test("ShellSidebar primary action always creates a task", () => {
   });
 });
 
-test("ShellSidebar keeps creation above two distinct sections and settings in the footer", () => {
+test("ShellSidebar keeps creation above the directory task tree and settings in the footer", () => {
   const html = renderSidebar(fixture());
   const createIndex = html.indexOf('id="drawer-new-session-button"');
-  const tasksIndex = html.indexOf('aria-label="独立任务"');
-  const projectsIndex = html.indexOf('aria-label="项目"');
-  assert.ok(createIndex > 0 && createIndex < tasksIndex);
-  assert.ok(tasksIndex < projectsIndex);
+  const treeIndex = html.indexOf('class="workspaces-panel"');
+  assert.ok(createIndex > 0 && createIndex < treeIndex);
   assert.ok(html.indexOf('id="settings-button"') > html.indexOf('class="sidebar-footer"'));
   assert.equal(html.match(/id="drawer-new-session-button"/g)?.length, 1);
-  assert.match(html, /aria-label="新建项目"/);
+  assert.doesNotMatch(html, /aria-label="新建项目"/);
+  assert.doesNotMatch(html, /aria-label="独立任务"/);
+  assert.doesNotMatch(html, /aria-label="项目"/);
 });
 
 test("mobile drawer ignores the desktop compact preference", () => {
   const base = fixture();
   const html = renderSidebar(fixture({ layout: { ...base.layout, sidebarCollapsed: true } }));
   assert.doesNotMatch(html, /class="sidebar open pinned collapsed"/);
-  assert.match(html, /aria-label="独立任务"/);
-  assert.match(html, /aria-label="项目"/);
+  assert.match(html, /aria-label="目录"/);
+  assert.doesNotMatch(html, /aria-label="新建项目"/);
 });
 
 test("ShellSidebar source uses the UiStore hooks and no forbidden legacy seam", () => {

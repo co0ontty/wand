@@ -852,6 +852,25 @@ function setConfigValue(
         ...config,
         https: value === "true"
       };
+    case "publicOrigin": {
+      if (!value) throw new Error("publicOrigin must not be empty; use 'wand config:unset publicOrigin' to clear it");
+      let parsed: URL;
+      try {
+        parsed = new URL(value);
+      } catch {
+        throw new Error("publicOrigin must be an absolute URL, e.g. https://home.example.com:8443");
+      }
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        throw new Error("publicOrigin must use http:// or https://");
+      }
+      if (parsed.username || parsed.password || parsed.pathname !== "/" || parsed.search || parsed.hash) {
+        throw new Error("publicOrigin must be a bare origin without credentials, path, query, or fragment");
+      }
+      return {
+        ...config,
+        publicOrigin: parsed.origin
+      };
+    }
     default:
       throw new Error(`Unsupported config key: ${key}`);
   }

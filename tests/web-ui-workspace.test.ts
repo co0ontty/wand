@@ -207,7 +207,10 @@ test("new task dialog can create a standalone task without find-or-create projec
   assert.match(source, /createStandaloneTask/);
   assert.match(source, /WorkspaceAgentPicker/);
   assert.match(source, /全局临时目录/);
-  assert.match(source, /openWorkspace\(createdProject\)/);
+  assert.doesNotMatch(source, /openWorkspace\(createdProject\)/);
+  assert.doesNotMatch(source, /wand-workspace-creation-kind/);
+  assert.doesNotMatch(source, /新建项目/);
+  assert.doesNotMatch(source, /所属项目/);
 });
 
 test("workspaces panel steers creation to the empty-state CTA without manual refresh", () => {
@@ -318,9 +321,11 @@ test("new task dialog follows the selected directory instead of retaining an old
   assert.match(source, /createStandaloneTask\([\s\S]*cwd: mountedCwd \|\| undefined/);
 });
 
-test("switching from a project to a standalone task clears the inherited directory", () => {
+test("new task dialog no longer exposes a project creation view", () => {
   const source = readFileSync(new URL("../src/web-ui/react/workspaces/host.tsx", import.meta.url), "utf8");
-  assert.match(source, /setCwd\(project\?\.cwd \?\? ""\)/);
+  assert.doesNotMatch(source, /setCreationKind/);
+  assert.doesNotMatch(source, /creationKind === "project"/);
+  assert.match(source, /const setTaskCwd = \(nextCwd: string\): void =>/);
 });
 
 test("workspace path captions keep the leaf and hide redundant absolute prefixes", () => {
@@ -345,7 +350,7 @@ test("task list treats directories as group headers and exposes per-terminal del
   assert.match(styles, /\.workspace-task-name\s*\{[^}]*-webkit-line-clamp:\s*2/s);
   assert.match(panel, /workspace-task-count/);
   assert.match(panel, /className="workspace-task-menu"/);
-  assert.match(panel, /删除项目/);
+  assert.match(panel, /删除目录/);
   assert.match(panel, /handleDeleteDirectory/);
   assert.match(panel, /className="workspace-task-menu-item danger"/);
   assert.doesNotMatch(panel, /role="button"[\s\S]{0,500}workspace-task-action/);

@@ -231,7 +231,7 @@ test("mobile tasks keep a sidebar navigation entry even without terminal windows
     path.join(root, "src", "web-ui", "react", "shell", "shell-main-content.tsx"), "utf8",
   );
   assert.match(source, /context\.taskId && snapshot\.viewport\.mobile &&/);
-  assert.match(source, /aria-label="打开任务与项目"/);
+  assert.match(source, /aria-label="打开任务"/);
   assert.match(source, /aria-controls="sessions-drawer"/);
   assert.match(source, /dispatch\(\{ type: "layout\.drawer\.toggle" \}\)/);
 });

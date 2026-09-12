@@ -1,11 +1,11 @@
-// 「新建项目 / 任务」对话框。
-// 任务可以不挂项目：不选目录时使用全局临时目录，创建时必须选择 CLI。
-// 项目必须挂目录，创建后进入空白全页 CLI / 会话类型选择。
+// 「新建任务」对话框。
+// 任务可以不挂目录：不选目录时使用全局临时目录，创建时必须选择 CLI。
+// 选中已有目录时按路径复用对应分组，不再提供单独的项目创建界面。
 
 import { type FormEvent, useEffect, useState, useSyncExternalStore } from "react";
 
 import { WandButton, WandDialogSurface, WandIcon, WandSwitch } from "../ui";
-import { workspacesController, workspacesStore, type WorkspaceCreationKind } from "./controller";
+import { workspacesController, workspacesStore } from "./controller";
 import { httpNewSessionRepository } from "../new-session/repository";
 import {
   httpWorkspacesRepository,
@@ -47,7 +47,6 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
   );
   const [defaults, setDefaults] = useState<NewProjectDefaults | null>(null);
   const [projects, setProjects] = useState<Workspace[]>([]);
-  const [creationKind, setCreationKind] = useState<WorkspaceCreationKind>(controller.initialKind);
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [name, setName] = useState("");
   const [cwd, setCwd] = useState("");
@@ -68,7 +67,6 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
     setError("");
     setDefaults(null);
     setProjects([]);
-    setCreationKind(controller.initialKind);
     setSelectedProjectId("");
     setName("");
     setWorktreeEnabled(true);
@@ -93,9 +91,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
         setWorktreeEnabled(loaded.defaultTaskWorktree);
         setTarget(loaded.defaultProvider);
         setSessionKind(loaded.defaultSessionKind);
-        if (controller.initialKind === "project") {
-          setCwd((current) => current || loaded.defaultCwd || workspacesStore.getRuntime()?.effectiveCwd() || "");
-        } else if (matchingProject) {
+        if (matchingProject) {
           setCwd(matchingProject.cwd);
         } else {
           setCwd(controller.initialCwd);
@@ -125,21 +121,14 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
   }, [controller.open, cwd, suggestionsActive]);
 
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
-  const isProject = creationKind === "project";
   const mountedCwd = cwd.trim();
   const setTaskCwd = (nextCwd: string): void => {
     setCwd(nextCwd);
-    if (!isProject) {
-      const matchingProject = projects.find((project) => normalizeDir(project.cwd) === normalizeDir(nextCwd));
-      setSelectedProjectId(matchingProject?.id ?? "");
-    }
+    const matchingProject = projects.find((project) => normalizeDir(project.cwd) === normalizeDir(nextCwd));
+    setSelectedProjectId(matchingProject?.id ?? "");
   };
   const hasDirectory = Boolean(selectedProject || mountedCwd);
-  const effectiveCwd = selectedProject?.cwd
-    || mountedCwd
-    || (isProject
-      ? (workspacesStore.getRuntime()?.effectiveCwd() || defaults?.defaultCwd || "请选择项目目录")
-      : "全局临时目录");
+  const effectiveCwd = selectedProject?.cwd || mountedCwd || "全局临时目录";
 
   async function startTaskSession(
     workspace: Pick<Workspace, "id" | "name" | "defaultProvider"> & { kind?: Workspace["kind"] },
@@ -175,32 +164,10 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
       return;
     }
     const trimmedName = name.trim();
-    if (isProject && !trimmedName) {
-      setError("请输入项目名称。");
-      return;
-    }
     workspacesController.setDismissable(false);
     setSubmitting(true);
     setError("");
     try {
-      if (isProject) {
-        const trimmedCwd = mountedCwd || runtime.effectiveCwd();
-        if (!trimmedCwd) {
-          setError("项目必须选择一个目录。");
-          return;
-        }
-        const createdProject = await repository.create({
-          name: trimmedName,
-          cwd: trimmedCwd,
-          defaultProvider: defaults?.defaultProvider,
-        });
-        runtime.openWorkspace(createdProject);
-        void runtime.refreshSessions();
-        runtime.toast(`已创建项目「${createdProject.name}」`, "success");
-        workspacesController.close();
-        return;
-      }
-
       const created = selectedProject
         ? await repository.createTask(selectedProject.id, {
           name: trimmedName || undefined,
@@ -236,10 +203,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
       }
       workspacesController.close();
     } catch (createError) {
-      setError(presentError(
-        createError,
-        isProject ? "创建项目失败，请检查目录是否有效。" : "创建任务失败，请检查目录是否有效。",
-      ));
+      setError(presentError(createError, "创建任务失败，请检查目录是否有效。"));
     } finally {
       workspacesController.setDismissable(true);
       setSubmitting(false);
@@ -250,16 +214,14 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
     <WandDialogSurface
       open={controller.open}
       onOpenChange={(open) => { if (!open) workspacesController.close(); }}
-      title={isProject ? "新建项目" : "新建任务"}
-      description={isProject
-        ? "项目必须挂载一个目录。创建后是空白工作台，在全页选择 CLI 和结构化 / PTY。"
-        : "可以不挂项目、不选目录（使用全局临时目录），也可以挂载目录或归属已有项目。创建任务时必须选择 CLI。"}
+      title="新建任务"
+      description="可以不选目录（使用全局临时目录），也可以挂载一个目录。创建任务时必须选择 CLI。"
       className="wand-new-session-dialog wand-new-project-dialog"
       overlayClassName="wand-new-session-overlay wand-new-project-overlay"
       titleClassName="wand-new-session-title wand-new-project-title"
       descriptionClassName="wand-new-session-description wand-new-project-description"
       headerClassName="wand-new-session-header wand-new-project-header"
-      closeLabel={isProject ? "关闭新建项目" : "关闭新建任务"}
+      closeLabel="关闭新建任务"
       testId="new-task-dialog"
       dismissable={!submitting}
     >
@@ -268,42 +230,14 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
       ) : (
         <form className="wand-new-session-form wand-new-project-form" aria-busy={submitting} onSubmit={(event) => void submit(event)}>
           <div className="wand-new-session-body wand-new-project-body">
-            <div className="wand-workspace-creation-kind" role="tablist" aria-label="创建分类">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={!isProject}
-                className={`wand-workspace-creation-kind-option${!isProject ? " active" : ""}`}
-                onClick={() => {
-                  setCreationKind("task");
-                  if (!selectedProjectId) setCwd("");
-                }}
-              >
-                <WandIcon name="task" size={15}/><span>任务</span>
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={isProject}
-                className={`wand-workspace-creation-kind-option${isProject ? " active" : ""}`}
-                onClick={() => {
-                  setCreationKind("project");
-                  if (!cwd.trim()) {
-                    setCwd(defaults?.defaultCwd || workspacesStore.getRuntime()?.effectiveCwd() || "");
-                  }
-                }}
-              >
-                <WandIcon name="folder" size={15}/><span>项目</span>
-              </button>
-            </div>
             <div className="wand-new-session-field wand-new-project-field">
-              <label className="wand-new-session-field-label wand-new-project-field-label" htmlFor="wand-new-task-name">{isProject ? "项目名称" : "任务名称"}</label>
+              <label className="wand-new-session-field-label wand-new-project-field-label" htmlFor="wand-new-task-name">任务名称</label>
               <input
                 id="wand-new-task-name"
                 className="wand-new-session-input wand-new-project-input"
                 type="text"
                 value={name}
-                placeholder={isProject ? "例如：Wand 控制台" : "例如：重构会话恢复流程"}
+                placeholder="例如：重构会话恢复流程"
                 autoComplete="off"
                 autoCorrect="off"
                 autoCapitalize="off"
@@ -312,99 +246,72 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
                 aria-describedby="wand-new-task-name-hint"
                 onChange={(event) => setName(event.currentTarget.value)}
               />
-              <p id="wand-new-task-name-hint" className="wand-new-session-field-hint wand-new-project-field-hint">{isProject ? "用于在项目列表里识别这个项目。" : "可选；留空时会在发布任务后自动命名。"}</p>
+              <p id="wand-new-task-name-hint" className="wand-new-session-field-hint wand-new-project-field-hint">可选；留空时会在发布任务后自动命名。</p>
             </div>
 
-            {!isProject ? (
-              <div className="wand-new-session-field wand-new-project-field">
-                <label className="wand-new-session-field-label wand-new-project-field-label" htmlFor="wand-new-task-project">所属项目</label>
-                <select
-                  id="wand-new-task-project"
-                  className="wand-new-session-input wand-new-project-input wand-workspace-project-select"
-                  value={selectedProjectId}
-                  onChange={(event) => {
-                    const nextId = event.currentTarget.value;
-                    const project = projects.find((item) => item.id === nextId);
-                    setSelectedProjectId(nextId);
-                    setCwd(project?.cwd ?? "");
-                  }}
-                >
-                  <option value="">不挂项目（独立任务）</option>
-                  {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
-                </select>
-                <p className="wand-new-session-field-hint wand-new-project-field-hint">
-                  独立任务不依赖项目；留空目录时使用全局临时目录。
-                </p>
-              </div>
-            ) : null}
-
-            {selectedProject && !isProject ? null : (
-              <div className="wand-new-session-field wand-new-project-field">
-                <label className="wand-new-session-field-label wand-new-project-field-label" htmlFor="wand-new-task-cwd">{isProject ? "项目目录" : "工作目录（可选）"}</label>
-                <div className="wand-new-session-suggestions-wrap wand-new-project-suggestions-wrap">
-                  <input
-                    id="wand-new-task-cwd"
-                    className="wand-new-session-input wand-new-project-input"
-                    type="text"
-                    value={cwd}
-                    placeholder={isProject ? effectiveCwd : "留空则使用全局临时目录"}
-                    autoComplete="off"
-                    autoCorrect="off"
-                    autoCapitalize="off"
-                    spellCheck={false}
-                    aria-invalid={error.includes("目录") || undefined}
-                    aria-describedby="wand-new-task-cwd-hint"
-                    onFocus={() => setSuggestionsActive(true)}
-                    onChange={(event) => setTaskCwd(event.currentTarget.value)}
-                    onBlur={() => window.setTimeout(() => setSuggestionsActive(false), 120)}
-                  />
-                  {suggestionsActive && suggestions.length > 0 ? (
-                    <div className="wand-new-session-suggestions wand-new-project-suggestions" role="listbox" aria-label={isProject ? "项目目录建议" : "任务目录建议"}>
-                      {suggestions.map((item) => (
-                        <button
-                          key={item.path}
-                          type="button"
-                          className="wand-new-session-suggestion wand-new-project-suggestion"
-                          role="option"
-                          aria-selected={cwd === item.path}
-                          onMouseDown={(event) => event.preventDefault()}
-                          onClick={() => {
-                            setTaskCwd(item.path);
-                            setSuggestionsActive(false);
-                          }}
-                        >
-                          <strong>{item.name}</strong>
-                          <small className="wand-new-session-suggestion-path wand-new-project-suggestion-path">{item.path}</small>
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-                <p id="wand-new-task-cwd-hint" className="wand-new-session-field-hint wand-new-project-field-hint">
-                  {isProject
-                    ? "项目必须在目录下执行，留空则使用当前目录。"
-                    : "可选。挂载后任务在该目录运行，不挂载则使用全局临时目录。"}
-                </p>
-                {defaults && defaults.recentPaths.length > 0 ? (
-                  <div className="wand-new-session-recent-paths wand-new-project-recent-paths" aria-label="最近使用的目录">
-                    {defaults.recentPaths.map((item) => (
+            <div className="wand-new-session-field wand-new-project-field">
+              <label className="wand-new-session-field-label wand-new-project-field-label" htmlFor="wand-new-task-cwd">工作目录（可选）</label>
+              <div className="wand-new-session-suggestions-wrap wand-new-project-suggestions-wrap">
+                <input
+                  id="wand-new-task-cwd"
+                  className="wand-new-session-input wand-new-project-input"
+                  type="text"
+                  value={cwd}
+                  placeholder="留空则使用全局临时目录"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  aria-invalid={error.includes("目录") || undefined}
+                  aria-describedby="wand-new-task-cwd-hint"
+                  onFocus={() => setSuggestionsActive(true)}
+                  onChange={(event) => setTaskCwd(event.currentTarget.value)}
+                  onBlur={() => window.setTimeout(() => setSuggestionsActive(false), 120)}
+                />
+                {suggestionsActive && suggestions.length > 0 ? (
+                  <div className="wand-new-session-suggestions wand-new-project-suggestions" role="listbox" aria-label="任务目录建议">
+                    {suggestions.map((item) => (
                       <button
                         key={item.path}
                         type="button"
-                        className={`wand-new-session-recent-path wand-new-project-recent-path${cwd === item.path ? " active" : ""}`}
-                        title={item.path}
-                        aria-pressed={cwd === item.path}
-                        onClick={() => setTaskCwd(item.path)}
+                        className="wand-new-session-suggestion wand-new-project-suggestion"
+                        role="option"
+                        aria-selected={cwd === item.path}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => {
+                          setTaskCwd(item.path);
+                          setSuggestionsActive(false);
+                        }}
                       >
-                        <span className="wand-new-session-recent-path-value wand-new-project-recent-path-value">{item.path}</span>
+                        <strong>{item.name}</strong>
+                        <small className="wand-new-session-suggestion-path wand-new-project-suggestion-path">{item.path}</small>
                       </button>
                     ))}
                   </div>
                 ) : null}
               </div>
-            )}
+              <p id="wand-new-task-cwd-hint" className="wand-new-session-field-hint wand-new-project-field-hint">
+                可选。挂载后任务在该目录运行，不挂载则使用全局临时目录。已有目录会自动归入对应分组。
+              </p>
+              {defaults && defaults.recentPaths.length > 0 ? (
+                <div className="wand-new-session-recent-paths wand-new-project-recent-paths" aria-label="最近使用的目录">
+                  {defaults.recentPaths.map((item) => (
+                    <button
+                      key={item.path}
+                      type="button"
+                      className={`wand-new-session-recent-path wand-new-project-recent-path${cwd === item.path ? " active" : ""}`}
+                      title={item.path}
+                      aria-pressed={cwd === item.path}
+                      onClick={() => setTaskCwd(item.path)}
+                    >
+                      <span className="wand-new-session-recent-path-value wand-new-project-recent-path-value">{item.path}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
 
-            {isProject || !hasDirectory ? null : (
+            {hasDirectory ? (
               <div className="wand-new-task-option" data-checked={worktreeEnabled ? "" : undefined}>
                 <span className="wand-new-task-option-icon"><WandIcon name="branch" size={17} className="wand-new-task-branch-icon" strokeWidth={1.8}/></span>
                 <span className="wand-new-task-option-text">
@@ -424,26 +331,22 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
                   ariaLabel="是否为新任务创建独立 worktree"
                 />
               </div>
-            )}
+            ) : null}
 
-            {isProject ? null : (
-              <WorkspaceAgentPicker
-                target={target}
-                kind={sessionKind}
-                disabled={submitting}
-                onTargetChange={setTarget}
-                onKindChange={setSessionKind}
-              />
-            )}
+            <WorkspaceAgentPicker
+              target={target}
+              kind={sessionKind}
+              disabled={submitting}
+              onTargetChange={setTarget}
+              onKindChange={setSessionKind}
+            />
           </div>
 
           <div className="wand-new-session-summary wand-new-task-summary" aria-live="polite">
             <span>即将创建</span>
-            <strong>{name.trim() || (isProject ? "未命名项目" : "未命名任务")}</strong>
+            <strong>{name.trim() || "未命名任务"}</strong>
             <span title={effectiveCwd}>{effectiveCwd}</span>
-            {isProject
-              ? <span>空白项目</span>
-              : <span>{target === "shell" ? "空白终端" : `${WORKSPACE_AGENT_OPTIONS.find((option) => option.value === target)?.label ?? target} · ${sessionKind === "pty" ? "PTY" : "结构化"}`}</span>}
+            <span>{target === "shell" ? "空白终端" : `${WORKSPACE_AGENT_OPTIONS.find((option) => option.value === target)?.label ?? target} · ${sessionKind === "pty" ? "PTY" : "结构化"}`}</span>
           </div>
 
           <div className="wand-new-session-footer wand-new-project-footer">
@@ -452,9 +355,9 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
               size="large"
               type="submit"
               className="wand-new-session-submit wand-new-project-submit"
-              disabled={submitting || (isProject && !name.trim())}
+              disabled={submitting}
             >
-              {submitting ? "正在创建…" : isProject ? "创建项目" : "创建任务"}
+              {submitting ? "正在创建…" : "创建任务"}
             </WandButton>
             {error ? <p className="wand-new-session-error wand-new-project-error" role="alert">{error}</p> : null}
           </div>

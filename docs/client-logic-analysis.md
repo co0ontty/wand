@@ -33,6 +33,10 @@ restoreLoginSession → /api/session-check
 
 连接码包含 endpoint 和 appToken。冷启动先用 token 登录，REST 遇 401 可重登一次；iOS/Android 的网络层按 endpoint 隔离 cookie/认证。进入嵌入网页还有 WebView 会话准备，不能假设原生 HTTP 的 cookie 自动出现在网页内。
 
+**连接码的 scheme 由服务端决定，且可能因部署方式出错。** TLS 在 L4 反代终止时（nginx `stream`、Nginx Proxy Manager 的 TCP stream），node 只看到明文 HTTP：没有 `X-Forwarded-Proto`、`req.protocol` 也是 `http`，而 `config.https` 为 false（TLS 不在 wand 内跑），于是 `/api/app-connect-code` 会把 `https://host:tls-port` 铸成 `http://host:tls-port`。客户端按连接码连 `http://` 明文到 TLS 端口，握手立刻失败（OkHttp `unexpected end of stream`），表现为“连不上服务端”。
+
+这种情况必须在 `config.json` 里显式声明 `publicOrigin`（如 `https://home.huniu.fun:8443`）。配了以后 `/api/app-connect-code` 与 extension 登录返回的 `serverUrl` 都以它为准，不再猜 scheme。Android `ConnectActivity` 另有兜底：连接探测失败且错误是“明文打到 TLS 端口”时，把 `http://` 升到 `https://` 重试一次，并把改写后的 endpoint 一并存进 profile（兼容老服务端已发出的坏连接码）。
+
 WS 服务端已支持 cookie 和 Bearer；“原生能 REST 不能 WS”仍要核对客户端是否把对应 endpoint 的认证带入握手。
 
 原生一般是 connected-app，不是管理员。iOS 的服务端更新横幅已用 `canManageSettings` 控制安装按钮；其它端不能仅因为有 App 更新入口就推断能安装服务端 npm 包。议题看板/GitHub 在原生网页兜底中的能力与授权还需专门验收（R02）。
@@ -245,6 +249,7 @@ Inbox 服务端和 CLI 已有；Web Missions 不消费 `/api/inbox`，没有因�
 | `/api/tasks` revision 快路径 | 未用 | 未用 | 已用 | 未用 |
 | 聊天块预算 | 当前主要 turn 窗口 | REST+WS 块预算 | turn 窗口 | API 部分支持，聊天未完整接入 |
 | 议题看板/GitHub | 任务管理已接入；GitHub 仍为 Web 入口 | 任务管理已接入 | 任务管理已接入 | 任务管理已接入 |
+| 任务标题可选 | 已接入 | 已接入 | 已接入 | 已接入 |
 | 客户端更新 | 服务端包管理 | IPA/OTA | APK | MacUpdateManager / DMG 路径 |
 
 “已接”表示在当前代码里存在调用和处理，不代替本次未做的真机验收。
@@ -255,6 +260,8 @@ Inbox 服务端和 CLI 已有；Web Missions 不消费 `/api/inbox`，没有因�
 2. 输入异常查 §6；不要继续照旧计划修已经消失的 `text+"\n"` 分支。
 3. 回复丢失/卡住查 HTTP 与 WS 的到达顺序、seq、activeRequestId、消息窗口 offset。
 4. 任务标题与内容不符查 openTask 跨任务 generation、layout 保存回包，而不仅是侧栏高亮。
+   标题留空时标题是异步生成的（`titleSource=auto`），刚建完看到的是描述首行占位值属正常；
+   客户端会短轮询 `GET /api/wand-tasks/:id` 刷新，生成失败就停在占位标题（见 `docs/taskboard-vendor.md`）。
 5. PTY 显示错位先查 fit/字号；structured JSON 中文变 `�` 则查字节流解码。
 6. 更新 403 查 principal；App 版本更新不等于服务端更新。
 7. 本轮 Apple WebView 契约测试失败：断言要求 `.notification-bubble.update-card`，iOS 当前注入更宽的 `.notification-bubble` 隐藏规则。先验证实际行为，再修正测试，不能据此断言通知必定露出（R14）。
