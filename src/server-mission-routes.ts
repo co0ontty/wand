@@ -2,13 +2,16 @@ import type { Express, Response } from "express";
 
 import { asyncRoute } from "./express-async.js";
 import { getErrorMessage } from "./error-utils.js";
+import { sendRouteError } from "./server-request.js";
 import type { CreateMissionInput, CreateReviewCommentInput } from "./mission-types.js";
 import type { Missions } from "./missions.js";
 
+// Missions 的错误文案在 service 层就已确定，这里只把“不存在”类错误提升为 404。
+const MISSION_NOT_FOUND = /^(任务不存在|任务 attempt 不存在)|没有关联会话|当前不可用/;
+
 function sendMissionError(res: Response, error: unknown): void {
   const message = getErrorMessage(error, "任务操作失败。");
-  const missing = /^(任务不存在|任务 attempt 不存在)|没有关联会话|当前不可用/.test(message);
-  res.status(missing ? 404 : 400).json({ error: message });
+  sendRouteError(res, error, "任务操作失败。", MISSION_NOT_FOUND.test(message) ? 404 : 400);
 }
 
 function commentIdsFrom(body: unknown): string[] {

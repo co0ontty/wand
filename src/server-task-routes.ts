@@ -2,6 +2,7 @@ import type { Express, RequestHandler, Response } from "express";
 import { getDefaultModelForProvider } from "./config.js";
 import { asyncRoute } from "./express-async.js";
 import { getErrorMessage } from "./error-utils.js";
+import { bodyObject, sendRouteError, text } from "./server-request.js";
 import { parseWandTaskAgent, type WandStorage } from "./storage.js";
 import { generateWandTaskTitle, provisionalTaskTitleFromDescription, TASK_TITLE_MAX_LENGTH } from "./task-title.js";
 import type { QuickCommitAiOptions } from "./git-quick-commit.js";
@@ -9,10 +10,10 @@ import { resolveSystemAiContext } from "./session-ai-context.js";
 import type { SessionRegistry } from "./session-registry.js";
 import type { StructuredSessionManager } from "./structured-session-manager.js";
 import type { WandTaskAgent, WandTaskAgentEffort, WandTaskAgentProvider, WandTaskPriority, WandTaskStatus, WandTaskTitleSource } from "./task-types.js";
-import { archiveBoardTask, syncUngroupedSessionsToBoard } from "./wand-task-sync.js";
+import { archiveBoardTask, syncClosedBoardTask, syncUngroupedSessionsToBoard } from "./wand-task-sync.js";
 import type { SessionProvider, SessionSnapshot, WandConfig } from "./types.js";
 
-const STATUSES = new Set<WandTaskStatus>(["todo", "doing", "done"]);
+const STATUSES = new Set<WandTaskStatus>(["todo", "doing", "done", "archived"]);
 const PRIORITIES = new Set<WandTaskPriority>(["none", "low", "medium", "high", "urgent"]);
 const AGENT_PROVIDERS = new Set<WandTaskAgentProvider>(["claude", "codex", "opencode", "grok", "qoder", "pi"]);
 const AGENT_EFFORTS = new Set<WandTaskAgentEffort>(["off", "standard", "deep", "max"]);
@@ -58,15 +59,6 @@ function dateValue(value: unknown): string | null | undefined {
     throw new Error("截止日期必须使用 YYYY-MM-DD 格式。");
   }
   return value.trim();
-}
-
-function bodyObject(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("请求体必须是对象。");
-  return value as Record<string, unknown>;
-}
-
-function text(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
 }
 
 function labelsFrom(value: unknown): string[] {
@@ -124,7 +116,7 @@ function taskSessionSummary(session: SessionSnapshot) {
 }
 
 function sendTaskError(res: Response, error: unknown, fallback: string): void {
-  res.status(400).json({ error: getErrorMessage(error, fallback) });
+  sendRouteError(res, error, fallback);
 }
 
 /**
@@ -290,7 +282,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies | W
         res.status(404).json({ error: "未找到该任务。" });
         return;
       }
-      if (task.status === "done") archiveBoardTask(storage, task.id);
+      if (task.status === "done" || task.status === "archived") syncClosedBoardTask(storage, task);
       res.json(dto(storage.getWandTask(task.id) ?? task));
     } catch (error) {
       sendTaskError(res, error, "无法更新任务。");

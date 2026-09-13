@@ -1766,6 +1766,27 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
         img.outerHTML = renderAvatarFallback(persona.avatarSvg);
       }
 
+      function formatChatClock(iso) {
+        if (!iso) return "";
+        var d = new Date(iso);
+        if (isNaN(d.getTime())) return "";
+        var pad = function(n) { return n < 10 ? "0" + n : String(n); };
+        var clock = pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
+        var now = new Date();
+        var sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+        if (sameDay) return clock;
+        return (d.getMonth() + 1) + "/" + d.getDate() + " " + clock;
+      }
+
+      function renderChatMessageTime(msg) {
+        var iso = (msg && (msg.completedAt || msg.createdAt)) || "";
+        var label = formatChatClock(iso);
+        if (!label) return "";
+        var title = "";
+        try { title = new Date(iso).toLocaleString(); } catch (e) {}
+        return '<div class="chat-message-time" title="' + escapeHtml(title) + '">' + escapeHtml(label) + '</div>';
+      }
+
       function chatAvatar(role) {
         var personaRole = role === "user" ? "user" : "assistant";
         var persona = getStructuredChatPersona(personaRole);
@@ -1818,6 +1839,7 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
           ? renderMarkdown(msg.content)
           : (msg.role === "user" ? renderUserText(msg.content) : escapeHtml(msg.content));
         return '<div class="chat-message ' + msg.role + '">' +
+          renderChatMessageTime(msg) +
           avatar +
           '<div class="chat-message-bubble">' + bubbleContent + '</div>' +
         '</div>';
@@ -2658,6 +2680,7 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
         _currentMessageGlobalIndex = typeof messageIndex === "number" ? messageIndex : -1;
         var role = msg.role;
         var messageKey = getMessageKey(msg, messageIndex);
+        var timeHtml = renderChatMessageTime(msg);
         var usageHtml = role === "assistant" ? renderUsageSummaryHtml(roundUsage) : "";
 
         // 排队中的用户消息标记（subagent 不会出现在 user role 的 user input 中）
@@ -2666,6 +2689,7 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
         if (!msg.content || msg.content.length === 0) {
           if (role === "assistant") {
             return '<div class="chat-message ' + role + '">' +
+              timeHtml +
               chatAvatar(role) +
               '<div class="chat-message-content"><div class="typing-indicator"><span></span><span></span><span></span></div>' + usageHtml + '</div>' +
             '</div>';
@@ -2673,6 +2697,7 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
           // 空 user 消息（极少出现，但快速发送的边界场景会让消息"消失"）。
           // 给个明确占位避免视觉断层。
           return '<div class="chat-message ' + role + ' empty-message" data-message-key="' + escapeHtml(messageKey) + '">' +
+            timeHtml +
             chatAvatar(role) +
             '<div class="chat-message-content"><span class="empty-message-hint">（空消息）</span></div>' +
           '</div>';
@@ -2691,11 +2716,12 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
           if (userHasSub) {
             var userMultiHtml = buildMultiAgentHtml(userSegments, role, parentPersona.name, toolResults, messageKey, { showHandoff: false });
             return '<div class="chat-message ' + role + queuedClass + ' multi-agent" data-message-key="' + escapeHtml(messageKey) + '">' +
-              userMultiHtml + queuedBadge +
+              timeHtml + userMultiHtml + queuedBadge +
             '</div>';
           }
           var userHtml = buildSegmentBlocksHtml(msg.content, 0, role, toolResults, messageKey);
           return '<div class="chat-message ' + role + queuedClass + '" data-message-key="' + escapeHtml(messageKey) + '">' +
+            timeHtml +
             chatAvatar(role) +
             '<div class="chat-message-content">' + userHtml + queuedBadge + '</div>' +
           '</div>';
@@ -2708,6 +2734,7 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
         if (!hasSubagent) {
           var html = buildSegmentBlocksHtml(msg.content, 0, role, toolResults, messageKey);
           return '<div class="chat-message ' + role + '" data-message-key="' + escapeHtml(messageKey) + '">' +
+            timeHtml +
             chatAvatar(role) +
             '<div class="chat-message-content">' + html + usageHtml + '</div>' +
           '</div>';
@@ -2717,6 +2744,7 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
         // 内部多个 .chat-message-segment 子段，每段自带头像；切到新 subagent 时
         // 插入一行 handoff 提示（"勤劳初二 ↳ 让 侦探猫 帮忙"）。
         var multiHtml = '<div class="chat-message ' + role + ' multi-agent" data-message-key="' + escapeHtml(messageKey) + '">';
+        multiHtml += timeHtml;
         multiHtml += buildMultiAgentHtml(segments, role, parentPersona.name, toolResults, messageKey, { showHandoff: true });
         multiHtml += usageHtml;
         multiHtml += '</div>';

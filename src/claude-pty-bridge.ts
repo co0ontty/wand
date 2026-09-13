@@ -252,15 +252,18 @@ export class ClaudePtyBridge extends EventEmitter {
 
     const cleanInput = input.replace(/[\r\n]+$/, "").trim();
 
+    const now = new Date().toISOString();
     // Add user message
     this.messages.push({
       role: "user",
+      createdAt: now,
       content: [{ type: "text", text: cleanInput }],
     });
 
     // Add assistant placeholder for streaming
     this.messages.push({
       role: "assistant",
+      createdAt: now,
       content: [],
     });
 
@@ -951,6 +954,7 @@ export class ClaudePtyBridge extends EventEmitter {
     // Emit turn completed
     const lastTurn = this.messages[this.messages.length - 1];
     if (lastTurn?.role === "assistant" && lastTurn.content.length > 0) {
+      lastTurn.completedAt = new Date().toISOString();
       this.emitEvent({
         type: "chat.turn",
         sessionId: this.sessionId,

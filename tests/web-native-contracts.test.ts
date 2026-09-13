@@ -264,19 +264,20 @@ test("activity folds stay consecutive and split when prose arrives", () => {
 
   includesAll("android/app/src/main/java/com/wand/app/ui/screens/ChatBlocks.kt", [
     "连续思考/工具收成一条压缩条",
-    "fun activityFoldSegments(",
+    "fun collapseActivityItems(",
     "renderItems.last() is SegmentRenderItem.Activity",
   ]);
 
   includesAll("ios/Wand/ChatView.swift", [
     "struct ActivityFoldCard",
-    "isActivityGroupOpen(group)",
+    // 折叠展开态由卡片自己的 @State 管理；running 只看当前轮次是否在回复。
+    "@State private var expanded = false",
     "summarizeActivityItems",
   ]);
 
   includesAll("macos/Wand/ChatView.swift", [
     "struct ActivityFoldCard",
-    "isActivityGroupOpen(group)",
+    "@State private var expanded = false",
     "summarizeActivityItems",
   ]);
 });

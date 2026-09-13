@@ -10,6 +10,7 @@ import type { Express, Request, Response } from "express";
 
 import { getErrorMessage } from "./error-utils.js";
 import { asyncRoute } from "./express-async.js";
+import { sendRouteError } from "./server-request.js";
 import { isBlockedFolderPath, normalizeFolderPath } from "./middleware/path-safety.js";
 import { parseBoundedInteger } from "./request-limits.js";
 import type { WandStorage } from "./storage.js";
@@ -70,7 +71,7 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
     try {
       res.json(await listPathSuggestions(query, defaultCwd));
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "无法加载路径建议。") });
+      sendRouteError(res, error, "无法加载路径建议。");
     }
   }));
 
@@ -114,7 +115,7 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
       };
       res.json(payload);
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "无法读取目录。可能原因：路径不存在或权限不足。") });
+      sendRouteError(res, error, "无法读取目录。可能原因：路径不存在或权限不足。");
     }
   }));
 
@@ -174,7 +175,7 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
       };
       res.json({ ...payload, mtime: fileStat.mtime.toISOString() });
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "Failed to read file") });
+      sendRouteError(res, error, "Failed to read file");
     }
   }));
 
@@ -248,7 +249,7 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
         mtime: newStat.mtime.toISOString(),
       });
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "保存文件失败。") });
+      sendRouteError(res, error, "保存文件失败。");
     }
   }));
 
@@ -274,7 +275,7 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
         res.status(409).json({ error: "文件已存在。", path: resolvedPath });
         return;
       }
-      res.status(400).json({ error: getErrorMessage(error, "创建文件失败。") });
+      sendRouteError(res, error, "创建文件失败。");
     }
   }));
 
@@ -295,7 +296,7 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
       const fileStat = await stat(resolvedPath);
       res.json({ ok: true, path: resolvedPath, mtime: fileStat.mtime.toISOString() });
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "创建文件夹失败。") });
+      sendRouteError(res, error, "创建文件夹失败。");
     }
   }));
 
@@ -338,7 +339,7 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
         res.status(404).json({ error: "源路径不存在。" });
         return;
       }
-      res.status(400).json({ error: getErrorMessage(error, "重命名/移动失败。") });
+      sendRouteError(res, error, "重命名/移动失败。");
     }
   }));
 
@@ -364,7 +365,7 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
         res.status(404).json({ error: "路径不存在。" });
         return;
       }
-      res.status(400).json({ error: getErrorMessage(error, "删除失败。") });
+      sendRouteError(res, error, "删除失败。");
     }
   }));
 
@@ -416,7 +417,7 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
         readErrorMessage: "Failed to read file",
       });
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "Failed to read file") });
+      sendRouteError(res, error, "Failed to read file");
     }
   }));
 
@@ -573,7 +574,7 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
         : a.name.localeCompare(b.name));
       res.json({ results: results.slice(0, maxResults), query, cwd: resolvedCwd });
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "搜索失败。可能原因：路径不存在或权限不足。") });
+      sendRouteError(res, error, "搜索失败。可能原因：路径不存在或权限不足。");
     }
   }));
 }

@@ -1,6 +1,6 @@
 import type { WandStorage } from "./storage.js";
 import { provisionalTaskTitleFromDescription } from "./task-title.js";
-import type { WandTask } from "./task-types.js";
+import { isClosedWandTaskStatus, type WandTask } from "./task-types.js";
 import type { SessionSnapshot, Workspace, WorkspaceTask } from "./types.js";
 
 const UNNAMED_TASK_NAME = "未命名任务";
@@ -107,7 +107,7 @@ function promoteUngroupedCard(
     title: nextTitle,
     titleSource: nextTitle !== card.title ? "auto" : card.titleSource,
     description: nextDescription,
-    status: card.status === "done" ? "done" : "doing",
+    status: isClosedWandTaskStatus(card.status) ? card.status : "doing",
     workspaceId: patch.workspaceId !== undefined ? patch.workspaceId : card.workspaceId,
     workspaceTaskId: patch.workspaceTaskId !== undefined ? patch.workspaceTaskId : card.workspaceTaskId,
   }) ?? card;
@@ -195,7 +195,7 @@ export function syncUngroupedSessionsToBoard(storage: WandStorage): void {
         status: "doing",
       });
       boardTasks.push(card);
-    } else if (card.status !== "done") {
+    } else if (!isClosedWandTaskStatus(card.status)) {
       card = promoteUngroupedCard(storage, card, {
         title,
         description: boardDescriptionFromSession(session),
@@ -207,23 +207,32 @@ export function syncUngroupedSessionsToBoard(storage: WandStorage): void {
   }
 }
 
-/** 看板归档：卡片进入已完成，并同步把关联的侧栏工作任务标成 done（不删会话）。 */
+function closeLinkedWorkspaceTask(storage: WandStorage, workspaceTaskId: string | null): void {
+  if (!workspaceTaskId) return;
+  const workspaceTask = storage.getWorkspaceTask(workspaceTaskId);
+  if (workspaceTask && workspaceTask.status !== "done") {
+    storage.updateWorkspaceTask(workspaceTask.id, { status: "done" });
+  }
+}
+
+/** 看板确认/归档时，把关联的侧栏工作任务标成 done（不删会话）。 */
+export function syncClosedBoardTask(storage: WandStorage, task: WandTask): void {
+  if (!isClosedWandTaskStatus(task.status)) return;
+  closeLinkedWorkspaceTask(storage, task.workspaceTaskId);
+}
+
+/** 看板归档：卡片进入归档目录，并同步把关联的侧栏工作任务标成 done（不删会话）。 */
 export function archiveBoardTask(storage: WandStorage, id: string): WandTask | null {
   const current = storage.getWandTask(id);
   if (!current) return null;
-  const archived = storage.updateWandTask(id, { status: "done" });
-  if (current.workspaceTaskId) {
-    const workspaceTask = storage.getWorkspaceTask(current.workspaceTaskId);
-    if (workspaceTask && workspaceTask.status !== "done") {
-      storage.updateWorkspaceTask(workspaceTask.id, { status: "done" });
-    }
-  }
+  const archived = storage.updateWandTask(id, { status: "archived" });
+  if (archived) closeLinkedWorkspaceTask(storage, archived.workspaceTaskId);
   return archived;
 }
 
-/** 侧栏工作任务完成/删除时，把对应看板卡片标成已完成。 */
+/** 侧栏工作任务完成/删除时，把对应看板卡片标成已完成；已归档的保持归档。 */
 export function archiveBoardTaskForWorkspaceTask(storage: WandStorage, workspaceTaskId: string): void {
   const linked = storage.getWandTaskByWorkspaceTaskId(workspaceTaskId);
-  if (!linked || linked.status === "done") return;
+  if (!linked || isClosedWandTaskStatus(linked.status)) return;
   storage.updateWandTask(linked.id, { status: "done" });
 }

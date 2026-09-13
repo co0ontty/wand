@@ -9,8 +9,11 @@ import {
   groupIssuesByStatus,
   ISSUE_AGENT_PROVIDERS,
   ISSUE_BOARD_VIEWS,
+  ISSUE_ARCHIVE_COLUMN,
   ISSUE_COLUMNS,
   ISSUE_NO_WORKSPACE,
+  ISSUE_STATUS_FILTERS,
+  issueArchiveFolderOpen,
   isDispatchableIssueAgent,
   issueAgentModelOptions,
   normalizeIssueAgentDefaults,
@@ -20,7 +23,6 @@ import {
   issueWorkspaceOptions,
   issueWorkspaceSelectValue,
   normalizeIssueModelCatalog,
-  reorderIssues,
   sortIssues,
   withIssueAgentProvider,
   groupIssueSessionsByAgent,
@@ -103,16 +105,22 @@ test("unassigned issues reuse the last selected agent defaults", () => {
 
 test("issue helpers expose columns, grouping, sorting, and workspace options", () => {
   const tasks = [
-    { id: "b", status: "doing" as const, sortOrder: 1, updatedAt: "2026-01-02" },
-    { id: "a", status: "todo" as const, sortOrder: 0, updatedAt: "2026-01-01" },
-    { id: "c", status: "doing" as const, sortOrder: 0, updatedAt: "2026-01-01" },
+    { id: "b", status: "doing" as const, createdAt: "2026-01-02T00:00:00.000Z" },
+    { id: "a", status: "todo" as const, createdAt: "2026-01-01T00:00:00.000Z" },
+    { id: "c", status: "doing" as const, createdAt: "2026-01-01T00:00:00.000Z" },
   ];
-  // sortOrder 优先；0 的两条同 updatedAt 时用 id 兜底，最后才是 sortOrder=1 的 b。
-  assert.deepEqual(sortIssues(tasks).map((task) => task.id), ["a", "c", "b"]);
+  // 固定按创建时间倒序：新的在前；同一时间用 id 兜底，与 updatedAt / sortOrder 无关。
+  assert.deepEqual(sortIssues(tasks).map((task) => task.id), ["b", "a", "c"]);
+  assert.deepEqual(
+    sortIssues(tasks.map((task) => ({ ...task, updatedAt: "2099-01-01T00:00:00.000Z", sortOrder: 9 })))
+      .map((task) => task.id),
+    ["b", "a", "c"],
+  );
   const grouped = groupIssuesByStatus(tasks);
   assert.deepEqual(grouped.todo.map((task) => task.id), ["a"]);
   assert.deepEqual(grouped.doing.map((task) => task.id), ["b", "c"]);
   assert.deepEqual(grouped.done, []);
+  assert.deepEqual(grouped.archived, []);
 
   const options = issueWorkspaceOptions([{ id: "w1", name: "wand", cwd: "/tmp/wand" }]);
   // Radix Select 不接受空串 option，所以「不指定项目」使用哨兵值表达。
@@ -187,12 +195,16 @@ test("board host mirrors dashi layout: header tabs, column create, drag, and det
   assert.match(host, /TaskBoardFilterMenu/);
   assert.match(host, /在\$\{column.label\}中新建任务/);
   assert.match(host, /application\/x-wand-task/);
-  assert.match(host, /dropIndexFromPoint/);
+  // 拖拽只换列（改状态），列内顺序固定按创建时间。
+  assert.match(host, /moving\.status === status/);
   assert.match(host, /返回任务管理/);
   assert.match(host, /新建任务/);
   assert.match(host, /创建更多/);
   assert.deepEqual(ISSUE_BOARD_VIEWS.map((entry) => entry.value), ["dashboard", "board", "list", "gantt"]);
   assert.deepEqual(ISSUE_COLUMNS.map((column) => column.status), ["todo", "doing", "done"]);
+  assert.equal(ISSUE_ARCHIVE_COLUMN.status, "archived");
+  assert.match(host, /TaskBoardArchiveFolder/);
+  assert.match(host, /issueArchiveFolderOpen/);
 });
 
 test("create dialog keeps modal positioning so title and selects stay visible", () => {
@@ -218,7 +230,7 @@ test("create dialog keeps modal positioning so title and selects stay visible", 
   assert.match(overlayRoot, /REACT_UI_PORTALS_ID/);
 });
 
-test("filter and reorder helpers keep board columns compact", () => {
+test("filter helpers keep board columns compact", () => {
   const tasks = [
     { id: "a", title: "登录", identifier: "TASK-1", description: "", labels: [], workspaceId: "w1", status: "todo" as const, sortOrder: 0, updatedAt: "1" },
     { id: "b", title: "支付", identifier: "TASK-2", description: "alipay", labels: ["钱"], workspaceId: "w2", status: "todo" as const, sortOrder: 1, updatedAt: "2" },
@@ -226,9 +238,6 @@ test("filter and reorder helpers keep board columns compact", () => {
   ];
   assert.deepEqual(filterIssues(tasks, "支付", "").map((task) => task.id), ["b"]);
   assert.deepEqual(filterIssues(tasks, "", "w1").map((task) => task.id), ["a", "c"]);
-  const moved = reorderIssues(tasks, "a", "doing", 0);
-  assert.deepEqual(moved.filter((entry) => entry.status === "doing").map((entry) => entry.id), ["a", "c"]);
-  assert.deepEqual(moved.find((entry) => entry.id === "b"), { id: "b", status: "todo", sortOrder: 0 });
   assert.deepEqual(
     filterIssues(tasks, "", "", { ...EMPTY_ISSUE_FILTERS, statuses: ["doing"] }).map((task) => task.id),
     ["c"],
@@ -238,6 +247,20 @@ test("filter and reorder helpers keep board columns compact", () => {
     { status: "doing" as const, priority: "none" as const, dueDate: null },
     { status: "done" as const, priority: "low" as const, dueDate: null },
   ]).remaining, 2);
+  const withArchived = [
+    ...tasks,
+    { id: "d", title: "旧登录", identifier: "TASK-4", description: "", labels: [], workspaceId: "w1", status: "archived" as const, sortOrder: 0, updatedAt: "4" },
+  ];
+  assert.deepEqual(filterIssues(withArchived, "旧登录", "").map((task) => task.id), ["d"]);
+  assert.deepEqual(
+    filterIssues(withArchived, "", "", { ...EMPTY_ISSUE_FILTERS, statuses: ["archived"] }).map((task) => task.id),
+    ["d"],
+  );
+  assert.deepEqual(groupIssuesByStatus(withArchived).archived.map((task) => task.id), ["d"]);
+  assert.equal(issueArchiveFolderOpen(true, "", EMPTY_ISSUE_FILTERS), false);
+  assert.equal(issueArchiveFolderOpen(true, "旧登录", EMPTY_ISSUE_FILTERS), true);
+  assert.equal(issueArchiveFolderOpen(true, "", { ...EMPTY_ISSUE_FILTERS, statuses: ["archived"] }), true);
+  assert.deepEqual(ISSUE_STATUS_FILTERS.map((entry) => entry.status), ["todo", "doing", "done", "archived"]);
 });
 
 test("task board is a first-class view=taskboard route that does not unmount the shell", () => {

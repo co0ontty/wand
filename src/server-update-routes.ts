@@ -6,6 +6,7 @@ import type { Express, Request, RequestHandler, Response } from "express";
 import type { GitHubApkDownload } from "./distribution-manager.js";
 import { getErrorMessage } from "./error-utils.js";
 import { asyncRoute } from "./express-async.js";
+import { sendRouteError, stringQuery } from "./server-request.js";
 import type { ModelCatalogService } from "./models.js";
 import type { PackageUpdateInfo, UpdateChannel } from "./npm-update-utils.js";
 import {
@@ -107,13 +108,23 @@ async function proxyGitHubApk(
   }
 }
 
+/**
+ * 三个 update 检查接口都要求 `currentVersion`。缺参数是客户端 bug，不是服务端异常，
+ * 用 400 + 固定的英文文案（老客户端按字符串匹配）。
+ */
+function requireCurrentVersion(req: Request, res: Response): string | null {
+  const currentVersion = stringQuery(req.query.currentVersion);
+  if (!currentVersion) {
+    res.status(400).json({ error: "Missing currentVersion query parameter." });
+    return null;
+  }
+  return currentVersion;
+}
+
 export function registerPublicUpdateRoutes(app: Express, deps: PublicUpdateRoutesDependencies): void {
   app.get("/api/android-apk-update", asyncRoute(async (req, res) => {
-    const currentVersion = typeof req.query.currentVersion === "string" ? req.query.currentVersion.trim() : "";
-    if (!currentVersion) {
-      res.status(400).json({ error: "Missing currentVersion query parameter." });
-      return;
-    }
+    const currentVersion = requireCurrentVersion(req, res);
+    if (currentVersion === null) return;
     const channel = req.query.channel === "beta" ? "beta" : "stable";
     const latest = await deps.resolveLatestApk(channel);
     if (!latest) {
@@ -185,11 +196,8 @@ export function registerPublicUpdateRoutes(app: Express, deps: PublicUpdateRoute
   }));
 
   app.get("/api/macos-dmg-update", asyncRoute(async (req, res) => {
-    const currentVersion = typeof req.query.currentVersion === "string" ? req.query.currentVersion.trim() : "";
-    if (!currentVersion) {
-      res.status(400).json({ error: "Missing currentVersion query parameter." });
-      return;
-    }
+    const currentVersion = requireCurrentVersion(req, res);
+    if (currentVersion === null) return;
     const latest = await deps.resolveLatestDmg();
     if (!latest) {
       res.json({ updateAvailable: false, currentVersion, latestVersion: null, downloadUrl: null, source: null });
@@ -223,11 +231,8 @@ export function registerPublicUpdateRoutes(app: Express, deps: PublicUpdateRoute
   }));
 
   app.get("/api/ios-ipa-update", asyncRoute(async (req, res) => {
-    const currentVersion = typeof req.query.currentVersion === "string" ? req.query.currentVersion.trim() : "";
-    if (!currentVersion) {
-      res.status(400).json({ error: "Missing currentVersion query parameter." });
-      return;
-    }
+    const currentVersion = requireCurrentVersion(req, res);
+    if (currentVersion === null) return;
     const payload = await resolveIosOtaPayload(req, deps);
     if (!payload) {
       res.json({
@@ -451,7 +456,7 @@ export function registerAdminUpdateRoutes(app: Express, deps: AdminUpdateRoutesD
         autoUpdate: storage.getConfigValue("autoUpdateProviderClis") === "true",
       });
     } catch (error) {
-      res.status(500).json({ error: getErrorMessage(error, "检查 CLI 更新失败。") });
+      sendRouteError(res, error, "检查 CLI 更新失败。", 500);
     }
   }));
 
@@ -476,7 +481,7 @@ export function registerAdminUpdateRoutes(app: Express, deps: AdminUpdateRoutesD
       void deps.modelCatalog.refresh().catch(() => {});
       res.json({ ok: results.every((item) => item.ok), results, ...after, autoUpdate: storage.getConfigValue("autoUpdateProviderClis") === "true" });
     } catch (error) {
-      res.status(500).json({ error: getErrorMessage(error, "更新 CLI 失败。") });
+      sendRouteError(res, error, "更新 CLI 失败。", 500);
     } finally {
       state.providerCliUpdateInFlight = false;
     }
@@ -493,7 +498,7 @@ export function registerAdminUpdateRoutes(app: Express, deps: AdminUpdateRoutesD
         },
       });
     } catch (error) {
-      res.status(500).json({ error: getErrorMessage(error, "检查更新失败。") });
+      sendRouteError(res, error, "检查更新失败。", 500);
     }
   }));
 
@@ -543,7 +548,7 @@ export function registerAdminUpdateRoutes(app: Express, deps: AdminUpdateRoutesD
         logPath: helper.logPath,
       });
     } catch (error) {
-      res.status(500).json({ error: getErrorMessage(error, "更新失败。") });
+      sendRouteError(res, error, "更新失败。", 500);
     } finally {
       state.updateInFlight = false;
     }

@@ -379,6 +379,29 @@ function buildIncrementalStructuredPayload(
   };
 }
 
+function isoNow(): string {
+  return new Date().toISOString();
+}
+
+function upsertAssistantMessage(
+  messages: ConversationTurn[] | undefined,
+  turn: ConversationTurn,
+  complete = false,
+): ConversationTurn[] {
+  const msgs = [...(messages ?? [])];
+  const last = msgs[msgs.length - 1];
+  const createdAt = (last?.role === "assistant" ? last.createdAt : undefined) ?? turn.createdAt ?? isoNow();
+  const next: ConversationTurn = {
+    ...turn,
+    createdAt,
+  };
+  if (complete) next.completedAt = isoNow();
+  else if (last?.role === "assistant" && last.completedAt) next.completedAt = last.completedAt;
+  if (last?.role === "assistant") msgs[msgs.length - 1] = next;
+  else msgs.push(next);
+  return msgs;
+}
+
 export class StructuredSessionManager {
   private readonly sessions = new Map<string, SessionSnapshot>();
   private readonly pendingRunnerExecutions = new Map<string, StructuredRunnerExecution>();
@@ -658,9 +681,7 @@ export class StructuredSessionManager {
         content: this.compactContentBlocks([...turnState.blocks], turnState.result),
         usage: turnState.usage,
       };
-      const messages = [...(current.messages ?? [])];
-      if (messages[messages.length - 1]?.role === "assistant") messages[messages.length - 1] = turn;
-      else messages.push(turn);
+      const messages = upsertAssistantMessage(current.messages, turn);
       const patched: SessionSnapshot = {
         ...current,
         claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
@@ -1230,9 +1251,11 @@ export class StructuredSessionManager {
     // child 是被 SIGTERM 主动 kill 的，正在等用户回答）。如果有，把这次的输入打包
     // 成 tool_result 注入到 messages，让 UI 把卡片渲染为 answered。
     const pendingAsk = findUnpairedAskUserQuestion(session.messages ?? []);
+    const userTurnAt = isoNow();
     const userTurn: ConversationTurn = pendingAsk
       ? {
           role: "user",
+          createdAt: userTurnAt,
           content: [
             {
               type: "tool_result",
@@ -1244,6 +1267,7 @@ export class StructuredSessionManager {
         }
       : {
           role: "user",
+          createdAt: userTurnAt,
           content: [{ type: "text", text: prompt }],
         };
     const requestId = randomUUID();
@@ -1984,9 +2008,7 @@ export class StructuredSessionManager {
         content: this.compactContentBlocks([...turnState.blocks], turnState.result),
         usage: turnState.usage,
       };
-      const messages = [...(current.messages ?? [])];
-      if (messages[messages.length - 1]?.role === "assistant") messages[messages.length - 1] = turn;
-      else messages.push(turn);
+      const messages = upsertAssistantMessage(current.messages, turn);
       const patched: SessionSnapshot = {
         ...current,
         claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
@@ -2157,9 +2179,7 @@ export class StructuredSessionManager {
         content: this.compactContentBlocks([...turnState.blocks], turnState.result),
         usage: turnState.usage,
       };
-      const messages = [...(current.messages ?? [])];
-      if (messages.at(-1)?.role === "assistant") messages[messages.length - 1] = turn;
-      else messages.push(turn);
+      const messages = upsertAssistantMessage(current.messages, turn);
       const patched: SessionSnapshot = {
         ...current,
         claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
@@ -2312,9 +2332,7 @@ export class StructuredSessionManager {
         content: this.compactContentBlocks([...turnState.blocks], turnState.result),
         usage: turnState.usage,
       };
-      const messages = [...(current.messages ?? [])];
-      if (messages[messages.length - 1]?.role === "assistant") messages[messages.length - 1] = turn;
-      else messages.push(turn);
+      const messages = upsertAssistantMessage(current.messages, turn);
       const patched: SessionSnapshot = {
         ...current,
         claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
@@ -2500,15 +2518,14 @@ export class StructuredSessionManager {
       const current = this.currentSessionForRequest(sessionId, requestId);
       if (!current) return;
       const hasAssistantContent = turnState.blocks.length > 0 || !!turnState.result;
-      const messages = [...(current.messages ?? [])];
+      let messages = [...(current.messages ?? [])];
       if (hasAssistantContent) {
         const turn: ConversationTurn = {
           role: "assistant",
           content: this.compactContentBlocks([...turnState.blocks], turnState.result),
           usage: turnState.usage,
         };
-        if (messages[messages.length - 1]?.role === "assistant") messages[messages.length - 1] = turn;
-        else messages.push(turn);
+        messages = upsertAssistantMessage(current.messages, turn);
       }
       const patched: SessionSnapshot = {
         ...current,
@@ -2890,10 +2907,7 @@ export class StructuredSessionManager {
         content: this.compactContentBlocks([...turnState.blocks], turnState.result),
         usage: turnState.usage,
       };
-      const msgs = [...(current.messages ?? [])];
-      const lastMsg = msgs[msgs.length - 1];
-      if (lastMsg && lastMsg.role === "assistant") msgs[msgs.length - 1] = inProgressTurn;
-      else msgs.push(inProgressTurn);
+      const msgs = upsertAssistantMessage(current.messages, inProgressTurn);
       const patched: SessionSnapshot = {
         ...current,
         claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
@@ -3252,11 +3266,7 @@ export class StructuredSessionManager {
       content: this.compactContentBlocks([...turnState.blocks], turnState.result),
       usage: turnState.usage,
     };
-    const msgs = [...(current.messages ?? [])];
-    const lastMsg = msgs[msgs.length - 1];
-    if (lastMsg && lastMsg.role === "assistant") msgs[msgs.length - 1] = assistantTurn;
-    else msgs.push(assistantTurn);
-    return msgs;
+    return upsertAssistantMessage(current.messages, assistantTurn, true);
   }
 
   private resolveQueuedMessagesAfterInterrupt(
@@ -3340,10 +3350,7 @@ export class StructuredSessionManager {
       role: "assistant",
       content: [{ type: "text", text: `结构化会话执行失败：${errorText}` }],
     };
-    const msgs = [...(current.messages ?? [])];
-    const lastMsg = msgs[msgs.length - 1];
-    if (lastMsg && lastMsg.role === "assistant") msgs[msgs.length - 1] = failureTurn;
-    else msgs.push(failureTurn);
+    const msgs = upsertAssistantMessage(current.messages, failureTurn, true);
     return {
       ...current,
       status: "failed",

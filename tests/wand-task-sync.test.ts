@@ -7,6 +7,7 @@ import test, { type TestContext } from "node:test";
 import { WandStorage } from "../src/storage.js";
 import type { SessionSnapshot } from "../src/types.js";
 import {
+  archiveBoardTask,
   boardTitleFromSession,
   ensureBoardTaskForWorkspaceTask,
   syncUngroupedSessionsToBoard,
@@ -150,4 +151,21 @@ test("sync binds standalone sessions onto an existing same-title card instead of
   assert.equal(tasks[0]?.id, existing.id);
   assert.equal(tasks[0]?.status, "done");
   assert.deepEqual(storage.listWandTaskSessionIds(existing.id), ["loose-persist"]);
+});
+
+test("archiveBoardTask stores archived instead of done", (t) => {
+  const storage = tempDatabase(t);
+  const workspace = storage.createWorkspace({ name: "wand", cwd: "/tmp/wand" });
+  const work = storage.createWorkspaceTask({ workspaceId: workspace.id, name: "侧栏任务" });
+  const card = storage.createWandTask({
+    workspaceId: workspace.id,
+    workspaceTaskId: work.id,
+    title: "要归档",
+    status: "doing",
+  });
+
+  const archived = archiveBoardTask(storage, card.id);
+  assert.equal(archived?.status, "archived");
+  assert.equal(storage.getWandTask(card.id)?.status, "archived");
+  assert.equal(storage.getWorkspaceTask(work.id)?.status, "done");
 });

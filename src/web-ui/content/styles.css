@@ -3965,6 +3965,25 @@
     }
 
     /* ===== 消息头像 ===== */
+    .chat-message-time {
+      font-size: 0.625rem;
+      line-height: 1;
+      color: var(--text-muted);
+      font-variant-numeric: tabular-nums;
+      padding: 0 4px 4px;
+      user-select: none;
+      letter-spacing: 0.02em;
+    }
+
+    .chat-message.user .chat-message-time {
+      align-self: flex-end;
+      text-align: right;
+    }
+
+    .chat-message.assistant .chat-message-time {
+      align-self: flex-start;
+    }
+
     .chat-message-avatar {
       display: flex;
       align-items: center;
@@ -20616,6 +20635,46 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav > .
 .task-board-list-header { color: var(--status-color, var(--text-secondary)); }
 .task-board-list-rows { padding: 2px 8px 0; }
 
+.task-board-archive-folder {
+  margin-top: 6px;
+  border: var(--tb-hairline) solid color-mix(in srgb, var(--text-primary) 8%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-primary) 70%, transparent);
+}
+.task-board-archive-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-tertiary);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.task-board-archive-header:hover { background: color-mix(in srgb, var(--text-primary) 5%, transparent); }
+.task-board-archive-header strong {
+  font-size: 11px;
+  font-weight: 560;
+  color: var(--text-secondary);
+}
+.task-board-archive-header span { margin-left: auto; font-size: 11px; }
+.task-board-archive-rows { padding: 0 4px 6px; }
+.task-board-archive-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 4px 8px;
+}
+.task-board-list-row.is-archived strong { color: var(--text-secondary); font-weight: 500; }
+.task-board-card.is-archived { opacity: 0.88; }
+.task-board-status-glyph.is-archived { color: var(--text-tertiary); }
+.task-board-column-list > .task-board-archive-folder { flex: 0 0 auto; }
+
 .task-board-dashboard {
   --dashboard-summary-text: #502bf5;
   flex: 1 1 auto;
@@ -20993,6 +21052,7 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav > .
 
 .task-board-gantt-track i.is-doing { background: var(--tb-column-doing); }
 .task-board-gantt-track i.is-done { background: var(--tb-column-done); }
+.task-board-gantt-track i.is-archived { background: color-mix(in srgb, var(--tb-column-done) 45%, var(--text-tertiary)); }
 
 .task-board-context-menu {
   position: fixed;

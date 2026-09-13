@@ -5,6 +5,7 @@ import type {
   WandTaskPriority,
   WandTaskStatus,
 } from "../../../task-types";
+import { isClosedWandTaskStatus } from "../../../task-types";
 import type { WandSelectOption } from "../ui";
 
 export type IssueAgentProvider = WandTaskAgentProvider;
@@ -40,6 +41,21 @@ export const ISSUE_COLUMNS: ReadonlyArray<{
   { status: "todo", label: "等待认领", empty: "还没有等待认领的任务" },
   { status: "doing", label: "处理中", empty: "暂无处理中的任务" },
   { status: "done", label: "等你确认", empty: "还没有待确认的任务" },
+];
+
+/** 归档不是第四列，而是「等你确认」下面的独立目录。 */
+export const ISSUE_ARCHIVE_COLUMN: {
+  status: Extract<WandTaskStatus, "archived">;
+  label: string;
+  empty: string;
+} = { status: "archived", label: "归档任务", empty: "还没有归档的任务" };
+
+export const ISSUE_STATUS_FILTERS: ReadonlyArray<{
+  status: WandTaskStatus;
+  label: string;
+}> = [
+  ...ISSUE_COLUMNS.map((column) => ({ status: column.status, label: column.label })),
+  { status: ISSUE_ARCHIVE_COLUMN.status, label: ISSUE_ARCHIVE_COLUMN.label },
 ];
 
 export const ISSUE_PRIORITIES: ReadonlyArray<{ value: WandTaskPriority; label: string }> = [
@@ -292,23 +308,44 @@ export function normalizeIssueAgentDefaults(payload: unknown): WandTaskAgent {
   return resolveIssueAgent(null, payload as WandTaskAgent);
 }
 
-/** 任务卡片的稳定排序：先人工 sortOrder，再按更新时间倒序。 */
-export function sortIssues<T extends { sortOrder: number; updatedAt: string; id: string }>(
+/**
+ * 任务卡片的固定排序：按创建时间倒序，新建在上、旧任务在后。
+ * 刻意不使用 updatedAt / sortOrder：编辑、派遣、自动改标题都会刷新 updatedAt，
+ * 用它会让人物卡在列里来回跳。
+ */
+export function sortIssues<T extends { createdAt: string; id: string }>(
   tasks: readonly T[],
 ): T[] {
   return [...tasks].sort((left, right) => {
-    if (left.sortOrder !== right.sortOrder) return left.sortOrder - right.sortOrder;
-    if (left.updatedAt !== right.updatedAt) return right.updatedAt.localeCompare(left.updatedAt);
+    if (left.createdAt !== right.createdAt) return right.createdAt.localeCompare(left.createdAt);
     return left.id.localeCompare(right.id);
   });
+}
+
+export function emptyIssueGroups<T>(): Record<WandTaskStatus, T[]> {
+  return { todo: [], doing: [], done: [], archived: [] };
 }
 
 export function groupIssuesByStatus<T extends { status: WandTaskStatus }>(
   tasks: readonly T[],
 ): Record<WandTaskStatus, T[]> {
-  const grouped: Record<WandTaskStatus, T[]> = { todo: [], doing: [], done: [] };
-  for (const task of tasks) grouped[task.status].push(task);
+  const grouped = emptyIssueGroups<T>();
+  for (const task of tasks) {
+    const bucket = grouped[task.status] ?? grouped.todo;
+    bucket.push(task);
+  }
   return grouped;
+}
+
+/** 归档目录默认折叠；搜索或勾选「归档任务」时自动展开，避免匹配结果被藏住。 */
+export function issueArchiveFolderOpen(
+  collapsed: boolean,
+  query: string,
+  filters: IssueBoardFilters,
+): boolean {
+  if (!collapsed) return true;
+  if (query.trim()) return true;
+  return filters.statuses.includes("archived");
 }
 
 /**
@@ -417,7 +454,7 @@ export function writeIssueBoardDisplay(display: IssueBoardDisplay): void {
 
 export function issueStatusTone(status: WandTaskStatus): "todo" | "progress" | "done" {
   if (status === "doing") return "progress";
-  if (status === "done") return "done";
+  if (isClosedWandTaskStatus(status)) return "done";
   return "todo";
 }
 
@@ -487,7 +524,7 @@ export function issueDueStamp(value: string | null | undefined): string {
 }
 
 export function issueIsOverdue(dueDate: string | null | undefined, status: WandTaskStatus, today = isoDate(new Date())): boolean {
-  return Boolean(dueDate && status !== "done" && dueDate < today);
+  return Boolean(dueDate && !isClosedWandTaskStatus(status) && dueDate < today);
 }
 
 export interface IssueBoardStats {
@@ -514,7 +551,7 @@ export function issueBoardStats<T extends {
   for (const task of tasks) {
     if (task.status === "todo") todo += 1;
     else if (task.status === "doing") doing += 1;
-    else done += 1;
+    else if (task.status === "done") done += 1;
     if (issueIsOverdue(task.dueDate, task.status, today)) overdue += 1;
     if (task.priority === "high" || task.priority === "urgent") high += 1;
   }
@@ -547,7 +584,7 @@ export function issueProgressSeries<T extends { status: WandTaskStatus; createdA
         if (task.status === "todo") return false;
         return (Number.isNaN(updatedAt) ? createdAt : Math.max(createdAt, updatedAt)) <= timestamp;
       }).length,
-      completed: tasks.filter((task) => task.status === "done" && new Date(task.updatedAt).getTime() <= timestamp).length,
+      completed: tasks.filter((task) => isClosedWandTaskStatus(task.status) && new Date(task.updatedAt).getTime() <= timestamp).length,
     };
   });
 }
@@ -572,47 +609,13 @@ export function issueGanttSpan<T extends { createdAt: string; dueDate: string | 
   days: number,
 ): { offset: number; length: number } {
   const created = isoDate(new Date(task.createdAt));
-  const finish = task.dueDate || (task.status === "done" ? isoDate(new Date(task.updatedAt)) : addIsoDays(created, 3));
+  const finish = task.dueDate || (isClosedWandTaskStatus(task.status) ? isoDate(new Date(task.updatedAt)) : addIsoDays(created, 3));
   const startMs = new Date(`${start}T12:00:00`).getTime();
   const createdMs = new Date(`${created}T12:00:00`).getTime();
   const finishMs = new Date(`${finish}T12:00:00`).getTime();
   const offset = Math.max(0, Math.round((createdMs - startMs) / 86_400_000));
   const end = Math.min(days, Math.max(offset + 1, Math.round((finishMs - startMs) / 86_400_000) + 1));
   return { offset: Math.min(offset, days - 1), length: Math.max(1, end - Math.min(offset, days - 1)) };
-}
-
-/**
- * 把被拖动的任务插入目标列 `beforeIndex`，并同时压紧源列 / 目标列的 sortOrder。
- * 返回需要 PATCH 的字段，调用方按 id 合并回列表。
- */
-export function reorderIssues<T extends { id: string; status: WandTaskStatus; sortOrder: number }>(
-  tasks: readonly T[],
-  taskId: string,
-  status: WandTaskStatus,
-  beforeIndex: number,
-): Array<{ id: string; status: WandTaskStatus; sortOrder: number }> {
-  const moving = tasks.find((task) => task.id === taskId);
-  if (!moving) return [];
-  const sourceStatus = moving.status;
-  const destination = tasks.filter((task) => task.status === status && task.id !== taskId);
-  const index = Math.max(0, Math.min(beforeIndex, destination.length));
-  destination.splice(index, 0, { ...moving, status });
-  const patches = destination.map((task, sortOrder) => ({ id: task.id, status, sortOrder }));
-  if (sourceStatus === status) return patches;
-  const source = tasks.filter((task) => task.status === sourceStatus && task.id !== taskId);
-  patches.push(...source.map((task, sortOrder) => ({ id: task.id, status: sourceStatus, sortOrder })));
-  return patches;
-}
-
-/** 用卡片中线判断应插在哪条前面；正在拖的那张不参与计算。 */
-export function dropIndexFromPoint(list: HTMLElement, clientY: number, draggedId: string): number {
-  const cards = [...list.querySelectorAll<HTMLElement>("[data-task-id]")]
-    .filter((node) => node.dataset.taskId !== draggedId);
-  for (let index = 0; index < cards.length; index += 1) {
-    const rect = cards[index]!.getBoundingClientRect();
-    if (clientY < rect.top + rect.height / 2) return index;
-  }
-  return cards.length;
 }
 
 export function formatIssueStamp(value: string | null | undefined): string {

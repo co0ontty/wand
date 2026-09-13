@@ -42,6 +42,14 @@ export function TaskBoardStatusIcon({
       <path fillRule="evenodd" d="M.75 5.618c0 2.187 2.761 4.868 6.168 4.868s6.168-2.679 6.168-4.868S10.324.75 6.918.75.75 3.431.75 5.618Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
     </svg>;
   }
+  if (status === "archived") {
+    return <svg {...props}>
+      <path d="M2.5 4.25h11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+      <path d="M3.25 4.25v7.25A1.5 1.5 0 0 0 4.75 13h6.5a1.5 1.5 0 0 0 1.5-1.5V4.25" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+      <path d="M2 3.25 3.2 1.75h9.6L14 3.25H2Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+      <path d="M6.5 7.25h3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+    </svg>;
+  }
   return <svg {...props}>
     <path d="M13.16 11.5H8.84" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
     <path fillRule="evenodd" d="M2.84 11.5c0 1.36.46 1.81 1.82 1.81s1.81-.45 1.81-1.81-.45-1.81-1.81-1.81-1.82.45-1.82 1.81Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>

@@ -357,7 +357,7 @@ test("deleting a project detaches its issues and dispatch falls back to the defa
   });
 });
 
-test("deleting a board task archives it as done instead of removing it", async () => {
+test("deleting a board task archives it instead of removing it", async () => {
   await withHarness(async ({ url, storage }) => {
     const workspace = storage.createWorkspace({ name: "wand", cwd: storage.directory() });
     const work = storage.createWorkspaceTask({ workspaceId: workspace.id, name: "要归档的工作任务" });
@@ -372,14 +372,27 @@ test("deleting a board task archives it as done instead of removing it", async (
     assert.equal(archived.status, 200);
     const payload = await archived.json() as { ok: boolean; status: string; id: string };
     assert.equal(payload.ok, true);
-    assert.equal(payload.status, "done");
+    assert.equal(payload.status, "archived");
     assert.equal(payload.id, created.id);
 
     const listed = await fetch(`${url}/api/wand-tasks`).then(jsonOf<Array<{ id: string; status: string }>>);
     assert.equal(listed.length, 1);
     assert.equal(listed[0]!.id, created.id);
-    assert.equal(listed[0]!.status, "done");
+    assert.equal(listed[0]!.status, "archived");
     assert.equal(storage.getWorkspaceTask(work.id)?.status, "done");
+  });
+});
+
+test("marking a board task done keeps it in done instead of archiving", async () => {
+  await withHarness(async ({ url, storage }) => {
+    const created = storage.createWandTask({ title: "待确认", status: "doing" });
+    const updated = await fetch(`${url}/api/wand-tasks/${created.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status: "done" }),
+    }).then(jsonOf<{ status: string }>);
+    assert.equal(updated.status, "done");
+    assert.equal(storage.getWandTask(created.id)?.status, "done");
   });
 });
 

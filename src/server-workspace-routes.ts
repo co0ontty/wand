@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { existsSync, statSync } from "node:fs";
 import type { Express } from "express";
 import { asyncRoute } from "./express-async.js";
+import { sendRouteError } from "./server-request.js";
 import { getErrorMessage } from "./error-utils.js";
 import { expandHomePath } from "./middleware/path-safety.js";
 import {
@@ -330,7 +331,7 @@ export function registerWorkspaceRoutes(
     try {
       cwd = resolveWorkspaceCwd(body.cwd);
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "目录无效。") });
+      sendRouteError(res, error, "目录无效。");
       return;
     }
     const defaultProvider = parseDefaultProvider(body.defaultProvider);
@@ -370,7 +371,7 @@ export function registerWorkspaceRoutes(
       try {
         patch.cwd = resolveWorkspaceCwd(body.cwd);
       } catch (error) {
-        res.status(400).json({ error: getErrorMessage(error, "目录无效。") });
+        sendRouteError(res, error, "目录无效。");
         return;
       }
     }
@@ -446,7 +447,7 @@ export function registerWorkspaceRoutes(
         worktreeError: created.worktreeError,
       });
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "创建任务失败。") });
+      sendRouteError(res, error, "创建任务失败。");
     }
   }));
 
@@ -647,7 +648,7 @@ export function registerWorkspaceRoutes(
     try {
       target = await resolveWorktreeTargetBranchAsync(workspace.cwd);
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "无法识别项目默认分支。") });
+      sendRouteError(res, error, "无法识别项目默认分支。");
       return;
     }
 
@@ -727,7 +728,7 @@ export function registerWorkspaceRoutes(
         worktreeError: created.worktreeError,
       });
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "创建任务失败。") });
+      sendRouteError(res, error, "创建任务失败。");
     }
   }));
 

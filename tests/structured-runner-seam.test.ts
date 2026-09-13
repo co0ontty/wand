@@ -103,11 +103,13 @@ test("StructuredSessionManager drives OpenCode through the runner interface", as
   assert.equal(finished.output, "scripted response");
   assert.equal(finished.claudeSessionId, "scripted-session-id");
   assert.equal(finished.structuredState?.model, "scripted-model");
-  assert.deepEqual(finished.messages?.at(-1), {
-    role: "assistant",
-    content: [{ type: "text", text: "scripted response" }],
-    usage: { inputTokens: 3, outputTokens: 4 },
-  });
+  const lastTurn = finished.messages?.at(-1);
+  assert.equal(lastTurn?.role, "assistant");
+  assert.deepEqual(lastTurn?.content, [{ type: "text", text: "scripted response" }]);
+  assert.deepEqual(lastTurn?.usage, { inputTokens: 3, outputTokens: 4 });
+  // 聊天时间戳是新增字段：完成态必须同时给出开始与结束的 ISO 时间。
+  assert.match(String(lastTurn?.createdAt), /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+  assert.match(String(lastTurn?.completedAt), /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
 });
 
 test("StructuredSessionManager drives Codex through the runner interface", async (t) => {

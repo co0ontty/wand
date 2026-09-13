@@ -1,4 +1,9 @@
-export type WandTaskStatus = "todo" | "doing" | "done";
+export type WandTaskStatus = "todo" | "doing" | "done" | "archived";
+
+/** 已确认或已归档：不再算未完成，也不会被未分组会话同步重新打开。 */
+export function isClosedWandTaskStatus(status: WandTaskStatus): boolean {
+  return status === "done" || status === "archived";
+}
 export type WandTaskPriority = "none" | "low" | "medium" | "high" | "urgent";
 
 /** 任务派发时选择的 CLI 工具；空串表示尚未指定。 */

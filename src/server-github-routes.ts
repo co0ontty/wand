@@ -6,7 +6,7 @@ import {
   getGithubConnectorStatus,
   githubRequest,
 } from "./github-connector.js";
-import { getErrorMessage } from "./error-utils.js";
+import { bodyObject, integerQuery, requiredString, sendRouteError, stringQuery } from "./server-request.js";
 import type { WandStorage } from "./storage.js";
 import type { SessionRegistry } from "./session-registry.js";
 
@@ -14,15 +14,6 @@ interface GithubRouteDependencies {
   storage: WandStorage;
   requireAdmin: RequestHandler;
   sessions?: SessionRegistry;
-}
-
-function stringQuery(value: unknown, fallback = ""): string {
-  return typeof value === "string" ? value.trim() : fallback;
-}
-
-function integerQuery(value: unknown, fallback: number, min: number, max: number): number {
-  const parsed = Number(stringQuery(value));
-  return Number.isInteger(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
 }
 
 function githubListQuery(
@@ -56,28 +47,22 @@ function issueNumber(req: { params: Record<string, string> }): number {
   return number;
 }
 
-function validateObjectBody(body: unknown): Record<string, unknown> {
-  if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("请求体必须是对象。");
-  return body as Record<string, unknown>;
-}
-
-function requiredString(body: Record<string, unknown>, key: string): string {
-  const value = typeof body[key] === "string" ? body[key].trim() : "";
-  if (!value) throw new Error(`${key} 不能为空。`);
-  return value;
-}
-
-function publicError(error: unknown): { status: number; message: string } {
+/** 把 connector 抛出的 HTTP 错误映射成对外的状态码；非法状态一律降为 500。 */
+function githubErrorStatus(error: unknown): number {
   const status = error instanceof Error && "status" in error && typeof error.status === "number"
     ? error.status
     : 400;
-  return { status: status >= 400 && status < 600 ? status : 500, message: getErrorMessage(error, "GitHub 操作失败。") };
+  return status >= 400 && status < 600 ? status : 500;
 }
 
 function sendGithubError(res: Response, error: unknown, remapAuth = false): void {
-  const result = publicError(error);
-  const status = remapAuth && (result.status === 401 || result.status === 403) ? 400 : result.status;
-  res.status(status).json({ error: result.message });
+  const status = githubErrorStatus(error);
+  sendRouteError(
+    res,
+    error,
+    "GitHub 操作失败。",
+    remapAuth && (status === 401 || status === 403) ? 400 : status,
+  );
 }
 
 async function githubJson<T = unknown>(storage: WandStorage, pathname: string, init: RequestInit = {}): Promise<T> {
@@ -94,7 +79,7 @@ export function registerGithubRoutes(app: Express, deps: GithubRouteDependencies
 
   app.post("/api/connectors/github", requireAdmin, asyncRoute(async (req, res) => {
     try {
-      const body = validateObjectBody(req.body);
+      const body = bodyObject(req.body);
       const token = requiredString(body, "token");
       const apiUrl = typeof body.apiUrl === "string" ? body.apiUrl : undefined;
       res.set("Cache-Control", "no-store");
@@ -122,7 +107,7 @@ export function registerGithubRoutes(app: Express, deps: GithubRouteDependencies
   app.post("/api/github/repos/:owner/:repo/issues/:number/bindings", requireAdmin, (req, res) => {
     try {
       const number = issueNumber(req);
-      const body = validateObjectBody(req.body);
+      const body = bodyObject(req.body);
       const sessionId = requiredString(body, "sessionId");
       if (sessions && !sessions.get(sessionId)) throw new Error("未找到该会话。");
       storage.bindGithubIssueSession(req.params.owner, req.params.repo, number, sessionId);
@@ -178,7 +163,7 @@ export function registerGithubRoutes(app: Express, deps: GithubRouteDependencies
 
   app.post("/api/github/repos/:owner/:repo/issues", requireAdmin, asyncRoute(async (req, res) => {
     try {
-      const body = validateObjectBody(req.body);
+      const body = bodyObject(req.body);
       const payload: Record<string, unknown> = { title: requiredString(body, "title") };
       for (const key of ["body", "labels", "assignees", "milestone"] as const) {
         if (body[key] !== undefined) payload[key] = body[key];
@@ -189,7 +174,7 @@ export function registerGithubRoutes(app: Express, deps: GithubRouteDependencies
 
   app.patch("/api/github/repos/:owner/:repo/issues/:number", requireAdmin, asyncRoute(async (req, res) => {
     try {
-      const body = validateObjectBody(req.body);
+      const body = bodyObject(req.body);
       const payload: Record<string, unknown> = {};
       for (const key of ["title", "body", "state", "state_reason", "labels", "assignees", "milestone"] as const) {
         if (body[key] !== undefined) payload[key] = body[key];
@@ -201,7 +186,7 @@ export function registerGithubRoutes(app: Express, deps: GithubRouteDependencies
 
   app.post("/api/github/repos/:owner/:repo/issues/:number/comments", requireAdmin, asyncRoute(async (req, res) => {
     try {
-      const body = validateObjectBody(req.body);
+      const body = bodyObject(req.body);
       const payload = { body: requiredString(body, "body") };
       res.status(201).json(await githubJson(storage, `${repoPath(req)}/issues/${issueNumber(req)}/comments`, { method: "POST", body: JSON.stringify(payload) }));
     } catch (error) { sendGithubError(res, error); }
@@ -216,7 +201,7 @@ export function registerGithubRoutes(app: Express, deps: GithubRouteDependencies
 
   app.post("/api/github/repos/:owner/:repo/pulls", requireAdmin, asyncRoute(async (req, res) => {
     try {
-      const body = validateObjectBody(req.body);
+      const body = bodyObject(req.body);
       const payload: Record<string, unknown> = {
         title: requiredString(body, "title"),
         head: requiredString(body, "head"),

@@ -6,7 +6,6 @@ import { stat } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { spawn } from "node:child_process";
-import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { WebSocketServer } from "ws";
@@ -36,6 +35,16 @@ import { resolveSessionAiContext, resolveSystemAiContext } from "./session-ai-co
 import { StructuredSessionManager } from "./structured-session-manager.js";
 import { recordRecentPath, registerFileRoutes } from "./server-file-routes.js";
 import { registerSettingsRoutes } from "./server-settings-routes.js";
+import {
+  appTokenLoginPayload,
+  buildStructuredChatPersonaPayload,
+  isBrowserExtensionOrigin,
+  resolveAppConnectCode,
+  resolveStructuredChatAvatarPath,
+  verifyAppToken,
+} from "./server-app-connect.js";
+import { firstHeaderValue, sendRouteError } from "./server-request.js";
+import { registerVaultRoutes } from "./server-vault-routes.js";
 import { registerGithubRoutes } from "./server-github-routes.js";
 import { registerTaskRoutes } from "./server-task-routes.js";
 import { getGithubConnectorStatus } from "./github-connector.js";
@@ -72,14 +81,6 @@ import { toSessionDetailDTO } from "./session-transport.js";
 import { registerUploadRoutes } from "./upload-routes.js";
 import { optimizePrompt, PromptOptimizeError } from "./prompt-optimizer.js";
 import { resolveDatabasePath, WandStorage, type AuthPrincipal, type AuthScope } from "./storage.js";
-import {
-  buildPasswordSecurityReport,
-  generatePassword,
-  generateTotpCode,
-  normalizePasswordItemType,
-  type PasswordVaultItemFilter,
-  type PasswordVaultItemInput,
-} from "./password-manager.js";
 import { deepRepairRuntimePath, formatPathRepairSummary, repairRuntimePath, type PathRepairResult } from "./path-repair.js";
 import { DistributionManager } from "./distribution-manager.js";
 import { isLogBusActive, wandTuiLog } from "./tui/log-bus.js";
@@ -94,12 +95,7 @@ import {
   verifyProviderCliUpdateResults,
   type ProviderCliUpdateStatus,
 } from "./provider-cli-updater.js";
-import {
-  CommandRequest,
-  SessionProvider,
-  StructuredChatPersonaConfig,
-  WandConfig
-} from "./types.js";
+import { CommandRequest, SessionProvider, WandConfig } from "./types.js";
 
 const SERVER_MODULE_DIR = path.dirname(new URL(import.meta.url).pathname);
 const RUNTIME_ROOT_DIR = path.resolve(SERVER_MODULE_DIR, "..");
@@ -169,96 +165,6 @@ function readBuildInfo(): WandBuildInfo {
 const BUILD_INFO = readBuildInfo();
 const DISPLAY_VERSION = BUILD_INFO.version || PKG_VERSION;
 const SERVER_INSTANCE_ID = crypto.randomUUID();
-
-function isExternalAvatarSource(value: string): boolean {
-  return /^(https?:|data:)/i.test(value);
-}
-
-function normalizePersonaName(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed || undefined;
-}
-
-function normalizePersonaAvatar(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed || undefined;
-}
-
-function resolveStructuredChatPersona(
-  config: WandConfig
-): StructuredChatPersonaConfig | undefined {
-  const persona = config.structuredChatPersona;
-  if (!persona) return undefined;
-
-  const userName = normalizePersonaName(persona.user?.name);
-  const userAvatar = normalizePersonaAvatar(persona.user?.avatar);
-  const assistantName = normalizePersonaName(persona.assistant?.name);
-  const assistantAvatar = normalizePersonaAvatar(persona.assistant?.avatar);
-
-  if (!userName && !userAvatar && !assistantName && !assistantAvatar) {
-    return undefined;
-  }
-
-  return {
-    user: userName || userAvatar ? { name: userName, avatar: userAvatar } : undefined,
-    assistant: assistantName || assistantAvatar ? { name: assistantName, avatar: assistantAvatar } : undefined,
-  };
-}
-
-function resolveStructuredChatAvatarPath(
-  configPath: string,
-  config: WandConfig,
-  role: "user" | "assistant"
-): string | null {
-  const avatar = role === "user"
-    ? config.structuredChatPersona?.user?.avatar
-    : config.structuredChatPersona?.assistant?.avatar;
-  if (!avatar || isExternalAvatarSource(avatar)) {
-    return null;
-  }
-  const configDir = resolveConfigDir(configPath);
-  return path.isAbsolute(avatar) ? avatar : path.resolve(configDir, avatar);
-}
-
-async function buildStructuredChatPersonaPayload(
-  configPath: string,
-  config: WandConfig
-): Promise<StructuredChatPersonaConfig | undefined> {
-  const persona = resolveStructuredChatPersona(config);
-  if (!persona) return undefined;
-
-  const buildRole = async (role: "user" | "assistant"): Promise<StructuredChatPersonaConfig["user"] | undefined> => {
-    const roleConfig = role === "user" ? persona.user : persona.assistant;
-    if (!roleConfig) return undefined;
-
-    let avatar = roleConfig.avatar;
-    if (avatar && !isExternalAvatarSource(avatar)) {
-      const resolvedPath = resolveStructuredChatAvatarPath(configPath, config, role);
-      if (!resolvedPath) {
-        avatar = undefined;
-      } else {
-        try {
-          const fileStat = await stat(resolvedPath);
-          avatar = fileStat.isFile() ? `/api/structured-chat-avatar/${role}` : undefined;
-        } catch {
-          avatar = undefined;
-        }
-      }
-    }
-
-    if (!roleConfig.name && !avatar) return undefined;
-    return {
-      name: roleConfig.name,
-      avatar,
-    };
-  };
-
-  const [user, assistant] = await Promise.all([buildRole("user"), buildRole("assistant")]);
-  if (!user && !assistant) return undefined;
-  return { user, assistant };
-}
 
 // ── Auth helpers ──
 
@@ -348,175 +254,6 @@ function authenticateBearerAppToken(
       : null;
   } catch {
     return null;
-  }
-}
-
-function resolveRequestServerUrl(req: Request, config: WandConfig, useHttps: boolean): string {
-  // 配置了公开 origin 就优先用它：TLS 在 L4 反代（nginx stream / NPM TCP stream）终止时
-  // node 只看到明文 HTTP，既没有 X-Forwarded-Proto 也没有正确的 scheme，猜不出来。
-  const configuredOrigin = normalizePublicOrigin(config.publicOrigin);
-  if (configuredOrigin) return resolveAppConnectOrigin(configuredOrigin, config);
-  const requestProtocol = getPublicRequestProtocol(req, useHttps ? "https" : "http");
-  const requestHost = getPublicRequestHost(req, config);
-  const originHeader = firstHeaderValue(req.headers.origin);
-  const browserOrigin = isBrowserExtensionOrigin(originHeader)
-    ? undefined
-    : normalizePublicOrigin(originHeader);
-  return resolveAppConnectOrigin(browserOrigin ?? `${requestProtocol}://${requestHost}`, config);
-}
-
-function appTokenLoginPayload(
-  req: Request,
-  storage: WandStorage,
-  config: WandConfig,
-  useHttps: boolean,
-): { appToken: string; serverUrl: string } {
-  return {
-    appToken: generateAppToken(getEffectivePassword(storage, config), config.appSecret ?? ""),
-    serverUrl: resolveRequestServerUrl(req, config, useHttps),
-  };
-}
-
-// ── App connection token helpers ──
-
-function generateAppToken(password: string, secret: string): string {
-  return crypto.createHmac("sha256", secret).update(password).digest("hex");
-}
-
-function verifyAppToken(token: string, password: string, secret: string): boolean {
-  const expected = generateAppToken(password, secret);
-  return crypto.timingSafeEqual(Buffer.from(token, "hex"), Buffer.from(expected, "hex"));
-}
-
-function encodeConnectCode(url: string, token: string): string {
-  return Buffer.from(`${url}#${token}`).toString("base64");
-}
-
-function firstHeaderValue(value: string | string[] | undefined): string | undefined {
-  if (Array.isArray(value)) return value[0];
-  return value;
-}
-
-function firstHeaderListValue(value: string | string[] | undefined): string | undefined {
-  return firstHeaderValue(value)?.split(",")[0]?.trim();
-}
-
-function unquoteHeaderValue(value: string): string {
-  const trimmed = value.trim();
-  if (trimmed.length >= 2 && trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
-    return trimmed.slice(1, -1);
-  }
-  return trimmed;
-}
-
-function getForwardedParam(req: Request, key: string): string | undefined {
-  const forwarded = firstHeaderListValue(req.headers.forwarded);
-  if (!forwarded) return undefined;
-  const targetKey = key.toLowerCase();
-  for (const part of forwarded.split(";")) {
-    const eqIdx = part.indexOf("=");
-    if (eqIdx < 1) continue;
-    const partKey = part.slice(0, eqIdx).trim().toLowerCase();
-    if (partKey !== targetKey) continue;
-    return unquoteHeaderValue(part.slice(eqIdx + 1));
-  }
-  return undefined;
-}
-
-function normalizePublicProtocol(value: string | undefined): "http" | "https" | undefined {
-  const proto = value?.trim().toLowerCase();
-  if (proto === "http" || proto === "https") return proto;
-  return undefined;
-}
-
-function getPublicRequestProtocol(req: Request, fallback: "http" | "https"): "http" | "https" {
-  return (
-    normalizePublicProtocol(firstHeaderListValue(req.headers["x-forwarded-proto"]))
-    ?? normalizePublicProtocol(getForwardedParam(req, "proto"))
-    ?? (firstHeaderListValue(req.headers["x-forwarded-ssl"])?.toLowerCase() === "on" ? "https" : undefined)
-    ?? (firstHeaderListValue(req.headers["x-forwarded-scheme"])?.toLowerCase() === "https" ? "https" : undefined)
-    ?? fallback
-  );
-}
-
-function getPublicRequestHost(req: Request, config: WandConfig): string {
-  return (
-    firstHeaderListValue(req.headers["x-forwarded-host"])
-    ?? getForwardedParam(req, "host")
-    ?? req.headers.host
-    ?? `${config.host}:${config.port}`
-  );
-}
-
-function firstQueryStringValue(value: unknown): string | undefined {
-  if (typeof value === "string") return value;
-  if (Array.isArray(value)) return firstQueryStringValue(value[0]);
-  return undefined;
-}
-
-function normalizePublicOrigin(value: string | undefined): string | undefined {
-  const raw = value?.trim();
-  if (!raw) return undefined;
-  try {
-    const parsed = new URL(raw);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return undefined;
-    if (!parsed.hostname || parsed.username || parsed.password) return undefined;
-    return parsed.origin;
-  } catch {
-    return undefined;
-  }
-}
-
-function isBrowserExtensionOrigin(value: string | undefined): boolean {
-  if (!value) return false;
-  return /^chrome-extension:\/\/[a-z]{32}$/i.test(value)
-    || /^moz-extension:\/\/[0-9a-f-]+$/i.test(value)
-    || /^safari-web-extension:\/\//i.test(value);
-}
-
-function isPrivateIpv4(address: string): boolean {
-  if (address.startsWith("10.") || address.startsWith("192.168.")) return true;
-  const match = address.match(/^172\.(\d+)\./);
-  return match ? Number(match[1]) >= 16 && Number(match[1]) <= 31 : false;
-}
-
-function preferredLanIpv4(): string | undefined {
-  const candidates: Array<{ address: string; score: number }> = [];
-  for (const [name, entries] of Object.entries(os.networkInterfaces())) {
-    for (const entry of entries ?? []) {
-      const family = entry.family as unknown;
-      if (entry.internal || (family !== "IPv4" && family !== 4)) continue;
-      let score = isPrivateIpv4(entry.address) ? 10 : 0;
-      if (/^(en|eth|wlan)\d+$/i.test(name)) score += 10;
-      candidates.push({ address: entry.address, score });
-    }
-  }
-  candidates.sort((a, b) => b.score - a.score || a.address.localeCompare(b.address));
-  return candidates[0]?.address;
-}
-
-/**
- * App 连接码用于另一台设备。设置页若从 localhost 打开，直接编码浏览器 origin
- * 会让客户端连接它自己；监听 0.0.0.0 时自动换成本机优先 LAN IPv4。
- */
-function resolveAppConnectOrigin(origin: string, config: WandConfig): string {
-  if (config.host !== "0.0.0.0") return origin;
-  try {
-    const parsed = new URL(origin);
-    const hostname = parsed.hostname.toLowerCase();
-    const isLocalOnly = hostname === "localhost"
-      || hostname === "127.0.0.1"
-      || hostname === "[::1]"
-      || hostname === "::1"
-      || hostname === "0.0.0.0"
-      || hostname === "[::]";
-    if (!isLocalOnly) return parsed.origin;
-    const lanIp = preferredLanIpv4();
-    if (!lanIp) return parsed.origin;
-    parsed.hostname = lanIp;
-    return parsed.origin;
-  } catch {
-    return origin;
   }
 }
 
@@ -849,7 +586,9 @@ export async function startServer(
     res.json({
       ok: true,
       principal,
-      ...(client === "browser-extension" ? appTokenLoginPayload(req, storage, config, useHttps) : {}),
+      ...(client === "browser-extension"
+        ? appTokenLoginPayload(req, config, useHttps, getEffectivePassword(storage, config))
+        : {}),
     });
   });
 
@@ -980,7 +719,7 @@ export async function startServer(
     });
   }));
 
-  // ── Browser extension password vault endpoints ──
+  // ── Claude skills & browser extension vault ──
 
   app.get("/api/claude-skills", (req, res) => {
     try {
@@ -990,129 +729,11 @@ export async function startServer(
       );
       res.json({ skills: listClaudeSkills(cwd) });
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "无法读取 skills。") });
+      sendRouteError(res, error, "无法读取 skills。");
     }
   });
 
-  app.get("/api/browser-extension/status", (req, res) => {
-    res.json({
-      ok: true,
-      serverUrl: resolveRequestServerUrl(req, config, useHttps),
-      features: {
-        loginAutofill: true,
-        saveLogins: true,
-        federatedLoginMemory: true,
-        passwordGenerator: true,
-        totp: true,
-        cardsAndIdentities: true,
-        vaults: true,
-        securityReport: true,
-        passkeys: "webauthn-proxy",
-      },
-    });
-  });
-
-  app.get("/api/browser-extension/vaults", (_req, res) => {
-    res.json({ vaults: storage.listPasswordVaults() });
-  });
-
-  app.post("/api/browser-extension/vaults", (req, res) => {
-    try {
-      const vault = storage.createPasswordVault((req.body as { name?: unknown }).name);
-      res.status(201).json({ vault });
-    } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "无法创建 vault。") });
-    }
-  });
-
-  app.get("/api/browser-extension/items", (req, res) => {
-    const filter: PasswordVaultItemFilter = {
-      q: firstQueryStringValue(req.query.q),
-      url: firstQueryStringValue(req.query.url),
-      vaultId: firstQueryStringValue(req.query.vaultId),
-      type: req.query.type ? normalizePasswordItemType(firstQueryStringValue(req.query.type)) : undefined,
-      limit: req.query.limit ? Number(firstQueryStringValue(req.query.limit)) : undefined,
-    };
-    res.json({ items: storage.listPasswordItems(filter) });
-  });
-
-  app.post("/api/browser-extension/items", (req, res) => {
-    try {
-      const item = storage.createPasswordItem(req.body as PasswordVaultItemInput);
-      res.status(201).json({ item });
-    } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "无法保存条目。") });
-    }
-  });
-
-  app.get("/api/browser-extension/items/:id", (req, res) => {
-    const item = storage.getPasswordItem(req.params.id);
-    if (!item) {
-      res.status(404).json({ error: "条目不存在。" });
-      return;
-    }
-    res.json({ item });
-  });
-
-  app.put("/api/browser-extension/items/:id", (req, res) => {
-    try {
-      const item = storage.updatePasswordItem(req.params.id, req.body as PasswordVaultItemInput);
-      if (!item) {
-        res.status(404).json({ error: "条目不存在。" });
-        return;
-      }
-      res.json({ item });
-    } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "无法更新条目。") });
-    }
-  });
-
-  app.delete("/api/browser-extension/items/:id", (req, res) => {
-    if (!storage.deletePasswordItem(req.params.id)) {
-      res.status(404).json({ error: "条目不存在。" });
-      return;
-    }
-    res.json({ ok: true });
-  });
-
-  app.post("/api/browser-extension/items/:id/use", (req, res) => {
-    const item = storage.touchPasswordItem(req.params.id);
-    if (!item) {
-      res.status(404).json({ error: "条目不存在。" });
-      return;
-    }
-    res.json({ item });
-  });
-
-  app.get("/api/browser-extension/generator/password", (req, res) => {
-    res.json({
-      password: generatePassword({
-        length: Number(firstQueryStringValue(req.query.length)),
-        digits: firstQueryStringValue(req.query.digits) !== "false",
-        symbols: firstQueryStringValue(req.query.symbols) !== "false",
-      }),
-    });
-  });
-
-  app.post("/api/browser-extension/totp/preview", (req, res) => {
-    try {
-      const { secret, digits, period } = req.body as { secret?: string; digits?: number; period?: number };
-      if (!secret) {
-        res.status(400).json({ error: "缺少 TOTP secret。" });
-        return;
-      }
-      res.json({
-        code: generateTotpCode(secret, Date.now(), digits ?? 6, period ?? 30),
-        period: period ?? 30,
-      });
-    } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "无法生成 TOTP。") });
-    }
-  });
-
-  app.get("/api/browser-extension/security-report", (_req, res) => {
-    res.json({ report: buildPasswordSecurityReport(storage.listPasswordItems({ includeArchived: false, limit: 200 })) });
-  });
+  registerVaultRoutes(app, { storage, config, useHttps });
 
   // ── Settings endpoints ──
 
@@ -1133,19 +754,8 @@ export async function startServer(
     getDistributionSettings,
     getGithubConnector: () => getGithubConnectorStatus(storage),
     modelCatalog,
-    resolveAppConnectCode: (req) => {
-      const effectivePassword = getEffectivePassword(storage, config);
-      const configuredOrigin = normalizePublicOrigin(config.publicOrigin);
-      const requestProtocol = getPublicRequestProtocol(req, useHttps ? "https" : "http");
-      const requestHost = getPublicRequestHost(req, config);
-      const browserOrigin = normalizePublicOrigin(firstQueryStringValue(req.query.origin));
-      const serverUrl = resolveAppConnectOrigin(
-        configuredOrigin ?? browserOrigin ?? `${requestProtocol}://${requestHost}`,
-        config,
-      );
-      const token = generateAppToken(effectivePassword, config.appSecret ?? "");
-      return { code: encodeConnectCode(serverUrl, token), url: serverUrl };
-    },
+    resolveAppConnectCode: (req) =>
+      resolveAppConnectCode(req, config, useHttps, getEffectivePassword(storage, config)),
   });
 
   registerGithubRoutes(app, { storage, requireAdmin, sessions: sessionRegistry });
@@ -1218,7 +828,7 @@ export async function startServer(
         res.status(status).json({ error: error.message, errorCode: error.code });
         return;
       }
-      res.status(500).json({ error: getErrorMessage(error, "提示词优化失败。") });
+      sendRouteError(res, error, "提示词优化失败。", 500);
     }
   }));
 
@@ -1296,7 +906,7 @@ export async function startServer(
       recordRecentPath(storage, snapshot.cwd);
       res.status(201).json(toSessionDetailDTO(snapshot));
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "无法启动命令。请检查命令是否安装。") });
+      sendRouteError(res, error, "无法启动命令。请检查命令是否安装。");
     }
   }));
 

@@ -1446,7 +1446,7 @@ export class WandStorage {
       title: String(row.title),
       titleSource: row.title_source === "auto" ? "auto" : "user",
       description: String(row.description ?? ""),
-      status: row.status === "doing" || row.status === "done" ? row.status : "todo",
+      status: row.status === "doing" || row.status === "done" || row.status === "archived" ? row.status : "todo",
       priority: row.priority === "low" || row.priority === "medium" || row.priority === "high" || row.priority === "urgent" ? row.priority : "none",
       labels: (() => { const parsed = safeJsonParse<unknown>(String(row.labels_json ?? "[]")); return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : []; })(),
       dueDate: typeof row.due_date === "string" ? row.due_date : null,

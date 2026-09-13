@@ -531,6 +531,10 @@ export type ContentBlock = TextBlock | ThinkingBlock | ToolUseBlock | ToolResult
 export interface ConversationTurn {
   role: "user" | "assistant";
   content: ContentBlock[];
+  /** ISO time when this turn was first recorded (user send / assistant start). */
+  createdAt?: string;
+  /** ISO time when an assistant turn finished streaming. */
+  completedAt?: string;
   /** Optional usage metadata when available from the underlying tool. */
   usage?: {
     inputTokens?: number;

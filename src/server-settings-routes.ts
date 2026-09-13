@@ -5,6 +5,7 @@ import type { Express, Request, RequestHandler } from "express";
 import { buildChildEnv } from "./env-utils.js";
 import { getErrorMessage } from "./error-utils.js";
 import { asyncRoute } from "./express-async.js";
+import { sendRouteError } from "./server-request.js";
 import {
   getProviderDefaultModels,
   PREFERENCE_KEYS,
@@ -265,7 +266,7 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
         throw new Error("测试线路需要完整的 API 地址、API Key 和模型。");
       }
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "测试线路配置无效。") });
+      sendRouteError(res, error, "测试线路配置无效。");
       return;
     }
 
@@ -406,7 +407,7 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
       }
       validateCommitAiConfig(candidateConfig);
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "配置校验失败。") });
+      sendRouteError(res, error, "配置校验失败。");
       return;
     }
 
@@ -437,7 +438,7 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
       if (deployConfigWritten) {
         try { await saveConfig(configPath, previousDesiredConfig); } catch { /* preserve original */ }
       }
-      res.status(500).json({ error: getErrorMessage(error, "保存配置失败。") });
+      sendRouteError(res, error, "保存配置失败。", 500);
     }
   }));
 
@@ -474,7 +475,7 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
         defaultModels: defaults,
       });
     } catch (error) {
-      res.status(500).json({ error: getErrorMessage(error, "刷新模型列表失败。") });
+      sendRouteError(res, error, "刷新模型列表失败。", 500);
     }
   }));
 
@@ -493,7 +494,7 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
       writeFileSync(path.join(configDir, "server.crt"), cert, { mode: 0o600 });
       res.json({ ok: true, restartRequired: true });
     } catch (error) {
-      res.status(500).json({ error: getErrorMessage(error, "保存证书失败。") });
+      sendRouteError(res, error, "保存证书失败。", 500);
     }
   }));
 }

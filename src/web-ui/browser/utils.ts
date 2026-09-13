@@ -171,7 +171,14 @@ export function renderStructuredStatusBar(chatMessages: any, session: any) {
       var elapsed = state._statusBarStartTime ? ((Date.now() - state._statusBarStartTime) / 1000).toFixed(1) : "0.0";
       existing.classList.add("completed");
       existing.querySelector(".status-bar-label")!.textContent = "完成";
-      existing.querySelector(".status-bar-timer")!.textContent = elapsed + "s";
+      var finishedAt = new Date();
+      var pad = function(n: number) { return n < 10 ? "0" + n : String(n); };
+      var clock = pad(finishedAt.getHours()) + ":" + pad(finishedAt.getMinutes()) + ":" + pad(finishedAt.getSeconds());
+      var timerEl = existing.querySelector(".status-bar-timer") as HTMLElement | null;
+      if (timerEl) {
+        timerEl.textContent = clock;
+        timerEl.title = "耗时 " + elapsed + "s";
+      }
       var dot = existing.querySelector(".status-bar-dot") as HTMLElement;
       if (dot) dot.style.display = "none";
       state._statusBarStartTime = 0;

@@ -8,9 +8,11 @@ import {
   EMPTY_ISSUE_FILTERS,
   formatIssueStamp,
   groupIssueSessionsByAgent,
+  ISSUE_ARCHIVE_COLUMN,
   ISSUE_COLUMNS,
   ISSUE_GANTT_ZOOMS,
   ISSUE_PRIORITIES,
+  ISSUE_STATUS_FILTERS,
   issueAgentEffortLabel,
   issueAgentProviderLabel,
   issueBoardStats,
@@ -190,7 +192,7 @@ export function TaskBoardFilterMenu({
   >
     <strong>筛选</strong>
     <p>状态</p>
-    {ISSUE_COLUMNS.map((column) => <label key={column.status}>
+    {ISSUE_STATUS_FILTERS.map((column) => <label key={column.status}>
       <input
         type="checkbox"
         checked={filters.statuses.includes(column.status)}
@@ -274,23 +276,94 @@ export function TaskBoardDisplayMenu({
   </WandPopover>;
 }
 
+export function TaskBoardArchiveFolder({
+  count,
+  open,
+  onToggle,
+  children,
+}: {
+  count: number;
+  open: boolean;
+  onToggle(): void;
+  children: React.ReactNode;
+}): React.ReactElement | null {
+  if (count === 0) return null;
+  return <div className="task-board-archive-folder">
+    <button
+      type="button"
+      className="task-board-archive-header"
+      aria-expanded={open}
+      onClick={onToggle}
+    >
+      <WandIcon name={open ? "chevron" : "chevronLeft"} size={12}/>
+      <TaskBoardFolderIcon size={13}/>
+      <strong>{ISSUE_ARCHIVE_COLUMN.label}</strong>
+      <span>{count}</span>
+    </button>
+    {open ? children : null}
+  </div>;
+}
+
+function TaskBoardListRow({
+  task,
+  onOpen,
+  onOpenSession,
+}: {
+  task: WandTaskListed;
+  onOpen(id: string): void;
+  onOpenSession?: (sessionId: string) => void;
+}): React.ReactElement {
+  return <div
+    role="button"
+    tabIndex={0}
+    className={classNames("task-board-list-row", task.status === "archived" && "is-archived")}
+    onClick={() => onOpen(task.id)}
+    onKeyDown={(event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        onOpen(task.id);
+      }
+    }}
+  >
+    <span className="task-board-list-title">
+      <small>{task.identifier}</small>
+      <strong>{task.title}</strong>
+    </span>
+    <span className="task-board-list-meta" onClick={(event) => event.stopPropagation()}>
+      <TaskBoardPriorityChip priority={task.priority}/>
+      {task.labels.slice(0, 2).map((label) => <TaskBoardLabelChip key={label} label={label}/>)}
+      {task.dueDate ? <span className="task-board-due"><TaskBoardDueIcon size={12}/>{issueDueStamp(task.dueDate)}</span> : null}
+      <span>{task.workspace?.name ?? "未指定项目"}</span>
+      <TaskBoardConversationButton sessions={task.sessions} onOpen={onOpenSession}/>
+      <time>{formatIssueStamp(task.updatedAt)}</time>
+    </span>
+  </div>;
+}
+
 export function TaskBoardListView({
   grouped,
   collapsed,
+  archiveOpen,
   onToggle,
+  onToggleArchive,
   onOpen,
   onOpenSession,
 }: {
   grouped: Record<WandTaskStatus, WandTaskListed[]>;
   collapsed: Record<WandTaskStatus, boolean>;
+  archiveOpen: boolean;
   onToggle(status: WandTaskStatus): void;
+  onToggleArchive(): void;
   onOpen(id: string): void;
   onOpenSession?: (sessionId: string) => void;
 }): React.ReactElement {
+  const archived = grouped.archived;
   return <div className="task-board-list-view">
     {ISSUE_COLUMNS.map((column) => {
       const items = grouped[column.status];
-      const isCollapsed = collapsed[column.status];
+      const isCollapsed = column.status === "done" && archiveOpen && archived.length > 0
+        ? false
+        : collapsed[column.status];
       return <section key={column.status} className={`task-board-list-group is-${column.status}`}>
         <button
           type="button"
@@ -304,33 +377,28 @@ export function TaskBoardListView({
           <span>{items.length}</span>
         </button>
         {!isCollapsed && <div className="task-board-list-rows">
-          {items.length === 0 && <p className="task-board-column-empty">{column.empty}</p>}
-          {items.map((task) => <div
+          {items.length === 0 && column.status !== "done" && <p className="task-board-column-empty">{column.empty}</p>}
+          {items.length === 0 && column.status === "done" && archived.length === 0 && <p className="task-board-column-empty">{column.empty}</p>}
+          {items.map((task) => <TaskBoardListRow
             key={task.id}
-            role="button"
-            tabIndex={0}
-            className="task-board-list-row"
-            onClick={() => onOpen(task.id)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                onOpen(task.id);
-              }
-            }}
+            task={task}
+            onOpen={onOpen}
+            onOpenSession={onOpenSession}
+          />)}
+          {column.status === "done" ? <TaskBoardArchiveFolder
+            count={archived.length}
+            open={archiveOpen}
+            onToggle={onToggleArchive}
           >
-            <span className="task-board-list-title">
-              <small>{task.identifier}</small>
-              <strong>{task.title}</strong>
-            </span>
-            <span className="task-board-list-meta" onClick={(event) => event.stopPropagation()}>
-              <TaskBoardPriorityChip priority={task.priority}/>
-              {task.labels.slice(0, 2).map((label) => <TaskBoardLabelChip key={label} label={label}/>)}
-              {task.dueDate ? <span className="task-board-due"><TaskBoardDueIcon size={12}/>{issueDueStamp(task.dueDate)}</span> : null}
-              <span>{task.workspace?.name ?? "未指定项目"}</span>
-              <TaskBoardConversationButton sessions={task.sessions} onOpen={onOpenSession}/>
-              <time>{formatIssueStamp(task.updatedAt)}</time>
-            </span>
-          </div>)}
+            <div className="task-board-archive-rows">
+              {archived.map((task) => <TaskBoardListRow
+                key={task.id}
+                task={task}
+                onOpen={onOpen}
+                onOpenSession={onOpenSession}
+              />)}
+            </div>
+          </TaskBoardArchiveFolder> : null}
         </div>}
       </section>;
     })}
@@ -490,8 +558,9 @@ export function TaskBoardGantt({
   onHideCompleted(hide: boolean): void;
   onOpen(id: string): void;
 }): React.ReactElement {
-  const tasks = ISSUE_COLUMNS.flatMap((column) => grouped[column.status])
-    .filter((task) => !(hideCompleted && task.status === "done"));
+  const closed = (status: WandTaskStatus): boolean => status === "done" || status === "archived";
+  const tasks = [...ISSUE_COLUMNS.flatMap((column) => grouped[column.status]), ...grouped.archived]
+    .filter((task) => !(hideCompleted && closed(task.status)));
   const range = issueGanttRange(tasks, zoom);
   return <div className="task-board-gantt">
     <div className="task-board-gantt-toolbar">
@@ -518,8 +587,8 @@ export function TaskBoardGantt({
             {range.columns.map((day) => <b key={day}>{Number(day.slice(8, 10))}</b>)}
           </div>
         </div>
-        {ISSUE_COLUMNS.map((column) => {
-          const items = grouped[column.status].filter((task) => !(hideCompleted && task.status === "done"));
+        {[...ISSUE_COLUMNS, ...(hideCompleted ? [] : [ISSUE_ARCHIVE_COLUMN])].map((column) => {
+          const items = grouped[column.status].filter((task) => !(hideCompleted && (task.status === "done" || task.status === "archived")));
           if (items.length === 0) return null;
           return <section key={column.status} className={`task-board-gantt-group is-${column.status}`}>
             <header>

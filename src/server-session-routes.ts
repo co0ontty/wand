@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { Express, Request, Response } from "express";
+import type { Express } from "express";
 
 import { ProcessManager, SessionInputError } from "./process-manager.js";
 import { StructuredSessionManager } from "./structured-session-manager.js";
@@ -27,9 +27,11 @@ import {
 } from "./git-quick-commit.js";
 
 import { getErrorMessage } from "./error-utils.js";
-import { buildProviderResumeCommand, isProviderSessionId, isSafeProviderSessionId } from "./resume-policy.js";
+import { buildProviderResumeCommand, isProviderSessionId } from "./resume-policy.js";
 import { parseBoundedInteger } from "./request-limits.js";
 import { asyncRoute } from "./express-async.js";
+import { sendRouteError } from "./server-request.js";
+import { registerStructuredResumeRoutes } from "./server-resume-routes.js";
 import { SessionRegistry } from "./session-registry.js";
 import { enrichStructuredMessages, WAND_PROTOCOL_VERSION } from "./structured-client-protocol.js";
 import {
@@ -567,7 +569,7 @@ export function registerSessionRoutes(
       }
       res.json(page);
     } catch (error) {
-      res.status(500).json({ error: getErrorMessage(error, "无法加载会话列表。") });
+      sendRouteError(res, error, "无法加载会话列表。", 500);
     }
   });
 
@@ -575,7 +577,7 @@ export function registerSessionRoutes(
     try {
       res.json(currentDirectoryTree());
     } catch (error) {
-      res.status(500).json({ error: getErrorMessage(error, "无法加载会话目录。") });
+      sendRouteError(res, error, "无法加载会话目录。", 500);
     }
   });
 
@@ -613,7 +615,7 @@ export function registerSessionRoutes(
       storage.setSessionDirectoryName(directoryPath, customName || null);
       res.json({ ok: true, path: directoryPath, name: customName || null });
     } catch (error) {
-      res.status(500).json({ error: getErrorMessage(error, "无法保存工作区名称。") });
+      sendRouteError(res, error, "无法保存工作区名称。", 500);
     }
   });
 
@@ -657,7 +659,7 @@ export function registerSessionRoutes(
       }
       res.status(201).json(sessionResponseDTO(snapshot));
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "无法启动结构化会话。") });
+      sendRouteError(res, error, "无法启动结构化会话。");
     }
   }));
 
@@ -673,7 +675,7 @@ export function registerSessionRoutes(
       }
       res.json(updated);
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "切换模型失败。") });
+      sendRouteError(res, error, "切换模型失败。");
     }
   });
 
@@ -691,7 +693,7 @@ export function registerSessionRoutes(
       }
       res.json(updated);
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "切换思考深度失败。") });
+      sendRouteError(res, error, "切换思考深度失败。");
     }
   });
 
@@ -720,7 +722,7 @@ export function registerSessionRoutes(
       const effective = (snapshot.provider ?? "claude") === "codex" ? "full-access" : mode;
       res.json(sessions.setSessionMode(id, effective));
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "切换模式失败。") });
+      sendRouteError(res, error, "切换模式失败。");
     }
   });
 
@@ -782,7 +784,7 @@ export function registerSessionRoutes(
       const snapshot = structured.reorderQueuedMessages(req.params.id, rawOrder.map((v: unknown) => Number(v)));
       res.json(sessionResponseDTO(snapshot));
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "无法调整排队顺序。") });
+      sendRouteError(res, error, "无法调整排队顺序。");
     }
   });
 
@@ -797,7 +799,7 @@ export function registerSessionRoutes(
       const snapshot = structured.deleteQueuedMessage(req.params.id, index, expectedText);
       res.json(sessionResponseDTO(snapshot));
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "无法删除排队消息。") });
+      sendRouteError(res, error, "无法删除排队消息。");
     }
   });
 
@@ -827,7 +829,7 @@ export function registerSessionRoutes(
       const snapshot = structured.clearQueuedMessages(req.params.id);
       res.json(sessionResponseDTO(snapshot));
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "无法清空排队消息。") });
+      sendRouteError(res, error, "无法清空排队消息。");
     }
   });
 
@@ -976,7 +978,7 @@ export function registerSessionRoutes(
         res.status(status).json({ error: error.message, errorCode: error.code });
         return;
       }
-      res.status(400).json({ error: getErrorMessage(error, "快捷提交失败。") });
+      sendRouteError(res, error, "快捷提交失败。");
     }
   }));
 
@@ -1001,7 +1003,7 @@ export function registerSessionRoutes(
         res.status(400).json({ error: error.message, errorCode: error.code });
         return;
       }
-      res.status(400).json({ error: getErrorMessage(error, "生成 commit message 失败。") });
+      sendRouteError(res, error, "生成 commit message 失败。");
     }
   }));
 
@@ -1033,7 +1035,7 @@ export function registerSessionRoutes(
         res.status(status).json({ error: error.message, errorCode: error.code });
         return;
       }
-      res.status(400).json({ error: getErrorMessage(error, "打 tag 失败。") });
+      sendRouteError(res, error, "打 tag 失败。");
     }
   }));
 
@@ -1062,7 +1064,7 @@ export function registerSessionRoutes(
         res.status(400).json({ error: error.message, errorCode: error.code });
         return;
       }
-      res.status(400).json({ error: getErrorMessage(error, "推送失败。") });
+      sendRouteError(res, error, "推送失败。");
     }
   }));
 
@@ -1222,7 +1224,7 @@ export function registerSessionRoutes(
       const newSnapshot = await startResumedPtySession(processes, storage, existingSession, sessionId, defaultMode, body);
       res.status(201).json(sessionResponseDTO(newSnapshot));
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "无法恢复会话。") });
+      sendRouteError(res, error, "无法恢复会话。");
     }
   }));
 
@@ -1291,7 +1293,7 @@ export function registerSessionRoutes(
         res.status(201).json({ resumedClaudeSessionId: claudeSessionId, ...sessionResponseDTO(newSnapshot) });
       }
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "无法按 Claude 会话 ID 恢复会话。") });
+      sendRouteError(res, error, "无法按 Claude 会话 ID 恢复会话。");
     }
   }));
 
@@ -1355,167 +1357,13 @@ export function registerSessionRoutes(
     }
   }));
 
-  app.post("/api/codex-sessions/:threadId/resume", asyncRoute(async (req, res) => {
-    const threadId = String(req.params.threadId || "").trim();
-    const body = req.body as { mode?: ExecutionMode; cwd?: string; worktreeEnabled?: boolean; sessionSource?: unknown; automationId?: unknown };
-    try {
-      if (!isProviderSessionId(threadId)) {
-        res.status(400).json({ error: "Codex 会话 ID 必须是有效的 UUID。" });
-        return;
-      }
-      const history = processes.listCodexHistorySessions().find((s) => s.claudeSessionId === threadId);
-      if (!history) {
-        res.status(400).json({ error: "对应的 Codex 历史会话不存在，无法恢复。" });
-        return;
-      }
-      const cwd = body.cwd?.trim() || history.cwd;
-      if (!cwd) {
-        res.status(400).json({ error: "无法确定工作目录 (cwd)，无法恢复。" });
-        return;
-      }
-      const newMode = parseExecutionMode(body.mode, defaultMode);
-      const origin = parseSessionCreationOrigin(body);
-      const snapshot = structured.createSession({
-        cwd,
-        mode: newMode,
-        provider: "codex",
-        runner: "codex-cli-exec",
-        worktreeEnabled: body.worktreeEnabled === true,
-        claudeSessionId: threadId,
-        workspaceId: resolveWorkspaceIdForNewSession(storage, cwd),
-        ...origin,
-      });
-      onSessionCreated?.(cwd);
-      res.status(201).json({ resumedClaudeSessionId: threadId, ...sessionResponseDTO(snapshot) });
-    } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "无法按 Codex 会话 ID 恢复会话。") });
-    }
-  }));
-
-  /**
-   * OpenCode and Qoder own their native transcript storage. Restoring an
-   * external transcript creates a Wand structured shell carrying the native
-   * ID; each provider runner adds its own resume flag when the next input is
-   * sent, preserving the original context without importing the full history.
-   */
-  app.post("/api/opencode-sessions/:sessionId/resume", (req, res) => {
-    const sessionId = String(req.params.sessionId || "").trim();
-    const body = req.body as { mode?: ExecutionMode; cwd?: string; worktreeEnabled?: boolean; sessionSource?: unknown; automationId?: unknown };
-    try {
-      if (!isSafeProviderSessionId(sessionId)) {
-        res.status(400).json({ error: "OpenCode 会话 ID 格式无效。" });
-        return;
-      }
-      const history = processes.listOpenCodeHistorySessions().find((session) => session.claudeSessionId === sessionId);
-      if (!history) {
-        res.status(400).json({ error: "对应的 OpenCode 历史会话不存在，无法恢复。" });
-        return;
-      }
-      const cwd = body.cwd?.trim() || history.cwd;
-      if (!cwd) {
-        res.status(400).json({ error: "无法确定工作目录 (cwd)，无法恢复。" });
-        return;
-      }
-      const snapshot = structured.createSession({
-        cwd,
-        mode: parseExecutionMode(body.mode, defaultMode),
-        provider: "opencode",
-        runner: "opencode-cli-run",
-        worktreeEnabled: body.worktreeEnabled === true,
-        claudeSessionId: sessionId,
-        workspaceId: resolveWorkspaceIdForNewSession(storage, cwd),
-        ...parseSessionCreationOrigin(body),
-      });
-      onSessionCreated?.(cwd);
-      res.status(201).json({ resumedClaudeSessionId: sessionId, ...sessionResponseDTO(snapshot) });
-    } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "无法按 OpenCode 会话 ID 恢复会话。") });
-    }
-  });
-
-  app.post("/api/qoder-sessions/:sessionId/resume", (req, res) => {
-    const sessionId = String(req.params.sessionId || "").trim();
-    const body = req.body as { mode?: ExecutionMode; cwd?: string; worktreeEnabled?: boolean; sessionSource?: unknown; automationId?: unknown };
-    try {
-      if (!isSafeProviderSessionId(sessionId)) {
-        res.status(400).json({ error: "Qoder 会话 ID 格式无效。" });
-        return;
-      }
-      const history = processes.listQoderHistorySessions().find((session) => session.claudeSessionId === sessionId);
-      if (!history) {
-        res.status(400).json({ error: "对应的 Qoder 历史会话不存在，无法恢复。" });
-        return;
-      }
-      const cwd = body.cwd?.trim() || history.cwd;
-      if (!cwd) {
-        res.status(400).json({ error: "无法确定工作目录 (cwd)，无法恢复。" });
-        return;
-      }
-      const snapshot = structured.createSession({
-        cwd,
-        mode: parseExecutionMode(body.mode, defaultMode),
-        provider: "qoder",
-        runner: "qoder-cli-print",
-        worktreeEnabled: body.worktreeEnabled === true,
-        claudeSessionId: sessionId,
-        workspaceId: resolveWorkspaceIdForNewSession(storage, cwd),
-        ...parseSessionCreationOrigin(body),
-      });
-      onSessionCreated?.(cwd);
-      res.status(201).json({ resumedClaudeSessionId: sessionId, ...sessionResponseDTO(snapshot) });
-    } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "无法按 Qoder 会话 ID 恢复会话。") });
-    }
-  });
-
-  const resumeNamedStructuredSession = (
-    req: Request,
-    res: Response,
-    spec: { provider: SessionProvider; runner: SessionRunner; label: string },
-  ): void => {
-    const sessionId = String(req.params.sessionId || "").trim();
-    const body = req.body as { mode?: ExecutionMode; cwd?: string; worktreeEnabled?: boolean; sessionSource?: unknown; automationId?: unknown };
-    try {
-      if (!isSafeProviderSessionId(sessionId)) {
-        res.status(400).json({ error: `${spec.label} 会话 ID 格式无效。` });
-        return;
-      }
-      const cwd = body.cwd?.trim();
-      if (!cwd) {
-        res.status(400).json({ error: "无法确定工作目录 (cwd)，无法恢复。" });
-        return;
-      }
-      const snapshot = structured.createSession({
-        cwd,
-        mode: parseExecutionMode(body.mode, defaultMode),
-        provider: spec.provider,
-        runner: spec.runner,
-        worktreeEnabled: body.worktreeEnabled === true,
-        claudeSessionId: sessionId,
-        workspaceId: resolveWorkspaceIdForNewSession(storage, cwd),
-        ...parseSessionCreationOrigin(body),
-      });
-      onSessionCreated?.(cwd);
-      res.status(201).json({ resumedClaudeSessionId: sessionId, ...sessionResponseDTO(snapshot) });
-    } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, `无法按 ${spec.label} 会话 ID 恢复会话。`) });
-    }
-  };
-
-  app.post("/api/grok-sessions/:sessionId/resume", (req, res) => {
-    resumeNamedStructuredSession(req, res, {
-      provider: "grok",
-      runner: "grok-cli-headless",
-      label: "Grok",
-    });
-  });
-
-  app.post("/api/pi-sessions/:sessionId/resume", (req, res) => {
-    resumeNamedStructuredSession(req, res, {
-      provider: "pi",
-      runner: "pi-cli-json",
-      label: "Pi",
-    });
+  registerStructuredResumeRoutes(app, {
+    processes,
+    structured,
+    storage,
+    defaultMode,
+    onSessionCreated,
+    toDetailDTO: sessionResponseDTO,
   });
 
   app.post("/api/sessions/:id/resize", (req, res) => {
@@ -1528,7 +1376,7 @@ export function registerSessionRoutes(
       const snapshot = processes.resize(req.params.id, body.cols ?? 0, body.rows ?? 0);
       res.json(sessionResponseDTO(snapshot));
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "无法调整终端大小。") });
+      sendRouteError(res, error, "无法调整终端大小。");
     }
   });
 
@@ -1545,7 +1393,7 @@ export function registerSessionRoutes(
       }
       res.json(sessionResponseDTO(processes.approvePermission(req.params.id)));
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "无法批准该授权请求。") });
+      sendRouteError(res, error, "无法批准该授权请求。");
     }
   });
 
@@ -1562,7 +1410,7 @@ export function registerSessionRoutes(
       }
       res.json(sessionResponseDTO(processes.denyPermission(req.params.id)));
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "无法拒绝该授权请求。") });
+      sendRouteError(res, error, "无法拒绝该授权请求。");
     }
   });
 
@@ -1579,7 +1427,7 @@ export function registerSessionRoutes(
       }
       res.json(sessionResponseDTO(processes.toggleAutoApprove(req.params.id)));
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "无法切换自动批准状态。") });
+      sendRouteError(res, error, "无法切换自动批准状态。");
     }
   });
 
@@ -1598,7 +1446,7 @@ export function registerSessionRoutes(
       }
       res.json(sessionResponseDTO(processes.resolveEscalation(req.params.id, requestId, resolution)));
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "无法处理该授权请求。") });
+      sendRouteError(res, error, "无法处理该授权请求。");
     }
   });
 
@@ -1610,7 +1458,7 @@ export function registerSessionRoutes(
       }
       res.json(sessionResponseDTO(processes.stop(req.params.id)));
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "无法停止会话。") });
+      sendRouteError(res, error, "无法停止会话。");
     }
   });
 
@@ -1619,7 +1467,7 @@ export function registerSessionRoutes(
       sessions.deleteWithProviderHistory(req.params.id);
       res.json({ ok: true });
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "无法删除会话。") });
+      sendRouteError(res, error, "无法删除会话。");
     }
   });
 }
@@ -1730,7 +1578,7 @@ export function registerClaudeHistoryRoutes(
       removeFromHiddenClaudeSessionIds(storage, toDelete.map((session) => session.claudeSessionId));
       res.json({ ok: true, deleted });
     } catch (error) {
-      res.status(500).json({ error: getErrorMessage(error, "无法删除该目录下的历史会话。") });
+      sendRouteError(res, error, "无法删除该目录下的历史会话。", 500);
     }
   });
 

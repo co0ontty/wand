@@ -25,6 +25,15 @@ cli.ts → server.ts（组合根）
 
 PTY 与 structured 共享 `SessionSnapshot`、DTO、存储、事件，不共享执行状态机。
 
+组合根拆成了四块，`server.ts` 现在只负责装配顺序与生命周期：
+
+| 模块 | 职责 |
+| --- | --- |
+| `server.ts` | Express/WS 装配、鉴权 scope 挂载、后台任务、关停 |
+| `server-app-connect.ts` | 公开 origin 推导、App 连接码/token、结构化聊天人设 |
+| `server-vault-routes.ts` | `/api/browser-extension/*` |
+| `server-request.ts` | 路由共享的请求解析与 `sendRouteError` |
+
 排查会话先调用 `SessionRegistry.ownerOf(id)`：`structured` → `pty` → `storage`。不要仅按 URL、provider 或界面外观推断执行路径。
 
 ## 2. CLI、启动与关停
@@ -90,7 +99,9 @@ appToken 由 appSecret 与密码派生；改密码撤销 cookie 并断开已认�
 
 ## 5. HTTP 契约与会话 DTO
 
-主要入口：`server-session-routes.ts`、`session-transport.ts`。
+主要入口：`server-session-routes.ts`、`server-resume-routes.ts`、`session-transport.ts`。
+
+按 provider 原生 ID 恢复 structured 会话的 5 个端点集中在 `server-resume-routes.ts`，差异只有 provider/runner 与「服务端能否反查历史」两项；codex/opencode/qoder 可从扫描到的历史补齐 `cwd`，grok/pi 必须由客户端显式给出。
 
 | 操作 | 路径 / 结果 |
 | --- | --- |

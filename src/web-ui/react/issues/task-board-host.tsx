@@ -13,15 +13,16 @@ import {
   collectIssueLabels,
   createDefaultIssueAgent,
   DEFAULT_ISSUE_BOARD_DISPLAY,
-  dropIndexFromPoint,
   EMPTY_ISSUE_FILTERS,
   filterIssues,
   groupIssuesByStatus,
   ISSUE_AGENT_EFFORTS,
   ISSUE_AGENT_PROVIDERS,
+  ISSUE_ARCHIVE_COLUMN,
   ISSUE_BOARD_VIEWS,
   ISSUE_COLUMNS,
   ISSUE_PRIORITIES,
+  issueArchiveFolderOpen,
   isDispatchableIssueAgent,
   issueAgentModelOptions,
   issueAgentProviderLabel,
@@ -33,7 +34,6 @@ import {
   issueWorkspaceSelectValue,
   normalizeIssueModelCatalog,
   readIssueBoardDisplay,
-  reorderIssues,
   resolveIssueAgent,
   sortIssues,
   withIssueAgentProvider,
@@ -49,6 +49,7 @@ import { taskBoardRepository, type IssueWorkspace, type WandTaskListed } from ".
 import {
   TaskBoardAgentChips,
   TaskBoardAgentSessionList,
+  TaskBoardArchiveFolder,
   TaskBoardCompleteButton,
   TaskBoardContextMenu,
   TaskBoardConversationButton,
@@ -153,6 +154,7 @@ export function TaskBoardHost({
     todo: false,
     doing: false,
     done: false,
+    archived: true,
   });
   const [draggedId, setDraggedId] = React.useState("");
   const [dropStatus, setDropStatus] = React.useState<WandTaskStatus | "">("");
@@ -319,18 +321,13 @@ export function TaskBoardHost({
     });
   }, [reload, rememberAgent, runFor]);
 
-  const dropTask = React.useCallback(async (status: WandTaskStatus, taskId: string, beforeIndex: number) => {
-    const patches = reorderIssues(tasks, taskId, status, beforeIndex);
-    if (patches.length === 0) return;
-    setTasks((current) => current.map((task) => {
-      const patch = patches.find((entry) => entry.id === task.id);
-      return patch ? { ...task, status: patch.status, sortOrder: patch.sortOrder } : task;
-    }));
+  // 列内顺序固定按创建时间（sortIssues），拖拽只用来换列：同列放下不改任何东西。
+  const dropTask = React.useCallback(async (status: WandTaskStatus, taskId: string) => {
+    const moving = tasks.find((task) => task.id === taskId);
+    if (!moving || moving.status === status) return;
+    setTasks((current) => current.map((task) => (task.id === taskId ? { ...task, status } : task)));
     await runFor(taskId, async () => {
-      await Promise.all(patches.map((patch) => taskBoardRepository.update(patch.id, {
-        status: patch.status,
-        sortOrder: patch.sortOrder,
-      })));
+      await taskBoardRepository.update(taskId, { status });
       await reload();
     });
   }, [reload, runFor, tasks]);
@@ -338,6 +335,7 @@ export function TaskBoardHost({
   const selected = tasks.find((task) => task.id === selectedId) ?? null;
   const visible = sortIssues(filterIssues(tasks, query, filterWorkspaceId, filters));
   const grouped = groupIssuesByStatus(visible);
+  const archiveOpen = issueArchiveFolderOpen(collapsedList.archived, query, filters);
   const workspaceOptions = issueWorkspaceOptions(workspaces);
   const projectName = filterWorkspaceId
     ? workspaces.find((workspace) => workspace.id === filterWorkspaceId)?.name ?? "项目"
@@ -491,11 +489,9 @@ export function TaskBoardHost({
       onDrop={(event) => {
         event.preventDefault();
         const id = event.dataTransfer.getData(TASK_MIME) || event.dataTransfer.getData("text/plain");
-        const list = event.currentTarget.querySelector<HTMLElement>(".task-board-column-list");
-        const index = list ? dropIndexFromPoint(list, event.clientY, id) : items.length;
         setDropStatus("");
         setDraggedId("");
-        if (id) void dropTask(status, id, index);
+        if (id) void dropTask(status, id);
       }}
     >
       <header className="task-board-column-head">
@@ -522,8 +518,17 @@ export function TaskBoardHost({
               <WandSkeleton className="task-board-skeleton"/>
             </>
           : null}
-        {!loading && items.length === 0 && <p className="task-board-column-empty">{column.empty}</p>}
+        {!loading && items.length === 0 && !(status === "done" && grouped.archived.length > 0) && <p className="task-board-column-empty">{column.empty}</p>}
         {items.map(renderCard)}
+        {status === "done" ? <TaskBoardArchiveFolder
+          count={grouped.archived.length}
+          open={archiveOpen}
+          onToggle={() => setCollapsedList((current) => ({ ...current, archived: !current.archived }))}
+        >
+          <div className="task-board-archive-cards">
+            {grouped.archived.map(renderCard)}
+          </div>
+        </TaskBoardArchiveFolder> : null}
       </div>
     </section>;
   };
@@ -678,7 +683,9 @@ export function TaskBoardHost({
     /> : view === "list" ? <TaskBoardListView
       grouped={grouped}
       collapsed={collapsedList}
+      archiveOpen={archiveOpen}
       onToggle={(status) => setCollapsedList((current) => ({ ...current, [status]: !current[status] }))}
+      onToggleArchive={() => setCollapsedList((current) => ({ ...current, archived: !current.archived }))}
       onOpen={setSelectedId}
       onOpenSession={onOpenSession}
     /> : view === "gantt" ? <TaskBoardGantt
@@ -1044,7 +1051,7 @@ function IssueDetail({
           <IssueField label="状态">
             <WandSelect
               value={task.status}
-              options={ISSUE_COLUMNS.map((column) => ({ value: column.status, label: column.label }))}
+              options={[...ISSUE_COLUMNS, ISSUE_ARCHIVE_COLUMN].map((column) => ({ value: column.status, label: column.label }))}
               ariaLabel="任务状态"
               className="task-board-native-select"
               disabled={busy}
