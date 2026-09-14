@@ -157,6 +157,8 @@ export class Missions {
     }
 
     const createdAt = nowIso();
+    const milestoneId = input.milestoneId?.trim() || null;
+    if (milestoneId && !this.storage.getWandMilestone(milestoneId)) throw new Error("未找到该里程碑。");
     const mission: Mission = {
       id: randomUUID(),
       title: input.title?.trim().slice(0, 120) || firstPromptLine(prompt),
@@ -164,6 +166,7 @@ export class Missions {
       cwd,
       status: "dispatching",
       taskId: input.taskId?.trim() || null,
+      milestoneId,
       worktree: {
         baseRef: input.baseRef?.trim() || undefined,
         sharedDirectories: normalizeStringList(input.sharedDirectories, "sharedDirectories"),

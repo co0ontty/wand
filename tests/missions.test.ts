@@ -39,7 +39,7 @@ test("mission persistence keeps attempts and review lifecycle together", (t) => 
   const storage = new WandStorage(path.join(root, "wand.db"));
   const mission: Mission = {
     id: "mission-1", title: "Parallel fix", prompt: "Fix it", cwd: root,
-    status: "running", taskId: null, worktree: { baseRef: "main", sharedDirectories: ["shared-cache"], copyPaths: [] },
+    status: "running", taskId: null, milestoneId: null, worktree: { baseRef: "main", sharedDirectories: ["shared-cache"], copyPaths: [] },
     createdAt: "2026-08-05T00:00:00.000Z", updatedAt: "2026-08-05T00:00:01.000Z",
   };
   const attempt: MissionAttempt = {
@@ -191,4 +191,14 @@ test("missions linked to a task bind dispatched sessions to it", (t) => {
   missions.create({ prompt: "并行修二", cwd: root, providers: ["codex"] });
   assert.equal(created[1].worktreeEnabled, true);
   assert.ok(!("workspaceTaskId" in created[1]));
+
+  // 里程碑：与看板共用列表，非法 id 直接拒绝。
+  const milestone = storage.createWandMilestone({ name: "v5.0" });
+  const withMilestone = missions.create({ prompt: "并行修三", cwd: root, providers: ["codex"], milestoneId: milestone.id });
+  assert.equal(withMilestone.milestoneId, milestone.id);
+  assert.equal(storage.getMission(withMilestone.id)?.milestoneId, milestone.id);
+  assert.throws(
+    () => missions.create({ prompt: "并行修四", cwd: root, providers: ["codex"], milestoneId: "missing" }),
+    /未找到该里程碑/,
+  );
 });

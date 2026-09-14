@@ -33,6 +33,7 @@ export type WandIconName =
   | "logout"
   | "markdown"
   | "merge"
+  | "milestone"
   | "more"
   | "parallel"
   | "pdf"
@@ -144,6 +145,8 @@ export function WandIcon({
       return <svg {...common}><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 15V9l3 4 3-4v6"/></svg>;
     case "merge":
       return <svg {...common}><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7M8.5 18H15.5M8.5 6c6 0 7.5 5 7.5 9.5"/></svg>;
+    case "milestone":
+      return <svg {...common}><path d="M5 21V4"/><path d="M5 5h11l-1.6 3.5L16 12H5z"/></svg>;
     case "more":
       return <svg {...common}><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>;
     case "parallel":

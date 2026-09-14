@@ -33,6 +33,8 @@ export interface MissionDetails {
   prompt: string;
   cwd: string;
   status: "dispatching" | "running" | "needs_input" | "completed" | "failed" | "archived";
+  /** 归属里程碑（与看板共用同一份全局列表）。 */
+  milestoneId?: string | null;
   worktree: { baseRef?: string; sharedDirectories?: string[]; copyPaths?: string[] };
   createdAt: string;
   updatedAt: string;
@@ -56,6 +58,8 @@ export interface CreateMissionRequest {
   providers: MissionProvider[];
   /** 关联到当前任务（workspace task）：派发的会话绑定该任务。 */
   taskId?: string;
+  /** 里程碑 id；null / 缺省表示不归入里程碑。 */
+  milestoneId?: string | null;
   baseRef?: string;
   sharedDirectories?: string[];
   copyPaths?: string[];

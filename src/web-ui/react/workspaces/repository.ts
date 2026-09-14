@@ -179,6 +179,15 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
     ));
   }
 
+  async renameDirectory(cwd: string, name: string | null): Promise<void> {
+    await readJson(await this.fetchImpl("/api/session-directories/name", {
+      method: "PUT",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: cwd, name }),
+    }));
+  }
+
   async saveLayout(id: string, layout: LayoutNode | null): Promise<LayoutNode | null> {
     const body = await readJson<{ layout: LayoutNode | null }>(await this.fetchImpl(`/api/workspaces/${encodeURIComponent(id)}/layout`, {
       method: "PUT",

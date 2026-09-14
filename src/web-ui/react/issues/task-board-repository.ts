@@ -23,9 +23,11 @@ const json = (body: unknown, method = "POST"): RequestInit => ({
 let agentDefaultsWrite = Promise.resolve();
 
 
-/** GET /api/wand-tasks 返回的任务：附带头部所需的工作空间与已绑定会话。 */
+/** GET /api/wand-tasks 返回的任务：附带头部所需的工作空间、里程碑与已绑定会话。 */
 export interface WandTaskListed extends WandTaskDetail {
   workspace: { id: string; name: string; cwd: string } | null;
+  /** 服务端已解出的里程碑（含名称），卡片可以直接显示。 */
+  milestone: { id: string; name: string } | null;
   sessions: IssueSessionSummary[];
 }
 
@@ -72,6 +74,8 @@ export const taskBoardRepository = {
     priority: WandTaskPriority;
     labels: string[];
     dueDate?: string | null;
+    /** 里程碑 id；null / 省略表示不归入里程碑。 */
+    milestoneId?: string | null;
     agent?: WandTaskAgent | null;
   }): Promise<WandTaskListed> {
     return request("/api/wand-tasks", json(input));
@@ -82,7 +86,7 @@ export const taskBoardRepository = {
   },
   update(
     id: string,
-    patch: Partial<Pick<WandTask, "title" | "titleSource" | "description" | "status" | "priority" | "labels" | "dueDate" | "workspaceId" | "sortOrder" | "agent">>,
+    patch: Partial<Pick<WandTask, "title" | "titleSource" | "description" | "status" | "priority" | "labels" | "dueDate" | "milestoneId" | "workspaceId" | "sortOrder" | "agent">>,
   ): Promise<WandTaskListed> {
     return request(`/api/wand-tasks/${encodeURIComponent(id)}`, json(patch, "PATCH"));
   },

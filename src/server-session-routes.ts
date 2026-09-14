@@ -41,6 +41,7 @@ import {
 } from "./session-directory-tree.js";
 import {
   projectCwdForSession,
+  renameWorkspaceDirectory,
   resolveWorkspaceIdForNewSession,
 } from "./workspace-binding.js";
 
@@ -613,6 +614,8 @@ export function registerSessionRoutes(
         return;
       }
       storage.setSessionDirectoryName(directoryPath, customName || null);
+      // 同一步把项目名改成同一个名字，避免「工作区」改名后只有会话目录视图生效。
+      renameWorkspaceDirectory(storage, directoryPath, customName);
       res.json({ ok: true, path: directoryPath, name: customName || null });
     } catch (error) {
       sendRouteError(res, error, "无法保存工作区名称。", 500);

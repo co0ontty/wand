@@ -15834,6 +15834,18 @@
       padding: 2px 4px 2px 2px;
     }
 
+    /* 重命名中：用输入行替换目录行，避免两行同名互相干扰。 */
+    .workspace-row.is-renaming {
+      display: none;
+    }
+
+    .workspace-row-rename {
+      display: flex;
+      align-items: flex-start;
+      gap: 7px;
+      padding: 3px 4px 3px 2px;
+    }
+
     .workspace-row-main {
       display: flex;
       flex: 1;
@@ -19913,11 +19925,40 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav > .
 }
 
 .task-board-chip.is-muted { color: var(--text-muted); }
+/* 里程碑胶囊：卡片/列表行上显示任务归属的里程碑。 */
+.task-board-chip.is-milestone { max-width: 156px; color: var(--text-primary); }
 .task-board-chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .task-board-priority.is-urgent,
 .task-board-priority.is-high { color: #ff7236; }
 .task-board-priority.is-medium { color: var(--warning); }
 .task-board-agent-logo { width: 12px; height: 12px; flex: 0 0 auto; }
+
+/* 任务卡片 Agent 胶囊：该 Agent 有会话在跑时，末尾跟一组跳动圆点。 */
+.task-board-chip.is-agent.is-running { max-width: 156px; color: var(--text-primary); }
+.task-board-agent-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  margin-left: 2px;
+  height: 8px;
+}
+/* 覆盖 `.task-board-chip > span` 的裁剪，否则跳出高度的圆点会被切掉。 */
+.task-board-chip.is-agent > .task-board-agent-dots { min-width: 0; overflow: visible; }
+.task-board-agent-dots > span {
+  display: inline-block;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: taskBoardAgentDotBounce 1.2s ease-in-out infinite;
+}
+.task-board-agent-dots > span:nth-child(2) { animation-delay: 0.15s; }
+.task-board-agent-dots > span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes taskBoardAgentDotBounce {
+  0%, 60%, 100% { opacity: 0.35; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-3px); }
+}
 
 .task-board-card-sessions {
   display: flex;
@@ -20542,6 +20583,138 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav > .
 }
 
 .task-board-conversation:hover { border-color: var(--border-strong); color: var(--text-primary); }
+
+/* ── 里程碑选择器（任务看板与「新建任务」对话框共用）── */
+.milestone-picker-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  height: 32px;
+  padding: 0 10px;
+  border: var(--tb-hairline) solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.milestone-picker-trigger:hover:not(:disabled) { border-color: var(--border-strong); color: var(--text-primary); }
+.milestone-picker-trigger:disabled { opacity: 0.55; cursor: default; }
+.milestone-picker-trigger.is-set { color: var(--text-primary); }
+.milestone-picker-trigger-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.milestone-picker-trigger-caret { flex: 0 0 auto; color: var(--text-tertiary); }
+
+.wand-ui-popover-content.milestone-picker-menu {
+  position: relative;
+  top: auto;
+  right: auto;
+  z-index: 80;
+  width: min(264px, calc(100vw - 16px));
+  padding: 8px;
+  border: var(--tb-hairline) solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-lg);
+}
+
+.milestone-picker { display: grid; gap: 6px; }
+.milestone-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px 2px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.milestone-picker-clear,
+.milestone-picker-create-cancel {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--text-tertiary);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.milestone-picker-clear:hover,
+.milestone-picker-create-cancel:hover { color: var(--text-primary); }
+
+.milestone-picker-list {
+  display: grid;
+  gap: 2px;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.milestone-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.milestone-picker-item:hover { background: color-mix(in srgb, var(--text-primary) 6%, transparent); color: var(--text-primary); }
+.milestone-picker-item.is-selected { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--text-primary); }
+.milestone-picker-item-icon { flex: 0 0 auto; }
+.milestone-picker-item-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.milestone-picker-item-count {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  color: var(--text-tertiary);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.milestone-picker-empty { margin: 0; padding: 6px; color: var(--text-tertiary); font-size: 12px; }
+.milestone-picker-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 32px;
+  padding: 4px 6px;
+  border: var(--tb-hairline) dashed var(--border-default);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.milestone-picker-add:hover { border-color: var(--border-strong); color: var(--text-primary); }
+.milestone-picker-create { display: grid; gap: 6px; padding: 2px; }
+.milestone-picker-input {
+  height: 32px;
+  padding: 0 8px;
+  border: var(--tb-hairline) solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+}
+
+.milestone-picker-create-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.milestone-picker-error { margin: 0; color: var(--danger); font-size: 11px; }
 
 .wand-ui-popover-content.task-board-conversation-menu,
 .wand-ui-popover-content.task-board-filter-menu,

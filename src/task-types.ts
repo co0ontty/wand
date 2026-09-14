@@ -22,6 +22,22 @@ export interface WandTaskAgent {
 /** 任务标题来源；标题是可选字段，留空时由服务端按描述自动生成。 */
 export type WandTaskTitleSource = "user" | "auto";
 
+/** 里程碑名上限；所有任务面板的新增入口共用同一约束。 */
+export const WAND_MILESTONE_NAME_MAX_LENGTH = 60;
+
+/**
+ * 里程碑：跨项目的全局列表（不是每个目录一份），创建任务时从中选择或新增。
+ * 任务只保存 milestoneId，删除里程碑时只解绑任务、不删除任务。
+ */
+export interface WandTaskMilestone {
+  id: string;
+  name: string;
+  /** YYYY-MM-DD，可为空。 */
+  dueDate: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface WandTask {
   id: string;
   workspaceId: string | null;
@@ -36,6 +52,8 @@ export interface WandTask {
   priority: WandTaskPriority;
   labels: string[];
   dueDate: string | null;
+  /** 所属里程碑；null 表示未归入任何里程碑。 */
+  milestoneId: string | null;
   sortOrder: number;
   /** 该任务绑定的执行 Agent；null 表示还没指定。 */
   agent: WandTaskAgent | null;

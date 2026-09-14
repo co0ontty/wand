@@ -102,6 +102,28 @@ test("task board creates, moves, binds, and deletes tasks", async () => {
   });
 });
 
+test("GET /api/wand-tasks returns newest created tasks first", async () => {
+  await withHarness(async ({ url }) => {
+    const older = await fetch(`${url}/api/wand-tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "先创建" }),
+    }).then(jsonOf<{ id: string }>);
+    const newer = await fetch(`${url}/api/wand-tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "后创建" }),
+    }).then(jsonOf<{ id: string }>);
+    await fetch(`${url}/api/wand-tasks/${older.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status: "doing" }),
+    });
+    const listed = await fetch(`${url}/api/wand-tasks`).then(jsonOf<Array<{ id: string }>>);
+    assert.deepEqual(listed.map((task) => task.id), [newer.id, older.id]);
+  });
+});
+
 test("tasks can be pointed at a workspace and expose its directory", async () => {
   await withHarness(async ({ url, storage }) => {
     const workspace = storage.createWorkspace({

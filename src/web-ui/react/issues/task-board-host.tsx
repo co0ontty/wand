@@ -9,6 +9,7 @@ import {
   WandSwitch,
 } from "../ui";
 import { classNames } from "../ui/class-names";
+import { MilestonePicker } from "../milestones/picker";
 import {
   collectIssueLabels,
   createDefaultIssueAgent,
@@ -35,7 +36,6 @@ import {
   normalizeIssueModelCatalog,
   readIssueBoardDisplay,
   resolveIssueAgent,
-  sortIssues,
   withIssueAgentProvider,
   writeIssueBoardDisplay,
   type IssueBoardDisplay,
@@ -58,6 +58,7 @@ import {
   TaskBoardFilterMenu,
   TaskBoardGantt,
   TaskBoardLabelChip,
+  TaskBoardMilestoneChip,
   TaskBoardListView,
   TaskBoardPriorityChip,
   TaskBoardProcessingRow,
@@ -77,11 +78,13 @@ interface DraftState {
   priority: WandTaskPriority;
   dueDate: string;
   labels: string;
+  /** 里程碑 id；空串表示不选。 */
+  milestoneId: string;
   agent: WandTaskAgent;
 }
 
 function emptyDraft(workspaceId: string, status: WandTaskStatus = "todo", agent: WandTaskAgent = createDefaultIssueAgent()): DraftState {
-  return { workspaceId, title: "", description: "", status, priority: "none", dueDate: "", labels: "", agent };
+  return { workspaceId, title: "", description: "", status, priority: "none", dueDate: "", labels: "", milestoneId: "", agent };
 }
 
 // 自动生成标题是后台完成的，创建响应里只有描述首行占位；这里短轮询几次，拿到模型标题就刷新。
@@ -261,6 +264,7 @@ export function TaskBoardHost({
         priority: draft.priority,
         labels: draft.labels.split(/[,，]/).map((label) => label.trim()).filter(Boolean),
         dueDate: draft.dueDate || null,
+        milestoneId: draft.milestoneId || null,
         agent: draft.agent,
       });
       rememberAgent(draft.agent);
@@ -321,7 +325,7 @@ export function TaskBoardHost({
     });
   }, [reload, rememberAgent, runFor]);
 
-  // 列内顺序固定按创建时间（sortIssues），拖拽只用来换列：同列放下不改任何东西。
+  // 列内顺序跟 GET /api/wand-tasks 返回顺序走；拖拽只用来换列。
   const dropTask = React.useCallback(async (status: WandTaskStatus, taskId: string) => {
     const moving = tasks.find((task) => task.id === taskId);
     if (!moving || moving.status === status) return;
@@ -333,7 +337,7 @@ export function TaskBoardHost({
   }, [reload, runFor, tasks]);
 
   const selected = tasks.find((task) => task.id === selectedId) ?? null;
-  const visible = sortIssues(filterIssues(tasks, query, filterWorkspaceId, filters));
+  const visible = filterIssues(tasks, query, filterWorkspaceId, filters);
   const grouped = groupIssuesByStatus(visible);
   const archiveOpen = issueArchiveFolderOpen(collapsedList.archived, query, filters);
   const workspaceOptions = issueWorkspaceOptions(workspaces);
@@ -452,6 +456,7 @@ export function TaskBoardHost({
       <TaskBoardProgressRow task={task}/>
       <div className="task-board-card-meta" aria-label="任务属性">
         <TaskBoardProjectChip name={task.workspace ? task.workspace.name : "未指定项目"}/>
+        {task.milestone ? <TaskBoardMilestoneChip name={task.milestone.name}/> : null}
         <TaskBoardPriorityChip priority={task.priority}/>
         {task.labels.slice(0, 2).map((label) => <TaskBoardLabelChip key={label} label={label}/>)}
         {task.labels.length > 2 ? <span className="task-board-label-more">+{task.labels.length - 2}</span> : null}
@@ -816,6 +821,10 @@ export function TaskBoardHost({
               }}
             />
           </label>
+          <MilestonePicker
+            value={draft.milestoneId || null}
+            onChange={(milestoneId) => setDraft((current) => ({ ...current, milestoneId: milestoneId ?? "" }))}
+          />
           <WandSelect
             value={draft.agent.provider}
             options={ISSUE_AGENT_PROVIDERS.map((entry) => ({ value: entry.value, label: entry.label }))}
@@ -1079,6 +1088,13 @@ function IssueDetail({
               className="task-board-native-select"
               disabled={busy}
               onValueChange={(value) => onPatch({ workspaceId: issueWorkspaceIdFromSelect(value) })}
+            />
+          </IssueField>
+          <IssueField label="里程碑">
+            <MilestonePicker
+              value={task.milestoneId}
+              disabled={busy}
+              onChange={(milestoneId) => onPatch({ milestoneId })}
             />
           </IssueField>
           <IssueField label="截止日期">

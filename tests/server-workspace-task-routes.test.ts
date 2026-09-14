@@ -231,8 +231,9 @@ test("task creation can skip worktree isolation and /api/tasks aggregates across
     assert.equal(group.workspaceName, "Wand");
     assert.equal(realpathSync(group.workspaceCwd), realpathSync(root));
     assert.equal(group.synthetic, undefined);
-    // 目录组带回全部任务（隔离 + 共享）。
+    // 目录组带回全部任务（隔离 + 共享），新创建的在前。
     assert.equal(group.tasks.length, 2);
+    assert.deepEqual(group.tasks.map((task) => task.id), [isolated.id, shared.id]);
     const sharedRow = group.tasks.find((task) => task.id === shared.id);
     assert.ok(sharedRow);
     assert.equal(sharedRow.isolated, false);

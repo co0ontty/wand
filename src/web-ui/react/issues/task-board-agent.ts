@@ -308,20 +308,6 @@ export function normalizeIssueAgentDefaults(payload: unknown): WandTaskAgent {
   return resolveIssueAgent(null, payload as WandTaskAgent);
 }
 
-/**
- * 任务卡片的固定排序：按创建时间倒序，新建在上、旧任务在后。
- * 刻意不使用 updatedAt / sortOrder：编辑、派遣、自动改标题都会刷新 updatedAt，
- * 用它会让人物卡在列里来回跳。
- */
-export function sortIssues<T extends { createdAt: string; id: string }>(
-  tasks: readonly T[],
-): T[] {
-  return [...tasks].sort((left, right) => {
-    if (left.createdAt !== right.createdAt) return right.createdAt.localeCompare(left.createdAt);
-    return left.id.localeCompare(right.id);
-  });
-}
-
 export function emptyIssueGroups<T>(): Record<WandTaskStatus, T[]> {
   return { todo: [], doing: [], done: [], archived: [] };
 }

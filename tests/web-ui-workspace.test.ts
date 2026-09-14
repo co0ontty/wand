@@ -369,7 +369,8 @@ test("task session lists default to collapsed and retain explicit disclosure pre
   assert.match(panel, /useSidebarCollapsed\(`task\.\$\{task.id\}`, true\)/);
   assert.match(panel, /useSidebarCollapsed\(`project\.\$\{group.workspaceId\}`\)/);
   assert.match(panel, /useSidebarCollapsed\(`loose\.\$\{group.workspaceId\}`\)/);
-  assert.match(panel, /orderSidebarTasks\(group.tasks\)/);
+  assert.doesNotMatch(panel, /orderSidebarTasks\(group.tasks\)/);
+  assert.match(panel, /group\.tasks\.map\(\(task\)/);
   assert.doesNotMatch(panel, /taskRecency\(right\)\.localeCompare\(taskRecency\(left\)\)/);
   assert.doesNotMatch(panel, /if \(isActive\) setCollapsed|setCollapsed\(false\); onOpen/);
   assert.match(panel, /canCollapseSessions \? \(/);
@@ -490,6 +491,26 @@ test("workspace repository closes terminal sessions with the batch endpoint", as
   assert.equal(requests[0].input, "/api/sessions/batch-delete");
   assert.equal(requests[0].init?.method, "POST");
   assert.deepEqual(JSON.parse(String(requests[0].init?.body)), { sessionIds: ["a", "b"] });
+});
+
+test("workspace repository renames a directory through the session-directory endpoint", async () => {
+  const requests: Array<{ input: string; init?: RequestInit }> = [];
+  const repository = new HttpWorkspacesRepository(async (input, init) => {
+    requests.push({ input: String(input), init });
+    return new Response(JSON.stringify({ ok: true, path: "/repo", name: "核心工作区" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+  await repository.renameDirectory("/repo", "核心工作区");
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].input, "/api/session-directories/name");
+  assert.equal(requests[0].init?.method, "PUT");
+  assert.deepEqual(JSON.parse(String(requests[0].init?.body)), { path: "/repo", name: "核心工作区" });
+
+  // 空名 = 恢复目录名，仍要发出去（服务端会清掉自定义名并回退项目名）。
+  await repository.renameDirectory("/repo", null);
+  assert.deepEqual(JSON.parse(String(requests[1].init?.body)), { path: "/repo", name: null });
 });
 
 test("workspace worktree review normalizes cards and builds one bounded merge Agent mission", async () => {
@@ -815,4 +836,7 @@ test("workspaces panel exposes multi-select and a compact task rail", () => {
   assert.match(panel, /sidebar-collapsed-rail/);
   assert.doesNotMatch(panel, /CompactWorkspaceTree/);
   assert.doesNotMatch(panel, /sidebar-collapsed-task-branch/);
+  // 目录行提供重命名入口，且走统一的目录改名接口（服务端会同步项目名）。
+  assert.match(panel, /重命名目录/);
+  assert.match(panel, /renameDirectory\(group\.workspaceCwd/);
 });

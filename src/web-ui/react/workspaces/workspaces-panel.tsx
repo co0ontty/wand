@@ -21,8 +21,6 @@ import { listSessionLabel, withLiveSessionTitle } from "./session-order";
 import { SidebarDisclosure, useSidebarCollapsed } from "./sidebar-disclosure";
 import {
   formatTaskRecency,
-  orderSidebarGroups,
-  orderSidebarTasks,
   sidebarSelection,
   taskActivity,
   taskRecency,
@@ -668,10 +666,50 @@ function TaskGroupSection({
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
   const [menuOpen, setMenuOpen] = React.useState(false);
+  const [renamingDirectory, setRenamingDirectory] = React.useState(false);
+  const [directoryNameValue, setDirectoryNameValue] = React.useState(group.workspaceName);
+  const [directoryNameError, setDirectoryNameError] = React.useState("");
+  const [directoryRenameBusy, setDirectoryRenameBusy] = React.useState(false);
   const tasksId = React.useId();
   const open = isDirectoryExpanded(collapsed, directoryCount);
   const looseOpen = !looseCollapsed;
   const canDelete = !group.synthetic && !group.global;
+  // 全局（不挂目录）不参与重命名；合成目录用目录接口改名。
+  const canRenameDirectory = !group.global;
+
+  const submitDirectoryRename = async () => {
+    if (directoryRenameBusy) return;
+    const trimmed = directoryNameValue.trim();
+    if (!trimmed) {
+      setDirectoryNameError("请输入工作区名称。");
+      return;
+    }
+    if (trimmed.length > NAME_MAX) {
+      setDirectoryNameError(`工作区名称最多 ${NAME_MAX} 个字符。`);
+      return;
+    }
+    if (trimmed === group.workspaceName) {
+      setRenamingDirectory(false);
+      return;
+    }
+    setDirectoryRenameBusy(true);
+    setDirectoryNameError("");
+    try {
+      // 合成目录（无项目实体）只能改目录名；已有项目走项目接口，服务端会同步目录名。
+      if (group.synthetic) {
+        await httpWorkspacesRepository.renameDirectory(group.workspaceCwd, trimmed);
+      } else {
+        await httpWorkspacesRepository.update(group.workspaceId, { name: trimmed });
+      }
+      toast(`已将目录「${group.workspaceName}」重命名为「${trimmed}」`, "success");
+      setRenamingDirectory(false);
+      await onTasksChanged();
+    } catch (cause) {
+      setDirectoryNameError(presentError(cause, "重命名目录失败。"));
+    } finally {
+      setDirectoryRenameBusy(false);
+    }
+  };
 
   const handleDeleteTask = async (task: TaskSummary) => {
     await httpWorkspacesRepository.deleteTask(task.id, true);
@@ -726,7 +764,40 @@ function TaskGroupSection({
         activeWorkspaceId === group.workspaceId && "active-workspace",
       )}
     >
-      <div className="workspace-row">
+      {renamingDirectory ? (
+        <form
+          className="workspace-row-rename"
+          aria-busy={directoryRenameBusy}
+          onSubmit={(event) => { event.preventDefault(); void submitDirectoryRename(); }}
+        >
+          <WandIcon name="folder" size={15} className="workspace-row-folder"/>
+          <span className="workspace-task-rename-field">
+            <input
+              className="workspace-task-rename-input"
+              value={directoryNameValue}
+              disabled={directoryRenameBusy}
+              maxLength={NAME_MAX}
+              autoFocus
+              aria-label={`重命名目录 ${group.workspaceName}`}
+              aria-invalid={Boolean(directoryNameError) || undefined}
+              onChange={(event) => { setDirectoryNameValue(event.currentTarget.value); setDirectoryNameError(""); }}
+              onKeyDown={(event) => {
+                if (event.key !== "Escape") return;
+                event.preventDefault();
+                if (!directoryRenameBusy) setRenamingDirectory(false);
+              }}
+            />
+            {directoryNameError && <span className="workspace-task-rename-error" role="alert">{directoryNameError}</span>}
+          </span>
+          <button type="submit" className="workspace-task-action confirm" disabled={directoryRenameBusy} title="保存工作区名称" aria-label="保存工作区名称">
+            <WandIcon name="check" size={13}/>
+          </button>
+          <button type="button" className="workspace-task-action cancel" disabled={directoryRenameBusy} title="取消重命名" aria-label="取消重命名" onClick={() => setRenamingDirectory(false)}>
+            <WandIcon name="close" size={13}/>
+          </button>
+        </form>
+      ) : null}
+      <div className={classNames("workspace-row", renamingDirectory && "is-renaming")}>
         <button
           type="button"
           className="workspace-row-main"
@@ -780,6 +851,24 @@ function TaskGroupSection({
             )}
           >
           <div className="workspace-menu-context" title={group.workspaceCwd}>{shortenWorkspacePath(group.workspaceCwd)}</div>
+          {canRenameDirectory ? (
+            <button
+              type="button"
+              role="menuitem"
+              className="workspace-task-menu-item"
+              title={`重命名目录 ${group.workspaceName}`}
+              aria-label={`重命名目录 ${group.workspaceName}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                setMenuOpen(false);
+                setDirectoryNameValue(group.workspaceName);
+                setDirectoryNameError("");
+                setRenamingDirectory(true);
+              }}
+            >
+              <WandIcon name="edit" size={13}/><span>重命名目录</span>
+            </button>
+          ) : null}
           <ClearSessionsButton
             menuItem
             count={new Set([...group.tasks.flatMap((task) => task.sessions.map((session) => session.id)),
@@ -867,7 +956,7 @@ function TaskGroupSection({
               <WandIcon name="plus" size={13}/><span>创建第一个任务</span>
             </button>
           )}
-          {orderSidebarTasks(group.tasks).map((task) => (
+          {group.tasks.map((task) => (
             <TaskItem
               key={task.id}
               task={task}
@@ -1071,7 +1160,7 @@ export function WorkspacesPanel({
   }, [controllerSnapshot.open]);
 
   const { groups, loading, error, reload } = useTaskGroups(refreshTick);
-  const visibleGroups = orderSidebarGroups(filterSidebarGroups(groups, searchQuery, sessionTitles ?? {}));
+  const visibleGroups = filterSidebarGroups(groups, searchQuery, sessionTitles ?? {});
 
   // 活动高亮统一读 workspaceContextStore（主区标签栏与这里共用同一来源，
   // 关闭工作区窗口时这里也会同步取消高亮）。

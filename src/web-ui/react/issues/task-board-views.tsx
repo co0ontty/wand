@@ -331,6 +331,7 @@ function TaskBoardListRow({
     </span>
     <span className="task-board-list-meta" onClick={(event) => event.stopPropagation()}>
       <TaskBoardPriorityChip priority={task.priority}/>
+      {task.milestone ? <TaskBoardMilestoneChip name={task.milestone.name}/> : null}
       {task.labels.slice(0, 2).map((label) => <TaskBoardLabelChip key={label} label={label}/>)}
       {task.dueDate ? <span className="task-board-due"><TaskBoardDueIcon size={12}/>{issueDueStamp(task.dueDate)}</span> : null}
       <span>{task.workspace?.name ?? "未指定项目"}</span>
@@ -679,11 +680,20 @@ export function TaskBoardCompleteButton({
   </button>;
 }
 
-export function TaskBoardAgentChip({ agent }: { agent: WandTaskAgent | null }): React.ReactElement | null {
+export function TaskBoardAgentChip({
+  agent,
+  running = false,
+}: {
+  agent: WandTaskAgent | null;
+  running?: boolean;
+}): React.ReactElement | null {
   if (!agent) return null;
-  return <span className="task-board-chip is-agent">
+  return <span className={classNames("task-board-chip is-agent", running && "is-running")}>
     <ProviderLogo provider={agent.provider} className="task-board-agent-logo"/>
     {issueAgentProviderLabel(agent.provider)}
+    {running ? <span className="task-board-agent-dots" aria-hidden="true">
+      <span/><span/><span/>
+    </span> : null}
   </span>;
 }
 
@@ -696,7 +706,11 @@ export function TaskBoardAgentChips({
 }): React.ReactElement | null {
   const agents = listIssueAgents(sessions, assigned);
   if (agents.length === 0) return null;
-  return <>{agents.map((agent) => <TaskBoardAgentChip key={agent.provider} agent={agent}/>)}</>;
+  return <>{agents.map((agent) => <TaskBoardAgentChip
+    key={agent.provider}
+    agent={agent}
+    running={sessions.some((session) => session.provider === agent.provider && issueSessionRunning(session.status))}
+  />)}</>;
 }
 
 function issueSessionStatusLabel(status: string): string {
@@ -753,6 +767,14 @@ export function TaskBoardAgentSessionList({
 export function TaskBoardProjectChip({ name }: { name: string }): React.ReactElement {
   return <span className="task-board-chip" title={name}>
     <TaskBoardFolderIcon size={12}/>
+    <span>{name}</span>
+  </span>;
+}
+
+/** 卡片上的里程碑胶囊；名字由服务端 DTO 直接给出。 */
+export function TaskBoardMilestoneChip({ name }: { name: string }): React.ReactElement {
+  return <span className="task-board-chip is-milestone" title={`里程碑：${name}`}>
+    <WandIcon name="milestone" size={12}/>
     <span>{name}</span>
   </span>;
 }

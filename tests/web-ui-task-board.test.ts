@@ -23,7 +23,6 @@ import {
   issueWorkspaceOptions,
   issueWorkspaceSelectValue,
   normalizeIssueModelCatalog,
-  sortIssues,
   withIssueAgentProvider,
   groupIssueSessionsByAgent,
   listIssueAgents,
@@ -109,13 +108,7 @@ test("issue helpers expose columns, grouping, sorting, and workspace options", (
     { id: "a", status: "todo" as const, createdAt: "2026-01-01T00:00:00.000Z" },
     { id: "c", status: "doing" as const, createdAt: "2026-01-01T00:00:00.000Z" },
   ];
-  // 固定按创建时间倒序：新的在前；同一时间用 id 兜底，与 updatedAt / sortOrder 无关。
-  assert.deepEqual(sortIssues(tasks).map((task) => task.id), ["b", "a", "c"]);
-  assert.deepEqual(
-    sortIssues(tasks.map((task) => ({ ...task, updatedAt: "2099-01-01T00:00:00.000Z", sortOrder: 9 })))
-      .map((task) => task.id),
-    ["b", "a", "c"],
-  );
+  // 分组保持输入顺序（即服务端 GET /api/wand-tasks 的顺序），客户端不再二次排序。
   const grouped = groupIssuesByStatus(tasks);
   assert.deepEqual(grouped.todo.map((task) => task.id), ["a"]);
   assert.deepEqual(grouped.doing.map((task) => task.id), ["b", "c"]);

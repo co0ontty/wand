@@ -90,6 +90,8 @@ export interface WorkspaceTask {
   name: string;
   worktree: WorkspaceTaskWorktree | null;
   cwd?: string;
+  /** 归属里程碑（全局列表）；null = 未归入。建任务时同步到看板卡片。 */
+  milestoneId?: string | null;
   layout: TaskWindowLayout | null;
   status: WorkspaceTaskStatus;
   createdAt: string;
@@ -171,17 +173,22 @@ export interface CreateWorkspaceTaskRequest {
   cwd?: string;
   /** 显式 false 时跳过独立 worktree，会话直接跑在项目目录；缺省为 true。 */
   worktree?: boolean;
+  /** 里程碑 id；null / 缺省表示不归入里程碑。 */
+  milestoneId?: string | null;
 }
 
 export interface CreateStandaloneTaskRequest {
   name?: string;
   cwd?: string;
   worktree?: boolean;
+  /** 里程碑 id；null / 缺省表示不归入里程碑。 */
+  milestoneId?: string | null;
 }
 
 export interface UpdateWorkspaceTaskRequest {
   name?: string;
   status?: WorkspaceTaskStatus;
+  milestoneId?: string | null;
 }
 
 export interface CreateWorkspaceRequest {
@@ -218,6 +225,11 @@ export interface WorkspacesRepository {
   update(id: string, patch: UpdateWorkspaceRequest): Promise<Workspace>;
   remove(id: string, cascade?: boolean): Promise<void>;
   saveLayout(id: string, layout: LayoutNode | null): Promise<LayoutNode | null>;
+  /**
+   * 重命名目录（工作区显示名）。服务端会同时同步项目名，
+   * 保证任务列表 / 项目列表 / 原生客户端显示同一个名字。
+   */
+  renameDirectory(cwd: string, name: string | null): Promise<void>;
   // 任务
   listTasks(workspaceId: string): Promise<WorkspaceTask[]>;
   createTask(workspaceId: string, request: CreateWorkspaceTaskRequest): Promise<WorkspaceTaskDetail>;

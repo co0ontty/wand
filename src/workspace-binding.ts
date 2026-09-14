@@ -2,7 +2,7 @@ import path from "node:path";
 
 import { normalizeSessionDirectory } from "./session-directory-tree.js";
 import type { WandStorage } from "./storage.js";
-import type { Workspace, WorkspaceDefaultProvider, WorktreeInfo } from "./types.js";
+import { GLOBAL_WORKSPACE_ID, type Workspace, type WorkspaceDefaultProvider, type WorktreeInfo } from "./types.js";
 
 /** Normalize a project/session cwd so `/foo/bar/` and `/foo/bar` match. */
 export function normalizeProjectCwd(cwd: string | null | undefined): string {
@@ -65,6 +65,43 @@ export function ensureWorkspaceForCwd(
     cwd: normalized,
     defaultProvider: options.defaultProvider,
   });
+}
+
+function isGlobalWorkspaceRecord(workspace: Pick<Workspace, "kind" | "id">): boolean {
+  return workspace.kind === "global" || workspace.id === GLOBAL_WORKSPACE_ID;
+}
+
+/**
+ * 「工作区名称」和「项目名」是同一个概念：用户在任意一端改名，两端都要写。
+ * name 为空表示恢复目录名（清掉自定义名）。返回最终生效的显示名。
+ */
+export function renameWorkspaceDirectory(
+  storage: WandStorage,
+  cwd: string,
+  name: string | null | undefined,
+): string {
+  const normalized = normalizeProjectCwd(cwd);
+  if (!normalized) return "";
+  const trimmed = name?.trim() ?? "";
+  const resolved = trimmed || path.basename(normalized) || normalized;
+  storage.setSessionDirectoryName(normalized, trimmed || null);
+  for (const workspace of storage.listWorkspaces()) {
+    if (isGlobalWorkspaceRecord(workspace)) continue;
+    if (normalizeProjectCwd(workspace.cwd) !== normalized) continue;
+    if (workspace.name === resolved) continue;
+    storage.updateWorkspace(workspace.id, { name: resolved });
+  }
+  return resolved;
+}
+
+/** 项目（workspaces.name）被直接改名后，把目录自定义名同步成同一个名字。 */
+export function syncDirectoryNameForWorkspace(storage: WandStorage, workspace: Workspace): void {
+  if (isGlobalWorkspaceRecord(workspace)) return;
+  const normalized = normalizeProjectCwd(workspace.cwd);
+  const name = workspace.name.trim();
+  if (!normalized || !name) return;
+  if (storage.listSessionDirectoryNames().get(normalized) === name) return;
+  storage.setSessionDirectoryName(normalized, name);
 }
 
 /**

@@ -1245,6 +1245,9 @@ export const missionsStyles = String.raw`
 .wand-missions-list > button:hover,.wand-missions-list > button.active { background: var(--bg-elevated); }
 .wand-missions-list > button.active { box-shadow: inset 3px 0 var(--accent); }
 .wand-missions-list small { color: var(--text-secondary); }
+/* 并行任务列表里的里程碑标记：与看板共用同一份里程碑列表。 */
+.wand-missions-milestone { display: inline-flex; align-items: center; gap: 4px; color: var(--text-tertiary); }
+.wand-missions-detail-milestone { display: inline-flex; align-items: center; gap: 6px; margin: 12px 0 0; color: var(--text-secondary); font-size: var(--font-size-xs); }
 .wand-missions-detail { min-width: 0; overflow: auto; padding: 18px 20px 32px; }
 .wand-missions-detail-head,.wand-missions-review-head,.wand-missions-attempt-head,.wand-missions-create-head,.wand-missions-create-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .wand-missions-detail-head h2,.wand-missions-review h3,.wand-missions-create h2 { margin: 0; font-size: 1.05rem; }
@@ -1274,7 +1277,7 @@ export const missionsStyles = String.raw`
 .wand-missions-create-overlay { position: absolute; inset: 0; display: grid; z-index: 2; place-items: center; padding: 22px; background: var(--bg-overlay); backdrop-filter: blur(5px); }
 .wand-missions-create { display: grid; width: min(680px, 100%); max-height: 100%; gap: 13px; overflow: auto; border: 1px solid var(--border-subtle); border-radius: 17px; padding: 18px; background: var(--bg-elevated); box-shadow: 0 18px 55px rgb(0 0 0 / 25%); }
 .wand-missions-create-head > button { border: 0; color: var(--text-secondary); background: transparent; font-size: 24px; cursor: pointer; }
-.wand-missions-create > label,.wand-missions-create details label { display: grid; gap: 6px; color: var(--text-secondary); font-size: var(--font-size-xs); }
+.wand-missions-create > label,.wand-missions-create details label,.wand-missions-field { display: grid; gap: 6px; color: var(--text-secondary); font-size: var(--font-size-xs); }
 .wand-missions-create input,.wand-missions-create textarea,.wand-missions-comment-form textarea { box-sizing: border-box; width: 100%; border: 1px solid var(--border-subtle); border-radius: 9px; padding: 9px 10px; color: var(--text-primary); background: var(--bg-primary); font: inherit; }
 .wand-missions-create textarea { min-height: 120px; resize: vertical; }
 .wand-missions-provider-picker { display: grid; grid-template-columns: repeat(3,1fr); gap: 7px; }

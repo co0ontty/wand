@@ -128,6 +128,7 @@ export function ensureBoardTaskForWorkspaceTask(
     return storage.updateWandTask(reusable.id, {
       workspaceTaskId: task.id,
       workspaceId: workspace.id,
+      ...(task.milestoneId ? { milestoneId: task.milestoneId } : {}),
     }) ?? reusable;
   }
   return storage.createWandTask({
@@ -136,6 +137,7 @@ export function ensureBoardTaskForWorkspaceTask(
     title: task.name,
     description: boardDescriptionFor(task, workspace),
     status: task.status === "done" ? "done" : "todo",
+    milestoneId: task.milestoneId ?? null,
   });
 }
 
@@ -165,6 +167,8 @@ export function syncUngroupedSessionsToBoard(storage: WandStorage): void {
           titleSource: "auto",
           description,
           status: "doing",
+          // 未命名任务建立板卡时才补上：建任务时选的里程碑不能丢。
+          milestoneId: task.milestoneId ?? null,
         });
         boardTasks.push(card);
       } else {
@@ -174,6 +178,9 @@ export function syncUngroupedSessionsToBoard(storage: WandStorage): void {
           workspaceId: workspace.id,
           workspaceTaskId: task.id,
         });
+        if (!card.milestoneId && task.milestoneId) {
+          card = storage.updateWandTask(card.id, { milestoneId: task.milestoneId }) ?? card;
+        }
       }
       bindSessions(storage, card.id, sessions.map((session) => session.id));
       for (const session of sessions) bound.add(session.id);

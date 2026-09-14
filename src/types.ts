@@ -725,6 +725,8 @@ export interface WorkspaceTask {
   worktree: WorkspaceTaskWorktree | null;
   /** Optional directory override; empty/undefined falls back to the workspace cwd. */
   cwd?: string;
+  /** 归属里程碑（全局列表）；null = 未归入。建任务时同步到看板卡片。 */
+  milestoneId?: string | null;
   /** 该任务的工作窗口 Tabs；每个窗口内部可含一棵分屏树。 */
   layout: TaskWindowLayout | null;
   status: WorkspaceTaskStatus;

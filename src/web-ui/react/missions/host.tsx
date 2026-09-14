@@ -2,7 +2,9 @@ import { type FormEvent, useEffect, useMemo, useState, useSyncExternalStore } fr
 import { workspaceContextStore } from "../workspaces/workspace-context";
 
 import { ProviderLogo } from "../provider-logo";
-import { WandButton, WandDialogSurface } from "../ui";
+import { WandButton, WandDialogSurface, WandIcon } from "../ui";
+import { milestonesStore, milestoneNameOf } from "../milestones/controller";
+import { MilestonePicker } from "../milestones/picker";
 import { missionsController, missionsStore } from "./controller";
 import { httpMissionsRepository } from "./repository";
 import type {
@@ -106,6 +108,7 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
   const [error, setError] = useState("");
   const [prompt, setPrompt] = useState("");
   const [title, setTitle] = useState("");
+  const [milestoneId, setMilestoneId] = useState("");
   const [cwd, setCwd] = useState("");
   const [baseRef, setBaseRef] = useState("");
   const [sharedPaths, setSharedPaths] = useState("");
@@ -117,6 +120,11 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
   const [reviewBody, setReviewBody] = useState("");
 
   const selected = missions.find((mission) => mission.id === selectedId) ?? missions[0] ?? null;
+  const milestoneSnapshot = useSyncExternalStore(
+    milestonesStore.subscribe,
+    milestonesStore.getSnapshot,
+    milestonesStore.getSnapshot,
+  );
   const activeTaskContext = useSyncExternalStore(
     workspaceContextStore.subscribe,
     workspaceContextStore.getSnapshot,
@@ -139,6 +147,7 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
     if (!controller.open) return;
     setCwd((value) => value || missionsStore.getRuntime()?.effectiveCwd() || "");
     setError("");
+    void milestonesStore.load();
     void refresh().catch((cause) => setError(cause instanceof Error ? cause.message : "无法加载任务。"));
     const timer = window.setInterval(() => void refresh().catch(() => undefined), 4000);
     return () => window.clearInterval(timer);
@@ -159,8 +168,9 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
         sharedDirectories: splitPaths(sharedPaths), copyPaths: splitPaths(copyPaths),
         // 打开并行任务时若处于某个任务的上下文中，派发会话归属该任务。
         taskId: workspaceContextStore.getSnapshot().taskId ?? undefined,
+        milestoneId: milestoneId || null,
       });
-      setCreating(false); setPrompt(""); setTitle(""); setSelectedId(created.id);
+      setCreating(false); setPrompt(""); setTitle(""); setMilestoneId(""); setSelectedId(created.id);
       await refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "创建任务失败。");
@@ -244,6 +254,10 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
               <button key={mission.id} className={selected?.id === mission.id ? "active" : ""} onClick={() => { setSelectedId(mission.id); setDiff(null); }}>
                 <strong>{mission.title}</strong>
                 <small>{mission.attempts.length} 个 Agent · {STATE_LABELS[mission.status]}</small>
+                {mission.milestoneId ? <small className="wand-missions-milestone">
+                  <WandIcon name="milestone" size={11}/>
+                  {milestoneNameOf(milestoneSnapshot.items, mission.milestoneId) || "里程碑"}
+                </small> : null}
               </button>
             ))}
             {!missions.length ? <div className="wand-missions-empty">创建一个任务，让多个 Agent 在独立 worktree 中并行尝试。</div> : null}
@@ -255,6 +269,10 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
                   <div><h2>{selected.title}</h2><p>{selected.cwd} · 基线 {selected.worktree.baseRef || "当前分支"}</p></div>
                   <span className={`wand-missions-state is-${selected.status}`}>{STATE_LABELS[selected.status]}</span>
                 </div>
+                {selected.milestoneId ? <p className="wand-missions-detail-milestone">
+                  <WandIcon name="milestone" size={12}/>
+                  {milestoneNameOf(milestoneSnapshot.items, selected.milestoneId) || "里程碑"}
+                </p> : null}
                 <p className="wand-missions-prompt">{selected.prompt}</p>
                 <div className="wand-missions-attempt-grid">
                   {selected.attempts.map((attempt) => (
@@ -306,6 +324,14 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
           <form className="wand-missions-create" onSubmit={(event) => void submitMission(event)}>
             <div className="wand-missions-create-head"><div><h2>并行任务</h2><p>每个 Provider 会获得独立 branch 与 worktree。</p></div><button type="button" onClick={() => setCreating(false)}>×</button></div>
             <label>任务标题（可选）<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="例如：重构会话恢复流程"/></label>
+            <div className="wand-missions-field">
+              <span>里程碑（可选）</span>
+              <MilestonePicker
+                value={milestoneId || null}
+                disabled={busy}
+                onChange={(next) => setMilestoneId(next ?? "")}
+              />
+            </div>
             <label>目标<textarea autoFocus required value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="描述清楚完成条件、限制和验证要求…"/></label>
             {linkedTaskName ? (
               <p className="wand-missions-linked-task">派发的 Agent 会话将关联到当前任务「{linkedTaskName}」。</p>

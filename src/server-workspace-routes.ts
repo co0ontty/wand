@@ -22,6 +22,8 @@ import {
   backfillSessionWorkspaces,
   normalizeProjectCwd,
   projectCwdForSession,
+  renameWorkspaceDirectory,
+  syncDirectoryNameForWorkspace,
 } from "./workspace-binding.js";
 import { archiveBoardTaskForWorkspaceTask, ensureBoardTaskForWorkspaceTask } from "./wand-task-sync.js";
 
@@ -135,7 +137,7 @@ function taskRuntimeCwd(task: WorkspaceTask, workspace: Pick<Workspace, "cwd"> |
 function createTaskForWorkspace(
   storage: WandStorage,
   workspace: Workspace,
-  body: { name?: unknown; baseRef?: unknown; worktree?: unknown; cwd?: unknown },
+  body: { name?: unknown; baseRef?: unknown; worktree?: unknown; cwd?: unknown; milestoneId?: unknown },
 ): {
   task: WorkspaceTask;
   cwd: string;
@@ -144,6 +146,12 @@ function createTaskForWorkspace(
 } {
   const name = typeof body.name === "string" ? body.name.trim() : "";
   const taskName = name || "未命名任务";
+  // 里程碑是全局列表；建任务时可选，非法 id 直接报错而不是静默丢掉。
+  const requestedMilestoneId = typeof body.milestoneId === "string" ? body.milestoneId.trim() : "";
+  if (requestedMilestoneId && !storage.getWandMilestone(requestedMilestoneId)) {
+    throw new Error("未找到该里程碑。");
+  }
+  const milestoneId = requestedMilestoneId || null;
   let mountedCwd: string | undefined;
   if (body.cwd !== undefined && body.cwd !== null && String(body.cwd).trim()) {
     mountedCwd = resolveWorkspaceCwd(body.cwd);
@@ -179,6 +187,7 @@ function createTaskForWorkspace(
     name: taskName,
     cwd: storedCwd,
     worktree,
+    milestoneId,
   });
   ensureBoardTaskForWorkspaceTask(storage, task, workspace);
   return {
@@ -336,6 +345,8 @@ export function registerWorkspaceRoutes(
     }
     const defaultProvider = parseDefaultProvider(body.defaultProvider);
     const workspace = storage.createWorkspace({ name, cwd, defaultProvider });
+    // 项目名就是工作区显示名：目录自定义名一起写，保证各端显示一致。
+    storage.setSessionDirectoryName(cwd, name);
     const attached = attachUnboundSessionsToWorkspace(storage, workspace);
     res.status(201).json({ ...workspace, worktreeCount: 0, sessionCount: attached });
   }));
@@ -365,6 +376,11 @@ export function registerWorkspaceRoutes(
       return;
     }
     const body = req.body as { name?: unknown; cwd?: unknown; defaultProvider?: unknown };
+    // 全局任务空间不是用户目录，不允许改名。
+    if (isGlobalWorkspace(existing) && typeof body.name === "string" && body.name.trim()) {
+      res.status(400).json({ error: "不能重命名全局任务空间。" });
+      return;
+    }
     const patch: { name?: string; cwd?: string; defaultProvider?: WorkspaceDefaultProvider | null } = {};
     if (typeof body.name === "string" && body.name.trim()) patch.name = body.name.trim();
     if (body.cwd !== undefined) {
@@ -383,6 +399,8 @@ export function registerWorkspaceRoutes(
     }
     storage.updateWorkspace(existing.id, patch);
     const updated = storage.getWorkspace(existing.id);
+    // 改名时同步目录自定义名，否则其它端（会话列表 / 项目视图）仍是旧名字。
+    if (updated) syncDirectoryNameForWorkspace(storage, updated);
     res.json(updated ? workspaceWithCounts(storage, updated) : null);
   });
 
@@ -438,7 +456,7 @@ export function registerWorkspaceRoutes(
     const workspace = storage.ensureGlobalWorkspace();
     try {
       const created = createTaskForWorkspace(storage, workspace, req.body as {
-        name?: unknown; baseRef?: unknown; worktree?: unknown; cwd?: unknown;
+        name?: unknown; baseRef?: unknown; worktree?: unknown; cwd?: unknown; milestoneId?: unknown;
       });
       res.status(201).json({
         ...created.task,
@@ -489,6 +507,12 @@ export function registerWorkspaceRoutes(
       session: SessionSnapshot,
       names: { taskName?: string; workspaceName?: string } = {},
     ) => workspaceSessionSummary(session, names, sessions);
+    // 目录自定义名（工作区名称）：没有项目实体的合成目录也按这个名字显示。
+    const directoryNames = storage.listSessionDirectoryNames();
+    const customNameForCwd = (cwd: string): string | undefined => {
+      const name = directoryNames.get(normalizeProjectCwd(cwd))?.trim();
+      return name || undefined;
+    };
     const visibleWorkspaces = workspaceFilter
       ? workspaces.filter((workspace) => workspace.id === workspaceFilter)
       : workspaces;
@@ -515,7 +539,9 @@ export function registerWorkspaceRoutes(
       if (existing) return existing;
       const created: TaskDirectoryGroup = {
         workspaceId: id,
-        workspaceName: normalized.split("/").filter(Boolean).at(-1) || normalized,
+        workspaceName: customNameForCwd(normalized)
+          ?? normalized.split("/").filter(Boolean).at(-1)
+          ?? normalized,
         workspaceCwd: normalized,
         synthetic: true,
         tasks: [],
@@ -586,7 +612,9 @@ export function registerWorkspaceRoutes(
         if (!synthetic) {
           synthetic = {
             workspaceId: id,
-            workspaceName: resolved.split("/").filter(Boolean).at(-1) || resolved,
+            workspaceName: customNameForCwd(resolved)
+              ?? resolved.split("/").filter(Boolean).at(-1)
+              ?? resolved,
             workspaceCwd: resolved,
             synthetic: true,
             tasks: [],
@@ -719,7 +747,7 @@ export function registerWorkspaceRoutes(
     }
     try {
       const created = createTaskForWorkspace(storage, workspace, req.body as {
-        name?: unknown; baseRef?: unknown; worktree?: unknown; cwd?: unknown;
+        name?: unknown; baseRef?: unknown; worktree?: unknown; cwd?: unknown; milestoneId?: unknown;
       });
       res.status(201).json({
         ...created.task,
@@ -761,10 +789,18 @@ export function registerWorkspaceRoutes(
       res.status(404).json({ error: "未找到该任务。" });
       return;
     }
-    const body = req.body as { name?: unknown; status?: unknown };
-    const patch: { name?: string; status?: "active" | "done" } = {};
+    const body = req.body as { name?: unknown; status?: unknown; milestoneId?: unknown };
+    const patch: { name?: string; status?: "active" | "done"; milestoneId?: string | null } = {};
     if (typeof body.name === "string" && body.name.trim()) patch.name = body.name.trim();
     if (body.status === "active" || body.status === "done") patch.status = body.status;
+    if (body.milestoneId !== undefined) {
+      const milestoneId = typeof body.milestoneId === "string" ? body.milestoneId.trim() : "";
+      if (milestoneId && !storage.getWandMilestone(milestoneId)) {
+        sendRouteError(res, new Error("未找到该里程碑。"), "无法更新任务。");
+        return;
+      }
+      patch.milestoneId = milestoneId || null;
+    }
     storage.updateWorkspaceTask(existing.id, patch);
     if (patch.status === "done") archiveBoardTaskForWorkspaceTask(storage, existing.id);
     res.json(storage.getWorkspaceTask(existing.id));

@@ -10,6 +10,7 @@ import { resolveSystemAiContext } from "./session-ai-context.js";
 import type { SessionRegistry } from "./session-registry.js";
 import type { StructuredSessionManager } from "./structured-session-manager.js";
 import type { WandTaskAgent, WandTaskAgentEffort, WandTaskAgentProvider, WandTaskPriority, WandTaskStatus, WandTaskTitleSource } from "./task-types.js";
+import { WAND_MILESTONE_NAME_MAX_LENGTH } from "./task-types.js";
 import { archiveBoardTask, syncClosedBoardTask, syncUngroupedSessionsToBoard } from "./wand-task-sync.js";
 import type { SessionProvider, SessionSnapshot, WandConfig } from "./types.js";
 
@@ -66,6 +67,22 @@ function labelsFrom(value: unknown): string[] {
   return value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean).slice(0, 20);
 }
 
+/** 里程碑名：必填、去首尾空白、限长。 */
+function milestoneNameFrom(value: unknown): string {
+  const name = text(value).slice(0, WAND_MILESTONE_NAME_MAX_LENGTH);
+  if (!name) throw new Error("请填写里程碑名称。");
+  return name;
+}
+
+/** 只有已存在的里程碑才能挂到任务上；null / 空串表示解绑。 */
+function milestoneIdFrom(storage: WandStorage, value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const id = text(value);
+  if (!id) return null;
+  if (!storage.getWandMilestone(id)) throw new Error("未找到该里程碑。");
+  return id;
+}
+
 /** 任务派发配置：provider / model / thinkingEffort 三者必须同时给出且合法。 */
 export function parseTaskAgent(value: unknown): WandTaskAgent | null {
   if (value === null) return null;
@@ -89,6 +106,7 @@ function taskDto({ storage, sessions }: TaskDtoDeps, task: ReturnType<WandStorag
   if (!task) return null;
   const workspace = task.workspaceId ? storage.getWorkspace(task.workspaceId) : null;
   const sessionIds = storage.listWandTaskSessionIds(task.id);
+  const milestone = task.milestoneId ? storage.getWandMilestone(task.milestoneId) : null;
   return {
     ...task,
     sessionIds,
@@ -99,6 +117,8 @@ function taskDto({ storage, sessions }: TaskDtoDeps, task: ReturnType<WandStorag
     workspace: workspace
       ? { id: workspace.id, name: workspace.name, cwd: workspace.cwd }
       : null,
+    // 卡片上要显示里程碑名字，直接在这里解出，免去前端再查一次列表。
+    milestone: milestone ? { id: milestone.id, name: milestone.name } : null,
   };
 }
 
@@ -190,10 +210,62 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies | W
       console.error("[WandTask] Failed to sync ungrouped sessions onto the board:", getErrorMessage(error));
     }
     const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : undefined;
+    // 数组顺序即展示顺序：created_at 倒序，新创建的在上面。
     res.json(storage.listWandTasks(workspaceId).map((task) => dto(task)));
   });
   app.get("/api/wand-task-agent-defaults", guard, (_req, res) => {
     res.json(readTaskBoardLastAgent(storage));
+  });
+  // ── 里程碑：跨项目全局列表，所有任务面板的「新建任务」共用 ──
+  app.get("/api/wand-milestones", guard, (_req, res) => {
+    const counts = storage.countWandTasksByMilestone();
+    res.json({
+      milestones: storage.listWandMilestones().map((milestone) => ({
+        ...milestone,
+        taskCount: counts[milestone.id] ?? 0,
+      })),
+    });
+  });
+  app.post("/api/wand-milestones", guard, (req, res) => {
+    try {
+      const body = bodyObject(req.body);
+      const name = milestoneNameFrom(body.name);
+      const duplicate = storage.listWandMilestones()
+        .find((milestone) => milestone.name.toLowerCase() === name.toLowerCase());
+      if (duplicate) throw new Error(`里程碑「${duplicate.name}」已存在。`);
+      const created = storage.createWandMilestone({ name, dueDate: dateValue(body.dueDate) ?? null });
+      res.status(201).json({ ...created, taskCount: 0 });
+    } catch (error) {
+      sendTaskError(res, error, "无法创建里程碑。");
+    }
+  });
+  app.patch("/api/wand-milestones/:id", guard, (req, res) => {
+    try {
+      const body = bodyObject(req.body);
+      const current = storage.getWandMilestone(req.params.id);
+      if (!current) {
+        res.status(404).json({ error: "未找到该里程碑。" });
+        return;
+      }
+      const patch: { name?: string; dueDate?: string | null } = {};
+      if (body.name !== undefined) {
+        const name = milestoneNameFrom(body.name);
+        const duplicate = storage.listWandMilestones()
+          .find((milestone) => milestone.id !== current.id && milestone.name.toLowerCase() === name.toLowerCase());
+        if (duplicate) throw new Error(`里程碑「${duplicate.name}」已存在。`);
+        patch.name = name;
+      }
+      if (body.dueDate !== undefined) patch.dueDate = dateValue(body.dueDate) ?? null;
+      const updated = storage.updateWandMilestone(current.id, patch);
+      res.json({ ...updated, taskCount: storage.countWandTasksByMilestone()[current.id] ?? 0 });
+    } catch (error) {
+      sendTaskError(res, error, "无法更新里程碑。");
+    }
+  });
+  app.delete("/api/wand-milestones/:id", guard, (req, res) => {
+    // 只解绑任务，不删任务；已经删过的 id 幂等返回 ok。
+    storage.deleteWandMilestone(req.params.id);
+    res.json({ ok: true });
   });
   app.put("/api/wand-task-agent-defaults", guard, (req, res) => {
     try {
@@ -220,6 +292,9 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies | W
       const priority = PRIORITIES.has(body.priority as WandTaskPriority) ? body.priority as WandTaskPriority : "none";
       const agent = body.agent === undefined ? null : parseTaskAgent(body.agent);
       if (agent) writeTaskBoardLastAgent(storage, agent);
+      const labels = labelsFrom(body.labels);
+      const dueDate = dateValue(body.dueDate) ?? null;
+      const milestoneId = milestoneIdFrom(storage, body.milestoneId);
       const task = storage.createWandTask({
         workspaceId,
         title,
@@ -227,8 +302,9 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies | W
         description,
         status,
         priority,
-        labels: labelsFrom(body.labels),
-        dueDate: dateValue(body.dueDate) ?? null,
+        labels,
+        dueDate,
+        milestoneId,
         agent,
       });
       if (titleSource === "auto") {
@@ -265,6 +341,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies | W
       }
       if (body.labels !== undefined) patch.labels = labelsFrom(body.labels);
       if (body.dueDate !== undefined) patch.dueDate = dateValue(body.dueDate) ?? null;
+      if (body.milestoneId !== undefined) patch.milestoneId = milestoneIdFrom(storage, body.milestoneId);
       if (body.workspaceId !== undefined) {
         const workspaceId = body.workspaceId === null ? null : text(body.workspaceId);
         if (workspaceId && !storage.getWorkspace(workspaceId)) throw new Error("项目不存在。");

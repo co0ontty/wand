@@ -5,6 +5,7 @@
 import { type FormEvent, useEffect, useState, useSyncExternalStore } from "react";
 
 import { WandButton, WandDialogSurface, WandIcon, WandSwitch } from "../ui";
+import { MilestonePicker } from "../milestones/picker";
 import { workspacesController, workspacesStore } from "./controller";
 import { httpNewSessionRepository } from "../new-session/repository";
 import {
@@ -53,6 +54,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
   const [worktreeEnabled, setWorktreeEnabled] = useState(true);
   const [target, setTarget] = useState<WorkspaceSessionTarget>("claude");
   const [sessionKind, setSessionKind] = useState<WorkspaceSessionKind>("structured");
+  const [milestoneId, setMilestoneId] = useState("");
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -72,6 +74,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
     setWorktreeEnabled(true);
     setTarget("claude");
     setSessionKind("structured");
+    setMilestoneId("");
     setCwd(controller.initialCwd);
     setSuggestions([]);
     setSuggestionsActive(false);
@@ -172,11 +175,13 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
         ? await repository.createTask(selectedProject.id, {
           name: trimmedName || undefined,
           worktree: worktreeEnabled,
+          milestoneId: milestoneId || null,
         })
         : await repository.createStandaloneTask({
           name: trimmedName || undefined,
           cwd: mountedCwd || undefined,
           worktree: mountedCwd ? worktreeEnabled : false,
+          milestoneId: milestoneId || null,
         });
       const workspace = selectedProject ?? {
         id: created.workspaceId,
@@ -332,6 +337,18 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
                 />
               </div>
             ) : null}
+
+            <div className="wand-new-session-field wand-new-project-field wand-new-task-milestone-field">
+              <span className="wand-new-session-field-label wand-new-project-field-label">里程碑（可选）</span>
+              <MilestonePicker
+                value={milestoneId || null}
+                disabled={submitting}
+                onChange={(next) => setMilestoneId(next ?? "")}
+              />
+              <p className="wand-new-session-field-hint wand-new-project-field-hint">
+                选一个已有里程碑，或直接新增；新建后会自动归入该里程碑。
+              </p>
+            </div>
 
             <WorkspaceAgentPicker
               target={target}

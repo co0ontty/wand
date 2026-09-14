@@ -19,6 +19,8 @@ export interface Mission {
   status: MissionStatus;
   /** 可选关联的任务（workspace task）：派发的 attempt 会话绑定该任务。 */
   taskId?: string | null;
+  /** 可选里程碑：与任务共用同一份全局里程碑列表。 */
+  milestoneId?: string | null;
   worktree: MissionWorktreeOptions;
   createdAt: string;
   updatedAt: string;
@@ -92,6 +94,8 @@ export interface CreateMissionInput {
   providers: SessionProvider[];
   /** 关联到指定 workspace task；派发会话将绑定 workspaceTaskId。 */
   taskId?: string;
+  /** 里程碑 id；null / 缺省表示不归入里程碑。 */
+  milestoneId?: string | null;
   baseRef?: string;
   sharedDirectories?: string[];
   copyPaths?: string[];
