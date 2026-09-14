@@ -124,3 +124,20 @@ test("legacy stylesheet no longer owns migrated business overlays", () => {
   }
   assert.ok(styles.includes(".session-kind-badge.worktree-merge"));
 });
+
+test("portalled popovers and selects re-enable hit testing under the passive overlay root", () => {
+  const styles = source("src/web-ui/react/styles/base.ts");
+  const overlayRule = styles.slice(styles.indexOf("#overlay-root {"), styles.indexOf(".wand-ui-mount {"));
+  // The overlay root is a full-viewport, click-through layer; anything portalled
+  // into it must opt back into pointer events or its menu items are unhittable.
+  assert.match(overlayRule, /pointer-events:\s*none;/);
+
+  const floatingRuleStart = styles.indexOf(".wand-ui-popover-content,\n.wand-ui-select-content {");
+  assert.ok(floatingRuleStart >= 0, "floating-layer rule must exist");
+  const floatingRule = styles.slice(floatingRuleStart, styles.indexOf("}", floatingRuleStart));
+  assert.match(
+    floatingRule,
+    /pointer-events:\s*auto;/,
+    "popover/select content must restore pointer-events for hit testing",
+  );
+});

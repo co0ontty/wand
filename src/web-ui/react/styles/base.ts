@@ -396,6 +396,9 @@ export const foundationStyles = String.raw`
 .wand-ui-popover-content,
 .wand-ui-select-content {
   z-index: 10;
+  /* Floating layers are portalled under #overlay-root (pointer-events: none);
+     re-enable hit testing on the content itself or menu items are unhittable. */
+  pointer-events: auto;
   box-sizing: border-box;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
