@@ -77,6 +77,8 @@ export type FileExplorerCommand =
   | { type: "create.file"; dir: string; name: string }
   | { type: "create.dir"; dir: string; name: string }
   | { type: "rename"; from: string; to: string }
+  /** Rename-or-move; used by "移动到…" so the source and target both refresh. */
+  | { type: "move"; from: string; to: string }
   | { type: "delete"; path: string };
 
 type FileExplorerNoticeTone = "success" | "error" | "info";

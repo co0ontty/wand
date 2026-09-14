@@ -148,6 +148,32 @@ test("rename delegates from/to through the repository", async () => {
   assert.deepEqual(renameCall?.payload, { from: "/app/old.ts", to: "/app/new.ts" });
 });
 
+test("move routes through the rename endpoint and refreshes both sides", async () => {
+  const repo = new MemoryFileExplorerRepository({ "/app": [entry("/app/a.ts", "file")] });
+  const module_ = createFileExplorerModule({ repository: repo, runtime: alwaysConfirmRuntime });
+  const { controller, store } = module_;
+  controller.setRoot("/app");
+  await waitFor(() => store.getSnapshot().expanded.get("/app")?.status === "loaded");
+
+  const ok = await controller.execute({ type: "move", from: "/app/a.ts", to: "/app/sub/a.ts" });
+  assert.equal(ok, true);
+  const moveCall = repo.mutationCalls.find((call) => call.kind === "rename");
+  assert.deepEqual(moveCall?.payload, { from: "/app/a.ts", to: "/app/sub/a.ts" });
+  assert.equal(repo.listCalls.includes("/app"), true);
+});
+
+test("move surfaces a target-exists failure without refreshing", async () => {
+  const repo = new MemoryFileExplorerRepository({ "/app": [entry("/app/a.ts", "file")] });
+  repo.rename = () => Promise.resolve({ ok: false, failure: { message: "目标路径已存在。", status: 409 } });
+  const module_ = createFileExplorerModule({ repository: repo, runtime: alwaysConfirmRuntime });
+  const { controller, store } = module_;
+  controller.setRoot("/app");
+  await waitFor(() => store.getSnapshot().expanded.get("/app")?.status === "loaded");
+
+  const ok = await controller.execute({ type: "move", from: "/app/a.ts", to: "/app/b.ts" });
+  assert.equal(ok, false);
+});
+
 test("delete respects confirmDelete veto", async () => {
   const repo = new MemoryFileExplorerRepository({ "/app": [entry("/app/gone.ts", "file")] });
   let confirmCalls = 0;

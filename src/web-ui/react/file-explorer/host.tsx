@@ -4,6 +4,8 @@ import { wandOverlay } from "../overlay-controller";
 import { copyTextToPlatformClipboard } from "../file-preview/platform-adapter";
 import { codeEditorController } from "../code-editor/controller";
 import { fileExplorerController, fileExplorerStore } from "./controller";
+import { MoveEntryDialog, type MoveEntryRequest } from "./move-dialog";
+import { explorerParentOf as parentOf, isPathWithin, joinExplorerPath as joinPath } from "./paths";
 import { fileExplorerStyles } from "./styles";
 import type {
   FileExplorerEntry,
@@ -88,21 +90,6 @@ function gitBadge(entry: FileExplorerEntry): { text: string; className: string }
   return null;
 }
 
-function joinPath(dir: string, name: string): string {
-  const trimmedName = name.trim();
-  if (!trimmedName) return dir;
-  const base = dir.replace(/\/+$/, "");
-  return `${base}/${trimmedName}`;
-}
-
-function parentOf(inputPath: string): string {
-  const normalized = inputPath.replace(/\\/g, "/").replace(/\/+$/, "");
-  if (!normalized || normalized === "/") return "/";
-  const index = normalized.lastIndexOf("/");
-  if (index <= 0) return "/";
-  return normalized.slice(0, index);
-}
-
 interface ContextMenuState {
   x: number;
   y: number;
@@ -143,7 +130,13 @@ function ExplorerRow({
   const isDir = entry.type === "dir";
   const nodeState: FileExplorerNodeState | undefined = isDir ? snapshot.expanded.get(entry.path) : undefined;
   const isOpen = Boolean(nodeState);
-  const hasChildren = isDir && nodeState && nodeState.entries.length > 0;
+  // Only hide the disclosure once we actually know the directory is empty.
+  // `!hasChildren` used to fold "collapsed / loading / failed" into `empty`,
+  // so expandable folders rendered without a chevron and looked like files.
+  const isEmptyDir = Boolean(
+    isDir && isOpen && nodeState?.status === "loaded" && nodeState.entries.length === 0,
+  );
+  const showChevron = isDir && !isEmptyDir;
   const isActiveFile = !isDir && snapshot.activeDir === parentOf(entry.path);
   const badge = gitBadge(entry);
 
@@ -211,8 +204,8 @@ function ExplorerRow({
           onContextMenu({ x: event.clientX, y: event.clientY, entry, dir: parentOf(entry.path) });
         }}
       >
-        <span className={`wand-explorer-chevron${isOpen ? " open" : ""}${isDir && !hasChildren ? " empty" : ""}`} aria-hidden="true">
-          {isDir ? "▸" : ""}
+        <span className={`wand-explorer-chevron${isOpen ? " open" : ""}${showChevron ? "" : " empty"}`} aria-hidden="true">
+          {showChevron ? "▸" : ""}
         </span>
         <span className="wand-explorer-icon" aria-hidden="true"><ExplorerIcon name={iconForEntry(entry, isOpen && isDir)}/></span>
         <span className="wand-explorer-name">{entry.name}</span>
@@ -394,6 +387,7 @@ function ContextMenu({
           {!isDir && item("下载文件", "download")}
           <div className="wand-explorer-context-divider"/>
           {item("重命名", "rename")}
+          {item("移动到…", "move")}
           {item("删除", "delete", { danger: true })}
         </>
       ) : (
@@ -412,6 +406,7 @@ export function FileExplorerHost({ root }: { root: string }) {
   const [contextMenu, setContextMenu] = React.useState<ContextMenuState | null>(null);
   const [renameState, setRenameState] = React.useState<{ path: string } | null>(null);
   const [pendingCreate, setPendingCreate] = React.useState<PendingCreate | null>(null);
+  const [moveRequest, setMoveRequest] = React.useState<MoveEntryRequest | null>(null);
   const [searchInput, setSearchInput] = React.useState(snapshot.searchQuery);
 
   React.useEffect(() => {
@@ -435,6 +430,10 @@ export function FileExplorerHost({ root }: { root: string }) {
     if (action === "navigate" && entry) { void dispatch.execute({ type: "navigate", dir: entry.path }); return; }
     if (action === "open" && entry) { codeEditorController.open(entry.path); return; }
     if (action === "rename" && entry) { setRenameState({ path: entry.path }); return; }
+    if (action === "move" && entry) {
+      setMoveRequest({ from: entry.path, initialDir: parentOf(entry.path), isDir: entry.type === "dir" });
+      return;
+    }
     if (action === "delete" && entry) { void dispatch.execute({ type: "delete", path: entry.path }); return; }
     if (action === "refresh") { void dispatch.execute({ type: "refresh", dir: ctx.dir }); return; }
     if (action === "copyPath" && entry) {
@@ -596,6 +595,27 @@ export function FileExplorerHost({ root }: { root: string }) {
           onAction={(action) => void handleAction(action)}
         />
       )}
+      <MoveEntryDialog
+        request={moveRequest}
+        onDismiss={() => setMoveRequest(null)}
+        onSubmit={async (from, to) => {
+          const request = moveRequest;
+          if (!request) return false;
+          if (to === from) {
+            notify("目标位置与当前位置相同。", "warning");
+            return false;
+          }
+          // A folder cannot land inside itself or one of its own descendants:
+          // reject both the folder itself and any path underneath it.
+          if (request.isDir && isPathWithin(to, from)) {
+            notify("不能把文件夹移动到它自己或它的子目录中。", "warning");
+            return false;
+          }
+          const moved = await dispatch.execute({ type: "move", from, to });
+          if (moved) setMoveRequest(null);
+          return moved;
+        }}
+      />
     </>
   );
 }

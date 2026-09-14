@@ -193,15 +193,20 @@ export function createFileExplorerModule(options: FileExplorerModuleOptions): Fi
     return `${base}/${trimmedName}`;
   }
 
-  function refreshAffected(affectedPath: string): void {
-    // Refresh the parent directory of the affected path, plus root if distinct.
-    const parent = parentOf(affectedPath);
+  function refreshMany(paths: readonly string[]): void {
     const toRefresh = new Set<string>();
-    if (parent && snapshot.expanded.has(parent)) toRefresh.add(parent);
-    if (snapshot.root && snapshot.expanded.has(snapshot.root)) toRefresh.add(snapshot.root);
-    // Also refresh the affected dir itself if it is expanded (e.g. after rename).
-    if (snapshot.expanded.has(affectedPath)) toRefresh.add(affectedPath);
+    for (const affectedPath of paths) {
+      const parent = parentOf(affectedPath);
+      if (parent && snapshot.expanded.has(parent)) toRefresh.add(parent);
+      if (snapshot.root && snapshot.expanded.has(snapshot.root)) toRefresh.add(snapshot.root);
+      // Also refresh the affected dir itself if it is expanded (e.g. after rename).
+      if (snapshot.expanded.has(affectedPath)) toRefresh.add(affectedPath);
+    }
     for (const dir of toRefresh) void loadDir(dir);
+  }
+
+  function refreshAffected(affectedPath: string): void {
+    refreshMany([affectedPath]);
   }
 
   async function execute(command: FileExplorerCommand): Promise<boolean> {
@@ -287,6 +292,22 @@ export function createFileExplorerModule(options: FileExplorerModuleOptions): Fi
             refreshAffected(parentOf(command.from));
           } else {
             runtime.notify(failureMessage(result.failure, "重命名失败"), "error");
+          }
+          return result.ok;
+        } finally {
+          publish({ busy: false });
+        }
+      }
+      case "move": {
+        publish({ busy: true });
+        try {
+          // The rename endpoint doubles as move when the parent directory differs.
+          const result = await options.repository.rename(command.from, command.to);
+          if (result.ok) {
+            runtime.notify("已移动", "success");
+            refreshMany([command.from, command.to]);
+          } else {
+            runtime.notify(failureMessage(result.failure, "移动失败"), "error");
           }
           return result.ok;
         } finally {
