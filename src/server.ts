@@ -34,6 +34,7 @@ import { SessionRegistry } from "./session-registry.js";
 import { resolveSessionAiContext, resolveSystemAiContext } from "./session-ai-context.js";
 import { StructuredSessionManager } from "./structured-session-manager.js";
 import { recordRecentPath, registerFileRoutes } from "./server-file-routes.js";
+import { registerLocalPreviewRoutes } from "./server-local-preview-routes.js";
 import { registerSettingsRoutes } from "./server-settings-routes.js";
 import {
   appTokenLoginPayload,
@@ -434,6 +435,10 @@ export async function startServer(
   const requireSessions = buildRequireScope("sessions");
   const requireFiles = buildRequireScope("files");
   const requirePasswordVault = buildRequireScope("password-vault");
+  // Local preview traffic may contain arbitrary POST bodies. Mounting it before
+  // Express body parsers keeps uploads, SSE and non-JSON requests streamable.
+  registerLocalPreviewRoutes(app, { requireAuth, requireFiles });
+
   // Route-specific parsers must run before the global parser. Once body-parser
   // has consumed a request, a later express.json() cannot tighten or widen it.
   app.use("/api/optimize-prompt", express.json({ limit: "256kb" }));
@@ -671,6 +676,7 @@ export async function startServer(
     "/api/quick-paths",
     "/api/validate-path",
     "/api/file-search",
+    "/api/local-file",
   ], requireFiles);
   app.use("/api/browser-extension", requirePasswordVault);
 

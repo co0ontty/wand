@@ -18324,7 +18324,7 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar {
     padding-left: var(--sidebar-collapsed-width);
   }
 
-  html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar {
+  html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar:not(.pinned.collapsed) {
     width: min(var(--web-sidebar-width), calc(100vw - 24px));
     background: var(--web-sidebar-surface);
     border-right: 1px solid var(--web-sidebar-line);
@@ -19097,6 +19097,22 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav > .
   html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav > .sidebar-new-task {
     min-height: 40px;
   }
+}
+
+/* Keep the later web polish from fighting the compact rail geometry. */
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-feature-nav {
+  display: flex;
+  align-items: center;
+  padding: 0 4px 8px;
+}
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-feature-nav > button {
+  display: inline-flex;
+  width: 36px;
+  min-width: 36px;
+  padding: 8px;
+  justify-content: center;
+  gap: 0;
 }
 
 /* ── GitHub 议题弹窗 ─────────────────────────────────────────

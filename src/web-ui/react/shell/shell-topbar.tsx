@@ -1,6 +1,7 @@
 import * as React from "react";
 
 import { WandIcon, WandPopover, type WandIconName } from "../ui";
+import { localPreviewController } from "../local-preview/controller";
 import { classNames } from "../ui/class-names";
 
 import { getShellSidebarEntryActions } from "./shell-sidebar";
@@ -131,6 +132,16 @@ export function ShellTopbar() {
           onClick={() => void dispatch({ type: "layout.files.toggle" })}
         >
           <WandIcon name="explorer"/>
+        </button>
+        <button
+          id="topbar-local-preview-button"
+          className="topbar-btn square"
+          type="button"
+          aria-label="本地预览"
+          title="打开本机 Web 服务或 HTML 文件"
+          onClick={() => localPreviewController.show()}
+        >
+          <WandIcon name="eye"/>
         </button>
         <span id="topbar-git-slot" className="topbar-git-slot">
           {snapshot.topbar.git && (

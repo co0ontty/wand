@@ -33,6 +33,7 @@ import { installWorktreeMergeLegacyAdapter } from "./worktree-merge-adapter";
 import { refreshAll } from "./session-engine";
 import { openWandDialog, showToast } from "./notifications";
 import { installFilePreviewLegacyAdapter } from "./file-preview-adapter";
+import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
 import { installMissionsLegacyAdapter } from "./missions-adapter";
 import { installWorkspacesLegacyAdapter } from "./workspaces-adapter";
 import {
@@ -105,6 +106,12 @@ installWorktreeMergeLegacyAdapter({
     showToast(message, tone);
   },
 });
+(function installLocalPreviewLegacyBridge() {
+  try {
+    (window as any).__openLocalPreview = (value: unknown) => openLocalPreviewFromLegacy(String(value ?? ""));
+  } catch (e) {}
+})();
+
 installFilePreviewLegacyAdapter({
   getSiblings() {
     return state.allFiles;

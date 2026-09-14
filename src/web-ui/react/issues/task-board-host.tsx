@@ -163,6 +163,7 @@ export function TaskBoardHost({
   const [dropStatus, setDropStatus] = React.useState<WandTaskStatus | "">("");
   const [contextMenu, setContextMenu] = React.useState<{ taskId: string; x: number; y: number } | null>(null);
   const loadGenerationRef = React.useRef(0);
+  const workspaceGenerationRef = React.useRef(0);
   const titleRef = React.useRef<HTMLTextAreaElement>(null);
   const searchRef = React.useRef<HTMLInputElement>(null);
 
@@ -182,13 +183,23 @@ export function TaskBoardHost({
     }
   }, []);
 
+  const loadWorkspaces = React.useCallback(async (): Promise<void> => {
+    // 会话模式新建目录时，工作区是在会话创建链路上生成的；看板保持打开时，
+    // 不能只依赖 controller.revision，否则「新建任务」里的项目目录会一直停留在旧列表。
+    const generation = ++workspaceGenerationRef.current;
+    try {
+      const next = await taskBoardRepository.workspaces();
+      if (generation === workspaceGenerationRef.current) setWorkspaces(next);
+    } catch {
+      // 轮询失败时保留上一次成功列表，避免瞬时错误把已选目录清掉。
+    }
+  }, []);
+
   React.useEffect(() => {
     if (!controller.open) return;
     setDisplay(readIssueBoardDisplay());
     void reload();
-    void taskBoardRepository.workspaces()
-      .then((next) => setWorkspaces(next))
-      .catch(() => setWorkspaces([]));
+    void loadWorkspaces();
     void taskBoardRepository.models()
       .then((payload) => setCatalog(normalizeIssueModelCatalog(payload)))
       .catch(() => setCatalog(null));
@@ -198,7 +209,14 @@ export function TaskBoardHost({
         setLastAgent(next);
       })
       .catch(() => undefined);
-  }, [controller.open, controller.revision, reload]);
+  }, [controller.open, controller.revision, loadWorkspaces, reload]);
+
+  React.useEffect(() => {
+    if (!controller.open) return;
+    // 新建对话框打开时用更高频率同步目录；仅看板打开时维持普通轮询。
+    const interval = window.setInterval(() => void loadWorkspaces(), createOpen ? 2_000 : 6_000);
+    return () => window.clearInterval(interval);
+  }, [controller.open, createOpen, loadWorkspaces]);
 
   React.useEffect(() => {
     setError("");

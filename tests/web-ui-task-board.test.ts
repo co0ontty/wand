@@ -136,6 +136,9 @@ test("native board host talks to the Wand task API instead of the removed taskbo
   const host = readFileSync(new URL("../src/web-ui/react/issues/task-board-host.tsx", import.meta.url), "utf8");
   assert.match(host, /taskBoardRepository\.dispatch\(/);
   assert.match(host, /taskBoardRepository\.workspaces\(/);
+  // 会话模式里新建目录会在服务端生成 workspace；看板打开时必须持续拉取，
+  // 否则「新建任务」的项目目录下拉停留在旧数据。
+  assert.match(host, /window\.setInterval\(\(\) => void loadWorkspaces\(\), createOpen \? 2_000 : 6_000\)/);
   assert.match(host, /taskBoardRepository\.agentDefaults\(/);
   assert.match(host, /saveAgentDefaults\(/);
   assert.match(host, /WandSelect/);

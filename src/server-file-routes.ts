@@ -11,7 +11,7 @@ import type { Express, Request, Response } from "express";
 import { getErrorMessage } from "./error-utils.js";
 import { asyncRoute } from "./express-async.js";
 import { sendRouteError } from "./server-request.js";
-import { isBlockedFolderPath, normalizeFolderPath } from "./middleware/path-safety.js";
+import { isBlockedFolderPath, isPathWithinBase, normalizeFolderPath } from "./middleware/path-safety.js";
 import { parseBoundedInteger } from "./request-limits.js";
 import type { WandStorage } from "./storage.js";
 import type {
@@ -421,6 +421,86 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
     }
   }));
 
+  // Serve a directory or a single HTML file as a small local static site. The
+  // base64url root keeps a URL-directory shape so browser-resolved relative
+  // assets stay on this endpoint instead of escaping to the Wand shell.
+  app.use("/api/local-file/:encodedRoot", asyncRoute(async (req, res) => {
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      res.status(405).json({ error: "本地文件预览只支持 GET。" });
+      return;
+    }
+    const encodedRoot = String(req.params.encodedRoot ?? "");
+    if (!/^[A-Za-z0-9_-]*$/.test(encodedRoot)) {
+      res.status(400).json({ error: "本地预览路径格式无效。" });
+      return;
+    }
+    let rootPath = "";
+    try {
+      rootPath = Buffer.from(encodedRoot, "base64url").toString("utf8");
+    } catch {
+      res.status(400).json({ error: "本地预览路径格式无效。" });
+      return;
+    }
+    if (!rootPath.trim()) {
+      res.status(400).json({ error: "缺少本地预览路径。" });
+      return;
+    }
+    const requestedRoot = normalizeFolderPath(rootPath);
+    if (isBlockedFolderPath(requestedRoot)) {
+      res.status(403).json({ error: "访问被拒绝：无法访问系统敏感目录。" });
+      return;
+    }
+    let relativePath = req.url.split("?")[0] ?? "/";
+    try {
+      relativePath = decodeURIComponent(relativePath);
+    } catch {
+      res.status(400).json({ error: "本地预览资源路径无效。" });
+      return;
+    }
+    relativePath = relativePath.replace(/^\/+/, "");
+    try {
+      const rootStat = await stat(requestedRoot);
+      const baseRoot = rootStat.isFile() ? path.dirname(requestedRoot) : requestedRoot;
+      const requested = relativePath.trim() || (rootStat.isFile() ? path.basename(requestedRoot) : "index.html");
+      const resolvedPath = path.resolve(baseRoot, requested);
+      if (!isPathWithinBase(resolvedPath, baseRoot) || isBlockedFolderPath(resolvedPath)) {
+        res.status(403).json({ error: "访问被拒绝：路径越界。" });
+        return;
+      }
+      let fileStat = await stat(resolvedPath);
+      let filePath = resolvedPath;
+      if (fileStat.isDirectory()) {
+        filePath = path.join(resolvedPath, "index.html");
+        fileStat = await stat(filePath);
+      }
+      if (!fileStat.isFile()) {
+        res.status(400).json({ error: "目标不是普通文件。" });
+        return;
+      }
+      const ext = path.extname(filePath).toLowerCase();
+      const baseName = path.basename(filePath);
+      const encodedName = encodeURIComponent(baseName);
+      streamFileWithRange(req, res, {
+        filePath,
+        size: fileStat.size,
+        contentType: mimeForExt(ext),
+        disposition: `inline; filename*=UTF-8''${encodedName}`,
+        headers: {
+          "Cache-Control": "private, no-cache",
+          "X-Content-Type-Options": "nosniff",
+        },
+        readErrorMessage: "读取本地文件失败。",
+      });
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code === "ENOENT") {
+        res.status(404).json({ error: "本地预览入口或资源不存在。" });
+        return;
+      }
+      sendRouteError(res, error, "读取本地文件失败。");
+    }
+  }));
+
   app.get("/api/folders", asyncRoute(async (req, res) => {
     const q = typeof req.query.q === "string" ? req.query.q : "/tmp";
     const targetPath = normalizeFolderPath(q);
@@ -742,6 +822,10 @@ const TEXT_BASENAME_ALLOW = new Set([
 ]);
 
 const MIME_BY_EXT: Record<string, string> = {
+  ".html": "text/html; charset=utf-8", ".htm": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8", ".json": "application/json; charset=utf-8",
+  ".map": "application/json; charset=utf-8", ".xml": "application/xml; charset=utf-8",
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
   ".svg": "image/svg+xml", ".avif": "image/avif", ".bmp": "image/bmp", ".ico": "image/x-icon", ".heic": "image/heic",
   ".heif": "image/heif", ".pdf": "application/pdf", ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime",

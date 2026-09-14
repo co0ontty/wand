@@ -14,6 +14,7 @@ import { WorktreeMergeHost } from "./worktree-merge/host";
 import { RestartOverlayHost } from "./restart-overlay/host";
 import { restartOverlayController } from "./restart-overlay/controller";
 import { FilePreviewHost } from "./file-preview/host";
+import { LocalPreviewHost } from "./local-preview/host";
 import { ComposerSelectHost } from "./composer-select/host";
 import { MissionsHost } from "./missions/host";
 import { WorkspacesHost } from "./workspaces/host";
@@ -43,6 +44,7 @@ export function OverlayHost({ portalContainer }: OverlayHostProps) {
       <QuickCommitHost />
       <WorktreeMergeHost />
       <FilePreviewHost />
+      <LocalPreviewHost />
       <RestartOverlayHost />
       <WandToastRegion>
         {current.toasts.map((toast) => (

@@ -11,6 +11,7 @@ import { ensureTerminalFit, initTerminalJoystick, initTerminalResizeHandle, obse
 import { t } from "./i18n";
 import { batchDeleteSelected, clearAllClaudeHistory, clearSelections, confirmDelete, ensureClaudeHistoryLoaded, getVisibleClaudeHistorySessions, selectAllVisibleItems, toggleManageMode, toggleManagedItemSelection } from "./sidebar";
 import { consumeTerminalTouchPage, consumeTerminalWheelLines, consumeTerminalWheelPage, terminalWheelPageSequence, type TerminalTouchPagingState, type TerminalWheelPagingState, type TerminalWheelScrollState } from "./terminal-wheel";
+import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
 
       export function saveWorkingDir(path: string) {
         state.workingDir = path;
@@ -919,6 +920,40 @@ import { consumeTerminalTouchPage, consumeTerminalWheelLines, consumeTerminalWhe
 
         fontsReady.then(function() {
           term.open(termWrap);
+          term.registerLinkProvider({
+            provideLinks: function(lineNumber: number, callback: (links: any[] | undefined) => void) {
+              var line = term.buffer.getLine(lineNumber);
+              var text = line ? line.translateToString(true) : "";
+              var links: any[] = [];
+              var httpRegex = /https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/[^\s]+)?/gi;
+              var match: RegExpExecArray | null;
+              while ((match = httpRegex.exec(text)) !== null) {
+                var start = match.index + 1;
+                var end = match.index + match[0].length;
+                links.push({
+                  text: match[0],
+                  range: { start: { x: start, y: lineNumber }, end: { x: end, y: lineNumber } },
+                  activate: function(_event: any, value: string) {
+                    openLocalPreviewFromLegacy(value);
+                  },
+                });
+              }
+              var fileRegex = /(^|[\s(\['"])(\/[^\s]+?\.(?:html?|\/))(?=$|[\s)\]'"])/gi;
+              while ((match = fileRegex.exec(text)) !== null) {
+                var value = match[2];
+                var fileStart = match.index + match[1].length + 1;
+                var fileEnd = match.index + match[1].length + value.length;
+                links.push({
+                  text: value,
+                  range: { start: { x: fileStart, y: lineNumber }, end: { x: fileEnd, y: lineNumber } },
+                  activate: function(_event: any, target: string) {
+                    openLocalPreviewFromLegacy(target);
+                  },
+                });
+              }
+              callback(links.length ? links : undefined);
+            },
+          });
           term.attachCustomKeyEventHandler(function() {
             return state.terminalInteractive === true;
           });

@@ -102,6 +102,7 @@ test("ShellTopbar SSR preserves title, status, cwd, git, and menu contracts", ()
     "current-task",
     "topbar-cwd",
     "topbar-file-button",
+    "topbar-local-preview-button",
     "topbar-git-slot",
     "topbar-git-badge",
     "topbar-more-button",

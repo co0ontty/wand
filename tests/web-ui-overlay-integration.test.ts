@@ -19,7 +19,7 @@ test("business overlay hosts and browser bridges are mounted exactly once", () =
   const index = source("src/web-ui/react/index.tsx");
   const main = source("src/web-ui/browser/main.ts");
 
-  for (const component of ["WorktreeMergeHost", "FilePreviewHost", "RestartOverlayHost"]) {
+  for (const component of ["WorktreeMergeHost", "FilePreviewHost", "LocalPreviewHost", "RestartOverlayHost"]) {
     assert.equal(occurrences(host, `<${component} />`), 1, `${component} must mount once`);
   }
   assert.ok(

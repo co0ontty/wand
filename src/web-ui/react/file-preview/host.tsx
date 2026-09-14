@@ -20,6 +20,7 @@ import {
   tokenizeFilePreviewCode,
 } from "./model";
 import { filePreviewStyles } from "./styles";
+import { localFilePreviewHref, localHttpPreviewHref, localPreviewController } from "../local-preview/controller";
 import type {
   FilePreviewCodeToken,
   FilePreviewMarkdownBlock,
@@ -58,7 +59,27 @@ function MarkdownInline({ tokens }: { tokens: ReadonlyArray<FilePreviewMarkdownI
           case "strong": return <strong key={index}>{token.value}</strong>;
           case "emphasis": return <em key={index}>{token.value}</em>;
           case "delete": return <del key={index}>{token.value}</del>;
-          case "link": return <a key={index} href={token.url} target="_blank" rel="noopener noreferrer">{token.value}</a>;
+          case "link": {
+            const isServerHtmlPath = token.url.startsWith("/") && /\.(?:html?|)$/i.test(token.url);
+            const localHref = isServerHtmlPath
+              ? localFilePreviewHref(token.url)
+              : localHttpPreviewHref(token.url);
+            return localHref ? (
+              <a
+                key={index}
+                href={localHref}
+                onClick={(event) => {
+                  event.preventDefault();
+                  if (isServerHtmlPath) localPreviewController.openFile(token.url);
+                  else localPreviewController.openUrl(token.url);
+                }}
+              >
+                {token.value}
+              </a>
+            ) : (
+              <a key={index} href={token.url} target="_blank" rel="noopener noreferrer">{token.value}</a>
+            );
+          }
           case "image": return <img key={index} src={token.url} alt={token.value} />;
           default: return <Fragment key={index}>{token.value}</Fragment>;
         }

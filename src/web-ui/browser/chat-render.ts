@@ -12,6 +12,8 @@ import { getCardDefault, snapCollapsedSubagentPanelsToBottom } from "./events";
 import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
 import { shouldExtractPtySystemInfo } from "./pty-system-info";
 import { getToolDisplayName, getToolIcon } from "./tool-identity";
+import { localFilePreviewHref, localHttpPreviewHref } from "../react/local-preview/controller";
+import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
 
 
 
@@ -3736,17 +3738,48 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
           return value.charAt(0) === "/" ? value : null;
         }
 
+        function localFilePreviewAnchor(value, label) {
+          var href = localFilePreviewHref(value);
+          if (!href) return label;
+          return '<a class="local-preview-link" href="' + escapeHtml(href) + '"' +
+            ' data-local-preview-url="' + escapeHtml(value) + '"' +
+            ' onclick="if(window.__openLocalPreview){event.preventDefault();window.__openLocalPreview(this.getAttribute(\'data-local-preview-url\'));}">' +
+            label + '</a>';
+        }
+
+        function localPreviewAnchor(value, label) {
+          var href = localHttpPreviewHref(value);
+          if (!href) return label;
+          return '<a class="local-preview-link" href="' + escapeHtml(href) + '"' +
+            ' data-local-preview-url="' + escapeHtml(value) + '"' +
+            ' onclick="if(window.__openLocalPreview){event.preventDefault();window.__openLocalPreview(this.getAttribute(\'data-local-preview-url\'));}">' +
+            label + '</a>';
+        }
+
         function safeExternalLink(target, label) {
           var value = String(target || "").trim();
           if (value.charAt(0) === "<" && value.charAt(value.length - 1) === ">") {
             value = value.slice(1, -1).trim();
           }
           if (!/^(?:https?:\/\/|mailto:|#)/i.test(value)) return label;
+          if (localHttpPreviewHref(value)) return localPreviewAnchor(value, label);
           var escapedTarget = escapeHtml(value);
           var opensNewWindow = /^https?:\/\//i.test(value);
           return '<a href="' + escapedTarget + '"' +
             (opensNewWindow ? ' target="_blank"' : "") +
             ' rel="noopener">' + label + '</a>';
+        }
+
+        function autoLinkLocalHttp(source) {
+          // Wand message text is already escaped here. The prefix excludes URL
+          // attributes and existing data attributes, so this only turns bare
+          // loopback URLs into clickable preview links.
+          return source.replace(
+            /(^|[^"'>])(https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/[^\s<>"'`\\]*)?)/gi,
+            function(_all, prefix, value) {
+              return prefix + localPreviewAnchor(value, value);
+            }
+          );
         }
 
         function stashMarkdownLinks(source) {
@@ -3795,7 +3828,9 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
                 var target = source.slice(closeText + 2, closeTarget).trim();
                 var serverPath = serverFilePathFromLink(target);
                 var linkHtml;
-                if (serverPath) {
+                if (serverPath && /\.(?:html?|)$/i.test(serverPath)) {
+                  linkHtml = localFilePreviewAnchor(serverPath, label);
+                } else if (serverPath) {
                   var rawUrl = "/api/file-raw?download=1&amp;path=" + encodeURIComponent(serverPath);
                   linkHtml = '<a class="server-file-link" href="' + rawUrl + '" data-server-file-path="' +
                     escapeHtml(serverPath) + '" title="打开或下载服务端文件" onclick="if(window.__openFilePreview){event.preventDefault();window.__openFilePreview(this.getAttribute(\'data-server-file-path\'));}">' +
@@ -4008,6 +4043,7 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
         flushListBuffer();
 
         result = wrapParagraphs(grouped.join(newline));
+        result = autoLinkLocalHttp(result);
         result = restoreMarkdownLinks(result);
         return '<div class="markdown-content">' + result + '</div>';
       }
