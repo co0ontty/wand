@@ -17756,13 +17756,20 @@
       padding-top: 0;
     }
 
-    /* One level of indentation is enough: the left edge is shared by tasks
-       and their sessions, while the smaller session type establishes depth. */
+    /* Three readable levels: 目录 (flush) → 任务 (guide line) → 终端 (nested
+       inside the task). Sessions must indent past their task row, and the
+       loose-session summary sits at session level so the tree never shows two
+       labels sharing one left edge. */
     #app[data-react-shell="enabled"] .workspace-tasks {
       gap: 1px;
       margin: 2px 0 0 17px;
-      padding: 0 0 0 5px;
+      padding: 0 0 0 9px;
       border-left: 1px solid var(--border-subtle);
+    }
+
+    /* 未命名任务折叠后，只有未归档目录会留下空的 tasks 容器；别让它画出一截 6px 导轨。 */
+    #app[data-react-shell="enabled"] .workspace-tasks:empty {
+      display: none;
     }
 
     #app[data-react-shell="enabled"] .workspace-task {
@@ -17839,8 +17846,12 @@
 
     #app[data-react-shell="enabled"] .workspace-task-sessions {
       margin: 1px 0 5px 10px;
-      padding-left: 4px;
+      padding-left: 9px;
       border-left: 1px solid var(--border-subtle);
+    }
+
+    #app[data-react-shell="enabled"] .workspace-task-sessions > .workspace-session-main {
+      padding-left: 8px;
     }
 
     #app[data-react-shell="enabled"] .workspace-session {
@@ -17903,12 +17914,25 @@
     }
 
     #app[data-react-shell="enabled"] .workspace-loose-sessions {
-      margin-top: 8px;
+      margin: 4px 0 0 10px;
+      border-left: 1px solid var(--border-subtle);
+      padding-left: 9px;
     }
 
     #app[data-react-shell="enabled"] .workspace-loose-sessions > summary {
-      padding: 4px 5px;
+      padding: 4px 6px;
       font-size: 0.6875rem;
+      letter-spacing: 0.01em;
+    }
+
+    #app[data-react-shell="enabled"] .workspace-loose-session-list {
+      margin-left: 0;
+      padding-left: 4px;
+      border-left: 0;
+    }
+
+    #app[data-react-shell="enabled"] .workspace-loose-session-list > .workspace-session-main {
+      padding-left: 6px;
     }
 
     @media (max-width: 768px) {
@@ -18647,6 +18671,11 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-tasks {
   border-left: 1px solid rgba(197, 101, 61, 0.18);
 }
 
+/* 未命名任务折叠后，只有未归档目录会留下空的 tasks 容器；别让它画出一截 6px 导轨。 */
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-tasks:empty {
+  display: none;
+}
+
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task {
   min-height: 36px;
   gap: 3px;
@@ -18721,6 +18750,24 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task-chevron-
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task-chevron-btn:hover {
   color: var(--accent-active);
   background: var(--web-sidebar-active);
+}
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task-sessions {
+  margin: 2px 0 6px 10px;
+  padding: 2px 0 2px 9px;
+  border-left: 1px solid rgba(197, 101, 61, 0.18);
+}
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-loose-sessions {
+  margin: 4px 0 0 10px;
+  border-left: 1px solid rgba(197, 101, 61, 0.18);
+  padding-left: 9px;
+}
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-loose-session-list {
+  margin-left: 0;
+  padding-left: 3px;
+  border-left: 0;
 }
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-session-main {

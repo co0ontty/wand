@@ -840,3 +840,74 @@ test("workspaces panel exposes multi-select and a compact task rail", () => {
   assert.match(panel, /重命名目录/);
   assert.match(panel, /renameDirectory\(group\.workspaceCwd/);
 });
+
+test("unnamed tasks fold into the directory's loose sessions", async () => {
+  const { flattenUnnamedTasks, flattenUnnamedTasksInGroups, findSessionTask, isUnnamedTaskName } = await import(
+    "../src/web-ui/react/workspaces/task-flatten.js"
+  );
+  assert.equal(isUnnamedTaskName("未命名任务"), true);
+  assert.equal(isUnnamedTaskName("   "), true);
+  assert.equal(isUnnamedTaskName(undefined), true);
+  assert.equal(isUnnamedTaskName("未命名任务 2"), false);
+
+  const group = {
+    workspaceId: "w1",
+    workspaceName: "Wand",
+    workspaceCwd: "/work",
+    tasks: [
+      manageTask("named", "修复侧栏", [{ id: "named-session" }]),
+      manageTask("unnamed-1", "未命名任务", [{ id: "loose-a" }]),
+      manageTask("unnamed-2", "未命名任务", [{ id: "loose-b" }]),
+    ],
+    standaloneSessions: [{ id: "loose-0" }],
+  };
+  const flattened = flattenUnnamedTasks(group);
+  assert.deepEqual(flattened.tasks.map((task) => task.id), ["named"]);
+  assert.deepEqual(flattened.standaloneSessions.map((session) => session.id), ["loose-0", "loose-a", "loose-b"]);
+  // Already-folder groups keep their identity so React can bail out of rendering.
+  const stable = { ...group, tasks: [group.tasks[0]] };
+  assert.equal(flattenUnnamedTasks(stable), stable);
+
+  // Polling rebuilds identical objects; the memo must hand back the same tree.
+  const { createUnnamedTaskFlattener } = await import(
+    "../src/web-ui/react/workspaces/task-flatten.js"
+  );
+  const flatten = createUnnamedTaskFlattener();
+  const first = flatten([group]);
+  const second = flatten([structuredClone(group)]);
+  assert.equal(first, second);
+  const third = flatten([{ ...structuredClone(group), workspaceName: "Renamed" }]);
+  assert.notEqual(first, third);
+
+  const [only] = flattenUnnamedTasksInGroups([group]);
+  assert.equal(only.tasks.length, 1);
+  // A folded session still resolves to its original task for workspace restore.
+  const folded = only.standaloneSessions[1];
+  assert.equal(findSessionTask(only, folded, [group])?.id, "unnamed-1");
+  assert.equal(findSessionTask(only, { id: "missing" }, [group]), undefined);
+});
+
+/** Read a repository file relative to the test directory. */
+function sourceText(relativePath: string): string {
+  return readFileSync(new URL(`../${relativePath}`, import.meta.url), "utf8");
+}
+
+test("sidebar directory tree indents every level without extra re-renders", () => {
+  const styles = sourceText("src/web-ui/content/styles.css");
+  // Sessions must indent past the task row they belong to, so 目录 / 任务 / 终端
+  // never share one left edge.
+  const taskSessions = styles.indexOf('#app[data-react-shell="enabled"] .workspace-task-sessions {');
+  assert.ok(taskSessions >= 0);
+  assert.match(styles.slice(taskSessions, styles.indexOf("}", taskSessions)), /padding-left:\s*9px;/);
+  const looseSessions = styles.indexOf('#app[data-react-shell="enabled"] .workspace-loose-sessions {');
+  assert.ok(looseSessions >= 0);
+  const looseRule = styles.slice(looseSessions, styles.indexOf("}", looseSessions));
+  assert.match(looseRule, /border-left:/);
+  assert.match(looseRule, /padding-left:\s*9px;/);
+
+  // The /api/tasks poll hands back fresh objects every few seconds; folding must
+  // be memoized by content or 40-session directories re-render on a timer.
+  const panel = sourceText("src/web-ui/react/workspaces/workspaces-panel.tsx");
+  assert.match(panel, /const flattenGroups = React\.useMemo\(\(\) => createUnnamedTaskFlattener\(\), \[\]\)/);
+  assert.match(panel, /const groups = React\.useMemo\(\(\) => flattenGroups\(sourceGroups\), \[flattenGroups, sourceGroups\]\)/);
+});

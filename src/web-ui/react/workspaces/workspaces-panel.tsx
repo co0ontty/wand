@@ -31,6 +31,7 @@ import {
   isTaskSessionsExpanded,
   showsTaskSessionDisclosure,
 } from "./task-tree";
+import { createUnnamedTaskFlattener, findSessionTask } from "./task-flatten";
 import {
   COLLAPSED_RAIL_LIMIT,
   EMPTY_SIDEBAR_MANAGE_SELECTION,
@@ -1159,7 +1160,11 @@ export function WorkspacesPanel({
     lastOpenRef.current = controllerSnapshot.open;
   }, [controllerSnapshot.open]);
 
-  const { groups, loading, error, reload } = useTaskGroups(refreshTick);
+  const { groups: sourceGroups, loading, error, reload } = useTaskGroups(refreshTick);
+  // 未命名任务折叠进「未分组会话」，目录树只保留 目录 → 任务 → 终端 三级。
+  // 轮询会重建所有对象，用内容签名做 memo，避免整棵树每 6 秒重渲染。
+  const flattenGroups = React.useMemo(() => createUnnamedTaskFlattener(), []);
+  const groups = React.useMemo(() => flattenGroups(sourceGroups), [flattenGroups, sourceGroups]);
   const visibleGroups = filterSidebarGroups(groups, searchQuery, sessionTitles ?? {});
 
   // 活动高亮统一读 workspaceContextStore（主区标签栏与这里共用同一来源，
@@ -1221,8 +1226,7 @@ export function WorkspacesPanel({
       toast("工作空间运行环境尚未就绪，请刷新页面后重试。", "warning");
       return;
     }
-    const task = group.tasks.find((item) => item.id === session.workspaceTaskId)
-      ?? group.tasks.find((item) => item.sessions.some((entry) => entry.id === session.id));
+    const task = findSessionTask(group, session, sourceGroups);
     if (task) {
       void Promise.resolve(openTask(group, task)).then(() => rt.selectSession(session.id));
       return;
@@ -1238,7 +1242,7 @@ export function WorkspacesPanel({
       });
     }
     rt.selectSession(session.id);
-  }, [onNavigate, openTask]);
+  }, [onNavigate, openTask, sourceGroups]);
 
   const newSessionInTask = React.useCallback(async (
     group: TaskDirectoryGroup,
@@ -1282,7 +1286,7 @@ export function WorkspacesPanel({
         if (activeTaskId === taskId) runtime()?.closeWorkspace();
       }
       if (resolved.sessionIds.length > 0) {
-        const ownedTask = visibleGroups
+        const ownedTask = sourceGroups
           .flatMap((group) => group.tasks)
           .find((task) => task.sessions.some((session) => resolved.sessionIds.includes(session.id))) ?? null;
         await removeSessions(resolved.sessionIds, ownedTask);
