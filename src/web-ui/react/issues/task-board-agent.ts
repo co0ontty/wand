@@ -66,7 +66,7 @@ export const ISSUE_PRIORITIES: ReadonlyArray<{ value: WandTaskPriority; label: s
   { value: "low", label: "低" },
 ];
 
-const LABEL_PALETTE = ["#5e6ad2", "#d25e5e", "#5eccd2", "#f9ac28", "#85d254", "#5482d2", "#bf49d7"];
+const LABEL_PALETTE = ["#c5653d", "#4f7a58", "#a96a2f", "#4a6fa5", "#b24f45", "#6f6da3", "#8a6b4a"];
 
 export function issuePriorityLabel(priority: WandTaskPriority): string {
   return ISSUE_PRIORITIES.find((entry) => entry.value === priority)?.label ?? priority;
@@ -81,8 +81,8 @@ export function issueLabelTone(name: string): "bug" | "feature" | null {
 
 export function issueLabelColor(name: string): string {
   const tone = issueLabelTone(name);
-  if (tone === "bug") return "#eb5757";
-  if (tone === "feature") return "#bb87fc";
+  if (tone === "bug") return "#b24f45";
+  if (tone === "feature") return "#4a6fa5";
   let hash = 0;
   for (const char of name) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
   return LABEL_PALETTE[hash % LABEL_PALETTE.length]!;

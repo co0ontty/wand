@@ -372,10 +372,12 @@ export function TaskBoardListView({
           aria-expanded={!isCollapsed}
           onClick={() => onToggle(column.status)}
         >
-          <WandIcon name={isCollapsed ? "chevronLeft" : "chevron"} size={12}/>
-          <TaskBoardStatusGlyph status={column.status}/>
-          <strong>{column.label}</strong>
-          <span>{items.length}</span>
+          <span className="task-board-list-heading">
+            <WandIcon name={isCollapsed ? "chevronLeft" : "chevron"} size={12}/>
+            <TaskBoardStatusGlyph status={column.status}/>
+            <strong>{column.label}</strong>
+          </span>
+          <b>{items.length}</b>
         </button>
         {!isCollapsed && <div className="task-board-list-rows">
           {items.length === 0 && column.status !== "done" && <p className="task-board-column-empty">{column.empty}</p>}

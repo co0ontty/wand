@@ -446,15 +446,15 @@ export function TaskBoardHost({
         onClick={() => setSelectedId(task.id)}
       />
       <div className="task-board-card-topline">
-        <span className="task-board-card-id">ID: {task.identifier}</span>
+        <h3 id={`task-${task.id}-title`}>{task.title || "未命名任务"}</h3>
         {task.status === "done" ? <TaskBoardCompleteButton onClick={() => void patchTask(task.id, { status: "done" })}/> : null}
       </div>
-      <h3 id={`task-${task.id}-title`}>{task.title}</h3>
       {display.body && task.description && task.sessions.length === 0 && !task.agent
         ? <p className="task-board-card-body">{task.description}</p>
         : null}
       <TaskBoardProgressRow task={task}/>
       <div className="task-board-card-meta" aria-label="任务属性">
+        <span className="task-board-card-id">{task.identifier}</span>
         <TaskBoardProjectChip name={task.workspace ? task.workspace.name : "未指定项目"}/>
         {task.milestone ? <TaskBoardMilestoneChip name={task.milestone.name}/> : null}
         <TaskBoardPriorityChip priority={task.priority}/>
@@ -464,14 +464,13 @@ export function TaskBoardHost({
           {issueDueStamp(task.dueDate)}
         </span> : null}
         <TaskBoardAgentChips sessions={task.sessions} assigned={assigned}/>
+        {task.status !== "doing"
+          ? <TaskBoardConversationButton sessions={task.sessions} onOpen={onOpenSession}/>
+          : null}
       </div>
       {task.status === "doing"
         ? <TaskBoardProcessingRow task={task} onOpenSession={onOpenSession}/>
-        : task.sessions.length > 0
-          ? <div className="task-board-card-sessions">
-              <TaskBoardConversationButton sessions={task.sessions} onOpen={onOpenSession}/>
-            </div>
-          : null}
+        : null}
     </article>;
   };
 
@@ -653,7 +652,8 @@ export function TaskBoardHost({
             title="新建议题 (C)"
             onClick={() => openCreate("todo")}
           >
-            <WandIcon name="plus" size={14}/>
+            <WandIcon name="plus" size={13}/>
+            <span>新建</span>
           </button>
         </>}
       </div>
@@ -740,9 +740,11 @@ export function TaskBoardHost({
       className={classNames("wand-ui-dialog-content", "task-board-create-dialog", createExpanded && "is-expanded")}
       overlayClassName="wand-ui-dialog-overlay task-board-create-overlay"
       titleClassName="task-board-create-title"
+      descriptionClassName="task-board-create-description"
       headerClassName="task-board-create-heading"
       description="标题可选。填写描述并选择 Agent 后，这段描述会作为第一次指派发出。"
       closeLabel="关闭编辑器"
+      closeContent={<WandIcon name="close" size={14} strokeWidth={1.8}/>}
       onOpenChange={(open) => {
         if (!open) setCreateOpen(false);
       }}
@@ -754,118 +756,132 @@ export function TaskBoardHost({
           void createTask();
         }}
       >
-        {/* 标题是可选字段：留空就按描述自动生成，所以这里刻意做得比描述框更轻。 */}
-        <div className="task-board-create-title-field">
-          <span className="task-board-create-title-label" id="task-board-create-title-label">
-            任务标题
-            <em>可选</em>
-          </span>
+        <div className="task-board-create-writing">
+          {/* 标题是可选字段：留空就按描述自动生成，所以这里刻意做得比描述框更轻。 */}
+          <div className="task-board-create-title-field">
+            <span className="task-board-create-title-label" id="task-board-create-title-label">
+              任务标题
+              <em>可选</em>
+            </span>
+            <textarea
+              ref={titleRef}
+              className="task-board-create-title-input"
+              rows={1}
+              value={draft.title}
+              placeholder="不填写则按描述自动生成"
+              aria-labelledby="task-board-create-title-label"
+              maxLength={240}
+              data-wand-autofocus=""
+              onChange={(event) => {
+                const value = event.currentTarget.value.replace(/\n/g, "");
+                setDraft((current) => ({ ...current, title: value }));
+              }}
+            />
+          </div>
           <textarea
-            ref={titleRef}
-            className="task-board-create-title-input"
-            rows={1}
-            value={draft.title}
-            placeholder="不填写则按描述自动生成"
-            aria-labelledby="task-board-create-title-label"
-            maxLength={240}
+            className="task-board-create-body-input"
+            rows={4}
+            value={draft.description}
+            placeholder="添加描述…（将作为第一个 Agent 的指派内容）"
+            aria-label="任务描述（作为第一次指派）"
             onChange={(event) => {
-              const value = event.currentTarget.value.replace(/\n/g, "");
-              setDraft((current) => ({ ...current, title: value }));
+              const value = event.currentTarget.value;
+              setDraft((current) => ({ ...current, description: value }));
             }}
           />
         </div>
-        <textarea
-          className="task-board-create-body-input"
-          rows={4}
-          value={draft.description}
-          placeholder="添加描述…（将作为第一个 Agent 的指派内容）"
-          aria-label="任务描述（作为第一次指派）"
-          onChange={(event) => {
-            const value = event.currentTarget.value;
-            setDraft((current) => ({ ...current, description: value }));
-          }}
-        />
-        <div className="task-board-create-properties">
-          <WandSelect
-            value={issueWorkspaceSelectValue(draft.workspaceId)}
-            options={workspaceOptions}
-            ariaLabel="指定项目目录"
-            placeholder="选择项目目录"
-            searchable
-            searchPlaceholder="搜索项目"
-            className="task-board-native-select"
-            onValueChange={(value) => setDraft((current) => ({ ...current, workspaceId: issueWorkspaceIdFromSelect(value) ?? "" }))}
-          />
-          <WandSelect
-            value={draft.status}
-            options={ISSUE_COLUMNS.map((column) => ({ value: column.status, label: column.label }))}
-            ariaLabel="状态"
-            className="task-board-native-select"
-            onValueChange={(status) => setDraft((current) => ({ ...current, status: status as WandTaskStatus }))}
-          />
-          <WandSelect
-            value={draft.priority}
-            options={ISSUE_PRIORITIES.map((entry) => ({ value: entry.value, label: entry.label }))}
-            ariaLabel="优先级"
-            className="task-board-native-select"
-            onValueChange={(priority) => setDraft((current) => ({ ...current, priority: priority as WandTaskPriority }))}
-          />
-          <label className="task-board-due-field">
-            <span>截止日期</span>
-            <input
-              type="date"
-              value={draft.dueDate}
-              onChange={(event) => {
-                const value = event.currentTarget.value;
-                setDraft((current) => ({ ...current, dueDate: value }));
-              }}
+        <div className="task-board-create-meta">
+          <div className="task-board-create-properties" aria-label="任务属性">
+            <WandSelect
+              value={issueWorkspaceSelectValue(draft.workspaceId)}
+              options={workspaceOptions}
+              ariaLabel="指定项目目录"
+              placeholder="选择项目目录"
+              searchable
+              searchPlaceholder="搜索项目"
+              className="task-board-native-select"
+              onValueChange={(value) => setDraft((current) => ({ ...current, workspaceId: issueWorkspaceIdFromSelect(value) ?? "" }))}
             />
-          </label>
-          <MilestonePicker
-            value={draft.milestoneId || null}
-            onChange={(milestoneId) => setDraft((current) => ({ ...current, milestoneId: milestoneId ?? "" }))}
-          />
-          <WandSelect
-            value={draft.agent.provider}
-            options={ISSUE_AGENT_PROVIDERS.map((entry) => ({ value: entry.value, label: entry.label }))}
-            ariaLabel="第一次指派的 CLI 工具"
-            className="task-board-native-select"
-            onValueChange={(provider) => setDraft((current) => ({
-              ...current,
-              agent: withIssueAgentProvider(current.agent, provider as WandTaskAgent["provider"], catalog),
-            }))}
-          />
-          <WandSelect
-            value={draft.agent.model}
-            options={issueAgentModelOptions(catalog, draft.agent.provider)}
-            ariaLabel="第一次指派的模型"
-            searchable
-            searchPlaceholder="搜索模型"
-            className="task-board-native-select"
-            onValueChange={(model) => setDraft((current) => ({ ...current, agent: { ...current.agent, model } }))}
-          />
-          <WandSelect
-            value={draft.agent.thinkingEffort}
-            options={ISSUE_AGENT_EFFORTS.map((entry) => ({ value: entry.value, label: entry.label }))}
-            ariaLabel="第一次指派的思考深度"
-            className="task-board-native-select"
-            onValueChange={(effort) => setDraft((current) => ({
-              ...current,
-              agent: { ...current.agent, thinkingEffort: effort as WandTaskAgent["thinkingEffort"] },
-            }))}
-          />
-          <label className="task-board-due-field">
-            <span>标签</span>
-            <input
-              type="text"
-              value={draft.labels}
-              placeholder="用逗号分隔"
-              onChange={(event) => {
-                const value = event.currentTarget.value;
-                setDraft((current) => ({ ...current, labels: value }));
-              }}
+            <WandSelect
+              value={draft.status}
+              options={ISSUE_COLUMNS.map((column) => ({ value: column.status, label: column.label }))}
+              ariaLabel="状态"
+              className="task-board-native-select"
+              onValueChange={(status) => setDraft((current) => ({ ...current, status: status as WandTaskStatus }))}
             />
-          </label>
+            <WandSelect
+              value={draft.priority}
+              options={ISSUE_PRIORITIES.map((entry) => ({ value: entry.value, label: entry.label }))}
+              ariaLabel="优先级"
+              className="task-board-native-select"
+              onValueChange={(priority) => setDraft((current) => ({ ...current, priority: priority as WandTaskPriority }))}
+            />
+            <label className="task-board-create-chip">
+              <span>截止日期</span>
+              <input
+                type="date"
+                value={draft.dueDate}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  setDraft((current) => ({ ...current, dueDate: value }));
+                }}
+              />
+            </label>
+            <MilestonePicker
+              value={draft.milestoneId || null}
+              onChange={(milestoneId) => setDraft((current) => ({ ...current, milestoneId: milestoneId ?? "" }))}
+            />
+            <label className="task-board-create-chip is-grow">
+              <span>标签</span>
+              <input
+                type="text"
+                value={draft.labels}
+                placeholder="用逗号分隔"
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  setDraft((current) => ({ ...current, labels: value }));
+                }}
+              />
+            </label>
+          </div>
+
+          <div className="task-board-create-assign" aria-label="第一次指派">
+            <div className="task-board-create-assign-copy">
+              <strong>第一次指派</strong>
+              <span>有描述时会立刻发给所选 Agent</span>
+            </div>
+            <div className="task-board-create-assign-controls">
+              <WandSelect
+                value={draft.agent.provider}
+                options={ISSUE_AGENT_PROVIDERS.map((entry) => ({ value: entry.value, label: entry.label }))}
+                ariaLabel="第一次指派的 CLI 工具"
+                className="task-board-native-select"
+                onValueChange={(provider) => setDraft((current) => ({
+                  ...current,
+                  agent: withIssueAgentProvider(current.agent, provider as WandTaskAgent["provider"], catalog),
+                }))}
+              />
+              <WandSelect
+                value={draft.agent.model}
+                options={issueAgentModelOptions(catalog, draft.agent.provider)}
+                ariaLabel="第一次指派的模型"
+                searchable
+                searchPlaceholder="搜索模型"
+                className="task-board-native-select"
+                onValueChange={(model) => setDraft((current) => ({ ...current, agent: { ...current.agent, model } }))}
+              />
+              <WandSelect
+                value={draft.agent.thinkingEffort}
+                options={ISSUE_AGENT_EFFORTS.map((entry) => ({ value: entry.value, label: entry.label }))}
+                ariaLabel="第一次指派的思考深度"
+                className="task-board-native-select"
+                onValueChange={(effort) => setDraft((current) => ({
+                  ...current,
+                  agent: { ...current.agent, thinkingEffort: effort as WandTaskAgent["thinkingEffort"] },
+                }))}
+              />
+            </div>
+          </div>
         </div>
         <div className="task-board-create-footer">
           <WandSwitch
@@ -885,6 +901,7 @@ export function TaskBoardHost({
           <WandButton
             kind="primary"
             type="submit"
+            className="task-board-create-submit"
             disabled={(!draft.title.trim() && !draft.description.trim()) || busyId === "__create__"}
           >
             {busyId === "__create__" ? "正在保存…" : draft.description.trim() ? "创建并指派" : "创建任务"}
