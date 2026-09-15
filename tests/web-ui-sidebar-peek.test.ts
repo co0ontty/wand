@@ -89,6 +89,10 @@ test("hover hook only opens while the rail is collapsed", () => {
   // 端口浮层（行内下拉 / 弹窗）自己处理 Esc 和内部点击，面板要让位。
   assert.match(source, /if \(insideFloatingLayer\(event\.target\)\) return;/);
   assert.match(source, /if \(insideFloatingLayer\(target\)\) return;/);
+  // Esc 只在焦点真在侧栏（窄栏或面板）里时才接管：
+  // 焦点在终端 / 聊天框时 Esc 属于它们（xterm 会把 Esc 发给 CLI）。
+  assert.match(source, /const focused = document\.activeElement;\s*if \(!holds\(focused\)\) return;/);
+  assert.match(source, /if \(focused instanceof HTMLElement && surfaceRef\.current\?\.contains\(focused\)\) \{\s*focused\.blur\(\);/);
 });
 
 test("SidebarPeek styles anchor the panel to the rail's right edge", () => {

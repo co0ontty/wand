@@ -126,16 +126,25 @@ export function useSidebarPeek(
 
   React.useEffect(() => clearTimers, [clearTimers]);
 
+  const holds = React.useCallback((next: EventTarget | null): boolean => (
+    next instanceof Node
+    && (surfaceRef.current?.contains(next) === true || triggerRef.current?.contains(next) === true)
+  ), [surfaceRef, triggerRef]);
+
   React.useEffect(() => {
     if (!open) return;
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
-      // Esc 来自端口浮层（行内下拉 / 弹窗）：它自己有收起逻辑，面板保持不动。
-      if (insideFloatingLayer(event.target)) return;
+      // 只有焦点真在侧栏里才接管 Esc：焦点在终端 / 聊天框时 Esc 属于它们
+      // （xterm 会把 Esc 发给 CLI），悬停面板不抢这个键。
       const focused = document.activeElement;
+      if (!holds(focused)) return;
+      // 面板里开着端口浮层（行内下拉 / 弹窗）：让浮层自己收。
+      if (insideFloatingLayer(event.target)) return;
       close();
+      // 焦点还在面板里时别把它交回窄栏：窄栏的 focusin 会立刻再把面板弹起来。
       if (focused instanceof HTMLElement && surfaceRef.current?.contains(focused)) {
-        triggerRef.current?.focus({ preventScroll: true });
+        focused.blur();
       }
     };
     const onPointerDown = (event: PointerEvent): void => {
@@ -154,12 +163,7 @@ export function useSidebarPeek(
       document.removeEventListener("keydown", onKeyDown);
       document.removeEventListener("pointerdown", onPointerDown, true);
     };
-  }, [open, close, surfaceRef, triggerRef]);
-
-  const holds = React.useCallback((next: EventTarget | null): boolean => (
-    next instanceof Node
-    && (surfaceRef.current?.contains(next) === true || triggerRef.current?.contains(next) === true)
-  ), [surfaceRef, triggerRef]);
+  }, [open, close, holds, surfaceRef, triggerRef]);
 
   const leave = React.useCallback((event: React.PointerEvent<HTMLElement>): void => {
     if (insideFloatingLayer(event.relatedTarget)) return;

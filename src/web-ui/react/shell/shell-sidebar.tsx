@@ -796,6 +796,8 @@ export function ShellSidebar() {
             </div>
           </div>
         </div>
+        {/* 首次悬停才挂载，之后常驻（关闭态用 CSS visibility 藏起来）：
+            既不预览就多跑一份任务树轮询，也不会每次悬停都重新拉一次。 */}
         {narrow && hoverPointer && peek.mounted ? (
           <SidebarPeek
             open={peek.open}
