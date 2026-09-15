@@ -19,15 +19,12 @@ export function buildQoderArgs(session: SessionSnapshot, prompt: string): string
   const effort = thinkingEffortToQoderEffort(session.thinkingEffort);
   if (effort) args.push("--reasoning-effort", effort);
 
-  if (
-    session.autoApprovePermissions === true
-    || session.mode === "full-access"
-    || session.mode === "managed"
-  ) {
-    args.push("--permission-mode", "bypass_permissions");
-  } else if (session.mode === "auto-edit") {
-    args.push("--permission-mode", "accept_edits");
-  }
+  // 与 PTY runner 保持一致：Qoder 默认 yolo（bypass_permissions）启动。结构化 runner
+  // 没有权限桥，--print 下未批准的调用只会被拒绝，所以除显式 auto-edit 外一律 bypass。
+  args.push(
+    "--permission-mode",
+    session.mode === "auto-edit" ? "accept_edits" : "bypass_permissions",
+  );
   if (session.claudeSessionId) args.push("-r", session.claudeSessionId);
   return args;
 }

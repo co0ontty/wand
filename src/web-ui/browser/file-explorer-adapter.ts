@@ -37,8 +37,3 @@ function unmountFileExplorerHost(): void {
   mountedContainer = null;
 }
 
-export function updateFileExplorerCwd(cwd: string): void {
-  if (explorerRoot && mountedContainer) {
-    fileExplorerController.setRoot(cwd);
-  }
-}

@@ -1,3 +1,10 @@
+/** 把 unknown 收敛成普通对象；数组 / null / 原始值都返回 null。 */
+export function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
 /** Preserve both Responses content parts and arbitrary structured tool output. */
 export function normalizeStructuredToolResultContent(
   content: unknown,

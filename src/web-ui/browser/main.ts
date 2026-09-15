@@ -20,8 +20,6 @@ import "./viewport";
 import "./websocket";    // includes 30s setInterval side effect
 import "./chat-render";  // includes initMobileCopyLongPress self-executing
 import "./notifications";
-import { t } from "./i18n";
-import { render, renderBootLoading, restoreLoginSession } from "./render";
 import { configPath, state } from "./state";
 import { startReactUi } from "../react";
 import { installFolderPickerLegacyAdapter } from "./folder-picker-adapter";

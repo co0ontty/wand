@@ -1,6 +1,7 @@
 import { callConfiguredAiText, type QuickCommitAiOptions } from "./git-quick-commit.js";
 import { skipAnsiSequence } from "./pty-text-utils.js";
 import type { ConversationTurn } from "./types.js";
+import { clipAtWordBoundary } from "./text-utils.js";
 
 const MAX_PROMPT_LENGTH = 12_000;
 const PTY_TOPIC_DRAFT_MAX = 4_000;
@@ -193,14 +194,6 @@ export function shouldAcceptGeneratedSessionTitle(
   return !blockedTitles.some((blocked) => isSameSessionTitle(cleaned, blocked));
 }
 
-function clipTitle(value: string, maxLength = TITLE_MAX_LENGTH): string {
-  if (value.length <= maxLength) return value;
-  const sliced = value.slice(0, maxLength);
-  const lastSpace = sliced.lastIndexOf(" ");
-  if (lastSpace >= Math.floor(maxLength * 0.55)) return sliced.slice(0, lastSpace);
-  return sliced;
-}
-
 /** Immediate title from the user's command, without waiting for the model. */
 export function summarizeSessionTitleFromInput(
   input: string,
@@ -211,9 +204,9 @@ export function summarizeSessionTitleFromInput(
     .split(/\r?\n/)
     .map((part) => part.replace(/^#+\s*/, "").replace(/\s+/g, " ").trim())
     .filter(Boolean);
-  const fallback = clipTitle(lines[0] ?? "");
+  const fallback = clipAtWordBoundary(lines[0] ?? "", TITLE_MAX_LENGTH);
   for (const line of lines) {
-    const title = clipTitle(line);
+    const title = clipAtWordBoundary(line, TITLE_MAX_LENGTH);
     if (shouldAcceptGeneratedSessionTitle(title, blockedTitles)) return title;
   }
   return fallback;

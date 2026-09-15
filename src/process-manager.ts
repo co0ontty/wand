@@ -31,6 +31,7 @@ import { getErrorMessage } from "./error-utils.js";
 import { describePtySpawnFailure } from "./ensure-node-pty-helper.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
 import { resolveSessionCwd } from "./session-cwd.js";
+import { inferProviderFromCommand } from "./session-provider.js";
 import { PtyTerminalState, type PtyTerminalSnapshot } from "./pty-terminal-state.js";
 import { buildPtyShellLaunchPlan, PtyCliExitMarker } from "./pty-shell-launch.js";
 import {
@@ -55,15 +56,6 @@ export type {
   OpenCodeHistorySession,
   QoderHistorySession,
 } from "./provider-history-scanner.js";
-
-function resolveProviderFromCommand(command: string): SessionProvider | undefined {
-  if (/^(?:claude|npx\s+claude|[^\s]+\/claude)(?:\s|$)/.test(command.trim())) return "claude";
-  if (/^codex\b/.test(command.trim())) return "codex";
-  if (/^opencode\b/.test(command.trim())) return "opencode";
-  if (/^grok\b/.test(command.trim())) return "grok";
-  if (/^pi\b/.test(command.trim())) return "pi";
-  return /^qodercli\b/.test(command.trim()) ? "qoder" : undefined;
-}
 
 /**
  * Tokenize the restricted shell-command subset accepted by the command
@@ -748,7 +740,7 @@ export class ProcessManager extends EventEmitter {
         continue;
       }
       this.lastPersistedMessageState.set(snapshot.id, getPersistedMessageState(snapshot.messages ?? []));
-      const provider = snapshot.provider ?? resolveProviderFromCommand(snapshot.command);
+      const provider = snapshot.provider ?? inferProviderFromCommand(snapshot.command);
       const isClaudeCmd = provider === "claude";
       const isCodexCmd = provider === "codex";
       const isOpenCodeCmd = provider === "opencode";
@@ -1208,7 +1200,7 @@ export class ProcessManager extends EventEmitter {
     const resolvedCwd = worktreeSetup?.cwd ?? baseCwd;
     const provider = opts?.interactiveShell
       ? undefined
-      : opts?.provider ?? resolveProviderFromCommand(command);
+      : opts?.provider ?? inferProviderFromCommand(command);
     const effectiveMode = provider === "codex" ? "full-access" : mode;
     const isClaudeProvider = provider === "claude";
     const selectedModel = opts?.model?.trim() || undefined;
@@ -2753,10 +2745,13 @@ export class ProcessManager extends EventEmitter {
       if (trimmedModel && trimmedModel !== "default" && !/--model(?:\s|=)/.test(result)) {
         result += ` --model '${trimmedModel.replace(/'/g, "'\\''")}'`;
       }
-      if ((mode === "managed" || mode === "full-access") && !/--(?:yolo|dangerously-skip-permissions|permission-mode)(?:\s|=|$)/.test(result)) {
-        result += " --permission-mode bypass_permissions";
-      } else if (mode === "auto-edit" && !/--permission-mode(?:\s|=)/.test(result)) {
-        result += " --permission-mode accept_edits";
+      // Qoder 默认以 yolo（bypass_permissions）启动：PTY 与结构化 runner 都没有运行时
+      // 权限桥，保持 Qoder 自身确认会让会话卡在 TUI 弹窗或直接拒绝工具调用。只有显式
+      // 选择 auto-edit 时降级为 accept_edits；命令行已带权限参数时保持原样。
+      if (!/--(?:yolo|dangerously-skip-permissions|permission-mode)(?:\s|=|$)/.test(result)) {
+        result += mode === "auto-edit"
+          ? " --permission-mode accept_edits"
+          : " --permission-mode bypass_permissions";
       }
       return result;
     }

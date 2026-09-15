@@ -1,4 +1,6 @@
-export type MissionProvider = "claude" | "codex" | "opencode" | "grok" | "qoder" | "pi";
+import type { ProviderId } from "../../provider-identity";
+
+export type MissionProvider = ProviderId;
 type AttemptState = "working" | "needs_input" | "needs_permission" | "done" | "failed" | "queued";
 
 export interface MissionAttempt {

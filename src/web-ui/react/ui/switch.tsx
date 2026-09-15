@@ -1,4 +1,5 @@
-import * as SwitchPrimitive from "@radix-ui/react-switch";
+import { Switch } from "@appica/ui-react/switch";
+import * as React from "react";
 import { useId } from "react";
 import { classNames } from "./class-names";
 
@@ -10,6 +11,8 @@ export interface WandSwitchProps {
   disabled?: boolean;
   className?: string;
   id?: string;
+  /** Appica scale. `lg` matches the previous 42x24 wand switch geometry. */
+  size?: "sm" | "md" | "lg";
 }
 
 export function WandSwitch({
@@ -20,21 +23,21 @@ export function WandSwitch({
   disabled,
   className,
   id,
+  size = "lg",
 }: WandSwitchProps) {
   const generatedId = useId();
   const switchId = id ?? generatedId;
   return (
     <div className={classNames("wand-ui-switch-row", className)}>
-      <SwitchPrimitive.Root
+      <Switch
         id={switchId}
+        size={size}
         className="wand-ui-switch"
         checked={checked}
         disabled={disabled}
         aria-label={ariaLabel}
         onCheckedChange={onCheckedChange}
-      >
-        <SwitchPrimitive.Thumb className="wand-ui-switch-thumb" />
-      </SwitchPrimitive.Root>
+      />
       {label ? <label htmlFor={switchId}>{label}</label> : null}
     </div>
   );

@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 
+import { shellQuote } from "./shell-quote.js";
+
 const CLI_EXIT_MARKER_START = "\x1eWAND_CLI_EXIT:";
 const CLI_EXIT_MARKER_END = "\x1f";
 const POSIX_SHELLS = new Set(["ash", "bash", "dash", "ksh", "ksh93", "mksh", "sh", "zsh"]);
@@ -18,10 +20,6 @@ export interface PtyCliExitChunk {
   exitCode: number | null;
 }
 
-function quotePosixShell(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
-
 function isKnownPosixShell(shell: string): boolean {
   return POSIX_SHELLS.has(path.basename(shell).toLowerCase());
 }
@@ -36,7 +34,7 @@ function isKnownPosixShell(shell: string): boolean {
  * persisted `print -s`, avoiding duplicate entries.
  */
 function buildShellHistoryRegistration(command: string, shell: string): string[] {
-  const quotedCommand = quotePosixShell(command);
+  const quotedCommand = shellQuote(command);
   switch (path.basename(shell).toLowerCase()) {
     case "zsh":
       return [
@@ -140,7 +138,7 @@ function buildPosixProviderShellCommand(
     buildTerminalRestoreCommand(),
     // -i forces an interactive prompt even if tty detection is confused after a
     // TUI teardown; -l matches Terminal.app / iTerm login-shell startup files.
-    `exec ${quotePosixShell(shell)} -il`,
+    `exec ${shellQuote(shell)} -il`,
   ].join("; ");
 }
 

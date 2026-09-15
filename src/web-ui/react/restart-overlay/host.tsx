@@ -3,6 +3,7 @@ import {
   useRef,
   useSyncExternalStore,
 } from "react";
+import * as React from "react";
 import { WandButton, WandDialogSurface } from "../ui";
 import { restartOverlayController } from "./controller";
 import { restartOverlayPresentation } from "./model";

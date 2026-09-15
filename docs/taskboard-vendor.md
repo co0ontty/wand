@@ -41,14 +41,25 @@
 
 ## 任务 → CLI 工具与派发
 
-任务可以预设「CLI 工具 + 模型 + 思考深度」（`wand_tasks.agent_json`）：
+任务可以预设「CLI 工具 + 模型 + 思考深度 + 工作模式」（`wand_tasks.agent_json`）：
 
 - 可选 Claude / Codex / OpenCode / Grok / Qoder / Pi；模型下拉来自 `/api/models`，
   按 provider 过滤，并始终保留一项「跟随服务端默认」。
-- `POST /api/wand-tasks/:id/dispatch` 用该配置创建结构化 Wand 会话，cwd 取任务项目
-  目录，把任务标题 + 描述作为首个 prompt 发出，并把会话绑定回该任务
+- 工作模式只开放三种，直接映射会话的 `ExecutionMode`：
+  - `managed`（托管）：自动确认权限 + 完全自主提示词（同新建会话的托管）；
+  - `full-access`（全限）：自动确认权限，但不注入自主提示词；
+  - `default`（标准）：逐步确认操作，未批准的权限请求会被拒绝。
+  缺省为 `default`；历史任务的 `agent_json` 没有 `mode` 字段时按 `default` 读取。
+  **Codex 只有 `full-access` 一个有效值**（与新建会话的 `supportedModes`、
+  `/api/sessions/:id/mode` 一致）：传 `default` / `managed` 会被服务端夹到 `full-access`，
+  否则 codex 会以 `--sandbox read-only` 跑，派发的任务根本改不了代码。Web 下拉也只
+  对 Codex 提供「全限」。老客户端（Android / iOS 未发 `mode`）PATCH / dispatch
+  时服务端会沿用任务当前的工作模式，不会把它复位成标准。
+- `POST /api/wand-tasks/:id/dispatch` 用该配置创建结构化 Wand 会话（`mode` 取所选工作模式），
+  cwd 取任务项目目录，把任务标题 + 描述作为首个 prompt 发出，并把会话绑定回该任务
   （`wand_task_sessions`）。派发成功后任务自动从 `todo` 推进到 `doing`。
-- 卡片上会列出已绑定会话（provider + 模型），点击即可跳到该会话。
+- 卡片上会列出已绑定会话（provider + 模型），点击即可跳到该会话；任务详情里的 Agent
+  分组会带上实际执行模式标签。
 
 ## 与其它「任务」实体的关系
 
@@ -61,7 +72,7 @@ WandTask；它不会自动变成 WorkspaceTask 或 Mission attempt，状态也�
 原生看板的布局与交互对标 `https://github.com/chuspeeism/dashi-taskboard`：
 44px 顶栏（项目切换 / 仪表盘·议题看板·列表·甘特图 / 搜索 / 筛选 / 显示设置）、
 彩色列头与状态图标、列内「+」新建、卡片拖拽换列、处理中光泽与会话气泡、
-点击进入全页详情。指派 Agent（CLI 工具 / 模型 / 思考深度）仍只属于单条任务。
+点击进入全页详情。指派 Agent（CLI 工具 / 模型 / 思考深度 / 工作模式）仍只属于单条任务。
 
 新建任务对话框里**标题是可选字段**：标签写「任务标题」+「可选」徽标，输入框比描述框小
 （Web 端 14px / 单行，不再是与描述争视觉重量的 18px 大标题），占位文案说明「留空按描述

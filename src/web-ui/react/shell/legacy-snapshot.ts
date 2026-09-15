@@ -7,6 +7,7 @@ import type {
   UiSnapshotData,
 } from "./ui-store";
 import { isIdleAtPrompt } from "./ui-store";
+import { stringValue } from "../json-utils";
 
 export interface LegacySnapshotState {
   selectedId?: string | null;
@@ -110,10 +111,6 @@ const STATUS_LABELS: Readonly<Record<string, string>> = {
   failed: "已失败",
 };
 
-function asString(value: unknown, fallback = ""): string {
-  return typeof value === "string" ? value : fallback;
-}
-
 function timestamp(value: string | undefined, fallback = 0): number {
   if (!value) return fallback;
   const parsed = new Date(value).getTime();
@@ -131,7 +128,7 @@ function authPhase(state: LegacySnapshotState): UiAuthPhase {
 }
 
 function isAutomation(session: LegacySession): boolean {
-  const source = asString(session.sessionSource).toLowerCase();
+  const source = stringValue(session.sessionSource).toLowerCase();
   return source === "automation" || source === "startup";
 }
 
@@ -139,7 +136,7 @@ function sessionStatusLabel(session: LegacySession): string {
   if (session.permissionBlocked) return "等待授权";
   const kind = session.sessionKind === "structured" ? "structured" : "pty";
   if (kind === "structured" && session.structuredState?.inFlight) return "思考中";
-  const status = asString(session.status, "idle");
+  const status = stringValue(session.status, "idle");
   // provider CLI 进程活着但本轮已结束 → 空闲而不是运行中
   if (isIdleAtPrompt(kind, status, session.provider ?? "", Boolean(session.ptyBusy))) return "空闲";
   return STATUS_LABELS[status] ?? status;
@@ -149,23 +146,23 @@ function sessionStatusTone(session: LegacySession): string {
   if (session.permissionBlocked) return "permission-blocked";
   const kind = session.sessionKind === "structured" ? "structured" : "pty";
   if (kind === "structured" && session.structuredState?.inFlight) return "running";
-  const status = asString(session.status);
+  const status = stringValue(session.status);
   if (isIdleAtPrompt(kind, status, session.provider ?? "", Boolean(session.ptyBusy))) return "idle";
   return status;
 }
 
 function defaultCwd(state: LegacySnapshotState): string {
-  return asString(state.workingDir)
-    || asString(state.config?.defaultCwd)
-    || asString(state.config?.cwd)
+  return stringValue(state.workingDir)
+    || stringValue(state.config?.defaultCwd)
+    || stringValue(state.config?.cwd)
     || "/tmp";
 }
 
 function sessionTitle(session: LegacySession): string {
-  return asString(session.title)
-    || asString(session.description)
-    || asString(session.summary)
-    || asString(session.command)
+  return stringValue(session.title)
+    || stringValue(session.description)
+    || stringValue(session.summary)
+    || stringValue(session.command)
     || "Wand 会话";
 }
 
@@ -174,13 +171,13 @@ function sessionToVm(
   state: LegacySnapshotState,
   manageSelection: Readonly<Record<string, boolean>>,
 ): UiSessionVm {
-  const id = asString(session.id);
-  const explicitProvider = asString(session.provider);
+  const id = stringValue(session.id);
+  const explicitProvider = stringValue(session.provider);
   const provider = (
     normalizeProviderId(explicitProvider)
     ?? (explicitProvider || inferProviderIdFromCommand(session.command) || "terminal")
   ) as UiProvider;
-  const status = asString(session.status, "idle") as UiSessionStatus;
+  const status = stringValue(session.status, "idle") as UiSessionStatus;
   const kind = session.sessionKind === "structured" ? "structured" : "pty";
   const worktreeEnabled = Boolean(session.worktree?.enabled ?? session.worktreeEnabled);
   const source = isAutomation(session) ? "automation" : "wand";
@@ -195,8 +192,8 @@ function sessionToVm(
     provider,
     kind,
     title: sessionTitle(session),
-    description: asString(session.description),
-    cwd: asString(session.cwd, defaultCwd(state)),
+    description: stringValue(session.description),
+    cwd: stringValue(session.cwd, defaultCwd(state)),
     status,
     statusLabel: sessionStatusLabel(session),
     active: id !== "" && id === state.selectedId,
@@ -216,9 +213,9 @@ function sessionToVm(
     ...(worktreeEnabled ? {
       worktree: {
         enabled: true,
-        branch: asString(session.worktree?.branch ?? session.worktreeBranch) || undefined,
-        path: asString(session.worktree?.path ?? session.worktreePath) || undefined,
-        mergeStatus: asString(session.worktree?.mergeStatus ?? session.worktreeMergeStatus) || undefined,
+        branch: stringValue(session.worktree?.branch ?? session.worktreeBranch) || undefined,
+        path: stringValue(session.worktree?.path ?? session.worktreePath) || undefined,
+        mergeStatus: stringValue(session.worktree?.mergeStatus ?? session.worktreeMergeStatus) || undefined,
       },
     } : {}),
   };
@@ -267,7 +264,7 @@ export function deriveLegacyUiSnapshot(
     && state.gitStatusSessionId === selected.id
     && state.gitStatus?.isGit
     ? {
-        branch: asString(state.gitStatus.branch, "?"),
+        branch: stringValue(state.gitStatus.branch, "?"),
         modifiedCount: Number(state.gitStatus.modifiedCount) || 0,
         clean: (Number(state.gitStatus.modifiedCount) || 0) === 0,
       }
@@ -318,8 +315,8 @@ export function deriveLegacyUiSnapshot(
       statusLabel: selected?.statusLabel ?? "",
       statusTone: selectedLegacy ? sessionStatusTone(selectedLegacy) : "",
       cwd: effectiveCwd,
-      currentTask: asString(state.currentTask?.title)
-        || asString(selectedLegacy?.currentTaskTitle),
+      currentTask: stringValue(state.currentTask?.title)
+        || stringValue(selectedLegacy?.currentTaskTitle),
       titleGenerating: Boolean(selectedLegacy?.titleGenerating),
       git: gitStatus,
     },

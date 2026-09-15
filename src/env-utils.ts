@@ -21,6 +21,11 @@ const MINIMAL_ENV_KEYS: readonly string[] = [
   "PWD",
 ];
 
+/** 子进程 env：显式传入 env 优先，否则按 inheritEnv 生成白名单环境。 */
+export function resolveChildEnv(options: { env?: NodeJS.ProcessEnv; inheritEnv?: boolean }): NodeJS.ProcessEnv {
+  return options.env ?? buildChildEnv(options.inheritEnv !== false);
+}
+
 /** 是否以 root 身份运行（uid 或 euid 为 0）。供 PTY runner 与 structured runner 共用。 */
 export function isRunningAsRoot(): boolean {
   return process.getuid?.() === 0 || process.geteuid?.() === 0;

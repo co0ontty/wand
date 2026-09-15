@@ -4,6 +4,10 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { SessionSnapshot, ConversationTurn, SessionKind, SessionProvider, SessionRunner, SessionSource, StructuredSessionState, WorktreeMergeInfo, Workspace, LayoutNode, TaskWindowLayout, WorkspaceDefaultProvider, WorkspaceKind, WorkspaceTask, WorkspaceTaskWorktree, WorkspaceTaskStatus, GLOBAL_WORKSPACE_ID } from "./types.js";
 import { normalizeSessionDirectory } from "./session-directory-tree.js";
+import { inferProviderFromCommand, inferProviderFromRunner, isSessionProvider } from "./session-provider.js";
+import { normalizeWandTaskAgentMode } from "./task-types.js";
+import { firstLayoutTabId } from "./layout-tree.js";
+import { isThinkingEffort } from "./structured-provider-common.js";
 import type {
   AgentActivityItem,
   AgentActivityState,
@@ -128,10 +132,12 @@ export function parseWandTaskAgent(raw: unknown): import("./task-types.js").Wand
   const provider = value.provider;
   const model = value.model;
   const thinkingEffort = value.thinkingEffort;
-  if (provider !== "claude" && provider !== "codex" && provider !== "opencode" && provider !== "grok" && provider !== "qoder" && provider !== "pi") return null;
+  if (!isSessionProvider(provider)) return null;
   if (typeof model !== "string" || !model.trim() || model.trim().length > 128) return null;
   if (thinkingEffort !== "off" && thinkingEffort !== "standard" && thinkingEffort !== "deep" && thinkingEffort !== "max") return null;
-  return { provider, model: model.trim(), thinkingEffort };
+  // mode 是后加列：历史行没有该字段时按标准模式读取，不因此整条配置退化成 null。
+  const mode = normalizeWandTaskAgentMode(provider, value.mode);
+  return { provider, model: model.trim(), thinkingEffort, mode };
 }
 
 /** `wand_milestones` 行 → 领域对象；名字必须非空，脏行直接跳过。 */
@@ -255,14 +261,6 @@ function parseApprovalStats(value: unknown): NonNullable<SessionSnapshot["approv
   };
 }
 
-function isThinkingEffort(value: unknown): value is NonNullable<SessionSnapshot["thinkingEffort"]> {
-  return value === "off"
-    || value === "standard"
-    || value === "deep"
-    || value === "max"
-    || (typeof value === "string" && /^codex:[a-z0-9][a-z0-9_-]{0,31}$/.test(value));
-}
-
 function serializeSessionOptions(snapshot: SessionSnapshot): string {
   const options: PersistedSessionOptions = {
     schemaVersion: SESSION_OPTIONS_SCHEMA_VERSION,
@@ -353,30 +351,6 @@ function parseQueuedMessageSkills(raw: string | null, queueLength: number): stri
   });
 }
 
-function inferSessionProvider(row: Pick<SessionRow, "provider" | "runner" | "command">): SessionProvider | undefined {
-  if (row.provider === "claude" || row.provider === "codex" || row.provider === "opencode" || row.provider === "grok" || row.provider === "qoder" || row.provider === "pi") {
-    return row.provider;
-  }
-  if (row.runner === "claude-cli" || row.runner === "claude-cli-print") {
-    return "claude";
-  }
-  if (row.runner === "codex-cli-exec") {
-    return "codex";
-  }
-  if (row.runner === "opencode-cli-run") {
-    return "opencode";
-  }
-  if (row.runner === "grok-cli-headless") return "grok";
-  if (row.runner === "qoder-cli-print") return "qoder";
-  if (row.runner === "pi-cli-json") return "pi";
-  if (/^codex\b/i.test(row.command.trim())) return "codex";
-  if (/^opencode\b/i.test(row.command.trim())) return "opencode";
-  if (/^grok\b/i.test(row.command.trim())) return "grok";
-  if (/^qodercli\b/i.test(row.command.trim())) return "qoder";
-  if (/^pi\b/i.test(row.command.trim())) return "pi";
-  return /^claude\b/i.test(row.command.trim()) ? "claude" : undefined;
-}
-
 function parseWorktreeInfo(raw: string | null): SessionSnapshot["worktree"] | undefined {
   const parsed = safeJsonParse<{ branch?: unknown; path?: unknown }>(raw);
   if (parsed && typeof parsed.branch === "string" && typeof parsed.path === "string") {
@@ -389,12 +363,8 @@ function parseWorktreeMergeInfo(raw: string | null): WorktreeMergeInfo | undefin
   return safeJsonParse<WorktreeMergeInfo>(raw);
 }
 
-function serializeWorktreeMergeInfo(info: SessionSnapshot["worktreeMergeInfo"]): string | null {
-  return info ? JSON.stringify(info) : null;
-}
-
-function serializeWorktreeInfo(info: SessionSnapshot["worktree"]): string | null {
-  return info ? JSON.stringify(info) : null;
+function serializeJsonOrNull(value: unknown): string | null {
+  return value ? JSON.stringify(value) : null;
 }
 
 function normalizeWorktreeMergeStatus(raw: string | null | undefined): SessionSnapshot["worktreeMergeStatus"] | undefined {
@@ -468,11 +438,6 @@ function mapWorkspaceTaskWorktree(raw: string | null): WorkspaceTaskWorktree | n
   const parsed = safeJsonParse<WorkspaceTaskWorktree>(raw);
   if (!parsed || typeof parsed.path !== "string" || typeof parsed.branch !== "string") return null;
   return parsed;
-}
-
-function firstLayoutTabId(node: LayoutNode): string | undefined {
-  if (node.type === "pane") return node.tabs[node.active]?.id ?? node.tabs[0]?.id;
-  return firstLayoutTabId(node.children[0]) ?? firstLayoutTabId(node.children[1]);
 }
 
 /** 读取旧版单棵分屏树时就地包成一个工作窗口，避免升级后丢失布局。 */
@@ -590,9 +555,9 @@ function sessionPersistValues(snapshot: SessionSnapshot): Array<string | number 
     snapshot.resumedFromSessionId ?? null,
     snapshot.autoRecovered ? 1 : 0,
     snapshot.worktreeEnabled ? 1 : 0,
-    serializeWorktreeInfo(snapshot.worktree),
+    serializeJsonOrNull(snapshot.worktree),
     snapshot.worktreeMergeStatus ?? null,
-    serializeWorktreeMergeInfo(snapshot.worktreeMergeInfo),
+    serializeJsonOrNull(snapshot.worktreeMergeInfo),
     snapshot.title ?? null,
     snapshot.description ?? null,
     serializeSessionOptions(snapshot),
@@ -624,9 +589,9 @@ function sessionRuntimeMetadataValues(snapshot: SessionSnapshot): Array<string |
     snapshot.resumedFromSessionId ?? null,
     snapshot.autoRecovered ? 1 : 0,
     snapshot.worktreeEnabled ? 1 : 0,
-    serializeWorktreeInfo(snapshot.worktree),
+    serializeJsonOrNull(snapshot.worktree),
     snapshot.worktreeMergeStatus ?? null,
-    serializeWorktreeMergeInfo(snapshot.worktreeMergeInfo),
+    serializeJsonOrNull(snapshot.worktreeMergeInfo),
     snapshot.title ?? null,
     snapshot.description ?? null,
     serializeSessionOptions(snapshot),
@@ -635,7 +600,9 @@ function sessionRuntimeMetadataValues(snapshot: SessionSnapshot): Array<string |
 }
 
 function mapSessionCore(row: SessionRow): SessionSnapshot {
-  const provider = inferSessionProvider(row);
+  const provider = isSessionProvider(row.provider)
+    ? row.provider
+    : (inferProviderFromRunner(row.runner) ?? inferProviderFromCommand(row.command));
   const sessionOptions = parseSessionOptions(row.session_options);
   const queuedMessages = parseQueuedMessages(row.queued_messages);
   return {

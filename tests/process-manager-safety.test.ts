@@ -189,6 +189,18 @@ test("Qoder PTY launches the TUI with model and managed permission flags", async
   assert.match(shellArgs.at(-1) ?? "", /if qodercli --model 'performance' --permission-mode bypass_permissions --session-id [0-9a-f-]{36}/);
 });
 
+test("Qoder PTY defaults to yolo mode without a managed/full-access selection", async (t) => {
+  const { manager, root, spawnCalls } = createHarness(t);
+  const session = await manager.start("qodercli", root, "default", undefined, {
+    provider: "qoder",
+    model: "performance",
+  });
+  assert.equal(session.provider, "qoder");
+  assert.equal(session.mode, "default");
+  const shellArgs = spawnCalls[0][1] as string[];
+  assert.match(shellArgs.at(-1) ?? "", /if qodercli --model 'performance' --permission-mode bypass_permissions --session-id [0-9a-f-]{36}/);
+});
+
 test("Pi PTY launches the TUI with model and thinking flags", async (t) => {
   const { manager, root, spawnCalls } = createHarness(t);
   const session = await manager.start("pi", root, "managed", undefined, {

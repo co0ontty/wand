@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 
+import { signalNumberFromName } from "./signal-utils.js";
+
 /**
  * Ownership seam for structured CLI runs, mirroring TerminalHost for PTYs.
  * Persistent adapters (terminald) outlive web restarts; the in-process adapter
@@ -140,7 +142,7 @@ class InProcessStructuredExecProcess implements StructuredExecProcess {
     this.child.on("close", (code, signal) => {
       settleExit({
         exitCode: code,
-        signal: signal === null || signal === undefined ? null : osSignalNumber(signal),
+        signal: signal === null || signal === undefined ? null : signalNumberFromName(signal),
       });
     });
     this.child.on("error", () => settleExit({ exitCode: null, signal: null }));
@@ -208,15 +210,4 @@ export class InProcessStructuredExecHost implements StructuredExecHost {
     this.processes.delete(runId);
     if (wrapped) wrapped.interrupt();
   }
-}
-
-/** Map a NodeJS.Signals name to the numeric value used by waitpid-style APIs. */
-export function osSignalNumber(signal: NodeJS.Signals): number {
-  const table: Partial<Record<NodeJS.Signals, number>> = {
-    SIGHUP: 1, SIGINT: 2, SIGQUIT: 3, SIGILL: 4, SIGTRAP: 5, SIGABRT: 6,
-    SIGBUS: 7, SIGFPE: 8, SIGKILL: 9, SIGUSR1: 10, SIGSEGV: 11, SIGUSR2: 12,
-    SIGPIPE: 13, SIGALRM: 14, SIGTERM: 15, SIGCHLD: 17, SIGCONT: 18,
-    SIGSTOP: 19, SIGTSTP: 20,
-  };
-  return table[signal] ?? 0;
 }

@@ -1,9 +1,11 @@
 export const filePreviewStyles = String.raw`
 .wand-file-preview-overlay { z-index: 54; }
 
-/* Generic confirmation dialogs render after File Preview in the shared portal. */
-.wand-file-preview-overlay ~ .wand-ui-dialog-overlay:not(.wand-file-preview-overlay) { z-index: 56; }
-.wand-file-preview-overlay ~ .wand-ui-dialog-content:not(.wand-file-preview-dialog) { z-index: 57; }
+/* Generic confirmation dialogs must beat File Preview. Appica portals every dialog in its
+   own wrapper, so the old sibling combinator can no longer compare overlay and content;
+   the File Preview presence check expresses the same rule. */
+.wand-ui-portals:has(.wand-file-preview-dialog) .wand-ui-dialog-overlay:not(.wand-file-preview-overlay) { z-index: 56; }
+.wand-ui-portals:has(.wand-file-preview-dialog) .wand-ui-dialog-content:not(.wand-file-preview-dialog) { z-index: 57; }
 
 .wand-file-preview-dialog {
   z-index: 55;

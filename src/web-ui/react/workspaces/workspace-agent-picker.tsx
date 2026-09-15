@@ -1,4 +1,5 @@
 import { type FormEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
+import * as React from "react";
 
 import { nextChoice, type ChoiceNavigationKey } from "../new-session/choice-navigation";
 import { httpNewSessionRepository } from "../new-session/repository";

@@ -1,11 +1,12 @@
-import { type ComponentPropsWithoutRef } from "react";
+import { Skeleton, type SkeletonProps } from "@appica/ui-react/skeleton";
+import * as React from "react";
 import { classNames } from "./class-names";
 
-export type WandSkeletonProps = ComponentPropsWithoutRef<"span">;
+export type WandSkeletonProps = SkeletonProps;
 
 export function WandSkeleton({ className, ...props }: WandSkeletonProps) {
   return (
-    <span
+    <Skeleton
       {...props}
       aria-hidden="true"
       className={classNames("wand-ui-skeleton", className)}

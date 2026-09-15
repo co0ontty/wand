@@ -1,8 +1,8 @@
 import { state, CHAT_EXPAND_STATE_STORAGE_KEY } from "./state";
 import { renderChat } from "./chat-render";
 import { fetchEarlierMessages } from "./session-engine";
-import { snapCollapsedSubagentPanelsToBottom } from "./events";
-import { render } from "./render";
+import "./events";
+import "./render";
 // import { iconSvg } from "./i18n";
 
 // TODO: import from correct module when created

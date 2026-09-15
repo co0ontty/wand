@@ -9,22 +9,9 @@ import type {
   QuickCommitStatus,
   QuickCommitSuggestion,
 } from "./types";
+import { finiteNumber, isRecord, stringValue, type JsonRecord } from "../json-utils";
 
 type FetchLike = typeof fetch;
-type JsonRecord = Record<string, unknown>;
-
-function isRecord(value: unknown): value is JsonRecord {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-function text(value: unknown, fallback = ""): string {
-  return typeof value === "string" ? value : fallback;
-}
-
-function finiteNumber(value: unknown, fallback = 0): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
-
 async function readRecord(response: Response, fallback: string): Promise<JsonRecord> {
   let value: unknown;
   try {
@@ -33,7 +20,7 @@ async function readRecord(response: Response, fallback: string): Promise<JsonRec
     throw new Error(`${fallback} (HTTP ${response.status})`);
   }
   const record = isRecord(value) ? value : {};
-  if (!response.ok) throw new Error(text(record.error, `${fallback} (HTTP ${response.status})`));
+  if (!response.ok) throw new Error(stringValue(record.error, `${fallback} (HTTP ${response.status})`));
   return record;
 }
 
@@ -44,7 +31,7 @@ function normalizeFiles(value: unknown): QuickCommitFile[] {
     const rawState = isRecord(item.submoduleState) ? item.submoduleState : null;
     return [{
       path: item.path,
-      status: text(item.status),
+      status: stringValue(item.status),
       isSubmodule: item.isSubmodule === true,
       submoduleState: rawState ? {
         commitChanged: rawState.commitChanged === true,
@@ -60,20 +47,20 @@ export function normalizeQuickCommitStatus(value: unknown): QuickCommitStatus {
   const files = normalizeFiles(record.files);
   const rawLastCommit = isRecord(record.lastCommit) ? record.lastCommit : null;
   const lastCommit = rawLastCommit ? {
-    hash: text(rawLastCommit.hash),
-    shortHash: text(rawLastCommit.shortHash),
-    subject: text(rawLastCommit.subject),
+    hash: stringValue(rawLastCommit.hash),
+    shortHash: stringValue(rawLastCommit.shortHash),
+    subject: stringValue(rawLastCommit.subject),
   } : undefined;
   return {
     isGit: record.isGit === true,
-    branch: text(record.branch),
+    branch: stringValue(record.branch),
     modifiedCount: Math.max(0, finiteNumber(record.modifiedCount, files.length)),
     files,
-    head: text(record.head),
+    head: stringValue(record.head),
     ahead: Math.max(0, finiteNumber(record.ahead)),
     behind: Math.max(0, finiteNumber(record.behind)),
     lastCommit,
-    latestTag: text(record.latestTag),
+    latestTag: stringValue(record.latestTag),
     hasSubmodule: record.hasSubmodule === true || files.some((file) => file.isSubmodule),
     error: typeof record.error === "string" ? record.error : undefined,
   };
@@ -110,7 +97,7 @@ export class HttpQuickCommitRepository implements QuickCommitRepository {
       },
     );
     const data = await readRecord(response, "AI 生成失败。");
-    return { message: text(data.message), suggestedTag: text(data.suggestedTag).trim() };
+    return { message: stringValue(data.message), suggestedTag: stringValue(data.suggestedTag).trim() };
   }
 
   async commit(sessionId: string, input: QuickCommitInput): Promise<QuickCommitResponse> {
@@ -125,7 +112,7 @@ export class HttpQuickCommitRepository implements QuickCommitRepository {
     );
     const data = await readRecord(response, "快捷提交失败。");
     const commit = isRecord(data.commit) && typeof data.commit.hash === "string"
-      ? { hash: data.commit.hash, message: text(data.commit.message) }
+      ? { hash: data.commit.hash, message: stringValue(data.commit.message) }
       : undefined;
     const tag = isRecord(data.tag) && typeof data.tag.name === "string"
       ? { name: data.tag.name }
@@ -142,7 +129,7 @@ export class HttpQuickCommitRepository implements QuickCommitRepository {
       commit,
       tag,
       pushed: data.pushed === true,
-      pushError: text(data.pushError),
+      pushError: stringValue(data.pushError),
       submoduleCommits,
     };
   }
@@ -162,7 +149,7 @@ export class HttpQuickCommitRepository implements QuickCommitRepository {
       ok: data.ok !== false,
       pushedCommits: data.pushedCommits === true,
       pushedTags: data.pushedTags === true,
-      error: text(data.error),
+      error: stringValue(data.error),
     };
   }
 }

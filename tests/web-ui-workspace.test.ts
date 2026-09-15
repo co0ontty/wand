@@ -345,7 +345,10 @@ test("task list treats directories as group headers and exposes per-terminal del
   assert.match(panel, /workspace-session-action delete/);
   assert.match(styles, /\.workspace-item\s*\{[^}]*border-radius:\s*8px/s);
   assert.match(styles, /\.workspace-tasks\s*\{[^}]*border-left/s);
-  assert.match(styles, /\.workspace-task-main\s*\{[^}]*cursor:\s*pointer/s);
+  // Row chrome (cursor, padding, hover wash) is Appica's NavigationLink now;
+  // Wand keeps the identity hook so the shell can still find the row.
+  assert.match(panel, /className="workspace-task-main"/);
+  assert.match(styles, /\.workspace-task-main\s*\{/);
   assert.match(styles, /\.workspace-task-name\s*\{[^}]*font-size:\s*var\(--font-size-sm\)/s);
   assert.match(styles, /\.workspace-task-name\s*\{[^}]*-webkit-line-clamp:\s*2/s);
   assert.match(panel, /workspace-task-count/);
@@ -358,9 +361,12 @@ test("task list treats directories as group headers and exposes per-terminal del
   assert.doesNotMatch(panel, /if \(!collapsible\) return/);
   assert.doesNotMatch(panel, /is-static/);
 
-  assert.match(styles, /\.workspace-session-main\s*\{[^}]*padding:\s*4px 6px 4px 12px/s);
-  assert.match(styles, /\.workspace-session\.active > \.workspace-session-main::before\s*\{[^}]*left:\s*4px/s);
-  assert.match(styles, /\.workspace-session\.active \.workspace-session-action[\s\S]*?pointer-events:\s*auto/);
+  // Same split for the session row: Appica owns padding + the active wash, and the
+  // delete affordance is an always-rendered Appica icon button.
+  assert.match(panel, /className="workspace-session-main"/);
+  assert.match(styles, /\.workspace-session-main\s*\{/);
+  assert.match(panel, /className="workspace-session-action delete"/);
+  assert.match(styles, /\.workspace-session-action\s*\{/);
   assert.match(styles, /\.workspace-tab-item\.active \.workspace-tab-item-close[\s\S]*?pointer-events:\s*auto/);
 });
 

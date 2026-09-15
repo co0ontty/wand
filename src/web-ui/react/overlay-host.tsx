@@ -1,9 +1,9 @@
 import { useSyncExternalStore } from "react";
+import * as React from "react";
 import { overlayStore } from "./overlay-controller";
 import {
   PortalContainerProvider,
   WandDialog,
-  WandToastItem,
   WandToastRegion,
 } from "./ui";
 import { SettingsHost } from "./settings/host";
@@ -16,6 +16,7 @@ import { restartOverlayController } from "./restart-overlay/controller";
 import { FilePreviewHost } from "./file-preview/host";
 import { LocalPreviewHost } from "./local-preview/host";
 import { ComposerSelectHost } from "./composer-select/host";
+import { ComposerRailHost } from "./composer-rail/host";
 import { MissionsHost } from "./missions/host";
 import { WorkspacesHost } from "./workspaces/host";
 import { GithubIssuesHost } from "./issues/host";
@@ -35,6 +36,7 @@ export function OverlayHost({ portalContainer }: OverlayHostProps) {
   return (
     <PortalContainerProvider container={portalContainer}>
       <ComposerSelectHost />
+      <ComposerRailHost />
       <MissionsHost />
       <WorkspacesHost />
       <GithubIssuesHost />
@@ -46,19 +48,7 @@ export function OverlayHost({ portalContainer }: OverlayHostProps) {
       <FilePreviewHost />
       <LocalPreviewHost />
       <RestartOverlayHost />
-      <WandToastRegion>
-        {current.toasts.map((toast) => (
-          <WandToastItem
-            key={toast.id}
-            open={toast.open}
-            title={toast.message}
-            description={toast.options.description}
-            tone={toast.options.tone}
-            duration={toast.options.duration}
-            onDismiss={() => overlayStore.dismissToast(toast.id)}
-          />
-        ))}
-      </WandToastRegion>
+      <WandToastRegion />
 
       {dialog ? (
         <WandDialog

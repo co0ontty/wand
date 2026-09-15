@@ -30,7 +30,3 @@ export function filterSidebarGroups(
     return tasks.length || standaloneSessions.length ? [{ ...group, tasks, standaloneSessions }] : [];
   });
 }
-
-export function compactTaskLabel(name: string): string {
-  return Array.from(name.trim()).slice(0, 2).join("") || "任务";
-}

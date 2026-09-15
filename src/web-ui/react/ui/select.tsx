@@ -1,5 +1,20 @@
-import * as PopoverPrimitive from "@radix-ui/react-popover";
-import * as SelectPrimitive from "@radix-ui/react-select";
+import {
+  Combobox as AppicaCombobox,
+  ComboboxContent as AppicaComboboxContent,
+  ComboboxEmpty as AppicaComboboxEmpty,
+  ComboboxInput as AppicaComboboxInput,
+  ComboboxItem as AppicaComboboxItem,
+  ComboboxList as AppicaComboboxList,
+  ComboboxTrigger as AppicaComboboxTrigger,
+  ComboboxValue as AppicaComboboxValue,
+} from "@appica/ui-react/combobox";
+import {
+  Select as AppicaSelect,
+  SelectContent as AppicaSelectContent,
+  SelectItem as AppicaSelectItem,
+  SelectTrigger as AppicaSelectTrigger,
+  SelectValue as AppicaSelectValue,
+} from "@appica/ui-react/select";
 import * as React from "react";
 import { classNames } from "./class-names";
 import { WandIcon } from "./icons";
@@ -34,18 +49,15 @@ export interface WandSelectProps {
   onOpenChange?(open: boolean): void;
 }
 
-export function filterSelectOptions(
-  options: ReadonlyArray<WandSelectOption>,
-  query: string,
-): WandSelectOption[] {
-  const needles = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  if (needles.length === 0) return options.slice();
-  return options.filter((option) => {
-    const haystack = `${option.value} ${option.label}`.toLowerCase();
-    return needles.every((needle) => haystack.includes(needle));
-  });
-}
-
+/**
+ * Wand's dropdown, rendered by Appica UI.
+ *
+ * Two library primitives back it: `Select` when the list is a plain menu, and
+ * `Combobox` when the popup owns a search field ("input inside popup" mode in
+ * Base UI - the trigger stays a combobox button, the popup is a dialog that
+ * autofocuses the search box and clears it again on close). Both keep the
+ * `wand-ui-select-*` classes so business stylesheets stay in charge of the look.
+ */
 export function WandSelect(props: WandSelectProps) {
   if (props.searchable) return <SearchableWandSelect {...props} />;
   return <ClassicWandSelect {...props} />;
@@ -71,53 +83,50 @@ function ClassicWandSelect({
 }: WandSelectProps) {
   const portalContainer = usePortalContainer();
   return (
-    <SelectPrimitive.Root
+    <AppicaSelect
+      items={options}
       value={value}
       defaultValue={defaultValue}
       disabled={disabled}
-      onValueChange={onValueChange}
-      onOpenChange={onOpenChange}
+      /* Wand's selects are inline poppers without a scrim, so page scroll stays live. */
+      modal={false}
+      /* Wand wants a plain popper under the trigger, not Appica's overlay-the-trigger effect. */
+      alignItemWithTrigger={false}
+      onValueChange={(next) => {
+        if (typeof next === "string") onValueChange?.(next);
+      }}
+      onOpenChange={(open) => onOpenChange?.(open)}
     >
-      <SelectPrimitive.Trigger
+      <AppicaSelectTrigger
         className={classNames("wand-ui-select-trigger", className)}
         aria-label={ariaLabel}
       >
-        <SelectPrimitive.Value placeholder={placeholder}>{displayValue}</SelectPrimitive.Value>
-        <SelectPrimitive.Icon aria-hidden="true">⌄</SelectPrimitive.Icon>
-      </SelectPrimitive.Trigger>
-      <SelectPrimitive.Portal container={portalContainer}>
-        <SelectPrimitive.Content
-          className={classNames("wand-ui-select-content", contentClassName)}
-          position="popper"
-          side={side}
-          align={align}
-          sideOffset={sideOffset}
-          collisionPadding={collisionPadding}
-        >
-          <SelectPrimitive.ScrollUpButton className="wand-ui-select-scroll-button">
-            ⌃
-          </SelectPrimitive.ScrollUpButton>
-          <SelectPrimitive.Viewport className="wand-ui-select-viewport">
-            {options.map((option) => (
-              <SelectPrimitive.Item
-                key={optionKey(option.value)}
-                className={classNames("wand-ui-select-item", itemClassName)}
-                value={option.value}
-                disabled={option.disabled}
-              >
-                <SelectPrimitive.ItemText>{option.label}</SelectPrimitive.ItemText>
-                <SelectPrimitive.ItemIndicator className="wand-ui-select-indicator">
-                  <WandIcon name="check" size={12}/>
-                </SelectPrimitive.ItemIndicator>
-              </SelectPrimitive.Item>
-            ))}
-          </SelectPrimitive.Viewport>
-          <SelectPrimitive.ScrollDownButton className="wand-ui-select-scroll-button">
-            ⌄
-          </SelectPrimitive.ScrollDownButton>
-        </SelectPrimitive.Content>
-      </SelectPrimitive.Portal>
-    </SelectPrimitive.Root>
+        <AppicaSelectValue
+          className="wand-ui-select-value"
+          placeholder={placeholder}
+          children={displayValue}
+        />
+      </AppicaSelectTrigger>
+      <AppicaSelectContent
+        className={classNames("wand-ui-select-content", contentClassName)}
+        container={portalContainer}
+        side={side}
+        align={align}
+        sideOffset={sideOffset}
+        collisionPadding={collisionPadding}
+      >
+        {options.map((option) => (
+          <AppicaSelectItem
+            key={optionKey(option.value)}
+            className={classNames("wand-ui-select-item", itemClassName)}
+            value={option.value}
+            disabled={option.disabled}
+          >
+            {option.label}
+          </AppicaSelectItem>
+        ))}
+      </AppicaSelectContent>
+    </AppicaSelect>
   );
 }
 
@@ -141,198 +150,148 @@ function SearchableWandSelect({
   onOpenChange,
 }: WandSelectProps) {
   const portalContainer = usePortalContainer();
-  const listId = React.useId();
-  const searchRef = React.useRef<HTMLInputElement>(null);
-  const listRef = React.useRef<HTMLDivElement>(null);
-  const [open, setOpen] = React.useState(false);
-  const [query, setQuery] = React.useState("");
-  const [uncontrolled, setUncontrolled] = React.useState(defaultValue ?? "");
-  const current = value !== undefined ? value : uncontrolled;
-  const filtered = React.useMemo(() => filterSelectOptions(options, query), [options, query]);
-  const [highlight, setHighlight] = React.useState(0);
-  const selectedLabel = options.find((option) => option.value === current)?.label;
-  const shown = displayValue || selectedLabel;
-  const safeHighlight = filtered.length === 0 ? 0 : Math.min(highlight, filtered.length - 1);
-  const activeId = filtered[safeHighlight] ? `${listId}-option-${safeHighlight}` : undefined;
-
-  React.useLayoutEffect(() => {
-    if (!open) return;
-    const node = listRef.current?.querySelector("[data-highlighted]");
-    if (node instanceof HTMLElement) node.scrollIntoView({ block: "nearest" });
-  }, [open, highlight, filtered]);
-
-  function handleOpenChange(next: boolean): void {
-    setOpen(next);
-    if (next) {
-      setQuery("");
-      const selectedIndex = options.findIndex((option) => option.value === current && !option.disabled);
-      setHighlight(selectedIndex >= 0 ? selectedIndex : firstEnabledIndex(options));
-    }
-    onOpenChange?.(next);
-  }
-
-  function commit(next: string): void {
-    if (value === undefined) setUncontrolled(next);
-    onValueChange?.(next);
-    handleOpenChange(false);
-  }
-
-  function moveHighlight(delta: number): void {
-    if (filtered.length === 0) return;
-    let index = safeHighlight;
-    for (let step = 0; step < filtered.length; step += 1) {
-      index = (index + delta + filtered.length) % filtered.length;
-      if (!filtered[index]?.disabled) {
-        setHighlight(index);
-        return;
-      }
-    }
-  }
-
-  function onSearchKeyDown(event: React.KeyboardEvent<HTMLInputElement>): void {
-    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      moveHighlight(1);
-      return;
-    }
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      moveHighlight(-1);
-      return;
-    }
-    if (event.key === "Home") {
-      event.preventDefault();
-      setHighlight(firstEnabledIndex(filtered));
-      return;
-    }
-    if (event.key === "End") {
-      event.preventDefault();
-      setHighlight(lastEnabledIndex(filtered));
-      return;
-    }
-    if (event.key === "Enter") {
-      event.preventDefault();
-      const option = filtered[safeHighlight];
-      if (option && !option.disabled) commit(option.value);
-      return;
-    }
-    if (event.key === "Escape") {
-      event.preventDefault();
-      handleOpenChange(false);
-    }
-  }
-
-  function onQueryChange(next: string): void {
-    setQuery(next);
-    const nextOptions = filterSelectOptions(options, next);
-    const selectedIndex = nextOptions.findIndex((option) => option.value === current && !option.disabled);
-    setHighlight(selectedIndex >= 0 ? selectedIndex : firstEnabledIndex(nextOptions));
-  }
-
+  const selected = findOption(options, value);
+  const shown = displayValue || selected?.label;
   return (
-    <PopoverPrimitive.Root open={open} onOpenChange={handleOpenChange}>
-      <PopoverPrimitive.Trigger
+    <AppicaCombobox
+      items={options as WandSelectOption[]}
+      value={selected}
+      defaultValue={findOption(options, defaultValue)}
+      disabled={disabled}
+      /* Highlight the current selection when the popup opens, like the old hand-rolled list. */
+      autoHighlight
+      /* The popup owns the search field, so it must start blank instead of pre-filled with the
+         selected label - otherwise the first keystroke would append to the current model name. */
+      defaultInputValue=""
+      /* Appica's `ComboboxInput` renders its own toggle button by default - a second
+         `Combobox.Trigger` that lives *inside* the popup. Base UI keeps only the last
+         registered trigger as the positioning anchor, so the popup would chase an element
+         it owns and drift one frame per layout pass instead of sticking to the trigger
+         button. The outer trigger already draws the chevron, so the toggle is redundant. */
+      icon={false}
+      isItemEqualToValue={sameOption}
+      filter={filterComboboxItem}
+      onValueChange={(next) => {
+        const nextValue = optionValue(next);
+        if (nextValue !== undefined) onValueChange?.(nextValue);
+      }}
+      onOpenChange={(open) => onOpenChange?.(open)}
+    >
+      <AppicaComboboxTrigger
         className={classNames("wand-ui-select-trigger", className)}
-        role="combobox"
         aria-label={ariaLabel}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        disabled={disabled}
-        data-placeholder={shown ? undefined : ""}
       >
-        <span>{shown || placeholder}</span>
-        <span aria-hidden="true">⌄</span>
-      </PopoverPrimitive.Trigger>
-      <PopoverPrimitive.Portal container={portalContainer}>
-        <PopoverPrimitive.Content
-          className={classNames("wand-ui-select-content", "wand-ui-select-searchable", contentClassName)}
-          side={side}
-          align={align}
-          sideOffset={sideOffset}
-          collisionPadding={collisionPadding}
-          onOpenAutoFocus={(event) => {
-            event.preventDefault();
-            searchRef.current?.focus();
-          }}
-        >
-          <div className="wand-ui-select-search">
-            <input
-              ref={searchRef}
-              className="wand-ui-select-search-input"
-              type="text"
-              value={query}
-              placeholder={searchPlaceholder}
-              autoComplete="off"
-              autoCorrect="off"
-              spellCheck={false}
-              aria-label={searchPlaceholder}
-              aria-controls={listId}
-              aria-autocomplete="list"
-              aria-activedescendant={activeId}
-              onChange={(event) => onQueryChange(event.currentTarget.value)}
-              onKeyDown={onSearchKeyDown}
-            />
-          </div>
-          <div
-            ref={listRef}
-            id={listId}
-            className="wand-ui-select-viewport"
-            role="listbox"
-            aria-label={ariaLabel}
-          >
-            {filtered.length === 0 ? (
-              <div className="wand-ui-select-empty">没有匹配的模型</div>
-            ) : filtered.map((option, index) => {
-              const selected = option.value === current;
-              const highlighted = index === safeHighlight;
-              return (
-                <button
-                  key={optionKey(option.value)}
-                  id={`${listId}-option-${index}`}
-                  type="button"
-                  role="option"
-                  className={classNames("wand-ui-select-item", itemClassName)}
-                  value={option.value}
-                  disabled={option.disabled}
-                  aria-selected={selected}
-                  data-highlighted={highlighted ? "" : undefined}
-                  data-state={selected ? "checked" : undefined}
-                  onMouseEnter={() => {
-                    if (!option.disabled) setHighlight(index);
-                  }}
-                  onClick={() => {
-                    if (!option.disabled) commit(option.value);
-                  }}
-                >
-                  <span>{option.label}</span>
-                  {selected ? (
-                    <span className="wand-ui-select-indicator">
-                      <WandIcon name="check" size={12}/>
-                    </span>
-                  ) : null}
-                </button>
-              );
-            })}
-          </div>
-        </PopoverPrimitive.Content>
-      </PopoverPrimitive.Portal>
-    </PopoverPrimitive.Root>
+        <span className="wand-ui-select-value">
+          <AppicaComboboxValue placeholder={placeholder} children={shown ? () => shown : undefined}/>
+        </span>
+      </AppicaComboboxTrigger>
+      <AppicaComboboxContent
+        className={classNames(
+          "wand-ui-select-content",
+          "wand-ui-select-searchable",
+          contentClassName,
+        )}
+        container={portalContainer}
+        side={side}
+        align={align}
+        sideOffset={sideOffset}
+        collisionPadding={collisionPadding}
+      >
+        <div className="wand-ui-select-search">
+          <AppicaComboboxInput
+            className="wand-ui-select-search-input"
+            placeholder={searchPlaceholder}
+            aria-label={searchPlaceholder}
+            startSlot={(
+              <WandIcon
+                className="wand-ui-select-search-icon"
+                name="search"
+                size={13}
+                strokeWidth={2}
+              />
+            )}
+          />
+        </div>
+        <AppicaComboboxEmpty className="wand-ui-select-empty">没有匹配的选项</AppicaComboboxEmpty>
+        <AppicaComboboxList className="wand-ui-select-viewport">
+          {(option: WandSelectOption) => (
+            <AppicaComboboxItem
+              key={optionKey(option.value)}
+              className={classNames("wand-ui-select-item", itemClassName)}
+              value={option}
+              disabled={option.disabled}
+            >
+              {option.label}
+            </AppicaComboboxItem>
+          )}
+        </AppicaComboboxList>
+      </AppicaComboboxContent>
+    </AppicaCombobox>
   );
+}
+
+/**
+ * Matches a whitespace-separated AND query against the option's value *and* label,
+ * so "gpt 5.4" finds `openai/gpt-5.4` / "GPT-5.4". One predicate drives both the
+ * searchable popup's filter and the exported helper, so they cannot drift apart.
+ */
+export function filterSelectOptions(
+  options: ReadonlyArray<WandSelectOption>,
+  query: string,
+): WandSelectOption[] {
+  if (!query.trim()) return options.slice();
+  return options.filter((option) => matchesQuery(optionSearchText(option), query));
+}
+
+function filterComboboxItem(
+  item: unknown,
+  query: string,
+  itemToString?: (value: unknown) => string,
+): boolean {
+  return matchesQuery(optionSearchText(item, itemToString), query);
+}
+
+function matchesQuery(text: string, query: string): boolean {
+  const needles = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (needles.length === 0) return true;
+  const haystack = text.toLowerCase();
+  return needles.every((needle) => haystack.includes(needle));
+}
+
+function optionSearchText(item: unknown, itemToString?: (value: unknown) => string): string {
+  const value = optionValue(item);
+  const label = optionLabel(item, itemToString);
+  return value === undefined ? label : `${value} ${label}`;
+}
+
+function optionValue(item: unknown): string | undefined {
+  if (isWandSelectOption(item)) return item.value;
+  return typeof item === "string" ? item : undefined;
+}
+
+function optionLabel(item: unknown, itemToString?: (value: unknown) => string): string {
+  if (isWandSelectOption(item)) return item.label;
+  if (itemToString && item != null) return itemToString(item);
+  return typeof item === "string" ? item : "";
+}
+
+function isWandSelectOption(item: unknown): item is WandSelectOption {
+  return typeof item === "object" && item !== null && typeof (item as WandSelectOption).value === "string";
+}
+
+function sameOption(left: unknown, right: unknown): boolean {
+  if (left == null || right == null) return left === right;
+  return optionValue(left) === optionValue(right);
+}
+
+function findOption(
+  options: ReadonlyArray<WandSelectOption>,
+  value: string | undefined,
+): WandSelectOption | undefined {
+  if (value === undefined) return undefined;
+  return options.find((option) => option.value === value);
 }
 
 function optionKey(value: string): string {
   return value === "" ? "__default__" : value;
-}
-
-function firstEnabledIndex(options: ReadonlyArray<WandSelectOption>): number {
-  const index = options.findIndex((option) => !option.disabled);
-  return index >= 0 ? index : 0;
-}
-
-function lastEnabledIndex(options: ReadonlyArray<WandSelectOption>): number {
-  for (let index = options.length - 1; index >= 0; index -= 1) {
-    if (!options[index]?.disabled) return index;
-  }
-  return Math.max(options.length - 1, 0);
 }

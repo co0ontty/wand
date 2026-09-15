@@ -11,8 +11,7 @@ import type {
 } from "../react/worktree-merge/types";
 import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
 import { closeReactOverlays } from "./react-overlay-coordinator";
-
-type UnknownRecord = Record<string, unknown>;
+import { isRecord } from "../react/json-utils";
 
 const MERGE_STATUSES = new Set<WorktreeMergeStatus>([
   "ready",
@@ -56,10 +55,6 @@ interface ActiveInstallation {
 }
 
 let activeInstallation: ActiveInstallation | null = null;
-
-function isRecord(value: unknown): value is UnknownRecord {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
 
 function optionalText(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;

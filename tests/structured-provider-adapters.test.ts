@@ -186,6 +186,23 @@ test("Qoder adapter emits print, model, permission, and resume arguments", () =>
   ]);
 
   assert.ok(buildQoderArgs(session({ mode: "auto-edit" }), "hello").includes("accept_edits"));
+  // 默认权限模式即 yolo（bypass_permissions），PTY 与结构化 runner 行为一致。
+  assert.deepEqual(buildQoderArgs(session({
+    provider: "qoder",
+    runner: "qoder-cli-print",
+    mode: "default",
+  }), "hello"), [
+    "-p", "hello", "--output-format", "stream-json",
+    "--permission-mode", "bypass_permissions",
+  ]);
+  assert.deepEqual(buildQoderArgs(session({
+    provider: "qoder",
+    runner: "qoder-cli-print",
+    mode: "auto-edit",
+  }), "hello"), [
+    "-p", "hello", "--output-format", "stream-json",
+    "--permission-mode", "accept_edits",
+  ]);
   assert.deepEqual(buildQoderArgs(session({
     provider: "qoder",
     runner: "qoder-cli-print",

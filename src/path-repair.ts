@@ -1,6 +1,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { compareSemver } from "./version-utils.js";
 import { getErrorMessage } from "./error-utils.js";
+import { providerCliCommand, SESSION_PROVIDERS } from "./session-provider.js";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -55,7 +56,7 @@ export interface PathRepairResult {
 }
 
 /** 关键的 CLI 工具，会被诊断输出。 */
-const PROBE_COMMANDS = ["claude", "codex", "opencode", "grok", "qodercli", "pi"] as const;
+const PROBE_COMMANDS: readonly string[] = SESSION_PROVIDERS.map(providerCliCommand);
 
 const DEEP_PROBE_TIMEOUT_MS = 4000;
 

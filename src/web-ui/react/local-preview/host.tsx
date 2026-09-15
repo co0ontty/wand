@@ -1,4 +1,5 @@
 import { type FormEvent, useSyncExternalStore } from "react";
+import * as React from "react";
 
 import { WandButton, WandDialogSurface } from "../ui";
 import { classNames } from "../ui/class-names";

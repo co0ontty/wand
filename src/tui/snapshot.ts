@@ -8,6 +8,7 @@
 import { SessionSnapshot } from "../types.js";
 import { IpcSnapshotData, IpcSnapshotHeader } from "./ipc-protocol.js";
 import { formatSession, sortRows } from "./session-formatter.js";
+import { safeRss } from "./runtime-utils.js";
 
 export interface SnapshotInputs {
   version: string;
@@ -60,6 +61,3 @@ export function buildSnapshotData(inputs: SnapshotInputs): IpcSnapshotData {
   };
 }
 
-function safeRss(): number {
-  try { return process.memoryUsage().rss; } catch { return 0; }
-}

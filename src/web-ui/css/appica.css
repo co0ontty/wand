@@ -1,0 +1,194 @@
+/* Appica UI + Tailwind v4 entry.
+ *
+ * Compiled by scripts/bundle-tailwind.js into src/web-ui/content/tailwind.css,
+ * which getCSSStyles() serves BEFORE the hand-written styles.css.
+ *
+ * Cascade contract (read this before adding token overrides):
+ *
+ *   1. Tailwind's own output lives in @layer theme/base/utilities, so it always
+ *      loses to unlayered rules. styles.css and the React style modules are
+ *      unlayered and therefore win. That is why styles.css keeps only
+ *      `box-sizing` in its reset and lets Tailwind's preflight own
+ *      margin/padding: an unlayered `* { margin: 0 }` would defeat every
+ *      Tailwind spacing utility.
+ *
+ *   2. Tailwind and Appica both declare tokens in unlayered `:root` blocks, so
+ *      *order* decides between them. styles.css is served last precisely so
+ *      Wand's palette wins every token name Appica also defines (`--success`,
+ *      `--border-strong`, `--radius-md`, `--shadow-sm`, ...). If the order were
+ *      flipped, Appica's neutral slate values would silently replace Wand's
+ *      warm ones across the whole legacy stylesheet.
+ *
+ *   3. Consequently this file must NOT redeclare a name that styles.css already
+ *      owns - `--success: var(--success)` is a self-reference and computes to
+ *      the guaranteed-invalid value, which would blank out the legacy UI. Only
+ *      map names Wand does not define.
+ */
+
+@import "tailwindcss";
+@import "@appica/ui-react/styles.css";
+
+/* 4. Appica 的 popup 自带两处工具类，会改变 Wand 的弹层语义，这里在 Tailwind utilities
+ *    之后、无层规则之前的专用层里抵消：
+ *    - `w-150` / `max-w-full` 尺寸约束：业务弹层有的自己声明 width，有的靠
+ *      `inset: 24px` 撑满屏幕（`.wand-missions-dialog`），后者会被压成 525px。
+ *    - `data-nested-dialog-open:` 变体：子弹层打开时父弹层淡出到 opacity 0
+ *      （iOS 式堆叠）。Wand 的二层弹层（如设置 → 环境变量预览）需要保留上层上下文，
+ *      迁移前的行为是父弹层留在原处、由子遮罩置顶。 */
+@layer wand-bridge {
+  [data-slot="dialog-popup"] {
+    width: auto;
+    max-width: none;
+  }
+
+  [data-slot="dialog-popup"][data-nested-dialog-open] {
+    opacity: 1;
+    scale: none;
+    pointer-events: auto;
+  }
+
+  /* Appica's triggers carry `w-full` + a fixed size height. Wand's selects are
+     sized by their business layout instead (composer chips, task-board pills),
+     so hand width/height back to the stylesheet. */
+  [data-slot="select-trigger"],
+  [data-slot="combobox-trigger"] {
+    width: auto;
+    height: auto;
+  }
+}
+
+/* Tailwind ignores node_modules; without this the compiled component classes
+   are never generated and everything renders unstyled. */
+@source "../../../node_modules/@appica/ui-react/dist";
+@source "../react";
+
+/* Wand renders dark mode through [data-theme="dark"], Appica defaults to .dark. */
+@custom-variant dark (&:is([data-theme="dark"] *, [data-theme="dark"]));
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Token bridge: Appica role tokens -> Wand design tokens.
+ *
+ * Appica ships a neutral slate palette. Wand has a warm, hand-tuned one that
+ * the entire legacy stylesheet already speaks, so instead of restyling every
+ * migrated component we re-point Appica's role tokens at Wand's tokens. That
+ * keeps one palette in the app while the component markup moves to Appica.
+ *
+ * Only names Wand leaves undefined appear here (see rule 3 above). Every token
+ * an Appica component reads is mapped below; if a component renders in default
+ * slate/blue, a token is missing.
+ * ───────────────────────────────────────────────────────────────────────── */
+:root {
+  /* ---- Foreground (text) -------------------------------------------- */
+  --foreground: var(--text-primary);
+  --foreground-subtle: var(--text-tertiary);
+  --foreground-muted: var(--text-muted);
+  --foreground-strong: var(--text-secondary);
+  --foreground-emphasis: var(--text-primary);
+  --foreground-intense: var(--text-primary);
+  --foreground-inverse: var(--text-inverse);
+
+  /* ---- Background (surfaces) ----------------------------------------
+     Appica's scale is lightness-ordered subtle > muted > strong; Wand's
+     surfaces are named by role instead, so these map by intent:
+     `muted` is the hover wash, `strong` the pressed/selected wash. */
+  --background: var(--bg-primary);
+  --background-subtle: var(--bg-elevated);
+  --background-muted: var(--bg-hover);
+  --background-strong: var(--bg-active);
+  --background-inverse: var(--text-primary);
+
+  /* ---- Border --------------------------------------------------------
+     `--border` and `--border-strong` are Wand-owned; only Appica's extra
+     border stops are mapped here. */
+  --border-muted: var(--border-subtle);
+  --border-emphasis: var(--border-strong);
+  --border-intense: var(--text-tertiary);
+  --border-inverse: var(--text-primary);
+  --border-overlay: var(--border-subtle);
+
+  /* ---- Primary (brand / accent) ------------------------------------- */
+  --primary: var(--accent);
+  --primary-foreground: var(--text-inverse);
+  --primary-subtle: var(--accent-muted);
+  --primary-soft: var(--accent-soft);
+  --primary-muted: var(--accent-hover);
+  --primary-strong: var(--accent-active);
+
+  /* ---- Secondary (neutral filled) ----------------------------------- */
+  --secondary: var(--bg-tertiary);
+  --secondary-foreground: var(--text-primary);
+  --secondary-subtle: var(--bg-hover);
+  --secondary-soft: var(--bg-active);
+  --secondary-muted: var(--bg-elevated);
+  --secondary-strong: var(--border-strong);
+  --secondary-emphasis: var(--border-strong);
+  --secondary-intense: var(--text-secondary);
+
+  /* ---- Status roles ---------------------------------------------------
+     `--error` and `--danger` differ in name only, so the mapping is direct.
+     `--success` / `--warning` / `--info` keep Wand's values untouched (rule 3).
+
+     Foregrounds are the on-solid colour: Wand's role colours are mid-to-dark
+     fills that carry white text, whereas Appica's light defaults expect dark
+     text on a pastel fill. Tinted surfaces therefore do NOT use
+     `*-foreground` - see the badge tones in react/styles/base.ts. */
+  --error: var(--danger);
+  --error-foreground: var(--text-inverse);
+  --error-subtle: var(--danger-muted);
+  --error-soft: var(--danger-muted);
+  --error-muted: var(--danger);
+  --error-strong: var(--danger);
+  --error-emphasis: var(--danger);
+  --error-intense: var(--danger);
+
+  --success-foreground: var(--text-inverse);
+  --success-subtle: var(--success-muted);
+  --success-soft: var(--success-muted);
+  --success-strong: var(--success);
+  --success-emphasis: var(--success);
+  --success-intense: var(--success);
+
+  --warning-foreground: var(--text-inverse);
+  --warning-subtle: var(--warning-muted);
+  --warning-soft: var(--warning-muted);
+  --warning-strong: var(--warning);
+  --warning-emphasis: var(--warning);
+  --warning-intense: var(--warning);
+
+  --info-foreground: var(--text-inverse);
+  --info-subtle: var(--info-muted);
+  --info-soft: var(--info-muted);
+  --info-strong: var(--info);
+  --info-emphasis: var(--info);
+  --info-intense: var(--info);
+
+  /* ---- Focus rings ---------------------------------------------------- */
+  --ring: var(--border-focus);
+  --ring-primary: var(--border-focus);
+  --ring-secondary: var(--border-focus);
+  --ring-error: var(--danger-muted);
+  --ring-success: var(--success-muted);
+  --ring-warning: var(--warning-muted);
+  --ring-info: var(--info-muted);
+  --ring-input: var(--border-strong);
+  --ring-light: rgb(255 255 255 / 25%);
+
+  --focus-ring: var(--border-focus);
+  --focus-ring-input: var(--border-strong);
+  --focus-ring-primary: var(--border-focus);
+  --focus-ring-secondary: var(--border-focus);
+  --focus-ring-error: var(--danger-muted);
+  --focus-ring-success: var(--success-muted);
+  --focus-ring-warning: var(--warning-muted);
+  --focus-ring-info: var(--info-muted);
+  --focus-ring-light: rgb(255 255 255 / 25%);
+
+  /* ---- Elevation ------------------------------------------------------ */
+  --shadow-color: rgb(89 58 32 / 18%);
+  --selection-color: var(--accent-muted);
+  --opacity-disabled: 0.52;
+}
+
+/* Wand has no dark palette yet (content/styles.css defines light tokens
+   only), so there is nothing to remap under [data-theme="dark"]. The
+   `@custom-variant dark` above is already wired for the day that changes. */

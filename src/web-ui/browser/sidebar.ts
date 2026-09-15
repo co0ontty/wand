@@ -1,5 +1,5 @@
 import { state, readStoredBoolean, writeStoredBoolean } from "./state";
-import { t, iconSvg } from "./i18n";
+import "./i18n";
 import { escapeHtml } from "./utils";
 import {
   inferProviderIdFromCommand,
@@ -10,7 +10,7 @@ import {
 import { persistSelectedId } from "./chat-scroll";
 import { closeSwipedItem } from "./input";
 import { showError, wandConfirm } from "./notifications";
-import { updateSessionsList, refreshAll, isStructuredSession } from "./session-engine";
+import { updateSessionsList, refreshAll } from "./session-engine";
 import { renderSessionItem } from "./session-ui";
 import { isBrowserReactShellMounted } from "./shell-runtime";
 
@@ -67,10 +67,6 @@ document.addEventListener("click", function(event) {
       function isAutomationSession(session: any) {
         var source = String(session && session.sessionSource || "").toLowerCase();
         return source === "automation" || source === "startup";
-      }
-
-      function sortSessionEntries(entries: any[]) {
-        return entries.sort(function(a, b) { return b.t - a.t; });
       }
 
       // 三个来源各自在组内按时间倒序，辅助会话不会再改变普通 Wand 会话

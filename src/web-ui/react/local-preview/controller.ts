@@ -175,5 +175,3 @@ export const localPreviewController = {
     }
   },
 };
-
-export const localPreviewStore = localPreviewController;

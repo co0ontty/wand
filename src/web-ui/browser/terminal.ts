@@ -1,14 +1,15 @@
 import { state } from "./state";
-import { escapeHtml } from "./utils";
-import { doRenderChat, scheduleChatRender } from "./chat-render";
-import { bindChatScrollListener, persistSelectedId } from "./chat-scroll";
-import { isMobileLayout } from "./file-browser";
-import { _swipeState, closeSwipedItem, deleteClaudeHistoryDirectory, deleteSession, executeDeleteHistory, focusInputBox, getHistoryItemsByCwd, getSelectedSession, handleDeleteCodexHistoryAction, handleResumeAction, handleResumeCodexHistoryAction, handleResumeHistoryAction, hasActiveTerminalSelection, installNativeInputImeGuard, lockNativeInputTerminalIme, resumeClaudeHistorySession, resumeCodexHistorySession, resumeSessionFromList, setDeletingState, shouldLockNativeInputTerminalIme, switchToSessionView } from "./input";
+import "./utils";
+import "./chat-render";
+import { persistSelectedId } from "./chat-scroll";
+import "./file-browser";
+import { _swipeState, closeSwipedItem, deleteClaudeHistoryDirectory, deleteSession, executeDeleteHistory, focusInputBox, getHistoryItemsByCwd, handleDeleteCodexHistoryAction, handleResumeAction, handleResumeCodexHistoryAction, handleResumeHistoryAction, hasActiveTerminalSelection, installNativeInputImeGuard, lockNativeInputTerminalIme, resumeClaudeHistorySession, resumeCodexHistorySession, resumeSessionFromList, setDeletingState, shouldLockNativeInputTerminalIme } from "./input";
 import { showToast } from "./notifications";
-import { render } from "./render";
-import { applyCurrentView, closeSessionsDrawer, copyToClipboard, dismissDrawerIfOverlay, isStructuredSession, loadSessions, openSessionModal, openWorktreeMergeModal, retryWorktreeCleanup, selectSession, updateSessionsList } from "./session-engine";
+import "./render";
+import { copyToClipboard, dismissDrawerIfOverlay, isStructuredSession, loadSessions, openSessionModal, openWorktreeMergeModal, retryWorktreeCleanup, selectSession, updateSessionsList } from "./session-engine";
 import { ensureTerminalFit, initTerminalJoystick, initTerminalResizeHandle, observeTerminalResize, sendTerminalResize, startTerminalHealthCheck } from "./viewport";
-import { t } from "./i18n";
+import { fitTerminalToContainer } from "./terminal-fit";
+import "./i18n";
 import { batchDeleteSelected, clearAllClaudeHistory, clearSelections, confirmDelete, ensureClaudeHistoryLoaded, getVisibleClaudeHistorySessions, selectAllVisibleItems, toggleManageMode, toggleManagedItemSelection } from "./sidebar";
 import { consumeTerminalTouchPage, consumeTerminalWheelLines, consumeTerminalWheelPage, terminalWheelPageSequence, type TerminalTouchPagingState, type TerminalWheelPagingState, type TerminalWheelScrollState } from "./terminal-wheel";
 import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
@@ -793,7 +794,7 @@ import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
             // 用户正在往上翻页：保持他的阅读位置和手动模式，不强行贴底。
             state.terminalAutoFollow = false;
             if (state.terminalFitAddon && typeof state.terminalFitAddon.fit === "function") {
-              state.terminalFitAddon.fit();
+              fitTerminalToContainer(terminal, state.terminalFitAddon);
               sendTerminalResize(terminal.cols, terminal.rows);
             }
             var restoredViewport = getTerminalViewport();
@@ -806,7 +807,7 @@ import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
           } else {
             state.terminalAutoFollow = true;
             if (state.terminalFitAddon && typeof state.terminalFitAddon.fit === "function") {
-              state.terminalFitAddon.fit();
+              fitTerminalToContainer(terminal, state.terminalFitAddon);
               sendTerminalResize(terminal.cols, terminal.rows);
             }
             terminal.scrollToBottom();
@@ -1033,7 +1034,7 @@ import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
           state.terminalFitAddon = fitAddon;
           state.terminalWriteQueue = Promise.resolve();
           state.terminalInitializing = false;
-          fitAddon.fit();
+          fitTerminalToContainer(term, fitAddon);
 
           term.onData(function(data: string) { sendPtyInput(data); });
           term.onBinary(function(data: string) {

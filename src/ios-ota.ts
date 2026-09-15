@@ -1,6 +1,8 @@
 import { open } from "node:fs/promises";
 import { inflateRawSync } from "node:zlib";
 
+import { firstHeaderListValue, forwardedParam, normalizeProtocol } from "./server-request.js";
+
 export interface IosIpaMetadata {
   bundleId: string;
   bundleVersion: string;
@@ -27,15 +29,15 @@ export function publicOriginFromRequest(req: {
   protocol?: string;
   headers: Record<string, string | string[] | undefined>;
 }): string | null {
-  const forwardedProto = firstHeader(req.headers["x-forwarded-proto"])
-    ?? forwardedParam(firstHeader(req.headers.forwarded), "proto");
+  const forwardedProto = firstHeaderListValue(req.headers["x-forwarded-proto"])
+    ?? forwardedParam(firstHeaderListValue(req.headers.forwarded), "proto");
   const proto = normalizeProtocol(forwardedProto)
-    ?? (firstHeader(req.headers["x-forwarded-ssl"])?.toLowerCase() === "on" ? "https" : undefined)
-    ?? (firstHeader(req.headers["x-forwarded-scheme"])?.toLowerCase() === "https" ? "https" : undefined)
+    ?? (firstHeaderListValue(req.headers["x-forwarded-ssl"])?.toLowerCase() === "on" ? "https" : undefined)
+    ?? (firstHeaderListValue(req.headers["x-forwarded-scheme"])?.toLowerCase() === "https" ? "https" : undefined)
     ?? normalizeProtocol(req.protocol);
-  const host = firstHeader(req.headers["x-forwarded-host"])
-    ?? forwardedParam(firstHeader(req.headers.forwarded), "host")
-    ?? firstHeader(req.headers.host);
+  const host = firstHeaderListValue(req.headers["x-forwarded-host"])
+    ?? forwardedParam(firstHeaderListValue(req.headers.forwarded), "host")
+    ?? firstHeaderListValue(req.headers.host);
   if (!proto || !host) return null;
   return `${proto}://${host}`;
 }
@@ -417,28 +419,6 @@ function dictEntries(entries: Array<[string, string]>): string {
     ...entries.flatMap(([key, value]) => [`<key>${escapeXml(key)}</key>`, `<string>${escapeXml(value)}</string>`]),
     `</dict>`,
   ].join("\n");
-}
-
-function firstHeader(value: string | string[] | undefined): string | undefined {
-  const raw = Array.isArray(value) ? value[0] : value;
-  return raw?.split(",")[0]?.trim();
-}
-
-function forwardedParam(header: string | undefined, key: string): string | undefined {
-  if (!header) return undefined;
-  const target = `${key}=`;
-  for (const part of header.split(";")) {
-    const trimmed = part.trim();
-    if (!trimmed.toLowerCase().startsWith(target)) continue;
-    return trimmed.slice(target.length).replace(/^"|"$/g, "");
-  }
-  return undefined;
-}
-
-function normalizeProtocol(value: string | undefined): "http" | "https" | undefined {
-  const proto = value?.trim().toLowerCase();
-  if (proto === "http" || proto === "https") return proto;
-  return undefined;
 }
 
 function stringValue(value: unknown): string {

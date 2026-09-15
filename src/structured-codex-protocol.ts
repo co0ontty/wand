@@ -3,15 +3,9 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
 import { getErrorMessage } from "./error-utils.js";
-import { normalizeStructuredToolResultContent } from "./structured-content.js";
+import { asRecord, normalizeStructuredToolResultContent } from "./structured-content.js";
 import type { ContentBlock, ConversationTurn, SessionSnapshot, ToolUseBlock } from "./types.js";
 import type { StructuredRunnerTurnState } from "./structured-runner.js";
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
-}
 
 function getString(value: unknown): string {
   return typeof value === "string" ? value : "";

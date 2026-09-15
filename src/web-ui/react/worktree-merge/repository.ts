@@ -7,22 +7,9 @@ import type {
   WorktreeMergeRepository,
   WorktreeMergeResult,
 } from "./types";
+import { finiteNumber, isRecord, stringValue, type JsonRecord } from "../json-utils";
 
 type FetchLike = typeof fetch;
-type JsonRecord = Record<string, unknown>;
-
-function isRecord(value: unknown): value is JsonRecord {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-function text(value: unknown, fallback = ""): string {
-  return typeof value === "string" ? value : fallback;
-}
-
-function finiteNumber(value: unknown, fallback = 0): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
-
 function recommendedAction(value: unknown): WorktreeMergeRecommendedAction {
   return value === "noop" || value === "resolve-conflict" ? value : "merge";
 }
@@ -33,8 +20,8 @@ function normalizeCommits(value: unknown): WorktreeMergeCommit[] {
     if (!isRecord(item) || typeof item.hash !== "string" || !item.hash) return [];
     return [{
       hash: item.hash,
-      shortHash: text(item.shortHash, item.hash.slice(0, 7)),
-      subject: text(item.subject, text(item.message)),
+      shortHash: stringValue(item.shortHash, item.hash.slice(0, 7)),
+      subject: stringValue(item.subject, stringValue(item.message)),
     }];
   });
 }
@@ -43,15 +30,15 @@ export function normalizeWorktreeMergeInspection(value: unknown): WorktreeMergeI
   const result = isRecord(value) ? value : {};
   return {
     ok: result.ok === true,
-    sourceBranch: text(result.sourceBranch),
-    targetBranch: text(result.targetBranch),
-    worktreePath: text(result.worktreePath),
-    repoRoot: text(result.repoRoot),
+    sourceBranch: stringValue(result.sourceBranch),
+    targetBranch: stringValue(result.targetBranch),
+    worktreePath: stringValue(result.worktreePath),
+    repoRoot: stringValue(result.repoRoot),
     hasUncommittedChanges: result.hasUncommittedChanges === true,
     aheadCount: Math.max(0, finiteNumber(result.aheadCount)),
     hasConflicts: result.hasConflicts === true,
     recommendedAction: recommendedAction(result.recommendedAction),
-    reason: text(result.reason),
+    reason: stringValue(result.reason),
     commits: normalizeCommits(result.commits),
   };
 }
@@ -60,15 +47,15 @@ export function normalizeWorktreeMergeResult(value: unknown): WorktreeMergeResul
   const result = isRecord(value) ? value : {};
   return {
     ok: result.ok === true,
-    sourceBranch: text(result.sourceBranch),
-    targetBranch: text(result.targetBranch),
-    repoRoot: text(result.repoRoot),
-    mergeCommit: text(result.mergeCommit),
-    mergedAt: text(result.mergedAt),
+    sourceBranch: stringValue(result.sourceBranch),
+    targetBranch: stringValue(result.targetBranch),
+    repoRoot: stringValue(result.repoRoot),
+    mergeCommit: stringValue(result.mergeCommit),
+    mergedAt: stringValue(result.mergedAt),
     cleanupDone: result.cleanupDone === true,
     conflict: result.conflict === true,
-    errorCode: text(result.errorCode),
-    reason: text(result.reason),
+    errorCode: stringValue(result.errorCode),
+    reason: stringValue(result.reason),
   };
 }
 
@@ -94,8 +81,8 @@ async function readRecord(response: Response, fallback: string): Promise<JsonRec
   const record = isRecord(value) ? value : {};
   if (!response.ok || typeof record.error === "string") {
     throw new WorktreeMergeRepositoryError(
-      text(record.error, `${fallback} (HTTP ${response.status})`),
-      text(record.errorCode),
+      stringValue(record.error, `${fallback} (HTTP ${response.status})`),
+      stringValue(record.errorCode),
       isRecord(record.result) ? normalizeWorktreeMergeResult(record.result) : null,
       response.status,
     );

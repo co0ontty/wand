@@ -4,6 +4,7 @@ import {
   useRef,
   useState,
 } from "react";
+import * as React from "react";
 import { WandButton, WandDialogSurface } from "../ui";
 import { httpFolderPickerRepository } from "../folder-picker/repository";
 import { nextFolderPickerIndex, type FolderPickerNavigationKey } from "../folder-picker/model";
@@ -13,6 +14,7 @@ import type {
   FolderPickerRepository,
 } from "../folder-picker/types";
 import { explorerBaseName, joinExplorerPath } from "./paths";
+import { failureMessage } from "../errors";
 
 export interface MoveEntryRequest {
   /** Absolute path being moved. */
@@ -32,10 +34,6 @@ export interface MoveEntryDialogProps {
 }
 
 const NAVIGATION_KEYS = new Set<FolderPickerNavigationKey>(["ArrowDown", "ArrowUp", "Home", "End"]);
-
-function presentError(error: unknown): string {
-  return error instanceof Error && error.message ? error.message : "无法读取该目录。";
-}
 
 /**
  * "移动到…" dialog for the file explorer. Browses directories through the
@@ -92,7 +90,7 @@ export function MoveEntryDialog({
         .catch((loadError) => {
           if (abort.signal.aborted) return;
           setListing(null);
-          setError(presentError(loadError));
+          setError(failureMessage(loadError, "无法读取该目录。"));
         })
         .finally(() => {
           if (!abort.signal.aborted) setLoading(false);
@@ -133,7 +131,7 @@ export function MoveEntryDialog({
       const applied = await onSubmit(request.from, destination);
       if (!applied) setError("移动失败，请检查目标目录后重试。");
     } catch (submitError) {
-      setError(presentError(submitError));
+      setError(failureMessage(submitError, "无法读取该目录。"));
     } finally {
       setMoving(false);
     }

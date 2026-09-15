@@ -1,4 +1,6 @@
-export type NewSessionProvider = "claude" | "codex" | "opencode" | "grok" | "qoder" | "pi";
+import type { ProviderId } from "../../provider-identity";
+
+export type NewSessionProvider = ProviderId;
 
 export type NewSessionKind = "structured" | "pty" | "shell";
 export type NewSessionPreferenceKind = Exclude<NewSessionKind, "shell">;

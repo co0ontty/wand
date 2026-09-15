@@ -1,7 +1,11 @@
-import * as PopoverPrimitive from "@radix-ui/react-popover";
+import {
+  Popover as AppicaPopover,
+  PopoverContent as AppicaPopoverContent,
+  PopoverTrigger as AppicaPopoverTrigger,
+} from "@appica/ui-react/popover";
 import * as React from "react";
 import type { AriaRole, ReactElement, ReactNode } from "react";
-import { classNames } from "./class-names";
+import { classNames, staticClassName } from "./class-names";
 import { usePortalContainer } from "./portal-context";
 
 void React;
@@ -17,12 +21,21 @@ export interface WandPopoverProps {
   open?: boolean;
   contentId?: string;
   contentRole?: AriaRole;
-  forceMount?: true;
-  portalled?: boolean;
-  showArrow?: boolean;
   onOpenChange?(open: boolean): void;
 }
 
+/**
+ * Wand's floating panel, rendered by Appica UI's Popover.
+ *
+ * Appica always portals the popup into the overlay root - the same floating
+ * surface Select, Combobox and DropdownMenu use - so there is no non-portalled
+ * mode left. Business code that used to keep a panel mounted and hidden with
+ * CSS now relies on the popover mounting it only while open.
+ *
+ * `wand-ui-popover-content` remains as the styling hook business stylesheets
+ * hang their panel sizing off; the chrome (border, radius, shadow, backdrop,
+ * enter/exit motion) comes from the library.
+ */
 export function WandPopover({
   trigger,
   children,
@@ -34,34 +47,26 @@ export function WandPopover({
   open,
   contentId,
   contentRole,
-  forceMount,
-  portalled = true,
-  showArrow = true,
   onOpenChange,
 }: WandPopoverProps) {
   const portalContainer = usePortalContainer();
-  const content = (
-    <PopoverPrimitive.Content
-      id={contentId}
-      role={contentRole}
-      forceMount={forceMount}
-      className={classNames("wand-ui-popover-content", className)}
-      aria-label={ariaLabel}
-      align={align}
-      side={side}
-      sideOffset={sideOffset}
-      collisionPadding={12}
-    >
-      {children}
-      {showArrow ? <PopoverPrimitive.Arrow className="wand-ui-popover-arrow" /> : null}
-    </PopoverPrimitive.Content>
-  );
   return (
-    <PopoverPrimitive.Root open={open} onOpenChange={onOpenChange}>
-      <PopoverPrimitive.Trigger asChild>{trigger}</PopoverPrimitive.Trigger>
-      {portalled ? (
-        <PopoverPrimitive.Portal container={portalContainer}>{content}</PopoverPrimitive.Portal>
-      ) : content}
-    </PopoverPrimitive.Root>
+    <AppicaPopover open={open} onOpenChange={onOpenChange}>
+      <AppicaPopoverTrigger render={trigger}/>
+      <AppicaPopoverContent
+        id={contentId}
+        role={contentRole}
+        aria-label={ariaLabel}
+        container={portalContainer}
+        side={side}
+        align={align}
+        sideOffset={sideOffset}
+        collisionPadding={12}
+        arrow={false}
+        className={classNames("wand-ui-popover-content", staticClassName(className))}
+      >
+        {children}
+      </AppicaPopoverContent>
+    </AppicaPopover>
   );
 }

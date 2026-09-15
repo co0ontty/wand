@@ -2,6 +2,8 @@ export const PROVIDER_IDS = ["claude", "codex", "opencode", "grok", "qoder", "pi
 
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 
+const PROVIDER_ID_SET: ReadonlySet<string> = new Set(PROVIDER_IDS);
+
 const PROVIDER_LABELS: Readonly<Record<ProviderId, string>> = {
   claude: "Claude",
   codex: "Codex",
@@ -54,6 +56,16 @@ export function inferProviderIdFromCommand(value: unknown): ProviderId | null {
   const executablePath = match?.[1] ?? match?.[2] ?? match?.[3] ?? "";
   const executable = executablePath.split(/[\\/]/).pop()?.replace(/\.(?:cmd|exe)$/i, "") ?? "";
   return normalizeProviderId(executable);
+}
+
+/** provider 对应的 CLI 可执行文件名（Qoder 的 CLI 叫 qodercli）。 */
+export function providerCliCommand(provider: string): string {
+  return provider === "qoder" ? "qodercli" : provider;
+}
+
+/** 严格判断：只接受 6 个 provider 字面量，不做别名 / 大小写归一。 */
+export function isProviderId(value: unknown): value is ProviderId {
+  return typeof value === "string" && PROVIDER_ID_SET.has(value);
 }
 
 export function providerDisplayName(value: unknown): string {

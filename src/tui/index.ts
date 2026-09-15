@@ -2,21 +2,16 @@ import { ProcessManager } from "../process-manager.js";
 import { StructuredSessionManager } from "../structured-session-manager.js";
 import { ProcessEvent, SessionSnapshot } from "../types.js";
 import {
-  checkUpdate,
   copyToClipboard,
-  installService,
-  installUpdate,
-  isServiceInstalled,
   openInBrowser,
-  readUpdateChannel,
   restartSelf,
-  uninstallService,
 } from "./commands.js";
-import { repairServiceUnitAfterUpdate } from "../service-self-repair.js";
 import { buildLayout, HeaderInfo, LayoutHandle } from "./layout.js";
 import { installLogBus, restoreLogBus } from "./log-bus.js";
 import { formatSession, sortRows } from "./session-formatter.js";
 import { openServicePanel } from "./service-panel.js";
+import { safeRss, safeServiceInstalled } from "./runtime-utils.js";
+import { createServiceActions } from "./service-actions.js";
 
 /** 触发 sessions 列表重渲的事件类型。output 太频繁，不订阅。 */
 const SESSIONS_REFRESH_EVENTS = new Set(["status", "started", "ended", "task"]);
@@ -139,6 +134,24 @@ export function startTui(deps: TuiDeps): TuiHandle {
   // 服务面板打开时，屏幕级快捷键全部让位给面板自身按键。
   const idle = () => !layout.isServicePanelOpen();
 
+  const serviceActions = createServiceActions({
+    configPath: deps.configPath,
+    version: deps.version,
+    layout,
+    updateConfirmBody: ({ current, latest, channelLabel }) =>
+      `通道 ${channelLabel}：当前 ${current} → 最新 ${latest}，是否立即升级？`,
+    installServiceBody: (isRoot) => process.platform === "linux"
+      ? `将写入 /etc/systemd/system/wand.service，systemctl enable --now，开机自启。\n${
+          isRoot ? "当前是 root，可以直接装。" : "⚠ 需要 root,请退出 TUI 后直接跑 sudo wand service:install。"
+        }\n不想要 root？退出 TUI 跑 wand service:install --user (登出会被回收)。`
+      : process.platform === "darwin"
+        ? `将写入 /Library/LaunchDaemons/com.wand.web.plist，launchctl load，开机自启。\n${
+            isRoot ? "当前是 root,可以直接装。" : "⚠ 需要 root,请退出 TUI 后直接跑 sudo wand service:install。"
+          }`
+        : "当前平台暂不支持。",
+    onServiceChanged: refreshAll,
+  });
+
   // —— 基本键位 ——
   layout.screen.key(["q", "Q"], () => { if (idle()) void stop("user"); });
   layout.screen.key(["C-c"], () => { void stop("user"); });
@@ -161,69 +174,16 @@ export function startTui(deps: TuiDeps): TuiHandle {
   // —— 运维快捷键 ——
   layout.screen.key(["g", "G"], () => { if (idle()) openServicePanel({ layout, configPath: deps.configPath }); });
   layout.screen.key(["S-r"], () => { if (idle()) void handleRestart(); });
-  layout.screen.key(["u", "U"], () => { if (idle()) void handleUpdate(); });
+  layout.screen.key(["u", "U"], () => { if (idle()) void serviceActions.handleUpdate(); });
   layout.screen.key(["o", "O"], () => { if (idle()) handleOpenBrowser(); });
   layout.screen.key(["c", "C"], () => { if (idle()) handleCopyUrl(); });
-  layout.screen.key(["s"], () => { if (idle()) void handleInstallService(); });
-  layout.screen.key(["S-s"], () => { if (idle()) void handleUninstallService(); });
+  layout.screen.key(["s"], () => { if (idle()) void serviceActions.handleInstallService(); });
+  layout.screen.key(["S-s"], () => { if (idle()) void serviceActions.handleUninstallService(); });
 
   // 首次渲染
   refreshAll();
 
   // —— 操作处理函数 ——
-  async function handleRestart(): Promise<void> {
-    const ok = await layout.confirm({
-      title: "重启 wand",
-      body: "将派生新进程并退出当前进程，活跃会话会因 PTY 中断而中止，是否继续？",
-    });
-    if (!ok) return;
-    layout.showToast("正在重启…", "info", 5000);
-    // 让 toast 有时间渲染，再触发 restart
-    setTimeout(() => {
-      const r = restartSelf();
-      if (!r.ok) layout.showToast(r.message, "error", 4000);
-    }, 200);
-  }
-
-  async function handleUpdate(): Promise<void> {
-    layout.showToast("正在检查更新…", "info", 2000);
-    const channel = await runOffMicrotask(() => readUpdateChannel(deps.configPath));
-    const info = await runOffMicrotask(() => checkUpdate(deps.version, channel));
-    if (!info.latest) {
-      layout.showToast(
-        info.channel === "beta" ? "无法读取 npm beta 版本" : "无法连接到 npm registry",
-        "error",
-        3500,
-      );
-      return;
-    }
-    if (!info.hasUpdate) {
-      layout.showToast(
-        info.channel === "beta" ? `已是最新 Beta 版本 (${info.current})` : `已是最新版本 (v${info.current})`,
-        "success",
-        3000,
-      );
-      return;
-    }
-    const channelLabel = info.channel === "beta" ? "Beta" : "正式版";
-    const go = await layout.confirm({
-      title: "发现新版本",
-      body: `通道 ${channelLabel}：当前 ${info.current} → 最新 ${info.latest}，是否立即升级？`,
-      yes: "回车 / y 安装",
-      no: "Esc / n 取消",
-    });
-    if (!go) return;
-    layout.showToast("正在执行 npm install -g …", "info", 5000);
-    const r = await runOffMicrotask(() => installUpdate(info.channel));
-    layout.showToast(r.message, r.ok ? "success" : "error", 5000);
-    if (r.detail) layout.showDetail(r.ok ? "更新输出" : "更新失败", r.detail);
-    if (r.ok) {
-      // 镜像 install.sh：装完用全局安装刷新服务 unit（ExecStart/PATH），再按 R 重启生效。
-      const repair = await runOffMicrotask(() => repairServiceUnitAfterUpdate(deps.configPath));
-      if (repair.scope) layout.showToast(repair.message, repair.repaired ? "success" : "warn", 4500);
-    }
-  }
-
   function handleOpenBrowser(): void {
     const url = deps.urls[0]?.url;
     if (!url) {
@@ -244,44 +204,18 @@ export function startTui(deps: TuiDeps): TuiHandle {
     layout.showToast(r.message, r.ok ? "success" : "error", 2500);
   }
 
-  async function handleInstallService(): Promise<void> {
-    if (isServiceInstalled()) {
-      layout.showToast("服务已安装，按 Shift+S 卸载", "warn", 2500);
-      return;
-    }
-    // 默认装 system-wide。非 root 时 installService 会返回明确错误,toast 自然展示。
-    const isRoot = typeof process.getuid === "function" ? process.getuid() === 0 : false;
-    const body = process.platform === "linux"
-      ? `将写入 /etc/systemd/system/wand.service，systemctl enable --now，开机自启。\n${
-          isRoot ? "当前是 root，可以直接装。" : "⚠ 需要 root,请退出 TUI 后直接跑 sudo wand service:install。"
-        }\n不想要 root？退出 TUI 跑 wand service:install --user (登出会被回收)。`
-      : process.platform === "darwin"
-        ? `将写入 /Library/LaunchDaemons/com.wand.web.plist，launchctl load，开机自启。\n${
-            isRoot ? "当前是 root,可以直接装。" : "⚠ 需要 root,请退出 TUI 后直接跑 sudo wand service:install。"
-          }`
-        : "当前平台暂不支持。";
-    const ok = await layout.confirm({ title: "注册为系统服务", body });
-    if (!ok) return;
-    const r = await runOffMicrotask(() => installService({ configPath: deps.configPath }));
-    layout.showToast(r.message, r.ok ? "success" : "error", 5000);
-    if (r.detail) layout.showDetail(r.ok ? "服务安装详情" : "服务安装失败", r.detail);
-    refreshAll();
-  }
-
-  async function handleUninstallService(): Promise<void> {
-    if (!isServiceInstalled()) {
-      layout.showToast("当前未安装系统服务", "warn", 2500);
-      return;
-    }
+  async function handleRestart(): Promise<void> {
     const ok = await layout.confirm({
-      title: "卸载系统服务",
-      body: "将禁用并删除 wand 的 systemd / launchd 配置，确认继续？",
+      title: "重启 wand",
+      body: "将派生新进程并退出当前进程，活跃会话会因 PTY 中断而中止，是否继续？",
     });
     if (!ok) return;
-    const r = await runOffMicrotask(() => uninstallService());
-    layout.showToast(r.message, r.ok ? "success" : "error", 4000);
-    if (r.detail) layout.showDetail(r.ok ? "服务卸载详情" : "服务卸载失败", r.detail);
-    refreshAll();
+    layout.showToast("正在重启…", "info", 5000);
+    // 让 toast 有时间渲染，再触发 restart
+    setTimeout(() => {
+      const r = restartSelf();
+      if (!r.ok) layout.showToast(r.message, "error", 4000);
+    }, 200);
   }
 
   async function stop(reason: ExitReason): Promise<void> {
@@ -314,27 +248,3 @@ function safeStructuredList(mgr: StructuredSessionManager): SessionSnapshot[] {
   }
 }
 
-function safeRss(): number {
-  try {
-    return process.memoryUsage().rss;
-  } catch {
-    return 0;
-  }
-}
-
-function safeServiceInstalled(): boolean {
-  try {
-    return isServiceInstalled();
-  } catch {
-    return false;
-  }
-}
-
-/** 把同步阻塞操作放到下一 microtask，给 TUI 留出一帧把 toast 画出来。 */
-function runOffMicrotask<T>(fn: () => T): Promise<T> {
-  return new Promise((resolve, reject) => {
-    setImmediate(() => {
-      try { resolve(fn()); } catch (err) { reject(err); }
-    });
-  });
-}

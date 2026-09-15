@@ -1,17 +1,10 @@
 import { callConfiguredAiText, type QuickCommitAiOptions } from "./git-quick-commit.js";
+import { clipAtWordBoundary } from "./text-utils.js";
 
 /** 任务标题留空时由描述自动生成；面板上显示得下，也不至于截断成半句话。 */
 export const TASK_TITLE_MAX_LENGTH = 40;
 
 const DESCRIPTION_HINT_MAX = 2_000;
-
-function clip(value: string, maxLength = TASK_TITLE_MAX_LENGTH): string {
-  if (value.length <= maxLength) return value;
-  const sliced = value.slice(0, maxLength);
-  const lastSpace = sliced.lastIndexOf(" ");
-  if (lastSpace >= Math.floor(maxLength * 0.55)) return sliced.slice(0, lastSpace);
-  return sliced;
-}
 
 function firstMeaningfulLine(description: string): string {
   const lines = description
@@ -31,12 +24,12 @@ function firstMeaningfulLine(description: string): string {
  * 后台自动生成成功后再覆盖它；失败或超时就保留这个兜底。
  */
 export function provisionalTaskTitleFromDescription(description: string): string {
-  return clip(firstMeaningfulLine(description));
+  return clipAtWordBoundary(firstMeaningfulLine(description), TASK_TITLE_MAX_LENGTH);
 }
 
 /** 模型输出可能带引号、代码块或「标题：」前缀，逐层剥掉再按单行裁剪。 */
 export function parseGeneratedTaskTitle(raw: string): string {
-  return clip(stripGeneratedTitle(raw));
+  return clipAtWordBoundary(stripGeneratedTitle(raw), TASK_TITLE_MAX_LENGTH);
 }
 
 function stripGeneratedTitle(raw: string): string {
@@ -98,5 +91,5 @@ export async function generateWandTaskTitle(
   // 拿到报错文案 / 整段解释时宁可保留占位标题，也不能把垃圾写进看板。
   // 先判可信度再裁剪：截断过的长句看起来就像标题，会绕过长度检查。
   if (!isPlausibleTaskTitle(stripped)) throw new Error("模型返回的任务标题不可用。");
-  return clip(stripped);
+  return clipAtWordBoundary(stripped, TASK_TITLE_MAX_LENGTH);
 }

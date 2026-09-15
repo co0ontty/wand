@@ -3,10 +3,11 @@ import { pipeline } from "node:stream/promises";
 
 import type { Express, Request, RequestHandler, Response } from "express";
 
+import { buildInfoPayload, type BuildInfo } from "./build-info.js";
 import type { GitHubApkDownload } from "./distribution-manager.js";
 import { getErrorMessage } from "./error-utils.js";
 import { asyncRoute } from "./express-async.js";
-import { sendRouteError, stringQuery } from "./server-request.js";
+import { sendRouteError, text } from "./server-request.js";
 import type { ModelCatalogService } from "./models.js";
 import type { PackageUpdateInfo, UpdateChannel } from "./npm-update-utils.js";
 import {
@@ -113,7 +114,7 @@ async function proxyGitHubApk(
  * 用 400 + 固定的英文文案（老客户端按字符串匹配）。
  */
 function requireCurrentVersion(req: Request, res: Response): string | null {
-  const currentVersion = stringQuery(req.query.currentVersion);
+  const currentVersion = text(req.query.currentVersion);
   if (!currentVersion) {
     res.status(400).json({ error: "Missing currentVersion query parameter." });
     return null;
@@ -426,7 +427,7 @@ export interface AdminUpdateRoutesDependencies {
   modelCatalog: ModelCatalogService;
   getUpdateChannel(): UpdateChannel;
   checkLatestPackageVersion(channel: UpdateChannel, forceRefresh?: boolean): Promise<PackageUpdateInfo>;
-  buildInfo: { commit: string | null; builtAt: string | null; channel: string | null };
+  buildInfo: BuildInfo;
   serverInstanceId: string;
   emitSystemNotification(data: Record<string, unknown>): void;
 }
@@ -490,13 +491,7 @@ export function registerAdminUpdateRoutes(app: Express, deps: AdminUpdateRoutesD
   app.get("/api/check-update", requireAdmin, asyncRoute(async (_req, res) => {
     try {
       const info = await deps.checkLatestPackageVersion(deps.getUpdateChannel(), true);
-      res.json({
-        ...info,
-        build: {
-          ...deps.buildInfo,
-          shortCommit: deps.buildInfo.commit ? deps.buildInfo.commit.slice(0, 7) : null,
-        },
-      });
+      res.json({ ...info, build: buildInfoPayload(deps.buildInfo) });
     } catch (error) {
       sendRouteError(res, error, "检查更新失败。", 500);
     }
@@ -553,4 +548,44 @@ export function registerAdminUpdateRoutes(app: Express, deps: AdminUpdateRoutesD
       state.updateInFlight = false;
     }
   }));
+
+  // ── 自动更新开关（Web / APK / DMG / provider CLI） ──
+
+  const readAutoUpdatePrefs = () => ({
+    web: storage.getConfigValue("autoUpdateWeb") === "true",
+    apk: storage.getConfigValue("autoUpdateApk") === "true",
+    dmg: storage.getConfigValue("autoUpdateDmg") === "true",
+    cli: storage.getConfigValue("autoUpdateProviderClis") === "true",
+  });
+
+  app.get("/api/auto-update", requireAdmin, (_req, res) => {
+    res.json(readAutoUpdatePrefs());
+  });
+
+  app.post("/api/auto-update", requireAdmin, (req, res) => {
+    const body = (req.body ?? {}) as { web?: unknown; apk?: unknown; dmg?: unknown; cli?: unknown };
+    const writes: Array<[string, string]> = [];
+    if (typeof body.web === "boolean") writes.push(["autoUpdateWeb", String(body.web)]);
+    if (typeof body.apk === "boolean") writes.push(["autoUpdateApk", String(body.apk)]);
+    if (typeof body.dmg === "boolean") writes.push(["autoUpdateDmg", String(body.dmg)]);
+    if (typeof body.cli === "boolean") writes.push(["autoUpdateProviderClis", String(body.cli)]);
+    for (const [key, value] of writes) storage.setConfigValue(key, value);
+    res.json(readAutoUpdatePrefs());
+  });
+
+  // ── 更新通道（stable / beta） ──
+
+  app.get("/api/update-channel", requireAdmin, (_req, res) => {
+    res.json({
+      channel: deps.getUpdateChannel(),
+      build: buildInfoPayload(deps.buildInfo),
+    });
+  });
+
+  app.post("/api/update-channel", requireAdmin, (req, res) => {
+    const body = (req.body ?? {}) as { channel?: unknown };
+    const channel = body.channel === "beta" ? "beta" : "stable";
+    storage.setConfigValue("updateChannel", channel);
+    res.json({ channel });
+  });
 }

@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 
 import { startStructuredCli } from "./structured-exec-pump.js";
 import type { StructuredExecHost } from "./structured-exec-host.js";
+import { asRecord } from "./structured-content.js";
 import { thinkingEffortToPiLevel } from "./structured-provider-common.js";
 import type {
   StructuredRunnerAdapter,
@@ -12,14 +13,10 @@ import type {
 } from "./structured-runner.js";
 import type { SessionSnapshot } from "./types.js";
 
-function record(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
-}
-
 function textContent(value: unknown): string {
   if (typeof value === "string") return value;
   if (Array.isArray(value)) return value.map((item) => textContent(item)).filter(Boolean).join("\n");
-  const item = record(value);
+  const item = asRecord(value);
   if (!item) return "";
   if (item.type === "text" && typeof item.text === "string") return item.text;
   return textContent(item.content);
@@ -43,8 +40,8 @@ export function piToolName(name: string): string {
 
 function applyPiAssistantMessage(state: StructuredRunnerTurnState, message: Record<string, unknown>): string | null {
   if (typeof message.model === "string") state.model = message.model;
-  const usage = record(message.usage);
-  const cost = record(usage?.cost);
+  const usage = asRecord(message.usage);
+  const cost = asRecord(usage?.cost);
   if (usage) {
     state.usage = {
       inputTokens: typeof usage.input === "number" ? usage.input : 0,
@@ -59,7 +56,7 @@ function applyPiAssistantMessage(state: StructuredRunnerTurnState, message: Reco
   const thinkings: string[] = [];
   const parts = Array.isArray(message.content) ? message.content : [];
   for (const part of parts) {
-    const item = record(part);
+    const item = asRecord(part);
     if (!item) continue;
     if (item.type === "text") {
       const text = typeof item.text === "string" ? item.text : textContent(item);
@@ -95,7 +92,7 @@ function applyPiAssistantMessage(state: StructuredRunnerTurnState, message: Reco
 export function applyPiEvent(state: StructuredRunnerTurnState, event: Record<string, unknown>): string | null {
   if (event.type === "session" && typeof event.id === "string") state.sessionId = event.id;
   if (event.type === "message_update") {
-    const update = record(event.assistantMessageEvent);
+    const update = asRecord(event.assistantMessageEvent);
     const delta = typeof update?.delta === "string" ? update.delta : "";
     if (update?.type === "text_delta" && delta) {
       const last = state.blocks.at(-1);
@@ -120,19 +117,19 @@ export function applyPiEvent(state: StructuredRunnerTurnState, event: Record<str
   if (event.type === "tool_execution_start") {
     const id = typeof event.toolCallId === "string" ? event.toolCallId : crypto.randomUUID();
     const name = typeof event.toolName === "string" ? event.toolName : "tool";
-    state.blocks.push({ type: "tool_use", id, name: piToolName(name), input: record(event.args) ?? {} });
+    state.blocks.push({ type: "tool_use", id, name: piToolName(name), input: asRecord(event.args) ?? {} });
   }
   if (event.type === "tool_execution_end") {
     const id = typeof event.toolCallId === "string" ? event.toolCallId : "unknown";
     state.blocks.push({ type: "tool_result", tool_use_id: id, content: textContent(event.result), is_error: event.isError === true });
   }
   if (event.type === "message_end" || event.type === "turn_end") {
-    const message = record(event.message);
+    const message = asRecord(event.message);
     if (message?.role === "assistant") return applyPiAssistantMessage(state, message);
   }
   if (event.type === "agent_end" && Array.isArray(event.messages)) {
     for (const raw of event.messages) {
-      const message = record(raw);
+      const message = asRecord(raw);
       if (message?.role === "assistant") {
         const error = applyPiAssistantMessage(state, message);
         if (error) return error;

@@ -11,13 +11,13 @@ import { httpFilePreviewRepository } from "./repository";
 import type {
   FilePreviewCommand,
   FilePreviewDiscardReason,
-  FilePreviewFailure,
   FilePreviewOpenRequest,
   FilePreviewRepository,
   FilePreviewRuntimeAdapter,
   FilePreviewSnapshot,
   WandFilePreviewController,
 } from "./types";
+import { failureOf as unknownFailure, isAbortError } from "../errors";
 
 type Listener = () => void;
 
@@ -54,16 +54,6 @@ function initialSnapshot(revision = 0): FilePreviewSnapshot {
     fontSize: defaultFilePreviewFontSize(),
     imageZoomed: false,
   };
-}
-
-function unknownFailure(error: unknown, fallback: string): FilePreviewFailure {
-  return {
-    message: error instanceof Error && error.message ? error.message : fallback,
-  };
-}
-
-function isAbort(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "AbortError";
 }
 
 function defaultDiscardCopy(reason: FilePreviewDiscardReason): { title: string; message: string } {
@@ -185,7 +175,7 @@ export function createFilePreviewModule(options: FilePreviewModuleOptions): File
       });
       return true;
     } catch (error) {
-      if (sequence !== loadSequence || abort.signal.aborted || isAbort(error) || !snapshot.open) return false;
+      if (sequence !== loadSequence || abort.signal.aborted || isAbortError(error) || !snapshot.open) return false;
       activeAbort = null;
       publish({ status: "error", failure: unknownFailure(error, "加载预览失败") });
       return false;

@@ -1,20 +1,20 @@
-import { state, readStoredBoolean, writeStoredBoolean, configPath } from "./state";
+import { state, writeStoredBoolean } from "./state";
 import { mergeWindowedMessages } from "./message-reconciliation";
-import { t, iconSvg } from "./i18n";
-import { escapeHtml, formatElapsedShort, refreshTailMarqueePaths } from "./utils";
+import { iconSvg } from "./i18n";
+import { escapeHtml, refreshTailMarqueePaths } from "./utils";
 import { ensureChatMessagesContainer, extractToolResultText, parseMessages, renderChat, scheduleChatRender, sessionChromeTitle } from "./chat-render";
-import { bindChatScrollListener, clearStructuredQueuePersistence, normalizeStructuredSnapshot, persistSelectedId, restoreStructuredQueue, saveStructuredQueue, scrollChatToBottom, stripRenderOnlyStructuredMessages, syncStructuredQueueFromSession, updateChatUnreadBubble } from "./chat-scroll";
-import { attachEventListeners } from "./events";
-import { applyTerminalScale, isMobileLayout, refreshFileExplorer, setFilePanelOpen, shouldShowSessionsBackdrop, updateFilePanelCwd, updateLayoutState } from "./file-browser";
+import { bindChatScrollListener, normalizeStructuredSnapshot, persistSelectedId, restoreStructuredQueue, saveStructuredQueue, stripRenderOnlyStructuredMessages, syncStructuredQueueFromSession, updateChatUnreadBubble } from "./chat-scroll";
+import "./events";
+import { isMobileLayout, refreshFileExplorer, shouldShowSessionsBackdrop, updateFilePanelCwd, updateLayoutState } from "./file-browser";
 import { loadGitStatus, updateTopbarGitBadge } from "./git-commit";
-import { activateSession, autoResizeInput, buildMessagesForRender, canAutoResumeSession, captureTerminalInput, closeKeyboardPopup, closeSwipedItem, flushCrossSessionQueue, focusInputBox, getControlInput, hasActiveTerminalSelection, hideMiniKeyboard, isImeKeyboardEvent, queueDirectInput, reconcileInteractiveState, renderCrossSessionQueue, sendInputFromBox, setTerminalInteractive, shouldCaptureTerminalEvent, stopSession, switchToSessionView, updateInteractiveControls, updateStructuredQueueCounter, updateVoiceTranscript } from "./input";
-import { _apkVersion, _getNativePermission, _hasNativeBridge, _macAppVersion, _syncWakeLock, clearSessionProgressNative, hideError, notifyTaskEnded, openWandDialog, performRestart, sendBrowserNotification, showError, showNotificationBubble, showRestartOverlay, showToast, tryPlayNotificationSound, wandAlert, wandConfirm, wandPrompt } from "./notifications";
-import { bindForegroundSyncListeners, getEffectiveCwd, render, renderAppShell, resetChatRenderCache, updateOfflineBanner } from "./render";
-import { renderSessions, renderSessionsListContent } from "./sidebar";
+import { autoResizeInput, buildMessagesForRender, canAutoResumeSession, captureTerminalInput, closeKeyboardPopup, closeSwipedItem, flushCrossSessionQueue, focusInputBox, getControlInput, hasActiveTerminalSelection, hideMiniKeyboard, isImeKeyboardEvent, queueDirectInput, reconcileInteractiveState, renderCrossSessionQueue, sendInputFromBox, setTerminalInteractive, shouldCaptureTerminalEvent, stopSession, switchToSessionView, updateInteractiveControls, updateStructuredQueueCounter } from "./input";
+import { _apkVersion, _hasNativeBridge, _macAppVersion, _syncWakeLock, hideError, showError, showToast } from "./notifications";
+import { getEffectiveCwd, render, resetChatRenderCache } from "./render";
+import { renderSessionsListContent } from "./sidebar";
 import { initTerminal, maybeScrollTerminalToBottom, syncTerminalBuffer } from "./terminal";
-import { computeRunningSignal, renderStructuredStatusBar, updateRunningIndicators } from "./utils";
-import { ensureTerminalFit, ensureTerminalFitWithRetry, scheduleTerminalResize, teardownTerminal } from "./viewport";
-import { forceReconnectWebSocket, initWebSocket, setView, startPolling, stopPolling, updateAutoApproveIndicator, updateTaskDisplay } from "./websocket";
+import "./utils";
+import { ensureTerminalFit, scheduleTerminalResize, teardownTerminal } from "./viewport";
+import { startPolling, stopPolling, updateAutoApproveIndicator, updateTaskDisplay } from "./websocket";
 import { getSessionLatestUserText, getSessionStatusLabel } from "./session-ui";
 import { isBrowserReactShellMounted } from "./shell-runtime";
 import { notifyLegacyUiChange } from "./ui-store-bridge";
@@ -28,7 +28,7 @@ import {
   normalizeAvailableComposerValue,
   normalizeComposerModelValue,
 } from "./composer-select-values";
-import { inferProviderIdFromCommand } from "../provider-identity";
+import { inferProviderIdFromCommand, providerCliCommand } from "../provider-identity";
 import { hasPooledTerminal, isPooledTerminalBracketedPasteMode } from "./terminal-pool";
 import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardImageExtension, isClipboardImageMimeType } from "./pty-paste";
 
@@ -199,7 +199,7 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
       export function getComposerPlaceholder(session, terminalInteractive) {
         // Keep placeholders short so they don't wrap on portrait mobile screens.
         // Only show informative state hints; drop the redundant "send to X" labels.
-        if (terminalInteractive) return "键盘输入将发送到终端";
+        if (terminalInteractive) return "键盘输入直通终端 · Enter 提交";
         // 只有真正进入终止态（exited / failed / stopped）才提示"会话已结束"。
         // 结构化会话刚创建或一次回复结束后会回到 "idle"——那是等待下一条输入的
         // 正常状态，不应该被当成结束。
@@ -215,42 +215,6 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
         return document.documentElement.classList.contains("is-wand-app")
           ? "打字或按住说话"
           : "输入消息…";
-      }
-
-      export function getToolModeHint(tool, mode) {
-        if (tool === "codex") {
-          return "Codex 支持 PTY 终端与结构化（JSONL）两种会话，结构化模式按 full-access 启动。";
-        }
-        if (tool === "opencode") {
-          return mode === "full-access" || mode === "managed" || mode === "auto-edit"
-            ? "OpenCode 将自动批准未显式拒绝的权限；支持 TUI 与 JSON 结构化会话。"
-            : "OpenCode 使用自身权限配置；结构化模式会自动拒绝未批准的权限请求。";
-        }
-        if (tool === "grok") {
-          return mode === "full-access" || mode === "managed" || mode === "auto-edit"
-            ? "Grok 将自动批准工具执行（--always-approve）；支持 TUI 与 streaming-json 结构化会话。"
-            : "Grok 使用自身权限配置；结构化模式支持多轮续聊与思考过程展示。";
-        }
-        if (tool === "qoder") {
-          return mode === "full-access" || mode === "managed"
-            ? "Qoder 将以 bypass_permissions 运行；支持 TUI 与 stream-json 结构化会话。"
-            : mode === "auto-edit"
-              ? "Qoder 将自动批准工作区内的安全编辑。"
-              : "Qoder 使用自身权限配置；结构化模式支持多轮续聊与工具调用展示。";
-        }
-        if (mode === "full-access") {
-          return "自动确认权限请求与高权限操作，适合你确认环境安全后的连续修改。";
-        }
-        if (mode === "auto-edit") {
-          return "保留交互式会话，同时更偏向直接编辑代码。";
-        }
-        if (mode === "native") {
-          return "调用 Claude 原生 API 输出，适合快速问答或一次性生成。";
-        }
-        if (mode === "managed") {
-          return "AI 自动完成所有工作，无需中途确认，适合有明确目标的任务。";
-        }
-        return "保留标准交互流程，适合手动确认每一步。";
       }
 
       export function getSupportedModes(tool) {
@@ -1322,10 +1286,8 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
           normalizedSnapshot.messageTotal = mw.messageTotal;
         }
         var updated = false;
-        var prevSession = null;
         state.sessions = state.sessions.map(function(session) {
           if (session.id !== normalizedSnapshot.id) return session;
-          prevSession = session;
           updated = true;
           return Object.assign({}, session, normalizedSnapshot);
         });
@@ -2443,7 +2405,7 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
 
       export function quickStartSession() {
         var provider = getPreferredTool();
-        var command = provider === "qoder" ? "qodercli" : provider;
+        var command = providerCliCommand(provider);
         var defaultCwd = getEffectiveCwd();
         var defaultMode = getSafeModeForTool(provider, (state.config && state.config.defaultMode) ? state.config.defaultMode : "default");
         state.preferredCommand = provider;
@@ -2536,7 +2498,7 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
               sessionSource: "interactive",
             })
           : withTerminalDimensions({
-              command: provider === "qoder" ? "qodercli" : provider,
+              command: providerCliCommand(provider),
               provider: provider,
               cwd: cwd,
               mode: defaultMode,
@@ -2617,6 +2579,14 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
         }
 
         if (event.key === "Backspace") {
+          if (state.terminalInteractive
+            && !document.documentElement.classList.contains("is-wand-embed-terminal")) {
+            // 直通模式下 composer 永远保持空文本（字符在 input 事件里已经逐字
+            // 发往 PTY），本地删除没有意义；按 PTY 约定把退格翻译成 \x7f。
+            event.preventDefault();
+            queueDirectInput(String.fromCharCode(127), "backspace").catch(function() {});
+            return;
+          }
           // Let default behavior handle the deletion, then sync state
           setTimeout(function() {
             var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;

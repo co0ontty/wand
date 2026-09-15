@@ -20,8 +20,8 @@ import type { SessionRegistry } from "./session-registry.js";
 import type { StructuredSessionManager } from "./structured-session-manager.js";
 import type { WandStorage } from "./storage.js";
 import type { ConversationTurn, ProcessEvent, SessionProvider, SessionSnapshot } from "./types.js";
+import { isSessionProvider } from "./session-provider.js";
 
-const PROVIDERS = new Set<SessionProvider>(["claude", "codex", "opencode", "grok", "qoder", "pi"]);
 const MAX_ATTEMPTS = 6;
 
 function nowIso(): string {
@@ -152,7 +152,7 @@ export class Missions {
     const cwd = path.resolve(input.cwd || "");
     if (!existsSync(cwd) || !statSync(cwd).isDirectory()) throw new Error("任务工作目录不存在。");
     const providers = [...new Set(input.providers ?? [])];
-    if (providers.length === 0 || providers.length > MAX_ATTEMPTS || providers.some((provider) => !PROVIDERS.has(provider))) {
+    if (providers.length === 0 || providers.length > MAX_ATTEMPTS || providers.some((provider) => !isSessionProvider(provider))) {
       throw new Error(`请选择 1-${MAX_ATTEMPTS} 个有效 provider。`);
     }
 

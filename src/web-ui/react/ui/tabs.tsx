@@ -1,4 +1,9 @@
-import * as TabsPrimitive from "@radix-ui/react-tabs";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@appica/ui-react/tabs";
 import type { ReactNode } from "react";
 import { classNames } from "./class-names";
 
@@ -15,6 +20,8 @@ export interface WandTabsProps {
   defaultValue?: string;
   ariaLabel: string;
   className?: string;
+  /** Drives Appica's orientation-aware trigger/list styling. */
+  orientation?: "horizontal" | "vertical";
   onValueChange?(value: string): void;
 }
 
@@ -24,37 +31,39 @@ export function WandTabs({
   defaultValue,
   ariaLabel,
   className,
+  orientation = "horizontal",
   onValueChange,
 }: WandTabsProps) {
   const initialValue = defaultValue ?? tabs[0]?.value;
   return (
-    <TabsPrimitive.Root
+    <Tabs
       className={className}
+      orientation={orientation}
       value={value}
       defaultValue={initialValue}
-      onValueChange={onValueChange}
+      onValueChange={(next) => onValueChange?.(String(next))}
     >
-      <TabsPrimitive.List className="wand-ui-tabs-list" aria-label={ariaLabel}>
+      <TabsList className="wand-ui-tabs-list" aria-label={ariaLabel}>
         {tabs.map((tab) => (
-          <TabsPrimitive.Trigger
+          <TabsTrigger
             key={tab.value}
             className="wand-ui-tabs-trigger"
             value={tab.value}
             disabled={tab.disabled}
           >
             {tab.label}
-          </TabsPrimitive.Trigger>
+          </TabsTrigger>
         ))}
-      </TabsPrimitive.List>
+      </TabsList>
       {tabs.map((tab) => (
-        <TabsPrimitive.Content
+        <TabsContent
           key={tab.value}
           className={classNames("wand-ui-tabs-content")}
           value={tab.value}
         >
           {tab.content}
-        </TabsPrimitive.Content>
+        </TabsContent>
       ))}
-    </TabsPrimitive.Root>
+    </Tabs>
   );
 }

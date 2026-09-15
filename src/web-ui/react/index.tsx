@@ -1,4 +1,5 @@
 import { createRoot, type Root } from "react-dom/client";
+import * as React from "react";
 import { isReactUiEnabled } from "./feature-flags";
 import { OverlayHost } from "./overlay-host";
 import { installReactUiStyles } from "./styles";

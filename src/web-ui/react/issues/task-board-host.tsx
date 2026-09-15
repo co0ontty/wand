@@ -4,9 +4,11 @@ import {
   WandButton,
   WandDialogSurface,
   WandIcon,
+  WandIconButton,
   WandSelect,
   WandSkeleton,
   WandSwitch,
+  WandTabs,
 } from "../ui";
 import { classNames } from "../ui/class-names";
 import { MilestonePicker } from "../milestones/picker";
@@ -24,7 +26,9 @@ import {
   ISSUE_COLUMNS,
   ISSUE_PRIORITIES,
   issueArchiveFolderOpen,
+  issueCreateDispatches,
   isDispatchableIssueAgent,
+  issueAgentModeOptions,
   issueAgentModelOptions,
   issueAgentProviderLabel,
   issueDueStamp,
@@ -286,8 +290,9 @@ export function TaskBoardHost({
         agent: draft.agent,
       });
       rememberAgent(draft.agent);
-      // 第一条描述就是当前任务的第一次指派：有描述就立刻派给所选 Agent。
-      if (submitDescription && isDispatchableIssueAgent(draft.agent)) {
+      // 只有「处理中」列的新建才顺带第一次指派；「等待认领」列只创建任务。
+      // 有描述才派发，否则只落库，之后在任务详情里再指派。
+      if (issueCreateDispatches(draft.status) && submitDescription && isDispatchableIssueAgent(draft.agent)) {
         try {
           const result = await taskBoardRepository.dispatch(created.id, draft.agent, {
             prompt: submitDescription,
@@ -373,6 +378,8 @@ export function TaskBoardHost({
   const detailAgentValue = detailAgent ?? (selected ? agentOf(selected, lastAgent) : lastAgent);
   const contextTask = contextMenu ? tasks.find((task) => task.id === contextMenu.taskId) ?? null : null;
   const filterActive = issueFilterCount(filters) > 0;
+  // 新建对话框与「处理中」列保持一致：只有会立刻指派时才展示指派控件。
+  const createDispatches = issueCreateDispatches(draft.status);
 
   React.useEffect(() => {
     if (!selected) {
@@ -522,15 +529,14 @@ export function TaskBoardHost({
           <h2 id={`column-${status}`}>{column.label}{items.length > 0 ? ` ${items.length}` : ""}</h2>
         </div>
         <div className="task-board-column-actions">
-          <button
-            type="button"
+          <WandIconButton
             className="task-board-icon-button"
             aria-label={`在${column.label}中新建任务`}
             title={`添加到${column.label}`}
             onClick={() => openCreate(status)}
           >
-            <WandIcon name="plus" size={12}/>
-          </button>
+            <WandIcon name="plus"/>
+          </WandIconButton>
         </div>
       </header>
       <div className="task-board-column-list">
@@ -559,19 +565,18 @@ export function TaskBoardHost({
     <header className="task-board-workspace-header">
       <div className="task-board-kicker">
         {onOpenSidebar ? (
-          <button type="button" className="task-board-icon-button" aria-label="打开任务" onClick={onOpenSidebar}>
-            <WandIcon name="rail" size={14}/>
-          </button>
+          <WandIconButton className="task-board-icon-button" aria-label="打开任务" onClick={onOpenSidebar}>
+            <WandIcon name="rail"/>
+          </WandIconButton>
         ) : null}
-        <button
-          type="button"
+        <WandIconButton
           className="task-board-icon-button"
           aria-label="返回"
           title="返回"
           onClick={() => onBack ? onBack() : taskBoardController.close()}
         >
-          <WandIcon name="chevronLeft" size={14}/>
-        </button>
+          <WandIcon name="chevronLeft"/>
+        </WandIconButton>
         <div className="task-board-project-switcher">
           <button
             type="button"
@@ -627,18 +632,17 @@ export function TaskBoardHost({
         </div>
       </div>
 
-      {!selected && <div className="task-board-view-tabs" role="tablist" aria-label="看板视图">
-        {ISSUE_BOARD_VIEWS.map((entry) => <button
-          key={entry.value}
-          type="button"
-          role="tab"
-          className={classNames("task-board-view-tab", view === entry.value && "is-active")}
-          aria-pressed={view === entry.value}
-          onClick={() => setView(entry.value)}
-        >
-          {entry.label}
-        </button>)}
-      </div>}
+      {!selected && <WandTabs
+        className="task-board-view-tabs"
+        ariaLabel="看板视图"
+        value={view}
+        onValueChange={(next) => setView(next as IssueBoardView)}
+        tabs={ISSUE_BOARD_VIEWS.map((entry) => ({
+          value: entry.value,
+          label: entry.label,
+          content: null,
+        }))}
+      />}
 
       <div className="task-board-header-actions">
         {!selected && <>
@@ -663,16 +667,17 @@ export function TaskBoardHost({
             onChange={setFilters}
           />}
           {view === "board" && <TaskBoardDisplayMenu display={display} onChange={persistDisplay}/>}
-          <button
-            type="button"
-            className="task-board-icon-button task-board-create-button"
+          <WandButton
+            className="task-board-create-button"
+            kind="primary"
+            size="small"
             aria-label="新建任务"
             title="新建议题 (C)"
             onClick={() => openCreate("todo")}
           >
-            <WandIcon name="plus" size={13}/>
+            <WandIcon name="plus" slot="start"/>
             <span>新建</span>
-          </button>
+          </WandButton>
         </>}
       </div>
     </header>
@@ -760,7 +765,9 @@ export function TaskBoardHost({
       titleClassName="task-board-create-title"
       descriptionClassName="task-board-create-description"
       headerClassName="task-board-create-heading"
-      description="标题可选。填写描述并选择 Agent 后，这段描述会作为第一次指派发出。"
+      description={createDispatches
+        ? "标题可选。填写描述并选择 Agent 后，这段描述会作为第一次指派发出。"
+        : "标题可选。这里的任务只创建、不指派，之后可在任务详情里派发 Agent。"}
       closeLabel="关闭编辑器"
       closeContent={<WandIcon name="close" size={14} strokeWidth={1.8}/>}
       onOpenChange={(open) => {
@@ -800,8 +807,10 @@ export function TaskBoardHost({
             className="task-board-create-body-input"
             rows={4}
             value={draft.description}
-            placeholder="添加描述…（将作为第一个 Agent 的指派内容）"
-            aria-label="任务描述（作为第一次指派）"
+            placeholder={createDispatches
+              ? "添加描述…（将作为第一个 Agent 的指派内容）"
+              : "添加描述…（只创建任务，不指派 Agent）"}
+            aria-label={createDispatches ? "任务描述（作为第一次指派）" : "任务描述"}
             onChange={(event) => {
               const value = event.currentTarget.value;
               setDraft((current) => ({ ...current, description: value }));
@@ -863,7 +872,7 @@ export function TaskBoardHost({
             </label>
           </div>
 
-          <div className="task-board-create-assign" aria-label="第一次指派">
+          {createDispatches ? <div className="task-board-create-assign" aria-label="第一次指派">
             <div className="task-board-create-assign-copy">
               <strong>第一次指派</strong>
               <span>有描述时会立刻发给所选 Agent</span>
@@ -898,8 +907,18 @@ export function TaskBoardHost({
                   agent: { ...current.agent, thinkingEffort: effort as WandTaskAgent["thinkingEffort"] },
                 }))}
               />
+              <WandSelect
+                value={draft.agent.mode}
+                options={issueAgentModeOptions(draft.agent.provider)}
+                ariaLabel="第一次指派的工作模式"
+                className="task-board-native-select"
+                onValueChange={(mode) => setDraft((current) => ({
+                  ...current,
+                  agent: { ...current.agent, mode: mode as WandTaskAgent["mode"] },
+                }))}
+              />
             </div>
-          </div>
+          </div> : null}
         </div>
         <div className="task-board-create-footer">
           <WandSwitch
@@ -908,21 +927,20 @@ export function TaskBoardHost({
             ariaLabel="创建更多"
             label="创建更多"
           />
-          <button
-            type="button"
+          <WandIconButton
             className="task-board-icon-button"
             aria-label={createExpanded ? "收起编辑器" : "展开编辑器"}
             onClick={() => setCreateExpanded((open) => !open)}
           >
-            <WandIcon name={createExpanded ? "chevron" : "up"} size={14}/>
-          </button>
+            <WandIcon name={createExpanded ? "chevron" : "up"}/>
+          </WandIconButton>
           <WandButton
             kind="primary"
             type="submit"
             className="task-board-create-submit"
             disabled={(!draft.title.trim() && !draft.description.trim()) || busyId === "__create__"}
           >
-            {busyId === "__create__" ? "正在保存…" : draft.description.trim() ? "创建并指派" : "创建任务"}
+            {busyId === "__create__" ? "正在保存…" : createDispatches && draft.description.trim() ? "创建并指派" : "创建任务"}
           </WandButton>
         </div>
       </form>
@@ -1060,6 +1078,19 @@ function IssueDetail({
                   onValueChange={(effort) => onAgentChange({
                     ...agent,
                     thinkingEffort: effort as WandTaskAgent["thinkingEffort"],
+                  })}
+                />
+              </IssueField>
+              <IssueField label="工作模式">
+                <WandSelect
+                  value={agent.mode}
+                  options={issueAgentModeOptions(agent.provider)}
+                  ariaLabel="任务工作模式"
+                  className="task-board-native-select"
+                  disabled={busy}
+                  onValueChange={(mode) => onAgentChange({
+                    ...agent,
+                    mode: mode as WandTaskAgent["mode"],
                   })}
                 />
               </IssueField>

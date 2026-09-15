@@ -23,7 +23,10 @@ for (const [key, relPath, contentType] of assets) {
   if (relPath === "scripts.js") {
     content = Buffer.from(minifyJs(content.toString("utf8")), "utf8");
   } else if (relPath === "styles.css") {
-    content = Buffer.from(minifyCss(content.toString("utf8")), "utf8");
+    // Must mirror src/web-ui/styles.ts: Tailwind/Appica output first, then the
+    // hand-written CSS so Wand's palette wins over Appica's same-named tokens.
+    const tailwind = readFileSync(path.join(contentDir, "tailwind.css"), "utf8");
+    content = Buffer.from(minifyCss(`${tailwind}\n${content.toString("utf8")}`), "utf8");
   }
   const assetHash = createHash("md5").update(content).digest("hex").slice(0, 8);
   entries[key] = {

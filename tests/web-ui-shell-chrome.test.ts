@@ -7,12 +7,15 @@ import { fileURLToPath } from "node:url";
 import { createElement, createRef } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
+import { WandDropdownMenu } from "../src/web-ui/react/ui/dropdown-menu.js";
 import {
   MemoryUiAdapter,
   ShellFilePanel,
   ShellTopbar,
+  TopbarMoreMenu,
   UiStoreProvider,
   getParentFilePanelCwd,
+  getShellSidebarEntryActions,
   normalizeFilePanelCwd,
   type UiSessionVm,
   type UiSnapshotData,
@@ -106,9 +109,14 @@ test("ShellTopbar SSR preserves title, status, cwd, git, and menu contracts", ()
     "topbar-git-slot",
     "topbar-git-badge",
     "topbar-more-button",
-    "topbar-more-menu",
   ];
   for (const id of requiredIds) assert.match(html, new RegExp(`id="${id}"`), `missing #${id}`);
+
+  // The action panel is portalled by the popover layer and only mounts while
+  // open, so SSR keeps the trigger contract only. The `data-action` hooks the
+  // browser layer dispatches through are asserted by the TopbarMoreMenu test
+  // below, which renders the panel body directly.
+  assert.doesNotMatch(html, /id="topbar-more-menu"/);
 
   assert.doesNotMatch(html, /id="sessions-toggle-button"/);
   assert.doesNotMatch(html, /class="topbar-brand"/);
@@ -118,13 +126,44 @@ test("ShellTopbar SSR preserves title, status, cwd, git, and menu contracts", ()
   assert.match(html, /class="topbar-cwd tail-marquee-path"/);
   assert.match(html, /class="topbar-git-branch">codex\/chrome</);
   assert.match(html, /class="topbar-git-count">·3</);
-  assert.match(html, /id="topbar-more-button" class="topbar-btn square active"/);
-  assert.match(html, /id="topbar-more-menu"[^>]*class="wand-ui-popover-content topbar-more-menu wand-shell-menu-popover"/);
-  assert.match(html, /data-action="copy-claude-session-id"/);
-  assert.match(html, /data-action="copy-cwd"/);
-  assert.match(html, /data-action="copy-session-id"/);
-  assert.match(html, /data-action="worktree-merge"/);
-  assert.match(html, /data-action="delete-session"/);
+  // Appica's icon button reports its pressed state through `data-pressed`.
+  assert.match(html, /id="topbar-more-button"[^>]*data-pressed="true"/);
+  assert.match(html, /id="topbar-more-button"[^>]*wand-ui-icon-button/);
+  // Appica's trigger carries the popup contract itself; the menu body is
+  // portalled and only mounts while open, so SSR keeps the closed state.
+  assert.match(html, /id="topbar-more-button"[^>]*aria-haspopup="menu"[^>]*aria-expanded="false"/);
+});
+
+test("TopbarMoreMenu keeps every action hook the browser layer dispatches", () => {
+  const selected = selectedSession();
+  // Appica's DropdownMenu sub-components require the root's size/reduced-motion
+  // context, so render the panel body inside an open root.
+  const html = renderToStaticMarkup(
+    createElement(
+      WandDropdownMenu,
+      { open: true },
+      createElement(TopbarMoreMenu, {
+        selected,
+        actions: getShellSidebarEntryActions(selected, false),
+        onAction: () => {},
+      }),
+    ),
+  );
+
+  for (const action of [
+    "copy-claude-session-id",
+    "copy-cwd",
+    "copy-session-id",
+    "worktree-merge",
+    "delete-session",
+  ]) {
+    assert.match(html, new RegExp(`data-action="${action}"`), `missing data-action=${action}`);
+  }
+  // The rows are Appica DropdownMenu items now; the business hooks are the
+  // `wand-ui-dropdown-*` classes plus the `data-action` the browser layer dispatches.
+  assert.match(html, /data-slot="dropdown-menu-item"[^>]*data-action="copy-cwd"/);
+  assert.match(html, /data-action="delete-session"[^>]*wand-ui-dropdown-item-danger/);
+  assert.match(html, /wand-ui-dropdown-separator/);
 });
 
 test("ShellTopbar SSR renders the home state and an empty stable git slot", () => {
@@ -152,7 +191,7 @@ test("ShellTopbar SSR renders the home state and an empty stable git slot", () =
     },
   }));
 
-  assert.match(html, /id="sessions-toggle-button" class="floating-sidebar-toggle"/);
+  assert.match(html, /id="sessions-toggle-button"[^>]*class="[^"]*floating-sidebar-toggle/);
   assert.match(html, /class="topbar-tagline">Wand 控制台</);
   assert.match(html, /class="topbar-brand"[^>]*>W</);
   assert.match(html, /<span id="topbar-git-slot" class="topbar-git-slot"><\/span>/);

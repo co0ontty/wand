@@ -1,6 +1,6 @@
 import * as React from "react";
 
-import { WandIcon } from "../ui";
+import { WandIcon, WandIconButton } from "../ui";
 import { classNames } from "../ui/class-names";
 import { fileExplorerController } from "../file-explorer/controller";
 import { FileExplorerHost } from "../file-explorer/host";
@@ -72,10 +72,9 @@ export function ShellFilePanel({ explorerRef }: ShellFilePanelProps = {}) {
             <span className="file-side-panel-title">文件</span>
           </div>
           <div className="file-side-panel-header-actions">
-            <button
+            <WandIconButton
               className="file-side-panel-iconbtn"
               id="file-explorer-refresh"
-              type="button"
               title="刷新"
               aria-label="刷新文件列表"
               onClick={() => {
@@ -84,25 +83,24 @@ export function ShellFilePanel({ explorerRef }: ShellFilePanelProps = {}) {
               }}
             >
               <WandIcon name="refresh" size={15} className="wand-icon wand-icon-refresh"/>
-            </button>
-            <button
+            </WandIconButton>
+            <WandIconButton
               id="file-side-panel-close"
               className="file-side-panel-iconbtn close"
-              type="button"
+              kind="danger"
               aria-label="关闭文件面板"
               title="关闭"
               onClick={() => void dispatch({ type: "layout.files.close" })}
             >
               <WandIcon name="close" size={16} className="wand-icon wand-icon-close"/>
-            </button>
+            </WandIconButton>
           </div>
         </div>
         <div className="file-side-panel-body">
           <div className="file-explorer-header">
-            <button
+            <WandIconButton
               className="file-explorer-up"
               id="file-explorer-up"
-              type="button"
               title="返回上级目录"
               aria-label="返回上级目录"
               disabled={committedCwd.current === "/"}
@@ -114,7 +112,7 @@ export function ShellFilePanel({ explorerRef }: ShellFilePanelProps = {}) {
               }}
             >
               <WandIcon name="up" size={15} className="wand-icon wand-icon-up"/>
-            </button>
+            </WandIconButton>
             <input
               type="text"
               className="file-explorer-path"

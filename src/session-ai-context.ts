@@ -5,6 +5,7 @@ import {
   systemAiProfiles,
 } from "./system-ai.js";
 import type { SessionProvider, SessionSnapshot, SystemAiConfig, WandConfig } from "./types.js";
+import { inferProviderFromCommand, inferProviderFromRunner, isSessionProvider } from "./session-provider.js";
 
 export interface SessionAiContext {
   provider: SessionProvider;
@@ -23,41 +24,12 @@ export function resolveSessionProvider(snapshot: Pick<
   SessionSnapshot,
   "provider" | "structuredState" | "runner" | "command"
 >): SessionProvider {
-  if (
-    snapshot.provider === "claude"
-    || snapshot.provider === "codex"
-    || snapshot.provider === "opencode"
-    || snapshot.provider === "grok"
-    || snapshot.provider === "qoder"
-    || snapshot.provider === "pi"
-  ) {
-    return snapshot.provider;
-  }
-  if (
-    snapshot.structuredState?.provider === "claude"
-    || snapshot.structuredState?.provider === "codex"
-    || snapshot.structuredState?.provider === "opencode"
-    || snapshot.structuredState?.provider === "grok"
-    || snapshot.structuredState?.provider === "qoder"
-    || snapshot.structuredState?.provider === "pi"
-  ) {
-    return snapshot.structuredState.provider;
-  }
+  if (isSessionProvider(snapshot.provider)) return snapshot.provider;
+  const structuredProvider = snapshot.structuredState?.provider;
+  if (isSessionProvider(structuredProvider)) return structuredProvider;
 
   const runner = snapshot.runner ?? snapshot.structuredState?.runner;
-  if (runner === "codex-cli-exec") return "codex";
-  if (runner === "opencode-cli-run") return "opencode";
-  if (runner === "grok-cli-headless") return "grok";
-  if (runner === "qoder-cli-print") return "qoder";
-  if (runner === "pi-cli-json") return "pi";
-  if (runner === "claude-cli" || runner === "claude-cli-print" || runner === "claude-sdk") return "claude";
-
-  if (/^codex\b/i.test(snapshot.command.trim())) return "codex";
-  if (/^opencode\b/i.test(snapshot.command.trim())) return "opencode";
-  if (/^grok\b/i.test(snapshot.command.trim())) return "grok";
-  if (/^qodercli\b/i.test(snapshot.command.trim())) return "qoder";
-  if (/^pi\b/i.test(snapshot.command.trim())) return "pi";
-  return "claude";
+  return inferProviderFromRunner(runner) ?? inferProviderFromCommand(snapshot.command) ?? "claude";
 }
 
 function normalizeModel(value: string | null | undefined): string | undefined {

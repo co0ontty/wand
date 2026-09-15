@@ -7,6 +7,7 @@ import type {
   RestartOverlayMode,
   RestartOverlaySnapshot,
 } from "./types";
+import { failureMessage } from "../errors";
 
 export const RESTART_POLL_INTERVAL_MS = 2_000;
 export const RESTART_MAX_ATTEMPTS = 180;
@@ -35,10 +36,6 @@ function blankSnapshot(revision = 0): RestartOverlaySnapshot {
     lastError: "",
     revision,
   };
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error && error.message ? error.message : "服务尚未就绪。";
 }
 
 function normalizedText(value: string | null | undefined): string {
@@ -115,7 +112,7 @@ export function createRestartOverlayController(
   function failReload(error: unknown): void {
     publish({
       phase: "timed-out",
-      lastError: errorMessage(error),
+      lastError: failureMessage(error, "服务尚未就绪。"),
     });
   }
 
@@ -196,7 +193,7 @@ export function createRestartOverlayController(
         if (abort.signal.reason.name !== "TimeoutError") return;
         publish({ phase: "waiting", lastError: "服务状态检查超时，正在重试。" });
       } else {
-        publish({ phase: "waiting", lastError: errorMessage(error) });
+        publish({ phase: "waiting", lastError: failureMessage(error, "服务尚未就绪。") });
       }
     } finally {
       removeAbortListener();

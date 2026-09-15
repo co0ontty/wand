@@ -14,7 +14,13 @@ import type { Request } from "express";
 
 import { resolveConfigDir } from "./config.js";
 import { normalizePublicOrigin } from "./ios-ota.js";
-import { firstQueryStringValue, firstHeaderValue, firstHeaderListValue } from "./server-request.js";
+import {
+  firstHeaderListValue,
+  firstHeaderValue,
+  firstQueryStringValue,
+  forwardedParam,
+  normalizeProtocol,
+} from "./server-request.js";
 import type { StructuredChatPersonaConfig, WandConfig } from "./types.js";
 
 // ── App 连接码 ──
@@ -37,38 +43,10 @@ export function encodeConnectCode(url: string, token: string): string {
 
 // ── 转发头解析 ──
 
-function unquoteHeaderValue(value: string): string {
-  const trimmed = value.trim();
-  if (trimmed.length >= 2 && trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
-    return trimmed.slice(1, -1);
-  }
-  return trimmed;
-}
-
-function getForwardedParam(req: Request, key: string): string | undefined {
-  const forwarded = firstHeaderListValue(req.headers.forwarded);
-  if (!forwarded) return undefined;
-  const targetKey = key.toLowerCase();
-  for (const part of forwarded.split(";")) {
-    const eqIdx = part.indexOf("=");
-    if (eqIdx < 1) continue;
-    const partKey = part.slice(0, eqIdx).trim().toLowerCase();
-    if (partKey !== targetKey) continue;
-    return unquoteHeaderValue(part.slice(eqIdx + 1));
-  }
-  return undefined;
-}
-
-function normalizePublicProtocol(value: string | undefined): "http" | "https" | undefined {
-  const proto = value?.trim().toLowerCase();
-  if (proto === "http" || proto === "https") return proto;
-  return undefined;
-}
-
 function getPublicRequestProtocol(req: Request, fallback: "http" | "https"): "http" | "https" {
   return (
-    normalizePublicProtocol(firstHeaderListValue(req.headers["x-forwarded-proto"]))
-    ?? normalizePublicProtocol(getForwardedParam(req, "proto"))
+    normalizeProtocol(firstHeaderListValue(req.headers["x-forwarded-proto"]))
+    ?? normalizeProtocol(forwardedParam(firstHeaderListValue(req.headers.forwarded), "proto"))
     ?? (firstHeaderListValue(req.headers["x-forwarded-ssl"])?.toLowerCase() === "on" ? "https" : undefined)
     ?? (firstHeaderListValue(req.headers["x-forwarded-scheme"])?.toLowerCase() === "https" ? "https" : undefined)
     ?? fallback
@@ -78,7 +56,7 @@ function getPublicRequestProtocol(req: Request, fallback: "http" | "https"): "ht
 function getPublicRequestHost(req: Request, config: WandConfig): string {
   return (
     firstHeaderListValue(req.headers["x-forwarded-host"])
-    ?? getForwardedParam(req, "host")
+    ?? forwardedParam(firstHeaderListValue(req.headers.forwarded), "host")
     ?? req.headers.host
     ?? `${config.host}:${config.port}`
   );
@@ -193,16 +171,10 @@ function isExternalAvatarSource(value: string): boolean {
   return /^(https?:|data:)/i.test(value);
 }
 
-function normalizePersonaName(value: unknown): string | undefined {
+/** persona 的 name / avatar 都是「可选非空字符串」：空白与非法类型都当未设置。 */
+function normalizeOptionalText(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed || undefined;
-}
-
-function normalizePersonaAvatar(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed || undefined;
+  return value.trim() || undefined;
 }
 
 export function resolveStructuredChatPersona(
@@ -211,10 +183,10 @@ export function resolveStructuredChatPersona(
   const persona = config.structuredChatPersona;
   if (!persona) return undefined;
 
-  const userName = normalizePersonaName(persona.user?.name);
-  const userAvatar = normalizePersonaAvatar(persona.user?.avatar);
-  const assistantName = normalizePersonaName(persona.assistant?.name);
-  const assistantAvatar = normalizePersonaAvatar(persona.assistant?.avatar);
+  const userName = normalizeOptionalText(persona.user?.name);
+  const userAvatar = normalizeOptionalText(persona.user?.avatar);
+  const assistantName = normalizeOptionalText(persona.assistant?.name);
+  const assistantAvatar = normalizeOptionalText(persona.assistant?.avatar);
 
   if (!userName && !userAvatar && !assistantName && !assistantAvatar) {
     return undefined;

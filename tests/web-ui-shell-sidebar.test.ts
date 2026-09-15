@@ -225,7 +225,10 @@ test("ShellSidebar SSR preserves native ids, key classes, groups, and action con
   assert.doesNotMatch(html, /<button[^>]*title="首页"/);
   assert.match(html, /id="sessions-drawer" class="sidebar open"/);
   assert.match(html, /id="sessions-drawer-backdrop" class="drawer-backdrop open"/);
-  assert.match(html, /id="file-panel-toggle-btn" class="btn btn-ghost btn-sm active"/);
+  // Appica's NavigationLink owns the row chrome; the business hook + the active
+  // state are the contract the shell binds to.
+  assert.match(html, /class="[^"]*sidebar-file-toggle active[^"]*"[^>]*id="file-panel-toggle-btn"/);
+  assert.match(html, /class="[^"]*wand-ui-navigation-link[^"]*"/);
   // 原生历史与自动化分组仍可达（附加在任务列表之后），但 wand 散会话平铺列表已下线。
   assert.match(html, /class="automation-session-group"/);
   assert.match(html, /class="non-wand-session-group" open=""/);
@@ -242,7 +245,10 @@ test("ShellSidebar desktop exposes one full-to-compact toggle", () => {
     capabilities: { backToNative: false, switchServer: false },
   }));
 
-  assert.match(html, /class="sidebar-compact-toggle"[^>]*aria-label="收起为窄栏"[^>]*aria-pressed="false"/);
+  // Appica's IconButton renders `aria-label`/`aria-pressed` ahead of the class
+  // list, so assert the identity hook and the state contract independently.
+  assert.match(html, /class="[^"]*sidebar-compact-toggle[^"]*"/);
+  assert.match(html, /aria-label="收起为窄栏"[^>]*aria-pressed="false"/);
   assert.doesNotMatch(html, /sidebar-layout-switch|data-layout-mode/);
   assert.doesNotMatch(html, /id="sidebar-pin-btn"/);
   assert.doesNotMatch(html, /id="sidebar-collapse-btn"/);
@@ -257,10 +263,8 @@ test("ShellSidebar desktop exposes one full-to-compact toggle", () => {
       sidebarCollapsed: true,
     },
   }));
-  assert.match(
-    compactHtml,
-    /class="sidebar-compact-toggle active"[^>]*aria-label="展开完整侧边栏"[^>]*aria-pressed="true"/,
-  );
+  assert.match(compactHtml, /class="[^"]*sidebar-compact-toggle active"[^>]*/);
+  assert.match(compactHtml, /aria-label="展开完整侧边栏"[^>]*aria-pressed="true"/);
 });
 
 test("ShellSidebar SSR retires manage mode but keeps capability-gated controls", () => {

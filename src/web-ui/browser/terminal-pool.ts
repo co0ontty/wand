@@ -7,6 +7,7 @@
 // websocket.ts 的输出分发里用 hasPooledTerminal() 把对应 chunk 路由进来（见 writePooledTerminal）。
 
 import { clampClientTerminalOutput } from "./terminal";
+import { fitTerminalToContainer } from "./terminal-fit";
 import { consumeTerminalWheelLines, consumeTerminalWheelPage, terminalWheelPageSequence, type TerminalWheelPagingState, type TerminalWheelScrollState } from "./terminal-wheel";
 import { state } from "./state";
 
@@ -85,7 +86,7 @@ function sendResize(sessionId: string, cols: number, rows: number): void {
 /** FitAddon 只在 cols/rows 变化时触发 onResize；首次 fit 可能早于监听器，因此总是显式同步一次。 */
 function fitAndSync(handle: Pick<PooledTerminal, "sessionId" | "terminal" | "fitAddon" | "disposed">): void {
   if (handle.disposed) return;
-  try { handle.fitAddon.fit(); } catch { /* container not laid out yet */ }
+  try { fitTerminalToContainer(handle.terminal, handle.fitAddon); } catch { /* container not laid out yet */ }
   const cols = Number(handle.terminal.cols);
   const rows = Number(handle.terminal.rows);
   if (cols > 0 && rows > 0) sendResize(handle.sessionId, cols, rows);
@@ -191,7 +192,7 @@ export function createPooledTerminal(sessionId: string, container: HTMLElement):
 
   // 先按真实容器尺寸 fit，再回放 ANSI 历史。否则 120 列历史会在窄窗格中被
   // xterm 二次折行，出现竖排字符和破碎 banner。
-  try { fitAddon.fit(); } catch { /* ResizeObserver 会在布局稳定后补一次 */ }
+  try { fitTerminalToContainer(term, fitAddon); } catch { /* ResizeObserver 会在布局稳定后补一次 */ }
 
   term.onData((data: string) => sendInput(sessionId, data));
   term.onBinary((data: string) => {

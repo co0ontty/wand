@@ -12,13 +12,16 @@ export type WandIconName =
   | "chat"
   | "check"
   | "chevron"
+  | "chevronDown"
   | "chevronLeft"
+  | "chevronUp"
   | "circle"
   | "clipboard"
   | "close"
   | "copy"
   | "download"
   | "edit"
+  | "enter"
   | "explorer"
   | "eye"
   | "file"
@@ -58,16 +61,25 @@ export function workspaceTaskIconName(isolated: boolean): "branch" | "task" {
   return isolated ? "branch" : "task";
 }
 
+/** Appica's buttons and navigation links detect their icon slot with
+ *  `has-data-[icon=start|end]` and adjust the leading/trailing padding. Wand's
+ *  icons carry their own name in `data-icon` for `[data-icon="..."]` styling
+ *  hooks, so the slot is opt-in: pass `slot` and the element reports the Appica
+ *  slot instead, while the name moves to `data-wand-icon`. */
+export type WandIconSlot = "start" | "end";
+
 export function WandIcon({
   name,
   size = 14,
   className,
   strokeWidth = 2,
+  slot,
 }: {
   name: WandIconName;
   size?: number;
   className?: string;
   strokeWidth?: number;
+  slot?: WandIconSlot;
 }): React.ReactElement {
   const common = {
     width: size,
@@ -80,7 +92,8 @@ export function WandIcon({
     strokeLinejoin: "round" as const,
     className,
     "aria-hidden": true,
-    "data-icon": name,
+    "data-wand-icon": name,
+    "data-icon": slot ?? name,
   };
 
   switch (name) {
@@ -98,6 +111,10 @@ export function WandIcon({
       return <svg {...common}><path d="M20 6L9 17l-5-5"/></svg>;
     case "chevron":
       return <svg {...common}><path d="M6 9l6 6 6-6"/></svg>;
+    case "chevronDown":
+      return <svg {...common}><path d="M6 9l6 6 6-6"/></svg>;
+    case "chevronUp":
+      return <svg {...common}><path d="M6 15l6-6 6 6"/></svg>;
     case "chevronLeft":
       return <svg {...common}><path d="M15 6l-6 6 6 6"/></svg>;
     case "circle":
@@ -112,6 +129,8 @@ export function WandIcon({
       return <svg {...common}><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>;
     case "edit":
       return <svg {...common}><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L8 18l-4 1 1-4z"/></svg>;
+    case "enter":
+      return <svg {...common}><path d="M9 10l-5 5 5 5"/><path d="M4 15h11a5 5 0 005-5V4"/></svg>;
     case "explorer":
       return <svg {...common}><path d="M8 3h7l4 4v11a2 2 0 01-2 2H8a2 2 0 01-2-2V5a2 2 0 012-2z"/><path d="M15 3v4h4"/><path d="M3 9h7l2 2v8a1 1 0 01-1 1H4a1 1 0 01-1-1z"/></svg>;
     case "eye":

@@ -1,4 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import * as React from "react";
 import { useSyncExternalStore } from "react";
 import { wandOverlay } from "../overlay-controller";
 import { WandBadge, WandButton, WandDialogSurface, WandIcon, WandSkeleton, WandTabs } from "../ui";
@@ -305,6 +306,7 @@ export function SettingsHost({
               <WandTabs
                 className="wand-settings-tabs"
                 ariaLabel="设置分组"
+                orientation="vertical"
                 value={selectedTab}
                 tabs={tabs}
                 onValueChange={(value) => settingsStore.setTab(value as SettingsTab)}

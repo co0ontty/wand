@@ -19,25 +19,13 @@ import type {
   TaskDirectoryGroup,
   WorkspacesRepository,
 } from "./types";
+import { record, stringValue } from "../json-utils";
+import { isProviderId } from "../../provider-identity";
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
-const PROVIDERS: ReadonlySet<string> = new Set([
-  "claude", "codex", "opencode", "grok", "qoder", "pi",
-]);
-
 function parseProvider(value: unknown): WorkspaceProvider | undefined {
-  return typeof value === "string" && PROVIDERS.has(value) ? (value as WorkspaceProvider) : undefined;
-}
-
-function text(value: unknown, fallback = ""): string {
-  return typeof value === "string" ? value : fallback;
-}
-
-function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
+  return isProviderId(value) ? value : undefined;
 }
 
 function finiteCount(value: unknown): number {
@@ -52,30 +40,30 @@ function worktreeState(value: unknown): WorkspaceWorktreeState {
 
 function normalizeWorkspaceWorktree(value: unknown): WorkspaceWorktreeReview | null {
   const item = record(value);
-  const taskId = text(item.taskId).trim();
-  const branch = text(item.branch).trim();
-  const worktreePath = text(item.path).trim();
+  const taskId = stringValue(item.taskId).trim();
+  const branch = stringValue(item.branch).trim();
+  const worktreePath = stringValue(item.path).trim();
   if (!taskId || !branch || !worktreePath) return null;
   const commits = Array.isArray(item.commits) ? item.commits.flatMap((candidate) => {
     const commit = record(candidate);
-    const hash = text(commit.hash).trim();
+    const hash = stringValue(commit.hash).trim();
     if (!hash) return [];
     return [{
       hash,
-      shortHash: text(commit.shortHash, hash.slice(0, 7)),
-      subject: text(commit.subject),
+      shortHash: stringValue(commit.shortHash, hash.slice(0, 7)),
+      subject: stringValue(commit.subject),
     }];
   }) : [];
   return {
     taskId,
-    taskName: text(item.taskName, branch),
+    taskName: stringValue(item.taskName, branch),
     taskStatus: item.taskStatus === "done" ? "done" : "active",
     branch,
     path: worktreePath,
-    baseRef: text(item.baseRef),
+    baseRef: stringValue(item.baseRef),
     state: worktreeState(item.state),
     actionable: item.actionable === true,
-    reason: text(item.reason),
+    reason: stringValue(item.reason),
     aheadCount: finiteCount(item.aheadCount),
     hasUncommittedChanges: item.hasUncommittedChanges === true,
     hasConflicts: item.hasConflicts === true,
@@ -86,9 +74,9 @@ function normalizeWorkspaceWorktree(value: unknown): WorkspaceWorktreeReview | n
 export function normalizeWorkspaceWorktreeOverview(value: unknown): WorkspaceWorktreeOverview {
   const result = record(value);
   return {
-    workspaceId: text(result.workspaceId),
-    repoRoot: text(result.repoRoot),
-    targetBranch: text(result.targetBranch),
+    workspaceId: stringValue(result.workspaceId),
+    repoRoot: stringValue(result.repoRoot),
+    targetBranch: stringValue(result.targetBranch),
     worktrees: Array.isArray(result.worktrees)
       ? result.worktrees.map(normalizeWorkspaceWorktree).filter((item): item is WorkspaceWorktreeReview => item !== null)
       : [],
@@ -113,7 +101,7 @@ function normalizePaths(value: unknown): RecentPath[] {
       const path = record.path;
       return {
         path,
-        name: text(record.name, path.split("/").filter(Boolean).at(-1) ?? path),
+        name: stringValue(record.name, path.split("/").filter(Boolean).at(-1) ?? path),
       };
     })
     .filter((item): item is RecentPath => item !== null);
@@ -318,7 +306,7 @@ export async function loadNewProjectDefaults(
   }
   return {
     defaultProvider: parseProvider(config.defaultProvider) ?? "claude",
-    defaultCwd: text(config.defaultCwd),
+    defaultCwd: stringValue(config.defaultCwd),
     defaultSessionKind: config.defaultSessionKind === "pty" ? "pty" : "structured",
     defaultTaskWorktree: config.defaultTaskWorktree !== false,
     recentPaths,

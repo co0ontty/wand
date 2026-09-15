@@ -8,6 +8,7 @@ import { StringDecoder } from "node:string_decoder";
 import pty from "node-pty";
 
 import { ensureNodePtyHelperExecutable } from "./ensure-node-pty-helper.js";
+import { signalNumberFromName } from "./signal-utils.js";
 import {
   STRUCTURED_RUN_LOG_MAX_CHARS,
   createUtf8TextDecoder,
@@ -509,16 +510,6 @@ function isProcessAlive(pid: number): boolean {
   } catch {
     return false;
   }
-}
-
-function signalNumberFromName(signalName: string): number {
-  const table: Record<string, number> = {
-    SIGHUP: 1, SIGINT: 2, SIGQUIT: 3, SIGILL: 4, SIGTRAP: 5, SIGABRT: 6,
-    SIGBUS: 7, SIGFPE: 8, SIGKILL: 9, SIGUSR1: 10, SIGSEGV: 11, SIGUSR2: 12,
-    SIGPIPE: 13, SIGALRM: 14, SIGTERM: 15, SIGCHLD: 17, SIGCONT: 18,
-    SIGSTOP: 19, SIGTSTP: 20,
-  };
-  return table[signalName] ?? 0;
 }
 
 function waitForProcessExit(pid: number): Promise<void> {

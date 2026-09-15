@@ -134,8 +134,9 @@ test("terminal snapshots survive WebSocket init arriving before xterm mounts", (
   assert.match(sessions, /if \(!sessionIds\.has\(id\)\) delete state\.terminalStatesBySession\[id\]/);
 });
 
-test("PTY terminal interaction hides the drafting surface and keeps direct controls", () => {
+test("PTY terminal interaction keeps a usable web composer and only the native embed hides it", () => {
   const input = readFileSync(path.join(root, "src/web-ui/browser/input.ts"), "utf8");
+  const sessions = readFileSync(path.join(root, "src/web-ui/browser/session-engine.ts"), "utf8");
   const render = readFileSync(path.join(root, "src/web-ui/browser/render.ts"), "utf8");
   const styles = readFileSync(path.join(root, "src/web-ui/content/styles.css"), "utf8");
 
@@ -143,7 +144,74 @@ test("PTY terminal interaction hides the drafting surface and keeps direct contr
   assert.match(input, /shouldUseTerminalPassthrough\(selectedSession\)/);
   assert.match(input, /var terminalPassthrough = el\.classList\.contains\("is-terminal-passthrough"\)/);
   assert.match(render, /state\.terminalInteractive \? ' is-terminal-interactive' : ''/);
-  assert.match(styles, /\.input-composer\.is-terminal-interactive \.composer-input-wrap[\s\S]*?display: none;/);
-  assert.match(styles, /html:not\(\.is-wand-app\) \.input-composer\.is-terminal-interactive \.composer-main-row[\s\S]*?grid-template-rows: 40px;[\s\S]*?min-height: 40px;/);
-  assert.match(styles, /@media \(max-width: 640px\), \(pointer: coarse\)[\s\S]*?grid-template-rows: 48px;/);
+  // 网页端 composer 是真实的 PTY 输入面：保留 textarea，只收纳 Agent-only 章节。
+  assert.match(styles, /\.input-composer\.is-terminal-interactive \.composer-input-wrap[\s\S]*?display: flex;/);
+  assert.match(styles, /\.input-composer\.is-terminal-interactive \.composer-actions-left[\s\S]*?display: none !important;/);
+  // 直通规则必须带 html:not(.is-wand-app) 前缀：基础 composer 规则在
+  // :focus-within / .is-expanded 变体下是 0-3-1 特指度，不带前缀的直通规则只有
+  // 0-3-0，打字（textarea 聚焦）时会输给基础规则，把 composer 顶回 84/100px。
+  assert.match(styles, /html:not\(\.is-wand-app\) \.input-composer\.is-terminal-interactive \.composer-main-row[\s\S]*?grid-template-rows: auto;/);
+  assert.match(styles, /html:not\(\.is-wand-app\) \.input-composer\.is-terminal-interactive:focus-within \.composer-main-row/);
+  assert.match(styles, /html:not\(\.is-wand-app\) \.input-composer\.is-terminal-interactive \.input-textarea[\s\S]*?height: 40px;/);
+  // 原生嵌入壳才把 drafting row 整个交还给原生底栏。
+  assert.match(styles, /html\.is-wand-embed-terminal \.input-composer\.is-terminal-interactive \.composer-input-wrap[\s\S]*?display: none;/);
+  assert.match(styles, /html\.is-wand-embed-terminal \.input-composer\.is-terminal-interactive \.composer-main-row[\s\S]*?grid-template-rows: 48px;[\s\S]*?min-height: 48px;/);
+  // #input-box 自己拥有按键（逐字透传走 input 事件），不能再被 keydown 捕获重复发送。
+  assert.match(input, /if \(target\.closest && target\.closest\("#input-box"\)\) return false;/);
+  // Enter 提交：先文本（若有）后单独 "\r"，符合 PTY 输入契约。
+  assert.match(input, /queueDirectInput\("\\r", "enter_text"\)/);
+  // 直通模式下退格翻译成 \x7f 送给 PTY，而不是在空 textarea 里做本地删除。
+  assert.match(sessions, /state\.terminalInteractive\s*&& !document\.documentElement\.classList\.contains\("is-wand-embed-terminal"\)[\s\S]*?String\.fromCharCode\(127\), "backspace"/);
+});
+
+test("PTY passthrough composer renders its trailing action with Appica", () => {
+  const render = readFileSync(path.join(root, "src/web-ui/browser/render.ts"), "utf8");
+  const input = readFileSync(path.join(root, "src/web-ui/browser/input.ts"), "utf8");
+  const adapter = readFileSync(path.join(root, "src/web-ui/browser/composer-rail-adapter.ts"), "utf8");
+  const host = readFileSync(path.join(root, "src/web-ui/react/composer-rail/host.tsx"), "utf8");
+  const overlay = readFileSync(path.join(root, "src/web-ui/react/overlay-host.tsx"), "utf8");
+  const styles = readFileSync(path.join(root, "src/web-ui/content/styles.css"), "utf8");
+
+  // 宿主 span 由 composer 标记提供，端口渲染进 composer-actions-right。
+  assert.match(render, /<span class="composer-rail-host" data-composer-rail-host="pty"><\/span>/);
+  assert.match(overlay, /<ComposerRailHost \/>/);
+  // 业务模块只认 Wand*，第三方组件 API 不进 browser/ 层。
+  assert.match(host, /<WandButton[\s\S]*?<WandIcon name="enter" slot="start"/);
+  assert.doesNotMatch(host, /@appica\/ui-react/);
+  // 只有「网页端 + 直通 + 非嵌入壳」才挂载；原生壳与结构化会话都要清空。
+  assert.match(
+    input,
+    /syncBrowserComposerRail\(\{[\s\S]*?return !!state\.terminalInteractive[\s\S]*?!document\.documentElement\.classList\.contains\("is-wand-embed-terminal"\)/,
+  );
+  assert.match(adapter, /if \(!config\.active\(\)\) \{[\s\S]*?composerRailController\.clear\(\);/);
+  assert.match(adapter, /document\.querySelectorAll<HTMLElement>\("\[data-composer-rail-host\]"\)/);
+  // 空宿主不占位（结构化会话保留 legacy 发送按钮），直通下按钮与 40px 输入框对齐。
+  assert.match(styles, /\.composer-rail-host:empty \{\s*display: none;/);
+  assert.match(styles, /html:not\(\.is-wand-app\) \.input-composer\.is-terminal-interactive \.composer-rail-host[\s\S]*?min-height: 40px;/);
+});
+
+test("composer rail controller publishes and clears Appica mounts", async () => {
+  const { composerRailController } = await import("../src/web-ui/react/composer-rail/controller.js");
+  const target = {} as HTMLElement;
+  let notified = 0;
+  const unsubscribe = composerRailController.subscribe(() => { notified += 1; });
+
+  try {
+    composerRailController.clear();
+    assert.equal(composerRailController.getSnapshot().mounts.length, 0);
+
+    composerRailController.sync([{ key: "pty", target, onSubmit() {} }]);
+    const snapshot = composerRailController.getSnapshot();
+    assert.equal(snapshot.mounts.length, 1);
+    assert.equal(snapshot.mounts[0].key, "pty");
+    assert.equal(snapshot.mounts[0].target, target);
+    assert.ok(snapshot.revision > 0);
+
+    composerRailController.clear();
+    assert.equal(composerRailController.getSnapshot().mounts.length, 0);
+    assert.equal(notified, 2);
+  } finally {
+    unsubscribe();
+    composerRailController.clear();
+  }
 });

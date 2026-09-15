@@ -1,17 +1,18 @@
-import { state, readStoredBoolean, writeStoredBoolean } from "./state";
-import { t, iconSvg } from "./i18n";
+import { state, writeStoredBoolean } from "./state";
+import "./i18n";
 import { escapeHtml, scrollInputToEnd, scrollPathElementToEnd } from "./utils";
-import { getSelectedSession, focusInputBox } from "./input";
+import "./input";
 import { showToast } from "./notifications";
-import { render, getEffectiveCwd } from "./render";
-import { isStructuredSession, updateDrawerState } from "./session-engine";
-import { renderSessions } from "./sidebar";
-import { ensureTerminalFit, scheduleTerminalResize } from "./viewport";
+import "./render";
+import { updateDrawerState } from "./session-engine";
+import "./sidebar";
+import "./viewport";
 import { getConfigCwd } from "./chat-scroll";
+import { fitTerminalToContainer } from "./terminal-fit";
 import { isBrowserReactShellMounted } from "./shell-runtime";
 import { notifyLegacyUiChange } from "./ui-store-bridge";
 import { openFilePreviewFromLegacy } from "./file-preview-adapter";
-import { mountFileExplorerHost, updateFileExplorerCwd } from "./file-explorer-adapter";
+import { mountFileExplorerHost } from "./file-explorer-adapter";
 
       export function isMobileLayout() {
         return window.innerWidth <= 768;
@@ -121,7 +122,7 @@ import { mountFileExplorerHost, updateFileExplorerCwd } from "./file-explorer-ad
         state.terminal.options.fontSize = fontPx;
         requestAnimationFrame(function() {
           if (!state.terminal || !state.terminalFitAddon) return;
-          state.terminalFitAddon.fit();
+          fitTerminalToContainer(state.terminal, state.terminalFitAddon);
         });
       }
 
@@ -273,7 +274,7 @@ import { mountFileExplorerHost, updateFileExplorerCwd } from "./file-explorer-ad
         state.allFiles = [];
         state.fileExplorerTruncated = false;
         state.fileExplorerTotal = 0;
-        explorer.innerHTML = '<div class="file-explorer"><div class="tree-loading" style="padding:12px;color:var(--text-muted);font-size:0.8125rem;">加载中…</div></div>';
+        explorer.innerHTML = '<div class="file-explorer"><div class="tree-loading" style="padding:12px;color:var(--text-muted);font-size:11.375px;">加载中…</div></div>';
         if (cwdEl && !isBrowserReactShellMounted()) {
           if (cwdEl.tagName === "INPUT") {
             // Avoid clobbering in-progress text while the user is typing.
@@ -407,16 +408,13 @@ import { mountFileExplorerHost, updateFileExplorerCwd } from "./file-explorer-ad
         });
         // Long-press / right-click context menu (path actions)
         var pressTimer = null;
-        var pressFired = false;
         tree.querySelectorAll(".tree-item").forEach(function(item) {
           item.addEventListener("contextmenu", function(e) {
             e.preventDefault();
             showFileContextMenu((e as MouseEvent).clientX, (e as MouseEvent).clientY, item);
           });
           item.addEventListener("touchstart", function(e) {
-            pressFired = false;
             pressTimer = setTimeout(function() {
-              pressFired = true;
               var t = (e as TouchEvent).touches && (e as TouchEvent).touches[0];
               showFileContextMenu(t ? t.clientX : 0, t ? t.clientY : 0, item);
             }, 500);

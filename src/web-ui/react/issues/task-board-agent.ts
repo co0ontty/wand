@@ -1,11 +1,17 @@
 import type {
   WandTaskAgent,
   WandTaskAgentEffort,
+  WandTaskAgentMode,
   WandTaskAgentProvider,
   WandTaskPriority,
   WandTaskStatus,
 } from "../../../task-types";
-import { isClosedWandTaskStatus } from "../../../task-types";
+import {
+  DEFAULT_WAND_TASK_AGENT_MODE,
+  isClosedWandTaskStatus,
+  normalizeWandTaskAgentMode,
+  supportedWandTaskAgentModes,
+} from "../../../task-types";
 import type { WandSelectOption } from "../ui";
 
 export type IssueAgentProvider = WandTaskAgentProvider;
@@ -31,7 +37,29 @@ export const ISSUE_AGENT_EFFORTS: ReadonlyArray<{ value: WandTaskAgentEffort; la
   { value: "max", label: "最大" },
 ];
 
+/**
+ * 派发时的执行模式。只开放三种：托管（全自动）/ 全限（自动确认权限）/ 标准（逐步确认）。
+ * auto-edit / native 仍属于新建会话的高级选项，不进任务看板。
+ */
+export const ISSUE_AGENT_MODES: ReadonlyArray<{
+  value: WandTaskAgentMode;
+  label: string;
+  description: string;
+}> = [
+  { value: "managed", label: "托管", description: "全自动完成任务，不再逐条确认" },
+  { value: "full-access", label: "全限", description: "自动确认权限，适合确认环境后的连续修改" },
+  { value: "default", label: "标准", description: "逐步确认操作" },
+];
+
 export const ISSUE_AGENT_DEFAULT_MODEL = "default";
+
+/** 当前 provider 支持的工作模式选项；Codex 只支持全限一种。 */
+export function issueAgentModeOptions(provider: IssueAgentProvider): WandSelectOption[] {
+  const supported = supportedWandTaskAgentModes(provider);
+  return ISSUE_AGENT_MODES
+    .filter((entry) => supported.includes(entry.value))
+    .map((entry) => ({ value: entry.value, label: entry.label }));
+}
 
 export const ISSUE_COLUMNS: ReadonlyArray<{
   status: WandTaskStatus;
@@ -49,6 +77,14 @@ export const ISSUE_ARCHIVE_COLUMN: {
   label: string;
   empty: string;
 } = { status: "archived", label: "归档任务", empty: "还没有归档的任务" };
+
+/**
+ * 新建任务是否顺带完成第一次指派。
+ * 「等待认领」列只创建任务；「处理中」列代表已经决定要跑，所以创建后立刻派给所选 Agent。
+ */
+export function issueCreateDispatches(status: WandTaskStatus): boolean {
+  return status === "doing";
+}
 
 export const ISSUE_STATUS_FILTERS: ReadonlyArray<{
   status: WandTaskStatus;
@@ -184,8 +220,8 @@ export function issueAgentModelOptions(
 }
 
 /**
- * 切换 CLI 工具时尽量保留已选模型；新 provider 的目录里没有该模型时，
- * 回退到目录首项，避免把上一个 provider 的模型 ID 提交给新 provider。
+ * 切换 CLI 工具时尽量保留已选模型与工作模式；新 provider 不支持时回退到合法值，
+ * 避免把上一个 provider 的模型 ID / 执行模式提交给新 provider（如 Codex 只收 full-access）。
  */
 export function withIssueAgentProvider(
   agent: WandTaskAgent,
@@ -197,14 +233,27 @@ export function withIssueAgentProvider(
   const model = options.some((option) => option.value === agent.model)
     ? agent.model
     : options[0]?.value ?? ISSUE_AGENT_DEFAULT_MODEL;
-  return { ...agent, provider, model };
+  return {
+    ...agent,
+    provider,
+    model,
+    mode: normalizeWandTaskAgentMode(provider, agent.mode),
+  };
 }
 
 export function isDispatchableIssueAgent(agent: WandTaskAgent | null | undefined): agent is WandTaskAgent {
   if (!agent) return false;
   if (!ISSUE_AGENT_PROVIDERS.some((entry) => entry.value === agent.provider)) return false;
   if (!agent.model.trim()) return false;
-  return ISSUE_AGENT_EFFORTS.some((entry) => entry.value === agent.thinkingEffort);
+  if (!ISSUE_AGENT_EFFORTS.some((entry) => entry.value === agent.thinkingEffort)) return false;
+  return ISSUE_AGENT_MODES.some((entry) => entry.value === agent.mode);
+}
+
+/** 执行模式标签；未知值回落到默认模式，避免旧任务显示空标签。 */
+export function issueAgentModeLabel(mode: string | null | undefined): string {
+  const found = ISSUE_AGENT_MODES.find((entry) => entry.value === mode);
+  if (found) return found.label;
+  return ISSUE_AGENT_MODES.find((entry) => entry.value === DEFAULT_WAND_TASK_AGENT_MODE)?.label ?? "标准";
 }
 
 export function isIssueAgentProvider(value: string | null | undefined): value is IssueAgentProvider {
@@ -222,6 +271,7 @@ export interface IssueAgentGroup {
     status: string;
     model: string;
     thinkingEffort: string;
+    mode?: string;
   }>;
 }
 
@@ -237,10 +287,12 @@ function agentFromSession(session: IssueAgentGroup["sessions"][number]): WandTas
   const thinkingEffort = ISSUE_AGENT_EFFORTS.some((entry) => entry.value === session.thinkingEffort)
     ? session.thinkingEffort as WandTaskAgent["thinkingEffort"]
     : "off";
+  const mode = normalizeWandTaskAgentMode(session.provider, session.mode);
   return {
     provider: session.provider,
     model: session.model.trim() || ISSUE_AGENT_DEFAULT_MODEL,
     thinkingEffort,
+    mode,
   };
 }
 
@@ -284,20 +336,31 @@ export function listIssueAgents(
 }
 
 export function createDefaultIssueAgent(provider: IssueAgentProvider = "claude"): WandTaskAgent {
-  return { provider, model: ISSUE_AGENT_DEFAULT_MODEL, thinkingEffort: "off" };
+  return {
+    provider,
+    model: ISSUE_AGENT_DEFAULT_MODEL,
+    thinkingEffort: "off",
+    mode: normalizeWandTaskAgentMode(provider, DEFAULT_WAND_TASK_AGENT_MODE),
+  };
 }
 
-/** 任务已指派则用任务上的配置，否则沿用面板上次选择。 */
+/**
+ * 任务已指派则用任务上的配置，否则沿用面板上次选择。
+ * 两条来源都会把 mode 夹到该 provider 支持的值，避免下拉出现无法选中的值。
+ */
 export function resolveIssueAgent(
   taskAgent: WandTaskAgent | null | undefined,
   lastAgent?: WandTaskAgent | null,
 ): WandTaskAgent {
-  if (isDispatchableIssueAgent(taskAgent)) return taskAgent;
+  if (isDispatchableIssueAgent(taskAgent)) {
+    return { ...taskAgent, mode: normalizeWandTaskAgentMode(taskAgent.provider, taskAgent.mode) };
+  }
   if (isDispatchableIssueAgent(lastAgent)) {
     return {
       provider: lastAgent.provider,
       model: lastAgent.model.trim(),
       thinkingEffort: lastAgent.thinkingEffort,
+      mode: normalizeWandTaskAgentMode(lastAgent.provider, lastAgent.mode),
     };
   }
   return createDefaultIssueAgent();
@@ -437,13 +500,6 @@ export function writeIssueBoardDisplay(display: IssueBoardDisplay): void {
     /* ignore quota / private mode */
   }
 }
-
-export function issueStatusTone(status: WandTaskStatus): "todo" | "progress" | "done" {
-  if (status === "doing") return "progress";
-  if (isClosedWandTaskStatus(status)) return "done";
-  return "todo";
-}
-
 export function filterIssues<T extends {
   title: string;
   identifier: string;

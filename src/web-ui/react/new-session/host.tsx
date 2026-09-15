@@ -9,6 +9,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import * as React from "react";
 import { ProviderLogo } from "../provider-logo";
 import { WandButton, WandDialogSurface } from "../ui";
 import { newSessionController, newSessionStore } from "./controller";
@@ -27,6 +28,7 @@ import type {
   NewSessionProvider,
   NewSessionRepository,
 } from "./types";
+import { describeError } from "../errors";
 
 export interface NewSessionHostProps {
   repository?: NewSessionRepository;
@@ -105,11 +107,9 @@ function modeHint(provider: NewSessionProvider, mode: NewSessionMode): string {
       : "Grok 使用自身权限确认；支持 TUI 与 streaming-json 结构化会话。";
   }
   if (provider === "qoder") {
-    return mode === "full-access" || mode === "managed"
-      ? "Qoder 将以 bypass_permissions 运行；支持 TUI 与 stream-json 结构化会话。"
-      : mode === "auto-edit"
-        ? "Qoder 将自动批准工作区内的安全编辑。"
-        : "Qoder 使用自身权限确认；结构化模式下未批准的操作会被拒绝。";
+    return mode === "auto-edit"
+      ? "Qoder 将以 accept_edits 运行，自动批准编辑，其余操作仍由 Qoder 确认。"
+      : "Qoder 默认以 yolo（bypass_permissions）启动，不再弹出权限确认；支持 TUI 与 stream-json 结构化会话。";
   }
   if (provider === "pi") return "Pi 支持标准与托管模式；模型和 thinking 会传给 Pi CLI。";
   if (mode === "full-access") return "自动确认权限请求与高权限操作，适合你确认环境安全后的连续修改。";
@@ -128,11 +128,6 @@ function creationFallback(provider: NewSessionProvider, kind: NewSessionKind): s
   if (provider === "qoder") return "无法启动 Qoder 会话，请确认 @qoder-ai/qodercli 已正确安装。";
   if (provider === "pi") return "无法启动 Pi 会话，请确认 Pi CLI 已正确安装。";
   return "无法启动 Claude 会话，请确认 Claude 已正确安装。";
-}
-
-function presentError(error: unknown, fallback: string): string {
-  if (!(error instanceof Error) || !error.message || error.message === "Failed to fetch") return fallback;
-  return error.message;
 }
 
 const RADIO_NAVIGATION_KEYS = new Set<ChoiceNavigationKey>([
@@ -193,7 +188,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
         if (!context) setError("新建会话运行环境尚未就绪，请刷新页面后重试。");
       })
       .catch((loadError) => {
-        if (!abort.signal.aborted) setError(presentError(loadError, "无法加载新建会话配置。"));
+        if (!abort.signal.aborted) setError(describeError(loadError, "无法加载新建会话配置。"));
       })
       .finally(() => {
         if (!abort.signal.aborted) setLoading(false);
@@ -295,7 +290,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
       await runtime.completeCreate(request, created);
       newSessionController.close();
     } catch (createError) {
-      setError(presentError(createError, creationFallback(form.provider, form.kind)));
+      setError(describeError(createError, creationFallback(form.provider, form.kind)));
     } finally {
       newSessionController.setDismissable(true);
       setSubmitting(false);
@@ -324,7 +319,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
           <div className="wand-new-session-body">
             <fieldset className="wand-new-session-field wand-new-session-fieldset">
               <legend className="wand-new-session-field-label">Provider</legend>
-              <div className="wand-new-session-choices" role="radiogroup" aria-label="Provider">
+              <div className="wand-new-session-choices wand-new-session-provider-choices" role="radiogroup" aria-label="Provider">
                 {PROVIDERS.map((provider) => (
                   <button
                     key={provider.value}

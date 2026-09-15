@@ -1,5 +1,5 @@
 import { state } from "./state";
-import { iconSvg, t } from "./i18n";
+import "./i18n";
 import { isStructuredSession } from "./session-engine";
 
 // isStructuredSession 定义在尚未迁移的代码区域，这里声明供本模块使用。
@@ -58,7 +58,6 @@ export function updateRunningIndicators(session: any) {
   var sig = computeRunningSignal(session);
   var headerRow = document.querySelector(".main-header-row");
   var pill = headerRow ? headerRow.querySelector(".session-status-pill") : null;
-  var chatMessages = document.querySelector(".chat-messages");
 
   // A. 顶部进度条
   if (headerRow) {

@@ -49,8 +49,8 @@ export const settingsAndQuickCommitStyles = String.raw`
   padding-bottom: 18px;
 }
 
-.wand-settings-dialog[data-state="open"],
-.wand-settings-nested-dialog[data-state="open"] {
+.wand-settings-dialog[data-open],
+.wand-settings-nested-dialog[data-open] {
   animation: wand-settings-fade-in 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
@@ -72,7 +72,7 @@ export const settingsAndQuickCommitStyles = String.raw`
 
 .wand-settings-title {
   margin: 0;
-  font-size: 1.125rem;
+  font-size: 15.75px;
   line-height: var(--line-height-tight);
   letter-spacing: -0.015em;
 }
@@ -221,17 +221,6 @@ export const settingsAndQuickCommitStyles = String.raw`
 .wand-settings-skeleton-card { width: 100%; height: 156px; margin-top: 14px; border-radius: 15px; }
 .wand-settings-skeleton-card.is-short { height: 112px; margin-top: 4px; }
 
-.wand-settings-readonly {
-  flex: 0 0 auto;
-  margin: 12px 18px 0;
-  border: 1px solid var(--warning);
-  border-radius: var(--radius-sm);
-  padding: 9px 12px;
-  color: var(--text-secondary);
-  background: var(--warning-muted);
-  font-size: var(--font-size-sm);
-}
-
 .wand-settings-app-access {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(320px, 440px);
@@ -286,6 +275,9 @@ export const settingsAndQuickCommitStyles = String.raw`
 .wand-settings-tabs {
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr);
+  /* Appica's Tabs root is a flex column with gap-6; the settings shell owns
+     its own 2-column grid, so the inherited gap must be cancelled. */
+  gap: 0;
   flex: 1;
   min-height: 0;
   overflow: hidden;
@@ -305,6 +297,25 @@ export const settingsAndQuickCommitStyles = String.raw`
   background: var(--bg-secondary);
 }
 
+/* Appica's TabsList renders its own sliding pill indicator. The settings nav
+   draws an accent rail on the active trigger instead, so that layer is off. */
+.wand-settings-tabs > .wand-ui-tabs-list > [data-slot="tabs-indicator"] {
+  display: none;
+}
+
+/* Appica wraps trigger content in an inner span carrying the pill padding.
+   The trigger itself is already padded below, so drop the inner box. */
+.wand-settings-tabs > .wand-ui-tabs-list .wand-ui-tabs-trigger > [data-slot="tabs-trigger-inner"] {
+  display: flex;
+  width: 100%;
+  justify-content: flex-start;
+  padding: 0;
+}
+
+.wand-settings-tabs > .wand-ui-tabs-list .wand-ui-tabs-trigger > [data-slot="tabs-trigger-inner"]::before {
+  content: none;
+}
+
 .wand-settings-tabs > .wand-ui-tabs-list .wand-ui-tabs-trigger {
   position: relative;
   min-height: 48px;
@@ -321,12 +332,12 @@ export const settingsAndQuickCommitStyles = String.raw`
   background: color-mix(in srgb, var(--bg-elevated) 66%, transparent);
 }
 
-.wand-settings-tabs > .wand-ui-tabs-list .wand-ui-tabs-trigger[data-state="active"] {
+.wand-settings-tabs > .wand-ui-tabs-list .wand-ui-tabs-trigger[data-active] {
   border-color: color-mix(in srgb, var(--accent) 16%, var(--border-subtle));
   background: color-mix(in srgb, var(--bg-elevated) 90%, var(--accent-muted));
 }
 
-.wand-settings-tabs > .wand-ui-tabs-list .wand-ui-tabs-trigger[data-state="active"]::before {
+.wand-settings-tabs > .wand-ui-tabs-list .wand-ui-tabs-trigger[data-active]::before {
   position: absolute;
   top: 11px;
   bottom: 11px;
@@ -387,7 +398,7 @@ export const settingsAndQuickCommitStyles = String.raw`
   background: var(--bg-tertiary);
 }
 
-.wand-settings-tabs > .wand-ui-tabs-list .wand-ui-tabs-trigger[data-state="active"] .wand-settings-tab-icon {
+.wand-settings-tabs > .wand-ui-tabs-list .wand-ui-tabs-trigger[data-active] .wand-settings-tab-icon {
   color: var(--accent-active);
   background: var(--accent-muted);
 }
@@ -425,7 +436,7 @@ export const settingsAndQuickCommitStyles = String.raw`
   color: var(--text-primary);
 }
 
-.wand-settings-panel-heading h2 { font-size: 1.25rem; letter-spacing: -0.018em; }
+.wand-settings-panel-heading h2 { font-size: 17.5px; letter-spacing: -0.018em; }
 .wand-settings-section-heading h3 { font-size: var(--font-size-base); }
 
 .wand-settings-section {
@@ -671,6 +682,7 @@ export const settingsAndQuickCommitStyles = String.raw`
   padding: 13px 26px calc(13px + var(--wand-safe-bottom));
   background: color-mix(in srgb, var(--bg-elevated) 96%, transparent);
   backdrop-filter: blur(12px);
+  box-shadow: var(--sticky-footer-shadow);
 }
 
 .wand-settings-save-bar .wand-settings-status { flex: 1; }
@@ -854,8 +866,8 @@ export const settingsAndQuickCommitStyles = String.raw`
   -webkit-backdrop-filter: blur(36px) saturate(165%);
 }
 
-.wand-quick-dialog[data-state="open"] { animation: wand-ui-dialog-in var(--transition-normal); }
-.wand-quick-dialog[data-state="closed"] { animation: wand-ui-dialog-out var(--transition-fast); }
+.wand-quick-dialog[data-open] { animation: wand-ui-dialog-in var(--transition-normal); }
+.wand-quick-dialog[data-ending-style] { animation: wand-ui-dialog-out var(--transition-fast); }
 
 .wand-quick-header {
   display: flex;
@@ -1228,7 +1240,7 @@ export const missionsStyles = String.raw`
 .wand-missions-dialog { position: fixed; inset: max(24px, var(--wand-safe-top)) max(24px, var(--wand-safe-right)) max(24px, var(--wand-safe-bottom)) max(24px, var(--wand-safe-left)); z-index: 35; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border-subtle); border-radius: 20px; color: var(--text-primary); background: color-mix(in srgb, var(--bg-elevated) 94%, transparent); box-shadow: 0 24px 70px rgb(0 0 0 / 24%); pointer-events: auto; }
 .wand-missions-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 18px 20px 12px; }
 .wand-missions-header > div { min-width: 0; }
-.wand-missions-title { margin: 0; font-size: 1.2rem; letter-spacing: -.02em; }
+.wand-missions-title { margin: 0; font-size: 16.8px; letter-spacing: -.02em; }
 .wand-missions-description { margin: 4px 0 0; color: var(--text-secondary); font-size: var(--font-size-sm); }
 .wand-missions-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border-subtle); padding: 0 20px 12px; }
 .wand-missions-toolbar-note { color: var(--text-secondary); font-size: var(--font-size-sm); }
@@ -1250,7 +1262,7 @@ export const missionsStyles = String.raw`
 .wand-missions-detail-milestone { display: inline-flex; align-items: center; gap: 6px; margin: 12px 0 0; color: var(--text-secondary); font-size: var(--font-size-xs); }
 .wand-missions-detail { min-width: 0; overflow: auto; padding: 18px 20px 32px; }
 .wand-missions-detail-head,.wand-missions-review-head,.wand-missions-attempt-head,.wand-missions-create-head,.wand-missions-create-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.wand-missions-detail-head h2,.wand-missions-review h3,.wand-missions-create h2 { margin: 0; font-size: 1.05rem; }
+.wand-missions-detail-head h2,.wand-missions-review h3,.wand-missions-create h2 { margin: 0; font-size: 14.7px; }
 .wand-missions-detail-head p,.wand-missions-create-head p { margin: 4px 0 0; color: var(--text-secondary); font-size: var(--font-size-xs); }
 .wand-missions-prompt { max-width: 900px; margin: 14px 0; color: var(--text-secondary); white-space: pre-wrap; }
 .wand-missions-attempt-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
@@ -1334,11 +1346,11 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   }
 }
 
-.wand-new-session-dialog[data-state="open"] {
+.wand-new-session-dialog[data-open] {
   animation: wand-ui-dialog-in var(--transition-normal);
 }
 
-.wand-new-session-dialog[data-state="closed"] {
+.wand-new-session-dialog[data-ending-style] {
   animation: wand-ui-dialog-out var(--transition-fast);
 }
 
@@ -1375,7 +1387,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
 .wand-new-session-title {
   margin: 0;
   color: var(--text-primary);
-  font-size: 1.3125rem;
+  font-size: 18.375px;
   font-weight: 700;
   letter-spacing: -0.022em;
   line-height: 1.2;
@@ -1385,7 +1397,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   max-width: 44ch;
   margin: 5px 0 0;
   color: var(--text-muted);
-  font-size: 0.8125rem;
+  font-size: 11.375px;
   font-weight: 400;
   line-height: 1.5;
 }
@@ -1429,14 +1441,14 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   margin-bottom: 8px;
   padding: 0;
   color: var(--text-secondary);
-  font-size: 0.8125rem;
+  font-size: 11.375px;
   font-weight: 600;
 }
 
 .wand-new-session-field-hint {
   margin: 6px 0 0;
   color: var(--text-muted);
-  font-size: 0.75rem;
+  font-size: 10.5px;
   line-height: 1.5;
 }
 
@@ -1446,8 +1458,14 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   gap: 8px;
 }
 
-.wand-new-session-provider-choice {
-  flex: 1 1 118px;
+/* 7 个 provider 卡：用 flex-wrap 会让最后一行被 flex-grow 拉成宽窄不一
+   （4 张 160px + 3 张 215px），3 列固定网格又变成 3+3+1 的孤儿行。
+   用 auto-fit 网格：同一比例下每行 4 张、末行 3 张但宽度一致。
+   （旧规则 --provider-choice { flex: 1 1 118px } 因为排在
+   .wand-new-session-choice 之前，早就被 flex: 1 1 0 覆盖失效了。）*/
+.wand-new-session-provider-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 
 .wand-new-session-choice {
@@ -1494,7 +1512,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
 
 .wand-new-session-choice-label {
   color: var(--text-primary);
-  font-size: 0.8rem;
+  font-size: 11.2px;
   font-weight: 600;
   line-height: 1.3;
 }
@@ -1517,7 +1535,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
 
 .wand-new-session-choice-description {
   color: var(--text-muted);
-  font-size: 0.68rem;
+  font-size: 9.52px;
   line-height: 1.3;
 }
 
@@ -1560,7 +1578,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   background: rgba(255, 255, 255, 0.78);
   box-shadow: inset 0 1px 1.5px rgba(125, 91, 57, 0.04);
   font-family: var(--font-mono);
-  font-size: 0.875rem;
+  font-size: 12.25px;
   outline: none;
   transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
 }
@@ -1604,7 +1622,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   background: transparent;
   cursor: pointer;
   font-family: var(--font-mono);
-  font-size: 0.8125rem;
+  font-size: 11.375px;
   text-align: left;
   transition: background var(--transition-fast);
 }
@@ -1617,7 +1635,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   display: block;
   margin-top: 2px;
   color: var(--text-muted);
-  font-size: 0.6875rem;
+  font-size: 9.625px;
 }
 
 .wand-new-session-suggestion-path {
@@ -1645,7 +1663,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   box-shadow: 0 1px 2px rgba(125, 91, 57, 0.03);
   cursor: pointer;
   font-family: var(--font-mono);
-  font-size: 0.6875rem;
+  font-size: 9.625px;
   white-space: nowrap;
   transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, transform 0.16s ease;
 }
@@ -1709,7 +1727,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
 .wand-new-session-advanced-trigger::after {
   color: var(--text-muted);
   content: "+";
-  font-size: 1.1rem;
+  font-size: 15.4px;
   transition: transform var(--transition-fast);
 }
 
@@ -1822,7 +1840,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   padding: 14px 28px calc(18px + var(--wand-safe-bottom));
   border-top: 1px solid color-mix(in srgb, var(--border-subtle) 74%, transparent);
   background: var(--bg-elevated);
-  box-shadow: 0 -12px 28px rgba(125, 91, 57, 0.045), inset 0 1px 0 rgba(255, 255, 255, 0.54);
+  box-shadow: var(--sticky-footer-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.54);
 }
 
 @supports (backdrop-filter: blur(1px)) {
@@ -1919,7 +1937,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   padding: 10px 12px;
   color: var(--danger);
   background: rgba(178, 79, 69, 0.1);
-  font-size: 0.75rem;
+  font-size: 10.5px;
   animation: wand-new-session-error-in 180ms ease-out;
 }
 
@@ -1950,7 +1968,9 @@ export const sessionPickerAndWorktreeStyles = String.raw`
 
 .wand-workspace-agent-options {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* 7 个 CLI 固定 3 列会排成 3+3+1，末行空掉 2/3；auto-fit 在同样宽度下
+     排成 4+3，末行只空一格。 */
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 
 .wand-workspace-agent-footer {
@@ -1980,36 +2000,6 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   border: 1px solid var(--border-subtle);
   border-radius: 10px;
   background: color-mix(in srgb, var(--bg-tertiary) 42%, transparent);
-}
-
-.wand-workspace-creation-kind-option {
-  display: inline-flex;
-  min-height: 34px;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  border: 0;
-  border-radius: 7px;
-  color: var(--text-muted);
-  background: transparent;
-  font: inherit;
-  font-size: var(--font-size-xs);
-  font-weight: 650;
-  cursor: pointer;
-}
-
-.wand-workspace-creation-kind-option:hover,
-.wand-workspace-creation-kind-option.active {
-  color: var(--text-primary);
-  background: var(--bg-elevated);
-}
-
-.wand-workspace-creation-kind-option.active {
-  box-shadow: 0 1px 2px color-mix(in srgb, #000 14%, transparent);
-}
-
-.wand-workspace-project-select {
-  appearance: auto;
 }
 
 .wand-new-task-option {
@@ -2056,14 +2046,14 @@ export const sessionPickerAndWorktreeStyles = String.raw`
 }
 
 .wand-new-task-option-label {
-  font-size: 0.8125rem;
+  font-size: 11.375px;
   font-weight: 650;
   color: var(--text-primary, #2d2419);
 }
 
 .wand-new-task-option-hint {
   overflow: hidden;
-  font-size: 0.6875rem;
+  font-size: 9.625px;
   line-height: 1.45;
   color: var(--text-muted, #7a6a58);
 }
@@ -2120,8 +2110,8 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   -webkit-backdrop-filter: blur(34px) saturate(165%);
 }
 
-.wand-folder-picker-dialog[data-state="open"] { animation: wand-ui-dialog-in var(--transition-normal); }
-.wand-folder-picker-dialog[data-state="closed"] { animation: wand-ui-dialog-out var(--transition-fast); }
+.wand-folder-picker-dialog[data-open] { animation: wand-ui-dialog-in var(--transition-normal); }
+.wand-folder-picker-dialog[data-ending-style] { animation: wand-ui-dialog-out var(--transition-fast); }
 
 .wand-folder-picker-header {
   display: flex;
@@ -2624,6 +2614,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
+    gap: 0;
     margin-top: 12px;
   }
 
@@ -2645,7 +2636,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
     padding: 7px 12px;
   }
 
-  .wand-settings-tabs > .wand-ui-tabs-list .wand-ui-tabs-trigger[data-state="active"]::before {
+  .wand-settings-tabs > .wand-ui-tabs-list .wand-ui-tabs-trigger[data-active]::before {
     top: auto;
     right: 10px;
     bottom: 3px;
@@ -2692,7 +2683,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
 
 @media (max-width: 640px) {
   .wand-new-session-header { padding: 16px 18px 14px; }
-  .wand-new-session-title { font-size: 1.125rem; }
+  .wand-new-session-title { font-size: 15.75px; }
   .wand-new-session-body { padding: 14px 18px; }
   .wand-new-session-primary-grid { grid-template-columns: minmax(0, 1fr); gap: 0; }
   .wand-new-session-summary {
@@ -2734,7 +2725,7 @@ export const composerSelectStyles = String.raw`
   color: inherit;
   background: transparent;
   box-shadow: none;
-  font-size: 0.8125rem;
+  font-size: 11.375px;
   font-weight: 450;
   letter-spacing: -0.01em;
   line-height: 1;
@@ -2758,7 +2749,7 @@ export const composerSelectStyles = String.raw`
 .wand-composer-select-trigger > [aria-hidden="true"] {
   flex: 0 0 auto;
   color: var(--text-muted);
-  font-size: 0.75rem;
+  font-size: 10.5px;
   line-height: 1;
   opacity: 0.72;
   transform: translateY(-1px);
@@ -2771,7 +2762,7 @@ export const composerSelectStyles = String.raw`
   }
 }
 
-.wand-ui-select-trigger.wand-composer-select-trigger[data-state="open"] {
+.wand-ui-select-trigger.wand-composer-select-trigger[data-popup-open] {
   color: var(--text-primary);
   background: color-mix(in srgb, var(--bg-tertiary) 82%, transparent);
 }
@@ -2789,7 +2780,7 @@ export const composerSelectStyles = String.raw`
 .wand-ui-select-content.wand-composer-select-content {
   width: max-content;
   max-width: min(360px, calc(100vw - var(--wand-safe-left) - var(--wand-safe-right) - 28px));
-  max-height: min(330px, var(--radix-select-content-available-height));
+  max-height: min(330px, var(--available-height));
   border-color: color-mix(in srgb, var(--border-default) 78%, #9b806c);
   border-radius: 14px;
   padding: 6px;
@@ -2801,11 +2792,7 @@ export const composerSelectStyles = String.raw`
   backdrop-filter: blur(20px) saturate(122%);
   -webkit-backdrop-filter: blur(20px) saturate(122%);
   pointer-events: auto;
-  transform-origin: var(--radix-select-content-transform-origin);
-}
-
-.wand-ui-select-content.wand-composer-select-content[data-state="open"] {
-  animation: none;
+  transform-origin: var(--transform-origin);
 }
 
 .wand-composer-select-content-mode { min-width: min(210px, calc(100vw - 28px)); }
@@ -2819,13 +2806,13 @@ export const composerSelectStyles = String.raw`
 }
 
 .wand-composer-select-content.wand-ui-select-searchable .wand-ui-select-viewport {
-  max-height: min(240px, calc(var(--radix-popover-content-available-height, 70vh) - 64px));
+  max-height: min(240px, calc(var(--available-height, 70vh) - 64px));
 }
 
 .wand-ui-select-item.wand-composer-select-item {
   min-height: 36px;
   border-radius: 9px;
-  padding: 7px 32px 7px 10px;
+  padding: 7px 10px;
   line-height: 1.3;
   cursor: pointer;
 }
@@ -2835,14 +2822,9 @@ export const composerSelectStyles = String.raw`
   background: color-mix(in srgb, var(--accent-muted) 72%, transparent);
 }
 
-.wand-ui-select-item.wand-composer-select-item[data-state="checked"] {
+.wand-ui-select-item.wand-composer-select-item[data-selected] {
   color: var(--accent);
   font-weight: 560;
-}
-
-.wand-composer-select-content .wand-ui-select-indicator {
-  right: 10px;
-  font-size: 0.78rem;
 }
 
 .input-composer .composer-config-chip:focus-within {
@@ -2871,7 +2853,7 @@ export const composerSelectStyles = String.raw`
   .input-composer .wand-composer-select-trigger {
     min-height: 44px;
     padding-inline: 4px;
-    font-size: 0.75rem;
+    font-size: 10.5px;
   }
 
   .wand-ui-select-item.wand-composer-select-item {

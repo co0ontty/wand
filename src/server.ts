@@ -19,6 +19,7 @@ import {
   SESSION_COOKIE_HTTPS,
   SESSION_COOKIE_LEGACY,
 } from "./auth.js";
+import { type WandBuildInfo } from "./build-info.js";
 import { ensureCertificates } from "./cert.js";
 import { listClaudeSkills } from "./claude-skills.js";
 import {
@@ -45,6 +46,7 @@ import {
   verifyAppToken,
 } from "./server-app-connect.js";
 import { firstHeaderValue, sendRouteError } from "./server-request.js";
+import { inferProviderFromCommand, isSessionProvider } from "./session-provider.js";
 import { registerVaultRoutes } from "./server-vault-routes.js";
 import { registerGithubRoutes } from "./server-github-routes.js";
 import { registerTaskRoutes } from "./server-task-routes.js";
@@ -74,7 +76,7 @@ import {
 import { repairServiceUnitAfterUpdate } from "./service-self-repair.js";
 import { computeRelaunch } from "./relaunch.js";
 import { RuntimeConfigState } from "./runtime-config.js";
-import { isServiceInstalled } from "./tui/commands.js";
+import { safeServiceInstalled } from "./tui/runtime-utils.js";
 import {
   checkManagedServiceUpdatePreflight,
 } from "./update-helper.js";
@@ -114,6 +116,17 @@ const PKG_VERSION = PKG_JSON.version;
 const PKG_NODE_REQ = PKG_JSON.engines?.node ?? ">=22.5.0";
 const PKG_REPO_URL = "https://github.com/co0ontty/wand";
 
+/** 结构化聊天头像允许的图片类型；未知扩展名回 415。 */
+const AVATAR_CONTENT_TYPES: Record<string, string> = {
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+  ".avif": "image/avif",
+};
+
 // ── Update check cache ──
 
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
@@ -138,13 +151,6 @@ async function checkLatestPackageVersion(channel: UpdateChannel, forceRefresh = 
 }
 
 // ── Build info (构建时打入的 commit SHA) + Beta 通道 ──
-
-interface WandBuildInfo {
-  commit: string | null;
-  builtAt: string | null;
-  version: string | null;
-  channel: string | null;
-}
 
 /** 读取 dist/build-info.json（由 scripts/stamp-build-info.js 在 build 时生成）。 */
 function readBuildInfo(): WandBuildInfo {
@@ -258,6 +264,15 @@ function authenticateBearerAppToken(
   }
 }
 
+/**
+ * 解析 PTY 会话的 provider：显式 `provider` 字段优先，其次按命令前缀识别；
+ * 都识别不出时回落到 Claude，与旧版客户端行为保持一致。
+ */
+function resolveProviderForCommand(provider: unknown, command: string): SessionProvider {
+  if (isSessionProvider(provider)) return provider;
+  return inferProviderFromCommand(command) ?? "claude";
+}
+
 // ── Startup error handling ──
 
 process.on("uncaughtException", (err) => {
@@ -368,24 +383,15 @@ export async function startServer(
   const storage = new WandStorage(resolveDatabasePath(configPath));
   const runtimeConfig = new RuntimeConfigState(config);
   const authService = new AuthService(storage);
-    // Helper to get current default models from storage (not from startup-captured config)
-  // This allows model preferences to update in real-time when user changes config via UI
-  const getCurrentDefaultModels = (): { claude: string; codex: string; opencode: string; grok: string; qoder: string; pi: string } => {
-    // Try to read from storage first (most up-to-date via UI settings)
-    // Falls back to config values for deployment settings
-    const prefStorage = storage;
-    if (prefStorage) {
-      return {
-        claude: prefStorage.getPreference("pref:defaultModel", config.defaultModel ?? ""),
-        codex: prefStorage.getPreference("pref:defaultCodexModel", config.defaultCodexModel ?? ""),
-        opencode: prefStorage.getPreference("pref:defaultOpenCodeModel", config.defaultOpenCodeModel ?? ""),
-        grok: prefStorage.getPreference("pref:defaultGrokModel", config.defaultGrokModel ?? ""),
-        qoder: prefStorage.getPreference("pref:defaultQoderModel", config.defaultQoderModel ?? ""),
-        pi: prefStorage.getPreference("pref:defaultPiModel", config.defaultPiModel ?? ""),
-      };
-    }
-    return getProviderDefaultModels(config);
-  };
+  // 默认模型优先读存储（UI 改设置后实时生效），未设置时由 getPreference 回落到 config。
+  const getCurrentDefaultModels = (): { claude: string; codex: string; opencode: string; grok: string; qoder: string; pi: string } => ({
+    claude: storage.getPreference("pref:defaultModel", config.defaultModel ?? ""),
+    codex: storage.getPreference("pref:defaultCodexModel", config.defaultCodexModel ?? ""),
+    opencode: storage.getPreference("pref:defaultOpenCodeModel", config.defaultOpenCodeModel ?? ""),
+    grok: storage.getPreference("pref:defaultGrokModel", config.defaultGrokModel ?? ""),
+    qoder: storage.getPreference("pref:defaultQoderModel", config.defaultQoderModel ?? ""),
+    pi: storage.getPreference("pref:defaultPiModel", config.defaultPiModel ?? ""),
+  });
 
   const getModelRefreshOptions = (): ModelRefreshOptions => {
     const injected = options.modelRefreshOptions?.() ?? {};
@@ -507,20 +513,7 @@ export async function startServer(
         return;
       }
 
-      const ext = path.extname(resolvedPath).toLowerCase();
-      const contentType = ext === ".svg"
-        ? "image/svg+xml"
-        : ext === ".png"
-          ? "image/png"
-          : ext === ".jpg" || ext === ".jpeg"
-            ? "image/jpeg"
-            : ext === ".webp"
-              ? "image/webp"
-              : ext === ".gif"
-                ? "image/gif"
-                : ext === ".avif"
-                  ? "image/avif"
-                  : null;
+      const contentType = AVATAR_CONTENT_TYPES[path.extname(resolvedPath).toLowerCase()];
       if (!contentType) {
         res.status(415).json({ error: "不支持的头像格式。" });
         return;
@@ -860,17 +853,7 @@ export async function startServer(
       const rawCommand = body.command?.trim() ?? "";
       const provider: SessionProvider | undefined = interactiveShell
         ? undefined
-        : body.provider === "codex" || /^codex\b/.test(rawCommand)
-        ? "codex"
-        : body.provider === "opencode" || /^opencode\b/.test(rawCommand)
-          ? "opencode"
-        : body.provider === "grok" || /^grok\b/.test(rawCommand)
-          ? "grok"
-        : body.provider === "qoder" || /^qodercli\b/.test(rawCommand)
-          ? "qoder"
-        : body.provider === "pi" || /^pi\b/.test(rawCommand)
-          ? "pi"
-          : "claude";
+        : resolveProviderForCommand(body.provider, rawCommand);
       // Older clients used the provider id as the PTY command. Qoder's executable
       // is named qodercli, so keep those clients working while preserving custom commands.
       const command = provider === "qoder" && rawCommand === "qoder"
@@ -1006,14 +989,6 @@ export async function startServer(
 
   // ── Restart endpoint (needs server + wss in scope) ──
 
-  function safeServiceInstalled(): boolean {
-    try {
-      return isServiceInstalled();
-    } catch {
-      return false;
-    }
-  }
-
   /**
    * 统一的关服 + 重启。重启方式由 computeRelaunch 决定：
    *   - systemd 托管且已装服务 → 仅退出，交给 Restart=always 用（更新自修复后可能刚被
@@ -1123,59 +1098,6 @@ export async function startServer(
     }, MODEL_CATALOG_AUTO_REFRESH_INTERVAL_MS);
     modelCatalogRefreshTimer.unref();
   }
-
-  // ── Auto-update endpoints ──
-
-  app.get("/api/auto-update", requireAdmin, (_req, res) => {
-    const web = storage.getConfigValue("autoUpdateWeb") === "true";
-    const apk = storage.getConfigValue("autoUpdateApk") === "true";
-    const dmg = storage.getConfigValue("autoUpdateDmg") === "true";
-    const cli = storage.getConfigValue("autoUpdateProviderClis") === "true";
-    res.json({ web, apk, dmg, cli });
-  });
-
-  app.post("/api/auto-update", requireAdmin, (req, res) => {
-    const { web, apk, dmg, cli } = req.body as { web?: boolean; apk?: boolean; dmg?: boolean; cli?: boolean };
-    if (typeof web === "boolean") {
-      storage.setConfigValue("autoUpdateWeb", String(web));
-    }
-    if (typeof apk === "boolean") {
-      storage.setConfigValue("autoUpdateApk", String(apk));
-    }
-    if (typeof dmg === "boolean") {
-      storage.setConfigValue("autoUpdateDmg", String(dmg));
-    }
-    if (typeof cli === "boolean") {
-      storage.setConfigValue("autoUpdateProviderClis", String(cli));
-    }
-    res.json({
-      web: storage.getConfigValue("autoUpdateWeb") === "true",
-      apk: storage.getConfigValue("autoUpdateApk") === "true",
-      dmg: storage.getConfigValue("autoUpdateDmg") === "true",
-      cli: storage.getConfigValue("autoUpdateProviderClis") === "true",
-    });
-  });
-
-  // ── Update channel (stable / beta) ──
-
-  app.get("/api/update-channel", requireAdmin, (_req, res) => {
-    res.json({
-      channel: getUpdateChannel(),
-      build: {
-        commit: BUILD_INFO.commit,
-        shortCommit: BUILD_INFO.commit ? BUILD_INFO.commit.slice(0, 7) : null,
-        builtAt: BUILD_INFO.builtAt,
-        channel: BUILD_INFO.channel,
-      },
-    });
-  });
-
-  app.post("/api/update-channel", requireAdmin, (req, res) => {
-    const body = (req.body ?? {}) as { channel?: string };
-    const channel = body.channel === "beta" ? "beta" : "stable";
-    storage.setConfigValue("updateChannel", channel);
-    res.json({ channel });
-  });
 
   // Express 4 does not forward rejected route promises automatically. Every
   // async route above is wrapped with asyncRoute, and this final middleware

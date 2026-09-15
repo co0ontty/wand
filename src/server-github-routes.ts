@@ -6,7 +6,7 @@ import {
   getGithubConnectorStatus,
   githubRequest,
 } from "./github-connector.js";
-import { bodyObject, integerQuery, requiredString, sendRouteError, stringQuery } from "./server-request.js";
+import { bodyObject, integerQuery, requiredString, sendRouteError, text } from "./server-request.js";
 import type { WandStorage } from "./storage.js";
 import type { SessionRegistry } from "./session-registry.js";
 
@@ -21,10 +21,11 @@ function githubListQuery(
   defaults: { state?: string; sort?: string; direction?: string } = {},
 ): URLSearchParams {
   const query = new URLSearchParams();
-  if (defaults.state) query.set("state", stringQuery(reqQuery.state, defaults.state));
-  if (stringQuery(reqQuery.labels)) query.set("labels", stringQuery(reqQuery.labels));
-  const sort = stringQuery(reqQuery.sort, defaults.sort ?? "");
-  const direction = stringQuery(reqQuery.direction, defaults.direction ?? "");
+  if (defaults.state) query.set("state", text(reqQuery.state, defaults.state));
+  const labels = text(reqQuery.labels);
+  if (labels) query.set("labels", labels);
+  const sort = text(reqQuery.sort, defaults.sort ?? "");
+  const direction = text(reqQuery.direction, defaults.direction ?? "");
   if (sort) query.set("sort", sort);
   if (direction) query.set("direction", direction);
   query.set("per_page", String(integerQuery(reqQuery.per_page, 30, 1, 100)));
@@ -134,14 +135,14 @@ export function registerGithubRoutes(app: Express, deps: GithubRouteDependencies
   app.get("/api/github/repos", requireAdmin, asyncRoute(async (req, res) => {
     try {
       const query = new URLSearchParams();
-      const visibility = stringQuery(req.query.visibility);
-      const affiliation = stringQuery(req.query.affiliation);
-      const type = stringQuery(req.query.type);
+      const visibility = text(req.query.visibility);
+      const affiliation = text(req.query.affiliation);
+      const type = text(req.query.type);
       if (visibility) query.set("visibility", visibility);
       if (affiliation) query.set("affiliation", affiliation);
       if (type) query.set("type", type);
-      query.set("sort", stringQuery(req.query.sort, "updated"));
-      query.set("direction", stringQuery(req.query.direction, "desc"));
+      query.set("sort", text(req.query.sort, "updated"));
+      query.set("direction", text(req.query.direction, "desc"));
       query.set("per_page", String(integerQuery(req.query.per_page, 30, 1, 100)));
       query.set("page", String(integerQuery(req.query.page, 1, 1, 10_000)));
       const suffix = query.toString();

@@ -1,19 +1,19 @@
-import { state, readStoredBoolean, writeStoredBoolean } from "./state";
+import { state, writeStoredBoolean } from "./state";
 import { renderProviderLogoMarkup } from "../provider-identity";
-import { t, iconSvg } from "./i18n";
-import { computeRunningSignal, escapeHtml, refreshTailMarqueePaths, renderTailMarqueePath, scrollPathElementToEnd, scrollInputToEnd, updateRunningIndicators } from "./utils";
+import { iconSvg } from "./i18n";
+import { escapeHtml, refreshTailMarqueePaths, renderTailMarqueePath, scrollPathElementToEnd, updateRunningIndicators } from "./utils";
 import { getConfigCwd } from "./chat-scroll";
-import { renderChatEmptyState, sessionChromeTitle, shortCommand } from "./chat-render";
+import { shortCommand } from "./chat-render";
 import { attachEventListeners } from "./events";
 import { shouldShowSessionsBackdrop, isMobileLayout, refreshFileExplorer, renderFileExplorer, wandFileIcon } from "./file-browser";
 import { loadGitStatus, renderTopbarGitBadgeHtml, renderTopbarMoreMenuHtml } from "./git-commit";
-import { autoResizeInput, getSelectedSession, updateInteractiveControls } from "./input";
+import { autoResizeInput, getSelectedSession } from "./input";
 import { requestNotificationPermission, notifyUpdateAvailable, _apkVersion, _macAppVersion } from "./notifications";
-import { applyCurrentView, checkApkAutoUpdate, checkDmgAutoUpdate, closeTransientSessionsDrawer, fetchAvailableModels, getComposerPlaceholder, getComposerTool, getSafeModeForTool, hasNativeBackToApp, hasNativeSwitchServer, loadOutput, loadSessions, login, logout, refreshAll, renderAutoApproveChip, renderClaudeSkillsPickerHtml, renderComposerConfigControlsHtml, syncComposerModeSelect, syncComposerModelSelect, toggleSidebarCollapsed, updateDrawerState, updateShellChrome } from "./session-engine";
+import { applyCurrentView, checkApkAutoUpdate, checkDmgAutoUpdate, closeTransientSessionsDrawer, fetchAvailableModels, getComposerPlaceholder, hasNativeBackToApp, hasNativeSwitchServer, loadSessions, refreshAll, renderAutoApproveChip, renderClaudeSkillsPickerHtml, renderComposerConfigControlsHtml, syncComposerModeSelect, syncComposerModelSelect, updateDrawerState, updateShellChrome } from "./session-engine";
 import { getSessionStatusClass, getSessionStatusLabel } from "./session-ui";
-import { renderSessionsListContent, renderSessions } from "./sidebar";
-import { initTerminal, maybeScrollTerminalToBottom, syncTerminalBuffer } from "./terminal";
-import { ensureTerminalFit, ensureTerminalFitWithRetry, setupVisualViewportHandlers, teardownTerminal } from "./viewport";
+import { renderSessionsListContent } from "./sidebar";
+import { maybeScrollTerminalToBottom } from "./terminal";
+import { ensureTerminalFit, ensureTerminalFitWithRetry, teardownTerminal } from "./viewport";
 import { initWebSocket, forceReconnectWebSocket, cancelWsReconnect, evaluateWsHeartbeatStale, startPolling } from "./websocket";
 import {
   isBrowserReactShellMounted,
@@ -549,15 +549,10 @@ export function renderLogin() {
 }
 
 export function renderAppShell() {
-  var scriptClose = String.fromCharCode(60) + String.fromCharCode(47) + "script>";
   var selectedSession = state.sessions.find(function(s: any) { return s.id === state.selectedId; });
-  var terminalTitle = selectedSession ? sessionChromeTitle(selectedSession, "未选择会话") : "未选择会话";
-  var terminalInfo = selectedSession ? (selectedSession.mode + " | " + selectedSession.status) : "点击上方「新对话」开始";
   var currentDraft = state.selectedId ? (state.drafts[state.selectedId] || "") : "";
   var drawerClass = state.sessionsDrawerOpen ? " open" : "";
   var backdropClass = shouldShowSessionsBackdrop() ? " open" : "";
-  var preferredTool = getComposerTool();
-  var composerMode = getSafeModeForTool(preferredTool, state.chatMode);
 
   // 手机端不允许「pin 但不窄条」（300px 固定边栏太占地），只允许窄条形态。
   // isAnchored = 边栏占据布局空间（推开主内容）。桌面 pin 或 任意端窄条都算 anchored。
@@ -813,6 +808,8 @@ export function renderAppShell() {
                 '</div>' +
               '</div>' +
               '<div class="composer-actions-right" role="group" aria-label="模型与发送">' +
+                // 直通模式的 Appica 发送按钮挂在这里（其余 legacy 按钮在直通下收起）。
+                '<span class="composer-rail-host" data-composer-rail-host="pty"></span>' +
                 '<div class="composer-inline-config">' +
                   renderComposerConfigControlsHtml(selectedSession, "runtime") +
                 '</div>' +

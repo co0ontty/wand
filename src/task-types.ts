@@ -11,12 +11,56 @@ export type WandTaskAgentProvider = "claude" | "codex" | "opencode" | "grok" | "
 export type WandTaskAgentModel = string;
 export type WandTaskAgentEffort = "off" | "standard" | "deep" | "max";
 
-/** 任务上的默认派发配置：先选工具 / 模型 / 思考深度，再一键交给 Agent。 */
+/**
+ * 派发时的执行模式，只暴露三种：
+ *   - managed：托管，自动确认全部权限并使用完全自主提示词；
+ *   - full-access：全限，自动确认权限但仍保留交互语义；
+ *   - default：标准，逐步确认操作。
+ */
+export type WandTaskAgentMode = "managed" | "full-access" | "default";
+
+/** 合法执行模式清单；顺序即下拉顺序。 */
+export const WAND_TASK_AGENT_MODES: readonly WandTaskAgentMode[] = ["managed", "full-access", "default"];
+
+/** 历史行没有 mode 字段时的兜底：标准模式，与旧 `mode: "agent"` 的权限姿态一致。 */
+export const DEFAULT_WAND_TASK_AGENT_MODE: WandTaskAgentMode = "default";
+
+export function isWandTaskAgentMode(value: unknown): value is WandTaskAgentMode {
+  return value === "managed" || value === "full-access" || value === "default";
+}
+
+/**
+ * 各 provider 实际支持的工作模式。Codex 只有 full-access 一个有效值
+ * （与新建会话的 `supportedModes` / `/api/sessions/:id/mode` 一致）；
+ * 否则 `default` 会让 codex 以 `--sandbox read-only` 跑，派发的任务根本改不了代码。
+ */
+export function supportedWandTaskAgentModes(
+  provider: WandTaskAgentProvider,
+): readonly WandTaskAgentMode[] {
+  if (provider === "codex") return ["full-access"];
+  return WAND_TASK_AGENT_MODES;
+}
+
+/** 把任意（含旧数据 / 其它客户端缺省的）模式夹到该 provider 真正支持的值。 */
+export function normalizeWandTaskAgentMode(
+  provider: WandTaskAgentProvider,
+  mode: unknown,
+): WandTaskAgentMode {
+  const supported = supportedWandTaskAgentModes(provider);
+  if (isWandTaskAgentMode(mode) && supported.includes(mode)) return mode;
+  return supported.includes(DEFAULT_WAND_TASK_AGENT_MODE)
+    ? DEFAULT_WAND_TASK_AGENT_MODE
+    : supported[0]!;
+}
+
+/** 任务上的默认派发配置：先选工具 / 模型 / 思考深度 / 工作模式，再一键交给 Agent。 */
 export interface WandTaskAgent {
   provider: WandTaskAgentProvider;
   /** 具体模型 ID；"default" 表示跟随服务端为该 provider 选择的默认模型。 */
   model: WandTaskAgentModel;
   thinkingEffort: WandTaskAgentEffort;
+  /** 执行模式；缺省时按标准模式处理。 */
+  mode: WandTaskAgentMode;
 }
 
 /** 任务标题来源；标题是可选字段，留空时由服务端按描述自动生成。 */

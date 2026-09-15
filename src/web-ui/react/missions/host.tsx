@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import * as React from "react";
 import { workspaceContextStore } from "../workspaces/workspace-context";
 
 import { ProviderLogo } from "../provider-logo";

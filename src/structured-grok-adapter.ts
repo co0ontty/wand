@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 
 import { startStructuredCli } from "./structured-exec-pump.js";
 import type { StructuredExecHost } from "./structured-exec-host.js";
+import { asRecord } from "./structured-content.js";
 import { thinkingEffortToGrokEffort } from "./structured-provider-common.js";
 import type {
   StructuredRunnerAdapter,
@@ -13,12 +14,6 @@ import type {
 import type { SessionSnapshot } from "./types.js";
 
 export type GrokTurnState = StructuredRunnerTurnState;
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
-}
 
 function grokText(value: unknown): string {
   if (typeof value === "string") return value;

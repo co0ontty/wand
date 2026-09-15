@@ -1,22 +1,24 @@
 import type { SendError } from "./types";
-import { state, readStoredBoolean, writeStoredBoolean } from "./state";
-import { t, iconSvg } from "./i18n";
+import { state } from "./state";
+import { t } from "./i18n";
 import { computeRunningSignal, escapeHtml } from "./utils";
-import { renderChat, scheduleChatRender, sessionChromeTitle, shortCommand } from "./chat-render";
-import { bindChatScrollListener, clearStructuredQueuePersistence, getConfigCwd, getStructuredQueuedInputs, persistCrossSessionQueue, persistSelectedId, prepareChatBottomFollow, restoreStructuredQueue, saveStructuredQueue, stripRenderOnlyStructuredMessages, syncStructuredQueueFromSession } from "./chat-scroll";
-import { isMobileLayout, updateFilePanelCwd } from "./file-browser";
-import { loadGitStatus } from "./git-commit";
-import { showToast, wandConfirm, wandAlert, wandPrompt, openWandDialog, showError, hideError, sendBrowserNotification, _syncWakeLock } from "./notifications";
-import { render, resetChatRenderCache, getEffectiveCwd } from "./render";
-import { applyCurrentView, buildAttachmentPrefix, canSendComposer, discardPendingAttachments, dismissDrawerIfOverlay, getChatModelForProvider, getComposerPlaceholder, getComposerTool, getDraftValueForSession, getPendingAttachments, getPreferredMessages, getPreferredTool, getSafeModeForTool, getSelectedClaudeSkills, isStructuredSession, loadOutput, loadSessions, refreshAll, replaceComposerSelection, restoreComposerStateForSession, restorePendingAttachments, selectSession, setDraftValue, setDraftValueForSession, shouldBracketPtyPaste, shouldRequestChatFormat, subscribeToSession, supportsClaudeSkillSelection, syncComposerHasText, takePendingAttachments, updateSessionSnapshot, updateSessionsList, uploadAttachments, withTerminalDimensions } from "./session-engine";
-import { renderSessions, loadClaudeHistory, loadCodexHistory, ensureClaudeHistoryLoaded, ensureCodexHistoryLoaded, confirmDelete } from "./sidebar";
+import { renderChat, sessionChromeTitle, shortCommand } from "./chat-render";
+import { getStructuredQueuedInputs, persistCrossSessionQueue, persistSelectedId, prepareChatBottomFollow, stripRenderOnlyStructuredMessages, syncStructuredQueueFromSession } from "./chat-scroll";
+import "./file-browser";
+import "./git-commit";
+import { showToast, wandConfirm, showError } from "./notifications";
+import { resetChatRenderCache, getEffectiveCwd } from "./render";
+import { applyCurrentView, buildAttachmentPrefix, canSendComposer, discardPendingAttachments, dismissDrawerIfOverlay, getComposerPlaceholder, getDraftValueForSession, getPendingAttachments, getPreferredMessages, getPreferredTool, getSelectedClaudeSkills, isStructuredSession, loadOutput, refreshAll, restoreComposerStateForSession, restorePendingAttachments, setDraftValue, setDraftValueForSession, shouldBracketPtyPaste, subscribeToSession, supportsClaudeSkillSelection, syncComposerHasText, takePendingAttachments, updateSessionSnapshot, updateSessionsList, uploadAttachments, withTerminalDimensions } from "./session-engine";
+import { confirmDelete } from "./sidebar";
 import { initTerminal, maybeScrollTerminalToBottom, scheduleSoftResyncTerminal } from "./terminal";
-import { ensureTerminalFit, scheduleClosedViewportBaselineWindow, sendTerminalResize, syncAppViewportHeight, teardownTerminal, updateJoystickPanelUI, updateJoystickVisibility } from "./viewport";
-import { setView, initWebSocket, forceReconnectWebSocket } from "./websocket";
+import { ensureTerminalFit, scheduleClosedViewportBaselineWindow, syncAppViewportHeight, teardownTerminal, updateJoystickPanelUI, updateJoystickVisibility } from "./viewport";
+import "./websocket";
 import { getSessionStatusLabel } from "./session-ui";
 import { isBrowserReactShellMounted } from "./shell-runtime";
 import { buildTerminalPathPasteSequence, isClipboardImageMimeType } from "./pty-paste";
 import { notifyLegacyUiChange } from "./ui-store-bridge";
+import { PROVIDER_IDS } from "../provider-identity";
+import { syncBrowserComposerRail } from "./composer-rail-adapter";
 
       // 改为在识别回调里调用 updateVoiceTranscript(累积文本) 即可，交互层不用动。
       // ─────────────────────────────────────────────────────────────────
@@ -728,7 +730,6 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         var blankChat = document.getElementById("blank-chat");
         var terminalContainer = document.getElementById("output");
         var chatContainer = document.getElementById("chat-output");
-        var stopBtn = document.getElementById("stop-button");
         var terminalTitle = document.getElementById("terminal-title");
         var terminalInfo = document.getElementById("terminal-info");
         var sessionSummary = document.querySelector(".session-summary-value");
@@ -849,8 +850,20 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         var interruptFlag = !!opts.interrupt;
         var embedTerminal = document.documentElement.classList.contains("is-wand-embed-terminal");
         if (state.terminalInteractive && !embedTerminal) {
-          showToast("终端交互模式开启时，请直接在终端中输入。", "info");
-          return Promise.resolve();
+          // 网页端直通模式：composer 本身就是 PTY 输入面。
+          // 打字已经由 handleInteractiveTextInput 逐字透传，Enter 只负责提交，
+          // 按服务端契约拆成「先文本、后单独 \r」两包发出去。
+          var passthroughBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
+          var passthroughText = passthroughBox ? passthroughBox.value : "";
+          if (passthroughBox && passthroughText) {
+            passthroughBox.value = "";
+            setDraftValue("", true);
+            autoResizeInput(passthroughBox);
+            return queueDirectInput(passthroughText, "interactive_text")
+              .then(function() { return queueDirectInput("\r", "enter_text"); })
+              .catch(function() {});
+          }
+          return queueDirectInput("\r", "enter_text").catch(function() {});
         }
 
         var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
@@ -1563,7 +1576,6 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         for (var i = 0; i < n; i++) order.push(i);
         order.splice(origIndex, 1);
         order.splice(target, 0, origIndex);
-        var top = rects[0].top;
         // list 是右对齐 column flex，所有元素相对 list 左边对齐 — 我们只关心 top
         // 用第一个 rect 的 top 作为锚点累加。
         // 但 list 起始位置不一定是 rects[0].top（rects[0] 现在变到 order[0] 的位置）
@@ -1782,7 +1794,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         // 就允许在用户发送时静默触发恢复。不再要求 messages 里同时
         // 有 user + assistant 文本（slim 列表/截断历史会让该判断失真）。
         return !!(session && !isStructuredSession(session)
-          && ["claude", "codex", "opencode", "grok", "qoder", "pi"].indexOf(session.provider) !== -1
+          && PROVIDER_IDS.indexOf(session.provider) !== -1
           && session.status !== "running" && session.claudeSessionId);
       }
 
@@ -2018,13 +2030,10 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         if (event.defaultPrevented || isImeKeyboardEvent(event)) return false;
         var target = event.target;
         if (!target) return true;
-        if (
-          document.documentElement.classList.contains("is-wand-embed-terminal") &&
-          target.closest &&
-          target.closest("#input-box")
-        ) {
-          return false;
-        }
+        // Composer 拥有自己的键盘：直通模式下 #input-box 的文本是通过
+        // `handleInteractiveTextInput` 在 input 事件里逐字发出去的。如果这里
+        // 再把同一个 keydown 透传一次，每个字符都会重复到达 PTY。
+        if (target.closest && target.closest("#input-box")) return false;
         if (target.closest && target.closest("#mini-keyboard")) return false;
         if (shouldIgnoreInteractiveTarget(target)) return false;
         return true;
@@ -2310,6 +2319,19 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           composerShell.classList.toggle("is-optimizing", promptOptimizeBusyForCurrent);
           composerShell.classList.toggle("is-terminal-interactive", !!state.terminalInteractive);
         }
+        // 直通 composer 的尾部操作区由 Appica 渲染：legacy 的发送 / 语音 / 优化按钮
+        // 在直通下全部收起，这里把「发送回车」这个真实动作补回右侧栏。
+        // 原生嵌入壳的底栏由原生渲染，网页侧不挂载。
+        syncBrowserComposerRail({
+          active: function() {
+            return !!state.terminalInteractive
+              && !document.documentElement.classList.contains("is-wand-embed-terminal");
+          },
+          submit: function() { void sendInputFromBox(undefined); },
+          focusInput: function() {
+            focusInputWithSelection(document.getElementById("input-box"));
+          },
+        });
         var promptOptimizeBtn = document.getElementById("prompt-optimize-btn") as HTMLButtonElement | null;
         if (promptOptimizeBtn) {
           promptOptimizeBtn.disabled = promptOptimizeBusyAnywhere;
@@ -2749,40 +2771,6 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         _swipedItem = null;
       }
 
-      function startCommand(command, cwd, errorEl) {
-        var knownProvider = command === "claude" || command === "codex" || command === "opencode"
-          || command === "grok" || command === "qoder" || command === "pi";
-        if (knownProvider) {
-          state.preferredCommand = command;
-          state.chatMode = getSafeModeForTool(command, state.chatMode);
-        }
-        var modelPref = knownProvider ? getChatModelForProvider(command) : "";
-        return fetch("/api/commands", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "same-origin",
-          body: JSON.stringify(withTerminalDimensions({
-            command: command,
-            provider: knownProvider ? command : undefined,
-            cwd: cwd || "",
-            mode: state.chatMode || state.config.defaultMode || "default",
-            model: modelPref || undefined,
-            thinkingEffort: state.chatThinking || undefined
-          }))
-        })
-        .then(function(res) { return res.json(); })
-        .then(function(data) {
-          if (data.error) {
-            if (errorEl) showError(errorEl, data.error);
-            return null;
-          }
-          state.selectedId = data.id;
-          persistSelectedId();
-          state.drafts[data.id] = "";
-          return data;
-        });
-      }
-
       var _resumeInProgress = false;
 
       function resumeSession(sessionId, errorEl?) {
@@ -2853,91 +2841,6 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         });
       }
 
-      export function startAndActivateCommand(command, cwd, errorEl) {
-        return startCommand(command, cwd, errorEl).then(function(data) {
-          if (!data) return null;
-          return activateSession(data).then(function() {
-            return data;
-          });
-        });
-      }
-
-      export function createSessionFromWelcomeInput(value) {
-        var welcomeInput = document.getElementById("welcome-input") as HTMLInputElement | null;
-        if (!welcomeInput) return;
-        welcomeInput.placeholder = "正在思考…";
-        welcomeInput.disabled = true;
-        var mode = state.chatMode || "managed";
-        var defaultCwd = getEffectiveCwd();
-        var preferredTool = getPreferredTool();
-        var modelPref = getChatModelForProvider(preferredTool);
-        fetch("/api/commands", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "same-origin",
-          body: JSON.stringify(withTerminalDimensions({
-            command: preferredTool,
-            cwd: defaultCwd,
-            mode: mode,
-            initialInput: value,
-            model: modelPref || undefined,
-            thinkingEffort: state.chatThinking || undefined
-          }))
-        })
-        .then(function(res) { return res.json(); })
-        .then(function(data) {
-          if (data.error) {
-            showToast(data.error, "error");
-            welcomeInput.placeholder = "输入消息";
-            welcomeInput.disabled = false;
-            return null;
-          }
-          return activateSession(data);
-        })
-        .catch(function(error) {
-          showToast((error && error.message) || "无法启动会话。", "error");
-          welcomeInput.placeholder = "输入消息";
-          welcomeInput.disabled = false;
-        })
-        .finally(function() {
-          welcomeInput.placeholder = "输入消息";
-          welcomeInput.disabled = false;
-        });
-      }
-
-      export function createSessionFromInput(value, inputBox, welcomeInput) {
-        var mode = state.chatMode || "managed";
-        var defaultCwd = getEffectiveCwd();
-        var preferredTool = getPreferredTool();
-        var modelPref = getChatModelForProvider(preferredTool);
-        fetch("/api/commands", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "same-origin",
-          body: JSON.stringify(withTerminalDimensions({
-            command: preferredTool,
-            cwd: defaultCwd,
-            mode: mode,
-            initialInput: value || undefined,
-            model: modelPref || undefined,
-            thinkingEffort: state.chatThinking || undefined
-          }))
-        })
-        .then(function(res) { return res.json(); })
-        .then(function(data) {
-          if (data.error) {
-            showToast(data.error, "error");
-            return null;
-          }
-          if (inputBox) inputBox.value = "";
-          if (welcomeInput) welcomeInput.value = "";
-          return activateSession(data);
-        })
-        .catch(function(error) {
-          showToast((error && error.message) || "无法启动会话。", "error");
-        });
-      }
-
       export function handleResumeAction(actionButton) {
         actionButton.disabled = true;
         resumeSessionFromList(actionButton.dataset.sessionId)
@@ -2957,8 +2860,9 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           });
       }
 
-      export function resumeCodexHistorySession(threadId, cwd) {
-        return fetch("/api/codex-sessions/" + encodeURIComponent(threadId) + "/resume", {
+      /** Codex/Claude share one resume endpoint shape; other providers use resumeHistoryFromList. */
+      function resumeProviderHistorySession(provider, providerSessionId, cwd) {
+        return fetch("/api/" + provider + "-sessions/" + encodeURIComponent(providerSessionId) + "/resume", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
@@ -2979,6 +2883,10 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           showToast((error && error.message) || "无法恢复会话。", "error");
           return null;
         });
+      }
+
+      export function resumeCodexHistorySession(threadId, cwd) {
+        return resumeProviderHistorySession("codex", threadId, cwd);
       }
 
       export function handleDeleteCodexHistoryAction(actionButton) {
@@ -3009,27 +2917,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
       }
 
       export function resumeClaudeHistorySession(claudeSessionId, cwd) {
-        return fetch("/api/claude-sessions/" + encodeURIComponent(claudeSessionId) + "/resume", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "same-origin",
-          body: JSON.stringify(withTerminalDimensions({
-            mode: state.chatMode || (state.config && state.config.defaultMode) || "default",
-            cwd: cwd
-          }))
-        })
-        .then(function(res) { return res.json(); })
-        .then(function(data) {
-          if (data.error) {
-            showToast(data.error, "error");
-            return null;
-          }
-          return data;
-        })
-        .catch(function(error) {
-          showToast((error && error.message) || "无法恢复会话。", "error");
-          return null;
-        });
+        return resumeProviderHistorySession("claude", claudeSessionId, cwd);
       }
 
       /** DOM-free history resume port used by React shell actions. */
@@ -3127,11 +3015,6 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         inputPanel.style.removeProperty('--keyboard-offset');
       }
 
-      function resetInputPanelViewportSpacing() {
-        var inputPanel = document.querySelector('.input-panel') as HTMLElement | null;
-        if (!inputPanel) return;
-        inputPanel.style.removeProperty('--keyboard-offset');
-      }
 
       function restoreInputBoxViewport(inputBox) {
         if (!inputBox) return;
@@ -3171,7 +3054,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
 
       export function handleInputBoxBlur(event) {
         var blurredEl = event && event.target ? event.target : document.getElementById('input-box');
-        resetInputPanelViewportSpacing();
+        updateInputPanelViewportSpacing();
         // A non-empty draft must not collapse to the compact one-line state when
         // its wrapped content needs more room. Re-measure immediately and again
         // while Android/iOS keyboard dismissal changes the available width.

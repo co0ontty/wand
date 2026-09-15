@@ -3,24 +3,15 @@ import type {
   RestartOverlayRepository,
   RestartOverlayRepositoryOptions,
 } from "./types";
+import { isRecord, stringValue } from "../json-utils";
 
 type FetchLike = typeof fetch;
-type JsonRecord = Record<string, unknown>;
-
-function isRecord(value: unknown): value is JsonRecord {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-function text(value: unknown): string {
-  return typeof value === "string" ? value : "";
-}
-
 export function normalizeRestartOverlayConfig(value: unknown): RestartOverlayConfig {
   const config = isRecord(value) ? value : {};
   return {
-    serverInstanceId: text(config.serverInstanceId),
-    packageVersion: text(config.packageVersion),
-    currentVersion: text(config.currentVersion),
+    serverInstanceId: stringValue(config.serverInstanceId),
+    packageVersion: stringValue(config.packageVersion),
+    currentVersion: stringValue(config.currentVersion),
   };
 }
 
@@ -55,7 +46,7 @@ export class HttpRestartOverlayRepository implements RestartOverlayRepository {
     const record = isRecord(value) ? value : {};
     if (!response.ok || typeof record.error === "string") {
       throw new RestartOverlayRepositoryError(
-        text(record.error) || `服务尚未就绪（HTTP ${response.status}）。`,
+        stringValue(record.error) || `服务尚未就绪（HTTP ${response.status}）。`,
         response.status,
       );
     }

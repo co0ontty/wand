@@ -12,6 +12,7 @@ import type {
   WorkspaceWorktreeReview,
   WorkspacesRepository,
 } from "./types";
+import { describeError } from "../errors";
 
 interface WorkspaceWorktreeDialogProps {
   open: boolean;
@@ -30,11 +31,6 @@ const STATE_META: Record<WorkspaceWorktreeReview["state"], { label: string; tone
 };
 
 
-
-function presentError(error: unknown, fallback: string): string {
-  if (!(error instanceof Error) || !error.message || error.message === "Failed to fetch") return fallback;
-  return error.message;
-}
 
 function WorktreeBubble({
   worktree,
@@ -101,7 +97,7 @@ export function WorkspaceWorktreeDialog({
         if (!abort.signal.aborted) setOverview(result);
       })
       .catch((loadError) => {
-        if (!abort.signal.aborted) setError(presentError(loadError, "无法读取项目 Worktree。"));
+        if (!abort.signal.aborted) setError(describeError(loadError, "无法读取项目 Worktree。"));
       })
       .finally(() => {
         if (!abort.signal.aborted) setLoading(false);
@@ -138,7 +134,7 @@ export function WorkspaceWorktreeDialog({
       await onStartAgent(prompt);
       onDismiss();
     } catch (startError) {
-      setError(presentError(startError, "无法启动 Worktree 合并 Agent。"));
+      setError(describeError(startError, "无法启动 Worktree 合并 Agent。"));
     } finally {
       setSubmitting(false);
     }

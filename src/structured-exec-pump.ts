@@ -5,6 +5,7 @@ import {
   type StructuredExecHost,
   type StructuredExecProcess,
 } from "./structured-exec-host.js";
+import { signalNameFromNumber } from "./signal-utils.js";
 import type {
   StructuredRunnerExecution,
   StructuredRunnerObserver,
@@ -184,17 +185,6 @@ function wireRemoteHandle(
     else onStderr(event.data);
   });
   handle.onExit((event) => {
-    finish(event.exitCode, numericToSignalName(event.signal));
+    finish(event.exitCode, signalNameFromNumber(event.signal));
   });
-}
-
-function numericToSignalName(signal: number | null): NodeJS.Signals | null {
-  if (signal === null || signal === 0) return null;
-  const names: Record<number, NodeJS.Signals> = {
-    1: "SIGHUP", 2: "SIGINT", 3: "SIGQUIT", 4: "SIGILL", 5: "SIGTRAP", 6: "SIGABRT",
-    7: "SIGBUS", 8: "SIGFPE", 9: "SIGKILL", 10: "SIGUSR1", 11: "SIGSEGV", 12: "SIGUSR2",
-    13: "SIGPIPE", 14: "SIGALRM", 15: "SIGTERM", 17: "SIGCHLD", 18: "SIGCONT",
-    19: "SIGSTOP", 20: "SIGTSTP",
-  };
-  return names[signal] ?? ("SIGTERM" satisfies NodeJS.Signals);
 }

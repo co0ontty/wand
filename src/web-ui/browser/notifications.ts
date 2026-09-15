@@ -5,7 +5,7 @@ import { persistSelectedId } from "./chat-scroll";
 import { setFilePanelOpen, isMobileLayout } from "./file-browser";
 import { render } from "./render";
 import { selectSession, closeSessionsDrawer } from "./session-engine";
-import { getLastAssistantSummary } from "./session-ui";
+import "./session-ui";
 import { openReactLegacyDialog, showReactLegacyToast } from "../react/legacy-overlays";
 import {
   restartOverlayController,
@@ -270,9 +270,8 @@ export function showNotificationBubble(opts: any) {
   }
 
   // Auto-dismiss
-  var timer: any = null;
   if (duration > 0) {
-    timer = setTimeout(function() { dismissNotification(id); }, duration);
+    setTimeout(function() { dismissNotification(id); }, duration);
   }
 
   return {
@@ -724,10 +723,6 @@ function playNotificationSound() {
  * Returns true if playback was initiated successfully.
  * Used by the test function to always attempt playback.
  */
-export function tryPlayNotificationSound() {
-  return _doPlaySound();
-}
-
 function _doPlaySound() {
   try {
     var AudioCtx = (window as any).AudioContext || (window as any).webkitAudioContext;
@@ -928,31 +923,6 @@ function performRestartCard(btn: HTMLButtonElement, labelEl: HTMLElement | null,
 /**
  * Call POST /api/restart and show the restart overlay.
  */
-export function performRestart(btn?: HTMLButtonElement | null, msgEl?: HTMLElement | null) {
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = "正在重启…";
-  }
-  if (msgEl) {
-    msgEl.textContent = "服务正在重启…";
-    msgEl.style.color = "var(--text-secondary)";
-  }
-
-  fetch("/api/restart", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "same-origin"
-  })
-  .then(function(res) { return res.json(); })
-  .then(function() {
-    showRestartOverlay();
-  })
-  .catch(function() {
-    // Network error likely means server already shut down — show overlay anyway
-    showRestartOverlay();
-  });
-}
-
 /**
  * Full-screen overlay shown during server restart or detached update.
  * An update only completes after both the process instance and package version change.

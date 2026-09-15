@@ -32,7 +32,7 @@ export const codeEditorStyles = String.raw`
   border-radius: 6px 6px 0 0;
   background: transparent;
   color: var(--text-secondary, #555);
-  font-size: 0.8125rem;
+  font-size: 11.375px;
   cursor: pointer;
   white-space: nowrap;
   transition: background 0.12s, color 0.12s;
@@ -74,7 +74,7 @@ export const codeEditorStyles = String.raw`
   padding: 6px 12px;
   background: var(--bg-primary, #fff);
   border-bottom: 1px solid var(--border-subtle, #e5e7eb);
-  font-size: 0.8125rem;
+  font-size: 11.375px;
   color: var(--text-secondary, #555);
   min-height: 32px;
 }
@@ -85,7 +85,7 @@ export const codeEditorStyles = String.raw`
   color: var(--text-primary, #111);
   border-radius: 6px;
   padding: 3px 10px;
-  font-size: 0.8125rem;
+  font-size: 11.375px;
   cursor: pointer;
 }
 .wand-code-editor-toolbar button.wand-code-editor-btn:hover:not(:disabled) { background: var(--bg-tertiary, #eee); }
@@ -97,7 +97,7 @@ export const codeEditorStyles = String.raw`
 }
 .wand-code-editor-dirty-mark {
   color: var(--accent, #2563eb);
-  font-size: 0.75rem;
+  font-size: 10.5px;
 }
 
 .wand-code-editor-body {
@@ -176,7 +176,7 @@ export const codeEditorStyles = String.raw`
   align-items: center;
   justify-content: center;
   color: var(--text-muted, #999);
-  font-size: 0.875rem;
+  font-size: 12.25px;
   padding: 24px;
   text-align: center;
 }
@@ -186,6 +186,6 @@ export const codeEditorStyles = String.raw`
   padding: 6px 12px;
   background: #fdecea;
   color: #c0392b;
-  font-size: 0.8125rem;
+  font-size: 11.375px;
 }
 `;

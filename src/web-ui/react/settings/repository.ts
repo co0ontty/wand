@@ -19,8 +19,7 @@ import type {
   SettingsSnapshot,
   SettingsSystemAi,
 } from "./types";
-
-type JsonRecord = Record<string, unknown>;
+import { finiteNumber, record, stringValue, type JsonRecord } from "../json-utils";
 
 export interface SettingsRuntimeAdapter {
   notificationPreferencesChanged(preferences: SettingsNotificationPreferences): void;
@@ -62,26 +61,12 @@ const EMPTY_SYSTEM_AI: SettingsSystemAi = {
   source: "custom",
 };
 
-function record(value: unknown): JsonRecord {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as JsonRecord
-    : {};
-}
-
-function stringValue(value: unknown, fallback = ""): string {
-  return typeof value === "string" ? value : fallback;
-}
-
 function nullableString(value: unknown): string | null {
   return typeof value === "string" && value ? value : null;
 }
 
 function booleanValue(value: unknown, fallback = false): boolean {
   return typeof value === "boolean" ? value : fallback;
-}
-
-function numberValue(value: unknown, fallback: number): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
 function normalizeAsset(value: unknown): SettingsDistributionAsset | null {
@@ -93,7 +78,7 @@ function normalizeAsset(value: unknown): SettingsDistributionAsset | null {
     fileName,
     downloadUrl,
     version: nullableString(input.version),
-    size: numberValue(input.size, 0),
+    size: finiteNumber(input.size, 0),
     updatedAt: nullableString(input.updatedAt),
     releaseNotes: stringValue(input.releaseNotes) || undefined,
   };
@@ -176,7 +161,7 @@ function normalizeConfig(value: unknown): SettingsConfig {
   const pi = stringValue(defaults.pi, stringValue(input.defaultPiModel));
   return {
     host: stringValue(input.host, "127.0.0.1"),
-    port: numberValue(input.port, 3000),
+    port: finiteNumber(input.port, 3000),
     https: input.https === true,
     defaultMode,
     defaultCwd: stringValue(input.defaultCwd),

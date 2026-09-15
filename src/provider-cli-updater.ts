@@ -3,7 +3,7 @@ import { realpathSync } from "node:fs";
 import process from "node:process";
 import { promisify } from "node:util";
 
-import { buildChildEnv } from "./env-utils.js";
+import { resolveChildEnv } from "./env-utils.js";
 import { getErrorMessage } from "./error-utils.js";
 import { whichSync } from "./path-repair.js";
 import { compareSemver, extractSemver } from "./version-utils.js";
@@ -107,10 +107,6 @@ export interface ProviderCliUpdaterOptions {
   onLog?: (line: string) => void;
 }
 
-function childEnv(options: ProviderCliUpdaterOptions): NodeJS.ProcessEnv {
-  return options.env ?? buildChildEnv(options.inheritEnv !== false);
-}
-
 async function runCommand(
   command: string,
   args: string[],
@@ -119,7 +115,7 @@ async function runCommand(
 ): Promise<CommandResult> {
   const { stdout, stderr } = await execFileAsync(command, args, {
     timeout,
-    env: childEnv(options),
+    env: resolveChildEnv(options),
     maxBuffer: MAX_BUFFER,
   });
   return { stdout: String(stdout ?? ""), stderr: String(stderr ?? "") };
@@ -155,7 +151,7 @@ async function readInstalledVersion(spec: ProviderCliSpec, options: ProviderCliU
   version: string | null;
   error?: string;
 }> {
-  const env = childEnv(options);
+  const env = resolveChildEnv(options);
   const executable = whichSync(spec.command, { env, timeoutMs: options.versionTimeoutMs ?? VERSION_TIMEOUT_MS });
   if (!executable) return { executable: null, version: null };
   try {

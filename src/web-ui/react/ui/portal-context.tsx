@@ -1,4 +1,5 @@
 import { createContext, type ReactNode, useContext } from "react";
+import * as React from "react";
 
 /** OverlayHost and shell-owned surfaces (task board dialogs/selects) share this root. */
 export const REACT_UI_PORTALS_ID = "wand-react-ui-portals";

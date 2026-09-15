@@ -281,3 +281,45 @@ test("activity folds stay consecutive and split when prose arrives", () => {
     "summarizeActivityItems",
   ]);
 });
+
+test("embedded passthrough terminal pins its width so fit cannot shrink it", () => {
+  // 直通输入模式下原生壳把 .terminal-scroll-wrap 从 absolute 改成 relative，好让
+  // .xterm-helpers 里的透明输入层有尺寸参照。但 .terminal-container.active 是 row
+  // 方向的 flex 容器：wrap 落回文档流后是 flex-grow: 0 的收缩型 flex item，宽度会被
+  // xterm 自身网格宽度反向决定，而 FitAddon 又按这个宽度反算列数 —— 自反馈会让终端
+  // 每 fit 一次就更窄一点（表现为右侧铺不满并逐渐缩小）。两处都必须钉死宽度。
+  const rulePattern = /\.is-wand-terminal-passthrough\s+\.terminal-scroll-wrap\s*\{[^}]*\}/;
+  for (const file of ["ios/Wand/WebContainerView.swift", "src/web-ui/content/styles.css"]) {
+    const rule = source(file).match(rulePattern);
+    assert.ok(rule, `${file} must keep the passthrough .terminal-scroll-wrap rule`);
+    assert.match(rule[0], /width:\s*100%/, `${file} must pin the passthrough wrap width`);
+    assert.match(rule[0], /min-width:\s*0/, `${file} must let the passthrough wrap shrink`);
+  }
+});
+
+test("terminal fit geometry ignores the unused overview ruler reserve", () => {
+  // @xterm/addon-fit 只要 scrollback > 0 就固定预留 14px 给 overview ruler，而 Wand
+  // 从未启用 overviewRuler（ruler 画布根本不会创建）。终端 fit 必须走
+  // terminal-fit.ts 的 proposeTerminalDimensions，把这条白扣的宽度补回来。
+  includesAll("src/web-ui/browser/terminal-fit.ts", [
+    "proposeTerminalDimensions",
+    ".xterm-decoration-overview-ruler",
+  ]);
+  for (const file of [
+    "src/web-ui/browser/terminal.ts",
+    "src/web-ui/browser/viewport.ts",
+    "src/web-ui/browser/terminal-pool.ts",
+    "src/web-ui/browser/file-browser.ts",
+  ]) {
+    const contents = source(file);
+    assert.ok(
+      contents.includes("fitTerminalToContainer"),
+      `${file} must fit terminals through terminal-fit.ts`,
+    );
+    assert.doesNotMatch(
+      contents,
+      /\b(?:state\.)?terminalFitAddon\.fit\(\)|fitAddon\.fit\(\)/,
+      `${file} must not call FitAddon.fit() directly (it reserves 14px for an unused ruler)`,
+    );
+  }
+});

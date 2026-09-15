@@ -7,6 +7,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import * as React from "react";
 import { WandBadge, WandButton, WandDialogSurface, WandIcon } from "../ui";
 import { settingsStore } from "./controller";
 import {
@@ -34,6 +35,7 @@ import type {
   SettingsSystemAi,
   SettingsWebUpdate,
 } from "./types";
+import { failureMessage } from "../errors";
 
 export interface SettingsTabProps {
   snapshot: SettingsSnapshot;
@@ -45,10 +47,6 @@ export interface SettingsTabProps {
 }
 
 type StatusTone = "info" | "success" | "warning" | "error";
-
-function messageOf(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
-}
 
 function formatBytes(size: number | null): string {
   if (size == null || !Number.isFinite(size)) return "-";
@@ -217,7 +215,7 @@ export function AboutSettingsTab({ snapshot, repository, refresh, toast, showRes
       await task();
       if (success) { setStatus(success); setTone("success"); }
     } catch (cause) {
-      setStatus(messageOf(cause, "操作失败。"));
+      setStatus(failureMessage(cause, "操作失败。"));
       setTone("error");
     } finally {
       setPending("");
@@ -364,7 +362,7 @@ export function GithubSettingsTab({ snapshot, repository, refresh, setSnapshot, 
       toast("GitHub 已连接", "success");
       await refresh();
     } catch (cause) {
-      setStatus(messageOf(cause, "连接 GitHub 失败。"));
+      setStatus(failureMessage(cause, "连接 GitHub 失败。"));
       setTone("error");
     } finally {
       setPending("");
@@ -381,7 +379,7 @@ export function GithubSettingsTab({ snapshot, repository, refresh, setSnapshot, 
       setTone("success");
       toast("GitHub 已断开", "success");
     } catch (cause) {
-      setStatus(messageOf(cause, "断开 GitHub 失败。"));
+      setStatus(failureMessage(cause, "断开 GitHub 失败。"));
       setTone("error");
     } finally {
       setPending("");
@@ -464,7 +462,7 @@ function EnvironmentDialog({ repository }: { repository: SettingsRepository }) {
     try {
       setPreview(await repository.execute({ type: "environment.load", reveal }));
     } catch (cause) {
-      setError(messageOf(cause, "环境变量加载失败。"));
+      setError(failureMessage(cause, "环境变量加载失败。"));
     } finally {
       setLoading(false);
     }
@@ -559,7 +557,7 @@ export function GeneralSettingsTab({ snapshot, repository, refresh, toast }: Set
       await refresh();
       toast("基本配置已保存", "success");
     } catch (cause) {
-      setStatus(messageOf(cause, "保存基本配置失败。"));
+      setStatus(failureMessage(cause, "保存基本配置失败。"));
       setTone("error");
     } finally {
       setPending(false);
@@ -895,7 +893,7 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toas
       setStatus("模型列表已刷新。" + (models.claudeVersion ? ` Claude ${models.claudeVersion}` : ""));
       setTone("success");
     } catch (cause) {
-      setStatus(messageOf(cause, "刷新模型列表失败。"));
+      setStatus(failureMessage(cause, "刷新模型列表失败。"));
       setTone("error");
     } finally {
       setPending("");
@@ -912,7 +910,7 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toas
       setTone("success");
       await refresh();
     } catch (cause) {
-      setStatus(messageOf(cause, "没有找到可导入的 CLI API 配置。"));
+      setStatus(failureMessage(cause, "没有找到可导入的 CLI API 配置。"));
       setTone("error");
     } finally {
       setPending("");
@@ -950,7 +948,7 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toas
     } catch (cause) {
       setRouteTests((current) => ({
         ...current,
-        [route.id]: { tone: "error", message: messageOf(cause, `${route.model} 调用失败。`) },
+        [route.id]: { tone: "error", message: failureMessage(cause, `${route.model} 调用失败。`) },
       }));
     } finally {
       setPending("");
@@ -1002,7 +1000,7 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toas
       await refresh();
       toast("AI 与模型配置已保存", "success");
     } catch (cause) {
-      setStatus(messageOf(cause, "保存 AI 配置失败。"));
+      setStatus(failureMessage(cause, "保存 AI 配置失败。"));
       setTone("error");
     } finally {
       setPending("");
@@ -1214,7 +1212,7 @@ export function NotificationSettingsTab(_props: SettingsTabProps) {
       setSnapshot((current) => current ? { ...current, notifications: next } : current);
       if (preview) await repository.execute({ type: "notification.sound.preview" });
     } catch (cause) {
-      setStatus(messageOf(cause, "保存通知偏好失败。"));
+      setStatus(failureMessage(cause, "保存通知偏好失败。"));
       setTone("error");
     } finally {
       setPending("");
@@ -1228,7 +1226,7 @@ export function NotificationSettingsTab(_props: SettingsTabProps) {
       setStatus(await task());
       setTone("success");
     } catch (cause) {
-      setStatus(messageOf(cause, "通知操作失败。"));
+      setStatus(failureMessage(cause, "通知操作失败。"));
       setTone("error");
     } finally {
       setPending("");
@@ -1398,7 +1396,7 @@ export function SecuritySettingsTab(_props: SettingsTabProps) {
         }, 650);
       }
     } catch (cause) {
-      setStatus(messageOf(cause, "修改密码失败。"));
+      setStatus(failureMessage(cause, "修改密码失败。"));
       setTone("error");
     } finally {
       setPending("");
@@ -1421,7 +1419,7 @@ export function SecuritySettingsTab(_props: SettingsTabProps) {
       await refresh();
       toast("SSL 证书已上传", "success");
     } catch (cause) {
-      setStatus(messageOf(cause, "上传证书失败。"));
+      setStatus(failureMessage(cause, "上传证书失败。"));
       setTone("error");
     } finally {
       setPending("");
@@ -1515,7 +1513,7 @@ export function DisplaySettingsTab({ snapshot, repository, refresh, toast }: Set
       await refresh();
       toast("显示设置已保存", "success");
     } catch (cause) {
-      setStatus(messageOf(cause, "保存显示设置失败。"));
+      setStatus(failureMessage(cause, "保存显示设置失败。"));
       setTone("error");
     } finally {
       setPending(false);

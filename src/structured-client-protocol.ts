@@ -1,3 +1,4 @@
+import { asRecord } from "./structured-content.js";
 import type {
   ContentBlock,
   ConversationTurn,
@@ -7,12 +8,6 @@ import type {
 } from "./types.js";
 
 export const WAND_PROTOCOL_VERSION = 2;
-
-function record(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
-}
 
 function text(value: unknown): string | undefined {
   return typeof value === "string" && value ? value : undefined;
@@ -33,10 +28,10 @@ function questionsFromInput(input: Record<string, unknown>): StructuredQuestion[
   const rawQuestions = arrayValue(input.questions) ?? [];
   const questions: StructuredQuestion[] = [];
   for (const rawQuestion of rawQuestions) {
-    const question = record(rawQuestion);
+    const question = asRecord(rawQuestion);
     if (!question) continue;
     const options = (arrayValue(question.options) ?? []).flatMap((rawOption, index) => {
-      const option = record(rawOption);
+      const option = asRecord(rawOption);
       if (!option) return [];
       return [{
         label: text(option.label) ?? `选项 ${index + 1}`,
@@ -80,7 +75,7 @@ function tasksFromSegment(messages: ConversationTurn[], start: number, end: numb
   if (latestTodoWrite) {
     const todos = arrayValue(latestTodoWrite.input.todos) ?? arrayValue(latestTodoWrite.input.plan) ?? [];
     const items = todos.flatMap((rawTodo, index): StructuredTaskItem[] => {
-      const todo = record(rawTodo);
+      const todo = asRecord(rawTodo);
       if (!todo) return [];
       return [{
         id: text(todo.id) ?? String(index + 1),

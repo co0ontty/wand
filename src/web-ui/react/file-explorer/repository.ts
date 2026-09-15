@@ -6,30 +6,9 @@ import type {
   FileExplorerRepository,
   FileExplorerSearchResult,
 } from "./types";
+import { finiteNumber, isRecord, readJson, stringValue, type JsonRecord } from "../json-utils";
 
 type FetchLike = typeof fetch;
-type JsonRecord = Record<string, unknown>;
-
-function isRecord(value: unknown): value is JsonRecord {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-function stringValue(value: unknown, fallback = ""): string {
-  return typeof value === "string" ? value : fallback;
-}
-
-function finiteNumber(value: unknown, fallback = 0): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
-
-async function readJson(response: Response): Promise<JsonRecord> {
-  try {
-    const value: unknown = await response.json();
-    return isRecord(value) ? value : {};
-  } catch {
-    return {};
-  }
-}
 
 function failureFromResponse(
   response: Response,

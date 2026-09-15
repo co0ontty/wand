@@ -247,8 +247,9 @@ test("tasks persist and validate the selected CLI tool", async () => {  await wi
         title: "选择工具",
         agent: { provider: "codex", model: "gpt-5", thinkingEffort: "deep" },
       }),
-    }).then(jsonOf<{ id: string; agent: { provider: string; model: string; thinkingEffort: string } | null }>);
-    assert.deepEqual(created.agent, { provider: "codex", model: "gpt-5", thinkingEffort: "deep" });
+    }).then(jsonOf<{ id: string; agent: { provider: string; model: string; thinkingEffort: string; mode: string } | null }>);
+    // 老客户端不传 mode：服务端按 provider 支持的模式兼容落地（codex 只有 full-access）。
+    assert.deepEqual(created.agent, { provider: "codex", model: "gpt-5", thinkingEffort: "deep", mode: "full-access" });
 
     // 未指定工具的新任务保持 null，前端据此显示「未指定 CLI 工具」。
     const bare = await fetch(`${url}/api/wand-tasks`, {
@@ -279,6 +280,30 @@ test("tasks persist and validate the selected CLI tool", async () => {  await wi
       body: JSON.stringify({ agent: { provider: "claude", model: "x", thinkingEffort: "insane" } }),
     });
     assert.equal(invalidEffort.status, 400);
+
+    const invalidMode = await fetch(`${url}/api/wand-tasks/${created.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agent: { provider: "claude", model: "x", thinkingEffort: "off", mode: "yolo" } }),
+    });
+    assert.equal(invalidMode.status, 400);
+    assert.match((await invalidMode.json() as { error: string }).error, /工作模式/);
+
+    // 显式指定的工作模式必须往返保存。
+    const withMode = await fetch(`${url}/api/wand-tasks/${created.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agent: { provider: "claude", model: "default", thinkingEffort: "off", mode: "managed" } }),
+    }).then(jsonOf<{ agent: { mode: string } }>);
+    assert.equal(withMode.agent.mode, "managed");
+
+    // Codex 只收 full-access：传 default 也要夹到有效值，否则会以只读沙箱跑任务。
+    const clamped = await fetch(`${url}/api/wand-tasks/${created.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agent: { provider: "codex", model: "gpt-5", thinkingEffort: "off", mode: "default" } }),
+    }).then(jsonOf<{ agent: { mode: string } }>);
+    assert.equal(clamped.agent.mode, "full-access");
   });
 });
 
@@ -302,10 +327,12 @@ test("dispatching an issue creates a structured session in the issue workspace a
       body: JSON.stringify({}),
     });
     assert.equal(dispatched.status, 202);
-    const payload = await dispatched.json() as { ok: boolean; session: { id: string; provider: string; cwd: string } };
+    const payload = await dispatched.json() as { ok: boolean; session: { id: string; provider: string; cwd: string; mode: string } };
     assert.equal(payload.ok, true);
     assert.equal(payload.session.provider, "claude");
     assert.equal(payload.session.cwd, storage.directory());
+    // agent 未指定 mode 时落到标准模式，不再是旧的 "agent"。
+    assert.equal(payload.session.mode, "default");
     assert.ok(registry.get(payload.session.id));
 
     const again = await fetch(`${url}/api/wand-tasks/${issue.id}/dispatch`, {
@@ -421,18 +448,18 @@ test("marking a board task done keeps it in done instead of archiving", async ()
 test("task board remembers last selected agent defaults", async () => {
   await withHarness(async ({ url }) => {
     const initial = await fetch(`${url}/api/wand-task-agent-defaults`)
-      .then(jsonOf<{ provider: string; model: string; thinkingEffort: string }>);
-    assert.deepEqual(initial, { provider: "claude", model: "default", thinkingEffort: "off" });
+      .then(jsonOf<{ provider: string; model: string; thinkingEffort: string; mode: string }>);
+    assert.deepEqual(initial, { provider: "claude", model: "default", thinkingEffort: "off", mode: "default" });
 
     const saved = await fetch(`${url}/api/wand-task-agent-defaults`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ provider: "pi", model: "gpt-5", thinkingEffort: "deep" }),
-    }).then(jsonOf<{ provider: string; model: string; thinkingEffort: string }>);
-    assert.deepEqual(saved, { provider: "pi", model: "gpt-5", thinkingEffort: "deep" });
+      body: JSON.stringify({ provider: "pi", model: "gpt-5", thinkingEffort: "deep", mode: "full-access" }),
+    }).then(jsonOf<{ provider: string; model: string; thinkingEffort: string; mode: string }>);
+    assert.deepEqual(saved, { provider: "pi", model: "gpt-5", thinkingEffort: "deep", mode: "full-access" });
 
     const loaded = await fetch(`${url}/api/wand-task-agent-defaults`)
-      .then(jsonOf<{ provider: string; model: string; thinkingEffort: string }>);
+      .then(jsonOf<{ provider: string; model: string; thinkingEffort: string; mode: string }>);
     assert.deepEqual(loaded, saved);
 
     const created = await fetch(`${url}/api/wand-tasks`, {
@@ -447,15 +474,25 @@ test("task board remembers last selected agent defaults", async () => {
       .then(jsonOf<{ provider: string }>);
     assert.equal(afterCreate.provider, "codex");
 
+    // 显式指定工作模式会写回任务与“上次选择”。
     await fetch(`${url}/api/wand-tasks/${created.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ agent: { provider: "grok", model: "grok-4", thinkingEffort: "standard" } }),
+      body: JSON.stringify({ agent: { provider: "grok", model: "grok-4", thinkingEffort: "standard", mode: "managed" } }),
     });
     const afterPatch = await fetch(`${url}/api/wand-task-agent-defaults`)
-      .then(jsonOf<{ provider: string; thinkingEffort: string }>);
+      .then(jsonOf<{ provider: string; thinkingEffort: string; mode: string }>);
     assert.equal(afterPatch.provider, "grok");
     assert.equal(afterPatch.thinkingEffort, "standard");
+    assert.equal(afterPatch.mode, "managed");
+
+    // 老客户端 PATCH 不带 mode：要沿用任务当前值，不能复位成标准。
+    const withoutMode = await fetch(`${url}/api/wand-tasks/${created.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agent: { provider: "grok", model: "grok-4", thinkingEffort: "standard" } }),
+    }).then(jsonOf<{ agent: { mode: string } }>);
+    assert.equal(withoutMode.agent.mode, "managed");
 
     const invalid = await fetch(`${url}/api/wand-task-agent-defaults`, {
       method: "PUT",

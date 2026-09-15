@@ -1,19 +1,19 @@
-import { state, readStoredBoolean, writeStoredBoolean, CHAT_EXPAND_STATE_STORAGE_KEY } from "./state";
-import { t, getActiveLang, iconSvg, I18N_DEFAULT_LANG } from "./i18n";
-import { escapeHtml, formatElapsedShort, isImagePath, refreshTailMarqueePaths, renderTailMarqueePath } from "./utils";
-import { applyExpandedState, applyPersistedExpandState, bindChatScrollListener, buildExpandKey, clearChatUnread, getElementExpandKey, getMessageKey, getPersistedExpandState, isChatNearBottom, observeLoadMoreSentinel, persistElementExpandState, refreshChatUnreadDivider, scrollChatToBottom, setPersistedExpandState, updateChatUnreadBubble } from "./chat-scroll";
-import { copyTextSafely, showToastIfPossible, openFilePreview, appendToComposer, isMobileLayout } from "./file-browser";
-import { buildMessagesForRender, focusInputBox, getSelectedSession } from "./input";
-import { showToast, syncSessionProgressToNative, wandConfirm } from "./notifications";
-import { render } from "./render";
-import { copyToClipboard, getPreferredMessages, isRecoverableToolError, selectSession, shouldRequestChatFormat } from "./session-engine";
-import { renderStructuredStatusBar, updateRunningIndicators } from "./utils";
+import { state } from "./state";
+import { t, getActiveLang, iconSvg } from "./i18n";
+import { escapeHtml, isImagePath, refreshTailMarqueePaths, renderTailMarqueePath } from "./utils";
+import { applyPersistedExpandState, bindChatScrollListener, buildExpandKey, clearChatUnread, getMessageKey, getPersistedExpandState, isChatNearBottom, observeLoadMoreSentinel, persistElementExpandState, refreshChatUnreadDivider, setPersistedExpandState, updateChatUnreadBubble } from "./chat-scroll";
+import "./file-browser";
+import { buildMessagesForRender } from "./input";
+import { syncSessionProgressToNative } from "./notifications";
+import "./render";
+import { copyToClipboard, getPreferredMessages, isRecoverableToolError } from "./session-engine";
+import { renderStructuredStatusBar } from "./utils";
 import { getCardDefault, snapCollapsedSubagentPanelsToBottom } from "./events";
 import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
 import { shouldExtractPtySystemInfo } from "./pty-system-info";
 import { getToolDisplayName, getToolIcon } from "./tool-identity";
 import { localFilePreviewHref, localHttpPreviewHref } from "../react/local-preview/controller";
-import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
+import "./local-preview-adapter";
 
 
 
@@ -1387,8 +1387,6 @@ import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
         ];
 
         // Find the most recent thinking line (usually appears after user input)
-        var lastThinkingLine = null;
-        var userCmdIndex = -1;
 
         // Separate different types of content
         var promptLines = [];  // Try "..." suggestions
@@ -2328,12 +2326,6 @@ import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
         return text.length > max ? "…" + text.slice(-(max - 1)) : text;
       }
 
-      function fileNameOf(path) {
-        var text = String(path || "");
-        var idx = text.lastIndexOf("/");
-        return idx >= 0 ? text.slice(idx + 1) : text;
-      }
-
       function activityKindOf(name) {
         var lower = String(name || "").toLowerCase();
         if (/read|inspect|view|open|list|load/.test(lower)) return "read";
@@ -2391,24 +2383,6 @@ import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
         var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
         if (!session) return false;
         return !!(session.structuredState && session.structuredState.inFlight) && session.status === "running";
-      }
-
-      // 当前消息尾部是否「悬而未决」：末尾是 thinking，或还没拿到 tool_result 的
-      // tool_use。尾部落到正文（text）就说明模型开始收敛作答，活动不再是运行中。
-      function isMessageActivityOpen(messageIndex) {
-        var msgs = state.currentMessages;
-        var msg = Array.isArray(msgs) ? msgs[messageIndex] : null;
-        if (!msg || !Array.isArray(msg.content)) return false;
-        var results = buildToolResultMap(msg.content);
-        for (var i = msg.content.length - 1; i >= 0; i--) {
-          var tail = msg.content[i];
-          if (!tail || !tail.type) continue;
-          if (tail.type === "text") return false;
-          if (tail.type === "thinking") return true;
-          if (tail.type === "tool_use") return !pickToolResultForDisplay(results, tail.id);
-          if (tail.type === "tool_result") return false;
-        }
-        return false;
       }
 
       function summarizeActivityRun(items, toolResults) {
@@ -2974,7 +2948,6 @@ import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
           }
         }
 
-        var resultDataAttr = escapeHtml(resultContent);
         var previewDataAttr = escapeHtml(preview);
         var fullResult = resultContent;
 
@@ -3056,7 +3029,6 @@ import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
 
         var isError = toolResult && toolResult.is_error;
         var exitCode = inputData.exitCode;
-        var hasResult = resultContent.length > 0;
 
         var statusDot = "";
         if (toolResult) {
@@ -3071,7 +3043,6 @@ import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
           statusDot = '<span class="term-status-dot term-running"></span>';
         }
 
-        var prompt = '<span class="term-prompt">$</span>';
         var cmdDisplay = escapeHtml(command);
 
         var outputLines = resultContent.split("\n");
@@ -3167,7 +3138,6 @@ import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
 
         var oldStr = inputData.old_string || "";
         var newStr = inputData.new_string || inputData.content || "";
-        var oldContent = inputData.old_content || "";
         var newContent = inputData.new_content || "";
         var unifiedDiff = inputData.unified_diff || inputData.diff || "";
         var changeKind = inputData.kind || "";
@@ -3175,7 +3145,6 @@ import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
         var isWrite = toolName === "Write" || toolName === "MultiEdit";
         var isError = toolResult && toolResult.is_error;
         var toolResultText = extractToolResultText(toolResult && toolResult.content);
-        var hasResult = !!(toolResultText && toolResultText.trim().length > 0);
 
         // Build side-by-side diff HTML (old | new columns)
         var leftCol = "";
@@ -4068,8 +4037,3 @@ import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
         return fallback || "Wand";
       }
 
-      export function normalizeTerminalOutput(value) {
-        return String(value || "")
-          .replace(/\r\r\n/g, "\r\n")
-          .replace(/\u0000/g, "");
-      }

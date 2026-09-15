@@ -3,6 +3,7 @@ node_modules
 dist
 .wand
 .tmp
+.tmp-probe/
 .codex
 output
 .playwright-cli
@@ -19,6 +20,8 @@ debug-*.mjs
 src/web-ui/embedded-assets.ts
 # 浏览器层 esbuild 打包产物（scripts/bundle-browser.js 生成），同理不入库
 src/web-ui/content/scripts.js
+# Tailwind v4 + Appica 编译产物（scripts/bundle-tailwind.js 生成），同理不入库
+src/web-ui/content/tailwind.css
 
 # IDE / 工具本地状态，不该入库
 .qoder/

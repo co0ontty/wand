@@ -8,21 +8,9 @@ import type {
   FilePreviewRepository,
   FilePreviewSaveOutcome,
 } from "./types";
+import { finiteNumber, isRecord, readJson, stringValue, type JsonRecord } from "../json-utils";
 
 type FetchLike = typeof fetch;
-type JsonRecord = Record<string, unknown>;
-
-function isRecord(value: unknown): value is JsonRecord {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-function stringValue(value: unknown, fallback = ""): string {
-  return typeof value === "string" ? value : fallback;
-}
-
-function finiteNumber(value: unknown, fallback = 0): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
 
 function previewKind(value: unknown): FilePreviewKind {
   switch (value) {
@@ -39,15 +27,6 @@ function previewKind(value: unknown): FilePreviewKind {
 
 function rawUrl(path: string, download = false): string {
   return `/api/file-raw?${download ? "download=1&" : ""}path=${encodeURIComponent(path)}`;
-}
-
-async function readJson(response: Response): Promise<JsonRecord> {
-  try {
-    const value: unknown = await response.json();
-    return isRecord(value) ? value : {};
-  } catch {
-    return {};
-  }
 }
 
 function failureFromResponse(

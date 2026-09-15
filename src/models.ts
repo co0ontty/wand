@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import Anthropic from "@anthropic-ai/sdk";
-import { buildChildEnv } from "./env-utils.js";
+import { resolveChildEnv } from "./env-utils.js";
 import { ClaudeModelAvailability, ClaudeModelInfo, ClaudeModelSource } from "./types.js";
 import { extractSemver } from "./version-utils.js";
 
@@ -211,10 +211,6 @@ function defaultCommandRunner(
     timeout: options.timeout,
     maxBuffer: 1024 * 1024,
   }).then(({ stdout, stderr }) => ({ stdout: String(stdout), stderr: String(stderr) }));
-}
-
-function resolveProbeEnv(options: ModelRefreshOptions): NodeJS.ProcessEnv {
-  return options.env ?? buildChildEnv(options.inheritEnv !== false);
 }
 
 function normalizeClaudeModelId(value: unknown): string | null {
@@ -876,7 +872,7 @@ async function discoverModelCache(
   previous: ModelCache,
 ): Promise<ModelCache> {
   const now = options.now?.() ?? new Date();
-  const env = resolveProbeEnv(options);
+  const env = resolveChildEnv(options);
   const runner = options.commandRunner ?? defaultCommandRunner;
   const [claudeVersionProbe, codexProbe, opencodeProbe, grokProbe, qoderProbe, piProbe, apiProbe] = await Promise.all([
     probeClaudeVersion(runner, env),

@@ -3,6 +3,7 @@ import {
   useEffect,
   useState,
 } from "react";
+import * as React from "react";
 
 import { httpNewSessionRepository } from "../new-session/repository";
 import { WandButton, WandDialogSurface } from "../ui";
@@ -11,6 +12,7 @@ import {
   WORKSPACE_AGENT_OPTIONS,
   WorkspaceAgentPicker,
 } from "./workspace-agent-picker";
+import { failureMessage } from "../errors";
 
 export { WORKSPACE_AGENT_OPTIONS, WORKSPACE_KIND_OPTIONS } from "./workspace-agent-picker";
 
@@ -20,11 +22,6 @@ export interface WorkspaceAgentDialogProps {
   initialKind?: WorkspaceSessionKind;
   onConfirm(target: WorkspaceSessionTarget, kind: WorkspaceSessionKind): void | Promise<void>;
   onDismiss(): void;
-}
-
-function presentError(error: unknown): string {
-  if (error instanceof Error && error.message) return error.message;
-  return "无法新建工作窗口，请确认对应 CLI 或 Shell 配置正确。";
 }
 
 /** Shared work-window picker for every task-level add entry. */
@@ -71,7 +68,7 @@ export function WorkspaceAgentDialog({
       await onConfirm(target, target === "shell" ? "pty" : kind);
       onDismiss();
     } catch (createError) {
-      setError(presentError(createError));
+      setError(failureMessage(createError, "无法新建工作窗口，请确认对应 CLI 或 Shell 配置正确。"));
     } finally {
       setSubmitting(false);
     }

@@ -67,7 +67,8 @@ export function ensureWorkspaceForCwd(
   });
 }
 
-function isGlobalWorkspaceRecord(workspace: Pick<Workspace, "kind" | "id">): boolean {
+/** 全局工作空间既可能标记 `kind`，也可能是旧的固定 id。 */
+export function isGlobalWorkspace(workspace: Pick<Workspace, "kind" | "id">): boolean {
   return workspace.kind === "global" || workspace.id === GLOBAL_WORKSPACE_ID;
 }
 
@@ -86,7 +87,7 @@ export function renameWorkspaceDirectory(
   const resolved = trimmed || path.basename(normalized) || normalized;
   storage.setSessionDirectoryName(normalized, trimmed || null);
   for (const workspace of storage.listWorkspaces()) {
-    if (isGlobalWorkspaceRecord(workspace)) continue;
+    if (isGlobalWorkspace(workspace)) continue;
     if (normalizeProjectCwd(workspace.cwd) !== normalized) continue;
     if (workspace.name === resolved) continue;
     storage.updateWorkspace(workspace.id, { name: resolved });
@@ -96,7 +97,7 @@ export function renameWorkspaceDirectory(
 
 /** 项目（workspaces.name）被直接改名后，把目录自定义名同步成同一个名字。 */
 export function syncDirectoryNameForWorkspace(storage: WandStorage, workspace: Workspace): void {
-  if (isGlobalWorkspaceRecord(workspace)) return;
+  if (isGlobalWorkspace(workspace)) return;
   const normalized = normalizeProjectCwd(workspace.cwd);
   const name = workspace.name.trim();
   if (!normalized || !name) return;

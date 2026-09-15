@@ -704,7 +704,8 @@ function hasLiveTerminalDaemon(configPath: string): boolean {
   return pid !== null && isPidAlive(pid);
 }
 
-function readServiceEntrypointForUpdate(scope: ServiceScope): string | null {
+/** 读取已安装服务 unit / plist 的入口命令；未安装或平台不支持时返回 null。 */
+export function readServiceEntrypoint(scope: ServiceScope): string | null {
   const servicePath = servicePathFor(scope);
   if (process.platform === "darwin") {
     const result = spawnSync(
@@ -734,7 +735,7 @@ function checkInstalledServiceEntrypointsForUpdate(): CommandResult {
     return { ok: false, message: "npm 全局 wand shim 不存在，已取消更新以保护当前服务。" };
   }
   for (const scope of scopes) {
-    const entrypoint = readServiceEntrypointForUpdate(scope);
+    const entrypoint = readServiceEntrypoint(scope);
     if (!entrypoint || path.resolve(entrypoint) !== path.resolve(stableBin)) {
       const command = scope === "system"
         ? `sudo ${stableBin} service:install`

@@ -7,6 +7,12 @@ import { asyncRoute } from "./express-async.js";
 const MAX_PORT = 65535;
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
+/** URL 里可能写 `localhost` / `[::1]`，建立连接前规范成裸主机名。 */
+const NORMALIZED_LOOPBACK_HOSTNAMES: Record<string, string> = {
+  localhost: "127.0.0.1",
+  "[::1]": "::1",
+};
+
 /** Headers that identify the original Wand request and must not leak downstream. */
 const FILTERED_REQUEST_HEADERS = new Set([
   "authorization",
@@ -55,7 +61,7 @@ export function parseLocalPreviewTarget(
 
   const suffix = rawPath.startsWith("/") ? rawPath : `/${rawPath}`;
   return {
-    hostname: hostname === "localhost" ? "127.0.0.1" : hostname === "[::1]" ? "::1" : hostname,
+    hostname: NORMALIZED_LOOPBACK_HOSTNAMES[hostname] ?? hostname,
     port,
     path: suffix,
   };

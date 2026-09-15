@@ -1,4 +1,5 @@
 import { cleanupWorktreeSync } from "./git-worktree.js";
+import { inferProviderFromCommand } from "./session-provider.js";
 import type { ProcessManager } from "./process-manager.js";
 import type { StructuredSessionManager } from "./structured-session-manager.js";
 import type { WandStorage } from "./storage.js";
@@ -11,18 +12,47 @@ function slimSnapshot(snapshot: SessionSnapshot): SessionSnapshot {
   return { ...slim, output: "" } as SessionSnapshot;
 }
 
-function addHiddenProviderSessionId(storage: WandStorage, id: string): void {
+type HiddenSessionStore = Pick<WandStorage, "getConfigValue" | "setConfigValue">;
+
+/** 读取 `hidden_claude_session_ids`；坏数据 / 空值按空集合处理，不抛错。 */
+export function readHiddenSessionIds(storage: Pick<HiddenSessionStore, "getConfigValue">): Set<string> {
   const raw = storage.getConfigValue("hidden_claude_session_ids");
-  let hidden: Set<string>;
+  if (!raw) return new Set();
   try {
-    const parsed = raw ? JSON.parse(raw) as unknown : [];
-    hidden = new Set(Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string") : []);
+    const parsed = JSON.parse(raw) as unknown;
+    return new Set(Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string") : []);
   } catch {
-    hidden = new Set();
+    return new Set();
   }
-  if (hidden.has(id)) return;
-  hidden.add(id);
-  storage.setConfigValue("hidden_claude_session_ids", JSON.stringify(Array.from(hidden)));
+}
+
+/** 写回 `hidden_claude_session_ids`（保持既有的 JSON 数组格式）。 */
+export function writeHiddenSessionIds(storage: Pick<HiddenSessionStore, "setConfigValue">, ids: Set<string>): void {
+  storage.setConfigValue("hidden_claude_session_ids", JSON.stringify(Array.from(ids)));
+}
+
+/** 追加若干 provider 原生 session id；无变化时不写盘。 */
+export function addHiddenSessionIds(storage: HiddenSessionStore, ids: readonly string[]): void {
+  if (ids.length === 0) return;
+  const hidden = readHiddenSessionIds(storage);
+  let changed = false;
+  for (const id of ids) {
+    if (hidden.has(id)) continue;
+    hidden.add(id);
+    changed = true;
+  }
+  if (changed) writeHiddenSessionIds(storage, hidden);
+}
+
+/** 移除若干 provider 原生 session id；无变化时不写盘。 */
+export function removeHiddenSessionIds(storage: HiddenSessionStore, ids: readonly string[]): void {
+  if (ids.length === 0) return;
+  const hidden = readHiddenSessionIds(storage);
+  let changed = false;
+  for (const id of ids) {
+    changed = hidden.delete(id) || changed;
+  }
+  if (changed) writeHiddenSessionIds(storage, hidden);
 }
 
 /**
@@ -137,11 +167,8 @@ export class SessionRegistry {
 
     const provider = snapshot.provider
       ?? snapshot.structuredState?.provider
-      ?? (/^codex\b/i.test(snapshot.command.trim())
-        ? "codex"
-        : /^opencode\b/i.test(snapshot.command.trim()) ? "opencode"
-          : /^grok\b/i.test(snapshot.command.trim()) ? "grok"
-            : /^qodercli\b/i.test(snapshot.command.trim()) ? "qoder" : "claude");
+      ?? inferProviderFromCommand(snapshot.command)
+      ?? "claude";
     if (provider === "claude") {
       this.processes.deleteClaudeHistoryFiles([{ claudeSessionId: providerSessionId, cwd: snapshot.cwd }]);
     } else if (provider === "codex") {
@@ -149,7 +176,7 @@ export class SessionRegistry {
     } else {
       return snapshot;
     }
-    addHiddenProviderSessionId(this.storage, providerSessionId);
+    addHiddenSessionIds(this.storage, [providerSessionId]);
     return snapshot;
   }
 

@@ -13,6 +13,7 @@ import {
 import { truncateMessagesForTransport } from "./message-truncator.js";
 import { buildChildEnv } from "./env-utils.js";
 import { getErrorMessage } from "./error-utils.js";
+import { signalNameFromNumber } from "./signal-utils.js";
 import { resolveSdkClaudeBinary } from "./claude-sdk-runner.js";
 import {
   provisionalSessionTopic,
@@ -21,6 +22,7 @@ import {
   shouldAcceptGeneratedSessionTitle,
 } from "./session-topic.js";
 import { resolveSessionCwd } from "./session-cwd.js";
+import { isSessionProvider } from "./session-provider.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
 import { CodexRunner } from "./structured-codex-adapter.js";
 import { CodexProtocolReducer } from "./structured-codex-protocol.js";
@@ -207,17 +209,6 @@ function recoveredCommandLabel(runner: SessionRunner | undefined): string {
     case "pi-cli-json": return "pi --mode json";
     default: return "claude -p";
   }
-}
-
-function numericToSignal(signal: number | null): NodeJS.Signals | null {
-  if (signal === null || signal === 0) return null;
-  const names: Record<number, NodeJS.Signals> = {
-    1: "SIGHUP", 2: "SIGINT", 3: "SIGQUIT", 4: "SIGILL", 5: "SIGTRAP", 6: "SIGABRT",
-    7: "SIGBUS", 8: "SIGFPE", 9: "SIGKILL", 10: "SIGUSR1", 11: "SIGSEGV", 12: "SIGUSR2",
-    13: "SIGPIPE", 14: "SIGALRM", 15: "SIGTERM", 17: "SIGCHLD", 18: "SIGCONT",
-    19: "SIGSTOP", 20: "SIGTSTP",
-  };
-  return names[signal] ?? "SIGTERM";
 }
 
 
@@ -476,9 +467,7 @@ export class StructuredSessionManager {
       if ((snapshot.sessionKind ?? "pty") !== "structured") continue;
       const restoredStatus = snapshot.status === "running" ? "idle" : snapshot.status;
       const storedProvider = snapshot.provider ?? snapshot.structuredState?.provider;
-      const provider: SessionProvider = storedProvider === "codex" || storedProvider === "opencode" || storedProvider === "grok" || storedProvider === "qoder" || storedProvider === "pi"
-        ? storedProvider
-        : "claude";
+      const provider: SessionProvider = isSessionProvider(storedProvider) ? storedProvider : "claude";
       const storedRunner = snapshot.runner ?? snapshot.structuredState?.runner;
       // Legacy/corrupt snapshots are normalized on restore so send dispatch can
       // rely on the provider/runner invariant without making startup fail.
@@ -754,7 +743,7 @@ export class StructuredSessionManager {
       feedFullLog();
       this.finalizeRecoveredRun(sessionId, requestId, processor, {
         exitCode: initialState.exitCode,
-        signal: initialState.signal === null ? null : numericToSignal(initialState.signal),
+        signal: initialState.signal === null ? null : signalNameFromNumber(initialState.signal),
         stderr: initialState.stderrLog,
         stdoutTruncated: initialState.stdoutTruncated,
       });
@@ -792,7 +781,7 @@ export class StructuredSessionManager {
       carry = "";
       this.finalizeRecoveredRun(sessionId, requestId, processor, {
         exitCode: event.exitCode,
-        signal: event.signal === null ? null : numericToSignal(event.signal),
+        signal: event.signal === null ? null : signalNameFromNumber(event.signal),
         stderr: processor.stderr,
         stdoutTruncated: initialState.stdoutTruncated,
       });
@@ -1069,7 +1058,7 @@ export class StructuredSessionManager {
     const id = randomUUID();
     const startedAt = new Date().toISOString();
     const requestedProvider: unknown = options.provider ?? "claude";
-    if (requestedProvider !== "claude" && requestedProvider !== "codex" && requestedProvider !== "opencode" && requestedProvider !== "grok" && requestedProvider !== "qoder" && requestedProvider !== "pi") {
+    if (!isSessionProvider(requestedProvider)) {
       throw new Error(`不支持的结构化 provider: ${String(requestedProvider)}`);
     }
     const provider: SessionProvider = requestedProvider;

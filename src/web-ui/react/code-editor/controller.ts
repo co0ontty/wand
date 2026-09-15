@@ -16,7 +16,7 @@ import type {
   CodeEditorTab,
   WandCodeEditorController,
 } from "./types";
-import type { FilePreviewFailure } from "../file-preview/types";
+import { failureOf as unknownFailure, isAbortError } from "../errors";
 
 type Listener = () => void;
 
@@ -49,16 +49,6 @@ function initialSnapshot(revision = 0): CodeEditorSnapshot {
     fontSize: defaultCodeEditorFontSize(),
     wrap: false,
   };
-}
-
-function unknownFailure(error: unknown, fallback: string): FilePreviewFailure {
-  return {
-    message: error instanceof Error && error.message ? error.message : fallback,
-  };
-}
-
-function isAbort(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "AbortError";
 }
 
 function discardCopy(reason: CodeEditorDiscardReason): { title: string; message: string } {
@@ -192,7 +182,7 @@ export function createCodeEditorModule(options: CodeEditorModuleOptions): CodeEd
       });
       return true;
     } catch (error) {
-      if (sequence !== loadSequence || abort.signal.aborted || isAbort(error) || !snapshot.open) return false;
+      if (sequence !== loadSequence || abort.signal.aborted || isAbortError(error) || !snapshot.open) return false;
       activeAbort = null;
       publish({ status: "error", failure: unknownFailure(error, "打开文件失败") });
       return false;

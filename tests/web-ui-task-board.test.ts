@@ -7,15 +7,19 @@ import {
   EMPTY_ISSUE_FILTERS,
   filterIssues,
   groupIssuesByStatus,
+  ISSUE_AGENT_MODES,
   ISSUE_AGENT_PROVIDERS,
-  ISSUE_BOARD_VIEWS,
   ISSUE_ARCHIVE_COLUMN,
+  ISSUE_BOARD_VIEWS,
   ISSUE_COLUMNS,
   ISSUE_NO_WORKSPACE,
   ISSUE_STATUS_FILTERS,
   issueArchiveFolderOpen,
   isDispatchableIssueAgent,
+  issueAgentModeLabel,
+  issueAgentModeOptions,
   issueAgentModelOptions,
+  issueCreateDispatches,
   normalizeIssueAgentDefaults,
   resolveIssueAgent,
   issueBoardStats,
@@ -65,7 +69,7 @@ test("switching provider drops models that do not exist in the new catalog", () 
     models: [{ id: "opus" }],
     codexModels: [{ id: "gpt-5" }],
   });
-  const start = { provider: "claude" as const, model: "opus", thinkingEffort: "deep" as const };
+  const start = { provider: "claude" as const, model: "opus", thinkingEffort: "deep" as const, mode: "managed" as const };
 
   // 停留在同一 provider 时保留已选模型，不重置用户输入。
   assert.deepEqual(withIssueAgentProvider(start, "claude", catalog), start);
@@ -74,32 +78,58 @@ test("switching provider drops models that do not exist in the new catalog", () 
   assert.equal(codex.provider, "codex");
   assert.ok(issueAgentModelOptions(catalog, "codex").some((option) => option.value === codex.model));
   assert.equal(codex.thinkingEffort, "deep");
+  // Codex 只支持 full-access：换 provider 时工作模式要被夹到合法值。
+  assert.equal(codex.mode, "full-access");
   // 目录尚未加载时仍回退到 default，绝不把旧 provider 的模型 ID 带过去。
   assert.equal(withIssueAgentProvider(start, "grok", null).model, "default");
 });
 
-test("dispatch guard only accepts supported providers with a model and effort", () => {
+test("dispatch guard only accepts supported providers with a model, effort, and mode", () => {
   assert.equal(isDispatchableIssueAgent(null), false);
   assert.equal(isDispatchableIssueAgent(createDefaultIssueAgent()), true);
-  assert.equal(isDispatchableIssueAgent({ provider: "claude", model: "", thinkingEffort: "off" }), false);
-  assert.equal(isDispatchableIssueAgent({ provider: "claude", model: "   ", thinkingEffort: "off" }), false);
-  assert.equal(isDispatchableIssueAgent({ provider: "cursor", model: "x", thinkingEffort: "off" }), false);
-  assert.equal(isDispatchableIssueAgent({ provider: "claude", model: "x", thinkingEffort: "insane" as never }), false);
+  assert.equal(isDispatchableIssueAgent({ provider: "claude", model: "", thinkingEffort: "off", mode: "default" }), false);
+  assert.equal(isDispatchableIssueAgent({ provider: "claude", model: "   ", thinkingEffort: "off", mode: "default" }), false);
+  assert.equal(isDispatchableIssueAgent({ provider: "cursor", model: "x", thinkingEffort: "off", mode: "default" }), false);
+  assert.equal(isDispatchableIssueAgent({ provider: "claude", model: "x", thinkingEffort: "insane" as never, mode: "default" }), false);
+  assert.equal(isDispatchableIssueAgent({ provider: "claude", model: "x", thinkingEffort: "off", mode: "yolo" as never }), false);
+  assert.equal(isDispatchableIssueAgent({ provider: "claude", model: "x", thinkingEffort: "off", mode: undefined as never }), false);
+});
+
+test("work mode options cover managed, full-access, and standard", () => {
+  assert.deepEqual(ISSUE_AGENT_MODES.map((entry) => entry.value), ["managed", "full-access", "default"]);
+  assert.deepEqual(ISSUE_AGENT_MODES.map((entry) => entry.label), ["托管", "全限", "标准"]);
+  assert.equal(issueAgentModeLabel("managed"), "托管");
+  assert.equal(issueAgentModeLabel("full-access"), "全限");
+  assert.equal(issueAgentModeLabel("default"), "标准");
+  // 旧任务 / 未知值回落到标准，不显示空标签。
+  assert.equal(issueAgentModeLabel(undefined), "标准");
+  assert.equal(issueAgentModeLabel("whatever"), "标准");
+  assert.equal(createDefaultIssueAgent().mode, "default");
+  // Codex 只有 full-access 一个有效值（与新建会话一致）。
+  assert.deepEqual(issueAgentModeOptions("claude").map((option) => option.value), ["managed", "full-access", "default"]);
+  assert.deepEqual(issueAgentModeOptions("codex").map((option) => option.value), ["full-access"]);
+  assert.deepEqual(issueAgentModeOptions("qoder").map((option) => option.value), ["managed", "full-access", "default"]);
+  assert.equal(createDefaultIssueAgent("codex").mode, "full-access");
 });
 
 test("unassigned issues reuse the last selected agent defaults", () => {
-  const last = { provider: "pi" as const, model: "gpt-5", thinkingEffort: "deep" as const };
-  const assigned = { provider: "codex" as const, model: "gpt-5.1", thinkingEffort: "max" as const };
+  const last = { provider: "pi" as const, model: "gpt-5", thinkingEffort: "deep" as const, mode: "full-access" as const };
+  const assigned = { provider: "claude" as const, model: "gpt-5.1", thinkingEffort: "max" as const, mode: "managed" as const };
 
   // 任务自己有配置时，不能被面板上次选择覆盖。
   assert.deepEqual(resolveIssueAgent(assigned, last), assigned);
-  // 未指派时沿用上次的工具 / 模型 / 思考深度。
+  // Codex 只支持 full-access：读回旧值时也要夹到合法值。
+  assert.deepEqual(
+    resolveIssueAgent({ provider: "codex", model: "gpt-5", thinkingEffort: "max", mode: "managed" }, last),
+    { provider: "codex", model: "gpt-5", thinkingEffort: "max", mode: "full-access" },
+  );
+  // 未指派时沿用上次的工具 / 模型 / 思考深度 / 工作模式。
   assert.deepEqual(resolveIssueAgent(null, last), last);
   assert.deepEqual(resolveIssueAgent(undefined, last), last);
   // 从未保存过时仍是 Claude 默认，避免空下拉。
   assert.deepEqual(resolveIssueAgent(null), createDefaultIssueAgent());
   assert.deepEqual(normalizeIssueAgentDefaults(last), last);
-  assert.deepEqual(normalizeIssueAgentDefaults({ provider: "cursor", model: "x", thinkingEffort: "off" }), createDefaultIssueAgent());
+  assert.deepEqual(normalizeIssueAgentDefaults({ provider: "cursor", model: "x", thinkingEffort: "off", mode: "default" }), createDefaultIssueAgent());
 });
 
 test("issue helpers expose columns, grouping, sorting, and workspace options", () => {
@@ -151,6 +181,24 @@ test("native board host talks to the Wand task API instead of the removed taskbo
   assert.doesNotMatch(host, /wand-taskboard-ready/);
 });
 
+test("only the doing column creates and assigns in one step", () => {
+  // 「处理中」列的新建代表已经决定要跑，所以创建后立刻派发。
+  assert.equal(issueCreateDispatches("doing"), true);
+  // 「等待认领」只创建；「等你确认」/归档列也不应该拉起 Agent。
+  assert.equal(issueCreateDispatches("todo"), false);
+  assert.equal(issueCreateDispatches("done"), false);
+  assert.equal(issueCreateDispatches("archived"), false);
+
+  const host = readFileSync(new URL("../src/web-ui/react/issues/task-board-host.tsx", import.meta.url), "utf8");
+  // 创建链路和新建对话框共用同一个判定，避免「按钮写创建并指派但没派发」这类不一致。
+  assert.match(host, /issueCreateDispatches\(draft\.status\) && submitDescription && isDispatchableIssueAgent\(draft\.agent\)/);
+  assert.match(host, /const createDispatches = issueCreateDispatches\(draft\.status\)/);
+  assert.match(host, /createDispatches \? <div className="task-board-create-assign"/);
+  // 只创建时不显示派发控件，也不出现「创建并指派」的按钮文案。
+  assert.match(host, /createDispatches && draft\.description\.trim\(\) \? "创建并指派" : "创建任务"/);
+  assert.match(host, /只创建任务，不指派 Agent/);
+});
+
 test("create form can assign the first agent from the description", () => {
   const host = readFileSync(new URL("../src/web-ui/react/issues/task-board-host.tsx", import.meta.url), "utf8");
   const composer = host.slice(host.indexOf("task-board-native-composer"), host.indexOf("task-board-create-footer"));
@@ -162,6 +210,8 @@ test("create form can assign the first agent from the description", () => {
   assert.match(host, /指定项目目录/);
   assert.match(composer, /第一次指派的 CLI 工具/);
   assert.match(composer, /第一次指派的思考深度/);
+  assert.match(composer, /第一次指派的工作模式/);
+  assert.match(composer, /issueAgentModeOptions\(draft\.agent\.provider\)/);
   assert.match(host, /作为第一个 Agent 的指派内容/);
   assert.match(host, /submitDescription && isDispatchableIssueAgent\(draft\.agent\)/);
   assert.match(host, /taskBoardRepository\.dispatch\(created\.id, draft\.agent/);
@@ -172,6 +222,7 @@ test("create form can assign the first agent from the description", () => {
   assert.match(editor, /任务 CLI 工具/);
   assert.match(editor, /任务模型/);
   assert.match(editor, /任务思考深度/);
+  assert.match(editor, /任务工作模式/);
   assert.match(host, /task-board-agent-add/);
   assert.match(host, /TaskBoardAgentSessionList/);
   assert.match(host, /TaskBoardAgentChips/);
@@ -299,24 +350,29 @@ test("task board is a first-class view=taskboard route that does not unmount the
   // 侧栏点任务 / 首页必须离开看板，任务管理按钮本身是当前页。
   assert.match(sidebar, /leaveBoard/);
   assert.match(sidebar, /taskBoardController\.close\(\)/);
-  assert.match(sidebar, /aria-current=\{taskBoard\.open \? "page" : undefined\}/);
+  // The active entry is handed to Appica's Navigation, which stamps
+  // `aria-current="page"` on the matching link itself.
+  assert.match(sidebar, /active=\{taskBoard\.open \? "task-board" : null\}/);
+  assert.match(sidebar, /value="task-board"/);
   assert.match(host, /chevronLeft[^\n]*>返回/);
   assert.doesNotMatch(host, /返回会话/);
 });
 
 test("task detail groups sessions by the agents that actually ran", () => {
-  const claude = { provider: "claude" as const, model: "opus", thinkingEffort: "deep" as const };
+  const claude = { provider: "claude" as const, model: "opus", thinkingEffort: "deep" as const, mode: "managed" as const };
   const groups = groupIssueSessionsByAgent([
-    { id: "s1", provider: "claude", title: "修登录", status: "running", model: "opus", thinkingEffort: "deep" },
-    { id: "s2", provider: "claude", title: "补测试", status: "exited", model: "sonnet", thinkingEffort: "off" },
-    { id: "s3", provider: "codex", title: "实现 API", status: "idle", model: "gpt-5", thinkingEffort: "standard" },
+    { id: "s1", provider: "claude", title: "修登录", status: "running", model: "opus", thinkingEffort: "deep", mode: "managed" },
+    { id: "s2", provider: "claude", title: "补测试", status: "exited", model: "sonnet", thinkingEffort: "off", mode: "full-access" },
+    { id: "s3", provider: "codex", title: "实现 API", status: "idle", model: "gpt-5", thinkingEffort: "standard", mode: "default" },
   ], claude);
   assert.deepEqual(groups.map((group) => group.provider), ["claude", "codex"]);
   assert.deepEqual(groups[0]!.sessions.map((session) => session.id), ["s1", "s2"]);
   assert.deepEqual(groups[1]!.sessions.map((session) => session.id), ["s3"]);
   assert.deepEqual(listIssueAgents(groups.flatMap((group) => group.sessions), claude).map((agent) => agent.provider), ["claude", "codex"]);
+  // 会话上的执行模式要能回读到分组里的 agent；codex 只支持 full-access。
+  assert.equal(groups[1]!.agent?.mode, "full-access");
 
-  const pending = groupIssueSessionsByAgent([], { provider: "pi", model: "default", thinkingEffort: "off" });
+  const pending = groupIssueSessionsByAgent([], { provider: "pi", model: "default", thinkingEffort: "off", mode: "managed" });
   assert.equal(pending.length, 1);
   assert.equal(pending[0]!.provider, "pi");
   assert.equal(pending[0]!.sessions.length, 0);

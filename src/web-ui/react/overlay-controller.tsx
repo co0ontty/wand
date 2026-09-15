@@ -1,4 +1,5 @@
-import type { WandButtonKind, WandDialogTone, WandToastTone } from "./ui";
+import { showWandToast, type WandButtonKind, type WandDialogTone, type WandToastTone } from "./ui";
+import * as React from "react";
 
 interface OverlayDialogAction<T> {
   label: string;
@@ -32,14 +33,14 @@ export interface OverlayToastOptions {
 }
 
 interface OverlayToastHandle {
-  readonly id: number;
+  readonly id: string;
   dismiss(): void;
 }
 
 /**
  * External seam for all React-owned overlays. Callers learn two operations;
- * Radix lifecycle, focus handling, portals, queueing, and rendering stay behind
- * the module.
+ * Base UI lifecycle, focus handling, portals, queueing, and rendering stay
+ * behind the module.
  */
 export interface WandOverlay {
   dialog<T>(options: OverlayDialogOptions<T>): Promise<OverlayDialogResult<T>>;
@@ -54,43 +55,20 @@ interface DialogEntry {
   resolve(result: OverlayDialogResult<unknown>): void;
 }
 
-interface ToastEntry {
-  id: number;
-  message: string;
-  options: OverlayToastOptions;
-  open: boolean;
-}
-
 export interface OverlaySnapshot {
   activeDialog: DialogEntry | null;
-  toasts: ReadonlyArray<ToastEntry>;
 }
 
 type Listener = () => void;
 
 let nextId = 0;
 let dialogQueue: DialogEntry[] = [];
-let toasts: ToastEntry[] = [];
-let snapshot: OverlaySnapshot = { activeDialog: null, toasts: [] };
+let snapshot: OverlaySnapshot = { activeDialog: null };
 const listeners = new Set<Listener>();
 
 function publish(): void {
-  snapshot = {
-    activeDialog: dialogQueue[0] ?? null,
-    toasts: [...toasts],
-  };
+  snapshot = { activeDialog: dialogQueue[0] ?? null };
   for (const listener of listeners) listener();
-}
-
-function dismissToast(id: number): void {
-  const entry = toasts.find((toast) => toast.id === id);
-  if (!entry || !entry.open) return;
-  toasts = toasts.map((toast) => toast.id === id ? { ...toast, open: false } : toast);
-  publish();
-  window.setTimeout(() => {
-    toasts = toasts.filter((toast) => toast.id !== id);
-    publish();
-  }, 180);
 }
 
 export const wandOverlay: WandOverlay = {
@@ -110,10 +88,9 @@ export const wandOverlay: WandOverlay = {
   },
 
   toast(message: string, options: OverlayToastOptions = {}): OverlayToastHandle {
-    const id = ++nextId;
-    toasts = [...toasts, { id, message, options, open: true }];
-    publish();
-    return { id, dismiss: () => dismissToast(id) };
+    // Toast lifecycle (stacking, timers, swipe) lives in Appica's toast manager,
+    // not in the overlay snapshot, so publishing here would be pointless churn.
+    return showWandToast(message, options);
   },
 
   closeTopmost(): boolean {
@@ -144,6 +121,4 @@ export const overlayStore = {
     publish();
     entry.resolve(result);
   },
-
-  dismissToast,
 };

@@ -1,4 +1,4 @@
-import type { Express, RequestHandler, Response } from "express";
+import type { Express } from "express";
 import { getDefaultModelForProvider } from "./config.js";
 import { asyncRoute } from "./express-async.js";
 import { getErrorMessage } from "./error-utils.js";
@@ -9,19 +9,19 @@ import type { QuickCommitAiOptions } from "./git-quick-commit.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
 import type { SessionRegistry } from "./session-registry.js";
 import type { StructuredSessionManager } from "./structured-session-manager.js";
-import type { WandTaskAgent, WandTaskAgentEffort, WandTaskAgentProvider, WandTaskPriority, WandTaskStatus, WandTaskTitleSource } from "./task-types.js";
-import { WAND_MILESTONE_NAME_MAX_LENGTH } from "./task-types.js";
+import type { WandTaskAgent, WandTaskAgentEffort, WandTaskAgentMode, WandTaskPriority, WandTaskStatus, WandTaskTitleSource } from "./task-types.js";
+import { DEFAULT_WAND_TASK_AGENT_MODE, isWandTaskAgentMode, normalizeWandTaskAgentMode, WAND_MILESTONE_NAME_MAX_LENGTH } from "./task-types.js";
 import { archiveBoardTask, syncClosedBoardTask, syncUngroupedSessionsToBoard } from "./wand-task-sync.js";
 import type { SessionProvider, SessionSnapshot, WandConfig } from "./types.js";
+import { isSessionProvider } from "./session-provider.js";
 
 const STATUSES = new Set<WandTaskStatus>(["todo", "doing", "done", "archived"]);
 const PRIORITIES = new Set<WandTaskPriority>(["none", "low", "medium", "high", "urgent"]);
-const AGENT_PROVIDERS = new Set<WandTaskAgentProvider>(["claude", "codex", "opencode", "grok", "qoder", "pi"]);
 const AGENT_EFFORTS = new Set<WandTaskAgentEffort>(["off", "standard", "deep", "max"]);
 const TASK_BOARD_LAST_AGENT_KEY = "pref:taskBoardLastAgent";
 
 function defaultTaskBoardAgent(): WandTaskAgent {
-  return { provider: "claude", model: "default", thinkingEffort: "off" };
+  return { provider: "claude", model: "default", thinkingEffort: "off", mode: DEFAULT_WAND_TASK_AGENT_MODE };
 }
 
 /** 任务面板上次选用的 CLI 工具 / 模型 / 思考深度；从未保存过时回落到 Claude 默认。 */
@@ -40,6 +40,7 @@ export function writeTaskBoardLastAgent(storage: WandStorage, agent: WandTaskAge
     provider: agent.provider,
     model: agent.model,
     thinkingEffort: agent.thinkingEffort,
+    mode: agent.mode,
   });
 }
 
@@ -48,7 +49,6 @@ export interface TaskRouteDependencies {
   sessions?: SessionRegistry;
   structured?: StructuredSessionManager;
   config?: WandConfig;
-  requireAdmin?: RequestHandler;
   /** 可注入的任务标题生成器；测试里换成同步桩，避免真的起 CLI。 */
   generateTitle?: typeof generateWandTaskTitle;
 }
@@ -83,18 +83,29 @@ function milestoneIdFrom(storage: WandStorage, value: unknown): string | null {
   return id;
 }
 
-/** 任务派发配置：provider / model / thinkingEffort 三者必须同时给出且合法。 */
-export function parseTaskAgent(value: unknown): WandTaskAgent | null {
+/**
+ * 任务派发配置：provider / model / thinkingEffort 必须合法；mode 缺省时用 `fallbackMode`。
+ * 老客户端（Android / iOS 尚未发 mode）不传 mode，PATCH / dispatch 时传任务当前值，
+ * 避免把用户在 Web 上选的工作模式悄悄复位成标准。
+ */
+export function parseTaskAgent(
+  value: unknown,
+  fallbackMode: WandTaskAgentMode = DEFAULT_WAND_TASK_AGENT_MODE,
+): WandTaskAgent | null {
   if (value === null) return null;
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Agent 配置必须是对象。");
   const body = value as Record<string, unknown>;
-  const provider = text(body.provider) as WandTaskAgentProvider;
-  if (!AGENT_PROVIDERS.has(provider)) throw new Error("请选择有效的 CLI 工具。");
+  const provider = text(body.provider);
+  if (!isSessionProvider(provider)) throw new Error("请选择有效的 CLI 工具。");
   const model = text(body.model) || "default";
   if (model.length > 128) throw new Error("模型名称过长。");
   const thinkingEffort = (text(body.thinkingEffort) || "off") as WandTaskAgentEffort;
   if (!AGENT_EFFORTS.has(thinkingEffort)) throw new Error("思考深度无效。");
-  return { provider, model, thinkingEffort };
+  const rawMode = body.mode === undefined || body.mode === null || body.mode === "" ? fallbackMode : body.mode;
+  if (!isWandTaskAgentMode(rawMode)) throw new Error("工作模式无效。");
+  // Codex 之类只认一种模式的 provider 在这里夹到有效值，落库值与实际执行保持一致。
+  const mode = normalizeWandTaskAgentMode(provider, rawMode);
+  return { provider, model, thinkingEffort, mode };
 }
 
 interface TaskDtoDeps {
@@ -132,11 +143,9 @@ function taskSessionSummary(session: SessionSnapshot) {
     cwd: session.cwd,
     model: session.selectedModel || session.structuredState?.model || "",
     thinkingEffort: session.thinkingEffort || "off",
+    // 会话实际跑的执行模式；旧会话没有该字段时留空，前端回落到任务上的配置。
+    mode: session.mode || "",
   };
-}
-
-function sendTaskError(res: Response, error: unknown, fallback: string): void {
-  sendRouteError(res, error, fallback);
 }
 
 /**
@@ -194,16 +203,11 @@ function taskTitleAiOptions(config?: WandConfig): QuickCommitAiOptions {
   return resolveSystemAiContext(defaultSession, config);
 }
 
-export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies | WandStorage, sessionsLegacy?: SessionRegistry, requireAdminLegacy?: RequestHandler): void {
-  // 兼容旧的 positional 调用；新代码统一用对象形式的依赖。
-  const resolved: TaskRouteDependencies = deps && typeof deps === "object" && "storage" in deps
-    ? deps as TaskRouteDependencies
-    : { storage: deps as WandStorage, sessions: sessionsLegacy, requireAdmin: requireAdminLegacy };
-  const { storage, sessions, structured, config } = resolved;
-  const guard = resolved.requireAdmin ?? ((_req, _res, next) => next());
-  const dto = (task: ReturnType<WandStorage["getWandTask"]>) => taskDto(resolved, task);
+export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): void {
+  const { storage, sessions, structured, config } = deps;
+  const dto = (task: ReturnType<WandStorage["getWandTask"]>) => taskDto(deps, task);
 
-  app.get("/api/wand-tasks", guard, (req, res) => {
+  app.get("/api/wand-tasks", (req, res) => {
     try {
       syncUngroupedSessionsToBoard(storage);
     } catch (error) {
@@ -213,11 +217,11 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies | W
     // 数组顺序即展示顺序：created_at 倒序，新创建的在上面。
     res.json(storage.listWandTasks(workspaceId).map((task) => dto(task)));
   });
-  app.get("/api/wand-task-agent-defaults", guard, (_req, res) => {
+  app.get("/api/wand-task-agent-defaults", (_req, res) => {
     res.json(readTaskBoardLastAgent(storage));
   });
   // ── 里程碑：跨项目全局列表，所有任务面板的「新建任务」共用 ──
-  app.get("/api/wand-milestones", guard, (_req, res) => {
+  app.get("/api/wand-milestones", (_req, res) => {
     const counts = storage.countWandTasksByMilestone();
     res.json({
       milestones: storage.listWandMilestones().map((milestone) => ({
@@ -226,7 +230,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies | W
       })),
     });
   });
-  app.post("/api/wand-milestones", guard, (req, res) => {
+  app.post("/api/wand-milestones", (req, res) => {
     try {
       const body = bodyObject(req.body);
       const name = milestoneNameFrom(body.name);
@@ -236,10 +240,10 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies | W
       const created = storage.createWandMilestone({ name, dueDate: dateValue(body.dueDate) ?? null });
       res.status(201).json({ ...created, taskCount: 0 });
     } catch (error) {
-      sendTaskError(res, error, "无法创建里程碑。");
+      sendRouteError(res, error, "无法创建里程碑。");
     }
   });
-  app.patch("/api/wand-milestones/:id", guard, (req, res) => {
+  app.patch("/api/wand-milestones/:id", (req, res) => {
     try {
       const body = bodyObject(req.body);
       const current = storage.getWandMilestone(req.params.id);
@@ -259,25 +263,25 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies | W
       const updated = storage.updateWandMilestone(current.id, patch);
       res.json({ ...updated, taskCount: storage.countWandTasksByMilestone()[current.id] ?? 0 });
     } catch (error) {
-      sendTaskError(res, error, "无法更新里程碑。");
+      sendRouteError(res, error, "无法更新里程碑。");
     }
   });
-  app.delete("/api/wand-milestones/:id", guard, (req, res) => {
+  app.delete("/api/wand-milestones/:id", (req, res) => {
     // 只解绑任务，不删任务；已经删过的 id 幂等返回 ok。
     storage.deleteWandMilestone(req.params.id);
     res.json({ ok: true });
   });
-  app.put("/api/wand-task-agent-defaults", guard, (req, res) => {
+  app.put("/api/wand-task-agent-defaults", (req, res) => {
     try {
       const agent = parseTaskAgent(req.body);
       if (!agent) throw new Error("请选择有效的 CLI 工具。");
       writeTaskBoardLastAgent(storage, agent);
       res.json(agent);
     } catch (error) {
-      sendTaskError(res, error, "无法保存 Agent 默认选项。");
+      sendRouteError(res, error, "无法保存 Agent 默认选项。");
     }
   });
-  app.post("/api/wand-tasks", guard, (req, res) => {
+  app.post("/api/wand-tasks", (req, res) => {
     try {
       const body = bodyObject(req.body);
       const workspaceId = body.workspaceId === null ? null : text(body.workspaceId) || null;
@@ -311,15 +315,15 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies | W
         scheduleWandTaskTitleGeneration(storage, task.id, description, {
           cwd: workspaceId ? storage.getWorkspace(workspaceId)?.cwd : undefined,
           config,
-          generateTitle: resolved.generateTitle ?? generateWandTaskTitle,
+          generateTitle: deps.generateTitle ?? generateWandTaskTitle,
         });
       }
       res.status(201).json(dto(task));
     } catch (error) {
-      sendTaskError(res, error, "无法创建任务。");
+      sendRouteError(res, error, "无法创建任务。");
     }
   });
-  app.patch("/api/wand-tasks/:id", guard, (req, res) => {
+  app.patch("/api/wand-tasks/:id", (req, res) => {
     try {
       const body = bodyObject(req.body);
       const patch: Parameters<WandStorage["updateWandTask"]>[1] = {};
@@ -348,7 +352,9 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies | W
         patch.workspaceId = workspaceId || null;
       }
       if (body.agent !== undefined) {
-        patch.agent = parseTaskAgent(body.agent);
+        // 老客户端不传 mode：沿用任务当前的工作模式，而不是复位成标准。
+        const current = storage.getWandTask(req.params.id);
+        patch.agent = parseTaskAgent(body.agent, current?.agent?.mode);
         if (patch.agent) writeTaskBoardLastAgent(storage, patch.agent);
       }
       if (body.sortOrder !== undefined && Number.isFinite(Number(body.sortOrder))) {
@@ -362,10 +368,10 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies | W
       if (task.status === "done" || task.status === "archived") syncClosedBoardTask(storage, task);
       res.json(dto(storage.getWandTask(task.id) ?? task));
     } catch (error) {
-      sendTaskError(res, error, "无法更新任务。");
+      sendRouteError(res, error, "无法更新任务。");
     }
   });
-  app.delete("/api/wand-tasks/:id", guard, (req, res) => {
+  app.delete("/api/wand-tasks/:id", (req, res) => {
     const archived = archiveBoardTask(storage, req.params.id);
     if (!archived) {
       res.status(404).json({ error: "未找到该任务。" });
@@ -373,7 +379,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies | W
     }
     res.json({ ok: true, ...dto(archived) });
   });
-  app.post("/api/wand-tasks/:id/sessions", guard, (req, res) => {
+  app.post("/api/wand-tasks/:id/sessions", (req, res) => {
     try {
       const sessionId = text(bodyObject(req.body).sessionId);
       if (!sessionId) throw new Error("缺少 sessionId。");
@@ -381,10 +387,10 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies | W
       storage.bindWandTaskSession(req.params.id, sessionId);
       res.status(201).json(dto(storage.getWandTask(req.params.id)));
     } catch (error) {
-      sendTaskError(res, error, "无法绑定会话。");
+      sendRouteError(res, error, "无法绑定会话。");
     }
   });
-  app.delete("/api/wand-tasks/:id/sessions/:sessionId", guard, (req, res) => {
+  app.delete("/api/wand-tasks/:id/sessions/:sessionId", (req, res) => {
     storage.unbindWandTaskSession(req.params.id, req.params.sessionId);
     res.json({ ok: true });
   });
@@ -393,7 +399,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies | W
    * 用选定的 CLI 工具开一个结构化会话，把这次派发的 prompt 作为首条消息，
    * 并把会话绑定回该任务。cwd 取任务所属项目目录；未指定项目时用全局默认目录。
    */
-  app.post("/api/wand-tasks/:id/dispatch", guard, asyncRoute(async (req, res) => {
+  app.post("/api/wand-tasks/:id/dispatch", asyncRoute(async (req, res) => {
     try {
       let task = storage.getWandTask(req.params.id);
       if (!task) {
@@ -404,7 +410,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies | W
       const body = bodyObject(req.body);
       const agent = body.agent === undefined
         ? task.agent ?? parseWandTaskAgent(JSON.stringify(body))
-        : parseTaskAgent(body.agent);
+        : parseTaskAgent(body.agent, task.agent?.mode);
       if (!agent) throw new Error("请先为该任务选择 CLI 工具。");
       writeTaskBoardLastAgent(storage, agent);
       if (body.workspaceId !== undefined) {
@@ -422,7 +428,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies | W
       const model = agent.model === "default" ? "" : agent.model;
       const session = structured.createSession({
         cwd,
-        mode: "agent",
+        mode: agent.mode,
         provider: agent.provider as SessionProvider,
         model: model || getDefaultModelForProvider(config, agent.provider as SessionProvider) || undefined,
         thinkingEffort: agent.thinkingEffort,
@@ -444,15 +450,16 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies | W
           provider: session.provider,
           model: session.selectedModel,
           thinkingEffort: session.thinkingEffort,
+          mode: session.mode,
           cwd: session.cwd,
         },
       });
     } catch (error) {
-      sendTaskError(res, error, "无法派发 Agent。");
+      sendRouteError(res, error, "无法派发 Agent。");
     }
   }));
 
-  app.get("/api/wand-tasks/:id", guard, asyncRoute(async (req, res) => {
+  app.get("/api/wand-tasks/:id", asyncRoute(async (req, res) => {
     const task = dto(storage.getWandTask(req.params.id));
     if (!task) {
       res.status(404).json({ error: "未找到该任务。" });

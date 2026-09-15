@@ -31,14 +31,32 @@ export function firstHeaderListValue(value: string | string[] | undefined): stri
   return firstHeaderValue(value)?.split(",")[0]?.trim();
 }
 
-/** 查询参数版 `text()`：显式传 fallback 时返回 fallback 而不是空串。 */
-export function stringQuery(value: unknown, fallback = ""): string {
-  return typeof value === "string" ? value.trim() : fallback;
+/** 从 Forwarded 头（`proto=https;host=example.com`）里取指定参数；缺失返回 undefined。 */
+export function forwardedParam(header: string | undefined, key: string): string | undefined {
+  if (!header) return undefined;
+  const targetKey = key.toLowerCase();
+  for (const part of header.split(";")) {
+    const eqIndex = part.indexOf("=");
+    if (eqIndex < 1) continue;
+    if (part.slice(0, eqIndex).trim().toLowerCase() !== targetKey) continue;
+    const value = part.slice(eqIndex + 1).trim();
+    return value.length >= 2 && value.startsWith("\"") && value.endsWith("\"")
+      ? value.slice(1, -1)
+      : value;
+  }
+  return undefined;
+}
+
+/** 把 header / URL 里的协议名收敛成 http | https；其余情况返回 undefined。 */
+export function normalizeProtocol(value: string | undefined): "http" | "https" | undefined {
+  const proto = value?.trim().toLowerCase();
+  if (proto === "http" || proto === "https") return proto;
+  return undefined;
 }
 
 /** 解析范围内整数，越界或非整数回落到 fallback。 */
 export function integerQuery(value: unknown, fallback: number, min: number, max: number): number {
-  const parsed = Number(stringQuery(value));
+  const parsed = Number(text(value));
   return Number.isInteger(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
 }
 

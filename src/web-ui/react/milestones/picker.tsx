@@ -8,6 +8,7 @@ import { WandButton, WandIcon, WandPopover } from "../ui";
 import { classNames } from "../ui/class-names";
 import { milestonesStore } from "./controller";
 import type { MilestoneOption } from "./repository";
+import { failureMessage } from "../errors";
 
 export interface MilestonePickerProps {
   value: string | null;
@@ -17,10 +18,6 @@ export interface MilestonePickerProps {
   items?: readonly MilestoneOption[];
   className?: string;
   align?: "start" | "center" | "end";
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error && error.message ? error.message : "无法新增里程碑。";
 }
 
 export function MilestonePicker({
@@ -78,7 +75,7 @@ export function MilestonePicker({
       const created = await milestonesStore.create(trimmed);
       close(created.id);
     } catch (cause) {
-      setError(errorMessage(cause));
+      setError(failureMessage(cause, "无法新增里程碑。"));
     } finally {
       setBusy(false);
     }
@@ -97,7 +94,6 @@ export function MilestonePicker({
       }}
       align={align}
       side="bottom"
-      showArrow={false}
       ariaLabel="选择里程碑"
       className="milestone-picker-menu"
       trigger={<button

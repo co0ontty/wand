@@ -1,14 +1,15 @@
 import { computeFloatingPanelPosition } from "./floating-panel-position";
 import { state, writeStoredBoolean } from "./state";
-import { iconSvg, t } from "./i18n";
-import { escapeHtml } from "./utils";
-import { JOYSTICK_ACTION_KEYS, JOYSTICK_BALL_SIZE, JOYSTICK_EDGE_MARGIN, JOYSTICK_LONG_PRESS_MS, JOYSTICK_MOVE_THRESHOLD, JOYSTICK_TAP_THRESHOLD, buildMessagesForRender, buildPtySequence, clearModifiers, focusInputBox, getSelectedSession, handleInputBoxBlur, isTerminalInteractionAvailable, postInput, queueDirectInput, resetRootViewportScroll, scheduleShortcutResync, sendTerminalSequence, shouldAdjustForKeyboard, syncInputBoxScroll, updateQueueBar } from "./input";
-import { showToast } from "./notifications";
-import { render } from "./render";
+import { iconSvg } from "./i18n";
+import "./utils";
+import { JOYSTICK_ACTION_KEYS, JOYSTICK_BALL_SIZE, JOYSTICK_EDGE_MARGIN, JOYSTICK_LONG_PRESS_MS, JOYSTICK_MOVE_THRESHOLD, JOYSTICK_TAP_THRESHOLD, buildMessagesForRender, buildPtySequence, clearModifiers, getSelectedSession, resetRootViewportScroll, scheduleShortcutResync, sendTerminalSequence, shouldAdjustForKeyboard, syncInputBoxScroll, updateQueueBar } from "./input";
+import "./notifications";
+import "./render";
 import { getPreferredMessages, isStructuredSession, updateDrawerState, updateSessionSnapshot } from "./session-engine";
 import { maybeScrollTerminalToBottom, updateTerminalJumpToBottomButton } from "./terminal";
 import { isMobileLayout } from "./file-browser";
-import { renderChat } from "./websocket";
+import { renderChat } from "./chat-render";
+import { fitTerminalToContainer } from "./terminal-fit";
 
       var appViewportBaselineWidth = 0;
       var appViewportBaselineHeight = 0;
@@ -993,13 +994,11 @@ import { renderChat } from "./websocket";
         // 用户点「回到底部」按钮决定。快照之外再叠加 rAF 内的 live 复查：
         // 若用户恰好在两帧之间 wheel 上滚，这里不能覆盖他的意图。
         var shouldStickToBottom = state.terminalAutoFollow;
-        var prevCols = state.terminal.cols;
-        var prevRows = state.terminal.rows;
         requestAnimationFrame(function() {
           requestAnimationFrame(function() {
             if (!state.terminal) return;
             if (state.terminalFitAddon && typeof state.terminalFitAddon.fit === "function") {
-              state.terminalFitAddon.fit();
+              fitTerminalToContainer(state.terminal, state.terminalFitAddon);
             }
             sendTerminalResize(state.terminal.cols, state.terminal.rows);
             if (shouldStickToBottom && state.terminalAutoFollow) {

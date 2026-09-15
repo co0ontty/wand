@@ -2,6 +2,7 @@ import { existsSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { Express, Request, RequestHandler } from "express";
 
+import { buildInfoPayload, type BuildInfo } from "./build-info.js";
 import { buildChildEnv } from "./env-utils.js";
 import { getErrorMessage } from "./error-utils.js";
 import { asyncRoute } from "./express-async.js";
@@ -31,12 +32,6 @@ interface SettingsDistributionPayload {
   iosIpa: Record<string, unknown>;
 }
 
-interface SettingsBuildInfo {
-  commit: string | null;
-  builtAt: string | null;
-  channel: string | null;
-}
-
 function systemAiRouteIdentity(profile: SystemAiConfig): string {
   return [
     profile.protocol,
@@ -55,7 +50,7 @@ export interface ServerSettingsRoutesDependencies {
   requireAdmin: RequestHandler;
   requireAdminOrSessionPreferences: RequestHandler;
   packageInfo: { version: string; name: string; nodeVersion: string; repoUrl: string };
-  buildInfo: SettingsBuildInfo;
+  buildInfo: BuildInfo;
   getCachedUpdateInfo(): { updateAvailable: boolean; latest: string | null } | null;
   getUpdateChannel(): "stable" | "beta";
   getDistributionSettings(): Promise<SettingsDistributionPayload>;
@@ -130,10 +125,7 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
       updateAvailable: cachedUpdate?.updateAvailable ?? false,
       latestVersion: cachedUpdate?.latest ?? null,
       updateChannel: deps.getUpdateChannel(),
-      build: {
-        ...deps.buildInfo,
-        shortCommit: deps.buildInfo.commit ? deps.buildInfo.commit.slice(0, 7) : null,
-      },
+      build: buildInfoPayload(deps.buildInfo),
       ...distribution,
     });
   }));
@@ -157,10 +149,7 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
       updateAvailable: cachedUpdate?.updateAvailable ?? false,
       latestVersion: cachedUpdate?.latest ?? null,
       updateChannel: deps.getUpdateChannel(),
-      build: {
-        ...deps.buildInfo,
-        shortCommit: deps.buildInfo.commit ? deps.buildInfo.commit.slice(0, 7) : null,
-      },
+      build: buildInfoPayload(deps.buildInfo),
       autoUpdate: {
         web: storage.getConfigValue("autoUpdateWeb") === "true",
         apk: storage.getConfigValue("autoUpdateApk") === "true",

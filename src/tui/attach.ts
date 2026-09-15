@@ -7,23 +7,18 @@
  */
 
 import {
-  checkUpdate,
   copyToClipboard,
-  installService,
-  installUpdate,
-  isServiceInstalled,
   openInBrowser,
-  readUpdateChannel,
   serviceRestart,
-  uninstallService,
 } from "./commands.js";
-import { repairServiceUnitAfterUpdate } from "../service-self-repair.js";
 import { IpcClient } from "./ipc-client.js";
 import { IpcSnapshotData } from "./ipc-protocol.js";
 import { PidInfo } from "../pidfile.js";
 import { buildLayout, HeaderInfo, LayoutHandle } from "./layout.js";
 import { SessionRow } from "./session-formatter.js";
 import { openServicePanel } from "./service-panel.js";
+import { runOffMicrotask, safeServiceInstalled } from "./runtime-utils.js";
+import { createServiceActions } from "./service-actions.js";
 
 export interface AttachTuiDeps {
   pidInfo: PidInfo;
@@ -155,6 +150,23 @@ export function startAttachTui(deps: AttachTuiDeps): AttachTuiHandle {
   const pollTimer = setInterval(() => { void pollOnce(); }, POLL_INTERVAL_MS);
   pollTimer.unref?.();
 
+  const serviceActions = createServiceActions({
+    configPath: deps.configPath,
+    version: deps.pidInfo.version,
+    layout,
+    updateConfirmBody: ({ current, latest, channelLabel }) =>
+      `通道 ${channelLabel}：当前 ${current} → 最新 ${latest}，立即升级？升级后请按 R 重启服务。`,
+    installServiceBody: (isRoot) => process.platform === "linux"
+      ? `将写入 /etc/systemd/system/wand.service，systemctl enable --now，开机自启。\n${
+          isRoot ? "当前是 root，可以直接装。" : "⚠ 需要 root,可以 Ctrl+C 退出 TUI 后跑 sudo wand service:install。"
+        }`
+      : process.platform === "darwin"
+        ? `将写入 /Library/LaunchDaemons/com.wand.web.plist，launchctl load，开机自启。\n${
+            isRoot ? "当前是 root,可以直接装。" : "⚠ 需要 root,退出 TUI 跑 sudo wand service:install。"
+          }`
+        : "当前平台暂不支持。",
+  });
+
   // —— 键位 —— 服务面板打开时，屏幕级快捷键让位
   const idle = () => !layout.isServicePanelOpen();
 
@@ -171,7 +183,7 @@ export function startAttachTui(deps: AttachTuiDeps): AttachTuiHandle {
   // 运维快捷键 — 与本地模式行为一致，但 R 走"重启系统服务"路径
   layout.screen.key(["g", "G"], () => { if (idle()) openServicePanel({ layout, configPath: deps.configPath }); });
   layout.screen.key(["S-r"], () => { if (idle()) void handleRestart(); });
-  layout.screen.key(["u", "U"], () => { if (idle()) void handleUpdate(); });
+  layout.screen.key(["u", "U"], () => { if (idle()) void serviceActions.handleUpdate(); });
   layout.screen.key(["o", "O"], () => {
     if (!idle()) return;
     const r = openInBrowser(deps.pidInfo.url);
@@ -182,8 +194,8 @@ export function startAttachTui(deps: AttachTuiDeps): AttachTuiHandle {
     const r = copyToClipboard(deps.pidInfo.url);
     layout.showToast(r.message, r.ok ? "success" : "error", 2500);
   });
-  layout.screen.key(["s"], () => { if (idle()) void handleInstallService(); });
-  layout.screen.key(["S-s"], () => { if (idle()) void handleUninstallService(); });
+  layout.screen.key(["s"], () => { if (idle()) void serviceActions.handleInstallService(); });
+  layout.screen.key(["S-s"], () => { if (idle()) void serviceActions.handleUninstallService(); });
 
   async function handleRestart(): Promise<void> {
     const installed = safeServiceInstalled();
@@ -209,82 +221,6 @@ export function startAttachTui(deps: AttachTuiDeps): AttachTuiHandle {
     layout.showToast(accepted ? "已请求主进程退出" : "请求未被接受", accepted ? "success" : "warn", 3500);
   }
 
-  async function handleUpdate(): Promise<void> {
-    layout.showToast("正在检查更新…", "info", 2000);
-    const channel = await runOffMicrotask(() => readUpdateChannel(deps.configPath));
-    const info = await runOffMicrotask(() => checkUpdate(deps.pidInfo.version, channel));
-    if (!info.latest) {
-      layout.showToast(
-        info.channel === "beta" ? "无法读取 npm beta 版本" : "无法连接到 npm registry",
-        "error",
-        3500,
-      );
-      return;
-    }
-    if (!info.hasUpdate) {
-      layout.showToast(
-        info.channel === "beta" ? `已是最新 Beta 版本 (${info.current})` : `已是最新版本 (v${info.current})`,
-        "success",
-        3000,
-      );
-      return;
-    }
-    const channelLabel = info.channel === "beta" ? "Beta" : "正式版";
-    const go = await layout.confirm({
-      title: "发现新版本",
-      body: `通道 ${channelLabel}：当前 ${info.current} → 最新 ${info.latest}，立即升级？升级后请按 R 重启服务。`,
-      yes: "回车 / y 安装",
-      no: "Esc / n 取消",
-    });
-    if (!go) return;
-    layout.showToast("正在执行 npm install -g …", "info", 5000);
-    const r = await runOffMicrotask(() => installUpdate(info.channel));
-    layout.showToast(r.message, r.ok ? "success" : "error", 5000);
-    if (r.detail) layout.showDetail(r.ok ? "更新输出" : "更新失败", r.detail);
-    if (r.ok) {
-      // 镜像 install.sh：装完用全局安装刷新服务 unit（ExecStart/PATH），再按 R 重启服务生效。
-      const repair = await runOffMicrotask(() => repairServiceUnitAfterUpdate(deps.configPath));
-      if (repair.scope) layout.showToast(repair.message, repair.repaired ? "success" : "warn", 4500);
-    }
-  }
-
-  async function handleInstallService(): Promise<void> {
-    if (isServiceInstalled()) {
-      layout.showToast("服务已安装，按 Shift+S 卸载", "warn", 2500);
-      return;
-    }
-    const isRoot = typeof process.getuid === "function" ? process.getuid() === 0 : false;
-    const body = process.platform === "linux"
-      ? `将写入 /etc/systemd/system/wand.service，systemctl enable --now，开机自启。\n${
-          isRoot ? "当前是 root，可以直接装。" : "⚠ 需要 root,可以 Ctrl+C 退出 TUI 后跑 sudo wand service:install。"
-        }`
-      : process.platform === "darwin"
-        ? `将写入 /Library/LaunchDaemons/com.wand.web.plist，launchctl load，开机自启。\n${
-            isRoot ? "当前是 root,可以直接装。" : "⚠ 需要 root,退出 TUI 跑 sudo wand service:install。"
-          }`
-        : "当前平台暂不支持。";
-    const ok = await layout.confirm({ title: "注册为系统服务", body });
-    if (!ok) return;
-    const r = await runOffMicrotask(() => installService({ configPath: deps.configPath }));
-    layout.showToast(r.message, r.ok ? "success" : "error", 5000);
-    if (r.detail) layout.showDetail(r.ok ? "服务安装详情" : "服务安装失败", r.detail);
-  }
-
-  async function handleUninstallService(): Promise<void> {
-    if (!isServiceInstalled()) {
-      layout.showToast("当前未安装系统服务", "warn", 2500);
-      return;
-    }
-    const ok = await layout.confirm({
-      title: "卸载系统服务",
-      body: "将禁用并删除 wand 的 systemd / launchd 配置，确认继续？",
-    });
-    if (!ok) return;
-    const r = await runOffMicrotask(() => uninstallService());
-    layout.showToast(r.message, r.ok ? "success" : "error", 4000);
-    if (r.detail) layout.showDetail(r.ok ? "服务卸载详情" : "服务卸载失败", r.detail);
-  }
-
   async function stop(): Promise<void> {
     if (stopping || !active) return;
     stopping = true;
@@ -302,14 +238,3 @@ export function startAttachTui(deps: AttachTuiDeps): AttachTuiHandle {
   return { stop };
 }
 
-function safeServiceInstalled(): boolean {
-  try { return isServiceInstalled(); } catch { return false; }
-}
-
-function runOffMicrotask<T>(fn: () => T): Promise<T> {
-  return new Promise((resolve, reject) => {
-    setImmediate(() => {
-      try { resolve(fn()); } catch (err) { reject(err); }
-    });
-  });
-}

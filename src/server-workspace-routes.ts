@@ -16,18 +16,11 @@ import type { SessionRegistry } from "./session-registry.js";
 import type { WandStorage } from "./storage.js";
 import { collectSessionTopicBlocklist } from "./session-topic.js";
 import { resolveSessionDisplayTitle } from "./session-transport.js";
-import { GLOBAL_WORKSPACE_ID, type LayoutNode, type PaneTab, type SessionProvider, type SessionSnapshot, type TaskWindowLayout, type Workspace, type WorkspaceDefaultProvider, type WorkspaceTask, type WorkspaceTaskWorktree } from "./types.js";
-import {
-  attachUnboundSessionsToWorkspace,
-  backfillSessionWorkspaces,
-  normalizeProjectCwd,
-  projectCwdForSession,
-  renameWorkspaceDirectory,
-  syncDirectoryNameForWorkspace,
-} from "./workspace-binding.js";
+import { type LayoutNode, type PaneTab, type SessionSnapshot, type TaskWindowLayout, type Workspace, type WorkspaceDefaultProvider, type WorkspaceTask, type WorkspaceTaskWorktree } from "./types.js";
+import { attachUnboundSessionsToWorkspace, backfillSessionWorkspaces, normalizeProjectCwd, projectCwdForSession, isGlobalWorkspace, syncDirectoryNameForWorkspace } from "./workspace-binding.js";
 import { archiveBoardTaskForWorkspaceTask, ensureBoardTaskForWorkspaceTask } from "./wand-task-sync.js";
-
-const PROVIDERS: ReadonlySet<string> = new Set(["claude", "codex", "opencode", "grok", "qoder", "pi"]);
+import { isSessionProvider } from "./session-provider.js";
+import { firstLayoutTabId } from "./layout-tree.js";
 
 function workspaceSessionTitle(
   session: SessionSnapshot,
@@ -102,7 +95,7 @@ function rememberCreatedAt(target: { createdAt?: string }, iso?: string | null):
 }
 
 function parseDefaultProvider(value: unknown): WorkspaceDefaultProvider | undefined {
-  return typeof value === "string" && PROVIDERS.has(value) ? (value as SessionProvider) : undefined;
+  return isSessionProvider(value) ? value : undefined;
 }
 
 /** Resolve + validate a workspace cwd: expand home, require an existing directory. */
@@ -124,10 +117,6 @@ function deleteSessions(
     if (sessions) sessions.deleteWithProviderHistory(sessionId);
     else storage.deleteSession(sessionId);
   }
-}
-
-function isGlobalWorkspace(workspace: Pick<Workspace, "kind" | "id">): boolean {
-  return workspace.kind === "global" || workspace.id === GLOBAL_WORKSPACE_ID;
 }
 
 function taskRuntimeCwd(task: WorkspaceTask, workspace: Pick<Workspace, "cwd"> | null | undefined): string {
@@ -266,11 +255,6 @@ export function sanitizeLayout(value: unknown): LayoutNode | null {
 function layoutHasTab(node: LayoutNode, tabId: string): boolean {
   if (node.type === "pane") return node.tabs.some((tab) => tab.id === tabId);
   return layoutHasTab(node.children[0], tabId) || layoutHasTab(node.children[1], tabId);
-}
-
-function firstLayoutTabId(node: LayoutNode): string | undefined {
-  if (node.type === "pane") return node.tabs[node.active]?.id ?? node.tabs[0]?.id;
-  return firstLayoutTabId(node.children[0]) ?? firstLayoutTabId(node.children[1]);
 }
 
 /** 校验任务级工作窗口集合；旧版单棵布局会兼容升级成一个 window。 */

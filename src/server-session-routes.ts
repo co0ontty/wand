@@ -27,12 +27,13 @@ import {
 } from "./git-quick-commit.js";
 
 import { getErrorMessage } from "./error-utils.js";
+import { inferProviderFromCommand, isSessionProvider, providerCliCommand, SESSION_PROVIDERS } from "./session-provider.js";
 import { buildProviderResumeCommand, isProviderSessionId } from "./resume-policy.js";
 import { parseBoundedInteger } from "./request-limits.js";
 import { asyncRoute } from "./express-async.js";
 import { sendRouteError } from "./server-request.js";
 import { registerStructuredResumeRoutes } from "./server-resume-routes.js";
-import { SessionRegistry } from "./session-registry.js";
+import { addHiddenSessionIds, removeHiddenSessionIds, SessionRegistry } from "./session-registry.js";
 import { enrichStructuredMessages, WAND_PROTOCOL_VERSION } from "./structured-client-protocol.js";
 import {
   buildDirectoryTree,
@@ -139,55 +140,6 @@ function getInputDebugMeta(error: unknown) {
   return { error };
 }
 
-function getHiddenClaudeSessionIds(storage: WandStorage): Set<string> {
-  const raw = storage.getConfigValue("hidden_claude_session_ids");
-  if (!raw) return new Set();
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return new Set(Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string") : []);
-  } catch {
-    return new Set();
-  }
-}
-
-function saveHiddenClaudeSessionIds(storage: WandStorage, ids: Set<string>): void {
-  storage.setConfigValue("hidden_claude_session_ids", JSON.stringify(Array.from(ids)));
-}
-
-function addToHiddenClaudeSessionIds(storage: Pick<WandStorage, "getConfigValue" | "setConfigValue">, ids: string[]): void {
-  if (ids.length === 0) return;
-  const raw = storage.getConfigValue("hidden_claude_session_ids");
-  let hidden: Set<string>;
-  try {
-    const parsed = raw ? JSON.parse(raw) as unknown : [];
-    hidden = new Set(Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string") : []);
-  } catch {
-    hidden = new Set();
-  }
-  let changed = false;
-  for (const id of ids) {
-    if (!hidden.has(id)) {
-      hidden.add(id);
-      changed = true;
-    }
-  }
-  if (changed) {
-    storage.setConfigValue("hidden_claude_session_ids", JSON.stringify(Array.from(hidden)));
-  }
-}
-
-function removeFromHiddenClaudeSessionIds(storage: WandStorage, ids: string[]): void {
-  if (ids.length === 0) return;
-  const hidden = getHiddenClaudeSessionIds(storage);
-  let changed = false;
-  for (const id of ids) {
-    changed = hidden.delete(id) || changed;
-  }
-  if (changed) {
-    saveHiddenClaudeSessionIds(storage, hidden);
-  }
-}
-
 type SessionDeletionProcesses = Pick<
   ProcessManager,
   "get" | "delete"
@@ -221,11 +173,8 @@ export function deleteSessionWithProviderHistory(
 
   const provider = snapshot.provider
     ?? snapshot.structuredState?.provider
-    ?? (/^codex\b/i.test(snapshot.command.trim())
-      ? "codex"
-      : /^opencode\b/i.test(snapshot.command.trim())
-        ? "opencode"
-        : "claude");
+    ?? inferProviderFromCommand(snapshot.command)
+    ?? "claude";
 
   if (provider === "claude") {
     processes.deleteClaudeHistoryFiles([{
@@ -244,7 +193,7 @@ export function deleteSessionWithProviderHistory(
 
   // History deletion is intentionally best-effort at the filesystem layer.
   // Keep a tombstone as a fallback for permission errors or process tail writes.
-  addToHiddenClaudeSessionIds(storage, [providerSessionId]);
+  addHiddenSessionIds(storage, [providerSessionId]);
 }
 
 type SessionListPageEntry = {
@@ -423,18 +372,11 @@ function getWorktreeMergePayload(error: unknown, fallback: string) {
 
 function resolvePtyResumeProvider(snapshot: SessionSnapshot): SessionProvider {
   if (snapshot.provider) return snapshot.provider;
-  const command = snapshot.command.trim();
-  if (/^codex\b/.test(command)) return "codex";
-  if (/^opencode\b/.test(command)) return "opencode";
-  if (/^grok\b/.test(command)) return "grok";
-  if (/^qodercli\b/.test(command)) return "qoder";
-  if (/^pi\b/.test(command)) return "pi";
-  return "claude";
+  return inferProviderFromCommand(snapshot.command) ?? "claude";
 }
 
 function isPtyProviderCommand(provider: SessionProvider, command: string): boolean {
-  const executable = provider === "qoder" ? "qodercli" : provider;
-  return new RegExp(`^${executable}\\b`, "i").test(command.trim());
+  return new RegExp(`^${providerCliCommand(provider)}\\b`, "i").test(command.trim());
 }
 
 async function startResumedPtySession(
@@ -505,8 +447,7 @@ function canAutoResumePtyForInput(snapshot: SessionSnapshot | null, input: strin
     snapshot
     && (snapshot.sessionKind ?? "pty") === "pty"
     && snapshot.status !== "running"
-    && (snapshot.provider === "claude" || snapshot.provider === "codex" || snapshot.provider === "opencode" || snapshot.provider === "grok" || snapshot.provider === "qoder" || snapshot.provider === "pi"
-      || /^(?:claude|codex|opencode|grok|qodercli)\b/.test(snapshot.command.trim()))
+    && (isSessionProvider(snapshot.provider) || Boolean(inferProviderFromCommand(snapshot.command)))
     && snapshot.claudeSessionId
     && input
   );
@@ -629,11 +570,11 @@ export function registerSessionRoutes(
   app.post("/api/structured-sessions", asyncRoute(async (req, res) => {
     const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner; provider?: string; worktreeEnabled?: boolean; model?: string; thinkingEffort?: string; sessionSource?: unknown; automationId?: unknown; workspaceId?: string; workspaceTaskId?: string };
     try {
-      if (body.provider && body.provider !== "claude" && body.provider !== "codex" && body.provider !== "opencode" && body.provider !== "grok" && body.provider !== "qoder" && body.provider !== "pi") {
+      if (body.provider && !isSessionProvider(body.provider)) {
         res.status(400).json({ error: "结构化会话当前仅支持 Claude、Codex、OpenCode、Grok、Qoder 或 Pi provider。" });
         return;
       }
-      const provider: SessionProvider = body.provider === "codex" || body.provider === "opencode" || body.provider === "grok" || body.provider === "qoder" || body.provider === "pi" ? body.provider : "claude";
+      const provider: SessionProvider = isSessionProvider(body.provider) ? body.provider : "claude";
       const rawModel = typeof body.model === "string" ? body.model.trim() : "";
       const origin = parseSessionCreationOrigin(body);
       const cwd = resolveSessionCwd(body.cwd, config.defaultCwd);
@@ -1482,7 +1423,7 @@ export function registerClaudeHistoryRoutes(
 ): void {
   // Older clients still GET these endpoints. Wand no longer imports provider-native
   // history into its session list, so the supported list response stays empty.
-  for (const provider of ["claude", "codex", "opencode", "qoder", "grok", "pi"] as const) {
+  for (const provider of SESSION_PROVIDERS) {
     app.get(`/api/${provider}-history`, (_req, res) => {
       res.json([]);
     });
@@ -1524,8 +1465,8 @@ export function registerClaudeHistoryRoutes(
     const toDelete = ids.filter((id) => existing.has(id));
     const toHide = ids.filter((id) => !existing.has(id));
     const deleted = historyFiles[provider].remove(toDelete);
-    removeFromHiddenClaudeSessionIds(storage, toDelete);
-    addToHiddenClaudeSessionIds(storage, toHide);
+    removeHiddenSessionIds(storage, toDelete);
+    addHiddenSessionIds(storage, toHide);
     return deleted + toHide.length;
   };
 
@@ -1578,7 +1519,7 @@ export function registerClaudeHistoryRoutes(
         .filter((session) => session.claudeSessionId && session.cwd === cwd)
         .map((session) => ({ claudeSessionId: session.claudeSessionId, cwd: session.cwd }));
       const deleted = processes.deleteClaudeHistoryFiles(toDelete);
-      removeFromHiddenClaudeSessionIds(storage, toDelete.map((session) => session.claudeSessionId));
+      removeHiddenSessionIds(storage, toDelete.map((session) => session.claudeSessionId));
       res.json({ ok: true, deleted });
     } catch (error) {
       sendRouteError(res, error, "无法删除该目录下的历史会话。", 500);

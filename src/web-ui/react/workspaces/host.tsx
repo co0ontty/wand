@@ -3,6 +3,7 @@
 // 选中已有目录时按路径复用对应分组，不再提供单独的项目创建界面。
 
 import { type FormEvent, useEffect, useState, useSyncExternalStore } from "react";
+import * as React from "react";
 
 import { WandButton, WandDialogSurface, WandIcon, WandSwitch } from "../ui";
 import { MilestonePicker } from "../milestones/picker";
@@ -24,14 +25,10 @@ import type {
   WorkspacesRepository,
 } from "./types";
 import { WORKSPACE_AGENT_OPTIONS, WorkspaceAgentPicker } from "./workspace-agent-picker";
+import { describeError } from "../errors";
 
 export interface WorkspacesHostProps {
   repository?: WorkspacesRepository;
-}
-
-function presentError(error: unknown, fallback: string): string {
-  if (!(error instanceof Error) || !error.message || error.message === "Failed to fetch") return fallback;
-  return error.message;
 }
 
 /** 与服务端 resolveWorkspaceCwd 的 path.resolve 结果对齐的轻量归一化。 */
@@ -101,7 +98,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
         }
       })
       .catch((loadError) => {
-        if (!abort.signal.aborted) setError(presentError(loadError, "无法加载新建配置。"));
+        if (!abort.signal.aborted) setError(describeError(loadError, "无法加载新建配置。"));
       })
       .finally(() => {
         if (!abort.signal.aborted) setLoading(false);
@@ -204,11 +201,11 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
           );
         }
       } catch (sessionError) {
-        runtime.toast(presentError(sessionError, "任务已创建，但无法启动会话。"), "warning");
+        runtime.toast(describeError(sessionError, "任务已创建，但无法启动会话。"), "warning");
       }
       workspacesController.close();
     } catch (createError) {
-      setError(presentError(createError, "创建任务失败，请检查目录是否有效。"));
+      setError(describeError(createError, "创建任务失败，请检查目录是否有效。"));
     } finally {
       workspacesController.setDismissable(true);
       setSubmitting(false);

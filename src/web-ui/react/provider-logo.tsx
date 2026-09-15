@@ -9,6 +9,7 @@ import {
   PI_LOGO_PATH,
   normalizeProviderId,
 } from "../provider-identity";
+import { classNames } from "./ui/class-names";
 
 void React;
 
@@ -17,13 +18,9 @@ export interface ProviderLogoProps {
   className?: string;
 }
 
-function classes(...values: Array<string | false | null | undefined>): string {
-  return values.filter(Boolean).join(" ");
-}
-
 export function ProviderLogo({ provider, className }: ProviderLogoProps) {
   const normalized = normalizeProviderId(provider);
-  const logoClass = classes(
+  const logoClass = classNames(
     "wand-provider-logo",
     `wand-provider-logo-${normalized ?? "generic"}`,
     className,

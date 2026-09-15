@@ -6,19 +6,7 @@ import type {
   WandTaskStatus,
 } from "../../../task-types";
 import { normalizeIssueAgentDefaults, type IssueWorkspace } from "./task-board-agent";
-
-async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
-  const value = await response.json().catch(() => ({})) as { error?: string };
-  if (!response.ok || value.error) throw new Error(value.error || `请求失败（${response.status}）`);
-  return value as T;
-}
-
-const json = (body: unknown, method = "POST"): RequestInit => ({
-  method,
-  headers: { "content-type": "application/json" },
-  body: JSON.stringify(body),
-});
+import { jsonBody, requestJson } from "../http-adapter";
 
 let agentDefaultsWrite = Promise.resolve();
 
@@ -40,6 +28,8 @@ export interface IssueSessionSummary {
   cwd: string;
   model: string;
   thinkingEffort: string;
+  /** 会话实际跑的执行模式；旧会话可能为空。 */
+  mode?: string;
 }
 
 export interface IssueDispatchResult {
@@ -50,20 +40,21 @@ export interface IssueDispatchResult {
     provider: string;
     model: string | null;
     thinkingEffort: string;
+    mode?: string;
     cwd: string;
   };
 }
 
 export const taskBoardRepository = {
   list(workspaceId?: string): Promise<WandTaskListed[]> {
-    return request(`/api/wand-tasks${workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : ""}`);
+    return requestJson(`/api/wand-tasks${workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : ""}`);
   },
   workspaces(): Promise<IssueWorkspace[]> {
-    return request("/api/workspaces");
+    return requestJson("/api/workspaces");
   },
   /** 服务端模型目录；派发下拉需要按 provider 过滤可选模型。 */
   models(): Promise<unknown> {
-    return request("/api/models");
+    return requestJson("/api/models");
   },
   create(input: {
     workspaceId: string | null;
@@ -78,20 +69,20 @@ export const taskBoardRepository = {
     milestoneId?: string | null;
     agent?: WandTaskAgent | null;
   }): Promise<WandTaskListed> {
-    return request("/api/wand-tasks", json(input));
+    return requestJson("/api/wand-tasks", jsonBody(input));
   },
   /** 单条任务：新建后用来确认后台自动标题是否已经生成。 */
   get(id: string): Promise<WandTaskListed> {
-    return request(`/api/wand-tasks/${encodeURIComponent(id)}`);
+    return requestJson(`/api/wand-tasks/${encodeURIComponent(id)}`);
   },
   update(
     id: string,
     patch: Partial<Pick<WandTask, "title" | "titleSource" | "description" | "status" | "priority" | "labels" | "dueDate" | "milestoneId" | "workspaceId" | "sortOrder" | "agent">>,
   ): Promise<WandTaskListed> {
-    return request(`/api/wand-tasks/${encodeURIComponent(id)}`, json(patch, "PATCH"));
+    return requestJson(`/api/wand-tasks/${encodeURIComponent(id)}`, jsonBody(patch, "PATCH"));
   },
   remove(id: string): Promise<void> {
-    return request(`/api/wand-tasks/${encodeURIComponent(id)}`, { method: "DELETE" }).then(() => undefined);
+    return requestJson(`/api/wand-tasks/${encodeURIComponent(id)}`, { method: "DELETE" }).then(() => undefined);
   },
   /** 用选定的 CLI 工具开一个结构化会话；prompt 作为这次派发的首条消息。 */
   dispatch(
@@ -99,15 +90,15 @@ export const taskBoardRepository = {
     agent: WandTaskAgent,
     extra?: { prompt?: string; workspaceId?: string | null },
   ): Promise<IssueDispatchResult> {
-    return request(`/api/wand-tasks/${encodeURIComponent(id)}/dispatch`, json({
+    return requestJson(`/api/wand-tasks/${encodeURIComponent(id)}/dispatch`, jsonBody({
       agent,
       ...(extra?.prompt != null ? { prompt: extra.prompt } : {}),
       ...(extra && "workspaceId" in extra ? { workspaceId: extra.workspaceId ?? null } : {}),
     }));
   },
-  /** 任务面板上次选用的 CLI 工具 / 模型 / 思考深度。 */
+  /** 任务面板上次选用的 CLI 工具 / 模型 / 思考深度 / 工作模式。 */
   agentDefaults(): Promise<WandTaskAgent> {
-    return request("/api/wand-task-agent-defaults")
+    return requestJson("/api/wand-task-agent-defaults")
       .then((payload) => normalizeIssueAgentDefaults(payload))
       .catch(() => normalizeIssueAgentDefaults(null));
   },
@@ -115,7 +106,7 @@ export const taskBoardRepository = {
     const write = agentDefaultsWrite
       .catch(() => undefined)
       .then(async () => {
-        await request("/api/wand-task-agent-defaults", json(agent, "PUT"));
+        await requestJson("/api/wand-task-agent-defaults", jsonBody(agent, "PUT"));
       });
     agentDefaultsWrite = write;
     return write;

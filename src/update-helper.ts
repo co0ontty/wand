@@ -1,12 +1,13 @@
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { type ServiceScope } from "./tui/commands.js";
+import { readServiceEntrypoint, type ServiceScope } from "./tui/commands.js";
 import { resolveGlobalWandBin } from "./npm-update-utils.js";
+import { shellQuote, shellQuoteAll } from "./shell-quote.js";
 
 export interface DetachedUpdateOptions {
   installSpec: string;
@@ -25,14 +26,6 @@ export interface DetachedUpdateResult {
   logPath: string;
   pid?: number;
   message: string;
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
-
-function shellArray(values: string[]): string {
-  return values.map((value) => shellQuote(value)).join(" ");
 }
 
 function resolveBashPath(): string {
@@ -127,37 +120,9 @@ export function isStableServiceEntrypoint(entrypoint: string | null, stableBin: 
   }
 }
 
-function readManagedServiceEntrypoint(scope: ServiceScope): string | null {
-  if (process.platform === "darwin") {
-    const plist = scope === "system"
-      ? "/Library/LaunchDaemons/com.wand.web.plist"
-      : path.join(os.homedir(), "Library/LaunchAgents/com.wand.web.plist");
-    const result = spawnSync(
-      "plutil",
-      ["-extract", "ProgramArguments.1", "raw", "-o", "-", plist],
-      { encoding: "utf8", timeout: 5_000 },
-    );
-    return result.status === 0 ? (result.stdout || "").trim() || null : null;
-  }
-  if (process.platform === "linux") {
-    const unit = scope === "system"
-      ? "/etc/systemd/system/wand.service"
-      : path.join(os.homedir(), ".config/systemd/user/wand.service");
-    try {
-      const execStart = readFileSync(unit, "utf8").split("\n").find((line) => line.startsWith("ExecStart="));
-      if (!execStart) return null;
-      const tokens = execStart.slice("ExecStart=".length).trim().split(/\s+/);
-      return tokens[1] || null;
-    } catch {
-      return null;
-    }
-  }
-  return null;
-}
-
 function managedServiceUpdatePreflight(scope: ServiceScope): { ok: true } | { ok: false; message: string } {
   const stableBin = resolveGlobalWandBin();
-  const entrypoint = readManagedServiceEntrypoint(scope);
+  const entrypoint = readServiceEntrypoint(scope);
   if (isStableServiceEntrypoint(entrypoint, stableBin)) return { ok: true };
   const command = scope === "system"
     ? `sudo ${stableBin || "wand"} service:install -c <config-path>`
@@ -223,7 +188,7 @@ export function buildDetachedUpdateHelperScript(
   if (updateUtilsPath.endsWith(".ts") && nodeLoaderArgs.length === 0) {
     throw new Error("本地 TypeScript 更新 helper 无法解析 tsx loader，请先运行 npm install。");
   }
-  const nodeLoaderCommand = nodeLoaderArgs.length > 0 ? `${shellArray(nodeLoaderArgs)} ` : "";
+  const nodeLoaderCommand = nodeLoaderArgs.length > 0 ? `${shellQuoteAll(nodeLoaderArgs)} ` : "";
 
   return `#!/usr/bin/env bash
 set -euo pipefail
@@ -245,7 +210,7 @@ NODE_BIN=${shellQuote(process.execPath)}
 UPDATE_UTILS=${shellQuote(updateUtilsPath)}
 GLOBAL_CLI_PATH_FILE=${shellQuote(`${logPath}.cli-path`)}
 WORKING_DIRECTORY=${shellQuote(opts.cwd)}
-CLI_ARGS=(${shellArray(opts.cliArgs)})
+CLI_ARGS=(${shellQuoteAll(opts.cliArgs)})
 GLOBAL_CLI=""
 PARENT_EXITED=0
 

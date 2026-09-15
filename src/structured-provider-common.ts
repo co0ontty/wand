@@ -1,5 +1,14 @@
 import type { SessionProvider, SessionRunner, SessionSnapshot, StructuredSessionState, WandConfig } from "./types.js";
 
+/** 判断任意值是否为合法的 thinking effort 字面量（含 `codex:<level>` 形式）。 */
+export function isThinkingEffort(value: unknown): value is NonNullable<SessionSnapshot["thinkingEffort"]> {
+  return value === "off"
+    || value === "standard"
+    || value === "deep"
+    || value === "max"
+    || (typeof value === "string" && /^codex:[a-z0-9][a-z0-9_-]{0,31}$/.test(value));
+}
+
 export function isStructuredRunnerForProvider(provider: SessionProvider, runner: unknown): runner is SessionRunner {
   if (provider === "claude") return runner === "claude-sdk" || runner === "claude-cli-print";
   if (provider === "codex") return runner === "codex-cli-exec";
@@ -76,7 +85,11 @@ export function thinkingEffortToCodexReasoningEffort(effort: SessionSnapshot["th
   return null;
 }
 
-export function thinkingEffortToOpenCodeVariant(effort: SessionSnapshot["thinkingEffort"]): string | null {
+/**
+ * OpenCode / Grok / Qoder 三家共用同一套 effort 级别（off/standard/deep/max →
+ * null/low/high/max），`codex:<level>` 透传 level。
+ */
+function thinkingEffortToLowHighMax(effort: SessionSnapshot["thinkingEffort"]): string | null {
   if (!effort || effort === "off") return null;
   if (effort === "standard") return "low";
   if (effort === "deep") return "high";
@@ -84,21 +97,9 @@ export function thinkingEffortToOpenCodeVariant(effort: SessionSnapshot["thinkin
   return effort.startsWith("codex:") ? effort.slice("codex:".length) || null : null;
 }
 
-export function thinkingEffortToGrokEffort(effort: SessionSnapshot["thinkingEffort"]): string | null {
-  if (!effort || effort === "off") return null;
-  if (effort === "standard") return "low";
-  if (effort === "deep") return "high";
-  if (effort === "max") return "max";
-  return effort.startsWith("codex:") ? effort.slice("codex:".length) || null : null;
-}
-
-export function thinkingEffortToQoderEffort(effort: SessionSnapshot["thinkingEffort"]): string | null {
-  if (!effort || effort === "off") return null;
-  if (effort === "standard") return "low";
-  if (effort === "deep") return "high";
-  if (effort === "max") return "max";
-  return effort.startsWith("codex:") ? effort.slice("codex:".length) || null : null;
-}
+export const thinkingEffortToOpenCodeVariant = thinkingEffortToLowHighMax;
+export const thinkingEffortToGrokEffort = thinkingEffortToLowHighMax;
+export const thinkingEffortToQoderEffort = thinkingEffortToLowHighMax;
 
 export function thinkingEffortToPiLevel(effort: SessionSnapshot["thinkingEffort"]): string | null {
   if (!effort || effort === "off") return "off";

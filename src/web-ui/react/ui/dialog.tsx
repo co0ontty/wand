@@ -1,10 +1,12 @@
-import * as DialogPrimitive from "@radix-ui/react-dialog";
 import {
-  type KeyboardEvent,
-  type ReactNode,
-  useRef,
-  useState,
-} from "react";
+  Dialog as AppicaDialog,
+  DialogClose as AppicaDialogClose,
+  DialogContent as AppicaDialogContent,
+  DialogDescription as AppicaDialogDescription,
+  DialogTitle as AppicaDialogTitle,
+} from "@appica/ui-react/dialog";
+import * as React from "react";
+import { type ComponentProps, type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { WandButton, type WandButtonKind } from "./button";
 import { classNames } from "./class-names";
 import { WandIcon, type WandIconName } from "./icons";
@@ -63,6 +65,26 @@ const defaultIcons: Record<WandDialogTone, WandIconName> = {
   question: "question",
 };
 
+type AppicaDialogOpenChange = NonNullable<ComponentProps<typeof AppicaDialog>["onOpenChange"]>;
+type AppicaDialogChangeDetails = Parameters<AppicaDialogOpenChange>[1];
+
+/**
+ * A locked dialog (`dismissable={false}`) must survive Escape and outside
+ * presses. Base UI reports every close attempt through `onOpenChange` with a
+ * reason, so the attempt is cancelled instead of relying on per-event handlers.
+ */
+function makeOpenChangeHandler(dismissable: boolean, onOpenChange: (open: boolean) => void) {
+  return (nextOpen: boolean, details: AppicaDialogChangeDetails): void => {
+    if (!nextOpen && !dismissable) {
+      if (details.reason === "escape-key" || details.reason === "outside-press") {
+        details.cancel();
+        return;
+      }
+    }
+    onOpenChange(nextOpen);
+  };
+}
+
 function resolveDialogIcon(tone: WandDialogTone, icon?: ReactNode): ReactNode {
   if (icon == null || icon === "" || icon === "i" || icon === "!" || icon === "✓" || icon === "?") {
     return <WandIcon name={defaultIcons[tone]} size={18} strokeWidth={1.8} />;
@@ -70,7 +92,13 @@ function resolveDialogIcon(tone: WandDialogTone, icon?: ReactNode): ReactNode {
   return icon;
 }
 
-/** Composable feature dialog that keeps Radix, portals and focus inside ui/**. */
+/** `true` hands the choice back to Base UI (first tabbable in the popup). */
+function firstTabbable(container: HTMLElement | null, selector: string): HTMLElement | true {
+  if (!container) return true;
+  return container.querySelector<HTMLElement>(selector) ?? true;
+}
+
+/** Composable feature dialog rendered by Appica's dialog parts, portalled under `ui/`. */
 export function WandDialogSurface({
   open,
   title,
@@ -89,58 +117,44 @@ export function WandDialogSurface({
 }: WandDialogSurfaceProps) {
   const portalContainer = usePortalContainer();
   const contentRef = useRef<HTMLDivElement>(null);
-  const previouslyFocusedRef = useRef<HTMLElement | null>(null);
   return (
-    <DialogPrimitive.Root
-      open={open}
-      onOpenChange={(nextOpen) => {
-        if (nextOpen || dismissable) onOpenChange(nextOpen);
-      }}
-    >
-      <DialogPrimitive.Portal container={portalContainer}>
-        <DialogPrimitive.Overlay className={overlayClassName} />
-        <DialogPrimitive.Content
-          ref={contentRef}
-          className={className}
-          data-testid={testId}
-          {...(description ? {} : { "aria-describedby": undefined })}
-          onEscapeKeyDown={(event) => { if (!dismissable) event.preventDefault(); }}
-          onInteractOutside={(event) => { if (!dismissable) event.preventDefault(); }}
-          onOpenAutoFocus={(event) => {
-            event.preventDefault();
-            previouslyFocusedRef.current = document.activeElement instanceof HTMLElement
-              ? document.activeElement
-              : null;
-            const target = contentRef.current?.querySelector<HTMLElement>("[data-wand-autofocus]")
-              ?? contentRef.current?.querySelector<HTMLElement>("button, input, [tabindex='0']");
-            target?.focus();
-          }}
-          onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            const previous = previouslyFocusedRef.current;
-            previouslyFocusedRef.current = null;
-            if (previous && document.contains(previous)) previous.focus();
-          }}
-        >
-          <div className={headerClassName}>
-            <div>
-              <DialogPrimitive.Title className={titleClassName}>{title}</DialogPrimitive.Title>
-              {description ? (
-                <DialogPrimitive.Description className={descriptionClassName}>
-                  {description}
-                </DialogPrimitive.Description>
-              ) : null}
-            </div>
-            <DialogPrimitive.Close asChild>
+    <AppicaDialog open={open} onOpenChange={makeOpenChangeHandler(dismissable, onOpenChange)}>
+      <AppicaDialogContent
+        ref={contentRef}
+        container={portalContainer}
+        className={className}
+        backdrop
+        frame={false}
+        closeButton={false}
+        data-testid={testId}
+        backdropProps={{ className: overlayClassName }}
+        viewportProps={{ className: "wand-ui-dialog-viewport" }}
+        initialFocus={() =>
+          firstTabbable(
+            contentRef.current,
+            "[data-wand-autofocus], button, input, [tabindex='0']",
+          )}
+      >
+        <div className={headerClassName}>
+          <div>
+            <AppicaDialogTitle className={titleClassName}>{title}</AppicaDialogTitle>
+            {description ? (
+              <AppicaDialogDescription className={descriptionClassName}>
+                {description}
+              </AppicaDialogDescription>
+            ) : null}
+          </div>
+          <AppicaDialogClose
+            render={
               <WandButton kind="ghost" aria-label={closeLabel} disabled={!dismissable}>
                 {closeContent}
               </WandButton>
-            </DialogPrimitive.Close>
-          </div>
-          {children}
-        </DialogPrimitive.Content>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
+            }
+          />
+        </div>
+        {children}
+      </AppicaDialogContent>
+    </AppicaDialog>
   );
 }
 
@@ -159,10 +173,21 @@ export function WandDialog<T>({
   const portalContainer = usePortalContainer();
   const inputRef = useRef<HTMLInputElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const previouslyFocusedRef = useRef<HTMLElement | null>(
-    document.activeElement instanceof HTMLElement ? document.activeElement : null,
-  );
   const [inputValue, setInputValue] = useState(input?.value ?? "");
+  const hasInput = Boolean(input);
+
+  useEffect(() => {
+    if (!open || !hasInput) return;
+    // Base UI 在自身 layout effect 里聚焦 initialFocus 目标，所以选中要等一帧后再做，
+    // 否则随后的 focus() 会把选区收回光标位置。
+    const frame = requestAnimationFrame(() => {
+      const node = inputRef.current;
+      if (!node) return;
+      node.focus();
+      node.select();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [open, hasInput]);
 
   const primaryAction = actions.find((action) => action.kind === "primary" || action.kind === "danger")
     ?? actions.at(-1);
@@ -174,91 +199,74 @@ export function WandDialog<T>({
   }
 
   return (
-    <DialogPrimitive.Root
+    <AppicaDialog
       open={open}
-      onOpenChange={(nextOpen) => {
-        if (!nextOpen && dismissable) onDismiss();
-      }}
+      onOpenChange={makeOpenChangeHandler(dismissable, (nextOpen) => {
+        if (!nextOpen) onDismiss();
+      })}
     >
-      <DialogPrimitive.Portal container={portalContainer}>
-        <DialogPrimitive.Overlay className="wand-ui-dialog-overlay" />
-        <DialogPrimitive.Content
-          ref={contentRef}
-          className="wand-ui-dialog-content"
-          {...(description ? {} : { "aria-describedby": undefined })}
-          onEscapeKeyDown={(event) => {
-            if (!dismissable) event.preventDefault();
-          }}
-          onInteractOutside={(event) => {
-            if (!dismissable) event.preventDefault();
-          }}
-          onOpenAutoFocus={(event) => {
-            event.preventDefault();
-            if (inputRef.current) {
-              inputRef.current.focus();
-              inputRef.current.select();
-              return;
-            }
-            const target = contentRef.current?.querySelector<HTMLElement>("[data-wand-autofocus]")
-              ?? contentRef.current?.querySelector<HTMLElement>("button");
-            target?.focus();
-          }}
-          onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            const previous = previouslyFocusedRef.current;
-            if (previous && document.contains(previous)) previous.focus();
-          }}
-        >
-          <div className="wand-ui-dialog-header">
-            <div
-              aria-hidden="true"
-              className={classNames("wand-ui-dialog-icon", `wand-ui-dialog-icon-${tone}`)}
+      <AppicaDialogContent
+        ref={contentRef}
+        container={portalContainer}
+        className="wand-ui-dialog-content"
+        backdrop
+        frame={false}
+        closeButton={false}
+        backdropProps={{ className: "wand-ui-dialog-overlay" }}
+        viewportProps={{ className: "wand-ui-dialog-viewport" }}
+        initialFocus={() =>
+          inputRef.current
+          ?? firstTabbable(contentRef.current, "[data-wand-autofocus], button")}
+      >
+        <div className="wand-ui-dialog-header">
+          <div
+            aria-hidden="true"
+            className={classNames("wand-ui-dialog-icon", `wand-ui-dialog-icon-${tone}`)}
+          >
+            {resolveDialogIcon(tone, icon)}
+          </div>
+          <div className="wand-ui-dialog-heading">
+            <AppicaDialogTitle className="wand-ui-dialog-title">
+              {title}
+            </AppicaDialogTitle>
+            {description ? (
+              <AppicaDialogDescription className="wand-ui-dialog-description">
+                {description}
+              </AppicaDialogDescription>
+            ) : null}
+          </div>
+        </div>
+
+        {input ? (
+          <div className="wand-ui-dialog-body">
+            <input
+              ref={inputRef}
+              className="wand-ui-dialog-input"
+              type="text"
+              aria-label={input.label ?? title}
+              autoComplete="off"
+              spellCheck={false}
+              placeholder={input.placeholder}
+              value={inputValue}
+              onChange={(event) => setInputValue(event.currentTarget.value)}
+              onKeyDown={submitPrimary}
+            />
+          </div>
+        ) : null}
+
+        <div className="wand-ui-dialog-actions">
+          {actions.map((action, index) => (
+            <WandButton
+              key={`${action.label}-${index}`}
+              kind={action.kind}
+              data-wand-autofocus={action.autoFocus ? "true" : undefined}
+              onClick={() => onAction(action.value, input ? inputValue : undefined)}
             >
-              {resolveDialogIcon(tone, icon)}
-            </div>
-            <div className="wand-ui-dialog-heading">
-              <DialogPrimitive.Title className="wand-ui-dialog-title">
-                {title}
-              </DialogPrimitive.Title>
-              {description ? (
-                <DialogPrimitive.Description className="wand-ui-dialog-description">
-                  {description}
-                </DialogPrimitive.Description>
-              ) : null}
-            </div>
-          </div>
-
-          {input ? (
-            <div className="wand-ui-dialog-body">
-              <input
-                ref={inputRef}
-                className="wand-ui-dialog-input"
-                type="text"
-                aria-label={input.label ?? title}
-                autoComplete="off"
-                spellCheck={false}
-                placeholder={input.placeholder}
-                value={inputValue}
-                onChange={(event) => setInputValue(event.currentTarget.value)}
-                onKeyDown={submitPrimary}
-              />
-            </div>
-          ) : null}
-
-          <div className="wand-ui-dialog-actions">
-            {actions.map((action, index) => (
-              <WandButton
-                key={`${action.label}-${index}`}
-                kind={action.kind}
-                data-wand-autofocus={action.autoFocus ? "true" : undefined}
-                onClick={() => onAction(action.value, input ? inputValue : undefined)}
-              >
-                {action.label}
-              </WandButton>
-            ))}
-          </div>
-        </DialogPrimitive.Content>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
+              {action.label}
+            </WandButton>
+          ))}
+        </div>
+      </AppicaDialogContent>
+    </AppicaDialog>
   );
 }

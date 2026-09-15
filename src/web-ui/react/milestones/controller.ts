@@ -2,6 +2,7 @@
 // 任何一处新增后另一处的下拉立刻能看到，不会再各自拉一次接口。
 
 import { httpMilestonesRepository, type MilestoneOption, type MilestonesRepository } from "./repository";
+import { failureMessage } from "../errors";
 
 export interface MilestonesSnapshot {
   items: MilestoneOption[];
@@ -25,10 +26,6 @@ function publish(patch: Partial<Omit<MilestonesSnapshot, "revision">>): void {
   for (const listener of listeners) listener();
 }
 
-function message(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
-}
-
 export const milestonesStore = {
   subscribe(listener: Listener): () => void {
     listeners.add(listener);
@@ -44,7 +41,7 @@ export const milestonesStore = {
     publish({ loading: true });
     inflight = repository.list()
       .then((items) => publish({ items, loaded: true, loading: false, error: "" }))
-      .catch((error) => publish({ loading: false, error: message(error, "无法加载里程碑。") }))
+      .catch((error) => publish({ loading: false, error: failureMessage(error, "无法加载里程碑。") }))
       .finally(() => { inflight = null; });
     return inflight;
   },

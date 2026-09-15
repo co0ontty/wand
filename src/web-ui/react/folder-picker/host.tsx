@@ -6,11 +6,13 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import * as React from "react";
 import { WandButton, WandDialogSurface } from "../ui";
 import { folderPickerController, folderPickerStore } from "./controller";
 import { nextFolderPickerIndex, type FolderPickerNavigationKey } from "./model";
 import { httpFolderPickerRepository } from "./repository";
 import type { FolderPickerItem, FolderPickerListing, FolderPickerRepository } from "./types";
+import { failureMessage } from "../errors";
 
 export interface FolderPickerHostProps {
   repository?: FolderPickerRepository;
@@ -22,10 +24,6 @@ const NAVIGATION_KEYS = new Set<FolderPickerNavigationKey>([
   "Home",
   "End",
 ]);
-
-function presentError(error: unknown): string {
-  return error instanceof Error && error.message ? error.message : "无法读取该目录。";
-}
 
 export function FolderPickerHost({ repository = httpFolderPickerRepository }: FolderPickerHostProps) {
   const controller = useSyncExternalStore(
@@ -76,7 +74,7 @@ export function FolderPickerHost({ repository = httpFolderPickerRepository }: Fo
         .catch((loadError) => {
           if (abort.signal.aborted) return;
           setListing(null);
-          setError(presentError(loadError));
+          setError(failureMessage(loadError, "无法读取该目录。"));
         })
         .finally(() => {
           if (!abort.signal.aborted) setLoading(false);
@@ -109,7 +107,7 @@ export function FolderPickerHost({ repository = httpFolderPickerRepository }: Fo
       const applied = await folderPickerController.choose(pathToChoose);
       if (!applied) setError("无法应用工作目录，请刷新页面后重试。");
     } catch (selectionError) {
-      setError(presentError(selectionError));
+      setError(failureMessage(selectionError, "无法读取该目录。"));
     } finally {
       folderPickerController.setDismissable(true);
       setChoosing(false);
@@ -139,7 +137,7 @@ export function FolderPickerHost({ repository = httpFolderPickerRepository }: Fo
       const applied = await folderPickerController.choose(validated.currentPath);
       if (!applied) setError("无法应用工作目录，请刷新页面后重试。");
     } catch (selectionError) {
-      setError(presentError(selectionError));
+      setError(failureMessage(selectionError, "无法读取该目录。"));
     } finally {
       folderPickerController.setDismissable(true);
       setChoosing(false);

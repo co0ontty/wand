@@ -1,7 +1,7 @@
 import * as React from "react";
 import type { WandTaskAgent, WandTaskPriority, WandTaskStatus } from "../../../task-types";
 import { ProviderLogo } from "../provider-logo";
-import { WandIcon, WandPopover, WandSwitch } from "../ui";
+import { WandIcon, WandIconButton, WandMenuItem, WandPopover, WandSwitch } from "../ui";
 import { classNames } from "../ui/class-names";
 import {
   collectIssueLabels,
@@ -14,6 +14,7 @@ import {
   ISSUE_PRIORITIES,
   ISSUE_STATUS_FILTERS,
   issueAgentEffortLabel,
+  issueAgentModeLabel,
   issueAgentProviderLabel,
   issueBoardStats,
   issueDueStamp,
@@ -103,7 +104,6 @@ export function TaskBoardConversationButton({
     align="end"
     side="bottom"
     sideOffset={6}
-    showArrow={false}
     ariaLabel="关联会话"
     className="task-board-conversation-menu"
     trigger={<button
@@ -177,18 +177,16 @@ export function TaskBoardFilterMenu({
   return <WandPopover
     align="end"
     side="bottom"
-    showArrow={false}
     ariaLabel="筛选任务"
     className="task-board-filter-menu"
-    trigger={<button
-      type="button"
+    trigger={<WandIconButton
       className={classNames("task-board-icon-button", count > 0 && "is-active")}
       aria-label={count > 0 ? `筛选（${count}）` : "筛选"}
       title="筛选"
     >
-      <TaskBoardFilterIcon size={14}/>
-      {count > 0 ? <b>{count}</b> : null}
-    </button>}
+      <TaskBoardFilterIcon/>
+      {count > 0 ? <span className="task-board-filter-badge">{count}</span> : null}
+    </WandIconButton>}
   >
     <strong>筛选</strong>
     <p>状态</p>
@@ -238,12 +236,11 @@ export function TaskBoardDisplayMenu({
   return <WandPopover
     align="end"
     side="bottom"
-    showArrow={false}
     ariaLabel="显示设置"
     className="task-board-display-menu"
-    trigger={<button type="button" className="task-board-icon-button" aria-label="显示设置" title="显示设置">
-      <TaskBoardPanelIcon size={15}/>
-    </button>}
+    trigger={<WandIconButton className="task-board-icon-button" aria-label="显示设置" title="显示设置">
+      <TaskBoardPanelIcon/>
+    </WandIconButton>}
   >
     <strong>显示设置</strong>
     <WandSwitch
@@ -660,10 +657,10 @@ export function TaskBoardContextMenu({
     style={{ left: x, top: y }}
     onPointerDown={(event) => event.stopPropagation()}
   >
-    <button type="button" role="menuitem" onClick={onOpen}>打开</button>
-    <button type="button" role="menuitem" onClick={onCopy}>复制 ID</button>
-    <button type="button" role="menuitem" onClick={onDispatch}>派发 Agent</button>
-    <button type="button" role="menuitem" className="is-danger" onClick={onArchive}>归档</button>
+    <WandMenuItem icon="folder" label="打开" onClick={onOpen}/>
+    <WandMenuItem icon="copy" label="复制 ID" onClick={onCopy}/>
+    <WandMenuItem icon="zap" label="派发 Agent" onClick={onDispatch}/>
+    <WandMenuItem icon="trash" label="归档" tone="danger" onClick={onArchive}/>
   </div>;
 }
 
@@ -743,7 +740,7 @@ export function TaskBoardAgentSessionList({
       <header className="task-board-agent-group-head">
         <ProviderLogo provider={group.agent?.provider ?? group.provider} className="task-board-agent-logo"/>
         <strong>{issueAgentProviderLabel(group.agent?.provider ?? group.provider)}</strong>
-        {group.agent ? <span>{group.agent.model === "default" ? "默认模型" : group.agent.model} · {issueAgentEffortLabel(group.agent.thinkingEffort)}</span> : null}
+        {group.agent ? <span>{group.agent.model === "default" ? "默认模型" : group.agent.model} · {issueAgentEffortLabel(group.agent.thinkingEffort)} · {issueAgentModeLabel(group.agent.mode)}</span> : null}
         <b>{group.sessions.length}</b>
       </header>
       {group.sessions.length === 0

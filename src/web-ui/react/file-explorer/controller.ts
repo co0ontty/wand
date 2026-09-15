@@ -10,6 +10,8 @@ import type {
   WandFileExplorerController,
 } from "./types";
 import type { FilePreviewFailure } from "../file-preview/types";
+import { failureOf as unknownFailure, isAbortError } from "../errors";
+import { explorerParentOf as parentOf } from "./paths";
 
 type Listener = () => void;
 type ExpandedMap = Map<string, FileExplorerNodeState>;
@@ -28,22 +30,6 @@ export interface FileExplorerModule {
   controller: WandFileExplorerController;
   store: FileExplorerStore;
   configureRuntime(adapter: FileExplorerRuntimeAdapter): () => void;
-}
-
-function unknownFailure(error: unknown, fallback: string): FilePreviewFailure {
-  return { message: error instanceof Error && error.message ? error.message : fallback };
-}
-
-function isAbort(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "AbortError";
-}
-
-function parentOf(inputPath: string): string {
-  const normalized = inputPath.replace(/\\/g, "/").replace(/\/+$/, "");
-  if (!normalized || normalized === "/") return "/";
-  const index = normalized.lastIndexOf("/");
-  if (index <= 0) return "/";
-  return normalized.slice(0, index);
 }
 
 const defaultRuntime: FileExplorerRuntimeAdapter = {
@@ -141,7 +127,7 @@ export function createFileExplorerModule(options: FileExplorerModuleOptions): Fi
       }
       publishExpanded(next);
     } catch (error) {
-      if (abort.signal.aborted || isAbort(error)) return;
+      if (abort.signal.aborted || isAbortError(error)) return;
       const next = new Map(snapshot.expanded as ExpandedMap);
       next.set(dirPath, {
         entries: [],
@@ -181,7 +167,7 @@ export function createFileExplorerModule(options: FileExplorerModuleOptions): Fi
         searchResults: result.ok && result.results ? result.results : [],
       });
     } catch (error) {
-      if (abort.signal.aborted || isAbort(error)) return;
+      if (abort.signal.aborted || isAbortError(error)) return;
       publish({ searching: false, searchResults: [] });
     }
   }

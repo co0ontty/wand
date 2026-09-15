@@ -14,11 +14,10 @@ import type {
   NewSessionRuntimeContext,
   NewSessionTerminalDimensions,
 } from "./types";
+import { isRecord, stringValue, type JsonRecord } from "../json-utils";
+import { PROVIDER_IDS, providerCliCommand } from "../../provider-identity";
 
 type FetchLike = typeof fetch;
-type JsonRecord = Record<string, unknown>;
-
-const PROVIDERS: readonly NewSessionProvider[] = ["claude", "codex", "opencode", "grok", "qoder", "pi"];
 const KINDS: readonly NewSessionPreferenceKind[] = ["structured", "pty"];
 const MODES: readonly NewSessionMode[] = [
   "default",
@@ -28,16 +27,8 @@ const MODES: readonly NewSessionMode[] = [
   "managed",
 ];
 
-function isRecord(value: unknown): value is JsonRecord {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
 function oneOf<T extends string>(value: unknown, choices: readonly T[], fallback: T): T {
   return typeof value === "string" && choices.includes(value as T) ? value as T : fallback;
-}
-
-function text(value: unknown, fallback = ""): string {
-  return typeof value === "string" ? value : fallback;
 }
 
 async function readJson(response: Response): Promise<JsonRecord> {
@@ -49,7 +40,7 @@ async function readJson(response: Response): Promise<JsonRecord> {
   }
   const record = isRecord(data) ? data : {};
   if (!response.ok || typeof record.error === "string") {
-    const error = new Error(text(record.error, `请求失败 (HTTP ${response.status})`)) as Error & {
+    const error = new Error(stringValue(record.error, `请求失败 (HTTP ${response.status})`)) as Error & {
       status?: number;
     };
     error.status = response.status;
@@ -60,11 +51,11 @@ async function readJson(response: Response): Promise<JsonRecord> {
 
 function normalizeConfig(value: JsonRecord): NewSessionConfig {
   return {
-    defaultProvider: oneOf(value.defaultProvider, PROVIDERS, "claude"),
+    defaultProvider: oneOf(value.defaultProvider, PROVIDER_IDS, "claude"),
     defaultSessionKind: oneOf(value.defaultSessionKind, KINDS, "structured"),
     defaultMode: oneOf(value.defaultMode, MODES, "default"),
-    defaultCwd: text(value.defaultCwd),
-    structuredRunner: text(value.structuredRunner, "cli"),
+    defaultCwd: stringValue(value.defaultCwd),
+    structuredRunner: stringValue(value.structuredRunner, "cli"),
   };
 }
 
@@ -74,7 +65,7 @@ function normalizePaths(value: unknown): NewSessionPath[] {
     if (!isRecord(item) || typeof item.path !== "string" || !item.path.trim()) return [];
     return [{
       path: item.path,
-      name: text(item.name, item.path.split("/").filter(Boolean).at(-1) ?? item.path),
+      name: stringValue(item.name, item.path.split("/").filter(Boolean).at(-1) ?? item.path),
     }];
   });
 }
@@ -106,10 +97,6 @@ function structuredRunner(provider: NewSessionProvider, configured: string): str
   return configured === "sdk" || configured === "claude-sdk"
     ? "claude-sdk"
     : "claude-cli-print";
-}
-
-function ptyCommand(provider: NewSessionProvider): string {
-  return provider === "qoder" ? "qodercli" : provider;
 }
 
 export function buildCreateRequest(
@@ -151,7 +138,7 @@ export function buildCreateRequest(
       ...base,
       ...terminalDimensions,
       kind: "pty",
-      command: ptyCommand(form.provider),
+      command: providerCliCommand(form.provider),
     };
   }
 

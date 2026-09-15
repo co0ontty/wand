@@ -1,43 +1,138 @@
 import * as React from "react";
 
-import { WandIcon, WandPopover, type WandIconName } from "../ui";
+import {
+  WandButton,
+  WandDropdownMenu,
+  WandDropdownMenuContent,
+  WandDropdownMenuItem,
+  WandDropdownMenuSeparator,
+  WandDropdownMenuTrigger,
+  WandIcon,
+  WandIconButton,
+  type WandIconName,
+} from "../ui";
 import { localPreviewController } from "../local-preview/controller";
 import { classNames } from "../ui/class-names";
 
-import { getShellSidebarEntryActions } from "./shell-sidebar";
+import { getShellSidebarEntryActions, type ShellSidebarEntryActions } from "./shell-sidebar";
 import { useUiDispatch, useUiStoreSnapshot } from "./ui-store-react";
-import type { UiAction } from "./ui-store";
+import type { UiAction, UiSessionVm } from "./ui-store";
 
 void React;
 
-function MoreItem({
-  action,
-  actionName,
-  label,
-  icon,
-  danger,
-  disabled,
-  onAction,
-}: {
-  action: UiAction;
-  actionName: string;
-  label: string;
-  icon: Extract<WandIconName, "copy" | "folder" | "hash" | "merge" | "trash">;
-  danger?: boolean;
-  disabled?: boolean;
+type TopbarMoreIcon = Extract<WandIconName, "copy" | "folder" | "hash" | "merge" | "trash">;
+
+export interface TopbarMoreAction {
+  readonly action: UiAction;
+  /** The `data-action` hook the browser layer dispatches through. */
+  readonly actionName: string;
+  readonly label: string;
+  readonly icon: TopbarMoreIcon;
+  readonly tone?: "danger";
+  readonly disabled?: boolean;
+  /** Draw a separator before this row. */
+  readonly dividerBefore?: boolean;
+}
+
+/**
+ * The open-session action list as data.
+ *
+ * Kept separate from the JSX so the contract (which actions exist, in which
+ * order, and the `data-action` hooks the browser layer dispatches through) can
+ * be asserted without rendering a portalled menu.
+ */
+export function getTopbarMoreActions(
+  selected: UiSessionVm,
+  actions: ShellSidebarEntryActions | null,
+): TopbarMoreAction[] {
+  const items: TopbarMoreAction[] = [];
+  if (selected.claudeSessionId) {
+    items.push({
+      action: { type: "topbar.copy", field: "providerSessionId" },
+      actionName: "copy-claude-session-id",
+      label: selected.provider === "codex"
+        ? "复制 Codex thread ID"
+        : selected.provider === "opencode"
+          ? "复制 OpenCode session ID"
+          : "复制 Claude 会话 ID",
+      icon: "copy",
+    });
+  }
+  if (selected.cwd) {
+    items.push({
+      action: { type: "topbar.copy", field: "cwd" },
+      actionName: "copy-cwd",
+      label: "复制工作目录",
+      icon: "folder",
+    });
+  }
+  items.push({
+    action: { type: "topbar.copy", field: "sessionId" },
+    actionName: "copy-session-id",
+    label: "复制会话 ID",
+    icon: "hash",
+  });
+  if (actions?.merge) {
+    items.push({
+      action: actions.merge,
+      actionName: "worktree-merge",
+      label: "合并到主分支…",
+      icon: "merge",
+      dividerBefore: true,
+      disabled: selected.status === "running" || selected.worktree?.mergeStatus === "merging",
+    });
+  }
+  if (actions?.cleanup) {
+    items.push({
+      action: actions.cleanup,
+      actionName: "worktree-cleanup",
+      label: "重试 worktree 清理",
+      icon: "trash",
+    });
+  }
+  if (actions?.delete) {
+    items.push({
+      action: actions.delete,
+      actionName: "delete-session",
+      label: "删除当前会话",
+      icon: "trash",
+      tone: "danger",
+    });
+  }
+  return items;
+}
+
+export interface TopbarMoreMenuProps {
+  selected: UiSessionVm;
+  actions: ShellSidebarEntryActions | null;
   onAction(action: UiAction): void;
-}) {
+}
+
+/**
+ * The open-session action list.
+ *
+ * Exported on its own so the menu contract (which actions exist, and the
+ * `data-action` hooks the browser layer dispatches through) can be tested
+ * without rendering a portalled popover.
+ */
+export function TopbarMoreMenu({ selected, actions, onAction }: TopbarMoreMenuProps) {
   return (
-    <button
-      className={classNames("topbar-more-item", danger && "topbar-more-item-danger")}
-      data-action={actionName}
-      type="button"
-      role="menuitem"
-      disabled={disabled}
-      onClick={() => onAction(action)}
-    >
-      <WandIcon name={icon} size={14}/><span>{label}</span>
-    </button>
+    <>
+      {getTopbarMoreActions(selected, actions).map((item) => (
+        <React.Fragment key={item.actionName}>
+          {item.dividerBefore ? <WandDropdownMenuSeparator/> : null}
+          <WandDropdownMenuItem
+            data-action={item.actionName}
+            icon={item.icon}
+            tone={item.tone ?? "default"}
+            disabled={item.disabled}
+            onClick={() => onAction(item.action)}
+          >
+            {item.label}
+          </WandDropdownMenuItem>
+        </React.Fragment>
+      ))}
+    </>
   );
 }
 
@@ -50,8 +145,9 @@ export function ShellTopbar() {
   const openFiles = () => {
     if (!snapshot.layout.filePanelOpen) void dispatch({ type: "layout.files.toggle" });
   };
+  // Selecting an item closes the menu through `onOpenChange`, so the action
+  // itself is all that is left to dispatch here.
   const runMoreAction = (action: UiAction) => {
-    if (moreOpen) void dispatch({ type: "topbar.menu.toggle" });
     void dispatch(action);
   };
 
@@ -59,17 +155,17 @@ export function ShellTopbar() {
     <div className="main-header-row">
       <div className="topbar-left">
         {(snapshot.viewport.mobile || !snapshot.layout.sidebarAnchored) && (
-          <button
+          <WandIconButton
             id="sessions-toggle-button"
             className={classNames("floating-sidebar-toggle", snapshot.layout.sessionsDrawerOpen && "active")}
             aria-label="切换会话侧栏"
             aria-expanded={snapshot.layout.sessionsDrawerOpen}
             aria-controls="sessions-drawer"
-            type="button"
+            data-pressed={snapshot.layout.sessionsDrawerOpen || undefined}
             onClick={() => void dispatch({ type: "layout.drawer.toggle" })}
           >
-            <span className="hamburger-icon"><span/><span/><span/></span>
-          </button>
+            <WandIcon name="rail" size={18}/>
+          </WandIconButton>
         )}
         {!snapshot.layout.sidebarAnchored && <span className="topbar-brand" aria-hidden="true">W</span>}
       </div>
@@ -123,137 +219,79 @@ export function ShellTopbar() {
         )}
       </div>
       <div className="topbar-right">
-        <button
+        <WandIconButton
           id="topbar-file-button"
-          className={classNames("topbar-btn square", snapshot.layout.filePanelOpen && "active")}
-          type="button"
+          kind="ghost"
+          size="medium"
           aria-label="文件"
+          aria-pressed={snapshot.layout.filePanelOpen}
+          data-pressed={snapshot.layout.filePanelOpen || undefined}
           title="查看文件（可修改路径）"
           onClick={() => void dispatch({ type: "layout.files.toggle" })}
         >
           <WandIcon name="explorer"/>
-        </button>
-        <button
+        </WandIconButton>
+        <WandIconButton
           id="topbar-local-preview-button"
-          className="topbar-btn square"
-          type="button"
+          kind="ghost"
+          size="medium"
           aria-label="本地预览"
           title="打开本机 Web 服务或 HTML 文件"
           onClick={() => localPreviewController.show()}
         >
           <WandIcon name="eye"/>
-        </button>
+        </WandIconButton>
         <span id="topbar-git-slot" className="topbar-git-slot">
           {snapshot.topbar.git && (
-            <button
+            <WandButton
               id="topbar-git-badge"
-              className="topbar-git-badge"
-              type="button"
+              kind="soft"
+              size="small"
               title={`${snapshot.topbar.git.branch}  ·  ${snapshot.topbar.git.clean
                 ? "工作区干净"
                 : `${snapshot.topbar.git.modifiedCount} 个文件待提交`}`}
               aria-label="快捷提交"
               onClick={() => void dispatch({ type: "topbar.gitCommit" })}
             >
-              <WandIcon name="git" size={14} className="topbar-git-icon"/>
+              <WandIcon name="git" slot="start" size={14} className="topbar-git-icon"/>
               <span className="topbar-git-branch">{snapshot.topbar.git.branch}</span>
               {snapshot.topbar.git.clean
                 ? <span className="topbar-git-clean" aria-hidden="true"><WandIcon name="check" size={11}/></span>
                 : <span className="topbar-git-count">·{snapshot.topbar.git.modifiedCount}</span>}
-            </button>
+            </WandButton>
           )}
         </span>
         {selected && (
           <div className="topbar-more-wrap">
-            <WandPopover
+            <WandDropdownMenu
               open={moreOpen}
               onOpenChange={(open) => {
                 if (open !== moreOpen) void dispatch({ type: "topbar.menu.toggle" });
               }}
-              align="end"
-              sideOffset={6}
-              portalled={false}
-              forceMount
-              showArrow={false}
-              contentId="topbar-more-menu"
-              contentRole="menu"
-              ariaLabel="当前会话"
-              className={classNames("topbar-more-menu", "wand-shell-menu-popover", !moreOpen && "hidden")}
-              trigger={(
-                <button
-                  id="topbar-more-button"
-                  className={classNames("topbar-btn square", moreOpen && "active")}
-                  type="button"
-                  aria-label="当前会话操作"
-                  aria-haspopup="menu"
-                  aria-expanded={moreOpen}
-                  aria-controls="topbar-more-menu"
-                  title="当前会话操作"
-                >
-                  <WandIcon name="more"/>
-                </button>
-              )}
             >
-              {selected.claudeSessionId && (
-                <MoreItem
-                  action={{ type: "topbar.copy", field: "providerSessionId" }}
-                  actionName="copy-claude-session-id"
-                  label={selected.provider === "codex"
-                    ? "复制 Codex thread ID"
-                    : selected.provider === "opencode"
-                      ? "复制 OpenCode session ID"
-                      : "复制 Claude 会话 ID"}
-                  icon="copy"
-                  onAction={runMoreAction}
-                />
-              )}
-              {selected.cwd && (
-                <MoreItem
-                  action={{ type: "topbar.copy", field: "cwd" }}
-                  actionName="copy-cwd"
-                  label="复制工作目录"
-                  icon="folder"
-                  onAction={runMoreAction}
-                />
-              )}
-              <MoreItem
-                action={{ type: "topbar.copy", field: "sessionId" }}
-                actionName="copy-session-id"
-                label="复制会话 ID"
-                icon="hash"
-                onAction={runMoreAction}
+              <WandDropdownMenuTrigger
+                render={(
+                  <WandIconButton
+                    id="topbar-more-button"
+                    kind="ghost"
+                    size="medium"
+                    aria-label="当前会话操作"
+                    title="当前会话操作"
+                    data-pressed={moreOpen || undefined}
+                  >
+                    <WandIcon name="more"/>
+                  </WandIconButton>
+                )}
               />
-              <div className="topbar-more-divider" role="separator"/>
-              {selectedActions?.merge && (
-                <MoreItem
-                  action={selectedActions.merge}
-                  actionName="worktree-merge"
-                  label="合并到主分支…"
-                  icon="merge"
-                  disabled={selected.status === "running" || selected.worktree?.mergeStatus === "merging"}
-                  onAction={runMoreAction}
-                />
-              )}
-              {selectedActions?.cleanup && (
-                <MoreItem
-                  action={selectedActions.cleanup}
-                  actionName="worktree-cleanup"
-                  label="重试 worktree 清理"
-                  icon="trash"
-                  onAction={runMoreAction}
-                />
-              )}
-              {selectedActions?.delete && (
-                <MoreItem
-                  action={selectedActions.delete}
-                  actionName="delete-session"
-                  label="删除当前会话"
-                  icon="trash"
-                  danger
-                  onAction={runMoreAction}
-                />
-              )}
-            </WandPopover>
+              <WandDropdownMenuContent
+                id="topbar-more-menu"
+                aria-label="当前会话"
+                align="end"
+                sideOffset={6}
+              >
+                <TopbarMoreMenu selected={selected} actions={selectedActions} onAction={runMoreAction}/>
+              </WandDropdownMenuContent>
+            </WandDropdownMenu>
           </div>
         )}
       </div>

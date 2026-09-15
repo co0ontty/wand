@@ -38,9 +38,14 @@ export const restartOverlayStyles = String.raw`
   outline: none;
 }
 
-.wand-restart-surface[data-state="open"],
-.wand-restart-surface[data-state="closed"] {
+/* Appica 的弹层用 data-starting-style / data-ending-style 表达进出场，
+   重启遮罩要即时全屏切换，所以把库给的缩放+淡入一并关掉。 */
+.wand-restart-surface[data-starting-style],
+.wand-restart-surface[data-ending-style] {
+  scale: none;
+  opacity: 1;
   animation: none;
+  transition: none;
 }
 
 .wand-restart-header {
@@ -59,7 +64,7 @@ export const restartOverlayStyles = String.raw`
 .wand-restart-title {
   margin: 0;
   color: #fff;
-  font-size: clamp(1.35rem, 3.4vw, 1.8rem);
+  font-size: clamp(18.9px, 3.4vw, 25.2px);
   font-weight: var(--font-weight-semibold);
   line-height: var(--line-height-tight);
 }

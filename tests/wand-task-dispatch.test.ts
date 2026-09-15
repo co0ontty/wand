@@ -152,8 +152,8 @@ printf '%s\\n' \\
   assert.equal(created.agent, null);
   assert.equal(created.workspace?.cwd, projectDir);
 
-  // 2. 在任务上指派 CLI 工具 / 模型 / 思考深度。
-  const agent = { provider: "codex" as const, model: "default", thinkingEffort: "standard" as const };
+  // 2. 在任务上指派 CLI 工具 / 模型 / 思考深度 / 工作模式。
+  const agent = { provider: "codex" as const, model: "default", thinkingEffort: "standard" as const, mode: "full-access" as const };
   await taskBoardRepository.update(created.id, { agent });
 
   // 3. 一键派发。
@@ -162,6 +162,7 @@ printf '%s\\n' \\
   assert.equal(dispatched.session.provider, "codex");
   assert.equal(dispatched.session.cwd, projectDir, "会话必须跑在任务项目目录里");
   assert.equal(dispatched.session.thinkingEffort, "standard");
+  assert.equal(dispatched.session.mode, "full-access", "工作模式要传到真实会话上");
   if (getDefaultModelForProvider(config, "codex")) {
     assert.equal(dispatched.session.model, getDefaultModelForProvider(config, "codex"), "default 模型要解析成服务端默认值");
   }
@@ -174,7 +175,7 @@ printf '%s\\n' \\
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   const session = manager.get(dispatched.session.id)!;
-  assert.equal(session.mode, "agent", "派发会话必须是 agent 模式");
+  assert.equal(session.mode, "full-access", "派发会话必须沿用在任务上选的工作模式（codex 锁 full-access）");
   assert.equal(session.sessionSource, "automation");
   assert.equal(session.automationId, `wand-task:${created.id}`);
   assert.equal(session.claudeSessionId, "thread-e2e", "provider 原生 resume id 必须回写");

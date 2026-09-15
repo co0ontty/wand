@@ -4,7 +4,7 @@ export const fileExplorerStyles = String.raw`
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
-  font-size: 0.8125rem;
+  font-size: 11.375px;
 }
 .wand-file-explorer-toolbar {
   display: flex;
@@ -16,7 +16,7 @@ export const fileExplorerStyles = String.raw`
 }
 .wand-file-explorer-title {
   flex: 1 1 auto;
-  font-size: 0.6875rem;
+  font-size: 9.625px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -53,7 +53,7 @@ export const fileExplorerStyles = String.raw`
   border: 1px solid var(--border-subtle, #e5e7eb);
   border-radius: 6px;
   padding: 4px 8px;
-  font-size: 0.8125rem;
+  font-size: 11.375px;
   background: var(--bg-primary, #fff);
   color: var(--text-primary, #111);
 }
@@ -115,7 +115,7 @@ export const fileExplorerStyles = String.raw`
 }
 .wand-explorer-git {
   flex: 0 0 auto;
-  font-size: 0.6875rem;
+  font-size: 9.625px;
   font-weight: 600;
   width: 14px;
   text-align: center;
@@ -139,7 +139,7 @@ export const fileExplorerStyles = String.raw`
   border: 1px solid var(--accent, #2563eb);
   border-radius: 4px;
   padding: 2px 6px;
-  font-size: 0.8125rem;
+  font-size: 11.375px;
   background: var(--bg-primary, #fff);
   color: var(--text-primary, #111);
 }
@@ -164,7 +164,7 @@ export const fileExplorerStyles = String.raw`
   border: none;
   background: transparent;
   color: var(--text-primary, #111);
-  font-size: 0.8125rem;
+  font-size: 11.375px;
   cursor: pointer;
   text-align: left;
 }
@@ -181,6 +181,6 @@ export const fileExplorerStyles = String.raw`
   padding: 24px 16px;
   color: var(--text-muted, #999);
   text-align: center;
-  font-size: 0.8125rem;
+  font-size: 11.375px;
 }
 `;

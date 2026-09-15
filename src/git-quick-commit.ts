@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { ClaudeRunError, runClaudePrint } from "./claude-sdk-runner.js";
 import { callSystemAiTextWithFallback } from "./system-ai.js";
 import { buildChildEnv } from "./env-utils.js";
+import { isSessionProvider } from "./session-provider.js";
 import {
   runGitAsync as runGitAsyncBase,
   runGitRawAsync as runGitRawAsyncBase,
@@ -26,6 +27,11 @@ import {
   SessionSnapshot,
   TagHeadResult,
 } from "./types.js";
+
+/** provider 缺省值：无法识别时回落到 Claude。 */
+function defaultProvider(provider: SessionProvider | undefined): SessionProvider {
+  return isSessionProvider(provider) ? provider : "claude";
+}
 
 const GIT_TIMEOUT_MS = 1500;
 const GIT_PUSH_TIMEOUT_MS = 30_000;
@@ -359,16 +365,6 @@ async function callClaudeText(
   }
 }
 
-function normalizeProvider(provider: SessionProvider | undefined): SessionProvider {
-  return provider === "codex"
-    || provider === "opencode"
-    || provider === "grok"
-    || provider === "qoder"
-    || provider === "pi"
-    ? provider
-    : "claude";
-}
-
 function stripFences(raw: string): string {
   return raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
 }
@@ -625,7 +621,7 @@ async function callPiText(prompt: string, cwd: string, opts: QuickCommitAiOption
 }
 
 async function callCliAiText(prompt: string, cwd: string, language: string, opts: QuickCommitAiOptions): Promise<string> {
-  const provider = normalizeProvider(opts.provider);
+  const provider = defaultProvider(opts.provider);
   if (provider === "codex") {
     return callCodexText(prompt, cwd, opts);
   }
@@ -1323,7 +1319,7 @@ async function runQuickCommitFallbackCli(opts: QuickCommitOptions, priorError: s
   await assertGitWorkTreeAsync(opts.cwd);
   const beforeHead = await getHead(opts.cwd);
   const prompt = buildFallbackPrompt(opts, priorError);
-  const provider = normalizeProvider(opts.provider);
+  const provider = defaultProvider(opts.provider);
   if (provider === "codex") {
     const args = ["exec", "--ephemeral", "--json", "--color", "never", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox"];
     const model = opts.model?.trim();

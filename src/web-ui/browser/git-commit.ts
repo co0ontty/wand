@@ -1,11 +1,11 @@
-import { state, readStoredBoolean, writeStoredBoolean } from "./state";
-import { t, iconSvg } from "./i18n";
+import { state } from "./state";
+import { iconSvg } from "./i18n";
 import { escapeHtml } from "./utils";
-import { PIXEL_AVATAR } from "./chat-render";
-import { getConfigCwd } from "./chat-scroll";
-import { showToast, wandConfirm } from "./notifications";
-import { render, getEffectiveCwd } from "./render";
-import { getToolModeHint, logout } from "./session-engine";
+import "./chat-render";
+import "./chat-scroll";
+import { showToast } from "./notifications";
+import "./render";
+import "./session-engine";
 import {
   configureQuickCommitRuntime,
   quickCommitController,
@@ -67,7 +67,6 @@ import { closeReactOverlays } from "./react-overlay-coordinator";
         var hasInfoGroup = hasClaudeId || hasCwd || true; // session-id button always renders
         var hasActionGroup = showMerge || showCleanup || true; // delete button always renders
 
-        var copyIconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
         var cloudIconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 1 0-1.5-8.74A6 6 0 1 0 6 14h11.5z"/></svg>';
         var folderIconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>';
         var hashIconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/></svg>';

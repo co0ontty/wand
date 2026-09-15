@@ -98,9 +98,12 @@ test("sidebar navigation maps settings and automation to distinct glyphs", () =>
       { store },
       createElement(ShellSidebar),
     ));
-    assert.match(html, /id="settings-button"[^>]*>[\s\S]*?data-icon="gear"/);
-    assert.match(html, /id="missions-button"[^>]*>[\s\S]*?data-icon="zap"/);
-    assert.match(html, /id="file-panel-toggle-btn"[^>]*>[\s\S]*?data-icon="explorer"/);
+    // Appica's NavigationLink marks the icon slot with `data-icon="start"` (that is
+    // what its `has-data-[icon=start]` padding reads), so the semantic glyph name
+    // lives on `data-wand-icon`.
+    assert.match(html, /id="settings-button"[^>]*>[\s\S]*?data-wand-icon="gear"/);
+    assert.match(html, /id="missions-button"[^>]*>[\s\S]*?data-wand-icon="zap"/);
+    assert.match(html, /id="file-panel-toggle-btn"[^>]*>[\s\S]*?data-wand-icon="explorer"/);
     assert.doesNotMatch(html, /data-icon="inbox"/);
   } finally {
     store.dispose();

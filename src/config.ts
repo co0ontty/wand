@@ -4,19 +4,13 @@ import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promi
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { AndroidApkConfig, CardExpandDefaults, ExecutionMode, IosIpaConfig, MacosDmgConfig, SessionProvider, StructuredChatPersonaConfig, ThinkingEffort, WandConfig } from "./types.js";
+import { AndroidApkConfig, CardExpandDefaults, ExecutionMode, IosIpaConfig, MacosDmgConfig, SessionProvider, StructuredChatPersonaConfig, WandConfig } from "./types.js";
 import type { WandStorage } from "./storage.js";
 import { isRunningAsRoot } from "./env-utils.js";
 import { normalizeSystemAiConfig, systemAiProfiles } from "./system-ai.js";
+import { isSessionProvider } from "./session-provider.js";
+import { isThinkingEffort } from "./structured-provider-common.js";
 type StructuredRunnerOption = WandConfig["structuredRunner"];
-
-function isThinkingEffort(value: unknown): value is ThinkingEffort {
-  return value === "off"
-    || value === "standard"
-    || value === "deep"
-    || value === "max"
-    || (typeof value === "string" && /^codex:[a-z0-9][a-z0-9_-]{0,31}$/.test(value));
-}
 
 const DEFAULT_CONFIG_DIR = ".wand";
 const DEFAULT_CONFIG_FILE = "config.json";
@@ -333,7 +327,7 @@ export function applyStoragePreferences(config: WandConfig, storage: WandStorage
 
   if (storage.hasPreference(preferenceStorageKey("defaultProvider"))) {
     const v = storage.getPreference<string>(preferenceStorageKey("defaultProvider"), defaults.defaultProvider ?? "claude");
-    if (v === "claude" || v === "codex" || v === "opencode" || v === "grok" || v === "qoder" || v === "pi") config.defaultProvider = v;
+    if (isSessionProvider(v)) config.defaultProvider = v;
   }
   if (storage.hasPreference(preferenceStorageKey("defaultSessionKind"))) {
     const v = storage.getPreference<string>(preferenceStorageKey("defaultSessionKind"), defaults.defaultSessionKind ?? "structured");
@@ -426,7 +420,7 @@ export function writePreferenceToStorage(
   const dbKey = preferenceStorageKey(key);
   switch (key) {
     case "defaultProvider": {
-      if (value !== "claude" && value !== "codex" && value !== "opencode" && value !== "grok" && value !== "qoder" && value !== "pi") throw new Error(`无效 Provider: ${value}`);
+      if (!isSessionProvider(value)) throw new Error(`无效 Provider: ${String(value)}`);
       storage.setPreference(dbKey, value);
       config.defaultProvider = value;
       break;
@@ -751,7 +745,7 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
     macos: normalizeMacosDmgConfig(input.macos) ?? defaults.macos,
     ios: normalizeIosIpaConfig(input.ios) ?? defaults.ios,
     cardDefaults: normalizeCardDefaults(input.cardDefaults),
-    defaultProvider: input.defaultProvider === "codex" || input.defaultProvider === "opencode" || input.defaultProvider === "grok" || input.defaultProvider === "qoder" || input.defaultProvider === "pi" ? input.defaultProvider : "claude",
+    defaultProvider: isSessionProvider(input.defaultProvider) ? input.defaultProvider : "claude",
     defaultSessionKind: input.defaultSessionKind === "pty" ? "pty" : "structured",
     defaultTaskWorktree: typeof input.defaultTaskWorktree === "boolean" ? input.defaultTaskWorktree : defaults.defaultTaskWorktree,
     defaultModel: typeof input.defaultModel === "string" ? input.defaultModel.trim() : defaults.defaultModel,

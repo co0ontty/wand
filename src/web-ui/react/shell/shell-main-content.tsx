@@ -1,6 +1,6 @@
 import * as React from "react";
 
-import { WandIcon } from "../ui";
+import { WandButton, WandIcon, WandIconButton } from "../ui";
 import { CodeEditorHost } from "../code-editor/host";
 import { workspaceContextStore } from "../workspaces/workspace-context";
 import { workspacesStore } from "../workspaces/controller";
@@ -158,15 +158,15 @@ function ShellBlankChat({ className, queueRef, workspaceTask, workspaceProject }
         <h2 className="blank-chat-title">Wand</h2>
         <p className="blank-chat-subtitle">创建一个任务，选择目录和 CLI，开始工作。</p>
         <div className="blank-chat-tools">
-          <button
+          <WandButton
             className="blank-chat-tool-btn welcome-new-task"
             id="welcome-new-task"
-            type="button"
+            kind="primary"
             onClick={() => void dispatch({ type: "workspace.new" })}
           >
-            <span className="tool-icon"><WandIcon name="task" size={16} strokeWidth={1.8}/></span>
+            <span className="tool-icon" slot="start"><WandIcon name="task" size={16} strokeWidth={1.8}/></span>
             新建任务
-          </button>
+          </WandButton>
         </div>
       </div>}
       <div id="cross-session-queue-host" ref={queueRef}/>
@@ -200,11 +200,12 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
       {context.taskId ? null : <ShellTopbar/>}
       {context.taskId && snapshot.viewport.mobile && (
         <nav className="workspace-mobile-navigation" aria-label="任务导航">
-          <button type="button" aria-label="打开任务" title="打开任务"
+          <WandIconButton aria-label="打开任务" title="打开任务"
+            data-pressed={snapshot.layout.sessionsDrawerOpen || undefined}
             aria-expanded={snapshot.layout.sessionsDrawerOpen} aria-controls="sessions-drawer"
             onClick={() => void dispatch({ type: "layout.drawer.toggle" })}>
             <WandIcon name="rail" size={19}/>
-          </button>
+          </WandIconButton>
           <span title={context.taskName}>{context.taskName || "任务"}</span>
         </nav>
       )}

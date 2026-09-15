@@ -7,6 +7,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
+import * as React from "react";
 
 import type { UiAction, UiSnapshot, UiStore } from "./ui-store";
 

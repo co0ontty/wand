@@ -7,6 +7,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import * as React from "react";
 import { WandButton, WandDialogSurface, WandSwitch } from "../ui";
 import { quickCommitController, quickCommitStore } from "./controller";
 import {
@@ -25,17 +26,13 @@ import type {
   QuickCommitRepository,
   QuickCommitStatus,
 } from "./types";
+import { describeError } from "../errors";
 
 export interface QuickCommitHostProps {
   repository?: QuickCommitRepository;
 }
 
 const EMPTY_FORM: QuickCommitForm = { message: "", tag: "", tagEdited: false };
-
-function presentError(error: unknown, fallback: string): string {
-  if (!(error instanceof Error) || !error.message || error.message === "Failed to fetch") return fallback;
-  return error.message;
-}
 
 function statusDescription(status: QuickCommitStatus | null): string {
   if (!status) return "加载 Git 状态并准备提交。";
@@ -195,7 +192,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
         if (!loaded.isGit) setError(loaded.error || "当前目录不是 Git 仓库。");
       })
       .catch((loadError) => {
-        if (!abort.signal.aborted) setError(presentError(loadError, "无法加载 Git 状态。"));
+        if (!abort.signal.aborted) setError(describeError(loadError, "无法加载 Git 状态。"));
       })
       .finally(() => {
         if (!abort.signal.aborted) setLoading(false);
@@ -244,7 +241,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
       }));
       if (suggestion.suggestedTag) setAction("commit-tag");
     } catch (generateError) {
-      if (!abort.signal.aborted) setError(presentError(generateError, "AI 生成失败。"));
+      if (!abort.signal.aborted) setError(describeError(generateError, "AI 生成失败。"));
     } finally {
       if (!abort.signal.aborted) setGenerating(false);
       if (generationAbort.current === abort) generationAbort.current = null;
@@ -293,7 +290,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
       }
       await reloadStatus(operationSessionId);
     } catch (commitError) {
-      const message = presentError(commitError, "快捷提交失败。");
+      const message = describeError(commitError, "快捷提交失败。");
       if (ownsCurrentSurface()) setError(message);
       quickCommitStore.getRuntime()?.toast(message, "error");
     } finally {
@@ -329,7 +326,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
       void reloadStatus(operationSessionId);
       if (ownsCurrentSurface()) quickCommitController.close();
     } catch (pushFailure) {
-      const message = presentError(pushFailure, "推送失败。");
+      const message = describeError(pushFailure, "推送失败。");
       if (ownsCurrentSurface()) setPushError(message);
       quickCommitStore.getRuntime()?.toast(message, "error");
     } finally {

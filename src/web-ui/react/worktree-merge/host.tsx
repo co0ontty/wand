@@ -5,6 +5,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import * as React from "react";
 import { WandButton, WandDialogSurface } from "../ui";
 import { worktreeMergeController, worktreeMergeStore } from "./controller";
 import {
@@ -22,14 +23,10 @@ import type {
   WorktreeMergeRepository,
   WorktreeMergeResult,
 } from "./types";
+import { describeError } from "../errors";
 
 export interface WorktreeMergeHostProps {
   repository?: WorktreeMergeRepository;
-}
-
-function presentError(error: unknown, fallback: string): string {
-  if (!(error instanceof Error) || !error.message || error.message === "Failed to fetch") return fallback;
-  return error.message;
 }
 
 function MergeDetail({
@@ -132,7 +129,7 @@ export function WorktreeMergeHost({
       })
       .catch((inspectError) => {
         if (!abort.signal.aborted) {
-          setError(presentError(inspectError, "无法检查 worktree 合并状态。"));
+          setError(describeError(inspectError, "无法检查 worktree 合并状态。"));
         }
       })
       .finally(() => {
@@ -168,7 +165,7 @@ export function WorktreeMergeHost({
         setMergeResult(mergeError.result);
         notifyChanged(context.sessionId);
       }
-      setError(presentError(mergeError, "无法合并 worktree。"));
+      setError(describeError(mergeError, "无法合并 worktree。"));
     } finally {
       worktreeMergeController.setDismissable(true);
       setSubmitting(false);
@@ -187,7 +184,7 @@ export function WorktreeMergeHost({
       worktreeMergeStore.getRuntime()?.toast("已完成 worktree 清理。", "success");
       worktreeMergeController.close();
     } catch (cleanupError) {
-      setError(presentError(cleanupError, "无法清理 worktree。"));
+      setError(describeError(cleanupError, "无法清理 worktree。"));
     } finally {
       worktreeMergeController.setDismissable(true);
       setSubmitting(false);

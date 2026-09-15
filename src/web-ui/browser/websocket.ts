@@ -1,13 +1,13 @@
 import { state } from "./state";
-import { t, iconSvg } from "./i18n";
-import { normalizeTerminalOutput, doRenderChat } from "./chat-render";
+import { iconSvg } from "./i18n";
+import { renderChat } from "./chat-render";
 import { clearStructuredQueuePersistence } from "./chat-scroll";
 import { mergeAssistantTurn } from "./message-reconciliation";
 import { flushPendingMessages, buildMessagesForRender, isCurrentTerminalSession, updateInputHint, flushStructuredInputQueue, updateStructuredQueueCounter, setTerminalInteractive, flushCrossSessionQueue, reconcileInteractiveState, getSelectedSession, closeKeyboardPopup } from "./input";
 import { notifyTaskEnded, clearSessionProgressNative, _syncWakeLock, showNotificationBubble, notifyTaskProgress, syncSessionProgressToNative, notifyPermissionRequest, notifyUpdateAvailable, showAutoUpdateOverlay, showRestartOverlay, showToast } from "./notifications";
-import { refreshAll, scheduleSessionListUpdate, subscribeToSession, updateSessionSnapshot, getPreferredMessages, loadSessions, selectSession, updateShellChrome, loadOutput, isAutoApproveImpliedByMode, applyCurrentView } from "./session-engine";
+import { refreshAll, scheduleSessionListUpdate, subscribeToSession, updateSessionSnapshot, getPreferredMessages, selectSession, updateShellChrome, loadOutput, isAutoApproveImpliedByMode, applyCurrentView } from "./session-engine";
 import { getLastAssistantSummary } from "./session-ui";
-import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS, clampClientTerminalOutput, maybeScrollTerminalToBottom, resetTerminal, restoreTerminalState, softResyncTerminal, syncTerminalBuffer, updateTerminalJumpToBottomButton, wandTerminalWrite } from "./terminal";
+import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS, clampClientTerminalOutput, maybeScrollTerminalToBottom, restoreTerminalState, syncTerminalBuffer, updateTerminalJumpToBottomButton, wandTerminalWrite } from "./terminal";
 import {
   hasPooledTerminal,
   replacePooledTerminalOutput,
@@ -16,7 +16,7 @@ import {
   writePooledTerminal,
 } from "./terminal-pool";
 import { ensureTerminalFitWithRetry, scheduleTerminalResize } from "./viewport";
-import { render, restoreLoginSession } from "./render";
+import "./render";
 import { isBrowserReactShellMounted } from "./shell-runtime";
 import { notifyLegacyUiChange } from "./ui-store-bridge";
 
@@ -956,22 +956,6 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
               if (state.terminal) state.terminal.remeasure();
             });
           }
-        }
-      }
-
-      export function renderChat(forceFullRender?: boolean) {
-        if (state.renderPending && !forceFullRender) return;
-        state.renderPending = true;
-
-        if (forceFullRender) {
-          // Immediate render for page refresh / session switch
-          doRenderChat(true);
-          state.renderPending = false;
-        } else {
-          requestAnimationFrame(function() {
-            doRenderChat(false);
-            state.renderPending = false;
-          });
         }
       }
 

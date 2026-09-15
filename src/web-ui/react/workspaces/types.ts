@@ -1,7 +1,9 @@
 // 工作空间（项目）前端类型。镜像 src/types.ts 的 Workspace/LayoutNode/PaneTab，
-// 但 provider 联合在浏览器层本地定义（不把服务端 types 拉进浏览器 bundle）。
+// provider 联合沿用浏览器层共享的 provider-identity（不把服务端 types 拉进浏览器 bundle）。
 
-export type WorkspaceProvider = "claude" | "codex" | "opencode" | "grok" | "qoder" | "pi";
+import type { ProviderId } from "../../provider-identity";
+
+export type WorkspaceProvider = ProviderId;
 
 /** A task work window can run an Agent CLI or a bare login shell. */
 export type WorkspaceSessionTarget = WorkspaceProvider | "shell";

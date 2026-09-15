@@ -1,4 +1,4 @@
-import type { TaskDirectoryGroup, TaskSummary, WorkspaceSessionSummary } from "./types";
+import type { TaskDirectoryGroup, TaskSummary } from "./types";
 import { taskActivity, taskRecency } from "./sidebar-task-meta";
 
 export interface SidebarManageSelection {
@@ -98,32 +98,6 @@ export function describeManagedDeletion(selection: SidebarManageSelection): stri
   if (selection.taskIds.length > 0) parts.push(`${selection.taskIds.length} 个任务`);
   if (selection.sessionIds.length > 0) parts.push(`${selection.sessionIds.length} 个终端`);
   return parts.join("和") || "所选项目";
-}
-
-export function findManagedTask(
-  groups: readonly TaskDirectoryGroup[],
-  taskId: string,
-): TaskSummary | null {
-  for (const group of groups) {
-    const task = group.tasks.find((item) => item.id === taskId);
-    if (task) return task;
-  }
-  return null;
-}
-
-export function findManagedSession(
-  groups: readonly TaskDirectoryGroup[],
-  sessionId: string,
-): WorkspaceSessionSummary | null {
-  for (const group of groups) {
-    const standalone = group.standaloneSessions.find((item) => item.id === sessionId);
-    if (standalone) return standalone;
-    for (const task of group.tasks) {
-      const session = task.sessions.find((item) => item.id === sessionId);
-      if (session) return session;
-    }
-  }
-  return null;
 }
 
 function railRank(item: CollapsedRailTask, activeTaskId: string | null): number {
