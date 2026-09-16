@@ -5152,11 +5152,14 @@
     }
     .chat-activity-body > :first-child { margin-top: 0; }
     .chat-activity-body > :last-child { margin-bottom: 0; }
-    /* 窗口内的卡片收紧、弱化，和正文拉开层级。 */
+    /* 窗口内的浅色卡片收紧、弱化，和正文拉开层级。
+       注意：深色卡（.inline-terminal / .term-*）不走这套「去底」规则——它靠
+       深底 + 浅色文字成立，background 一旦抹成透明，标题栏的半透明黑就
+       直接叠在米色页面上变成灰条，命令与输出变成灰底浅字（实测对比度 1.1）。
+       终端卡只收紧外间距，保留自己的底色、边框和文字色。 */
     .chat-activity-body .tool-use-card,
     .chat-activity-body .tool-group,
     .chat-activity-body .inline-tool,
-    .chat-activity-body .inline-terminal,
     .chat-activity-body .inline-diff {
       margin: 2px 0;
       box-shadow: none;
@@ -5164,6 +5167,10 @@
       border-color: var(--border-subtle);
       font-size: 9.8px;
       color: var(--text-muted);
+    }
+    .chat-activity-body .inline-terminal {
+      margin: 2px 0;
+      box-shadow: none;
     }
     .chat-activity-body .thinking-inline {
       font-size: 9.52px;
