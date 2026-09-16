@@ -38,7 +38,7 @@ test("WandIcon stamps a data-icon matching the semantic name", () => {
   assert.doesNotMatch(html, /M12 2v4M12 18v4/);
 });
 
-test("sidebar navigation maps settings and automation to distinct glyphs", () => {
+test("sidebar navigation maps settings and task board to distinct glyphs", () => {
   const selected: UiSessionVm = {
     id: "session-1",
     source: "wand",
@@ -102,7 +102,7 @@ test("sidebar navigation maps settings and automation to distinct glyphs", () =>
     // what its `has-data-[icon=start]` padding reads), so the semantic glyph name
     // lives on `data-wand-icon`.
     assert.match(html, /id="settings-button"[^>]*>[\s\S]*?data-wand-icon="gear"/);
-    assert.match(html, /id="missions-button"[^>]*>[\s\S]*?data-wand-icon="zap"/);
+    assert.match(html, /id="task-board-button"[^>]*>[\s\S]*?data-wand-icon="clipboard"/);
     assert.match(html, /id="file-panel-toggle-btn"[^>]*>[\s\S]*?data-wand-icon="explorer"/);
     assert.doesNotMatch(html, /data-icon="inbox"/);
   } finally {

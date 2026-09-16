@@ -36,6 +36,7 @@ import {
   showsTaskSessionDisclosure,
 } from "../src/web-ui/react/workspaces/task-tree.js";
 import {
+  CompactDirectoryRail,
   WorkspacesPanel,
   shortenWorkspacePath,
   workspacePathLeaf,
@@ -814,37 +815,51 @@ test("sidebar multi-select delete cascades task terminals and keeps leftover ses
   assert.equal(all.sessionIds.length, 4);
 });
 
-test("collapsed rail prefers the active and attention tasks and caps overflow", async () => {
-  const { collapsedRailTasks } = await import("../src/web-ui/react/workspaces/sidebar-manage.js");
-  const groups = [{
-    workspaceId: "workspace-1",
-    workspaceName: "Wand",
-    workspaceCwd: "/work",
-    tasks: [
-      manageTask("idle", "旧任务", [], "2026-09-01T00:00:00Z"),
-      manageTask("active", "当前任务", [], "2026-09-08T00:00:00Z"),
-      manageTask("attention", "待处理", [{ id: "blocked", status: "waiting-input" }], "2026-09-07T00:00:00Z"),
-      manageTask("running", "运行中", [{ id: "busy", inFlight: true }], "2026-09-06T00:00:00Z"),
-    ],
+test("compact rail shows every directory, including empty ones, without task entries", () => {
+  const groups = Array.from({ length: 10 }, (_, index) => ({
+    workspaceId: `directory-${index}`,
+    workspaceName: `项目 ${index}`,
+    workspaceCwd: `/work/${index}`,
+    tasks: index === 0 ? [manageTask("task", "TASK-MUST-NOT-BE-IN-RAIL", [])] : [],
     standaloneSessions: [],
-  }];
-  const rail = collapsedRailTasks(groups, "active", 3);
-  assert.deepEqual(rail.items.map((item) => item.task.id), ["active", "attention", "running"]);
-  assert.equal(rail.overflow, 1);
+  }));
+  const html = renderToStaticMarkup(createElement(CompactDirectoryRail, {
+    groups,
+    loading: false,
+    error: "",
+    activeWorkspaceId: "directory-0",
+    peekDirectoryId: "directory-9",
+    onExpand: () => {},
+  }));
+  assert.equal((html.match(/data-sidebar-directory-id=/g) ?? []).length, 10);
+  assert.equal((html.match(/aria-expanded="true"/g) ?? []).length, 1);
+  assert.match(html, /aria-label="查看目录 项目 9" aria-expanded="true"/);
+  assert.match(html, /aria-controls="sidebar-peek"/);
+  assert.doesNotMatch(html, /TASK-MUST-NOT-BE-IN-RAIL|sidebar-collapsed-rail-more/);
 });
 
-test("workspaces panel exposes multi-select and a compact task rail", () => {
+test("workspaces panel exposes multi-select and a compact directory rail", () => {
   const html = renderToStaticMarkup(createElement(WorkspacesPanel));
   assert.match(html, /aria-label="多选任务和终端"/);
-  assert.match(html, />选择</);
+  assert.match(html, /title="批量管理"/);
+  assert.match(html, />项目与任务<\/h2>/);
   const panel = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
-  assert.match(panel, /CompactTaskRail/);
+  assert.match(panel, /CompactDirectoryRail/);
+  assert.match(panel, /data-sidebar-directory-id=\{group.workspaceId\}/);
   assert.match(panel, /sidebar-collapsed-rail/);
   assert.doesNotMatch(panel, /CompactWorkspaceTree/);
   assert.doesNotMatch(panel, /sidebar-collapsed-task-branch/);
   // 目录行提供重命名入口，且走统一的目录改名接口（服务端会同步项目名）。
   assert.match(panel, /重命名目录/);
   assert.match(panel, /renameDirectory\(group\.workspaceCwd/);
+});
+
+test("directory previews omit global toolbar and unrelated history groups", () => {
+  const html = renderToStaticMarkup(createElement(WorkspacesPanel, {
+    directoryId: "workspace-one",
+    extraGroups: createElement("span", null, "UNRELATED-HISTORY"),
+  }));
+  assert.doesNotMatch(html, /UNRELATED-HISTORY|项目与任务|多选任务和终端|搜索任务或会话/);
 });
 
 test("unnamed tasks fold into the directory's loose sessions", async () => {

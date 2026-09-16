@@ -42,9 +42,7 @@ import {
 } from "./task-tree";
 import { createUnnamedTaskFlattener, findSessionTask } from "./task-flatten";
 import {
-  COLLAPSED_RAIL_LIMIT,
   EMPTY_SIDEBAR_MANAGE_SELECTION,
-  collapsedRailTasks,
   collectManagedIds,
   describeManagedDeletion,
   pruneManagedSelection,
@@ -638,6 +636,7 @@ function ClearSessionsButton({ count, label, onClear, menuItem = false }: {
 function TaskGroupSection({
   group,
   now,
+  preview = false,
   directoryCount,
   liveTitles,
   activeWorkspaceId,
@@ -655,6 +654,7 @@ function TaskGroupSection({
 }: {
   group: TaskDirectoryGroup;
   now: number;
+  preview?: boolean;
   directoryCount: number;
   liveTitles?: Readonly<Record<string, string>>;
   activeWorkspaceId: string | null;
@@ -681,7 +681,7 @@ function TaskGroupSection({
   const [directoryNameError, setDirectoryNameError] = React.useState("");
   const [directoryRenameBusy, setDirectoryRenameBusy] = React.useState(false);
   const tasksId = React.useId();
-  const open = isDirectoryExpanded(collapsed, directoryCount);
+  const open = preview || isDirectoryExpanded(collapsed, directoryCount);
   const looseOpen = !looseCollapsed;
   const canDelete = !group.synthetic && !group.global;
   // 全局（不挂目录）不参与重命名；合成目录用目录接口改名。
@@ -807,7 +807,7 @@ function TaskGroupSection({
           </WandIconButton>
         </form>
       ) : null}
-      <div className={classNames("workspace-row", renamingDirectory && "is-renaming")}>
+      {!preview && <div className={classNames("workspace-row", renamingDirectory && "is-renaming")}>
         <WandNavigationLink
           className="workspace-row-main"
           orientation="vertical"
@@ -957,7 +957,7 @@ function TaskGroupSection({
           ) : null}
           </WandPopover>
         </span>
-      </div>
+      </div>}
       <SidebarDisclosure id={tasksId} open={open}>
         <div className="workspace-tasks">
           {taskCount === 0 && group.standaloneSessions.length === 0 && !group.synthetic && (
@@ -1059,19 +1059,19 @@ function TaskGroupSection({
   );
 }
 
-function CompactTaskRail({
+export function CompactDirectoryRail({
   groups,
   loading,
   error,
-  activeTaskId,
-  onOpenTask,
+  activeWorkspaceId,
+  peekDirectoryId,
   onExpand,
 }: {
   groups: readonly TaskDirectoryGroup[];
   loading: boolean;
   error: string;
-  activeTaskId: string | null;
-  onOpenTask(group: TaskDirectoryGroup, task: TaskSummary): void;
+  activeWorkspaceId: string | null;
+  peekDirectoryId?: string;
   onExpand(): void;
 }) {
   if (loading && groups.length === 0) {
@@ -1080,54 +1080,29 @@ function CompactTaskRail({
   if (error && groups.length === 0) {
     return <div className="sidebar-collapsed-tree-state error" title={error} aria-label={error}>!</div>;
   }
-
-  const rail = collapsedRailTasks(groups, activeTaskId, COLLAPSED_RAIL_LIMIT);
-  if (rail.items.length === 0) {
-    return <div className="sidebar-collapsed-rail" aria-label="最近任务"/>;
-  }
   return (
-    <div className="sidebar-collapsed-rail" aria-label="最近任务">
-      {rail.items.map((item) => {
-        const group = groups.find((candidate) => candidate.workspaceId === item.workspaceId);
-        const title = item.global ? item.task.name : `${item.workspaceName} / ${item.task.name}`;
-        return (
-          <WandIconButton
-            key={item.task.id}
-            className={classNames(
-              "sidebar-collapsed-rail-task",
-              activeTaskId === item.task.id && "active",
-              item.activity && `activity-${item.activity}`,
-            )}
-            title={title}
-            aria-label={item.global ? `打开独立任务 ${item.task.name}` : `打开项目 ${item.workspaceName} 中的任务 ${item.task.name}`}
-            data-pressed={activeTaskId === item.task.id || undefined}
-            onClick={() => {
-              if (!group) {
-                onExpand();
-                return;
-              }
-              onOpenTask(group, item.task);
-            }}
-          >
-            <WandIcon name={workspaceTaskIconName(Boolean(item.task.worktree))} size={15}/>
-            {item.activity ? (
-              <span className={classNames("sidebar-collapsed-rail-dot", item.activity)} aria-hidden="true"/>
-            ) : null}
-          </WandIconButton>
-        );
-      })}
-      {rail.overflow > 0 ? (
-        <WandButton
-          className="sidebar-collapsed-rail-more"
-          kind="ghost"
-          size="small"
-          title={`还有 ${rail.overflow} 个任务，展开侧栏查看`}
-          aria-label={`展开侧栏，还有 ${rail.overflow} 个任务`}
-          onClick={onExpand}
+    <div className="sidebar-collapsed-rail" aria-label="项目目录">
+      {groups.map((group) => (
+        <WandIconButton
+          key={group.workspaceId}
+          className={classNames(
+            "sidebar-collapsed-rail-task",
+            activeWorkspaceId === group.workspaceId && "active",
+          )}
+          title={group.workspaceName}
+          aria-label={`查看目录 ${group.workspaceName}`}
+          aria-expanded={peekDirectoryId === group.workspaceId}
+          aria-controls={peekDirectoryId === group.workspaceId ? "sidebar-peek" : undefined}
+          data-sidebar-directory-id={group.workspaceId}
+          data-sidebar-directory-name={group.workspaceName}
+          data-pressed={activeWorkspaceId === group.workspaceId || undefined}
+          onClick={() => {
+            if (!window.matchMedia("(hover: hover) and (pointer: fine)").matches) onExpand();
+          }}
         >
-          +{rail.overflow > 9 ? "9" : rail.overflow}
-        </WandButton>
-      ) : null}
+          <WandIcon name="folder" size={18}/>
+        </WandIconButton>
+      ))}
     </div>
   );
 }
@@ -1136,6 +1111,8 @@ export function WorkspacesPanel({
   sessionTitles = null,
   extraGroups = null,
   compact = false,
+  directoryId,
+  peekDirectoryId,
   onExpand,
   onNavigate,
   searchQuery = "",
@@ -1148,6 +1125,9 @@ export function WorkspacesPanel({
   extraGroups?: React.ReactNode;
   /** 窄栏模式下保留项目 → 任务的紧凑目录层级。 */
   compact?: boolean;
+  /** 悬浮树只呈现这个目录，省略全局搜索和附加分组。 */
+  directoryId?: string;
+  peekDirectoryId?: string;
   onExpand?: () => void;
   onNavigate?: () => void;
   searchQuery?: string;
@@ -1174,7 +1154,11 @@ export function WorkspacesPanel({
   // 轮询会重建所有对象，用内容签名做 memo，避免整棵树每 6 秒重渲染。
   const flattenGroups = React.useMemo(() => createUnnamedTaskFlattener(), []);
   const groups = React.useMemo(() => flattenGroups(sourceGroups), [flattenGroups, sourceGroups]);
-  const visibleGroups = filterSidebarGroups(groups, searchQuery, sessionTitles ?? {});
+  const visibleGroups = filterSidebarGroups(
+    directoryId === undefined ? groups : groups.filter((group) => group.workspaceId === directoryId),
+    directoryId === undefined ? searchQuery : "",
+    sessionTitles ?? {},
+  );
 
   // 活动高亮统一读 workspaceContextStore（主区标签栏与这里共用同一来源，
   // 关闭工作区窗口时这里也会同步取消高亮）。
@@ -1195,6 +1179,14 @@ export function WorkspacesPanel({
   // 任务行「＋」的 Agent 选择器：先记下目标任务，确认后在该任务目录内新建会话。
   const [pendingNewSessionTask, setPendingNewSessionTask] = React.useState<TaskSummary | null>(null);
   const [manageMode, setManageMode] = React.useState(false);
+  const [searchOpen, setSearchOpen] = React.useState(false);
+  const searchInputRef = React.useRef<HTMLInputElement>(null);
+  const searchButtonRef = React.useRef<HTMLButtonElement>(null);
+  const searchId = React.useId();
+  const searchVisible = searchOpen || Boolean(searchQuery);
+  React.useEffect(() => {
+    if (searchOpen) searchInputRef.current?.focus();
+  }, [searchOpen]);
   const [selection, setSelection] = React.useState<SidebarManageSelection>(EMPTY_SIDEBAR_MANAGE_SELECTION);
   const [confirmingManageDelete, setConfirmingManageDelete] = React.useState(false);
   const [manageBusy, setManageBusy] = React.useState(false);
@@ -1315,13 +1307,13 @@ export function WorkspacesPanel({
 
   if (compact) {
     return (
-      <section className="workspaces-panel workspaces-panel-compact" aria-label="最近任务">
-        <CompactTaskRail
+      <section className="workspaces-panel workspaces-panel-compact" aria-label="项目目录">
+        <CompactDirectoryRail
           groups={groups}
           loading={loading}
           error={error}
-          activeTaskId={activeTaskId}
-          onOpenTask={(group, task) => { void openTask(group, task); }}
+          activeWorkspaceId={activeWorkspaceId}
+          peekDirectoryId={peekDirectoryId}
           onExpand={() => onExpand?.()}
         />
       </section>
@@ -1380,35 +1372,58 @@ export function WorkspacesPanel({
               )}
               <WandButton className="sidebar-manage-action" kind="ghost" size="small" disabled={manageBusy} onClick={exitManageMode}>完成</WandButton>
             </div>
-          ) : (
-            <div className="sidebar-toolbar">
+          ) : directoryId === undefined ? (
+            <>
+            <div className="sidebar-list-heading">
+              <h2>项目与任务</h2>
+              <div className="sidebar-list-actions">
+                <WandIconButton
+                  ref={searchButtonRef}
+                  title={searchVisible ? "收起搜索" : "搜索任务或会话"}
+                  aria-label={searchVisible ? "收起搜索" : "搜索任务或会话"}
+                  aria-expanded={searchVisible}
+                  aria-controls={searchVisible ? searchId : undefined}
+                  onClick={() => {
+                    if (searchVisible) onSearchChange?.("");
+                    setSearchOpen(!searchVisible);
+                  }}
+                ><WandIcon name="search" size={15}/></WandIconButton>
+                <WandIconButton
+                  className="sidebar-manage-toggle"
+                  title="批量管理"
+                  aria-label="多选任务和终端"
+                  onClick={() => {
+                    setManageMode(true);
+                    setSelection(EMPTY_SIDEBAR_MANAGE_SELECTION);
+                    setConfirmingManageDelete(false);
+                  }}
+                ><WandIcon name="check" size={15}/></WandIconButton>
+              </div>
+            </div>
+            {searchVisible && <div className="sidebar-toolbar" id={searchId}>
               <WandInput
+                ref={searchInputRef}
                 className="sidebar-search-input"
                 type="search"
                 value={searchQuery}
                 placeholder="搜索任务或会话"
                 aria-label="搜索任务或会话"
                 clearable
-                startSlot={<WandIcon name="hash" size={14}/>}
+                startSlot={<WandIcon name="search" size={14}/>}
                 onClear={() => onSearchChange?.("")}
                 onChange={(event) => onSearchChange?.(event.currentTarget.value)}
-              />
-              <WandChip
-                type="button"
-                className="sidebar-manage-toggle"
-                variant="soft"
-                title="多选任务和终端"
-                aria-label="多选任务和终端"
-                onClick={() => {
-                  setManageMode(true);
-                  setSelection(EMPTY_SIDEBAR_MANAGE_SELECTION);
-                  setConfirmingManageDelete(false);
+                onKeyDown={(event) => {
+                  if (event.key !== "Escape") return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onSearchChange?.("");
+                  setSearchOpen(false);
+                  searchButtonRef.current?.focus();
                 }}
-              >
-                选择
-              </WandChip>
-            </div>
-          )}
+              />
+            </div>}
+            </>
+          ) : null}
           {searchQuery && visibleGroups.length === 0 ? (
             <div className="sidebar-search-empty">没有找到匹配的任务或会话。</div>
           ) : null}
@@ -1420,6 +1435,7 @@ export function WorkspacesPanel({
                   <TaskGroupSection
                     key={group.workspaceId}
                     group={group}
+                    preview={directoryId !== undefined}
                     now={now}
                     directoryCount={visibleGroups.length}
                     liveTitles={sessionTitles ?? undefined}
@@ -1457,7 +1473,7 @@ export function WorkspacesPanel({
           <WandButton kind="ghost" size="small" className="workspaces-empty-action" onClick={() => void reload()}>重试</WandButton>
         </div>
       )}
-      {manageMode ? null : extraGroups}
+      {manageMode || directoryId !== undefined ? null : extraGroups}
       {pendingNewSessionTask !== null ? (
         <WorkspaceAgentDialog
           open

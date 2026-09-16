@@ -11,12 +11,14 @@ import { SidebarPeek } from "../src/web-ui/react/shell/sidebar-peek.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-function renderPeek(open: boolean): string {
+function renderPeek(open: boolean, top = 8): string {
   const children: ReactElement = createElement("span", null, "TREE-MARKER");
   return renderToStaticMarkup(createElement(
     SidebarPeek,
     {
       open,
+      title: "Wand 项目",
+      top,
       surfaceRef: { current: null },
       onExpand: () => {},
       onPointerEnter: () => {},
@@ -45,10 +47,17 @@ test("SidebarPeek exposes the directory tree and an expand escape hatch", () => 
   assert.match(html, /class="sidebar-peek open"/);
   assert.match(html, /data-open="true"/);
   assert.doesNotMatch(html, /inert=/);
-  assert.match(html, /aria-label="任务目录"/);
-  assert.match(html, />任务目录</);
+  assert.match(html, /aria-label="Wand 项目"/);
+  assert.match(html, />Wand 项目</);
+  assert.doesNotMatch(html, />任务目录</);
   assert.match(html, /aria-label="展开成完整侧栏"/);
   assert.match(html, /TREE-MARKER/);
+});
+
+test("SidebarPeek follows its directory trigger and stays within the viewport", () => {
+  const html = renderPeek(true, 180);
+  assert.match(html, /top:180px/);
+  assert.match(html, /max-height:calc\(100dvh - 192px\)/);
 });
 
 test("SidebarPeek never duplicates the legacy sidebar ids", () => {
@@ -66,13 +75,13 @@ test("ShellSidebar drives the peek from hover/focus on the collapsed rail", () =
   );
 
   // 展开后的完整侧栏不再挂第二份目录树：启用条件绑定在窄栏上。
-  assert.match(source, /useSidebarPeek\(narrow && hoverPointer, drawerRef, peekSurfaceRef\)/);
+  assert.match(source, /useSidebarPeek\(narrow && hoverPointer && !moreOpen, drawerRef, peekSurfaceRef, selectPeekDirectory\)/);
   assert.match(source, /narrow && hoverPointer && peek\.mounted/);
   assert.match(source, /\.\.\.peek\.triggerBindings/);
   assert.match(source, /\.\.\.peek\.surfaceBindings/);
-  // 同一份树渲染两处：窄栏里 compact，弹出面板里是完整层级，且不带 legacy id。
+  // 窄栏按目录显示图标，悬浮树只传当前目录，不复制 legacy id。
   assert.match(source, /<div className="sessions-list" id="sessions-list">\s*\{taskTree\(narrow\)\}/);
-  assert.match(source, /<div className="sessions-list">\{taskTree\(false\)\}<\/div>/);
+  assert.match(source, /<div className="sessions-list">\{taskTree\(false, peekDirectory.id\)\}<\/div>/);
 });
 
 test("hover hook only opens while the rail is collapsed", () => {
@@ -83,8 +92,10 @@ test("hover hook only opens while the rail is collapsed", () => {
 
   // 折叠按钮本身就在侧栏里：不过 enabled 的话，点一下收起就会顺手点亮面板。
   assert.match(source, /const requestOpen = React\.useCallback\(\(delay: number\): void => \{\s*if \(!enabled\) return;/);
-  // pointerover 而不是 pointerenter：Esc 收起后指针还在窄栏里晃动就该弹回来。
-  assert.match(source, /triggerBindings: \{\s*\/\/[^\n]*\n\s*onPointerOver: \(event\) => \{\s*if \(insideSurface\(event\.target\)\) return;\s*requestOpen\(OPEN_DELAY_MS\);/);
+  // 只允许带目录标识的图标触发预览，面板自身不重复触发。
+  assert.match(source, /if \(!enabled \|\| insideSurface\(target\) \|\| insideFloatingLayer\(target\)\) return;/);
+  assert.match(source, /target.closest<HTMLElement>\("\[data-sidebar-directory-id\]"\)/);
+  assert.match(source, /onDirectory\(id, trigger\);\s*requestOpen\(delay\);/);
   assert.doesNotMatch(source, /onPointerEnter: \(\) => scheduleOpen/);
   // 端口浮层（行内下拉 / 弹窗）自己处理 Esc 和内部点击，面板要让位。
   assert.match(source, /if \(insideFloatingLayer\(event\.target\)\) return;/);

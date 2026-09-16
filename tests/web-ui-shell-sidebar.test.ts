@@ -211,7 +211,7 @@ test("ShellSidebar SSR preserves native ids, key classes, groups, and action con
     "file-panel-toggle-btn",
     "settings-button",
     "back-to-native-button",
-    "logout-button",
+    "sidebar-more-btn",
   ];
 
   for (const id of requiredIds) {
@@ -223,7 +223,7 @@ test("ShellSidebar SSR preserves native ids, key classes, groups, and action con
   assert.doesNotMatch(html, />会话<\/button>/);
   assert.match(html, /aria-label="新建任务"/);
   assert.doesNotMatch(html, /<button[^>]*title="首页"/);
-  assert.match(html, /id="sessions-drawer" class="sidebar open"/);
+  assert.match(html, /id="sessions-drawer" class="sidebar sidebar-refined open"/);
   assert.match(html, /id="sessions-drawer-backdrop" class="drawer-backdrop open"/);
   // Appica's NavigationLink owns the row chrome; the business hook + the active
   // state are the contract the shell binds to.
@@ -298,7 +298,7 @@ test("ShellSidebar collapsed rail still renders the unified task panel", () => {
   }));
 
   // 窄栏不再有散会话磁贴，改为极简任务轨：展开入口 + 新建任务。
-  assert.match(html, /id="sessions-drawer" class="sidebar open pinned collapsed"/);
+  assert.match(html, /id="sessions-drawer" class="sidebar sidebar-refined open pinned collapsed"/);
   assert.doesNotMatch(html, /class="sidebar-collapsed-tiles"[^>]*>[\s\S]*任务列表/);
   assert.doesNotMatch(html, /aria-label="任务列表"/);
   assert.match(html, /aria-label="展开完整侧边栏"/);
@@ -330,9 +330,22 @@ test("ShellSidebar keeps creation above the directory task tree and settings in 
 test("mobile drawer ignores the desktop compact preference", () => {
   const base = fixture();
   const html = renderSidebar(fixture({ layout: { ...base.layout, sidebarCollapsed: true } }));
-  assert.doesNotMatch(html, /class="sidebar open pinned collapsed"/);
+  assert.doesNotMatch(html, /class="sidebar sidebar-refined open pinned collapsed"/);
   assert.match(html, /aria-label="目录"/);
   assert.doesNotMatch(html, /aria-label="新建项目"/);
+});
+
+test("ShellSidebar keeps secondary tools in the closed overflow menu", () => {
+  const html = renderSidebar(fixture());
+  assert.match(html, /class="sidebar-brand-mark"/);
+  assert.match(html, /id="task-board-button"/);
+  assert.match(html, />任务看板<\/span>/);
+  assert.match(html, /id="sidebar-more-btn"/);
+  for (const id of ["missions-button", "github-issues-button", "logout-button"]) {
+    assert.doesNotMatch(html, new RegExp(`id="${id}"`));
+  }
+  assert.match(html, />项目与任务<\/h2>/);
+  assert.doesNotMatch(html, /placeholder="搜索任务或会话"/);
 });
 
 test("ShellSidebar source uses the UiStore hooks and no forbidden legacy seam", () => {

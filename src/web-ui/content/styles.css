@@ -781,8 +781,7 @@
       gap: 6px;
       padding: 2px 0 8px;
     }
-    .sidebar-collapsed-rail-task,
-    .sidebar-collapsed-rail-more {
+    .sidebar-collapsed-rail-task {
       position: relative;
       width: 36px;
       height: 36px;
@@ -796,50 +795,31 @@
       justify-content: center;
       cursor: pointer;
     }
-    .sidebar-collapsed-rail-task:hover,
-    .sidebar-collapsed-rail-more:hover {
+    .sidebar-collapsed-rail-task:hover {
       color: var(--accent);
       background: color-mix(in srgb, var(--accent) 10%, transparent);
     }
-    .sidebar-collapsed-rail-task.active {
+    .sidebar-collapsed-rail-task.active,
+    .sidebar-collapsed-rail-task[aria-expanded="true"] {
       color: var(--accent);
       border-color: color-mix(in srgb, var(--accent) 28%, transparent);
       background: color-mix(in srgb, var(--accent) 12%, transparent);
     }
-    .sidebar-collapsed-rail-dot {
-      position: absolute;
-      top: 5px;
-      right: 5px;
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      box-shadow: 0 0 0 2px var(--bg-elevated);
-    }
-    .sidebar-collapsed-rail-dot.running { background: var(--success); }
-    .sidebar-collapsed-rail-dot.attention { background: var(--warning); }
-    .sidebar-collapsed-rail-more {
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: -0.02em;
-      color: var(--text-muted);
-    }
 
-    /* ===== 折叠窄栏的悬浮目录树（向右弹出）=====
-       56px 窄栏只放得下图标；鼠标停在窄栏（或键盘 Tab 进窄栏）时向右
-       弹出完整「目录 → 任务 → 终端」层级，点一下就能选中会话。
-       面板是 .sidebar 的子元素（不 portal），所以继承侧栏调色板与
-       #app[data-react-shell="enabled"] 下的任务树样式，和完整侧栏一致。 */
+    /* ===== 折叠窄栏的目录预览（向右弹出）=====
+       每个目录图标只弹出自己的任务与终端，面板高度随内容变化。
+       面板在 .sidebar 内继承调色板与任务树样式。 */
     .sidebar-peek {
       position: fixed;
-      top: 0;
-      bottom: 0;
+      bottom: auto;
       left: 100%;
       z-index: 1;
       display: flex;
       flex-direction: column;
       width: min(320px, calc(100vw - var(--sidebar-collapsed-width) - 16px));
       overflow: hidden;
-      border-right: 1px solid var(--web-sidebar-line, var(--border-subtle));
+      border: 1px solid var(--web-sidebar-line, var(--border-subtle));
+      border-radius: 8px;
       background: var(--web-sidebar-surface, rgba(255, 251, 245, 0.97));
       box-shadow: 10px 0 34px -20px rgba(53, 37, 25, 0.5);
       backdrop-filter: blur(20px) saturate(140%);
@@ -1747,6 +1727,7 @@
       flex: 1;
       min-height: 0;
       overflow-y: auto;
+      overscroll-behavior-y: contain;
       -webkit-overflow-scrolling: touch;
       position: relative;
     }
@@ -14082,14 +14063,6 @@
       gap: 8px;
     }
 
-    #app[data-react-shell="enabled"] .sidebar-header-main .topbar-logo-icon {
-      width: 25px;
-      height: 25px;
-      border-radius: 8px;
-      font-size: 10.5px;
-      box-shadow: 0 1px 3px color-mix(in srgb, var(--accent) 24%, transparent);
-    }
-
     #app[data-react-shell="enabled"] .sidebar-title {
       font-size: 11.375px;
       font-weight: 700;
@@ -16328,8 +16301,7 @@
       padding: 8px;
     }
 
-    #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-footer-actions .wand-ui-navigation-link > span,
-    #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-logout::before {
+    #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-footer-actions .wand-ui-navigation-link > span {
       display: none;
     }
 
@@ -16514,14 +16486,14 @@
    Native clients keep the touch-oriented material above unchanged.
    ======================================================================== */
 html:not(.is-wand-app) #app[data-react-shell="enabled"] {
-  --web-sidebar-width: 280px;
-  --web-sidebar-surface: #f8f6f2;
-  --web-sidebar-surface-raised: #fcfbf8;
-  --web-sidebar-ink: #2f2924;
-  --web-sidebar-muted: #81776e;
-  --web-sidebar-line: rgba(92, 72, 56, 0.11);
-  --web-sidebar-hover: rgba(92, 72, 56, 0.065);
-  --web-sidebar-active: rgba(197, 101, 61, 0.1);
+  --web-sidebar-width: 296px;
+  --web-sidebar-surface: #faf7f2;
+  --web-sidebar-surface-raised: #fffdfa;
+  --web-sidebar-ink: #1f1b18;
+  --web-sidebar-muted: #776e63;
+  --web-sidebar-line: #e5ded3;
+  --web-sidebar-hover: #f2ede5;
+  --web-sidebar-active: #f3e5db;
   --web-sidebar-ease: cubic-bezier(0.23, 1, 0.32, 1);
 }
 
@@ -16561,12 +16533,10 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar {
 }
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-header {
-  min-height: 64px;
-  padding: 14px 15px 13px;
-  background:
-    radial-gradient(circle at 16% 0%, rgba(197, 101, 61, 0.09), transparent 42%),
-    var(--web-sidebar-surface);
-  border-bottom: 1px solid var(--web-sidebar-line);
+  min-height: 76px;
+  padding: 20px 18px 12px;
+  background: var(--web-sidebar-surface);
+  border-bottom: 0;
 }
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-header-primary {
@@ -16578,19 +16548,10 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-header-main {
   gap: 10px;
 }
 
-html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-header-main .topbar-logo-icon {
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
-  background: linear-gradient(145deg, #d97757 0%, #c5653d 56%, #a94c2f 100%);
-  box-shadow: 0 4px 10px -4px rgba(168, 72, 43, 0.62), inset 0 1px 0 rgba(255, 255, 255, 0.3);
-  font-size: 11.375px;
-}
-
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-title {
   color: var(--web-sidebar-ink);
-  font-size: 14px;
-  font-weight: 720;
+  font-size: 16px;
+  font-weight: 600;
   letter-spacing: -0.025em;
 }
 
@@ -16636,7 +16597,7 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 5px;
-  padding: 14px 12px 13px;
+  padding: 8px 18px 16px;
   border-bottom: 1px solid var(--web-sidebar-line);
 }
 
@@ -16709,14 +16670,14 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-row-folder {
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-row-name {
   color: var(--web-sidebar-ink);
-  font-size: 11.375px;
-  font-weight: 650;
+  font-size: 13px;
+  font-weight: 600;
   letter-spacing: -0.005em;
 }
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-row-count {
-  color: #9a8e83;
-  font-size: 8.75px;
+  color: var(--web-sidebar-muted);
+  font-size: 11px;
 }
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-tasks {
@@ -16763,9 +16724,9 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task-marker.i
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task-name {
   color: var(--web-sidebar-ink);
-  font-size: 10.5px;
-  font-weight: 560;
-  line-height: 1.35;
+  font-size: 13px;
+  font-weight: 450;
+  line-height: 1.45;
 }
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task.active .workspace-task-name {
@@ -16775,7 +16736,7 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task.active .
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task-time,
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task-activity {
-  font-size: 8.75px;
+  font-size: 10px;
 }
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task-activity {
@@ -16831,9 +16792,9 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-session.activ
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task-chevron-btn {
   min-width: 26px;
   height: 26px;
-  border-radius: 8px;
-  color: #9a8d82;
-  background: rgba(92, 72, 56, 0.055);
+  border-radius: 4px;
+  color: var(--web-sidebar-muted);
+  background: transparent;
   transition: color 140ms var(--web-sidebar-ease), background-color 140ms var(--web-sidebar-ease);
 }
 
@@ -16901,7 +16862,7 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-footer-actions 
   padding: 7px 8px;
   color: var(--web-sidebar-muted);
   background: transparent;
-  font-size: 9.625px;
+  font-size: 12px;
   font-weight: 600;
   transition: color 140ms var(--web-sidebar-ease), background-color 140ms var(--web-sidebar-ease), border-color 140ms var(--web-sidebar-ease), transform 120ms ease;
 }
@@ -16925,17 +16886,6 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-footer-actions 
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-footer-actions .wand-ui-navigation-link:hover svg {
   color: var(--accent-active);
-}
-
-/* 「退出」是破坏性动作： hover 转危险色，并保留分隔线。 */
-html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-footer-actions .sidebar-logout:hover {
-  color: var(--danger);
-  border-color: rgba(178, 79, 69, 0.16);
-  background: rgba(178, 79, 69, 0.07);
-}
-
-html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-footer-actions .sidebar-logout:hover svg {
-  color: currentColor;
 }
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspaces-panel-state,
@@ -17085,8 +17035,7 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-manage-action:h
   color: var(--web-sidebar-ink);
   background: var(--web-sidebar-hover);
 }
-html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-collapsed-rail-task,
-html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-collapsed-rail-more {
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-collapsed-rail-task {
   color: var(--web-sidebar-muted);
 }
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-collapsed-rail-task.active {
@@ -17178,9 +17127,7 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .si
   padding: 7px 10px;
   color: var(--web-sidebar-muted);
   background: transparent;
-  /* 11.375px = 0.8125rem × 0.875：跟侧栏其它文字（目录行、任务行）同一档，
-     不再被 Appica 的 text-sm（14px）接管。 */
-  font-size: 11.375px;
+  font-size: 13px;
   font-weight: 550;
   transition: color 150ms var(--web-sidebar-ease), background-color 150ms var(--web-sidebar-ease), border-color 150ms var(--web-sidebar-ease), transform 120ms ease;
 }
@@ -17215,22 +17162,22 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .si
   transform: scale(0.98);
 }
 
-/* Feature nav uses one visual language; creation is not a competing primary card. */
+/* Keep creation visually distinct from the selected navigation destination. */
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list > li > .sidebar-new-task {
-  min-height: 36px;
-  margin-bottom: 0;
+  min-height: 40px;
+  margin-bottom: 4px;
   justify-content: flex-start;
-  border-color: transparent;
-  border-radius: 10px;
-  padding: 7px 10px;
-  color: var(--web-sidebar-muted);
+  border-color: var(--web-sidebar-line);
+  border-radius: 6px;
+  padding: 9px 12px;
+  color: var(--web-sidebar-ink);
   background: transparent;
   box-shadow: none;
-  font-weight: 550;
+  font-weight: 600;
 }
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list > li > .sidebar-new-task > svg {
-  color: #9a8d82;
+  color: currentColor;
 }
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list > li > .sidebar-new-task:hover {
@@ -17241,13 +17188,16 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .si
 }
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list > li > .sidebar-new-task:hover > svg {
-  color: var(--accent-active);
+  color: currentColor;
 }
 
 @media (max-width: 768px) {
   html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list > li > button,
   html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list > li > .sidebar-new-task {
-    min-height: 40px;
+    min-height: 44px;
+  }
+  html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-footer-actions .wand-ui-navigation-link {
+    min-height: 44px;
   }
 }
 
@@ -17283,6 +17233,226 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar.pinned.collapse
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-footer-actions .wand-ui-navigation-list > li {
   flex: 0 0 auto;
+}
+
+/* Sidebar hierarchy shared by the full tree and its compact preview. */
+.sidebar-brand-mark { width: 32px; height: 32px; flex: 0 0 auto; }
+/* Preserve the legacy ID for integrations without showing a second close button. */
+.sidebar-refined .sidebar-header-actions .legacy-sidebar-collapse { display: none; }
+.sidebar-tools-menu.wand-ui-dropdown-content {
+  min-width: 196px;
+  max-width: calc(100vw - 24px);
+  padding: 4px;
+  border: 1px solid #e5ded3;
+  border-radius: 6px;
+  background: #fffdfa;
+  box-shadow: none;
+}
+.sidebar-tools-menu .wand-ui-dropdown-item {
+  min-height: 36px;
+  padding: 8px 10px;
+  gap: 9px;
+  border-radius: 4px;
+  color: #57504a;
+  font-size: 13px;
+}
+.sidebar-tools-menu .wand-ui-dropdown-item[data-highlighted],
+.sidebar-tools-menu .wand-ui-dropdown-item:hover { background: #f2ede5; }
+.sidebar-tools-menu .wand-ui-dropdown-item-danger { color: #b24f45; }
+.sidebar-tools-menu .wand-ui-dropdown-separator { margin: 4px 6px; background: #e5ded3; }
+.sidebar-list-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 8px 4px;
+}
+.sidebar-list-heading h2 {
+  margin: 0;
+  color: var(--web-sidebar-muted, var(--text-secondary));
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+.sidebar-list-actions { display: flex; align-items: center; gap: 2px; }
+.sidebar-list-actions .wand-ui-icon-button {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
+  border: 0;
+  border-radius: 4px;
+  padding: 6px;
+  background: transparent;
+  color: var(--web-sidebar-muted, var(--text-secondary));
+}
+.sidebar-list-actions .wand-ui-icon-button:hover {
+  background: var(--web-sidebar-hover, var(--bg-tertiary));
+  color: var(--web-sidebar-ink, var(--text-primary));
+}
+.sidebar-footer-caption {
+  color: var(--web-sidebar-muted, var(--text-secondary));
+  font-size: 11px;
+  white-space: nowrap;
+}
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar.sidebar-refined {
+  box-shadow: none;
+}
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .sidebar-body {
+  padding: 0 12px 12px;
+}
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .sidebar-toolbar {
+  padding: 0 8px 8px;
+}
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .sidebar-search-input {
+  border: 0;
+  border-bottom: 1px solid #cfc6b8;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .sidebar-search-input:focus-within {
+  border-color: #c5653d;
+  box-shadow: 0 1px 0 #c5653d;
+}
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .sidebar-toolbar input {
+  font-size: 13px;
+}
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-item,
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-item:hover {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+/* Shallow indentation keeps the tree on the sidebar's own surface. */
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspaces-list {
+  gap: 16px;
+}
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-row {
+  padding: 0;
+  min-height: 40px;
+}
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-tasks {
+  margin: 2px 0 0;
+  padding: 0 0 0 28px;
+  border-left: 0;
+  gap: 4px;
+}
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .sidebar-peek .workspace-tasks {
+  margin: 0;
+  padding: 0;
+}
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .sidebar-peek .workspaces-panel {
+  gap: 0;
+  padding: 0;
+}
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-task-sessions {
+  margin: 2px 0 8px 12px;
+  padding: 0 0 0 8px;
+  border-left: 1px solid var(--web-sidebar-line);
+}
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-task {
+  min-height: 40px;
+  gap: 4px;
+  padding: 2px 6px;
+}
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-task.active {
+  box-shadow: none;
+  background: var(--web-sidebar-active);
+}
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-task-main {
+  padding-inline: 4px;
+}
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-task-time {
+  display: none;
+}
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-row-count {
+  display: none;
+}
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-session-main {
+  min-height: 34px;
+}
+/* Fine-pointer actions appear in place without reserving title width at rest.
+   Keyboard focus and open menus keep their actions visible. */
+@media (hover: hover) and (pointer: fine) {
+  html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-task:not(:hover):not(:focus-within):not(:has([aria-expanded="true"])) .workspace-task-action.more {
+    width: 0;
+    min-width: 0;
+    padding-inline: 0;
+    margin-left: -4px;
+    border: 0;
+    overflow: hidden;
+  }
+}
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-row-folder {
+  color: var(--web-sidebar-muted);
+  opacity: 1;
+}
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-task,
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-row-main,
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-session-main {
+  border-radius: 5px;
+}
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-session-name {
+  font-size: 12px;
+}
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-task-time {
+  color: var(--web-sidebar-muted);
+  font-variant-numeric: tabular-nums;
+}
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .sidebar-footer {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 18px;
+}
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-task-chevron-btn::before {
+  background: transparent;
+  border-color: transparent;
+}
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-task-chevron-btn:hover::before {
+  background: var(--web-sidebar-hover);
+}
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .sidebar-footer-actions {
+  flex: 0 1 auto;
+  width: auto;
+}
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .sidebar-footer-actions .wand-ui-navigation-link {
+  justify-content: flex-start;
+  border-radius: 5px;
+  padding: 7px 4px;
+}
+/* Keep tools and sign-out reachable when the sidebar is a compact rail. */
+#app[data-react-shell="enabled"] .sidebar-refined.pinned.collapsed .sidebar-header-more { display: block; }
+#app[data-react-shell="enabled"] .sidebar-refined.pinned.collapsed .sidebar-header-actions {
+  flex-direction: column-reverse;
+  gap: 6px;
+}
+#app[data-react-shell="enabled"] .sidebar-refined.pinned.collapsed .sidebar-footer-caption { display: none; }
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined.pinned.collapsed .sidebar-footer {
+  justify-content: center;
+  padding: 10px 4px;
+}
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined.pinned.collapsed .sidebar-feature-nav .sidebar-new-task {
+  min-height: 36px;
+  padding: 8px;
+}
+@media (max-width: 768px) {
+  .sidebar-tools-menu .wand-ui-dropdown-item { min-height: 44px; }
+  .sidebar-list-actions .wand-ui-icon-button {
+    width: 36px;
+    min-width: 36px;
+    height: 44px;
+    min-height: 44px;
+  }
+  .sidebar-footer-caption { display: none; }
+  html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .sidebar-header-actions .sidebar-more-trigger {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
 
 /* ── GitHub 议题弹窗 ─────────────────────────────────────────

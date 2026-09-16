@@ -7,6 +7,7 @@ import {
   WandDropdownMenu,
   WandDropdownMenuContent,
   WandDropdownMenuItem,
+  WandDropdownMenuSeparator,
   WandDropdownMenuTrigger,
   WandIcon,
   WandIconButton,
@@ -557,7 +558,7 @@ export function ShellSidebar() {
   const [searchQuery, setSearchQuery] = React.useState("");
   const narrow = !snapshot.viewport.mobile && snapshot.layout.sidebarPinned && snapshot.layout.sidebarCollapsed;
   const sidebarClass = classNames(
-    "sidebar",
+    "sidebar sidebar-refined",
     snapshot.layout.sessionsDrawerOpen && "open",
     !snapshot.viewport.mobile && snapshot.layout.sidebarAnchored && "pinned",
     narrow && "collapsed",
@@ -570,7 +571,18 @@ export function ShellSidebar() {
   const peekSurfaceRef = React.useRef<HTMLDivElement>(null);
   // 窄栏的悬浮目录树：只在有真实指针的设备上启用（触摸设备没有悬停语义）。
   const hoverPointer = useHoverPointer();
-  const peek = useSidebarPeek(narrow && hoverPointer, drawerRef, peekSurfaceRef);
+  const [peekDirectory, setPeekDirectory] = React.useState<{ id: string; name: string; top: number } | null>(null);
+  const selectPeekDirectory = React.useCallback((id: string, trigger: HTMLElement): void => {
+    const sidebarTop = drawerRef.current?.getBoundingClientRect().top ?? 0;
+    const top = Math.max(8, Math.min(
+      trigger.getBoundingClientRect().top - sidebarTop,
+      window.innerHeight - sidebarTop - 300,
+    ));
+    const name = trigger.dataset.sidebarDirectoryName ?? "目录";
+    setPeekDirectory((current) => current?.id === id && current.name === name && current.top === top
+      ? current : { id, name, top });
+  }, [drawerRef]);
+  const peek = useSidebarPeek(narrow && hoverPointer && !moreOpen, drawerRef, peekSurfaceRef, selectPeekDirectory);
   const scrollPositions = React.useRef({ full: 0, compact: 0 });
   React.useLayoutEffect(() => {
     const body = bodyRef.current;
@@ -594,6 +606,17 @@ export function ShellSidebar() {
     peek.close();
     if (overlay) void dispatch({ type: "layout.drawer.close" });
   };
+  const dispatchEntryAction = (action: UiAction): void => {
+    if (action.type === "session.select" || action.type === "session.resume"
+      || action.type === "session.resumeHistory") {
+      navigate(action);
+      return;
+    }
+    void dispatch(action);
+  };
+  React.useEffect(() => {
+    setMoreOpen(false);
+  }, [visible, narrow]);
   const extraGroups = snapshot.sidebar.groups
     .filter((group) => group.kind !== "wand")
     .map((group) => ({
@@ -605,15 +628,18 @@ export function ShellSidebar() {
         : group.entries,
     }))
     .map((group) => (
-      <SessionGroup key={group.kind} group={group} manageMode={false} dispatch={dispatch}/>
+      <SessionGroup key={group.kind} group={group} manageMode={false} dispatch={dispatchEntryAction}/>
     ));
-  // 同一份目录树渲染两处：窄栏里是图标 rail，悬浮面板里是完整层级。
-  const taskTree = (compact: boolean): React.ReactNode => (
+  // 窄栏展示目录图标；悬浮树按当前目录过滤，不携带全局搜索和历史分组。
+  const taskTree = (compact: boolean, directoryId?: string): React.ReactNode => (
     <WorkspacesPanel
+      key={directoryId ?? "sidebar-tree"}
       compact={compact}
+      directoryId={directoryId}
+      peekDirectoryId={peek.open ? peekDirectory?.id : undefined}
       onExpand={() => void dispatch({ type: "layout.drawer.collapse" })}
       onNavigate={navigateFromTree}
-      searchQuery={searchQuery}
+      searchQuery={directoryId === undefined ? searchQuery : ""}
       onSearchChange={setSearchQuery}
       selectedSessionId={snapshot.selected?.id ?? null}
       sessionTitles={Object.fromEntries(snapshot.sidebar.groups.flatMap((group) => (
@@ -638,7 +664,11 @@ export function ShellSidebar() {
         <div className="sidebar-header">
           <div className="sidebar-header-primary">
             <div className="sidebar-header-main">
-              <div className="topbar-logo-icon">W</div>
+              <svg className="sidebar-brand-mark" viewBox="0 0 64 64" aria-hidden="true">
+                <rect width="64" height="64" rx="18" fill="#17120f"/>
+                <path d="M13 21l9 24 10-15 10 15 9-24" fill="none" stroke="#c5653d"
+                  strokeWidth="6.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
               <span className="sidebar-title">Wand</span>
             </div>
             <div className="sidebar-header-actions">
@@ -664,10 +694,34 @@ export function ShellSidebar() {
                   />
                   <WandDropdownMenuContent
                     id="sidebar-overflow-menu"
+                    className="sidebar-tools-menu"
                     aria-label="侧栏更多操作"
                     align="end"
                     sideOffset={6}
                   >
+                    <WandDropdownMenuItem
+                      id="missions-button"
+                      icon="zap"
+                      onClick={() => {
+                        setMoreOpen(false);
+                        navigate({ type: "missions.open" });
+                      }}
+                    >
+                      自动化任务
+                    </WandDropdownMenuItem>
+                    <WandDropdownMenuItem
+                      id="github-issues-button"
+                      icon="git"
+                      onClick={() => {
+                        setMoreOpen(false);
+                        peek.close();
+                        if (overlay) void dispatch({ type: "layout.drawer.close" });
+                        window.__wandReactGithubIssues?.open(snapshot.selected?.id ?? "");
+                      }}
+                    >
+                      GitHub 议题
+                    </WandDropdownMenuItem>
+                    <WandDropdownMenuSeparator/>
                     <WandDropdownMenuItem
                       id="sidebar-home-btn"
                       icon="home"
@@ -687,6 +741,18 @@ export function ShellSidebar() {
                       }}
                     >
                       刷新页面
+                    </WandDropdownMenuItem>
+                    <WandDropdownMenuSeparator/>
+                    <WandDropdownMenuItem
+                      id="logout-button"
+                      icon="logout"
+                      tone="danger"
+                      onClick={() => {
+                        setMoreOpen(false);
+                        navigate({ type: "auth.logout" });
+                      }}
+                    >
+                      退出登录
                     </WandDropdownMenuItem>
                   </WandDropdownMenuContent>
                 </WandDropdownMenu>
@@ -735,7 +801,7 @@ export function ShellSidebar() {
               <WandButton
                 id="drawer-new-session-button"
                 className="sidebar-new-task"
-                kind="primary"
+                kind="secondary"
                 size="medium"
                 title="新建任务"
                 aria-label={primaryAction.ariaLabel}
@@ -747,44 +813,18 @@ export function ShellSidebar() {
             </WandNavigationItem>
             <WandNavigationItem>
               <WandNavigationLink
-                id="missions-button"
-                title="自动化任务"
-                value="missions"
-                render={<button type="button"/>}
-                onClick={() => navigate({ type: "missions.open" })}
-              >
-                <WandIcon name="zap" slot="start" size={17}/>
-                <span>自动化</span>
-              </WandNavigationLink>
-            </WandNavigationItem>
-            <WandNavigationItem>
-              <WandNavigationLink
                 id="task-board-button"
-                title="任务管理"
+                title="任务看板"
                 value="task-board"
                 render={<button type="button"/>}
                 onClick={() => {
+                  peek.close();
                   if (overlay) void dispatch({ type: "layout.drawer.close" });
                   taskBoardController.open(snapshot.selected?.workspaceId ?? "", snapshot.selected?.id ?? "");
                 }}
               >
                 <WandIcon name="clipboard" slot="start" size={17}/>
-                <span>任务管理</span>
-              </WandNavigationLink>
-            </WandNavigationItem>
-            <WandNavigationItem>
-              <WandNavigationLink
-                id="github-issues-button"
-                title="GitHub 议题"
-                value="github-issues"
-                render={<button type="button"/>}
-                onClick={() => {
-                  if (overlay) void dispatch({ type: "layout.drawer.close" });
-                  window.__wandReactGithubIssues?.open(snapshot.selected?.id ?? "");
-                }}
-              >
-                <WandIcon name="git" slot="start" size={17}/>
-                <span>GitHub</span>
+                <span>任务看板</span>
               </WandNavigationLink>
             </WandNavigationItem>
           </WandNavigationList>
@@ -798,8 +838,10 @@ export function ShellSidebar() {
         </div>
         {/* 首次悬停才挂载，之后常驻（关闭态用 CSS visibility 藏起来）：
             既不预览就多跑一份任务树轮询，也不会每次悬停都重新拉一次。 */}
-        {narrow && hoverPointer && peek.mounted ? (
+        {narrow && hoverPointer && peek.mounted && peekDirectory ? (
           <SidebarPeek
+            title={peekDirectory.name}
+            top={peekDirectory.top}
             open={peek.open}
             surfaceRef={peekSurfaceRef}
             onExpand={() => {
@@ -808,8 +850,8 @@ export function ShellSidebar() {
             }}
             {...peek.surfaceBindings}
           >
-            {/* 面板里的目录树不带 #sessions-panel / #sessions-list 这些 legacy id。 */}
-            <div className="sessions-list">{taskTree(false)}</div>
+            {/* 仅渲染当前目录，不复制 legacy DOM id。 */}
+            <div className="sessions-list">{taskTree(false, peekDirectory.id)}</div>
           </SidebarPeek>
         ) : null}
         <div className="sidebar-footer">
@@ -878,21 +920,9 @@ export function ShellSidebar() {
                   </WandNavigationLink>
                 </WandNavigationItem>
               )}
-              <WandNavigationItem>
-                <WandNavigationLink
-                  id="logout-button"
-                  className="sidebar-logout"
-                  title="退出登录"
-                  value="logout"
-                  render={<button type="button"/>}
-                  onClick={() => navigate({ type: "auth.logout" })}
-                >
-                  <WandIcon name="logout" slot="start" size={16}/>
-                  <span>退出</span>
-                </WandNavigationLink>
-              </WandNavigationItem>
             </WandNavigationList>
           </WandNavigation>
+          <span className="sidebar-footer-caption">本地控制台</span>
         </div>
       </aside>
     </>

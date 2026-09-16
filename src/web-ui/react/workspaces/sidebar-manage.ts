@@ -1,5 +1,4 @@
-import type { TaskDirectoryGroup, TaskSummary } from "./types";
-import { taskActivity, taskRecency } from "./sidebar-task-meta";
+import type { TaskDirectoryGroup } from "./types";
 
 export interface SidebarManageSelection {
   readonly taskIds: readonly string[];
@@ -10,21 +9,6 @@ export const EMPTY_SIDEBAR_MANAGE_SELECTION: SidebarManageSelection = Object.fre
   taskIds: [],
   sessionIds: [],
 });
-
-export const COLLAPSED_RAIL_LIMIT = 8;
-
-export interface CollapsedRailTask {
-  readonly workspaceId: string;
-  readonly workspaceName: string;
-  readonly global: boolean;
-  readonly task: TaskSummary;
-  readonly activity: "attention" | "running" | null;
-}
-
-export interface CollapsedRailModel {
-  readonly items: readonly CollapsedRailTask[];
-  readonly overflow: number;
-}
 
 export function sidebarManageCount(selection: SidebarManageSelection): number {
   return selection.taskIds.length + selection.sessionIds.length;
@@ -98,33 +82,4 @@ export function describeManagedDeletion(selection: SidebarManageSelection): stri
   if (selection.taskIds.length > 0) parts.push(`${selection.taskIds.length} 个任务`);
   if (selection.sessionIds.length > 0) parts.push(`${selection.sessionIds.length} 个终端`);
   return parts.join("和") || "所选项目";
-}
-
-function railRank(item: CollapsedRailTask, activeTaskId: string | null): number {
-  if (item.task.id === activeTaskId) return 0;
-  if (item.activity === "attention") return 1;
-  if (item.activity === "running") return 2;
-  return 3;
-}
-
-/** Narrow rail: active / needing attention first, then recency. Cap the list. */
-export function collapsedRailTasks(
-  groups: readonly TaskDirectoryGroup[],
-  activeTaskId: string | null,
-  limit = COLLAPSED_RAIL_LIMIT,
-): CollapsedRailModel {
-  const items: CollapsedRailTask[] = groups.flatMap((group) => group.tasks.map((task) => ({
-    workspaceId: group.workspaceId,
-    workspaceName: group.global ? "独立任务" : group.workspaceName,
-    global: Boolean(group.global),
-    task,
-    activity: taskActivity(task),
-  })));
-  items.sort((left, right) => {
-    const rankDelta = railRank(left, activeTaskId) - railRank(right, activeTaskId);
-    if (rankDelta !== 0) return rankDelta;
-    return taskRecency(right.task).localeCompare(taskRecency(left.task));
-  });
-  const visible = items.slice(0, Math.max(0, limit));
-  return { items: visible, overflow: Math.max(0, items.length - visible.length) };
 }

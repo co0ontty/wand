@@ -3,7 +3,7 @@ import * as React from "react";
 /**
  * 折叠窄栏「悬浮目录树」的开关时序。
  *
- * 先等一小段悬停意图：鼠标快速扫过 56px 窄栏时不该弹出整棵目录树。
+ * 先等一小段悬停意图：鼠标快速扫过目录图标时不该弹出预览。
  * 指针离开后再留一点时间，让指针能从窄栏滑进弹出面板而不闪断。
  */
 const OPEN_DELAY_MS = 140;
@@ -11,13 +11,14 @@ const CLOSE_DELAY_MS = 240;
 
 export interface SidebarPeekHoverBindings {
   onPointerLeave(event: React.PointerEvent<HTMLElement>): void;
-  onFocusCapture(): void;
+  onFocusCapture(event: React.FocusEvent<HTMLElement>): void;
   onBlurCapture(event: React.FocusEvent<HTMLElement>): void;
 }
 
-/** 绑在窄栏 `<aside>` 上：窄栏内部的每次指针移动都算「想展开」。 */
+/** 绑在窄栏上，仅目录图标的指针和焦点事件请求展开。 */
 export interface SidebarPeekTriggerBindings extends SidebarPeekHoverBindings {
   onPointerOver(event: React.PointerEvent<HTMLElement>): void;
+  onClick(event: React.MouseEvent<HTMLElement>): void;
 }
 
 /** 绑在弹出面板上：指针或焦点落进面板就保持展开。 */
@@ -37,7 +38,7 @@ export interface SidebarPeek {
   /** 只有真正悬停过才挂载面板：折叠态常驻会多跑一份目录树轮询。 */
   readonly mounted: boolean;
   readonly open: boolean;
-  /** 绑在窄栏 `<aside>` 上：悬停 / 聚焦窄栏即请求展开。 */
+  /** 绑在窄栏上：只响应带目录标识的图标。 */
   readonly triggerBindings: SidebarPeekTriggerBindings;
   /** 绑在弹出面板上：指针或焦点落进面板就保持展开。 */
   readonly surfaceBindings: SidebarPeekSurfaceBindings;
@@ -71,6 +72,7 @@ export function useSidebarPeek(
   enabled: boolean,
   triggerRef: React.RefObject<HTMLElement | null>,
   surfaceRef: React.RefObject<HTMLElement | null>,
+  onDirectory: (id: string, trigger: HTMLElement) => void,
 ): SidebarPeek {
   const [open, setOpen] = React.useState(false);
   const [mounted, setMounted] = React.useState(false);
@@ -170,19 +172,30 @@ export function useSidebarPeek(
     scheduleClose();
   }, [scheduleClose]);
 
+  const requestDirectory = (target: EventTarget | null, delay: number): void => {
+    if (!enabled || insideSurface(target) || insideFloatingLayer(target)) return;
+    const trigger = target instanceof Element
+      ? target.closest<HTMLElement>("[data-sidebar-directory-id]")
+      : null;
+    const id = trigger?.dataset.sidebarDirectoryId;
+    if (!trigger || !id || !triggerRef.current?.contains(trigger)) {
+      scheduleClose();
+      return;
+    }
+    onDirectory(id, trigger);
+    requestOpen(delay);
+  };
+
   return {
     mounted,
     open,
     close,
     triggerBindings: {
-      // pointerover（不是 pointerenter）：Esc 收起后指针只要还在窄栏里晃就该弹回来。
-      onPointerOver: (event) => {
-        if (insideSurface(event.target)) return;
-        requestOpen(OPEN_DELAY_MS);
-      },
+      // 目录之间可直接切换；头部、导航、页脚都不触发目录预览。
+      onPointerOver: (event) => requestDirectory(event.target, OPEN_DELAY_MS),
+      onClick: (event) => requestDirectory(event.target, 0),
       onPointerLeave: leave,
-      // 键盘落到窄栏也放行：Tab 进来即展开，Blur 出去再收回。
-      onFocusCapture: () => requestOpen(0),
+      onFocusCapture: (event) => requestDirectory(event.target, 0),
       onBlurCapture: (event) => {
         if (holds(event.relatedTarget) || insideFloatingLayer(event.relatedTarget)) return;
         scheduleClose();
