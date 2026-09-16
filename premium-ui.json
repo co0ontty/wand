@@ -1,0 +1,34 @@
+{
+  "profile": "product-admin",
+  "sourceRoots": [
+    "src/web-ui/react"
+  ],
+  "locale": "zh-CN",
+  "canonicalMap": "UX-CONTRACT.md",
+  "requiredCapabilities": [
+    "Select/Listbox",
+    "Date",
+    "Form",
+    "Scrollbar",
+    "Toast",
+    "CRUD"
+  ],
+  "ownership": {
+    "Select/Listbox": "authored",
+    "Date": "native"
+  },
+  "requiredCommands": [
+    "typecheck",
+    "unit",
+    "build"
+  ],
+  "commands": {
+    "typecheck": "npm run check",
+    "unit": "npm test",
+    "build": "npm run build"
+  },
+  "evidence": {
+    "crudFullFlow": "docs/web-cleanup-review.md",
+    "failurePaths": "tests/web-ui-task-board.test.ts"
+  }
+}

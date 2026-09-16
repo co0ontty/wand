@@ -1,3 +1,4 @@
+import { parseJsonResponse } from "../http-adapter";
 import type {
   CreateStandaloneTaskRequest,
   CreateWorkspaceRequest,
@@ -83,14 +84,6 @@ export function normalizeWorkspaceWorktreeOverview(value: unknown): WorkspaceWor
   };
 }
 
-async function readJson<T = Record<string, unknown>>(response: Response): Promise<T> {
-  const body = await response.json().catch(() => ({})) as Record<string, unknown>;
-  if (!response.ok || body.error) {
-    throw new Error(typeof body.error === "string" ? body.error : `请求失败 (HTTP ${response.status})`);
-  }
-  return body as T;
-}
-
 function normalizePaths(value: unknown): RecentPath[] {
   if (!Array.isArray(value)) return [];
   return value
@@ -111,7 +104,7 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
   constructor(private readonly fetchImpl: FetchLike = (input, init) => globalThis.fetch(input, init)) {}
 
   async list(): Promise<Workspace[]> {
-    const body = await readJson<unknown>(await this.fetchImpl("/api/workspaces", { credentials: "same-origin" }));
+    const body = await parseJsonResponse<unknown>(await this.fetchImpl("/api/workspaces", { credentials: "same-origin" }));
     const items = Array.isArray(body) ? body : (body as { workspaces?: unknown }).workspaces;
     if (!Array.isArray(items)) return [];
     return items.map((item) => {
@@ -126,7 +119,7 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
 
   async listTaskGroups(revision?: string): Promise<{ groups: TaskDirectoryGroup[]; revision?: string; unchanged: boolean }> {
     const query = revision ? `?revision=${encodeURIComponent(revision)}` : "";
-    const body = await readJson<unknown>(await this.fetchImpl(`/api/tasks${query}`, { credentials: "same-origin" }));
+    const body = await parseJsonResponse<unknown>(await this.fetchImpl(`/api/tasks${query}`, { credentials: "same-origin" }));
     if (Array.isArray(body)) return { groups: body as TaskDirectoryGroup[], unchanged: false };
     const record = body && typeof body === "object" ? body as { groups?: TaskDirectoryGroup[]; revision?: string; unchanged?: boolean } : {};
     return {
@@ -137,13 +130,13 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
   }
 
   async get(id: string): Promise<WorkspaceDetail> {
-    return readJson<WorkspaceDetail>(await this.fetchImpl(`/api/workspaces/${encodeURIComponent(id)}`, {
+    return parseJsonResponse<WorkspaceDetail>(await this.fetchImpl(`/api/workspaces/${encodeURIComponent(id)}`, {
       credentials: "same-origin",
     }));
   }
 
   async create(request: CreateWorkspaceRequest): Promise<Workspace> {
-    return readJson<Workspace>(await this.fetchImpl("/api/workspaces", {
+    return parseJsonResponse<Workspace>(await this.fetchImpl("/api/workspaces", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
@@ -152,7 +145,7 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
   }
 
   async update(id: string, patch: UpdateWorkspaceRequest): Promise<Workspace> {
-    return readJson<Workspace>(await this.fetchImpl(`/api/workspaces/${encodeURIComponent(id)}`, {
+    return parseJsonResponse<Workspace>(await this.fetchImpl(`/api/workspaces/${encodeURIComponent(id)}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
@@ -161,14 +154,14 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
   }
 
   async remove(id: string, cascade = false): Promise<void> {
-    await readJson(await this.fetchImpl(
+    await parseJsonResponse<Record<string, unknown>>(await this.fetchImpl(
       `/api/workspaces/${encodeURIComponent(id)}${cascade ? "?cascade=1" : ""}`,
       { method: "DELETE", credentials: "same-origin" },
     ));
   }
 
   async renameDirectory(cwd: string, name: string | null): Promise<void> {
-    await readJson(await this.fetchImpl("/api/session-directories/name", {
+    await parseJsonResponse<Record<string, unknown>>(await this.fetchImpl("/api/session-directories/name", {
       method: "PUT",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
@@ -177,7 +170,7 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
   }
 
   async saveLayout(id: string, layout: LayoutNode | null): Promise<LayoutNode | null> {
-    const body = await readJson<{ layout: LayoutNode | null }>(await this.fetchImpl(`/api/workspaces/${encodeURIComponent(id)}/layout`, {
+    const body = await parseJsonResponse<{ layout: LayoutNode | null }>(await this.fetchImpl(`/api/workspaces/${encodeURIComponent(id)}/layout`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
@@ -189,7 +182,7 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
   // ── 任务 ──
 
   async listTasks(workspaceId: string): Promise<WorkspaceTask[]> {
-    const body = await readJson<unknown>(await this.fetchImpl(
+    const body = await parseJsonResponse<unknown>(await this.fetchImpl(
       `/api/workspaces/${encodeURIComponent(workspaceId)}/tasks`,
       { credentials: "same-origin" },
     ));
@@ -197,7 +190,7 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
   }
 
   async createTask(workspaceId: string, request: CreateWorkspaceTaskRequest): Promise<WorkspaceTaskDetail> {
-    return readJson<WorkspaceTaskDetail>(await this.fetchImpl(
+    return parseJsonResponse<WorkspaceTaskDetail>(await this.fetchImpl(
       `/api/workspaces/${encodeURIComponent(workspaceId)}/tasks`,
       {
         method: "POST",
@@ -209,7 +202,7 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
   }
 
   async createStandaloneTask(request: CreateStandaloneTaskRequest): Promise<WorkspaceTaskDetail> {
-    return readJson<WorkspaceTaskDetail>(await this.fetchImpl("/api/tasks", {
+    return parseJsonResponse<WorkspaceTaskDetail>(await this.fetchImpl("/api/tasks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
@@ -218,14 +211,14 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
   }
 
   async getTask(taskId: string): Promise<WorkspaceTaskDetail> {
-    return readJson<WorkspaceTaskDetail>(await this.fetchImpl(
+    return parseJsonResponse<WorkspaceTaskDetail>(await this.fetchImpl(
       `/api/workspace-tasks/${encodeURIComponent(taskId)}`,
       { credentials: "same-origin" },
     ));
   }
 
   async updateTask(taskId: string, patch: UpdateWorkspaceTaskRequest): Promise<WorkspaceTask> {
-    return readJson<WorkspaceTask>(await this.fetchImpl(
+    return parseJsonResponse<WorkspaceTask>(await this.fetchImpl(
       `/api/workspace-tasks/${encodeURIComponent(taskId)}`,
       {
         method: "PATCH",
@@ -237,7 +230,7 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
   }
 
   async deleteTask(taskId: string, cascade = false): Promise<void> {
-    await readJson(await this.fetchImpl(
+    await parseJsonResponse<Record<string, unknown>>(await this.fetchImpl(
       `/api/workspace-tasks/${encodeURIComponent(taskId)}${cascade ? "?cascade=1" : ""}`,
       { method: "DELETE", credentials: "same-origin" },
     ));
@@ -248,7 +241,7 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
     layout: TaskWindowLayout | null,
     layoutRevision?: number,
   ): Promise<{ layout: TaskWindowLayout | null; layoutRevision?: number }> {
-    const body = await readJson<{ layout: TaskWindowLayout | null; layoutRevision?: number }>(await this.fetchImpl(
+    const body = await parseJsonResponse<{ layout: TaskWindowLayout | null; layoutRevision?: number }>(await this.fetchImpl(
       `/api/workspace-tasks/${encodeURIComponent(taskId)}/layout`,
       {
         method: "PUT",
@@ -264,7 +257,7 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
     workspaceId: string,
     options: { signal?: AbortSignal } = {},
   ): Promise<WorkspaceWorktreeOverview> {
-    const body = await readJson<unknown>(await this.fetchImpl(
+    const body = await parseJsonResponse<unknown>(await this.fetchImpl(
       `/api/workspaces/${encodeURIComponent(workspaceId)}/worktrees`,
       { credentials: "same-origin", signal: options.signal },
     ));
@@ -274,7 +267,7 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
   async deleteSessions(sessionIds: readonly string[]): Promise<void> {
     const ids = [...new Set(sessionIds.filter((id) => typeof id === "string" && id.trim().length > 0))];
     if (ids.length === 0) return;
-    const body = await readJson<{ failed?: string[] }>(await this.fetchImpl("/api/sessions/batch-delete", {
+    const body = await parseJsonResponse<{ failed?: string[] }>(await this.fetchImpl("/api/sessions/batch-delete", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
@@ -295,7 +288,7 @@ export async function loadNewProjectDefaults(
     fetchImpl("/api/config", { credentials: "same-origin", signal: options.signal }),
     fetchImpl("/api/recent-paths", { credentials: "same-origin", signal: options.signal }),
   ]);
-  const config = await readJson(configRes);
+  const config = await parseJsonResponse<Record<string, unknown>>(configRes);
   let recentPaths: RecentPath[] = [];
   if (recentRes.ok) {
     try {

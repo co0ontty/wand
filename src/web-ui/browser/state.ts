@@ -146,6 +146,8 @@ export var state: AppState = {
   // shared. The session id keeps only the owning composer read-only while a
   // response may safely finish in the background after a session switch.
   promptOptimizeRequest: null,
+  // 输入面板内联错误条（`#action-error`）的文案；非空时由 React 渲染。
+  actionError: null,
   isSyncingInputBox: false,
   loginPending: false,
   loginChecked: false,
@@ -311,12 +313,6 @@ export var state: AppState = {
   joystickMoveHandler: null,
   joystickUpHandler: null,
   joystickResizeHandler: null,
-  fileSearchQuery: "",
-  fileExplorerLoading: false,
-  allFiles: [],
-  fileExplorerCwd: "",
-  fileExplorerTruncated: false,
-  fileExplorerTotal: 0,
   claudeHistory: [],
   claudeHistoryLoaded: false,
   claudeHistoryExpanded: false,

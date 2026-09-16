@@ -1432,7 +1432,7 @@ export function SecuritySettingsTab(_props: SettingsTabProps) {
         <h2>安全</h2><p>管理登录密码与 SSL 证书。敏感变更保存前请仔细确认。</p>
       </header>
       <SettingsSection title="修改密码" description="至少 6 个字符；保存后会撤销包括当前页面在内的所有登录会话。">
-        <form className="wand-settings-security-form" onSubmit={(event) => { event.preventDefault(); void changePassword(); }}>
+        <form noValidate className="wand-settings-security-form" onSubmit={(event) => { event.preventDefault(); void changePassword(); }}>
           <input type="text" name="username" autoComplete="username" value="wand" readOnly hidden />
           <SettingsGrid>
             <SettingsField label="新密码" htmlFor="settings-new-password" error={passwordError}>

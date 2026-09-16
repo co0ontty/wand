@@ -5,7 +5,8 @@ export const codeEditorStyles = String.raw`
   display: flex;
   flex-direction: column;
   background: var(--bg-primary, #fff);
-  z-index: 12;
+  /* Above the session composer (26), below drawers and their backdrop (44+). */
+  z-index: 40;
 }
 .wand-code-editor-host[hidden] { display: none !important; }
 
@@ -68,6 +69,7 @@ export const codeEditorStyles = String.raw`
 
 .wand-code-editor-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   flex: 0 0 auto;
@@ -91,8 +93,8 @@ export const codeEditorStyles = String.raw`
 .wand-code-editor-toolbar button.wand-code-editor-btn:hover:not(:disabled) { background: var(--bg-tertiary, #eee); }
 .wand-code-editor-toolbar button.wand-code-editor-btn:disabled { opacity: 0.5; cursor: default; }
 .wand-code-editor-toolbar button.wand-code-editor-btn.primary {
-  background: var(--accent, #2563eb);
-  border-color: var(--accent, #2563eb);
+  background: var(--accent-solid);
+  border-color: var(--accent-solid);
   color: #fff;
 }
 .wand-code-editor-dirty-mark {

@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
+import { defaultConfig } from "../src/config.js";
+import { WandStorage } from "../src/storage.js";
 import { applyPiEvent, buildPiArgs, piToolName } from "../src/structured-pi-adapter.js";
+import { StructuredSessionManager } from "../src/structured-session-manager.js";
+import type { StructuredRunnerAdapter } from "../src/structured-runner.js";
 import type { SessionSnapshot } from "../src/types.js";
 
 function session(overrides: Partial<SessionSnapshot> = {}): SessionSnapshot {
@@ -50,6 +57,7 @@ test("Pi args use JSON print mode and preserve model, thinking, resume, and prom
 test("Pi JSON events map streaming content, tools, usage, model, and session id", () => {
   const state = { blocks: [], result: "", sessionId: null };
   applyPiEvent(state, { type: "session", id: "native-pi-id" });
+  assert.equal(state.sessionId, null, "Pi has not written a resumable session file yet");
   applyPiEvent(state, { type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: "plan" } });
   applyPiEvent(state, { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Hello " } });
   applyPiEvent(state, { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Pi" } });
@@ -71,6 +79,84 @@ test("Pi JSON events map streaming content, tools, usage, model, and session id"
     { type: "tool_result", tool_use_id: "tool-1", content: "/tmp/project", is_error: false },
   ]);
   assert.equal(piToolName("custom"), "Pi/custom");
+});
+
+test("Pi does not save a session ID when a turn ends before the assistant replies", () => {
+  const state = { blocks: [], result: "", sessionId: null };
+  applyPiEvent(state, { type: "session", id: "unwritten-id" });
+  applyPiEvent(state, { type: "message_end", message: { role: "user", content: [] } });
+  assert.equal(state.sessionId, null);
+});
+
+test("Pi retries a previously failed Wand session without its missing resume ID", async (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-pi-resume-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  t.after(() => {
+    storage.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+  const missingId = "unwritten-id";
+  storage.saveSession(session({
+    id: "failed-pi",
+    cwd: root,
+    status: "failed",
+    claudeSessionId: missingId,
+    structuredState: {
+      provider: "pi", runner: "pi-cli-json", inFlight: false, activeRequestId: null,
+      lastError: `No session found matching '${missingId}'`,
+    },
+  }));
+  let resumedWith: string | null | undefined;
+  const runner: StructuredRunnerAdapter = {
+    start(context) {
+      resumedWith = context.session.claudeSessionId;
+      return {
+        args: buildPiArgs(context.session, context.prompt),
+        spawnedAt: new Date().toISOString(), pid: null, interrupt() {},
+        completion: Promise.resolve({
+          state: { blocks: [{ type: "text", text: "done" }], result: "done", sessionId: "new-id" },
+          exitCode: 0, signal: null, stderr: "", primaryError: null,
+        }),
+      };
+    },
+  };
+  const manager = new StructuredSessionManager(
+    storage, { ...defaultConfig(), defaultCwd: root }, null, undefined, { pi: runner },
+  );
+  t.after(() => manager.dispose());
+  const result = await manager.sendMessage("failed-pi", "retry");
+  assert.equal(resumedWith, null);
+  assert.equal(result.claudeSessionId, "new-id");
+});
+
+test("Pi clears a missing resume ID after the CLI rejects it", async (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-pi-missing-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  t.after(() => {
+    storage.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+  const missingId = "unwritten-id";
+  storage.saveSession(session({ id: "missing-pi", cwd: root, claudeSessionId: missingId }));
+  const runner: StructuredRunnerAdapter = {
+    start() {
+      return {
+        args: [], spawnedAt: new Date().toISOString(), pid: null, interrupt() {},
+        completion: Promise.resolve({
+          state: { blocks: [], result: "", sessionId: missingId },
+          exitCode: 1, signal: null,
+          stderr: `No session found matching '${missingId}'`, primaryError: null,
+        }),
+      };
+    },
+  };
+  const manager = new StructuredSessionManager(
+    storage, { ...defaultConfig(), defaultCwd: root }, null, undefined, { pi: runner },
+  );
+  t.after(() => manager.dispose());
+  await assert.rejects(manager.sendMessage("missing-pi", "retry"), /No session found matching/);
+  assert.equal(manager.get("missing-pi")?.claudeSessionId, null);
+  assert.equal(storage.getSession("missing-pi")?.claudeSessionId, null);
 });
 
 test("Pi errors surface the provider message", () => {

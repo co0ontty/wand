@@ -6,6 +6,7 @@ import {
   WandIcon,
   WandIconButton,
   WandSelect,
+  WandSearchField,
   WandSkeleton,
   WandSwitch,
   WandTabs,
@@ -72,7 +73,9 @@ import {
   TaskBoardProjectChip,
   TaskBoardStatusGlyph,
 } from "./task-board-views";
-import { TaskBoardSearchIcon } from "./task-board-icons";
+import { wandOverlay } from "../overlay-controller";
+import { confirmDiscardTaskDraft } from "../task-draft-guard";
+import { readTaskBoardViewState, writeTaskBoardViewState } from "./task-board-view-state";
 
 const TASK_MIME = "application/x-wand-task";
 
@@ -134,6 +137,7 @@ export function TaskBoardHost({
   onOpenSidebar,
 }: TaskBoardHostProps = {}): React.ReactElement | null {
   const controller = React.useSyncExternalStore(taskBoardStore.subscribe, taskBoardStore.getSnapshot, taskBoardStore.getSnapshot);
+  const [restored] = React.useState(readTaskBoardViewState);
   const [tasks, setTasks] = React.useState<WandTaskListed[]>([]);
   const [workspaces, setWorkspaces] = React.useState<IssueWorkspace[]>([]);
   const [catalog, setCatalog] = React.useState<IssueModelCatalog | null>(null);
@@ -141,15 +145,14 @@ export function TaskBoardHost({
   const [busyId, setBusyId] = React.useState("");
   const [error, setError] = React.useState("");
   const [notice, setNotice] = React.useState("");
-  const [query, setQuery] = React.useState("");
-  const [view, setView] = React.useState<IssueBoardView>("board");
+  const [query, setQuery] = React.useState(restored.query);
+  const [view, setView] = React.useState<IssueBoardView>(restored.view);
   const [display, setDisplay] = React.useState<IssueBoardDisplay>(DEFAULT_ISSUE_BOARD_DISPLAY);
-  const [filters, setFilters] = React.useState<IssueBoardFilters>(EMPTY_ISSUE_FILTERS);
+  const [filters, setFilters] = React.useState<IssueBoardFilters>(restored.filters);
   const [ganttZoom, setGanttZoom] = React.useState<IssueGanttZoom>("week");
   const [ganttHideCompleted, setGanttHideCompleted] = React.useState(false);
-  const [filterWorkspaceId, setFilterWorkspaceId] = React.useState("");
-  const [projectMenuOpen, setProjectMenuOpen] = React.useState(false);
-  const [projectQuery, setProjectQuery] = React.useState("");
+  const [filterWorkspaceId, setFilterWorkspaceId] = React.useState(restored.workspaceId);
+  const mutationPending = React.useRef(false);
   const [createOpen, setCreateOpen] = React.useState(false);
   const [createMore, setCreateMore] = React.useState(false);
   const [createExpanded, setCreateExpanded] = React.useState(false);
@@ -173,6 +176,12 @@ export function TaskBoardHost({
   const titleRef = React.useRef<HTMLTextAreaElement>(null);
   const searchRef = React.useRef<HTMLInputElement>(null);
 
+  React.useEffect(() => {
+    if (!notice) return;
+    wandOverlay.toast(notice, { tone: "success" });
+    setNotice("");
+  }, [notice]);
+
   const reload = React.useCallback(async (): Promise<void> => {
     const generation = ++loadGenerationRef.current;
     setLoading(true);
@@ -195,7 +204,10 @@ export function TaskBoardHost({
     const generation = ++workspaceGenerationRef.current;
     try {
       const next = await taskBoardRepository.workspaces();
-      if (generation === workspaceGenerationRef.current) setWorkspaces(next);
+      if (generation === workspaceGenerationRef.current) {
+        setWorkspaces(next);
+        setFilterWorkspaceId((current) => next.some((workspace) => workspace.id === current) ? current : "");
+      }
     } catch {
       // 轮询失败时保留上一次成功列表，避免瞬时错误把已选目录清掉。
     }
@@ -230,10 +242,6 @@ export function TaskBoardHost({
     setSelectedId("");
     setDetailAgent(null);
     setCreateOpen(false);
-    setQuery("");
-    setView("board");
-    setFilters(EMPTY_ISSUE_FILTERS);
-    setProjectMenuOpen(false);
     setContextMenu(null);
   }, [controller.revision, controller.open]);
 
@@ -244,6 +252,8 @@ export function TaskBoardHost({
   }, [controller.workspaceId, controller.open]);
 
   const runFor = React.useCallback(async (id: string, action: () => Promise<void>): Promise<void> => {
+    if (mutationPending.current) return;
+    mutationPending.current = true;
     setBusyId(id);
     setError("");
     try {
@@ -251,6 +261,7 @@ export function TaskBoardHost({
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "操作失败。");
     } finally {
+      mutationPending.current = false;
       setBusyId("");
     }
   }, []);
@@ -316,6 +327,7 @@ export function TaskBoardHost({
       await reload();
       // reload() 开头会清掉错误横幅，所以这些提示必须放在它之后才留得住。
       if (assignError) setError(assignError);
+      else setNotice(`已创建任务「${created.title}」${issueCreateDispatches(draft.status) && submitDescription ? "，工具已启动" : "，可在详情中启动执行"}。`);
       if (!submitTitle && created.titleSource === "auto") {
         void refreshGeneratedTitle(created.id, created.title, reload);
       }
@@ -330,8 +342,18 @@ export function TaskBoardHost({
   }, [reload, runFor]);
 
   const removeTask = React.useCallback(async (task: WandTaskListed): Promise<void> => {
+    const answer = await wandOverlay.dialog({
+      title: `归档「${task.title}」？`,
+      description: "任务会移入归档，并将关联的工作任务标为完成。会话记录会保留。",
+      actions: [
+        { label: "取消", value: false, autoFocus: true },
+        { label: "归档任务", value: true, kind: "primary" },
+      ],
+    });
+    if (answer.dismissed === true || !answer.action) return;
     await runFor(task.id, async () => {
       await taskBoardRepository.remove(task.id);
+      setNotice(`已归档「${task.title}」，会话记录已保留。`);
       if (selectedId === task.id) {
         setSelectedId("");
         setDetailAgent(null);
@@ -361,7 +383,7 @@ export function TaskBoardHost({
     if (!moving || moving.status === status) return;
     const dispatches = issueDropDispatches(status, moving.sessions.length);
     const agent = dispatches ? agentOf(moving, lastAgentRef.current) : null;
-    setTasks((current) => current.map((task) => (task.id === taskId ? { ...task, status } : task)));
+    if (mutationPending.current) return;
     await runFor(taskId, async () => {
       await taskBoardRepository.update(taskId, { status });
       let dispatchError = "";
@@ -392,11 +414,6 @@ export function TaskBoardHost({
   const projectName = filterWorkspaceId
     ? workspaces.find((workspace) => workspace.id === filterWorkspaceId)?.name ?? "项目"
     : "所有项目";
-  const projectChoices = workspaces.filter((workspace) => {
-    const needle = projectQuery.trim().toLowerCase();
-    if (!needle) return true;
-    return `${workspace.name} ${workspace.cwd}`.toLowerCase().includes(needle);
-  });
   const mainColumns = ISSUE_COLUMNS.filter((column) => display.mainStatuses.includes(column.status));
   const otherColumns = ISSUE_COLUMNS.filter((column) => !display.mainStatuses.includes(column.status));
   const detailBusy = selected ? busyId === selected.id : false;
@@ -415,21 +432,29 @@ export function TaskBoardHost({
   }, [selected?.id, selected?.agent]);
 
   React.useEffect(() => {
-    if (!projectMenuOpen) return;
-    const onPointer = (event: PointerEvent): void => {
-      const target = event.target;
-      if (!(target instanceof Element)) return;
-      if (target.closest(".task-board-project-switcher")) return;
-      setProjectMenuOpen(false);
-    };
-    window.addEventListener("pointerdown", onPointer);
-    return () => window.removeEventListener("pointerdown", onPointer);
-  }, [projectMenuOpen]);
+    writeTaskBoardViewState({ view, query, workspaceId: filterWorkspaceId, filters });
+  }, [view, query, filterWorkspaceId, filters]);
+
+  React.useEffect(() => {
+    const previous = document.title;
+    document.title = selected ? `${selected.title} · Wand` : "任务看板 · Wand";
+    return () => { document.title = previous; };
+  }, [selected?.title]);
+
+  const closeCreate = React.useCallback(async (): Promise<void> => {
+    if (mutationPending.current) return;
+    if (draft.title.trim() || draft.description.trim()) {
+      if (!await confirmDiscardTaskDraft()) return;
+    }
+    setCreateOpen(false);
+  }, [draft.title, draft.description]);
 
   React.useEffect(() => {
     if (!controller.open) return;
     const onKey = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented || event.isComposing) return;
       const target = event.target;
+      if (target instanceof Element && target.closest('[role="dialog"], [role="alertdialog"], [role="listbox"], [role="menu"]')) return;
       const typing = target instanceof HTMLElement && (
         target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable
       );
@@ -443,9 +468,9 @@ export function TaskBoardHost({
         openCreate("todo");
         return;
       }
-      if (event.key !== "Escape") return;
+      if (event.key !== "Escape" || typing) return;
       if (createOpen) {
-        setCreateOpen(false);
+        void closeCreate();
         return;
       }
       if (selectedId) {
@@ -456,7 +481,7 @@ export function TaskBoardHost({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [controller.open, createOpen, onBack, openCreate, selectedId]);
+  }, [controller.open, createOpen, closeCreate, onBack, openCreate, selectedId]);
 
   if (!controller.open) return null;
 
@@ -596,67 +621,38 @@ export function TaskBoardHost({
         ) : null}
         <WandIconButton
           className="task-board-icon-button"
-          aria-label="返回"
-          title="返回"
-          onClick={() => onBack ? onBack() : taskBoardController.close()}
+          aria-label={selected ? "返回任务看板" : "返回工作区"}
+          title={selected ? "返回任务看板" : "返回工作区"}
+          onClick={() => selected ? setSelectedId("") : onBack ? onBack() : taskBoardController.close()}
         >
           <WandIcon name="chevronLeft"/>
         </WandIconButton>
-        <div className="task-board-project-switcher">
-          <button
-            type="button"
-            className="task-board-project-button"
-            aria-label="切换项目"
-            aria-haspopup="menu"
-            aria-expanded={projectMenuOpen}
-            onClick={() => setProjectMenuOpen((open) => !open)}
-          >
-            <span className="task-board-project-name">{projectName}</span>
-            <WandIcon name="chevron" size={12}/>
-          </button>
-          {projectMenuOpen && <div className="task-board-project-menu" role="menu" aria-label="项目">
-            <span>切换项目</span>
-            <div className="task-board-project-search">
-              <WandIcon name="search" size={12}/>
-              <input
-                type="search"
-                value={projectQuery}
-                placeholder="筛选项目…"
-                onChange={(event) => {
-                  const value = event.currentTarget.value;
-                  setProjectQuery(value);
-                }}
-              />
-            </div>
-            <button
-              type="button"
-              role="menuitemradio"
-              aria-checked={!filterWorkspaceId}
-              onClick={() => {
-                setFilterWorkspaceId("");
-                setProjectMenuOpen(false);
-              }}
-            >
-              <WandIcon name="folder" size={14}/>
-              <span>所有项目</span>
-            </button>
-            {projectChoices.map((workspace) => <button
-              key={workspace.id}
-              type="button"
-              role="menuitemradio"
-              aria-checked={filterWorkspaceId === workspace.id}
-              onClick={() => {
-                setFilterWorkspaceId(workspace.id);
-                setProjectMenuOpen(false);
-              }}
-            >
-              <WandIcon name="folder" size={14}/>
-              <span>{workspace.name}</span>
-            </button>)}
-          </div>}
+        <div className="task-board-heading-copy">
+          <h1>{selected ? selected.identifier : "任务看板"}</h1>
+          <p>{selected ? "查看进度与执行记录" : "安排工作，跟进执行，确认结果。"}</p>
         </div>
       </div>
 
+      <div className="task-board-header-actions">
+        {!selected && <>
+          <WandButton kind="ghost" size="small" disabled={loading} onClick={() => void reload()} aria-label="刷新任务">
+            <WandIcon name="refresh" slot="start"/>刷新
+          </WandButton>
+          <WandButton
+            className="task-board-create-button"
+            kind="primary"
+            size="small"
+            aria-label="新建任务"
+            title="新建任务 (C)"
+            onClick={() => openCreate("todo")}
+          >
+            <WandIcon name="plus" slot="start"/>
+            <span>新建任务</span>
+          </WandButton>
+        </>}
+      </div>
+    </header>
+    {!selected && <div className="task-board-toolbar">
       {!selected && <WandTabs
         className="task-board-view-tabs"
         ariaLabel="看板视图"
@@ -669,49 +665,32 @@ export function TaskBoardHost({
         }))}
       />}
 
-      <div className="task-board-header-actions">
-        {!selected && <>
-          <label className={classNames("task-board-search", query && "has-value")}>
-            <TaskBoardSearchIcon size={13}/>
-            <input
-              ref={searchRef}
-              type="search"
-              value={query}
-              placeholder="搜索任务"
-              aria-label="搜索任务"
-              onChange={(event) => {
-                const value = event.currentTarget.value;
-                setQuery(value);
-              }}
-            />
-            {!query && <kbd>/</kbd>}
-          </label>
+      <div className="task-board-toolbar-controls">
+        <WandSelect
+          value={filterWorkspaceId || "__all__"}
+          options={[{ value: "__all__", label: "所有目录" }, ...workspaces.map((workspace) => ({ value: workspace.id, label: workspace.name }))]}
+          ariaLabel="筛选工作目录"
+          searchable
+          searchPlaceholder="搜索目录"
+          onValueChange={(value) => setFilterWorkspaceId(value === "__all__" ? "" : value)}
+        />
+        <WandSearchField inputRef={searchRef} label="搜索任务" value={query} onValueChange={setQuery}/>
           {(view === "board" || view === "list" || view === "gantt") && <TaskBoardFilterMenu
             tasks={tasks}
             filters={filters}
             onChange={setFilters}
           />}
           {view === "board" && <TaskBoardDisplayMenu display={display} onChange={persistDisplay}/>}
-          <WandButton
-            className="task-board-create-button"
-            kind="primary"
-            size="small"
-            aria-label="新建任务"
-            title="新建议题 (C)"
-            onClick={() => openCreate("todo")}
-          >
-            <WandIcon name="plus" slot="start"/>
-            <span>新建</span>
-          </WandButton>
-        </>}
       </div>
-    </header>
+    </div>}
+    {!selected && <div className="task-board-result-summary" role="status">
+      <span>{loading ? "正在同步任务…" : `共 ${visible.length} 个任务`}{(query || filterActive || filterWorkspaceId) ? " · 已筛选" : ""}</span>
+      {(query || filterActive || filterWorkspaceId) && <WandButton kind="ghost" size="small" onClick={() => {
+        setQuery(""); setFilters(EMPTY_ISSUE_FILTERS); setFilterWorkspaceId(""); searchRef.current?.focus();
+      }}>清除筛选</WandButton>}
+    </div>}
 
-    {error && <p className="task-board-native-banner is-error" role="alert">{error}</p>}
-    {notice && <p className="task-board-native-banner is-notice" role="status">{notice}</p>}
-    {filterActive && !selected && <p className="task-board-native-banner is-notice" role="status">
-      当前筛选已启用
-    </p>}
+    {error && <div className="task-board-native-banner is-error" role="alert"><span>{error}</span><WandButton kind="ghost" size="small" disabled={loading} onClick={() => void reload()}>重新加载</WandButton></div>}
 
     {selected ? <IssueDetail
       task={selected}
@@ -727,8 +706,12 @@ export function TaskBoardHost({
       onDispatch={(prompt) => void dispatchTask(selected, detailAgentValue, prompt)}
       onRemove={() => void removeTask(selected)}
       onOpenSession={onOpenSession}
-      onClose={() => setSelectedId("")}
-    /> : view === "dashboard" ? <TaskBoardDashboard
+    /> : !loading && visible.length === 0 && (query || filterActive || filterWorkspaceId) ? <div className="task-board-no-results">
+      <WandIcon name="search" size={28}/>
+      <h2>没有找到匹配的任务</h2>
+      <p>试试其他关键词，或清除筛选查看全部任务。</p>
+      <WandButton kind="secondary" onClick={() => { setQuery(""); setFilters(EMPTY_ISSUE_FILTERS); setFilterWorkspaceId(""); }}>查看全部任务</WandButton>
+    </div> : view === "dashboard" ? <TaskBoardDashboard
       projectName={projectName}
       tasks={visible}
       onOpen={setSelectedId}
@@ -791,15 +774,17 @@ export function TaskBoardHost({
       descriptionClassName="task-board-create-description"
       headerClassName="task-board-create-heading"
       description={createDispatches
-        ? "标题可选。填写描述并选择 Agent 后，这段描述会作为第一次指派发出。"
-        : "标题可选。这里的任务只创建、不指派，之后可在任务详情里派发 Agent。"}
-      closeLabel="关闭编辑器"
+        ? "描述要完成的工作，创建后交给所选工具执行。"
+        : "先记录要做的事，准备好后再从任务详情启动执行。"}
+      closeLabel="关闭新建任务"
+      dismissable={busyId !== "__create__"}
       closeContent={<WandIcon name="close" size={14} strokeWidth={1.8}/>}
       onOpenChange={(open) => {
-        if (!open) setCreateOpen(false);
+        if (!open) void closeCreate();
       }}
     >
-      <form
+      <form noValidate
+        aria-busy={busyId === "__create__"}
         className="task-board-create-form task-board-native-composer"
         onSubmit={(event) => {
           event.preventDefault();
@@ -815,7 +800,7 @@ export function TaskBoardHost({
             </span>
             <textarea
               ref={titleRef}
-              className="task-board-create-title-input"
+              className="resize-none task-board-create-title-input"
               rows={1}
               value={draft.title}
               placeholder="不填写则按描述自动生成"
@@ -829,7 +814,7 @@ export function TaskBoardHost({
             />
           </div>
           <textarea
-            className="task-board-create-body-input"
+            className="resize-none task-board-create-body-input"
             rows={4}
             value={draft.description}
             placeholder={createDispatches
@@ -949,6 +934,7 @@ export function TaskBoardHost({
             </div>
           </div>
         </div>
+        {error && <p className="task-board-native-banner is-error" role="alert">{error}</p>}
         <div className="task-board-create-footer">
           <WandSwitch
             checked={createMore}
@@ -988,7 +974,6 @@ function IssueDetail({
   onDispatch,
   onRemove,
   onOpenSession,
-  onClose,
 }: {
   task: WandTaskListed;
   busy: boolean;
@@ -1000,7 +985,6 @@ function IssueDetail({
   onDispatch(prompt: string): void;
   onRemove(): void;
   onOpenSession?: (sessionId: string) => void;
-  onClose(): void;
 }): React.ReactElement {
   const [title, setTitle] = React.useState(task.title);
   const [labelDraft, setLabelDraft] = React.useState(task.labels.join(", "));
@@ -1031,12 +1015,9 @@ function IssueDetail({
     <div className="task-board-detail-scroll">
       <div className="task-board-detail-layout">
         <div className="task-board-detail-main">
-          <button type="button" className="task-board-detail-back" onClick={onClose}>
-            <WandIcon name="chevronLeft" size={14}/>返回任务管理
-          </button>
           <p className="task-board-detail-id">ID: {task.identifier}</p>
           <textarea
-            className="task-board-detail-title"
+            className="resize-none task-board-detail-title"
             rows={1}
             value={title}
             aria-label="任务标题"
@@ -1061,7 +1042,7 @@ function IssueDetail({
               <small>先输入提示词，再选参数直接派发</small>
             </div>
             <textarea
-              className="task-board-detail-body"
+              className="resize-none task-board-detail-body"
               rows={5}
               value={composePrompt}
               placeholder="输入这次派给 Agent 的提示词…"
@@ -1233,4 +1214,3 @@ function IssueDetail({
     </div>
   </div>;
 }
-

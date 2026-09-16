@@ -10,7 +10,6 @@ import {
   configureQuickCommitRuntime,
   quickCommitController,
 } from "../react/quick-commit/controller";
-import { isBrowserReactShellMounted } from "./shell-runtime";
 import { notifyLegacyUiChange } from "./ui-store-bridge";
 import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
 import { closeReactOverlays } from "./react-overlay-coordinator";
@@ -32,21 +31,10 @@ import { closeReactOverlays } from "./react-overlay-coordinator";
           + '</button>';
       }
 
+      // 顶栏 git 徽章归 React Shell 渲染（原目标 #topbar-git-slot 只存在于已删除的
+      // legacy markup），这里只保留变更通知。
       export function updateTopbarGitBadge() {
-        if (isBrowserReactShellMounted()) {
-          notifyLegacyUiChange("topbar:git");
-          return;
-        }
-        var slot = document.getElementById("topbar-git-slot");
-        if (!slot) return;
-        slot.innerHTML = renderTopbarGitBadgeHtml();
-        var btn = document.getElementById("topbar-git-badge");
-        if (btn) {
-          btn.addEventListener("click", function(e) {
-            e.preventDefault();
-            openQuickCommitModal();
-          });
-        }
+        notifyLegacyUiChange("topbar:git");
       }
 
       /**

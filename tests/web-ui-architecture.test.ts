@@ -172,18 +172,18 @@ function globMatches(glob: string, candidate: string): boolean {
   return new RegExp(`${expression}$`).test(candidate);
 }
 
-test("Radix primitives stay behind src/web-ui/react/ui wrappers", () => {
+test("third-party UI primitives stay behind src/web-ui/react/ui wrappers", () => {
   const violations: string[] = [];
   for (const file of collectSourceFiles(reactRoot)) {
     for (const imported of importedSpecifiers(file.source)) {
-      if (!imported.specifier.startsWith("@radix-ui/")) continue;
+      if (!/^@(appica|radix-ui|base-ui)\//.test(imported.specifier)) continue;
       if (file.relativePath.startsWith("src/web-ui/react/ui/")) continue;
       violations.push(
         `${file.relativePath}:${lineNumber(file.source, imported.offset)} imports ${imported.specifier}`,
       );
     }
   }
-  assertNoViolations("Only src/web-ui/react/ui/** may import @radix-ui/* directly.", violations);
+  assertNoViolations("Only src/web-ui/react/ui/** may import UI primitives directly.", violations);
 });
 
 test("React business modules do not reach through legacy DOM or state seams", () => {

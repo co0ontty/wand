@@ -3,18 +3,14 @@ import "./i18n";
 import { escapeHtml } from "./utils";
 import { formatInlineResult, scheduleChatRender } from "./chat-render";
 import { applyExpandedState, persistElementExpandState, persistSelectedId, scrollChatToBottom } from "./chat-scroll";
-import { adjustTerminalScale, closeFilePanel, filterFileTree, navigateExplorerUp, openFilePreview, refreshFileExplorer, toggleFilePanel } from "./file-browser";
-import { openQuickCommitModal } from "./git-commit";
-import { attachQueueBarDelegates, bindInputTouchScroll, cancelVoiceRecording, deleteSession, focusInputBox, getSelectedSession, handleInputBoxBlur, handleInputBoxFocus, handleVoiceMove, initSwipeToDelete, refreshInputBoxState, sendOrStart, setupMobileKeyboardHandlers, startVoiceRecording, stopSession, stopVoiceRecording, toggleTerminalInteractive, updateQueueBar, welcomeInputSend } from "./input";
-import { hideError, showToast } from "./notifications";
+import { adjustTerminalScale, openFilePreview } from "./file-browser";
+import { attachQueueBarDelegates, bindInputTouchScroll, cancelVoiceRecording, handleInputBoxBlur, handleInputBoxFocus, handleVoiceMove, refreshInputBoxState, sendOrStart, setupMobileKeyboardHandlers, startVoiceRecording, stopSession, stopVoiceRecording, updateQueueBar } from "./input";
+import { hideError } from "./notifications";
 import { render, resetChatRenderCache } from "./render";
-import { addPendingAttachment, backToNativeApp, closeClaudeSkillsPicker, closePlusPopover, closeSessionsDrawer, createStructuredSession, dismissDrawerIfOverlay, handleCollapsedTileHover, handleCollapsedTileLeave, handleInputBoxKeydown, handleInputPaste, handleInteractiveTextInput, handlePtyImagePaste, hideCollapsedTileBubble, login, logout, onChatModeChange, onChatModelChange, onChatThinkingChange, openSessionModal, openSettingsModal, openWorktreeMergeModal, optimizePromptText, positionSidebarOverflowMenu, quickStartSession, refreshAvailableModels, retryWorktreeCleanup, setDraftValue, switchServer, syncComposerHasText, toggleClaudeSkill, toggleClaudeSkillsPicker, togglePlusPopover, toggleSessionsDrawer, toggleSidebarCollapsed, toggleSidebarPin } from "./session-engine";
-import { confirmDelete } from "./sidebar";
-import { copySelectedSessionField, handleSessionItemClick, handleSessionItemKeydown, initTerminal, maybeScrollTerminalToBottom, softResyncTerminal } from "./terminal";
+import { addPendingAttachment, closeClaudeSkillsPicker, closePlusPopover, closeSessionsDrawer, dismissDrawerIfOverlay, handleInputBoxKeydown, handleInputPaste, handleInteractiveTextInput, handlePtyImagePaste, login, onChatModeChange, onChatModelChange, onChatThinkingChange, optimizePromptText, setDraftValue, switchServer, syncComposerHasText, togglePlusPopover } from "./session-engine";
+import { initTerminal, maybeScrollTerminalToBottom, softResyncTerminal } from "./terminal";
 import { setupVisualViewportHandlers } from "./viewport";
-import { approvePermission, approveTurnPermission, denyPermission, toggleAutoApprove } from "./websocket";
-import { isBrowserReactShellMounted } from "./shell-runtime";
-import { missionsController } from "../react/missions/controller";
+import { approvePermission, approveTurnPermission, denyPermission } from "./websocket";
 
       // Global toggle function for tool card headers — called via onclick attribute
       // Lazy-load tool content for truncated results
@@ -305,43 +301,6 @@ import { missionsController } from "../react/missions/controller";
           }
         }, true);
 
-        // sidebar overflow 菜单：外点 / 视口变化时关闭
-        document.addEventListener("click", function() {
-          if (isBrowserReactShellMounted()) return;
-          var el = document.getElementById("sidebar-overflow-menu");
-          if (el) el.classList.remove("open");
-        });
-
-        window.addEventListener("resize", function() {
-          if (isBrowserReactShellMounted()) return;
-          var el = document.getElementById("sidebar-overflow-menu");
-          if (el) el.classList.remove("open");
-        });
-
-        // topbar more 菜单：外点 / ESC 关闭
-        var closeTopbarMore = function() {
-          if (isBrowserReactShellMounted()) return;
-          state.topbarMoreOpen = false;
-          var menu = document.getElementById("topbar-more-menu");
-          var btn = document.getElementById("topbar-more-button");
-          if (menu) menu.classList.add("hidden");
-          if (btn) {
-            btn.classList.remove("active");
-            btn.setAttribute("aria-expanded", "false");
-          }
-        };
-        document.addEventListener("click", function(e) {
-          if (isBrowserReactShellMounted()) return;
-          if (!state.topbarMoreOpen) return;
-          var menu = document.getElementById("topbar-more-menu");
-          var wrap = menu && menu.parentElement;
-          if (wrap && !wrap.contains(e.target as Node)) closeTopbarMore();
-        });
-        document.addEventListener("keydown", function(e) {
-          if (isBrowserReactShellMounted()) return;
-          if (e.key === "Escape" && state.topbarMoreOpen) closeTopbarMore();
-        });
-
         // 加号 popover：外点 / ESC 关闭。attach-btn 自身的点击在按钮 handler 里 stopPropagation 了，
         // 不会触发外点关闭；popover 内部的 click 冒泡到这里时，contains(target) 命中 → 不关闭。
         document.addEventListener("click", function(e) {
@@ -367,37 +326,10 @@ import { missionsController } from "../react/missions/controller";
         document.addEventListener("click", function(e) {
           var target = e.target as HTMLElement;
           if (!target || typeof target.closest !== "function") return;
-          var trigger = target.closest("[data-claude-skills-trigger]");
-          if (trigger) {
-            e.preventDefault();
-            toggleClaudeSkillsPicker(trigger as HTMLElement);
-            return;
-          }
-          var option = target.closest("[data-claude-skill-name]");
-          if (option) {
-            e.preventDefault();
-            var session = state.sessions.find(function(item) { return item.id === state.selectedId; });
-            toggleClaudeSkill(session, option.getAttribute("data-claude-skill-name"));
-            return;
-          }
           var picker = document.getElementById("composer-skills-popover");
-          if (picker && !picker.contains(target)) closeClaudeSkillsPicker();
-        });
-
-        // 自动批准 chip 会随输入栏/会话状态局部刷新，使用委托避免刷新后丢失点击绑定。
-        document.addEventListener("click", function(e) {
-          var target = e.target as HTMLElement;
-          if (!target || typeof target.closest !== "function") return;
-          var modelRefresh = target.closest("[data-models-refresh]") as HTMLButtonElement | null;
-          if (modelRefresh) {
-            e.preventDefault();
-            if (!modelRefresh.disabled) void refreshAvailableModels();
-            return;
-          }
-          var toggle = target.closest("#auto-approve-toggle");
-          if (!toggle) return;
-          e.preventDefault();
-          toggleAutoApprove();
+          // trigger 自己的点击由 React 的 onClick 处理（toggle），这里必须排除它，
+          // 否则同一个 click 会被“点外部关闭”再关掉一次，表现为点了没反应。
+          if (picker && !picker.contains(target) && !target.closest("[data-claude-skills-trigger]")) closeClaudeSkillsPicker();
         });
 
         // 三件套（模式 / 模型 / 思考）走全局委托，多个实例共用同一状态源。
@@ -463,124 +395,7 @@ import { missionsController } from "../react/missions/controller";
           return;
         }
 
-        var reactShellActive = isBrowserReactShellMounted();
-
-        // Welcome/sidebar/topbar controls are React-owned after shell mount.
-        if (!reactShellActive) {
-        // Welcome screen event listeners
-        var welcomeInput = document.getElementById("welcome-input") as HTMLTextAreaElement | null;
-        if (welcomeInput) {
-          welcomeInput.addEventListener("keydown", function(e) {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              welcomeInputSend();
-            }
-          });
-          welcomeInput.focus();
-        }
-        var welcomeSendBtn = document.getElementById("welcome-send-btn");
-        if (welcomeSendBtn) {
-          welcomeSendBtn.addEventListener("click", function() {
-            welcomeInputSend();
-          });
-        }
-        var welcomeClaudeBtn = document.getElementById("welcome-tool-claude");
-        if (welcomeClaudeBtn) {
-          welcomeClaudeBtn.addEventListener("click", function() {
-            quickStartSession();
-          });
-        }
-        var welcomeCodexBtn = document.getElementById("welcome-tool-codex");
-        if (welcomeCodexBtn) {
-          welcomeCodexBtn.addEventListener("click", function() {
-            state.sessionTool = "codex";
-            state.preferredCommand = "codex";
-            state.modeValue = "full-access";
-            quickStartSession();
-          });
-        }
-        var welcomeOpenCodeBtn = document.getElementById("welcome-tool-opencode");
-        if (welcomeOpenCodeBtn) {
-          welcomeOpenCodeBtn.addEventListener("click", function() {
-            state.sessionTool = "opencode";
-            state.preferredCommand = "opencode";
-            state.modeValue = "managed";
-            quickStartSession();
-          });
-        }
-        var welcomeStructuredBtn = document.getElementById("welcome-tool-structured");
-        if (welcomeStructuredBtn) {
-          welcomeStructuredBtn.addEventListener("click", function() {
-            createStructuredSession().then(function() {
-              focusInputBox(true);
-            }).catch(function(error) {
-              showToast((error && error.message) || "无法启动结构化会话。", "error");
-            });
-          });
-        }
-        var sessionsList = document.getElementById("sessions-list");
-        if (sessionsList) {
-          sessionsList.addEventListener("click", handleSessionItemClick);
-          sessionsList.addEventListener("keydown", handleSessionItemKeydown);
-          sessionsList.addEventListener("mouseover", handleCollapsedTileHover);
-          sessionsList.addEventListener("mouseout", handleCollapsedTileLeave);
-          initSwipeToDelete(sessionsList);
-        }
-        // History now renders inline as the final group inside #sessions-list,
-        // so the delegated handlers above already cover its toggle / directory
-        // expand-collapse / item clicks / clear-all — no separate region wiring.
-        window.addEventListener("scroll", hideCollapsedTileBubble, true);
-        window.addEventListener("resize", hideCollapsedTileBubble);
-
-        var sessionsToggle = document.getElementById("sessions-toggle-button");
-        if (sessionsToggle) sessionsToggle.addEventListener("click", toggleSessionsDrawer);
-        var drawerBackdrop = document.getElementById("sessions-drawer-backdrop");
-        if (drawerBackdrop) drawerBackdrop.addEventListener("click", closeSessionsDrawer);
-        var closeDrawerBtn = document.getElementById("close-drawer-button");
-        if (closeDrawerBtn) closeDrawerBtn.addEventListener("click", closeSessionsDrawer);
-        var collapseBtn = document.getElementById("sidebar-collapse-btn");
-        if (collapseBtn) collapseBtn.addEventListener("click", toggleSidebarCollapsed);
-        var pinBtn = document.getElementById("sidebar-pin-btn");
-        if (pinBtn) pinBtn.addEventListener("click", toggleSidebarPin);
-        var sidebarMoreBtn = document.getElementById("sidebar-more-btn");
-        var sidebarOverflow = document.getElementById("sidebar-overflow-menu");
-        if (sidebarMoreBtn && sidebarOverflow) {
-          sidebarMoreBtn.addEventListener("click", function(e) {
-            e.stopPropagation();
-            var willOpen = !sidebarOverflow!.classList.contains("open");
-            sidebarOverflow!.classList.toggle("open", willOpen);
-            if (willOpen) positionSidebarOverflowMenu(sidebarOverflow!);
-          });
-        }
-        var homeBtn = document.getElementById("sidebar-home-btn");
-        if (homeBtn) homeBtn.addEventListener("click", function() {
-          state.selectedId = null;
-          persistSelectedId();
-          resetChatRenderCache();
-          // 回到首页是导航语义，不是「收侧栏」。桌面常驻栏保留；手机只把 overlay 收掉。
-          dismissDrawerIfOverlay();
-          render();
-        });
-        var refreshBtn = document.getElementById("sidebar-refresh-btn");
-        if (refreshBtn) refreshBtn.addEventListener("click", function() {
-          window.location.reload();
-        });
-        var logoutBtn = document.getElementById("logout-button");
-        if (logoutBtn) logoutBtn.addEventListener("click", logout);
-        var switchServerBtn = document.getElementById("switch-server-button");
-        if (switchServerBtn) switchServerBtn.addEventListener("click", switchServer);
-        var backToNativeBtn = document.getElementById("back-to-native-button");
-        if (backToNativeBtn) backToNativeBtn.addEventListener("click", backToNativeApp);
-        var settingsBtn = document.getElementById("settings-button");
-        if (settingsBtn) settingsBtn.addEventListener("click", openSettingsModal);
-        var missionsBtn = document.getElementById("missions-button");
-        if (missionsBtn) missionsBtn.addEventListener("click", function() { missionsController.open(); });
-        var newSessBtn = document.getElementById("topbar-new-session-button");
-        if (newSessBtn) newSessBtn.addEventListener("click", function() { openSessionModal(); });
-        var drawerNewSessBtn = document.getElementById("drawer-new-session-button");
-        if (drawerNewSessBtn) drawerNewSessBtn.addEventListener("click", function() { openSessionModal(); });
-        }
-        var approvePermissionBtn = document.getElementById("approve-permission-btn");
+                var approvePermissionBtn = document.getElementById("approve-permission-btn");
         if (approvePermissionBtn) approvePermissionBtn.addEventListener("click", approvePermission);
         var approveTurnPermissionBtn = document.getElementById("approve-turn-permission-btn");
         if (approveTurnPermissionBtn) approveTurnPermissionBtn.addEventListener("click", approveTurnPermission);
@@ -694,11 +509,11 @@ import { missionsController } from "../react/missions/controller";
         }
 
         // 加号 popover & 附件上传
-        // attach-btn 现在是 popover 触发器；真正的"上传附件"动作在 popover 内的 #plus-attach-item 上。
+        // attach-btn 是 popover 触发器；popover 内的「上传附件」/「终端交互」两个
+        // 条目由 React portal 渲染并自带点击处理，这里只保留容器级行为。
         var attachBtn = document.getElementById("attach-btn");
         var fileInput = document.getElementById("file-upload-input") as HTMLInputElement | null;
         var plusPopover = document.getElementById("composer-plus-popover");
-        var plusAttachItem = document.getElementById("plus-attach-item");
         if (attachBtn && plusPopover) {
           attachBtn.addEventListener("click", function(e) {
             e.stopPropagation();
@@ -729,12 +544,6 @@ import { missionsController } from "../react/missions/controller";
                   ? (currentIndex <= 0 ? controls.length - 1 : currentIndex - 1)
                   : (currentIndex + 1) % controls.length;
             controls[nextIndex]?.focus();
-          });
-        }
-        if (plusAttachItem && fileInput) {
-          plusAttachItem.addEventListener("click", function(e) {
-            closePlusPopover(e.detail === 0);
-            fileInput!.click();
           });
         }
         if (fileInput) {
@@ -792,90 +601,7 @@ import { missionsController } from "../react/missions/controller";
           });
         }
 
-        // Terminal interactive toggle (both topbar and terminal-header)
-        var terminalInteractiveToggles = ["terminal-interactive-toggle-top"];
-        terminalInteractiveToggles.forEach(function(id) {
-          var toggle = document.getElementById(id);
-          if (toggle) toggle.addEventListener("click", toggleTerminalInteractive);
-        });
-        if (!reactShellActive) {
-        // File panel toggle
-        var filePanelToggle = document.getElementById("file-panel-toggle-btn");
-        if (filePanelToggle) filePanelToggle.addEventListener("click", toggleFilePanel);
-        var filePanelClose = document.getElementById("file-side-panel-close");
-        if (filePanelClose) filePanelClose.addEventListener("click", closeFilePanel);
-
-        // File panel backdrop click to close (mobile)
-        var filePanelBackdrop = document.getElementById("file-panel-backdrop");
-        if (filePanelBackdrop) filePanelBackdrop.addEventListener("click", closeFilePanel);
-
-        // Topbar: file button (mirrors toggleFilePanel)
-        var topbarFileBtn = document.getElementById("topbar-file-button");
-        if (topbarFileBtn) topbarFileBtn.addEventListener("click", toggleFilePanel);
-
-        // Topbar: cwd click → open file panel
-        var topbarCwdEl = document.getElementById("topbar-cwd");
-        if (topbarCwdEl) {
-          topbarCwdEl.addEventListener("click", function() {
-            if (!state.filePanelOpen) toggleFilePanel();
-          });
-          topbarCwdEl.addEventListener("keydown", function(e) {
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
-              if (!state.filePanelOpen) toggleFilePanel();
-            }
-          });
-        }
-
-        // Topbar: more menu
-        var topbarMoreBtn = document.getElementById("topbar-more-button");
-        var topbarMoreMenu = document.getElementById("topbar-more-menu");
-        if (topbarMoreBtn && topbarMoreMenu) {
-          topbarMoreBtn.addEventListener("click", function(e) {
-            e.stopPropagation();
-            state.topbarMoreOpen = !state.topbarMoreOpen;
-            topbarMoreMenu!.classList.toggle("hidden", !state.topbarMoreOpen);
-            topbarMoreBtn!.classList.toggle("active", state.topbarMoreOpen);
-            topbarMoreBtn!.setAttribute("aria-expanded", state.topbarMoreOpen ? "true" : "false");
-          });
-          topbarMoreMenu.addEventListener("click", function(e) {
-            var btn = (e.target as HTMLElement) && (e.target as HTMLElement).closest ? (e.target as HTMLElement).closest(".topbar-more-item") : null;
-            if (!btn) return;
-            var action = btn.getAttribute("data-action");
-            // Close menu first regardless of action
-            state.topbarMoreOpen = false;
-            topbarMoreMenu!.classList.add("hidden");
-            topbarMoreBtn!.classList.remove("active");
-            topbarMoreBtn!.setAttribute("aria-expanded", "false");
-            switch (action) {
-              case "copy-claude-session-id":
-                var copyProvider = getSelectedSession() && getSelectedSession().provider;
-                copySelectedSessionField("claudeSessionId", copyProvider === "codex" ? "Codex thread ID 已复制" : copyProvider === "opencode" ? "OpenCode session ID 已复制" : "Claude 会话 ID 已复制");
-                break;
-              case "copy-cwd":
-                copySelectedSessionField("cwd", "工作目录已复制");
-                break;
-              case "copy-session-id":
-                copySelectedSessionField("id", "会话 ID 已复制");
-                break;
-              case "worktree-merge":
-                if (state.selectedId) openWorktreeMergeModal(state.selectedId);
-                break;
-              case "worktree-cleanup":
-                if (state.selectedId) retryWorktreeCleanup(state.selectedId);
-                break;
-              case "delete-session":
-                if (state.selectedId) {
-                  (function(pendingId) {
-                    confirmDelete("确定要删除当前会话吗？此操作无法撤销。", { title: "删除当前会话" })
-                      .then(function(ok: any) { if (ok) deleteSession(pendingId); });
-                  })(state.selectedId);
-                }
-                break;
-            }
-          });
-        }
-        }
+        // Terminal interactive toggle: 点击处理随条目一起搬进了 React。
 
         // Terminal scale controls (topbar)
         var scaleDownBtn = document.getElementById("terminal-scale-down-top");
@@ -905,93 +631,7 @@ import { missionsController } from "../react/missions/controller";
         if (chatUnreadBubble) chatUnreadBubble.addEventListener("click", function() {
           scrollChatToBottom(true);
         });
-        if (!reactShellActive) {
-        var fileRefresh = document.getElementById("file-explorer-refresh");
-        if (fileRefresh) fileRefresh.addEventListener("click", function() { refreshFileExplorer(); });
-        var fileUp = document.getElementById("file-explorer-up");
-        if (fileUp) fileUp.addEventListener("click", navigateExplorerUp);
-
-        // 路径输入框：支持点击修改路径，回车跳转，Esc 撤销。
-        var fileCwdInput = document.getElementById("file-explorer-cwd") as HTMLInputElement | null;
-        if (fileCwdInput && fileCwdInput.tagName === "INPUT") {
-          var lastCommittedCwd = fileCwdInput.value;
-          var normalizeCwdInput = function(raw: string) {
-            var s = (raw || "").trim();
-            if (!s) return "";
-            // 折叠重复斜杠，去掉尾随斜杠（根目录除外）。
-            s = s.replace(/\/{2,}/g, "/");
-            if (s.length > 1) s = s.replace(/\/+$/, "");
-            return s;
-          };
-          fileCwdInput.addEventListener("focus", function() {
-            lastCommittedCwd = fileCwdInput!.value;
-            // Select all on focus so the user can immediately overwrite.
-            setTimeout(function() {
-              try { fileCwdInput!.select(); } catch (e) {}
-            }, 0);
-          });
-          fileCwdInput.addEventListener("keydown", function(e) {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              var next = normalizeCwdInput(fileCwdInput!.value);
-              if (!next) return;
-              lastCommittedCwd = next;
-              fileCwdInput!.value = next;
-              refreshFileExplorer({ cwd: next });
-              fileCwdInput!.blur();
-            } else if (e.key === "Escape") {
-              e.preventDefault();
-              fileCwdInput!.value = lastCommittedCwd;
-              fileCwdInput!.blur();
-            }
-          });
-          fileCwdInput.addEventListener("blur", function() {
-            var next = normalizeCwdInput(fileCwdInput!.value);
-            if (!next) {
-              fileCwdInput!.value = lastCommittedCwd;
-              return;
-            }
-            if (next === lastCommittedCwd) {
-              fileCwdInput!.value = next;
-              return;
-            }
-            lastCommittedCwd = next;
-            fileCwdInput!.value = next;
-            refreshFileExplorer({ cwd: next });
-          });
-        }
-
-        // File search
-        var fileSearchInput = document.getElementById("file-search-input") as HTMLInputElement | null;
-        var fileSearchClear = document.getElementById("file-search-clear");
-        if (fileSearchInput) {
-          fileSearchInput.addEventListener("input", function(e) {
-            state.fileSearchQuery = (e.target as HTMLInputElement).value.trim();
-            if (fileSearchClear) {
-              fileSearchClear.classList.toggle("visible", state.fileSearchQuery.length > 0);
-            }
-            filterFileTree();
-          });
-        }
-        if (fileSearchClear) {
-          fileSearchClear.addEventListener("click", function() {
-            state.fileSearchQuery = "";
-            if (fileSearchInput) {
-              fileSearchInput.value = "";
-            }
-            fileSearchClear!.classList.remove("visible");
-          });
-        }
-
-        var topbarGitBadge = document.getElementById("topbar-git-badge");
-        if (topbarGitBadge) {
-          topbarGitBadge.addEventListener("click", function(e) {
-            e.preventDefault();
-            openQuickCommitModal();
-          });
-        }
-        }
-        initTerminal();
+                initTerminal();
         setupMobileKeyboardHandlers();
         setupVisualViewportHandlers();
 

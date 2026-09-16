@@ -330,6 +330,11 @@ test("settings validate atomically, persist without secrets, and password rotati
     assert.equal((await fetch(`${baseUrl}/api/app-connect-code`, { headers: connectedHeaders })).status, 403);
     assert.equal((await fetch(`${baseUrl}/api/settings/env-preview`, { headers: connectedHeaders })).status, 200);
     assert.equal((await fetch(`${baseUrl}/api/settings/env-preview?reveal=1`, { headers: connectedHeaders })).status, 403);
+    assert.equal((await fetch(`${baseUrl}/api/settings/env-preview?reveal=true`, { headers: connectedHeaders })).status, 403);
+    assert.equal((await fetch(`${baseUrl}/api/settings/env-preview?reveal=true`, { headers: connectedCookieHeaders })).status, 403);
+    const revealedEnvironment = await fetch(`${baseUrl}/api/settings/env-preview?reveal=true`, { headers });
+    assert.equal(revealedEnvironment.status, 200);
+    assert.equal((await revealedEnvironment.json() as { reveal: boolean }).reveal, true);
 
     const connectedAdminWrite = await fetch(`${baseUrl}/api/settings/config`, {
       method: "POST",

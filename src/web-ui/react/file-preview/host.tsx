@@ -218,7 +218,7 @@ function PreviewBody({ snapshot, editorRef }: {
   if (snapshot.editing) {
     return (
       <div className="wand-file-preview-editor">
-        <textarea
+        <textarea className="resize-none"
           ref={editorRef}
           aria-label={`编辑 ${file.name}`}
           autoComplete="off"

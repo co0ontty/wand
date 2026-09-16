@@ -779,6 +779,8 @@ test("sidebar multi-select delete cascades task terminals and keeps leftover ses
   const {
     EMPTY_SIDEBAR_MANAGE_SELECTION,
     collectManagedIds,
+    isManagedGroupSelected,
+    toggleManagedGroup,
     describeManagedDeletion,
     pruneManagedSelection,
     resolveManagedDeletion,
@@ -813,6 +815,19 @@ test("sidebar multi-select delete cascades task terminals and keeps leftover ses
   const all = collectManagedIds(groups);
   assert.equal(all.taskIds.length, 2);
   assert.equal(all.sessionIds.length, 4);
+  const other = {
+    ...groups[0], workspaceId: "workspace-2",
+    tasks: [manageTask("other", "其他", [])], standaloneSessions: [],
+  };
+  const firstGroup = toggleManagedGroup({ taskIds: ["other"], sessionIds: [] }, groups[0]);
+  assert.equal(isManagedGroupSelected(firstGroup, groups[0]), true);
+  assert.deepEqual(firstGroup.taskIds, ["other", "task-1", "task-2"]);
+  assert.equal(isManagedGroupSelected(firstGroup, other), true);
+  const clearedGroup = toggleManagedGroup(firstGroup, groups[0]);
+  assert.deepEqual(clearedGroup, { taskIds: ["other"], sessionIds: [] });
+  assert.equal(isManagedGroupSelected(clearedGroup, groups[0]), false);
+  const partiallySelected = toggleManagedGroup({ taskIds: ["task-1"], sessionIds: [] }, groups[0]);
+  assert.deepEqual(partiallySelected.taskIds, ["task-1", "task-2"]);
 });
 
 test("compact rail shows every directory, including empty ones, without task entries", () => {
@@ -845,6 +860,9 @@ test("workspaces panel exposes multi-select and a compact directory rail", () =>
   assert.match(html, />项目与任务<\/h2>/);
   const panel = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
   assert.match(panel, /CompactDirectoryRail/);
+  assert.match(panel, /groups=\{groups\.filter\(\(group\) => !group\.global\)\}/);
+  assert.match(panel, /workspace-global-tasks/);
+  assert.match(panel, /onToggleGroup=/);
   assert.match(panel, /data-sidebar-directory-id=\{group.workspaceId\}/);
   assert.match(panel, /sidebar-collapsed-rail/);
   assert.doesNotMatch(panel, /CompactWorkspaceTree/);

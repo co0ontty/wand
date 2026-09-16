@@ -4,36 +4,19 @@ import {
   type FolderPickerRuntimeAdapter,
 } from "../react";
 import { getEffectiveCwd } from "./render";
-import { state } from "./state";
 import { saveWorkingDir } from "./terminal";
 import { showToast } from "./notifications";
-import { setTailMarqueePathText } from "./utils";
-import { isBrowserReactShellMounted } from "./shell-runtime";
 import { notifyLegacyUiChange } from "./ui-store-bridge";
 import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
 import { closeReactOverlays } from "./react-overlay-coordinator";
 
 let uninstallRuntime: (() => void) | null = null;
 
-function setTriggerExpanded(expanded: boolean): void {
-  if (isBrowserReactShellMounted()) return;
-  document.getElementById("blank-chat-cwd")?.setAttribute("aria-expanded", expanded ? "true" : "false");
-}
-
-function syncWorkingDirectoryUi(path: string): void {
-  if (isBrowserReactShellMounted()) {
-    notifyLegacyUiChange("working-dir");
-    return;
-  }
-  const trigger = document.getElementById("blank-chat-cwd");
-  if (trigger) trigger.title = `当前工作目录：${path}`;
-  setTailMarqueePathText(document.getElementById("blank-chat-cwd-path"), path);
-
-  const filePathInput = document.getElementById("file-explorer-cwd") as HTMLInputElement | null;
-  if (!state.selectedId && filePathInput && document.activeElement !== filePathInput) {
-    filePathInput.value = path;
-    filePathInput.title = path;
-  }
+// #blank-chat-cwd* 只在已删除的 legacy 空白页 markup 里存在，React 的空白页不渲染
+// 它们（登录页 / 桌面 / 移动端 / 原生 embed 四种状态探针均 0 命中），所以这里只保留
+// 目录变更通知。
+function syncWorkingDirectoryUi(_path: string): void {
+  notifyLegacyUiChange("working-dir");
 }
 
 const legacyRuntime: FolderPickerRuntimeAdapter = {
@@ -41,14 +24,10 @@ const legacyRuntime: FolderPickerRuntimeAdapter = {
 
   onOpen(): void {
     closeReactOverlays(["folderPicker"]);
-    setTriggerExpanded(true);
   },
 
   onClose(): void {
-    setTriggerExpanded(false);
-    window.requestAnimationFrame(() => {
-      document.getElementById("blank-chat-cwd")?.focus();
-    });
+    // React 的空白页没有 legacy 的 #blank-chat-cwd 触发器可聚焦。
   },
 
   applySelection(path): void {
@@ -74,32 +53,12 @@ export function openFolderPickerFromLegacy(): boolean {
   return openFolderPickerNow();
 }
 
-function openFolderPicker(event: Event): void {
-  event.preventDefault();
-  openFolderPickerFromLegacy();
-}
-
-function findTrigger(target: EventTarget | null): HTMLElement | null {
-  return target instanceof Element ? target.closest<HTMLElement>("#blank-chat-cwd") : null;
-}
-
-function handleClick(event: MouseEvent): void {
-  if (isBrowserReactShellMounted()) return;
-  if (!findTrigger(event.target)) return;
-  openFolderPicker(event);
-}
-
-function handleKeyDown(event: KeyboardEvent): void {
-  if (isBrowserReactShellMounted()) return;
-  if (event.key !== "Enter" && event.key !== " ") return;
-  if (!findTrigger(event.target)) return;
-  openFolderPicker(event);
-}
+// legacy 空白页的 #blank-chat-cwd 触发器已随 legacy Shell 一起删除，React 通过
+// shell-commands 的 openFolderPicker 命令直接调 openFolderPickerFromLegacy()，
+// 所以 document 级 click/keydown 代理已无作用对象。
 
 /** Installs the only adapter allowed to mutate the legacy working-directory runtime. */
 export function installFolderPickerLegacyAdapter(): void {
   if (uninstallRuntime) return;
   uninstallRuntime = configureFolderPickerRuntime(legacyRuntime);
-  document.addEventListener("click", handleClick);
-  document.addEventListener("keydown", handleKeyDown);
 }

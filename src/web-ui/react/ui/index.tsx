@@ -1,7 +1,8 @@
-// Radix imports stay inside this directory. Business modules consume these
+// Appica imports stay inside this directory. Business modules consume these
 // Wand interfaces so the implementation can change without spreading a
 // third-party interface across the application.
 export {WandBadge} from "./badge";
+export { WandBrandMark } from "./brand-mark";
 export {WandButton, WandIconButton, type WandButtonKind, type WandIconButtonProps} from "./button";
 export {WandChip, type WandChipProps} from "./chip";
 export {WandDialog, WandDialogSurface, type WandDialogTone} from "./dialog";
@@ -32,6 +33,7 @@ export {
 export {WandPopover} from "./popover";
 export {WandSelect, type WandSelectOption} from "./select";
 export {WandSkeleton} from "./skeleton";
+export {WandSearchField} from "./search-field";
 export {WandSwitch} from "./switch";
 export {WandTabs} from "./tabs";
 export {WandToastRegion, showWandToast, type WandToastHandle, type WandToastTone} from "./toast";

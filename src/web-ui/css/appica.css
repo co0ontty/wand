@@ -107,11 +107,11 @@
   --border-overlay: var(--border-subtle);
 
   /* ---- Primary (brand / accent) ------------------------------------- */
-  --primary: var(--accent);
+  --primary: var(--accent-solid);
   --primary-foreground: var(--text-inverse);
   --primary-subtle: var(--accent-muted);
   --primary-soft: var(--accent-soft);
-  --primary-muted: var(--accent-hover);
+  --primary-muted: var(--accent-solid-hover);
   --primary-strong: var(--accent-active);
 
   /* ---- Secondary (neutral filled) ----------------------------------- */

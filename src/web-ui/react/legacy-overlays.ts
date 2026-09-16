@@ -120,7 +120,7 @@ function finishReactLegacyDialog(): void {
 }
 
 /**
- * Routes the legacy dialog contract through the mounted React/Radix host.
+ * Routes the legacy dialog contract through the mounted React/Appica host.
  * `null` means that the host is disabled or unavailable and the caller must
  * use its DOM fallback. Button tokens retain the original value/kind so prompt
  * submission has exactly the same return semantics as the legacy dialog.

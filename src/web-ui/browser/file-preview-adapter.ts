@@ -18,7 +18,11 @@ interface LegacyFilePreviewItem {
 }
 
 export interface FilePreviewLegacyAdapterDependencies {
-  getSiblings(): ReadonlyArray<LegacyFilePreviewItem>;
+  /**
+   * 当前预览文件同目录的条目。React 文件树是唯一数据源，legacy 的扁平列表
+   * 已删除；按传入路径的父目录取已加载条目，取不到时退回面板当前目录。
+   */
+  getSiblings(openPath: string): ReadonlyArray<LegacyFilePreviewItem>;
   confirmDiscard(reason: FilePreviewDiscardReason, path: string): Promise<boolean>;
   copyText(text: string): boolean | Promise<boolean>;
   appendToComposer(text: string): boolean;
@@ -83,7 +87,7 @@ export function openFilePreviewFromLegacy(path: string): boolean {
   if (!closeCompetingReactOverlays()) return false;
   void filePreviewController.open({
     path: normalizedPath,
-    siblings: normalizeSiblings(dependencies.getSiblings()),
+    siblings: normalizeSiblings(dependencies.getSiblings(normalizedPath)),
   });
   return true;
 }

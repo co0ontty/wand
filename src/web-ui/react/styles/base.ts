@@ -12,6 +12,51 @@ export const foundationStyles = String.raw`
   display: contents;
 }
 
+/* Appica owns behavior and sizing; Wand owns the shared surface geometry. */
+.wand-ui-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text-tertiary);
+}
+.wand-ui-search:focus-within { border-color: var(--accent-solid); outline: 2px solid var(--accent-muted); }
+.wand-ui-search > svg { flex: none; }
+.wand-ui-search input {
+  flex: 1;
+  width: 0;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--font-size-base);
+}
+.wand-ui-search input::-webkit-search-cancel-button { display: none; }
+.wand-ui-search input::placeholder { color: var(--text-tertiary); }
+.wand-ui-search .wand-ui-icon-button { flex: none; width: 28px; height: 28px; }
+
+.wand-ui-button {
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+}
+
+.wand-ui-button-primary,
+.wand-ui-button-danger {
+  box-shadow: none;
+}
+
+[data-slot="dialog-backdrop"] {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
 .wand-ui-portals {
   position: fixed;
   inset: 0;
@@ -63,7 +108,7 @@ export const foundationStyles = String.raw`
   inset: 0;
   z-index: 0;
   background: var(--bg-overlay);
-  backdrop-filter: blur(4px);
+  backdrop-filter: none;
   pointer-events: auto;
 }
 

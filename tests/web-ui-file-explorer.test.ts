@@ -63,6 +63,39 @@ const alwaysConfirmRuntime: FileExplorerRuntimeAdapter = {
   async promptForName() { return null; },
 };
 
+test("file search coalesces typing and clear cancels pending work", async () => {
+  const repo = new MemoryFileExplorerRepository({ "/app": [] });
+  const queries: string[] = [];
+  repo.search = async (query) => { queries.push(query); return { ok: true, results: [] }; };
+  const { controller, store } = createFileExplorerModule({ repository: repo, runtime: alwaysConfirmRuntime });
+  controller.setRoot("/app");
+  const first = controller.execute({ type: "search.start", query: "a" });
+  const second = controller.execute({ type: "search.start", query: "ab" });
+  await Promise.all([first, second]);
+  assert.deepEqual(queries, ["ab"]);
+  const pending = controller.execute({ type: "search.start", query: "abc" });
+  await controller.execute({ type: "search.clear" });
+  await pending;
+  assert.deepEqual(queries, ["ab"]);
+  assert.equal(store.getSnapshot().searching, false);
+  assert.equal(store.getSnapshot().searchResults, null);
+});
+
+test("file search failure stays distinct from a successful empty result", async () => {
+  const repo = new MemoryFileExplorerRepository({ "/app": [] });
+  repo.search = async () => { throw new TypeError("Failed to fetch"); };
+  const { controller, store } = createFileExplorerModule({ repository: repo, runtime: alwaysConfirmRuntime });
+  controller.setRoot("/app");
+  await controller.execute({ type: "search.start", query: "note" });
+  assert.match(store.getSnapshot().searchError ?? "", /搜索文件失败.*重试/);
+  assert.doesNotMatch(store.getSnapshot().searchError ?? "", /Failed to fetch/);
+  assert.equal(store.getSnapshot().searching, false);
+  repo.search = async () => ({ ok: true, results: [] });
+  await controller.execute({ type: "search.start", query: "note" });
+  assert.equal(store.getSnapshot().searchError, "");
+  assert.deepEqual(store.getSnapshot().searchResults, []);
+});
+
 function waitFor(predicate: () => boolean, timeoutMs = 200): Promise<void> {
   return new Promise((resolve, reject) => {
     const start = Date.now();

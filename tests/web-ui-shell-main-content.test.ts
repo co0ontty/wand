@@ -192,9 +192,9 @@ test("ShellMainContent uses UiStore actions and no forbidden legacy seam", () =>
   );
   assert.match(source, /useUiStoreSnapshot\(\)/);
   assert.match(source, /useUiDispatch\(\)/);
-  assert.match(source, /<div id="output" className=\{classes\.terminal\} ref=\{legacyRefs\?\.terminal\}\/>/);
-  assert.match(source, /<div id="chat-output" className=\{classes\.chat\} ref=\{legacyRefs\?\.chat\}\/>/);
-  assert.match(source, /<div className=\{classes\.composer\} ref=\{legacyRefs\?\.composer\}\/>/);
+  assert.match(source, /<div id="output" inert=\{editor\.open\} className=\{classes\.terminal\} ref=\{legacyRefs\?\.terminal\}\/>/);
+  assert.match(source, /<div id="chat-output" inert=\{editor\.open\} className=\{classes\.chat\} ref=\{legacyRefs\?\.chat\}\/>/);
+  assert.match(source, /<div inert=\{editor\.open\} className=\{classes\.composer\} ref=\{legacyRefs\?\.composer\}\/>/);
   assert.match(source, /id="cross-session-queue-host" ref=\{queueRef\}/);
   assert.match(source, /context\.taskId \? null : <ShellTopbar\/>/);
   assert.match(source, /<WorkspaceTabBar\/>/);

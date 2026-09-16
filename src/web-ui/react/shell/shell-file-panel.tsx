@@ -22,7 +22,7 @@ export function getParentFilePanelCwd(raw: string): string {
 }
 
 export interface ShellFilePanelProps {
-  /** Ref used by the legacy file-tree host. React never renders slot children. */
+  /** Stable bridge root; FileExplorerHost owns the file tree's React children. */
   explorerRef?: React.Ref<HTMLDivElement>;
 }
 
@@ -31,28 +31,30 @@ export function ShellFilePanel({ explorerRef }: ShellFilePanelProps = {}) {
   const dispatch = useUiDispatch();
   const snapshotCwd = normalizeFilePanelCwd(snapshot.topbar.cwd) || "/";
   const [cwd, setCwd] = React.useState(snapshotCwd);
-  const committedCwd = React.useRef(snapshotCwd);
+  // committedCwd 必须是 state：它是 FileExplorerHost 的 root，而 commitCwd 里
+  // setCwd 往往与当前值相同（输入期间 onChange 已经同步过），用 ref 存
+  // 时那次 setState 会被 React bail-out，root 就不会跟着变。
+  const [committedCwd, setCommittedCwd] = React.useState(snapshotCwd);
   const editingCwd = React.useRef(false);
 
   React.useEffect(() => {
     if (editingCwd.current) return;
-    committedCwd.current = snapshotCwd;
+    setCommittedCwd(snapshotCwd);
     setCwd(snapshotCwd);
   }, [snapshot.selected?.id, snapshotCwd]);
 
   const commitCwd = React.useCallback(() => {
     const normalized = normalizeFilePanelCwd(cwd);
     if (!normalized) {
-      setCwd(committedCwd.current);
+      setCwd(committedCwd);
       return;
     }
     setCwd(normalized);
-    if (normalized === committedCwd.current) return;
-    committedCwd.current = normalized;
-    void dispatch({ type: "layout.files.navigate", cwd: normalized });
-  }, [cwd, dispatch]);
+    if (normalized === committedCwd) return;
+    setCommittedCwd(normalized);
+  }, [cwd, committedCwd]);
 
-  const parentCwd = getParentFilePanelCwd(committedCwd.current);
+  const parentCwd = getParentFilePanelCwd(committedCwd);
   return (
     <>
       <div
@@ -79,7 +81,6 @@ export function ShellFilePanel({ explorerRef }: ShellFilePanelProps = {}) {
               aria-label="刷新文件列表"
               onClick={() => {
                 void fileExplorerController.execute({ type: "refresh" });
-                void dispatch({ type: "layout.files.refresh" });
               }}
             >
               <WandIcon name="refresh" size={15} className="wand-icon wand-icon-refresh"/>
@@ -103,12 +104,11 @@ export function ShellFilePanel({ explorerRef }: ShellFilePanelProps = {}) {
               id="file-explorer-up"
               title="返回上级目录"
               aria-label="返回上级目录"
-              disabled={committedCwd.current === "/"}
+              disabled={committedCwd === "/"}
               onClick={() => {
-                if (parentCwd === committedCwd.current) return;
-                committedCwd.current = parentCwd;
+                if (parentCwd === committedCwd) return;
+                setCommittedCwd(parentCwd);
                 setCwd(parentCwd);
-                void dispatch({ type: "layout.files.up" });
               }}
             >
               <WandIcon name="up" size={15} className="wand-icon wand-icon-up"/>
@@ -142,7 +142,7 @@ export function ShellFilePanel({ explorerRef }: ShellFilePanelProps = {}) {
                 } else if (event.key === "Escape") {
                   event.preventDefault();
                   editingCwd.current = false;
-                  setCwd(committedCwd.current);
+                  setCwd(committedCwd);
                   event.currentTarget.blur();
                 }
               }}
@@ -155,7 +155,7 @@ export function ShellFilePanel({ explorerRef }: ShellFilePanelProps = {}) {
             hidden
             aria-hidden="true"
           />
-          <FileExplorerHost root={committedCwd.current}/>
+          <FileExplorerHost root={committedCwd}/>
         </div>
       </div>
     </>

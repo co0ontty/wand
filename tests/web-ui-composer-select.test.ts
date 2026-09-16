@@ -99,25 +99,55 @@ test("composer select values always resolve to a rendered option", () => {
   assert.equal(normalizeAvailableComposerValue("max", thinkingOptions, "off"), "off");
 });
 
-test("composer config markup delegates selection to the React WandSelect host", () => {
+test("composer 三件套的 chip 与内层 select 宿主都由 React 渲染", () => {
   const sessionEngine = readFileSync(
     new URL("../src/web-ui/browser/session-engine.ts", import.meta.url),
     "utf8",
   );
-  const start = sessionEngine.indexOf("export function renderComposerConfigControlsHtml");
-  const end = sessionEngine.indexOf("export function refreshAllChatModeTrios", start);
-  const renderBlock = sessionEngine.slice(start, end);
+  const render = readFileSync(
+    new URL("../src/web-ui/browser/render.ts", import.meta.url),
+    "utf8",
+  );
   const host = readFileSync(
+    new URL("../src/web-ui/react/composer-config/host.tsx", import.meta.url),
+    "utf8",
+  );
+  const adapter = readFileSync(
+    new URL("../src/web-ui/browser/composer-config-adapter.ts", import.meta.url),
+    "utf8",
+  );
+  const selectHost = readFileSync(
     new URL("../src/web-ui/react/composer-select/host.tsx", import.meta.url),
     "utf8",
   );
 
-  assert.match(sessionEngine, /data-composer-select-host/);
-  assert.match(renderBlock, /renderComposerSelectHost/);
-  assert.match(renderBlock, /showModelRefresh = scope === "runtime" \|\| showExtended/);
-  assert.match(renderBlock, /data-models-refresh-scope/);
-  assert.doesNotMatch(renderBlock, /<select/);
-  assert.match(host, /<WandSelect/);
-  assert.match(host, /searchable=\{mount.control === "model"\}/);
-  assert.match(host, /searchPlaceholder="搜索模型"/);
+  // 旧渲染器与它吐出的 data-* 钩子必须一起消失，否则会出现两个写入者。
+  assert.doesNotMatch(sessionEngine, /renderComposerConfigControlsHtml/);
+  assert.doesNotMatch(sessionEngine, /renderComposerSelectHost/);
+  assert.doesNotMatch(sessionEngine, /data-models-refresh/);
+  assert.doesNotMatch(sessionEngine, /data-claude-skills-trigger/);
+  assert.doesNotMatch(sessionEngine, /"\.composer-config-controls"/);
+
+  // 宿主常驻在种子 markup 里，切会话后 portal 目标仍然有效。
+  assert.match(render, /data-composer-config-host="mode"/);
+  assert.match(render, /data-composer-config-host="runtime"/);
+  assert.match(render, /data-composer-config-host="all"/);
+
+  // chip 结构 + 选择委托都在 React 侧，且不回到原生 select。
+  assert.match(host, /data-mode-control-pill="mode"/);
+  assert.match(host, /data-mode-control-pill="model"/);
+  assert.match(host, /data-mode-control-pill="thinking"/);
+  assert.match(host, /data-composer-select-host=""/);
+  assert.match(host, /data-models-refresh=""/);
+  assert.match(host, /data-models-refresh-scope=\{scope\}/);
+  assert.match(host, /data-claude-skills-trigger=""/);
+  assert.doesNotMatch(host, /<select/);
+
+  // chip 里会长出 select 宿主，所以配置同步必须同步提交后 select 才能扫到。
+  assert.match(adapter, /syncPortalMounts<ComposerConfigMount>\(\{/);
+  assert.match(adapter, /flush: true/);
+  assert.match(adapter, /data-composer-config-host/);
+  assert.match(selectHost, /<WandSelect/);
+  assert.match(selectHost, /searchable=\{mount\.control === "model"\}/);
+  assert.match(selectHost, /searchPlaceholder="搜索模型"/);
 });

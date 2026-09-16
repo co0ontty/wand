@@ -161,6 +161,11 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
 
   const submitMission = async (event: FormEvent) => {
     event.preventDefault();
+    if (busy) return;
+    if (!prompt.trim() || !cwd.trim() || providers.size === 0) {
+      setError("请填写任务目标、工作目录，并选择至少一个工具。");
+      return;
+    }
     setBusy(true); setError("");
     try {
       const created = await repository.create({
@@ -302,7 +307,7 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
                     {reviewTarget ? (
                       <div className="wand-missions-comment-form">
                         <label>{reviewTarget.filePath}{reviewTarget.line ? `:${reviewTarget.line}` : ""}</label>
-                        <textarea value={reviewBody} onChange={(event) => setReviewBody(event.target.value)} placeholder="写下具体、可执行的修改意见…"/>
+                        <textarea className="resize-none" value={reviewBody} onChange={(event) => setReviewBody(event.target.value)} placeholder="写下具体、可执行的修改意见…"/>
                         <WandButton kind="primary" size="small" disabled={busy || !reviewBody.trim()} onClick={() => void addComment()}>加入 Review</WandButton>
                       </div>
                     ) : null}
@@ -322,7 +327,7 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
 
       {creating ? (
         <div className="wand-missions-create-overlay">
-          <form className="wand-missions-create" onSubmit={(event) => void submitMission(event)}>
+          <form noValidate className="wand-missions-create" onSubmit={(event) => void submitMission(event)}>
             <div className="wand-missions-create-head"><div><h2>并行任务</h2><p>每个 Provider 会获得独立 branch 与 worktree。</p></div><button type="button" onClick={() => setCreating(false)}>×</button></div>
             <label>任务标题（可选）<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="例如：重构会话恢复流程"/></label>
             <div className="wand-missions-field">
@@ -333,7 +338,7 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
                 onChange={(next) => setMilestoneId(next ?? "")}
               />
             </div>
-            <label>目标<textarea autoFocus required value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="描述清楚完成条件、限制和验证要求…"/></label>
+            <label>目标<textarea className="resize-none" autoFocus required value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="描述清楚完成条件、限制和验证要求…"/></label>
             {linkedTaskName ? (
               <p className="wand-missions-linked-task">派发的 Agent 会话将关联到当前任务「{linkedTaskName}」。</p>
             ) : null}

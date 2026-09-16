@@ -310,23 +310,14 @@ function TaskBoardListRow({
   onOpen(id: string): void;
   onOpenSession?: (sessionId: string) => void;
 }): React.ReactElement {
-  return <div
-    role="button"
-    tabIndex={0}
+  return <article
     className={classNames("task-board-list-row", task.status === "archived" && "is-archived")}
-    onClick={() => onOpen(task.id)}
-    onKeyDown={(event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        onOpen(task.id);
-      }
-    }}
   >
-    <span className="task-board-list-title">
+    <button type="button" className="task-board-list-title" aria-label={`打开 ${task.identifier}: ${task.title}`} onClick={() => onOpen(task.id)}>
       <small>{task.identifier}</small>
       <strong>{task.title}</strong>
-    </span>
-    <span className="task-board-list-meta" onClick={(event) => event.stopPropagation()}>
+    </button>
+    <span className="task-board-list-meta">
       <TaskBoardPriorityChip priority={task.priority}/>
       {task.milestone ? <TaskBoardMilestoneChip name={task.milestone.name}/> : null}
       {task.labels.slice(0, 2).map((label) => <TaskBoardLabelChip key={label} label={label}/>)}
@@ -335,7 +326,7 @@ function TaskBoardListRow({
       <TaskBoardConversationButton sessions={task.sessions} onOpen={onOpenSession}/>
       <time>{formatIssueStamp(task.updatedAt)}</time>
     </span>
-  </div>;
+  </article>;
 }
 
 export function TaskBoardListView({

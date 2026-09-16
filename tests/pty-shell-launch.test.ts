@@ -7,6 +7,7 @@ import test from "node:test";
 import pty from "node-pty";
 
 import { buildPtyShellLaunchPlan, PtyCliExitMarker } from "../src/pty-shell-launch.js";
+import { shellQuote } from "../src/shell-quote.js";
 
 async function waitForOutput(read: () => string, expected: string, timeoutMs = 10_000): Promise<void> {
   // 全量套件下 node --test 会并行拉起几十个测试进程，zsh 启动 + PTY 回显的
@@ -154,7 +155,9 @@ test("Ctrl+C after a provider command lands in an interactive login shell", {
 
   const plan = buildPtyShellLaunchPlan({
     shell: "/bin/zsh",
-    command: "printf WAND_PROVIDER_RUNNING; sleep 30",
+    // Emit readiness from the foreground process, not from the launcher before
+    // it starts the process that Ctrl+C is intended to interrupt.
+    command: `${shellQuote(process.execPath)} -e ${shellQuote("setTimeout(() => {}, 30000); process.stdout.write('WAND_PROVIDER_RUNNING');")}`,
     bareShell: false,
     providerCommand: true,
     platform: process.platform,

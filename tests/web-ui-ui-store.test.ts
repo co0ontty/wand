@@ -198,7 +198,7 @@ test("dispatch routes discriminated actions, refreshes state, and preserves prom
         });
         return;
       }
-      if (action.type === "layout.files.refresh") {
+      if (action.type === "layout.files.toggle") {
         return Promise.resolve().then(() => {
           current = fixture({ layout: { ...current.layout, filePanelOpen: true } });
         });
@@ -212,7 +212,7 @@ test("dispatch routes discriminated actions, refreshes state, and preserves prom
   assert.equal(adapter.getSnapshot().layout.sessionsDrawerOpen, false);
   assert.equal(adapter.getSnapshot().revision, 1);
 
-  await adapter.dispatch({ type: "layout.files.refresh" });
+  await adapter.dispatch({ type: "layout.files.toggle" });
   assert.equal(adapter.getSnapshot().layout.filePanelOpen, true);
   assert.equal(adapter.getSnapshot().revision, 3);
 
@@ -220,7 +220,7 @@ test("dispatch routes discriminated actions, refreshes state, and preserves prom
   assert.equal(adapter.getSnapshot().revision, 5);
   assert.deepEqual(actions.map((action) => action.type), [
     "layout.drawer.toggle",
-    "layout.files.refresh",
+    "layout.files.toggle",
     "auth.logout",
   ]);
   adapter.dispose();

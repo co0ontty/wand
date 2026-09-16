@@ -34,11 +34,9 @@ import { installFilePreviewLegacyAdapter } from "./file-preview-adapter";
 import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
 import { installMissionsLegacyAdapter } from "./missions-adapter";
 import { installWorkspacesLegacyAdapter } from "./workspaces-adapter";
-import {
-  appendToComposer,
-  copyTextSafely,
-  refreshFileExplorer,
-} from "./file-browser";
+import { appendToComposer, copyTextSafely } from "./file-browser";
+import { fileExplorerController, fileExplorerStore } from "../react/file-explorer/controller";
+import { explorerParentOf } from "../react/file-explorer/paths";
 
 installSettingsRuntimeBridge();
 configureBrowserShellCommands(createBrowserShellCommands());
@@ -111,8 +109,11 @@ installWorktreeMergeLegacyAdapter({
 })();
 
 installFilePreviewLegacyAdapter({
-  getSiblings() {
-    return state.allFiles;
+  getSiblings(openPath) {
+    const snapshot = fileExplorerStore.getSnapshot();
+    const loaded = snapshot.expanded.get(explorerParentOf(openPath))
+      ?? snapshot.expanded.get(snapshot.activeDir);
+    return loaded ? loaded.entries : [];
   },
   confirmDiscard(reason) {
     const replacing = reason === "replace";
@@ -137,6 +138,6 @@ installFilePreviewLegacyAdapter({
     showToast(message, tone);
   },
   onSaved() {
-    refreshFileExplorer();
+    return fileExplorerController.execute({ type: "refresh" }).then(function() {});
   },
 });

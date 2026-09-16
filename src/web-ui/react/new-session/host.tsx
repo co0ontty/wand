@@ -313,7 +313,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
       {loading ? (
         <div className="wand-new-session-loading" role="status">正在加载新建会话配置…</div>
       ) : form && defaults ? (
-        <form className="wand-new-session-form" aria-busy={submitting} onSubmit={(event) => void submit(event)}>
+        <form noValidate className="wand-new-session-form" aria-busy={submitting} onSubmit={(event) => void submit(event)}>
           <div className="wand-new-session-body">
             <fieldset className="wand-new-session-field wand-new-session-fieldset">
               <legend className="wand-new-session-field-label">Provider</legend>

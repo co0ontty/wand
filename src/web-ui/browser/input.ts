@@ -2,38 +2,48 @@ import type { SendError } from "./types";
 import { state } from "./state";
 import { t } from "./i18n";
 import { computeRunningSignal, escapeHtml } from "./utils";
-import { renderChat, sessionChromeTitle, shortCommand } from "./chat-render";
+import { renderChat, shortCommand } from "./chat-render";
 import { getStructuredQueuedInputs, persistCrossSessionQueue, persistSelectedId, prepareChatBottomFollow, stripRenderOnlyStructuredMessages, syncStructuredQueueFromSession } from "./chat-scroll";
 import "./file-browser";
 import "./git-commit";
-import { showToast, wandConfirm, showError } from "./notifications";
+import { showToast, wandConfirm } from "./notifications";
 import { resetChatRenderCache, getEffectiveCwd } from "./render";
-import { applyCurrentView, buildAttachmentPrefix, canSendComposer, discardPendingAttachments, dismissDrawerIfOverlay, getComposerPlaceholder, getDraftValueForSession, getPendingAttachments, getPreferredMessages, getPreferredTool, getSelectedClaudeSkills, isStructuredSession, loadOutput, refreshAll, restoreComposerStateForSession, restorePendingAttachments, setDraftValue, setDraftValueForSession, shouldBracketPtyPaste, subscribeToSession, supportsClaudeSkillSelection, syncComposerHasText, takePendingAttachments, updateSessionSnapshot, updateSessionsList, uploadAttachments, withTerminalDimensions } from "./session-engine";
+import { applyCurrentView, buildAttachmentPrefix, canSendComposer, closePlusPopover, discardPendingAttachments, dismissDrawerIfOverlay, getComposerPlaceholder, getDraftValueForSession, getPendingAttachments, getPreferredMessages, getPreferredTool, getSelectedClaudeSkills, isStructuredSession, loadOutput, refreshAll, restoreComposerStateForSession, restorePendingAttachments, setDraftValue, setDraftValueForSession, shouldBracketPtyPaste, subscribeToSession, supportsClaudeSkillSelection, syncComposerHasText, takePendingAttachments, updateSessionSnapshot, updateSessionsList, uploadAttachments, withTerminalDimensions } from "./session-engine";
 import { confirmDelete } from "./sidebar";
 import { initTerminal, maybeScrollTerminalToBottom, scheduleSoftResyncTerminal } from "./terminal";
 import { ensureTerminalFit, scheduleClosedViewportBaselineWindow, syncAppViewportHeight, teardownTerminal, updateJoystickPanelUI, updateJoystickVisibility } from "./viewport";
 import "./websocket";
-import { getSessionStatusLabel } from "./session-ui";
-import { isBrowserReactShellMounted } from "./shell-runtime";
 import { buildTerminalPathPasteSequence, isClipboardImageMimeType } from "./pty-paste";
 import { notifyLegacyUiChange } from "./ui-store-bridge";
 import { PROVIDER_IDS } from "../provider-identity";
 import { syncBrowserComposerRail } from "./composer-rail-adapter";
+import { syncBrowserComposerPopover } from "./composer-popover-adapter";
+import { showActionError } from "./composer-action-error";
+import { syncBrowserComposerVoice } from "./composer-voice-adapter";
 
       // 改为在识别回调里调用 updateVoiceTranscript(累积文本) 即可，交互层不用动。
       // ─────────────────────────────────────────────────────────────────
-      var voiceState = { recording: false, canceling: false, transcript: "", startY: 0 };
+      // 气泡的可见性与文案由 React 渲染（见 composer-voice 组件）；legacy 只维护
+      // 录音状态与录制按钮 DOM。`bubbleVisible` 取代了原来自行切的 .hidden class。
+      var voiceState = { recording: false, canceling: false, transcript: "", startY: 0, bubbleVisible: false, status: "" };
       var VOICE_CANCEL_THRESHOLD = 60; // 按住后上滑超过该像素进入"松开取消"态
+
+      // 把录音状态发布给 React 气泡。
+      function syncVoiceBubble() {
+        syncBrowserComposerVoice({
+          visible: voiceState.bubbleVisible,
+          canceling: voiceState.canceling,
+          transcript: voiceState.transcript,
+          status: voiceState.status,
+        });
+      }
 
       // STT 唯一注入点：写入累积文字并刷新气泡内容。
       // 网页端目前没有可用的语音识别后端（移动端走原生客户端的端侧 STT）；
       // 真正接入网页 STT 时，在识别回调里调用本函数累积文本即可，交互层不用动。
       export function updateVoiceTranscript(text) {
         voiceState.transcript = text || "";
-        var textEl = document.getElementById("voice-transcript-text");
-        if (textEl) textEl.textContent = voiceState.transcript;
-        var bubble = document.getElementById("voice-transcript-bubble");
-        if (bubble) bubble.classList.toggle("has-text", !!voiceState.transcript);
+        syncVoiceBubble();
       }
 
       export function startVoiceRecording(e) {
@@ -62,13 +72,11 @@ import { syncBrowserComposerRail } from "./composer-rail-adapter";
           var label = btn.querySelector(".voice-record-label");
           if (label) label.textContent = "松开 发送";
         }
-        var bubble = document.getElementById("voice-transcript-bubble");
-        if (bubble) bubble.classList.remove("hidden", "is-canceling", "has-text");
-        updateVoiceTranscript("");
-        var status = document.getElementById("voice-transcript-status");
+        voiceState.bubbleVisible = true;
+        voiceState.status = "网页端暂不支持语音输入，请使用 App";
         // 网页端暂无语音识别后端：给出明确提示，不再用假样本骗用户。
         // 语音输入请使用 App（原生客户端走端侧 STT）。
-        if (status) status.textContent = "网页端暂不支持语音输入，请使用 App";
+        updateVoiceTranscript("");
       }
 
       export function handleVoiceMove(e) {
@@ -77,13 +85,11 @@ import { syncBrowserComposerRail } from "./composer-rail-adapter";
         var shouldCancel = dy > VOICE_CANCEL_THRESHOLD;
         if (shouldCancel === voiceState.canceling) return;
         voiceState.canceling = shouldCancel;
-        var bubble = document.getElementById("voice-transcript-bubble");
-        if (bubble) bubble.classList.toggle("is-canceling", shouldCancel);
         var btn = document.getElementById("voice-record-btn");
         var label = btn && btn.querySelector(".voice-record-label");
         if (label) label.textContent = shouldCancel ? "松开 取消" : "松开 发送";
-        var status = document.getElementById("voice-transcript-status");
-        if (status) status.textContent = shouldCancel ? "松开手指 取消" : "正在聆听…上滑取消";
+        voiceState.status = shouldCancel ? "松开手指 取消" : "正在聆听…上滑取消";
+        syncVoiceBubble();
       }
 
       export function stopVoiceRecording(e) {
@@ -115,8 +121,8 @@ import { syncBrowserComposerRail } from "./composer-rail-adapter";
           var label = btn.querySelector(".voice-record-label");
           if (label) label.textContent = "按住 说话";
         }
-        var bubble = document.getElementById("voice-transcript-bubble");
-        if (bubble) bubble.classList.add("hidden");
+        voiceState.bubbleVisible = false;
+        syncVoiceBubble();
       }
 
       // 把识别文字填回输入框（追加在已有草稿后、不覆盖），光标停末尾。
@@ -725,23 +731,12 @@ import { syncBrowserComposerRail } from "./composer-rail-adapter";
       }
 
       export function switchToSessionView(sessionId) {
-        var reactShellActive = isBrowserReactShellMounted();
         var session = state.sessions.find(function(s) { return s.id === sessionId; });
-        var blankChat = document.getElementById("blank-chat");
-        var terminalContainer = document.getElementById("output");
-        var chatContainer = document.getElementById("chat-output");
-        var terminalTitle = document.getElementById("terminal-title");
-        var terminalInfo = document.getElementById("terminal-info");
-        var sessionSummary = document.querySelector(".session-summary-value");
         var structured = isStructuredSession(session);
 
-        if (!reactShellActive && blankChat) blankChat.classList.add("hidden");
-        if (!reactShellActive && terminalContainer) {
-          terminalContainer.classList.toggle("hidden", structured);
-        }
-        if (!reactShellActive && chatContainer) {
-          chatContainer.classList.remove("hidden");
-        }
+        // #blank-chat / #output / #chat-output 的可见性、以及 #terminal-title /
+        // #terminal-info / .session-summary-value 的文案都由 React 外壳持有
+        // （见 docs/web-ui-react-migration-adr.md），legacy 只负责切自己的 view。
         // v2: 不再无条件展示停止按钮 —— 由 updateInteractiveControls() 按
         // computeRunningSignal 判断「真在跑」时才露出，下面 updateInteractiveControls
         // 链路会处理（switchToSessionView 后续会触发它）。
@@ -751,12 +746,6 @@ import { syncBrowserComposerRail } from "./composer-rail-adapter";
         } else {
           state.currentView = "terminal";
         }
-
-        var title = session ? sessionChromeTitle(session, "Wand") : "Wand";
-        var info = session ? getSessionStatusLabel(session) : "开始对话";
-        if (terminalTitle) terminalTitle.textContent = title;
-        if (terminalInfo) terminalInfo.textContent = info;
-        if (sessionSummary) sessionSummary.textContent = title;
 
         if (!structured) {
           if (!state.terminal) initTerminal();
@@ -1798,7 +1787,7 @@ import { syncBrowserComposerRail } from "./composer-rail-adapter";
           && session.status !== "running" && session.claudeSessionId);
       }
 
-      function ensureSessionReadyForInput(session, errorEl?) {
+      function ensureSessionReadyForInput(session) {
         if (!session) {
           showToast("会话不存在，请重新选择或新建会话。", "error");
           return Promise.resolve(null);
@@ -1814,7 +1803,7 @@ import { syncBrowserComposerRail } from "./composer-rail-adapter";
         }
 
         // 静默恢复：不再弹 "正在恢复历史会话…" 提示，让用户发送动作看起来无缝。
-        return resumeSession(session.id, errorEl).then(function(data) {
+        return resumeSession(session.id).then(function(data) {
           if (!data) return null;
           updateSessionSnapshot(data);
           updateSessionsList();
@@ -2168,6 +2157,16 @@ import { syncBrowserComposerRail } from "./composer-rail-adapter";
         setTerminalInteractive(!state.terminalInteractive);
       }
 
+      /**
+       * 加号 popover「上传附件」条目的动作（条目本身由 React portal 渲染）。
+       * `keyboard` 来自 `event.detail === 0`：键盘触发时把焦点还给触发按钮。
+       */
+      export function openComposerFilePicker(keyboard = false) {
+        closePlusPopover(keyboard);
+        var fileInput = document.getElementById("file-upload-input") as HTMLInputElement | null;
+        if (fileInput) fileInput.click();
+      }
+
       function shouldUseTerminalPassthrough(session) {
         return !!session
           && !isStructuredSession(session)
@@ -2270,23 +2269,17 @@ import { syncBrowserComposerRail } from "./composer-rail-adapter";
           && promptOptimizeRequest.sessionId === state.selectedId);
         var promptOptimizeBusyAnywhere = !!promptOptimizeRequest;
         var terminalPassthrough = shouldUseTerminalPassthrough(selectedSession);
-        // 终端交互 toggle 现在挂在加号 popover 内。.active 保留兼容；
-        // .is-on 给 popover-item 提供独立的"已开启"视觉；同时刷新 aria-pressed 与 "开/关" 文本。
-        var toggles = ["terminal-interactive-toggle-top"];
-        toggles.forEach(function(id) {
-          var toggle = document.getElementById(id);
-          if (toggle) {
-            toggle.classList.toggle("active", state.terminalInteractive);
-            toggle.classList.toggle("is-on", state.terminalInteractive);
-            // PTY terminal view is direct-manipulation by definition. Keep the
-            // legacy toggle in the DOM for old native-shell compatibility, but
-            // do not expose a switch that reconciliation would immediately
-            // force back on.
-            toggle.classList.toggle("hidden", structured || state.currentView !== "terminal" || !selectedSession || terminalPassthrough);
-            toggle.setAttribute("aria-pressed", state.terminalInteractive ? "true" : "false");
-            var stateLabel = toggle.querySelector(".plus-popover-toggle-state");
-            if (stateLabel) stateLabel.textContent = state.terminalInteractive ? "开" : "关";
-          }
+        // 终端交互 toggle 挂在加号 popover 内，条目由 React portal 渲染；
+        // 这里只发布可见性与开关状态，不再直接改写 class / aria / 文案。
+        syncBrowserComposerPopover({
+          resolve: function() {
+            return {
+              interactiveVisible: !(structured || state.currentView !== "terminal" || !selectedSession || terminalPassthrough),
+              interactiveOn: state.terminalInteractive,
+            };
+          },
+          onAttach: function(keyboard) { openComposerFilePicker(keyboard); },
+          onToggleInteractive: toggleTerminalInteractive,
         });
         var inputHint = document.querySelector(".input-hint");
         if (inputHint) {
@@ -2653,14 +2646,8 @@ import { syncBrowserComposerRail } from "./composer-rail-adapter";
       }
 
       export function deleteSession(id) {
-        var item = isBrowserReactShellMounted()
-          ? null
-          : document.querySelector('.session-item[data-session-id="' + id + '"]');
         var session = state.sessions.find(function(candidate: any) { return candidate.id === id; });
         var providerSessionId = session && session.claudeSessionId;
-        if (item) {
-          item.classList.add("deleting");
-        }
         setTimeout(function() {
           fetch("/api/sessions/" + id, { method: "DELETE", credentials: "same-origin" })
             .then(function(res) { return res.json(); })
@@ -2683,10 +2670,7 @@ import { syncBrowserComposerRail } from "./composer-rail-adapter";
               return refreshAll();
             })
             .catch(function() {
-              // Remove deleting state on error so item reappears
-              if (item) item.classList.remove("deleting");
-              var errorEl = document.getElementById("action-error");
-              showError(errorEl, "无法删除会话。");
+              showActionError("无法删除会话。");
             });
         }, 250);
       }
@@ -2710,8 +2694,7 @@ import { syncBrowserComposerRail } from "./composer-rail-adapter";
             })
             .catch(function() {
               if (item) item.classList.remove("deleting");
-              var errorEl = document.getElementById("action-error");
-              showError(errorEl, "无法删除会话。");
+              showActionError("无法删除会话。");
             });
         }, 250);
       }
@@ -2737,8 +2720,7 @@ import { syncBrowserComposerRail } from "./composer-rail-adapter";
           })
           .catch(function() {
             setDeletingState(items, false);
-            var errorEl = document.getElementById("action-error");
-            showError(errorEl, "无法清理该目录的历史会话。");
+            showActionError("无法清理该目录的历史会话。");
           });
       }
 
@@ -2773,7 +2755,7 @@ import { syncBrowserComposerRail } from "./composer-rail-adapter";
 
       var _resumeInProgress = false;
 
-      function resumeSession(sessionId, errorEl?) {
+      function resumeSession(sessionId) {
         if (!sessionId || _resumeInProgress) return Promise.resolve(null);
         _resumeInProgress = true;
         return fetch("/api/sessions/" + encodeURIComponent(sessionId) + "/resume", {
@@ -2787,8 +2769,7 @@ import { syncBrowserComposerRail } from "./composer-rail-adapter";
         .then(function(res) { return res.json(); })
         .then(function(data) {
           if (data.error) {
-            if (errorEl) showError(errorEl, data.error);
-            else showToast(data.error, "error");
+            showToast(data.error, "error");
             return null;
           }
           state.selectedId = data.id;
@@ -2798,8 +2779,7 @@ import { syncBrowserComposerRail } from "./composer-rail-adapter";
         })
         .catch(function(error) {
           var message = (error && error.message) || "无法恢复会话。";
-          if (errorEl) showError(errorEl, message);
-          else showToast(message, "error");
+          showToast(message, "error");
           return null;
         })
         .finally(function() { _resumeInProgress = false; });

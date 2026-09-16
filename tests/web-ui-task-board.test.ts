@@ -39,6 +39,20 @@ import {
   TASK_BOARD_VIEW_PARAM,
   taskBoardSearch,
 } from "../src/web-ui/react/issues/task-board-controller.ts";
+import { parseTaskBoardViewState } from "../src/web-ui/react/issues/task-board-view-state.ts";
+
+test("board browsing state restores valid filters and rejects stale or malformed values", () => {
+  const restored = parseTaskBoardViewState({
+    view: "list", query: "工作目录", workspaceId: "workspace-a",
+    filters: { statuses: ["doing", "invalid"], priorities: ["high", null], labels: ["UI", 1] },
+  });
+  assert.equal(restored.view, "list");
+  assert.equal(restored.query, "工作目录");
+  assert.equal(restored.workspaceId, "workspace-a");
+  assert.deepEqual(restored.filters, { statuses: ["doing"], priorities: ["high"], labels: ["UI"] });
+  assert.equal(parseTaskBoardViewState({ view: "removed-view" }).view, "board");
+  assert.deepEqual(parseTaskBoardViewState(null).filters, EMPTY_ISSUE_FILTERS);
+});
 
 test("issue model catalog normalizes every provider and keeps a default option", () => {
   const catalog = normalizeIssueModelCatalog({
@@ -235,7 +249,7 @@ test("create form can assign the first agent from the description", () => {
   assert.match(host, /taskBoardRepository\.get\(taskId\)/);
 });
 
-test("board host mirrors dashi layout: header tabs, column create, drag, and detail", () => {
+test("board host preserves navigation, column creation, drag, and detail contracts", () => {
   const host = readFileSync(new URL("../src/web-ui/react/issues/task-board-host.tsx", import.meta.url), "utf8");
   assert.match(host, /task-board-workspace-header/);
   assert.match(host, /ISSUE_BOARD_VIEWS/);
@@ -247,7 +261,7 @@ test("board host mirrors dashi layout: header tabs, column create, drag, and det
   assert.match(host, /application\/x-wand-task/);
   // 列内顺序固定按创建时间；跨列拖拽换状态，拖进「处理中」时还会顺手派发首次指派。
   assert.match(host, /moving\.status === status/);
-  assert.match(host, /返回任务管理/);
+  assert.match(host, /返回任务看板/);
   assert.match(host, /新建任务/);
   assert.match(host, /创建更多/);
   assert.deepEqual(ISSUE_BOARD_VIEWS.map((entry) => entry.value), ["dashboard", "board", "list", "gantt"]);
@@ -381,7 +395,7 @@ test("task board is a first-class view=taskboard route that does not unmount the
   // `aria-current="page"` on the matching link itself.
   assert.match(sidebar, /active=\{taskBoard\.open \? "task-board" : null\}/);
   assert.match(sidebar, /value="task-board"/);
-  assert.match(host, /chevronLeft[^\n]*>返回/);
+  assert.match(host, /aria-label=\{selected \? "返回任务看板" : "返回工作区"\}/);
   assert.doesNotMatch(host, /返回会话/);
 });
 

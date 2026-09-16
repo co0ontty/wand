@@ -1,6 +1,7 @@
 import type { WandStorage } from "./storage.js";
 import { provisionalTaskTitleFromDescription } from "./task-title.js";
-import { isClosedWandTaskStatus, type WandTask } from "./task-types.js";
+import { isSessionProvider } from "./session-provider.js";
+import { isClosedWandTaskStatus, normalizeWandTaskAgentMode, type WandTask, type WandTaskAgent } from "./task-types.js";
 import type { SessionSnapshot, Workspace, WorkspaceTask } from "./types.js";
 
 const UNNAMED_TASK_NAME = "未命名任务";
@@ -113,6 +114,17 @@ function promoteUngroupedCard(
   }) ?? card;
 }
 
+function agentFromSession(session: SessionSnapshot): WandTaskAgent | null {
+  if (!isSessionProvider(session.provider)) return null;
+  const effort = session.thinkingEffort;
+  return {
+    provider: session.provider,
+    model: session.selectedModel || session.structuredState?.model || "default",
+    thinkingEffort: effort === "standard" || effort === "deep" || effort === "max" ? effort : "off",
+    mode: normalizeWandTaskAgentMode(session.provider, session.mode),
+  };
+}
+
 /** 侧栏工作任务与看板卡片对账：已关联则复用，同项目同名未关联则挂上，否则新建。 */
 export function ensureBoardTaskForWorkspaceTask(
   storage: WandStorage,
@@ -136,7 +148,7 @@ export function ensureBoardTaskForWorkspaceTask(
     workspaceTaskId: task.id,
     title: task.name,
     description: boardDescriptionFor(task, workspace),
-    status: task.status === "done" ? "done" : "todo",
+    status: task.status === "done" ? "done" : "doing",
     milestoneId: task.milestoneId ?? null,
   });
 }
@@ -151,8 +163,19 @@ export function syncUngroupedSessionsToBoard(storage: WandStorage): void {
 
   for (const workspace of storage.listWorkspaces()) {
     for (const task of storage.listWorkspaceTasks(workspace.id)) {
-      if (!isUnnamedWorkspaceTaskName(task.name)) continue;
       const sessions = storage.listSessionsByWorkspaceTask(task.id);
+      if (!isUnnamedWorkspaceTaskName(task.name)) {
+        let card = ensureBoardTaskForWorkspaceTask(storage, task, workspace);
+        if (card && !card.agent) {
+          const agent = sessions.map(agentFromSession).find((value) => value !== null);
+          if (agent) card = storage.updateWandTask(card.id, { agent }) ?? card;
+        }
+        if (card) {
+          bindSessions(storage, card.id, sessions.map((session) => session.id));
+          for (const session of sessions) bound.add(session.id);
+        }
+        continue;
+      }
       const best = pickBestSession(sessions);
       const title = best ? boardTitleFromSession(best) : "";
       if (!best || !title) continue;

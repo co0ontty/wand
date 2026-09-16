@@ -1,3 +1,4 @@
+import { parseJsonResponse } from "../http-adapter";
 import { wandOverlay } from "../overlay-controller";
 import type {
   SettingsAbout,
@@ -350,19 +351,8 @@ function capabilities(access: "admin" | "read-only", platform: SettingsPlatformS
   };
 }
 
-async function responseJson(response: Response): Promise<JsonRecord> {
-  let body: JsonRecord = {};
-  try { body = record(await response.json()); } catch { /* preserve HTTP status error */ }
-  if (!response.ok || typeof body.error === "string") {
-    const error = new Error(stringValue(body.error, `请求失败（${response.status}）`));
-    (error as Error & { status?: number }).status = response.status;
-    throw error;
-  }
-  return body;
-}
-
 async function request(path: string, init: RequestInit = {}): Promise<JsonRecord> {
-  return responseJson(await fetch(path, { credentials: "same-origin", ...init }));
+  return parseJsonResponse<JsonRecord>(await fetch(path, { credentials: "same-origin", ...init }));
 }
 
 async function post(path: string, body?: unknown, signal?: AbortSignal): Promise<JsonRecord> {

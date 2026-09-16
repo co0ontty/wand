@@ -15,7 +15,7 @@
 | 扩展 | MV3 background + popup/options + content script | `browser-extension/` |
 | JSON CLI / TUI | HTTP 客户端与 IPC 管理入口 | `src/cli-api.ts`、`src/cli.ts`、`src/tui/` |
 
-Web Legacy 管会话/输入/WS/xterm；React 经 adapter、ui-store bridge 操作同一 runtime，不应建立第二份 session 真源。`?reactUi=0`、`?reactShell=0` 是旧界面回退，不保证与新信息架构一致。
+Web Legacy 管会话/输入/WS/xterm；React 经 adapter、ui-store bridge 操作同一 runtime，不应建立第二份 session 真源。认证后 Shell 已无回退开关（legacy `renderAppShell` 只作为 legacy 槽位的 seed 标记）；`?reactUi=0` 只剩“通用对话框/通知退回原生”的含义。
 
 ## 2. 连接、登录、换服务器与退出
 

@@ -149,6 +149,7 @@ export function issueSessionRunning(status: string | null | undefined): boolean 
 }
 
 export function issueAgentProviderLabel(provider: string | null | undefined): string {
+  if (provider === "session" || provider === "shell") return "终端";
   return ISSUE_AGENT_PROVIDERS.find((entry) => entry.value === provider)?.label ?? (provider || "Agent");
 }
 

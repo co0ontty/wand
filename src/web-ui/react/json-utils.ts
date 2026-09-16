@@ -19,8 +19,9 @@ export function finiteNumber(value: unknown, fallback = 0): number {
 export async function readJson(response: Response): Promise<JsonRecord> {
   try {
     const value: unknown = await response.json();
-    return isRecord(value) ? value : {};
-  } catch {
-    return {};
+    return isRecord(value) ? value : { error: "服务端返回了无效的数据，请重试。" };
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") throw error;
+    return { error: response.ok ? "服务端返回了无效的数据，请重试。" : `请求失败（${response.status}）` };
   }
 }

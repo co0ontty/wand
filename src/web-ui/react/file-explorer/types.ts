@@ -63,6 +63,7 @@ export interface FileExplorerSnapshot {
   searchQuery: string;
   searchResults: FileExplorerEntry[] | null;
   searching: boolean;
+  searchError?: string;
   busy: boolean;
 }
 

@@ -1,3 +1,4 @@
+import { parseJsonResponse } from "../http-adapter";
 import type {
   NewSessionConfig,
   NewSessionCreateRequest,
@@ -29,24 +30,6 @@ const MODES: readonly NewSessionMode[] = [
 
 function oneOf<T extends string>(value: unknown, choices: readonly T[], fallback: T): T {
   return typeof value === "string" && choices.includes(value as T) ? value as T : fallback;
-}
-
-async function readJson(response: Response): Promise<JsonRecord> {
-  let data: unknown;
-  try {
-    data = await response.json();
-  } catch {
-    throw new Error(`请求失败 (HTTP ${response.status})`);
-  }
-  const record = isRecord(data) ? data : {};
-  if (!response.ok || typeof record.error === "string") {
-    const error = new Error(stringValue(record.error, `请求失败 (HTTP ${response.status})`)) as Error & {
-      status?: number;
-    };
-    error.status = response.status;
-    throw error;
-  }
-  return record;
 }
 
 function normalizeConfig(value: JsonRecord): NewSessionConfig {
@@ -166,7 +149,7 @@ export class HttpNewSessionRepository implements NewSessionRepository {
       credentials: "same-origin",
       signal: options.signal,
     });
-    return normalizeConfig(await readJson(response));
+    return normalizeConfig(await parseJsonResponse<JsonRecord>(response));
   }
 
   async load(options: NewSessionLoadOptions = {}): Promise<NewSessionDefaults> {
@@ -197,7 +180,7 @@ export class HttpNewSessionRepository implements NewSessionRepository {
           credentials: "same-origin",
           body: JSON.stringify(patch),
         });
-        await readJson(response);
+        await parseJsonResponse<JsonRecord>(response);
       });
     this.preferenceWrite = write;
     return write;
@@ -246,7 +229,7 @@ export class HttpNewSessionRepository implements NewSessionRepository {
       credentials: "same-origin",
       body: JSON.stringify(body),
     });
-    const created = await readJson(response);
+    const created = await parseJsonResponse<JsonRecord>(response);
     if (typeof created.id !== "string" || !created.id) {
       throw new Error("服务端未返回新会话 ID。");
     }

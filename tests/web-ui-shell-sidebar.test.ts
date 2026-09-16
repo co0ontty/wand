@@ -229,8 +229,8 @@ test("ShellSidebar SSR preserves native ids, key classes, groups, and action con
   // state are the contract the shell binds to.
   assert.match(html, /class="[^"]*sidebar-file-toggle active[^"]*"[^>]*id="file-panel-toggle-btn"/);
   assert.match(html, /class="[^"]*wand-ui-navigation-link[^"]*"/);
-  // 原生历史与自动化分组仍可达（附加在任务列表之后），但 wand 散会话平铺列表已下线。
-  assert.match(html, /class="automation-session-group"/);
+  // 自动化会话不再占用侧栏底部；原生历史仍可达。
+  assert.doesNotMatch(html, /class="automation-session-group"/);
   assert.match(html, /class="non-wand-session-group" open=""/);
   assert.match(html, /data-claude-history-id="codex-history-1"/);
   assert.match(html, /data-action="resume-codex-history"/);

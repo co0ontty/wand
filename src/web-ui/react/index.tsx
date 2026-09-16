@@ -66,8 +66,8 @@ function exposeBusinessControllers(): void {
 /**
  * Mounts the stable business-overlay infrastructure next to legacy #app.
  *
- * `reactUi=0` rolls the authenticated Shell and generic dialog/toast bridge
- * back, but the migrated business overlays remain mounted because they have
+ * `reactUi=0` rolls only the generic dialog/toast bridge back. The Shell and
+ * migrated business overlays remain mounted because they have
  * no legacy implementation. This prevents their public adapters from
  * reporting a successful open while no Host exists to render it.
  */
@@ -97,24 +97,10 @@ export function startReactUi(): WandOverlay | null {
 }
 
 
-export {WandOverlay} from "./overlay-controller";
-export {isReactShellEnabled} from "./feature-flags";
-
-
-export {configureNewSessionRuntime} from "./new-session/controller";
-export {configureFolderPickerRuntime, folderPickerController} from "./folder-picker/controller";
-
-
-
-
-
-
-
-export {NewSessionCreateRequest, NewSessionCreated, NewSessionRuntimeAdapter} from "./new-session/types";
-export {FolderPickerRuntimeAdapter} from "./folder-picker/types";
-
-
-
-
+export type { WandOverlay } from "./overlay-controller";
+export { configureNewSessionRuntime } from "./new-session/controller";
+export { configureFolderPickerRuntime, folderPickerController } from "./folder-picker/controller";
+export type { NewSessionCreateRequest, NewSessionCreated, NewSessionRuntimeAdapter } from "./new-session/types";
+export type { FolderPickerRuntimeAdapter } from "./folder-picker/types";
 export * from "./shell";
 export * from "./ui";

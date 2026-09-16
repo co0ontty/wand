@@ -3,7 +3,6 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 
 import {
-  isReactShellEnabled,
   LegacyHost,
   ShellApp,
   type LegacyUiCommands,
@@ -12,7 +11,7 @@ import {
 } from "../react";
 import { createBrowserUiStoreBridge } from "./ui-store-bridge";
 
-export type BrowserShellRenderResult = "disabled" | "mounted" | "updated";
+export type BrowserShellRenderResult = "mounted" | "updated";
 
 interface BrowserShellRuntime {
   readonly app: HTMLElement;
@@ -85,10 +84,6 @@ export function renderBrowserReactShell(
   app: HTMLElement,
   createLegacyMarkup: () => string,
 ): BrowserShellRenderResult {
-  if (!isReactShellEnabled()) {
-    unmountBrowserReactShell();
-    return "disabled";
-  }
   if (!commands) throw new Error("Browser shell commands were not configured");
 
   if (runtime) {

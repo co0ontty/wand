@@ -151,7 +151,9 @@ test("explicit worktree:true fails instead of silently degrading", async () => {
     const res = await fetch(`${baseUrl}/api/workspaces/${ws.id}/tasks`, json({ name: "必须隔离", worktree: true }));
     assert.equal(res.status, 400);
     const body = await res.json() as { error?: string };
-    assert.match(body.error ?? "", /worktree|隔离|git/i);
+    assert.match(body.error ?? "", /当前目录不是 Git 仓库/);
+    assert.match(body.error ?? "", /关闭.*worktree 隔离/);
+    assert.doesNotMatch(body.error ?? "", /Command failed|fatal:/);
     const tasks = await fetch(`${baseUrl}/api/workspaces/${ws.id}/tasks`).then((r) => r.json() as Promise<unknown[]>);
     assert.equal(tasks.length, 0);
   } finally {
@@ -588,7 +590,7 @@ test("creating a workspace task fills a board card and reuses a matching unlinke
     assert.ok(linked);
     assert.equal(linked!.id, preexisting.id);
     assert.equal(linked!.workspaceTaskId, created.id);
-    assert.equal(linked!.status, "todo");
+    assert.equal(linked!.status, "todo", "an existing board task keeps its status");
 
     const second = await fetch(`${baseUrl}/api/workspaces/${ws.id}/tasks`, json({ name: "设置页", worktree: false }))
       .then((r) => r.json() as Promise<{ id: string; name: string }>);
@@ -596,8 +598,11 @@ test("creating a workspace task fills a board card and reuses a matching unlinke
     assert.ok(fresh);
     assert.notEqual(fresh!.id, preexisting.id);
     assert.equal(fresh!.title, "设置页");
+    assert.equal(fresh!.status, "doing");
+    assert.equal(fresh!.workspaceId, ws.id);
+    assert.equal(fresh!.workspaceTaskId, second.id);
     assert.match(fresh!.description, /项目：Wand/);
-    assert.match(fresh!.description, /目录：/);
+    assert.match(fresh!.description, new RegExp(`目录：${root}`));
 
     const archived = await fetch(`${baseUrl}/api/workspace-tasks/${second.id}`, json({ status: "done" }, "PATCH"));
     assert.equal(archived.status, 200);

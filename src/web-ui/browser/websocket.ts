@@ -1,5 +1,5 @@
 import { state } from "./state";
-import { iconSvg } from "./i18n";
+import { syncBrowserComposerBadges } from "./composer-badges-adapter";
 import { renderChat } from "./chat-render";
 import { clearStructuredQueuePersistence } from "./chat-scroll";
 import { mergeAssistantTurn } from "./message-reconciliation";
@@ -17,7 +17,6 @@ import {
 } from "./terminal-pool";
 import { ensureTerminalFitWithRetry, scheduleTerminalResize } from "./viewport";
 import "./render";
-import { isBrowserReactShellMounted } from "./shell-runtime";
 import { notifyLegacyUiChange } from "./ui-store-bridge";
 
 // ── External functions not defined in this module ──
@@ -527,7 +526,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
               state.currentMessages = buildMessagesForRender(initSession || msg.data, getPreferredMessages(initSession || msg.data, msg.data.output, false));
               renderChat(true);
               updateTaskDisplay();
-              updateApprovalStats();
+              syncComposerBadges();
               var initOutput = msg.data.output || "";
               if (hasPooledTerminal(msg.sessionId)) {
                 if (!restorePooledTerminalState(msg.sessionId, msg.data.terminalState, initOutput)) {
@@ -664,7 +663,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
               if (msg.sessionId === state.selectedId) {
                 updateTaskDisplay();
                 if (msg.data.approvalStats) {
-                  updateApprovalStats();
+                  syncComposerBadges();
                 }
                 // Re-render chat when structured session inFlight state changes
                 if (statusUpdate.structuredState) {
@@ -700,16 +699,14 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
       }
 
       export function updateTaskDisplay() {
-        var reactShellActive = isBrowserReactShellMounted();
-        var taskEl = document.getElementById("current-task");
         var permissionActionsEl = document.getElementById("permission-actions");
         var permissionLabel = document.getElementById("permission-actions-label");
-        if (!taskEl && !reactShellActive) return;
+        // 顶栏 #current-task 由 React 外壳渲染（shell-topbar.tsx），legacy 只广播
+        // 快照变更，让 React 从 deriveLegacyUiSnapshot 里取 currentTask。
         notifyLegacyUiChange("task:update");
         var selectedSession = state.sessions.find(function(s: any) { return s.id === state.selectedId; });
         if (selectedSession && selectedSession.provider === "codex") {
           if (permissionActionsEl) permissionActionsEl.classList.add("hidden");
-          if (!reactShellActive && taskEl) taskEl.classList.remove("permission-blocked");
         }
         var pendingEscalation = selectedSession && selectedSession.pendingEscalation ? selectedSession.pendingEscalation : null;
         var isBlocked = selectedSession && selectedSession.provider !== "codex"
@@ -741,57 +738,30 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
             if (denyBtn) denyBtn.classList.toggle("hidden", !!isAutoApprove);
           }
           // Hide top task bar — permission info is already shown in the composer
-          if (!reactShellActive && taskEl) {
-            taskEl.textContent = "";
-            taskEl.classList.add("hidden");
-            taskEl.classList.remove("permission-blocked");
-          }
           return;
         }
 
-        if (!reactShellActive && taskEl) taskEl.classList.remove("permission-blocked");
         if (permissionActionsEl) permissionActionsEl.classList.add("hidden");
-        var task = state.currentTask;
-        if (!reactShellActive && taskEl && task && task.title) {
-          taskEl.textContent = task.title;
-          taskEl.classList.remove("hidden");
-        } else if (!reactShellActive && taskEl) {
-          taskEl.textContent = "";
-          taskEl.classList.add("hidden");
-        }
       }
 
-      function updateApprovalStats() {
-        var container = document.getElementById("approval-stats");
-        if (!container) return;
+      /**
+       * 自动批准 chip 与自动批准统计徽章由 React portal 渲染（见 composer-badges 组件），
+       * legacy 只负责把当前会话的值与可见性推给 controller：模式隐含自动批准时 chip
+       * 不出现，由适配器给宿主加 `.hidden`，避免状态行留下空占位。
+       */
+      export function syncComposerBadges() {
         var selectedSession = state.sessions.find(function(s: any) { return s.id === state.selectedId; });
-        var stats = selectedSession && selectedSession.approvalStats;
-        if (!stats || stats.total === 0) {
-          container.className = "approval-stats hidden";
-          container.innerHTML = "";
-          return;
-        }
-        container.className = "approval-stats";
-        container.innerHTML =
-          '<span class="approval-stats-divider"></span>' +
-          '<span class="approval-stats-badge" id="approval-stats-badge" title="本次会话自动批准统计">' +
-            '<svg class="approval-stats-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>' +
-            '<span class="approval-stats-total">' + stats.total + '</span>' +
-          '</span>' +
-          '<span class="approval-stats-popup" id="approval-stats-popup">' +
-            '<span class="approval-stats-popup-title">自动批准统计</span>' +
-            (stats.command > 0 ? '<span class="approval-stats-row"><span class="approval-stats-row-icon">' + iconSvg("terminal", { size: 12, strokeWidth: 1.8 }) + '</span><span class="approval-stats-row-label">命令执行</span><span class="approval-stats-row-count">' + stats.command + '</span></span>' : '') +
-            (stats.file > 0 ? '<span class="approval-stats-row"><span class="approval-stats-row-icon">' + iconSvg("file", { size: 12, strokeWidth: 1.8 }) + '</span><span class="approval-stats-row-label">文件写入</span><span class="approval-stats-row-count">' + stats.file + '</span></span>' : '') +
-            (stats.tool > 0 ? '<span class="approval-stats-row"><span class="approval-stats-row-icon">' + iconSvg("wrench", { size: 12, strokeWidth: 1.8 }) + '</span><span class="approval-stats-row-label">其他工具</span><span class="approval-stats-row-count">' + stats.tool + '</span></span>' : '') +
-            '<span class="approval-stats-row approval-stats-row-total"><span class="approval-stats-row-icon">' + iconSvg("sigma", { size: 12, strokeWidth: 1.8 }) + '</span><span class="approval-stats-row-label">合计</span><span class="approval-stats-row-count">' + stats.total + '</span></span>' +
-          '</span>';
-        // Pulse animation on the badge
-        var badge = container.querySelector(".approval-stats-badge");
-        if (badge) {
-          badge.classList.remove("approval-stats-pulse");
-          void (badge as HTMLElement).offsetWidth;
-          badge.classList.add("approval-stats-pulse");
-        }
+        syncBrowserComposerBadges({
+          resolve: function() {
+            if (!selectedSession) return null;
+            return {
+              autoApproveHidden: isAutoApproveImpliedByMode(selectedSession),
+              autoApproveEnabled: !!selectedSession.autoApprovePermissions,
+              approvalStats: selectedSession.approvalStats || null,
+            };
+          },
+          onToggleAutoApprove: function() { toggleAutoApprove(); },
+        });
       }
 
       function permissionActionButtons() {
@@ -898,30 +868,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
       }
 
       export function updateAutoApproveIndicator() {
-        var toggle = document.getElementById("auto-approve-toggle");
-        var selectedSession = state.sessions.find(function(s: any) { return s.id === state.selectedId; });
-        // 当模式（managed / full-access）已隐含自动批准，chip 应该不存在；如果上一次渲染留下来了，
-        // 在这里清理掉，避免视觉上还有冗余 chip。
-        if (isAutoApproveImpliedByMode(selectedSession)) {
-          if (toggle && toggle.parentNode) toggle.parentNode.removeChild(toggle);
-          return;
-        }
-        if (!toggle) return;
-        var base = "composer-pill composer-pill-chip auto-approve-indicator";
-        var enabled = selectedSession && selectedSession.autoApprovePermissions;
-        if (enabled) {
-          toggle.className = base + " active";
-          toggle.title = "自动批准已启用 — 点击关闭";
-          toggle.setAttribute("aria-pressed", "true");
-          toggle.setAttribute("aria-label", "自动批准已启用，点击关闭");
-          toggle.innerHTML = iconSvg("shieldCheck", { size: 12, strokeWidth: 1.7, cls: "composer-pill-icon" }) + '<span class="composer-pill-label">自动</span>';
-        } else {
-          toggle.className = base;
-          toggle.title = "自动批准已关闭 — 点击开启";
-          toggle.setAttribute("aria-pressed", "false");
-          toggle.setAttribute("aria-label", "自动批准已关闭，点击开启");
-          toggle.innerHTML = iconSvg("shield", { size: 12, strokeWidth: 1.7, cls: "composer-pill-icon" }) + '<span class="composer-pill-label">手动</span>';
-        }
+        syncComposerBadges();
       }
 
       function updateTerminalOutput(output: any, sessionId: any, mode?: any) {

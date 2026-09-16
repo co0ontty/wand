@@ -45,9 +45,11 @@ import {
   EMPTY_SIDEBAR_MANAGE_SELECTION,
   collectManagedIds,
   describeManagedDeletion,
+  isManagedGroupSelected,
   pruneManagedSelection,
   resolveManagedDeletion,
   sidebarManageCount,
+  toggleManagedGroup,
   toggleManagedSession,
   toggleManagedTask,
   type SidebarManageSelection,
@@ -359,7 +361,7 @@ function TaskItem({
 
   if (renaming) {
     return (
-      <form
+      <form noValidate
         className="workspace-task workspace-task-rename"
         aria-busy={busy}
         onSubmit={(event) => { event.preventDefault(); void submitRename(); }}
@@ -645,6 +647,7 @@ function TaskGroupSection({
   manageMode = false,
   selection,
   onToggleTask,
+  onToggleGroup,
   onToggleSession,
   onActiveTaskOpen,
   onOpenSession,
@@ -663,6 +666,7 @@ function TaskGroupSection({
   manageMode?: boolean;
   selection?: SidebarManageSelection;
   onToggleTask?(taskId: string): void;
+  onToggleGroup?(group: TaskDirectoryGroup): void;
   onToggleSession?(sessionId: string): void;
   onActiveTaskOpen(group: TaskDirectoryGroup, task: TaskSummary): void;
   onOpenSession(group: TaskDirectoryGroup, session: WorkspaceSessionSummary): void;
@@ -681,7 +685,7 @@ function TaskGroupSection({
   const [directoryNameError, setDirectoryNameError] = React.useState("");
   const [directoryRenameBusy, setDirectoryRenameBusy] = React.useState(false);
   const tasksId = React.useId();
-  const open = preview || isDirectoryExpanded(collapsed, directoryCount);
+  const open = group.global || preview || isDirectoryExpanded(collapsed, directoryCount);
   const looseOpen = !looseCollapsed;
   const canDelete = !group.synthetic && !group.global;
   // 全局（不挂目录）不参与重命名；合成目录用目录接口改名。
@@ -705,12 +709,7 @@ function TaskGroupSection({
     setDirectoryRenameBusy(true);
     setDirectoryNameError("");
     try {
-      // 合成目录（无项目实体）只能改目录名；已有项目走项目接口，服务端会同步目录名。
-      if (group.synthetic) {
-        await httpWorkspacesRepository.renameDirectory(group.workspaceCwd, trimmed);
-      } else {
-        await httpWorkspacesRepository.update(group.workspaceId, { name: trimmed });
-      }
+      await httpWorkspacesRepository.renameDirectory(group.workspaceCwd, trimmed);
       toast(`已将目录「${group.workspaceName}」重命名为「${trimmed}」`, "success");
       setRenamingDirectory(false);
       await onTasksChanged();
@@ -764,18 +763,21 @@ function TaskGroupSection({
   };
 
   const taskCount = group.tasks.length;
+  const rootTasks = group.global && !preview;
+  const groupSelected = manageMode && selection ? isManagedGroupSelected(selection, group) : false;
 
   return (
     <section
       className={classNames(
         "workspace-item",
+        rootTasks && "workspace-global-tasks",
         open && "is-open",
         group.synthetic && "is-synthetic",
         activeWorkspaceId === group.workspaceId && "active-workspace",
       )}
     >
       {renamingDirectory ? (
-        <form
+        <form noValidate
           className="workspace-row-rename"
           aria-busy={directoryRenameBusy}
           onSubmit={(event) => { event.preventDefault(); void submitDirectoryRename(); }}
@@ -807,16 +809,18 @@ function TaskGroupSection({
           </WandIconButton>
         </form>
       ) : null}
-      {!preview && <div className={classNames("workspace-row", renamingDirectory && "is-renaming")}>
+      {!preview && !group.global && <div className={classNames("workspace-row", renamingDirectory && "is-renaming")}>
         <WandNavigationLink
           className="workspace-row-main"
           orientation="vertical"
           size="md"
-          aria-expanded={open}
+          aria-expanded={manageMode ? undefined : open}
+          aria-pressed={manageMode ? groupSelected : undefined}
           aria-controls={tasksId}
           title={group.workspaceCwd}
-          render={<button type="button" onClick={toggleCollapsed}/>}
+          render={<button type="button" onClick={manageMode ? () => onToggleGroup?.(group) : toggleCollapsed}/>}
         >
+          {manageMode && <ManageCheck checked={groupSelected} label={`选择目录 ${group.workspaceName}`}/>}
           {/* 目录行保留文件夹图标：它是「这一行是工作目录」的唯一视觉标记。 */}
           <WandIcon name="folder" size={15} className="workspace-row-folder"/>
           <span className="workspace-row-label">
@@ -830,9 +834,9 @@ function TaskGroupSection({
               {taskCount}
             </span>
           ) : null}
-          <WandIcon name="chevron" size={11} className={classNames("workspace-row-chevron", open && "open")}/>
+          {!manageMode && <WandIcon name="chevron" size={11} className={classNames("workspace-row-chevron", open && "open")}/>}
         </WandNavigationLink>
-        <span className="workspace-row-actions">
+        {manageMode ? null : <span className="workspace-row-actions">
           {!group.synthetic && (
             <WandIconButton
               className="workspace-row-action add"
@@ -956,7 +960,7 @@ function TaskGroupSection({
             </div>
           ) : null}
           </WandPopover>
-        </span>
+        </span>}
       </div>}
       <SidebarDisclosure id={tasksId} open={open}>
         <div className="workspace-tasks">
@@ -1309,7 +1313,7 @@ export function WorkspacesPanel({
     return (
       <section className="workspaces-panel workspaces-panel-compact" aria-label="项目目录">
         <CompactDirectoryRail
-          groups={groups}
+          groups={groups.filter((group) => !group.global)}
           loading={loading}
           error={error}
           activeWorkspaceId={activeWorkspaceId}
@@ -1445,6 +1449,10 @@ export function WorkspacesPanel({
                     manageMode={manageMode}
                     selection={prunedSelection}
                     onToggleTask={(taskId) => setSelection((current) => toggleManagedTask(current, taskId))}
+                    onToggleGroup={(selectedGroup) => {
+                      setSelection((current) => toggleManagedGroup(current, selectedGroup));
+                      setConfirmingManageDelete(false);
+                    }}
                     onToggleSession={(sessionId) => setSelection((current) => toggleManagedSession(current, sessionId))}
                     onActiveTaskOpen={openTask}
                     onOpenSession={openSession}

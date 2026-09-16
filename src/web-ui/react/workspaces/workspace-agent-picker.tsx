@@ -190,7 +190,7 @@ export function WorkspaceWelcomeChooser({
       <div className="blank-chat-logo"><WandIcon name="task" size={28} strokeWidth={1.8}/></div>
       <h2 className="blank-chat-title">{title}</h2>
       <p className="blank-chat-subtitle">{subtitle}</p>
-      <form className="workspace-welcome-form" aria-busy={submitting} onSubmit={(event) => void submit(event)}>
+      <form noValidate className="workspace-welcome-form" aria-busy={submitting} onSubmit={(event) => void submit(event)}>
         <WorkspaceAgentPicker
           target={target}
           kind={kind}

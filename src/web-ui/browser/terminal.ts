@@ -923,7 +923,7 @@ import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
           term.open(termWrap);
           term.registerLinkProvider({
             provideLinks: function(lineNumber: number, callback: (links: any[] | undefined) => void) {
-              var line = term.buffer.getLine(lineNumber);
+              var line = term.buffer.active.getLine(lineNumber);
               var text = line ? line.translateToString(true) : "";
               var links: any[] = [];
               var httpRegex = /https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/[^\s]+)?/gi;

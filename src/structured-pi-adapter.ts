@@ -13,6 +13,12 @@ import type {
 } from "./structured-runner.js";
 import type { SessionSnapshot } from "./types.js";
 
+type PiTurnState = StructuredRunnerTurnState & { pendingSessionId?: string };
+
+export function isMissingPiSession(error: string | null | undefined, sessionId: string | null | undefined): boolean {
+  return !!sessionId && !!error?.includes(`No session found matching '${sessionId}'`);
+}
+
 function textContent(value: unknown): string {
   if (typeof value === "string") return value;
   if (Array.isArray(value)) return value.map((item) => textContent(item)).filter(Boolean).join("\n");
@@ -89,8 +95,10 @@ function applyPiAssistantMessage(state: StructuredRunnerTurnState, message: Reco
   return null;
 }
 
-export function applyPiEvent(state: StructuredRunnerTurnState, event: Record<string, unknown>): string | null {
-  if (event.type === "session" && typeof event.id === "string") state.sessionId = event.id;
+export function applyPiEvent(state: PiTurnState, event: Record<string, unknown>): string | null {
+  // Pi announces the ID before it writes a session file. The file is only
+  // created when an assistant message is saved, so this ID is not resumable yet.
+  if (event.type === "session" && typeof event.id === "string") state.pendingSessionId = event.id;
   if (event.type === "message_update") {
     const update = asRecord(event.assistantMessageEvent);
     const delta = typeof update?.delta === "string" ? update.delta : "";
@@ -125,12 +133,16 @@ export function applyPiEvent(state: StructuredRunnerTurnState, event: Record<str
   }
   if (event.type === "message_end" || event.type === "turn_end") {
     const message = asRecord(event.message);
-    if (message?.role === "assistant") return applyPiAssistantMessage(state, message);
+    if (message?.role === "assistant") {
+      if (state.pendingSessionId) state.sessionId = state.pendingSessionId;
+      return applyPiAssistantMessage(state, message);
+    }
   }
   if (event.type === "agent_end" && Array.isArray(event.messages)) {
     for (const raw of event.messages) {
       const message = asRecord(raw);
       if (message?.role === "assistant") {
+        if (state.pendingSessionId) state.sessionId = state.pendingSessionId;
         const error = applyPiAssistantMessage(state, message);
         if (error) return error;
       }
@@ -147,7 +159,7 @@ export class PiRunner implements StructuredRunnerAdapter {
 
   start(context: StructuredRunnerContext, observer: StructuredRunnerObserver): StructuredRunnerExecution {
     const args = buildPiArgs(context.session, context.prompt);
-    const state: StructuredRunnerTurnState = { blocks: [], result: "", sessionId: context.session.claudeSessionId, model: context.session.selectedModel ?? undefined };
+    const state: PiTurnState = { blocks: [], result: "", sessionId: context.session.claudeSessionId, model: context.session.selectedModel ?? undefined };
     let primaryError: string | null = null;
     return startStructuredCli({
       sessionId: context.session.id,

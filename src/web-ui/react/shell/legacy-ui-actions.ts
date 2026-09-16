@@ -33,11 +33,6 @@ export interface LegacyUiCommands {
   setSidebarGroupExpanded(group: "automation" | "history", expanded: boolean): void | Promise<unknown>;
   toggleFilePanel(): void | Promise<unknown>;
   closeFilePanel(): void | Promise<unknown>;
-  refreshFiles(): void | Promise<unknown>;
-  navigateFiles(cwd: string): void | Promise<unknown>;
-  navigateFilesUp(): void | Promise<unknown>;
-  searchFiles(query: string): void | Promise<unknown>;
-  clearFileSearch(): void | Promise<unknown>;
   openFolderPicker(): void | Promise<unknown>;
   toggleTopbarMenu(): void | Promise<unknown>;
   copyTopbarField(field: "providerSessionId" | "cwd" | "sessionId"): void | Promise<unknown>;
@@ -84,11 +79,6 @@ export function applyLegacyUiAction(
     case "layout.drawer.group.set": return commands.setSidebarGroupExpanded(action.group, action.expanded);
     case "layout.files.toggle": return commands.toggleFilePanel();
     case "layout.files.close": return commands.closeFilePanel();
-    case "layout.files.refresh": return commands.refreshFiles();
-    case "layout.files.navigate": return commands.navigateFiles(action.cwd);
-    case "layout.files.up": return commands.navigateFilesUp();
-    case "layout.files.search": return commands.searchFiles(action.query);
-    case "layout.files.search.clear": return commands.clearFileSearch();
     case "folderPicker.open": return commands.openFolderPicker();
     case "topbar.menu.toggle": return commands.toggleTopbarMenu();
     case "topbar.copy": return commands.copyTopbarField(action.field);

@@ -1,8 +1,9 @@
 import * as React from "react";
 import { useSyncExternalStore } from "react";
 import { wandOverlay } from "../overlay-controller";
+import { WandButton, WandMenuItem, WandSearchField } from "../ui";
 import { copyTextToPlatformClipboard } from "../file-preview/platform-adapter";
-import { codeEditorController } from "../code-editor/controller";
+import { codeEditorController, codeEditorStore } from "../code-editor/controller";
 import { fileExplorerController, fileExplorerStore } from "./controller";
 import { MoveEntryDialog, type MoveEntryRequest } from "./move-dialog";
 import { explorerParentOf as parentOf, isPathWithin, joinExplorerPath as joinPath } from "./paths";
@@ -102,10 +103,13 @@ interface PendingCreate {
   kind: "file" | "dir";
 }
 
+const TreeItemsContext = React.createContext<Map<string, HTMLDivElement> | null>(null);
+
 function ExplorerRow({
   entry,
   depth,
   snapshot,
+  activePath,
   onToggle,
   onFileActivate,
   onContextMenu,
@@ -118,6 +122,7 @@ function ExplorerRow({
   entry: FileExplorerEntry;
   depth: number;
   snapshot: FileExplorerSnapshot;
+  activePath: string | null;
   onToggle(dir: string): void;
   onFileActivate(path: string): void;
   onContextMenu(state: ContextMenuState): void;
@@ -127,6 +132,7 @@ function ExplorerRow({
   pendingCreate: PendingCreate | null;
   setPendingCreate(state: PendingCreate | null): void;
 }) {
+  const treeItems = React.useContext(TreeItemsContext);
   const isDir = entry.type === "dir";
   const nodeState: FileExplorerNodeState | undefined = isDir ? snapshot.expanded.get(entry.path) : undefined;
   const isOpen = Boolean(nodeState);
@@ -137,7 +143,7 @@ function ExplorerRow({
     isDir && isOpen && nodeState?.status === "loaded" && nodeState.entries.length === 0,
   );
   const showChevron = isDir && !isEmptyDir;
-  const isActiveFile = !isDir && snapshot.activeDir === parentOf(entry.path);
+  const isActiveFile = !isDir && activePath === entry.path;
   const badge = gitBadge(entry);
 
   const [renameDraft, setRenameDraft] = React.useState(entry.name);
@@ -188,7 +194,44 @@ function ExplorerRow({
     <>
       <div
         className={`wand-explorer-row${isActiveFile ? " active" : ""}`}
+        ref={(node) => {
+          if (node) treeItems?.set(entry.path, node);
+          else treeItems?.delete(entry.path);
+        }}
         style={{ paddingLeft: 8 + depth * 12 }}
+        role="treeitem"
+        tabIndex={0}
+        aria-label={entry.name}
+        aria-level={depth + 1}
+        aria-expanded={isDir ? isOpen : undefined}
+        aria-selected={isActiveFile}
+        onKeyDown={(event) => {
+          if (event.target !== event.currentTarget) return;
+          if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+            event.preventDefault();
+            const bounds = event.currentTarget.getBoundingClientRect();
+            onContextMenu({ x: bounds.left + 12, y: bounds.bottom, entry, dir: parentOf(entry.path) });
+          } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key) && treeItems) {
+            event.preventDefault();
+            const rows = [...treeItems.values()].filter((node) => node.isConnected);
+            rows.sort((left, right) => {
+              if (left === right) return 0;
+              return left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+            });
+            const index = rows.indexOf(event.currentTarget);
+            let next = index + (event.key === "ArrowDown" ? 1 : -1);
+            if (event.key === "Home") next = 0;
+            if (event.key === "End") next = rows.length - 1;
+            rows[Math.max(0, Math.min(rows.length - 1, next))]?.focus();
+          } else if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            if (isDir) onToggle(entry.path);
+            else onFileActivate(entry.path);
+          } else if (isDir && ((event.key === "ArrowRight" && !isOpen) || (event.key === "ArrowLeft" && isOpen))) {
+            event.preventDefault();
+            onToggle(entry.path);
+          }
+        }}
         title={entry.path}
         onClick={() => {
           if (isDir) onToggle(entry.path);
@@ -254,6 +297,7 @@ function ExplorerRow({
               entry={child}
               depth={depth + 1}
               snapshot={snapshot}
+              activePath={activePath}
               onToggle={onToggle}
               onFileActivate={onFileActivate}
               onContextMenu={onContextMenu}
@@ -336,6 +380,8 @@ function ContextMenu({
   onAction(action: string): void;
 }) {
   const ref = React.useRef<HTMLDivElement>(null);
+  const buttons = React.useRef(new Map<string, HTMLButtonElement>());
+  const focusOrigin = React.useRef(document.activeElement);
   React.useEffect(() => {
     const handle = (event: MouseEvent) => {
       if (ref.current && !ref.current.contains(event.target as Node)) onClose();
@@ -359,14 +405,18 @@ function ContextMenu({
   const targetDir = isDir && entry ? entry.path : state.dir;
 
   const item = (label: string, action: string, opts: { danger?: boolean; disabled?: boolean } = {}) => (
-    <button
-      type="button"
+    <WandMenuItem
+      label={label}
+      tone={opts.danger ? "danger" : "default"}
+      autoFocus={action === "newFile"}
+      ref={(node) => {
+        if (node) buttons.current.set(action, node);
+        else buttons.current.delete(action);
+      }}
       className={`wand-explorer-context-item${opts.danger ? " danger" : ""}`}
       disabled={opts.disabled}
       onClick={() => { onAction(action); }}
-    >
-      {label}
-    </button>
+    />
   );
 
   return (
@@ -375,6 +425,20 @@ function ContextMenu({
       className="wand-explorer-context-menu"
       style={{ left: Math.max(8, left), top: Math.max(8, top) }}
       role="menu"
+      aria-label="文件操作"
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          onClose();
+          if (focusOrigin.current instanceof HTMLElement) focusOrigin.current.focus();
+        } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          const items = [...buttons.current.values()].filter((item) => !item.disabled);
+          const index = items.indexOf(document.activeElement as HTMLButtonElement);
+          const next = index + (event.key === "ArrowDown" ? 1 : -1);
+          items[(next + items.length) % items.length]?.focus();
+        }
+      }}
     >
       {item("新建文件", "newFile", { disabled: !targetDir })}
       {item("新建文件夹", "newDir", { disabled: !targetDir })}
@@ -401,7 +465,10 @@ function ContextMenu({
 }
 
 export function FileExplorerHost({ root }: { root: string }) {
+  const treeItems = React.useRef(new Map<string, HTMLDivElement>());
   const snapshot = useFileExplorerSnapshot();
+  const editor = useSyncExternalStore(codeEditorStore.subscribe, codeEditorStore.getSnapshot, codeEditorStore.getSnapshot);
+  const activePath = editor.open ? editor.activePath : null;
   const dispatch = fileExplorerController;
   const [contextMenu, setContextMenu] = React.useState<ContextMenuState | null>(null);
   const [renameState, setRenameState] = React.useState<{ path: string } | null>(null);
@@ -459,7 +526,7 @@ export function FileExplorerHost({ root }: { root: string }) {
   };
 
   return (
-    <>
+    <TreeItemsContext.Provider value={treeItems.current}>
       <style id="wand-file-explorer-styles">{fileExplorerStyles}</style>
       <div className="wand-file-explorer" onContextMenu={(event) => {
         // background context menu (empty area)
@@ -495,24 +562,13 @@ export function FileExplorerHost({ root }: { root: string }) {
           ><ExplorerIcon name="refresh" size={15}/></button>
         </div>
         <div className="wand-file-explorer-search">
-          <input
-            type="text"
+          <WandSearchField
             value={searchInput}
+            label="搜索文件"
             placeholder="搜索文件…"
-            spellCheck={false}
-            autoComplete="off"
             disabled={!snapshot.root}
-            onChange={(event) => {
-              const value = event.currentTarget.value;
-              setSearchInput(value);
-              void dispatch.execute({ type: "search.start", query: value });
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                event.preventDefault();
-                void dispatch.execute({ type: "search.clear" });
-              }
-            }}
+            onValueChange={setSearchInput}
+            onSearch={(query) => void dispatch.execute({ type: "search.start", query })}
           />
           {snapshot.searching && <span aria-hidden="true">…</span>}
         </div>
@@ -526,7 +582,10 @@ export function FileExplorerHost({ root }: { root: string }) {
           {snapshot.root && rootNode?.status === "error" && (
             <div className="wand-file-explorer-empty">{rootNode.error || "读取目录失败"}</div>
           )}
-          {showingSearch ? (
+          {snapshot.searchError ? <div className="wand-file-explorer-empty" role="alert">
+            <p>{snapshot.searchError}</p>
+            <WandButton kind="ghost" size="small" onClick={() => void dispatch.execute({ type: "search.start", query: searchInput })}>重试搜索</WandButton>
+          </div> : showingSearch ? (
             snapshot.searchResults && snapshot.searchResults.length > 0 ? (
               snapshot.searchResults.map((entry) => (
                 <ExplorerRow
@@ -534,6 +593,7 @@ export function FileExplorerHost({ root }: { root: string }) {
                   entry={entry}
                   depth={0}
                   snapshot={snapshot}
+                  activePath={activePath}
                   onToggle={(dir) => void dispatch.execute({ type: "toggle", dir })}
                   onFileActivate={(path) => void codeEditorController.open(path)}
                   onContextMenu={(state) => setContextMenu(state)}
@@ -573,6 +633,7 @@ export function FileExplorerHost({ root }: { root: string }) {
                     entry={entry}
                     depth={0}
                     snapshot={snapshot}
+                    activePath={activePath}
                     onToggle={(dir) => void dispatch.execute({ type: "toggle", dir })}
                     onFileActivate={(path) => void codeEditorController.open(path)}
                     onContextMenu={(state) => setContextMenu(state)}
@@ -616,7 +677,7 @@ export function FileExplorerHost({ root }: { root: string }) {
           return moved;
         }}
       />
-    </>
+    </TreeItemsContext.Provider>
   );
 }
 

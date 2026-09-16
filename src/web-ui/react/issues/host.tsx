@@ -142,7 +142,7 @@ export function GithubIssuesHost(): JSX.Element | null {
             <input className="wand-ui-dialog-input" placeholder="新议题标题" value={title} onChange={(event) => setTitle(event.currentTarget.value)} />
             <WandButton onClick={() => void create()} disabled={!hasRepo || !title.trim() || creating || loading}>{creating ? "创建中…" : "创建议题"}</WandButton>
           </div>
-          <textarea className="wand-ui-dialog-input" placeholder="描述（可选）" value={body} onChange={(event) => setBody(event.currentTarget.value)} />
+          <textarea className="resize-none wand-ui-dialog-input" placeholder="描述（可选）" value={body} onChange={(event) => setBody(event.currentTarget.value)} />
         </div>
       </section>
 

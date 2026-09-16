@@ -4,7 +4,7 @@ export const fileExplorerStyles = String.raw`
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
-  font-size: 11.375px;
+  font-size: var(--font-size-sm);
 }
 .wand-file-explorer-toolbar {
   display: flex;
@@ -16,7 +16,7 @@ export const fileExplorerStyles = String.raw`
 }
 .wand-file-explorer-title {
   flex: 1 1 auto;
-  font-size: 9.625px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -47,17 +47,7 @@ export const fileExplorerStyles = String.raw`
   padding: 6px 8px;
   border-bottom: 1px solid var(--border-subtle, #e5e7eb);
 }
-.wand-file-explorer-search input {
-  flex: 1 1 auto;
-  min-width: 0;
-  border: 1px solid var(--border-subtle, #e5e7eb);
-  border-radius: 6px;
-  padding: 4px 8px;
-  font-size: 11.375px;
-  background: var(--bg-primary, #fff);
-  color: var(--text-primary, #111);
-}
-.wand-file-explorer-search input:focus { outline: none; border-color: var(--accent, #2563eb); }
+.wand-file-explorer-search > .wand-ui-search { flex: 1; }
 
 .wand-file-explorer-tree {
   flex: 1 1 auto;
@@ -80,6 +70,7 @@ export const fileExplorerStyles = String.raw`
   line-height: 1.45;
 }
 .wand-explorer-row:hover { background: var(--bg-hover, rgba(0,0,0,0.04)); }
+.wand-explorer-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .wand-explorer-row.active { background: var(--bg-active, rgba(37,99,235,0.12)); }
 .wand-explorer-row.editing { background: transparent; cursor: default; }
 .wand-explorer-row.editing:hover { background: transparent; }
@@ -115,7 +106,7 @@ export const fileExplorerStyles = String.raw`
 }
 .wand-explorer-git {
   flex: 0 0 auto;
-  font-size: 9.625px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   width: 14px;
   text-align: center;
@@ -139,7 +130,7 @@ export const fileExplorerStyles = String.raw`
   border: 1px solid var(--accent, #2563eb);
   border-radius: 4px;
   padding: 2px 6px;
-  font-size: 11.375px;
+  font-size: var(--font-size-sm);
   background: var(--bg-primary, #fff);
   color: var(--text-primary, #111);
 }
@@ -164,7 +155,7 @@ export const fileExplorerStyles = String.raw`
   border: none;
   background: transparent;
   color: var(--text-primary, #111);
-  font-size: 11.375px;
+  font-size: var(--font-size-sm);
   cursor: pointer;
   text-align: left;
 }
@@ -181,6 +172,6 @@ export const fileExplorerStyles = String.raw`
   padding: 24px 16px;
   color: var(--text-muted, #999);
   text-align: center;
-  font-size: 11.375px;
+  font-size: var(--font-size-sm);
 }
 `;

@@ -1,3 +1,4 @@
+import { WandBrandMark } from "../ui/brand-mark";
 import * as React from "react";
 import { normalizeProviderId, providerDisplayName } from "../../provider-identity";
 import { ProviderLogo } from "../provider-logo";
@@ -618,7 +619,7 @@ export function ShellSidebar() {
     setMoreOpen(false);
   }, [visible, narrow]);
   const extraGroups = snapshot.sidebar.groups
-    .filter((group) => group.kind !== "wand")
+    .filter((group) => group.kind === "history")
     .map((group) => ({
       ...group,
       entries: searchQuery.trim()
@@ -664,11 +665,7 @@ export function ShellSidebar() {
         <div className="sidebar-header">
           <div className="sidebar-header-primary">
             <div className="sidebar-header-main">
-              <svg className="sidebar-brand-mark" viewBox="0 0 64 64" aria-hidden="true">
-                <rect width="64" height="64" rx="18" fill="#17120f"/>
-                <path d="M13 21l9 24 10-15 10 15 9-24" fill="none" stroke="#c5653d"
-                  strokeWidth="6.5" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
+              <WandBrandMark className="sidebar-brand-mark" />
               <span className="sidebar-title">Wand</span>
             </div>
             <div className="sidebar-header-actions">

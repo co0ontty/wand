@@ -26,6 +26,7 @@ import type {
 } from "./types";
 import { WORKSPACE_AGENT_OPTIONS, WorkspaceAgentPicker } from "./workspace-agent-picker";
 import { describeError } from "../errors";
+import { confirmDiscardTaskDraft } from "../task-draft-guard";
 
 export interface WorkspacesHostProps {
   repository?: WorkspacesRepository;
@@ -57,9 +58,11 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
   const [error, setError] = useState("");
   const [suggestions, setSuggestions] = useState<RecentPath[]>([]);
   const [suggestionsActive, setSuggestionsActive] = useState(false);
+  const draftTouched = React.useRef(false);
 
   useEffect(() => {
     if (!controller.open) return;
+    draftTouched.current = false;
     const abort = new AbortController();
     setLoading(true);
     setSubmitting(false);
@@ -123,12 +126,19 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
   const mountedCwd = cwd.trim();
   const setTaskCwd = (nextCwd: string): void => {
+    draftTouched.current = true;
     setCwd(nextCwd);
     const matchingProject = projects.find((project) => normalizeDir(project.cwd) === normalizeDir(nextCwd));
     setSelectedProjectId(matchingProject?.id ?? "");
   };
   const hasDirectory = Boolean(selectedProject || mountedCwd);
   const effectiveCwd = selectedProject?.cwd || mountedCwd || "全局临时目录";
+
+  async function closeDraft(): Promise<void> {
+    if (submitting) return;
+    if (draftTouched.current && !await confirmDiscardTaskDraft()) return;
+    workspacesController.close();
+  }
 
   async function startTaskSession(
     workspace: Pick<Workspace, "id" | "name" | "defaultProvider"> & { kind?: Workspace["kind"] },
@@ -215,9 +225,9 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
   return (
     <WandDialogSurface
       open={controller.open}
-      onOpenChange={(open) => { if (!open) workspacesController.close(); }}
+      onOpenChange={(open) => { if (!open) void closeDraft(); }}
       title="新建任务"
-      description="可以不选目录（使用全局临时目录），也可以挂载一个目录。创建任务时必须选择 CLI。"
+      description="选择工作目录和工具，创建后即可开始。"
       className="wand-new-session-dialog wand-new-project-dialog"
       overlayClassName="wand-new-session-overlay wand-new-project-overlay"
       titleClassName="wand-new-session-title wand-new-project-title"
@@ -230,7 +240,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
       {loading ? (
         <div className="wand-new-session-loading wand-new-project-loading" role="status">正在加载新建配置…</div>
       ) : (
-        <form className="wand-new-session-form wand-new-project-form" aria-busy={submitting} onSubmit={(event) => void submit(event)}>
+        <form noValidate className="wand-new-session-form wand-new-project-form" aria-busy={submitting} onChangeCapture={() => { draftTouched.current = true; }} onSubmit={(event) => void submit(event)}>
           <div className="wand-new-session-body wand-new-project-body">
             <div className="wand-new-session-field wand-new-project-field">
               <label className="wand-new-session-field-label wand-new-project-field-label" htmlFor="wand-new-task-name">任务名称</label>
@@ -248,7 +258,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
                 aria-describedby="wand-new-task-name-hint"
                 onChange={(event) => setName(event.currentTarget.value)}
               />
-              <p id="wand-new-task-name-hint" className="wand-new-session-field-hint wand-new-project-field-hint">可选；留空时会在发布任务后自动命名。</p>
+              <p id="wand-new-task-name-hint" className="wand-new-session-field-hint wand-new-project-field-hint">留空则根据后续工作内容自动命名。</p>
             </div>
 
             <div className="wand-new-session-field wand-new-project-field">
@@ -293,7 +303,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
                 ) : null}
               </div>
               <p id="wand-new-task-cwd-hint" className="wand-new-session-field-hint wand-new-project-field-hint">
-                可选。挂载后任务在该目录运行，不挂载则使用全局临时目录。已有目录会自动归入对应分组。
+                留空使用临时目录；同一工作目录的任务会自动分组。
               </p>
               {defaults && defaults.recentPaths.length > 0 ? (
                 <div className="wand-new-session-recent-paths wand-new-project-recent-paths" aria-label="最近使用的目录">
@@ -335,24 +345,25 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
               </div>
             ) : null}
 
-            <div className="wand-new-session-field wand-new-project-field wand-new-task-milestone-field">
+            <details className="wand-new-session-field wand-new-project-field wand-new-task-milestone-field">
+              <summary>关联里程碑{milestoneId ? " · 已选择" : "（可选）"}</summary>
               <span className="wand-new-session-field-label wand-new-project-field-label">里程碑（可选）</span>
               <MilestonePicker
                 value={milestoneId || null}
                 disabled={submitting}
-                onChange={(next) => setMilestoneId(next ?? "")}
+                onChange={(next) => { draftTouched.current = true; setMilestoneId(next ?? ""); }}
               />
               <p className="wand-new-session-field-hint wand-new-project-field-hint">
-                选一个已有里程碑，或直接新增；新建后会自动归入该里程碑。
+                将相关任务归入同一个目标，便于跟进。
               </p>
-            </div>
+            </details>
 
             <WorkspaceAgentPicker
               target={target}
               kind={sessionKind}
               disabled={submitting}
-              onTargetChange={setTarget}
-              onKindChange={setSessionKind}
+              onTargetChange={(next) => { draftTouched.current = true; setTarget(next); }}
+              onKindChange={(next) => { draftTouched.current = true; setSessionKind(next); }}
             />
           </div>
 

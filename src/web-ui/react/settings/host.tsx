@@ -163,7 +163,7 @@ function ConnectedAppAccess({
         <strong>设备功能已可用</strong>
         <span>通知、触感、应用图标和客户端下载无需管理权限。要修改服务配置，请使用管理员密码登录此网页。</span>
       </div>
-      <form
+      <form noValidate
         className="wand-settings-app-access-form"
         onSubmit={(event) => {
           event.preventDefault();
@@ -201,6 +201,18 @@ export function SettingsHost({
   repository = httpSettingsRepository,
   showRestart = () => {},
 }: SettingsHostProps) {
+  const [horizontalTabs, setHorizontalTabs] = useState(() => (
+    typeof window !== "undefined" && typeof window.matchMedia === "function"
+      && window.matchMedia("(max-width: 760px)").matches
+  ));
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia("(max-width: 760px)");
+    const sync = (): void => setHorizontalTabs(media.matches);
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
   const controller = useSyncExternalStore(
     settingsStore.subscribe,
     settingsStore.getSnapshot,
@@ -306,7 +318,7 @@ export function SettingsHost({
               <WandTabs
                 className="wand-settings-tabs"
                 ariaLabel="设置分组"
-                orientation="vertical"
+                orientation={horizontalTabs ? "horizontal" : "vertical"}
                 value={selectedTab}
                 tabs={tabs}
                 onValueChange={(value) => settingsStore.setTab(value as SettingsTab)}

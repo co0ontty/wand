@@ -178,7 +178,7 @@ export function FolderPickerHost({ repository = httpFolderPickerRepository }: Fo
       testId="folder-picker-dialog"
       dismissable={!choosing}
     >
-      <form className="wand-folder-picker-form" aria-busy={loading || choosing} onSubmit={(event) => void submit(event)}>
+      <form noValidate className="wand-folder-picker-form" aria-busy={loading || choosing} onSubmit={(event) => void submit(event)}>
         <div className="wand-folder-picker-quick" aria-label="快捷目录">
           <WandButton size="small" onClick={() => navigate("/tmp")}>临时目录 /tmp</WandButton>
           <WandButton size="small" onClick={() => navigate("/")}>根目录 /</WandButton>

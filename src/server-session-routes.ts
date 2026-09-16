@@ -550,7 +550,9 @@ export function registerSessionRoutes(
 
     try {
       const tree = currentDirectoryTree();
-      if (!directoryTreeContainsPath(tree.roots, directoryPath)) {
+      const hasWorkspace = storage.listWorkspaces().some((workspace) =>
+        workspace.kind !== "global" && normalizeSessionDirectory(workspace.cwd) === directoryPath);
+      if (!directoryTreeContainsPath(tree.roots, directoryPath) && !hasWorkspace) {
         res.status(404).json({ error: "未找到该会话目录。" });
         return;
       }

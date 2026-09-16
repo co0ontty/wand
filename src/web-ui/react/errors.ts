@@ -11,7 +11,7 @@ export function describeError(error: unknown, fallback: string): string {
 
 /** 取异常文案；无 message 时回落到 fallback。 */
 export function failureMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
+  return describeError(error, fallback);
 }
 
 /** 请求被 AbortController 取消（组件卸载 / 切换会话）。 */

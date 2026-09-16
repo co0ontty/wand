@@ -388,7 +388,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
           </div>
         </section>
       ) : status ? (
-        <form className="wand-quick-form" aria-busy={busy} onSubmit={(event) => void submit(event)}>
+        <form noValidate className="wand-quick-form" aria-busy={busy} onSubmit={(event) => void submit(event)}>
           <div className="wand-quick-body">
             <CommitWorkspaceLens status={status} />
             <ChangedFiles status={status} />
@@ -407,7 +407,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
               </div>
               <label className="wand-quick-field" htmlFor="wand-quick-message">
                 <span>新的 Commit 信息</span>
-                <textarea
+                <textarea className="resize-none"
                   id="wand-quick-message"
                   ref={messageInput}
                   data-wand-autofocus=""

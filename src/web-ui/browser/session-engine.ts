@@ -1,22 +1,20 @@
 import { state, writeStoredBoolean } from "./state";
 import { mergeWindowedMessages } from "./message-reconciliation";
 import { iconSvg } from "./i18n";
-import { escapeHtml, refreshTailMarqueePaths } from "./utils";
-import { ensureChatMessagesContainer, extractToolResultText, parseMessages, renderChat, scheduleChatRender, sessionChromeTitle } from "./chat-render";
+import { escapeHtml } from "./utils";
+import { ensureChatMessagesContainer, extractToolResultText, parseMessages, renderChat, scheduleChatRender } from "./chat-render";
 import { bindChatScrollListener, normalizeStructuredSnapshot, persistSelectedId, restoreStructuredQueue, saveStructuredQueue, stripRenderOnlyStructuredMessages, syncStructuredQueueFromSession, updateChatUnreadBubble } from "./chat-scroll";
 import "./events";
-import { isMobileLayout, refreshFileExplorer, shouldShowSessionsBackdrop, updateFilePanelCwd, updateLayoutState } from "./file-browser";
+import { isMobileLayout, updateFilePanelCwd, updateLayoutState } from "./file-browser";
 import { loadGitStatus, updateTopbarGitBadge } from "./git-commit";
 import { autoResizeInput, buildMessagesForRender, canAutoResumeSession, captureTerminalInput, closeKeyboardPopup, closeSwipedItem, flushCrossSessionQueue, focusInputBox, getControlInput, hasActiveTerminalSelection, hideMiniKeyboard, isImeKeyboardEvent, queueDirectInput, reconcileInteractiveState, renderCrossSessionQueue, sendInputFromBox, setTerminalInteractive, shouldCaptureTerminalEvent, stopSession, switchToSessionView, updateInteractiveControls, updateStructuredQueueCounter } from "./input";
 import { _apkVersion, _hasNativeBridge, _macAppVersion, _syncWakeLock, hideError, showError, showToast } from "./notifications";
 import { getEffectiveCwd, render, resetChatRenderCache } from "./render";
-import { renderSessionsListContent } from "./sidebar";
 import { initTerminal, maybeScrollTerminalToBottom, syncTerminalBuffer } from "./terminal";
 import "./utils";
 import { ensureTerminalFit, scheduleTerminalResize, teardownTerminal } from "./viewport";
 import { startPolling, stopPolling, updateAutoApproveIndicator, updateTaskDisplay } from "./websocket";
-import { getSessionLatestUserText, getSessionStatusLabel } from "./session-ui";
-import { isBrowserReactShellMounted } from "./shell-runtime";
+import { getSessionLatestUserText } from "./session-ui";
 import { notifyLegacyUiChange } from "./ui-store-bridge";
 import {
   openWorktreeMergeForSession,
@@ -24,6 +22,9 @@ import {
 import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
 import { closeReactOverlays } from "./react-overlay-coordinator";
 import { syncBrowserComposerSelects } from "./composer-select-adapter";
+import { syncBrowserComposerConfig } from "./composer-config-adapter";
+import { syncBrowserComposerAttachments } from "./composer-attachments-adapter";
+import { syncBrowserComposerSkills } from "./composer-skills-adapter";
 import {
   normalizeAvailableComposerValue,
   normalizeComposerModelValue,
@@ -191,11 +192,6 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
         return state.sessionTool || state.preferredCommand || "claude";
       }
 
-      export function getComposerTool() {
-        var selected = state.sessions.find(function(s) { return s.id === state.selectedId; });
-        return (selected && selected.provider) || state.preferredCommand || "claude";
-      }
-
       export function getComposerPlaceholder(session, terminalInteractive) {
         // Keep placeholders short so they don't wrap on portrait mobile screens.
         // Only show informative state hints; drop the redundant "send to X" labels.
@@ -232,17 +228,6 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
         var fallback = state.config && state.config.defaultMode ? state.config.defaultMode : "default";
         if (supported.indexOf(fallback) !== -1) return fallback;
         return supported[0];
-      }
-
-      export function getModeHint(mode) {
-        var hints = {
-          'default': '标准模式 - 需要确认文件修改',
-          'full-access': '完全访问 - 自动确认权限与操作',
-          'auto-edit': '自动编辑 - 自动确认文件修改',
-          'native': '原生模式 - 返回结构化输出',
-          'managed': '托管模式 - AI 自动完成所有工作'
-        };
-        return hints[mode] || '';
       }
 
       export function getSessionKindLabel(session) {
@@ -286,8 +271,6 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
         // 旧 ID 形态（chat-mode-select / chat-mode-label）已下线 —— trio 现在多实例存在。
         // 这里只保留 state 归一化与 mode-hint 文本刷新；DOM 同步交给 refreshAllChatModeTrios。
         state.chatMode = getSafeModeForTool("claude", state.chatMode);
-        var modeHint = document.getElementById("mode-hint");
-        if (modeHint) modeHint.textContent = getModeHint(state.chatMode);
         refreshAllChatModeTrios();
       }
 
@@ -351,46 +334,6 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
         return true;
       }
 
-      // 三件套 raw 选项渲染：option 文本直接是 id（不带括号注释 / 不本地化）。
-      // 空会话入口使用这套统一渲染器；composer 与 + 弹层复用下方的 chip 渲染器。
-      // 三者都使用原生 select，思考深度的选项仍根据当前模型能力动态生成。
-      export function renderChatModeTrioHtml(session, opts) {
-        opts = opts || {};
-        // 三种 kind：dropdown（空状态横向）/ compact（用户消息徽章）/ popover（加号气泡纵向）
-        var kind = (opts.kind === "compact" || opts.kind === "popover") ? opts.kind : "dropdown";
-        var preferredTool = getPreferredTool();
-        var composerMode = state.chatMode || "default";
-        var modelText = getEffectiveModel(session) || "";
-        var modelLabel = getShortModelLabel(modelText, session);
-        var thinkingText = getEffectiveThinking(session);
-        function pill(ctrl, label, value, optionsHtml) {
-          // compact 不显示分组小标签；dropdown / popover 都显示（"模式" / "模型" / "思考"）。
-          var tagHtml = kind === "compact" ? "" : ('<span class="chat-mode-trio-tag">' + escapeHtml(label) + '</span>');
-          // title 带上完整值，可见文本被 ellipsis 时悬停仍能看到全名。
-          return '<span class="composer-text-pill chat-mode-trio-pill" data-mode-control-pill="' + ctrl + '" title="' + escapeHtml(label + "：" + value) + '">' +
-            tagHtml +
-            '<span class="composer-text-label">' + escapeHtml(value) + '</span>' +
-            '<select class="composer-text-hidden-select" data-mode-control="' + ctrl + '" aria-label="' + escapeHtml(label) + '">' +
-              optionsHtml +
-            '</select>' +
-          '</span>';
-        }
-        var refreshButton = '<button class="model-refresh-button' + (state.modelsRefreshing ? ' is-refreshing' : '') + '" type="button" data-models-refresh ' +
-          'aria-label="刷新模型列表" title="刷新模型列表" aria-busy="' + (state.modelsRefreshing ? 'true' : 'false') + '"' +
-          (state.modelsRefreshing ? ' disabled' : '') + '>' +
-          iconSvg("refresh", { size: 13, strokeWidth: 1.9, cls: "model-refresh-icon" }) +
-          '<span class="model-refresh-label">刷新模型列表</span>' +
-          '</button>';
-        return '<div class="chat-mode-trio chat-mode-trio-' + kind + '" role="group" aria-label="会话设置">' +
-          pill("mode", "模式", composerMode, renderChatModeOptionsRaw(preferredTool, composerMode)) +
-          '<span class="composer-text-sep" aria-hidden="true">·</span>' +
-          pill("model", "模型", modelLabel, renderChatModelOptionsRaw(modelText, session)) +
-          refreshButton +
-          '<span class="composer-text-sep" aria-hidden="true">·</span>' +
-          pill("thinking", "思考", getThinkingCompactLabel(thinkingText, session), renderThinkingOptions(thinkingText, session)) +
-        '</div>';
-      }
-
       export function getThinkingCompactLabel(id, session?) {
         var effort = getThinkingLabel(id, session);
         if (effort === "low") return "低";
@@ -440,24 +383,6 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
         });
       }
 
-      export function renderThinkingOptions(selected, session?) {
-        var options = getThinkingSelectOptions(selected, session);
-        var normalized = normalizeAvailableComposerValue(selected, options, "off");
-        return options.map(function(option) {
-          return '<option value="' + escapeHtml(option.value) + '"' + (option.value === normalized ? " selected" : "") + '>' +
-            escapeHtml(option.label) +
-          '</option>';
-        }).join("");
-      }
-
-      function syncThinkingSelect(container, selected, session?) {
-        var select = container.querySelector('[data-mode-control="thinking"]') as HTMLSelectElement | null;
-        if (!select) return;
-        var options = getThinkingSelectOptions(selected, session);
-        select.innerHTML = renderThinkingOptions(selected, session);
-        select.value = normalizeAvailableComposerValue(selected, options, "off");
-      }
-
       export function supportsClaudeSkillSelection(session) {
         return !!session
           && session.sessionKind === "structured"
@@ -472,71 +397,58 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
       }
 
       var claudeSkillsTrigger: HTMLElement | null = null;
+      var EMPTY_COMPOSER_SKILLS = {
+        visible: false,
+        loading: false,
+        options: [],
+        selectedCount: 0,
+        onToggle: function() {},
+      };
 
       function refreshClaudeSkillControls() {
-        var session = getSelectedSession();
-        var selected = getSelectedClaudeSkills(session);
-        document.querySelectorAll("[data-claude-skills-trigger]").forEach(function(trigger) {
-          trigger.textContent = selected.length ? ("Skills " + selected.length) : "Skills";
-          trigger.setAttribute("aria-expanded", state.claudeSkillsPickerOpen ? "true" : "false");
-          trigger.setAttribute("title", selected.length ? ("已选择 " + selected.length + " 个 skills") : "选择本条消息要应用的 skills");
-        });
+        // skill chip 的文案 / aria / 可见性现在由 refreshComposerConfigControls
+        // 发布给 React，这里只需让三件套重新同步一次并刷新弹层本体。
+        refreshAllChatModeTrios();
         refreshClaudeSkillsPicker();
       }
 
-      export function renderClaudeSkillsPickerHtml(session) {
-        if (!supportsClaudeSkillSelection(session)) return "";
+      /**
+       * Skills 弹层的选项快照。标签翻译（项目/用户）等业务规则留在 legacy，
+       * React 只负责渲染 —— 与 composer-config 的 Skills 按钮同一套约定。
+       */
+      function buildClaudeSkillOptions(session) {
         var selected = getSelectedClaudeSkills(session);
         var skills = state.claudeSkillsByCwd && Array.isArray(state.claudeSkillsByCwd[session.cwd])
           ? state.claudeSkillsByCwd[session.cwd]
           : [];
-        var loading = !!(state.claudeSkillsLoadingByCwd && state.claudeSkillsLoadingByCwd[session.cwd]);
-        var items = loading
-          ? '<div class="composer-skills-empty">正在加载 skills…</div>'
-          : skills.length
-            ? skills.map(function(skill) {
-              var name = typeof skill.name === "string" ? skill.name : "";
-              if (!name) return "";
-              var checked = selected.indexOf(name) !== -1;
-              var description = typeof skill.description === "string" ? skill.description : "";
-              var source = skill.source === "project" ? "项目" : "用户";
-              return '<button class="composer-skill-option' + (checked ? " is-selected" : "") + '" type="button" role="checkbox" aria-checked="' + checked + '" data-claude-skill-name="' + escapeHtml(name) + '">' +
-                '<span class="composer-skill-check" aria-hidden="true">' + (checked ? "✓" : "") + '</span>' +
-                '<span class="composer-skill-copy"><span class="composer-skill-name">' + escapeHtml(name) + '</span>' +
-                (description ? '<span class="composer-skill-description">' + escapeHtml(description) + '</span>' : "") +
-                '</span><span class="composer-skill-source">' + source + '</span></button>';
-            }).join("")
-            : '<div class="composer-skills-empty">当前目录没有可用 skills。</div>';
-        return '<div class="composer-skills-popover' + (state.claudeSkillsPickerOpen ? "" : " hidden") + '" id="composer-skills-popover" role="dialog" aria-label="选择 skills" tabindex="-1">' +
-          '<div class="composer-skills-heading"><span>Skills</span><span class="composer-skills-count">' + (selected.length ? ("已选 " + selected.length) : "本条不应用") + '</span></div>' +
-          '<div class="composer-skills-list">' + items + '</div>' +
-        '</div>';
+        return skills.reduce(function(acc, skill) {
+          var name = typeof skill.name === "string" ? skill.name : "";
+          if (!name) return acc;
+          acc.push({
+            name: name,
+            description: typeof skill.description === "string" ? skill.description : "",
+            sourceLabel: skill.source === "project" ? "项目" : "用户",
+            selected: selected.indexOf(name) !== -1,
+          });
+          return acc;
+        }, []);
       }
 
-      function refreshClaudeSkillsPicker() {
-        var picker = document.getElementById("composer-skills-popover");
+      export function refreshClaudeSkillsPicker() {
         var session = getSelectedSession();
         if (!supportsClaudeSkillSelection(session)) {
-          picker?.remove();
+          syncBrowserComposerSkills(EMPTY_COMPOSER_SKILLS);
           return;
         }
-        var markup = renderClaudeSkillsPickerHtml(session);
-        if (picker) {
-          picker.outerHTML = markup;
-        } else {
-          var plusPopover = document.getElementById("composer-plus-popover");
-          if (!plusPopover) return;
-          var template = document.createElement("template");
-          template.innerHTML = markup;
-          plusPopover.insertAdjacentElement("afterend", template.content.firstElementChild as Element);
-        }
-        if (state.claudeSkillsPickerOpen) {
-          requestAnimationFrame(function() {
-            var nextPicker = document.getElementById("composer-skills-popover");
-            var focusTarget = nextPicker?.querySelector<HTMLElement>("[data-claude-skill-name]") ?? nextPicker;
-            focusTarget?.focus();
-          });
-        }
+        syncBrowserComposerSkills({
+          visible: !!state.claudeSkillsPickerOpen,
+          loading: !!(state.claudeSkillsLoadingByCwd && state.claudeSkillsLoadingByCwd[session.cwd]),
+          options: buildClaudeSkillOptions(session),
+          selectedCount: getSelectedClaudeSkills(session).length,
+          onToggle: function(name) {
+            toggleClaudeSkill(getSelectedSession(), name);
+          },
+        });
       }
 
       export function loadClaudeSkillsForSession(session) {
@@ -595,86 +507,11 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
         refreshClaudeSkillControls();
       }
 
-      function renderComposerSelectHost(control, scope) {
-        var key = String(scope) + "-" + String(control);
-        return '<span class="composer-config-select-host" data-composer-select-host data-composer-select-key="' + escapeHtml(key) + '" data-composer-select-scope="' + escapeHtml(scope) + '" data-mode-control="' + escapeHtml(control) + '"></span>';
-      }
-
-      export function renderComposerConfigControlsHtml(session, scope = "all") {
-        var mode = state.chatMode || "default";
-        var model = normalizeComposerModelValue(getEffectiveModel(session));
-        var thinkingOptions = getThinkingSelectOptions(getEffectiveThinking(session), session);
-        var thinking = normalizeAvailableComposerValue(getEffectiveThinking(session), thinkingOptions, "off");
-        var modeLabel = getModeLabel(mode);
-        var modelLabel = getShortModelLabel(model, session);
-        // title 永远给完整 ID：触发器文本会被 ellipsis，tooltip 是唯一的完整信息出口。
-        var modelFullLabel = getModelDisplayLabel(model, session) || modelLabel;
-        var thinkingLabel = getThinkingCompactLabel(thinking, session);
-        var title = "模式 " + modeLabel + " · 模型 " + modelFullLabel + " · 思考 " + thinkingLabel;
-        var showMode = scope !== "runtime";
-        var showRuntime = scope !== "mode";
-        var showExtended = scope === "all";
-        var showModelRefresh = scope === "runtime" || showExtended;
-        var ariaLabel = scope === "mode" ? "权限模式" : (scope === "runtime" ? "模型与思考设置" : "会话设置");
-        return '<div class="composer-config-controls composer-config-controls-' + escapeHtml(scope) + '" data-config-scope="' + escapeHtml(scope) + '" role="group" aria-label="' + ariaLabel + '" title="' + escapeHtml(title) + '">' +
-          (showMode
-            ? '<span class="composer-config-chip composer-config-chip-mode" data-mode-control-pill="mode" title="模式：' + escapeHtml(modeLabel) + '">' +
-                iconSvg("sliders", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) +
-                renderComposerSelectHost("mode", scope) +
-              '</span>'
-            : "") +
-          (showRuntime
-            ? '<span class="composer-config-chip composer-config-model" data-mode-control-pill="model" title="模型：' + escapeHtml(modelFullLabel) + '">' +
-                iconSvg("cpu", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) +
-                renderComposerSelectHost("model", scope) +
-              '</span>' +
-              (showModelRefresh
-                ? '<button class="model-refresh-button composer-model-refresh-button' + (state.modelsRefreshing ? ' is-refreshing' : '') + '" type="button" data-models-refresh data-models-refresh-scope="' + escapeHtml(scope) + '" aria-label="刷新模型列表" title="刷新模型列表" aria-busy="' + (state.modelsRefreshing ? 'true' : 'false') + '"' +
-                    (state.modelsRefreshing ? ' disabled' : '') + '>' +
-                    iconSvg("refresh", { size: 13, strokeWidth: 1.9, cls: "model-refresh-icon" }) +
-                    '<span class="model-refresh-label">刷新模型列表</span>' +
-                  '</button>'
-                : "") +
-              '<span class="composer-config-chip composer-config-thinking" data-mode-control-pill="thinking" data-thinking="' + escapeHtml(thinking) + '" title="思考深度：' + escapeHtml(thinkingLabel) + '">' +
-                iconSvg("brain", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) +
-                renderComposerSelectHost("thinking", scope) +
-              '</span>'
-            : "") +
-          (showExtended && supportsClaudeSkillSelection(session)
-            ? '<button class="composer-config-chip composer-config-skills" type="button" data-claude-skills-trigger aria-haspopup="dialog" aria-expanded="false" title="选择本条消息要应用的 skills">Skills</button>'
-            : "") +
-        '</div>';
-      }
-
-      // 改完任何一处 trio 的 select 后，把所有 trio 实例的 label / select.value 同步刷新。
-      // 同时重建 model select 的 options，保证异步 fetchAvailableModels 到达后选项列表完整。
+      // 把所有三件套实例的 label / select 同步到当前会话设置。
       export function refreshAllChatModeTrios() {
         var session = getSelectedSession();
-        var preferredTool = getPreferredTool();
         var mode = state.chatMode || "default";
-        var model = getEffectiveModel(session) || "";
-        var modelLabel = getShortModelLabel(model, session);
         var thinking = getEffectiveThinking(session);
-        var trios = document.querySelectorAll(".chat-mode-trio");
-        trios.forEach(function(trio) {
-          function setPair(ctrl, value, optionsHtml, labelText?) {
-            var pillNode = trio.querySelector('[data-mode-control-pill="' + ctrl + '"]');
-            if (!pillNode) return;
-            var label = pillNode.querySelector(".composer-text-label");
-            if (label) label.textContent = labelText || value;
-            if (ctrl === "thinking") {
-              syncThinkingSelect(pillNode, value, session);
-              return;
-            }
-            var sel = pillNode.querySelector('[data-mode-control="' + ctrl + '"]') as HTMLSelectElement | null;
-            if (!sel) return;
-            if (optionsHtml) sel.innerHTML = optionsHtml;
-            if (sel.value !== value) sel.value = value;
-          }
-          setPair("mode", mode, renderChatModeOptionsRaw(preferredTool, mode));
-          setPair("model", model, renderChatModelOptionsRaw(model, session), modelLabel);
-          setPair("thinking", thinking, "", getThinkingCompactLabel(thinking, session));
-        });
         refreshComposerConfigControls(session, mode, getEffectiveModel(session) || "", thinking);
       }
 
@@ -688,36 +525,27 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
         var modelLabel = getShortModelLabel(normalizedModel, session);
         var modelFullLabel = getModelDisplayLabel(normalizedModel, session) || modelLabel;
         var thinkingLabel = getThinkingCompactLabel(normalizedThinking, session);
-        var controls = document.querySelectorAll(".composer-config-controls");
-        controls.forEach(function(control) {
-          var title = "模式 " + modeLabel + " · 模型 " + modelFullLabel + " · 思考 " + thinkingLabel;
-          control.setAttribute("title", title);
-          var modePart = control.querySelector('[data-mode-control-pill="mode"]');
-          if (modePart) {
-            modePart.setAttribute("title", "模式：" + modeLabel);
-          }
-          var modelPart = control.querySelector('[data-mode-control-pill="model"]');
-          if (modelPart) {
-            // 触发器宽度不够时文本会被 ellipsis 掉，这里必须给完整 ID。
-            modelPart.setAttribute("title", "模型：" + modelFullLabel);
-          }
-          var thinkingPart = control.querySelector('[data-mode-control-pill="thinking"]');
-          if (thinkingPart) {
-            thinkingPart.setAttribute("data-thinking", normalizedThinking);
-            thinkingPart.setAttribute("title", "思考深度：" + thinkingLabel);
-          }
-          var skillsTrigger = control.querySelector("[data-claude-skills-trigger]");
-          var supportsExtendedControls = control.getAttribute("data-config-scope") === "all";
-          if (supportsExtendedControls && supportsClaudeSkillSelection(session)) {
-            if (!skillsTrigger) {
-              control.insertAdjacentHTML(
-                "beforeend",
-                '<button class="composer-config-chip composer-config-skills" type="button" data-claude-skills-trigger aria-haspopup="dialog" aria-expanded="false" title="选择本条消息要应用的 skills">Skills</button>',
-              );
-            }
-          } else {
-            skillsTrigger?.remove();
-          }
+        var selectedSkills = getSelectedClaudeSkills(session);
+        syncBrowserComposerConfig({
+          // 三个宿主的 chip 内容是同一份状态，只有 scope 决定显示哪几个 chip。
+          resolve: function() {
+            return {
+              groupTitle: "模式 " + modeLabel + " · 模型 " + modelFullLabel + " · 思考 " + thinkingLabel,
+              modeLabel: modeLabel,
+              modelFullLabel: modelFullLabel,
+              modelRefreshing: !!state.modelsRefreshing,
+              thinkingValue: normalizedThinking,
+              thinkingLabel: thinkingLabel,
+              skillsVisible: supportsClaudeSkillSelection(session),
+              skillsLabel: selectedSkills.length ? ("Skills " + selectedSkills.length) : "Skills",
+              skillsTitle: selectedSkills.length
+                ? ("已选择 " + selectedSkills.length + " 个 skills")
+                : "选择本条消息要应用的 skills",
+              skillsExpanded: !!state.claudeSkillsPickerOpen,
+            };
+          },
+          onRefreshModels: function() { void refreshAvailableModels(); },
+          onOpenSkills: function(trigger) { toggleClaudeSkillsPicker(trigger); },
         });
         syncBrowserComposerSelects({
           resolve: function(control) {
@@ -760,15 +588,6 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
             }
           },
         });
-        refreshClaudeSkillControls();
-      }
-
-      export function renderChatModeOptionsRaw(tool, selectedMode) {
-        return getSupportedModes(tool).map(function(mode) {
-          return '<option value="' + escapeHtml(mode) + '"' + (mode === selectedMode ? " selected" : "") + '>' +
-            escapeHtml(mode) +
-          '</option>';
-        }).join("");
       }
 
       export function getProviderKey(provider) {
@@ -865,31 +684,6 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
           options.push({ value: normalized, label: normalized + "（自定义）" });
         }
         return options;
-      }
-
-      // Raw 选项优先显示模型 ID，并以简短状态标识候选的验证状态。
-      export function renderChatModelOptionsRaw(selected, session) {
-        var models = getModelsForCurrentProvider(session);
-        var normalized = normalizeComposerModelValue(selected);
-        var html = '<option value=""' + (!normalized ? " selected" : "") + '>' + escapeHtml(getModelDisplayLabel("", session)) + '</option>';
-        for (var i = 0; i < models.length; i++) {
-          var m = models[i];
-          if (m.id === "default") continue;
-          var rawSuffix = getProviderForSession(session) === "claude"
-            ? m.availability === "verified"
-              ? " · verified"
-              : m.availability === "stale"
-                ? " · stale"
-                : m.source === "models-api"
-                  ? " · API candidate"
-                  : " · candidate"
-            : "";
-          html += '<option value="' + escapeHtml(m.id) + '"' + (m.id === normalized ? " selected" : "") + '>' + escapeHtml(m.id + rawSuffix) + '</option>';
-        }
-        if (normalized && !models.some(function(m) { return m.id === normalized; })) {
-          html += '<option value="' + escapeHtml(normalized) + '" selected>' + escapeHtml(normalized) + '</option>';
-        }
-        return html;
       }
 
       export function syncComposerModelSelect(session) {
@@ -1010,15 +804,6 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
         var m = session.mode;
         return m === "managed" || m === "full-access";
       }
-      export function renderAutoApproveChip(session) {
-        if (!session) return "";
-        if (isAutoApproveImpliedByMode(session)) return "";
-        var enabled = !!session.autoApprovePermissions;
-        return enabled
-          ? '<button id="auto-approve-toggle" class="composer-pill composer-pill-chip auto-approve-indicator active" type="button" aria-pressed="true" aria-label="自动批准已启用，点击关闭" title="自动批准已启用 — 点击关闭">' + iconSvg("shieldCheck", { size: 12, strokeWidth: 1.7, cls: "composer-pill-icon" }) + '<span class="composer-pill-label">自动</span></button>'
-          : '<button id="auto-approve-toggle" class="composer-pill composer-pill-chip auto-approve-indicator" type="button" aria-pressed="false" aria-label="自动批准已关闭，点击开启" title="自动批准已关闭 — 点击开启">' + iconSvg("shield", { size: 12, strokeWidth: 1.7, cls: "composer-pill-icon" }) + '<span class="composer-pill-label">手动</span></button>';
-      }
-
       export function fetchAvailableModels() {
         return fetch("/api/models", { credentials: "same-origin" })
           .then(function(res) { return res.json(); })
@@ -1041,23 +826,11 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
         return true;
       }
 
-      function syncModelRefreshButtons() {
-        var buttons = document.querySelectorAll("[data-models-refresh]");
-        buttons.forEach(function(button) {
-          var refreshing = !!state.modelsRefreshing;
-          button.toggleAttribute("disabled", refreshing);
-          button.setAttribute("aria-busy", refreshing ? "true" : "false");
-          button.setAttribute("title", refreshing ? "正在刷新模型列表" : "刷新模型列表");
-          button.setAttribute("aria-label", refreshing ? "正在刷新模型列表" : "刷新模型列表");
-          button.classList.toggle("is-refreshing", refreshing);
-        });
-      }
-
       /** Refresh every provider catalog and immediately repopulate all visible model selectors. */
       export function refreshAvailableModels() {
         if (state.modelsRefreshing) return Promise.resolve(null);
         state.modelsRefreshing = true;
-        syncModelRefreshButtons();
+        refreshAllChatModeTrios();
         return fetch("/api/models/refresh", { method: "POST", credentials: "same-origin" })
           .then(function(res) {
             if (!res.ok) {
@@ -1078,7 +851,7 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
           })
           .finally(function() {
             state.modelsRefreshing = false;
-            syncModelRefreshButtons();
+            refreshAllChatModeTrios();
           });
       }
 
@@ -1231,14 +1004,10 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
       }
 
       export function applyCurrentView() {
-        var reactShellActive = isBrowserReactShellMounted();
         var hasSession = !!state.selectedId;
-        var terminalContainer = document.getElementById("output");
         var chatContainer = document.getElementById("chat-output");
-        var blankChat = document.getElementById("blank-chat");
         var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
         var structured = isStructuredSession(selectedSession);
-        var showTerminal = hasSession && !structured && state.currentView === "terminal";
         var showChat = hasSession && (structured || state.currentView !== "terminal");
         if (structured) {
           state.currentView = "chat";
@@ -1246,22 +1015,9 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
           state.currentView = "terminal";
         }
 
-        if (!reactShellActive && terminalContainer) {
-          terminalContainer.classList.toggle("active", showTerminal);
-          terminalContainer.classList.toggle("hidden", !showTerminal);
-        }
-        if (!reactShellActive && chatContainer) {
-          chatContainer.classList.toggle("active", showChat);
-          chatContainer.classList.toggle("hidden", !showChat);
-        }
-        // blank-chat 的可见性由 applyCurrentView 收口：updateShellChrome 在
-        // selectedSession 缺失（启动期 selectedId 已恢复但 /api/sessions 未回 /
-        // activateSession 在 updateSessionSnapshot 之前调 switchToSessionView 等
-        // 瞬态）时会走 else 分支把 blank-chat 显示出来，但紧接着调到这里，应
-        // 以 hasSession 为准重新隐藏，避免与 terminal/chat 同屏并存。
-        if (!reactShellActive && blankChat) {
-          blankChat.classList.toggle("hidden", hasSession);
-        }
+        // #output / #chat-output / #blank-chat 的可见性类名由 React Shell 从
+        // UiStore 快照渲染，legacy 不再直接 toggle。这里只保留需要命令式
+        // 收口的 chat 容器准备（#chat-output 是 legacy 槽位，其子节点归 legacy）。
         if (chatContainer && showChat) {
           ensureChatMessagesContainer(chatContainer);
         }
@@ -1483,21 +1239,6 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
             updateStructuredQueueCounter();
             state.bootstrapping = false;
             persistSelectedId();
-            if (!isBrowserReactShellMounted()) {
-              var listEl = document.getElementById("sessions-list");
-              var rendered = renderSessionsListContent();
-              if (listEl && listEl.innerHTML === rendered) {
-                var countEl = document.getElementById("session-count");
-                if (countEl) countEl.textContent = String(state.sessions.length);
-              } else {
-                if (listEl) {
-                  listEl.innerHTML = rendered;
-                  refreshTailMarqueePaths(listEl);
-                }
-                var countEl = document.getElementById("session-count");
-                if (countEl) countEl.textContent = String(state.sessions.length);
-              }
-            }
             updateShellChrome();
             if (state.selectedId && state.gitStatusSessionId !== state.selectedId) {
               loadGitStatus(state.selectedId);
@@ -1546,15 +1287,6 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
       }
 
       export function updateSessionsList() {
-        if (!isBrowserReactShellMounted()) {
-          var listEl = document.getElementById("sessions-list");
-          var countEl = document.getElementById("session-count");
-          if (listEl) {
-            listEl.innerHTML = renderSessionsListContent();
-            refreshTailMarqueePaths(listEl);
-          }
-          if (countEl) countEl.textContent = String(state.sessions.length);
-        }
         notifyLegacyUiChange("sessions:update");
         // History renders inline inside #sessions-list now, so the line above
         // already refreshed it — no separate docked region to update.
@@ -1565,38 +1297,23 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
       }
 
       export function updateShellChrome() {
-        var reactShellActive = isBrowserReactShellMounted();
         var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        // 外壳 chrome（会话标题 / 状态 / 类型 / 摘要 / 顶栏标题）现在完全由
+        // React Shell 从 UiStore 快照渲染。原来的写入目标 —— #terminal-title、
+        // #terminal-info、#session-kind-display、.session-summary-value、
+        // .topbar-tagline —— 只存在于已删除的 legacy Shell markup 里，运行时
+        // querySelector 一律为 null，写入本身就是空操作。
         if (!selectedSession) {
           setTerminalInteractive(false);
           hideMiniKeyboard();
           closeKeyboardPopup();
         }
-        var terminalTitle = selectedSession ? sessionChromeTitle(selectedSession, "Wand") : "Wand";
-        var terminalInfo = selectedSession ? getSessionStatusLabel(selectedSession) : "开始对话";
-        var summaryEl = document.querySelector(".session-summary-value");
-        var titleEl = document.getElementById("terminal-title");
-        var infoEl = document.getElementById("terminal-info");
-        var topbarTitleEl = document.querySelector(".topbar-session-title, .topbar-tagline");
-        if (!reactShellActive && topbarTitleEl && selectedSession) {
-          topbarTitleEl.classList.remove("topbar-tagline");
-          topbarTitleEl.classList.add("topbar-session-title");
-          topbarTitleEl.textContent = sessionChromeTitle(selectedSession, "Wand");
-          topbarTitleEl.setAttribute("title", selectedSession.description || selectedSession.command || "");
-        }
-        var blankChat = document.getElementById("blank-chat");
-        var terminalContainer = document.getElementById("output");
-        var chatContainer = document.getElementById("chat-output");
-        var stopBtn = document.getElementById("stop-button");
-
-        if (summaryEl && summaryEl.textContent !== terminalTitle) summaryEl.textContent = terminalTitle;
-        if (titleEl && titleEl.textContent !== terminalTitle) titleEl.textContent = terminalTitle;
-        if (infoEl) infoEl.textContent = selectedSession ? (terminalInfo + " · " + getSessionKindDescription(selectedSession)) : terminalInfo;
-
-        var kindEl = document.getElementById("session-kind-display");
-        var kindText = selectedSession ? getSessionKindLabel(selectedSession) : "终端";
-        if (kindEl && kindEl.textContent !== kindText) kindEl.textContent = kindText;
         updateAutoApproveIndicator();
+
+        // 只保留 legacy-owned 的槽内节点：#output 是 React 渲染的槽根（class 归
+        // React），这里只用来判断终端实例是否需要初始化/重挂。
+        var terminalContainer = document.getElementById("output");
+        var stopBtn = document.getElementById("stop-button");
 
         // 结构化会话没有 PTY。这里若初始化终端，initTerminal 的测量准备会
         // 直接触碰 #output 可见性，并可能与 React 外壳的 chat 投影打架。
@@ -1628,20 +1345,12 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
           maybeScrollTerminalToBottom("view");
         }
 
-        var inputPanel = document.querySelector(".input-panel");
-        if (selectedSession) {
-          if (!reactShellActive && blankChat) blankChat.classList.add("hidden");
-          if (!reactShellActive && terminalContainer) terminalContainer.classList.remove("hidden");
-          if (!reactShellActive && chatContainer) chatContainer.classList.remove("hidden");
-          // v2: 停止按钮不在这里统一展示 —— 由 updateInteractiveControls()
-          // 按 computeRunningSignal 判断「真在跑」时才露出（applyCurrentView 末尾会调用）。
-          if (!reactShellActive && inputPanel) inputPanel.classList.remove("hidden");
-        } else {
-          if (!reactShellActive && blankChat) blankChat.classList.remove("hidden");
-          if (!reactShellActive && terminalContainer) terminalContainer.classList.add("hidden");
-          if (!reactShellActive && chatContainer) chatContainer.classList.add("hidden");
+        // #output / #chat-output / .input-panel / #blank-chat 的隐藏类归 React
+        // Shell 所有；legacy 侧只剩 #stop-button 是真正 legacy-owned 的槽内节点。
+        // v2: 停止按钮不在这里统一展示 —— 由 updateInteractiveControls()
+        // 按 computeRunningSignal 判断「真在跑」时才露出（applyCurrentView 末尾会调用）。
+        if (!selectedSession) {
           if (stopBtn) stopBtn.classList.add("hidden");
-          if (!reactShellActive && inputPanel) inputPanel.classList.add("hidden");
         }
         syncComposerModeSelect();
         syncComposerModelSelect(getSelectedSession());
@@ -1783,6 +1492,9 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
         }
         state.selectedId = id;
         state.claudeSkillsPickerOpen = false;
+        // 弹层由 React 渲染，重置打开标记后必须重新发布一次，否则切换会话会
+        // 把上一个会话的 skills 弹层留在屏幕上（旧实现靠 outerHTML 重建顺手收掉）。
+        refreshClaudeSkillsPicker();
         persistSelectedId();
         state.toolContentCache = {};
         // Clear queued inputs from the previous session to prevent cross-session leaks
@@ -1821,7 +1533,6 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
         // Update file panel cwd and refresh if open
         if (state.filePanelOpen) {
           updateFilePanelCwd(session);
-          refreshFileExplorer();
         }
         loadOutput(id).then(function() { focusInputBox(true); });
         subscribeToSession(id);
@@ -1847,56 +1558,15 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
         updateSessionsList();
       }
 
+      // 侧栏固定 / 收窄 / 抽屉开合状态全部由 React Shell 从 UiStore 快照渲染。
+      // `?reactShell=0` 删除后，下面的 legacy DOM 写入不可达（探针：登录页无
+      // 这些节点，认证态命中项均为 React-owned），只保留变更通知。
       export function updatePinState() {
-        if (isBrowserReactShellMounted()) {
-          notifyLegacyUiChange("layout:pin");
-          return;
-        }
-        var drawer = document.getElementById("sessions-drawer");
-        var mainLayout = document.querySelector(".main-layout");
-        // 与 renderAppShell 保持一致：手机端只允许窄条形态 anchored。
-        var isMobile = isMobileLayout();
-        var isCollapsed = !!state.sidebarPinned && !!state.sidebarCollapsed;
-        var isAnchored = isCollapsed || (!isMobile && (!!state.sidebarPinned || !!state.sessionsDrawerOpen));
-        if (drawer) {
-          drawer.classList.toggle("pinned", isAnchored);
-          drawer.classList.toggle("collapsed", isCollapsed);
-        }
-        if (mainLayout) {
-          mainLayout.classList.toggle("sidebar-pinned", isAnchored);
-          mainLayout.classList.toggle("sidebar-collapsed", isCollapsed);
-        }
-        var pinBtn = document.getElementById("sidebar-pin-btn");
-        if (pinBtn) {
-          pinBtn.classList.toggle("pinned", !!state.sidebarPinned);
-          pinBtn.title = state.sidebarPinned ? "已固定常驻（点击解除锁定）" : "固定侧栏常驻";
-          pinBtn.setAttribute("aria-label", state.sidebarPinned ? "解除固定常驻" : "固定侧栏常驻");
-          pinBtn.setAttribute("aria-pressed", state.sidebarPinned ? "true" : "false");
-        }
+        notifyLegacyUiChange("layout:pin");
       }
 
       export function updateDrawerState() {
-        if (isBrowserReactShellMounted()) {
-          notifyLegacyUiChange("layout:drawer");
-          return;
-        }
-        var drawer = document.getElementById("sessions-drawer");
-        var backdrop = document.getElementById("sessions-drawer-backdrop");
-        var mainLayout = document.querySelector(".main-layout");
-        if (drawer) {
-          drawer.classList.toggle("open", state.sessionsDrawerOpen);
-        }
-        if (backdrop) {
-          backdrop.classList.toggle("open", shouldShowSessionsBackdrop());
-        }
-        if (mainLayout) {
-          mainLayout.classList.toggle("sidebar-open", state.sessionsDrawerOpen);
-        }
-        var toggleBtn = document.getElementById("sessions-toggle-button");
-        if (toggleBtn) {
-          toggleBtn.classList.toggle("active", state.sessionsDrawerOpen);
-        }
-        updatePinState();
+        notifyLegacyUiChange("layout:drawer");
       }
 
       export function toggleSessionsDrawer() {
@@ -2169,22 +1839,9 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
         scheduleTerminalRefitAfterPaddingTransition();
       }
 
-      // 收窄按钮的图标/title/状态随 collapsed 切换。抽出来给轻量更新路径用，
-      // 避免为了换一个箭头方向就走全量 render()。
+      // 收窄按钮的图标/title/状态归 React 渲染（同样的不可达理由，见 updatePinState）。
       export function updateSidebarCollapseButton() {
-        if (isBrowserReactShellMounted()) {
-          notifyLegacyUiChange("layout:collapse-button");
-          return;
-        }
-        var btn = document.getElementById("sidebar-collapse-btn");
-        if (!btn) return;
-        var isCollapsed = !!state.sidebarPinned && !!state.sidebarCollapsed;
-        btn.classList.toggle("collapsed", isCollapsed);
-        btn.title = isCollapsed ? "展开侧栏" : "收起为窄条";
-        btn.setAttribute("aria-label", isCollapsed ? "展开侧栏" : "收起为窄条");
-        btn.innerHTML = isCollapsed
-          ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="10 6 16 12 10 18"/><line x1="20" y1="5" x2="20" y2="19"/></svg>'
-          : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="14 6 8 12 14 18"/><line x1="4" y1="5" x2="4" y2="19"/></svg>';
+        notifyLegacyUiChange("layout:collapse-button");
       }
 
       // 「更多操作」下拉默认 right:0 贴 more 按钮右沿向左展开。手机窄屏下这条会把
@@ -2898,36 +2555,21 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
       }
 
       export function renderAttachmentPreview() {
-        var bar = document.getElementById("attachment-preview");
-        if (!bar) return;
+        // 附件 pill 列表由 React portal 渲染（见 composer-attachments 组件），
+        // 这里只把「名字 / 已格式化的大小 / 预览 URL + 下标」发布过去。
         var items = getPendingAttachments(state.selectedId);
-        if (items.length === 0) {
-          bar.classList.add("hidden");
-          bar.innerHTML = "";
-          updateInteractiveControls();
-          return;
-        }
-        bar.classList.remove("hidden");
-        var html = "";
-        for (var i = 0; i < items.length; i++) {
-          var a = items[i];
-          var thumb = a.previewUrl
-            ? '<img src="' + escapeHtml(a.previewUrl) + '" alt="">'
-            : '<span class="att-icon">' + iconSvg("file", { size: 13, strokeWidth: 1.7 }) + '</span>';
-          html += '<span class="attachment-pill" data-index="' + i + '">' +
-            thumb +
-            '<span class="att-name" title="' + escapeHtml(a.name) + '">' + escapeHtml(a.name) + '</span>' +
-            '<span class="att-size">' + formatFileSize(a.size) + '</span>' +
-            '<button class="att-remove" data-index="' + i + '" type="button" title="移除" aria-label="移除附件 ' + escapeHtml(a.name) + '">×</button>' +
-            '</span>';
-        }
-        bar.innerHTML = html;
-        bar.querySelectorAll(".att-remove").forEach(function(btn) {
-          btn.addEventListener("click", function(e) {
-            e.preventDefault();
-            e.stopPropagation();
-            removePendingAttachment(parseInt(btn.getAttribute("data-index"), 10));
-          });
+        syncBrowserComposerAttachments({
+          resolve: function() {
+            return items.map(function(a, index) {
+              return {
+                index: index,
+                name: a.name,
+                sizeLabel: formatFileSize(a.size),
+                previewUrl: a.previewUrl || null,
+              };
+            });
+          },
+          onRemove: function(index) { removePendingAttachment(index); },
         });
         updateInteractiveControls();
       }

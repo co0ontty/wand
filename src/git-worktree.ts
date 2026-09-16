@@ -485,7 +485,15 @@ export async function mergeSessionWorktreeAsync(options: WorktreeMergeOptions): 
 
 export function prepareSessionWorktree(options: WorktreeSetupOptions): WorktreeSetupResult {
   const resolvedCwd = path.resolve(options.cwd);
-  const repoRoot = runGit(["rev-parse", "--show-toplevel"], resolvedCwd);
+  let repoRoot: string;
+  try {
+    repoRoot = runGit(["rev-parse", "--show-toplevel"], resolvedCwd);
+  } catch (error) {
+    if (/not a git repository/i.test(getGitErrorMessage(error))) {
+      throw new Error("当前目录不是 Git 仓库。请选择 Git 仓库，或关闭“独立 worktree 隔离”后重试。");
+    }
+    throw error;
+  }
 
   if (!repoRoot || !existsSync(repoRoot)) {
     throw new Error("当前目录不在 git 仓库中，无法启用 worktree 模式。");

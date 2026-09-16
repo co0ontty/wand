@@ -242,5 +242,8 @@ test("Shell chrome sources use UiStore hooks and no forbidden legacy seam", () =
     "utf8",
   );
   assert.match(panelSource, /className="file-explorer legacy-file-explorer-host"/);
-  assert.match(panelSource, /<FileExplorerHost root=\{committedCwd\.current\}\/>/);
+  // root 必须来自 state，不能是 ref：commitCwd 的 setCwd 常与当前值相同
+  // （输入期间 onChange 已同步），ref 更新不会触发 FileExplorerHost 重挂。
+  assert.match(panelSource, /const \[committedCwd, setCommittedCwd\] = React\.useState\(snapshotCwd\)/);
+  assert.match(panelSource, /<FileExplorerHost root=\{committedCwd\}\/>/);
 });

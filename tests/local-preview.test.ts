@@ -63,6 +63,11 @@ test("local preview helpers turn message links into one-click previews", () => {
   const terminal = readFileSync(new URL("../src/web-ui/browser/terminal.ts", import.meta.url), "utf8");
   assert.match(terminal, /registerLinkProvider/);
   assert.match(terminal, /openLocalPreviewFromLegacy/);
+  // xterm 的公开 IBuffer 上只有 active/normal/alternate，行内容要从
+  // term.buffer.active 上取。写成 term.buffer.getLine 会让 provideLinks 每行抛
+  // TypeError，终端里的本地链接全部失效。
+  assert.match(terminal, /term\.buffer\.active\.getLine\(lineNumber\)/);
+  assert.doesNotMatch(terminal, /term\.buffer\.getLine\(/);
 });
 
 test("local preview targets are limited to loopback HTTP ports", () => {

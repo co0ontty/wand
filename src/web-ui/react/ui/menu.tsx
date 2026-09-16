@@ -30,6 +30,7 @@ export const WandMenuItem = forwardRef<HTMLButtonElement, WandMenuItemProps>(fun
   return (
     <button
       {...props}
+      onClick={props.onClick}
       ref={ref}
       type={type ?? "button"}
       role={props.role ?? "menuitem"}

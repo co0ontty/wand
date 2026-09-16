@@ -48,7 +48,7 @@ import {
 import { OpenCodeRunner, applyOpenCodeEvent } from "./structured-opencode-adapter.js";
 import { GrokRunner, applyGrokEvent } from "./structured-grok-adapter.js";
 import { QoderRunner } from "./structured-qoder-adapter.js";
-import { PiRunner, applyPiEvent } from "./structured-pi-adapter.js";
+import { PiRunner, applyPiEvent, isMissingPiSession } from "./structured-pi-adapter.js";
 import {
   structuredRunId,
   type StructuredExecHost,
@@ -1260,6 +1260,9 @@ export class StructuredSessionManager {
           content: [{ type: "text", text: prompt }],
         };
     const requestId = randomUUID();
+    if (session.provider === "pi" && isMissingPiSession(session.structuredState?.lastError, session.claudeSessionId)) {
+      session = { ...session, claudeSessionId: null };
+    }
     const updated: SessionSnapshot = {
       ...session,
       status: "running",
@@ -2622,6 +2625,9 @@ export class StructuredSessionManager {
         errorText,
         result.state,
       );
+      if (provider === "pi" && isMissingPiSession(result.stderr, current.claudeSessionId)) {
+        failed.claudeSessionId = null;
+      }
       this.sessions.set(sessionId, failed);
       this.saveAuthoritativeSession(failed);
       this.emitStructuredSnapshot(failed);

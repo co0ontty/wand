@@ -3,7 +3,7 @@
  * src/web-ui/content/tailwind.css.
  *
  * The output is a generated artifact consumed by src/web-ui/styles.ts, which
- * appends it after the hand-written content/styles.css. Do not edit the output
+ * serves it before the hand-written content/styles.css. Do not edit the output
  * by hand. Uses the Tailwind CLI so the CSS pipeline matches what Appica
  * documents, instead of relying on unstable @tailwindcss/node internals.
  */

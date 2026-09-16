@@ -5,41 +5,21 @@ import { escapeHtml, refreshTailMarqueePaths, renderTailMarqueePath, scrollPathE
 import { getConfigCwd } from "./chat-scroll";
 import { shortCommand } from "./chat-render";
 import { attachEventListeners } from "./events";
-import { shouldShowSessionsBackdrop, isMobileLayout, refreshFileExplorer, renderFileExplorer, wandFileIcon } from "./file-browser";
+import { shouldShowSessionsBackdrop, isMobileLayout } from "./file-browser";
 import { loadGitStatus, renderTopbarGitBadgeHtml, renderTopbarMoreMenuHtml } from "./git-commit";
 import { autoResizeInput, getSelectedSession } from "./input";
 import { requestNotificationPermission, notifyUpdateAvailable, _apkVersion, _macAppVersion } from "./notifications";
-import { applyCurrentView, checkApkAutoUpdate, checkDmgAutoUpdate, closeTransientSessionsDrawer, fetchAvailableModels, getComposerPlaceholder, hasNativeBackToApp, hasNativeSwitchServer, loadSessions, refreshAll, renderAutoApproveChip, renderClaudeSkillsPickerHtml, renderComposerConfigControlsHtml, syncComposerModeSelect, syncComposerModelSelect, updateDrawerState, updateShellChrome } from "./session-engine";
+import { applyCurrentView, checkApkAutoUpdate, checkDmgAutoUpdate, closeTransientSessionsDrawer, fetchAvailableModels, getComposerPlaceholder, hasNativeBackToApp, hasNativeSwitchServer, loadSessions, refreshAll, refreshClaudeSkillsPicker, syncComposerModeSelect, syncComposerModelSelect, updateDrawerState, updateShellChrome } from "./session-engine";
 import { getSessionStatusClass, getSessionStatusLabel } from "./session-ui";
-import { renderSessionsListContent } from "./sidebar";
 import { maybeScrollTerminalToBottom } from "./terminal";
 import { ensureTerminalFit, ensureTerminalFitWithRetry, teardownTerminal } from "./viewport";
-import { initWebSocket, forceReconnectWebSocket, cancelWsReconnect, evaluateWsHeartbeatStale, startPolling } from "./websocket";
+import { initWebSocket, forceReconnectWebSocket, cancelWsReconnect, evaluateWsHeartbeatStale, startPolling, syncComposerBadges } from "./websocket";
+import { syncComposerActionError } from "./composer-action-error";
 import {
   isBrowserReactShellMounted,
   renderBrowserReactShell,
   unmountBrowserReactShell,
 } from "./shell-runtime";
-
-// 这些函数的实际 import 会在其他模块创建后补全
-// import { initTerminal, teardownTerminal, ensureTerminalFit, ensureTerminalFitWithRetry, maybeScrollTerminalToBottom } from "./terminal";
-// import { attachEventListeners } from "./events";
-// import { renderSessionsListContent, renderSessions, loadSessions, getSelectedSession } from "./sessions";
-// import { updateDrawerState, closeTransientSessionsDrawer, shouldShowSessionsBackdrop, isMobileLayout } from "./layout";
-// import { syncComposerModeSelect, syncComposerModelSelect, getComposerTool, getSafeModeForTool, getComposerPlaceholder, renderChatModeTrioHtml, renderAutoApproveChip } from "./composer";
-// import { applyCurrentView, updateShellChrome } from "./view";
-// import { refreshFileExplorer, renderFileExplorer, wandFileIcon } from "./file-explorer";
-// import { initWebSocket, forceReconnectWebSocket, cancelWsReconnect, evaluateWsHeartbeatStale } from "./websocket";
-// import { startPolling, refreshAll } from "./polling";
-// import { fetchAvailableModels } from "./models";
-// import { requestNotificationPermission, notifyUpdateAvailable } from "./notification";
-// import { checkApkAutoUpdate, checkDmgAutoUpdate } from "./native-update";
-// import { loadClaudeHistory, ensureClaudeHistoryLoaded } from "./claude-history";
-// import { loadGitStatus, renderTopbarGitBadgeHtml } from "./git";
-// import { shortCommand, getSessionStatusClass, getSessionStatusLabel } from "./session-utils";
-// import { hasNativeSwitchServer } from "./native";
-// import { renderTopbarMoreMenuHtml } from "./topbar";
-// import { updateQueueBar } from "./queue";
 
 // options.preserveStickState=true：仅清渲染缓存，不动 sticky/未读
 // 状态。用于 page-refresh、ws 重连等"用户停留在当前会话，只是想刷新
@@ -118,6 +98,22 @@ export function renderBootLoading() {
       '<div class="boot-loading-card">' +
         '<div class="boot-loading-spinner"></div>' +
         '<div class="boot-loading-text">正在连接 Wand…</div>' +
+      '</div>' +
+    '</div>';
+}
+
+/**
+ * React shell mount failure has no legacy shell left to fall back to, so the
+ * user must not be left staring at an empty #app. Reuses the boot card markup
+ * and its existing styles instead of introducing a second error surface.
+ */
+export function renderBootFailure() {
+  var app = document.getElementById("app");
+  if (!app) return;
+  app.innerHTML =
+    '<div class="boot-loading">' +
+      '<div class="boot-loading-card">' +
+        '<div class="boot-loading-text">界面加载失败，请刷新页面重试</div>' +
       '</div>' +
     '</div>';
 }
@@ -385,23 +381,19 @@ export function render(options?: any) {
     state.sessionsDrawerOpen = true;
     writeStoredBoolean("wand-sidebar-open", true);
   }
-  var shellRenderResult: "disabled" | "mounted" | "updated" = "disabled";
+  var shellRenderResult: "mounted" | "updated";
   var rebuiltLegacyHosts = false;
   if (isLoggedIn) {
     try {
       shellRenderResult = renderBrowserReactShell(app, renderAppShell);
     } catch (error) {
-      console.error("[wand] React shell mount failed; using legacy shell", error);
+      console.error("[wand] React shell mount failed", error);
       unmountBrowserReactShell();
-      app.innerHTML = renderAppShell();
-      shellRenderResult = "disabled";
+      document.documentElement.classList.remove("no-transition");
+      renderBootFailure();
+      return;
     }
-    if (shellRenderResult === "disabled") {
-      app.innerHTML = renderAppShell();
-      rebuiltLegacyHosts = true;
-    } else if (shellRenderResult === "mounted") {
-      rebuiltLegacyHosts = true;
-    }
+    rebuiltLegacyHosts = shellRenderResult === "mounted";
   } else {
     app.innerHTML = renderLogin();
     rebuiltLegacyHosts = true;
@@ -415,12 +407,12 @@ export function render(options?: any) {
   updateDrawerState();
   syncComposerModeSelect();
   syncComposerModelSelect(getSelectedSession());
+  syncComposerBadges();
+  syncComposerActionError();
+  refreshClaudeSkillsPicker();
   applyCurrentView();
   if (!skipShellChrome) {
     updateShellChrome();
-  }
-  if (isLoggedIn && state.filePanelOpen) {
-    refreshFileExplorer();
   }
 
   // Force reflow then re-enable transitions after layout settles
@@ -447,31 +439,12 @@ export function render(options?: any) {
     updateRunningIndicators(__sel);
   }
 
-  // 长路径元素（topbar / blank-chat 的 cwd）滚到末尾展示末尾目录。
+  // 长路径元素（topbar 的 cwd）滚到末尾展示末尾目录。
   // 渲染刚完成，元素可能尚未完成布局，scrollPathElementToEnd 内部用 rAF 兜底。
+  // blank-chat 的 cwd 路径元素只存在于已删除的 legacy Shell markup 里，
+  // React Shell 的空白页不再渲染 #blank-chat-cwd-path。
   scrollPathElementToEnd(document.getElementById("topbar-cwd"));
-  scrollPathElementToEnd(document.getElementById("blank-chat-cwd-path"));
   refreshTailMarqueePaths();
-}
-
-export function renderApprovalStatsBadge() {
-  var selectedSession = state.sessions.find(function(s: any) { return s.id === state.selectedId; });
-  var stats = selectedSession && selectedSession.approvalStats;
-  if (!stats || stats.total === 0) return '<span class="approval-stats hidden" id="approval-stats"></span>';
-  return '<span class="approval-stats" id="approval-stats">' +
-    '<span class="approval-stats-divider"></span>' +
-    '<span class="approval-stats-badge" id="approval-stats-badge" title="本次会话自动批准统计">' +
-      '<svg class="approval-stats-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>' +
-      '<span class="approval-stats-total">' + stats.total + '</span>' +
-    '</span>' +
-    '<span class="approval-stats-popup" id="approval-stats-popup">' +
-      '<span class="approval-stats-popup-title">自动批准统计</span>' +
-      (stats.command > 0 ? '<span class="approval-stats-row"><span class="approval-stats-row-icon">' + iconSvg("terminal", { size: 12, strokeWidth: 1.8 }) + '</span><span class="approval-stats-row-label">命令执行</span><span class="approval-stats-row-count">' + stats.command + '</span></span>' : '') +
-      (stats.file > 0 ? '<span class="approval-stats-row"><span class="approval-stats-row-icon">' + iconSvg("file", { size: 12, strokeWidth: 1.8 }) + '</span><span class="approval-stats-row-label">文件写入</span><span class="approval-stats-row-count">' + stats.file + '</span></span>' : '') +
-      (stats.tool > 0 ? '<span class="approval-stats-row"><span class="approval-stats-row-icon">' + iconSvg("wrench", { size: 12, strokeWidth: 1.8 }) + '</span><span class="approval-stats-row-label">其他工具</span><span class="approval-stats-row-count">' + stats.tool + '</span></span>' : '') +
-      '<span class="approval-stats-row approval-stats-row-total"><span class="approval-stats-row-icon">' + iconSvg("sigma", { size: 12, strokeWidth: 1.8 }) + '</span><span class="approval-stats-row-label">合计</span><span class="approval-stats-row-count">' + stats.total + '</span></span>' +
-    '</span>' +
-  '</span>';
 }
 
 // 品牌标记：与 index.ts 的 favicon data-URI 同源（深色圆角方块 + 赤陶色折线），
@@ -609,7 +582,7 @@ export function renderAppShell() {
         '</div>' +
         '<div class="sidebar-body">' +
           '<div id="sessions-panel">' +
-            '<div class="sessions-list" id="sessions-list">' + renderSessionsListContent() + '</div>' +
+            '<div class="sessions-list" id="sessions-list"></div>' +
           '</div>' +
         '</div>' +
         '<div class="sidebar-footer">' +
@@ -676,41 +649,9 @@ export function renderAppShell() {
             (selectedSession ? renderTopbarMoreMenuHtml(selectedSession) : '') +
           '</div>' +
         '</div>' +
-        // File panel backdrop (mobile)
-        '<div id="file-panel-backdrop" class="file-panel-backdrop' + (state.filePanelOpen ? " open" : "") + '"></div>' +
-        // File side panel
-        '<div id="file-side-panel" class="file-side-panel' + (state.filePanelOpen ? " open" : "") + '">' +
-          '<div class="file-side-panel-header">' +
-            '<div class="file-side-panel-title-group">' +
-              '<span class="file-side-panel-icon">' + wandFileIcon("folder-open", { size: 16 }) + '</span>' +
-              '<span class="file-side-panel-title">文件</span>' +
-            '</div>' +
-            '<div class="file-side-panel-header-actions">' +
-              '<button class="file-side-panel-iconbtn" id="file-explorer-refresh" type="button" title="刷新" aria-label="刷新文件列表">' +
-                wandFileIcon("refresh", { size: 15 }) +
-              '</button>' +
-              '<button id="file-side-panel-close" class="file-side-panel-iconbtn close" type="button" aria-label="关闭文件面板" title="关闭">' +
-                wandFileIcon("x", { size: 16 }) +
-              '</button>' +
-            '</div>' +
-          '</div>' +
-          '<div class="file-side-panel-body">' +
-            '<div class="file-explorer-header">' +
-              '<button class="file-explorer-up" id="file-explorer-up" type="button" title="返回上级目录" aria-label="返回上级目录">' +
-                wandFileIcon("arrow-up", { size: 15 }) +
-              '</button>' +
-              '<input type="text" class="file-explorer-path" id="file-explorer-cwd" value="' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" title="' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" placeholder="输入路径并回车..." spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" aria-label="当前路径，可直接修改后回车" />' +
-            '</div>' +
-            '<div class="file-search-box">' +
-              '<span class="file-search-icon">' + wandFileIcon("search", { size: 14 }) + '</span>' +
-              '<input type="text" id="file-search-input" class="file-search-input" placeholder="搜索当前目录…" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />' +
-              '<button class="file-search-clear" id="file-search-clear" type="button" aria-label="清除搜索" title="清除">' +
-                wandFileIcon("x", { size: 13 }) +
-              '</button>' +
-            '</div>' +
-            '<div class="file-explorer" id="file-explorer">' + renderFileExplorer(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '</div>' +
-          '</div>' +
-        '</div>' +
+        // 文件面板（含 backdrop、头部、搜索框）归 React Shell 渲染；
+        // 只保留 #file-explorer 槽位锚点，legacy 不再往里写内容。
+        '<div class="file-explorer" id="file-explorer"></div>' +
         '<div id="output" class="terminal-container' + (state.selectedId ? "" : " hidden") + ' active">' +
           '<div class="terminal-scale-overlay" aria-label="终端缩放控件">' +
             '<button id="terminal-scale-down-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="缩小">−</button>' +
@@ -790,7 +731,8 @@ export function renderAppShell() {
           // 「添加 / 权限」与「模型 / 思考 / 发送」两组，键盘顺序与视觉顺序一致。
           '<div class="input-composer-row">' +
           '<div class="input-composer' + (String(currentDraft || "").trim() ? ' has-text' : '') + (state.terminalInteractive ? ' is-terminal-interactive' : '') + '" role="group" aria-label="消息编辑器">' +
-            '<div id="attachment-preview" class="attachment-preview hidden" aria-label="待发送附件" aria-live="polite"></div>' +
+            // 附件预览条由 React portal 渲染（见 composer-attachments 组件）。
+            '<span class="composer-attachments-host" data-composer-attachments-host="main"></span>' +
             '<div class="composer-main-row">' +
               '<div class="composer-input-wrap">' +
                 '<textarea id="input-box" class="input-textarea" aria-label="消息输入" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml(currentDraft) + '</textarea>' +
@@ -803,22 +745,30 @@ export function renderAppShell() {
                 // tabindex="-1": 把 file input 移出 iOS Safari 表单导航链，避免软键盘顶部工具条出现 ⌃ ⌄ ✓。
                 '<input type="file" id="file-upload-input" multiple tabindex="-1" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0);pointer-events:none">' +
                 '<div class="composer-status-row" id="composer-status-row">' +
-                  renderComposerConfigControlsHtml(selectedSession, "mode") +
-                  renderAutoApproveChip(selectedSession) +
+                  // 三件套 chip 的内容全部由 React portal 渲染（见 composer-config 组件），
+                  // 宿主常驻；chip 内还会长出 select 宿主，所以配置同步要先于 select 同步。
+                  '<span class="composer-config-host" data-composer-config-host="mode"></span>' +
+                  // 徽章内容由 React portal 渲染（见 composer-badges 组件），宿主常驻，
+                  // 空状态用宿主上的 `.hidden` 表达。
+                  '<span class="composer-badge-host" data-composer-badge-host="auto-approve"></span>' +
                   '<span class="permission-actions hidden" id="permission-actions">' +
                     '<span class="permission-actions-label" id="permission-actions-label" role="status" aria-live="polite" aria-atomic="true">等待授权</span>' +
                     '<button id="approve-permission-btn" class="btn btn-permission btn-permission-approve" type="button">批准</button>' +
                     '<button id="approve-turn-permission-btn" class="btn btn-permission btn-permission-approve hidden" type="button">本轮允许</button>' +
                     '<button id="deny-permission-btn" class="btn btn-permission btn-permission-deny" type="button">拒绝</button>' +
                   '</span>' +
-                  renderApprovalStatsBadge() +
+                  '<span class="composer-badge-host" data-composer-badge-host="approval-stats"></span>' +
                 '</div>' +
               '</div>' +
               '<div class="composer-actions-right" role="group" aria-label="模型与发送">' +
                 // 直通模式的 Appica 发送按钮挂在这里（其余 legacy 按钮在直通下收起）。
                 '<span class="composer-rail-host" data-composer-rail-host="pty"></span>' +
                 '<div class="composer-inline-config">' +
-                  renderComposerConfigControlsHtml(selectedSession, "runtime") +
+                  // 注意：`.composer-inline-config` 的闭合由紧邻它的这个 `</div>` 承担，
+                  // 后续按钮因此落在 `.composer-actions-right` 内。删改这段时必须保持标签平衡，
+                  // 否则 `.input-panel` 会提前闭合，其后面的浮层（popover/语音气泡/错误条）会被
+                  // React 外壳的 `replaceChildren()` 丢弃。
+                  '<span class="composer-config-host" data-composer-config-host="runtime"></span>' +
                 '</div>' +
                 '<button class="prompt-optimize-btn" id="prompt-optimize-btn" type="button" title="优化提示词" aria-label="优化提示词">' +
                   iconSvg("sparkle", { size: 15, strokeWidth: 1.9, cls: "prompt-optimize-icon" }) +
@@ -846,35 +796,27 @@ export function renderAppShell() {
           // 内容：附件 / 终端交互 / 三件套（模式·模型·思考）。默认 hidden，点 + 切换；
           // 点 popover 外部 / Esc / 选完任一项后自动关闭。
           '<div class="composer-plus-popover hidden" id="composer-plus-popover" role="dialog" aria-modal="false" aria-label="更多操作" aria-hidden="true">' +
-            '<button class="plus-popover-item" id="plus-attach-item" type="button">' +
-              iconSvg("paperclip", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) +
-              '<span class="plus-popover-label">上传附件</span>' +
-            '</button>' +
-            '<button class="plus-popover-item' + (state.terminalInteractive ? " is-on" : "") + '" id="terminal-interactive-toggle-top" type="button" aria-pressed="' + (state.terminalInteractive ? "true" : "false") + '">' +
-              iconSvg("keyboard", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) +
-              '<span class="plus-popover-label">终端交互</span>' +
-              '<span class="plus-popover-toggle-state">' + (state.terminalInteractive ? "开" : "关") + '</span>' +
-            '</button>' +
+            // 两个条目（上传附件 / 终端交互）由 React portal 渲染（见 composer-popover
+            // 组件），宿主常驻；容器本身的开关与键盘导航仍然归 legacy。
+            '<span class="plus-popover-items-host" data-composer-popover-host="items"></span>' +
             // 模式 + 模型/思考：复用 data-mode-control 的 select 委托链。
             // 对所有会话都展示；服务端负责落盘当前会话可变的设置，不能即时应用的
             // CLI 启动参数会作为后续轮次 / 新会话默认值生效。
             '<div class="plus-popover-sep" aria-hidden="true"></div>' +
             '<div class="plus-popover-trio-wrap">' +
-              renderComposerConfigControlsHtml(selectedSession) +
+              '<span class="composer-config-host" data-composer-config-host="all"></span>' +
             '</div>' +
           '</div>' +
-          renderClaudeSkillsPickerHtml(selectedSession) +
-          // 语音实时转写气泡 —— 浮在输入框上方（.input-composer 之外，绕开它的 overflow:hidden）。
-          // 按住录音时显示，逐字展示识别文字；松手填回输入框。默认 hidden。
-          '<div class="voice-transcript-bubble hidden" id="voice-transcript-bubble" aria-live="polite">' +
-            '<div class="voice-transcript-text" id="voice-transcript-text"></div>' +
-            '<div class="voice-transcript-hint" id="voice-transcript-hint">' +
-              '<span class="voice-wave" aria-hidden="true"><i></i><i></i><i></i><i></i></span>' +
-              '<span class="voice-transcript-status" id="voice-transcript-status">正在聆听…上滑取消</span>' +
-            '</div>' +
-            '<span class="voice-bubble-arrow" aria-hidden="true"></span>' +
-          '</div>' +
-          '<p id="action-error" class="error-message hidden"></p>' +
+          // Skills 弹层由 React portal 渲染（见 composer-skills 组件）：宿主常驻，
+          // 关闭时不发布 mount。落点与旧实现 insertAdjacentElement("afterend") 一致。
+          '<span class="composer-skills-host" data-composer-skills-host="main"></span>' +
+          // 语音实时转写气泡 —— 浮在输入框上方（.input-composer 之外，绕开它的
+          // overflow:hidden）。**内容由 React portal 渲染**（见 composer-voice 组件）：
+          // 非录音态不发布 mount，整条气泡不渲染，等价于原来的 .hidden。
+          '<span class="composer-voice-host" data-composer-voice-host="main"></span>' +
+          // 错误条由 React portal 渲染（见 composer-action-error 组件），
+          // legacy 通过 state.actionError 表达文案。
+          '<span class="composer-action-error-host" data-composer-action-error-host="main"></span>' +
         '</div>' +
       '</main>' +
     '</div>' +

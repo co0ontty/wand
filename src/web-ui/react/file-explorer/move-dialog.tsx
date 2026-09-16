@@ -182,7 +182,7 @@ export function MoveEntryDialog({
       testId="move-entry-dialog"
       dismissable={!moving}
     >
-      <form
+      <form noValidate
         className="wand-folder-picker-form"
         aria-busy={loading || moving}
         onSubmit={(event) => { event.preventDefault(); void commit(targetDir); }}

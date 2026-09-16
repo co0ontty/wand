@@ -81,12 +81,14 @@ PTY 输入服务端原样写入终端，客户端必须拆成**先文本、后�
 
 ## Web UI 与生成文件
 
+统一技术栈与模块/样式职责见 `docs/web-architecture.md`；先验证并清理失效实现，再调整保留组件的样式。
+
 前端是服务端渲染的单 HTML shell + 内联资产，浏览器侧有**两层并存**：
 
 - Legacy vanilla-TS 层：`src/web-ui/browser/*.ts`（entry `main.ts`）— 终端、聊天渲染、WS、输入
 - React 层：`src/web-ui/react/*.tsx` — Shell、新建会话、设置、工作空间、任务、文件预览/编辑器等
 
-回滚开关：`?reactUi=0` 关整个 React UI/Shell；`?reactShell=0` 只回退 Shell（对话框保留）。React 通过 `*-adapter.ts` 调 legacy 的 `selectSession` / 终端池。
+回滚开关：`?reactUi=0` 只关通用 React 对话框/通知层（退回原生 confirm/prompt + legacy 气泡）；**认证后的 Shell 没有回退开关**，React Shell 始终挂载。`?reactShell=0` 已随 legacy Shell 一并删除。React 通过 `*-adapter.ts` 调 legacy 的 `selectSession` / 终端池。
 
 手编源码：
 
@@ -109,6 +111,8 @@ scripts/qrcode-entry.js    -> scripts/bundle-qrcode.js   -> content/vendor/qrcod
 ```
 
 升级 `@xterm/*` 或 `qrcode` 后要重跑对应 vendor bundler。`npm run build` 必须保持把 `src/web-ui/content/` 拷进 `dist/web-ui/`，否则打包版坏。
+
+`scripts.js` + `tailwind.css` + `styles.css` 全部被 `src/web-ui/index.ts` 内联进单个 HTML 响应，不能单独缓存，移动端冷启动每次重传，所以三者合计有 gzip 预算：`scripts/check-bundle-budget.js`（`npm run check:bundle-budget`，已挂在 `npm run build` 末尾）。预算只降不升；要松绑必须在同一个提交里改 `BUDGET` 并说明原因。
 
 Raw PTY 输出和结构化聊天 turn 是同一会话的两种表示；渲染 bug 先查 provider parser / WS payload / `chat-render.ts`，别急着怪 CSS。
 

@@ -88,6 +88,39 @@ async function startApp(root: string): Promise<{
   };
 }
 
+test("无会话项目的侧边栏目录改名只更新别名，不改变工作路径", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-name-sync-"));
+  const projectDir = mkdtempSync(path.join(os.tmpdir(), "wand-name-project-"));
+  const { baseUrl, close } = await startApp(root);
+  try {
+    const created = await fetch(`${baseUrl}/api/workspaces`, json("POST", {
+      name: "初始项目", cwd: projectDir,
+    }));
+    assert.equal(created.status, 201);
+    const workspace = await created.json() as WorkspaceRow;
+
+    const renamed = await fetch(`${baseUrl}/api/session-directories/name`, json("PUT", {
+      path: projectDir, name: "显示别名",
+    }));
+    assert.equal(renamed.status, 200);
+    assert.deepEqual(await renamed.json(), { ok: true, path: projectDir, name: "显示别名" });
+
+    const listed = await fetch(`${baseUrl}/api/workspaces`).then((response) => response.json()) as WorkspaceRow[];
+    assert.equal(listed.find((item) => item.id === workspace.id)?.cwd, projectDir);
+    assert.equal(listed.find((item) => item.id === workspace.id)?.name, "显示别名");
+    const groups = await fetch(`${baseUrl}/api/tasks`).then((response) => response.json()) as TaskGroup[];
+    assert.equal(groups.find((group) => group.workspaceId === workspace.id)?.workspaceCwd, projectDir);
+    assert.equal(groups.find((group) => group.workspaceId === workspace.id)?.workspaceName, "显示别名");
+    assert.equal((await fetch(`${baseUrl}/api/session-directories/name`, json("PUT", {
+      path: "显示别名", name: "错误路径",
+    }))).status, 404);
+  } finally {
+    await close();
+    rmSync(root, { recursive: true, force: true });
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
 test("目录工作区名称与项目名双向同步，且改名会刷新任务聚合 revision", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-name-sync-"));
   const projectDir = mkdtempSync(path.join(os.tmpdir(), "wand-name-project-"));

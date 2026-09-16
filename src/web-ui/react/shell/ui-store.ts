@@ -155,11 +155,6 @@ export type UiAction =
   | { type: "layout.drawer.group.set"; group: "automation" | "history"; expanded: boolean }
   | { type: "layout.files.toggle" }
   | { type: "layout.files.close" }
-  | { type: "layout.files.refresh" }
-  | { type: "layout.files.navigate"; cwd: string }
-  | { type: "layout.files.up" }
-  | { type: "layout.files.search"; query: string }
-  | { type: "layout.files.search.clear" }
   | { type: "folderPicker.open" }
   | { type: "topbar.menu.toggle" }
   | { type: "topbar.copy"; field: "providerSessionId" | "cwd" | "sessionId" }

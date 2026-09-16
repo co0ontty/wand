@@ -1,11 +1,5 @@
 import { type LegacyUiCommands, type UiManageTarget } from "../react";
-import {
-  closeFilePanel,
-  filterFileTree,
-  navigateExplorerUp,
-  refreshFileExplorer,
-  toggleFilePanel,
-} from "./file-browser";
+import { closeFilePanel, toggleFilePanel } from "./file-browser";
 import { openQuickCommitModal } from "./git-commit";
 import {
   deleteClaudeHistorySession,
@@ -163,17 +157,6 @@ export function createBrowserShellCommands(): LegacyUiCommands {
     },
     toggleFilePanel,
     closeFilePanel,
-    refreshFiles: () => refreshFileExplorer(),
-    navigateFiles: (cwd) => refreshFileExplorer({ cwd }),
-    navigateFilesUp: navigateExplorerUp,
-    searchFiles: (query) => {
-      state.fileSearchQuery = query.trim();
-      filterFileTree();
-    },
-    clearFileSearch: () => {
-      state.fileSearchQuery = "";
-      filterFileTree();
-    },
     openFolderPicker: () => { openFolderPickerFromLegacy(); },
     toggleTopbarMenu: () => {
       state.topbarMoreOpen = !state.topbarMoreOpen;

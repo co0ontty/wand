@@ -16,6 +16,13 @@ import { restartOverlayController } from "./restart-overlay/controller";
 import { FilePreviewHost } from "./file-preview/host";
 import { LocalPreviewHost } from "./local-preview/host";
 import { ComposerSelectHost } from "./composer-select/host";
+import { ComposerConfigHost } from "./composer-config/host";
+import { ComposerPopoverHost } from "./composer-popover/host";
+import { ComposerActionErrorHost } from "./composer-action-error/host";
+import { ComposerAttachmentsHost } from "./composer-attachments/host";
+import { ComposerVoiceHost } from "./composer-voice/host";
+import { ComposerSkillsHost } from "./composer-skills/host";
+import { ComposerBadgesHost } from "./composer-badges/host";
 import { ComposerRailHost } from "./composer-rail/host";
 import { MissionsHost } from "./missions/host";
 import { WorkspacesHost } from "./workspaces/host";
@@ -36,6 +43,13 @@ export function OverlayHost({ portalContainer }: OverlayHostProps) {
   return (
     <PortalContainerProvider container={portalContainer}>
       <ComposerSelectHost />
+      <ComposerConfigHost />
+      <ComposerPopoverHost />
+      <ComposerActionErrorHost />
+      <ComposerAttachmentsHost />
+      <ComposerVoiceHost />
+      <ComposerSkillsHost />
+      <ComposerBadgesHost />
       <ComposerRailHost />
       <MissionsHost />
       <WorkspacesHost />

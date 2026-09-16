@@ -56,7 +56,7 @@ export function LocalPreviewHost() {
       className="wand-local-preview-content"
       closeLabel="关闭预览"
     >
-      <form className="wand-local-preview-form" onSubmit={submit}>
+      <form noValidate className="wand-local-preview-form" onSubmit={submit}>
         <ModeToggle
           mode={snapshot.mode}
           onMode={(mode) => localPreviewController.setMode(mode)}

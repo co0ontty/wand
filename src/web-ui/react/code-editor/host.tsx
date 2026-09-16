@@ -60,7 +60,7 @@ function EditorBody({ snapshot, editorRef }: {
         </pre>
         <textarea
           ref={editorRef}
-          className="wand-code-editor-textarea"
+          className="resize-none wand-code-editor-textarea"
           aria-label={`编辑 ${file.name}`}
           autoComplete="off"
           autoCorrect="off"

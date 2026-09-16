@@ -153,22 +153,31 @@ export function createFileExplorerModule(options: FileExplorerModuleOptions): Fi
   async function runSearch(query: string): Promise<void> {
     searchAbort?.abort();
     if (!query.trim() || !snapshot.root) {
-      publish({ searchQuery: query, searchResults: null, searching: false });
+      publish({ searchQuery: query, searchResults: null, searching: false, searchError: "" });
       return;
     }
     const abort = new AbortController();
     searchAbort = abort;
-    publish({ searchQuery: query, searching: true });
+    publish({ searchQuery: query, searching: true, searchError: "" });
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, 300);
+      abort.signal.addEventListener("abort", () => {
+        clearTimeout(timer);
+        resolve();
+      }, { once: true });
+    });
+    if (abort.signal.aborted) return;
     try {
       const result = await options.repository.search(query.trim(), snapshot.root, abort.signal);
       if (abort.signal.aborted) return;
       publish({
         searching: false,
         searchResults: result.ok && result.results ? result.results : [],
+        searchError: result.ok ? "" : failureMessage(result.failure, "搜索文件失败，请重试。"),
       });
     } catch (error) {
       if (abort.signal.aborted || isAbortError(error)) return;
-      publish({ searching: false, searchResults: [] });
+      publish({ searching: false, searchResults: [], searchError: unknownFailure(error, "搜索文件失败，请重试。").message });
     }
   }
 
@@ -233,7 +242,7 @@ export function createFileExplorerModule(options: FileExplorerModuleOptions): Fi
       }
       case "search.clear": {
         searchAbort?.abort();
-        publish({ searchQuery: "", searchResults: null, searching: false });
+        publish({ searchQuery: "", searchResults: null, searching: false, searchError: "" });
         return true;
       }
       case "create.file": {

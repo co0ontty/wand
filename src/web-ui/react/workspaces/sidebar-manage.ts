@@ -45,6 +45,28 @@ export function collectManagedIds(groups: readonly TaskDirectoryGroup[]): Sideba
   return { taskIds, sessionIds };
 }
 
+export function isManagedGroupSelected(selection: SidebarManageSelection, group: TaskDirectoryGroup): boolean {
+  const ids = collectManagedIds([group]);
+  return ids.taskIds.length + ids.sessionIds.length > 0
+    && ids.taskIds.every((id) => selection.taskIds.includes(id))
+    && ids.sessionIds.every((id) => selection.sessionIds.includes(id));
+}
+
+export function toggleManagedGroup(
+  selection: SidebarManageSelection,
+  group: TaskDirectoryGroup,
+): SidebarManageSelection {
+  const ids = collectManagedIds([group]);
+  const remove = isManagedGroupSelected(selection, group);
+  const update = (current: readonly string[], members: readonly string[]): string[] => (
+    remove ? current.filter((id) => !members.includes(id)) : [...new Set([...current, ...members])]
+  );
+  return {
+    taskIds: update(selection.taskIds, ids.taskIds),
+    sessionIds: update(selection.sessionIds, ids.sessionIds),
+  };
+}
+
 export function pruneManagedSelection(
   selection: SidebarManageSelection,
   groups: readonly TaskDirectoryGroup[],

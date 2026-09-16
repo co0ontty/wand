@@ -55,6 +55,47 @@ test("unnamed workspace tasks do not create empty board cards at create time", (
   assert.equal(storage.listWandTasks().length, 1);
 });
 
+test("named sidebar tasks bind sessions and fill the agent from the selected CLI", (t) => {
+  const storage = tempDatabase(t);
+  const workspace = storage.createWorkspace({ name: "wand", cwd: "/tmp/wand" });
+  const named = storage.createWorkspaceTask({ workspaceId: workspace.id, name: "修登录" });
+  const card = ensureBoardTaskForWorkspaceTask(storage, named, workspace)!;
+  storage.saveSession(snapshot({
+    workspaceId: workspace.id,
+    workspaceTaskId: named.id,
+    provider: "codex",
+    mode: "default",
+    selectedModel: "gpt-5",
+    thinkingEffort: "deep",
+  }));
+
+  syncUngroupedSessionsToBoard(storage);
+  syncUngroupedSessionsToBoard(storage);
+  assert.equal(storage.listWandTasks().length, 1);
+  assert.deepEqual(storage.listWandTaskSessionIds(card.id), ["session-1"]);
+  assert.deepEqual(storage.getWandTask(card.id)?.agent, {
+    provider: "codex", model: "gpt-5", thinkingEffort: "deep", mode: "full-access",
+  });
+});
+
+test("shell sessions bind to named tasks without inventing an agent", (t) => {
+  const storage = tempDatabase(t);
+  const workspace = storage.createWorkspace({ name: "wand", cwd: "/tmp/wand" });
+  const named = storage.createWorkspaceTask({ workspaceId: workspace.id, name: "检查构建" });
+  const card = ensureBoardTaskForWorkspaceTask(storage, named, workspace)!;
+  storage.saveSession(snapshot({
+    workspaceId: workspace.id,
+    workspaceTaskId: named.id,
+    provider: undefined,
+    command: "/bin/zsh",
+    sessionKind: "pty",
+  }));
+
+  syncUngroupedSessionsToBoard(storage);
+  assert.deepEqual(storage.listWandTaskSessionIds(card.id), ["session-1"]);
+  assert.equal(storage.getWandTask(card.id)?.agent, null);
+});
+
 test("boardTitleFromSession prefers title then description then first user message", () => {
   assert.equal(boardTitleFromSession(snapshot({ title: "修复安卓连接故障" })), "修复安卓连接故障");
   assert.equal(

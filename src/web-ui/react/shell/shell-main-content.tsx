@@ -1,7 +1,8 @@
 import * as React from "react";
 
-import { WandButton, WandIcon, WandIconButton } from "../ui";
+import { WandBrandMark, WandButton, WandIcon, WandIconButton } from "../ui";
 import { CodeEditorHost } from "../code-editor/host";
+import { codeEditorStore } from "../code-editor/controller";
 import { workspaceContextStore } from "../workspaces/workspace-context";
 import { workspacesStore } from "../workspaces/controller";
 import { httpWorkspacesRepository } from "../workspaces/repository";
@@ -154,7 +155,7 @@ function ShellBlankChat({ className, queueRef, workspaceTask, workspaceProject }
           onStart={startInProject}
         />
       ) : <div className="blank-chat-inner">
-        <div className="blank-chat-logo">W</div>
+        <WandBrandMark className="blank-chat-logo" />
         <h2 className="blank-chat-title">Wand</h2>
         <p className="blank-chat-subtitle">创建一个任务，选择目录和 CLI，开始工作。</p>
         <div className="blank-chat-tools">
@@ -179,6 +180,9 @@ function ShellBlankChat({ className, queueRef, workspaceTask, workspaceProject }
  * own the children of the terminal, chat, composer, and file explorer slots.
  */
 export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
+  const editor = React.useSyncExternalStore(
+    codeEditorStore.subscribe, codeEditorStore.getSnapshot, codeEditorStore.getSnapshot,
+  );
   const snapshot = useUiStoreSnapshot();
   const dispatch = useUiDispatch();
   const taskBoard = React.useSyncExternalStore(taskBoardStore.subscribe, taskBoardStore.getSnapshot, taskBoardStore.getSnapshot);
@@ -211,8 +215,8 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
       )}
       <ShellFilePanel explorerRef={legacyRefs?.fileExplorer}/>
       <WorkspaceTabBar/>
-      <div id="output" className={classes.terminal} ref={legacyRefs?.terminal}/>
-      <div id="chat-output" className={classes.chat} ref={legacyRefs?.chat}/>
+      <div id="output" inert={editor.open} className={classes.terminal} ref={legacyRefs?.terminal}/>
+      <div id="chat-output" inert={editor.open} className={classes.chat} ref={legacyRefs?.chat}/>
       <ShellBlankChat
         className={classes.blank}
         queueRef={legacyRefs?.crossSessionQueue}
@@ -229,7 +233,7 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
           cwd: context.cwd,
         } : undefined}
       />
-      <div className={classes.composer} ref={legacyRefs?.composer}/>
+      <div inert={editor.open} className={classes.composer} ref={legacyRefs?.composer}/>
       {inSplit ? <WorkspaceWindow/> : null}
       <CodeEditorHost/>
       {/* 看板是独立路由，不能替换 <main>：#output 等 LegacyHost 槽位必须一直挂着。 */}

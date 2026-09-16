@@ -161,29 +161,36 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
   }));
 
   app.get("/api/settings/env-preview", (req, res, next) => {
-    if (req.query.reveal === "1") return requireAdmin(req, res, next);
-    next();
-  }, (req, res) => {
-    const inheritEnv = config.inheritEnv !== false;
-    const env = buildChildEnv(inheritEnv, {
-      WAND_MODE: "<runtime>",
-      WAND_AUTO_CONFIRM: "<runtime>",
-      WAND_AUTO_EDIT: "<runtime>",
-    });
     const reveal = req.query.reveal === "1" || req.query.reveal === "true";
-    const sensitivePattern = /(KEY|TOKEN|SECRET|PASSWORD|AUTH|CREDENTIAL|COOKIE|SESSION)/i;
-    const entries = Object.keys(env).sort().map((name) => {
-      const raw = env[name] ?? "";
-      const sensitive = sensitivePattern.test(name);
-      const placeholder = raw.startsWith("<") && raw.endsWith(">");
-      return {
-        name,
-        value: sensitive && !reveal && !placeholder ? "***" : raw,
-        length: raw.length,
-        sensitive,
-      };
-    });
-    res.json({ inheritEnv, total: entries.length, reveal, entries });
+    if (reveal) {
+      return requireAdmin(req, res, (error?: unknown) => {
+        if (error) return next(error);
+        sendEnvironmentPreview(true);
+      });
+    }
+    sendEnvironmentPreview(false);
+
+    function sendEnvironmentPreview(reveal: boolean): void {
+      const inheritEnv = config.inheritEnv !== false;
+      const env = buildChildEnv(inheritEnv, {
+        WAND_MODE: "<runtime>",
+        WAND_AUTO_CONFIRM: "<runtime>",
+        WAND_AUTO_EDIT: "<runtime>",
+      });
+      const sensitivePattern = /(KEY|TOKEN|SECRET|PASSWORD|AUTH|CREDENTIAL|COOKIE|SESSION)/i;
+      const entries = Object.keys(env).sort().map((name) => {
+        const raw = env[name] ?? "";
+        const sensitive = sensitivePattern.test(name);
+        const placeholder = raw.startsWith("<") && raw.endsWith(">");
+        return {
+          name,
+          value: sensitive && !reveal && !placeholder ? "***" : raw,
+          length: raw.length,
+          sensitive,
+        };
+      });
+      res.json({ inheritEnv, total: entries.length, reveal, entries });
+    }
   });
 
   app.post("/api/settings/system-ai/import", requireAdmin, (_req, res) => {
