@@ -202,7 +202,6 @@
 
     @media (prefers-reduced-transparency: reduce) {
       .input-composer,
-      .field-input,
       .file-search-input,
       input.file-explorer-path {
         background: var(--bg-elevated);
@@ -213,7 +212,6 @@
 
     @media (prefers-contrast: more) {
       .input-composer,
-      .field-input,
       .file-search-input,
       input.file-explorer-path {
         border-color: var(--border-strong);
@@ -222,7 +220,6 @@
       }
 
       .input-composer:focus-within,
-      .field-input:focus,
       .file-search-input:focus,
       input.file-explorer-path:focus {
         border-color: var(--accent);
@@ -769,76 +766,6 @@
     .workspaces-panel-compact {
       padding: 4px 4px 8px;
       overflow: visible;
-    }
-    .sidebar-collapsed-workspaces {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      align-items: center;
-      max-height: calc(100vh - 120px);
-      overflow-y: auto;
-      scrollbar-width: none;
-    }
-    .sidebar-collapsed-workspaces::-webkit-scrollbar { width: 0; }
-    .sidebar-collapsed-workspace {
-      position: relative;
-      width: 36px;
-      padding: 2px 0 3px;
-      border-radius: 10px;
-    }
-    .sidebar-collapsed-workspace.active {
-      background: color-mix(in srgb, var(--accent) 8%, transparent);
-    }
-    .sidebar-collapsed-workspace-mark,
-    .sidebar-collapsed-task {
-      position: relative;
-      width: 36px;
-      height: 30px;
-      padding: 0;
-      border: 0;
-      background: transparent;
-      color: var(--text-secondary);
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-    }
-    .sidebar-collapsed-workspace-mark:hover,
-    .sidebar-collapsed-task:hover,
-    .sidebar-collapsed-task.active { color: var(--accent); }
-    .sidebar-collapsed-count {
-      position: absolute;
-      top: 0;
-      right: 2px;
-      min-width: 13px;
-      padding: 0 3px;
-      border-radius: 8px;
-      background: var(--accent);
-      color: white;
-      font-size: 9px;
-      line-height: 13px;
-      text-align: center;
-    }
-    .sidebar-collapsed-task-list {
-      position: relative;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
-    .sidebar-collapsed-task-branch {
-      position: absolute;
-      top: -1px;
-      bottom: 14px;
-      left: 11px;
-      border-left: 1px solid var(--border-strong);
-    }
-    .sidebar-collapsed-task-dot {
-      width: 7px;
-      height: 7px;
-      border: 1px solid currentColor;
-      border-radius: 50%;
-      background: var(--bg-elevated);
-      z-index: 1;
     }
     .sidebar-collapsed-tree-state {
       width: 36px;
@@ -8413,8 +8340,7 @@
       transition: border-color 120ms ease-out, box-shadow 120ms ease-out;
     }
 
-    /* 覆盖全局 .field-input（12.25px 等宽字、白底、12px 圆角、3px 焦点环），
-       改成扁平的无框输入。 */
+    /* 登录卡片的密码框：扁平无框输入（行内只留 caret 和下划线）。 */
     .login-page .form-col .password-input {
       flex: 1;
       width: 100%;
@@ -8721,28 +8647,6 @@
 
     .field { margin-bottom: 18px; }
     .field-label { display: block; font-size: 11.375px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; }
-
-    .field-input {
-      width: 100%;
-      font-family: var(--font-mono);
-      font-size: 12.25px;
-      background: rgba(255, 255, 255, 0.75);
-      border: 1px solid rgba(125, 91, 57, 0.22);
-      border-radius: 12px;
-      color: var(--text-primary);
-      caret-color: var(--accent);
-      padding: 12px 14px;
-      outline: none;
-      transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
-      min-height: 44px;
-    }
-
-    .field-input:focus {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px var(--accent-muted), 0 10px 28px -22px rgba(197, 101, 61, 0.62);
-      background: rgba(255, 255, 255, 0.9);
-    }
-    .field-input::placeholder { color: var(--text-muted); opacity: 0.72; }
 
     /* ============================================================ */
     /* ── Liquid Glass dialog system                              ── */
@@ -9343,16 +9247,6 @@
       .drawer-backdrop { background: rgba(20, 14, 8, 0.55); }
       .sidebar-header-overflow { background: #fffaf2; }
     }
-    select.field-input {
-      appearance: none;
-      -webkit-appearance: none;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%238c735f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-      background-repeat: no-repeat;
-      background-position: right 14px center;
-      padding-right: 40px;
-      cursor: pointer;
-    }
-
     .error-message {
       font-size: 10.5px;
       color: var(--danger);
@@ -9367,11 +9261,6 @@
       0%, 100% { transform: translateX(0); }
       25% { transform: translateX(-4px); }
       75% { transform: translateX(4px); }
-    }
-
-    .field-input[data-error="true"] {
-      border-color: var(--danger);
-      box-shadow: 0 0 0 3px var(--danger-muted);
     }
 
     .hint { font-size: 9.625px; color: var(--text-muted); margin-top: 12px; }
@@ -9665,8 +9554,7 @@
       }
 
       /* 防止iOS自动缩放 */
-      .input-textarea,
-      .field-input {
+      .input-textarea {
         font-size: 16px;
       }
 
@@ -14396,19 +14284,6 @@
       color: var(--danger);
     }
 
-    .workspaces-overview {
-      display: flex;
-      min-width: 0;
-      min-height: 30px;
-      align-items: center;
-      justify-content: space-between;
-      gap: 6px;
-      padding: 2px 7px 4px;
-      color: var(--text-muted);
-      font-size: 8.75px;
-      line-height: 1;
-    }
-
     .workspaces-list {
       display: flex;
       flex-direction: column;
@@ -15991,14 +15866,6 @@
       padding: 2px 0 14px;
     }
 
-    #app[data-react-shell="enabled"] .workspaces-overview {
-      min-height: 22px;
-      justify-content: flex-start;
-      gap: 9px;
-      padding: 0 8px;
-      color: var(--text-muted);
-      font-size: 8.75px;
-    }
     #app[data-react-shell="enabled"] .workspace-session-mark,
     #app[data-react-shell="enabled"] .workspace-session-kind,
     #app[data-react-shell="enabled"] .workspace-task-chevron-btn [data-icon="terminal"] {
