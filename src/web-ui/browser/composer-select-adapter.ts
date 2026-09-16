@@ -12,6 +12,7 @@ interface BrowserComposerSelectDefinition {
   readonly ariaLabel: string;
   readonly placeholder?: string;
   readonly displayValue?: string;
+  readonly displayTitle?: string;
   readonly disabled?: boolean;
 }
 
@@ -52,6 +53,7 @@ export function syncBrowserComposerSelects(config: BrowserComposerSelectConfig):
       ariaLabel: definition.ariaLabel,
       placeholder: definition.placeholder,
       displayValue: definition.displayValue,
+      displayTitle: definition.displayTitle,
       disabled: definition.disabled,
       align: control === "mode" ? "start" : "end",
       onValueChange(value) {

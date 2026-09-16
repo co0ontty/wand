@@ -34,6 +34,8 @@ export interface WandSelectProps {
   options: ReadonlyArray<WandSelectOption>;
   placeholder?: string;
   displayValue?: string;
+  /** 悬停 tooltip 用的完整值，不参与可见文本；缺省时回退 displayValue。 */
+  displayTitle?: string;
   ariaLabel: string;
   disabled?: boolean;
   searchable?: boolean;
@@ -69,6 +71,7 @@ function ClassicWandSelect({
   options,
   placeholder = "请选择",
   displayValue,
+  displayTitle,
   ariaLabel,
   disabled,
   className,
@@ -100,6 +103,7 @@ function ClassicWandSelect({
       <AppicaSelectTrigger
         className={classNames("wand-ui-select-trigger", className)}
         aria-label={ariaLabel}
+        title={displayTitle ?? displayValue ?? placeholder}
       >
         <AppicaSelectValue
           className="wand-ui-select-value"
@@ -121,6 +125,7 @@ function ClassicWandSelect({
             className={classNames("wand-ui-select-item", itemClassName)}
             value={option.value}
             disabled={option.disabled}
+            title={option.label}
           >
             {option.label}
           </AppicaSelectItem>
@@ -136,6 +141,7 @@ function SearchableWandSelect({
   options,
   placeholder = "请选择",
   displayValue,
+  displayTitle,
   ariaLabel,
   disabled,
   searchPlaceholder = "搜索",
@@ -180,8 +186,9 @@ function SearchableWandSelect({
       <AppicaComboboxTrigger
         className={classNames("wand-ui-select-trigger", className)}
         aria-label={ariaLabel}
+        title={displayTitle ?? shown ?? placeholder}
       >
-        <span className="wand-ui-select-value">
+        <span className="wand-ui-select-value" title={displayTitle ?? shown ?? placeholder}>
           <AppicaComboboxValue placeholder={placeholder} children={shown ? () => shown : undefined}/>
         </span>
       </AppicaComboboxTrigger>
@@ -220,6 +227,7 @@ function SearchableWandSelect({
               className={classNames("wand-ui-select-item", itemClassName)}
               value={option}
               disabled={option.disabled}
+              title={option.label}
             >
               {option.label}
             </AppicaComboboxItem>

@@ -366,7 +366,8 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
         function pill(ctrl, label, value, optionsHtml) {
           // compact 不显示分组小标签；dropdown / popover 都显示（"模式" / "模型" / "思考"）。
           var tagHtml = kind === "compact" ? "" : ('<span class="chat-mode-trio-tag">' + escapeHtml(label) + '</span>');
-          return '<span class="composer-text-pill chat-mode-trio-pill" data-mode-control-pill="' + ctrl + '" title="' + escapeHtml(label) + '">' +
+          // title 带上完整值，可见文本被 ellipsis 时悬停仍能看到全名。
+          return '<span class="composer-text-pill chat-mode-trio-pill" data-mode-control-pill="' + ctrl + '" title="' + escapeHtml(label + "：" + value) + '">' +
             tagHtml +
             '<span class="composer-text-label">' + escapeHtml(value) + '</span>' +
             '<select class="composer-text-hidden-select" data-mode-control="' + ctrl + '" aria-label="' + escapeHtml(label) + '">' +
@@ -423,21 +424,11 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
         if (cutAt > 0) label = label.slice(0, cutAt).trim();
         var slash = label.lastIndexOf("/");
         if (slash >= 0 && slash < label.length - 1) label = label.slice(slash + 1).trim();
-        var lower = label.toLowerCase();
-        if (lower.indexOf("opus") !== -1) return "Opus";
-        if (lower.indexOf("sonnet") !== -1) return "Sonnet";
-        if (lower.indexOf("haiku") !== -1) return "Haiku";
-        if (lower.indexOf("gpt-5.5") !== -1) return "GPT-5.5";
-        if (lower.indexOf("gpt-5") !== -1) return "GPT-5";
-        if (lower.indexOf("gpt-4") !== -1) return "GPT-4";
-        if (lower.indexOf("grok-4.5") !== -1) return "Grok 4.5";
-        if (lower.indexOf("grok-4") !== -1) return "Grok 4";
-        if (lower.indexOf("grok-3") !== -1) return "Grok 3";
-        if (lower.indexOf("grok") !== -1) {
-          if (label.length > 12) return label.slice(0, 10) + "…";
-          return label;
-        }
-        if (label.length > 12) return label.slice(0, 10) + "…";
+        // 触发器只做「去前缀 / 去后缀」的语义压缩，不做按字符数硬切。
+        // 之前这里会拼 Opus/Sonnet/GPT-5 这类别名、再栏截到 10 字符 + …，
+        // 同 provider 下两个相近变体（如 claude-opus-4-5 / claude-opus-4-1）
+        // 在触发器上就长成一样了，而且 tooltip 也拿不到完整 ID。
+        // 现在交给 CSS ellipsis 收尾，完整值走 title（见 refreshAllChatModeTrios）。
         return label;
       }
 
@@ -616,8 +607,10 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
         var thinking = normalizeAvailableComposerValue(getEffectiveThinking(session), thinkingOptions, "off");
         var modeLabel = getModeLabel(mode);
         var modelLabel = getShortModelLabel(model, session);
+        // title 永远给完整 ID：触发器文本会被 ellipsis，tooltip 是唯一的完整信息出口。
+        var modelFullLabel = getModelDisplayLabel(model, session) || modelLabel;
         var thinkingLabel = getThinkingCompactLabel(thinking, session);
-        var title = "模式 " + modeLabel + " · 模型 " + modelLabel + " · 思考 " + thinkingLabel;
+        var title = "模式 " + modeLabel + " · 模型 " + modelFullLabel + " · 思考 " + thinkingLabel;
         var showMode = scope !== "runtime";
         var showRuntime = scope !== "mode";
         var showExtended = scope === "all";
@@ -631,7 +624,7 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
               '</span>'
             : "") +
           (showRuntime
-            ? '<span class="composer-config-chip composer-config-model" data-mode-control-pill="model" title="模型：' + escapeHtml(modelLabel) + '">' +
+            ? '<span class="composer-config-chip composer-config-model" data-mode-control-pill="model" title="模型：' + escapeHtml(modelFullLabel) + '">' +
                 iconSvg("cpu", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) +
                 renderComposerSelectHost("model", scope) +
               '</span>' +
@@ -693,10 +686,11 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
         var normalizedThinking = normalizeAvailableComposerValue(thinking, thinkingOptions, "off");
         var modeLabel = getModeLabel(mode);
         var modelLabel = getShortModelLabel(normalizedModel, session);
+        var modelFullLabel = getModelDisplayLabel(normalizedModel, session) || modelLabel;
         var thinkingLabel = getThinkingCompactLabel(normalizedThinking, session);
         var controls = document.querySelectorAll(".composer-config-controls");
         controls.forEach(function(control) {
-          var title = "模式 " + modeLabel + " · 模型 " + modelLabel + " · 思考 " + thinkingLabel;
+          var title = "模式 " + modeLabel + " · 模型 " + modelFullLabel + " · 思考 " + thinkingLabel;
           control.setAttribute("title", title);
           var modePart = control.querySelector('[data-mode-control-pill="mode"]');
           if (modePart) {
@@ -704,7 +698,8 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
           }
           var modelPart = control.querySelector('[data-mode-control-pill="model"]');
           if (modelPart) {
-            modelPart.setAttribute("title", "模型：" + modelLabel);
+            // 触发器宽度不够时文本会被 ellipsis 掉，这里必须给完整 ID。
+            modelPart.setAttribute("title", "模型：" + modelFullLabel);
           }
           var thinkingPart = control.querySelector('[data-mode-control-pill="thinking"]');
           if (thinkingPart) {
@@ -744,6 +739,8 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
                 ariaLabel: "模型",
                 placeholder: modelLabel,
                 displayValue: modelLabel,
+                // 触发器文本会被 ellipsis，tooltip 必须是完整 ID。
+                displayTitle: modelFullLabel,
               };
             }
             return {

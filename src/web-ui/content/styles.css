@@ -84,7 +84,6 @@
          不要再自己拼 border-radius + box-shadow，否则又会漂移成
          「有的 8px 有的 14px、有的几乎没有阴影」那种廉价感。 */
       --float-radius: 14px;
-      --float-radius-sm: 10px;
       --float-pad: 6px;
       --float-border: color-mix(in srgb, var(--border-default) 74%, #9b806c);
       --float-bg: var(--bg-elevated);
@@ -101,16 +100,16 @@
       --menu-item-height: 34px;
       --menu-item-radius: 9px;
       --menu-item-gap: 6px;
-      --menu-item-padding: 7px 10px;
+      --menu-item-pad-block: 7px;
+      --menu-item-pad-inline: 10px;
       --menu-item-font-size: 11.375px;
       --menu-item-icon-opacity: 0.82;
-
-      /* ===== 浮层动效 =====
-         入场略慢、退场更快，是「弹出感」的关键；统一的 emphasized 缓动
-         让所有浮层用同一条曲线，避免有的 ease 有的 linear。 */
-      --ease-emphasized: cubic-bezier(0.22, 1, 0.36, 1);
-      --motion-pop-in: 0.17s;
-      --motion-pop-out: 0.11s;
+      /* 触发器 chip（模式 / 模型 / 思考）的宽度预算。
+         模型 ID 经常很长，之前硬压在 96px 里只剩十个字符 + …，
+         现在给足预算，超出部分由 CSS ellipsis 处理，完整值放在 title 里。 */
+      --composer-chip-max-width: 140px;
+      --composer-chip-model-max-width: 264px;
+      --composer-chip-thinking-max-width: 110px;
 
       /* ===== 圆角系统 ===== */
       --radius-xs: 6px;
@@ -6438,7 +6437,7 @@
       cursor: pointer;
     }
     .composer-config-chip {
-      max-width: 76px;
+      max-width: var(--composer-chip-max-width);
       padding: 0 7px;
       border: 1px solid transparent;
       border-radius: 8px;
@@ -6460,10 +6459,10 @@
       outline-offset: 1px;
     }
     .composer-config-model {
-      max-width: 96px;
+      max-width: var(--composer-chip-model-max-width);
     }
     .composer-config-thinking {
-      max-width: 76px;
+      max-width: var(--composer-chip-thinking-max-width);
     }
     .composer-config-thinking[data-thinking="off"] {
       color: var(--text-muted);
@@ -12627,7 +12626,7 @@
       flex: 0 1 auto;
       min-width: 0;
       min-height: 34px;
-      max-width: 92px;
+      max-width: var(--composer-chip-max-width);
       padding: 0 5px;
       gap: 3px;
       justify-content: flex-start;
@@ -12677,13 +12676,13 @@
     }
 
     .input-composer .composer-config-model {
-      max-width: 118px;
+      max-width: var(--composer-chip-model-max-width);
       padding-right: 4px;
       color: var(--text-secondary);
     }
 
     .input-composer .composer-config-thinking {
-      max-width: 88px;
+      max-width: var(--composer-chip-thinking-max-width);
       padding-left: 3px;
       padding-right: 4px;
     }
@@ -13163,7 +13162,7 @@
       }
 
       .input-composer .composer-config-model {
-        max-width: 100px;
+        max-width: 150px;
       }
 
       .input-composer .composer-model-refresh-button {
@@ -13175,7 +13174,7 @@
       }
 
       .input-composer .composer-config-thinking {
-        max-width: 72px;
+        max-width: 84px;
       }
 
       .input-composer .auto-approve-indicator,

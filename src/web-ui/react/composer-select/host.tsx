@@ -18,6 +18,7 @@ export function ComposerSelectHost() {
       ariaLabel={mount.ariaLabel}
       placeholder={mount.placeholder}
       displayValue={mount.displayValue}
+      displayTitle={mount.displayTitle}
       disabled={mount.disabled}
       searchable={mount.control === "model"}
       searchPlaceholder="搜索模型"

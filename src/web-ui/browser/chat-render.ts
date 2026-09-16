@@ -2109,9 +2109,10 @@ import "./local-preview-adapter";
           }
           disclosure.setAttribute("data-expand-key", key);
           disclosure.setAttribute("aria-expanded", expanded ? "true" : "false");
+          var previewText = getMessagePreviewText(allMessages[idx]) || "助手回复";
           disclosure.innerHTML =
             '<span class="assistant-reply-label">回复</span>' +
-            '<span class="assistant-reply-preview">' + escapeHtml(getMessagePreviewText(allMessages[idx]) || "助手回复") + '</span>' +
+            '<span class="assistant-reply-preview" title="' + escapeHtml(previewText) + '">' + escapeHtml(previewText) + '</span>' +
             '<span class="assistant-reply-action">' + (expanded ? "收起" : "展开") + '</span>' +
             '<span class="assistant-reply-chevron">' + iconSvg("chevronDown", { size: 15 }) + '</span>';
           el.classList.toggle("assistant-reply-collapsed", !expanded);

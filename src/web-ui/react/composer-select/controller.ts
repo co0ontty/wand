@@ -13,6 +13,8 @@ export interface ComposerSelectMount {
   readonly ariaLabel: string;
   readonly placeholder?: string;
   readonly displayValue?: string;
+  /** 悬停 tooltip 用的完整值（例如带完整前缀的模型 ID），不参与可见文本。 */
+  readonly displayTitle?: string;
   readonly disabled?: boolean;
   readonly align?: "start" | "center" | "end";
   readonly onValueChange: (value: string) => void;

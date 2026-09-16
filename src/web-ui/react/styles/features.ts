@@ -2778,26 +2778,30 @@ export const composerSelectStyles = String.raw`
 }
 
 .wand-ui-select-content.wand-composer-select-content {
+  /* width: max-content 让面板撑到最长选项的宽度，上限只拦截真正离谱的 ID；
+     超出上限的部分由选项文本 ellipsis，完整值在选项 title 里。 */
   width: max-content;
-  max-width: min(360px, calc(100vw - var(--wand-safe-left) - var(--wand-safe-right) - 28px));
+  max-width: min(480px, calc(100vw - var(--wand-safe-left) - var(--wand-safe-right) - 28px));
   max-height: min(330px, var(--available-height));
-  border-color: color-mix(in srgb, var(--border-default) 78%, #9b806c);
-  border-radius: 14px;
-  padding: 6px;
-  background: color-mix(in srgb, var(--bg-elevated) 96%, transparent);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.8),
-    0 4px 10px rgba(60, 42, 28, 0.09),
-    0 22px 44px -22px rgba(60, 42, 28, 0.34);
+  border-color: var(--float-border);
+  border-radius: var(--float-radius);
+  padding: var(--float-pad);
+  background: var(--float-bg-glass);
+  box-shadow: var(--float-shadow);
   backdrop-filter: blur(20px) saturate(122%);
   -webkit-backdrop-filter: blur(20px) saturate(122%);
   pointer-events: auto;
   transform-origin: var(--transform-origin);
 }
 
-.wand-composer-select-content-mode { min-width: min(210px, calc(100vw - 28px)); }
-.wand-composer-select-content-model { min-width: min(280px, calc(100vw - 28px)); }
-.wand-composer-select-content-thinking { min-width: min(170px, calc(100vw - 28px)); }
+.wand-ui-select-content.wand-composer-select-content-mode { min-width: min(210px, calc(100vw - 28px)); }
+/* 模型 ID 是唯一真正需要长文本的选项，单独放宽面板上限；
+   更离谱的 ID 由选项内 ellipsis + title 兑底。 */
+.wand-ui-select-content.wand-composer-select-content-model {
+  min-width: min(300px, calc(100vw - 28px));
+  max-width: min(560px, calc(100vw - 28px));
+}
+.wand-ui-select-content.wand-composer-select-content-thinking { min-width: min(170px, calc(100vw - 28px)); }
 
 .wand-composer-select-content .wand-ui-select-search-input {
   min-height: 32px;
@@ -2815,6 +2819,14 @@ export const composerSelectStyles = String.raw`
   padding: 7px 10px;
   line-height: 1.3;
   cursor: pointer;
+}
+
+/* 选项文本单行 + ellipsis：面板已经撑到 max-content，只有超过上限才省略。 */
+.wand-ui-select-item.wand-composer-select-item > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wand-ui-select-item.wand-composer-select-item[data-highlighted] {
@@ -2868,20 +2880,6 @@ export const composerSelectStyles = String.raw`
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }
-}
-
-html:not(.is-wand-app) .wand-ui-select-content.wand-composer-select-content {
-  border-color: var(--border-default);
-  border-radius: 10px;
-  padding: 5px;
-  background: var(--bg-elevated);
-  box-shadow: 0 14px 34px -20px rgba(40, 32, 26, 0.38);
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-}
-
-html:not(.is-wand-app) .wand-ui-select-item.wand-composer-select-item {
-  border-radius: 7px;
 }
 
 html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {

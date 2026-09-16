@@ -425,7 +425,9 @@ export const foundationStyles = String.raw`
   min-height: var(--menu-item-height);
   border: 0;
   border-radius: var(--menu-item-radius);
-  padding: var(--menu-item-padding);
+  /* 右侧留出选中勾的宽度，避免长文本从勾下穿过。 */
+  padding: var(--menu-item-pad-block) calc(var(--menu-item-pad-inline) + 20px)
+    var(--menu-item-pad-block) var(--menu-item-pad-inline);
   color: var(--text-primary);
   background: transparent;
   cursor: pointer;
@@ -477,7 +479,7 @@ export const foundationStyles = String.raw`
   min-height: var(--menu-item-height);
   border: 0;
   border-radius: var(--menu-item-radius);
-  padding: var(--menu-item-padding);
+  padding: var(--menu-item-pad-block) var(--menu-item-pad-inline);
   color: var(--text-primary);
   background: transparent;
   cursor: pointer;
