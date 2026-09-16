@@ -20,6 +20,8 @@ import {
   issueAgentModeOptions,
   issueAgentModelOptions,
   issueCreateDispatches,
+  issueDropDispatches,
+  issueDropDispatchPrompt,
   normalizeIssueAgentDefaults,
   resolveIssueAgent,
   issueBoardStats,
@@ -243,7 +245,7 @@ test("board host mirrors dashi layout: header tabs, column create, drag, and det
   assert.match(host, /TaskBoardFilterMenu/);
   assert.match(host, /在\$\{column.label\}中新建任务/);
   assert.match(host, /application\/x-wand-task/);
-  // 拖拽只换列（改状态），列内顺序固定按创建时间。
+  // 列内顺序固定按创建时间；跨列拖拽换状态，拖进「处理中」时还会顺手派发首次指派。
   assert.match(host, /moving\.status === status/);
   assert.match(host, /返回任务管理/);
   assert.match(host, /新建任务/);
@@ -253,6 +255,30 @@ test("board host mirrors dashi layout: header tabs, column create, drag, and det
   assert.equal(ISSUE_ARCHIVE_COLUMN.status, "archived");
   assert.match(host, /TaskBoardArchiveFolder/);
   assert.match(host, /issueArchiveFolderOpen/);
+});
+
+test("dropping an unassigned task into doing dispatches the first agent immediately", () => {
+  // 没派发过的任务拖进「处理中」= 已经决定开跑，直接派发，不再需要进详情再点一次。
+  assert.equal(issueDropDispatches("doing", 0), true);
+  // 已经在跑 / 跑过的任务只改状态，避免拖一下就多开一个 session。
+  assert.equal(issueDropDispatches("doing", 1), false);
+  assert.equal(issueDropDispatches("todo", 0), false);
+  assert.equal(issueDropDispatches("done", 0), false);
+  assert.equal(issueDropDispatches("archived", 0), false);
+
+  // 提示词回退顺序：描述 → 标题 → 兜底指令。
+  assert.equal(issueDropDispatchPrompt({ title: "标题", description: " 描述 " }), "描述");
+  assert.equal(issueDropDispatchPrompt({ title: "标题", description: "   " }), "标题");
+  assert.equal(issueDropDispatchPrompt({ title: "", description: "" }), "执行此任务");
+
+  const host = readFileSync(new URL("../src/web-ui/react/issues/task-board-host.tsx", import.meta.url), "utf8");
+  assert.match(host, /const dispatches = issueDropDispatches\(status, moving\.sessions\.length\)/);
+  assert.match(host, /issueDropDispatchPrompt\(moving\)/);
+  assert.match(host, /taskBoardRepository\.dispatch\(taskId, agent/);
+  // 派发用任务上的指派，未指派时沿用面板上次选择。
+  assert.match(host, /const agent = dispatches \? agentOf\(moving, lastAgentRef\.current\) : null/);
+  // 派发失败不回滚状态，只提示并保留任务在「处理中」。
+  assert.match(host, /任务已移入「处理中」，但派发 Agent 失败/);
 });
 
 test("create dialog keeps modal positioning so title and selects stay visible", () => {

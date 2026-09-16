@@ -27,6 +27,8 @@ import {
   ISSUE_PRIORITIES,
   issueArchiveFolderOpen,
   issueCreateDispatches,
+  issueDropDispatches,
+  issueDropDispatchPrompt,
   isDispatchableIssueAgent,
   issueAgentModeOptions,
   issueAgentModelOptions,
@@ -292,6 +294,7 @@ export function TaskBoardHost({
       rememberAgent(draft.agent);
       // 只有「处理中」列的新建才顺带第一次指派；「等待认领」列只创建任务。
       // 有描述才派发，否则只落库，之后在任务详情里再指派。
+      let assignError = "";
       if (issueCreateDispatches(draft.status) && submitDescription && isDispatchableIssueAgent(draft.agent)) {
         try {
           const result = await taskBoardRepository.dispatch(created.id, draft.agent, {
@@ -300,7 +303,7 @@ export function TaskBoardHost({
           });
           setNotice(`${issueAgentProviderLabel(result.session.provider)} 已开始处理「${created.title}」`);
         } catch (cause) {
-          setError(cause instanceof Error ? cause.message : "任务已创建，但第一次指派失败。");
+          assignError = cause instanceof Error ? cause.message : "任务已创建，但第一次指派失败。";
         }
       }
       if (createMore) {
@@ -311,6 +314,8 @@ export function TaskBoardHost({
         setDraft(emptyDraft(draft.workspaceId, "todo", draft.agent));
       }
       await reload();
+      // reload() 开头会清掉错误横幅，所以这些提示必须放在它之后才留得住。
+      if (assignError) setError(assignError);
       if (!submitTitle && created.titleSource === "auto") {
         void refreshGeneratedTitle(created.id, created.title, reload);
       }
@@ -349,15 +354,35 @@ export function TaskBoardHost({
   }, [reload, rememberAgent, runFor]);
 
   // 列内顺序跟 GET /api/wand-tasks 返回顺序走；拖拽只用来换列。
+  // 拖进「处理中」代表已经决定要跑：没派发过的任务顺手把首次指派发出去，
+  // 省掉「拖完再进详情点一次派发」这一步。
   const dropTask = React.useCallback(async (status: WandTaskStatus, taskId: string) => {
     const moving = tasks.find((task) => task.id === taskId);
     if (!moving || moving.status === status) return;
+    const dispatches = issueDropDispatches(status, moving.sessions.length);
+    const agent = dispatches ? agentOf(moving, lastAgentRef.current) : null;
     setTasks((current) => current.map((task) => (task.id === taskId ? { ...task, status } : task)));
     await runFor(taskId, async () => {
       await taskBoardRepository.update(taskId, { status });
+      let dispatchError = "";
+      if (dispatches && agent) {
+        rememberAgent(agent);
+        try {
+          const result = await taskBoardRepository.dispatch(taskId, agent, {
+            prompt: issueDropDispatchPrompt(moving),
+            workspaceId: moving.workspaceId,
+          });
+          setNotice(`${issueAgentProviderLabel(result.session.provider)} 已开始处理「${moving.title}」`);
+        } catch (cause) {
+          // 状态已经改好，派发失败只提示、不回滚：用户可进详情改参数后重试。
+          dispatchError = cause instanceof Error ? cause.message : "任务已移入「处理中」，但派发 Agent 失败。";
+        }
+      }
       await reload();
+      // reload() 开头会清掉错误横幅，所以派发失败的提示必须放在它之后才留得住。
+      if (dispatchError) setError(dispatchError);
     });
-  }, [reload, runFor, tasks]);
+  }, [reload, rememberAgent, runFor, tasks]);
 
   const selected = tasks.find((task) => task.id === selectedId) ?? null;
   const visible = filterIssues(tasks, query, filterWorkspaceId, filters);

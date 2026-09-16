@@ -86,6 +86,20 @@ export function issueCreateDispatches(status: WandTaskStatus): boolean {
   return status === "doing";
 }
 
+/**
+ * 拖进「处理中」是否要顺带派发 Agent。
+ * 只有还没派发过（没有绑定会话）的任务才自动派发：已经在跑 / 跑过的卡再拖回来只改状态，
+ * 避免拖一次就多开一个 session。
+ */
+export function issueDropDispatches(status: WandTaskStatus, sessionCount: number): boolean {
+  return status === "doing" && sessionCount === 0;
+}
+
+/** 拖拽派发用的提示词：优先任务描述，其次标题，最后给一句兜底指令。 */
+export function issueDropDispatchPrompt(task: { title: string; description: string }): string {
+  return task.description.trim() || task.title.trim() || "执行此任务";
+}
+
 export const ISSUE_STATUS_FILTERS: ReadonlyArray<{
   status: WandTaskStatus;
   label: string;
