@@ -2745,13 +2745,10 @@ export class ProcessManager extends EventEmitter {
       if (trimmedModel && trimmedModel !== "default" && !/--model(?:\s|=)/.test(result)) {
         result += ` --model '${trimmedModel.replace(/'/g, "'\\''")}'`;
       }
-      // Qoder 默认以 yolo（bypass_permissions）启动：PTY 与结构化 runner 都没有运行时
-      // 权限桥，保持 Qoder 自身确认会让会话卡在 TUI 弹窗或直接拒绝工具调用。只有显式
-      // 选择 auto-edit 时降级为 accept_edits；命令行已带权限参数时保持原样。
+      // Qoder 一律以 yolo（bypass_permissions）启动：PTY 与结构化 runner 都没有运行时
+      // 权限桥，保持 Qoder 自身确认只会让会话卡在 TUI 弹窗或直接拒绝工具调用。
       if (!/--(?:yolo|dangerously-skip-permissions|permission-mode)(?:\s|=|$)/.test(result)) {
-        result += mode === "auto-edit"
-          ? " --permission-mode accept_edits"
-          : " --permission-mode bypass_permissions";
+        result += " --permission-mode bypass_permissions";
       }
       return result;
     }

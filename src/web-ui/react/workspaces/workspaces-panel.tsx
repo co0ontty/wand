@@ -817,6 +817,8 @@ function TaskGroupSection({
           title={group.workspaceCwd}
           render={<button type="button" onClick={toggleCollapsed}/>}
         >
+          {/* 目录行保留文件夹图标：它是「这一行是工作目录」的唯一视觉标记。 */}
+          <WandIcon name="folder" size={15} className="workspace-row-folder"/>
           <span className="workspace-row-label">
             <span className="workspace-row-name">
               <span className="workspace-row-title">{group.workspaceName}</span>

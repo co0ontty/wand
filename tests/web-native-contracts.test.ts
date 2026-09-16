@@ -181,6 +181,61 @@ test("Apple WebViews preserve deep links, bridge globals, and terminal hooks", (
   ]);
 });
 
+test("task board create sheets only assign agents from the doing column", () => {
+  // 语义：待办列的新建只创建任务；进行中列的新建创建后立刻派 Agent。
+  // 三端 + Web 必须一致，否则同一个面板在不同端会做出不同的事。
+  includesAll("android/app/src/main/java/com/wand/app/ui/screens/TaskBoardScreen.kt", [
+    'internal fun boardCreateDispatches(status: String): Boolean = status == "doing"',
+    "initialStatus: String",
+    "var status by remember { mutableStateOf(initialStatus) }",
+    "if (boardCreateDispatches(status) && description.isNotBlank())",
+    "onCreateForStatus: (String) -> Unit",
+    'BoardSectionHeader(status = status, count = items.size, onAdd = onCreateForStatus)',
+    'contentDescription = "在${boardTaskStatusLabel(status)}中新建任务"',
+    'label = if (dispatches && description.trim().isNotEmpty()) "创建并指派" else "创建任务"',
+    "只创建任务，不指派 Agent",
+  ]);
+  assert.doesNotMatch(
+    source("android/app/src/main/java/com/wand/app/ui/screens/TaskBoardScreen.kt"),
+    /if \(description\.isNotBlank\(\)\) \{\s*runCatching \{ api\.dispatchBoardTask/,
+    "Android must not dispatch on create from every column",
+  );
+
+  includesAll("ios/Wand/TaskBoardView.swift", [
+    'func wandBoardCreateDispatches(status: String) -> Bool { status == "doing" }',
+    "initialStatus: String = \"todo\"",
+    "_status = State(initialValue: initialStatus)",
+    "private var dispatches: Bool { wandBoardCreateDispatches(status: status) }",
+    "if wandBoardCreateDispatches(status: status),",
+    "private func openCreate(_ status: String)",
+    "openCreate(status)",
+    "dispatches && !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? \"创建并指派\" : \"创建任务\"",
+    "描述（只创建任务）",
+  ]);
+  assert.equal(
+    (source("ios/Wand/TaskBoardView.swift").match(/if !description\.trimmingCharacters\(in: \.whitespacesAndNewlines\)\.isEmpty \{/g) ?? []).length,
+    0,
+    "iOS must not dispatch on create from every column",
+  );
+
+  includesAll("macos/Wand/TaskBoardView.swift", [
+    'func wandBoardCreateDispatches(status: String) -> Bool { status == "doing" }',
+    "initialStatus: String = \"todo\"",
+    "_status = State(initialValue: initialStatus)",
+    "private var dispatches: Bool { wandBoardCreateDispatches(status: status) }",
+    "if wandBoardCreateDispatches(status: status),",
+    "private func openCreate(_ status: String)",
+    "openCreate(status.rawValue)",
+    "dispatches && !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? \"创建并指派\" : \"创建任务\"",
+    "描述（只创建任务）",
+  ]);
+  assert.equal(
+    (source("macos/Wand/TaskBoardView.swift").match(/if !description\.trimmingCharacters\(in: \.whitespacesAndNewlines\)\.isEmpty \{/g) ?? []).length,
+    0,
+    "macOS must not dispatch on create from every column",
+  );
+});
+
 test("subagent role windows stay compact, avatar-free, and follow the newest content", () => {
   includesAll("src/web-ui/browser/chat-render.ts", [
     'data-follow-tail="true"',

@@ -545,11 +545,34 @@
     .floating-sidebar-toggle {
       position: relative;
       z-index: 1;
+      flex-shrink: 0;
       display: inline-flex;
       align-items: center;
       justify-content: center;
+      width: 34px;
+      height: 34px;
+      padding: 0;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      background: rgba(255, 251, 245, 0.85);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+      backdrop-filter: blur(16px) saturate(180%);
       cursor: pointer;
       transition: all var(--transition-fast);
+    }
+
+    .main-header-row .floating-sidebar-toggle {
+      margin-right: 2px;
+    }
+
+    .floating-sidebar-toggle:hover {
+      background: rgba(255, 251, 245, 0.95);
+      box-shadow: 0 3px 12px rgba(0, 0, 0, 0.1);
+    }
+
+    .main-header-row .floating-sidebar-toggle:active,
+    .floating-sidebar-toggle:active {
+      transform: scale(0.92);
     }
 
 
@@ -709,7 +732,7 @@
     /* 窄条（collapsed）状态：不显示 X 关闭按钮。
        窄条只保留「展开」按钮，关闭操作必须先回到全尺寸。
        多塞一层 .sidebar-header-actions 把 specificity 抬到 0,4,0，
-       压过文件后段 .sidebar-header-actions .btn-ghost.btn-sm
+       压过文件后段 .sidebar-header-actions .sidebar-more-trigger
        与 .drawer-close-btn 的 display: inline-flex 重置规则。 */
     .sidebar.collapsed .sidebar-header-actions .sidebar-close {
       display: none;
@@ -973,10 +996,26 @@
       flex: 1 1 0;
       min-width: 0;
     }
+    /* 「选择」chip 与多选工具条按钮：平铺的小按钮，不是实心 chip。 */
     .sidebar-manage-toggle,
     .sidebar-manage-action {
+      flex-shrink: 0;
+      height: 30px;
+      padding: 0 9px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 10.5px;
+      font-weight: 600;
       cursor: pointer;
     }
+    .sidebar-manage-toggle:hover,
+    .sidebar-manage-action:hover {
+      color: var(--text-primary);
+      background: var(--bg-tertiary);
+    }
+    .sidebar-manage-action.danger { color: var(--danger); }
     .sidebar-manage-action:disabled {
       opacity: 0.45;
       cursor: default;
@@ -1287,19 +1326,23 @@
     }
 
     .sidebar-logout {
+      color: var(--text-muted);
       opacity: 0.7;
       transition: opacity var(--transition-fast), color var(--transition-fast);
     }
     .sidebar-logout:hover {
       opacity: 1;
+      color: var(--text-secondary);
     }
 
     .sidebar-switch-server {
+      color: var(--text-muted);
       opacity: 0.7;
       transition: opacity var(--transition-fast), color var(--transition-fast);
     }
     .sidebar-switch-server:hover {
       opacity: 1;
+      color: var(--primary, var(--text-secondary));
     }
 
     .login-switch-server {
@@ -1591,6 +1634,13 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
+      width: 30px;
+      height: 30px;
+      padding: 0;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--text-muted);
       cursor: pointer;
       transition: background var(--transition-fast),
                   color var(--transition-fast),
@@ -1598,9 +1648,27 @@
                   transform var(--transition-fast);
     }
 
+    .file-side-panel-iconbtn:hover {
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+      border-color: var(--border-subtle);
+    }
 
+    .file-side-panel-iconbtn:active {
+      transform: scale(0.94);
+    }
 
+    .file-side-panel-iconbtn.active {
+      color: var(--accent);
+      background: var(--accent-muted);
+      border-color: rgba(212, 152, 99, 0.35);
+    }
 
+    .file-side-panel-iconbtn.close:hover {
+      color: var(--text-primary);
+      background: rgba(220, 70, 70, 0.08);
+      border-color: rgba(220, 70, 70, 0.25);
+    }
 
     .file-side-panel-iconbtn .wand-icon {
       display: block;
@@ -1608,6 +1676,7 @@
 
     /* The refresh icon nudges with a subtle spin on hover to reinforce its purpose. */
     .file-side-panel-iconbtn:hover .wand-icon-refresh {
+      transform: rotate(60deg);
       transition: transform 0.25s var(--ease-out-expo);
     }
 
@@ -1901,7 +1970,19 @@
       align-items: center;
       justify-content: center;
       gap: 3px;
+      width: 72px;
+      border: 0;
+      border-radius: 0;
+      background: var(--danger);
+      color: var(--text-inverse);
+      font: inherit;
+      font-size: 9.625px;
+      font-weight: 700;
       cursor: pointer;
+    }
+
+    .session-swipe-delete svg {
+      flex-shrink: 0;
     }
 
 
@@ -2055,18 +2136,44 @@
       display: flex;
       align-items: center;
       justify-content: center;
+      width: 28px;
+      height: 28px;
+      min-width: 28px;
+      min-height: 28px;
+      padding: 0;
+      border: none;
+      border-radius: var(--radius-full);
+      font-size: 11.375px;
+      color: var(--text-muted);
+      background: transparent;
       transition: all 0.2s ease;
       cursor: pointer;
     }
 
+    .session-action-btn:hover {
+      background: rgba(150, 118, 85, 0.1);
+      color: var(--accent);
+    }
 
     .session-action-btn:active {
+      transform: scale(0.9);
       transition-duration: 0.1s;
     }
 
+    .session-action-btn svg {
+      flex-shrink: 0;
+    }
 
     /* Delete icon button in actions */
+    .session-action-btn.delete-btn:hover {
+      background: rgba(231, 76, 60, 0.08);
+      color: #d35244;
+    }
 
+    .session-action-btn.merge-btn:hover {
+      background: rgba(47, 128, 237, 0.1);
+      color: #2f80ed;
+    }
 
     .session-kind-badge.worktree-merge {
       background: rgba(47, 128, 237, 0.12);
@@ -2092,6 +2199,11 @@
     .session-action-btn[disabled] {
       opacity: 0.45;
       cursor: not-allowed;
+    }
+
+    .session-action-btn[disabled]:hover {
+      background: transparent;
+      color: var(--text-muted);
     }
 
 
@@ -2269,7 +2381,7 @@
       gap: 4px;
     }
 
-    .sidebar-footer-actions .btn {
+    .sidebar-footer-actions .wand-ui-navigation-link {
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -2284,7 +2396,7 @@
       transition: background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
     }
 
-    .sidebar-footer-actions .btn svg {
+    .sidebar-footer-actions .wand-ui-navigation-link svg {
       width: 16px;
       height: 16px;
       flex-shrink: 0;
@@ -2292,22 +2404,22 @@
       transition: opacity var(--transition-fast);
     }
 
-    .sidebar-footer-actions .btn:hover {
+    .sidebar-footer-actions .wand-ui-navigation-link:hover {
       color: var(--text-primary);
       background: rgba(150, 118, 85, 0.08);
       transform: translateY(-1px);
     }
 
-    .sidebar-footer-actions .btn:hover svg {
+    .sidebar-footer-actions .wand-ui-navigation-link:hover svg {
       opacity: 1;
     }
 
-    .sidebar-footer-actions .btn:active {
+    .sidebar-footer-actions .wand-ui-navigation-link:active {
       transform: scale(0.95);
       transition-duration: 0.1s;
     }
 
-    .sidebar-footer-actions .btn.hidden {
+    .sidebar-footer-actions .wand-ui-navigation-link.hidden {
       display: none;
     }
 
@@ -2323,7 +2435,16 @@
       left: -3px;
       top: 22%;
       bottom: 22%;
+      width: 1px;
+      background: var(--border-subtle);
       pointer-events: none;
+    }
+    .sidebar-footer-actions .sidebar-logout:hover {
+      color: var(--danger);
+      background: var(--danger-muted);
+    }
+    .sidebar-footer-actions .sidebar-logout:hover svg {
+      color: var(--danger);
     }
 
     /* Unified topbar button base — all topbar/icon buttons share the same 32px height */
@@ -8113,53 +8234,443 @@
       box-shadow: 0 0 0 2px var(--accent-muted), inset 0 0 20px rgba(197, 101, 61, 0.03);
     }
 
-    .login-container {
-      position: relative;
+    /* ============================================================ */
+    /* ── 登录页 · 扁平暖色极简（flat warm minimal）               ── */
+    /* 设计来源：Superdesign 画布已批准稿 draft e678492a（v4 分栏）。  */
+    /*                                                            */
+    /* 所有规则都限定在 .login-page 作用域内：登录页用一套自洽的     */
+    /* 扁平调色板（不透明色、零阴影、零渐变、零玻璃），控制台其余    */
+    /* 部分继续沿用原有主题，互不影响。                              */
+    /*                                                            */
+    /* 设计稿里的 --paper/--surface/--ink/--line/--accent 等变量在   */
+    /* 这里统一加 --lp- 前缀，避免在登录子树里遮蔽全局同名 token     */
+    /* （.btn / .btn-danger 等全局规则仍会读到 --accent 等原值）。   */
+    /* 对应关系：--paper→--lp-paper、--surface→--lp-surface、       */
+    /* --well→--lp-well、--ink→--lp-ink、--ink-2→--lp-ink-2、        */
+    /* --ink-3→--lp-ink-3、--line→--lp-line、--line-2→--lp-line-2、 */
+    /* --accent→--lp-accent、--accent-press→--lp-accent-press、      */
+    /* --accent-solid→--lp-accent-solid、--danger→--lp-danger。      */
+    /* ============================================================ */
+    .login-page {
+      --lp-paper: #faf7f2;
+      --lp-surface: #fffdfa;
+      --lp-well: #f2ede5;
+      --lp-ink: #1f1b18;
+      --lp-ink-2: #57504a;
+      /* #8b8279 在 --lp-paper 上只有 3.53:1，低于小字 WCAG AA 的 4.5:1。
+         #776e63 为 4.68:1（paper）/ 4.93:1（surface），色相保持不变。 */
+      --lp-ink-3: #776e63;
+      --lp-line: #e5ded3;
+      --lp-line-2: #cfc6b8;
+      --lp-accent: #c5653d;
+      --lp-accent-press: #a94f2b;
+      /* 承载白字的实心底色需要更深的赤陶色：#c5653d 对 #fffdfa 只有 3.9:1，
+         #b8562f 为 4.69:1。 */
+      --lp-accent-solid: #b8562f;
+      --lp-accent-solid-hover: #9d4623;
+      --lp-danger: #b24f45;
+      --lp-danger-wash: #fbeeec;
+
+      height: 100vh;
+      height: 100dvh;
+      /* body 是 overflow: hidden 的固定视口层，登录页自己做滚动容器，
+         否则窄屏 / 弹出错误提示后内容会被裁掉且滚不到。 */
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      display: grid;
+      grid-template-columns: 1.15fr 1fr;
+      background: var(--lp-paper);
+      color: var(--lp-ink);
+      font-family: var(--font-sans);
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      padding-top: var(--wand-safe-top);
+      padding-bottom: var(--wand-safe-bottom);
+      padding-left: var(--wand-safe-left);
+      padding-right: var(--wand-safe-right);
+    }
+
+    /* ── 左栏：品牌陈述（桌面双栏的编辑排版侧） ── */
+    .login-page .login-left {
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      align-items: flex-start;
+      padding: 64px;
+      border-right: 1px solid var(--lp-line);
+    }
+
+    .login-page .brand-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 32px;
+    }
+
+    .login-page .brand-logo {
+      display: block;
+      width: 44px;
+      height: 44px;
+      flex-shrink: 0;
+    }
+
+    .login-page .brand-wordmark {
+      font-size: 17.5px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      color: var(--lp-ink);
+    }
+
+    .login-page .brand-statement {
+      max-width: 400px;
+      margin: 0 0 auto;
+      font-size: 21.7px;
+      font-weight: 400;
+      line-height: 1.5;
+      color: var(--lp-ink-2);
+    }
+
+    .login-page .left-spacer { flex: 1; }
+
+    .login-page .trust-line {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      max-width: 340px;
+      margin-top: 48px;
+      padding-top: 24px;
+      border-top: 1px solid var(--lp-line);
+      color: var(--lp-ink-3);
+      font-size: 11.375px;
+      font-weight: 400;
+    }
+    .login-page .trust-line svg {
+      width: 13px;
+      height: 13px;
+      flex: 0 0 auto;
+    }
+
+    /* ── 右栏：表单 ── */
+    .login-page .login-right {
       display: flex;
       align-items: center;
       justify-content: center;
-      min-height: 100vh;
-      min-height: 100dvh;
-      padding: 24px;
-      isolation: isolate;
-      background:
-        radial-gradient(circle at 24% 18%, color-mix(in srgb, var(--accent-muted) 54%, transparent) 0, transparent 34%),
-        radial-gradient(circle at 78% 82%, color-mix(in srgb, var(--bg-tertiary) 72%, transparent) 0, transparent 36%);
+      padding: 64px;
     }
 
-    .login-container::before {
-      position: absolute;
-      z-index: -1;
-      inset: 0;
-      opacity: .34;
-      background-image:
-        linear-gradient(color-mix(in srgb, var(--border-subtle) 42%, transparent) 1px, transparent 1px),
-        linear-gradient(90deg, color-mix(in srgb, var(--border-subtle) 42%, transparent) 1px, transparent 1px);
-      background-size: 44px 44px;
-      mask-image: radial-gradient(circle at center, black, transparent 72%);
-      pointer-events: none;
-      content: "";
-    }
-
-    .login-card {
+    .login-page .form-col {
       width: 100%;
-      max-width: 420px;
-      background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
-      border: 1px solid rgba(255, 255, 255, 0.72);
-      border-radius: 22px;
-      overflow: hidden;
-      box-shadow:
-        0 1px 2px rgba(73, 51, 35, 0.05),
-        0 24px 70px -44px color-mix(in srgb, var(--text-primary) 32%, transparent);
-      backdrop-filter: blur(24px) saturate(135%);
-      -webkit-backdrop-filter: blur(24px) saturate(135%);
+      max-width: 380px;
     }
 
-    .login-header {
-      padding: 24px 26px 22px;
+    .login-page .eyebrow {
+      margin: 0 0 20px;
+      font-size: 11.375px;
+      font-weight: 500;
+      letter-spacing: .14em;
+      color: var(--lp-ink-3);
+    }
+
+    .login-page .login-title {
+      margin: 0 0 12px;
+      font-size: 28px;
+      font-weight: 600;
+      line-height: 1.15;
+      letter-spacing: -0.03em;
+      color: var(--lp-ink);
+      text-wrap: balance;
+    }
+
+    .login-page .form-col .login-hint {
+      margin: 0 0 40px;
+      font-size: 13.125px;
+      font-weight: 400;
+      line-height: 1.65;
+      color: var(--lp-ink-2);
+    }
+
+    .login-page .form-col .field { margin-bottom: 20px; }
+
+    .login-page .form-col .field-label {
+      display: block;
+      margin-bottom: 10px;
+      font-size: 13.125px;
+      font-weight: 500;
+      color: var(--lp-ink);
+    }
+
+    .login-page .password-field {
+      position: relative;
+      display: flex;
+      align-items: center;
+      /* 下划线归容器所有，和设计稿几何完全一致（容器 47px = 输入 46px + 1px 线）。
+         状态变色走 :focus-within（无需 :has()），错误态用 :has() 做渐进增强，
+         老 WebView 上只是少一条红下划线，错误洗色块照常出现。
+         线宽始终 1px，2px 的效果由 1px inset 阴影叠出来，避免状态切换时
+         内容抖动 1px。 */
+      border-bottom: 1px solid var(--lp-line-2);
+      transition: border-color 120ms ease-out, box-shadow 120ms ease-out;
+    }
+
+    /* 覆盖全局 .field-input（12.25px 等宽字、白底、12px 圆角、3px 焦点环），
+       改成扁平的无框输入。 */
+    .login-page .form-col .password-input {
+      flex: 1;
+      width: 100%;
+      height: 46px;
+      min-height: 46px;
+      padding: 0 60px 0 0;
+      font-family: var(--font-sans);
+      font-size: 15px;
+      font-weight: 400;
+      color: var(--lp-ink);
+      background: transparent;
+      border: none;
+      border-radius: 0;
+      box-shadow: none;
+      outline: none;
+      caret-color: var(--lp-accent);
+    }
+    .login-page .form-col .password-input::placeholder {
+      color: var(--lp-ink-3);
+      opacity: 1;
+    }
+
+    .login-page .password-field:focus-within {
+      border-bottom-color: var(--lp-accent);
+      box-shadow: inset 0 -1px 0 0 var(--lp-accent);
+    }
+    .login-page .password-field:has(.password-input[data-error="true"]),
+    .login-page .password-field:has(.password-input[aria-invalid="true"]) {
+      border-bottom-color: var(--lp-danger);
+      box-shadow: inset 0 -1px 0 0 var(--lp-danger);
+    }
+
+    .login-page .password-toggle {
+      position: absolute;
+      right: 0;
+      top: 50%;
+      transform: translateY(-50%);
+      padding: 6px 4px;
+      border: none;
+      border-radius: 0;
+      background: transparent;
+      color: var(--lp-ink-3);
+      font-size: 11.375px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: color 120ms ease-out;
+    }
+    .login-page .password-toggle:hover {
+      background: transparent;
+      color: var(--lp-ink);
+    }
+    .login-page .password-toggle:focus-visible {
+      outline: 2px solid var(--lp-accent);
+      outline-offset: 2px;
+    }
+    /* 视觉文字位置保持不动，只用伪元素把点击区扩到 44x44
+       （文字本身量出来约 31x29，达不到 44px 触控目标）。 */
+    .login-page .password-toggle::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 44px;
+      height: 44px;
+      transform: translate(-50%, -50%);
+    }
+
+    .login-page .form-col .hint {
+      margin: 10px 0 0;
+      font-size: 11.375px;
+      font-weight: 400;
+      line-height: 1.5;
+      color: var(--lp-ink-3);
+    }
+
+    .login-page .form-col .error-message {
+      margin: 10px 0 0;
+      padding: 10px 12px;
+      border-radius: 2px;
+      font-size: 11.375px;
+      line-height: 1.5;
+      color: var(--lp-danger);
+      background: var(--lp-danger-wash);
+    }
+
+    .login-page .login-cert-hint {
+      margin-top: 16px;
+      padding: 14px 16px;
+      border: 1px solid var(--lp-line);
+      border-radius: 2px;
+      background: var(--lp-well);
       text-align: left;
-      border-bottom: 1px solid var(--border-subtle);
-      background: color-mix(in srgb, var(--bg-elevated) 68%, transparent);
+    }
+    .login-page .login-cert-hint-title {
+      margin-bottom: 6px;
+      font-size: 13.125px;
+      font-weight: 600;
+      color: var(--lp-ink);
+    }
+    .login-page .login-cert-hint-body {
+      margin: 0 0 12px;
+      font-size: 13.125px;
+      line-height: 1.6;
+      color: var(--lp-ink-2);
+    }
+
+    /* ── 按钮：扁平实心 / 安静描边 / 文字链接 ── */
+    .login-page .form-col .btn {
+      height: 44px;
+      min-height: 44px;
+      padding: 0 24px;
+      border-radius: 6px;
+      font-size: 13.125px;
+      font-weight: 600;
+      text-decoration: none;
+      transform: none;
+      transition: background-color 120ms ease-out, color 120ms ease-out, border-color 120ms ease-out;
+    }
+    .login-page .form-col .btn:focus { outline: none; }
+    .login-page .form-col .btn:focus-visible {
+      outline: 2px solid var(--lp-accent);
+      outline-offset: 2px;
+      box-shadow: none;
+    }
+    .login-page .form-col .btn-block { width: 100%; }
+
+    .login-page .form-col .btn-primary {
+      margin-top: 28px;
+      background: var(--lp-accent-solid);
+      color: #fffdfa;
+      border-color: transparent;
+      box-shadow: none;
+    }
+    .login-page .form-col .btn-primary:hover,
+    .login-page .form-col .btn-primary:active {
+      background: var(--lp-accent-solid-hover);
+      transform: none;
+      box-shadow: none;
+    }
+
+    /* 证书提示里的「改用 HTTP 访问」：global .btn-ghost 是透明无边框，
+       这里换成安静描边按钮。 */
+    .login-page .form-col .btn-ghost {
+      background: transparent;
+      color: var(--lp-ink-2);
+      border-color: var(--lp-line-2);
+    }
+    .login-page .form-col .btn-ghost:hover {
+      background: var(--lp-well);
+      color: var(--lp-ink);
+    }
+
+    /* 「切换服务器」只在原生壳里出现（存在 WandNative.switchServer 时）。
+       设计稿把它隐藏了，但隐藏等于砍掉原生功能，所以这里保留，
+       改成扁平的文字链接样式。 */
+    .login-page #login-switch-server-button {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: auto;
+      min-height: 44px;
+      margin: 20px auto 0;
+      padding: 0;
+      border: none;
+      background: transparent;
+      color: var(--lp-accent-press);
+      font-size: 13.125px;
+      font-weight: 500;
+    }
+    .login-page #login-switch-server-button:hover {
+      background: transparent;
+      color: var(--lp-accent-press);
+      text-decoration: underline;
+    }
+
+    /* ── 「正在恢复会话」占位态：复用同一副双栏骨架 ── */
+    .login-page .login-status {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+    }
+    .login-page .login-spinner {
+      width: 18px;
+      height: 18px;
+      flex-shrink: 0;
+      margin-top: 2px;
+      border: 2px solid rgba(197, 101, 61, 0.16);
+      border-top-color: var(--lp-accent);
+      border-radius: 999px;
+      animation: loginSpin 0.8s linear infinite;
+    }
+    .login-page .login-status .login-hint {
+      margin: 0 0 6px;
+      font-size: 13.125px;
+      line-height: 1.6;
+      color: var(--lp-ink);
+    }
+    .login-page .login-muted {
+      margin: 0;
+      font-size: 11.375px;
+      line-height: 1.5;
+      color: var(--lp-ink-3);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .login-page *,
+      .login-page *::before,
+      .login-page *::after {
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+      }
+    }
+
+    @media (prefers-contrast: more) {
+      .login-page .password-field { border-bottom-color: var(--lp-line-2); }
+      .login-page .login-left { border-right-color: var(--lp-line-2); }
+    }
+
+    @media (max-width: 640px) {
+      .login-page {
+        grid-template-columns: 1fr;
+        align-content: start;
+      }
+      /* .login-left 变成 display: contents，让它的子元素直接进入单列网格。
+         这样品牌块仍在最上方，同时把「凭据只发送到…」挪到表单下方——
+         自然堆叠顺序会把信任行排到标题之上，读起来是反的。 */
+      .login-page .login-left { display: contents; }
+      .login-page .brand-row {
+        order: 1;
+        margin: 0 0 24px;
+        padding: 40px 24px 0;
+      }
+      .login-page .brand-statement {
+        order: 2;
+        max-width: 100%;
+        margin: 0 0 32px;
+        padding: 0 24px;
+      }
+      .login-page .login-right {
+        order: 3;
+        align-items: flex-start;
+        justify-content: flex-start;
+        padding: 0 24px 32px;
+      }
+      .login-page .left-spacer { display: none; }
+      .login-page .trust-line {
+        order: 4;
+        width: auto;
+        max-width: none;
+        margin: 0 24px 40px;
+        padding-top: 24px;
+      }
+      .login-page .login-title { font-size: 24px; }
+      .login-page .form-col { max-width: none; }
     }
 
     .boot-loading {
@@ -8197,106 +8708,6 @@
       font-weight: 500;
     }
 
-    .login-brand-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-      margin-bottom: 30px;
-    }
-
-    .login-logo { display: flex; align-items: center; gap: 9px; }
-
-    .login-logo-icon {
-      width: 36px; height: 36px;
-      background: var(--accent);
-      border-radius: 10px;
-      display: flex; align-items: center; justify-content: center;
-      border: 1px solid rgba(255, 255, 255, 0.18);
-      box-shadow: 0 1px 1px rgba(197, 101, 61, 0.10);
-      font-size: 16px; color: white; font-weight: 700;
-    }
-
-    .login-logo-text { font-size: 15.75px; font-weight: 650; letter-spacing: -0.02em; }
-    .login-context-badge {
-      display: inline-flex;
-      align-items: center;
-      min-height: 22px;
-      border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border-default));
-      border-radius: 6px;
-      padding: 3px 7px;
-      color: var(--accent-active);
-      background: var(--accent-muted);
-      font-size: 10px;
-      font-weight: 600;
-      letter-spacing: .035em;
-    }
-    .login-title {
-      margin: 0;
-      color: var(--text-primary);
-      font-size: 21.7px;
-      font-weight: 650;
-      line-height: 1.18;
-      letter-spacing: -0.028em;
-      text-wrap: balance;
-    }
-    .login-subtitle { margin-top: 7px; color: var(--text-muted); font-size: 12.25px; line-height: 1.5; }
-    .login-body { padding: 22px 26px 26px; }
-    .login-card-loading .login-body { padding-top: 18px; padding-bottom: 24px; }
-    .login-hint { font-size: 11.375px; color: var(--text-secondary); margin: 0 0 18px; line-height: 1.5; }
-    .login-muted { margin: 4px 0 0; font-size: 10.5px; color: var(--text-muted); line-height: 1.45; }
-    .login-status {
-      display: flex;
-      align-items: flex-start;
-      gap: 14px;
-      padding: 2px 0;
-    }
-    .login-spinner {
-      width: 18px;
-      height: 18px;
-      flex-shrink: 0;
-      margin-top: 2px;
-      border: 2px solid rgba(197, 101, 61, 0.16);
-      border-top-color: var(--accent);
-      border-radius: 999px;
-      animation: loginSpin 0.8s linear infinite;
-    }
-    .password-field {
-      position: relative;
-      display: flex;
-      align-items: center;
-    }
-    .password-input {
-      padding-right: 78px;
-      min-height: 46px;
-    }
-    .login-body .field-input:hover:not(:disabled) {
-      border-color: var(--border-strong);
-      background: color-mix(in srgb, white 84%, var(--bg-elevated));
-    }
-    .password-toggle {
-      position: absolute;
-      right: 8px;
-      top: 50%;
-      transform: translateY(-50%);
-      border: none;
-      background: transparent;
-      color: var(--text-secondary);
-      font-size: 10.5px;
-      font-weight: 600;
-      padding: 6px 8px;
-      border-radius: 8px;
-      cursor: pointer;
-      transition: background var(--transition-fast), color var(--transition-fast);
-    }
-    .password-toggle:hover {
-      background: rgba(125, 91, 57, 0.08);
-      color: var(--text-primary);
-    }
-    .password-toggle:focus-visible {
-      outline: 2px solid var(--accent);
-      outline-offset: 2px;
-    }
     @keyframes loginSpin {
       from { transform: rotate(0deg); }
       to { transform: rotate(360deg); }
@@ -8306,89 +8717,6 @@
       opacity: 0.72;
       transform: none;
       box-shadow: none;
-    }
-    .login-body .field {
-      margin-bottom: 20px;
-    }
-    .login-body .hint {
-      margin-top: 10px;
-    }
-    .login-body .error-message {
-      margin-top: 10px;
-      margin-bottom: 0;
-    }
-    .login-body > .btn-primary {
-      min-height: 44px;
-      border-radius: 11px;
-      box-shadow: 0 8px 24px -16px color-mix(in srgb, var(--accent) 72%, transparent);
-    }
-    .login-trust-note {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      margin: 11px 0 0;
-      color: var(--text-muted);
-      font-size: 9.625px;
-      line-height: 1.4;
-    }
-    .login-trust-note svg {
-      width: 13px;
-      height: 13px;
-      flex: 0 0 auto;
-    }
-    .login-cert-hint {
-      margin-top: 14px;
-      padding: 14px 16px;
-      border-radius: 12px;
-      border: 1px solid rgba(190, 120, 40, 0.32);
-      background: rgba(220, 150, 60, 0.1);
-      text-align: left;
-    }
-    .login-cert-hint-title {
-      font-size: 12.25px;
-      font-weight: 600;
-      color: var(--text-primary);
-      margin-bottom: 6px;
-    }
-    .login-cert-hint-body {
-      font-size: 11.375px;
-      line-height: 1.6;
-      color: var(--text-secondary);
-      margin: 0 0 12px;
-    }
-    .login-cert-hint .btn {
-      margin-top: 0;
-    }
-    .password-input[data-error="true"],
-    .password-input[aria-invalid="true"] {
-      border-color: var(--danger);
-      box-shadow: 0 0 0 3px var(--danger-muted);
-    }
-    .password-input[data-error="true"] + .password-toggle,
-    .password-input[aria-invalid="true"] + .password-toggle {
-      color: var(--danger);
-    }
-    .password-input:focus + .password-toggle {
-      color: var(--text-primary);
-    }
-    .password-toggle:active {
-      transform: translateY(-50%) scale(0.98);
-    }
-    .password-input::-ms-reveal,
-    .password-input::-ms-clear {
-      display: none;
-    }
-    .password-input::-webkit-credentials-auto-fill-button,
-    .password-input::-webkit-contacts-auto-fill-button {
-      visibility: hidden;
-      display: none !important;
-      pointer-events: none;
-      position: absolute;
-      right: 0;
-    }
-    .password-input[type="text"] {
-      font-family: var(--font-mono);
     }
 
     .field { margin-bottom: 18px; }
@@ -8582,7 +8910,7 @@
     }
 
     /* Sidebar header icon buttons — collapse / more / close — uniform 32×32 ghost */
-    .sidebar-header-actions .btn-ghost.btn-sm,
+    .sidebar-header-actions .sidebar-more-trigger,
     .drawer-close-btn {
       width: 32px;
       height: 32px;
@@ -8601,7 +8929,7 @@
         color 0.16s ease,
         transform 0.22s cubic-bezier(0.34, 1.4, 0.64, 1);
     }
-    .sidebar-header-actions .btn-ghost.btn-sm:hover {
+    .sidebar-header-actions .sidebar-more-trigger:hover {
       background: rgba(125, 91, 57, 0.08);
       color: var(--text-primary);
     }
@@ -8871,13 +9199,39 @@
 
     /* ── Session action mini-buttons (resume / merge / delete) ── */
     .session-action-btn {
+      width: 28px;
+      height: 28px;
+      min-width: 28px;
+      min-height: 28px;
+      border-radius: 50%;
+      background: rgba(125, 91, 57, 0.06);
+      color: var(--text-tertiary);
+      border: none;
       transition:
         background 0.16s ease,
         color 0.16s ease,
         transform 0.18s cubic-bezier(0.34, 1.4, 0.64, 1);
     }
+    .session-action-btn:hover {
+      background: rgba(125, 91, 57, 0.14);
+      color: var(--text-primary);
+      transform: translateY(-1px);
+    }
+    .session-action-btn.delete-btn:hover {
+      background: rgba(178, 79, 69, 0.14);
+      color: var(--danger);
+    }
+    .session-action-btn.merge-btn:hover {
+      background: rgba(79, 122, 88, 0.16);
+      color: var(--success);
+    }
     .session-action-btn:active {
+      transform: scale(0.9);
       transition-duration: 0.06s;
+    }
+    .session-action-btn:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
     }
 
     /* Session manage check — iOS-style mini checkbox */
@@ -8915,7 +9269,7 @@
       border-top: 1px solid rgba(125, 91, 57, 0.06);
       padding: 14px;
     }
-    .sidebar-footer-actions .btn {
+    .sidebar-footer-actions .wand-ui-navigation-link {
       background: rgba(255, 255, 255, 0.45);
       border: 1px solid rgba(125, 91, 57, 0.06);
       border-radius: 10px;
@@ -8932,20 +9286,20 @@
         transform 0.16s ease,
         box-shadow 0.16s ease;
     }
-    .sidebar-footer-actions .btn:hover {
+    .sidebar-footer-actions .wand-ui-navigation-link:hover {
       background: rgba(255, 255, 255, 0.85);
       border-color: rgba(125, 91, 57, 0.16);
       color: var(--text-primary);
       transform: translateY(-1px);
       box-shadow: 0 2px 8px rgba(125, 91, 57, 0.06);
     }
-    .sidebar-footer-actions .btn:active {
+    .sidebar-footer-actions .wand-ui-navigation-link:active {
       transform: scale(0.96);
       transition-duration: 0.06s;
     }
     /* Footer tab active — same liquid glass language as .session-item.active
        （同步精简为 accent 边框 + 1 层柔和投影 + 顶高光） */
-    .sidebar-footer-actions .btn.active {
+    .sidebar-footer-actions .wand-ui-navigation-link.active {
       background:
         linear-gradient(180deg, rgba(255, 252, 247, 0.95) 0%, rgba(255, 242, 228, 0.78) 100%);
       border: 1px solid rgba(197, 101, 61, 0.28);
@@ -8957,7 +9311,7 @@
         0 3px 10px -3px rgba(197, 101, 61, 0.22),
         inset 0 1px 0 rgba(255, 255, 255, 0.7);
     }
-    .sidebar-footer-actions .btn.sidebar-logout:hover {
+    .sidebar-footer-actions .wand-ui-navigation-link.sidebar-logout:hover {
       opacity: 1;
     }
 
@@ -9105,7 +9459,7 @@
       .session-item { min-height: 52px; padding: 12px 12px; }
       .session-manage-bar .btn { min-height: 32px; }
       .claude-history-toggle { min-height: 40px; display: flex; align-items: center; }
-      .sidebar-footer-actions .btn { min-height: 44px; }
+      .sidebar-footer-actions .wand-ui-navigation-link { min-height: 44px; }
       .tree-item { min-height: 44px; padding: 8px 12px; }
     }
 
@@ -9144,6 +9498,11 @@
       }
 
       /* 移动端浮动按钮 */
+      .floating-sidebar-toggle {
+        width: 30px;
+        height: 30px;
+        border-radius: 6px;
+      }
 
       .sidebar { top: 0; }
       .sidebar-header { padding: 10px 12px; min-height: 48px; gap: 8px; }
@@ -9159,12 +9518,12 @@
       .sidebar-footer-actions:has(.sidebar-back-to-native):has(.sidebar-switch-server) {
         grid-template-columns: repeat(5, 1fr);
       }
-      .sidebar-footer-actions .btn {
+      .sidebar-footer-actions .wand-ui-navigation-link {
         min-height: 40px;
         padding: 6px 4px;
       }
-      .sidebar-footer-actions .btn span { display: none; }
-      .sidebar-footer-actions .btn svg { width: 18px; height: 18px; }
+      .sidebar-footer-actions .wand-ui-navigation-link span { display: none; }
+      .sidebar-footer-actions .wand-ui-navigation-link svg { width: 18px; height: 18px; }
 
       /* "更多操作"下拉：默认锚在更多按钮右沿向左展开 150px。手机端：
          · 加大 min-width 让中文项不会两行；
@@ -9403,20 +9762,8 @@
       .todo-progress-task { font-size: 10.5px; }
       .todo-progress-body { padding: 4px 6px; }
 
-      .login-container {
-        min-height: 100dvh;
-        align-items: flex-start;
-        padding: 8px 8px calc(8px + var(--safe-bottom, 0px));
-      }
-
-      .login-card {
-        margin-top: max(6px, env(safe-area-inset-top, 0px));
-      }
-
-      .login-header { padding: 18px 18px 16px; }
-      .login-brand-row { margin-bottom: 22px; }
-      .login-title { font-size: 18.9px; }
-      .login-body { padding: 18px; }
+      /* 登录页（.login-page）的移动端规则在它自己的 @media 里，见文件上方的
+         「登录页 · 扁平暖色极简」区块；这里只保留全局按钮高度。 */
       .btn { min-height: 40px; }
       .btn-sm { min-height: 32px; }
 
@@ -9480,6 +9827,12 @@
     @media (max-width: 390px) {
       /* 继承 max-width: 640px 的样式，此处仅做小屏微调 */
 
+      /* 小屏浮动按钮再小一号 */
+      .floating-sidebar-toggle {
+        width: 28px;
+        height: 28px;
+      }
+
       .terminal-header { padding: 4px 6px; min-height: 28px; }
       .terminal-info { display: none; }
 
@@ -9505,8 +9858,8 @@
       .sidebar-footer-actions:has(.sidebar-back-to-native):has(.sidebar-switch-server) {
         grid-template-columns: repeat(5, 1fr);
       }
-      .sidebar-footer-actions .btn span { display: none; }
-      .sidebar-footer-actions .btn { min-height: 36px; padding: 6px; }
+      .sidebar-footer-actions .wand-ui-navigation-link span { display: none; }
+      .sidebar-footer-actions .wand-ui-navigation-link { min-height: 36px; padding: 6px; }
 
       .modal { max-height: 80vh; }
 
@@ -9534,6 +9887,11 @@
 
     /* 横屏模式优化 */
     @media (max-height: 420px) and (orientation: landscape) {
+
+      .floating-sidebar-toggle {
+        width: 28px;
+        height: 28px;
+      }
 
       .sidebar { top: 0; }
 
@@ -9771,7 +10129,16 @@
     }
     /* 欢迎页唯一主行动：新建任务（统一任务入口） */
     .blank-chat-tool-btn.welcome-new-task {
+      min-width: 180px;
       justify-content: center;
+      border-color: var(--accent);
+      background: var(--accent-muted);
+      color: var(--accent);
+      font-weight: 650;
+    }
+
+    .blank-chat-tool-btn.welcome-new-task:hover {
+      background: color-mix(in srgb, var(--accent) 16%, transparent);
     }
     /* Blank-chat CWD inline selector */
     .blank-chat-cwd-wrap {
@@ -10238,10 +10605,28 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
+      flex-shrink: 0;
+      width: 30px;
+      height: 30px;
+      padding: 0;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--text-muted);
       transition: background var(--transition-fast),
                   color var(--transition-fast),
                   border-color var(--transition-fast),
                   transform var(--transition-fast);
+    }
+
+    .file-explorer-up:hover {
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+      border-color: var(--border-subtle);
+    }
+
+    .file-explorer-up:active {
+      transform: translateY(-1px);
     }
 
     /* ── File tree size/meta column ── */
@@ -11740,6 +12125,10 @@
     }
 
     @media (hover: hover) and (pointer: fine) {
+      /* 桌面端不抬高按钮，只靠底色/文字色反馈（旧设计的悬停位移在鼠标上很吵）。 */
+      .session-action-btn:hover {
+        transform: none;
+      }
     }
 
     @media (hover: none), (pointer: coarse) {
@@ -12332,6 +12721,11 @@
       gap: 0;
       overflow: hidden;
       flex-wrap: nowrap;
+    }
+
+    /* 模式组里的下拉/弹层要能溢出行外，不能被上面那条 overflow: hidden 裁掉。 */
+    .input-composer .composer-config-controls-mode {
+      overflow: visible;
     }
 
     .input-composer .composer-config-chip {
@@ -13328,7 +13722,7 @@
       border-top-color: var(--border-subtle);
     }
 
-    html:not(.is-wand-app) .sidebar-footer-actions .btn {
+    html:not(.is-wand-app) .sidebar-footer-actions .wand-ui-navigation-link {
       border-color: transparent;
       border-radius: 8px;
       background: transparent;
@@ -13336,18 +13730,18 @@
       transform: none;
     }
 
-    html:not(.is-wand-app) .sidebar-footer-actions .btn:hover {
+    html:not(.is-wand-app) .sidebar-footer-actions .wand-ui-navigation-link:hover {
       border-color: transparent;
       background: var(--bg-tertiary);
       box-shadow: none;
       transform: none;
     }
 
-    html:not(.is-wand-app) .sidebar-footer-actions .btn:active {
+    html:not(.is-wand-app) .sidebar-footer-actions .wand-ui-navigation-link:active {
       transform: scale(0.97);
     }
 
-    html:not(.is-wand-app) .sidebar-footer-actions .btn.active {
+    html:not(.is-wand-app) .sidebar-footer-actions .wand-ui-navigation-link.active {
       border-color: transparent;
       background: var(--accent-muted);
       backdrop-filter: none;
@@ -13816,7 +14210,7 @@
       text-align: center;
     }
 
-    #app[data-react-shell="enabled"] .sidebar-header-actions .btn-ghost.btn-sm,
+    #app[data-react-shell="enabled"] .sidebar-header-actions .sidebar-more-trigger,
     #app[data-react-shell="enabled"] .sidebar-header-actions .drawer-close-btn {
       width: 28px;
       min-width: 28px;
@@ -13834,6 +14228,14 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
+      width: 34px;
+      min-width: 34px;
+      height: 32px;
+      padding: 0;
+      border: 1px solid var(--border-subtle);
+      border-radius: 9px;
+      color: var(--text-muted);
+      background: var(--bg-tertiary);
       cursor: pointer;
       transition:
         color 140ms ease,
@@ -13841,6 +14243,34 @@
         border-color 140ms ease,
         box-shadow 140ms ease,
         transform 100ms ease;
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-compact-toggle:hover {
+      color: var(--text-primary);
+      border-color: color-mix(in srgb, var(--border-default) 86%, transparent);
+      background: var(--bg-elevated);
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-compact-toggle:active {
+      transform: scale(0.94);
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-compact-toggle.active {
+      color: var(--success);
+      border-color: color-mix(in srgb, var(--success) 30%, var(--border-subtle));
+      background: color-mix(in srgb, var(--success) 13%, var(--bg-elevated));
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--success) 20%, transparent), 0 1px 3px color-mix(in srgb, var(--success) 16%, transparent);
+    }
+
+    #app[data-react-shell="enabled"] .sidebar-compact-toggle.active::after {
+      content: "";
+      position: absolute;
+      right: 4px;
+      bottom: 4px;
+      width: 3px;
+      height: 3px;
+      border-radius: 50%;
+      background: currentColor;
     }
 
 
@@ -13851,6 +14281,10 @@
       position: absolute;
       right: 4px;
       bottom: 4px;
+      width: 3px;
+      height: 3px;
+      border-radius: 50%;
+      background: currentColor;
     }
 
     #app[data-react-shell="enabled"] .sidebar-compact-toggle-label {
@@ -14018,9 +14452,35 @@
       padding: 3px 4px 3px 2px;
     }
 
+    /* 目录 / 会话 / 任务三种行都是「主区 + 行尾动作」两段式：主区必须
+       display: flex + min-width: 0，否则长标题会把行尾动作挤出侧栏。 */
     .workspace-row-main {
+      display: flex;
       flex: 1 1 auto;
+      min-width: 0;
+      min-height: 36px;
+      align-items: center;
+      gap: 7px;
+      border: 0;
+      border-radius: 9px;
+      padding: 5px 4px 5px 6px;
+      color: var(--text-secondary);
+      background: transparent;
+      font: inherit;
+      cursor: pointer;
       text-align: left;
+    }
+
+    .workspace-row-main:hover {
+      background: color-mix(in srgb, var(--bg-tertiary) 42%, transparent);
+    }
+
+    .workspace-row-main.is-static {
+      cursor: default;
+    }
+
+    .workspace-row-main.is-static:hover {
+      background: transparent;
     }
 
 
@@ -14090,10 +14550,21 @@
       gap: 1px;
     }
 
+    /* 行高只有 34-40px，行尾动作不能用 Appica 默认的 32×32 图标按钮：
+       那会把标题挤到没有位置（且和 22px 的会话行动作不成体系）。 */
     .workspace-row-action {
       display: inline-flex;
       align-items: center;
       justify-content: center;
+      width: 26px;
+      min-width: 26px;
+      height: 26px;
+      border: 0;
+      border-radius: 8px;
+      padding: 0;
+      color: var(--text-muted);
+      background: transparent;
+      font-size: 14px;
       cursor: pointer;
       opacity: 0.55;
       transition: color 120ms ease, background-color 120ms ease, opacity 120ms ease, transform 100ms ease;
@@ -14105,23 +14576,51 @@
     }
 
     .workspace-row-action:hover {
+      color: var(--text-primary);
+      background: color-mix(in srgb, var(--bg-tertiary) 72%, transparent);
       opacity: 1;
     }
 
+    .workspace-row-action:active {
+      transform: scale(0.94);
+    }
 
     .workspace-row-action.add,
     .workspace-row-action.delete {
       opacity: 0.82;
     }
 
+    .workspace-row-action.add:hover {
+      color: var(--accent);
+      background: var(--accent-muted);
+    }
 
+    .workspace-row-action.worktrees {
+      color: var(--accent);
+    }
 
     .workspace-row-action.worktrees:disabled {
+      color: var(--text-muted);
       cursor: default;
       opacity: 0.45;
     }
 
+    .workspace-row-action.delete:hover,
+    .workspace-row-action.cancel:hover {
+      color: var(--danger);
+      background: color-mix(in srgb, var(--danger) 12%, transparent);
+    }
+
+    .workspace-row-action.confirm:hover {
+      color: var(--success);
+      background: color-mix(in srgb, var(--success) 14%, transparent);
+    }
+
     @media (hover: hover) and (pointer: fine) {
+      .workspace-row-action.worktrees:not(:disabled):hover {
+        color: var(--accent-active);
+        background: var(--accent-muted);
+      }
     }
 
 
@@ -14145,8 +14644,42 @@
     }
 
     .workspace-session-main {
+      position: relative;
+      display: flex;
       flex: 1 1 auto;
+      min-width: 0;
+      align-items: center;
+      gap: 6px;
+      border: 0;
+      border-radius: 8px;
+      padding: 4px 6px 4px 12px;
+      color: inherit;
+      background: transparent;
+      font: inherit;
+      cursor: pointer;
       text-align: left;
+      transition: background-color 140ms ease;
+    }
+
+    .workspace-session-main:hover {
+      background: color-mix(in srgb, var(--bg-tertiary) 48%, transparent);
+    }
+
+    /* 当前会话：底色 + 左侧 2px 竖条，不靠单一颜色区分。 */
+    .workspace-session.active > .workspace-session-main {
+      background: color-mix(in srgb, var(--accent-muted) 46%, transparent);
+      color: var(--text-primary);
+    }
+
+    .workspace-session.active > .workspace-session-main::before {
+      content: "";
+      position: absolute;
+      left: 4px;
+      top: 6px;
+      bottom: 6px;
+      width: 2px;
+      border-radius: 2px;
+      background: var(--accent);
     }
 
 
@@ -14197,6 +14730,14 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
+      width: 22px;
+      min-width: 22px;
+      height: 22px;
+      border: 0;
+      border-radius: 6px;
+      padding: 0;
+      color: var(--text-muted);
+      background: transparent;
       cursor: pointer;
       opacity: 0.55;
       transition: color 120ms ease, background-color 120ms ease, opacity 120ms ease, transform 100ms ease;
@@ -14209,7 +14750,19 @@
     }
 
     .workspace-session-action:hover {
+      color: var(--text-primary);
+      background: color-mix(in srgb, var(--bg-tertiary) 72%, transparent);
       opacity: 1;
+    }
+
+    .workspace-session-action:active {
+      transform: scale(0.92);
+    }
+
+    .workspace-session-action.delete:hover,
+    .workspace-session-action.cancel:hover {
+      color: var(--danger);
+      background: color-mix(in srgb, var(--danger) 12%, transparent);
     }
 
 
@@ -14239,14 +14792,33 @@
     }
 
     .workspace-task-main {
+      display: flex;
       flex: 1 1 auto;
+      min-width: 0;
+      min-height: 30px;
+      align-items: center;
+      gap: 5px;
+      border: 0;
+      border-radius: 6px;
+      padding: 3px 2px;
+      color: inherit;
+      background: transparent;
+      font: inherit;
+      cursor: pointer;
       text-align: left;
+    }
+
+    .workspace-task-main:focus-visible {
+      outline: 2px solid color-mix(in srgb, var(--accent) 52%, transparent);
+      outline-offset: 1px;
     }
 
 
 
     .workspace-task.active {
+      background: color-mix(in srgb, var(--accent-muted) 42%, var(--bg-elevated));
       color: var(--text-primary);
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
     }
 
     .workspace-task-group {
@@ -14272,7 +14844,20 @@
       align-items: center;
       justify-content: center;
       gap: 3px;
+      min-width: 18px;
+      height: 22px;
+      padding: 0 4px;
+      border: 0;
+      border-radius: 6px;
+      background: color-mix(in srgb, var(--bg-elevated) 52%, transparent);
+      color: var(--text-muted);
+      font: inherit;
       cursor: pointer;
+    }
+
+    .workspace-task-chevron-btn:hover {
+      color: var(--text-primary);
+      background: color-mix(in srgb, var(--accent-muted) 45%, transparent);
     }
 
 
@@ -14467,13 +15052,42 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
+      width: 24px;
+      min-width: 24px;
+      height: 24px;
+      border: 0;
+      border-radius: 7px;
+      padding: 0;
+      color: var(--text-muted);
+      background: transparent;
       cursor: pointer;
       opacity: 0.7;
       transition: color 120ms ease, background-color 120ms ease, opacity 120ms ease, transform 100ms ease;
     }
 
     .workspace-task-action:hover {
+      color: var(--text-primary);
+      background: color-mix(in srgb, var(--bg-tertiary) 72%, transparent);
       opacity: 1;
+    }
+
+    .workspace-task-action:active {
+      transform: scale(0.9);
+    }
+
+    .workspace-task-action.add:hover {
+      color: var(--accent);
+    }
+
+    .workspace-task-action.delete:hover,
+    .workspace-task-action.cancel:hover {
+      color: var(--danger);
+      background: color-mix(in srgb, var(--danger) 12%, transparent);
+    }
+
+    .workspace-task-action.confirm:hover {
+      color: var(--success);
+      background: color-mix(in srgb, var(--success) 14%, transparent);
     }
 
 
@@ -15364,7 +15978,7 @@
         margin-top: 8px;
       }
 
-      .sidebar-footer-actions .btn {
+      .sidebar-footer-actions .wand-ui-navigation-link {
         min-height: 32px;
         border-radius: 8px;
         padding-inline: 8px;
@@ -15437,6 +16051,18 @@
       padding-top: 0;
     }
 
+    /* 原生壳（触控、无悬停）里行更矮、圆角收平，悬停也不给底色。 */
+    #app[data-react-shell="enabled"] .workspace-row-main {
+      min-height: 28px;
+      gap: 6px;
+      padding: 2px 0;
+      border-radius: 0;
+    }
+
+    #app[data-react-shell="enabled"] .workspace-row-main:hover {
+      background: transparent;
+    }
+
     /* Three readable levels: 目录 (flush) → 任务 (guide line) → 终端 (nested
        inside the task). Sessions must indent past their task row, and the
        loose-session summary sits at session level so the tree never shows two
@@ -15457,7 +16083,8 @@
       position: relative;
       min-height: 34px;
       gap: 2px;
-      padding: 1px 28px 1px 0;
+      /* 行尾按钮已在 flow 里，不再给绝对定位按钮预留 28px gutter。 */
+      padding: 1px 0;
       border-radius: 7px;
       transition: background-color 120ms ease;
     }
@@ -15470,6 +16097,45 @@
       background: color-mix(in srgb, var(--text-primary) 9%, transparent);
       box-shadow: none;
     }
+
+    #app[data-react-shell="enabled"] .workspace-task-main {
+      min-height: 32px;
+      gap: 5px;
+      padding: 3px 5px;
+    }
+
+    #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-compact-toggle {
+      width: 36px;
+      min-width: 36px;
+      height: 36px;
+    }
+
+    #app[data-react-shell="enabled"] .workspace-session-main {
+      min-height: 30px;
+      gap: 5px;
+      padding: 5px 7px;
+      border-radius: 6px;
+      color: var(--text-secondary);
+    }
+
+    #app[data-react-shell="enabled"] .workspace-session-main:hover {
+      background: color-mix(in srgb, var(--bg-elevated) 62%, transparent);
+    }
+
+    #app[data-react-shell="enabled"] .workspace-session.active > .workspace-session-main {
+      background: color-mix(in srgb, var(--accent-muted) 72%, transparent);
+    }
+
+    #app[data-react-shell="enabled"] .workspace-session.active > .workspace-session-main::before {
+      left: 0;
+      top: 8px;
+      bottom: 8px;
+      width: 3px;
+      background: var(--accent);
+    }
+
+    /* 嵌套在任务下的会话行靠容器缩进（.workspace-task-sessions 的 margin/padding），
+       行自身不再单独加 padding，否则两层缩进会叠加。 */
 
 
     #app[data-react-shell="enabled"] .workspace-task-marker {
@@ -15505,7 +16171,11 @@
     }
 
     #app[data-react-shell="enabled"] .workspace-task-chevron-btn {
+      min-width: 28px;
+      height: 28px;
       gap: 2px;
+      padding: 0 2px;
+      background: transparent;
     }
 
     #app[data-react-shell="enabled"] .workspace-task-sessions,
@@ -15644,13 +16314,72 @@
       font-weight: 550;
     }
 
-    .sidebar-feature-nav > button:hover,
-    .sidebar-feature-nav > button[aria-current="page"] {
+    /* Appica 迁移后，侧栏动作行变成 nav > ul > li > button（WandNavigation*），
+       列表与行几何没有默认外观，也不该由 Appica 的 pill 排版接管：
+       这里把「一行一个动作」的紧凑行收回自己手上。 */
+    .sidebar-feature-nav .sidebar-feature-list,
+    .sidebar-footer-actions .wand-ui-navigation-list {
+      display: flex;
+      gap: 4px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      min-width: 0;
+    }
+
+    .sidebar-feature-nav .sidebar-feature-list {
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .sidebar-feature-nav .sidebar-feature-list > li,
+    .sidebar-footer-actions .wand-ui-navigation-list > li {
+      display: block;
+      min-width: 0;
+    }
+
+    /* 底部动作还是等宽平铺：li 平分整行，按钮撑满自己的格子。 */
+    .sidebar-footer-actions .wand-ui-navigation-list > li {
+      flex: 1 1 0;
+    }
+
+    .sidebar-feature-nav .sidebar-feature-list > li > button {
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 10px;
+      width: 100%;
+      min-height: 36px;
+      padding: 7px 10px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--text-secondary);
+      font: inherit;
+      font-size: 13.125px;
+      font-weight: 550;
+      text-align: left;
+      cursor: pointer;
+      transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease, transform 120ms ease;
+    }
+
+    .sidebar-feature-nav .sidebar-feature-list > li > button > svg {
+      flex: 0 0 auto;
+      color: #9a8d82;
+    }
+
+    .sidebar-feature-nav .sidebar-feature-list > li > button:hover,
+    .sidebar-feature-nav .sidebar-feature-list > li > button[aria-current="page"],
+    .sidebar-feature-nav .sidebar-feature-list > li > button[data-active] {
       color: var(--text-primary);
       background: color-mix(in srgb, var(--text-primary) 9%, transparent);
     }
 
-    .sidebar-feature-nav > button:focus-visible,
+    .sidebar-feature-nav .sidebar-feature-list > li > button:active {
+      transform: scale(0.98);
+    }
+
+    .sidebar-feature-nav .sidebar-feature-list > li > button:focus-visible,
     .workspaces-panel button:focus-visible {
       outline: 2px solid var(--accent);
       outline-offset: -2px;
@@ -15661,7 +16390,21 @@
       padding: 0 4px 8px;
     }
 
-    .sidebar.pinned.collapsed .sidebar-feature-nav > button > span {
+    /* 窄栏里动作行收成 36×36 图标块，文字必须藏掉，否则会顶出 56px 轨道。 */
+    .sidebar.pinned.collapsed .sidebar-feature-nav .sidebar-feature-list {
+      align-items: center;
+      width: auto;
+    }
+
+    .sidebar.pinned.collapsed .sidebar-feature-nav .sidebar-feature-list > li > button {
+      display: inline-flex;
+      width: 36px;
+      min-width: 36px;
+      justify-content: center;
+      gap: 0;
+    }
+
+    .sidebar.pinned.collapsed .sidebar-feature-nav .sidebar-feature-list > li > button > span {
       display: none;
     }
 
@@ -15669,7 +16412,7 @@
       margin-top: 0;
     }
 
-    #app[data-react-shell="enabled"] .sidebar-footer-actions .btn {
+    #app[data-react-shell="enabled"] .sidebar-footer-actions .wand-ui-navigation-link {
       flex-direction: row;
       gap: 7px;
       font-size: 11.375px;
@@ -15694,14 +16437,25 @@
       align-items: center;
     }
 
-    #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-footer-actions .btn {
+    /* 窄栏里底部动作也竖着排：Appica 的 ul 默认是横排，不扳回方向
+       56px 轨道放不下两个 36px 图标按钮。 */
+    #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-footer-actions .wand-ui-navigation-list {
+      flex-direction: column;
+      align-items: center;
+    }
+
+    #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-footer-actions .wand-ui-navigation-list > li {
+      flex: 0 0 auto;
+    }
+
+    #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-footer-actions .wand-ui-navigation-link {
       width: 36px;
       min-width: 0;
       min-height: 36px;
       padding: 8px;
     }
 
-    #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-footer-actions .btn > span,
+    #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-footer-actions .wand-ui-navigation-link > span,
     #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-logout::before {
       display: none;
     }
@@ -15749,9 +16503,21 @@
       display: inline-flex;
       align-items: center;
       gap: 6px;
+      min-height: 30px;
+      padding: 4px 6px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--text-secondary);
+      font: inherit;
+      font-size: 12.25px;
       cursor: pointer;
     }
 
+    .workspaces-empty-action:hover {
+      background: var(--accent-muted);
+      color: var(--accent);
+    }
 
     .workspace-row-folder {
       flex-shrink: 0;
@@ -15809,9 +16575,9 @@
       min-width: 0;
     }
 
-    /* 任务行的行尾按钮现在是 Appica 的 icon button（32px 盒子），直接参与
-       flex 布局；手写时代为了给 24px 绝对定位按钮留位而写的 gutter 全部撤掉，
-       否则标题会被两侧各一份的预留空间挤到只剩几十像素。 */
+    /* 任务行的行尾按钮参与 flex 布局（不再是绝对定位），为了给旧 24px 绝对定位
+       按钮留位而写的 gutter 已经撤掉；按钮自身回到 24px 紧凑盒子
+       （.workspace-task-action），否则标题会被两侧预留空间挤没。 */
     #app[data-react-shell="enabled"] .workspace-task-action.more,
     #app[data-react-shell="enabled"] .workspace-task-confirm {
       position: static;
@@ -15856,14 +16622,14 @@
 
     @media (prefers-reduced-motion: reduce) {
       .sidebar-disclosure,
-      .sidebar-feature-nav > button,
+      .sidebar-feature-nav .sidebar-feature-list > li > button,
       #app[data-react-shell="enabled"] .workspace-task,
       #app[data-react-shell="enabled"] .workspace-row-actions,
       #app[data-react-shell="enabled"] .workspace-task-action.more {
         transition: none;
       }
 
-      .sidebar-feature-nav > button:active {
+      .sidebar-feature-nav .sidebar-feature-list > li > button:active {
         transform: none;
       }
     }
@@ -15959,9 +16725,39 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-header-actions 
   gap: 3px;
 }
 
+/* 头部图标按钮（更多 / 窄栏切换）：30×30 幽灵按钮，两个大小必须一致。 */
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-header-actions .sidebar-more-trigger,
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-header-actions .sidebar-compact-toggle {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  min-height: 30px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  color: var(--web-sidebar-muted);
+  background: transparent;
+  box-shadow: none;
+}
 
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-header-actions .sidebar-more-trigger:hover,
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-header-actions .sidebar-compact-toggle:hover {
+  color: var(--web-sidebar-ink);
+  border-color: var(--web-sidebar-line);
+  background: var(--web-sidebar-hover);
+  transform: none;
+}
 
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-header-actions .sidebar-more-trigger:active,
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-header-actions .sidebar-compact-toggle:active {
+  transform: scale(0.95);
+}
 
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-header-actions .sidebar-compact-toggle.active {
+  color: var(--accent-active);
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--web-sidebar-line));
+  background: var(--web-sidebar-active);
+  box-shadow: none;
+}
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav {
   display: grid;
@@ -16118,9 +16914,60 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task-activity
   color: var(--warning);
 }
 
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-row-main {
+  min-height: 34px;
+  gap: 8px;
+  border-radius: 9px;
+  padding: 5px 7px;
+  color: var(--web-sidebar-ink);
+}
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-row-main:hover {
+  background: rgba(255, 255, 255, 0.55);
+}
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task-main {
+  min-height: 32px;
+  gap: 7px;
+  border-radius: 7px;
+  padding: 4px 6px;
+}
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-session-main {
+  min-height: 28px;
+  gap: 7px;
+  border-radius: 8px;
+  padding: 4px 7px 4px 10px;
+}
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-session-main:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-session.active > .workspace-session-main {
+  background: rgba(197, 101, 61, 0.08);
+  color: var(--web-sidebar-ink);
+}
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-session.active > .workspace-session-main::before {
+  left: 2px;
+  width: 2px;
+  background: var(--accent);
+}
+
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task-chevron-btn {
-      transition: color 140ms var(--web-sidebar-ease), background-color 140ms var(--web-sidebar-ease);
-    }
+  min-width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  color: #9a8d82;
+  background: rgba(92, 72, 56, 0.055);
+  transition: color 140ms var(--web-sidebar-ease), background-color 140ms var(--web-sidebar-ease);
+}
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task-chevron-btn:hover {
+  color: var(--accent-active);
+  background: var(--web-sidebar-active);
+}
 
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task-sessions {
@@ -16173,7 +17020,7 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-footer-actions 
   margin-top: 0;
 }
 
-html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-footer-actions .btn {
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-footer-actions .wand-ui-navigation-link {
   min-height: 34px;
   justify-content: center;
   border: 1px solid transparent;
@@ -16186,7 +17033,7 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-footer-actions 
   transition: color 140ms var(--web-sidebar-ease), background-color 140ms var(--web-sidebar-ease), border-color 140ms var(--web-sidebar-ease), transform 120ms ease;
 }
 
-html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-footer-actions .btn:hover {
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-footer-actions .wand-ui-navigation-link:hover {
   color: var(--web-sidebar-ink);
   border-color: var(--web-sidebar-line);
   background: var(--web-sidebar-hover);
@@ -16194,20 +17041,29 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-footer-actions 
   transform: none;
 }
 
-html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-footer-actions .btn:active {
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-footer-actions .wand-ui-navigation-link:active {
   transform: scale(0.96);
 }
 
-html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-footer-actions .btn svg {
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-footer-actions .wand-ui-navigation-link svg {
   color: #998c81;
   transition: color 140ms var(--web-sidebar-ease);
 }
 
-html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-footer-actions .btn:hover svg {
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-footer-actions .wand-ui-navigation-link:hover svg {
   color: var(--accent-active);
 }
 
+/* 「退出」是破坏性动作： hover 转危险色，并保留分隔线。 */
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-footer-actions .sidebar-logout:hover {
+  color: var(--danger);
+  border-color: rgba(178, 79, 69, 0.16);
+  background: rgba(178, 79, 69, 0.07);
+}
 
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-footer-actions .sidebar-logout:hover svg {
+  color: currentColor;
+}
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspaces-panel-state,
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspaces-section-empty {
@@ -16215,14 +17071,28 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspaces-section-empt
 }
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspaces-empty-action {
-      transition: background-color 140ms var(--web-sidebar-ease), border-color 140ms var(--web-sidebar-ease), transform 120ms ease;
-    }
+  border: 1px solid var(--web-sidebar-line);
+  border-radius: 8px;
+  padding: 6px 9px;
+  color: var(--accent-active);
+  background: rgba(255, 255, 255, 0.45);
+  transition: background-color 140ms var(--web-sidebar-ease), border-color 140ms var(--web-sidebar-ease), transform 120ms ease;
+}
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspaces-empty-action:hover {
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--web-sidebar-line));
+  background: var(--web-sidebar-active);
+}
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspaces-empty-action:active {
+  transform: scale(0.97);
+}
 
 
 
-html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav > button:focus-visible,
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list > li > button:focus-visible,
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspaces-panel button:focus-visible,
-html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-footer-actions .btn:focus-visible {
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-footer-actions .wand-ui-navigation-link:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent) 72%, transparent);
   outline-offset: -2px;
 }
@@ -16257,20 +17127,20 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-footer-actions 
     padding-bottom: calc(13px + var(--safe-bottom, 0px));
 }
 
-  html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-footer-actions .btn {
+  html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-footer-actions .wand-ui-navigation-link {
     min-height: 40px;
     padding-inline: 6px;
 }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav > button,
-  html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-header-actions .btn-ghost.btn-sm,
+  html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list > li > button,
+  html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-header-actions .sidebar-more-trigger,
   html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-item,
   html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task,
   html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task-chevron-btn,
   html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-session-main,
-  html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-footer-actions .btn {
+  html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-footer-actions .wand-ui-navigation-link {
     transition: none;
 }
 }
@@ -16287,8 +17157,60 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-search-empty {
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-toolbar {
   gap: 4px;
 }
+
+/* 搜索框：Appica Input 的默认造型（40px 高 / 14px 圆角 / 实心底）在 280px
+   侧栏里过重，收回到迁移前的轻量样式。 */
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-toolbar .sidebar-search-input {
+  height: 34px;
+  min-height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--web-sidebar-line);
+  border-radius: 9px;
+  color: var(--web-sidebar-muted);
+  background: rgba(255, 255, 255, 0.58);
+  box-shadow: none;
+  transition: border-color 140ms var(--web-sidebar-ease), box-shadow 140ms var(--web-sidebar-ease), background-color 140ms var(--web-sidebar-ease);
+}
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-toolbar .sidebar-search-input:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 44%, var(--web-sidebar-line));
+  background: var(--web-sidebar-surface-raised);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-toolbar input {
+  height: 100%;
+  min-height: 0;
+  border: 0;
+  outline: 0;
+  color: var(--web-sidebar-ink);
+  background: transparent;
+  font-size: 10.5px;
+}
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-toolbar input::placeholder {
+  color: #a1968d;
+}
+
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-manage-count {
   color: var(--web-sidebar-ink);
+}
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-manage-toggle,
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-manage-action {
+  color: var(--web-sidebar-muted);
+}
+
+/* Appica chip 的填写色画在 ::before 上，不抹掉的话「选择」会是个实心胶囊。 */
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-manage-toggle::before {
+  background: transparent;
+  border-color: transparent;
+}
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-manage-toggle:hover,
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-manage-action:hover {
+  color: var(--web-sidebar-ink);
+  background: var(--web-sidebar-hover);
 }
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-collapsed-rail-task,
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-collapsed-rail-more {
@@ -16341,6 +17263,12 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task.active {
 }
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task-action.more {
   z-index: 1;
+  border-radius: 7px;
+}
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task-action.more:hover,
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task-action.more[aria-expanded="true"] {
+  color: var(--accent-active);
+  background: var(--web-sidebar-active);
 }
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task-chevron-btn {
   position: relative;
@@ -16349,6 +17277,9 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task-chevron-
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-row-actions {
   gap: 4px;
   padding-left: 4px;
+}
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-row-action {
+  border-radius: 7px;
 }
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-item,
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-item.active-workspace,
@@ -16361,15 +17292,90 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav {
   grid-template-columns: minmax(0, 1fr);
   gap: 5px;
 }
-html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav > .sidebar-new-task {
-      grid-column: auto;
-    }
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list {
+  gap: 5px;
+}
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list > li > button {
+  min-height: 36px;
+  gap: 8px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 7px 10px;
+  color: var(--web-sidebar-muted);
+  background: transparent;
+  /* 11.375px = 0.8125rem × 0.875：跟侧栏其它文字（目录行、任务行）同一档，
+     不再被 Appica 的 text-sm（14px）接管。 */
+  font-size: 11.375px;
+  font-weight: 550;
+  transition: color 150ms var(--web-sidebar-ease), background-color 150ms var(--web-sidebar-ease), border-color 150ms var(--web-sidebar-ease), transform 120ms ease;
+}
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list > li > button > svg {
+  color: #9a8d82;
+  transition: color 150ms var(--web-sidebar-ease), transform 150ms var(--web-sidebar-ease);
+}
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list > li > button[aria-current="page"],
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list > li > button[data-active] {
+  color: var(--web-sidebar-ink);
+  background: color-mix(in srgb, var(--text-primary) 9%, transparent);
+}
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list > li > button[aria-current="page"] > svg,
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list > li > button[data-active] > svg {
+  color: var(--accent-active);
+}
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list > li > button:hover {
+  color: var(--web-sidebar-ink);
+  border-color: var(--web-sidebar-line);
+  background: var(--web-sidebar-hover);
+}
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list > li > button:hover > svg {
+  color: var(--accent-active);
+}
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list > li > button:active {
+  transform: scale(0.98);
+}
 
 /* Feature nav uses one visual language; creation is not a competing primary card. */
-html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav > .sidebar-new-task {
-      justify-content: flex-start;
-    }
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list > li > .sidebar-new-task {
+  min-height: 36px;
+  margin-bottom: 0;
+  justify-content: flex-start;
+  border-color: transparent;
+  border-radius: 10px;
+  padding: 7px 10px;
+  color: var(--web-sidebar-muted);
+  background: transparent;
+  box-shadow: none;
+  font-weight: 550;
+}
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list > li > .sidebar-new-task > svg {
+  color: #9a8d82;
+}
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list > li > .sidebar-new-task:hover {
+  border-color: var(--web-sidebar-line);
+  color: var(--web-sidebar-ink);
+  background: var(--web-sidebar-hover);
+  box-shadow: none;
+}
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list > li > .sidebar-new-task:hover > svg {
+  color: var(--accent-active);
+}
+
 @media (max-width: 768px) {
+  html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list > li > button,
+  html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list > li > .sidebar-new-task {
+    min-height: 40px;
+  }
 }
 
 /* Keep the later web polish from fighting the compact rail geometry. */
@@ -16379,13 +17385,31 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar.pinned.collapse
   padding: 0 4px 8px;
 }
 
-html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-feature-nav > button {
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-feature-nav .sidebar-feature-list {
+  align-items: center;
+  width: auto;
+}
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-feature-nav .sidebar-feature-list > li > button {
   display: inline-flex;
   width: 36px;
   min-width: 36px;
   padding: 8px;
   justify-content: center;
   gap: 0;
+}
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-feature-nav .sidebar-feature-list > li > button > span {
+  display: none;
+}
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-footer-actions .wand-ui-navigation-list {
+  flex-direction: column;
+  align-items: center;
+}
+
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-footer-actions .wand-ui-navigation-list > li {
+  flex: 0 0 auto;
 }
 
 /* ── GitHub 议题弹窗 ─────────────────────────────────────────

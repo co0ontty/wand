@@ -486,6 +486,17 @@ test("task board remembers last selected agent defaults", async () => {
     assert.equal(afterPatch.thinkingEffort, "standard");
     assert.equal(afterPatch.mode, "managed");
 
+    // 老客户端 PUT 默认选项不带 mode：沿用已保存模式，不能把全局默认复位成标准。
+    const defaultsWithoutMode = await fetch(`${url}/api/wand-task-agent-defaults`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ provider: "grok", model: "grok-4", thinkingEffort: "standard" }),
+    }).then(jsonOf<{ mode: string }>);
+    assert.equal(defaultsWithoutMode.mode, "managed");
+    const reloadedDefaults = await fetch(`${url}/api/wand-task-agent-defaults`)
+      .then(jsonOf<{ mode: string }>);
+    assert.equal(reloadedDefaults.mode, "managed");
+
     // 老客户端 PATCH 不带 mode：要沿用任务当前值，不能复位成标准。
     const withoutMode = await fetch(`${url}/api/wand-tasks/${created.id}`, {
       method: "PATCH",

@@ -273,7 +273,8 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
   });
   app.put("/api/wand-task-agent-defaults", (req, res) => {
     try {
-      const agent = parseTaskAgent(req.body);
+      // 老客户端（尚未发 mode）不传 mode：沿用已保存的模式，而不是把全局默认复位成标准。
+      const agent = parseTaskAgent(req.body, readTaskBoardLastAgent(storage).mode);
       if (!agent) throw new Error("请选择有效的 CLI 工具。");
       writeTaskBoardLastAgent(storage, agent);
       res.json(agent);

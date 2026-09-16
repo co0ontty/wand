@@ -58,7 +58,7 @@ printf '%s\n' \\
   await manager.sendMessage(created.id, "again");
   assert.deepEqual(readFileSync(argsFile, "utf8").trim().split("\n").slice(-2), ["-r", "qoder_test"]);
 
-  // 默认权限模式（未选 managed/full-access）也以 yolo 启动，避免 --print 下工具调用被拒。
+  // 不选任何权限模式时也一律 yolo，避免 --print 下工具调用被拒。
   const defaultMode = manager.createSession({ cwd: root, mode: "default", provider: "qoder" });
   manager.setSessionTopic(defaultMode.id, "test", "test");
   await manager.sendMessage(defaultMode.id, "hello");

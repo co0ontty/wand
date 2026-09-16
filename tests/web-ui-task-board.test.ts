@@ -193,8 +193,9 @@ test("only the doing column creates and assigns in one step", () => {
   // 创建链路和新建对话框共用同一个判定，避免「按钮写创建并指派但没派发」这类不一致。
   assert.match(host, /issueCreateDispatches\(draft\.status\) && submitDescription && isDispatchableIssueAgent\(draft\.agent\)/);
   assert.match(host, /const createDispatches = issueCreateDispatches\(draft\.status\)/);
-  assert.match(host, /createDispatches \? <div className="task-board-create-assign"/);
-  // 只创建时不显示派发控件，也不出现「创建并指派」的按钮文案。
+  // 运行模式始终可选：即使只创建任务，也要把工作模式写进全局默认。
+  assert.match(host, /<div className="task-board-create-assign" aria-label=\{createDispatches \? "第一次指派" : "Agent 与运行模式"\}>/);
+  // 只创建时不出现「创建并指派」的按钮文案。
   assert.match(host, /createDispatches && draft\.description\.trim\(\) \? "创建并指派" : "创建任务"/);
   assert.match(host, /只创建任务，不指派 Agent/);
 });
@@ -210,7 +211,7 @@ test("create form can assign the first agent from the description", () => {
   assert.match(host, /指定项目目录/);
   assert.match(composer, /第一次指派的 CLI 工具/);
   assert.match(composer, /第一次指派的思考深度/);
-  assert.match(composer, /第一次指派的工作模式/);
+  assert.match(composer, /ariaLabel="运行模式"/);
   assert.match(composer, /issueAgentModeOptions\(draft\.agent\.provider\)/);
   assert.match(host, /作为第一个 Agent 的指派内容/);
   assert.match(host, /submitDescription && isDispatchableIssueAgent\(draft\.agent\)/);

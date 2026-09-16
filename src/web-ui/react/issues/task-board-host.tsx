@@ -872,10 +872,12 @@ export function TaskBoardHost({
             </label>
           </div>
 
-          {createDispatches ? <div className="task-board-create-assign" aria-label="第一次指派">
+          {/* 运行模式必须始终可选：只创建的任务也要把工作模式记进全局默认，
+              否则下次派发会退回标准模式，Agent 反过来「改不了东西」。 */}
+          <div className="task-board-create-assign" aria-label={createDispatches ? "第一次指派" : "Agent 与运行模式"}>
             <div className="task-board-create-assign-copy">
-              <strong>第一次指派</strong>
-              <span>有描述时会立刻发给所选 Agent</span>
+              <strong>{createDispatches ? "第一次指派" : "Agent 与运行模式"}</strong>
+              <span>{createDispatches ? "有描述时会立刻发给所选 Agent" : "会记入全局默认，之后派发沿用"}</span>
             </div>
             <div className="task-board-create-assign-controls">
               <WandSelect
@@ -910,15 +912,17 @@ export function TaskBoardHost({
               <WandSelect
                 value={draft.agent.mode}
                 options={issueAgentModeOptions(draft.agent.provider)}
-                ariaLabel="第一次指派的工作模式"
+                ariaLabel="运行模式"
                 className="task-board-native-select"
-                onValueChange={(mode) => setDraft((current) => ({
-                  ...current,
-                  agent: { ...current.agent, mode: mode as WandTaskAgent["mode"] },
-                }))}
+                onValueChange={(mode) => {
+                  // 改完立即写入全局默认，下次打开新建任务时沿用上次的运行模式。
+                  const nextAgent = { ...draft.agent, mode: mode as WandTaskAgent["mode"] };
+                  setDraft((current) => ({ ...current, agent: nextAgent }));
+                  rememberAgent(nextAgent);
+                }}
               />
             </div>
-          </div> : null}
+          </div>
         </div>
         <div className="task-board-create-footer">
           <WandSwitch

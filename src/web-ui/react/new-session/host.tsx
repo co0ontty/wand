@@ -107,9 +107,7 @@ function modeHint(provider: NewSessionProvider, mode: NewSessionMode): string {
       : "Grok 使用自身权限确认；支持 TUI 与 streaming-json 结构化会话。";
   }
   if (provider === "qoder") {
-    return mode === "auto-edit"
-      ? "Qoder 将以 accept_edits 运行，自动批准编辑，其余操作仍由 Qoder 确认。"
-      : "Qoder 默认以 yolo（bypass_permissions）启动，不再弹出权限确认；支持 TUI 与 stream-json 结构化会话。";
+    return "Qoder 一律以 yolo（bypass_permissions）启动，不再弹出权限确认；支持 TUI 与 stream-json 结构化会话。";
   }
   if (provider === "pi") return "Pi 支持标准与托管模式；模型和 thinking 会传给 Pi CLI。";
   if (mode === "full-access") return "自动确认权限请求与高权限操作，适合你确认环境安全后的连续修改。";

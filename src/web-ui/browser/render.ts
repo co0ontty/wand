@@ -474,22 +474,36 @@ export function renderApprovalStatsBadge() {
   '</span>';
 }
 
+// 品牌标记：与 index.ts 的 favicon data-URI 同源（深色圆角方块 + 赤陶色折线），
+// 内联成 SVG，保证本地控制台离线可用、不依赖任何外部 CDN。
+var LOGIN_BRAND_MARK =
+  '<svg class="brand-logo" viewBox="0 0 64 64" aria-hidden="true" focusable="false">' +
+    '<rect width="64" height="64" rx="18" fill="#17120f"/>' +
+    '<path d="M13 21l9 24 10-15 10 15 9-24" fill="none" stroke="#c5653d" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"/>' +
+  '</svg>';
+
+var LOGIN_TRUST_LINE =
+  '<p class="trust-line">' +
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>' +
+    '<span>凭据只发送到当前 Wand 服务</span>' +
+  '</p>';
+
 export function renderLogin() {
   if (!state.loginChecked) {
-    return '<div class="login-container">' +
-      '<div class="login-card login-card-loading">' +
-        '<div class="login-header">' +
-          '<div class="login-brand-row">' +
-            '<div class="login-logo">' +
-              '<div class="login-logo-icon">W</div>' +
-              '<span class="login-logo-text">Wand</span>' +
-            '</div>' +
-            '<span class="login-context-badge">本地控制台</span>' +
-          '</div>' +
-          '<h1 class="login-title">正在恢复会话</h1>' +
-          '<div class="login-subtitle">重新连接到这台设备上的 Wand 服务。</div>' +
+    return '<div class="login-page">' +
+      '<div class="login-left">' +
+        '<div class="brand-row">' +
+          LOGIN_BRAND_MARK +
+          '<span class="brand-wordmark">Wand</span>' +
         '</div>' +
-        '<div class="login-body">' +
+        '<p class="brand-statement">重新连接到这台设备上的 Wand 服务。</p>' +
+        '<div class="left-spacer"></div>' +
+        LOGIN_TRUST_LINE +
+      '</div>' +
+      '<div class="login-right">' +
+        '<div class="form-col">' +
+          '<p class="eyebrow">本地控制台</p>' +
+          '<h1 class="login-title">正在恢复会话</h1>' +
           '<div class="login-status">' +
             '<span class="login-spinner" aria-hidden="true"></span>' +
             '<div>' +
@@ -501,26 +515,26 @@ export function renderLogin() {
       '</div>' +
     '</div>';
   }
-  return '<div class="login-container">' +
-    '<div class="login-card">' +
-      '<div class="login-header">' +
-        '<div class="login-brand-row">' +
-          '<div class="login-logo">' +
-            '<div class="login-logo-icon">W</div>' +
-            '<span class="login-logo-text">Wand</span>' +
-          '</div>' +
-          '<span class="login-context-badge">本地控制台</span>' +
-        '</div>' +
-        '<h1 class="login-title">欢迎回来</h1>' +
-        '<div class="login-subtitle">连接到本机终端、会话和工作区。</div>' +
+  return '<div class="login-page">' +
+    '<div class="login-left">' +
+      '<div class="brand-row">' +
+        LOGIN_BRAND_MARK +
+        '<span class="brand-wordmark">Wand</span>' +
       '</div>' +
-      '<form id="login-form" class="login-body" autocomplete="on">' +
+      '<p class="brand-statement">连接到本机终端、会话和工作区。</p>' +
+      '<div class="left-spacer"></div>' +
+      LOGIN_TRUST_LINE +
+    '</div>' +
+    '<div class="login-right">' +
+      '<form id="login-form" class="form-col" autocomplete="on">' +
         '<input type="text" name="username" autocomplete="username" value="wand" tabindex="-1" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none" readonly />' +
+        '<p class="eyebrow">本地控制台</p>' +
+        '<h1 class="login-title">欢迎回来</h1>' +
         '<p class="login-hint">使用当前 Wand 服务的访问密码继续。</p>' +
         '<div class="field">' +
           '<label class="field-label" for="password">访问密码</label>' +
           '<div class="password-field">' +
-            '<input id="password" type="password" class="field-input password-input" placeholder="输入访问密码" autocomplete="current-password" data-error="false" aria-describedby="password-hint login-error" aria-invalid="false" />' +
+            '<input id="password" type="password" class="password-input" placeholder="输入访问密码" autocomplete="current-password" data-error="false" aria-describedby="password-hint login-error" aria-invalid="false" />' +
             '<button id="toggle-password-button" type="button" class="password-toggle" aria-label="显示密码" aria-pressed="false">显示</button>' +
           '</div>' +
           '<p id="password-hint" class="hint">密码由当前服务验证，不会保存在此页面。</p>' +
@@ -532,15 +546,8 @@ export function renderLogin() {
           '<a id="login-cert-http-link" class="btn btn-ghost btn-block" href="#" rel="noopener">改用 HTTP 访问</a>' +
         '</div>' +
         '<button id="login-button" type="submit" class="btn btn-primary btn-block">进入控制台</button>' +
-        '<p class="login-trust-note">' +
-          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>' +
-          '<span>凭据只发送到当前 Wand 服务</span>' +
-        '</p>' +
         (hasNativeSwitchServer() ?
-          '<button id="login-switch-server-button" class="btn btn-ghost btn-block login-switch-server" type="button">' +
-            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg>' +
-            '<span>切换服务器</span>' +
-          '</button>'
+          '<button id="login-switch-server-button" class="login-switch-server" type="button">切换服务器</button>'
           : ''
         ) +
       '</form>' +

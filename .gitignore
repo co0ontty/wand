@@ -26,3 +26,7 @@ src/web-ui/content/tailwind.css
 # IDE / 工具本地状态，不该入库
 .qoder/
 .claude/
+
+# Superdesign 设计上下文（本地生成，不入库）
+.superdesign/
+.superdesign/tmp/
