@@ -29,6 +29,16 @@ function publish(next: Partial<WorkspacesControllerSnapshot>): void {
   for (const listener of listeners) listener();
 }
 
+function publishDismissable(dismissable: boolean): void {
+  if (!snapshot.open || snapshot.dismissable === dismissable) return;
+  // Dismissability is transient operation state, not a new open lifecycle.
+  // Keep revision stable so Host initialization effects are not replayed —
+  // otherwise submitting would wipe the form (including the picked directory)
+  // and re-enable the button while the create request is still in flight.
+  snapshot = { ...snapshot, dismissable };
+  for (const listener of listeners) listener();
+}
+
 export interface WandWorkspacesController {
   open(initialCwd?: string, kind?: WorkspaceCreationKind): boolean;
   close(): void;
@@ -57,8 +67,7 @@ export const workspacesController: WandWorkspacesController = {
     return snapshot.open;
   },
   setDismissable(dismissable): void {
-    if (!snapshot.open || snapshot.dismissable === dismissable) return;
-    publish({ dismissable });
+    publishDismissable(dismissable);
   },
 };
 

@@ -917,3 +917,51 @@ test("sidebar directory tree indents every level without extra re-renders", () =
   assert.match(panel, /const flattenGroups = React\.useMemo\(\(\) => createUnnamedTaskFlattener\(\), \[\]\)/);
   assert.match(panel, /const groups = React\.useMemo\(\(\) => flattenGroups\(sourceGroups\), \[flattenGroups, sourceGroups\]\)/);
 });
+
+test("workspaces controller keeps the dialog state stable while submitting", async () => {
+  const runtime = {
+    onOpen: () => {},
+    onClose: () => {},
+    openTask: () => {},
+    newTaskSession: () => {},
+    refreshSessions: () => {},
+    toast: () => {},
+    openSession: () => {},
+    saveTaskLayout: () => {},
+  };
+  const { workspacesController, workspacesStore, configureWorkspacesRuntime } = await import(
+    "../src/web-ui/react/workspaces/controller.js"
+  );
+  const uninstall = configureWorkspacesRuntime(runtime as never);
+  try {
+    const revisions: number[] = [];
+    const unsubscribe = workspacesStore.subscribe(() => {
+      revisions.push(workspacesStore.getSnapshot().revision);
+    });
+
+    assert.equal(workspacesController.open("/workspace/project"), true);
+    const openRevision = workspacesStore.getSnapshot().revision;
+    assert.equal(workspacesStore.getSnapshot().initialCwd, "/workspace/project");
+
+    // 提交期间锁住/恢复 dismissable 都不是新的打开生命周期：revision 必须保持
+    // 稳定，否则 Host 初始化 effect 会重放，把用户选定的目录等表单状态清掉。
+    workspacesController.setDismissable(false);
+    assert.equal(workspacesStore.getSnapshot().dismissable, false);
+    assert.equal(workspacesController.closeIfOpen(), false);
+    workspacesController.setDismissable(true);
+    assert.equal(workspacesStore.getSnapshot().dismissable, true);
+    assert.equal(workspacesStore.getSnapshot().revision, openRevision,
+      "dismissability toggles must not replay the new-task dialog initialization");
+
+    assert.equal(workspacesController.closeIfOpen(), true);
+    assert.equal(workspacesController.isOpen(), false);
+    assert.equal(revisions.length, 4, "open, lock, unlock, close each notify once");
+    assert.equal(revisions[1], openRevision, "locking must not replay initialization");
+    assert.equal(revisions[2], openRevision, "unlocking must not replay initialization");
+    assert.equal(revisions[3], openRevision + 1, "only close bumps the lifecycle revision");
+
+    unsubscribe();
+  } finally {
+    uninstall();
+  }
+});
