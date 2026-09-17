@@ -322,6 +322,7 @@ wand/
 ├── android/                      # Android 客户端（submodule）
 ├── ios/                          # iOS 客户端（submodule）
 ├── macos/                        # macOS 客户端（submodule）
+├── 架构图.md                     # 运行时架构与代码边界（mermaid）
 └── docs/                         # 文档与截图
 ```
 

@@ -45,7 +45,8 @@ Express route → 参数与权限检查 → 业务服务 / SessionRegistry → m
 ## 样式归属与后续视觉方向
 
 先清理失效实现，再调整保留组件。登录页是视觉基准：纸色底、暖中性色、赤陶色
-主操作、细分隔线、克制的圆角和明确的文字层级。
+主操作、细分隔线、克制的圆角和明确的文字层级。改 token / 层叠前必读
+`docs/appica-ui-migration.md`（无层与 Tailwind 分层的覆盖顺序、构建链路、已迁移组件）。
 
 - 全局语义 token 的唯一来源为 `content/styles.css` 的 `:root`。
 - `css/appica.css` 只桥接 Appica 独有 token，不重复定义 Wand 已拥有的 token。
