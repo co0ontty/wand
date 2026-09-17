@@ -41,8 +41,13 @@ jobs:
           java-version: "17"
           distribution: "temurin"
 
+      # setup-android 的 packages 默认值是 "tools platform-tools"，而旧 `tools` 包已从
+      # Android SDK 仓库下线：v4.64.0 起所有 release 的 build-android 都卡在这一步。
+      # 显式列出构建真正需要的包，并把 action 钉到 tag，避免上游再改默认值。
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v3.2.2
+        with:
+          packages: "platform-tools platforms;android-36 build-tools;36.0.0"
 
       - name: Extract version from tag
         id: version
