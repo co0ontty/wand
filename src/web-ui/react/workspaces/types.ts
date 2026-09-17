@@ -170,6 +170,8 @@ export interface WorkspaceWorktreeOverview {
 
 export interface CreateWorkspaceTaskRequest {
   name?: string;
+  /** 首个会话的提示词：任务留空名时用它总结标题，并同步到看板卡片描述。 */
+  description?: string;
   baseRef?: string;
   /** Optional directory override, used by standalone tasks that mount a folder. */
   cwd?: string;
@@ -181,6 +183,8 @@ export interface CreateWorkspaceTaskRequest {
 
 export interface CreateStandaloneTaskRequest {
   name?: string;
+  /** 首个会话的提示词：任务留空名时用它总结标题，并同步到看板卡片描述。 */
+  description?: string;
   cwd?: string;
   worktree?: boolean;
   /** 里程碑 id；null / 缺省表示不归入里程碑。 */

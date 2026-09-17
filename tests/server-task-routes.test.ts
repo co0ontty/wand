@@ -32,7 +32,9 @@ function start(
   const app = express();
   app.use(express.json());
   registerTaskRoutes(app, { storage, sessions: registry, structured: manager, config, ...extra });
-  registerWorkspaceRoutes(app, storage, registry);
+  registerWorkspaceRoutes(app, storage, registry, extra.generateTitle
+    ? { config, generateTitle: extra.generateTitle }
+    : {});
   app.use(jsonErrorHandler);
   const server = createServer(app);
   return new Promise((resolve, reject) => {
@@ -262,6 +264,26 @@ test("editing the title of an auto-titled task keeps the manual title", async ()
   }, { generateTitle: async () => { await gate; return "迟到的自动标题"; } });
 });
 
+test("a sidebar task created with only a prompt is summarized right away", async () => {
+  const calls: string[] = [];
+  await withHarness(async ({ url, storage }) => {
+    const workspace = storage.createWorkspace({ name: "wand", cwd: storage.directory() });
+    const prompt = "帮我排查登录页 Safari 白屏\n只在 iOS 16 复现";
+    const created = await fetch(`${url}/api/workspaces/${workspace.id}/tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ description: prompt }),
+    }).then(jsonOf<{ id: string; name: string }>);
+    // 建任务时就能看到提示词临时标题，不会出现「未命名任务」。
+    assert.equal(created.name, "帮我排查登录页 Safari 白屏");
+    await whenWandTaskTitlesSettled();
+    const card = storage.getWandTaskByWorkspaceTaskId(created.id);
+    assert.equal(card?.title, "修复 Safari 登录页白屏");
+    assert.equal(storage.getWorkspaceTask(created.id)?.name, "修复 Safari 登录页白屏");
+    assert.deepEqual(calls, [prompt]);
+  }, { generateTitle: async (description) => { calls.push(description); return "修复 Safari 登录页白屏"; } });
+});
+
 test("a sidebar task created without a name is titled from its sessions", async () => {
   const calls: string[] = [];
   await withHarness(async ({ url, storage }) => {
@@ -271,7 +293,7 @@ test("a sidebar task created without a name is titled from its sessions", async 
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ worktree: false }),
     }).then(jsonOf<{ id: string; name: string }>);
-    assert.equal(created.name, "未命名任务");
+    assert.match(created.name, /^未命名任务 \d{4}$/);
 
     // 先建任务、后开会话：轮询时用会话内容把占位标题换成真实标题。
     storage.saveSession(sessionSnapshot({

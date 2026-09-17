@@ -22,6 +22,7 @@ import { archiveBoardTaskForWorkspaceTask, archiveWorkspaceTask, ensureBoardTask
 import { isSessionProvider } from "./session-provider.js";
 import { firstLayoutTabId } from "./layout-tree.js";
 import { refreshAutoBoardTaskTitles, type AutoTaskTitleOptions } from "./server-task-routes.js";
+import { provisionalTaskTitleFromDescription } from "./task-title.js";
 
 function workspaceSessionTitle(
   session: SessionSnapshot,
@@ -137,7 +138,7 @@ function taskRuntimeCwd(task: WorkspaceTask, workspace: Pick<Workspace, "cwd"> |
 function createTaskForWorkspace(
   storage: WandStorage,
   workspace: Workspace,
-  body: { name?: unknown; baseRef?: unknown; worktree?: unknown; cwd?: unknown; milestoneId?: unknown },
+  body: { name?: unknown; description?: unknown; baseRef?: unknown; worktree?: unknown; cwd?: unknown; milestoneId?: unknown },
 ): {
   task: WorkspaceTask;
   cwd: string;
@@ -145,9 +146,11 @@ function createTaskForWorkspace(
   worktreeError?: string;
 } {
   const name = typeof body.name === "string" ? body.name.trim() : "";
-  // 留空（或老客户端回传的占位名）走自动命名：先用占位名建组，会话内容一到位就改名。
+  // 首个会话的提示词：任务没起名时用它先总结一个标题，不再留「未命名任务」占位。
+  const description = typeof body.description === "string" ? body.description.trim() : "";
+  // 留空（或老客户端回传的占位名）走自动命名：先用提示词总结，再交给模型改写。
   const named = name.length > 0 && !isUnnamedWorkspaceTaskName(name);
-  const taskName = named ? name : UNNAMED_WORKSPACE_TASK_NAME;
+  const provisional = named ? "" : provisionalTaskTitleFromDescription(description);
   // 里程碑是全局列表；建任务时可选，非法 id 直接报错而不是静默丢掉。
   const requestedMilestoneId = typeof body.milestoneId === "string" ? body.milestoneId.trim() : "";
   if (requestedMilestoneId && !storage.getWandMilestone(requestedMilestoneId)) {
@@ -164,6 +167,10 @@ function createTaskForWorkspace(
   }
   const baseRef = typeof body.baseRef === "string" && body.baseRef.trim() ? body.baseRef.trim() : undefined;
   const runCwd = mountedCwd ?? workspace.cwd;
+  // 什么都没给（无名字、无提示词）时用带随机数的占位名，后续会话内容一到就自动改名。
+  const taskName = named
+    ? name
+    : provisional || `${UNNAMED_WORKSPACE_TASK_NAME} ${crypto.randomInt(1000, 10000)}`;
   let worktree: WorkspaceTaskWorktree | null = null;
   if (body.worktree === true) {
     const setup = prepareSessionWorktree({
@@ -181,7 +188,10 @@ function createTaskForWorkspace(
     worktree,
     milestoneId,
   });
-  ensureBoardTaskForWorkspaceTask(storage, task, workspace, { titleSource: named ? "user" : "auto" });
+  ensureBoardTaskForWorkspaceTask(storage, task, workspace, {
+    titleSource: named ? "user" : "auto",
+    description,
+  });
   return {
     task,
     cwd: taskRuntimeCwd(task, workspace),
@@ -449,8 +459,10 @@ export function registerWorkspaceRoutes(
     const workspace = storage.ensureGlobalWorkspace();
     try {
       const created = createTaskForWorkspace(storage, workspace, req.body as {
-        name?: unknown; baseRef?: unknown; worktree?: unknown; cwd?: unknown; milestoneId?: unknown;
+        name?: unknown; description?: unknown; baseRef?: unknown; worktree?: unknown; cwd?: unknown; milestoneId?: unknown;
       });
+      // 带提示词建的任务立刻排上模型总结（响应里已经是提示词临时标题）。
+      refreshAutoBoardTaskTitles(storage, titleOptions);
       res.status(201).json({
         ...created.task,
         cwd: created.cwd,
@@ -759,8 +771,9 @@ export function registerWorkspaceRoutes(
     }
     try {
       const created = createTaskForWorkspace(storage, workspace, req.body as {
-        name?: unknown; baseRef?: unknown; worktree?: unknown; cwd?: unknown; milestoneId?: unknown;
+        name?: unknown; description?: unknown; baseRef?: unknown; worktree?: unknown; cwd?: unknown; milestoneId?: unknown;
       });
+      refreshAutoBoardTaskTitles(storage, titleOptions);
       res.status(201).json({
         ...created.task,
         cwd: created.cwd,

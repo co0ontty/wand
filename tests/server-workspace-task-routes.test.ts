@@ -161,6 +161,50 @@ test("task aggregation reuses queries without leaking truncated or filtered task
   }
 });
 
+test("a task created without a name is titled from its first prompt", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-task-prompt-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const { baseUrl, close } = await startWorkspaceApp(storage);
+  try {
+    const ws = await fetch(`${baseUrl}/api/workspaces`, json({ name: "Wand", cwd: root })).then((r) => r.json() as Promise<{ id: string }>);
+    const prompt = "帮我排查登录页 Safari 上偶发的白屏问题\n补充：只在 iOS 16 复现";
+
+    const res = await fetch(`${baseUrl}/api/workspaces/${ws.id}/tasks`, json({ description: prompt }));
+    assert.equal(res.status, 201);
+    const created = await res.json() as { id: string; name: string };
+    // 不留「未命名任务」：名称直接取提示词首行，之后再交给模型总结。
+    assert.equal(created.name, "帮我排查登录页 Safari 上偶发的白屏问题");
+    assert.notEqual(created.name, "未命名任务");
+    assert.equal(storage.getWorkspaceTask(created.id)?.name, "帮我排查登录页 Safari 上偶发的白屏问题");
+    const card = storage.getWandTaskByWorkspaceTaskId(created.id);
+    assert.equal(card?.titleSource, "auto");
+    assert.equal(card?.description, prompt);
+  } finally {
+    await close();
+    storage.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an explicit task name always wins over the first prompt", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-task-name-wins-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const { baseUrl, close } = await startWorkspaceApp(storage);
+  try {
+    const res = await fetch(`${baseUrl}/api/tasks`, json({ name: "我自己的任务名", description: "帮我重构会话恢复流程" }));
+    assert.equal(res.status, 201);
+    const created = await res.json() as { id: string; name: string };
+    assert.equal(created.name, "我自己的任务名");
+    const card = storage.getWandTaskByWorkspaceTaskId(created.id);
+    assert.equal(card?.titleSource, "user");
+    assert.equal(card?.title, "我自己的任务名");
+  } finally {
+    await close();
+    storage.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("task creation makes an isolated worktree in a git workspace", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-task-git-"));
   // 建一个 git 仓库并提交一个文件，prepareSessionWorktree 才能工作
@@ -174,11 +218,11 @@ test("task creation makes an isolated worktree in a git workspace", async () => 
   try {
     const ws = await fetch(`${baseUrl}/api/workspaces`, json({ name: "Wand", cwd: root })).then((r) => r.json() as Promise<{ id: string }>);
 
-    // 空名自动生成默认任务名称
+    // 空名且无提示词时用带随机数的占位名，避免同名任务挤在一起
     let res = await fetch(`${baseUrl}/api/workspaces/${ws.id}/tasks`, json({ name: "  " }));
     assert.equal(res.status, 201);
     const unnamed = await res.json() as { id: string; name: string };
-    assert.equal(unnamed.name, "未命名任务");
+    assert.match(unnamed.name, /^未命名任务 \d{4}$/);
 
     // 合法任务 → 201 + worktree 隔离
     res = await fetch(`${baseUrl}/api/workspaces/${ws.id}/tasks`, json({ name: "重构恢复流程", worktree: true }));
@@ -545,10 +589,11 @@ test("standalone tasks use the global scratch workspace and stay off the project
   const storage = new WandStorage(path.join(root, "wand.db"));
   const { baseUrl, close } = await startWorkspaceApp(storage);
   try {
+    // 独立任务无目录无提示词时也是带随机数的占位名
     let res = await fetch(`${baseUrl}/api/tasks`, json({ name: "  " }));
     assert.equal(res.status, 201);
     const unnamed = await res.json() as { id: string; name: string };
-    assert.equal(unnamed.name, "未命名任务");
+    assert.match(unnamed.name, /^未命名任务 \d{4}$/);
 
     res = await fetch(`${baseUrl}/api/tasks`, json({ name: "随口问问" }));
     assert.equal(res.status, 201);

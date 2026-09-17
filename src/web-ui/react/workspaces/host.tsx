@@ -170,6 +170,10 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (submitting) return;
+    if (!name.trim() && !prompt.trim()) {
+      setError("任务名称和首个提示词至少填一个，任务会按提示词自动命名。");
+      return;
+    }
     const runtime = workspacesStore.getRuntime();
     if (!runtime) {
       setError("新建任务运行环境尚未就绪，请刷新页面后重试。");
@@ -185,14 +189,17 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
         cwd: mountedCwd,
         defaultProvider: defaults?.defaultProvider,
       }) : undefined);
+      const taskPrompt = prompt.trim();
       const created = project
         ? await repository.createTask(project.id, {
           name: trimmedName || undefined,
+          description: taskPrompt || undefined,
           worktree: worktreeEnabled,
           milestoneId: milestoneId || null,
         })
         : await repository.createStandaloneTask({
           name: trimmedName || undefined,
+          description: taskPrompt || undefined,
           cwd: mountedCwd || undefined,
           worktree: mountedCwd ? worktreeEnabled : false,
           milestoneId: milestoneId || null,
@@ -265,7 +272,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
                 aria-describedby="wand-new-task-name-hint"
                 onChange={(event) => setName(event.currentTarget.value)}
               />
-              <p id="wand-new-task-name-hint" className="wand-new-session-field-hint wand-new-project-field-hint">工作区下的分组名称，留空则根据其中的会话内容自动命名；不会创建磁盘目录。</p>
+              <p id="wand-new-task-name-hint" className="wand-new-session-field-hint wand-new-project-field-hint">工作区下的分组名称，留空则用首个提示词自动总结一个名字；不会创建磁盘目录。</p>
             </div>
 
             <div className="wand-new-session-field wand-new-project-field">
@@ -335,7 +342,9 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
               <textarea id="wand-new-task-prompt" className="wand-new-session-input" rows={3}
                 value={prompt} disabled={submitting || target === "shell"}
                 placeholder="希望 CLI 帮你完成什么？" onChange={(event) => setPrompt(event.currentTarget.value)}/>
-              <p className="wand-new-session-field-hint">提示词发送到新会话，不会替换任务名称。之后可继续添加或移动会话。</p>
+              <p className="wand-new-session-field-hint">{target === "shell"
+                ? "空白终端不会读取提示词，请填写任务名称。"
+                : "提示词发送到新会话；任务名称留空时会据此自动命名，仍可随时改名。"}</p>
             </div>
 
             {hasDirectory ? (
@@ -386,7 +395,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
 
           <div className="wand-new-session-summary wand-new-task-summary" aria-live="polite">
             <span>即将创建</span>
-            <strong>{name.trim() || "自动命名"}</strong>
+            <strong>{name.trim() || (prompt.trim() ? "按提示词自动命名" : "自动命名")}</strong>
             <span title={effectiveCwd}>{effectiveCwd}</span>
             <span>{target === "shell" ? "空白终端" : `${WORKSPACE_AGENT_OPTIONS.find((option) => option.value === target)?.label ?? target} · ${sessionKind === "pty" ? "PTY" : "结构化"}`}</span>
           </div>
@@ -397,7 +406,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
               size="large"
               type="submit"
               className="wand-new-session-submit wand-new-project-submit"
-              disabled={submitting}
+              disabled={submitting || (!name.trim() && !prompt.trim())}
             >
               {submitting ? "正在创建…" : "创建任务"}
             </WandButton>
