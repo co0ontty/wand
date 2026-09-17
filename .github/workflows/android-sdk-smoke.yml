@@ -44,7 +44,7 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug -PAPP_VERSION_NAME="0.0.0-smoke.00000000"
+          ./gradlew assembleDebug -PAPP_VERSION_NAME="4.68.0+smoke.00000000"
 
       - name: Report APK
         run: ls -la android/app/build/outputs/apk/debug/
