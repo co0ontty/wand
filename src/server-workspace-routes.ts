@@ -534,12 +534,24 @@ export function registerWorkspaceRoutes(
       groups.set(id, created);
       return created;
     };
+    const tasksByWorkspace = new Map(workspaces.map((workspace) => [
+      workspace.id, storage.listWorkspaceTasks(workspace.id),
+    ]));
+    const sessionsByTask = new Map<string, SessionSnapshot[]>();
+    const taskSessions = (taskId: string): SessionSnapshot[] => {
+      let snapshots = sessionsByTask.get(taskId);
+      if (!snapshots) {
+        snapshots = storage.listSessionsByWorkspaceTask(taskId);
+        sessionsByTask.set(taskId, snapshots);
+      }
+      return snapshots;
+    };
     const appendTask = (
       target: TaskDirectoryGroup,
       workspace: Workspace,
       task: ReturnType<WandStorage["listWorkspaceTasks"]>[number],
     ) => {
-      const allSessions = storage.listSessionsByWorkspaceTask(task.id);
+      const allSessions = taskSessions(task.id);
       const sessions = allSessions
         .slice(0, sessionLimit ?? undefined)
         .map((session) => ({
@@ -559,7 +571,7 @@ export function registerWorkspaceRoutes(
       const base = groups.get(workspace.id);
       if (!base) continue;
       const global = isGlobalWorkspace(workspace);
-      for (const task of storage.listWorkspaceTasks(workspace.id).slice(0, taskLimit ?? undefined)) {
+      for (const task of tasksByWorkspace.get(workspace.id)!.slice(0, taskLimit ?? undefined)) {
         const taskCwd = taskRuntimeCwd(task, workspace);
         const target = global && taskCwd
           && normalizeProjectCwd(taskCwd) !== normalizeProjectCwd(workspace.cwd)
@@ -569,9 +581,10 @@ export function registerWorkspaceRoutes(
       }
     }
     const taskBoundSessionIds = new Set<string>();
-    for (const workspace of workspaces) {
-      for (const task of storage.listWorkspaceTasks(workspace.id)) {
-        for (const session of storage.listSessionsByWorkspaceTask(task.id)) taskBoundSessionIds.add(session.id);
+    // Membership must include tasks/sessions hidden by the response limits.
+    for (const tasks of tasksByWorkspace.values()) {
+      for (const task of tasks) {
+        for (const session of taskSessions(task.id)) taskBoundSessionIds.add(session.id);
       }
     }
     for (const session of storage.loadSessions()) {

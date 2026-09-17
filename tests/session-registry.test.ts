@@ -41,6 +41,7 @@ function harness() {
     ptyDeletes: [] as string[],
     storageDeletes: [] as string[],
     claudeDeletes: [] as string[],
+    slimStorageLoads: 0,
   };
 
   const structured = {
@@ -78,7 +79,11 @@ function harness() {
 
   const storage = {
     getSession: (id: string) => storageRows.get(id) ?? null,
-    loadSessions: () => Array.from(storageRows.values()),
+    loadSessions: () => { throw new Error("Slim listing must not load persisted transcripts"); },
+    loadSessionsSlim: () => {
+      calls.slimStorageLoads += 1;
+      return Array.from(storageRows.values(), ({ messages: _messages, ...row }) => ({ ...row, output: "" }));
+    },
     updateSessionRuntimeMetadata: (value: SessionSnapshot) => {
       calls.storageUpdates.push(value.id);
       storageRows.set(value.id, value);
@@ -117,7 +122,12 @@ test("SessionRegistry preserves structured, PTY, storage precedence without stal
   const listed = h.registry.listSlim();
   assert.equal(listed.filter((item) => item.id === "same").length, 1);
   assert.equal(listed.find((item) => item.id === "same")?.title, "live-structured");
+  assert.equal(listed.find((item) => item.id === "pty")?.title, "live-pty-only");
+  assert.equal(listed.find((item) => item.id === "stored")?.title, "storage-only");
   assert.equal(listed.find((item) => item.id === "stored")?.output, "");
+  assert.equal(listed.find((item) => item.id === "stored")?.messages, undefined);
+  assert.equal(h.calls.slimStorageLoads, 1);
+  assert.deepEqual(listed.map((item) => item.id), ["stored", "same", "pty"]);
 
   h.registry.updateWorktreeState("same", "checking", { conflict: false });
   assert.deepEqual(h.calls.structuredUpdates, ["same"]);

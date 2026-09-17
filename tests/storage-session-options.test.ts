@@ -58,6 +58,32 @@ function assertDurableOptions(actual: SessionSnapshot, expected: SessionSnapshot
   }
 }
 
+test("slim session storage preserves ordered metadata without transcript payloads", (t) => {
+  const dbPath = tempDatabase(t, "wand-session-slim-");
+  const storage = new WandStorage(dbPath);
+  t.after(() => storage.close());
+  for (const kind of ["pty", "structured"] as const) {
+    storage.saveSession(snapshot(kind, {
+      sessionKind: kind,
+      startedAt: kind === "pty" ? "2026-07-14T00:00:00.000Z" : "2026-07-15T00:00:00.000Z",
+      output: "large transcript".repeat(1000),
+      messages: [{ role: "user", content: [{ type: "text", text: "persisted message" }] }],
+      workspaceId: "workspace",
+      workspaceTaskId: "task",
+      selectedModel: "test-model",
+      queuedMessages: ["queued prompt"],
+      queuedMessageSkills: [["review"]],
+      structuredState: kind === "structured" ? { provider: "claude", inFlight: true } : undefined,
+      worktree: { branch: "test", path: "/tmp/worktree" },
+    }));
+  }
+  const full = storage.loadSessions();
+  const slim = storage.loadSessionsSlim();
+  assert.deepEqual(slim, full.map((row) => ({ ...row, output: "", messages: undefined })));
+  assert.deepEqual(slim.map((row) => row.id), ["structured", "pty"]);
+  assert.ok(full.every((row) => row.output.length > 0 && row.messages?.length === 1));
+});
+
 test("session runtime options survive a full close and reopen round-trip", (t) => {
   const dbPath = tempDatabase(t, "wand-session-options-");
   const expected = snapshot("full-round-trip", {

@@ -51,6 +51,116 @@ function git(args: string[], cwd: string): void {
   });
 }
 
+test("task revisions track individual metadata, milestone removal, and lower layout revisions", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-task-revisions-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const { baseUrl, close } = await startWorkspaceApp(storage);
+  try {
+    const workspace = storage.createWorkspace({ name: "Project", cwd: root });
+    const first = storage.createWorkspaceTask({ workspaceId: workspace.id, name: "First" });
+    const second = storage.createWorkspaceTask({ workspaceId: workspace.id, name: "Second" });
+    const milestone = storage.createWandMilestone({ name: "Release" });
+    storage.saveWorkspaceTaskLayout(first.id, null);
+    storage.saveWorkspaceTaskLayout(first.id, null);
+    type Page = {
+      unchanged: boolean;
+      revision: string;
+      groups: Array<{ tasks: Array<{ id: string; name: string; status: string; milestoneId: string | null; layoutRevision: number; isolated: boolean }> }>;
+    };
+    const load = async (revision = "probe"): Promise<Page> => {
+      const res = await fetch(`${baseUrl}/api/tasks?revision=${encodeURIComponent(revision)}`);
+      assert.equal(res.status, 200);
+      return await res.json() as Page;
+    };
+    let page = await load();
+    assert.equal((await load(page.revision)).unchanged, true);
+    for (const patch of [{ name: "Renamed" }, { status: "done" }, { milestoneId: milestone.id }]) {
+      const response = await fetch(`${baseUrl}/api/workspace-tasks/${second.id}`, json(patch, "PATCH"));
+      assert.equal(response.status, 200);
+      const next = await load(page.revision);
+      assert.equal(next.unchanged, false);
+      assert.notEqual(next.revision, page.revision);
+      const task = next.groups.flatMap((group) => group.tasks).find((task) => task.id === second.id)!;
+      for (const [key, value] of Object.entries(patch)) assert.equal(task[key as keyof typeof task], value);
+      page = next;
+    }
+    const layoutResponse = await fetch(`${baseUrl}/api/workspace-tasks/${second.id}/layout`, json({
+      layout: { type: "pane", tabs: [], active: 0 }, layoutRevision: 0,
+    }, "PUT"));
+    assert.equal(layoutResponse.status, 200);
+    let next = await load(page.revision);
+    assert.equal(next.unchanged, false);
+    const tasks = next.groups.flatMap((group) => group.tasks);
+    assert.equal(tasks.find((task) => task.id === first.id)?.layoutRevision, 2);
+    assert.equal(tasks.find((task) => task.id === second.id)?.layoutRevision, 1);
+    page = next;
+
+    storage.updateWorkspaceTask(second.id, { worktree: { branch: "test", path: root } });
+    next = await load(page.revision);
+    assert.equal(next.unchanged, false);
+    assert.equal(next.groups.flatMap((group) => group.tasks).find((task) => task.id === second.id)?.isolated, true);
+    page = next;
+    storage.deleteWandMilestone(milestone.id);
+    next = await load(page.revision);
+    assert.equal(next.unchanged, false);
+    assert.equal(next.groups.flatMap((group) => group.tasks).find((task) => task.id === second.id)?.milestoneId, null);
+    assert.equal((await load(next.revision)).unchanged, true);
+  } finally {
+    await close();
+    storage.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("task aggregation reuses queries without leaking truncated or filtered task sessions", async (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-task-query-reuse-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const { baseUrl, close } = await startWorkspaceApp(storage);
+  try {
+    const workspace = storage.createWorkspace({ name: "Project", cwd: root });
+    const other = storage.createWorkspace({ name: "Other", cwd: path.join(root, "other") });
+    const first = storage.createWorkspaceTask({ workspaceId: workspace.id, name: "First" });
+    const second = storage.createWorkspaceTask({ workspaceId: workspace.id, name: "Second" });
+    const excluded = storage.createWorkspaceTask({ workspaceId: other.id, name: "Excluded" });
+    for (const task of [first, second, excluded]) {
+      for (const suffix of ["a", "b"]) storage.saveSession({
+        id: `${task.id}-${suffix}`, command: "sh", cwd: root, mode: "managed", status: "exited",
+        exitCode: 0, startedAt: "2026-07-14T00:00:00.000Z", endedAt: null, output: "transcript",
+        workspaceId: workspace.id, workspaceTaskId: task.id,
+      });
+    }
+    const taskQueries = t.mock.method(storage, "listWorkspaceTasks");
+    const sessionQueries = t.mock.method(storage, "listSessionsByWorkspaceTask");
+    for (const query of ["", `?workspaceId=${workspace.id}&limit=1&maxSessions=1`]) {
+      taskQueries.mock.resetCalls();
+      sessionQueries.mock.resetCalls();
+      const response = await fetch(`${baseUrl}/api/tasks${query}`);
+      assert.equal(response.status, 200);
+      const groups = await response.json() as Array<{
+        workspaceId: string;
+        tasks: Array<{ sessions: unknown[]; totalSessions: number }>;
+        standaloneSessions: unknown[];
+      }>;
+      assert.ok(groups.every((group) => group.standaloneSessions.length === 0));
+      assert.equal(taskQueries.mock.callCount(), 2);
+      assert.equal(sessionQueries.mock.callCount(), 3);
+      assert.equal(new Set(taskQueries.mock.calls.map((call) => call.arguments[0])).size, 2);
+      assert.equal(new Set(sessionQueries.mock.calls.map((call) => call.arguments[0])).size, 3);
+      if (query) {
+        assert.equal(groups.length, 1);
+        assert.equal(groups[0].workspaceId, workspace.id);
+        assert.equal(groups[0].tasks.length, 1);
+        assert.equal(groups[0].tasks[0].sessions.length, 1);
+        assert.equal(groups[0].tasks[0].totalSessions, 2);
+      }
+    }
+  } finally {
+    await close();
+    storage.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("task creation makes an isolated worktree in a git workspace", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-task-git-"));
   // 建一个 git 仓库并提交一个文件，prepareSessionWorktree 才能工作

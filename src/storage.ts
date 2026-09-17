@@ -387,8 +387,8 @@ function mapWorktreeMergeFields(row: SessionRow): Pick<SessionSnapshot, "worktre
   };
 }
 
-function sessionSelectFields(): string {
-  return `id, session_source, automation_id, provider, session_kind, runner, command, cwd, mode, status, exit_code, started_at, ended_at, output, pty_output_seq, archived, archived_at, claude_session_id, messages, queued_messages, queued_message_skills, structured_state
+function sessionSelectFields(slim = false): string {
+  return `id, session_source, automation_id, provider, session_kind, runner, command, cwd, mode, status, exit_code, started_at, ended_at, ${slim ? "'' AS output" : "output"}, pty_output_seq, archived, archived_at, claude_session_id, ${slim ? "NULL AS messages" : "messages"}, queued_messages, queued_message_skills, structured_state
              , resumed_from_session_id, auto_recovered, worktree_enabled, worktree_info, worktree_merge_status, worktree_merge_info, title, description, session_options, workspace_id, workspace_task_id`;
 }
 
@@ -1425,13 +1425,13 @@ export class WandStorage {
               COALESCE(MAX(title), '') AS title
        FROM command_sessions`
     ).get() as { count: number; started: string; ended: string; title: string };
+    // Per-task metadata catches edits even when another task owns the maximum
+    // timestamp/revision. Layout payloads are represented by their own revision.
     const tasks = this.db.prepare(
-      `SELECT COUNT(*) AS count,
-              COALESCE(MAX(created_at), '') AS created,
-              COALESCE(MAX(last_opened_at), '') AS opened,
-              COALESCE(MAX(layout_revision), 0) AS revision
-       FROM workspace_tasks`
-    ).get() as { count: number; created: string; opened: string; revision: number };
+      `SELECT id, workspace_id, name, status, cwd, worktree_json, milestone_id,
+              created_at, last_opened_at, layout_revision
+       FROM workspace_tasks ORDER BY id`
+    ).all();
     const workspaces = this.db.prepare(
       `SELECT COUNT(*) AS count, COALESCE(MAX(last_opened_at), '') AS opened FROM workspaces`
     ).get() as { count: number; opened: string };
@@ -2196,6 +2196,14 @@ export class WandStorage {
       )
       .all() as unknown as SessionRow[];
 
+    return rows.map((row) => this.mapSessionRow(row));
+  }
+
+  /** List durable metadata without reading or parsing output/messages payloads. */
+  loadSessionsSlim(): SessionSnapshot[] {
+    const rows = this.db.prepare(
+      `SELECT ${sessionSelectFields(true)} FROM command_sessions ORDER BY started_at DESC`
+    ).all() as unknown as SessionRow[];
     return rows.map((row) => this.mapSessionRow(row));
   }
 

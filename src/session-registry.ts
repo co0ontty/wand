@@ -7,11 +7,6 @@ import type { ExecutionMode, SessionSnapshot } from "./types.js";
 
 export type SessionOwner = "structured" | "pty" | "storage";
 
-function slimSnapshot(snapshot: SessionSnapshot): SessionSnapshot {
-  const { output: _output, messages: _messages, ...slim } = snapshot;
-  return { ...slim, output: "" } as SessionSnapshot;
-}
-
 type HiddenSessionStore = Pick<WandStorage, "getConfigValue" | "setConfigValue">;
 
 /** 读取 `hidden_claude_session_ids`；坏数据 / 空值按空集合处理，不抛错。 */
@@ -86,8 +81,8 @@ export class SessionRegistry {
     for (const snapshot of this.processes.listSlim()) {
       if (!byId.has(snapshot.id)) byId.set(snapshot.id, snapshot);
     }
-    for (const snapshot of this.storage.loadSessions()) {
-      if (!byId.has(snapshot.id)) byId.set(snapshot.id, slimSnapshot(snapshot));
+    for (const snapshot of this.storage.loadSessionsSlim()) {
+      if (!byId.has(snapshot.id)) byId.set(snapshot.id, snapshot);
     }
     return Array.from(byId.values()).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
   }
