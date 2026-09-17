@@ -50,7 +50,7 @@ interface LegacySession {
   status?: string;
   permissionBlocked?: boolean;
   ptyBusy?: boolean;
-  structuredState?: { inFlight?: boolean } | null;
+  structuredState?: { inFlight?: boolean; phase?: "responding" | "background" } | null;
   startedAt?: string;
   endedAt?: string;
   claudeSessionId?: string;
@@ -135,7 +135,9 @@ function isAutomation(session: LegacySession): boolean {
 function sessionStatusLabel(session: LegacySession): string {
   if (session.permissionBlocked) return "等待授权";
   const kind = session.sessionKind === "structured" ? "structured" : "pty";
-  if (kind === "structured" && session.structuredState?.inFlight) return "思考中";
+  if (kind === "structured" && session.structuredState?.inFlight) {
+    return session.structuredState.phase === "background" ? "后台任务中" : "思考中";
+  }
   const status = stringValue(session.status, "idle");
   // provider CLI 进程活着但本轮已结束 → 空闲而不是运行中
   if (isIdleAtPrompt(kind, status, session.provider ?? "", Boolean(session.ptyBusy))) return "空闲";

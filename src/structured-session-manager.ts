@@ -222,6 +222,7 @@ const STREAM_EMIT_DEBOUNCE_MS = 16;
 // checkpoint keeps recovery useful without rewriting megabytes five times a
 // second on the event loop.
 const STREAM_SAVE_THROTTLE_MS = 1_000;
+const DETACHED_RECOVERY_RETRY_MS = 500;
 const ARCHIVE_AFTER_MS = 1000 * 60 * 60 * 24;
 
 interface StreamingCheckpointDirty {
@@ -447,6 +448,9 @@ export class StructuredSessionManager {
   private readonly piRunner: StructuredRunnerAdapter;
   /** Structured CLI runs that were mid-flight when the previous web process died. */
   private pendingRecoveryIds: string[] = [];
+  private detachedRecoveryPromise: Promise<void> | null = null;
+  private detachedRecoveryRetryTimer: NodeJS.Timeout | null = null;
+  private detachedRecoveryFailureLogged = false;
   private disposed = false;
 
   constructor(
@@ -474,9 +478,10 @@ export class StructuredSessionManager {
       const runner = isStructuredRunnerForProvider(provider, storedRunner)
         ? storedRunner
         : defaultStructuredRunner(provider, this.config.structuredRunner);
-      if (snapshot.status === "running" && runner !== "claude-sdk") {
-        this.pendingRecoveryIds.push(snapshot.id);
-      }
+      const recoverableDetachedRun = snapshot.status === "running"
+        && runner !== "claude-sdk"
+        && this.execHost?.persistent === true;
+      if (recoverableDetachedRun) this.pendingRecoveryIds.push(snapshot.id);
       const restored: SessionSnapshot = {
         ...snapshot,
         sessionKind: "structured",
@@ -484,7 +489,7 @@ export class StructuredSessionManager {
         automationId: snapshot.automationId,
         provider,
         runner,
-        status: restoredStatus,
+        status: recoverableDetachedRun ? "running" : restoredStatus,
         autoApprovePermissions: snapshot.autoApprovePermissions ?? shouldAutoApproveForMode(snapshot.mode),
         approvalStats: snapshot.approvalStats ?? { tool: 0, command: 0, file: 0, total: 0 },
         queuedMessages: snapshot.queuedMessages ?? [],
@@ -496,16 +501,21 @@ export class StructuredSessionManager {
           runner,
           model: snapshot.structuredState?.model ?? snapshot.selectedModel ?? undefined,
           lastError: snapshot.status === "running"
-            ? "服务重启，上一轮已中断。"
+            ? recoverableDetachedRun ? null : "服务重启，上一轮已中断。"
             : snapshot.structuredState?.lastError ?? null,
-          inFlight: false,
-          activeRequestId: null,
+          inFlight: recoverableDetachedRun,
+          activeRequestId: recoverableDetachedRun
+            ? snapshot.structuredState?.activeRequestId ?? `recover-pending-${snapshot.id}`
+            : null,
         },
         selectedModel: snapshot.selectedModel ?? null,
         titleGenerating: false,
       };
       this.sessions.set(restored.id, restored);
-      this.storage.saveSession(restored);
+      // Keep the durable running marker until terminald inventory has been
+      // reconciled. If web is restarted again during startup, the next owner
+      // must still know there is a daemon run to adopt.
+      if (!recoverableDetachedRun) this.storage.saveSession(restored);
     }
     this.archiveExpiredSessions();
     this.archiveTimer = setInterval(() => {
@@ -542,6 +552,10 @@ export class StructuredSessionManager {
     if (this.archiveTimer) {
       clearInterval(this.archiveTimer);
       this.archiveTimer = null;
+    }
+    if (this.detachedRecoveryRetryTimer) {
+      clearTimeout(this.detachedRecoveryRetryTimer);
+      this.detachedRecoveryRetryTimer = null;
     }
     for (const timer of this.streamEmitTimers) clearTimeout(timer);
     this.streamEmitTimers.clear();
@@ -611,29 +625,86 @@ export class StructuredSessionManager {
   // while the previous web process was down.
   // ---------------------------------------------------------------------------
 
-  /** Called once after startup wiring; safe to skip when no host or candidates. */
-  async recoverDetachedRuns(): Promise<void> {
-    if (this.disposed || this.execHost?.persistent !== true || this.pendingRecoveryIds.length === 0) return;
-    const ids = this.pendingRecoveryIds;
-    this.pendingRecoveryIds = [];
+  /** Called once after startup wiring; transient daemon failures retry automatically. */
+  recoverDetachedRuns(): Promise<void> {
+    if (this.disposed || this.execHost?.persistent !== true || this.pendingRecoveryIds.length === 0) {
+      return Promise.resolve();
+    }
+    if (this.detachedRecoveryPromise) return this.detachedRecoveryPromise;
+    if (this.detachedRecoveryRetryTimer) {
+      clearTimeout(this.detachedRecoveryRetryTimer);
+      this.detachedRecoveryRetryTimer = null;
+    }
+    const recovery = this.recoverDetachedRunsOnce();
+    this.detachedRecoveryPromise = recovery;
+    const clearRecovery = (): void => {
+      if (this.detachedRecoveryPromise === recovery) this.detachedRecoveryPromise = null;
+    };
+    void recovery.then(clearRecovery, clearRecovery);
+    return recovery;
+  }
+
+  private async recoverDetachedRunsOnce(): Promise<void> {
+    if (this.disposed || !this.execHost) return;
     let runs: StructuredRunState[];
     try {
       runs = await this.execHost.listRuns();
+      this.detachedRecoveryFailureLogged = false;
     } catch (error) {
-      process.stderr.write(`[wand] structured run recovery skipped: ${getErrorMessage(error)}\n`);
+      if (!this.detachedRecoveryFailureLogged) {
+        this.detachedRecoveryFailureLogged = true;
+        process.stderr.write(`[wand] structured run recovery waiting for terminal daemon: ${getErrorMessage(error)}\n`);
+      }
+      this.scheduleDetachedRecovery();
       return;
     }
+
+    const ids = this.pendingRecoveryIds;
+    this.pendingRecoveryIds = [];
     const byRunId = new Map(runs.map((run) => [run.runId, run]));
     for (const sessionId of ids) {
-      const state = byRunId.get(structuredRunId(sessionId));
       const session = this.sessions.get(sessionId);
-      if (!state || !session) continue;
+      if (!session) continue;
+      const state = byRunId.get(structuredRunId(sessionId));
+      if (!state) {
+        // Inventory was read successfully, so this is a genuinely lost run,
+        // not a temporary control-plane outage. Commit the interrupted view.
+        const interrupted: SessionSnapshot = {
+          ...session,
+          status: "idle",
+          exitCode: null,
+          endedAt: null,
+          structuredState: {
+            ...(session.structuredState as StructuredSessionState),
+            inFlight: false,
+            activeRequestId: null,
+            lastError: "服务重启，上一轮已中断。",
+          },
+        };
+        this.sessions.set(sessionId, interrupted);
+        this.saveAuthoritativeSession(interrupted);
+        this.emitStructuredSnapshot(interrupted);
+        continue;
+      }
       try {
         await this.resumeDetachedRun(session, state);
       } catch (error) {
         console.error(`[WAND] structured run recovery failed for ${sessionId}:`, error);
+        if (!this.disposed && !this.pendingRecoveryIds.includes(sessionId)) {
+          this.pendingRecoveryIds.push(sessionId);
+        }
       }
     }
+    this.scheduleDetachedRecovery();
+  }
+
+  private scheduleDetachedRecovery(): void {
+    if (this.disposed || this.pendingRecoveryIds.length === 0 || this.detachedRecoveryRetryTimer) return;
+    this.detachedRecoveryRetryTimer = setTimeout(() => {
+      this.detachedRecoveryRetryTimer = null;
+      void this.recoverDetachedRuns();
+    }, DETACHED_RECOVERY_RETRY_MS);
+    this.detachedRecoveryRetryTimer.unref?.();
   }
 
   private async resumeDetachedRun(snapshot: SessionSnapshot, initialState: StructuredRunState): Promise<void> {
@@ -679,6 +750,7 @@ export class StructuredSessionManager {
         structuredState: {
           ...(current.structuredState as StructuredSessionState),
           model: turnState.model ?? current.structuredState?.model,
+          phase: turnState.phase ?? current.structuredState?.phase,
         },
       };
       this.sessions.set(sessionId, patched);
@@ -706,24 +778,12 @@ export class StructuredSessionManager {
     };
 
     let runningHandle: Awaited<ReturnType<StructuredExecHost["adoptRun"]>> = null;
-    let fedChars = 0;
-    const snapshotChars = initialState.stdoutLog.length;
+    let lastStdoutSeq = initialState.stdoutSeq;
+    let lastStderrSeq = initialState.stderrSeq;
     const feedLine = (line: string): void => {
       onApplied(processor.feed(line));
     };
     const feedDelta = (text: string): void => {
-      // Skip the portion already covered by the attach snapshot to avoid
-      // double-feeding overlapping events buffered during adoption.
-      if (fedChars < snapshotChars) {
-        const remaining = snapshotChars - fedChars;
-        if (text.length <= remaining) {
-          fedChars += text.length;
-          return;
-        }
-        text = text.slice(remaining);
-        fedChars = snapshotChars;
-      }
-      fedChars += text.length;
       carry += text;
       const lines = carry.split("\n");
       carry = lines.pop() ?? "";
@@ -757,7 +817,6 @@ export class StructuredSessionManager {
       const lines = initialState.stdoutLog.split("\n");
       carry = lines.pop() ?? "";
       for (const line of lines) feedLine(line);
-      fedChars = initialState.stdoutLog.length - carry.length;
     }
     runningHandle = await this.execHost.adoptRun(structuredRunId(sessionId));
     if (!runningHandle) {
@@ -773,8 +832,18 @@ export class StructuredSessionManager {
       return;
     }
     runningHandle.onStream((event) => {
-      if (event.stream === "stdout") feedDelta(event.data);
-      else processor.stderr += event.data;
+      // Events may be buffered while structuredAttach is in flight. Sequence
+      // watermarks distinguish overlap with the snapshot from genuinely new
+      // output; character-count skipping corrupts a new short event.
+      if (event.stream === "stdout") {
+        if (event.seq <= lastStdoutSeq) return;
+        lastStdoutSeq = event.seq;
+        feedDelta(event.data);
+        return;
+      }
+      if (event.seq <= lastStderrSeq) return;
+      lastStderrSeq = event.seq;
+      processor.stderr += event.data;
     });
     runningHandle.onExit((event) => {
       if (carry.trim()) feedLine(carry);
@@ -852,6 +921,7 @@ export class StructuredSessionManager {
         inFlight: false,
         activeRequestId: null,
         lastError: null,
+        phase: undefined,
       },
     };
     this.sessions.set(sessionId, finished);
@@ -2527,6 +2597,7 @@ export class StructuredSessionManager {
         structuredState: {
           ...(current.structuredState as StructuredSessionState),
           model: turnState.model ?? current.structuredState?.model,
+          phase: turnState.phase ?? current.structuredState?.phase,
         },
       };
       this.sessions.set(sessionId, patched);
@@ -2656,6 +2727,7 @@ export class StructuredSessionManager {
         inFlight: false,
         activeRequestId: null,
         lastError: null,
+        phase: undefined,
       },
     };
     this.sessions.set(sessionId, finished);
@@ -3362,6 +3434,7 @@ export class StructuredSessionManager {
         inFlight: false,
         activeRequestId: null,
         lastError: errorText,
+        phase: undefined,
       },
     };
   }

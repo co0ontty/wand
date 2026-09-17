@@ -99,7 +99,11 @@ export function applyPiEvent(state: PiTurnState, event: Record<string, unknown>)
   // Pi announces the ID before it writes a session file. The file is only
   // created when an assistant message is saved, so this ID is not resumable yet.
   if (event.type === "session" && typeof event.id === "string") state.pendingSessionId = event.id;
+  if (event.type === "turn_start" || event.type === "message_start" || event.type === "tool_execution_start") {
+    state.phase = "responding";
+  }
   if (event.type === "message_update") {
+    state.phase = "responding";
     const update = asRecord(event.assistantMessageEvent);
     const delta = typeof update?.delta === "string" ? update.delta : "";
     if (update?.type === "text_delta" && delta) {
@@ -135,7 +139,13 @@ export function applyPiEvent(state: PiTurnState, event: Record<string, unknown>)
     const message = asRecord(event.message);
     if (message?.role === "assistant") {
       if (state.pendingSessionId) state.sessionId = state.pendingSessionId;
-      return applyPiAssistantMessage(state, message);
+      const error = applyPiAssistantMessage(state, message);
+      if (event.type === "turn_end") {
+        const content = Array.isArray(message.content) ? message.content : [];
+        const hasToolCall = content.some((part) => asRecord(part)?.type === "toolCall");
+        if (!hasToolCall && message.stopReason !== "toolUse") state.phase = "background";
+      }
+      return error;
     }
   }
   if (event.type === "agent_end" && Array.isArray(event.messages)) {
@@ -159,7 +169,13 @@ export class PiRunner implements StructuredRunnerAdapter {
 
   start(context: StructuredRunnerContext, observer: StructuredRunnerObserver): StructuredRunnerExecution {
     const args = buildPiArgs(context.session, context.prompt);
-    const state: PiTurnState = { blocks: [], result: "", sessionId: context.session.claudeSessionId, model: context.session.selectedModel ?? undefined };
+    const state: PiTurnState = {
+      blocks: [],
+      result: "",
+      sessionId: context.session.claudeSessionId,
+      model: context.session.selectedModel ?? undefined,
+      phase: "responding",
+    };
     let primaryError: string | null = null;
     return startStructuredCli({
       sessionId: context.session.id,

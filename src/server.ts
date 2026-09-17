@@ -421,8 +421,8 @@ export async function startServer(
   const terminalHost = options.terminalHost ?? await createTerminalHost(configPath);
   const processes = new ProcessManager(config, storage, configDir, terminalHost);
   const structuredLogger = new SessionLogger(configDir, config.shortcutLogMaxBytes);
-  // Only the daemon-backed host keeps structured CLI runs alive across restarts;
-  // the in-process fallback keeps the legacy die-with-server lifecycle.
+  // Production startup requires the daemon-backed host so CLI runs outlive web
+  // restarts. In-process hosts are retained only for explicit test injection.
   const structuredExecHost = terminalHost instanceof TerminalDaemonClient ? terminalHost : undefined;
   const structuredSessions = new StructuredSessionManager(storage, config, structuredLogger, undefined, {}, structuredExecHost);
   const sessionRegistry = new SessionRegistry(processes, structuredSessions, storage);

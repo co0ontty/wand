@@ -1,16 +1,28 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import test from "node:test";
 
+import { defaultConfig } from "../src/config.js";
+import { WandStorage } from "../src/storage.js";
+import { ClaudeCliProtocolReducer } from "../src/structured-claude-protocol.js";
 import {
   InProcessStructuredExecHost,
   structuredRunId,
+  type StructuredExecHost,
   type StructuredExitEvent,
   type StructuredStreamEvent,
 } from "../src/structured-exec-host.js";
+import { startStructuredCli } from "../src/structured-exec-pump.js";
+import type {
+  StructuredRunnerAdapter,
+  StructuredRunnerContext,
+  StructuredRunnerExecution,
+  StructuredRunnerObserver,
+} from "../src/structured-runner.js";
+import { StructuredSessionManager } from "../src/structured-session-manager.js";
 import { terminalDaemonPaths } from "../src/terminal-daemon-protocol.js";
 import { TerminalDaemonClient } from "../src/terminal-daemon-client.js";
 
@@ -38,6 +50,61 @@ interface Collected {
   stderr: string;
   exit: StructuredExitEvent | null;
   done: Promise<void>;
+}
+
+class ScriptedClaudeDaemonRunner implements StructuredRunnerAdapter {
+  constructor(private readonly execHost: StructuredExecHost) {}
+
+  start(context: StructuredRunnerContext, observer: StructuredRunnerObserver): StructuredRunnerExecution {
+    const reducer = new ClaudeCliProtocolReducer(context.session);
+    const first = JSON.stringify({
+      type: "assistant",
+      session_id: "daemon-claude-session",
+      message: { id: "answer", content: [{ type: "text", text: "before restart" }] },
+    });
+    const final = JSON.stringify({
+      type: "assistant",
+      session_id: "daemon-claude-session",
+      message: { id: "answer", content: [{ type: "text", text: "after restart and still running" }] },
+    });
+    const result = JSON.stringify({
+      type: "result",
+      session_id: "daemon-claude-session",
+      result: "completed after restart",
+    });
+    const script = `
+      process.stdout.write(${JSON.stringify(`${first}\n`)});
+      setTimeout(() => {
+        process.stdout.write(${JSON.stringify(`${final}\n${result}\n`)});
+        process.exit(0);
+      }, 1200);
+    `;
+    return startStructuredCli({
+      sessionId: context.session.id,
+      file: NODE,
+      args: ["-e", script],
+      cwd: context.session.cwd,
+      env: context.env,
+      observer,
+      execHost: this.execHost,
+      createState: () => reducer.state,
+      processLine: (line) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        let event: unknown;
+        try { event = JSON.parse(trimmed); } catch { return; }
+        if (reducer.apply(event, false)) observer.onUpdate(reducer.state);
+      },
+      finalize: (ctx, exitCode, signal, spawnError) => ({
+        state: reducer.state,
+        exitCode,
+        signal,
+        stderr: ctx.stderr,
+        primaryError: null,
+        spawnError,
+      }),
+    });
+  }
 }
 
 function collect(
@@ -178,6 +245,101 @@ test("daemon-owned structured runs survive client reconnect and replay full logs
   }
 });
 
+test("structured manager detaches on web shutdown and recovers the same daemon run", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "wand-structured-manager-restart-"));
+  const configPath = path.join(root, "config.json");
+  const dbPath = path.join(root, "wand.db");
+  const daemon = startDaemonProcess(configPath);
+  let firstClient: TerminalDaemonClient | null = null;
+  let secondClient: TerminalDaemonClient | null = null;
+  let firstStorage: WandStorage | null = null;
+  let secondStorage: WandStorage | null = null;
+  let firstManager: StructuredSessionManager | null = null;
+  let secondManager: StructuredSessionManager | null = null;
+  try {
+    const paths = terminalDaemonPaths(configPath);
+    const waitForToken = async (): Promise<string> => {
+      for (let i = 0; i < 100; i++) {
+        try { return readFileSync(paths.tokenPath, "utf8").trim(); } catch { /* not yet */ }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      throw new Error("terminal daemon token never appeared");
+    };
+    const token = await waitForToken();
+    firstClient = new TerminalDaemonClient(paths.socketPath, token);
+    await firstClient.connect();
+    firstStorage = new WandStorage(dbPath);
+    const runner = new ScriptedClaudeDaemonRunner(firstClient);
+    firstManager = new StructuredSessionManager(
+      firstStorage,
+      { ...defaultConfig(), defaultCwd: root },
+      null,
+      undefined,
+      { claudeCli: runner },
+      firstClient,
+    );
+    const session = firstManager.createSession({
+      cwd: root,
+      mode: "assist",
+      provider: "claude",
+      runner: "claude-cli-print",
+    });
+    firstManager.setSessionTopic(session.id, "restart", "restart");
+    (firstManager as unknown as { maybeGenerateSessionTopic(): void }).maybeGenerateSessionTopic = () => {};
+    void firstManager.sendMessage(session.id, "continue through restart");
+    await waitFor(() => JSON.stringify(firstManager?.get(session.id)?.messages ?? []).includes("before restart"));
+    const beforeRestart = await firstClient.attachRun(structuredRunId(session.id));
+    assert.ok(beforeRestart);
+    assert.equal(beforeRestart!.status, "running");
+    const originalPid = beforeRestart!.pid;
+
+    firstManager.dispose();
+    firstManager = null;
+    firstClient.disconnect();
+    firstClient = null;
+    firstStorage.close();
+    firstStorage = null;
+
+    secondClient = new TerminalDaemonClient(paths.socketPath, token);
+    await secondClient.connect();
+    const whileWebWasDown = await secondClient.attachRun(structuredRunId(session.id));
+    assert.ok(whileWebWasDown, "daemon run must survive web manager disposal");
+    assert.equal(whileWebWasDown!.status, "running");
+    assert.equal(whileWebWasDown!.pid, originalPid);
+
+    secondStorage = new WandStorage(dbPath);
+    assert.equal(secondStorage.getSession(session.id)?.status, "running");
+    secondManager = new StructuredSessionManager(
+      secondStorage,
+      { ...defaultConfig(), defaultCwd: root },
+      null,
+      undefined,
+      {},
+      secondClient,
+    );
+    await secondManager.recoverDetachedRuns();
+    await waitFor(() => secondManager?.get(session.id)?.status === "idle", 8_000);
+    const recovered = secondManager.get(session.id);
+    assert.equal(recovered?.output, "completed after restart");
+    assert.equal(recovered?.claudeSessionId, "daemon-claude-session");
+    assert.ok(
+      JSON.stringify(recovered?.messages ?? []).includes("after restart"),
+      JSON.stringify(recovered?.messages ?? []),
+    );
+    assert.equal(secondStorage.getSession(session.id)?.structuredState?.inFlight, false);
+    await waitFor(async () => (await secondClient!.attachRun(structuredRunId(session.id))) === null);
+  } finally {
+    try { secondManager?.dispose(); } catch { /* best effort */ }
+    try { firstManager?.dispose(); } catch { /* best effort */ }
+    try { secondClient?.disconnect(); } catch { /* best effort */ }
+    try { firstClient?.disconnect(); } catch { /* best effort */ }
+    try { secondStorage?.close(); } catch { /* best effort */ }
+    try { firstStorage?.close(); } catch { /* best effort */ }
+    await stopDaemonProcess(daemon);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("daemon-owned structured runs round-trip a Chinese+emoji JSON line split mid-character", async () => {
   const configPath = path.join(mkdtempSync(path.join(tmpdir(), "wand-structured-utf8-")), "config.json");
   const daemon = startDaemonProcess(configPath);
@@ -311,6 +473,17 @@ async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error("waitFor timed out");
+}
+
+async function stopDaemonProcess(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  child.kill("SIGTERM");
+  await Promise.race([
+    new Promise<void>((resolve) => child.once("exit", () => resolve())),
+    new Promise<void>((resolve) => setTimeout(resolve, 2_000)).then(() => {
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    }),
+  ]);
 }
 
 function startDaemonProcess(configPath: string): ChildProcess {

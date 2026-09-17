@@ -117,6 +117,9 @@ export function renderStructuredStatusBar(chatMessages: any, session: any) {
   }
 
   var isInFlight = session.structuredState && session.structuredState.inFlight;
+  var inFlightLabel = session.structuredState && session.structuredState.phase === "background"
+    ? "后台任务中"
+    : "回复中";
 
   if (isInFlight) {
     // Start timer if not already running
@@ -132,7 +135,7 @@ export function renderStructuredStatusBar(chatMessages: any, session: any) {
       bar.className = "structured-status-bar";
       bar.innerHTML =
         '<span class="status-bar-dot"></span>' +
-        '<span class="status-bar-label">回复中</span>' +
+        '<span class="status-bar-label">' + inFlightLabel + '</span>' +
         '<span class="status-bar-timer">0.0s</span>';
       // Append as last child of the top row so it sits to the right of the todo bar
       topRow.appendChild(bar);
@@ -141,11 +144,13 @@ export function renderStructuredStatusBar(chatMessages: any, session: any) {
       // Was completed, now in-flight again — reset
       existing.classList.remove("completed");
       (existing as HTMLElement).style.animation = "none";
-      existing.querySelector(".status-bar-label")!.textContent = "回复中";
+      existing.querySelector(".status-bar-label")!.textContent = inFlightLabel;
       var dot = existing.querySelector(".status-bar-dot") as HTMLElement;
       if (dot) dot.style.display = "";
       state._statusBarStartTime = Date.now();
     }
+    var activeLabel = existing && existing.querySelector(".status-bar-label");
+    if (activeLabel) activeLabel.textContent = inFlightLabel;
 
     // Start interval to update timer
     if (!state._statusBarTimerId) {

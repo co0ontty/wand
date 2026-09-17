@@ -710,8 +710,9 @@ export async function createTerminalHost(configPath: string): Promise<TerminalHo
     if (await probeSocket(paths.socketPath)) {
       const starting = await waitForTerminalDaemon(paths.socketPath, paths.tokenPath, 5_000);
       if (starting) return starting;
-      process.stderr.write("[wand] Existing terminal daemon rejected adoption; using non-persistent PTYs without replacing it.\n");
-      return new InProcessTerminalHost();
+      throw new Error(
+        "Existing terminal daemon rejected adoption; refusing non-persistent fallback because web restarts must not stop running tasks.",
+      );
     }
   }
 
@@ -721,8 +722,9 @@ export async function createTerminalHost(configPath: string): Promise<TerminalHo
   if (hasLiveDaemonPid(paths.pidPath)) {
     const adopted = await waitForTerminalDaemon(paths.socketPath, paths.tokenPath, 5_000);
     if (adopted) return adopted;
-    process.stderr.write("[wand] Terminal daemon process is alive but its socket is unavailable; using non-persistent PTYs without replacing it.\n");
-    return new InProcessTerminalHost();
+    throw new Error(
+      "Terminal daemon process is alive but its socket is unavailable; refusing non-persistent fallback because web restarts must not stop running tasks.",
+    );
   }
 
   try {
@@ -732,8 +734,9 @@ export async function createTerminalHost(configPath: string): Promise<TerminalHo
   } catch (error) {
     process.stderr.write(`[wand] Failed to start terminal daemon: ${error instanceof Error ? error.message : String(error)}\n`);
   }
-  process.stderr.write("[wand] Terminal daemon unavailable; falling back to in-process PTYs.\n");
-  return new InProcessTerminalHost();
+  throw new Error(
+    "Terminal daemon unavailable; refusing non-persistent fallback because web restarts must not stop running tasks.",
+  );
 }
 
 async function waitForTerminalDaemon(

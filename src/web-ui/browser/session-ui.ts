@@ -4,7 +4,9 @@ import { isStructuredSession } from "./session-engine";
       export function getSessionStatusLabel(session) {
         if (!session) return "";
         if (session.permissionBlocked) return "等待授权";
-        if (isStructuredSession(session) && session.structuredState && session.structuredState.inFlight) return "思考中";
+        if (isStructuredSession(session) && session.structuredState && session.structuredState.inFlight) {
+          return session.structuredState.phase === "background" ? "后台任务中" : "思考中";
+        }
         // provider CLI 进程活着但本轮已结束 → 显示空闲而不是运行中
         if (session.status === "running"
           && session.provider

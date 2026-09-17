@@ -207,6 +207,25 @@ test("legacy snapshot derivation projects the complete shell state and excludes 
   assert.equal("drafts" in snapshot, false);
 });
 
+test("legacy snapshot labels a Pi process that is draining background tasks", () => {
+  const snapshot = deriveLegacyUiSnapshot({
+    loginChecked: true,
+    selectedId: "pi-background",
+    sessions: [{
+      id: "pi-background",
+      provider: "pi",
+      command: "pi --mode json --print",
+      sessionKind: "structured",
+      status: "running",
+      structuredState: { inFlight: true, phase: "background" },
+    }],
+  }, mobileEnvironment);
+
+  assert.equal(snapshot.selected?.statusLabel, "后台任务中");
+  assert.equal(snapshot.topbar.statusLabel, "后台任务中");
+  assert.equal(snapshot.selected?.inFlight, true);
+});
+
 test("legacy snapshot derivation handles boot, anonymous, and empty desktop states", () => {
   const environment = { ...mobileEnvironment, width: 1200, embedTerminal: false, nativeInput: false };
   const boot = deriveLegacyUiSnapshot({}, environment);

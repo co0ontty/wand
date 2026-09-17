@@ -8,7 +8,7 @@ import { defaultConfig } from "../src/config.js";
 import { WandStorage } from "../src/storage.js";
 import { applyPiEvent, buildPiArgs, piToolName } from "../src/structured-pi-adapter.js";
 import { StructuredSessionManager } from "../src/structured-session-manager.js";
-import type { StructuredRunnerAdapter } from "../src/structured-runner.js";
+import type { StructuredRunnerAdapter, StructuredRunnerTurnState } from "../src/structured-runner.js";
 import type { SessionSnapshot } from "../src/types.js";
 
 function session(overrides: Partial<SessionSnapshot> = {}): SessionSnapshot {
@@ -79,6 +79,31 @@ test("Pi JSON events map streaming content, tools, usage, model, and session id"
     { type: "tool_result", tool_use_id: "tool-1", content: "/tmp/project", is_error: false },
   ]);
   assert.equal(piToolName("custom"), "Pi/custom");
+});
+
+test("Pi distinguishes a finished visible reply from background task draining", () => {
+  const state: StructuredRunnerTurnState = { blocks: [], result: "", sessionId: null };
+  applyPiEvent(state, { type: "turn_start" });
+  assert.equal(state.phase, "responding");
+
+  applyPiEvent(state, {
+    type: "turn_end",
+    message: {
+      role: "assistant",
+      stopReason: "toolUse",
+      content: [{ type: "toolCall", name: "read", arguments: { path: "README.md" } }],
+    },
+  });
+  assert.equal(state.phase, "responding", "ordinary tool turns are not background draining");
+
+  applyPiEvent(state, {
+    type: "turn_end",
+    message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "已启动后台检查" }] },
+  });
+  assert.equal(state.phase, "background");
+
+  applyPiEvent(state, { type: "turn_start" });
+  assert.equal(state.phase, "responding", "a completion follow-up returns to normal streaming");
 });
 
 test("Pi does not save a session ID when a turn ends before the assistant replies", () => {

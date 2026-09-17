@@ -47,6 +47,46 @@ class ScriptedOpenCodeRunner implements StructuredRunnerAdapter {
   }
 }
 
+class BackgroundPhasePiRunner implements StructuredRunnerAdapter {
+  observer: StructuredRunnerObserver | null = null;
+  private resolveCompletion: ((value: Awaited<StructuredRunnerExecution["completion"]>) => void) | null = null;
+  readonly state = {
+    blocks: [{ type: "text" as const, text: "background work started" }],
+    result: "background work started",
+    sessionId: "pi-session-id",
+    phase: "background" as const,
+  };
+
+  start(_context: StructuredRunnerContext, observer: StructuredRunnerObserver): StructuredRunnerExecution {
+    this.observer = observer;
+    const completion = new Promise<Awaited<StructuredRunnerExecution["completion"]>>((resolve) => {
+      this.resolveCompletion = resolve;
+    });
+    return {
+      args: ["--mode", "json", "--print"],
+      spawnedAt: "2026-07-15T00:00:00.000Z",
+      pid: 43,
+      completion,
+      interrupt: () => {},
+    };
+  }
+
+  publishBackgroundPhase(): void {
+    this.observer?.onUpdate(this.state);
+  }
+
+  finish(): void {
+    this.resolveCompletion?.({
+      state: this.state,
+      exitCode: 0,
+      signal: null,
+      stderr: "",
+      primaryError: null,
+    });
+    this.resolveCompletion = null;
+  }
+}
+
 class InterruptibleOpenCodeRunner implements StructuredRunnerAdapter {
   interruptCalls = 0;
   private finish: (() => void) | null = null;
@@ -170,6 +210,41 @@ test("StructuredSessionManager drives Claude CLI through the runner interface", 
   assert.equal(runner.starts[0].prompt, "hello claude adapter");
   assert.equal(finished.output, "scripted response");
   assert.equal(finished.claudeSessionId, "scripted-session-id");
+});
+
+test("StructuredSessionManager exposes Pi background draining until the CLI exits", async (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-pi-background-phase-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const runner = new BackgroundPhasePiRunner();
+  const manager = new StructuredSessionManager(
+    storage,
+    { ...defaultConfig(), defaultCwd: root },
+    null,
+    undefined,
+    { pi: runner },
+  );
+  t.after(() => {
+    manager.dispose();
+    storage.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  const session = manager.createSession({ cwd: root, mode: "assist", provider: "pi" });
+  manager.setSessionTopic(session.id, "test", "test");
+  const pending = manager.sendMessage(session.id, "delegate work");
+  await Promise.resolve();
+  runner.publishBackgroundPhase();
+
+  const draining = manager.get(session.id);
+  assert.equal(draining?.status, "running");
+  assert.equal(draining?.structuredState?.inFlight, true);
+  assert.equal(draining?.structuredState?.phase, "background");
+
+  runner.finish();
+  const finished = await pending;
+  assert.equal(finished.status, "idle");
+  assert.equal(finished.structuredState?.inFlight, false);
+  assert.equal(finished.structuredState?.phase, undefined);
 });
 
 test("StructuredSessionManager interrupts OpenCode without accessing its process handle", async (t) => {

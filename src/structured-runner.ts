@@ -6,6 +6,8 @@ export interface StructuredRunnerTurnState {
   sessionId: string | null;
   model?: string;
   usage?: ConversationTurn["usage"];
+  /** Provider turn phase when the CLI stays alive after its visible reply. */
+  phase?: "responding" | "background";
 }
 
 export interface StructuredRunnerContext {

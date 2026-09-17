@@ -556,6 +556,8 @@ export interface StructuredSessionState {
   lastError: string | null;
   inFlight: boolean;
   activeRequestId: string | null;
+  /** Pi 已结束前台回复、但 CLI 仍在等待异步子任务收尾。 */
+  phase?: "responding" | "background";
 }
 
 export interface SessionSnapshot {
