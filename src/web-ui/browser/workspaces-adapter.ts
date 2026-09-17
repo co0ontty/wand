@@ -15,6 +15,8 @@ import {
   setPooledTerminalScale,
 } from "./terminal-pool";
 import { httpWorkspacesRepository } from "../react/workspaces/repository";
+import { taskDetailStore } from "../react/workspaces/task-detail-store";
+import { createTaskLayoutController } from "../react/workspaces/task-layout-controller";
 import { orderWorkspaceSessions } from "../react/workspaces/session-order";
 import {
   activeWorkWindow,
@@ -26,23 +28,42 @@ import type {
   NewTaskSessionPayload,
   OpenWorkspaceTaskPayload,
   TaskWindowLayout,
+  TaskLayoutSaveOptions,
   Workspace,
 } from "../react/workspaces/types";
 
 let uninstall: (() => void) | null = null;
 let openTaskGeneration = 0;
-let layoutRevisionByTask = new Map<string, number>();
+const taskLayouts = createTaskLayoutController(httpWorkspacesRepository, {
+  onSaved(taskId, layoutRevision) {
+    if (state.activeWorkspaceTaskId === taskId) setActiveWorkspaceContext({ layoutRevision });
+  },
+  onError(taskId, error) {
+    const message = error instanceof Error ? error.message : "请检查网络后重试。";
+    showToast(`任务 ${taskId} 的布局未保存：${message}`, "danger");
+  },
+  onRestore(taskId, detail) {
+    if (state.activeWorkspaceTaskId !== taskId) return;
+    const ids = orderWorkspaceSessions(detail.sessions).map((session) => session.id);
+    const savedActive = activeWorkWindowTab(detail.layout);
+    const preferred = savedActive?.kind === "session" ? savedActive.sessionId : ids[0];
+    const layout = reconcileTaskWindowLayout(detail.layout, ids, preferred);
+    if (activeWorkWindow(layout)?.layout.type !== "split") disposeAllPooledTerminals();
+    const active = activeWorkWindowTab(layout);
+    if (active?.kind === "session") selectSession(active.sessionId);
+    else goHome();
+    setActiveWorkspaceContext({ layout, layoutRevision: detail.layoutRevision });
+  },
+});
 
-function rememberLayoutRevision(taskId: string | null | undefined, revision: number | undefined): void {
-  if (!taskId || typeof revision !== "number" || !Number.isFinite(revision)) return;
-  layoutRevisionByTask.set(taskId, revision);
+function saveTaskLayout(taskId: string, layout: TaskWindowLayout | null, options?: TaskLayoutSaveOptions) {
+  if (options?.automatic && !taskLayouts.canSaveAutomatically(taskId)) return Promise.resolve("failed");
+  if (state.activeWorkspaceTaskId === taskId) {
+    if (activeWorkWindow(layout)?.layout.type !== "split") disposeAllPooledTerminals();
+    setActiveWorkspaceContext({ layout });
+  }
+  return taskLayouts.save(taskId, layout, options);
 }
-
-function currentLayoutRevision(taskId: string | null | undefined): number | undefined {
-  if (!taskId) return undefined;
-  return layoutRevisionByTask.get(taskId);
-}
-
 
 
 /**
@@ -60,6 +81,7 @@ export function installWorkspacesLegacyAdapter(): void {
     onClose() {},
     effectiveCwd: getEffectiveCwd,
     openWorkspace(workspace: Workspace) {
+      ++openTaskGeneration;
       state.activeWorkspaceId = workspace.id;
       state.activeWorkspaceTaskId = null;
       try { localStorage.setItem("wand-active-workspace", workspace.id); } catch (e) {}
@@ -77,6 +99,7 @@ export function installWorkspacesLegacyAdapter(): void {
       dismissDrawerIfOverlay();
     },
     closeWorkspace() {
+      ++openTaskGeneration;
       state.activeWorkspaceId = null;
       state.activeWorkspaceTaskId = null;
       try { localStorage.removeItem("wand-active-workspace"); } catch (e) {}
@@ -88,7 +111,7 @@ export function installWorkspacesLegacyAdapter(): void {
       selectSession(sessionId);
       dismissDrawerIfOverlay();
     },
-    openTask(payload: OpenWorkspaceTaskPayload) {
+    async openTask(payload: OpenWorkspaceTaskPayload) {
       const generation = ++openTaskGeneration;
       state.activeWorkspaceId = payload.workspaceId;
       state.activeWorkspaceTaskId = payload.taskId;
@@ -102,6 +125,7 @@ export function installWorkspacesLegacyAdapter(): void {
         cwd: payload.cwd,
         provider: payload.provider,
         layout: null,
+        layoutRevision: undefined,
       });
       // 任务上下文已经切换，旧任务的终端不能继续挂在新任务标题下。
       // 先即时进入任务欢迎/加载态；详情返回后再恢复已有会话。
@@ -109,32 +133,30 @@ export function installWorkspacesLegacyAdapter(): void {
       // 已有会话的任务只恢复标签 / 布局，不因每次点击任务而偷偷再起一个会话。
       // 空任务进入任务欢迎页，由用户主动选择 Agent 或空白终端。
       // 返回 Promise：调用方（如侧栏「＋」建会话）需等恢复完成再动作。
-      return httpWorkspacesRepository.getTask(payload.taskId).then((detail) => {
+      const saving = taskLayouts.isSaving(payload.taskId);
+      await taskLayouts.flush(payload.taskId);
+      if (generation !== openTaskGeneration) return;
+      return (saving ? taskDetailStore.reload(payload.taskId) : taskDetailStore.load(payload.taskId)).then((detail) => {
         if (generation !== openTaskGeneration) return;
-        if (!detail) return;
         const sessionIds = orderWorkspaceSessions(detail.sessions).map((session) => session.id);
-        if (sessionIds.length > 0) {
-          const preferred = state.selectedId && sessionIds.includes(state.selectedId)
-            ? state.selectedId
+        const savedActive = activeWorkWindowTab(detail.layout);
+        const preferred = state.selectedId && sessionIds.includes(state.selectedId)
+          ? state.selectedId
+          : savedActive?.kind === "session" && sessionIds.includes(savedActive.sessionId)
+            ? savedActive.sessionId
             : sessionIds[0];
-          const layout = reconcileTaskWindowLayout(detail.layout, sessionIds, preferred);
-          const active = activeWorkWindowTab(layout);
-          if (active?.kind === "session") selectSession(active.sessionId);
-          rememberLayoutRevision(payload.taskId, detail.layoutRevision);
-          setActiveWorkspaceContext({ layout, layoutRevision: detail.layoutRevision });
-          void httpWorkspacesRepository.saveTaskLayout(payload.taskId, layout, currentLayoutRevision(payload.taskId)).then((saved) => {
-            rememberLayoutRevision(payload.taskId, saved.layoutRevision);
-          }).catch(() => { /* ignore */ });
-        } else {
-          const layout = reconcileTaskWindowLayout(detail.layout, [], null);
-          rememberLayoutRevision(payload.taskId, detail.layoutRevision);
-          setActiveWorkspaceContext({ layout, layoutRevision: detail.layoutRevision });
-          void httpWorkspacesRepository.saveTaskLayout(payload.taskId, layout, currentLayoutRevision(payload.taskId)).then((saved) => {
-            rememberLayoutRevision(payload.taskId, saved.layoutRevision);
-          }).catch(() => { /* ignore */ });
+        const layout = sessionIds.length > 0
+          ? reconcileTaskWindowLayout(detail.layout, sessionIds, preferred)
+          : reconcileTaskWindowLayout(detail.layout, [], null);
+        const active = activeWorkWindowTab(layout);
+        if (active?.kind === "session") selectSession(active.sessionId);
+        taskLayouts.remember(payload.taskId, detail.layoutRevision);
+        setActiveWorkspaceContext({ layout, layoutRevision: detail.layoutRevision });
+        if (JSON.stringify(layout) !== JSON.stringify(detail.layout)) {
+          void saveTaskLayout(payload.taskId, layout, { automatic: true });
         }
         dismissDrawerIfOverlay();
-      }).catch(() => { /* 任务详情加载失败时保留当前界面，等待下一次用户操作。 */ });
+      }).catch(() => { /* 任务详情加载失败时保留当前任务的空态，等待重试。 */ });
     },
     newTaskSession(payload: NewTaskSessionPayload) {
       // 标签栏「+」/ 窗格「+」/ 空白桌面：在同一任务 worktree 再起一个绑定会话；
@@ -146,23 +168,21 @@ export function installWorkspacesLegacyAdapter(): void {
         shell: payload.target === "shell",
         provider: payload.target === "shell" ? undefined : payload.target,
         kind: payload.target === "shell" ? "pty" : (payload.kind ?? "structured"),
-      })).then((created) => {
+      })).then(async (created) => {
         const sessionId = typeof created === "string" && created
           ? created
           : (created && typeof created === "object" && "id" in created && typeof created.id === "string" && created.id
             ? created.id
             : undefined);
         if (!sessionId) return undefined;
+        await taskDetailStore.reload(payload.taskId).catch(() => {});
         if (state.activeWorkspaceTaskId === payload.taskId) {
           const current = workspaceContextStore.getSnapshot().layout;
           const existing = current
             ? current.windows.flatMap((window) => layoutSessionIds(window.layout))
             : [];
           const next = reconcileTaskWindowLayout(current, [...existing, sessionId], sessionId);
-          setActiveWorkspaceContext({ layout: next });
-          void httpWorkspacesRepository.saveTaskLayout(payload.taskId, next, currentLayoutRevision(payload.taskId)).then((saved) => {
-            rememberLayoutRevision(payload.taskId, saved.layoutRevision);
-          }).catch(() => { /* ignore */ });
+          void saveTaskLayout(payload.taskId, next);
         }
         return sessionId;
       });
@@ -175,16 +195,10 @@ export function installWorkspacesLegacyAdapter(): void {
         initialInput: payload.prompt,
       });
     },
-    saveTaskLayout(layout: TaskWindowLayout | null) {
+    saveTaskLayout(layout: TaskWindowLayout | null, options?: TaskLayoutSaveOptions) {
       const taskId = state.activeWorkspaceTaskId;
-      const nextWindow = activeWorkWindow(layout);
-      if (nextWindow?.layout.type !== "split") disposeAllPooledTerminals();
-      setActiveWorkspaceContext({ layout });
       if (!taskId) return;
-      return httpWorkspacesRepository.saveTaskLayout(taskId, layout, currentLayoutRevision(taskId)).then((saved) => {
-        rememberLayoutRevision(taskId, saved.layoutRevision);
-        if (saved.layoutRevision !== undefined) setActiveWorkspaceContext({ layoutRevision: saved.layoutRevision });
-      }).catch(() => { /* ignore stale/offline layout writes */ });
+      return saveTaskLayout(taskId, layout, options);
     },
     async closeTaskSessions(sessionIds, scope) {
       const ids = [...new Set(sessionIds.filter(Boolean))];

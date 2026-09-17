@@ -6,7 +6,7 @@ import * as React from "react";
 
 import { workspaceContextStore } from "./workspace-context";
 import { workspacesStore } from "./controller";
-import { httpWorkspacesRepository } from "./repository";
+import { taskDetailStore, useTaskDetail } from "./task-detail-store";
 import { SessionProviderMark } from "./session-mark";
 import {
   listSessionLabel,
@@ -21,7 +21,6 @@ import type {
   WorkspaceSessionKind,
   WorkspaceSessionTarget,
   WorkspaceSessionSummary,
-  WorkspaceTaskDetail,
 } from "./types";
 import { WorkspaceAgentDialog } from "./workspace-agent-dialog";
 import {
@@ -34,7 +33,6 @@ import {
   activateWorkWindow,
   activeLayoutTab,
   activeWorkWindowTab,
-  addSessionWindow,
   closeWorkWindow,
   layoutSessionIds,
   moveSessionBeside,
@@ -76,50 +74,6 @@ function windowPresentation(
   };
 }
 
-// 轮询拉取活动任务详情（含其会话列表）。新增会话或宿主选中首会话后立即重拉。
-function useActiveTaskDetail(
-  taskId: string | null,
-  refreshTick: number,
-  selectedSessionId: string | null,
-): {
-  detail: WorkspaceTaskDetail | null;
-  loading: boolean;
-} {
-  const [detail, setDetail] = React.useState<WorkspaceTaskDetail | null>(null);
-  const [loading, setLoading] = React.useState(false);
-
-  React.useEffect(() => {
-    if (!taskId) {
-      setDetail(null);
-      return;
-    }
-    let cancelled = false;
-    let timer: number | undefined;
-    const load = async () => {
-      setLoading(true);
-      try {
-        const fetched = await httpWorkspacesRepository.getTask(taskId);
-        if (!cancelled) setDetail(fetched);
-      } catch {
-        // 静默：标签栏会保留上一次的会话列表或显示空态。
-        if (!cancelled && !detail) setDetail(null);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-    void load();
-    timer = window.setInterval(() => void load(), 4_000);
-    return () => {
-      cancelled = true;
-      if (timer !== undefined) window.clearInterval(timer);
-    };
-    // detail 不进依赖：避免每次拉到新详情都重建定时器。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskId, refreshTick, selectedSessionId]);
-
-  return { detail, loading };
-}
-
 export function WorkspaceTabBar(): React.ReactElement | null {
   const context = React.useSyncExternalStore(
     workspaceContextStore.subscribe,
@@ -128,7 +82,6 @@ export function WorkspaceTabBar(): React.ReactElement | null {
   );
   const snapshot = useUiStoreSnapshot();
   const dispatch = useUiDispatch();
-  const [refreshTick, setRefreshTick] = React.useState(0);
   const agentDialog = React.useSyncExternalStore(
     workspaceAgentDialogStore.subscribe,
     workspaceAgentDialogStore.getSnapshot,
@@ -137,7 +90,7 @@ export function WorkspaceTabBar(): React.ReactElement | null {
   const [moving, setMoving] = React.useState<{ sessionId: string; dir: "h" | "v" } | null>(null);
   const [closingWindowId, setClosingWindowId] = React.useState<string | null>(null);
   const selectedId = snapshot.selected?.id ?? null;
-  const { detail } = useActiveTaskDetail(context.taskId, refreshTick, selectedId);
+  const detail = useTaskDetail(context.taskId);
 
   React.useEffect(() => {
     setMoving(null);
@@ -172,7 +125,7 @@ export function WorkspaceTabBar(): React.ReactElement | null {
 
   React.useEffect(() => {
     if (!context.taskId || !detail || layoutsEqual(context.layout, taskLayout)) return;
-    runtime()?.saveTaskLayout(taskLayout);
+    runtime()?.saveTaskLayout(taskLayout, { automatic: true });
   }, [context.layout, context.taskId, detail, taskLayout]);
 
   // 无活动任务，或还没有任何工作窗口：让主区全页 CLI 选择桌面单独出现，
@@ -195,13 +148,9 @@ export function WorkspaceTabBar(): React.ReactElement | null {
     const result = await rt.newTaskSession(payload);
     const sessionId = typeof result === "string" ? result : null;
     if (!sessionId) throw new Error("服务端未返回新会话 ID。");
-    const latest = workspaceContextStore.getSnapshot().layout;
-    const base = reconcileTaskWindowLayout(latest, [...sessionIds, sessionId], selectedId);
-    const next = addSessionWindow(base, sessionId, true);
-    rt.saveTaskLayout(next);
+    if (workspaceContextStore.getSnapshot().taskId !== payload.taskId) return;
+    // The runtime refreshes task detail and persists the new window through its queue.
     void dispatch({ type: "session.select", id: sessionId });
-    // 会话创建后立即重拉任务详情，新标签马上出现。
-    setRefreshTick((n) => n + 1);
     rt.toast(target === "shell" ? "已新建空白终端" : `已新建 ${workspaceProviderLabel(target)} 对话`, "success");
   };
 
@@ -238,12 +187,13 @@ export function WorkspaceTabBar(): React.ReactElement | null {
     setClosingWindowId(window.id);
     try {
       if (!await rt.closeTaskSessions(sessionIds, "window")) return;
+      if (workspaceContextStore.getSnapshot().taskId !== context.taskId) return;
       const next = closeWorkWindow(taskLayout, window.id);
       rt.saveTaskLayout(next);
       const active = activeWorkWindowTab(next);
       if (active?.kind === "session") void dispatch({ type: "session.select", id: active.sessionId });
       setMoving(null);
-      setRefreshTick((value) => value + 1);
+      if (context.taskId) void taskDetailStore.load(context.taskId).catch(() => {});
       rt.toast(sessionIds.length > 1 ? `已关闭 ${sessionIds.length} 个终端` : "已关闭终端", "success");
     } finally {
       setClosingWindowId(null);

@@ -6,7 +6,7 @@ import * as React from "react";
 
 import { workspaceContextStore } from "./workspace-context";
 import { workspacesStore } from "./controller";
-import { httpWorkspacesRepository } from "./repository";
+import { useTaskDetail } from "./task-detail-store";
 import { setRatioAtPath } from "./layout-tree";
 import {
   listSessionLabel,
@@ -14,7 +14,7 @@ import {
   withLiveSessionTitle,
   workspaceProviderLabel,
 } from "./session-order";
-import type { LayoutNode, PaneTab, WorkspaceSessionSummary } from "./types";
+import type { LayoutNode, PaneTab } from "./types";
 import { SessionProviderMark } from "./session-mark";
 import { classNames } from "../ui/class-names";
 import { useUiDispatch, useUiStoreSnapshot } from "../shell/ui-store-react";
@@ -259,24 +259,8 @@ function useTaskSessionMeta(
   parentNames: readonly string[] = [],
   liveTitles: ReadonlyMap<string, string> = new Map(),
 ): Map<string, SessionMeta> {
-  const [sessions, setSessions] = React.useState<WorkspaceSessionSummary[]>([]);
-  React.useEffect(() => {
-    if (!taskId) {
-      setSessions([]);
-      return;
-    }
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const detail = await httpWorkspacesRepository.getTask(taskId);
-        if (cancelled || !detail) return;
-        setSessions(orderWorkspaceSessions(detail.sessions));
-      } catch { /* ignore */ }
-    };
-    void load();
-    const timer = window.setInterval(() => void load(), 4_000);
-    return () => { cancelled = true; window.clearInterval(timer); };
-  }, [taskId]);
+  const detail = useTaskDetail(taskId);
+  const sessions = orderWorkspaceSessions(detail?.sessions ?? []);
   const meta = new Map<string, SessionMeta>();
   sessions.forEach((s, index) => {
     const session = withLiveSessionTitle(s, liveTitles.get(s.id), parentNames);
@@ -337,6 +321,7 @@ export function WorkspaceWindow(): React.ReactElement | null {
       setClosingSessionId(tab.sessionId);
       try {
         if (!await rt.closeTaskSessions([tab.sessionId], "terminal")) return;
+        if (workspaceContextStore.getSnapshot().taskId !== context.taskId) return;
         const next = closeSessionPane(taskLayout, tab.sessionId);
         rt.saveTaskLayout(next);
         const active = activeWorkWindowTab(next);

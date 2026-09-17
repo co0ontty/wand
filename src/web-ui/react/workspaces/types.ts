@@ -272,6 +272,11 @@ interface StartWorkspaceMergeAgentPayload {
   prompt: string;
 }
 
+export interface TaskLayoutSaveOptions {
+  /** Reconciliation/restoration is not a new user edit after a failed save. */
+  automatic?: boolean;
+}
+
 export interface WorkspacesRuntimeAdapter {
   /** 对话框打开/关闭的副作用钩子（关其它覆盖层等）。 */
   onOpen(): void;
@@ -297,7 +302,7 @@ export interface WorkspacesRuntimeAdapter {
   /** Start one managed Agent at the project checkout to merge selected task worktrees. */
   startWorktreeMergeAgent(payload: StartWorkspaceMergeAgentPayload): void | Promise<unknown>;
   /** 工作窗口 / 分屏布局变更后回写持久化 + 更新活动上下文。 */
-  saveTaskLayout(layout: TaskWindowLayout | null): void | Promise<unknown>;
+  saveTaskLayout(layout: TaskWindowLayout | null, options?: TaskLayoutSaveOptions): void | Promise<unknown>;
   /** 确认并关闭底层会话；取消或失败时返回 false，调用方不得移除布局。 */
   closeTaskSessions(sessionIds: readonly string[], scope: "window" | "terminal"): Promise<boolean>;
   /** 在指定容器内为某会话挂一个池终端实例（分屏窗格内容）。幂等。 */
