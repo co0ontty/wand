@@ -208,7 +208,11 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
     }
 
     try {
-      const fileStat = await stat(resolvedPath);
+      const fileStat = await lstat(resolvedPath);
+      if (fileStat.isSymbolicLink()) {
+        res.status(400).json({ error: "无法保存符号链接，请打开目标文件后编辑。" });
+        return;
+      }
       if (fileStat.isDirectory()) {
         res.status(400).json({ error: "目标是目录，无法写入。" });
         return;

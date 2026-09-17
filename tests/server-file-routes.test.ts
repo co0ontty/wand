@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
@@ -139,6 +139,28 @@ test("extracted file routes preserve directory, preview, write, range, recent, a
     });
     assert.equal(overwriteWrite.status, 200);
     assert.equal(readFileSync(filePath, "utf8"), "explicit overwrite");
+
+    // Preview may follow a symlink, but saving must not replace the link itself.
+    for (const target of [filePath, path.join(root, "missing.txt")]) {
+      const alias = path.join(root, target === filePath ? "alias.txt" : "dangling.txt");
+      symlinkSync(target, alias);
+      if (target === filePath) {
+        const aliasPreview = await fetch(`${baseUrl}/api/file-preview?path=${encodeURIComponent(alias)}`);
+        assert.equal(aliasPreview.status, 200);
+        assert.equal((await aliasPreview.json() as { content: string }).content, "explicit overwrite");
+      }
+      const aliasWrite = await fetch(`${baseUrl}/api/file-write`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: alias, content: "must not replace link" }),
+      });
+      assert.equal(aliasWrite.status, 400);
+      assert.match((await aliasWrite.json() as { error: string }).error, /符号链接/);
+      assert.equal(lstatSync(alias).isSymbolicLink(), true);
+      assert.equal(readlinkSync(alias), target);
+      assert.equal(readFileSync(filePath, "utf8"), "explicit overwrite");
+      assert.equal(existsSync(path.join(root, "missing.txt")), false);
+    }
 
     const dirWrite = await fetch(`${baseUrl}/api/file-write`, {
       method: "POST",
