@@ -93,7 +93,7 @@ export function ensureBoardTaskForWorkspaceTask(
   storage: WandStorage,
   task: WorkspaceTask,
   workspace: Workspace,
-  options: { titleSource?: WandTaskTitleSource } = {},
+  options: { titleSource?: WandTaskTitleSource; description?: string } = {},
 ): WandTask {
   const existing = storage.getWandTaskByWorkspaceTaskId(task.id);
   if (existing) return existing;
@@ -103,7 +103,7 @@ export function ensureBoardTaskForWorkspaceTask(
     title: task.name,
     // 占位名（未命名任务 / 新任务 / 空）走自动命名；用户填过名就是 user，永不被模型覆盖。
     titleSource: options.titleSource ?? (isUnnamedWorkspaceTaskName(task.name) ? "auto" : "user"),
-    description: "",
+    description: options.description ?? "",
     status: task.status === "done" ? "done" : "todo",
     milestoneId: task.milestoneId ?? null,
   });
