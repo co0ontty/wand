@@ -253,7 +253,7 @@ function alignedDelta(log: string, truncated: boolean, deliveredChars: number): 
 export class TerminalDaemonClient implements TerminalHost, StructuredExecHost {
   readonly persistent = true;
   private socket: net.Socket | null = null;
-  private buffer = "";
+  private frameParts: string[] = [];
   /** Decodes daemon NDJSON frames without splitting multi-byte chars. */
   private decoder = new StringDecoder("utf8");
   private nextRequestId = 1;
@@ -293,6 +293,7 @@ export class TerminalDaemonClient implements TerminalHost, StructuredExecHost {
     // Each socket decodes from a clean slate; a half-written character from a
     // previous connection must not leak into the next frame.
     this.decoder = new StringDecoder("utf8");
+    this.frameParts = [];
     socket.on("data", (data) => this.consume(this.decoder.write(data)));
     socket.on("close", () => this.handleDisconnect());
     socket.on("error", (error) => {
@@ -585,12 +586,20 @@ export class TerminalDaemonClient implements TerminalHost, StructuredExecHost {
   }
 
   private consume(chunk: string): void {
-    this.buffer += chunk;
-    while (true) {
-      const newline = this.buffer.indexOf("\n");
-      if (newline < 0) return;
-      const line = this.buffer.slice(0, newline);
-      this.buffer = this.buffer.slice(newline + 1);
+    // Replay inventories can span tens of MB. Scan only the incoming chunk;
+    // concatenating and rescanning the partial frame on every socket read is
+    // quadratic and can starve unrelated create/attach requests until timeout.
+    let offset = 0;
+    while (offset < chunk.length) {
+      const newline = chunk.indexOf("\n", offset);
+      if (newline < 0) {
+        this.frameParts.push(chunk.slice(offset));
+        return;
+      }
+      this.frameParts.push(chunk.slice(offset, newline));
+      const line = this.frameParts.join("");
+      this.frameParts = [];
+      offset = newline + 1;
       if (!line) continue;
       let message: TerminalDaemonResponse | TerminalDaemonEvent;
       try { message = JSON.parse(line) as TerminalDaemonResponse | TerminalDaemonEvent; }

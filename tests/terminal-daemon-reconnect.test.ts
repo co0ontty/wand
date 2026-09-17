@@ -64,6 +64,10 @@ class FakeDaemon {
   sessions: TerminalSessionState[] = [];
   runs: unknown[] = [];
 
+  sendPartialFrame(): void {
+    for (const socket of this.sockets) socket.write('{"kind":"response","result":');
+  }
+
   constructor(
     private readonly socketPath: string,
     private readonly token: string,
@@ -248,5 +252,41 @@ test("disconnect() stops the reconnect loop", async (t) => {
     const probe = new TerminalDaemonClient(socketPath, "test-token");
     await probe.connect();
     probe.disconnect();
+  });
+});
+
+test("large structured replay inventories do not starve terminal creation", async (t) => {
+  await withHarness(t, async ({ daemon, client }) => {
+    const stdoutLog = "日志 replay\n".repeat(900_000);
+    daemon.runs = Array.from({ length: 4 }, (_, index) => ({
+      runId: `run-${index}`, incarnationId: `inc-${index}`, pid: 123,
+      status: "exited", exitCode: 0, signal: null,
+      stdoutSeq: 1, stderrSeq: 0, stdoutLog, stderrLog: "",
+      stdoutTruncated: true, stderrTruncated: false,
+    }));
+    await daemon.start();
+    const startedAt = Date.now();
+    await client.connect();
+    const [runs, attached] = await Promise.all([
+      client.listRuns(), client.createOrAttach(makeSpawnRequest("new-terminal")),
+    ]);
+    assert.equal(runs.length, 4);
+    assert.equal(runs[3].stdoutLog, stdoutLog);
+    assert.ok(attached.process);
+    assert.ok(Date.now() - startedAt < 10_000, "replay must finish within the RPC deadline");
+  });
+});
+
+test("reconnect discards a partial frame from the previous socket", async (t) => {
+  await withHarness(t, async ({ daemon, client }) => {
+    await daemon.start();
+    await client.connect();
+    daemon.sendPartialFrame();
+    await delay(50);
+    await daemon.kill();
+    daemon.sessions = [makeState("after-reconnect", "new-incarnation")];
+    await daemon.start();
+    await waitFor(() => client.attach("after-reconnect"), "partial old frame corrupted reconnect");
+    assert.ok((await client.createOrAttach(makeSpawnRequest("after-reconnect"))).process);
   });
 });
