@@ -8,7 +8,6 @@ import * as React from "react";
 import { WandButton, WandDialogSurface, WandIcon, WandSwitch } from "../ui";
 import { MilestonePicker } from "../milestones/picker";
 import { workspacesController, workspacesStore } from "./controller";
-import { httpNewSessionRepository } from "../new-session/repository";
 import {
   httpWorkspacesRepository,
   loadNewProjectDefaults,
@@ -49,7 +48,8 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [name, setName] = useState("");
   const [cwd, setCwd] = useState("");
-  const [worktreeEnabled, setWorktreeEnabled] = useState(true);
+  const [worktreeEnabled, setWorktreeEnabled] = useState(false);
+  const [prompt, setPrompt] = useState("");
   const [target, setTarget] = useState<WorkspaceSessionTarget>("claude");
   const [sessionKind, setSessionKind] = useState<WorkspaceSessionKind>("structured");
   const [milestoneId, setMilestoneId] = useState("");
@@ -71,7 +71,8 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
     setProjects([]);
     setSelectedProjectId("");
     setName("");
-    setWorktreeEnabled(true);
+    setWorktreeEnabled(false);
+    setPrompt("");
     setTarget("claude");
     setSessionKind("structured");
     setMilestoneId("");
@@ -86,18 +87,18 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
         if (abort.signal.aborted) return;
         setDefaults(loaded);
         setProjects(listed);
-        const initial = controller.initialCwd.trim() ? normalizeDir(controller.initialCwd) : "";
+        const initial = normalizeDir(controller.initialCwd.trim()
+          || workspacesStore.getRuntime()?.effectiveCwd() || loaded.defaultCwd);
         const matchingProject = initial
           ? listed.find((project) => normalizeDir(project.cwd) === initial)
           : undefined;
         setSelectedProjectId(matchingProject?.id ?? "");
-        setWorktreeEnabled(loaded.defaultTaskWorktree);
         setTarget(loaded.defaultProvider);
         setSessionKind(loaded.defaultSessionKind);
         if (matchingProject) {
           setCwd(matchingProject.cwd);
         } else {
-          setCwd(controller.initialCwd);
+          setCwd(initial);
         }
       })
       .catch((loadError) => {
@@ -161,6 +162,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
       cwd: payload.cwd,
       target,
       kind: target === "shell" ? "pty" : sessionKind,
+      prompt: target === "shell" ? undefined : prompt.trim() || undefined,
     });
     void runtime.refreshSessions();
   }
@@ -178,8 +180,13 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
     setSubmitting(true);
     setError("");
     try {
-      const created = selectedProject
-        ? await repository.createTask(selectedProject.id, {
+      const project = selectedProject ?? (mountedCwd ? await repository.create({
+        name: mountedCwd.replace(/\/+$/, "").split("/").pop() || "工作区",
+        cwd: mountedCwd,
+        defaultProvider: defaults?.defaultProvider,
+      }) : undefined);
+      const created = project
+        ? await repository.createTask(project.id, {
           name: trimmedName || undefined,
           worktree: worktreeEnabled,
           milestoneId: milestoneId || null,
@@ -190,7 +197,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
           worktree: mountedCwd ? worktreeEnabled : false,
           milestoneId: milestoneId || null,
         });
-      const workspace = selectedProject ?? {
+      const workspace = project ?? {
         id: created.workspaceId,
         name: "",
         kind: "global" as const,
@@ -227,7 +234,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
       open={controller.open}
       onOpenChange={(open) => { if (!open) void closeDraft(); }}
       title="新建任务"
-      description="选择工作目录和工具，创建后即可开始。"
+      description="任务负责分组，提示词开启其中的会话。侧边栏与看板同步。"
       className="wand-new-session-dialog wand-new-project-dialog"
       overlayClassName="wand-new-session-overlay wand-new-project-overlay"
       titleClassName="wand-new-session-title wand-new-project-title"
@@ -258,7 +265,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
                 aria-describedby="wand-new-task-name-hint"
                 onChange={(event) => setName(event.currentTarget.value)}
               />
-              <p id="wand-new-task-name-hint" className="wand-new-session-field-hint wand-new-project-field-hint">留空则根据后续工作内容自动命名。</p>
+              <p id="wand-new-task-name-hint" className="wand-new-session-field-hint wand-new-project-field-hint">工作区下的分组名称，留空则根据其中的会话内容自动命名；不会创建磁盘目录。</p>
             </div>
 
             <div className="wand-new-session-field wand-new-project-field">
@@ -323,7 +330,17 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
               ) : null}
             </div>
 
+            <div className="wand-new-session-field wand-new-project-field">
+              <label className="wand-new-session-field-label" htmlFor="wand-new-task-prompt">首个会话的提示词（可选）</label>
+              <textarea id="wand-new-task-prompt" className="wand-new-session-input" rows={3}
+                value={prompt} disabled={submitting || target === "shell"}
+                placeholder="希望 CLI 帮你完成什么？" onChange={(event) => setPrompt(event.currentTarget.value)}/>
+              <p className="wand-new-session-field-hint">提示词发送到新会话，不会替换任务名称。之后可继续添加或移动会话。</p>
+            </div>
+
             {hasDirectory ? (
+              <details className="wand-new-session-field wand-new-project-field">
+              <summary>高级：独立工作树</summary>
               <div className="wand-new-task-option" data-checked={worktreeEnabled ? "" : undefined}>
                 <span className="wand-new-task-option-icon"><WandIcon name="branch" size={17} className="wand-new-task-branch-icon" strokeWidth={1.8}/></span>
                 <span className="wand-new-task-option-text">
@@ -331,18 +348,18 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
                   <span className="wand-new-task-option-hint">
                     {worktreeEnabled
                       ? "为任务创建独立分支与工作树，改动隔离、可审查后合并。"
-                      : "会话直接运行在任务目录；非 git 目录自动用这种模式。"}
+                      : "默认仅做界面分组，会话共用工作区目录。"}
                   </span>
                 </span>
                 <WandSwitch
                   checked={worktreeEnabled}
                   onCheckedChange={(checked) => {
                     setWorktreeEnabled(checked);
-                    void httpNewSessionRepository.savePreferences({ defaultTaskWorktree: checked }).catch(() => undefined);
                   }}
                   ariaLabel="是否为新任务创建独立 worktree"
                 />
               </div>
+              </details>
             ) : null}
 
             <details className="wand-new-session-field wand-new-project-field wand-new-task-milestone-field">
@@ -369,7 +386,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
 
           <div className="wand-new-session-summary wand-new-task-summary" aria-live="polite">
             <span>即将创建</span>
-            <strong>{name.trim() || "未命名任务"}</strong>
+            <strong>{name.trim() || "自动命名"}</strong>
             <span title={effectiveCwd}>{effectiveCwd}</span>
             <span>{target === "shell" ? "空白终端" : `${WORKSPACE_AGENT_OPTIONS.find((option) => option.value === target)?.label ?? target} · ${sessionKind === "pty" ? "PTY" : "结构化"}`}</span>
           </div>

@@ -40,14 +40,18 @@ import {
   isTaskSessionsExpanded,
   showsTaskSessionDisclosure,
 } from "./task-tree";
-import { createUnnamedTaskFlattener, findSessionTask } from "./task-flatten";
+import { findSessionTask } from "./session-task-lookup";
+import { subscribeTaskChanges } from "../task-changes";
+import { draggedSessionId, isSessionDrag, startSessionDrag } from "./session-drag";
+import { SessionMoveButton } from "./session-move-button";
 import {
   EMPTY_SIDEBAR_MANAGE_SELECTION,
   collectManagedIds,
-  describeManagedDeletion,
+  describeManagedAction,
+  describeManagedResult,
   isManagedGroupSelected,
+  managedSelectionIsDestructive,
   pruneManagedSelection,
-  resolveManagedDeletion,
   sidebarManageCount,
   toggleManagedGroup,
   toggleManagedSession,
@@ -149,7 +153,9 @@ function useTaskGroups(refreshKey: number): {
   React.useEffect(() => {
     void reload();
     const interval = window.setInterval(() => void reload(), 6_000);
+    const unsubscribe = subscribeTaskChanges(() => void reload());
     return () => {
+      unsubscribe();
       window.clearInterval(interval);
       generationRef.current += 1;
     };
@@ -211,7 +217,13 @@ function TaskSessionItem({
       confirming && "confirming",
       manageMode && "managing",
       manageMode && selected && "selected",
-    )}>
+    )}
+      data-session-id={session.id}
+      draggable={!manageMode && !busy}
+      onDragStart={(event) => {
+        event.stopPropagation();
+        startSessionDrag(event.dataTransfer, session.id);
+      }}>
       <WandNavigationLink
         className="workspace-session-main"
         orientation="vertical"
@@ -230,6 +242,8 @@ function TaskSessionItem({
           <span className="workspace-session-kind">终端</span>
         )}
       </WandNavigationLink>
+      {!manageMode && !confirming && <SessionMoveButton sessionId={session.id}
+        taskId={session.workspaceTaskId} className="workspace-session-action"/>}
       {manageMode ? null : confirming ? (
         <span className="workspace-session-confirm">
           <WandIconButton
@@ -297,7 +311,9 @@ function TaskItem({
   onClearSessions,
   onDeleteSession,
   onRename,
+  onArchive,
   onDelete,
+  onMoveSession,
 }: {
   task: TaskSummary;
   now: number;
@@ -318,10 +334,15 @@ function TaskItem({
   onClearSessions(): Promise<void>;
   onDeleteSession(session: WorkspaceSessionSummary): Promise<void>;
   onRename(name: string): Promise<void>;
+  /** 归档（软删除）：终端与 worktree 都保留，只从侧栏隐藏并进入看板归档。 */
+  onArchive(): Promise<void>;
+  /** 硬删除；只有隔离任务还留着它，用来清理 worktree。 */
   onDelete(): Promise<void>;
+  onMoveSession(sessionId: string): Promise<void>;
 }) {
-  const [collapsed, toggleCollapsed] = useSidebarCollapsed(`task.${task.id}`, true);
-  const [confirming, setConfirming] = React.useState(false);
+  const [collapsed, toggleCollapsed] = useSidebarCollapsed(`task.${task.id}`, false);
+  const [dropTarget, setDropTarget] = React.useState(false);
+  const [confirming, setConfirming] = React.useState<"archive" | "delete" | false>(false);
   const [taskMenuOpen, setTaskMenuOpen] = React.useState(false);
   const [renaming, setRenaming] = React.useState(false);
   const [renameValue, setRenameValue] = React.useState(task.name);
@@ -402,11 +423,37 @@ function TaskItem({
   return (
     <div className={classNames(
       "workspace-task-group",
+      dropTarget && "is-session-drop-target",
       isActive && "active",
       open && "is-open",
       manageMode && "managing",
       manageMode && selected && "selected",
-    )}>
+    )}
+      data-workspace-task-id={task.id}
+      aria-busy={busy || undefined}
+      onDragOver={(event) => {
+        if (manageMode || busy || !isSessionDrag(event.dataTransfer)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = "move";
+        setDropTarget(true);
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget(false);
+      }}
+      onDrop={(event) => {
+        if (!isSessionDrag(event.dataTransfer)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setDropTarget(false);
+        const id = draggedSessionId(event.dataTransfer);
+        if (!id || busy || manageMode || task.sessions.some((session) => session.id === id)) return;
+        setBusy(true);
+        void onMoveSession(id).then(() => { if (collapsed) toggleCollapsed(); })
+          .catch((cause) => toast(describeError(cause, "无法移动会话。"), "danger"))
+          .finally(() => setBusy(false));
+      }}>
+      {dropTarget && <span className="workspace-task-drop-hint">移入此任务 · 运行目录不变</span>}
       <div className={classNames(
         "workspace-task",
         isActive && "active",
@@ -459,6 +506,16 @@ function TaskItem({
         </span>
         {manageMode ? null : !confirming ? (
           <>
+            {/* 任务已有会话时，行内「＋」是唯一常驻的新增会话入口（空任务用下方整行按钮）。 */}
+            <WandIconButton
+              className="workspace-task-action add"
+              title={`新建会话（${task.name}）`}
+              aria-label={`在任务 ${task.name} 中新建会话`}
+              disabled={busy}
+              onClick={() => onRequestNewSession()}
+            >
+              <WandIcon name="plus" size={13}/>
+            </WandIconButton>
             <WandPopover
               open={taskMenuOpen}
               onOpenChange={setTaskMenuOpen}
@@ -487,7 +544,7 @@ function TaskItem({
                   onRequestNewSession();
                 }}
               >
-                <WandIcon name="plus" size={13}/><span>新建终端</span>
+                <WandIcon name="plus" size={13}/><span>新建会话</span>
               </button>
               <button
                 type="button"
@@ -507,43 +564,58 @@ function TaskItem({
               <button
                 type="button"
                 role="menuitem"
-                className="workspace-task-menu-item danger"
+                className="workspace-task-menu-item"
                 onClick={() => {
                   setTaskMenuOpen(false);
-                  setConfirming(true);
+                  setConfirming("archive");
                 }}
               >
-                <WandIcon name="trash" size={13}/>
-                <span>{isolated ? "删除任务并清理 Worktree" : "删除任务"}</span>
+                <WandIcon name="archive" size={13}/>
+                <span>{isolated ? "归档任务（保留 Worktree）" : "归档任务"}</span>
               </button>
+              {isolated ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="workspace-task-menu-item danger"
+                  onClick={() => {
+                    setTaskMenuOpen(false);
+                    setConfirming("delete");
+                  }}
+                >
+                  <WandIcon name="trash" size={13}/>
+                  <span>删除任务并清理 Worktree</span>
+                </button>
+              ) : null}
             </WandPopover>
           </>
         ) : (
           <span className="workspace-task-confirm">
             <WandIconButton
               className="workspace-task-action confirm"
-              title="确认删除任务"
-              aria-label={`确认删除任务 ${task.name}`}
+              title={confirming === "archive" ? "确认归档任务" : "确认删除任务并清理 Worktree"}
+              aria-label={confirming === "archive" ? `确认归档任务 ${task.name}` : `确认删除任务 ${task.name}`}
               disabled={busy}
               onClick={async () => {
                 if (busy) return;
                 setBusy(true);
                 try {
-                  await onDelete();
+                  if (confirming === "archive") await onArchive();
+                  else await onDelete();
                 } catch (cause) {
-                  toast(describeError(cause, "无法删除任务。"), "danger");
+                  toast(describeError(cause, confirming === "archive" ? "无法归档任务。" : "无法删除任务。"), "danger");
                 } finally {
                   setBusy(false);
                   setConfirming(false);
                 }
               }}
             >
-              <WandIcon name="trash" size={13}/>
+              <WandIcon name={confirming === "archive" ? "archive" : "trash"} size={13}/>
             </WandIconButton>
             <WandIconButton
               className="workspace-task-action cancel"
-              title="取消删除"
-              aria-label="取消删除任务"
+              title="取消"
+              aria-label={confirming === "archive" ? "取消归档任务" : "取消删除任务"}
               disabled={busy}
               onClick={() => setConfirming(false)}
             >
@@ -552,6 +624,8 @@ function TaskItem({
           </span>
         )}
       </div>
+      {sessionCount === 0 && !manageMode && <button type="button" className="workspace-task-empty"
+        onClick={onRequestNewSession}><WandIcon name="plus" size={12}/>添加会话，或拖入已有会话</button>}
       {sessionCount > 0 && (
         <SidebarDisclosure id={sessionsId} open={open}>
           <div className="workspace-task-sessions">
@@ -685,7 +759,7 @@ function TaskGroupSection({
   const [directoryNameError, setDirectoryNameError] = React.useState("");
   const [directoryRenameBusy, setDirectoryRenameBusy] = React.useState(false);
   const tasksId = React.useId();
-  const open = group.global || preview || isDirectoryExpanded(collapsed, directoryCount);
+  const open = preview || isDirectoryExpanded(collapsed, directoryCount);
   const looseOpen = !looseCollapsed;
   const canDelete = !group.synthetic && !group.global;
   // 全局（不挂目录）不参与重命名；合成目录用目录接口改名。
@@ -718,6 +792,14 @@ function TaskGroupSection({
     } finally {
       setDirectoryRenameBusy(false);
     }
+  };
+
+  // 归档是软删除：终端不杀、worktree 不清理，只从侧栏隐藏并移到看板归档。
+  const handleArchiveTask = async (task: TaskSummary) => {
+    await httpWorkspacesRepository.archiveTask(task.id);
+    if (activeTaskId === task.id) runtime()?.closeWorkspace();
+    toast(`已归档任务「${task.name}」，可在任务看板的归档任务中恢复。`, "info");
+    await onTasksChanged();
   };
 
   const handleDeleteTask = async (task: TaskSummary) => {
@@ -763,14 +845,13 @@ function TaskGroupSection({
   };
 
   const taskCount = group.tasks.length;
-  const rootTasks = group.global && !preview;
   const groupSelected = manageMode && selection ? isManagedGroupSelected(selection, group) : false;
 
   return (
     <section
       className={classNames(
         "workspace-item",
-        rootTasks && "workspace-global-tasks",
+        group.global && "workspace-global-tasks",
         open && "is-open",
         group.synthetic && "is-synthetic",
         activeWorkspaceId === group.workspaceId && "active-workspace",
@@ -809,7 +890,7 @@ function TaskGroupSection({
           </WandIconButton>
         </form>
       ) : null}
-      {!preview && !group.global && <div className={classNames("workspace-row", renamingDirectory && "is-renaming")}>
+      {!preview && <div className={classNames("workspace-row", renamingDirectory && "is-renaming")}>
         <WandNavigationLink
           className="workspace-row-main"
           orientation="vertical"
@@ -817,7 +898,7 @@ function TaskGroupSection({
           aria-expanded={manageMode ? undefined : open}
           aria-pressed={manageMode ? groupSelected : undefined}
           aria-controls={tasksId}
-          title={group.workspaceCwd}
+          title={group.global ? "这些历史任务尚未指定工作区，可在任务看板中选择工作区。" : group.workspaceCwd}
           render={<button type="button" onClick={manageMode ? () => onToggleGroup?.(group) : toggleCollapsed}/>}
         >
           {manageMode && <ManageCheck checked={groupSelected} label={`选择目录 ${group.workspaceName}`}/>}
@@ -836,7 +917,7 @@ function TaskGroupSection({
           ) : null}
           {!manageMode && <WandIcon name="chevron" size={11} className={classNames("workspace-row-chevron", open && "open")}/>}
         </WandNavigationLink>
-        {manageMode ? null : <span className="workspace-row-actions">
+        {manageMode || group.global ? null : <span className="workspace-row-actions">
           {!group.synthetic && (
             <WandIconButton
               className="workspace-row-action add"
@@ -1004,7 +1085,14 @@ function TaskGroupSection({
                 toast(`已将任务「${task.name}」重命名为「${updated.name}」`, "success");
                 await onTasksChanged();
               }}
+              onMoveSession={async (sessionId) => {
+                await httpWorkspacesRepository.moveSession(task.id, sessionId);
+                toast(`已移入「${task.name}」，运行目录不变`, "success");
+                await runtime()?.refreshSessions();
+                await onTasksChanged();
+              }}
               onDelete={() => handleDeleteTask(task)}
+              onArchive={() => handleArchiveTask(task)}
             />
           ))}
           {group.standaloneSessions.length > 0 && (
@@ -1154,10 +1242,8 @@ export function WorkspacesPanel({
   }, [controllerSnapshot.open]);
 
   const { groups: sourceGroups, loading, error, reload } = useTaskGroups(refreshTick);
-  // 未命名任务折叠进「未分组会话」，目录树只保留 目录 → 任务 → 终端 三级。
-  // 轮询会重建所有对象，用内容签名做 memo，避免整棵树每 6 秒重渲染。
-  const flattenGroups = React.useMemo(() => createUnnamedTaskFlattener(), []);
-  const groups = React.useMemo(() => flattenGroups(sourceGroups), [flattenGroups, sourceGroups]);
+  // Every task is a visible container, including empty and legacy unnamed tasks.
+  const groups = sourceGroups;
   const visibleGroups = filterSidebarGroups(
     directoryId === undefined ? groups : groups.filter((group) => group.workspaceId === directoryId),
     directoryId === undefined ? searchQuery : "",
@@ -1196,6 +1282,8 @@ export function WorkspacesPanel({
   const [manageBusy, setManageBusy] = React.useState(false);
   const prunedSelection = pruneManagedSelection(selection, visibleGroups);
   const selectedCount = sidebarManageCount(prunedSelection);
+  // 归档不是破坏性操作；只有选中了终端（真的会结束进程）才用危险样式。
+  const manageActionTone = managedSelectionIsDestructive(prunedSelection) ? "danger" : "secondary";
   const visibleManaged = collectManagedIds(visibleGroups);
   const allVisibleSelected = selectedCount > 0
     && prunedSelection.taskIds.length === visibleManaged.taskIds.length
@@ -1214,7 +1302,7 @@ export function WorkspacesPanel({
       return undefined;
     }
     const payload: OpenWorkspaceTaskPayload = {
-      workspaceId: group.workspaceId,
+      workspaceId: task.workspaceId,
       workspaceName: group.global ? "" : group.workspaceName,
       taskId: task.id,
       taskName: task.name,
@@ -1261,7 +1349,7 @@ export function WorkspacesPanel({
     // 覆盖新会话的选中态（切片6 #6 竞态）。
     await Promise.resolve(openTask(group, task));
     await rt.newTaskSession({
-      workspaceId: group.workspaceId,
+      workspaceId: task.workspaceId,
       taskId: task.id,
       cwd: task.cwd,
       target,
@@ -1280,14 +1368,15 @@ export function WorkspacesPanel({
     setRefreshTick((n) => n + 1);
   }, [selectedSessionId, activeTaskId]);
 
-  const deleteManagedSelection = async (): Promise<void> => {
+  // 批量操作里任务是归档（终端继续跑），只有显式选中的终端才真删除。
+  const applyManagedSelection = async (): Promise<void> => {
     if (manageBusy) return;
-    const resolved = resolveManagedDeletion(prunedSelection, visibleGroups);
+    const resolved = prunedSelection;
     if (sidebarManageCount(resolved) === 0) return;
     setManageBusy(true);
     try {
       for (const taskId of resolved.taskIds) {
-        await httpWorkspacesRepository.deleteTask(taskId, true);
+        await httpWorkspacesRepository.archiveTask(taskId);
         if (activeTaskId === taskId) runtime()?.closeWorkspace();
       }
       if (resolved.sessionIds.length > 0) {
@@ -1298,11 +1387,11 @@ export function WorkspacesPanel({
       } else {
         await runtime()?.refreshSessions();
       }
-      toast(`已删除${describeManagedDeletion(resolved)}`, "info");
+      toast(`已${describeManagedResult(resolved)}`, "info");
       exitManageMode();
       await reload();
     } catch (cause) {
-      toast(describeError(cause, "无法删除所选任务。"), "danger");
+      toast(describeError(cause, "无法处理所选任务。"), "danger");
     } finally {
       setManageBusy(false);
       setConfirmingManageDelete(false);
@@ -1313,7 +1402,7 @@ export function WorkspacesPanel({
     return (
       <section className="workspaces-panel workspaces-panel-compact" aria-label="项目目录">
         <CompactDirectoryRail
-          groups={groups.filter((group) => !group.global)}
+          groups={visibleGroups}
           loading={loading}
           error={error}
           activeWorkspaceId={activeWorkspaceId}
@@ -1354,24 +1443,24 @@ export function WorkspacesPanel({
                 <>
                   <WandButton className="sidebar-manage-action" kind="ghost" size="small" disabled={manageBusy} onClick={() => setConfirmingManageDelete(false)}>返回</WandButton>
                   <WandButton
-                    className="sidebar-manage-action danger"
-                    kind="danger"
+                    className={classNames("sidebar-manage-action", manageActionTone === "danger" && "danger")}
+                    kind={manageActionTone}
                     size="small"
                     disabled={manageBusy || selectedCount === 0}
-                    onClick={() => { void deleteManagedSelection(); }}
+                    onClick={() => { void applyManagedSelection(); }}
                   >
-                    {manageBusy ? "正在删除…" : "确认删除"}
+                    {manageBusy ? "正在处理…" : `确认${describeManagedAction(prunedSelection)}`}
                   </WandButton>
                 </>
               ) : (
                 <WandButton
-                  className="sidebar-manage-action danger"
-                  kind="danger"
+                  className={classNames("sidebar-manage-action", manageActionTone === "danger" && "danger")}
+                  kind={manageActionTone}
                   size="small"
                   disabled={manageBusy || selectedCount === 0}
                   onClick={() => setConfirmingManageDelete(true)}
                 >
-                  删除
+                  {describeManagedAction(prunedSelection)}
                 </WandButton>
               )}
               <WandButton className="sidebar-manage-action" kind="ghost" size="small" disabled={manageBusy} onClick={exitManageMode}>完成</WandButton>

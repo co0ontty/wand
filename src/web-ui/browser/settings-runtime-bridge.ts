@@ -1,3 +1,4 @@
+import { applyConfigDefaultThinking } from "./session-engine";
 import { state } from "./state";
 
 interface NotificationPreferencesDetail {
@@ -20,5 +21,7 @@ export function installSettingsRuntimeBridge(): void {
     if (!detail) return;
     if (!state.config) state.config = {};
     Object.assign(state.config, detail);
+    // 设置页刚保存的「新会话默认思考深度」要立刻反映到组合器三件套上。
+    applyConfigDefaultThinking(detail);
   });
 }

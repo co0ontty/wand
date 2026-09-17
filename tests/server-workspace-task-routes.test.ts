@@ -181,7 +181,7 @@ test("task creation makes an isolated worktree in a git workspace", async () => 
     assert.equal(unnamed.name, "未命名任务");
 
     // 合法任务 → 201 + worktree 隔离
-    res = await fetch(`${baseUrl}/api/workspaces/${ws.id}/tasks`, json({ name: "重构恢复流程" }));
+    res = await fetch(`${baseUrl}/api/workspaces/${ws.id}/tasks`, json({ name: "重构恢复流程", worktree: true }));
     assert.equal(res.status, 201);
     const task = await res.json() as {
       id: string; name: string; isolated: boolean; cwd: string;
@@ -239,7 +239,7 @@ test("task creation makes an isolated worktree in a git workspace", async () => 
     assert.equal(res.status, 404);
 
     // 删除项目也必须清理其余任务的 worktree，不能只删数据库行。
-    res = await fetch(`${baseUrl}/api/workspaces/${ws.id}/tasks`, json({ name: "项目删除清理" }));
+    res = await fetch(`${baseUrl}/api/workspaces/${ws.id}/tasks`, json({ name: "项目删除清理", worktree: true }));
     assert.equal(res.status, 201);
     const secondTask = await res.json() as { worktree: { path: string } | null };
     assert.ok(secondTask.worktree && existsSync(secondTask.worktree.path));
@@ -272,7 +272,7 @@ test("explicit worktree:true fails instead of silently degrading", async () => {
   }
 });
 
-test("task in a non-git workspace degrades to no isolation", async () => {
+test("task in a non-git workspace is a logical group by default", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-task-nogit-"));
   const storage = new WandStorage(path.join(root, "wand.db"));
   const { baseUrl, close } = await startWorkspaceApp(storage);
@@ -284,7 +284,7 @@ test("task in a non-git workspace degrades to no isolation", async () => {
     assert.equal(task.isolated, false);
     assert.equal(task.worktree, null);
     assert.equal(task.cwd, root);
-    assert.ok(task.worktreeError, "非 git 目录应给出降级提示");
+    assert.equal(task.worktreeError, undefined);
   } finally {
     await close();
     rmSync(root, { recursive: true, force: true });
@@ -312,8 +312,8 @@ test("task creation can skip worktree isolation and /api/tasks aggregates across
     assert.equal(shared.cwd, root);
     assert.equal(shared.worktreeError, undefined);
 
-    // 缺省行为不变：默认尝试建隔离 worktree。
-    res = await fetch(`${baseUrl}/api/workspaces/${ws.id}/tasks`, json({ name: "隔离任务" }));
+    // 隔离是显式选择；默认任务只做逻辑分组。
+    res = await fetch(`${baseUrl}/api/workspaces/${ws.id}/tasks`, json({ name: "隔离任务", worktree: true }));
     assert.equal(res.status, 201);
     const isolated = await res.json() as { id: string; isolated: boolean; cwd: string };
     assert.equal(isolated.isolated, true);
@@ -414,13 +414,13 @@ test("project worktree review reports count, default branch, commits, and dirty 
   try {
     const workspace = await fetch(`${baseUrl}/api/workspaces`, json({ name: "Review", cwd: root }))
       .then((response) => response.json() as Promise<{ id: string }>);
-    const committed = await fetch(`${baseUrl}/api/workspaces/${workspace.id}/tasks`, json({ name: "完成登录页" }))
+    const committed = await fetch(`${baseUrl}/api/workspaces/${workspace.id}/tasks`, json({ name: "完成登录页", worktree: true }))
       .then((response) => response.json() as Promise<{ id: string; cwd: string }>);
     writeFileSync(path.join(committed.cwd, "login.txt"), "login\n");
     git(["add", "login.txt"], committed.cwd);
     git(["commit", "-q", "-m", "feat: add login page"], committed.cwd);
 
-    const dirty = await fetch(`${baseUrl}/api/workspaces/${workspace.id}/tasks`, json({ name: "调整设置页" }))
+    const dirty = await fetch(`${baseUrl}/api/workspaces/${workspace.id}/tasks`, json({ name: "调整设置页", worktree: true }))
       .then((response) => response.json() as Promise<{ id: string; cwd: string }>);
     writeFileSync(path.join(dirty.cwd, "settings.txt"), "draft\n");
 
@@ -681,7 +681,7 @@ test("task layout PUT conflicts when the expected revision is stale", async () =
   }
 });
 
-test("creating a workspace task fills a board card and reuses a matching unlinked one", async () => {
+test("creating a workspace task fills its own board card without merging same-title tasks", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-task-board-sync-"));
   const storage = new WandStorage(path.join(root, "wand.db"));
   const { baseUrl, close } = await startWorkspaceApp(storage);
@@ -698,7 +698,7 @@ test("creating a workspace task fills a board card and reuses a matching unlinke
       .then((r) => r.json() as Promise<{ id: string; name: string }>);
     const linked = storage.getWandTaskByWorkspaceTaskId(created.id);
     assert.ok(linked);
-    assert.equal(linked!.id, preexisting.id);
+    assert.notEqual(linked!.id, preexisting.id);
     assert.equal(linked!.workspaceTaskId, created.id);
     assert.equal(linked!.status, "todo", "an existing board task keeps its status");
 
@@ -708,15 +708,92 @@ test("creating a workspace task fills a board card and reuses a matching unlinke
     assert.ok(fresh);
     assert.notEqual(fresh!.id, preexisting.id);
     assert.equal(fresh!.title, "设置页");
-    assert.equal(fresh!.status, "doing");
+    assert.equal(fresh!.status, "todo");
     assert.equal(fresh!.workspaceId, ws.id);
     assert.equal(fresh!.workspaceTaskId, second.id);
-    assert.match(fresh!.description, /项目：Wand/);
-    assert.match(fresh!.description, new RegExp(`目录：${root}`));
+    assert.equal(fresh!.description, "");
 
     const archived = await fetch(`${baseUrl}/api/workspace-tasks/${second.id}`, json({ status: "done" }, "PATCH"));
     assert.equal(archived.status, 200);
     assert.equal(storage.getWandTask(fresh!.id)?.status, "done");
+  } finally {
+    await close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("archiving a sidebar task keeps its terminals and worktree, and restoring brings it back", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-task-archive-"));
+  git(["init", "-q"], root);
+  git(["commit", "-q", "--allow-empty", "-m", "init"], root);
+
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const config = { ...defaultConfig(), defaultCwd: root, structuredRunner: "sdk" as const };
+  const { baseUrl, close } = await startWorkspaceApp(storage);
+  try {
+    const ws = storage.createWorkspace({ name: "Wand", cwd: root });
+    const task = await fetch(`${baseUrl}/api/workspaces/${ws.id}/tasks`, json({ name: "重构恢复流程", worktree: true }))
+      .then((r) => r.json() as Promise<{ id: string; cwd: string; worktree: { path: string } | null }>);
+    const manager = new StructuredSessionManager(storage, config);
+    const session = manager.createSession({
+      cwd: task.cwd,
+      mode: config.defaultMode,
+      workspaceId: ws.id,
+      workspaceTaskId: task.id,
+    });
+    const card = storage.getWandTaskByWorkspaceTaskId(task.id);
+    assert.ok(card);
+
+    const archived = await fetch(`${baseUrl}/api/workspace-tasks/${task.id}/archive`, json({}, "POST"));
+    assert.equal(archived.status, 200);
+    // 软删除：卡片进归档、侧栏任务隐藏，终端 / worktree / 卡片绑定全部保留。
+    assert.equal(storage.getWandTask(card!.id)?.status, "archived");
+    assert.equal(storage.getWorkspaceTask(task.id)?.status, "done");
+    assert.ok(storage.getSession(session.id), "归档不能删除终端");
+    assert.equal(storage.getSession(session.id)?.workspaceTaskId, task.id);
+    assert.equal(storage.getSession(session.id)?.workspaceId, ws.id);
+    assert.ok(task.worktree && existsSync(task.worktree.path), "归档不能清理 worktree");
+    assert.equal(storage.getWandTaskByWorkspaceTaskId(task.id)?.id, card!.id);
+
+    // 侧栏拿到的是隐藏状态（done），会话仍挂在任务里；看板归档目录里卡片还在。
+    const groups = await fetch(`${baseUrl}/api/tasks`).then((r) => r.json() as Promise<Array<{
+      tasks: Array<{ id: string; status: string; sessions: Array<{ id: string }> }>;
+    }>>);
+    const listed = groups.flatMap((group) => group.tasks).find((item) => item.id === task.id);
+    assert.equal(listed?.status, "done");
+    assert.deepEqual(listed?.sessions.map((item) => item.id), [session.id]);
+    assert.equal(storage.getWandTask(card!.id)?.status, "archived");
+
+    // 恢复：卡片改回「等待认领」后，侧栏任务由反向投影重新出现，终端仍绑在原任务上。
+    storage.updateWandTask(card!.id, { status: "todo" });
+    assert.equal(storage.getWorkspaceTask(task.id)?.status, "active");
+    assert.equal(storage.getSession(session.id)?.workspaceTaskId, task.id);
+
+    const missing = await fetch(`${baseUrl}/api/workspace-tasks/missing/archive`, json({}, "POST"));
+    assert.equal(missing.status, 404);
+  } finally {
+    await close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("archiving a board card hides its sidebar container without deleting the task row", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-card-archive-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const { baseUrl, close } = await startWorkspaceApp(storage);
+  try {
+    const ws = storage.createWorkspace({ name: "Wand", cwd: root });
+    const created = await fetch(`${baseUrl}/api/workspaces/${ws.id}/tasks`, json({ name: "文档整理" }))
+      .then((r) => r.json() as Promise<{ id: string }>);
+    const card = storage.getWandTaskByWorkspaceTaskId(created.id);
+    assert.ok(card);
+
+    const archived = storage.updateWandTask(card!.id, { status: "archived" });
+    assert.equal(archived?.status, "archived");
+    // 侧栏不显示靠 status=done，任务行与看板绑定都还在，方便随时恢复。
+    assert.equal(storage.getWorkspaceTask(created.id)?.status, "done");
+    assert.equal(storage.getWandTaskByWorkspaceTaskId(created.id)?.id, card!.id);
+    assert.equal(storage.listWorkspaceTasks(ws.id).length, 1);
   } finally {
     await close();
     rmSync(root, { recursive: true, force: true });

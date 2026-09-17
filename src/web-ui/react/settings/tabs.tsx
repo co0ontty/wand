@@ -31,8 +31,10 @@ import type {
   SettingsGeneralInput,
   SettingsModelOption,
   SettingsRepository,
+  SettingsSessionProvider,
   SettingsSnapshot,
   SettingsSystemAi,
+  SettingsThinkingEffort,
   SettingsWebUpdate,
 } from "./types";
 import { failureMessage } from "../errors";
@@ -652,6 +654,8 @@ function aiFromSnapshot(snapshot: SettingsSnapshot): SettingsAiInput {
     defaultGrokModel: config.defaultGrokModel,
     defaultQoderModel: config.defaultQoderModel,
     defaultPiModel: config.defaultPiModel,
+    defaultProvider: config.defaultProvider,
+    defaultThinkingEffort: config.defaultThinkingEffort,
     commitAiSource: config.commitAiSource,
     systemAi: {
       ...primary,
@@ -667,6 +671,152 @@ function ModelSuggestions({ id, models }: { id: string; models: SettingsModelOpt
       {models.map((model) => <option key={model.id} value={model.id}>{model.label || model.id}</option>)}
     </datalist>
   );
+}
+
+/** CLI 工具下拉：顺序与任务指派 / 新建会话一致。 */
+const SESSION_PROVIDER_OPTIONS: ReadonlyArray<{ value: SettingsSessionProvider; label: string }> = [
+  { value: "claude", label: "Claude" },
+  { value: "codex", label: "Codex" },
+  { value: "opencode", label: "OpenCode" },
+  { value: "grok", label: "Grok" },
+  { value: "qoder", label: "Qoder" },
+  { value: "pi", label: "Pi" },
+];
+
+/** 与任务指派的「思考深度」保持同一套档位和文案。 */
+const THINKING_EFFORT_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: "off", label: "关闭（跟随模型默认）" },
+  { value: "standard", label: "标准" },
+  { value: "deep", label: "深入" },
+  { value: "max", label: "最大" },
+];
+
+/** Codex 动态推理档位（如 `codex:ultra`）由客户端或旧设置写入，原样列出来免得下拉显示空值。 */
+function thinkingEffortOptions(
+  current: SettingsThinkingEffort,
+): ReadonlyArray<{ value: string; label: string }> {
+  if (THINKING_EFFORT_OPTIONS.some((option) => option.value === current)) return THINKING_EFFORT_OPTIONS;
+  return [
+    ...THINKING_EFFORT_OPTIONS,
+    { value: current, label: `${current.slice("codex:".length)}（Codex 动态档位）` },
+  ];
+}
+
+/** 一个 CLI 工具对应 `SettingsAiInput` 里的默认模型字段。 */
+const PROVIDER_MODEL_FIELDS: Record<SettingsSessionProvider, keyof SettingsAiInput> = {
+  claude: "defaultModel",
+  codex: "defaultCodexModel",
+  opencode: "defaultOpenCodeModel",
+  grok: "defaultGrokModel",
+  qoder: "defaultQoderModel",
+  pi: "defaultPiModel",
+};
+
+function sessionProviderLabel(provider: SettingsSessionProvider): string {
+  return SESSION_PROVIDER_OPTIONS.find((option) => option.value === provider)?.label ?? provider;
+}
+
+/** `/api/models` 里当前工具的那一份目录。 */
+function providerModelSuggestions(
+  models: SettingsSnapshot["models"],
+  provider: SettingsSessionProvider,
+): SettingsModelOption[] {
+  if (!models) return [];
+  if (provider === "codex") return models.codexModels;
+  if (provider === "opencode") return models.opencodeModels;
+  if (provider === "grok") return models.grokModels;
+  if (provider === "qoder") return models.qoderModels;
+  if (provider === "pi") return models.piModels;
+  return models.models;
+}
+
+function providerModelValue(form: SettingsAiInput, provider: SettingsSessionProvider): string {
+  const value = form[PROVIDER_MODEL_FIELDS[provider]];
+  return typeof value === "string" ? value : "";
+}
+
+/** 下拉里的“自定义模型 ID…”只是动作项，永远不会成为被选中的值。 */
+const CUSTOM_MODEL_ACTION = "\u0000custom-model";
+
+/**
+ * 新会话默认模型：列表里选（和任务指派、会话三件套同一份目录），
+ * 目录外的模型 ID 也能手输，不会被下拉锁死。
+ */
+function DefaultModelControl({
+  provider,
+  value,
+  models,
+  onChange,
+}: {
+  provider: SettingsSessionProvider;
+  value: string;
+  models: SettingsSnapshot["models"];
+  onChange(value: string): void;
+}): React.ReactElement {
+  const [customEntry, setCustomEntry] = useState(false);
+  useEffect(() => setCustomEntry(false), [provider]);
+
+  const suggestions = providerModelSuggestions(models, provider);
+  const options = suggestions.map((model) => ({ value: model.id, label: model.label || model.id }));
+  const label = sessionProviderLabel(provider);
+  const trimmed = value.trim();
+  const customValue = trimmed !== "" && !options.some((option) => option.value === trimmed);
+  const inputId = `settings-default-model-${provider}`;
+
+  if (customEntry || customValue) {
+    return (
+      <>
+        <SettingsTextInput
+          id={inputId}
+          list={`${inputId}-list`}
+          value={value}
+          placeholder="输入模型 ID，留空跟随 CLI 默认"
+          onChange={onChange}
+        />
+        <ModelSuggestions id={`${inputId}-list`} models={suggestions} />
+        <WandButton
+          kind="ghost"
+          size="small"
+          className="wand-settings-inline-action"
+          onClick={() => {
+            setCustomEntry(false);
+            onChange("");
+          }}
+        >
+          从列表选择
+        </WandButton>
+      </>
+    );
+  }
+
+  return (
+    <SettingsSelect
+      id={inputId}
+      ariaLabel={`${label} 默认模型`}
+      value={value}
+      searchable
+      searchPlaceholder="搜索模型"
+      options={[
+        { value: "", label: `跟随 ${label} 默认` },
+        ...options,
+        { value: CUSTOM_MODEL_ACTION, label: "自定义模型 ID…" },
+      ]}
+      onChange={(next) => {
+        if (next === CUSTOM_MODEL_ACTION) {
+          setCustomEntry(true);
+          return;
+        }
+        onChange(next);
+      }}
+    />
+  );
+}
+
+/** 三件套只展示选中的工具；把其余工具已保存的默认值摆出来，避免配置被藏起来。 */
+function sessionDefaultsSummary(form: SettingsAiInput): string {
+  return SESSION_PROVIDER_OPTIONS
+    .map((option) => `${option.label} · ${providerModelValue(form, option.value) || "跟随默认"}`)
+    .join("；");
 }
 
 function createSystemAiRouteId(): string {
@@ -770,6 +920,12 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toas
 
   function update<K extends keyof SettingsAiInput>(key: K, value: SettingsAiInput[K]) {
     setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  /** 每个 CLI 各有一份默认模型字段，选中的工具决定写哪一个。 */
+  function updateProviderModel(provider: SettingsSessionProvider, model: string) {
+    const field = PROVIDER_MODEL_FIELDS[provider];
+    setForm((current) => ({ ...current, [field]: model }));
   }
 
   function updateSystemEnabled(enabled: boolean) {
@@ -1021,36 +1177,45 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toas
       </header>
 
       <SettingsSection
-        title="新会话默认模型"
-        description="留空表示跟随对应 CLI 默认值；也可以输入列表外的自定义模型。"
+        title="新会话默认"
+        description="选 CLI 工具、模型和思考深度；模型留空表示跟随该 CLI 默认值，目录外的模型 ID 也能手输。"
         action={<SettingsActionButton pending={pending === "models"} kind="secondary" onClick={() => void refreshModels()}>刷新模型列表</SettingsActionButton>}
       >
-        <SettingsGrid>
-          <SettingsField label="Claude 默认模型" htmlFor="settings-model-claude" hint="会原样传给 --model">
-            <SettingsTextInput id="settings-model-claude" list="settings-models-claude" value={form.defaultModel} placeholder="跟随 Claude 默认" onChange={(value) => update("defaultModel", value)} />
-            <ModelSuggestions id="settings-models-claude" models={models?.models || []} />
+        <div className="wand-settings-default-row">
+          <SettingsField label="CLI 工具" hint="新建会话默认使用的工具">
+            <SettingsSelect
+              id="settings-default-provider"
+              ariaLabel="新会话默认 CLI 工具"
+              value={form.defaultProvider}
+              options={SESSION_PROVIDER_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+              onChange={(value) => update("defaultProvider", value as SettingsSessionProvider)}
+            />
           </SettingsField>
-          <SettingsField label="Codex 默认模型" htmlFor="settings-model-codex" hint="留空则不传模型参数">
-            <SettingsTextInput id="settings-model-codex" list="settings-models-codex" value={form.defaultCodexModel} placeholder="跟随 Codex 默认" onChange={(value) => update("defaultCodexModel", value)} />
-            <ModelSuggestions id="settings-models-codex" models={models?.codexModels || []} />
+          <SettingsField
+            label="默认模型"
+            htmlFor={`settings-default-model-${form.defaultProvider}`}
+            hint={`${sessionProviderLabel(form.defaultProvider)} 的默认模型`}
+          >
+            <DefaultModelControl
+              provider={form.defaultProvider}
+              value={providerModelValue(form, form.defaultProvider)}
+              models={models}
+              onChange={(value) => updateProviderModel(form.defaultProvider, value)}
+            />
           </SettingsField>
-          <SettingsField label="OpenCode 默认模型" htmlFor="settings-model-opencode" hint="通常为 provider/model">
-            <SettingsTextInput id="settings-model-opencode" list="settings-models-opencode" value={form.defaultOpenCodeModel} placeholder="跟随 OpenCode 默认" onChange={(value) => update("defaultOpenCodeModel", value)} />
-            <ModelSuggestions id="settings-models-opencode" models={models?.opencodeModels || []} />
+          <SettingsField label="思考深度" hint="派发和新建会话时的默认推理档位">
+            <SettingsSelect
+              id="settings-default-thinking"
+              ariaLabel="新会话默认思考深度"
+              value={form.defaultThinkingEffort}
+              options={thinkingEffortOptions(form.defaultThinkingEffort)}
+              onChange={(value) => update("defaultThinkingEffort", value as SettingsThinkingEffort)}
+            />
           </SettingsField>
-          <SettingsField label="Grok 默认模型" htmlFor="settings-model-grok" hint="留空则不传 --model">
-            <SettingsTextInput id="settings-model-grok" list="settings-models-grok" value={form.defaultGrokModel} placeholder="跟随 Grok 默认" onChange={(value) => update("defaultGrokModel", value)} />
-            <ModelSuggestions id="settings-models-grok" models={models?.grokModels || []} />
-          </SettingsField>
-          <SettingsField label="Qoder 默认模型" htmlFor="settings-model-qoder" hint="可选 lite / efficient / auto / performance / ultimate">
-            <SettingsTextInput id="settings-model-qoder" list="settings-models-qoder" value={form.defaultQoderModel} placeholder="跟随 Qoder 默认" onChange={(value) => update("defaultQoderModel", value)} />
-            <ModelSuggestions id="settings-models-qoder" models={models?.qoderModels || []} />
-          </SettingsField>
-          <SettingsField label="Pi 默认模型" htmlFor="settings-model-pi" hint="可用 provider/model，留空则跟随 Pi 默认">
-            <SettingsTextInput id="settings-model-pi" list="settings-models-pi" value={form.defaultPiModel} placeholder="跟随 Pi 默认" onChange={(value) => update("defaultPiModel", value)} />
-            <ModelSuggestions id="settings-models-pi" models={models?.piModels || []} />
-          </SettingsField>
-        </SettingsGrid>
+        </div>
+        <p className="wand-settings-default-summary" aria-label="各 CLI 工具已保存的默认模型">
+          {sessionDefaultsSummary(form)}
+        </p>
       </SettingsSection>
 
       <SettingsSection

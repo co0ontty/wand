@@ -421,6 +421,33 @@ test("late PTY data and exit callbacks cannot mutate a reused session id", async
   assert.equal(events.filter((event) => event.type === "ended").length, 1);
 });
 
+test("explicitly stopping a PTY session broadcasts ended so clients leave the running state", async (t) => {
+  const { manager, root, spawned } = createHarness(t);
+  const events: ProcessEvent[] = [];
+  manager.on("process", (event) => events.push(event));
+
+  const session = await manager.start("opencode", root, "default", undefined, {
+    provider: "opencode",
+    reuseId: "stop-notifies",
+  });
+  events.length = 0;
+
+  assert.equal(manager.stop(session.id).status, "stopped");
+
+  // 主动停止后 ptyProcess 已被清空，handleTerminalExit 会把随后的异步退出当成过期
+  // 回调直接 return，所以 ended 只能由 stop() 自己发；否则各端一直以为会话在跑。
+  const ended = events.filter((event) => event.type === "ended");
+  assert.equal(ended.length, 1);
+  assert.equal(ended[0]?.sessionId, session.id);
+  assert.equal((ended[0]?.data as SessionSnapshot | undefined)?.status, "stopped");
+
+  spawned[0].emitExit(0);
+  assert.equal(events.filter((event) => event.type === "ended").length, 1, "no duplicate ended from the stale exit callback");
+  assert.equal(manager.get(session.id)?.status, "stopped");
+
+  assert.throws(() => manager.sendInput(session.id, "late", "terminal"), /not running/);
+});
+
 test("continuous PTY output checkpoints every throttle window and flushes on dispose", async (t) => {
   const { manager, root, spawned, storage } = createHarness(t);
   const started = await manager.start("opencode", root, "default", undefined, {

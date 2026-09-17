@@ -239,6 +239,8 @@ export interface WorkspacesRepository {
   getTask(taskId: string): Promise<WorkspaceTaskDetail>;
   updateTask(taskId: string, patch: UpdateWorkspaceTaskRequest): Promise<WorkspaceTask>;
   deleteTask(taskId: string, cascade?: boolean): Promise<void>;
+  /** 归档任务：保留终端与 worktree，仅从侧栏隐藏并移入看板归档。 */
+  archiveTask(taskId: string): Promise<WorkspaceTask>;
   saveTaskLayout(taskId: string, layout: TaskWindowLayout | null, layoutRevision?: number): Promise<{ layout: TaskWindowLayout | null; layoutRevision?: number }>;
   /** Project-level review data used by the multi-worktree merge Agent launcher. */
   listWorktrees(workspaceId: string, options?: { signal?: AbortSignal }): Promise<WorkspaceWorktreeOverview>;
@@ -263,6 +265,7 @@ export interface NewTaskSessionPayload {
   cwd: string;
   target: WorkspaceSessionTarget;
   kind?: WorkspaceSessionKind;
+  prompt?: string;
 }
 
 interface StartWorkspaceMergeAgentPayload {

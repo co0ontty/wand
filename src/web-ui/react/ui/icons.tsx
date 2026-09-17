@@ -5,6 +5,7 @@ import * as React from "react";
  * 名字即语义：folder 是文件夹，gear 是齿轮，branch 只表示 git 分支 / worktree。
  */
 export type WandIconName =
+  | "archive"
   | "audio"
   | "back"
   | "binary"
@@ -108,6 +109,8 @@ export function WandIcon({
   };
 
   switch (name) {
+    case "archive":
+      return <svg {...common}><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"/><path d="M10 12h4"/></svg>;
     case "audio":
       return <svg {...common}><path d="M9 18V5l11-2v13"/><circle cx="7" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>;
     case "back":

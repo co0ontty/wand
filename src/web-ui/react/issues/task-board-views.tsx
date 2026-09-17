@@ -322,7 +322,7 @@ function TaskBoardListRow({
       {task.milestone ? <TaskBoardMilestoneChip name={task.milestone.name}/> : null}
       {task.labels.slice(0, 2).map((label) => <TaskBoardLabelChip key={label} label={label}/>)}
       {task.dueDate ? <span className="task-board-due"><TaskBoardDueIcon size={12}/>{issueDueStamp(task.dueDate)}</span> : null}
-      <span>{task.workspace?.name ?? "未指定项目"}</span>
+      <span>{task.workspace?.name ?? "未归属工作区"}</span>
       <TaskBoardConversationButton sessions={task.sessions} onOpen={onOpenSession}/>
       <time>{formatIssueStamp(task.updatedAt)}</time>
     </span>
@@ -622,6 +622,7 @@ export function TaskBoardContextMenu({
   onCopy,
   onDispatch,
   onArchive,
+  onRestore,
   onClose,
 }: {
   x: number;
@@ -630,7 +631,10 @@ export function TaskBoardContextMenu({
   onOpen(): void;
   onCopy(): void;
   onDispatch(): void;
+  /** 归档：卡片进归档目录，侧栏不再显示，终端与记录都保留。 */
   onArchive(): void;
+  /** 恢复归档卡片：重建侧栏任务并带回它的终端。 */
+  onRestore(): void;
   onClose(): void;
 }): React.ReactElement {
   React.useEffect(() => {
@@ -650,8 +654,12 @@ export function TaskBoardContextMenu({
   >
     <WandMenuItem icon="folder" label="打开" onClick={onOpen}/>
     <WandMenuItem icon="copy" label="复制 ID" onClick={onCopy}/>
-    <WandMenuItem icon="zap" label="派发 Agent" onClick={onDispatch}/>
-    <WandMenuItem icon="trash" label="归档" tone="danger" onClick={onArchive}/>
+    {task.status === "archived"
+      ? <WandMenuItem icon="resume" label="恢复到等待认领" onClick={onRestore}/>
+      : <>
+          <WandMenuItem icon="zap" label="派发 Agent" onClick={onDispatch}/>
+          <WandMenuItem icon="archive" label="归档" tone="danger" onClick={onArchive}/>
+        </>}
   </div>;
 }
 

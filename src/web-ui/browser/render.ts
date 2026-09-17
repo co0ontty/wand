@@ -9,7 +9,7 @@ import { shouldShowSessionsBackdrop, isMobileLayout } from "./file-browser";
 import { loadGitStatus, renderTopbarGitBadgeHtml, renderTopbarMoreMenuHtml } from "./git-commit";
 import { autoResizeInput, getSelectedSession } from "./input";
 import { requestNotificationPermission, notifyUpdateAvailable, _apkVersion, _macAppVersion } from "./notifications";
-import { applyCurrentView, checkApkAutoUpdate, checkDmgAutoUpdate, closeTransientSessionsDrawer, fetchAvailableModels, getComposerPlaceholder, hasNativeBackToApp, hasNativeSwitchServer, loadSessions, refreshAll, refreshClaudeSkillsPicker, syncComposerModeSelect, syncComposerModelSelect, updateDrawerState, updateShellChrome } from "./session-engine";
+import { applyCurrentView, applyConfigDefaultThinking, checkApkAutoUpdate, checkDmgAutoUpdate, closeTransientSessionsDrawer, fetchAvailableModels, getComposerPlaceholder, hasNativeBackToApp, hasNativeSwitchServer, loadSessions, refreshAll, refreshClaudeSkillsPicker, syncComposerModeSelect, syncComposerModelSelect, updateDrawerState, updateShellChrome } from "./session-engine";
 import { getSessionStatusClass, getSessionStatusLabel } from "./session-ui";
 import { maybeScrollTerminalToBottom } from "./terminal";
 import { ensureTerminalFit, ensureTerminalFitWithRetry, teardownTerminal } from "./viewport";
@@ -274,6 +274,7 @@ export function restoreLoginSession() {
     .then(function(config: any) {
       if (!config) return;
       state.config = config;
+      applyConfigDefaultThinking(config);
       state.loginChecked = true;
       requestAnimationFrame(function() {
         try {

@@ -42,6 +42,8 @@ function config(overrides: Record<string, unknown> = {}): Record<string, unknown
     defaultGrokModel: "grok-4.5",
     defaultQoderModel: "performance",
     defaultModels: { claude: "claude-sonnet", codex: "gpt-5", opencode: "openai/gpt-5", grok: "grok-4.5", qoder: "performance" },
+    defaultProvider: "grok",
+    defaultThinkingEffort: "deep",
     commitCli: "claude",
     commitModel: "",
     commitAiSource: "cli",
@@ -154,6 +156,31 @@ test("admin load is settings-first and maps models, CLI updates, and connect cod
   assert.equal(snapshot.connectCode?.code, "connect-secret");
   assert.equal(snapshot.config?.systemAi.apiKey, "", "repository must redact a malicious server secret");
   assert.equal(snapshot.config?.systemAi.hasApiKey, true);
+  assert.equal(snapshot.config?.defaultProvider, "grok");
+  assert.equal(snapshot.config?.defaultThinkingEffort, "deep");
+});
+
+test("new-session defaults fall back safely and keep Codex dynamic thinking levels", async () => {
+  const payload = adminPayload();
+  const raw = payload.config as Record<string, unknown>;
+  raw.defaultProvider = "not-a-provider";
+  raw.defaultThinkingEffort = "turbo";
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url === "/api/settings") return json(payload);
+    if (url === "/api/models") return json({ defaultModels: {} });
+    if (url === "/api/provider-cli-updates") return json({ items: [], checkedAt: null, updating: false, autoUpdate: false });
+    if (url.startsWith("/api/app-connect-code")) return json({ code: "", url: "" });
+    throw new Error(`unexpected request ${url}`);
+  };
+
+  const snapshot = await new HttpSettingsRepository(new RuntimeSpy()).load();
+  assert.equal(snapshot.config?.defaultProvider, "claude", "unknown providers must not leak into the form");
+  assert.equal(snapshot.config?.defaultThinkingEffort, "off", "unknown efforts must not leak into the form");
+
+  raw.defaultThinkingEffort = "codex:ultra";
+  const dynamic = await new HttpSettingsRepository(new RuntimeSpy()).load();
+  assert.equal(dynamic.config?.defaultThinkingEffort, "codex:ultra");
 });
 
 test("403 admin response falls back to the public About snapshot", async () => {
@@ -223,6 +250,8 @@ test("AI save preserves the empty-key sentinel and emits only a redacted runtime
     defaultOpenCodeModel: "openai/gpt-5",
     defaultGrokModel: "grok-4.5",
     defaultQoderModel: "performance",
+    defaultProvider: "grok" as const,
+    defaultThinkingEffort: "deep" as const,
     commitAiSource: "api" as const,
     systemAi: {
       id: "route-primary",
@@ -257,6 +286,8 @@ test("AI save preserves the empty-key sentinel and emits only a redacted runtime
   );
   assert.equal(Object.hasOwn(submitted ?? {}, "commitCli"), false);
   assert.equal(Object.hasOwn(submitted ?? {}, "commitModel"), false);
+  assert.equal(submitted?.defaultProvider, "grok", "the CLI tool choice must reach the config endpoint");
+  assert.equal(submitted?.defaultThinkingEffort, "deep");
   assert.equal(runtime.configs[0].systemAi.apiKey, "");
   assert.equal(runtime.configs[0].systemAi.hasApiKey, true);
 });

@@ -1,4 +1,9 @@
 import { parseJsonResponse } from "../http-adapter";
+import { taskMutationCompleted } from "../task-changes";
+
+function parseTaskMutation<T>(response: Response): Promise<T> {
+  return parseJsonResponse<T>(response).then(taskMutationCompleted);
+}
 import type {
   CreateStandaloneTaskRequest,
   CreateWorkspaceRequest,
@@ -136,7 +141,7 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
   }
 
   async create(request: CreateWorkspaceRequest): Promise<Workspace> {
-    return parseJsonResponse<Workspace>(await this.fetchImpl("/api/workspaces", {
+    return parseTaskMutation<Workspace>(await this.fetchImpl("/api/workspaces", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
@@ -190,7 +195,7 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
   }
 
   async createTask(workspaceId: string, request: CreateWorkspaceTaskRequest): Promise<WorkspaceTaskDetail> {
-    return parseJsonResponse<WorkspaceTaskDetail>(await this.fetchImpl(
+    return parseTaskMutation<WorkspaceTaskDetail>(await this.fetchImpl(
       `/api/workspaces/${encodeURIComponent(workspaceId)}/tasks`,
       {
         method: "POST",
@@ -202,7 +207,7 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
   }
 
   async createStandaloneTask(request: CreateStandaloneTaskRequest): Promise<WorkspaceTaskDetail> {
-    return parseJsonResponse<WorkspaceTaskDetail>(await this.fetchImpl("/api/tasks", {
+    return parseTaskMutation<WorkspaceTaskDetail>(await this.fetchImpl("/api/tasks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
@@ -218,7 +223,7 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
   }
 
   async updateTask(taskId: string, patch: UpdateWorkspaceTaskRequest): Promise<WorkspaceTask> {
-    return parseJsonResponse<WorkspaceTask>(await this.fetchImpl(
+    return parseTaskMutation<WorkspaceTask>(await this.fetchImpl(
       `/api/workspace-tasks/${encodeURIComponent(taskId)}`,
       {
         method: "PATCH",
@@ -230,9 +235,28 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
   }
 
   async deleteTask(taskId: string, cascade = false): Promise<void> {
-    await parseJsonResponse<Record<string, unknown>>(await this.fetchImpl(
+    await parseTaskMutation<Record<string, unknown>>(await this.fetchImpl(
       `/api/workspace-tasks/${encodeURIComponent(taskId)}${cascade ? "?cascade=1" : ""}`,
       { method: "DELETE", credentials: "same-origin" },
+    ));
+  }
+
+  /** 归档是软删除：服务端保留终端与 worktree，只把看板卡片移入归档。 */
+  async archiveTask(taskId: string): Promise<WorkspaceTask> {
+    return parseTaskMutation<WorkspaceTask>(await this.fetchImpl(
+      `/api/workspace-tasks/${encodeURIComponent(taskId)}/archive`,
+      { method: "POST", credentials: "same-origin" },
+    ));
+  }
+
+  async moveSession(taskId: string, sessionId: string): Promise<void> {
+    await parseTaskMutation(await this.fetchImpl(
+      `/api/workspace-tasks/${encodeURIComponent(taskId)}/sessions`,
+      {
+        method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      },
     ));
   }
 

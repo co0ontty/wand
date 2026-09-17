@@ -4,6 +4,7 @@ import { WandBrandMark, WandButton, WandIcon, WandIconButton } from "../ui";
 import { CodeEditorHost } from "../code-editor/host";
 import { codeEditorStore } from "../code-editor/controller";
 import { workspaceContextStore } from "../workspaces/workspace-context";
+import { openSessionWithOwningTask } from "../workspaces/session-open";
 import { workspacesStore } from "../workspaces/controller";
 import { httpWorkspacesRepository } from "../workspaces/repository";
 import { WorkspaceWelcomeChooser } from "../workspaces/workspace-agent-picker";
@@ -111,7 +112,6 @@ function ShellBlankChat({ className, queueRef, workspaceTask, workspaceProject }
     if (!runtime) throw new Error("工作空间运行环境尚未就绪，请刷新页面后重试。");
     try {
       const created = await httpWorkspacesRepository.createTask(workspaceProject.workspaceId, {
-        name: "新任务",
         worktree: false,
       });
       await Promise.resolve(runtime.openTask({
@@ -244,7 +244,10 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
           : undefined}
         onOpenSession={(sessionId) => {
           taskBoardController.close();
-          dispatch({ type: "session.select", id: sessionId });
+          // 看板卡片里的会话也要带上任务上下文，否则顶部标签栏（含「＋」）不出现。
+          void openSessionWithOwningTask(sessionId, (id) => {
+            void dispatch({ type: "session.select", id });
+          });
         }}
       /> : null}
     </main>

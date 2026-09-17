@@ -28,6 +28,7 @@ function harness() {
   const reads: Array<{ id: string; result: ReturnType<typeof deferred<WorkspaceTaskDetail>> }> = [];
   const writes: Array<{ id: string; layout: unknown; revision?: number; result: ReturnType<typeof deferred<any>> }> = [];
   const errors: string[] = [];
+  const starts: Array<{ cwd: string; options: Record<string, unknown> }> = [];
   const repository = {
     getTask(id: string) { const result = deferred<WorkspaceTaskDetail>(); reads.push({ id, result }); return result.promise; },
     saveTaskLayout(id: string, layout: unknown, revision?: number) {
@@ -53,7 +54,10 @@ function harness() {
     "./session-engine": {
       goHome: () => { state.selectedId = null; }, dismissDrawerIfOverlay: () => {},
       selectSession: (id: string) => { state.selectedId = id; },
-      startSessionInCwd: () => Promise.resolve("new-session"),
+      startSessionInCwd: (cwd: string, options: Record<string, unknown>) => {
+        starts.push({ cwd, options });
+        return Promise.resolve("new-session");
+      },
     },
   };
   const source = readFileSync(new URL("../src/web-ui/browser/workspaces-adapter.ts", import.meta.url), "utf8");
@@ -63,8 +67,23 @@ function harness() {
     localStorage: { setItem: () => {}, removeItem: () => {} } });
   exports.installWorkspacesLegacyAdapter();
   const open = (id: string) => runtime.openTask({ taskId: id, taskName: id, workspaceId: "workspace", workspaceName: "workspace", cwd: `/${id}` });
-  return { runtime, reads, writes, errors, state, context: () => context, open };
+  return { runtime, reads, writes, errors, starts, state, context: () => context, open };
 }
+
+test("task prompts start a bound session for both PTY and structured runners", async () => {
+  for (const kind of ["pty", "structured"] as const) {
+    const h = harness();
+    const created = h.runtime.newTaskSession({ taskId: "A", workspaceId: "workspace", cwd: "/A",
+      target: "pi", kind, prompt: "实现这个任务的第一步" });
+    await tick();
+    h.reads[0].result.resolve(fixture("A"));
+    await created;
+    assert.equal(h.starts[0].cwd, "/A");
+    assert.equal(h.starts[0].options.workspaceTaskId, "A");
+    assert.equal(h.starts[0].options.kind, kind);
+    assert.equal(h.starts[0].options.initialInput, "实现这个任务的第一步");
+  }
+});
 
 test("adapter routes restoration, user edits and creation through one task revision queue", async () => {
   const h = harness();

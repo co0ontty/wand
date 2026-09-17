@@ -1,3 +1,4 @@
+import { HttpResponseError } from "../http-adapter";
 import type { TaskLayoutSaveOptions, TaskWindowLayout, WorkspaceTaskDetail, WorkspacesRepository } from "./types";
 
 type SaveResult = "saved" | "superseded" | "failed";
@@ -57,10 +58,14 @@ export function createTaskLayoutController(
       } catch (error) {
         // Cancel only edits queued before this failure, never edits made during recovery.
         const failedEpoch = writes.epoch;
-        writes.automaticBlocked = true;
+        // Moving a session changes the server layout revision. A background
+        // reconciliation racing that move should restore quietly, not report a
+        // failed user edit or permanently block future automatic reconciliation.
+        const remoteReconciliation = next.automatic && error instanceof HttpResponseError && error.status === 409;
+        writes.automaticBlocked = !remoteReconciliation;
         settlePending(writes, "failed");
         writes.revision = undefined;
-        callbacks.onError(taskId, error);
+        if (!remoteReconciliation) callbacks.onError(taskId, error);
         try {
           const remote = await readRevision(taskId, writes);
           if (writes.epoch === failedEpoch) callbacks.onRestore(taskId, remote);

@@ -13534,7 +13534,7 @@
     html:not(.is-wand-app) .input-composer.is-terminal-interactive .composer-main-row,
     html:not(.is-wand-app) .input-composer.is-terminal-interactive:focus-within .composer-main-row,
     html:not(.is-wand-app) .input-composer.is-terminal-interactive.is-expanded .composer-main-row {
-      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-columns: auto minmax(0, 1fr) auto;
       grid-template-rows: auto;
       row-gap: 0;
       min-height: 48px;
@@ -13544,7 +13544,7 @@
     html:not(.is-wand-app) .input-composer.is-terminal-interactive:focus-within .composer-input-wrap,
     html:not(.is-wand-app) .input-composer.is-terminal-interactive.is-expanded .composer-input-wrap {
       display: flex;
-      grid-column: 1;
+      grid-column: 2;
       grid-row: 1;
       /* 覆盖 html:not(.is-wand-app) 的 48/52px 草稿高度：
          直通模式是一行控制面，多行草稿在内部滚动。 */
@@ -13561,19 +13561,42 @@
       line-height: 1.45;
     }
 
-    /* Agent-only 的左组（附件 / 模式 / 权限 chip）在 PTY 直通里没有意义：
-       附件走终端粘贴协议，模式与权限由 CLI 自己管。整组收起，腾出书写宽度。 */
+    /* Agent-only 的模型 / 权限 chip 在 PTY 直通里没有意义（这些设置只影响结构化会话，
+       PTY 里的 CLI 自己管），所以整组里的 chip 都被下面的规则收掉。
+       但附件入口必须留下：PTY 会话没有草稿概念，`+` → 上传附件 是桌面上唯一能用
+       文件选择器挑图的入口（拖拽与剪贴板粘贴只覆盖一部分工作流），选完直接走终端
+       粘贴协议把路径送进 CLI，不经过 composer 提交。*/
     html:not(.is-wand-app) .input-composer.is-terminal-interactive .composer-actions-left,
     html:not(.is-wand-app) .input-composer.is-terminal-interactive:focus-within .composer-actions-left,
     html:not(.is-wand-app) .input-composer.is-terminal-interactive.is-expanded .composer-actions-left {
-      display: none !important;
+      grid-column: 1;
+      grid-row: 1;
+      padding: 0 2px;
     }
 
     html:not(.is-wand-app) .input-composer.is-terminal-interactive .composer-actions-right,
     html:not(.is-wand-app) .input-composer.is-terminal-interactive:focus-within .composer-actions-right,
     html:not(.is-wand-app) .input-composer.is-terminal-interactive.is-expanded .composer-actions-right {
-      grid-column: 2;
+      grid-column: 3;
       grid-row: 1;
+    }
+
+    /* 直通模式下 popover 只留「上传附件 / 终端交互」：三件套（模式 / 模型 / 思考）
+       只影响结构化会话，PTY 里的 CLI 自己管，露出来只会让人以为能改。
+       分隔线也一起收掉，省得留下一条悬空的细分隔。 */
+    html:not(.is-wand-app) .input-panel:has(.input-composer.is-terminal-interactive) .composer-plus-popover > .plus-popover-sep,
+    html:not(.is-wand-app) .input-panel:has(.input-composer.is-terminal-interactive) .composer-plus-popover > .plus-popover-trio-wrap {
+      display: none !important;
+    }
+
+    /* 直通 composer 只有 50px 高（普通态两行草稿是 84px），照搬 72px 锚点会
+       把 popover 贴在按钮上，收窄到 62px 留出和普通态一致的间距。 */
+    html:not(.is-wand-app) .input-panel:has(.input-composer.is-terminal-interactive) .composer-plus-popover {
+      bottom: calc(
+        62px
+        + var(--input-safe-bottom, var(--safe-bottom, 0px))
+        + var(--keyboard-offset, 0px)
+      );
     }
 
     html:not(.is-wand-app) .input-composer.is-terminal-interactive .attachment-preview,
@@ -14273,6 +14296,44 @@
       flex-direction: column;
       min-width: 0;
     }
+
+    .workspace-task-group.is-session-drop-target {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+      border-radius: var(--radius-sm);
+      background: var(--accent-muted);
+    }
+
+    .workspace-task-drop-hint {
+      padding: 5px 8px;
+      margin: 0;
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 600;
+      pointer-events: none;
+    }
+
+    .workspace-task-empty {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      margin: 1px 0 6px 10px;
+      padding: 6px 9px;
+      border: 0;
+      border-left: 1px dashed var(--border-strong);
+      background: transparent;
+      color: var(--text-muted);
+      font: inherit;
+      font-size: 11px;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .workspace-task-empty:hover,
+    .workspace-task-empty:focus-visible { color: var(--accent); background: var(--accent-muted); }
+    .workspace-session[draggable="true"] { cursor: grab; }
+    .workspace-session-move-menu { max-height: min(420px, 70vh); overflow-y: auto; max-width: min(360px, 90vw); }
+    .workspace-session-move-hint { padding: 6px 10px; color: var(--text-muted); font-size: 11px; }
 
     .workspace-task-group .workspace-task-chevron {
       flex: 0 0 auto;
@@ -15515,11 +15576,6 @@
       border-left: 1px solid var(--border-subtle);
     }
 
-    #app[data-react-shell="enabled"] .workspace-global-tasks .workspace-tasks {
-      margin-left: 0;
-      padding-left: 0;
-      border-left: 0;
-    }
 
     /* 未命名任务折叠后，只有未归档目录会留下空的 tasks 容器；别让它画出一截 6px 导轨。 */
     #app[data-react-shell="enabled"] .workspace-tasks:empty {
@@ -16024,6 +16080,7 @@
     /* 任务行的行尾按钮参与 flex 布局（不再是绝对定位），为了给旧 24px 绝对定位
        按钮留位而写的 gutter 已经撤掉；按钮自身回到 24px 紧凑盒子
        （.workspace-task-action），否则标题会被两侧预留空间挤没。 */
+    #app[data-react-shell="enabled"] .workspace-task-action.add,
     #app[data-react-shell="enabled"] .workspace-task-action.more,
     #app[data-react-shell="enabled"] .workspace-task-confirm {
       position: static;
@@ -16033,6 +16090,7 @@
 
     @media (hover: hover) and (pointer: fine) {
       #app[data-react-shell="enabled"] .workspace-row-actions,
+      #app[data-react-shell="enabled"] .workspace-task-action.add,
       #app[data-react-shell="enabled"] .workspace-task-action.more {
         opacity: 0;
         transition: opacity 120ms ease;
@@ -16040,7 +16098,9 @@
 
       #app[data-react-shell="enabled"] .workspace-row:hover .workspace-row-actions,
       #app[data-react-shell="enabled"] .workspace-row:focus-within .workspace-row-actions,
+      #app[data-react-shell="enabled"] .workspace-task:hover .workspace-task-action.add,
       #app[data-react-shell="enabled"] .workspace-task:hover .workspace-task-action.more,
+      #app[data-react-shell="enabled"] .workspace-task:focus-within .workspace-task-action.add,
       #app[data-react-shell="enabled"] .workspace-task:focus-within .workspace-task-action.more,
       #app[data-react-shell="enabled"] .workspace-task-action.more[aria-expanded="true"] {
         opacity: 1;
@@ -16071,6 +16131,7 @@
       .sidebar-feature-nav .sidebar-feature-list > li > button,
       #app[data-react-shell="enabled"] .workspace-task,
       #app[data-react-shell="enabled"] .workspace-row-actions,
+      #app[data-react-shell="enabled"] .workspace-task-action.add,
       #app[data-react-shell="enabled"] .workspace-task-action.more {
         transition: none;
       }
@@ -16684,10 +16745,12 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task {
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task.active {
   box-shadow: inset 3px 0 0 var(--accent);
 }
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task-action.add,
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task-action.more {
   z-index: 1;
   border-radius: 7px;
 }
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task-action.add:hover,
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task-action.more:hover,
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task-action.more[aria-expanded="true"] {
   color: var(--accent-active);
@@ -16940,9 +17003,6 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .worksp
   border-left: 0;
   gap: 4px;
 }
-html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-global-tasks .workspace-tasks {
-  padding-left: 0;
-}
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .sidebar-peek .workspace-tasks {
   margin: 0;
   padding: 0;
@@ -16980,6 +17040,7 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .worksp
 /* Fine-pointer actions appear in place without reserving title width at rest.
    Keyboard focus and open menus keep their actions visible. */
 @media (hover: hover) and (pointer: fine) {
+  html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-task:not(:hover):not(:focus-within):not(:has([aria-expanded="true"])) .workspace-task-action.add,
   html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-task:not(:hover):not(:focus-within):not(:has([aria-expanded="true"])) .workspace-task-action.more {
     width: 0;
     min-width: 0;
@@ -17616,6 +17677,18 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined.pinned.
 .task-board-card:active { cursor: grabbing; }
 .task-board-card.is-dragging { opacity: 0; }
 .task-board-card.is-busy { opacity: 0.7; }
+.task-board-card.is-session-drop-target {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  background: var(--accent-muted);
+}
+.task-board-session-list { display: flex; flex-direction: column; gap: 2px; padding: 4px 0 0 9px; border-left: 1px solid var(--border-strong); }
+.task-board-session-row { display: flex; align-items: center; gap: 4px; min-width: 0; cursor: grab; }
+.task-board-session-open { display: flex; align-items: center; gap: 7px; flex: 1; min-width: 0; padding: 5px 2px; border: 0; background: transparent; color: var(--text-secondary); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.task-board-session-open span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-board-session-open svg { flex-shrink: 0; color: var(--text-muted); }
+.task-board-session-open:hover { color: var(--accent); }
+.task-board-session-open:focus-visible { outline: 2px solid var(--accent); border-radius: var(--radius-xs); }
 .task-board-card.is-shift { transform: translateY(6px); }
 .task-board-card.is-doing {
   border-color: color-mix(in srgb, var(--tb-column-doing) 26%, var(--border-subtle));
@@ -17633,6 +17706,7 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined.pinned.
 
 .task-board-card-open:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .task-board-card > :not(.task-board-card-open) { position: relative; z-index: 2; flex-shrink: 0; pointer-events: none; }
+.task-board-card > .task-board-session-list { pointer-events: auto; }
 .task-board-card-sessions,
 .task-board-session,
 .task-board-conversation,
@@ -18773,8 +18847,37 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined.pinned.
 .task-board-list-header { color: var(--status-color, var(--text-secondary)); }
 .task-board-list-rows { padding: 2px 8px 0; }
 
-.task-board-archive-folder {
+.task-board-archive-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   margin-top: 6px;
+}
+.task-board-archive-zone.is-over .task-board-archive-hint {
+  border-color: var(--accent);
+  background: var(--accent-muted);
+  color: var(--accent);
+}
+.task-board-archive-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 0;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: var(--tb-hairline) dashed color-mix(in srgb, var(--text-primary) 14%, transparent);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-align: center;
+}
+.task-board-archive-zone.is-dragging-task .task-board-archive-hint {
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  color: var(--text-secondary);
+}
+.task-board-archive-folder {
   border: var(--tb-hairline) solid color-mix(in srgb, var(--text-primary) 8%, transparent);
   border-radius: 10px;
   background: color-mix(in srgb, var(--bg-primary) 70%, transparent);
@@ -18811,7 +18914,7 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined.pinned.
 .task-board-list-row.is-archived strong { color: var(--text-secondary); font-weight: 500; }
 .task-board-card.is-archived { opacity: 0.88; }
 .task-board-status-glyph.is-archived { color: var(--text-tertiary); }
-.task-board-column-list > .task-board-archive-folder { flex: 0 0 auto; }
+.task-board-column-list > .task-board-archive-zone { flex: 0 0 auto; }
 
 .task-board-dashboard {
   --dashboard-summary-text: var(--text-primary);

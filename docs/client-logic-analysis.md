@@ -162,6 +162,24 @@ Web pending PTY 输入有数量/TTL 限制，过期丢弃以免重连后输入�
 
 附件上传与模型执行不是同一步；上传成功但发送失败时，应能保留重试内容而不假装消息已执行。后续跨端验收同时覆盖文字、中文输入法、图片、后台切换和第二包失败。
 
+#### 直通（PTY 交互）下的附件写入
+
+直通模式隐藏了消息气泡，`+` 的「上传附件」不走草稿，而是把落盘路径直接写进正在运行的 CLI。写入序列由 `pty-paste.ts` 的 `buildPtyAttachmentChunks` 统一生成，两条 composer 路径（直通粘贴、恢复后的普通发送）共用：
+
+```text
+每个文件：{data: "\x1b[200~<路径>\x1b[201~", shortcutKey: "paste"}
+图片且 provider 自己不补空格时（claude / pi）：{data: " "}
+发送时追写：{data: <文本>, shortcutKey: "enter_text"} → {data: "\r", shortcutKey: "enter_text"}
+```
+
+- 必须是真正的 paste 事件（`\x1b[200~ … \x1b[201~`）加**单独的重绘等待**：codex 只把 paste 事件里的图片路径转成附件，一个文件一个边界才能得到多个 chip。
+- 路径标 `paste` 而不是 `enter_text`：否则上传路径会被 `session-topic` 当成首行文本生成会话标题，也会被 codex 自动恢复的 initialInput 取走。
+- chip 格式各家不同（claude / codex / grok `[Image #1]`、opencode `[Image 1]`、pi `[#image 1]`、qoder `[Image …png]`）。claude / pi 拼完不留空格，其余 provider 自己补一个，所以分隔空格只在 `providerGluesAfterAttachment()` 为真时才发。
+- claude / pi 会把粘贴的路径异步换成 chip 并重绘整行草稿，抢在这次重绘之前发的 chunk 会被吃掉，所以 chunk 之间等终端安静（`waitForTerminalSettled`，见 `terminal.ts` 的 `PTY_ATTACHMENT_SETTLE_*`）而不是固定 sleep；图片粘贴后的那一包（普通发送时的提交回车）用更长的 3s 上限（`PTY_IMAGE_CHIP_SETTLE_MAX_MS`），否则回车会抢在芯片完成之前发出，codex 就把路径当普通文本收下了。
+- 刚 resume 的 CLI 还没进 bracketed paste 模式，此时写入的粘贴标记会以字面量出现在草稿行（codex 显示 `^[[200~`），所以恢复后先等 CLI 画出自己的 TUI（`waitForProviderPaint`：至少 3s + 有新输出 + 终端安静，上限 5s）再写。
+- 一批附件一次上传 + 一条串行写入队列（`queueAttachmentChunks`）；逐文件排队会让「上一个芯片的分隔空格」插到「下一个附件路径」之后。
+- 直通样式只对 `html:not(.is-wand-app)` 生效，原生壳（iOS / Android）仍是「原生顶栏 + WebView 终端 + 原生输入栏」；Android 靠脚本点 `#terminal-interactive-toggle-top`，所以该元素必须留在 DOM 里（只隐藏，不删除）。
+
 ## 7. 权限、模型与“正在回答”
 
 - Claude PTY 和 Claude SDK structured/default 都可以有 pendingEscalation。
@@ -184,6 +202,8 @@ Web pending PTY 输入有数量/TTL 限制，过期丢弃以免重连后输入�
 | 通知点击 | 由 session ID/deep link 找回任务上下文，而不是再创建一条会话 |
 
 批量清空在任务操作中已经存在，不再需要从零恢复旧平铺列表。隔离任务删除默认级联与非隔离默认解绑不同。通知/Live Activity/launcher 快捷方式分别有自己的 store，回退与进程重建需验证 ID 仍可达。
+
+「停止 PTY」的广播契约：`ProcessManager.stop()` 自己完成状态转换（先清 `ptyProcess` 再置 `stopped`），因此迟到的 `handleTerminalExit` 会被当成过期回调直接 return，`ended` 必须由 `stop()` 自己发（与 structured `stop()` 一致）。少了它，各端只会继续显示运行中：直通输入框不关闭、附件/发送全部打进已经死掉的 PTY（服务端日志 `Rejecting input: session … not running (stopped)`），`status` / `providerCliActive` 也要跟着一起下发才不停在运行徒标。
 
 ## 9. 工作空间、分屏与布局
 

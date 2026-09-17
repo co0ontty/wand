@@ -1,4 +1,9 @@
 import * as React from "react";
+import { subscribeTaskChanges } from "../task-changes";
+import { draggedTaskId, isTaskDrag, startTaskDrag, TASK_DRAG_TYPE } from "./task-drag";
+import { draggedSessionId, isSessionDrag, startSessionDrag } from "../workspaces/session-drag";
+import { SessionMoveButton } from "../workspaces/session-move-button";
+import { workspacesStore } from "../workspaces/controller";
 import type { WandTaskAgent, WandTaskPriority, WandTaskStatus } from "../../../task-types";
 import {
   WandButton,
@@ -77,8 +82,6 @@ import { wandOverlay } from "../overlay-controller";
 import { confirmDiscardTaskDraft } from "../task-draft-guard";
 import { readTaskBoardViewState, writeTaskBoardViewState } from "./task-board-view-state";
 
-const TASK_MIME = "application/x-wand-task";
-
 interface DraftState {
   workspaceId: string;
   title: string;
@@ -143,6 +146,7 @@ export function TaskBoardHost({
   const [catalog, setCatalog] = React.useState<IssueModelCatalog | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [busyId, setBusyId] = React.useState("");
+  const [sessionDropTarget, setSessionDropTarget] = React.useState("");
   const [error, setError] = React.useState("");
   const [notice, setNotice] = React.useState("");
   const [query, setQuery] = React.useState(restored.query);
@@ -170,6 +174,7 @@ export function TaskBoardHost({
   });
   const [draggedId, setDraggedId] = React.useState("");
   const [dropStatus, setDropStatus] = React.useState<WandTaskStatus | "">("");
+  const [archiveDrop, setArchiveDrop] = React.useState(false);
   const [contextMenu, setContextMenu] = React.useState<{ taskId: string; x: number; y: number } | null>(null);
   const loadGenerationRef = React.useRef(0);
   const workspaceGenerationRef = React.useRef(0);
@@ -182,10 +187,9 @@ export function TaskBoardHost({
     setNotice("");
   }, [notice]);
 
-  const reload = React.useCallback(async (): Promise<void> => {
+  const reload = React.useCallback(async (silent = false): Promise<void> => {
     const generation = ++loadGenerationRef.current;
-    setLoading(true);
-    setError("");
+    if (!silent) { setLoading(true); setError(""); }
     try {
       const next = await taskBoardRepository.list();
       if (generation !== loadGenerationRef.current) return;
@@ -232,9 +236,10 @@ export function TaskBoardHost({
   React.useEffect(() => {
     if (!controller.open) return;
     // 新建对话框打开时用更高频率同步目录；仅看板打开时维持普通轮询。
-    const interval = window.setInterval(() => void loadWorkspaces(), createOpen ? 2_000 : 6_000);
-    return () => window.clearInterval(interval);
-  }, [controller.open, createOpen, loadWorkspaces]);
+    const interval = window.setInterval(() => { void loadWorkspaces(); void reload(true); }, createOpen ? 2_000 : 6_000);
+    const unsubscribe = subscribeTaskChanges(() => { void reload(true); void loadWorkspaces(); });
+    return () => { window.clearInterval(interval); unsubscribe(); };
+  }, [controller.open, createOpen, loadWorkspaces, reload]);
 
   React.useEffect(() => {
     setError("");
@@ -406,6 +411,30 @@ export function TaskBoardHost({
     });
   }, [reload, rememberAgent, runFor, tasks]);
 
+  // 归档也是软删除：卡片进归档目录、侧栏任务隐藏，终端与执行记录全部保留。
+  const archiveCard = React.useCallback(async (taskId: string): Promise<void> => {
+    const moving = tasks.find((task) => task.id === taskId);
+    if (!moving || moving.status === "archived") return;
+    await runFor(taskId, async () => {
+      await taskBoardRepository.update(taskId, { status: "archived" });
+      // 归档目录默认折叠，不展开的话卡片只是从看板上消失，用户看不出落在哪里。
+      setCollapsedList((current) => ({ ...current, archived: false }));
+      setNotice(`已归档「${moving.title}」，拖回任意列或右键「恢复到等待认领」即可恢复。`);
+      await reload();
+    });
+  }, [reload, runFor, tasks]);
+
+  // 恢复归档卡片：卡片回到「等待认领」，侧栏任务由服务端反向投影重新出现。
+  const restoreCard = React.useCallback(async (taskId: string): Promise<void> => {
+    const moving = tasks.find((task) => task.id === taskId);
+    if (!moving || moving.status !== "archived") return;
+    await runFor(taskId, async () => {
+      await taskBoardRepository.update(taskId, { status: "todo" });
+      setNotice(`已恢复「${moving.title}」到「等待认领」。`);
+      await reload();
+    });
+  }, [reload, runFor, tasks]);
+
   const selected = tasks.find((task) => task.id === selectedId) ?? null;
   const visible = filterIssues(tasks, query, filterWorkspaceId, filters);
   const grouped = groupIssuesByStatus(visible);
@@ -496,18 +525,41 @@ export function TaskBoardHost({
         draggedId === task.id && "is-dragging",
         dropStatus === task.status && draggedId && draggedId !== task.id && "is-shift",
         busy && "is-busy",
+        sessionDropTarget === task.id && "is-session-drop-target",
       )}
+      onDragOver={(event) => {
+        if (busy || !isSessionDrag(event.dataTransfer)) return;
+        event.preventDefault(); event.stopPropagation();
+        event.dataTransfer.dropEffect = "move";
+        setSessionDropTarget(task.id);
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setSessionDropTarget("");
+      }}
+      onDrop={(event) => {
+        if (!isSessionDrag(event.dataTransfer)) return;
+        event.preventDefault(); event.stopPropagation();
+        setSessionDropTarget("");
+        const id = draggedSessionId(event.dataTransfer);
+        if (!id || busy || task.sessions.some((session) => session.id === id)) return;
+        void runFor(task.id, async () => {
+          await taskBoardRepository.moveSession(task.id, id);
+          setNotice(`已移入「${task.title}」，运行目录不变`);
+          await reload();
+          await workspacesStore.getRuntime()?.refreshSessions();
+        });
+      }}
       data-task-id={task.id}
       draggable
       onDragStart={(event) => {
-        event.dataTransfer.effectAllowed = "move";
-        event.dataTransfer.setData("text/plain", task.id);
-        event.dataTransfer.setData(TASK_MIME, task.id);
+        if (event.target !== event.currentTarget) return;
+        startTaskDrag(event.dataTransfer, task.id);
         setDraggedId(task.id);
       }}
       onDragEnd={() => {
         setDraggedId("");
         setDropStatus("");
+        setArchiveDrop(false);
       }}
       onContextMenu={(event) => {
         event.preventDefault();
@@ -530,7 +582,7 @@ export function TaskBoardHost({
       <TaskBoardProgressRow task={task}/>
       <div className="task-board-card-meta" aria-label="任务属性">
         <span className="task-board-card-id">{task.identifier}</span>
-        <TaskBoardProjectChip name={task.workspace ? task.workspace.name : "未指定项目"}/>
+        <TaskBoardProjectChip name={task.workspace ? task.workspace.name : "未归属工作区"}/>
         {task.milestone ? <TaskBoardMilestoneChip name={task.milestone.name}/> : null}
         <TaskBoardPriorityChip priority={task.priority}/>
         {task.labels.slice(0, 2).map((label) => <TaskBoardLabelChip key={label} label={label}/>)}
@@ -543,6 +595,18 @@ export function TaskBoardHost({
           ? <TaskBoardConversationButton sessions={task.sessions} onOpen={onOpenSession}/>
           : null}
       </div>
+      {sessionDropTarget === task.id && <p className="workspace-task-drop-hint">移入此任务 · 运行目录不变</p>}
+      {task.sessions.length > 0 && <div className="task-board-session-list" aria-label={`${task.title} 的会话`}>
+        {task.sessions.map((session) => <div key={session.id} className="task-board-session-row"
+          data-session-id={session.id} draggable={!busy}
+          onDragStart={(event) => { event.stopPropagation(); startSessionDrag(event.dataTransfer, session.id); }}>
+          <button type="button" className="task-board-session-open" title={`${session.title}\n${session.cwd}`}
+            onClick={() => onOpenSession?.(session.id)}>
+            <WandIcon name="terminal" size={13}/><span>{session.title || session.provider || "CLI 会话"}</span>
+          </button>
+          <SessionMoveButton sessionId={session.id} taskId={task.workspaceTaskId ?? undefined}/>
+        </div>)}
+      </div>}
       {task.status === "doing"
         ? <TaskBoardProcessingRow task={task} onOpenSession={onOpenSession}/>
         : null}
@@ -556,8 +620,9 @@ export function TaskBoardHost({
       key={status}
       className={classNames("task-board-column", `is-${status}`, dropStatus === status && "is-drop-target")}
       aria-labelledby={`column-${status}`}
-      onDragEnter={() => setDropStatus(status)}
+      onDragEnter={(event) => { if (!isSessionDrag(event.dataTransfer)) setDropStatus(status); }}
       onDragOver={(event) => {
+        if (isSessionDrag(event.dataTransfer)) return;
         event.preventDefault();
         setDropStatus(status);
       }}
@@ -566,8 +631,9 @@ export function TaskBoardHost({
         setDropStatus((current) => current === status ? "" : current);
       }}
       onDrop={(event) => {
+        if (isSessionDrag(event.dataTransfer)) return;
         event.preventDefault();
-        const id = event.dataTransfer.getData(TASK_MIME) || event.dataTransfer.getData("text/plain");
+        const id = draggedTaskId(event.dataTransfer);
         setDropStatus("");
         setDraggedId("");
         if (id) void dropTask(status, id);
@@ -598,15 +664,50 @@ export function TaskBoardHost({
           : null}
         {!loading && items.length === 0 && !(status === "done" && grouped.archived.length > 0) && <p className="task-board-column-empty">{column.empty}</p>}
         {items.map(renderCard)}
-        {status === "done" ? <TaskBoardArchiveFolder
-          count={grouped.archived.length}
-          open={archiveOpen}
-          onToggle={() => setCollapsedList((current) => ({ ...current, archived: !current.archived }))}
-        >
-          <div className="task-board-archive-cards">
-            {grouped.archived.map(renderCard)}
+        {status === "done" ? (
+          <div
+            className={classNames(
+              "task-board-archive-zone",
+              draggedId && "is-dragging-task",
+              archiveDrop && "is-over",
+            )}
+            aria-label="归档区"
+            onDragOver={(event) => {
+              if (!isTaskDrag(event.dataTransfer)) return;
+              event.preventDefault();
+              event.stopPropagation();
+              event.dataTransfer.dropEffect = "move";
+              setArchiveDrop(true);
+            }}
+            onDragLeave={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setArchiveDrop(false);
+            }}
+            onDrop={(event) => {
+              if (!isTaskDrag(event.dataTransfer)) return;
+              event.preventDefault();
+              event.stopPropagation();
+              setArchiveDrop(false);
+              setDraggedId("");
+              setDropStatus("");
+              const id = event.dataTransfer.getData(TASK_DRAG_TYPE);
+              if (id) void archiveCard(id);
+            }}
+          >
+            <TaskBoardArchiveFolder
+              count={grouped.archived.length}
+              open={archiveOpen}
+              onToggle={() => setCollapsedList((current) => ({ ...current, archived: !current.archived }))}
+            >
+              <div className="task-board-archive-cards">
+                {grouped.archived.map(renderCard)}
+              </div>
+            </TaskBoardArchiveFolder>
+            <p className="task-board-archive-hint">
+              <WandIcon name="archive" size={12}/>
+              {archiveDrop ? "松开鼠标，归档此任务" : "拖到这里归档：侧栏隐藏，终端与记录保留"}
+            </p>
           </div>
-        </TaskBoardArchiveFolder> : null}
+        ) : null}
       </div>
     </section>;
   };
@@ -760,6 +861,10 @@ export function TaskBoardHost({
       }}
       onArchive={() => {
         void removeTask(contextTask);
+        setContextMenu(null);
+      }}
+      onRestore={() => {
+        void restoreCard(contextTask.id);
         setContextMenu(null);
       }}
       onClose={() => setContextMenu(null)}

@@ -68,7 +68,9 @@ export class SessionRegistry {
   }
 
   get(id: string): SessionSnapshot | null {
-    return this.structured.get(id) ?? this.processes.getOwned(id) ?? this.storage.getSession(id);
+    const snapshot = this.structured.get(id) ?? this.processes.getOwned(id) ?? this.storage.getSession(id);
+    const membership = this.storage.getSessionWorkspace(id);
+    return snapshot && membership ? { ...snapshot, ...membership } : snapshot;
   }
 
   getLatest(id: string): SessionSnapshot | null {
@@ -82,9 +84,21 @@ export class SessionRegistry {
       if (!byId.has(snapshot.id)) byId.set(snapshot.id, snapshot);
     }
     for (const snapshot of this.storage.loadSessionsSlim()) {
-      if (!byId.has(snapshot.id)) byId.set(snapshot.id, snapshot);
+      const live = byId.get(snapshot.id);
+      byId.set(snapshot.id, live ? {
+        ...live, workspaceId: snapshot.workspaceId, workspaceTaskId: snapshot.workspaceTaskId,
+      } : snapshot);
     }
     return Array.from(byId.values()).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  }
+
+  /** Membership belongs to storage; both runners only refresh their live projection. */
+  refreshSessionWorkspace(id: string): void {
+    const membership = this.storage.getSessionWorkspace(id);
+    if (!membership) return;
+    const owner = this.ownerOf(id);
+    if (owner === "structured") this.structured.setSessionWorkspace(id, membership);
+    else if (owner === "pty") this.processes.setSessionWorkspace(id, membership);
   }
 
   setSessionModel(id: string, model: string | null): SessionSnapshot | null {

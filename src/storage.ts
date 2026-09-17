@@ -513,8 +513,8 @@ function sessionPersistAssignments(): string {
              title = excluded.title,
              description = excluded.description,
              session_options = excluded.session_options,
-             workspace_id = excluded.workspace_id,
-             workspace_task_id = excluded.workspace_task_id`;
+             workspace_id = command_sessions.workspace_id,
+             workspace_task_id = command_sessions.workspace_task_id`;
 }
 
 function sessionRuntimeMetadataAssignments(): string {
@@ -896,6 +896,7 @@ const INIT_SQL = `
     agent_json TEXT,
     workspace_task_id TEXT,
     title_source TEXT,
+    auto_title_signature TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE SET NULL
@@ -920,8 +921,10 @@ function ensureWandTaskSchema(db: DatabaseSync): void {
   // 任务的默认派发配置（CLI 工具 / 模型 / 思考深度）。只加列，历史行保持 NULL。
   if (columns.length > 0 && !names.has("agent_json")) db.exec("ALTER TABLE wand_tasks ADD COLUMN agent_json TEXT");
   if (columns.length > 0 && !names.has("workspace_task_id")) db.exec("ALTER TABLE wand_tasks ADD COLUMN workspace_task_id TEXT");
-  // 标题来源：'user' = 用户手写，'auto' = 由描述自动生成。只加列，历史行保持 NULL（读取时视为 user）。
+  // 标题来源：'user' = 用户手写，'auto' = 由描述/会话内容自动生成。只加列，历史行保持 NULL（读取时视为 user）。
   if (columns.length > 0 && !names.has("title_source")) db.exec("ALTER TABLE wand_tasks ADD COLUMN title_source TEXT");
+  // 自动标题最近一次的输入指纹：内容没变就不再重复总结（也避免自动标题来回震荡）。只加列。
+  if (columns.length > 0 && !names.has("auto_title_signature")) db.exec("ALTER TABLE wand_tasks ADD COLUMN auto_title_signature TEXT");
   // 里程碑：只加列，历史行保持 NULL；里程碑本体在 wand_milestones（INIT_SQL 建表）。
   if (columns.length > 0 && !names.has("milestone_id")) db.exec("ALTER TABLE wand_tasks ADD COLUMN milestone_id TEXT");
   if (columns.length > 0) {
@@ -1255,6 +1258,12 @@ export class WandStorage {
   }
 
   /** 显式更新某会话的工作空间归属（用于创建时绑定）。 */
+  getSessionWorkspace(sessionId: string): Pick<SessionSnapshot, "workspaceId" | "workspaceTaskId"> | null {
+    const row = this.db.prepare("SELECT workspace_id, workspace_task_id FROM command_sessions WHERE id = ?")
+      .get(sessionId) as { workspace_id: string | null; workspace_task_id: string | null } | undefined;
+    return row ? { workspaceId: row.workspace_id ?? undefined, workspaceTaskId: row.workspace_task_id ?? undefined } : null;
+  }
+
   setSessionWorkspaceId(sessionId: string, workspaceId: string | null): void {
     this.db.prepare("UPDATE command_sessions SET workspace_id = ? WHERE id = ?").run(workspaceId, sessionId);
   }
@@ -1363,9 +1372,14 @@ export class WandStorage {
     status?: WorkspaceTaskStatus;
     worktree?: WorkspaceTaskWorktree | null;
     milestoneId?: string | null;
+    workspaceId?: string;
   }): void {
     const assignments: string[] = [];
     const values: Array<string | null> = [];
+    if (patch.workspaceId !== undefined) {
+      assignments.push("workspace_id = ?");
+      values.push(patch.workspaceId);
+    }
     if (patch.name !== undefined) {
       assignments.push("name = ?");
       values.push(patch.name);
@@ -1384,6 +1398,19 @@ export class WandStorage {
     }
     if (assignments.length === 0) return;
     this.db.prepare(`UPDATE workspace_tasks SET ${assignments.join(", ")} WHERE id = ?`).run(...values, id);
+    const card = this.getWandTaskByWorkspaceTaskId(id);
+    if (card) {
+      // Reverse projection uses direct SQL, so these writers cannot recurse.
+      this.updateWandTask(card.id, {
+        ...(patch.name !== undefined ? { title: patch.name, titleSource: "user" as const } : {}),
+        ...(patch.milestoneId !== undefined ? { milestoneId: patch.milestoneId } : {}),
+        ...(patch.status !== undefined ? {
+          status: patch.status === "done"
+            ? card.status === "archived" ? "archived" as const : "done" as const
+            : card.status === "todo" ? "todo" as const : "doing" as const,
+        } : {}),
+      });
+    }
   }
 
   saveWorkspaceTaskLayout(
@@ -1443,8 +1470,12 @@ export class WandStorage {
          COALESCE((SELECT GROUP_CONCAT(path || ':' || name || ':' || updated_at, '|')
                    FROM (SELECT path, name, updated_at FROM session_directory_names ORDER BY path)), '') AS directoryNames`
     ).get() as { workspaceNames: string; directoryNames: string };
+    const membership = this.db.prepare(
+      "SELECT id, workspace_id, workspace_task_id FROM command_sessions ORDER BY id",
+    ).all();
     return JSON.stringify({
       sessions,
+      membership,
       tasks,
       workspaces,
       names,
@@ -1454,7 +1485,7 @@ export class WandStorage {
   /** GET /api/wand-tasks 的顺序：新创建在前。客户端按此顺序渲染，不再本地排序。 */
   listWandTasks(workspaceId?: string | null): import("./task-types.js").WandTask[] {
     const rows = this.db.prepare(
-      `SELECT id, identifier, workspace_id, workspace_task_id, title, title_source, description, status, priority, labels_json, due_date, milestone_id, sort_order, agent_json, created_at, updated_at
+      `SELECT id, identifier, workspace_id, workspace_task_id, title, title_source, auto_title_signature, description, status, priority, labels_json, due_date, milestone_id, sort_order, agent_json, created_at, updated_at
        FROM wand_tasks ${workspaceId === undefined ? "" : "WHERE workspace_id IS ?"}
        ORDER BY created_at DESC, rowid DESC`,
     ).all(...(workspaceId === undefined ? [] : [workspaceId])) as unknown as Array<Record<string, unknown>>;
@@ -1469,6 +1500,7 @@ export class WandStorage {
       workspaceTaskId: typeof row.workspace_task_id === "string" && row.workspace_task_id ? row.workspace_task_id : null,
       title: String(row.title),
       titleSource: row.title_source === "auto" ? "auto" : "user",
+      autoTitleSignature: typeof row.auto_title_signature === "string" && row.auto_title_signature ? row.auto_title_signature : null,
       description: String(row.description ?? ""),
       status: row.status === "doing" || row.status === "done" || row.status === "archived" ? row.status : "todo",
       priority: row.priority === "low" || row.priority === "medium" || row.priority === "high" || row.priority === "urgent" ? row.priority : "none",
@@ -1488,19 +1520,9 @@ export class WandStorage {
 
   getWandTaskByWorkspaceTaskId(workspaceTaskId: string): import("./task-types.js").WandTask | null {
     const row = this.db.prepare(
-      `SELECT id, identifier, workspace_id, workspace_task_id, title, title_source, description, status, priority, labels_json, due_date, milestone_id, sort_order, agent_json, created_at, updated_at
+      `SELECT id, identifier, workspace_id, workspace_task_id, title, title_source, auto_title_signature, description, status, priority, labels_json, due_date, milestone_id, sort_order, agent_json, created_at, updated_at
        FROM wand_tasks WHERE workspace_task_id = ? ORDER BY updated_at DESC LIMIT 1`,
     ).get(workspaceTaskId) as Record<string, unknown> | undefined;
-    return row ? this.mapWandTaskRow(row) : null;
-  }
-
-  findUnlinkedWandTask(workspaceId: string, title: string): import("./task-types.js").WandTask | null {
-    const row = this.db.prepare(
-      `SELECT id, identifier, workspace_id, workspace_task_id, title, title_source, description, status, priority, labels_json, due_date, milestone_id, sort_order, agent_json, created_at, updated_at
-       FROM wand_tasks
-       WHERE workspace_id IS ? AND title = ? AND (workspace_task_id IS NULL OR workspace_task_id = '')
-       ORDER BY updated_at DESC LIMIT 1`,
-    ).get(workspaceId, title) as Record<string, unknown> | undefined;
     return row ? this.mapWandTaskRow(row) : null;
   }
 
@@ -1510,14 +1532,22 @@ export class WandStorage {
     const max = this.db.prepare("SELECT COALESCE(MAX(sort_order), -1) AS value FROM wand_tasks WHERE workspace_id IS ? AND status = ?").get(input.workspaceId ?? null, status) as { value?: number } | undefined;
     const numberRow = this.db.prepare("SELECT COALESCE(MAX(CAST(substr(identifier, 6) AS INTEGER)), 0) AS value FROM wand_tasks WHERE identifier GLOB 'TASK-[0-9]*'").get() as { value?: number } | undefined;
     const identifier = `TASK-${(numberRow?.value ?? 0) + 1}`;
-    this.db.prepare(`INSERT INTO wand_tasks (id, identifier, workspace_id, workspace_task_id, title, title_source, description, status, priority, labels_json, due_date, milestone_id, sort_order, agent_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, identifier, input.workspaceId ?? null, input.workspaceTaskId ?? null, input.title, input.titleSource ?? "user", input.description ?? "", status, priority, JSON.stringify(input.labels ?? []), input.dueDate ?? null, input.milestoneId ?? null, (max?.value ?? -1) + 1, input.agent ? JSON.stringify(input.agent) : null, now, now);
+    this.db.prepare(`INSERT INTO wand_tasks (id, identifier, workspace_id, workspace_task_id, title, title_source, auto_title_signature, description, status, priority, labels_json, due_date, milestone_id, sort_order, agent_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, identifier, input.workspaceId ?? null, input.workspaceTaskId ?? null, input.title, input.titleSource ?? "user", null, input.description ?? "", status, priority, JSON.stringify(input.labels ?? []), input.dueDate ?? null, input.milestoneId ?? null, (max?.value ?? -1) + 1, input.agent ? JSON.stringify(input.agent) : null, now, now);
     return this.getWandTask(id)!;
   }
 
-  updateWandTask(id: string, patch: Partial<Pick<import("./task-types.js").WandTask, "workspaceId" | "workspaceTaskId" | "title" | "titleSource" | "description" | "status" | "priority" | "labels" | "dueDate" | "milestoneId" | "sortOrder" | "agent">>): import("./task-types.js").WandTask | null {
+  updateWandTask(id: string, patch: Partial<Pick<import("./task-types.js").WandTask, "workspaceId" | "workspaceTaskId" | "title" | "titleSource" | "autoTitleSignature" | "description" | "status" | "priority" | "labels" | "dueDate" | "milestoneId" | "sortOrder" | "agent">>): import("./task-types.js").WandTask | null {
     const current = this.getWandTask(id); if (!current) return null;
     const next = { ...current, ...patch, updatedAt: nowIso() };
-    this.db.prepare(`UPDATE wand_tasks SET workspace_id = ?, workspace_task_id = ?, title = ?, title_source = ?, description = ?, status = ?, priority = ?, labels_json = ?, due_date = ?, milestone_id = ?, sort_order = ?, agent_json = ?, updated_at = ? WHERE id = ?`).run(next.workspaceId, next.workspaceTaskId, next.title, next.titleSource, next.description, next.status, next.priority, JSON.stringify(next.labels), next.dueDate, next.milestoneId ?? null, next.sortOrder, next.agent ? JSON.stringify(next.agent) : null, next.updatedAt, id);
+    this.db.prepare(`UPDATE wand_tasks SET workspace_id = ?, workspace_task_id = ?, title = ?, title_source = ?, auto_title_signature = ?, description = ?, status = ?, priority = ?, labels_json = ?, due_date = ?, milestone_id = ?, sort_order = ?, agent_json = ?, updated_at = ? WHERE id = ?`).run(next.workspaceId, next.workspaceTaskId, next.title, next.titleSource, next.autoTitleSignature ?? null, next.description, next.status, next.priority, JSON.stringify(next.labels), next.dueDate, next.milestoneId ?? null, next.sortOrder, next.agent ? JSON.stringify(next.agent) : null, next.updatedAt, id);
+    if (next.workspaceTaskId) {
+      const workspaceId = next.workspaceId ?? this.ensureGlobalWorkspace().id;
+      this.db.prepare(`UPDATE workspace_tasks SET name = ?, status = ?, milestone_id = ?, workspace_id = ? WHERE id = ?`)
+        .run(next.title, next.status === "done" || next.status === "archived" ? "done" : "active",
+          next.milestoneId ?? null, workspaceId, next.workspaceTaskId);
+      this.db.prepare("UPDATE command_sessions SET workspace_id = ? WHERE workspace_task_id = ?")
+        .run(workspaceId, next.workspaceTaskId);
+    }
     return next;
   }
 
@@ -1592,6 +1622,7 @@ export class WandStorage {
   bindWandTaskSession(taskId: string, sessionId: string): void {
     if (!this.getWandTask(taskId)) throw new Error("未找到该任务。");
     if (!this.getSession(sessionId)) throw new Error("未找到该会话。");
+    this.db.prepare("DELETE FROM wand_task_sessions WHERE session_id = ? AND task_id != ?").run(sessionId, taskId);
     this.db.prepare("INSERT OR IGNORE INTO wand_task_sessions (task_id, session_id, bound_at) VALUES (?, ?, ?)").run(taskId, sessionId, nowIso());
   }
 

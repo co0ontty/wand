@@ -1,0 +1,68 @@
+// 从任务外部（看板卡片、里程碑、通知等）打开会话时，必须先恢复该会话所属任务的
+// 工作区上下文：顶部标签栏（含「＋ 新建会话」）与主区的任务态都以它为准，否则
+// 主区只剩一条裸会话标题——既没有标签，也没有新建会话的入口。
+// 侧栏点击走的是同一条恢复路径（workspaces-panel 的 openSession），这里补上
+// 看板等入口缺的那一步；会话不属于任何任务时保持原行为。
+
+import { workspacesStore } from "./controller";
+import { httpWorkspacesRepository } from "./repository";
+import { workspaceContextStore } from "./workspace-context";
+import type { OpenWorkspaceTaskPayload, TaskDirectoryGroup, TaskSummary } from "./types";
+
+export interface SessionOwningTask {
+  group: TaskDirectoryGroup;
+  task: TaskSummary;
+}
+
+/** 会话归属的目录组 + 任务；未分组会话（standaloneSessions）返回 null。 */
+export function findSessionOwningTask(
+  groups: readonly TaskDirectoryGroup[],
+  sessionId: string,
+): SessionOwningTask | null {
+  for (const group of groups) {
+    const task = group.tasks.find((candidate) =>
+      candidate.sessions.some((session) => session.id === sessionId));
+    if (task) return { group, task };
+  }
+  return null;
+}
+
+/**
+ * 打开会话，并在必要时先恢复它所属任务的工作区上下文。
+ *
+ * @param sessionId 目标会话 id。
+ * @param openFallback 会话不属于任何任务、属于当前已打开任务、或恢复失败时的
+ *   兜底打开方式（保持调用方原有行为）。
+ */
+export async function openSessionWithOwningTask(
+  sessionId: string,
+  openFallback: (sessionId: string) => void,
+): Promise<void> {
+  const runtime = workspacesStore.getRuntime();
+  const id = sessionId.trim();
+  if (!runtime || !id) {
+    openFallback(sessionId);
+    return;
+  }
+  try {
+    const page = await httpWorkspacesRepository.listTaskGroups();
+    const found = findSessionOwningTask(page.groups, id);
+    // 已在该任务里：上下文无需切换，直接选中会话，避免重复 flush/重载布局。
+    if (!found || workspaceContextStore.getSnapshot().taskId === found.task.id) {
+      openFallback(sessionId);
+      return;
+    }
+    const payload: OpenWorkspaceTaskPayload = {
+      workspaceId: found.task.workspaceId,
+      workspaceName: found.group.global ? "" : found.group.workspaceName,
+      taskId: found.task.id,
+      taskName: found.task.name,
+      cwd: found.task.cwd,
+    };
+    await runtime.openTask(payload);
+    // openTask 恢复的是任务的标签布局；点击的那一个会话仍要单独选中（与侧栏一致）。
+    runtime.selectSession(id);
+  } catch {
+    openFallback(sessionId);
+  }
+}

@@ -80,28 +80,26 @@ export function pruneManagedSelection(
   };
 }
 
-/** Selected tasks cascade their terminals; leftover sessions are deleted separately. */
-export function resolveManagedDeletion(
-  selection: SidebarManageSelection,
-  groups: readonly TaskDirectoryGroup[],
-): SidebarManageSelection {
-  const taskSet = new Set(selection.taskIds);
-  const owned = new Set<string>();
-  for (const group of groups) {
-    for (const task of group.tasks) {
-      if (!taskSet.has(task.id)) continue;
-      for (const session of task.sessions) owned.add(session.id);
-    }
-  }
-  return {
-    taskIds: [...taskSet],
-    sessionIds: selection.sessionIds.filter((id) => !owned.has(id)),
-  };
+/**
+ * 任务在批量操作里是归档（终端继续跑、worktree 保留），只有被显式选中的终端才是真删除。
+ * 所以这里不再把任务名下的终端并入删除集合，两者互不覆盖。
+ */
+export function describeManagedAction(selection: SidebarManageSelection): string {
+  const tasks = selection.taskIds.length > 0;
+  const sessions = selection.sessionIds.length > 0;
+  if (tasks && sessions) return "归档任务并删除终端";
+  if (tasks) return "归档任务";
+  return "删除终端";
 }
 
-export function describeManagedDeletion(selection: SidebarManageSelection): string {
+export function describeManagedResult(selection: SidebarManageSelection): string {
   const parts: string[] = [];
-  if (selection.taskIds.length > 0) parts.push(`${selection.taskIds.length} 个任务`);
-  if (selection.sessionIds.length > 0) parts.push(`${selection.sessionIds.length} 个终端`);
-  return parts.join("和") || "所选项目";
+  if (selection.taskIds.length > 0) parts.push(`归档 ${selection.taskIds.length} 个任务`);
+  if (selection.sessionIds.length > 0) parts.push(`删除 ${selection.sessionIds.length} 个终端`);
+  return parts.join("、") || "处理所选项目";
+}
+
+/** 只有真的会杀终端时才用危险样式；纯归档不该渲染成红色破坏性操作。 */
+export function managedSelectionIsDestructive(selection: SidebarManageSelection): boolean {
+  return selection.sessionIds.length > 0;
 }

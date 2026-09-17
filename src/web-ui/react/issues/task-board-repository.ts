@@ -7,6 +7,11 @@ import type {
 } from "../../../task-types";
 import { normalizeIssueAgentDefaults, type IssueWorkspace } from "./task-board-agent";
 import { jsonBody, requestJson } from "../http-adapter";
+import { taskMutationCompleted } from "../task-changes";
+
+function mutateTask<T>(url: string, init: RequestInit): Promise<T> {
+  return requestJson<T>(url, init).then(taskMutationCompleted);
+}
 
 let agentDefaultsWrite = Promise.resolve();
 
@@ -69,7 +74,7 @@ export const taskBoardRepository = {
     milestoneId?: string | null;
     agent?: WandTaskAgent | null;
   }): Promise<WandTaskListed> {
-    return requestJson("/api/wand-tasks", jsonBody(input));
+    return mutateTask("/api/wand-tasks", jsonBody(input));
   },
   /** 单条任务：新建后用来确认后台自动标题是否已经生成。 */
   get(id: string): Promise<WandTaskListed> {
@@ -79,10 +84,10 @@ export const taskBoardRepository = {
     id: string,
     patch: Partial<Pick<WandTask, "title" | "titleSource" | "description" | "status" | "priority" | "labels" | "dueDate" | "milestoneId" | "workspaceId" | "sortOrder" | "agent">>,
   ): Promise<WandTaskListed> {
-    return requestJson(`/api/wand-tasks/${encodeURIComponent(id)}`, jsonBody(patch, "PATCH"));
+    return mutateTask(`/api/wand-tasks/${encodeURIComponent(id)}`, jsonBody(patch, "PATCH"));
   },
   remove(id: string): Promise<void> {
-    return requestJson(`/api/wand-tasks/${encodeURIComponent(id)}`, { method: "DELETE" }).then(() => undefined);
+    return mutateTask(`/api/wand-tasks/${encodeURIComponent(id)}`, { method: "DELETE" }).then(() => undefined);
   },
   /** 用选定的 CLI 工具开一个结构化会话；prompt 作为这次派发的首条消息。 */
   dispatch(
@@ -90,11 +95,14 @@ export const taskBoardRepository = {
     agent: WandTaskAgent,
     extra?: { prompt?: string; workspaceId?: string | null },
   ): Promise<IssueDispatchResult> {
-    return requestJson(`/api/wand-tasks/${encodeURIComponent(id)}/dispatch`, jsonBody({
+    return mutateTask(`/api/wand-tasks/${encodeURIComponent(id)}/dispatch`, jsonBody({
       agent,
       ...(extra?.prompt != null ? { prompt: extra.prompt } : {}),
       ...(extra && "workspaceId" in extra ? { workspaceId: extra.workspaceId ?? null } : {}),
     }));
+  },
+  moveSession(id: string, sessionId: string): Promise<WandTaskListed> {
+    return mutateTask(`/api/wand-tasks/${encodeURIComponent(id)}/sessions`, jsonBody({ sessionId }));
   },
   /** 任务面板上次选用的 CLI 工具 / 模型 / 思考深度 / 工作模式。 */
   agentDefaults(): Promise<WandTaskAgent> {

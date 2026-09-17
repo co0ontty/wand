@@ -104,6 +104,8 @@ export function SettingsSelect({
   options,
   onChange,
   disabled,
+  searchable,
+  searchPlaceholder,
 }: {
   id: string;
   ariaLabel: string;
@@ -111,6 +113,8 @@ export function SettingsSelect({
   options: ReadonlyArray<{ value: string; label: string }>;
   onChange(value: string): void;
   disabled?: boolean;
+  searchable?: boolean;
+  searchPlaceholder?: string;
 }) {
   return (
     <div id={id} className="wand-settings-select">
@@ -119,6 +123,8 @@ export function SettingsSelect({
       value={value}
       options={options}
       disabled={disabled}
+      searchable={searchable}
+      searchPlaceholder={searchPlaceholder}
       onValueChange={onChange}
       />
     </div>

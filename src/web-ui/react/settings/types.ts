@@ -27,6 +27,10 @@ type SettingsAccess = "admin" | "read-only";
 type SettingsProvider = "claude" | "codex" | "opencode";
 /** Providers that have per-session default model preferences. */
 type SettingsModelProvider = SettingsProvider | "grok" | "qoder" | "pi";
+/** CLI 工具选择：和 `WandConfig.defaultProvider` 一样开放全部 provider。 */
+export type SettingsSessionProvider = SettingsModelProvider;
+/** 新会话默认思考深度；`codex:` 前缀的动态档位（旧客户端写入）也允许出现。 */
+export type SettingsThinkingEffort = "off" | "standard" | "deep" | "max" | `codex:${string}`;
 type SettingsCliProvider = SettingsProvider | "qoder" | "pi";
 type SettingsUpdateChannel = "stable" | "beta";
 type SettingsAutoUpdateTarget = "web" | "apk" | "dmg" | "cli";
@@ -143,6 +147,8 @@ export interface SettingsConfig {
   defaultQoderModel: string;
   defaultPiModel: string;
   defaultModels: Record<SettingsModelProvider, string>;
+  defaultProvider: SettingsSessionProvider;
+  defaultThinkingEffort: SettingsThinkingEffort;
   commitCli: SettingsProvider;
   commitModel: string;
   commitAiSource: "cli" | "api";
@@ -307,6 +313,8 @@ export interface SettingsAiInput {
   defaultGrokModel: string;
   defaultQoderModel: string;
   defaultPiModel: string;
+  defaultProvider: SettingsSessionProvider;
+  defaultThinkingEffort: SettingsThinkingEffort;
   commitAiSource: "cli" | "api";
   systemAi: SettingsSystemAi;
 }

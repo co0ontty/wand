@@ -17,10 +17,22 @@ import type {
   SettingsNotificationPreferences,
   SettingsPlatformSnapshot,
   SettingsRepository,
+  SettingsSessionProvider,
   SettingsSnapshot,
   SettingsSystemAi,
+  SettingsThinkingEffort,
 } from "./types";
 import { finiteNumber, record, stringValue, type JsonRecord } from "../json-utils";
+
+/** `/api/config` 能回给客户端的全部 CLI 工具，顺序与设置页下拉一致。 */
+const SESSION_PROVIDERS: readonly SettingsSessionProvider[] = [
+  "claude",
+  "codex",
+  "opencode",
+  "grok",
+  "qoder",
+  "pi",
+];
 
 export interface SettingsRuntimeAdapter {
   notificationPreferencesChanged(preferences: SettingsNotificationPreferences): void;
@@ -154,6 +166,16 @@ function normalizeConfig(value: unknown): SettingsConfig {
     ? stringValue(input.defaultMode) as SettingsConfig["defaultMode"]
     : "default";
   const commitCli = input.commitCli === "codex" || input.commitCli === "opencode" ? input.commitCli : "claude";
+  const defaultProvider = SESSION_PROVIDERS.includes(stringValue(input.defaultProvider) as SettingsSessionProvider)
+    ? stringValue(input.defaultProvider) as SettingsSessionProvider
+    : "claude";
+  const defaultThinkingEffort = (function(): SettingsThinkingEffort {
+    const raw = stringValue(input.defaultThinkingEffort);
+    if (raw === "off" || raw === "standard" || raw === "deep" || raw === "max") return raw;
+    // Codex 动态推理档位由旧客户端写入，原样保留而不是悄悄重置成 off。
+    if (/^codex:[a-z0-9][a-z0-9_-]{0,31}$/.test(raw)) return raw as SettingsThinkingEffort;
+    return "off";
+  })();
   const claude = stringValue(defaults.claude, stringValue(input.defaultModel));
   const codex = stringValue(defaults.codex, stringValue(input.defaultCodexModel));
   const opencode = stringValue(defaults.opencode, stringValue(input.defaultOpenCodeModel));
@@ -177,6 +199,8 @@ function normalizeConfig(value: unknown): SettingsConfig {
     defaultQoderModel: qoder,
     defaultPiModel: pi,
     defaultModels: { claude, codex, opencode, grok, qoder, pi },
+    defaultProvider,
+    defaultThinkingEffort,
     commitCli,
     commitModel: stringValue(input.commitModel),
     commitAiSource: input.commitAiSource === "api" ? "api" : "cli",

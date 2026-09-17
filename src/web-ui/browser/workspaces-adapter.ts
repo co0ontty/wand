@@ -1,3 +1,4 @@
+import { notifyTasksChanged, subscribeTaskChanges } from "../react/task-changes";
 import { configureWorkspacesRuntime } from "../react/workspaces/controller";
 import { clearActiveWorkspaceContext, setActiveWorkspaceContext, workspaceContextStore } from "../react/workspaces/workspace-context";
 import { closeReactOverlays } from "./react-overlay-coordinator";
@@ -73,7 +74,20 @@ function saveTaskLayout(taskId: string, layout: TaskWindowLayout | null, options
  */
 export function installWorkspacesLegacyAdapter(): void {
   if (uninstall) return;
-  uninstall = configureWorkspacesRuntime({
+  const stopChanges = subscribeTaskChanges(() => {
+    const taskId = state.activeWorkspaceTaskId;
+    if (!taskId) return;
+    void taskLayouts.flush(taskId).then(async () => {
+      const detail = await taskDetailStore.reload(taskId);
+      if (state.activeWorkspaceTaskId !== taskId) return;
+      taskLayouts.remember(taskId, detail.layoutRevision);
+      setActiveWorkspaceContext({
+        taskName: detail.name, cwd: detail.cwd, workspaceId: detail.workspaceId,
+        layout: detail.layout, layoutRevision: detail.layoutRevision,
+      });
+    }).catch(() => {});
+  });
+  const stopRuntime = configureWorkspacesRuntime({
     onOpen() {
       closeReactOverlays(["workspaces"]);
       dismissDrawerIfOverlay();
@@ -168,6 +182,7 @@ export function installWorkspacesLegacyAdapter(): void {
         shell: payload.target === "shell",
         provider: payload.target === "shell" ? undefined : payload.target,
         kind: payload.target === "shell" ? "pty" : (payload.kind ?? "structured"),
+        initialInput: payload.prompt,
       })).then(async (created) => {
         const sessionId = typeof created === "string" && created
           ? created
@@ -184,6 +199,7 @@ export function installWorkspacesLegacyAdapter(): void {
           const next = reconcileTaskWindowLayout(current, [...existing, sessionId], sessionId);
           void saveTaskLayout(payload.taskId, next);
         }
+        notifyTasksChanged();
         return sessionId;
       });
     },
@@ -244,4 +260,5 @@ export function installWorkspacesLegacyAdapter(): void {
       showToast(message, tone);
     },
   });
+  uninstall = () => { stopChanges(); stopRuntime(); };
 }

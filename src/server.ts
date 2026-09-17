@@ -792,7 +792,7 @@ export async function startServer(
     recordRecentPath(storage, cwd);
   });
   registerClaudeHistoryRoutes(app, processes, storage);
-  registerWorkspaceRoutes(app, storage, sessionRegistry);
+  registerWorkspaceRoutes(app, storage, sessionRegistry, { config });
   registerMissionRoutes(app, missions);
   registerUploadRoutes(app, processes);
 

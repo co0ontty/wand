@@ -1048,6 +1048,12 @@ export class StructuredSessionManager {
     return s ? withSummary(s) : null;
   }
 
+  setSessionWorkspace(id: string, membership: Pick<SessionSnapshot, "workspaceId" | "workspaceTaskId">): void {
+    const updated = { ...this.requireSession(id), ...membership };
+    this.sessions.set(id, updated);
+    this.emitStructuredSnapshot(updated);
+  }
+
   setSessionTopic(id: string, title: string, description: string): SessionSnapshot {
     const current = this.requireSession(id);
     const updated: SessionSnapshot = { ...current, title, description, summary: description };

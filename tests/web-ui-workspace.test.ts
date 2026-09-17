@@ -371,9 +371,9 @@ test("task list treats directories as group headers and exposes per-terminal del
   assert.match(styles, /\.workspace-tab-item\.active \.workspace-tab-item-close[\s\S]*?pointer-events:\s*auto/);
 });
 
-test("task session lists default to collapsed and retain explicit disclosure preferences", () => {
+test("task session lists default to expanded and retain explicit disclosure preferences", () => {
   const panel = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
-  assert.match(panel, /useSidebarCollapsed\(`task\.\$\{task.id\}`, true\)/);
+  assert.match(panel, /useSidebarCollapsed\(`task\.\$\{task.id\}`, false\)/);
   assert.match(panel, /useSidebarCollapsed\(`project\.\$\{group.workspaceId\}`\)/);
   assert.match(panel, /useSidebarCollapsed\(`loose\.\$\{group.workspaceId\}`\)/);
   assert.doesNotMatch(panel, /orderSidebarTasks\(group.tasks\)/);
@@ -775,15 +775,15 @@ function manageTask(
   };
 }
 
-test("sidebar multi-select delete cascades task terminals and keeps leftover sessions", async () => {
+test("sidebar multi-select archives tasks and only deletes the terminals that were picked", async () => {
   const {
     EMPTY_SIDEBAR_MANAGE_SELECTION,
     collectManagedIds,
     isManagedGroupSelected,
     toggleManagedGroup,
-    describeManagedDeletion,
+    describeManagedAction,
+    describeManagedResult,
     pruneManagedSelection,
-    resolveManagedDeletion,
     sidebarManageCount,
     toggleManagedSession,
     toggleManagedTask,
@@ -802,10 +802,13 @@ test("sidebar multi-select delete cascades task terminals and keeps leftover ses
   selection = toggleManagedSession(selection, "session-1");
   selection = toggleManagedSession(selection, "loose-1");
   assert.equal(sidebarManageCount(selection), 3);
-  const resolved = resolveManagedDeletion(selection, groups);
-  assert.deepEqual([...resolved.taskIds], ["task-1"]);
-  assert.deepEqual([...resolved.sessionIds], ["loose-1"]);
-  assert.equal(describeManagedDeletion(resolved), "1 个任务和1 个终端");
+  // 归档任务不会连带它的终端：只有显式选中的 session-1 / loose-1 会被删除。
+  assert.deepEqual([...selection.taskIds], ["task-1"]);
+  assert.deepEqual([...selection.sessionIds], ["session-1", "loose-1"]);
+  assert.equal(describeManagedAction(selection), "归档任务并删除终端");
+  assert.equal(describeManagedAction({ taskIds: ["task-1"], sessionIds: [] }), "归档任务");
+  assert.equal(describeManagedAction({ taskIds: [], sessionIds: ["session-1"] }), "删除终端");
+  assert.equal(describeManagedResult(selection), "归档 1 个任务、删除 2 个终端");
   const pruned = pruneManagedSelection({
     taskIds: ["task-1", "gone"],
     sessionIds: ["session-1", "missing"],
@@ -860,7 +863,7 @@ test("workspaces panel exposes multi-select and a compact directory rail", () =>
   assert.match(html, />项目与任务<\/h2>/);
   const panel = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
   assert.match(panel, /CompactDirectoryRail/);
-  assert.match(panel, /groups=\{groups\.filter\(\(group\) => !group\.global\)\}/);
+  assert.match(panel, /groups=\{visibleGroups\}/);
   assert.match(panel, /workspace-global-tasks/);
   assert.match(panel, /onToggleGroup=/);
   assert.match(panel, /data-sidebar-directory-id=\{group.workspaceId\}/);
@@ -880,15 +883,9 @@ test("directory previews omit global toolbar and unrelated history groups", () =
   assert.doesNotMatch(html, /UNRELATED-HISTORY|项目与任务|多选任务和终端|搜索任务或会话/);
 });
 
-test("unnamed tasks fold into the directory's loose sessions", async () => {
-  const { flattenUnnamedTasks, flattenUnnamedTasksInGroups, findSessionTask, isUnnamedTaskName } = await import(
-    "../src/web-ui/react/workspaces/task-flatten.js"
-  );
-  assert.equal(isUnnamedTaskName("未命名任务"), true);
-  assert.equal(isUnnamedTaskName("   "), true);
-  assert.equal(isUnnamedTaskName(undefined), true);
-  assert.equal(isUnnamedTaskName("未命名任务 2"), false);
-
+test("unnamed tasks keep their own sidebar row instead of folding into loose sessions", async () => {
+  // 侧栏是「目录 → 任务 → 终端」三级：未命名任务也是任务容器，服务端兜底名照样显示一行。
+  const { findSessionTask } = await import("../src/web-ui/react/workspaces/session-task-lookup.js");
   const group = {
     workspaceId: "w1",
     workspaceName: "Wand",
@@ -896,34 +893,17 @@ test("unnamed tasks fold into the directory's loose sessions", async () => {
     tasks: [
       manageTask("named", "修复侧栏", [{ id: "named-session" }]),
       manageTask("unnamed-1", "未命名任务", [{ id: "loose-a" }]),
-      manageTask("unnamed-2", "未命名任务", [{ id: "loose-b" }]),
     ],
     standaloneSessions: [{ id: "loose-0" }],
   };
-  const flattened = flattenUnnamedTasks(group);
-  assert.deepEqual(flattened.tasks.map((task) => task.id), ["named"]);
-  assert.deepEqual(flattened.standaloneSessions.map((session) => session.id), ["loose-0", "loose-a", "loose-b"]);
-  // Already-folder groups keep their identity so React can bail out of rendering.
-  const stable = { ...group, tasks: [group.tasks[0]] };
-  assert.equal(flattenUnnamedTasks(stable), stable);
-
-  // Polling rebuilds identical objects; the memo must hand back the same tree.
-  const { createUnnamedTaskFlattener } = await import(
-    "../src/web-ui/react/workspaces/task-flatten.js"
-  );
-  const flatten = createUnnamedTaskFlattener();
-  const first = flatten([group]);
-  const second = flatten([structuredClone(group)]);
-  assert.equal(first, second);
-  const third = flatten([{ ...structuredClone(group), workspaceName: "Renamed" }]);
-  assert.notEqual(first, third);
-
-  const [only] = flattenUnnamedTasksInGroups([group]);
-  assert.equal(only.tasks.length, 1);
-  // A folded session still resolves to its original task for workspace restore.
-  const folded = only.standaloneSessions[1];
-  assert.equal(findSessionTask(only, folded, [group])?.id, "unnamed-1");
-  assert.equal(findSessionTask(only, { id: "missing" }, [group]), undefined);
+  assert.equal(findSessionTask(group, { id: "named-session" })?.id, "named");
+  assert.equal(findSessionTask(group, { id: "loose-a" })?.id, "unnamed-1");
+  assert.equal(findSessionTask(group, { id: "missing" }), undefined);
+  // 目录预览只渲染一个目录的切片，会话要靠 workspaceTaskId 回到原始分组找任务。
+  const preview = { ...group, tasks: [], standaloneSessions: [{ id: "loose-a", workspaceTaskId: "unnamed-1" }] };
+  assert.equal(findSessionTask(preview, { id: "loose-a", workspaceTaskId: "unnamed-1" }, [group])?.id, "unnamed-1");
+  // 会话丢了 taskId 时退化成按 session id 在原始分组里找。
+  assert.equal(findSessionTask(preview, { id: "loose-a" }, [group])?.id, "unnamed-1");
 });
 
 /** Read a repository file relative to the test directory. */
@@ -947,8 +927,9 @@ test("sidebar directory tree indents every level without extra re-renders", () =
   // The /api/tasks poll hands back fresh objects every few seconds; folding must
   // be memoized by content or 40-session directories re-render on a timer.
   const panel = sourceText("src/web-ui/react/workspaces/workspaces-panel.tsx");
-  assert.match(panel, /const flattenGroups = React\.useMemo\(\(\) => createUnnamedTaskFlattener\(\), \[\]\)/);
-  assert.match(panel, /const groups = React\.useMemo\(\(\) => flattenGroups\(sourceGroups\), \[flattenGroups, sourceGroups\]\)/);
+  assert.match(panel, /const groups = sourceGroups/);
+  assert.doesNotMatch(panel, /createUnnamedTaskFlattener/);
+  assert.match(panel, /subscribeTaskChanges/);
 });
 
 test("workspaces controller keeps the dialog state stable while submitting", async () => {

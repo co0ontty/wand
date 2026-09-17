@@ -89,8 +89,13 @@ export interface WandTask {
   workspaceTaskId: string | null;
   identifier: string;
   title: string;
-  /** 'user' = 用户自己填的标题；'auto' = 用户留空后按描述自动生成。 */
+  /** 'user' = 用户自己填的标题；'auto' = 用户留空后按描述/会话内容自动生成。 */
   titleSource: WandTaskTitleSource;
+  /**
+   * 最近一次自动命名用到的输入指纹（描述 + 所有会话摘要）；内容没变就不再重复总结。
+   * 标题来源为 user 或从未自动命名过时为 null。
+   */
+  autoTitleSignature: string | null;
   description: string;
   status: WandTaskStatus;
   priority: WandTaskPriority;

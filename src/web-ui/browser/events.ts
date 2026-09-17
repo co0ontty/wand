@@ -7,7 +7,7 @@ import { adjustTerminalScale, openFilePreview } from "./file-browser";
 import { attachQueueBarDelegates, bindInputTouchScroll, cancelVoiceRecording, handleInputBoxBlur, handleInputBoxFocus, handleVoiceMove, refreshInputBoxState, sendOrStart, setupMobileKeyboardHandlers, startVoiceRecording, stopSession, stopVoiceRecording, updateQueueBar } from "./input";
 import { hideError } from "./notifications";
 import { render, resetChatRenderCache } from "./render";
-import { addPendingAttachment, closeClaudeSkillsPicker, closePlusPopover, closeSessionsDrawer, dismissDrawerIfOverlay, handleInputBoxKeydown, handleInputPaste, handleInteractiveTextInput, handlePtyImagePaste, login, onChatModeChange, onChatModelChange, onChatThinkingChange, optimizePromptText, setDraftValue, switchServer, syncComposerHasText, togglePlusPopover } from "./session-engine";
+import { addPendingAttachments, closeClaudeSkillsPicker, closePlusPopover, closeSessionsDrawer, dismissDrawerIfOverlay, handleInputBoxKeydown, handleInputPaste, handleInteractiveTextInput, handlePtyImagePaste, login, onChatModeChange, onChatModelChange, onChatThinkingChange, optimizePromptText, setDraftValue, switchServer, syncComposerHasText, togglePlusPopover } from "./session-engine";
 import { initTerminal, maybeScrollTerminalToBottom, softResyncTerminal } from "./terminal";
 import { setupVisualViewportHandlers } from "./viewport";
 import { approvePermission, approveTurnPermission, denyPermission } from "./websocket";
@@ -550,7 +550,7 @@ import { approvePermission, approveTurnPermission, denyPermission } from "./webs
           fileInput.addEventListener("change", function() {
             var files = fileInput!.files;
             if (files) {
-              for (var i = 0; i < files.length; i++) addPendingAttachment(files[i]);
+              addPendingAttachments(files);
             }
             fileInput!.value = "";
           });
@@ -596,7 +596,7 @@ import { approvePermission, approveTurnPermission, denyPermission } from "./webs
             (composer as HTMLElement).classList.remove("drag-over");
             var files = (e as DragEvent).dataTransfer && (e as DragEvent).dataTransfer!.files;
             if (files) {
-              for (var i = 0; i < files.length; i++) addPendingAttachment(files[i]);
+              addPendingAttachments(files);
             }
           });
         }

@@ -11,7 +11,12 @@ import {
   boardTitleFromSession,
   ensureBoardTaskForWorkspaceTask,
   syncUngroupedSessionsToBoard,
+  ensureWorkspaceTaskForBoardTask,
+  moveSessionToWorkspaceTask,
+  taskAutoNameSourceText,
+  taskAutoNameSignature,
 } from "../src/wand-task-sync.js";
+import { refreshAutoBoardTaskTitles } from "../src/server-task-routes.js";
 
 function tempDatabase(t: TestContext): WandStorage {
   const directory = mkdtempSync(path.join(os.tmpdir(), "wand-task-sync-"));
@@ -41,18 +46,18 @@ function snapshot(overrides: Partial<SessionSnapshot> = {}): SessionSnapshot {
   };
 }
 
-test("unnamed workspace tasks do not create empty board cards at create time", (t) => {
+test("empty and unnamed task containers immediately get board cards", (t) => {
   const storage = tempDatabase(t);
   const workspace = storage.createWorkspace({ name: "wand", cwd: "/tmp/wand" });
   const unnamed = storage.createWorkspaceTask({ workspaceId: workspace.id, name: "未命名任务" });
   const named = storage.createWorkspaceTask({ workspaceId: workspace.id, name: "修登录" });
 
-  assert.equal(ensureBoardTaskForWorkspaceTask(storage, unnamed, workspace), null);
-  assert.equal(storage.listWandTasks().length, 0);
+  assert.equal(ensureBoardTaskForWorkspaceTask(storage, unnamed, workspace).title, unnamed.name);
+  assert.equal(storage.listWandTasks().length, 1);
 
   const card = ensureBoardTaskForWorkspaceTask(storage, named, workspace);
   assert.equal(card?.title, "修登录");
-  assert.equal(storage.listWandTasks().length, 1);
+  assert.equal(storage.listWandTasks().length, 2);
 });
 
 test("named sidebar tasks bind sessions and fill the agent from the selected CLI", (t) => {
@@ -116,7 +121,7 @@ test("boardTitleFromSession prefers title then description then first user messa
   assert.equal(boardTitleFromSession(snapshot({ title: "", description: "" })), "");
 });
 
-test("sync fills unnamed tasks from their sessions and puts them in doing", (t) => {
+test("sync only binds sessions; auto naming later replaces a placeholder task title", (t) => {
   const storage = tempDatabase(t);
   const workspace = storage.createWorkspace({ name: "wand", cwd: "/tmp/wand" });
   const unnamed = storage.createWorkspaceTask({ workspaceId: workspace.id, name: "未命名任务" });
@@ -140,13 +145,56 @@ test("sync fills unnamed tasks from their sessions and puts them in doing", (t) 
 
   const tasks = storage.listWandTasks();
   assert.equal(tasks.length, 1);
-  assert.equal(tasks[0]?.title, "修复安卓客户端连接故障");
+  assert.equal(tasks[0]?.title, "未命名任务");
   assert.equal(tasks[0]?.status, "doing");
-  assert.equal(tasks[0]?.description, "定位并修复安卓客户端连不上本机服务的问题");
+  assert.equal(tasks[0]?.description, "项目：wand\n目录：/tmp/wand");
   assert.deepEqual(storage.listWandTaskSessionIds(tasks[0]!.id), ["sess-unnamed"]);
+
+  // 自动命名单独走一层：占位标题（含 titleSource=user 的历史卡片）会被会话内容覆盖，
+  // 并回写到侧栏分组名；「项目：/ 目录：」这类同步元信息不参与命名。
+  refreshAutoBoardTaskTitles(storage);
+  const renamed = storage.getWandTask(tasks[0]!.id);
+  assert.equal(renamed?.titleSource, "auto");
+  assert.equal(renamed?.title, "修复安卓客户端连接故障");
+  assert.equal(storage.getWorkspaceTask(unnamed.id)?.name, "修复安卓客户端连接故障");
+  // 同一份内容不会重复处理。
+  const signature = renamed?.autoTitleSignature;
+  assert.ok(signature);
+  refreshAutoBoardTaskTitles(storage);
+  assert.equal(storage.getWandTask(tasks[0]!.id)?.autoTitleSignature, signature);
 });
 
-test("sync creates doing cards for standalone ungrouped sessions", (t) => {
+test("auto naming never touches a task the user named", (t) => {
+  const storage = tempDatabase(t);
+  const workspace = storage.createWorkspace({ name: "wand", cwd: "/tmp/wand" });
+  const named = storage.createWorkspaceTask({ workspaceId: workspace.id, name: "我自己的任务名" });
+  const card = ensureBoardTaskForWorkspaceTask(storage, named, workspace);
+  assert.equal(card.titleSource, "user");
+  storage.saveSession(snapshot({
+    id: "sess-named",
+    workspaceId: workspace.id,
+    workspaceTaskId: named.id,
+    title: "会话里的另一个标题",
+  }));
+
+  refreshAutoBoardTaskTitles(storage);
+  assert.equal(storage.getWandTask(card.id)?.title, "我自己的任务名");
+  assert.equal(storage.getWandTask(card.id)?.titleSource, "user");
+});
+
+test("auto naming source only includes task content, not synced directory metadata", (t) => {
+  const storage = tempDatabase(t);
+  const workspace = storage.createWorkspace({ name: "wand", cwd: "/tmp/wand" });
+  const task = storage.createWorkspaceTask({ workspaceId: workspace.id, name: "未命名任务" });
+  const card = ensureBoardTaskForWorkspaceTask(storage, task, workspace);
+  storage.updateWandTask(card.id, { description: "项目：wand\n目录：/tmp/wand\n把登录页错误提示修好" });
+
+  const source = taskAutoNameSourceText(storage, storage.getWandTask(card.id)!);
+  assert.equal(source, "把登录页错误提示修好");
+  assert.equal(taskAutoNameSignature(source), taskAutoNameSignature("把登录页错误提示修好"));
+});
+
+test("sync leaves standalone sessions unassigned rather than inventing tasks", (t) => {
   const storage = tempDatabase(t);
   const workspace = storage.createWorkspace({ name: "wand", cwd: "/tmp/wand" });
   storage.saveSession(snapshot({
@@ -164,13 +212,11 @@ test("sync creates doing cards for standalone ungrouped sessions", (t) => {
 
   syncUngroupedSessionsToBoard(storage);
   const tasks = storage.listWandTasks();
-  assert.equal(tasks.length, 1);
-  assert.equal(tasks[0]?.title, "优化消息压缩与运行状态展示");
-  assert.equal(tasks[0]?.status, "doing");
-  assert.deepEqual(storage.listWandTaskSessionIds(tasks[0]!.id), ["loose-1"]);
+  assert.equal(tasks.length, 0);
+  assert.equal(storage.getSession("loose-1")?.workspaceTaskId, undefined);
 });
 
-test("sync binds standalone sessions onto an existing same-title card instead of duplicating", (t) => {
+test("sync does not guess session membership from matching titles", (t) => {
   const storage = tempDatabase(t);
   const workspace = storage.createWorkspace({ name: "wand", cwd: "/tmp/wand" });
   const existing = storage.createWandTask({
@@ -191,7 +237,7 @@ test("sync binds standalone sessions onto an existing same-title card instead of
   assert.equal(tasks.length, 1);
   assert.equal(tasks[0]?.id, existing.id);
   assert.equal(tasks[0]?.status, "done");
-  assert.deepEqual(storage.listWandTaskSessionIds(existing.id), ["loose-persist"]);
+  assert.deepEqual(storage.listWandTaskSessionIds(existing.id), []);
 });
 
 test("archiveBoardTask stores archived instead of done", (t) => {
@@ -209,4 +255,65 @@ test("archiveBoardTask stores archived instead of done", (t) => {
   assert.equal(archived?.status, "archived");
   assert.equal(storage.getWandTask(card.id)?.status, "archived");
   assert.equal(storage.getWorkspaceTask(work.id)?.status, "done");
+});
+
+test("board tasks get sidebar containers and share names, milestones, and reopened status", (t) => {
+  const storage = tempDatabase(t);
+  const workspace = storage.createWorkspace({ name: "project", cwd: "/tmp/project" });
+  const milestone = storage.createWandMilestone({ name: "v1" });
+  const card = storage.createWandTask({ workspaceId: workspace.id, title: "First" });
+  const group = ensureWorkspaceTaskForBoardTask(storage, card);
+  assert.equal(group.worktree, null);
+  assert.equal(group.workspaceId, workspace.id);
+  storage.updateWandTask(card.id, { title: "Board rename", status: "done", milestoneId: milestone.id });
+  assert.equal(storage.getWorkspaceTask(group.id)?.name, "Board rename");
+  assert.equal(storage.getWorkspaceTask(group.id)?.status, "done");
+  assert.equal(storage.getWorkspaceTask(group.id)?.milestoneId, milestone.id);
+  storage.updateWandTask(card.id, { status: "doing" });
+  assert.equal(storage.getWorkspaceTask(group.id)?.status, "active");
+  storage.updateWorkspaceTask(group.id, { name: "Sidebar rename", milestoneId: null });
+  assert.equal(storage.getWandTask(card.id)?.title, "Sidebar rename");
+  assert.equal(storage.getWandTask(card.id)?.milestoneId, null);
+});
+
+test("moving a session is exclusive, preserves execution, prunes old tabs, and survives stale checkpoints", (t) => {
+  const storage = tempDatabase(t);
+  const workspace = storage.createWorkspace({ name: "project", cwd: "/tmp/project" });
+  const source = storage.createWorkspaceTask({ workspaceId: workspace.id, name: "Same name" });
+  const target = storage.createWorkspaceTask({ workspaceId: workspace.id, name: "Same name" });
+  const old = snapshot({ workspaceId: workspace.id, workspaceTaskId: source.id, output: "history", title: "Prompt" });
+  storage.saveSession(old);
+  storage.saveWorkspaceTaskLayout(source.id, {
+    type: "windows", activeWindowId: "window", windows: [{ id: "window", activeTabId: "session",
+      layout: { type: "pane", active: 0, tabs: [
+        { id: "session", kind: "session", sessionId: old.id },
+        { id: "editor", kind: "editor", path: "/tmp/project/file" },
+      ] },
+    }],
+  });
+  syncUngroupedSessionsToBoard(storage);
+  const sourceCard = storage.getWandTaskByWorkspaceTaskId(source.id)!;
+  moveSessionToWorkspaceTask(storage, old.id, target.id);
+  moveSessionToWorkspaceTask(storage, old.id, target.id);
+  storage.saveSession(old);
+  syncUngroupedSessionsToBoard(storage);
+  assert.equal(storage.getSession(old.id)?.workspaceTaskId, target.id);
+  assert.equal(storage.getSession(old.id)?.cwd, old.cwd);
+  assert.equal(storage.getSession(old.id)?.output, "history");
+  assert.deepEqual(storage.listWandTaskSessionIds(sourceCard.id), []);
+  assert.deepEqual(storage.listWandTaskSessionIds(storage.getWandTaskByWorkspaceTaskId(target.id)!.id), [old.id]);
+  const layout = storage.getWorkspaceTask(source.id)!.layout!;
+  assert.equal(layout.windows[0]?.activeTabId, "editor");
+  assert.equal(JSON.stringify(layout).includes('"sessionId"'), false);
+  assert.equal(storage.listWandTasks().length, 2);
+  const targetCard = storage.getWandTaskByWorkspaceTaskId(target.id)!;
+  storage.updateWandTask(targetCard.id, { status: "todo" });
+  syncUngroupedSessionsToBoard(storage);
+  assert.equal(storage.getWandTask(targetCard.id)?.status, "todo", "reconciliation preserves explicit board status");
+  assert.throws(() => moveSessionToWorkspaceTask(storage, old.id, "missing"));
+  assert.equal(storage.getSession(old.id)?.workspaceTaskId, target.id);
+  moveSessionToWorkspaceTask(storage, old.id, null);
+  syncUngroupedSessionsToBoard(storage);
+  assert.equal(storage.getSession(old.id)?.workspaceTaskId, undefined);
+  assert.deepEqual(storage.listBoundWandTaskSessionIds(), []);
 });

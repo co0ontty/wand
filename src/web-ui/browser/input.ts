@@ -10,12 +10,12 @@ import { showToast, wandConfirm } from "./notifications";
 import { resetChatRenderCache, getEffectiveCwd } from "./render";
 import { applyCurrentView, buildAttachmentPrefix, canSendComposer, closePlusPopover, discardPendingAttachments, dismissDrawerIfOverlay, getComposerPlaceholder, getDraftValueForSession, getPendingAttachments, getPreferredMessages, getPreferredTool, getSelectedClaudeSkills, isStructuredSession, loadOutput, refreshAll, restoreComposerStateForSession, restorePendingAttachments, setDraftValue, setDraftValueForSession, shouldBracketPtyPaste, subscribeToSession, supportsClaudeSkillSelection, syncComposerHasText, takePendingAttachments, updateSessionSnapshot, updateSessionsList, uploadAttachments, withTerminalDimensions } from "./session-engine";
 import { confirmDelete } from "./sidebar";
-import { initTerminal, maybeScrollTerminalToBottom, scheduleSoftResyncTerminal } from "./terminal";
+import { initTerminal, maybeScrollTerminalToBottom, scheduleSoftResyncTerminal, waitForProviderPaint, waitForTerminalSettled } from "./terminal";
 import { ensureTerminalFit, scheduleClosedViewportBaselineWindow, syncAppViewportHeight, teardownTerminal, updateJoystickPanelUI, updateJoystickVisibility } from "./viewport";
 import "./websocket";
-import { buildTerminalPathPasteSequence, isClipboardImageMimeType } from "./pty-paste";
+import { buildPtyAttachmentChunks, isImageAttachmentSource } from "./pty-paste";
 import { notifyLegacyUiChange } from "./ui-store-bridge";
-import { PROVIDER_IDS } from "../provider-identity";
+import { PROVIDER_IDS, inferProviderIdFromCommand } from "../provider-identity";
 import { syncBrowserComposerRail } from "./composer-rail-adapter";
 import { syncBrowserComposerPopover } from "./composer-popover-adapter";
 import { showActionError } from "./composer-action-error";
@@ -914,11 +914,18 @@ import { syncBrowserComposerVoice } from "./composer-voice-adapter";
             // it as ordinary prompt text. Keep non-image attachments on the old
             // textual path while sending each uploaded image as its own pasted
             // path, so Codex can convert it into an [Image #N] attachment.
+            // 附件路径 → PTY 写入序列和直通模式共用 buildPtyAttachmentChunks：
+            // 每张图片一个 paste 事件（Codex 只认 paste 边界内的图片路径），
+            // 后面按 provider 补分隔空格；路径 chunk 标 "paste"，让服务端把它
+            // 排除在「草稿 → 会话标题」推断之外，只有用户真正敲的文本算提示词。
             var ptyAttachmentChunks = null;
             if (!isStructuredSession(selectedSession) && uploadedFiles.length) {
               var imageFiles = uploadedFiles.filter(function(file) {
-                return isClipboardImageMimeType(file && (file.mimeType || file.type))
-                  || /\.(?:png|jpe?g|gif|webp|bmp|svg)$/i.test(file && file.originalName || "");
+                return isImageAttachmentSource({
+                  savedPath: file && file.savedPath,
+                  mimeType: file && (file.mimeType || file.type),
+                  originalName: file && file.originalName,
+                });
               });
               if (imageFiles.length) {
                 var otherFiles = uploadedFiles.filter(function(file) {
@@ -926,15 +933,18 @@ import { syncBrowserComposerVoice } from "./composer-voice-adapter";
                 });
                 var ptyText = buildAttachmentPrefix(otherFiles)
                   + (hasText ? value : (otherFiles.length ? "请查看附件。" : ""));
-                var ptyBracketedPaste = shouldBracketPtyPaste(
-                  selectedSession.id,
-                  selectedSession.provider,
-                );
-                ptyAttachmentChunks = imageFiles.map(function(file) {
-                  return buildTerminalPathPasteSequence(file.savedPath, ptyBracketedPaste);
+                ptyAttachmentChunks = buildPtyAttachmentChunks(imageFiles, {
+                  bracketedPaste: shouldBracketPtyPaste(
+                    selectedSession.id,
+                    selectedSession.provider,
+                  ),
+                  provider: selectedSession.provider
+                    || inferProviderIdFromCommand(selectedSession.command || ""),
                 });
-                if (ptyText) ptyAttachmentChunks.push(ptyText);
-                ptyAttachmentChunks.push(String.fromCharCode(13));
+                if (ptyText) {
+                  ptyAttachmentChunks.push({ data: ptyText, shortcutKey: "enter_text" });
+                }
+                ptyAttachmentChunks.push({ data: String.fromCharCode(13), shortcutKey: "enter_text" });
               }
             }
 
@@ -967,7 +977,17 @@ import { syncBrowserComposerVoice } from "./composer-voice-adapter";
                 throw new Error("发送前会话已切换，原草稿已恢复。");
               }
               prepareChatBottomFollow();
-              return sendTerminalChunks(submitChunks, "enter_text", 30, selectedView, readySession.id || sessionId);
+              // 附件 chunk（图片路径粘贴 + 紧跟的文本）之间要等 CLI 把上一帧画完：
+              // claude / pi 会把图片路径异步换成 [Image #N] 并重绘草稿行，
+              // 按常规 30ms 文本间隔连发会让后面的 chunk 被那次重绘吞掉。
+              return sendTerminalChunks(
+                submitChunks,
+                "enter_text",
+                ptyAttachmentChunks ? 0 : 30,
+                selectedView,
+                readySession.id || sessionId,
+                !!ptyAttachmentChunks,
+              );
             });
           })
           .then(function(result) {
@@ -1810,7 +1830,10 @@ import { syncBrowserComposerVoice } from "./composer-voice-adapter";
           subscribeToSession(data.id);
           return loadOutput(data.id).then(function() {
             focusInputBox(true);
-            return data;
+            // PTY 冷启动：先等 CLI 画出自己的 TUI 再让调用方写入，否则粘贴序列会被
+            // 当成字面量（见 waitForProviderPaint）。结构化会话没有这一步。
+            if (isStructuredSession(data)) return data;
+            return waitForProviderPaint().then(function() { return data; });
           });
         });
       }
@@ -1821,8 +1844,22 @@ import { syncBrowserComposerVoice } from "./composer-voice-adapter";
         return [text, String.fromCharCode(13)];
       }
 
-      function sendTerminalChunks(chunks, shortcutKey, delayMs, viewOverride, sessionId?) {
-        var sequence = Array.isArray(chunks) ? chunks.filter(function(chunk) { return !!chunk; }) : [];
+      // chunk 可以是字符串，也可以是 { data, shortcutKey }：附件序列需要逐 chunk
+      // 打不同的标（路径 paste / 文本 enter_text），不能用统一的 shortcutKey。
+      function normalizeTerminalChunk(entry) {
+        if (typeof entry === "string") return entry ? { data: entry } : null;
+        if (entry && typeof entry.data === "string" && entry.data) {
+          return { data: entry.data, shortcutKey: entry.shortcutKey, image: !!entry.image };
+        }
+        return null;
+      }
+
+      // 图片芯片完成（CLI 读文件 + 重绘草稿）比普通重绘慢，实测 codex 需要 2~3s；
+      // 等太短会让紧随其后的回车把未完成的芯片当成普通路径文本提交。
+      var PTY_IMAGE_CHIP_SETTLE_MAX_MS = 3000;
+
+      function sendTerminalChunks(chunks, shortcutKey, delayMs, viewOverride, sessionId?, settleChunks?: boolean) {
+        var sequence = (Array.isArray(chunks) ? chunks : []).map(normalizeTerminalChunk).filter(Boolean);
         if (sequence.length === 0) {
           return Promise.resolve();
         }
@@ -1830,18 +1867,28 @@ import { syncBrowserComposerVoice } from "./composer-voice-adapter";
         return sequence.reduce(function(promise, chunk, index) {
           // 文本段和单独的 "\r" 都带 enter_text：服务端用它判断这是整段提交，
           // 从而给 PTY 会话生成标题；中间若有其它 chunk 则不打标。
-          var key = shortcutKey && (index === 0 || index === sequence.length - 1)
-            ? shortcutKey
-            : undefined;
+          // 附件 chunk 自带 shortcutKey（路径 = paste），优先用它。
+          var key = chunk.shortcutKey !== undefined
+            ? chunk.shortcutKey
+            : (shortcutKey && (index === 0 || index === sequence.length - 1) ? shortcutKey : undefined);
           return promise.then(function() {
-            if (index > 0 && delay > 0) {
-              return new Promise(function(resolve) {
-                setTimeout(resolve, delay);
-              }).then(function() {
-                return queueDirectInput(chunk, key, viewOverride, sessionId);
+            if (index > 0) {
+              // settleChunks：附件序列不能按固定间隔发，要等 CLI 画完上一帧。
+              // 图片芯片慢一拍，所以跟在图片粘贴后的那一包用更高上限。
+              var previousChunk = sequence[index - 1];
+              var wait = settleChunks
+                ? waitForTerminalSettled(
+                  undefined,
+                  previousChunk && previousChunk.image ? PTY_IMAGE_CHIP_SETTLE_MAX_MS : undefined,
+                )
+                : (delay > 0
+                  ? new Promise(function(resolve) { setTimeout(resolve, delay); })
+                  : Promise.resolve());
+              return wait.then(function() {
+                return queueDirectInput(chunk.data, key, viewOverride, sessionId);
               });
             }
-            return queueDirectInput(chunk, key, viewOverride, sessionId);
+            return queueDirectInput(chunk.data, key, viewOverride, sessionId);
           });
         }, Promise.resolve());
       }

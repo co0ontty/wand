@@ -1921,6 +1921,10 @@ export class ProcessManager extends EventEmitter {
     }
 
     this.flushPersist(record, true);
+    // handleTerminalExit 会因为 ptyProcess 已被清空而把这次异步退出判定为过期回调并
+    // return，所以主动停止必须自己广播 ended。少了这一步，各端会一直以为会话还在跑：
+    // 直通输入框不关闭，附件/发送全都打进已经死掉的 PTY。结构化 stop() 同样发 ended。
+    this.emitEvent({ type: "ended", sessionId: record.id, data: this.snapshot(record) });
     return this.snapshot(record);
   }
 
@@ -2139,6 +2143,11 @@ export class ProcessManager extends EventEmitter {
 
   private isPermissionBlocked(record: SessionRecord): boolean {
     return record.ptyPermissionBlocked || record.pendingEscalation !== null;
+  }
+
+  setSessionWorkspace(id: string, membership: Pick<SessionSnapshot, "workspaceId" | "workspaceTaskId">): void {
+    Object.assign(this.mustGet(id), membership);
+    this.emitEvent({ type: "status", sessionId: id, data: membership });
   }
 
   setSessionTopic(id: string, title: string, description: string): SessionSnapshot {

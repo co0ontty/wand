@@ -9,8 +9,10 @@ import { defaultConfig } from "../src/config.js";
 import { jsonErrorHandler } from "../src/express-async.js";
 import { registerTaskRoutes, whenWandTaskTitlesSettled } from "../src/server-task-routes.js";
 import { SessionRegistry } from "../src/session-registry.js";
+import { registerWorkspaceRoutes } from "../src/server-workspace-routes.js";
 import { StructuredSessionManager } from "../src/structured-session-manager.js";
 import { WandStorage } from "../src/storage.js";
+import type { SessionSnapshot } from "../src/types.js";
 
 interface Harness {
   url: string;
@@ -30,6 +32,7 @@ function start(
   const app = express();
   app.use(express.json());
   registerTaskRoutes(app, { storage, sessions: registry, structured: manager, config, ...extra });
+  registerWorkspaceRoutes(app, storage, registry);
   app.use(jsonErrorHandler);
   const server = createServer(app);
   return new Promise((resolve, reject) => {
@@ -72,6 +75,26 @@ async function withHarness(
 
 function jsonOf<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
+}
+
+function sessionSnapshot(overrides: Partial<SessionSnapshot>): SessionSnapshot {
+  return {
+    id: "session-auto-name",
+    sessionKind: "structured",
+    provider: "claude",
+    command: "claude",
+    cwd: "/tmp/wand",
+    mode: "default",
+    status: "idle",
+    exitCode: null,
+    startedAt: "2026-09-11T00:00:00.000Z",
+    endedAt: null,
+    output: "",
+    archived: false,
+    archivedAt: null,
+    claudeSessionId: null,
+    ...overrides,
+  };
 }
 
 test("task board creates, moves, binds, and deletes tasks", async () => {
@@ -237,6 +260,36 @@ test("editing the title of an auto-titled task keeps the manual title", async ()
     await whenWandTaskTitlesSettled();
     assert.equal(storage.getWandTask(created.id)?.title, "用户改过的标题");
   }, { generateTitle: async () => { await gate; return "迟到的自动标题"; } });
+});
+
+test("a sidebar task created without a name is titled from its sessions", async () => {
+  const calls: string[] = [];
+  await withHarness(async ({ url, storage }) => {
+    const workspace = storage.createWorkspace({ name: "wand", cwd: storage.directory() });
+    const created = await fetch(`${url}/api/workspaces/${workspace.id}/tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ worktree: false }),
+    }).then(jsonOf<{ id: string; name: string }>);
+    assert.equal(created.name, "未命名任务");
+
+    // 先建任务、后开会话：轮询时用会话内容把占位标题换成真实标题。
+    storage.saveSession(sessionSnapshot({
+      id: "sess-auto",
+      workspaceId: workspace.id,
+      workspaceTaskId: created.id,
+      title: "修复安卓终端乱码",
+      description: "定位列宽与字号问题",
+    }));
+    await fetch(`${url}/api/wand-tasks`).then(jsonOf<unknown[]>);
+    await whenWandTaskTitlesSettled();
+
+    const card = storage.getWandTaskByWorkspaceTaskId(created.id);
+    assert.equal(card?.titleSource, "auto");
+    assert.equal(card?.title, "会话总结的任务标题");
+    assert.deepEqual(calls, ["修复安卓终端乱码"]);
+    assert.equal(storage.getWorkspaceTask(created.id)?.name, "会话总结的任务标题");
+  }, { generateTitle: async (description) => { calls.push(description); return "会话总结的任务标题"; } });
 });
 
 test("tasks persist and validate the selected CLI tool", async () => {  await withHarness(async ({ url }) => {
@@ -511,5 +564,43 @@ test("task board remembers last selected agent defaults", async () => {
       body: JSON.stringify({ provider: "cursor", model: "x", thinkingEffort: "off" }),
     });
     assert.equal(invalid.status, 400);
+  });
+});
+
+test("sidebar and board share containers and moving a live CLI session preserves its cwd", async () => {
+  await withHarness(async ({ url, storage, manager, registry }) => {
+    const send = (route: string, body: unknown, method = "POST") => fetch(`${url}${route}`, {
+      method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    const workspace = storage.createWorkspace({ name: "Project", cwd: process.cwd() });
+    const board = await send("/api/wand-tasks", { workspaceId: workspace.id, title: "Board task" })
+      .then(jsonOf<{ id: string; workspaceTaskId: string }>);
+    assert.ok(storage.getWorkspaceTask(board.workspaceTaskId));
+    const sidebar = await send(`/api/workspaces/${workspace.id}/tasks`, { name: "Sidebar task" })
+      .then(jsonOf<{ id: string; cwd: string; isolated: boolean }>);
+    assert.equal(sidebar.isolated, false);
+    const card = storage.getWandTaskByWorkspaceTaskId(sidebar.id)!;
+    assert.ok(card);
+    const session = manager.createSession({ cwd: sidebar.cwd, mode: "default",
+      workspaceId: workspace.id, workspaceTaskId: sidebar.id });
+    assert.equal(registry.ownerOf(session.id), "structured");
+    const moved = await send(`/api/wand-tasks/${board.id}/sessions`, { sessionId: session.id });
+    assert.equal(moved.status, 201);
+    assert.equal(manager.get(session.id)?.workspaceTaskId, board.workspaceTaskId);
+    assert.equal(registry.getLatest(session.id)?.cwd, session.cwd);
+    assert.deepEqual(storage.listWandTaskSessionIds(card.id), []);
+    assert.deepEqual(storage.listWandTaskSessionIds(board.id), [session.id]);
+    const movedBack = await send(`/api/workspace-tasks/${sidebar.id}/sessions`, { sessionId: session.id });
+    assert.equal(movedBack.status, 200);
+    assert.equal(manager.get(session.id)?.workspaceTaskId, sidebar.id);
+    assert.equal(manager.get(session.id)?.cwd, session.cwd);
+    await send(`/api/workspace-tasks/${sidebar.id}`, { name: "Renamed", status: "done" }, "PATCH");
+    assert.equal(storage.getWandTask(card.id)?.title, "Renamed");
+    await send(`/api/wand-tasks/${card.id}`, { status: "doing", title: "Reopened" }, "PATCH");
+    assert.equal(storage.getWorkspaceTask(sidebar.id)?.status, "active");
+    assert.equal(storage.getWorkspaceTask(sidebar.id)?.name, "Reopened");
+    const missing = await send("/api/workspace-tasks/missing/sessions", { sessionId: session.id });
+    assert.equal(missing.status, 404);
+    assert.equal(manager.get(session.id)?.workspaceTaskId, sidebar.id);
   });
 });

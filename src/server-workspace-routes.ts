@@ -18,9 +18,10 @@ import { collectSessionTopicBlocklist } from "./session-topic.js";
 import { resolveSessionDisplayTitle } from "./session-transport.js";
 import { type LayoutNode, type PaneTab, type SessionSnapshot, type TaskWindowLayout, type Workspace, type WorkspaceDefaultProvider, type WorkspaceTask, type WorkspaceTaskWorktree } from "./types.js";
 import { attachUnboundSessionsToWorkspace, backfillSessionWorkspaces, normalizeProjectCwd, projectCwdForSession, isGlobalWorkspace, syncDirectoryNameForWorkspace } from "./workspace-binding.js";
-import { archiveBoardTaskForWorkspaceTask, ensureBoardTaskForWorkspaceTask } from "./wand-task-sync.js";
+import { archiveBoardTaskForWorkspaceTask, archiveWorkspaceTask, ensureBoardTaskForWorkspaceTask, isUnnamedWorkspaceTaskName, moveSessionToWorkspaceTask, syncSidebarTasksFromBoard, UNNAMED_WORKSPACE_TASK_NAME } from "./wand-task-sync.js";
 import { isSessionProvider } from "./session-provider.js";
 import { firstLayoutTabId } from "./layout-tree.js";
+import { refreshAutoBoardTaskTitles, type AutoTaskTitleOptions } from "./server-task-routes.js";
 
 function workspaceSessionTitle(
   session: SessionSnapshot,
@@ -119,6 +120,16 @@ function deleteSessions(
   }
 }
 
+function worktreeUsedOutsideTasks(storage: WandStorage, tasks: WorkspaceTask[]): boolean {
+  const deleting = new Set(tasks.map((task) => task.id));
+  return storage.loadSessionsSlim().some((session) => !deleting.has(session.workspaceTaskId ?? "")
+    && tasks.some((task) => {
+      if (!task.worktree) return false;
+      const relative = path.relative(task.worktree.path, session.cwd);
+      return !relative || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
+    }));
+}
+
 function taskRuntimeCwd(task: WorkspaceTask, workspace: Pick<Workspace, "cwd"> | null | undefined): string {
   return task.worktree?.path ?? task.cwd ?? workspace?.cwd ?? "";
 }
@@ -134,7 +145,9 @@ function createTaskForWorkspace(
   worktreeError?: string;
 } {
   const name = typeof body.name === "string" ? body.name.trim() : "";
-  const taskName = name || "未命名任务";
+  // 留空（或老客户端回传的占位名）走自动命名：先用占位名建组，会话内容一到位就改名。
+  const named = name.length > 0 && !isUnnamedWorkspaceTaskName(name);
+  const taskName = named ? name : UNNAMED_WORKSPACE_TASK_NAME;
   // 里程碑是全局列表；建任务时可选，非法 id 直接报错而不是静默丢掉。
   const requestedMilestoneId = typeof body.milestoneId === "string" ? body.milestoneId.trim() : "";
   if (requestedMilestoneId && !storage.getWandMilestone(requestedMilestoneId)) {
@@ -151,24 +164,14 @@ function createTaskForWorkspace(
   }
   const baseRef = typeof body.baseRef === "string" && body.baseRef.trim() ? body.baseRef.trim() : undefined;
   const runCwd = mountedCwd ?? workspace.cwd;
-  const requireWorktree = body.worktree === true;
-  const wantWorktree = requireWorktree || (body.worktree !== false && !isGlobalWorkspace(workspace));
   let worktree: WorkspaceTaskWorktree | null = null;
-  let worktreeError: string | undefined;
-  if (wantWorktree) {
-    try {
-      const setup = prepareSessionWorktree({
-        cwd: runCwd,
-        sessionId: crypto.randomUUID(),
-        spec: { taskName, baseRef },
-      });
-      worktree = setup.worktree;
-    } catch (error) {
-      if (requireWorktree) {
-        throw new Error(getErrorMessage(error, "无法创建隔离 worktree。"));
-      }
-      worktreeError = getErrorMessage(error, "无法创建 worktree，将在项目目录直接运行。");
-    }
+  if (body.worktree === true) {
+    const setup = prepareSessionWorktree({
+      cwd: runCwd,
+      sessionId: crypto.randomUUID(),
+      spec: { taskName, baseRef },
+    });
+    worktree = setup.worktree;
   }
   const storedCwd = mountedCwd && mountedCwd !== workspace.cwd ? mountedCwd : undefined;
   const task = storage.createWorkspaceTask({
@@ -178,12 +181,11 @@ function createTaskForWorkspace(
     worktree,
     milestoneId,
   });
-  ensureBoardTaskForWorkspaceTask(storage, task, workspace);
+  ensureBoardTaskForWorkspaceTask(storage, task, workspace, { titleSource: named ? "user" : "auto" });
   return {
     task,
     cwd: taskRuntimeCwd(task, workspace),
     isolated: worktree !== null,
-    worktreeError,
   };
 }
 
@@ -302,6 +304,7 @@ export function registerWorkspaceRoutes(
   app: Express,
   storage: WandStorage,
   sessions?: SessionRegistry,
+  titleOptions: AutoTaskTitleOptions = {},
 ): void {
   // 列出所有项目（按创建时间降序：新建在前，打开不会改位置）
   app.get("/api/workspaces", (_req, res) => {
@@ -401,6 +404,10 @@ export function registerWorkspaceRoutes(
       return;
     }
     const tasks = storage.listWorkspaceTasks(existing.id);
+    if (worktreeUsedOutsideTasks(storage, tasks)) {
+      res.status(409).json({ error: "该 Worktree 仍被已移出的会话使用，请先结束并删除这些会话。" });
+      return;
+    }
     if (cascade) {
       deleteSessions(storage, sessions, [
         ...storage.listSessionsByWorkspace(existing.id).map((session) => session.id),
@@ -415,6 +422,8 @@ export function registerWorkspaceRoutes(
     }
     for (const task of tasks) {
       if (cascade || task.worktree) cleanupWorktreeSync(task.worktree);
+      const card = storage.getWandTaskByWorkspaceTaskId(task.id);
+      if (card) storage.updateWandTask(card.id, { status: "archived", workspaceTaskId: null });
     }
     storage.deleteWorkspace(existing.id, { cascade });
     res.json({ ok: true });
@@ -455,6 +464,13 @@ export function registerWorkspaceRoutes(
 
   // 目录组为一级容器的任务聚合列表，供侧栏「任务」视图一次拉全。
   app.get("/api/tasks", (req, res) => {
+    syncSidebarTasksFromBoard(storage);
+    // 侧栏轮询也在补自动标题：不打开看板的任务（以及新增会话后的改名）也要吃到。
+    try {
+      refreshAutoBoardTaskTitles(storage, titleOptions);
+    } catch (error) {
+      console.error("[WandTask] Failed to refresh auto task titles:", getErrorMessage(error));
+    }
     // 查询参数：workspaceId 过滤单目录；limit 截断每目录任务数；
     // maxSessions 截断每任务内嵌会话数（大数据量时控制响应体积）。
     const hasRevisionQuery = typeof req.query.revision === "string";
@@ -734,8 +750,7 @@ export function registerWorkspaceRoutes(
     });
   }));
 
-  // 新建任务：命名 + 可选独立 worktree（默认尝试创建，非 git 仓库时退化为直接用项目目录；
-  // 显式 worktree:false 跳过隔离；显式 worktree:true 失败则 400，不静默降级）。
+  // 默认只创建逻辑分组；仅显式 worktree:true 才创建隔离目录。
   app.post("/api/workspaces/:id/tasks", asyncRoute(async (req, res) => {
     const workspace = storage.getWorkspace(req.params.id);
     if (!workspace) {
@@ -779,6 +794,22 @@ export function registerWorkspaceRoutes(
     });
   });
 
+  // 移动会话只改变归属，不修改运行目录，也不重启 CLI。
+  app.post("/api/workspace-tasks/:taskId/sessions", (req, res) => {
+    const sessionId = typeof req.body?.sessionId === "string" ? req.body.sessionId.trim() : "";
+    if (!storage.getWorkspaceTask(req.params.taskId) || !storage.getSession(sessionId)) {
+      res.status(404).json({ error: "未找到任务或会话。" });
+      return;
+    }
+    try {
+      moveSessionToWorkspaceTask(storage, sessionId, req.params.taskId);
+      sessions?.refreshSessionWorkspace(sessionId);
+      res.json({ ok: true });
+    } catch (error) {
+      sendRouteError(res, error, "无法移动会话。");
+    }
+  });
+
   // 改名 / 状态
   app.patch("/api/workspace-tasks/:taskId", (req, res) => {
     const existing = storage.getWorkspaceTask(req.params.taskId);
@@ -803,11 +834,26 @@ export function registerWorkspaceRoutes(
     res.json(storage.getWorkspaceTask(existing.id));
   });
 
+  // 归档任务：软删除。终端继续运行、worktree 与卡片历史都保留，只是侧栏不再显示。
+  app.post("/api/workspace-tasks/:taskId/archive", (req, res) => {
+    const existing = storage.getWorkspaceTask(req.params.taskId);
+    if (!existing) {
+      res.status(404).json({ error: "未找到该任务。" });
+      return;
+    }
+    archiveWorkspaceTask(storage, existing);
+    res.json(storage.getWorkspaceTask(existing.id));
+  });
+
   // 删除任务；cascade=true 连带删会话，否则仅解绑；尽力清理 worktree
   app.delete("/api/workspace-tasks/:taskId", (req, res) => {
     const existing = storage.getWorkspaceTask(req.params.taskId);
     if (!existing) {
       res.status(404).json({ error: "未找到该任务。" });
+      return;
+    }
+    if (worktreeUsedOutsideTasks(storage, [existing])) {
+      res.status(409).json({ error: "该 Worktree 仍被已移出的会话使用，请先结束并删除这些会话。" });
       return;
     }
     // 删除隔离任务必然会移除其 cwd，因此即使调用方没有显式传 cascade，
@@ -826,7 +872,7 @@ export function registerWorkspaceRoutes(
     if (cascade) cleanupWorktreeSync(existing.worktree);
     archiveBoardTaskForWorkspaceTask(storage, existing.id);
     const board = storage.getWandTaskByWorkspaceTaskId(existing.id);
-    if (board) storage.updateWandTask(board.id, { workspaceTaskId: null });
+    if (board) storage.updateWandTask(board.id, { workspaceTaskId: null, status: "archived" });
     storage.deleteWorkspaceTask(existing.id, { cascade });
     res.json({ ok: true });
   });

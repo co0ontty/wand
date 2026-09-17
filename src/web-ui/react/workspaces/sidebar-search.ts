@@ -17,15 +17,17 @@ export function filterSidebarGroups(
   // Keep the source snapshot intact for the board, navigation and task history.
   const activeGroups = groups.map((group) => ({
     ...group,
+    workspaceName: group.global ? "未归属工作区" : group.workspaceName,
     tasks: group.tasks.filter((task) => task.status !== "done"),
-  }));
+  })).filter((group) => !group.global || group.tasks.length > 0 || group.standaloneSessions.length > 0)
+    .sort((left, right) => Number(Boolean(left.global)) - Number(Boolean(right.global)));
   if (!query.trim()) return activeGroups;
   const matches = (...values: (string | undefined)[]): boolean => sidebarSearchMatches(query, ...values);
   const sessionText = (session: WorkspaceSessionSummary): string => (
     [session.title, session.cwd, session.provider, liveTitles[session.id]].filter(Boolean).join(" ")
   );
   return activeGroups.flatMap((group) => {
-    const name = group.global ? "独立任务" : group.workspaceName;
+    const name = group.workspaceName;
     if (matches(name, group.workspaceCwd)) return [group];
     const tasks = group.tasks.filter((task) => matches(
       name, task.name, task.cwd, ...task.sessions.map(sessionText),

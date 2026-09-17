@@ -11,7 +11,7 @@ import type { SessionRegistry } from "./session-registry.js";
 import type { StructuredSessionManager } from "./structured-session-manager.js";
 import type { WandTaskAgent, WandTaskAgentEffort, WandTaskAgentMode, WandTaskPriority, WandTaskStatus, WandTaskTitleSource } from "./task-types.js";
 import { DEFAULT_WAND_TASK_AGENT_MODE, isWandTaskAgentMode, normalizeWandTaskAgentMode, WAND_MILESTONE_NAME_MAX_LENGTH } from "./task-types.js";
-import { archiveBoardTask, syncClosedBoardTask, syncUngroupedSessionsToBoard } from "./wand-task-sync.js";
+import { archiveBoardTask, ensureWorkspaceTaskForBoardTask, isAutoNameableBoardTask, moveSessionToWorkspaceTask, syncClosedBoardTask, syncUngroupedSessionsToBoard, taskAutoNameSignature, taskAutoNameSourceText } from "./wand-task-sync.js";
 import type { SessionProvider, SessionSnapshot, WandConfig } from "./types.js";
 import { isSessionProvider } from "./session-provider.js";
 
@@ -149,29 +149,33 @@ function taskSessionSummary(session: SessionSnapshot) {
 }
 
 /**
- * 用户没写标题时，先用描述首行当占位标题，再由后台模型总结一个更好的。
+ * 用户没写标题时，先用描述/会话内容当占位标题，再由后台模型总结一个更好的。
  * 全程不阻塞创建请求：失败只是保留占位标题，不返回错误、也不覆盖用户后来改的标题。
- * 多次建任务会排队而不是丢弃，保证每张卡片最终都会拿到标题。
+ * 多次总结会排队而不是丢弃，保证每张卡片最终都会拿到标题。
  */
 let titleGenerationChain: Promise<void> = Promise.resolve();
 
 function scheduleWandTaskTitleGeneration(
   storage: WandStorage,
   taskId: string,
-  description: string,
+  source: string,
+  signature: string,
   options: {
     cwd?: string;
     config?: WandConfig;
-    generateTitle: typeof generateWandTaskTitle;
+    generateTitle?: typeof generateWandTaskTitle;
   },
 ): void {
+  const generateTitle = options.generateTitle ?? generateWandTaskTitle;
   const cwd = options.cwd || options.config?.defaultCwd || process.cwd();
   const run = async (): Promise<void> => {
     try {
-      const title = await options.generateTitle(description, cwd, options.config?.language ?? "", taskTitleAiOptions(options.config));
+      const title = await generateTitle(source, cwd, options.config?.language ?? "", taskTitleAiOptions(options.config));
       const current = storage.getWandTask(taskId);
       // 用户已经自己写了标题（原生端 / 面板编辑）就不要覆盖。
       if (!current || current.titleSource !== "auto") return;
+      // 命名输入已经变了（新增会话 / 会话内容更新）：这次是过期结果，交给下一轮。
+      if (current.autoTitleSignature !== signature) return;
       const clipped = title.slice(0, TASK_TITLE_MAX_LENGTH);
       if (!clipped || clipped === current.title) return;
       storage.updateWandTask(taskId, { title: clipped });
@@ -185,6 +189,45 @@ function scheduleWandTaskTitleGeneration(
 /** 等待排队中的标题生成全部结束；只有测试用，避免用例轮询。 */
 export function whenWandTaskTitlesSettled(): Promise<void> {
   return titleGenerationChain;
+}
+
+export interface AutoTaskTitleOptions {
+  config?: WandConfig;
+  /** 可注入的标题生成器；测试里换成同步桩，避免真的起 CLI。 */
+  generateTitle?: typeof generateWandTaskTitle;
+  /** 未从任务所属工作区解析到目录时的兜底 cwd。 */
+  cwd?: string;
+}
+
+/**
+ * 扫描标题仍可自动命名的看板任务（titleSource=auto，或仍是占位名的历史卡片）：
+ * 先用任务描述 + 所有绑定会话的内容立即改掉占位名，再交给后台模型总结更贴切的标题。
+ * 同一个输入指纹只处理一次：内容没变就跳过，也避免自动标题与模型结果来回震荡。
+ * 用户建任务时写了名字、或事后改过名（titleSource=user 且不是占位名）的任务永不进入这里。
+ */
+export function refreshAutoBoardTaskTitles(storage: WandStorage, options: AutoTaskTitleOptions = {}): void {
+  for (const card of storage.listWandTasks()) {
+    if (!isAutoNameableBoardTask(card)) continue;
+    const source = taskAutoNameSourceText(storage, card);
+    if (!source) continue;
+    const signature = taskAutoNameSignature(source);
+    if (card.autoTitleSignature === signature) continue;
+    const provisional = provisionalTaskTitleFromDescription(source);
+    storage.updateWandTask(card.id, {
+      titleSource: "auto",
+      autoTitleSignature: signature,
+      ...(provisional && provisional !== card.title ? { title: provisional } : {}),
+    });
+    // 未启用模型（如部分只验证占位改名的单测）时只保留立即生效的占位标题。
+    if (!options.generateTitle && !options.config) continue;
+    const cwd = options.cwd
+      || (card.workspaceId ? storage.getWorkspace(card.workspaceId)?.cwd : undefined);
+    scheduleWandTaskTitleGeneration(storage, card.id, source, signature, {
+      cwd,
+      config: options.config,
+      generateTitle: options.generateTitle,
+    });
+  }
 }
 
 /** 自动生成标题没有会话上下文，按「默认 provider + 默认模型」解析，与提示词优化一致。 */
@@ -212,6 +255,12 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       syncUngroupedSessionsToBoard(storage);
     } catch (error) {
       console.error("[WandTask] Failed to sync ungrouped sessions onto the board:", getErrorMessage(error));
+    }
+    try {
+      // 侧栏建的任务 / 后续新增的会话都会在这里补上自动标题。
+      refreshAutoBoardTaskTitles(storage, { config, generateTitle: deps.generateTitle });
+    } catch (error) {
+      console.error("[WandTask] Failed to refresh auto task titles:", getErrorMessage(error));
     }
     const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : undefined;
     // 数组顺序即展示顺序：created_at 倒序，新创建的在上面。
@@ -300,26 +349,30 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       const labels = labelsFrom(body.labels);
       const dueDate = dateValue(body.dueDate) ?? null;
       const milestoneId = milestoneIdFrom(storage, body.milestoneId);
-      const task = storage.createWandTask({
-        workspaceId,
-        title,
-        titleSource,
-        description,
-        status,
-        priority,
-        labels,
-        dueDate,
-        milestoneId,
-        agent,
+      const task = storage.transaction(() => {
+        const card = storage.createWandTask({
+          workspaceId,
+          title,
+          titleSource,
+          description,
+          status,
+          priority,
+          labels,
+          dueDate,
+          milestoneId,
+          agent,
+        });
+        ensureWorkspaceTaskForBoardTask(storage, card);
+        return storage.getWandTask(card.id)!;
       });
       if (titleSource === "auto") {
-        scheduleWandTaskTitleGeneration(storage, task.id, description, {
+        refreshAutoBoardTaskTitles(storage, {
           cwd: workspaceId ? storage.getWorkspace(workspaceId)?.cwd : undefined,
           config,
-          generateTitle: deps.generateTitle ?? generateWandTaskTitle,
+          generateTitle: deps.generateTitle,
         });
       }
-      res.status(201).json(dto(task));
+      res.status(201).json(dto(storage.getWandTask(task.id) ?? task));
     } catch (error) {
       sendRouteError(res, error, "无法创建任务。");
     }
@@ -385,14 +438,28 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       const sessionId = text(bodyObject(req.body).sessionId);
       if (!sessionId) throw new Error("缺少 sessionId。");
       if (sessions && !sessions.get(sessionId)) throw new Error("未找到该会话。");
-      storage.bindWandTaskSession(req.params.id, sessionId);
+      const card = storage.getWandTask(req.params.id);
+      if (!card) {
+        res.status(404).json({ error: "未找到该任务。" });
+        return;
+      }
+      const task = ensureWorkspaceTaskForBoardTask(storage, card);
+      moveSessionToWorkspaceTask(storage, sessionId, task.id);
+      sessions?.refreshSessionWorkspace(sessionId);
       res.status(201).json(dto(storage.getWandTask(req.params.id)));
     } catch (error) {
       sendRouteError(res, error, "无法绑定会话。");
     }
   });
   app.delete("/api/wand-tasks/:id/sessions/:sessionId", (req, res) => {
-    storage.unbindWandTaskSession(req.params.id, req.params.sessionId);
+    const card = storage.getWandTask(req.params.id);
+    const session = storage.getSession(req.params.sessionId);
+    if (card?.workspaceTaskId && session?.workspaceTaskId === card.workspaceTaskId) {
+      moveSessionToWorkspaceTask(storage, session.id, null);
+      sessions?.refreshSessionWorkspace(session.id);
+    } else {
+      storage.unbindWandTaskSession(req.params.id, req.params.sessionId);
+    }
     res.json({ ok: true });
   });
 
@@ -421,7 +488,9 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       }
       const workspace = task.workspaceId ? storage.getWorkspace(task.workspaceId) : null;
       if (task.workspaceId && !workspace) throw new Error("任务所属项目已被删除，请重新指定。");
-      const cwd = workspace?.cwd || config.defaultCwd;
+      const group = ensureWorkspaceTaskForBoardTask(storage, task);
+      task = storage.getWandTask(task.id)!;
+      const cwd = group.worktree?.path || group.cwd || workspace?.cwd || config.defaultCwd;
       const requestedPrompt = text(body.prompt);
       const existingSessions = storage.listWandTaskSessionIds(task.id).length;
       if (existingSessions > 0 && !requestedPrompt) throw new Error("请输入提示词。");
@@ -436,8 +505,8 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
         worktreeEnabled: false,
         sessionSource: "automation",
         automationId: `wand-task:${task.id}`,
-        workspaceId: task.workspaceId ?? undefined,
-        workspaceTaskId: task.workspaceTaskId ?? undefined,
+        workspaceId: group.workspaceId,
+        workspaceTaskId: group.id,
       });
       storage.updateWandTask(task.id, { agent, status: task.status === "todo" ? "doing" : task.status });
       storage.bindWandTaskSession(task.id, session.id);

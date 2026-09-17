@@ -79,6 +79,10 @@ function harness() {
 
   const storage = {
     getSession: (id: string) => storageRows.get(id) ?? null,
+    getSessionWorkspace: (id: string) => {
+      const row = storageRows.get(id);
+      return row ? { workspaceId: row.workspaceId, workspaceTaskId: row.workspaceTaskId } : null;
+    },
     loadSessions: () => { throw new Error("Slim listing must not load persisted transcripts"); },
     loadSessionsSlim: () => {
       calls.slimStorageLoads += 1;

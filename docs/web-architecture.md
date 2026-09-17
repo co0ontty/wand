@@ -42,6 +42,43 @@ Express route → 参数与权限检查 → 业务服务 / SessionRegistry → m
   业务逻辑必须使用同一次参数解析结果。
 - PTY 与 structured 保留独立执行代码，通过 SessionRegistry 统一查找，不合并 runner。
 
+## 工作区、任务与 CLI 会话
+
+- 工作区对应工作目录，任务是其下的**逻辑分组**，会话是任务内的执行实例。
+  默认创建任务不建子目录、不建 worktree；高级选项可显式开启 worktree 隔离。
+- 侧边栏与任务看板通过 `workspaceTaskId` 对应同一个任务；创建、改名、里程碑、
+  完成和重新打开双向同步。空任务也显示，同名任务不得按标题自动合并。
+- 新建任务里的提示词属于首个会话，不用于替换任务名称。未分组的历史会话
+  继续保留，不因打开看板自动生成任务。
+- 会话只有一个任务归属。侧边栏/看板拖动与“移动到其他任务”菜单走同一移动操作：
+  原子更新归属与看板关联、清理源任务布局；保留 cwd、进程、历史和运行状态。
+  已移出的会话仍使用旧 worktree 时，禁止删除该 worktree 所属任务/工作区。
+- 归属由 SQLite 持有，runner checkpoint 不回写旧归属；`SessionRegistry` 按原
+  owner 刷新 PTY/structured 内存投影。前端成功写入后通知两个视图刷新，并以轮询
+  同步其他客户端的更改。
+
+### 归档就是软删除
+
+用户能删的两处都是**归档**，不是真删：
+
+- 侧栏任务菜单的「归档任务」走 `POST /api/workspace-tasks/:id/archive`
+  （`archiveWorkspaceTask`）：先把看板卡片置为 `archived`，再把侧栏任务置为 `done`；
+  侧栏把 `done` 任务连同它的会话整段隐藏。终端进程、执行历史、布局和 worktree
+  都保留，**不清理 worktree**，随时可以恢复。
+- 看板卡片的「归档」/拖进归档区也只是把卡片置为 `archived`，侧栏任务由存储的
+  反向投影跟着变成 `done`（`storage.updateWandTask` / `updateWorkspaceTask`）。
+- 恢复＝把卡片状态改回 `todo`（拖出归档目录、右键「恢复到等待认领」，或直接
+  拖到任意列），侧栏任务随之回到 `active` 重新出现，会话归属不变。
+
+旧版级联删除 `DELETE /api/workspace-tasks/:id?cascade=1` 仍保留给原生客户端
+（Android/iOS 的删除按钮就是它，会删终端、清 worktree），Web 侧不再用它；
+只有隔离任务还留「删除任务并清理 Worktree」这一个真删入口。
+
+看板不靠轮询之外的额外状态：拖拽用私有 MIME `application/x-wand-task`
+（`issues/task-drag.ts`）与终端拖拽 `application/x-wand-session`
+（`workspaces/session-drag.ts`）区分，归档区只接受前者，卡片拖到列上仍兼容
+`text/plain`。
+
 ## 样式归属与后续视觉方向
 
 先清理失效实现，再调整保留组件。登录页是视觉基准：纸色底、暖中性色、赤陶色

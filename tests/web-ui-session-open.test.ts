@@ -1,0 +1,92 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { configureWorkspacesRuntime } from "../src/web-ui/react/workspaces/controller.js";
+import { findSessionOwningTask, openSessionWithOwningTask } from "../src/web-ui/react/workspaces/session-open.js";
+import { clearActiveWorkspaceContext, setActiveWorkspaceContext } from "../src/web-ui/react/workspaces/workspace-context.js";
+import type { TaskDirectoryGroup, WorkspacesRuntimeAdapter } from "../src/web-ui/react/workspaces/types.js";
+
+function groupsFixture(): TaskDirectoryGroup[] {
+  return [{
+    workspaceId: "workspace-1",
+    workspaceName: "项目 A",
+    workspaceCwd: "/repo",
+    tasks: [
+      {
+        id: "task-1",
+        workspaceId: "workspace-1",
+        name: "任务一",
+        cwd: "/repo",
+        worktree: null,
+        layout: null,
+        status: "active",
+        createdAt: "2026-01-01",
+        lastOpenedAt: null,
+        isolated: false,
+        sessions: [{ id: "session-1" }, { id: "session-2" }],
+      },
+    ],
+    standaloneSessions: [{ id: "session-loose" }],
+  }];
+}
+
+test("findSessionOwningTask finds the task that owns a session and ignores loose ones", () => {
+  const groups = groupsFixture();
+  assert.equal(findSessionOwningTask(groups, "session-2")?.task.id, "task-1");
+  assert.equal(findSessionOwningTask(groups, "session-2")?.group.workspaceName, "项目 A");
+  assert.equal(findSessionOwningTask(groups, "session-loose"), null);
+  assert.equal(findSessionOwningTask(groups, "session-missing"), null);
+  assert.equal(findSessionOwningTask([], "session-1"), null);
+});
+
+test("opening a session from the board restores its task context before selecting it", async () => {
+  const calls: string[] = [];
+  const payloads: unknown[] = [];
+  const runtime = new Proxy({
+    openTask: (payload: unknown) => { calls.push("openTask"); payloads.push(payload); },
+    selectSession: (id: string) => { calls.push(`selectSession:${id}`); },
+  } as unknown as WorkspacesRuntimeAdapter, {
+    get: (target, key) => (key in target ? Reflect.get(target, key) : () => {}),
+  });
+  const uninstall = configureWorkspacesRuntime(runtime);
+  const originalFetch = globalThis.fetch;
+  const jsonResponse = (body: unknown, status = 200): Response =>
+    new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  const fallback = (id: string): void => { calls.push(`fallback:${id}`); };
+  try {
+    clearActiveWorkspaceContext();
+    globalThis.fetch = async () => jsonResponse({ groups: groupsFixture() });
+    await openSessionWithOwningTask("session-2", fallback);
+    assert.deepEqual(calls, ["openTask", "selectSession:session-2"]);
+    assert.deepEqual(payloads, [{
+      workspaceId: "workspace-1",
+      workspaceName: "项目 A",
+      taskId: "task-1",
+      taskName: "任务一",
+      cwd: "/repo",
+    }]);
+
+    // 已在同一任务内：不再重开任务（避免重复 flush / 恢复覆盖选中态）。
+    setActiveWorkspaceContext({ taskId: "task-1" });
+    calls.length = 0;
+    await openSessionWithOwningTask("session-1", fallback);
+    assert.deepEqual(calls, ["fallback:session-1"]);
+
+    // 未分组会话与未知会话保持调用方原有行为。
+    clearActiveWorkspaceContext();
+    calls.length = 0;
+    await openSessionWithOwningTask("session-loose", fallback);
+    await openSessionWithOwningTask("session-missing", fallback);
+    assert.deepEqual(calls, ["fallback:session-loose", "fallback:session-missing"]);
+
+    // 任务列表拿不到时也必须能打开会话。
+    globalThis.fetch = async () => jsonResponse({ error: "boom" }, 500);
+    calls.length = 0;
+    await openSessionWithOwningTask("session-2", fallback);
+    assert.deepEqual(calls, ["fallback:session-2"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    uninstall();
+    clearActiveWorkspaceContext();
+  }
+});

@@ -668,6 +668,18 @@ import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
       var CLIENT_OUTPUT_MAX = 160 * 1024;
       var CLIENT_OUTPUT_TRIM_AT = 192 * 1024;
 
+      // 附件写入之后的「等 CLI 画完」时序（ms）：
+      // MIN / QUIET —— 至少等这么久，且看到这一帧输出后再多等 QUIET；
+      // PAINT —— 一直没看到输出时的兜底；MAX —— 总上限（CLI 正在刷屏时不再无限等）。
+      var PTY_ATTACHMENT_SETTLE_MIN_MS = 120;
+      var PTY_ATTACHMENT_SETTLE_QUIET_MS = 120;
+      var PTY_ATTACHMENT_SETTLE_PAINT_MS = 800;
+      var PTY_ATTACHMENT_SETTLE_MAX_MS = 1500;
+
+      /** 会话恢复后等 provider CLI 画出自己 TUI 的上限（冷启动通常 1~3s）。 */
+      var PTY_RESUME_PAINT_TIMEOUT_MS = 5000;
+      /** 冷启动下限：刚 resume 的 CLI 先要自己初始化（服务端 initialInput 同样是 3s 兜底）。 */
+      var PTY_RESUME_SETTLE_MIN_MS = 3000;
       export function softResyncTerminal(_options?: any) {
         if (!state.terminal) return false;
         state.terminal.refresh(0, Math.max(0, state.terminal.rows - 1));
@@ -706,12 +718,74 @@ import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
         sendPtySocketMessage({ type: "pty_ack", sessionId: sessionId, bytes: bytes });
       }
 
+      // 最近一次终端输出的时刻，用于判断 CLI 是否已经画完上一次写入（见
+      // waitForTerminalSettled）。放在这里而不是 state 里，因为只有终端写入
+      // 能代表「CLI 又画了一帧」。
+      var lastTerminalOutputAt = 0;
+
+      /**
+       * 等 CLI 把上一次写入画完。
+       *
+       * 附件粘贴后 claude / pi 会异步把图片路径换成 [Image #N] 芯片并重绘整行草稿，
+       * 紧接着发的下一个 chunk 会被那次重绘吃掉（草稿只剩芯片）。固定 sleep 不是太慢
+       * 就是机器忙时不够用，所以改成：看到这一帧输出后再等它静下来；一直没输出就按
+       * 上限兜底放行。
+       */
+      export function waitForTerminalSettled(wroteAtMs?: number, maxMs?: number) {
+        var startedAt = typeof wroteAtMs === "number" ? wroteAtMs : Date.now();
+        var deadline = startedAt + (typeof maxMs === "number" ? maxMs : PTY_ATTACHMENT_SETTLE_MAX_MS);
+        return new Promise(function(resolve) {
+          (function poll() {
+            var now = Date.now();
+            var outputAt = lastTerminalOutputAt;
+            var readyAt = outputAt > startedAt
+              ? Math.max(outputAt + PTY_ATTACHMENT_SETTLE_QUIET_MS, startedAt + PTY_ATTACHMENT_SETTLE_MIN_MS)
+              : startedAt + PTY_ATTACHMENT_SETTLE_PAINT_MS;
+            if (now >= readyAt || now >= deadline) {
+              resolve(null);
+              return;
+            }
+            setTimeout(poll, Math.max(10, Math.min(60, readyAt - now)));
+          })();
+        });
+      }
+
+      /**
+       * 等恢复中的 provider CLI 画出自己的 TUI。
+       *
+       * 刚 resume 的 CLI 还在冷启动，没进入 bracketed paste 模式；这时写进去的粘贴
+       * 标记会被当成字面量显示在草稿行（codex 会显示 "^[[200~"），图片路径也就不会
+       * 被换成 chip。所以等到第一帧新输出、再等它静下来；一直没输出就按上限兜底放行。
+       * 光看「有新输出」不够：恢复瞬间服务端还会重放旧输出，而 CLI 此时仍在初始化，
+       * 所以另加一个冷启动下限（与服务端 initialInput 的 3s 兜底同一量级）。
+       */
+      export function waitForProviderPaint(timeoutMs?: number) {
+        var startedAt = Date.now();
+        var paintAllowedAt = startedAt + PTY_RESUME_SETTLE_MIN_MS;
+        var deadline = startedAt + (typeof timeoutMs === "number" ? timeoutMs : PTY_RESUME_PAINT_TIMEOUT_MS);
+        return new Promise(function(resolve) {
+          (function poll() {
+            var now = Date.now();
+            if (now >= deadline) {
+              resolve(null);
+              return;
+            }
+            if (now >= paintAllowedAt && lastTerminalOutputAt > startedAt) {
+              waitForTerminalSettled(now).then(function() { resolve(null); });
+              return;
+            }
+            setTimeout(poll, 50);
+          })();
+        });
+      }
+
       export function wandTerminalWrite(terminal: any, data: any, ackBytes?: number, sessionId?: string) {
         if (!terminal || data == null || data === "") {
           if (ackBytes && sessionId) acknowledgePtyOutput(sessionId, ackBytes);
           return Promise.resolve();
         }
         var text = String(data);
+        lastTerminalOutputAt = Date.now();
         var queue = state.terminalWriteQueue || Promise.resolve();
         state.terminalWriteQueue = queue.catch(function() {}).then(function() {
           return new Promise(function(resolve) {

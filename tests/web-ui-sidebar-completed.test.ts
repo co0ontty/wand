@@ -31,6 +31,17 @@ test("sidebar hides completed tasks and their sessions before applying search", 
   assert.equal(source.tasks[0].sessions.length, 1);
 });
 
+test("legacy global tasks use a named fallback group after real workspaces", () => {
+  const global = { ...source, workspaceId: "wand-global", global: true, workspaceName: "全局" };
+  const groups = filterSidebarGroups([global, source], "");
+  assert.deepEqual(groups.map((group) => group.workspaceId), ["workspace", "wand-global"]);
+  assert.equal(groups[1].workspaceName, "未归属工作区");
+  assert.equal(global.workspaceName, "全局");
+  assert.equal(filterSidebarGroups([global], "未归属").length, 1);
+  assert.deepEqual(filterSidebarGroups([{ ...global, tasks: [task("done", "done")], standaloneSessions: [] }], ""), []);
+  assert.deepEqual(groups[1].tasks[0].sessions, source.tasks[1].sessions);
+});
+
 test("sidebar keeps empty workspaces and restores reopened tasks without deleting history", () => {
   const completedOnly = { ...source, tasks: [source.tasks[0]], standaloneSessions: [] };
   assert.equal(filterSidebarGroups([completedOnly], "").length, 1);

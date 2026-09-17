@@ -10,7 +10,7 @@ import { loadGitStatus, updateTopbarGitBadge } from "./git-commit";
 import { autoResizeInput, buildMessagesForRender, canAutoResumeSession, captureTerminalInput, closeKeyboardPopup, closeSwipedItem, flushCrossSessionQueue, focusInputBox, getControlInput, hasActiveTerminalSelection, hideMiniKeyboard, isImeKeyboardEvent, queueDirectInput, reconcileInteractiveState, renderCrossSessionQueue, sendInputFromBox, setTerminalInteractive, shouldCaptureTerminalEvent, stopSession, switchToSessionView, updateInteractiveControls, updateStructuredQueueCounter } from "./input";
 import { _apkVersion, _hasNativeBridge, _macAppVersion, _syncWakeLock, hideError, showError, showToast } from "./notifications";
 import { getEffectiveCwd, render, resetChatRenderCache } from "./render";
-import { initTerminal, maybeScrollTerminalToBottom, syncTerminalBuffer } from "./terminal";
+import { initTerminal, maybeScrollTerminalToBottom, syncTerminalBuffer, waitForTerminalSettled } from "./terminal";
 import "./utils";
 import { ensureTerminalFit, scheduleTerminalResize, teardownTerminal } from "./viewport";
 import { startPolling, stopPolling, updateAutoApproveIndicator, updateTaskDisplay } from "./websocket";
@@ -31,7 +31,7 @@ import {
 } from "./composer-select-values";
 import { inferProviderIdFromCommand, providerCliCommand } from "../provider-identity";
 import { hasPooledTerminal, isPooledTerminalBracketedPasteMode } from "./terminal-pool";
-import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardImageExtension, isClipboardImageMimeType } from "./pty-paste";
+import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExtension, isClipboardImageMimeType } from "./pty-paste";
 
       // 证书不受信任时浏览器会丢弃 Secure Cookie —— 密码正确也存不住登录态。
       // 这里揭示专用提示，并把「改用 HTTP」按钮指向同 host 的 http:// 地址。
@@ -101,6 +101,7 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
         })
         .then(function(config) {
           state.config = config;
+          applyConfigDefaultThinking(config);
           var statusDot = document.getElementById("status-dot");
           var statusText = document.getElementById("status-text");
           if (statusDot) statusDot.classList.add("active");
@@ -756,6 +757,22 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
       function persistThinkingPreference(value) {
         state.chatThinking = value;
         try { localStorage.setItem("wand-thinking-effort", value); } catch (e) {}
+      }
+
+      // 服务端「新会话默认思考深度」（设置 → AI 与模型）只在这个浏览器从没手动选过
+      // 档位时生效：三件套一动过，localStorage 里的显式选择就永久优先，否则改设置
+      // 会反过来盖掉用户当场的操作。
+      export function applyConfigDefaultThinking(config) {
+        var effort = config && typeof config === "object" ? config.defaultThinkingEffort : "";
+        var supported = effort === "off" || effort === "standard" || effort === "deep" || effort === "max"
+          || /^codex:[a-z0-9][a-z0-9_-]{0,31}$/.test(String(effort || ""));
+        if (!supported) return;
+        try {
+          if (localStorage.getItem("wand-thinking-effort")) return;
+        } catch (e) { /* 隐私模式下读不到就按未设过处理 */ }
+        if (state.chatThinking === effort) return;
+        state.chatThinking = effort;
+        refreshAllChatModeTrios();
       }
 
       function submitThinkingMutation(session, normalized, successMessage, prerequisite?) {
@@ -2446,25 +2463,38 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
         return !!(state.terminal && state.terminal.modes && state.terminal.modes.bracketedPasteMode);
       }
 
-      function pasteUploadedPathsIntoPty(sessionId, uploadedFiles, bracketedPaste) {
-        return uploadedFiles.reduce(function(promise, uploaded) {
-          return promise.then(function() {
-            var path = uploaded && typeof uploaded.savedPath === "string"
-              ? uploaded.savedPath
-              : "";
-            if (!path) return undefined;
-            // Codex only recognizes a pasted image path inside a terminal paste
-            // event. Raw PTY text becomes ordinary key input and never reaches
-            // its image attachment path. Preserve one paste boundary per file
-            // so multiple images become separate [Image #N] attachments.
-            return queueDirectInput(
-              buildTerminalPathPasteSequence(path, bracketedPaste),
-              "paste",
-              "terminal",
-              sessionId,
-            );
+      // 上传完的附件路径必须一个个按顺序写进 PTY，且每个 chunk 之间要等 CLI 把上一帧
+      // 画完：claude / pi 收到图片路径后会异步把它换成 [Image #N] 占位符并重绘整行
+      // 草稿，抢在那次重绘之前发的 chunk 会被吃掉。一批附件整体入队，否则「前一批
+      // 芯片后的分隔空格」可能插到「后一批附件路径」之后，芯片就和路径粘在一起了。
+      var attachmentWriteChain: Promise<unknown> = Promise.resolve();
+      var attachmentChunksWritten = 0;
+      function queueAttachmentChunks(chunks, sessionId) {
+        var start = attachmentWriteChain;
+        attachmentWriteChain = start
+          .then(function() {
+            // 上一批刚写完时再等一帧：最后一张图的芯片可能还在重绘。
+            return attachmentChunksWritten ? waitForTerminalSettled() : undefined;
+          })
+          .then(function() {
+            return chunks.reduce(function(promise, chunk, index) {
+              var send = promise.then(function() {
+                attachmentChunksWritten += 1;
+                return queueDirectInput(chunk.data, chunk.shortcutKey, "terminal", sessionId);
+              });
+              return index < chunks.length - 1 ? send.then(waitForTerminalSettled) : send;
+            }, Promise.resolve());
           });
-        }, Promise.resolve());
+        return attachmentWriteChain;
+      }
+
+      function pasteUploadedPathsIntoPty(sessionId, uploadedFiles, bracketedPaste, provider) {
+        var chunks = buildPtyAttachmentChunks(uploadedFiles, {
+          bracketedPaste: bracketedPaste,
+          provider: provider,
+        });
+        if (!chunks.length) return Promise.resolve();
+        return queueAttachmentChunks(chunks, sessionId);
       }
 
       export function pasteFilesIntoPty(files, targetSessionId?) {
@@ -2481,18 +2511,33 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
         showToast(imageCount === entries.length ? "正在粘贴图片…" : "正在上传附件…", "info");
         uploadAttachments(sessionId, entries)
           .then(function(uploadedFiles) {
-            return pasteUploadedPathsIntoPty(sessionId, uploadedFiles, bracketedPaste).then(function() {
-              var countLabel = imageCount === entries.length
-                ? entries.length + " 张图片"
-                : entries.length + " 个附件";
-              var target = provider === "codex" ? "Codex" : "CLI";
-              showToast("已将 " + countLabel + "粘贴到 " + target + " 输入区。", "info");
-            });
+            return pasteUploadedPathsIntoPty(sessionId, uploadedFiles, bracketedPaste, provider)
+              .then(function() {
+                var countLabel = imageCount === entries.length
+                  ? entries.length + " 张图片"
+                  : entries.length + " 个附件";
+                var target = provider === "codex" ? "Codex" : "CLI";
+                showToast("已将 " + countLabel + "粘贴到 " + target + " 输入区。", "info");
+              });
           })
           .catch(function(error) {
             showToast("附件粘贴失败: " + ((error && error.message) || error), "error");
           });
         return true;
+      }
+
+      /**
+       * 一批附件（拖拽 / 多选 / 多张粘贴图片）的处理入口。直通模式下要把整批交给
+       * pasteFilesIntoPty：一次上传请求 + 一条串行写入队列，逐文件调用会让「附件芯片
+       * 后的分隔空格」和「下一个附件路径」互相插队。
+       */
+      export function addPendingAttachments(files) {
+        var list = Array.from(files || []) as File[];
+        if (!list.length) return;
+        if (state.terminalInteractive && pasteFilesIntoPty(list)) return;
+        for (var i = 0; i < list.length; i++) {
+          addPendingAttachment(list[i]);
+        }
       }
 
       export function addPendingAttachment(file) {
@@ -2647,9 +2692,7 @@ import { buildTerminalPasteSequence, buildTerminalPathPasteSequence, clipboardIm
         if (imageFiles.length) {
           event.preventDefault();
           if (state.terminalInteractive && pasteFilesIntoPty(imageFiles)) return;
-          for (var i = 0; i < imageFiles.length; i++) {
-            addPendingAttachment(imageFiles[i]);
-          }
+          addPendingAttachments(imageFiles);
           return;
         }
         var pasted = event.clipboardData && event.clipboardData.getData("text");

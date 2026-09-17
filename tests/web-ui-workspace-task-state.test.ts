@@ -119,6 +119,18 @@ test("409 cancels stale queued writes, settles callers, surfaces error and resto
   assert.deepEqual(h.restored, ["A:8"]);
 });
 
+test("background reconciliation after moving a session quietly restores the new layout", async () => {
+  const h = savesHarness();
+  const automatic = h.controller.save("A", layout("old-session"), { automatic: true });
+  h.writes[0].result.reject(new HttpResponseError("moved session", 409)); await tick();
+  h.reads[0].result.resolve(detail("A", 4));
+  assert.equal(await automatic, "failed");
+  await h.controller.flush("A");
+  assert.deepEqual(h.errors, []);
+  assert.deepEqual(h.restored, ["A:4"]);
+  assert.equal(h.controller.canSaveAutomatically("A"), true);
+});
+
 test("failure recovery cannot overwrite new edits or another task; new generation still saves", async () => {
   const h = savesHarness();
   const failed = h.controller.save("A", layout("failed"));

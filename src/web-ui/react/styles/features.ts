@@ -481,6 +481,25 @@ export const settingsAndQuickCommitStyles = String.raw`
   gap: 14px;
 }
 
+/* 新会话默认三件套：工具 / 模型 / 思考深度，与任务指派同一排布。 */
+.wand-settings-default-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.wand-settings-default-summary {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.wand-settings-inline-action { align-self: flex-start; }
+
+@media (max-width: 1100px) {
+  .wand-settings-default-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 .wand-settings-route-toolbar,
 .wand-settings-route-heading,
 .wand-settings-route-identity,
@@ -2625,7 +2644,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   .wand-settings-section { margin-bottom: 14px; border-radius: 12px; }
   .wand-settings-section-heading { padding: 15px 14px; }
   .wand-settings-section-body { padding: 15px 14px; }
-  .wand-settings-grid, .wand-settings-file-grid, .wand-settings-env-toolbar { grid-template-columns: minmax(0, 1fr); }
+  .wand-settings-grid, .wand-settings-default-row, .wand-settings-file-grid, .wand-settings-env-toolbar { grid-template-columns: minmax(0, 1fr); }
   .wand-settings-route .wand-settings-field:last-child { grid-column: auto; }
   .wand-settings-route-toolbar, .wand-settings-route-heading { align-items: flex-start; }
   .wand-settings-route-toolbar { flex-direction: column; }
