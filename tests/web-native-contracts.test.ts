@@ -192,7 +192,8 @@ test("task board create sheets only assign agents from the doing column", () => 
     "onCreateForStatus: (String) -> Unit",
     'BoardSectionHeader(status = status, count = items.size, onAdd = onCreateForStatus)',
     'contentDescription = "在${boardTaskStatusLabel(status)}中新建任务"',
-    'label = if (dispatches && description.trim().isNotEmpty()) "创建并指派" else "创建任务"',
+    'label = if (busy) "创建中…" else if (dispatches && description.trim().isNotEmpty()) "创建并指派" else "创建任务"',
+    'enabled = !busy && (title.trim().isNotEmpty() || description.trim().isNotEmpty())',
     "只创建任务，不指派 Agent",
   ]);
   assert.doesNotMatch(
