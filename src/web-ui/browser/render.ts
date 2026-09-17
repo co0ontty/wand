@@ -145,7 +145,7 @@ export function syncOnForeground(reason: string, force?: boolean) {
   // 浏览器节流（最低 1Hz，部分浏览器更慢），所以如果挂了 1 分钟回来，
   // 不主动跑这一次的话要等到下一个 10s tick 才会发现，前 10s 会继续
   // 往一条死 socket 上推消息。
-  evaluateWsHeartbeatStale();
+  if (!force) evaluateWsHeartbeatStale();
   // On Android resume the previous WS may still report OPEN/CONNECTING
   // for a few seconds because the close frame hasn't been delivered
   // yet (TCP keepalive / Doze suspended the network stack). Force a
@@ -282,7 +282,6 @@ export function restoreLoginSession() {
           // render() may fail if external terminal assets failed to load;
           // continue with polling and session loading so the app remains functional
         }
-        bindForegroundSyncListeners();
         startPolling();
         refreshAll();
         fetchAvailableModels();

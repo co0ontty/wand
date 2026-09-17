@@ -16,13 +16,14 @@ import {
   writePooledTerminal,
 } from "./terminal-pool";
 import { ensureTerminalFitWithRetry, scheduleTerminalResize } from "./viewport";
-import "./render";
+import { bindForegroundSyncListeners } from "./render";
 import { notifyLegacyUiChange } from "./ui-store-bridge";
 
 // ── External functions not defined in this module ──
 
       export function startPolling() {
         stopPolling();
+        bindForegroundSyncListeners();
         // Use WebSocket if available, fallback to polling
         if (initWebSocket()) {
           // WebSocket will deliver updates; no need for initial refreshAll()
@@ -85,6 +86,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           var stale = state.ws;
           // Detach handlers so the imminent close doesn't trigger another
           // reconnect path while we're already starting a fresh one.
+          try { stale.onopen = null; } catch (e) { /* ignore */ }
           try { stale.onclose = null; } catch (e) { /* ignore */ }
           try { stale.onerror = null; } catch (e) { /* ignore */ }
           // 也清掉 onmessage：close() 是异步的，TCP RST/Close 帧到达之前，浏览器
@@ -125,8 +127,11 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
       export function initWebSocket(reason?: any) {
         if (!window.WebSocket) return false;
 
-        // Prevent duplicate connections
+        // Ordinary initialization reuses an owned connection, including CONNECTING.
+        // Only forceReconnectWebSocket deliberately replaces a healthy socket.
         if (state.ws) {
+          if (state.ws.readyState === WebSocket.OPEN || state.ws.readyState === WebSocket.CONNECTING) return true;
+          state.ws.onopen = state.ws.onmessage = state.ws.onclose = state.ws.onerror = null;
           try { state.ws.close(); } catch (e) { /* ignore */ }
           state.ws = null;
         }
@@ -136,9 +141,11 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
 
         try {
           var ws = new WebSocket(wsUrl);
+          state.ws = ws;
+          state.wsConnected = false;
 
           ws.onopen = function() {
-            state.ws = ws;
+            if (state.ws !== ws) return;
             try { (window as any).__wandWs = ws; } catch (e) {}
             state.wsConnected = true;
             state.lastWsMessageAt = Date.now();
@@ -168,6 +175,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           };
 
           ws.onmessage = function(event) {
+            if (state.ws !== ws) return;
             // 任意服务端消息都说明连接活着，先刷新心跳计时。
             state.lastWsMessageAt = Date.now();
             try {
@@ -230,6 +238,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           };
 
           ws.onclose = function() {
+            if (state.ws !== ws) return;
             state.ws = null;
             state.wsConnected = false;
             stopWsHeartbeatCheck();
@@ -237,6 +246,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           };
 
           ws.onerror = function() {
+            if (state.ws !== ws) return;
             ws.close();
           };
 
