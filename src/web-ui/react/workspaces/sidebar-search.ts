@@ -13,12 +13,18 @@ export function filterSidebarGroups(
   query: string,
   liveTitles: Readonly<Record<string, string>> = {},
 ): readonly TaskDirectoryGroup[] {
-  if (!query.trim()) return groups;
+  // Hide completed containers only in the sidebar, including their sessions.
+  // Keep the source snapshot intact for the board, navigation and task history.
+  const activeGroups = groups.map((group) => ({
+    ...group,
+    tasks: group.tasks.filter((task) => task.status !== "done"),
+  }));
+  if (!query.trim()) return activeGroups;
   const matches = (...values: (string | undefined)[]): boolean => sidebarSearchMatches(query, ...values);
   const sessionText = (session: WorkspaceSessionSummary): string => (
     [session.title, session.cwd, session.provider, liveTitles[session.id]].filter(Boolean).join(" ")
   );
-  return groups.flatMap((group) => {
+  return activeGroups.flatMap((group) => {
     const name = group.global ? "独立任务" : group.workspaceName;
     if (matches(name, group.workspaceCwd)) return [group];
     const tasks = group.tasks.filter((task) => matches(
