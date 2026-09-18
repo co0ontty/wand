@@ -4,6 +4,7 @@ import type {
   ConversationTurn,
   StructuredQuestion,
   StructuredTaskItem,
+  SubagentMeta,
   ToolUseBlock,
 } from "./types.js";
 
@@ -47,6 +48,73 @@ function questionsFromInput(input: Record<string, unknown>): StructuredQuestion[
     });
   }
   return questions;
+}
+
+/** 派发子 Agent 的工具名：Claude Code 的 Task/Agent，以及 Wand pi 扩展的 subagent。 */
+const SUBAGENT_TOOL_NAMES = new Set(["Task", "Agent"]);
+const PI_SUBAGENT_TOOL_NAME = "Pi/subagent";
+
+/**
+ * 历史 turn / 非 Claude provider 的子 Agent 工具调用没有 `__subagent` 盖章，
+ * 按调用参数现场补一份，让「子 Agent」面板在所有端都拿得到同一份分组。
+ *
+ * 只认一次真正的派发：Claude 的 Task/Agent（`subagent_type` 可省），
+ * pi 扩展的 `Pi/subagent` 必须带 `agent`，避免把管理类调用误当子任务。
+ */
+function deriveSubagentMeta(block: ToolUseBlock): SubagentMeta | null {
+  const existing = block.__subagent;
+  if (existing?.taskId) return existing;
+  const input = asRecord(block.input) ?? {};
+  if (block.name === PI_SUBAGENT_TOOL_NAME) {
+    const agent = text(input.agent);
+    const task = text(input.task);
+    if (!agent && !task) return null;
+    return {
+      taskId: block.id,
+      ...(agent ? { agentType: agent } : {}),
+      ...(task ? { taskDescription: task } : {}),
+    };
+  }
+  const agentType = text(input.subagent_type);
+  // Claude 的 Task/Agent 允许省 `subagent_type`；其他工具只有在真给了 `subagent_type` 时才算派发。
+  if (!SUBAGENT_TOOL_NAMES.has(block.name) && !agentType) return null;
+  const description = text(input.description);
+  return {
+    taskId: block.id,
+    ...(agentType ? { agentType } : {}),
+    ...(description ? { taskDescription: description } : {}),
+  };
+}
+
+/**
+ * 给没有盖章的子 Agent 调用打上 `__subagent`：派发用的 tool_use 自己带一份，
+ * 对应的 tool_result（`tool_use_id` 命中 taskId）带同一份，客户端才好判定完成态。
+ */
+function stampDerivedSubagents(messages: ConversationTurn[]): ConversationTurn[] {
+  const byTaskId = new Map<string, SubagentMeta>();
+  for (const turn of messages) {
+    for (const block of turn.content) {
+      if (block.type !== "tool_use") continue;
+      const meta = deriveSubagentMeta(block);
+      if (meta) byTaskId.set(meta.taskId, meta);
+    }
+  }
+  if (byTaskId.size === 0) return messages;
+  return messages.map((turn) => ({
+    ...turn,
+    content: turn.content.map((block): ContentBlock => {
+      if (block.__subagent) return block;
+      if (block.type === "tool_use") {
+        const meta = byTaskId.get(block.id);
+        return meta ? { ...block, __subagent: meta } : block;
+      }
+      if (block.type === "tool_result") {
+        const meta = byTaskId.get(block.tool_use_id);
+        return meta ? { ...block, __subagent: meta } : block;
+      }
+      return block;
+    }),
+  }));
 }
 
 function toolResultText(block: ContentBlock): string {
@@ -129,7 +197,7 @@ function tasksFromSegment(messages: ConversationTurn[], start: number, end: numb
  * This is the external interface consumed by every client.
  */
 export function enrichStructuredMessages(messages: ConversationTurn[]): ConversationTurn[] {
-  const enriched = messages.map((turn) => ({
+  const enriched = stampDerivedSubagents(messages).map((turn) => ({
     ...turn,
     content: turn.content.map((block) => {
       if (block.type !== "tool_use" || block.name !== "AskUserQuestion") return block;

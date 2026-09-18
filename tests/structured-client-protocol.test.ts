@@ -105,3 +105,61 @@ test("protocol v2 reads Qoder TodoWrite description fields", () => {
     ],
   });
 });
+
+test("protocol v2 stamps legacy Task tool calls as subagent activities", () => {
+  const messages: ConversationTurn[] = [
+    { role: "user", content: [{ type: "text", text: "查一下依赖" }] },
+    { role: "assistant", content: [
+      { type: "text", text: "我先派一只猫去看看。" },
+      { type: "tool_use", id: "task-1", name: "Task", input: { subagent_type: "explore", description: "查看依赖" } },
+      { type: "tool_result", tool_use_id: "task-1", content: "依赖只有 express。" },
+    ] },
+  ];
+
+  const enriched = enrichStructuredMessages(messages);
+  const dispatch = enriched[1].content[1];
+  const result = enriched[1].content[2];
+  assert.deepEqual(dispatch.__subagent, { taskId: "task-1", agentType: "explore", taskDescription: "查看依赖" });
+  assert.deepEqual(result.__subagent, { taskId: "task-1", agentType: "explore", taskDescription: "查看依赖" });
+  assert.equal(enriched[1].content[0].__subagent, undefined);
+  assert.equal(messages[1].content[1].__subagent, undefined, "does not mutate persisted blocks");
+});
+
+test("protocol v2 stamps pi subagent dispatches but not management calls", () => {
+  const messages: ConversationTurn[] = [
+    { role: "assistant", content: [
+      { type: "tool_use", id: "pi-1", name: "Pi/subagent", input: { agent: "repo-inventory", task: "列出所有路由文件" } },
+      { type: "tool_result", tool_use_id: "pi-1", content: "找到 12 个文件。" },
+      { type: "tool_use", id: "pi-2", name: "Pi/subagent", input: { action: "list" } },
+      { type: "tool_result", tool_use_id: "pi-2", content: "无运行中的子 Agent。" },
+    ] },
+  ];
+
+  const enriched = enrichStructuredMessages(messages);
+  assert.deepEqual(enriched[0].content[0].__subagent, {
+    taskId: "pi-1",
+    agentType: "repo-inventory",
+    taskDescription: "列出所有路由文件",
+  });
+  assert.equal(enriched[0].content[1].__subagent?.taskId, "pi-1");
+  assert.equal(enriched[0].content[2].__subagent, undefined, "management calls stay in the transcript");
+  assert.equal(enriched[0].content[3].__subagent, undefined);
+});
+
+test("protocol v2 keeps existing subagent stamps and unrelated tools untouched", () => {
+  const existing = { taskId: "task-9", agentType: "general-purpose" };
+  const messages: ConversationTurn[] = [
+    { role: "assistant", content: [
+      { type: "tool_use", id: "task-9", name: "Task", input: { subagent_type: "changed-later" }, __subagent: existing },
+      { type: "tool_result", tool_use_id: "task-9", content: "完成" },
+      { type: "tool_use", id: "bash-1", name: "Bash", input: { command: "ls" } },
+      { type: "tool_result", tool_use_id: "bash-1", content: "src" },
+    ] },
+  ];
+
+  const enriched = enrichStructuredMessages(messages);
+  assert.deepEqual(enriched[0].content[0].__subagent, existing);
+  assert.deepEqual(enriched[0].content[1].__subagent, existing, "missing result stamp reuses the dispatch meta");
+  assert.equal(enriched[0].content[2].__subagent, undefined);
+  assert.equal(enriched[0].content[3].__subagent, undefined);
+});
