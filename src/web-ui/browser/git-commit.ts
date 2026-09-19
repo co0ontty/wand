@@ -12,6 +12,7 @@ import {
 } from "../react/quick-commit/controller";
 import { notifyLegacyUiChange } from "./ui-store-bridge";
 import { createGitStatusRefresh } from "./git-status-refresh";
+import { createGitStatusCache } from "./git-status-cache";
 import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
 import { closeReactOverlays } from "./react-overlay-coordinator";
 
@@ -48,21 +49,35 @@ import { closeReactOverlays } from "./react-overlay-coordinator";
         refresh: function(sessionId: string) { void loadGitStatus(sessionId, { force: true }); },
       });
 
-      /** 已经用过的最近一次请求时刻：晚到的旧响应不能覆盖更新的快照。 */
-      var gitStatusAppliedRequestAt = 0;
+      /** 已经取过的状态按会话缓存：切会话时先用它顶上，徽章不会闪一下就没。 */
+      var gitStatusCache = createGitStatusCache<any>();
 
-      /** 拿到一份新鲜状态 → 直接写进徽章状态，避免再发一次同样的请求。 */
-      export function applyGitStatusSnapshot(sessionId: string, status: any, requestedAt?: number) {
-        if (!sessionId || !status) return;
-        var at = requestedAt || Date.now();
-        // 两个请求可能交叉落地（回合结束的刷新与面板自己拉的取数）：只认
-        // 更晚发起的那个，否则旧快照会把刚拿到的状态盖回去。
-        if (at < gitStatusAppliedRequestAt) return;
-        gitStatusAppliedRequestAt = at;
-        state.gitStatus = status;
-        state.gitStatusSessionId = sessionId;
-        state.gitStatusLastFetchAt = Date.now();
+      /**
+       * 写入展示状态。`fetched` 为 false 表示值来自缓存（不计入节流时间）。
+       * 拿不到值时只把 `gitStatusSessionId` 清掉，让惰性取数路径（render /
+       * loadSessions）会再来一次。
+       */
+      function displayGitStatus(sessionId: string | null, status: any, fetched: boolean) {
+        state.gitStatus = status || null;
+        state.gitStatusSessionId = status ? sessionId : null;
+        if (fetched) state.gitStatusLastFetchAt = Date.now();
         updateTopbarGitBadge();
+      }
+
+      /**
+       * 拿到一份新鲜状态。同一会话只认更晚发起的请求（两个请求可能交叉落地：
+       * 回合结束的刷新与面板自己拉的取数），且只把当前会话的结果写到徽章上，
+       * 其他会话先入缓存。
+       */
+      export function applyGitStatusSnapshot(sessionId: string, status: any, requestedAt?: number) {
+        if (!gitStatusCache.accept(sessionId, status, requestedAt || Date.now())) return;
+        if (sessionId !== state.selectedId) return;
+        displayGitStatus(sessionId, status, true);
+      }
+
+      /** 切会话/回首页：有缓存就用缓存的，没有就先不显示，不必等新的一次取数。 */
+      export function restoreGitStatusForSession(sessionId: string | null) {
+        displayGitStatus(sessionId, sessionId ? gitStatusCache.peek(sessionId) : null, false);
       }
 
       /** 工作区可能变了（回合结束/进程退出）→ 合并成一次强制刷新。 */
@@ -147,19 +162,22 @@ import { closeReactOverlays } from "./react-overlay-coordinator";
         var promise = fetch("/api/sessions/" + encodeURIComponent(sessionId) + "/git-status", {
           credentials: "same-origin"
         })
-          .then(function(res) { return res.ok ? res.json() : { isGit: false }; })
+          .then(function(res) {
+            // 404/401/500 这类失败与「真的不是 git 仓库」不同：不能拿它当
+            // 非仓库去把徽章打没，这里当失败处理（retain 上一次的结果）。
+            if (!res.ok) throw new Error("git-status " + res.status);
+            return res.json();
+          })
           .then(function(data: any) {
             applyGitStatusSnapshot(sessionId, data || { isGit: false }, requestedAt);
             return data;
           })
           .catch(function() {
-            // 网络抖动不该把徽章打没：同一会话保留上一次的有效状态，换会话才清空。
-            if (state.gitStatusSessionId !== sessionId) {
-              state.gitStatus = { isGit: false };
-              state.gitStatusSessionId = sessionId;
+            // 网络抖动同样不该把徽章打没：缓存里有这个会话的状态就继续用。
+            var cached = gitStatusCache.peek(sessionId);
+            if (sessionId === state.selectedId) {
+              displayGitStatus(sessionId, cached, false);
             }
-            state.gitStatusLastFetchAt = Date.now();
-            updateTopbarGitBadge();
             return null;
           })
           .finally(function() {

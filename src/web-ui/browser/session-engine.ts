@@ -5,7 +5,7 @@ import { ensureChatMessagesContainer, extractToolResultText, parseMessages, rend
 import { bindChatScrollListener, normalizeStructuredSnapshot, persistSelectedId, restoreStructuredQueue, saveStructuredQueue, stripRenderOnlyStructuredMessages, syncStructuredQueueFromSession, updateChatUnreadBubble } from "./chat-scroll";
 import "./events";
 import { isSidebarDrawerLayout, updateFilePanelCwd, updateLayoutState } from "./file-browser";
-import { loadGitStatus, updateTopbarGitBadge } from "./git-commit";
+import { loadGitStatus, restoreGitStatusForSession } from "./git-commit";
 import { autoResizeInput, buildMessagesForRender, canAutoResumeSession, captureTerminalInput, closeKeyboardPopup, closeSwipedItem, flushCrossSessionQueue, focusInputBox, getControlInput, hasActiveTerminalSelection, hideMiniKeyboard, isImeKeyboardEvent, queueDirectInput, reconcileInteractiveState, renderCrossSessionQueue, sendInputFromBox, setTerminalInteractive, shouldCaptureTerminalEvent, stopSession, switchToSessionView, updateInteractiveControls, updateStructuredQueueCounter } from "./input";
 import { _apkVersion, _hasNativeBridge, _macAppVersion, _syncWakeLock, hideError, showError, showToast } from "./notifications";
 import { getEffectiveCwd, render, resetChatRenderCache } from "./render";
@@ -1538,10 +1538,9 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
         loadOutput(id).then(function() { focusInputBox(true); });
         subscribeToSession(id);
         loadClaudeSkillsForSession(foundSession);
-        // 切换会话时清掉旧 git 状态，再异步刷新
-        state.gitStatus = null;
-        state.gitStatusSessionId = null;
-        updateTopbarGitBadge();
+        // 切会话：先用缓存里的上一次结果顶上（没有就空着），再异步刷新，
+        // 避免慢仓库上徽章先消失、隔一两秒才出现。
+        restoreGitStatusForSession(id);
         loadGitStatus(id, { force: true });
       }
 
@@ -1551,8 +1550,7 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
         state.selectedId = null;
         state.currentTask = null;
         state.currentMessages = [];
-        state.gitStatus = null;
-        state.gitStatusSessionId = null;
+        restoreGitStatusForSession(null);
         persistSelectedId();
         resetChatRenderCache();
         dismissDrawerIfOverlay();

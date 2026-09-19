@@ -80,6 +80,7 @@ test("顶栏 git 徽章靠回合结束、进程退出、回前台与兜底轮询
   const websocket = readFileSync(new URL("../src/web-ui/browser/websocket.ts", import.meta.url), "utf8");
   const render = readFileSync(new URL("../src/web-ui/browser/render.ts", import.meta.url), "utf8");
   const host = readFileSync(new URL("../src/web-ui/react/quick-commit/host.tsx", import.meta.url), "utf8");
+  const sessionEngine = readFileSync(new URL("../src/web-ui/browser/session-engine.ts", import.meta.url), "utf8");
 
   // 只在切会话时取一次快照会让徽章停在「工作区干净」：必须有合并刷新 + 轮询兜底。
   assert.ok(gitCommit.includes("createGitStatusRefresh({"), "git-commit.ts must keep the refresh controller");
@@ -88,7 +89,13 @@ test("顶栏 git 徽章靠回合结束、进程退出、回前台与兜底轮询
     host.includes("onStatusLoaded(sessionId, loaded, requestedAt)"),
     "面板拿到的状态必须回给宿主，并带上取数发起时刻",
   );
-  assert.ok(gitCommit.includes("if (at < gitStatusAppliedRequestAt) return;"), "旧响应不能盖掉新快照");
+  assert.ok(gitCommit.includes("gitStatusCache.accept(sessionId, status, requestedAt || Date.now())"), "状态入缓存并排掉旧响应");
+  assert.ok(gitCommit.includes("if (sessionId !== state.selectedId) return;"), "别的会话的结果只进缓存");
+  assert.ok(gitCommit.includes("if (!res.ok) throw new Error"), "HTTP 失败不能当成「不是 git 仓库」把徽章打没");
+  assert.ok(
+    sessionEngine.includes("restoreGitStatusForSession(id);"),
+    "切会话先用缓存顶上，避免徽章闪一下才出现",
+  );
 
   // 回合结束（isResponding / structuredState.inFlight true→false）与进程退出都是信号源。
   assert.ok(websocket.includes("noteTurnActivity(msg.sessionId, !!msg.data.isResponding)"));
