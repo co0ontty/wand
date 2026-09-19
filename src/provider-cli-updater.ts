@@ -14,15 +14,18 @@ const REGISTRY_TIMEOUT_MS = 15_000;
 const UPDATE_TIMEOUT_MS = 5 * 60_000;
 const MAX_BUFFER = 4 * 1024 * 1024;
 
-export type ProviderCliId = "claude" | "codex" | "opencode" | "qoder" | "pi";
+export type ProviderCliId = "claude" | "codex" | "opencode" | "grok" | "qoder" | "pi";
 
 interface ProviderCliSpec {
   id: ProviderCliId;
   label: string;
   command: string;
-  npmPackage: string;
+  /** 有 npm 发布渠道时用它查最新版；Grok 只提供自更新，见 `cliLatestArgs`。 */
+  npmPackage?: string;
   versionArgs: string[];
   updateArgs: string[];
+  /** 没有 npm 渠道的 CLI 用自身 --check 读取最新版（如 `grok update --check --json`）。 */
+  cliLatestArgs?: string[];
 }
 
 const PROVIDER_CLI_SPECS: readonly ProviderCliSpec[] = [
@@ -51,6 +54,15 @@ const PROVIDER_CLI_SPECS: readonly ProviderCliSpec[] = [
     updateArgs: ["upgrade"],
   },
   {
+    id: "grok",
+    label: "Grok CLI",
+    command: "grok",
+    // Grok CLI 没有 npm 发布渠道，最新版只能问它自己。
+    versionArgs: ["--version"],
+    updateArgs: ["update"],
+    cliLatestArgs: ["update", "--check", "--json"],
+  },
+  {
     id: "qoder",
     label: "Qoder CLI",
     command: "qodercli",
@@ -62,7 +74,9 @@ const PROVIDER_CLI_SPECS: readonly ProviderCliSpec[] = [
     id: "pi",
     label: "Pi CLI",
     command: "pi",
-    npmPackage: "@mariozechner/pi-coding-agent",
+    // pi 已从 @mariozechner/pi-coding-agent 改名到 @earendil-works/pi-coding-agent，
+    // 继续查旧包会拿到低于本机安装版本的“最新版”，把更新判断彻底带偏。
+    npmPackage: "@earendil-works/pi-coding-agent",
     versionArgs: ["--version"],
     updateArgs: ["update", "self"],
   },
@@ -133,8 +147,27 @@ function resolveInstallKind(executable: string | null, id: ProviderCliId, versio
   if (id === "opencode" && version && /^0\.0\./.test(version)) return "legacy";
   if (normalized.includes("/node_modules/") || normalized.includes("/npm/")) return "npm";
   if (normalized.includes("/cellar/") || normalized.includes("/caskroom/") || normalized.includes("/homebrew/")) return "brew";
-  if (normalized.includes("/.claude/") || normalized.includes("/.codex/") || normalized.includes("/.opencode/") || normalized.includes("/.qoder/")) return "native";
+  if (normalized.includes("/.claude/") || normalized.includes("/.codex/") || normalized.includes("/.opencode/") || normalized.includes("/.grok/") || normalized.includes("/.qoder/") || normalized.includes("/.qoder-cn/")) return "native";
   return "unknown";
+}
+
+/**
+ * Homebrew 托管的 CLI 官方更新器会拒绍动手（实测 `claude update` 只打印
+ * "managed by Homebrew" 并不改版本），所以直接给出正确的 brew 命令。
+ */
+export function homebrewUpdateHint(executable: string | null): string | null {
+  const install = parseHomebrewInstall(executable);
+  return install ? `brew upgrade ${install.name}` : null;
+}
+
+/** 从 `/opt/homebrew/Caskroom/<cask>/…` / `/Cellar/<formula>/…` 反解 Homebrew 包名。 */
+export function parseHomebrewInstall(executable: string | null): { kind: "cask" | "formula"; name: string } | null {
+  if (!executable) return null;
+  let resolved = executable;
+  try { resolved = realpathSync(executable); } catch { /* keep original */ }
+  const matched = /\/(Caskroom|Cellar)\/([^/]+)\//i.exec(resolved.replace(/\\/g, "/"));
+  if (!matched) return null;
+  return { kind: matched[1].toLowerCase() === "caskroom" ? "cask" : "formula", name: matched[2] };
 }
 
 function isUpdateSupported(id: ProviderCliId, version: string | null): boolean {
@@ -165,10 +198,21 @@ async function readInstalledVersion(spec: ProviderCliSpec, options: ProviderCliU
   }
 }
 
-async function readLatestVersion(spec: ProviderCliSpec, options: ProviderCliUpdaterOptions): Promise<{
+async function readLatestVersion(spec: ProviderCliSpec, options: ProviderCliUpdaterOptions, status?: {
+  executable: string | null;
+  installKind: ProviderCliUpdateStatus["installKind"];
+}): Promise<{
   version: string | null;
   error?: string;
 }> {
+  if (spec.cliLatestArgs) return readLatestVersionFromCli(spec, options);
+  // Homebrew 安装跟 npm 的 latest 不是同一个发布渠道（cask 通常落后一两个版本），
+  // 拿 npm 比会永久显示“有更新”。
+  if (status?.installKind === "brew") {
+    const install = parseHomebrewInstall(status.executable);
+    if (install) return readBrewLatestVersion(install, options);
+  }
+  if (!spec.npmPackage) return { version: null, error: "该 CLI 没有配置版本来源。" };
   const npm = options.env?.WAND_NPM_BIN || process.env.WAND_NPM_BIN || (process.platform === "win32" ? "npm.cmd" : "npm");
   try {
     const result = await runCommand(
@@ -184,14 +228,97 @@ async function readLatestVersion(spec: ProviderCliSpec, options: ProviderCliUpda
   }
 }
 
+/** `brew info --json=v2` 的 cask/formula 最新版。 */
+async function readBrewLatestVersion(
+  install: { kind: "cask" | "formula"; name: string },
+  options: ProviderCliUpdaterOptions,
+): Promise<{ version: string | null; error?: string }> {
+  const env = resolveChildEnv(options);
+  const brew = whichSync("brew", { env, timeoutMs: options.versionTimeoutMs ?? VERSION_TIMEOUT_MS });
+  if (!brew) return { version: null, error: "未找到 brew 命令，无法检查 Homebrew 最新版。" };
+  try {
+    const result = await runCommand(
+      brew,
+      ["info", "--json=v2", install.kind === "cask" ? "--cask" : "--formula", install.name],
+      options.registryTimeoutMs ?? REGISTRY_TIMEOUT_MS,
+      options,
+    );
+    const version = parseBrewInfoVersion(result.stdout, install.kind);
+    return version ? { version } : { version: null, error: "brew info 未返回版本。" };
+  } catch (error) {
+    return { version: null, error: getErrorMessage(error, "无法运行 brew info。") };
+  }
+}
+
+/** 从 `brew info --json=v2` 输出里取 cask version / formula stable 版本。 */
+export function parseBrewInfoVersion(output: string, kind: "cask" | "formula"): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(output);
+  } catch {
+    return null;
+  }
+  const root = parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : {};
+  const list = kind === "cask" ? root.casks : root.formulae;
+  const entry = Array.isArray(list) && list.length && list[0] && typeof list[0] === "object"
+    ? list[0] as Record<string, unknown>
+    : null;
+  if (!entry) return null;
+  if (kind === "cask") return typeof entry.version === "string" ? extractSemver(entry.version) : null;
+  const versions = entry.versions && typeof entry.versions === "object" ? entry.versions as Record<string, unknown> : {};
+  return typeof versions.stable === "string" ? extractSemver(versions.stable) : null;
+}
+
+/** `grok update --check --json` 的 JSON 行里取 `latestVersion`；日志混排也能挑出来。 */
+export function parseCliLatestVersionJson(output: string): string | null {
+  for (const line of output.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    const latest = parsed && typeof parsed === "object"
+      ? (parsed as { latestVersion?: unknown }).latestVersion
+      : null;
+    const version = typeof latest === "string" ? extractSemver(latest) : null;
+    if (version) return version;
+  }
+  return null;
+}
+
+async function readLatestVersionFromCli(spec: ProviderCliSpec, options: ProviderCliUpdaterOptions): Promise<{
+  version: string | null;
+  error?: string;
+}> {
+  const env = resolveChildEnv(options);
+  const executable = whichSync(spec.command, { env, timeoutMs: options.versionTimeoutMs ?? VERSION_TIMEOUT_MS });
+  // 没装就没有“最新版”可比，交给上面按未安装展示。
+  if (!executable) return { version: null };
+  try {
+    const result = await runCommand(
+      executable,
+      spec.cliLatestArgs as string[],
+      options.registryTimeoutMs ?? REGISTRY_TIMEOUT_MS,
+      options,
+    );
+    const version = parseCliLatestVersionJson(`${result.stdout}\n${result.stderr}`);
+    return version ? { version } : { version: null, error: "CLI 未返回可解析的最新版本。" };
+  } catch (error) {
+    return { version: null, error: getErrorMessage(error, "无法检查 CLI 最新版本。") };
+  }
+}
+
 export async function checkProviderCliUpdates(
   options: ProviderCliUpdaterOptions = {},
 ): Promise<ProviderCliUpdateStatus[]> {
   return Promise.all(PROVIDER_CLI_SPECS.map(async (spec) => {
-    const [installed, latest] = await Promise.all([
-      readInstalledVersion(spec, options),
-      readLatestVersion(spec, options),
-    ]);
+    // 串行：查最新版要先用 installKind 判断是不是 Homebrew 安装（其它 5 个 CLI 仍并发）。
+    const installed = await readInstalledVersion(spec, options);
+    const installKind = resolveInstallKind(installed.executable, spec.id, installed.version);
+    const latest = await readLatestVersion(spec, options, { executable: installed.executable, installKind });
     const updateSupported = isUpdateSupported(spec.id, installed.version);
     const errors = [installed.error, latest.error].filter(Boolean);
     if (!updateSupported) {
@@ -207,7 +334,7 @@ export async function checkProviderCliUpdates(
       latestVersion: latest.version,
       updateAvailable: providerCliUpdateAvailable(installed.version, latest.version),
       updateSupported,
-      installKind: resolveInstallKind(installed.executable, spec.id, installed.version),
+      installKind,
       ...(errors.length ? { error: errors.join("；") } : {}),
     };
   }));
@@ -266,6 +393,22 @@ export async function updateProviderClis(
     }
 
     const executable = status.executable as string;
+    // Homebrew 托管的安装不能靠 CLI 自更新（它会直接拒绍），别浪费一次必然失败的子进程。
+    if (status.installKind === "brew") {
+      const hint = homebrewUpdateHint(executable);
+      results.push({
+        id: spec.id,
+        label: spec.label,
+        ok: false,
+        skipped: true,
+        fromVersion: status.currentVersion,
+        toVersion: status.latestVersion,
+        message: hint
+          ? `${spec.label} 由 Homebrew 安装，请运行 \`${hint}\` 更新。`
+          : `${spec.label} 由 Homebrew 安装，请用 \`brew upgrade\` 更新。`,
+      });
+      continue;
+    }
     options.onLog?.(`[CLI Update] ${spec.label}: ${status.currentVersion} -> ${status.latestVersion}`);
     try {
       const output = await runCommand(executable, spec.updateArgs, options.updateTimeoutMs ?? UPDATE_TIMEOUT_MS, options);

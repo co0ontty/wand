@@ -31,7 +31,7 @@ type SettingsModelProvider = SettingsProvider | "grok" | "qoder" | "pi";
 export type SettingsSessionProvider = SettingsModelProvider;
 /** 新会话默认思考深度；`codex:` 前缀的动态档位（旧客户端写入）也允许出现。 */
 export type SettingsThinkingEffort = "off" | "standard" | "deep" | "max" | `codex:${string}`;
-type SettingsCliProvider = SettingsProvider | "qoder" | "pi";
+type SettingsCliProvider = SettingsProvider | "grok" | "qoder" | "pi";
 type SettingsUpdateChannel = "stable" | "beta";
 type SettingsAutoUpdateTarget = "web" | "apk" | "dmg" | "cli";
 export type SettingsDistributionKind = "apk" | "dmg" | "ipa";
@@ -196,7 +196,7 @@ export interface SettingsModelCatalog {
   defaultModels: Record<SettingsModelProvider, string>;
 }
 
-interface SettingsProviderCliStatus {
+export interface SettingsProviderCliStatus {
   id: SettingsCliProvider;
   label: string;
   command: string;
@@ -210,7 +210,7 @@ interface SettingsProviderCliStatus {
   error?: string;
 }
 
-interface SettingsProviderCliResult {
+export interface SettingsProviderCliResult {
   id: SettingsCliProvider;
   label: string;
   ok: boolean;
@@ -221,7 +221,7 @@ interface SettingsProviderCliResult {
   output?: string;
 }
 
-interface SettingsProviderCliUpdates {
+export interface SettingsProviderCliUpdates {
   items: SettingsProviderCliStatus[];
   checkedAt: string | null;
   updating: boolean;

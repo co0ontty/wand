@@ -29,7 +29,11 @@ import type {
   SettingsDistributionSource,
   SettingsEnvironmentPreview,
   SettingsGeneralInput,
+  SettingsModelCatalog,
   SettingsModelOption,
+  SettingsProviderCliResult,
+  SettingsProviderCliStatus,
+  SettingsProviderCliUpdates,
   SettingsRepository,
   SettingsSessionProvider,
   SettingsSnapshot,
@@ -292,10 +296,10 @@ export function AboutSettingsTab({ snapshot, repository, refresh, toast, showRes
             </div>
           </SettingsSection>
 
-          <SettingsSection title="开发 CLI" description="Claude Code、Codex、OpenCode 与 Qoder CLI 的服务端版本。">
+          <SettingsSection title="开发 CLI" description="服务端检测到的各开发 CLI 版本；显示「当前 → 最新」表示有新版本。">
             <div className="wand-settings-cli-list">
               {cliItems.map((item) => (
-                <div key={item.id}><strong>{item.label}</strong><span>{item.installed ? item.currentVersion || "未知版本" : "未安装"}{item.updateAvailable ? ` → ${item.latestVersion || "最新版"}` : ""}</span></div>
+                <div key={item.id} title={cliStatusDetail(item)}><strong>{item.label}</strong><span>{cliStatusText(item)}</span></div>
               ))}
               {!cliItems.length ? <div className="wand-settings-empty">尚未检查 CLI 版本</div> : null}
             </div>
@@ -311,7 +315,13 @@ export function AboutSettingsTab({ snapshot, repository, refresh, toast, showRes
             />
             <div className="wand-settings-button-row">
               <SettingsActionButton pending={pending === "cli-check"} kind="secondary" onClick={() => void action("cli-check", async () => { await repository.execute({ type: "cliUpdates.load", force: true }); await refresh(); }, "CLI 版本检查完成。")}>检查 CLI 更新</SettingsActionButton>
-              {cliUpdates.length ? <SettingsActionButton pending={pending === "cli-install"} kind="primary" onClick={() => void action("cli-install", async () => { await repository.execute({ type: "cliUpdates.install", ids: cliUpdates.map((item) => item.id) }); await refresh(); }, "CLI 更新完成。")}>快速更新 ({cliUpdates.length})</SettingsActionButton> : null}
+              {cliUpdates.length ? <SettingsActionButton pending={pending === "cli-install"} kind="primary" onClick={() => void action("cli-install", async () => {
+                const result = await repository.execute({ type: "cliUpdates.install", ids: cliUpdates.map((item) => item.id) });
+                const summary = cliUpdateSummary(result);
+                setStatus(summary.text);
+                setTone(summary.ok ? "success" : "error");
+                await refresh();
+              }, undefined)}>快速更新 ({cliUpdates.length})</SettingsActionButton> : null}
             </div>
           </SettingsSection>
         </>
@@ -819,6 +829,52 @@ function sessionDefaultsSummary(form: SettingsAiInput): string {
     .join("；");
 }
 
+/** 快速更新后的回执：逐条列出每个 CLI 的结果，否则只看到一句“更新完成”，失败原因全丢掉。 */
+export function cliUpdateSummary(result: SettingsProviderCliUpdates): { text: string; ok: boolean } {
+  const results = result.results || [];
+  if (!results.length) return { ok: true, text: "没有需要更新的 CLI。" };
+  const failed = results.filter((item) => !item.ok);
+  const header = failed.length
+    ? `${failed.length}/${results.length} 个 CLI 未更新完成：`
+    : `${results.length} 个 CLI 更新完成：`;
+  return { ok: !failed.length, text: header + "\n" + results.map((item) => `${item.label}：${item.message}`).join("\n") };
+}
+
+/** 刷新模型列表后的回执：把每个 CLI 拿到的候选条数都摆出来，避免只提 Claude。 */
+export function modelCatalogSummary(models: SettingsModelCatalog): string {
+  const groups: Array<[string, number]> = [
+    ["Claude", models.models.length],
+    ["Codex", models.codexModels.length],
+    ["OpenCode", models.opencodeModels.length],
+    ["Grok", models.grokModels.length],
+    ["Qoder", models.qoderModels.length],
+    ["Pi", models.piModels.length],
+  ];
+  return groups
+    .map(([label, count]) => count > 0 ? `${label} ${count}` : `${label} 0（未发现）`)
+    .join(" · ");
+}
+
+/** CLI 行的状态文案：把「已是最新 / 读不出来 / 未安装」区分开，否则只有有新版本的那行看得出变化。 */
+export function cliStatusText(item: SettingsProviderCliStatus): string {
+  if (!item.installed) return "未安装";
+  const current = item.currentVersion;
+  if (!current) return "版本读取失败";
+  if (item.updateAvailable) {
+    const arrow = `${current} → ${item.latestVersion || "最新版"}`;
+    return item.updateSupported ? arrow : `${arrow}（需手动更新）`;
+  }
+  if (!item.updateSupported) return `${current}（当前安装方式不支持自动更新）`;
+  if (!item.latestVersion) return `${current}（未能获取最新版）`;
+  return `${current}（已是最新）`;
+}
+
+/** 行上的悬停详情：优先用服务端返回的失败原因，没有就重复状态文案。 */
+export function cliStatusDetail(item: SettingsProviderCliStatus): string {
+  const error = (item.error ?? "").replace(/\s+/g, " ").trim();
+  return error || cliStatusText(item);
+}
+
 function createSystemAiRouteId(): string {
   if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
   return `route-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -1046,7 +1102,8 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toas
     try {
       const models = await repository.execute({ type: "models.refresh" });
       setSnapshot((current) => current ? { ...current, models } : current);
-      setStatus("模型列表已刷新。" + (models.claudeVersion ? ` Claude ${models.claudeVersion}` : ""));
+      // 只回显 Claude 版本会让人以为别的 CLI 没刷新；这里把每个工具的条数都摆出来。
+      setStatus(`模型列表已刷新。${modelCatalogSummary(models)}`);
       setTone("success");
     } catch (cause) {
       setStatus(failureMessage(cause, "刷新模型列表失败。"));

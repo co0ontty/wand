@@ -467,7 +467,7 @@ export function registerAdminUpdateRoutes(app: Express, deps: AdminUpdateRoutesD
       return;
     }
     const rawIds = Array.isArray(req.body?.ids) ? req.body.ids : [];
-    const ids = rawIds.filter((value: unknown): value is ProviderCliId => value === "claude" || value === "codex" || value === "opencode" || value === "qoder" || value === "pi");
+    const ids = rawIds.filter((value: unknown): value is ProviderCliId => value === "claude" || value === "codex" || value === "opencode" || value === "grok" || value === "qoder" || value === "pi");
     state.providerCliUpdateInFlight = true;
     try {
       const before = await refreshProviderCliUpdateState(state, config);

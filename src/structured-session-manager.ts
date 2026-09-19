@@ -1398,7 +1398,7 @@ export class StructuredSessionManager {
           provider: "pi",
           commandLabel: "pi --mode json --print",
           logKind: "pi-json",
-          installHint: "请安装 @mariozechner/pi-coding-agent（或兼容的 Pi CLI），或重跑 `wand service:install` 刷新服务的 PATH",
+          installHint: "请安装 @earendil-works/pi-coding-agent（或兼容的 Pi CLI），或重跑 `wand service:install` 刷新服务的 PATH",
         });
       } else if (runner === "claude-sdk") {
         await this.runClaudeSdkStreaming(id, updated, prompt, requestId, skills);
