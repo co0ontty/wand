@@ -152,6 +152,11 @@
       --sidebar-width: 300px;
       --sidebar-collapsed-width: 56px;
       --file-panel-width: 320px;
+      /* 主区阅读列：切到「居中」宽度时正文/工具卡片/表格共用的列宽上限。
+         默认是铺满（历史行为）；只有 <html data-chat-width="column"> 打开时
+         下面 .chat-messages / .input-panel 的居中规则才生效，且只在 ≥1280px
+         视口（更窄时 940px 已经接近满宽，开关本身也隐藏）。 */
+      --chat-column-width: 940px;
       --safe-bottom: 0px;
 
       /* ===== 高级缓动函数 ===== */
@@ -2506,6 +2511,69 @@
       flex-shrink: 0;
     }
 
+    /* ===== 聊天内容宽度开关（铺满 / 居中）=====
+       独立会话顶栏与任务标签栏共用同一个组件，且只在聊天视图在屏上时渲染。
+       默认隐藏、宽屏才出现：比 1280px 窄时 --chat-column-width 已经接近满宽，
+       开关点了看不出差别，不必给用户这个空动作。 */
+    .chat-width-toggle {
+      display: none;
+    }
+
+    @media (min-width: 1280px) {
+      .chat-width-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        padding: 2px;
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--radius-sm);
+        background: var(--bg-tertiary);
+      }
+    }
+
+    .chat-width-toggle-option {
+      min-height: 20px;
+      padding: 0 7px;
+      border: none;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--text-tertiary);
+      font-family: inherit;
+      font-size: var(--font-size-xs);
+      line-height: 1;
+      white-space: nowrap;
+      cursor: pointer;
+      transition: background 120ms ease, color 120ms ease;
+    }
+
+    .chat-width-toggle-option:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+
+    .chat-width-toggle-option[data-active] {
+      background: var(--accent-muted);
+      color: var(--accent-strong);
+      font-weight: 500;
+    }
+
+    /* 触摸设备（iPad 横屏等）没有 hover，把点中的面积做大一点。 */
+    @media (min-width: 1280px) and (pointer: coarse) {
+      .chat-width-toggle-option {
+        min-height: 28px;
+        padding: 0 10px;
+      }
+    }
+
+    .topbar-chat-width {
+      margin-right: 2px;
+    }
+
+    .workspace-tab-chat-width {
+      align-self: center;
+      margin-right: 8px;
+    }
+
     /* 左段品牌徽标 */
     .topbar-brand {
       display: inline-flex;
@@ -3007,6 +3075,9 @@
       text-align: center;
       padding: 0 2px;
     }
+    /* 终端缩放浮层：它必然压在终端第一行上方，所以空闲时完全退场，
+       只在指针进入终端（或键盘聚焦控件）时才浮现；触摸设备没有 hover，
+       保持常显。浮现时用不透明底，避免半透底下穿出终端文字。 */
     .terminal-scale-overlay {
       position: absolute;
       top: 8px;
@@ -3015,21 +3086,35 @@
       align-items: center;
       gap: 1px;
       padding: 2px;
-      border-radius: 7px;
-      border: 1px solid rgba(255, 255, 255, 0.06);
-      background: rgba(24, 20, 17, 0.38);
+      border-radius: var(--radius-sm);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(24, 20, 17, 0.94);
       backdrop-filter: blur(8px);
       box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
-      opacity: 0.72;
+      opacity: 0;
+      pointer-events: none;
       transition: opacity 0.18s ease, background 0.18s ease, border-color 0.18s ease;
       z-index: 12;
-      pointer-events: auto;
     }
     .terminal-container:hover .terminal-scale-overlay,
     .terminal-scale-overlay:focus-within {
       opacity: 1;
-      background: rgba(24, 20, 17, 0.56);
-      border-color: rgba(255, 255, 255, 0.1);
+      pointer-events: auto;
+      background: rgba(24, 20, 17, 0.94);
+      border-color: rgba(255, 255, 255, 0.14);
+    }
+    @media (pointer: coarse), (hover: none) {
+      .terminal-scale-overlay {
+        opacity: 1;
+        pointer-events: auto;
+        background: rgba(24, 20, 17, 0.78);
+      }
+      /* 触摸设备没有 hover，浮层只能常显；此时收成纯图标，
+         把压在终端首行右侧的面积减半。 */
+      .terminal-scale-overlay-label,
+      .terminal-scale-overlay-divider {
+        display: none;
+      }
     }
     .terminal-scale-overlay-btn {
       min-width: 22px;
@@ -3415,7 +3500,9 @@
       display: flex;
       flex-direction: column-reverse;
       gap: 16px;
-      padding: 20px 4px 12px;
+      /* 左右留白默认贴边 = 铺满；居中阅读列见紧随其后的 data-chat-width 规则。 */
+      padding-block: 20px 12px;
+      padding-inline: 4px;
       min-height: 0;
       scrollbar-gutter: stable;
       overscroll-behavior-y: contain;
@@ -3428,6 +3515,16 @@
          2) 偶尔触发地址栏 / 工具栏的折叠动画。contain 把惯性吃在容器内,
          保留 iOS 那种橡皮筋反弹手感, 但不向外溢出。 */
       overscroll-behavior: contain;
+    }
+
+    /* 「居中」宽度：对称留白把正文收成 min(容器宽, --chat-column-width) 阅读列。
+       百分比按 .chat-container 内容宽解析，窄屏自然回落到 4px；这里再加一层
+       ≥1280px 限制——更窄的视口下量级本来就没差别。
+       :where() 把选择器权重压回 .chat-messages，后面所有窄屏覆盖规则照旧生效。 */
+    @media (min-width: 1280px) {
+      :where(html[data-chat-width="column"]) .chat-messages {
+        padding-inline: max(4px, calc((100% - var(--chat-column-width)) / 2));
+      }
     }
 
     /* ===== 历史消息懒加载 ===== */
@@ -3907,62 +4004,339 @@
       color: var(--agent-color, var(--accent));
     }
 
-    /* subagent 回复气泡（群聊角色完成任务后的发言） */
-    .subagent-reply {
-      background: rgba(197, 101, 61, 0.06);
-      background: color-mix(in srgb, var(--agent-color, var(--accent)) 6%, var(--bg-surface));
-      border: 1px solid rgba(197, 101, 61, 0.20);
-      border: 1px solid color-mix(in srgb, var(--agent-color, var(--accent)) 20%, transparent);
-      border-radius: 10px;
-      padding: 10px 14px;
-      margin: 4px 0;
-      line-height: 1.55;
+    /* ===== 子代理执行卡 =====
+       折叠态是执行摘要，展开态把完整过程直接铺进主对话。
+       --agent-color 只承担身份强调，状态色只用于状态与结果。 */
+    .subagent-panel {
+      --subagent-status: var(--text-muted);
+      margin: 8px 0;
+      border: 1px solid var(--border-subtle);
+      border-left: 2px solid color-mix(in srgb, var(--agent-color, var(--accent)) 58%, transparent);
+      border-radius: var(--radius-md);
+      background: var(--bg-surface);
+      box-shadow: 0 1px 2px rgba(89, 58, 32, 0.035);
+      overflow: clip;
+      color: var(--text-primary);
+      box-sizing: border-box;
+      min-width: 0;
+    }
+    .subagent-panel.is-running { --subagent-status: var(--accent); }
+    .subagent-panel.is-done { --subagent-status: var(--success, #4f7a58); }
+    .subagent-panel.is-error { --subagent-status: var(--danger, #b24f45); }
+    .subagent-panel.is-interrupted { --subagent-status: var(--text-muted); }
+
+    .subagent-panel-summary {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      width: 100%;
+      min-width: 0;
+      padding: 11px 12px 10px;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+      box-sizing: border-box;
+      transition: background-color 140ms ease;
+    }
+    .subagent-panel-summary:hover {
+      background: color-mix(in srgb, var(--agent-color, var(--accent)) 4%, transparent);
+    }
+    .subagent-panel-summary:focus-visible {
+      outline: 2px solid color-mix(in srgb, var(--agent-color, var(--accent)) 62%, transparent);
+      outline-offset: -2px;
+    }
+
+    .subagent-panel-summary-main {
+      flex: 1 1 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      min-width: 0;
+    }
+    .subagent-panel-kicker {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+      min-width: 0;
+    }
+    .subagent-panel-name {
+      color: color-mix(in srgb, var(--agent-color, var(--accent)) 88%, var(--text-primary));
       font-size: 12.25px;
+      font-weight: 650;
+      line-height: 1.35;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .subagent-panel-tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 0 5px;
+      border: 1px solid var(--border-subtle);
+      border-radius: 4px;
+      color: var(--text-muted);
+      background: var(--bg-secondary);
+      font-size: 9.1px;
+      font-weight: 500;
+      line-height: 1.45;
+      white-space: nowrap;
+    }
+    .subagent-panel-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      color: var(--subagent-status);
+      font-size: 10.15px;
+      font-weight: 600;
+      line-height: 1.4;
+      white-space: nowrap;
+    }
+    .subagent-panel-status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+      box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 12%, transparent);
+      flex: 0 0 auto;
+    }
+    .subagent-panel.is-running .subagent-panel-status-dot {
+      animation: subagent-status-pulse 1.65s ease-in-out infinite;
+    }
+    @keyframes subagent-status-pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.52; transform: scale(0.78); }
+    }
+
+    .subagent-panel-task-desc {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      color: var(--text-secondary);
+      font-size: 11.55px;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+    .subagent-panel-preview {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      align-items: start;
+      gap: 7px;
+      margin-top: 1px;
+      min-width: 0;
+    }
+    .subagent-panel-preview-label {
+      color: var(--subagent-status);
+      font-size: 10.15px;
+      font-weight: 600;
+      line-height: 1.5;
+      white-space: nowrap;
+    }
+    .subagent-panel-preview-text {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      color: var(--text-secondary);
+      font-size: 11.55px;
+      line-height: 1.5;
+      overflow-wrap: anywhere;
+    }
+    .subagent-panel.is-done .subagent-panel-preview-text {
+      color: var(--text-primary);
+    }
+    .subagent-panel.is-error .subagent-panel-preview-text {
+      color: color-mix(in srgb, var(--danger, #b24f45) 82%, var(--text-primary));
+    }
+
+    .subagent-panel-side {
+      flex: 0 0 auto;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 8px;
+      padding-top: 1px;
+    }
+    .subagent-panel-steps {
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      font-size: 9.45px;
+      line-height: 1.35;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .subagent-panel-chevron {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      border-radius: 6px;
+      color: var(--text-muted);
+      transition: transform 180ms var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)), background-color 140ms ease;
+    }
+    .subagent-panel-summary:hover .subagent-panel-chevron {
+      background: color-mix(in srgb, var(--agent-color, var(--accent)) 9%, transparent);
+      color: var(--agent-color, var(--accent));
+    }
+    .subagent-panel[data-expanded="true"] .subagent-panel-chevron {
+      transform: rotate(180deg);
+    }
+
+    /* 展开后的完整过程没有固定高度，也没有内部滚动条。 */
+    .subagent-panel-body {
+      height: auto;
+      max-height: none;
+      overflow: visible;
+      padding: 12px 14px 14px;
+      border-top: 1px solid var(--border-subtle);
+      background: color-mix(in srgb, var(--agent-color, var(--accent)) 1.2%, var(--bg-surface));
+      box-sizing: border-box;
+      min-width: 0;
+      max-width: 100%;
+    }
+    .subagent-panel-process {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-width: 0;
+    }
+    .subagent-panel-process::before {
+      content: "";
+      position: absolute;
+      left: 10px;
+      top: 12px;
+      bottom: 12px;
+      width: 1px;
+      background: color-mix(in srgb, var(--agent-color, var(--accent)) 20%, var(--border-subtle));
+      pointer-events: none;
+    }
+    .subagent-step {
+      position: relative;
+      min-width: 0;
+      padding-left: 32px;
+      animation: subagent-step-in 180ms var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)) both;
+    }
+    @keyframes subagent-step-in {
+      from { opacity: 0; transform: translateY(3px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .subagent-step-marker {
+      position: absolute;
+      z-index: 1;
+      left: 3px;
+      top: 3px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 15px;
+      height: 15px;
+      border-radius: 50%;
+      border: 1px solid color-mix(in srgb, var(--agent-color, var(--accent)) 30%, var(--border-subtle));
+      background: var(--bg-elevated, var(--bg-surface));
+      color: color-mix(in srgb, var(--agent-color, var(--accent)) 76%, var(--text-secondary));
+      box-sizing: border-box;
+    }
+    .subagent-step-dot {
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+    .subagent-step-icon,
+    .subagent-step-icon svg {
+      display: inline-flex;
+      width: 11px;
+      height: 11px;
+      flex: 0 0 auto;
+    }
+    .subagent-step.is-result .subagent-step-marker {
+      color: var(--success, #4f7a58);
+      border-color: color-mix(in srgb, var(--success, #4f7a58) 42%, var(--border-subtle));
+    }
+    .subagent-step.is-error .subagent-step-marker {
+      color: var(--danger, #b24f45);
+      border-color: color-mix(in srgb, var(--danger, #b24f45) 46%, var(--border-subtle));
+    }
+    .subagent-step-content {
+      min-width: 0;
+    }
+
+    /* 过程行去卡片化：工具仍保留交互，但不再一层层嵌套纸卡。 */
+    .subagent-panel-process .tool-use-card,
+    .subagent-panel-process .tool-group,
+    .subagent-panel-process .inline-tool,
+    .subagent-panel-process .inline-diff {
+      margin: 0;
+      background: transparent;
+      border-color: transparent;
+      border-radius: 6px;
+      box-shadow: none;
+    }
+    .subagent-panel-process .tool-use-header,
+    .subagent-panel-process .tool-group-header,
+    .subagent-panel-process .inline-tool-row,
+    .subagent-panel-process .diff-header {
+      padding: 4px 2px;
+      background: transparent;
+    }
+    .subagent-panel-process .tool-use-body,
+    .subagent-panel-process .tool-group-body,
+    .subagent-panel-process .inline-tool-expanded,
+    .subagent-panel-process .diff-body {
+      padding: 7px 2px 5px;
+      border-top-color: var(--border-subtle);
+      background: transparent;
+    }
+    .subagent-panel-process .inline-terminal {
+      margin: 0;
+      box-shadow: none;
+    }
+    .subagent-panel-process .thinking-inline {
+      margin: 1px 0;
+      padding: 3px 0;
+      background: transparent;
+      border-color: transparent;
+    }
+    .subagent-panel-process .markdown-content {
+      font-size: 12.25px;
+      line-height: 1.58;
+    }
+    .subagent-panel-process .markdown-content > :first-child { margin-top: 0; }
+    .subagent-panel-process .markdown-content > :last-child { margin-bottom: 0; }
+
+    /* 最终结论占据轨迹末端，不用外框再套一层“结果卡”。 */
+    .subagent-step.is-result .subagent-reply,
+    .subagent-step.is-error .subagent-reply {
+      margin: 0;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+    .subagent-reply {
+      line-height: 1.55;
       color: var(--text-primary);
       word-break: break-word;
       overflow-wrap: anywhere;
-      /* box-sizing: border-box 让 padding(14px*2)+border(1px*2) 算进 width:100%，
-         不再外鼓 30px 撑出 subagent 段右边缘。 */
-      box-sizing: border-box;
-      width: 100%;
-      max-width: 100%;
       min-width: 0;
-      overflow-x: hidden;
     }
-
     .subagent-reply > :first-child { margin-top: 0; }
     .subagent-reply > :last-child { margin-bottom: 0; }
-
-    .subagent-reply.error {
-      background: rgba(226, 87, 76, 0.08);
-      background: color-mix(in srgb, var(--danger, #e2574c) 8%, var(--bg-surface));
-      border-color: rgba(226, 87, 76, 0.35);
-      border-color: color-mix(in srgb, var(--danger, #e2574c) 35%, transparent);
-    }
-
-    .subagent-reply.pending {
-      opacity: 0.7;
-      padding: 14px 16px;
-    }
-
-    /* 短内容（error）形态：图标 + body 并列。用 flex 而不是 inline-block + display:inline，
-       后者在 body 内含块级 markdown（段落 / 代码块）时会塌掉。 */
-    .subagent-reply:not(.collapsible) {
-      display: flex;
-      align-items: flex-start;
-      gap: 6px;
-    }
-
     .subagent-reply pre,
     .subagent-reply code {
       font-size: 11.48px;
     }
-
     .subagent-reply pre {
-      background: rgba(0, 0, 0, 0.04);
+      background: var(--bg-secondary);
       padding: 10px 12px;
       border-radius: 6px;
-      overflow-x: hidden;
+      overflow-x: auto;
       white-space: pre-wrap;
       word-break: break-word;
       overflow-wrap: anywhere;
@@ -3970,204 +4344,35 @@
       max-width: 100%;
       min-width: 0;
     }
-
-    /* ===== subagent panel（整段输出统一角色窗口）=====
-       结构：header（角色名 + 任务摘要 + 内容数）+ body（固定高度滚动内容）
-       色彩：跟随 --agent-color（外层 inline style 注入），同 agent 跨 turn 颜色稳定 */
-    .subagent-panel {
-      margin: 8px 0;
-      border: 1px solid color-mix(in srgb, var(--agent-color, var(--accent)) 25%, transparent);
-      border-left: 3px solid color-mix(in srgb, var(--agent-color, var(--accent)) 55%, transparent);
-      border-radius: 12px;
-      overflow: hidden;
-      background: color-mix(in srgb, var(--agent-color, var(--accent)) 3%, var(--bg-surface));
-      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
-    }
-
-    .subagent-panel-header {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 12px;
-      background: color-mix(in srgb, var(--agent-color, var(--accent)) 10%, var(--bg-surface));
-      border-bottom: 1px solid color-mix(in srgb, var(--agent-color, var(--accent)) 16%, transparent);
-      font-size: 10.92px;
-      line-height: 1.35;
-    }
-    .subagent-panel-header:focus-visible {
-      outline: 2px solid color-mix(in srgb, var(--agent-color, var(--accent)) 55%, transparent);
-      outline-offset: -2px;
-    }
-
-    .subagent-panel-attribution {
-      flex: 1 1 auto;
-      min-width: 0;
-      color: var(--text-primary);
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .subagent-panel-name {
-      color: color-mix(in srgb, var(--agent-color, var(--accent)) 88%, var(--text-primary));
-      font-weight: 600;
-    }
-    .subagent-panel-tag {
-      display: inline-block;
-      margin: 0 6px;
-      padding: 0 6px;
-      font-size: 8.68px;
-      font-weight: 500;
-      letter-spacing: 0.04em;
-      color: var(--agent-color, var(--accent));
-      background: color-mix(in srgb, var(--agent-color, var(--accent)) 12%, transparent);
-      border: 1px solid color-mix(in srgb, var(--agent-color, var(--accent)) 30%, transparent);
-      border-radius: 4px;
-      vertical-align: 1px;
-      line-height: 1.4;
-      white-space: nowrap;
-      /* 注意：不要加 text-transform: uppercase。之前用 lowercase "subagent" + uppercase 强转
-         出来 "SUBAGENT"，结果中文 UI 里冒出来一个英文大写词跟用户配置语言（中文）对不上。
-         现在文案直接走 i18n（t("subagent.tag") = "子代理" / "Subagent"），无需大小写强制。 */
-    }
-    .subagent-panel-task-desc {
-      color: var(--text-muted);
-      font-weight: 400;
-    }
-
-    .subagent-panel-count {
-      flex: 0 0 auto;
-      display: inline-flex;
-      align-items: center;
-      padding: 3px 8px;
-      border-radius: 999px;
-      border: 1px solid color-mix(in srgb, var(--agent-color, var(--accent)) 24%, transparent);
-      background: color-mix(in srgb, var(--agent-color, var(--accent)) 9%, var(--bg-surface));
-      color: color-mix(in srgb, var(--agent-color, var(--accent)) 72%, var(--text-primary));
-      font-size: 9.8px;
-      font-weight: 600;
-      white-space: nowrap;
-    }
-
-    .subagent-panel-toggle {
-      display: none;
-      flex: 0 0 auto;
-      align-items: center;
-      gap: 4px;
-      padding: 3px 10px;
-      font-size: 9.8px;
-      font-weight: 500;
-      line-height: 1.3;
-      color: color-mix(in srgb, var(--agent-color, var(--accent)) 78%, var(--text-primary));
-      background: color-mix(in srgb, var(--agent-color, var(--accent)) 8%, var(--bg-surface));
-      border: 1px solid color-mix(in srgb, var(--agent-color, var(--accent)) 30%, transparent);
-      border-radius: 999px;
-      cursor: pointer;
-      user-select: none;
-      transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
-    }
-    .subagent-panel-toggle:hover {
-      background: color-mix(in srgb, var(--agent-color, var(--accent)) 18%, var(--bg-surface));
-      border-color: color-mix(in srgb, var(--agent-color, var(--accent)) 45%, transparent);
-    }
-    .subagent-panel-toggle:active {
-      transform: translateY(1px);
-    }
-
-    /* body：固定高度 + 内部滚动，避免一个超长 subagent 把整页撑爆。 */
-    .subagent-panel-body {
-      padding: 10px 14px;
-      height: 320px;
-      box-sizing: border-box;
-      overflow-y: auto;
-      overflow-x: hidden;
-      min-width: 0;
-      max-width: 100%;
-      scrollbar-gutter: stable;
-      overscroll-behavior: contain;
-      -webkit-overflow-scrolling: touch;
-    }
-    .subagent-panel[data-expanded="false"] .subagent-panel-body {
-      height: 320px;
-    }
-    .subagent-panel[data-expanded="true"] .subagent-panel-body {
-      height: 320px;
-    }
-    .subagent-panel-body > :first-child { margin-top: 0; }
-    .subagent-panel-body > :last-child { margin-bottom: 0; }
-
-    /* body 里的工具卡 / 文本：缩一点字号 + 减小 margin，让窗口里能装下更多内容 */
-    .subagent-panel-body .tool-use-card,
-    .subagent-panel-body .tool-group,
-    .subagent-panel-body .inline-tool,
-    .subagent-panel-body .inline-terminal,
-    .subagent-panel-body .inline-diff {
-      margin: 4px 0;
-    }
-    .subagent-panel-body .markdown-content {
-      font-size: 12.25px;
-    }
-
-    /* body 滚动条：弱化但仍可见，对应 agent 色 */
-    .subagent-panel-body::-webkit-scrollbar {
-      width: 7px;
-      height: 7px;
-    }
-    .subagent-panel-body::-webkit-scrollbar-thumb {
-      background: color-mix(in srgb, var(--agent-color, var(--accent)) 32%, transparent);
-      border-radius: 4px;
-    }
-    .subagent-panel-body::-webkit-scrollbar-thumb:hover {
-      background: color-mix(in srgb, var(--agent-color, var(--accent)) 50%, transparent);
-    }
-    .subagent-panel-body::-webkit-scrollbar-track {
-      background: transparent;
-    }
-
-    /* ===== panel 内最终回复的简化标记块（外层 panel 已经管折叠，这里只剩"任务完成"标记）===== */
-    .subagent-reply.collapsible {
-      padding: 0;
-      overflow: hidden;
-    }
-    .subagent-reply.final {
-      margin: 6px 0 0;
-      padding: 10px 12px;
-      border-radius: 8px;
-      border-left: 3px solid color-mix(in srgb, var(--agent-color, var(--accent)) 60%, transparent);
-      background: color-mix(in srgb, var(--agent-color, var(--accent)) 5%, var(--bg-surface));
-    }
-    .subagent-reply.final.error {
-      border-left-color: var(--danger, #e2574c);
-      background: color-mix(in srgb, var(--danger, #e2574c) 5%, var(--bg-surface));
-    }
     .subagent-reply-marker {
       display: inline-flex;
       align-items: center;
       gap: 4px;
-      margin-bottom: 4px;
-      font-size: 9.52px;
-      font-weight: 600;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      color: color-mix(in srgb, var(--agent-color, var(--accent)) 78%, var(--text-primary));
+      margin-bottom: 5px;
+      color: var(--agent-color, var(--accent));
+      font-size: 10.15px;
+      font-weight: 650;
+      line-height: 1.35;
     }
     .subagent-reply-marker.error {
-      color: var(--danger, #e2574c);
-    }
-    .subagent-reply-marker.pending {
-      color: var(--text-muted);
-      text-transform: none;
-      letter-spacing: 0;
-      font-weight: 500;
+      color: var(--danger, #b24f45);
     }
     .subagent-reply-marker-icon {
-      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
     }
     .subagent-reply.final .subagent-reply-content > :first-child { margin-top: 0; }
     .subagent-reply.final .subagent-reply-content > :last-child { margin-bottom: 0; }
 
-    /* （旧的 .subagent-reply-header / .subagent-reply-toggle / .subagent-reply-body /
-       .subagent-reply-fade / .subagent-reply-body-inline 系列已移除——现在外层
-       .subagent-panel 接管整段折叠 + 滚动，内层最终回复退化为简化标记块。） */
+    @media (prefers-reduced-motion: reduce) {
+      .subagent-panel.is-running .subagent-panel-status-dot,
+      .subagent-step {
+        animation: none;
+      }
+      .subagent-panel-chevron {
+        transition: none;
+      }
+    }
 
     /* ===== 空消息占位 / 未识别 block / 截断提示 ===== */
     .empty-message .empty-message-hint {
@@ -9012,7 +9217,9 @@
 
     /*
      * ===== 响应式断点级联 =====
-     * max-width: 768px  → 平板: 触摸优化, 侧栏覆盖
+     * min-width: 640px  → 侧栏停靠（推开主内容）。断点与
+     *                       src/web-ui/sidebar-layout.ts 的 SIDEBAR_PUSH_MIN_WIDTH 严格一致
+     * max-width: 639.98px → 手机: 侧栏抽屉（覆盖主内容）
      * max-width: 640px  → 手机: 紧凑布局, safe-area 底部, 欢迎页适配
      *   ├─ 391-420px    → iPhone 14/15: 微调 padding (继承 640px)
      *   └─ max-width: 390px → iPhone SE: 超紧凑 (继承 640px)
@@ -9020,8 +9227,10 @@
      * max-height: 420px → 横屏: 水平布局
      */
 
-    /* 平板适配 */
-    @media (max-width: 768px) {
+    /* 抽屉形态：只在手机宽度、以及「触摸 + 矮视口」的横屏手机上生效。
+       JS 侧同一规则见 src/web-ui/sidebar-layout.ts；这里的 639.98px 是
+       min-width: 640px 的补集，避免两边出现「JS 认为停靠、CSS 不补 padding」。 */
+    @media (max-width: 639.98px) {
       /* drawer 模式（pinned 但非窄条）下若未打开，则隐藏到屏幕左侧。
          窄条模式（pinned + collapsed）由 .sidebar.pinned.collapsed 的 width:56px
          规则常驻显示，不进入这条隐藏分支。 */
@@ -9035,6 +9244,10 @@
       .main-layout.sidebar-pinned:not(.sidebar-collapsed) {
         padding-left: 0;
       }
+    }
+
+    /* 平板适配 */
+    @media (max-width: 768px) {
       /* drawer 模式（未 anchored）默认就显示 hamburger（继承全局 inline-flex）。
          窄条模式（.sidebar-pinned.sidebar-collapsed）由全局
          `.main-layout.sidebar-pinned .floating-sidebar-toggle{display:none}`
@@ -9458,11 +9671,12 @@
       .btn-sm { min-height: 28px; padding: 4px 8px; }
     }
 
-    /* iPad Mini 等平板 (641px - 768px) */
+    /* iPad Mini 等平板 (641px - 768px)
+       注意：侧栏宽度由停靠 padding（--sidebar-width）与抽屉规则决定，
+       这里不能再单独指定宽度，否则停靠态会比 padding 宽、侧栏反过来盖住主内容。 */
     @media (min-width: 641px) and (max-width: 768px) {
       .sidebar {
         top: 0;
-        width: min(320px, calc(100vw - 40px));
       }
 
       .session-item {
@@ -9514,28 +9728,18 @@
       }
       .tool-use-file { max-width: 100%; }
       .tool-use-body { padding: 10px 12px; }
-      .subagent-reply { padding: 9px 12px; }
-      .subagent-reply.collapsible { padding: 0; }
-      .subagent-reply.final { padding: 9px 11px; }
-      /* subagent-panel：窄屏头部不省略 attribution，body 保持固定高度内滚动。 */
+      /* subagent 执行卡：窄屏收紧摘要密度，展开过程仍参与主对话滚动。 */
       .subagent-panel { margin: 6px 0; }
-      .subagent-panel-header {
-        padding: 7px 10px;
-        gap: 6px;
-        font-size: 10.36px;
-        flex-wrap: wrap;
-      }
-      .subagent-panel-attribution {
-        white-space: normal;
-        line-height: 1.4;
-      }
-      .subagent-panel-count { margin-left: auto; }
-      .subagent-panel-tag { margin: 0 4px; padding: 0 4px; }
+      .subagent-panel-summary { padding: 10px; gap: 8px; }
+      .subagent-panel-kicker { gap: 4px 6px; }
+      .subagent-panel-tag { margin: 0; padding: 0 4px; }
+      .subagent-panel-side { gap: 4px; }
+      .subagent-panel-steps { font-size: 9px; }
+      .subagent-panel-body { height: auto; max-height: none; overflow: visible; padding: 10px 10px 12px; }
+      .subagent-panel-process::before { left: 9px; }
+      .subagent-step { padding-left: 28px; }
       .chat-activity-body { height: 200px; padding: 4px 2px 8px; }
       .chat-activity-summary { padding: 7px 8px; gap: 4px; }
-      .subagent-panel-body { height: 260px; padding: 9px 11px; }
-      .subagent-panel[data-expanded="false"] .subagent-panel-body { height: 260px; max-height: none; }
-      .subagent-panel[data-expanded="true"] .subagent-panel-body { height: 260px; max-height: none; }
       .markdown-content .code-block { margin: 8px 0; }
       .markdown-content pre,
       .markdown-content .code-block pre,
@@ -13266,6 +13470,17 @@
       box-shadow: inset 0 2px 0 color-mix(in srgb, var(--success) 54%, transparent);
     }
 
+    /* 结构化聊天模式 + 「居中」宽度：输入栏和正文共用同一条居中列，避免正文收窄后
+       输入框仍然通栏。铺满模式（默认）和窄屏不加这条——正文本来就满宽；PTY 模式也
+       不加：终端必须通栏，输入栏跟着通栏才和上面的终端对齐。原生壳保留自己的输入栏
+       几何，所以同样排除 is-wand-app。 */
+    @media (min-width: 1280px) {
+      html[data-chat-width="column"]:not(.is-wand-app) #chat-output.active ~ .input-panel {
+        --composer-panel-inline: max(clamp(8px, 1.2vw, 14px), calc((100% - var(--chat-column-width)) / 2));
+        --composer-panel-right: var(--composer-panel-inline);
+      }
+    }
+
     html:not(.is-wand-app) .input-panel {
       --composer-panel-inline: clamp(8px, 1.2vw, 14px);
       --composer-panel-right: var(--composer-panel-inline);
@@ -14988,7 +15203,8 @@
       min-height: 36px;
       background: var(--bg-secondary);
       border-bottom: 1px solid var(--border-subtle);
-      font-size: 10.5px;
+      /* 任务内的主区导航就是这一条，字号不能再掉到 10.5px 的“小字”。 */
+      font-size: var(--font-size-xs);
       user-select: none;
       flex-shrink: 0;
     }
@@ -16166,7 +16382,9 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar {
   -webkit-backdrop-filter: none;
 }
 
-@media (min-width: 769px) {
+/* 侧栏停靠断点：宽度 ≥ 640px，与 src/web-ui/sidebar-layout.ts 的
+   SIDEBAR_PUSH_MIN_WIDTH 一致（平板竖屏、640–768 的桌面窗口都推开主内容）。 */
+@media (min-width: 640px) {
   html:not(.is-wand-app) .main-layout.sidebar-pinned {
     padding-left: var(--web-sidebar-width);
 }
@@ -16582,7 +16800,9 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-footer-actions 
   outline-offset: -2px;
 }
 
-@media (max-width: 768px) {
+/* 手机抽屉外观（圆角 + 宽抽屉）；宽度 ≥640px 的停靠形态走扁平 Web 主题，
+   阈值与 src/web-ui/sidebar-layout.ts 一致。 */
+@media (max-width: 639.98px) {
   html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar {
     width: min(312px, calc(100vw - 12px));
     max-width: calc(100vw - 12px);
@@ -18719,6 +18939,17 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined.pinned.
   color: var(--text-tertiary);
   font-size: 10px;
   line-height: 16px;
+}
+
+/* 按工作区过滤时，把跨工作区可见的全局里程碑标出来。 */
+.milestone-picker-item-scope {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border: var(--tb-hairline) solid var(--border-default);
+  border-radius: 999px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  line-height: 15px;
 }
 
 .milestone-picker-empty { margin: 0; padding: 6px; color: var(--text-tertiary); font-size: 12px; }

@@ -4,6 +4,8 @@
 // global assignments, setInterval timers).
 import "./legacy-pwa-cleanup";
 import "./state";        // state initialization + localStorage migrations
+// 首帧前把 <html data-chat-width> 落到真实偏好上，避免铺满→居中闪一帧。
+import "../react/shell/chat-width";
 import "./i18n";
 import "./utils";
 import "./chat-scroll";

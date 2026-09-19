@@ -1,11 +1,10 @@
 import { state, writeStoredBoolean } from "./state";
 import { mergeWindowedMessages } from "./message-reconciliation";
-import { iconSvg } from "./i18n";
-import { escapeHtml } from "./utils";
+import { shouldPersistComposerDraft } from "./composer-draft";
 import { ensureChatMessagesContainer, extractToolResultText, parseMessages, renderChat, scheduleChatRender } from "./chat-render";
 import { bindChatScrollListener, normalizeStructuredSnapshot, persistSelectedId, restoreStructuredQueue, saveStructuredQueue, stripRenderOnlyStructuredMessages, syncStructuredQueueFromSession, updateChatUnreadBubble } from "./chat-scroll";
 import "./events";
-import { isMobileLayout, updateFilePanelCwd, updateLayoutState } from "./file-browser";
+import { isSidebarDrawerLayout, updateFilePanelCwd, updateLayoutState } from "./file-browser";
 import { loadGitStatus, updateTopbarGitBadge } from "./git-commit";
 import { autoResizeInput, buildMessagesForRender, canAutoResumeSession, captureTerminalInput, closeKeyboardPopup, closeSwipedItem, flushCrossSessionQueue, focusInputBox, getControlInput, hasActiveTerminalSelection, hideMiniKeyboard, isImeKeyboardEvent, queueDirectInput, reconcileInteractiveState, renderCrossSessionQueue, sendInputFromBox, setTerminalInteractive, shouldCaptureTerminalEvent, stopSession, switchToSessionView, updateInteractiveControls, updateStructuredQueueCounter } from "./input";
 import { _apkVersion, _hasNativeBridge, _macAppVersion, _syncWakeLock, hideError, showError, showToast } from "./notifications";
@@ -14,7 +13,6 @@ import { initTerminal, maybeScrollTerminalToBottom, syncTerminalBuffer, waitForT
 import "./utils";
 import { ensureTerminalFit, scheduleTerminalResize, teardownTerminal } from "./viewport";
 import { startPolling, stopPolling, updateAutoApproveIndicator, updateTaskDisplay } from "./websocket";
-import { getSessionLatestUserText } from "./session-ui";
 import { notifyLegacyUiChange } from "./ui-store-bridge";
 import {
   openWorktreeMergeForSession,
@@ -229,21 +227,6 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
         var fallback = state.config && state.config.defaultMode ? state.config.defaultMode : "default";
         if (supported.indexOf(fallback) !== -1) return fallback;
         return supported[0];
-      }
-
-      export function getSessionKindLabel(session) {
-        var provider = session && session.provider
-          ? session.provider
-          : inferProviderIdFromCommand(session && session.command) || "terminal";
-        return (isStructuredSession(session) ? "结构化" : "终端") + " · " + provider;
-      }
-
-      export function getSessionKindDescription(session) {
-        return isStructuredSession(session)
-          ? "结构化 · 块级记录"
-          : (session && session.provider === "codex"
-            ? "终端 · Codex PTY（chat 为解析视图）"
-            : "终端 · PTY 会话");
       }
 
       export function shouldRequestChatFormat(session) {
@@ -1010,7 +993,7 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
           }
           state.selectedId = data.id;
           persistSelectedId();
-          state.drafts[data.id] = "";
+          clearDraftValueForSession(data.id, true);
           resetChatRenderCache();
           updateSessionSnapshot(data);
           updateSessionsList();
@@ -1254,7 +1237,6 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
             }
             restoreStructuredQueue();
             updateStructuredQueueCounter();
-            state.bootstrapping = false;
             persistSelectedId();
             updateShellChrome();
             if (state.selectedId && state.gitStatusSessionId !== state.selectedId) {
@@ -1307,7 +1289,6 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
         notifyLegacyUiChange("sessions:update");
         // History renders inline inside #sessions-list now, so the line above
         // already refreshed it — no separate docked region to update.
-        if (typeof hideCollapsedTileBubble === "function") hideCollapsedTileBubble();
         updateShellChrome();
         // Re-render cross-session queue (container may have been destroyed by DOM rebuild)
         if (state.crossSessionQueue.length > 0) renderCrossSessionQueue();
@@ -1501,7 +1482,10 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
         if (previousSessionId && previousSessionId !== id) {
           var previousInput = document.getElementById("input-box") as HTMLTextAreaElement | null;
           if (previousInput) {
-            setDraftValueForSession(previousSessionId, previousInput.value, true);
+            // 发送结果未知时回填的草稿只活在内存里；切走时再顺手写一次 localStorage
+            // 就等于把它重新变成持久草稿，刷新后又会「自己出现」。
+            var persistPreviousDraft = !state.draftsMemoryOnly[previousSessionId];
+            setDraftValueForSession(previousSessionId, previousInput.value, true, persistPreviousDraft);
           }
         }
         if (state.selectedId !== id) {
@@ -1578,18 +1562,14 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
       // 侧栏固定 / 收窄 / 抽屉开合状态全部由 React Shell 从 UiStore 快照渲染。
       // `?reactShell=0` 删除后，下面的 legacy DOM 写入不可达（探针：登录页无
       // 这些节点，认证态命中项均为 React-owned），只保留变更通知。
-      export function updatePinState() {
-        notifyLegacyUiChange("layout:pin");
-      }
-
       export function updateDrawerState() {
         notifyLegacyUiChange("layout:drawer");
       }
 
       export function toggleSessionsDrawer() {
-        var isMobile = isMobileLayout();
-        if (!isMobile) {
-          // 桌面：hamburger 只负责临时打开/关闭；锁定常驻由图钉按钮控制。
+        var drawerMode = isSidebarDrawerLayout();
+        if (!drawerMode) {
+          // 停靠形态：hamburger 只负责临时打开/关闭；锁定常驻由图钉按钮控制。
           var willOpen = state.sidebarPinned ? false : !state.sessionsDrawerOpen;
           state.sessionsDrawerOpen = willOpen;
           if (willOpen) {
@@ -1602,7 +1582,7 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
           scheduleTerminalRefitAfterPaddingTransition();
           return;
         }
-        // 手机端：保持原 drawer 行为。
+        // 抽屉形态：开合抽屉本身，pinned 不变。
         state.sessionsDrawerOpen = !state.sessionsDrawerOpen;
         writeStoredBoolean("wand-sidebar-open", state.sessionsDrawerOpen);
         if (state.sessionsDrawerOpen) {
@@ -1615,9 +1595,9 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
       }
 
       export function closeSessionsDrawer() {
-        var isMobile = isMobileLayout();
-        if (!isMobile) {
-          // 桌面：X 按钮 / backdrop 点击 = 完全收起，撤掉常驻状态，floating-toggle 重新出现。
+        var drawerMode = isSidebarDrawerLayout();
+        if (!drawerMode) {
+          // 停靠形态：X 按钮 / backdrop 点击 = 完全收起，撤掉常驻状态，floating-toggle 重新出现。
           // 窄条状态下没有 X 按钮（CSS 隐藏），不会走到这里，因此无需特判 collapsed。
           if (!state.sidebarPinned && !state.sessionsDrawerOpen) return;
           closeSwipedItem();
@@ -1629,7 +1609,7 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
           scheduleTerminalRefitAfterPaddingTransition();
           return;
         }
-        // 手机端：保持原 drawer 关闭行为。
+        // 抽屉形态：只关抽屉本身，不动 pinned。
         if (!state.sessionsDrawerOpen) return;
         closeSwipedItem();
         state.sessionsDrawerOpen = false;
@@ -1638,7 +1618,7 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
       }
 
       export function closeTransientSessionsDrawer() {
-        if (isMobileLayout()) {
+        if (isSidebarDrawerLayout()) {
           closeSessionsDrawer();
           return;
         }
@@ -1716,7 +1696,7 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
       // 进而让 .pinned/.collapsed 这两个类一起脱落，窄条整体消失 —— 这是
       // sidebar-collapsed-tile 点击后侧栏整个不见的根因。
       export function dismissDrawerIfOverlay() {
-        if (isMobileLayout() && state.sessionsDrawerOpen) {
+        if (isSidebarDrawerLayout() && state.sessionsDrawerOpen) {
           closeSessionsDrawer();
         }
       }
@@ -1737,71 +1717,8 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
         setTimeout(function() { scheduleTerminalResize(true); }, 350);
       }
 
-      export var collapsedTileBubbleEl = null;
-      export function ensureCollapsedTileBubble() {
-        if (collapsedTileBubbleEl && document.body.contains(collapsedTileBubbleEl)) {
-          return collapsedTileBubbleEl;
-        }
-        collapsedTileBubbleEl = document.createElement("div");
-        collapsedTileBubbleEl.className = "sidebar-tile-bubble";
-        collapsedTileBubbleEl.setAttribute("role", "tooltip");
-        document.body.appendChild(collapsedTileBubbleEl);
-        return collapsedTileBubbleEl;
-      }
-      export function hideCollapsedTileBubble() {
-        if (collapsedTileBubbleEl) collapsedTileBubbleEl.classList.remove("visible");
-      }
-      export function showCollapsedTileBubble(tile, text) {
-        if (!text) { hideCollapsedTileBubble(); return; }
-        var bubble = ensureCollapsedTileBubble();
-        bubble.textContent = text.length > 400 ? text.slice(0, 400) + "…" : text;
-        var rect = tile.getBoundingClientRect();
-        bubble.classList.add("visible");
-        // Measure after content set; clamp vertically to viewport.
-        var bubbleRect = bubble.getBoundingClientRect();
-        var centerY = rect.top + rect.height / 2;
-        var top = centerY - bubbleRect.height / 2;
-        var minTop = 8;
-        var maxTop = window.innerHeight - bubbleRect.height - 8;
-        if (top < minTop) top = minTop;
-        if (top > maxTop) top = Math.max(minTop, maxTop);
-        bubble.style.left = (rect.right + 12) + "px";
-        bubble.style.top = top + "px";
-        bubble.style.setProperty("--bubble-tail-y", (centerY - top) + "px");
-      }
-      export function getCollapsedTileBubbleText(tile) {
-        if (tile.dataset.collapsedSessionId) {
-          var session = state.sessions.find(function(s) { return s.id === tile.dataset.collapsedSessionId; });
-          if (!session) return "";
-          var latest = getSessionLatestUserText(session);
-          if (latest) return latest;
-          return session.summary || session.command || "";
-        }
-        if (tile.dataset.collapsedHistoryId) {
-          var hist = state.claudeHistory.find(function(s) { return s.claudeSessionId === tile.dataset.collapsedHistoryId; });
-          if (hist && hist.firstUserMessage) return hist.firstUserMessage;
-        }
-        return "";
-      }
-      export function handleCollapsedTileHover(event) {
-        var target = event.target;
-        if (!target || !(target instanceof Element)) return;
-        var tile = target.closest(".sidebar-collapsed-tile");
-        if (!tile) { hideCollapsedTileBubble(); return; }
-        var text = getCollapsedTileBubbleText(tile);
-        if (!text) { hideCollapsedTileBubble(); return; }
-        showCollapsedTileBubble(tile, text);
-      }
-      export function handleCollapsedTileLeave(event) {
-        var related = event.relatedTarget;
-        if (related && related instanceof Element && related.closest(".sidebar-collapsed-tile")) {
-          return;
-        }
-        hideCollapsedTileBubble();
-      }
-
       export function toggleSidebarCollapsed() {
-        var isMobile = isMobileLayout();
+        var drawerMode = isSidebarDrawerLayout();
         // 任何形态下点窄条按钮都意味着「我要常驻」，确保 pinned 写上。
         if (!state.sidebarPinned) {
           state.sidebarPinned = true;
@@ -1810,11 +1727,11 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
         state.sidebarCollapsed = !state.sidebarCollapsed;
         writeStoredBoolean("wand-sidebar-collapsed", state.sidebarCollapsed);
         if (state.sidebarCollapsed) {
-          // 进入窄条形态：sessionsDrawerOpen 设 false，避免手机上 .drawer-backdrop
+          // 进入窄条形态：sessionsDrawerOpen 设 false，避免抽屉形态下 .drawer-backdrop
           // 仍带 .open 类导致背景遮罩误显示（窄条已经常驻显示，不需要遮罩）。
           state.sessionsDrawerOpen = false;
-        } else if (isMobile) {
-          // 手机端展开窄条：不允许「pin 但不窄条」的 300px 全栏（太占地），
+        } else if (drawerMode) {
+          // 抽屉形态展开窄条：不允许「pin 但不窄条」的 300px 全栏（太占地），
           // 改为回到 drawer 模式并自动打开抽屉，让用户看到完整会话列表。
           state.sidebarPinned = false;
           state.sessionsDrawerOpen = true;
@@ -1831,7 +1748,6 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
         updateLayoutState();
         updateSessionsList();
         updateSidebarCollapseButton();
-        hideCollapsedTileBubble();
         scheduleTerminalRefitAfterPaddingTransition();
       }
 
@@ -1846,7 +1762,7 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
       //     只是变成「可被 X 关闭」的临时态。
       // 全尺寸 / 窄条由「收起为窄条」按钮控制，与图钉正交。
       export function toggleSidebarPin() {
-        if (isMobileLayout()) return;
+        if (isSidebarDrawerLayout()) return;
         state.sidebarPinned = !state.sidebarPinned;
         // 关键：保持侧栏可见停靠，无论锁定与否，点图钉都不让它消失。
         state.sessionsDrawerOpen = true;
@@ -1856,38 +1772,10 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
         scheduleTerminalRefitAfterPaddingTransition();
       }
 
-      // 收窄按钮的图标/title/状态归 React 渲染（同样的不可达理由，见 updatePinState）。
+      // 收窄按钮的图标/title/状态归 React 渲染。
       export function updateSidebarCollapseButton() {
         notifyLegacyUiChange("layout:collapse-button");
       }
-
-      // 「更多操作」下拉默认 right:0 贴 more 按钮右沿向左展开。手机窄屏下这条会把
-      // 菜单左缘顶出屏幕外。打开时按视口边界 clamp：先保持 CSS 默认右对齐，仅当
-      // 真的越界才改写 left/right 把菜单拉回视口内（留 8px 边距）。
-      export function positionSidebarOverflowMenu(menu) {
-        if (!menu) return;
-        menu.style.left = "";
-        menu.style.right = "";
-        var parent = menu.offsetParent || menu.parentElement;
-        if (!parent) return;
-        var margin = 8;
-        var parentRect = parent.getBoundingClientRect();
-        var rect = menu.getBoundingClientRect();
-        var vw = window.innerWidth;
-        if (rect.left < margin) {
-          // 左缘越界：改用 left 定位，把左缘顶到视口左 margin。
-          menu.style.right = "auto";
-          menu.style.left = (margin - parentRect.left) + "px";
-        } else if (rect.right > vw - margin) {
-          // 右缘越界：拉回视口右 margin（桌面右对齐时几乎不会触发）。
-          menu.style.left = "auto";
-          menu.style.right = (parentRect.right - (vw - margin)) + "px";
-        }
-      }
-
-      // Store last focused element for focus trap
-      // moved to state.state.lastFocusedElement
-      // moved to state.state.focusTrapHandler
 
       function openSessionModalNow(initialCwd?: string) {
         if (!closeReactOverlays(["newSession"])) return;
@@ -2099,7 +1987,8 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
           if (state.selectedId !== sessionId) teardownTerminal();
           state.selectedId = sessionId;
           persistSelectedId();
-          state.drafts[sessionId] = "";
+          // 新会话的输入框必须是空的：连 localStorage 里的旧草稿一起清掉。
+          clearDraftValueForSession(sessionId);
           resetChatRenderCache();
           return Promise.resolve(refreshAll()).then(function() {
             // 会话进入本地列表后统一走 selectSession，补齐 websocket 订阅、
@@ -2196,7 +2085,8 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
             if (state.selectedId !== sessionId) teardownTerminal();
             state.selectedId = sessionId;
             persistSelectedId();
-            state.drafts[sessionId] = "";
+            // 新会话的输入框必须是空的：连 localStorage 里的旧草稿一起清掉。
+            clearDraftValueForSession(sessionId);
             resetChatRenderCache();
             return Promise.resolve(refreshAll()).then(function() {
               // refreshAll 只刷新数据；selectSession 才会完成 websocket 订阅和
@@ -2729,17 +2619,50 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
         return state.drafts[sessionId];
       }
 
-      export function setDraftValueForSession(sessionId, value, skipDom?) {
+      // persist 三态：
+      //   false —— 只写内存草稿，绝不落 localStorage。发送结果未知（传输层失败）的回填
+      //     走这条：消息可能已经被服务端接收，持久化会让它在刷新后「重新出现在输入框
+      //     里」并被重复发送（判定见 composer-draft.ts）。同一条草稿会被一直标记成
+      //     memory-only（state.draftsMemoryOnly），直到用户重新编辑或走明确的失败回填，
+      //     这样「切到别的会话再刷新」也不会把它从 localStorage 里捞回来。
+      //   true  —— 显式要求落盘（明确失败的回填、切会话时保存上一条草稿），卸载期间照办。
+      //   省略  —— 普通写入；页面正在卸载时跳过。刷新 / 原生壳回收 WebView 会把在途
+      //     fetch 全部 abort，卸载期间的隐式回写只会污染下一次启动的草稿。
+      export function setDraftValueForSession(sessionId, value, skipDom?, persist?) {
         if (!sessionId) return;
         state.drafts[sessionId] = value;
-        try {
-          localStorage.setItem("wand-draft-" + sessionId, value);
-        } catch (e) { /* ignore */ }
+        if (persist === false) {
+          state.draftsMemoryOnly[sessionId] = true;
+          try { localStorage.removeItem("wand-draft-" + sessionId); } catch (e) { /* ignore */ }
+        } else if (shouldPersistComposerDraft(persist, !!state.pageUnloading)) {
+          delete state.draftsMemoryOnly[sessionId];
+          try {
+            localStorage.setItem("wand-draft-" + sessionId, value);
+          } catch (e) { /* ignore */ }
+        }
         if (!skipDom && sessionId === state.selectedId) {
           var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
           if (inputBox) {
             inputBox.value = value;
             autoResizeInput(inputBox);
+          }
+        }
+      }
+
+      // 彻底忘掉某个会话的草稿（内存 + localStorage）。需要「这个会话的输入框必须是
+      // 空的」时用它：只改 state.drafts 会留下 localStorage 里的旧值，下次刷新又被
+      // getDraftValueForSession() 读回来，表现为草稿「自己复活」。
+      export function clearDraftValueForSession(sessionId, skipDom?) {
+        if (!sessionId) return;
+        delete state.drafts[sessionId];
+        delete state.draftsMemoryOnly[sessionId];
+        try { localStorage.removeItem("wand-draft-" + sessionId); } catch (e) { /* ignore */ }
+        if (!skipDom && sessionId === state.selectedId) {
+          var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
+          if (inputBox) {
+            inputBox.value = "";
+            autoResizeInput(inputBox);
+            syncComposerHasText(inputBox);
           }
         }
       }
@@ -2776,11 +2699,9 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
         var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
         if (inputBox) {
           var draft = getDraftValueForSession(sessionId);
-          state.isSyncingInputBox = true;
           inputBox.value = draft;
           autoResizeInput(inputBox);
           try { inputBox.setSelectionRange(draft.length, draft.length); } catch (e) { /* ignore */ }
-          state.isSyncingInputBox = false;
         }
         renderAttachmentPreview();
       }

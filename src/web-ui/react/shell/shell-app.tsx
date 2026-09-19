@@ -34,7 +34,7 @@ function ShellAppFrame({ legacyRefs }: ShellAppFrameProps = {}) {
   const snapshot = useUiStoreSnapshot();
   return (
     <div className="app-container">
-      <div className={getShellLayoutClassName(snapshot.viewport.mobile
+      <div className={getShellLayoutClassName(snapshot.layout.sidebarDrawer
         ? { ...snapshot.layout, sidebarAnchored: false, sidebarCollapsed: false }
         : snapshot.layout)}>
         <ShellSidebar/>

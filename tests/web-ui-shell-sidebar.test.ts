@@ -103,6 +103,7 @@ function fixture(overrides: Partial<UiSnapshotData> = {}): UiSnapshotData {
       sessionsDrawerOpen: true,
       sidebarPinned: true,
       sidebarCollapsed: false,
+      sidebarDrawer: true,
       sidebarAnchored: true,
       sessionsBackdropVisible: true,
       filePanelOpen: true,
@@ -243,6 +244,7 @@ test("ShellSidebar desktop exposes one full-to-compact toggle", () => {
   const html = renderSidebar(fixture({
     viewport: { ...base.viewport, mobile: false },
     capabilities: { backToNative: false, switchServer: false },
+    layout: { ...base.layout, sidebarDrawer: false },
   }));
 
   // Appica's IconButton renders `aria-label`/`aria-pressed` ahead of the class
@@ -260,6 +262,7 @@ test("ShellSidebar desktop exposes one full-to-compact toggle", () => {
     capabilities: { backToNative: false, switchServer: false },
     layout: {
       ...base.layout,
+      sidebarDrawer: false,
       sidebarCollapsed: true,
     },
   }));
@@ -293,6 +296,7 @@ test("ShellSidebar collapsed rail still renders the unified task panel", () => {
     viewport: { ...base.viewport, mobile: false },
     layout: {
       ...base.layout,
+      sidebarDrawer: false,
       sidebarCollapsed: true,
     },
   }));

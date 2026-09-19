@@ -295,3 +295,63 @@ test("session list and detail DTOs keep workspace binding and queue skills", asy
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a session created inside a sidebar task reaches the board card immediately", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-session-task-card-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const config = { ...defaultConfig(), defaultCwd: root, startupCommands: [] };
+  const processes = new ProcessManager(config, storage, root);
+  const structured = new StructuredSessionManager(storage, config);
+  const sessions = new SessionRegistry(processes, structured, storage);
+  const app = express();
+  app.use(express.json());
+  registerSessionRoutes(app, processes, structured, storage, config.defaultMode, config, sessions);
+  app.use(jsonErrorHandler);
+  const server = createServer(app);
+
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+
+  try {
+    const address = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+    const workspace = storage.createWorkspace({ name: "mk2api", cwd: root });
+    const task = storage.createWorkspaceTask({ workspaceId: workspace.id, name: "按渠道配置 API" });
+    const card = storage.createWandTask({
+      workspaceId: workspace.id,
+      workspaceTaskId: task.id,
+      title: task.name,
+      status: "todo",
+    });
+
+    const createdResponse = await fetch(`${baseUrl}/api/structured-sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        cwd: root,
+        provider: "opencode",
+        mode: "assist",
+        workspaceId: workspace.id,
+        workspaceTaskId: task.id,
+      }),
+    });
+    assert.equal(createdResponse.status, 201);
+    const created = await createdResponse.json() as { id: string };
+
+    // 侧栏「＋」刚建出来的会话必须在卡片上：不需要再拉一次 GET /api/wand-tasks。
+    assert.deepEqual(storage.listWandTaskSessionIds(card.id), [created.id]);
+    assert.equal(storage.getWandTask(card.id)?.status, "doing");
+    assert.equal(storage.getWandTask(card.id)?.agent?.provider, "opencode");
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    processes.dispose();
+    structured.dispose();
+    storage.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

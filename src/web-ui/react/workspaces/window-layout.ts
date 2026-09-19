@@ -196,27 +196,6 @@ export function replaceWorkWindowLayout(
   return { ...layout, windows };
 }
 
-export function addSessionWindow(
-  layout: TaskWindowLayout,
-  sessionId: string,
-  activate = true,
-): TaskWindowLayout {
-  const existing = layout.windows.find((window) => layoutSessionIds(window.layout).includes(sessionId));
-  if (existing) return activate ? activateWorkWindow(layout, existing.id) : layout;
-  const tab = sessionPaneTab(sessionId);
-  const used = new Set(layout.windows.map((window) => window.id));
-  const window: WorkWindowLayout = {
-    id: uniqueWindowId(windowIdForTab(tab), used),
-    layout: paneWith(tab),
-    activeTabId: tab.id,
-  };
-  return {
-    ...layout,
-    windows: [...layout.windows, window],
-    activeWindowId: activate ? window.id : layout.activeWindowId ?? window.id,
-  };
-}
-
 function findSessionTab(layout: TaskWindowLayout, sessionId: string): PaneTab | undefined {
   for (const window of layout.windows) {
     const tab = layoutTabs(window.layout).find((candidate) => (

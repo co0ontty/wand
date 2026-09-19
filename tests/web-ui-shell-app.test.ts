@@ -48,6 +48,7 @@ function fixture(layout: Partial<UiSnapshotData["layout"]> = {}): UiSnapshotData
       sessionsDrawerOpen: true,
       sidebarPinned: false,
       sidebarCollapsed: false,
+      sidebarDrawer: false,
       sidebarAnchored: true,
       sessionsBackdropVisible: false,
       filePanelOpen: false,

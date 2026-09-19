@@ -1,18 +1,23 @@
-// 「里程碑」选择器：新建任务时点开下拉，选历史里程碑，或就地新增一个。
+// 「里程碑（迭代）」选择器：新建任务时点开下拉，选历史里程碑，或就地新增一个。
 // 任务看板与「新建任务」对话框共用这一个组件，保证两处行为一致。
+// 传了 `workspaceId` 就只展示该工作区的迭代（含全局的），新增的也归属该工作区。
 
 import * as React from "react";
 
 import { WAND_MILESTONE_NAME_MAX_LENGTH } from "../../../task-types";
 import { WandButton, WandIcon, WandPopover } from "../ui";
 import { classNames } from "../ui/class-names";
-import { milestonesStore } from "./controller";
+import { milestonesStore, visibleMilestones } from "./controller";
 import type { MilestoneOption } from "./repository";
 import { failureMessage } from "../errors";
 
 export interface MilestonePickerProps {
   value: string | null;
   onChange(id: string | null): void;
+  /** 当前所选工作区；用来按工作区过滤列表，新增的迭代也归到它下面。 */
+  workspaceId?: string | null;
+  /** 新建成功时回调：宿主要在建完项目后回填工作区时用它记下新迭代的 id。 */
+  onCreated?(created: MilestoneOption): void;
   disabled?: boolean;
   /** 已经在外面加载过列表的宿主（例如任务看板）可以把它传进来，省一次订阅渲染。 */
   items?: readonly MilestoneOption[];
@@ -23,6 +28,8 @@ export interface MilestonePickerProps {
 export function MilestonePicker({
   value,
   onChange,
+  workspaceId = null,
+  onCreated,
   disabled = false,
   items: itemsProp,
   className,
@@ -33,7 +40,9 @@ export function MilestonePicker({
     milestonesStore.getSnapshot,
     milestonesStore.getSnapshot,
   );
-  const items = itemsProp ?? snapshot.items;
+  // 已选工作区时只留它自己的迭代；外部传进来的列表同样过一层，两处过滤口径一致。
+  const items = visibleMilestones(itemsProp ?? snapshot.items, workspaceId);
+  const scoped = Boolean(workspaceId?.trim());
 
   const [open, setOpen] = React.useState(false);
   const [creating, setCreating] = React.useState(false);
@@ -44,10 +53,11 @@ export function MilestonePicker({
 
   // 只在真正展开下拉时拉列表：宿主（例如「新建任务」对话框）可能一直挂载在登录前，
   // 提前请求会拿 401；加载失败后下次展开会自动重试（loaded 仍为 false）。
+  // 已经带值（任务详情）时也要拉一次，否则触发按钮只有占位文字，看起来像没设过迭代。
   React.useEffect(() => {
-    if (itemsProp || !open) return;
+    if (itemsProp || (!open && !value)) return;
     void milestonesStore.load();
-  }, [itemsProp, open]);
+  }, [itemsProp, open, value]);
 
   const selected = value ? items.find((item) => item.id === value) ?? null : null;
 
@@ -72,7 +82,8 @@ export function MilestonePicker({
     setBusy(true);
     setError("");
     try {
-      const created = await milestonesStore.create(trimmed);
+      const created = await milestonesStore.create(trimmed, workspaceId);
+      onCreated?.(created);
       close(created.id);
     } catch (cause) {
       setError(failureMessage(cause, "无法新增里程碑。"));
@@ -173,10 +184,12 @@ export function MilestonePicker({
                 >
                   <WandIcon name="milestone" size={13} className="milestone-picker-item-icon"/>
                   <span className="milestone-picker-item-name">{item.name}</span>
+                  {/* 按工作区过滤时，把跨工作区可见的全局迭代标出来，避免看起来「串台」。 */}
+                  {scoped && !item.workspaceId ? <span className="milestone-picker-item-scope">全局</span> : null}
                   {item.taskCount > 0 ? <span className="milestone-picker-item-count">{item.taskCount}</span> : null}
                 </button>)}
               </div>
-            ) : <p className="milestone-picker-empty">还没有里程碑，新增一个吧。</p>}
+            ) : <p className="milestone-picker-empty">{scoped ? "这个工作区还没有迭代，新增一个吧。" : "还没有里程碑，新增一个吧。"}</p>}
             <button type="button" className="milestone-picker-add" onClick={startCreating}>
               <WandIcon name="plus" size={13}/><span>新增里程碑</span>
             </button>

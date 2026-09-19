@@ -106,7 +106,6 @@ import { closeReactOverlays } from "./react-overlay-coordinator";
         if (state.gitStatusInflight && state.gitStatusInflight.sessionId === sessionId) {
           return state.gitStatusInflight.promise;
         }
-        state.gitStatusLoading = true;
         var promise = fetch("/api/sessions/" + encodeURIComponent(sessionId) + "/git-status", {
           credentials: "same-origin"
         })
@@ -126,7 +125,6 @@ import { closeReactOverlays } from "./react-overlay-coordinator";
             return null;
           })
           .finally(function() {
-            state.gitStatusLoading = false;
             if (state.gitStatusInflight && state.gitStatusInflight.sessionId === sessionId) {
               state.gitStatusInflight = null;
             }

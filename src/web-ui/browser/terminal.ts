@@ -1,16 +1,14 @@
 import { state } from "./state";
 import "./utils";
 import "./chat-render";
-import { persistSelectedId } from "./chat-scroll";
 import "./file-browser";
-import { _swipeState, closeSwipedItem, deleteClaudeHistoryDirectory, deleteSession, executeDeleteHistory, focusInputBox, getHistoryItemsByCwd, handleDeleteCodexHistoryAction, handleResumeAction, handleResumeCodexHistoryAction, handleResumeHistoryAction, hasActiveTerminalSelection, installNativeInputImeGuard, lockNativeInputTerminalIme, resumeClaudeHistorySession, resumeCodexHistorySession, resumeSessionFromList, setDeletingState, shouldLockNativeInputTerminalIme } from "./input";
+import { focusInputBox, hasActiveTerminalSelection, installNativeInputImeGuard, lockNativeInputTerminalIme, shouldLockNativeInputTerminalIme } from "./input";
 import { showToast } from "./notifications";
 import "./render";
-import { copyToClipboard, dismissDrawerIfOverlay, isStructuredSession, loadSessions, openSessionModal, openWorktreeMergeModal, retryWorktreeCleanup, selectSession, updateSessionsList } from "./session-engine";
+import { copyToClipboard, isStructuredSession } from "./session-engine";
 import { ensureTerminalFit, initTerminalJoystick, initTerminalResizeHandle, observeTerminalResize, sendTerminalResize, startTerminalHealthCheck } from "./viewport";
 import { fitTerminalToContainer } from "./terminal-fit";
 import "./i18n";
-import { batchDeleteSelected, clearAllClaudeHistory, clearSelections, confirmDelete, ensureClaudeHistoryLoaded, getVisibleClaudeHistorySessions, selectAllVisibleItems, toggleManageMode, toggleManagedItemSelection } from "./sidebar";
 import { consumeTerminalTouchPage, consumeTerminalWheelLines, consumeTerminalWheelPage, terminalWheelPageSequence, type TerminalTouchPagingState, type TerminalWheelPagingState, type TerminalWheelScrollState } from "./terminal-wheel";
 import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
 
@@ -31,214 +29,6 @@ import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
           credentials: "same-origin",
           body: JSON.stringify({ path: path })
         }).catch(function() {});
-      }
-
-      function activateSessionItem(sessionId: string) {
-        var session = state.sessions.find(function(s: any) { return s.id === sessionId; });
-        if (session && session.status !== "running" && !isStructuredSession(session)) {
-          resumeSessionFromList(sessionId);
-        } else {
-          selectSession(sessionId);
-        }
-        // 桌面常驻栏与窄条形态都保留；只在手机端真的有 overlay drawer 时才收。
-        // （旧条件 !sidebarPinned || isMobileLayout() 在桌面 not-pinned 状态下也会
-        // 调 closeSessionsDrawer，靠内部 early-return 才不至于出错——含义不清晰，
-        // 统一走 dismissDrawerIfOverlay 反过来表达"只收 overlay 不撤常驻"。）
-        dismissDrawerIfOverlay();
-      }
-
-      export function handleSessionItemClick(event: any) {
-        var target = event.target;
-        if (!target || !(target instanceof Element)) return;
-
-        var collapsedTile = target.closest(".sidebar-collapsed-tile");
-        if (collapsedTile && collapsedTile instanceof HTMLElement) {
-          if (collapsedTile.dataset.collapsedNewSession) {
-            event.preventDefault();
-            event.stopPropagation();
-            openSessionModal();
-            return;
-          }
-          if (collapsedTile.dataset.collapsedSessionId) {
-            event.preventDefault();
-            event.stopPropagation();
-            activateSessionItem(collapsedTile.dataset.collapsedSessionId);
-            return;
-          }
-          if (collapsedTile.dataset.collapsedHistoryId) {
-            event.preventDefault();
-            event.stopPropagation();
-            var historyCid = collapsedTile.dataset.collapsedHistoryId;
-            var historyCwd = collapsedTile.dataset.cwd || "";
-            var resumeCollapsed = collapsedTile.dataset.provider === "codex" ? resumeCodexHistorySession : resumeClaudeHistorySession;
-            resumeCollapsed(historyCid, historyCwd)
-              .then(function(data: any) {
-                if (data && data.id) {
-                  state.selectedId = data.id;
-                  persistSelectedId();
-                  state.drafts[data.id] = "";
-                  loadSessions().then(function() {
-                    selectSession(data.id);
-                  });
-                }
-              });
-            return;
-          }
-        }
-
-        var historyToggle = target.closest("#claude-history-toggle");
-        if (historyToggle) {
-          event.preventDefault();
-          event.stopPropagation();
-          state.claudeHistoryExpanded = !state.claudeHistoryExpanded;
-          if (state.claudeHistoryExpanded && !state.claudeHistoryLoaded) {
-            ensureClaudeHistoryLoaded();
-          }
-          updateSessionsList();
-          return;
-        }
-
-        var actionButton = target.closest("[data-action]");
-        if (actionButton && actionButton instanceof HTMLElement) {
-          event.preventDefault();
-          event.stopPropagation();
-          if (actionButton.dataset.action === "toggle-manage-mode") {
-            toggleManageMode();
-          } else if (actionButton.dataset.action === "select-all-visible") {
-            selectAllVisibleItems();
-          } else if (actionButton.dataset.action === "clear-selection") {
-            clearSelections();
-          } else if (actionButton.dataset.action === "delete-selected") {
-            batchDeleteSelected();
-          } else if (actionButton.dataset.action === "toggle-selection") {
-            toggleManagedItemSelection(actionButton.dataset.kind!, actionButton.dataset.id!);
-          } else if (actionButton.dataset.action === "swipe-delete-session" && actionButton.dataset.sessionId) {
-            deleteSession(actionButton.dataset.sessionId);
-          } else if (actionButton.dataset.action === "delete-session" && actionButton.dataset.sessionId) {
-            (function(sid: string) {
-              confirmDelete("确认删除这个会话吗？此操作无法撤销。", { title: "删除会话" }).then(function(ok: any) {
-                if (ok) deleteSession(sid);
-              });
-            })(actionButton.dataset.sessionId);
-          } else if (actionButton.dataset.action === "delete-history" && actionButton.dataset.claudeSessionId) {
-            (function(cid: string, item: any) {
-              confirmDelete("确认删除这条 Claude 会话吗？", { title: "删除会话" }).then(function(ok: any) {
-                if (ok) executeDeleteHistory(cid, item);
-              });
-            })(actionButton.dataset.claudeSessionId, actionButton.closest(".session-item"));
-          } else if (actionButton.dataset.action === "toggle-history-directory" && actionButton.dataset.cwd) {
-            var dirCwd = actionButton.dataset.cwd;
-            state.claudeHistoryExpandedDirs[dirCwd] = !state.claudeHistoryExpandedDirs[dirCwd];
-            updateSessionsList();
-          } else if (actionButton.dataset.action === "delete-history-directory" && actionButton.dataset.cwd) {
-            (function(deleteCwd: string, btn: any) {
-              var items = getHistoryItemsByCwd(deleteCwd);
-              var dirCount = getVisibleClaudeHistorySessions().filter(function(s: any) { return s.cwd === deleteCwd; }).length;
-              confirmDelete("确认清空此目录下的 " + dirCount + " 条 Claude 历史吗？", {
-                title: "清空目录历史",
-                okLabel: "清空",
-              }).then(function(ok: any) {
-                if (!ok) return;
-                setDeletingState(items, true);
-                deleteClaudeHistoryDirectory(deleteCwd, btn, items);
-              });
-            })(actionButton.dataset.cwd, actionButton);
-          } else if (actionButton.dataset.action === "clear-all-history") {
-            clearAllClaudeHistory();
-          } else if (actionButton.dataset.action === "toggle-archived-group") {
-            state.archivedExpanded = !state.archivedExpanded;
-            updateSessionsList();
-          } else if (actionButton.dataset.action === "resume" && actionButton.dataset.sessionId) {
-            handleResumeAction(actionButton);
-          } else if (actionButton.dataset.action === "resume-history" && actionButton.dataset.claudeSessionId) {
-            handleResumeHistoryAction(actionButton);
-          } else if (actionButton.dataset.action === "resume-codex-history" && actionButton.dataset.claudeSessionId) {
-            handleResumeCodexHistoryAction(actionButton);
-          } else if (actionButton.dataset.action === "delete-codex-history" && actionButton.dataset.claudeSessionId) {
-            handleDeleteCodexHistoryAction(actionButton);
-          } else if (actionButton.dataset.action === "toggle-codex-history-directory" && actionButton.dataset.cwd) {
-            var codexDirCwd = actionButton.dataset.cwd;
-            state.codexHistoryExpandedDirs[codexDirCwd] = !state.codexHistoryExpandedDirs[codexDirCwd];
-            updateSessionsList();
-          } else if (actionButton.dataset.action === "worktree-merge" && actionButton.dataset.sessionId) {
-            openWorktreeMergeModal(actionButton.dataset.sessionId);
-          } else if (actionButton.dataset.action === "worktree-cleanup" && actionButton.dataset.sessionId) {
-            retryWorktreeCleanup(actionButton.dataset.sessionId);
-          }
-          return;
-        }
-
-        var item = target.closest(".session-item") as HTMLElement | null;
-        if (item) {
-          if (state.sessionsManageMode) {
-            if (item.dataset.sessionId) {
-              toggleManagedItemSelection("sessions", item.dataset.sessionId);
-            } else if (item.dataset.claudeHistoryId) {
-              toggleManagedItemSelection(item.dataset.provider === "codex" ? "codex" : "history", item.dataset.claudeHistoryId);
-            }
-            return;
-          }
-          if (item.classList.contains("swiped")) {
-            closeSwipedItem();
-            return;
-          }
-          if (_swipeState) return;
-          if (item.dataset.sessionId) {
-            activateSessionItem(item.dataset.sessionId);
-          } else if (item.dataset.claudeHistoryId) {
-            var claudeSessionId = item.dataset.claudeHistoryId;
-            var cwd = item.dataset.cwd;
-            var resumeItem = item.dataset.provider === "codex" ? resumeCodexHistorySession : resumeClaudeHistorySession;
-            resumeItem(claudeSessionId, cwd)
-              .then(function(data: any) {
-                if (data && data.id) {
-                  state.selectedId = data.id;
-                  persistSelectedId();
-                  state.drafts[data.id] = "";
-                  loadSessions().then(function() {
-                    selectSession(data.id);
-                    // 桌面常驻/窄条形态不要撤掉，只把手机端 overlay 收掉。
-                    dismissDrawerIfOverlay();
-                  });
-                }
-              });
-          }
-        }
-      }
-
-      export function handleSessionItemKeydown(event: any) {
-        if (event.key !== "Enter" && event.key !== " ") return;
-        var item = event.target.closest(".session-item");
-        if (!item) return;
-        event.preventDefault();
-        if (state.sessionsManageMode) {
-          if (item.dataset.sessionId) {
-            toggleManagedItemSelection("sessions", item.dataset.sessionId);
-          } else if (item.dataset.claudeHistoryId) {
-            toggleManagedItemSelection(item.dataset.provider === "codex" ? "codex" : "history", item.dataset.claudeHistoryId);
-          }
-          return;
-        }
-        if (item.dataset.sessionId) {
-          activateSessionItem(item.dataset.sessionId);
-        } else if (item.dataset.claudeHistoryId) {
-          var claudeSessionId = item.dataset.claudeHistoryId;
-          var cwd = item.dataset.cwd;
-          var resumeItem = item.dataset.provider === "codex" ? resumeCodexHistorySession : resumeClaudeHistorySession;
-          resumeItem(claudeSessionId, cwd)
-            .then(function(data: any) {
-              if (data && data.id) {
-                state.selectedId = data.id;
-                persistSelectedId();
-                state.drafts[data.id] = "";
-                loadSessions().then(function() {
-                  selectSession(data.id);
-                  // 桌面常驻/窄条形态不要撤掉，只把手机端 overlay 收掉。
-                  dismissDrawerIfOverlay();
-                });
-              }
-            });
-        }
       }
 
       /** Copy a string field of the currently selected session to clipboard. */
@@ -494,7 +284,6 @@ import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
         container.appendChild(scrollbar);
 
         state.terminalScrollbarEl = scrollbar;
-        state.terminalScrollbarThumbEl = thumb;
         state.terminalScrollbarHideTimer = null;
         state.terminalScrollbarDragging = false;
         state.terminalScrollbarRafPending = false;

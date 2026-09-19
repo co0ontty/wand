@@ -5,7 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { SessionSnapshot, ConversationTurn, SessionKind, SessionProvider, SessionRunner, SessionSource, StructuredSessionState, WorktreeMergeInfo, Workspace, LayoutNode, TaskWindowLayout, WorkspaceDefaultProvider, WorkspaceKind, WorkspaceTask, WorkspaceTaskWorktree, WorkspaceTaskStatus, GLOBAL_WORKSPACE_ID } from "./types.js";
 import { normalizeSessionDirectory } from "./session-directory-tree.js";
 import { inferProviderFromCommand, inferProviderFromRunner, isSessionProvider } from "./session-provider.js";
-import { normalizeWandTaskAgentMode } from "./task-types.js";
+import { DEFAULT_WAND_TASK_AGENT_KIND, DEFAULT_WAND_TASK_PRIORITY, isWandTaskAgentKind, normalizeWandTaskAgentMode } from "./task-types.js";
 import { firstLayoutTabId } from "./layout-tree.js";
 import { isThinkingEffort } from "./structured-provider-common.js";
 import type {
@@ -137,7 +137,9 @@ export function parseWandTaskAgent(raw: unknown): import("./task-types.js").Wand
   if (thinkingEffort !== "off" && thinkingEffort !== "standard" && thinkingEffort !== "deep" && thinkingEffort !== "max") return null;
   // mode 是后加列：历史行没有该字段时按标准模式读取，不因此整条配置退化成 null。
   const mode = normalizeWandTaskAgentMode(provider, value.mode);
-  return { provider, model: model.trim(), thinkingEffort, mode };
+  // kind 同样是后加字段：老数据 / 老客户端没带时按结构化会话读取。
+  const kind = isWandTaskAgentKind(value.kind) ? value.kind : DEFAULT_WAND_TASK_AGENT_KIND;
+  return { provider, model: model.trim(), thinkingEffort, mode, kind };
 }
 
 /** `wand_milestones` 行 → 领域对象；名字必须非空，脏行直接跳过。 */
@@ -148,6 +150,7 @@ function mapWandMilestoneRow(row: Record<string, unknown>): import("./task-types
     id: String(row.id),
     name,
     dueDate: typeof row.due_date === "string" && row.due_date ? row.due_date : null,
+    workspaceId: typeof row.workspace_id === "string" && row.workspace_id ? row.workspace_id : null,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
   };
@@ -876,6 +879,7 @@ const INIT_SQL = `
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     due_date TEXT,
+    workspace_id TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -958,6 +962,20 @@ function ensureWorkspaceSchema(db: DatabaseSync): void {
   }
 }
 
+function ensureWandMilestoneSchema(db: DatabaseSync): void {
+  const columns = db.prepare("PRAGMA table_info(wand_milestones)").all() as Array<{ name: string }>;
+  const names = new Set(columns.map((column) => column.name));
+  // 里程碑归属工作区：只加列，历史行保持 NULL（读作全局里程碑，所有工作区可见）。
+  if (columns.length > 0 && !names.has("workspace_id")) {
+    db.exec("ALTER TABLE wand_milestones ADD COLUMN workspace_id TEXT");
+  }
+  if (columns.length > 0) {
+    // 索引必须等列存在后再建：老库的 CREATE TABLE IF NOT EXISTS 是空操作，
+    // 直接在 INIT_SQL 里建索引会因缺列报错。
+    db.exec("CREATE INDEX IF NOT EXISTS idx_wand_milestones_workspace ON wand_milestones(workspace_id, created_at DESC)");
+  }
+}
+
 function ensureConnectorSchema(db: DatabaseSync): void {
   // The table is created by INIT_SQL for new databases; this repairs an
   // existing wand.db that predates the connector feature (additive-only).
@@ -985,6 +1003,7 @@ export function ensureDatabaseFile(dbPath: string): boolean {
   ensureCommandSessionSchema(db);
   ensureWorkspaceSchema(db);
   ensureWandTaskSchema(db);
+  ensureWandMilestoneSchema(db);
   ensureConnectorSchema(db);
   {
     const missionColumns = db.prepare("PRAGMA table_info(missions)").all() as Array<{ name: string }>;
@@ -1017,6 +1036,7 @@ export class WandStorage {
     ensureCommandSessionSchema(this.db);
     ensureWorkspaceSchema(this.db);
     ensureWandTaskSchema(this.db);
+    ensureWandMilestoneSchema(this.db);
     ensureConnectorSchema(this.db);
     this.ensureDefaultPasswordVault();
   }
@@ -1528,7 +1548,7 @@ export class WandStorage {
 
   createWandTask(input: { workspaceId?: string | null; workspaceTaskId?: string | null; title: string; titleSource?: import("./task-types.js").WandTaskTitleSource; description?: string; status?: import("./task-types.js").WandTaskStatus; priority?: import("./task-types.js").WandTaskPriority; labels?: string[]; dueDate?: string | null; milestoneId?: string | null; agent?: import("./task-types.js").WandTaskAgent | null }): import("./task-types.js").WandTask {
     const id = crypto.randomUUID(); const now = nowIso();
-    const status = input.status ?? "todo"; const priority = input.priority ?? "none";
+    const status = input.status ?? "todo"; const priority = input.priority ?? DEFAULT_WAND_TASK_PRIORITY;
     const max = this.db.prepare("SELECT COALESCE(MAX(sort_order), -1) AS value FROM wand_tasks WHERE workspace_id IS ? AND status = ?").get(input.workspaceId ?? null, status) as { value?: number } | undefined;
     const numberRow = this.db.prepare("SELECT COALESCE(MAX(CAST(substr(identifier, 6) AS INTEGER)), 0) AS value FROM wand_tasks WHERE identifier GLOB 'TASK-[0-9]*'").get() as { value?: number } | undefined;
     const identifier = `TASK-${(numberRow?.value ?? 0) + 1}`;
@@ -1553,42 +1573,53 @@ export class WandStorage {
 
   deleteWandTask(id: string): void { this.db.prepare("DELETE FROM wand_tasks WHERE id = ?").run(id); }
 
-  // ── 里程碑（跨项目全局列表；任务只存 milestoneId）──
+  // ── 里程碑（迭代，归属工作区；任务只存 milestoneId）──
 
-  listWandMilestones(): import("./task-types.js").WandTaskMilestone[] {
-    const rows = this.db.prepare(
-      `SELECT id, name, due_date, created_at, updated_at FROM wand_milestones ORDER BY created_at DESC, rowid DESC`,
-    ).all() as unknown as Array<Record<string, unknown>>;
+  /**
+   * 里程碑列表。传工作区 id 时返回「该工作区 + 全局（workspace_id IS NULL）」；
+   * 未指定工作区（null / undefined / 空串）时返回全部。
+   */
+  listWandMilestones(workspaceId?: string | null): import("./task-types.js").WandTaskMilestone[] {
+    const scoped = typeof workspaceId === "string" ? workspaceId.trim() : "";
+    const select = "SELECT id, name, due_date, workspace_id, created_at, updated_at FROM wand_milestones";
+    const order = " ORDER BY created_at DESC, rowid DESC";
+    const rows = (scoped
+      ? this.db.prepare(`${select} WHERE workspace_id = ? OR workspace_id IS NULL${order}`).all(scoped)
+      : this.db.prepare(`${select}${order}`).all()) as unknown as Array<Record<string, unknown>>;
     return rows.map(mapWandMilestoneRow).filter((item): item is import("./task-types.js").WandTaskMilestone => item !== null);
   }
 
   getWandMilestone(id: string): import("./task-types.js").WandTaskMilestone | null {
     const row = this.db.prepare(
-      `SELECT id, name, due_date, created_at, updated_at FROM wand_milestones WHERE id = ?`,
+      `SELECT id, name, due_date, workspace_id, created_at, updated_at FROM wand_milestones WHERE id = ?`,
     ).get(id) as Record<string, unknown> | undefined;
     return row ? mapWandMilestoneRow(row) : null;
   }
 
-  createWandMilestone(input: { name: string; dueDate?: string | null }): import("./task-types.js").WandTaskMilestone {
+  createWandMilestone(input: { name: string; dueDate?: string | null; workspaceId?: string | null }): import("./task-types.js").WandTaskMilestone {
     const id = crypto.randomUUID();
     const now = nowIso();
+    const workspaceId = typeof input.workspaceId === "string" && input.workspaceId.trim() ? input.workspaceId.trim() : null;
     this.db.prepare(
-      `INSERT INTO wand_milestones (id, name, due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
-    ).run(id, input.name, input.dueDate ?? null, now, now);
+      `INSERT INTO wand_milestones (id, name, due_date, workspace_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(id, input.name, input.dueDate ?? null, workspaceId, now, now);
     return this.getWandMilestone(id)!;
   }
 
-  updateWandMilestone(id: string, patch: { name?: string; dueDate?: string | null }): import("./task-types.js").WandTaskMilestone | null {
+  updateWandMilestone(id: string, patch: { name?: string; dueDate?: string | null; workspaceId?: string | null }): import("./task-types.js").WandTaskMilestone | null {
     const current = this.getWandMilestone(id);
     if (!current) return null;
     const next = {
       name: patch.name ?? current.name,
       dueDate: patch.dueDate === undefined ? current.dueDate : patch.dueDate,
+      workspaceId: patch.workspaceId === undefined
+        ? current.workspaceId
+        : (typeof patch.workspaceId === "string" && patch.workspaceId.trim() ? patch.workspaceId.trim() : null),
       updatedAt: nowIso(),
     };
     this.db.prepare(
-      `UPDATE wand_milestones SET name = ?, due_date = ?, updated_at = ? WHERE id = ?`,
-    ).run(next.name, next.dueDate, next.updatedAt, id);
+      `UPDATE wand_milestones SET name = ?, due_date = ?, workspace_id = ?, updated_at = ? WHERE id = ?`,
+    ).run(next.name, next.dueDate, next.workspaceId, next.updatedAt, id);
     return this.getWandMilestone(id);
   }
 

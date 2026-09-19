@@ -334,6 +334,7 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
               <span>里程碑（可选）</span>
               <MilestonePicker
                 value={milestoneId || null}
+                workspaceId={activeTaskContext.workspaceId}
                 disabled={busy}
                 onChange={(next) => setMilestoneId(next ?? "")}
               />

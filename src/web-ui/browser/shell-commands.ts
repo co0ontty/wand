@@ -71,8 +71,6 @@ function confirmAndDelete(target: UiManageTarget, id: string): Promise<unknown> 
 function setQuickStartProvider(provider: "claude" | "codex" | "opencode"): void {
   state.sessionTool = provider;
   state.preferredCommand = provider;
-  if (provider === "codex") state.modeValue = "full-access";
-  if (provider === "opencode") state.modeValue = "managed";
 }
 
 function quickStart(provider: "claude" | "codex" | "opencode"): void | Promise<unknown> {

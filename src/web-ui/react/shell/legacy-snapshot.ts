@@ -8,13 +8,13 @@ import type {
 } from "./ui-store";
 import { isIdleAtPrompt } from "./ui-store";
 import { stringValue } from "../json-utils";
+import { usesSidebarDrawer } from "../../sidebar-layout";
 
 export interface LegacySnapshotState {
   selectedId?: string | null;
   sessions?: readonly LegacySession[];
   config?: { defaultCwd?: string; cwd?: string } | null;
   loginChecked?: boolean;
-  bootstrapping?: boolean;
   isOnline?: boolean;
   sessionsDrawerOpen?: boolean;
   sidebarPinned?: boolean;
@@ -90,6 +90,10 @@ interface LegacyGitStatus {
 
 export interface LegacySnapshotEnvironment {
   width: number;
+  /** 视口高度；只用于侧栏「停靠 ⟷ 抽屉」判定，缺省视为足够高。 */
+  height?: number;
+  /** `(pointer: coarse)`：触摸优先设备，缺省按桌面鼠标处理。 */
+  coarsePointer?: boolean;
   online: boolean;
   embedTerminal: boolean;
   nativeInput: boolean;
@@ -253,9 +257,16 @@ export function deriveLegacyUiSnapshot(
   const automation = sortSessionVms(sessionVms.filter((session) => session.source === "automation"), sessions);
 
   const mobile = environment.width <= 768;
+  // 抽屉（覆盖）与停靠（推开内容）是两件事：手机宽度、以及「触摸 + 矮视口」的
+  // 横屏手机才走抽屉；平板竖屏和 640–768 的桌面窗口都停靠，不再遮挡主内容。
+  const sidebarDrawer = usesSidebarDrawer({
+    width: environment.width,
+    height: environment.height ?? Number.POSITIVE_INFINITY,
+    coarsePointer: environment.coarsePointer ?? false,
+  });
   const drawerOpen = Boolean(state.sessionsDrawerOpen);
   const sidebarPinned = Boolean(state.sidebarPinned);
-  const sidebarCollapsed = !mobile && sidebarPinned && Boolean(state.sidebarCollapsed);
+  const sidebarCollapsed = !sidebarDrawer && sidebarPinned && Boolean(state.sidebarCollapsed);
   const filePanelOpen = Boolean(state.filePanelOpen);
   const structuredSelected = selected?.kind === "structured";
   const currentView = structuredSelected || state.currentView === "chat" ? "chat" : "terminal";
@@ -288,8 +299,9 @@ export function deriveLegacyUiSnapshot(
       sessionsDrawerOpen: drawerOpen,
       sidebarPinned,
       sidebarCollapsed,
-      sidebarAnchored: !mobile && (sidebarPinned || drawerOpen),
-      sessionsBackdropVisible: drawerOpen && (mobile || !sidebarPinned),
+      sidebarDrawer,
+      sidebarAnchored: !sidebarDrawer && (sidebarPinned || drawerOpen),
+      sessionsBackdropVisible: drawerOpen && (sidebarDrawer || !sidebarPinned),
       filePanelOpen,
       filePanelBackdropVisible: filePanelOpen && mobile,
       topbarMoreOpen: Boolean(state.topbarMoreOpen),

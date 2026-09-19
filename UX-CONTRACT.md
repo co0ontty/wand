@@ -33,6 +33,7 @@ DESIGN.md 镜像 `content/styles.css` 规范值；Appica adapter 和共享组件
 | CRUD | workspaces controller / taskBoardRepository | task-first-rollout.md + wand-task-sync.ts | 立即工作 / 记录待办 / 归档 | 浏览器完整流程 |
 | Search | react/ui/search-field.tsx | 本契约 | 本地即时 / 远程 300ms | clear、IME、取消、无结果 |
 | Dialog | react/ui/dialog.tsx + wandOverlay | 本契约 | modal / confirmation | Escape、焦点、输入保留 |
+| 聊天内容宽度 | chat-width-toggle.tsx + chat-width.ts | DESIGN.md + 本契约 | 铺满（默认）/ 居中 | 顶栏与标签栏同状态、≥1280px 才出现、刷新后不跳变 |
 
 ## Flow ledger
 

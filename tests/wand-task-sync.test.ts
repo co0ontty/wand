@@ -11,6 +11,7 @@ import {
   boardTitleFromSession,
   ensureBoardTaskForWorkspaceTask,
   syncUngroupedSessionsToBoard,
+  syncWorkspaceTaskToBoard,
   ensureWorkspaceTaskForBoardTask,
   moveSessionToWorkspaceTask,
   taskAutoNameSourceText,
@@ -79,7 +80,7 @@ test("named sidebar tasks bind sessions and fill the agent from the selected CLI
   assert.equal(storage.listWandTasks().length, 1);
   assert.deepEqual(storage.listWandTaskSessionIds(card.id), ["session-1"]);
   assert.deepEqual(storage.getWandTask(card.id)?.agent, {
-    provider: "codex", model: "gpt-5", thinkingEffort: "deep", mode: "full-access",
+    provider: "codex", model: "gpt-5", thinkingEffort: "deep", mode: "full-access", kind: "structured",
   });
 });
 
@@ -99,6 +100,44 @@ test("shell sessions bind to named tasks without inventing an agent", (t) => {
   syncUngroupedSessionsToBoard(storage);
   assert.deepEqual(storage.listWandTaskSessionIds(card.id), ["session-1"]);
   assert.equal(storage.getWandTask(card.id)?.agent, null);
+});
+
+test("a session landing on a sidebar task reaches its card without a board-wide reload", (t) => {
+  const storage = tempDatabase(t);
+  const workspace = storage.createWorkspace({ name: "mk2api", cwd: "/tmp/mk2api" });
+  const task = storage.createWorkspaceTask({ workspaceId: workspace.id, name: "按渠道配置 API" });
+  const card = ensureBoardTaskForWorkspaceTask(storage, task, workspace)!;
+  storage.saveSession(snapshot({
+    id: "sess-sidebar",
+    workspaceId: workspace.id,
+    workspaceTaskId: task.id,
+    provider: "pi",
+    mode: "default",
+    selectedModel: "mk2api/monkeycode-ultra/gpt-6-astra",
+  }));
+
+  // 侧栏「＋」建出来的会话：只同步它所属的那一个任务，不必等 /api/wand-tasks 的全量兜底。
+  syncWorkspaceTaskToBoard(storage, task.id);
+  assert.deepEqual(storage.listWandTaskSessionIds(card.id), ["sess-sidebar"]);
+  assert.equal(storage.getWandTask(card.id)?.status, "doing");
+  assert.deepEqual(storage.getWandTask(card.id)?.agent, {
+    provider: "pi",
+    model: "mk2api/monkeycode-ultra/gpt-6-astra",
+    thinkingEffort: "off",
+    mode: "default",
+    kind: "structured",
+  });
+
+  // 幂等：重复同步不会重复绑定，也不会把用户手动改过的状态再改回去。
+  storage.updateWandTask(card.id, { status: "todo" });
+  syncWorkspaceTaskToBoard(storage, task.id);
+  assert.deepEqual(storage.listWandTaskSessionIds(card.id), ["sess-sidebar"]);
+  assert.equal(storage.getWandTask(card.id)?.status, "todo");
+
+  // 任务不存在 / 没给归属时静默跳过：会话创建不能因为看板同步失败而失败。
+  assert.doesNotThrow(() => syncWorkspaceTaskToBoard(storage, "missing-task"));
+  assert.doesNotThrow(() => syncWorkspaceTaskToBoard(storage, null));
+  assert.doesNotThrow(() => syncWorkspaceTaskToBoard(storage, undefined));
 });
 
 test("boardTitleFromSession prefers title then description then first user message", () => {

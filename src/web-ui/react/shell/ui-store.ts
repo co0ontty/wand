@@ -85,6 +85,8 @@ export interface UiSnapshotData {
     sessionsDrawerOpen: boolean;
     sidebarPinned: boolean;
     sidebarCollapsed: boolean;
+    /** true = 抽屉（覆盖主内容）；false = 停靠（推开主内容）。 */
+    sidebarDrawer: boolean;
     sidebarAnchored: boolean;
     sessionsBackdropVisible: boolean;
     filePanelOpen: boolean;

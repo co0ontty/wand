@@ -81,6 +81,7 @@ import {
   checkManagedServiceUpdatePreflight,
 } from "./update-helper.js";
 import { toSessionDetailDTO } from "./session-transport.js";
+import { syncWorkspaceTaskToBoard } from "./wand-task-sync.js";
 import { registerUploadRoutes } from "./upload-routes.js";
 import { optimizePrompt, PromptOptimizeError } from "./prompt-optimizer.js";
 import { resolveDatabasePath, WandStorage, type AuthPrincipal, type AuthScope } from "./storage.js";
@@ -759,7 +760,7 @@ export async function startServer(
 
   registerGithubRoutes(app, { storage, requireAdmin, sessions: sessionRegistry });
   // 任务管理与 Missions 一样只需登录：原生 connected-app 也要能列/建/派发。
-  registerTaskRoutes(app, { storage, sessions: sessionRegistry, structured: structuredSessions, config });
+  registerTaskRoutes(app, { storage, sessions: sessionRegistry, structured: structuredSessions, processes, config });
 
   registerAdminUpdateRoutes(app, {
     storage,
@@ -893,6 +894,8 @@ export async function startServer(
             }
           ));
       recordRecentPath(storage, snapshot.cwd);
+      // 会话一落地就挂到任务的看板卡片上，不等下一次看板列表的兜底同步。
+      syncWorkspaceTaskToBoard(storage, snapshot.workspaceTaskId);
       res.status(201).json(toSessionDetailDTO(snapshot));
     } catch (error) {
       sendRouteError(res, error, "无法启动命令。请检查命令是否安装。");

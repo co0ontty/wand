@@ -1948,8 +1948,8 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   padding-block: 22px;
 }
 
-.wand-new-task-milestone-field summary { cursor: pointer; color: var(--text-secondary); font-size: var(--font-size-base); }
-.wand-new-task-milestone-field[open] summary { margin-bottom: 12px; }
+/* 新建任务：里程碑（迭代）按工作区过滤，触发器占满字段宽度。 */
+.wand-new-task-milestone-field .milestone-picker-trigger { max-width: 100%; }
 
 .wand-workspace-agent-options {
   display: grid;

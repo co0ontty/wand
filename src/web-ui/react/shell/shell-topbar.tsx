@@ -15,6 +15,7 @@ import { localPreviewController } from "../local-preview/controller";
 import { classNames } from "../ui/class-names";
 
 import { getShellSidebarEntryActions, type ShellSidebarEntryActions } from "./shell-sidebar";
+import { ChatWidthToggle } from "./chat-width-toggle";
 import { useUiDispatch, useUiStoreSnapshot } from "./ui-store-react";
 import type { UiAction, UiSessionVm } from "./ui-store";
 
@@ -154,7 +155,7 @@ export function ShellTopbar() {
   return (
     <div className="main-header-row">
       <div className="topbar-left">
-        {(snapshot.viewport.mobile || !snapshot.layout.sidebarAnchored) && (
+        {(snapshot.layout.sidebarDrawer || !snapshot.layout.sidebarAnchored) && (
           <WandIconButton
             id="sessions-toggle-button"
             className={classNames("floating-sidebar-toggle", snapshot.layout.sessionsDrawerOpen && "active")}
@@ -219,6 +220,7 @@ export function ShellTopbar() {
         )}
       </div>
       <div className="topbar-right">
+        <ChatWidthToggle className="topbar-chat-width"/>
         <WandIconButton
           id="topbar-file-button"
           kind="ghost"

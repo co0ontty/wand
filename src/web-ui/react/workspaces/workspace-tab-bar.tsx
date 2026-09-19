@@ -28,6 +28,8 @@ import {
   workspaceAgentDialogStore,
 } from "./workspace-agent-dialog-controller";
 import { useUiDispatch, useUiStoreSnapshot } from "../shell/ui-store-react";
+import { ChatWidthToggle } from "../shell/chat-width-toggle";
+import { WandIcon } from "../ui";
 import { classNames } from "../ui/class-names";
 import {
   activateWorkWindow,
@@ -248,7 +250,7 @@ export function WorkspaceTabBar(): React.ReactElement | null {
                   disabled={closingWindowId === window.id}
                   onClick={() => void closeWindow(window)}
                 >
-                  ×
+                  <WandIcon name="close" size={13} strokeWidth={2.2}/>
                 </button>
               </div>
             );
@@ -260,7 +262,7 @@ export function WorkspaceTabBar(): React.ReactElement | null {
           aria-label="新建 Agent 或空白终端"
           onClick={() => workspaceAgentDialogController.open()}
         >
-          +
+          <WandIcon name="plus" size={16} strokeWidth={2}/>
         </button>
         {taskLayout.windows.length > 1 ? (
           <>
@@ -297,6 +299,7 @@ export function WorkspaceTabBar(): React.ReactElement | null {
           选择目标窗口 · Esc 取消
         </button>
       ) : null}
+      <ChatWidthToggle className="workspace-tab-chat-width"/>
       <button
         type="button"
         className="workspace-tab-files"
@@ -304,7 +307,7 @@ export function WorkspaceTabBar(): React.ReactElement | null {
         aria-label="文件"
         onClick={() => void dispatch({ type: "layout.files.toggle" })}
       >
-        ▤
+        <WandIcon name="explorer" size={16} strokeWidth={1.8}/>
       </button>
       <button
         type="button"
@@ -313,7 +316,7 @@ export function WorkspaceTabBar(): React.ReactElement | null {
         aria-label="关闭任务标签组"
         onClick={handleClose}
       >
-        ×
+        <WandIcon name="close" size={16} strokeWidth={2.2}/>
       </button>
       <WorkspaceAgentDialog
         open={agentDialog.open}

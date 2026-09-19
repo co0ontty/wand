@@ -18,6 +18,7 @@ import { collectSessionTopicBlocklist } from "./session-topic.js";
 import { resolveSessionDisplayTitle } from "./session-transport.js";
 import { type LayoutNode, type PaneTab, type SessionSnapshot, type TaskWindowLayout, type Workspace, type WorkspaceDefaultProvider, type WorkspaceTask, type WorkspaceTaskWorktree } from "./types.js";
 import { attachUnboundSessionsToWorkspace, backfillSessionWorkspaces, normalizeProjectCwd, projectCwdForSession, isGlobalWorkspace, syncDirectoryNameForWorkspace } from "./workspace-binding.js";
+import { scopedMilestoneId } from "./milestone-scope.js";
 import { archiveBoardTaskForWorkspaceTask, archiveWorkspaceTask, ensureBoardTaskForWorkspaceTask, isUnnamedWorkspaceTaskName, moveSessionToWorkspaceTask, syncSidebarTasksFromBoard, UNNAMED_WORKSPACE_TASK_NAME } from "./wand-task-sync.js";
 import { isSessionProvider } from "./session-provider.js";
 import { firstLayoutTabId } from "./layout-tree.js";
@@ -151,12 +152,16 @@ function createTaskForWorkspace(
   // 留空（或老客户端回传的占位名）走自动命名：先用提示词总结，再交给模型改写。
   const named = name.length > 0 && !isUnnamedWorkspaceTaskName(name);
   const provisional = named ? "" : provisionalTaskTitleFromDescription(description);
-  // 里程碑是全局列表；建任务时可选，非法 id 直接报错而不是静默丢掉。
+  // 迭代按工作区归属：项目里的任务只能挂本项目或全局的迭代（详见 milestone-scope.ts）。
   const requestedMilestoneId = typeof body.milestoneId === "string" ? body.milestoneId.trim() : "";
   if (requestedMilestoneId && !storage.getWandMilestone(requestedMilestoneId)) {
     throw new Error("未找到该里程碑。");
   }
-  const milestoneId = requestedMilestoneId || null;
+  const milestoneId = scopedMilestoneId(
+    storage,
+    requestedMilestoneId || null,
+    isGlobalWorkspace(workspace) ? null : workspace.id,
+  );
   let mountedCwd: string | undefined;
   if (body.cwd !== undefined && body.cwd !== null && String(body.cwd).trim()) {
     mountedCwd = resolveWorkspaceCwd(body.cwd);

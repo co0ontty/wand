@@ -1,6 +1,6 @@
 {
   "name": "@co0ontty/wand",
-  "version": "4.68.1",
+  "version": "4.71.0",
   "description": "A web console for Claude Code, Codex, OpenCode, and other local CLI tools.",
   "type": "module",
   "bin": {
@@ -24,6 +24,7 @@
     "check": "node scripts/bundle-tailwind.js && node scripts/bundle-xterm.js && node scripts/bundle-browser.js && npm run generate:web-assets && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.browser.json && tsc --noEmit -p tsconfig.react.json",
     "test": "node --test --import tsx tests/*.test.ts",
     "check:bundle-budget": "node scripts/check-bundle-budget.js",
+    "audit:remnants": "node scripts/audit-legacy-remnants.js",
     "prepublishOnly": "VER=${WAND_PUBLISH_VERSION:-$(git tag --sort=-v:refname --list 'v*' | head -1)} && VER=${VER#v} && npm version \"$VER\" --no-git-tag-version --allow-same-version && npm run build",
     "bundle:tailwind": "node scripts/bundle-tailwind.js"
   },

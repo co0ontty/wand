@@ -4,16 +4,18 @@ import { asyncRoute } from "./express-async.js";
 import { getErrorMessage } from "./error-utils.js";
 import { bodyObject, sendRouteError, text } from "./server-request.js";
 import { parseWandTaskAgent, type WandStorage } from "./storage.js";
+import { scopedMilestoneId } from "./milestone-scope.js";
 import { generateWandTaskTitle, provisionalTaskTitleFromDescription, TASK_TITLE_MAX_LENGTH } from "./task-title.js";
 import type { QuickCommitAiOptions } from "./git-quick-commit.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
 import type { SessionRegistry } from "./session-registry.js";
 import type { StructuredSessionManager } from "./structured-session-manager.js";
-import type { WandTaskAgent, WandTaskAgentEffort, WandTaskAgentMode, WandTaskPriority, WandTaskStatus, WandTaskTitleSource } from "./task-types.js";
-import { DEFAULT_WAND_TASK_AGENT_MODE, isWandTaskAgentMode, normalizeWandTaskAgentMode, WAND_MILESTONE_NAME_MAX_LENGTH } from "./task-types.js";
-import { archiveBoardTask, ensureWorkspaceTaskForBoardTask, isAutoNameableBoardTask, moveSessionToWorkspaceTask, syncClosedBoardTask, syncUngroupedSessionsToBoard, taskAutoNameSignature, taskAutoNameSourceText } from "./wand-task-sync.js";
+import type { ProcessManager } from "./process-manager.js";
+import type { WandTaskAgent, WandTaskAgentEffort, WandTaskAgentKind, WandTaskAgentMode, WandTaskPriority, WandTaskStatus, WandTaskTitleSource } from "./task-types.js";
+import { DEFAULT_WAND_TASK_AGENT_KIND, DEFAULT_WAND_TASK_AGENT_MODE, DEFAULT_WAND_TASK_PRIORITY, isWandTaskAgentKind, isWandTaskAgentMode, normalizeWandTaskAgentMode, WAND_MILESTONE_NAME_MAX_LENGTH } from "./task-types.js";
+import { archiveBoardTask, ensureWorkspaceTaskForBoardTask, isAutoNameableBoardTask, moveSessionToWorkspaceTask, syncClosedBoardTask, syncUngroupedSessionsToBoard, syncWorkspaceTaskToBoard, taskAutoNameSignature, taskAutoNameSourceText } from "./wand-task-sync.js";
 import type { SessionProvider, SessionSnapshot, WandConfig } from "./types.js";
-import { isSessionProvider } from "./session-provider.js";
+import { isSessionProvider, providerCliCommand } from "./session-provider.js";
 
 const STATUSES = new Set<WandTaskStatus>(["todo", "doing", "done", "archived"]);
 const PRIORITIES = new Set<WandTaskPriority>(["none", "low", "medium", "high", "urgent"]);
@@ -21,7 +23,7 @@ const AGENT_EFFORTS = new Set<WandTaskAgentEffort>(["off", "standard", "deep", "
 const TASK_BOARD_LAST_AGENT_KEY = "pref:taskBoardLastAgent";
 
 function defaultTaskBoardAgent(): WandTaskAgent {
-  return { provider: "claude", model: "default", thinkingEffort: "off", mode: DEFAULT_WAND_TASK_AGENT_MODE };
+  return { provider: "claude", model: "default", thinkingEffort: "off", mode: DEFAULT_WAND_TASK_AGENT_MODE, kind: DEFAULT_WAND_TASK_AGENT_KIND };
 }
 
 /** 任务面板上次选用的 CLI 工具 / 模型 / 思考深度；从未保存过时回落到 Claude 默认。 */
@@ -41,6 +43,7 @@ export function writeTaskBoardLastAgent(storage: WandStorage, agent: WandTaskAge
     model: agent.model,
     thinkingEffort: agent.thinkingEffort,
     mode: agent.mode,
+    kind: agent.kind,
   });
 }
 
@@ -48,6 +51,8 @@ export interface TaskRouteDependencies {
   storage: WandStorage;
   sessions?: SessionRegistry;
   structured?: StructuredSessionManager;
+  /** PTY 会话创建入口；派发 `kind: "pty"` 的任务时使用。测试里可换成同步桩。 */
+  processes?: ProcessManager;
   config?: WandConfig;
   /** 可注入的任务标题生成器；测试里换成同步桩，避免真的起 CLI。 */
   generateTitle?: typeof generateWandTaskTitle;
@@ -83,6 +88,15 @@ function milestoneIdFrom(storage: WandStorage, value: unknown): string | null {
   return id;
 }
 
+/** 新建里程碑时归属的工作区；null 表示全局（未指定项目）。 */
+function milestoneWorkspaceIdFrom(storage: WandStorage, value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const workspaceId = text(value);
+  if (!workspaceId) return null;
+  if (!storage.getWorkspace(workspaceId)) throw new Error("项目不存在。");
+  return workspaceId;
+}
+
 /**
  * 任务派发配置：provider / model / thinkingEffort 必须合法；mode 缺省时用 `fallbackMode`。
  * 老客户端（Android / iOS 尚未发 mode）不传 mode，PATCH / dispatch 时传任务当前值，
@@ -91,6 +105,7 @@ function milestoneIdFrom(storage: WandStorage, value: unknown): string | null {
 export function parseTaskAgent(
   value: unknown,
   fallbackMode: WandTaskAgentMode = DEFAULT_WAND_TASK_AGENT_MODE,
+  fallbackKind: WandTaskAgentKind = DEFAULT_WAND_TASK_AGENT_KIND,
 ): WandTaskAgent | null {
   if (value === null) return null;
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Agent 配置必须是对象。");
@@ -105,7 +120,10 @@ export function parseTaskAgent(
   if (!isWandTaskAgentMode(rawMode)) throw new Error("工作模式无效。");
   // Codex 之类只认一种模式的 provider 在这里夹到有效值，落库值与实际执行保持一致。
   const mode = normalizeWandTaskAgentMode(provider, rawMode);
-  return { provider, model, thinkingEffort, mode };
+  // kind 与 mode 同样兼容老客户端：不传就沿用任务当前值，避免把 PTY 悄悄复位成结构化。
+  const rawKind = body.kind === undefined || body.kind === null || body.kind === "" ? fallbackKind : body.kind;
+  if (!isWandTaskAgentKind(rawKind)) throw new Error("会话形态无效。");
+  return { provider, model, thinkingEffort, mode, kind: rawKind };
 }
 
 interface TaskDtoDeps {
@@ -247,7 +265,7 @@ function taskTitleAiOptions(config?: WandConfig): QuickCommitAiOptions {
 }
 
 export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): void {
-  const { storage, sessions, structured, config } = deps;
+  const { storage, sessions, structured, processes, config } = deps;
   const dto = (task: ReturnType<WandStorage["getWandTask"]>) => taskDto(deps, task);
 
   app.get("/api/wand-tasks", (req, res) => {
@@ -269,11 +287,13 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
   app.get("/api/wand-task-agent-defaults", (_req, res) => {
     res.json(readTaskBoardLastAgent(storage));
   });
-  // ── 里程碑：跨项目全局列表，所有任务面板的「新建任务」共用 ──
-  app.get("/api/wand-milestones", (_req, res) => {
+  // ── 里程碑（迭代）：归属工作区，任务面板的「新建任务」按工作区过滤 ──
+  app.get("/api/wand-milestones", (req, res) => {
+    // 不传 workspaceId 返回全部；传了就只给「该工作区 + 全局」的里程碑。
+    const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : null;
     const counts = storage.countWandTasksByMilestone();
     res.json({
-      milestones: storage.listWandMilestones().map((milestone) => ({
+      milestones: storage.listWandMilestones(workspaceId).map((milestone) => ({
         ...milestone,
         taskCount: counts[milestone.id] ?? 0,
       })),
@@ -283,10 +303,12 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
     try {
       const body = bodyObject(req.body);
       const name = milestoneNameFrom(body.name);
-      const duplicate = storage.listWandMilestones()
+      const workspaceId = milestoneWorkspaceIdFrom(storage, body.workspaceId);
+      // 重名只在「同一个工作区可见的里程碑」里查：不同工作区可以各有同名迭代。
+      const duplicate = storage.listWandMilestones(workspaceId)
         .find((milestone) => milestone.name.toLowerCase() === name.toLowerCase());
       if (duplicate) throw new Error(`里程碑「${duplicate.name}」已存在。`);
-      const created = storage.createWandMilestone({ name, dueDate: dateValue(body.dueDate) ?? null });
+      const created = storage.createWandMilestone({ name, dueDate: dateValue(body.dueDate) ?? null, workspaceId });
       res.status(201).json({ ...created, taskCount: 0 });
     } catch (error) {
       sendRouteError(res, error, "无法创建里程碑。");
@@ -300,13 +322,21 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
         res.status(404).json({ error: "未找到该里程碑。" });
         return;
       }
-      const patch: { name?: string; dueDate?: string | null } = {};
+      const patch: { name?: string; dueDate?: string | null; workspaceId?: string | null } = {};
       if (body.name !== undefined) {
         const name = milestoneNameFrom(body.name);
-        const duplicate = storage.listWandMilestones()
+        const duplicate = storage.listWandMilestones(current.workspaceId)
           .find((milestone) => milestone.id !== current.id && milestone.name.toLowerCase() === name.toLowerCase());
         if (duplicate) throw new Error(`里程碑「${duplicate.name}」已存在。`);
         patch.name = name;
+      }
+      if (body.workspaceId !== undefined) {
+        // 允许改挂工作区（例如新建任务时目录对应的项目还没建，提交后再绑上）。
+        const workspaceId = milestoneWorkspaceIdFrom(storage, body.workspaceId);
+        const duplicate = storage.listWandMilestones(workspaceId)
+          .find((milestone) => milestone.id !== current.id && milestone.name.toLowerCase() === current.name.toLowerCase());
+        if (duplicate) throw new Error(`里程碑「${duplicate.name}」已存在。`);
+        patch.workspaceId = workspaceId;
       }
       if (body.dueDate !== undefined) patch.dueDate = dateValue(body.dueDate) ?? null;
       const updated = storage.updateWandMilestone(current.id, patch);
@@ -343,12 +373,12 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       const titleSource: WandTaskTitleSource = providedTitle ? "user" : "auto";
       const title = providedTitle || provisionalTaskTitleFromDescription(description) || "新建任务";
       const status = STATUSES.has(body.status as WandTaskStatus) ? body.status as WandTaskStatus : "todo";
-      const priority = PRIORITIES.has(body.priority as WandTaskPriority) ? body.priority as WandTaskPriority : "none";
+      const priority = PRIORITIES.has(body.priority as WandTaskPriority) ? body.priority as WandTaskPriority : DEFAULT_WAND_TASK_PRIORITY;
       const agent = body.agent === undefined ? null : parseTaskAgent(body.agent);
       if (agent) writeTaskBoardLastAgent(storage, agent);
       const labels = labelsFrom(body.labels);
       const dueDate = dateValue(body.dueDate) ?? null;
-      const milestoneId = milestoneIdFrom(storage, body.milestoneId);
+      const milestoneId = scopedMilestoneId(storage, milestoneIdFrom(storage, body.milestoneId), workspaceId);
       const task = storage.transaction(() => {
         const card = storage.createWandTask({
           workspaceId,
@@ -404,11 +434,16 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
         const workspaceId = body.workspaceId === null ? null : text(body.workspaceId);
         if (workspaceId && !storage.getWorkspace(workspaceId)) throw new Error("项目不存在。");
         patch.workspaceId = workspaceId || null;
+        // 换项目后原迭代不再属于新工作区就一并摘掉；移动端只 PATCH workspaceId，不会自己清。
+        const milestoneId = body.milestoneId !== undefined
+          ? patch.milestoneId
+          : storage.getWandTask(req.params.id)?.milestoneId ?? null;
+        patch.milestoneId = scopedMilestoneId(storage, milestoneId, patch.workspaceId);
       }
       if (body.agent !== undefined) {
-        // 老客户端不传 mode：沿用任务当前的工作模式，而不是复位成标准。
+        // 老客户端不传 mode / kind：沿用任务当前值，而不是复位成标准 / 结构化。
         const current = storage.getWandTask(req.params.id);
-        patch.agent = parseTaskAgent(body.agent, current?.agent?.mode);
+        patch.agent = parseTaskAgent(body.agent, current?.agent?.mode, current?.agent?.kind);
         if (patch.agent) writeTaskBoardLastAgent(storage, patch.agent);
       }
       if (body.sortOrder !== undefined && Number.isFinite(Number(body.sortOrder))) {
@@ -464,8 +499,9 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
   });
 
   /**
-   * 用选定的 CLI 工具开一个结构化会话，把这次派发的 prompt 作为首条消息，
-   * 并把会话绑定回该任务。cwd 取任务所属项目目录；未指定项目时用全局默认目录。
+   * 用选定的 CLI 工具开一个会话（`agent.kind` 为 structured 时是结构化对话，pty 时是原始
+   * CLI 终端），把这次派发的 prompt 作为首条消息 / 初始输入，并把会话绑定回该任务。
+   * cwd 取任务所属项目目录；未指定项目时用全局默认目录。
    */
   app.post("/api/wand-tasks/:id/dispatch", asyncRoute(async (req, res) => {
     try {
@@ -474,12 +510,14 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
         res.status(404).json({ error: "未找到该任务。" });
         return;
       }
-      if (!structured || !config) throw new Error("当前服务未启用结构化会话，无法派发 Agent。");
+      if (!config) throw new Error("当前服务未启用派发，无法派发 Agent。");
       const body = bodyObject(req.body);
       const agent = body.agent === undefined
         ? task.agent ?? parseWandTaskAgent(JSON.stringify(body))
-        : parseTaskAgent(body.agent, task.agent?.mode);
+        : parseTaskAgent(body.agent, task.agent?.mode, task.agent?.kind);
       if (!agent) throw new Error("请先为该任务选择 CLI 工具。");
+      if (agent.kind === "structured" && !structured) throw new Error("当前服务未启用结构化会话，无法派发 Agent。");
+      if (agent.kind === "pty" && !processes) throw new Error("当前服务未启用终端会话，无法派发 Agent。");
       writeTaskBoardLastAgent(storage, agent);
       if (body.workspaceId !== undefined) {
         const workspaceId = body.workspaceId === null ? null : text(body.workspaceId) || null;
@@ -496,28 +534,43 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       if (existingSessions > 0 && !requestedPrompt) throw new Error("请输入提示词。");
       const prompt = requestedPrompt || task.description.trim() || task.title || "执行此任务";
       const model = agent.model === "default" ? "" : agent.model;
-      const session = structured.createSession({
-        cwd,
-        mode: agent.mode,
-        provider: agent.provider as SessionProvider,
-        model: model || getDefaultModelForProvider(config, agent.provider as SessionProvider) || undefined,
-        thinkingEffort: agent.thinkingEffort,
-        worktreeEnabled: false,
-        sessionSource: "automation",
-        automationId: `wand-task:${task.id}`,
-        workspaceId: group.workspaceId,
-        workspaceTaskId: group.id,
-      });
+      const provider = agent.provider as SessionProvider;
+      const resolvedModel = model || getDefaultModelForProvider(config, provider) || undefined;
+      const session = agent.kind === "pty"
+        ? await processes!.start(providerCliCommand(provider), cwd, agent.mode, prompt, {
+            provider,
+            model: resolvedModel,
+            thinkingEffort: agent.thinkingEffort,
+            sessionSource: "automation",
+            automationId: `wand-task:${task.id}`,
+            workspaceId: group.workspaceId,
+            workspaceTaskId: group.id,
+          })
+        : structured!.createSession({
+            cwd,
+            mode: agent.mode,
+            provider,
+            model: resolvedModel,
+            thinkingEffort: agent.thinkingEffort,
+            worktreeEnabled: false,
+            sessionSource: "automation",
+            automationId: `wand-task:${task.id}`,
+            workspaceId: group.workspaceId,
+            workspaceTaskId: group.id,
+          });
       storage.updateWandTask(task.id, { agent, status: task.status === "todo" ? "doing" : task.status });
       storage.bindWandTaskSession(task.id, session.id);
-      const completion = structured.sendMessage(session.id, prompt);
-      completion.catch((error) => console.error(`[WandTask] Agent dispatch failed for ${task.id}:`, error));
+      if (agent.kind !== "pty") {
+        const completion = structured!.sendMessage(session.id, prompt);
+        completion.catch((error) => console.error(`[WandTask] Agent dispatch failed for ${task.id}:`, error));
+      }
       res.status(202).json({
         ok: true,
         taskId: task.id,
         session: {
           id: session.id,
           provider: session.provider,
+          sessionKind: session.sessionKind ?? "pty",
           model: session.selectedModel,
           thinkingEffort: session.thinkingEffort,
           mode: session.mode,
@@ -530,6 +583,9 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
   }));
 
   app.get("/api/wand-tasks/:id", asyncRoute(async (req, res) => {
+    // 单卡读取不跑全量同步，但至少把这张卡片自己的任务归属对上：
+    // 原生客户端 / 详情面板只拉单卡时，也不会看到一张没有会话的卡片。
+    syncWorkspaceTaskToBoard(storage, storage.getWandTask(req.params.id)?.workspaceTaskId);
     const task = dto(storage.getWandTask(req.params.id));
     if (!task) {
       res.status(404).json({ error: "未找到该任务。" });

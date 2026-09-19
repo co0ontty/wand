@@ -237,24 +237,45 @@ test("task board create sheets only assign agents from the doing column", () => 
   );
 });
 
-test("subagent role windows stay compact, avatar-free, and follow the newest content", () => {
+test("subagent execution surfaces stay compact, avatar-free, and follow the newest content", () => {
   includesAll("src/web-ui/browser/chat-render.ts", [
-    'data-follow-tail="true"',
-    'class="subagent-panel-body"',
+    'class="subagent-panel-summary"',
+    'aria-expanded="\' + (expanded ? "true" : "false") + \'"',
+    'data-status="\' + status.key + \'"',
+    'expanded = persisted === null ? status.key === "running" : persisted;',
+    'class="subagent-panel-process"',
+    'class="subagent-reply final',
   ]);
   includesAll("src/web-ui/browser/events.ts", [
-    '.subagent-panel[data-follow-tail="true"]',
-    "body.scrollTop = body.scrollHeight",
+    "(window as any).__subagentPanelToggle",
+    'applyExpandedState(panel, "subagent-panel", expanded)',
+    'persistElementExpandState(panel, "subagent-panel")',
+  ]);
+  includesAll("src/web-ui/browser/chat-scroll.ts", [
+    'case "subagent-panel":',
+    "subagentBody.style.display = expanded ? \"block\" : \"none\"",
   ]);
   includesAll("src/web-ui/content/styles.css", [
-    ".subagent-panel-body",
-    "height: 320px",
-    "overflow-y: auto",
+    ".subagent-panel-summary",
+    ".subagent-panel-process::before",
+    "height: auto;",
+    "max-height: none;",
+    "overflow: visible;",
   ]);
   assert.doesNotMatch(
     source("src/web-ui/browser/chat-render.ts"),
     /class="subagent-panel-avatar"/,
     "Web subagent window must not reserve a left avatar box",
+  );
+  assert.doesNotMatch(
+    source("src/web-ui/content/styles.css"),
+    /\.subagent-panel-body\s*\{[^}]*height:\s*(?:260|320)px/s,
+    "Web subagent process must not use a fixed-height nested scroller",
+  );
+  assert.doesNotMatch(
+    source("src/web-ui/content/styles.css"),
+    /\.subagent-panel-header|\.subagent-panel-count/,
+    "Web subagent cards must use the semantic summary button instead of legacy header chrome",
   );
 
   includesAll("ios/Wand/ChatView.swift", [

@@ -115,29 +115,21 @@ import { approvePermission, approveTurnPermission, denyPermission } from "./webs
         applyExpandedState(bubble, "subagent-reply", !expanded);
         persistElementExpandState(bubble, "subagent-reply");
       };
-      // 旧版 subagent panel 是可折叠面板；新版是固定高度角色窗口。
-      // 保留这个入口兼容旧 DOM / 旧内联事件，但只会把窗口恢复到常驻展开态。
+      // subagent 执行卡由原生 button 驱动，浏览器自带 Enter / Space 键盘行为。
+      // 展开内容参与主对话滚动，不再操作任何内嵌滚动容器。
       (window as any).__subagentPanelToggle = function(e: any, target: any) {
         if (e) { e.preventDefault(); e.stopPropagation(); }
         var panel = target && target.closest ? target.closest(".subagent-panel") : null;
         if (!panel) return;
-        panel.setAttribute("data-expanded", "true");
+        var expanded = panel.getAttribute("data-expanded") !== "true";
+        applyExpandedState(panel, "subagent-panel", expanded);
+        persistElementExpandState(panel, "subagent-panel");
       };
 
-      // 固定高度角色窗口始终展示尾部：首次打开直接看到最新几条，流式刷新后也
-      // 继续跟随最新内容。用户仍可在两次刷新之间自由滚动查看窗口内的历史。
-      export function snapCollapsedSubagentPanelsToBottom(container: any) {
+      // 活动折叠仍然是固定高度滚动区：流式刷新后锚定尾部，让用户持续看到
+      // 最新到达的思考和工具活动。折叠态下 body 为 display:none，直接跳过。
+      export function snapExpandedActivityFoldsToBottom(container: any) {
         if (!container) return;
-        var panels = container.querySelectorAll('.subagent-panel[data-follow-tail="true"]');
-        for (var i = 0; i < panels.length; i++) {
-          var body = panels[i].querySelector(".subagent-panel-body");
-          if (!body) continue;
-          // 直接赋 scrollHeight 即可，浏览器会自动钳到合法上界。
-          body.scrollTop = body.scrollHeight;
-        }
-        // 展开的活动折叠窗口同样是固定高度滚动区：流式刷新后锚定尾部，
-        // 让用户持续看到最新到达的思考 / 工具活动。折叠态没有 body 高度，
-        // 跳过（display:none 下 scrollTop 无意义）。
         var activities = container.querySelectorAll('.chat-activity[data-follow-tail="true"][data-expanded="true"]');
         for (var a = 0; a < activities.length; a++) {
           var actBody = activities[a].querySelector(".chat-activity-body");

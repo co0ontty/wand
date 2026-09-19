@@ -557,16 +557,17 @@ export function ShellSidebar() {
   const taskBoard = React.useSyncExternalStore(taskBoardStore.subscribe, taskBoardStore.getSnapshot, taskBoardStore.getSnapshot);
   const [moreOpen, setMoreOpen] = React.useState(false);
   const [searchQuery, setSearchQuery] = React.useState("");
-  const narrow = !snapshot.viewport.mobile && snapshot.layout.sidebarPinned && snapshot.layout.sidebarCollapsed;
+  const narrow = !snapshot.layout.sidebarDrawer && snapshot.layout.sidebarPinned && snapshot.layout.sidebarCollapsed;
   const sidebarClass = classNames(
     "sidebar sidebar-refined",
     snapshot.layout.sessionsDrawerOpen && "open",
-    !snapshot.viewport.mobile && snapshot.layout.sidebarAnchored && "pinned",
+    !snapshot.layout.sidebarDrawer && snapshot.layout.sidebarAnchored && "pinned",
     narrow && "collapsed",
   );
   const primaryAction = getShellSidebarPrimaryAction();
-  const visible = snapshot.layout.sessionsDrawerOpen || (!snapshot.viewport.mobile && snapshot.layout.sidebarAnchored);
-  const overlay = visible && (snapshot.viewport.mobile || !snapshot.layout.sidebarPinned);
+  const visible = snapshot.layout.sessionsDrawerOpen
+    || (!snapshot.layout.sidebarDrawer && snapshot.layout.sidebarAnchored);
+  const overlay = visible && (snapshot.layout.sidebarDrawer || !snapshot.layout.sidebarPinned);
   const drawerRef = useSidebarDrawer(overlay, () => void dispatch({ type: "layout.drawer.close" }));
   const bodyRef = React.useRef<HTMLDivElement>(null);
   const peekSurfaceRef = React.useRef<HTMLDivElement>(null);
@@ -754,13 +755,13 @@ export function ShellSidebar() {
                   </WandDropdownMenuContent>
                 </WandDropdownMenu>
               </div>
-              {!snapshot.viewport.mobile && (
+              {!snapshot.layout.sidebarDrawer && (
                 <SidebarCompactToggle
                   active={narrow}
                   onToggle={() => void dispatch({ type: "layout.drawer.collapse" })}
                 />
               )}
-              {snapshot.viewport.mobile && (
+              {snapshot.layout.sidebarDrawer && (
                 <>
                   <WandIconButton
                     id="sidebar-collapse-btn"
@@ -871,7 +872,7 @@ export function ShellSidebar() {
                   <span>设置</span>
                 </WandNavigationLink>
               </WandNavigationItem>
-              {snapshot.viewport.mobile && (
+              {snapshot.layout.sidebarDrawer && (
                 <WandNavigationItem>
                   <WandNavigationLink
                     id="file-panel-toggle-btn"

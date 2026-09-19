@@ -6,6 +6,9 @@ export function isClosedWandTaskStatus(status: WandTaskStatus): boolean {
 }
 export type WandTaskPriority = "none" | "low" | "medium" | "high" | "urgent";
 
+/** 新建任务的默认优先级：用户没挑就是「低」，不再落成「无优先级」。 */
+export const DEFAULT_WAND_TASK_PRIORITY: WandTaskPriority = "low";
+
 /** 任务派发时选择的 CLI 工具；空串表示尚未指定。 */
 export type WandTaskAgentProvider = "claude" | "codex" | "opencode" | "grok" | "qoder" | "pi";
 export type WandTaskAgentModel = string;
@@ -53,7 +56,24 @@ export function normalizeWandTaskAgentMode(
     : supported[0]!;
 }
 
-/** 任务上的默认派发配置：先选工具 / 模型 / 思考深度 / 工作模式，再一键交给 Agent。 */
+/**
+ * 派发时创建的会话形态：
+ *   - structured：结构化对话，走 provider 的结构化 runner；
+ *   - pty：原始 CLI 终端，与「新建工作窗口」里的 PTY 一致。
+ */
+export type WandTaskAgentKind = "structured" | "pty";
+
+/** 合法会话形态清单；顺序即下拉顺序。 */
+export const WAND_TASK_AGENT_KINDS: readonly WandTaskAgentKind[] = ["structured", "pty"];
+
+/** 历史行 / 老客户端没带 kind 时的兜底：结构化对话，与旧派发行为一致。 */
+export const DEFAULT_WAND_TASK_AGENT_KIND: WandTaskAgentKind = "structured";
+
+export function isWandTaskAgentKind(value: unknown): value is WandTaskAgentKind {
+  return value === "structured" || value === "pty";
+}
+
+/** 任务上的默认派发配置：先选工具 / 模型 / 思考深度 / 工作模式 / 会话形态，再一键交给 Agent。 */
 export interface WandTaskAgent {
   provider: WandTaskAgentProvider;
   /** 具体模型 ID；"default" 表示跟随服务端为该 provider 选择的默认模型。 */
@@ -61,6 +81,8 @@ export interface WandTaskAgent {
   thinkingEffort: WandTaskAgentEffort;
   /** 执行模式；缺省时按标准模式处理。 */
   mode: WandTaskAgentMode;
+  /** 派发出来的会话是结构化对话还是 PTY 终端；缺省时按结构化处理。 */
+  kind: WandTaskAgentKind;
 }
 
 /** 任务标题来源；标题是可选字段，留空时由服务端按描述自动生成。 */
@@ -70,7 +92,8 @@ export type WandTaskTitleSource = "user" | "auto";
 export const WAND_MILESTONE_NAME_MAX_LENGTH = 60;
 
 /**
- * 里程碑：跨项目的全局列表（不是每个目录一份），创建任务时从中选择或新增。
+ * 里程碑（迭代）：归属某个工作区，新建任务时按所选工作区过滤展示，也可以不选。
+ * workspaceId 为 null 表示全局里程碑（历史数据，或未指定工作区时创建），任何工作区都能选。
  * 任务只保存 milestoneId，删除里程碑时只解绑任务、不删除任务。
  */
 export interface WandTaskMilestone {
@@ -78,6 +101,8 @@ export interface WandTaskMilestone {
   name: string;
   /** YYYY-MM-DD，可为空。 */
   dueDate: string | null;
+  /** 所属工作区；null = 全局里程碑。 */
+  workspaceId: string | null;
   createdAt: string;
   updatedAt: string;
 }

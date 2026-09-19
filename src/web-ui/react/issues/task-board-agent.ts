@@ -1,14 +1,17 @@
 import type {
   WandTaskAgent,
   WandTaskAgentEffort,
+  WandTaskAgentKind,
   WandTaskAgentMode,
   WandTaskAgentProvider,
   WandTaskPriority,
   WandTaskStatus,
 } from "../../../task-types";
 import {
+  DEFAULT_WAND_TASK_AGENT_KIND,
   DEFAULT_WAND_TASK_AGENT_MODE,
   isClosedWandTaskStatus,
+  isWandTaskAgentKind,
   normalizeWandTaskAgentMode,
   supportedWandTaskAgentModes,
 } from "../../../task-types";
@@ -287,6 +290,7 @@ export interface IssueAgentGroup {
     model: string;
     thinkingEffort: string;
     mode?: string;
+    sessionKind?: string;
   }>;
 }
 
@@ -308,6 +312,7 @@ function agentFromSession(session: IssueAgentGroup["sessions"][number]): WandTas
     model: session.model.trim() || ISSUE_AGENT_DEFAULT_MODEL,
     thinkingEffort,
     mode,
+    kind: session.sessionKind === "pty" ? "pty" : DEFAULT_WAND_TASK_AGENT_KIND,
   };
 }
 
@@ -356,7 +361,18 @@ export function createDefaultIssueAgent(provider: IssueAgentProvider = "claude")
     model: ISSUE_AGENT_DEFAULT_MODEL,
     thinkingEffort: "off",
     mode: normalizeWandTaskAgentMode(provider, DEFAULT_WAND_TASK_AGENT_MODE),
+    kind: DEFAULT_WAND_TASK_AGENT_KIND,
   };
+}
+
+/** 会话形态标签；未知值回落到结构化，避免旧任务显示空标签。 */
+export function issueAgentKindLabel(kind: string | null | undefined): string {
+  return kind === "pty" ? "PTY 终端" : "结构化对话";
+}
+
+/** 把任意来源的 kind 收敛成合法值；缺省/脏数据按结构化处理。 */
+export function normalizeIssueAgentKind(kind: unknown): WandTaskAgentKind {
+  return isWandTaskAgentKind(kind) ? kind : DEFAULT_WAND_TASK_AGENT_KIND;
 }
 
 /**
@@ -368,7 +384,11 @@ export function resolveIssueAgent(
   lastAgent?: WandTaskAgent | null,
 ): WandTaskAgent {
   if (isDispatchableIssueAgent(taskAgent)) {
-    return { ...taskAgent, mode: normalizeWandTaskAgentMode(taskAgent.provider, taskAgent.mode) };
+    return {
+      ...taskAgent,
+      mode: normalizeWandTaskAgentMode(taskAgent.provider, taskAgent.mode),
+      kind: normalizeIssueAgentKind(taskAgent.kind),
+    };
   }
   if (isDispatchableIssueAgent(lastAgent)) {
     return {
@@ -376,6 +396,7 @@ export function resolveIssueAgent(
       model: lastAgent.model.trim(),
       thinkingEffort: lastAgent.thinkingEffort,
       mode: normalizeWandTaskAgentMode(lastAgent.provider, lastAgent.mode),
+      kind: normalizeIssueAgentKind(lastAgent.kind),
     };
   }
   return createDefaultIssueAgent();

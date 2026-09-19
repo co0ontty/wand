@@ -24,6 +24,9 @@ function browserEnvironment(): LegacySnapshotEnvironment {
   const nativeBridge = typeof WandNative === "undefined" ? undefined : WandNative;
   return {
     width: window.innerWidth,
+    height: window.innerHeight,
+    coarsePointer: typeof window.matchMedia === "function"
+      && window.matchMedia("(pointer: coarse)").matches,
     online: navigator.onLine,
     embedTerminal: document.documentElement.classList.contains("is-wand-embed-terminal"),
     nativeInput: Boolean(window.__wandImeNative || window.__wandIosNative),

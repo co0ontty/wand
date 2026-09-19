@@ -1,3 +1,5 @@
+export * from "./chat-width";
+export * from "./chat-width-toggle";
 export * from "./legacy-snapshot";
 export * from "./legacy-hosts";
 export * from "./legacy-ui-actions";

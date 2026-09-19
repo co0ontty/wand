@@ -83,9 +83,11 @@ test("milestones can be created, listed, renamed, and deleted without deleting t
     assert.match((await duplicate.json() as { error: string }).error, /已存在/);
 
     const task = await fetch(`${url}/api/wand-tasks`, jsonBody({ title: "发布准备", milestoneId: created.id }))
-      .then(jsonOf<{ id: string; milestoneId: string | null; milestone: { id: string; name: string } | null }>);
+      .then(jsonOf<{ id: string; milestoneId: string | null; priority: string; milestone: { id: string; name: string } | null }>);
     assert.equal(task.milestoneId, created.id);
     assert.deepEqual(task.milestone, { id: created.id, name: "v5.0 发布" });
+    // 没挑优先级的新任务默认「低」，不再落成「无优先级」。
+    assert.equal(task.priority, "low");
 
     const listed = await fetch(`${url}/api/wand-milestones`)
       .then(jsonOf<{ milestones: Array<{ id: string; name: string; taskCount: number }> }>);
@@ -128,6 +130,66 @@ test("tasks reject unknown milestones and can be rebound or cleared", async (t) 
   });
 });
 
+test("a task only carries its own project's milestone (or a global one)", async (t) => {
+  await withHarness(t, async ({ url, storage }) => {
+    const alpha = storage.createWorkspace({ name: "alpha", cwd: "/tmp/wand-milestone-alpha" });
+    const beta = storage.createWorkspace({ name: "beta", cwd: "/tmp/wand-milestone-beta" });
+    const alphaMilestone = storage.createWandMilestone({ name: "alpha 迭代", workspaceId: alpha.id });
+    const betaMilestone = storage.createWandMilestone({ name: "beta 迭代", workspaceId: beta.id });
+    const globalMilestone = storage.createWandMilestone({ name: "长线维护" });
+
+    // 建任务：别的项目的迭代直接忽略，本项目 / 全局的照常挂上。
+    const crossed = await fetch(`${url}/api/wand-tasks`, jsonBody({
+      title: "跨项目迭代",
+      workspaceId: alpha.id,
+      milestoneId: betaMilestone.id,
+    })).then(jsonOf<{ id: string; milestoneId: string | null }>);
+    assert.equal(crossed.milestoneId, null);
+
+    const owned = await fetch(`${url}/api/wand-tasks`, jsonBody({
+      title: "本项目迭代",
+      workspaceId: alpha.id,
+      milestoneId: alphaMilestone.id,
+    })).then(jsonOf<{ id: string; milestoneId: string | null }>);
+    assert.equal(owned.milestoneId, alphaMilestone.id);
+
+    // 移动端只会 PATCH workspaceId：换到别的项目时原迭代一并摘掉。
+    const moved = await fetch(`${url}/api/wand-tasks/${owned.id}`, jsonBody({ workspaceId: beta.id }, "PATCH"))
+      .then(jsonOf<{ workspaceId: string | null; milestoneId: string | null }>);
+    assert.equal(moved.workspaceId, beta.id);
+    assert.equal(moved.milestoneId, null);
+
+    // 全局迭代不受项目限制；没归属项目的任务也不受限（独立任务照样能用项目的迭代）。
+    const globalTask = await fetch(`${url}/api/wand-tasks`, jsonBody({
+      title: "全局迭代",
+      workspaceId: beta.id,
+      milestoneId: globalMilestone.id,
+    })).then(jsonOf<{ id: string; milestoneId: string | null }>);
+    assert.equal(globalTask.milestoneId, globalMilestone.id);
+    const reassigned = await fetch(`${url}/api/wand-tasks/${globalTask.id}`, jsonBody({ workspaceId: alpha.id }, "PATCH"))
+      .then(jsonOf<{ milestoneId: string | null }>);
+    assert.equal(reassigned.milestoneId, globalMilestone.id);
+
+    const standalone = await fetch(`${url}/api/tasks`, jsonBody({ name: "独立任务", milestoneId: alphaMilestone.id }))
+      .then(jsonOf<{ milestoneId: string | null }>);
+    assert.equal(standalone.milestoneId, alphaMilestone.id);
+
+    // 项目里的任务面板任务同样只看本项目：挂别的项目的迭代会被收敛成空。
+    const workspaceTask = await fetch(`${url}/api/workspaces/${beta.id}/tasks`, jsonBody({
+      name: "项目任务",
+      worktree: false,
+      milestoneId: alphaMilestone.id,
+    })).then(jsonOf<{ milestoneId: string | null }>);
+    assert.equal(workspaceTask.milestoneId, null);
+
+    // 同项目 / 全局的仍然保留，PATCH 别的字段不会误清。
+    const kept = await fetch(`${url}/api/wand-tasks/${globalTask.id}`, jsonBody({ priority: "high" }, "PATCH"))
+      .then(jsonOf<{ priority: string; milestoneId: string | null }>);
+    assert.equal(kept.priority, "high");
+    assert.equal(kept.milestoneId, globalMilestone.id);
+  });
+});
+
 test("workspace task creation carries the milestone onto the board card", async (t) => {
   await withHarness(t, async ({ url, storage }) => {
     const milestone = storage.createWandMilestone({ name: "移动端 5.0", dueDate: "2026-09-30" });
@@ -157,6 +219,53 @@ test("workspace task creation carries the milestone onto the board card", async 
       milestoneId: "missing",
     }));
     assert.equal(bad.status, 400);
+  });
+});
+
+test("milestones scoped to a workspace only show up in that workspace", async (t) => {
+  await withHarness(t, async ({ url, storage }) => {
+    const alpha = storage.createWorkspace({ name: "alpha", cwd: "/tmp/wand-ms-alpha" });
+    const beta = storage.createWorkspace({ name: "beta", cwd: "/tmp/wand-ms-beta" });
+
+    const scoped = await fetch(`${url}/api/wand-milestones`, jsonBody({ name: "5.0 发布", workspaceId: alpha.id }))
+      .then(jsonOf<{ id: string; workspaceId: string | null }>);
+    assert.equal(scoped.workspaceId, alpha.id);
+
+    // 不传工作区就是全局迭代，任何工作区都能选。
+    const global = await fetch(`${url}/api/wand-milestones`, jsonBody({ name: "长线维护" }))
+      .then(jsonOf<{ id: string; workspaceId: string | null }>);
+    assert.equal(global.workspaceId, null);
+
+    // 别的项目可以有自己的同名迭代。
+    const sameNameElsewhere = await fetch(`${url}/api/wand-milestones`, jsonBody({ name: "5.0 发布", workspaceId: beta.id }));
+    assert.equal(sameNameElsewhere.status, 201);
+
+    // 同一个工作区（含全局）里不允许重名。
+    const duplicate = await fetch(`${url}/api/wand-milestones`, jsonBody({ name: "长线维护", workspaceId: alpha.id }));
+    assert.equal(duplicate.status, 400);
+
+    const alphaList = await fetch(`${url}/api/wand-milestones?workspaceId=${alpha.id}`)
+      .then(jsonOf<{ milestones: Array<{ id: string }> }>);
+    assert.deepEqual(alphaList.milestones.map((item) => item.id).sort(), [scoped.id, global.id].sort());
+
+    const betaList = await fetch(`${url}/api/wand-milestones?workspaceId=${beta.id}`)
+      .then(jsonOf<{ milestones: Array<{ id: string }> }>);
+    assert.ok(!betaList.milestones.some((item) => item.id === scoped.id), "别的项目的迭代不应出现在下拉里");
+
+    // 不带过滤时返回全量：任务看板共用一份缓存，按工作区本地过滤。
+    const all = await fetch(`${url}/api/wand-milestones`).then(jsonOf<{ milestones: unknown[] }>);
+    assert.equal(all.milestones.length, 3);
+
+    // 改挂工作区：目录对应的项目是提交时才建的，建完再回填。
+    const rebound = await fetch(`${url}/api/wand-milestones/${global.id}`, jsonBody({ workspaceId: beta.id }, "PATCH"))
+      .then(jsonOf<{ workspaceId: string | null }>);
+    assert.equal(rebound.workspaceId, beta.id);
+    const afterRebind = await fetch(`${url}/api/wand-milestones?workspaceId=${alpha.id}`)
+      .then(jsonOf<{ milestones: Array<{ id: string }> }>);
+    assert.deepEqual(afterRebind.milestones.map((item) => item.id), [scoped.id]);
+
+    const unknownWorkspace = await fetch(`${url}/api/wand-milestones`, jsonBody({ name: "坏工作区", workspaceId: "missing" }));
+    assert.equal(unknownWorkspace.status, 400);
   });
 });
 
@@ -193,20 +302,45 @@ test("legacy databases gain the milestone columns and table on open", (t) => {
     );
     INSERT INTO wand_tasks (id, identifier, title, created_at, updated_at)
     VALUES ('legacy-task', 'TASK-1', '旧任务', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+    CREATE TABLE wand_milestones (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      due_date TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    INSERT INTO wand_milestones (id, name, due_date, created_at, updated_at)
+    VALUES ('legacy-milestone', '旧里程碑', NULL, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
   `);
   legacy.close();
 
   const storage = new WandStorage(dbPath);
   t.after(() => storage.close());
 
+  // 老里程碑表没有 workspace_id：迁移后按全局里程碑读回，所有工作区都能选。
+  assert.equal(storage.getWandMilestone("legacy-milestone")?.workspaceId, null);
+
   const milestone = storage.createWandMilestone({ name: "迁移后可用" });
   assert.equal(storage.listWandTasks()[0]?.milestoneId, null);
+  // 历史行保持原样（'none'），只影响新建任务。
+  assert.equal(storage.listWandTasks()[0]?.priority, "none");
   storage.updateWandTask("legacy-task", { milestoneId: milestone.id });
   assert.equal(storage.listWandTasks()[0]?.milestoneId, milestone.id);
 
   const workspace = storage.createWorkspace({ name: "wand", cwd: "/tmp/wand-legacy-milestone" });
   const task = storage.createWorkspaceTask({ workspaceId: workspace.id, name: "旧侧栏任务", milestoneId: milestone.id });
   assert.equal(storage.getWorkspaceTask(task.id)?.milestoneId, milestone.id);
+
+  // 按工作区取列表：老库里的全局里程碑也在，新加的归属工作区。
+  const bound = storage.createWandMilestone({ name: "迁移后归属", workspaceId: workspace.id });
+  assert.equal(bound.workspaceId, workspace.id);
+  assert.deepEqual(
+    storage.listWandMilestones(workspace.id).map((item) => item.id).sort(),
+    ["legacy-milestone", milestone.id, bound.id].sort(),
+  );
+
+  // 新建任务没指定优先级时默认「低」。
+  assert.equal(storage.createWandTask({ title: "新任务默认优先级" }).priority, "low");
 });
 
 test("milestone ids are trimmed and blank ids mean unassigned", () => {

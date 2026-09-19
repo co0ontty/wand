@@ -2,7 +2,7 @@ import { state, writeStoredBoolean } from "./state";
 import { iconSvg } from "./i18n";
 import { escapeHtml } from "./utils";
 import { persistSelectedId } from "./chat-scroll";
-import { setFilePanelOpen, isMobileLayout } from "./file-browser";
+import { setFilePanelOpen, isMobileLayout, isSidebarDrawerLayout } from "./file-browser";
 import { render } from "./render";
 import { selectSession, closeSessionsDrawer } from "./session-engine";
 import "./session-ui";
@@ -692,7 +692,7 @@ export function clearSessionProgressNative(sessionId: string) {
     setFilePanelOpen(false);
     return true;
   }
-  if (state.sessionsDrawerOpen && isMobileLayout()) {
+  if (state.sessionsDrawerOpen && isSidebarDrawerLayout()) {
     closeSessionsDrawer();
     return true;
   }

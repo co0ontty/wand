@@ -4,7 +4,7 @@ import { draggedTaskId, isTaskDrag, startTaskDrag, TASK_DRAG_TYPE } from "./task
 import { draggedSessionId, isSessionDrag, startSessionDrag } from "../workspaces/session-drag";
 import { SessionMoveButton } from "../workspaces/session-move-button";
 import { workspacesStore } from "../workspaces/controller";
-import type { WandTaskAgent, WandTaskPriority, WandTaskStatus } from "../../../task-types";
+import { DEFAULT_WAND_TASK_PRIORITY, type WandTaskAgent, type WandTaskPriority, type WandTaskStatus } from "../../../task-types";
 import {
   WandButton,
   WandDialogSurface,
@@ -96,7 +96,8 @@ interface DraftState {
 }
 
 function emptyDraft(workspaceId: string, status: WandTaskStatus = "todo", agent: WandTaskAgent = createDefaultIssueAgent()): DraftState {
-  return { workspaceId, title: "", description: "", status, priority: "none", dueDate: "", labels: "", milestoneId: "", agent };
+  // 用户没挑优先级就默认「低」，不再落成「无优先级」。
+  return { workspaceId, title: "", description: "", status, priority: DEFAULT_WAND_TASK_PRIORITY, dueDate: "", labels: "", milestoneId: "", agent };
 }
 
 // 自动生成标题是后台完成的，创建响应里只有描述首行占位；这里短轮询几次，拿到模型标题就刷新。
@@ -971,6 +972,7 @@ export function TaskBoardHost({
             </label>
             <MilestonePicker
               value={draft.milestoneId || null}
+              workspaceId={draft.workspaceId || null}
               onChange={(milestoneId) => setDraft((current) => ({ ...current, milestoneId: milestoneId ?? "" }))}
             />
             <label className="task-board-create-chip is-grow">
@@ -1274,6 +1276,7 @@ function IssueDetail({
           <IssueField label="里程碑">
             <MilestonePicker
               value={task.milestoneId}
+              workspaceId={task.workspaceId}
               disabled={busy}
               onChange={(milestoneId) => onPatch({ milestoneId })}
             />

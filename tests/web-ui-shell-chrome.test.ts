@@ -60,6 +60,7 @@ function fixture(overrides: Partial<UiSnapshotData> = {}): UiSnapshotData {
       sessionsDrawerOpen: true,
       sidebarPinned: true,
       sidebarCollapsed: false,
+      sidebarDrawer: false,
       sidebarAnchored: true,
       sessionsBackdropVisible: false,
       filePanelOpen: true,
@@ -132,6 +133,23 @@ test("ShellTopbar SSR preserves title, status, cwd, git, and menu contracts", ()
   // Appica's trigger carries the popup contract itself; the menu body is
   // portalled and only mounts while open, so SSR keeps the closed state.
   assert.match(html, /id="topbar-more-button"[^>]*aria-haspopup="menu"[^>]*aria-expanded="false"/);
+  // 聊天宽度开关只在聊天在屏时出现（本 fixture 是 terminal 视图）。
+  assert.doesNotMatch(html, /chat-width-toggle/);
+});
+
+test("ShellTopbar exposes the chat width toggle while a chat is on screen", () => {
+  const chat = renderWithStore(
+    createElement(ShellTopbar),
+    fixture({ legacyVisibility: { terminal: false, chat: true, blank: false, composer: true } }),
+  );
+  assert.match(
+    chat,
+    /<div class="chat-width-toggle topbar-chat-width" role="group" aria-label="聊天内容宽度">/,
+  );
+  // 默认铺满：第一段是选中的那一段。
+  assert.match(chat, /data-active="true" aria-pressed="true" title="铺满可用宽度[^"]*"[^>]*>铺满</);
+  assert.match(chat, /title="正文收成居中阅读列[^"]*"[^>]*>居中</);
+  assert.doesNotMatch(chat, /aria-pressed="true"[^>]*>居中</);
 });
 
 test("TopbarMoreMenu keeps every action hook the browser layer dispatches", () => {
@@ -175,6 +193,7 @@ test("ShellTopbar SSR renders the home state and an empty stable git slot", () =
       ...base.layout,
       sessionsDrawerOpen: false,
       sidebarPinned: false,
+      sidebarDrawer: true,
       sidebarAnchored: false,
       filePanelOpen: false,
       topbarMoreOpen: false,

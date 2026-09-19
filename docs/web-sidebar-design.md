@@ -40,6 +40,22 @@
 - 打开更多菜单时暂停目录预览，防止两个面板同时抢占空间。
 - 桌面折叠或抽屉隐藏时关闭遗留菜单；目录树展开/折叠与原有状态持久化保持兼容。
 
+## 停靠与抽屉的判定
+
+侧栏只有两种形态：**停靠**（`sidebar-pinned`，按侧栏宽度给主内容补 `padding-left`，把内容推开）和**抽屉**（`sidebar-open` + 全屏背板，覆盖主内容）。判定集中在 `src/web-ui/sidebar-layout.ts` 的 `usesSidebarDrawer()`：
+
+- 宽度 `>= 640px`：停靠。含平板竖屏（iPad Mini 768、安卓平板 712）和 640–768 的桌面窄窗口。
+- 宽度 `< 640px`：抽屉（手机）。
+- 触摸设备（`(pointer: coarse)`）另加高度门槛 `>= 480px`：横屏手机放不下两栏，仍走抽屉；桌面矮窗口（如竖向分屏 1200×420）不受影响，依旧停靠。
+
+这条规则与原生端 `ios/Wand/NativeRootView.swift` 的 `usesWideListDetail(width >= 640 && height >= 480)` 对齐。改判定时必须同步三处，否则会出现「JS 停靠 / CSS 不补 padding」的覆盖态：
+
+- React Shell：`legacy-snapshot.ts` 派生的 `layout.sidebarDrawer`（组件只读它，不再读 `viewport.mobile`）。
+- 浏览器 legacy 层：`isSidebarDrawerLayout()`（`file-browser.ts`），供抽屉开合、背板、resize 跨断面用。
+- CSS 断点：`min-width: 640px` 与 `max-width: 639.98px` 成对出现（含 Web 主题的侧栏宽度与手机抽屉外观两段）。
+
+`viewport.mobile`（`<= 768px`）仍然用于文件面板、聊天宽度等其他窄屏适配，两者不要互相替代。
+
 ## 验证范围
 
 静态检查、全量单元测试和生产构建；浏览器检查桌面展开、窄栏、搜索、管理、会话折叠、更多菜单、移动抽屉、原生壳 CSS 分支和 legacy 回滚入口。

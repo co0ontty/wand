@@ -8,6 +8,7 @@ import { persistSelectedId } from "./chat-scroll";
 import { focusInputBox } from "./input";
 import { getEffectiveCwd, resetChatRenderCache } from "./render";
 import {
+  clearDraftValueForSession,
   dismissDrawerIfOverlay,
   ensureTerminalReady,
   getChatModelForProvider,
@@ -64,14 +65,15 @@ const legacyRuntime: NewSessionRuntimeAdapter = {
   },
 
   async completeCreate(request: NewSessionCreateRequest, created: NewSessionCreated): Promise<void> {
-    state.modeValue = request.mode;
     state.chatMode = request.mode;
     if (request.kind !== "shell") {
       state.sessionTool = request.provider;
       state.preferredCommand = request.provider;
     }
     state.selectedId = created.id;
-    state.drafts[created.id] = "";
+    // 新会话的输入框必须是空的：连 localStorage 里的旧草稿一起清掉，否则刷新后
+    // 同 id 的旧草稿会被 getDraftValueForSession() 读回来。
+    clearDraftValueForSession(created.id, true);
     persistSelectedId();
     saveWorkingDir(request.cwd);
     resetChatRenderCache();

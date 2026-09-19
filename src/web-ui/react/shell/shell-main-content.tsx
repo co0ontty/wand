@@ -202,7 +202,7 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
     <main inert={snapshot.layout.sessionsBackdropVisible} className={`main-content${snapshot.layout.filePanelOpen ? " file-panel-open" : ""}${inSplit ? " main-content-in-split" : ""}${taskBoard.open ? " task-board-main-content" : ""}`}>
       {/* 任务内由标签条承担主区导航；不再叠一层重复的会话标题栏。 */}
       {context.taskId ? null : <ShellTopbar/>}
-      {context.taskId && snapshot.viewport.mobile && (
+      {context.taskId && snapshot.layout.sidebarDrawer && (
         <nav className="workspace-mobile-navigation" aria-label="任务导航">
           <WandIconButton aria-label="打开任务" title="打开任务"
             data-pressed={snapshot.layout.sessionsDrawerOpen || undefined}
@@ -239,7 +239,7 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
       {/* 看板是独立路由，不能替换 <main>：#output 等 LegacyHost 槽位必须一直挂着。 */}
       {taskBoard.open ? <TaskBoardHost
         onBack={() => taskBoardController.close()}
-        onOpenSidebar={snapshot.viewport.mobile
+        onOpenSidebar={snapshot.layout.sidebarDrawer
           ? () => void dispatch({ type: "layout.drawer.toggle" })
           : undefined}
         onOpenSession={(sessionId) => {

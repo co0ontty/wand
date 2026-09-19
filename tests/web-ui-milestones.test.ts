@@ -4,12 +4,12 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { configureMilestonesRepository, milestoneNameOf, milestonesStore } from "../src/web-ui/react/milestones/controller.js";
+import { configureMilestonesRepository, milestoneNameOf, milestonesStore, visibleMilestones } from "../src/web-ui/react/milestones/controller.js";
 import { MilestonePicker } from "../src/web-ui/react/milestones/picker.js";
 import type { MilestoneOption } from "../src/web-ui/react/milestones/repository.js";
 
-function option(id: string, name: string, taskCount = 0): MilestoneOption {
-  return { id, name, dueDate: null, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", taskCount };
+function option(id: string, name: string, taskCount = 0, workspaceId: string | null = null): MilestoneOption {
+  return { id, name, dueDate: null, workspaceId, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", taskCount };
 }
 
 test("milestone store loads once and prepends newly created milestones", async () => {
@@ -20,7 +20,10 @@ test("milestone store loads once and prepends newly created milestones", async (
       return [option("m1", "旧里程碑", 2)];
     },
     async create(input) {
-      return option("m2", input.name, 0);
+      return option("m2", input.name, 0, input.workspaceId ?? null);
+    },
+    async update(id, patch) {
+      return option(id, "新里程碑", 0, patch.workspaceId);
     },
   });
   try {
@@ -33,9 +36,15 @@ test("milestone store loads once and prepends newly created milestones", async (
     await milestonesStore.load();
     assert.equal(listCalls, 1);
 
-    const created = await milestonesStore.create("  新里程碑  ");
+    const created = await milestonesStore.create("  新里程碑  ", "ws-1");
     assert.equal(created.name, "新里程碑");
+    assert.equal(created.workspaceId, "ws-1");
     assert.deepEqual(milestonesStore.getSnapshot().items.map((item) => item.id), ["m2", "m1"]);
+
+    // 回填工作区：缓存里的那条同步改成归属该工作区。
+    await milestonesStore.rebind("m2", "ws-2");
+    assert.equal(milestonesStore.getSnapshot().items.find((item) => item.id === "m2")?.workspaceId, "ws-2");
+    assert.equal(milestonesStore.getSnapshot().items.find((item) => item.id === "m1")?.workspaceId, null);
 
     await assert.rejects(() => milestonesStore.create("   "), /里程碑名称/);
   } finally {
@@ -51,6 +60,9 @@ test("milestone store surfaces load failures instead of pretending the list is e
     async create(input) {
       return option("m1", input.name);
     },
+    async update(id, patch) {
+      return option(id, "里程碑", 0, patch.workspaceId);
+    },
   });
   try {
     await milestonesStore.load();
@@ -61,6 +73,40 @@ test("milestone store surfaces load failures instead of pretending the list is e
   } finally {
     restore();
   }
+});
+
+test("visibleMilestones keeps only the selected workspace's milestones plus global ones", () => {
+  const items = [
+    option("g1", "长线维护"),
+    option("a1", "A 的迭代", 0, "a"),
+    option("b1", "B 的迭代", 0, "b"),
+  ];
+  // 没选工作区：沿用全量列表。
+  assert.deepEqual(visibleMilestones(items, "").map((item) => item.id), ["g1", "a1", "b1"]);
+  assert.deepEqual(visibleMilestones(items, null).map((item) => item.id), ["g1", "a1", "b1"]);
+  // 选了工作区：自己的 + 全局，别的项目的不出现。
+  assert.deepEqual(visibleMilestones(items, "a").map((item) => item.id), ["g1", "a1"]);
+  assert.deepEqual(visibleMilestones(items, " b ").map((item) => item.id), ["g1", "b1"]);
+});
+
+test("MilestonePicker treats a global milestone as selected but not another workspace's", () => {
+  const items = [option("g1", "长线维护"), option("b1", "B 的迭代", 0, "b")];
+  const global = renderToStaticMarkup(createElement(MilestonePicker, {
+    value: "g1",
+    workspaceId: "a",
+    items,
+    onChange: () => undefined,
+  }));
+  assert.match(global, /is-set/);
+  assert.match(global, /长线维护/);
+
+  const foreign = renderToStaticMarkup(createElement(MilestonePicker, {
+    value: "b1",
+    workspaceId: "a",
+    items,
+    onChange: () => undefined,
+  }));
+  assert.doesNotMatch(foreign, /is-set/);
 });
 
 test("milestoneNameOf resolves ids for board chips", () => {

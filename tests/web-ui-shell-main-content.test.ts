@@ -50,6 +50,7 @@ function fixture(overrides: Partial<UiSnapshotData> = {}): UiSnapshotData {
       sessionsDrawerOpen: true,
       sidebarPinned: true,
       sidebarCollapsed: false,
+      sidebarDrawer: false,
       sidebarAnchored: true,
       sessionsBackdropVisible: false,
       filePanelOpen: false,
@@ -230,7 +231,7 @@ test("mobile tasks keep a sidebar navigation entry even without terminal windows
   const source = readFileSync(
     path.join(root, "src", "web-ui", "react", "shell", "shell-main-content.tsx"), "utf8",
   );
-  assert.match(source, /context\.taskId && snapshot\.viewport\.mobile &&/);
+  assert.match(source, /context\.taskId && snapshot\.layout\.sidebarDrawer &&/);
   assert.match(source, /aria-label="打开任务"/);
   assert.match(source, /aria-controls="sessions-drawer"/);
   assert.match(source, /dispatch\(\{ type: "layout\.drawer\.toggle" \}\)/);

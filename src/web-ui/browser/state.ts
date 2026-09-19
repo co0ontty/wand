@@ -66,10 +66,6 @@ export var state: AppState = {
     } catch (e) {}
     try { return localStorage.getItem("wand-selected-session") || null; } catch (e) { return null; }
   })(),
-  activeWorkspaceId: (function() {
-    try { return localStorage.getItem("wand-active-workspace") || null; } catch (e) { return null; }
-  })(),
-  activeWorkspaceTaskId: null,
   pollTimer: null,
   config: null,
   sessions: [],
@@ -81,22 +77,18 @@ export var state: AppState = {
   // Keep the authoritative emulator snapshot outside the replaceable session
   // list so a concurrent /api/sessions refresh cannot lose it.
   terminalStatesBySession: {},
-  terminalFitInProgress: false,
   terminalSessionId: null,
   terminalOutput: "",
   terminalLiveStreamSessions: {},
-  lastChunkAt: 0,
   terminalHealthTimer: null,
   terminalAutoFollow: true,
   // Ignore scroll events caused by our own scroll-to-bottom operation.
   terminalProgrammaticScrollUntil: 0,
-  terminalScrollThreshold: 12,
   showTerminalJumpToBottom: false,
   terminalViewportEl: null,
   terminalViewportScrollHandler: null,
   terminalViewportTouchHandler: null,
   terminalViewportTouchStartHandler: null,
-  terminalTouchStartY: 0,
   terminalComposing: false,
   // Safari / WKWebView may report the Enter key used to confirm an IME
   // candidate after compositionend with isComposing=false. Keep a composer-
@@ -126,14 +118,18 @@ export var state: AppState = {
   //     false = 收起成水平小气泡胶囊）。点击胶囊空白 / 气泡本体 / +N 徽章切换。
   //     ESC / 清空 / 全部 promote 出去时也会被自动收回。
   //   queueBarDrag: 拖拽排序进行中时的临时状态（pointer 捕获、起始坐标、参考 rect）。
-  //   收起态以前还有"hover 展开某一条"的旧实现，已在 iOS 26 玻璃条改造里一起下线；
-  //   queueBarHoverIndex 不再被任何代码读写，保留 null 占位以免破坏其他模块的
-  //   类型推断。
+  //   收起态以前还有"hover 展开某一条"的旧实现，已在 iOS 26 玻璃条改造里一起下线。
   queueBarExpanded: false,
-  queueBarHoverIndex: null,
   queueBarDrag: null,
   queueBarPromoting: false,
   drafts: {},
+  // 只活在内存里的草稿：发送结果未知（传输层失败）时回填的内容。它不能落
+  // localStorage —— 否则刷新后同一条「可能已经发出」的消息会再次出现在输入框里，
+  // 用户一按回车就重复发送。用户重新编辑、发送成功或明确失败回填后即恢复普通持久化。
+  draftsMemoryOnly: {},
+  // 页面正在卸载（刷新 / 关标签 / 原生壳回收 WebView）：在途 fetch 会被 abort，
+  // 失败回填随之触发。这段时间一律不写 localStorage，避免污染下一次启动的草稿。
+  pageUnloading: false,
   // Attachments are composer state, so they must follow the same per-session
   // isolation as drafts. File objects cannot be persisted across reloads, but
   // they do survive in-memory session switches.
@@ -148,15 +144,12 @@ export var state: AppState = {
   promptOptimizeRequest: null,
   // 输入面板内联错误条（`#action-error`）的文案；非空时由 React 渲染。
   actionError: null,
-  isSyncingInputBox: false,
   loginPending: false,
   loginChecked: false,
-  bootstrapping: true,
   sessionsDrawerOpen: readStoredBoolean("wand-sidebar-open", false),
   // 桌面仅保留完整 / 窄栏两态，完整侧栏为默认状态。
   sidebarPinned: readStoredBoolean("wand-sidebar-pinned", true),
   sidebarCollapsed: readStoredBoolean("wand-sidebar-collapsed", false),
-  modeValue: "managed",
   chatMode: "managed",
   chatModels: (function() {
     try {
@@ -207,7 +200,6 @@ export var state: AppState = {
   wsHeartbeatCheckTimer: null,
   _updateBubbleShown: false,
   notificationHistory: {},
-  delayedNotificationTimer: null,
   notifSound: (function() {
     try { var v = localStorage.getItem("wand-notif-sound"); return v === null ? true : v === "true"; } catch (e) { return true; }
   })(),
@@ -243,16 +235,11 @@ export var state: AppState = {
   topbarMoreOpen: false,
   gitStatus: null,
   gitStatusSessionId: null,
-  gitStatusLoading: false,
   gitStatusInflight: null,
   gitStatusLastFetchAt: 0,
   // Telegram 风格的"贴底"状态：true = 用户当前贴在底部，新消息会自然出现；
   // false = 用户向上滚了，未读会累积到气泡里，不会自动滚他们的视图。
   chatStickToBottom: true,
-  // 旧版自动折叠横条已禁用：不再把最新一轮摘要固定到聊天顶部。
-  chatAutoFoldEnabled: false,
-  // 当前会话视图里"激活的折叠快照"，记录顶部预览对应的最新 user / assistant 索引。
-  chatAutoFoldSnapshot: null,
   chatUnreadCount: 0,
   // state.currentMessages 中第一条未读消息的 index，-1 表示没有未读。
   chatUnreadStartIndex: -1,
@@ -287,7 +274,6 @@ export var state: AppState = {
   chatRenderedCount: 20,
   currentTask: null, // Current task title from Claude
   terminalInteractive: false,
-  miniKeyboardVisible: false,
   modifiers: { ctrl: false, alt: false, shift: false },
   // ── 终端悬浮摇杆遥控器（手机端 PTY 遥控）状态 ──
   // joystickPos 持久化球球位置 {right, bottom}（localStorage wand-ball-pos）
@@ -317,7 +303,6 @@ export var state: AppState = {
   claudeHistoryLoaded: false,
   claudeHistoryExpanded: false,
   claudeHistoryExpandedDirs: {},
-  archivedExpanded: false,
   sessionsManageMode: false,
   selectedSessionIds: {},
   selectedClaudeHistoryIds: {},
@@ -346,3 +331,14 @@ if (state.selectedId) {
     if (initialDraft !== null) state.drafts[state.selectedId] = initialDraft;
   } catch (e) { /* localStorage unavailable */ }
 }
+
+// 刷新 / 关标签 / 原生壳回收 WebView 时在途 fetch 会被 abort，发送失败的回填逻辑
+// 可能在卸载过程中跑完。标记出来后 setDraftValueForSession 会跳过 localStorage
+// 写入（见 session-engine）。bfcache 恢复（pageshow）必须复位，否则后续草稿不再落盘。
+(function trackPageUnloading() {
+  if (typeof window === "undefined" || typeof window.addEventListener !== "function") return;
+  var markUnloading = function() { state.pageUnloading = true; };
+  window.addEventListener("pagehide", markUnloading);
+  window.addEventListener("beforeunload", markUnloading);
+  window.addEventListener("pageshow", function() { state.pageUnloading = false; });
+})();

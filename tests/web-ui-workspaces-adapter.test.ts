@@ -22,7 +22,7 @@ function fixture(id: string): WorkspaceTaskDetail {
     sessions: [{ id: `${id}-session`, title: id, cwd: `/${id}` }] };
 }
 function harness() {
-  const state = { activeWorkspaceTaskId: null as string | null, activeWorkspaceId: null as string | null, selectedId: null as string | null };
+  const state = { selectedId: null as string | null };
   let context: Record<string, any> = { layout: null, taskId: null };
   let runtime!: WorkspacesRuntimeAdapter;
   const reads: Array<{ id: string; result: ReturnType<typeof deferred<WorkspaceTaskDetail>> }> = [];

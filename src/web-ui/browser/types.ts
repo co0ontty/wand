@@ -1,10 +1,6 @@
 export interface AppState {
   [key: string]: any;
   selectedId: string | null;
-  /** 当前打开的工作空间（项目）id；为 null 时回到单会话视图。由工作空间窗口读写。 */
-  activeWorkspaceId: string | null;
-  /** 当前打开的任务 id（工作空间内的任务）；点击任务时设置。 */
-  activeWorkspaceTaskId: string | null;
   sessions: any[];
   config: any;
   terminal: any;
@@ -16,13 +12,10 @@ export interface AppState {
   ws: WebSocket | null;
   wsConnected: boolean;
   chatStickToBottom: boolean;
-  chatAutoFoldEnabled: boolean;
-  chatAutoFoldSnapshot: { userIdx: number; assistantIdx: number } | null;
   chatProgrammaticScrollUntil: number;
   chatUnreadCount: number;
   chatUnreadStartIndex: number;
   chatInitialRenderDone: boolean;
-  bootstrapping: boolean;
   loginChecked: boolean;
   isOnline: boolean;
 }

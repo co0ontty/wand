@@ -153,7 +153,7 @@ printf '%s\\n' \\
   assert.equal(created.workspace?.cwd, projectDir);
 
   // 2. 在任务上指派 CLI 工具 / 模型 / 思考深度 / 工作模式。
-  const agent = { provider: "codex" as const, model: "default", thinkingEffort: "standard" as const, mode: "full-access" as const };
+  const agent = { provider: "codex" as const, model: "default", thinkingEffort: "standard" as const, mode: "full-access" as const, kind: "structured" as const };
   await taskBoardRepository.update(created.id, { agent });
 
   // 3. 一键派发。

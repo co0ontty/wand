@@ -64,6 +64,7 @@ test("sidebar navigation maps settings and task board to distinct glyphs", () =>
       sessionsDrawerOpen: true,
       sidebarPinned: true,
       sidebarCollapsed: false,
+      sidebarDrawer: true,
       sidebarAnchored: true,
       sessionsBackdropVisible: true,
       filePanelOpen: false,

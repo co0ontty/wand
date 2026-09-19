@@ -1,8 +1,8 @@
-// 从任务外部（看板卡片、里程碑、通知等）打开会话时，必须先恢复该会话所属任务的
-// 工作区上下文：顶部标签栏（含「＋ 新建会话」）与主区的任务态都以它为准，否则
-// 主区只剩一条裸会话标题——既没有标签，也没有新建会话的入口。
-// 侧栏点击走的是同一条恢复路径（workspaces-panel 的 openSession），这里补上
-// 看板等入口缺的那一步；会话不属于任何任务时保持原行为。
+// 从任务外部（刷新恢复、看板卡片、里程碑、通知等）打开会话或任务时，必须先恢复
+// 所属任务的工作区上下文：顶部标签栏（含「＋ 新建会话」）与主区的任务态都以它为准，
+// 否则主区只剩一条裸会话标题——既没有标签，也没有新建会话的入口。
+// 侧栏点击走的是同一条恢复路径（workspaces-panel 的 openSession），这里补上看板、
+// 页面刷新等入口缺的那一步；会话不属于任何任务时保持原行为。
 
 import { workspacesStore } from "./controller";
 import { httpWorkspacesRepository } from "./repository";
@@ -25,6 +25,31 @@ export function findSessionOwningTask(
     if (task) return { group, task };
   }
   return null;
+}
+
+/** 任务 id 归属的目录组 + 任务；任务已删除 / 归档时返回 null。 */
+export function findTaskContext(
+  groups: readonly TaskDirectoryGroup[],
+  taskId: string,
+): SessionOwningTask | null {
+  const id = taskId.trim();
+  if (!id) return null;
+  for (const group of groups) {
+    const task = group.tasks.find((candidate) => candidate.id === id);
+    if (task) return { group, task };
+  }
+  return null;
+}
+
+/** 目录组 + 任务 → openTask 载荷（与侧栏打开任务用的是同一份上下文）。 */
+export function taskOpenPayload(found: SessionOwningTask): OpenWorkspaceTaskPayload {
+  return {
+    workspaceId: found.task.workspaceId,
+    workspaceName: found.group.global ? "" : found.group.workspaceName,
+    taskId: found.task.id,
+    taskName: found.task.name,
+    cwd: found.task.cwd,
+  };
 }
 
 /**
@@ -52,14 +77,7 @@ export async function openSessionWithOwningTask(
       openFallback(sessionId);
       return;
     }
-    const payload: OpenWorkspaceTaskPayload = {
-      workspaceId: found.task.workspaceId,
-      workspaceName: found.group.global ? "" : found.group.workspaceName,
-      taskId: found.task.id,
-      taskName: found.task.name,
-      cwd: found.task.cwd,
-    };
-    await runtime.openTask(payload);
+    await runtime.openTask(taskOpenPayload(found));
     // openTask 恢复的是任务的标签布局；点击的那一个会话仍要单独选中（与侧栏一致）。
     runtime.selectSession(id);
   } catch {

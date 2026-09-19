@@ -17,6 +17,7 @@ function fixture(overrides: Partial<UiSnapshotData> = {}): UiSnapshotData {
       sessionsDrawerOpen: true,
       sidebarPinned: true,
       sidebarCollapsed: false,
+      sidebarDrawer: false,
       sidebarAnchored: true,
       sessionsBackdropVisible: false,
       filePanelOpen: false,

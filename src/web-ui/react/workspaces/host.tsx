@@ -7,6 +7,7 @@ import * as React from "react";
 
 import { WandButton, WandDialogSurface, WandIcon, WandSwitch } from "../ui";
 import { MilestonePicker } from "../milestones/picker";
+import { milestonesStore } from "../milestones/controller";
 import { workspacesController, workspacesStore } from "./controller";
 import {
   httpWorkspacesRepository,
@@ -59,6 +60,8 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
   const [suggestions, setSuggestions] = useState<RecentPath[]>([]);
   const [suggestionsActive, setSuggestionsActive] = useState(false);
   const draftTouched = React.useRef(false);
+  // 在这个对话框里新建的迭代：目录对应的项目是提交时才建的，先把它们记下来再回填工作区。
+  const createdMilestoneIds = React.useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!controller.open) return;
@@ -79,6 +82,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
     setCwd(controller.initialCwd);
     setSuggestions([]);
     setSuggestionsActive(false);
+    createdMilestoneIds.current = new Set();
     void Promise.all([
       loadNewProjectDefaults(undefined, { signal: abort.signal }),
       repository.list().catch(() => [] as Workspace[]),
@@ -126,6 +130,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
 
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
   const mountedCwd = cwd.trim();
+  const milestoneWorkspaceId = selectedProject?.id ?? "";
   const setTaskCwd = (nextCwd: string): void => {
     draftTouched.current = true;
     setCwd(nextCwd);
@@ -210,6 +215,10 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
         kind: "global" as const,
         defaultProvider: defaults?.defaultProvider,
       };
+      // 目录对应的项目刚建出来：把这次新建的迭代回填到它名下。
+      if (project && milestoneId && createdMilestoneIds.current.has(milestoneId)) {
+        await milestonesStore.rebind(milestoneId, project.id).catch(() => undefined);
+      }
       try {
         await startTaskSession(workspace, created);
         if (!created.isolated && created.worktreeError) {
@@ -348,6 +357,22 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
             </div>
 
             {hasDirectory ? (
+              <div className="wand-new-session-field wand-new-project-field wand-new-task-milestone-field">
+                <span className="wand-new-session-field-label wand-new-project-field-label" id="wand-new-task-milestone-label">里程碑（可选）</span>
+                <MilestonePicker
+                  value={milestoneId || null}
+                  workspaceId={milestoneWorkspaceId}
+                  disabled={submitting}
+                  onCreated={(created) => { createdMilestoneIds.current.add(created.id); }}
+                  onChange={(next) => { draftTouched.current = true; setMilestoneId(next ?? ""); }}
+                />
+                <p className="wand-new-session-field-hint wand-new-project-field-hint">
+                  迭代按工作区归属：只列当前工作区已有的；也可以不选。
+                </p>
+              </div>
+            ) : null}
+
+            {hasDirectory ? (
               <details className="wand-new-session-field wand-new-project-field">
               <summary>高级：独立工作树</summary>
               <div className="wand-new-task-option" data-checked={worktreeEnabled ? "" : undefined}>
@@ -370,19 +395,6 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
               </div>
               </details>
             ) : null}
-
-            <details className="wand-new-session-field wand-new-project-field wand-new-task-milestone-field">
-              <summary>关联里程碑{milestoneId ? " · 已选择" : "（可选）"}</summary>
-              <span className="wand-new-session-field-label wand-new-project-field-label">里程碑（可选）</span>
-              <MilestonePicker
-                value={milestoneId || null}
-                disabled={submitting}
-                onChange={(next) => { draftTouched.current = true; setMilestoneId(next ?? ""); }}
-              />
-              <p className="wand-new-session-field-hint wand-new-project-field-hint">
-                将相关任务归入同一个目标，便于跟进。
-              </p>
-            </details>
 
             <WorkspaceAgentPicker
               target={target}

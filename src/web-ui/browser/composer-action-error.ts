@@ -18,12 +18,6 @@ export function showActionError(message: string): void {
   syncComposerActionError();
 }
 
-export function hideActionError(): void {
-  if (!state.actionError) return;
-  state.actionError = null;
-  syncComposerActionError();
-}
-
 /**
  * 发布错误文案。`flush: true` 让错误在调用后立刻可见 —— 调用点分布在
  * fetch 的 `.catch()` 与 React 按钮的 onClick 里，不想等一次批处理。

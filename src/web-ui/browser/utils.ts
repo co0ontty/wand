@@ -233,11 +233,9 @@ export function isImagePath(value: any) {
 // 还用过 `direction: rtl` hack 来"优先显示尾段"，副作用是首字符 "/" 也被
 // 吃掉，导致显示文本跟实际 data-path / value 字符串对不上。
 //
-// 这里把统一行为抽成几个小工具：
-//   1) scrollPathElementToEnd —— 横向 overflow 容器，scrollLeft 推到末尾；
-//      对 tail-marquee-path 则测量溢出量并交给 CSS transform 跑马灯
-//   2) scrollInputToEnd —— input 元素专用，setSelectionRange 把光标放末尾
-//      再补一刀 scrollLeft，兼容各浏览器
+// 这里把统一行为抽成一个小工具：
+//   scrollPathElementToEnd —— 横向 overflow 容器，scrollLeft 推到末尾；
+//   对 tail-marquee-path 则测量溢出量并交给 CSS transform 跑马灯。
 //
 // 调用方更新 path 后调一次即可。
 
@@ -274,45 +272,4 @@ export function refreshTailMarqueePaths(root?: any) {
   scope.querySelectorAll(".tail-marquee-path").forEach(function(el: any) {
     scrollPathElementToEnd(el);
   });
-}
-
-export function setTailMarqueePathText(el: any, value: any) {
-  if (!el) return;
-  var text = String(value || "");
-  var inner = el.querySelector && el.querySelector(".tail-marquee-path-inner");
-  if (inner) {
-    var separator = Math.max(text.lastIndexOf("/"), text.lastIndexOf("\\"));
-    var prefix = separator >= 0 ? text.slice(0, separator + 1) : "";
-    var leaf = separator >= 0 ? text.slice(separator + 1) : text;
-    inner.textContent = "";
-    var prefixEl = document.createElement("span");
-    prefixEl.className = "tail-marquee-prefix";
-    prefixEl.textContent = prefix;
-    var leafEl = document.createElement("span");
-    leafEl.className = "tail-marquee-leaf";
-    leafEl.textContent = leaf;
-    inner.append(prefixEl, leafEl);
-  }
-  else el.textContent = text;
-  if (el.setAttribute) el.setAttribute("title", text);
-  scrollPathElementToEnd(el);
-}
-
-export function scrollInputToEnd(input: any) {
-  if (!input) return;
-  var apply = function() {
-    try {
-      if (typeof input.setSelectionRange === "function" && input.value != null) {
-        var len = input.value.length;
-        try { input.setSelectionRange(len, len); } catch (e) { /* type=email/number 等会抛 */ }
-      }
-      if (input.scrollWidth > input.clientWidth) {
-        input.scrollLeft = input.scrollWidth;
-      }
-    } catch (e) { /* defensive */ }
-  };
-  apply();
-  if (typeof requestAnimationFrame === "function") {
-    requestAnimationFrame(apply);
-  }
 }

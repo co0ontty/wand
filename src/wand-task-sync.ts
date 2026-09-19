@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import { getErrorMessage } from "./error-utils.js";
 import type { WandStorage } from "./storage.js";
 import { provisionalTaskTitleFromDescription } from "./task-title.js";
 import { isSessionProvider } from "./session-provider.js";
@@ -85,6 +86,8 @@ function agentFromSession(session: SessionSnapshot): WandTaskAgent | null {
     model: session.selectedModel || session.structuredState?.model || "default",
     thinkingEffort: effort === "standard" || effort === "deep" || effort === "max" ? effort : "off",
     mode: normalizeWandTaskAgentMode(session.provider, session.mode),
+    // 会话形态按会话自身的 sessionKind 还原，PTY 会话不会在「再指派」时被误当结构化。
+    kind: (session.sessionKind ?? "pty") === "structured" ? "structured" : "pty",
   };
 }
 
@@ -199,26 +202,50 @@ export function syncSidebarTasksFromBoard(storage: WandStorage): void {
   });
 }
 
+/** 单个任务的会话归属落到看板卡片：补卡片、按会话补 Agent、绑定会话、todo → doing。 */
+function syncTaskSessionsToBoard(storage: WandStorage, task: WorkspaceTask, workspace: Workspace): void {
+  storage.transaction(() => {
+    let card = ensureBoardTaskForWorkspaceTask(storage, task, workspace);
+    const sessions = storage.listSessionsByWorkspaceTask(task.id);
+    const agent = sessions.map(agentFromSession).find((value) => value !== null);
+    const bound = new Set(storage.listWandTaskSessionIds(card.id));
+    const started = card.status === "todo" && sessions.some((session) => !bound.has(session.id));
+    if ((!card.agent && agent) || started) {
+      card = storage.updateWandTask(card.id, {
+        ...(!card.agent && agent ? { agent } : {}),
+        ...(started ? { status: "doing" as const } : {}),
+      }) ?? card;
+    }
+    for (const session of sessions) storage.bindWandTaskSession(card.id, session.id);
+  });
+}
+
+/**
+ * 会话建立 / 移动后立刻把任务归属同步到看板卡片，卡片不必等下一次 `GET /api/wand-tasks`
+ * 的全量兜底同步，也不必等某个客户端碰巧拉了看板列表。
+ * 看板侧的写入失败只记日志：会话已经跑起来了，不能因为看板同步失败把创建请求打断。
+ */
+export function syncWorkspaceTaskToBoard(storage: WandStorage, workspaceTaskId: string | null | undefined): void {
+  if (!workspaceTaskId) return;
+  try {
+    const task = storage.getWorkspaceTask(workspaceTaskId);
+    const workspace = task ? storage.getWorkspace(task.workspaceId) : null;
+    if (!task || !workspace) return;
+    syncTaskSessionsToBoard(storage, task, workspace);
+  } catch (error) {
+    console.error(`[WandTask] Failed to sync task ${workspaceTaskId} onto the board:`, getErrorMessage(error));
+  }
+}
+
+/**
+ * 兜底全量同步：只处理「会话带着 workspace_task_id 但卡片上还没有绑定」的历史 / 外部写入。
+ * 正常路径由 `syncWorkspaceTaskToBoard` 在会话建立时点完成。
+ */
 export function syncUngroupedSessionsToBoard(storage: WandStorage): void {
   syncSidebarTasksFromBoard(storage);
-  storage.transaction(() => {
-    for (const workspace of storage.listWorkspaces()) {
-      for (const task of storage.listWorkspaceTasks(workspace.id)) {
-        let card = ensureBoardTaskForWorkspaceTask(storage, task, workspace);
-        const sessions = storage.listSessionsByWorkspaceTask(task.id);
-        const agent = sessions.map(agentFromSession).find((value) => value !== null);
-        const bound = new Set(storage.listWandTaskSessionIds(card.id));
-        const started = card.status === "todo" && sessions.some((session) => !bound.has(session.id));
-        if ((!card.agent && agent) || started) {
-          card = storage.updateWandTask(card.id, {
-            ...(!card.agent && agent ? { agent } : {}),
-            ...(started ? { status: "doing" as const } : {}),
-          }) ?? card;
-        }
-        for (const session of sessions) storage.bindWandTaskSession(card.id, session.id);
-      }
-    }
-  });
+  for (const workspace of storage.listWorkspaces()) {
+    for (const task of storage.listWorkspaceTasks(workspace.id)) syncTaskSessionsToBoard(storage, task, workspace);
+  }
 }
 
 /** Status and title projection is centralized in the storage writer. */

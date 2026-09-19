@@ -7,7 +7,7 @@ import "./notifications";
 import "./render";
 import { getPreferredMessages, isStructuredSession, updateDrawerState, updateSessionSnapshot } from "./session-engine";
 import { maybeScrollTerminalToBottom, updateTerminalJumpToBottomButton } from "./terminal";
-import { isMobileLayout } from "./file-browser";
+import { isSidebarDrawerLayout } from "./file-browser";
 import { renderChat } from "./chat-render";
 import { fitTerminalToContainer } from "./terminal-fit";
 
@@ -805,10 +805,12 @@ import { fitTerminalToContainer } from "./terminal-fit";
       export function observeTerminalResize() {
         var output = document.getElementById("output");
         if (!output) return;
-        var lastKnownDesktop = !isMobileLayout();
+        // 「停靠 ⟷ 抽屉」形态切换时才需要修正抽屉开关状态：
+        // 进入抽屉形态要把常驻侧栏收成抽屉，回到停靠形态要把抽屉恢复成常驻。
+        var lastKnownDesktop = !isSidebarDrawerLayout();
         state.resizeHandler = function() {
           scheduleTerminalResize(true);
-          var isDesktop = !isMobileLayout();
+          var isDesktop = !isSidebarDrawerLayout();
           if (lastKnownDesktop !== isDesktop) {
             lastKnownDesktop = isDesktop;
             if (!isDesktop && state.sidebarPinned && state.sessionsDrawerOpen) {
@@ -921,7 +923,6 @@ import { fitTerminalToContainer } from "./terminal-fit";
           state.terminalScrollbarEl.parentNode.removeChild(state.terminalScrollbarEl);
         }
         state.terminalScrollbarEl = null;
-        state.terminalScrollbarThumbEl = null;
         state.terminalScrollbarDragging = false;
         state.terminalScrollbarRafPending = false;
         if (state.terminal) {

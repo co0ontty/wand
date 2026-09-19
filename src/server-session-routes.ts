@@ -35,6 +35,7 @@ import { sendRouteError } from "./server-request.js";
 import { registerStructuredResumeRoutes } from "./server-resume-routes.js";
 import { addHiddenSessionIds, removeHiddenSessionIds, SessionRegistry } from "./session-registry.js";
 import { enrichStructuredMessages, WAND_PROTOCOL_VERSION } from "./structured-client-protocol.js";
+import { syncWorkspaceTaskToBoard } from "./wand-task-sync.js";
 import {
   buildDirectoryTree,
   normalizeSessionDirectory,
@@ -597,6 +598,8 @@ export function registerSessionRoutes(
         ...origin,
       });
       onSessionCreated?.(snapshot.cwd);
+      // 会话一落地就挂到任务的看板卡片上，不等下一次看板列表的兜底同步。
+      syncWorkspaceTaskToBoard(storage, snapshot.workspaceTaskId);
       const prompt = body.prompt?.trim();
       if (prompt) {
         const finished = await structured.sendMessage(snapshot.id, prompt);

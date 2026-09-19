@@ -1,11 +1,12 @@
 import { state, writeStoredBoolean } from "./state";
+import { restoreActiveTask } from "./active-task";
 import { renderProviderLogoMarkup } from "../provider-identity";
 import { iconSvg } from "./i18n";
 import { escapeHtml, refreshTailMarqueePaths, renderTailMarqueePath, scrollPathElementToEnd, updateRunningIndicators } from "./utils";
 import { getConfigCwd } from "./chat-scroll";
 import { shortCommand } from "./chat-render";
 import { attachEventListeners } from "./events";
-import { shouldShowSessionsBackdrop, isMobileLayout } from "./file-browser";
+import { shouldShowSessionsBackdrop, isMobileLayout, isSidebarDrawerLayout } from "./file-browser";
 import { loadGitStatus, renderTopbarGitBadgeHtml, renderTopbarMoreMenuHtml } from "./git-commit";
 import { autoResizeInput, getSelectedSession } from "./input";
 import { requestNotificationPermission, notifyUpdateAvailable, _apkVersion, _macAppVersion } from "./notifications";
@@ -284,7 +285,9 @@ export function restoreLoginSession() {
           // continue with polling and session loading so the app remains functional
         }
         startPolling();
-        refreshAll();
+        // 会话加载完再恢复任务上下文：弹回上次打开的任务（标签栏 / 分屏），
+        // 否则主区只剩一条裸会话（会话选中态是持久化的，任务上下文不是）。
+        refreshAll().then(function() { return restoreActiveTask(); });
         fetchAvailableModels();
         requestNotificationPermission();
         if (config.updateAvailable && config.latestVersion) {
@@ -331,7 +334,7 @@ export function restoreLoginSession() {
 //   「sidebar 外的空白」，否则点弹层会顺带把 sidebar 关掉
 // 用 capture 阶段是为了绕过下游按钮自己的 stopPropagation。
 document.addEventListener("click", function(e) {
-  if (isMobileLayout()) return;
+  if (isSidebarDrawerLayout()) return;
   if (state.sidebarPinned) return;
   if (state.sidebarCollapsed) return;
   if (!state.sessionsDrawerOpen) return;
@@ -377,7 +380,7 @@ export function render(options?: any) {
   // 窄条（collapsed）形态不靠 .open 显示，靠 .pinned.collapsed 的 width:56px
   // 常驻；此时强制 sessionsDrawerOpen=true 会与 toggleSidebarCollapsed 里设的
   // false 打架，并在手机端误触发背景遮罩。窄条态下不强制 open。
-  if (state.sidebarPinned && !state.sidebarCollapsed && !isMobileLayout()) {
+  if (state.sidebarPinned && !state.sidebarCollapsed && !isSidebarDrawerLayout()) {
     state.sessionsDrawerOpen = true;
     writeStoredBoolean("wand-sidebar-open", true);
   }

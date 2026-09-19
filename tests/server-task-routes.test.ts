@@ -27,7 +27,7 @@ function start(
   manager: StructuredSessionManager,
   registry: SessionRegistry,
   config = defaultConfig(),
-  extra: Partial<Pick<Parameters<typeof registerTaskRoutes>[1] & object, "generateTitle">> = {},
+  extra: Partial<Pick<Parameters<typeof registerTaskRoutes>[1] & object, "generateTitle" | "processes">> = {},
 ): Promise<Harness> {
   const app = express();
   app.use(express.json());
@@ -55,7 +55,10 @@ function start(
 
 async function withHarness(
   run: (ctx: Harness) => Promise<void>,
-  options: { generateTitle?: (description: string) => Promise<string> } = {},
+  options: {
+    generateTitle?: (description: string) => Promise<string>;
+    processes?: Parameters<typeof registerTaskRoutes>[1]["processes"];
+  } = {},
 ): Promise<void> {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-task-board-"));
   const storage = new WandStorage(path.join(root, "wand.db"));
@@ -63,9 +66,12 @@ async function withHarness(
   const manager = new StructuredSessionManager(storage, config);
   // Task routes only ever read the registry, so the PTY manager can stay absent.
   const registry = new SessionRegistry({ getOwned: () => null } as never, manager, storage);
-  const harness = await start(storage, manager, registry, config, options.generateTitle
-    ? { generateTitle: ((description: string) => options.generateTitle!(description)) as never }
-    : {});
+  const harness = await start(storage, manager, registry, config, {
+    ...(options.generateTitle
+      ? { generateTitle: ((description: string) => options.generateTitle!(description)) as never }
+      : {}),
+    ...(options.processes ? { processes: options.processes } : {}),
+  });
   try {
     await run(harness);
   } finally {
@@ -322,9 +328,9 @@ test("tasks persist and validate the selected CLI tool", async () => {  await wi
         title: "选择工具",
         agent: { provider: "codex", model: "gpt-5", thinkingEffort: "deep" },
       }),
-    }).then(jsonOf<{ id: string; agent: { provider: string; model: string; thinkingEffort: string; mode: string } | null }>);
-    // 老客户端不传 mode：服务端按 provider 支持的模式兼容落地（codex 只有 full-access）。
-    assert.deepEqual(created.agent, { provider: "codex", model: "gpt-5", thinkingEffort: "deep", mode: "full-access" });
+    }).then(jsonOf<{ id: string; agent: { provider: string; model: string; thinkingEffort: string; mode: string; kind: string } | null }>);
+    // 老客户端不传 mode / kind：服务端按 provider 支持的模式兼容落地（codex 只有 full-access），kind 默认结构化。
+    assert.deepEqual(created.agent, { provider: "codex", model: "gpt-5", thinkingEffort: "deep", mode: "full-access", kind: "structured" });
 
     // 未指定工具的新任务保持 null，前端据此显示「未指定 CLI 工具」。
     const bare = await fetch(`${url}/api/wand-tasks`, {
@@ -363,6 +369,28 @@ test("tasks persist and validate the selected CLI tool", async () => {  await wi
     });
     assert.equal(invalidMode.status, 400);
     assert.match((await invalidMode.json() as { error: string }).error, /工作模式/);
+
+    const invalidKind = await fetch(`${url}/api/wand-tasks/${created.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agent: { provider: "claude", model: "x", thinkingEffort: "off", kind: "telepathy" } }),
+    });
+    assert.equal(invalidKind.status, 400);
+    assert.match((await invalidKind.json() as { error: string }).error, /会话形态/);
+
+    // 显式指定的会话形态必须往返保存；再 PATCH 时不带 kind 要沿用已存的 pty，而不是复位成结构化。
+    const withKind = await fetch(`${url}/api/wand-tasks/${created.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agent: { provider: "claude", model: "default", thinkingEffort: "off", kind: "pty" } }),
+    }).then(jsonOf<{ agent: { kind: string } }>);
+    assert.equal(withKind.agent.kind, "pty");
+    const keptKind = await fetch(`${url}/api/wand-tasks/${created.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agent: { provider: "claude", model: "default", thinkingEffort: "max" } }),
+    }).then(jsonOf<{ agent: { kind: string } }>);
+    assert.equal(keptKind.agent.kind, "pty");
 
     // 显式指定的工作模式必须往返保存。
     const withMode = await fetch(`${url}/api/wand-tasks/${created.id}`, {
@@ -430,6 +458,69 @@ test("dispatching an issue creates a structured session in the issue workspace a
     assert.deepEqual(detail.sessionIds, [payload.session.id, secondPayload.session.id]);
     assert.equal(detail.status, "doing");
   });
+});
+
+test("dispatching with kind pty starts a terminal session and binds it", async () => {
+  const calls: Array<{ command: string; cwd: string | undefined; mode: string; initialInput?: string; opts: Record<string, unknown> }> = [];
+  const stub = {
+    start: async (command: string, cwd: string | undefined, mode: string, initialInput?: string, opts?: Record<string, unknown>) => {
+      calls.push({ command, cwd, mode, initialInput, opts: opts ?? {} });
+      return sessionSnapshot({
+        id: "session-pty-dispatch",
+        sessionKind: "pty",
+        provider: "qoder",
+        command,
+        cwd: cwd ?? "/tmp/wand",
+        mode: mode as SessionSnapshot["mode"],
+      });
+    },
+  };
+  await withHarness(async ({ url, storage }) => {
+    const workspace = storage.createWorkspace({ name: "wand", cwd: storage.directory() });
+    const issue = await fetch(`${url}/api/wand-tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title: "开个终端",
+        description: "看看构建日志",
+        workspaceId: workspace.id,
+        agent: { provider: "qoder", model: "default", thinkingEffort: "standard", mode: "managed", kind: "pty" },
+      }),
+    }).then(jsonOf<{ id: string; agent: { kind: string } }>);
+    assert.equal(issue.agent.kind, "pty");
+    // 真实 PTY 管理器会自己落库；桩需要在绑定时先有一条会话记录。
+    storage.saveSession(sessionSnapshot({
+      id: "session-pty-dispatch",
+      sessionKind: "pty",
+      provider: "qoder",
+      command: "qodercli",
+      cwd: storage.directory(),
+      mode: "managed",
+    }));
+
+    const dispatched = await fetch(`${url}/api/wand-tasks/${issue.id}/dispatch`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ prompt: "跑一下 assembleDebug" }),
+    });
+    assert.equal(dispatched.status, 202);
+    const payload = await dispatched.json() as { ok: boolean; session: { id: string; sessionKind: string; provider: string; cwd: string; mode: string } };
+    assert.equal(payload.session.id, "session-pty-dispatch");
+    assert.equal(payload.session.sessionKind, "pty");
+    assert.equal(payload.session.mode, "managed");
+    // PTY 路径拿的是 CLI 可执行文件名（Qoder 是 qodercli），prompt 作为初始输入而不是首条消息。
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]!.command, "qodercli");
+    assert.equal(calls[0]!.cwd, storage.directory());
+    assert.equal(calls[0]!.mode, "managed");
+    assert.equal(calls[0]!.initialInput, "跑一下 assembleDebug");
+    assert.equal(calls[0]!.opts.provider, "qoder");
+    assert.equal(calls[0]!.opts.sessionSource, "automation");
+
+    const detail = await fetch(`${url}/api/wand-tasks/${issue.id}`).then(jsonOf<{ status: string; sessionIds: string[] }>);
+    assert.deepEqual(detail.sessionIds, ["session-pty-dispatch"]);
+    assert.equal(detail.status, "doing");
+  }, { processes: stub as never });
 });
 
 test("dispatch refuses an issue whose CLI tool is still unset", async () => {
@@ -523,18 +614,18 @@ test("marking a board task done keeps it in done instead of archiving", async ()
 test("task board remembers last selected agent defaults", async () => {
   await withHarness(async ({ url }) => {
     const initial = await fetch(`${url}/api/wand-task-agent-defaults`)
-      .then(jsonOf<{ provider: string; model: string; thinkingEffort: string; mode: string }>);
-    assert.deepEqual(initial, { provider: "claude", model: "default", thinkingEffort: "off", mode: "default" });
+      .then(jsonOf<{ provider: string; model: string; thinkingEffort: string; mode: string; kind: string }>);
+    assert.deepEqual(initial, { provider: "claude", model: "default", thinkingEffort: "off", mode: "default", kind: "structured" });
 
     const saved = await fetch(`${url}/api/wand-task-agent-defaults`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ provider: "pi", model: "gpt-5", thinkingEffort: "deep", mode: "full-access" }),
-    }).then(jsonOf<{ provider: string; model: string; thinkingEffort: string; mode: string }>);
-    assert.deepEqual(saved, { provider: "pi", model: "gpt-5", thinkingEffort: "deep", mode: "full-access" });
+      body: JSON.stringify({ provider: "pi", model: "gpt-5", thinkingEffort: "deep", mode: "full-access", kind: "pty" }),
+    }).then(jsonOf<{ provider: string; model: string; thinkingEffort: string; mode: string; kind: string }>);
+    assert.deepEqual(saved, { provider: "pi", model: "gpt-5", thinkingEffort: "deep", mode: "full-access", kind: "pty" });
 
     const loaded = await fetch(`${url}/api/wand-task-agent-defaults`)
-      .then(jsonOf<{ provider: string; model: string; thinkingEffort: string; mode: string }>);
+      .then(jsonOf<{ provider: string; model: string; thinkingEffort: string; mode: string; kind: string }>);
     assert.deepEqual(loaded, saved);
 
     const created = await fetch(`${url}/api/wand-tasks`, {
@@ -624,5 +715,31 @@ test("sidebar and board share containers and moving a live CLI session preserves
     const missing = await send("/api/workspace-tasks/missing/sessions", { sessionId: session.id });
     assert.equal(missing.status, 404);
     assert.equal(manager.get(session.id)?.workspaceTaskId, sidebar.id);
+  });
+});
+
+test("reading a single card reconciles its own task sessions", async () => {
+  await withHarness(async ({ url, storage }) => {
+    const workspace = storage.createWorkspace({ name: "wand", cwd: storage.directory() });
+    const task = storage.createWorkspaceTask({ workspaceId: workspace.id, name: "按渠道配置 API" });
+    // 卡片和归属都在，只缺绑定：历史数据、外部写入，或旧版本建出来的会话。
+    const card = storage.createWandTask({
+      workspaceId: workspace.id,
+      workspaceTaskId: task.id,
+      title: task.name,
+      status: "todo",
+    });
+    storage.saveSession(sessionSnapshot({
+      id: "sess-unbound",
+      workspaceId: workspace.id,
+      workspaceTaskId: task.id,
+      provider: "pi",
+    }));
+    assert.deepEqual(storage.listWandTaskSessionIds(card.id), []);
+
+    const detail = await fetch(`${url}/api/wand-tasks/${card.id}`).then(jsonOf<{ sessions: Array<{ id: string }>; status: string }>);
+    assert.deepEqual(detail.sessions.map((session) => session.id), ["sess-unbound"]);
+    assert.equal(detail.status, "doing");
+    assert.deepEqual(storage.listWandTaskSessionIds(card.id), ["sess-unbound"]);
   });
 });

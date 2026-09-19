@@ -83,6 +83,8 @@ PTY 输入服务端原样写入终端，客户端必须拆成**先文本、后�
 
 统一技术栈与模块/样式职责见 `docs/web-architecture.md`；运行时全景与代码边界见 `架构图.md`，Appica token / 层叠契约见 `docs/appica-ui-migration.md`；先验证并清理失效实现，再调整保留组件的样式。
 
+扫 legacy 残留（React 迁移删了渲染层、留下查询与写入）用 `npm run audit:remnants`，口径与配套检查见 `docs/web-architecture.md` §「Legacy 残留审计」。
+
 前端是服务端渲染的单 HTML shell + 内联资产，浏览器侧有**两层并存**：
 
 - Legacy vanilla-TS 层：`src/web-ui/browser/*.ts`（entry `main.ts`）— 终端、聊天渲染、WS、输入

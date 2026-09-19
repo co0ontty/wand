@@ -11,6 +11,8 @@ import {
 
 const mobileEnvironment: LegacySnapshotEnvironment = {
   width: 390,
+  height: 844,
+  coarsePointer: true,
   online: true,
   embedTerminal: true,
   nativeInput: true,
@@ -159,6 +161,7 @@ test("legacy snapshot derivation projects the complete shell state and excludes 
     sessionsDrawerOpen: true,
     sidebarPinned: true,
     sidebarCollapsed: false,
+    sidebarDrawer: true,
     sidebarAnchored: false,
     sessionsBackdropVisible: true,
     filePanelOpen: true,
@@ -224,6 +227,44 @@ test("legacy snapshot labels a Pi process that is draining background tasks", ()
   assert.equal(snapshot.selected?.statusLabel, "后台任务中");
   assert.equal(snapshot.topbar.statusLabel, "后台任务中");
   assert.equal(snapshot.selected?.inFlight, true);
+});
+
+test("legacy snapshot keeps tablets and narrow desktop windows docked instead of covering", () => {
+  const layoutFor = (environment: LegacySnapshotEnvironment) => deriveLegacyUiSnapshot({
+    loginChecked: true,
+    sessionsDrawerOpen: true,
+    sidebarPinned: true,
+  }, environment).layout;
+
+  // 平板竖屏（iPad Mini 768 / Galaxy Tab S4 712）和 640–768 的桌面窗口都要停靠：
+  // 侧栏推开主内容（sidebar-pinned + padding），而不是抽屉遮罩。
+  const tabletPortrait = layoutFor({ ...mobileEnvironment, width: 768 });
+  assert.equal(tabletPortrait.sidebarDrawer, false);
+  assert.equal(tabletPortrait.sidebarAnchored, true);
+  assert.equal(tabletPortrait.sessionsBackdropVisible, false);
+  assert.equal(layoutFor({ ...mobileEnvironment, width: 712 }).sidebarDrawer, false);
+  assert.equal(layoutFor({ ...mobileEnvironment, width: 640 }).sidebarDrawer, false);
+  // 640 以下才是手机抽屉。
+  assert.equal(layoutFor({ ...mobileEnvironment, width: 639 }).sidebarDrawer, true);
+  // 横屏手机（触摸 + 高度不足 480）放不下两栏，仍旧走抽屉。
+  const phoneLandscape = layoutFor({ ...mobileEnvironment, width: 664, height: 390 });
+  assert.equal(phoneLandscape.sidebarDrawer, true);
+  assert.equal(phoneLandscape.sidebarAnchored, false);
+  assert.equal(phoneLandscape.sessionsBackdropVisible, true);
+  // 桌面上的矮窗口（例如竖向分屏 1200×420）不是手机，依旧停靠。
+  assert.equal(layoutFor({
+    ...mobileEnvironment,
+    width: 1200,
+    height: 420,
+    coarsePointer: false,
+  }).sidebarDrawer, false);
+  // 抽屉形态下不保留窄栏：窄栏只在停靠形态有意义。
+  const drawerCollapsed = deriveLegacyUiSnapshot({
+    loginChecked: true,
+    sidebarPinned: true,
+    sidebarCollapsed: true,
+  }, { ...mobileEnvironment, width: 430 });
+  assert.equal(drawerCollapsed.layout.sidebarCollapsed, false);
 });
 
 test("legacy snapshot derivation handles boot, anonymous, and empty desktop states", () => {

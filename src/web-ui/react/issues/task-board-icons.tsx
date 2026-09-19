@@ -106,12 +106,6 @@ export function TaskBoardConversationIcon({ size = 16, color = "currentColor", c
   </svg>;
 }
 
-export function TaskBoardSearchIcon({ size = 14, color = "currentColor", className }: GlyphProps): React.ReactElement {
-  return <svg {...svgProps({ size, color, className })} viewBox="0 0 14 14">
-    <path fill="currentColor" fillRule="evenodd" d="M6.13 1.75a4.38 4.38 0 0 1 3.52 6.97l2.41 2.41.05.05a.66.66 0 0 1-.93.93l-.05-.05-2.41-2.41A4.38 4.38 0 1 1 6.13 1.75Zm0 1.31a3.06 3.06 0 1 0 0 6.13 3.06 3.06 0 0 0 0-6.13Z"/>
-  </svg>;
-}
-
 export function TaskBoardFolderIcon({ size = 12, color = "currentColor", className }: GlyphProps): React.ReactElement {
   return <svg {...svgProps({ size, color, className })}>
     <path d="M2 8v3.5A1.5 1.5 0 0 0 3.5 13h8a1.5 1.5 0 0 0 1.5-1.5V8M2 8V4.5A1.5 1.5 0 0 1 3.5 3h2c.63 0 1.22.3 1.6.8l.3.4c.38.5.97.8 1.6.8h2.5A1.5 1.5 0 0 1 14 6.5V8M2 8h12" stroke="currentColor" strokeWidth="1"/>

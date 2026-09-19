@@ -23,6 +23,7 @@ function fixture(title: string): UiSnapshotData {
       sessionsDrawerOpen: false,
       sidebarPinned: true,
       sidebarCollapsed: false,
+      sidebarDrawer: false,
       sidebarAnchored: true,
       sessionsBackdropVisible: false,
       filePanelOpen: false,

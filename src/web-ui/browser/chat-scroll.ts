@@ -369,8 +369,15 @@ export function normalizeStructuredSnapshot(snapshot: any, existingSession?: any
 
 export function saveStructuredQueue() {
   try {
+    if (!state.selectedId) return;
     var queued = getSelectedStructuredQueuedInputs();
-    if (!state.selectedId || queued.length === 0) {
+    if (queued.length === 0) {
+      // 队列排空时必须把遗留记录删掉：只写不清会让上一次的排队文本永久留在
+      // localStorage 里。刷新后如果当前会话快照没有 queuedMessages 字段（历史 /
+      // 精简会话），restoreStructuredQueue 会回退到这份旧值 —— 一条「已经发出去
+      // 的消息」就会以排队气泡的形式重新出现，而且气泡上的 ⚡ / × 会按 index
+      // 打到服务端真实队列上（删除 / 抢先发送错条目）。
+      clearStructuredQueuePersistence(state.selectedId);
       return;
     }
     localStorage.setItem("wand-structured-queue", JSON.stringify({
@@ -400,6 +407,16 @@ export function restoreStructuredQueue() {
   if (selectedSession && Array.isArray(selectedSession.queuedMessages)) {
     syncStructuredQueueFromSession(selectedSession);
     saveStructuredQueue();
+    return;
+  }
+  // 服务端快照没带 queuedMessages（历史 / 精简会话）时才回退读 localStorage，
+  // 且只在「会话还没加载出来」或「会话仍在跑」时信任它：排队只存在于 turn 执行中，
+  // turn 结束 / 会话退出时服务端会把队列清空并推送。会话已知且已停止却还留着旧
+  // 记录 = 上一次页在这一步被关掉留下的残渣，画出来就是一条「已经发出去的消息」
+  // 以排队气泡复活（气泡上的 ⚡ / × 还会按 index 打到服务端真实队列上）。
+  if (selectedSession && selectedSession.status !== "running") {
+    state.structuredInputQueue = [];
+    clearStructuredQueuePersistence(selectedSession.id);
     return;
   }
   try {
@@ -603,25 +620,14 @@ export function applyExpandedState(el: any, kind: string, expanded: boolean) {
     }
     case "subagent-panel": {
       el.setAttribute("data-expanded", expanded ? "true" : "false");
-      // 头/尾两个按钮都得同步——label、aria-expanded、aria-label
-      var panelBtns = el.querySelectorAll(".subagent-panel-toggle");
-      for (var pbi = 0; pbi < panelBtns.length; pbi++) {
-        var pb = panelBtns[pbi];
-        pb.setAttribute("aria-expanded", expanded ? "true" : "false");
-        pb.setAttribute("aria-label", expanded ? "收起子代理输出" : "展开子代理输出");
-        var pblbl = pb.querySelector(".subagent-panel-toggle-label");
-        if (pblbl) pblbl.textContent = expanded ? "收起" : "展开";
+      var subagentSummary = el.querySelector(".subagent-panel-summary");
+      if (subagentSummary) {
+        subagentSummary.setAttribute("aria-expanded", expanded ? "true" : "false");
       }
-      var pbody = el.querySelector(".subagent-panel-body");
-      if (pbody) {
-        if (expanded) {
-          // 展开时把 body 滚到顶，避免延续上次的滚动位置造成"展开后看到一半"
-          pbody.scrollTop = 0;
-        } else {
-          // 折叠回去时滚到底——折叠预览窗口要展示的是"最新到达的内容"，
-          // 跟 snapCollapsedSubagentPanelsToBottom 在 re-render 后的行为对齐。
-          pbody.scrollTop = pbody.scrollHeight;
-        }
+      var subagentBody = el.querySelector(".subagent-panel-body");
+      if (subagentBody) {
+        subagentBody.style.display = expanded ? "block" : "none";
+        subagentBody.setAttribute("aria-hidden", expanded ? "false" : "true");
       }
       break;
     }

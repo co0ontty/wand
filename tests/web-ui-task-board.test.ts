@@ -129,15 +129,15 @@ test("work mode options cover managed, full-access, and standard", () => {
 });
 
 test("unassigned issues reuse the last selected agent defaults", () => {
-  const last = { provider: "pi" as const, model: "gpt-5", thinkingEffort: "deep" as const, mode: "full-access" as const };
-  const assigned = { provider: "claude" as const, model: "gpt-5.1", thinkingEffort: "max" as const, mode: "managed" as const };
+  const last = { provider: "pi" as const, model: "gpt-5", thinkingEffort: "deep" as const, mode: "full-access" as const, kind: "pty" as const };
+  const assigned = { provider: "claude" as const, model: "gpt-5.1", thinkingEffort: "max" as const, mode: "managed" as const, kind: "structured" as const };
 
   // 任务自己有配置时，不能被面板上次选择覆盖。
   assert.deepEqual(resolveIssueAgent(assigned, last), assigned);
   // Codex 只支持 full-access：读回旧值时也要夹到合法值。
   assert.deepEqual(
-    resolveIssueAgent({ provider: "codex", model: "gpt-5", thinkingEffort: "max", mode: "managed" }, last),
-    { provider: "codex", model: "gpt-5", thinkingEffort: "max", mode: "full-access" },
+    resolveIssueAgent({ provider: "codex", model: "gpt-5", thinkingEffort: "max", mode: "managed", kind: "pty" }, last),
+    { provider: "codex", model: "gpt-5", thinkingEffort: "max", mode: "full-access", kind: "pty" },
   );
   // 未指派时沿用上次的工具 / 模型 / 思考深度 / 工作模式。
   assert.deepEqual(resolveIssueAgent(null, last), last);

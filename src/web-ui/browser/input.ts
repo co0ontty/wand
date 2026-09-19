@@ -8,7 +8,7 @@ import "./file-browser";
 import "./git-commit";
 import { showToast, wandConfirm } from "./notifications";
 import { resetChatRenderCache, getEffectiveCwd } from "./render";
-import { applyCurrentView, buildAttachmentPrefix, canSendComposer, closePlusPopover, discardPendingAttachments, dismissDrawerIfOverlay, getComposerPlaceholder, getDraftValueForSession, getPendingAttachments, getPreferredMessages, getPreferredTool, getSelectedClaudeSkills, isStructuredSession, loadOutput, refreshAll, restoreComposerStateForSession, restorePendingAttachments, setDraftValue, setDraftValueForSession, shouldBracketPtyPaste, subscribeToSession, supportsClaudeSkillSelection, syncComposerHasText, takePendingAttachments, updateSessionSnapshot, updateSessionsList, uploadAttachments, withTerminalDimensions } from "./session-engine";
+import { applyCurrentView, buildAttachmentPrefix, canSendComposer, clearDraftValueForSession, closePlusPopover, discardPendingAttachments, dismissDrawerIfOverlay, getComposerPlaceholder, getDraftValueForSession, getPendingAttachments, getPreferredMessages, getPreferredTool, getSelectedClaudeSkills, isStructuredSession, loadOutput, refreshAll, restoreComposerStateForSession, restorePendingAttachments, setDraftValue, setDraftValueForSession, shouldBracketPtyPaste, subscribeToSession, supportsClaudeSkillSelection, syncComposerHasText, takePendingAttachments, updateSessionSnapshot, updateSessionsList, uploadAttachments, withTerminalDimensions } from "./session-engine";
 import { confirmDelete } from "./sidebar";
 import { initTerminal, maybeScrollTerminalToBottom, scheduleSoftResyncTerminal, waitForProviderPaint, waitForTerminalSettled } from "./terminal";
 import { ensureTerminalFit, scheduleClosedViewportBaselineWindow, syncAppViewportHeight, teardownTerminal, updateJoystickPanelUI, updateJoystickVisibility } from "./viewport";
@@ -20,6 +20,8 @@ import { syncBrowserComposerRail } from "./composer-rail-adapter";
 import { syncBrowserComposerPopover } from "./composer-popover-adapter";
 import { showActionError } from "./composer-action-error";
 import { syncBrowserComposerVoice } from "./composer-voice-adapter";
+import { isAmbiguousComposerSubmissionFailure, shouldPersistQueueItemRestore } from "./composer-draft";
+import { resolveInsertBeforeAnchor } from "./queue-dom";
 
       // 改为在识别回调里调用 updateVoiceTranscript(累积文本) 即可，交互层不用动。
       // ─────────────────────────────────────────────────────────────────
@@ -396,7 +398,15 @@ import { syncBrowserComposerVoice } from "./composer-voice-adapter";
       }
 
       function launchQueueItem(item) {
-        if (_queueLaunching) return;
+        if (_queueLaunching) {
+          // 已经有另一条在启动中：把这条放回队首，绝不静默丢弃。
+          // （历史 bug：这里直接 return，配合 flush 先出队再渲染的顺序，
+          //  一次 DOM 异常 / 重入就能让已出队落盘的消息永久蒸发。）
+          state.crossSessionQueue.unshift(item);
+          if (shouldPersistQueueItemRestore(!!state.pageUnloading)) persistCrossSessionQueue();
+          renderCrossSessionQueue();
+          return;
+        }
         _queueLaunching = true;
         fetch("/api/commands", {
           method: "POST",
@@ -425,8 +435,11 @@ import { syncBrowserComposerVoice } from "./composer-voice-adapter";
         .catch(function(error) {
           _queueLaunching = false;
           showToast((error && error.message) || "无法启动排队会话。", "error");
+          // 回填到内存，用户仍能看到 / 立即重试。
           state.crossSessionQueue.unshift(item);
-          persistCrossSessionQueue();
+          // 页面卸载中的 abort = 送达未知：服务端可能已经建好会话并发出这条
+          // initialInput，落盘会让它在刷新后被自动 flush 二次发送。
+          if (shouldPersistQueueItemRestore(!!state.pageUnloading)) persistCrossSessionQueue();
           renderCrossSessionQueue();
         });
       }
@@ -463,7 +476,8 @@ import { syncBrowserComposerVoice } from "./composer-voice-adapter";
         .catch(function(error) {
           showToast((error && error.message) || "无法启动排队会话。", "error");
           state.crossSessionQueue.splice(idx, 0, item);
-          persistCrossSessionQueue();
+          // 同上：卸载中的 abort 送达未知，只回填内存，不复活到 localStorage。
+          if (shouldPersistQueueItemRestore(!!state.pageUnloading)) persistCrossSessionQueue();
           renderCrossSessionQueue();
         });
       }
@@ -484,8 +498,15 @@ import { syncBrowserComposerVoice } from "./composer-voice-adapter";
         if (hasAnyBusySession()) return;
         if (_queueLaunching) return;
         var item = state.crossSessionQueue.shift();
-        renderCrossSessionQueue();
+        // 出队立刻落盘：多条目时 renderCrossSessionQueue() 只在队列排空时才会
+        // persist，否则 localStorage 会留着已经交给 /api/commands 的旧队首，
+        // 刷新后它被重新 flush 一次 = 同一条消息发两遍。
+        persistCrossSessionQueue();
+        // 先把这条交给 launchQueueItem（它同步置位 _queueLaunching），再做展示层
+        // 渲染。顺序反过来的话，渲染期间的任何重入都会撞上守卫把这条无声丢掉，
+        // 而它此刻已经从内存和 localStorage 双重出队 —— 消息永久蒸发。
         launchQueueItem(item);
+        renderCrossSessionQueue();
       }
 
       function formatQueueAge(queuedAt) {
@@ -497,6 +518,17 @@ import { syncBrowserComposerVoice } from "./composer-voice-adapter";
       }
 
       export function renderCrossSessionQueue() {
+        // 排队条是纯展示层：渲染失败可以少一次刷新，绝不能把异常抛回
+        // flushCrossSessionQueue / loadSessions 调用链（那会连带吞掉后面
+        // renderCrossSessionQueue()、_syncWakeLock() 等收尾逻辑）。
+        try {
+          renderCrossSessionQueueUnsafe();
+        } catch (error) {
+          console.error("[wand] cross-session queue render failed:", error);
+        }
+      }
+
+      function renderCrossSessionQueueUnsafe() {
         var container = document.querySelector(".cross-session-queue");
         var inputPanel = document.querySelector(".input-panel");
         var statusBar = document.querySelector(".structured-status-bar");
@@ -513,10 +545,13 @@ import { syncBrowserComposerVoice } from "./composer-voice-adapter";
         // appends children into React-owned #blank-chat.
         var isInputPanelVisible = inputPanel && !inputPanel.classList.contains("hidden");
         var parent = isInputPanelVisible ? inputPanel : blankQueueHost;
-        // Insert above status bar if present, otherwise above composer
-        var insertBefore = isInputPanelVisible ? (statusBar || composer) : null;
-
         if (!parent) return;
+
+        // 状态栏 / 输入框都埋在 .input-panel 更深一层，必须上溯成直接子节点才能当
+        // insertBefore 的参照；否则 insertBefore 会抛 NotFoundError（见 queue-dom.ts）。
+        var insertBefore = isInputPanelVisible
+          ? resolveInsertBeforeAnchor(parent, [statusBar, composer])
+          : null;
 
         // If container exists but is in the wrong parent, move it
         if (container && container.parentNode !== parent) {
@@ -598,73 +633,6 @@ import { syncBrowserComposerVoice } from "./composer-voice-adapter";
         }
       });
 
-      // Send message from the welcome screen input
-      export function welcomeInputSend() {
-        var welcomeInput = document.getElementById("welcome-input") as HTMLInputElement | null;
-        var value = welcomeInput ? welcomeInput.value.trim() : "";
-        if (!value) return;
-
-        // Cross-session queue: if any session is busy, send the message back into
-        // that busy conversation (context-preserving) instead of starting fresh.
-        // enqueueCrossSessionMessage owns the user feedback toast for both paths.
-        if (hasAnyBusySession()) {
-          welcomeInput.value = "";
-          enqueueCrossSessionMessage(value);
-          return;
-        }
-
-        // Clear todo progress bar at the start of a new session
-        var todoEl = document.getElementById("todo-progress");
-        if (todoEl) todoEl.classList.add("hidden");
-        welcomeInput.value = "";
-        welcomeInput.placeholder = "正在启动…";
-        welcomeInput.disabled = true;
-        var mode = state.chatMode || "managed";
-        var defaultCwd = getEffectiveCwd();
-        var preferredTool = getPreferredTool();
-        fetch("/api/commands", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "same-origin",
-          body: JSON.stringify(withTerminalDimensions({
-            command: preferredTool,
-            provider: preferredTool,
-            cwd: defaultCwd,
-            mode: mode,
-            initialInput: value
-          }))
-        })
-        .then(function(res) { return res.json(); })
-        .then(function(data) {
-          if (data.error) {
-            showToast(data.error, "error");
-            welcomeInput.placeholder = "输入消息";
-            welcomeInput.disabled = false;
-            return;
-          }
-          state.selectedId = data.id;
-          persistSelectedId();
-          state.drafts[data.id] = "";
-          resetChatRenderCache();
-          updateSessionSnapshot(data);
-          updateSessionsList();
-          switchToSessionView(data.id);
-          subscribeToSession(data.id);
-          loadOutput(data.id).then(function() {
-            welcomeInput.placeholder = "输入消息";
-            welcomeInput.disabled = false;
-            focusInputBox(true);
-          });
-        })
-        .catch(function(error) {
-          showToast((error && error.message) || (preferredTool === "codex"
-            ? "无法启动 Codex 会话。"
-            : "无法启动 Claude 会话。"), "error");
-          welcomeInput.placeholder = "输入消息";
-          welcomeInput.disabled = false;
-        });
-      }
-
       export function sendOrStart(opts?) {
         opts = opts || {};
         // Support welcome input as well as the main input box
@@ -712,7 +680,7 @@ import { syncBrowserComposerVoice } from "./composer-voice-adapter";
           }
           state.selectedId = data.id;
           persistSelectedId();
-          state.drafts[data.id] = "";
+          clearDraftValueForSession(data.id, true);
           resetChatRenderCache();
           if (inputBox) inputBox.value = "";
           if (welcomeInput) welcomeInput.value = "";
@@ -799,13 +767,16 @@ import { syncBrowserComposerVoice } from "./composer-voice-adapter";
         return String(value || "").trim() + "\u0000" + attachmentPart;
       }
 
-      function restoreFailedComposerSubmission(sessionId, value, attachments) {
+      // persist=false：发送结果未知（fetch 被 abort / 网络中断）时的回填。请求可能
+      // 已经被服务端接收，只把文本放回当前页面让用户能改写或重试，绝不落 localStorage，
+      // 否则刷新后同一条消息会重新出现在输入框里、被当成新消息重复发送。
+      function restoreFailedComposerSubmission(sessionId, value, attachments, persist?) {
         var currentDraft = getDraftValueForSession(sessionId);
         var restoredDraft = value;
         if (currentDraft && currentDraft !== value) {
           restoredDraft = value ? value + "\n" + currentDraft : currentDraft;
         }
-        setDraftValueForSession(sessionId, restoredDraft, true);
+        setDraftValueForSession(sessionId, restoredDraft, true, persist);
         restorePendingAttachments(sessionId, attachments);
         if (sessionId === state.selectedId) {
           var currentInput = document.getElementById("input-box") as HTMLTextAreaElement | null;
@@ -995,7 +966,12 @@ import { syncBrowserComposerVoice } from "./composer-voice-adapter";
             return result;
           })
           .catch(function(err) {
-            restoreFailedComposerSubmission(sessionId, value, capturedAttachments);
+            restoreFailedComposerSubmission(
+              sessionId,
+              value,
+              capturedAttachments,
+              !isAmbiguousComposerSubmissionFailure(err),
+            );
             if (!(err && (err.__wandToasted || err.__wandHandled))) {
               showToast(getInputErrorMessage(err), "error");
             }
@@ -1245,7 +1221,11 @@ import { syncBrowserComposerVoice } from "./composer-voice-adapter";
             message === "NetworkError when attempting to fetch resource." ||
             message === "Load failed" ||
             /aborted|aborterror|networkerror|failed to fetch/i.test(message);
-          if (!isTransientAbort) {
+          if (isTransientAbort) {
+            // 传输层失败 / 请求被 abort：这条消息可能已经被服务端接收。打标记让
+            // sendInputFromBox 知道回填只能留在内存里（见 composer-draft.ts）。
+            error.__wandAmbiguousDelivery = true;
+          } else {
             showToast((error && error.message) || "无法发送结构化消息。", "error");
             error.__wandToasted = true;
           }
@@ -2795,11 +2775,6 @@ import { syncBrowserComposerVoice } from "./composer-voice-adapter";
         }
       }
 
-      export function initSwipeToDelete(_container?) {
-        _swipeState = null;
-        _swipedItem = null;
-      }
-
       var _resumeInProgress = false;
 
       function resumeSession(sessionId) {
@@ -2821,7 +2796,7 @@ import { syncBrowserComposerVoice } from "./composer-voice-adapter";
           }
           state.selectedId = data.id;
           persistSelectedId();
-          state.drafts[data.id] = "";
+          clearDraftValueForSession(data.id);
           return data;
         })
         .catch(function(error) {
@@ -2980,7 +2955,7 @@ import { syncBrowserComposerVoice } from "./composer-voice-adapter";
           }
           state.selectedId = data.id;
           persistSelectedId();
-          state.drafts[data.id] = "";
+          clearDraftValueForSession(data.id);
           return activateSession(data).then(function() {
             // Desktop pinned/narrow layouts remain; only overlay drawers close.
             dismissDrawerIfOverlay();

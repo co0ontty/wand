@@ -383,7 +383,6 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
             if (msg.sessionId === state.selectedId && state.terminal && msg.data && !hasPooledTerminal(msg.sessionId)) {
               if (msg.data.chunk && isCurrentTerminalSession(msg.sessionId)) {
                 // Fast path: write chunk directly to avoid full-output comparison.
-                state.lastChunkAt = Date.now();
                 state.terminalLiveStreamSessions[msg.sessionId] = true;
                 wandTerminalWrite(state.terminal, msg.data.chunk, msg.ptyBytes, msg.sessionId);
                 state.terminalSessionId = msg.sessionId;

@@ -48,6 +48,11 @@ Express route → 参数与权限检查 → 业务服务 / SessionRegistry → m
   默认创建任务不建子目录、不建 worktree；高级选项可显式开启 worktree 隔离。
 - 侧边栏与任务看板通过 `workspaceTaskId` 对应同一个任务；创建、改名、里程碑、
   完成和重新打开双向同步。空任务也显示，同名任务不得按标题自动合并。
+- 会话落地时（侧栏「＋」、标签栏「＋」、派发、关联任务的自动化）就调用
+  `syncWorkspaceTaskToBoard` 把归属写进卡片：补卡片、按会话补 Agent、绑定会话、
+  `todo → doing`，不必等 `GET /api/wand-tasks` 的全量兜底。单卡读取
+  `GET /api/wand-tasks/:id` 也会按需补一次本任务，原生客户端只拉单卡时同样不会
+  看到一张没有会话的卡片。
 - 新建任务里的提示词属于首个会话，不用于替换任务名称。未分组的历史会话
   继续保留，不因打开看板自动生成任务。
 - 会话只有一个任务归属。侧边栏/看板拖动与“移动到其他任务”菜单走同一移动操作：
@@ -102,3 +107,42 @@ Express route → 参数与权限检查 → 业务服务 / SessionRegistry → m
 纯删除与行为修复分别审查。交付执行 `npm run check`、`npm test`、`npm run build`，
 并在隔离配置实例中操作登录、任务、文件、设置与会话。浏览器中的原生 UA 模拟
 仅验证 Web 分支，不能替代真机验收。
+
+## Legacy 残留审计（可复跑）
+
+React 迁移删掉的是 legacy 的**渲染层**，留下的往往是「查得到选择器、但没人再造节点」
+的查询与写入。这类残留可能不报错，却静默失效或与 React 重复写入，因此必须用
+成体系的检查发现，不能靠读代码碰运气。
+
+```bash
+npm run audit:remnants              # 未识别到字面量生产者的 DOM 候选
+npm run audit:remnants -- --json    # 机器可读
+```
+
+判定口径（`scripts/audit-legacy-remnants.js`）：
+
+- **消费者**：`src/web-ui/browser/**` 里的 `getElementById` / `querySelector(All)` /
+  `closest` / `matches` / `classList.*` 引用的 id 与 class。
+- **可能的生产者**：手编源码中的 JSX 属性、HTML 字符串、`id/className` 赋值、
+  `classNames(...)`、`setAttribute(...)`、`classList.add/toggle/replace(...)`。
+- 用 TypeScript AST 定位调用与所属函数，忽略注释；CSS 只作为独立线索，不算生产者。
+- 动态查询单独计数；变量拼接、第三方组件和运行分支不能由本工具证明。
+- 输出仅为候选，不做死代码/可达性判定，也不自动删除。函数名在 bundle 中出现或
+  消失都不是充分证据（可能重名、改名、内联或产物过期）。
+
+配套的四类检查（本轮用来定位「刷新后标签栏消失」同族问题）：
+
+1. 状态来源：检查 `deriveLegacyUiSnapshot()` 和 React 各独立 store 的读写、
+   初始化、切换、持久化与刷新恢复，不能只确认存在某条赋值语句。
+2. DOM 所有权：查 legacy 写入目标是否由 React 同时管理；运行时验证写入时序和
+   视觉结果，不把设计上不挂载的节点或初始化期间的空查询直接判为故障。
+3. 动作入口：检查 UiAction 的实际派发链，包括菜单配置对象、间接回调和 runtime
+   adapter。没有字面量 `dispatch({ type: ... })` 不等于没有入口。
+4. 运行时空查询审计：无头浏览器里 hook `getElementById` / `querySelector`，
+   驱动登录、任务、标签栏、输入、弹层、移动端与刷新，统计返回 null 的调用点。
+   静态差集给候选，运行时命中给证据。
+
+清理标识符前全仓检索（包含同文件引用、测试、脚本、文档、模板与动态字符串），
+识别公共 API/扩展点。选择器另需在原生壳、窄屏、折叠、抽屉、弹层及 `?reactUi=0`
+下实测；`?reactShell=0` 已没有回滚作用。删除后检查连带无用导入和空函数。
+`--fail-on-found` 只表示发现候选，不表示确认故障，不挂 CI 卡口。

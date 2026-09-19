@@ -1,6 +1,7 @@
 import { notifyTasksChanged, subscribeTaskChanges } from "../react/task-changes";
 import { configureWorkspacesRuntime } from "../react/workspaces/controller";
 import { clearActiveWorkspaceContext, setActiveWorkspaceContext, workspaceContextStore } from "../react/workspaces/workspace-context";
+import { persistActiveTask } from "./active-task";
 import { closeReactOverlays } from "./react-overlay-coordinator";
 import { dismissDrawerIfOverlay, goHome, refreshAll, selectSession, startSessionInCwd } from "./session-engine";
 import { getEffectiveCwd } from "./render";
@@ -35,16 +36,25 @@ import type {
 
 let uninstall: (() => void) | null = null;
 let openTaskGeneration = 0;
+
+/**
+ * 当前打开的任务 id。唯一来源是 workspaceContextStore（标签栏同源），
+ * 适配器不再另存一份副本：两份状态曾经出现「一处被持久化、另一处被读取」
+ * 的分叉，刷新后任务上下文就丢了。
+ */
+function currentTaskId(): string | null {
+  return workspaceContextStore.getSnapshot().taskId;
+}
 const taskLayouts = createTaskLayoutController(httpWorkspacesRepository, {
   onSaved(taskId, layoutRevision) {
-    if (state.activeWorkspaceTaskId === taskId) setActiveWorkspaceContext({ layoutRevision });
+    if (currentTaskId() === taskId) setActiveWorkspaceContext({ layoutRevision });
   },
   onError(taskId, error) {
     const message = error instanceof Error ? error.message : "请检查网络后重试。";
     showToast(`任务 ${taskId} 的布局未保存：${message}`, "danger");
   },
   onRestore(taskId, detail) {
-    if (state.activeWorkspaceTaskId !== taskId) return;
+    if (currentTaskId() !== taskId) return;
     const ids = orderWorkspaceSessions(detail.sessions).map((session) => session.id);
     const savedActive = activeWorkWindowTab(detail.layout);
     const preferred = savedActive?.kind === "session" ? savedActive.sessionId : ids[0];
@@ -59,7 +69,7 @@ const taskLayouts = createTaskLayoutController(httpWorkspacesRepository, {
 
 function saveTaskLayout(taskId: string, layout: TaskWindowLayout | null, options?: TaskLayoutSaveOptions) {
   if (options?.automatic && !taskLayouts.canSaveAutomatically(taskId)) return Promise.resolve("failed");
-  if (state.activeWorkspaceTaskId === taskId) {
+  if (currentTaskId() === taskId) {
     if (activeWorkWindow(layout)?.layout.type !== "split") disposeAllPooledTerminals();
     setActiveWorkspaceContext({ layout });
   }
@@ -75,11 +85,11 @@ function saveTaskLayout(taskId: string, layout: TaskWindowLayout | null, options
 export function installWorkspacesLegacyAdapter(): void {
   if (uninstall) return;
   const stopChanges = subscribeTaskChanges(() => {
-    const taskId = state.activeWorkspaceTaskId;
+    const taskId = currentTaskId();
     if (!taskId) return;
     void taskLayouts.flush(taskId).then(async () => {
       const detail = await taskDetailStore.reload(taskId);
-      if (state.activeWorkspaceTaskId !== taskId) return;
+      if (currentTaskId() !== taskId) return;
       taskLayouts.remember(taskId, detail.layoutRevision);
       setActiveWorkspaceContext({
         taskName: detail.name, cwd: detail.cwd, workspaceId: detail.workspaceId,
@@ -96,10 +106,7 @@ export function installWorkspacesLegacyAdapter(): void {
     effectiveCwd: getEffectiveCwd,
     openWorkspace(workspace: Workspace) {
       ++openTaskGeneration;
-      state.activeWorkspaceId = workspace.id;
-      state.activeWorkspaceTaskId = null;
-      try { localStorage.setItem("wand-active-workspace", workspace.id); } catch (e) {}
-      notifyLegacyUiChange("workspace:open");
+      persistActiveTask(null);
       setActiveWorkspaceContext({
         workspaceId: workspace.id,
         workspaceName: workspace.name,
@@ -109,14 +116,13 @@ export function installWorkspacesLegacyAdapter(): void {
         provider: workspace.defaultProvider,
         layout: null,
       });
+      notifyLegacyUiChange("workspace:open");
       goHome();
       dismissDrawerIfOverlay();
     },
     closeWorkspace() {
       ++openTaskGeneration;
-      state.activeWorkspaceId = null;
-      state.activeWorkspaceTaskId = null;
-      try { localStorage.removeItem("wand-active-workspace"); } catch (e) {}
+      persistActiveTask(null);
       clearActiveWorkspaceContext();
       notifyLegacyUiChange("workspace:close");
     },
@@ -127,10 +133,8 @@ export function installWorkspacesLegacyAdapter(): void {
     },
     async openTask(payload: OpenWorkspaceTaskPayload) {
       const generation = ++openTaskGeneration;
-      state.activeWorkspaceId = payload.workspaceId;
-      state.activeWorkspaceTaskId = payload.taskId;
-      try { localStorage.setItem("wand-active-workspace", payload.workspaceId); } catch (e) {}
-      notifyLegacyUiChange("workspace:open");
+      // 刷新 / 重新登录后据此恢复整个任务上下文，见 active-task.ts。
+      persistActiveTask(payload.taskId);
       setActiveWorkspaceContext({
         workspaceId: payload.workspaceId,
         workspaceName: payload.workspaceName,
@@ -141,6 +145,7 @@ export function installWorkspacesLegacyAdapter(): void {
         layout: null,
         layoutRevision: undefined,
       });
+      notifyLegacyUiChange("workspace:open");
       // 任务上下文已经切换，旧任务的终端不能继续挂在新任务标题下。
       // 先即时进入任务欢迎/加载态；详情返回后再恢复已有会话。
       goHome();
@@ -191,7 +196,7 @@ export function installWorkspacesLegacyAdapter(): void {
             : undefined);
         if (!sessionId) return undefined;
         await taskDetailStore.reload(payload.taskId).catch(() => {});
-        if (state.activeWorkspaceTaskId === payload.taskId) {
+        if (currentTaskId() === payload.taskId) {
           const current = workspaceContextStore.getSnapshot().layout;
           const existing = current
             ? current.windows.flatMap((window) => layoutSessionIds(window.layout))
@@ -212,7 +217,7 @@ export function installWorkspacesLegacyAdapter(): void {
       });
     },
     saveTaskLayout(layout: TaskWindowLayout | null, options?: TaskLayoutSaveOptions) {
-      const taskId = state.activeWorkspaceTaskId;
+      const taskId = currentTaskId();
       if (!taskId) return;
       return saveTaskLayout(taskId, layout, options);
     },

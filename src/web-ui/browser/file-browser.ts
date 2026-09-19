@@ -1,4 +1,5 @@
 import { state, writeStoredBoolean } from "./state";
+import { usesSidebarDrawer } from "../sidebar-layout";
 import "./i18n";
 import "./input";
 import "./render";
@@ -13,8 +14,20 @@ import { openFilePreviewFromLegacy } from "./file-preview-adapter";
         return window.innerWidth <= 768;
       }
 
+      // 侧栏形态（抽屉覆盖 ⟷ 停靠推开内容）判定，与 React Shell 共用同一套规则。
+      // 注意：不要用 isMobileLayout() 代替它——平板竖屏（768）和 640–768 的桌面
+      // 窗口必须在侧栏上表现为「停靠」，否则主内容会被盖住（见 sidebar-layout.ts）。
+      export function isSidebarDrawerLayout() {
+        return usesSidebarDrawer({
+          width: window.innerWidth,
+          height: window.innerHeight,
+          coarsePointer: typeof window.matchMedia === "function"
+            && window.matchMedia("(pointer: coarse)").matches,
+        });
+      }
+
       export function shouldShowSessionsBackdrop() {
-        return !!state.sessionsDrawerOpen && (isMobileLayout() || !state.sidebarPinned);
+        return !!state.sessionsDrawerOpen && (isSidebarDrawerLayout() || !state.sidebarPinned);
       }
 
       export function setFilePanelOpen(nextOpen) {
@@ -22,7 +35,9 @@ import { openFilePreviewFromLegacy } from "./file-preview-adapter";
         try {
           localStorage.setItem("wand-file-panel-open", String(state.filePanelOpen));
         } catch (e) {}
-        if (state.filePanelOpen && isMobileLayout()) {
+        // 只有抽屉形态才需要把侧栏收走（抽屉会被文件面板盖住）；
+        // 停靠形态侧栏本就并排常驻，收走只会留下一条空 padding。
+        if (state.filePanelOpen && isSidebarDrawerLayout()) {
           state.sessionsDrawerOpen = false;
           writeStoredBoolean("wand-sidebar-open", false);
         }
