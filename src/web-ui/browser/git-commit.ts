@@ -11,6 +11,7 @@ import {
   quickCommitController,
 } from "../react/quick-commit/controller";
 import { notifyLegacyUiChange } from "./ui-store-bridge";
+import { createGitStatusRefresh } from "./git-status-refresh";
 import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
 import { closeReactOverlays } from "./react-overlay-coordinator";
 
@@ -35,6 +36,42 @@ import { closeReactOverlays } from "./react-overlay-coordinator";
       // legacy markup），这里只保留变更通知。
       export function updateTopbarGitBadge() {
         notifyLegacyUiChange("topbar:git");
+      }
+
+      /** 会话工作期间工作区随时会变，徽章不能只在切会话时取一次快照。 */
+      var gitStatusRefresh = createGitStatusRefresh({
+        coalesceMs: 1200,
+        // 裸 shell、外部编辑器、别的终端手敲 git 都没有可用信号，只能兜底轮询。
+        pollMs: 20000,
+        selectedSessionId: function() { return state.selectedId; },
+        hidden: function() { return document.hidden; },
+        refresh: function(sessionId: string) { void loadGitStatus(sessionId, { force: true }); },
+      });
+
+      /** 已经用过的最近一次请求时刻：晚到的旧响应不能覆盖更新的快照。 */
+      var gitStatusAppliedRequestAt = 0;
+
+      /** 拿到一份新鲜状态 → 直接写进徽章状态，避免再发一次同样的请求。 */
+      export function applyGitStatusSnapshot(sessionId: string, status: any, requestedAt?: number) {
+        if (!sessionId || !status) return;
+        var at = requestedAt || Date.now();
+        // 两个请求可能交叉落地（回合结束的刷新与面板自己拉的取数）：只认
+        // 更晚发起的那个，否则旧快照会把刚拿到的状态盖回去。
+        if (at < gitStatusAppliedRequestAt) return;
+        gitStatusAppliedRequestAt = at;
+        state.gitStatus = status;
+        state.gitStatusSessionId = sessionId;
+        state.gitStatusLastFetchAt = Date.now();
+        updateTopbarGitBadge();
+      }
+
+      /** 工作区可能变了（回合结束/进程退出）→ 合并成一次强制刷新。 */
+      export function scheduleGitStatusRefresh() {
+        gitStatusRefresh.schedule();
+      }
+
+      export function startGitStatusPolling() {
+        gitStatusRefresh.startPolling();
       }
 
       /**
@@ -106,20 +143,21 @@ import { closeReactOverlays } from "./react-overlay-coordinator";
         if (state.gitStatusInflight && state.gitStatusInflight.sessionId === sessionId) {
           return state.gitStatusInflight.promise;
         }
+        var requestedAt = Date.now();
         var promise = fetch("/api/sessions/" + encodeURIComponent(sessionId) + "/git-status", {
           credentials: "same-origin"
         })
           .then(function(res) { return res.ok ? res.json() : { isGit: false }; })
           .then(function(data: any) {
-            state.gitStatus = data || { isGit: false };
-            state.gitStatusSessionId = sessionId;
-            state.gitStatusLastFetchAt = Date.now();
-            updateTopbarGitBadge();
+            applyGitStatusSnapshot(sessionId, data || { isGit: false }, requestedAt);
             return data;
           })
           .catch(function() {
-            state.gitStatus = { isGit: false };
-            state.gitStatusSessionId = sessionId;
+            // 网络抖动不该把徽章打没：同一会话保留上一次的有效状态，换会话才清空。
+            if (state.gitStatusSessionId !== sessionId) {
+              state.gitStatus = { isGit: false };
+              state.gitStatusSessionId = sessionId;
+            }
             state.gitStatusLastFetchAt = Date.now();
             updateTopbarGitBadge();
             return null;
@@ -138,8 +176,8 @@ import { closeReactOverlays } from "./react-overlay-coordinator";
           closeReactOverlays(["quickCommit"]);
         },
         onClose: function() {},
-        onRepositoryChanged: function(sessionId: string) {
-          void loadGitStatus(sessionId, { force: true });
+        onStatusLoaded: function(sessionId: string, status: any, requestedAt?: number) {
+          applyGitStatusSnapshot(sessionId, status, requestedAt);
         },
         toast: function(message: string, tone: "success" | "error" | "info") {
           showToast(message, tone);

@@ -17,13 +17,27 @@ import {
 } from "./terminal-pool";
 import { ensureTerminalFitWithRetry, scheduleTerminalResize } from "./viewport";
 import { bindForegroundSyncListeners } from "./render";
+import { scheduleGitStatusRefresh, startGitStatusPolling } from "./git-commit";
 import { notifyLegacyUiChange } from "./ui-store-bridge";
+
+/**
+ * 记录会话“这一轮是否还在生成”。落到 false 的那一刻说明 agent 刚动过工作区，
+ * 顶栏快捷提交徽章得跟着重新取一次 git 状态（信号会成串到达，内部合并）。
+ */
+function noteTurnActivity(sessionId: string, active: boolean): void {
+  if (!sessionId) return;
+  if (!state.turnActiveBySession) state.turnActiveBySession = {};
+  var previous = state.turnActiveBySession[sessionId];
+  state.turnActiveBySession[sessionId] = active;
+  if (previous === true && !active) scheduleGitStatusRefresh();
+}
 
 // ── External functions not defined in this module ──
 
       export function startPolling() {
         stopPolling();
         bindForegroundSyncListeners();
+        startGitStatusPolling();
         // Use WebSocket if available, fallback to polling
         if (initWebSocket()) {
           // WebSocket will deliver updates; no need for initial refreshAll()
@@ -268,12 +282,14 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
             // 120ms 微延迟 + 单 timer 防抖，避免连续 false→true→false 多次重放。
             if (msg.data && msg.sessionId
                 && Object.prototype.hasOwnProperty.call(msg.data, 'isResponding')) {
-              if (!state._lastIsResponding) state._lastIsResponding = {};
-              state._lastIsResponding[msg.sessionId] = !!msg.data.isResponding;
+              noteTurnActivity(msg.sessionId, !!msg.data.isResponding);
               // R2 策略 A：移除 isResponding true→false 翻转触发的 softResync。
               // 原本是想在"流式回答结束"瞬间洗掉错位的 cursor 定位残留，但
               // softResync 全量重放在 fresh buffer 上会把 askuserquestion 的多
               // 帧字节顺序堆叠（截图 2 的根因之一）。NEW-A + R6 兜底后不再需要。
+            }
+            if (msg.data && msg.sessionId && msg.data.structuredState) {
+              noteTurnActivity(msg.sessionId, msg.data.structuredState.inFlight === true);
             }
             if (msg.data && msg.sessionId) {
               var isIncremental = !!msg.data.incremental;
@@ -422,6 +438,8 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
             scheduleSessionListUpdate();
             break;
           case 'ended': {
+            // 进程退出前最后一轮改动也要落到徽章上。
+            scheduleGitStatusRefresh();
             // Build snapshot from server data; use updateSessionSnapshot so the
             // local update is not lost when loadSessions() later replaces
             // state.sessions entirely.
@@ -664,6 +682,14 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
               if (Object.prototype.hasOwnProperty.call(msg.data, 'titleGenerating')) {
                 statusUpdate.titleGenerating = !!msg.data.titleGenerating;
                 topicMetadataChanged = true;
+              }
+              // 结构化会话也可能只靠 status 事件收尾（没有尾随 output）；
+              // PTY 的 ptyBusy 同样代表「这一轮干完了」。
+              if (statusUpdate.structuredState) {
+                noteTurnActivity(msg.sessionId, statusUpdate.structuredState.inFlight === true);
+              }
+              if (Object.prototype.hasOwnProperty.call(msg.data, 'ptyBusy')) {
+                noteTurnActivity(msg.sessionId, !!msg.data.ptyBusy);
               }
               updateSessionSnapshot(statusUpdate);
               if (topicMetadataChanged) scheduleSessionListUpdate();

@@ -156,6 +156,10 @@ export function syncOnForeground(reason: string, force?: boolean) {
   } else if (!state.ws || (state.ws.readyState !== WebSocket.OPEN && state.ws.readyState !== WebSocket.CONNECTING)) {
     initWebSocket();
   }
+  // 离开浏览器期间 agent / 别的终端也可能改过工作区：回前台就把 git 徽章取新。
+  if (state.selectedId) {
+    void loadGitStatus(state.selectedId, { force: true });
+  }
   // 不再 loadOutput 当前会话——WS 重连后服务端会主动推一条 init
   // 消息，那条路径已经走 ensureTerminalFitWithRetry 强制按真实
   // cols 重排 history，足够覆盖前台恢复时的同步需求。这里多加

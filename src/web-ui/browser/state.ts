@@ -237,6 +237,9 @@ export var state: AppState = {
   gitStatusSessionId: null,
   gitStatusInflight: null,
   gitStatusLastFetchAt: 0,
+  // 逐会话记录上一帧是否在生成（结构化 structuredState.inFlight / PTY bridge
+  // isResponding）。true→false 的跳变当作“这一轮刚干完活”，用来刷新顶栏 git 徽章。
+  turnActiveBySession: {},
   // Telegram 风格的"贴底"状态：true = 用户当前贴在底部，新消息会自然出现；
   // false = 用户向上滚了，未读会累积到气泡里，不会自动滚他们的视图。
   chatStickToBottom: true,

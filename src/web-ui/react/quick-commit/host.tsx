@@ -171,6 +171,20 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
   const messageInput = useRef<HTMLTextAreaElement | null>(null);
   const context = controller.context;
 
+  /**
+   * 面板自己拉状态：顺手把同一份结果交给顶栏徽章，避免面板显示“3 个改动”
+   * 而右上角还停在上一轮快照。
+   */
+  async function loadStatusWithBadgeSync(
+    sessionId: string,
+    signal?: AbortSignal,
+  ): Promise<QuickCommitStatus> {
+    const requestedAt = Date.now();
+    const loaded = await repository.loadStatus(sessionId, signal ? { signal } : {});
+    quickCommitStore.getRuntime()?.onStatusLoaded(sessionId, loaded, requestedAt);
+    return loaded;
+  }
+
   useEffect(() => {
     if (!controller.open || !context) return;
     const abort = new AbortController();
@@ -185,7 +199,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
     setGenerating(false);
     setError("");
     setPushError("");
-    void repository.loadStatus(context.sessionId, { signal: abort.signal })
+    void loadStatusWithBadgeSync(context.sessionId, abort.signal)
       .then((loaded) => {
         if (abort.signal.aborted) return;
         setStatus(loaded);
@@ -215,9 +229,8 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
   const canCommit = hasQuickCommitChanges(status) && !busy && !loading;
 
   async function reloadStatus(sessionId: string): Promise<void> {
-    quickCommitStore.getRuntime()?.onRepositoryChanged(sessionId);
     try {
-      const loaded = await repository.loadStatus(sessionId);
+      const loaded = await loadStatusWithBadgeSync(sessionId);
       if (quickCommitStore.getSnapshot().context?.sessionId === sessionId) setStatus(loaded);
     } catch {
       // The operation already succeeded; a stale status panel is non-fatal.

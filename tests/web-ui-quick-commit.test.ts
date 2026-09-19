@@ -75,6 +75,39 @@ test("legacy quick-commit renderer, listeners, state, and CSS stay deleted", () 
   assert.ok(!styles.includes(".qc-pair"));
 });
 
+test("顶栏 git 徽章靠回合结束、进程退出、回前台与兜底轮询保持新鲜", () => {
+  const gitCommit = readFileSync(new URL("../src/web-ui/browser/git-commit.ts", import.meta.url), "utf8");
+  const websocket = readFileSync(new URL("../src/web-ui/browser/websocket.ts", import.meta.url), "utf8");
+  const render = readFileSync(new URL("../src/web-ui/browser/render.ts", import.meta.url), "utf8");
+  const host = readFileSync(new URL("../src/web-ui/react/quick-commit/host.tsx", import.meta.url), "utf8");
+
+  // 只在切会话时取一次快照会让徽章停在「工作区干净」：必须有合并刷新 + 轮询兜底。
+  assert.ok(gitCommit.includes("createGitStatusRefresh({"), "git-commit.ts must keep the refresh controller");
+  assert.ok(gitCommit.includes("onStatusLoaded: function"), "git-commit.ts must adopt the panel's status");
+  assert.ok(
+    host.includes("onStatusLoaded(sessionId, loaded, requestedAt)"),
+    "面板拿到的状态必须回给宿主，并带上取数发起时刻",
+  );
+  assert.ok(gitCommit.includes("if (at < gitStatusAppliedRequestAt) return;"), "旧响应不能盖掉新快照");
+
+  // 回合结束（isResponding / structuredState.inFlight true→false）与进程退出都是信号源。
+  assert.ok(websocket.includes("noteTurnActivity(msg.sessionId, !!msg.data.isResponding)"));
+  assert.ok(
+    websocket.includes("noteTurnActivity(msg.sessionId, msg.data.structuredState.inFlight === true)"),
+  );
+  assert.ok(websocket.includes("startGitStatusPolling();"), "登录后要启动兜底轮询");
+  assert.ok(websocket.includes("noteTurnActivity(msg.sessionId, !!msg.data.ptyBusy)"));
+  assert.ok(websocket.includes("noteTurnActivity(msg.sessionId, statusUpdate.structuredState.inFlight === true)"));
+  assert.equal(
+    (websocket.match(/scheduleGitStatusRefresh\(\);/g) ?? []).length,
+    2,
+    "回合结束与进程退出都要触发刷新",
+  );
+
+  // 离开浏览器期间 agent / 外部终端也可能改过工作区：回前台取新。
+  assert.ok(render.includes("void loadGitStatus(state.selectedId, { force: true });"));
+});
+
 test("quick-commit action model produces the four legacy API combinations", () => {
   assert.equal(normalizeQuickCommitAction("unknown"), "commit");
   assert.equal(actionFromOptions(false, false), "commit");
@@ -318,7 +351,9 @@ test("quick-commit controller owns one contextual overlay lifecycle", () => {
   const runtime: QuickCommitRuntimeAdapter = {
     onOpen(context) { events.push(`open:${context.sessionId}`); },
     onClose(context) { events.push(`close:${context.sessionId}`); },
-    onRepositoryChanged(sessionId) { events.push(`changed:${sessionId}`); },
+    onStatusLoaded(sessionId, loaded, requestedAt) {
+      events.push(`status:${sessionId}:${loaded.modifiedCount}:${typeof requestedAt}`);
+    },
     toast(message, tone) { events.push(`${tone}:${message}`); },
   };
   const uninstall = configureQuickCommitRuntime(runtime);
@@ -331,7 +366,7 @@ test("quick-commit controller owns one contextual overlay lifecycle", () => {
   assert.deepEqual(quickCommitStore.getSnapshot().context, { sessionId: "session-1" });
   const firstRevision = quickCommitStore.getSnapshot().revision;
   assert.equal(quickCommitController.isCurrentLifecycle(firstRevision, "session-1"), true);
-  quickCommitStore.getRuntime()?.onRepositoryChanged("session-1");
+  quickCommitStore.getRuntime()?.onStatusLoaded("session-1", status(), 1);
   quickCommitStore.getRuntime()?.toast("done", "success");
   quickCommitController.setDismissable(false);
   assert.equal(quickCommitController.closeIfOpen(), false);
@@ -349,7 +384,7 @@ test("quick-commit controller owns one contextual overlay lifecycle", () => {
   assert.equal(quickCommitController.closeIfOpen(), false);
   assert.deepEqual(events, [
     "open:session-1",
-    "changed:session-1",
+    "status:session-1:2:number",
     "success:done",
     "close:session-1",
     "open:session-1",

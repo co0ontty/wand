@@ -100,7 +100,13 @@ type QuickCommitToastTone = "success" | "error" | "info";
 export interface QuickCommitRuntimeAdapter {
   onOpen(context: QuickCommitOpenContext): void;
   onClose(context: QuickCommitOpenContext): void;
-  onRepositoryChanged(sessionId: string): void;
+  /**
+   * 面板自己拉到的 git 状态。顶栏快捷提交徽章是同一份数据的另一个视图，
+   * 握手给宿主即可让它同步更新，不必再发一次同样的请求。
+   *
+   * `requestedAt` 是这次取数的发起时刻，宿主用它排掉「晚到的旧响应」。
+   */
+  onStatusLoaded(sessionId: string, status: QuickCommitStatus, requestedAt: number): void;
   toast(message: string, tone: QuickCommitToastTone): void;
 }
 
