@@ -10720,32 +10720,6 @@
     .topbar-git-slot:empty {
       display: none;
     }
-    .topbar-git-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      height: 32px;
-      padding: 0 10px;
-      font-family: var(--font-sans);
-      font-size: 10.08px;
-      font-weight: 500;
-      color: var(--text-secondary);
-      background: transparent;
-      border: 1px solid transparent;
-      border-radius: var(--radius-sm);
-      cursor: pointer;
-      white-space: nowrap;
-      transition: all var(--transition-fast);
-      box-sizing: border-box;
-      line-height: 1;
-    }
-    .topbar-git-badge:hover {
-      background: rgba(255, 255, 255, 0.5);
-      color: var(--text-primary);
-    }
-    .topbar-git-badge:active {
-      transform: scale(0.96);
-    }
     .topbar-git-icon {
       flex-shrink: 0;
       opacity: 0.85;
@@ -10770,7 +10744,6 @@
 
     @media (max-width: 720px) {
       .topbar-git-branch { max-width: 8em; }
-      .topbar-git-badge { padding: 0 8px; font-size: 9.8px; }
     }
 
     .wand-provider-logo {
