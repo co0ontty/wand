@@ -29,6 +29,7 @@ import {
 } from "./workspace-agent-dialog-controller";
 import { useUiDispatch, useUiStoreSnapshot } from "../shell/ui-store-react";
 import { ChatWidthToggle } from "../shell/chat-width-toggle";
+import { TopbarGitBadge } from "../shell/topbar-git-badge";
 import { WandIcon } from "../ui";
 import { classNames } from "../ui/class-names";
 import {
@@ -299,6 +300,7 @@ export function WorkspaceTabBar(): React.ReactElement | null {
           选择目标窗口 · Esc 取消
         </button>
       ) : null}
+      <TopbarGitBadge id="workspace-tab-git-badge" className="workspace-tab-git"/>
       <ChatWidthToggle className="workspace-tab-chat-width"/>
       <button
         type="button"

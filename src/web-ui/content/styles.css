@@ -15379,6 +15379,14 @@
       opacity: 0.72;
     }
 
+
+    /* 快捷提交徽章：任务里顶栏被标签栏取代，入口只有这一个。 */
+    .workspace-tab-git {
+      align-self: center;
+      flex-shrink: 0;
+      margin-right: 8px;
+      max-width: 18em;
+    }
     .workspace-tab-files,
     .workspace-tab-close {
       flex-shrink: 0;

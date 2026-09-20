@@ -1,7 +1,6 @@
 import * as React from "react";
 
 import {
-  WandButton,
   WandDropdownMenu,
   WandDropdownMenuContent,
   WandDropdownMenuItem,
@@ -16,6 +15,7 @@ import { classNames } from "../ui/class-names";
 
 import { getShellSidebarEntryActions, type ShellSidebarEntryActions } from "./shell-sidebar";
 import { ChatWidthToggle } from "./chat-width-toggle";
+import { TopbarGitBadge } from "./topbar-git-badge";
 import { useUiDispatch, useUiStoreSnapshot } from "./ui-store-react";
 import type { UiAction, UiSessionVm } from "./ui-store";
 
@@ -244,24 +244,7 @@ export function ShellTopbar() {
           <WandIcon name="eye"/>
         </WandIconButton>
         <span id="topbar-git-slot" className="topbar-git-slot">
-          {snapshot.topbar.git && (
-            <WandButton
-              id="topbar-git-badge"
-              kind="soft"
-              size="small"
-              title={`${snapshot.topbar.git.branch}  ·  ${snapshot.topbar.git.clean
-                ? "工作区干净"
-                : `${snapshot.topbar.git.modifiedCount} 个文件待提交`}`}
-              aria-label="快捷提交"
-              onClick={() => void dispatch({ type: "topbar.gitCommit" })}
-            >
-              <WandIcon name="git" slot="start" size={14} className="topbar-git-icon"/>
-              <span className="topbar-git-branch">{snapshot.topbar.git.branch}</span>
-              {snapshot.topbar.git.clean
-                ? <span className="topbar-git-clean" aria-hidden="true"><WandIcon name="check" size={11}/></span>
-                : <span className="topbar-git-count">·{snapshot.topbar.git.modifiedCount}</span>}
-            </WandButton>
-          )}
+          <TopbarGitBadge/>
         </span>
         {selected && (
           <div className="topbar-more-wrap">
