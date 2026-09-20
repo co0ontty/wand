@@ -42,14 +42,16 @@ export function findTaskContext(
 }
 
 /** 目录组 + 任务 → openTask 载荷（与侧栏打开任务用的是同一份上下文）。 */
-export function taskOpenPayload(found: SessionOwningTask): OpenWorkspaceTaskPayload {
-  return {
+export function taskOpenPayload(found: SessionOwningTask, preferredSessionId?: string): OpenWorkspaceTaskPayload {
+  const payload: OpenWorkspaceTaskPayload = {
     workspaceId: found.task.workspaceId,
     workspaceName: found.group.global ? "" : found.group.workspaceName,
     taskId: found.task.id,
     taskName: found.task.name,
     cwd: found.task.cwd,
   };
+  if (preferredSessionId) payload.preferredSessionId = preferredSessionId;
+  return payload;
 }
 
 /**
@@ -77,8 +79,9 @@ export async function openSessionWithOwningTask(
       openFallback(sessionId);
       return;
     }
-    await runtime.openTask(taskOpenPayload(found));
-    // openTask 恢复的是任务的标签布局；点击的那一个会话仍要单独选中（与侧栏一致）。
+    await runtime.openTask(taskOpenPayload(found, id));
+    // openTask 恢复的是任务的标签布局；点击的那一个会话已经作为 preferredSessionId
+    // 在布局恢复时就选中了，这里再选中一次只是为了兜住「会话不在任务列表里」的边界。
     runtime.selectSession(id);
   } catch {
     openFallback(sessionId);

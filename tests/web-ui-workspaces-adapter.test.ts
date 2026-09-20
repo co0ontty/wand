@@ -66,7 +66,7 @@ function harness() {
   runInNewContext(outputText, { exports, require: (id: string) => dependencies[id] ?? fallback,
     localStorage: { setItem: () => {}, removeItem: () => {} } });
   exports.installWorkspacesLegacyAdapter();
-  const open = (id: string) => runtime.openTask({ taskId: id, taskName: id, workspaceId: "workspace", workspaceName: "workspace", cwd: `/${id}` });
+  const open = (id: string, extra: Record<string, unknown> = {}) => runtime.openTask({ taskId: id, taskName: id, workspaceId: "workspace", workspaceName: "workspace", cwd: `/${id}`, ...extra });
   return { runtime, reads, writes, errors, starts, state, context: () => context, open };
 }
 
@@ -135,6 +135,32 @@ test("opening a task restores its saved active split instead of selecting the fi
   assert.equal(h.state.selectedId, "third");
   assert.deepEqual(h.context().layout, remote.layout);
   assert.equal(h.writes.length, 0, "restoring an unchanged saved layout does not issue a PUT");
+});
+
+test("opening a task selects the requested session instead of the layout's active tab", async () => {
+  const remote = fixture("A");
+  remote.sessions = [{ id: "first" }, { id: "second" }];
+  remote.layout = windowLayout.reconcileTaskWindowLayout(null, ["first", "second"], "first");
+
+  // 调用方点名了会话（侧栏 / 看板 / 通知点的哪一个）：恢复出来就是它。
+  const requested = harness();
+  const opened = requested.open("A", { preferredSessionId: "second" });
+  await tick(); requested.reads[0].result.resolve(remote); await opened;
+  assert.equal(requested.state.selectedId, "second");
+
+  // 进入任务前选中、且属于这个任务的会话同样优先；goHome() 会清空 selectedId，
+  // 所以必须在它之前读，否则永远落到布局里的活动标签上。
+  const entering = harness();
+  entering.state.selectedId = "second";
+  const reentered = entering.open("A");
+  await tick(); entering.reads[0].result.resolve(remote); await reentered;
+  assert.equal(entering.state.selectedId, "second");
+
+  // 点名的会话不在任务里（旧列表 / 已删除）：回落到布局里的活动标签。
+  const stale = harness();
+  const staleOpen = stale.open("A", { preferredSessionId: "missing" });
+  await tick(); stale.reads[0].result.resolve(remote); await staleOpen;
+  assert.equal(stale.state.selectedId, "first");
 });
 
 test("conflict recovery restores remote active window and selection, not the failed optimistic selection", async () => {

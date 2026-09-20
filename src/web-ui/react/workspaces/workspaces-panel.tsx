@@ -1294,7 +1294,7 @@ export function WorkspacesPanel({
     setConfirmingManageDelete(false);
   }, []);
 
-  const openTask = React.useCallback((group: TaskDirectoryGroup, task: TaskSummary): unknown => {
+  const openTask = React.useCallback((group: TaskDirectoryGroup, task: TaskSummary, preferredSessionId?: string): unknown => {
     onNavigate?.();
     const rt = runtime();
     if (!rt) {
@@ -1308,6 +1308,7 @@ export function WorkspacesPanel({
       taskName: task.name,
       cwd: task.cwd,
     };
+    if (preferredSessionId) payload.preferredSessionId = preferredSessionId;
     // 可能返回恢复完成的 Promise；调用方按需 await（见 newSessionInTask）。
     return rt.openTask(payload);
   }, [onNavigate]);
@@ -1321,7 +1322,15 @@ export function WorkspacesPanel({
     }
     const task = findSessionTask(group, session, sourceGroups);
     if (task) {
-      void Promise.resolve(openTask(group, task)).then(() => rt.selectSession(session.id));
+      // 已经在这个任务里：上下文无需切换，直接选中会话。再走一次 openTask 会先
+      // goHome() 把正文清空、重新拉布局与任务详情，回来后还只选中布局里存着的
+      // 那个标签（点 A 先看到 B），点击感就是「要等一会才显示正文」。
+      if (workspaceContextStore.getSnapshot().taskId === task.id) {
+        rt.selectSession(session.id);
+        return;
+      }
+      // 不在该任务：恢复任务时让布局直接选中点的那一个会话（openTask 内部会选中它）。
+      void Promise.resolve(openTask(group, task, session.id)).then(() => rt.selectSession(session.id));
       return;
     }
     if (!group.synthetic && !group.global) {

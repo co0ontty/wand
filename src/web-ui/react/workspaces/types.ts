@@ -260,6 +260,11 @@ export interface OpenWorkspaceTaskPayload {
   taskName: string;
   cwd: string;
   provider?: WorkspaceProvider;
+  /**
+   * 恢复这个任务的标签布局时优先选中的会话（侧栏 / 通知点了哪一个就恢复哪一个）。
+   * 不传时沿用旧行为：当前选中 → 布局里存的活跃标签 → 第一个会话。
+   */
+  preferredSessionId?: string;
 }
 
 /** 标签栏「+ 新建会话」时传给宿主：在同一任务 worktree 内再起一个绑定会话。 */

@@ -202,6 +202,32 @@ test("empty task tab bar yields to the full-page CLI desktop", () => {
   assert.doesNotMatch(source, /该任务还没有工作窗口/);
 });
 
+test("task tab bar and standalone topbar share one quick-commit badge", () => {
+  const tabBar = readFileSync(new URL("../src/web-ui/react/workspaces/workspace-tab-bar.tsx", import.meta.url), "utf8");
+  const topbar = readFileSync(new URL("../src/web-ui/react/shell/shell-topbar.tsx", import.meta.url), "utf8");
+  const badge = readFileSync(new URL("../src/web-ui/react/shell/topbar-git-badge.tsx", import.meta.url), "utf8");
+  const styles = readFileSync(new URL("../src/web-ui/content/styles.css", import.meta.url), "utf8");
+  // 任务里主区顶部是标签栏而不是顶栏（ShellMainContent 在任务态不挂 ShellTopbar），
+  // 徽章必须两个宿主都有，否则进任务后快捷提交入口就没了。
+  assert.match(topbar, /<span id="topbar-git-slot" className="topbar-git-slot">\s*<TopbarGitBadge\/>/);
+  assert.doesNotMatch(topbar, /id="topbar-git-badge"/, "顶栏不再自带一份内联徽章");
+  assert.match(tabBar, /<TopbarGitBadge id="workspace-tab-git-badge" className="workspace-tab-git"\/>/);
+  assert.match(badge, /id = "topbar-git-badge"/, "默认保留顶栏的 DOM id");
+  assert.match(badge, /dispatch\(\{ type: "topbar\.gitCommit" \}\)/);
+  assert.match(badge, /if \(!git\) return null;/, "非 git 会话 / 首页不显示徽章");
+  assert.match(styles, /\.workspace-tab-git\s*\{/);
+});
+
+test("clicking a session inside the open task skips the task reopen", () => {
+  const panel = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
+  // 已在当前任务里：直接选中。再走 openTask 会先 goHome() 把正文清空、
+  // 重新拉任务详情，回来还只选中布局里存的标签（点 A 先看到 B）。
+  assert.match(panel, /if \(workspaceContextStore\.getSnapshot\(\)\.taskId === task\.id\) \{\s*rt\.selectSession\(session\.id\);\s*return;\s*\}/);
+  // 跨任务：把点的那一个会话作为恢复目标，恢复出来就是它，不再等二次选择。
+  assert.match(panel, /openTask\(group, task, session\.id\)/);
+  assert.match(panel, /const openTask = React\.useCallback\(\(group: TaskDirectoryGroup, task: TaskSummary, preferredSessionId\?: string\)/);
+});
+
 test("new task dialog can create a standalone task without find-or-create project", () => {
   const source = readFileSync(new URL("../src/web-ui/react/workspaces/host.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(source, /findOrCreateWorkspace/);

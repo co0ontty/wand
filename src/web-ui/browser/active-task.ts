@@ -57,7 +57,8 @@ export async function restoreActiveTask(selection: string | null = selectionOnLo
       persistActiveTask(null);
       return;
     }
-    await runtime.openTask(taskOpenPayload(found));
+    // 带上刷新前在看的会话：恢复布局时就选中它，不会先把活动标签拉上来闪一下。
+    await runtime.openTask(taskOpenPayload(found, selection || undefined));
     // openTask 恢复的是任务的标签布局，选中态可能落在任务的活动标签上；
     // 刷新要还原用户真正在看的会话（不属于本任务时也一样）。
     if (selection) runtime.selectSession(selection);

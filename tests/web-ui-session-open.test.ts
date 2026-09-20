@@ -53,6 +53,8 @@ test("findTaskContext resolves a task id to its directory group and open payload
     taskName: "任务一",
     cwd: "/repo",
   });
+  // 从会话入口打开任务时带上「先选中这一个」：恢复布局后不会先闪一下别的会话。
+  assert.equal(taskOpenPayload(findTaskContext(groups, "task-1")!, "session-2").preferredSessionId, "session-2");
   // 全局空间里的任务没有可显示的目录名；与侧栏一致地留空。
   const global = { ...groups[0], workspaceId: "wand-global", workspaceName: "全局", global: true };
   assert.equal(taskOpenPayload(findTaskContext([global], "task-1")!).workspaceName, "");
@@ -83,6 +85,7 @@ test("opening a session from the board restores its task context before selectin
       taskId: "task-1",
       taskName: "任务一",
       cwd: "/repo",
+      preferredSessionId: "session-2",
     }]);
 
     // 已在同一任务内：不再重开任务（避免重复 flush / 恢复覆盖选中态）。

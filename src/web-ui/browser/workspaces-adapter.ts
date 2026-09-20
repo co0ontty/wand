@@ -133,6 +133,9 @@ export function installWorkspacesLegacyAdapter(): void {
     },
     async openTask(payload: OpenWorkspaceTaskPayload) {
       const generation = ++openTaskGeneration;
+      // goHome() 会清空 selectedId，所以先把「该选中谁」记下来：
+      // 调用方点名的会话 / 进入前选中的会话优先，避免先闪一下别的会话再切过去。
+      const requested = payload.preferredSessionId || state.selectedId;
       // 刷新 / 重新登录后据此恢复整个任务上下文，见 active-task.ts。
       persistActiveTask(payload.taskId);
       setActiveWorkspaceContext({
@@ -159,8 +162,8 @@ export function installWorkspacesLegacyAdapter(): void {
         if (generation !== openTaskGeneration) return;
         const sessionIds = orderWorkspaceSessions(detail.sessions).map((session) => session.id);
         const savedActive = activeWorkWindowTab(detail.layout);
-        const preferred = state.selectedId && sessionIds.includes(state.selectedId)
-          ? state.selectedId
+        const preferred = requested && sessionIds.includes(requested)
+          ? requested
           : savedActive?.kind === "session" && sessionIds.includes(savedActive.sessionId)
             ? savedActive.sessionId
             : sessionIds[0];
