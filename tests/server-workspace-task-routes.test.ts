@@ -130,7 +130,8 @@ test("task aggregation reuses queries without leaking truncated or filtered task
       });
     }
     const taskQueries = t.mock.method(storage, "listWorkspaceTasks");
-    const sessionQueries = t.mock.method(storage, "listSessionsByWorkspaceTask");
+    // 侧栏只渲染会话摘要，路由走 slim 读（不解析 output/messages 大字段）。
+    const sessionQueries = t.mock.method(storage, "listSessionsByWorkspaceTaskSlim");
     for (const query of ["", `?workspaceId=${workspace.id}&limit=1&maxSessions=1`]) {
       taskQueries.mock.resetCalls();
       sessionQueries.mock.resetCalls();

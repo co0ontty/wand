@@ -82,6 +82,13 @@ test("slim session storage preserves ordered metadata without transcript payload
   assert.deepEqual(slim, full.map((row) => ({ ...row, output: "", messages: undefined })));
   assert.deepEqual(slim.map((row) => row.id), ["structured", "pty"]);
   assert.ok(full.every((row) => row.output.length > 0 && row.messages?.length === 1));
+
+  // 按任务 / 按 id 的元数据读法是同一份契约：侧栏和自动命名都靠它，
+  // 翻到 output/messages 就会把十 MB 级的会话历史重新解析一遍。
+  const byTask = storage.listSessionsByWorkspaceTaskSlim("task");
+  assert.deepEqual(byTask, slim);
+  assert.deepEqual(storage.getSessionSlim("structured"), slim.find((row) => row.id === "structured"));
+  assert.equal(storage.getSession("structured")?.output.length > 0, true);
 });
 
 test("session runtime options survive a full close and reopen round-trip", (t) => {

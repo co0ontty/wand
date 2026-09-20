@@ -1693,6 +1693,24 @@ export class WandStorage {
     return rows.map((row) => this.mapSessionRow(row));
   }
 
+  /**
+   * 同 `listSessionsByWorkspaceTask`，但不读 `output`/`messages` 大字段。
+   *
+   * 侧栏的目录组、任务详情、自动命名只需要元数据；完整行会把整个会话消息
+   * 历史 JSON 解析一遍（单会话可达十几 MB），每轮轮询都会卡住事件循环。
+   */
+  listSessionsByWorkspaceTaskSlim(taskId: string): SessionSnapshot[] {
+    const rows = this.db
+      .prepare(
+        `SELECT ${sessionSelectFields(true)}
+         FROM command_sessions
+         WHERE workspace_task_id = ?
+         ORDER BY started_at DESC`
+      )
+      .all(taskId) as unknown as SessionRow[];
+    return rows.map((row) => this.mapSessionRow(row));
+  }
+
   setSessionWorkspaceTaskId(sessionId: string, taskId: string | null): void {
     this.db.prepare("UPDATE command_sessions SET workspace_task_id = ? WHERE id = ?").run(taskId, sessionId);
   }
@@ -2235,6 +2253,19 @@ export class WandStorage {
     return row ? this.mapSessionRow(row) : null;
   }
 
+  /** 同 `getSession`，但不读 `output`/`messages` 大字段（只取元数据的路径用）。 */
+  getSessionSlim(id: string): SessionSnapshot | null {
+    const row = this.db
+      .prepare(
+        `SELECT ${sessionSelectFields(true)}
+         FROM command_sessions
+         WHERE id = ?`
+      )
+      .get(id) as SessionRow | undefined;
+
+    return row ? this.mapSessionRow(row) : null;
+  }
+
   getLatestSessionByClaudeSessionId(claudeSessionId: string): SessionSnapshot | null {
     const row = this.db
       .prepare(
@@ -2437,6 +2468,13 @@ function ensureCommandSessionSchema(db: DatabaseSync): void {
     if (!names.has(column)) {
       db.exec(sql);
     }
+  }
+  if (columns.length > 0) {
+    // 侧栏 / 任务面板按 workspace_task_id 反复拉会话：没有索引时每次都是
+    // 46MB 表全扫（单次 ~500ms），而 command_sessions 里有 10MB+ 的 output/
+    // messages 溢出行。索引只加不删，老库首次启动时建一次。
+    db.exec("CREATE INDEX IF NOT EXISTS idx_command_sessions_workspace_task ON command_sessions(workspace_task_id)");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_command_sessions_workspace ON command_sessions(workspace_id)");
   }
 }
 

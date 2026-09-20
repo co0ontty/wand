@@ -48,10 +48,22 @@ function taskNamingSessions(storage: WandStorage, card: WandTask): SessionSnapsh
   const add = (session: SessionSnapshot | null | undefined): void => {
     if (session && !sessions.has(session.id)) sessions.set(session.id, session);
   };
+  const needsMessageFallback: string[] = [];
+  const addSlim = (session: SessionSnapshot | null | undefined): void => {
+    if (!session) return;
+    add(session);
+    // boardTitleFromSession 只在 title/description 都缺时才翻 messages 找首条用户输入。
+    if (!session.title?.trim() && !session.description?.trim()) needsMessageFallback.push(session.id);
+  };
   if (card.workspaceTaskId) {
-    for (const session of storage.listSessionsByWorkspaceTask(card.workspaceTaskId)) add(session);
+    for (const session of storage.listSessionsByWorkspaceTaskSlim(card.workspaceTaskId)) addSlim(session);
   }
-  for (const sessionId of storage.listWandTaskSessionIds(card.id)) add(storage.getSession(sessionId));
+  for (const sessionId of storage.listWandTaskSessionIds(card.id)) addSlim(storage.getSessionSlim(sessionId));
+  // 只有真的需要 messages 的那几个会话才去解析大字段。
+  for (const sessionId of needsMessageFallback) {
+    const full = storage.getSession(sessionId);
+    if (full && (full.messages?.length ?? 0) > 0) sessions.set(sessionId, full);
+  }
   return [...sessions.values()].sort((left, right) => (right.startedAt ?? "").localeCompare(left.startedAt ?? ""));
 }
 
@@ -189,7 +201,8 @@ export function syncSidebarTasksFromBoard(storage: WandStorage): void {
       if (!card.workspaceTaskId && card.status === "archived") continue;
       const task = ensureWorkspaceTaskForBoardTask(storage, card);
       for (const sessionId of storage.listWandTaskSessionIds(card.id)) {
-        const session = storage.getSession(sessionId);
+        // 只需要归属两列：不要用 getSession()，那会解析十几 MB 的 messages。
+        const session = storage.getSessionWorkspace(sessionId);
         if (!session) continue;
         if (session.workspaceTaskId && session.workspaceTaskId !== task.id) {
           storage.unbindWandTaskSession(card.id, sessionId);
@@ -206,7 +219,7 @@ export function syncSidebarTasksFromBoard(storage: WandStorage): void {
 function syncTaskSessionsToBoard(storage: WandStorage, task: WorkspaceTask, workspace: Workspace): void {
   storage.transaction(() => {
     let card = ensureBoardTaskForWorkspaceTask(storage, task, workspace);
-    const sessions = storage.listSessionsByWorkspaceTask(task.id);
+    const sessions = storage.listSessionsByWorkspaceTaskSlim(task.id);
     const agent = sessions.map(agentFromSession).find((value) => value !== null);
     const bound = new Set(storage.listWandTaskSessionIds(card.id));
     const started = card.status === "todo" && sessions.some((session) => !bound.has(session.id));

@@ -426,13 +426,13 @@ export function registerWorkspaceRoutes(
     if (cascade) {
       deleteSessions(storage, sessions, [
         ...storage.listSessionsByWorkspace(existing.id).map((session) => session.id),
-        ...tasks.flatMap((task) => storage.listSessionsByWorkspaceTask(task.id).map((session) => session.id)),
+        ...tasks.flatMap((task) => storage.listSessionsByWorkspaceTaskSlim(task.id).map((session) => session.id)),
       ]);
     } else {
       // 非级联删除可以保留项目根目录里的会话，但隔离任务的 cwd 会随
       // worktree 一起消失，因此必须删除这些会话，不能留下僵尸记录。
       deleteSessions(storage, sessions, tasks.flatMap((task) => task.worktree
-        ? storage.listSessionsByWorkspaceTask(task.id).map((session) => session.id)
+        ? storage.listSessionsByWorkspaceTaskSlim(task.id).map((session) => session.id)
         : []));
     }
     for (const task of tasks) {
@@ -507,6 +507,9 @@ export function registerWorkspaceRoutes(
     const taskLimit = parseBoundedCount(req.query.limit);
     const sessionLimit = parseBoundedCount(req.query.maxSessions);
     backfillSessionWorkspaces(storage);
+    // 目录组只需要会话元数据：用 slim 读，否则每次轮询都要把每个会话的
+    // messages 大字段 JSON 解析一遍（单会话可达十几 MB，整表 ~30MB）。
+    const allSessions = storage.loadSessionsSlim();
     const workspaces = storage.listWorkspaces();
     // 目录组为一级容器：任务归属目录；未绑定任务的会话以 standaloneSessions
     // 归入所在目录的组（含无项目的合成组），保证没有会话在任务视图里失联。
@@ -574,7 +577,7 @@ export function registerWorkspaceRoutes(
     const taskSessions = (taskId: string): SessionSnapshot[] => {
       let snapshots = sessionsByTask.get(taskId);
       if (!snapshots) {
-        snapshots = storage.listSessionsByWorkspaceTask(taskId);
+        snapshots = storage.listSessionsByWorkspaceTaskSlim(taskId);
         sessionsByTask.set(taskId, snapshots);
       }
       return snapshots;
@@ -620,7 +623,7 @@ export function registerWorkspaceRoutes(
         for (const session of taskSessions(task.id)) taskBoundSessionIds.add(session.id);
       }
     }
-    for (const session of storage.loadSessions()) {
+    for (const session of allSessions) {
       if (taskBoundSessionIds.has(session.id)) continue;
       const direct = session.workspaceId ? groups.get(session.workspaceId) : undefined;
       const resolved = projectCwdForSession(session);
@@ -802,7 +805,7 @@ export function registerWorkspaceRoutes(
     res.json({
       ...task,
       cwd: taskRuntimeCwd(task, workspace),
-      sessions: storage.listSessionsByWorkspaceTask(task.id).map((session) => ({
+      sessions: storage.listSessionsByWorkspaceTaskSlim(task.id).map((session) => ({
         ...workspaceSessionSummary(session, {
           taskName: task.name,
           workspaceName: workspace?.name,
@@ -883,7 +886,7 @@ export function registerWorkspaceRoutes(
       deleteSessions(
         storage,
         sessions,
-        storage.listSessionsByWorkspaceTask(existing.id).map((session) => session.id),
+        storage.listSessionsByWorkspaceTaskSlim(existing.id).map((session) => session.id),
       );
     }
     // 尽力清理 worktree 与分支；失败不阻塞删除任务行。
