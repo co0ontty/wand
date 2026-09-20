@@ -39,6 +39,16 @@ export interface CodeEditorSnapshot {
   saving: boolean;
   fontSize: number;
   wrap: boolean;
+  /** In-editor find bar (⌘F). Closed by default so the editor keeps full height. */
+  findOpen: boolean;
+  findQuery: string;
+  findCaseSensitive: boolean;
+  /**
+   * Active occurrence inside the derived match list. Kept unclamped on purpose:
+   * editing the draft can shrink the list under the stored index, and the view
+   * clamps for display while `find.step` wraps around whatever count it finds.
+   */
+  findIndex: number;
 }
 
 export interface CodeEditorLoadResult {
@@ -88,7 +98,12 @@ export type CodeEditorCommand =
   | { type: "revert" }
   | { type: "save" }
   | { type: "wrap.toggle" }
-  | { type: "font.adjust"; delta: number };
+  | { type: "font.adjust"; delta: number }
+  | { type: "find.open" }
+  | { type: "find.close" }
+  | { type: "find.set"; query: string }
+  | { type: "find.step"; delta: number }
+  | { type: "find.case.toggle" };
 
 export type CodeEditorDiscardReason = "close" | "switch" | "replace";
 

@@ -5,6 +5,7 @@ import {
   composerBadgesController,
   type ComposerApprovalStats,
   type ComposerBadgeMount,
+  type ComposerPermissionMount,
 } from "./controller";
 import { WandIcon } from "../ui";
 
@@ -15,9 +16,11 @@ const AUTO_APPROVE_LABELS = {
 
 export function ComposerAutoApproveChip({
   enabled,
+  pending = false,
   onToggle,
 }: {
   enabled: boolean;
+  pending?: boolean;
   onToggle: () => void;
 }): React.ReactElement {
   const copy = enabled ? AUTO_APPROVE_LABELS.on : AUTO_APPROVE_LABELS.off;
@@ -27,6 +30,8 @@ export function ComposerAutoApproveChip({
       type="button"
       className={`composer-pill composer-pill-chip auto-approve-indicator${enabled ? " active" : ""}`}
       aria-pressed={enabled}
+      aria-busy={pending || undefined}
+      disabled={pending}
       aria-label={copy.aria}
       title={copy.title}
       onClick={(event) => {
@@ -99,12 +104,36 @@ export function ComposerApprovalStatsBadge({
   );
 }
 
+export function ComposerPermissionActions({ permission, pending, onAction }: Pick<
+  ComposerPermissionMount, "permission" | "pending" | "onAction"
+>): React.ReactElement {
+  return (
+    <span className="permission-actions" id="permission-actions" aria-busy={pending || undefined}>
+      <span className="permission-actions-label" id="permission-actions-label"
+        role="status" aria-live="polite" aria-atomic="true">{permission.label}</span>
+      {!permission.autoApproving && <>
+        <button id="approve-permission-btn" className="btn btn-permission btn-permission-approve"
+          type="button" disabled={pending} onClick={() => onAction("approve")}>批准</button>
+        {permission.requestId && <button id="approve-turn-permission-btn"
+          className="btn btn-permission btn-permission-approve" type="button" disabled={pending}
+          onClick={() => onAction("approve-turn")}>本轮允许</button>}
+        <button id="deny-permission-btn" className="btn btn-permission btn-permission-deny"
+          type="button" disabled={pending} onClick={() => onAction("deny")}>拒绝</button>
+      </>}
+    </span>
+  );
+}
+
 function renderBadge(mount: ComposerBadgeMount, revision: number): React.ReactElement | null {
+  if (mount.kind === "permissions") {
+    return <ComposerPermissionActions permission={mount.permission} pending={mount.pending} onAction={mount.onAction}/>;
+  }
   if (mount.kind === "auto-approve") {
     return (
       <ComposerAutoApproveChip
         key={mount.key}
         enabled={mount.enabled}
+        pending={mount.pending}
         onToggle={mount.onToggle}
       />
     );

@@ -1,17 +1,16 @@
 import { state, writeStoredBoolean } from "./state";
 import { restoreActiveTask } from "./active-task";
-import { renderProviderLogoMarkup } from "../provider-identity";
+import { renderLoginVisual } from "./login-visual.js";
+import { renderWandBrandMarkup } from "../brand-identity.js";
 import { iconSvg } from "./i18n";
-import { escapeHtml, refreshTailMarqueePaths, renderTailMarqueePath, scrollPathElementToEnd, updateRunningIndicators } from "./utils";
+import { escapeHtml, refreshTailMarqueePaths, scrollPathElementToEnd } from "./utils";
 import { getConfigCwd } from "./chat-scroll";
-import { shortCommand } from "./chat-render";
 import { attachEventListeners } from "./events";
-import { shouldShowSessionsBackdrop, isMobileLayout, isSidebarDrawerLayout } from "./file-browser";
-import { loadGitStatus, renderTopbarGitBadgeHtml, renderTopbarMoreMenuHtml } from "./git-commit";
+import { isSidebarDrawerLayout } from "./file-browser";
+import { loadGitStatus } from "./git-commit";
 import { autoResizeInput, getSelectedSession } from "./input";
 import { requestNotificationPermission, notifyUpdateAvailable, _apkVersion, _macAppVersion } from "./notifications";
-import { applyCurrentView, applyConfigDefaultThinking, checkApkAutoUpdate, checkDmgAutoUpdate, closeTransientSessionsDrawer, fetchAvailableModels, getComposerPlaceholder, hasNativeBackToApp, hasNativeSwitchServer, loadSessions, refreshAll, refreshClaudeSkillsPicker, syncComposerModeSelect, syncComposerModelSelect, updateDrawerState, updateShellChrome } from "./session-engine";
-import { getSessionStatusClass, getSessionStatusLabel } from "./session-ui";
+import { applyCurrentView, applyConfigDefaultThinking, checkApkAutoUpdate, checkDmgAutoUpdate, closeTransientSessionsDrawer, fetchAvailableModels, getComposerPlaceholder, hasNativeSwitchServer, loadSessions, refreshAll, refreshClaudeSkillsPicker, syncComposerModeSelect, syncComposerModelSelect, updateDrawerState, updateShellChrome } from "./session-engine";
 import { maybeScrollTerminalToBottom } from "./terminal";
 import { ensureTerminalFit, ensureTerminalFitWithRetry, teardownTerminal } from "./viewport";
 import { initWebSocket, forceReconnectWebSocket, cancelWsReconnect, evaluateWsHeartbeatStale, startPolling, syncComposerBadges } from "./websocket";
@@ -30,6 +29,7 @@ export function resetChatRenderCache(options?: any) {
   var opts = options || {};
   state.lastRenderedHash = 0;
   state.lastRenderedMsgCount = 0;
+  state.lastRenderedAgentRunSignature = "";
   state.lastRenderedEmpty = null;
   state.renderPending = false;
   state.chatRenderedCount = state.chatPageSize;
@@ -440,12 +440,6 @@ export function render(options?: any) {
     loadGitStatus(state.selectedId);
   }
 
-  // DOM 整体重渲后，重新挂上"运行中"指示器（顶部进度条/徽章计时/气泡呼吸条）
-  if (isLoggedIn) {
-    var __sel = state.sessions.find(function(s: any) { return s.id === state.selectedId; });
-    updateRunningIndicators(__sel);
-  }
-
   // 长路径元素（topbar 的 cwd）滚到末尾展示末尾目录。
   // 渲染刚完成，元素可能尚未完成布局，scrollPathElementToEnd 内部用 rAF 兜底。
   // blank-chat 的 cwd 路径元素只存在于已删除的 legacy Shell markup 里，
@@ -454,13 +448,8 @@ export function render(options?: any) {
   refreshTailMarqueePaths();
 }
 
-// 品牌标记：与 index.ts 的 favicon data-URI 同源（深色圆角方块 + 赤陶色折线），
-// 内联成 SVG，保证本地控制台离线可用、不依赖任何外部 CDN。
-var LOGIN_BRAND_MARK =
-  '<svg class="brand-logo" viewBox="0 0 64 64" aria-hidden="true" focusable="false">' +
-    '<rect width="64" height="64" rx="18" fill="#17120f"/>' +
-    '<path d="M13 21l9 24 10-15 10 15 9-24" fill="none" stroke="#c5653d" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"/>' +
-  '</svg>';
+// 与 favicon、React Shell 和原生客户端共用 Android 像素猫，不依赖外部资源。
+var LOGIN_BRAND_MARK = renderWandBrandMarkup("brand-logo");
 
 var LOGIN_TRUST_LINE =
   '<p class="trust-line">' +
@@ -477,7 +466,7 @@ export function renderLogin() {
           '<span class="brand-wordmark">Wand</span>' +
         '</div>' +
         '<p class="brand-statement">重新连接到这台设备上的 Wand 服务。</p>' +
-        '<div class="left-spacer"></div>' +
+        '<div class="left-spacer">' + renderLoginVisual(LOGIN_BRAND_MARK) + '</div>' +
         LOGIN_TRUST_LINE +
       '</div>' +
       '<div class="login-right">' +
@@ -502,7 +491,7 @@ export function renderLogin() {
         '<span class="brand-wordmark">Wand</span>' +
       '</div>' +
       '<p class="brand-statement">连接到本机终端、会话和工作区。</p>' +
-      '<div class="left-spacer"></div>' +
+      '<div class="left-spacer">' + renderLoginVisual(LOGIN_BRAND_MARK) + '</div>' +
       LOGIN_TRUST_LINE +
     '</div>' +
     '<div class="login-right">' +
@@ -535,127 +524,12 @@ export function renderLogin() {
   '</div>';
 }
 
+// Seeds only the imperative host children. Shell chrome and welcome content
+// are rendered exclusively by React; this markup is never mounted as a page.
 export function renderAppShell() {
   var selectedSession = state.sessions.find(function(s: any) { return s.id === state.selectedId; });
   var currentDraft = state.selectedId ? (state.drafts[state.selectedId] || "") : "";
-  var drawerClass = state.sessionsDrawerOpen ? " open" : "";
-  var backdropClass = shouldShowSessionsBackdrop() ? " open" : "";
-
-  // 手机端不允许「pin 但不窄条」（300px 固定边栏太占地），只允许窄条形态。
-  // isAnchored = 边栏占据布局空间（推开主内容）。桌面 pin 或 任意端窄条都算 anchored。
-  var isMobile = isMobileLayout();
-  var isCollapsed = !!state.sidebarPinned && !!state.sidebarCollapsed;
-  // 桌面端任何「可见」的侧栏都停靠（推开内容），绝不悬浮遮挡——避免主区被压到
-  // 侧栏下面。pinned 只表示「锁定常驻」，open 则是临时可见，两者都算停靠。
-  var isAnchored = isCollapsed || (!isMobile && (!!state.sidebarPinned || !!state.sessionsDrawerOpen));
-  var collapsedCls = isCollapsed ? ' sidebar-collapsed' : '';
-  var sidebarCollapsedCls = isCollapsed ? ' collapsed' : '';
-  return '<div class="app-container">' +
-    '<div id="sessions-drawer-backdrop" class="drawer-backdrop' + backdropClass + '"></div>' +
-    '<div class="main-layout' + (state.sessionsDrawerOpen ? ' sidebar-open' : '') + (isAnchored ? ' sidebar-pinned' : '') + collapsedCls + '">' +
-      '<aside id="sessions-drawer" class="sidebar' + drawerClass + (isAnchored ? ' pinned' : '') + sidebarCollapsedCls + '">' +
-        '<div class="sidebar-header">' +
-          '<div class="sidebar-header-main">' +
-            '<div class="topbar-logo-icon">W</div>' +
-            '<span class="sidebar-title">会话</span>' +
-            '<span class="session-count" id="session-count">' + String(state.sessions.filter(function(session: any) { var source = String(session && session.sessionSource || "").toLowerCase(); return source !== "automation" && source !== "startup"; }).length) + '</span>' +
-          '</div>' +
-          '<div class="sidebar-header-actions">' +
-            '<div class="sidebar-header-more">' +
-              '<button id="sidebar-more-btn" class="btn btn-ghost btn-sm" type="button" title="更多操作">' +
-                '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>' +
-              '</button>' +
-              '<div class="sidebar-header-overflow" id="sidebar-overflow-menu">' +
-                '<button class="overflow-item" id="sidebar-home-btn" type="button">' +
-                  '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>' +
-                  '<span>回到首页</span>' +
-                '</button>' +
-                '<button class="overflow-item" id="sidebar-refresh-btn" type="button">' +
-                  '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>' +
-                  '<span>刷新页面</span>' +
-                '</button>' +
-              '</div>' +
-            '</div>' +
-            '<button id="sidebar-pin-btn" class="btn btn-ghost btn-sm sidebar-pin-toggle' + (state.sidebarPinned ? ' pinned' : '') + '" type="button" title="' + (state.sidebarPinned ? '已固定常驻（点击解除锁定）' : '固定侧栏常驻') + '" aria-label="' + (state.sidebarPinned ? '解除固定常驻' : '固定侧栏常驻') + '" aria-pressed="' + (state.sidebarPinned ? 'true' : 'false') + '">' +
-              '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24z"/></svg>' +
-            '</button>' +
-            '<button id="sidebar-collapse-btn" class="btn btn-ghost btn-sm sidebar-collapse-toggle' + (isCollapsed ? ' collapsed' : '') + '" type="button" title="' + (isCollapsed ? '展开为全尺寸' : '收起为窄条') + '" aria-label="' + (isCollapsed ? '展开为全尺寸' : '收起为窄条') + '">' +
-              (isCollapsed
-                ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="10 6 16 12 10 18"/><line x1="20" y1="5" x2="20" y2="19"/></svg>'
-                : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="14 6 8 12 14 18"/><line x1="4" y1="5" x2="4" y2="19"/></svg>') +
-            '</button>' +
-            '<button id="close-drawer-button" class="btn btn-ghost btn-icon sidebar-close drawer-close-btn" type="button" aria-label="关闭菜单"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>' +
-          '</div>' +
-        '</div>' +
-        '<div class="sidebar-body">' +
-          '<div id="sessions-panel">' +
-            '<div class="sessions-list" id="sessions-list"></div>' +
-          '</div>' +
-        '</div>' +
-        '<div class="sidebar-footer">' +
-          '<button id="drawer-new-session-button" class="btn btn-primary btn-block"><span>+</span> 新会话</button>' +
-          '<div class="sidebar-footer-actions">' +
-            '<button id="missions-button" class="btn btn-ghost btn-sm" type="button" title="并行任务">' +
-              '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16l2 10v6H2v-6L4 4zM2 14h6l2 3h4l2-3h6"/></svg>' +
-              '<span>任务</span>' +
-            '</button>' +
-            '<button id="file-panel-toggle-btn" class="btn btn-ghost btn-sm' + (state.filePanelOpen ? " active" : "") + '" type="button" title="查看文件">' +
-              '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>' +
-              '<span>文件</span>' +
-            '</button>' +
-            '<button id="settings-button" class="btn btn-ghost btn-sm" type="button" title="设置">' +
-              '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>' +
-              '<span>设置</span>' +
-            '</button>' +
-            (hasNativeBackToApp() ?
-              '<button id="back-to-native-button" class="btn btn-ghost btn-sm sidebar-back-to-native" type="button" title="返回 App 原生界面">' +
-                '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="10" y="3" width="11" height="18" rx="2"/><line x1="14" y1="17" x2="17" y2="17"/><polyline points="7 8 3 12 7 16"/></svg>' +
-                '<span>返回App</span>' +
-              '</button>'
-              : ''
-            ) +
-            (hasNativeSwitchServer() ?
-              '<button id="switch-server-button" class="btn btn-ghost btn-sm sidebar-switch-server" type="button" title="切换服务器">' +
-                '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg>' +
-                '<span>切换</span>' +
-              '</button>'
-              : ''
-            ) +
-            '<button id="logout-button" class="btn btn-ghost btn-sm sidebar-logout" type="button" title="退出登录">' +
-              '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>' +
-              '<span>退出</span>' +
-            '</button>' +
-          '</div>' +
-        '</div>' +
-      '</aside>' +
-      '<main class="main-content">' +
-        '<div class="main-header-row">' +
-          '<div class="topbar-left">' +
-            '<button id="sessions-toggle-button" class="floating-sidebar-toggle' + (state.sessionsDrawerOpen ? ' active' : '') + '" aria-label="切换会话侧栏" type="button">' +
-              '<span class="hamburger-icon">' +
-                '<span></span><span></span><span></span>' +
-              '</span>' +
-            '</button>' +
-            '<span class="topbar-brand" aria-hidden="true">W</span>' +
-          '</div>' +
-          '<div class="topbar-center">' +
-            (selectedSession
-              ? (
-                  '<span class="topbar-session-title' + (selectedSession.titleGenerating ? ' title-generating' : '') + '"' + (selectedSession.titleGenerating ? ' aria-busy="true"' : '') + ' title="' + escapeHtml(selectedSession.description || selectedSession.command || "") + '">' + escapeHtml(selectedSession.title || shortCommand(selectedSession.command)) + '</span>' +
-                  '<span class="session-status-pill ' + getSessionStatusClass(selectedSession) + '" title="' + escapeHtml(getSessionStatusLabel(selectedSession)) + '"><span class="session-status-dot"></span><span class="session-status-text">' + escapeHtml(getSessionStatusLabel(selectedSession)) + '</span></span>' +
-                  '<span class="current-task hidden" id="current-task"></span>' +
-                  (selectedSession.cwd ? renderTailMarqueePath(selectedSession.cwd, "topbar-cwd", ' id="topbar-cwd" role="button" tabindex="0"') : '')
-                )
-              : '<span class="topbar-tagline">Wand 控制台</span>' +
-                '<span class="current-task hidden" id="current-task"></span>'
-            ) +
-          '</div>' +
-          '<div class="topbar-right">' +
-            '<button id="topbar-file-button" class="topbar-btn square' + (state.filePanelOpen ? ' active' : '') + '" type="button" aria-label="文件" title="查看文件（可修改路径）"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button>' +
-            '<span id="topbar-git-slot" class="topbar-git-slot">' + renderTopbarGitBadgeHtml() + '</span>' +
-            (selectedSession ? renderTopbarMoreMenuHtml(selectedSession) : '') +
-          '</div>' +
-        '</div>' +
+  return (
         // 文件面板（含 backdrop、头部、搜索框）归 React Shell 渲染；
         // 只保留 #file-explorer 槽位锚点，legacy 不再往里写内容。
         '<div class="file-explorer" id="file-explorer"></div>' +
@@ -676,57 +550,33 @@ export function renderAppShell() {
             '<span class="chat-unread-bubble-count" aria-hidden="true"></span>' +
           '</button>' +
         '</div>' +
-        '<div id="blank-chat" class="blank-chat' + (state.selectedId ? " hidden" : "") + '">' +
-          '<div class="blank-chat-inner">' +
-            '<div class="blank-chat-logo">W</div>' +
-            '<h2 class="blank-chat-title">Wand</h2>' +
-            '<p class="blank-chat-subtitle">支持终端 PTY 会话与结构化 chat 会话，两种模式可并存。</p>' +
-            '<div class="blank-chat-tools">' +
-              '<button class="blank-chat-tool-btn" id="welcome-tool-claude" type="button">' +
-                '<span class="tool-icon">' + renderProviderLogoMarkup("claude") + '</span>新建终端会话' +
-              '</button>' +
-              '<button class="blank-chat-tool-btn" id="welcome-tool-codex" type="button">' +
-                '<span class="tool-icon">' + renderProviderLogoMarkup("codex") + '</span>新建 Codex 会话' +
-              '</button>' +
-              '<button class="blank-chat-tool-btn" id="welcome-tool-opencode" type="button">' +
-                '<span class="tool-icon">' + renderProviderLogoMarkup("opencode") + '</span>新建 OpenCode 会话' +
-              '</button>' +
-              '<button class="blank-chat-tool-btn" id="welcome-tool-structured" type="button">' +
-                '<span class="tool-icon">' + iconSvg("chat", { size: 16, strokeWidth: 1.8 }) + '</span>新建结构化会话' +
-              '</button>' +
-            '</div>' +
-            '<div class="blank-chat-cwd-wrap">' +
-              '<div class="blank-chat-cwd" id="blank-chat-cwd" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" title="点击切换工作目录">' +
-                '<span class="blank-chat-cwd-icon">' + iconSvg("folder", { size: 13, strokeWidth: 1.8 }) + '</span>' +
-                renderTailMarqueePath(getEffectiveCwd(), "blank-chat-cwd-path", ' id="blank-chat-cwd-path"') +
-                '<span class="blank-chat-cwd-arrow">' + iconSvg("chevronDown", { size: 11, strokeWidth: 2 }) + '</span>' +
-              '</div>' +
-            '</div>' +
-          '</div>' +
-          '<div id="cross-session-queue-host"></div>' +
-        '</div>' +
+        '<div id="cross-session-queue-host"></div>' +
         '<div class="input-panel' + (state.selectedId ? "" : " hidden") + '">' +
           '<div class="composer-top-row">' +
             '<div id="todo-progress" class="todo-progress hidden">' +
               '<button class="todo-progress-header" id="todo-progress-toggle" type="button" aria-expanded="false" aria-controls="todo-progress-body" aria-label="展开待办列表">' +
+                // 通栏进度轨（轨道由 .todo-progress-header::after 画，填充由这里生长）
                 '<div class="todo-progress-fill" id="todo-progress-fill" aria-hidden="true" style="--progress:0"></div>' +
-                '<div class="todo-progress-left">' +
-                  '<span class="todo-progress-ring" id="todo-progress-ring" aria-hidden="true" style="--progress:0">' +
-                    '<svg width="16" height="16" viewBox="0 0 36 36">' +
-                      '<circle class="todo-ring-track" cx="18" cy="18" r="15.5" fill="none" stroke-width="4"/>' +
-                      '<circle class="todo-ring-fill" cx="18" cy="18" r="15.5" fill="none" stroke-width="4" stroke-linecap="round"/>' +
-                    '</svg>' +
-                  '</span>' +
-                  '<span class="todo-progress-counter" id="todo-progress-counter"></span>' +
-                '</div>' +
-                // 当前任务描述占满中间剩余空间，过长时单行截断；细进度轨道独立贴底。
-                '<div class="todo-progress-task-wrap">' +
-                  '<span class="todo-progress-task" id="todo-progress-task"></span>' +
-                '</div>' +
-                iconSvg("chevronDown", { size: 14, strokeWidth: 2 }) +
+                '<span class="todo-progress-ring" id="todo-progress-ring" aria-hidden="true" style="--progress:0">' +
+                  '<svg width="18" height="18" viewBox="0 0 36 36">' +
+                    '<circle class="todo-ring-track" cx="18" cy="18" r="15.5" fill="none" stroke-width="3.4"/>' +
+                    '<circle class="todo-ring-fill" cx="18" cy="18" r="15.5" fill="none" stroke-width="3.4" stroke-linecap="round"/>' +
+                  '</svg>' +
+                '</span>' +
+                '<span class="todo-progress-counter" id="todo-progress-counter" aria-live="polite"></span>' +
+                '<span class="todo-progress-divider" aria-hidden="true"></span>' +
+                // 当前任务描述占满中间剩余空间，过长时单行截断（展开面板里换行全显）。
+                '<span class="todo-progress-task" id="todo-progress-task"></span>' +
+                '<span class="todo-progress-chevron" aria-hidden="true">' + iconSvg("chevronDown", { size: 14, strokeWidth: 2 }) + '</span>' +
               '</button>' +
             '</div>' +
             '<div class="todo-progress-body hidden" id="todo-progress-body">' +
+              '<div class="todo-progress-panel-head">' +
+                '<span class="todo-progress-panel-title">待办进度</span>' +
+                '<span class="todo-progress-panel-count" id="todo-progress-panel-count"></span>' +
+              '</div>' +
+              // 分段进度：一段一项，一眼能看出「哪几项做完了、当前卡在第几项」。
+              '<div class="todo-progress-segments" id="todo-progress-segments" aria-hidden="true"></div>' +
               '<ul class="todo-progress-list" id="todo-progress-list"></ul>' +
             '</div>' +
           '</div>' +
@@ -758,12 +608,7 @@ export function renderAppShell() {
                   // 徽章内容由 React portal 渲染（见 composer-badges 组件），宿主常驻，
                   // 空状态用宿主上的 `.hidden` 表达。
                   '<span class="composer-badge-host" data-composer-badge-host="auto-approve"></span>' +
-                  '<span class="permission-actions hidden" id="permission-actions">' +
-                    '<span class="permission-actions-label" id="permission-actions-label" role="status" aria-live="polite" aria-atomic="true">等待授权</span>' +
-                    '<button id="approve-permission-btn" class="btn btn-permission btn-permission-approve" type="button">批准</button>' +
-                    '<button id="approve-turn-permission-btn" class="btn btn-permission btn-permission-approve hidden" type="button">本轮允许</button>' +
-                    '<button id="deny-permission-btn" class="btn btn-permission btn-permission-deny" type="button">拒绝</button>' +
-                  '</span>' +
+                  '<span class="composer-badge-host hidden" data-composer-badge-host="permissions"></span>' +
                   '<span class="composer-badge-host" data-composer-badge-host="approval-stats"></span>' +
                 '</div>' +
               '</div>' +
@@ -824,8 +669,6 @@ export function renderAppShell() {
           // 错误条由 React portal 渲染（见 composer-action-error 组件），
           // legacy 通过 state.actionError 表达文案。
           '<span class="composer-action-error-host" data-composer-action-error-host="main"></span>' +
-        '</div>' +
-      '</main>' +
-    '</div>' +
-  '</div>';
+        '</div>'
+  );
 }

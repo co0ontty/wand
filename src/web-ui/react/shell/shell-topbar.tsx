@@ -1,6 +1,7 @@
 import * as React from "react";
 
 import {
+  WandBrandMark,
   WandDropdownMenu,
   WandDropdownMenuContent,
   WandDropdownMenuItem,
@@ -15,6 +16,7 @@ import { classNames } from "../ui/class-names";
 
 import { getShellSidebarEntryActions, type ShellSidebarEntryActions } from "./shell-sidebar";
 import { ChatWidthToggle } from "./chat-width-toggle";
+import { SessionElapsed } from "./session-elapsed";
 import { TopbarGitBadge } from "./topbar-git-badge";
 import { useUiDispatch, useUiStoreSnapshot } from "./ui-store-react";
 import type { UiAction, UiSessionVm } from "./ui-store";
@@ -153,7 +155,11 @@ export function ShellTopbar() {
   };
 
   return (
-    <div className="main-header-row">
+    <div className={classNames(
+      "main-header-row",
+      (selected?.turnActive || selected?.permissionBlocked) && "is-running",
+      selected?.permissionBlocked && "is-permission-blocked",
+    )}>
       <div className="topbar-left">
         {(snapshot.layout.sidebarDrawer || !snapshot.layout.sidebarAnchored) && (
           <WandIconButton
@@ -168,7 +174,7 @@ export function ShellTopbar() {
             <WandIcon name="rail" size={18}/>
           </WandIconButton>
         )}
-        {!snapshot.layout.sidebarAnchored && <span className="topbar-brand" aria-hidden="true">W</span>}
+        {!snapshot.layout.sidebarAnchored && <WandBrandMark className="topbar-brand"/>}
       </div>
       <div className="topbar-center">
         {selected ? (
@@ -186,6 +192,7 @@ export function ShellTopbar() {
             >
               <span className="session-status-dot"/>
               <span className="session-status-text">{snapshot.topbar.statusLabel}</span>
+              {selected.inFlight && <SessionElapsed key={selected.id}/>}
             </span>
             <span
               className={classNames("current-task", !snapshot.topbar.currentTask && "hidden")}
@@ -231,7 +238,7 @@ export function ShellTopbar() {
           title="查看文件（可修改路径）"
           onClick={() => void dispatch({ type: "layout.files.toggle" })}
         >
-          <WandIcon name="explorer"/>
+          <WandIcon name="explorer" size={18}/>
         </WandIconButton>
         <WandIconButton
           id="topbar-local-preview-button"
@@ -241,7 +248,7 @@ export function ShellTopbar() {
           title="打开本机 Web 服务或 HTML 文件"
           onClick={() => localPreviewController.show()}
         >
-          <WandIcon name="eye"/>
+          <WandIcon name="eye" size={18}/>
         </WandIconButton>
         <span id="topbar-git-slot" className="topbar-git-slot">
           <TopbarGitBadge/>
@@ -264,7 +271,7 @@ export function ShellTopbar() {
                     title="当前会话操作"
                     data-pressed={moreOpen || undefined}
                   >
-                    <WandIcon name="more"/>
+                    <WandIcon name="more" size={18}/>
                   </WandIconButton>
                 )}
               />

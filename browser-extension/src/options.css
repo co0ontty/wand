@@ -30,6 +30,14 @@ body {
   box-shadow: 0 16px 40px rgba(18, 35, 64, .08);
 }
 
+.brand-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-logo { flex: 0 0 auto; }
+
 h1 {
   margin: 0;
   font-size: 22px;

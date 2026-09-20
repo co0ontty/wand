@@ -251,7 +251,7 @@ export function WorkspaceTabBar(): React.ReactElement | null {
                   disabled={closingWindowId === window.id}
                   onClick={() => void closeWindow(window)}
                 >
-                  <WandIcon name="close" size={13} strokeWidth={2.2}/>
+                  <WandIcon name="close" size={14}/>
                 </button>
               </div>
             );
@@ -263,7 +263,7 @@ export function WorkspaceTabBar(): React.ReactElement | null {
           aria-label="新建 Agent 或空白终端"
           onClick={() => workspaceAgentDialogController.open()}
         >
-          <WandIcon name="plus" size={16} strokeWidth={2}/>
+          <WandIcon name="plus" size={18}/>
         </button>
         {taskLayout.windows.length > 1 ? (
           <>
@@ -275,7 +275,7 @@ export function WorkspaceTabBar(): React.ReactElement | null {
               aria-pressed={moving?.dir === "h"}
               onClick={() => moving?.dir === "h" ? setMoving(null) : beginMove("h")}
             >
-              ⇆
+              <WandIcon name="splitHorizontal" size={18}/>
             </button>
             <button
               type="button"
@@ -285,7 +285,7 @@ export function WorkspaceTabBar(): React.ReactElement | null {
               aria-pressed={moving?.dir === "v"}
               onClick={() => moving?.dir === "v" ? setMoving(null) : beginMove("v")}
             >
-              ⇅
+              <WandIcon name="splitVertical" size={18}/>
             </button>
           </>
         ) : null}
@@ -318,7 +318,7 @@ export function WorkspaceTabBar(): React.ReactElement | null {
         aria-label="关闭任务标签组"
         onClick={handleClose}
       >
-        <WandIcon name="close" size={16} strokeWidth={2.2}/>
+        <WandIcon name="close" size={18}/>
       </button>
       <WorkspaceAgentDialog
         open={agentDialog.open}

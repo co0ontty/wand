@@ -11,7 +11,7 @@ import type {
 } from "./types";
 import type { FilePreviewFailure } from "../file-preview/types";
 import { failureOf as unknownFailure, isAbortError } from "../errors";
-import { explorerParentOf as parentOf } from "./paths";
+import { explorerParentOf as parentOf, isPathWithin } from "./paths";
 
 type Listener = () => void;
 type ExpandedMap = Map<string, FileExplorerNodeState>;
@@ -84,7 +84,10 @@ export function createFileExplorerModule(options: FileExplorerModuleOptions): Fi
     expanded: new Map() as ReadonlyMap<string, FileExplorerNodeState>,
     searchQuery: "",
     searchResults: null,
+    searchFilter: "all",
+    searchDurationMs: null,
     searching: false,
+    revealPath: null,
     busy: false,
   };
   let runtime = options.runtime ?? defaultRuntime;
@@ -143,7 +146,19 @@ export function createFileExplorerModule(options: FileExplorerModuleOptions): Fi
   function ensureRoot(root: string): void {
     if (!root) return;
     if (snapshot.root !== root) {
-      publish({ root, activeDir: root });
+      // A new root invalidates every search result and reveal target that
+      // pointed into the old tree.
+      searchAbort?.abort();
+      publish({
+        root,
+        activeDir: root,
+        searchQuery: "",
+        searchResults: null,
+        searching: false,
+        searchError: "",
+        searchDurationMs: null,
+        revealPath: null,
+      });
     }
     if (!snapshot.expanded.has(root)) {
       void loadDir(root);
@@ -153,12 +168,18 @@ export function createFileExplorerModule(options: FileExplorerModuleOptions): Fi
   async function runSearch(query: string): Promise<void> {
     searchAbort?.abort();
     if (!query.trim() || !snapshot.root) {
-      publish({ searchQuery: query, searchResults: null, searching: false, searchError: "" });
+      publish({
+        searchQuery: query,
+        searchResults: null,
+        searchDurationMs: null,
+        searching: false,
+        searchError: "",
+      });
       return;
     }
     const abort = new AbortController();
     searchAbort = abort;
-    publish({ searchQuery: query, searching: true, searchError: "" });
+    publish({ searchQuery: query, searching: true, searchError: "", revealPath: null });
     await new Promise<void>((resolve) => {
       const timer = setTimeout(resolve, 300);
       abort.signal.addEventListener("abort", () => {
@@ -167,18 +188,75 @@ export function createFileExplorerModule(options: FileExplorerModuleOptions): Fi
       }, { once: true });
     });
     if (abort.signal.aborted) return;
+    const startedAt = Date.now();
     try {
       const result = await options.repository.search(query.trim(), snapshot.root, abort.signal);
       if (abort.signal.aborted) return;
       publish({
         searching: false,
         searchResults: result.ok && result.results ? result.results : [],
+        searchDurationMs: result.ok ? Date.now() - startedAt : null,
         searchError: result.ok ? "" : failureMessage(result.failure, "搜索文件失败，请重试。"),
       });
     } catch (error) {
       if (abort.signal.aborted || isAbortError(error)) return;
-      publish({ searching: false, searchResults: [], searchError: unknownFailure(error, "搜索文件失败，请重试。").message });
+      publish({
+        searching: false,
+        searchResults: [],
+        searchDurationMs: null,
+        searchError: unknownFailure(error, "搜索文件失败，请重试。").message,
+      });
     }
+  }
+
+  function closeSearch(): void {
+    searchAbort?.abort();
+    searchAbort = null;
+    publish({
+      searchQuery: "",
+      searchResults: null,
+      searchDurationMs: null,
+      searching: false,
+      searchError: "",
+    });
+  }
+
+  /**
+   * Expands every ancestor of `target` that is not loaded yet, then marks it as
+   * the reveal target. Loading is sequential so each publish leaves the tree in
+   * a consistent state and the host can scroll on its own render pass. A
+   * directory is opened on the way in: revealing it means "take me there", so
+   * its contents (and the active directory new entries land in) follow it.
+   */
+  async function reveal(target: string): Promise<boolean> {
+    const root = snapshot.root;
+    if (!root || !isPathWithin(target, root)) return false;
+    closeSearch();
+    const ancestors: string[] = [];
+    let dir = parentOf(target);
+    while (dir !== root && isPathWithin(dir, root)) {
+      ancestors.unshift(dir);
+      const parent = parentOf(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+    for (const ancestor of ancestors) {
+      if (!snapshot.expanded.has(ancestor)) await loadDir(ancestor);
+    }
+    const parentDir = parentOf(target);
+    // The root has no parent inside the tree, so it is the only target that is
+    // already at the top of the active-directory chain.
+    const isRoot = target === root;
+    const isDir = isRoot || looksLikeDirectory(parentDir, target);
+    if (isDir && !isRoot && !snapshot.expanded.has(target)) await loadDir(target);
+    publish({ activeDir: isDir ? target : parentDir, revealPath: target });
+    return true;
+  }
+
+  /** Directory-ness comes from the parent listing, the only place that knows. */
+  function looksLikeDirectory(parentDir: string, target: string): boolean {
+    const state = snapshot.expanded.get(parentDir);
+    return state?.entries.some((entry) => entry.path === target && entry.type === "dir") ?? false;
   }
 
   function joinPath(dir: string, name: string): string {
@@ -236,13 +314,25 @@ export function createFileExplorerModule(options: FileExplorerModuleOptions): Fi
         await loadDir(target);
         return true;
       }
+      case "reveal": {
+        return reveal(command.path);
+      }
+      case "reveal.done": {
+        if (snapshot.revealPath === null) return true;
+        publish({ revealPath: null });
+        return true;
+      }
       case "search.start": {
         await runSearch(command.query);
         return true;
       }
+      case "search.filter": {
+        if (snapshot.searchFilter === command.filter) return true;
+        publish({ searchFilter: command.filter });
+        return true;
+      }
       case "search.clear": {
-        searchAbort?.abort();
-        publish({ searchQuery: "", searchResults: null, searching: false, searchError: "" });
+        closeSearch();
         return true;
       }
       case "create.file": {

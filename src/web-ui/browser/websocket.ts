@@ -1,5 +1,9 @@
 import { state } from "./state";
 import { syncBrowserComposerBadges } from "./composer-badges-adapter";
+import { getErrorMessage } from "../../error-utils.js";
+import { parseJsonResponse } from "../react/http-adapter";
+import { resolveComposerPermission } from "../react/composer-badges/model";
+import type { ComposerPermissionAction } from "../react/composer-badges/controller";
 import { renderChat } from "./chat-render";
 import { clearStructuredQueuePersistence } from "./chat-scroll";
 import { mergeAssistantTurn } from "./message-reconciliation";
@@ -734,49 +738,8 @@ function noteTurnActivity(sessionId: string, active: boolean): void {
       }
 
       export function updateTaskDisplay() {
-        var permissionActionsEl = document.getElementById("permission-actions");
-        var permissionLabel = document.getElementById("permission-actions-label");
-        // 顶栏 #current-task 由 React 外壳渲染（shell-topbar.tsx），legacy 只广播
-        // 快照变更，让 React 从 deriveLegacyUiSnapshot 里取 currentTask。
         notifyLegacyUiChange("task:update");
-        var selectedSession = state.sessions.find(function(s: any) { return s.id === state.selectedId; });
-        if (selectedSession && selectedSession.provider === "codex") {
-          if (permissionActionsEl) permissionActionsEl.classList.add("hidden");
-        }
-        var pendingEscalation = selectedSession && selectedSession.pendingEscalation ? selectedSession.pendingEscalation : null;
-        var isBlocked = selectedSession && selectedSession.provider !== "codex"
-          ? (pendingEscalation || selectedSession.permissionBlocked)
-          : false;
-
-        if (isBlocked) {
-          var isAutoApprove = selectedSession && selectedSession.autoApprovePermissions;
-          // Show permission label in input composer area
-          if (permissionLabel) {
-            if (isAutoApprove) {
-              permissionLabel.textContent = "自动批准中...";
-            } else if (pendingEscalation) {
-              var reason = pendingEscalation.reason || "等待授权";
-              var target = pendingEscalation.target ? " · " + pendingEscalation.target : "";
-              permissionLabel.textContent = reason + target;
-            } else {
-              permissionLabel.textContent = "等待授权";
-            }
-          }
-          if (permissionActionsEl) {
-            permissionActionsEl.classList.remove("hidden");
-            // Hide approve/deny buttons when auto-approve is active
-            var approveBtn = document.getElementById("approve-permission-btn");
-            var approveTurnBtn = document.getElementById("approve-turn-permission-btn");
-            var denyBtn = document.getElementById("deny-permission-btn");
-            if (approveBtn) approveBtn.classList.toggle("hidden", !!isAutoApprove);
-            if (approveTurnBtn) approveTurnBtn.classList.toggle("hidden", !!isAutoApprove || !pendingEscalation);
-            if (denyBtn) denyBtn.classList.toggle("hidden", !!isAutoApprove);
-          }
-          // Hide top task bar — permission info is already shown in the composer
-          return;
-        }
-
-        if (permissionActionsEl) permissionActionsEl.classList.add("hidden");
+        syncComposerBadges();
       }
 
       /**
@@ -790,116 +753,95 @@ function noteTurnActivity(sessionId: string, active: boolean): void {
           resolve: function() {
             if (!selectedSession) return null;
             return {
+              sessionId: selectedSession.id,
+              autoApprovePending: autoApprovePending.has(selectedSession.id),
+              permissionPending: permissionPending.has(selectedSession.id),
+              permission: resolveComposerPermission(selectedSession),
               autoApproveHidden: isAutoApproveImpliedByMode(selectedSession),
               autoApproveEnabled: !!selectedSession.autoApprovePermissions,
               approvalStats: selectedSession.approvalStats || null,
             };
           },
-          onToggleAutoApprove: function() { toggleAutoApprove(); },
+          onToggleAutoApprove: function(sessionId) { void toggleAutoApprove(sessionId); },
+          onPermissionAction: function(sessionId, requestId, action) {
+            void postPermissionAction(sessionId, requestId, action);
+          },
         });
       }
 
-      function permissionActionButtons() {
-        return {
-          approveBtn: document.getElementById("approve-permission-btn") as HTMLButtonElement | null,
-          approveTurnBtn: document.getElementById("approve-turn-permission-btn") as HTMLButtonElement | null,
-          denyBtn: document.getElementById("deny-permission-btn") as HTMLButtonElement | null,
-        };
-      }
+      const permissionPending = new Set<string>();
 
-      function setPermissionButtonsDisabled(disabled: boolean) {
-        var buttons = permissionActionButtons();
-        if (buttons.approveBtn) buttons.approveBtn.disabled = disabled;
-        if (buttons.approveTurnBtn) buttons.approveTurnBtn.disabled = disabled;
-        if (buttons.denyBtn) buttons.denyBtn.disabled = disabled;
-      }
-
-      function postPermissionAction(url: string, body: Record<string, string> | undefined, fallbackError: string) {
-        if (!state.selectedId) return;
-        setPermissionButtonsDisabled(true);
-        fetch(url, {
-          method: "POST",
-          credentials: "same-origin",
-          headers: body ? { "content-type": "application/json" } : undefined,
-          body: body ? JSON.stringify(body) : undefined,
-        })
-          .then(function(res) { return res.json(); })
-          .then(function(data: any) {
-            if (data && data.error) {
-              showToast(data.error, "error");
-              return;
-            }
-            updateSessionSnapshot(data);
-            updateTaskDisplay();
-          })
-          .catch(function(error: any) {
-            showToast((error && error.message) || fallbackError, "error");
-          })
-          .finally(function() {
-            setPermissionButtonsDisabled(false);
-          });
-      }
-
-      export function approvePermission() {
-        postPermissionAction(
-          "/api/sessions/" + encodeURIComponent(state.selectedId || "") + "/approve-permission",
-          undefined,
-          "无法批准授权。",
-        );
-      }
-
-      export function approveTurnPermission() {
-        var selectedSession = state.sessions.find(function(s: any) { return s.id === state.selectedId; });
-        var requestId = selectedSession && selectedSession.pendingEscalation && selectedSession.pendingEscalation.requestId;
-        if (!state.selectedId || !requestId) {
-          approvePermission();
+      async function postPermissionAction(
+        sessionId: string,
+        requestId: string | null,
+        action: ComposerPermissionAction,
+      ): Promise<void> {
+        if (sessionId !== state.selectedId || permissionPending.has(sessionId)) return;
+        const session = state.sessions.find(function(s: any) { return s.id === sessionId; });
+        const permission = resolveComposerPermission(session);
+        // A rendered callback belongs to one session and one escalation. Do not
+        // silently approve a newer request if state changed before React committed.
+        if (!permission || permission.autoApproving || permission.requestId !== requestId) {
+          syncComposerBadges();
           return;
         }
-        postPermissionAction(
-          "/api/sessions/" + encodeURIComponent(state.selectedId) + "/escalations/" + encodeURIComponent(requestId) + "/resolve",
-          { resolution: "approve_turn" },
-          "无法批准授权。",
-        );
+        if (action === "approve-turn" && !requestId) return;
+        const prefix = "/api/sessions/" + encodeURIComponent(sessionId);
+        const url = action === "approve-turn"
+          ? prefix + "/escalations/" + encodeURIComponent(requestId!) + "/resolve"
+          : prefix + (action === "approve" ? "/approve-permission" : "/deny-permission");
+        permissionPending.add(sessionId);
+        syncComposerBadges();
+        try {
+          const response = await fetch(url, {
+            method: "POST",
+            credentials: "same-origin",
+            ...(action === "approve-turn" ? {
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ resolution: "approve_turn" }),
+            } : {}),
+          });
+          const data = await parseJsonResponse<any>(response);
+          if (data.id !== sessionId) throw new Error("授权响应与当前操作的会话不一致。");
+          updateSessionSnapshot(data);
+          updateTaskDisplay();
+        } catch (error) {
+          showToast(getErrorMessage(error, "无法完成授权操作。"), "error");
+        } finally {
+          permissionPending.delete(sessionId);
+          syncComposerBadges();
+        }
       }
 
-      export function denyPermission() {
-        postPermissionAction(
-          "/api/sessions/" + encodeURIComponent(state.selectedId || "") + "/deny-permission",
-          undefined,
-          "无法拒绝授权。",
-        );
-      }
+      const autoApprovePending = new Set<string>();
 
-      export function toggleAutoApprove() {
-        if (!state.selectedId) return;
-        var selectedSession = state.sessions.find(function(s: any) { return s.id === state.selectedId; });
-        if (selectedSession && selectedSession.provider === "codex") {
+      async function toggleAutoApprove(sessionId: string): Promise<void> {
+        if (!sessionId || sessionId !== state.selectedId || autoApprovePending.has(sessionId)) return;
+        const selectedSession = state.sessions.find(function(s: any) { return s.id === sessionId; });
+        if (!selectedSession) return;
+        if (selectedSession.provider === "codex") {
           showToast("Codex 会话固定以 full-access PTY 启动，不支持切换自动批准。", "info");
           return;
         }
-        var toggle = document.getElementById("auto-approve-toggle") as HTMLElement | null;
-        if (toggle) toggle.style.opacity = "0.5";
-        fetch("/api/sessions/" + encodeURIComponent(state.selectedId) + "/toggle-auto-approve", {
-          method: "POST",
-          credentials: "same-origin"
-        })
-          .then(function(res) { return res.json(); })
-          .then(function(data: any) {
-            if (data && data.error) {
-              showToast(data.error, "error");
-              return;
-            }
-            updateSessionSnapshot(data);
-            updateAutoApproveIndicator();
-            var enabled = data.autoApprovePermissions;
-            showToast(enabled ? "自动批准已开启" : "自动批准已关闭", "info");
-          })
-          .catch(function(error: any) {
-            showToast((error && error.message) || "无法切换自动批准。", "error");
-          })
-          .finally(function() {
-            if (toggle) toggle.style.opacity = "";
+        autoApprovePending.add(sessionId);
+        syncComposerBadges();
+        try {
+          const response = await fetch("/api/sessions/" + encodeURIComponent(sessionId) + "/toggle-auto-approve", {
+            method: "POST",
+            credentials: "same-origin",
           });
+          const data = await parseJsonResponse<any>(response);
+          if (data.id !== sessionId) throw new Error("自动批准响应与当前操作的会话不一致。");
+          updateSessionSnapshot(data);
+          if (state.selectedId === sessionId) {
+            showToast(data.autoApprovePermissions ? "自动批准已开启" : "自动批准已关闭", "info");
+          }
+        } catch (error) {
+          showToast(getErrorMessage(error, "无法切换自动批准。"), "error");
+        } finally {
+          autoApprovePending.delete(sessionId);
+          syncComposerBadges();
+        }
       }
 
       export function updateAutoApproveIndicator() {

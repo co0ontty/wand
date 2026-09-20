@@ -239,43 +239,56 @@ test("task board create sheets only assign agents from the doing column", () => 
 
 test("subagent execution surfaces stay compact, avatar-free, and follow the newest content", () => {
   includesAll("src/web-ui/browser/chat-render.ts", [
-    'class="subagent-panel-summary"',
+    'class="agent-run-summary"',
     'aria-expanded="\' + (expanded ? "true" : "false") + \'"',
-    'data-status="\' + status.key + \'"',
-    'expanded = persisted === null ? status.key === "running" : persisted;',
-    'class="subagent-panel-process"',
-    'class="subagent-reply final',
+    'data-status="\' + summary.status + \'"',
+    "var expanded = shouldAgentRunStartExpanded(summary.status, persisted);",
+    'class="agent-run-rail"',
+    'class="agent-run-agent',
+    'class="agent-run-detail-panel',
+    'class="agent-run-result',
+    "renderAgentRunTimelineHtml(agent, agentStatus, role, toolResults, messageKey)",
+    "role=\"tabpanel\"",
+    'onkeydown="__agentRunSelect(event, this)"',
+    'aria-controls="\' + escapeHtml(panelId) + \'"',
   ]);
   includesAll("src/web-ui/browser/events.ts", [
-    "(window as any).__subagentPanelToggle",
-    'applyExpandedState(panel, "subagent-panel", expanded)',
-    'persistElementExpandState(panel, "subagent-panel")',
+    "(window as any).__agentRunToggle",
+    '(window as any).__agentRunSelect',
+    'applyExpandedState(run, "agent-run", expanded)',
+    'persistElementExpandState(run, "agent-run")',
+    "setPersistedAgentSelection(runId, taskId)",
+    "ArrowLeft",
+    "ArrowRight",
   ]);
   includesAll("src/web-ui/browser/chat-scroll.ts", [
-    'case "subagent-panel":',
-    "subagentBody.style.display = expanded ? \"block\" : \"none\"",
+    'case "agent-run":',
+    "AGENT_RUN_SELECTION_STORAGE_KEY",
+    "export function getPersistedAgentSelection",
+    "export function setPersistedAgentSelection",
   ]);
   includesAll("src/web-ui/content/styles.css", [
-    ".subagent-panel-summary",
-    ".subagent-panel-process::before",
-    "height: auto;",
+    ".agent-run-summary",
+    ".agent-run-rail",
+    ".agent-run-detail",
+    ".agent-run-result",
     "max-height: none;",
     "overflow: visible;",
   ]);
   assert.doesNotMatch(
     source("src/web-ui/browser/chat-render.ts"),
-    /class="subagent-panel-avatar"/,
-    "Web subagent window must not reserve a left avatar box",
+    /\.subagent-panel|\.subagent-reply|multi-agent/,
+    "Web subagent rendering must not fall back to the legacy multi-role bubble",
   );
   assert.doesNotMatch(
     source("src/web-ui/content/styles.css"),
-    /\.subagent-panel-body\s*\{[^}]*height:\s*(?:260|320)px/s,
-    "Web subagent process must not use a fixed-height nested scroller",
+    /\.subagent-panel|\.subagent-reply|\.chat-message-segment/,
+    "Web subagent styling must not keep legacy subagent chrome",
   );
   assert.doesNotMatch(
     source("src/web-ui/content/styles.css"),
-    /\.subagent-panel-header|\.subagent-panel-count/,
-    "Web subagent cards must use the semantic summary button instead of legacy header chrome",
+    /\.agent-run-body\s*\{[^}]*height:\s*\d+px/s,
+    "Web Agent Run body must not use a fixed-height nested scroller",
   );
 
   includesAll("ios/Wand/ChatView.swift", [

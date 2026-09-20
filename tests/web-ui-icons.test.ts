@@ -38,6 +38,16 @@ test("WandIcon stamps a data-icon matching the semantic name", () => {
   assert.doesNotMatch(html, /M12 2v4M12 18v4/);
 });
 
+test("icon geometry remains explicit inside Appica buttons and navigation", () => {
+  const html = renderToStaticMarkup(createElement(WandIcon, { name: "plus", size: 18 }));
+  assert.match(html, /style="width:18px;height:18px;stroke-width:1\.8"/);
+  const custom = renderToStaticMarkup(createElement(WandIcon, { name: "task", size: 28, strokeWidth: 1.5 }));
+  assert.match(custom, /style="width:28px;height:28px;stroke-width:1\.5"/);
+  const board = renderToStaticMarkup(createElement(WandIcon, { name: "board" }));
+  const clipboard = renderToStaticMarkup(createElement(WandIcon, { name: "clipboard" }));
+  assert.notEqual(board, clipboard);
+});
+
 test("sidebar navigation maps settings and task board to distinct glyphs", () => {
   const selected: UiSessionVm = {
     id: "session-1",
@@ -103,7 +113,7 @@ test("sidebar navigation maps settings and task board to distinct glyphs", () =>
     // what its `has-data-[icon=start]` padding reads), so the semantic glyph name
     // lives on `data-wand-icon`.
     assert.match(html, /id="settings-button"[^>]*>[\s\S]*?data-wand-icon="gear"/);
-    assert.match(html, /id="task-board-button"[^>]*>[\s\S]*?data-wand-icon="clipboard"/);
+    assert.match(html, /id="task-board-button"[^>]*>[\s\S]*?data-wand-icon="board"/);
     assert.match(html, /id="file-panel-toggle-btn"[^>]*>[\s\S]*?data-wand-icon="explorer"/);
     assert.doesNotMatch(html, /data-icon="inbox"/);
   } finally {

@@ -1,6 +1,10 @@
 import { state } from "./state";
 import "./i18n";
 import { isStructuredSession } from "./session-engine";
+import { escapeHtml } from "./text-escape";
+
+export { escapeHtml };
+export { computeRunningSignal } from "../session-activity";
 
 // isStructuredSession 定义在尚未迁移的代码区域，这里声明供本模块使用。
 // 后续迁移该函数时，改为从对应模块 import。
@@ -8,101 +12,23 @@ import { isStructuredSession } from "./session-engine";
 // ── Structured session status bar (in-flight timer) ──
 state._statusBarTimerId = null;
 state._statusBarStartTime = 0;
-var _runningIndicatorsTimerId: any = null;
-var _runningIndicatorsStartTime = 0;
-
-// 计算 PTY 会话本轮是否真的在生成。provider CLI 会话需要 ptyBusy 信号（目前只有
-// Claude bridge 能给出）；裸 shell 没有 provider，保持旧行为（进程活着即在跑）。
-var _PROVIDER_CLI_IDS = { claude: 1, codex: 1, opencode: 1, grok: 1, qoder: 1, pi: 1 };
-function isProviderCliSession(session: any) {
-  return !!(session.provider && (_PROVIDER_CLI_IDS as Record<string, number>)[session.provider]);
-}
-
-export function ptyTurnActive(session: any) {
-  if (!session || session.status !== "running") return false;
-  if (isStructuredSession(session)) return false;
-  if (isProviderCliSession(session)) return session.ptyBusy === true;
-  return true;
-}
-
-// 计算会话整体的"在跑"信号，统一驱动顶部进度条/徽章计时/气泡呼吸条。
-export function computeRunningSignal(session: any) {
-  if (!session) return { active: false };
-  if (session.archived) return { active: false };
-  var permBlocked = !!session.permissionBlocked;
-  var inFlight = !!(isStructuredSession(session)
-    && session.structuredState && session.structuredState.inFlight);
-  var providerCliRunning = session.providerCliActive !== false;
-  var ptyRunning = ptyTurnActive(session) && providerCliRunning;
-  return {
-    active: inFlight || ptyRunning || permBlocked,
-    inFlight: inFlight,
-    ptyRunning: ptyRunning,
-    permissionBlocked: permBlocked,
-  };
-}
-
-export function formatElapsedShort(ms: number) {
-  var s = Math.max(0, Math.floor(ms / 1000));
-  if (s < 60) return s + "s";
-  var m = Math.floor(s / 60);
-  var rs = s % 60;
-  if (m < 60) return m + "m" + (rs ? " " + rs + "s" : "");
-  var h = Math.floor(m / 60);
-  var rm = m % 60;
-  return h + "h" + (rm ? " " + rm + "m" : "");
-}
-
-// 集中刷新：顶部进度条 + 顶部徽章计时 + 助手气泡左侧呼吸条。
-export function updateRunningIndicators(session: any) {
-  var sig = computeRunningSignal(session);
-  var headerRow = document.querySelector(".main-header-row");
-  var pill = headerRow ? headerRow.querySelector(".session-status-pill") : null;
-
-  // A. 顶部进度条
-  if (headerRow) {
-    headerRow.classList.toggle("is-running", sig.active);
-    headerRow.classList.toggle("is-permission-blocked", sig.permissionBlocked);
+// 收起待办进度条：容器与展开面板一起复位。切会话 / 发下一条消息时要立刻让上一轮
+// 的待办消失，不能等下一帧 render。展开态的真值存在 DOM（#todo-progress-body 的
+// .expanded）上，所以清 class 就是唯一需要做的事，不会跟 chat-render 里的状态飘。
+export function collapseTodoProgress(): void {
+  var container = document.getElementById("todo-progress");
+  var body = document.getElementById("todo-progress-body");
+  if (container) {
+    container.classList.remove("expanded");
+    container.classList.add("hidden");
   }
-
-  // B. 顶部徽章计时（仅 inFlight 显示，PTY running 不强制显示）
-  if (pill) {
-    var elapsedEl = pill.querySelector(".session-status-elapsed");
-    if (sig.inFlight) {
-      if (!_runningIndicatorsStartTime) {
-        // 优先复用 renderStructuredStatusBar 已记录的真实起点
-        _runningIndicatorsStartTime = state._statusBarStartTime > 0 ? state._statusBarStartTime : Date.now();
-      }
-      var label = formatElapsedShort(Date.now() - _runningIndicatorsStartTime);
-      if (!elapsedEl) {
-        elapsedEl = document.createElement("span");
-        elapsedEl.className = "session-status-elapsed";
-        pill.appendChild(elapsedEl);
-      }
-      elapsedEl.textContent = label;
-    } else {
-      _runningIndicatorsStartTime = 0;
-      if (elapsedEl) elapsedEl.remove();
-    }
-  }
-
-  // 维持每秒一次的刷新心跳，让 elapsed 数字持续滚动
-  if (sig.active) {
-    if (!_runningIndicatorsTimerId) {
-      _runningIndicatorsTimerId = setInterval(function() {
-        var sel = state.sessions.find(function(s: any) { return s.id === state.selectedId; });
-        updateRunningIndicators(sel);
-      }, 1000);
-    }
-  } else if (_runningIndicatorsTimerId) {
-    clearInterval(_runningIndicatorsTimerId);
-    _runningIndicatorsTimerId = null;
+  if (body) {
+    body.classList.remove("expanded");
+    body.classList.add("hidden");
   }
 }
 
 export function renderStructuredStatusBar(chatMessages: any, session: any) {
-  // 先驱动跨视图的运行指示器（顶部进度条/徽章计时/气泡呼吸条）
-  updateRunningIndicators(session);
 
   // Status bar now lives in .composer-top-row alongside the todo-progress collapse bar
   var topRow = document.querySelector(".composer-top-row");
@@ -192,15 +118,6 @@ export function renderStructuredStatusBar(chatMessages: any, session: any) {
       }, 3000);
     }
   }
-}
-
-export function escapeHtml(value: any) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }
 
 export function renderTailMarqueePath(value: any, className: string, attrs?: string) {

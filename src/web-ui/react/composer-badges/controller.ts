@@ -1,14 +1,30 @@
 /**
  * Composer 状态徽章的 portal 注册表。
  *
- * `.input-panel` 的宿主 markup 由 legacy seed 生成，React 只接管这两个叶子：
- * `auto-approve`（自动批准 chip）与 `approval-stats`（自动批准统计）。legacy 侧
- * 每轮同步把「值 + 可见性」推到这里，React 负责渲染；旧的命令式 innerHTML
- * 覆盖与「节点不存在就删掉」都已删除。
+ * `.input-panel` 的宿主 markup 由 legacy seed 生成，React 接管状态行中的
+ * 自动批准 chip、权限操作与自动批准统计。browser 只发布会话状态和命令回调，
+ * React 负责节点、事件和请求期间的禁用状态。
  */
 import { MountStore, type MountSnapshot } from "../composer-portal/mount-store";
 
-export type ComposerBadgeKind = "auto-approve" | "approval-stats";
+export type ComposerBadgeKind = "auto-approve" | "approval-stats" | "permissions";
+export type ComposerPermissionAction = "approve" | "approve-turn" | "deny";
+
+export interface ComposerPermissionState {
+  readonly requestId: string | null;
+  readonly label: string;
+  readonly autoApproving: boolean;
+}
+
+export interface ComposerPermissionMount {
+  readonly key: string;
+  readonly kind: "permissions";
+  readonly target: HTMLElement;
+  readonly sessionId: string;
+  readonly pending: boolean;
+  readonly permission: ComposerPermissionState;
+  readonly onAction: (action: ComposerPermissionAction) => void;
+}
 
 export interface ComposerApprovalStats {
   readonly total: number;
@@ -21,6 +37,8 @@ export interface ComposerAutoApproveBadgeMount {
   readonly key: string;
   readonly kind: "auto-approve";
   readonly target: HTMLElement;
+  readonly sessionId: string;
+  readonly pending: boolean;
   readonly enabled: boolean;
   readonly onToggle: () => void;
 }
@@ -33,7 +51,7 @@ export interface ComposerApprovalStatsBadgeMount {
   readonly stats: ComposerApprovalStats | null;
 }
 
-export type ComposerBadgeMount = ComposerAutoApproveBadgeMount | ComposerApprovalStatsBadgeMount;
+export type ComposerBadgeMount = ComposerAutoApproveBadgeMount | ComposerApprovalStatsBadgeMount | ComposerPermissionMount;
 
 export interface ComposerBadgesSnapshot extends MountSnapshot<ComposerBadgeMount> {}
 
@@ -50,7 +68,15 @@ function sameStats(a: ComposerApprovalStats | null, b: ComposerApprovalStats | n
  */
 function sameMount(a: ComposerBadgeMount, b: ComposerBadgeMount): boolean {
   if (a.key !== b.key || a.target !== b.target) return false;
-  if (a.kind === "auto-approve" && b.kind === "auto-approve") return a.enabled === b.enabled;
+  if (a.kind === "auto-approve" && b.kind === "auto-approve") {
+    return a.sessionId === b.sessionId && a.enabled === b.enabled && a.pending === b.pending;
+  }
+  if (a.kind === "permissions" && b.kind === "permissions") {
+    return a.sessionId === b.sessionId && a.pending === b.pending
+      && a.permission.requestId === b.permission.requestId
+      && a.permission.label === b.permission.label
+      && a.permission.autoApproving === b.permission.autoApproving;
+  }
   if (a.kind === "approval-stats" && b.kind === "approval-stats") return sameStats(a.stats, b.stats);
   return false;
 }

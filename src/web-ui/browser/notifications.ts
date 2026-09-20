@@ -1,4 +1,5 @@
 import { state, writeStoredBoolean } from "./state";
+import { WAND_FAVICON_URL } from "../brand-identity.js";
 import { iconSvg } from "./i18n";
 import { escapeHtml } from "./utils";
 import { persistSelectedId } from "./chat-scroll";
@@ -423,7 +424,7 @@ export function sendBrowserNotification(title: string, body?: string, opts?: any
   try {
     var n = new Notification(title, {
       body: body || "",
-      icon: options.icon || "/favicon.ico",
+      icon: options.icon || WAND_FAVICON_URL,
       tag: tag || undefined,
     });
     n.onclick = function() {

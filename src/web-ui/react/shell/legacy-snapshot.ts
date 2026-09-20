@@ -1,4 +1,5 @@
 import { inferProviderIdFromCommand, normalizeProviderId } from "../../provider-identity";
+import { computeRunningSignal } from "../../session-activity";
 import type {
   UiAuthPhase,
   UiProvider,
@@ -50,6 +51,9 @@ interface LegacySession {
   status?: string;
   permissionBlocked?: boolean;
   ptyBusy?: boolean;
+  runner?: string;
+  archived?: boolean;
+  providerCliActive?: boolean;
   structuredState?: { inFlight?: boolean; phase?: "responding" | "background" } | null;
   startedAt?: string;
   endedAt?: string;
@@ -187,10 +191,7 @@ function sessionToVm(
   const kind = session.sessionKind === "structured" ? "structured" : "pty";
   const worktreeEnabled = Boolean(session.worktree?.enabled ?? session.worktreeEnabled);
   const source = isAutomation(session) ? "automation" : "wand";
-  const structuredInFlight = kind === "structured" && Boolean(session.structuredState?.inFlight);
-  const turnActive = kind === "structured"
-    ? structuredInFlight
-    : status === "running" && (!Boolean(explicitProvider) || Boolean(session.ptyBusy));
+  const activity = computeRunningSignal(session);
 
   return {
     id,
@@ -207,9 +208,9 @@ function sessionToVm(
     resumable: kind !== "structured"
       && status !== "running"
       && Boolean(session.claudeSessionId),
-    permissionBlocked: Boolean(session.permissionBlocked),
-    inFlight: structuredInFlight,
-    turnActive,
+    permissionBlocked: activity.permissionBlocked,
+    inFlight: activity.inFlight,
+    turnActive: activity.inFlight || activity.ptyRunning,
     titleGenerating: Boolean(session.titleGenerating),
     ...(session.startedAt ? { startedAt: session.startedAt } : {}),
     ...(session.endedAt ? { endedAt: session.endedAt } : {}),

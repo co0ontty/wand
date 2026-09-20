@@ -89,6 +89,8 @@ test("徽章注册表按 kind 区分同 key 的两种徽章", () => {
   const autoApprove: ComposerBadgeMount = {
     key: "auto-approve",
     kind: "auto-approve",
+    sessionId: "session-1",
+    pending: false,
     target,
     enabled: false,
     onToggle() {},

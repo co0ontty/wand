@@ -2,10 +2,16 @@ import {
   composerBadgesController,
   type ComposerApprovalStats,
   type ComposerBadgeMount,
+  type ComposerPermissionAction,
+  type ComposerPermissionState,
 } from "../react/composer-badges/controller";
 import { syncPortalMounts } from "./mount-sync";
 
 export interface BrowserComposerBadgeState {
+  readonly sessionId: string;
+  readonly autoApprovePending: boolean;
+  readonly permissionPending: boolean;
+  readonly permission: ComposerPermissionState | null;
   /** 模式（managed / full-access）已隐含自动批准时，chip 不应出现。 */
   readonly autoApproveHidden: boolean;
   readonly autoApproveEnabled: boolean;
@@ -14,9 +20,10 @@ export interface BrowserComposerBadgeState {
 }
 
 export interface BrowserComposerBadgesConfig {
-  /** 返回 `null` 表示当前没有选中会话，两个徽章都不渲染。 */
+  /** 返回 `null` 表示当前没有选中会话，状态行不渲染会话控件。 */
   resolve(): BrowserComposerBadgeState | null;
-  onToggleAutoApprove(): void;
+  onToggleAutoApprove(sessionId: string): void;
+  onPermissionAction(sessionId: string, requestId: string | null, action: ComposerPermissionAction): void;
 }
 
 /** 模式隐含自动批准、或没有选中会话时，chip 不出现。 */
@@ -55,14 +62,33 @@ export function syncBrowserComposerBadges(config: BrowserComposerBadgesConfig): 
       if (kind === "auto-approve") {
         const { visible, enabled } = resolveAutoApproveBadge(current);
         target.classList.toggle("hidden", !visible);
-        if (!visible) return null;
+        if (!visible || !current) return null;
+        const sessionId = current.sessionId;
         return {
           key,
           kind: "auto-approve",
           target,
+          sessionId,
+          pending: current.autoApprovePending,
           enabled,
           onToggle() {
-            config.onToggleAutoApprove();
+            config.onToggleAutoApprove(sessionId);
+          },
+        };
+      }
+      if (kind === "permissions") {
+        target.classList.toggle("hidden", !current?.permission);
+        if (!current?.permission) return null;
+        const { sessionId, permission } = current;
+        return {
+          key,
+          kind: "permissions",
+          target,
+          sessionId,
+          pending: current.permissionPending,
+          permission,
+          onAction(action) {
+            config.onPermissionAction(sessionId, permission.requestId, action);
           },
         };
       }

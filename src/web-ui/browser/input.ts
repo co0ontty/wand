@@ -1,7 +1,7 @@
 import type { SendError } from "./types";
 import { state } from "./state";
 import { t } from "./i18n";
-import { computeRunningSignal, escapeHtml } from "./utils";
+import { collapseTodoProgress, computeRunningSignal, escapeHtml } from "./utils";
 import { renderChat, shortCommand } from "./chat-render";
 import { getStructuredQueuedInputs, persistCrossSessionQueue, persistSelectedId, prepareChatBottomFollow, stripRenderOnlyStructuredMessages, syncStructuredQueueFromSession } from "./chat-scroll";
 import "./file-browser";
@@ -920,8 +920,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
             }
 
             // Clear todo progress bar at the start of a new user turn
-            var todoEl = document.getElementById("todo-progress");
-            if (todoEl && sessionId === state.selectedId) todoEl.classList.add("hidden");
+            if (sessionId === state.selectedId) collapseTodoProgress();
 
             if (isStructuredSession(selectedSession)) {
               return postStructuredInput(finalValue, inputBox, selectedSession, {

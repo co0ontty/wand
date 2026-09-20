@@ -165,7 +165,7 @@ function ShellBlankChat({ className, queueRef, workspaceTask, workspaceProject }
             kind="primary"
             onClick={() => void dispatch({ type: "workspace.new" })}
           >
-            <span className="tool-icon" slot="start"><WandIcon name="task" size={16} strokeWidth={1.8}/></span>
+            <span className="tool-icon" slot="start"><WandIcon name="plus" size={18}/></span>
             新建任务
           </WandButton>
         </div>

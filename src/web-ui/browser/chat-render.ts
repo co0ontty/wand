@@ -1,18 +1,29 @@
 import { state } from "./state";
 import { t, getActiveLang, iconSvg } from "./i18n";
 import { escapeHtml, isImagePath, refreshTailMarqueePaths, renderTailMarqueePath } from "./utils";
-import { applyPersistedExpandState, bindChatScrollListener, buildExpandKey, clearChatUnread, getMessageKey, getPersistedExpandState, isChatNearBottom, observeLoadMoreSentinel, persistElementExpandState, refreshChatUnreadDivider, setPersistedExpandState, updateChatUnreadBubble } from "./chat-scroll";
+import { applyPersistedExpandState, bindChatScrollListener, buildExpandKey, clearChatUnread, getMessageKey, getPersistedAgentSelection, getPersistedExpandState, isChatNearBottom, observeLoadMoreSentinel, persistElementExpandState, refreshChatUnreadDivider, setPersistedExpandState, updateChatUnreadBubble } from "./chat-scroll";
 import "./file-browser";
 import { buildMessagesForRender } from "./input";
 import { syncSessionProgressToNative } from "./notifications";
 import "./render";
 import { copyToClipboard, getPreferredMessages, isRecoverableToolError } from "./session-engine";
+import { buildTodoItemsHtml, buildTodoSegmentsHtml, summarizeTodoProgress } from "./todo-progress";
 import { renderStructuredStatusBar } from "./utils";
 import { getCardDefault, snapExpandedActivityFoldsToBottom } from "./events";
 import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
 import { shouldExtractPtySystemInfo } from "./pty-system-info";
 import { getToolDisplayName, getToolIcon } from "./tool-identity";
 import { localFilePreviewHref, localHttpPreviewHref } from "../react/local-preview/controller";
+import {
+  agentRunBlockKey,
+  agentRunTouchesMessage,
+  buildAgentRunRenderSignature,
+  collectAgentRuns,
+  deriveSubagentMeta,
+  getAgentRunStatusSummary,
+  getLatestAgentRunId,
+  shouldAgentRunStartExpanded,
+} from "./agent-runs";
 import "./local-preview-adapter";
 
 
@@ -180,12 +191,16 @@ import "./local-preview-adapter";
         }
 
         var allMessages = state.currentMessages;
-        // 预扫一遍全量 messages，构建 task id → subagent meta 的 map，
-        // 供老消息 tool_result（没有 __subagent 盖章）按 tool_use_id 反查兜底。
-        var legacyTaskMap = collectLegacyTaskIdMap(allMessages);
-        // 同时刷一遍"同显示名要加后缀"的 suffix map，让 getSubagentDisplayName 拼上
-        // " #1 / #2"。模块级变量在 doRenderChat 同步执行期间一致；下一轮 render 重置。
-        _subagentSuffixMap = collectSubagentSuffixMap(allMessages);
+        // Agent Run 是聊天渲染的稳定索引：dispatch、子 Agent 轨迹、最终 result
+        // 可能分散在多条消息里，不能在单条消息内各自计算一份。
+        var agentRunIndex = collectAgentRuns(allMessages);
+        var agentRunSignature = buildAgentRunRenderSignature(agentRunIndex);
+        // inFlight 的状态切换本身也应该刷新 Run：例如中断会话恢复执行时，
+        // 新状态要把未完成的 Run 从“已中断”切回“运行中”，即使正文还没有新内容。
+        agentRunSignature += "|live:" + (selectedSession.status === "running" &&
+          selectedSession.structuredState && selectedSession.structuredState.inFlight ? "1" : "0");
+        var conversationToolResults = buildConversationToolResultMap(allMessages);
+        _currentLatestAgentRunId = getLatestAgentRunId(agentRunIndex);
 
         if (allMessages.length === 0) {
           if (state.lastRenderedEmpty !== "empty") {
@@ -212,6 +227,27 @@ import "./local-preview-adapter";
           state.chatRenderedCount = totalMsgCount;
         }
         var visibleOffset = Math.max(0, totalMsgCount - state.chatRenderedCount);
+        // Run 的 dispatch 可能比当前 lazy window 更早，而它的子轨迹 / result
+        // 刚好落在窗口内。把锚点一并纳入窗口，避免窗口边界把 Run 从页面里切掉。
+        for (var runIndex = 0; runIndex < agentRunIndex.runs.length; runIndex++) {
+          var indexedRun = agentRunIndex.runs[runIndex];
+          var touchesVisibleWindow = false;
+          for (var indexedAgentIndex = 0; indexedAgentIndex < indexedRun.agents.length; indexedAgentIndex++) {
+            var indexedAgent = indexedRun.agents[indexedAgentIndex];
+            var indexedRefs = [indexedAgent.dispatch, indexedAgent.firstSeen, indexedAgent.result].concat(indexedAgent.blocks);
+            for (var indexedRefIndex = 0; indexedRefIndex < indexedRefs.length; indexedRefIndex++) {
+              var indexedRef = indexedRefs[indexedRefIndex];
+              if (indexedRef && indexedRef.messageIndex >= visibleOffset && indexedRef.messageIndex < totalMsgCount) {
+                touchesVisibleWindow = true;
+                break;
+              }
+            }
+            if (touchesVisibleWindow) break;
+          }
+          if (touchesVisibleWindow && indexedRun.messageIndex < visibleOffset) {
+            visibleOffset = indexedRun.messageIndex;
+          }
+        }
         var messages = visibleOffset > 0 ? allMessages.slice(visibleOffset) : allMessages;
         // 窗口化：本地还有没展开的（visibleOffset>0），或服务端还有更早的（messageOffset>0），
         // 都要保留「加载更早」哨兵。后者触底时会从服务端拉下一页。
@@ -262,8 +298,12 @@ import "./local-preview-adapter";
           outputHash = msgCount * 100000 + totalBlocks * 1000 + contentLen;
         }
 
-        // Force full render if message count changed or explicitly requested
-        var forceRender = forceFullRender || msgCount !== state.lastRenderedMsgCount;
+        // Force full render if message count changed, an Agent Run changed shape/status,
+        // or explicitly requested. Run details live on the dispatch message, so a result
+        // arriving in a later message must rebuild that older anchor instead of appending
+        // an isolated result bubble.
+        var forceRender = forceFullRender || msgCount !== state.lastRenderedMsgCount ||
+          agentRunSignature !== state.lastRenderedAgentRunSignature;
         if (!forceRender && msgCount === state.lastRenderedMsgCount && outputHash === state.lastRenderedHash) {
           // Even if message content hasn't changed, update the status bar
           // (inFlight state may have changed without new message content)
@@ -278,6 +318,7 @@ import "./local-preview-adapter";
         var prevMsgCount = state.lastRenderedMsgCount;
         state.lastRenderedMsgCount = msgCount;
         state.lastRenderedHash = outputHash;
+        state.lastRenderedAgentRunSignature = agentRunSignature;
 
         chatMessages = ensureChatMessagesContainer(chatOutput);
         if (!chatMessages) return;
@@ -335,7 +376,13 @@ import "./local-preview-adapter";
             }
 
             // Render message
-            html += renderChatMessage(msg, roundUsageByIndex[originalIndex] || null, originalIndex, legacyTaskMap);
+            html += renderChatMessage(
+              msg,
+              roundUsageByIndex[originalIndex] || null,
+              originalIndex,
+              agentRunIndex,
+              conversationToolResults
+            );
           }
 
           // Add sentinel for loading older messages (DOM end = visual top in column-reverse)
@@ -489,7 +536,13 @@ import "./local-preview-adapter";
           for (var i = 0; i < newMessages.length; i++) {
             var div = document.createElement("div");
             var nmOrigIdx = visibleOffset + existingCount + (newMessages.length - 1 - i);
-            div.innerHTML = renderChatMessage(newMessages[i], roundUsageByIndex[nmOrigIdx] || null, nmOrigIdx, legacyTaskMap);
+            div.innerHTML = renderChatMessage(
+              newMessages[i],
+              roundUsageByIndex[nmOrigIdx] || null,
+              nmOrigIdx,
+              agentRunIndex,
+              conversationToolResults
+            );
             var el = div.firstElementChild;
             if (el) {
               el.classList.add("animate-in");
@@ -545,7 +598,13 @@ import "./local-preview-adapter";
             var currentEl = existingEls[mi];
             var tmpWrap = document.createElement("div");
             var srOrigIdx = visibleOffset + reversedMessages.length - 1 - mi;
-            tmpWrap.innerHTML = renderChatMessage(reversedMessages[mi], roundUsageByIndex[srOrigIdx] || null, srOrigIdx, legacyTaskMap);
+            tmpWrap.innerHTML = renderChatMessage(
+              reversedMessages[mi],
+              roundUsageByIndex[srOrigIdx] || null,
+              srOrigIdx,
+              agentRunIndex,
+              conversationToolResults
+            );
             var replacementEl = tmpWrap.firstElementChild;
             if (!replacementEl) continue;
             if (currentEl.innerHTML !== replacementEl.innerHTML || currentEl.className !== replacementEl.className) {
@@ -607,7 +666,31 @@ import "./local-preview-adapter";
       // refreshChatUnreadDivider（分割线渲染）、updateChatUnreadBubble（气泡 UI）。
 
       // --- Todo progress bar ---
-      var todoExpanded = false;
+      // 展开态的真值只在 DOM 上（#todo-progress-body 的 .expanded），不再另存一份
+      // 闭包变量：input.ts / session-engine.ts 在切会话、发新消息时会直接清这个 class，
+      // 两份状态一飘就会出现「点一下没反应，要点两下才展开」。
+      function isTodoExpanded() {
+        var body = document.getElementById("todo-progress-body");
+        return !!body && body.classList.contains("expanded");
+      }
+
+      // 展开/收起待办面板的唯一入口：aria、class、chat 底部 padding 一次改完。
+      function setTodoExpanded(expanded, focusToggle?) {
+        var next = !!expanded;
+        var prog = document.getElementById("todo-progress");
+        var body = document.getElementById("todo-progress-body");
+        var toggle = document.getElementById("todo-progress-toggle");
+        if (prog) prog.classList.toggle("expanded", next);
+        if (body) body.classList.toggle("expanded", next);
+        if (toggle) {
+          toggle.setAttribute("aria-expanded", next ? "true" : "false");
+          toggle.setAttribute("aria-label", next ? "收起待办列表" : "展开待办列表");
+        }
+        // body 展开/收起后视觉高度变了，触发一次 padding 同步
+        syncChatMessagesPaddingForTodoBody();
+        if (focusToggle && toggle) toggle.focus();
+      }
+
       // Use event delegation for todo toggle (more robust than binding to specific element)
       document.addEventListener("click", function(e) {
         var target = e.target;
@@ -616,22 +699,22 @@ import "./local-preview-adapter";
         if (!toggle) return;
         e.preventDefault();
         e.stopPropagation();
-        todoExpanded = !todoExpanded;
-        toggle.setAttribute("aria-expanded", todoExpanded ? "true" : "false");
-        toggle.setAttribute("aria-label", todoExpanded ? "收起待办列表" : "展开待办列表");
-        var prog = document.getElementById("todo-progress");
-        var body = document.getElementById("todo-progress-body");
-        if (prog && body) {
-          if (todoExpanded) {
-            prog.classList.add("expanded");
-            body.classList.add("expanded");
-          } else {
-            prog.classList.remove("expanded");
-            body.classList.remove("expanded");
-          }
-        }
-        // body 展开/收起后视觉高度变了，触发一次 padding 同步
-        syncChatMessagesPaddingForTodoBody();
+        setTodoExpanded(!isTodoExpanded());
+      });
+
+      // 收起的兜底路径。之前只能再点一次那条，面板展开后会一直挂在聊天上方；
+      // 点外部收起对移动端尤其重要（手机上没有 Esc）。
+      document.addEventListener("pointerdown", function(e) {
+        if (!isTodoExpanded()) return;
+        var target = e.target;
+        if (!(target instanceof Element)) return;
+        if (target.closest("#todo-progress-body") || target.closest("#todo-progress-toggle")) return;
+        setTodoExpanded(false);
+      });
+      document.addEventListener("keydown", function(e) {
+        if (!isTodoExpanded() || e.key !== "Escape") return;
+        e.stopPropagation();
+        setTodoExpanded(false, true);
       });
 
       // 同步 .chat-messages 的 padding-bottom 与 .todo-progress-body 的实际高度。
@@ -640,10 +723,27 @@ import "./local-preview-adapter";
       // （也就是视觉底部），结果就是被 body 完全遮住、只在上沿露个头。给 chat-messages
       // 动态加一段等于 body 高度的 padding-bottom，最新一条消息就会浮在 body 正上方，
       // 不再渲染在 body 覆盖区。body 收起/隐藏时还原回 CSS 默认的 12px。
+      //
+      // 每次都用 ResizeObserver 跟住当前的 body 节点：列表条数变化、长文本换行、
+      // 面板被整块重渲染（节点被替换）都会改高度，靠调用点手动补刀总会漏掉一路。
+      var todoBodyObserver = null;
+      var todoBodyObserved = null;
+      function ensureTodoBodyObserver(todoBody) {
+        if (typeof ResizeObserver !== "function") return;
+        if (todoBodyObserved === todoBody && todoBodyObserver) return;
+        if (todoBodyObserver) todoBodyObserver.disconnect();
+        todoBodyObserved = todoBody;
+        todoBodyObserver = new ResizeObserver(function() {
+          syncChatMessagesPaddingForTodoBody();
+        });
+        todoBodyObserver.observe(todoBody);
+      }
+
       function syncChatMessagesPaddingForTodoBody() {
         var chatMessages = document.querySelector("#chat-output .chat-messages");
         var todoBody = document.getElementById("todo-progress-body");
         if (!chatMessages || !todoBody) return;
+        ensureTodoBodyObserver(todoBody);
         // querySelector 返回 Element，但 .style 是 HTMLElement 上的；这里强转。
         var chatMessagesEl = chatMessages as HTMLElement;
         var isVisible = !todoBody.classList.contains("hidden");
@@ -790,25 +890,19 @@ import "./local-preview-adapter";
         if (!todos || todos.length === 0) {
           container.classList.add("hidden");
           if (bodyEl) bodyEl.classList.add("hidden");
+          // 收起态是闭包状态，隐藏时必须一起复位；否则下一次这个条重新出现
+          // 会带着上一轮的 expanded class，面板无人操作就自己弹开。
+          if (isTodoExpanded()) setTodoExpanded(false);
           // body 隐藏（无 todo）→ 还原 chat 底部 padding
           syncChatMessagesPaddingForTodoBody();
           return;
         }
 
-        var completed = 0;
-        var inProgress = 0;
-        var activeTask = "";
-        for (var k = 0; k < todos.length; k++) {
-          if (todos[k].status === "completed") completed++;
-          if (todos[k].status === "in_progress") {
-            inProgress++;
-            if (!activeTask) {
-              activeTask = todos[k].activeForm || todos[k].content || "";
-            }
-          }
-        }
-
-        var allDone = completed === todos.length;
+        // 统计（完成数 / 当前任务文案）与 class、图标映射都收在 todo-progress.ts
+        // 里——那边是纯函数，有单测兜着；这里只负责把结果写进 DOM。
+        var summary = summarizeTodoProgress(todos);
+        var completed = summary.completed;
+        var allDone = summary.allDone;
 
         // 当会话不再活跃时（status !== "running"，即 turn 已结束、会话 idle/exited/
         // archived），隐藏进度条。解决两个问题：
@@ -822,70 +916,42 @@ import "./local-preview-adapter";
         if (!sessionActive || allDone) {
           container.classList.add("hidden");
           if (bodyEl) bodyEl.classList.add("hidden");
+          if (isTodoExpanded()) setTodoExpanded(false);
           // turn 结束 / 全部 done，body 不再展示 → 还原 chat 底部 padding
           syncChatMessagesPaddingForTodoBody();
           return;
         }
 
         container.classList.remove("hidden");
-        container.classList.remove("all-done");
         if (bodyEl) bodyEl.classList.remove("hidden");
 
         // 计数器直接展示"已完成 / 总数"，与展开列表的 ✓ 勾选一致。
         // 旧方案用 completed+1 试图表达"正在干第 N 个"，但列表只有 completed 个
         // 勾，造成计数器和列表不匹配（如计数器 3/4、列表只 2 个 ✓）。
+        // 面板头部那个计数与收起态保持同一口径。
+        var countText = completed + " / " + summary.total;
         var counter = document.getElementById("todo-progress-counter");
-        if (counter) counter.textContent = completed + " / " + todos.length;
+        if (counter) counter.textContent = countText;
+        var panelCount = document.getElementById("todo-progress-panel-count");
+        if (panelCount) panelCount.textContent = countText;
 
-        // 右侧任务描述：优先取首个 in_progress 的 activeForm / content，
-        // 没有任何进行中项时（首条 TodoWrite 还没来、模型漏发 activeForm），
-        // 回退到下一条 pending 任务的 content——总比一片空白强。
+        // 右侧任务描述：优先取首个 in_progress 的 activeForm / content；
+        // 没有任何进行中项时回退到下一条 pending（逻辑在 summarizeTodoProgress）。
         var task = document.getElementById("todo-progress-task");
-        if (task) {
-          if (!activeTask) {
-            for (var p = 0; p < todos.length; p++) {
-              if (todos[p].status === "pending" && (todos[p].activeForm || todos[p].content)) {
-                activeTask = todos[p].activeForm || todos[p].content;
-                break;
-              }
-            }
-          }
-          task.textContent = activeTask || "准备中…";
-        }
+        if (task) task.textContent = summary.activeTask || "准备中…";
 
-        var ratio = todos.length > 0 ? completed / todos.length : 0;
+        // 进度环与底部通栏进度轨共用同一比例。
+        var progress = summary.ratio.toFixed(3);
         var ring = document.getElementById("todo-progress-ring");
-        if (ring) {
-          ring.style.setProperty("--progress", ratio.toFixed(3));
-        }
-        // 同步把整条横条的进度填充（从左到右生长）也设上同一比例，
-        // 避免额外算一遍 completed/todos.length。
+        if (ring) ring.style.setProperty("--progress", progress);
         var fill = document.getElementById("todo-progress-fill");
-        if (fill) {
-          fill.style.setProperty("--progress", ratio.toFixed(3));
-        }
+        if (fill) fill.style.setProperty("--progress", progress);
 
-        // Render expanded list
+        var segments = document.getElementById("todo-progress-segments");
+        if (segments) segments.innerHTML = buildTodoSegmentsHtml(todos);
+
         var list = document.getElementById("todo-progress-list");
-        if (list) {
-          var html = "";
-          for (var m = 0; m < todos.length; m++) {
-            var t = todos[m];
-            var st = t.status || "pending";
-            var itemClass = st === "in_progress" ? "active" : st === "completed" ? "done" : "";
-            var iconClass = st === "in_progress" ? "active" : st === "completed" ? "done" : "pending";
-            var icon = st === "completed"
-              ? iconSvg("check", { size: 12, strokeWidth: 2.2 })
-              : st === "in_progress"
-                ? iconSvg("chevronRight", { size: 12, strokeWidth: 2.2 })
-                : iconSvg("circle", { size: 12, strokeWidth: 2 });
-            html += '<li class="todo-progress-item ' + itemClass + '">' +
-              '<span class="todo-item-icon ' + iconClass + '">' + icon + '</span>' +
-              '<span>' + escapeHtml(t.content || "") + '</span>' +
-            '</li>';
-          }
-          list.innerHTML = html;
-        }
+        if (list) list.innerHTML = buildTodoItemsHtml(todos);
 
         // Sync todo progress to native notification
         if (state.selectedId) {
@@ -1629,173 +1695,250 @@ import "./local-preview-adapter";
         base: "#9EAAB8", dark: "#6B7B8D", light: "#C5CED8",
         accent: "#FFFFFF", eye: "#7EC88B", mouth: "#F28B9A",
       };
-      // 子 agent palette 池。色相与父/用户都拉开距离，避免群聊里多只猫颜色相近难辨认。
-      // primary 用来暴露成 CSS 变量 --agent-color，给气泡左边框 / handoff 文字着色。
-      var SUBAGENT_PALETTES = [
-        { base: "#5A8FE0", dark: "#2E5BB3", light: "#9CC0F2", accent: "#FFFFFF", eye: "#FFD66E", mouth: "#F28B9A", primary: "#5A8FE0" }, // 蓝猫
-        { base: "#A06FE0", dark: "#6B45A8", light: "#C8A4F2", accent: "#FFFFFF", eye: "#FFE36E", mouth: "#F28B9A", primary: "#A06FE0" }, // 紫猫
-        { base: "#7BB76B", dark: "#4F8A40", light: "#A9D49C", accent: "#FFFFFF", eye: "#2D2D2D", mouth: "#F28B9A", primary: "#7BB76B" }, // 抹茶猫
-        { base: "#D86A88", dark: "#9C3A57", light: "#E8A4B5", accent: "#FFFFFF", eye: "#2D2D2D", mouth: "#FFFFFF", primary: "#D86A88" }, // 樱花猫
-        { base: "#5BB7B0", dark: "#2E7873", light: "#9CD6D2", accent: "#FFFFFF", eye: "#FFD66E", mouth: "#F28B9A", primary: "#5BB7B0" }, // 青苔猫
-        { base: "#4A4A60", dark: "#1F1F2E", light: "#6E6E84", accent: "#F5F5F5", eye: "#FFD66E", mouth: "#F28B9A", primary: "#4A4A60" }, // 黑猫
-        { base: "#D8A85A", dark: "#9C7028", light: "#EBC78A", accent: "#FFFFFF", eye: "#2D2D2D", mouth: "#F28B9A", primary: "#D8A85A" }, // 焦糖猫
-      ];
+      // Agent Run 使用稳定的身份色，但不再引入额外头像或“角色扮演”命名。
+      // 颜色只是让同一个 taskId 在并行轨迹里可辨认，状态色仍由 CSS 统一控制。
+      var AGENT_RUN_ACCENTS = ["#4F7FD8", "#8A61C9", "#4F8A68", "#C45F78", "#3F9992", "#A66B35"];
       function hashStringToIndex(str, mod) {
         var s = String(str || "");
         var h = 0;
         for (var i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
         return Math.abs(h) % mod;
       }
-      // agentType → 中文名映射。命中映射就用映射名，否则用 agentType 原文；
-      // 都没有则退化为 "协作猫·<taskId 后 4 位>"。
-      var SUBAGENT_NAME_MAP = {
-        "general-purpose": "万能猫",
-        "Explore": "侦探猫",
-        "code-explorer": "侦探猫",
-        "code-reviewer": "审查猫",
-        "code-architect": "架构猫",
-        "code-simplifier": "简化猫",
-        "code-guide": "向导猫",
-        "Plan": "策划猫",
-        "feature-dev": "开发猫",
-        "pr-test-analyzer": "测试猫",
-        "silent-failure-hunter": "护卫猫",
-        "type-design-analyzer": "类型猫",
-        "comment-analyzer": "注释猫",
-      };
-      // 同一轮对话里如果起了多个同类型 subagent（比如两只"万能猫"），光看名字会
-      // 撞车。doRenderChat 在每次 render 前预扫一遍 messages，把"同显示名 ≥ 2"
-      // 的 taskId 各自分配一个 "#1 / #2 / ..." 后缀，按首次出现顺序稳定。
-      // 单实例不加后缀，避免视觉噪音。
-      var _subagentSuffixMap = null;
-      function getSubagentBaseName(sub) {
-        if (!sub) return "";
-        var agentType = sub.agentType || "";
-        if (agentType && SUBAGENT_NAME_MAP[agentType]) return SUBAGENT_NAME_MAP[agentType];
-        if (agentType) return agentType;
-        return getActiveLang() === "English" ? "Subtask" : "子任务";
+      function agentRunAccent(agent) {
+        var seed = (agent && (agent.meta.agentType || agent.taskId)) || "agent-run";
+        return AGENT_RUN_ACCENTS[hashStringToIndex(seed, AGENT_RUN_ACCENTS.length)];
       }
-      function catPrefixedSubagentName(name) {
-        var text = String(name || "").trim();
-        if (!text) return "猫猫子 Agent";
-        return text.indexOf("猫猫") === 0 ? text : "猫猫 " + text;
+      function agentRunStatusLabel(status) {
+        if (status === "failed") return t("agentRun.status.failed");
+        if (status === "running") return t("agentRun.status.running");
+        if (status === "interrupted") return t("agentRun.status.interrupted");
+        return t("agentRun.status.completed");
       }
-      function getSubagentDisplayName(sub) {
-        var base = getSubagentBaseName(sub);
-        if (!base) return base;
-        var suffix = (_subagentSuffixMap && sub && sub.taskId) ? _subagentSuffixMap.get(sub.taskId) : null;
-        return catPrefixedSubagentName(suffix ? base + suffix : base);
+      function agentRunStatusIcon(status) {
+        if (status === "failed") return iconSvg("close", { size: 12, strokeWidth: 2.2 });
+        if (status === "running") return iconSvg("refresh", { size: 12, strokeWidth: 1.8 });
+        if (status === "interrupted") return iconSvg("warning", { size: 12, strokeWidth: 1.8 });
+        return iconSvg("check", { size: 12, strokeWidth: 2.2 });
       }
-      function getSubagentPalette(sub) {
-        // 哈希优先用 agentType，让同类型 agent 跨 turn 颜色稳定；没有 agentType 时
-        // 退化用 taskId，至少同 turn 内同一只猫颜色稳定。
-        var seed = (sub && (sub.agentType || sub.taskId)) || "subagent";
-        return SUBAGENT_PALETTES[hashStringToIndex(seed, SUBAGENT_PALETTES.length)];
+      function agentRunAgentName(agent) {
+        return (agent && agent.meta.agentType && String(agent.meta.agentType).trim()) || t("agentRun.agent");
       }
-      function isSubagentFinalResultBlock(block, taskId) {
-        if (!block || block.type !== "tool_result") return false;
-        var stampedTaskId = block.__subagent && block.__subagent.taskId;
-        if (stampedTaskId) return stampedTaskId === block.tool_use_id;
-        return !!(taskId && block.tool_use_id === taskId);
+      function agentRunTaskDescription(agent) {
+        var task = agent && agent.meta.taskDescription && String(agent.meta.taskDescription).trim();
+        return task || t("agentRun.noTask");
       }
-
-      function findSubagentFinalResult(blocks, taskId) {
-        if (!Array.isArray(blocks)) return null;
+      function agentRunResultText(agent) {
+        if (!agent || !agent.result) return "";
+        var value = extractToolResultText(agent.result.block.content);
+        return String(value == null ? "" : value).replace(/\s+/g, " ").trim();
+      }
+      function agentRunLatestText(agent, status) {
+        var resultText = agentRunResultText(agent);
+        if (resultText) return resultText;
+        var blocks = agent && Array.isArray(agent.blocks) ? agent.blocks : [];
         for (var i = blocks.length - 1; i >= 0; i--) {
-          if (isSubagentFinalResultBlock(blocks[i], taskId)) return blocks[i];
-        }
-        return null;
-      }
-
-      function getSubagentStatus(blocks, taskId, isLive) {
-        var finalResult = findSubagentFinalResult(blocks, taskId);
-        if (finalResult) {
-          var failed = finalResult.is_error === true;
-          return {
-            key: failed ? "error" : "done",
-            label: failed ? t("subagent.task.failed") : t("subagent.task.done"),
-            finalResult: finalResult,
-          };
-        }
-        if (isLive) {
-          return { key: "running", label: t("subagent.running"), finalResult: null };
-        }
-        return { key: "interrupted", label: t("subagent.interrupted"), finalResult: null };
-      }
-
-      function countSubagentSteps(blocks, taskId) {
-        if (!Array.isArray(blocks)) return 0;
-        var count = 0;
-        for (var i = 0; i < blocks.length; i++) {
-          var block = blocks[i];
-          if (!block || block.type !== "tool_use") continue;
-          if (block.__subagent && block.__subagent.taskId === block.id) continue;
-          if (taskId && block.id === taskId) continue;
-          count++;
-        }
-        return count;
-      }
-
-      function getSubagentPreviewText(blocks, status, taskId) {
-        if (status.finalResult) {
-          var finalText = extractToolResultText(status.finalResult.content);
-          var finalPlain = String(finalText == null ? "" : finalText).replace(/\s+/g, " ").trim();
-          return finalPlain || t("subagent.no_output");
-        }
-        if (Array.isArray(blocks)) {
-          for (var i = blocks.length - 1; i >= 0; i--) {
-            var block = blocks[i];
-            if (!block) continue;
-            if (block.type === "text") {
-              var text = String(block.text || "").replace(/\s+/g, " ").trim();
-              if (text) return text;
-            }
-            if (block.type === "thinking") {
-              var thinking = String(block.thinking || "").replace(/\s+/g, " ").trim();
-              if (thinking) return thinking;
-            }
-            if (block.type === "tool_use") {
-              if ((block.__subagent && block.__subagent.taskId === block.id) || (taskId && block.id === taskId)) {
-                continue;
-              }
-              var input = block.input || {};
-              var detail = input.description || input.file_path || input.path || input.command || input.cmd || input.pattern || "";
-              var toolLabel = getToolDisplayName(block.name);
-              return detail ? toolLabel + " · " + String(detail) : toolLabel;
-            }
+          var ref = blocks[i];
+          var block = ref && ref.block;
+          if (!block) continue;
+          if (block.type === "text" && String(block.text || "").trim()) {
+            return String(block.text).replace(/\s+/g, " ").trim();
+          }
+          if (block.type === "thinking" && String(block.thinking || "").trim()) {
+            return String(block.thinking).replace(/\s+/g, " ").trim();
+          }
+          if (block.type === "tool_use") {
+            var label = activityItemLabel(block);
+            if (label) return label;
           }
         }
-        return status.key === "running" ? t("subagent.waiting") : t("subagent.no_output");
+        if (status === "running") return t("agentRun.waiting");
+        return t("agentRun.noOutput");
       }
-
-      function getSubagentPreviewLabel(statusKey) {
-        if (statusKey === "done") return t("subagent.preview.result");
-        if (statusKey === "error") return t("subagent.preview.error");
-        if (statusKey === "running") return t("subagent.preview.latest");
-        return t("subagent.preview.status");
+      function agentRunLatestRef(agent) {
+        var latest = agent && (agent.result || agent.dispatch || agent.firstSeen);
+        var blocks = agent && Array.isArray(agent.blocks) ? agent.blocks : [];
+        for (var i = 0; i < blocks.length; i++) {
+          var ref = blocks[i];
+          if (!latest || ref.messageIndex > latest.messageIndex ||
+              (ref.messageIndex === latest.messageIndex && ref.blockIndex > latest.blockIndex)) latest = ref;
+        }
+        return latest;
       }
-
-      // subagent 最终回复（父 Task 的 tool_result）在展开轨迹的尾部独立呈现。
-      // 外层摘要已经给出任务状态与预览，这里只负责完整结论，避免卡片套卡片。
-      function renderSubagentReplyBubble(block, role) {
-        if (!block || block.type !== "tool_result") return "";
-        var text = extractToolResultText(block.content);
-        var isError = block.is_error === true;
-        var rawText = typeof text === "string" ? text : (text == null ? "" : String(text));
-        var displayText = rawText.trim() ? rawText : t("subagent.no_output");
-        var bodyHtml = rawText.trim() ? renderMarkdown(displayText) : escapeHtml(displayText);
-        var markerLabel = isError ? t("subagent.task.failed") : t("subagent.task.done");
-        var markerSymbol = isError
-          ? iconSvg("close", { size: 12, strokeWidth: 2.2 })
-          : iconSvg("check", { size: 12, strokeWidth: 2.2 });
-
-        return '<div class="subagent-reply final' + (isError ? ' error' : '') + '">' +
-          '<div class="subagent-reply-marker ' + (isError ? 'error' : 'done') + '">' +
-            '<span class="subagent-reply-marker-icon" aria-hidden="true">' + markerSymbol + '</span>' +
-            '<span class="subagent-reply-marker-label">' + escapeHtml(markerLabel) + '</span>' +
-          '</div>' +
-          '<div class="subagent-reply-content">' + bodyHtml + '</div>' +
+      function agentRunLatestSummary(run, isLive) {
+        var latestAgent = null;
+        var latestRef = null;
+        for (var i = 0; i < run.agents.length; i++) {
+          var ref = agentRunLatestRef(run.agents[i]);
+          if (!latestRef || (ref && (ref.messageIndex > latestRef.messageIndex ||
+              (ref.messageIndex === latestRef.messageIndex && ref.blockIndex > latestRef.blockIndex)))) {
+            latestRef = ref;
+            latestAgent = run.agents[i];
+          }
+        }
+        return latestAgent ? truncateInline(agentRunLatestText(latestAgent, getAgentRunStatusSummary({ agents: [latestAgent] } as any, isLive).status), 220) : "";
+      }
+      function renderAgentRunStepHtml(ref, role, toolResults, messageKey) {
+        var block = ref && ref.block;
+        if (!block || block.type === "tool_result") return "";
+        var blockHtml = renderContentBlock(
+          block,
+          role,
+          toolResults,
+          ref.messageIndex * 100000 + ref.blockIndex,
+          messageKey + ":" + ref.messageIndex + ":" + ref.blockIndex,
+          { noActivityFold: true, inAgentRun: true }
+        );
+        if (!blockHtml || !String(blockHtml).trim()) return "";
+        var kind = block.type === "thinking" ? "thinking" : (block.type === "tool_use" ? "tool" : "text");
+        var marker = '<span class="agent-run-step-dot" aria-hidden="true"></span>';
+        if (kind === "thinking") {
+          marker = '<span class="agent-run-step-icon" aria-hidden="true">' + iconSvg("spark", { size: 11, strokeWidth: 1.8 }) + '</span>';
+        } else if (kind === "tool") {
+          marker = '<span class="agent-run-step-icon" aria-hidden="true">' + getToolIcon(block.name) + '</span>';
+        }
+        return '<div class="agent-run-step is-' + kind + '">' +
+          '<span class="agent-run-step-marker">' + marker + '</span>' +
+          '<div class="agent-run-step-content">' + blockHtml + '</div>' +
         '</div>';
+      }
+      function renderAgentRunResultHtml(agent) {
+        if (!agent || !agent.result) return "";
+        var resultBlock = agent.result.block || {};
+        var isError = resultBlock.is_error === true;
+        var rawText = agentRunResultText(agent);
+        var displayText = rawText || t("agentRun.noOutput");
+        var bodyHtml = rawText ? renderMarkdown(displayText) : escapeHtml(displayText);
+        return '<div class="agent-run-result' + (isError ? ' is-error' : '') + '">' +
+          '<div class="agent-run-result-label">' +
+            '<span class="agent-run-result-icon" aria-hidden="true">' + agentRunStatusIcon(isError ? "failed" : "completed") + '</span>' +
+            '<span>' + escapeHtml(isError ? t("agentRun.result.failed") : t("agentRun.result.done")) + '</span>' +
+          '</div>' +
+          '<div class="agent-run-result-content">' + bodyHtml + '</div>' +
+        '</div>';
+      }
+      function renderAgentRunTimelineHtml(agent, status, role, toolResults, messageKey) {
+        var html = "";
+        var blocks = agent && Array.isArray(agent.blocks) ? agent.blocks : [];
+        for (var i = 0; i < blocks.length; i++) {
+          html += renderAgentRunStepHtml(blocks[i], role || "assistant", toolResults, messageKey);
+        }
+        // 只有最终 result、没有中间过程时，结果为唯一信息，不要再先放一行重复状态。
+        if (!html.trim() && !(agent && agent.result)) {
+          html = '<div class="agent-run-waiting">' + escapeHtml(agentRunStatusLabel(status)) + '</div>';
+        }
+        return html + renderAgentRunResultHtml(agent);
+      }
+      function agentRunPanelId(runId, taskId) {
+        return "agent-run-panel-" + String(runId + "-" + taskId).replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 120);
+      }
+      function renderAgentRunDetailHtml(run, agent, selected, role, toolResults, messageKey, isLive, isMulti) {
+        var taskId = agent.taskId;
+        var agentStatus = getAgentRunStatusSummary({ agents: [agent] } as any, isLive).status;
+        var domId = agentRunPanelId(run.id, taskId);
+        var buttonId = domId + "-tab";
+        // 单个 Agent 没有“切换”语义：不套 tab/tabpanel，rail 也整块不渲染，
+        // 避免常见情况下出现一个只剩一项、纯占位的选择器。
+        var panelRole = isMulti
+          ? 'role="tabpanel" tabindex="0" aria-labelledby="' + escapeHtml(buttonId) + '" '
+          : '';
+        return '<div class="agent-run-detail-panel' + (selected ? ' is-selected' : '') + '" ' +
+            'id="' + escapeHtml(domId) + '" ' + panelRole +
+            'data-agent-run-id="' + escapeHtml(run.id) + '" data-agent-task-id="' + escapeHtml(taskId) + '" ' +
+            (selected ? '' : 'hidden') + '>' +
+          '<div class="agent-run-detail-head">' +
+            '<div>' +
+              '<div class="agent-run-detail-name">' + escapeHtml(agentRunAgentName(agent)) + '</div>' +
+              '<div class="agent-run-detail-task">' + escapeHtml(agentRunTaskDescription(agent)) + '</div>' +
+            '</div>' +
+            '<span class="agent-run-detail-state">' + escapeHtml(agentRunStatusLabel(agentStatus)) + '</span>' +
+          '</div>' +
+          '<div class="agent-run-timeline">' + renderAgentRunTimelineHtml(agent, agentStatus, role, toolResults, messageKey) + '</div>' +
+        '</div>';
+      }
+      function renderAgentRunHtml(run, isLive, role, toolResults, messageKey) {
+        if (!run || !run.agents.length) return "";
+        var summary = getAgentRunStatusSummary(run, isLive);
+        var expandKey = buildExpandKey("agent-run", [run.id]);
+        var persisted = getPersistedExpandState(expandKey);
+        var expanded = shouldAgentRunStartExpanded(summary.status, persisted);
+        var selectedTaskId = typeof getPersistedAgentSelection === "function" ? getPersistedAgentSelection(run.id) : "";
+        var selectedAgent = null;
+        for (var i = 0; i < run.agents.length; i++) {
+          var candidate = run.agents[i];
+          if (selectedTaskId && candidate.taskId === selectedTaskId) selectedAgent = candidate;
+        }
+        if (!selectedAgent) {
+          for (var j = 0; j < run.agents.length; j++) {
+            var candidateStatus = getAgentRunStatusSummary({ agents: [run.agents[j]] } as any, isLive).status;
+            if (!selectedAgent || candidateStatus === "failed" || (candidateStatus === "running" && selectedAgent !== run.agents[j])) {
+              selectedAgent = run.agents[j];
+            }
+            if (candidateStatus === "failed") break;
+          }
+        }
+        selectedAgent = selectedAgent || run.agents[0];
+        var bodyId = "agent-run-body-" + String(run.id).replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 120);
+        var latest = agentRunLatestSummary(run, isLive);
+        var countText = t("agentRun.count", { count: String(summary.total) });
+        var summaryAria = t("agentRun.summary_aria", {
+          count: String(summary.total),
+          status: agentRunStatusLabel(summary.status),
+          latest: latest || t("agentRun.noOutput"),
+        });
+        var railHtml = "";
+        var detailHtml = "";
+        var isMulti = run.agents.length > 1;
+        for (var k = 0; k < run.agents.length; k++) {
+          var agent = run.agents[k];
+          var agentSummary = getAgentRunStatusSummary({ agents: [agent] } as any, isLive);
+          var isSelected = agent === selectedAgent;
+          var panelId = agentRunPanelId(run.id, agent.taskId);
+          var tabId = panelId + "-tab";
+          if (isMulti) railHtml += '<button type="button" class="agent-run-agent' + (isSelected ? ' is-selected' : '') + '" ' +
+              'id="' + escapeHtml(tabId) + '" role="tab" aria-controls="' + escapeHtml(panelId) + '" ' +
+              'aria-selected="' + (isSelected ? "true" : "false") + '" ' +
+              'tabindex="' + (isSelected ? "0" : "-1") + '" data-agent-task-id="' + escapeHtml(agent.taskId) + '" ' +
+              'data-agent-run-id="' + escapeHtml(run.id) + '" onclick="__agentRunSelect(event, this)" ' +
+              'onkeydown="__agentRunSelect(event, this)" ' +
+              'style="--agent-color:' + escapeHtml(agentRunAccent(agent)) + '">' +
+            '<span class="agent-run-agent-marker" aria-hidden="true"></span>' +
+            '<span class="agent-run-agent-copy">' +
+              '<strong>' + escapeHtml(agentRunAgentName(agent)) + '</strong>' +
+              '<span>' + escapeHtml(truncateInline(agentRunTaskDescription(agent), 86)) + '</span>' +
+            '</span>' +
+            '<span class="agent-run-agent-status is-' + agentSummary.status + '">' + escapeHtml(agentRunStatusLabel(agentSummary.status)) + '</span>' +
+          '</button>';
+          detailHtml += renderAgentRunDetailHtml(run, agent, isSelected, role, toolResults, messageKey, isLive, isMulti);
+        }
+        return '<section class="agent-run is-' + summary.status + (isMulti ? '' : ' is-single') + '" ' +
+            'data-expand-kind="agent-run" data-expand-key="' + escapeHtml(expandKey) + '" ' +
+            'data-agent-run-id="' + escapeHtml(run.id) + '" data-status="' + summary.status + '" ' +
+            'data-expanded="' + (expanded ? "true" : "false") + '" ' +
+            'aria-label="' + escapeHtml(summaryAria) + '">' +
+          '<button type="button" class="agent-run-summary" aria-expanded="' + (expanded ? "true" : "false") + '" ' +
+              'aria-controls="' + escapeHtml(bodyId) + '" aria-label="' + escapeHtml(summaryAria) + '" ' +
+              'onclick="__agentRunToggle(event, this)">' +
+            '<span class="agent-run-summary-icon" aria-hidden="true">' + agentRunStatusIcon(summary.status) + '</span>' +
+            '<span class="agent-run-summary-main">' +
+              '<span class="agent-run-summary-top">' +
+                '<strong class="agent-run-title">' + escapeHtml(t("agentRun.title")) + '</strong>' +
+                '<span class="agent-run-count">' + escapeHtml(countText) + '</span>' +
+                '<span class="agent-run-status-label is-' + summary.status + '">' + escapeHtml(agentRunStatusLabel(summary.status)) + '</span>' +
+              '</span>' +
+              '<span class="agent-run-latest">' +
+                '<span class="agent-run-latest-label">' + escapeHtml(t("agentRun.latest")) + '</span>' +
+                '<span class="agent-run-latest-text">' + escapeHtml(latest || t("agentRun.waiting")) + '</span>' +
+              '</span>' +
+            '</span>' +
+            '<span class="agent-run-chevron" aria-hidden="true">' + iconSvg("chevronDown", { size: 14, strokeWidth: 2 }) + '</span>' +
+          '</button>' +
+          '<div class="agent-run-body" id="' + escapeHtml(bodyId) + '" aria-hidden="' + (expanded ? "false" : "true") + '">' +
+            (isMulti
+              ? '<div class="agent-run-rail" role="tablist" aria-label="' + escapeHtml(t("agentRun.agent_list")) + '">' + railHtml + '</div>'
+              : '') +
+            '<div class="agent-run-detail">' + detailHtml + '</div>' +
+          '</div>' +
+        '</section>';
       }
       export var PIXEL_AVATAR = {
         assistant: buildPixelSvg(buildCatGrid(GARFIELD_PALETTE)),
@@ -1871,7 +2014,7 @@ import "./local-preview-adapter";
         '</div>';
       }
 
-      function renderChatMessage(msg, roundUsage, messageIndex, legacyTaskMap) {
+      function renderChatMessage(msg, roundUsage, messageIndex, agentRunIndex, conversationToolResults) {
         // Thinking card (deep thought) — from PTY parsing
         if (msg.role === "thinking") {
           // 空 / 全空白的 thinking 没有任何信息量，渲染出来只是一条带"展开"的紫色窄条，
@@ -1902,7 +2045,7 @@ import "./local-preview-adapter";
 
         // Structured content blocks (from JSON chat mode)
         if (Array.isArray(msg.content)) {
-          return renderStructuredMessage(msg, roundUsage, messageIndex, legacyTaskMap);
+          return renderStructuredMessage(msg, roundUsage, messageIndex, agentRunIndex, conversationToolResults);
         }
 
         // Legacy string content (from PTY parsing)
@@ -2229,136 +2372,24 @@ import "./local-preview-adapter";
         }
       };
 
-      // 老消息（SQLite 历史 turn）后端还没盖章。前端给 name === "Task"/"Agent"
-      // 或 input.subagent_type 非空的 tool_use 虚拟盖章，让现有 multi-agent 渲染路径吃到。
-      function deriveLegacySubagent(block) {
-        if (!block || block.type !== "tool_use") return null;
-        var input = block.input || {};
-        var agentType = typeof input.subagent_type === "string" ? input.subagent_type : null;
-        if (!agentType && block.name !== "Task" && block.name !== "Agent") return null;
-        return {
-          taskId: block.id,
-          agentType: agentType || undefined,
-          taskDescription: typeof input.description === "string" ? input.description : undefined,
-        };
-      }
-
-      // tool_result 老消息靠 tool_use_id 关联 task。由外层预扫一遍 messages，构建 task id → meta 的 map。
-      function collectLegacyTaskIdMap(allMessages) {
-        var map = new Map();
-        if (!Array.isArray(allMessages)) return map;
-        for (var i = 0; i < allMessages.length; i++) {
-          var m = allMessages[i];
-          if (!m || m.role !== "assistant" || !Array.isArray(m.content)) continue;
-          for (var j = 0; j < m.content.length; j++) {
-            var b = m.content[j];
-            if (!b || b.type !== "tool_use") continue;
-            var derived = b.__subagent || deriveLegacySubagent(b);
-            if (derived) map.set(b.id, derived);
-          }
-        }
-        return map;
-      }
-
-      // 预扫一遍 messages，把"同显示名 ≥ 2 个 taskId"的 subagent 各自分配一个
-      // " #1 / #2 / ..." 后缀（按首次出现顺序）。返回 taskId → suffix 字符串的 map。
-      // bucket key 走 getSubagentBaseName(sub)：不同 agentType 但相同中文名（比如
-      // "Explore" 和 "code-explorer" 都映射 "侦探猫"）也算冲突，得分别加后缀。
-      // 单实例不进 map，调用方就不会拼后缀。
-      function collectSubagentSuffixMap(allMessages) {
-        var suffix = new Map();
-        if (!Array.isArray(allMessages)) return suffix;
-        var bucketsByName = new Map(); // displayName -> ordered list of unique taskIds
-        var seenTaskIds = new Set();
-        function record(sub) {
-          if (!sub || !sub.taskId) return;
-          if (seenTaskIds.has(sub.taskId)) return;
-          seenTaskIds.add(sub.taskId);
-          var name = getSubagentBaseName(sub);
-          if (!name) return;
-          if (!bucketsByName.has(name)) bucketsByName.set(name, []);
-          bucketsByName.get(name).push(sub.taskId);
-        }
-        for (var i = 0; i < allMessages.length; i++) {
-          var m = allMessages[i];
-          if (!m || !Array.isArray(m.content)) continue;
-          for (var j = 0; j < m.content.length; j++) {
-            var b = m.content[j];
-            if (!b) continue;
-            var sub = b.__subagent || (b.type === "tool_use" ? deriveLegacySubagent(b) : null);
-            if (sub) record(sub);
-          }
-        }
-        bucketsByName.forEach(function(taskIds) {
-          if (taskIds.length < 2) return;
-          for (var k = 0; k < taskIds.length; k++) {
-            suffix.set(taskIds[k], " #" + (k + 1));
-          }
-        });
-        return suffix;
-      }
-
-      // 把一条 assistant turn 按相邻 block 的 __subagent.taskId 切成段。
-      // 输出每段附带原数组中的 firstIndex，方便渲染时 expand key 用全局 index
-      // 避免不同段冲突。
-      // legacyTaskMap：老消息没有 __subagent 盖章时，按 tool_use_id 反查兜底。
-      function splitTurnBySubagent(blocks, legacyTaskMap) {
-        var segs = [];
-        if (!Array.isArray(blocks) || !blocks.length) return segs;
-        var current = null;
-        for (var i = 0; i < blocks.length; i++) {
-          var b = blocks[i];
-          // __processing 占位 block（流式中的 typing indicator）没有 __subagent 盖章，
-          // 强制延续上一段（若已有），避免"父-Task-占位-子内容"反复切段导致 DOM 抖动。
-          // 边界：若占位是第一个 block（current 仍为 null），走正常路径开 parent 段。
-          var isPlaceholder = b && b.type === "text" && b.__processing === true;
-          if (isPlaceholder && current) {
-            current.blocks.push(b);
-            continue;
-          }
-          var sub = b && b.__subagent ? b.__subagent : null;
-          if (!sub) sub = deriveLegacySubagent(b);
-          // 老消息 tool_result 兜底：用 tool_use_id 反查 map
-          if (!sub && b && b.type === "tool_result" && legacyTaskMap && legacyTaskMap.has(b.tool_use_id)) {
-            sub = legacyTaskMap.get(b.tool_use_id);
-          }
-          var key = sub ? sub.taskId : null;
-          if (!current || current.key !== key) {
-            current = { key: key, subagent: sub, blocks: [], firstIndex: i };
-            segs.push(current);
-          }
-          current.blocks.push(b);
-        }
-        return segs;
-      }
-
-      // ===== Codex 风格「活动折叠」=========================================
-      // 一次 assistant turn 里模型往往产生几十段 thinking + 工具调用，逐条铺开会把
-      // 对话流撑成几千像素的高墙（线上实测单 turn 可达 3600px）。参考 Codex app：
-      //   · 连续的 thinking / 工具调用收成一条状态条；
-      //   · 正文、图片、子 agent 回复保持原位，出现即打断当前条并显示在它下方；
-      //   · 后面再有思考 / 工具，另起一条，而不是整轮活动捏到正文底下。
-      //   · 点一下展开是固定高度的窗口，内部自动滚动显示最新活动详情。
-      // 子 agent 段（inSubagentPanel）不再二次折叠——执行卡本身就是过程轨迹。
+      // ===== 普通活动折叠 =================================================
+      // 连续 thinking / 工具调用收成一条状态条；正文出现就切断当前活动。
+      // Agent Run 有自己的摘要 + 轨迹容器，不进入这条普通折叠路径。
       var ACTIVITY_FOLD_ENABLED = true;
       // 当前正在渲染的消息在 state.currentMessages 里的全局下标。渲染是同步单线程的，
       // 在 renderStructuredMessage 入口设置一次即可让下游活动折叠判断运行态。
       var _currentMessageGlobalIndex = -1;
+      // 当前渲染批次里“最新的 Agent Run”id。只有它可能是 live（running）状态——
+      // 更早的 Run 结论已定，不能再被当作进行中。
+      var _currentLatestAgentRunId = "";
 
-      // tool_result 只有一种情况会渲染出可见内容：父 Task 的最终回复气泡。
-      function isVisibleSubagentReply(block) {
-        return !!(block && block.type === "tool_result" && block.__subagent &&
-          block.__subagent.taskId === block.tool_use_id);
-      }
-
-      // 参与折叠但折叠后一行都渲染不出来的空块（空 thinking / 配对后返回空的
-      // tool_result / 被入口屏蔽的父 Task tool_use），统计时跳过。
+      // Agent dispatch 和 tool_result 都由 Run 或对应 tool card 消费，普通活动折叠
+      // 不应再把它们当成独立可见步骤。
       function isHiddenActivityBlock(block) {
         if (!block) return true;
         if (block.type === "thinking") return !String(block.thinking || "").trim();
-        if (block.type === "tool_use" && block.__subagent && block.__subagent.taskId === block.id &&
-            (block.name === "Task" || block.name === "Agent")) return true;
-        if (block.type === "tool_result" && !isVisibleSubagentReply(block)) return true;
+        if (block.type === "tool_use" && deriveSubagentMeta(block)) return true;
+        if (block.type === "tool_result") return true;
         return false;
       }
 
@@ -2382,7 +2413,6 @@ import "./local-preview-adapter";
           if (toolBlockShowsImage(block, toolResults)) return false;
           return true;
         }
-        if (block.type === "tool_result") return !isVisibleSubagentReply(block);
         return false;
       }
 
@@ -2559,35 +2589,13 @@ import "./local-preview-adapter";
         if (key) setPersistedExpandState(key, nowExpanded);
       };
 
-      function wrapSubagentStepHtml(blockHtml, block, options) {
-        var opts = options || {};
-        if (!opts.inSubagentPanel || !blockHtml || !String(blockHtml).trim()) return blockHtml;
-        var finalResult = isSubagentFinalResultBlock(block, opts.subagentTaskId);
-        var stepKind = finalResult ? (block.is_error ? "error" : "result") : (block.type || "content");
-        var marker = '<span class="subagent-step-dot" aria-hidden="true"></span>';
-        if (finalResult) {
-          marker = '<span class="subagent-step-icon" aria-hidden="true">' +
-            iconSvg(block.is_error ? "close" : "check", { size: 12, strokeWidth: 2.2 }) +
-          '</span>';
-        } else if (block.type === "tool_use") {
-          marker = '<span class="subagent-step-icon" aria-hidden="true">' + getToolIcon(block.name) + '</span>';
-        } else if (block.type === "thinking") {
-          marker = '<span class="subagent-step-icon" aria-hidden="true">' + iconSvg("spark", { size: 12, strokeWidth: 1.8 }) + '</span>';
-        }
-        return '<div class="subagent-step is-' + escapeHtml(stepKind) + '">' +
-          '<span class="subagent-step-marker">' + marker + '</span>' +
-          '<div class="subagent-step-content">' + blockHtml + '</div>' +
-        '</div>';
-      }
-
-      // 渲染一段内的 blocks。独立 group consecutive tools，避免父/子 agent 的工具
-      // 调用跨边界被合并；grp.index 偏移到原数组全局位置，保持 expand key 唯一。
+      // 渲染一组普通（非 Agent Run）内容 blocks。group consecutive tools，
+      // 偏移到原数组全局位置，保持 expand key 唯一。
       function buildSegmentBlocksHtml(segmentBlocks, segmentFirstIndex, role, toolResults, messageKey, options?: any) {
         var html = "";
         var opts = options || {};
-        // 活动折叠：连续 thinking / 工具调用收成一条状态条；正文、图片、子 agent
-        // 回复保持原位，出现即打断当前条。子 agent 段不再二次折叠。
-        if (ACTIVITY_FOLD_ENABLED && !opts.noActivityFold && !opts.inSubagentPanel && role === "assistant") {
+        // 活动折叠：连续 thinking / 工具调用收成一条状态条；正文、图片保持原位。
+        if (ACTIVITY_FOLD_ENABLED && !opts.noActivityFold && role === "assistant") {
           try {
             var pendingActivity = [];
             var flushPendingActivity = function(isTrailing) {
@@ -2628,17 +2636,9 @@ import "./local-preview-adapter";
                 for (var k = 0; k < grp.items.length; k++) {
                   shifted.push({ block: grp.items[k].block, index: grp.items[k].index + segmentFirstIndex });
                 }
-                html += wrapSubagentStepHtml(
-                  renderToolGroup(shifted, role, toolResults, messageKey, opts),
-                  grp.items[0] && grp.items[0].block,
-                  opts
-                );
+                html += renderToolGroup(shifted, role, toolResults, messageKey, opts);
               } else {
-                html += wrapSubagentStepHtml(
-                  renderContentBlock(grp.block, role, toolResults, grp.index + segmentFirstIndex, messageKey, opts),
-                  grp.block,
-                  opts
-                );
+                html += renderContentBlock(grp.block, role, toolResults, grp.index + segmentFirstIndex, messageKey, opts);
               }
             } catch (e) {
               html += '<div class="render-error">消息块渲染失败</div>';
@@ -2650,135 +2650,16 @@ import "./local-preview-adapter";
         return html;
       }
 
-      // assistant turn 与 user turn 都可能含 subagent 段。连续、同 taskId 的段先合并，
-      // 保证一只子代理只出现一张执行卡，而不是被流式边界切成多张“继续输出”。
-      function buildMultiAgentHtml(segments, role, toolResults, messageKey) {
-        var html = "";
-        var turnIsLive = role === "assistant" && isTurnActivityLive(_currentMessageGlobalIndex);
-        for (var si = 0; si < segments.length; si++) {
-          var seg = segments[si];
-          if (seg.subagent) {
-            var mergedBlocks = seg.blocks.slice();
-            var mergedFirstIndex = seg.firstIndex;
-            var next = si + 1;
-            while (next < segments.length && segments[next].subagent &&
-                   segments[next].subagent.taskId === seg.subagent.taskId) {
-              mergedBlocks = mergedBlocks.concat(segments[next].blocks);
-              next++;
-            }
-            var mergedSeg = {
-              key: seg.key,
-              subagent: seg.subagent,
-              blocks: mergedBlocks,
-              firstIndex: mergedFirstIndex,
-            };
-            var segmentOptions = {
-              inSubagentPanel: true,
-              subagentTaskId: seg.subagent.taskId,
-            };
-            var subagentHtml = buildSegmentBlocksHtml(
-              mergedBlocks,
-              mergedFirstIndex,
-              role,
-              toolResults,
-              messageKey,
-              segmentOptions
-            );
-            if (subagentHtml && subagentHtml.trim()) {
-              html += buildSubagentPanelHtml(mergedSeg, subagentHtml, messageKey, turnIsLive);
-            }
-            si = next - 1;
-            continue;
-          }
-
-          var parentHtml = buildSegmentBlocksHtml(seg.blocks, seg.firstIndex, role, toolResults, messageKey, {});
-          // 段内所有 block 都被短路返空（典型场景：父段只剩一个空 thinking）时，
-          // 跳过整段，避免渲染出“只有头像没内容”的空气泡。
-          if (!parentHtml || !parentHtml.trim()) continue;
-          html += '<div class="chat-message-segment parent">' +
-            chatAvatar(role) +
-            '<div class="chat-message-content">' + parentHtml + '</div>' +
-          '</div>';
-        }
-        return html;
-      }
-
-      // 渲染子代理为可展开的执行卡：
-      //   header = 谁 / 做什么 / 状态 / 步数 / 进度或结论摘要
-      //   body   = 完整过程，直接进入主对话滚动，不再套固定高度迷你终端
-      function buildSubagentPanelHtml(seg, segHtml, messageKey, turnIsLive) {
-        var sub = seg.subagent;
-        var subPalette = getSubagentPalette(sub);
-        var subName = getSubagentDisplayName(sub);
-        var taskId = sub.taskId || "";
-        var status = getSubagentStatus(seg.blocks, taskId, turnIsLive);
-        var stepCount = countSubagentSteps(seg.blocks, taskId);
-        var taskDescription = sub.taskDescription && String(sub.taskDescription).trim()
-          ? String(sub.taskDescription).trim()
-          : t("subagent.no_task");
-        var previewText = truncateInline(getSubagentPreviewText(seg.blocks, status, taskId), 280);
-        var previewLabel = getSubagentPreviewLabel(status.key);
-        var stepsText = t("subagent.steps", { count: String(stepCount) });
-        var expandKey = buildExpandKey("subagent-panel", [messageKey, taskId]);
-        var persisted = getPersistedExpandState(expandKey);
-        var expanded = persisted === null ? status.key === "running" : persisted;
-        var bodyId = "subagent-body-" + String(messageKey + "-" + taskId)
-          .replace(/[^a-zA-Z0-9_-]/g, "-")
-          .slice(0, 96);
-        var summaryAria = t("subagent.summary_aria", {
-          name: subName,
-          status: status.label,
-          task: taskDescription,
-        });
-
-        return '<section class="subagent-panel is-' + status.key + '" ' +
-                    'data-expand-kind="subagent-panel" ' +
-                    'data-expand-key="' + escapeHtml(expandKey) + '" ' +
-                    'data-agent-id="' + escapeHtml(taskId) + '" ' +
-                    'data-status="' + status.key + '" ' +
-                    'data-expanded="' + (expanded ? "true" : "false") + '" ' +
-                    'style="--agent-color:' + subPalette.primary + '">' +
-          '<button type="button" class="subagent-panel-summary" ' +
-                  'aria-expanded="' + (expanded ? "true" : "false") + '" ' +
-                  'aria-controls="' + escapeHtml(bodyId) + '" ' +
-                  'aria-label="' + escapeHtml(summaryAria) + '" ' +
-                  'onclick="__subagentPanelToggle(event, this)">' +
-            '<span class="subagent-panel-summary-main">' +
-              '<span class="subagent-panel-kicker">' +
-                '<strong class="subagent-panel-name">' + escapeHtml(subName) + '</strong>' +
-                '<span class="subagent-panel-tag" title="' + escapeHtml(t("subagent.tag_title")) + '">' + escapeHtml(t("subagent.tag")) + '</span>' +
-                '<span class="subagent-panel-status"><span class="subagent-panel-status-dot" aria-hidden="true"></span>' + escapeHtml(status.label) + '</span>' +
-              '</span>' +
-              '<span class="subagent-panel-task-desc">' + escapeHtml(taskDescription) + '</span>' +
-              '<span class="subagent-panel-preview">' +
-                '<span class="subagent-panel-preview-label">' + escapeHtml(previewLabel) + '</span>' +
-                '<span class="subagent-panel-preview-text">' + escapeHtml(previewText) + '</span>' +
-              '</span>' +
-            '</span>' +
-            '<span class="subagent-panel-side">' +
-              '<span class="subagent-panel-steps">' + escapeHtml(stepsText) + '</span>' +
-              '<span class="subagent-panel-chevron" aria-hidden="true">' + iconSvg("chevronDown", { size: 14, strokeWidth: 2 }) + '</span>' +
-            '</span>' +
-          '</button>' +
-          '<div class="subagent-panel-body" id="' + escapeHtml(bodyId) + '" ' +
-               'aria-hidden="' + (expanded ? "false" : "true") + '"' +
-               (expanded ? '' : ' style="display:none"') + '>' +
-            '<div class="subagent-panel-process">' + segHtml + '</div>' +
-          '</div>' +
-        '</section>';
-      }
-
-      function renderStructuredMessage(msg, roundUsage, messageIndex, legacyTaskMap) {
+      function renderStructuredMessage(msg, roundUsage, messageIndex, agentRunIndex, conversationToolResults) {
         _currentMessageGlobalIndex = typeof messageIndex === "number" ? messageIndex : -1;
         var role = msg.role;
         var messageKey = getMessageKey(msg, messageIndex);
         var timeHtml = renderChatMessageTime(msg);
         var usageHtml = role === "assistant" ? renderUsageSummaryHtml(roundUsage) : "";
+        var content = Array.isArray(msg.content) ? msg.content : [];
+        var isQueued = role === "user" && content.some(function(b) { return b && b.__queued; });
 
-        // 排队中的用户消息标记（subagent 不会出现在 user role 的 user input 中）
-        var isQueued = role === "user" && msg.content && msg.content.some(function(b) { return b.__queued; });
-
-        if (!msg.content || msg.content.length === 0) {
+        if (content.length === 0) {
           if (role === "assistant") {
             return '<div class="chat-message ' + role + '">' +
               timeHtml +
@@ -2786,8 +2667,6 @@ import "./local-preview-adapter";
               '<div class="chat-message-content"><div class="typing-indicator"><span></span><span></span><span></span></div>' + usageHtml + '</div>' +
             '</div>';
           }
-          // 空 user 消息（极少出现，但快速发送的边界场景会让消息"消失"）。
-          // 给个明确占位避免视觉断层。
           return '<div class="chat-message ' + role + ' empty-message" data-message-key="' + escapeHtml(messageKey) + '">' +
             timeHtml +
             chatAvatar(role) +
@@ -2795,50 +2674,60 @@ import "./local-preview-adapter";
           '</div>';
         }
 
-        var toolResults = buildToolResultMap(msg.content);
-                // user role：可能含 Task tool_result（subagent 反查盖章过的）。检测一下，
-        // 有 subagent 段就走 multi-agent 渲染（不输出 handoff，避免重复）。
-        if (role !== "assistant") {
-          var userSegments = splitTurnBySubagent(msg.content, legacyTaskMap);
-          var userHasSub = userSegments.some(function(s) { return s.subagent; });
-          var queuedClass = isQueued ? " queued" : "";
-          var queuedBadge = isQueued ? '<span class="queued-badge">排队中</span>' : "";
-          if (userHasSub) {
-            var userMultiHtml = buildMultiAgentHtml(userSegments, role, toolResults, messageKey);
-            return '<div class="chat-message ' + role + queuedClass + ' multi-agent" data-message-key="' + escapeHtml(messageKey) + '">' +
-              timeHtml + userMultiHtml + queuedBadge +
-            '</div>';
+        var bodyHtml = "";
+        var pendingBlocks = [];
+        var pendingFirstIndex = 0;
+        var messageRuns = agentRunIndex && agentRunIndex.runsByMessageIndex
+          ? agentRunIndex.runsByMessageIndex.get(messageIndex)
+          : null;
+        var ownerByBlockKey = agentRunIndex ? agentRunIndex.ownerByBlockKey : null;
+
+        function flushPendingBlocks() {
+          if (!pendingBlocks.length) return;
+          bodyHtml += buildSegmentBlocksHtml(
+            pendingBlocks,
+            pendingFirstIndex,
+            role,
+            conversationToolResults,
+            messageKey
+          );
+          pendingBlocks = [];
+        }
+
+        for (var bi = 0; bi < content.length; bi++) {
+          var run = messageRuns ? messageRuns.get(bi) : null;
+          if (run) {
+            flushPendingBlocks();
+            bodyHtml += renderAgentRunHtml(
+              run,
+              isAgentRunLive(run, messageIndex),
+              role,
+              conversationToolResults,
+              messageKey
+            );
+            continue;
           }
-          var userHtml = buildSegmentBlocksHtml(msg.content, 0, role, toolResults, messageKey);
-          return '<div class="chat-message ' + role + queuedClass + '" data-message-key="' + escapeHtml(messageKey) + '">' +
-            timeHtml +
-            chatAvatar(role) +
-            '<div class="chat-message-content">' + userHtml + queuedBadge + '</div>' +
-          '</div>';
+          if (ownerByBlockKey && ownerByBlockKey.has(agentRunBlockKey(messageIndex, bi))) {
+            flushPendingBlocks();
+            continue;
+          }
+          if (!pendingBlocks.length) pendingFirstIndex = bi;
+          pendingBlocks.push(content[bi]);
+        }
+        flushPendingBlocks();
+
+        // 跨 turn 到达的 Agent result 只负责回填原 Run，不再在结果消息里生成一张孤立卡片。
+        if (!bodyHtml || !bodyHtml.trim()) {
+          return '<div class="chat-message agent-run-owned" data-message-key="' + escapeHtml(messageKey) + '" hidden></div>';
         }
 
-        // assistant：检测是否有 subagent 段，没有就走单段渲染（兼容老消息 / 无 subagent 的 turn）
-        var segments = splitTurnBySubagent(msg.content, legacyTaskMap);
-        var hasSubagent = segments.some(function(s) { return s.subagent; });
-
-        if (!hasSubagent) {
-          var html = buildSegmentBlocksHtml(msg.content, 0, role, toolResults, messageKey);
-          return '<div class="chat-message ' + role + '" data-message-key="' + escapeHtml(messageKey) + '">' +
-            timeHtml +
-            chatAvatar(role) +
-            '<div class="chat-message-content">' + html + usageHtml + '</div>' +
-          '</div>';
-        }
-
-        // 多段：父 assistant 段 + 各 subagent 段。同一根 .chat-message 容器，
-        // 内部多个 .chat-message-segment 子段，每段自带头像；切到新 subagent 时
-        // 插入一行 handoff 提示（"勤劳初二 ↳ 让 侦探猫 帮忙"）。
-        var multiHtml = '<div class="chat-message ' + role + ' multi-agent" data-message-key="' + escapeHtml(messageKey) + '">';
-        multiHtml += timeHtml;
-        multiHtml += buildMultiAgentHtml(segments, role, toolResults, messageKey);
-        multiHtml += usageHtml;
-        multiHtml += '</div>';
-        return multiHtml;
+        var queuedClass = isQueued ? " queued" : "";
+        var queuedBadge = isQueued ? '<span class="queued-badge">排队中</span>' : "";
+        return '<div class="chat-message ' + role + queuedClass + '" data-message-key="' + escapeHtml(messageKey) + '">' +
+          timeHtml +
+          chatAvatar(role) +
+          '<div class="chat-message-content">' + bodyHtml + queuedBadge + usageHtml + '</div>' +
+        '</div>';
       }
 
       function compactUsageNumber(value) {
@@ -2911,24 +2800,36 @@ import "./local-preview-adapter";
         return wrap + body;
       }
 
+      function buildConversationToolResultMap(allMessages) {
+        var toolResults = {};
+        if (!Array.isArray(allMessages)) return toolResults;
+        for (var mi = 0; mi < allMessages.length; mi++) {
+          var content = allMessages[mi] && Array.isArray(allMessages[mi].content)
+            ? allMessages[mi].content
+            : [];
+          for (var bi = 0; bi < content.length; bi++) {
+            var block = content[bi];
+            if (!block || block.type !== "tool_result") continue;
+            var toolUseId = block.tool_use_id;
+            if (!toolUseId) continue;
+            if (!toolResults[toolUseId]) toolResults[toolUseId] = [];
+            toolResults[toolUseId].push(block);
+          }
+        }
+        return toolResults;
+      }
+
+      function isAgentRunLive(run, messageIndex) {
+        if (!run || !run.id || run.id !== _currentLatestAgentRunId) return false;
+        if (!agentRunTouchesMessage(run, messageIndex)) return false;
+        var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        if (!session) return false;
+        return !!(session.structuredState && session.structuredState.inFlight) && session.status === "running";
+      }
+
       function renderContentBlock(block, role, toolResults, index, messageKey, options?: any) {
         var opts = options || {};
         if (!block || !block.type) return "";
-
-        // 父 Task / Agent 的 dispatch 本身不进入过程轨迹：摘要头已经表达“谁在执行”，
-        // 轨迹只保留子代理真正做了什么。旧历史消息用子代理段的 taskId 兜底识别。
-        var isParentDispatch = block.type === "tool_use" && (
-          (block.__subagent && block.__subagent.taskId === block.id) ||
-          (opts.subagentTaskId && block.id === opts.subagentTaskId)
-        );
-        if (isParentDispatch) return "";
-        // 只有父 Task 的 tool_result（taskId === tool_use_id）走 reply bubble；
-        // 子 agent 内部工具的 tool_result（taskId === parent_tool_use_id ≠ tool_use_id）
-        // 走普通工具卡片，不能误判为 reply bubble。旧历史消息没有 __subagent
-        // 盖章时，用当前子代理段显式传入的 taskId 兜底。
-        if (isSubagentFinalResultBlock(block, opts.subagentTaskId)) {
-          return renderSubagentReplyBubble(block, role);
-        }
 
         switch (block.type) {
           case "text":

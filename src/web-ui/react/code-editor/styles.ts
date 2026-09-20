@@ -147,6 +147,13 @@ export const codeEditorStyles = String.raw`
   inset: 0;
   pointer-events: none;
   color: var(--text-primary, #111);
+  /* The textarea is the only scroller. Without this the syntax layer keeps its
+     own overflow, which makes the surrounding area scroll away from the caret
+     and breaks every programmatic jump (find, restore). scrollbar-gutter keeps
+     the same content width as the textarea so wrapped lines break at the same
+     characters in both layers. */
+  overflow: hidden;
+  scrollbar-gutter: stable;
 }
 .wand-code-editor-content code { font-family: inherit; }
 .wand-code-editor-textarea {
@@ -159,7 +166,10 @@ export const codeEditorStyles = String.raw`
   caret-color: var(--text-primary, #111);
   resize: none;
   outline: none;
-  overflow: hidden;
+  /* Transparent text over the syntax layer: the browser scrolls this box and
+     onScroll mirrors it onto the gutter and the layer. */
+  overflow: auto;
+  scrollbar-gutter: stable;
 }
 .wand-code-editor-textarea::selection { background: rgba(37, 99, 235, 0.22); }
 .wand-code-editor-host.wrap .wand-code-editor-content,
@@ -189,5 +199,82 @@ export const codeEditorStyles = String.raw`
   background: #fdecea;
   color: #c0392b;
   font-size: 11.375px;
+}
+
+/* find bar (⌘F) */
+.wand-code-editor-find {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 4px 12px 4px 10px;
+  background: var(--bg-secondary, #f7f7f8);
+  border-bottom: 1px solid var(--border-subtle, #e5e7eb);
+  color: var(--text-muted, #999);
+  min-height: 32px;
+}
+.wand-code-editor-find-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 320px;
+  border: 1px solid var(--border-subtle, #e5e7eb);
+  border-radius: 6px;
+  padding: 3px 8px;
+  background: var(--bg-primary, #fff);
+  color: var(--text-primary, #111);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11.375px;
+}
+.wand-code-editor-find-input:focus { outline: none; border-color: var(--accent, #2563eb); }
+.wand-code-editor-find-count {
+  flex: 0 0 auto;
+  min-width: 52px;
+  color: var(--text-secondary, #555);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10.5px;
+  text-align: right;
+}
+.wand-code-editor-find-count.empty { color: var(--danger, #c0392b); }
+.wand-code-editor-find-line {
+  flex: 0 0 auto;
+  color: var(--text-muted, #999);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10.5px;
+}
+.wand-code-editor-find-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 4px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary, #555);
+  font-size: 11.375px;
+  line-height: 1;
+  cursor: pointer;
+}
+.wand-code-editor-find-btn:hover:not(:disabled) { background: var(--bg-tertiary, #eee); color: var(--text-primary, #111); }
+.wand-code-editor-find-btn:disabled { opacity: 0.4; cursor: default; }
+.wand-code-editor-find-btn.active {
+  background: var(--accent-muted, rgba(37,99,235,0.12));
+  border-color: var(--accent, #2563eb);
+  color: var(--text-primary, #111);
+}
+
+/* find hits inside the syntax layer */
+.wand-code-editor-content mark.wand-code-editor-hit {
+  background: rgba(250, 204, 21, 0.42);
+  color: inherit;
+  border-radius: 2px;
+}
+.wand-code-editor-content mark.wand-code-editor-hit.active {
+  background: rgba(249, 115, 22, 0.55);
+  box-shadow: 0 0 0 1px rgba(194, 65, 12, 0.55);
+}
+@media (prefers-reduced-motion: reduce) {
+  .wand-code-editor-find-btn { transition: none; }
 }
 `;

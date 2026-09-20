@@ -478,7 +478,7 @@ function SidebarCompactToggle({
       title={label}
       onClick={onToggle}
     >
-      <WandIcon name="rail" size={15} className={active ? "sidebar-rail-icon is-collapsed" : "sidebar-rail-icon"}/>
+      <WandIcon name="rail" size={18} className={active ? "sidebar-rail-icon is-collapsed" : "sidebar-rail-icon"}/>
       <span className="sidebar-compact-toggle-label">{label}</span>
     </WandIconButton>
   );
@@ -686,7 +686,7 @@ export function ShellSidebar() {
                         title="更多操作"
                         aria-label="侧栏更多操作"
                       >
-                        <WandIcon name="more"/>
+                        <WandIcon name="more" size={18}/>
                       </WandIconButton>
                     )}
                   />
@@ -799,7 +799,7 @@ export function ShellSidebar() {
               <WandButton
                 id="drawer-new-session-button"
                 className="sidebar-new-task"
-                kind="secondary"
+                kind="primary"
                 size="medium"
                 title="新建任务"
                 aria-label={primaryAction.ariaLabel}
@@ -821,7 +821,7 @@ export function ShellSidebar() {
                   taskBoardController.open(snapshot.selected?.workspaceId ?? "", snapshot.selected?.id ?? "");
                 }}
               >
-                <WandIcon name="clipboard" slot="start" size={17}/>
+                <WandIcon name="board" slot="start" size={18}/>
                 <span>任务看板</span>
               </WandNavigationLink>
             </WandNavigationItem>

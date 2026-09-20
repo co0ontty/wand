@@ -2,7 +2,7 @@ import { state } from "./state";
 import "./i18n";
 import { escapeHtml } from "./utils";
 import { formatInlineResult, scheduleChatRender } from "./chat-render";
-import { applyExpandedState, persistElementExpandState, persistSelectedId, scrollChatToBottom } from "./chat-scroll";
+import { applyExpandedState, persistElementExpandState, persistSelectedId, scrollChatToBottom, setPersistedAgentSelection } from "./chat-scroll";
 import { adjustTerminalScale, openFilePreview } from "./file-browser";
 import { attachQueueBarDelegates, bindInputTouchScroll, cancelVoiceRecording, handleInputBoxBlur, handleInputBoxFocus, handleVoiceMove, refreshInputBoxState, sendOrStart, setupMobileKeyboardHandlers, startVoiceRecording, stopSession, stopVoiceRecording, updateQueueBar } from "./input";
 import { hideError } from "./notifications";
@@ -10,7 +10,6 @@ import { render, resetChatRenderCache } from "./render";
 import { addPendingAttachments, closeClaudeSkillsPicker, closePlusPopover, closeSessionsDrawer, dismissDrawerIfOverlay, handleInputBoxKeydown, handleInputPaste, handleInteractiveTextInput, handlePtyImagePaste, login, onChatModeChange, onChatModelChange, onChatThinkingChange, optimizePromptText, setDraftValue, switchServer, syncComposerHasText, togglePlusPopover } from "./session-engine";
 import { initTerminal, maybeScrollTerminalToBottom, softResyncTerminal } from "./terminal";
 import { setupVisualViewportHandlers } from "./viewport";
-import { approvePermission, approveTurnPermission, denyPermission } from "./websocket";
 
       // Global toggle function for tool card headers — called via onclick attribute
       // Lazy-load tool content for truncated results
@@ -103,28 +102,68 @@ import { approvePermission, approveTurnPermission, denyPermission } from "./webs
         }
         persistElementExpandState(el, "thinking");
       };
-      // Toggle function for subagent reply bubbles — simple two-state preview/expanded.
-      // 参考 opencode 的折叠面板：默认固定高度预览（含底部渐隐 mask），点击切到全文展开。
-      // 状态写在 data-expanded 上，配套 CSS 控制 max-height + mask；用 data-expand-key
-      // 走通用持久化通道（applyPersistedExpandState 会自动恢复用户上次的选择）。
-      (window as any).__subagentReplyToggle = function(e: any, target: any) {
+      // Agent Run 头部由原生 button 驱动，Enter / Space 交给浏览器默认行为。
+      // 展开状态写在 data-expanded 上，并通过 data-expand-key 走通用持久化通道；
+      // 展开后的时间线是主对话流的一部分，不创建嵌套滚动容器。
+      (window as any).__agentRunToggle = function(e: any, target: any) {
         if (e) { e.preventDefault(); e.stopPropagation(); }
-        var bubble = target && target.closest ? target.closest(".subagent-reply") : null;
-        if (!bubble) return;
-        var expanded = bubble.getAttribute("data-expanded") === "true";
-        applyExpandedState(bubble, "subagent-reply", !expanded);
-        persistElementExpandState(bubble, "subagent-reply");
+        var run = target && target.closest ? target.closest(".agent-run") : null;
+        if (!run) return;
+        var expanded = run.getAttribute("data-expanded") !== "true";
+        applyExpandedState(run, "agent-run", expanded);
+        persistElementExpandState(run, "agent-run");
       };
-      // subagent 执行卡由原生 button 驱动，浏览器自带 Enter / Space 键盘行为。
-      // 展开内容参与主对话滚动，不再操作任何内嵌滚动容器。
-      (window as any).__subagentPanelToggle = function(e: any, target: any) {
-        if (e) { e.preventDefault(); e.stopPropagation(); }
-        var panel = target && target.closest ? target.closest(".subagent-panel") : null;
-        if (!panel) return;
-        var expanded = panel.getAttribute("data-expanded") !== "true";
-        applyExpandedState(panel, "subagent-panel", expanded);
-        persistElementExpandState(panel, "subagent-panel");
+      // Agent 切换：点击 + 全套键盘导航（←/→/Home/End 环绕）。选择结果按会话持久化，
+      // 刷新或重连后仍停留在用户上次查看的 Agent。
+      (window as any).__agentRunSelect = function(e: any, target: any) {
+        var run = target && target.closest ? target.closest(".agent-run") : null;
+        if (!run) return;
+        var tabs = Array.prototype.slice.call(
+          run.querySelectorAll(".agent-run-agent")
+        ) as any[];
+        if (!tabs.length) return;
+        var keyed = e && e.type === "keydown" ? String(e.key || "") : "";
+        if (keyed) {
+          if (keyed !== "ArrowLeft" && keyed !== "ArrowRight" && keyed !== "Home" && keyed !== "End") return;
+          if (e) { e.preventDefault(); e.stopPropagation(); }
+          var currentIndex = tabs.indexOf(target);
+          if (currentIndex < 0) currentIndex = 0;
+          var nextIndex = currentIndex;
+          if (keyed === "ArrowLeft") nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+          else if (keyed === "ArrowRight") nextIndex = (currentIndex + 1) % tabs.length;
+          else if (keyed === "Home") nextIndex = 0;
+          else if (keyed === "End") nextIndex = tabs.length - 1;
+          var nextTab = tabs[nextIndex];
+          selectAgentTab(run, tabs, nextTab);
+          try { nextTab.focus(); } catch (err) {}
+          return;
+        }
+        // 鼠标点击：原生 button 也会触发一次 click，统一在这里做选择。
+        if (e) { e.stopPropagation(); }
+        selectAgentTab(run, tabs, target);
       };
+      function selectAgentTab(run: any, tabs: any[], tab: any) {
+        if (!run || !tab) return;
+        var taskId = tab.getAttribute("data-agent-task-id") || "";
+        var runId = run.getAttribute("data-agent-run-id") || "";
+        for (var i = 0; i < tabs.length; i++) {
+          var isSelected = tabs[i] === tab;
+          tabs[i].classList.toggle("is-selected", isSelected);
+          tabs[i].setAttribute("aria-selected", isSelected ? "true" : "false");
+          tabs[i].setAttribute("tabindex", isSelected ? "0" : "-1");
+        }
+        var panels = run.querySelectorAll(".agent-run-detail-panel");
+        for (var j = 0; j < panels.length; j++) {
+          var selected = panels[j].getAttribute("data-agent-task-id") === taskId;
+          panels[j].classList.toggle("is-selected", selected);
+          if (selected) {
+            panels[j].removeAttribute("hidden");
+          } else {
+            panels[j].setAttribute("hidden", "");
+          }
+        }
+        if (runId && taskId) setPersistedAgentSelection(runId, taskId);
+      }
 
       // 活动折叠仍然是固定高度滚动区：流式刷新后锚定尾部，让用户持续看到
       // 最新到达的思考和工具活动。折叠态下 body 为 display:none，直接跳过。
@@ -387,12 +426,6 @@ import { approvePermission, approveTurnPermission, denyPermission } from "./webs
           return;
         }
 
-                var approvePermissionBtn = document.getElementById("approve-permission-btn");
-        if (approvePermissionBtn) approvePermissionBtn.addEventListener("click", approvePermission);
-        var approveTurnPermissionBtn = document.getElementById("approve-turn-permission-btn");
-        if (approveTurnPermissionBtn) approveTurnPermissionBtn.addEventListener("click", approveTurnPermission);
-        var denyPermissionBtn = document.getElementById("deny-permission-btn");
-        if (denyPermissionBtn) denyPermissionBtn.addEventListener("click", denyPermission);
         var sendBtn = document.getElementById("send-input-button");
         if (sendBtn) sendBtn.addEventListener("click", function() {
           // 与 input focus 同理：手机 drawer 盖在上面才收起，桌面常驻栏保持原状。

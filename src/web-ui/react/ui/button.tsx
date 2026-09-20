@@ -10,8 +10,8 @@ type WandButtonSize = "small" | "medium" | "large";
  *
  * The `wand-ui-button*` classes are kept as stable styling hooks for the
  * business stylesheets (`.task-board-create-footer .wand-ui-button { ... }`
- * and friends). They no longer carry visuals - Appica's Tailwind classes and
- * design tokens own the appearance.
+ * and friends). Appica owns sizes and behavior; foundationStyles owns the flat
+ * surfaces and restrained motion shared with the login page.
  */
 export interface WandButtonProps extends Omit<AppicaButtonProps, "variant" | "size"> {
   kind?: WandButtonKind;

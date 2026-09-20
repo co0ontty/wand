@@ -498,6 +498,52 @@ export function setPersistedExpandState(itemKey: string, expanded: boolean) {
   saveChatExpandStateMap(map);
 }
 
+var AGENT_RUN_SELECTION_STORAGE_KEY = "wand-agent-run-selection-v1";
+
+function loadAgentRunSelectionMap() {
+  try {
+    var saved = localStorage.getItem(AGENT_RUN_SELECTION_STORAGE_KEY);
+    if (!saved) return {};
+    var parsed = JSON.parse(saved);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function saveAgentRunSelectionMap(map: any) {
+  try {
+    if (!map || Object.keys(map).length === 0) {
+      localStorage.removeItem(AGENT_RUN_SELECTION_STORAGE_KEY);
+      return;
+    }
+    localStorage.setItem(AGENT_RUN_SELECTION_STORAGE_KEY, JSON.stringify(map));
+  } catch (e) {
+    // Ignore localStorage errors
+  }
+}
+
+// 每个会话独立记忆“当前查看的 Agent”，避免切会话时互相覆盖，也避免刷新后跳回第一个。
+export function getPersistedAgentSelection(runId: string) {
+  if (!runId || !state.selectedId) return null;
+  var map = loadAgentRunSelectionMap();
+  var sessionState = map[state.selectedId];
+  if (!sessionState || typeof sessionState !== "object") return null;
+  var taskId = sessionState[runId];
+  return typeof taskId === "string" && taskId ? taskId : null;
+}
+
+export function setPersistedAgentSelection(runId: string, taskId: string) {
+  if (!runId || !taskId || !state.selectedId) return;
+  var map = loadAgentRunSelectionMap();
+  var sessionId = state.selectedId;
+  var sessionState = map[sessionId];
+  if (!sessionState || typeof sessionState !== "object") sessionState = {};
+  sessionState[runId] = taskId;
+  map[sessionId] = sessionState;
+  saveAgentRunSelectionMap(map);
+}
+
 export function getMessageKey(msg: any, fallbackIndex?: number) {
   if (!msg) {
     return "msg:unknown-" + (typeof fallbackIndex === "number" ? fallbackIndex : 0);
@@ -541,9 +587,7 @@ function isElementExpanded(el: any, kind: string) {
     }
     case "tool-group":
       return el.getAttribute("data-expanded") === "true";
-    case "subagent-reply":
-      return el.getAttribute("data-expanded") === "true";
-    case "subagent-panel":
+    case "agent-run":
       return el.getAttribute("data-expanded") === "true";
     case "activity":
       return el.getAttribute("data-expanded") === "true";
@@ -595,17 +639,6 @@ export function applyExpandedState(el: any, kind: string, expanded: boolean) {
       if (chevron) chevron.style.transform = expanded ? "rotate(180deg)" : "";
       break;
     }
-    case "subagent-reply": {
-      el.setAttribute("data-expanded", expanded ? "true" : "false");
-      var subLabel = el.querySelector(".subagent-reply-toggle-label");
-      if (subLabel) subLabel.textContent = expanded ? "收起" : "展开";
-      var subToggleBtn = el.querySelector(".subagent-reply-toggle");
-      if (subToggleBtn) {
-        subToggleBtn.setAttribute("aria-expanded", expanded ? "true" : "false");
-        subToggleBtn.setAttribute("aria-label", expanded ? "收起子代理回复" : "展开子代理回复全文");
-      }
-      break;
-    }
     case "activity": {
       el.setAttribute("data-expanded", expanded ? "true" : "false");
       var activityBody = el.querySelector(".chat-activity-body");
@@ -618,17 +651,12 @@ export function applyExpandedState(el: any, kind: string, expanded: boolean) {
       if (activitySummary) activitySummary.setAttribute("aria-expanded", expanded ? "true" : "false");
       break;
     }
-    case "subagent-panel": {
+    case "agent-run": {
       el.setAttribute("data-expanded", expanded ? "true" : "false");
-      var subagentSummary = el.querySelector(".subagent-panel-summary");
-      if (subagentSummary) {
-        subagentSummary.setAttribute("aria-expanded", expanded ? "true" : "false");
-      }
-      var subagentBody = el.querySelector(".subagent-panel-body");
-      if (subagentBody) {
-        subagentBody.style.display = expanded ? "block" : "none";
-        subagentBody.setAttribute("aria-hidden", expanded ? "false" : "true");
-      }
+      var runSummary = el.querySelector(".agent-run-summary");
+      if (runSummary) runSummary.setAttribute("aria-expanded", expanded ? "true" : "false");
+      var runBody = el.querySelector(".agent-run-body");
+      if (runBody) runBody.setAttribute("aria-hidden", expanded ? "false" : "true");
       break;
     }
   }

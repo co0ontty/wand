@@ -212,7 +212,8 @@ test("ShellTopbar SSR renders the home state and an empty stable git slot", () =
 
   assert.match(html, /id="sessions-toggle-button"[^>]*class="[^"]*floating-sidebar-toggle/);
   assert.match(html, /class="topbar-tagline">Wand 控制台</);
-  assert.match(html, /class="topbar-brand"[^>]*>W</);
+  assert.match(html, /<svg class="topbar-brand"[^>]*aria-hidden="true"/);
+  assert.doesNotMatch(html, /class="topbar-brand"[^>]*>W</);
   assert.match(html, /<span id="topbar-git-slot" class="topbar-git-slot"><\/span>/);
   assert.doesNotMatch(html, /id="topbar-more-button"/);
   assert.doesNotMatch(html, /id="topbar-cwd"/);

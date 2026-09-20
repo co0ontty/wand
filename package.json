@@ -24,6 +24,8 @@
     "check": "node scripts/bundle-tailwind.js && node scripts/bundle-xterm.js && node scripts/bundle-browser.js && npm run generate:web-assets && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.browser.json && tsc --noEmit -p tsconfig.react.json",
     "test": "node --test --import tsx tests/*.test.ts",
     "check:bundle-budget": "node scripts/check-bundle-budget.js",
+    "sync:brand-assets": "node scripts/sync-brand-assets.js",
+    "check:brand-assets": "node scripts/sync-brand-assets.js --check",
     "audit:remnants": "node scripts/audit-legacy-remnants.js",
     "prepublishOnly": "VER=${WAND_PUBLISH_VERSION:-$(git tag --sort=-v:refname --list 'v*' | head -1)} && VER=${VER#v} && npm version \"$VER\" --no-git-tag-version --allow-same-version && npm run build",
     "bundle:tailwind": "node scripts/bundle-tailwind.js"

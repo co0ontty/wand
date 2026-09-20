@@ -87,7 +87,7 @@
          同一 padding / 行高 / 字号。各业务模块只负责摆放内容，
          不要再自己拼 border-radius + box-shadow，否则又会漂移成
          「有的 8px 有的 14px、有的几乎没有阴影」那种廉价感。 */
-      --float-radius: 12px;
+      --float-radius: 8px;
       --float-pad: 6px;
       --float-border: color-mix(in srgb, var(--border-default) 74%, #9b806c);
       --float-bg: var(--bg-elevated);
@@ -98,7 +98,7 @@
 
       /* ===== 菜单行系统 ===== */
       --menu-item-height: 34px;
-      --menu-item-radius: 9px;
+      --menu-item-radius: 6px;
       --menu-item-gap: 6px;
       --menu-item-pad-block: 7px;
       --menu-item-pad-inline: 10px;
@@ -112,6 +112,7 @@
       --composer-chip-thinking-max-width: 110px;
 
       /* ===== 圆角系统 ===== */
+      --control-radius: 6px;     /* 登录 / Shell / React 控件共用的克制圆角 */
       --radius-xs: 6px;
       --radius-sm: 8px;
       --radius-md: 12px;
@@ -144,8 +145,8 @@
       --line-height-relaxed: 1.75;
 
       /* ===== 过渡系统 ===== */
-      --transition-fast: 0.15s ease;
-      --transition-normal: 0.25s ease;
+      --transition-fast: 0.14s ease-out;
+      --transition-normal: 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
       --transition-spring: 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
 
       /* ===== 布局尺寸 ===== */
@@ -824,11 +825,11 @@
       width: min(320px, calc(100vw - var(--sidebar-collapsed-width) - 16px));
       overflow: hidden;
       border: 1px solid var(--web-sidebar-line, var(--border-subtle));
-      border-radius: 8px;
-      background: var(--web-sidebar-surface, rgba(255, 251, 245, 0.97));
-      box-shadow: 10px 0 34px -20px rgba(53, 37, 25, 0.5);
-      backdrop-filter: blur(20px) saturate(140%);
-      -webkit-backdrop-filter: blur(20px) saturate(140%);
+      border-radius: var(--float-radius);
+      background: var(--web-sidebar-surface, var(--bg-primary));
+      box-shadow: var(--float-shadow);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
       opacity: 0;
       visibility: hidden;
       transform: translateX(-10px);
@@ -2287,18 +2288,17 @@
       padding: 0 16px;
       height: 38px;
       min-height: 38px;
-      border-radius: 10px;
+      border-radius: var(--control-radius);
       border: 1px solid transparent;
       cursor: pointer;
       white-space: nowrap;
       position: relative;
       user-select: none;
       transition:
-        background-color 0.15s ease,
-        border-color 0.15s ease,
-        color 0.15s ease,
-        box-shadow 0.18s ease,
-        transform 0.18s cubic-bezier(0.34, 1.4, 0.64, 1);
+        background-color var(--transition-fast),
+        border-color var(--transition-fast),
+        color var(--transition-fast),
+        box-shadow var(--transition-fast);
       -webkit-tap-highlight-color: transparent;
     }
 
@@ -2576,26 +2576,16 @@
 
     /* 左段品牌徽标 */
     .topbar-brand {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 26px;
-      height: 26px;
-      border-radius: 8px;
-      background: linear-gradient(135deg, var(--accent), var(--accent-active));
-      color: #fff;
-      font-weight: 700;
-      font-size: 11.9px;
-      letter-spacing: 0.02em;
-      box-shadow: 0 1px 3px rgba(89, 58, 32, 0.18);
-      user-select: none;
+      display: block;
+      width: 28px;
+      height: 28px;
       flex-shrink: 0;
     }
 
     /* 中段：会话标题 / cwd / 标语 */
     .topbar-session-title {
       font-weight: 600;
-      font-size: 11.9px;
+      font-size: var(--font-size-sm);
       color: var(--text-primary);
       white-space: nowrap;
       overflow: hidden;
@@ -2668,8 +2658,8 @@
       }
     }
     .topbar-tagline {
-      color: var(--text-muted);
-      font-size: 10.92px;
+      color: var(--text-secondary);
+      font-size: var(--font-size-sm);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -2680,12 +2670,12 @@
       display: inline-flex;
       align-items: center;
       gap: 5px;
-      font-size: 9.8px;
+      font-size: var(--font-size-xs);
       font-weight: 500;
       color: var(--text-secondary);
       background: var(--bg-elevated);
       border: 1px solid var(--border-subtle);
-      border-radius: 20px;
+      border-radius: var(--control-radius);
       padding: 2px 9px 2px 7px;
       flex-shrink: 0;
       max-width: 140px;
@@ -2741,7 +2731,7 @@
       opacity: 0.75;
       font-variant-numeric: tabular-nums;
       font-family: var(--font-mono, monospace);
-      font-size: 9.1px;
+      font-size: var(--font-size-2xs);
       letter-spacing: -0.01em;
     }
 
@@ -3953,425 +3943,440 @@
       stroke-linejoin: round;
     }
 
-    /* ===== 多角色群聊（subagent 加入对话） ===== */
-    /* 一个 assistant turn 内有 subagent 时，根容器切到 multi-agent 模式，
-       内部多个 .chat-message-segment 子段堆叠，每段自带头像与气泡。 */
-    .chat-message.multi-agent {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
+    /* ===== Agent Run（一组连续的 Agent 派发） =====
+       一个 Run = 一段连续的 subagent 派发批次。父 assistant 正文保持连续阅读流，
+       这里只承载“谁在跑、跑到哪、结论是什么”。展开后左侧 rail 选 Agent，
+       右侧看该 Agent 的时间线，最终结果单独成块放在时间线之后。 */
+    .agent-run {
+      /* 状态色：默认中性，按 data-status / is-* 覆盖。所有强调色都从这一个变量派生，
+         避免每个子元素各自写一套红/绿判定。 */
+      --agent-run-status: var(--text-muted);
+      --agent-run-status-muted: color-mix(in srgb, var(--text-muted) 12%, transparent);
+      position: relative;
       width: 100%;
-      max-width: 100%;
+      max-width: var(--chat-card-max-width, 720px);
       min-width: 0;
       box-sizing: border-box;
-    }
-    /* user turn 默认 align-self: flex-end（右对齐）；多段渲染时强制
-       容器内左对齐，否则 subagent 段会被推到右边，border-left 色条断裂。 */
-    .chat-message.user.multi-agent {
-      align-self: flex-start;
-      align-items: flex-start;
-    }
-    .chat-message.multi-agent .chat-message-segment {
-      display: flex;
-      flex-direction: column;
-      align-self: flex-start;
-      width: 100%;
-      max-width: 100%;
-      min-width: 0;
-      box-sizing: border-box;
-    }
-    .chat-message.multi-agent .chat-message-segment.subagent {
-      padding-left: 10px;
-      margin-left: 6px;
-      border-left: 2px solid var(--agent-color, var(--border-subtle));
-      border-radius: 0 4px 4px 0;
-      /* 父 .chat-message-segment 是 width:100%; box-sizing:border-box，padding
-         和 border 已被 border-box 吃掉，但 margin-left:6px 是外间距，会把
-         整段推出父容器 6px 撞屏幕右边。这里把宽度从父宽减掉同等 margin，
-         视觉上左缘内缩 6px、右缘对齐父容器，刚好不溢出。 */
-      width: calc(100% - 6px);
-      max-width: calc(100% - 6px);
-    }
-    .chat-message.multi-agent .chat-message-segment.subagent .chat-message-content {
-      /* 子 agent 段内的气泡稍微弱化背景，区分主线 */
-      opacity: 0.96;
-    }
-    .chat-message.multi-agent .chat-message-segment .chat-message-avatar {
-      padding-bottom: 4px;
-    }
-    /* 子 agent 头像 name 跟随 agent 主色 */
-    .chat-message-avatar.subagent .avatar-name {
-      color: var(--agent-color, var(--accent));
-    }
-
-    /* ===== 子代理执行卡 =====
-       折叠态是执行摘要，展开态把完整过程直接铺进主对话。
-       --agent-color 只承担身份强调，状态色只用于状态与结果。 */
-    .subagent-panel {
-      --subagent-status: var(--text-muted);
-      margin: 8px 0;
+      margin: 6px 0;
       border: 1px solid var(--border-subtle);
-      border-left: 2px solid color-mix(in srgb, var(--agent-color, var(--accent)) 58%, transparent);
+      border-left: 3px solid var(--agent-run-status);
       border-radius: var(--radius-md);
       background: var(--bg-surface);
-      box-shadow: 0 1px 2px rgba(89, 58, 32, 0.035);
-      overflow: clip;
-      color: var(--text-primary);
-      box-sizing: border-box;
-      min-width: 0;
+      overflow: hidden;
     }
-    .subagent-panel.is-running { --subagent-status: var(--accent); }
-    .subagent-panel.is-done { --subagent-status: var(--success, #4f7a58); }
-    .subagent-panel.is-error { --subagent-status: var(--danger, #b24f45); }
-    .subagent-panel.is-interrupted { --subagent-status: var(--text-muted); }
+    .agent-run.is-failed {
+      --agent-run-status: var(--danger);
+      --agent-run-status-muted: var(--danger-muted);
+      border-color: color-mix(in srgb, var(--danger) 32%, var(--border-subtle));
+      border-left-color: var(--danger);
+    }
+    .agent-run.is-running {
+      --agent-run-status: var(--accent);
+      --agent-run-status-muted: var(--accent-muted);
+    }
+    .agent-run.is-interrupted {
+      --agent-run-status: var(--warning);
+      --agent-run-status-muted: var(--warning-muted);
+    }
+    .agent-run.is-completed {
+      --agent-run-status: var(--success);
+      --agent-run-status-muted: var(--success-muted);
+    }
 
-    .subagent-panel-summary {
+    /* ── 摘要行（原生 button，整行可点） ── */
+    .agent-run-summary {
       display: flex;
       align-items: flex-start;
-      gap: 12px;
+      gap: 10px;
       width: 100%;
       min-width: 0;
-      padding: 11px 12px 10px;
+      box-sizing: border-box;
+      padding: 10px 12px;
       border: 0;
       background: transparent;
-      color: inherit;
       font: inherit;
       text-align: left;
+      color: var(--text-primary);
       cursor: pointer;
-      box-sizing: border-box;
-      transition: background-color 140ms ease;
+      transition: background-color 0.16s var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1));
     }
-    .subagent-panel-summary:hover {
-      background: color-mix(in srgb, var(--agent-color, var(--accent)) 4%, transparent);
-    }
-    .subagent-panel-summary:focus-visible {
-      outline: 2px solid color-mix(in srgb, var(--agent-color, var(--accent)) 62%, transparent);
+    .agent-run-summary:hover { background: var(--bg-hover); }
+    .agent-run-summary:focus-visible {
+      outline: 2px solid var(--border-focus);
       outline-offset: -2px;
     }
-
-    .subagent-panel-summary-main {
+    .agent-run-summary:active { transform: scale(0.995); }
+    .agent-run-summary-icon {
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 22px;
+      height: 22px;
+      margin-top: 1px;
+      border-radius: 50%;
+      background: var(--agent-run-status-muted);
+      color: var(--agent-run-status);
+    }
+    .agent-run.is-running .agent-run-summary-icon svg {
+      animation: agent-run-spin 2.4s linear infinite;
+    }
+    @keyframes agent-run-spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .agent-run-summary-main {
       flex: 1 1 auto;
       display: flex;
       flex-direction: column;
       gap: 3px;
       min-width: 0;
     }
-    .subagent-panel-kicker {
+    .agent-run-summary-top {
       display: flex;
       align-items: center;
       flex-wrap: wrap;
-      gap: 6px;
+      gap: 6px 8px;
       min-width: 0;
     }
-    .subagent-panel-name {
-      color: color-mix(in srgb, var(--agent-color, var(--accent)) 88%, var(--text-primary));
-      font-size: 12.25px;
-      font-weight: 650;
+    .agent-run-title {
+      font-size: var(--font-size-xs);
+      font-weight: var(--font-weight-semibold);
+      line-height: 1.3;
+      color: var(--text-primary);
+    }
+    .agent-run-count {
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      padding: 1px 6px;
+      border-radius: var(--radius-full);
+      background: var(--bg-tertiary);
+      color: var(--text-secondary);
+      font-size: 10.5px;
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+    .agent-run-status-label {
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 10.5px;
+      font-weight: var(--font-weight-medium);
+      color: var(--agent-run-status);
+    }
+    .agent-run-latest {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      min-width: 0;
+      font-size: 10.5px;
+      line-height: 1.45;
+      color: var(--text-muted);
+    }
+    .agent-run-latest-label {
+      flex: 0 0 auto;
+      font-size: 9.5px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--text-tertiary);
+      opacity: 0.8;
+    }
+    .agent-run-latest-text {
+      flex: 1 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .agent-run.is-running .agent-run-latest-text {
+      white-space: normal;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow-wrap: anywhere;
+    }
+    .agent-run-chevron {
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      margin-top: 3px;
+      color: var(--text-muted);
+      transition: transform 0.2s var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1));
+    }
+    .agent-run[data-expanded="true"] .agent-run-chevron { transform: rotate(180deg); }
+
+    /* ── 展开体：桌面 rail 在左、详情在右；永远不设固定高度 / 内嵌滚动 ──
+       这是刻意选择：Agent 时间线是对话流的一部分，用户滚动的是整段对话，
+       而不是一个被困在卡片里的小窗口。 */
+    .agent-run-body {
+      display: flex;
+      flex-direction: row;
+      align-items: stretch;
+      width: 100%;
+      min-width: 0;
+      height: auto;
+      max-height: none;
+      overflow: visible;
+      border-top: 1px solid var(--border-subtle);
+    }
+    .agent-run[data-expanded="false"] .agent-run-body { display: none; }
+
+    .agent-run-rail {
+      flex: 0 0 208px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+      padding: 8px;
+      border-right: 1px solid var(--border-subtle);
+      background: var(--bg-secondary);
+    }
+    .agent-run-agent {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      min-width: 0;
+      box-sizing: border-box;
+      padding: 7px 8px;
+      border: 0;
+      border-radius: var(--radius-sm);
+      background: transparent;
+      font: inherit;
+      text-align: left;
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: background-color 0.15s var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)),
+                  color 0.15s var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1));
+    }
+    .agent-run-agent:hover { background: var(--bg-hover); }
+    .agent-run-agent:active { transform: scale(0.985); }
+    .agent-run-agent:focus-visible {
+      outline: 2px solid var(--border-focus);
+      outline-offset: -1px;
+    }
+    .agent-run-agent.is-selected {
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+      box-shadow: inset 2px 0 0 var(--agent-color, var(--accent));
+    }
+    .agent-run-agent-marker {
+      flex: 0 0 auto;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--agent-color, var(--text-tertiary));
+    }
+    .agent-run-agent.is-selected .agent-run-agent-marker {
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--agent-color, var(--accent)) 22%, transparent);
+    }
+    .agent-run-agent-copy {
+      flex: 1 1 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      min-width: 0;
+    }
+    .agent-run-agent-copy strong {
+      font-size: 11.5px;
+      font-weight: var(--font-weight-semibold);
       line-height: 1.35;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .subagent-panel-tag {
-      display: inline-flex;
-      align-items: center;
-      padding: 0 5px;
-      border: 1px solid var(--border-subtle);
-      border-radius: 4px;
-      color: var(--text-muted);
-      background: var(--bg-secondary);
-      font-size: 9.1px;
-      font-weight: 500;
-      line-height: 1.45;
-      white-space: nowrap;
-    }
-    .subagent-panel-status {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      color: var(--subagent-status);
-      font-size: 10.15px;
-      font-weight: 600;
+    .agent-run-agent-copy span {
+      font-size: 10px;
       line-height: 1.4;
+      color: var(--text-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .subagent-panel-status-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: currentColor;
-      box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 12%, transparent);
+    .agent-run-agent-status {
       flex: 0 0 auto;
+      font-size: 9.5px;
+      font-weight: var(--font-weight-medium);
+      color: var(--text-muted);
     }
-    .subagent-panel.is-running .subagent-panel-status-dot {
-      animation: subagent-status-pulse 1.65s ease-in-out infinite;
-    }
-    @keyframes subagent-status-pulse {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.52; transform: scale(0.78); }
-    }
+    .agent-run-agent-status.is-failed { color: var(--danger); }
+    .agent-run-agent-status.is-running { color: var(--accent); }
+    .agent-run-agent-status.is-interrupted { color: var(--warning); }
+    .agent-run-agent-status.is-completed { color: var(--success); }
 
-    .subagent-panel-task-desc {
-      display: -webkit-box;
-      -webkit-line-clamp: 2;
-      -webkit-box-orient: vertical;
-      overflow: hidden;
-      color: var(--text-secondary);
-      font-size: 11.55px;
+    .agent-run-detail {
+      flex: 1 1 auto;
+      min-width: 0;
+      padding: 10px 12px 12px;
+    }
+    .agent-run-detail-panel[hidden] { display: none; }
+    .agent-run-detail-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      min-width: 0;
+      margin-bottom: 8px;
+    }
+    .agent-run-detail-name {
+      font-size: 11.5px;
+      font-weight: var(--font-weight-semibold);
+      color: var(--text-primary);
+      overflow-wrap: anywhere;
+    }
+    .agent-run-detail-task {
+      font-size: 10.5px;
       line-height: 1.45;
+      color: var(--text-muted);
       overflow-wrap: anywhere;
     }
-    .subagent-panel-preview {
-      display: grid;
-      grid-template-columns: auto minmax(0, 1fr);
-      align-items: start;
-      gap: 7px;
-      margin-top: 1px;
-      min-width: 0;
-    }
-    .subagent-panel-preview-label {
-      color: var(--subagent-status);
-      font-size: 10.15px;
-      font-weight: 600;
-      line-height: 1.5;
-      white-space: nowrap;
-    }
-    .subagent-panel-preview-text {
-      display: -webkit-box;
-      -webkit-line-clamp: 2;
-      -webkit-box-orient: vertical;
-      overflow: hidden;
-      color: var(--text-secondary);
-      font-size: 11.55px;
-      line-height: 1.5;
-      overflow-wrap: anywhere;
-    }
-    .subagent-panel.is-done .subagent-panel-preview-text {
-      color: var(--text-primary);
-    }
-    .subagent-panel.is-error .subagent-panel-preview-text {
-      color: color-mix(in srgb, var(--danger, #b24f45) 82%, var(--text-primary));
+    .agent-run-detail-state {
+      flex: 0 0 auto;
+      font-size: 10px;
+      color: var(--text-muted);
     }
 
-    .subagent-panel-side {
-      flex: 0 0 auto;
+    .agent-run-timeline {
       display: flex;
       flex-direction: column;
-      align-items: flex-end;
-      gap: 8px;
-      padding-top: 1px;
-    }
-    .subagent-panel-steps {
-      color: var(--text-muted);
-      font-family: var(--font-mono);
-      font-size: 9.45px;
-      line-height: 1.35;
-      font-variant-numeric: tabular-nums;
-      white-space: nowrap;
-    }
-    .subagent-panel-chevron {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 20px;
-      height: 20px;
-      border-radius: 6px;
-      color: var(--text-muted);
-      transition: transform 180ms var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)), background-color 140ms ease;
-    }
-    .subagent-panel-summary:hover .subagent-panel-chevron {
-      background: color-mix(in srgb, var(--agent-color, var(--accent)) 9%, transparent);
-      color: var(--agent-color, var(--accent));
-    }
-    .subagent-panel[data-expanded="true"] .subagent-panel-chevron {
-      transform: rotate(180deg);
-    }
-
-    /* 展开后的完整过程没有固定高度，也没有内部滚动条。 */
-    .subagent-panel-body {
-      height: auto;
-      max-height: none;
-      overflow: visible;
-      padding: 12px 14px 14px;
-      border-top: 1px solid var(--border-subtle);
-      background: color-mix(in srgb, var(--agent-color, var(--accent)) 1.2%, var(--bg-surface));
-      box-sizing: border-box;
-      min-width: 0;
-      max-width: 100%;
-    }
-    .subagent-panel-process {
-      position: relative;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      min-width: 0;
-    }
-    .subagent-panel-process::before {
-      content: "";
-      position: absolute;
-      left: 10px;
-      top: 12px;
-      bottom: 12px;
-      width: 1px;
-      background: color-mix(in srgb, var(--agent-color, var(--accent)) 20%, var(--border-subtle));
-      pointer-events: none;
-    }
-    .subagent-step {
-      position: relative;
-      min-width: 0;
-      padding-left: 32px;
-      animation: subagent-step-in 180ms var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)) both;
-    }
-    @keyframes subagent-step-in {
-      from { opacity: 0; transform: translateY(3px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-    .subagent-step-marker {
-      position: absolute;
-      z-index: 1;
-      left: 3px;
-      top: 3px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 15px;
-      height: 15px;
-      border-radius: 50%;
-      border: 1px solid color-mix(in srgb, var(--agent-color, var(--accent)) 30%, var(--border-subtle));
-      background: var(--bg-elevated, var(--bg-surface));
-      color: color-mix(in srgb, var(--agent-color, var(--accent)) 76%, var(--text-secondary));
-      box-sizing: border-box;
-    }
-    .subagent-step-dot {
-      width: 4px;
-      height: 4px;
-      border-radius: 50%;
-      background: currentColor;
-    }
-    .subagent-step-icon,
-    .subagent-step-icon svg {
-      display: inline-flex;
-      width: 11px;
-      height: 11px;
-      flex: 0 0 auto;
-    }
-    .subagent-step.is-result .subagent-step-marker {
-      color: var(--success, #4f7a58);
-      border-color: color-mix(in srgb, var(--success, #4f7a58) 42%, var(--border-subtle));
-    }
-    .subagent-step.is-error .subagent-step-marker {
-      color: var(--danger, #b24f45);
-      border-color: color-mix(in srgb, var(--danger, #b24f45) 46%, var(--border-subtle));
-    }
-    .subagent-step-content {
-      min-width: 0;
-    }
-
-    /* 过程行去卡片化：工具仍保留交互，但不再一层层嵌套纸卡。 */
-    .subagent-panel-process .tool-use-card,
-    .subagent-panel-process .tool-group,
-    .subagent-panel-process .inline-tool,
-    .subagent-panel-process .inline-diff {
-      margin: 0;
-      background: transparent;
-      border-color: transparent;
-      border-radius: 6px;
-      box-shadow: none;
-    }
-    .subagent-panel-process .tool-use-header,
-    .subagent-panel-process .tool-group-header,
-    .subagent-panel-process .inline-tool-row,
-    .subagent-panel-process .diff-header {
-      padding: 4px 2px;
-      background: transparent;
-    }
-    .subagent-panel-process .tool-use-body,
-    .subagent-panel-process .tool-group-body,
-    .subagent-panel-process .inline-tool-expanded,
-    .subagent-panel-process .diff-body {
-      padding: 7px 2px 5px;
-      border-top-color: var(--border-subtle);
-      background: transparent;
-    }
-    .subagent-panel-process .inline-terminal {
-      margin: 0;
-      box-shadow: none;
-    }
-    .subagent-panel-process .thinking-inline {
-      margin: 1px 0;
-      padding: 3px 0;
-      background: transparent;
-      border-color: transparent;
-    }
-    .subagent-panel-process .markdown-content {
-      font-size: 12.25px;
-      line-height: 1.58;
-    }
-    .subagent-panel-process .markdown-content > :first-child { margin-top: 0; }
-    .subagent-panel-process .markdown-content > :last-child { margin-bottom: 0; }
-
-    /* 最终结论占据轨迹末端，不用外框再套一层“结果卡”。 */
-    .subagent-step.is-result .subagent-reply,
-    .subagent-step.is-error .subagent-reply {
-      margin: 0;
-      padding: 0;
-      border: 0;
-      background: transparent;
-      box-shadow: none;
-    }
-    .subagent-reply {
-      line-height: 1.55;
-      color: var(--text-primary);
-      word-break: break-word;
-      overflow-wrap: anywhere;
-      min-width: 0;
-    }
-    .subagent-reply > :first-child { margin-top: 0; }
-    .subagent-reply > :last-child { margin-bottom: 0; }
-    .subagent-reply pre,
-    .subagent-reply code {
-      font-size: 11.48px;
-    }
-    .subagent-reply pre {
-      background: var(--bg-secondary);
-      padding: 10px 12px;
-      border-radius: 6px;
-      overflow-x: auto;
-      white-space: pre-wrap;
-      word-break: break-word;
-      overflow-wrap: anywhere;
-      margin: 8px 0;
-      max-width: 100%;
-      min-width: 0;
-    }
-    .subagent-reply-marker {
-      display: inline-flex;
-      align-items: center;
       gap: 4px;
-      margin-bottom: 5px;
-      color: var(--agent-color, var(--accent));
-      font-size: 10.15px;
-      font-weight: 650;
-      line-height: 1.35;
+      min-width: 0;
     }
-    .subagent-reply-marker.error {
-      color: var(--danger, #b24f45);
+    .agent-run-step {
+      display: flex;
+      gap: 8px;
+      min-width: 0;
     }
-    .subagent-reply-marker-icon {
+    .agent-run-step-marker {
+      flex: 0 0 auto;
+      display: flex;
+      justify-content: center;
+      width: 16px;
+      padding-top: 2px;
+    }
+    .agent-run-step-dot {
+      width: 5px;
+      height: 5px;
+      margin-top: 4px;
+      border-radius: 50%;
+      background: color-mix(in srgb, var(--accent) 55%, var(--text-muted));
+    }
+    .agent-run-step-icon,
+    .agent-run-step-icon svg {
       display: inline-flex;
       align-items: center;
+      width: 12px;
+      height: 12px;
+      color: var(--text-tertiary);
     }
-    .subagent-reply.final .subagent-reply-content > :first-child { margin-top: 0; }
-    .subagent-reply.final .subagent-reply-content > :last-child { margin-bottom: 0; }
+    .agent-run-step-content {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    /* 时间线里的工具/思考是“过程”，压暗、去底，让最终结果成为视觉终点。 */
+    .agent-run-detail .tool-use-card,
+    .agent-run-detail .tool-group,
+    .agent-run-detail .inline-tool,
+    .agent-run-detail .inline-diff {
+      margin: 2px 0;
+      box-shadow: none;
+      background: transparent;
+      border-color: var(--border-subtle);
+      font-size: 10.5px;
+      color: var(--text-muted);
+    }
+    .agent-run-detail .inline-terminal {
+      margin: 2px 0;
+      box-shadow: none;
+    }
+    .agent-run-detail .thinking-inline {
+      padding: 2px 0;
+      background: transparent;
+      font-size: 10.5px;
+      color: var(--text-muted);
+    }
+    .agent-run-detail .markdown-content {
+      font-size: 11.5px;
+      line-height: 1.5;
+      color: var(--text-secondary);
+      overflow-wrap: anywhere;
+    }
+    .agent-run-detail .markdown-content > :first-child { margin-top: 0; }
+    .agent-run-detail .markdown-content > :last-child { margin-bottom: 0; }
+    .agent-run-detail .markdown-content pre,
+    .agent-run-detail .markdown-content .code-block pre {
+      max-width: 100%;
+      overflow-x: auto;
+    }
+    .agent-run-waiting {
+      font-size: 10.5px;
+      line-height: 1.45;
+      color: var(--text-muted);
+    }
+
+    /* ── 最终结果：与时间线分开，成功/失败各自一套底色 ── */
+    .agent-run-result {
+      margin-top: 8px;
+      padding: 9px 10px;
+      border: 1px solid color-mix(in srgb, var(--success) 26%, transparent);
+      border-radius: var(--radius-sm);
+      background: color-mix(in srgb, var(--success) 7%, transparent);
+    }
+    .agent-run-result.is-error {
+      border-color: color-mix(in srgb, var(--danger) 30%, transparent);
+      background: color-mix(in srgb, var(--danger) 7%, transparent);
+    }
+    .agent-run-result-label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 10.5px;
+      font-weight: var(--font-weight-semibold);
+      color: var(--success);
+    }
+    .agent-run-result.is-error .agent-run-result-label { color: var(--danger); }
+    .agent-run-result-icon,
+    .agent-run-result-icon svg {
+      display: inline-flex;
+      align-items: center;
+      width: 12px;
+      height: 12px;
+    }
+    .agent-run-result-content {
+      margin-top: 6px;
+      font-size: 11.5px;
+      line-height: 1.55;
+      color: var(--text-secondary);
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    .agent-run-result-content > :first-child { margin-top: 0; }
+    .agent-run-result-content > :last-child { margin-bottom: 0; }
+    .agent-run-result-content pre,
+    .agent-run-result-content code {
+      max-width: 100%;
+    }
+    .agent-run-result-content pre {
+      overflow-x: auto;
+      padding: 8px 10px;
+      border-radius: var(--radius-xs);
+      background: var(--bg-terminal);
+      color: var(--text-inverse);
+      font-size: 10.5px;
+    }
+
+    /* 结果已回填到原 Run 的消息本身不再产生第二张卡，只留一个隐藏占位。 */
+    .chat-message.agent-run-owned { display: none; }
 
     @media (prefers-reduced-motion: reduce) {
-      .subagent-panel.is-running .subagent-panel-status-dot,
-      .subagent-step {
-        animation: none;
-      }
-      .subagent-panel-chevron {
-        transition: none;
-      }
+      .agent-run.is-running .agent-run-summary-icon svg { animation: none; }
+      .agent-run-chevron,
+      .agent-run-summary,
+      .agent-run-agent { transition: none; }
+      .agent-run-summary:active,
+      .agent-run-agent:active { transform: none; }
     }
 
     /* ===== 空消息占位 / 未识别 block / 截断提示 ===== */
@@ -7090,7 +7095,7 @@
     }
 
     /* Composer top row: holds todo collapse bar (left) + reply status bar (right) on one line.
-       position: relative anchors the upward-floating .todo-progress-body to the full row width. */
+       position: relative 是上方浮层（.todo-progress-body / .queue-bar-host）的定位参照。 */
     .composer-top-row {
       position: relative;
       display: flex;
@@ -7104,11 +7109,20 @@
     }
 
     /* Todo progress bar */
+    /* ── 待办进度条（composer 顶栏左侧）───────────────────────────────
+       收起态是 40px 一行：进度环 + 计数 + 当前任务 + chevron，底边一条通栏
+       进度轨（左段是固定轨道、右段随完成比例生长）。
+       展开态是浮在 composer 上方的清单面板：面板头（标题 + 计数）+ 分段
+       进度 + 可换行的完整任务文本。
+       这里同时修掉两个老问题：
+         1. 图标被「SVG + ::after」画了两遍（勾叠勾、进行中图标是多边形加
+            一个多余圆点，18px 里糊成一团），现在只保留 SVG。
+         2. 计数 9.625px / 任务 10.5px 低于「辅助信息至少 11px」的字号约定，
+            且底部进度轨内缩 10px 时看着像根游离的下划线。 */
     .todo-progress {
       margin-bottom: 6px;
       background: transparent;
       overflow: hidden;
-      transition: all var(--transition-fast);
     }
     .todo-progress.hidden { display: none; }
     .composer-top-row > .todo-progress {
@@ -7121,60 +7135,51 @@
       display: flex;
       align-items: center;
       width: 100%;
-      min-height: 36px;
-      padding: 0 10px;
+      min-height: 40px;
+      padding: 0 9px 0 11px;
       cursor: pointer;
       user-select: none;
-      gap: 10px;
+      gap: 9px;
       color: inherit;
       font: inherit;
       text-align: left;
       appearance: none;
-      background: color-mix(in srgb, var(--bg-elevated) 78%, transparent);
+      background: color-mix(in srgb, var(--bg-elevated) 82%, transparent);
       border: 1px solid var(--border-subtle);
-      border-radius: 11px;
-      box-shadow: var(--shadow-xs), inset 0 1px 0 rgba(255, 255, 255, 0.55);
+      border-radius: var(--radius-md);
+      box-shadow: 0 1px 3px rgba(89, 58, 32, 0.05);
       overflow: hidden;
       transition: background var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
     }
     .todo-progress-header:hover {
-      background: color-mix(in srgb, var(--bg-elevated) 88%, var(--accent-muted));
-      border-color: color-mix(in srgb, var(--border-default) 65%, var(--accent));
+      background: var(--bg-elevated);
+      border-color: color-mix(in srgb, var(--border-default) 70%, var(--accent));
     }
     .todo-progress-header:focus-visible {
       outline: none;
       border-color: var(--border-focus);
-      box-shadow: 0 0 0 3px var(--accent-muted), inset 0 1px 0 rgba(255, 255, 255, 0.55);
+      box-shadow: 0 0 0 3px var(--accent-muted);
     }
+    /* 通栏进度轨：贴卡片底边、跟随圆角裁切。 */
     .todo-progress-header::after {
       content: "";
       position: absolute;
-      left: 10px;
-      right: 10px;
-      bottom: 3px;
-      height: 2px;
-      border-radius: var(--radius-full);
-      background: var(--border-subtle);
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 3px;
+      background: color-mix(in srgb, var(--accent) 13%, transparent);
       pointer-events: none;
     }
-    .todo-progress-left {
-      display: flex;
-      align-items: center;
-      gap: 7px;
-      min-width: 0;
-      flex-shrink: 0;
-      position: relative;
-      z-index: 1;
-    }
-    /* Circular progress ring (replaces the old plain spinner) */
+    /* 进度环：取代旧版那个 16px 细线圆圈。 */
     .todo-progress-ring {
       position: relative;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 16px;
-      height: 16px;
-      min-width: 16px;
+      width: 18px;
+      height: 18px;
+      min-width: 18px;
       flex-shrink: 0;
     }
     .todo-progress-ring svg {
@@ -7183,7 +7188,7 @@
       transform: rotate(-90deg);
     }
     .todo-ring-track {
-      stroke: rgba(197, 101, 61, 0.18);
+      stroke: color-mix(in srgb, var(--accent) 16%, transparent);
     }
     .todo-ring-fill {
       stroke: var(--accent);
@@ -7193,66 +7198,71 @@
       transition: stroke-dashoffset 0.35s ease;
     }
     .todo-progress-counter {
-      min-width: 31px;
-      font-size: 9.625px;
+      flex-shrink: 0;
+      font-size: var(--font-size-xs);
       font-weight: 650;
       color: var(--text-primary);
       white-space: nowrap;
       font-variant-numeric: tabular-nums;
       letter-spacing: 0.01em;
     }
-    /* A quiet two-pixel track keeps progress legible without tinting the whole row. */
+    /* 计数与任务描述之间的细分隔线，替掉旧版靠空隙区分的那点模糊感。 */
+    .todo-progress-divider {
+      flex-shrink: 0;
+      width: 1px;
+      height: 12px;
+      border-radius: 1px;
+      background: color-mix(in srgb, var(--border-default) 80%, transparent);
+    }
     .todo-progress-fill {
       position: absolute;
-      left: 10px;
-      bottom: 3px;
-      width: calc((100% - 20px) * var(--progress, 0));
-      height: 2px;
+      left: 0;
+      bottom: 0;
+      width: calc(100% * var(--progress, 0));
+      height: 3px;
       background: linear-gradient(90deg, var(--accent-active), var(--accent-hover));
-      border-radius: var(--radius-full);
       transition: width 0.3s ease-out;
       pointer-events: none;
-      z-index: 2;
-    }
-    .todo-progress-task-wrap {
-      flex: 1;
-      min-width: 0;
-      display: flex;
-      align-items: center;
-      justify-content: flex-start;
-      position: relative;
-      z-index: 1;
-      padding-left: 2px;
     }
     .todo-progress-task {
-      font-size: 10.5px;
+      flex: 1;
+      min-width: 0;
+      font-size: var(--font-size-xs);
       color: var(--text-secondary);
       font-weight: 500;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      flex: 1;
-      min-width: 0;
       text-align: left;
     }
+    .todo-progress-chevron {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      color: var(--text-tertiary);
+      transition: transform var(--transition-normal), color var(--transition-fast);
+    }
+    .todo-progress-header:hover .todo-progress-chevron { color: var(--text-primary); }
+    /* 展开后箭头翻上去。旧版只改了 aria-expanded，箭头永远朝下，跟面板状态对不上。 */
+    .todo-progress.expanded .todo-progress-chevron { transform: rotate(180deg); }
 
-    /* Expanded body floats UPWARD above the composer, spans the full row width,
-       and is decoupled from the flex row so the status bar on the right does not
-       animate together with the expansion. */
+    /* 展开面板向上浮在 composer 上方。宽度收在 560px：铺满整行时十几条任务
+       会摊成一张空荡荡的大白纸，左对齐的卡片读起来紧凑得多。 */
     .todo-progress-body {
       position: absolute;
       left: 0;
-      right: 0;
+      right: auto;
       bottom: calc(100% + 6px);
-      background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
-      border: 1px solid var(--border-subtle);
-      border-radius: 14px;
-      padding: 7px;
-      box-shadow: var(--shadow-lg), inset 0 1px 0 rgba(255, 255, 255, 0.55);
-      backdrop-filter: blur(14px) saturate(1.1);
-      -webkit-backdrop-filter: blur(14px) saturate(1.1);
-      max-height: 320px;
+      width: min(560px, 100%);
+      padding: var(--float-pad);
+      background: var(--float-bg);
+      border: 1px solid var(--float-border);
+      border-radius: var(--float-radius);
+      box-shadow: var(--float-shadow);
+      max-height: min(320px, 48vh);
       overflow-y: auto;
+      overscroll-behavior: contain;
       z-index: 30;
       opacity: 0;
       transform: translateY(6px);
@@ -7265,87 +7275,124 @@
       transform: translateY(0);
       pointer-events: auto;
     }
+    .todo-progress-panel-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 3px 8px 0;
+    }
+    .todo-progress-panel-title {
+      font-size: var(--font-size-2xs);
+      font-weight: var(--font-weight-semibold);
+      letter-spacing: 0.04em;
+      color: var(--text-tertiary);
+    }
+    .todo-progress-panel-count {
+      font-size: var(--font-size-2xs);
+      font-weight: var(--font-weight-semibold);
+      font-variant-numeric: tabular-nums;
+      color: var(--text-secondary);
+      white-space: nowrap;
+    }
+    /* 分段进度：一段一项。一把能看出「做完几项、当前卡在哪一项」。 */
+    .todo-progress-segments {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      padding: 8px 8px 6px;
+    }
+    .todo-progress-seg {
+      flex: 1 1 0;
+      min-width: 3px;
+      height: 4px;
+      border-radius: var(--radius-full);
+      background: var(--border-subtle);
+      transition: background var(--transition-normal);
+    }
+    .todo-progress-seg.done {
+      background: color-mix(in srgb, var(--accent) 52%, transparent);
+    }
+    .todo-progress-seg.active {
+      background: linear-gradient(90deg, var(--accent-active), var(--accent-hover));
+    }
     .todo-progress-list {
       list-style: none;
       margin: 0;
       padding: 0;
       display: flex;
       flex-direction: column;
-      gap: 3px;
+      gap: 2px;
     }
     .todo-progress-item {
+      position: relative;
       display: flex;
-      align-items: center;
-      gap: 9px;
-      min-height: 34px;
-      padding: 7px 9px;
-      border-radius: 9px;
-      font-size: 11.375px;
+      align-items: flex-start;
+      gap: 8px;
+      min-height: 32px;
+      padding: 7px 9px 7px 10px;
+      border-radius: var(--menu-item-radius);
+      font-size: var(--font-size-sm);
+      line-height: 1.45;
       color: var(--text-secondary);
-      line-height: 1.35;
-      transition: background var(--transition-fast);
+      transition: background var(--transition-fast), color var(--transition-fast);
     }
-    .todo-progress-item + .todo-progress-item {
-      border-top: 0;
+    /* 展开面板的意义就是能读完整描述，这里必须换行；旧版 nowrap + ellipsis
+       把长任务截成一句半，等于白展开。 */
+    .todo-progress-item > span:last-child {
+      flex: 1;
+      min-width: 0;
+      white-space: normal;
+      overflow-wrap: anywhere;
     }
     .todo-progress-item.active {
       color: var(--text-primary);
       font-weight: 550;
       background: var(--accent-muted);
     }
+    /* 进行中项左侧短竖条：叠在 accent-muted 底上，语义比单独换个底色明确。 */
+    .todo-progress-item.active::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 7px;
+      bottom: 7px;
+      width: 2px;
+      border-radius: var(--radius-full);
+      background: var(--accent);
+    }
     .todo-progress-item.done {
       color: var(--text-muted);
-      opacity: 0.78;
     }
-    .todo-progress-item > span:last-child {
-      flex: 1;
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+    .todo-progress-item.done > span:last-child {
+      text-decoration: line-through;
+      text-decoration-thickness: 1px;
+      text-decoration-color: color-mix(in srgb, currentColor 55%, transparent);
     }
+    /* 图标只画一层：颜色 + 尺寸全在这里定，形状由 chat-render 的 iconSvg 给。 */
     .todo-item-icon {
       display: inline-grid;
       place-items: center;
-      width: 18px;
-      min-width: 18px;
-      height: 18px;
-      border: 1.5px solid currentColor;
-      border-radius: 50%;
-      font-size: 0;
+      width: 13px;
+      min-width: 13px;
+      height: 13px;
+      margin-top: 2px;
       flex-shrink: 0;
+      color: var(--text-muted);
     }
-    .todo-item-icon.pending { color: var(--border-strong); }
+    .todo-item-icon.pending {
+      color: color-mix(in srgb, var(--text-muted) 62%, transparent);
+    }
     .todo-item-icon.active {
       color: var(--accent);
-      border-color: color-mix(in srgb, var(--accent) 40%, transparent);
-    }
-    .todo-item-icon.active::after {
-      content: "";
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: currentColor;
+      animation: todoIconPulse 1.5s ease-in-out infinite;
     }
     .todo-item-icon.done {
       color: var(--success);
-      background: var(--success-muted);
     }
-    .todo-item-icon.done::after {
-      content: "";
-      width: 7px;
-      height: 4px;
-      border-left: 1.5px solid currentColor;
-      border-bottom: 1.5px solid currentColor;
-      transform: translateY(-1px) rotate(-45deg);
-    }
-
-    @media (prefers-reduced-motion: reduce) {
-      .todo-ring-fill,
-      .todo-progress-fill,
-      .todo-progress-body {
-        transition: none;
-      }
+    @keyframes todoIconPulse {
+      0%, 100% { opacity: 0.55; }
+      50%      { opacity: 1; }
     }
 
     .input-textarea {
@@ -8225,7 +8272,147 @@
       color: var(--lp-ink-2);
     }
 
-    .login-page .left-spacer { flex: 1; }
+    .login-page .left-spacer {
+      flex: 1;
+      align-self: stretch;
+      display: grid;
+      place-items: center;
+      padding-top: 24px;
+    }
+
+    /* 非实时产品插画：六种 CLI → 工作区 → 移动端。所有素材内联，无媒体请求。 */
+    .login-visual {
+      position: relative;
+      width: 100%;
+      max-width: 580px;
+      padding-bottom: 32px;
+      color: var(--lp-ink-2);
+    }
+    .login-visual-scene {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 52vh;
+      overflow: visible;
+      pointer-events: none;
+    }
+    .login-visual .wand-provider-logo { width: 26px; height: 26px; }
+    .login-visual-orbit {
+      stroke: var(--lp-line);
+      stroke-dasharray: 2 7;
+      opacity: .65;
+    }
+    .login-visual-registration { stroke: var(--lp-line-2); }
+    .login-visual-wire { stroke: var(--lp-line-2); stroke-width: 1.2; }
+    .login-visual-signal {
+      stroke: var(--lp-accent);
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-dasharray: .055 .945;
+      opacity: 0;
+      animation: loginVisualSignal 8s linear infinite;
+      animation-delay: var(--lv-delay, 0s);
+    }
+    .login-visual-node,
+    .login-visual-window {
+      fill: var(--lp-surface);
+      stroke: var(--lp-line-2);
+    }
+    .login-visual-backplate {
+      fill: var(--lp-well);
+      stroke: var(--lp-line);
+    }
+    .login-visual-rule { stroke: var(--lp-line); }
+    .login-visual-window-dots { fill: var(--lp-line-2); }
+    .login-visual-tab { fill: var(--accent-muted); }
+    .login-visual-muted-line {
+      stroke: var(--lp-line-2);
+      stroke-width: 3;
+      stroke-linecap: round;
+    }
+    .login-visual-online { fill: var(--success); }
+    .login-visual-sidebar { stroke: var(--lp-ink-3); }
+    .login-visual-accent-stroke { stroke: var(--lp-accent); }
+    .login-visual-terminal { fill: var(--bg-terminal); }
+    .login-visual-code { stroke: var(--border-strong); }
+    .login-visual-code .login-visual-code-accent { stroke: var(--accent-hover); }
+    .login-visual-code .login-visual-output {
+      stroke: var(--success-hover);
+      transform-box: fill-box;
+      transform-origin: left;
+      animation: loginVisualOutput 8s ease-in-out infinite;
+    }
+    .login-visual-cursor { animation: loginVisualCursor 2s steps(2, jump-none) infinite; }
+    .login-visual-chat-card { fill: var(--lp-well); }
+    .login-visual-git-tile {
+      fill: var(--lp-surface);
+      stroke: var(--lp-line-2);
+    }
+    .login-visual-git { stroke: var(--success); stroke-linecap: round; stroke-linejoin: round; }
+    .login-visual-sync-dot {
+      fill: var(--success);
+      animation: loginVisualSync 8s ease-in-out infinite;
+    }
+    .login-visual-phone { animation: loginVisualFloat 8s ease-in-out infinite; }
+    .login-visual-phone-shadow { fill: var(--lp-line); opacity: .55; }
+    .login-visual-device { fill: var(--lp-ink-2); }
+    .login-visual-phone-screen { fill: var(--lp-surface); }
+
+    /* 原生 checkbox 提供键盘/读屏可用的暂停开关，无额外计时器或事件监听。 */
+    .login-visual-toggle,
+    .login-visual-control {
+      position: absolute;
+      left: 0;
+      bottom: 0;
+      width: 44px;
+      height: 44px;
+      margin: 0;
+      border-radius: 50%;
+    }
+    .login-visual-toggle { z-index: 1; opacity: 0; cursor: pointer; }
+    .login-visual-control {
+      display: grid;
+      place-items: center;
+      color: var(--lp-ink-3);
+      border: 1px solid var(--lp-line);
+      background: var(--lp-paper);
+    }
+    .login-visual-control svg { width: 16px; height: 16px; }
+    .login-visual-control .login-visual-play-icon { display: none; }
+    .login-visual-toggle:hover + .login-visual-control { border-color: var(--lp-line-2); }
+    .login-visual-toggle:focus-visible + .login-visual-control {
+      outline: 2px solid var(--lp-accent);
+      outline-offset: 3px;
+    }
+    .login-visual-toggle:checked + .login-visual-control .login-visual-pause-icon { display: none; }
+    .login-visual-toggle:checked + .login-visual-control .login-visual-play-icon { display: block; }
+    .login-visual-toggle:checked ~ .login-visual-scene * { animation-play-state: paused; }
+
+    @keyframes loginVisualSignal {
+      0% { stroke-dashoffset: .08; opacity: 0; }
+      12% { opacity: .8; }
+      65% { stroke-dashoffset: -1; opacity: .8; }
+      66%, 100% { stroke-dashoffset: -1; opacity: 0; }
+    }
+    @keyframes loginVisualOutput {
+      0%, 20%, 100% { transform: scaleX(.6); opacity: .65; }
+      45%, 80% { transform: scaleX(1); opacity: 1; }
+    }
+    @keyframes loginVisualCursor { 0%, 100% { opacity: 1; } 50% { opacity: .2; } }
+    @keyframes loginVisualSync {
+      0%, 20% { transform: translateX(-110px); opacity: 0; }
+      25%, 75% { opacity: .8; }
+      80%, 100% { transform: translateX(145px); opacity: 0; }
+    }
+    @keyframes loginVisualFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+
+    @media (prefers-reduced-motion: reduce) {
+      .login-visual-scene * { animation: none !important; }
+      .login-visual-signal,
+      .login-visual-sync-dot,
+      .login-visual-toggle,
+      .login-visual-control { display: none; }
+    }
 
     .login-page .trust-line {
       display: flex;
@@ -8420,7 +8607,7 @@
       height: 44px;
       min-height: 44px;
       padding: 0 24px;
-      border-radius: 6px;
+      border-radius: var(--control-radius);
       font-size: 13.125px;
       font-weight: 600;
       text-decoration: none;
@@ -8744,15 +8931,15 @@
         2px 0 12px -8px rgba(20, 14, 8, 0.12);
     }
 
-    /* Drawer backdrop — calmer dark wash, matches modal-backdrop */
+    /* Same quiet, solid scrim as the dialog surfaces. */
     .drawer-backdrop {
-      background: rgba(20, 14, 8, 0.32);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
+      background: var(--bg-overlay);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
     }
     .drawer-backdrop.open {
-      backdrop-filter: blur(18px) saturate(140%);
-      -webkit-backdrop-filter: blur(18px) saturate(140%);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
     }
 
     /* Sidebar header — hairline divider, transparent so glass shows through */
@@ -9563,12 +9750,6 @@
       }
       .chat-container.active { display: flex; }
 
-      /* Todo 进度条 - 紧凑 */
-      .todo-progress-header { padding: 0 8px; gap: 6px; }
-      .todo-progress-counter { font-size: 10.5px; }
-      .todo-progress-task { font-size: 10.5px; }
-      .todo-progress-body { padding: 4px 6px; }
-
       /* 登录页（.login-page）的移动端规则在它自己的 @media 里，见文件上方的
          「登录页 · 扁平暖色极简」区块；这里只保留全局按钮高度。 */
       .btn { min-height: 40px; }
@@ -9728,22 +9909,34 @@
       }
       .tool-use-file { max-width: 100%; }
       .tool-use-body { padding: 10px 12px; }
-      /* subagent 执行卡：窄屏收紧摘要密度，展开过程仍参与主对话滚动。 */
-      .subagent-panel { margin: 6px 0; }
-      .subagent-panel-summary { padding: 10px; gap: 8px; }
-      .subagent-panel-kicker { gap: 4px 6px; }
-      .subagent-panel-tag { margin: 0; padding: 0 4px; }
-      .subagent-panel-side { gap: 4px; }
-      .subagent-panel-steps { font-size: 9px; }
-      .subagent-panel-body { height: auto; max-height: none; overflow: visible; padding: 10px 10px 12px; }
-      .subagent-panel-process::before { left: 9px; }
-      .subagent-step { padding-left: 28px; }
+      /* Agent Run：窄屏下 rail 从左侧换到上方，详情铺满，摘要更紧凑。
+         窄屏窄到放不下两栏时也不横向滚动——rail 允许横向滑动选 Agent。 */
+      .agent-run { margin: 6px 0; }
+      .agent-run-summary { padding: 9px 10px; gap: 8px; }
+      .agent-run-body { flex-direction: column; }
+      .agent-run-rail {
+        flex: 0 0 auto;
+        flex-direction: row;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 8px;
+        border-right: 0;
+        border-bottom: 1px solid var(--border-subtle);
+        /* 换行而不是横向滑动：窄屏上绝不产生横向溢出或嵌套滚动区。 */
+        overflow: visible;
+      }
+      .agent-run-agent {
+        flex: 1 1 100%;
+        width: auto;
+        min-width: 0;
+      }
+      .agent-run-detail { padding: 10px 10px 12px; }
       .chat-activity-body { height: 200px; padding: 4px 2px 8px; }
       .chat-activity-summary { padding: 7px 8px; gap: 4px; }
       .markdown-content .code-block { margin: 8px 0; }
       .markdown-content pre,
       .markdown-content .code-block pre,
-      .subagent-reply pre { padding: 10px; }
+      .agent-run-result-content pre { padding: 10px; }
       /* diff 卡片：窄屏下两列 side-by-side 每列只剩 ~160px，旧/新被挤成
          单字一行的"窄条"几乎不可读。改成垂直堆叠（旧在上，新在下），
          单列占满屏宽，长行靠 word-break 自然换行，杜绝横向溢出。 */
@@ -9901,27 +10094,27 @@
       flex-wrap: wrap;
     }
     .blank-chat-tool-btn {
-      padding: 8px 14px;
-      border: 1.5px solid var(--border-default);
-      border-radius: 10px;
-      background: rgba(255, 255, 255, 0.7);
+      padding: 8px 18px;
+      border: 1px solid var(--border-default);
+      border-radius: var(--control-radius);
+      background: var(--bg-elevated);
       color: var(--text-secondary);
-      font-size: 12.25px;
+      font-size: var(--font-size-sm);
       font-weight: 500;
       font-family: inherit;
       cursor: pointer;
-      transition: all var(--transition-fast);
+      transition: background-color var(--transition-fast), color var(--transition-fast);
       display: flex;
       align-items: center;
-      gap: 6px;
-      min-height: 40px;
+      gap: 8px;
+      min-height: 44px;
     }
     .blank-chat-tool-btn:hover {
-      background: var(--accent-muted);
-      border-color: var(--accent);
-      color: var(--accent);
-      transform: translateY(-1px);
-      box-shadow: 0 4px 12px rgba(89, 58, 32, 0.08);
+      background: var(--bg-hover);
+      border-color: var(--border-default);
+      color: var(--text-primary);
+      transform: none;
+      box-shadow: none;
     }
     .blank-chat-tool-btn .tool-icon {
       font-size: 15.75px;
@@ -9930,14 +10123,15 @@
     .blank-chat-tool-btn.welcome-new-task {
       min-width: 180px;
       justify-content: center;
-      border-color: var(--accent);
-      background: var(--accent-muted);
-      color: var(--accent);
-      font-weight: 650;
+      border-color: transparent;
+      background: var(--accent-solid);
+      color: var(--text-inverse);
+      font-weight: 600;
     }
 
     .blank-chat-tool-btn.welcome-new-task:hover {
-      background: color-mix(in srgb, var(--accent) 16%, transparent);
+      color: var(--text-inverse);
+      background: var(--accent-active);
     }
     /* Blank-chat CWD inline selector */
     .blank-chat-cwd-wrap {
@@ -9983,34 +10177,35 @@
     }
 
     .workspace-task-welcome-eyebrow {
-      margin: 0 0 10px;
-      color: var(--accent);
-      font-size: 9.625px;
-      font-weight: 650;
+      margin: 0 0 16px;
+      color: var(--text-tertiary);
+      font-size: var(--font-size-xs);
+      font-weight: 500;
       letter-spacing: 0.08em;
       text-transform: uppercase;
     }
 
     .workspace-task-welcome .blank-chat-logo {
-      color: white;
-
-      background: transparent;
-
+      width: 44px;
+      height: 44px;
+      margin: 0 0 16px;
+      color: var(--text-secondary);
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--control-radius);
       box-shadow: none;
-
-      border-radius: 0;
     }
 
     .workspace-task-welcome-cwd {
       display: flex;
       max-width: min(420px, 100%);
       align-items: center;
-      justify-content: center;
-      gap: 5px;
-      margin: 12px auto 0;
+      justify-content: flex-start;
+      gap: 6px;
+      margin: 16px 0 0;
       color: var(--text-muted);
       font-family: var(--font-mono);
-      font-size: 9.625px;
+      font-size: var(--font-size-xs);
     }
 
     .workspace-task-welcome-cwd span {
@@ -10720,6 +10915,32 @@
     .topbar-git-slot:empty {
       display: none;
     }
+    .topbar-git-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      height: 32px;
+      padding: 0 10px;
+      font-family: var(--font-sans);
+      font-size: 10.08px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all var(--transition-fast);
+      box-sizing: border-box;
+      line-height: 1;
+    }
+    .topbar-git-badge:hover {
+      background: rgba(255, 255, 255, 0.5);
+      color: var(--text-primary);
+    }
+    .topbar-git-badge:active {
+      transform: scale(0.96);
+    }
     .topbar-git-icon {
       flex-shrink: 0;
       opacity: 0.85;
@@ -10744,6 +10965,7 @@
 
     @media (max-width: 720px) {
       .topbar-git-branch { max-width: 8em; }
+      .topbar-git-badge { padding: 0 8px; font-size: 9.8px; }
     }
 
     .wand-provider-logo {
@@ -12518,7 +12740,7 @@
     }
 
     .input-composer:has(.permission-actions:not(.hidden))
-      .composer-status-row > :not(.permission-actions) {
+      .composer-status-row > :not([data-composer-badge-host="permissions"]) {
       display: none;
     }
 
@@ -12557,47 +12779,32 @@
       width: 32px;
       height: 32px;
       min-width: 32px;
-      color: var(--bg-primary);
-      border: 1px solid color-mix(in srgb, var(--text-primary) 88%, transparent);
-      background: var(--text-primary);
-      box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.16),
-        0 5px 12px -7px color-mix(in srgb, var(--text-primary) 64%, transparent);
-      transition:
-        color 150ms var(--composer-ease),
-        background-color 150ms var(--composer-ease),
-        border-color 150ms var(--composer-ease),
-        box-shadow 150ms var(--composer-ease),
-        transform 120ms var(--composer-ease);
+      border-radius: var(--control-radius);
+      color: var(--text-inverse);
+      border: 1px solid transparent;
+      background: var(--accent-solid);
+      box-shadow: none;
+      transition: color var(--transition-fast), background-color var(--transition-fast);
     }
 
-    .input-composer .btn-circle-send:hover:not(:disabled) {
-      color: var(--bg-primary);
-      background: color-mix(in srgb, var(--text-primary) 88%, var(--bg-primary));
-      border-color: color-mix(in srgb, var(--text-primary) 88%, var(--bg-primary));
-      box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.18),
-        0 7px 16px -9px color-mix(in srgb, var(--text-primary) 72%, transparent);
-      transform: translateY(-1px);
-    }
-
+    .input-composer .btn-circle-send:hover:not(:disabled),
     .input-composer .btn-circle-send:active:not(:disabled) {
-      box-shadow: inset 0 1px 2px color-mix(in srgb, var(--bg-primary) 22%, transparent);
-      transform: scale(0.97);
+      color: var(--text-inverse);
+      background: var(--accent-active);
+      border-color: transparent;
+      box-shadow: none;
+      transform: none;
     }
 
     .input-composer .btn-circle-send.queue-mode:not(:disabled) {
-      color: white;
-      border-color: color-mix(in srgb, var(--accent) 84%, #8b4b34);
-      background: var(--accent);
-      box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.24),
-        0 5px 12px -7px rgba(132, 61, 35, 0.72);
+      color: var(--text-inverse);
+      border-color: transparent;
+      background: var(--accent-solid);
+      box-shadow: none;
     }
 
     .input-composer .btn-circle-send.queue-mode:hover:not(:disabled) {
-      border-color: var(--accent-hover);
-      background: var(--accent-hover);
+      background: var(--accent-active);
     }
 
     .input-composer .btn-circle-send:focus-visible,
@@ -13334,10 +13541,11 @@
       }
     }
 
-    /* Web-only flat shell: native clients keep their existing touch-oriented
-       material while the browser surface follows the denser ORCA rhythm. */
+    /* Web chrome follows the same paper surface and quiet separators as login. */
     html:not(.is-wand-app) .main-header-row {
-      background: var(--bg-elevated);
+      min-height: 56px;
+      padding: 8px 18px;
+      background: var(--bg-primary);
       border-bottom-color: var(--border-subtle);
       backdrop-filter: none;
       -webkit-backdrop-filter: none;
@@ -13465,17 +13673,17 @@
     html:not(.is-wand-app) .input-composer {
       --composer-action-size: 32px;
       --composer-border: var(--border-default);
-      border-radius: 12px;
+      border-radius: var(--radius-sm);
       background: var(--bg-elevated);
       backdrop-filter: none;
       -webkit-backdrop-filter: none;
-      box-shadow: 0 1px 2px rgba(40, 32, 26, 0.045);
+      box-shadow: none;
     }
 
     html:not(.is-wand-app) .input-composer:focus-within,
     html:not(.is-wand-app) .input-composer.is-expanded {
-      border-color: color-mix(in srgb, var(--accent) 36%, var(--composer-border));
-      border-radius: 12px;
+      border-color: var(--accent);
+      border-radius: var(--radius-sm);
       background: var(--bg-elevated);
       box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 9%, transparent);
     }
@@ -15173,8 +15381,8 @@
       align-items: stretch;
       gap: 0;
       padding: 0;
-      min-height: 36px;
-      background: var(--bg-secondary);
+      min-height: 44px;
+      background: var(--bg-primary);
       border-bottom: 1px solid var(--border-subtle);
       /* 任务内的主区导航就是这一条，字号不能再掉到 10.5px 的“小字”。 */
       font-size: var(--font-size-xs);
@@ -15206,8 +15414,8 @@
     }
 
     .workspace-tab-item.active {
-      background: var(--bg-elevated);
-      box-shadow: inset 0 2px 0 var(--accent);
+      background: var(--accent-muted);
+      box-shadow: inset 0 -2px 0 var(--accent);
     }
 
     .workspace-tab {
@@ -15216,7 +15424,7 @@
       gap: 7px;
       min-width: 0;
       flex: 1 1 auto;
-      height: 36px;
+      height: 44px;
       padding: 0 5px 0 13px;
       border: 0;
       border-radius: 0;
@@ -15228,19 +15436,19 @@
     }
 
     .workspace-tab:hover {
-      background: color-mix(in srgb, var(--bg-elevated) 58%, transparent);
+      background: var(--bg-hover);
       color: var(--text-primary);
     }
 
     .workspace-tab.active {
       background: transparent;
-      color: var(--text-primary);
+      color: var(--accent-strong);
     }
 
     .workspace-tab-item-close {
       flex: 0 0 auto;
       width: 28px;
-      height: 36px;
+      height: 44px;
       padding: 0;
       border: 0;
       background: transparent;
@@ -15265,13 +15473,13 @@
       background: color-mix(in srgb, var(--danger) 12%, transparent);
     }
 
-    .workspace-tab-item-close:active:not(:disabled) { transform: scale(0.9); }
+    .workspace-tab-item-close:active:not(:disabled) { transform: none; }
     .workspace-tab-item-close:disabled { cursor: wait; opacity: 0.48; }
 
     .workspace-tab.moving-source {
-      color: #dff6e4;
-      background: color-mix(in srgb, #4f9d69 34%, var(--bg-elevated));
-      box-shadow: inset 0 2px 0 #69c984;
+      color: var(--success);
+      background: var(--success-muted);
+      box-shadow: inset 0 -2px 0 var(--success);
     }
 
     .workspace-tab.move-target {
@@ -15322,8 +15530,8 @@
 
     .workspace-tab-add {
       flex-shrink: 0;
-      width: 36px;
-      height: 36px;
+      width: 44px;
+      height: 44px;
       border-radius: 0;
       border: 0;
       border-right: 1px solid var(--border-subtle);
@@ -15344,14 +15552,14 @@
     }
 
     .workspace-tab-add:active:not(:disabled) {
-      transform: scale(0.94);
+      transform: none;
+      background: var(--bg-active);
     }
 
     .workspace-tab-add:disabled {
       cursor: wait;
       opacity: 0.72;
     }
-
 
     /* 快捷提交徽章：任务里顶栏被标签栏取代，入口只有这一个。 */
     .workspace-tab-git {
@@ -15360,11 +15568,12 @@
       margin-right: 8px;
       max-width: 18em;
     }
+
     .workspace-tab-files,
     .workspace-tab-close {
       flex-shrink: 0;
-      width: 36px;
-      height: 36px;
+      width: 44px;
+      height: 44px;
       border-radius: 0;
       border: none;
       background: transparent;
@@ -15403,8 +15612,8 @@
 
     .workspace-tab-move {
       flex-shrink: 0;
-      width: 36px;
-      height: 36px;
+      width: 44px;
+      height: 44px;
       padding: 0;
       border-radius: 0;
       border: 0;
@@ -15424,7 +15633,8 @@
     }
 
     .workspace-tab-move:active {
-      transform: scale(0.94);
+      transform: none;
+      background: var(--bg-active);
     }
 
     .workspace-tab-move-hint {
@@ -15802,6 +16012,8 @@
       min-height: 32px;
       gap: 5px;
       padding: 3px 5px;
+      /* The parent row owns selection; no nested Appica pill. */
+      background: transparent;
     }
 
     #app[data-react-shell="enabled"] .sidebar.pinned.collapsed .sidebar-compact-toggle {
@@ -16346,14 +16558,14 @@
    ======================================================================== */
 html:not(.is-wand-app) #app[data-react-shell="enabled"] {
   --web-sidebar-width: 296px;
-  --web-sidebar-surface: #faf7f2;
-  --web-sidebar-surface-raised: #fffdfa;
-  --web-sidebar-ink: #1f1b18;
-  --web-sidebar-muted: #776e63;
-  --web-sidebar-line: #e5ded3;
-  --web-sidebar-hover: #f2ede5;
-  --web-sidebar-active: #f3e5db;
-  --web-sidebar-ease: cubic-bezier(0.23, 1, 0.32, 1);
+  --web-sidebar-surface: var(--bg-primary);
+  --web-sidebar-surface-raised: var(--bg-elevated);
+  --web-sidebar-ink: var(--text-primary);
+  --web-sidebar-muted: var(--text-tertiary);
+  --web-sidebar-line: var(--border-subtle);
+  --web-sidebar-hover: var(--bg-hover);
+  --web-sidebar-active: var(--accent-muted);
+  --web-sidebar-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar {
@@ -16428,7 +16640,7 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-header-actions 
   height: 30px;
   min-height: 30px;
   border: 1px solid transparent;
-  border-radius: 9px;
+  border-radius: var(--control-radius);
   color: var(--web-sidebar-muted);
   background: transparent;
   box-shadow: none;
@@ -16444,7 +16656,7 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-header-actions 
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-header-actions .sidebar-more-trigger:active,
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-header-actions .sidebar-compact-toggle:active {
-  transform: scale(0.95);
+  transform: none;
 }
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-header-actions .sidebar-compact-toggle.active {
@@ -16562,7 +16774,7 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task {
 }
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task:hover {
-  background: rgba(255, 255, 255, 0.58);
+  background: var(--bg-hover);
 }
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task.active {
@@ -16586,13 +16798,13 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task-marker.i
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task-name {
   color: var(--web-sidebar-ink);
   font-size: 13px;
-  font-weight: 450;
+  font-weight: 500;
   line-height: 1.45;
 }
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task.active .workspace-task-name {
-  color: var(--accent-active);
-  font-weight: 680;
+  color: var(--accent-strong);
+  font-weight: 600;
 }
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task-time,
@@ -16618,7 +16830,7 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-row-main {
 }
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-row-main:hover {
-  background: rgba(255, 255, 255, 0.55);
+  background: var(--bg-hover);
 }
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task-main {
@@ -16636,7 +16848,7 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-session-main 
 }
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-session-main:hover {
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--bg-hover);
 }
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-session.active > .workspace-session-main {
@@ -16688,7 +16900,7 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-loose-session
 
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-session-name {
-  color: #81776e;
+  color: var(--text-secondary);
   font-size: 9.625px;
 }
 
@@ -16737,11 +16949,11 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-footer-actions 
 }
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-footer-actions .wand-ui-navigation-link:active {
-  transform: scale(0.96);
+  transform: none;
 }
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-footer-actions .wand-ui-navigation-link svg {
-  color: #998c81;
+  color: currentColor;
   transition: color 140ms var(--web-sidebar-ease);
 }
 
@@ -16988,24 +17200,25 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .si
   min-height: 36px;
   gap: 8px;
   border: 1px solid transparent;
-  border-radius: 10px;
-  padding: 7px 10px;
-  color: var(--web-sidebar-muted);
+  border-radius: var(--control-radius);
+  padding: 7px 12px;
+  color: var(--text-secondary);
   background: transparent;
   font-size: 13px;
-  font-weight: 550;
+  font-weight: 500;
   transition: color 150ms var(--web-sidebar-ease), background-color 150ms var(--web-sidebar-ease), border-color 150ms var(--web-sidebar-ease), transform 120ms ease;
 }
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list > li > button > svg {
-  color: #9a8d82;
-  transition: color 150ms var(--web-sidebar-ease), transform 150ms var(--web-sidebar-ease);
+  color: currentColor;
+  transition: color var(--transition-fast);
 }
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list > li > button[aria-current="page"],
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list > li > button[data-active] {
-  color: var(--web-sidebar-ink);
-  background: color-mix(in srgb, var(--text-primary) 9%, transparent);
+  color: var(--accent-strong);
+  background: var(--accent-muted);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list > li > button[aria-current="page"] > svg,
@@ -17013,9 +17226,9 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .si
   color: var(--accent-active);
 }
 
-html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list > li > button:hover {
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list > li > button:hover:not([data-active]) {
   color: var(--web-sidebar-ink);
-  border-color: var(--web-sidebar-line);
+  border-color: transparent;
   background: var(--web-sidebar-hover);
 }
 
@@ -17024,7 +17237,7 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .si
 }
 
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list > li > button:active {
-  transform: scale(0.98);
+  transform: none;
 }
 
 /* Keep creation visually distinct from the selected navigation destination. */
@@ -17032,11 +17245,11 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .si
   min-height: 40px;
   margin-bottom: 4px;
   justify-content: flex-start;
-  border-color: var(--web-sidebar-line);
-  border-radius: 6px;
+  border-color: transparent;
+  border-radius: var(--control-radius);
   padding: 9px 12px;
-  color: var(--web-sidebar-ink);
-  background: transparent;
+  color: var(--text-inverse);
+  background: var(--accent-solid);
   box-shadow: none;
   font-weight: 600;
 }
@@ -17045,10 +17258,10 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .si
   color: currentColor;
 }
 
-html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list > li > .sidebar-new-task:hover {
-  border-color: var(--web-sidebar-line);
-  color: var(--web-sidebar-ink);
-  background: var(--web-sidebar-hover);
+html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-feature-nav .sidebar-feature-list > li > .sidebar-new-task:hover:not([data-active]) {
+  border-color: transparent;
+  color: var(--text-inverse);
+  background: var(--accent-active);
   box-shadow: none;
 }
 
@@ -17108,23 +17321,24 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar.pinned.collapse
   min-width: 196px;
   max-width: calc(100vw - 24px);
   padding: 4px;
-  border: 1px solid #e5ded3;
-  border-radius: 6px;
-  background: #fffdfa;
-  box-shadow: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--float-radius);
+  background: var(--bg-elevated);
+  box-shadow: var(--float-shadow);
 }
 .sidebar-tools-menu .wand-ui-dropdown-item {
   min-height: 36px;
   padding: 8px 10px;
   gap: 9px;
-  border-radius: 4px;
-  color: #57504a;
-  font-size: 13px;
+  border-radius: var(--menu-item-radius);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
 }
 .sidebar-tools-menu .wand-ui-dropdown-item[data-highlighted],
-.sidebar-tools-menu .wand-ui-dropdown-item:hover { background: #f2ede5; }
-.sidebar-tools-menu .wand-ui-dropdown-item-danger { color: #b24f45; }
-.sidebar-tools-menu .wand-ui-dropdown-separator { margin: 4px 6px; background: #e5ded3; }
+.sidebar-tools-menu .wand-ui-dropdown-item:hover { background: var(--bg-hover); }
+.sidebar-tools-menu .wand-ui-dropdown-item-danger { color: var(--danger); }
+.sidebar-tools-menu .wand-ui-dropdown-item-danger[data-highlighted] { background: var(--danger-muted); }
+.sidebar-tools-menu .wand-ui-dropdown-separator { margin: 4px 6px; background: var(--border-subtle); }
 .sidebar-list-heading {
   display: flex;
   align-items: center;
@@ -17135,7 +17349,7 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar.pinned.collapse
 .sidebar-list-heading h2 {
   margin: 0;
   color: var(--web-sidebar-muted, var(--text-secondary));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: 500;
   letter-spacing: 0.04em;
 }
@@ -17171,14 +17385,14 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .sideba
 }
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .sidebar-search-input {
   border: 0;
-  border-bottom: 1px solid #cfc6b8;
+  border-bottom: 1px solid var(--border-default);
   border-radius: 0;
   background: transparent;
   box-shadow: none;
 }
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .sidebar-search-input:focus-within {
-  border-color: #c5653d;
-  box-shadow: 0 1px 0 #c5653d;
+  border-color: var(--accent);
+  box-shadow: 0 1px 0 var(--accent);
 }
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .sidebar-toolbar input {
   font-size: 13px;
@@ -17223,7 +17437,7 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .worksp
   padding: 2px 6px;
 }
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-task.active {
-  box-shadow: none;
+  box-shadow: inset 2px 0 0 var(--accent);
   background: var(--web-sidebar-active);
 }
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-task-main {
@@ -17238,17 +17452,13 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .worksp
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-session-main {
   min-height: 34px;
 }
-/* Fine-pointer actions appear in place without reserving title width at rest.
+/* Reserve the action gutter so hovering never reflows a task title.
    Keyboard focus and open menus keep their actions visible. */
 @media (hover: hover) and (pointer: fine) {
   html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-task:not(:hover):not(:focus-within):not(:has([aria-expanded="true"])) .workspace-task-action.add,
   html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-task:not(:hover):not(:focus-within):not(:has([aria-expanded="true"])) .workspace-task-action.more {
-    width: 0;
-    min-width: 0;
-    padding-inline: 0;
-    margin-left: -4px;
-    border: 0;
-    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
   }
 }
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-row-folder {
@@ -17258,7 +17468,7 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .worksp
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-task,
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-row-main,
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-session-main {
-  border-radius: 5px;
+  border-radius: var(--control-radius);
 }
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .workspace-session-name {
   font-size: 12px;
@@ -17315,6 +17525,7 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined.pinned.
     min-height: 44px;
   }
   .sidebar-footer-caption { display: none; }
+  html:not(.is-wand-app) .main-header-row { padding-inline: 10px; }
   html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .sidebar-header-actions .sidebar-more-trigger {
     min-width: 44px;
     min-height: 44px;

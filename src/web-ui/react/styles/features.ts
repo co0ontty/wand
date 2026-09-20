@@ -92,9 +92,9 @@ export const settingsAndQuickCommitStyles = String.raw`
   gap: 14px;
   margin: 16px 24px 0;
   border: 1px solid var(--border-subtle);
-  border-radius: 14px;
+  border-radius: var(--radius-sm);
   padding: 14px 16px;
-  background: var(--bg-secondary);
+  background: var(--bg-primary);
 }
 
 .wand-settings-overview-mark,
@@ -298,7 +298,7 @@ export const settingsAndQuickCommitStyles = String.raw`
   border-right: 1px solid var(--border-subtle);
   border-radius: 0;
   padding: 18px 14px;
-  background: var(--bg-secondary);
+  background: var(--bg-primary);
 }
 
 /* Appica's TabsList renders its own sliding pill indicator. The settings nav
@@ -324,21 +324,22 @@ export const settingsAndQuickCommitStyles = String.raw`
   position: relative;
   min-height: 48px;
   border: 1px solid transparent;
-  border-radius: 9px;
+  border-radius: var(--control-radius);
   padding: 8px 12px;
   text-align: left;
   box-shadow: none;
-  transition: color 140ms ease, background-color 140ms ease, border-color 140ms ease, transform 140ms ease;
+  transition: color var(--transition-fast), background-color var(--transition-fast), border-color var(--transition-fast);
 }
 
 .wand-settings-tabs > .wand-ui-tabs-list .wand-ui-tabs-trigger:hover:not(:disabled) {
   color: var(--text-primary);
-  background: color-mix(in srgb, var(--bg-elevated) 66%, transparent);
+  background: var(--bg-hover);
 }
 
 .wand-settings-tabs > .wand-ui-tabs-list .wand-ui-tabs-trigger[data-active] {
-  border-color: color-mix(in srgb, var(--accent) 16%, var(--border-subtle));
-  background: color-mix(in srgb, var(--bg-elevated) 90%, var(--accent-muted));
+  border-color: transparent;
+  color: var(--accent-strong);
+  background: var(--accent-muted);
 }
 
 .wand-settings-tabs > .wand-ui-tabs-list .wand-ui-tabs-trigger[data-active]::before {
@@ -403,8 +404,8 @@ export const settingsAndQuickCommitStyles = String.raw`
 }
 
 .wand-settings-tabs > .wand-ui-tabs-list .wand-ui-tabs-trigger[data-active] .wand-settings-tab-icon {
-  color: var(--accent-active);
-  background: var(--accent-muted);
+  color: var(--accent-strong);
+  background: transparent;
 }
 
 .wand-settings-tabs > .wand-ui-tabs-content {
@@ -446,15 +447,13 @@ export const settingsAndQuickCommitStyles = String.raw`
 .wand-settings-section {
   margin-bottom: 18px;
   border: 1px solid var(--border-subtle);
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   background: var(--bg-elevated);
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--text-primary) 4%, transparent);
-  transition: border-color 160ms ease, box-shadow 160ms ease;
+  box-shadow: none;
 }
 
-.wand-settings-section:hover {
-  border-color: var(--border-strong);
-  box-shadow: 0 4px 14px color-mix(in srgb, var(--text-primary) 6%, transparent);
+.wand-settings-section:focus-within {
+  border-color: var(--border-default);
 }
 
 .wand-settings-section-heading {
@@ -1385,7 +1384,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   min-width: 32px;
   min-height: 32px;
   padding: 0;
-  border-radius: var(--radius-full);
+  border-radius: var(--control-radius);
 }
 
 .wand-new-session-title {
@@ -1479,8 +1478,8 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   flex-direction: column;
   align-items: center;
   gap: 3px;
-  border: 1px solid color-mix(in srgb, var(--border-subtle) 84%, transparent);
-  border-radius: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
   padding: 12px 10px;
   color: inherit;
   background: var(--bg-elevated);
@@ -1488,7 +1487,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   cursor: pointer;
   outline: none;
   text-align: center;
-  transition: background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast);
 }
 
 .wand-new-session-choice:hover {
@@ -2186,11 +2185,11 @@ export const sessionPickerAndWorktreeStyles = String.raw`
 ) {
   min-height: 44px;
   border: 1px solid var(--border-default);
-  border-radius: 12px;
+  border-radius: var(--control-radius);
   outline: none;
   caret-color: var(--accent);
-  background: color-mix(in srgb, var(--bg-primary) 88%, transparent);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, white 42%, transparent);
+  background: var(--bg-primary);
+  box-shadow: none;
   transition:
     border-color 160ms cubic-bezier(0.2, 0.8, 0.2, 1),
     background-color 160ms cubic-bezier(0.2, 0.8, 0.2, 1),
@@ -2219,9 +2218,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
 ):focus {
   border-color: var(--accent);
   background: var(--bg-primary);
-  box-shadow:
-    0 0 0 3px var(--accent-muted),
-    0 10px 24px -20px color-mix(in srgb, var(--accent) 45%, transparent);
+  box-shadow: 0 0 0 2px var(--accent-muted);
 }
 
 :is(
@@ -2641,7 +2638,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   .wand-settings-tabs > .wand-ui-tabs-content { grid-column: 1; grid-row: 2; }
   .wand-settings-panel { padding: 24px 14px 32px; }
   .wand-settings-panel-heading { margin-bottom: 20px; }
-  .wand-settings-section { margin-bottom: 14px; border-radius: 12px; }
+  .wand-settings-section { margin-bottom: 14px; border-radius: var(--radius-sm); }
   .wand-settings-section-heading { padding: 15px 14px; }
   .wand-settings-section-body { padding: 15px 14px; }
   .wand-settings-grid, .wand-settings-default-row, .wand-settings-file-grid, .wand-settings-env-toolbar { grid-template-columns: minmax(0, 1fr); }

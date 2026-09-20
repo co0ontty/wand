@@ -42,6 +42,33 @@ Express route → 参数与权限检查 → 业务服务 / SessionRegistry → m
   业务逻辑必须使用同一次参数解析结果。
 - PTY 与 structured 保留独立执行代码，通过 SessionRegistry 统一查找，不合并 runner。
 
+## Shell 与 Composer 的所有权
+
+认证后的 Shell 只由 React 渲染。`browser/render.ts::renderAppShell()` 是运行时
+宿主的种子生成器：只保留 `#output`、`#chat-output`、`.input-panel`、
+`#file-explorer`、`#cross-session-queue-host`。`shell-runtime.ts` 只搬运这些种子
+根的子节点；宿主根的 class、可见性及外围布局由 React 设置。已删除原来生成后
+被丢弃的侧栏、顶栏、欢迎页模板，以及仅被这些模板调用的状态和 Git HTML 函数。
+
+- 顶栏运行条、等待授权状态和回复计时节点由 `ShellTopbar` 渲染。计时组件按
+  会话 ID 隔离，响应结束或切走会话时清理计时器；数字表示本次挂载后的已观察
+  回复时长。browser 不再给 React 徽章追加/删除子节点，也不修改顶栏 class。
+- `session-activity.ts` 为顶栏与输入栏停止按钮提供同一套运行判断：structured
+  看 `inFlight`，provider PTY 看 `ptyBusy` 和 `providerCliActive`，裸 shell
+  看进程状态，空会话和归档会话返回完整的 false 标志。
+- Composer 状态行的自动批准、权限操作、批准统计通过 `composer-badges` portal
+  渲染。browser 只设置宿主可见性、发布快照、执行会话命令；按钮事件、disabled
+  和 aria 状态归 React。权限强调样式以 portal 宿主为选择目标。
+- 自动批准与权限请求分别按会话去重。挂载快照比较必须包含会话 ID、pending，
+  权限操作还包含 escalation request ID，避免同文案/同开关状态保留旧回调。
+  请求发出前校验所选会话与请求身份，响应更新原会话，finally 重新投影当前
+  会话；使用共享 HTTP 解析器处理 HTTP 错误和无效响应。
+
+后续迁移沿稳定宿主逐个推进：先迁移 Composer 内剩余展示叶子，再处理聊天消息
+展示；WebSocket、终端池、输入分包及原生桥接继续由 browser 运行时承担。每次
+迁移同步删除原生产者、事件绑定和 DOM 写入，补会话切换、失败恢复与窄屏回归，
+避免两套代码同时修改同一个节点。
+
 ## 工作区、任务与 CLI 会话
 
 - 工作区对应工作目录，任务是其下的**逻辑分组**，会话是任务内的执行实例。

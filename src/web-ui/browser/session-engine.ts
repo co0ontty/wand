@@ -10,7 +10,7 @@ import { autoResizeInput, buildMessagesForRender, canAutoResumeSession, captureT
 import { _apkVersion, _hasNativeBridge, _macAppVersion, _syncWakeLock, hideError, showError, showToast } from "./notifications";
 import { getEffectiveCwd, render, resetChatRenderCache } from "./render";
 import { initTerminal, maybeScrollTerminalToBottom, syncTerminalBuffer, waitForTerminalSettled } from "./terminal";
-import "./utils";
+import { collapseTodoProgress } from "./utils";
 import { ensureTerminalFit, scheduleTerminalResize, teardownTerminal } from "./viewport";
 import { startPolling, stopPolling, updateAutoApproveIndicator, updateTaskDisplay } from "./websocket";
 import { notifyLegacyUiChange } from "./ui-store-bridge";
@@ -1507,9 +1507,8 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
         resetChatRenderCache();
         state.currentMessages = [];
         if (state.chatRenderTimer) { clearTimeout(state.chatRenderTimer); state.chatRenderTimer = null; }
-        // Reset todo progress bar
-        var todoEl = document.getElementById("todo-progress");
-        if (todoEl) todoEl.classList.add("hidden");
+        // Reset todo progress bar (容器 + 展开面板一起收，见 collapseTodoProgress)
+        collapseTodoProgress();
         // 同时清掉上一会话残留的 "回复中 N.Ns" 状态条以及它的计时器/glow。
         // 不清就会出现：切到新建的空会话，底部仍显示前一会话的 todolist + 回复中。
         var staleStatusBar = document.querySelector(".structured-status-bar");

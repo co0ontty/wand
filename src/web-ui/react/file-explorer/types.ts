@@ -47,6 +47,9 @@ export interface FileExplorerRepository {
 
 type FileExplorerNodeStatus = "idle" | "loading" | "loaded" | "error";
 
+/** Filter applied to search results; purely presentational (no refetch). */
+export type FileExplorerSearchFilter = "all" | "file" | "dir";
+
 export interface FileExplorerNodeState {
   entries: FileExplorerEntry[];
   status: FileExplorerNodeStatus;
@@ -62,8 +65,13 @@ export interface FileExplorerSnapshot {
   activeDir: string;
   searchQuery: string;
   searchResults: FileExplorerEntry[] | null;
+  searchFilter: FileExplorerSearchFilter;
+  /** Wall-clock duration of the last completed search, in milliseconds. */
+  searchDurationMs: number | null;
   searching: boolean;
   searchError?: string;
+  /** File the tree should scroll to and highlight after a reveal. */
+  revealPath: string | null;
   busy: boolean;
 }
 
@@ -73,7 +81,12 @@ export type FileExplorerCommand =
   | { type: "toggle"; dir: string }
   | { type: "expand"; dir: string }
   | { type: "refresh"; dir?: string }
+  /** Expand the ancestors of `path` and scroll it into view. */
+  | { type: "reveal"; path: string }
+  /** Clear `revealPath` once the host has scrolled to it. */
+  | { type: "reveal.done" }
   | { type: "search.start"; query: string }
+  | { type: "search.filter"; filter: FileExplorerSearchFilter }
   | { type: "search.clear" }
   | { type: "create.file"; dir: string; name: string }
   | { type: "create.dir"; dir: string; name: string }

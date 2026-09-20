@@ -110,7 +110,7 @@ export function WandDialogSurface({
   descriptionClassName = "wand-ui-dialog-description",
   headerClassName = "wand-ui-dialog-heading",
   closeLabel = "关闭",
-  closeContent = "×",
+  closeContent = <WandIcon name="close" size={18}/>,
   testId,
   dismissable = true,
   onOpenChange,

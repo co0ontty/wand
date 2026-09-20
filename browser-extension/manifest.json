@@ -2,7 +2,13 @@
   "manifest_version": 3,
   "name": "Wand Passwords",
   "description": "Wand browser password manager with autofill, save prompts, cards, identities, TOTP, and security checks.",
-  "version": "0.1.0",
+  "version": "0.1.1",
+  "icons": {
+    "16": "icons/wand-16.png",
+    "32": "icons/wand-32.png",
+    "48": "icons/wand-48.png",
+    "128": "icons/wand-128.png"
+  },
   "permissions": [
     "activeTab",
     "clipboardWrite",
@@ -25,7 +31,11 @@
   },
   "action": {
     "default_title": "Wand Passwords",
-    "default_popup": "src/popup.html"
+    "default_popup": "src/popup.html",
+    "default_icon": {
+      "16": "icons/wand-16.png",
+      "32": "icons/wand-32.png"
+    }
   },
   "options_page": "src/options.html",
   "content_scripts": [

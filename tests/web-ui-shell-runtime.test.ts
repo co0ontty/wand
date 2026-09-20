@@ -9,6 +9,8 @@ import {
   REACT_UI_STORAGE_KEY,
 } from "../src/web-ui/react/feature-flags.js";
 
+import { computeRunningSignal } from "../src/web-ui/session-activity.js";
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 function fakeWindow(options: {
@@ -138,7 +140,8 @@ test("React-owned controls are not rebound or imperatively rewritten", () => {
   // 组合器里的权限行仍是 legacy 渲染（.input-panel 槽），必须保留。
   assert.match(websocket, /notifyLegacyUiChange\("task:update"\)/);
   assert.doesNotMatch(websocket, /reactShellActive|isBrowserReactShellMounted|getElementById\("current-task"\)/);
-  assert.match(websocket, /getElementById\("permission-actions-label"\)/);
+  assert.doesNotMatch(websocket, /getElementById\("(?:permission-actions-label|approve-permission-btn|deny-permission-btn|auto-approve-toggle)"\)/);
+  assert.match(websocket, /resolveComposerPermission\(selectedSession\)/);
   // switchToSessionView 不再写 React 拥有的 #blank-chat/#output/#chat-output 可见性，
   // 也不再写已经被删掉的标题栏节点。
   assert.doesNotMatch(input, /isBrowserReactShellMounted|reactShellActive/);
@@ -174,12 +177,11 @@ test("composer skill picker stays scoped to Claude SDK structured sessions", () 
 });
 
 test("PTY running indicators stop when the provider exits into its retained shell", () => {
-  const utils = readFileSync(path.join(root, "src/web-ui/browser/utils.ts"), "utf8");
   const sessions = readFileSync(path.join(root, "src/web-ui/browser/session-engine.ts"), "utf8");
-  assert.match(utils, /session\.providerCliActive !== false/);
-  // provider CLI 会话必须 ptyBusy 信号才显示运行中；裸 shell 保持进程存活即运行
-  assert.match(utils, /var ptyRunning = ptyTurnActive\(session\) && providerCliRunning;/);
-  assert.match(utils, /if \(isProviderCliSession\(session\)\) return session\.ptyBusy === true;/);
+  assert.equal(computeRunningSignal({ status: "running", provider: "claude", ptyBusy: true, providerCliActive: false }).active, false);
+  assert.equal(computeRunningSignal({ status: "running", provider: "claude", ptyBusy: false }).active, false);
+  assert.equal(computeRunningSignal({ status: "running", provider: "claude", ptyBusy: true }).active, true);
+  assert.equal(computeRunningSignal({ status: "running" }).active, true);
   assert.match(sessions, /capabilities: \{ ptyAck: true \}/);
 });
 

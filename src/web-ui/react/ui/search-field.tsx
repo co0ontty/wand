@@ -13,11 +13,20 @@ export interface WandSearchFieldProps {
   disabled?: boolean;
   className?: string;
   inputRef?: React.RefObject<HTMLInputElement | null>;
+  /**
+   * Id of the listbox this field filters. Supplying it turns the field into a
+   * combobox so the highlighted option stays reachable by screen readers while
+   * the caret never leaves the input.
+   */
+  listId?: string;
+  /** Id of the currently highlighted option inside `listId`. */
+  activeOptionId?: string;
 }
 
 /** Search owns its clear action and IME boundary; repositories own request cancellation. */
 export function WandSearchField({
   value, onValueChange, onSearch, label, placeholder = label, disabled, className, inputRef,
+  listId, activeOptionId,
 }: WandSearchFieldProps): React.ReactElement {
   const internalRef = React.useRef<HTMLInputElement>(null);
   const ref = inputRef ?? internalRef;
@@ -39,6 +48,11 @@ export function WandSearchField({
       disabled={disabled}
       autoComplete="off"
       spellCheck={false}
+      role={listId ? "combobox" : undefined}
+      aria-expanded={listId ? true : undefined}
+      aria-autocomplete={listId ? "list" : undefined}
+      aria-controls={listId}
+      aria-activedescendant={activeOptionId}
       onCompositionStart={() => { composing.current = true; }}
       onCompositionEnd={(event) => {
         composing.current = false;

@@ -4,13 +4,23 @@ import { wandOverlay } from "../overlay-controller";
 import { WandButton, WandMenuItem, WandSearchField } from "../ui";
 import { copyTextToPlatformClipboard } from "../file-preview/platform-adapter";
 import { codeEditorController, codeEditorStore } from "../code-editor/controller";
+import { nextFolderPickerIndex, type FolderPickerNavigationKey } from "../folder-picker/model";
 import { fileExplorerController, fileExplorerStore } from "./controller";
+import {
+  countFileExplorerSearchResults,
+  fileExplorerEntrySizeLabel,
+  fileExplorerSearchSegments,
+  filterFileExplorerSearchResults,
+  formatFileExplorerTimestamp,
+  groupFileExplorerSearchResults,
+} from "./model";
 import { MoveEntryDialog, type MoveEntryRequest } from "./move-dialog";
 import { explorerParentOf as parentOf, isPathWithin, joinExplorerPath as joinPath } from "./paths";
 import { fileExplorerStyles } from "./styles";
 import type {
   FileExplorerEntry,
   FileExplorerNodeState,
+  FileExplorerSearchFilter,
   FileExplorerSnapshot,
 } from "./types";
 
@@ -33,6 +43,12 @@ const CODE_EXT = new Set([
   "zsh", "fish", "lua", "sql", "graphql", "proto", "vue", "svelte", "html", "htm", "xml", "css", "scss", "less",
   "diff", "patch",
 ]);
+
+const SEARCH_FILTERS: ReadonlyArray<{ value: FileExplorerSearchFilter; label: string }> = [
+  { value: "all", label: "全部" },
+  { value: "file", label: "文件" },
+  { value: "dir", label: "文件夹" },
+];
 
 function iconForEntry(entry: FileExplorerEntry, isOpen: boolean): ExplorerIconName {
   if (entry.type === "dir") return isOpen ? "folderOpen" : "folder";
@@ -78,17 +94,37 @@ function ExplorerIcon({ name, size = 16 }: { name: ExplorerIconName; size?: numb
   }
 }
 
-function gitBadge(entry: FileExplorerEntry): { text: string; className: string } | null {
+interface GitBadge {
+  text: string;
+  className: string;
+  label: string;
+}
+
+function gitBadge(entry: FileExplorerEntry): GitBadge | null {
   const g = entry.gitStatus;
   if (!g) return null;
-  if (g.staged === "added") return { text: "A", className: "git-added" };
-  if (g.staged === "modified") return { text: "M", className: "git-modified" };
-  if (g.staged === "deleted") return { text: "D", className: "git-deleted" };
-  if (g.staged === "renamed") return { text: "R", className: "git-renamed" };
-  if (g.unstaged === "modified") return { text: "M", className: "git-modified" };
-  if (g.unstaged === "deleted") return { text: "D", className: "git-deleted" };
-  if (g.untracked) return { text: "?", className: "git-untracked" };
+  if (g.staged === "added") return { text: "A", className: "git-added", label: "已暂存新增" };
+  if (g.staged === "modified") return { text: "M", className: "git-modified", label: "已暂存修改" };
+  if (g.staged === "deleted") return { text: "D", className: "git-deleted", label: "已暂存删除" };
+  if (g.staged === "renamed") return { text: "R", className: "git-renamed", label: "已暂存重命名" };
+  if (g.unstaged === "modified") return { text: "M", className: "git-modified", label: "未暂存修改" };
+  if (g.unstaged === "deleted") return { text: "D", className: "git-deleted", label: "未暂存删除" };
+  if (g.untracked) return { text: "?", className: "git-untracked", label: "未跟踪" };
   return null;
+}
+
+/**
+ * Rows stay quiet: size and mtime only show up in the native tooltip, so a long
+ * directory listing keeps a single reading column.
+ */
+function entryTooltip(entry: FileExplorerEntry): string {
+  const facts: string[] = [];
+  const size = fileExplorerEntrySizeLabel(entry);
+  if (size) facts.push(size);
+  const stamp = entry.mtime ? formatFileExplorerTimestamp(entry.mtime) : "";
+  if (stamp) facts.push(stamp);
+  if (entry.type === "dir") facts.push("文件夹");
+  return facts.length > 0 ? `${entry.path}\n${facts.join(" · ")}` : entry.path;
 }
 
 interface ContextMenuState {
@@ -115,7 +151,6 @@ function ExplorerRow({
   onContextMenu,
   renameState,
   setRenameState,
-  onCreateChild,
   pendingCreate,
   setPendingCreate,
 }: {
@@ -128,7 +163,6 @@ function ExplorerRow({
   onContextMenu(state: ContextMenuState): void;
   renameState: { path: string } | null;
   setRenameState(state: { path: string } | null): void;
-  onCreateChild(dir: string, kind: "file" | "dir"): void;
   pendingCreate: PendingCreate | null;
   setPendingCreate(state: PendingCreate | null): void;
 }) {
@@ -145,6 +179,7 @@ function ExplorerRow({
   const showChevron = isDir && !isEmptyDir;
   const isActiveFile = !isDir && activePath === entry.path;
   const badge = gitBadge(entry);
+  const sizeLabel = fileExplorerEntrySizeLabel(entry);
 
   const [renameDraft, setRenameDraft] = React.useState(entry.name);
   React.useEffect(() => {
@@ -232,7 +267,7 @@ function ExplorerRow({
             onToggle(entry.path);
           }
         }}
-        title={entry.path}
+        title={entryTooltip(entry)}
         onClick={() => {
           if (isDir) onToggle(entry.path);
           else onFileActivate(entry.path);
@@ -252,26 +287,28 @@ function ExplorerRow({
         </span>
         <span className="wand-explorer-icon" aria-hidden="true"><ExplorerIcon name={iconForEntry(entry, isOpen && isDir)}/></span>
         <span className="wand-explorer-name">{entry.name}</span>
-        {badge && <span className={`wand-explorer-git ${badge.className}`} title={entry.path}>{badge.text}</span>}
+        {sizeLabel ? <span className="wand-explorer-size">{sizeLabel}</span> : null}
+        {badge && <span className={`wand-explorer-git ${badge.className}`} title={badge.label} aria-label={badge.label}>{badge.text}</span>}
       </div>
       {isDir && isOpen && (
         <div className="wand-explorer-children">
           {nodeState?.status === "loading" && (
-            <div className="wand-explorer-row" style={{ paddingLeft: 8 + (depth + 1) * 12, color: "var(--text-muted, #999)" }}>
+            <div className="wand-explorer-row pending" style={{ paddingLeft: 8 + (depth + 1) * 12 }} role="status">
               <span className="wand-explorer-chevron empty"/>
-              <span className="wand-explorer-name">加载中…</span>
+              <span className="wand-explorer-name">加载中</span>
+              <span className="wand-explorer-dots" aria-hidden="true"><i/><i/><i/></span>
             </div>
           )}
           {nodeState?.status === "error" && (
-            <div className="wand-explorer-row" style={{ paddingLeft: 8 + (depth + 1) * 12, color: "#c0392b" }}>
+            <div className="wand-explorer-row error" style={{ paddingLeft: 8 + (depth + 1) * 12 }} role="alert">
               <span className="wand-explorer-chevron empty"/>
               <span className="wand-explorer-name">{nodeState.error || "读取失败"}</span>
             </div>
           )}
           {nodeState?.status === "loaded" && nodeState.entries.length === 0 && (
-            <div className="wand-explorer-row" style={{ paddingLeft: 8 + (depth + 1) * 12, color: "var(--text-muted, #999)" }}>
+            <div className="wand-explorer-row pending" style={{ paddingLeft: 8 + (depth + 1) * 12 }}>
               <span className="wand-explorer-chevron empty"/>
-              <span className="wand-explorer-name">（空目录）</span>
+              <span className="wand-explorer-name">空文件夹</span>
             </div>
           )}
           {isCreatingHere && pendingCreate && (
@@ -303,29 +340,11 @@ function ExplorerRow({
               onContextMenu={onContextMenu}
               renameState={renameState}
               setRenameState={setRenameState}
-              onCreateChild={onCreateChild}
               pendingCreate={pendingCreate}
               setPendingCreate={setPendingCreate}
             />
           ))}
         </div>
-      )}
-      {!isDir && isCreatingHere && pendingCreate && (
-        <CreateInput
-          depth={depth + 1}
-          kind={pendingCreate.kind}
-          onCancel={() => setPendingCreate(null)}
-          onSubmit={async (name) => {
-            const dir = pendingCreate.dir;
-            setPendingCreate(null);
-            if (!name) return;
-            await fileExplorerController.execute({
-              type: pendingCreate.kind === "file" ? "create.file" : "create.dir",
-              dir,
-              name,
-            });
-          }}
-        />
       )}
     </>
   );
@@ -446,6 +465,7 @@ function ContextMenu({
       {entry ? (
         <>
           {isDir ? item("进入此目录", "navigate") : item("打开", "open")}
+          {item("在文件树中显示", "reveal")}
           {item("复制完整路径", "copyPath")}
           {item("复制相对路径", "copyRelative")}
           {!isDir && item("下载文件", "download")}
@@ -464,8 +484,172 @@ function ContextMenu({
   );
 }
 
+interface SearchPanelProps {
+  snapshot: FileExplorerSnapshot;
+  query: string;
+  /** Rows visible under the active filter, in server order. */
+  rows: ReadonlyArray<FileExplorerEntry>;
+  activeIndex: number;
+  listId: string;
+  rowRefs: React.RefObject<Map<string, HTMLElement>>;
+  onActiveIndex(index: number): void;
+  onOpen(entry: FileExplorerEntry): void;
+  onReveal(entry: FileExplorerEntry): void;
+  onContextMenu(state: ContextMenuState): void;
+  onFilter(filter: FileExplorerSearchFilter): void;
+  onClear(): void;
+  onRetry(): void;
+}
+
+/**
+ * Search results answer "where is it?": rows are grouped under their parent
+ * directory with sticky labels, the matched substring is highlighted, and the
+ * caret stays in the field while ↑/↓ move a roving highlight.
+ */
+function SearchPanel({
+  snapshot,
+  query,
+  rows,
+  activeIndex,
+  listId,
+  rowRefs,
+  onActiveIndex,
+  onOpen,
+  onReveal,
+  onContextMenu,
+  onFilter,
+  onClear,
+  onRetry,
+}: SearchPanelProps) {
+  const counts = countFileExplorerSearchResults(snapshot.searchResults ?? []);
+  const groups = groupFileExplorerSearchResults(rows, snapshot.root);
+  const indexByPath = new Map<string, number>();
+  rows.forEach((entry, index) => indexByPath.set(entry.path, index));
+  const activeFilter = SEARCH_FILTERS.find((filter) => filter.value === snapshot.searchFilter);
+  const showSummary = !snapshot.searchError;
+
+  return (
+    <div className="wand-explorer-search-panel">
+      {showSummary && (
+        <div className="wand-explorer-search-summary">
+          <span className="wand-explorer-search-count">
+            {snapshot.searching ? "搜索中" : `${counts.all} 项结果`}
+          </span>
+          {!snapshot.searching && snapshot.searchDurationMs !== null && counts.all > 0 && (
+            <span className="wand-explorer-search-duration">{snapshot.searchDurationMs} ms</span>
+          )}
+          <div className="wand-explorer-search-filters" role="group" aria-label="按类型筛选结果">
+            {SEARCH_FILTERS.map((filter) => (
+              <button
+                key={filter.value}
+                type="button"
+                className={`wand-explorer-filter${snapshot.searchFilter === filter.value ? " active" : ""}`}
+                aria-pressed={snapshot.searchFilter === filter.value}
+                disabled={counts.all === 0}
+                onClick={() => onFilter(filter.value)}
+              >
+                {filter.label}
+                <span className="wand-explorer-filter-count">{counts[filter.value]}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {snapshot.searching && <div className="wand-explorer-search-progress" aria-hidden="true"><span/></div>}
+
+      {snapshot.searchError ? (
+        <div className="wand-file-explorer-empty" role="alert">
+          <p className="wand-file-explorer-empty-title">搜索失败</p>
+          <p className="wand-file-explorer-empty-hint">{snapshot.searchError}</p>
+          <WandButton kind="ghost" size="small" onClick={onRetry}>重试搜索</WandButton>
+        </div>
+      ) : rows.length > 0 ? (
+        <div id={listId} className="wand-explorer-results" role="listbox" aria-label="搜索结果">
+          {groups.map((group) => (
+            <div className="wand-explorer-search-group" role="group" aria-label={group.label} key={group.key}>
+              <div className="wand-explorer-search-group-label" title={group.key}>
+                <span className="wand-explorer-search-group-path">{group.label}</span>
+                <span className="wand-explorer-search-group-count">{group.entries.length}</span>
+              </div>
+              {group.entries.map((entry) => {
+                const index = indexByPath.get(entry.path) ?? -1;
+                const active = index === activeIndex;
+                const badge = gitBadge(entry);
+                return (
+                  <div
+                    key={entry.path}
+                    id={`${listId}-option-${index}`}
+                    ref={(node) => {
+                      if (node) rowRefs.current?.set(entry.path, node);
+                      else rowRefs.current?.delete(entry.path);
+                    }}
+                    className={`wand-explorer-result${active ? " active" : ""}`}
+                    role="option"
+                    aria-selected={active}
+                    title={entry.path}
+                    onMouseEnter={() => onActiveIndex(index)}
+                    onClick={() => onOpen(entry)}
+                    onDoubleClick={() => onReveal(entry)}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      onContextMenu({ x: event.clientX, y: event.clientY, entry, dir: parentOf(entry.path) });
+                    }}
+                  >
+                    <span className="wand-explorer-result-icon" aria-hidden="true">
+                      <ExplorerIcon name={iconForEntry(entry, false)}/>
+                    </span>
+                    <span className="wand-explorer-result-name">
+                      {fileExplorerSearchSegments(entry.name, query).map((segment, segmentIndex) => (
+                        segment.match
+                          ? <mark className="wand-explorer-hit" key={segmentIndex}>{segment.value}</mark>
+                          : <React.Fragment key={segmentIndex}>{segment.value}</React.Fragment>
+                      ))}
+                    </span>
+                    {badge && (
+                      <span className={`wand-explorer-git ${badge.className}`} title={badge.label} aria-label={badge.label}>
+                        {badge.text}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      ) : snapshot.searching ? null : counts.all > 0 ? (
+        <div className="wand-file-explorer-empty">
+          <p className="wand-file-explorer-empty-title">「{activeFilter?.label ?? "当前"}」筛选下没有结果</p>
+          <WandButton kind="ghost" size="small" onClick={() => onFilter("all")}>
+            显示全部 {counts.all} 项
+          </WandButton>
+        </div>
+      ) : (
+        <div className="wand-file-explorer-empty">
+          <p className="wand-file-explorer-empty-title">没有匹配「{query}」的文件</p>
+          <p className="wand-file-explorer-empty-hint">
+            只匹配名称；已跳过 .git、node_modules、dist 等目录，最多向下 5 层。
+          </p>
+          <WandButton kind="ghost" size="small" onClick={onClear}>清除搜索</WandButton>
+        </div>
+      )}
+
+      {rows.length > 0 && (
+        <div className="wand-explorer-keyhints" aria-hidden="true">
+          <span><kbd>↑</kbd><kbd>↓</kbd>选择</span>
+          <span><kbd>↵</kbd>打开</span>
+          <span><kbd>⇧↵</kbd>在树中定位</span>
+          <span><kbd>Esc</kbd>清空</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function FileExplorerHost({ root }: { root: string }) {
   const treeItems = React.useRef(new Map<string, HTMLDivElement>());
+  const resultItems = React.useRef(new Map<string, HTMLElement>());
+  const searchInputRef = React.useRef<HTMLInputElement>(null);
+  const revealRequest = React.useRef<{ path: string; focus: boolean } | null>(null);
   const snapshot = useFileExplorerSnapshot();
   const editor = useSyncExternalStore(codeEditorStore.subscribe, codeEditorStore.getSnapshot, codeEditorStore.getSnapshot);
   const activePath = editor.open ? editor.activePath : null;
@@ -475,6 +659,18 @@ export function FileExplorerHost({ root }: { root: string }) {
   const [pendingCreate, setPendingCreate] = React.useState<PendingCreate | null>(null);
   const [moveRequest, setMoveRequest] = React.useState<MoveEntryRequest | null>(null);
   const [searchInput, setSearchInput] = React.useState(snapshot.searchQuery);
+  const [activeResult, setActiveResult] = React.useState(0);
+
+  const query = snapshot.searchQuery.trim();
+  const searchMode = query.length > 0;
+  const rows = React.useMemo(
+    () => filterFileExplorerSearchResults(snapshot.searchResults ?? [], snapshot.searchFilter),
+    [snapshot.searchResults, snapshot.searchFilter],
+  );
+  // The roving highlight is derived instead of stored clamped, so results that
+  // shrink under a filter can never leave the index out of range.
+  const activeRow = rows.length > 0 ? Math.min(activeResult, rows.length - 1) : -1;
+  const listId = React.useId();
 
   React.useEffect(() => {
     if (root) dispatch.setRoot(root);
@@ -484,8 +680,58 @@ export function FileExplorerHost({ root }: { root: string }) {
     setSearchInput(snapshot.searchQuery);
   }, [snapshot.searchQuery]);
 
+  React.useEffect(() => {
+    setActiveResult(0);
+  }, [query, snapshot.searchFilter, snapshot.searchResults]);
+
+  React.useEffect(() => {
+    if (activeRow < 0) return;
+    const entry = rows[activeRow];
+    if (!entry) return;
+    resultItems.current.get(entry.path)?.scrollIntoView({ block: "nearest" });
+  }, [activeRow, rows]);
+
+  // "在树中定位" is a one-shot request: scroll to the row and hand keyboard focus
+  // to the tree only when the user asked for it — an editor-driven reveal must
+  // not steal the caret out of the textarea. The request is consumed either way,
+  // so a target that is no longer in the tree (deleted file, failed listing)
+  // cannot stay pending and block the next reveal of the same path.
+  React.useEffect(() => {
+    const target = snapshot.revealPath;
+    if (!target) return;
+    const node = treeItems.current.get(target);
+    const request = revealRequest.current;
+    revealRequest.current = null;
+    void dispatch.execute({ type: "reveal.done" });
+    if (!node) return;
+    node.scrollIntoView({ block: "center" });
+    if (!request || request.path !== target || request.focus) node.focus({ preventScroll: true });
+  }, [snapshot.revealPath, dispatch]);
+
+  // The tree follows the file the editor is showing, so opening a file from a
+  // chat link or a tab never leaves the panel scrolled somewhere else.
+  React.useEffect(() => {
+    if (!activePath) return;
+    const current = fileExplorerStore.getSnapshot();
+    if (!current.root || !isPathWithin(activePath, current.root)) return;
+    if (current.searchQuery.trim()) return;
+    const node = treeItems.current.get(activePath);
+    if (node) {
+      node.scrollIntoView({ block: "nearest" });
+      return;
+    }
+    revealRequest.current = { path: activePath, focus: false };
+    void dispatch.execute({ type: "reveal", path: activePath });
+  }, [activePath, dispatch]);
+
+  const revealInTree = (path: string): void => {
+    revealRequest.current = { path, focus: true };
+    // The controller leaves search mode on reveal: the row we were asked to show
+    // would otherwise stay hidden behind the result list.
+    void dispatch.execute({ type: "reveal", path });
+  };
+
   const rootNode = snapshot.root ? snapshot.expanded.get(snapshot.root) : undefined;
-  const showingSearch = snapshot.searchQuery.trim().length > 0 && snapshot.searchResults !== null;
 
   const handleAction = async (action: string) => {
     const ctx = contextMenu;
@@ -496,6 +742,7 @@ export function FileExplorerHost({ root }: { root: string }) {
     if (action === "newDir") { setPendingCreate({ dir: ctx.entry?.type === "dir" ? ctx.entry.path : ctx.dir, kind: "dir" }); return; }
     if (action === "navigate" && entry) { void dispatch.execute({ type: "navigate", dir: entry.path }); return; }
     if (action === "open" && entry) { codeEditorController.open(entry.path); return; }
+    if (action === "reveal" && entry) { revealInTree(entry.path); return; }
     if (action === "rename" && entry) { setRenameState({ path: entry.path }); return; }
     if (action === "move" && entry) {
       setMoveRequest({ from: entry.path, initialDir: parentOf(entry.path), isDir: entry.type === "dir" });
@@ -525,6 +772,28 @@ export function FileExplorerHost({ root }: { root: string }) {
     }
   };
 
+  const activateResult = (entry: FileExplorerEntry): void => {
+    // Directories have no content to show, so the useful action is revealing
+    // their place in the tree — the same gesture the ⇧↵ hint advertises.
+    if (entry.type === "dir") revealInTree(entry.path);
+    else codeEditorController.open(entry.path);
+  };
+
+  const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (event.nativeEvent.isComposing) return;
+    if ((event.key === "ArrowDown" || event.key === "ArrowUp") && rows.length > 0) {
+      event.preventDefault();
+      setActiveResult(nextFolderPickerIndex(activeRow, rows.length, event.key as FolderPickerNavigationKey));
+      return;
+    }
+    if (event.key !== "Enter") return;
+    const entry = activeRow >= 0 ? rows[activeRow] : undefined;
+    if (!entry) return;
+    event.preventDefault();
+    if (event.shiftKey) revealInTree(entry.path);
+    else activateResult(entry);
+  };
+
   return (
     <TreeItemsContext.Provider value={treeItems.current}>
       <style id="wand-file-explorer-styles">{fileExplorerStyles}</style>
@@ -535,7 +804,19 @@ export function FileExplorerHost({ root }: { root: string }) {
         setContextMenu({ x: event.clientX, y: event.clientY, entry: null, dir: snapshot.activeDir || snapshot.root });
       }}>
         <div className="wand-file-explorer-toolbar">
-          <span className="wand-file-explorer-title">资源管理器</span>
+          <div className="wand-file-explorer-search" onKeyDown={handleSearchKeyDown}>
+            <WandSearchField
+              value={searchInput}
+              label="搜索文件"
+              placeholder="搜索文件…"
+              disabled={!snapshot.root}
+              inputRef={searchInputRef}
+              listId={searchMode ? listId : undefined}
+              activeOptionId={activeRow >= 0 ? `${listId}-option-${activeRow}` : undefined}
+              onValueChange={setSearchInput}
+              onSearch={(next) => void dispatch.execute({ type: "search.start", query: next })}
+            />
+          </div>
           <button
             type="button"
             className="wand-file-explorer-btn"
@@ -552,63 +833,40 @@ export function FileExplorerHost({ root }: { root: string }) {
             disabled={!snapshot.root || snapshot.busy}
             onClick={() => setPendingCreate({ dir: snapshot.activeDir || snapshot.root, kind: "dir" })}
           ><ExplorerIcon name="newFolder" size={15}/></button>
-          <button
-            type="button"
-            className="wand-file-explorer-btn"
-            title="刷新"
-            aria-label="刷新"
-            disabled={!snapshot.root || snapshot.busy}
-            onClick={() => void dispatch.execute({ type: "refresh" })}
-          ><ExplorerIcon name="refresh" size={15}/></button>
         </div>
-        <div className="wand-file-explorer-search">
-          <WandSearchField
-            value={searchInput}
-            label="搜索文件"
-            placeholder="搜索文件…"
-            disabled={!snapshot.root}
-            onValueChange={setSearchInput}
-            onSearch={(query) => void dispatch.execute({ type: "search.start", query })}
+        {searchMode ? (
+          <SearchPanel
+            snapshot={snapshot}
+            query={query}
+            rows={rows}
+            activeIndex={activeRow}
+            listId={listId}
+            rowRefs={resultItems}
+            onActiveIndex={setActiveResult}
+            onOpen={activateResult}
+            onReveal={(entry) => revealInTree(entry.path)}
+            onContextMenu={setContextMenu}
+            onFilter={(filter) => {
+              void dispatch.execute({ type: "search.filter", filter });
+              // Clicking a chip must not strand the keyboard on the chip: the
+              // whole panel is driven from the field.
+              searchInputRef.current?.focus();
+            }}
+            onClear={() => void dispatch.execute({ type: "search.clear" })}
+            onRetry={() => void dispatch.execute({ type: "search.start", query: searchInput })}
           />
-          {snapshot.searching && <span aria-hidden="true">…</span>}
-        </div>
-        <div className="wand-file-explorer-tree" role="tree" aria-label="文件树">
-          {!snapshot.root && (
-            <div className="wand-file-explorer-empty">尚未选择工作目录。</div>
-          )}
-          {snapshot.root && rootNode?.status === "loading" && !rootNode.entries.length && (
-            <div className="wand-file-explorer-empty">加载中…</div>
-          )}
-          {snapshot.root && rootNode?.status === "error" && (
-            <div className="wand-file-explorer-empty">{rootNode.error || "读取目录失败"}</div>
-          )}
-          {snapshot.searchError ? <div className="wand-file-explorer-empty" role="alert">
-            <p>{snapshot.searchError}</p>
-            <WandButton kind="ghost" size="small" onClick={() => void dispatch.execute({ type: "search.start", query: searchInput })}>重试搜索</WandButton>
-          </div> : showingSearch ? (
-            snapshot.searchResults && snapshot.searchResults.length > 0 ? (
-              snapshot.searchResults.map((entry) => (
-                <ExplorerRow
-                  key={entry.path}
-                  entry={entry}
-                  depth={0}
-                  snapshot={snapshot}
-                  activePath={activePath}
-                  onToggle={(dir) => void dispatch.execute({ type: "toggle", dir })}
-                  onFileActivate={(path) => void codeEditorController.open(path)}
-                  onContextMenu={(state) => setContextMenu(state)}
-                  renameState={renameState}
-                  setRenameState={setRenameState}
-                  onCreateChild={(dir, kind) => setPendingCreate({ dir, kind })}
-                  pendingCreate={pendingCreate}
-                  setPendingCreate={setPendingCreate}
-                />
-              ))
-            ) : (
-              <div className="wand-file-explorer-empty">没有找到匹配的文件</div>
-            )
-          ) : (
-            rootNode?.status === "loaded" && rootNode.entries.length > 0 && (
+        ) : (
+          <div className="wand-file-explorer-tree" role="tree" aria-label="文件树">
+            {!snapshot.root && (
+              <div className="wand-file-explorer-empty">尚未选择工作目录。</div>
+            )}
+            {snapshot.root && rootNode?.status === "loading" && !rootNode.entries.length && (
+              <div className="wand-file-explorer-empty">加载中…</div>
+            )}
+            {snapshot.root && rootNode?.status === "error" && (
+              <div className="wand-file-explorer-empty">{rootNode.error || "读取目录失败"}</div>
+            )}
+            {rootNode?.status === "loaded" && rootNode.entries.length > 0 && (
               <>
                 {pendingCreate && pendingCreate.dir === snapshot.root && (
                   <CreateInput
@@ -639,15 +897,17 @@ export function FileExplorerHost({ root }: { root: string }) {
                     onContextMenu={(state) => setContextMenu(state)}
                     renameState={renameState}
                     setRenameState={setRenameState}
-                    onCreateChild={(dir, kind) => setPendingCreate({ dir, kind })}
                     pendingCreate={pendingCreate}
                     setPendingCreate={setPendingCreate}
                   />
                 ))}
               </>
-            )
-          )}
-        </div>
+            )}
+            {snapshot.root && rootNode?.status === "loaded" && rootNode.entries.length === 0 && (
+              <div className="wand-file-explorer-empty">这个目录是空的。</div>
+            )}
+          </div>
+        )}
       </div>
       {contextMenu && (
         <ContextMenu

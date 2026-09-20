@@ -1,7 +1,9 @@
 import { wandOverlay } from "../overlay-controller";
 import {
   clampCodeEditorFontSize,
+  codeEditorFindMatches,
   defaultCodeEditorFontSize,
+  stepCodeEditorFindIndex,
 } from "./model";
 import { httpCodeEditorRepository } from "./repository";
 import type {
@@ -48,6 +50,10 @@ function initialSnapshot(revision = 0): CodeEditorSnapshot {
     saving: false,
     fontSize: defaultCodeEditorFontSize(),
     wrap: false,
+    findOpen: false,
+    findQuery: "",
+    findCaseSensitive: false,
+    findIndex: 0,
   };
 }
 
@@ -163,6 +169,7 @@ export function createCodeEditorModule(options: CodeEditorModuleOptions): CodeEd
       status: "loading",
       file: null,
       failure: null,
+      findIndex: 0,
     });
 
     try {
@@ -263,6 +270,14 @@ export function createCodeEditorModule(options: CodeEditorModuleOptions): CodeEd
     }
   }
 
+  /** Matches of the current draft, recomputed on demand (never cached). */
+  function currentFindMatches(): number {
+    const active = snapshot.activePath ? files.get(snapshot.activePath) : null;
+    return codeEditorFindMatches(active?.draft ?? "", snapshot.findQuery, {
+      caseSensitive: snapshot.findCaseSensitive,
+    }).length;
+  }
+
   async function execute(command: CodeEditorCommand): Promise<boolean> {
     switch (command.type) {
       case "close": {
@@ -286,6 +301,7 @@ export function createCodeEditorModule(options: CodeEditorModuleOptions): CodeEd
           file: nextActive ? files.get(nextActive) ?? null : null,
           tabs: remaining,
           status: nextActive ? "ready" : "idle",
+          findIndex: 0,
         });
         return true;
       }
@@ -298,6 +314,7 @@ export function createCodeEditorModule(options: CodeEditorModuleOptions): CodeEd
           file: next,
           status: next ? "ready" : "loading",
           failure: null,
+          findIndex: 0,
         });
         if (!next) {
           return load(command.path);
@@ -337,6 +354,29 @@ export function createCodeEditorModule(options: CodeEditorModuleOptions): CodeEd
         return true;
       case "font.adjust":
         publish({ fontSize: clampCodeEditorFontSize(snapshot.fontSize + command.delta) });
+        return true;
+      case "find.open":
+        publish({ findOpen: true });
+        return true;
+      case "find.close":
+        if (!snapshot.findOpen) return true;
+        publish({ findOpen: false });
+        return true;
+      case "find.set":
+        if (command.query === snapshot.findQuery) return true;
+        // A new query restarts from the top of the file rather than keeping a
+        // stale offset into a list that no longer exists.
+        publish({ findQuery: command.query, findOpen: true, findIndex: 0 });
+        return true;
+      case "find.step": {
+        if (!snapshot.findQuery) return false;
+        const count = currentFindMatches();
+        if (count === 0) return false;
+        publish({ findIndex: stepCodeEditorFindIndex(snapshot.findIndex, count, command.delta) });
+        return true;
+      }
+      case "find.case.toggle":
+        publish({ findCaseSensitive: !snapshot.findCaseSensitive, findIndex: 0 });
         return true;
     }
   }

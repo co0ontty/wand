@@ -12,7 +12,8 @@ export const foundationStyles = String.raw`
   display: contents;
 }
 
-/* Appica owns behavior and sizing; Wand owns the shared surface geometry. */
+/* Appica owns behavior and sizing; Wand owns the login page's flat surfaces. */
+.wand-ui-input { border-radius: var(--control-radius); }
 .wand-ui-search {
   display: flex;
   align-items: center;
@@ -21,7 +22,7 @@ export const foundationStyles = String.raw`
   min-height: 38px;
   padding: 0 10px;
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-sm);
+  border-radius: var(--control-radius);
   background: var(--bg-elevated);
   color: var(--text-tertiary);
 }
@@ -43,13 +44,86 @@ export const foundationStyles = String.raw`
 .wand-ui-search .wand-ui-icon-button { flex: none; width: 28px; height: 28px; }
 
 .wand-ui-button {
-  border-radius: var(--radius-sm);
+  border-radius: var(--control-radius);
   font-family: var(--font-sans);
+  transition: color var(--transition-fast), background-color var(--transition-fast),
+    border-color var(--transition-fast), opacity var(--transition-fast);
 }
 
+/* Appica paints a second surface (including radial gradients) in ::before.
+   Flat filled buttons need one surface, not a tint laid over the brand color. */
+.wand-ui-button::before {
+  backdrop-filter: none;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast);
+}
+.wand-ui-button-primary::before,
+.wand-ui-button-secondary::before,
+.wand-ui-button-danger::before { background: transparent; }
+
+.wand-ui-button-primary {
+  color: var(--text-inverse);
+  background: var(--accent-solid);
+}
+.wand-ui-button-primary:hover:not(:disabled):not([data-disabled]) {
+  background: var(--accent-active);
+}
 .wand-ui-button-primary,
-.wand-ui-button-danger {
-  box-shadow: none;
+.wand-ui-button-danger { box-shadow: none; }
+
+.wand-ui-button-secondary { background: var(--bg-secondary); }
+.wand-ui-button-secondary:hover:not(:disabled):not([data-disabled]) { background: var(--bg-active); }
+.wand-ui-button-danger:hover:not(:disabled):not([data-disabled]) { background: var(--danger-hover); }
+
+.wand-ui-navigation-link {
+  transition: color var(--transition-fast), background-color var(--transition-fast);
+}
+.wand-ui-navigation-link::before { background: transparent; }
+.wand-ui-navigation-link:hover { background: var(--bg-hover); }
+.wand-ui-navigation-link[data-active] {
+  color: var(--accent-strong);
+  background: var(--accent-muted);
+}
+
+/* Keep hit targets and labels still on press; Appica also uses the independent
+   scale/translate properties, so resetting transform alone is insufficient. */
+.wand-ui-button:is(:active, [data-pressed], [data-popup-open]),
+.wand-ui-navigation-link:is(:active, [data-active], [data-popup-open]) {
+  scale: none;
+  translate: none;
+  transform: none;
+}
+.wand-ui-button:focus-visible,
+.wand-ui-navigation-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.wand-ui-dropdown-content {
+  /* Like popovers/selects, menus live under the non-interactive overlay root. */
+  pointer-events: auto;
+  z-index: 10;
+  border: 1px solid var(--float-border);
+  border-radius: var(--float-radius);
+  padding: var(--float-pad);
+  color: var(--text-primary);
+  background: var(--float-bg);
+  box-shadow: var(--float-shadow);
+}
+.wand-ui-dropdown-item {
+  min-height: var(--menu-item-height);
+  border-radius: var(--menu-item-radius);
+  padding: var(--menu-item-pad-block) var(--menu-item-pad-inline);
+  gap: 9px;
+  font-size: var(--menu-item-font-size);
+}
+.wand-ui-dropdown-item[data-highlighted] {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.wand-ui-dropdown-item-danger { color: var(--danger); }
+.wand-ui-dropdown-item-danger[data-highlighted] {
+  color: var(--danger);
+  background: var(--danger-muted);
 }
 
 [data-slot="dialog-backdrop"] {
@@ -177,7 +251,7 @@ export const foundationStyles = String.raw`
   place-items: center;
   width: 34px;
   height: 34px;
-  border-radius: var(--radius-full);
+  border-radius: var(--control-radius);
   color: var(--info);
   background: var(--info-muted);
   font-weight: var(--font-weight-bold);
@@ -328,8 +402,8 @@ export const foundationStyles = String.raw`
   color: var(--text-primary);
   background: var(--float-bg-glass);
   box-shadow: var(--float-shadow);
-  backdrop-filter: blur(20px) saturate(125%);
-  -webkit-backdrop-filter: blur(20px) saturate(125%);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .wand-ui-popover-content {
@@ -363,7 +437,7 @@ export const foundationStyles = String.raw`
   min-width: 160px;
   min-height: 38px;
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-sm);
+  border-radius: var(--control-radius);
   padding: 7px 10px;
   color: var(--text-primary);
   background: var(--bg-secondary);
@@ -636,13 +710,13 @@ export const sharedMotionStyles = String.raw`
 }
 
 @keyframes wand-ui-dialog-in {
-  from { opacity: 0; transform: translate(-50%, calc(-50% + 10px)) scale(0.98); }
-  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  from { opacity: 0; transform: translate(-50%, calc(-50% + 6px)); }
+  to { opacity: 1; transform: translate(-50%, -50%); }
 }
 
 @keyframes wand-ui-dialog-out {
-  from { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-  to { opacity: 0; transform: translate(-50%, calc(-50% + 6px)) scale(0.99); }
+  from { opacity: 1; transform: translate(-50%, -50%); }
+  to { opacity: 0; transform: translate(-50%, calc(-50% + 4px)); }
 }
 
 @keyframes wand-ui-scale-in {

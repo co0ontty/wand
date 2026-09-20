@@ -271,6 +271,7 @@ export var state: AppState = {
   currentMessages: [],
   lastRenderedHash: 0,
   lastRenderedMsgCount: 0,
+  lastRenderedAgentRunSignature: "",
   lastRenderedEmpty: null,
   renderPending: false,
   chatPageSize: 20,

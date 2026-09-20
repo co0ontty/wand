@@ -4,6 +4,7 @@
 import { EMBEDDED_WEB_ASSETS, type EmbeddedVendorAssetPath } from "./embedded-assets.js";
 import { getCSSStyles } from "./styles.js";
 import { getScriptContent } from "./scripts.js";
+import { WAND_FAVICON_URL } from "./brand-identity.js";
 
 // Use String.fromCharCode to avoid template literal interpretation of </script>
 const scriptClose = String.fromCharCode(60, 47) + "script>";
@@ -26,7 +27,7 @@ export function renderApp(configPath: string): string {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
   <title>Wand Console</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%2317120f'/%3E%3Cpath d='M13 21l9 24 10-15 10 15 9-24' fill='none' stroke='%23c5653d' stroke-width='6.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+  <link rel="icon" type="image/svg+xml" href="${WAND_FAVICON_URL}" />
   <meta name="description" content="Local CLI Console for Vibe Coding - Manage terminal sessions from your browser" />
   <meta name="theme-color" content="#f1eadf" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#17120f" media="(prefers-color-scheme: dark)" />

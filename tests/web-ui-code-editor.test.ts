@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createCodeEditorModule } from "../src/web-ui/react/code-editor/controller.ts";
+import {
+  codeEditorFindMatches,
+  stepCodeEditorFindIndex,
+} from "../src/web-ui/react/code-editor/model.ts";
 import { HttpCodeEditorRepository } from "../src/web-ui/react/code-editor/repository.ts";
 import type {
   CodeEditorConflictChoice,
@@ -421,3 +425,91 @@ test("HTTP repository captures preview mtime and sends expected mtime unless ove
   assert.deepEqual(calls[2]?.body, { path: "/tmp/a.ts", content: "draft" });
 });
 
+
+test("code editor find locates matches with line numbers", () => {
+  const text = "alpha\nbeta ALPHA\ngamma";
+  const matches = codeEditorFindMatches(text, "alpha");
+  assert.deepEqual(matches, [
+    { start: 0, end: 5, line: 1 },
+    { start: 11, end: 16, line: 2 },
+  ]);
+  assert.deepEqual(codeEditorFindMatches(text, "alpha", { caseSensitive: true }), [
+    { start: 0, end: 5, line: 1 },
+  ]);
+  assert.deepEqual(codeEditorFindMatches(text, ""), []);
+  assert.deepEqual(codeEditorFindMatches(text, "zzz"), []);
+});
+
+test("code editor find does not overlap matches or lose offsets to case folding", () => {
+  // "aaaa" holds two non-overlapping "aa" hits, and the İ fold must not shift
+  // the offsets of the hits that follow it.
+  assert.deepEqual(codeEditorFindMatches("aaaa", "aa").map((match) => match.start), [0, 2]);
+  const folded = "İİ note";
+  const note = codeEditorFindMatches(folded, "note");
+  assert.equal(note.length, 1);
+  assert.equal(folded.slice(note[0].start, note[0].end), "note");
+});
+
+test("code editor find steps wrap in both directions", () => {
+  assert.equal(stepCodeEditorFindIndex(0, 3, 1), 1);
+  assert.equal(stepCodeEditorFindIndex(2, 3, 1), 0);
+  assert.equal(stepCodeEditorFindIndex(0, 3, -1), 2);
+  assert.equal(stepCodeEditorFindIndex(0, 0, 1), 0);
+  assert.equal(stepCodeEditorFindIndex(9, 3, 1), 1);
+});
+
+test("find.open, find.set, and find.step navigate the active file", async () => {
+  const repo = new MemoryCodeEditorRepository([textFile("/app/a.ts", "one two one")]);
+  const module_ = createCodeEditorModule({ repository: repo, runtime: noopRuntime });
+  const { controller, store } = module_;
+  await controller.open("/app/a.ts");
+  assert.equal(store.getSnapshot().findOpen, false);
+
+  await controller.execute({ type: "find.open" });
+  assert.equal(store.getSnapshot().findOpen, true);
+  assert.equal(store.getSnapshot().findQuery, "");
+
+  await controller.execute({ type: "find.set", query: "one" });
+  assert.equal(store.getSnapshot().findIndex, 0);
+  assert.equal(await controller.execute({ type: "find.step", delta: 1 }), true);
+  assert.equal(store.getSnapshot().findIndex, 1);
+  assert.equal(await controller.execute({ type: "find.step", delta: 1 }), true);
+  assert.equal(store.getSnapshot().findIndex, 0);
+  assert.equal(await controller.execute({ type: "find.step", delta: -1 }), true);
+  assert.equal(store.getSnapshot().findIndex, 1);
+
+  await controller.execute({ type: "find.set", query: "one" });
+  assert.equal(store.getSnapshot().findIndex, 1);
+
+  await controller.execute({ type: "find.set", query: "absent" });
+  assert.equal(await controller.execute({ type: "find.step", delta: 1 }), false);
+  assert.equal(store.getSnapshot().findOpen, true);
+
+  await controller.execute({ type: "find.close" });
+  assert.equal(store.getSnapshot().findOpen, false);
+  // The query survives closing the bar, so ⌘F reopens where the user left off.
+  assert.equal(store.getSnapshot().findQuery, "absent");
+});
+
+test("find case toggle restarts navigation and switching tabs resets the position", async () => {
+  const repo = new MemoryCodeEditorRepository([
+    textFile("/app/a.ts", "Note note NOTE"),
+    textFile("/app/b.ts", "note"),
+  ]);
+  const module_ = createCodeEditorModule({ repository: repo, runtime: noopRuntime });
+  const { controller, store } = module_;
+  await controller.open("/app/a.ts");
+  await controller.execute({ type: "find.set", query: "note" });
+  await controller.execute({ type: "find.step", delta: 1 });
+  assert.equal(store.getSnapshot().findIndex, 1);
+
+  await controller.execute({ type: "find.case.toggle" });
+  assert.equal(store.getSnapshot().findCaseSensitive, true);
+  assert.equal(store.getSnapshot().findIndex, 0);
+  assert.equal(store.getSnapshot().findQuery, "note");
+
+  await controller.open("/app/b.ts");
+  assert.equal(store.getSnapshot().findIndex, 0);
+  assert.equal(store.getSnapshot().findQuery, "note");
+  assert.equal(store.getSnapshot().findCaseSensitive, true);
+});

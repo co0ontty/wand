@@ -8,11 +8,13 @@ import {
   resolveApprovalStatsBadge,
   resolveAutoApproveBadge,
 } from "../src/web-ui/browser/composer-badges-adapter.ts";
+import { resolveComposerPermission } from "../src/web-ui/react/composer-badges/model.js";
 import { ComposerBadgesController } from "../src/web-ui/react/composer-badges/controller.ts";
 import type { ComposerApprovalStats } from "../src/web-ui/react/composer-badges/controller.ts";
 import {
   ComposerApprovalStatsBadge,
   ComposerAutoApproveChip,
+  ComposerPermissionActions,
 } from "../src/web-ui/react/composer-badges/host.tsx";
 
 test("composer badges controller publishes immutable portal mount snapshots", () => {
@@ -22,7 +24,7 @@ test("composer badges controller publishes immutable portal mount snapshots", ()
   const unsubscribe = controller.subscribe(() => { notifications += 1; });
 
   controller.sync([
-    { key: "auto-approve", kind: "auto-approve", target, enabled: true, onToggle() {} },
+    { key: "auto-approve", kind: "auto-approve", target, sessionId: "a", pending: false, enabled: true, onToggle() {} },
     { key: "approval-stats", kind: "approval-stats", target, stats: null },
   ]);
   const first = controller.getSnapshot();
@@ -64,26 +66,26 @@ test("重复同步相同徽章不广播，统计数字变化才触发重渲染",
   assert.equal(notifications, 2);
   assert.equal(controller.getSnapshot().revision, 2);
 
-  controller.sync([{ key: "auto-approve", kind: "auto-approve", target, enabled: false, onToggle() {} }]);
+  controller.sync([{ key: "auto-approve", kind: "auto-approve", target, sessionId: "a", pending: false, enabled: false, onToggle() {} }]);
   assert.equal(notifications, 3);
-  controller.sync([{ key: "auto-approve", kind: "auto-approve", target, enabled: false, onToggle() {} }]);
+  controller.sync([{ key: "auto-approve", kind: "auto-approve", target, sessionId: "a", pending: false, enabled: false, onToggle() {} }]);
   assert.equal(notifications, 3);
-  controller.sync([{ key: "auto-approve", kind: "auto-approve", target, enabled: true, onToggle() {} }]);
+  controller.sync([{ key: "auto-approve", kind: "auto-approve", target, sessionId: "a", pending: false, enabled: true, onToggle() {} }]);
   assert.equal(notifications, 4);
 });
 
 test("自动批准 chip 的可见性由模式隐含状态与选中会话共同决定", () => {
   assert.deepEqual(resolveAutoApproveBadge(null), { visible: false, enabled: false });
   assert.deepEqual(
-    resolveAutoApproveBadge({ autoApproveHidden: true, autoApproveEnabled: true, approvalStats: null }),
+    resolveAutoApproveBadge({ sessionId: "a", autoApprovePending: false, permissionPending: false, permission: null, autoApproveHidden: true, autoApproveEnabled: true, approvalStats: null }),
     { visible: false, enabled: false },
   );
   assert.deepEqual(
-    resolveAutoApproveBadge({ autoApproveHidden: false, autoApproveEnabled: true, approvalStats: null }),
+    resolveAutoApproveBadge({ sessionId: "a", autoApprovePending: false, permissionPending: false, permission: null, autoApproveHidden: false, autoApproveEnabled: true, approvalStats: null }),
     { visible: true, enabled: true },
   );
   assert.deepEqual(
-    resolveAutoApproveBadge({ autoApproveHidden: false, autoApproveEnabled: false, approvalStats: null }),
+    resolveAutoApproveBadge({ sessionId: "a", autoApprovePending: false, permissionPending: false, permission: null, autoApproveHidden: false, autoApproveEnabled: false, approvalStats: null }),
     { visible: true, enabled: false },
   );
 });
@@ -139,16 +141,97 @@ test("统计徽章渲染总数、分类行与合计行，无统计时不渲染",
 test("宿主 span 用 display:contents 让徽章直接成为状态行的 flex item", () => {
   const css = readFileSync(new URL("../src/web-ui/content/styles.css", import.meta.url), "utf8");
   assert.match(css, /\.composer-badge-host\s*\{\s*display:\s*contents;/);
+  assert.ok(css.includes('.composer-status-row > :not([data-composer-badge-host="permissions"])'),
+    "permission emphasis must keep the portal host visible");
 });
 
 test("输入栏种子 markup 只保留徽章宿主，不再内联渲染徽章", () => {
   const renderSource = readFileSync(new URL("../src/web-ui/browser/render.ts", import.meta.url), "utf8");
   assert.match(renderSource, /data-composer-badge-host="auto-approve"/);
   assert.match(renderSource, /data-composer-badge-host="approval-stats"/);
+  assert.match(renderSource, /data-composer-badge-host="permissions"/);
+  assert.doesNotMatch(renderSource, /id="(?:permission-actions|approve-permission-btn|deny-permission-btn)"/);
   assert.doesNotMatch(renderSource, /renderApprovalStatsBadge/);
   const engineSource = readFileSync(new URL("../src/web-ui/browser/session-engine.ts", import.meta.url), "utf8");
   assert.doesNotMatch(engineSource, /renderAutoApproveChip/);
   const websocketSource = readFileSync(new URL("../src/web-ui/browser/websocket.ts", import.meta.url), "utf8");
   assert.doesNotMatch(websocketSource, /updateApprovalStats/);
   assert.match(websocketSource, /export function syncComposerBadges/);
+});
+
+
+test("switching identical badges refreshes the callback's session and pending state", () => {
+  const controller = new ComposerBadgesController();
+  const target = {} as HTMLElement;
+  const calls: string[] = [];
+  const sync = (sessionId: string, pending = false) => controller.sync([{
+    key: "auto-approve", kind: "auto-approve", target, sessionId, pending, enabled: false,
+    onToggle: () => { calls.push(sessionId); },
+  }]);
+  sync("a");
+  const old = controller.getSnapshot();
+  sync("b");
+  assert.notEqual(controller.getSnapshot(), old);
+  const mount = controller.getSnapshot().mounts[0];
+  assert.equal(mount.kind, "auto-approve");
+  if (mount.kind !== "auto-approve") throw new Error("wrong mount");
+  mount.onToggle();
+  assert.deepEqual(calls, ["b"]);
+  sync("b", true);
+  const busy = controller.getSnapshot();
+  assert.equal(busy.revision, 3);
+  sync("b", false);
+  assert.equal(controller.getSnapshot().revision, 4);
+  assert.match(renderToStaticMarkup(React.createElement(ComposerAutoApproveChip, {
+    enabled: false, pending: true, onToggle() {},
+  })), /disabled=""/);
+});
+
+test("permission state covers hidden, escalation, auto-approve and PTY fallback cases", () => {
+  assert.equal(resolveComposerPermission(null), null);
+  assert.equal(resolveComposerPermission({}), null);
+  assert.equal(resolveComposerPermission({ provider: "codex", permissionBlocked: true }), null);
+  assert.deepEqual(resolveComposerPermission({ permissionBlocked: true }), {
+    requestId: null, label: "等待授权", autoApproving: false,
+  });
+  assert.deepEqual(resolveComposerPermission({ pendingEscalation: { requestId: "r1", reason: "执行命令", target: "pwd" } }), {
+    requestId: "r1", label: "执行命令 · pwd", autoApproving: false,
+  });
+  assert.deepEqual(resolveComposerPermission({ permissionBlocked: true, autoApprovePermissions: true }), {
+    requestId: null, label: "自动批准中...", autoApproving: true,
+  });
+});
+
+test("permission mounts refresh when the request identity changes with identical text", () => {
+  const controller = new ComposerBadgesController();
+  const target = {} as HTMLElement;
+  const calls: string[] = [];
+  const sync = (sessionId: string, requestId: string, pending = false) => controller.sync([{
+    key: "permissions", kind: "permissions", target, sessionId, pending,
+    permission: { requestId, label: "等待授权", autoApproving: false },
+    onAction: () => { calls.push(`${sessionId}/${requestId}`); },
+  }]);
+  sync("a", "r1");
+  sync("a", "r2");
+  sync("b", "r2");
+  const mount = controller.getSnapshot().mounts[0];
+  if (mount.kind !== "permissions") throw new Error("wrong mount");
+  mount.onAction("approve");
+  assert.deepEqual(calls, ["b/r2"]);
+  sync("b", "r2", true);
+  assert.equal(controller.getSnapshot().revision, 4);
+  sync("b", "r2", true);
+  assert.equal(controller.getSnapshot().revision, 4);
+});
+
+test("permission actions disable together and only escalations offer turn approval", () => {
+  const render = (requestId: string | null, autoApproving = false, pending = false) =>
+    renderToStaticMarkup(React.createElement(ComposerPermissionActions, {
+      permission: { requestId, label: "等待授权", autoApproving }, pending, onAction() {},
+    }));
+  assert.equal((render("r1", false, true).match(/disabled=""/g) || []).length, 3);
+  assert.match(render("r1", false, true), /aria-busy="true"/);
+  assert.doesNotMatch(render(null), /approve-turn-permission-btn/);
+  assert.equal((render(null).match(/<button/g) || []).length, 2);
+  assert.doesNotMatch(render("r1", true), /<button/);
 });
