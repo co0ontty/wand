@@ -9,6 +9,7 @@ import * as React from "react";
 import { type ComponentProps, type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { WandButton, type WandButtonKind } from "./button";
 import { classNames } from "./class-names";
+import { findDialogFocusTarget, watchDialogAutofocus } from "./dialog-focus";
 import { WandIcon, type WandIconName } from "./icons";
 import { usePortalContainer } from "./portal-context";
 
@@ -94,8 +95,11 @@ function resolveDialogIcon(tone: WandDialogTone, icon?: ReactNode): ReactNode {
 
 /** `true` hands the choice back to Base UI (first tabbable in the popup). */
 function firstTabbable(container: HTMLElement | null, selector: string): HTMLElement | true {
-  if (!container) return true;
-  return container.querySelector<HTMLElement>(selector) ?? true;
+  // A comma-separated selector follows DOM order, not selector priority. Look
+  // for the caller's explicit target before the header's close button.
+  return findDialogFocusTarget(container, "[data-wand-autofocus]")
+    ?? findDialogFocusTarget(container, selector)
+    ?? true;
 }
 
 /** Composable feature dialog rendered by Appica's dialog parts, portalled under `ui/`. */
@@ -117,6 +121,25 @@ export function WandDialogSurface({
 }: WandDialogSurfaceProps) {
   const portalContainer = usePortalContainer();
   const contentRef = useRef<HTMLDivElement>(null);
+  const stopDeferredFocus = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    return () => {
+      stopDeferredFocus.current?.();
+      stopDeferredFocus.current = null;
+    };
+  }, [open]);
+
+  function initialFocus(): HTMLElement | true {
+    stopDeferredFocus.current?.();
+    const container = contentRef.current;
+    const preferred = findDialogFocusTarget(container, "[data-wand-autofocus]");
+    if (preferred) return preferred;
+    const fallback = findDialogFocusTarget(container, "button, input, textarea, select, [tabindex='0']");
+    if (container) stopDeferredFocus.current = watchDialogAutofocus(container, fallback);
+    return fallback ?? true;
+  }
+
   return (
     <AppicaDialog open={open} onOpenChange={makeOpenChangeHandler(dismissable, onOpenChange)}>
       <AppicaDialogContent
@@ -129,11 +152,7 @@ export function WandDialogSurface({
         data-testid={testId}
         backdropProps={{ className: overlayClassName }}
         viewportProps={{ className: "wand-ui-dialog-viewport" }}
-        initialFocus={() =>
-          firstTabbable(
-            contentRef.current,
-            "[data-wand-autofocus], button, input, [tabindex='0']",
-          )}
+        initialFocus={initialFocus}
       >
         <div className={headerClassName}>
           <div>
@@ -172,6 +191,7 @@ export function WandDialog<T>({
 }: WandDialogProps<T>) {
   const portalContainer = usePortalContainer();
   const inputRef = useRef<HTMLInputElement>(null);
+  const inputComposing = useRef(false);
   const contentRef = useRef<HTMLDivElement>(null);
   const [inputValue, setInputValue] = useState(input?.value ?? "");
   const hasInput = Boolean(input);
@@ -193,7 +213,8 @@ export function WandDialog<T>({
     ?? actions.at(-1);
 
   function submitPrimary(event: KeyboardEvent<HTMLInputElement>) {
-    if (event.key !== "Enter" || !primaryAction) return;
+    if (event.key !== "Enter" || !primaryAction || inputComposing.current
+      || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
     event.preventDefault();
     onAction(primaryAction.value, inputValue);
   }
@@ -216,7 +237,7 @@ export function WandDialog<T>({
         viewportProps={{ className: "wand-ui-dialog-viewport" }}
         initialFocus={() =>
           inputRef.current
-          ?? firstTabbable(contentRef.current, "[data-wand-autofocus], button")}
+          ?? firstTabbable(contentRef.current, "button")}
       >
         <div className="wand-ui-dialog-header">
           <div
@@ -249,6 +270,8 @@ export function WandDialog<T>({
               placeholder={input.placeholder}
               value={inputValue}
               onChange={(event) => setInputValue(event.currentTarget.value)}
+              onCompositionStart={() => { inputComposing.current = true; }}
+              onCompositionEnd={() => { inputComposing.current = false; }}
               onKeyDown={submitPrimary}
             />
           </div>

@@ -179,7 +179,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
     sessionId: string,
     signal?: AbortSignal,
   ): Promise<QuickCommitStatus> {
-    const requestedAt = Date.now();
+    const requestedAt = quickCommitStore.getRuntime()?.nextStatusRequestTime() ?? Date.now();
     const loaded = await repository.loadStatus(sessionId, signal ? { signal } : {});
     quickCommitStore.getRuntime()?.onStatusLoaded(sessionId, loaded, requestedAt);
     return loaded;

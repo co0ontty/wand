@@ -8,23 +8,16 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   activateTab,
   addTab,
-  addTabAtPath,
   emptyLayout,
   moveTab,
-  moveTabToPath,
   removeTab,
-  sessionPane,
   setRatioAtPath,
-  splitPane,
-  splitPaneAtPath,
-  taskSplitLayout,
   wrapInSplit,
 } from "../src/web-ui/react/workspaces/layout-tree.js";
 import {
   listSessionLabel,
   orderWorkspaceSessions,
   withLiveSessionTitle,
-  workspaceSessionLabel,
   workspaceSessionProvider,
 } from "../src/web-ui/react/workspaces/session-order.js";
 import type { LayoutNode, PaneTab } from "../src/web-ui/react/workspaces/types.js";
@@ -32,20 +25,16 @@ import { WORKSPACE_AGENT_OPTIONS } from "../src/web-ui/react/workspaces/workspac
 import {
   isDirectoryExpanded,
   isTaskSessionsExpanded,
-  showsDirectoryDisclosure,
   showsTaskSessionDisclosure,
 } from "../src/web-ui/react/workspaces/task-tree.js";
 import {
   CompactDirectoryRail,
   WorkspacesPanel,
   shortenWorkspacePath,
-  workspacePathLeaf,
 } from "../src/web-ui/react/workspaces/workspaces-panel.js";
 import { SidebarDisclosure } from "../src/web-ui/react/workspaces/sidebar-disclosure.js";
 import {
   formatTaskRecency,
-  orderSidebarGroups,
-  orderSidebarTasks,
   sidebarSelection,
   taskActivity,
 } from "../src/web-ui/react/workspaces/sidebar-task-meta.js";
@@ -84,32 +73,6 @@ test("emptyLayout yields a single empty pane", () => {
   assert.deepEqual((layout as Extract<LayoutNode, { type: "pane" }>).tabs, []);
 });
 
-test("sessionPane keeps caller order and activates the requested session", () => {
-  const layout = sessionPane(["a", "b", "c"], "b");
-  if (layout.type !== "pane") throw new Error("expected pane");
-  assert.deepEqual(layout.tabs.map((tab) => tab.kind === "session" ? tab.sessionId : ""), ["a", "b", "c"]);
-  assert.equal(layout.active, 1);
-});
-
-test("taskSplitLayout moves the active session right and keeps the remaining tabs left", () => {
-  const layout = taskSplitLayout(["a", "b", "c"], "b");
-  if (layout.type !== "split") throw new Error("expected split");
-  if (layout.children[0].type !== "pane" || layout.children[1].type !== "pane") {
-    throw new Error("expected two panes");
-  }
-  assert.deepEqual(layout.children[0].tabs.map((tab) => tab.kind === "session" ? tab.sessionId : ""), ["a", "c"]);
-  assert.deepEqual(layout.children[1].tabs.map((tab) => tab.kind === "session" ? tab.sessionId : ""), ["b"]);
-  assert.equal(layout.children[1].active, 0);
-});
-
-test("taskSplitLayout keeps an empty sibling when there is only one session", () => {
-  const layout = taskSplitLayout(["a"], "a");
-  if (layout.type !== "split") throw new Error("expected split");
-  assert.deepEqual(paneTabs(layout).map((tab) => tab.id), ["tab-a"]);
-  assert.equal(layout.children[1].type, "pane");
-  assert.deepEqual((layout.children[1] as Extract<LayoutNode, { type: "pane" }>).tabs, []);
-});
-
 test("list session labels skip titles that only repeat the directory or task name", () => {
   assert.equal(
     listSessionLabel({ id: "s1", provider: "pi", title: "wand", cwd: "/Users/me/wand" }, 0, ["wand"]),
@@ -127,16 +90,16 @@ test("list session labels skip titles that only repeat the directory or task nam
 
 test("workspace session labels ignore PTY cwd fallback titles and infer CLI from command", () => {
   assert.equal(
-    workspaceSessionLabel({ id: "s1", provider: "claude", title: "wand", cwd: "/repo/wand" }, 0),
+    listSessionLabel({ id: "s1", provider: "claude", title: "wand", cwd: "/repo/wand" }, 0),
     "Claude 1",
   );
   assert.equal(workspaceSessionProvider({ command: "codex --search" }), "codex");
   assert.equal(
-    workspaceSessionLabel({ id: "s2", command: "codex", title: "wand", cwd: "/repo/wand" }, 0),
+    listSessionLabel({ id: "s2", command: "codex", title: "wand", cwd: "/repo/wand" }, 0),
     "Codex 1",
   );
   assert.equal(
-    workspaceSessionLabel({ id: "s3", provider: "claude", title: "修权限弹窗" }, 1),
+    listSessionLabel({ id: "s3", provider: "claude", title: "修权限弹窗" }, 1),
     "修权限弹窗",
   );
   assert.equal(
@@ -168,7 +131,6 @@ test("workspace sessions use chronological tab order and stable labels", () => {
     { id: "middle", provider: "claude", startedAt: "2026-08-09T10:01:00.000Z" },
   ]);
   assert.deepEqual(sessions.map((session) => session.id), ["old", "middle", "new"]);
-  assert.deepEqual(sessions.map(workspaceSessionLabel), ["Claude 1", "Claude 2", "Claude 3"]);
 });
 
 test("new task conversations offer every supported Agent provider", () => {
@@ -274,39 +236,6 @@ test("task recency handles minute, hour, day, invalid and future timestamps", ()
   assert.equal(formatTaskRecency("not-a-date", now), "");
 });
 
-test("sidebar lists keep created order with new items first", () => {
-  const older: TaskSummary = {
-    id: "old", workspaceId: "ws", name: "旧任务", cwd: "/ws", worktree: null,
-    layout: null, status: "active", isolated: false,
-    createdAt: "2026-01-01T00:00:00Z", lastOpenedAt: "2026-06-01T00:00:00Z", sessions: [],
-  };
-  const newer: TaskSummary = {
-    id: "new", workspaceId: "ws", name: "新任务", cwd: "/ws", worktree: null,
-    layout: null, status: "active", isolated: false,
-    createdAt: "2026-05-01T00:00:00Z", lastOpenedAt: "2026-02-01T00:00:00Z", sessions: [],
-  };
-  assert.deepEqual(orderSidebarTasks([older, newer]).map((task) => task.id), ["new", "old"]);
-
-  const groups: TaskDirectoryGroup[] = [
-    {
-      workspaceId: "old-folder", workspaceName: "旧目录", workspaceCwd: "/old",
-      createdAt: "2026-01-01T00:00:00Z", tasks: [older], standaloneSessions: [],
-    },
-    {
-      workspaceId: "new-folder", workspaceName: "新目录", workspaceCwd: "/new",
-      createdAt: "2026-05-01T00:00:00Z", tasks: [newer], standaloneSessions: [],
-    },
-    {
-      workspaceId: "global", workspaceName: "独立任务", workspaceCwd: "/scratch", global: true,
-      createdAt: "2025-01-01T00:00:00Z", tasks: [], standaloneSessions: [],
-    },
-  ];
-  assert.deepEqual(
-    orderSidebarGroups(groups).map((group) => group.workspaceId),
-    ["global", "new-folder", "old-folder"],
-  );
-});
-
 test("task activity reflects live turns, not merely a running shell process", () => {
   const task: TaskSummary = {
     id: "task", workspaceId: "workspace", name: "任务", cwd: "/workspace", worktree: null,
@@ -356,7 +285,6 @@ test("new task dialog no longer exposes a project creation view", () => {
 });
 
 test("workspace path captions keep the leaf and hide redundant absolute prefixes", () => {
-  assert.equal(workspacePathLeaf("/Users/me/Self/vibe_coding/wand"), "wand");
   assert.equal(shortenWorkspacePath("/Users/me/Self/vibe_coding/wand"), "…/vibe_coding/wand");
   assert.equal(shortenWorkspacePath("/tmp/wand"), "/tmp/wand");
   assert.equal(shortenWorkspacePath("wand"), "wand");
@@ -407,8 +335,6 @@ test("task session lists default to expanded and retain explicit disclosure pref
   assert.doesNotMatch(panel, /taskRecency\(right\)\.localeCompare\(taskRecency\(left\)\)/);
   assert.doesNotMatch(panel, /if \(isActive\) setCollapsed|setCollapsed\(false\); onOpen/);
   assert.match(panel, /canCollapseSessions \? \(/);
-  assert.equal(showsDirectoryDisclosure(1), true);
-  assert.equal(showsDirectoryDisclosure(2), true);
   assert.equal(isDirectoryExpanded(true, 1), false);
   assert.equal(isDirectoryExpanded(false, 1), true);
   assert.equal(showsTaskSessionDisclosure(0), false);
@@ -609,7 +535,7 @@ test("project menus retain worktree management and a multi-select dialog", () =>
 });
 
 test("legacy pane tabsets migrate into independent work windows", () => {
-  const legacy = sessionPane(["a", "b", "c"], "b");
+  const legacy: LayoutNode = { type: "pane", active: 1, tabs: ["a", "b", "c"].map(sessionTab) };
   const migrated = reconcileTaskWindowLayout(legacy, ["a", "b", "c"], "b");
   assert.equal(migrated.windows.length, 3);
   assert.ok(migrated.windows.every((window) => layoutSessionIds(window.layout).length === 1));
@@ -643,20 +569,9 @@ test("wrapInSplit wraps a node with a sibling split", () => {
   assert.equal(split.children[1].type, "pane");
 });
 
-test("splitPane splits the first pane into a split with an empty sibling", () => {
-  const layout = splitPane(addTab(emptyLayout(), sessionTab("a")), "v");
-  assert.equal(layout.type, "split");
-  if (layout.type !== "split") throw new Error("expected split");
-  assert.equal(layout.dir, "v");
-  assert.equal(layout.children[0].type, "pane");
-  assert.equal((layout.children[1] as Extract<LayoutNode, { type: "pane" }>).tabs.length, 0);
-  // original tab survives in the left child
-  assert.deepEqual(paneTabs(layout).map((tab) => tab.id), ["a"]);
-});
-
 test("removeTab collapses a split when its pane becomes empty", () => {
   // split: [pane(a), pane()]  → removing a leaves empty root → collapses to single empty pane
-  let layout: LayoutNode = splitPane(addTab(emptyLayout(), sessionTab("a")), "h");
+  let layout: LayoutNode = wrapInSplit(addTab(emptyLayout(), sessionTab("a")), "h", emptyLayout());
   layout = removeTab(layout, "a");
   assert.equal(layout.type, "pane");
   assert.equal((layout as Extract<LayoutNode, { type: "pane" }>).tabs.length, 0);
@@ -704,44 +619,12 @@ test("moveTab is a no-op for unknown ids or moving onto itself", () => {
   assert.equal(moveTab(layout, "a", "missing"), layout);
 });
 
-test("moveTabToPath can drop a tab into an empty pane", () => {
-  const layout = wrapInSplit(addTab(emptyLayout(), sessionTab("a")), "h", emptyLayout());
-  const next = moveTabToPath(layout, "a", [1]);
-  assert.equal(next.type, "split");
-  if (next.type !== "split") throw new Error("expected split");
-  assert.deepEqual((next.children[0] as Extract<LayoutNode, { type: "pane" }>).tabs, []);
-  assert.deepEqual(paneTabs(next).map((tab) => tab.id), ["a"]);
-});
-
 test("operations are immutable: inputs are not mutated", () => {
   const original = addTab(emptyLayout(), sessionTab("a"));
   const snapshot = JSON.parse(JSON.stringify(original));
-  splitPane(original, "h");
   removeTab(original, "a");
   activateTab(original, "a");
   assert.deepEqual(JSON.parse(JSON.stringify(original)), snapshot);
-});
-
-test("splitPaneAtPath splits the targeted pane, not the first one", () => {
-  // root split: [pane(a), pane(b)] — split the RIGHT pane (path [1])
-  const layout = wrapInSplit(
-    addTab(emptyLayout(), sessionTab("a")),
-    "h",
-    addTab(emptyLayout(), sessionTab("b")),
-  );
-  const next = splitPaneAtPath(layout, [1], "v");
-  // root stays a split; its right child is now itself a split containing b + empty
-  assert.equal(next.type, "split");
-  if (next.type !== "split") throw new Error("expected split");
-  assert.equal(next.children[1].type, "split");
-  // all original tabs survive somewhere in the tree
-  assert.deepEqual(paneTabs(next).map((tab) => tab.id), ["a", "b"]);
-});
-
-test("splitPaneAtPath on the root pane (empty path) wraps it", () => {
-  const layout = addTab(emptyLayout(), sessionTab("a"));
-  const next = splitPaneAtPath(layout, [], "h");
-  assert.equal(next.type, "split");
 });
 
 test("setRatioAtPath updates only the targeted split's ratio", () => {
@@ -750,17 +633,6 @@ test("setRatioAtPath updates only the targeted split's ratio", () => {
   assert.equal(next.type, "split");
   if (next.type !== "split") throw new Error("expected split");
   assert.equal(next.ratio, 0.3);
-});
-
-test("addTabAtPath appends a tab to the targeted pane", () => {
-  const layout = wrapInSplit(addTab(emptyLayout(), sessionTab("a")), "h", addTab(emptyLayout(), sessionTab("b")), 0.5);
-  const next = addTabAtPath(layout, [1], sessionTab("c"));
-  // right pane now has b, c and active points at c
-  if (next.type !== "split") throw new Error("expected split");
-  const right = next.children[1];
-  if (right.type !== "pane") throw new Error("expected pane");
-  assert.deepEqual(right.tabs.map((tab) => tab.id), ["b", "c"]);
-  assert.equal(right.active, 1);
 });
 
 test("sidebar search keeps matching tasks and sessions while preserving directory scope", async () => {

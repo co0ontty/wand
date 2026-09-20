@@ -100,6 +100,8 @@ type QuickCommitToastTone = "success" | "error" | "info";
 export interface QuickCommitRuntimeAdapter {
   onOpen(context: QuickCommitOpenContext): void;
   onClose(context: QuickCommitOpenContext): void;
+  /** 与顶栏徽章共用单调递增的取数时刻，保证同毫秒请求和时钟回拨时仍能排除旧响应。 */
+  nextStatusRequestTime(): number;
   /**
    * 面板自己拉到的 git 状态。顶栏快捷提交徽章是同一份数据的另一个视图，
    * 握手给宿主即可让它同步更新，不必再发一次同样的请求。

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-本文件是本仓库所有编码 agent 的**唯一操作指南**。原 `CLAUDE.md` 已删除，其内容已并入本文；深入的行为分析见 `docs/`（服务端 `docs/server-logic-analysis.md`、客户端 `docs/client-logic-analysis.md`、优化排期 `docs/optimization-plan.md`）。
+本文件是本仓库所有编码 agent 的**唯一操作指南**。原 `CLAUDE.md` 已删除，其内容已并入本文；深入的行为分析见 `docs/`（服务端 `docs/server-logic-analysis.md`、客户端 `docs/client-logic-analysis.md`）。
 
 ## 项目记忆
 

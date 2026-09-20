@@ -17,9 +17,7 @@ import { TaskBoardHost } from "../issues/task-board-host";
 import { taskBoardController, taskBoardStore } from "../issues/task-board-controller";
 import { ShellTopbar } from "./shell-topbar";
 import { useUiDispatch, useUiStoreSnapshot } from "./ui-store-react";
-import type { UiAction, UiSnapshotData } from "./ui-store";
-
-export type ShellWelcomeQuickStart = "claude" | "codex" | "opencode" | "structured";
+import type { UiSnapshotData } from "./ui-store";
 
 export interface ShellMainContentRefs {
   /** Stable roots populated by the corresponding imperative legacy hosts. */
@@ -51,16 +49,6 @@ export function getShellLegacySlotClasses(
     blank: `blank-chat${visibility.blank ? "" : " hidden"}`,
     composer: `input-panel${visibility.composer ? "" : " hidden"}`,
   };
-}
-
-/** Each welcome entry remains a separate domain action and legacy command. */
-export function getShellWelcomeQuickStartAction(tool: ShellWelcomeQuickStart): UiAction {
-  switch (tool) {
-    case "claude": return { type: "session.quickStart.claude" };
-    case "codex": return { type: "session.quickStart.codex" };
-    case "opencode": return { type: "session.quickStart.opencode" };
-    case "structured": return { type: "session.quickStart.structured" };
-  }
 }
 
 

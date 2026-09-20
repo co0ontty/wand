@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { deflateSync } from "node:zlib";
+import { deflateSync, inflateSync } from "node:zlib";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const check = process.argv.includes("--check");
@@ -33,10 +33,36 @@ const rectangles = paths.flatMap(({ fill, d }) => {
   });
 });
 
+function pngContent(data) {
+  try {
+    const parts = [data.subarray(0, 8)];
+    const compressed = [];
+    for (let offset = 8; offset < data.length;) {
+      const length = data.readUInt32BE(offset);
+      const end = offset + 8 + length;
+      const type = data.subarray(offset + 4, offset + 8);
+      const content = data.subarray(offset + 8, end);
+      if (crc32(data.subarray(offset + 4, end)) !== data.readUInt32BE(end)) return null;
+      if (type.toString() === "IDAT") compressed.push(content);
+      else parts.push(type, content);
+      offset = end + 4;
+    }
+    return Buffer.concat([...parts, inflateSync(Buffer.concat(compressed))]);
+  } catch {
+    return null;
+  }
+}
+
 function emit(path, content) {
   const file = resolve(root, path);
   const expected = Buffer.from(content);
-  if (existsSync(file) && readFileSync(file).equals(expected)) return;
+  if (existsSync(file)) {
+    const actual = readFileSync(file);
+    // zlib versions can encode identical pixels differently. Validate PNG
+    // checksums and compare decoded content so --check is runtime-independent.
+    if (actual.equals(expected) || (path.endsWith(".png")
+      && pngContent(actual)?.equals(pngContent(expected)))) return;
+  }
   if (check) throw new Error(`Stale brand asset: ${path}; run npm run sync:brand-assets`);
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, expected);

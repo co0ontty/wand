@@ -1,3 +1,11 @@
+// Shared by the badge and quick-commit panel; wall-clock ties and clock changes
+// must not make an older response appear newer.
+let lastRequestTime = 0;
+export function nextGitStatusRequestTime(): number {
+  lastRequestTime = Math.max(Date.now(), lastRequestTime + 1);
+  return lastRequestTime;
+}
+
 /**
  * 逐会话记住最近一次 git 状态。
  *

@@ -72,7 +72,7 @@ export const settingsAndQuickCommitStyles = String.raw`
 
 .wand-settings-title {
   margin: 0;
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-xl);
   line-height: var(--line-height-tight);
   letter-spacing: -0.015em;
 }
@@ -90,10 +90,9 @@ export const settingsAndQuickCommitStyles = String.raw`
   flex: 0 0 auto;
   align-items: center;
   gap: 14px;
-  margin: 16px 24px 0;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  padding: 14px 16px;
+  justify-content: space-between;
+  margin: 0;
+  padding: 12px 24px;
   background: var(--bg-primary);
 }
 
@@ -159,6 +158,9 @@ export const settingsAndQuickCommitStyles = String.raw`
   color: var(--text-secondary);
 }
 
+.wand-settings-refresh-error { margin: 0 18px 8px; }
+.wand-settings-refresh-error .wand-settings-status { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+
 .wand-settings-loading {
   display: flex;
   flex: 1;
@@ -172,18 +174,15 @@ export const settingsAndQuickCommitStyles = String.raw`
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 12px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 16px;
-  padding: 13px 14px;
-  background: color-mix(in srgb, var(--bg-elevated) 76%, transparent);
+  gap: 7px;
+  min-height: 44px;
+  padding: 0 24px;
+  background: var(--bg-primary);
 }
 
-.wand-settings-loading-overview > div {
-  display: grid;
-  flex: 1;
-  gap: 7px;
-}
+.wand-settings-skeleton-pill { width: 74px; height: 22px; border-radius: 999px; }
+.wand-settings-skeleton-pill.is-wide { width: 86px; }
+.wand-settings-skeleton-version { width: 48px; height: 10px; margin-left: auto; }
 
 .wand-settings-loading-layout {
   display: grid;
@@ -281,7 +280,7 @@ export const settingsAndQuickCommitStyles = String.raw`
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  margin-top: 16px;
+  margin-top: 0;
   border-top: 1px solid var(--border-subtle);
 }
 
@@ -1308,12 +1307,14 @@ export const missionsStyles = String.raw`
 .wand-missions-pending-review { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; border-top: 1px solid var(--border-subtle); padding: 11px 12px; }
 .wand-missions-pending-review > div { display: grid; gap: 5px; }.wand-missions-pending-review p { margin: 0; color: var(--text-secondary); font-size: var(--font-size-xs); }.wand-missions-pending-review strong { margin-right: 8px; color: var(--text-primary); }
 .wand-missions-empty { padding: 28px 14px; color: var(--text-secondary); text-align: center; }
-.wand-missions-create-overlay { position: absolute; inset: 0; display: grid; z-index: 2; place-items: center; padding: 22px; background: var(--bg-overlay); backdrop-filter: none; }
-.wand-missions-create { display: grid; width: min(680px, 100%); max-height: 100%; gap: 13px; overflow: auto; border: 1px solid var(--border-subtle); border-radius: 17px; padding: 18px; background: var(--bg-elevated); box-shadow: 0 18px 55px rgb(0 0 0 / 25%); }
-.wand-missions-create-head > button { border: 0; color: var(--text-secondary); background: transparent; font-size: 24px; cursor: pointer; }
-.wand-missions-create > label,.wand-missions-create details label,.wand-missions-field { display: grid; gap: 6px; color: var(--text-secondary); font-size: var(--font-size-xs); }
+.wand-missions-create-overlay { position: fixed; inset: 0; z-index: 36; background: var(--bg-overlay); pointer-events: auto; }
+.wand-missions-create-dialog { z-index: 37; display: flex; flex-direction: column; width: min(680px, calc(100vw - var(--wand-safe-left) - var(--wand-safe-right) - 32px)); overflow: hidden; }
+.wand-missions-create { display: flex; flex-direction: column; gap: 16px; min-height: 0; overflow: hidden; }
+.wand-missions-create-body { display: grid; gap: 13px; min-height: 0; overflow: auto; }
+.wand-missions-create-head { margin-bottom: 20px; }
+.wand-missions-create-body > label,.wand-missions-create details label,.wand-missions-field { display: grid; gap: 6px; color: var(--text-secondary); font-size: var(--font-size-sm); }
 .wand-missions-create input,.wand-missions-create textarea,.wand-missions-comment-form textarea { box-sizing: border-box; width: 100%; border: 1px solid var(--border-subtle); border-radius: 9px; padding: 9px 10px; color: var(--text-primary); background: var(--bg-primary); font: inherit; }
-.wand-missions-create textarea { min-height: 120px; resize: vertical; }
+.wand-missions-create textarea { min-height: 120px; resize: none; }
 .wand-missions-provider-picker { display: grid; grid-template-columns: repeat(3,1fr); gap: 7px; }
 .wand-missions-provider-picker label { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border-subtle); border-radius: 10px; padding: 9px; cursor: pointer; }.wand-missions-provider-picker label.active { border-color: var(--accent); background: var(--accent-muted); }.wand-missions-provider-picker svg { width: 19px; height: 19px; color: var(--text-primary); }.wand-missions-provider-picker input { width: auto; }
 .wand-missions-create details { display: grid; gap: 10px; border: 1px solid var(--border-subtle); border-radius: 10px; padding: 10px; }.wand-missions-create details[open] summary { margin-bottom: 10px; }.wand-missions-create details label + label { margin-top: 9px; }
@@ -1367,7 +1368,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   align-items: center;
   justify-content: space-between;
   min-height: 56px;
-  padding: 18px 22px 16px;
+  padding: 20px 24px;
   border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 74%, transparent);
   background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
 }
@@ -1416,7 +1417,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding: 20px 28px;
+  padding: 20px 24px;
 }
 
 .wand-new-session-field {
@@ -1438,6 +1439,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   padding: 0;
   border: 0;
 }
+.wand-new-session-fieldset + .wand-new-session-fieldset { margin-top: 18px; }
 
 .wand-new-session-field-label {
   display: block;
@@ -1522,6 +1524,18 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   margin-bottom: 2px;
   color: var(--text-primary);
 }
+
+.wand-new-session-provider-choice {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-content: center;
+  gap: 4px 10px;
+  min-height: 64px;
+  text-align: left;
+}
+.wand-new-session-provider-choice .wand-new-session-provider-logo { grid-row: 1 / 3; margin: 0; }
+.wand-new-session-provider-choice .wand-new-session-choice-description { grid-column: 2; }
+.wand-new-session-choice:disabled { cursor: not-allowed; opacity: 0.5; }
 
 .wand-new-session-provider-logo.wand-provider-logo-opencode,
 .wand-new-session-provider-logo.wand-provider-logo-qoder {
@@ -1797,7 +1811,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   grid-template-columns: auto auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 7px;
-  padding: 10px 28px;
+  padding: 10px 24px;
   border-top: 1px solid color-mix(in srgb, var(--border-subtle) 68%, transparent);
   color: var(--text-muted);
   background: color-mix(in srgb, var(--bg-elevated) 90%, transparent);
@@ -1824,11 +1838,14 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   z-index: 2;
   display: block;
   flex: 0 0 auto;
-  padding: 14px 28px calc(18px + var(--wand-safe-bottom));
+  padding: 14px 24px calc(16px + var(--wand-safe-bottom));
   border-top: 1px solid color-mix(in srgb, var(--border-subtle) 74%, transparent);
   background: var(--bg-elevated);
-  box-shadow: var(--sticky-footer-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.54);
+  box-shadow: none;
 }
+
+.wand-new-session-footer-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.wand-new-session-footer-actions .wand-new-session-submit { width: auto; min-width: 132px; }
 
 
 
@@ -1949,6 +1966,15 @@ export const sessionPickerAndWorktreeStyles = String.raw`
 
 /* 新建任务：里程碑（迭代）按工作区过滤，触发器占满字段宽度。 */
 .wand-new-task-milestone-field .milestone-picker-trigger { max-width: 100%; }
+.wand-new-task-advanced { margin-top: 18px; border-top: 1px solid var(--border-subtle); padding-top: 8px; }
+.wand-new-task-advanced-body { padding: 12px 0 0; }
+.wand-new-task-advanced > summary { display: flex; align-items: center; justify-content: space-between; min-height: 40px; padding: 8px 10px; border-radius: var(--control-radius); color: var(--text-secondary); font-size: var(--font-size-sm); cursor: pointer; }
+.wand-new-task-advanced > summary::after { content: "+"; margin-left: 10px; }
+.wand-new-task-advanced[open] > summary::after { content: "−"; }
+.wand-new-task-advanced > summary span { margin-left: auto; color: var(--text-muted); font-size: var(--font-size-xs); }
+.wand-new-task-advanced > summary:hover { background: var(--bg-hover); }
+.wand-new-task-advanced > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wand-new-task-advanced > summary::-webkit-details-marker { display: none; }
 
 .wand-workspace-agent-options {
   display: grid;
@@ -2585,7 +2611,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
 
   .wand-settings-header { padding: 14px 15px 13px; }
   .wand-settings-description { display: none; }
-  .wand-settings-overview { gap: 10px; margin: 10px 12px 0; padding: 12px; }
+  .wand-settings-overview { gap: 10px; margin: 0; padding: 10px 15px; }
   .wand-settings-overview-copy > div:first-child span { display: none; }
   .wand-settings-overview > code { align-self: flex-start; }
   .wand-settings-app-access { grid-template-columns: minmax(0, 1fr); margin: 8px 12px 0; }
@@ -2597,7 +2623,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
     gap: 0;
-    margin-top: 12px;
+    margin-top: 0;
   }
 
   .wand-settings-tabs > .wand-ui-tabs-list {

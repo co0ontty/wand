@@ -2,16 +2,17 @@ import type { MissionsRuntimeAdapter } from "./types";
 
 export interface MissionsControllerSnapshot {
   open: boolean;
+  dismissable: boolean;
   revision: number;
 }
 
 type Listener = () => void;
-let snapshot: MissionsControllerSnapshot = { open: false, revision: 0 };
+let snapshot: MissionsControllerSnapshot = { open: false, dismissable: true, revision: 0 };
 let runtime: MissionsRuntimeAdapter | null = null;
 const listeners = new Set<Listener>();
 
 function publish(open: boolean): void {
-  snapshot = { open, revision: snapshot.revision + 1 };
+  snapshot = { open, dismissable: true, revision: snapshot.revision + 1 };
   for (const listener of listeners) listener();
 }
 
@@ -28,10 +29,16 @@ export const missionsController = {
   },
   closeIfOpen(): boolean {
     if (!snapshot.open) return true;
+    if (!snapshot.dismissable) return false;
     this.close();
     return true;
   },
   isOpen(): boolean { return snapshot.open; },
+  setDismissable(dismissable: boolean): void {
+    if (!snapshot.open || snapshot.dismissable === dismissable) return;
+    snapshot = { ...snapshot, dismissable };
+    for (const listener of listeners) listener();
+  },
 };
 
 export const missionsStore = {

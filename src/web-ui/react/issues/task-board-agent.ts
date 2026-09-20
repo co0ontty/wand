@@ -365,11 +365,6 @@ export function createDefaultIssueAgent(provider: IssueAgentProvider = "claude")
   };
 }
 
-/** 会话形态标签；未知值回落到结构化，避免旧任务显示空标签。 */
-export function issueAgentKindLabel(kind: string | null | undefined): string {
-  return kind === "pty" ? "PTY 终端" : "结构化对话";
-}
-
 /** 把任意来源的 kind 收敛成合法值；缺省/脏数据按结构化处理。 */
 export function normalizeIssueAgentKind(kind: unknown): WandTaskAgentKind {
   return isWandTaskAgentKind(kind) ? kind : DEFAULT_WAND_TASK_AGENT_KIND;
@@ -464,9 +459,9 @@ export function issueWorkspaceIdFromSelect(value: string): string | null {
 export type IssueBoardView = "dashboard" | "board" | "list" | "gantt";
 
 export const ISSUE_BOARD_VIEWS: ReadonlyArray<{ value: IssueBoardView; label: string }> = [
-  { value: "dashboard", label: "仪表盘" },
-  { value: "board", label: "议题看板" },
-  { value: "list", label: "列表视图" },
+  { value: "dashboard", label: "概览" },
+  { value: "board", label: "看板" },
+  { value: "list", label: "列表" },
   { value: "gantt", label: "甘特图" },
 ];
 

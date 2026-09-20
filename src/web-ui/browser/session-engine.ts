@@ -1,4 +1,7 @@
 import { state, writeStoredBoolean } from "./state";
+import { createSessionReads } from "./session-reads";
+import { parseJsonResponse } from "../react/http-adapter";
+
 import { mergeWindowedMessages } from "./message-reconciliation";
 import { shouldPersistComposerDraft } from "./composer-draft";
 import { ensureChatMessagesContainer, extractToolResultText, parseMessages, renderChat, scheduleChatRender } from "./chat-render";
@@ -6,7 +9,7 @@ import { bindChatScrollListener, normalizeStructuredSnapshot, persistSelectedId,
 import "./events";
 import { isSidebarDrawerLayout, updateFilePanelCwd, updateLayoutState } from "./file-browser";
 import { loadGitStatus, restoreGitStatusForSession } from "./git-commit";
-import { autoResizeInput, buildMessagesForRender, canAutoResumeSession, captureTerminalInput, closeKeyboardPopup, closeSwipedItem, flushCrossSessionQueue, focusInputBox, getControlInput, hasActiveTerminalSelection, hideMiniKeyboard, isImeKeyboardEvent, queueDirectInput, reconcileInteractiveState, renderCrossSessionQueue, sendInputFromBox, setTerminalInteractive, shouldCaptureTerminalEvent, stopSession, switchToSessionView, updateInteractiveControls, updateStructuredQueueCounter } from "./input";
+import { autoResizeInput, buildMessagesForRender, canAutoResumeSession, captureTerminalInput, closeKeyboardPopup, flushCrossSessionQueue, focusInputBox, getControlInput, hasActiveTerminalSelection, hideMiniKeyboard, isImeKeyboardEvent, queueDirectInput, reconcileInteractiveState, renderCrossSessionQueue, sendInputFromBox, setTerminalInteractive, shouldCaptureTerminalEvent, stopSession, switchToSessionView, updateInteractiveControls, updateStructuredQueueCounter } from "./input";
 import { _apkVersion, _hasNativeBridge, _macAppVersion, _syncWakeLock, hideError, showError, showToast } from "./notifications";
 import { getEffectiveCwd, render, resetChatRenderCache } from "./render";
 import { initTerminal, maybeScrollTerminalToBottom, syncTerminalBuffer, waitForTerminalSettled } from "./terminal";
@@ -30,6 +33,8 @@ import {
 import { inferProviderIdFromCommand, providerCliCommand } from "../provider-identity";
 import { hasPooledTerminal, isPooledTerminalBracketedPasteMode } from "./terminal-pool";
 import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExtension, isClipboardImageMimeType } from "./pty-paste";
+
+const sessionReads = createSessionReads();
 
       // 证书不受信任时浏览器会丢弃 Secure Cookie —— 密码正确也存不住登录态。
       // 这里揭示专用提示，并把「改用 HTTP」按钮指向同 host 的 http:// 地址。
@@ -131,15 +136,6 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
         try { WandNative.switchServer(); } catch (e) {}
       }
 
-      // 「返回 App 原生界面」只对带原生界面的壳开放：
-      // - Android 新壳：WandNative.backToNative()（addJavascriptInterface 注入）
-      // - iOS 新壳：user script 注入的 window.__wandBackToNative()
-      // macOS 壳（纯 WebView、无原生界面）与普通浏览器都不命中。
-      export function hasNativeBackToApp() {
-        if (typeof WandNative !== "undefined" && typeof WandNative.backToNative === "function") return true;
-        return typeof (window as any).__wandBackToNative === "function";
-      }
-
       export function backToNativeApp() {
         try {
           if (typeof WandNative !== "undefined" && typeof WandNative.backToNative === "function") {
@@ -151,6 +147,8 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
       }
 
       export function logout() {
+        sessionReads.reset();
+        earlierMessageRequests.clear();
         fetch("/api/logout", { method: "POST", credentials: "same-origin" }).catch(function() {});
         stopPolling();
         setTerminalInteractive(false);
@@ -991,15 +989,9 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
           if (data.error) {
             throw new Error(data.error);
           }
-          state.selectedId = data.id;
-          persistSelectedId();
           clearDraftValueForSession(data.id, true);
-          resetChatRenderCache();
           updateSessionSnapshot(data);
-          updateSessionsList();
-          switchToSessionView(data.id);
-          subscribeToSession(data.id);
-          return loadOutput(data.id).then(function() { return data; });
+          return Promise.resolve(selectSession(data.id)).then(function() { return data; });
         });
       }
 
@@ -1038,6 +1030,7 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
           normalizedSnapshot.messageOffset = mw.messageOffset;
           normalizedSnapshot.messageTotal = mw.messageTotal;
         }
+        sessionReads.record(normalizedSnapshot);
         var updated = false;
         state.sessions = state.sessions.map(function(session) {
           if (session.id !== normalizedSnapshot.id) return session;
@@ -1196,16 +1189,28 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
 
       export function loadSessions(options?) {
         var opts = options || {};
+        var read = sessionReads.begin("list");
         return fetch("/api/sessions", { credentials: "same-origin" })
           .then(function(res) {
+            if (!read.isCurrent()) return;
             if (res.status === 401) {
               logout();
               return;
             }
-            return res.json();
+            return parseJsonResponse<any[]>(res);
           })
           .then(function(sessions) {
-            var serverSessions = sessions || [];
+            if (!read.isCurrent()) return;
+            if (!Array.isArray(sessions) || sessions.some(function(s) { return !s || typeof s.id !== "string"; })) {
+              throw new Error("Invalid session list response");
+            }
+            var serverSessions = sessions.slice();
+            // A push/create received after this read began must not disappear from an older list.
+            state.sessions.forEach(function(session) {
+              if (read.changed(session.id) && !serverSessions.some(function(s) { return s.id === session.id; })) {
+                serverSessions.push(session);
+              }
+            });
             var sessionIds = new Set(serverSessions.map(function(s) { return s.id; }));
             var previousSelectedId = state.selectedId;
 
@@ -1224,7 +1229,9 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
 
             state.sessions = serverSessions.map(function(serverSession) {
               var localSession = state.sessions.find(function(s) { return s.id === serverSession.id; });
-              return mergeServerSession(localSession, serverSession);
+              var snapshot = read.merge(serverSession, localSession);
+              sessionReads.record(snapshot);
+              return mergeServerSession(localSession, snapshot);
             });
 
             var preferredSessionId = getPreferredSessionId(state.sessions);
@@ -1256,6 +1263,7 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
             }
 
             return reloadPromise.then(function() {
+              if (!read.isCurrent()) return;
               if (state.crossSessionQueue.length > 0) {
                 flushCrossSessionQueue();
               }
@@ -1273,7 +1281,7 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
             if (!isTransientAbort) {
               console.error("[wand] loadSessions failed:", e);
             }
-          });
+          }).finally(function() { read.finish(); });
       }
 
       export var _sessionListUpdateTimer = null;
@@ -1361,9 +1369,8 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
       // Rapid A -> B -> A switches can leave multiple requests for the same id
       // in flight, so comparing selectedId alone is not enough: an older A
       // response could otherwise overwrite the newer A render.
-      var sessionDetailRequestGeneration = 0;
       export function loadOutput(id) {
-        var requestGeneration = ++sessionDetailRequestGeneration;
+        var read = sessionReads.begin("detail");
         // Cancel any pending debounced chat render to avoid flicker
         if (state.chatRenderTimer) {
           clearTimeout(state.chatRenderTimer);
@@ -1375,16 +1382,21 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
           url += "?format=chat";
         }
         return fetch(url, { credentials: "same-origin" })
-          .then(function(res) { return res.json(); })
+          .then(async function(res) {
+            if (!read.isCurrent() || state.selectedId !== id) return;
+            // Only a missing session warrants deselection; HTTP failures retain the current view.
+            if (res.status === 404) return { missing: true };
+            return parseJsonResponse<any>(res);
+          })
           .then(function(data) {
             // Session selection and detail loading are intentionally decoupled,
             // but a response belongs to the view generation that requested it.
             // Drop superseded responses before they can mutate either the
             // selected session cache or the shared currentMessages buffer.
-            if (requestGeneration !== sessionDetailRequestGeneration || state.selectedId !== id) {
+            if (!read.isCurrent() || state.selectedId !== id) {
               return;
             }
-            if (data.error) {
+            if (data.missing) {
               // Session no longer exists — deselect and refresh list
               if (state.selectedId === id) {
                 state.selectedId = null;
@@ -1393,6 +1405,8 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
               loadSessions();
               return;
             }
+            if (data.id !== id) throw new Error("Session detail identity mismatch");
+            data = read.merge(data, state.sessions.find(function(s) { return s.id === id; }));
             updateSessionSnapshot(data);
             updateShellChrome();
 
@@ -1432,16 +1446,17 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
               state.currentMessages = buildMessagesForRender(selectedSession, getPreferredMessages(selectedSession, data.output, false));
 
             renderChat(false);
-          });
+          }).catch(function(error) {
+            if (read.isCurrent()) console.error("[wand] loadOutput failed:", error);
+          }).finally(function() { read.finish(); });
       }
 
       // 窗口化：从服务端拉「更早的一页」消息并 prepend 到当前会话。
       // 返回 true 表示发起了请求（本地全展开后由「加载更早」触底调用）。
-      var _fetchingEarlierMessages = false;
+      const earlierMessageRequests = new Map<string, object>();
       export function fetchEarlierMessages() {
-        if (_fetchingEarlierMessages) return false;
         var id = state.selectedId;
-        if (!id) return false;
+        if (!id || earlierMessageRequests.has(id)) return false;
         var sess = state.sessions.find(function(s) { return s.id === id; });
         if (!sess) return false;
         var offset = (typeof sess.messageOffset === "number") ? sess.messageOffset : 0;
@@ -1449,17 +1464,23 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
         var pageSize = 40;
         var newOffset = Math.max(0, offset - pageSize);
         var limit = offset - newOffset;
-        _fetchingEarlierMessages = true;
+        var request = {};
+        earlierMessageRequests.set(id, request);
         fetch("/api/sessions/" + encodeURIComponent(id) + "/messages?offset=" + newOffset + "&limit=" + limit,
           { credentials: "same-origin" })
-          .then(function(res) { return res.json(); })
+          .then(function(res) { return parseJsonResponse<any>(res); })
           .then(function(data) {
+            if (earlierMessageRequests.get(id) !== request) return;
+            // Snapshots replace session objects during IO; always prepend to the current one.
+            sess = state.sessions.find(function(s) { return s.id === id; });
+            if (!sess) return;
             // 仅当起点未被其它更新改动时才 prepend，避免错位重复。
             if (data && Array.isArray(data.messages) && sess.messageOffset === offset) {
               var existing = Array.isArray(sess.messages) ? sess.messages : [];
               sess.messages = data.messages.concat(existing);
               sess.messageOffset = newOffset;
               if (typeof data.total === "number") sess.messageTotal = data.total;
+              sessionReads.record({ id: id, messages: sess.messages, messageOffset: sess.messageOffset, messageTotal: sess.messageTotal });
               if (id === state.selectedId) {
                 state.currentMessages = buildMessagesForRender(sess, getPreferredMessages(sess, sess.output, false));
                 // 已加载的全部展开（新拉的更早消息也要可见）。
@@ -1469,7 +1490,9 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
             }
           })
           .catch(function() { /* 静默：下次触底重试 */ })
-          .finally(function() { _fetchingEarlierMessages = false; });
+          .finally(function() {
+            if (earlierMessageRequests.get(id) === request) earlierMessageRequests.delete(id);
+          });
         return true;
       }
 
@@ -1534,13 +1557,16 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
         if (state.filePanelOpen) {
           updateFilePanelCwd(session);
         }
-        loadOutput(id).then(function() { focusInputBox(true); });
+        var outputLoaded = loadOutput(id).then(function() {
+          if (state.selectedId === id) focusInputBox(true);
+        });
         subscribeToSession(id);
         loadClaudeSkillsForSession(foundSession);
         // 切会话：先用缓存里的上一次结果顶上（没有就空着），再异步刷新，
         // 避免慢仓库上徽章先消失、隔一两秒才出现。
         restoreGitStatusForSession(id);
         loadGitStatus(id, { force: true });
+        return outputLoaded;
       }
 
       /** DOM-free home navigation used by the React shell command port. */
@@ -1597,7 +1623,6 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
           // 停靠形态：X 按钮 / backdrop 点击 = 完全收起，撤掉常驻状态，floating-toggle 重新出现。
           // 窄条状态下没有 X 按钮（CSS 隐藏），不会走到这里，因此无需特判 collapsed。
           if (!state.sidebarPinned && !state.sessionsDrawerOpen) return;
-          closeSwipedItem();
           state.sidebarPinned = false;
           state.sessionsDrawerOpen = false;
           writeStoredBoolean("wand-sidebar-pinned", false);
@@ -1608,7 +1633,6 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
         }
         // 抽屉形态：只关抽屉本身，不动 pinned。
         if (!state.sessionsDrawerOpen) return;
-        closeSwipedItem();
         state.sessionsDrawerOpen = false;
         writeStoredBoolean("wand-sidebar-open", false);
         updateLayoutState();
@@ -1620,7 +1644,6 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
           return;
         }
         if (state.sidebarPinned || state.sidebarCollapsed || !state.sessionsDrawerOpen) return;
-        closeSwipedItem();
         state.sessionsDrawerOpen = false;
         writeStoredBoolean("wand-sidebar-open", false);
         updateLayoutState();
@@ -1981,13 +2004,9 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
             return;
           }
           var sessionId = String(data.id);
-          if (state.selectedId !== sessionId) teardownTerminal();
-          state.selectedId = sessionId;
-          persistSelectedId();
-          // 新会话的输入框必须是空的：连 localStorage 里的旧草稿一起清掉。
-          clearDraftValueForSession(sessionId);
-          resetChatRenderCache();
-          return Promise.resolve(refreshAll()).then(function() {
+          // Preserve the previous selection until selectSession saves its draft and releases its terminal.
+          clearDraftValueForSession(sessionId, true);
+          return loadSessions({ skipSelectedOutputReload: true }).then(function() {
             // 会话进入本地列表后统一走 selectSession，补齐 websocket 订阅、
             // 文件目录与输入区状态，避免标签已切换但终端仍显示上一会话。
             selectSession(sessionId);
@@ -2079,14 +2098,10 @@ import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExt
             }
             if (!data.id) throw new Error("服务端未返回新会话 ID。");
             var sessionId = String(data.id);
-            if (state.selectedId !== sessionId) teardownTerminal();
-            state.selectedId = sessionId;
-            persistSelectedId();
-            // 新会话的输入框必须是空的：连 localStorage 里的旧草稿一起清掉。
-            clearDraftValueForSession(sessionId);
-            resetChatRenderCache();
-            return Promise.resolve(refreshAll()).then(function() {
-              // refreshAll 只刷新数据；selectSession 才会完成 websocket 订阅和
+            // Preserve the previous selection until selectSession saves its draft and releases its terminal.
+            clearDraftValueForSession(sessionId, true);
+            return loadSessions({ skipSelectedOutputReload: true }).then(function() {
+              // 列表刷新只取元数据；selectSession 才会完成 websocket 订阅和
               // 视图切换。两者缺一会让新标签继续显示旧终端缓冲区。
               selectSession(sessionId);
               return sessionId;

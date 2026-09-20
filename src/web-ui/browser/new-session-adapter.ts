@@ -4,9 +4,8 @@ import {
   type NewSessionCreated,
   type NewSessionRuntimeAdapter,
 } from "../react";
-import { persistSelectedId } from "./chat-scroll";
 import { focusInputBox } from "./input";
-import { getEffectiveCwd, resetChatRenderCache } from "./render";
+import { getEffectiveCwd } from "./render";
 import {
   clearDraftValueForSession,
   dismissDrawerIfOverlay,
@@ -14,8 +13,6 @@ import {
   getChatModelForProvider,
   loadSessions,
   selectSession,
-  syncComposerModeSelect,
-  syncComposerModelSelect,
   updateDrawerState,
 } from "./session-engine";
 import { state, writeStoredBoolean } from "./state";
@@ -70,16 +67,11 @@ const legacyRuntime: NewSessionRuntimeAdapter = {
       state.sessionTool = request.provider;
       state.preferredCommand = request.provider;
     }
-    state.selectedId = created.id;
     // 新会话的输入框必须是空的：连 localStorage 里的旧草稿一起清掉，否则刷新后
     // 同 id 的旧草稿会被 getDraftValueForSession() 读回来。
     clearDraftValueForSession(created.id, true);
-    persistSelectedId();
     saveWorkingDir(request.cwd);
-    resetChatRenderCache();
-    syncComposerModeSelect();
-    await loadSessions();
-    syncComposerModelSelect(state.sessions.find((session) => session.id === created.id) || null);
+    await loadSessions({ skipSelectedOutputReload: true });
     selectSession(created.id);
     dismissDrawerIfOverlay();
     window.setTimeout(() => focusInputBox(true), 0);

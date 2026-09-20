@@ -40,6 +40,7 @@ import {
   taskBoardSearch,
 } from "../src/web-ui/react/issues/task-board-controller.ts";
 import { parseTaskBoardViewState } from "../src/web-ui/react/issues/task-board-view-state.ts";
+import { sidebarActionLeavesPage } from "../src/web-ui/react/shell/shell-sidebar.tsx";
 
 test("board browsing state restores valid filters and rejects stale or malformed values", () => {
   const restored = parseTaskBoardViewState({
@@ -389,9 +390,14 @@ test("task board is a first-class view=taskboard route that does not unmount the
   assert.match(styles, /\.task-board-main-content > \.input-panel/);
   assert.match(styles, /\.task-board-main-content > #output/);
 
-  // 侧栏点任务 / 首页必须离开看板，任务管理按钮本身是当前页。
-  assert.match(sidebar, /leaveBoard/);
-  assert.match(sidebar, /taskBoardController\.close\(\)/);
+  // 真正导航离开看板；设置 / 创建表单只暂时覆盖当前页，取消后仍返回看板。
+  assert.equal(sidebarActionLeavesPage({ type: "nav.home" }), true);
+  assert.equal(sidebarActionLeavesPage({ type: "session.select", id: "session-1" }), true);
+  assert.equal(sidebarActionLeavesPage({ type: "settings.open" }), false);
+  assert.equal(sidebarActionLeavesPage({ type: "workspace.new" }), false);
+  assert.match(sidebar, /if \(sidebarActionLeavesPage\(action\)\) taskBoardController\.close\(\)/);
+  assert.match(sidebar, /const navigateFromTree = \(\): void => \{\s*taskBoardController\.close\(\)/);
+  assert.match(sidebar, /onNavigate=\{navigateFromTree\}/);
   // The active entry is handed to Appica's Navigation, which stamps
   // `aria-current="page"` on the matching link itself.
   assert.match(sidebar, /active=\{taskBoard\.open \? "task-board" : null\}/);

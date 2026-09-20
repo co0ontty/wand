@@ -203,7 +203,3 @@ function openWorktreeMergeNow(
   installation.dependencies.toast("Worktree 合并界面尚未就绪，请刷新后重试。", "error");
   return false;
 }
-
-export function closeWorktreeMergeFromLegacy(): boolean {
-  return worktreeMergeController.closeIfOpen();
-}

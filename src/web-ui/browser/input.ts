@@ -7,11 +7,11 @@ import { getStructuredQueuedInputs, persistCrossSessionQueue, persistSelectedId,
 import "./file-browser";
 import "./git-commit";
 import { showToast, wandConfirm } from "./notifications";
-import { resetChatRenderCache, getEffectiveCwd } from "./render";
-import { applyCurrentView, buildAttachmentPrefix, canSendComposer, clearDraftValueForSession, closePlusPopover, discardPendingAttachments, dismissDrawerIfOverlay, getComposerPlaceholder, getDraftValueForSession, getPendingAttachments, getPreferredMessages, getPreferredTool, getSelectedClaudeSkills, isStructuredSession, loadOutput, refreshAll, restoreComposerStateForSession, restorePendingAttachments, setDraftValue, setDraftValueForSession, shouldBracketPtyPaste, subscribeToSession, supportsClaudeSkillSelection, syncComposerHasText, takePendingAttachments, updateSessionSnapshot, updateSessionsList, uploadAttachments, withTerminalDimensions } from "./session-engine";
+import { getEffectiveCwd } from "./render";
+import { applyCurrentView, buildAttachmentPrefix, canSendComposer, clearDraftValueForSession, closePlusPopover, discardPendingAttachments, dismissDrawerIfOverlay, getComposerPlaceholder, getDraftValueForSession, getPendingAttachments, getPreferredMessages, getPreferredTool, getSelectedClaudeSkills, isStructuredSession, selectSession, loadOutput, refreshAll, restoreComposerStateForSession, restorePendingAttachments, setDraftValue, setDraftValueForSession, shouldBracketPtyPaste, subscribeToSession, supportsClaudeSkillSelection, syncComposerHasText, takePendingAttachments, updateSessionSnapshot, updateSessionsList, uploadAttachments, withTerminalDimensions } from "./session-engine";
 import { confirmDelete } from "./sidebar";
 import { initTerminal, maybeScrollTerminalToBottom, scheduleSoftResyncTerminal, waitForProviderPaint, waitForTerminalSettled } from "./terminal";
-import { ensureTerminalFit, scheduleClosedViewportBaselineWindow, syncAppViewportHeight, teardownTerminal, updateJoystickPanelUI, updateJoystickVisibility } from "./viewport";
+import { ensureTerminalFit, scheduleClosedViewportBaselineWindow, syncAppViewportHeight, updateJoystickPanelUI, updateJoystickVisibility } from "./viewport";
 import "./websocket";
 import { buildPtyAttachmentChunks, isImageAttachmentSource } from "./pty-paste";
 import { notifyLegacyUiChange } from "./ui-store-bridge";
@@ -678,18 +678,10 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
             showToast(data.error, "error");
             return null;
           }
-          state.selectedId = data.id;
-          persistSelectedId();
-          clearDraftValueForSession(data.id, true);
-          resetChatRenderCache();
-          if (inputBox) inputBox.value = "";
+          clearDraftValueForSession(data.id);
+          if (!state.selectedId && inputBox) inputBox.value = "";
           if (welcomeInput) welcomeInput.value = "";
-          updateSessionSnapshot(data);
-          updateSessionsList();
-          switchToSessionView(data.id);
-          // Subscribe to new session via WebSocket
-          subscribeToSession(data.id);
-          return loadOutput(data.id);
+          return activateSession(data);
         })
         .catch(function(error) {
           showToast((error && error.message) || (preferredTool === "codex"
@@ -2729,50 +2721,6 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         executeDeleteHistory(claudeSessionId, item);
       }
 
-      export function deleteClaudeHistoryDirectory(cwd, btn, items) {
-        if (!cwd) {
-          return;
-        }
-        fetch("/api/claude-history?cwd=" + encodeURIComponent(cwd), { method: "DELETE", credentials: "same-origin" })
-          .then(function(res) { return res.json(); })
-          .then(function(data) {
-            if (data && data.error) {
-              throw new Error(data.error);
-            }
-            state.claudeHistory = state.claudeHistory.filter(function(s) {
-              return s.cwd !== cwd;
-            });
-            updateSessionsList();
-          })
-          .catch(function() {
-            setDeletingState(items, false);
-            showActionError("无法清理该目录的历史会话。");
-          });
-      }
-
-      export function setDeletingState(items, deleting) {
-        items.forEach(function(item) {
-          item.classList.toggle("deleting", deleting);
-        });
-      }
-
-      export function getHistoryItemsByCwd(cwd) {
-        return Array.prototype.slice.call(document.querySelectorAll('.claude-history-item[data-cwd="' + window.CSS.escape(String(cwd)) + '"]'));
-      }
-
-      // ── Swipe-to-delete gesture ──
-
-      export var _swipeState = null;
-      var _swipedItem = null;
-
-      export function closeSwipedItem() {
-        if (_swipedItem) {
-          _swipedItem.classList.remove("swiped");
-          var content = _swipedItem.querySelector(".session-item-content");
-          if (content) content.style.transform = "";
-          _swipedItem = null;
-        }
-      }
 
       var _resumeInProgress = false;
 
@@ -2793,9 +2741,6 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
             showToast(data.error, "error");
             return null;
           }
-          state.selectedId = data.id;
-          persistSelectedId();
-          clearDraftValueForSession(data.id);
           return data;
         })
         .catch(function(error) {
@@ -2808,18 +2753,8 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
 
       export function activateSession(data) {
         if (!data || !data.id) return Promise.resolve();
-        state.selectedId = data.id;
-        persistSelectedId();
-        state.currentMessages = [];
-        teardownTerminal();
-        resetChatRenderCache();
-        switchToSessionView(data.id);
         updateSessionSnapshot(data);
-        updateSessionsList();
-        subscribeToSession(data.id);
-        return loadOutput(data.id).then(function() {
-          focusInputBox(true);
-        });
+        return Promise.resolve(selectSession(data.id));
       }
 
       export function resumeSessionFromList(sessionId) {
@@ -2840,25 +2775,6 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
             return data;
           });
         });
-      }
-
-      export function handleResumeAction(actionButton) {
-        actionButton.disabled = true;
-        resumeSessionFromList(actionButton.dataset.sessionId)
-          .finally(function() {
-            actionButton.disabled = false;
-          });
-      }
-
-      export function handleResumeCodexHistoryAction(actionButton) {
-        var threadId = actionButton.dataset.claudeSessionId;
-        var cwd = actionButton.dataset.cwd;
-        if (!threadId) return;
-        actionButton.disabled = true;
-        resumeHistoryFromList("codex", threadId, cwd)
-          .finally(function() {
-            actionButton.disabled = false;
-          });
       }
 
       /** Codex/Claude share one resume endpoint shape; other providers use resumeHistoryFromList. */
@@ -2888,33 +2804,6 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
 
       export function resumeCodexHistorySession(threadId, cwd) {
         return resumeProviderHistorySession("codex", threadId, cwd);
-      }
-
-      export function handleDeleteCodexHistoryAction(actionButton) {
-        var threadId = actionButton.dataset.claudeSessionId;
-        if (!threadId) return;
-        confirmDelete("确认删除这条 Codex 会话吗？", {
-          title: "删除会话"
-        }).then(function(ok) {
-          if (!ok) return;
-          var item = actionButton.closest(".session-item");
-          if (item) item.style.opacity = "0.5";
-          deleteCodexHistorySession(threadId)
-            .catch(function() {
-              if (item) item.style.opacity = "1";
-            });
-        });
-      }
-
-      export function handleResumeHistoryAction(actionButton) {
-        var claudeSessionId = actionButton.dataset.claudeSessionId;
-        var cwd = actionButton.dataset.cwd;
-        if (!claudeSessionId) return;
-        actionButton.disabled = true;
-        resumeHistoryFromList("claude", claudeSessionId, cwd)
-          .finally(function() {
-            actionButton.disabled = false;
-          });
       }
 
       export function resumeClaudeHistorySession(claudeSessionId, cwd) {
@@ -2952,9 +2841,6 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
               return s.claudeSessionId !== providerSessionId;
             });
           }
-          state.selectedId = data.id;
-          persistSelectedId();
-          clearDraftValueForSession(data.id);
           return activateSession(data).then(function() {
             // Desktop pinned/narrow layouts remain; only overlay drawers close.
             dismissDrawerIfOverlay();

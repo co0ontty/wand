@@ -9,7 +9,6 @@ import {
 } from "../src/web-ui/react/quick-commit/controller.ts";
 import { MemoryQuickCommitRepository } from "../src/web-ui/react/quick-commit/memory-repository.ts";
 import {
-  actionFromOptions,
   buildQuickCommitInput,
   buildQuickCommitOutcome,
   normalizeQuickCommitAction,
@@ -89,7 +88,7 @@ test("顶栏 git 徽章靠回合结束、进程退出、回前台与兜底轮询
     host.includes("onStatusLoaded(sessionId, loaded, requestedAt)"),
     "面板拿到的状态必须回给宿主，并带上取数发起时刻",
   );
-  assert.ok(gitCommit.includes("gitStatusCache.accept(sessionId, status, requestedAt || Date.now())"), "状态入缓存并排掉旧响应");
+  assert.ok(gitCommit.includes("gitStatusCache.accept(sessionId, status, requestedAt ?? nextGitStatusRequestTime())"), "状态入缓存并排掉旧响应");
   assert.ok(gitCommit.includes("if (sessionId !== state.selectedId) return;"), "别的会话的结果只进缓存");
   assert.ok(gitCommit.includes("if (!res.ok) throw new Error"), "HTTP 失败不能当成「不是 git 仓库」把徽章打没");
   assert.ok(
@@ -117,10 +116,6 @@ test("顶栏 git 徽章靠回合结束、进程退出、回前台与兜底轮询
 
 test("quick-commit action model produces the four legacy API combinations", () => {
   assert.equal(normalizeQuickCommitAction("unknown"), "commit");
-  assert.equal(actionFromOptions(false, false), "commit");
-  assert.equal(actionFromOptions(true, false), "commit-tag");
-  assert.equal(actionFromOptions(false, true), "commit-push");
-  assert.equal(actionFromOptions(true, true), "commit-tag-push");
   assert.deepEqual(quickCommitActionMeta("commit-tag-push"), {
     action: "commit-tag-push",
     label: "Commit + Tag + Push",
@@ -358,6 +353,7 @@ test("quick-commit controller owns one contextual overlay lifecycle", () => {
   const runtime: QuickCommitRuntimeAdapter = {
     onOpen(context) { events.push(`open:${context.sessionId}`); },
     onClose(context) { events.push(`close:${context.sessionId}`); },
+    nextStatusRequestTime() { return 42; },
     onStatusLoaded(sessionId, loaded, requestedAt) {
       events.push(`status:${sessionId}:${loaded.modifiedCount}:${typeof requestedAt}`);
     },
@@ -373,7 +369,9 @@ test("quick-commit controller owns one contextual overlay lifecycle", () => {
   assert.deepEqual(quickCommitStore.getSnapshot().context, { sessionId: "session-1" });
   const firstRevision = quickCommitStore.getSnapshot().revision;
   assert.equal(quickCommitController.isCurrentLifecycle(firstRevision, "session-1"), true);
-  quickCommitStore.getRuntime()?.onStatusLoaded("session-1", status(), 1);
+  const requestedAt = quickCommitStore.getRuntime()?.nextStatusRequestTime();
+  assert.equal(requestedAt, 42, "面板通过宿主领取与徽章共享的请求顺序");
+  quickCommitStore.getRuntime()?.onStatusLoaded("session-1", status(), requestedAt);
   quickCommitStore.getRuntime()?.toast("done", "success");
   quickCommitController.setDismissable(false);
   assert.equal(quickCommitController.closeIfOpen(), false);

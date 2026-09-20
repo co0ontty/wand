@@ -10,7 +10,7 @@ import {
 } from "../react/quick-commit/controller";
 import { notifyLegacyUiChange } from "./ui-store-bridge";
 import { createGitStatusRefresh } from "./git-status-refresh";
-import { createGitStatusCache } from "./git-status-cache";
+import { createGitStatusCache, nextGitStatusRequestTime } from "./git-status-cache";
 import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
 import { closeReactOverlays } from "./react-overlay-coordinator";
 
@@ -33,6 +33,7 @@ import { closeReactOverlays } from "./react-overlay-coordinator";
 
       /** 已经取过的状态按会话缓存：切会话时先用它顶上，徽章不会闪一下就没。 */
       var gitStatusCache = createGitStatusCache<any>();
+      const gitStatusRequests = new Map<string, Promise<any>>();
 
       /**
        * 写入展示状态。`fetched` 为 false 表示值来自缓存（不计入节流时间）。
@@ -52,7 +53,7 @@ import { closeReactOverlays } from "./react-overlay-coordinator";
        * 其他会话先入缓存。
        */
       export function applyGitStatusSnapshot(sessionId: string, status: any, requestedAt?: number) {
-        if (!gitStatusCache.accept(sessionId, status, requestedAt || Date.now())) return;
+        if (!gitStatusCache.accept(sessionId, status, requestedAt ?? nextGitStatusRequestTime())) return;
         if (sessionId !== state.selectedId) return;
         displayGitStatus(sessionId, status, true);
       }
@@ -79,10 +80,10 @@ import { closeReactOverlays } from "./react-overlay-coordinator";
         if (!force && state.gitStatusSessionId === sessionId && state.gitStatus && (now - state.gitStatusLastFetchAt) < 1000) {
           return Promise.resolve(state.gitStatus);
         }
-        if (state.gitStatusInflight && state.gitStatusInflight.sessionId === sessionId) {
-          return state.gitStatusInflight.promise;
+        if (!force && gitStatusRequests.has(sessionId)) {
+          return gitStatusRequests.get(sessionId)!;
         }
-        var requestedAt = Date.now();
+        var requestedAt = nextGitStatusRequestTime();
         var promise = fetch("/api/sessions/" + encodeURIComponent(sessionId) + "/git-status", {
           credentials: "same-origin"
         })
@@ -105,11 +106,11 @@ import { closeReactOverlays } from "./react-overlay-coordinator";
             return null;
           })
           .finally(function() {
-            if (state.gitStatusInflight && state.gitStatusInflight.sessionId === sessionId) {
-              state.gitStatusInflight = null;
+            if (gitStatusRequests.get(sessionId) === promise) {
+              gitStatusRequests.delete(sessionId);
             }
           });
-        state.gitStatusInflight = { sessionId: sessionId, promise: promise };
+        gitStatusRequests.set(sessionId, promise);
         return promise;
       }
 
@@ -118,6 +119,7 @@ import { closeReactOverlays } from "./react-overlay-coordinator";
           closeReactOverlays(["quickCommit"]);
         },
         onClose: function() {},
+        nextStatusRequestTime: nextGitStatusRequestTime,
         onStatusLoaded: function(sessionId: string, status: any, requestedAt?: number) {
           applyGitStatusSnapshot(sessionId, status, requestedAt);
         },

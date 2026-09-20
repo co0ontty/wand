@@ -87,11 +87,6 @@ function toast(message: string, tone?: "info" | "success" | "warning" | "danger"
   runtime()?.toast(message, tone);
 }
 
-export function workspacePathLeaf(path: string): string {
-  const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
-  return normalized.split("/").filter(Boolean).at(-1) || normalized || path;
-}
-
 /** 侧栏目录副标题：保留末两段，避免整条绝对路径压过任务名。 */
 export function shortenWorkspacePath(path: string): string {
   const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
@@ -727,7 +722,7 @@ function TaskGroupSection({
   onOpenSession,
   onRequestNewSessionInTask,
   onTasksChanged,
-  onNavigate,
+  onOpenDialog,
 }: {
   group: TaskDirectoryGroup;
   now: number;
@@ -746,7 +741,7 @@ function TaskGroupSection({
   onOpenSession(group: TaskDirectoryGroup, session: WorkspaceSessionSummary): void;
   onRequestNewSessionInTask(task: TaskSummary): void;
   onTasksChanged(): Promise<void>;
-  onNavigate?: () => void;
+  onOpenDialog?: () => void;
 }) {
   const [collapsed, toggleCollapsed] = useSidebarCollapsed(`project.${group.workspaceId}`);
   const [looseCollapsed, toggleLooseCollapsed] = useSidebarCollapsed(`loose.${group.workspaceId}`);
@@ -1047,7 +1042,7 @@ function TaskGroupSection({
         <div className="workspace-tasks">
           {taskCount === 0 && group.standaloneSessions.length === 0 && !group.synthetic && (
             <WandButton kind="ghost" size="small" className="workspaces-empty-action"
-              onClick={() => { onNavigate?.(); workspacesController.open(group.global ? undefined : group.workspaceCwd); }}>
+              onClick={() => { onOpenDialog?.(); workspacesController.open(group.global ? undefined : group.workspaceCwd); }}>
               <WandIcon name="plus" slot="start" size={13}/><span>创建第一个任务</span>
             </WandButton>
           )}
@@ -1207,6 +1202,7 @@ export function WorkspacesPanel({
   peekDirectoryId,
   onExpand,
   onNavigate,
+  onOpenDialog,
   searchQuery = "",
   onSearchChange,
 }: {
@@ -1222,6 +1218,7 @@ export function WorkspacesPanel({
   peekDirectoryId?: string;
   onExpand?: () => void;
   onNavigate?: () => void;
+  onOpenDialog?: () => void;
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
 } = {}) {
@@ -1554,9 +1551,9 @@ export function WorkspacesPanel({
                     onToggleSession={(sessionId) => setSelection((current) => toggleManagedSession(current, sessionId))}
                     onActiveTaskOpen={openTask}
                     onOpenSession={openSession}
-                    onRequestNewSessionInTask={(task) => { onNavigate?.(); setPendingNewSessionTask(task); }}
+                    onRequestNewSessionInTask={(task) => { onOpenDialog?.(); setPendingNewSessionTask(task); }}
                     onTasksChanged={reload}
-                    onNavigate={onNavigate}
+                    onOpenDialog={onOpenDialog}
                   />
                 ))}
             </div>
@@ -1564,7 +1561,7 @@ export function WorkspacesPanel({
             <div className="workspaces-section-empty">
               <span>按目录查看任务，任务下面是执行过的会话。</span>
               <WandButton kind="ghost" size="small" className="workspaces-empty-action" aria-label="新建任务"
-                onClick={() => { onNavigate?.(); workspacesController.open(); }}>
+                onClick={() => { onOpenDialog?.(); workspacesController.open(); }}>
                 <WandIcon name="plus" slot="start" size={13}/><span>开始一个任务</span>
               </WandButton>
             </div>

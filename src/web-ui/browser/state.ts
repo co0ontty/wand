@@ -235,7 +235,6 @@ export var state: AppState = {
   topbarMoreOpen: false,
   gitStatus: null,
   gitStatusSessionId: null,
-  gitStatusInflight: null,
   gitStatusLastFetchAt: 0,
   // 逐会话记录上一帧是否在生成（结构化 structuredState.inFlight / PTY bridge
   // isResponding）。true→false 的跳变当作“这一轮刚干完活”，用来刷新顶栏 git 徽章。

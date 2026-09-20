@@ -67,11 +67,6 @@ export function orderWorkspaceSessions(
     .map(({ session }) => session);
 }
 
-export function workspaceSessionLabel(session: WorkspaceSessionSummary, index: number): string {
-  if (!isGenericSessionTitle(session)) return (session.title || "").trim();
-  return `${workspaceProviderLabel(workspaceSessionProvider(session))} ${index + 1}`;
-}
-
 /** 侧栏 / 详情共用：目录名、任务名不要再当终端标题。 */
 export function listSessionLabel(
   session: WorkspaceSessionSummary,

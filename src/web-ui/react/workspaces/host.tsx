@@ -8,6 +8,7 @@ import * as React from "react";
 import { WandButton, WandDialogSurface, WandIcon, WandSwitch } from "../ui";
 import { MilestonePicker } from "../milestones/picker";
 import { milestonesStore } from "../milestones/controller";
+import { taskBoardController } from "../issues/task-board-controller";
 import { workspacesController, workspacesStore } from "./controller";
 import {
   httpWorkspacesRepository,
@@ -160,6 +161,8 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
       cwd: created.cwd || created.worktree?.path || selectedProject?.cwd || mountedCwd,
     };
     if (workspace.defaultProvider) payload.provider = workspace.defaultProvider;
+    // 创建成功后才进入新任务，打开或取消创建表单不应离开当前看板。
+    taskBoardController.close();
     await Promise.resolve(runtime.openTask(payload));
     await runtime.newTaskSession({
       workspaceId: workspace.id,
@@ -250,7 +253,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
       open={controller.open}
       onOpenChange={(open) => { if (!open) void closeDraft(); }}
       title="新建任务"
-      description="任务负责分组，提示词开启其中的会话。侧边栏与看板同步。"
+      description="选择工作目录和工具，创建后打开任务并开始会话。"
       className="wand-new-session-dialog wand-new-project-dialog"
       overlayClassName="wand-new-session-overlay wand-new-project-overlay"
       titleClassName="wand-new-session-title wand-new-project-title"
@@ -281,7 +284,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
                 aria-describedby="wand-new-task-name-hint"
                 onChange={(event) => setName(event.currentTarget.value)}
               />
-              <p id="wand-new-task-name-hint" className="wand-new-session-field-hint wand-new-project-field-hint">工作区下的分组名称，留空则用首个提示词自动总结一个名字；不会创建磁盘目录。</p>
+              <p id="wand-new-task-name-hint" className="wand-new-session-field-hint wand-new-project-field-hint">名称与提示词至少填写一项；留空时根据提示词自动命名。</p>
             </div>
 
             <div className="wand-new-session-field wand-new-project-field">
@@ -347,54 +350,14 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
             </div>
 
             <div className="wand-new-session-field wand-new-project-field">
-              <label className="wand-new-session-field-label" htmlFor="wand-new-task-prompt">首个会话的提示词（可选）</label>
-              <textarea id="wand-new-task-prompt" className="wand-new-session-input" rows={3}
+              <label className="wand-new-session-field-label" htmlFor="wand-new-task-prompt">提示词（可选）</label>
+              <textarea id="wand-new-task-prompt" className="wand-new-session-input resize-none" rows={3}
                 value={prompt} disabled={submitting || target === "shell"}
                 placeholder="希望 CLI 帮你完成什么？" onChange={(event) => setPrompt(event.currentTarget.value)}/>
               <p className="wand-new-session-field-hint">{target === "shell"
                 ? "空白终端不会读取提示词，请填写任务名称。"
-                : "提示词发送到新会话；任务名称留空时会据此自动命名，仍可随时改名。"}</p>
+                : "创建后发送给所选工具；留空则先打开会话，稍后再输入。"}</p>
             </div>
-
-            {hasDirectory ? (
-              <div className="wand-new-session-field wand-new-project-field wand-new-task-milestone-field">
-                <span className="wand-new-session-field-label wand-new-project-field-label" id="wand-new-task-milestone-label">里程碑（可选）</span>
-                <MilestonePicker
-                  value={milestoneId || null}
-                  workspaceId={milestoneWorkspaceId}
-                  disabled={submitting}
-                  onCreated={(created) => { createdMilestoneIds.current.add(created.id); }}
-                  onChange={(next) => { draftTouched.current = true; setMilestoneId(next ?? ""); }}
-                />
-                <p className="wand-new-session-field-hint wand-new-project-field-hint">
-                  迭代按工作区归属：只列当前工作区已有的；也可以不选。
-                </p>
-              </div>
-            ) : null}
-
-            {hasDirectory ? (
-              <details className="wand-new-session-field wand-new-project-field">
-              <summary>高级：独立工作树</summary>
-              <div className="wand-new-task-option" data-checked={worktreeEnabled ? "" : undefined}>
-                <span className="wand-new-task-option-icon"><WandIcon name="branch" size={17} className="wand-new-task-branch-icon" strokeWidth={1.8}/></span>
-                <span className="wand-new-task-option-text">
-                  <span className="wand-new-task-option-label">独立 worktree 隔离</span>
-                  <span className="wand-new-task-option-hint">
-                    {worktreeEnabled
-                      ? "为任务创建独立分支与工作树，改动隔离、可审查后合并。"
-                      : "默认仅做界面分组，会话共用工作区目录。"}
-                  </span>
-                </span>
-                <WandSwitch
-                  checked={worktreeEnabled}
-                  onCheckedChange={(checked) => {
-                    setWorktreeEnabled(checked);
-                  }}
-                  ariaLabel="是否为新任务创建独立 worktree"
-                />
-              </div>
-              </details>
-            ) : null}
 
             <WorkspaceAgentPicker
               target={target}
@@ -403,25 +366,67 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
               onTargetChange={(next) => { draftTouched.current = true; setTarget(next); }}
               onKindChange={(next) => { draftTouched.current = true; setSessionKind(next); }}
             />
+
+            {hasDirectory ? (
+              <details className="wand-new-session-field wand-new-project-field wand-new-task-advanced">
+                <summary>更多选项 <span>{worktreeEnabled ? "独立工作树已启用" : milestoneId ? "已关联里程碑" : "里程碑 · 独立工作树"}</span></summary>
+                <div className="wand-new-task-advanced-body">
+                  <div className="wand-new-session-field wand-new-project-field wand-new-task-milestone-field">
+                    <span className="wand-new-session-field-label wand-new-project-field-label" id="wand-new-task-milestone-label">里程碑（可选）</span>
+                    <MilestonePicker
+                      value={milestoneId || null}
+                      workspaceId={milestoneWorkspaceId}
+                      disabled={submitting}
+                      onCreated={(created) => { createdMilestoneIds.current.add(created.id); }}
+                      onChange={(next) => { draftTouched.current = true; setMilestoneId(next ?? ""); }}
+                    />
+                    <p className="wand-new-session-field-hint wand-new-project-field-hint">
+                      可关联当前工作区的里程碑。
+                    </p>
+                  </div>
+
+                  <div className="wand-new-task-option" data-checked={worktreeEnabled ? "" : undefined}>
+                    <span className="wand-new-task-option-icon"><WandIcon name="branch" size={17} className="wand-new-task-branch-icon" strokeWidth={1.8}/></span>
+                    <span className="wand-new-task-option-text">
+                      <span className="wand-new-task-option-label">独立 worktree 隔离</span>
+                      <span className="wand-new-task-option-hint">
+                        {worktreeEnabled
+                          ? "为任务创建独立分支与工作树，改动隔离、可审查后合并。"
+                          : "默认仅做界面分组，会话共用工作区目录。"}
+                      </span>
+                    </span>
+                    <WandSwitch
+                      checked={worktreeEnabled}
+                      onCheckedChange={(checked) => {
+                        setWorktreeEnabled(checked);
+                      }}
+                      ariaLabel="是否为新任务创建独立 worktree"
+                    />
+                  </div>
+                </div>
+              </details>
+            ) : null}
           </div>
 
           <div className="wand-new-session-summary wand-new-task-summary" aria-live="polite">
             <span>即将创建</span>
-            <strong>{name.trim() || (prompt.trim() ? "按提示词自动命名" : "自动命名")}</strong>
+            <strong>{name.trim() || (prompt.trim() ? "按提示词自动命名" : "待填写任务")}</strong>
             <span title={effectiveCwd}>{effectiveCwd}</span>
             <span>{target === "shell" ? "空白终端" : `${WORKSPACE_AGENT_OPTIONS.find((option) => option.value === target)?.label ?? target} · ${sessionKind === "pty" ? "PTY" : "结构化"}`}</span>
           </div>
 
           <div className="wand-new-session-footer wand-new-project-footer">
-            <WandButton
-              kind="primary"
-              size="large"
-              type="submit"
-              className="wand-new-session-submit wand-new-project-submit"
-              disabled={submitting || (!name.trim() && !prompt.trim())}
-            >
-              {submitting ? "正在创建…" : "创建任务"}
-            </WandButton>
+            <div className="wand-new-session-footer-actions">
+              <WandButton kind="ghost" disabled={submitting} onClick={() => void closeDraft()}>取消</WandButton>
+              <WandButton
+                kind="primary"
+                type="submit"
+                className="wand-new-session-submit wand-new-project-submit"
+                disabled={submitting || (!name.trim() && !prompt.trim())}
+              >
+                {submitting ? "正在创建…" : "创建任务"}
+              </WandButton>
+            </div>
             {error ? <p className="wand-new-session-error wand-new-project-error" role="alert">{error}</p> : null}
           </div>
         </form>

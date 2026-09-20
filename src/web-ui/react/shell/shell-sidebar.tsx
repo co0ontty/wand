@@ -323,25 +323,6 @@ function SessionEntry({
         activate();
       }}
     >
-      {!manageMode && !isHistory && actions.delete && (
-        <div className="session-swipe-bg" aria-hidden="true">
-          <WandButton
-            className="session-swipe-delete"
-            kind="danger"
-            size="small"
-            data-action="swipe-delete-session"
-            data-session-id={entry.id}
-            tabIndex={-1}
-            aria-label="删除会话"
-            onClick={(event) => {
-              event.stopPropagation();
-              void dispatch(actions.delete!);
-            }}
-          >
-            <WandIcon name="trash" slot="start" size={18}/><span>删除</span>
-          </WandButton>
-        </div>
-      )}
       <div className="session-item-content">
         <div className="session-item-row">
           {manageMode && <ManageCheckbox entry={entry} dispatch={dispatch}/>} 
@@ -455,6 +436,21 @@ export function getShellSidebarPrimaryAction(): ShellSidebarPrimaryAction {
     label: "新建任务",
     ariaLabel: "新建任务",
   };
+}
+
+export function sidebarActionLeavesPage(action: UiAction): boolean {
+  switch (action.type) {
+    case "session.select":
+    case "session.resume":
+    case "session.resumeHistory":
+    case "nav.home":
+    case "auth.logout":
+    case "native.back":
+    case "native.switchServer":
+      return true;
+    default:
+      return false;
+  }
 }
 
 
@@ -593,20 +589,20 @@ export function ShellSidebar() {
     body.scrollTop = scrollPositions.current[mode];
     return () => { scrollPositions.current[mode] = body.scrollTop; };
   }, [narrow]);
-  const leaveBoard = (): void => {
-    taskBoardController.close();
+  const dismissSidebarSurfaces = (): void => {
+    peek.close();
+    if (overlay) void dispatch({ type: "layout.drawer.close" });
   };
   const navigate = (action: UiAction): void => {
-    leaveBoard();
-    peek.close();
-    if (overlay) void dispatch({ type: "layout.drawer.close" });
+    // 设置、创建表单和辅助面板只暂时覆盖当前页面，取消后仍留在原视图。
+    if (sidebarActionLeavesPage(action)) taskBoardController.close();
+    dismissSidebarSurfaces();
     void dispatch(action);
   };
-  // 目录树里点任意一项（含窄栏图标）都先收掉弹出面板，再切会话。
+  // 真正打开任务 / 会话时离开看板；树内创建表单复用临时弹层入口。
   const navigateFromTree = (): void => {
-    leaveBoard();
-    peek.close();
-    if (overlay) void dispatch({ type: "layout.drawer.close" });
+    taskBoardController.close();
+    dismissSidebarSurfaces();
   };
   const dispatchEntryAction = (action: UiAction): void => {
     if (action.type === "session.select" || action.type === "session.resume"
@@ -641,6 +637,7 @@ export function ShellSidebar() {
       peekDirectoryId={peek.open ? peekDirectory?.id : undefined}
       onExpand={() => void dispatch({ type: "layout.drawer.collapse" })}
       onNavigate={navigateFromTree}
+      onOpenDialog={dismissSidebarSurfaces}
       searchQuery={directoryId === undefined ? searchQuery : ""}
       onSearchChange={setSearchQuery}
       selectedSessionId={snapshot.selected?.id ?? null}

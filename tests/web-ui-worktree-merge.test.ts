@@ -4,7 +4,6 @@ import test from "node:test";
 
 import {
   buildWorktreeMergeOpenContext,
-  closeWorktreeMergeFromLegacy,
   installWorktreeMergeLegacyAdapter,
   openWorktreeMergeForSession,
 } from "../src/web-ui/browser/worktree-merge-adapter.ts";
@@ -447,8 +446,8 @@ test("legacy adapter owns install, open, toast, refresh, overlay, and close beha
   worktreeMergeStore.getRuntime()?.toast("merged", "success");
   worktreeMergeStore.getRuntime()?.onRepositoryChanged("session-1");
   await new Promise<void>((resolve) => setImmediate(resolve));
-  assert.equal(closeWorktreeMergeFromLegacy(), true);
-  assert.equal(closeWorktreeMergeFromLegacy(), false);
+  assert.equal(worktreeMergeController.closeIfOpen(), true);
+  assert.equal(worktreeMergeController.closeIfOpen(), false);
   assert.deepEqual(events, [
     "error:未找到可操作的 worktree 会话。",
     "open:session-1",

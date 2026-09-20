@@ -26,10 +26,6 @@ import { openFilePreviewFromLegacy } from "./file-preview-adapter";
         });
       }
 
-      export function shouldShowSessionsBackdrop() {
-        return !!state.sessionsDrawerOpen && (isSidebarDrawerLayout() || !state.sidebarPinned);
-      }
-
       export function setFilePanelOpen(nextOpen) {
         state.filePanelOpen = nextOpen;
         try {

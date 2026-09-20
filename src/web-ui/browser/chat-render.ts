@@ -2060,23 +2060,6 @@ import "./local-preview-adapter";
         '</div>';
       }
 
-      function buildToolResultMap(contentBlocks) {
-        var toolResults = {};
-        if (!Array.isArray(contentBlocks)) return toolResults;
-        for (var i = 0; i < contentBlocks.length; i++) {
-          var block = contentBlocks[i];
-          if (block && block.type === "tool_result") {
-            var toolUseId = block.tool_use_id;
-            if (!toolUseId) continue;
-            if (!toolResults[toolUseId]) {
-              toolResults[toolUseId] = [];
-            }
-            toolResults[toolUseId].push(block);
-          }
-        }
-        return toolResults;
-      }
-
       function pickToolResultForDisplay(toolResults, toolUseId) {
         var entries = toolResults && toolUseId ? toolResults[toolUseId] : null;
         if (!entries || !entries.length) return null;

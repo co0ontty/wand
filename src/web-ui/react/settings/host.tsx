@@ -2,7 +2,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react
 import * as React from "react";
 import { useSyncExternalStore } from "react";
 import { wandOverlay } from "../overlay-controller";
-import { WandBadge, WandButton, WandDialogSurface, WandIcon, WandSkeleton, WandTabs } from "../ui";
+import { WandBadge, WandButton, WandDialogSurface, WandSkeleton, WandTabs } from "../ui";
 import { settingsController, settingsStore } from "./controller";
 import { httpSettingsRepository } from "./repository";
 import {
@@ -80,19 +80,12 @@ function SettingsOverview({ snapshot }: { snapshot: SettingsSnapshot }) {
   const version = snapshot.platform.appVersion || snapshot.about.version || "未知版本";
   return (
     <section className="wand-settings-overview" aria-label="当前设置概览">
-      <span className="wand-settings-overview-mark" aria-hidden="true"><WandIcon name="gear" size={18} strokeWidth={1.8} /></span>
-      <div className="wand-settings-overview-copy">
-        <div>
-          <strong>系统设置</strong>
-          <span>集中管理 Wand 的运行偏好。</span>
-        </div>
-        <div className="wand-settings-overview-pills">
-          <WandBadge tone="success">{snapshot.access === "admin" ? "管理员连接" : "App 连接"}</WandBadge>
-          <WandBadge tone={snapshot.about.updateChannel === "beta" ? "warning" : "info"}>
-            {snapshot.about.updateChannel === "beta" ? "Beta 通道" : "Stable 通道"}
-          </WandBadge>
-          <WandBadge tone="accent">{PLATFORM_LABELS[snapshot.platform.kind]}</WandBadge>
-        </div>
+      <div className="wand-settings-overview-pills">
+        <WandBadge tone="success">{snapshot.access === "admin" ? "管理员连接" : "App 连接"}</WandBadge>
+        <WandBadge tone={snapshot.about.updateChannel === "beta" ? "warning" : "info"}>
+          {snapshot.about.updateChannel === "beta" ? "Beta 通道" : "Stable 通道"}
+        </WandBadge>
+        <WandBadge tone="accent">{PLATFORM_LABELS[snapshot.platform.kind]}</WandBadge>
       </div>
       <code>v{version.replace(/^v/, "")}</code>
     </section>
@@ -103,11 +96,10 @@ function SettingsLoading() {
   return (
     <div className="wand-settings-loading" role="status" aria-label="正在加载设置">
       <div className="wand-settings-loading-overview">
-        <WandSkeleton className="wand-settings-skeleton-mark" />
-        <div>
-          <WandSkeleton className="wand-settings-skeleton-heading" />
-          <WandSkeleton className="wand-settings-skeleton-copy" />
-        </div>
+        <WandSkeleton className="wand-settings-skeleton-pill" />
+        <WandSkeleton className="wand-settings-skeleton-pill is-wide" />
+        <WandSkeleton className="wand-settings-skeleton-pill" />
+        <WandSkeleton className="wand-settings-skeleton-version" />
       </div>
       <div className="wand-settings-loading-layout">
         <div className="wand-settings-loading-nav">
@@ -222,16 +214,18 @@ export function SettingsHost({
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
 
-  const load = useCallback(async (signal?: AbortSignal, quiet = false) => {
-    if (!quiet) setLoading(true);
-    setLoadError("");
+  const load = useCallback(async (signal?: AbortSignal) => {
+    setLoading(true);
     try {
       const next = await repository.load({ signal });
-      if (!signal?.aborted) setSnapshot(next);
+      if (!signal?.aborted) {
+        setSnapshot(next);
+        setLoadError("");
+      }
     } catch (error) {
       if (!signal?.aborted) setLoadError(error instanceof Error ? error.message : "设置加载失败。");
     } finally {
-      if (!signal?.aborted && !quiet) setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }, [repository]);
 
@@ -242,7 +236,7 @@ export function SettingsHost({
     return () => abort.abort();
   }, [controller.open, load]);
 
-  const refresh = useCallback(async () => load(undefined, true), [load]);
+  const refresh = useCallback(async () => load(), [load]);
   const toast = useCallback((message: string, tone: "info" | "success" | "warning" | "error" = "info") => {
     wandOverlay.toast(message, { tone });
   }, []);
@@ -295,16 +289,19 @@ export function SettingsHost({
       closeLabel="关闭设置"
       testId="settings-dialog"
     >
-          {loading ? (
-            <SettingsLoading />
-          ) : loadError ? (
-            <div className="wand-settings-load-error" role="alert">
-              <p>{loadError}</p>
-              <WandButton kind="primary" onClick={() => void load()}>重试加载设置</WandButton>
-            </div>
-          ) : snapshot ? (
+          {snapshot ? (
             <>
               <SettingsOverview snapshot={snapshot} />
+              {loadError ? (
+                <div className="wand-settings-refresh-error">
+                  <SettingsStatus tone="error">
+                    <span>刷新设置失败，当前内容已保留。{loadError}</span>
+                    <WandButton size="small" disabled={loading} aria-busy={loading} onClick={() => void refresh()}>
+                      重新加载
+                    </WandButton>
+                  </SettingsStatus>
+                </div>
+              ) : null}
               {snapshot.access === "read-only" ? (
                 <ConnectedAppAccess
                   repository={repository}
@@ -324,6 +321,13 @@ export function SettingsHost({
                 onValueChange={(value) => settingsStore.setTab(value as SettingsTab)}
               />
             </>
+          ) : loading ? (
+            <SettingsLoading />
+          ) : loadError ? (
+            <div className="wand-settings-load-error" role="alert">
+              <p>{loadError}</p>
+              <WandButton kind="primary" onClick={() => void load()}>重试加载设置</WandButton>
+            </div>
           ) : null}
     </WandDialogSurface>
   );

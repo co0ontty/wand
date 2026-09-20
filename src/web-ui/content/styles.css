@@ -1696,9 +1696,6 @@
       z-index: 1;
     }
 
-    /* Keep content transparent by default so it doesn't paint a second
-       gradient inside the card (which created a visible "white box" in the
-       middle). Only opaque when swiped, so the actions stay hidden behind. */
     .session-item-content {
       position: relative;
       z-index: 2;
@@ -1707,50 +1704,6 @@
       transition: transform 0.3s var(--ease-out-expo), background 0.18s ease;
       will-change: transform;
     }
-
-    .session-item.swiped .session-item-content {
-      transform: translateX(-72px);
-      background: linear-gradient(180deg, rgba(255, 252, 247, 0.96) 0%, rgba(252, 246, 237, 0.94) 100%);
-    }
-
-    .session-swipe-bg {
-      position: absolute;
-      inset: 0;
-      z-index: 1;
-      display: flex;
-      align-items: stretch;
-      justify-content: flex-end;
-      pointer-events: none;
-      opacity: 0;
-      transition: opacity 0.18s ease;
-    }
-
-    .session-item.swiped .session-swipe-bg {
-      opacity: 1;
-      pointer-events: auto;
-    }
-
-    .session-swipe-delete {
-      display: inline-flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 3px;
-      width: 72px;
-      border: 0;
-      border-radius: 0;
-      background: var(--danger);
-      color: var(--text-inverse);
-      font: inherit;
-      font-size: 9.625px;
-      font-weight: 700;
-      cursor: pointer;
-    }
-
-    .session-swipe-delete svg {
-      flex-shrink: 0;
-    }
-
 
     .session-manage-check {
       display: inline-flex;
@@ -1980,8 +1933,7 @@
         transition: opacity 0.2s ease;
       }
       .session-item:hover .session-actions,
-      .session-item.active .session-actions,
-      .session-item.swiped .session-actions {
+      .session-item.active .session-actions {
         opacity: 1;
       }
       /* Running sessions always show resume */
@@ -17828,8 +17780,8 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined.pinned.
   max-width: 100%;
 }
 .task-board-view-tabs > .wand-ui-tabs-content { display: none; }
-.task-board-view-tabs .wand-ui-tabs-list { background: var(--bg-secondary); }
-.task-board-view-tabs [data-slot="tabs-indicator"] { box-shadow: var(--shadow-xs); background: var(--bg-elevated); }
+.task-board-view-tabs .wand-ui-tabs-list { border-radius: var(--control-radius); background: var(--bg-secondary); }
+.task-board-view-tabs [data-slot="tabs-indicator"] { border-radius: var(--radius-xs); box-shadow: var(--shadow-xs); background: var(--bg-elevated); }
 
 .task-board-view-tab {
   display: inline-flex;
@@ -18053,8 +18005,8 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined.pinned.
 }
 .task-board-column-list > .task-board-column-empty {
   flex: 0 0 auto;
-  min-height: 112px;
-  border: 1px dashed var(--border-default);
+  min-height: 80px;
+  border: 1px dashed var(--border-subtle);
   border-radius: var(--radius-md);
   background: transparent;
 }
@@ -18072,7 +18024,7 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined.pinned.
   padding: 14px 14px 12px;
   overflow: hidden;
   border: 1px solid var(--border-subtle);
-  border-radius: 14px;
+  border-radius: var(--radius-md);
   background: var(--bg-elevated);
   box-shadow: none;
   cursor: grab;

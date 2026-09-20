@@ -2,7 +2,7 @@
 
 最后核对：2026-09-10。主仓库基线 `d240da1`；Android `dc4dc6a`，iOS `d10a456`，macOS `b0a545e`。
 
-本文按用户操作描述当前调用、状态真源与端间差异。服务端机制见 `server-logic-analysis.md`，待办及验证证据见 `optimization-plan.md`。本次为代码核对和有限隔离验证，**没有完成多端真实设备验收，也没有实施修复**。
+本文按用户操作描述当前调用、状态真源与端间差异。服务端机制见 `server-logic-analysis.md`。本次为代码核对和有限隔离验证，**没有完成多端真实设备验收，也没有实施修复**。
 
 ## 1. 客户端与入口
 
@@ -285,5 +285,3 @@ Inbox 服务端和 CLI 已有；Web Missions 不消费 `/api/inbox`，没有因�
 5. PTY 显示错位先查 fit/字号；structured JSON 中文变 `�` 则查字节流解码。
 6. 更新 403 查 principal；App 版本更新不等于服务端更新。
 7. 本轮 Apple WebView 契约测试失败：断言要求 `.notification-bubble.update-card`，iOS 当前注入更宽的 `.notification-bubble` 隐藏规则。先验证实际行为，再修正测试，不能据此断言通知必定露出（R14）。
-
-优化计划按 R01–R14 排期；历史任务一级容器完成记录保留在 `task-first-rollout.md`，只作为历史，不覆盖本文当前基线。

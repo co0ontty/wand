@@ -107,7 +107,7 @@ React Shell ── stable host roots ──► Terminal / Chat / Composer legacy
 - **已删除** `?reactShell=0`、`localStorage["wand.reactShell.enabled"]`、`window.__wandFeatureFlags.reactShell` 与 `isReactShellEnabled()`。认证后的 Shell 不再有回退路径，`renderBrowserReactShell()` 的返回值从 `"disabled" | "mounted" | "updated"` 收窄为 `"mounted" | "updated"`。原因是该回退在生产中从未被测过（仅 3 处测试引用），且它把「React 挂载失败」静默降级成一个没人维护的 legacy Shell；现在挂载失败会显示可重试的 boot 错误卡片。
 - **保留** `?reactUi=0`，但语义收窄为「通用对话框/通知层退回原生 confirm/prompt + legacy 气泡」，不再影响 Shell。它仍被 84 处 legacy 调用点依赖。
 
-`renderAppShell()` 暂时保留：它仍是 legacy 槽位（`#output`/`#chat-output`/`.input-panel`/`#file-explorer`/`#cross-session-queue-host`）的 seed markup 模板，删除它需要先让 React 自己渲染这些稳定容器（见 `docs/optimization-plan.md` 的后续切片）。
+`renderAppShell()` 暂时保留：它仍是 legacy 槽位（`#output`/`#chat-output`/`.input-panel`/`#file-explorer`/`#cross-session-queue-host`）的 seed markup 模板，删除它需要先让 React 自己渲染这些稳定容器。
 
 ## 技术栈统一路线（2026-09-16，第二轮）
 
@@ -147,7 +147,6 @@ React Shell ── stable host roots ──► Terminal / Chat / Composer legacy
   - 顺带修一处由此暴露的缺陷：`ShellFilePanel.committedCwd` 原为 ref，`commitCwd` 的 `setCwd` 常与当前值相同而被 React bail-out，ref 更新不再传给 `FileExplorerHost` 的 `root`，回车后文件树不重载 → 改为 state。
 - ⏳ 待做：
   1. `#file-explorer` 空槽位锚点与 `explorerRef`（删除需 Phase 4 一并移除槽位机制）。
-  2. `input.ts` 的 `executeDeleteHistory`/`getHistoryItemsByCwd`/`setDeletingState` 簇（`.claude-history-item` 自 Phase 1 起已无渲染者）。
   3. `state.topbarMoreOpen`（值为 false 时仍被 `deriveLegacyUiSnapshot` 读取；写入点在 seed 中）。
 
 **Phase 3 — 逐个把 legacy 槽位换成 React 组件（收益主体）**

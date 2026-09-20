@@ -300,7 +300,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
       open={controller.open}
       onOpenChange={(open) => { if (!open) newSessionController.close(); }}
       title="新对话"
-      description="启动 AI 会话或空白终端，选择 provider、会话类型、模式和工作目录。"
+      description="选择工具与工作目录，启动新的会话。"
       className="wand-new-session-dialog"
       overlayClassName="wand-new-session-overlay"
       titleClassName="wand-new-session-title"
@@ -316,8 +316,8 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
         <form noValidate className="wand-new-session-form" aria-busy={submitting} onSubmit={(event) => void submit(event)}>
           <div className="wand-new-session-body">
             <fieldset className="wand-new-session-field wand-new-session-fieldset">
-              <legend className="wand-new-session-field-label">Provider</legend>
-              <div className="wand-new-session-choices wand-new-session-provider-choices" role="radiogroup" aria-label="Provider">
+              <legend className="wand-new-session-field-label">CLI 工具</legend>
+              <div className="wand-new-session-choices wand-new-session-provider-choices" role="radiogroup" aria-label="CLI 工具">
                 {PROVIDERS.map((provider) => (
                   <button
                     key={provider.value}
@@ -505,15 +505,17 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
           </div>
 
           <div className="wand-new-session-footer">
-            <WandButton
-              kind="primary"
-              size="large"
-              type="submit"
-              className="wand-new-session-submit"
-              disabled={submitting}
-            >
-              {submitting ? "正在启动…" : form.kind === "shell" ? "启动空白终端" : "启动会话"}
-            </WandButton>
+            <div className="wand-new-session-footer-actions">
+              <WandButton kind="ghost" disabled={submitting} onClick={() => newSessionController.close()}>取消</WandButton>
+              <WandButton
+                kind="primary"
+                type="submit"
+                className="wand-new-session-submit"
+                disabled={submitting}
+              >
+                {submitting ? "正在启动…" : form.kind === "shell" ? "启动空白终端" : "启动会话"}
+              </WandButton>
+            </div>
             {error ? <p className="wand-new-session-error" role="alert">{error}</p> : null}
           </div>
         </form>

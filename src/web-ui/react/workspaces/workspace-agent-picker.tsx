@@ -31,6 +31,7 @@ export const WORKSPACE_KIND_OPTIONS: ReadonlyArray<{
 ];
 
 const TARGET_VALUES = WORKSPACE_AGENT_OPTIONS.map((option) => option.value);
+const KIND_VALUES = WORKSPACE_KIND_OPTIONS.map((option) => option.value);
 const RADIO_NAVIGATION_KEYS = new Set<ChoiceNavigationKey>([
   "ArrowLeft",
   "ArrowRight",
@@ -58,6 +59,23 @@ export function WorkspaceAgentPicker({
   onKindChange,
 }: WorkspaceAgentPickerProps) {
   const targetRefs = useRef<Partial<Record<WorkspaceSessionTarget, HTMLButtonElement | null>>>({});
+  const kindRefs = useRef<Partial<Record<WorkspaceSessionKind, HTMLButtonElement | null>>>({});
+
+  function selectTarget(next: WorkspaceSessionTarget): void {
+    if (disabled) return;
+    onTargetChange(next);
+    if (persistPreferences && next !== "shell") {
+      void httpNewSessionRepository.savePreferences({ defaultProvider: next }).catch(() => undefined);
+    }
+  }
+
+  function selectKind(next: WorkspaceSessionKind): void {
+    if (disabled) return;
+    onKindChange(next);
+    if (persistPreferences) {
+      void httpNewSessionRepository.savePreferences({ defaultSessionKind: next }).catch(() => undefined);
+    }
+  }
 
   function navigateTarget(
     event: KeyboardEvent<HTMLButtonElement>,
@@ -66,8 +84,19 @@ export function WorkspaceAgentPicker({
     if (disabled || !RADIO_NAVIGATION_KEYS.has(event.key as ChoiceNavigationKey)) return;
     event.preventDefault();
     const next = nextChoice(TARGET_VALUES, current, event.key as ChoiceNavigationKey);
-    onTargetChange(next);
+    selectTarget(next);
     window.requestAnimationFrame(() => targetRefs.current[next]?.focus());
+  }
+
+  function navigateKind(
+    event: KeyboardEvent<HTMLButtonElement>,
+    current: WorkspaceSessionKind,
+  ): void {
+    if (disabled || !RADIO_NAVIGATION_KEYS.has(event.key as ChoiceNavigationKey)) return;
+    event.preventDefault();
+    const next = nextChoice(KIND_VALUES, current, event.key as ChoiceNavigationKey);
+    selectKind(next);
+    window.requestAnimationFrame(() => kindRefs.current[next]?.focus());
   }
 
   return (
@@ -86,13 +115,8 @@ export function WorkspaceAgentPicker({
               disabled={disabled}
               className={`wand-new-session-choice wand-new-session-provider-choice${target === option.value ? " active" : ""}`}
               data-wand-autofocus={target === option.value ? "" : undefined}
-              onClick={() => {
-                onTargetChange(option.value);
-                if (persistPreferences && option.value !== "shell") {
-                  void httpNewSessionRepository.savePreferences({ defaultProvider: option.value }).catch(() => undefined);
-                }
-              }}
-              onKeyDown={(event) => navigateTarget(event, target)}
+              onClick={() => selectTarget(option.value)}
+              onKeyDown={(event) => navigateTarget(event, option.value)}
             >
               {option.value === "shell"
                 ? <WandIcon name="terminal" size={20} className="wand-new-session-provider-logo" strokeWidth={1.8} />
@@ -110,17 +134,15 @@ export function WorkspaceAgentPicker({
             {WORKSPACE_KIND_OPTIONS.map((option) => (
               <button
                 key={option.value}
+                ref={(element) => { kindRefs.current[option.value] = element; }}
                 type="button"
                 role="radio"
                 aria-checked={kind === option.value}
+                tabIndex={kind === option.value ? 0 : -1}
                 disabled={disabled}
                 className={`wand-new-session-choice wand-new-session-kind-choice${kind === option.value ? " active" : ""}`}
-                onClick={() => {
-                  onKindChange(option.value);
-                  if (persistPreferences) {
-                    void httpNewSessionRepository.savePreferences({ defaultSessionKind: option.value }).catch(() => undefined);
-                  }
-                }}
+                onClick={() => selectKind(option.value)}
+                onKeyDown={(event) => navigateKind(event, option.value)}
               >
                 <span className="wand-new-session-choice-label">{option.label}</span>
                 <span className="wand-new-session-choice-description">{option.description}</span>

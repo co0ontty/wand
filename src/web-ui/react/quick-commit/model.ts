@@ -58,13 +58,6 @@ export function quickCommitActionMeta(value: unknown): QuickCommitActionMeta {
   return ACTIONS[normalizeQuickCommitAction(value)];
 }
 
-export function actionFromOptions(withTag: boolean, push: boolean): QuickCommitAction {
-  if (withTag && push) return "commit-tag-push";
-  if (withTag) return "commit-tag";
-  if (push) return "commit-push";
-  return "commit";
-}
-
 export function buildQuickCommitInput(
   form: QuickCommitForm,
   action: QuickCommitAction,

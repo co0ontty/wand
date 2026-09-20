@@ -12,7 +12,6 @@ import {
   ShellMainContent,
   UiStoreProvider,
   getShellLegacySlotClasses,
-  getShellWelcomeQuickStartAction,
   type ShellMainContentRefs,
   type UiSessionVm,
   type UiSnapshotData,
@@ -172,18 +171,6 @@ test("legacy slot visibility projection preserves hidden and active semantics", 
     blank: "blank-chat hidden",
     composer: "input-panel",
   });
-});
-
-test("welcome quick starts remain four exhaustive provider and kind actions", () => {
-  const actions = (["claude", "codex", "opencode", "structured"] as const)
-    .map(getShellWelcomeQuickStartAction);
-  assert.deepEqual(actions, [
-    { type: "session.quickStart.claude" },
-    { type: "session.quickStart.codex" },
-    { type: "session.quickStart.opencode" },
-    { type: "session.quickStart.structured" },
-  ]);
-  assert.equal(new Set(actions.map((action) => action.type)).size, 4);
 });
 
 test("ShellMainContent uses UiStore actions and no forbidden legacy seam", () => {

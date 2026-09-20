@@ -14,6 +14,8 @@ import {
   getShellSidebarEntryActions,
   getShellSidebarPrimaryAction,
   getSidebarEntryTarget,
+  sidebarActionLeavesPage,
+  type UiAction,
   type UiSessionVm,
   type UiSnapshotData,
 } from "../src/web-ui/react/shell/index.js";
@@ -317,6 +319,31 @@ test("ShellSidebar primary action always creates a task", () => {
     label: "新建任务",
     ariaLabel: "新建任务",
   });
+});
+
+test("sidebar temporary tools preserve the page while navigation leaves it", () => {
+  const temporaryActions: UiAction[] = [
+    { type: "settings.open" },
+    { type: "missions.open" },
+    { type: "workspace.new" },
+    { type: "workspace.newAt", cwd: "/workspace" },
+    { type: "layout.files.toggle" },
+  ];
+  for (const action of temporaryActions) {
+    assert.equal(sidebarActionLeavesPage(action), false, `${action.type} must preserve the current page`);
+  }
+  const navigationActions: UiAction[] = [
+    { type: "nav.home" },
+    { type: "session.select", id: "session-1" },
+    { type: "session.resume", id: "session-1" },
+    { type: "session.resumeHistory", provider: "codex", id: "thread-1", cwd: "/workspace" },
+    { type: "native.back" },
+    { type: "native.switchServer" },
+    { type: "auth.logout" },
+  ];
+  for (const action of navigationActions) {
+    assert.equal(sidebarActionLeavesPage(action), true, `${action.type} must leave the current page`);
+  }
 });
 
 test("ShellSidebar keeps creation above the directory task tree and settings in the footer", () => {

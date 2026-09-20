@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import * as React from "react";
 import { workspaceContextStore } from "../workspaces/workspace-context";
+import { failureMessage } from "../errors";
 
 import { ProviderLogo } from "../provider-logo";
 import { WandButton, WandDialogSurface, WandIcon } from "../ui";
@@ -105,6 +106,8 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
   const [missions, setMissions] = useState<MissionDetails[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [createError, setCreateError] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -161,12 +164,14 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
 
   const submitMission = async (event: FormEvent) => {
     event.preventDefault();
-    if (busy) return;
+    if (submitting) return;
     if (!prompt.trim() || !cwd.trim() || providers.size === 0) {
-      setError("请填写任务目标、工作目录，并选择至少一个工具。");
+      setCreateError("请填写任务目标、项目目录，并选择至少一个工具。");
       return;
     }
-    setBusy(true); setError("");
+    missionsController.setDismissable(false);
+    setSubmitting(true);
+    setCreateError("");
     try {
       const created = await repository.create({
         title: title.trim() || undefined, prompt, cwd, providers: [...providers],
@@ -176,11 +181,18 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
         taskId: workspaceContextStore.getSnapshot().taskId ?? undefined,
         milestoneId: milestoneId || null,
       });
+      setMissions((current) => [created, ...current.filter((mission) => mission.id !== created.id)]);
       setCreating(false); setPrompt(""); setTitle(""); setMilestoneId(""); setSelectedId(created.id);
-      await refresh();
+      setError("");
+      await refresh().catch((cause) => {
+        setError(`任务已创建，但列表刷新失败：${failureMessage(cause, "请稍后重新打开并行任务。")}`);
+      });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "创建任务失败。");
-    } finally { setBusy(false); }
+      setCreateError(failureMessage(cause, "创建任务失败，请重试。"));
+    } finally {
+      missionsController.setDismissable(true);
+      setSubmitting(false);
+    }
   };
 
   const openDiff = async (mission: MissionDetails, attempt: MissionAttempt) => {
@@ -226,11 +238,15 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
       headerClassName="wand-missions-header"
       titleClassName="wand-missions-title"
       descriptionClassName="wand-missions-description"
+      dismissable={!creating && controller.dismissable}
       onOpenChange={(open) => { if (!open) missionsController.close(); }}
     >
       <div className="wand-missions-toolbar">
         <span className="wand-missions-toolbar-note">{missions.length} 个任务</span>
-        <WandButton kind="primary" size="small" onClick={() => setCreating(true)}>＋ 新任务</WandButton>
+        <WandButton kind="primary" size="small" disabled={busy || submitting} onClick={() => {
+          setCreateError("");
+          setCreating(true);
+        }}>＋ 新任务</WandButton>
       </div>
 
       {error ? <div className="wand-missions-error" role="alert">{error}</div> : null}
@@ -325,43 +341,58 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
         </div>
       </div>
 
-      {creating ? (
-        <div className="wand-missions-create-overlay">
-          <form noValidate className="wand-missions-create" onSubmit={(event) => void submitMission(event)}>
-            <div className="wand-missions-create-head"><div><h2>并行任务</h2><p>每个 Provider 会获得独立 branch 与 worktree。</p></div><button type="button" onClick={() => setCreating(false)}>×</button></div>
-            <label>任务标题（可选）<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="例如：重构会话恢复流程"/></label>
+      <WandDialogSurface
+        open={creating}
+        title="新建并行任务"
+        description="创建后立即分派给所选工具，在独立 Worktree 中执行。"
+        className="wand-ui-dialog-content wand-missions-create-dialog"
+        overlayClassName="wand-ui-dialog-overlay wand-missions-create-overlay"
+        headerClassName="wand-missions-create-head"
+        closeLabel="关闭新建并行任务"
+        dismissable={!submitting}
+        onOpenChange={(open) => { if (!open && !submitting) setCreating(false); }}
+      >
+        <form noValidate className="wand-missions-create" aria-busy={submitting} onSubmit={(event) => void submitMission(event)}>
+          <div className="wand-missions-create-body">
+            <label>任务标题（可选）<input disabled={submitting} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="例如：重构会话恢复流程"/></label>
             <div className="wand-missions-field">
               <span>里程碑（可选）</span>
               <MilestonePicker
                 value={milestoneId || null}
                 workspaceId={activeTaskContext.workspaceId}
-                disabled={busy}
+                disabled={submitting}
                 onChange={(next) => setMilestoneId(next ?? "")}
               />
             </div>
-            <label>目标<textarea className="resize-none" autoFocus required value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="描述清楚完成条件、限制和验证要求…"/></label>
+            <label>目标<textarea className="resize-none" data-wand-autofocus disabled={submitting} required value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="描述清楚完成条件、限制和验证要求…"/></label>
             {linkedTaskName ? (
               <p className="wand-missions-linked-task">派发的 Agent 会话将关联到当前任务「{linkedTaskName}」。</p>
             ) : null}
-            <label>项目目录<input required value={cwd} onChange={(event) => setCwd(event.target.value)}/></label>
+            <label>项目目录<input required disabled={submitting} value={cwd} onChange={(event) => setCwd(event.target.value)}/></label>
             <div className="wand-missions-provider-picker">
               {PROVIDERS.map((provider) => (
                 <label key={provider.id} className={providers.has(provider.id) ? "active" : ""}>
-                  <input type="checkbox" checked={providers.has(provider.id)} onChange={() => setProviders((current) => {
+                  <input type="checkbox" disabled={submitting} checked={providers.has(provider.id)} onChange={() => setProviders((current) => {
                     const next = new Set(current); if (next.has(provider.id)) next.delete(provider.id); else next.add(provider.id); return next;
                   })}/><ProviderLogo provider={provider.id}/><span>{provider.label}</span>
                 </label>
               ))}
             </div>
             <details><summary>Worktree 高级选项</summary>
-              <label>基线 ref<input value={baseRef} onChange={(event) => setBaseRef(event.target.value)} placeholder="当前分支"/></label>
-              <label>共享目录（仅 gitignored）<input value={sharedPaths} onChange={(event) => setSharedPaths(event.target.value)} placeholder="node_modules, .venv"/></label>
-              <label>复制路径（仅 gitignored）<input value={copyPaths} onChange={(event) => setCopyPaths(event.target.value)} placeholder=".env.local"/></label>
+              <label>基线 ref<input disabled={submitting} value={baseRef} onChange={(event) => setBaseRef(event.target.value)} placeholder="当前分支"/></label>
+              <label>共享目录（仅 gitignored）<input disabled={submitting} value={sharedPaths} onChange={(event) => setSharedPaths(event.target.value)} placeholder="node_modules, .venv"/></label>
+              <label>复制路径（仅 gitignored）<input disabled={submitting} value={copyPaths} onChange={(event) => setCopyPaths(event.target.value)} placeholder=".env.local"/></label>
             </details>
-            <div className="wand-missions-create-actions"><WandButton kind="ghost" onClick={() => setCreating(false)}>取消</WandButton><WandButton kind="primary" type="submit" disabled={busy || !prompt.trim() || !cwd.trim() || providers.size === 0}>{busy ? "正在分派…" : `分派给 ${providers.size} 个 Agent`}</WandButton></div>
-          </form>
-        </div>
-      ) : null}
+          </div>
+          {createError ? <div className="wand-missions-error" role="alert">{createError}</div> : null}
+          <div className="wand-missions-create-actions">
+            <WandButton kind="ghost" disabled={submitting} onClick={() => setCreating(false)}>取消</WandButton>
+            <WandButton kind="primary" type="submit" disabled={submitting || !prompt.trim() || !cwd.trim() || providers.size === 0}>
+              {submitting ? "正在分派…" : `分派给 ${providers.size} 个 Agent`}
+            </WandButton>
+          </div>
+        </form>
+      </WandDialogSurface>
     </WandDialogSurface>
   );
 }

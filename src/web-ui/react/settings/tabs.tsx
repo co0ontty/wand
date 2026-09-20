@@ -1,6 +1,7 @@
 import {
   type Dispatch,
   type SetStateAction,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -8,7 +9,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import * as React from "react";
-import { WandBadge, WandButton, WandDialogSurface, WandIcon } from "../ui";
+import { WandBadge, WandButton, WandDialogSurface, WandIcon, WandSearchField } from "../ui";
 import { settingsStore } from "./controller";
 import {
   SettingsActionButton,
@@ -467,22 +468,33 @@ function EnvironmentDialog({ repository }: { repository: SettingsRepository }) {
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
+  const loadSequence = useRef(0);
+  const requestedReveal = useRef(false);
 
-  async function load(reveal = false) {
+  const load = useCallback(async (reveal = false) => {
+    const sequence = ++loadSequence.current;
+    requestedReveal.current = reveal;
     setLoading(true);
-    setError("");
     try {
-      setPreview(await repository.execute({ type: "environment.load", reveal }));
+      const next = await repository.execute({ type: "environment.load", reveal });
+      if (sequence === loadSequence.current) {
+        setPreview(next);
+        setError("");
+      }
     } catch (cause) {
-      setError(failureMessage(cause, "环境变量加载失败。"));
+      if (sequence === loadSequence.current) setError(failureMessage(cause, "环境变量加载失败。"));
     } finally {
-      setLoading(false);
+      if (sequence === loadSequence.current) setLoading(false);
     }
-  }
+  }, [repository]);
 
   useEffect(() => {
+    setPreview(null);
+    setError("");
+    setLoading(false);
     if (controller.nested === "environment") void load(false);
-  }, [controller.nested]);
+    return () => { loadSequence.current += 1; };
+  }, [controller.nested, load]);
 
   const entries = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -494,7 +506,7 @@ function EnvironmentDialog({ repository }: { repository: SettingsRepository }) {
       open={controller.nested === "environment"}
       onOpenChange={(open) => { if (!open) settingsStore.setNested(null); }}
       title="将注入子进程的环境变量"
-      description="这些变量会传给 Claude、Codex 与 OpenCode 的子进程。"
+      description="这些变量会传给新启动的会话子进程，敏感值默认隐藏。"
       className="wand-settings-nested-dialog"
       overlayClassName="wand-settings-nested-overlay"
       headerClassName="wand-settings-header"
@@ -504,12 +516,11 @@ function EnvironmentDialog({ repository }: { repository: SettingsRepository }) {
       testId="settings-environment-dialog"
     >
       <div className="wand-settings-env-toolbar">
-        <SettingsTextInput
-          id="settings-environment-search"
+        <WandSearchField
           value={search}
-          type="search"
+          label="搜索变量名"
           placeholder="搜索变量名"
-          onChange={setSearch}
+          onValueChange={setSearch}
         />
         <SettingsToggle
           label="显示敏感值"
@@ -519,15 +530,24 @@ function EnvironmentDialog({ repository }: { repository: SettingsRepository }) {
           onCheckedChange={(checked) => void load(checked)}
         />
       </div>
-      {error ? <SettingsStatus tone="error">{error}</SettingsStatus> : null}
-      <div className="wand-settings-env-list" role="table" aria-label="子进程环境变量">
-        {loading ? <div role="status">加载中…</div> : entries.map((entry) => (
+      <div className="wand-settings-env-list" role="table" aria-label="子进程环境变量" aria-busy={loading}>
+        {error ? (
+          <div className="wand-settings-load-error" role="alert">
+            <p>{error}</p>
+            <WandButton size="small" disabled={loading} aria-busy={loading} onClick={() => void load(requestedReveal.current)}>
+              重新加载
+            </WandButton>
+          </div>
+        ) : null}
+        {loading && !preview ? <div role="status">加载中…</div> : entries.map((entry) => (
           <div className="wand-settings-env-row" role="row" key={entry.name}>
             <code role="cell">{entry.name}</code>
             <span role="cell" title={entry.value}>{entry.value}</span>
           </div>
         ))}
-        {!loading && entries.length === 0 ? <div className="wand-settings-empty">没有匹配的变量</div> : null}
+        {!loading && !error && preview && entries.length === 0 ? (
+          <div className="wand-settings-empty">{search.trim() ? "没有匹配的变量" : "暂无环境变量"}</div>
+        ) : null}
       </div>
     </WandDialogSurface>
   );

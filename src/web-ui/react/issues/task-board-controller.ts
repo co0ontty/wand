@@ -24,6 +24,8 @@ const listeners = new Set<Listener>();
 let historyInstalled = false;
 /** True only for the history entry this tab pushed by opening the board. */
 let openedViaPush = false;
+let closingViaBack = false;
+let reopenAfterBack: { workspaceId: string; sessionId: string } | null = null;
 
 function publish(next: Partial<TaskBoardControllerSnapshot>): void {
   snapshot = { ...snapshot, ...next, revision: snapshot.revision + 1 };
@@ -81,6 +83,13 @@ function writeLocation(open: boolean, mode: HistoryMode): void {
 function onPopState(): void {
   const shouldOpen = isTaskBoardView(locationSearch());
   openedViaPush = false;
+  closingViaBack = false;
+  const reopen = reopenAfterBack;
+  reopenAfterBack = null;
+  if (reopen) {
+    taskBoardController.open(reopen.workspaceId, reopen.sessionId);
+    return;
+  }
   if (shouldOpen === snapshot.open) return;
   publish({ open: shouldOpen });
 }
@@ -97,6 +106,10 @@ export function installTaskBoardHistory(): void {
 export const taskBoardController = {
   open(workspaceId = "", sessionId = ""): void {
     installTaskBoardHistory();
+    if (closingViaBack) {
+      reopenAfterBack = { workspaceId, sessionId };
+      return;
+    }
     const wasOpen = snapshot.open;
     publish({ open: true, workspaceId, sessionId });
     if (wasOpen) return;
@@ -109,13 +122,14 @@ export const taskBoardController = {
   },
   close(): void {
     installTaskBoardHistory();
-    if (!snapshot.open) return;
+    reopenAfterBack = null;
+    if (closingViaBack || !snapshot.open) return;
     if (openedViaPush && typeof window !== "undefined") {
       openedViaPush = false;
-      window.history.back();
-      if (!snapshot.open) return;
+      closingViaBack = true;
       publish({ open: false });
-      writeLocation(false, "replace");
+      // Traversal completes at popstate; replacing here destroys the forward entry.
+      window.history.back();
       return;
     }
     publish({ open: false });
