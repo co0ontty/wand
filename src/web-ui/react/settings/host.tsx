@@ -308,7 +308,8 @@ export function SettingsHost({
                   onAuthenticated={(next) => {
                     setLoadError("");
                     setSnapshot(next);
-                    settingsStore.setTab("general");
+                    // Keep the requested section after upgrading an App
+                    // connection; native tools may have opened AI or security.
                   }}
                 />
               ) : null}

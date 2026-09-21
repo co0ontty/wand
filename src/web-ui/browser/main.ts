@@ -28,7 +28,10 @@ import { installFolderPickerLegacyAdapter } from "./folder-picker-adapter";
 import { installNewSessionLegacyAdapter } from "./new-session-adapter";
 import { installSettingsRuntimeBridge } from "./settings-runtime-bridge";
 import { createBrowserShellCommands } from "./shell-commands";
-import { configureBrowserShellCommands } from "./shell-runtime";
+import { configureBrowserShellCommands, isBrowserReactShellMounted } from "./shell-runtime";
+import { createDesktopToolsNavigation } from "./desktop-tools-bridge";
+import { codeEditorController, codeEditorStore } from "../react/code-editor/controller";
+import { filePreviewStore } from "../react/file-preview/controller";
 import { installWorktreeMergeLegacyAdapter } from "./worktree-merge-adapter";
 import { refreshAll } from "./session-engine";
 import { openWandDialog, showToast } from "./notifications";
@@ -36,12 +39,19 @@ import { installFilePreviewLegacyAdapter } from "./file-preview-adapter";
 import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
 import { installMissionsLegacyAdapter } from "./missions-adapter";
 import { installWorkspacesLegacyAdapter } from "./workspaces-adapter";
-import { appendToComposer, copyTextSafely } from "./file-browser";
+import { appendToComposer, copyTextSafely, setFilePanelOpen } from "./file-browser";
 import { fileExplorerController, fileExplorerStore } from "../react/file-explorer/controller";
 import { explorerParentOf } from "../react/file-explorer/paths";
 
 installSettingsRuntimeBridge();
 configureBrowserShellCommands(createBrowserShellCommands());
+window.__wandDesktopTools = createDesktopToolsNavigation({
+  isReady: isBrowserReactShellMounted,
+  setFilePanelOpen,
+  hasUnsavedFiles: () => codeEditorController.hasDirty() || filePreviewStore.getSnapshot().dirty,
+  isSavingFile: () => codeEditorStore.getSnapshot().saving || filePreviewStore.getSnapshot().saving,
+  getSelectedSessionId: () => state.selectedId || "",
+});
 
 (function() {
   try {
