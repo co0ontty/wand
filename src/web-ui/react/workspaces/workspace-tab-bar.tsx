@@ -135,7 +135,7 @@ export function WorkspaceTabBar(): React.ReactElement | null {
   // 避免空标签栏和选择器叠在一起。
   if (!context.taskId || taskLayout.windows.length === 0) return null;
 
-  const handleNewSession = async (target: WorkspaceSessionTarget, kind: WorkspaceSessionKind) => {
+  const handleNewSession = async (target: WorkspaceSessionTarget, kind: WorkspaceSessionKind, model: string) => {
     if (!context.taskId || !context.workspaceId) {
       throw new Error("当前任务上下文已失效，请重新打开任务后重试。");
     }
@@ -147,6 +147,7 @@ export function WorkspaceTabBar(): React.ReactElement | null {
       cwd: taskCwd,
       target,
       kind,
+      model: model || undefined,
     };
     const result = await rt.newTaskSession(payload);
     const sessionId = typeof result === "string" ? result : null;

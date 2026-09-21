@@ -106,7 +106,7 @@ appToken 由 appSecret 与密码派生；改密码撤销 cookie 并断开已认�
 | 操作 | 路径 / 结果 |
 | --- | --- |
 | 新建 PTY / shell | `POST /api/commands`；`shell:true` 表示纯 shell |
-| 新建 structured | `POST /api/structured-sessions`；可携首条 prompt |
+| 新建 structured | `POST /api/structured-sessions`；可携首条 prompt（默认等首轮结束才响应，带 `respondImmediately:true` 则发完即回快照） |
 | 列表 | `GET /api/sessions`；`GET /api/session-list` 分页/探测 |
 | 详情 / 历史窗 | `GET /api/sessions/:id?format=chat`；`.../messages` |
 | 统一输入 | `POST /api/sessions/:id/input`，按 owner/kind 分流 |

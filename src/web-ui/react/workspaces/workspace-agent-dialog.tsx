@@ -6,11 +6,13 @@ import {
 import * as React from "react";
 
 import { httpNewSessionRepository } from "../new-session/repository";
+import { MODEL_CATALOG_DEFAULT_VALUE, pickedModelId } from "../model-catalog";
 import { WandButton, WandDialogSurface } from "../ui";
 import type { WorkspaceProvider, WorkspaceSessionKind, WorkspaceSessionTarget } from "./types";
 import {
   WORKSPACE_AGENT_OPTIONS,
   WorkspaceAgentPicker,
+  workspaceModelDefault,
 } from "./workspace-agent-picker";
 import { failureMessage } from "../errors";
 
@@ -20,7 +22,8 @@ export interface WorkspaceAgentDialogProps {
   open: boolean;
   initialProvider?: WorkspaceProvider;
   initialKind?: WorkspaceSessionKind;
-  onConfirm(target: WorkspaceSessionTarget, kind: WorkspaceSessionKind): void | Promise<void>;
+  /** `model` 为真实模型 id；空串表示跟随服务端默认。 */
+  onConfirm(target: WorkspaceSessionTarget, kind: WorkspaceSessionKind, model: string): void | Promise<void>;
   onDismiss(): void;
 }
 
@@ -34,6 +37,7 @@ export function WorkspaceAgentDialog({
 }: WorkspaceAgentDialogProps) {
   const [target, setTarget] = useState<WorkspaceSessionTarget>(initialProvider);
   const [kind, setKind] = useState<WorkspaceSessionKind>(initialKind);
+  const [model, setModel] = useState(MODEL_CATALOG_DEFAULT_VALUE);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -44,13 +48,17 @@ export function WorkspaceAgentDialog({
     setError("");
     setTarget(initialProvider);
     setKind(initialKind === "pty" ? "pty" : "structured");
+    setModel(workspaceModelDefault(initialProvider));
     void httpNewSessionRepository.loadConfig()
       .then((config) => {
         if (cancelled) return;
         const savedProvider = WORKSPACE_AGENT_OPTIONS.some((option) => option.value === config.defaultProvider)
           ? config.defaultProvider as WorkspaceSessionTarget
           : null;
-        if (savedProvider && savedProvider !== "shell") setTarget(savedProvider);
+        if (savedProvider && savedProvider !== "shell") {
+          setTarget(savedProvider);
+          setModel(workspaceModelDefault(savedProvider));
+        }
         if (config.defaultSessionKind === "pty" || config.defaultSessionKind === "structured") {
           setKind(config.defaultSessionKind);
         }
@@ -65,7 +73,7 @@ export function WorkspaceAgentDialog({
     setSubmitting(true);
     setError("");
     try {
-      await onConfirm(target, target === "shell" ? "pty" : kind);
+      await onConfirm(target, target === "shell" ? "pty" : kind, pickedModelId(model));
       onDismiss();
     } catch (createError) {
       setError(failureMessage(createError, "无法新建工作窗口，请确认对应 CLI 或 Shell 配置正确。"));
@@ -94,9 +102,11 @@ export function WorkspaceAgentDialog({
           <WorkspaceAgentPicker
             target={target}
             kind={kind}
+            model={model}
             disabled={submitting}
-            onTargetChange={setTarget}
+            onTargetChange={(next) => { setTarget(next); setModel(workspaceModelDefault(next)); }}
             onKindChange={setKind}
+            onModelChange={setModel}
           />
           {error ? <p className="wand-new-session-error" role="alert">{error}</p> : null}
         </div>

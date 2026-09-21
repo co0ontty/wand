@@ -1348,6 +1348,7 @@ export function WorkspacesPanel({
     task: TaskSummary,
     target: WorkspaceSessionTarget,
     kind: WorkspaceSessionKind,
+    model: string,
   ) => {
     const rt = runtime();
     if (!rt) throw new Error("工作空间运行环境尚未就绪，请刷新页面后重试。");
@@ -1360,6 +1361,7 @@ export function WorkspacesPanel({
       cwd: task.cwd,
       target,
       kind,
+      model: model || undefined,
     });
     toast(target === "shell" ? "已在该任务中新建空白终端" : "已在该任务中新建会话", "success");
     await reload();
@@ -1581,12 +1583,12 @@ export function WorkspacesPanel({
         <WorkspaceAgentDialog
           open
           key={pendingNewSessionTask.id}
-          onConfirm={(target, kind) => {
+          onConfirm={(target, kind, model) => {
             const task = pendingNewSessionTask;
             const group = groups.find((candidate) => candidate.tasks.some((item) => item.id === task.id));
             setPendingNewSessionTask(null);
             if (!task || !group) return;
-            void newSessionInTask(group, task, target, kind).catch((cause) => {
+            void newSessionInTask(group, task, target, kind, model).catch((cause) => {
               toast(describeError(cause, "无法在任务中新建会话。"), "danger");
             });
           }}

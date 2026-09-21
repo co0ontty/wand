@@ -94,6 +94,22 @@ Web `selectSession` → 切旧终端/视图、保存选中 ID → HTTP 详情与
 
 任务内请求带 cwd、workspaceId、workspaceTaskId；Qoder 映射 `qodercli`。旧文档“任务内＋只开 PTY”已失效。
 
+模型选择属于同一条链路，四处入口（新建任务对话框、工作区/标签栏“＋”、任务欢迎页选择器、
+通用“新对话”对话框）共用归一化 `src/web-ui/react/model-catalog.ts`：
+
+- 目录来自 `GET /api/models`（为空的 provider 兜底一项“跟随服务端默认”），选择器值 `default` 表示不指定。
+- `model` 一路传到 `startSessionInCwd`（任务入口）或 `buildCreateRequest`（通用入口）：structured 进
+  `POST /api/structured-sessions` 的 `model`，PTY 进 `POST /api/commands`，由 `processCommandForMode`
+  注入 `--model`（macOS 客户端的 PTY 请求也一直带 model）。空白 shell 不显示模型字段。
+- 选择结果写回 provider 级记忆（`setChatModelForProvider` / `localStorage["wand-chat-model-<provider>"]`），
+  下次打开选择器按上次选择预选；provider 切换时重算。
+- 目录带 60s 缓存（`loadWandModelCatalog`），失败不写缓存：React 外壳在登录前就已挂载，过早请求会拿
+  401，所以拉取挂在“对话框打开”之后（`useWandModelCatalog(enabled)`），下一次打开会重试。
+
+结构化创建接口默认等首轮跑完才回 HTTP，只有 Web legacy 会带 `respondImmediately: true`（`createStructuredSession`
+在带 prompt 时总是带），让首轮进展改走 websocket。原生客户端没带这个 flag，仍按“响应返回 = 首轮结束”工作，
+不能把默认行为改成非阻塞。`/api/sessions/:id/input` 与 `/api/wand-tasks/:id/dispatch` 早就是这个语义。
+
 Web 同任务“先 openTask 再建会话”已有 await，**但跨任务 A→B 的详情响应仍缺少当前 task generation 校验**；晚到 A 可覆盖 B 的布局/选中会话（R11）。不能把已修复的同任务创建顺序问题与这一风险混为一谈。
 
 通用新会话、快捷启动、空输入区启动和兼容 deep link 仍是旁路。审查绑定时需逐一检查入口，不能只测任务行上的＋。

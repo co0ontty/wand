@@ -3,7 +3,7 @@ import { configureWorkspacesRuntime } from "../react/workspaces/controller";
 import { clearActiveWorkspaceContext, setActiveWorkspaceContext, workspaceContextStore } from "../react/workspaces/workspace-context";
 import { persistActiveTask } from "./active-task";
 import { closeReactOverlays } from "./react-overlay-coordinator";
-import { dismissDrawerIfOverlay, goHome, refreshAll, selectSession, startSessionInCwd } from "./session-engine";
+import { dismissDrawerIfOverlay, getChatModelForProvider, goHome, refreshAll, selectSession, setChatModelForProvider, startSessionInCwd } from "./session-engine";
 import { getEffectiveCwd } from "./render";
 import { showToast } from "./notifications";
 import { confirmDelete } from "./sidebar";
@@ -190,6 +190,7 @@ export function installWorkspacesLegacyAdapter(): void {
         shell: payload.target === "shell",
         provider: payload.target === "shell" ? undefined : payload.target,
         kind: payload.target === "shell" ? "pty" : (payload.kind ?? "structured"),
+        model: payload.model,
         initialInput: payload.prompt,
       })).then(async (created) => {
         const sessionId = typeof created === "string" && created
@@ -263,6 +264,13 @@ export function installWorkspacesLegacyAdapter(): void {
     },
     disposeAllSessionTerminals() {
       disposeAllPooledTerminals();
+    },
+    modelPreference(provider) {
+      // 与 composer 的按 provider 记忆同源；空串表示还没选过，UI 回落到「跟随服务端默认」。
+      return getChatModelForProvider(provider) || "";
+    },
+    rememberModelPreference(provider, model) {
+      setChatModelForProvider(provider, model || "");
     },
     toast(message, tone) {
       showToast(message, tone);

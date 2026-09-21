@@ -29,6 +29,7 @@ function harness() {
   const writes: Array<{ id: string; layout: unknown; revision?: number; result: ReturnType<typeof deferred<any>> }> = [];
   const errors: string[] = [];
   const starts: Array<{ cwd: string; options: Record<string, unknown> }> = [];
+  const models: Record<string, string> = {};
   const repository = {
     getTask(id: string) { const result = deferred<WorkspaceTaskDetail>(); reads.push({ id, result }); return result.promise; },
     saveTaskLayout(id: string, layout: unknown, revision?: number) {
@@ -54,6 +55,8 @@ function harness() {
     "./session-engine": {
       goHome: () => { state.selectedId = null; }, dismissDrawerIfOverlay: () => {},
       selectSession: (id: string) => { state.selectedId = id; },
+      getChatModelForProvider: (provider: string) => models[provider] ?? "",
+      setChatModelForProvider: (provider: string, model: string) => { models[provider] = model; },
       startSessionInCwd: (cwd: string, options: Record<string, unknown>) => {
         starts.push({ cwd, options });
         return Promise.resolve("new-session");
@@ -74,7 +77,7 @@ test("task prompts start a bound session for both PTY and structured runners", a
   for (const kind of ["pty", "structured"] as const) {
     const h = harness();
     const created = h.runtime.newTaskSession({ taskId: "A", workspaceId: "workspace", cwd: "/A",
-      target: "pi", kind, prompt: "实现这个任务的第一步" });
+      target: "pi", kind, prompt: "实现这个任务的第一步", model: "claude-opus-4-1" });
     await tick();
     h.reads[0].result.resolve(fixture("A"));
     await created;
@@ -82,7 +85,18 @@ test("task prompts start a bound session for both PTY and structured runners", a
     assert.equal(h.starts[0].options.workspaceTaskId, "A");
     assert.equal(h.starts[0].options.kind, kind);
     assert.equal(h.starts[0].options.initialInput, "实现这个任务的第一步");
+    // 选择器里选的模型必须跟会话一起提交，PTY 与结构化都要。
+    assert.equal(h.starts[0].options.model, "claude-opus-4-1");
   }
+});
+
+test("model preference reads and writes the composer's per-provider memory", () => {
+  const h = harness();
+  assert.equal(h.runtime.modelPreference("claude"), "");
+  h.runtime.rememberModelPreference("claude", "opus");
+  assert.equal(h.runtime.modelPreference("claude"), "opus");
+  h.runtime.rememberModelPreference("claude", "");
+  assert.equal(h.runtime.modelPreference("claude"), "");
 });
 
 test("adapter routes restoration, user edits and creation through one task revision queue", async () => {

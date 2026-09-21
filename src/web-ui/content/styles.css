@@ -642,9 +642,6 @@
       flex-shrink: 0;
     }
 
-    .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); }
-    .status-dot.active { background: var(--success); box-shadow: 0 0 8px var(--success); }
-
     .main-layout {
       display: flex;
       flex: 1;
@@ -3150,70 +3147,6 @@
         0 10px 26px rgba(184, 92, 55, 0.36),
         inset 0 1px 0 rgba(255, 255, 255, 0.18),
         0 0 0 3px rgba(214, 123, 82, 0.35);
-    }
-
-    /* Mini keyboard FAB button */
-    .mini-keyboard-fab {
-      position: fixed;
-      bottom: 60px;
-      right: 16px;
-      width: 44px;
-      height: 44px;
-      border-radius: 50%;
-      background: var(--accent);
-      color: white;
-      border: none;
-      font-size: 15.75px;
-      cursor: pointer;
-      display: none;
-      align-items: center;
-      justify-content: center;
-      box-shadow: 0 4px 16px rgba(184, 92, 55, 0.35);
-      z-index: 100;
-      transition: all 0.2s var(--ease-spring);
-    }
-    .mini-keyboard-fab.visible { display: flex; }
-    .mini-keyboard-fab:hover {
-      transform: scale(1.1);
-      box-shadow: 0 6px 20px rgba(184, 92, 55, 0.45);
-    }
-    .mini-keyboard-fab:active {
-      transform: scale(0.95);
-    }
-
-    /* Mini keyboard panel */
-    .mini-keyboard {
-      position: fixed;
-      bottom: 60px;
-      right: 16px;
-      background: rgba(42, 31, 22, 0.96);
-      border: 1px solid rgba(122, 91, 64, 0.5);
-      border-radius: var(--radius-lg);
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-      z-index: 1000;
-      backdrop-filter: blur(16px);
-      overflow: hidden;
-      min-width: 260px;
-      animation: mkSlideUp 0.2s var(--ease-out-expo);
-    }
-    .mini-keyboard.hidden { display: none; }
-    @keyframes mkSlideUp {
-      from { opacity: 0; transform: translateY(12px) scale(0.96); }
-      to { opacity: 1; transform: translateY(0) scale(1); }
-    }
-
-    /* Mobile keyboard overlap compensation */
-    @media (max-width: 640px) {
-      .mini-keyboard {
-        bottom: 20px;
-        right: 10px;
-        left: 10px;
-        min-width: 0;
-      }
-      .mini-keyboard-fab {
-        bottom: 20px;
-        right: 16px;
-      }
     }
 
     /* ===== 聊天容器 ===== */
@@ -9671,22 +9604,6 @@
       }
       .chat-unread-bubble-count {
         font-size: 10.08px;
-      }
-
-      /* 小键盘 FAB */
-      .mini-keyboard-fab {
-        width: 40px;
-        height: 40px;
-        bottom: 50px;
-        right: 10px;
-        font-size: 14px;
-      }
-      .mini-keyboard {
-        bottom: 50px;
-        right: 8px;
-        left: 8px;
-        min-width: 0;
-        border-radius: 10px;
       }
 
       .chat-container {

@@ -1,11 +1,18 @@
 import { type FormEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
 import * as React from "react";
 
+import {
+  MODEL_CATALOG_DEFAULT_VALUE,
+  pickedModelId,
+  wandModelOptions,
+} from "../model-catalog";
+import { useWandModelCatalog } from "../use-model-catalog";
 import { nextChoice, type ChoiceNavigationKey } from "../new-session/choice-navigation";
 import { httpNewSessionRepository } from "../new-session/repository";
 import { ProviderLogo } from "../provider-logo";
-import { WandButton, WandIcon } from "../ui";
-import type { WorkspaceSessionKind, WorkspaceSessionTarget } from "./types";
+import { WandButton, WandIcon, WandSelect } from "../ui";
+import { workspacesStore } from "./controller";
+import type { WorkspaceProvider, WorkspaceSessionKind, WorkspaceSessionTarget } from "./types";
 
 export const WORKSPACE_AGENT_OPTIONS: ReadonlyArray<{
   value: WorkspaceSessionTarget;
@@ -44,20 +51,36 @@ const RADIO_NAVIGATION_KEYS = new Set<ChoiceNavigationKey>([
 export interface WorkspaceAgentPickerProps {
   target: WorkspaceSessionTarget;
   kind: WorkspaceSessionKind;
+  /** 启动会话时使用的模型；`default` 表示跟随服务端配置的默认模型。 */
+  model: string;
   disabled?: boolean;
   persistPreferences?: boolean;
   onTargetChange(target: WorkspaceSessionTarget): void;
   onKindChange(kind: WorkspaceSessionKind): void;
+  onModelChange(model: string): void;
+}
+
+/**
+ * 某个 CLI 工具「上次用过的模型」：与输入框 composer 的记忆同源（localStorage + 会话状态）。
+ * 空值表示还没选过，回落到「跟随服务端默认」。
+ */
+export function workspaceModelDefault(provider: WorkspaceSessionTarget): string {
+  if (provider === "shell") return MODEL_CATALOG_DEFAULT_VALUE;
+  return workspacesStore.getRuntime()?.modelPreference(provider as WorkspaceProvider)
+    || MODEL_CATALOG_DEFAULT_VALUE;
 }
 
 export function WorkspaceAgentPicker({
   target,
   kind,
+  model,
   disabled = false,
   persistPreferences = true,
   onTargetChange,
   onKindChange,
+  onModelChange,
 }: WorkspaceAgentPickerProps) {
+  const catalog = useWandModelCatalog();
   const targetRefs = useRef<Partial<Record<WorkspaceSessionTarget, HTMLButtonElement | null>>>({});
   const kindRefs = useRef<Partial<Record<WorkspaceSessionKind, HTMLButtonElement | null>>>({});
 
@@ -74,6 +97,15 @@ export function WorkspaceAgentPicker({
     onKindChange(next);
     if (persistPreferences) {
       void httpNewSessionRepository.savePreferences({ defaultSessionKind: next }).catch(() => undefined);
+    }
+  }
+
+  /** 选中的模型写回按 provider 的记忆（与 composer 同一份），下次打开默认沿用。 */
+  function selectModel(next: string): void {
+    if (disabled) return;
+    onModelChange(next);
+    if (persistPreferences && target !== "shell") {
+      workspacesStore.getRuntime()?.rememberModelPreference(target as WorkspaceProvider, pickedModelId(next));
     }
   }
 
@@ -151,6 +183,24 @@ export function WorkspaceAgentPicker({
           </div>
         </fieldset>
       ) : null}
+      {target !== "shell" ? (
+        <fieldset className="wand-new-session-fieldset wand-workspace-agent-model" disabled={disabled}>
+          <legend className="wand-new-session-field-label">模型</legend>
+          <WandSelect
+            value={model || MODEL_CATALOG_DEFAULT_VALUE}
+            options={wandModelOptions(catalog, target as WorkspaceProvider)}
+            ariaLabel="模型"
+            searchable
+            searchPlaceholder="搜索模型"
+            disabled={disabled}
+            className="wand-workspace-agent-model-select"
+            onValueChange={selectModel}
+          />
+          <p className="wand-new-session-field-hint">
+            所选模型随会话启动一起提交；「跟随服务端默认」沿用服务端配置的默认模型。
+          </p>
+        </fieldset>
+      ) : null}
     </>
   );
 }
@@ -168,10 +218,11 @@ export function WorkspaceWelcomeChooser({
   subtitle: string;
   cwd?: string;
   submitLabel?: string;
-  onStart(target: WorkspaceSessionTarget, kind: WorkspaceSessionKind): void | Promise<void>;
+  onStart(target: WorkspaceSessionTarget, kind: WorkspaceSessionKind, model: string): void | Promise<void>;
 }) {
   const [target, setTarget] = useState<WorkspaceSessionTarget>("claude");
   const [kind, setKind] = useState<WorkspaceSessionKind>("structured");
+  const [model, setModel] = useState(MODEL_CATALOG_DEFAULT_VALUE);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -183,7 +234,10 @@ export function WorkspaceWelcomeChooser({
         const savedProvider = WORKSPACE_AGENT_OPTIONS.some((option) => option.value === config.defaultProvider)
           ? config.defaultProvider as WorkspaceSessionTarget
           : null;
-        if (savedProvider && savedProvider !== "shell") setTarget(savedProvider);
+        if (savedProvider && savedProvider !== "shell") {
+          setTarget(savedProvider);
+          setModel(workspaceModelDefault(savedProvider));
+        }
         if (config.defaultSessionKind === "pty" || config.defaultSessionKind === "structured") {
           setKind(config.defaultSessionKind);
         }
@@ -198,7 +252,8 @@ export function WorkspaceWelcomeChooser({
     setSubmitting(true);
     setError("");
     try {
-      await onStart(target, target === "shell" ? "pty" : kind);
+      // 选择器用 `default` 表示跟随服务端默认；交给调用方时统一换成真实模型 id（空串 = 默认）。
+      await onStart(target, target === "shell" ? "pty" : kind, pickedModelId(model));
     } catch (cause) {
       setError(cause instanceof Error && cause.message ? cause.message : "无法启动会话。");
     } finally {
@@ -216,9 +271,11 @@ export function WorkspaceWelcomeChooser({
         <WorkspaceAgentPicker
           target={target}
           kind={kind}
+          model={model}
           disabled={submitting}
-          onTargetChange={setTarget}
+          onTargetChange={(next) => { setTarget(next); setModel(workspaceModelDefault(next)); }}
           onKindChange={setKind}
+          onModelChange={setModel}
         />
         {error ? <p className="wand-new-session-error" role="alert">{error}</p> : null}
         <WandButton kind="primary" size="large" type="submit" disabled={submitting}>

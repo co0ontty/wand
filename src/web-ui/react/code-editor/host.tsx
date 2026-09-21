@@ -1,6 +1,8 @@
 import * as React from "react";
 import { Fragment, type KeyboardEvent, type RefObject, useEffect, useRef, useSyncExternalStore } from "react";
-import { tokenizeFilePreviewCode, type FilePreviewCodeToken } from "../file-preview/model";
+import { isMarkdownPreview, tokenizeFilePreviewCode, type FilePreviewCodeToken } from "../file-preview/model";
+import { MarkdownPreview } from "../file-preview/markdown";
+import { markdownPreviewStyles } from "../file-preview/markdown-styles";
 import { WandIcon } from "../ui";
 import { codeEditorController, codeEditorStore } from "./controller";
 import { codeEditorFindMatches, maxCodeEditorFindHighlights, type CodeEditorFindMatch } from "./model";
@@ -135,6 +137,13 @@ function EditorBody({ snapshot, editorRef, ranges, activeRange }: {
   }
   const file = snapshot.file;
   if (!file) return <div className="wand-code-editor-state">选择文件后将在这里编辑。</div>;
+  if (snapshot.preview && isMarkdownPreview(file)) {
+    return (
+      <div className="wand-code-editor-markdown">
+        <MarkdownPreview content={file.draft} fontSize={snapshot.fontSize} wrap={snapshot.wrap}/>
+      </div>
+    );
+  }
   const content = file.draft;
   const lineCount = Math.max(1, content.split("\n").length);
   return (
@@ -253,7 +262,7 @@ function FindBar({ snapshot, matchCount, activeIndex, activeLine, inputRef }: {
   );
 }
 
-function handleEditorKeydown(event: KeyboardEvent<HTMLTextAreaElement>, content: string): void {  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+function handleEditorKeydown(event: KeyboardEvent<HTMLTextAreaElement>, content: string): void {if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
     event.preventDefault();
     event.stopPropagation();
     run({ type: "save" });
@@ -284,6 +293,8 @@ export function CodeEditorHost() {
   const findInputRef = useRef<HTMLInputElement>(null);
 
   const file = snapshot.file;
+  const markdown = file ? isMarkdownPreview(file) : false;
+  const rendered = markdown && snapshot.preview;
   const content = file?.draft ?? "";
   // Matches are derived from the live draft instead of stored, so they can never
   // drift from what is on screen after an edit or a tab switch.
@@ -324,6 +335,13 @@ export function CodeEditorHost() {
     editor.scrollTop = 0;
   }, [snapshot.activePath, snapshot.status]);
 
+  function openFind(): void {
+    // Search walks the source text, so a rendered Markdown file switches back
+    // to source first instead of silently finding nothing.
+    if (rendered) run({ type: "preview.toggle" });
+    run({ type: "find.open" });
+  }
+
   function handleKeydown(event: KeyboardEvent<HTMLDivElement>): void {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
       event.preventDefault();
@@ -332,7 +350,7 @@ export function CodeEditorHost() {
       const selected = editor && editor.selectionEnd > editor.selectionStart
         ? editor.value.slice(editor.selectionStart, editor.selectionEnd)
         : "";
-      run({ type: "find.open" });
+      openFind();
       if (selected && !selected.includes("\n")) run({ type: "find.set", query: selected });
       return;
     }
@@ -352,7 +370,7 @@ export function CodeEditorHost() {
 
   return (
     <>
-      <style id="wand-code-editor-styles">{codeEditorStyles}</style>
+      <style id="wand-code-editor-styles">{codeEditorStyles}{markdownPreviewStyles}</style>
       <div
         className={`wand-code-editor-host${snapshot.wrap ? " wrap" : ""}`}
         hidden={hidden}
@@ -410,10 +428,21 @@ export function CodeEditorHost() {
             >
               撤销改动
             </button>
+            {markdown ? (
+              <button
+                type="button"
+                className={`wand-code-editor-btn${rendered ? " active" : ""}`}
+                aria-pressed={rendered}
+                title={rendered ? "显示 Markdown 源码" : "渲染 Markdown 预览"}
+                onClick={() => run({ type: "preview.toggle" })}
+              >
+                预览
+              </button>
+            ) : null}
             <button
               type="button"
               className="wand-code-editor-btn"
-              onClick={() => run({ type: "find.open" })}
+              onClick={openFind}
               aria-pressed={snapshot.findOpen}
               title="在文件中查找 (⌘F)"
             >
@@ -421,7 +450,7 @@ export function CodeEditorHost() {
             </button>
             <button
               type="button"
-              className="wand-code-editor-btn"
+              className={`wand-code-editor-btn${snapshot.wrap ? " active" : ""}`}
               onClick={() => run({ type: "wrap.toggle" })}
               aria-pressed={snapshot.wrap}
             >

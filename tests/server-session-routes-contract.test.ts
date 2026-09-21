@@ -355,3 +355,91 @@ test("a session created inside a sidebar task reaches the board card immediately
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("首轮提示词不再把创建请求挂在 HTTP 上", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-session-respond-immediately-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const config = { ...defaultConfig(), defaultCwd: root, startupCommands: [] };
+  const processes = new ProcessManager(config, storage, root);
+  const prompts: string[] = [];
+  let resolveTurn: (() => void) | null = null;
+  const live = {
+    id: "structured-1",
+    cwd: root,
+    sessionKind: "structured",
+    provider: "claude",
+    output: "",
+    messages: [],
+  } as unknown as Record<string, unknown>;
+  const structured = {
+    createSession: () => live,
+    get: () => live,
+    sendMessage: (id: string, prompt: string) => {
+      prompts.push(`${id}:${prompt}`);
+      // 真实 runner 的首轮可能跑几分钟：这里用永不 resolve 的 promise 模拟。
+      return new Promise((resolve) => { resolveTurn = () => resolve(live); });
+    },
+  } as unknown as StructuredSessionManager;
+  const sessions = new SessionRegistry(processes, structured, storage);
+  const app = express();
+  app.use(express.json());
+  registerSessionRoutes(app, processes, structured, storage, config.defaultMode, config, sessions);
+  app.use(jsonErrorHandler);
+  const server = createServer(app);
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => { server.off("error", reject); resolve(); });
+  });
+
+  try {
+    const address = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+    const responded = await Promise.race([
+      fetch(`${baseUrl}/api/structured-sessions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cwd: root, provider: "claude", prompt: "开始做这个任务", respondImmediately: true }),
+      }),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000)),
+    ]);
+    assert.ok(responded, "带了提示词的创建请求必须立刻返回，而不是等首轮跑完");
+    assert.equal(responded.status, 201);
+    assert.equal((await responded.json() as { id: string }).id, "structured-1");
+    assert.deepEqual(prompts, ["structured-1:开始做这个任务"]);
+    assert.ok(resolveTurn, "提示词必须在后台真的发出去");
+
+    // 不带 flag 时维持原契约：原生客户端靠「响应返回 = 首轮结束」。
+    prompts.length = 0;
+    let settleTurn: (() => void) | null = null;
+    const blocking = {
+      id: "structured-2",
+      cwd: root,
+      sessionKind: "structured",
+      provider: "claude",
+      output: "",
+      messages: [],
+    } as unknown as Record<string, unknown>;
+    structured.createSession = () => blocking;
+    structured.get = () => blocking;
+    structured.sendMessage = () => new Promise((resolve) => { settleTurn = () => resolve(blocking); });
+    const pending = fetch(`${baseUrl}/api/structured-sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cwd: root, provider: "claude", prompt: "继续" }),
+    });
+    const early = await Promise.race([
+      pending.then(() => "responded"),
+      new Promise<string>((resolve) => setTimeout(() => resolve("waiting"), 300)),
+    ]);
+    assert.equal(early, "waiting", "默认行为必须等首轮结束，不能悄悄改成非阻塞");
+    settleTurn?.();
+    const blocked = await pending;
+    assert.equal(blocked.status, 201);
+    assert.equal((await blocked.json() as { id: string }).id, "structured-2");
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    processes.dispose();
+    storage.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

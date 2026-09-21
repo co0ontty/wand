@@ -16,6 +16,12 @@ import {
   supportedWandTaskAgentModes,
 } from "../../../task-types";
 import type { WandSelectOption } from "../ui";
+import {
+  MODEL_CATALOG_DEFAULT_VALUE,
+  normalizeWandModelCatalog,
+  wandModelOptions,
+  type WandModelCatalog,
+} from "../model-catalog";
 
 export type IssueAgentProvider = WandTaskAgentProvider;
 
@@ -54,7 +60,7 @@ export const ISSUE_AGENT_MODES: ReadonlyArray<{
   { value: "default", label: "标准", description: "逐步确认操作" },
 ];
 
-export const ISSUE_AGENT_DEFAULT_MODEL = "default";
+export const ISSUE_AGENT_DEFAULT_MODEL = MODEL_CATALOG_DEFAULT_VALUE;
 
 /** 当前 provider 支持的工作模式选项；Codex 只支持全限一种。 */
 export function issueAgentModeOptions(provider: IssueAgentProvider): WandSelectOption[] {
@@ -168,74 +174,17 @@ export interface IssueWorkspace {
   kind?: string;
 }
 
-/** `/api/models` 的浏览器侧视图；未加载 / 拉取失败时给空目录。 */
-export interface IssueModelCatalog {
-  byProvider: Record<IssueAgentProvider, WandSelectOption[]>;
-  refreshedAt: string;
-}
-
-interface ModelEntry {
-  id?: unknown;
-  label?: unknown;
-}
-
-function modelEntryToOption(entry: ModelEntry): WandSelectOption | null {
-  const id = typeof entry.id === "string" ? entry.id.trim() : "";
-  if (!id) return null;
-  const label = typeof entry.label === "string" && entry.label.trim() ? entry.label.trim() : id;
-  return { value: id, label };
-}
-
-const MODEL_KEYS: ReadonlyArray<readonly [IssueAgentProvider, string, string]> = [
-  ["claude", "models", "defaultModel"],
-  ["codex", "codexModels", "defaultCodexModel"],
-  ["opencode", "opencodeModels", "defaultOpenCodeModel"],
-  ["grok", "grokModels", "defaultGrokModel"],
-  ["qoder", "qoderModels", "defaultQoderModel"],
-  ["pi", "piModels", "defaultPiModel"],
-];
-
 /**
- * 把 `/api/models` 的 payload 归一化成每个 provider 的下拉选项。
- * 模型列表里带 `default` 时直接用；否则补一项「跟随服务端默认」，
- * 这样用户即使只有一个候选模型也能派发，而不会卡在空列表。
+ * `/api/models` 的浏览器侧视图；看板与新任务选择器共用同一份归一化实现
+ * （见 `../model-catalog`）。未加载 / 拉取失败时给空目录。
  */
-export function normalizeIssueModelCatalog(payload: unknown): IssueModelCatalog {
-  const root = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
-  const defaults = root.defaultModels && typeof root.defaultModels === "object"
-    ? root.defaultModels as Record<string, unknown>
-    : {};
-  const byProvider = {} as Record<IssueAgentProvider, WandSelectOption[]>;
-  for (const [provider, listKey, defaultKey] of MODEL_KEYS) {
-    const raw = Array.isArray(root[listKey]) ? root[listKey] as ModelEntry[] : [];
-    const options = raw.map(modelEntryToOption).filter((option): option is WandSelectOption => option !== null);
-    const hasDefault = options.some((option) => option.value === ISSUE_AGENT_DEFAULT_MODEL);
-    if (!hasDefault) {
-      const candidate = typeof defaults[provider] === "string"
-        ? defaults[provider] as string
-        : typeof root[defaultKey] === "string" ? root[defaultKey] as string : "";
-      const fallback = candidate.trim();
-      options.unshift({
-        value: ISSUE_AGENT_DEFAULT_MODEL,
-        label: fallback ? `跟随服务端默认（${fallback}）` : "跟随服务端默认",
-      });
-    }
-    byProvider[provider] = options;
-  }
-  return {
-    byProvider,
-    refreshedAt: typeof root.refreshedAt === "string" ? root.refreshedAt : "",
-  };
-}
+export type IssueModelCatalog = WandModelCatalog;
+
+/** 把 `/api/models` 的 payload 归一化成每个 provider 的下拉选项。 */
+export const normalizeIssueModelCatalog = normalizeWandModelCatalog;
 
 /** 目录尚未加载时也要能渲染下拉，给出「跟随服务端默认」占位。 */
-export function issueAgentModelOptions(
-  catalog: IssueModelCatalog | null,
-  provider: IssueAgentProvider,
-): WandSelectOption[] {
-  const options = catalog?.byProvider[provider];
-  return options && options.length > 0 ? options : [{ value: ISSUE_AGENT_DEFAULT_MODEL, label: "跟随服务端默认" }];
-}
+export const issueAgentModelOptions = wandModelOptions;
 
 /**
  * 切换 CLI 工具时尽量保留已选模型与工作模式；新 provider 不支持时回退到合法值，

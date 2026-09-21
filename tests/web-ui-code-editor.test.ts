@@ -20,10 +20,11 @@ import type { FilePreviewFailure } from "../src/web-ui/react/file-preview/types.
 
 function textFile(path: string, content = "", name?: string): CodeEditorFile {
   const leaf = name ?? path.split("/").pop() ?? "file";
+  const dot = leaf.lastIndexOf(".");
   return {
     path,
     name: leaf,
-    ext: ".ts",
+    ext: dot > 0 ? leaf.slice(dot) : "",
     size: content.length,
     baseline: content,
     draft: content,
@@ -512,4 +513,59 @@ test("find case toggle restarts navigation and switching tabs resets the positio
   assert.equal(store.getSnapshot().findIndex, 0);
   assert.equal(store.getSnapshot().findQuery, "note");
   assert.equal(store.getSnapshot().findCaseSensitive, true);
+});
+
+test("Markdown files open rendered and can toggle back to source", async () => {
+  const repo = new MemoryCodeEditorRepository([
+    textFile("/app/README.md", "# 标题\n\n正文", "README.md"),
+    textFile("/app/notes.MARKDOWN", "note", "notes.MARKDOWN"),
+    textFile("/app/a.ts", "const x = 1;"),
+  ]);
+  const module_ = createCodeEditorModule({ repository: repo, runtime: noopRuntime });
+  const { controller, store } = module_;
+
+  await controller.open("/app/README.md");
+  assert.equal(store.getSnapshot().preview, true);
+  assert.equal(await controller.execute({ type: "preview.toggle" }), true);
+  assert.equal(store.getSnapshot().preview, false);
+  await controller.execute({ type: "preview.toggle" });
+  assert.equal(store.getSnapshot().preview, true);
+
+  // .markdown counts too, and each tab keeps its own mode.
+  await controller.open("/app/notes.MARKDOWN");
+  assert.equal(store.getSnapshot().preview, true);
+  await controller.execute({ type: "preview.toggle" });
+  await controller.execute({ type: "activate", path: "/app/README.md" });
+  assert.equal(store.getSnapshot().preview, true);
+
+  // Source files never enter the rendered mode.
+  await controller.open("/app/a.ts");
+  assert.equal(store.getSnapshot().preview, false);
+  assert.equal(await controller.execute({ type: "preview.toggle" }), false);
+  assert.equal(store.getSnapshot().preview, false);
+
+  // Reopening a Markdown tab resets it to rendered, like a fresh open.
+  await controller.execute({ type: "activate", path: "/app/notes.MARKDOWN" });
+  await controller.execute({ type: "close", path: "/app/notes.MARKDOWN" });
+  await controller.open("/app/notes.MARKDOWN");
+  assert.equal(store.getSnapshot().preview, true);
+});
+
+test("entering the rendered Markdown mode closes the find bar", async () => {
+  const repo = new MemoryCodeEditorRepository([textFile("/app/README.md", "# 标题", "README.md")]);
+  const module_ = createCodeEditorModule({ repository: repo, runtime: noopRuntime });
+  const { controller, store } = module_;
+  await controller.open("/app/README.md");
+  await controller.execute({ type: "preview.toggle" });
+  assert.equal(store.getSnapshot().preview, false);
+  await controller.execute({ type: "find.set", query: "标题" });
+  assert.equal(store.getSnapshot().findOpen, true);
+
+  await controller.execute({ type: "preview.toggle" });
+  assert.equal(store.getSnapshot().preview, true);
+  assert.equal(store.getSnapshot().findOpen, false);
+  // Leaving the preview keeps a closed find bar closed.
+  assert.equal(await controller.execute({ type: "preview.toggle" }), true);
+  assert.equal(store.getSnapshot().findOpen, false);
+  assert.equal(store.getSnapshot().findQuery, "标题");
 });

@@ -76,7 +76,7 @@ function ShellBlankChat({ className, queueRef, workspaceTask, workspaceProject }
 }) {
   const dispatch = useUiDispatch();
 
-  const startInTask = async (target: WorkspaceSessionTarget, kind: WorkspaceSessionKind) => {
+  const startInTask = async (target: WorkspaceSessionTarget, kind: WorkspaceSessionKind, model: string) => {
     if (!workspaceTask) return;
     const runtime = workspacesStore.getRuntime();
     if (!runtime) throw new Error("工作空间运行环境尚未就绪，请刷新页面后重试。");
@@ -87,6 +87,7 @@ function ShellBlankChat({ className, queueRef, workspaceTask, workspaceProject }
         cwd: workspaceTask.cwd,
         target,
         kind,
+        model: model || undefined,
       });
       void runtime.refreshSessions();
     } catch (error) {
@@ -94,7 +95,7 @@ function ShellBlankChat({ className, queueRef, workspaceTask, workspaceProject }
     }
   };
 
-  const startInProject = async (target: WorkspaceSessionTarget, kind: WorkspaceSessionKind) => {
+  const startInProject = async (target: WorkspaceSessionTarget, kind: WorkspaceSessionKind, model: string) => {
     if (!workspaceProject) return;
     const runtime = workspacesStore.getRuntime();
     if (!runtime) throw new Error("工作空间运行环境尚未就绪，请刷新页面后重试。");
@@ -115,6 +116,7 @@ function ShellBlankChat({ className, queueRef, workspaceTask, workspaceProject }
         cwd: created.cwd || workspaceProject.cwd,
         target,
         kind,
+        model: model || undefined,
       });
       void runtime.refreshSessions();
     } catch (error) {

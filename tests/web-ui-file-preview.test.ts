@@ -98,9 +98,13 @@ test("safe code and Markdown models preserve formatting without executable HTML"
   assert.deepEqual(blocks.map((block) => block.type), ["heading", "table", "code", "paragraph"]);
   assert.equal(blocks.find((block) => block.type === "table")?.aligns[1], "right");
 
-  const host = readFileSync(new URL("../src/web-ui/react/file-preview/host.tsx", import.meta.url), "utf8");
-  assert.ok(!host.includes("dangerouslySetInnerHTML"));
-  assert.ok(!host.includes("innerHTML ="));
+  // React owns every Markdown node: neither the dialog host nor the shared
+  // renderer may inject HTML strings into the page.
+  for (const file of ["host.tsx", "markdown.tsx"]) {
+    const source = readFileSync(new URL(`../src/web-ui/react/file-preview/${file}`, import.meta.url), "utf8");
+    assert.ok(!source.includes("dangerouslySetInnerHTML"), `${file} must not set inner HTML`);
+    assert.ok(!source.includes("innerHTML ="), `${file} must not set inner HTML`);
+  }
 });
 
 test("memory repository clones reads, records calls, saves text, and exposes failures", async () => {

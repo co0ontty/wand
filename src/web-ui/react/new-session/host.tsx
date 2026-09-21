@@ -10,8 +10,14 @@ import {
   useSyncExternalStore,
 } from "react";
 import * as React from "react";
+import {
+  MODEL_CATALOG_DEFAULT_VALUE,
+  pickedModelId,
+  wandModelOptions,
+} from "../model-catalog";
+import { useWandModelCatalog } from "../use-model-catalog";
 import { ProviderLogo } from "../provider-logo";
-import { WandButton, WandDialogSurface } from "../ui";
+import { WandButton, WandDialogSurface, WandSelect } from "../ui";
 import { newSessionController, newSessionStore } from "./controller";
 import {
   buildCreateRequest,
@@ -71,6 +77,14 @@ const MODES: ReadonlyArray<{
 
 const PROVIDER_VALUES = PROVIDERS.map((provider) => provider.value);
 const KIND_VALUES = KINDS.map((kind) => kind.value);
+
+/**
+ * 模型的预选值：显式文字优先，空值回落到「跟随服务端默认」（与工作区选择器同一套哨兵值）。
+ * 归一化 / 目录解析共用 `../model-catalog`，不在这里重写一遍。
+ */
+function preferredModel(selected?: string | null): string {
+  return (selected ?? "").trim() || MODEL_CATALOG_DEFAULT_VALUE;
+}
 
 function kindHint(provider: NewSessionProvider, kind: NewSessionKind): string {
   if (kind === "shell") {
@@ -151,6 +165,8 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
   const [suggestions, setSuggestions] = useState<NewSessionDefaults["recentPaths"]>([]);
   const [suggestionsActive, setSuggestionsActive] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  // 目录请求挂在对话框打开之后（登录前请求会 401），失败下次打开重试。
+  const modelCatalog = useWandModelCatalog(controller.open);
   const providerRefs = useRef<Partial<Record<NewSessionProvider, HTMLButtonElement | null>>>({});
   const kindRefs = useRef<Partial<Record<NewSessionKind, HTMLButtonElement | null>>>({});
   const modeRefs = useRef<Partial<Record<NewSessionMode, HTMLButtonElement | null>>>({});
@@ -182,6 +198,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
           ),
           cwd: controller.initialCwd,
           worktreeEnabled: false,
+          model: preferredModel(context?.selectedModels?.[loaded.config.defaultProvider]),
         });
         if (!context) setError("新建会话运行环境尚未就绪，请刷新页面后重试。");
       })
@@ -210,9 +227,12 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
 
   const selectProvider = useCallback((provider: NewSessionProvider) => {
     if (!defaults) return;
+    // 模型跟着 provider 走：切过去时预选该 provider 上次用过的模型。
+    const remembered = preferredModel(newSessionStore.getRuntime()?.getContext().selectedModels?.[provider]);
     setForm((current) => current ? {
       ...current,
       provider,
+      model: remembered,
       mode: safeMode(provider, current.mode, defaults.config.defaultMode),
     } : current);
     const currentMode = form
@@ -237,6 +257,12 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
     void repository.savePreferences({ defaultMode: mode })
       .catch((saveError) => console.warn("[wand] Failed to persist new-session defaults", saveError));
   }, [form, repository]);
+
+  const selectModel = useCallback((model: string) => {
+    setForm((current) => current ? { ...current, model } : current);
+    // 写回按 provider 的记忆，与任务选择器 / composer 同一份。
+    newSessionStore.getRuntime()?.rememberModel(form?.provider ?? "claude", pickedModelId(model));
+  }, [form?.provider]);
 
   const supportedModesForProvider = useMemo(
     () => form ? supportedModes(form.provider) : [],
@@ -439,6 +465,25 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                 ) : null}
               </div>
             </div>
+
+            {form.kind !== "shell" ? (
+              <fieldset className="wand-new-session-field wand-new-session-fieldset">
+                <legend className="wand-new-session-field-label">模型</legend>
+                <WandSelect
+                  value={preferredModel(form.model)}
+                  options={wandModelOptions(modelCatalog, form.provider)}
+                  ariaLabel="模型"
+                  searchable
+                  searchPlaceholder="搜索模型"
+                  disabled={submitting}
+                  className="wand-new-session-model-select"
+                  onValueChange={selectModel}
+                />
+                <p className="wand-new-session-field-hint">
+                  所选模型随会话启动一起提交；「跟随服务端默认」沿用服务端配置的默认模型。
+                </p>
+              </fieldset>
+            ) : null}
 
             <section className="wand-new-session-advanced" aria-label="高级选项">
               <button

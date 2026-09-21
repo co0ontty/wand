@@ -39,6 +39,11 @@ export interface CodeEditorSnapshot {
   saving: boolean;
   fontSize: number;
   wrap: boolean;
+  /**
+   * Rendered Markdown mode for the active tab. Markdown files open with it on;
+   * it stays false for every other file type.
+   */
+  preview: boolean;
   /** In-editor find bar (⌘F). Closed by default so the editor keeps full height. */
   findOpen: boolean;
   findQuery: string;
@@ -98,6 +103,7 @@ export type CodeEditorCommand =
   | { type: "revert" }
   | { type: "save" }
   | { type: "wrap.toggle" }
+  | { type: "preview.toggle" }
   | { type: "font.adjust"; delta: number }
   | { type: "find.open" }
   | { type: "find.close" }

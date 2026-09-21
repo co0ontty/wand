@@ -275,6 +275,8 @@ export interface NewTaskSessionPayload {
   target: WorkspaceSessionTarget;
   kind?: WorkspaceSessionKind;
   prompt?: string;
+  /** 启动会话时使用的模型 id；空串表示跟随服务端默认。 */
+  model?: string;
 }
 
 interface StartWorkspaceMergeAgentPayload {
@@ -311,6 +313,13 @@ export interface WorkspacesRuntimeAdapter {
   openTask(payload: OpenWorkspaceTaskPayload): void | Promise<void>;
   /** 标签栏「+」：在该任务 worktree 再起一个绑定会话（返回 promise 以便标签栏刷新）。 */
   newTaskSession(payload: NewTaskSessionPayload): void | Promise<unknown>;
+  /**
+   * 某个 CLI 工具「上次用过的模型」；新建任务 / 工作窗口用它预选模型。
+   * 与输入框 composer 的按 provider 记忆同源，空串表示还没选过。
+   */
+  modelPreference(provider: WorkspaceProvider): string;
+  /** 用户在创建时选了模型：写回按 provider 的记忆，下一次默认沿用。 */
+  rememberModelPreference(provider: WorkspaceProvider, model: string): void;
   /** Start one managed Agent at the project checkout to merge selected task worktrees. */
   startWorktreeMergeAgent(payload: StartWorkspaceMergeAgentPayload): void | Promise<unknown>;
   /** 工作窗口 / 分屏布局变更后回写持久化 + 更新活动上下文。 */

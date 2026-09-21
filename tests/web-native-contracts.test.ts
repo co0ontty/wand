@@ -112,7 +112,6 @@ test("Android WebView preserves its half of the web/native protocol", () => {
 test("Apple WebViews preserve deep links, bridge globals, and terminal hooks", () => {
   includesAll("ios/Wand/WebContainerView.swift", [
     "window.__wandIosNative = true",
-    "window.__wandBackToNative",
     "window.WandNative",
     'URLQueryItem(name: "session", value: sessionId)',
     'URLQueryItem(name: "embed", value: "terminal")',

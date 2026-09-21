@@ -13,6 +13,7 @@ import {
   getChatModelForProvider,
   loadSessions,
   selectSession,
+  setChatModelForProvider,
   updateDrawerState,
 } from "./session-engine";
 import { state, writeStoredBoolean } from "./state";
@@ -45,6 +46,10 @@ const legacyRuntime: NewSessionRuntimeAdapter = {
       },
       thinkingEffort: state.chatThinking || "off",
     };
+  },
+
+  rememberModel(provider, model): void {
+    setChatModelForProvider(provider, model || "");
   },
 
   async prepareCreate(kind) {

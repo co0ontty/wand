@@ -92,6 +92,11 @@ export const codeEditorStyles = String.raw`
 }
 .wand-code-editor-toolbar button.wand-code-editor-btn:hover:not(:disabled) { background: var(--bg-tertiary, #eee); }
 .wand-code-editor-toolbar button.wand-code-editor-btn:disabled { opacity: 0.5; cursor: default; }
+.wand-code-editor-toolbar button.wand-code-editor-btn.active {
+  border-color: var(--accent, #2563eb);
+  background: var(--accent-muted, rgba(37, 99, 235, 0.12));
+  color: var(--text-primary, #111);
+}
 .wand-code-editor-toolbar button.wand-code-editor-btn.primary {
   background: var(--accent-solid);
   border-color: var(--accent-solid);
@@ -128,6 +133,16 @@ export const codeEditorStyles = String.raw`
   flex: 1 1 auto;
   min-width: 0;
   overflow: auto;
+}
+/* Rendered Markdown: the wrapper owns scrolling, the document keeps its
+   readable measure (.wand-markdown-preview). */
+.wand-code-editor-markdown {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  background: var(--bg-primary, #fff);
+  overscroll-behavior: contain;
 }
 .wand-code-editor-content,
 .wand-code-editor-textarea {

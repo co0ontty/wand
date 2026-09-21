@@ -603,7 +603,7 @@ export function registerSessionRoutes(
   });
 
   app.post("/api/structured-sessions", asyncRoute(async (req, res) => {
-    const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner; provider?: string; worktreeEnabled?: boolean; model?: string; thinkingEffort?: string; sessionSource?: unknown; automationId?: unknown; workspaceId?: string; workspaceTaskId?: string };
+    const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner; provider?: string; worktreeEnabled?: boolean; model?: string; thinkingEffort?: string; sessionSource?: unknown; automationId?: unknown; workspaceId?: string; workspaceTaskId?: string; respondImmediately?: unknown };
     try {
       if (body.provider && !isSessionProvider(body.provider)) {
         res.status(400).json({ error: "结构化会话当前仅支持 Claude、Codex、OpenCode、Grok、Qoder 或 Pi provider。" });
@@ -634,6 +634,22 @@ export function registerSessionRoutes(
       syncWorkspaceTaskToBoard(storage, snapshot.workspaceTaskId);
       const prompt = body.prompt?.trim();
       if (prompt) {
+        if (body.respondImmediately === true) {
+          // 只创建、不等首轮：整轮可能是几分钟，调用方（新建任务对话框、worktree 合并）
+          // 等在 HTTP 上会把用户锁在「正在创建…」且关闭按钮被禁用。与
+          // /api/sessions/:id/input 的 respondImmediately、/api/wand-tasks/:id/dispatch
+          // 一致：先回会话快照，首轮进度继续走结构化事件。
+          structured.sendMessage(snapshot.id, prompt).catch((error) => {
+            console.error("[wand] Accepted structured prompt later failed", {
+              sessionId: snapshot.id,
+              error: getInputDebugMeta(error),
+            });
+          });
+          const accepted = structured.get(snapshot.id);
+          if (!accepted) throw new Error("未找到该结构化会话。");
+          res.status(201).json(sessionResponseDTO(accepted));
+          return;
+        }
         const finished = await structured.sendMessage(snapshot.id, prompt);
         res.status(201).json(finished);
         return;

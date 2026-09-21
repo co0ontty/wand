@@ -26,7 +26,8 @@ import type {
   WorkspaceTaskDetail,
   WorkspacesRepository,
 } from "./types";
-import { WORKSPACE_AGENT_OPTIONS, WorkspaceAgentPicker } from "./workspace-agent-picker";
+import { WORKSPACE_AGENT_OPTIONS, WorkspaceAgentPicker, workspaceModelDefault } from "./workspace-agent-picker";
+import { MODEL_CATALOG_DEFAULT_VALUE, pickedModelId } from "../model-catalog";
 import { describeError } from "../errors";
 import { confirmDiscardTaskDraft } from "../task-draft-guard";
 
@@ -55,6 +56,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
   const [prompt, setPrompt] = useState("");
   const [target, setTarget] = useState<WorkspaceSessionTarget>("claude");
   const [sessionKind, setSessionKind] = useState<WorkspaceSessionKind>("structured");
+  const [model, setModel] = useState(MODEL_CATALOG_DEFAULT_VALUE);
   const [milestoneId, setMilestoneId] = useState("");
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -80,6 +82,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
     setPrompt("");
     setTarget("claude");
     setSessionKind("structured");
+    setModel(MODEL_CATALOG_DEFAULT_VALUE);
     setMilestoneId("");
     setCwd(controller.initialCwd);
     setSuggestions([]);
@@ -101,6 +104,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
         setSelectedProjectId(matchingProject?.id ?? "");
         setTarget(loaded.defaultProvider);
         setSessionKind(loaded.defaultSessionKind);
+        setModel(workspaceModelDefault(loaded.defaultProvider));
         if (matchingProject) {
           setCwd(matchingProject.cwd);
         } else {
@@ -159,6 +163,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
   ): Promise<void> {
     const runtime = workspacesStore.getRuntime();
     if (!runtime) throw new Error("新建任务运行环境尚未就绪，请刷新页面后重试。");
+    const pickedModel = pickedModelId(model);
     const payload: OpenWorkspaceTaskPayload = {
       workspaceId: workspace.id,
       workspaceName: workspace.kind === "global" ? "" : workspace.name,
@@ -177,6 +182,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
       target,
       kind: target === "shell" ? "pty" : sessionKind,
       prompt: target === "shell" ? undefined : prompt.trim() || undefined,
+      model: target === "shell" ? undefined : pickedModel || undefined,
     });
     void runtime.refreshSessions();
   }
@@ -368,9 +374,15 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
             <WorkspaceAgentPicker
               target={target}
               kind={sessionKind}
+              model={model}
               disabled={submitting}
-              onTargetChange={(next) => { draftTouched.current = true; setTarget(next); }}
+              onTargetChange={(next) => {
+                draftTouched.current = true;
+                setTarget(next);
+                setModel(workspaceModelDefault(next));
+              }}
               onKindChange={(next) => { draftTouched.current = true; setSessionKind(next); }}
+              onModelChange={(next) => { draftTouched.current = true; setModel(next); }}
             />
 
             {hasDirectory ? (
@@ -418,7 +430,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
             <span>即将创建</span>
             <strong>{name.trim() || (prompt.trim() ? "按提示词自动命名" : "待填写任务")}</strong>
             <span title={effectiveCwd}>{effectiveCwd}</span>
-            <span>{target === "shell" ? "空白终端" : `${WORKSPACE_AGENT_OPTIONS.find((option) => option.value === target)?.label ?? target} · ${sessionKind === "pty" ? "PTY" : "结构化"}`}</span>
+            <span>{target === "shell" ? "空白终端" : `${WORKSPACE_AGENT_OPTIONS.find((option) => option.value === target)?.label ?? target} · ${sessionKind === "pty" ? "PTY" : "结构化"}${model === MODEL_CATALOG_DEFAULT_VALUE ? "" : ` · ${model}`}`}</span>
           </div>
 
           <div className="wand-new-session-footer wand-new-project-footer">

@@ -1,7 +1,5 @@
 import {
-  Fragment,
   type KeyboardEvent,
-  type ReactNode,
   type RefObject,
   useEffect,
   useRef,
@@ -10,6 +8,8 @@ import {
 import * as React from "react";
 import { WandButton, WandDialogSurface, WandIcon } from "../ui";
 import { filePreviewController, filePreviewStore } from "./controller";
+import { CodeTokens, MarkdownPreview } from "./markdown";
+import { markdownPreviewStyles } from "./markdown-styles";
 import {
   fileNameFromPath,
   filePreviewIconName,
@@ -17,16 +17,9 @@ import {
   formatFilePreviewSize,
   isMarkdownPreview,
   nextFilePreviewSibling,
-  parseFilePreviewMarkdown,
   tokenizeFilePreviewCode,
 } from "./model";
 import { filePreviewStyles } from "./styles";
-import { localFilePreviewHref, localHttpPreviewHref, localPreviewController } from "../local-preview/controller";
-import type {
-  FilePreviewCodeToken,
-  FilePreviewMarkdownBlock,
-  FilePreviewMarkdownInline,
-} from "./model";
 import type { FilePreviewFile, FilePreviewSnapshot } from "./types";
 
 function run(command: Parameters<typeof filePreviewController.execute>[0]): void {
@@ -41,119 +34,10 @@ function DownloadLink({ file, label = "下载" }: { file: Pick<FilePreviewFile, 
   );
 }
 
-function CodeTokens({ tokens }: { tokens: ReadonlyArray<FilePreviewCodeToken> }) {
-  return (
-    <>
-      {tokens.map((token, index) => token.kind ? (
-        <span className={`wand-file-preview-syntax-${token.kind}`} key={index}>{token.value}</span>
-      ) : <Fragment key={index}>{token.value}</Fragment>)}
-    </>
-  );
-}
-
-function MarkdownInline({ tokens }: { tokens: ReadonlyArray<FilePreviewMarkdownInline> }) {
-  return (
-    <>
-      {tokens.map((token, index): ReactNode => {
-        switch (token.type) {
-          case "code": return <code key={index}>{token.value}</code>;
-          case "strong": return <strong key={index}>{token.value}</strong>;
-          case "emphasis": return <em key={index}>{token.value}</em>;
-          case "delete": return <del key={index}>{token.value}</del>;
-          case "link": {
-            const isServerHtmlPath = token.url.startsWith("/") && /\.(?:html?|)$/i.test(token.url);
-            const localHref = isServerHtmlPath
-              ? localFilePreviewHref(token.url)
-              : localHttpPreviewHref(token.url);
-            return localHref ? (
-              <a
-                key={index}
-                href={localHref}
-                onClick={(event) => {
-                  event.preventDefault();
-                  if (isServerHtmlPath) localPreviewController.openFile(token.url);
-                  else localPreviewController.openUrl(token.url);
-                }}
-              >
-                {token.value}
-              </a>
-            ) : (
-              <a key={index} href={token.url} target="_blank" rel="noopener noreferrer">{token.value}</a>
-            );
-          }
-          case "image": return <img key={index} src={token.url} alt={token.value} />;
-          default: return <Fragment key={index}>{token.value}</Fragment>;
-        }
-      })}
-    </>
-  );
-}
-
-function MarkdownHeading({ block }: { block: Extract<FilePreviewMarkdownBlock, { type: "heading" }> }) {
-  const content = <MarkdownInline tokens={block.content} />;
-  switch (block.level) {
-    case 1: return <h1>{content}</h1>;
-    case 2: return <h2>{content}</h2>;
-    case 3: return <h3>{content}</h3>;
-    case 4: return <h4>{content}</h4>;
-    case 5: return <h5>{content}</h5>;
-    default: return <h6>{content}</h6>;
-  }
-}
-
-function MarkdownBlock({ block }: { block: FilePreviewMarkdownBlock }) {
-  switch (block.type) {
-    case "heading":
-      return <MarkdownHeading block={block} />;
-    case "paragraph":
-      return <p><MarkdownInline tokens={block.content} /></p>;
-    case "blockquote":
-      return <blockquote><MarkdownInline tokens={block.content} /></blockquote>;
-    case "list": {
-      const items = block.items.map((item, index) => <li key={index}><MarkdownInline tokens={item} /></li>);
-      return block.ordered ? <ol>{items}</ol> : <ul>{items}</ul>;
-    }
-    case "code":
-      return (
-        <pre data-language={block.lang || undefined}>
-          <code><CodeTokens tokens={tokenizeFilePreviewCode(block.value)} /></code>
-        </pre>
-      );
-    case "table":
-      return (
-        <div className="wand-file-preview-table-wrap">
-          <table>
-            <thead>
-              <tr>{block.headers.map((cell, index) => (
-                <th key={index} style={{ textAlign: block.aligns[index] }}><MarkdownInline tokens={cell} /></th>
-              ))}</tr>
-            </thead>
-            <tbody>
-              {block.rows.map((row, rowIndex) => (
-                <tr key={rowIndex}>{row.map((cell, cellIndex) => (
-                  <td key={cellIndex} style={{ textAlign: block.aligns[cellIndex] }}><MarkdownInline tokens={cell} /></td>
-                ))}</tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      );
-    case "rule":
-      return <hr />;
-  }
-}
-
 function TextPreview({ snapshot, file }: { snapshot: FilePreviewSnapshot; file: FilePreviewFile }) {
   const content = file.content ?? "";
   if (isMarkdownPreview(file)) {
-    return (
-      <div
-        className={`wand-file-preview-markdown${snapshot.wrap ? " wrap" : ""}`}
-        style={{ fontSize: `${snapshot.fontSize}px` }}
-      >
-        {parseFilePreviewMarkdown(content).map((block, index) => <MarkdownBlock block={block} key={index} />)}
-      </div>
-    );
+    return <MarkdownPreview content={content} fontSize={snapshot.fontSize} wrap={snapshot.wrap} />;
   }
   const lineCount = Math.max(1, content.split("\n").length);
   return (
@@ -410,7 +294,7 @@ export function FilePreviewHost() {
 
   return (
     <>
-      <style id="wand-file-preview-styles">{filePreviewStyles}</style>
+      <style id="wand-file-preview-styles">{filePreviewStyles}{markdownPreviewStyles}</style>
       <WandDialogSurface
       open={snapshot.open}
       onOpenChange={(open) => { if (!open) run({ type: "close" }); }}

@@ -110,6 +110,8 @@ test("create-request builder preserves structured and PTY legacy contracts", () 
     mode: "full-access",
     worktreeEnabled: false,
     sessionSource: "interactive",
+    // PTY 也照该 provider 用过的模型启动 CLI（macOS 客户端同样如此）。
+    model: "gpt-5",
     cols: 98,
     rows: 31,
   });
@@ -184,6 +186,81 @@ test("create-request builder preserves structured and PTY legacy contracts", () 
     cols: 101,
     rows: 32,
   });
+});
+
+test("模型选择随创建请求发出，PTY 也按模型启动 CLI", () => {
+  const config = {
+    defaultProvider: "claude" as const,
+    defaultSessionKind: "structured" as const,
+    defaultMode: "default" as const,
+    defaultCwd: "/configured",
+    structuredRunner: "claude-cli-print",
+  };
+  const context = {
+    effectiveCwd: "/repo",
+    selectedModels: { claude: "claude-sonnet", codex: "gpt-5" },
+  };
+  const base = { cwd: "/repo", mode: "default" as const, worktreeEnabled: false };
+
+  // 对话框里选定的模型优先于 composer 记忆。
+  assert.equal(buildCreateRequest(
+    { ...base, provider: "claude", kind: "structured", model: "opus" }, config, context,
+  ).model, "opus");
+  // 没碰过模型字段时沿用该 provider 上次用过的模型。
+  assert.equal(buildCreateRequest(
+    { ...base, provider: "claude", kind: "structured", model: "" }, config, context,
+  ).model, "claude-sonnet");
+  // PTY 会话同样带模型（服务端 processCommandForMode 注入 --model）。
+  assert.equal(buildCreateRequest(
+    { ...base, provider: "codex", kind: "pty", model: "gpt-5" }, config, context,
+  ).model, "gpt-5");
+  assert.equal(buildCreateRequest(
+    { ...base, provider: "codex", kind: "pty", model: "" }, config, context,
+  ).model, "gpt-5");
+  // 空白终端没有模型概念。
+  assert.equal("model" in buildCreateRequest({ ...base, provider: "claude", kind: "shell" }, config, context), false);
+});
+
+test("PTY 创建请求把模型发到 /api/commands", async () => {
+  const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+  const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({ url: String(input), body: JSON.parse(String(init?.body ?? "{}")) });
+    return json({ id: "pty-1" }, 201);
+  }) as typeof fetch;
+  const repository = new HttpNewSessionRepository(fetchImpl);
+  await repository.create({
+    kind: "pty",
+    provider: "claude",
+    command: "claude",
+    cwd: "/repo",
+    mode: "default",
+    worktreeEnabled: false,
+    sessionSource: "interactive",
+    model: "opus",
+  });
+  assert.equal(calls[0].url, "/api/commands");
+  assert.equal(calls[0].body.model, "opus");
+  // 空白终端没有模型概念，不能把 stale 值带上。
+  calls.length = 0;
+  await repository.create({
+    kind: "shell",
+    shell: true,
+    cwd: "/repo",
+    mode: "default",
+    worktreeEnabled: false,
+    sessionSource: "interactive",
+  });
+  assert.equal(calls[0].body.model, undefined);
+});
+
+test("新建会话对话框提供模型字段并把选择写回 provider 记忆", () => {
+  const host = readFileSync(new URL("../src/web-ui/react/new-session/host.tsx", import.meta.url), "utf8");
+  assert.match(host, /wand-new-session-model-select/);
+  assert.match(host, /rememberModel\(/);
+  assert.match(host, /wandModelOptions\(modelCatalog/);
+
+  const adapter = readFileSync(new URL("../src/web-ui/browser/new-session-adapter.ts", import.meta.url), "utf8");
+  assert.match(adapter, /rememberModel\(provider, model\)[\s\S]*setChatModelForProvider\(provider, model \|\| ""\)/);
 });
 
 test("HTTP repository serializes preferences and loads the latest server defaults", async () => {

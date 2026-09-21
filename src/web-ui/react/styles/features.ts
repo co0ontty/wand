@@ -2103,6 +2103,12 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 
+/* 新建任务 / 工作窗口 / 任务欢迎页 / 新建会话：模型下拉占满字段宽度。 */
+.wand-ui-select-trigger.wand-workspace-agent-model-select,
+.wand-ui-select-trigger.wand-new-session-model-select {
+  width: 100%;
+}
+
 .wand-workspace-agent-footer {
   display: flex;
   align-items: center;

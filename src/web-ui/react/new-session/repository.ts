@@ -115,6 +115,8 @@ export function buildCreateRequest(
 
   const mode = safeMode(form.provider, form.mode, defaults.defaultMode);
   const base = { ...common, provider: form.provider, mode };
+  // 对话框里选定的模型优先；没碰过模型字段时沿用 composer 的按 provider 记忆。
+  const model = (form.model ?? "").trim() || (context.selectedModels?.[form.provider] ?? "").trim();
 
   if (form.kind === "pty") {
     return {
@@ -122,10 +124,10 @@ export function buildCreateRequest(
       ...terminalDimensions,
       kind: "pty",
       command: providerCliCommand(form.provider),
+      model: model || undefined,
     };
   }
 
-  const model = context.selectedModels?.[form.provider]?.trim();
   const thinkingEffort = context.thinkingEffort?.trim();
   return {
     ...base,
@@ -219,6 +221,8 @@ export class HttpNewSessionRepository implements NewSessionRepository {
           cwd: request.cwd,
           mode: request.mode,
           worktreeEnabled: request.worktreeEnabled,
+          // PTY 也按模型启动 CLI（服务端 processCommandForMode 注入 --model）。
+          model: request.kind === "pty" ? request.model : undefined,
           cols: request.cols,
           rows: request.rows,
           sessionSource: request.sessionSource,

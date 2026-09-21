@@ -105,10 +105,6 @@ const sessionReads = createSessionReads();
         .then(function(config) {
           state.config = config;
           applyConfigDefaultThinking(config);
-          var statusDot = document.getElementById("status-dot");
-          var statusText = document.getElementById("status-text");
-          if (statusDot) statusDot.classList.add("active");
-          if (statusText) statusText.textContent = "已登录";
           return refreshAll();
         })
         .then(function() {
@@ -950,7 +946,10 @@ const sessionReads = createSessionReads();
 
       export function createStructuredSession(prompt?, cwdOverride?, modeOverride?, worktreeEnabled?, extra?) {
         var provider = (extra && extra.provider) || getProviderKey(state.sessionTool);
-        var modelPref = getChatModelForProvider(provider) || getConfigDefaultModelForProvider(provider);
+        // 显式选定的模型优先；未指定时沿用该 provider 上次在输入框选过的模型，
+        // 再回落到服务端配置的默认模型。
+        var pickedModel = (extra && extra.model ? String(extra.model) : "").trim();
+        var modelPref = pickedModel || getChatModelForProvider(provider) || getConfigDefaultModelForProvider(provider);
         var thinkingPref = state.chatThinking || "off";
         var structuredRunner = provider === "codex"
           ? "codex-cli-exec"
@@ -975,6 +974,10 @@ const sessionReads = createSessionReads();
           sessionSource: "interactive",
           workspaceId: extra && extra.workspaceId,
           workspaceTaskId: extra && extra.workspaceTaskId,
+          // 带了首轮提示词时不要在 HTTP 里等整轮跑完：创建接口会在发完提示词后
+          // 立刻返回快照，首轮进展走 websocket。否则调用方（新建任务对话框）
+          // 会被锁在「正在创建…」里直到模型答完，可能是几分钟。
+          respondImmediately: prompt ? true : undefined,
         };
         return fetch("/api/structured-sessions", {
           method: "POST",
@@ -2032,11 +2035,13 @@ const sessionReads = createSessionReads();
           shell?: boolean;
           kind?: "structured" | "pty";
           mode?: string;
+          model?: string;
           initialInput?: string;
         },
       ): Promise<unknown> {
         var shell = !!(options && options.shell);
         var provider = shell ? "" : ((options && options.provider) || getPreferredTool());
+        var pickedModel = (options && options.model ? String(options.model) : "").trim();
         var kind = shell
           ? "pty"
           : ((options && options.kind)
@@ -2052,6 +2057,7 @@ const sessionReads = createSessionReads();
               workspaceId: options && options.workspaceId,
               workspaceTaskId: options && options.workspaceTaskId,
               provider: provider,
+              model: pickedModel || undefined,
             },
           );
         }
@@ -2078,6 +2084,8 @@ const sessionReads = createSessionReads();
               provider: provider,
               cwd: cwd,
               mode: defaultMode,
+              // PTY 会话按所选模型启动 CLI（processCommandForMode 注入 --model）。
+              model: pickedModel || undefined,
               initialInput: options && options.initialInput,
               sessionSource: "interactive",
             });

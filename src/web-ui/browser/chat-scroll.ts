@@ -118,22 +118,9 @@ export function updateChatUnreadBubble() {
   if (chatContainer) chatContainer.classList.toggle("has-jump-btn", shouldShow);
 }
 
-function releaseChatTurnPin() {
-  removeChatPinSpacer();
-}
-
-function removeChatPinSpacer(chatMsgs?: any) {
-  var el = chatMsgs || getChatScrollElement();
-  if (!el) return;
-  var spacer = el.querySelector(".chat-pin-spacer");
-  if (spacer && spacer.parentNode) spacer.parentNode.removeChild(spacer);
-}
-
 export function scrollChatToBottom(smooth?: boolean) {
   var chatMsgs = getChatScrollElement();
   if (!chatMsgs || !(chatMsgs as any).isConnected) return;
-  releaseChatTurnPin();
-  removeChatPinSpacer(chatMsgs);
   state.chatIsProgrammaticScroll = true;
   var done = function() {
     state.chatIsProgrammaticScroll = false;
@@ -155,8 +142,6 @@ export function scrollChatToBottom(smooth?: boolean) {
 // 新消息/回复就不会出现在底部。
 export function prepareChatBottomFollow() {
   var chatMsgs = getChatScrollElement();
-  releaseChatTurnPin();
-  if (chatMsgs) removeChatPinSpacer(chatMsgs);
   state.chatStickToBottom = true;
   clearChatUnread({ removeDivider: true });
   if (chatMsgs && (chatMsgs as any).isConnected) {
@@ -192,7 +177,6 @@ export function bindChatScrollListener() {
   state.chatScrollElement = chatMsgs;
 
   function handleManualHistoryScroll() {
-    releaseChatTurnPin();
     state.chatStickToBottom = false;
     if (chatMsgs.querySelector(".chat-history-summary")) {
       renderChat(true);
@@ -207,11 +191,10 @@ export function bindChatScrollListener() {
       updateChatUnreadBubble();
       return;
     }
-    // 用户真的手动滚了——退出 pin 模式，回到普通贴底逻辑。
+    // 用户真的手动滚了——回到普通贴底逻辑。
     var atBottom = isChatNearBottom(chatMsgs);
     if (atBottom) {
       // 用户自己滚到底了——清未读、贴回底部、撤下气泡。
-      releaseChatTurnPin();
       state.chatStickToBottom = true;
       clearChatUnread({ removeDivider: true });
     } else {

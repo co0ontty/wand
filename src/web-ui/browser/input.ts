@@ -635,12 +635,9 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
 
       export function sendOrStart(opts?) {
         opts = opts || {};
-        // Support welcome input as well as the main input box
-        var welcomeInput = document.getElementById("welcome-input") as HTMLInputElement | null;
         var inputBox = document.getElementById("input-box") as HTMLInputElement | null;
-        var welcomeValue = welcomeInput ? welcomeInput.value.trim() : "";
         var inputValue = inputBox ? inputBox.value : "";
-        var value = welcomeValue || inputValue.trim();
+        var value = inputValue.trim();
 
         // If we have a selected ID, try to send input to it
         if (state.selectedId) {
@@ -652,7 +649,6 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         // enqueueCrossSessionMessage owns the user feedback toast for both paths.
         if (value && hasAnyBusySession()) {
           if (inputBox) inputBox.value = "";
-          if (welcomeInput) welcomeInput.value = "";
           syncComposerHasText(inputBox);
           enqueueCrossSessionMessage(value);
           return;
@@ -680,7 +676,6 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
           }
           clearDraftValueForSession(data.id);
           if (!state.selectedId && inputBox) inputBox.value = "";
-          if (welcomeInput) welcomeInput.value = "";
           return activateSession(data);
         })
         .catch(function(error) {
@@ -2041,7 +2036,6 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         // `handleInteractiveTextInput` 在 input 事件里逐字发出去的。如果这里
         // 再把同一个 keydown 透传一次，每个字符都会重复到达 PTY。
         if (target.closest && target.closest("#input-box")) return false;
-        if (target.closest && target.closest("#mini-keyboard")) return false;
         if (shouldIgnoreInteractiveTarget(target)) return false;
         return true;
       }
@@ -2098,15 +2092,8 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         { key: "shift_tab", label: "Shift+Tab" }
       ];
 
-      var ignoredInteractiveTargetIds = new Set([
-        "mini-keyboard-fab",
-        "mini-keyboard-toggle",
-        "terminal-interactive-toggle"
-      ]);
-
       function shouldIgnoreInteractiveTarget(target) {
         if (!target) return false;
-        if (ignoredInteractiveTargetIds.has(target.id)) return true;
         // React/Radix overlays own their keyboard contract. In terminal-interactive
         // mode the document capture listener otherwise consumes Escape before the
         // dialog can dismiss itself (and can forward radio arrow keys to the PTY).
@@ -2513,16 +2500,6 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         state.modifiers.ctrl = false;
         state.modifiers.alt = false;
         state.modifiers.shift = false;
-        updateModifierUI();
-      }
-
-      function updateModifierUI() {
-        var keyboard = document.getElementById("mini-keyboard");
-        if (!keyboard) return;
-        ["ctrl", "alt", "shift"].forEach(function(name) {
-          var btn = keyboard.querySelector('[data-key="' + name + '"]');
-          if (btn) btn.classList.toggle("active", !!state.modifiers[name]);
-        });
       }
 
       export function getControlInput(key) {
@@ -3081,14 +3058,10 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
           if (!inputBox || document.activeElement !== inputBox) return;
           var target = e.target as HTMLElement | null;
           if (!target || typeof target.closest !== "function") return;
-          // 输入面板自身（输入框/发送/快捷按钮）、迷你键盘及其开关、
-          // 终端悬浮遥控上的点击不收起键盘。
+          // 输入面板自身（输入框/发送/快捷按钮）与终端悬浮遥控上的点击
+          // 不收起键盘。
           if (
             target.closest(".input-panel") ||
-            target.closest("#mini-keyboard") ||
-            target.closest("#mini-keyboard-fab") ||
-            target.closest("#mini-keyboard-toggle") ||
-            target.closest("#terminal-interactive-toggle") ||
             target.closest(".wand-joystick-root")
           ) {
             return;

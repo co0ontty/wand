@@ -29,23 +29,67 @@ type Radio = React.ReactElement<{
   onKeyDown(event: { key: string; preventDefault(): void }): void;
 }>;
 
+type ModelSelectProps = {
+  value?: string;
+  options: Array<{ value: string; label: string }>;
+  disabled?: boolean;
+  onValueChange?(value: string): void;
+};
+
+/** 模型目录在 vm 里用桩代替：只验证选择器与「跟随服务端默认」哨兵值的契约。 */
+const MODEL_CATALOG_DEPENDENCY = {
+  MODEL_CATALOG_DEFAULT_VALUE: "default",
+  pickedModelId: (model: string | null | undefined) => {
+    const value = (model ?? "").trim();
+    return value === "default" ? "" : value;
+  },
+  wandModelOptions: (catalog: { byProvider?: Record<string, unknown> } | null, provider: string) =>
+    catalog?.byProvider?.[provider] ?? [{ value: "default", label: "跟随服务端默认" }],
+};
+
+/** 没被渲染的 stub：靠自身标记被遍历找到，元素的 props 就是选择器收到的 props。 */
+function WandSelectStub(_props: ModelSelectProps): null {
+  return null;
+}
+const WAND_SELECT_MARK = "wandSelectStub";
+(WandSelectStub as unknown as Record<string, unknown>)[WAND_SELECT_MARK] = true;
+
 function harness(overrides: Partial<WorkspaceAgentPickerProps> = {}) {
   const preferences: unknown[] = [];
   const changes: string[] = [];
+  const remembered: Array<{ provider: string; model: string }> = [];
   let focused = "";
+  let runtime: {
+    modelPreference?(provider: string): string;
+    rememberModelPreference?(provider: string, model: string): void;
+  } | null = {
+    modelPreference: () => "opus",
+    rememberModelPreference: (provider, model) => { remembered.push({ provider, model }); },
+  };
   const props: WorkspaceAgentPickerProps = {
     target: "claude",
     kind: "structured",
+    model: "default",
     onTargetChange: (target) => { props.target = target; changes.push(target); },
     onKindChange: (kind) => { props.kind = kind; changes.push(kind); },
+    onModelChange: (model) => { props.model = model; changes.push(model); },
     ...overrides,
   };
   const dependencies: Record<string, unknown> = {
-    react: { ...React, useRef: (current: unknown) => ({ current }) },
+    react: {
+      ...React,
+      useRef: (current: unknown) => ({ current }),
+      useState: (initial: unknown) => [typeof initial === "function" ? (initial as () => unknown)() : initial, () => {}],
+      useEffect: () => {},
+    },
     "react/jsx-runtime": jsxRuntime,
+    "../model-catalog": MODEL_CATALOG_DEPENDENCY,
+    // 目录 hook 单独有单测；这里只要“还没拉到目录”这一种状态。
+    "../use-model-catalog": { useWandModelCatalog: () => null },
     "../new-session/choice-navigation": { nextChoice },
     "../new-session/repository": {
       httpNewSessionRepository: {
+        loadConfig: () => Promise.resolve({ defaultProvider: "claude", defaultSessionKind: "structured" }),
         savePreferences: (value: unknown) => {
           preferences.push(JSON.parse(JSON.stringify(value)));
           return Promise.resolve();
@@ -53,7 +97,12 @@ function harness(overrides: Partial<WorkspaceAgentPickerProps> = {}) {
       },
     },
     "../provider-logo": { ProviderLogo: () => null },
-    "../ui": { WandButton: () => null, WandIcon: () => null },
+    "../ui": {
+      WandButton: () => null,
+      WandIcon: () => null,
+      WandSelect: WandSelectStub,
+    },
+    "./controller": { workspacesStore: { getRuntime: () => runtime } },
   };
   const exports: Record<string, (props: WorkspaceAgentPickerProps) => React.ReactNode> = {};
   runInNewContext(outputText, {
@@ -92,7 +141,40 @@ function harness(overrides: Partial<WorkspaceAgentPickerProps> = {}) {
     return prevented;
   }
 
-  return { props, preferences, changes, radios, key, focused: () => focused };
+  function modelSelects(): ModelSelectProps[] {
+    const result: ModelSelectProps[] = [];
+    function visit(node: React.ReactNode): void {
+      React.Children.forEach(node, (child) => {
+        if (!React.isValidElement<{ children?: React.ReactNode }>(child)) return;
+        const type = child.type as unknown as Record<string, unknown> | null;
+        if (type && typeof type === "function" && type[WAND_SELECT_MARK] === true) {
+          result.push(child.props as unknown as ModelSelectProps);
+        }
+        visit(child.props.children);
+      });
+    }
+    visit(exports.WorkspaceAgentPicker(props));
+    return result;
+  }
+
+  function modelSelect(): ModelSelectProps {
+    const [first] = modelSelects();
+    assert.ok(first, "expected the model select to render");
+    return first;
+  }
+
+  return {
+    props,
+    preferences,
+    changes,
+    radios,
+    key,
+    modelSelect,
+    modelSelects,
+    focused: () => focused,
+    remembered,
+    setRuntime: (next: typeof runtime) => { runtime = next; },
+  };
 }
 
 test("session kind uses one tab stop and moves selection, focus and preference together", () => {
@@ -155,4 +237,48 @@ test("local and disabled pickers retain their preference and keyboard contracts"
   assert.deepEqual(disabled.changes, []);
   assert.deepEqual(disabled.preferences, []);
   assert.equal(disabled.focused(), "");
+  assert.equal(disabled.modelSelect().disabled, true);
+});
+
+test("model select is everywhere a provider runs, remembers the pick, and is hidden for shell", () => {
+  const h = harness();
+  // 目录还没到（vm 里没有 effect）：仍然渲染「跟随服务端默认」占位，不阻塞创建。
+  const initial = h.modelSelect();
+  assert.equal(initial.value, "default");
+  assert.deepEqual(initial.options, [{ value: "default", label: "跟随服务端默认" }]);
+
+  initial.onValueChange!("opus");
+  assert.equal(h.props.model, "opus");
+  // 选项写回按 provider 的记忆，空串表示「跟随服务端默认」而不是字面量 default。
+  assert.deepEqual(h.remembered, [{ provider: "claude", model: "opus" }]);
+  h.modelSelect().onValueChange!("default");
+  assert.deepEqual(h.remembered.at(-1), { provider: "claude", model: "" });
+
+  // PTY 会话同样按模型启动 CLI，所以模型选择必须在。
+  h.radios().get("pty")!.props.onClick();
+  assert.equal(h.modelSelect().options.length, 1);
+
+  // 空白终端没有模型可选，交给系统 Shell。
+  h.radios().get("shell")!.props.onClick();
+  assert.equal(h.modelSelects().length, 0);
+
+  // 只看不选（persistPreferences=false）时不得写偏好。
+  const local = harness({ persistPreferences: false });
+  local.modelSelect().onValueChange!("haiku");
+  assert.deepEqual(local.remembered, []);
+  assert.equal(local.props.model, "haiku");
+});
+
+test("provider switch hands the caller that provider's remembered model", () => {
+  const h = harness();
+  h.setRuntime({
+    modelPreference: (provider) => (provider === "codex" ? "gpt-5-codex" : ""),
+    rememberModelPreference: (provider, model) => { h.remembered.push({ provider, model }); },
+  });
+  assert.equal(h.key("claude", "ArrowRight"), true);
+  assert.equal(h.props.target, "codex");
+  // 选择器只负责提示默认值；调用方用 workspaceModelDefault 决定新 provider 的预选。
+  assert.equal(h.props.model, "default");
+  h.modelSelect().onValueChange!("gpt-5-codex");
+  assert.deepEqual(h.remembered.at(-1), { provider: "codex", model: "gpt-5-codex" });
 });

@@ -26,7 +26,14 @@ const contentDir = path.join(root, "dist", "web-ui", "content");
 
 /** gzip budgets in bytes, measured over the whole shipped asset. */
 const BUDGET = {
-  js: 512_000,
+  // js 从 512_000 上调（原因必须留在同一提交里，见上）：
+  // 「默认迭代 + 用提示词清单生成 commit message」那一版真实增长了约 0.5 KiB
+  // （quick-commit 迭代面板 / 仓储 / 类型 + features.ts 样式），把包体顶到
+  // 512_140 字节。同一次改动顺手删掉了 mini-keyboard、status-dot/status-text、
+  // welcome-input、chat-pin-spacer 这批没有任何生产者的残留（约 0.3 KiB），
+  // 仍回不到 512_000，所以按脚本要求刻意上调并记录原因；下一次真正瘦身
+  // （懒加载重型面板等）后必须把它降回去。
+  js: 514_000,
   css: 100_000,
 };
 

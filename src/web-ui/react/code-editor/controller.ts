@@ -1,4 +1,5 @@
 import { wandOverlay } from "../overlay-controller";
+import { isMarkdownPreview } from "../file-preview/model";
 import {
   clampCodeEditorFontSize,
   codeEditorFindMatches,
@@ -50,6 +51,7 @@ function initialSnapshot(revision = 0): CodeEditorSnapshot {
     saving: false,
     fontSize: defaultCodeEditorFontSize(),
     wrap: false,
+    preview: false,
     findOpen: false,
     findQuery: "",
     findCaseSensitive: false,
@@ -130,6 +132,11 @@ export function createCodeEditorModule(options: CodeEditorModuleOptions): CodeEd
     for (const listener of listeners) listener();
   }
 
+  /** Markdown files default to the rendered view; everything else stays source. */
+  function previewFor(file: CodeEditorFile | null | undefined): boolean {
+    return file ? isMarkdownPreview(file) : false;
+  }
+
   function tabsFromFiles(activePath: string | null): CodeEditorTab[] {
     const tabs: CodeEditorTab[] = [];
     for (const file of files.values()) {
@@ -185,6 +192,7 @@ export function createCodeEditorModule(options: CodeEditorModuleOptions): CodeEd
         status: "ready",
         file: outcome.file,
         failure: null,
+        preview: previewFor(outcome.file),
         tabs: tabsFromFiles(path),
       });
       return true;
@@ -299,6 +307,7 @@ export function createCodeEditorModule(options: CodeEditorModuleOptions): CodeEd
         publish({
           activePath: nextActive,
           file: nextActive ? files.get(nextActive) ?? null : null,
+          preview: previewFor(nextActive ? files.get(nextActive) : null),
           tabs: remaining,
           status: nextActive ? "ready" : "idle",
           findIndex: 0,
@@ -314,6 +323,7 @@ export function createCodeEditorModule(options: CodeEditorModuleOptions): CodeEd
           file: next,
           status: next ? "ready" : "loading",
           failure: null,
+          preview: previewFor(next),
           findIndex: 0,
         });
         if (!next) {
@@ -352,6 +362,15 @@ export function createCodeEditorModule(options: CodeEditorModuleOptions): CodeEd
       case "wrap.toggle":
         publish({ wrap: !snapshot.wrap });
         return true;
+      case "preview.toggle": {
+        const active = snapshot.activePath ? files.get(snapshot.activePath) : null;
+        if (!active || !previewFor(active)) return false;
+        const preview = !snapshot.preview;
+        // The find bar measures offsets in the source text, so it cannot stay
+        // open over the rendered view.
+        publish({ preview, ...(preview ? { findOpen: false } : {}) });
+        return true;
+      }
       case "font.adjust":
         publish({ fontSize: clampCodeEditorFontSize(snapshot.fontSize + command.delta) });
         return true;
