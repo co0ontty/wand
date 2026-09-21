@@ -4,6 +4,7 @@ import type {
   QuickCommitInput,
   QuickCommitOutcome,
   QuickCommitResponse,
+  QuickCommitSelection,
   QuickCommitStatus,
 } from "./types";
 
@@ -62,11 +63,13 @@ export function buildQuickCommitInput(
   form: QuickCommitForm,
   action: QuickCommitAction,
   includeSubmodule: boolean,
+  selection?: QuickCommitSelection,
+  includeDiff = false,
 ): QuickCommitInput {
   const meta = quickCommitActionMeta(action);
   const message = form.message.trim();
   const tag = meta.withTag ? form.tag.trim() : "";
-  return {
+  const input: QuickCommitInput = {
     autoMessage: !message,
     customMessage: message,
     tag,
@@ -74,6 +77,14 @@ export function buildQuickCommitInput(
     push: meta.push,
     submodule: includeSubmodule,
   };
+  // 输入源只影响「谁来写 message」；没选过就不传，服务端用记住的偏好兜底。
+  if (selection) {
+    input.mode = selection.mode;
+    input.entryIds = [...selection.entryIds];
+  }
+  // 显式要求时才带上完整 diff：默认走「提示词清单」，省 token。
+  if (includeDiff) input.includeDiff = true;
+  return input;
 }
 
 export function hasQuickCommitChanges(status: QuickCommitStatus | null): boolean {

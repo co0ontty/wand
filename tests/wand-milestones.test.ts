@@ -69,6 +69,15 @@ function jsonOf<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+/** 默认迭代 id：没选迭代的任务都回落到它，断言时用它对比。 */
+async function defaultIterationId(url: string): Promise<string> {
+  const listed = await fetch(`${url}/api/wand-milestones`)
+    .then(jsonOf<{ milestones: Array<{ id: string; name: string; isDefault: boolean }> }>);
+  const found = listed.milestones.find((item) => item.isDefault);
+  assert.ok(found, "迭代列表里必须一直在默认迭代");
+  return found.id;
+}
+
 test("milestones can be created, listed, renamed, and deleted without deleting tasks", async (t) => {
   await withHarness(t, async ({ url, storage }) => {
     const created = await fetch(`${url}/api/wand-milestones`, jsonBody({ name: "  v5.0 发布  " }))
@@ -85,28 +94,36 @@ test("milestones can be created, listed, renamed, and deleted without deleting t
     const task = await fetch(`${url}/api/wand-tasks`, jsonBody({ title: "发布准备", milestoneId: created.id }))
       .then(jsonOf<{ id: string; milestoneId: string | null; priority: string; milestone: { id: string; name: string } | null }>);
     assert.equal(task.milestoneId, created.id);
-    assert.deepEqual(task.milestone, { id: created.id, name: "v5.0 发布" });
+    assert.deepEqual(task.milestone, { id: created.id, name: "v5.0 发布", isDefault: false });
     // 没挑优先级的新任务默认「低」，不再落成「无优先级」。
     assert.equal(task.priority, "low");
 
     const listed = await fetch(`${url}/api/wand-milestones`)
-      .then(jsonOf<{ milestones: Array<{ id: string; name: string; taskCount: number }> }>);
-    assert.equal(listed.milestones.length, 1);
-    assert.equal(listed.milestones[0]?.taskCount, 1);
+      .then(jsonOf<{ milestones: Array<{ id: string; name: string; taskCount: number; isDefault: boolean }> }>);
+    // 默认迭代惰性建出来，并且永远排第一（新建任务的下拉直接取第一项当预选）。
+    assert.equal(listed.milestones.length, 2);
+    assert.equal(listed.milestones[0]?.isDefault, true);
+    assert.equal(listed.milestones[0]?.name, "默认迭代");
+    assert.equal(listed.milestones[1]?.taskCount, 1);
 
     const renamed = await fetch(`${url}/api/wand-milestones/${created.id}`, jsonBody({ name: "v5.0 正式发布" }, "PATCH"))
       .then(jsonOf<{ name: string; taskCount: number }>);
     assert.equal(renamed.name, "v5.0 正式发布");
     assert.equal(renamed.taskCount, 1);
 
-    // 删除里程碑只解绑：任务仍然在，只是 milestoneId 归空。
+    // 删迭代只解绑：任务仍然在，只是回到默认迭代。
     const removed = await fetch(`${url}/api/wand-milestones/${created.id}`, { method: "DELETE" });
     assert.equal(removed.status, 200);
     const after = await fetch(`${url}/api/wand-tasks/${task.id}`)
-      .then(jsonOf<{ milestoneId: string | null; milestone: unknown }>);
-    assert.equal(after.milestoneId, null);
-    assert.equal(after.milestone, null);
-    assert.equal(storage.listWandMilestones().length, 0);
+      .then(jsonOf<{ milestoneId: string | null; milestone: { id: string; name: string; isDefault: boolean } | null }>);
+    assert.equal(after.milestoneId, listed.milestones[0]?.id);
+    assert.deepEqual(after.milestone, { id: listed.milestones[0]?.id, name: "默认迭代", isDefault: true });
+    assert.deepEqual(storage.listWandMilestones().map((item) => item.isDefault), [true]);
+
+    // 默认迭代不能删：它是所有「没选迭代」任务的兑底。
+    const refuseDefault = await fetch(`${url}/api/wand-milestones/${listed.milestones[0]?.id}`, { method: "DELETE" });
+    assert.equal(refuseDefault.status, 400);
+    assert.match((await refuseDefault.json() as { error: string }).error, /默认迭代不能删除/);
   });
 });
 
@@ -118,15 +135,19 @@ test("tasks reject unknown milestones and can be rebound or cleared", async (t) 
 
     const milestone = storage.createWandMilestone({ name: "Q3" });
     const task = await fetch(`${url}/api/wand-tasks`, jsonBody({ title: "绑定里程碑" }))
-      .then(jsonOf<{ id: string }>);
+      .then(jsonOf<{ id: string; milestoneId: string | null }>);
+    // 没选迭代的新任务直接挂在默认迭代下（写入时就落库，不只是读时兑）。
+    assert.equal(task.milestoneId, await defaultIterationId(url));
 
     const bound = await fetch(`${url}/api/wand-tasks/${task.id}`, jsonBody({ milestoneId: milestone.id }, "PATCH"))
       .then(jsonOf<{ milestoneId: string | null }>);
     assert.equal(bound.milestoneId, milestone.id);
 
+    // 清空迭代 = 回到默认迭代。
     const cleared = await fetch(`${url}/api/wand-tasks/${task.id}`, jsonBody({ milestoneId: null }, "PATCH"))
-      .then(jsonOf<{ milestoneId: string | null }>);
-    assert.equal(cleared.milestoneId, null);
+      .then(jsonOf<{ milestoneId: string | null; milestone: { isDefault: boolean } | null }>);
+    assert.equal(cleared.milestoneId, task.milestoneId);
+    assert.equal(cleared.milestone?.isDefault, true);
   });
 });
 
@@ -137,14 +158,15 @@ test("a task only carries its own project's milestone (or a global one)", async 
     const alphaMilestone = storage.createWandMilestone({ name: "alpha 迭代", workspaceId: alpha.id });
     const betaMilestone = storage.createWandMilestone({ name: "beta 迭代", workspaceId: beta.id });
     const globalMilestone = storage.createWandMilestone({ name: "长线维护" });
+    const fallbackId = await defaultIterationId(url);
 
-    // 建任务：别的项目的迭代直接忽略，本项目 / 全局的照常挂上。
+    // 建任务：别的项目的迭代直接收敛到默认迭代，本项目 / 全局的照常挂上。
     const crossed = await fetch(`${url}/api/wand-tasks`, jsonBody({
       title: "跨项目迭代",
       workspaceId: alpha.id,
       milestoneId: betaMilestone.id,
     })).then(jsonOf<{ id: string; milestoneId: string | null }>);
-    assert.equal(crossed.milestoneId, null);
+    assert.equal(crossed.milestoneId, fallbackId);
 
     const owned = await fetch(`${url}/api/wand-tasks`, jsonBody({
       title: "本项目迭代",
@@ -153,11 +175,11 @@ test("a task only carries its own project's milestone (or a global one)", async 
     })).then(jsonOf<{ id: string; milestoneId: string | null }>);
     assert.equal(owned.milestoneId, alphaMilestone.id);
 
-    // 移动端只会 PATCH workspaceId：换到别的项目时原迭代一并摘掉。
+    // 移动端只会 PATCH workspaceId：换到别的项目时原迭代不再适用，回落到默认迭代。
     const moved = await fetch(`${url}/api/wand-tasks/${owned.id}`, jsonBody({ workspaceId: beta.id }, "PATCH"))
       .then(jsonOf<{ workspaceId: string | null; milestoneId: string | null }>);
     assert.equal(moved.workspaceId, beta.id);
-    assert.equal(moved.milestoneId, null);
+    assert.equal(moved.milestoneId, fallbackId);
 
     // 全局迭代不受项目限制；没归属项目的任务也不受限（独立任务照样能用项目的迭代）。
     const globalTask = await fetch(`${url}/api/wand-tasks`, jsonBody({
@@ -174,13 +196,13 @@ test("a task only carries its own project's milestone (or a global one)", async 
       .then(jsonOf<{ milestoneId: string | null }>);
     assert.equal(standalone.milestoneId, alphaMilestone.id);
 
-    // 项目里的任务面板任务同样只看本项目：挂别的项目的迭代会被收敛成空。
+    // 项目里的任务面板任务同样只看本项目：挂别的项目的迭代会被收敛到默认迭代。
     const workspaceTask = await fetch(`${url}/api/workspaces/${beta.id}/tasks`, jsonBody({
       name: "项目任务",
       worktree: false,
       milestoneId: alphaMilestone.id,
     })).then(jsonOf<{ milestoneId: string | null }>);
-    assert.equal(workspaceTask.milestoneId, null);
+    assert.equal(workspaceTask.milestoneId, fallbackId);
 
     // 同项目 / 全局的仍然保留，PATCH 别的字段不会误清。
     const kept = await fetch(`${url}/api/wand-tasks/${globalTask.id}`, jsonBody({ priority: "high" }, "PATCH"))
@@ -226,6 +248,7 @@ test("milestones scoped to a workspace only show up in that workspace", async (t
   await withHarness(t, async ({ url, storage }) => {
     const alpha = storage.createWorkspace({ name: "alpha", cwd: "/tmp/wand-ms-alpha" });
     const beta = storage.createWorkspace({ name: "beta", cwd: "/tmp/wand-ms-beta" });
+    const defaultId = await defaultIterationId(url);
 
     const scoped = await fetch(`${url}/api/wand-milestones`, jsonBody({ name: "5.0 发布", workspaceId: alpha.id }))
       .then(jsonOf<{ id: string; workspaceId: string | null }>);
@@ -246,15 +269,18 @@ test("milestones scoped to a workspace only show up in that workspace", async (t
 
     const alphaList = await fetch(`${url}/api/wand-milestones?workspaceId=${alpha.id}`)
       .then(jsonOf<{ milestones: Array<{ id: string }> }>);
-    assert.deepEqual(alphaList.milestones.map((item) => item.id).sort(), [scoped.id, global.id].sort());
+    assert.deepEqual(
+      alphaList.milestones.map((item) => item.id).sort(),
+      [scoped.id, global.id, defaultId].sort(),
+    );
 
     const betaList = await fetch(`${url}/api/wand-milestones?workspaceId=${beta.id}`)
       .then(jsonOf<{ milestones: Array<{ id: string }> }>);
     assert.ok(!betaList.milestones.some((item) => item.id === scoped.id), "别的项目的迭代不应出现在下拉里");
 
     // 不带过滤时返回全量：任务看板共用一份缓存，按工作区本地过滤。
-    const all = await fetch(`${url}/api/wand-milestones`).then(jsonOf<{ milestones: unknown[] }>);
-    assert.equal(all.milestones.length, 3);
+    const all = await fetch(`${url}/api/wand-milestones`).then(jsonOf<{ milestones: Array<{ id: string; isDefault: boolean }> }>);
+    assert.equal(all.milestones.length, 4);
 
     // 改挂工作区：目录对应的项目是提交时才建的，建完再回填。
     const rebound = await fetch(`${url}/api/wand-milestones/${global.id}`, jsonBody({ workspaceId: beta.id }, "PATCH"))
@@ -262,7 +288,7 @@ test("milestones scoped to a workspace only show up in that workspace", async (t
     assert.equal(rebound.workspaceId, beta.id);
     const afterRebind = await fetch(`${url}/api/wand-milestones?workspaceId=${alpha.id}`)
       .then(jsonOf<{ milestones: Array<{ id: string }> }>);
-    assert.deepEqual(afterRebind.milestones.map((item) => item.id), [scoped.id]);
+    assert.deepEqual(afterRebind.milestones.map((item) => item.id).sort(), [scoped.id, defaultId].sort());
 
     const unknownWorkspace = await fetch(`${url}/api/wand-milestones`, jsonBody({ name: "坏工作区", workspaceId: "missing" }));
     assert.equal(unknownWorkspace.status, 400);

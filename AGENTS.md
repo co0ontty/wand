@@ -127,6 +127,21 @@ Raw PTY 输出和结构化聊天 turn 是同一会话的两种表示；渲染 bu
 
 持久化看起来不一致时，同时查 `src/storage.ts` 和 `src/session-logger.ts`，它们互补而非冗余。
 
+## 迭代与 commit 生成
+
+「迭代」就是里程碑（同一张表、同一套路由），加了两条规则：每个任务都有归属（没选时落到
+全局唯一的**默认迭代**，惰性创建、不可删、不可改挂工作区），以及把用户在这一轮里发过的
+提示词标题记下来当 commit message 的默认输入（省 token）。深入说明见 `docs/iteration.md`。
+
+最容易改错的三处：
+
+- 库里 `milestone_id IS NULL` 的历史行不搬家，只在**读路径**（`resolvedMilestoneFields`）
+  兑成默认迭代，**写路径**（POST/PATCH/`createTaskForWorkspace`）落默认迭代 id。
+- 提示词记录挂在输入热路径上：新增调用点必须保持「同步过滤 + 串行异步写入 + 永不抛错」，
+  不能给普通输入加任何延迟或 IO。
+- 未消费（`consumed_at IS NULL`）= 「上次提交以来」；提交成功就消费选中集合，
+  diff 模式也消费（提交是仓库事实）。
+
 ## Browser Extension
 
 MV3 密码库扩展在 `browser-extension/`，后端在 `src/password-manager.ts` + `/api/browser-extension/*`。改鉴权、保险库、TOTP、自动填充前先读 `docs/browser-extension.md`。扩展通过 `POST /api/login { client: "browser-extension" }` 拿 appToken；改密码会使旧 token 失效。后端改动跑 `tests/password-manager.test.ts`。

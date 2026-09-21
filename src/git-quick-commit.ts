@@ -46,6 +46,8 @@ const CODEX_MESSAGE_TIMEOUT_MS = 60_000;
 const DIRECT_API_PROFILE_TIMEOUT_MS = 20_000;
 const QUICK_COMMIT_CLI_TIMEOUT_MS = 120_000;
 const MAX_DIFF_FOR_AI = 100_000;
+// 迭代提示词模式下只给文件清单做核对，不需要完整 diff：单次上限比 diff 小一个量级。
+const MAX_WORKTREE_SUMMARY_FOR_AI = 4_000;
 const GIT_MAX_BUFFER = 16 * 1024 * 1024;
 
 function runGitAsync(args: string[], cwd: string, timeoutMs: number = GIT_TIMEOUT_MS): Promise<string> {
@@ -294,7 +296,7 @@ export async function getGitStatusAsync(cwd: string): Promise<GitStatusResult> {
   };
 }
 
-interface QuickCommitOptions {
+interface QuickCommitOptions extends CommitInputOptions {
   cwd: string;
   language: string;
   provider?: SessionProvider;
@@ -328,6 +330,17 @@ export class QuickCommitError extends Error {
     super(message);
     this.name = "QuickCommitError";
   }
+}
+
+/**
+ * 生成 commit message / tag 的输入源。
+ *   - iterationDigest：本轮迭代的提示词标题清单（默认输入，省 token、不读代码）；
+ *   - includeDiff：仍然附上完整 diff，用于提示词不够、需要逐行核对时；
+ *   - 两个都没有时保持旧行为：直接读 diff。
+ */
+export interface CommitInputOptions {
+  iterationDigest?: string;
+  includeDiff?: boolean;
 }
 
 // ── AI commit message generation ──
@@ -699,10 +712,78 @@ async function collectWorkingTreeDiff(cwd: string): Promise<string> {
   return diff;
 }
 
-async function generateCommitMessage(cwd: string, language: string, ai: QuickCommitAiOptions = {}): Promise<string> {
-  const diff = await collectWorkingTreeDiff(cwd);
+/** 有迭代提示词时用的轻量改动清单：只列文件与增删行数，不读任何代码内容。 */
+async function collectWorkingTreeSummary(cwd: string): Promise<string> {
+  const parts: string[] = [];
+  for (const args of [["diff", "HEAD", "--stat"], ["diff", "--cached", "--stat"]]) {
+    try {
+      const stat = await runGitAsync(args, cwd, 5000);
+      if (stat) {
+        parts.push(stat);
+        break;
+      }
+    } catch {
+      // 没有 HEAD（初始仓库）或没有 staged 内容都会走到这里，换下一个候选。
+    }
+  }
+  try {
+    const untracked = await runGitAllowEmptyAsync(["ls-files", "--others", "--exclude-standard"], cwd, 3000);
+    if (untracked.trim()) parts.push(`未跟踪文件：\n${untracked.trim()}`);
+  } catch {
+    // 可选信息，取不到就算了：提示词清单已经够模型总结。
+  }
+  if (parts.length === 0) return "(没有可见的文件改动)";
+  const summary = parts.join("\n");
+  return summary.length > MAX_WORKTREE_SUMMARY_FOR_AI
+    ? `${summary.slice(0, MAX_WORKTREE_SUMMARY_FOR_AI)}\n...(文件清单已截断)`
+    : summary;
+}
+
+/**
+ * 拼出「要总结什么」的输入块。
+ * 有迭代提示词时默认只附文件清单：commit message 要的是「我让你们改了什么」，
+ * 不是逐行 diff，省下的就是真金白银的 token。
+ */
+async function buildCommitPromptInput(
+  cwd: string,
+  options: CommitInputOptions,
+): Promise<{ input: string; usedIteration: boolean }> {
+  const digest = options.iterationDigest?.trim();
+  if (digest) {
+    const summary = await collectWorkingTreeSummary(cwd);
+    const diff = options.includeDiff ? `\ngit diff：\n${await collectWorkingTreeDiff(cwd)}` : "";
+    return {
+      usedIteration: true,
+      input: [
+        "我这一轮迭代（上次提交之后）发给编码助手的改动提示词，按时间排列：",
+        digest,
+        "",
+        "本次工作区改动清单（仅供核对，不要逐文件罗列）：",
+        summary,
+        diff,
+      ].join("\n"),
+    };
+  }
+  return { usedIteration: false, input: `git diff：\n${await collectWorkingTreeDiff(cwd)}` };
+}
+
+/** 两种输入源共用的任务描述，只改变如何引导模型读输入。 */
+function commitTaskLine(lang: string, usedIteration: boolean): string {
+  const instruction = usedIteration
+    ? `阅读以下迭代提示词与文件清单，用${lang}写一条简洁的 commit message。要求：祈使句，不超过 50 字，描述「做了什么」。只输出 message 本身，不要引号、不要 Markdown 格式、不要任何额外说明。`
+    : `阅读以下 git diff，用${lang}写一条简洁的 commit message。要求：祈使句，不超过 50 字，描述「做了什么」。只输出 message 本身，不要引号、不要 Markdown 格式、不要任何额外说明。`;
+  return instruction;
+}
+
+async function generateCommitMessage(
+  cwd: string,
+  language: string,
+  ai: QuickCommitAiOptions = {},
+  options: CommitInputOptions = {},
+): Promise<string> {
+  const { input, usedIteration } = await buildCommitPromptInput(cwd, options);
   const lang = language.trim() || "中文";
-  const prompt = `阅读以下 git diff，用${lang}写一条简洁的 commit message。要求：祈使句，不超过 50 字，描述「做了什么」。只输出 message 本身，不要引号、不要 Markdown 格式、不要任何额外说明。\n\n${diff}`;
+  const prompt = `${commitTaskLine(lang, usedIteration)}\n\n${input}`;
   const raw = await callConfiguredAiText(prompt, cwd, language, ai);
   const message = normalizeAiText(raw);
   if (!message) {
@@ -745,8 +826,9 @@ async function generateCommitMessageWithTag(
   cwd: string,
   language: string,
   ai: QuickCommitAiOptions = {},
+  options: CommitInputOptions = {},
 ): Promise<GenerateCommitMessageResult> {
-  const diff = await collectWorkingTreeDiff(cwd);
+  const { input, usedIteration } = await buildCommitPromptInput(cwd, options);
   let latestTag: string | undefined;
   try {
     latestTag = await runGitAsync(["describe", "--tags", "--abbrev=0"], cwd) || undefined;
@@ -757,15 +839,14 @@ async function generateCommitMessageWithTag(
   const tagHint = latestTag
     ? `当前最新 tag 是 \`${latestTag}\`，请基于它给出下一个版本号（保持原有前缀风格，例如有 \`v\` 就保留 \`v\`）。`
     : `仓库还没有任何 tag，请直接给一个起始版本号（建议 \`v0.0.1\` / \`v0.1.0\` / \`v1.0.0\` 之一，按改动幅度选择）。`;
-  const prompt = `阅读以下 git diff，完成两件事：
+  const prompt = `阅读以下输入，完成两件事：
 1. 用${lang}写一条简洁的 commit message（祈使句，不超过 50 字，描述「做了什么」）。
 2. 根据改动幅度推荐下一个语义化版本 tag（破坏性变更 → 升 major；新增功能 → 升 minor；修复 / 文档 / 重构 / 维护 → 升 patch）。${tagHint}
 
 请严格输出**单行 JSON 对象**，不要 Markdown 代码块、不要任何解释文字、不要多余引号。格式：
 {"message":"...","tag":"v1.2.3"}
 
-git diff:
-${diff}`;
+${input}`;
   const raw = await callConfiguredAiText(prompt, cwd, language, ai);
   const parsed = tryParseJson(raw);
 
@@ -790,12 +871,13 @@ export async function generateCommitMessageOnly(
   cwd: string,
   language: string,
   ai: QuickCommitAiOptions = {},
+  options: CommitInputOptions = {},
 ): Promise<GenerateCommitMessageResult> {
   if (!cwd || !existsSync(cwd)) {
     throw new QuickCommitError("工作目录不存在。", "CWD_MISSING");
   }
   // Read the working tree as-is. Generating a message must not stage files.
-  return generateCommitMessageWithTag(cwd, language, ai);
+  return generateCommitMessageWithTag(cwd, language, ai, options);
 }
 
 /**
@@ -1255,9 +1337,12 @@ async function collectSubmodulesForPush(cwd: string): Promise<{ base: string; in
 
 function buildFallbackPrompt(opts: QuickCommitOptions, priorError: string): string {
   const lang = opts.language.trim() || "中文";
+  const digest = opts.iterationDigest?.trim();
   const messageLine = opts.autoMessage === false
     ? `- 使用这个 commit message：${(opts.customMessage || "").trim()}`
-    : `- 先根据当前 staged/unstaged diff 生成一条简洁的 ${lang} commit message（祈使句，不超过 50 字）`;
+    : digest
+      ? `- 先依据下面「本轮迭代提示词」总结改动，写一条简洁的 ${lang} commit message（祈使句，不超过 50 字）；不需要逐行读 diff`
+      : `- 先根据当前 staged/unstaged diff 生成一条简洁的 ${lang} commit message（祈使句，不超过 50 字）`;
   const tagLine = opts.tag?.trim()
     ? `- 提交后创建 tag：${opts.tag.trim()}`
     : opts.autoTag
@@ -1282,6 +1367,9 @@ function buildFallbackPrompt(opts: QuickCommitOptions, priorError: string): stri
     tagLine,
     pushLine,
     submoduleLine,
+    ...(digest && opts.autoMessage !== false
+      ? ["", "本轮迭代提示词（按时间）：", digest, ...(opts.includeDiff ? [] : ["（文件清单请自行用 git status 查看，不必逐行读 diff）"])]
+      : []),
     "",
     `内置流程失败原因：${priorError}`,
     "",
@@ -1472,7 +1560,7 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
 
   let message: string;
   if (autoMessage) {
-    message = await generateCommitMessage(cwd, language, ai);
+    message = await generateCommitMessage(cwd, language, ai, opts);
   } else {
     message = (customMessage || "").trim();
     if (!message) {

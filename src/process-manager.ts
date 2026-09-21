@@ -25,9 +25,11 @@ import {
   SessionTopicCoordinator,
   sessionTopicBlocklistForSnapshot,
   shouldAcceptGeneratedSessionTitle,
+  shouldGenerateSessionTopicFromInput,
   type PtyTopicLineBuffer,
 } from "./session-topic.js";
 import { getErrorMessage } from "./error-utils.js";
+import { recordIterationPrompt } from "./iteration-log.js";
 import { describePtySpawnFailure } from "./ensure-node-pty-helper.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
 import { resolveSessionCwd } from "./session-cwd.js";
@@ -2201,9 +2203,15 @@ export class ProcessManager extends EventEmitter {
     const prompt = input.trim();
     const record = this.sessions.get(id);
     if (this.disposed || !prompt || !record) return;
+    // 迭代提示词记录：和会话标题共用同一套「有没有信息量」判断，用户不用多做一步。
+    recordIterationPrompt(this.storage, record, prompt, "session");
     const blockedTitles = sessionTopicBlocklistForSnapshot(record, this.storage);
     const provisional = provisionalSessionTopic(prompt, blockedTitles);
-    if (provisional && (record.title !== provisional.title || record.description !== provisional.description)) {
+    if (
+      provisional
+      && shouldGenerateSessionTopicFromInput(prompt)
+      && (record.title !== provisional.title || record.description !== provisional.description)
+    ) {
       this.setSessionTopic(id, provisional.title, provisional.description);
     }
     this.topicCoordinator.request(id, {

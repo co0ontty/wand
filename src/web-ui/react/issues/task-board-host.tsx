@@ -18,6 +18,7 @@ import {
 } from "../ui";
 import { classNames } from "../ui/class-names";
 import { MilestonePicker } from "../milestones/picker";
+import { useDefaultMilestone, usePreselectMilestone } from "../milestones/default-iteration";
 import {
   collectIssueLabels,
   createDefaultIssueAgent,
@@ -283,6 +284,12 @@ export function TaskBoardHost({
     setLastAgent(agent);
     void taskBoardRepository.saveAgentDefaults(agent);
   }, []);
+
+  // 新卡片默认挂到「默认迭代」：用户不选也有归属，面板上直接看得见。
+  const presetMilestone = useDefaultMilestone(draft.workspaceId || filterWorkspaceId || null, createOpen);
+  usePreselectMilestone(createOpen, presetMilestone, (id) => {
+    setDraft((current) => (current.milestoneId ? current : { ...current, milestoneId: id }));
+  });
 
   const openCreate = React.useCallback((status: WandTaskStatus = "todo") => {
     setDraft(emptyDraft(filterWorkspaceId || controller.workspaceId, status, lastAgentRef.current));

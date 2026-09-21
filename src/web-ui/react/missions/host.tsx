@@ -7,6 +7,7 @@ import { ProviderLogo } from "../provider-logo";
 import { WandButton, WandDialogSurface, WandIcon } from "../ui";
 import { milestonesStore, milestoneNameOf } from "../milestones/controller";
 import { MilestonePicker } from "../milestones/picker";
+import { useDefaultMilestone, usePreselectMilestone } from "../milestones/default-iteration";
 import { missionsController, missionsStore } from "./controller";
 import { httpMissionsRepository } from "./repository";
 import type {
@@ -135,6 +136,11 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
     workspaceContextStore.getServerSnapshot,
   );
   const linkedTaskName = creating && activeTaskContext.taskId ? activeTaskContext.taskName : null;
+  // 派发任务默认挂到「默认迭代」。
+  const presetMilestone = useDefaultMilestone(activeTaskContext.workspaceId, creating);
+  usePreselectMilestone(creating, presetMilestone, (id) => {
+    setMilestoneId((current) => current || id);
+  });
   const diffLines = useMemo(() => diff ? parseDiff(diff.patch) : [], [diff]);
 
   const refresh = async () => {

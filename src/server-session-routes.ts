@@ -27,6 +27,14 @@ import {
 } from "./git-quick-commit.js";
 
 import { getErrorMessage } from "./error-utils.js";
+import {
+  buildIterationCommitContext,
+  COMMIT_CONTEXT_MODE_PREF_KEY,
+  isCommitContextMode,
+  readCommitContextMode,
+  resolveCommitContextInput,
+  type IterationCommitContext,
+} from "./iteration-log.js";
 import { inferProviderFromCommand, isSessionProvider, providerCliCommand, SESSION_PROVIDERS } from "./session-provider.js";
 import { buildProviderResumeCommand, isProviderSessionId } from "./resume-policy.js";
 import { parseBoundedInteger } from "./request-limits.js";
@@ -53,6 +61,30 @@ export function parseExecutionMode(value: unknown, fallback: ExecutionMode): Exe
     throw new Error(`无效执行模式: ${String(value)}`);
   }
   return value;
+}
+
+/** 提交输入模式：query 覆盖 > 记住的偏好 > 默认（有提示词就优先用提示词）。 */
+function commitModeForRead(storage: WandStorage, override: unknown): string {
+  return readCommitContextMode(storage, override);
+}
+
+/**
+ * 生成 commit message 的输入：迭代模式下给「本轮提示词清单」，
+ * 切到 diff 模式、或本轮没记录到任何提示词时给空 digest（调用方自动读完整 diff）。
+ */
+async function iterationCommitInput(
+  storage: WandStorage,
+  snapshot: SessionSnapshot,
+  body: { mode?: unknown; entryIds?: unknown },
+): Promise<{ digest: string; entryIds: string[]; iteration: IterationCommitContext["iteration"] }> {
+  const context = await buildIterationCommitContext(storage, { session: snapshot });
+  const input = resolveCommitContextInput(storage, context, body);
+  return { digest: input.digest, entryIds: input.entryIds, iteration: context.iteration };
+}
+
+/** 只有「让模型自己写 message」时才把迭代提示词交给它；用户手写的 message 不需要读任何输入。 */
+function commitMessageFromIteration(body: { autoMessage?: boolean; customMessage?: string }): boolean {
+  return body.autoMessage !== false && !body.customMessage?.trim();
 }
 
 export function parseSessionCreationOrigin(
@@ -906,9 +938,14 @@ export function registerSessionRoutes(
       res.status(400).json({ error: "会话没有工作目录。", errorCode: "NO_CWD" });
       return;
     }
-    const body = (req.body ?? {}) as { autoMessage?: boolean; customMessage?: string; tag?: string; autoTag?: boolean; push?: boolean; submodule?: boolean };
+    const body = (req.body ?? {}) as {
+      autoMessage?: boolean; customMessage?: string; tag?: string; autoTag?: boolean; push?: boolean;
+      submodule?: boolean; mode?: unknown; entryIds?: unknown; includeDiff?: boolean;
+    };
     try {
       const ai = resolveCommitAiContext(snapshot, config);
+      // 自动 message + 迭代模式：拿本轮提示词当输入；提交成功后标记已用掉。
+      const context = await iterationCommitInput(storage, snapshot, body);
       const result = await runQuickCommitWithFallback({
         cwd: snapshot.cwd,
         language: config.language ?? "",
@@ -919,8 +956,21 @@ export function registerSessionRoutes(
         autoTag: !!body.autoTag,
         push: !!body.push,
         submodule: !!body.submodule,
+        iterationDigest: commitMessageFromIteration(body) ? context.digest : "",
+        includeDiff: !!body.includeDiff,
       });
-      res.json(result);
+      const consumed = result.ok && result.commit?.hash && context.entryIds.length > 0
+        ? storage.markIterationPromptsConsumed(context.entryIds, result.commit.hash)
+        : 0;
+      res.json({
+        ...result,
+        commitContext: {
+          source: commitMessageFromIteration(body) && context.digest ? "iteration" : "diff",
+          entryIds: context.entryIds,
+          iteration: context.iteration,
+        },
+        iterationEntriesConsumed: consumed,
+      });
     } catch (error) {
       if (error instanceof QuickCommitError) {
         const status = error.code === "NOTHING_TO_COMMIT" || error.code === "TAG_EXISTS" ? 409 : 400;
@@ -930,6 +980,38 @@ export function registerSessionRoutes(
       sendRouteError(res, error, "快捷提交失败。");
     }
   }));
+
+  // 本轮迭代的提示词清单：快捷提交面板默认勾选「上次提交以来」的那些，
+  // 也可以往回勾已提交过的历史，或者整套切成读 diff。
+  app.get("/api/sessions/:id/iteration-context", asyncRoute(async (req, res) => {
+    const snapshot = sessions.getLatest(req.params.id);
+    if (!snapshot) {
+      res.status(404).json({ error: "未找到该会话。" });
+      return;
+    }
+    const milestoneId = typeof req.query.milestoneId === "string" ? req.query.milestoneId : null;
+    try {
+      const context = await buildIterationCommitContext(storage, { session: snapshot, milestoneId });
+      res.json({ ...context, mode: commitModeForRead(storage, req.query.mode) });
+    } catch (error) {
+      sendRouteError(res, error, "无法读取本轮变更。");
+    }
+  }));
+
+  // 记住用户选的模式（只存偏好，不碰仓库）。
+  app.post("/api/sessions/:id/iteration-context", (req, res) => {
+    if (!sessions.getLatest(req.params.id)) {
+      res.status(404).json({ error: "未找到该会话。" });
+      return;
+    }
+    const mode = (req.body ?? {}).mode;
+    if (!isCommitContextMode(mode)) {
+      res.status(400).json({ error: "无效的提交输入模式。" });
+      return;
+    }
+    storage.setPreference(COMMIT_CONTEXT_MODE_PREF_KEY, mode);
+    res.json({ ok: true, mode });
+  });
 
   app.post("/api/sessions/:id/generate-commit-message", asyncRoute(async (req, res) => {
     const snapshot = sessions.getLatest(req.params.id);
@@ -941,12 +1023,24 @@ export function registerSessionRoutes(
       res.status(400).json({ error: "会话没有工作目录。" });
       return;
     }
+    const body = (req.body ?? {}) as { mode?: unknown; entryIds?: unknown; includeDiff?: boolean };
     try {
       const ai = resolveCommitAiContext(snapshot, config);
+      const context = await iterationCommitInput(storage, snapshot, body);
       const result = await generateCommitMessageOnly(snapshot.cwd, config.language ?? "", {
         ...ai,
+      }, {
+        iterationDigest: context.digest,
+        includeDiff: !!body.includeDiff,
       });
-      res.json(result);
+      res.json({
+        ...result,
+        commitContext: {
+          source: context.digest ? "iteration" : "diff",
+          entryIds: context.entryIds,
+          iteration: context.iteration,
+        },
+      });
     } catch (error) {
       if (error instanceof QuickCommitError) {
         res.status(400).json({ error: error.message, errorCode: error.code });

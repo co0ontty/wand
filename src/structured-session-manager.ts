@@ -13,6 +13,7 @@ import {
 import { truncateMessagesForTransport } from "./message-truncator.js";
 import { buildChildEnv } from "./env-utils.js";
 import { getErrorMessage } from "./error-utils.js";
+import { recordIterationPrompt } from "./iteration-log.js";
 import { signalNameFromNumber } from "./signal-utils.js";
 import { resolveSdkClaudeBinary } from "./claude-sdk-runner.js";
 import {
@@ -20,6 +21,7 @@ import {
   SessionTopicCoordinator,
   sessionTopicBlocklistForSnapshot,
   shouldAcceptGeneratedSessionTitle,
+  shouldGenerateSessionTopicFromInput,
 } from "./session-topic.js";
 import { resolveSessionCwd } from "./session-cwd.js";
 import { isSessionProvider } from "./session-provider.js";
@@ -1104,9 +1106,15 @@ export class StructuredSessionManager {
   private maybeGenerateSessionTopic(id: string, input: string): void {
     const session = this.sessions.get(id);
     if (this.disposed || !session || !input.trim()) return;
+    // 迭代提示词记录：和会话标题共用同一套「有没有信息量」判断，用户不用多做一步。
+    recordIterationPrompt(this.storage, session, input, "session");
     const blockedTitles = sessionTopicBlocklistForSnapshot(session, this.storage);
     const provisional = provisionalSessionTopic(input, blockedTitles);
-    if (provisional && (session.title !== provisional.title || session.description !== provisional.description)) {
+    if (
+      provisional
+      && shouldGenerateSessionTopicFromInput(input)
+      && (session.title !== provisional.title || session.description !== provisional.description)
+    ) {
       this.setSessionTopic(id, provisional.title, provisional.description);
     }
     this.topicCoordinator.request(id, {

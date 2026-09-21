@@ -162,6 +162,50 @@ test("quick-commit action model produces the four legacy API combinations", () =
     push: false,
     submodule: false,
   });
+
+  // 迭代上下文只在真有时才上行：默认走后端记住的偏好，不多发字段。
+  assert.deepEqual(buildQuickCommitInput(
+    { message: "", tag: "", tagEdited: false },
+    "commit",
+    false,
+    { mode: "iteration", entryIds: ["a", "b"] },
+  ), {
+    autoMessage: true,
+    customMessage: "",
+    tag: "",
+    autoTag: false,
+    push: false,
+    submodule: false,
+    mode: "iteration",
+    entryIds: ["a", "b"],
+  });
+  assert.deepEqual(buildQuickCommitInput(
+    { message: "", tag: "", tagEdited: false },
+    "commit",
+    false,
+    { mode: "diff", entryIds: [] },
+    true,
+  ), {
+    autoMessage: true,
+    customMessage: "",
+    tag: "",
+    autoTag: false,
+    push: false,
+    submodule: false,
+    mode: "diff",
+    entryIds: [],
+    includeDiff: true,
+  });
+  // 勾选集合是快照：之后改数组不会反过来改输入对象。
+  const ids = ["x"];
+  const snapshot = buildQuickCommitInput(
+    { message: "", tag: "", tagEdited: false },
+    "commit",
+    false,
+    { mode: "iteration", entryIds: ids },
+  );
+  ids.push("y");
+  assert.deepEqual(snapshot.entryIds, ["x"]);
 });
 
 test("quick-commit model preserves before/after context and porcelain badges", () => {
@@ -230,7 +274,26 @@ test("HTTP quick-commit repository normalizes status and preserves endpoint cont
       });
     }
     if (url.endsWith("/generate-commit-message")) {
-      return json({ message: "feat: generated", suggestedTag: " v2 " });
+      return json({
+        message: "feat: generated",
+        suggestedTag: " v2 ",
+        commitContext: { source: "iteration", entryIds: ["p1"], iteration: { id: "i1", name: "默认迭代", isDefault: true } },
+      });
+    }
+    if (url.endsWith("/iteration-context")) {
+      if (init?.method === "POST") return json({ ok: true, mode: "diff" });
+      return json({
+        iteration: { id: "i1", name: "默认迭代", isDefault: true },
+        entries: [
+          { id: "p1", title: "修终端乱码", detail: "修终端乱码", createdAt: "2026-02-14T09:05:00.000Z", consumed: false, consumedCommit: null, source: "session" },
+          { id: "p0", title: "", detail: "", createdAt: "nonsense", consumed: true, consumedCommit: "abcdef1", source: "session" },
+        ],
+        defaultEntryIds: ["p1"],
+        selectableIds: ["p0", "p1"],
+        truncated: false,
+        effectiveMode: "iteration",
+        mode: "iteration",
+      });
     }
     if (url.endsWith("/quick-commit")) {
       return json({
@@ -260,7 +323,27 @@ test("HTTP quick-commit repository normalizes status and preserves endpoint cont
   assert.deepEqual(await repository.generate("session/a"), {
     message: "feat: generated",
     suggestedTag: "v2",
+    contextSource: "iteration",
+    entryIds: ["p1"],
   });
+  assert.equal(
+    (await repository.generate("session/a", {
+      selection: { mode: "iteration", entryIds: ["p1"] },
+      includeDiff: true,
+    })).contextSource,
+    "iteration",
+  );
+
+  const context = await repository.loadContext("session/a");
+  assert.equal(context.iteration.name, "默认迭代");
+  assert.equal(context.iteration.isDefault, true);
+  assert.deepEqual(context.defaultEntryIds, ["p1"]);
+  assert.deepEqual(context.selectableIds, ["p0", "p1"]);
+  assert.equal(context.mode, "iteration");
+  assert.equal(context.entries[1].consumed, true);
+  assert.equal(context.entries[1].consumedCommit, "abcdef1");
+  assert.equal(await repository.saveContextMode("session/a", "diff"), "diff");
+
   const input = {
     autoMessage: true,
     customMessage: "",
@@ -288,10 +371,21 @@ test("HTTP quick-commit repository normalizes status and preserves endpoint cont
   assert.deepEqual(calls.map((call) => [call.url, call.method]), [
     ["/api/sessions/session%2Fa/git-status", "GET"],
     ["/api/sessions/session%2Fa/generate-commit-message", "POST"],
+    ["/api/sessions/session%2Fa/generate-commit-message", "POST"],
+    ["/api/sessions/session%2Fa/iteration-context", "GET"],
+    ["/api/sessions/session%2Fa/iteration-context", "POST"],
     ["/api/sessions/session%2Fa/quick-commit", "POST"],
     ["/api/sessions/session%2Fa/git/push", "POST"],
   ]);
-  assert.deepEqual(calls[2].body, input);
+  const bodyOf = (suffix: string): unknown[] => calls
+    .filter((call) => call.url.endsWith(suffix) && call.method === "POST")
+    .map((call) => call.body);
+  assert.deepEqual(bodyOf("/generate-commit-message"), [
+    {},
+    { mode: "iteration", entryIds: ["p1"], includeDiff: true },
+  ]);
+  assert.deepEqual(bodyOf("/iteration-context"), [{ mode: "diff" }]);
+  assert.deepEqual(bodyOf("/quick-commit"), [input]);
 });
 
 test("HTTP quick-commit repository surfaces server errors and safe status defaults", async () => {
@@ -324,6 +418,8 @@ test("Memory quick-commit repository records immutable commands", async () => {
   assert.deepEqual(await repository.generate("session-1"), {
     message: "generated",
     suggestedTag: "v2",
+    contextSource: "diff",
+    entryIds: [],
   });
   await repository.commit("session-1", {
     autoMessage: false,

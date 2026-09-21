@@ -18,7 +18,7 @@ import { collectSessionTopicBlocklist } from "./session-topic.js";
 import { resolveSessionDisplayTitle } from "./session-transport.js";
 import { type LayoutNode, type PaneTab, type SessionSnapshot, type TaskWindowLayout, type Workspace, type WorkspaceDefaultProvider, type WorkspaceTask, type WorkspaceTaskWorktree } from "./types.js";
 import { attachUnboundSessionsToWorkspace, backfillSessionWorkspaces, normalizeProjectCwd, projectCwdForSession, isGlobalWorkspace, syncDirectoryNameForWorkspace } from "./workspace-binding.js";
-import { scopedMilestoneId } from "./milestone-scope.js";
+import { defaultMilestoneIdForWrite, resolvedMilestoneFields, scopedMilestoneId } from "./milestone-scope.js";
 import { archiveBoardTaskForWorkspaceTask, archiveWorkspaceTask, ensureBoardTaskForWorkspaceTask, isUnnamedWorkspaceTaskName, moveSessionToWorkspaceTask, syncSidebarTasksFromBoard, UNNAMED_WORKSPACE_TASK_NAME } from "./wand-task-sync.js";
 import { isSessionProvider } from "./session-provider.js";
 import { firstLayoutTabId } from "./layout-tree.js";
@@ -161,7 +161,7 @@ function createTaskForWorkspace(
     storage,
     requestedMilestoneId || null,
     isGlobalWorkspace(workspace) ? null : workspace.id,
-  );
+  ) ?? defaultMilestoneIdForWrite(storage);
   let mountedCwd: string | undefined;
   if (body.cwd !== undefined && body.cwd !== null && String(body.cwd).trim()) {
     mountedCwd = resolveWorkspaceCwd(body.cwd);
@@ -470,6 +470,7 @@ export function registerWorkspaceRoutes(
       refreshAutoBoardTaskTitles(storage, titleOptions);
       res.status(201).json({
         ...created.task,
+        ...resolvedMilestoneFields(storage, created.task.milestoneId),
         cwd: created.cwd,
         isolated: created.isolated,
         worktreeError: created.worktreeError,
@@ -596,6 +597,8 @@ export function registerWorkspaceRoutes(
         }));
       target.tasks.push({
         ...task,
+        // 没单独指定迭代的任务读作默认迭代（id 与名字成对）。
+        ...resolvedMilestoneFields(storage, task.milestoneId),
         cwd: taskRuntimeCwd(task, workspace),
         isolated: task.worktree !== null,
         sessions,
@@ -689,7 +692,10 @@ export function registerWorkspaceRoutes(
       res.status(404).json({ error: "未找到该项目。" });
       return;
     }
-    res.json(storage.listWorkspaceTasks(workspace.id));
+    res.json(storage.listWorkspaceTasks(workspace.id).map((task) => ({
+      ...task,
+      ...resolvedMilestoneFields(storage, task.milestoneId),
+    })));
   });
 
   // 项目级 Worktree 总览：一次解析默认目标分支，再为每个任务读取可合并状态。
@@ -784,6 +790,7 @@ export function registerWorkspaceRoutes(
       refreshAutoBoardTaskTitles(storage, titleOptions);
       res.status(201).json({
         ...created.task,
+        ...resolvedMilestoneFields(storage, created.task.milestoneId),
         cwd: created.cwd,
         isolated: created.isolated,
         worktreeError: created.worktreeError,
@@ -804,6 +811,7 @@ export function registerWorkspaceRoutes(
     const workspace = storage.getWorkspace(task.workspaceId);
     res.json({
       ...task,
+      ...resolvedMilestoneFields(storage, task.milestoneId),
       cwd: taskRuntimeCwd(task, workspace),
       sessions: storage.listSessionsByWorkspaceTaskSlim(task.id).map((session) => ({
         ...workspaceSessionSummary(session, {
@@ -848,11 +856,16 @@ export function registerWorkspaceRoutes(
         sendRouteError(res, new Error("未找到该里程碑。"), "无法更新任务。");
         return;
       }
-      patch.milestoneId = milestoneId || null;
+      // 清空迭代等于回到默认迭代（老客户端不传时不会走到这里）。
+      patch.milestoneId = milestoneId || defaultMilestoneIdForWrite(storage);
     }
     storage.updateWorkspaceTask(existing.id, patch);
     if (patch.status === "done") archiveBoardTaskForWorkspaceTask(storage, existing.id);
-    res.json(storage.getWorkspaceTask(existing.id));
+    const updated = storage.getWorkspaceTask(existing.id);
+    res.json({
+      ...updated,
+      ...resolvedMilestoneFields(storage, updated?.milestoneId),
+    });
   });
 
   // 归档任务：软删除。终端继续运行、worktree 与卡片历史都保留，只是侧栏不再显示。
@@ -863,7 +876,11 @@ export function registerWorkspaceRoutes(
       return;
     }
     archiveWorkspaceTask(storage, existing);
-    res.json(storage.getWorkspaceTask(existing.id));
+    const archived = storage.getWorkspaceTask(existing.id);
+    res.json({
+      ...archived,
+      ...resolvedMilestoneFields(storage, archived?.milestoneId),
+    });
   });
 
   // 删除任务；cascade=true 连带删会话，否则仅解绑；尽力清理 worktree

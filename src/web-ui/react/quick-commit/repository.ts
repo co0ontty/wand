@@ -1,11 +1,15 @@
 import type {
+  QuickCommitContextMode,
   QuickCommitFile,
   QuickCommitInput,
+  QuickCommitIterationContext,
+  QuickCommitIterationEntry,
   QuickCommitLoadOptions,
   QuickCommitPushInput,
   QuickCommitPushResponse,
   QuickCommitRepository,
   QuickCommitResponse,
+  QuickCommitSelection,
   QuickCommitStatus,
   QuickCommitSuggestion,
 } from "./types";
@@ -66,6 +70,52 @@ export function normalizeQuickCommitStatus(value: unknown): QuickCommitStatus {
   };
 }
 
+function normalizeMode(value: unknown, fallback: QuickCommitContextMode): QuickCommitContextMode {
+  return value === "iteration" || value === "diff" ? value : fallback;
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && !!item) : [];
+}
+
+function normalizeEntries(value: unknown): QuickCommitIterationEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!isRecord(item) || typeof item.id !== "string") return [];
+    return [{
+      id: item.id,
+      title: stringValue(item.title),
+      detail: stringValue(item.detail),
+      createdAt: stringValue(item.createdAt),
+      consumed: item.consumed === true,
+      consumedCommit: stringValue(item.consumedCommit),
+      source: stringValue(item.source),
+    }];
+  });
+}
+
+/** 服务端返回的迭代上下文；缺字段一律兑成安全默认值，面板不会因此崩。 */
+export function normalizeQuickCommitContext(value: unknown): QuickCommitIterationContext {
+  const record = isRecord(value) ? value : {};
+  const iteration = isRecord(record.iteration) ? record.iteration : {};
+  const entries = normalizeEntries(record.entries);
+  const defaultEntryIds = stringList(record.defaultEntryIds);
+  const selectableIds = stringList(record.selectableIds);
+  return {
+    iteration: {
+      id: stringValue(iteration.id),
+      name: stringValue(iteration.name),
+      isDefault: iteration.isDefault === true,
+    },
+    entries,
+    defaultEntryIds,
+    selectableIds: selectableIds.length > 0 ? selectableIds : entries.map((entry) => entry.id),
+    truncated: record.truncated === true,
+    effectiveMode: normalizeMode(record.effectiveMode, defaultEntryIds.length > 0 ? "iteration" : "diff"),
+    mode: normalizeMode(record.mode, "iteration"),
+  };
+}
+
 export class HttpQuickCommitRepository implements QuickCommitRepository {
   constructor(
     private readonly fetchImpl: FetchLike = (input, init) => fetch(input, init),
@@ -82,22 +132,63 @@ export class HttpQuickCommitRepository implements QuickCommitRepository {
     return normalizeQuickCommitStatus(await readRecord(response, "无法加载 Git 状态。"));
   }
 
-  async generate(
+  async loadContext(
     sessionId: string,
     options: QuickCommitLoadOptions = {},
+  ): Promise<QuickCommitIterationContext> {
+    const response = await this.fetchImpl(
+      `/api/sessions/${encodeURIComponent(sessionId)}/iteration-context`,
+      { credentials: "same-origin", signal: options.signal },
+    );
+    return normalizeQuickCommitContext(await readRecord(response, "无法读取本轮变更。"));
+  }
+
+  async saveContextMode(
+    sessionId: string,
+    mode: QuickCommitContextMode,
+  ): Promise<QuickCommitContextMode> {
+    const response = await this.fetchImpl(
+      `/api/sessions/${encodeURIComponent(sessionId)}/iteration-context`,
+      {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode }),
+      },
+    );
+    const data = await readRecord(response, "无法保存输入选择。");
+    return normalizeMode(data.mode, mode);
+  }
+
+  async generate(
+    sessionId: string,
+    options: QuickCommitLoadOptions & { selection?: QuickCommitSelection; includeDiff?: boolean } = {},
   ): Promise<QuickCommitSuggestion> {
+    // 只发真正有值的字段：没选过就不替服务端做决定（它用记住的偏好兜底）。
+    const body: Record<string, unknown> = {};
+    if (options.selection) {
+      body.mode = options.selection.mode;
+      body.entryIds = [...options.selection.entryIds];
+    }
+    if (options.includeDiff) body.includeDiff = true;
     const response = await this.fetchImpl(
       `/api/sessions/${encodeURIComponent(sessionId)}/generate-commit-message`,
       {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: "{}",
+        body: JSON.stringify(body),
         signal: options.signal,
       },
     );
     const data = await readRecord(response, "AI 生成失败。");
-    return { message: stringValue(data.message), suggestedTag: stringValue(data.suggestedTag).trim() };
+    const context = isRecord(data.commitContext) ? data.commitContext : null;
+    return {
+      message: stringValue(data.message),
+      suggestedTag: stringValue(data.suggestedTag).trim(),
+      contextSource: normalizeMode(context?.source, "diff"),
+      entryIds: stringList(context?.entryIds),
+    };
   }
 
   async commit(sessionId: string, input: QuickCommitInput): Promise<QuickCommitResponse> {
@@ -124,6 +215,7 @@ export class HttpQuickCommitRepository implements QuickCommitRepository {
             : []
         ))
       : [];
+    const rawContext = isRecord(data.commitContext) ? data.commitContext : null;
     return {
       ok: data.ok !== false,
       commit,
@@ -131,6 +223,9 @@ export class HttpQuickCommitRepository implements QuickCommitRepository {
       pushed: data.pushed === true,
       pushError: stringValue(data.pushError),
       submoduleCommits,
+      commitContext: rawContext
+        ? { source: normalizeMode(rawContext.source, "diff"), entryIds: stringList(rawContext.entryIds) }
+        : null,
     };
   }
 

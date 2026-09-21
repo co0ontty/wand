@@ -231,3 +231,66 @@ test("agentic quick-commit fallback dispatches Grok and Qoder with provider-nati
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("iteration digests replace the raw diff in generated commit messages", async () => {
+  const root = mkdtempSync(join(tmpdir(), "wand-quick-commit-iteration-"));
+  const bin = join(root, "bin");
+  const promptFile = join(root, "codex-prompt");
+  mkdirSync(bin);
+  // codex 从 stdin 读 prompt：落盘后回一条固定 message，方便断言 prompt 里到底装了什么。
+  executable(join(bin, "codex"), [
+    'cat > "$WAND_PROMPT_FILE"',
+    'printf \'%s\\n\' \'{"type":"item.completed","item":{"type":"agent_message","text":"fix: 按迭代提示词总结"}}\'',
+  ].join("\n"));
+
+  const previousPath = process.env.PATH;
+  const previousPromptFile = process.env.WAND_PROMPT_FILE;
+  process.env.PATH = `${bin}${delimiter}${previousPath ?? ""}`;
+  process.env.WAND_PROMPT_FILE = promptFile;
+
+  const digest = "1. 02-14 09:05 把登录页的错误提示改成中文\n2. 02-14 10:30 补一条空密码的测试";
+  async function commitWith(options: { iterationDigest?: string; includeDiff?: boolean }): Promise<string> {
+    const repo = join(root, `repo-${options.iterationDigest ? (options.includeDiff ? "diff" : "digest") : "legacy"}`);
+    initRepo(repo);
+    // 只在 diff 正文里出现的标记：用来确认「读没读代码」。
+    writeFileSync(join(repo, "tracked.txt"), "DIFF_BODY_MARKER\n");
+    const result = await runQuickCommitWithFallback({
+      cwd: repo,
+      language: "中文",
+      provider: "codex",
+      model: "codex-test-model",
+      autoMessage: true,
+      push: false,
+      submodule: false,
+      ...options,
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.commit?.message, "fix: 按迭代提示词总结");
+    return readFileSync(promptFile, "utf8");
+  }
+
+  try {
+    // 默认（有迭代提示词）：只给提示词清单 + 文件清单，不读 diff 正文。
+    const prompt = await commitWith({ iterationDigest: digest });
+    assert.match(prompt, /把登录页的错误提示改成中文/);
+    assert.match(prompt, /补一条空密码的测试/);
+    assert.match(prompt, /tracked\.txt/, "文件清单要留着给模型核对");
+    assert.doesNotMatch(prompt, /DIFF_BODY_MARKER/, "迭代模式不应该把完整 diff 灌给模型");
+
+    // 显式要 diff：仍然带完整改动，用于提示词不够时逐行核对。
+    const withDiff = await commitWith({ iterationDigest: digest, includeDiff: true });
+    assert.match(withDiff, /把登录页的错误提示改成中文/);
+    assert.match(withDiff, /DIFF_BODY_MARKER/);
+
+    // 没有迭代提示词（老客户端 / 无记录）：保持旧行为，直接读 diff。
+    const legacy = await commitWith({});
+    assert.match(legacy, /DIFF_BODY_MARKER/);
+    assert.doesNotMatch(legacy, /把登录页的错误提示改成中文/);
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+    if (previousPromptFile === undefined) delete process.env.WAND_PROMPT_FILE;
+    else process.env.WAND_PROMPT_FILE = previousPromptFile;
+    rmSync(root, { recursive: true, force: true });
+  }
+});

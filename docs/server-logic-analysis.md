@@ -255,7 +255,7 @@ review 发送经 `sendMessage`：请求被接受（入队或启动）后才标 s
 
 ## 12. 模型、系统 AI、扩展与更新
 
-`models.ts` 为唯一模型目录发现者；客户端只读缓存。`system-ai.ts`、`claude-sdk-runner.ts`、session-topic、prompt-optimizer 与 git 文案生成属于 one-shot 辅助调用，不等于会话执行。首条文本触发标题时还要遵守 pending/旧回调防覆盖。
+`models.ts` 为唯一模型目录发现者；客户端只读缓存。`system-ai.ts`、`claude-sdk-runner.ts`、session-topic、prompt-optimizer 与 git 文案生成属于 one-shot 辅助调用，不等于会话执行。首条文本触发标题时还要遵守 pending/旧回调防覆盖。输入信息量不足（`shouldGenerateSessionTopicFromInput`：单条命令、`y`/`1` 之类的选择、`/compact`）时不写标题也不起模型调用，显示退回目录名/首条消息兜底；否则回一句「y」就会把已生成的主题覆盖掉。
 
 浏览器扩展：content script 捕获/填充 → background 按消息分派 → Bearer REST；popup/options 管理连接与条目；passkey 路径按浏览器能力启用，并在发给内容脚本前去掉私钥字段。服务端返回当前请求 origin；代码仍有历史默认地址常量，不能写成“运行时 origin 已完全不存在默认值”。
 

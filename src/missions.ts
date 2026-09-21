@@ -3,6 +3,7 @@ import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 
 import { buildMissionDiff } from "./mission-diff.js";
+import { recordIterationPromptForTask } from "./iteration-log.js";
 import type {
   AgentActivityItem,
   AgentActivityState,
@@ -158,8 +159,10 @@ export class Missions {
     }
 
     const createdAt = nowIso();
-    const milestoneId = input.milestoneId?.trim() || null;
-    if (milestoneId && !this.storage.getWandMilestone(milestoneId)) throw new Error("未找到该里程碑。");
+    // 没选迭代就落到默认迭代：每个任务都属于一个迭代，后面按迭代做 commit 总结才成立。
+    const requestedMilestoneId = input.milestoneId?.trim() || null;
+    if (requestedMilestoneId && !this.storage.getWandMilestone(requestedMilestoneId)) throw new Error("未找到该里程碑。");
+    const milestoneId = requestedMilestoneId ?? this.storage.ensureDefaultWandMilestone().id;
     const mission: Mission = {
       id: randomUUID(),
       title: input.title?.trim().slice(0, 120) || firstPromptLine(prompt),
@@ -177,6 +180,15 @@ export class Missions {
       updatedAt: createdAt,
     };
     this.storage.saveMission(mission);
+    // 派发即改动意图：记进迭代提示词，commit / 汇报总结时不必读 diff。
+    recordIterationPromptForTask(this.storage, {
+      cwd: mission.cwd,
+      milestoneId: mission.milestoneId,
+      taskId: mission.taskId,
+      title: mission.title,
+      detail: prompt,
+      source: "dispatch",
+    });
 
     for (const provider of providers) this.dispatchAttempt(mission, provider);
     this.refreshMissionStatus(mission.id);

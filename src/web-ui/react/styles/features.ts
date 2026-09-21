@@ -979,6 +979,7 @@ export const settingsAndQuickCommitStyles = String.raw`
 
 .wand-quick-files,
 .wand-quick-editor,
+.wand-quick-iteration,
 .wand-quick-actions {
   min-width: 0;
   margin: 0;
@@ -1087,6 +1088,125 @@ export const settingsAndQuickCommitStyles = String.raw`
   font-size: var(--font-size-sm);
   text-align: center;
 }
+
+.wand-quick-generated-from {
+  margin: 2px 12px 10px;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+}
+
+/* ── 本次变更输入（迭代提示词 / 完整 diff） ── */
+
+.wand-quick-iteration-modes {
+  display: flex;
+  gap: 6px;
+  padding: 10px 11px 0;
+}
+
+.wand-quick-iteration-mode {
+  flex: 1 1 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 6px 9px;
+  color: var(--text-secondary);
+  background: transparent;
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.wand-quick-iteration-mode.is-selected {
+  border-color: var(--accent-solid);
+  color: var(--accent-solid);
+  background: var(--accent-muted);
+  font-weight: var(--font-weight-medium);
+}
+
+.wand-quick-iteration-hint {
+  margin: 9px 11px 11px;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  line-height: 1.55;
+}
+
+.wand-quick-iteration-list {
+  display: grid;
+  max-height: 168px;
+  margin: 6px 0 0;
+  overflow-y: auto;
+  padding: 0;
+  list-style: none;
+}
+
+.wand-quick-iteration-list label {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 11px;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.wand-quick-iteration-list label:hover { background: rgba(125, 91, 57, 0.05); }
+.wand-quick-iteration-list input { flex: 0 0 auto; margin: 0; accent-color: var(--accent-solid); }
+
+.wand-quick-iteration-entry-title {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wand-quick-iteration-entry-meta {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.wand-quick-iteration-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 11px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.wand-quick-iteration-actions > div { display: flex; flex: 0 0 auto; gap: 4px; }
+
+.wand-quick-iteration-actions button {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  padding: 3px 8px;
+  color: var(--text-secondary);
+  background: transparent;
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.wand-quick-iteration-actions button:disabled { opacity: 0.45; cursor: default; }
+
+.wand-quick-iteration-diff-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 11px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.wand-quick-iteration-diff-toggle strong {
+  display: block;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+}
+
+.wand-quick-iteration-diff-toggle span { color: var(--text-muted); font-size: var(--font-size-xs); }
 
 .wand-quick-editor { padding-bottom: 12px; }
 .wand-quick-editor .wand-quick-section-heading { margin-bottom: 12px; }

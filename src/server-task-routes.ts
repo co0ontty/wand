@@ -4,8 +4,9 @@ import { asyncRoute } from "./express-async.js";
 import { getErrorMessage } from "./error-utils.js";
 import { bodyObject, sendRouteError, text } from "./server-request.js";
 import { parseWandTaskAgent, type WandStorage } from "./storage.js";
-import { scopedMilestoneId } from "./milestone-scope.js";
+import { defaultMilestoneIdForWrite, resolvedMilestoneFields, scopedMilestoneId } from "./milestone-scope.js";
 import { generateWandTaskTitle, provisionalTaskTitleFromDescription, TASK_TITLE_MAX_LENGTH } from "./task-title.js";
+import { recordIterationPromptForTask } from "./iteration-log.js";
 import type { QuickCommitAiOptions } from "./git-quick-commit.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
 import type { SessionRegistry } from "./session-registry.js";
@@ -135,7 +136,7 @@ function taskDto({ storage, sessions }: TaskDtoDeps, task: ReturnType<WandStorag
   if (!task) return null;
   const workspace = task.workspaceId ? storage.getWorkspace(task.workspaceId) : null;
   const sessionIds = storage.listWandTaskSessionIds(task.id);
-  const milestone = task.milestoneId ? storage.getWandMilestone(task.milestoneId) : null;
+  const milestone = resolvedMilestoneFields(storage, task.milestoneId);
   return {
     ...task,
     sessionIds,
@@ -146,8 +147,10 @@ function taskDto({ storage, sessions }: TaskDtoDeps, task: ReturnType<WandStorag
     workspace: workspace
       ? { id: workspace.id, name: workspace.name, cwd: workspace.cwd }
       : null,
-    // 卡片上要显示里程碑名字，直接在这里解出，免去前端再查一次列表。
-    milestone: milestone ? { id: milestone.id, name: milestone.name } : null,
+    // 卡片上要显示迭代名字，直接在这里解出，免去前端再查一次列表。
+    // 任务没有单独指定迭代时给的就是默认迭代（id 与名字成对返回）。
+    milestoneId: milestone.milestoneId,
+    milestone: milestone.milestone,
   };
 }
 
@@ -287,10 +290,12 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
   app.get("/api/wand-task-agent-defaults", (_req, res) => {
     res.json(readTaskBoardLastAgent(storage));
   });
-  // ── 里程碑（迭代）：归属工作区，任务面板的「新建任务」按工作区过滤 ──
+  // ── 迭代（里程碑）：归属工作区，任务面板的「新建任务」按工作区过滤 ──
   app.get("/api/wand-milestones", (req, res) => {
-    // 不传 workspaceId 返回全部；传了就只给「该工作区 + 全局」的里程碑。
+    // 不传 workspaceId 返回全部；传了就只给「该工作区 + 全局」的迭代。
     const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : null;
+    // 默认迭代是惰性创建的：列表是它的第一个真实读取点，在这里保证它一定存在。
+    storage.ensureDefaultWandMilestone();
     const counts = storage.countWandTasksByMilestone();
     res.json({
       milestones: storage.listWandMilestones(workspaceId).map((milestone) => ({
@@ -346,6 +351,12 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
     }
   });
   app.delete("/api/wand-milestones/:id", (req, res) => {
+    const current = storage.getWandMilestone(req.params.id);
+    // 默认迭代是所有任务的兜底归属，删了就再没有地方接「没选迭代」的任务。
+    if (current?.isDefault) {
+      res.status(400).json({ error: "默认迭代不能删除，可以改成你自己习惯的名字。" });
+      return;
+    }
     // 只解绑任务，不删任务；已经删过的 id 幂等返回 ok。
     storage.deleteWandMilestone(req.params.id);
     res.json({ ok: true });
@@ -378,7 +389,10 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       if (agent) writeTaskBoardLastAgent(storage, agent);
       const labels = labelsFrom(body.labels);
       const dueDate = dateValue(body.dueDate) ?? null;
-      const milestoneId = scopedMilestoneId(storage, milestoneIdFrom(storage, body.milestoneId), workspaceId);
+      // 没选迭代就落到默认迭代：每个任务都属于一个迭代。
+      const requestedMilestoneId = milestoneIdFrom(storage, body.milestoneId) ?? defaultMilestoneIdForWrite(storage);
+      const milestoneId = scopedMilestoneId(storage, requestedMilestoneId, workspaceId)
+        ?? defaultMilestoneIdForWrite(storage);
       const task = storage.transaction(() => {
         const card = storage.createWandTask({
           workspaceId,
@@ -429,16 +443,20 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       }
       if (body.labels !== undefined) patch.labels = labelsFrom(body.labels);
       if (body.dueDate !== undefined) patch.dueDate = dateValue(body.dueDate) ?? null;
-      if (body.milestoneId !== undefined) patch.milestoneId = milestoneIdFrom(storage, body.milestoneId);
+      if (body.milestoneId !== undefined) {
+        // 清空迭代等于回到默认迭代（原生端的「清除」按钮也走这里）。
+        patch.milestoneId = milestoneIdFrom(storage, body.milestoneId) ?? defaultMilestoneIdForWrite(storage);
+      }
       if (body.workspaceId !== undefined) {
         const workspaceId = body.workspaceId === null ? null : text(body.workspaceId);
         if (workspaceId && !storage.getWorkspace(workspaceId)) throw new Error("项目不存在。");
         patch.workspaceId = workspaceId || null;
-        // 换项目后原迭代不再属于新工作区就一并摘掉；移动端只 PATCH workspaceId，不会自己清。
+        // 换项目后原迭代不再属于新工作区就一并收敛；移动端只 PATCH workspaceId，不会自己清。
         const milestoneId = body.milestoneId !== undefined
           ? patch.milestoneId
           : storage.getWandTask(req.params.id)?.milestoneId ?? null;
-        patch.milestoneId = scopedMilestoneId(storage, milestoneId, patch.workspaceId);
+        patch.milestoneId = scopedMilestoneId(storage, milestoneId, patch.workspaceId)
+          ?? defaultMilestoneIdForWrite(storage);
       }
       if (body.agent !== undefined) {
         // 老客户端不传 mode / kind：沿用任务当前值，而不是复位成标准 / 结构化。
@@ -560,6 +578,17 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
           });
       storage.updateWandTask(task.id, { agent, status: task.status === "todo" ? "doing" : task.status });
       storage.bindWandTaskSession(task.id, session.id);
+      // 派发也算一轮迭代里的改动意图：直接把任务的标题 / 描述记进迭代记录。
+      recordIterationPromptForTask(storage, {
+        sessionId: session.id,
+        cwd,
+        workspaceId: group.workspaceId,
+        milestoneId: task.milestoneId,
+        taskId: task.id,
+        title: task.title,
+        detail: task.description || prompt,
+        source: "dispatch",
+      });
       if (agent.kind !== "pty") {
         const completion = structured!.sendMessage(session.id, prompt);
         completion.catch((error) => console.error(`[WandTask] Agent dispatch failed for ${task.id}:`, error));

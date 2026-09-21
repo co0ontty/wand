@@ -19,11 +19,15 @@ import {
   quickCommitStatusBadge,
 } from "./model";
 import { httpQuickCommitRepository } from "./repository";
+import { IterationContextPanel } from "./iteration-panel";
 import type {
   QuickCommitAction,
+  QuickCommitContextMode,
   QuickCommitForm,
+  QuickCommitIterationContext,
   QuickCommitOutcome,
   QuickCommitRepository,
+  QuickCommitSelection,
   QuickCommitStatus,
 } from "./types";
 import { describeError } from "../errors";
@@ -160,6 +164,12 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
   const [form, setForm] = useState<QuickCommitForm>(EMPTY_FORM);
   const [action, setAction] = useState<QuickCommitAction>("commit");
   const [includeSubmodule, setIncludeSubmodule] = useState(false);
+  const [iterationContext, setIterationContext] = useState<QuickCommitIterationContext | null>(null);
+  const [contextMode, setContextMode] = useState<QuickCommitContextMode>("iteration");
+  // null = 用服务端给的默认勾选（上次提交以来的条目）；用户一动手就换成显式集合。
+  const [selectedOverride, setSelectedOverride] = useState<string[] | null>(null);
+  const [includeDiff, setIncludeDiff] = useState(false);
+  const [generatedFrom, setGeneratedFrom] = useState<{ source: QuickCommitContextMode; count: number } | null>(null);
   const [outcome, setOutcome] = useState<QuickCommitOutcome | null>(null);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -194,6 +204,10 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
     setForm(EMPTY_FORM);
     setAction("commit");
     setIncludeSubmodule(false);
+    setIterationContext(null);
+    setSelectedOverride(null);
+    setIncludeDiff(false);
+    setGeneratedFrom(null);
     setOutcome(null);
     setLoading(true);
     setGenerating(false);
@@ -211,6 +225,16 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
       .finally(() => {
         if (!abort.signal.aborted) setLoading(false);
       });
+    // 本轮迭代的提示词清单：能拉到就用它当默认输入，拉不到（老服务端）就退回读 diff。
+    void repository.loadContext(context.sessionId, { signal: abort.signal })
+      .then((loaded) => {
+        if (abort.signal.aborted) return;
+        setIterationContext(loaded);
+        setContextMode(loaded.mode);
+      })
+      .catch(() => {
+        if (!abort.signal.aborted) setIterationContext(null);
+      });
     return () => {
       abort.abort();
       generationAbort.current?.abort();
@@ -227,6 +251,45 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
   const selectedMeta = useMemo(() => quickCommitActionMeta(action), [action]);
   const busy = submitting || pushing;
   const canCommit = hasQuickCommitChanges(status) && !busy && !loading;
+  const selectedEntryIds = useMemo<ReadonlySet<string>>(
+    () => new Set(selectedOverride ?? iterationContext?.defaultEntryIds ?? []),
+    [selectedOverride, iterationContext],
+  );
+
+  /** 传给服务端的选择：模式 + 本次算作已提交的条目（默认就是「上次提交以来」）。 */
+  function contextSelection(): QuickCommitSelection | undefined {
+    if (!iterationContext) return undefined;
+    return { mode: contextMode, entryIds: [...selectedEntryIds] };
+  }
+
+  function changeContextMode(mode: QuickCommitContextMode): void {
+    setContextMode(mode);
+    if (!context) return;
+    // 记住选择；失败不阻塞提交，下次打开回落到服务端默认。
+    void repository.saveContextMode(context.sessionId, mode).catch(() => undefined);
+  }
+
+  function toggleEntry(id: string, checked: boolean): void {
+    setSelectedOverride(() => {
+      const next = new Set(selectedEntryIds);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return [...next];
+    });
+  }
+
+  function selectEntries(scope: "pending" | "all" | "none"): void {
+    if (!iterationContext) return;
+    if (scope === "none") {
+      setSelectedOverride([]);
+      return;
+    }
+    if (scope === "all") {
+      setSelectedOverride(iterationContext.entries.map((entry) => entry.id));
+      return;
+    }
+    setSelectedOverride(null);
+  }
 
   async function reloadStatus(sessionId: string): Promise<void> {
     try {
@@ -234,6 +297,19 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
       if (quickCommitStore.getSnapshot().context?.sessionId === sessionId) setStatus(loaded);
     } catch {
       // The operation already succeeded; a stale status panel is non-fatal.
+    }
+  }
+
+  /** 提交后刷新一轮变更清单：刚提交的全被标记为「已提交」，默认勾选随之清空。 */
+  async function reloadContext(sessionId: string): Promise<void> {
+    try {
+      const loaded = await repository.loadContext(sessionId);
+      if (quickCommitStore.getSnapshot().context?.sessionId !== sessionId) return;
+      setIterationContext(loaded);
+      setSelectedOverride(null);
+      setGeneratedFrom(null);
+    } catch {
+      // 提交已经成功，面板上留着旧清单比报错好。
     }
   }
 
@@ -245,13 +321,19 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
     setGenerating(true);
     setError("");
     try {
-      const suggestion = await repository.generate(context.sessionId, { signal: abort.signal });
+      const suggestion = await repository.generate(context.sessionId, {
+        signal: abort.signal,
+        selection: contextSelection(),
+        includeDiff,
+      });
       if (abort.signal.aborted) return;
       setForm((current) => ({
         message: current.message.trim() ? current.message : suggestion.message,
         tag: current.tagEdited ? current.tag : (suggestion.suggestedTag || current.tag),
         tagEdited: current.tagEdited,
       }));
+      // 告诉用户这次是靠提示词总结的还是读了 diff：省 token 这件事要看得见。
+      setGeneratedFrom({ source: suggestion.contextSource, count: suggestion.entryIds.length });
       if (suggestion.suggestedTag) setAction("commit-tag");
     } catch (generateError) {
       if (!abort.signal.aborted) setError(describeError(generateError, "AI 生成失败。"));
@@ -274,7 +356,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
     try {
       const response = await repository.commit(
         operationSessionId,
-        buildQuickCommitInput(form, action, includeSubmodule),
+        buildQuickCommitInput(form, action, includeSubmodule, contextSelection(), includeDiff),
       );
       if (!response.ok) throw new Error("快捷提交失败。");
       const nextOutcome = buildQuickCommitOutcome(
@@ -291,6 +373,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
           "success",
         );
         void reloadStatus(operationSessionId);
+        void reloadContext(operationSessionId);
         if (ownsCurrentSurface()) quickCommitController.close();
         return;
       }
@@ -301,7 +384,10 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
       } else {
         quickCommitStore.getRuntime()?.toast(`${summary}。`, "success");
       }
-      await reloadStatus(operationSessionId);
+      await Promise.all([
+        reloadStatus(operationSessionId),
+        reloadContext(operationSessionId),
+      ]);
     } catch (commitError) {
       const message = describeError(commitError, "快捷提交失败。");
       if (ownsCurrentSurface()) setError(message);
@@ -405,6 +491,19 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
           <div className="wand-quick-body">
             <CommitWorkspaceLens status={status} />
             <ChangedFiles status={status} />
+            {iterationContext ? (
+              <IterationContextPanel
+                context={iterationContext}
+                mode={contextMode}
+                selectedIds={selectedEntryIds}
+                includeDiff={includeDiff}
+                disabled={busy}
+                onModeChange={changeContextMode}
+                onToggleEntry={toggleEntry}
+                onSelectAll={selectEntries}
+                onIncludeDiffChange={setIncludeDiff}
+              />
+            ) : null}
             <section className="wand-quick-editor" aria-labelledby="wand-quick-editor-title">
               <div className="wand-quick-section-heading">
                 <h3 id="wand-quick-editor-title">New</h3>
@@ -432,6 +531,14 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
                   onKeyDown={submitShortcut}
                 />
               </label>
+              {/* 生成来源可见：默认走迭代提示词，只有没得用时才会去读完整 diff。 */}
+              {generatedFrom ? (
+                <p className="wand-quick-generated-from">
+                  {generatedFrom.source === "iteration"
+                    ? `已依据 ${generatedFrom.count} 条迭代提示词生成，没有读取代码。`
+                    : "已依据完整 diff 生成。"}
+                </p>
+              ) : null}
               <label className="wand-quick-field" htmlFor="wand-quick-tag">
                 <span>Tag（可选）</span>
                 <input

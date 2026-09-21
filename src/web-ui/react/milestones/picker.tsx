@@ -128,7 +128,7 @@ export function MilestonePicker({
             type="button"
             className="milestone-picker-clear"
             onClick={() => close(null)}
-          >清除</button> : null}
+          >{selected.isDefault ? "回到默认" : "清除"}</button> : null}
         </div>
         {creating ? (
           <div className="milestone-picker-create">
@@ -184,8 +184,10 @@ export function MilestonePicker({
                 >
                   <WandIcon name="milestone" size={13} className="milestone-picker-item-icon"/>
                   <span className="milestone-picker-item-name">{item.name}</span>
+                  {/* 默认迭代：没选迭代的任务都会落到它下面，所以标出来（不可删除）。 */}
+                  {item.isDefault ? <span className="milestone-picker-item-default">默认</span> : null}
                   {/* 按工作区过滤时，把跨工作区可见的全局迭代标出来，避免看起来「串台」。 */}
-                  {scoped && !item.workspaceId ? <span className="milestone-picker-item-scope">全局</span> : null}
+                  {scoped && !item.workspaceId && !item.isDefault ? <span className="milestone-picker-item-scope">全局</span> : null}
                   {item.taskCount > 0 ? <span className="milestone-picker-item-count">{item.taskCount}</span> : null}
                 </button>)}
               </div>

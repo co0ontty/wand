@@ -75,6 +75,8 @@ Express route → 参数与权限检查 → 业务服务 / SessionRegistry → m
   默认创建任务不建子目录、不建 worktree；高级选项可显式开启 worktree 隔离。
 - 侧边栏与任务看板通过 `workspaceTaskId` 对应同一个任务；创建、改名、里程碑、
   完成和重新打开双向同步。空任务也显示，同名任务不得按标题自动合并。
+  里程碑就是**迭代**：每个任务都有归属（没选时落到全局「默认迭代」），看板/侧栏/
+  派发三个新建入口打开时预选默认迭代；细节见 `docs/iteration.md`。
 - 会话落地时（侧栏「＋」、标签栏「＋」、派发、关联任务的自动化）就调用
   `syncWorkspaceTaskToBoard` 把归属写进卡片：补卡片、按会话补 Agent、绑定会话、
   `todo → doing`，不必等 `GET /api/wand-tasks` 的全量兜底。单卡读取

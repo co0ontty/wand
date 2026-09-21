@@ -194,6 +194,27 @@ export function shouldAcceptGeneratedSessionTitle(
   return !blockedTitles.some((blocked) => isSameSessionTitle(cleaned, blocked));
 }
 
+const CJK_CHARACTER_PATTERN = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]/g;
+
+/**
+ * 用户输入的「信息量」：CJK 字符按 2 计，其余非空白字符按 1 计。
+ * 单条命令（`pwd`、`git status`）、选择与确认（`y`、`1`、`好的`）、斜杠命令（`/compact`）
+ * 都低于阈值：让模型总结只会把输入复述一遍，还多花一次调用。
+ */
+const SESSION_TOPIC_INPUT_MIN_WEIGHT = 12;
+
+export function measureSessionTopicInputWeight(input: string): number {
+  const text = input.replace(/\s+/g, "");
+  if (!text) return 0;
+  const cjkCount = text.match(CJK_CHARACTER_PATTERN)?.length ?? 0;
+  return cjkCount * 2 + (text.length - cjkCount);
+}
+
+/** 太短的用户输入不值得生成标题，也不应该覆盖已有标题。 */
+export function shouldGenerateSessionTopicFromInput(input: string): boolean {
+  return measureSessionTopicInputWeight(input) >= SESSION_TOPIC_INPUT_MIN_WEIGHT;
+}
+
 /** Immediate title from the user's command, without waiting for the model. */
 export function summarizeSessionTitleFromInput(
   input: string,
@@ -323,6 +344,7 @@ export async function generateSessionTopic(
 /**
  * Coalesces title refreshes per session. A newer user message invalidates an
  * in-flight result and is summarized together with every earlier user turn.
+ * Short inputs (single commands, choices) are dropped before any model call.
  */
 export class SessionTopicCoordinator {
   private readonly states = new Map<string, PendingTopicState>();
@@ -335,7 +357,7 @@ export class SessionTopicCoordinator {
   request(sessionId: string, request: SessionTopicRequest): void {
     if (this.disposed) return;
     const input = request.input.trim();
-    if (!input) return;
+    if (!input || !shouldGenerateSessionTopicFromInput(input)) return;
     let state = this.states.get(sessionId);
     if (!state) {
       state = {

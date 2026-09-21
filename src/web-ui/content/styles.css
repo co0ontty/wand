@@ -19101,6 +19101,17 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined.pinned.
   line-height: 15px;
 }
 
+/* 默认迭代：没选迭代的任务都落到它下面（不可删除）。 */
+.milestone-picker-item-default {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-size: 10px;
+  line-height: 16px;
+}
+
 .milestone-picker-empty { margin: 0; padding: 6px; color: var(--text-tertiary); font-size: 12px; }
 .milestone-picker-add {
   display: flex;

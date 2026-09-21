@@ -5,7 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { SessionSnapshot, ConversationTurn, SessionKind, SessionProvider, SessionRunner, SessionSource, StructuredSessionState, WorktreeMergeInfo, Workspace, LayoutNode, TaskWindowLayout, WorkspaceDefaultProvider, WorkspaceKind, WorkspaceTask, WorkspaceTaskWorktree, WorkspaceTaskStatus, GLOBAL_WORKSPACE_ID } from "./types.js";
 import { normalizeSessionDirectory } from "./session-directory-tree.js";
 import { inferProviderFromCommand, inferProviderFromRunner, isSessionProvider } from "./session-provider.js";
-import { DEFAULT_WAND_TASK_AGENT_KIND, DEFAULT_WAND_TASK_PRIORITY, isWandTaskAgentKind, normalizeWandTaskAgentMode } from "./task-types.js";
+import { DEFAULT_ITERATION_NAME, DEFAULT_WAND_TASK_AGENT_KIND, DEFAULT_WAND_TASK_PRIORITY, isWandTaskAgentKind, normalizeWandTaskAgentMode } from "./task-types.js";
 import { firstLayoutTabId } from "./layout-tree.js";
 import { isThinkingEffort } from "./structured-provider-common.js";
 import type {
@@ -151,8 +151,30 @@ function mapWandMilestoneRow(row: Record<string, unknown>): import("./task-types
     name,
     dueDate: typeof row.due_date === "string" && row.due_date ? row.due_date : null,
     workspaceId: typeof row.workspace_id === "string" && row.workspace_id ? row.workspace_id : null,
+    isDefault: Number(row.is_default) === 1,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
+  };
+}
+
+/** `wand_iteration_prompts` 行 → 领域对象；标题为空的脏行直接跳过。 */
+function mapIterationPromptRow(row: Record<string, unknown>): import("./task-types.js").WandIterationPrompt | null {
+  const title = typeof row.title === "string" ? row.title.trim() : "";
+  if (!title) return null;
+  return {
+    id: String(row.id),
+    milestoneId: String(row.milestone_id ?? ""),
+    workspaceId: typeof row.workspace_id === "string" && row.workspace_id ? row.workspace_id : null,
+    sessionId: typeof row.session_id === "string" && row.session_id ? row.session_id : null,
+    taskId: typeof row.task_id === "string" && row.task_id ? row.task_id : null,
+    repoKey: typeof row.repo_key === "string" && row.repo_key ? row.repo_key : null,
+    cwd: typeof row.cwd === "string" ? row.cwd : "",
+    title,
+    detail: typeof row.detail === "string" ? row.detail : "",
+    source: row.source === "dispatch" ? "dispatch" : "session",
+    consumedAt: typeof row.consumed_at === "string" && row.consumed_at ? row.consumed_at : null,
+    consumedCommit: typeof row.consumed_commit === "string" && row.consumed_commit ? row.consumed_commit : null,
+    createdAt: String(row.created_at),
   };
 }
 
@@ -880,10 +902,32 @@ const INIT_SQL = `
     name TEXT NOT NULL,
     due_date TEXT,
     workspace_id TEXT,
+    is_default INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_wand_milestones_created ON wand_milestones(created_at DESC);
+
+  -- 迭代提示词记录：用户在本轮迭代里发过的提示词标题，供 commit message / 汇报类生成复用。
+  -- 不建外键：删除迭代只把记录改挂到默认迭代，绝不删记录。
+  CREATE TABLE IF NOT EXISTS wand_iteration_prompts (
+    id TEXT PRIMARY KEY,
+    milestone_id TEXT NOT NULL,
+    workspace_id TEXT,
+    session_id TEXT,
+    task_id TEXT,
+    repo_key TEXT,
+    cwd TEXT NOT NULL,
+    title TEXT NOT NULL,
+    detail TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL DEFAULT 'session',
+    consumed_at TEXT,
+    consumed_commit TEXT,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_wand_iteration_prompts_iteration ON wand_iteration_prompts(milestone_id, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_wand_iteration_prompts_repo ON wand_iteration_prompts(repo_key, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_wand_iteration_prompts_session ON wand_iteration_prompts(session_id, created_at DESC);
 
   CREATE TABLE IF NOT EXISTS wand_tasks (
     id TEXT PRIMARY KEY,
@@ -969,11 +1013,44 @@ function ensureWandMilestoneSchema(db: DatabaseSync): void {
   if (columns.length > 0 && !names.has("workspace_id")) {
     db.exec("ALTER TABLE wand_milestones ADD COLUMN workspace_id TEXT");
   }
+  // 默认迭代标记：只加列，历史行保持 0（读作普通迭代）。
+  if (columns.length > 0 && !names.has("is_default")) {
+    db.exec("ALTER TABLE wand_milestones ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0");
+  }
   if (columns.length > 0) {
     // 索引必须等列存在后再建：老库的 CREATE TABLE IF NOT EXISTS 是空操作，
     // 直接在 INIT_SQL 里建索引会因缺列报错。
     db.exec("CREATE INDEX IF NOT EXISTS idx_wand_milestones_workspace ON wand_milestones(workspace_id, created_at DESC)");
   }
+}
+
+/**
+ * 迭代提示词记录表：新库由 INIT_SQL 建好，老库在这里补建（只加表，不改表）。
+ * 空库（没建过任何表）时 PRAGMA 拿不到列，直接返回。
+ */
+function ensureIterationPromptSchema(db: DatabaseSync): void {
+  const columns = db.prepare("PRAGMA table_info(wand_iteration_prompts)").all() as Array<{ name: string }>;
+  if (columns.length > 0) return;
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS wand_iteration_prompts (
+      id TEXT PRIMARY KEY,
+      milestone_id TEXT NOT NULL,
+      workspace_id TEXT,
+      session_id TEXT,
+      task_id TEXT,
+      repo_key TEXT,
+      cwd TEXT NOT NULL,
+      title TEXT NOT NULL,
+      detail TEXT NOT NULL DEFAULT '',
+      source TEXT NOT NULL DEFAULT 'session',
+      consumed_at TEXT,
+      consumed_commit TEXT,
+      created_at TEXT NOT NULL
+    )
+  `);
+  db.exec("CREATE INDEX IF NOT EXISTS idx_wand_iteration_prompts_iteration ON wand_iteration_prompts(milestone_id, created_at DESC)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_wand_iteration_prompts_repo ON wand_iteration_prompts(repo_key, created_at DESC)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_wand_iteration_prompts_session ON wand_iteration_prompts(session_id, created_at DESC)");
 }
 
 function ensureConnectorSchema(db: DatabaseSync): void {
@@ -1004,6 +1081,7 @@ export function ensureDatabaseFile(dbPath: string): boolean {
   ensureWorkspaceSchema(db);
   ensureWandTaskSchema(db);
   ensureWandMilestoneSchema(db);
+  ensureIterationPromptSchema(db);
   ensureConnectorSchema(db);
   {
     const missionColumns = db.prepare("PRAGMA table_info(missions)").all() as Array<{ name: string }>;
@@ -1037,6 +1115,7 @@ export class WandStorage {
     ensureWorkspaceSchema(this.db);
     ensureWandTaskSchema(this.db);
     ensureWandMilestoneSchema(this.db);
+    ensureIterationPromptSchema(this.db);
     ensureConnectorSchema(this.db);
     this.ensureDefaultPasswordVault();
   }
@@ -1581,8 +1660,9 @@ export class WandStorage {
    */
   listWandMilestones(workspaceId?: string | null): import("./task-types.js").WandTaskMilestone[] {
     const scoped = typeof workspaceId === "string" ? workspaceId.trim() : "";
-    const select = "SELECT id, name, due_date, workspace_id, created_at, updated_at FROM wand_milestones";
-    const order = " ORDER BY created_at DESC, rowid DESC";
+    const select = "SELECT id, name, due_date, workspace_id, is_default, created_at, updated_at FROM wand_milestones";
+    // 默认迭代永远排最前：新建任务的下拉把它放在第一项，不选时也回落到它。
+    const order = " ORDER BY is_default DESC, created_at DESC, rowid DESC";
     const rows = (scoped
       ? this.db.prepare(`${select} WHERE workspace_id = ? OR workspace_id IS NULL${order}`).all(scoped)
       : this.db.prepare(`${select}${order}`).all()) as unknown as Array<Record<string, unknown>>;
@@ -1591,18 +1671,45 @@ export class WandStorage {
 
   getWandMilestone(id: string): import("./task-types.js").WandTaskMilestone | null {
     const row = this.db.prepare(
-      `SELECT id, name, due_date, workspace_id, created_at, updated_at FROM wand_milestones WHERE id = ?`,
+      `SELECT id, name, due_date, workspace_id, is_default, created_at, updated_at FROM wand_milestones WHERE id = ?`,
     ).get(id) as Record<string, unknown> | undefined;
     return row ? mapWandMilestoneRow(row) : null;
   }
 
-  createWandMilestone(input: { name: string; dueDate?: string | null; workspaceId?: string | null }): import("./task-types.js").WandTaskMilestone {
+  /** 已有的默认迭代；未创建过时返回 null（读路径用它，不写库）。 */
+  findDefaultWandMilestone(): import("./task-types.js").WandTaskMilestone | null {
+    const row = this.db.prepare(
+      `SELECT id, name, due_date, workspace_id, is_default, created_at, updated_at FROM wand_milestones WHERE is_default = 1 ORDER BY created_at ASC, rowid ASC LIMIT 1`,
+    ).get() as Record<string, unknown> | undefined;
+    return row ? mapWandMilestoneRow(row) : null;
+  }
+
+  /**
+   * 惰性拿到全局唯一的「默认迭代」：没有就建一个，返回值一定可写进任务 / 记录。
+   * 用户已经自己建过一个同名迭代时直接把它提升为默认，不再造第二个重名行。
+   */
+  ensureDefaultWandMilestone(): import("./task-types.js").WandTaskMilestone {
+    const existing = this.findDefaultWandMilestone();
+    if (existing) return existing;
+    const sameName = this.db.prepare(
+      `SELECT id FROM wand_milestones WHERE name = ? AND workspace_id IS NULL ORDER BY created_at ASC, rowid ASC LIMIT 1`,
+    ).get(DEFAULT_ITERATION_NAME) as { id?: string } | undefined;
+    if (sameName?.id) {
+      this.db.prepare("UPDATE wand_milestones SET is_default = 1, updated_at = ? WHERE id = ?").run(nowIso(), sameName.id);
+      return this.getWandMilestone(sameName.id)!;
+    }
+    return this.createWandMilestone({ name: DEFAULT_ITERATION_NAME, isDefault: true });
+  }
+
+  createWandMilestone(input: { name: string; dueDate?: string | null; workspaceId?: string | null; isDefault?: boolean }): import("./task-types.js").WandTaskMilestone {
     const id = crypto.randomUUID();
     const now = nowIso();
     const workspaceId = typeof input.workspaceId === "string" && input.workspaceId.trim() ? input.workspaceId.trim() : null;
+    // 默认迭代是全局兜底：固定 workspace_id = NULL，任何工作区的任务都能挂。
+    const isDefault = input.isDefault === true;
     this.db.prepare(
-      `INSERT INTO wand_milestones (id, name, due_date, workspace_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(id, input.name, input.dueDate ?? null, workspaceId, now, now);
+      `INSERT INTO wand_milestones (id, name, due_date, workspace_id, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(id, input.name, input.dueDate ?? null, isDefault ? null : workspaceId, isDefault ? 1 : 0, now, now);
     return this.getWandMilestone(id)!;
   }
 
@@ -1612,9 +1719,12 @@ export class WandStorage {
     const next = {
       name: patch.name ?? current.name,
       dueDate: patch.dueDate === undefined ? current.dueDate : patch.dueDate,
-      workspaceId: patch.workspaceId === undefined
-        ? current.workspaceId
-        : (typeof patch.workspaceId === "string" && patch.workspaceId.trim() ? patch.workspaceId.trim() : null),
+      // 默认迭代永远是全局的：不允许改挂到某个工作区，否则别的项目就看不到兜底迭代了。
+      workspaceId: current.isDefault
+        ? null
+        : patch.workspaceId === undefined
+          ? current.workspaceId
+          : (typeof patch.workspaceId === "string" && patch.workspaceId.trim() ? patch.workspaceId.trim() : null),
       updatedAt: nowIso(),
     };
     this.db.prepare(
@@ -1623,21 +1733,149 @@ export class WandStorage {
     return this.getWandMilestone(id);
   }
 
-  /** 删除里程碑只解绑任务（milestone_id 置空），绝不删除任务。 */
+  /**
+   * 删除里程碑只解绑任务（milestone_id 置空）、并把提示词记录改挂到默认迭代，绝不删任务与记录。
+   * 默认迭代不可删除：返回 false，由调用方给出明确提示。
+   */
   deleteWandMilestone(id: string): boolean {
+    const current = this.getWandMilestone(id);
+    if (!current) return false;
+    if (current.isDefault) return false;
     const removed = this.db.prepare("DELETE FROM wand_milestones WHERE id = ?").run(id);
     if (Number(removed.changes) === 0) return false;
     this.db.prepare("UPDATE wand_tasks SET milestone_id = NULL WHERE milestone_id = ?").run(id);
     this.db.prepare("UPDATE workspace_tasks SET milestone_id = NULL WHERE milestone_id = ?").run(id);
+    // 记录属于「用户的改动历史」，不能因为删迭代就丢：改挂到默认迭代。
+    const fallback = this.findDefaultWandMilestone();
+    if (fallback) {
+      this.db.prepare("UPDATE wand_iteration_prompts SET milestone_id = ? WHERE milestone_id = ?").run(fallback.id, id);
+    }
     return true;
   }
 
-  /** 各里程碑下的任务数（看板卡片），用于下拉里的数量提示。 */
+  /** 各迭代下的任务数（看板卡片），用于下拉里的数量提示；历史 NULL 行算在默认迭代里。 */
   countWandTasksByMilestone(): Record<string, number> {
     const rows = this.db.prepare(
-      `SELECT milestone_id, COUNT(*) AS count FROM wand_tasks WHERE milestone_id IS NOT NULL GROUP BY milestone_id`,
-    ).all() as unknown as Array<{ milestone_id: string; count: number }>;
-    return Object.fromEntries(rows.map((row) => [row.milestone_id, Number(row.count) || 0]));
+      `SELECT milestone_id, COUNT(*) AS count FROM wand_tasks GROUP BY milestone_id`,
+    ).all() as unknown as Array<{ milestone_id: string | null; count: number }>;
+    const defaultId = this.findDefaultWandMilestone()?.id ?? null;
+    const counts: Record<string, number> = {};
+    for (const row of rows) {
+      const key = row.milestone_id ? String(row.milestone_id) : defaultId;
+      if (!key) continue;
+      counts[key] = (counts[key] ?? 0) + (Number(row.count) || 0);
+    }
+    return counts;
+  }
+
+  // ============ 迭代提示词记录 ============
+
+  /** 同一会话最近一条记录；用来去重（同一提示词重复提交 / 占位与模型结果双写）。 */
+  latestIterationPromptForSession(sessionId: string): import("./task-types.js").WandIterationPrompt | null {
+    const row = this.db.prepare(
+      `SELECT * FROM wand_iteration_prompts WHERE session_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+    ).get(sessionId) as Record<string, unknown> | undefined;
+    return row ? mapIterationPromptRow(row) : null;
+  }
+
+  createIterationPrompt(input: {
+    milestoneId: string;
+    workspaceId?: string | null;
+    sessionId?: string | null;
+    taskId?: string | null;
+    repoKey?: string | null;
+    cwd?: string;
+    title: string;
+    detail?: string;
+    source?: import("./task-types.js").WandIterationPromptSource;
+  }): import("./task-types.js").WandIterationPrompt {
+    const id = crypto.randomUUID();
+    const now = nowIso();
+    this.db.prepare(
+      `INSERT INTO wand_iteration_prompts (id, milestone_id, workspace_id, session_id, task_id, repo_key, cwd, title, detail, source, consumed_at, consumed_commit, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)`,
+    ).run(
+      id,
+      input.milestoneId,
+      input.workspaceId ?? null,
+      input.sessionId ?? null,
+      input.taskId ?? null,
+      input.repoKey ?? null,
+      input.cwd ?? "",
+      input.title,
+      input.detail ?? "",
+      input.source ?? "session",
+      now,
+    );
+    return mapIterationPromptRow(
+      this.db.prepare(`SELECT * FROM wand_iteration_prompts WHERE id = ?`).get(id) as Record<string, unknown>,
+    )!;
+  }
+
+  /**
+   * 迭代窗口里的提示词记录，按时间正序（模型读起来就是「先做什么、后做什么」）。
+   * `repoKey` 给值时按仓库隔离；`includeConsumed=false` 只看还没提交的部分。
+   */
+  listIterationPrompts(filter: {
+    milestoneId?: string | null;
+    repoKey?: string | null;
+    sessionId?: string | null;
+    includeConsumed?: boolean;
+    limit?: number;
+  } = {}): import("./task-types.js").WandIterationPrompt[] {
+    const conditions: string[] = [];
+    const values: Array<string | number> = [];
+    if (filter.milestoneId) {
+      conditions.push("milestone_id = ?");
+      values.push(filter.milestoneId);
+    }
+    if (filter.repoKey) {
+      conditions.push("repo_key = ?");
+      values.push(filter.repoKey);
+    }
+    if (filter.sessionId) {
+      conditions.push("session_id = ?");
+      values.push(filter.sessionId);
+    }
+    if (!filter.includeConsumed) conditions.push("consumed_at IS NULL");
+    const limit = Math.max(1, Math.min(500, Math.floor(filter.limit ?? 200)));
+    const where = conditions.length ? ` WHERE ${conditions.join(" AND ")}` : "";
+    const rows = this.db.prepare(
+      `SELECT * FROM wand_iteration_prompts${where} ORDER BY created_at ASC, rowid ASC LIMIT ?`,
+    ).all(...values, limit) as unknown as Array<Record<string, unknown>>;
+    return rows.map(mapIterationPromptRow).filter((item): item is import("./task-types.js").WandIterationPrompt => item !== null);
+  }
+
+  /** 按 id 批量取记录（用户只勾选了一部分历史变更时用）。 */
+  listIterationPromptsByIds(ids: readonly string[]): import("./task-types.js").WandIterationPrompt[] {
+    const unique = [...new Set(ids.filter(Boolean))].slice(0, 500);
+    if (unique.length === 0) return [];
+    const placeholders = unique.map(() => "?").join(", ");
+    const rows = this.db.prepare(
+      `SELECT * FROM wand_iteration_prompts WHERE id IN (${placeholders}) ORDER BY created_at ASC, rowid ASC`,
+    ).all(...unique) as unknown as Array<Record<string, unknown>>;
+    return rows.map(mapIterationPromptRow).filter((item): item is import("./task-types.js").WandIterationPrompt => item !== null);
+  }
+
+  /** 标记这些记录已被某次提交用掉，下一轮「上次提交以来」从这里开始。 */
+  markIterationPromptsConsumed(ids: readonly string[], commit: string): number {
+    const unique = [...new Set(ids.filter(Boolean))];
+    if (unique.length === 0) return 0;
+    const placeholders = unique.map(() => "?").join(", ");
+    const result = this.db.prepare(
+      `UPDATE wand_iteration_prompts SET consumed_at = ?, consumed_commit = ? WHERE id IN (${placeholders})`,
+    ).run(nowIso(), commit, ...unique);
+    return Number(result.changes) || 0;
+  }
+
+  // ============ 会话 → 任务 / 迭代 ============
+
+  /** 会话绑定的看板任务 id；没绑或已删除时返回 null。 */
+  getWandTaskIdForSession(sessionId: string): string | null {
+    const row = this.db.prepare(
+      "SELECT task_id FROM wand_task_sessions WHERE session_id = ? ORDER BY rowid DESC LIMIT 1",
+    ).get(sessionId) as { task_id?: string } | undefined;
+    return row?.task_id || null;
   }
 
   listWandTaskSessionIds(taskId: string): string[] {

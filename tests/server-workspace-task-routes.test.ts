@@ -103,7 +103,10 @@ test("task revisions track individual metadata, milestone removal, and lower lay
     storage.deleteWandMilestone(milestone.id);
     next = await load(page.revision);
     assert.equal(next.unchanged, false);
-    assert.equal(next.groups.flatMap((group) => group.tasks).find((task) => task.id === second.id)?.milestoneId, null);
+    // 迭代被删后任务回到默认迭代（不再是「无迭代」）。
+    const afterDelete = next.groups.flatMap((group) => group.tasks).find((task) => task.id === second.id);
+    assert.equal(afterDelete?.milestoneId, storage.findDefaultWandMilestone()?.id);
+    assert.equal(afterDelete?.milestone?.isDefault, true);
     assert.equal((await load(next.revision)).unchanged, true);
   } finally {
     await close();

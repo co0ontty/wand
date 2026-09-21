@@ -91,10 +91,13 @@ export type WandTaskTitleSource = "user" | "auto";
 /** 里程碑名上限；所有任务面板的新增入口共用同一约束。 */
 export const WAND_MILESTONE_NAME_MAX_LENGTH = 60;
 
+/** 兜底迭代的名字；用户没选迭代时任务/会话都归到它下面。 */
+export const DEFAULT_ITERATION_NAME = "默认迭代";
+
 /**
  * 里程碑（迭代）：归属某个工作区，新建任务时按所选工作区过滤展示，也可以不选。
  * workspaceId 为 null 表示全局里程碑（历史数据，或未指定工作区时创建），任何工作区都能选。
- * 任务只保存 milestoneId，删除里程碑时只解绑任务、不删除任务。
+ * 任务只保存 milestoneId，删除里程碑时只解绑任务（并改挂默认迭代）、不删除任务。
  */
 export interface WandTaskMilestone {
   id: string;
@@ -103,8 +106,56 @@ export interface WandTaskMilestone {
   dueDate: string | null;
   /** 所属工作区；null = 全局里程碑。 */
   workspaceId: string | null;
+  /**
+   * 是否为兜底「默认迭代」：全局唯一、不可删除，用户没选迭代时一切新建都落到它这里。
+   * 同一个工作区可见的迭代里最多只有一个 isDefault，服务端保证惰性创建。
+   */
+  isDefault: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+/** 迭代提示词记录的来源：会话里用户输入的 / 任务派发的。 */
+export type WandIterationPromptSource = "session" | "dispatch";
+
+/** 记录标题上限（列表里显示的一行）。 */
+export const WAND_ITERATION_PROMPT_TITLE_MAX_LENGTH = 60;
+
+/** 记录详情上限：够模型总结，又不至于把整段提示词全量灌进 commit 生成。 */
+export const WAND_ITERATION_PROMPT_DETAIL_MAX_LENGTH = 600;
+
+/**
+ * 迭代提示词记录（「两次迭代之间我到底改了什么」的输入源）：
+ * 用户每发一条有信息量的提示词就追加一行，commit / 汇报类生成直接读它，
+ * 不用每次都让模型去读 diff。
+ */
+export interface WandIterationPrompt {
+  id: string;
+  /** 归属迭代；默认迭代也有自己真实的行 id，不会留下 null。 */
+  milestoneId: string;
+  /** 记录时所属项目；null = 未指定项目的会话 / 任务。 */
+  workspaceId: string | null;
+  sessionId: string | null;
+  /** 关联的看板任务（wand_tasks.id）。 */
+  taskId: string | null;
+  /**
+   * 仓库身份：`git rev-parse --git-common-dir` 的绝对路径，同一仓库的 worktree 共享同一个值。
+   * 用来把提示词按仓库隔离，避免把别的项目的历史混进这次 commit message。
+   * 拿不到仓库信息时为 null。
+   */
+  repoKey: string | null;
+  /** 记录时的会话工作目录。 */
+  cwd: string;
+  /** 提示词的本地标题（不调模型，取第一行有效内容）。 */
+  title: string;
+  /** 提示词摘要，已经过清洗与截断。 */
+  detail: string;
+  source: WandIterationPromptSource;
+  /** 已被某次 commit message 用掉的时间；null = 还没提交。 */
+  consumedAt: string | null;
+  /** 用掉它的 commit hash；提交失败或只生成不提交时为 null。 */
+  consumedCommit: string | null;
+  createdAt: string;
 }
 
 export interface WandTask {

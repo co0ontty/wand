@@ -7,9 +7,11 @@ import {
   consumePtyInputForTopic,
   createPtyTopicLineBuffer,
   isPtyTypedTopicCandidate,
+  measureSessionTopicInputWeight,
   provisionalSessionTopic,
   SessionTopicCoordinator,
   shouldAcceptGeneratedSessionTitle,
+  shouldGenerateSessionTopicFromInput,
   shouldGenerateSessionTopicFromPtyInput,
   summarizeSessionTitleFromInput,
   type SessionTopic,
@@ -48,14 +50,14 @@ test("SessionTopicCoordinator coalesces new turns and discards stale titles", as
     onError: assert.fail,
   });
 
-  request("第一轮");
-  assert.deepEqual(pending[0].messages, ["第一轮"]);
-  request("第二轮");
+  request("重构会话恢复流程");
+  assert.deepEqual(pending[0].messages, ["重构会话恢复流程"]);
+  request("把 resume 时间窗收紧");
   pending[0].resolve({ title: "旧标题", description: "旧描述" });
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(pending.length, 2);
-  assert.deepEqual(pending[1].messages, ["第一轮", "第二轮"]);
+  assert.deepEqual(pending[1].messages, ["重构会话恢复流程", "把 resume 时间窗收紧"]);
   assert.deepEqual(topics, []);
   pending[1].resolve({ title: "共同标题", description: "共同描述" });
   await new Promise((resolve) => setImmediate(resolve));
@@ -63,6 +65,35 @@ test("SessionTopicCoordinator coalesces new turns and discards stale titles", as
   assert.deepEqual(topics, [{ title: "共同标题", description: "共同描述" }]);
   assert.deepEqual(generating, [true, false]);
   coordinator.clear();
+});
+
+test("short inputs neither generate nor overwrite session titles", async () => {
+  const calls: Array<readonly string[]> = [];
+  const coordinator = new SessionTopicCoordinator((messages) => {
+    calls.push(messages);
+    return Promise.resolve({ title: "标题", description: "描述" });
+  });
+  const generating: boolean[] = [];
+  for (const input of ["y", "pwd"]) {
+    coordinator.request("session-1", {
+      input,
+      onGenerating: (value) => generating.push(value),
+      onTopic: () => assert.fail("short input must not produce a topic"),
+      onError: assert.fail,
+    });
+  }
+  assert.deepEqual(calls, []);
+  assert.deepEqual(generating, []);
+  coordinator.clear();
+
+  for (const input of ["y", "n", "ok", "1", "继续", "好的", "pwd", "ls -la", "git status", "npm test", "npm run check", "/compact", "hello"]) {
+    assert.equal(shouldGenerateSessionTopicFromInput(input), false, input);
+  }
+  for (const input of ["修权限弹窗的文案", "把按钮改大点", "fix the login flow", "检查一下这个报错"]) {
+    assert.equal(shouldGenerateSessionTopicFromInput(input), true, input);
+  }
+  assert.equal(measureSessionTopicInputWeight("修权限弹窗的文案"), 16);
+  assert.equal(measureSessionTopicInputWeight("fix login"), 8);
 });
 
 test("PTY terminal keystrokes do not request a title unless the composer submitted", () => {

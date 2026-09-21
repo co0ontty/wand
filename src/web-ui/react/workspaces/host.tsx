@@ -7,6 +7,7 @@ import * as React from "react";
 
 import { WandButton, WandDialogSurface, WandIcon, WandSwitch } from "../ui";
 import { MilestonePicker } from "../milestones/picker";
+import { useDefaultMilestone, usePreselectMilestone } from "../milestones/default-iteration";
 import { milestonesStore } from "../milestones/controller";
 import { taskBoardController } from "../issues/task-board-controller";
 import { workspacesController, workspacesStore } from "./controller";
@@ -132,6 +133,11 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
   const mountedCwd = cwd.trim();
   const milestoneWorkspaceId = selectedProject?.id ?? "";
+  // 新建会话默认挂到「默认迭代」，不让用户在未选迭代时丢归属。
+  const presetMilestone = useDefaultMilestone(milestoneWorkspaceId, controller.open);
+  usePreselectMilestone(controller.open, presetMilestone, (id) => {
+    setMilestoneId((current) => current || id);
+  });
   const setTaskCwd = (nextCwd: string): void => {
     draftTouched.current = true;
     setCwd(nextCwd);
