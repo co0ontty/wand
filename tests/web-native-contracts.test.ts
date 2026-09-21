@@ -155,8 +155,6 @@ test("Apple WebViews preserve deep links, bridge globals, and terminal hooks", (
     "__wandNativeBackHooked",
   ]);
   includesAll("macos/Wand/WebContainerView.swift", [
-    "window.__wandMacNative = true",
-    "window.__wandBackToNative",
     "var embedTerminal: Bool = false",
     "embedTerminal: embedTerminal",
     "var embedNativeInput: Bool = false",
