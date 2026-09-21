@@ -11070,6 +11070,11 @@
       transform: scale(1.12);
       cursor: grabbing;
       box-shadow: 0 10px 28px rgba(0, 0, 0, 0.36);
+      /* 拖动期间关掉背景模糊：手机上逐帧重新采样模糊会掉帧（球心靠逐帧改 right/bottom 跟手），
+         用更实的底色补上失去的模糊。 */
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      background: rgba(35, 28, 24, 0.96);
     }
     /* 钉住面板 */
     .wand-joystick-panel {

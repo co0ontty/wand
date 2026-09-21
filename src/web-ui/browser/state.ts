@@ -296,9 +296,11 @@ export var state: AppState = {
   joystickBackdropEl: null,
   joystickBallEl: null,
   joystickPointerId: null,
-  joystickGesture: null,          // null|'pending'|'cancelled'|'move'
-  joystickPressStart: null,       // {x, y, t}
-  joystickLongPressTimer: null,
+  joystickGesture: null,          // null|'pending'|'move'
+  joystickPressStart: null,       // {x, y}
+  joystickDragOffset: null,       // {x, y} 手指相对球心的抓取偏移
+  joystickDragPoint: null,        // {x, y} 最近一次指针坐标
+  joystickDragFrame: null,        // requestAnimationFrame 句柄（合并每帧一次写样式）
   joystickMoveHandler: null,
   joystickUpHandler: null,
   joystickResizeHandler: null,

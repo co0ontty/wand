@@ -2087,9 +2087,8 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
       };
 
       // ── 终端悬浮摇杆遥控器常量与布局表 ──
-      export var JOYSTICK_LONG_PRESS_MS = 400;     // 按住不动多久进入移动模式
-      export var JOYSTICK_MOVE_THRESHOLD = 10;     // px：区分"拖动选键"与"静止长按"
-      export var JOYSTICK_TAP_THRESHOLD = 8;       // px：快速点击的最大位移
+      export var JOYSTICK_MOVE_THRESHOLD = 10;     // px：手指/指针移出这么多就进入拖动（无需先长按）
+      export var JOYSTICK_TAP_THRESHOLD = 8;       // px：抬手时位移不超过这么多算点击
       export var JOYSTICK_BALL_SIZE = 54;          // 球球直径（与 CSS 一致）
       export var JOYSTICK_EDGE_MARGIN = 8;         // 球球钳进视口的留白
       export var JOYSTICK_ACTION_KEYS = [

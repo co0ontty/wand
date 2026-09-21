@@ -2,7 +2,7 @@ import { computeFloatingPanelPosition } from "./floating-panel-position";
 import { state, writeStoredBoolean } from "./state";
 import { iconSvg } from "./i18n";
 import "./utils";
-import { JOYSTICK_ACTION_KEYS, JOYSTICK_BALL_SIZE, JOYSTICK_EDGE_MARGIN, JOYSTICK_LONG_PRESS_MS, JOYSTICK_MOVE_THRESHOLD, JOYSTICK_TAP_THRESHOLD, buildMessagesForRender, buildPtySequence, clearModifiers, getSelectedSession, resetRootViewportScroll, scheduleShortcutResync, sendTerminalSequence, shouldAdjustForKeyboard, syncInputBoxScroll, updateQueueBar } from "./input";
+import { JOYSTICK_ACTION_KEYS, JOYSTICK_BALL_SIZE, JOYSTICK_EDGE_MARGIN, JOYSTICK_MOVE_THRESHOLD, JOYSTICK_TAP_THRESHOLD, buildMessagesForRender, buildPtySequence, clearModifiers, getSelectedSession, resetRootViewportScroll, scheduleShortcutResync, sendTerminalSequence, shouldAdjustForKeyboard, syncInputBoxScroll, updateQueueBar } from "./input";
 import "./notifications";
 import "./render";
 import { getPreferredMessages, isStructuredSession, updateDrawerState, updateSessionSnapshot } from "./session-engine";
@@ -472,6 +472,9 @@ import { fitTerminalToContainer } from "./terminal-fit";
 
       export function initTerminalJoystick() {
         if (state.joystickRootEl) return;
+        // 新页面从「没有手指压在球上」开始。上一次手势如果在换页前没跑完，外壳里的
+        // 让位标记会一直是 true，左右滑动切兄弟会话就永久失效了。
+        notifyNativeFloatingBallDrag(false);
 
         var root = document.createElement("div");
         root.className = "wand-joystick-root";
@@ -548,21 +551,37 @@ import { fitTerminalToContainer } from "./terminal-fit";
         suppressJoystickKeyboardFocus();
         e.preventDefault();
         e.stopPropagation();
-        var canDirectDrag = e.pointerType === "mouse" || e.pointerType === "pen";
         state.joystickPointerId = e.pointerId;
-        state.joystickPressStart = { x: e.clientX, y: e.clientY, t: Date.now() };
+        state.joystickPressStart = { x: e.clientX, y: e.clientY };
         state.joystickGesture = "pending";
+        // 一按下就先让位，不等越过拖动阈值：快速甩动时「第一次 pointermove」和外壳
+        // 判定切会话用的是同一个触摸事件，等那会儿再通知已经晚了（WebView 已被 cancel）。
+        // 点击时也只是短暂置位，没有位移，外壳不会误接管。
+        notifyNativeFloatingBallDrag(true);
+        // 抓取偏移在「按下」这一刻定下来：拖动期间球心跟手，但不会跳到指尖正中。
+        // 等越过阈值再采样就已经晚了一截，球会永远落后这一截。
+        var rect = state.joystickBallEl.getBoundingClientRect();
+        state.joystickDragOffset = {
+          x: rect.left + rect.width / 2 - e.clientX,
+          y: rect.top + rect.height / 2 - e.clientY
+        };
         try { state.joystickBallEl.setPointerCapture(e.pointerId); } catch (err) {}
-        if (!canDirectDrag) {
-          state.joystickLongPressTimer = setTimeout(function() {
-            if (state.joystickGesture === "pending") enterJoystickMoveMode();
-          }, JOYSTICK_LONG_PRESS_MS);
-        }
+        // 触摸、鼠标、触控笔一视同仁：按住球球即可直接拖，不再要求先静止长按。
         state.joystickMoveHandler = onJoystickPointerMove;
         state.joystickUpHandler = onJoystickPointerUp;
         document.addEventListener("pointermove", state.joystickMoveHandler);
         document.addEventListener("pointerup", state.joystickUpHandler);
         document.addEventListener("pointercancel", state.joystickUpHandler);
+      }
+
+      // Android 外壳（PtyTerminalScreen）用 Compose 手势做过「左右滑动切兄弟会话」：
+      // 它接管手势时会把触摸事件从内嵌 WebView 上收回，球拖到一半就冻住。这里在拖动
+      // 开始/结束时通知外壳让位。浏览器、iOS、桌面端没有这个桥，调用自动 no-op。
+      function notifyNativeFloatingBallDrag(active) {
+        var bridge = (window as any).WandTerminal;
+        if (bridge && typeof bridge.setFloatingBallActive === "function") {
+          try { bridge.setFloatingBallActive(!!active); } catch (err) {}
+        }
       }
 
       function enterJoystickMoveMode() {
@@ -572,51 +591,65 @@ import { fitTerminalToContainer } from "./terminal-fit";
         if (state.joystickBackdropEl) state.joystickBackdropEl.classList.add("active");
       }
 
-      function moveJoystickBallTo(clientX, clientY) {
+      function applyJoystickDragPoint(clientX, clientY) {
         if (!state.joystickBallEl) return;
+        var offset = state.joystickDragOffset || { x: 0, y: 0 };
         var pos = clampJoystickPos({
-          right: window.innerWidth - clientX - JOYSTICK_BALL_SIZE / 2,
-          bottom: window.innerHeight - clientY - JOYSTICK_BALL_SIZE / 2
+          right: window.innerWidth - (clientX + offset.x) - JOYSTICK_BALL_SIZE / 2,
+          bottom: window.innerHeight - (clientY + offset.y) - JOYSTICK_BALL_SIZE / 2
         });
         state.joystickBallEl.style.right = pos.right + "px";
         state.joystickBallEl.style.bottom = pos.bottom + "px";
+      }
+
+      // pointermove 比屏幕刷新率密，逐包写样式只是白烧合成；合并到每帧一次。
+      function queueJoystickDragMove(clientX, clientY) {
+        state.joystickDragPoint = { x: clientX, y: clientY };
+        if (state.joystickDragFrame !== null) return;
+        state.joystickDragFrame = requestAnimationFrame(function() {
+          state.joystickDragFrame = null;
+          var point = state.joystickDragPoint;
+          if (point) applyJoystickDragPoint(point.x, point.y);
+        });
+      }
+
+      // 抬手前补上最后一帧，否则快速甩动会停在上一帧的位置。
+      function flushJoystickDragMove() {
+        if (state.joystickDragFrame !== null) {
+          cancelAnimationFrame(state.joystickDragFrame);
+          state.joystickDragFrame = null;
+        }
+        var point = state.joystickDragPoint;
+        if (state.joystickGesture === "move" && point) {
+          applyJoystickDragPoint(point.x, point.y);
+        }
       }
 
       function onJoystickPointerMove(e) {
         if (e.pointerId !== state.joystickPointerId || !state.joystickBallEl) return;
         e.preventDefault();
         if (state.joystickGesture === "move") {
-          moveJoystickBallTo(e.clientX, e.clientY);
+          queueJoystickDragMove(e.clientX, e.clientY);
           return;
         }
         if (state.joystickGesture !== "pending") return;
         var dx = e.clientX - state.joystickPressStart.x;
         var dy = e.clientY - state.joystickPressStart.y;
         if (Math.sqrt(dx * dx + dy * dy) <= JOYSTICK_MOVE_THRESHOLD) return;
-        if (e.pointerType === "mouse" || e.pointerType === "pen") {
-          enterJoystickMoveMode();
-          moveJoystickBallTo(e.clientX, e.clientY);
-        } else {
-          if (state.joystickLongPressTimer) {
-            clearTimeout(state.joystickLongPressTimer);
-            state.joystickLongPressTimer = null;
-          }
-          state.joystickGesture = "cancelled";
-        }
+        // 一越过阈值就进入拖动：手机上"按下去拖"必须立刻跟手。
+        enterJoystickMoveMode();
+        queueJoystickDragMove(e.clientX, e.clientY);
       }
 
       function onJoystickPointerUp(e) {
         if (e.pointerId !== state.joystickPointerId) return;
-        if (state.joystickLongPressTimer) {
-          clearTimeout(state.joystickLongPressTimer);
-          state.joystickLongPressTimer = null;
-        }
         var gesture = state.joystickGesture;
         if (gesture === "pending") {
           var dx = e.clientX - state.joystickPressStart.x;
           var dy = e.clientY - state.joystickPressStart.y;
           if (Math.sqrt(dx * dx + dy * dy) <= JOYSTICK_TAP_THRESHOLD) toggleJoystickPanel();
         } else if (gesture === "move") {
+          flushJoystickDragMove();
           var r = state.joystickBallEl ? state.joystickBallEl.getBoundingClientRect() : null;
           if (r) saveJoystickPosition(window.innerWidth - r.right, window.innerHeight - r.bottom);
         }
@@ -624,9 +657,9 @@ import { fitTerminalToContainer } from "./terminal-fit";
       }
 
       function endJoystickGesture() {
-        if (state.joystickLongPressTimer) {
-          clearTimeout(state.joystickLongPressTimer);
-          state.joystickLongPressTimer = null;
+        if (state.joystickDragFrame !== null) {
+          cancelAnimationFrame(state.joystickDragFrame);
+          state.joystickDragFrame = null;
         }
         if (state.joystickBallEl && state.joystickPointerId !== null) {
           try { state.joystickBallEl.releasePointerCapture(state.joystickPointerId); } catch (err) {}
@@ -647,6 +680,9 @@ import { fitTerminalToContainer } from "./terminal-fit";
         state.joystickPointerId = null;
         state.joystickGesture = null;
         state.joystickPressStart = null;
+        state.joystickDragPoint = null;
+        state.joystickDragOffset = null;
+        notifyNativeFloatingBallDrag(false);
       }
 
       function sendJoystickKey(key) {
@@ -767,9 +803,9 @@ import { fitTerminalToContainer } from "./terminal-fit";
       }
 
       function teardownJoystick() {
-        if (state.joystickLongPressTimer) {
-          clearTimeout(state.joystickLongPressTimer);
-          state.joystickLongPressTimer = null;
+        if (state.joystickDragFrame !== null) {
+          cancelAnimationFrame(state.joystickDragFrame);
+          state.joystickDragFrame = null;
         }
         if (state.joystickMoveHandler) {
           document.removeEventListener("pointermove", state.joystickMoveHandler);
@@ -799,7 +835,10 @@ import { fitTerminalToContainer } from "./terminal-fit";
         state.joystickPointerId = null;
         state.joystickGesture = null;
         state.joystickPressStart = null;
+        state.joystickDragPoint = null;
+        state.joystickDragOffset = null;
         state.joystickPinnedOpen = false;
+        notifyNativeFloatingBallDrag(false);
       }
 
       export function observeTerminalResize() {
