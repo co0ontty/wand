@@ -4,6 +4,8 @@
 
 ## 项目记忆
 
+- 后续所有 Wand 功能验收、真机验收和最终端到端验收，统一使用这台机器上已安装运行的 Wand 服务，以及用户指定的连接码；连接信息读取本机私密文件 `~/.wand/acceptance-connection.json`（`serverURL` / `connectionCode`）。不要使用隔离服务、mock 服务或另建测试实例代替最终验收。连接码包含鉴权信息，不得写进仓库、提交、日志或截图。单元测试和开发期隔离检查仍可使用独立环境。
+
 - 只要当前项目的 Android 客户端发生改动，收尾时必须重新编译带版本号的 beta APK，并部署到 `~/.wand/android/` Beta 更新目录；同时验证 `/api/android-apk-update?currentVersion=0.0.0&channel=beta` 能返回新版本。除非用户明确要求跳过，否则不得省略。
 
 
@@ -228,7 +230,9 @@ npm test
 npm run build
 ```
 
-迭代期先跑相关单测文件，交付前跑全量。用户可见的会话/UI 行为改动，起隔离打包服务器人工验证受影响的流程（登录、建会话、provider/model 切换、终端与结构化聊天、权限弹窗、重连/resume、上传、快捷提交、扩展/原生行为）：
+迭代期先跑相关单测文件，交付前跑全量。用户可见的会话/UI 行为改动，使用「项目记忆」指定的本机已安装服务及连接码人工验收受影响的流程（登录、建会话、provider/model 切换、终端与结构化聊天、权限弹窗、重连/resume、上传、快捷提交、扩展/原生行为）：
+
+以下仅用于开发期隔离冒烟，不能替代上述最终验收：
 
 ```bash
 npm run build && node dist/cli.js web -c /tmp/wand-dev/config.json
