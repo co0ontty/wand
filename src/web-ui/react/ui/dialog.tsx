@@ -10,6 +10,7 @@ import { type ComponentProps, type KeyboardEvent, type ReactNode, useEffect, use
 import { WandButton, type WandButtonKind } from "./button";
 import { classNames } from "./class-names";
 import { findDialogFocusTarget, watchDialogAutofocus } from "./dialog-focus";
+import { handleDialogOpenChange } from "./dialog-open-change";
 import { WandIcon, type WandIconName } from "./icons";
 import { usePortalContainer } from "./portal-context";
 
@@ -69,20 +70,24 @@ const defaultIcons: Record<WandDialogTone, WandIconName> = {
 type AppicaDialogOpenChange = NonNullable<ComponentProps<typeof AppicaDialog>["onOpenChange"]>;
 type AppicaDialogChangeDetails = Parameters<AppicaDialogOpenChange>[1];
 
-/**
- * A locked dialog (`dismissable={false}`) must survive Escape and outside
- * presses. Base UI reports every close attempt through `onOpenChange` with a
- * reason, so the attempt is cancelled instead of relying on per-event handlers.
- */
-function makeOpenChangeHandler(dismissable: boolean, onOpenChange: (open: boolean) => void) {
+function useOpenChangeHandler(
+  open: boolean,
+  dismissable: boolean,
+  onOpenChange: (open: boolean) => void,
+): AppicaDialogOpenChange {
+  const openedAt = useRef(0);
+  useEffect(() => {
+    if (open) openedAt.current = performance.now();
+  }, [open]);
   return (nextOpen: boolean, details: AppicaDialogChangeDetails): void => {
-    if (!nextOpen && !dismissable) {
-      if (details.reason === "escape-key" || details.reason === "outside-press") {
-        details.cancel();
-        return;
-      }
-    }
-    onOpenChange(nextOpen);
+    handleDialogOpenChange(
+      nextOpen,
+      details,
+      dismissable,
+      openedAt.current,
+      performance.now(),
+      onOpenChange,
+    );
   };
 }
 
@@ -122,6 +127,7 @@ export function WandDialogSurface({
   const portalContainer = usePortalContainer();
   const contentRef = useRef<HTMLDivElement>(null);
   const stopDeferredFocus = useRef<(() => void) | null>(null);
+  const handleOpenChange = useOpenChangeHandler(open, dismissable, onOpenChange);
   useEffect(() => {
     if (!open) return;
     return () => {
@@ -141,7 +147,7 @@ export function WandDialogSurface({
   }
 
   return (
-    <AppicaDialog open={open} onOpenChange={makeOpenChangeHandler(dismissable, onOpenChange)}>
+    <AppicaDialog open={open} onOpenChange={handleOpenChange}>
       <AppicaDialogContent
         ref={contentRef}
         container={portalContainer}
@@ -195,6 +201,9 @@ export function WandDialog<T>({
   const contentRef = useRef<HTMLDivElement>(null);
   const [inputValue, setInputValue] = useState(input?.value ?? "");
   const hasInput = Boolean(input);
+  const handleOpenChange = useOpenChangeHandler(open, dismissable, (nextOpen) => {
+    if (!nextOpen) onDismiss();
+  });
 
   useEffect(() => {
     if (!open || !hasInput) return;
@@ -220,12 +229,7 @@ export function WandDialog<T>({
   }
 
   return (
-    <AppicaDialog
-      open={open}
-      onOpenChange={makeOpenChangeHandler(dismissable, (nextOpen) => {
-        if (!nextOpen) onDismiss();
-      })}
-    >
+    <AppicaDialog open={open} onOpenChange={handleOpenChange}>
       <AppicaDialogContent
         ref={contentRef}
         container={portalContainer}
