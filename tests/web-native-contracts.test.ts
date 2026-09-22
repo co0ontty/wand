@@ -109,7 +109,7 @@ test("Android WebView preserves its half of the web/native protocol", () => {
   ]);
 });
 
-test("Apple WebViews preserve deep links, bridge globals, and terminal hooks", () => {
+test("Apple clients preserve mobile WebView and desktop native terminal contracts", () => {
   includesAll("ios/Wand/WebContainerView.swift", [
     "window.__wandIosNative = true",
     "window.WandNative",
@@ -153,15 +153,24 @@ test("Apple WebViews preserve deep links, bridge globals, and terminal hooks", (
     "wand-ios-ime-state",
     "__wandNativeBackHooked",
   ]);
-  includesAll("macos/Wand/WebContainerView.swift", [
-    "var embedTerminal: Bool = false",
-    "embedTerminal: embedTerminal",
-    "var embedNativeInput: Bool = false",
-    "embedNativeInput: embedNativeInput",
-    'URLQueryItem(name: "session", value: sessionId)',
-    'URLQueryItem(name: "embed", value: "terminal")',
-    'URLQueryItem(name: "nativeInput", value: "1")',
-    "WandPlatform/macOS",
+  includesAll("macos/Wand/NativeTerminalView.swift", [
+    "import SwiftTerm",
+    "TerminalView, TerminalViewDelegate",
+    "terminal.resize(cols: cols, rows: rows)",
+    "func clipboardRead(source: TerminalView) -> Data? { nil }",
+  ]);
+  includesAll("macos/Wand/PtyTerminalStore.swift", [
+    "PtyTerminalSnapshot",
+    "socket.subscribe(sessionId: sessionId, ptyAck: true)",
+    "terminal.restore(data)",
+    "terminal.feedOutput(chunk)",
+    "socket.acknowledgePty(bytes: event.ptyBytes ?? 0)",
+  ]);
+  includesAll("macos/Wand/WandSocket.swift", [
+    '"type": "pty_input"',
+    '"type": "pty_resize"',
+    '"type": "pty_ack"',
+    'payload["shortcutKey"] = "enter_text"',
   ]);
   includesAll("macos/Wand/MainShellView.swift", [
     "if session?.isStructured == false",
@@ -169,14 +178,15 @@ test("Apple WebViews preserve deep links, bridge globals, and terminal hooks", (
     "PtySessionView(sessionId: sessionId, api: api)",
   ]);
   includesAll("macos/Wand/ChatView.swift", [
-    "embedTerminal: true",
-    "embedNativeInput: true",
+    "NativeTerminalSurface(terminal: store.terminal)",
+    "store.terminal.clearScrollback()",
     "IMEAwareComposerTextView",
     "doCommandBy commandSelector",
     "textView.hasMarkedText()",
     "textView.unmarkText()",
     "composerIsComposing",
   ]);
+  assert.doesNotMatch(source("macos/Wand/ChatView.swift"), /WebContainerView|terminalWebModel|evaluateJavaScript/);
 });
 
 test("task board create sheets only assign agents from the doing column", () => {

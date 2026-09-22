@@ -11,7 +11,7 @@
 | Web | Legacy runtime + React Shell/面板；议题看板为原生 React 面板 | `src/web-ui/browser/`、`src/web-ui/react/` |
 | Android | Compose 列表/任务/聊天/原生 PTY 外壳；WebView 显示终端与网页兜底 | `android/app/src/main/java/com/wand/app/`，含 Kotlin 和 Java 桥接 |
 | iOS | SwiftUI 原生列表/任务/聊天/PTY 外壳，WKWebView 显示终端 | `ios/Wand/` |
-| macOS | 原生三栏、聊天、文件面板与任务；WKWebView 用于终端/网页 | `macos/Wand/`，不是纯 WebView 壳 |
+| macOS | 原生三栏、聊天、文件面板与任务；SwiftTerm AppKit 终端直连 `/ws`，无 WebView | `macos/Wand/`，终端协议见 `macos/docs/native-terminal.md`（2026-09-22 更新） |
 | 扩展 | MV3 background + popup/options + content script | `browser-extension/` |
 | JSON CLI / TUI | HTTP 客户端与 IPC 管理入口 | `src/cli-api.ts`、`src/cli.ts`、`src/tui/` |
 
@@ -166,7 +166,7 @@ AskUserQuestion 的选择暂存客户端，流式替换不应丢选择；提交�
 
 不要改成 `text + "\n"`。终端文本包也标 enter_text，以便服务端捕获标题。PTY AskUser 已使用对应拆包路径；旧文档中 Android ChatStore/iOS AskUser/macOS 聊天仍发送 `\n` 的断言应删除。
 
-实现入口：Web `getTerminalSubmitChunks`；iOS `PtyInputProtocol.swift` / ChatStore.sendPtyInput；Android `ptyComposerSubmitChunks` / PtyTerminalScreen；macOS ChatStore.sendPtyInput。
+实现入口：Web `getTerminalSubmitChunks`；iOS `PtyInputProtocol.swift` / ChatStore.sendPtyInput；Android `ptyComposerSubmitChunks` / PtyTerminalScreen；macOS 聊天走 ChatStore.sendPtyInput，原生终端走 NativeTerminalView → PtyTerminalStore → WandSocket（`pty_input`，Return 单独 `\r`）。
 
 终端视图优先 WS pty_input；HTTP 写用 responseMode=accepted。结束的 PTY 先 resume 再输入。两包中第二包失败时不能盲目重发全文，避免重复执行（验收项，非本次已复现问题）。
 
