@@ -4,6 +4,7 @@
  * with a summary, and clients fetch full content on-demand via API.
  */
 
+import { contentHasStructuredImage } from "./structured-content.js";
 import type { CardExpandDefaults, ContentBlock, ConversationTurn, ToolResultBlock, ToolUseBlock } from "./types.js";
 
 const TRUNCATION_THRESHOLD = 200;
@@ -198,6 +199,11 @@ export function truncateMessagesForTransport(
 
       const toolName = toolNameMap.get(result.tool_use_id) || "";
       if (!isToolDefaultCollapsed(toolName, cardDefaults)) return block;
+
+      // 带图片的 tool_result 永不截断：图片 part 被 JSON.stringify 截半后客户端再也
+      // 抽不出 data URI（线上表现就是「读图不显示，只剩一串 base64 残文」）。图片要么
+      // 整块送达（客户端会强制展开渲染），要么由 _truncated + 懒加载单独取回。
+      if (contentHasStructuredImage(result.content)) return block;
 
       const contentStr = getContentString(result.content);
       if (contentStr.length <= TRUNCATION_THRESHOLD) return block;

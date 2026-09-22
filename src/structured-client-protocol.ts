@@ -1,10 +1,11 @@
-import { asRecord } from "./structured-content.js";
+import { asRecord, isStructuredImagePart } from "./structured-content.js";
 import type {
   ContentBlock,
   ConversationTurn,
   StructuredQuestion,
   StructuredTaskItem,
   SubagentMeta,
+  ToolResultBlock,
   ToolUseBlock,
 } from "./types.js";
 
@@ -193,10 +194,50 @@ function tasksFromSegment(messages: ConversationTurn[], start: number, end: numb
 }
 
 /**
+ * 把 tool_result 里的内联 base64 图片换成「按会话取图」的 URL。
+ *
+ * 为什么不能把 base64 直接下发：读一张截图动辄 1–3MB，base64 后更大，会撑爆移动端
+ * 单帧上限（iOS 默认 1MiB）导致反复断连；而且同一张图在每条快照里重复传。换成 URL
+ * 后各端用同一套带鉴权的取图通道按需加载（Web 走 <img>，原生走各自 ImageLoader）。
+ * source 本来就是 url 的图片不动，保持幂等。
+ */
+function rewriteInlineToolImageUrls(messages: ConversationTurn[], sessionId: string): ConversationTurn[] {
+  return messages.map((turn) => {
+    let turnChanged = false;
+    const content = turn.content.map((block) => {
+      if (block.type !== "tool_result" || !Array.isArray(block.content)) return block;
+      let imageIndex = -1;
+      let blockChanged = false;
+      const parts = block.content.map((part) => {
+        if (!isStructuredImagePart(part)) return part;
+        imageIndex += 1;
+        const source = asRecord((part as { source?: unknown }).source);
+        if (source?.type !== "base64" || typeof source.data !== "string") return part;
+        blockChanged = true;
+        return {
+          type: "image",
+          source: {
+            type: "url",
+            url: `/api/sessions/${encodeURIComponent(sessionId)}/tool-images/${encodeURIComponent(block.tool_use_id)}/${imageIndex}`,
+            ...(typeof source.media_type === "string" ? { media_type: source.media_type } : {}),
+          },
+        };
+      });
+      if (!blockChanged) return block;
+      turnChanged = true;
+      return { ...block, content: parts } as ToolResultBlock;
+    });
+    return turnChanged ? { ...turn, content } : turn;
+  });
+}
+
+/**
  * Add Wand-owned semantics without mutating persisted provider blocks.
  * This is the external interface consumed by every client.
+ *
+ * 传 sessionId 时额外把内联图片改写成取图 URL（见 rewriteInlineToolImageUrls）。
  */
-export function enrichStructuredMessages(messages: ConversationTurn[]): ConversationTurn[] {
+export function enrichStructuredMessages(messages: ConversationTurn[], sessionId?: string): ConversationTurn[] {
   const enriched = stampDerivedSubagents(messages).map((turn) => ({
     ...turn,
     content: turn.content.map((block) => {
@@ -233,5 +274,5 @@ export function enrichStructuredMessages(messages: ConversationTurn[]): Conversa
     }
     segmentStart = i;
   }
-  return enriched;
+  return sessionId ? rewriteInlineToolImageUrls(enriched, sessionId) : enriched;
 }

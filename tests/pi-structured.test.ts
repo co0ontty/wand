@@ -221,3 +221,31 @@ test("Pi reconstructs assistant text from message_end and text_end when deltas a
   assert.equal(fromTextEnd.result, "final answer");
   assert.deepEqual(fromTextEnd.blocks, [{ type: "text", text: "final answer" }]);
 });
+
+test("Pi keeps inline image parts in tool results and canonicalizes them for every client", () => {
+  const state: StructuredRunnerTurnState & { sessionId?: string | null } = { blocks: [], result: "", sessionId: null };
+  applyPiEvent(state, {
+    type: "tool_execution_start",
+    toolCallId: "tool-img",
+    toolName: "read",
+    args: { path: "/tmp/shot.png" },
+  });
+  applyPiEvent(state, {
+    type: "tool_execution_end",
+    toolCallId: "tool-img",
+    toolName: "read",
+    result: {
+      content: [
+        { type: "text", text: "Read image file [image/png]" },
+        { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" },
+      ],
+    },
+    isError: false,
+  });
+  const result = state.blocks.find((block) => block.type === "tool_result");
+  assert.ok(result && result.type === "tool_result");
+  assert.deepEqual(result.content, [
+    { type: "text", text: "Read image file [image/png]" },
+    { type: "image", source: { type: "base64", media_type: "image/png", data: "iVBORw0KGgo=" } },
+  ]);
+});

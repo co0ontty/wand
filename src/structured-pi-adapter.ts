@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 
 import { startStructuredCli } from "./structured-exec-pump.js";
 import type { StructuredExecHost } from "./structured-exec-host.js";
-import { asRecord } from "./structured-content.js";
+import { asRecord, normalizeStructuredToolResultContent } from "./structured-content.js";
 import { thinkingEffortToPiLevel } from "./structured-provider-common.js";
 import type {
   StructuredRunnerAdapter,
@@ -26,6 +26,22 @@ function textContent(value: unknown): string {
   if (!item) return "";
   if (item.type === "text" && typeof item.text === "string") return item.text;
   return textContent(item.content);
+}
+
+/**
+ * Pi 的工具结果是 `{ content: [ text…, image… ] }`。图片 part 不能像以前那样只抽文本
+ * 丢掉——读图 / 截图全靠它，统一交给 normalizeStructuredToolResultContent 归一化。
+ * 纯文本结果仍压成字符串，保持既有形态。
+ */
+function piToolResultContent(value: unknown): string | Array<{ type: string; [key: string]: unknown }> {
+  const record = asRecord(value);
+  const raw = record && "content" in record ? record.content : value;
+  const normalized = normalizeStructuredToolResultContent(raw);
+  if (typeof normalized === "string") return normalized;
+  if (normalized.length > 0 && normalized.every((part) => part.type === "text" && typeof part.text === "string")) {
+    return normalized.map((part) => part.text as string).filter(Boolean).join("\n");
+  }
+  return normalized;
 }
 
 export function buildPiArgs(session: SessionSnapshot, prompt: string): string[] {
@@ -133,7 +149,7 @@ export function applyPiEvent(state: PiTurnState, event: Record<string, unknown>)
   }
   if (event.type === "tool_execution_end") {
     const id = typeof event.toolCallId === "string" ? event.toolCallId : "unknown";
-    state.blocks.push({ type: "tool_result", tool_use_id: id, content: textContent(event.result), is_error: event.isError === true });
+    state.blocks.push({ type: "tool_result", tool_use_id: id, content: piToolResultContent(event.result), is_error: event.isError === true });
   }
   if (event.type === "message_end" || event.type === "turn_end") {
     const message = asRecord(event.message);

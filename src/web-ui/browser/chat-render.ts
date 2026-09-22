@@ -2851,8 +2851,8 @@ import "./local-preview-adapter";
 
         // 图片直接内联展示，不让用户去点开 JSON 或猜路径。
         //   · path 命中图片扩展名 → 走文件浏览器同款 /api/file-raw
-        //   · tool_result 内联 image content block（base64 / url）→ 直接 data URI
-        // 两种来源都可能出现，合并渲染；加载失败（被删 / 超限）则隐藏整块。
+        //   · tool_result 内联 image content block（base64 / url）→ data URI / 取图 URL
+        // Read 读图必然带路径，两者同时渲染会变成同一张图两个缩略图：内联图优先。
         var imageHtml = "";
         var imgPath = inputData.file_path || inputData.path || fileInfo || "";
         if (imgPath && isImagePath(imgPath)) {
@@ -2867,6 +2867,7 @@ import "./local-preview-adapter";
           '</div>';
         }
         var inlineResultImages = toolResult ? extractToolResultImages(toolResult.content) : [];
+        if (inlineResultImages.length > 0) imageHtml = "";
         for (var ri = 0; ri < inlineResultImages.length; ri++) {
           imageHtml += '<div class="inline-tool-image" onclick="event.stopPropagation();">' +
             '<img class="inline-tool-image-thumb" loading="lazy" src="' + inlineResultImages[ri].src + '" alt="工具返回图片" />' +

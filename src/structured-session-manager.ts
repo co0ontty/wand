@@ -292,7 +292,7 @@ function buildStructuredOutputPayload(snapshot: SessionSnapshot): ProcessEvent["
   return {
     wandProtocolVersion: WAND_PROTOCOL_VERSION,
     output: snapshot.output,
-    messages: snapshot.messages ? enrichStructuredMessages(snapshot.messages) : undefined,
+    messages: snapshot.messages ? enrichStructuredMessages(snapshot.messages, snapshot.id) : undefined,
     queuedMessages: snapshot.queuedMessages,
     queuedMessageSkills: snapshot.queuedMessageSkills,
     sessionKind: "structured",
@@ -355,7 +355,7 @@ function buildIncrementalStructuredPayload(
   const messages = snapshot.messages ?? [];
   // Derive semantics from the complete current turn before taking the
   // incremental tail; TaskCreate results can live in an earlier provider frame.
-  const clientMessages = enrichStructuredMessages(messages);
+  const clientMessages = enrichStructuredMessages(messages, snapshot.id);
   const lastTurn = clientMessages.length > 0 ? clientMessages[clientMessages.length - 1] : undefined;
   // Streaming turn (index 0 here) is preserved verbatim; truncation only kicks
   // in if the live response is already bigger than the transport threshold,

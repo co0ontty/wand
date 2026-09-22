@@ -139,7 +139,7 @@ export function toSessionDetailDTO(
     outputOffset,
     outputTotal: rawOutput.length,
     outputTruncated: outputOffset > 0,
-    ...(options.messages !== undefined ? { messages: enrichStructuredMessages(options.messages) } : {}),
+    ...(options.messages !== undefined ? { messages: enrichStructuredMessages(options.messages, snapshot.id) } : {}),
     ...(options.messageOffset !== undefined ? { messageOffset: options.messageOffset } : {}),
     ...(options.messageTotal !== undefined ? { messageTotal: options.messageTotal } : {}),
     ...(options.leadingBlockOffset !== undefined ? { leadingBlockOffset: options.leadingBlockOffset } : {}),

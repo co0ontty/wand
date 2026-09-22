@@ -414,7 +414,7 @@ export class WsBroadcastManager {
   private sendInit(client: WsClient, sessionId: string, snapshot: SessionSnapshot, resync: boolean): void {
     // 块级窗口客户端（iOS）只下发最近 blockBudget 个块；其余走 turn 级窗口。
     // 两种都附 offset/total，更早的客户端按需翻页。
-    const windowed = this.windowForClient(client, snapshot.messages);
+    const windowed = this.windowForClient(client, sessionId, snapshot.messages);
     const seq = (client.outputSeqBySession.get(sessionId) ?? 0) + 1;
     client.outputSeqBySession.set(sessionId, seq);
     client.pendingResyncSessions.delete(sessionId);
@@ -436,12 +436,13 @@ export class WsBroadcastManager {
    */
   private windowForClient(
     client: WsClient,
+    sessionId: string,
     messages: SessionSnapshot["messages"],
   ): ClientMessageWindow {
     if (!messages) {
       return { messages: undefined, messageOffset: 0, messageTotal: 0 };
     }
-    messages = enrichStructuredMessages(messages);
+    messages = enrichStructuredMessages(messages, sessionId);
     if (client.blockBudget && client.blockBudget > 0) {
       const w = blockWindowMessagesForTransport(messages, this.getCardDefaults(), client.blockBudget);
       return {
@@ -480,7 +481,7 @@ export class WsBroadcastManager {
       if (client.blockBudget && client.blockBudget > 0) {
         return {
           ...boundedEvent,
-          data: { ...data, ...this.windowForClient(client, rawMessages) },
+          data: { ...data, ...this.windowForClient(client, event.sessionId, rawMessages) },
         } as ProcessEvent;
       }
       if (!turnWindowedEvent) {

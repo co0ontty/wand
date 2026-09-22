@@ -43,6 +43,7 @@ import { sendRouteError } from "./server-request.js";
 import { registerStructuredResumeRoutes } from "./server-resume-routes.js";
 import { addHiddenSessionIds, removeHiddenSessionIds, SessionRegistry } from "./session-registry.js";
 import { enrichStructuredMessages, WAND_PROTOCOL_VERSION } from "./structured-client-protocol.js";
+import { asRecord, isStructuredImagePart } from "./structured-content.js";
 import { syncWorkspaceTaskToBoard } from "./wand-task-sync.js";
 import {
   buildDirectoryTree,
@@ -506,7 +507,7 @@ export function registerSessionRoutes(
 ): void {
   const sessionResponseDTO = (snapshot: SessionSnapshot) => {
     const windowed = windowMessagesForTransport(
-      enrichStructuredMessages(snapshot.messages ?? []),
+      enrichStructuredMessages(snapshot.messages ?? [], snapshot.id),
       config.cardDefaults ?? {},
     );
     return toSessionDetailDTO(snapshot, {
@@ -855,6 +856,41 @@ export function registerSessionRoutes(
     res.status(404).json({ error: "未找到该工具结果。" });
   });
 
+  // ── Inline tool image endpoint ──
+  // tool_result 里内联的 base64 图片在传输层被改写为这个 URL（避免把整张图的 base64
+  // 塞进每次快照 / WS 帧）。各端用同一套带鉴权的取图通道按需加载。
+  app.get("/api/sessions/:id/tool-images/:toolUseId/:index", (req, res) => {
+    const snapshot = sessions.get(req.params.id);
+    if (!snapshot) {
+      res.status(404).json({ error: "未找到该会话。" });
+      return;
+    }
+    const toolUseId = req.params.toolUseId;
+    const index = Number.parseInt(req.params.index, 10);
+    if (!Number.isFinite(index) || index < 0) {
+      res.status(400).json({ error: "无效的图片序号。" });
+      return;
+    }
+    for (const turn of snapshot.messages ?? []) {
+      for (const block of turn.content) {
+        if (block.type !== "tool_result" || block.tool_use_id !== toolUseId || !Array.isArray(block.content)) continue;
+        const part = block.content.filter(isStructuredImagePart)[index];
+        const source = asRecord((part as { source?: unknown } | undefined)?.source);
+        const data = typeof source?.data === "string" ? source.data : undefined;
+        if (source?.type !== "base64" || !data) {
+          res.status(404).json({ error: "未找到该图片。" });
+          return;
+        }
+        res.setHeader("Content-Type", typeof source.media_type === "string" ? source.media_type : "image/png");
+        res.setHeader("Cache-Control", "private, max-age=3600");
+        res.setHeader("X-Content-Type-Options", "nosniff");
+        res.send(Buffer.from(data, "base64"));
+        return;
+      }
+    }
+    res.status(404).json({ error: "未找到该工具结果。" });
+  });
+
   app.post("/api/sessions/:id/worktree/merge/check", asyncRoute(async (req, res) => {
     try {
       const current = requireWorktreeSession(sessions.getLatest(req.params.id));
@@ -1193,7 +1229,7 @@ export function registerSessionRoutes(
       if (typeof rawBudget === "string" && /^\d+$/.test(rawBudget) && Number(rawBudget) > 0) {
         const blockBudget = parseBoundedInteger(rawBudget, 1, 1, 2_000);
         const windowed = blockWindowMessagesForTransport(
-          enrichStructuredMessages(snapshot.messages ?? []),
+          enrichStructuredMessages(snapshot.messages ?? [], snapshot.id),
           config.cardDefaults ?? {},
           blockBudget,
         );
@@ -1209,7 +1245,7 @@ export function registerSessionRoutes(
       }
       // 与 WS init 对齐：只回最近一窗 turn + offset/total，更早的走 /messages 翻页。
       const windowed = windowMessagesForTransport(
-        enrichStructuredMessages(snapshot.messages ?? []),
+        enrichStructuredMessages(snapshot.messages ?? [], snapshot.id),
         config.cardDefaults ?? {},
       );
       res.json(toSessionDetailDTO(snapshot, {
@@ -1231,7 +1267,7 @@ export function registerSessionRoutes(
       res.status(404).json({ error: "未找到该会话，可能已被删除。" });
       return;
     }
-    const all = enrichStructuredMessages(snapshot.messages ?? []);
+    const all = enrichStructuredMessages(snapshot.messages ?? [], snapshot.id);
     const total = all.length;
 
     // 块级翻页（iOS）：?turn=<i>&blockOffset=<当前 leading 偏移>&blockLimit=<N>
@@ -1253,7 +1289,7 @@ export function registerSessionRoutes(
       const blocks = enrichStructuredMessages([{
         ...turn,
         content: sliceTurnBlocksForTransport(turn, blockStart, blockEnd, config.cardDefaults ?? {}),
-      }])[0].content;
+      }], snapshot.id)[0].content;
       res.json({ wandProtocolVersion: WAND_PROTOCOL_VERSION, turnIndex, blocks, blockOffset: blockStart, blockTotal });
       return;
     }
@@ -1263,7 +1299,7 @@ export function registerSessionRoutes(
     const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 40, 1), 200);
     const offset = Math.min(Math.max(Number.isFinite(rawOffset) ? rawOffset : 0, 0), total);
     const end = Math.min(offset + limit, total);
-    const slice = enrichStructuredMessages(truncateMessagesForTransport(all.slice(offset, end), config.cardDefaults ?? {}));
+    const slice = enrichStructuredMessages(truncateMessagesForTransport(all.slice(offset, end), config.cardDefaults ?? {}), snapshot.id);
     res.json({ wandProtocolVersion: WAND_PROTOCOL_VERSION, messages: slice, offset, total });
   });
 
