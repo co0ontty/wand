@@ -36,3 +36,52 @@ test("terminal snapshots reproduce ANSI, CJK, resize, and pending PTY operations
   assert.equal(restored.snapshot().rows, source.snapshot().rows);
   assert.equal(restored.snapshot().data, source.snapshot().data);
 });
+
+test("mirror writes are coalesced instead of one xterm write per chunk", async (t) => {
+  const state = new PtyTerminalState(80, 24);
+  t.after(() => state.dispose());
+
+  // 40 chunks of 4KB: the batch bound (64KB) must fold them into three queued
+  // operations, and a snapshot must expose them as a single replay step.
+  const chunk = "x".repeat(4096);
+  for (let i = 0; i < 40; i++) state.write(chunk);
+
+  const snapshot = state.snapshot();
+  assert.equal(snapshot.pending.length, 1, "adjacent data operations should reach the client merged");
+  const chars = snapshot.pending.reduce(
+    (total, operation) => total + (operation.type === "data" ? operation.data.length : 0),
+    0,
+  );
+  assert.equal(chars, 40 * chunk.length);
+});
+
+test("batched bytes keep their order relative to a resize", async (t) => {
+  const source = new PtyTerminalState(20, 4);
+  t.after(() => source.dispose());
+
+  source.write("AAAA");
+  source.resize(30, 6);
+  source.write("BBBB");
+
+  const restored = restore(source.snapshot());
+  t.after(() => restored.dispose());
+
+  await delay(250);
+  assert.equal(restored.snapshot().cols, source.snapshot().cols);
+  assert.equal(restored.snapshot().rows, source.snapshot().rows);
+  assert.equal(restored.snapshot().data, source.snapshot().data);
+});
+
+test("a writer that never pauses stays bounded and still checkpoints", async (t) => {
+  const state = new PtyTerminalState(200, 50);
+  t.after(() => state.dispose());
+
+  const chunk = "y".repeat(4096);
+  for (let i = 0; i < 100; i++) state.write(chunk); // 400KB, well past the pending bound
+  assert.ok(state.snapshot().pending.length > 0, "uncommitted operations are still replayable");
+
+  await delay(400);
+  const drained = state.snapshot();
+  assert.equal(drained.pending.length, 0, "a quiet writer must converge to a committed baseline");
+  assert.ok(drained.data.length > 0);
+});

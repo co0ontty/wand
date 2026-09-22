@@ -2,6 +2,8 @@ import { state } from "./state";
 import "./utils";
 import "./chat-render";
 import "./file-browser";
+import { parseJsonResponse } from "../react/http-adapter";
+import { getErrorMessage } from "../../error-utils.js";
 import { focusInputBox, hasActiveTerminalSelection, installNativeInputImeGuard, lockNativeInputTerminalIme, shouldLockNativeInputTerminalIme } from "./input";
 import { showToast } from "./notifications";
 import "./render";
@@ -23,12 +25,18 @@ import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
       }
 
       function addRecentPath(path: string) {
+        // 最近路径只是便利记录：失败（含 4xx/5xx）不能影响工作目录切换，
+        // 也不能把拒绝写成的响应当成成功，更不能抛未处理异常打断调用方。
         return fetch("/api/recent-paths", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
           body: JSON.stringify({ path: path })
-        }).catch(function() {});
+        })
+          .then(function(res) { return parseJsonResponse<any>(res); })
+          .catch(function(error: unknown) {
+            console.warn("[wand] 记录最近路径失败：" + getErrorMessage(error, "未知错误"));
+          });
       }
 
       /** Copy a string field of the currently selected session to clipboard. */
@@ -126,6 +134,21 @@ import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
         }
         scrollTerminalToBottom(false);
         updateTerminalJumpToBottomButton();
+      }
+
+      /**
+       * PTY 分片热路径专用入口：把一帧内的多次“贴底 + 回到底部按钮”合并成一次。
+       * 逐分片调用会变成每分片两次 getElementById + 一次读 scrollTop/scrollHeight。
+       */
+      export function scheduleTerminalChromeUpdate() {
+        if (terminalChromeRaf) return;
+        var raf = (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function")
+          ? window.requestAnimationFrame.bind(window)
+          : function(callback: () => void) { return window.setTimeout(callback, 16); };
+        terminalChromeRaf = raf(function() {
+          terminalChromeRaf = 0;
+          maybeScrollTerminalToBottom();
+        });
       }
 
       // ===== Touch scroll (mobile) =====
@@ -456,6 +479,8 @@ import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
       export var CHAT_RENDER_IDLE_MS = 30;
       var CLIENT_OUTPUT_MAX = 160 * 1024;
       var CLIENT_OUTPUT_TRIM_AT = 192 * 1024;
+      /** 未完成的“贴底 + 回到底部按钮”rAF 句柄（PTY 分片热路径的合并槽）。 */
+      var terminalChromeRaf = 0;
 
       // 附件写入之后的「等 CLI 画完」时序（ms）：
       // MIN / QUIET —— 至少等这么久，且看到这一帧输出后再多等 QUIET；

@@ -968,8 +968,6 @@ export async function startServer(
     resizePty: (id, cols, rows) => {
       processes.resize(id, cols, rows);
     },
-    pausePtyOutput: (id) => processes.pauseOutput(id),
-    resumePtyOutput: (id) => processes.resumeOutput(id),
   });
   disconnectAuthenticatedSockets = () => wsManager.disconnectAll();
   wss.on("error", (err: NodeJS.ErrnoException) => {

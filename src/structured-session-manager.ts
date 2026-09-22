@@ -377,6 +377,87 @@ function isoNow(): string {
   return new Date().toISOString();
 }
 
+/**
+ * Identity of one content block inside an assistant turn. Tool ids are copied
+ * verbatim from the CLI stream and never mutate, so they are the anchors used to
+ * align a replayed turn with the transcript we already stored.
+ */
+function replayBlockAnchor(block: ContentBlock): string | null {
+  switch (block.type) {
+    case "tool_use": return `tool_use:${block.id}`;
+    case "tool_result": return `tool_result:${block.tool_use_id}`;
+    case "thinking": return `thinking:${block.thinking}`;
+    case "text": return `text:${block.text}`;
+    default: return null;
+  }
+}
+
+/**
+ * Index of the last replayed block the stored turn already contains, or -1 when
+ * no overlap can be proven.
+ *
+ * Needed because a daemon replay log can start mid-stream
+ * (STRUCTURED_RUN_LOG_MAX_CHARS), so the first replayed blocks usually repeat the
+ * tail of the turn we accumulated live before the restart.
+ */
+function lastStoredAnchorIndex(stored: ContentBlock[] | null, replayed: ContentBlock[]): number {
+  if (!stored || stored.length === 0) return -1;
+  const known = new Set<string>();
+  for (const block of stored) {
+    const anchor = replayBlockAnchor(block);
+    if (anchor !== null) known.add(anchor);
+  }
+  let cut = -1;
+  for (let index = 0; index < replayed.length; index += 1) {
+    const anchor = replayBlockAnchor(replayed[index]);
+    if (anchor !== null && known.has(anchor)) cut = index;
+  }
+  return cut;
+}
+
+/**
+ * 截断重放期间「本地已存 turn + replay 新增段」的合并视图。
+ *
+ * 重启后在 terminald 里继续跑的 CLI 只保留最后 STRUCTURED_RUN_LOG_MAX_CHARS 字符的
+ * stdout，replay 出来的是「半截尾巴」：直接用它覆盖会删掉重启前用户已经看到的输出，
+ * 完全不用它又会让前端冻结到本轮结束。所以把 checkpoint 里的 turn 当固定底，只把
+ * replay 里能证明是新增的那段拼在后面。cut 只算一次，视图随 replay 增长而增长
+ * （保持流式），且重复调用幂等（不会重复追加、也不会丢底）。
+ */
+class TruncatedReplayView {
+  private readonly base: ContentBlock[] | null;
+  private cut = -1;
+  private primed = false;
+
+  constructor(messages: ConversationTurn[] | undefined) {
+    const last = messages && messages.length > 0 ? messages[messages.length - 1] : undefined;
+    this.base = last && last.role === "assistant" ? last.content : null;
+  }
+
+  get ready(): boolean {
+    return this.primed;
+  }
+
+  /** 必须在 replay 首轮 feed 完成后再定锚点：feed 途中的半截 blocks 会把重叠判错。 */
+  prime(replayed: ContentBlock[]): void {
+    this.cut = lastStoredAnchorIndex(this.base, replayed);
+    this.primed = true;
+  }
+
+  content(replayed: ContentBlock[]): ContentBlock[] {
+    if (!this.base || this.base.length === 0) return replayed;
+    // 证明不了重叠就只信本地已存内容（宁可暂不追加，也不要重复整段）。
+    if (!this.primed || this.cut === -1) return this.base;
+    const extra = replayed.slice(this.cut + 1);
+    return extra.length === 0 ? this.base : [...this.base, ...extra];
+  }
+}
+
+/** Append a standalone notice turn without touching the previous assistant turn. */
+function appendNoticeTurn(messages: ConversationTurn[] | undefined, turn: ConversationTurn): ConversationTurn[] {
+  return [...(messages ?? []), { ...turn, createdAt: isoNow(), completedAt: isoNow() }];
+}
+
 function upsertAssistantMessage(
   messages: ConversationTurn[] | undefined,
   turn: ConversationTurn,
@@ -732,12 +813,54 @@ export class StructuredSessionManager {
     this.saveAuthoritativeSession(resumed);
     this.emitStructuredSnapshot(resumed);
     process.stderr.write(`[wand] resuming structured run for session ${sessionId} (daemon pid ${initialState.pid})\n`);
+    this.logger?.appendStructuredSpawn(sessionId, {
+      kind: `${resumed.runner ?? "structured"}-recovered`,
+      provider: resumed.provider,
+      pid: initialState.pid,
+      cwd: resumed.cwd,
+      status: initialState.status,
+      exitCode: initialState.exitCode,
+      stdoutTruncated: initialState.stdoutTruncated,
+      recoveredAt: new Date().toISOString(),
+    });
 
     const processor = buildReplayProcessor(resumed);
     let emitTimer: ReturnType<typeof setTimeout> | null = null;
+    // 日志被截断时 reducer 只看到半截历史，重建出的 turn 远比本地已存的少；
+    // 不能用它覆盖 messages/output，也不能就此冻结前端。
+    const replayTruncated = initialState.stdoutTruncated;
+    const replayView = new TruncatedReplayView(resumed.messages);
     const syncTurn = (turnState: StructuredRunnerTurnState): void => {
       const current = this.currentSessionForRequest(sessionId, requestId);
       if (!current) return;
+      const structuredState = {
+        ...(current.structuredState as StructuredSessionState),
+        model: turnState.model ?? current.structuredState?.model,
+        phase: turnState.phase ?? current.structuredState?.phase,
+      };
+      if (replayTruncated) {
+        // 锚点未定前（首轮 feed 中）只有半截 blocks，先只落元数据。
+        if (!replayView.ready) {
+          const patched: SessionSnapshot = { ...current, structuredState };
+          this.sessions.set(sessionId, patched);
+          this.saveStreamingSnapshot(patched, { metadata: true });
+          return;
+        }
+        // 已存底 + replay 新增段：前端继续流式拿到增长中的 turn，库里也不会丢底。
+        const merged: ConversationTurn = {
+          role: "assistant",
+          content: this.compactContentBlocks(replayView.content([...turnState.blocks]), turnState.result),
+          usage: turnState.usage,
+        };
+        const patched: SessionSnapshot = {
+          ...current,
+          messages: upsertAssistantMessage(current.messages, merged),
+          structuredState,
+        };
+        this.sessions.set(sessionId, patched);
+        this.saveStreamingSnapshot(patched);
+        return;
+      }
       const turn: ConversationTurn = {
         role: "assistant",
         content: this.compactContentBlocks([...turnState.blocks], turnState.result),
@@ -749,11 +872,7 @@ export class StructuredSessionManager {
         claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
         messages,
         output: turnState.result || current.output,
-        structuredState: {
-          ...(current.structuredState as StructuredSessionState),
-          model: turnState.model ?? current.structuredState?.model,
-          phase: turnState.phase ?? current.structuredState?.phase,
-        },
+        structuredState,
       };
       this.sessions.set(sessionId, patched);
       this.saveStreamingSnapshot(patched);
@@ -803,7 +922,8 @@ export class StructuredSessionManager {
 
     if (initialState.status === "exited") {
       feedFullLog();
-      this.finalizeRecoveredRun(sessionId, requestId, processor, {
+      replayView.prime([...processor.state.blocks]);
+      this.finalizeRecoveredRun(sessionId, requestId, processor, replayView, {
         exitCode: initialState.exitCode,
         signal: initialState.signal === null ? null : signalNameFromNumber(initialState.signal),
         stderr: initialState.stderrLog,
@@ -823,7 +943,7 @@ export class StructuredSessionManager {
     runningHandle = await this.execHost.adoptRun(structuredRunId(sessionId));
     if (!runningHandle) {
       // Run vanished between listing and adoption; fall back to failure notes.
-      this.finalizeRecoveredRun(sessionId, requestId, processor, {
+      this.finalizeRecoveredRun(sessionId, requestId, processor, replayView, {
         exitCode: null,
         signal: null,
         stderr: initialState.stderrLog,
@@ -833,6 +953,8 @@ export class StructuredSessionManager {
       flushEmit();
       return;
     }
+    // 首轮 feed + attach 完成后再定锚点，之后 onStream 的事件都走合并视图。
+    replayView.prime([...processor.state.blocks]);
     runningHandle.onStream((event) => {
       // Events may be buffered while structuredAttach is in flight. Sequence
       // watermarks distinguish overlap with the snapshot from genuinely new
@@ -840,17 +962,21 @@ export class StructuredSessionManager {
       if (event.stream === "stdout") {
         if (event.seq <= lastStdoutSeq) return;
         lastStdoutSeq = event.seq;
+        // 重启后 daemon 继续吐出的输出也要落回会话制品，否则会话日志在重启点断掉，
+        // 事后无从核对这一轮到底产出了什么。
+        this.logger?.appendStructuredStdout(sessionId, event.data);
         feedDelta(event.data);
         return;
       }
       if (event.seq <= lastStderrSeq) return;
       lastStderrSeq = event.seq;
+      this.logger?.appendStructuredStderr(sessionId, event.data);
       processor.stderr += event.data;
     });
     runningHandle.onExit((event) => {
       if (carry.trim()) feedLine(carry);
       carry = "";
-      this.finalizeRecoveredRun(sessionId, requestId, processor, {
+      this.finalizeRecoveredRun(sessionId, requestId, processor, replayView, {
         exitCode: event.exitCode,
         signal: event.signal === null ? null : signalNameFromNumber(event.signal),
         stderr: processor.stderr,
@@ -864,6 +990,7 @@ export class StructuredSessionManager {
     sessionId: string,
     requestId: string,
     processor: ReplayProcessor,
+    replayView: TruncatedReplayView,
     outcome: {
       exitCode: number | null;
       signal: NodeJS.Signals | null;
@@ -879,8 +1006,10 @@ export class StructuredSessionManager {
 
     const commandLabel = recoveredCommandLabel(current.runner);
     const interruptedForQuestion = processor.stopReason === "ask-user-question";
+    // 退出码/信号是 CLI 的权威结论：daemon 的 replay 日志被截断只说明我们重建不出
+    // 完整过程记录，不代表这一轮失败（否则 exit 0 会被报成 "exited with code 0"）。
+    const replayTruncated = outcome.stdoutTruncated;
     const failedExit = outcome.lost
-      || outcome.stdoutTruncated
       || (outcome.exitCode !== null && outcome.exitCode !== 0)
       || outcome.signal !== null;
     if ((processor.primaryError || failedExit) && !interruptedForQuestion) {
@@ -897,6 +1026,7 @@ export class StructuredSessionManager {
         typeof outcome.exitCode === "number" ? outcome.exitCode : 1,
         errorText,
         processor.state,
+        { keepTranscript: replayTruncated },
       );
       this.sessions.set(sessionId, failed);
       this.saveAuthoritativeSession(failed);
@@ -905,14 +1035,17 @@ export class StructuredSessionManager {
       return;
     }
 
-    const messages = this.buildCompletedAssistantMessages(current, processor.state);
     const keepRunning = interruptedForQuestion;
+    const messages = replayTruncated
+      ? this.mergeTruncatedReplayTurn(current, processor, replayView, !keepRunning)
+      : this.buildCompletedAssistantMessages(current, processor.state);
     const finished: SessionSnapshot = {
       ...current,
       status: keepRunning ? "running" : "idle",
       exitCode: keepRunning ? null : 0,
       endedAt: keepRunning ? null : new Date().toISOString(),
-      output: processor.state.result,
+      // 日志被截断时 output 保留重启前的版本：replay 只覆盖尾部，用它反而丢掉前半段。
+      output: replayTruncated ? current.output || processor.state.result : processor.state.result,
       claudeSessionId: processor.state.sessionId ?? current.claudeSessionId,
       messages,
       pendingEscalation: null,
@@ -3350,6 +3483,29 @@ export class StructuredSessionManager {
     return upsertAssistantMessage(current.messages, assistantTurn, true);
   }
 
+  /**
+   * Rebuild the trailing assistant turn when the replayed log was truncated.
+   *
+   * 重启后在 daemon 里继续跑的 CLI，它的 stdout 只保留最后
+   * STRUCTURED_RUN_LOG_MAX_CHARS 字符，所以 replay 出来的 turn 是「半截尾巴」：
+   * 直接覆盖会丢掉重启前用户已经看到的全部输出。这里用与流式期间同一个
+   * TruncatedReplayView（本地已存 turn + replay 新增段），保证收尾视图和前端
+   * 中途看到的完全一致。
+   */
+  private mergeTruncatedReplayTurn(
+    current: SessionSnapshot,
+    processor: ReplayProcessor,
+    view: TruncatedReplayView,
+    complete: boolean,
+  ): ConversationTurn[] {
+    const turn: ConversationTurn = {
+      role: "assistant",
+      content: this.compactContentBlocks(view.content([...processor.state.blocks]), processor.state.result),
+      usage: processor.state.usage,
+    };
+    return upsertAssistantMessage([...(current.messages ?? [])], turn, complete);
+  }
+
   private resolveQueuedMessagesAfterInterrupt(
     sessionId: string,
     current: SessionSnapshot,
@@ -3426,12 +3582,17 @@ export class StructuredSessionManager {
     code: number,
     errorText: string,
     turnState: StreamingTurnState,
+    options: { keepTranscript?: boolean } = {},
   ): SessionSnapshot {
     const failureTurn: ConversationTurn = {
       role: "assistant",
       content: [{ type: "text", text: `结构化会话执行失败：${errorText}` }],
     };
-    const msgs = upsertAssistantMessage(current.messages, failureTurn, true);
+    // 日志被截断时本地已存的 turn 是重启前唯一完整的记录：失败提示追加成独立一轮，
+    // 不能把整段 turn 换成错误文本（那会把用户看到过的输出全删掉）。
+    const msgs = options.keepTranscript
+      ? appendNoticeTurn(current.messages, failureTurn)
+      : upsertAssistantMessage(current.messages, failureTurn, true);
     return {
       ...current,
       status: "failed",

@@ -21,8 +21,10 @@ import type {
   StructuredRunnerContext,
   StructuredRunnerExecution,
   StructuredRunnerObserver,
+  StructuredRunnerTurnState,
 } from "../src/structured-runner.js";
 import { StructuredSessionManager } from "../src/structured-session-manager.js";
+import { applyPiEvent } from "../src/structured-pi-adapter.js";
 import { terminalDaemonPaths } from "../src/terminal-daemon-protocol.js";
 import { TerminalDaemonClient } from "../src/terminal-daemon-client.js";
 
@@ -335,6 +337,212 @@ test("structured manager detaches on web shutdown and recovers the same daemon r
     try { firstClient?.disconnect(); } catch { /* best effort */ }
     try { secondStorage?.close(); } catch { /* best effort */ }
     try { firstStorage?.close(); } catch { /* best effort */ }
+    await stopDaemonProcess(daemon);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+class ScriptedPiFloodRunner implements StructuredRunnerAdapter {
+  /** 洪泛行数 × 每行长度必须超过 STRUCTURED_RUN_LOG_MAX_CHARS，才能真的触发 daemon 截断。 */
+  constructor(
+    private readonly execHost: StructuredExecHost,
+    private readonly floodLines = 72,
+    private readonly floodLineBytes = 120_000,
+    private readonly postFloodDelayMs = 6_000,
+  ) {}
+  start(context: StructuredRunnerContext, observer: StructuredRunnerObserver): StructuredRunnerExecution {
+    const state: StructuredRunnerTurnState = {
+      blocks: [],
+      result: "",
+      sessionId: context.session.claudeSessionId,
+      model: context.session.selectedModel ?? undefined,
+      phase: "responding",
+    };
+    const line = (event: Record<string, unknown>): string => JSON.stringify(event) + "\n";
+    const pre = [
+      line({ type: "session", id: "pi-flood-session" }),
+      line({ type: "turn_start" }),
+      line({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "before restart" } }),
+      line({ type: "tool_execution_start", toolCallId: "pre-1", toolName: "bash", args: { command: "echo pre" } }),
+      line({ type: "tool_execution_end", toolCallId: "pre-1", result: "pre" }),
+    ].join("");
+    // mid-1 出现在洪泛之后：重启时它仍在 daemon 尾部日志里，是「本地已存 turn」和
+    // 「replay turn」唯一的重叠锚点，新增块就是靠它定位的。
+    const mid = [
+      line({ type: "tool_execution_start", toolCallId: "mid-1", toolName: "bash", args: { command: "echo mid" } }),
+      line({ type: "tool_execution_end", toolCallId: "mid-1", result: "mid" }),
+    ].join("");
+    const live = [
+      line({ type: "tool_execution_start", toolCallId: "live-1", toolName: "bash", args: { command: "echo live" } }),
+      line({ type: "tool_execution_end", toolCallId: "live-1", result: "live" }),
+    ].join("");
+    const liveText = line({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "live streaming answer" } });
+    const post = [
+      line({ type: "tool_execution_start", toolCallId: "post-1", toolName: "bash", args: { command: "echo post" } }),
+      line({ type: "tool_execution_end", toolCallId: "post-1", result: "post" }),
+      line({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "after restart" } }),
+      line({ type: "turn_end", message: { role: "assistant", model: "flood-model", stopReason: "stop", content: [{ type: "text", text: "after restart" }] } }),
+    ].join("");
+    const script = `
+      process.stdout.write(${JSON.stringify(pre)});
+      const pad = "x".repeat(${this.floodLineBytes});
+      for (let i = 0; i < ${this.floodLines}; i++) process.stdout.write(JSON.stringify({ type: "flood", i, pad }) + "\\n");
+      process.stdout.write(${JSON.stringify(mid)});
+      setTimeout(() => process.stdout.write(${JSON.stringify(live)}), 1200);
+      setTimeout(() => process.stdout.write(${JSON.stringify(liveText)}), 3000);
+      setTimeout(() => {
+        process.stdout.write(${JSON.stringify(post)});
+        process.exit(0);
+      }, ${this.postFloodDelayMs});
+    `;
+    return startStructuredCli({
+      sessionId: context.session.id,
+      file: NODE,
+      args: ["-e", script],
+      cwd: context.session.cwd,
+      env: context.env,
+      observer,
+      execHost: this.execHost,
+      createState: () => state,
+      processLine: (line) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        let event: Record<string, unknown>;
+        try { event = JSON.parse(trimmed) as Record<string, unknown>; } catch { return; }
+        applyPiEvent(state, event);
+        observer.onUpdate(state);
+      },
+      finalize: (ctx, exitCode, signal, spawnError) => ({
+        state,
+        exitCode,
+        signal,
+        stderr: ctx.stderr,
+        primaryError: null,
+        spawnError,
+      }),
+    });
+  }
+}
+
+test("truncated daemon replay keeps the checkpoint transcript instead of failing a clean exit", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "wand-structured-truncated-recovery-"));
+  const configPath = path.join(root, "config.json");
+  const dbPath = path.join(root, "wand.db");
+  const daemon = startDaemonProcess(configPath);
+  let client: TerminalDaemonClient | null = null;
+  let storage: WandStorage | null = null;
+  let manager: StructuredSessionManager | null = null;
+  try {
+    const paths = terminalDaemonPaths(configPath);
+    const token = await (async (): Promise<string> => {
+      for (let i = 0; i < 100; i++) {
+        try { return readFileSync(paths.tokenPath, "utf8").trim(); } catch { /* not yet */ }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      throw new Error("terminal daemon token never appeared");
+    })();
+    client = new TerminalDaemonClient(paths.socketPath, token);
+    await client.connect();
+    storage = new WandStorage(dbPath);
+    manager = new StructuredSessionManager(
+      storage,
+      { ...defaultConfig(), defaultCwd: root },
+      null,
+      undefined,
+      { pi: new ScriptedPiFloodRunner(client) },
+      client,
+    );
+    const session = manager.createSession({ cwd: root, mode: "assist", provider: "pi", runner: "pi-cli-json" });
+    manager.setSessionTopic(session.id, "flood", "flood");
+    (manager as unknown as { maybeGenerateSessionTopic(): void }).maybeGenerateSessionTopic = () => {};
+    void manager.sendMessage(session.id, "flood stdout");
+
+    // 等 checkpoint 落盘：mid-1 必须已经在库里，重启后才有「本地已存 turn」可比对。
+    await waitFor(() => JSON.stringify(storage?.getSession(session.id)?.messages ?? []).includes("mid-1"), 30_000);
+    const beforeRestart = await client.attachRun(structuredRunId(session.id));
+    assert.equal(beforeRestart?.status, "running");
+    assert.equal(beforeRestart?.stdoutTruncated, true, "precondition: daemon log must exceed the 8MB cap");
+    const originalPid = beforeRestart!.pid;
+
+    manager.dispose();
+    manager = null;
+    client.disconnect();
+    client = null;
+    storage.close();
+    storage = null;
+
+    client = new TerminalDaemonClient(paths.socketPath, token);
+    await client.connect();
+    const recoveredState = await client.attachRun(structuredRunId(session.id));
+    assert.ok(recoveredState, "daemon run must survive web manager disposal");
+    assert.equal(recoveredState!.status, "running");
+    assert.equal(recoveredState!.pid, originalPid);
+    assert.equal(recoveredState!.stdoutTruncated, true);
+    assert.ok(
+      !recoveredState!.stdoutLog.includes("before restart"),
+      "pre-flood output must have been evicted from the daemon log",
+    );
+
+    storage = new WandStorage(dbPath);
+    // 模拟「上一轮已经拿到 resume id」的真实场景：截断后 replay 里看不到 pi 的
+    // session 事件，但 checkpoint 里的 claudeSessionId 必须被保留。
+    const persisted = storage.getSession(session.id);
+    assert.ok(persisted);
+    storage.saveSession({ ...persisted!, claudeSessionId: "pi-flood-session" });
+    manager = new StructuredSessionManager(
+      storage,
+      { ...defaultConfig(), defaultCwd: root },
+      null,
+      undefined,
+      { pi: new ScriptedPiFloodRunner(client) },
+      client,
+    );
+    (manager as unknown as { maybeGenerateSessionTopic(): void }).maybeGenerateSessionTopic = () => {};
+    await manager.recoverDetachedRuns();
+
+    // 恢复期间必须继续流式：还在跑的时候就要能看到重启后的新块，并且底没被 replay 覆盖。
+    await waitFor(() => {
+      const live = manager?.get(session.id);
+      if (live?.status !== "running") return false;
+      const json = JSON.stringify(live.messages ?? []);
+      return json.includes("live-1") && json.includes("before restart") && json.includes("mid-1");
+    }, 30_000);
+    const streamed = manager.get(session.id);
+    assert.equal(streamed?.structuredState?.inFlight, true);
+    const streamedJson = JSON.stringify(streamed?.messages ?? []);
+    assert.ok(streamedJson.includes("pre-1"), streamedJson);
+    // 视图必须随新事件继续增长（而不是只在收尾时一次性出现）。
+    await waitFor(() => JSON.stringify(manager?.get(session.id)?.messages ?? []).includes("live streaming answer"), 30_000);
+
+    await waitFor(() => manager?.get(session.id)?.status === "idle", 30_000);
+
+    const recovered = manager.get(session.id);
+    assert.equal(recovered?.exitCode, 0);
+    assert.equal(recovered?.structuredState?.lastError, null);
+    assert.equal(recovered?.structuredState?.inFlight, false);
+    assert.equal(recovered?.claudeSessionId, "pi-flood-session");
+    const transcript = JSON.stringify(recovered?.messages ?? []);
+    // 重启前的内容只存在于 checkpoint 里（daemon 日志已把它挤掉），不能被 replay 覆盖掉。
+    assert.ok(transcript.includes("before restart"), transcript);
+    assert.ok(transcript.includes("pre-1"), transcript);
+    assert.ok(transcript.includes("mid-1"), transcript);
+    // 重启后的新增块（含工具调用）必须按锚点并进来，而不是当成「已存在」丢掉。
+    assert.ok(transcript.includes("after restart"), transcript);
+    assert.ok(transcript.includes("post-1"), transcript);
+    assert.ok(transcript.includes("live-1"), transcript);
+    assert.equal((transcript.match(/before restart/g) ?? []).length, 1, `duplicated transcript=${transcript}`);
+    assert.equal((transcript.match(/"id":"live-1"/g) ?? []).length, 1, `duplicated transcript=${transcript}`);
+    assert.ok(!transcript.includes("服务重启后运行进程已丢失"), transcript);
+    assert.ok(!transcript.includes("exited with code"), transcript);
+    // 截断时 output 保留重启前版本，避免只剩半截尾部。
+    assert.equal(recovered?.output, "before restart");
+    assert.equal(storage.getSession(session.id)?.status, "idle");
+    assert.equal(storage.getSession(session.id)?.structuredState?.lastError ?? null, null);
+    await waitFor(async () => (await client!.attachRun(structuredRunId(session.id))) === null);
+  } finally {
+    try { manager?.dispose(); } catch { /* best effort */ }
+    try { client?.disconnect(); } catch { /* best effort */ }
+    try { storage?.close(); } catch { /* best effort */ }
     await stopDaemonProcess(daemon);
     rmSync(root, { recursive: true, force: true });
   }

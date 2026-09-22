@@ -34,6 +34,12 @@ const HEARTBEAT_INTERVAL_MS = 20_000;
 const HEARTBEAT_STALE_MS = 45_000;
 const PTY_UNACKED_HIGH_WATER = 512 * 1024;
 const PTY_UNACKED_LOW_WATER = 128 * 1024;
+/**
+ * 同一个（客户端, 会话）两次「请重建屏幕」的最小间隔。慢性慢客户端追上来后会
+ * 立刻再积压，没有这个下限就会变成「重建 → 立刻积压 → 再重建」的循环，每次重建
+ * 都要下发一份终端快照。
+ */
+const PTY_RESYNC_MIN_INTERVAL_MS = 5_000;
 const MAX_PTY_INPUT_CHARS = 128 * 1024;
 
 function asEventData(data: unknown): Record<string, unknown> {
@@ -77,7 +83,6 @@ interface WsClient {
   sendQueue: string[];
   sendInProgress: boolean;
   backpressurePaused: boolean;
-  lastOutputBySession: Map<string, { output: string; messages?: string; timestamp: number }>;
   /** Per-session monotonically increasing sequence number for output events. */
   outputSeqBySession: Map<string, number>;
   /** Sessions for which we owe the client a resync notice. */
@@ -97,7 +102,13 @@ interface WsClient {
   ptySubscriptions: Map<string, {
     supportsAck: boolean;
     unackedBytes: number;
-    paused: boolean;
+    /**
+     * 该客户端在这个会话上已经积压到高水位：原始 PTY 分片对它是**过期帧**，停发，
+     * 等它 ack 回落到低水位再让它按终端快照重建屏幕。只影响这一个客户端。
+     */
+    degraded: boolean;
+    /** 上次给它发 resync_required 的时间戳（限流用）。 */
+    lastResyncNoticeAt: number;
   }>;
 }
 
@@ -106,8 +117,6 @@ export interface WsSessionPort {
   getTerminalState?(id: string): PtyTerminalSnapshot | null;
   sendPtyInput?(id: string, input: string, shortcutKey?: string, userInput?: boolean): void;
   resizePty?(id: string, cols: number, rows: number): void;
-  pausePtyOutput?(id: string): void;
-  resumePtyOutput?(id: string): void;
 }
 
 interface ClientMessageWindow {
@@ -127,7 +136,6 @@ export class WsBroadcastManager {
   private heartbeatTimer?: NodeJS.Timeout;
   private disposed = false;
   private port?: WsSessionPort;
-  private readonly ptyPauseRefs = new Map<string, number>();
 
   private getCardDefaults: () => CardExpandDefaults;
   private useHttps: boolean;
@@ -193,7 +201,6 @@ export class WsBroadcastManager {
         sendQueue: [],
         sendInProgress: false,
         backpressurePaused: false,
-        lastOutputBySession: new Map(),
         outputSeqBySession: new Map(),
         pendingResyncSessions: new Set(),
         lastSeenAt: Date.now(),
@@ -228,15 +235,13 @@ export class WsBroadcastManager {
             }
             // 默认仍是历史的“切换当前会话”；分屏池显式用 mode:add 叠加订阅。
             if (msg.mode !== "add") {
-              this.releaseAllPtyPauses(client);
               client.ptySubscriptions.clear();
-            } else {
-              this.releasePtyPause(client, msg.sessionId);
             }
             client.ptySubscriptions.set(msg.sessionId, {
               supportsAck: msg.capabilities?.ptyAck === true,
               unackedBytes: 0,
-              paused: false,
+              degraded: false,
+              lastResyncNoticeAt: 0,
             });
             this.flushOutput(msg.sessionId);
             const snapshot = this.port?.getSession(msg.sessionId) ?? null;
@@ -250,7 +255,6 @@ export class WsBroadcastManager {
               }));
             }
           } else if (msg.type === "unsubscribe" && msg.sessionId) {
-            this.releasePtyPause(client, msg.sessionId);
             client.ptySubscriptions.delete(msg.sessionId);
           } else if (msg.type === "resync" && msg.sessionId) {
             this.flushOutput(msg.sessionId);
@@ -277,12 +281,7 @@ export class WsBroadcastManager {
               this.sendPtyError(client, msg.sessionId, error);
             }
           } else if (msg.type === "pty_ack" && msg.sessionId && Number.isFinite(msg.bytes)) {
-            const subscription = client.ptySubscriptions.get(msg.sessionId);
-            if (!subscription?.supportsAck) return;
-            subscription.unackedBytes = Math.max(0, subscription.unackedBytes - Math.max(0, Math.floor(msg.bytes)));
-            if (subscription.paused && subscription.unackedBytes <= PTY_UNACKED_LOW_WATER) {
-              this.releasePtyPause(client, msg.sessionId);
-            }
+            this.handlePtyAck(client, msg.sessionId, msg.bytes);
           } else if (msg.type === "pong") {
             // 应用层 pong（对我们下发的 {type:"ping"} 的响应）。lastSeenAt
             // 已经在函数顶部刷新过了，这里不需要再做事；分支留着是为了
@@ -513,12 +512,21 @@ export class WsBroadcastManager {
       }
       const subscription = client.ptySubscriptions.get(event.sessionId);
       const usesPtyAckFlowControl = isRawPtyOutput && subscription?.supportsAck === true;
+      if (usesPtyAckFlowControl && subscription.degraded) {
+        // 已经积压到高水位的客户端：后面这些原始字节对它是**过期的 TUI 帧**（终端
+        // 每帧整屏重绘，中间帧没有任何保留价值），停发这些分片；等它 ack 追上来
+        // 再由 requestPtyResync 让它按终端快照重建屏幕。
+        //
+        // 历史实现在这里是「暂停整个会话的 PTY 读取」，结果是：一个客户端
+        // （手机切后台 / WebView 被节流 / 标签页休眠）停止 ack，整个会话对所有
+        // 客户端冻结，连会话日志和落库也一起停，而且只能靠那个客户端 ack 回落
+        // 才恢复；手机不回来就永久冻住。降级只影响积压的这一个客户端。
+        continue;
+      }
       if (usesPtyAckFlowControl) {
         outgoing = { ...outgoing, ptyBytes } as ProcessEvent;
         subscription.unackedBytes += ptyBytes;
-        if (subscription.unackedBytes >= PTY_UNACKED_HIGH_WATER) {
-          this.acquirePtyPause(client, event.sessionId);
-        }
+        if (subscription.unackedBytes >= PTY_UNACKED_HIGH_WATER) subscription.degraded = true;
       }
 
       // Backpressure only gates new business messages. The send pump must
@@ -572,7 +580,6 @@ export class WsBroadcastManager {
   }
 
   private discardClient(client: WsClient, terminate: boolean): void {
-    this.releaseAllPtyPauses(client);
     client.sendQueue.length = 0;
     client.pendingResyncSessions.clear();
     client.sendInProgress = false;
@@ -583,32 +590,43 @@ export class WsBroadcastManager {
     }
   }
 
-  private acquirePtyPause(client: WsClient, sessionId: string): void {
+  /**
+   * 客户端 ack 掉一段已渲染字节。积压回落到低水位就从「降级」恢复，并请该客户端
+   * 用终端快照重建屏幕（降级期间它的屏幕停在最后一帧，中间帧已经丢掉了）。
+   */
+  private handlePtyAck(client: WsClient, sessionId: string, bytes: number): void {
     const subscription = client.ptySubscriptions.get(sessionId);
-    if (!subscription || subscription.paused) return;
-    subscription.paused = true;
-    const next = (this.ptyPauseRefs.get(sessionId) ?? 0) + 1;
-    this.ptyPauseRefs.set(sessionId, next);
-    if (next === 1) this.port?.pausePtyOutput?.(sessionId);
-  }
-
-  private releasePtyPause(client: WsClient, sessionId: string): void {
-    const subscription = client.ptySubscriptions.get(sessionId);
-    if (!subscription?.paused) return;
-    subscription.paused = false;
-    const next = Math.max(0, (this.ptyPauseRefs.get(sessionId) ?? 1) - 1);
-    if (next === 0) {
-      this.ptyPauseRefs.delete(sessionId);
-      this.port?.resumePtyOutput?.(sessionId);
-    } else {
-      this.ptyPauseRefs.set(sessionId, next);
+    if (!subscription?.supportsAck) return;
+    subscription.unackedBytes = Math.max(0, subscription.unackedBytes - Math.max(0, Math.floor(bytes)));
+    if (subscription.degraded && subscription.unackedBytes <= PTY_UNACKED_LOW_WATER) {
+      subscription.degraded = false;
+      this.requestPtyResync(client, sessionId);
     }
   }
 
-  private releaseAllPtyPauses(client: WsClient): void {
-    for (const sessionId of client.ptySubscriptions.keys()) {
-      this.releasePtyPause(client, sessionId);
+  /**
+   * 客户端积压追赶完成 → 请它用终端快照重建屏幕。
+   *
+   * 走客户端已支持的 `resync_required` 通道（客户端会回 `resync`，服务端用
+   * init 下发 terminalState 快照），不引入新协议。限流见 PTY_RESYNC_MIN_INTERVAL_MS。
+   */
+  private requestPtyResync(client: WsClient, sessionId: string): void {
+    const subscription = client.ptySubscriptions.get(sessionId);
+    if (!subscription) return;
+    const now = Date.now();
+    if (now - subscription.lastResyncNoticeAt < PTY_RESYNC_MIN_INTERVAL_MS) return;
+    subscription.lastResyncNoticeAt = now;
+    this.queueResyncNotice(client, sessionId, "pty_backlog_drop");
+  }
+
+  /** 把一条 resync 通知塞进该客户端的发送队列（不绕过队列，也不绕过背压）。 */
+  private queueResyncNotice(client: WsClient, sessionId: string, reason: string): void {
+    if (client.ws.readyState !== WebSocket.OPEN) return;
+    client.sendQueue.push(JSON.stringify({ type: "resync_required", sessionId, reason }));
+    if (client.sendQueue.length >= MAX_QUEUE_SIZE) {
+      client.backpressurePaused = true;
     }
+    this.processWsQueue(client);
   }
 
   private sendPtyError(client: WsClient, sessionId: string, error: unknown): void {

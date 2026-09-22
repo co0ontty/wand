@@ -10,7 +10,7 @@ type HistoryMode = "push" | "replace";
 
 export const TASK_BOARD_VIEW_PARAM = "view";
 export const TASK_BOARD_VIEW = "taskboard";
-export const TASK_BOARD_VIEW_ALIASES = new Set(["taskboard", "issues"]);
+const TASK_BOARD_VIEW_ALIASES = new Set(["taskboard", "issues"]);
 
 const HISTORY_STATE_KEY = "wandShellView";
 

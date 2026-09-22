@@ -21,7 +21,7 @@ export interface MemoryQuickCommitSeed {
 }
 
 /** 未注入种子时的空上下文：默认迭代、没有任何提示词记录。 */
-export const EMPTY_QUICK_COMMIT_CONTEXT: QuickCommitIterationContext = {
+const EMPTY_QUICK_COMMIT_CONTEXT: QuickCommitIterationContext = {
   iteration: { id: "iteration-default", name: "默认迭代", isDefault: true },
   entries: [],
   defaultEntryIds: [],

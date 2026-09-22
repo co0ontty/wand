@@ -217,19 +217,26 @@ test("task board create sheets only assign agents from the doing column", () => 
     "iOS must not dispatch on create from every column",
   );
 
+  // macOS 4.72 把新建面板拆成 TaskBoardCreateView，派发判定下沉到 TaskBoardModels。
+  includesAll("macos/Wand/TaskBoardModels.swift", [
+    'func wandBoardCreateDispatches(status: String) -> Bool { status == WandBoardStatus.doing.rawValue }',
+  ]);
+  includesAll("macos/Wand/TaskBoardCreateView.swift", [
+    "initialStatus: String = WandBoardStatus.todo.rawValue",
+    "initial.status = initialStatus",
+    "private var dispatches: Bool { wandBoardCreateDispatches(status: draft.status) }",
+    "private var hasDescription: Bool {",
+    "!draft.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty",
+    '(dispatches && hasDescription ? "创建并指派" : "创建任务")',
+    "添加描述…（只创建任务，不指派 Agent）",
+  ]);
   includesAll("macos/Wand/TaskBoardView.swift", [
-    'func wandBoardCreateDispatches(status: String) -> Bool { status == "doing" }',
-    "initialStatus: String = \"todo\"",
-    "_status = State(initialValue: initialStatus)",
-    "private var dispatches: Bool { wandBoardCreateDispatches(status: status) }",
-    "if wandBoardCreateDispatches(status: status),",
     "private func openCreate(_ status: String)",
-    "openCreate(status.rawValue)",
-    "dispatches && !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? \"创建并指派\" : \"创建任务\"",
-    "描述（只创建任务）",
+    "initialStatus: createStatus,",
+    "if wandBoardCreateDispatches(status: draft.status) && !prompt.isEmpty {",
   ]);
   assert.equal(
-    (source("macos/Wand/TaskBoardView.swift").match(/if !description\.trimmingCharacters\(in: \.whitespacesAndNewlines\)\.isEmpty \{/g) ?? []).length,
+    (source("macos/Wand/TaskBoardCreateView.swift").match(/if !draft\.description\.trimmingCharacters\(in: \.whitespacesAndNewlines\)\.isEmpty \{/g) ?? []).length,
     0,
     "macOS must not dispatch on create from every column",
   );

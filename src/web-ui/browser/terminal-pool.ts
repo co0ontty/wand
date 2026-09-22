@@ -393,6 +393,10 @@ export function restorePooledTerminalState(
 
 /** 释放单个池实例（窗格关闭 / 会话移除时）。 */
 export function disposePooledTerminal(sessionId: string): void {
+  // 缩放比例是「这个窗格」的偏好而不是会话属性；且 setPooledTerminalScale 在
+  // 没有池实例时也会写入记录（面板已渲染、XTermLib 尚未就绪的情况），所以清理
+  // 必须在 handle 早退之前，否则 sessionScales 依旧会留下无界记录。
+  sessionScales.delete(sessionId);
   const handle = pool.get(sessionId);
   if (!handle) return;
   handle.disposed = true;

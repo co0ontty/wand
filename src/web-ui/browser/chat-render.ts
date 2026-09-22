@@ -12,6 +12,7 @@ import { renderStructuredStatusBar } from "./utils";
 import { getCardDefault, snapExpandedActivityFoldsToBottom } from "./events";
 import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
 import { shouldExtractPtySystemInfo } from "./pty-system-info";
+import { codexActivityRe, codexFooterRe, isPtyCodexNoiseLine, isPtySystemInfoNoiseLine, isPtyTranscriptNoiseLine } from "./pty-noise";
 import { getToolDisplayName, getToolIcon } from "./tool-identity";
 import { localFilePreviewHref, localHttpPreviewHref } from "../react/local-preview/controller";
 import {
@@ -124,20 +125,10 @@ import "./local-preview-adapter";
             var infoLines = [];
             for (var j = 0; j < lines.length; j++) {
               var line = lines[j].trim();
-              // Skip empty lines, separators, prompts, UI noise
-              if (!line || line.startsWith('────') || line === '❯' || line === '?' || line === '') continue;
-              
-              // Skip Claude Code UI elements
-              if (line.includes('Claude Code v') || 
-                  (line.includes('Opus') && line.includes('with')) || 
-                  (line.includes('Sonnet') && line.includes('with')) ||
-                  line.includes('API Usage') || line.includes('Billing') ||
-                  line.includes('for shortcuts') || line.includes('/effort') ||
-                  line.match(/^[▸▐▝▘▗▖█▌▍▎▏▔▁▂▃▄▅▆▇██]/) ||
-                  line.match(/^[▸▐▝▘▗▖█▌▍▎▏▔▁▂▃▄▅▆▇██]{3,}/)) {
-                continue;
-              }
-              
+              // 分隔线 / 提示符 / banner / 用量行等界面噪声统一走 pty-noise：
+              // CLI 文案只在那里维护（本函数只保留“留下有信息量的行”这条规则）。
+              if (isPtySystemInfoNoiseLine(line)) continue;
+
               // Keep meaningful system messages
               if (line.length > 3) {
                 infoLines.push(line);
@@ -1016,12 +1007,19 @@ import "./local-preview-adapter";
                 btn.textContent = "复制";
                 btn.classList.remove("copied");
                 btn.classList.remove("visible");
+                // 自动隐藏后引用也必须失效：否则下一次点击还是会走进
+                // closest() 分支（虽然已不再扫 DOM，但会指向一个已隐藏的按钮）。
+                if (visibleCopyButton === btn) visibleCopyButton = null;
               }, 1500);
             });
           });
           msgEl.appendChild(btn);
         });
       }
+
+      // 当前可见的复制按钮（同一时刻最多一个）：按引用隐藏，点击外部时不再扫 DOM。
+      // 声明在模块作用域，是因为复制成功后的 1500ms 自动隐藏也要清掉引用（见上）。
+      var visibleCopyButton: Element | null = null;
 
       // Long-press to show copy button on chat messages
       (function initMobileCopyLongPress() {
@@ -1039,13 +1037,10 @@ import "./local-preview-adapter";
           touchStartY = e.touches[0].clientY;
           longPressTimer = setTimeout(function() {
             var btn = msgEl.querySelector(".msg-copy-btn");
-            if (btn) {
-              // Hide any other visible copy buttons
-              document.querySelectorAll(".msg-copy-btn.visible").forEach(function(b) {
-                b.classList.remove("visible");
-              });
-              btn.classList.add("visible");
-            }
+            if (!btn) return;
+            if (visibleCopyButton && visibleCopyButton !== btn) visibleCopyButton.classList.remove("visible");
+            visibleCopyButton = btn;
+            btn.classList.add("visible");
           }, 500);
         }, { passive: true });
 
@@ -1065,65 +1060,14 @@ import "./local-preview-adapter";
 
         // Dismiss copy buttons when tapping elsewhere
         document.addEventListener("click", function(e) {
-          if (!(e.target as HTMLElement).closest(".msg-copy-btn")) {
-            document.querySelectorAll(".msg-copy-btn.visible").forEach(function(b) {
-              b.classList.remove("visible");
-            });
-          }
+          if (!visibleCopyButton) return;
+          if ((e.target as HTMLElement).closest(".msg-copy-btn")) return;
+          visibleCopyButton.classList.remove("visible");
+          visibleCopyButton = null;
         });
       })();
 
       // ===== Terminal copy button for mobile =====
-
-      function isNoiseLine(line) {
-        if (!line) return false;
-        var trimmed = String(line).trim();
-        if (!trimmed) return false;
-        if (trimmed.indexOf("────") === 0) return true;
-        if (trimmed === "❯" || trimmed === "›") return true;
-        if (/^[╭╰│┌└┐┘├┤┬┴┼─═]{2,}$/.test(trimmed)) return true;
-        if (/^[▁▂▃▄▅▆▇█▔▕▏▐]+$/.test(trimmed)) return true;
-        if (trimmed.indexOf("esc to interrupt") !== -1) return true;
-        if (trimmed.indexOf("Claude Code v") !== -1) return true;
-        if (/^Sonnet\b/.test(trimmed)) return true;
-        if (trimmed.indexOf("Failed to install Anthropic") !== -1) return true;
-        if (trimmed.indexOf("Claude Code has switched") !== -1) return true;
-        if (trimmed.indexOf("? for shortcuts") !== -1) return true;
-        if (trimmed.indexOf("Claude is waiting") !== -1) return true;
-        if (trimmed.indexOf("[wand]") !== -1) return true;
-        if (trimmed.indexOf("0;") === 0 || trimmed.indexOf("9;") === 0) return true;
-        if (trimmed.indexOf("ctrl+g") !== -1) return true;
-        if (trimmed.indexOf("/effort") !== -1) return true;
-        if (/^Using .* for .* session/.test(trimmed)) return true;
-        if (trimmed.indexOf("Press ") === 0 && trimmed.indexOf(" for") !== -1) return true;
-        if (trimmed.indexOf("type ") === 0 && trimmed.indexOf(" to ") !== -1) return true;
-        if (trimmed.indexOf("auto mode is unavailable") !== -1) return true;
-        if (/MCP server.*failed/i.test(trimmed)) return true;
-        if (trimmed.indexOf("Germinating") !== -1 || trimmed.indexOf("Doodling") !== -1 || trimmed.indexOf("Brewing") !== -1) return true;
-        if (trimmed.indexOf("Permissions") !== -1 && trimmed.indexOf("mode") !== -1) return true;
-        if (trimmed.indexOf("●") === 0 && trimmed.indexOf("·") !== -1) return true;
-        if (trimmed.indexOf("[>") === 0 || trimmed.indexOf("[<") === 0) return true;
-        if (trimmed.indexOf("Captured Claude session ID") !== -1) return true;
-        if (/^>_\s*OpenAI Codex\b/.test(trimmed)) return true;
-        if (/^OpenAI Codex\b/i.test(trimmed)) return true;
-        if (/^(model|directory):\s+/i.test(trimmed)) return true;
-        if (/^(tip|context):\s+/i.test(trimmed)) return true;
-        if (/^work(tree|space):\s+/i.test(trimmed)) return true;
-        if (/^(approvals?|sandbox|provider|session id):\s+/i.test(trimmed)) return true;
-        if (/^(thinking|working)(\.\.\.|…)?$/i.test(trimmed)) return true;
-        if (/^[•◦·]\s+Working\b/i.test(trimmed)) return true;
-        if (/^[•◦·]\s+(Running|Planning|Applying|Reading|Searching)\b/i.test(trimmed)) return true;
-        if (/^[•◦·]\s+(Inspecting|Reviewing|Summarizing|Editing|Updating|Writing)\b/i.test(trimmed)) return true;
-        if (/^[•◦·]\s+Completed\b/i.test(trimmed)) return true;
-        if (/^(ctrl|enter|tab|shift|esc|alt)\+/i.test(trimmed)) return true;
-        if (/\b(open|close|toggle) (chat|terminal)\b/i.test(trimmed)) return true;
-        if (/\b(approve|deny)\b.*\b(permission|approval)\b/i.test(trimmed)) return true;
-        if (/^(use|press) .* (to|for) .*/i.test(trimmed)) return true;
-        if (/^(?:token|context window|remaining context|conversation):\s+/i.test(trimmed)) return true;
-        if (/^(?:cwd|path):\s+\//i.test(trimmed)) return true;
-        if (/^[<>│┆╎].*[<>│┆╎]$/.test(trimmed) && trimmed.length < 8) return true;
-        return false;
-      }
 
       function stripAnsi(text) {
         return String(text || "")
@@ -1153,9 +1097,6 @@ import "./local-preview-adapter";
         var esc = String.fromCharCode(27);
 
         if (/^codex\b/.test(String(command || "").trim())) {
-          var codexFooterRe = /\bgpt-\d+(?:\.\d+)?(?:\s+[a-z0-9.-]+)?\s+·\s+\d+%\s+left\s+·\s+(?:\/|~\/).+/i;
-          var codexActivityRe = /^(?:thinking|working|running|planning|applying|reading|searching|inspecting|reviewing|summarizing|editing|updating|writing|completed)\b/i;
-
           function stripCodexSegment(raw) {
             return String(raw || "")
               .replace(/\x1b\][^\x07]*(\x07|\x1b\\)/g, "")
@@ -1186,28 +1127,12 @@ import "./local-preview-adapter";
               .trim();
           }
 
-          function shouldIgnoreCodexLine(line) {
-            var trimmed = String(line || "").trim();
-            if (!trimmed) return true;
-            if (isNoiseLine(trimmed)) return true;
-            if (codexFooterRe.test(trimmed)) return true;
-            if (/^[╭╰│┌└┐┘├┤┬┴┼─═]/.test(trimmed)) return true;
-            if (/^\[>[0-9;?]*u$/i.test(trimmed)) return true;
-            if (/^M+$/i.test(trimmed)) return true;
-            if (/^(?:OpenAI Codex|Codex)\b/i.test(trimmed)) return true;
-            if (/^(?:tokens?|context window|remaining context|approvals?|sandbox|provider|session id):\s*/i.test(trimmed)) return true;
-            if (/^(?:thinking|working)\s*(?:\.\.\.|…)?$/i.test(trimmed)) return true;
-            if (/^[•◦·]\s+(?:thinking|working|running|planning|applying|reading|searching|inspecting|reviewing|summarizing|editing|updating|writing|completed)\b/i.test(trimmed)) return true;
-            if (/^(?:model|directory|tip|context|cwd|path):\s+/i.test(trimmed)) return true;
-            return false;
-          }
-
           function extractCodexPromptCandidate(line) {
             var trimmed = String(line || "").trim();
             if (!/^›(?:\s|$)/.test(trimmed)) return null;
             if (codexFooterRe.test(trimmed)) return null;
             var prompt = normalizeCodexText(normalizeCodexPromptLine(trimmed));
-            if (!prompt || shouldIgnoreCodexLine(prompt)) return null;
+            if (!prompt || isPtyCodexNoiseLine(prompt)) return null;
             return prompt;
           }
 
@@ -1229,7 +1154,7 @@ import "./local-preview-adapter";
               .replace(/\b(?:OpenAI Codex|model:|directory:|Tip:)\b[\s\S]*$/i, "");
             assistant = normalizeCodexText(assistant);
 
-            if (!assistant || assistant.length < 2 || codexActivityRe.test(assistant) || shouldIgnoreCodexLine(assistant)) {
+            if (!assistant || assistant.length < 2 || codexActivityRe.test(assistant) || isPtyCodexNoiseLine(assistant)) {
               return null;
             }
             return assistant;
@@ -1237,7 +1162,7 @@ import "./local-preview-adapter";
 
           function extractCodexEchoCandidate(line) {
             var trimmed = normalizeCodexText(line);
-            if (!trimmed || shouldIgnoreCodexLine(trimmed)) return null;
+            if (!trimmed || isPtyCodexNoiseLine(trimmed)) return null;
             if (/^[•◦·⏺›]/.test(trimmed)) return null;
             if (/^[\[\]<>0-9;?]+u?$/i.test(trimmed)) return null;
             if (/^[╭╰│┌└┐┘├┤┬┴┼─═]/.test(trimmed)) return null;
@@ -1255,7 +1180,7 @@ import "./local-preview-adapter";
             var collected = [];
             for (var i = 0; i < lines.length; i++) {
               var normalized = normalizeCodexText(lines[i]);
-              if (!normalized || normalized.length < 2 || shouldIgnoreCodexLine(normalized)) continue;
+              if (!normalized || normalized.length < 2 || isPtyCodexNoiseLine(normalized)) continue;
 
               var previous = collected[collected.length - 1];
               if (!previous) {
@@ -1289,7 +1214,7 @@ import "./local-preview-adapter";
               if (line === "›") {
                 for (var j = i + 1; j < lines.length; j++) {
                   var nextLine = normalizeCodexText(lines[j]);
-                  if (!nextLine || codexFooterRe.test(nextLine) || shouldIgnoreCodexLine(nextLine)) continue;
+                  if (!nextLine || codexFooterRe.test(nextLine) || isPtyCodexNoiseLine(nextLine)) continue;
                   return nextLine;
                 }
               }
@@ -1316,7 +1241,7 @@ import "./local-preview-adapter";
               }
 
               if (collecting) {
-                if (line === "›" || /^›(?:\s|$)/.test(line) || codexFooterRe.test(line) || shouldIgnoreCodexLine(line)) {
+                if (line === "›" || /^›(?:\s|$)/.test(line) || codexFooterRe.test(line) || isPtyCodexNoiseLine(line)) {
                   break;
                 }
                 assistantLines.push(normalizeCodexText(line));
@@ -1480,51 +1405,8 @@ import "./local-preview-adapter";
           }
           if (isThinking) continue;
 
-          // Filter noise
-          if (!line) continue;
-          if (line.indexOf("────────────────") === 0) continue;
-          if (line === "❯") continue;
-          if (line.indexOf("esc to interrupt") !== -1) continue;
-          if (line.indexOf("Claude Code v") !== -1) continue;
-          if (line.indexOf("Sonnet") !== -1) continue;
-          if (line.indexOf("~/") === 0) continue;
-          if (line.indexOf("● high") !== -1) continue;
-          if (line.indexOf("Failed to install Anthropic marketplace") !== -1) continue;
-          if (line.indexOf("Claude Code has switched from npm to native installer") !== -1) continue;
-          if (line.indexOf("Fluttering") !== -1) continue;
-          if (line.indexOf("? for shortcuts") !== -1) continue;
-          if (line.indexOf("0;") === 0) continue;
-          if (line.indexOf("9;") === 0) continue;
-          if (line.indexOf("Claude is waiting") !== -1) continue;
-          if (line.indexOf("✢") !== -1 || line.indexOf("✳") !== -1 || line.indexOf("✶") !== -1 || line.indexOf("✻") !== -1 || line.indexOf("✽") !== -1) continue;
-          if (line.indexOf("▐") === 0 || line.indexOf("▝") === 0 || line.indexOf("▘") === 0) continue;
-          if ((line === "lu" || line === "ue" || line === "tr" || line === "ti" || line === "g" || line === "n" || line === "i…" || line === "…" || line === "uts" || line === "lt" || line === "rg" || line === "·") && line.length < 4) continue;
-          if (line.indexOf("✽F") === 0 || line.indexOf("✻F") === 0) continue;
-          // Additional noise filters
-          if (line.indexOf("npm WARN") !== -1) continue;
-          if (line.indexOf("npm notice") !== -1) continue;
-          if (line.indexOf("added ") !== -1 && line.indexOf(" packages") !== -1) continue;
-          if (line.indexOf("audited ") !== -1) continue;
-          if (line.indexOf("found ") !== -1 && line.indexOf(" vulnerabilities") !== -1) continue;
-          if (line.indexOf("Using ") !== -1 && line.indexOf(" for ") !== -1 && line.indexOf("session") !== -1) continue;
-          if (line.indexOf("You can use") !== -1) continue;
-          if (line.indexOf("Press ") !== -1 && line.indexOf(" for") !== -1) continue;
-          if (line.indexOf("type ") === 0 && line.indexOf(" to ") !== -1) continue;
-          if (line.indexOf("[wand]") === 0) continue;
-          if (line.indexOf("Captured Claude session ID") !== -1) continue;
-          // Filter Claude TUI noise patterns
-          if (line.indexOf("⏵") !== -1) continue;
-          if (line.indexOf("acceptedit") !== -1) continue;
-          if (line.indexOf("shift+tab") !== -1) continue;
-          if (line.indexOf("tabtocycle") !== -1) continue;
-          if (line.indexOf("ctrl+g") !== -1) continue;
-          if (line.indexOf("/effort") !== -1) continue;
-          if (line.indexOf("Opus") !== -1 && line.indexOf("model") !== -1) continue;
-          if (line.indexOf("Haiku") !== -1) continue;
-          if (line.indexOf("to cycle") !== -1) continue;
-          if (line.indexOf("high ·") !== -1 || line.indexOf("high·") !== -1) continue;
-          if (line.indexOf("medium ·") !== -1 || line.indexOf("medium·") !== -1) continue;
-          if (line.indexOf("low ·") !== -1 || line.indexOf("low·") !== -1) continue;
+          // 界面文案与 CLI 噪声集中在 pty-noise.ts：本函数只管切分，不再维护文案。
+          if (isPtyTranscriptNoiseLine(line)) continue;
           // Strip bullet prefix from Claude TUI output lines (keep the content)
           if (line.indexOf("●") === 0) {
             line = line.slice(1).trim();

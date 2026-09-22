@@ -18,6 +18,9 @@ import { fitTerminalToContainer } from "./terminal-fit";
       // detectKeyboardOpen 误判为 "键盘仍打开"，导致 --app-viewport-top
       // 残留正值、输入框偏下。冷却期内抑制弱信号的 "仍打开" 判定。
       var keyboardDismissCooldownUntil = 0;
+      // settle 批次：focus/blur 抖动会叠加多批回调，重排前清旧批、teardown 全清。
+      var viewportSettleTimers = [];
+      var focusedInputSettleTimers = [];
 
       function isIosNativeViewportMode() {
         return window.__wandIosNative === true;
@@ -125,7 +128,6 @@ import { fitTerminalToContainer } from "./terminal-fit";
         var keyboardOpen = false;
         var lastViewportWidth = Math.max(window.innerWidth || 0, vv.width || 0);
         var largestViewportHeight = Math.max(window.innerHeight || 0, vv.height || 0);
-        var viewportSettleTimers = [];
 
         function getCurrentViewportHeightBaseline() {
           return Math.max(window.innerHeight || 0, vv.height || 0);
@@ -177,8 +179,9 @@ import { fitTerminalToContainer } from "./terminal-fit";
         }
 
         function scheduleFocusedInputSettle() {
-          [0, 50, 120, 220, 360, 560].forEach(function(delay) {
-            setTimeout(function() {
+          focusedInputSettleTimers.forEach(function(timer) { clearTimeout(timer); });
+          focusedInputSettleTimers = [0, 50, 120, 220, 360, 560].map(function(delay) {
+            return setTimeout(function() {
               updateViewport();
               var inputBox = document.getElementById('input-box');
               if (inputBox && document.activeElement === inputBox) {
@@ -738,7 +741,7 @@ import { fitTerminalToContainer } from "./terminal-fit";
           }
         })
         .catch(function(err) {
-          if (err && err.message) console.debug("[wand] joystick interrupt no-op:", err.message);
+          // 摇杆中断只是示意，失败无需打断用户。
         });
       }
 
@@ -896,6 +899,11 @@ import { fitTerminalToContainer } from "./terminal-fit";
 
       export function teardownTerminal() {
         stopTerminalHealthCheck();
+        // settle 回调不挂在 DOM 监听器上，teardown 必须显式清空两批。
+        viewportSettleTimers.forEach(function(timer) { clearTimeout(timer); });
+        viewportSettleTimers = [];
+        focusedInputSettleTimers.forEach(function(timer) { clearTimeout(timer); });
+        focusedInputSettleTimers = [];
         if (state.resizeTimer) {
           clearTimeout(state.resizeTimer);
           state.resizeTimer = null;

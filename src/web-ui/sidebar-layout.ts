@@ -18,10 +18,10 @@
  */
 
 /** 停靠所需的最小宽度，与 CSS `min-width: 640px` 断点一致。 */
-export const SIDEBAR_PUSH_MIN_WIDTH = 640;
+const SIDEBAR_PUSH_MIN_WIDTH = 640;
 
 /** 触摸设备停靠所需的最小高度，与原生端 `usesWideListDetail` 一致。 */
-export const SIDEBAR_PUSH_MIN_HEIGHT = 480;
+const SIDEBAR_PUSH_MIN_HEIGHT = 480;
 
 export interface SidebarLayoutViewport {
   readonly width: number;

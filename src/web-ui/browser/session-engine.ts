@@ -1,6 +1,7 @@
 import { state, writeStoredBoolean } from "./state";
 import { createSessionReads } from "./session-reads";
 import { parseJsonResponse } from "../react/http-adapter";
+import { getErrorMessage } from "../../error-utils.js";
 
 import { mergeWindowedMessages } from "./message-reconciliation";
 import { shouldPersistComposerDraft } from "./composer-draft";
@@ -9,7 +10,7 @@ import { bindChatScrollListener, normalizeStructuredSnapshot, persistSelectedId,
 import "./events";
 import { isSidebarDrawerLayout, updateFilePanelCwd, updateLayoutState } from "./file-browser";
 import { loadGitStatus, restoreGitStatusForSession } from "./git-commit";
-import { autoResizeInput, buildMessagesForRender, canAutoResumeSession, captureTerminalInput, closeKeyboardPopup, flushCrossSessionQueue, focusInputBox, getControlInput, hasActiveTerminalSelection, hideMiniKeyboard, isImeKeyboardEvent, queueDirectInput, reconcileInteractiveState, renderCrossSessionQueue, sendInputFromBox, setTerminalInteractive, shouldCaptureTerminalEvent, stopSession, switchToSessionView, updateInteractiveControls, updateStructuredQueueCounter } from "./input";
+import { autoResizeInput, buildMessagesForRender, canAutoResumeSession, captureTerminalInput, closeKeyboardPopup, flushCrossSessionQueue, focusInputBox, getControlInput, hasActiveTerminalSelection, hideMiniKeyboard, isImeKeyboardEvent, queueDirectInput, reconcileInteractiveState, renderCrossSessionQueue, sendInputFromBox, setTerminalInteractive, shouldCaptureTerminalEvent, stopCrossSessionQueueTicker, stopSession, switchToSessionView, updateInteractiveControls, updateStructuredQueueCounter } from "./input";
 import { _apkVersion, _hasNativeBridge, _macAppVersion, _syncWakeLock, hideError, showError, showToast } from "./notifications";
 import { getEffectiveCwd, render, resetChatRenderCache } from "./render";
 import { initTerminal, maybeScrollTerminalToBottom, syncTerminalBuffer, waitForTerminalSettled } from "./terminal";
@@ -142,11 +143,13 @@ const sessionReads = createSessionReads();
         } catch (e) {}
       }
 
-      export function logout() {
+      // 本地登出收尾：清运行时状态 + 拆终端 + 回登录页。不发网络请求，
+      // 供「用户主动登出」与「服务端已判定会话失效（401）」两条路径复用。
+      function teardownLocalSession() {
         sessionReads.reset();
         earlierMessageRequests.clear();
-        fetch("/api/logout", { method: "POST", credentials: "same-origin" }).catch(function() {});
         stopPolling();
+        stopCrossSessionQueueTicker();
         setTerminalInteractive(false);
         hideMiniKeyboard();
         teardownTerminal();
@@ -161,6 +164,32 @@ const sessionReads = createSessionReads();
         state.sessionsDrawerOpen = false;
         writeStoredBoolean("wand-sidebar-open", false);
         render();
+      }
+
+      // 用户主动登出：服务端吊销会话 + 清 cookie 是这次操作的全部意义，
+      // 所以先拿到确认再拆本地状态。历史实现是 fire-and-forget 且无条件清空本地，
+      // 失败时用户既没登出也没被告知（刷新又回到已登录态）。
+      // 判据只看 2xx：路由在写响应体之前就已经 revoke + clearCookie，所以
+      // 「响应体不是 JSON」不应该被当成「没登出」而把用户留在已登录态。
+      export async function logout(): Promise<void> {
+        var response: Response;
+        try {
+          response = await fetch("/api/logout", { method: "POST", credentials: "same-origin" });
+        } catch (error) {
+          showToast(getErrorMessage(error, "注销失败，请检查网络后重试。"), "error");
+          return;
+        }
+        if (!response.ok) {
+          showToast("注销失败（HTTP " + response.status + "），请重试。", "error");
+          return;
+        }
+        teardownLocalSession();
+      }
+
+      // 服务端已回 401（cookie 过期 / 被吊销 / 改过密码）时的收尾：会话已经无效，
+      // 这里不再发一条必然失败的 logout 请求，也不弹「注销失败」打扰用户。
+      function logoutExpiredSession() {
+        teardownLocalSession();
       }
 
       export function refreshAll() {
@@ -674,7 +703,7 @@ const sessionReads = createSessionReads();
 
       // 标签直接用实际传给各 runner 的 effort 语义，避免把 Claude 的一次性深度提示词
       // 误解成会话级配置。
-      export var THINKING_LEVELS = [
+      var THINKING_LEVELS = [
         { id: "off",      label: "auto",   hint: "使用 provider / 模型默认思考档位" },
         { id: "standard", label: "low",    hint: "Claude/Codex: low · OpenCode variant: low" },
         { id: "deep",     label: "medium", hint: "Claude/Codex: medium · OpenCode variant: high" },
@@ -1087,9 +1116,15 @@ const sessionReads = createSessionReads();
           }
           return merged;
         }
-        var localOutput = localSession.output || "";
-        var serverOutput = serverSession.output || "";
-        var keepLocalOutput = localOutput.length > serverOutput.length;
+        // GET /api/sessions 走 toSessionListItemDTO：output 固定是 ""（见
+        // session-transport.ts 里 SessionListItemDTO 的注释），且不带 messages。
+        // 列表刷新必须保留本地缓冲，否则每次 refreshAll / WS 重连都会把当前会话的输出
+        // 清成空串；只有服务端真带回了非空输出（详情/事件路径）时才以服务端为准。
+        var serverHasAuthoritativeOutput = typeof serverSession.output === "string"
+          && serverSession.output.length > 0;
+        if (!serverHasAuthoritativeOutput && typeof localSession.output === "string") {
+          merged.output = localSession.output;
+        }
         var localStructuredState = localSession.structuredState || null;
         var serverStructuredState = serverSession.structuredState || null;
         var structuredSession = (localSession.sessionKind === "structured") || (serverSession.sessionKind === "structured");
@@ -1099,9 +1134,6 @@ const sessionReads = createSessionReads();
             return block && block.__processing;
           });
         })());
-        var localMessages = Array.isArray(localSession.messages)
-          ? (structuredSession ? stripRenderOnlyStructuredMessages(localSession.messages) : localSession.messages)
-          : [];
         var serverMessages = Array.isArray(serverSession.messages)
           ? (structuredSession ? stripRenderOnlyStructuredMessages(serverSession.messages) : serverSession.messages)
           : [];
@@ -1112,6 +1144,8 @@ const sessionReads = createSessionReads();
           return last && last.role === "assistant" && Array.isArray(last.content)
             && !last.content.some(function(b) { return b && b.__processing; });
         })();
+        // 只有同一个仍在进行的 structured request 才能保留本地乐观 assistant block。
+        // 其它消息一律采用服务端快照；条数/JSON 长度不能证明谁更新。
         var preserveLocalStructuredProgress = (localSession.sessionKind === "structured")
           && !!localStructuredState
           && localStructuredState.inFlight === true
@@ -1121,14 +1155,6 @@ const sessionReads = createSessionReads();
           && !!serverStructuredState && !!serverStructuredState.activeRequestId
           && serverStructuredState.activeRequestId === localStructuredState.activeRequestId
           && !serverHasCompletedAssistant;
-        var preserveLocalMessages = localMessages.length > serverMessages.length
-          || (localMessages.length > 0 && serverMessages.length > 0
-            && JSON.stringify(localMessages[localMessages.length - 1]) !== JSON.stringify(serverMessages[serverMessages.length - 1])
-            && JSON.stringify(localMessages).length > JSON.stringify(serverMessages).length);
-
-        if (keepLocalOutput) {
-          merged.output = localOutput;
-        }
 
         if (preserveLocalStructuredProgress) {
           merged.status = localSession.status || merged.status;
@@ -1136,22 +1162,18 @@ const sessionReads = createSessionReads();
           merged.messages = localSession.messages;
         }
 
-        if (preserveLocalMessages) {
-          merged.messages = localMessages;
-        }
-
         if (localSession.id === state.selectedId) {
-          if (localSession.permissionBlocked && serverSession.permissionBlocked === false) {
-          } else if (localSession.permissionBlocked && !serverSession.permissionBlocked) {
+          // 与改动前逐位等价：服务端给出 true/false 时以服务端为准；字段缺失（slim 列表、
+          // 窗口化事件）时保留当前会话本地尚未被覆盖的权限态（true/0/""/null 都属于后者）。
+          if (localSession.permissionBlocked
+            && !serverSession.permissionBlocked
+            && serverSession.permissionBlocked !== false) {
             merged.permissionBlocked = true;
           }
-
-          if (localSession.pendingEscalation && !serverSession.pendingEscalation && serverSession.permissionBlocked !== false) {
+          if (localSession.pendingEscalation
+            && !serverSession.pendingEscalation
+            && serverSession.permissionBlocked !== false) {
             merged.pendingEscalation = localSession.pendingEscalation;
-          }
-
-          if (localSession.messages && localSession.messages.length > 0 && (!serverSession.messages || serverSession.messages.length === 0)) {
-            merged.messages = localSession.messages;
           }
         }
 
@@ -1197,7 +1219,7 @@ const sessionReads = createSessionReads();
           .then(function(res) {
             if (!read.isCurrent()) return;
             if (res.status === 401) {
-              logout();
+              logoutExpiredSession();
               return;
             }
             return parseJsonResponse<any[]>(res);
@@ -1287,7 +1309,7 @@ const sessionReads = createSessionReads();
           }).finally(function() { read.finish(); });
       }
 
-      export var _sessionListUpdateTimer = null;
+      var _sessionListUpdateTimer = null;
       export function scheduleSessionListUpdate() {
         if (_sessionListUpdateTimer) return;
         _sessionListUpdateTimer = setTimeout(function() {
@@ -2287,7 +2309,7 @@ const sessionReads = createSessionReads();
 
       // ── Attachment helpers ──
 
-      export var ATTACH_MAX_SIZE = 10 * 1024 * 1024;
+      var ATTACH_MAX_SIZE = 10 * 1024 * 1024;
 
       export function formatFileSize(bytes) {
         if (bytes < 1024) return bytes + " B";

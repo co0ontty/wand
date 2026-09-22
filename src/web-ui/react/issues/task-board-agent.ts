@@ -451,7 +451,7 @@ export const DEFAULT_ISSUE_BOARD_DISPLAY: IssueBoardDisplay = {
   mainStatuses: ["todo", "doing", "done"],
 };
 
-export const ISSUE_BOARD_DISPLAY_KEY = "wand.issue-board.display";
+const ISSUE_BOARD_DISPLAY_KEY = "wand.issue-board.display";
 
 export function readIssueBoardDisplay(): IssueBoardDisplay {
   if (typeof window === "undefined") return DEFAULT_ISSUE_BOARD_DISPLAY;

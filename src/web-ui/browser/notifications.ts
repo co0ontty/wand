@@ -1,5 +1,7 @@
 import { state, writeStoredBoolean } from "./state";
 import { WAND_FAVICON_URL } from "../brand-identity.js";
+import { HttpResponseError, parseJsonResponse } from "../react/http-adapter";
+import { getErrorMessage } from "../../error-utils.js";
 import { iconSvg } from "./i18n";
 import { escapeHtml } from "./utils";
 import { persistSelectedId } from "./chat-scroll";
@@ -848,6 +850,15 @@ function showUpdateBubble(currentVer: string, latestVer: string) {
     if (!progressEl) return;
     progressEl.classList.toggle("active", !!active);
   }
+  // 所有失败分支共用：复位进度 / 忙碌态 / 成功态与按钮，并显示可读错误。
+  function setUpdateFailed(message: string) {
+    setProgress(false);
+    card.classList.remove("is-busy", "is-success");
+    setSubtitle("更新未完成");
+    setStatus(message, "error");
+    actionBtn!.disabled = false;
+    if (actionLabel) actionLabel.textContent = "重试";
+  }
 
   if (actionBtn) actionBtn.onclick = function() {
     // Phase 1: Performing update
@@ -863,18 +874,8 @@ function showUpdateBubble(currentVer: string, latestVer: string) {
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin"
     })
-    .then(function(res) { return res.json(); })
+    .then(function(res) { return parseJsonResponse<any>(res); })
     .then(function(data: any) {
-      if (data.error) {
-        // Update failed
-        setProgress(false);
-        card.classList.remove("is-busy");
-        setSubtitle("更新未完成");
-        setStatus(data.error, "error");
-        actionBtn!.disabled = false;
-        if (actionLabel) actionLabel.textContent = "重试";
-        return;
-      }
       // Phase 2: 安装成功，自动调用 /api/restart，由 restart overlay 接管 UX。
       card.classList.add("is-success");
       setSubtitle((data.message || "更新完成") + "，正在重启服务…");
@@ -891,32 +892,35 @@ function showUpdateBubble(currentVer: string, latestVer: string) {
         if (actionLabel) actionLabel.textContent = "已完成";
         return;
       }
-      performRestartCard(actionBtn!, actionLabel, subtitleEl, statusEl, progressEl);
+      performRestartCard(setUpdateFailed);
     })
-    .catch(function() {
-      setProgress(false);
-      card.classList.remove("is-busy");
-      setSubtitle("更新未完成");
-      setStatus("请检查网络连接后重试", "error");
-      actionBtn!.disabled = false;
-      if (actionLabel) actionLabel.textContent = "重试";
+    .catch(function(error: unknown) {
+      // 非 2xx（含非 JSON 的 5xx）不再伪装成成功；纯网络中断沿用既有文案。
+      setUpdateFailed(error instanceof HttpResponseError
+        ? getErrorMessage(error, "更新失败，请重试。")
+        : "请检查网络连接后重试");
     });
   };
 }
 
 // Restart driver used by the new update card.
-function performRestartCard(btn: HTMLButtonElement, labelEl: HTMLElement | null, subtitleEl: HTMLElement | null, statusEl: HTMLElement | null, progressEl: HTMLElement | null) {
+function performRestartCard(onFailure: (message: string) => void) {
   fetch("/api/restart", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "same-origin"
   })
-  .then(function(res) { return res.json(); })
+  .then(function(res) { return parseJsonResponse<any>(res); })
   .then(function() {
     showRestartOverlay();
   })
-  .catch(function() {
-    // Network error likely means the server already shut down — show overlay anyway
+  .catch(function(error: unknown) {
+    // 服务端明确回错（仍在运行、拒绝重启）时停在更新卡片上，复位后允许重试；
+    // 网络中断更可能是服务已经退出，仍然交给重启遮罩继续探测。
+    if (error instanceof HttpResponseError && error.status > 0) {
+      onFailure(getErrorMessage(error, "重启失败，请重试。"));
+      return;
+    }
     showRestartOverlay();
   });
 }

@@ -11,7 +11,7 @@ import { state } from "./state";
 //   - 不引入 i18n 库，几十个 key 用平铺对象，t(key, params) 是个十行 helper。
 //   - params 支持 "{name}" 占位符替换，避免在调用点拼字符串。
 //   - 缺 key 时回退到中文表，再没有就返回 key 本身（debug 友好）。
-export var I18N_DEFAULT_LANG = "中文";
+var I18N_DEFAULT_LANG = "中文";
 var I18N: Record<string, Record<string, string>> = {
   "中文": {
     "agentRun.title": "Agent 运行",

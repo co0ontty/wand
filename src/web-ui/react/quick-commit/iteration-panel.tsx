@@ -17,7 +17,7 @@ import type {
   QuickCommitIterationEntry,
 } from "./types";
 
-export const ITERATION_CONTEXT_MODES: ReadonlyArray<{
+const ITERATION_CONTEXT_MODES: ReadonlyArray<{
   mode: QuickCommitContextMode;
   label: string;
   hint: string;

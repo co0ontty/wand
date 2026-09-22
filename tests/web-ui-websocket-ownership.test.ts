@@ -31,23 +31,46 @@ function harness() {
   let subscribed = 0;
   let toasted = 0;
   let foregroundBindings = 0;
+  let listUpdates = 0;
+  let gitPollsStarted = 0;
+  let gitPollsStopped = 0;
   const listeners: string[] = [];
+  const timeEls: unknown[] = [];
+  const intervals: Array<{ id: number; handler: () => void; ms: number | undefined; cleared: boolean }> = [];
+  let nextTimerId = 1;
   const globals = {
     WebSocket: FakeSocket, window: { WebSocket: FakeSocket, location: { protocol: "http:", host: "example" }, addEventListener: (name: string) => listeners.push(name) },
-    document: { hidden: false, addEventListener: () => {}, getElementById: () => null }, Date, console,
+    document: {
+      hidden: false, addEventListener: () => {},
+      getElementById: () => null, querySelectorAll: () => timeEls,
+    }, Date, console,
     fetch: () => new Promise(() => {}),
-    setInterval: () => 1, clearInterval: () => {}, setTimeout: () => 1, clearTimeout: () => {},
+    setInterval: (handler: () => void, ms?: number) => { const id = nextTimerId++; intervals.push({ id, handler, ms, cleared: false }); return id; },
+    clearInterval: (id: number) => { const entry = intervals.find((item) => item.id === id); if (entry) entry.cleared = true; },
+    setTimeout: () => 1, clearTimeout: () => {},
   };
   const dependencies = {
     "./state": { state },
     "./render": { bindForegroundSyncListeners: () => { foregroundBindings++; } },
     "./notifications": { showToast: () => { toasted++; } },
+    "./git-commit": new Proxy({
+      startGitStatusPolling: () => { gitPollsStarted++; },
+      stopGitStatusPolling: () => { gitPollsStopped++; },
+      scheduleGitStatusRefresh: () => {},
+    }, { get: (obj: Record<string, unknown>, key: string) => obj[key] ?? (() => {}) }),
     "./session-engine": new Proxy({}, { get: (_target, key) => key === "subscribeToSession"
-      ? () => { subscribed++; } : () => Promise.resolve() }),
+      ? () => { subscribed++; }
+      : key === "scheduleSessionListUpdate" ? () => { listUpdates++; } : () => Promise.resolve() }),
   };
   const ws = loadBrowserModule("websocket", dependencies, globals);
   const render = loadBrowserModule("render", { ...dependencies, "./websocket": ws }, globals);
-  return { state, sockets, ws, render, subscribed: () => subscribed, toasted: () => toasted, foregroundBindings: () => foregroundBindings, listeners };
+  const liveIntervals = () => intervals.filter((item) => !item.cleared);
+  return {
+    state, sockets, ws, render, listeners, timeEls,
+    subscribed: () => subscribed, toasted: () => toasted, foregroundBindings: () => foregroundBindings,
+    listUpdates: () => listUpdates, gitPollsStarted: () => gitPollsStarted, gitPollsStopped: () => gitPollsStopped,
+    liveIntervals,
+  };
 }
 
 test("polling startup binds foreground recovery for a fresh login as well as restored login", () => {
@@ -60,6 +83,34 @@ test("foreground listener installation remains idempotent across repeated pollin
   h.render.bindForegroundSyncListeners(); h.render.bindForegroundSyncListeners();
   assert.equal(h.listeners.filter((name) => name === "focus").length, 1);
   assert.equal(h.listeners.filter((name) => name === "pageshow").length, 1);
+});
+
+test("session-time polling and git polling start with polling and stop on teardown", () => {
+  const h = harness();
+  assert.equal(h.liveIntervals().length, 0, "模块导入时不得自带 interval（登出后仍在跑的历史问题）");
+  h.ws.startPolling();
+  const timeTimer = h.liveIntervals().find((item) => item.ms === 30_000);
+  assert.ok(timeTimer, "登录后应该有侧边栏相对时间节拍器");
+  assert.equal(h.gitPollsStarted(), 1);
+  h.timeEls.push("<span class=\"session-time\"></span>");
+  timeTimer.handler();
+  assert.equal(h.listUpdates(), 1);
+  timeTimer.handler();
+  assert.equal(h.listUpdates(), 2);
+
+  const stopsBefore = h.gitPollsStopped();
+  h.ws.stopPolling();
+  assert.equal(h.gitPollsStopped(), stopsBefore + 1);
+  assert.equal(h.liveIntervals().some((item) => item.ms === 30_000), false, "登出后相对时间节拍器必须停");
+});
+
+test("repeated polling startups keep exactly one session-time timer", () => {
+  const h = harness();
+  h.ws.startPolling();
+  h.ws.startPolling();
+  h.timeEls.push("<span class=\"session-time\"></span>");
+  h.liveIntervals().filter((item) => item.ms === 30_000).forEach((item) => item.handler());
+  assert.equal(h.listUpdates(), 1, "重复 startPolling 不得叠加节拍器");
 });
 
 test("foreground stale recovery owns the replacement while CONNECTING and opens only one socket", async () => {

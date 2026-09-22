@@ -1,6 +1,8 @@
 import type { SendError } from "./types";
 import { state } from "./state";
 import { t } from "./i18n";
+import { parseJsonResponse } from "../react/http-adapter";
+import { getErrorMessage } from "../../error-utils.js";
 import { collapseTodoProgress, computeRunningSignal, escapeHtml } from "./utils";
 import { renderChat, shortCommand } from "./chat-render";
 import { getStructuredQueuedInputs, persistCrossSessionQueue, persistSelectedId, prepareChatBottomFollow, stripRenderOnlyStructuredMessages, syncStructuredQueueFromSession } from "./chat-scroll";
@@ -71,8 +73,6 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
           btn.classList.add("is-recording");
           btn.setAttribute("aria-pressed", "true");
           btn.setAttribute("title", "松开结束 · 上滑取消");
-          var label = btn.querySelector(".voice-record-label");
-          if (label) label.textContent = "松开 发送";
         }
         voiceState.bubbleVisible = true;
         voiceState.status = "网页端暂不支持语音输入，请使用 App";
@@ -87,9 +87,6 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         var shouldCancel = dy > VOICE_CANCEL_THRESHOLD;
         if (shouldCancel === voiceState.canceling) return;
         voiceState.canceling = shouldCancel;
-        var btn = document.getElementById("voice-record-btn");
-        var label = btn && btn.querySelector(".voice-record-label");
-        if (label) label.textContent = shouldCancel ? "松开 取消" : "松开 发送";
         voiceState.status = shouldCancel ? "松开手指 取消" : "正在聆听…上滑取消";
         syncVoiceBubble();
       }
@@ -120,8 +117,6 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
           btn.classList.remove("is-recording");
           btn.setAttribute("aria-pressed", "false");
           btn.setAttribute("title", "按住语音输入");
-          var label = btn.querySelector(".voice-record-label");
-          if (label) label.textContent = "按住 说话";
         }
         voiceState.bubbleVisible = false;
         syncVoiceBubble();
@@ -419,17 +414,9 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
             initialInput: item.text
           }))
         })
-        .then(function(res) { return res.json(); })
+        .then(function(res) { return parseJsonResponse<any>(res); })
         .then(function(data) {
           _queueLaunching = false;
-          if (data.error) {
-            showToast(data.error, "error");
-            // 失败回填队首，不丢消息
-            state.crossSessionQueue.unshift(item);
-            persistCrossSessionQueue();
-            renderCrossSessionQueue();
-            return null;
-          }
           return activateSession(data);
         })
         .catch(function(error) {
@@ -462,15 +449,8 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
             initialInput: item.text
           }))
         })
-        .then(function(res) { return res.json(); })
+        .then(function(res) { return parseJsonResponse<any>(res); })
         .then(function(data) {
-          if (data.error) {
-            showToast(data.error, "error");
-            state.crossSessionQueue.splice(idx, 0, item);
-            persistCrossSessionQueue();
-            renderCrossSessionQueue();
-            return null;
-          }
           return activateSession(data);
         })
         .catch(function(error) {
@@ -494,6 +474,9 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
       }
 
       export function flushCrossSessionQueue() {
+        // 未登录 / 已登出：绝不自动起会话。队列是从 localStorage 恢复的，
+        // 没有这道门禁时它会在登录页（或登出后）拿着 401 去 POST /api/commands。
+        if (!state.config) return;
         if (state.crossSessionQueue.length === 0) return;
         if (hasAnyBusySession()) return;
         if (_queueLaunching) return;
@@ -525,6 +508,9 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
           renderCrossSessionQueueUnsafe();
         } catch (error) {
           console.error("[wand] cross-session queue render failed:", error);
+        } finally {
+          // 每次变更后对齐节拍器：有队列就跑，排空就停。
+          syncCrossSessionQueueTicker();
         }
       }
 
@@ -595,18 +581,40 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         container.innerHTML = header + items;
       }
 
-      // 定时刷新排队项的等待时间 + 尝试 flush
-      setInterval(function() {
-        if (state.crossSessionQueue.length > 0) {
-          // 只更新 age 文本，不重建整个 DOM
-          var ages = document.querySelectorAll(".queue-item-age");
-          state.crossSessionQueue.forEach(function(item, i) {
-            if (ages[i]) ages[i].textContent = formatQueueAge(item.queuedAt);
-          });
-          // 尝试 flush 作为保底（防止 ended 事件 flush 失败）
-          flushCrossSessionQueue();
+      // 跨会话排队条的节拍器：只在队列非空时运行。以前它是模块级 interval，
+      // 登出后仍会每 5s 尝试 flush，把已登出的用户当成能开会话的人；
+      // 现在由 renderCrossSessionQueue() 在每次变更后负责装/卸。
+      var CROSS_SESSION_QUEUE_TICK_MS = 5000;
+      var crossSessionQueueTicker: ReturnType<typeof setInterval> | null = null;
+
+      function tickCrossSessionQueue() {
+        if (state.crossSessionQueue.length === 0) {
+          stopCrossSessionQueueTicker();
+          return;
         }
-      }, 5000);
+        // 只更新 age 文本，不重建整个 DOM
+        var ages = document.querySelectorAll(".queue-item-age");
+        state.crossSessionQueue.forEach(function(item, i) {
+          if (ages[i]) ages[i].textContent = formatQueueAge(item.queuedAt);
+        });
+        // 尝试 flush 作为保底（防止 ended 事件 flush 失败）
+        flushCrossSessionQueue();
+      }
+
+      export function stopCrossSessionQueueTicker() {
+        if (crossSessionQueueTicker === null) return;
+        clearInterval(crossSessionQueueTicker);
+        crossSessionQueueTicker = null;
+      }
+
+      function syncCrossSessionQueueTicker() {
+        if (state.crossSessionQueue.length === 0) {
+          stopCrossSessionQueueTicker();
+          return;
+        }
+        if (crossSessionQueueTicker !== null) return;
+        crossSessionQueueTicker = setInterval(tickCrossSessionQueue, CROSS_SESSION_QUEUE_TICK_MS);
+      }
 
       // Delegate click events for cross-session queue items
       document.addEventListener("click", function(e) {
@@ -668,18 +676,15 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
             initialInput: value || undefined
           }))
         })
-        .then(function(res) { return res.json(); })
+        .then(function(res) { return parseJsonResponse<any>(res); })
         .then(function(data) {
-          if (data.error) {
-            showToast(data.error, "error");
-            return null;
-          }
           clearDraftValueForSession(data.id);
           if (!state.selectedId && inputBox) inputBox.value = "";
           return activateSession(data);
         })
         .catch(function(error) {
-          showToast((error && error.message) || (preferredTool === "codex"
+          // 创会话失败：草稿与输入框内容保持原样，只提示可读原因（含 HTTP 状态码）。
+          showToast(getErrorMessage(error, preferredTool === "codex"
             ? "无法启动 Codex 会话。"
             : "无法启动 Claude 会话。"), "error");
         });
@@ -1021,7 +1026,6 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         var lastTs = typeof lastSubmit === "number" ? lastSubmit : lastSubmit && lastSubmit.at || 0;
         var lastInput = typeof lastSubmit === "number" ? input : lastSubmit && lastSubmit.input;
         if (rapidDuplicateGuardEnabled && lastInput === input && nowTs - lastTs < DUPLICATE_SUBMIT_WINDOW_MS) {
-          console.log("[wand] postStructuredInput: duplicate submit (within " + DUPLICATE_SUBMIT_WINDOW_MS + "ms) ignored for session", session.id);
           return Promise.resolve();
         }
         var submitStamp = rapidDuplicateGuardEnabled ? { at: nowTs, input: input } : null;
@@ -1924,10 +1928,6 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
           // If WebSocket is disconnected, queue for flush on reconnect
           if (!state.wsConnected) {
             enqueuePendingInput(input);
-            console.log("[wand] postInput: session not running, queued for reconnect", {
-              sessionId: requestSessionId,
-              inputLength: input.length
-            });
             return Promise.resolve();
           }
           console.warn("[wand] postInput: session not running, skipping send", {
@@ -1943,10 +1943,6 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
             throw new Error("网络已断开，消息未发送。");
           }
           enqueuePendingInput(input);
-          console.log("[wand] postInput: WebSocket disconnected, queued message", {
-            sessionId: requestSessionId,
-            inputLength: input.length
-          });
           return Promise.resolve();
         }
 
@@ -2561,9 +2557,6 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
           queue.push(item.input);
         });
         state.pendingMessages = [];
-        if (dropped > 0) {
-          console.log("[wand] flushPendingMessages: dropped " + dropped + " stale input(s)");
-        }
 
         var sendPromise = Promise.resolve();
         queue.forEach(function(input) {
@@ -2594,10 +2587,6 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
               // Don't re-queue on session-unavailable — the session will auto-resume
               // on the user's next message, and stale queue items would cause duplicates
               if (isSessionUnavailableError(error)) {
-                console.log("[wand] sendInputDirect: session unavailable, dropping", {
-                  sessionId: requestSessionId,
-                  errorCode: error.errorCode
-                });
                 return null;
               }
               throw error;

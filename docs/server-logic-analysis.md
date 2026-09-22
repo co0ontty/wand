@@ -184,14 +184,23 @@ PTY daemon 以 config 路径哈希区分 socket/token/pid；客户端重连对�
 主要文件：`ws-broadcast.ts`、客户端 `websocket.ts` / `WandSocket`。
 
 - `subscribe` 默认替换订阅；Web 分屏使用 `mode:"add"`。`resync` 请求新的 init。
-- `pty_input` / resize 要求订阅对应 PTY；ACK-capable 客户端按未确认字节数暂停/恢复 PTY。
+- `pty_input` / resize 要求订阅对应 PTY。
+- **ACK 客户端落后时只降级它自己，绝不暂停会话**（2026-09-22 改）：某客户端未确认字节 ≥ 512KB
+  就不再给它发 raw PTY 分片（终端每帧整屏重绘，中间帧对它是过期帧），等它 ack 回落到 ≤128KB
+  时发一条 `resync_required`（同一客户端同一会话最小间隔 5s）让它按终端快照重建屏幕。
+  历史实现是 `pausePtyOutput`（= 暂停服务端读 daemon）：任何一个客户端停止 ack
+  （手机切后台 / WebView 被节流 / 标签页休眠）会让**整个会话对所有客户端冻结**，连
+  `pty-output.log` 与 SQLite 检查点一起停，且只能靠那个客户端 ack 回落才恢复——
+  已按秒级真实复现，见下。
 - output 约 16ms 合流；不同 payload 形状先 flush，避免 messages/lastMessage/raw chunk 混成歧义事件。
 - 非 output 事件前 flush output，保证最终文字在 ended/status 前到达。
 - output 按客户端/会话打 seq；缺口或 `resync_required` 触发快照恢复。
 - 未订阅的 raw PTY 不广播；**非 raw 的结构化/状态事件仍可全局 fanout**，原生全局通知 socket 利用这一点。
 - 心跳负责断线检测；HTTP 快照、WS init 和本地乐观状态仍需独立处理新旧顺序。
 
-当前非 ACK 背压分支会丢新业务事件，不仅 output；但只有丢 output 才记录 pending resync。若最后只丢 ended/status，UI 可能没有主动纠正信号。这是静态确认的协议缺口，尚未复现真实慢网络卡死（R06）。
+非 ACK 背压分支会丢新业务事件，不仅 output；但只有丢 output 才记录 pending resync。若最后只丢 ended/status，UI 可能没有主动纠正信号。这是静态确认的协议缺口（R06 的 ACK 分支已修，非 ACK 分支仍未修）。
+
+**R06 已复现并修掉一半（2026-09-22）**：用真实服务 + 两个 WS 客户端复现——声明 `ptyAck` 但停止 ack 的那个客户端累计到 512KB 未确认后触发 `pausePtyOutput`，服务端下一秒起 ingest 直接从 70KB/s 掉到 0 并且**不再恢复**（要求 8 次采样全为 0），同时另一个全健康客户端也被冻结；这正好解释“手机端画面卡住但输入（走 HTTP）仍生效、pi 侧记下 9 次 shift-tab 却看不到反馈”。改成 per-client 降级后同样场景：ingest 全程 70KB/s，健康客户端一帧不少，僵尸客户端在 513KB 处停发、回前台 ack 后收到 1 次重建并恢复 70KB/s。回归用例：`tests/ws-broadcast.test.ts`（`一个停止 ack 的客户端只降级自己…`）。
 
 ## 9. “任务”的四套实体不能混同
 
@@ -280,7 +289,7 @@ review 发送经 `sendMessage`：请求被接受（入队或启动）后才标 s
 | 真正字符损坏 / 恢复后消息不对 | structured-exec-pump、daemon 解码、recoverDetachedRuns | R03、R07 |
 | 编辑器覆盖外部文件 | file-write + code-editor repository/controller | R04 |
 | GitHub 连接/列表串状态 | github-connector + issues host | R05 |
-| 慢客户端不停止转圈 | ws-broadcast 背压、客户端 reducer | R06 |
+| 慢客户端不停止转圈 | ws-broadcast 背压、客户端 reducer | R06（ACK 分支已修，非 ACK 丢弃分支待改） |
 | 原生模型/队列回退 | 各端 ChatStore、WandSocket | R08 |
 | 密码库敏感字段范围 | storage + password-manager + extension | R09 |
 | worktree/暂存区/删除意外 | workspace routes、git-*、Registry | R10 |

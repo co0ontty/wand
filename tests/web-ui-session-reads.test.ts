@@ -5,11 +5,13 @@ import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import { createSessionReads } from "../src/web-ui/browser/session-reads.js";
 import { parseJsonResponse } from "../src/web-ui/react/http-adapter.js";
+import { getErrorMessage } from "../src/error-utils.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((yes) => { resolve = yes; });
-  return { promise, resolve };
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
 }
 const tick = async () => { for (let i = 0; i < 25; i++) await Promise.resolve(); };
 
@@ -20,13 +22,22 @@ function harness() {
   };
   const requests: Array<{ url: string; response: ReturnType<typeof deferred<Response>> }> = [];
   const errors: unknown[] = [];
+  const toasts: Array<{ message: string; tone?: string }> = [];
   const noop = () => {};
   const fallback = new Proxy({}, { get: () => noop });
   const dependencies: Record<string, unknown> = {
     "./state": { state, writeStoredBoolean: noop },
     "./session-reads": { createSessionReads },
     "../react/http-adapter": { parseJsonResponse },
-    "./chat-scroll": new Proxy({}, { get: (_, key) => key === "normalizeStructuredSnapshot" ? (s: unknown) => s : noop }),
+    "../../error-utils.js": { getErrorMessage },
+    "./notifications": new Proxy(
+      { showToast: (message: string, tone?: string) => { toasts.push({ message, tone }); } },
+      { get: (obj: Record<string, unknown>, key: string) => obj[key] ?? noop },
+    ),
+    "./chat-scroll": new Proxy({}, { get: (_, key) => {
+      if (key === "normalizeStructuredSnapshot" || key === "stripRenderOnlyStructuredMessages") return (value: unknown) => value;
+      return noop;
+    } }),
     "./input": new Proxy({}, { get: (_, key) => key === "buildMessagesForRender" ? (_s: unknown, messages: unknown) => messages : noop }),
   };
   const source = readFileSync(new URL("../src/web-ui/browser/session-engine.ts", import.meta.url), "utf8");
@@ -41,7 +52,7 @@ function harness() {
     fetch: (url: string) => { const response = deferred<Response>(); requests.push({ url, response }); return response.promise; },
   });
   const respond = (index: number, body: unknown, status = 200) => requests[index].response.resolve(new Response(JSON.stringify(body), { status }));
-  return { state, api, requests, respond, errors };
+  return { state, api, requests, respond, errors, toasts };
 }
 
 test("shared session reads protect only fields updated during a read and reset on logout", () => {
@@ -113,12 +124,69 @@ test("logout invalidates pending list, detail, and pagination even when the same
   const h = harness();
   h.state.selectedId = "A"; h.state.sessions = [{ id: "A", messageOffset: 40, messages: [] }];
   const list = h.api.loadSessions(); const detail = h.api.loadOutput("A"); h.api.fetchEarlierMessages();
-  h.api.logout();
+  // 用户主动登出要先等服务端确认（requests[3]），确认后才注销本地读取。
+  const logout = h.api.logout();
+  h.respond(3, { ok: true }); await logout;
   h.state.selectedId = "A"; h.state.sessions = [{ id: "A", messageOffset: 40, messages: ["new login"] }];
   h.respond(0, [{ id: "old login" }]); h.respond(1, { id: "A", title: "old login" }); h.respond(2, { messages: ["old history"] });
   await Promise.all([list, detail]); await tick();
   assert.equal(h.state.sessions[0].title, undefined);
   assert.deepEqual(h.state.sessions[0].messages, ["new login"]);
+});
+
+test("user logout keeps the session when the server refuses to revoke it", async () => {
+  const h = harness();
+  h.state.selectedId = "A"; h.state.sessions = [{ id: "A" }];
+  const logout = h.api.logout();
+  assert.deepEqual(h.state.sessions, [{ id: "A" }], "服务端确认前不拆本地状态");
+  h.respond(0, { error: "无法注销。" }, 500);
+  await logout;
+  assert.notEqual(h.state.config, null, "注销失败必须留在已登录态，而不是假登出");
+  assert.deepEqual(h.state.sessions, [{ id: "A" }]);
+  assert.deepEqual(h.toasts, [{ message: "注销失败（HTTP 500），请重试。", tone: "error" }]);
+});
+
+test("user logout keeps the local session when the request never reaches the server", async () => {
+  const h = harness();
+  h.state.selectedId = "A"; h.state.sessions = [{ id: "A" }];
+  const logout = h.api.logout();
+  h.requests[0].response.reject(new TypeError("Failed to fetch"));
+  await logout;
+  assert.notEqual(h.state.config, null);
+  assert.deepEqual(h.toasts, [{ message: "Failed to fetch", tone: "error" }]);
+});
+
+test("logout trusts any 2xx even when the body is not JSON", async () => {
+  const h = harness();
+  h.state.selectedId = "A"; h.state.sessions = [{ id: "A" }];
+  const logout = h.api.logout();
+  h.requests[0].response.resolve(new Response("ok", { status: 200 }));
+  await logout;
+  assert.equal(h.state.config, null, "路由已经 revoke + clearCookie，不能因为响应体不是 JSON 就留在已登录态");
+  assert.equal(h.state.sessions.length, 0);
+  assert.deepEqual(h.toasts, []);
+});
+
+test("user logout tears down only after the server revokes the session", async () => {
+  const h = harness();
+  h.state.selectedId = "A"; h.state.sessions = [{ id: "A" }];
+  const logout = h.api.logout();
+  h.respond(0, { ok: true });
+  await logout;
+  assert.equal(h.state.config, null);
+  assert.equal(h.state.sessions.length, 0);
+  assert.equal(h.state.selectedId, null);
+  assert.deepEqual(h.toasts, []);
+});
+
+test("a 401 from the list ends the local session without a logout error", async () => {
+  const h = harness();
+  h.state.selectedId = "A"; h.state.sessions = [{ id: "A" }];
+  const list = h.api.loadSessions({ skipSelectedOutputReload: true });
+  h.respond(0, { error: "expired" }, 401);
+  await list;
+  assert.equal(h.state.config, null, "服务端已判定会话失效 → 本地跟着收尾");
+  assert.deepEqual(h.toasts, [], "被动收尾不弹「注销失败」");
 });
 
 test("a list started before a push retains newly created sessions and fresh status fields", async () => {
@@ -159,6 +227,83 @@ test("pagination does not prepend twice when a snapshot already changed the wind
   h.state.sessions[0] = { id: "A", messageOffset: 0, messages: ["already loaded", "tail"] };
   h.respond(0, { messages: ["duplicate"] }); await tick();
   assert.deepEqual(h.state.sessions[0].messages, ["already loaded", "tail"]);
+});
+
+test("slim list snapshots keep the local output buffer and messages", async () => {
+  const h = harness();
+  h.state.selectedId = "A";
+  h.state.sessions = [{ id: "A", output: "local terminal tail", messages: [{ role: "user", content: "hi" }] }];
+  const pending = h.api.loadSessions({ skipSelectedOutputReload: true });
+  // 真实列表响应形状：toSessionListItemDTO 固定 output:""，且不带 messages。
+  h.respond(0, [{ id: "A", output: "" }]);
+  await pending;
+  assert.equal(h.state.sessions[0].output, "local terminal tail", "列表占位输出不得清空本地缓冲");
+  assert.equal(h.state.sessions[0].messages[0].content, "hi");
+});
+
+test("slim list snapshots that omit permission fields keep the local pending state", async () => {
+  const h = harness();
+  h.state.selectedId = "A";
+  h.state.sessions = [{ id: "A", permissionBlocked: true, pendingEscalation: { requestId: "local" } }];
+  const pending = h.api.loadSessions({ skipSelectedOutputReload: true });
+  // 说明：JSON.stringify 会丢掉 undefined，所以「键存在但值为 undefined」在
+  // 线上不可表达；这里覆盖的是键缺席（JS 侧与 undefined 同义）。
+  h.respond(0, [{ id: "A", output: "" }]);
+  await pending;
+  assert.equal(h.state.sessions[0].permissionBlocked, true);
+  assert.deepEqual(h.state.sessions[0].pendingEscalation, { requestId: "local" });
+});
+
+test("full session snapshots win over longer stale local output and messages", () => {
+  const h = harness();
+  h.state.selectedId = "A";
+  const merged = h.api.mergeServerSession(
+    { id: "A", output: "old output that happens to be longer", messages: [{ role: "assistant", content: [{ text: "stale longer text" }] }] },
+    { id: "A", output: "new", messages: [{ role: "user", content: "new prompt" }] },
+  );
+  assert.equal(merged.output, "new");
+  assert.deepEqual(merged.messages, [{ role: "user", content: "new prompt" }]);
+});
+
+test("structured in-flight optimistic blocks survive only for the same request", () => {
+  const h = harness();
+  h.state.selectedId = "A";
+  const local = {
+    id: "A", sessionKind: "structured", status: "running",
+    structuredState: { inFlight: true, activeRequestId: "request-1" },
+    messages: [{ role: "assistant", content: [{ __processing: true, text: "streaming" }] }],
+  };
+  const sameRequest = h.api.mergeServerSession(local, {
+    id: "A", sessionKind: "structured", structuredState: { inFlight: false, activeRequestId: "request-1" },
+    messages: [{ role: "user", content: "prompt" }],
+  });
+  assert.deepEqual(sameRequest.messages, local.messages);
+  assert.equal(sameRequest.structuredState.inFlight, true);
+
+  const newerRequest = h.api.mergeServerSession(local, {
+    id: "A", sessionKind: "structured", structuredState: { inFlight: false, activeRequestId: "request-2" },
+    messages: [{ role: "assistant", content: [{ text: "completed" }] }],
+  });
+  assert.deepEqual(newerRequest.messages, [{ role: "assistant", content: [{ text: "completed" }] }]);
+  assert.equal(newerRequest.structuredState.inFlight, false);
+});
+
+test("explicit permission fields from the server clear stale local permission state", () => {
+  const h = harness();
+  h.state.selectedId = "A";
+  const cleared = h.api.mergeServerSession(
+    { id: "A", permissionBlocked: true, pendingEscalation: { requestId: "old" } },
+    { id: "A", permissionBlocked: false, pendingEscalation: null },
+  );
+  assert.equal(cleared.permissionBlocked, false);
+  assert.equal(cleared.pendingEscalation, null);
+
+  const preserved = h.api.mergeServerSession(
+    { id: "A", permissionBlocked: true, pendingEscalation: { requestId: "local" } },
+    { id: "A", status: "running" },
+  );
+  assert.equal(preserved.permissionBlocked, true);
+  assert.deepEqual(preserved.pendingEscalation, { requestId: "local" });
 });
 
 for (const kind of ["new-session", "missions"]) {

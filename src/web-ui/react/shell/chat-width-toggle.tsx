@@ -19,7 +19,7 @@ interface ChatWidthOption {
   readonly title: string;
 }
 
-export const CHAT_WIDTH_OPTIONS: readonly ChatWidthOption[] = [
+const CHAT_WIDTH_OPTIONS: readonly ChatWidthOption[] = [
   {
     mode: "full",
     label: "铺满",

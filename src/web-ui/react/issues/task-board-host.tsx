@@ -82,6 +82,7 @@ import {
 import { wandOverlay } from "../overlay-controller";
 import { confirmDiscardTaskDraft } from "../task-draft-guard";
 import { readTaskBoardViewState, writeTaskBoardViewState } from "./task-board-view-state";
+import { createGeneratedTitlePoller, type GeneratedTitlePoller } from "./generated-title-poll";
 
 interface DraftState {
   workspaceId: string;
@@ -99,19 +100,6 @@ interface DraftState {
 function emptyDraft(workspaceId: string, status: WandTaskStatus = "todo", agent: WandTaskAgent = createDefaultIssueAgent()): DraftState {
   // 用户没挑优先级就默认「低」，不再落成「无优先级」。
   return { workspaceId, title: "", description: "", status, priority: DEFAULT_WAND_TASK_PRIORITY, dueDate: "", labels: "", milestoneId: "", agent };
-}
-
-// 自动生成标题是后台完成的，创建响应里只有描述首行占位；这里短轮询几次，拿到模型标题就刷新。
-const AUTO_TITLE_POLL_DELAYS_MS = [1_200, 2_000, 3_000, 5_000, 8_000];
-
-async function refreshGeneratedTitle(taskId: string, placeholder: string, reload: () => Promise<void>): Promise<void> {
-  for (const delay of AUTO_TITLE_POLL_DELAYS_MS) {
-    await new Promise((resolve) => setTimeout(resolve, delay));
-    await reload();
-    const task = await taskBoardRepository.get(taskId).catch(() => null);
-    // 标题还是占位值说明后台还没总结完（或总结失败），继续等到下一次轮询。
-    if (task && task.title && task.title !== placeholder) return;
-  }
 }
 
 function agentOf(task: WandTaskListed, lastAgent?: WandTaskAgent | null): WandTaskAgent {
@@ -182,6 +170,7 @@ export function TaskBoardHost({
   const workspaceGenerationRef = React.useRef(0);
   const titleRef = React.useRef<HTMLTextAreaElement>(null);
   const searchRef = React.useRef<HTMLInputElement>(null);
+  const titlePollerRef = React.useRef<GeneratedTitlePoller | null>(null);
 
   React.useEffect(() => {
     if (!notice) return;
@@ -218,6 +207,15 @@ export function TaskBoardHost({
       // 轮询失败时保留上一次成功列表，避免瞬时错误把已选目录清掉。
     }
   }, []);
+
+  // 看板关闭时停掉自动标题轮询：轮询每轮都会 reload + setState，用户看不见时不该继续跑。
+  React.useEffect(() => {
+    if (controller.open) return;
+    titlePollerRef.current?.cancel();
+  }, [controller.open]);
+
+  // 组件整体卸载（登出 / 切到旧外壳）时兜底取消。
+  React.useEffect(() => () => { titlePollerRef.current?.cancel(); }, []);
 
   React.useEffect(() => {
     if (!controller.open) return;
@@ -342,7 +340,11 @@ export function TaskBoardHost({
       if (assignError) setError(assignError);
       else setNotice(`已创建任务「${created.title}」${issueCreateDispatches(draft.status) && submitDescription ? "，工具已启动" : "，可在详情中启动执行"}。`);
       if (!submitTitle && created.titleSource === "auto") {
-        void refreshGeneratedTitle(created.id, created.title, reload);
+        titlePollerRef.current ??= createGeneratedTitlePoller({
+          getTask: (taskId) => taskBoardRepository.get(taskId),
+          reload,
+        });
+        void titlePollerRef.current.start(created.id, created.title);
       }
     });
   }, [createMore, draft, loading, rememberAgent, reload, runFor]);

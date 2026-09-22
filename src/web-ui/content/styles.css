@@ -6760,11 +6760,6 @@
       --qb-shadow: 0 4px 18px rgba(0, 0, 0, 0.10), 0 1px 3px rgba(0, 0, 0, 0.06);
       --qb-shadow-hover: 0 8px 24px rgba(0, 0, 0, 0.14), 0 1px 3px rgba(0, 0, 0, 0.06);
     }
-    [data-theme="dark"] .queue-bar {
-      --qb-bg: rgba(40, 38, 34, 0.60);
-      --qb-bg-strong: rgba(60, 56, 50, 0.74);
-      --qb-border: rgba(255, 255, 255, 0.12);
-    }
 
     /* 宿主：绝对定位浮在 .input-panel 顶边线「上方」、右侧贴边。
        host 本身不吃指针事件，让聊天流仍可滚动；内部气泡再各自开启 pointer-events。 */

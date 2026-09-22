@@ -66,6 +66,7 @@ interface DaemonStructuredRun {
   status: "running" | "exited";
   exitCode: number | null;
   signal: number | null;
+  exitedAt: number | null;
   stdoutSeq: number;
   stderrSeq: number;
   stdoutLog: string;
@@ -77,6 +78,55 @@ interface DaemonStructuredRun {
 }
 
 const MAX_STRUCTURED_RUNS = 256;
+/**
+ * Exited records exist so a web restart can adopt a finished turn. Each one
+ * carries a replay log capped at STRUCTURED_RUN_LOG_MAX_CHARS, so a count-only
+ * bound would still let the daemon retain 256 x 8M chars of logs; the exited
+ * set is bounded by aggregate log size as well, and old records expire.
+ */
+const MAX_EXITED_STRUCTURED_RUNS = 128;
+const EXITED_STRUCTURED_RUN_LOG_MAX_CHARS = 32 * 1024 * 1024;
+const EXITED_STRUCTURED_RUN_RETENTION_MS = 2 * 60 * 60 * 1000;
+
+/** Retention view of one structured run, in map insertion order (oldest first). */
+export interface StructuredRunRetentionEntry {
+  runId: string;
+  status: "running" | "exited";
+  exitedAt: number | null;
+  logChars: number;
+}
+
+/**
+ * Oldest-first ids of exited runs that fall outside the count, retained-log, or
+ * age budget. Running runs are never evicted: their child is still live.
+ */
+export function structuredRunEvictionOrder(
+  entries: readonly StructuredRunRetentionEntry[],
+  now = Date.now(),
+): string[] {
+  let total = entries.length;
+  let exitedCount = 0;
+  let exitedLogChars = 0;
+  for (const entry of entries) {
+    if (entry.status !== "exited") continue;
+    exitedCount++;
+    exitedLogChars += entry.logChars;
+  }
+  const evicted: string[] = [];
+  for (const entry of entries) {
+    if (entry.status !== "exited") continue;
+    const expired = entry.exitedAt !== null && now - entry.exitedAt >= EXITED_STRUCTURED_RUN_RETENTION_MS;
+    const overBudget = total > MAX_STRUCTURED_RUNS
+      || exitedCount > MAX_EXITED_STRUCTURED_RUNS
+      || exitedLogChars > EXITED_STRUCTURED_RUN_LOG_MAX_CHARS;
+    if (!expired && !overBudget) continue;
+    evicted.push(entry.runId);
+    total--;
+    exitedCount--;
+    exitedLogChars -= entry.logChars;
+  }
+  return evicted;
+}
 
 const MAX_REQUEST_BUFFER = 4 * 1024 * 1024;
 
@@ -246,13 +296,18 @@ export async function runTerminalDaemon(configPath: string): Promise<void> {
     stderrTruncated: run.stderrTruncated,
   });
 
-  /** Evict oldest exited records once the map outgrows its bound. */
+  /** Evict oldest exited records until counts, retained logs, and age are back in budget. */
   const evictStaleStructuredRuns = (): void => {
-    if (structuredRuns.size <= MAX_STRUCTURED_RUNS) return;
+    const entries: StructuredRunRetentionEntry[] = [];
     for (const [runId, run] of structuredRuns) {
-      if (structuredRuns.size <= MAX_STRUCTURED_RUNS) break;
-      if (run.status === "exited") structuredRuns.delete(runId);
+      entries.push({
+        runId,
+        status: run.status,
+        exitedAt: run.exitedAt,
+        logChars: run.stdoutLog.length + run.stderrLog.length,
+      });
     }
+    for (const runId of structuredRunEvictionOrder(entries)) structuredRuns.delete(runId);
   };
 
   const structuredSpawn = (request: StructuredSpawnRequest): StructuredRunState => {
@@ -273,6 +328,7 @@ export async function runTerminalDaemon(configPath: string): Promise<void> {
       status: "running",
       exitCode: null,
       signal: null,
+      exitedAt: null,
       stdoutSeq: 0,
       stderrSeq: 0,
       stdoutLog: "",
@@ -315,6 +371,7 @@ export async function runTerminalDaemon(configPath: string): Promise<void> {
       run.child = null;
       run.status = "exited";
       run.exitCode = code;
+      run.exitedAt = Date.now();
       run.signal = signalName === null || signalName === undefined ? null : Number(signalName) || signalNumberFromName(signalName);
       broadcast({
         kind: "event",
@@ -324,6 +381,7 @@ export async function runTerminalDaemon(configPath: string): Promise<void> {
         exitCode: run.exitCode ?? undefined,
         signal: run.signal ?? undefined,
       });
+      evictStaleStructuredRuns();
     });
     return serializeStructuredRun(run);
   };

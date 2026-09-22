@@ -1798,16 +1798,6 @@ export class ProcessManager extends EventEmitter {
     return record.terminalState.snapshot();
   }
 
-  pauseOutput(id: string): void {
-    const record = this.sessions.get(id);
-    if (record?.ptyProcess && record.status === "running") record.ptyProcess.pause();
-  }
-
-  resumeOutput(id: string): void {
-    const record = this.sessions.get(id);
-    if (record?.ptyProcess && record.status === "running") record.ptyProcess.resume();
-  }
-
   /**
    * Finalize provider-only state while leaving the owning PTY shell alive. The
    * session itself remains running so terminal input can continue normally.

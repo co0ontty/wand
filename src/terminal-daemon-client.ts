@@ -46,8 +46,6 @@ interface PendingRequest {
 class RemoteTerminalProcess implements TerminalProcess {
   private readonly dataListeners = new Set<(event: TerminalDataEvent) => void>();
   private readonly exitListeners = new Set<(event: TerminalExitEvent) => void>();
-  private paused = false;
-  private pausedEvents: TerminalDataEvent[] = [];
   private undeliveredEvents: TerminalDataEvent[] = [];
   private pendingExit: TerminalExitEvent | null = null;
 
@@ -76,18 +74,6 @@ class RemoteTerminalProcess implements TerminalProcess {
     });
   }
 
-  pause(): void {
-    this.paused = true;
-  }
-
-  resume(): void {
-    if (!this.paused) return;
-    this.paused = false;
-    const pending = this.pausedEvents;
-    this.pausedEvents = [];
-    for (const event of pending) this.emitData(event);
-  }
-
   onData(listener: (event: TerminalDataEvent) => void): { dispose(): void } {
     this.dataListeners.add(listener);
     if (this.undeliveredEvents.length > 0) {
@@ -113,10 +99,6 @@ class RemoteTerminalProcess implements TerminalProcess {
   }
 
   acceptData(event: TerminalDataEvent): void {
-    if (this.paused) {
-      this.pausedEvents = appendTerminalChunkWindow(this.pausedEvents, event);
-      return;
-    }
     if (this.dataListeners.size === 0) {
       this.undeliveredEvents = appendTerminalChunkWindow(this.undeliveredEvents, event);
       return;
@@ -138,8 +120,6 @@ class RemoteTerminalProcess implements TerminalProcess {
 class RemoteStructuredProcess implements StructuredExecProcess {
   private readonly streamListeners = new Set<(event: StructuredStreamEvent) => void>();
   private readonly exitListeners = new Set<(event: StructuredExitEvent) => void>()
-  private paused = false;
-  private pausedEvents: StructuredStreamEvent[] = [];
   private undeliveredEvents: StructuredStreamEvent[] = [];
   private pendingExit: StructuredExitEvent | null = null;
   private lastStdoutSeq = 0;
@@ -186,10 +166,6 @@ class RemoteStructuredProcess implements StructuredExecProcess {
     this.deliveredChars[event.stream] += event.data.length;
     if (event.stream === "stdout") this.lastStdoutSeq = Math.max(this.lastStdoutSeq, event.seq);
     else this.lastStderrSeq = Math.max(this.lastStderrSeq, event.seq);
-    if (this.paused) {
-      this.pausedEvents.push(event);
-      return;
-    }
     if (this.streamListeners.size === 0) {
       this.undeliveredEvents.push(event);
       if (this.undeliveredEvents.length > 4096) this.undeliveredEvents.shift();
@@ -217,18 +193,6 @@ class RemoteStructuredProcess implements StructuredExecProcess {
     } else if (stderrDelta) {
       this.acceptStream({ stream: "stderr", data: stderrDelta, seq: ++this.syntheticSeq });
     }
-  }
-
-  pause(): void {
-    this.paused = true;
-  }
-
-  resume(): void {
-    if (!this.paused) return;
-    this.paused = false;
-    const pending = this.pausedEvents;
-    this.pausedEvents = [];
-    for (const event of pending) this.emitStream(event);
   }
 
   private emitStream(event: StructuredStreamEvent): void {

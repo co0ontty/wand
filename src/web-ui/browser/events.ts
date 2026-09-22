@@ -1,5 +1,7 @@
 import { state } from "./state";
 import "./i18n";
+import { HttpResponseError, parseJsonResponse } from "../react/http-adapter";
+import { getErrorMessage } from "../../error-utils.js";
 import { escapeHtml } from "./utils";
 import { formatInlineResult, scheduleChatRender } from "./chat-render";
 import { applyExpandedState, persistElementExpandState, persistSelectedId, scrollChatToBottom, setPersistedAgentSelection } from "./chat-scroll";
@@ -21,17 +23,18 @@ import { setupVisualViewportHandlers } from "./viewport";
           return;
         }
         fetch("/api/sessions/" + encodeURIComponent(state.selectedId) + "/tool-content/" + encodeURIComponent(toolUseId), { credentials: "same-origin" })
-          .then(function(res) { return res.json(); })
+          .then(function(res) { return parseJsonResponse<any>(res); })
           .then(function(data: any) {
-            if (data.error) {
-              callback(data.error, null);
-            } else {
-              state.toolContentCache[cacheKey] = data;
-              callback(null, data);
-            }
+            state.toolContentCache[cacheKey] = data;
+            callback(null, data);
           })
-          .catch(function() {
-            callback("加载失败", null);
+          .catch(function(error: unknown) {
+            // 失败一律不写缓存，并把状态码带给用户：404 表示内容已不存在，5xx 才值得重试。
+            if (error instanceof HttpResponseError) {
+              callback(getErrorMessage(error, "加载失败") + "（HTTP " + error.status + "）", null);
+              return;
+            }
+            callback(getErrorMessage(error, "加载失败"), null);
           });
       }
 

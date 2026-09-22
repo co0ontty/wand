@@ -33,6 +33,8 @@ export interface GitStatusRefreshController {
   /** 工作区可能变了 → 合并成一次刷新。 */
   schedule(): void;
   startPolling(): void;
+  /** 登出 / 拆壳时停掉兜底轮询，避免未登录状态下继续打接口。 */
+  stop(): void;
 }
 
 const defaultTimers: GitStatusRefreshTimers = {
@@ -68,5 +70,16 @@ export function createGitStatusRefresh<Handle = ReturnType<typeof globalThis.set
     }, options.pollMs);
   }
 
-  return { schedule, startPolling };
+  function stop(): void {
+    if (refreshTimer !== null) {
+      timers.clearTimeout(refreshTimer);
+      refreshTimer = null;
+    }
+    if (pollTimer !== null) {
+      timers.clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  return { schedule, startPolling, stop };
 }

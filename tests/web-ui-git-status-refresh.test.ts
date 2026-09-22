@@ -150,3 +150,33 @@ test("兜底轮询只在可见且有选中会话时刷新，重复启动只有�
   fake.fireInterval();
   assert.deepEqual(refreshed, ["session-4"]);
 });
+
+test("stop 清掉待决刷新与轮询，停掉后再 startPolling 只留一个定时器", () => {
+  const fake = fakeTimers();
+  const refreshed: string[] = [];
+  const controller = createGitStatusRefresh({
+    coalesceMs: 1200,
+    pollMs: 20000,
+    selectedSessionId: () => "session-5",
+    hidden: () => false,
+    refresh: (sessionId) => refreshed.push(sessionId),
+    timers: fake.timers,
+  });
+
+  controller.schedule();
+  controller.startPolling();
+  assert.equal(fake.pending.length, 1);
+  assert.equal(fake.intervals.length, 1);
+
+  controller.stop();
+  assert.equal(fake.pending.length, 0, "待决刷新要一起清掉，否则登出后还会打一次接口");
+  assert.equal(fake.intervals.length, 0);
+  assert.deepEqual(refreshed, []);
+
+  // 停掉之后还能重新登录复用：不残留旧定时器，也不会被重建两次。
+  controller.startPolling();
+  controller.startPolling();
+  assert.equal(fake.intervals.length, 1);
+  fake.fireInterval();
+  assert.deepEqual(refreshed, ["session-5"]);
+});

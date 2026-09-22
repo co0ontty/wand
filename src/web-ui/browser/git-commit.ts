@@ -72,6 +72,10 @@ import { closeReactOverlays } from "./react-overlay-coordinator";
         gitStatusRefresh.startPolling();
       }
 
+      export function stopGitStatusPolling() {
+        gitStatusRefresh.stop();
+      }
+
       export function loadGitStatus(sessionId: any, options?: any) {
         if (!sessionId) return Promise.resolve(null);
         var force = options && options.force;

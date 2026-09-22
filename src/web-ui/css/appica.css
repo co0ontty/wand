@@ -62,7 +62,9 @@
 @source "../../../node_modules/@appica/ui-react/dist";
 @source "../react";
 
-/* Wand renders dark mode through [data-theme="dark"], Appica defaults to .dark. */
+/* 当前没有任何 shell 设置 data-theme，深色模式尚未接线：Wand 只有一套浅色 token。
+   保留这个 variant 只是为了将来真正接上深色模式时，Appica 组件上的 dark: 类能按
+   [data-theme="dark"] 生效；删掉它会退回 Tailwind 默认的 .dark 选择器，等于改变编译产物。 */
 @custom-variant dark (&:is([data-theme="dark"] *, [data-theme="dark"]));
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -189,6 +191,6 @@
   --opacity-disabled: 0.52;
 }
 
-/* Wand has no dark palette yet (content/styles.css defines light tokens
-   only), so there is nothing to remap under [data-theme="dark"]. The
-   `@custom-variant dark` above is already wired for the day that changes. */
+/* Wand 目前没有深色 token（content/styles.css 只定义浅色 token，也没有任何 shell
+   设置 data-theme），所以这里没有需要重映射的深色覆盖。上面的 `@custom-variant dark`
+   保留着，等深色模式真正接上时可直接生效。 */

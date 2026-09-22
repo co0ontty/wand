@@ -36,24 +36,26 @@ interface TestClient {
   sendQueue: string[];
   sendInProgress: boolean;
   backpressurePaused: boolean;
-  lastOutputBySession: Map<string, { output: string; messages?: string; timestamp: number }>;
   outputSeqBySession: Map<string, number>;
   pendingResyncSessions: Set<string>;
   blockBudget?: number;
   lastSeenAt: number;
-  ptySubscriptions: Map<string, { supportsAck: boolean; unackedBytes: number; paused: boolean }>;
+  ptySubscriptions: Map<string, { supportsAck: boolean; unackedBytes: number; degraded: boolean; lastResyncNoticeAt: number }>;
 }
 
 interface ManagerInternals {
   clients: Set<TestClient>;
-  port?: {
-    pausePtyOutput?(id: string): void;
-    resumePtyOutput?(id: string): void;
-  };
+  port?: Record<string, unknown>;
   emitEvent(event: ProcessEvent): void;
   broadcast(event: ProcessEvent): void;
   processWsQueue(client: TestClient): void;
-  releasePtyPause(client: TestClient, sessionId: string): void;
+  handlePtyAck(client: TestClient, sessionId: string, bytes: number): void;
+  queueResyncNotice(client: TestClient, sessionId: string, reason: string): void;
+}
+
+/** 新订阅的默认形状（与原实现一致：ack 配额从 0 开始、未降级）。 */
+function newSubscription(options: { supportsAck: boolean } = { supportsAck: true }) {
+  return { supportsAck: options.supportsAck, unackedBytes: 0, degraded: false, lastResyncNoticeAt: 0 };
 }
 
 function createHarness(): {
@@ -69,7 +71,6 @@ function createHarness(): {
     sendQueue: [],
     sendInProgress: false,
     backpressurePaused: false,
-    lastOutputBySession: new Map(),
     outputSeqBySession: new Map(),
     pendingResyncSessions: new Set(),
     lastSeenAt: Date.now(),
@@ -183,28 +184,21 @@ test("a send callback error clears the queue even when a later callback succeeds
   assert.equal(socket.terminated, true);
 });
 
-test("raw PTY output is scoped to the subscribed session and pauses until acknowledged", () => {
+test("raw PTY output is scoped to the subscribed session", () => {
   const first = createHarness();
   const secondSocket = new ControlledSocket();
   const secondClient: TestClient = {
     ...first.client,
     ws: secondSocket as unknown as WebSocket,
     sendQueue: [],
-    lastOutputBySession: new Map(),
     outputSeqBySession: new Map(),
     pendingResyncSessions: new Set(),
-    ptySubscriptions: new Map([["session-b", { supportsAck: true, unackedBytes: 0, paused: false }]]),
+    ptySubscriptions: new Map([["session-b", newSubscription()]]),
   };
-  first.client.ptySubscriptions.set("session-a", { supportsAck: true, unackedBytes: 0, paused: false });
+  first.client.ptySubscriptions.set("session-a", newSubscription());
   first.manager.clients.add(secondClient);
 
-  const paused: string[] = [];
-  const resumed: string[] = [];
-  first.manager.port = {
-    pausePtyOutput: (id) => paused.push(id),
-    resumePtyOutput: (id) => resumed.push(id),
-  };
-  const chunk = "x".repeat(513 * 1024);
+  const chunk = "x".repeat(4 * 1024);
   first.manager.broadcast({
     type: "output",
     sessionId: "session-a",
@@ -216,19 +210,75 @@ test("raw PTY output is scoped to the subscribed session and pauses until acknow
   const sent = JSON.parse(first.socket.sent[0]) as { ptyBytes: number; data: { chunk: string } };
   assert.equal(sent.ptyBytes, Buffer.byteLength(chunk));
   assert.equal(sent.data.chunk, chunk);
-  assert.deepEqual(paused, ["session-a"]);
+});
 
-  const firstSubscription = first.client.ptySubscriptions.get("session-a");
-  assert.ok(firstSubscription);
-  firstSubscription.unackedBytes = 0;
-  first.manager.releasePtyPause(first.client, "session-a");
-  assert.deepEqual(resumed, ["session-a"]);
+// 回归：以前任何客户端停止 ack（手机切后台 / WebView 被节流 / 标签页休眠）都会让服务端
+// 调用 pausePtyOutput，把「服务端读 daemon」整条暂停——整个会话对所有客户端冻结，连
+// 会话日志和落库也一起停，而且只靠那个客户端回来 ack 才恢复（它不回来就永久冻住）。
+// 现在改成：只对积压的这一个客户端降级（丢掉过期 TUI 帧），它追上来再用终端快照重建。
+test("一个停止 ack 的客户端只降级自己，既不冻结会话也不影响健康客户端", () => {
+  const healthy = createHarness();
+  const zombieSocket = new ControlledSocket();
+  const zombie: TestClient = {
+    ...healthy.client,
+    ws: zombieSocket as unknown as WebSocket,
+    sendQueue: [],
+    outputSeqBySession: new Map(),
+    pendingResyncSessions: new Set(),
+    ptySubscriptions: new Map([["session-a", newSubscription()]]),
+  };
+  healthy.client.ptySubscriptions.set("session-a", newSubscription());
+  healthy.manager.clients.add(zombie);
+
+  const chunk = "y".repeat(128 * 1024);
+  // 健康客户端每帧都 ack（= 手机在前台正常渲染）；僵尸客户端一路不 ack。
+  for (let index = 0; index < 6; index += 1) {
+    healthy.manager.broadcast({ type: "output", sessionId: "session-a", data: { incremental: true, chunk } });
+    healthy.manager.handlePtyAck(healthy.client, "session-a", chunk.length);
+  }
+
+  const zombieSub = zombie.ptySubscriptions.get("session-a");
+  assert.ok(zombieSub);
+  assert.equal(zombieSub.degraded, true, "累计超过 512KB 未确认后只把它这一个客户端标成降级");
+  assert.equal(
+    zombie.sendQueue.length + zombieSocket.sent.length,
+    4,
+    "降级后不再给积压客户端排队原始分片（前 4 个 128KB 分片已发满 512KB 高水位，第 5、6 帧被丢弃）",
+  );
+  assert.equal(
+    healthy.client.sendQueue.length + healthy.socket.sent.length,
+    6,
+    "健康客户端必须继续收到每一帧：慢客户端不再拖住整个会话",
+  );
+
+  // 僵尸追上来（ack 到低水位）：只给它自己一条重建通知。
+  healthy.manager.handlePtyAck(zombie, "session-a", 6 * 128 * 1024);
+  assert.equal(zombieSub.degraded, false);
+  const notices = zombieSocket.sent
+    .concat(zombie.sendQueue)
+    .map((message) => JSON.parse(message) as Record<string, unknown>)
+    .filter((message) => message.type === "resync_required");
+  assert.equal(notices.length, 1, "追上来后只发一次重建通知");
+  assert.equal(notices[0].sessionId, "session-a");
+  assert.equal(notices[0].reason, "pty_backlog_drop");
+
+  // 紧接着再来一轮积压：限流窗口内不重复下发重建通知。
+  for (let index = 0; index < 6; index += 1) {
+    healthy.manager.broadcast({ type: "output", sessionId: "session-a", data: { incremental: true, chunk } });
+    healthy.manager.handlePtyAck(healthy.client, "session-a", chunk.length);
+  }
+  healthy.manager.handlePtyAck(zombie, "session-a", 6 * 128 * 1024);
+  const afterSecondRound = zombieSocket.sent
+    .concat(zombie.sendQueue)
+    .map((message) => JSON.parse(message) as Record<string, unknown>)
+    .filter((message) => message.type === "resync_required");
+  assert.equal(afterSecondRound.length, 1, "重建通知有最小间隔，避免慢性慢客户端来回重建");
 });
 
 test("one client can receive raw PTY output from multiple subscribed panes", () => {
   const { manager, client, socket } = createHarness();
-  client.ptySubscriptions.set("session-a", { supportsAck: true, unackedBytes: 0, paused: false });
-  client.ptySubscriptions.set("session-b", { supportsAck: true, unackedBytes: 0, paused: false });
+  client.ptySubscriptions.set("session-a", newSubscription());
+  client.ptySubscriptions.set("session-b", newSubscription());
 
   manager.broadcast({
     type: "output",
@@ -249,7 +299,7 @@ test("one client can receive raw PTY output from multiple subscribed panes", () 
 
 test("legacy PTY subscribers keep the bounded send queue", () => {
   const { manager, client } = createHarness();
-  client.ptySubscriptions.set("session-a", { supportsAck: false, unackedBytes: 0, paused: false });
+  client.ptySubscriptions.set("session-a", newSubscription({ supportsAck: false }));
 
   for (let index = 0; index < 700; index += 1) {
     manager.broadcast({
@@ -263,17 +313,13 @@ test("legacy PTY subscribers keep the bounded send queue", () => {
   assert.equal(client.backpressurePaused, true);
   assert.equal(client.pendingResyncSessions.has("session-a"), true);
   assert.equal(client.ptySubscriptions.get("session-a")?.unackedBytes, 0);
-  assert.equal(client.ptySubscriptions.get("session-a")?.paused, false);
+  assert.equal(client.ptySubscriptions.get("session-a")?.degraded, false);
 });
 
 test("legacy PTY subscribers do not require acknowledgements", () => {
   const { manager, client, socket } = createHarness();
-  client.ptySubscriptions.set("session-a", { supportsAck: false, unackedBytes: 0, paused: false });
+  client.ptySubscriptions.set("session-a", newSubscription({ supportsAck: false }));
 
-  const paused: string[] = [];
-  manager.port = {
-    pausePtyOutput: (id) => paused.push(id),
-  };
   const chunk = "x".repeat(513 * 1024);
   manager.broadcast({
     type: "output",
@@ -286,7 +332,6 @@ test("legacy PTY subscribers do not require acknowledgements", () => {
   assert.equal(sent.ptyBytes, undefined);
   assert.equal(sent.data.chunk, chunk);
   assert.equal(client.ptySubscriptions.get("session-a")?.unackedBytes, 0);
-  assert.deepEqual(paused, []);
 });
 
 function waitForOutputDebounce(): Promise<void> {
@@ -295,7 +340,7 @@ function waitForOutputDebounce(): Promise<void> {
 
 test("session topic output is not merged into raw PTY chunks", async () => {
   const { manager, client, socket } = createHarness();
-  client.ptySubscriptions.set("session-a", { supportsAck: false, unackedBytes: 0, paused: false });
+  client.ptySubscriptions.set("session-a", newSubscription({ supportsAck: false }));
 
   manager.emitEvent({
     type: "output",
@@ -323,7 +368,7 @@ test("session topic output is not merged into raw PTY chunks", async () => {
 
 test("session topic status flushes pending PTY bytes before the new title", async () => {
   const { manager, client, socket } = createHarness();
-  client.ptySubscriptions.set("session-a", { supportsAck: false, unackedBytes: 0, paused: false });
+  client.ptySubscriptions.set("session-a", newSubscription({ supportsAck: false }));
 
   manager.emitEvent({
     type: "output",

@@ -4,6 +4,8 @@ import { persistSelectedId } from "./chat-scroll";
 import { wandConfirm } from "./notifications";
 import { showActionError } from "./composer-action-error";
 import { updateSessionsList, refreshAll } from "./session-engine";
+import { parseJsonResponse } from "../react/http-adapter";
+import { getErrorMessage } from "../../error-utils.js";
 
       function getSelectedSessionIds() {
         return Object.keys(state.selectedSessionIds).filter(function(id) { return !!state.selectedSessionIds[id]; });
@@ -79,17 +81,31 @@ import { updateSessionsList, refreshAll } from "./session-engine";
             credentials: 'same-origin',
             body: JSON.stringify({ sessionIds: sessionIds })
           })
-            .then(function(res) { return res.json(); })
-            .then(function() {
-              if (sessionIds.indexOf(state.selectedId) !== -1) {
+            .then(function(res) {
+              // 全部失败时服务端回 400 + {error}；部分成功回 {ok:true, failed:[…]}。
+              // 必须按状态解析：历史实现只 res.json() 就当成功，于是「删失败」也会
+              // 清空选择并 refresh，用户看到的是「选中项丢了、会话还在」。
+              return parseJsonResponse<{ failed?: string[] }>(res);
+            })
+            .then(function(payload) {
+              var failed = payload && Array.isArray(payload.failed) ? payload.failed : [];
+              if (failed.length > 0) {
+                showActionError('有 ' + failed.length + ' 个会话未能删除，请重试。');
+              }
+              // 当前会话确实被删掉（而不是删除失败）时才取消选中。
+              if (sessionIds.indexOf(state.selectedId) !== -1
+                && failed.indexOf(state.selectedId) === -1) {
                 state.selectedId = null;
                 persistSelectedId();
               }
+              // 部分成功时只保留失败项的选择，成功删除的项自然从列表消失；
+              // 用户可以直接对失败项重试，不必重新定位它们。
               clearManageSelections();
+              failed.forEach(function(id) { state.selectedSessionIds[id] = true; });
               return refreshAll();
             })
-            .catch(function() {
-              showActionError('无法批量删除所选项目。');
+            .catch(function(error) {
+              showActionError(getErrorMessage(error, '无法批量删除所选项目。'));
             });
         });
       }

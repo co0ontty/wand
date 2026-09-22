@@ -4,14 +4,14 @@ import { getErrorMessage } from "../../error-utils.js";
 import { parseJsonResponse } from "../react/http-adapter";
 import { resolveComposerPermission } from "../react/composer-badges/model";
 import type { ComposerPermissionAction } from "../react/composer-badges/controller";
-import { renderChat } from "./chat-render";
+import { renderChat, scheduleChatRender } from "./chat-render";
 import { clearStructuredQueuePersistence } from "./chat-scroll";
 import { mergeAssistantTurn } from "./message-reconciliation";
 import { flushPendingMessages, buildMessagesForRender, isCurrentTerminalSession, updateInputHint, flushStructuredInputQueue, updateStructuredQueueCounter, setTerminalInteractive, flushCrossSessionQueue, reconcileInteractiveState, getSelectedSession, closeKeyboardPopup } from "./input";
 import { notifyTaskEnded, clearSessionProgressNative, _syncWakeLock, showNotificationBubble, notifyTaskProgress, syncSessionProgressToNative, notifyPermissionRequest, notifyUpdateAvailable, showAutoUpdateOverlay, showRestartOverlay, showToast } from "./notifications";
 import { refreshAll, scheduleSessionListUpdate, subscribeToSession, updateSessionSnapshot, getPreferredMessages, selectSession, updateShellChrome, loadOutput, isAutoApproveImpliedByMode, applyCurrentView } from "./session-engine";
 import { getLastAssistantSummary } from "./session-ui";
-import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS, clampClientTerminalOutput, maybeScrollTerminalToBottom, restoreTerminalState, syncTerminalBuffer, updateTerminalJumpToBottomButton, wandTerminalWrite } from "./terminal";
+import { clampClientTerminalOutput, restoreTerminalState, scheduleTerminalChromeUpdate, syncTerminalBuffer, updateTerminalJumpToBottomButton, wandTerminalWrite } from "./terminal";
 import {
   hasPooledTerminal,
   replacePooledTerminalOutput,
@@ -21,7 +21,7 @@ import {
 } from "./terminal-pool";
 import { ensureTerminalFitWithRetry, scheduleTerminalResize } from "./viewport";
 import { bindForegroundSyncListeners } from "./render";
-import { scheduleGitStatusRefresh, startGitStatusPolling } from "./git-commit";
+import { scheduleGitStatusRefresh, startGitStatusPolling, stopGitStatusPolling } from "./git-commit";
 import { notifyLegacyUiChange } from "./ui-store-bridge";
 
 /**
@@ -42,6 +42,7 @@ function noteTurnActivity(sessionId: string, active: boolean): void {
         stopPolling();
         bindForegroundSyncListeners();
         startGitStatusPolling();
+        startSessionTimePolling();
         // Use WebSocket if available, fallback to polling
         if (initWebSocket()) {
           // WebSocket will deliver updates; no need for initial refreshAll()
@@ -52,11 +53,22 @@ function noteTurnActivity(sessionId: string, active: boolean): void {
         state.pollTimer = setInterval(refreshAll, 1600);
       }
 
-      // Periodically refresh session time displays (30s)
-      setInterval(function() {
-        var timeEls = document.querySelectorAll(".session-time");
-        if (timeEls.length > 0) scheduleSessionListUpdate();
-      }, 30000);
+      // 侧边栏相对时间的节拍器（30s）。只在已登录期间运行：它以前是模块级 interval，
+      // 登出后仍会每秒扫 DOM（且 startPolling/stopPolling 管不到它）。
+      const SESSION_TIME_TICK_MS = 30_000;
+      var sessionTimeTimer: ReturnType<typeof setInterval> | null = null;
+      function startSessionTimePolling() {
+        if (sessionTimeTimer !== null) return;
+        sessionTimeTimer = setInterval(function() {
+          var timeEls = document.querySelectorAll(".session-time");
+          if (timeEls.length > 0) scheduleSessionListUpdate();
+        }, SESSION_TIME_TICK_MS);
+      }
+      function stopSessionTimePolling() {
+        if (sessionTimeTimer === null) return;
+        clearInterval(sessionTimeTimer);
+        sessionTimeTimer = null;
+      }
 
       export function cancelWsReconnect() {
         if (state.wsReconnectTimer) {
@@ -411,10 +423,9 @@ function noteTurnActivity(sessionId: string, active: boolean): void {
                 } else {
                   state.terminalOutput = clampClientTerminalOutput((state.terminalOutput || "") + String(msg.data.chunk));
                 }
-                maybeScrollTerminalToBottom("output");
-                updateTerminalJumpToBottomButton();
-              } else if (!msg.data.incremental && Object.prototype.hasOwnProperty.call(msg.data, "output")) {
-                // Fallback: no chunk available, use full-output comparison.
+                // 分片热路径：贴底 + 回到底部按钮按帧合并，不逐分片做 DOM/布局。
+                scheduleTerminalChromeUpdate();
+              } else if (!msg.data.incremental && Object.prototype.hasOwnProperty.call(msg.data, "output")) {                // Fallback: no chunk available, use full-output comparison.
                 syncTerminalBuffer(msg.sessionId, msg.data.output || "", { mode: "append" });
               }
             } else if (msg.data && hasPooledTerminal(msg.sessionId)) {
@@ -858,6 +869,9 @@ function noteTurnActivity(sessionId: string, active: boolean): void {
           clearInterval(state.pollTimer);
           state.pollTimer = null;
         }
+        // 登出/拆壳：兜底轮询与相对时间节拍器都归零，不要在未登录状态下继续打接口。
+        stopGitStatusPolling();
+        stopSessionTimePolling();
       }
 
       export function setView(view: any) {
@@ -881,28 +895,4 @@ function noteTurnActivity(sessionId: string, active: boolean): void {
             });
           }
         }
-      }
-
-      state.chatRenderTimer = null;
-      function scheduleChatRender(immediate?: boolean) {
-        if (state.chatRenderTimer && !immediate) return;
-        if (state.chatRenderTimer) clearTimeout(state.chatRenderTimer);
-        if (immediate) {
-          state.chatRenderTimer = null;
-          renderChat();
-          return;
-        }
-        var selectedForDelay = state.sessions.find(function(s: any) { return s.id === state.selectedId; });
-        var isActiveStream = selectedForDelay && selectedForDelay.status === "running"
-          && selectedForDelay.sessionKind !== "structured";
-        // 活跃流时拉到 LIVE 减少高频重渲；空闲时用 IDLE 快速响应。
-        var delay = isActiveStream ? CHAT_RENDER_LIVE_MS : CHAT_RENDER_IDLE_MS;
-        state.chatRenderTimer = setTimeout(function() {
-          state.chatRenderTimer = null;
-          var selectedSession = state.sessions.find(function(s: any) { return s.id === state.selectedId; });
-          if (selectedSession) {
-              state.currentMessages = buildMessagesForRender(selectedSession, getPreferredMessages(selectedSession, selectedSession.output, true));
-          }
-          renderChat();
-        }, delay);
       }

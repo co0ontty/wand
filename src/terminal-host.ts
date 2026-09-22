@@ -24,8 +24,6 @@ export interface TerminalProcess {
   write(data: string): void;
   resize(cols: number, rows: number): void;
   kill(signal?: string): void;
-  pause(): void;
-  resume(): void;
   onData(listener: (event: TerminalDataEvent) => void): { dispose(): void };
   onExit(listener: (event: TerminalExitEvent) => void): { dispose(): void };
 }
@@ -99,14 +97,6 @@ class InProcessTerminalProcess implements TerminalProcess {
 
   kill(signal?: string): void {
     this.child.kill(signal);
-  }
-
-  pause(): void {
-    this.child.pause();
-  }
-
-  resume(): void {
-    this.child.resume();
   }
 
   onData(listener: (event: TerminalDataEvent) => void): { dispose(): void } {
