@@ -797,6 +797,21 @@ export function registerSessionRoutes(
     }
   });
 
+  app.patch("/api/structured-sessions/:id/queued/:index", (req, res) => {
+    const { expectedText, text } = req.body ?? {};
+    if (typeof expectedText !== "string" || typeof text !== "string" || !text.trim()) {
+      res.status(400).json({ error: "排队消息不能为空，且必须提供原文。" });
+      return;
+    }
+    try {
+      res.json(sessionResponseDTO(structured.editQueuedMessage(
+        req.params.id, Number(req.params.index), expectedText, text,
+      )));
+    } catch (error) {
+      sendRouteError(res, error, "无法编辑排队消息。");
+    }
+  });
+
   app.delete("/api/structured-sessions/:id/queued/:index", (req, res) => {
     const index = Number(req.params.index);
     if (!Number.isFinite(index)) {

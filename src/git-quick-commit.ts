@@ -562,6 +562,17 @@ function runCliText(
       }
       reject(new QuickCommitError(`${command} CLI 失败：${(stderr || stdout).trim() || `exit ${code}`}`, "CLAUDE_CLI_FAILED"));
     });
+    // A CLI may exit before reading stdin (e.g. invalid credentials/argv).
+    // The writable stream emits EPIPE independently of ChildProcess.error;
+    // without a listener that becomes an uncaught exception after callers
+    // have already finished their turn or closed storage.
+    child.stdin?.on("error", (error: NodeJS.ErrnoException) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      child.kill("SIGTERM");
+      reject(new QuickCommitError(`${command} CLI stdin failed: ${error.code ?? "write error"}`, "CLAUDE_CLI_FAILED"));
+    });
     child.stdin?.end(prompt);
   });
 }

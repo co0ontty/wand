@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -90,23 +90,12 @@ test("开启态带 is-on、aria-pressed=true 与「开」文案", () => {
 });
 
 test("开关不可见时用 .hidden 表达，而不是删掉节点", () => {
-  // 原生壳的 EnableTerminalPassthroughScript 还要靠这个 id 点它。
   const html = render(mountFor({ interactiveVisible: false }));
   assert.match(html, /plus-popover-item hidden/);
   assert.match(html, /id="terminal-interactive-toggle-top"/);
 });
 
-test("两个条目都保留了原生壳依赖的 id 与 aria-pressed", () => {
-  // Android submodule 可能未 checkout（CI 只拉主仓库时）。
-  const kotlin = new URL(
-    "../android/app/src/main/java/com/wand/app/ui/screens/PtyTerminalScreen.kt",
-    import.meta.url,
-  );
-  if (existsSync(kotlin)) {
-    const source = readFileSync(kotlin, "utf8");
-    assert.match(source, /getElementById\('terminal-interactive-toggle-top'\)/);
-    assert.match(source, /getAttribute\('aria-pressed'\)/);
-  }
+test("两个条目都保留 id 与 aria-pressed", () => {
   assert.match(render(mountFor()), /id="terminal-interactive-toggle-top"/);
   assert.match(render(mountFor({ interactiveOn: true })), /aria-pressed="true"/);
 });

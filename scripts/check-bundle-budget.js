@@ -26,7 +26,7 @@ const contentDir = path.join(root, "dist", "web-ui", "content");
 
 /** gzip budgets in bytes, measured over the whole shipped asset. */
 const BUDGET = {
-  // js 历史上从 512_000 上调过两次，每次都在本文件记录原因：
+  // js 历史上从 512_000 上调过三次，每次都在本文件记录原因：
   //   1) 「默认迭代 + 用提示词清单生成 commit message」：quick-commit 迭代面板 /
   //      仓储 / 类型 + features.ts 样式真实增长约 0.5 KiB（顶到 512_140），同一次
   //      删掉了 mini-keyboard、status-dot/status-text、welcome-input、chat-pin-spacer
@@ -34,8 +34,16 @@ const BUDGET = {
   //   2) 结构化模式「读图内联展示」修复：工具卡有内联结果图时不再重复渲染路径
   //      缩略图（同一张图只出一个）。净增约 1 字节 gzip，但 gzip 对齐使 514_000
   //      这个精确卡点反复红（±1~3 字节漂移），故上调到 514_200 留 200 字节余量。
+  //   3) 任务看板「父子任务」+ 排队消息可编辑：看板卡片/列表的父任务胶囊、详情页
+  //      父任务链接与子任务区块、新建/详情两处父任务选择器、input.ts 排队条「编辑」
+  //      按钮，都是真实功能，不是重复渲染（esbuild metafile 对账：本批只动了
+  //      task-board-host.tsx / task-board-agent.ts / task-board-views.tsx / input.ts
+  //      四个文件，其余模块字节数不变）。minify 后 gzip 514_130 -> 515_168（+1.0 KiB），
+  //      514_200 这个卡点本就只剩 70 字节余量，于是上调到 516_000。
   // 下一次真正瘦身（懒加载重型面板等）后必须把这几个值一起降回去。
-  js: 514_200,
+  // 已知的最大单块肥肉：tailwind-merge（bundle 内 ~103 KiB raw，由 @appica/ui-react
+  // 的 cn() 间接引入）与 react-dom（~553 KiB raw）；真要瘦身从这两处下手。
+  js: 516_000,
   css: 100_000,
 };
 

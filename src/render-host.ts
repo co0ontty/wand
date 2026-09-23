@@ -41,6 +41,8 @@ export interface RoutedTerminalHosts {
 
 /**
  * 升级期无损路由：旧会话留在 legacy terminald，新会话一律进 Render。
+ * MIGRATION-COMPAT: 旧 PTY/Render v1 路由须保留到用户另行要求删除；
+ * 不能因为新 Render 负责新会话就杀掉或丢弃旧 owner。
  *
  * 所有权判断只能靠 legacy 自己的 inventory —— Server 无法从 DB 倒推
  * 「这个 PTY 现在归谁」，因为升级前建的会话进程就在旧 daemon 里。
@@ -176,8 +178,11 @@ export async function createUpgradeAwareTerminalHost(
     return { host: fallback, renderHost: null, legacyHost: asTerminalDaemonClient(fallback) };
   }
 
-  // Render v1 only owns PTYs. Structured CLI runs still need a daemon-backed
-  // host to survive a web restart, including on a fresh installation where no
+  // MIGRATION-COMPAT: Render v1 only owns PTYs. Keep terminald as the owner
+  // of existing structured runs during the v2 migration, even if new runs
+  // eventually use Rust. Remove this path only on a later explicit request.
+  // Structured CLI runs still need a daemon-backed host to survive a web restart,
+  // including on a fresh installation where no
   // pre-upgrade terminald exists. The composite routes new PTYs to Render.
   let structuredHost: TerminalDaemonClient;
   try {
@@ -315,8 +320,11 @@ function reapUnreadyRender(pid: number | undefined): void {
 /** 对端是否真的在监听：区分「活着但拒绝 adopt」与「上一轮崩溃留下的孤儿 socket 文件」。 */function isSocketListening(socketPath: string): Promise<boolean> {
   return new Promise((resolve) => {
     const socket = net.createConnection(socketPath);
+    let settled = false;
     const finish = (alive: boolean) => {
-      socket.removeAllListeners();
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       socket.destroy();
       resolve(alive);
     };

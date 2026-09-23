@@ -89,6 +89,11 @@ export interface RenderConfig {
   binaryPath?: string;
 }
 
+/** Deployment-only owner for new structured CLI runs. Existing runs follow daemon inventory. */
+export interface StructuredProcessConfig {
+  processHost: "legacy" | "rust";
+}
+
 export interface MacosDmgConfig {
   enabled?: boolean;
   dmgDir?: string;
@@ -151,6 +156,8 @@ export interface WandConfig {
   ios?: IosIpaConfig;
   /** Render（常驻 PTY 持有者）引擎选择。默认 auto。 */
   render?: RenderConfig;
+  /** Structured CLI process owner for new runs; default legacy. SDK stays in Node. */
+  structured?: StructuredProcessConfig;
   /** Default expand/collapse state for card types in structured chat view */
   cardDefaults?: CardExpandDefaults;
   /** 新建会话时默认使用的 Claude 模型（别名或完整 ID）。留空则不传 --model，由 claude 自行决定。 */

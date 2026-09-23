@@ -1,0 +1,416 @@
+{
+  "provider": "pi",
+  "scenario": "normal",
+  "args": [
+    "--mode",
+    "json",
+    "--print",
+    "--thinking",
+    "off",
+    "<FIXTURE_PROMPT>"
+  ],
+  "stdinData": null,
+  "events": [
+    {
+      "type": "session",
+      "version": 1,
+      "id": "fixture-id-1",
+      "timestamp": "FIXTURE_TEXT"
+    },
+    {
+      "type": "agent_start"
+    },
+    {
+      "type": "turn_start"
+    },
+    {
+      "type": "message_start",
+      "message": {
+        "role": "assistant",
+        "content": [],
+        "api": "FIXTURE_TEXT",
+        "provider": "FIXTURE_TEXT",
+        "model": "FIXTURE_TEXT",
+        "usage": {
+          "input": 1,
+          "output": 1,
+          "cacheRead": 1,
+          "cacheWrite": 1,
+          "cost": {
+            "input": 1,
+            "output": 1,
+            "cacheRead": 1,
+            "cacheWrite": 1,
+            "total": 1
+          }
+        },
+        "stopReason": "pending",
+        "timestamp": 1
+      }
+    },
+    {
+      "type": "message_update",
+      "usage": {
+        "input": 1,
+        "output": 1,
+        "cacheRead": 1,
+        "cacheWrite": 1,
+        "cost": {
+          "input": 1,
+          "output": 1,
+          "cacheRead": 1,
+          "cacheWrite": 1,
+          "total": 1
+        }
+      },
+      "assistantMessageEvent": {
+        "type": "text_start",
+        "contentIndex": 1
+      }
+    },
+    {
+      "type": "message_update",
+      "usage": {
+        "input": 1,
+        "output": 1,
+        "cacheRead": 1,
+        "cacheWrite": 1,
+        "cost": {
+          "input": 1,
+          "output": 1,
+          "cacheRead": 1,
+          "cacheWrite": 1,
+          "total": 1
+        }
+      },
+      "assistantMessageEvent": {
+        "type": "text_delta",
+        "contentIndex": 1,
+        "delta": "FIXTURE_TEXT"
+      }
+    },
+    {
+      "type": "message_update",
+      "usage": {
+        "input": 1,
+        "output": 1,
+        "cacheRead": 1,
+        "cacheWrite": 1,
+        "cost": {
+          "input": 1,
+          "output": 1,
+          "cacheRead": 1,
+          "cacheWrite": 1,
+          "total": 1
+        }
+      },
+      "assistantMessageEvent": {
+        "type": "text_delta",
+        "contentIndex": 1,
+        "delta": "FIXTURE_TEXT"
+      }
+    },
+    {
+      "type": "message_update",
+      "usage": {
+        "input": 1,
+        "output": 1,
+        "cacheRead": 1,
+        "cacheWrite": 1,
+        "cost": {
+          "input": 1,
+          "output": 1,
+          "cacheRead": 1,
+          "cacheWrite": 1,
+          "total": 1
+        }
+      },
+      "assistantMessageEvent": {
+        "type": "text_delta",
+        "contentIndex": 1,
+        "delta": "FIXTURE_TEXT"
+      }
+    },
+    {
+      "type": "message_update",
+      "usage": {
+        "input": 1,
+        "output": 1,
+        "cacheRead": 1,
+        "cacheWrite": 1,
+        "cost": {
+          "input": 1,
+          "output": 1,
+          "cacheRead": 1,
+          "cacheWrite": 1,
+          "total": 1
+        }
+      },
+      "assistantMessageEvent": {
+        "type": "text_delta",
+        "contentIndex": 1,
+        "delta": "FIXTURE_TEXT"
+      }
+    },
+    {
+      "type": "message_update",
+      "usage": {
+        "input": 1,
+        "output": 1,
+        "cacheRead": 1,
+        "cacheWrite": 1,
+        "cost": {
+          "input": 1,
+          "output": 1,
+          "cacheRead": 1,
+          "cacheWrite": 1,
+          "total": 1
+        }
+      },
+      "assistantMessageEvent": {
+        "type": "text_delta",
+        "contentIndex": 1,
+        "delta": "FIXTURE_TEXT"
+      }
+    },
+    {
+      "type": "message_update",
+      "usage": {
+        "input": 1,
+        "output": 1,
+        "cacheRead": 1,
+        "cacheWrite": 1,
+        "cost": {
+          "input": 1,
+          "output": 1,
+          "cacheRead": 1,
+          "cacheWrite": 1,
+          "total": 1
+        }
+      },
+      "assistantMessageEvent": {
+        "type": "text_delta",
+        "contentIndex": 1,
+        "delta": "FIXTURE_TEXT"
+      }
+    },
+    {
+      "type": "message_update",
+      "usage": {
+        "input": 1,
+        "output": 1,
+        "cacheRead": 1,
+        "cacheWrite": 1,
+        "cost": {
+          "input": 1,
+          "output": 1,
+          "cacheRead": 1,
+          "cacheWrite": 1,
+          "total": 1
+        }
+      },
+      "assistantMessageEvent": {
+        "type": "text_delta",
+        "contentIndex": 1,
+        "delta": "FIXTURE_TEXT"
+      }
+    },
+    {
+      "type": "message_update",
+      "usage": {
+        "input": 1,
+        "output": 1,
+        "cacheRead": 1,
+        "cacheWrite": 1,
+        "cost": {
+          "input": 1,
+          "output": 1,
+          "cacheRead": 1,
+          "cacheWrite": 1,
+          "total": 1
+        }
+      },
+      "assistantMessageEvent": {
+        "type": "text_delta",
+        "contentIndex": 1,
+        "delta": "FIXTURE_TEXT"
+      }
+    },
+    {
+      "type": "message_update",
+      "usage": {
+        "input": 1,
+        "output": 1,
+        "cacheRead": 1,
+        "cacheWrite": 1,
+        "cost": {
+          "input": 1,
+          "output": 1,
+          "cacheRead": 1,
+          "cacheWrite": 1,
+          "total": 1
+        }
+      },
+      "assistantMessageEvent": {
+        "type": "text_delta",
+        "contentIndex": 1,
+        "delta": "FIXTURE_TEXT"
+      }
+    },
+    {
+      "type": "message_update",
+      "usage": {
+        "input": 1,
+        "output": 1,
+        "cacheRead": 1,
+        "cacheWrite": 1,
+        "cost": {
+          "input": 1,
+          "output": 1,
+          "cacheRead": 1,
+          "cacheWrite": 1,
+          "total": 1
+        }
+      },
+      "assistantMessageEvent": {
+        "type": "text_delta",
+        "contentIndex": 1,
+        "delta": "FIXTURE_TEXT"
+      }
+    },
+    {
+      "type": "message_update",
+      "usage": {
+        "input": 1,
+        "output": 1,
+        "cacheRead": 1,
+        "cacheWrite": 1,
+        "cost": {
+          "input": 1,
+          "output": 1,
+          "cacheRead": 1,
+          "cacheWrite": 1,
+          "total": 1
+        }
+      },
+      "assistantMessageEvent": {
+        "type": "text_end",
+        "contentIndex": 1,
+        "content": "FIXTURE_TEXT"
+      }
+    },
+    {
+      "type": "message_end",
+      "message": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "FIXTURE_TEXT",
+            "textSignature": "FIXTURE_TEXT"
+          }
+        ],
+        "api": "FIXTURE_TEXT",
+        "provider": "FIXTURE_TEXT",
+        "model": "FIXTURE_TEXT",
+        "usage": {
+          "input": 1,
+          "output": 1,
+          "cacheRead": 1,
+          "cacheWrite": 1,
+          "reasoning": 1,
+          "cost": {
+            "input": 1,
+            "output": 1,
+            "cacheRead": 1,
+            "cacheWrite": 1,
+            "total": 1
+          }
+        },
+        "stopReason": "stop",
+        "timestamp": 1,
+        "responseId": "FIXTURE_TEXT",
+        "rawStopReason": "FIXTURE_TEXT"
+      }
+    },
+    {
+      "type": "turn_end",
+      "message": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "FIXTURE_TEXT",
+            "textSignature": "FIXTURE_TEXT"
+          }
+        ],
+        "api": "FIXTURE_TEXT",
+        "provider": "FIXTURE_TEXT",
+        "model": "FIXTURE_TEXT",
+        "usage": {
+          "input": 1,
+          "output": 1,
+          "cacheRead": 1,
+          "cacheWrite": 1,
+          "reasoning": 1,
+          "cost": {
+            "input": 1,
+            "output": 1,
+            "cacheRead": 1,
+            "cacheWrite": 1,
+            "total": 1
+          }
+        },
+        "stopReason": "stop",
+        "timestamp": 1,
+        "responseId": "FIXTURE_TEXT",
+        "rawStopReason": "FIXTURE_TEXT"
+      },
+      "toolResults": []
+    },
+    {
+      "type": "agent_end",
+      "messages": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "FIXTURE_TEXT",
+              "textSignature": "FIXTURE_TEXT"
+            }
+          ],
+          "api": "FIXTURE_TEXT",
+          "provider": "FIXTURE_TEXT",
+          "model": "FIXTURE_TEXT",
+          "usage": {
+            "input": 1,
+            "output": 1,
+            "cacheRead": 1,
+            "cacheWrite": 1,
+            "reasoning": 1,
+            "cost": {
+              "input": 1,
+              "output": 1,
+              "cacheRead": 1,
+              "cacheWrite": 1,
+              "total": 1
+            }
+          },
+          "stopReason": "stop",
+          "timestamp": 1,
+          "responseId": "FIXTURE_TEXT",
+          "rawStopReason": "FIXTURE_TEXT"
+        }
+      ],
+      "willRetry": false
+    },
+    {
+      "type": "agent_settled"
+    }
+  ],
+  "nonJsonLines": 0,
+  "stderrPresent": false,
+  "exitCode": 0,
+  "signal": null
+}

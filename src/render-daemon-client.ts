@@ -2,6 +2,7 @@ import { lstatSync, readFileSync } from "node:fs";
 import net from "node:net";
 import process from "node:process";
 
+import { startDaemonHeartbeat, waitForDaemonSocket } from "./daemon-connection.js";
 import { getErrorMessage } from "./error-utils.js";
 import { appendWindow, PTY_OUTPUT_MAX_SIZE } from "./pty-text-utils.js";
 import type { PtyTerminalSnapshot } from "./pty-terminal-state.js";
@@ -210,6 +211,8 @@ export class RenderDaemonClient implements TerminalHost {
   private tokenReadFailureLogged = false;
   /** 当前 socket 上已解出的帧数，用来区分「未鉴权被直接关闭」与网络错误。 */
   private framesOnCurrentSocket = 0;
+  private connecting: Promise<void> | null = null;
+  private stopHeartbeat: (() => void) | null = null;
 
   constructor(
     private readonly socketPath: string,
@@ -230,9 +233,19 @@ export class RenderDaemonClient implements TerminalHost {
     return this.daemonVersion;
   }
 
-  async connect(): Promise<void> {
-    if (this.disposed) throw new Error("Render client disposed");
-    if (this.socket && !this.socket.destroyed) return;
+  connect(): Promise<void> {
+    if (this.disposed) return Promise.reject(new Error("Render client disposed"));
+    if (this.connecting) return this.connecting;
+    if (this.socket && !this.socket.destroyed) return Promise.resolve();
+    const connecting = this.open();
+    this.connecting = connecting;
+    void connecting.finally(() => {
+      if (this.connecting === connecting) this.connecting = null;
+    }).catch(() => {});
+    return connecting;
+  }
+
+  private async open(): Promise<void> {
     // 先校验对端再送 token：/tmp 是全局可写的，任何人都能抢注同名 socket 路径，
     // 抢注者拿到 token 就等于拿到该 config 全部 PTY 的完整读写权限。
     assertSocketOwnership(this.socketPath);
@@ -241,26 +254,21 @@ export class RenderDaemonClient implements TerminalHost {
     this.framesOnCurrentSocket = 0;
     socket.setNoDelay(true);
     this.socket = socket;
-    await new Promise<void>((resolve, reject) => {
-      const onConnect = () => { cleanup(); resolve(); };
-      const onError = (error: Error) => { cleanup(); reject(error); };
-      const cleanup = () => {
-        socket.off("connect", onConnect);
-        socket.off("error", onError);
-      };
-      socket.once("connect", onConnect);
-      socket.once("error", onError);
-    });
+    try {
+      await waitForDaemonSocket(socket);
+    } catch (error) {
+      if (this.socket === socket) this.socket = null;
+      throw error;
+    }
     // 新 socket 从干净状态开始解码：上一条连接留下的半帧不能污染这一条。
     this.resetFrameDecoder();
     this.offlineOperationLogged = false;
-    socket.on("data", (data) => this.consume(data));
+    socket.on("data", (data) => {
+      if (this.socket === socket) this.consume(data);
+    });
     // 传 socket 引用：旧连接的迟到 close/error 不能影响当前连接上的在途请求。
     socket.on("close", () => this.handleDisconnect(socket));
-    socket.on("error", (error) => {
-      this.rejectPending(error instanceof Error ? error : new Error(String(error)));
-      this.handleDisconnect(socket);
-    });
+    socket.on("error", () => this.handleDisconnect(socket));
     this.reconciling = true;
     try {
       const hello = this.parseHello(await this.request("hello", undefined, "hello"));
@@ -272,6 +280,7 @@ export class RenderDaemonClient implements TerminalHost {
         this.fatalProtocolError = fatal;
         throw fatal;
       }
+      this.fatalProtocolError = null;
       this.daemonVersion = hello.version;
       const previous = new Map(this.inventory);
       const sessions = await this.loadAuthoritativeSessions();
@@ -292,13 +301,16 @@ export class RenderDaemonClient implements TerminalHost {
         const handle = this.handles.get(sessionId);
         if (handle) void this.refreshSession(sessionId, handle);
       }
+      if (this.disposed || this.socket !== socket) throw new Error("Render disconnected during adoption");
+      this.stopHeartbeat?.();
+      this.stopHeartbeat = startDaemonHeartbeat(socket, () => this.request("ping"), { socketPath: this.socketPath });
     } catch (error) {
       this.reconciling = false;
       this.eventsDuringReconcile = [];
       this.reconcileDuringSync = null;
       if (!this.disposed) {
         try { socket.destroy(); } catch { /* best-effort cleanup */ }
-        this.handleDisconnect();
+        this.handleDisconnect(socket);
       }
       throw this.describeConnectFailure(error);
     }
@@ -413,6 +425,8 @@ export class RenderDaemonClient implements TerminalHost {
    */
   disconnect(): void {
     this.disposed = true;
+    this.stopHeartbeat?.();
+    this.stopHeartbeat = null;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -768,9 +782,12 @@ export class RenderDaemonClient implements TerminalHost {
    * Socket 断开后的重连。不做重连的话，Render 重启一次所有
    * RemoteRenderProcess 就会静默失效，而 ProcessManager 仍显示 running。
    */
-  private handleDisconnect(origin?: net.Socket): void {
-    if (origin && this.socket !== origin) return;
-    if (this.socket?.destroyed) this.socket = null;
+  private handleDisconnect(origin: net.Socket): void {
+    if (this.socket !== origin) return;
+    this.socket = null;
+    this.stopHeartbeat?.();
+    this.stopHeartbeat = null;
+    origin.destroy();
     this.rejectPending(new Error("Render disconnected"));
     if (this.disposed || this.fatalProtocolError) return;
     this.scheduleReconnect();

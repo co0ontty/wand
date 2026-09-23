@@ -76,6 +76,32 @@ test("startStructuredCli round-trips a Chinese+emoji JSON line split mid-charact
   assert.equal(result.exitCode, 0);
 });
 
+test("local CLI stdin EPIPE is a failed turn even when the child closes with 0", async () => {
+  const child = new FakeChild();
+  const execution = startStructuredCli<StructuredRunnerTurnState>({
+    sessionId: "early-stdin-close",
+    file: "fake-cli",
+    args: [],
+    cwd: tmpdir(),
+    env: {},
+    stdinData: "fixture prompt",
+    observer: { isActive: () => true },
+    spawnProcess: () => child as unknown as ChildProcess,
+    createState: () => ({ blocks: [], result: "", sessionId: null }),
+    processLine: () => {},
+    finalize: (ctx, exitCode, signal, error) => ({
+      state: ctx.state, exitCode, signal, stderr: ctx.stderr,
+      primaryError: error?.code ?? null,
+    }),
+  });
+  child.stdin.emit("error", Object.assign(new Error("broken pipe"), { code: "EPIPE" }));
+  child.emit("close", 0, null);
+  const result = await execution.completion;
+  assert.equal(result.primaryError, "EPIPE");
+  assert.equal(result.exitCode, null);
+  assert.equal(child.killed, true);
+});
+
 test("incomplete UTF-8 at close does not invent replacement characters in processed lines", async () => {
   const child = new FakeChild();
   const lines: string[] = [];

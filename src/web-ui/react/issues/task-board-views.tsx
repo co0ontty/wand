@@ -303,10 +303,12 @@ export function TaskBoardArchiveFolder({
 
 function TaskBoardListRow({
   task,
+  parentLabel,
   onOpen,
   onOpenSession,
 }: {
   task: WandTaskListed;
+  parentLabel?: string;
   onOpen(id: string): void;
   onOpenSession?: (sessionId: string) => void;
 }): React.ReactElement {
@@ -314,7 +316,7 @@ function TaskBoardListRow({
     className={classNames("task-board-list-row", task.status === "archived" && "is-archived")}
   >
     <button type="button" className="task-board-list-title" aria-label={`打开 ${task.identifier}: ${task.title}`} onClick={() => onOpen(task.id)}>
-      <small>{task.identifier}</small>
+      <small>{task.identifier}{parentLabel ? ` ↳ ${parentLabel}` : ""}</small>
       <strong>{task.title}</strong>
     </button>
     <span className="task-board-list-meta">
@@ -331,6 +333,7 @@ function TaskBoardListRow({
 
 export function TaskBoardListView({
   grouped,
+  allTasks,
   collapsed,
   archiveOpen,
   onToggle,
@@ -339,6 +342,7 @@ export function TaskBoardListView({
   onOpenSession,
 }: {
   grouped: Record<WandTaskStatus, WandTaskListed[]>;
+  allTasks: WandTaskListed[];
   collapsed: Record<WandTaskStatus, boolean>;
   archiveOpen: boolean;
   onToggle(status: WandTaskStatus): void;
@@ -373,6 +377,7 @@ export function TaskBoardListView({
           {items.map((task) => <TaskBoardListRow
             key={task.id}
             task={task}
+            parentLabel={allTasks.find((parent) => parent.id === task.parentTaskId)?.identifier}
             onOpen={onOpen}
             onOpenSession={onOpenSession}
           />)}
@@ -385,6 +390,7 @@ export function TaskBoardListView({
               {archived.map((task) => <TaskBoardListRow
                 key={task.id}
                 task={task}
+                parentLabel={allTasks.find((parent) => parent.id === task.parentTaskId)?.identifier}
                 onOpen={onOpen}
                 onOpenSession={onOpenSession}
               />)}

@@ -32,6 +32,7 @@ import {
   type StructuredStreamEvent,
   type StructuredRunState,
 } from "./structured-exec-host.js";
+import { startDaemonHeartbeat, waitForDaemonSocket } from "./daemon-connection.js";
 import { appendWindow, PTY_OUTPUT_MAX_SIZE } from "./pty-text-utils.js";
 
 const TERMINAL_DAEMON_RECONNECT_INITIAL_MS = 500;
@@ -167,9 +168,11 @@ class RemoteStructuredProcess implements StructuredExecProcess {
   }
 
   acceptStream(event: StructuredStreamEvent): void {
+    const previousSeq = event.stream === "stdout" ? this.lastStdoutSeq : this.lastStderrSeq;
+    if (event.seq <= previousSeq) return;
     this.deliveredChars[event.stream] += event.data.length;
-    if (event.stream === "stdout") this.lastStdoutSeq = Math.max(this.lastStdoutSeq, event.seq);
-    else this.lastStderrSeq = Math.max(this.lastStderrSeq, event.seq);
+    if (event.stream === "stdout") this.lastStdoutSeq = event.seq;
+    else this.lastStderrSeq = event.seq;
     if (this.streamListeners.size === 0) {
       this.undeliveredEvents.push(event);
       if (this.undeliveredEvents.length > 4096) this.undeliveredEvents.shift();
@@ -189,13 +192,13 @@ class RemoteStructuredProcess implements StructuredExecProcess {
     if (stdoutDelta === null) {
       process.stderr.write(`[wand] structured run ${this.runId} stdout log no longer aligns with delivered output; skipping catch-up\n`);
     } else if (stdoutDelta) {
-      this.acceptStream({ stream: "stdout", data: stdoutDelta, seq: ++this.syntheticSeq });
+      this.acceptStream({ stream: "stdout", data: stdoutDelta, seq: state.stdoutSeq });
     }
     const stderrDelta = alignedDelta(state.stderrLog, state.stderrTruncated, this.deliveredChars.stderr);
     if (stderrDelta === null) {
       process.stderr.write(`[wand] structured run ${this.runId} stderr log no longer aligns with delivered output; skipping catch-up\n`);
     } else if (stderrDelta) {
-      this.acceptStream({ stream: "stderr", data: stderrDelta, seq: ++this.syntheticSeq });
+      this.acceptStream({ stream: "stderr", data: stderrDelta, seq: state.stderrSeq });
     }
   }
 
@@ -204,7 +207,6 @@ class RemoteStructuredProcess implements StructuredExecProcess {
   }
 
   private readonly deliveredChars = { stdout: 0, stderr: 0 };
-  private syntheticSeq = 1_000_000_000_000;
 }
 
 /**
@@ -230,44 +232,56 @@ export class TerminalDaemonClient implements TerminalHost, StructuredExecHost {
   private readonly handles = new Map<string, RemoteTerminalProcess>();
   private readonly pendingEvents = new Map<string, TerminalDaemonEvent[]>();
   private readonly structuredInventory = new Map<string, StructuredRunState>();
+  /** Immutable read cursors; live sdata may mutate inventory but not the caller's last snapshot. */
+  private readonly structuredObserved = new Map<string, Pick<StructuredRunState,
+    "incarnationId" | "stdoutSeq" | "stderrSeq">>();
   private readonly structuredHandles = new Map<string, RemoteStructuredProcess>();
   private readonly pendingStructuredEvents = new Map<string, TerminalDaemonEvent[]>();
   private disposed = false;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private reconnectDelayMs = TERMINAL_DAEMON_RECONNECT_INITIAL_MS;
   private reconnectFailureLogged = false;
+  private connecting: Promise<void> | null = null;
+  private stopHeartbeat: (() => void) | null = null;
 
   constructor(
     private readonly socketPath: string,
-    private readonly token: string,
+    private token: string,
+    private readonly tokenPath: string | null = null,
   ) {}
 
-  async connect(): Promise<void> {
-    if (this.disposed) throw new Error("Terminal daemon client disposed");
-    if (this.socket && !this.socket.destroyed) return;
+  connect(): Promise<void> {
+    if (this.disposed) return Promise.reject(new Error("Terminal daemon client disposed"));
+    if (this.connecting) return this.connecting;
+    if (this.socket && !this.socket.destroyed) return Promise.resolve();
+    const connecting = this.open();
+    this.connecting = connecting;
+    void connecting.finally(() => {
+      if (this.connecting === connecting) this.connecting = null;
+    }).catch(() => {});
+    return connecting;
+  }
+
+  private async open(): Promise<void> {
+    if (this.tokenPath) this.token = readFileSync(this.tokenPath, "utf8").trim();
     const socket = net.createConnection(this.socketPath);
     socket.setNoDelay(true);
     this.socket = socket;
-    await new Promise<void>((resolve, reject) => {
-      const onConnect = () => { cleanup(); resolve(); };
-      const onError = (error: Error) => { cleanup(); reject(error); };
-      const cleanup = () => {
-        socket.off("connect", onConnect);
-        socket.off("error", onError);
-      };
-      socket.once("connect", onConnect);
-      socket.once("error", onError);
-    });
+    try {
+      await waitForDaemonSocket(socket);
+    } catch (error) {
+      if (this.socket === socket) this.socket = null;
+      throw error;
+    }
     // Each socket decodes from a clean slate; a half-written character from a
     // previous connection must not leak into the next frame.
     this.decoder = new StringDecoder("utf8");
     this.frameParts = [];
-    socket.on("data", (data) => this.consume(this.decoder.write(data)));
-    socket.on("close", () => this.handleDisconnect());
-    socket.on("error", (error) => {
-      this.rejectPending(error instanceof Error ? error : new Error(String(error)));
-      this.handleDisconnect();
+    socket.on("data", (data) => {
+      if (this.socket === socket) this.consume(this.decoder.write(data));
     });
+    socket.on("close", () => this.handleDisconnect(socket));
+    socket.on("error", () => this.handleDisconnect(socket));
     try {
       await this.request("hello");
       const previous = new Map(this.inventory);
@@ -279,10 +293,13 @@ export class TerminalDaemonClient implements TerminalHost, StructuredExecHost {
         process.stderr.write("[wand] Reconnected to terminal daemon; reconciled PTY inventory.\n");
       }
       await this.refreshStructuredAfterReconnect();
+      if (this.disposed || this.socket !== socket) throw new Error("Terminal daemon disconnected during adoption");
+      this.stopHeartbeat?.();
+      this.stopHeartbeat = startDaemonHeartbeat(socket, () => this.request("hello"), { socketPath: this.socketPath });
     } catch (error) {
       if (!this.disposed) {
         try { socket.destroy(); } catch { /* best-effort cleanup */ }
-        this.handleDisconnect();
+        this.handleDisconnect(socket);
       }
       throw error;
     }
@@ -310,6 +327,8 @@ export class TerminalDaemonClient implements TerminalHost, StructuredExecHost {
   }
 
   // ---------------------------------------------------------------------------
+  // MIGRATION-COMPAT: keep this legacy StructuredExecHost adapter for owned
+  // runs and rollback after Rust adoption; remove only on explicit request.
   // StructuredExecHost: daemon-owned CLI runs that survive web restarts.
   // ---------------------------------------------------------------------------
 
@@ -321,33 +340,45 @@ export class TerminalDaemonClient implements TerminalHost, StructuredExecHost {
     }
     this.structuredHandles.delete(request.runId);
     const state = await this.request("structuredSpawn", { ...request }) as StructuredRunState;
-    return this.handleFromState(state, existingHandle ?? null);
+    return this.handleFromState(state, existingHandle ?? null, true);
   }
 
   async attachRun(runId: string): Promise<StructuredRunState | null> {
     const payload = await this.request("structuredAttach", { runId }) as { state: StructuredRunState | null };
-    if (!payload.state) return null;
-    this.structuredInventory.set(runId, payload.state);
+    if (!payload.state) {
+      this.structuredInventory.delete(runId);
+      this.structuredObserved.delete(runId);
+      return null;
+    }
+    this.rememberStructuredSnapshot(payload.state);
     return payload.state;
   }
 
   async adoptRun(runId: string): Promise<StructuredExecProcess | null> {
+    // The caller may have already replayed a list/attach snapshot. Keep its
+    // watermarks: events arriving during the attach RPC still need delivery.
+    const observed = this.structuredObserved.get(runId);
     const state = await this.attachRun(runId);
     if (!state || state.status !== "running") return null;
     const existing = this.structuredHandles.get(runId);
     if (existing && existing.incarnationId === state.incarnationId) return existing;
-    return this.handleFromState(state, existing ?? null);
+    return this.handleFromState(state, existing ?? null, false,
+      observed?.incarnationId === state.incarnationId ? observed : state);
   }
 
   async listRuns(): Promise<StructuredRunState[]> {
     const result = await this.request("structuredList") as unknown;
     // Defensive against protocol skew with older daemons that answer unknown
     // methods with a generic { ok: true }.
-    return Array.isArray(result) ? (result as StructuredRunState[]) : [];
+    if (!Array.isArray(result)) return [];
+    const runs = result as StructuredRunState[];
+    for (const run of runs) this.rememberStructuredSnapshot(run);
+    return runs;
   }
 
   forgetRun(runId: string): void {
     this.structuredInventory.delete(runId);
+    this.structuredObserved.delete(runId);
     this.structuredHandles.delete(runId);
     this.pendingStructuredEvents.delete(runId);
     void this.request("structuredForget", { runId }).catch((error) => this.reportOperationError(runId, error));
@@ -363,7 +394,7 @@ export class TerminalDaemonClient implements TerminalHost, StructuredExecHost {
       return; // socket died again mid-refresh; next reconnect retries
     }
     this.structuredInventory.clear();
-    for (const run of runs) this.structuredInventory.set(run.runId, run);
+    for (const run of runs) this.structuredInventory.set(run.runId, { ...run });
     for (const [runId, oldState] of previous) {
       const current = this.structuredInventory.get(runId);
       const handle = this.structuredHandles.get(runId);
@@ -378,8 +409,25 @@ export class TerminalDaemonClient implements TerminalHost, StructuredExecHost {
     }
   }
 
-  private handleFromState(state: StructuredRunState, reuse: RemoteStructuredProcess | null): RemoteStructuredProcess {
-    this.structuredInventory.set(state.runId, state);
+  private rememberStructuredSnapshot(state: StructuredRunState): void {
+    // A reducer may be feeding the returned list/attach object while events
+    // keep arriving. Never let routeStructuredEvent mutate that object or the
+    // watermarks used to bridge list -> attach -> live adoption.
+    this.structuredInventory.set(state.runId, { ...state });
+    this.structuredObserved.set(state.runId, {
+      incarnationId: state.incarnationId,
+      stdoutSeq: state.stdoutSeq,
+      stderrSeq: state.stderrSeq,
+    });
+  }
+
+  private handleFromState(
+    state: StructuredRunState,
+    reuse: RemoteStructuredProcess | null,
+    replaySnapshot = false,
+    observed: Pick<StructuredRunState, "incarnationId" | "stdoutSeq" | "stderrSeq"> = state,
+  ): RemoteStructuredProcess {
+    this.rememberStructuredSnapshot(state);
     let process = this.structuredHandles.get(state.runId) ?? null;
     if (!process || process.incarnationId !== state.incarnationId) {
       process = reuse && reuse.incarnationId === state.incarnationId
@@ -389,17 +437,24 @@ export class TerminalDaemonClient implements TerminalHost, StructuredExecHost {
     if (state.status === "running") this.structuredHandles.set(state.runId, process);
     else this.structuredHandles.delete(state.runId);
 
-    // Events can arrive (and the child can even exit) before this RPC returns.
-    // Always drain the backlog onto THIS handle. If the run already finished,
-    // also replay daemon logs and synthesize exit so a fast Codex/Pi turn is
-    // not lost just because listeners were not attached yet.
+    // A fresh spawn must replay the RPC snapshot. For adoption, the caller may
+    // have replayed an earlier inventory/attach state, so retain that earlier
+    // watermark while draining the events received during the attach RPC.
+    // Do not redeliver events already present in the caller's snapshot.
+    if (replaySnapshot || state.status !== "running") process.replayFromLogs(state);
     const pending = this.pendingStructuredEvents.get(state.runId) ?? [];
     this.pendingStructuredEvents.delete(state.runId);
-    for (const event of pending) this.deliverStructuredEvent(process, event);
-    if (state.status !== "running") {
-      process.replayFromLogs(state);
-      process.acceptExit({ exitCode: state.exitCode, signal: state.signal });
+    for (const event of pending) {
+      if (event.incarnationId !== state.incarnationId) continue;
+      if (event.event === "sdata" && typeof event.seq === "number") {
+        const known = replaySnapshot ? state : observed;
+        const knownSeq = event.stream === "stderr" ? known.stderrSeq : known.stdoutSeq;
+        if (event.seq <= knownSeq) continue;
+      }
+      if (event.event === "sexit" && state.status === "exited") continue;
+      this.deliverStructuredEvent(process, event);
     }
+    if (state.status !== "running") process.acceptExit({ exitCode: state.exitCode, signal: state.signal });
     return process;
   }
 
@@ -420,6 +475,8 @@ export class TerminalDaemonClient implements TerminalHost, StructuredExecHost {
 
   disconnect(): void {
     this.disposed = true;
+    this.stopHeartbeat?.();
+    this.stopHeartbeat = null;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -439,8 +496,12 @@ export class TerminalDaemonClient implements TerminalHost, StructuredExecHost {
    * every RemoteTerminalProcess silently dead while ProcessManager keeps the
    * session status at "running" forever.
    */
-  private handleDisconnect(): void {
-    if (this.socket?.destroyed) this.socket = null;
+  private handleDisconnect(socket: net.Socket): void {
+    if (this.socket !== socket) return;
+    this.socket = null;
+    this.stopHeartbeat?.();
+    this.stopHeartbeat = null;
+    socket.destroy();
     this.rejectPending(new Error("Terminal daemon disconnected"));
     if (this.disposed) return;
     this.scheduleReconnect();
@@ -739,7 +800,7 @@ async function tryConnect(socketPath: string, tokenPath: string): Promise<Termin
   try { token = readFileSync(tokenPath, "utf8").trim(); }
   catch { return null; }
   if (!token) return null;
-  const client = new TerminalDaemonClient(socketPath, token);
+  const client = new TerminalDaemonClient(socketPath, token, tokenPath);
   try {
     await client.connect();
     return client;
@@ -758,8 +819,11 @@ export async function connectExistingTerminalHost(configPath: string): Promise<T
 function probeSocket(socketPath: string): Promise<boolean> {
   return new Promise((resolve) => {
     const socket = net.createConnection(socketPath);
+    let settled = false;
     const finish = (alive: boolean) => {
-      socket.removeAllListeners();
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       socket.destroy();
       resolve(alive);
     };

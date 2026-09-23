@@ -1,0 +1,40 @@
+{
+  "provider": "codex",
+  "scenario": "normal",
+  "args": [
+    "exec",
+    "--json",
+    "--color",
+    "never",
+    "--sandbox",
+    "read-only",
+    "--skip-git-repo-check",
+    "-"
+  ],
+  "stdinData": "<FIXTURE_PROMPT>",
+  "events": [
+    {
+      "type": "thread.started",
+      "thread_id": "fixture-id-1"
+    },
+    {
+      "type": "turn.started"
+    },
+    {
+      "type": "item.completed",
+      "item": {
+        "id": "fixture-id-2",
+        "type": "agent_message",
+        "text": "FIXTURE_TEXT"
+      }
+    },
+    {
+      "type": "turn.completed",
+      "usage": {}
+    }
+  ],
+  "nonJsonLines": 0,
+  "stderrPresent": false,
+  "exitCode": 0,
+  "signal": null
+}

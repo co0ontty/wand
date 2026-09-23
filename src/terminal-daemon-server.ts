@@ -7,6 +7,7 @@ import { StringDecoder } from "node:string_decoder";
 
 import pty from "node-pty";
 
+import { keepUnixSocketAlive } from "./unix-socket-keepalive.js";
 import { ensureNodePtyHelperExecutable } from "./ensure-node-pty-helper.js";
 import { signalNumberFromName } from "./signal-utils.js";
 import {
@@ -260,6 +261,9 @@ export async function runTerminalDaemon(configPath: string): Promise<void> {
   };
 
   // ---------------------------------------------------------------------------
+  // MIGRATION-COMPAT: Node-owned structured CLI runs must remain available
+  // throughout the Rust migration for existing owners and explicit rollback.
+  // Do not remove until the user separately requests legacy cleanup.
   // Structured CLI runs: plain child_process ownership with full replay logs.
   // ---------------------------------------------------------------------------
 
@@ -312,14 +316,16 @@ export async function runTerminalDaemon(configPath: string): Promise<void> {
 
   const structuredSpawn = (request: StructuredSpawnRequest): StructuredRunState => {
     const existing = structuredRuns.get(request.runId);
-    if (existing && existing.status === "running") return serializeStructuredRun(existing);
+    // A lost spawn response must never re-execute the input, even if the
+    // child exited before the caller could retry. Only forget permits reuse.
+    if (existing) return serializeStructuredRun(existing);
     const wantsStdin = typeof request.stdinData === "string";
     const child = nodeSpawn(request.file, request.args, {
       cwd: request.cwd,
       env: request.env,
       stdio: wantsStdin ? ["pipe", "pipe", "pipe"] : ["ignore", "pipe", "pipe"],
     });
-    if (wantsStdin) child.stdin?.end(request.stdinData);
+    let stdinFailed = false;
     const run: DaemonStructuredRun = {
       request,
       incarnationId: randomUUID(),
@@ -370,7 +376,7 @@ export async function runTerminalDaemon(configPath: string): Promise<void> {
       emitDecoded("stderr", run.stderrDecoder.end());
       run.child = null;
       run.status = "exited";
-      run.exitCode = code;
+      run.exitCode = stdinFailed ? -1 : code;
       run.exitedAt = Date.now();
       run.signal = signalName === null || signalName === undefined ? null : Number(signalName) || signalNumberFromName(signalName);
       broadcast({
@@ -383,6 +389,12 @@ export async function runTerminalDaemon(configPath: string): Promise<void> {
       });
       evictStaleStructuredRuns();
     });
+    child.stdin?.on("error", () => {
+      // Stream errors are independent of the child's error/close events.
+      stdinFailed = true;
+      child.kill("SIGTERM");
+    });
+    if (wantsStdin) child.stdin?.end(request.stdinData);
     return serializeStructuredRun(run);
   };
 
@@ -534,7 +546,11 @@ export async function runTerminalDaemon(configPath: string): Promise<void> {
     });
   });
 
+  const stopSocketKeepalive = keepUnixSocketAlive(server, paths.socketPath, () => {
+    chmodSync(paths.socketPath, 0o600);
+  });
   const shutdown = (): void => {
+    stopSocketKeepalive();
     for (const sessionId of Array.from(sessions.keys())) forget(sessionId);
     for (const runId of Array.from(structuredRuns.keys())) structuredForget(runId);
     for (const client of clients) client.socket.destroy();

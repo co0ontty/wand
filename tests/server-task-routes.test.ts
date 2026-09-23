@@ -460,6 +460,77 @@ test("dispatching an issue creates a structured session in the issue workspace a
   });
 });
 
+test("claiming a board task creates an independently dispatched child of a doing task", async () => {
+  let storageForPty: WandStorage;
+  const stub = {
+    start: async (command: string, cwd: string, mode: SessionSnapshot["mode"], prompt: string) => {
+      const session = sessionSnapshot({
+        id: "child-pty", command, cwd, mode, provider: "pi", sessionKind: "pty", description: prompt,
+      });
+      storageForPty.saveSession(session);
+      return session;
+    },
+  };
+  await withHarness(async ({ url, storage }) => {
+    storageForPty = storage;
+    const workspace = storage.createWorkspace({ name: "Project", cwd: storage.directory() });
+    const other = storage.createWorkspace({ name: "Other", cwd: "/tmp/other-project" });
+    const parent = storage.createWandTask({ title: "正在做的工作", status: "doing", workspaceId: workspace.id });
+    const peer = storage.createWandTask({ title: "另一项工作", status: "doing", workspaceId: workspace.id });
+    const closed = storage.createWandTask({ title: "已经完成", status: "done", workspaceId: workspace.id });
+    const send = (route: string, body: object, method = "PATCH") => fetch(`${url}${route}`, {
+      method, headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    });
+    const child = await send("/api/wand-tasks", {
+      title: "要认领的任务", description: "独立执行检查", parentTaskId: parent.id,
+      agent: { provider: "pi", model: "default", thinkingEffort: "off", kind: "pty" },
+    }, "POST").then(jsonOf<{ id: string; workspaceId: string; parentTaskId: string; status: string }>);
+    assert.equal(child.workspaceId, workspace.id, "未指定项目时继承父任务的项目");
+    assert.equal(child.parentTaskId, parent.id);
+    assert.equal(child.status, "todo");
+    assert.equal(storage.getWandTask(child.id)?.parentTaskId, parent.id);
+
+    const started = await send(`/api/wand-tasks/${child.id}/dispatch`, { prompt: "独立执行检查" }, "POST");
+    assert.equal(started.status, 202);
+    const payload = await jsonOf<{ session: { id: string; cwd: string } }>(started);
+    assert.equal(payload.session.cwd, storage.directory());
+    assert.deepEqual(storage.listWandTaskSessionIds(child.id), [payload.session.id]);
+    assert.deepEqual(storage.listWandTaskSessionIds(parent.id), []);
+    const listed = await fetch(`${url}/api/wand-tasks`).then(jsonOf<Array<{ id: string; parentTaskId: string | null }>>);
+    assert.equal(listed.find((task) => task.id === child.id)?.parentTaskId, parent.id);
+    assert.equal((await fetch(`${url}/api/wand-tasks/${child.id}`).then(jsonOf<{ parentTaskId: string }>)).parentTaskId, parent.id);
+    assert.equal(storage.getWandTask(child.id)?.status, "doing");
+    assert.equal(storage.getWandTask(parent.id)?.status, "doing");
+
+    const reject = async (response: Response, message: RegExp) => {
+      assert.equal(response.status, 400);
+      assert.match((await response.json() as { error: string }).error, message);
+    };
+    await reject(await send(`/api/wand-tasks/${child.id}`, { parentTaskId: child.id }), /循环/);
+    await reject(await send(`/api/wand-tasks/${parent.id}`, { parentTaskId: child.id }), /循环/);
+    await reject(await send(`/api/wand-tasks/${child.id}`, { parentTaskId: "missing" }), /不存在/);
+    await reject(await send(`/api/wand-tasks/${child.id}`, { parentTaskId: closed.id }), /正在处理/);
+    await reject(await send(`/api/wand-tasks/${child.id}`, { workspaceId: other.id }), /同一项目/);
+    await reject(await send(`/api/wand-tasks/${parent.id}`, { workspaceId: other.id }), /解除归属/);
+    await reject(await send(`/api/wand-tasks/${child.id}/dispatch`, { workspaceId: other.id, prompt: "再次执行" }, "POST"), /同一项目/);
+    assert.equal(storage.getWandTask(child.id)?.workspaceId, workspace.id);
+    await reject(await send("/api/wand-tasks", { title: "无效归属", parentTaskId: closed.id }, "POST"), /正在处理/);
+    await reject(await send("/api/wand-tasks", { title: "跨项目", workspaceId: other.id, parentTaskId: peer.id }, "POST"), /同一项目/);
+
+    const reparented = await send(`/api/wand-tasks/${child.id}`, { parentTaskId: peer.id })
+      .then(jsonOf<{ parentTaskId: string }>);
+    assert.equal(reparented.parentTaskId, peer.id);
+    await send(`/api/wand-tasks/${peer.id}`, { status: "done" });
+    // 父任务完成后，既有子任务的历史归属保持不变，但不能再认领新的子任务。
+    assert.equal((await send(`/api/wand-tasks/${child.id}`, { title: "继续处理" }).then(jsonOf<{ parentTaskId: string }>)).parentTaskId, peer.id);
+    await reject(await send(`/api/wand-tasks/${parent.id}`, { parentTaskId: peer.id }), /正在处理/);
+    const detached = await send(`/api/wand-tasks/${child.id}`, { parentTaskId: null, workspaceId: other.id })
+      .then(jsonOf<{ parentTaskId: null; workspaceId: string }>);
+    assert.equal(detached.parentTaskId, null);
+    assert.equal(detached.workspaceId, other.id);
+  }, { processes: stub as never });
+});
+
 test("dispatching with kind pty starts a terminal session and binds it", async () => {
   const calls: Array<{ command: string; cwd: string | undefined; mode: string; initialInput?: string; opts: Record<string, unknown> }> = [];
   const stub = {

@@ -1,6 +1,6 @@
 {
   "name": "@co0ontty/wand",
-  "version": "4.72.1",
+  "version": "4.72.2",
   "description": "A web console for Claude Code, Codex, OpenCode, and other local CLI tools.",
   "type": "module",
   "bin": {
@@ -24,6 +24,7 @@
     "build:copy-content": "cp -r src/web-ui/content dist/web-ui/ && node scripts/minify-dist-content.js",
     "build:render-bin": "node scripts/stage-render-binaries.js --all",
     "build:render-native": "cargo build --release --manifest-path render/Cargo.toml -p wand-renderd",
+    "build:structured-render-native": "cargo build --release --manifest-path render/Cargo.toml -p wand-structured-renderd",
     "dev": "node scripts/bundle-tailwind.js && node scripts/bundle-xterm.js && node scripts/bundle-browser.js --development && npm run generate:web-assets && tsx src/cli.ts web",
     "check": "node scripts/bundle-tailwind.js && node scripts/bundle-xterm.js && node scripts/bundle-browser.js && npm run generate:web-assets && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.browser.json && tsc --noEmit -p tsconfig.react.json",
     "test": "node --test --import tsx tests/*.test.ts",

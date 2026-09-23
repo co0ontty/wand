@@ -770,7 +770,13 @@ export class StructuredSessionManager {
         continue;
       }
       try {
-        await this.resumeDetachedRun(session, state);
+        // listRuns is metadata-only on Render v2. Fetch the authoritative
+        // paged replay from the owner before feeding any provider reducer.
+        const attached = await this.execHost.attachRun(state.runId);
+        if (!attached || attached.incarnationId !== state.incarnationId) {
+          throw new Error("Structured run changed owner between inventory and replay");
+        }
+        await this.resumeDetachedRun(session, attached);
       } catch (error) {
         console.error(`[WAND] structured run recovery failed for ${sessionId}:`, error);
         if (!this.disposed && !this.pendingRecoveryIds.includes(sessionId)) {
@@ -1616,6 +1622,24 @@ export class StructuredSessionManager {
       queuedMessages: reordered,
       queuedMessageSkills: order.map((idx) => (session.queuedMessageSkills ?? [])[idx] ?? []),
     };
+    this.sessions.set(sessionId, updated);
+    this.storage.updateSessionRuntimeMetadata(updated);
+    this.emitStructuredSnapshot(updated);
+    return updated;
+  }
+
+  /** Edit only the pending item still identified by both index and original text. */
+  editQueuedMessage(sessionId: string, index: number, expectedText: string, text: string): SessionSnapshot {
+    const session = this.requireSession(sessionId);
+    const queue = session.queuedMessages ?? [];
+    if (!Number.isInteger(index) || index < 0 || index >= queue.length || queue[index] !== expectedText) {
+      throw new Error("排队消息已变化，请刷新后重试。");
+    }
+    const trimmed = text.trim();
+    if (!trimmed) throw new Error("排队消息不能为空。");
+    const next = queue.slice();
+    next[index] = trimmed;
+    const updated = { ...session, queuedMessages: next };
     this.sessions.set(sessionId, updated);
     this.storage.updateSessionRuntimeMetadata(updated);
     this.emitStructuredSnapshot(updated);

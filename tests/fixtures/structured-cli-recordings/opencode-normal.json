@@ -1,0 +1,87 @@
+{
+  "provider": "opencode",
+  "scenario": "normal",
+  "args": [
+    "run",
+    "--format",
+    "json",
+    "--thinking"
+  ],
+  "stdinData": "<FIXTURE_PROMPT>",
+  "events": [
+    {
+      "type": "step_start",
+      "timestamp": 1,
+      "sessionID": "fixture-id-1",
+      "part": {
+        "id": "fixture-id-2",
+        "messageID": "FIXTURE_TEXT",
+        "sessionID": "fixture-id-1",
+        "snapshot": "FIXTURE_TEXT",
+        "type": "step-start"
+      }
+    },
+    {
+      "type": "reasoning",
+      "timestamp": 1,
+      "sessionID": "fixture-id-1",
+      "part": {
+        "id": "fixture-id-3",
+        "messageID": "FIXTURE_TEXT",
+        "sessionID": "fixture-id-1",
+        "type": "reasoning",
+        "text": "FIXTURE_TEXT",
+        "time": {
+          "start": 1,
+          "end": 1
+        },
+        "metadata": {
+          "openai": {
+            "itemId": "FIXTURE_TEXT",
+            "reasoningEncryptedContent": "FIXTURE_TEXT"
+          }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "timestamp": 1,
+      "sessionID": "fixture-id-1",
+      "part": {
+        "id": "fixture-id-4",
+        "messageID": "FIXTURE_TEXT",
+        "sessionID": "fixture-id-1",
+        "type": "text",
+        "text": "FIXTURE_TEXT",
+        "time": {
+          "start": 1,
+          "end": 1
+        },
+        "metadata": {
+          "openai": {
+            "itemId": "FIXTURE_TEXT",
+            "phase": "final_answer"
+          }
+        }
+      }
+    },
+    {
+      "type": "step_finish",
+      "timestamp": 1,
+      "sessionID": "fixture-id-1",
+      "part": {
+        "id": "fixture-id-5",
+        "reason": "stop",
+        "snapshot": "FIXTURE_TEXT",
+        "messageID": "FIXTURE_TEXT",
+        "sessionID": "fixture-id-1",
+        "type": "step-finish",
+        "cost": 1
+      }
+    }
+  ],
+  "nonJsonLines": 0,
+  "stderrPresent": false,
+  "exitCode": 0,
+  "signal": null
+}

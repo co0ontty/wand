@@ -55,7 +55,23 @@ test("legacy wand_tasks without workspace_task_id can be opened and queried", (t
   assert.equal(tasks.length, 1);
   assert.equal(tasks[0]?.id, "legacy-task");
   assert.equal(tasks[0]?.workspaceTaskId, null);
+  assert.equal(tasks[0]?.parentTaskId, null);
   assert.ok(columnNames(dbPath, "wand_tasks").includes("workspace_task_id"));
+  assert.ok(columnNames(dbPath, "wand_tasks").includes("parent_task_id"));
+});
+
+test("new task schema keeps parent links across reopen and detaches on physical removal", (t) => {
+  const dbPath = tempDatabase(t, "wand-task-parent-");
+  const storage = new WandStorage(dbPath);
+  const parent = storage.createWandTask({ title: "父任务", status: "doing" });
+  const child = storage.createWandTask({ title: "子任务", parentTaskId: parent.id });
+  storage.close();
+
+  const reopened = new WandStorage(dbPath);
+  t.after(() => reopened.close());
+  assert.equal(reopened.getWandTask(child.id)?.parentTaskId, parent.id);
+  reopened.deleteWandTask(parent.id);
+  assert.equal(reopened.getWandTask(child.id)?.parentTaskId, null);
 });
 
 test("ensureDatabaseFile migrates legacy wand_tasks before creating the workspace_task index", (t) => {
@@ -64,6 +80,7 @@ test("ensureDatabaseFile migrates legacy wand_tasks before creating the workspac
 
   assert.equal(ensureDatabaseFile(dbPath), false);
   assert.ok(columnNames(dbPath, "wand_tasks").includes("workspace_task_id"));
+  assert.ok(columnNames(dbPath, "wand_tasks").includes("parent_task_id"));
 
   const storage = new WandStorage(dbPath);
   t.after(() => storage.close());

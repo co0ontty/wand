@@ -169,6 +169,19 @@ test("in-process structured host spawns, streams, and reports exit", async () =>
   host.forgetRun(structuredRunId("s1"));
 });
 
+test("in-process host rejects a one-shot prompt closed before delivery", async () => {
+  const host = new InProcessStructuredExecHost();
+  const runId = structuredRunId("early-stdin-close");
+  const handle = await host.spawnStructured({
+    runId, file: NODE, args: ["-e", "process.exit(0)"], cwd: tmpdir(), env: {},
+    stdinData: "x".repeat(2 * 1024 * 1024),
+  });
+  const collected = collect(handle);
+  await Promise.race([collected.done, new Promise((_, reject) => setTimeout(() => reject(new Error("stdin-close timeout")), 5000))]);
+  assert.equal(collected.exit?.exitCode, -1);
+  host.forgetRun(runId);
+});
+
 test("daemon-owned structured runs survive client reconnect and replay full logs", async () => {
   const configPath = path.join(mkdtempSync(path.join(tmpdir(), "wand-structured-daemon-")), "config.json");
   // Run the daemon out-of-process so its SIGTERM shutdown handlers never touch
@@ -244,6 +257,61 @@ test("daemon-owned structured runs survive client reconnect and replay full logs
     secondClient.disconnect();
   } finally {
     daemon.kill("SIGTERM");
+  }
+});
+
+test("structured list snapshot stays immutable while adoption drains newer events", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "wand-structured-observed-"));
+  const configPath = path.join(root, "config.json");
+  const runId = structuredRunId("s-observed-cursor");
+  const daemon = startDaemonProcess(configPath);
+  let first: TerminalDaemonClient | null = null;
+  let second: TerminalDaemonClient | null = null;
+  try {
+    const paths = terminalDaemonPaths(configPath);
+    await waitFor(() => {
+      try { return !!readFileSync(paths.tokenPath, "utf8").trim(); } catch { return false; }
+    });
+    const token = readFileSync(paths.tokenPath, "utf8").trim();
+    first = new TerminalDaemonClient(paths.socketPath, token);
+    await first.connect();
+    await first.spawnStructured({
+      runId,
+      file: NODE,
+      args: ["-e", `
+        process.stdout.write("one\\n");
+        setTimeout(() => process.stdout.write("two\\n"), 1600);
+        setTimeout(() => process.stdout.write("three\\n"), 3200);
+      `],
+      cwd: root,
+      env: {},
+    });
+    await waitFor(async () => (await first!.attachRun(runId))?.stdoutLog === "one\n");
+    first.disconnect();
+    first = null;
+
+    second = new TerminalDaemonClient(paths.socketPath, token);
+    await second.connect();
+    const initial = (await second.listRuns()).find((run) => run.runId === runId);
+    assert.equal(initial?.stdoutLog, "one\n");
+    const firstSeq = initial!.stdoutSeq;
+    // No attach/list after this point: live sdata must not mutate the value
+    // already returned to the reducer or its observed adoption watermark.
+    await new Promise((resolve) => setTimeout(resolve, 1950));
+    assert.equal(initial?.stdoutSeq, firstSeq);
+    assert.equal(initial?.stdoutLog, "one\n");
+    const adopted = await second.adoptRun(runId);
+    assert.ok(adopted);
+    const output = collect(adopted!);
+    await waitFor(() => output.exit !== null, 8_000);
+    assert.equal(output.stdout, "two\nthree\n");
+    assert.equal(output.exit?.exitCode, 0);
+    second.forgetRun(runId);
+  } finally {
+    first?.disconnect();
+    second?.disconnect();
+    await stopDaemonProcess(daemon);
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

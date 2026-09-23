@@ -29,6 +29,7 @@ import {
   ISSUE_AGENT_EFFORTS,
   ISSUE_AGENT_PROVIDERS,
   ISSUE_ARCHIVE_COLUMN,
+  ISSUE_NO_PARENT,
   ISSUE_BOARD_VIEWS,
   ISSUE_COLUMNS,
   ISSUE_PRIORITIES,
@@ -43,6 +44,7 @@ import {
   issueDueStamp,
   issueFilterCount,
   issueIsOverdue,
+  issueParentOptions,
   issueWorkspaceIdFromSelect,
   issueWorkspaceOptions,
   issueWorkspaceSelectValue,
@@ -94,12 +96,18 @@ interface DraftState {
   labels: string;
   /** 里程碑 id；空串表示不选。 */
   milestoneId: string;
+  parentTaskId: string;
   agent: WandTaskAgent;
 }
 
-function emptyDraft(workspaceId: string, status: WandTaskStatus = "todo", agent: WandTaskAgent = createDefaultIssueAgent()): DraftState {
+function emptyDraft(
+  workspaceId: string,
+  status: WandTaskStatus = "todo",
+  agent: WandTaskAgent = createDefaultIssueAgent(),
+  parentTaskId = "",
+): DraftState {
   // 用户没挑优先级就默认「低」，不再落成「无优先级」。
-  return { workspaceId, title: "", description: "", status, priority: DEFAULT_WAND_TASK_PRIORITY, dueDate: "", labels: "", milestoneId: "", agent };
+  return { workspaceId, title: "", description: "", status, priority: DEFAULT_WAND_TASK_PRIORITY, dueDate: "", labels: "", milestoneId: "", parentTaskId, agent };
 }
 
 function agentOf(task: WandTaskListed, lastAgent?: WandTaskAgent | null): WandTaskAgent {
@@ -289,8 +297,11 @@ export function TaskBoardHost({
     setDraft((current) => (current.milestoneId ? current : { ...current, milestoneId: id }));
   });
 
-  const openCreate = React.useCallback((status: WandTaskStatus = "todo") => {
-    setDraft(emptyDraft(filterWorkspaceId || controller.workspaceId, status, lastAgentRef.current));
+  const openCreate = React.useCallback((status: WandTaskStatus = "todo", parent?: WandTaskListed) => {
+    setDraft({
+      ...emptyDraft(parent ? parent.workspaceId ?? "" : filterWorkspaceId || controller.workspaceId, status, lastAgentRef.current, parent?.id),
+      milestoneId: parent?.milestoneId ?? "",
+    });
     setCreateExpanded(false);
     setCreateOpen(true);
     requestAnimationFrame(() => titleRef.current?.focus());
@@ -311,6 +322,7 @@ export function TaskBoardHost({
         labels: draft.labels.split(/[,，]/).map((label) => label.trim()).filter(Boolean),
         dueDate: draft.dueDate || null,
         milestoneId: draft.milestoneId || null,
+        parentTaskId: draft.parentTaskId || null,
         agent: draft.agent,
       });
       rememberAgent(draft.agent);
@@ -329,7 +341,7 @@ export function TaskBoardHost({
         }
       }
       if (createMore) {
-        setDraft(emptyDraft(draft.workspaceId, draft.status, draft.agent));
+        setDraft({ ...emptyDraft(draft.workspaceId, draft.status, draft.agent, draft.parentTaskId), milestoneId: draft.milestoneId });
         requestAnimationFrame(() => titleRef.current?.focus());
       } else {
         setCreateOpen(false);
@@ -446,10 +458,12 @@ export function TaskBoardHost({
   }, [reload, runFor, tasks]);
 
   const selected = tasks.find((task) => task.id === selectedId) ?? null;
+  const selectedChildren = selected ? tasks.filter((task) => task.parentTaskId === selected.id) : [];
   const visible = filterIssues(tasks, query, filterWorkspaceId, filters);
   const grouped = groupIssuesByStatus(visible);
   const archiveOpen = issueArchiveFolderOpen(collapsedList.archived, query, filters);
   const workspaceOptions = issueWorkspaceOptions(workspaces);
+  const createParentOptions = issueParentOptions(tasks, draft.workspaceId || undefined, null, draft.parentTaskId);
   const projectName = filterWorkspaceId
     ? workspaces.find((workspace) => workspace.id === filterWorkspaceId)?.name ?? "项目"
     : "所有项目";
@@ -527,6 +541,8 @@ export function TaskBoardHost({
   const renderCard = (task: WandTaskListed): React.ReactElement => {
     const assigned = task.agent;
     const busy = busyId === task.id;
+    const parent = tasks.find((item) => item.id === task.parentTaskId);
+    const childCount = tasks.filter((item) => item.parentTaskId === task.id).length;
     return <article
       key={task.id}
       className={classNames(
@@ -592,6 +608,12 @@ export function TaskBoardHost({
       <TaskBoardProgressRow task={task}/>
       <div className="task-board-card-meta" aria-label="任务属性">
         <span className="task-board-card-id">{task.identifier}</span>
+        {parent && <span className="task-board-chip is-parent" title={`归属 ${parent.identifier} · ${parent.title}`}>
+          ↳ {parent.identifier}
+        </span>}
+        {childCount > 0 && <span className="task-board-chip is-parent" title={`${childCount} 个子任务`}>
+          {childCount} 个子任务
+        </span>}
         <TaskBoardProjectChip name={task.workspace ? task.workspace.name : "未归属工作区"}/>
         {task.milestone ? <TaskBoardMilestoneChip name={task.milestone.name}/> : null}
         <TaskBoardPriorityChip priority={task.priority}/>
@@ -809,6 +831,11 @@ export function TaskBoardHost({
       catalog={catalog}
       agent={detailAgentValue}
       workspaceOptions={workspaceOptions}
+      parent={tasks.find((task) => task.id === selected.parentTaskId) ?? null}
+      children={selectedChildren}
+      parentOptions={issueParentOptions(tasks, selected.workspaceId, selected.id, selected.parentTaskId)}
+      onOpenTask={setSelectedId}
+      onCreateChild={() => openCreate("doing", selected)}
       onAgentChange={(agent) => {
         setDetailAgent(agent);
         rememberAgent(agent);
@@ -829,6 +856,7 @@ export function TaskBoardHost({
       onOpenSession={onOpenSession}
     /> : view === "list" ? <TaskBoardListView
       grouped={grouped}
+      allTasks={tasks}
       collapsed={collapsedList}
       archiveOpen={archiveOpen}
       onToggle={(status) => setCollapsedList((current) => ({ ...current, [status]: !current[status] }))}
@@ -952,7 +980,33 @@ export function TaskBoardHost({
               searchable
               searchPlaceholder="搜索项目"
               className="task-board-native-select"
-              onValueChange={(value) => setDraft((current) => ({ ...current, workspaceId: issueWorkspaceIdFromSelect(value) ?? "" }))}
+              onValueChange={(value) => {
+                const workspaceId = issueWorkspaceIdFromSelect(value) ?? "";
+                setDraft((current) => ({
+                  ...current,
+                  workspaceId,
+                  parentTaskId: tasks.some((task) => task.id === current.parentTaskId && task.workspaceId === (workspaceId || null))
+                    ? current.parentTaskId : "",
+                }));
+              }}
+            />
+            <WandSelect
+              value={draft.parentTaskId || ISSUE_NO_PARENT}
+              options={createParentOptions}
+              ariaLabel="归属父任务"
+              placeholder="归属父任务"
+              searchable
+              searchPlaceholder="搜索正在处理的任务"
+              className="task-board-native-select task-board-parent-select"
+              onValueChange={(value) => {
+                const parent = tasks.find((task) => task.id === value);
+                setDraft((current) => ({
+                  ...current,
+                  parentTaskId: parent?.id ?? "",
+                  workspaceId: parent ? parent.workspaceId ?? "" : current.workspaceId,
+                  milestoneId: parent?.milestoneId ?? current.milestoneId,
+                }));
+              }}
             />
             <WandSelect
               value={draft.status}
@@ -1085,6 +1139,11 @@ function IssueDetail({
   catalog,
   agent,
   workspaceOptions,
+  parent,
+  children,
+  parentOptions,
+  onOpenTask,
+  onCreateChild,
   onAgentChange,
   onPatch,
   onDispatch,
@@ -1096,6 +1155,11 @@ function IssueDetail({
   catalog: IssueModelCatalog | null;
   agent: WandTaskAgent;
   workspaceOptions: ReturnType<typeof issueWorkspaceOptions>;
+  parent: WandTaskListed | null;
+  children: WandTaskListed[];
+  parentOptions: ReturnType<typeof issueParentOptions>;
+  onOpenTask(id: string): void;
+  onCreateChild(): void;
   onAgentChange(agent: WandTaskAgent): void;
   onPatch(patch: Parameters<typeof taskBoardRepository.update>[1]): void;
   onDispatch(prompt: string): void;
@@ -1108,6 +1172,7 @@ function IssueDetail({
   const [composeOpen, setComposeOpen] = React.useState(!hasAgents);
   const [composePrompt, setComposePrompt] = React.useState(hasAgents ? "" : task.description);
   const knownLabels = collectIssueLabels([task]);
+  const labelKey = task.labels.join("\0");
   const workspaceSelectOptions = React.useMemo(() => {
     const options = [...workspaceOptions];
     if (task.workspaceId && task.workspace && !options.some((item) => item.value === task.workspaceId)) {
@@ -1119,19 +1184,30 @@ function IssueDetail({
     return options;
   }, [task.workspace, task.workspaceId, workspaceOptions]);
 
+  // 看板会静默轮询 + 跟随会话变更刷新，task 每次都是新对象（labels 数组换了引用）。
+  // 因此派生草稿只按「值」同步，否则一次刷新就会把用户正在编辑的标题/标签打回原样。
   React.useEffect(() => {
     setTitle(task.title);
     setLabelDraft(task.labels.join(", "));
-    const assigned = task.sessions.length > 0;
+  }, [task.id, task.title, labelKey]);
+
+  // 指派面板只在切换任务或会话数真的变了（派发成功挂上新会话）时重置；
+  // 静默刷新不能把刚打开的面板和已经输入的提示词一起关掉。
+  const sessionCount = task.sessions.length;
+  React.useEffect(() => {
+    const assigned = sessionCount > 0;
     setComposeOpen(!assigned);
     setComposePrompt(assigned ? "" : task.description);
-  }, [task.id, task.title, task.description, task.labels, task.sessions.length]);
+  }, [task.id, sessionCount]);
 
   return <div className="task-board-detail" aria-label="任务详情">
     <div className="task-board-detail-scroll">
       <div className="task-board-detail-layout">
         <div className="task-board-detail-main">
           <p className="task-board-detail-id">ID: {task.identifier}</p>
+          {parent && <button className="task-board-parent-link" type="button" onClick={() => onOpenTask(parent.id)}>
+            ↳ 归属 {parent.identifier} · {parent.title}
+          </button>}
           <textarea
             className="resize-none task-board-detail-title"
             rows={1}
@@ -1152,6 +1228,19 @@ function IssueDetail({
             assigned={task.agent}
             onOpenSession={onOpenSession}
           />
+          {(children.length > 0 || task.status === "doing") && <section className="task-board-children" aria-label="子任务">
+            <div className="task-board-children-head">
+              <strong>子任务 <span>{children.length}</span></strong>
+              {task.status === "doing" && <WandButton kind="ghost" size="small" onClick={onCreateChild}>
+                <WandIcon name="plus" size={14} slot="start"/>派发子任务
+              </WandButton>}
+            </div>
+            {children.map((child) => <button key={child.id} type="button" className="task-board-child-row" onClick={() => onOpenTask(child.id)}>
+              <TaskBoardStatusGlyph status={child.status}/>
+              <span>{child.title}</span>
+              <small>{child.identifier}</small>
+            </button>)}
+          </section>}
           {composeOpen ? <section className="task-board-native-assign" aria-label="指派 Agent">
             <div className="task-board-native-assign-head">
               <strong>{task.sessions.length > 0 ? "再指派一个 Agent" : "指派 Agent"}</strong>
@@ -1279,7 +1368,23 @@ function IssueDetail({
               searchPlaceholder="搜索项目"
               className="task-board-native-select"
               disabled={busy}
-              onValueChange={(value) => onPatch({ workspaceId: issueWorkspaceIdFromSelect(value) })}
+              onValueChange={(value) => {
+                const workspaceId = issueWorkspaceIdFromSelect(value);
+                onPatch({ workspaceId, ...(task.parentTaskId && task.workspaceId !== workspaceId ? { parentTaskId: null } : {}) });
+              }}
+            />
+          </IssueField>
+          <IssueField label="归属父任务">
+            <WandSelect
+              value={task.parentTaskId || ISSUE_NO_PARENT}
+              options={parentOptions}
+              ariaLabel="归属父任务"
+              placeholder="归属父任务"
+              searchable
+              searchPlaceholder="搜索正在处理的任务"
+              className="task-board-native-select task-board-parent-select"
+              disabled={busy}
+              onValueChange={(value) => onPatch({ parentTaskId: value === ISSUE_NO_PARENT ? null : value })}
             />
           </IssueField>
           <IssueField label="里程碑">

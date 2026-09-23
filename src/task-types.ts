@@ -163,6 +163,8 @@ export interface WandTask {
   workspaceId: string | null;
   /** 关联的侧栏工作任务；归档/新建时用来对账，不随 WorkspaceTask 删除而消失。 */
   workspaceTaskId: string | null;
+  /** 认领到处理中的父任务；子任务仍有独立 Agent 会话。 */
+  parentTaskId: string | null;
   identifier: string;
   title: string;
   /** 'user' = 用户自己填的标题；'auto' = 用户留空后按描述/会话内容自动生成。 */

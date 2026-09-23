@@ -1290,6 +1290,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
                 ' title="' + escapeHtml(titleAttr) + '">' +
               '<span class="queue-bar-item-index" aria-hidden="true">' + (i + 1) + '</span>' +
               '<span class="queue-bar-item-text">' + escapeHtml(displayText) + '</span>' +
+              '<button type="button" data-action="edit" title="编辑" aria-label="编辑第 ' + (i + 1) + ' 条">✎</button>' +
               '<button type="button" class="queue-bar-item-promote" data-action="promote-item"' +
                     ' title="' + escapeHtml(promoteTitle) + '" aria-label="立即发送第 ' + (i + 1) + ' 条">' +
                 '<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
@@ -1363,6 +1364,25 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, refreshed.output, false));
         renderChat(true);
         updateQueueBar();
+      }
+
+      async function queueBarEditItem(index) {
+        var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        var original = session && session.queuedMessages && session.queuedMessages[index];
+        if (typeof original !== "string") return;
+        var edited = window.prompt("编辑排队消息", original);
+        if (edited === null || edited.trim() === original) return;
+        if (!edited.trim()) { showToast("排队消息不能为空。", "error"); return; }
+        try {
+          var res = await fetch("/api/structured-sessions/" + encodeURIComponent(session.id) + "/queued/" + index, {
+            method: "PATCH", credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ expectedText: original, text: edited }),
+          });
+          if (!res.ok) throw new Error((await res.json()).error || "编辑失败");
+          updateSessionSnapshot({ id: session.id, queuedMessages: (await res.json()).queuedMessages });
+          updateQueueBar();
+        } catch (err) { showToast((err && err.message) || "编辑失败", "error"); }
       }
 
       function queueBarDeleteItem(index) {
@@ -1674,7 +1694,10 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
             if (action === "drag") return;
             ev.preventDefault();
             ev.stopPropagation();
-            if (action === "promote-item") {
+            if (action === "edit") {
+              var editItem = actionEl.closest(".queue-bar-item");
+              if (editItem) queueBarEditItem(Number(editItem.getAttribute("data-index")));
+            } else if (action === "promote-item") {
               var pItem = actionEl.closest(".queue-bar-item");
               if (pItem) queueBarPromoteIndex(Number(pItem.getAttribute("data-index")));
             } else if (action === "delete") {
@@ -1694,7 +1717,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
           if (ev.button !== undefined && ev.button !== 0) return;
           var evTarget = ev.target as HTMLElement;
           if (evTarget && evTarget.closest && evTarget.closest(
-                '[data-action="delete"], [data-action="promote-item"], ' +
+                '[data-action="delete"], [data-action="edit"], [data-action="promote-item"], ' +
                 '[data-action="clear-all"], [data-action="expand"]')) return;
           var chip = evTarget && evTarget.closest ? evTarget.closest(".queue-bar-item") : null;
           if (!chip) return;

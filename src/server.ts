@@ -93,6 +93,7 @@ import { renderApp } from "./web-ui/index.js";
 import { WsBroadcastManager } from "./ws-broadcast.js";
 import { TerminalDaemonClient } from "./terminal-daemon-client.js";
 import { createUpgradeAwareTerminalHost } from "./render-host.js";
+import { createUpgradeAwareStructuredHost } from "./render-structured-host.js";
 import type { TerminalHost } from "./terminal-host.js";
 import { checkRateLimit, recordFailedLogin, resetRateLimit } from "./middleware/rate-limit.js";
 import {
@@ -437,9 +438,14 @@ export async function startServer(
   const structuredLogger = new SessionLogger(configDir, config.shortcutLogMaxBytes);
   // Production startup provides a daemon-backed host for structured CLI runs
   // even when Render owns every PTY. In-process hosts are for test injection.
-  const structuredExecHost = ptyHosts.legacyHost
-    ?? (terminalHost instanceof TerminalDaemonClient ? terminalHost : undefined);
-  const structuredSessions = new StructuredSessionManager(storage, config, structuredLogger, undefined, {}, structuredExecHost);
+  const legacyStructuredHost = ptyHosts.legacyHost
+    ?? (terminalHost instanceof TerminalDaemonClient ? terminalHost : null);
+  const structuredHosts = await createUpgradeAwareStructuredHost(
+    configPath, legacyStructuredHost, config.structured?.processHost,
+  );
+  const structuredSessions = new StructuredSessionManager(
+    storage, config, structuredLogger, undefined, {}, structuredHosts.host,
+  );
   const sessionRegistry = new SessionRegistry(processes, structuredSessions, storage);
   const missions = new Missions(storage, structuredSessions, sessionRegistry);
   const updateState = new ServerUpdateState();
@@ -1051,6 +1057,7 @@ export async function startServer(
       shuttingDown = true;
       try { processes.dispose(); } catch { /* noop */ }
       try { structuredSessions.dispose(); } catch { /* noop */ }
+      try { structuredHosts.rustClient?.disconnect(); } catch { /* noop */ }
       try { structuredLogger.dispose(); } catch { /* noop */ }
       try { wsManager.dispose(); } catch { /* noop */ }
       try { wss.close(); } catch { /* noop */ }
@@ -1295,6 +1302,7 @@ export async function startServer(
 
       try { processes.dispose(); } catch { /* best-effort shutdown */ }
       try { structuredSessions.dispose(); } catch { /* best-effort shutdown */ }
+      try { structuredHosts.rustClient?.disconnect(); } catch { /* best-effort shutdown */ }
       try { structuredLogger.dispose(); } catch { /* best-effort shutdown */ }
       try { wsManager.dispose(); } catch { /* best-effort shutdown */ }
       try { wss.close(); } catch { /* ignore */ }

@@ -94,71 +94,33 @@ test("web source preserves native events, safe-area variables, and selector hook
   ]);
 });
 
-test("Android WebView preserves its half of the web/native protocol", () => {
-  const mainActivity = "android/app/src/main/java/com/wand/app/MainActivity.java";
-  if (existsSync(path.join(root, mainActivity))) {
-    // The pinned Android submodule still uses the full-page Java WebView shell.
-    includesAll(mainActivity, [
-      "window.handleNativeBack",
-      // window._onNativePermissionResult 已随通知权限桥接一并移除（1168cfa），
-      // web 侧保留防御性回调并有 resume / timeout 兑底，不再要求原生端实现。
-      "wand-android-resume",
-      "wand-android-network",
-      "wand-ime-state",
-      'appendQueryParameter("session", sessionId)',
-      'WandPlatform/Android',
-      "webView.canGoBack()",
-      "onShowFileChooser",
-      "onCreateWindow",
-      "onPermissionRequest",
-      "setDownloadListener",
-      // openNotificationSettings 已随通知权限桥接一并移除（1168cfa）。
-    ]);
-  } else {
-    // The native-shell client prepares authentication before loading its PTY WebView.
-    const screen = "android/app/src/main/java/com/wand/app/ui/screens/PtyTerminalScreen.kt";
-    includesAll(screen, [
-      "WandWebSession.prepare(",
-      "WandWebSession.OwnerRevocation {",
-      "WandWebSession.release(webSessionOwnerId)",
-      "activeWebView.get()?.onResume()",
-      "activeWebView.get()?.onPause()",
-      "override fun onPageFinished(view: WebView, url: String)",
-      "loadUrl(buildEmbedTerminalUrl(serverUrl, sessionId))",
-      "RefitTerminalScript",
-      'ptyComposerSubmitChunks(text, "terminal")',
-      "api.sendPtyInputChunk(",
-      "WandPlatform/Android",
-    ]);
-    assertOrdered(
-      screen,
-      "WandWebSession.prepare(",
-      "loadUrl(buildEmbedTerminalUrl(serverUrl, sessionId))",
-    );
-    includesAll("android/app/src/main/java/com/wand/app/data/WandWebSession.kt", [
-      "mutex.withLock",
-      "loginCookieHeaders(normalized, token)",
-      "replaceCookies(normalized, setCookies)",
-      "previous.onRevoked.onRevoked()",
-    ]);
-    includesAll("android/app/src/main/java/com/wand/app/ui/SessionTopic.kt", [
-      'PtyComposerChunk(input = text, view = view, shortcutKey = "enter_text")',
-      'PtyComposerChunk(input = "\\r", view = view, shortcutKey = "enter_text")',
-    ]);
-    includesAll("android/app/src/main/java/com/wand/app/data/WandSocket.kt", [
-      '"resync_required" -> {',
-      "requestResync()",
-      "lastSeqBySession[id] = seq",
-      "openSocket()",
-    ]);
-  }
-  includesAll("android/app/src/main/java/com/wand/app/ui/screens/PtyTerminalScreen.kt", [
-    'appendQueryParameter("session", sessionId)',
-    'appendQueryParameter("embed", "terminal")',
-    'appendQueryParameter("nativeInput", "1")',
-    'appendQueryParameter("passthrough", "1")',
-    "EnableTerminalPassthroughScript",
+test("Android native terminal consumes Render snapshots over the PTY websocket", () => {
+  const screen = "android/app/src/main/java/com/wand/app/ui/screens/PtyTerminalScreen.kt";
+  const terminal = "android/app/src/main/java/com/wand/app/ui/terminal/NativePtyTerminal.kt";
+  const socket = "android/app/src/main/java/com/wand/app/data/WandSocket.kt";
+  includesAll(screen, [
+    "NativePtyTerminalSurface(terminal, onTap = { inputDrawerOpen = true })",
+    'ptyComposerSubmitChunks(text, "terminal")',
   ]);
+  includesAll(terminal, [
+    "TerminalEmulatorFactory.create(",
+    "detectTapGestures(onTap = { onTap() })",
+    'typeface = Typeface.create("sans-serif-mono", Typeface.NORMAL)',
+    "initialFontSize = 14.sp",
+    "replayTerminalSnapshot(emulator, data.terminalState, data.output, data.ptyCols, data.ptyRows)",
+    "emulator.writeInput(it.toByteArray(Charsets.UTF_8))",
+    "socket.acknowledgePty(event.ptyBytes ?: 0)",
+  ]);
+  includesAll(socket, [
+    '.put("ptyAck", ptyAck)',
+    '.put("type", "pty_input")',
+    '.put("type", "pty_resize")',
+    '.put("type", "pty_ack")',
+    '"resync_required" -> {',
+    "requestResync()",
+  ]);
+  assertOrdered(terminal, "replayTerminalSnapshot(", "socket.acknowledgePty(event.ptyBytes ?: 0)");
+  assert.ok(!source(screen).includes("WebView"), "Android PTY must not mount WebView");
 });
 
 test("Apple clients preserve mobile WebView and desktop native terminal contracts", () => {

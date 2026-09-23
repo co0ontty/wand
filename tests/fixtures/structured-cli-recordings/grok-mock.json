@@ -1,0 +1,17 @@
+{
+  "provider": "grok",
+  "scenario": "synthetic-mock",
+  "source": "handwritten-from-node-adapter-contract",
+  "args": ["--no-auto-update", "-p", "<FIXTURE_PROMPT>", "--output-format", "streaming-json", "--resume", "fixture-session-id"],
+  "stdinData": null,
+  "events": [
+    { "type": "available_commands", "commands": [] },
+    { "type": "thought", "data": "FIXTURE_THINKING" },
+    { "type": "tool_call", "toolCallId": "fixture-tool-1", "toolName": "read_file", "status": "in_progress", "rawInput": { "path": "fixture.txt" } },
+    { "type": "tool_call_update", "toolCallId": "fixture-tool-1", "toolName": "read_file", "status": "completed", "rawOutput": { "ok": true } },
+    { "type": "text", "data": "FIXTURE_TEXT" },
+    { "type": "end", "sessionId": "fixture-session-id", "usage": { "input_tokens": 1, "output_tokens": 1 } }
+  ],
+  "exitCode": 0,
+  "signal": null
+}

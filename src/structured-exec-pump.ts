@@ -146,18 +146,22 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
       env: options.env,
       stdio: wantsStdin ? ["pipe", "pipe", "pipe"] : ["ignore", "pipe", "pipe"],
     });
-    if (wantsStdin) child.stdin?.end(options.stdinData);
     source = { pid: child.pid ?? null, interrupt: () => child.kill("SIGTERM") };
     const stdoutDecoder = createUtf8TextDecoder();
     const stderrDecoder = createUtf8TextDecoder();
     child.stdout?.on("data", (chunk: Buffer) => handleStdoutText(stdoutDecoder.write(chunk)));
     child.stderr?.on("data", (chunk: Buffer) => handleStderrText(stderrDecoder.write(chunk)));
     child.on("error", (error) => finish(null, null, error as NodeJS.ErrnoException));
+    child.stdin?.on("error", (error) => {
+      finish(null, null, error as NodeJS.ErrnoException);
+      child.kill("SIGTERM");
+    });
     child.on("close", (exitCode, signalName) => {
       handleStdoutText(stdoutDecoder.end());
       handleStderrText(stderrDecoder.end());
       finish(exitCode, signalName === null || signalName === undefined ? null : signalName);
     });
+    if (wantsStdin) child.stdin?.end(options.stdinData);
     sourceReady = Promise.resolve();
   }
 

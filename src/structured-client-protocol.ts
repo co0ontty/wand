@@ -54,6 +54,8 @@ function questionsFromInput(input: Record<string, unknown>): StructuredQuestion[
 /** 派发子 Agent 的工具名：Claude Code 的 Task/Agent，以及 Wand pi 扩展的 subagent。 */
 const SUBAGENT_TOOL_NAMES = new Set(["Task", "Agent"]);
 const PI_SUBAGENT_TOOL_NAME = "Pi/subagent";
+/** pi 的待办扩展工具，经 `piToolName` 映射后带 `Pi/` 前缀。 */
+const PI_TODO_TOOL_NAME = "Pi/todo";
 
 /**
  * 历史 turn / 非 Claude provider 的子 Agent 工具调用没有 `__subagent` 盖章，
@@ -124,6 +126,12 @@ function toolResultText(block: ContentBlock): string {
   return block.content.map((part) => text(part.text) ?? "").join("");
 }
 
+const TASK_LIST_TOOL_NAMES = ["TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", PI_TODO_TOOL_NAME];
+
+function piTodoAction(input: Record<string, unknown>): string {
+  return text(input.action) ?? "";
+}
+
 function tasksFromSegment(messages: ConversationTurn[], start: number, end: number): {
   items: StructuredTaskItem[];
   targetId: string | null;
@@ -134,7 +142,7 @@ function tasksFromSegment(messages: ConversationTurn[], start: number, end: numb
   for (let i = start; i < end; i++) {
     for (const block of messages[i]?.content ?? []) {
       if (block.type === "tool_result") resultByToolId.set(block.tool_use_id, toolResultText(block));
-      if (block.type === "tool_use" && ["TodoWrite", "TaskCreate", "TaskUpdate", "TaskList"].includes(block.name)) {
+      if (block.type === "tool_use" && TASK_LIST_TOOL_NAMES.includes(block.name)) {
         targetId = block.id;
         if (block.name === "TodoWrite") latestTodoWrite = block;
       }
@@ -162,29 +170,39 @@ function tasksFromSegment(messages: ConversationTurn[], start: number, end: numb
   for (let i = start; i < end; i++) {
     for (const block of messages[i]?.content ?? []) {
       if (block.type !== "tool_use") continue;
-      if (block.name === "TaskCreate") {
+      // pi 的待办工具把增删改合成一条 call，靠 `action` 区分，且主键是 `id` 而非 `taskId`。
+      const piAction = block.name === PI_TODO_TOOL_NAME ? piTodoAction(block.input) : null;
+      const isCreate = block.name === "TaskCreate" || piAction === "create";
+      const isUpdate = block.name === "TaskUpdate"
+        || (piAction !== null && piAction !== "list" && piAction !== "get");
+      if (!isCreate && !isUpdate) continue;
+      if (piAction === "clear") {
         sawTaskTool = true;
-        fallbackId++;
-        const match = resultByToolId.get(block.id)?.match(/#([^\s]+)/);
-        const id = match?.[1] ?? String(fallbackId);
-        tasks.set(id, {
-          id,
-          content: text(block.input.subject) ?? text(block.input.description) ?? `Task #${id}`,
-          status: "pending",
-          ...(text(block.input.activeForm) ? { activeForm: text(block.input.activeForm) } : {}),
-        });
-      } else if (block.name === "TaskUpdate") {
-        sawTaskTool = true;
-        const id = String(block.input.taskId ?? "");
-        if (!id) continue;
-        const previous = tasks.get(id) ?? { id, content: `Task #${id}`, status: "pending" };
-        tasks.set(id, {
-          ...previous,
-          ...(text(block.input.subject) ? { content: text(block.input.subject)! } : {}),
-          ...(text(block.input.status) ? { status: text(block.input.status)! } : {}),
-          ...(text(block.input.activeForm) ? { activeForm: text(block.input.activeForm) } : {}),
-        });
+        tasks.clear();
+        continue;
       }
+      const rawId = isCreate ? "" : String(block.input.taskId ?? block.input.id ?? "");
+      if (!isCreate && !rawId) continue;
+      sawTaskTool = true;
+      let id: string;
+      if (isCreate) {
+        fallbackId++;
+        // 结果文本里才有分配到的 id：Claude「Task #7 created …」/ pi「Created #1: …」。
+        id = resultByToolId.get(block.id)?.match(/#([^\s:,]+)/)?.[1] ?? String(fallbackId);
+      } else {
+        id = rawId;
+      }
+      const content = text(block.input.subject) ?? text(block.input.description);
+      const status = text(block.input.status);
+      const activeForm = text(block.input.activeForm);
+      const deleted = piAction === "delete" || status === "deleted";
+      tasks.set(id, {
+        ...tasks.get(id) ?? { id, content: content ?? `Task #${id}`, status: "pending" },
+        ...(content ? { content } : {}),
+        ...(status ? { status } : {}),
+        ...(deleted ? { status: "deleted" } : {}),
+        ...(activeForm ? { activeForm } : {}),
+      });
     }
   }
   return {

@@ -44,6 +44,7 @@ export const RENDER_BIN_DIR_NAME = "render-bin";
 export const MANIFEST_FILE_NAME = "manifest.json";
 
 export const BINARY_NAME = "wand-render";
+export const STRUCTURED_BINARY_NAME = "wand-structured-renderd";
 export const VERSION_FILE_NAME = "wand-render.version";
 export const SHA256_FILE_NAME = "wand-render.sha256";
 
@@ -224,7 +225,7 @@ export function readBinaryContainerFormat(filePath) {
   return "unknown";
 }
 
-function verifyArtifact({ triple, artifact, sourcePath, expectedVersion, hostTriple, log }) {
+function verifyArtifact({ triple, artifact, sourcePath, expectedVersion, hostTriple, log, protocolVersion = null }) {
   if (!isFile(sourcePath)) return `${triple}: 产物缺失 ${sourcePath}（manifest 指向的路径不对？）`;
 
   const actualSize = statSync(sourcePath).size;
@@ -262,6 +263,9 @@ function verifyArtifact({ triple, artifact, sourcePath, expectedVersion, hostTri
   if (probe.version !== expectedVersion) {
     return `${triple}: 产物版本 ${probe.version} 与 manifest latest ${expectedVersion} 不一致`;
   }
+  if (protocolVersion !== null && !probe.output.includes(`(protocol ${protocolVersion})`)) {
+    return `${triple}: structured 产物协议版本与 manifest 不一致`;
+  }
   return null;
 }
 
@@ -285,8 +289,9 @@ function writeTextAtomically(filePath, content) {
  * 绝不留下半截的 `wand-render`，也绝不就地改写一个可能正在被执行的二进制。
  * @returns {{ error: string | null, targetPath: string, sha256: string, version: string }}
  */
-function stageTriple({ triple, artifact, sourcePath, expectedVersion, distDir, write, hostTriple }) {
-  const targetPath = path.join(distDir, "native", triple, BINARY_NAME);
+function stageTriple({ triple, artifact, sourcePath, expectedVersion, distDir, write, hostTriple,
+  binaryName = BINARY_NAME, protocolVersion = null }) {
+  const targetPath = path.join(distDir, "native", triple, binaryName);
   const sha256 = sha256File(sourcePath);
   if (!write) return { error: null, targetPath, sha256, version: expectedVersion };
 
@@ -305,7 +310,8 @@ function stageTriple({ triple, artifact, sourcePath, expectedVersion, distDir, w
     }
     if (triple === hostTriple) {
       const probe = probeRenderBinary(tempPath);
-      if (!probe.ran || probe.isStub || probe.version !== expectedVersion) {
+      if (!probe.ran || probe.isStub || probe.version !== expectedVersion
+        || (protocolVersion !== null && !probe.output.includes(`(protocol ${protocolVersion})`))) {
         throw new Error(
           `就位后的副本自检失败（ran=${probe.ran} stub=${probe.isStub} version=${probe.version}，期望 ${expectedVersion}）：${probe.output || "无输出"}`,
         );
@@ -326,8 +332,8 @@ function stageTriple({ triple, artifact, sourcePath, expectedVersion, distDir, w
     }
     return { error: `${triple}: ${error instanceof Error ? error.message : String(error)}`, targetPath, sha256, version: expectedVersion };
   }
-  writeTextAtomically(path.join(path.dirname(targetPath), VERSION_FILE_NAME), `${expectedVersion}\n`);
-  writeTextAtomically(path.join(path.dirname(targetPath), SHA256_FILE_NAME), `${sha256}  ${BINARY_NAME}\n`);
+  writeTextAtomically(path.join(path.dirname(targetPath), `${binaryName}.version`), `${expectedVersion}\n`);
+  writeTextAtomically(path.join(path.dirname(targetPath), `${binaryName}.sha256`), `${sha256}  ${binaryName}\n`);
   return { error: null, targetPath, sha256, version: expectedVersion };
 }
 
@@ -446,6 +452,36 @@ export function stageRenderBinaries(options = {}) {
       continue;
     }
     staged.push({ triple, sourcePath, targetPath: result.targetPath, sha256: result.sha256, version: result.version });
+    let structuredStage = null;
+    if (artifact.structured !== undefined) {
+      const structured = artifact.structured;
+      if (structured?.protocolVersion !== 2 || typeof structured.sha256 !== "string") {
+        const message = `${triple}: v2 structured artifact metadata is invalid`;
+        failures.push(message);
+        log(`error: ${message}`);
+        continue;
+      }
+      const structuredSource = path.join(renderBinDir, typeof structured.path === "string" && structured.path
+        ? structured.path : path.join(`v${latest}`, triple, STRUCTURED_BINARY_NAME));
+      const structuredProblem = verifyArtifact({ triple, artifact: structured, sourcePath: structuredSource,
+        expectedVersion: latest, hostTriple, log, protocolVersion: 2 });
+      if (structuredProblem) {
+        failures.push(structuredProblem);
+        log(`error: ${structuredProblem}`);
+        continue;
+      }
+      const stagedV2 = stageTriple({ triple, artifact: structured, sourcePath: structuredSource,
+        expectedVersion: latest, distDir, write: !check && !dryRun, hostTriple,
+        binaryName: STRUCTURED_BINARY_NAME, protocolVersion: 2 });
+      if (stagedV2.error) {
+        failures.push(stagedV2.error);
+        log(`error: ${stagedV2.error}`);
+        continue;
+      }
+      structuredStage = { sourcePath: structuredSource, ...stagedV2 };
+      staged.push({ triple, sourcePath: structuredSource, targetPath: stagedV2.targetPath,
+        sha256: stagedV2.sha256, version: stagedV2.version });
+    }
 
     if (check) {
       if (!isFile(result.targetPath)) {
@@ -464,13 +500,23 @@ export function stageRenderBinaries(options = {}) {
           log(`${triple}: 已 stage 的副本一致（${result.targetPath}）`);
         }
       }
+      if (structuredStage) {
+        if (!isFile(structuredStage.targetPath)) {
+          warn(`${structuredStage.targetPath} 尚未 stage`);
+          if (strict) failures.push(`${triple}: --check --strict requires the v2 binary`);
+        } else if (sha256File(structuredStage.targetPath) !== structuredStage.sha256) {
+          failures.push(`${triple}: staged v2 sha256 mismatch`);
+        }
+      }
       continue;
     }
     if (dryRun) {
       log(`${triple}: 将写入 ${result.targetPath}（mode 0755）与 ${VERSION_FILE_NAME} / ${SHA256_FILE_NAME} sidecar`);
+      if (structuredStage) log(`${triple}: 将写入 ${structuredStage.targetPath}（v2 protocol 2）`);
       continue;
     }
     log(`${triple}: 已 stage ${result.targetPath}（mode 0755，v${latest}）`);
+    if (structuredStage) log(`${triple}: 已 stage ${structuredStage.targetPath}（protocol 2）`);
   }
 
   if (failures.length > 0) {

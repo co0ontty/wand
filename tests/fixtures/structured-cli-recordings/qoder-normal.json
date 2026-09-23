@@ -1,0 +1,175 @@
+{
+  "provider": "qoder",
+  "scenario": "normal",
+  "args": [
+    "-p",
+    "<FIXTURE_PROMPT>",
+    "--output-format",
+    "stream-json",
+    "--model",
+    "Qwen3.8-Flash",
+    "--permission-mode",
+    "bypass_permissions"
+  ],
+  "stdinData": null,
+  "events": [
+    {
+      "type": "system",
+      "subtype": "init",
+      "qodercli_version": "FIXTURE_TEXT",
+      "protocol_version": "FIXTURE_TEXT",
+      "mcp_servers": [],
+      "model": "FIXTURE_TEXT",
+      "permissionMode": "bypassPermissions",
+      "output_style": "FIXTURE_TEXT",
+      "fast_mode_state": "FIXTURE_TEXT",
+      "uuid": "FIXTURE_TEXT",
+      "session_id": "fixture-id-1"
+    },
+    {
+      "type": "system",
+      "subtype": "artifacts_update",
+      "artifacts": [],
+      "uuid": "FIXTURE_TEXT",
+      "session_id": "fixture-id-1"
+    },
+    {
+      "type": "system",
+      "subtype": "hook_started",
+      "hook_id": "FIXTURE_TEXT",
+      "hook_name": "FIXTURE_TEXT",
+      "hook_event": "FIXTURE_TEXT",
+      "uuid": "FIXTURE_TEXT",
+      "session_id": "fixture-id-1"
+    },
+    {
+      "type": "system",
+      "subtype": "hook_response",
+      "hook_id": "FIXTURE_TEXT",
+      "hook_name": "FIXTURE_TEXT",
+      "hook_event": "FIXTURE_TEXT",
+      "output": "FIXTURE_TEXT",
+      "stdout": "FIXTURE_TEXT",
+      "stderr": "FIXTURE_TEXT",
+      "exit_code": 1,
+      "duration_ms": 1,
+      "outcome": "FIXTURE_TEXT",
+      "uuid": "FIXTURE_TEXT",
+      "session_id": "fixture-id-1"
+    },
+    {
+      "type": "assistant",
+      "message": {
+        "id": "fixture-id-2",
+        "type": "message",
+        "role": "assistant",
+        "model": "FIXTURE_TEXT",
+        "stop_reason": null,
+        "stop_sequence": null,
+        "content": [
+          {
+            "type": "thinking",
+            "thinking": "FIXTURE_TEXT",
+            "signature": "FIXTURE_TEXT"
+          }
+        ],
+        "container": null,
+        "context_management": null,
+        "usage": {
+          "server_tool_use": {
+            "web_search_requests": 1,
+            "web_fetch_requests": 1
+          },
+          "service_tier": "FIXTURE_TEXT",
+          "cache_creation": {},
+          "inference_geo": "FIXTURE_TEXT",
+          "iterations": [],
+          "speed": "FIXTURE_TEXT"
+        }
+      },
+      "parent_tool_use_id": null,
+      "uuid": "FIXTURE_TEXT",
+      "session_id": "fixture-id-1"
+    },
+    {
+      "type": "assistant",
+      "message": {
+        "id": "fixture-id-2",
+        "type": "message",
+        "role": "assistant",
+        "model": "FIXTURE_TEXT",
+        "stop_reason": "end_turn",
+        "stop_sequence": null,
+        "usage": {
+          "server_tool_use": {
+            "web_search_requests": 1,
+            "web_fetch_requests": 1
+          },
+          "service_tier": "FIXTURE_TEXT",
+          "cache_creation": {},
+          "inference_geo": "FIXTURE_TEXT",
+          "iterations": [],
+          "speed": "FIXTURE_TEXT",
+          "credits": 1,
+          "original_credits": 1,
+          "billable": false,
+          "request_id": "FIXTURE_TEXT",
+          "context_usage_ratio": 1
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "FIXTURE_TEXT",
+            "citations": null
+          }
+        ],
+        "container": null,
+        "context_management": null
+      },
+      "parent_tool_use_id": null,
+      "uuid": "FIXTURE_TEXT",
+      "session_id": "fixture-id-1"
+    },
+    {
+      "type": "result",
+      "subtype": "success",
+      "duration_ms": 1,
+      "duration_api_ms": 1,
+      "is_error": false,
+      "num_turns": 1,
+      "result": "FIXTURE_TEXT",
+      "stop_reason": "end_turn",
+      "total_cost_usd": 1,
+      "total_credits": 1,
+      "usage": {
+        "server_tool_use": {
+          "web_search_requests": 1,
+          "web_fetch_requests": 1
+        },
+        "service_tier": "FIXTURE_TEXT",
+        "cache_creation": {},
+        "inference_geo": "FIXTURE_TEXT",
+        "iterations": [],
+        "speed": "FIXTURE_TEXT",
+        "request_id": "FIXTURE_TEXT",
+        "context_usage_ratio": 1
+      },
+      "modelUsage": {
+        "qfmodel": {
+          "webSearchRequests": 1,
+          "costUSD": 1,
+          "contextWindow": 1,
+          "credits": 1
+        }
+      },
+      "permission_denials": [],
+      "fast_mode_state": "FIXTURE_TEXT",
+      "uuid": "FIXTURE_TEXT",
+      "session_id": "fixture-id-1"
+    }
+  ],
+  "nonJsonLines": 0,
+  "stderrPresent": false,
+  "exitCode": 0,
+  "signal": null
+}

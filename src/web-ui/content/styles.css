@@ -18069,6 +18069,12 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined.pinned.
 }
 
 .task-board-chip.is-muted { color: var(--text-muted); }
+.task-board-chip.is-parent {
+  max-width: 140px;
+  border-color: color-mix(in srgb, var(--accent) 25%, var(--border-default));
+  background: color-mix(in srgb, var(--accent-muted) 45%, var(--bg-elevated));
+  color: var(--text-secondary);
+}
 /* 里程碑胶囊：卡片/列表行上显示任务归属的里程碑。 */
 .task-board-chip.is-milestone { max-width: 156px; color: var(--text-primary); }
 .task-board-chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -18352,6 +18358,52 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined.pinned.
 .task-board-detail-title:hover,
 .task-board-detail-body:hover { background: color-mix(in srgb, var(--text-primary) 4%, transparent); }
 
+.task-board-parent-link {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.task-board-parent-link:hover { color: var(--accent); }
+.task-board-parent-link:focus-visible,
+.task-board-child-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.task-board-children {
+  margin: 16px 0 20px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+}
+.task-board-children-head,
+.task-board-child-row { display: flex; align-items: center; gap: 10px; }
+.task-board-children-head { justify-content: space-between; }
+.task-board-children-head strong { color: var(--text-primary); font-size: 12px; }
+.task-board-children-head strong span { color: var(--text-tertiary); font-weight: 500; }
+.task-board-child-row {
+  width: 100%;
+  padding: 9px 4px;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.task-board-child-row:hover { color: var(--accent); }
+.task-board-child-row span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-board-child-row small { color: var(--text-tertiary); font-size: 11px; }
+
 .task-board-detail-properties {
   display: grid;
   gap: 10px;
@@ -18567,6 +18619,9 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined.pinned.
 .task-board-create-dialog .task-board-native-select {
   min-width: 0;
 }
+.task-board-parent-select { max-width: 100%; }
+.task-board-create-dialog .task-board-parent-select { max-width: min(240px, 100%); }
+.task-board-parent-select .wand-ui-select-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-board-create-dialog .wand-ui-select-trigger.task-board-native-select {
   min-width: 108px;
   min-height: 30px;

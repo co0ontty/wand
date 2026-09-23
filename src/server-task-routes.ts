@@ -73,6 +73,40 @@ function labelsFrom(value: unknown): string[] {
   return value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean).slice(0, 20);
 }
 
+/** 新认领只能挂到同项目且正在处理的任务；历史归属在父任务完成后仍保留。 */
+function parentTaskIdFrom(
+  storage: WandStorage,
+  value: unknown,
+  workspaceId: string | null,
+  childId: string | null = null,
+  existingParentId: string | null = null,
+): string | null {
+  if (value === null || value === "") return null;
+  if (typeof value !== "string" || !value.trim()) throw new Error("父任务无效。");
+  const parentId = value.trim();
+  const parent = storage.getWandTask(parentId);
+  if (!parent) throw new Error("父任务不存在。");
+  if (parent.workspaceId !== workspaceId) throw new Error("父任务必须与子任务属于同一项目目录。");
+  if (parent.status !== "doing" && parentId !== existingParentId) {
+    throw new Error("只能认领到正在处理的父任务。");
+  }
+  // 不允许自己做父任务，也不允许把祖先接到后代下。
+  const visited = new Set<string>();
+  let ancestorId: string | null = parentId;
+  while (ancestorId) {
+    if (ancestorId === childId || visited.has(ancestorId)) throw new Error("父任务不能形成循环。");
+    visited.add(ancestorId);
+    ancestorId = storage.getWandTask(ancestorId)?.parentTaskId ?? null;
+  }
+  return parentId;
+}
+
+function assertTaskWorkspaceMove(storage: WandStorage, taskId: string, workspaceId: string | null): void {
+  if (storage.listWandTasks().some((task) => task.parentTaskId === taskId && task.workspaceId !== workspaceId)) {
+    throw new Error("请先将子任务解除归属，再移动父任务的项目目录。");
+  }
+}
+
 /** 里程碑名：必填、去首尾空白、限长。 */
 function milestoneNameFrom(value: unknown): string {
   const name = text(value).slice(0, WAND_MILESTONE_NAME_MAX_LENGTH);
@@ -375,8 +409,12 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
   app.post("/api/wand-tasks", (req, res) => {
     try {
       const body = bodyObject(req.body);
-      const workspaceId = body.workspaceId === null ? null : text(body.workspaceId) || null;
+      const requestedParent = body.parentTaskId == null ? null : storage.getWandTask(text(body.parentTaskId));
+      const workspaceId = body.workspaceId === undefined && requestedParent
+        ? requestedParent.workspaceId
+        : body.workspaceId === null ? null : text(body.workspaceId) || null;
       if (workspaceId && !storage.getWorkspace(workspaceId)) throw new Error("项目不存在。");
+      const parentTaskId = parentTaskIdFrom(storage, body.parentTaskId ?? null, workspaceId);
       const description = text(body.description);
       // 标题是可选字段：用户不写就先用描述首行占位，再由模型在后台覆盖。
       const providedTitle = text(body.title);
@@ -396,6 +434,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       const task = storage.transaction(() => {
         const card = storage.createWandTask({
           workspaceId,
+          parentTaskId,
           title,
           titleSource,
           description,
@@ -424,6 +463,11 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
   app.patch("/api/wand-tasks/:id", (req, res) => {
     try {
       const body = bodyObject(req.body);
+      const currentTask = storage.getWandTask(req.params.id);
+      if (!currentTask) {
+        res.status(404).json({ error: "未找到该任务。" });
+        return;
+      }
       const patch: Parameters<WandStorage["updateWandTask"]>[1] = {};
       if (body.title !== undefined) {
         // 显式改标题（包括原生端的可编辑标题框）都算用户自己写的。
@@ -458,10 +502,17 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
         patch.milestoneId = scopedMilestoneId(storage, milestoneId, patch.workspaceId)
           ?? defaultMilestoneIdForWrite(storage);
       }
+      if (body.parentTaskId !== undefined || body.workspaceId !== undefined) {
+        const workspaceId = patch.workspaceId === undefined ? currentTask.workspaceId : patch.workspaceId;
+        patch.parentTaskId = parentTaskIdFrom(
+          storage, body.parentTaskId === undefined ? currentTask.parentTaskId : body.parentTaskId,
+          workspaceId, currentTask.id, currentTask.parentTaskId,
+        );
+        if (workspaceId !== currentTask.workspaceId) assertTaskWorkspaceMove(storage, currentTask.id, workspaceId);
+      }
       if (body.agent !== undefined) {
         // 老客户端不传 mode / kind：沿用任务当前值，而不是复位成标准 / 结构化。
-        const current = storage.getWandTask(req.params.id);
-        patch.agent = parseTaskAgent(body.agent, current?.agent?.mode, current?.agent?.kind);
+        patch.agent = parseTaskAgent(body.agent, currentTask.agent?.mode, currentTask.agent?.kind);
         if (patch.agent) writeTaskBoardLastAgent(storage, patch.agent);
       }
       if (body.sortOrder !== undefined && Number.isFinite(Number(body.sortOrder))) {
@@ -540,6 +591,8 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       if (body.workspaceId !== undefined) {
         const workspaceId = body.workspaceId === null ? null : text(body.workspaceId) || null;
         if (workspaceId && !storage.getWorkspace(workspaceId)) throw new Error("项目不存在。");
+        parentTaskIdFrom(storage, task.parentTaskId, workspaceId, task.id, task.parentTaskId);
+        if (workspaceId !== task.workspaceId) assertTaskWorkspaceMove(storage, task.id, workspaceId);
         task = storage.updateWandTask(task.id, { workspaceId }) ?? task;
       }
       const workspace = task.workspaceId ? storage.getWorkspace(task.workspaceId) : null;

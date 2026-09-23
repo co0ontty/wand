@@ -72,6 +72,8 @@ export const taskBoardRepository = {
     dueDate?: string | null;
     /** 里程碑 id；null / 省略表示不归入里程碑。 */
     milestoneId?: string | null;
+    /** 将任务认领为另一项处理中任务的子任务。 */
+    parentTaskId?: string | null;
     agent?: WandTaskAgent | null;
   }): Promise<WandTaskListed> {
     return mutateTask("/api/wand-tasks", jsonBody(input));
@@ -82,7 +84,7 @@ export const taskBoardRepository = {
   },
   update(
     id: string,
-    patch: Partial<Pick<WandTask, "title" | "titleSource" | "description" | "status" | "priority" | "labels" | "dueDate" | "milestoneId" | "workspaceId" | "sortOrder" | "agent">>,
+    patch: Partial<Pick<WandTask, "title" | "titleSource" | "description" | "status" | "priority" | "labels" | "dueDate" | "milestoneId" | "workspaceId" | "parentTaskId" | "sortOrder" | "agent">>,
   ): Promise<WandTaskListed> {
     return mutateTask(`/api/wand-tasks/${encodeURIComponent(id)}`, jsonBody(patch, "PATCH"));
   },

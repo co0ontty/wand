@@ -1,4 +1,5 @@
 import type {
+  WandTask,
   WandTaskAgent,
   WandTaskAgentEffort,
   WandTaskAgentKind,
@@ -107,6 +108,38 @@ export function issueDropDispatches(status: WandTaskStatus, sessionCount: number
 /** 拖拽派发用的提示词：优先任务描述，其次标题，最后给一句兜底指令。 */
 export function issueDropDispatchPrompt(task: { title: string; description: string }): string {
   return task.description.trim() || task.title.trim() || "执行此任务";
+}
+
+export const ISSUE_NO_PARENT = "__no_parent__";
+
+/** 只允许选同项目、处理中的任务；保留已完成的当前父任务供查看和解除。 */
+export function issueParentOptions(
+  tasks: readonly Pick<WandTask, "id" | "identifier" | "title" | "status" | "workspaceId" | "parentTaskId">[],
+  workspaceId: string | null | undefined,
+  childId: string | null = null,
+  currentParentId: string | null = null,
+): WandSelectOption[] {
+  const byId = new Map(tasks.map((task) => [task.id, task]));
+  const descendantsOfChild = (candidateId: string): boolean => {
+    const visited = new Set<string>();
+    let id: string | null = candidateId;
+    while (id && !visited.has(id)) {
+      if (id === childId) return true;
+      visited.add(id);
+      id = byId.get(id)?.parentTaskId ?? null;
+    }
+    return false;
+  };
+  return [
+    { value: ISSUE_NO_PARENT, label: "无父任务" },
+    ...tasks.filter((task) => (workspaceId === undefined || task.workspaceId === workspaceId)
+      && (task.status === "doing" || task.id === currentParentId)
+      && !descendantsOfChild(task.id))
+      .map((task) => ({
+        value: task.id,
+        label: `${task.identifier} · ${task.title}${task.status !== "doing" ? "（已结束）" : ""}`,
+      })),
+  ];
 }
 
 export const ISSUE_STATUS_FILTERS: ReadonlyArray<{

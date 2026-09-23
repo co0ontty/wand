@@ -50,6 +50,15 @@ const SEARCH_FILTERS: ReadonlyArray<{ value: FileExplorerSearchFilter; label: st
   { value: "dir", label: "文件夹" },
 ];
 
+function downloadExplorerFile(path: string): void {
+  const a = document.createElement("a");
+  a.href = `/api/file-raw?download=1&path=${encodeURIComponent(path)}`;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
 function iconForEntry(entry: FileExplorerEntry, isOpen: boolean): ExplorerIconName {
   if (entry.type === "dir") return isOpen ? "folderOpen" : "folder";
   const name = entry.name.toLowerCase();
@@ -731,6 +740,19 @@ export function FileExplorerHost({ root }: { root: string }) {
     void dispatch.execute({ type: "reveal", path });
   };
 
+  // Files the editor cannot show as text (image / pdf / media / binary → 415)
+  // are useless in the editor pane, so clicking them downloads directly.
+  const openFileOrDownload = (path: string): void => {
+    void codeEditorController.open(path).then((opened) => {
+      if (opened) return;
+      const current = codeEditorStore.getSnapshot();
+      if (current.activePath !== path || current.failure?.status !== 415) return;
+      void codeEditorController.execute({ type: "close" });
+      downloadExplorerFile(path);
+      notify("该文件无法以文本打开，已开始下载", "info");
+    });
+  };
+
   const rootNode = snapshot.root ? snapshot.expanded.get(snapshot.root) : undefined;
 
   const handleAction = async (action: string) => {
@@ -741,7 +763,7 @@ export function FileExplorerHost({ root }: { root: string }) {
     if (action === "newFile") { setPendingCreate({ dir: ctx.entry?.type === "dir" ? ctx.entry.path : ctx.dir, kind: "file" }); return; }
     if (action === "newDir") { setPendingCreate({ dir: ctx.entry?.type === "dir" ? ctx.entry.path : ctx.dir, kind: "dir" }); return; }
     if (action === "navigate" && entry) { void dispatch.execute({ type: "navigate", dir: entry.path }); return; }
-    if (action === "open" && entry) { codeEditorController.open(entry.path); return; }
+    if (action === "open" && entry) { openFileOrDownload(entry.path); return; }
     if (action === "reveal" && entry) { revealInTree(entry.path); return; }
     if (action === "rename" && entry) { setRenameState({ path: entry.path }); return; }
     if (action === "move" && entry) {
@@ -762,12 +784,7 @@ export function FileExplorerHost({ root }: { root: string }) {
       return;
     }
     if (action === "download" && entry) {
-      const a = document.createElement("a");
-      a.href = `/api/file-raw?download=1&path=${encodeURIComponent(entry.path)}`;
-      a.rel = "noopener";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      downloadExplorerFile(entry.path);
       return;
     }
   };
@@ -776,7 +793,7 @@ export function FileExplorerHost({ root }: { root: string }) {
     // Directories have no content to show, so the useful action is revealing
     // their place in the tree — the same gesture the ⇧↵ hint advertises.
     if (entry.type === "dir") revealInTree(entry.path);
-    else codeEditorController.open(entry.path);
+    else openFileOrDownload(entry.path);
   };
 
   const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
@@ -893,7 +910,7 @@ export function FileExplorerHost({ root }: { root: string }) {
                     snapshot={snapshot}
                     activePath={activePath}
                     onToggle={(dir) => void dispatch.execute({ type: "toggle", dir })}
-                    onFileActivate={(path) => void codeEditorController.open(path)}
+                    onFileActivate={openFileOrDownload}
                     onContextMenu={(state) => setContextMenu(state)}
                     renameState={renameState}
                     setRenameState={setRenameState}

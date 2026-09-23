@@ -146,6 +146,12 @@ class InProcessStructuredExecProcess implements StructuredExecProcess {
       });
     });
     this.child.on("error", () => settleExit({ exitCode: null, signal: null }));
+    this.child.stdin?.on("error", () => {
+      // EPIPE is emitted by stdin, not by ChildProcess. Never claim success
+      // when a child exits before consuming its one-shot prompt.
+      settleExit({ exitCode: -1, signal: null });
+      this.interrupt();
+    });
   }
 
   get pid(): number {
@@ -186,8 +192,8 @@ export class InProcessStructuredExecHost implements StructuredExecHost {
       env: request.env,
       stdio: wantsStdin ? ["pipe", "pipe", "pipe"] : ["ignore", "pipe", "pipe"],
     });
-    if (wantsStdin) child.stdin?.end(request.stdinData);
     const wrapped = new InProcessStructuredExecProcess(request.runId, child);
+    if (wantsStdin) child.stdin?.end(request.stdinData);
     // Keep exited records until forgetRun so a late attach can still answer.
     this.processes.set(request.runId, wrapped);
     return wrapped;

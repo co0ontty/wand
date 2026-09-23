@@ -56,6 +56,28 @@ test("protocol v2 reconstructs provider Task tools into one task_list", () => {
   });
 });
 
+test("protocol v2 reconstructs pi's incremental Pi/todo calls into one task_list", () => {
+  const messages: ConversationTurn[] = [
+    { role: "user", content: [{ type: "text", text: "开始" }] },
+    { role: "assistant", content: [
+      { type: "tool_use", id: "pi-1", name: "Pi/todo", input: { action: "create", subject: "梳理结构", activeForm: "正在梳理" } },
+      { type: "tool_result", tool_use_id: "pi-1", content: "Created #1: 梳理结构 (pending)" },
+      { type: "tool_use", id: "pi-2", name: "Pi/todo", input: { action: "create", subject: "跑测试" } },
+      { type: "tool_result", tool_use_id: "pi-2", content: "Created #2: 跑测试 (pending)" },
+      { type: "tool_use", id: "pi-3", name: "Pi/todo", input: { action: "update", id: 1, status: "in_progress" } },
+      { type: "tool_result", tool_use_id: "pi-3", content: "Updated #1 (pending → in_progress)" },
+      { type: "tool_use", id: "pi-4", name: "Pi/todo", input: { action: "delete", id: 2 } },
+    ] },
+  ];
+
+  const enriched = enrichStructuredMessages(messages);
+  const last = enriched[1].content[6] as ToolUseBlock;
+  assert.deepEqual(last.semantic, {
+    kind: "task_list",
+    items: [{ id: "1", content: "梳理结构", status: "in_progress", activeForm: "正在梳理" }],
+  });
+});
+
 test("protocol v2 prefers the latest TodoWrite snapshot", () => {
   const messages: ConversationTurn[] = [{
     role: "assistant",

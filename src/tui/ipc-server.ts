@@ -10,6 +10,7 @@ import { StringDecoder } from "node:string_decoder";
 import path from "node:path";
 import { IpcRequest, IpcResponseErr, IpcResponseOk, IpcSnapshotData } from "./ipc-protocol.js";
 import { getErrorMessage } from "../error-utils.js";
+import { keepUnixSocketAlive } from "../unix-socket-keepalive.js";
 
 export interface IpcServerDeps {
   socketPath: string;
@@ -95,12 +96,20 @@ export function startIpcServer(deps: IpcServerDeps): IpcServerHandle | null {
     process.stderr.write(`[wand] IPC server error: ${err.message}\n`);
   });
 
+  let stopSocketKeepalive = (): void => {};
+  let closed = false;
   server.listen(deps.socketPath, () => {
+    if (closed) { server.close(); return; }
     applySocketOwnership(deps.socketPath);
+    stopSocketKeepalive = keepUnixSocketAlive(server, deps.socketPath, () => {
+      applySocketOwnership(deps.socketPath);
+    });
   });
 
   return {
     close: async () => {
+      closed = true;
+      stopSocketKeepalive();
       await new Promise<void>((resolve) => {
         server.close(() => resolve());
         // 兜底：1s 内强制 resolve

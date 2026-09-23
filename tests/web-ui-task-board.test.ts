@@ -12,6 +12,7 @@ import {
   ISSUE_ARCHIVE_COLUMN,
   ISSUE_BOARD_VIEWS,
   ISSUE_COLUMNS,
+  ISSUE_NO_PARENT,
   ISSUE_NO_WORKSPACE,
   ISSUE_STATUS_FILTERS,
   issueArchiveFolderOpen,
@@ -22,6 +23,7 @@ import {
   issueCreateDispatches,
   issueDropDispatches,
   issueDropDispatchPrompt,
+  issueParentOptions,
   normalizeIssueAgentDefaults,
   resolveIssueAgent,
   issueBoardStats,
@@ -179,6 +181,25 @@ test("issue helpers expose columns, grouping, sorting, and workspace options", (
   assert.equal(issueWorkspaceIdFromSelect("w1"), "w1");
 });
 
+test("parent task picker offers only active tasks in the same project and avoids cycles", () => {
+  const tasks = [
+    { id: "root", identifier: "TASK-1", title: "父任务", status: "doing" as const, workspaceId: "w1", parentTaskId: null },
+    { id: "child", identifier: "TASK-2", title: "子任务", status: "doing" as const, workspaceId: "w1", parentTaskId: "root" },
+    { id: "grandchild", identifier: "TASK-3", title: "孙任务", status: "doing" as const, workspaceId: "w1", parentTaskId: "child" },
+    { id: "done", identifier: "TASK-4", title: "已结束", status: "done" as const, workspaceId: "w1", parentTaskId: null },
+    { id: "other", identifier: "TASK-5", title: "其他项目", status: "doing" as const, workspaceId: "w2", parentTaskId: null },
+  ];
+  const options = issueParentOptions(tasks, "w1", "root");
+  assert.deepEqual(options.map((option) => option.value), [ISSUE_NO_PARENT]);
+  assert.deepEqual(issueParentOptions(tasks, "w1", "child").map((option) => option.value), [ISSUE_NO_PARENT, "root"]);
+  const remembered = issueParentOptions(tasks, "w1", "grandchild", "done");
+  assert.deepEqual(remembered.map((option) => option.value), [ISSUE_NO_PARENT, "root", "child", "done"]);
+  assert.match(remembered.at(-1)!.label, /已结束/);
+  assert.match(issueParentOptions(tasks, "w2")[1]!.label, /TASK-5 · 其他项目/);
+  assert.deepEqual(issueParentOptions(tasks, undefined).map((option) => option.value),
+    [ISSUE_NO_PARENT, "root", "child", "grandchild", "other"]);
+});
+
 test("native board host talks to the Wand task API instead of the removed taskboard bridge", () => {
   const host = readFileSync(new URL("../src/web-ui/react/issues/task-board-host.tsx", import.meta.url), "utf8");
   assert.match(host, /taskBoardRepository\.dispatch\(/);
@@ -234,6 +255,10 @@ test("create form can assign the first agent from the description", () => {
   assert.match(host, /作为第一个 Agent 的指派内容/);
   assert.match(host, /submitDescription && isDispatchableIssueAgent\(draft\.agent\)/);
   assert.match(host, /taskBoardRepository\.dispatch\(created\.id, draft\.agent/);
+  assert.match(host, /parentTaskId: draft\.parentTaskId \|\| null/);
+  assert.match(composer, /ariaLabel="归属父任务"/);
+  assert.match(host, /onCreateChild=\{\(\) => openCreate\("doing", selected\)\}/);
+  assert.match(host, /aria-label="子任务"/);
   assert.match(host, /创建并指派/);
 
   assert.match(editor, /指派 Agent/);
@@ -424,4 +449,13 @@ test("task detail groups sessions by the agents that actually ran", () => {
   assert.equal(pending.length, 1);
   assert.equal(pending[0]!.provider, "pi");
   assert.equal(pending[0]!.sessions.length, 0);
+});
+
+test("task detail drafts survive the silent board refresh", () => {
+  const host = readFileSync(new URL("../src/web-ui/react/issues/task-board-host.tsx", import.meta.url), "utf8");
+  // 轮询与 WS 刷新每次都给出新的 task 对象：把 labels 数组或 description 的引用变化
+  // 写进依赖，「再指派一个 Agent」面板会在用户输入途中自己关掉。
+  assert.doesNotMatch(host, /\[task\.id, task\.title, task\.description, task\.labels/);
+  assert.match(host, /\[task\.id, task\.title, labelKey\]/);
+  assert.match(host, /\[task\.id, sessionCount\]/);
 });

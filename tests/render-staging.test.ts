@@ -145,6 +145,34 @@ test("stages the pinned artifact with 0755 plus version/sha256 sidecars", () => 
   });
 });
 
+test("a v2 manifest stages both independently hashed binaries and rejects a wrong v2 protocol", () => {
+  withFixture({}, (fixture) => {
+    const name = "wand-structured-renderd";
+    const source = path.join(path.dirname(fixture.binaryPath), name);
+    writeFileSync(source, "#!/bin/sh\necho 'wand-structured-render 0.1.0 (protocol 2)'\n");
+    chmodSync(source, 0o755);
+    const hash = sha256File(source);
+    const manifestPath = path.join(fixture.renderBinDir, "manifest.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    const artifact = manifest.versions[fixture.version].triples[fixture.triple];
+    artifact.structured = { path: `v${fixture.version}/${fixture.triple}/${name}`,
+      sha256: hash, size: statSync(source).size, protocolVersion: 2 };
+    writeFileSync(manifestPath, JSON.stringify(manifest));
+
+    const { result } = run(fixture);
+    assert.equal(result.exitCode, 0);
+    const target = path.join(fixture.distDir, "native", fixture.triple, name);
+    assert.equal(sha256File(target), hash);
+    assert.equal(statSync(target).mode & 0o777, 0o755);
+    assert.equal(readFileSync(`${target}.sha256`, "utf8"), `${hash}  ${name}\n`);
+    assert.equal(run(fixture, { check: true, strict: true }).result.exitCode, 0);
+
+    artifact.structured.protocolVersion = 3;
+    writeFileSync(manifestPath, JSON.stringify(manifest));
+    assert.equal(run(fixture).result.exitCode, 1);
+  });
+});
+
 test("--check verifies the staged copy and --dry-run writes nothing", () => {
   withFixture({}, (fixture) => {
     const dryRun = run(fixture, { dryRun: true });

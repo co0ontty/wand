@@ -1,0 +1,22 @@
+{
+  "provider": "claude",
+  "scenario": "synthetic-mock",
+  "source": "handwritten-from-node-adapter-contract",
+  "args": ["-p", "--verbose", "--output-format", "stream-json", "--resume", "fixture-session-id"],
+  "stdinData": "<FIXTURE_PROMPT>",
+  "events": [
+    { "type": "system", "subtype": "init", "session_id": "fixture-session-id" },
+    { "type": "assistant", "session_id": "fixture-session-id", "message": { "id": "ask", "content": [
+      { "type": "tool_use", "id": "ask-1", "name": "AskUserQuestion", "input": { "questions": "[{\"question\":\"Continue?\"}]" } }
+    ] } },
+    { "type": "user", "session_id": "fixture-session-id", "message": { "content": [
+      { "type": "tool_result", "tool_use_id": "ask-1", "content": "Yes", "is_error": false }
+    ] } },
+    { "type": "assistant", "session_id": "fixture-session-id", "message": { "id": "answer", "content": [
+      { "type": "text", "text": "FIXTURE_TEXT" }
+    ] } },
+    { "type": "result", "subtype": "success", "session_id": "fixture-session-id", "result": "FIXTURE_TEXT", "is_error": false, "usage": { "input_tokens": 1, "output_tokens": 1 } }
+  ],
+  "exitCode": 0,
+  "signal": null
+}

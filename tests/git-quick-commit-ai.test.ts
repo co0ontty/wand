@@ -7,6 +7,7 @@ import test from "node:test";
 
 import {
   callConfiguredAiText,
+  QuickCommitError,
   runQuickCommitWithFallback,
 } from "../src/git-quick-commit.js";
 import type { SessionProvider } from "../src/types.js";
@@ -36,6 +37,24 @@ function initRepo(repo: string): void {
 function lines(path: string): string[] {
   return readFileSync(path, "utf8").trim().split("\n");
 }
+
+test("one-shot CLI rejects an early stdin close instead of throwing an uncaught EPIPE", async () => {
+  const root = mkdtempSync(join(tmpdir(), "wand-quick-commit-stdin-"));
+  const bin = join(root, "bin");
+  mkdirSync(bin);
+  executable(join(bin, "codex"), "exit 0");
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${bin}${delimiter}${previousPath ?? ""}`;
+  try {
+    await assert.rejects(
+      callConfiguredAiText("input ".repeat(200_000), root, "English", { provider: "codex" }),
+      (error: unknown) => error instanceof QuickCommitError && error.code === "CLAUDE_CLI_FAILED",
+    );
+  } finally {
+    process.env.PATH = previousPath;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("one-shot commit text keeps Codex ephemeral and dispatches Grok/Qoder without selecting Claude", async () => {
   const root = mkdtempSync(join(tmpdir(), "wand-quick-commit-ai-provider-"));
