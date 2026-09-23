@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 import { defaultConfig } from "../src/config.js";
+import { PtyInputDeliveryError } from "../src/process-manager.js";
 import { startServer } from "../src/server.js";
 import { WandStorage } from "../src/storage.js";
 import type { SessionSnapshot } from "../src/types.js";
@@ -112,6 +113,19 @@ test("commands endpoint dispatches shell requests without a provider command", a
   assert.equal(inputResponse.status, 202);
   assert.deepEqual(await inputResponse.json(), { accepted: true });
   assert.deepEqual(inputCalls, [[created.id, "\r", "terminal", "enter_text"]]);
+
+  handle.processManager.sendInputConfirmed = (async () => {
+    throw new PtyInputDeliveryError(created.id, new Error("Render write rejected"));
+  }) as typeof handle.processManager.sendInputConfirmed;
+  const rejected = await fetch(`${handle.urls[0]!.url}/api/sessions/${created.id}/input`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${appToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ input: "\r", view: "terminal", responseMode: "accepted" }),
+  });
+  assert.equal(rejected.status, 503);
+  const error = await rejected.json() as { errorCode?: string; error?: string };
+  assert.equal(error.errorCode, "INPUT_DELIVERY_UNCONFIRMED");
+  assert.equal(error.error?.includes("Render write rejected"), false);
 });
 
 test("commands endpoint puts a new session on its task card without a board reload", async (t) => {
