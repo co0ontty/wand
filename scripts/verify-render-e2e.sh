@@ -14,7 +14,7 @@
 #   · 绝不读/写 ~/.wand，也不碰任何其他正在运行的实例。
 #
 # 二进制来自新布局（旧 `wand-rs/` 与仓库根 `native/` 已不存在）：
-#   1. $WAND_RENDER_BIN（显式指定，优先）
+#   1. ${WAND_RENDER_BIN}（显式指定，优先）
 #   2. render/ 子模块的 cargo 产物 render/target/{release,debug}/wand-render（开发态）
 #   3. dist/native/<triple>/wand-render（`npm run build:render-bin` 从 render-bin 子模块 stage 的发布产物）
 # 开发态产物要先用 `npm run build:render-native`（= cargo build --release）或
@@ -373,7 +373,10 @@ try {
   console.log(JSON.stringify({ error: String((error && error.message) || error) }));
   process.exitCode = 1;
 } finally {
-  // 助手脚本里复用了长连接（render RPC / ws），断言完成后强制退出。
+  // 退出前必须把 stdout 刷干：stdout 是管道（$(...) 捕获）时写操作是异步的，
+  // 紧跟 console.log 的 process.exit() 会把还没落地的输出丢掉 ——
+  // 表现是调用方读到空字符串、JSON.parse 报 "Unexpected end of JSON input"。
+  await new Promise((resolve) => process.stdout.write("", resolve));
   process.exit(process.exitCode ?? 0);
 }
 NODE_HELPER_EOF
@@ -415,7 +418,7 @@ wait_for_http() {
   return 1
 }
 
-# 等端口真的空出来。子实例都用同一个 $PORT，上一个没退干净就直接报错，
+# 等端口真的空出来。子实例都用同一个 ${PORT}，上一个没退干净就直接报错，
 # 否则后面的断言会静默地打在旧实例上（假 PASS）。
 wait_for_port_free() {
   for _ in $(seq 1 60); do
@@ -681,7 +684,7 @@ PTY_PID_AFTER="$(json_field "$RENDER_LIST_7" sessions.0.pid)"
 if [ -n "$PTY_PID_AFTER" ] && [ "$PTY_PID_AFTER" = "$PTY_PID_BEFORE" ]; then
   pass "重启前后 PTY pid 完全一致：before=$PTY_PID_BEFORE after=$PTY_PID_AFTER"
 else
-  fail "PTY pid 变了：before=$PTY_PID_BEFORE after=$PTY_PID_AFTER（render-list=${RENDER_LIST_7}）"
+  fail "PTY pid 变了：before=$PTY_PID_BEFORE after=${PTY_PID_AFTER}（render-list=${RENDER_LIST_7}）"
 fi
 if [ "$(render_process_count)" = "1" ]; then pass "Render 进程数仍为 1（没有跑出第二个 daemon）"; else fail "Render 进程数 = $(render_process_count)（期望 1）"; ps -ax -o pid=,command= | grep "[w]and-render -c $CONFIG" | sed 's/^/    /'; fi
 MARK7="WAND_E2E_STEP7_$(date +%s)"
@@ -806,7 +809,7 @@ if [ "$(render_process_count)" = "0" ]; then pass "now 之后没有再跑出新�
 # ── 步骤 11：stub / dev 路径 / legacy 回滚路径 ─────────────────────────────
 step "步骤 11：产物与回滚路径抽查（stub / 删除 dist/native 的开发态 / engine=legacy）"
 
-# 子实例都用同一个 $PORT：先停掉主 Server 并等端口真的空出来，
+# 子实例都用同一个 ${PORT}：先停掉主 Server 并等端口真的空出来，
 # 否则后面的 "$BASE 就绪" 会打在旧实例上、断言变成假 PASS。
 stop_server "$SERVER_PID_FILE" >/dev/null 2>&1 || true
 if wait_for_port_free; then
