@@ -60,6 +60,22 @@ test("commit CLI and model preferences update live config and restore from stora
   assert.equal(restored.commitAiSource, "api");
 });
 
+test("system AI CLI and model round-trip independently from API route preferences", () => {
+  const storage = new FakePreferenceStorage() as unknown as WandStorage;
+  const config = defaultConfig();
+  assert.equal(config.systemAiCli, undefined, "old installs continue to use the session CLI");
+  writePreferenceToStorage(config, storage, "systemAiCli", "pi");
+  writePreferenceToStorage(config, storage, "systemAiModel", "  google/gemini-3  ");
+
+  const restored = applyStoragePreferences(defaultConfig(), storage);
+  assert.equal(restored.systemAiCli, "pi");
+  assert.equal(restored.systemAiModel, "google/gemini-3");
+  assert.throws(
+    () => writePreferenceToStorage(config, storage, "systemAiCli", "shell-command"),
+    /无效系统 AI CLI/,
+  );
+});
+
 test("commit CLI preference rejects unsupported commands", () => {
   const storage = new FakePreferenceStorage() as unknown as WandStorage;
   assert.throws(

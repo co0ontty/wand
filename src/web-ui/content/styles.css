@@ -345,11 +345,11 @@
       display: none !important;
     }
     .is-wand-embed-terminal .terminal-scroll-wrap {
-      --term-font-family: "Roboto Mono", "Droid Sans Mono", "Noto Sans Mono", "Noto Sans Symbols 2", "Noto Sans Symbols", monospace;
-      --term-row-height: 15px !important;
+      --term-font-family: ui-monospace, Menlo, "SF Mono", Monaco, Consolas, "Noto Sans Symbols 2", "Noto Sans Symbols", monospace;
+      --term-row-height: 17px !important;
     }
     .is-wand-embed-terminal .terminal-scroll-wrap .xterm {
-      padding: 8px 4px 6px;
+      padding: 10px 8px 8px;
     }
     /* 直通输入模式（iOS / Android 原生壳）会把 .terminal-scroll-wrap 从 absolute
        改成 relative，好让 .xterm-helpers 里的透明输入层有个有尺寸的参照。但

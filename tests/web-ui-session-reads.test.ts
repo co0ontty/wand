@@ -105,18 +105,21 @@ test("invalid or failed list responses preserve drafts and sessions", async () =
 
 test("earlier messages use the current snapshot and deduplicate independently per session", async () => {
   const h = harness();
-  h.state.sessions = [{ id: "A", messageOffset: 40, messages: ["old tail"] }, { id: "B", messageOffset: 40, messages: ["B tail"] }];
+  h.state.sessions = [{ id: "A", messageOffset: 1, messages: ["old tail"] }, { id: "B", messageOffset: 1, messages: ["B tail"] }];
   h.state.selectedId = "A";
   assert.equal(h.api.fetchEarlierMessages(), true);
   assert.equal(h.api.fetchEarlierMessages(), false);
-  h.state.sessions[0] = { id: "A", messageOffset: 40, messages: ["live tail"] };
+  h.state.sessions[0] = { id: "A", messageOffset: 1, messages: ["live tail"] };
   h.state.selectedId = "B";
   assert.equal(h.api.fetchEarlierMessages(), true);
-  h.respond(0, { messages: ["history"], total: 41 }); await tick();
+  assert.match(h.requests[0].url, /messages\?before=1&blockBudget=60/);
+  h.respond(0, { messages: ["history"], offset: 0, total: 2,
+    leadingBlockOffset: 0, leadingBlockTotal: 1 }); await tick();
   assert.deepEqual(Array.from(h.state.sessions[0].messages), ["history", "live tail"]);
   assert.equal(h.state.sessions[0].messageOffset, 0);
   assert.equal(h.state.currentMessages.length, 0, "inactive session does not render");
-  h.respond(1, { messages: ["B history"], total: 41 }); await tick();
+  h.respond(1, { messages: ["B history"], offset: 0, total: 2,
+    leadingBlockOffset: 0, leadingBlockTotal: 1 }); await tick();
   assert.deepEqual(Array.from(h.state.currentMessages), ["B history", "B tail"]);
 });
 

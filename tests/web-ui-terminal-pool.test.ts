@@ -40,7 +40,7 @@ function fakeElement(): any {
   return element;
 }
 
-function harness() {
+function harness(options?: { embed?: boolean }) {
   const created: FakeTerminal[] = [];
   const state: Record<string, any> = {
     sessions: [],
@@ -94,6 +94,8 @@ function harness() {
       "./terminal-wheel": {
         consumeTerminalWheelLines: () => 0,
         consumeTerminalWheelPage: () => 0,
+        consumeTerminalZoomWheel: () => 0,
+        installTerminalPinchZoom: () => {},
         terminalWheelPageSequence: () => "",
       },
     } as Record<string, unknown>)[id] ?? fallback,
@@ -106,7 +108,11 @@ function harness() {
     getComputedStyle: () => ({ getPropertyValue: () => "" }),
     window: { setTimeout: () => 1 },
     document: {
-      documentElement: { classList: { contains: () => false } },
+      documentElement: {
+        classList: {
+          contains: (token: string) => options?.embed === true && token === "is-wand-embed-terminal",
+        },
+      },
       createElement: () => fakeElement(),
     },
   };
@@ -131,6 +137,12 @@ test("释放池实例后缩放记录被丢弃，同 id 重建的终端回到默�
   assert.equal(h.pool.createPooledTerminal("S1", h.container), true);
   assert.equal(h.created.length, 2);
   assert.equal(h.created[1].options.fontSize, 13, "重建的终端不得继承已释放实例的放大比例");
+});
+
+test("嵌入终端和桌面使用同一基础字号", () => {
+  const h = harness({ embed: true });
+  assert.equal(h.pool.createPooledTerminal("S1", h.container), true);
+  assert.equal(h.created[0].options.fontSize, 13);
 });
 
 test("退出分屏清空整个池时同样丢弃缩放记录", () => {

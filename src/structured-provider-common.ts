@@ -86,8 +86,8 @@ export function thinkingEffortToCodexReasoningEffort(effort: SessionSnapshot["th
 }
 
 /**
- * OpenCode / Grok / Qoder 三家共用同一套 effort 级别（off/standard/deep/max →
- * null/low/high/max），`codex:<level>` 透传 level。
+ * OpenCode / Qoder 共用（off/standard/deep/max → null/low/high/max）。
+ * `codex:<level>` 透传 level。Grok 无头模式不走这里，见 `thinkingEffortToGrokEffort`。
  */
 function thinkingEffortToLowHighMax(effort: SessionSnapshot["thinkingEffort"]): string | null {
   if (!effort || effort === "off") return null;
@@ -98,8 +98,23 @@ function thinkingEffortToLowHighMax(effort: SessionSnapshot["thinkingEffort"]): 
 }
 
 export const thinkingEffortToOpenCodeVariant = thinkingEffortToLowHighMax;
-export const thinkingEffortToGrokEffort = thinkingEffortToLowHighMax;
 export const thinkingEffortToQoderEffort = thinkingEffortToLowHighMax;
+
+/**
+ * Grok Build 无头 `--effort` 只接受 `xhigh | high | medium | low`。
+ * `max` 会让 `grok -p` 直接退出（unknown effort level）。交互 TUI 仍接受 `max`，
+ * PTY 启动参数不要改用这个函数。
+ */
+export function thinkingEffortToGrokEffort(effort: SessionSnapshot["thinkingEffort"]): string | null {
+  if (!effort || effort === "off") return null;
+  if (effort === "standard") return "low";
+  if (effort === "deep") return "high";
+  if (effort === "max") return "xhigh";
+  if (!effort.startsWith("codex:")) return null;
+  const level = effort.slice("codex:".length);
+  if (!level) return null;
+  return level === "max" ? "xhigh" : level;
+}
 
 export function thinkingEffortToPiLevel(effort: SessionSnapshot["thinkingEffort"]): string | null {
   if (!effort || effort === "off") return "off";

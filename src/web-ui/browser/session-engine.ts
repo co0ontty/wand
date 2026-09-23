@@ -3,12 +3,12 @@ import { createSessionReads } from "./session-reads";
 import { parseJsonResponse } from "../react/http-adapter";
 import { getErrorMessage } from "../../error-utils.js";
 
-import { mergeWindowedMessages } from "./message-reconciliation";
+import { mergeBlockWindowedMessages, mergeWindowedMessages } from "./message-reconciliation";
 import { shouldPersistComposerDraft } from "./composer-draft";
 import { ensureChatMessagesContainer, extractToolResultText, parseMessages, renderChat, scheduleChatRender } from "./chat-render";
 import { bindChatScrollListener, normalizeStructuredSnapshot, persistSelectedId, restoreStructuredQueue, saveStructuredQueue, stripRenderOnlyStructuredMessages, syncStructuredQueueFromSession, updateChatUnreadBubble } from "./chat-scroll";
 import "./events";
-import { isSidebarDrawerLayout, updateFilePanelCwd, updateLayoutState } from "./file-browser";
+import { isSidebarDrawerLayout, terminalZoomFromKeyboard, updateFilePanelCwd, updateLayoutState } from "./file-browser";
 import { loadGitStatus, restoreGitStatusForSession } from "./git-commit";
 import { autoResizeInput, buildMessagesForRender, canAutoResumeSession, captureTerminalInput, closeKeyboardPopup, flushCrossSessionQueue, focusInputBox, getControlInput, hasActiveTerminalSelection, hideMiniKeyboard, isImeKeyboardEvent, queueDirectInput, reconcileInteractiveState, renderCrossSessionQueue, sendInputFromBox, setTerminalInteractive, shouldCaptureTerminalEvent, stopCrossSessionQueueTicker, stopSession, switchToSessionView, updateInteractiveControls, updateStructuredQueueCounter } from "./input";
 import { _apkVersion, _hasNativeBridge, _macAppVersion, _syncWakeLock, hideError, showError, showToast } from "./notifications";
@@ -1057,10 +1057,19 @@ const sessionReads = createSessionReads();
         var normalizedSnapshot = normalizeStructuredSnapshot(snapshot, currentSession);
         // 全量 messages（带 messageOffset）走窗口合并，避免尾部窗口清掉已加载的更早消息。
         if (Array.isArray(normalizedSnapshot.messages) && typeof normalizedSnapshot.messageOffset === "number") {
-          var mw = mergeWindowedMessages(currentSession, normalizedSnapshot.messages, normalizedSnapshot.messageOffset, normalizedSnapshot.messageTotal);
-          normalizedSnapshot.messages = mw.messages;
-          normalizedSnapshot.messageOffset = mw.messageOffset;
-          normalizedSnapshot.messageTotal = mw.messageTotal;
+          var incomingOffset = normalizedSnapshot.messageOffset;
+          var mw = typeof normalizedSnapshot.leadingBlockOffset === "number"
+            ? mergeBlockWindowedMessages(currentSession, normalizedSnapshot.messages,
+              normalizedSnapshot.messageOffset, normalizedSnapshot.messageTotal,
+              normalizedSnapshot.leadingBlockOffset, normalizedSnapshot.leadingBlockTotal || 0)
+            : mergeWindowedMessages(currentSession, normalizedSnapshot.messages,
+              normalizedSnapshot.messageOffset, normalizedSnapshot.messageTotal);
+          Object.assign(normalizedSnapshot, mw);
+          if (typeof normalizedSnapshot.leadingBlockOffset !== "number") {
+            normalizedSnapshot.leadingBlockOffset = mw.messageOffset < incomingOffset
+              ? (currentSession?.leadingBlockOffset || 0) : 0;
+            normalizedSnapshot.leadingBlockTotal = normalizedSnapshot.messages[0]?.content?.length || 0;
+          }
         }
         sessionReads.record(normalizedSnapshot);
         var updated = false;
@@ -1097,6 +1106,7 @@ const sessionReads = createSessionReads();
           type: "subscribe",
           mode: hasPooledTerminal(sessionId) ? "add" : "replace",
           sessionId: sessionId,
+          blockBudget: 60,
           capabilities: { ptyAck: true },
         }));
       }
@@ -1404,7 +1414,7 @@ const sessionReads = createSessionReads();
         var sess = state.sessions.find(function(s) { return s.id === id; });
         var url = "/api/sessions/" + id;
         if (shouldRequestChatFormat(sess)) {
-          url += "?format=chat";
+          url += "?format=chat&blockBudget=60";
         }
         return fetch(url, { credentials: "same-origin" })
           .then(async function(res) {
@@ -1485,13 +1495,15 @@ const sessionReads = createSessionReads();
         var sess = state.sessions.find(function(s) { return s.id === id; });
         if (!sess) return false;
         var offset = (typeof sess.messageOffset === "number") ? sess.messageOffset : 0;
-        if (offset <= 0) return false; // 已经到最早一条
-        var pageSize = 40;
-        var newOffset = Math.max(0, offset - pageSize);
-        var limit = offset - newOffset;
+        var blockOffset = (typeof sess.leadingBlockOffset === "number") ? sess.leadingBlockOffset : 0;
+        if (offset <= 0 && blockOffset <= 0) return false; // 已经到最早一块
         var request = {};
         earlierMessageRequests.set(id, request);
-        fetch("/api/sessions/" + encodeURIComponent(id) + "/messages?offset=" + newOffset + "&limit=" + limit,
+        var url = blockOffset > 0
+          ? "/api/sessions/" + encodeURIComponent(id) + "/messages?turn=" + offset
+            + "&blockOffset=" + blockOffset + "&blockLimit=60"
+          : "/api/sessions/" + encodeURIComponent(id) + "/messages?before=" + offset + "&blockBudget=60";
+        fetch(url,
           { credentials: "same-origin" })
           .then(function(res) { return parseJsonResponse<any>(res); })
           .then(function(data) {
@@ -1499,13 +1511,39 @@ const sessionReads = createSessionReads();
             // Snapshots replace session objects during IO; always prepend to the current one.
             sess = state.sessions.find(function(s) { return s.id === id; });
             if (!sess) return;
+            if (blockOffset > 0 && data && Array.isArray(data.blocks)
+                && sess.messageOffset === offset && sess.leadingBlockOffset === blockOffset
+                && data.turnIndex === offset && data.blockOffset < blockOffset
+                && data.blockOffset + data.blocks.length === blockOffset) {
+              var turns = Array.isArray(sess.messages) ? sess.messages.slice() : [];
+              if (!turns.length) return;
+              turns[0] = Object.assign({}, turns[0], { content: data.blocks.concat(turns[0].content) });
+              sess.messages = turns;
+              sess.leadingBlockOffset = data.blockOffset;
+              sess.leadingBlockTotal = data.blockTotal;
+              sessionReads.record({ id: id, messages: turns,
+                leadingBlockOffset: data.blockOffset, leadingBlockTotal: data.blockTotal });
+              if (id === state.selectedId) {
+                state.currentMessages = buildMessagesForRender(sess, getPreferredMessages(sess, sess.output, false));
+                state.chatRenderedCount = state.currentMessages.length;
+                renderChat(true);
+              }
+              return;
+            }
             // 仅当起点未被其它更新改动时才 prepend，避免错位重复。
-            if (data && Array.isArray(data.messages) && sess.messageOffset === offset) {
+            if (blockOffset === 0 && data && Array.isArray(data.messages) && sess.messageOffset === offset
+                && Number.isSafeInteger(data.offset) && data.offset >= 0 && data.offset < offset
+                && data.offset + data.messages.length === offset
+                && Number.isSafeInteger(data.leadingBlockOffset) && data.leadingBlockOffset >= 0) {
               var existing = Array.isArray(sess.messages) ? sess.messages : [];
               sess.messages = data.messages.concat(existing);
-              sess.messageOffset = newOffset;
+              sess.messageOffset = data.offset;
+              sess.leadingBlockOffset = data.leadingBlockOffset;
+              sess.leadingBlockTotal = data.leadingBlockTotal;
               if (typeof data.total === "number") sess.messageTotal = data.total;
-              sessionReads.record({ id: id, messages: sess.messages, messageOffset: sess.messageOffset, messageTotal: sess.messageTotal });
+              sessionReads.record({ id: id, messages: sess.messages, messageOffset: sess.messageOffset,
+                messageTotal: sess.messageTotal, leadingBlockOffset: sess.leadingBlockOffset,
+                leadingBlockTotal: sess.leadingBlockTotal });
               if (id === state.selectedId) {
                 state.currentMessages = buildMessagesForRender(sess, getPreferredMessages(sess, sess.output, false));
                 // 已加载的全部展开（新拉的更早消息也要可见）。
@@ -2153,6 +2191,8 @@ const sessionReads = createSessionReads();
         // keyCode 229), or immediately after compositionend in the same event
         // loop. None of those cases may submit the composer.
         if (isImeKeyboardEvent(event)) return;
+
+        if (terminalZoomFromKeyboard(event)) return;
 
         if (shouldCaptureTerminalEvent(event)) {
           captureTerminalInput(event);

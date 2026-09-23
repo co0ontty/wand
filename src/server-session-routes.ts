@@ -741,7 +741,15 @@ export function registerSessionRoutes(
       res.status(404).json({ error: "未找到该结构化会话。" });
       return;
     }
-    res.json({ id: snapshot.id, messages: snapshot.messages ?? [] });
+    const all = snapshot.messages ?? [];
+    const offset = parseBoundedInteger(req.query.offset, Math.max(0, all.length - 40), 0, all.length);
+    const limit = parseBoundedInteger(req.query.limit, 40, 1, 200);
+    res.json({
+      id: snapshot.id,
+      messages: truncateMessagesForTransport(all.slice(offset, offset + limit), config.cardDefaults ?? {}),
+      offset,
+      total: all.length,
+    });
   });
 
   app.post("/api/structured-sessions/:id/messages", asyncRoute(async (req, res) => {
@@ -1239,6 +1247,26 @@ export function registerSessionRoutes(
     res.json({ ok: true, deleted, failed });
   });
 
+  app.get("/api/sessions/:id/pty-history", asyncRoute(async (req, res) => {
+    const snapshot = sessions.get(req.params.id);
+    if (!snapshot || (snapshot.sessionKind ?? "pty") !== "pty") {
+      res.status(404).json({ error: "未找到 PTY 会话。" });
+      return;
+    }
+    const before = Number(req.query.before);
+    const revision = Number(req.query.revision);
+    if (!Number.isSafeInteger(before) || !Number.isSafeInteger(revision) || before < 1 || revision < 0) {
+      res.status(400).json({ error: "无效的终端历史游标。" });
+      return;
+    }
+    const page = await processes.getTerminalHistoryPage(snapshot.id, before, revision);
+    if (!page) {
+      res.status(409).json({ error: "终端历史已变化，请重新同步。" });
+      return;
+    }
+    res.json(page);
+  }));
+
   app.get("/api/sessions/:id", (req, res) => {
     const snapshot = sessions.get(req.params.id);
     if (!snapshot) {
@@ -1249,8 +1277,8 @@ export function registerSessionRoutes(
       ? processes.getPtyTranscript(snapshot.id) ?? snapshot.output
       : snapshot.output;
     if (req.query.format === "chat") {
-      // 客户端带 blockBudget（iOS）走块级窗口：只回最近 N 个块（必要时切掉最旧 turn 的头部），
-      // 根治「单条 turn 上百块/1MB」的长任务打开慢。Web/Android 不带该参数，走原 turn 级窗口。
+      // 客户端带 blockBudget（Web/iOS）走块级窗口：只回最近 N 个块（必要时切掉最旧 turn 的头部），
+      // 根治「单条 turn 上百块/1MB」的长任务打开慢；未启用的客户端保持 turn 级窗口。
       const rawBudget = req.query.blockBudget;
       if (typeof rawBudget === "string" && /^\d+$/.test(rawBudget) && Number(rawBudget) > 0) {
         const blockBudget = parseBoundedInteger(rawBudget, 1, 1, 2_000);
@@ -1295,6 +1323,19 @@ export function registerSessionRoutes(
     }
     const all = enrichStructuredMessages(snapshot.messages ?? [], snapshot.id);
     const total = all.length;
+
+    // Web history: fetch at most one block window *before* the currently
+    // displayed turn. A 40-turn page can contain a single multi-MB assistant
+    // turn, defeating the initial block budget entirely.
+    if (typeof req.query.before === "string" && /^\d+$/.test(req.query.before)
+      && typeof req.query.blockBudget === "string" && /^\d+$/.test(req.query.blockBudget)) {
+      const before = parseBoundedInteger(req.query.before, total, 0, total);
+      const budget = parseBoundedInteger(req.query.blockBudget, 60, 1, 200);
+      const windowed = blockWindowMessagesForTransport(all.slice(0, before), config.cardDefaults ?? {}, budget);
+      res.json({ wandProtocolVersion: WAND_PROTOCOL_VERSION, ...windowed,
+        offset: windowed.messageOffset, total });
+      return;
+    }
 
     // 块级翻页（iOS）：?turn=<i>&blockOffset=<当前 leading 偏移>&blockLimit=<N>
     // 取该 turn 的 [start, blockOffset) 段（start = max(0, blockOffset - blockLimit)）。

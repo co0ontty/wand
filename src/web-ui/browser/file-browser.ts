@@ -65,18 +65,39 @@ import { openFilePreviewFromLegacy } from "./file-preview-adapter";
       }
 
       export function adjustTerminalScale(delta) {
-        var newScale = state.terminalScale + delta;
-        // Clamp scale between 0.5 and 2
-        newScale = Math.max(0.5, Math.min(2, newScale));
-        // Round to nearest 0.25
-        newScale = Math.round(newScale * 4) / 4;
-        if (newScale === state.terminalScale) return;
-        state.terminalScale = newScale;
+        setTerminalScale(state.terminalScale + delta);
+      }
+
+      export function setTerminalScale(scale) {
+        var next = Math.max(0.5, Math.min(2, scale));
+        next = Math.round(next * 4) / 4;
+        if (next === state.terminalScale) return;
+        state.terminalScale = next;
         try {
-          localStorage.setItem("wand-terminal-scale", String(newScale));
+          localStorage.setItem("wand-terminal-scale", String(next));
         } catch (e) {}
         applyTerminalScale();
         updateScaleLabel();
+      }
+
+      // Ctrl/Cmd plus, minus, and zero zoom the terminal instead of the browser page.
+      // A focused text field keeps the browser shortcut so drafting is unchanged.
+      export function terminalZoomFromKeyboard(event) {
+        if (!event || event.altKey || !(event.metaKey || event.ctrlKey)) return false;
+        if (state.currentView !== "terminal") return false;
+        var step = event.key === "=" || event.key === "+" ? 0.25
+          : event.key === "-" || event.key === "_" ? -0.25
+          : event.key === "0" ? 0
+          : null;
+        if (step === null) return false;
+        var target = event.target;
+        if (target && target.closest && target.closest("input, textarea, [contenteditable='true']")) {
+          if (!target.classList || !target.classList.contains("xterm-helper-textarea")) return false;
+        }
+        event.preventDefault();
+        if (step === 0) setTerminalScale(1);
+        else adjustTerminalScale(step);
+        return true;
       }
 
       export function applyTerminalScale() {

@@ -26,7 +26,7 @@ export interface SettingsHostProps {
 const TAB_LABELS: Record<SettingsTab, { title: string; description: string }> = {
   connectors: { title: "连接器", description: "GitHub 与外部服务" },
   general: { title: "基本配置", description: "服务与工作环境" },
-  ai: { title: "AI 与模型", description: "模型和 API 线路" },
+  ai: { title: "AI 与模型", description: "系统 AI、CLI 和 API 线路" },
   notifications: { title: "通知", description: "声音与系统提醒" },
   display: { title: "显示", description: "界面外观偏好" },
   security: { title: "安全", description: "密码与证书" },

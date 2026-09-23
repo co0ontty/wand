@@ -240,6 +240,36 @@ test("resolveCommitAiContext falls straight through to the session CLI when no A
   assert.equal(context.thinkingEffort, "deep");
 });
 
+test("system AI CLI selection overrides the session provider and never reuses its model", () => {
+  const snapshot = session({
+    provider: "codex",
+    selectedModel: "gpt-5.6-sol",
+    thinkingEffort: "codex:xhigh",
+  });
+  const selected = resolveSystemAiContext(snapshot, {
+    ...config,
+    systemAiCli: "pi",
+    systemAiModel: "  google/gemini-3  ",
+    systemAi: { enabled: false, protocol: "openai", baseUrl: "", apiKey: "", model: "" },
+  });
+  assert.deepEqual(selected, {
+    provider: "pi",
+    model: "google/gemini-3",
+    thinkingEffort: "deep",
+    inheritEnv: true,
+  });
+  const defaultModel = resolveSystemAiContext(snapshot, {
+    ...config,
+    systemAiCli: "qoder",
+    systemAiModel: "  ",
+  });
+  assert.equal(defaultModel.provider, "qoder");
+  assert.equal(defaultModel.model, "performance");
+  const legacy = resolveSystemAiContext(snapshot, config);
+  assert.equal(legacy.provider, "codex");
+  assert.equal(legacy.model, "gpt-5.6-sol");
+});
+
 test("resolveSystemAiContext keeps the current session CLI context independently of Commit", () => {
   const context = resolveSystemAiContext(session({
     provider: "codex",
@@ -248,6 +278,8 @@ test("resolveSystemAiContext keeps the current session CLI context independently
   }), {
     ...config,
     commitAiSource: "cli",
+    systemAiCli: "pi",
+    systemAiModel: "google/gemini-3",
     systemAi: {
       enabled: true,
       protocol: "openai",

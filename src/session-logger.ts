@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, appendFileSync, writeFileSync, readFileSync, existsSync, statSync, renameSync, unlinkSync } from "node:fs";
+import { mkdirSync, rmSync, appendFileSync, writeFileSync, readFileSync, existsSync, statSync, renameSync, unlinkSync, openSync, readSync, closeSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import type { ConversationTurn, ExecutionMode } from "./types.js";
@@ -192,6 +192,44 @@ export class SessionLogger {
       }
       if (parts.length === 0) return null;
       return parts.join("");
+    } catch {
+      return null;
+    }
+  }
+
+  /** Only read the tail needed by the transport, including rotated files. */
+  readPtyOutputTail(sessionId: string, maxBytes = 256 * 1024): string | null {
+    try {
+      this.flushSession(sessionId);
+      const dir = this.ensureDir(sessionId);
+      const parts: Buffer[] = [];
+      let remaining = Math.max(1, Math.min(maxBytes, 1024 * 1024));
+      for (let index = 0; index <= this.ptyLogMaxRotations && remaining > 0; index++) {
+        const file = path.join(dir, index ? `pty-output.log.${index}` : "pty-output.log");
+        const size = tryStatSize(file);
+        if (!size) continue;
+        const length = Math.min(remaining, size);
+        const buffer = Buffer.allocUnsafe(length);
+        const fd = openSync(file, "r");
+        try {
+          let read = 0;
+          while (read < length) {
+            const count = readSync(fd, buffer, read, length - read, size - length + read);
+            if (!count) break;
+            read += count;
+          }
+          parts.unshift(buffer.subarray(0, read));
+          remaining -= read;
+        } finally {
+          closeSync(fd);
+        }
+      }
+      if (!parts.length) return null;
+      const tail = Buffer.concat(parts);
+      // A byte-range may begin inside a multibyte scalar; don't inject U+FFFD.
+      let start = 0;
+      while (start < tail.length && (tail[start] & 0xc0) === 0x80) start++;
+      return tail.subarray(start).toString("utf8");
     } catch {
       return null;
     }

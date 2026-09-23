@@ -242,7 +242,8 @@ import "./local-preview-adapter";
         var messages = visibleOffset > 0 ? allMessages.slice(visibleOffset) : allMessages;
         // 窗口化：本地还有没展开的（visibleOffset>0），或服务端还有更早的（messageOffset>0），
         // 都要保留「加载更早」哨兵。后者触底时会从服务端拉下一页。
-        var hasServerOlder = (typeof selectedSession.messageOffset === "number") && selectedSession.messageOffset > 0;
+        var hasServerOlder = (typeof selectedSession.messageOffset === "number" && selectedSession.messageOffset > 0)
+          || (typeof selectedSession.leadingBlockOffset === "number" && selectedSession.leadingBlockOffset > 0);
         var hasOlderMessages = visibleOffset > 0 || hasServerOlder;
 
         // Check if messages actually changed

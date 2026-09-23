@@ -158,6 +158,7 @@ test("admin load is settings-first and maps models, CLI updates, and connect cod
   assert.equal(snapshot.config?.systemAi.hasApiKey, true);
   assert.equal(snapshot.config?.defaultProvider, "grok");
   assert.equal(snapshot.config?.defaultThinkingEffort, "deep");
+  assert.equal(snapshot.config?.systemAiCli, null, "old settings preserve session CLI until explicitly saved");
 });
 
 test("new-session defaults fall back safely and keep Codex dynamic thinking levels", async () => {
@@ -253,6 +254,8 @@ test("AI save preserves the empty-key sentinel and emits only a redacted runtime
     defaultProvider: "grok" as const,
     defaultThinkingEffort: "deep" as const,
     commitAiSource: "api" as const,
+    systemAiCli: "pi" as const,
+    systemAiModel: "google/gemini-3",
     systemAi: {
       id: "route-primary",
       enabled: true,
@@ -288,6 +291,8 @@ test("AI save preserves the empty-key sentinel and emits only a redacted runtime
   assert.equal(Object.hasOwn(submitted ?? {}, "commitModel"), false);
   assert.equal(submitted?.defaultProvider, "grok", "the CLI tool choice must reach the config endpoint");
   assert.equal(submitted?.defaultThinkingEffort, "deep");
+  assert.equal(submitted?.systemAiCli, "pi");
+  assert.equal(submitted?.systemAiModel, "google/gemini-3");
   assert.equal(runtime.configs[0].systemAi.apiKey, "");
   assert.equal(runtime.configs[0].systemAi.hasApiKey, true);
 });

@@ -5,8 +5,10 @@ import {
   consumeTerminalTouchPage,
   consumeTerminalWheelLines,
   consumeTerminalWheelPage,
+  consumeTerminalZoomWheel,
   TERMINAL_TOUCH_PAGE_THRESHOLD_PX,
   terminalWheelPageSequence,
+  terminalZoomKeyStep,
   type TerminalTouchPagingState,
   type TerminalWheelPagingState,
 } from "../src/web-ui/browser/terminal-wheel.ts";
@@ -33,6 +35,18 @@ function touchState(): TerminalTouchPagingState {
     lastPageAt: 0,
   };
 }
+
+test("ctrl or command wheel and keyboard zoom the terminal in quarter steps", () => {
+  const state = { accumulatedPixels: 0 };
+  assert.equal(consumeTerminalZoomWheel({ deltaY: -10 }, state), 0);
+  assert.equal(consumeTerminalZoomWheel({ deltaY: -30 }, state), 1);
+  assert.equal(consumeTerminalZoomWheel({ deltaY: 40 }, state), -1);
+  assert.equal(terminalZoomKeyStep("=", true, false), 0.25);
+  assert.equal(terminalZoomKeyStep("-", true, false), -0.25);
+  assert.equal(terminalZoomKeyStep("0", true, false), 0);
+  assert.equal(terminalZoomKeyStep("=", false, false), null);
+  assert.equal(terminalZoomKeyStep("=", true, true), null);
+});
 
 test("terminal wheel scrolling moves normal-buffer history by measured rows", () => {
   const state = wheelScrollState();

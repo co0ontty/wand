@@ -51,6 +51,46 @@ test("session HTTP interface preserves create, list, update, detail, and delete 
     assert.equal(created.sessionKind, "structured");
     assert.equal(created.provider, "opencode");
     assert.equal(created.output, "");
+    assert.equal((await fetch(`${baseUrl}/api/sessions/${created.id}/pty-history?before=1&revision=0`)).status, 404);
+    const structuredPage = await (await fetch(`${baseUrl}/api/structured-sessions/${created.id}/messages`)).json() as {
+      messages: unknown[]; offset: number; total: number;
+    };
+    assert.deepEqual(structuredPage, { id: created.id, messages: [], offset: 0, total: 0 });
+    const messages = structured.get(created.id)?.messages;
+    assert.ok(messages);
+    for (let index = 0; index < 90; index++) {
+      messages.push({ role: "user", content: [{ type: "text", text: `history-${index}` }] });
+    }
+    const tailPage = await (await fetch(`${baseUrl}/api/structured-sessions/${created.id}/messages`)).json() as {
+      messages: Array<{ content: Array<{ text?: string }> }>; offset: number; total: number;
+    };
+    assert.equal(tailPage.messages.length, 40);
+    assert.equal(tailPage.offset, 50);
+    assert.equal(tailPage.total, 90);
+    assert.equal(tailPage.messages[0].content[0].text, "history-50");
+    const olderPage = await (await fetch(
+      `${baseUrl}/api/structured-sessions/${created.id}/messages?offset=10&limit=5`,
+    )).json() as typeof tailPage;
+    assert.equal(olderPage.messages.length, 5);
+    assert.equal(olderPage.messages[0].content[0].text, "history-10");
+    const beforePage = await (await fetch(
+      `${baseUrl}/api/sessions/${created.id}/messages?before=90&blockBudget=12`,
+    )).json() as typeof tailPage & { leadingBlockOffset: number };
+    assert.equal(beforePage.messages.length, 12);
+    assert.equal(beforePage.offset, 78);
+    assert.equal(beforePage.total, 90);
+    assert.equal(beforePage.leadingBlockOffset, 0);
+    messages.push({ role: "assistant", content: Array.from({ length: 150 }, (_, index) =>
+      ({ type: "text", text: `large-${index}` })) });
+    const boundedPage = await (await fetch(
+      `${baseUrl}/api/sessions/${created.id}/messages?before=91&blockBudget=12`,
+    )).json() as typeof beforePage;
+    assert.equal(boundedPage.messages.length, 1);
+    assert.equal(boundedPage.messages[0].content.length, 12);
+    assert.equal(boundedPage.offset, 90);
+    assert.equal(boundedPage.leadingBlockOffset, 138);
+    assert.equal(boundedPage.messages[0].content[0].text, "large-138");
+    messages.length = 0;
 
     const listResponse = await fetch(`${baseUrl}/api/sessions`);
     assert.equal(listResponse.status, 200);

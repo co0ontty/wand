@@ -195,13 +195,20 @@ test("terminal initialization cannot expose PTY chrome for a structured session"
   assert.match(sessions, /!state\.terminal && terminalContainer && selectedSession && !isStructuredSession\(selectedSession\)/);
 });
 
+test("pooled terminal history uses xterm's public buffer scroll coordinates", () => {
+  const pooled = readFileSync(path.join(root, "src/web-ui/browser/terminal-pool.ts"), "utf8");
+  assert.match(pooled, /buffer\.active\.viewportY/);
+  assert.match(pooled, /buffer\.active\.baseY/);
+  assert.doesNotMatch(pooled, /buffer\.active\.(ydisp|ybase)/);
+});
+
 test("terminal snapshots survive WebSocket init arriving before xterm mounts", () => {
   const state = readFileSync(path.join(root, "src/web-ui/browser/state.ts"), "utf8");
   const terminal = readFileSync(path.join(root, "src/web-ui/browser/terminal.ts"), "utf8");
   const sessions = readFileSync(path.join(root, "src/web-ui/browser/session-engine.ts"), "utf8");
 
   assert.match(state, /terminalStatesBySession: \{\}/);
-  assert.match(terminal, /if \(sessionId\) state\.terminalStatesBySession\[sessionId\] = snapshot;/);
+  assert.match(terminal, /if \(sessionId && !keepHistory\) \{\s*var cached = cachedTerminalHistory\(sessionId, snapshot\);\s*state\.terminalStatesBySession\[sessionId\] = snapshot;/);
   assert.match(terminal, /if \(!state\.terminal\) return true;/);
   assert.match(terminal, /session\.terminalState \|\| cachedState/);
   assert.match(sessions, /if \(!sessionIds\.has\(id\)\) delete state\.terminalStatesBySession\[id\]/);

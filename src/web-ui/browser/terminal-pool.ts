@@ -8,8 +8,9 @@
 
 import { clampClientTerminalOutput } from "./terminal";
 import { fitTerminalToContainer } from "./terminal-fit";
-import { consumeTerminalWheelLines, consumeTerminalWheelPage, terminalWheelPageSequence, type TerminalWheelPagingState, type TerminalWheelScrollState } from "./terminal-wheel";
+import { consumeTerminalWheelLines, consumeTerminalWheelPage, consumeTerminalZoomWheel, installTerminalPinchZoom, terminalWheelPageSequence, type TerminalWheelPagingState, type TerminalWheelScrollState, type TerminalZoomWheelState } from "./terminal-wheel";
 import { state } from "./state";
+import { cachedTerminalHistory, forgetTerminalHistory, loadTerminalHistory, resetTerminalHistory } from "./terminal-history";
 
 /** 把 chunk 追加进该会话在 state.sessions 里的 output 缓冲（带 clamp），供将来 remount 回放，避免丢字。 */
 function appendSessionOutput(sessionId: string, chunk: string): void {
@@ -67,9 +68,7 @@ function terminalFontFamily(): string {
 }
 
 function terminalFontSize(scale = Number(state.terminalScale || 1)): number {
-  const base = document.documentElement.classList.contains("is-wand-embed-terminal")
-    ? 10
-    : state.terminalBaseFontSize || 13;
+  const base = state.terminalBaseFontSize || 13;
   return Math.max(8, Math.round(base * scale));
 }
 
@@ -219,6 +218,17 @@ export function createPooledTerminal(sessionId: string, container: HTMLElement):
     accumulatedPixels: 0,
     lastEventAt: 0,
   };
+  const loadOlder = (): void => {
+    const current = pool.get(sessionId);
+    if (!current || current.autoFollow || current.disposed || term.buffer.active.type !== "normal"
+      || term.buffer.active.viewportY > 12) return;
+    void loadTerminalHistory(sessionId, async (snapshot) => {
+      if (pool.get(sessionId) !== current) return false;
+      restorePooledTerminalState(sessionId, snapshot, "", true);
+      await current.writeQueue;
+      return pool.get(sessionId) === current;
+    });
+  };
   const terminalCellHeight = (): number => {
     try {
       const screen = wrap.querySelector(".xterm-screen") as HTMLElement | null;
@@ -229,12 +239,21 @@ export function createPooledTerminal(sessionId: string, container: HTMLElement):
     } catch { /* use fallback */ }
     return Math.max(1, terminalFontSize(getPooledTerminalScale(sessionId)) * 1.25);
   };
+  const zoomWheelState: TerminalZoomWheelState = { accumulatedPixels: 0 };
+  installTerminalPinchZoom(wrap, (direction) => {
+    setPooledTerminalScale(sessionId, getPooledTerminalScale(sessionId) + direction * 0.25);
+  });
   wrap.addEventListener("wheel", (event: WheelEvent) => {
-    if (
-      event.ctrlKey
-      || event.metaKey
-      || Math.abs(event.deltaY) <= Math.abs(event.deltaX)
-    ) return;
+    if (event.ctrlKey || event.metaKey) {
+      event.preventDefault();
+      event.stopPropagation();
+      const zoomStep = consumeTerminalZoomWheel(event, zoomWheelState);
+      if (zoomStep !== 0) {
+        setPooledTerminalScale(sessionId, getPooledTerminalScale(sessionId) + zoomStep * 0.25);
+      }
+      return;
+    }
+    if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
 
     event.preventDefault();
     event.stopPropagation();
@@ -262,7 +281,8 @@ export function createPooledTerminal(sessionId: string, container: HTMLElement):
       container.clientHeight || term.rows * terminalCellHeight(),
     );
     if (lines !== 0) term.scrollLines(lines);
-    if (term.buffer.active.ydisp >= term.buffer.active.ybase) {
+    if (event.deltaY < 0) loadOlder();
+    if (term.buffer.active.viewportY >= term.buffer.active.baseY) {
       const current = pool.get(sessionId);
       if (current) current.autoFollow = true;
     }
@@ -270,7 +290,7 @@ export function createPooledTerminal(sessionId: string, container: HTMLElement):
 
   term.onScroll(() => {
     const current = pool.get(sessionId);
-    if (current && term.buffer.active.ydisp >= term.buffer.active.ybase) current.autoFollow = true;
+    if (current && term.buffer.active.viewportY >= term.buffer.active.baseY) current.autoFollow = true;
   });
 
   const handle: PooledTerminal = {
@@ -356,15 +376,23 @@ export function restorePooledTerminalState(
   sessionId: string,
   snapshot: any,
   fallbackOutput = "",
+  keepHistory = false,
 ): boolean {
   if (!snapshot || snapshot.version !== 1) return false;
-  if (sessionId) state.terminalStatesBySession[sessionId] = snapshot;
-  setSessionOutput(sessionId, fallbackOutput);
+  if (sessionId && !keepHistory) {
+    const cached = cachedTerminalHistory(sessionId, snapshot);
+    state.terminalStatesBySession[sessionId] = snapshot;
+    if (cached) snapshot = cached;
+    else resetTerminalHistory(sessionId, snapshot);
+  }
+  if (!keepHistory) setSessionOutput(sessionId, fallbackOutput);
   const handle = pool.get(sessionId);
   if (!handle || handle.disposed) return true;
   const generation = ++handle.restoreGeneration;
   handle.writeQueue = handle.writeQueue.catch(() => {}).then(async () => {
     if (handle.disposed || generation !== handle.restoreGeneration) return;
+    const wasBrowsing = !handle.autoFollow;
+    const distance = handle.terminal.buffer.active.baseY - handle.terminal.buffer.active.viewportY;
     try {
       handle.terminal.reset();
       handle.terminal.clear();
@@ -385,7 +413,12 @@ export function restorePooledTerminalState(
     if (handle.disposed || generation !== handle.restoreGeneration) return;
     try {
       fitAndSync(handle);
-      handle.terminal.scrollToBottom();
+      if (wasBrowsing) {
+        handle.autoFollow = false;
+        handle.terminal.scrollToLine(Math.max(0, handle.terminal.buffer.active.baseY - distance));
+      } else {
+        handle.terminal.scrollToBottom();
+      }
     } catch { /* ignore */ }
   });
   return true;
@@ -397,6 +430,7 @@ export function disposePooledTerminal(sessionId: string): void {
   // 没有池实例时也会写入记录（面板已渲染、XTermLib 尚未就绪的情况），所以清理
   // 必须在 handle 早退之前，否则 sessionScales 依旧会留下无界记录。
   sessionScales.delete(sessionId);
+  forgetTerminalHistory(sessionId);
   const handle = pool.get(sessionId);
   if (!handle) return;
   handle.disposed = true;

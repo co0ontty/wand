@@ -143,7 +143,7 @@ test("one-shot commit text keeps Codex ephemeral and dispatches Grok/Qoder witho
     ]);
     assert.deepEqual(grokArgs.slice(grokArgs.indexOf("--effort"), grokArgs.indexOf("--effort") + 2), [
       "--effort",
-      "max",
+      "xhigh",
     ]);
 
     const qoderArgs = lines(qoderArgsFile);

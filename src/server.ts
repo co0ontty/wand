@@ -32,7 +32,7 @@ import { ModelCatalogService, type ModelRefreshOptions } from "./models.js";
 import { ProcessManager, ProcessEvent } from "./process-manager.js";
 import { SessionLogger } from "./session-logger.js";
 import { SessionRegistry } from "./session-registry.js";
-import { resolveSessionAiContext, resolveSystemAiContext } from "./session-ai-context.js";
+import { resolveSystemAiContext } from "./session-ai-context.js";
 import { StructuredSessionManager } from "./structured-session-manager.js";
 import { recordRecentPath, registerFileRoutes } from "./server-file-routes.js";
 import { registerLocalPreviewRoutes } from "./server-local-preview-routes.js";
@@ -821,7 +821,7 @@ export async function startServer(
     const body = (req.body ?? {}) as { text?: string; sessionId?: string };
     const text = typeof body.text === "string" ? body.text : "";
     let cwd: string | undefined;
-    let ai: ReturnType<typeof resolveSessionAiContext> | undefined;
+    let ai: ReturnType<typeof resolveSystemAiContext> | undefined;
     if (typeof body.sessionId === "string" && body.sessionId.length > 0) {
       const snapshot = sessionRegistry.getLatest(body.sessionId);
       if (snapshot?.cwd) cwd = snapshot.cwd;
@@ -836,8 +836,7 @@ export async function startServer(
         selectedModel: null,
         thinkingEffort: config.defaultThinkingEffort,
       };
-      const cli = resolveSessionAiContext(defaultSession, config);
-      ai = config.systemAi?.enabled ? { ...cli, systemAi: config.systemAi } : cli;
+      ai = resolveSystemAiContext(defaultSession, config);
     }
     try {
       const optimized = await optimizePrompt(text, config.language ?? "", cwd, ai);

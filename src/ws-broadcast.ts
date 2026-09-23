@@ -424,20 +424,27 @@ export class WsBroadcastManager {
    * and the first incremental update.
    */
   private sendInit(client: WsClient, sessionId: string, snapshot: SessionSnapshot, resync: boolean): void {
-    // 块级窗口客户端（iOS）只下发最近 blockBudget 个块；其余走 turn 级窗口。
+    // 块级窗口客户端（Web/iOS）只下发最近 blockBudget 个块；其余走 turn 级窗口。
     // 两种都附 offset/total，更早的客户端按需翻页。
     const windowed = this.windowForClient(client, sessionId, snapshot.messages);
     const seq = (client.outputSeqBySession.get(sessionId) ?? 0) + 1;
     client.outputSeqBySession.set(sessionId, seq);
     client.pendingResyncSessions.delete(sessionId);
+    const terminalState = (snapshot.sessionKind ?? "pty") === "pty"
+      ? this.port?.getTerminalState?.(sessionId) ?? undefined
+      : undefined;
     client.ws.send(JSON.stringify({
       type: "init",
       sessionId,
       seq,
       ...(resync ? { resync: true } : {}),
       data: {
-        ...toSessionDetailDTO(snapshot, { output: snapshot.output, ...windowed }),
-        terminalState: this.port?.getTerminalState?.(sessionId) ?? undefined,
+        ...toSessionDetailDTO(snapshot, {
+          output: snapshot.output,
+          outputLimit: terminalState ? 16_000 : undefined,
+          ...windowed,
+        }),
+        terminalState,
       },
     }));
   }
@@ -474,7 +481,7 @@ export class WsBroadcastManager {
     // 非增量事件若带完整 messages（结构化 output/ended 快照、PTY 非流式 chat 快照），
     // 在这个统一出口窗口化——避免逐个 emit 点各自处理、也防止超大帧撑爆移动端 WS。
     // 增量事件只带 lastMessage，不含 messages 数组，不受影响。
-    // 块级窗口客户端（iOS）需按各自预算切，所以这里改为「按客户端」窗口化；
+    // 块级窗口客户端（Web/iOS）需按各自预算切，所以这里改为「按客户端」窗口化；
     // turn 级（Web/Android）的结果跨客户端一致，缓存一次复用，避免重复计算。
     const boundedData = boundSessionEventData(event.data);
     const boundedEvent = boundedData === event.data ? event : { ...event, data: boundedData };

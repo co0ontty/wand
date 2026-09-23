@@ -65,13 +65,24 @@ export function resolveSessionAiContext(
 /** Build the source order for Wand-owned AI features such as titles. */
 export function resolveSystemAiContext(
   snapshot: Parameters<typeof resolveSessionAiContext>[0],
-  config: Parameters<typeof resolveSessionAiContext>[1] & Pick<WandConfig, "systemAi">,
+  config: Parameters<typeof resolveSessionAiContext>[1]
+    & Pick<WandConfig, "systemAi" | "systemAiCli" | "systemAiModel">,
 ): SessionAiContext {
   const sessionContext = resolveSessionAiContext(snapshot, config);
-  const directApi = config.systemAi ? usableSystemAi(config.systemAi) : undefined;
-  return directApi && config.systemAi?.enabled
-    ? { ...sessionContext, systemAi: directApi }
-    : sessionContext;
+  if (config.systemAi?.enabled) {
+    const directApi = usableSystemAi(config.systemAi);
+    return directApi ? { ...sessionContext, systemAi: directApi } : sessionContext;
+  }
+  // Older installations without a system AI CLI preference still follow the
+  // current session. A chosen CLI must never inherit another provider's model.
+  if (!isSessionProvider(config.systemAiCli)) return sessionContext;
+  return {
+    ...sessionContext,
+    provider: config.systemAiCli,
+    model: normalizeModel(config.systemAiModel)
+      ?? normalizeModel(getDefaultModelForProvider(config, config.systemAiCli)),
+    thinkingEffort: config.defaultThinkingEffort,
+  };
 }
 
 /** Build the AI context for quick-commit actions from their global preferences. */

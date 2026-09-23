@@ -10,6 +10,58 @@ export type TerminalWheelScrollState = {
   lastEventAt: number;
 };
 
+export type TerminalZoomWheelState = {
+  accumulatedPixels: number;
+};
+
+/** Ctrl/Cmd+wheel and trackpad pinch. Negative deltaY zooms in, matching browser zoom. */
+export function consumeTerminalZoomWheel(
+  event: { deltaY: number },
+  state: TerminalZoomWheelState,
+): -1 | 0 | 1 {
+  if (!Number.isFinite(event.deltaY) || event.deltaY === 0) return 0;
+  state.accumulatedPixels += event.deltaY;
+  if (Math.abs(state.accumulatedPixels) < 40) return 0;
+  const direction: -1 | 1 = state.accumulatedPixels < 0 ? 1 : -1;
+  state.accumulatedPixels = 0;
+  return direction;
+}
+
+/** Ctrl/Cmd plus, minus, and zero. `0` means restore 100%. */
+export function terminalZoomKeyStep(key: string, ctrlOrMeta: boolean, alt: boolean): number | null {
+  if (!ctrlOrMeta || alt) return null;
+  if (key === "=" || key === "+") return 0.25;
+  if (key === "-" || key === "_") return -0.25;
+  if (key === "0") return 0;
+  return null;
+}
+
+/** Safari/WebKit pinch. One gesture becomes a single zoom step so it does not run away. */
+export function installTerminalPinchZoom(
+  surface: HTMLElement,
+  onStep: (direction: -1 | 1) => void,
+): void {
+  let scale = 1;
+  const start = (event: Event) => {
+    event.preventDefault();
+    scale = 1;
+  };
+  const change = (event: Event) => {
+    event.preventDefault();
+    const next = (event as Event & { scale?: number }).scale;
+    if (typeof next === "number" && Number.isFinite(next)) scale = next;
+  };
+  const end = (event: Event) => {
+    event.preventDefault();
+    if (scale >= 1.08) onStep(1);
+    else if (scale <= 0.92) onStep(-1);
+    scale = 1;
+  };
+  surface.addEventListener("gesturestart", start);
+  surface.addEventListener("gesturechange", change);
+  surface.addEventListener("gestureend", end);
+}
+
 export type TerminalWheelLikeEvent = {
   deltaY: number;
   deltaMode: number;

@@ -89,6 +89,16 @@ test("SessionLogger flushes the current PTY batch before rotation", (t) => {
   assert.equal(readFileSync(path.join(sessionDir("rotate"), "pty-output.log.1"), "utf8"), "abcde");
   assert.equal(readFileSync(path.join(sessionDir("rotate"), "pty-output.log"), "utf8"), "FG");
   assert.equal(logger.readPtyOutput("rotate"), "abcdeFG");
+  assert.equal(logger.readPtyOutputTail("rotate", 4), "deFG");
+});
+
+test("PTY transcript detail reads a byte-bounded tail without breaking UTF-8", (t) => {
+  const { logger } = createLogger(t);
+  logger.appendPtyOutput("long", "x".repeat(500_000) + "中文🙂tail");
+  const tail = logger.readPtyOutputTail("long", 64);
+  assert.ok(tail?.endsWith("中文🙂tail"));
+  assert.ok(Buffer.byteLength(tail) <= 64);
+  assert.equal(tail?.includes("�"), false);
 });
 
 test("SessionLogger delete clears pending timers without recreating files", async (t) => {

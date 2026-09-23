@@ -153,6 +153,9 @@ export interface SettingsConfig {
   commitModel: string;
   commitAiSource: "cli" | "api";
   systemAi: SettingsSystemAi;
+  /** Absent in older configs: system AI then follows the current session CLI. */
+  systemAiCli: SettingsSessionProvider | null;
+  systemAiModel: string;
   commandPresets: SettingsCommandPreset[];
   cardDefaults: SettingsCardDefaults;
 }
@@ -317,6 +320,8 @@ export interface SettingsAiInput {
   defaultThinkingEffort: SettingsThinkingEffort;
   commitAiSource: "cli" | "api";
   systemAi: SettingsSystemAi;
+  systemAiCli: SettingsSessionProvider;
+  systemAiModel: string;
 }
 
 interface SettingsSaveResult {

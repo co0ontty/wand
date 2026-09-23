@@ -58,7 +58,25 @@ function grokToolInput(event: Record<string, unknown>): Record<string, unknown> 
   return asRecord(event.rawInput) ?? asRecord(event.input) ?? {};
 }
 
+/** Grok bash `rawOutput.output` is a byte array; the readable text is `output_for_prompt`. */
+function grokByteText(value: unknown): string {
+  if (!Array.isArray(value) || value.length === 0) return "";
+  const bytes: number[] = [];
+  for (const item of value) {
+    if (typeof item !== "number" || !Number.isInteger(item) || item < 0 || item > 255) return "";
+    bytes.push(item);
+  }
+  return Buffer.from(bytes).toString("utf8");
+}
+
 function grokToolOutput(event: Record<string, unknown>): string {
+  const raw = asRecord(event.rawOutput);
+  if (raw) {
+    if (typeof raw.output_for_prompt === "string" && raw.output_for_prompt) return raw.output_for_prompt;
+    const fromBytes = grokByteText(raw.output);
+    if (fromBytes) return fromBytes;
+    if (typeof raw.output === "string" && raw.output) return raw.output;
+  }
   const fromRaw = grokText(event.rawOutput);
   if (fromRaw) return fromRaw;
   return grokText(event.content);

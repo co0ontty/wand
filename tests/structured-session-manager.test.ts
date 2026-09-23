@@ -9,6 +9,7 @@ import { normalizeStructuredToolResultContent } from "../src/structured-content.
 import {
   normalizeThinkingEffort,
   thinkingEffortToCodexReasoningEffort,
+  thinkingEffortToGrokEffort,
   thinkingEffortToOpenCodeVariant,
 } from "../src/structured-provider-common.js";
 import {
@@ -50,6 +51,15 @@ test("OpenCode thinking effort maps to CLI variants", () => {
   assert.equal(thinkingEffortToOpenCodeVariant("deep"), "high");
   assert.equal(thinkingEffortToOpenCodeVariant("max"), "max");
   assert.equal(thinkingEffortToOpenCodeVariant("codex:ultra"), "ultra");
+});
+
+test("Grok headless effort maps max to xhigh", () => {
+  assert.equal(thinkingEffortToGrokEffort("off"), null);
+  assert.equal(thinkingEffortToGrokEffort("standard"), "low");
+  assert.equal(thinkingEffortToGrokEffort("deep"), "high");
+  assert.equal(thinkingEffortToGrokEffort("max"), "xhigh");
+  assert.equal(thinkingEffortToGrokEffort("codex:max"), "xhigh");
+  assert.equal(thinkingEffortToGrokEffort("codex:medium"), "medium");
 });
 
 test("codex live output usage estimate grows with streamed content", () => {

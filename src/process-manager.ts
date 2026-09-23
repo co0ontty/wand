@@ -34,7 +34,7 @@ import { describePtySpawnFailure } from "./ensure-node-pty-helper.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
 import { resolveSessionCwd } from "./session-cwd.js";
 import { inferProviderFromCommand } from "./session-provider.js";
-import { PtyTerminalState, type PtyTerminalSnapshot } from "./pty-terminal-state.js";
+import { PtyTerminalState, type PtyTerminalSnapshot, type PtyHistoryPage } from "./pty-terminal-state.js";
 import { buildPtyShellLaunchPlan, PtyCliExitMarker } from "./pty-shell-launch.js";
 import {
   InProcessTerminalHost,
@@ -1694,7 +1694,7 @@ export class ProcessManager extends EventEmitter {
   }
 
   getPtyTranscript(id: string): string | null {
-    return this.logger.readPtyOutput(id);
+    return this.logger.readPtyOutputTail(id);
   }
 
   /**
@@ -1885,6 +1885,13 @@ export class ProcessManager extends EventEmitter {
       record.terminalState = new PtyTerminalState(record.ptyCols, record.ptyRows, record.output || record.storedOutput);
     }
     return record.terminalState.snapshot();
+  }
+
+  async getTerminalHistoryPage(id: string, before: number, revision: number): Promise<PtyHistoryPage | null> {
+    const record = this.sessions.get(id);
+    if (!record) return null;
+    if (!record.terminalState) this.getTerminalState(id);
+    return record.terminalState?.historyPage(before, revision) ?? null;
   }
 
   /**
@@ -2825,6 +2832,8 @@ export class ProcessManager extends EventEmitter {
       if (trimmedModel && trimmedModel !== "default" && !/--model(?:\s|=)/.test(result) && !/(?:^|\s)-m(?:\s|$)/.test(result)) {
         result += ` --model '${trimmedModel.replace(/'/g, "'\\''")}'`;
       }
+      // 交互 TUI 仍接受 `--effort max`。无头 `-p` 只接受 xhigh/high/medium/low，
+      // 那条路径用 thinkingEffortToGrokEffort，不要改成同一个映射。
       const effort = thinkingEffortToOpenCodeVariant(thinkingEffort ?? null);
       if (effort && !/--(?:reasoning-)?effort(?:\s|=)/.test(result)) {
         result += ` --effort '${effort.replace(/'/g, "'\\''")}'`;

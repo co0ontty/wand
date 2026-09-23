@@ -178,8 +178,12 @@ export interface WandConfig {
   commitModel?: string;
   /** 快捷提交生成 commit message / tag 时使用 CLI 或直连 API。 */
   commitAiSource?: CommitAiSource;
-  /** Wand 自身轻量 AI 功能与 Commit 直连模式复用的 API 配置。 */
+  /** Wand 自身轻量 AI 功能与 Commit 直连模式复用的 API 配置。enabled 表示系统 AI 优先使用 API。 */
   systemAi?: SystemAiConfig;
+  /** 系统 AI 使用 CLI 模式时的专用工具；未配置时沿用当前会话工具（兼容旧设置）。 */
+  systemAiCli?: SessionProvider;
+  /** 系统 AI 专用 CLI 模型；留空跟随该工具的新会话默认模型。 */
+  systemAiModel?: string;
   /** 新建会话时默认使用的思考深度。 */
   defaultThinkingEffort?: ThinkingEffort;
   /** 结构化会话使用的 runner: "cli"（默认，spawn claude -p）或 "sdk"（@anthropic-ai/claude-agent-sdk）。 */

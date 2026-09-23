@@ -687,6 +687,8 @@ function aiFromSnapshot(snapshot: SettingsSnapshot): SettingsAiInput {
     defaultProvider: config.defaultProvider,
     defaultThinkingEffort: config.defaultThinkingEffort,
     commitAiSource: config.commitAiSource,
+    systemAiCli: config.systemAiCli ?? config.defaultProvider,
+    systemAiModel: config.systemAiModel,
     systemAi: {
       ...primary,
       enabled: config.systemAi.enabled,
@@ -777,11 +779,13 @@ function DefaultModelControl({
   value,
   models,
   onChange,
+  id,
 }: {
   provider: SettingsSessionProvider;
   value: string;
   models: SettingsSnapshot["models"];
   onChange(value: string): void;
+  id?: string;
 }): React.ReactElement {
   const [customEntry, setCustomEntry] = useState(false);
   useEffect(() => setCustomEntry(false), [provider]);
@@ -791,7 +795,7 @@ function DefaultModelControl({
   const label = sessionProviderLabel(provider);
   const trimmed = value.trim();
   const customValue = trimmed !== "" && !options.some((option) => option.value === trimmed);
-  const inputId = `settings-default-model-${provider}`;
+  const inputId = id ?? `settings-default-model-${provider}`;
 
   if (customEntry || customValue) {
     return (
@@ -1195,8 +1199,8 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toas
     const routes = nonEmptyRoutes.length ? nonEmptyRoutes : [allRoutes[0]!];
     const configuredRoutes = routes.filter(routeIsComplete);
     routes.forEach((route, index) => {
-      const shouldValidate = !routeIsEmpty(route)
-        || (form.systemAi.enabled && configuredRoutes.length === 0 && index === 0);
+      const shouldValidate = form.systemAi.enabled
+        && (!routeIsEmpty(route) || (configuredRoutes.length === 0 && index === 0));
       if (!shouldValidate) return;
       if (!route.baseUrl.trim()) nextErrors[`${route.id}.baseUrl`] = "请输入 API 地址。";
       else {
@@ -1214,7 +1218,7 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toas
     });
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length) {
-      setStatus("模型路由中有未完成的线路。");
+      setStatus("直连 API 模式需要完整的模型线路。");
       setTone("error");
       return;
     }
@@ -1250,7 +1254,7 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toas
   return (
     <section className="wand-settings-panel" aria-label="AI 与模型">
       <header className="wand-settings-panel-heading">
-        <h2>AI 与模型</h2><p>集中管理会话默认模型、系统 API 路由和快捷提交的 AI 来源。</p>
+        <h2>AI 与模型</h2><p>集中管理会话默认模型、系统 AI 来源和快捷提交的 AI 来源。</p>
       </header>
 
       <SettingsSection
@@ -1296,16 +1300,52 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toas
       </SettingsSection>
 
       <SettingsSection
-        title="系统 AI 模型路由"
-        description="像中转站一样管理直连 API 与模型；列表从上到下就是调用顺序。API Key 只保存在服务端。"
+        title="系统 AI"
+        description="用于提示词优化、会话及任务标题生成；选择 CLI 或按顺序尝试直连 API。"
+      >
+        <fieldset className="wand-settings-radio-group">
+          <legend>生成方式</legend>
+          <label><input type="radio" name="settings-system-ai-source" value="cli" checked={!form.systemAi.enabled} onChange={() => updateSystemEnabled(false)} />CLI</label>
+          <label><input type="radio" name="settings-system-ai-source" value="api" checked={form.systemAi.enabled} onChange={() => updateSystemEnabled(true)} />直连 API</label>
+        </fieldset>
+        {!form.systemAi.enabled ? (
+          <>
+            {snapshot.config?.systemAiCli === null ? (
+              <SettingsStatus tone="info">当前仍跟随会话 CLI；保存后将使用下方选择的专用工具和模型。</SettingsStatus>
+            ) : null}
+            <div className="wand-settings-grid">
+              <SettingsField label="CLI 工具" hint="与当前会话使用的 CLI 相互独立">
+                <SettingsSelect
+                  id="settings-system-ai-cli"
+                  ariaLabel="系统 AI CLI 工具"
+                  value={form.systemAiCli}
+                  options={SESSION_PROVIDER_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                  onChange={(value) => setForm((current) => ({
+                    ...current, systemAiCli: value as SettingsSessionProvider, systemAiModel: "",
+                  }))}
+                />
+              </SettingsField>
+              <SettingsField label="模型" htmlFor="settings-system-ai-cli-model" hint="留空时跟随此 CLI 的新会话默认模型">
+                <DefaultModelControl
+                  id="settings-system-ai-cli-model"
+                  provider={form.systemAiCli}
+                  value={form.systemAiModel}
+                  models={models}
+                  onChange={(value) => update("systemAiModel", value)}
+                />
+              </SettingsField>
+            </div>
+          </>
+        ) : (
+          <SettingsStatus tone="info">先尝试下方 API 线路；全部失败时回退到当前会话的 CLI 和模型。</SettingsStatus>
+        )}
+      </SettingsSection>
+
+      <SettingsSection
+        title="直连 API 模型路由"
+        description="从上到下依次尝试；系统 AI 选 CLI 时，这些线路仍可供 Commit 的直连模式使用。API Key 只保存在服务端。"
         action={<SettingsActionButton pending={pending === "import"} kind="secondary" onClick={() => void importSystemAi()}>导入全部工具 API</SettingsActionButton>}
       >
-        <SettingsToggle
-          label="用于系统 AI 功能"
-          description="启用提示词优化和会话标题生成；Commit 选择 API 时仍会使用下方路由。"
-          checked={form.systemAi.enabled}
-          onCheckedChange={updateSystemEnabled}
-        />
         {configuredSystemAiProfiles.length > 0 ? (
           <SettingsStatus tone="success">
             已配置 {configuredSystemAiProfiles.length} 条线路：{systemAiOrder}。请求会依次尝试，成功后停止。

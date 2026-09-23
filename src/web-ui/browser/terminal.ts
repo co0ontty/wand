@@ -1,7 +1,7 @@
 import { state } from "./state";
 import "./utils";
 import "./chat-render";
-import "./file-browser";
+import { adjustTerminalScale } from "./file-browser";
 import { parseJsonResponse } from "../react/http-adapter";
 import { getErrorMessage } from "../../error-utils.js";
 import { focusInputBox, hasActiveTerminalSelection, installNativeInputImeGuard, lockNativeInputTerminalIme, shouldLockNativeInputTerminalIme } from "./input";
@@ -11,8 +11,9 @@ import { copyToClipboard, isStructuredSession } from "./session-engine";
 import { ensureTerminalFit, initTerminalJoystick, initTerminalResizeHandle, observeTerminalResize, sendTerminalResize, startTerminalHealthCheck } from "./viewport";
 import { fitTerminalToContainer } from "./terminal-fit";
 import "./i18n";
-import { consumeTerminalTouchPage, consumeTerminalWheelLines, consumeTerminalWheelPage, terminalWheelPageSequence, type TerminalTouchPagingState, type TerminalWheelPagingState, type TerminalWheelScrollState } from "./terminal-wheel";
+import { consumeTerminalTouchPage, consumeTerminalWheelLines, consumeTerminalWheelPage, consumeTerminalZoomWheel, installTerminalPinchZoom, terminalWheelPageSequence, type TerminalTouchPagingState, type TerminalWheelPagingState, type TerminalWheelScrollState, type TerminalZoomWheelState } from "./terminal-wheel";
 import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
+import { cachedTerminalHistory, loadTerminalHistory, resetTerminalHistory } from "./terminal-history";
 
       export function saveWorkingDir(path: string) {
         state.workingDir = path;
@@ -81,6 +82,10 @@ import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
       // 向上滚时，wheel handler 把 autoFollow 设 false 后紧接着触发的 scroll
       // 事件会因为"还没滚出阈值"而把 autoFollow 反转回 true，丢失用户意图。
       function isTerminalAtBottom() {
+        if (state.terminal?.buffer?.active) {
+          var buffer = state.terminal.buffer.active;
+          return buffer.viewportY >= buffer.baseY;
+        }
         var viewport = getTerminalViewport();
         if (!viewport) return true;
         var distance = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop;
@@ -148,6 +153,22 @@ import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
         terminalChromeRaf = raf(function() {
           terminalChromeRaf = 0;
           maybeScrollTerminalToBottom();
+        });
+      }
+
+      function maybeLoadOlderTerminalHistory(term: any) {
+        if (state.terminal !== term || state.terminalAutoFollow !== false
+          || Date.now() < state.terminalProgrammaticScrollUntil
+          || term.buffer.active.type !== "normal") return;
+        // xterm v6 keeps its scroll position in the buffer; .xterm-viewport
+        // can report scrollHeight === clientHeight even with hundreds of rows.
+        if (term.buffer.active.viewportY > 12 || !state.selectedId) return;
+        var id = state.selectedId;
+        void loadTerminalHistory(id, async function(snapshot) {
+          if (state.terminal !== term || state.selectedId !== id) return false;
+          restoreTerminalState(id, snapshot, state.terminalOutput, true);
+          await state.terminalWriteQueue;
+          return state.terminal === term && state.selectedId === id;
         });
       }
 
@@ -284,7 +305,10 @@ import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
           // Detach auto-follow on the first deliberate movement (before a
           // whole row accrues) so streaming writes stop snapping the viewport
           // back to the bottom mid-drag.
-          if (travelPixels > 8) setTerminalManualScrollActive();
+          if (travelPixels > 8) {
+            setTerminalManualScrollActive();
+            if (dy > 0) maybeLoadOlderTerminalHistory(term);
+          }
         }, { passive: false });
 
         function endTouch() {
@@ -642,9 +666,15 @@ import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
         });
       }
 
-      export function restoreTerminalState(sessionId: string, snapshot: any, fallbackOutput?: string) {
+      export function restoreTerminalState(sessionId: string, snapshot: any, fallbackOutput?: string,
+        keepHistory = false) {
         if (!snapshot || snapshot.version !== 1) return false;
-        if (sessionId) state.terminalStatesBySession[sessionId] = snapshot;
+        if (sessionId && !keepHistory) {
+          var cached = cachedTerminalHistory(sessionId, snapshot);
+          state.terminalStatesBySession[sessionId] = snapshot;
+          if (cached) snapshot = cached;
+          else resetTerminalHistory(sessionId, snapshot);
+        }
         // A WS init commonly wins the race against xterm's async font/open
         // setup. Treat the snapshot as accepted here; initTerminal will apply
         // the cached value as soon as the emulator is ready.
@@ -652,6 +682,7 @@ import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
         var terminal = state.terminal;
         var generation = (state.terminalRestoreGeneration || 0) + 1;
         state.terminalRestoreGeneration = generation;
+        state.terminalProgrammaticScrollUntil = Date.now() + 400;
         var queue = state.terminalWriteQueue || Promise.resolve();
         state.terminalWriteQueue = queue.catch(function() {}).then(async function() {
           if (terminal !== state.terminal || generation !== state.terminalRestoreGeneration) return;
@@ -660,9 +691,11 @@ import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
           // 复位视口，保持手动浏览模式（是否回底由用户点「回到底部」按钮决定）。
           var wasManualBrowsing = state.terminalAutoFollow === false;
           var prevViewport = getTerminalViewport();
-          var manualDistanceFromBottom = prevViewport
-            ? Math.max(0, prevViewport.scrollHeight - prevViewport.clientHeight - prevViewport.scrollTop)
-            : 0;
+          var manualDistanceFromBottom = Math.max(0,
+            terminal.buffer.active.baseY - terminal.buffer.active.viewportY);
+          if (!Number.isFinite(manualDistanceFromBottom) && prevViewport) {
+            manualDistanceFromBottom = prevViewport.scrollHeight - prevViewport.clientHeight - prevViewport.scrollTop;
+          }
           terminal.reset();
           terminal.clear();
           if (snapshot.cols > 0 && snapshot.rows > 0) terminal.resize(snapshot.cols, snapshot.rows);
@@ -678,20 +711,16 @@ import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
           }
           state.terminalSessionId = sessionId || null;
           state.terminalOutput = String(fallbackOutput || "");
-          if (wasManualBrowsing && manualDistanceFromBottom > 2) {
+          state.terminalProgrammaticScrollUntil = Date.now() + 120;
+          if (wasManualBrowsing && manualDistanceFromBottom > 0) {
             // 用户正在往上翻页：保持他的阅读位置和手动模式，不强行贴底。
             state.terminalAutoFollow = false;
             if (state.terminalFitAddon && typeof state.terminalFitAddon.fit === "function") {
               fitTerminalToContainer(terminal, state.terminalFitAddon);
               sendTerminalResize(terminal.cols, terminal.rows);
             }
-            var restoredViewport = getTerminalViewport();
-            if (restoredViewport) {
-              restoredViewport.scrollTop = Math.max(
-                0,
-                restoredViewport.scrollHeight - restoredViewport.clientHeight - manualDistanceFromBottom
-              );
-            }
+            terminal.scrollToLine(Math.max(0,
+              terminal.buffer.active.baseY - manualDistanceFromBottom));
           } else {
             state.terminalAutoFollow = true;
             if (state.terminalFitAddon && typeof state.terminalFitAddon.fit === "function") {
@@ -772,9 +801,9 @@ import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
         var wrapStyle = getComputedStyle(termWrap);
         var terminalFont = wrapStyle.getPropertyValue("--term-font-family").trim()
           || "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
-        var baseFontSize = document.documentElement.classList.contains("is-wand-embed-terminal")
-          ? 10
-          : state.terminalBaseFontSize;
+        // Embed (the iOS PTY WebView) uses the same base as the desktop terminal.
+        // A separate 10px face made the phone grid look thin next to a native terminal.
+        var baseFontSize = state.terminalBaseFontSize;
         var fontSize = Math.max(8, Math.round(baseFontSize * Number(state.terminalScale || 1)));
 
         var term: any = new XTermLib.Terminal({
@@ -874,12 +903,19 @@ import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
           // the scroll container gets a chance to move. Handling the gesture at
           // the wrapper capture phase makes mouse wheels and trackpads behave
           // consistently while preserving the alternate-buffer TUI path.
+          var zoomWheelState: TerminalZoomWheelState = { accumulatedPixels: 0 };
+          installTerminalPinchZoom(termWrap, function(direction) {
+            adjustTerminalScale(direction * 0.25);
+          });
           termWrap.addEventListener("wheel", function(event: WheelEvent) {
-            if (
-              event.ctrlKey
-              || event.metaKey
-              || Math.abs(event.deltaY) <= Math.abs(event.deltaX)
-            ) {
+            if (event.ctrlKey || event.metaKey) {
+              event.preventDefault();
+              event.stopPropagation();
+              var zoomStep = consumeTerminalZoomWheel(event, zoomWheelState);
+              if (zoomStep !== 0) adjustTerminalScale(zoomStep * 0.25);
+              return;
+            }
+            if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) {
               return;
             }
 
@@ -946,15 +982,27 @@ import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
                 setTerminalManualScrollActive();
               }
               updateTerminalJumpToBottomButton();
+              maybeLoadOlderTerminalHistory(term);
             };
             viewport.addEventListener("scroll", state.terminalViewportScrollHandler, { passive: true });
           }
 
           state.terminalWheelHandler = function(event: WheelEvent) {
-            if (event.deltaY < 0) setTerminalManualScrollActive();
-            event.stopPropagation();
+            if (event.deltaY < 0 && term.buffer.active.type === "normal") {
+              setTerminalManualScrollActive();
+              maybeLoadOlderTerminalHistory(term);
+            }
           };
-          container.addEventListener("wheel", state.terminalWheelHandler, { passive: true });
+          // Capture before xterm consumes the wheel event. Do not stop
+          // propagation: xterm still owns the actual scroll / TUI mouse input.
+          container.addEventListener("wheel", state.terminalWheelHandler, { capture: true, passive: true });
+          term.onScroll(function() {
+            if (Date.now() < state.terminalProgrammaticScrollUntil) return;
+            if (isTerminalAtBottom()) state.terminalAutoFollow = true;
+            else if (state.terminalAutoFollow) setTerminalManualScrollActive();
+            updateTerminalJumpToBottomButton();
+            maybeLoadOlderTerminalHistory(term);
+          });
           initTerminalScrollbar(container);
           // Mobile touch scroll: wired on the terminal surface so Android WebView,
           // iOS WKWebView and mobile browsers can scroll scrollback / page TUIs.

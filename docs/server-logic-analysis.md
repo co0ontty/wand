@@ -266,6 +266,8 @@ review 发送经 `sendMessage`：请求被接受（入队或启动）后才标 s
 
 `models.ts` 为唯一模型目录发现者；客户端只读缓存。`system-ai.ts`、`claude-sdk-runner.ts`、session-topic、prompt-optimizer 与 git 文案生成属于 one-shot 辅助调用，不等于会话执行。首条文本触发标题时还要遵守 pending/旧回调防覆盖。输入信息量不足（`shouldGenerateSessionTopicFromInput`：单条命令、`y`/`1` 之类的选择、`/compact`）时不写标题也不起模型调用，显示退回目录名/首条消息兜底；否则回一句「y」就会把已生成的主题覆盖掉。
 
+系统 AI 在「AI 与模型」中可选 CLI（六种 provider + 独立模型，留空跟随该 CLI 的新会话默认模型）或直连 API 线路；API 全部失败时仍回退当前会话 CLI。旧设置未配置专用 CLI 时继续跟随当前会话。Commit 的来源选择独立：CLI 模式跟随当前会话，API 模式使用同一组直连线路并追加自动发现线路，不受系统 AI CLI 选择影响。系统 AI 的 CLI/模型偏好与 API 路由一起只存 SQLite，不写配置 JSON。
+
 浏览器扩展：content script 捕获/填充 → background 按消息分派 → Bearer REST；popup/options 管理连接与条目；passkey 路径按浏览器能力启用，并在发给内容脚本前去掉私钥字段。服务端返回当前请求 origin；代码仍有历史默认地址常量，不能写成“运行时 origin 已完全不存在默认值”。
 
 更新分线：

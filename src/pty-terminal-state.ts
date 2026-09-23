@@ -15,7 +15,23 @@ export interface PtyTerminalSnapshot {
   cols: number;
   rows: number;
   pending: PtyTerminalOperation[];
+  /** Web scrollback cursor, absent from the Render wire protocol. */
+  historyBefore?: number;
+  historyRevision?: number;
 }
+
+export interface PtyHistoryPage {
+  data: string;
+  separator: string;
+  start: number;
+  before: number;
+  revision: number;
+}
+
+export const PTY_INITIAL_HISTORY_ROWS = 80;
+const PTY_INITIAL_HISTORY_MAX_BYTES = 256 * 1024;
+export const PTY_HISTORY_PAGE_ROWS = 80;
+const PTY_HISTORY_PAGE_MAX_BYTES = 192 * 1024;
 
 interface PendingOperation {
   id: number;
@@ -85,6 +101,9 @@ export class PtyTerminalState {
   private committedData = "";
   private committedCols: number;
   private committedRows: number;
+  private committedHistoryBefore = 0;
+  private committedRevision = 0;
+  private revision = 0;
   private disposed = false;
 
   constructor(cols: number, rows: number, initialData = "") {
@@ -99,6 +118,7 @@ export class PtyTerminalState {
 
   write(data: string): void {
     if (this.disposed || !data) return;
+    this.revision++;
     this.buffered += data;
     if (this.buffered.length >= WRITE_BATCH_MAX_CHARS) this.flushBuffered();
     else this.scheduleFlush();
@@ -106,6 +126,7 @@ export class PtyTerminalState {
 
   resize(cols: number, rows: number): void {
     if (this.disposed) return;
+    this.revision++;
     // Bytes that arrived before the resize must land before it.
     this.flushBuffered();
     this.addPending({ type: "resize", cols, rows });
@@ -125,6 +146,34 @@ export class PtyTerminalState {
       cols: this.committedCols,
       rows: this.committedRows,
       pending: coalesceOperations(this.pending),
+      historyBefore: this.committedHistoryBefore,
+      historyRevision: this.committedRevision,
+    };
+  }
+
+  /** A bounded ANSI range preceding the committed baseline, never a cumulative snapshot. */
+  async historyPage(before: number, revision: number, limit = PTY_HISTORY_PAGE_ROWS): Promise<PtyHistoryPage | null> {
+    if (this.disposed || !Number.isSafeInteger(before) || !Number.isSafeInteger(revision)
+      || !Number.isSafeInteger(limit) || limit < 1 || limit > PTY_HISTORY_PAGE_ROWS) return null;
+    // Wait for buffered writes/checkpoints. If output or resize changed the row indices,
+    // the caller must resync rather than concatenate unrelated lines.
+    await this.tail;
+    if (this.revision !== revision || before > this.committedHistoryBefore || before <= 0) return null;
+    const count = Math.min(before, limit);
+    let start = before - count;
+    let data = "";
+    while (start < before) {
+      data = this.serializer.serialize({ range: { start, end: before - 1 } });
+      if (Buffer.byteLength(data, "utf8") <= PTY_HISTORY_PAGE_MAX_BYTES) break;
+      if (start === before - 1) return null;
+      start = Math.min(before - 1, start + Math.max(1, Math.ceil((before - start) / 2)));
+    }
+    return {
+      data,
+      separator: this.terminal.buffer.normal.getLine(before)?.isWrapped ? "" : "\r\n",
+      start,
+      before,
+      revision,
     };
   }
 
@@ -203,13 +252,23 @@ export class PtyTerminalState {
     }
     const cutoff = this.pending.at(-1)?.id ?? 0;
     if (!cutoff) return;
+    const revision = this.revision;
     this.checkpointQueued = true;
     this.tail = this.tail.then(() => {
       if (this.disposed) return;
       try {
-        this.committedData = this.serializer.serialize({ scrollback: 5000 });
+        let historyRows = PTY_INITIAL_HISTORY_ROWS;
+        this.committedData = this.serializer.serialize({ scrollback: historyRows });
+        while (historyRows > 0 && Buffer.byteLength(this.committedData) > PTY_INITIAL_HISTORY_MAX_BYTES) {
+          historyRows = Math.floor(historyRows / 2);
+          this.committedData = this.serializer.serialize({ scrollback: historyRows });
+        }
         this.committedCols = this.terminal.cols;
         this.committedRows = this.terminal.rows;
+        this.committedHistoryBefore = Math.max(0, this.terminal.buffer.normal.baseY - historyRows);
+        // A newer write can arrive while the queued checkpoint drains. Only the
+        // operations through cutoff are represented by this baseline.
+        this.committedRevision = revision;
         this.pending = this.pending.filter((entry) => entry.id > cutoff);
       } catch {
         // Keep the mirror alive; the next checkpoint re-serializes.

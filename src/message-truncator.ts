@@ -18,12 +18,12 @@ const SUMMARY_LENGTH = 100;
 const MESSAGE_WINDOW_SIZE = 40;
 
 /**
- * 块级窗口的默认预算：init/REST 默认只下发最近这么多个「内容块」（跨 turn 累计，
+ * 块级窗口的默认预算：显式启用时 init/REST 只下发最近这么多个「内容块」（跨 turn 累计，
  * 必要时切掉最旧那条 turn 的头部），更早的块由客户端滚动到顶时按需分页拉取。
  * turn 级窗口（MESSAGE_WINDOW_SIZE）对「单条 turn 携带上百块」的长任务无能为力——
  * 一条流式 assistant turn 可膨胀到 1MB+，整条下发会撑爆移动端 WS 帧、拖慢打开。
- * 块级窗口是对这种会话的根治手段。仅在客户端显式带 blockBudget 时启用（iOS），
- * Web/Android 走原有 turn 级路径不受影响。
+ * 块级窗口是对这种会话的根治手段。客户端显式带 blockBudget 时启用（Web/iOS），
+ * 未携带的原生客户端仍走 turn 级路径。
  */
 const MESSAGE_BLOCK_WINDOW = 60;
 

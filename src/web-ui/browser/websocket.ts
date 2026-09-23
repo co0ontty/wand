@@ -6,7 +6,7 @@ import { resolveComposerPermission } from "../react/composer-badges/model";
 import type { ComposerPermissionAction } from "../react/composer-badges/controller";
 import { renderChat, scheduleChatRender } from "./chat-render";
 import { clearStructuredQueuePersistence } from "./chat-scroll";
-import { mergeAssistantTurn } from "./message-reconciliation";
+import { mergeIncrementalWindowedTurn } from "./message-reconciliation";
 import { flushPendingMessages, buildMessagesForRender, isCurrentTerminalSession, updateInputHint, flushStructuredInputQueue, updateStructuredQueueCounter, setTerminalInteractive, flushCrossSessionQueue, reconcileInteractiveState, getSelectedSession, closeKeyboardPopup } from "./input";
 import { notifyTaskEnded, clearSessionProgressNative, _syncWakeLock, showNotificationBubble, notifyTaskProgress, syncSessionProgressToNative, notifyPermissionRequest, notifyUpdateAvailable, showAutoUpdateOverlay, showRestartOverlay, showToast } from "./notifications";
 import { refreshAll, scheduleSessionListUpdate, subscribeToSession, updateSessionSnapshot, getPreferredMessages, selectSession, updateShellChrome, loadOutput, isAutoApproveImpliedByMode, applyCurrentView } from "./session-engine";
@@ -23,6 +23,7 @@ import { ensureTerminalFitWithRetry, scheduleTerminalResize } from "./viewport";
 import { bindForegroundSyncListeners } from "./render";
 import { scheduleGitStatusRefresh, startGitStatusPolling, stopGitStatusPolling } from "./git-commit";
 import { notifyLegacyUiChange } from "./ui-store-bridge";
+import { recordTerminalHistoryChunk } from "./terminal-history";
 
 /**
  * 记录会话“这一轮是否还在生成”。落到 false 的那一刻说明 agent 刚动过工作区，
@@ -295,6 +296,9 @@ function noteTurnActivity(sessionId: string, active: boolean): void {
       function handleWebSocketMessage(msg: any) {
         switch (msg.type) {
           case 'output':
+            if (msg.sessionId && typeof msg.data?.chunk === "string") {
+              recordTerminalHistoryChunk(msg.sessionId, msg.data.chunk);
+            }
             // For structured sessions, output may be "" during streaming — check messages too.
             // thinking → idle 边界自愈：bridge 把 isResponding 透传过来，true→false 时
             // 主动 softResyncTerminal，洗掉流式渲染残留的错位光标定位序列。
@@ -357,6 +361,10 @@ function noteTurnActivity(sessionId: string, active: boolean): void {
                 snapshot.messages = msg.data.messages;
                 if (typeof msg.data.messageOffset === "number") snapshot.messageOffset = msg.data.messageOffset;
                 if (typeof msg.data.messageTotal === "number") snapshot.messageTotal = msg.data.messageTotal;
+                if (typeof msg.data.leadingBlockOffset === "number") {
+                  snapshot.leadingBlockOffset = msg.data.leadingBlockOffset;
+                  snapshot.leadingBlockTotal = msg.data.leadingBlockTotal;
+                }
               } else if (isIncremental && msg.data.lastMessage) {
                 // Incremental mode: merge lastMessage into existing session messages
                 var existingSession = state.sessions.find(function(s: any) { return s.id === msg.sessionId; });
@@ -371,12 +379,20 @@ function noteTurnActivity(sessionId: string, active: boolean): void {
                   var localLast = msgs.length > 0 ? msgs[msgs.length - 1] : null;
                   var incoming = msg.data.lastMessage;
                   if (localLast && incoming.role && localLast.role === incoming.role) {
-                    msgs[msgs.length - 1] = mergeAssistantTurn(localLast, incoming);
+                    msgs[msgs.length - 1] = mergeIncrementalWindowedTurn(localLast, incoming,
+                      msgs.length === 1 ? existingSession.leadingBlockOffset || 0 : 0,
+                      existingSession.leadingBlockTotal || 0);
                   } else if (baseOffset + msgs.length < expectedCount) {
                     msgs.push(incoming);
                   }
                   snapshot.messages = msgs;
                   if (expectedCount > 0) snapshot.messageTotal = expectedCount;
+                  if (msgs.length === 1 && existingSession.leadingBlockOffset > 0
+                    && msgs[0] === incoming && Array.isArray(incoming.content)
+                    && incoming.content.length >= (existingSession.leadingBlockTotal || 0)) {
+                    snapshot.leadingBlockOffset = 0;
+                    snapshot.leadingBlockTotal = incoming.content.length;
+                  }
                 }
               }
 
@@ -467,6 +483,10 @@ function noteTurnActivity(sessionId: string, active: boolean): void {
             if (msg.data && msg.data.messages) {
               endedSnapshot.messages = msg.data.messages;
               if (typeof msg.data.messageOffset === "number") endedSnapshot.messageOffset = msg.data.messageOffset;
+              if (typeof msg.data.leadingBlockOffset === "number") {
+                endedSnapshot.leadingBlockOffset = msg.data.leadingBlockOffset;
+                endedSnapshot.leadingBlockTotal = msg.data.leadingBlockTotal;
+              }
               if (typeof msg.data.messageTotal === "number") endedSnapshot.messageTotal = msg.data.messageTotal;
             }
             if (msg.data && msg.data.structuredState) {

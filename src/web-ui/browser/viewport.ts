@@ -950,7 +950,7 @@ import { fitTerminalToContainer } from "./terminal-fit";
         }
         if (output) {
           if (state.terminalWheelHandler) {
-            output.removeEventListener("wheel", state.terminalWheelHandler);
+            output.removeEventListener("wheel", state.terminalWheelHandler, true);
           }
           if (state.terminalClickHandler) {
             output.removeEventListener("click", state.terminalClickHandler);

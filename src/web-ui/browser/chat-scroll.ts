@@ -244,7 +244,8 @@ function loadMoreChatMessages() {
   }
   // 本地已全展开，但服务端还有更早的（窗口化）：拉下一页。
   var sess = state.sessions.find(function(s: any) { return s.id === state.selectedId; });
-  if (sess && typeof sess.messageOffset === "number" && sess.messageOffset > 0) {
+  if (sess && ((typeof sess.messageOffset === "number" && sess.messageOffset > 0)
+    || (typeof sess.leadingBlockOffset === "number" && sess.leadingBlockOffset > 0))) {
     fetchEarlierMessages();
   }
 }

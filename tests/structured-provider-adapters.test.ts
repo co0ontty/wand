@@ -117,6 +117,11 @@ test("Grok adapter maps official streaming-json chunks, usage, and resume argume
     "--model", "grok-4.5", "--effort", "high", "--always-approve",
     "--resume", "grok-session-1",
   ]);
+  assert.deepEqual(buildGrokArgs(session({
+    provider: "grok",
+    runner: "grok-cli-headless",
+    thinkingEffort: "max",
+  }), "hello").slice(-2), ["--effort", "xhigh"]);
 
   const state = { blocks: [], result: "", sessionId: null };
   applyGrokEvent(state, { type: "thought", data: "checking" });
@@ -168,6 +173,24 @@ test("Grok adapter maps official streaming-json chunks, usage, and resume argume
     { type: "tool_use", id: "call_1", name: "Read", description: "Read", input: { path: "src/main.rs" } },
     { type: "tool_result", tool_use_id: "call_1", content: "{\"lines\":42}", is_error: false },
     { type: "text", text: "ok" },
+  ]);
+
+  const bash = { blocks: [], result: "", sessionId: null };
+  applyGrokEvent(bash, {
+    type: "tool_call_update",
+    toolCallId: "call_bash",
+    status: "completed",
+    toolName: "run_terminal_command",
+    rawOutput: {
+      type: "Bash",
+      output: [119, 97, 110, 100, 45, 111, 107, 10],
+      output_for_prompt: "exit: 0\nwand-ok\n",
+      exit_code: 0,
+    },
+  });
+  assert.deepEqual(bash.blocks, [
+    { type: "tool_use", id: "call_bash", name: "Bash", description: undefined, input: {} },
+    { type: "tool_result", tool_use_id: "call_bash", content: "exit: 0\nwand-ok\n", is_error: false },
   ]);
 });
 

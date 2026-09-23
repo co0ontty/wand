@@ -205,6 +205,9 @@ function normalizeConfig(value: unknown): SettingsConfig {
     commitModel: stringValue(input.commitModel),
     commitAiSource: input.commitAiSource === "api" ? "api" : "cli",
     systemAi: normalizeSystemAi(input.systemAi),
+    systemAiCli: SESSION_PROVIDERS.includes(input.systemAiCli as SettingsSessionProvider)
+      ? input.systemAiCli as SettingsSessionProvider : null,
+    systemAiModel: stringValue(input.systemAiModel),
     commandPresets: presets.map((item) => {
       const preset = record(item);
       return {

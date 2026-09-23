@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -111,6 +111,71 @@ test("system AI route test calls the submitted model with the saved route key", 
   } finally {
     await handle.close();
     await new Promise<void>((resolve, reject) => provider.close((error) => error ? reject(error) : resolve()));
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("system AI CLI preference runs the chosen model for prompt optimization", async () => {
+  process.env.WAND_TEST_MODE = "1";
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wand-system-ai-cli-"));
+  const previousPath = process.env.PATH;
+  const argsPath = path.join(dir, "pi-args.txt");
+  const binDir = path.join(dir, "bin");
+  mkdirSync(binDir);
+  const binary = path.join(binDir, "pi");
+  writeFileSync(binary, [
+    "#!/bin/sh",
+    `printf '%s\\n' "$@" > '${argsPath}'`,
+    `printf '%s\\n' '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"CLI_OK"}]}}'`,
+    "",
+  ].join("\n"));
+  chmodSync(binary, 0o755);
+  process.env.PATH = `${binDir}${path.delimiter}${previousPath ?? ""}`;
+  const config = {
+    ...defaultConfig(), host: "127.0.0.1", port: 0, https: false,
+    password: "test-password", startupCommands: [], defaultProvider: "codex" as const,
+    appSecret: "0123456789abcdef0123456789abcdef0123456789abcdef",
+  };
+  let handle: Awaited<ReturnType<typeof startServer>> | undefined;
+  try {
+    handle = await startServer(config, path.join(dir, "config.json"));
+    const baseUrl = handle.urls[0]!.url;
+    const login = await fetch(`${baseUrl}/api/login`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "test-password", client: "browser-extension" }),
+    });
+    assert.equal(login.status, 200);
+    const cookie = login.headers.getSetCookie().map((value) => value.split(";", 1)[0]).join("; ");
+    const headers = { Cookie: cookie, "Content-Type": "application/json" };
+    const saved = await fetch(`${baseUrl}/api/settings/config`, {
+      method: "POST", headers,
+      body: JSON.stringify({ systemAiCli: "pi", systemAiModel: "google/test", systemAi: {
+        enabled: false, baseUrl: "", apiKey: "", model: "", fallbacks: [],
+      } }),
+    });
+    assert.equal(saved.status, 200);
+    assert.equal(config.systemAiCli, "pi");
+    assert.equal(config.systemAiModel, "google/test");
+    const optimized = await fetch(`${baseUrl}/api/optimize-prompt`, {
+      method: "POST", headers, body: JSON.stringify({ text: "fix bug" }),
+    });
+    assert.equal(optimized.status, 200);
+    assert.deepEqual(await optimized.json(), { optimized: "CLI_OK" });
+    const args = readFileSync(argsPath, "utf8").split("\n");
+    assert.ok(args.includes("--model"));
+    assert.ok(args.includes("google/test"));
+    assert.equal(args.includes("codex"), false);
+
+    const invalid = await fetch(`${baseUrl}/api/settings/config`, {
+      method: "POST", headers, body: JSON.stringify({ systemAiCli: "shell-command", systemAiModel: "other" }),
+    });
+    assert.equal(invalid.status, 400);
+    assert.equal(config.systemAiCli, "pi");
+    assert.equal(config.systemAiModel, "google/test");
+  } finally {
+    if (handle) await handle.close();
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -435,6 +500,8 @@ test("settings validate atomically, persist without secrets, and password rotati
     assert.equal("password" in persisted, false);
     assert.equal("appSecret" in persisted, false);
     assert.equal("systemAi" in persisted, false);
+    assert.equal("systemAiCli" in persisted, false);
+    assert.equal("systemAiModel" in persisted, false);
 
     const oversizedPrompt = await fetch(`${baseUrl}/api/optimize-prompt`, {
       method: "POST",

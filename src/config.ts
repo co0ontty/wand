@@ -38,6 +38,8 @@ export const PREFERENCE_KEYS = [
   "commitModel",
   "commitAiSource",
   "systemAi",
+  "systemAiCli",
+  "systemAiModel",
   "defaultThinkingEffort",
   "structuredRunner",
   "language",
@@ -122,6 +124,7 @@ export const defaultConfig = (): WandConfig => ({
     authHeader: "bearer",
     source: "custom",
   },
+  systemAiModel: "",
   defaultThinkingEffort: "off",
   structuredRunner: "cli" as StructuredRunnerOption,
   inheritEnv: true,
@@ -387,6 +390,14 @@ export function applyStoragePreferences(config: WandConfig, storage: WandStorage
     const v = storage.getPreference<unknown>(preferenceStorageKey("systemAi"), defaults.systemAi);
     config.systemAi = normalizeSystemAiConfig(v, defaults.systemAi);
   }
+  if (storage.hasPreference(preferenceStorageKey("systemAiCli"))) {
+    const v = storage.getPreference<unknown>(preferenceStorageKey("systemAiCli"), defaults.systemAiCli);
+    if (isSessionProvider(v)) config.systemAiCli = v;
+  }
+  if (storage.hasPreference(preferenceStorageKey("systemAiModel"))) {
+    const v = storage.getPreference<unknown>(preferenceStorageKey("systemAiModel"), defaults.systemAiModel);
+    if (typeof v === "string") config.systemAiModel = v.trim();
+  }
   if (storage.hasPreference(preferenceStorageKey("defaultThinkingEffort"))) {
     const v = storage.getPreference<string>(preferenceStorageKey("defaultThinkingEffort"), defaults.defaultThinkingEffort ?? "off");
     if (isThinkingEffort(v)) config.defaultThinkingEffort = v;
@@ -521,6 +532,18 @@ export function writePreferenceToStorage(
       }
       storage.setPreference(dbKey, normalized);
       config.systemAi = normalized;
+      break;
+    }
+    case "systemAiCli": {
+      if (!isSessionProvider(value)) throw new Error(`无效系统 AI CLI: ${String(value)}`);
+      storage.setPreference(dbKey, value);
+      config.systemAiCli = value;
+      break;
+    }
+    case "systemAiModel": {
+      const v = typeof value === "string" ? value.trim() : "";
+      storage.setPreference(dbKey, v);
+      config.systemAiModel = v;
       break;
     }
     case "defaultThinkingEffort": {
@@ -778,6 +801,8 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
     commitCli: input.commitCli === "codex" || input.commitCli === "opencode" ? input.commitCli : "claude",
     commitModel: typeof input.commitModel === "string" ? input.commitModel.trim() : defaults.commitModel,
     commitAiSource: input.commitAiSource === "api" ? "api" : "cli",
+    systemAiCli: isSessionProvider(input.systemAiCli) ? input.systemAiCli : undefined,
+    systemAiModel: typeof input.systemAiModel === "string" ? input.systemAiModel.trim() : defaults.systemAiModel,
     defaultThinkingEffort: isThinkingEffort(input.defaultThinkingEffort) ? input.defaultThinkingEffort : "off",
     structuredRunner: (input.structuredRunner === "sdk" || input.structuredRunner === "cli") ? input.structuredRunner : defaults.structuredRunner,
     inheritEnv: typeof input.inheritEnv === "boolean" ? input.inheritEnv : (defaults.inheritEnv ?? true),
