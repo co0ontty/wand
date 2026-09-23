@@ -4,7 +4,7 @@ import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promi
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { AndroidApkConfig, CardExpandDefaults, ExecutionMode, IosIpaConfig, MacosDmgConfig, SessionProvider, StructuredChatPersonaConfig, WandConfig } from "./types.js";
+import { AndroidApkConfig, CardExpandDefaults, ExecutionMode, IosIpaConfig, MacosDmgConfig, RenderConfig, RenderEngine, SessionProvider, StructuredChatPersonaConfig, WandConfig } from "./types.js";
 import type { WandStorage } from "./storage.js";
 import { isRunningAsRoot } from "./env-utils.js";
 import { normalizeSystemAiConfig, systemAiProfiles } from "./system-ai.js";
@@ -100,6 +100,7 @@ export const defaultConfig = (): WandConfig => ({
   android: defaultAndroidApkConfig(),
   macos: defaultMacosDmgConfig(),
   ios: defaultIosIpaConfig(),
+  render: defaultRenderConfig(),
   cardDefaults: defaultCardExpandDefaults(),
   defaultModel: "",
   defaultCodexModel: "",
@@ -642,6 +643,23 @@ function defaultIosIpaConfig(): IosIpaConfig {
   };
 }
 
+/**
+ * 默认 auto：存在 wand-render 就用它，否则保持 legacy terminald。
+ * 放在 config.json（部署项）而非 SQLite 偏好里——它决定进程所有权，属于部署决策。
+ */
+function defaultRenderConfig(): RenderConfig {
+  return { engine: "auto" };
+}
+
+/** 旧 config.json 没有 render 字段时回落到默认值，不能因为新字段让启动失败。 */
+function normalizeRenderConfig(input: unknown): RenderConfig | undefined {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return undefined;
+  const raw = input as Record<string, unknown>;
+  const engine: RenderEngine = raw.engine === "rust" || raw.engine === "legacy" ? raw.engine : "auto";
+  const binaryPath = typeof raw.binaryPath === "string" ? raw.binaryPath.trim() : "";
+  return { engine, ...(binaryPath ? { binaryPath } : {}) };
+}
+
 function normalizeIosIpaConfig(input: unknown): IosIpaConfig | undefined {
   if (!input || typeof input !== "object") return undefined;
   const defaults = defaultIosIpaConfig();
@@ -744,6 +762,7 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
     android: normalizeAndroidApkConfig(input.android) ?? defaults.android,
     macos: normalizeMacosDmgConfig(input.macos) ?? defaults.macos,
     ios: normalizeIosIpaConfig(input.ios) ?? defaults.ios,
+    render: normalizeRenderConfig(input.render) ?? defaults.render,
     cardDefaults: normalizeCardDefaults(input.cardDefaults),
     defaultProvider: isSessionProvider(input.defaultProvider) ? input.defaultProvider : "claude",
     defaultSessionKind: input.defaultSessionKind === "pty" ? "pty" : "structured",

@@ -17,6 +17,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # render-bin 子模块 pin 住各平台 wand-render 二进制；不初始化子模块，
+          # npm 包里就不会有 dist/native/，线上 engine=auto 永远找不到 Rust 引擎、
+          # 静默回退 legacy —— 也就是「Rust 化」在产品上等于没发生。
+          submodules: recursive
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -50,6 +55,11 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      # 显式把关：npm run build 里的 stage 步骤是 best-effort（开发机没拉子模块也不该构建失败），
+      # 但发版必须硬失败。这里用 --strict 重跑一次，缺产物就拦住发布。
+      - name: Verify render binaries are packaged
+        run: node scripts/stage-render-binaries.js --strict --check
 
       # Stable 与 beta 发布共用 npm-publish concurrency group，避免同时写同一个
       # packument。npm publish 返回成功后仍要反查 registry，因为并发写曾导致版本被

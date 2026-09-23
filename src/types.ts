@@ -77,6 +77,18 @@ export interface AndroidApkConfig {
   currentApkFile?: string;
 }
 
+/**
+ * PTY 归属引擎。`auto` 优先 Rust Render（找到了二进制才用），`rust` 强制 Rust，
+ * `legacy` 保留现有 terminald 行为。仅切换所有权，DB/客户端契约不变。
+ */
+export type RenderEngine = "auto" | "rust" | "legacy";
+
+export interface RenderConfig {
+  engine: RenderEngine;
+  /** 显式指定 wand-render 可执行文件；留空则按约定顺序自动查找。 */
+  binaryPath?: string;
+}
+
 export interface MacosDmgConfig {
   enabled?: boolean;
   dmgDir?: string;
@@ -137,6 +149,8 @@ export interface WandConfig {
   android?: AndroidApkConfig;
   macos?: MacosDmgConfig;
   ios?: IosIpaConfig;
+  /** Render（常驻 PTY 持有者）引擎选择。默认 auto。 */
+  render?: RenderConfig;
   /** Default expand/collapse state for card types in structured chat view */
   cardDefaults?: CardExpandDefaults;
   /** 新建会话时默认使用的 Claude 模型（别名或完整 ID）。留空则不传 --model，由 claude 自行决定。 */

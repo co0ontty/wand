@@ -13,13 +13,17 @@
   },
   "files": [
     "dist",
-    "browser-extension"
+    "browser-extension",
+    "scripts/install-render-binary.js",
+    "scripts/stage-render-binaries.js"
   ],
   "preferGlobal": true,
   "scripts": {
     "generate:web-assets": "node scripts/generate-web-assets.js",
-    "build": "rm -rf dist && node scripts/bundle-tailwind.js && node scripts/bundle-xterm.js && node scripts/bundle-qrcode.js && node scripts/bundle-browser.js && npm run generate:web-assets && tsc -p tsconfig.json && npm run build:copy-content && node scripts/check-bundle-budget.js && node scripts/stamp-build-info.js && node scripts/fix-dist-permissions.js",
+    "build": "rm -rf dist && node scripts/bundle-tailwind.js && node scripts/bundle-xterm.js && node scripts/bundle-qrcode.js && node scripts/bundle-browser.js && npm run generate:web-assets && tsc -p tsconfig.json && npm run build:copy-content && node scripts/check-bundle-budget.js && (npm run build:render-bin || echo '[wand] WARNING: build:render-bin failed; dist/native/ has no wand-render (run: npm run build:render-bin)' >&2) && node scripts/stamp-build-info.js && node scripts/fix-dist-permissions.js",
     "build:copy-content": "cp -r src/web-ui/content dist/web-ui/ && node scripts/minify-dist-content.js",
+    "build:render-bin": "node scripts/stage-render-binaries.js",
+    "build:render-native": "cargo build --release --manifest-path render/Cargo.toml -p wand-renderd",
     "dev": "node scripts/bundle-tailwind.js && node scripts/bundle-xterm.js && node scripts/bundle-browser.js --development && npm run generate:web-assets && tsx src/cli.ts web",
     "check": "node scripts/bundle-tailwind.js && node scripts/bundle-xterm.js && node scripts/bundle-browser.js && npm run generate:web-assets && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.browser.json && tsc --noEmit -p tsconfig.react.json",
     "test": "node --test --import tsx tests/*.test.ts",

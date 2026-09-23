@@ -16,15 +16,42 @@
 - `-c /path/to/config.json` 隔离以上全部（隔离测试统一用 `/tmp/wand-dev/`）。
 - 单实例按 config 路径隔离：已有实例时 `wand web` 走 IPC attach，不开第二个 server。
 
-原生客户端是 git submodule：
+原生客户端与 Render 都是 git submodule：
 
-| Path | Repository |
-| --- | --- |
-| `android/` | `co0ontty/wand-android` |
-| `ios/` | `co0ontty/wand-ios` |
-| `macos/` | `co0ontty/wand-macos` |
+| Path | Repository | 作用 |
+| --- | --- | --- |
+| `android/` | `co0ontty/wand-android` | Android 客户端 |
+| `ios/` | `co0ontty/wand-ios` | iOS 客户端 |
+| `macos/` | `co0ontty/wand-macos` | macOS 客户端 |
+| `render/` | `co0ontty/wand-render` | **Render 源码**（Rust 常驻进程，持有 PTY / 输出 journal / VT 屏幕模型） |
+| `render-bin/` | `co0ontty/wand-render-bin` | **Render 产物**（各平台二进制 + `manifest.json`，只由 CI 写入） |
 
-克隆后先 `git submodule update --init`。
+克隆后先 `git submodule update --init`（只想跑起来至少要 `--init render render-bin`，否则 npm 包里没有 Render 二进制，`engine=auto` 会回退 legacy 并打警告）。
+
+## Server / Render 分离（不可破坏的边界）
+
+Server（本仓库，Node）与 Render（`render/`，Rust）是两个独立进程、两个独立发布节奏：
+
+| | Server | Render |
+| --- | --- | --- |
+| 拥有 | HTTP/WS、鉴权、SQLite、业务、聊天与权限投影、Web 资产 | PTY 进程、输出 journal、VT 屏幕模型、退出状态 |
+| 生命周期 | 随 npm 升级重启 | 独立 detached 进程，**Server 重启不停** |
+| 版本 | `package.json` | `render/Cargo.toml` + `render-bin/manifest.json` |
+
+- 契约（权威）：`render/docs/render-protocol.md`（本仓库 `docs/render-protocol.md` 只是指针）；
+  Rust 类型真源 `render/crates/wand-render-protocol/src/lib.rs` ↔ TS 镜像 `src/render-protocol.ts`。
+  改协议必须同时提升 `RENDER_PROTOCOL_VERSION` 并同步两侧与文档。
+- 引擎开关：`render.engine = auto | rust | legacy`，环境变量 `WAND_RENDER_ENGINE` 优先。
+  `protocolVersion` 不匹配时**拒绝启动**，不做降级运行。
+- **Render 的更新与 Server 的更新分开**：Render 改完以后在 `render/` 内提交并 push，再回主仓库 bump 子模块指针；
+  发新产物则在 `render/` 打 tag，CI 会把产物推进 `render-bin/`，主仓库再 bump `render-bin/` 指针。
+  两个指针互相独立，可以只换二进制不换源码。
+- 永不交叉领养：Render 与 legacy `terminald` 的 socket/token/pid 文件名刻意不同，升级期两套并存，
+  旧会话继续由 legacy 服务直到自然结束（无损升级的实现方式）。
+- 开发态与分发布局：`render/target/release/wand-render`（开发）→ `<configDir>/bin/wand-render`（就位）→
+  `dist/native/<triple>/wand-render`（npm 包内嵌，由 `npm run build:render-bin` 从 `render-bin/` stage，校验 sha256）。
+- 端到端验证：`scripts/verify-render-e2e.sh`（隔离实例+新端口，验 Server 重启后 PTY pid 不变、
+  Render 崩溃自愈、drain 保留 PTY、Web/Android 两种 profile、回滚路径）。
 
 ## Common Commands
 

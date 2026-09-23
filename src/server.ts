@@ -91,7 +91,8 @@ import { isLogBusActive, wandTuiLog } from "./tui/log-bus.js";
 import { EMBEDDED_WEB_ASSETS, type EmbeddedVendorAssetPath } from "./web-ui/embedded-assets.js";
 import { renderApp } from "./web-ui/index.js";
 import { WsBroadcastManager } from "./ws-broadcast.js";
-import { createTerminalHost, TerminalDaemonClient } from "./terminal-daemon-client.js";
+import { TerminalDaemonClient } from "./terminal-daemon-client.js";
+import { createUpgradeAwareTerminalHost, resolveRenderEngine } from "./render-host.js";
 import type { TerminalHost } from "./terminal-host.js";
 import { checkRateLimit, recordFailedLogin, resetRateLimit } from "./middleware/rate-limit.js";
 import {
@@ -419,12 +420,36 @@ export async function startServer(
     config,
     repositoryUrl: PKG_REPO_URL,
   });
-  const terminalHost = options.terminalHost ?? await createTerminalHost(configPath);
+  // PTY 所有者可以是 legacy terminald 或常驻的 Rust Render：升级期由复合 host 按所有权
+  // 路由（旧会话留在 legacy，新会话进 Render），对客户端契约没有任何改变。
+  const ptyHosts = options.terminalHost
+    ? { host: options.terminalHost, renderHost: null, legacyHost: null }
+    : await createUpgradeAwareTerminalHost(configPath, {
+        engine: config.render?.engine,
+        binaryPath: config.render?.binaryPath,
+      });
+  const terminalHost = ptyHosts.host;
   const processes = new ProcessManager(config, storage, configDir, terminalHost);
   const structuredLogger = new SessionLogger(configDir, config.shortcutLogMaxBytes);
   // Production startup requires the daemon-backed host so CLI runs outlive web
   // restarts. In-process hosts are retained only for explicit test injection.
-  const structuredExecHost = terminalHost instanceof TerminalDaemonClient ? terminalHost : undefined;
+  const structuredExecHost = ptyHosts.legacyHost
+    ?? (terminalHost instanceof TerminalDaemonClient ? terminalHost : undefined);
+  // Render 协议 v1 没有任何 structured* 方法，而 Render 模式对 legacy terminald 只
+  // adopt、不 spawn：本机没有旧 terminald 时这里就是 undefined，结构化 CLI run 会
+  // 退化成进程内运行（`recoverDetachedRuns()` 也会 no-op）。这相对「web 重启不丢任务」
+  // 是功能回退，绝不能静默发生 —— 见 docs/render-upgrade-path.md §10.4。
+  if (!structuredExecHost && process.env.WAND_TEST_MODE !== "1" && !process.env.NODE_TEST_CONTEXT) {
+    const renderEngine = resolveRenderEngine(process.env.WAND_RENDER_ENGINE, config.render?.engine);
+    process.stderr.write(
+      "[wand] WARNING: structured CLI runs will NOT survive a web restart. " +
+      `render.engine=${renderEngine} only adopts an existing legacy terminald (it never spawns one) and Render protocol v1 has no ` +
+      "structured methods, so structured runs stay inside this web process and recoverDetachedRuns() is a no-op. " +
+      `Workaround: set "render": { "engine": "legacy" } in ${configPath} so Wand starts/adopts the legacy terminald again ` +
+      "(PTYs already owned by Render keep running), or keep a legacy terminald alive on this machine. " +
+      "See docs/render-upgrade-path.md §10.4.\n",
+    );
+  }
   const structuredSessions = new StructuredSessionManager(storage, config, structuredLogger, undefined, {}, structuredExecHost);
   const sessionRegistry = new SessionRegistry(processes, structuredSessions, storage);
   const missions = new Missions(storage, structuredSessions, sessionRegistry);
