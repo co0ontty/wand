@@ -21,9 +21,12 @@ fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
 "
 echo "==> package.json version 已更新为 $VERSION"
 
-# 客户端目录是 git submodule（wand-android / wand-macos / wand-ios），构建前确保已检出
-echo "==> 同步客户端 submodule..."
-git submodule update --init android macos ios
+# 客户端目录与 Render 都是 git submodule（wand-android / wand-macos / wand-ios /
+# wand-render / wand-render-bin），构建前确保已检出。
+# render-bin 不检出时 `npm run build` 只警告并跳过，包里的 dist/native/ 会是空的，
+# npm 包里就不会有 Render 二进制 —— 发版必须在这里断掉。
+echo "==> 同步 submodule..."
+git submodule update --init android macos ios render render-bin
 
 # 构建
 echo "==> 开始构建..."

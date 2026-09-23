@@ -43,15 +43,19 @@ node "$(npm root -g)/@co0ontty/wand/scripts/install-render-binary.js" --dry-run 
 
 外部 `npm i -g`（或应用内更新，二者在这一层等价）：
 
-1. **npm 覆盖全局包目录**：`dist/` + `native/<triple>/` 被新版本替换。正在运行的进程（web、`terminald`
+1. **npm 覆盖全局包目录**：`dist/`（含内嵌产物 `dist/native/<triple>/`）被新版本替换。正在运行的进程（web、`terminald`
    里已加载的 JS、已 map 的二进制）持有旧 inode，**不受影响**；也不会因为替换文件而被杀。见 §2。
 2. **应用内更新多两步**（`src/update-helper.ts`、`src/service-self-repair.ts`）：detached helper 执行
    `installPackageGloballyAsync()` → `node <新全局 CLI> init -c <config>` → `kill -TERM <旧 web pid>`
    （**只 TERM web 进程，不含 `terminald`**）→ 有服务则等 systemd/launchd 按 `Restart=always` 拉起，
    否则 helper 自己 spawn 新进程；随后 `repairServiceUnitAfterUpdate()` 把 unit 的 `ExecStart` 重新钉到全局 shim。
    全程没有 `pkill`、没有按名字杀进程组。
-3. **新 Server 启动早期：Render 二进制就位**（`scripts/install-render-binary.js`，幂等，通常零写盘）。
-   本次交付只提供这个工具与它的调用契约；`src/` 里的调用点见 §10「集成缺口 1」。见 §3。
+3. **Render 二进制不需要单独「就位」步骤**：`src/render-binary.ts` 直接按候选顺序解析，
+   安装态命中的是**全局包自己的** `dist/native/<triple>/wand-render`（npm 已随包替换），
+   所以升级后新 Server 拿到的一定是新二进制，不存在「先拷贝再启动」这一步。
+   `scripts/install-render-binary.js` 只是**可选**工具：把二进制固定复制到 `<configDir>/bin/`
+   供手工排障或需要脱离 npm 包布局的场景使用，不由 Server 自动调用（早期文档写过「启动早期自动就位」，
+   那是规划而非实现）。见 §3。
 4. **`createUpgradeAwareTerminalHost()`**（`src/render-host.ts`）：按引擎开关决定 owner，见 §4/§5。
    - `engine=legacy` → 老行为：adopt 已有 `terminald`，没有才 spawn。
    - `engine=auto` / `rust` → **只 adopt** 已存在的 `terminald`（绝不 spawn、绝不 kill），
@@ -61,6 +65,29 @@ node "$(npm root -g)/@co0ontty/wand/scripts/install-render-binary.js" --dry-run 
 6. **legacy `terminald` 用完后退场**：Node 侧在它不再持有任何 running 会话后停止路由（见 §4.4）。
 
 ---
+
+### 1.3 本地开发更新（`./start.sh`）
+
+本地用 `./start.sh` 更新与外部 `npm i -g` 是同一套机制，只是包来自**当前工作树**：
+`npm run build` → `npm pack` → `npm install -g` → 重写 service unit 并重启。
+
+执行前要确认两件事（`start.sh` 已内置检查，失败会明确报错而不是静默降级）：
+
+1. **`render` / `render-bin` 子模块已检出**：缺失时 `npm run build` 只会警告并跳过 stage，
+   包里就没有 `dist/native/`，`engine=auto` 会**静默回退 legacy** —— 表现是「更新成功但还在跑旧引擎」。
+2. **包内确实含本平台二进制**：安装后 `start.sh` 会执行
+   `dist/native/<triple>/wand-render --version` 实测；缺失时若 `engine=rust` 直接失败，
+   若 `engine=auto` 则打印后果（会话不再跨 Server 重启存活）与启用方法。
+   只看版本号无法发现这个问题，所以必须实测二进制。
+
+跑完看这两行即可确认 Rust 引擎生效（`./start.sh --status` 的 Recent logs 里）：
+
+```text
+[wand] Render engine active (wand-render 0.1.0, <pkg>/dist/native/darwin-arm64/wand-render).
+```
+
+同时会出现告警 `WARNING: structured CLI runs will NOT survive a web restart` ——
+在无 legacy `terminald` 的机器上这是预期行为，见 §10 缺口 1。
 
 ## 2. 分发布局：两个仓库、两个 submodule
 
@@ -113,6 +140,8 @@ Server 完全不必重新编译 Rust，也不必跟着发版。两个 submodule 
 ## 3. 二进制就位：时机、幂等、原子性
 
 工具：`scripts/install-render-binary.js`（可 `import`，被 `main` 之外调用时不会执行任何动作）。
+**注意**：它不参与自动升级链路 —— 升级只需要「新 npm 包自带 `dist/native/<triple>/`」这一条。
+`./start.sh` 在安装后会用 `--version` 实测校验包内二进制是否存在、是否是 stub，见 §1.3。
 
 ### 3.1 源与目标
 
@@ -121,8 +150,8 @@ Server 完全不必重新编译 Rust，也不必跟着发版。两个 submodule 
 | 1 | `--from <path>` | 显式指定；路径不存在**直接报错**（退出码 2），不静默回落 |
 | 2 | `WAND_RENDER_BIN` | 与 `src/render-binary.ts` 的显式开关一致，视为等价于 `--from` |
 | 3 | `<repo>/render/target/release/wand-render` | 开发态：`cargo build --release` 的产物优先于分发包，改完立刻生效 |
-| 4 | `<pkg>/native/<triple>/wand-render` | **npm 包内**的正式位置 |
-| 5 | `<pkg>/dist/native/<triple>/wand-render` | 兼容 `src/render-binary.ts` 既有的候选位置，避免两处布局分叉 |
+| 4 | `<pkg>/dist/native/<triple>/wand-render` | **npm 包内的正式位置**（`npm run build:render-bin` 从 `render-bin/` 子模块 stage 过来） |
+| 5 | `<configDir>/bin/wand-render` | 手工就位位置；只有显式跑本工具才会写，Server 不自动维护 |
 
 目标：`<configDir>/bin/wand-render`（`<configDir>` = `--config` 的所在目录，默认 `~/.wand/`），
 旁边写 `<configDir>/bin/wand-render.version`。
@@ -141,9 +170,10 @@ Server 完全不必重新编译 Rust，也不必跟着发版。两个 submodule 
 
 ### 3.3 调用时机与退出码
 
-- **Server 每次启动 check 一次**（幂等、通常零 IO 写），位置在 `createUpgradeAwareTerminalHost()` 之前
-  —— 见 §10「集成缺口 1」，`src/` 里目前还没有这个调用点，需要 Node 侧加。
-- 也可在 `install.sh` / 更新 helper 的 `wand init` 之后顺手跑一次（与启动自检等效，纯粹省一次启动等待）。
+- **Server 不调用它**：升级链路只依赖「新 npm 包自带 `dist/native/<triple>/`」，
+  `src/render-binary.ts` 直接解析该路径，没有拷贝步骤。
+- 想固定一份到 `<configDir>/bin/`（脱离 npm 包布局、或给手工排障用）时手工跑本工具；
+  这是运维选项，不是升级必需步骤。
 
 | 退出码 | 含义 | 调用方该怎么处理 |
 | --- | --- | --- |
@@ -203,7 +233,7 @@ Render 是 detached 常驻（`setsid`、stdio 忽略、不随 Server 退出）�
   「会话自然结束后停止路由」这件事必须由两侧**同时**为空才会发生。
 - **进程退出**：`terminald` 只在 `SIGINT`/`SIGTERM` 上退出，而它的退出处理器会
   `forget()` 掉**全部**会话（PTY 会被杀）——所以「让它退出」只能发生在确认空仓之后，
-  绝不能在还有会话时 SIGTERM。当前 `src/` 没有实现这个自动退出（见 §10「集成缺口 2」）；
+  绝不能在还有会话时 SIGTERM。当前没有实现这个自动退出（见 §10 缺口 4）；
   保守做法是**让它继续活着**（空仓的 daemon 不占资源、不影响任何功能），
   由机器重启自然回收。
 - **升级批次内禁止改动 legacy daemon 协议**：`TERMINAL_DAEMON_PROTOCOL_VERSION` 必须保持 2。
@@ -252,8 +282,9 @@ Render 是 detached 常驻（`setsid`、stdio 忽略、不随 Server 退出）�
   那个进程会在下一次「本来就会重启」的时机（机器重启 / 会话全空 / 显式 `shutdown drain`）换成新二进制。
 - **双向升级的前提**：协议 bump 必须与二进制、TS 镜像在**同一个 npm 版本**里发布；
   跨版本混跑（新 Server + 旧 Render）只能靠「版本不匹配就报错」暴露出来，
-  所以不要指望「新 Server 自动把旧 Render 迁过来」——那需要旧 Render 自己的 `shutdown drain`，
-  而 drain 也得说得上话（见 §10「集成缺口 3」）。
+  所以不要指望「新 Server 自动把旧 Render 迁过来」：`drain` 语义已经正确
+  （协议 §9.3，保留进程与运行中会话），但把 PTY **交接**给新 Render 还需要
+  master fd 的 `SCM_RIGHTS` 传递，见 §10 缺口 2。
 
 ---
 

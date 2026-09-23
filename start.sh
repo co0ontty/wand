@@ -226,6 +226,74 @@ config_value() {
   ' "$CONFIG_PATH" "$key" "$fallback"
 }
 
+# 客户端与 Render 都是 submodule。Render 缺失时 `npm run build` 只会警告并跳过
+# （没拉子模块的开发机不该因此构建失败），结果是包里没有 dist/native/，
+# 线上 render.engine=auto 静默回退 legacy ——「更新了但 Rust 引擎没生效」正是这么来的。
+# 这里前置补齐，让它无法静默发生。
+ensure_render_submodules() {
+  local missing=()
+  [[ -f "$REPO_ROOT/render/Cargo.toml" ]] || missing+=("render")
+  [[ -f "$REPO_ROOT/render-bin/manifest.json" ]] || missing+=("render-bin")
+  if [[ "${#missing[@]}" -eq 0 ]]; then
+    return 0
+  fi
+  if [[ ! -e "$REPO_ROOT/.git" ]]; then
+    warn "当前目录不是 git 工作树，跳过子模块检出（缺失 ${missing[*]}），将不会有内嵌 Render 二进制"
+    return 0
+  fi
+  command -v git >/dev/null 2>&1 || die "缺少 git，无法检出子模块: ${missing[*]}"
+  msg "检出缺失的子模块: ${missing[*]}"
+  git -C "$REPO_ROOT" submodule update --init "${missing[@]}" || die "子模块检出失败: ${missing[*]}"
+}
+
+# 安装后校验：包里到底有没有本平台的 Render 二进制。
+# 这是「本地更新完却还在跑 legacy」的唯一可靠判据 —— 版本号一致、二进制缺失时
+# 引擎会静默降级，只看版本号发现不了。
+verify_render_binary_installed() {
+  local triple platform arch installed_root binary engine version_output
+  platform="$(uname -s)"; arch="$(uname -m)"
+  case "$platform-$arch" in
+    Darwin-arm64)  triple="darwin-arm64" ;;
+    Darwin-x86_64) triple="darwin-x64" ;;
+    Linux-x86_64)  triple="linux-x64" ;;
+    Linux-aarch64) triple="linux-arm64" ;;
+    *)             triple="" ;;
+  esac
+
+  engine="$("$NODE_BIN" -e '
+    const fs = require("fs");
+    try {
+      const config = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      process.stdout.write(String((config.render && config.render.engine) || "auto"));
+    } catch { process.stdout.write("auto"); }
+  ' "$CONFIG_PATH")"
+  [[ -n "${WAND_RENDER_ENGINE:-}" ]] && engine="$WAND_RENDER_ENGINE"
+
+  installed_root="$WAND_PREFIX/lib/node_modules/@co0ontty/wand"
+  if [[ -n "$triple" ]]; then
+    binary="$installed_root/dist/native/$triple/wand-render"
+  else
+    binary=""
+  fi
+
+  if [[ -n "$binary" && -x "$binary" ]]; then
+    chmod +x "$binary" 2>/dev/null || true
+    version_output="$("$binary" --version 2>&1 | head -1)"
+    case "$version_output" in
+      *stub*|*TODO*)
+        die "安装的 Render 二进制是 stub（$version_output）：$binary" ;;
+    esac
+    ok "Rust Render 已随包安装：$triple · $version_output"
+    return 0
+  fi
+
+  if [[ "$engine" == "rust" ]]; then
+    die "render.engine=rust 但包里没有本平台二进制（期望 $installed_root/dist/native/${triple:-未识别平台}/wand-render）。\n   要么把 render-bin 子模块更新到含本平台的版本，要么改回 render.engine=auto/legacy。"
+  fi
+  warn "包里没有本平台 Render 二进制（${triple:-未识别平台}），render.engine=$engine 将回退 legacy：会话不会跨 Server 重启存活。"
+  warn "要启用 Rust 引擎：确认 render-bin 子模块含本平台产物（当前 manifest 只有 darwin-arm64）。"
+}
+
 cleanup_stale_wand() {
   local target_port="${PORT_OVERRIDE:-$(config_value port 8443)}"
   if command -v lsof >/dev/null 2>&1; then
@@ -547,6 +615,7 @@ if [[ "$PACKAGE_VERSION" != "$BASE_VERSION" ]]; then
 fi
 
 if [[ "$DO_BUILD" == "1" ]]; then
+  ensure_render_submodules
   if [[ -e "$REPO_ROOT/dist" && ! -w "$REPO_ROOT/dist" ]]; then
     command -v sudo >/dev/null 2>&1 || die "dist/ 不可写且找不到 sudo，请先修复权限: chown -R $(id -un):$(id -gn) $REPO_ROOT/dist"
     warn "dist/ 当前不可写，先归还给当前用户"
@@ -598,6 +667,7 @@ if [[ "$DO_INSTALL" == "1" ]]; then
   restore_node_pty_spawn_helper
   refresh_wand_runtime
   verify_installed_beta
+  verify_render_binary_installed
 fi
 
 [[ -f "$WAND_BIN" || -x "$WAND_BIN" ]] || die "安装后仍找不到 wand: $WAND_BIN"
