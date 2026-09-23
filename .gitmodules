@@ -7,3 +7,9 @@
 [submodule "ios"]
 	path = ios
 	url = https://github.com/co0ontty/wand-ios.git
+[submodule "render"]
+	path = render
+	url = https://github.com/co0ontty/wand-render.git
+[submodule "render-bin"]
+	path = render-bin
+	url = https://github.com/co0ontty/wand-render-bin.git
