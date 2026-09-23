@@ -58,11 +58,11 @@ node "$(npm root -g)/@co0ontty/wand/scripts/install-render-binary.js" --dry-run 
    那是规划而非实现）。见 §3。
 4. **`createUpgradeAwareTerminalHost()`**（`src/render-host.ts`）：按引擎开关决定 owner，见 §4/§5。
    - `engine=legacy` → 老行为：adopt 已有 `terminald`，没有才 spawn。
-   - `engine=auto` / `rust` → **只 adopt** 已存在的 `terminald`（绝不 spawn、绝不 kill），
-     再 adopt 或 spawn `wand-render`，然后按所有权复合路由。
+   - `engine=auto` / `rust` → 先 adopt 已存在的 `terminald`，再 adopt 或 spawn `wand-render`；
+     如果没有 `terminald`，启动一个专门承载结构化 CLI run 的常驻进程。复合路由始终把新 PTY 交给 Render。
 5. **结构化会话恢复**：`structuredSessions.recoverDetachedRuns()`（`src/server.ts`）把仍跑在
    `terminald` 里的结构化 CLI run 重新接上（这条路径本次没有被改动）。
-6. **legacy `terminald` 用完后退场**：Node 侧在它不再持有任何 running 会话后停止路由（见 §4.4）。
+6. **`terminald` 持续服务结构化 CLI run**；旧 PTY 自然结束后它仍保持可用（见 §4.4）。
 
 ---
 
@@ -83,11 +83,10 @@ node "$(npm root -g)/@co0ontty/wand/scripts/install-render-binary.js" --dry-run 
 跑完看这两行即可确认 Rust 引擎生效（`./start.sh --status` 的 Recent logs 里）：
 
 ```text
-[wand] Render engine active (wand-render 0.1.0, <pkg>/dist/native/darwin-arm64/wand-render).
+[wand] Render engine active (wand-render 0.1.0, <pkg>/dist/native/darwin-arm64/wand-render); terminald available for structured CLI runs and pre-upgrade PTYs.
 ```
 
-同时会出现告警 `WARNING: structured CLI runs will NOT survive a web restart` ——
-在无 legacy `terminald` 的机器上这是预期行为，见 §10 缺口 1。
+`terminald` 也会自动启动或被领养，用于保证结构化 CLI run 跨 Web 重启继续运行。
 
 ## 2. 分发布局：两个仓库、两个 submodule
 
@@ -199,8 +198,8 @@ wand web  ── socket ──► terminald      wand web ──┬─ socket �
                                                       （同样不随 web 重启退出）
 ```
 
-- 新 Server 对 `terminald` **只 adopt**（`connectExistingTerminalHost()`）：`hello` → `list` 拿到
-  inventory 与每会话的 `chunks` / `seq`，旧 PTY 的字节流一条不丢。
+- 新 Server 先尝试 adopt `terminald`（`connectExistingTerminalHost()`）：`hello` → `list` 拿到
+  inventory 与每会话的 `chunks` / `seq`，旧 PTY 的字节流一条不丢；不存在时再启动一个空的 `terminald`。
 - **所有权判定只能靠 legacy 自己的 inventory**：Server 无法从 DB 倒推「这个 PTY 现在归谁」，
   所以 `CompositeTerminalHost.createOrAttach()` 先问 legacy（命中即用它），否则交给 Render。
 - **升级过程中不杀任何 PTY**：`CompositeTerminalHost.disconnect()` 现在只是两侧解绑，
@@ -214,7 +213,7 @@ wand web  ── socket ──► terminald      wand web ──┬─ socket �
 | 升级后新建的 PTY | `wand-render` | 新 owner 从第一天起接管新会话 |
 | 结构化 CLI run（`structuredSpawn` 那套） | **仍是 legacy `terminald`**（新旧都算） | Render 协议 v1 只有 PTY，没有 `structured*` 方法（`docs/render-protocol.md` §3），所以 `src/server.ts` 把 `structuredExecHost` 绑到 `legacyHost` |
 
-第三行是本次升级的硬边界，不是疏漏：**只要还有结构化会话跑在 `terminald` 里，它就必须活着**。
+第三行是本次升级的硬边界：**只要还有结构化会话跑在 `terminald` 里，它就必须活着**。
 把结构化 runner 迁到 Rust 属于 `docs/rust-core-migration-plan.md` §7 的 P2，不在本次范围内。
 
 ### 4.3 跨重启的持续可用
@@ -229,8 +228,8 @@ Render 是 detached 常驻（`setsid`、stdio 忽略、不随 Server 退出）�
 
 ### 4.4 legacy `terminald` 什么时候可以不再用 / 退出
 
-- **停止路由的条件**：它不再持有任何 running 会话 —— 即 PTY `list` 与 `structuredList` 里都没有 running。
-  「会话自然结束后停止路由」这件事必须由两侧**同时**为空才会发生。
+- **持续路由**：Render v1 没有结构化运行能力，因此 `terminald` 即使暂时没有运行中的会话，
+  仍是后续结构化 CLI run 的宿主；旧 PTY 也继续按 inventory 路由给它。
 - **进程退出**：`terminald` 只在 `SIGINT`/`SIGTERM` 上退出，而它的退出处理器会
   `forget()` 掉**全部**会话（PTY 会被杀）——所以「让它退出」只能发生在确认空仓之后，
   绝不能在还有会话时 SIGTERM。当前没有实现这个自动退出（见 §10 缺口 4）；
@@ -416,14 +415,10 @@ PTY 会话不中断、结构化会话不丢、终端可输入、重连/resume �
 
 按「会不会影响用户」排序。
 
-1. **结构化会话不跨 Server 重启存活（相对现状的功能回退，已披露）。**
-   `engine=auto|rust` 下 Render 只接管 PTY；结构化 CLI run 仍由 legacy `terminald` 承载，
-   而新引擎**只 adopt 不主动 spawn** 它。所以机器上本来没有 legacy daemon 时，
-   `structuredExecHost` 为 undefined → 结构化 run 退化为进程内运行、`recoverDetachedRuns()` 变 no-op。
-   升级用户（旧 daemon 仍在跑）不受影响，**新装用户受影响**。
-   已在启动时打醒目 WARNING 并给出规避方式（`render.engine=legacy`）。
-   正解是下一阶段把结构化 runner 迁到 Render（`docs/rust-core-migration-plan.md` P2），
-   或在无 legacy daemon 时按需只为结构化 spawn 一个。
+1. ~~结构化会话不跨 Server 重启存活~~ **已解决**：`engine=auto|rust` 下 Render 只接管 PTY；
+   启动时会领养或启动 `terminald` 承载结构化 CLI run。它与 Render 的进程生命周期彼此独立，
+   Web 重启后通过 `structuredList` / `structuredAttach` 恢复。将结构化 runner 迁到 Render
+   仍是 `docs/rust-core-migration-plan.md` P2 的长期方向。
 2. **Render 自身的热升级（换二进制而不断 PTY）未实现。** `drain` 现在语义正确（保住运行中会话），
    但真正切换还需要 PTY master fd 的 `SCM_RIGHTS` 交接，或用「新版起新 daemon、旧版活到最后一个会话结束」
    的双实例编排。当前 0.1.0 的升级路径是「无运行中会话时直接换」。
@@ -433,15 +428,17 @@ PTY 会话不中断、结构化会话不丢、终端可输入、重连/resume �
    workflow 收录。`render-bin/manifest.json` 的 0.1.1 起含 `darwin-arm64` / `darwin-x64` /
    `linux-x64` / `linux-arm64`，npm 包里内嵌全部四个（`npm run build:render-bin --all`）。
    Windows 仍未实现，理由与所需工作见 `render/README.md` 的支持矩阵。
-4. **legacy `terminald` 空仓后不会自动退场**，会一直挂着（不占资源，机器重启自然回收）。
-   自动停止必须先确认两侧都没有 running 会话——legacy 的 SIGTERM 会 `forget` 全部会话并杀掉 PTY。
-5. **Render 侧没有总会话内存上限。** 单个 1000 列、满回滚的会话 RSS 可达约 350MB；
-   `stats.liveBytes` 只统计 output/chunks，严重低估真实占用（网格 + 快照不在内）。
+4. **`terminald` 不自动退场**：它继续承载以后新建的结构化 CLI run。手动停止前必须确认
+   PTY 与结构化 run 都没有运行；SIGTERM 会 `forget` 全部会话并杀掉仍由它持有的 PTY。
+5. **内存准入预算不是运行时硬限。** `stats.liveBytes` 已估算输出窗口、VT 网格、基线和 pending；
+   新建会话会参考它与物理内存预算决定是否准入。已有会话之后的输出、回滚与 resize 仍可继续增长，
+   因此进程 RSS 可能超过准入预算；运行时占用应同时看 `stats.rssBytes`。
 6. **Windows 只有 cfg 拆分与明确拒绝**：`cargo check --target x86_64-pc-windows-msvc` 通过，
    但没有命名管道、ConPTY 与信号语义的实现，也没有 Windows 运行时验收。
 7. **客户端 socket 归属校验的宽度与文档不完全一致**：协议要求 0600，
    Node 客户端只拒绝「组/其他人可写」（为了兼容 legacy daemon 建出的 0755 socket）。
    legacy 退役后应收紧到 0600。
-8. **`attach()` 目前读本地 inventory 而不是每次都发 RPC。** 启动恢复路径恰好紧跟 `list`，
-   所以当前看不到问题；但 `list` 里的快照按协议 §9.1.1 已裁剪到 64KiB，
-   需要精确屏幕的调用方必须走 `attach`。
+8. **单个 `attach` 仍受 v1 的 64 MiB 帧上限约束。** Server 启动时用 `list` 找到会话 ID，
+   再逐会话 `attach` 取得权威屏幕；旧版 Render 的汇总 `list` 超限时可用数据库中运行中的
+   PTY ID 逐个恢复。但极大的单会话 VT 快照仍可能超过一帧，后续需要分块协议；本轮保持
+   v1 兼容，避免升级时失去正在运行的 PTY。

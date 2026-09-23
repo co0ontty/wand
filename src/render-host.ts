@@ -24,6 +24,8 @@ export interface RenderHostOptions {
   engine?: RenderEngine;
   /** 配置里显式指定的二进制路径。 */
   binaryPath?: string;
+  /** DB 中仍在运行的 PTY，用于旧版 Render 的超大 list 失败时逐个 attach。 */
+  knownSessionIds?: readonly string[];
 }
 
 export interface UpgradeAwareTerminalHost {
@@ -132,7 +134,7 @@ export async function createUpgradeAwareTerminalHost(
     return { host: legacy, renderHost: null, legacyHost: asTerminalDaemonClient(legacy) };
   }
 
-  // 只 adopt，绝不 spawn/杀：它可能正持有升级前的会话 PTY。
+  // 先 adopt 升级前的 terminald，以它的 inventory 判定旧 PTY 的 owner。
   const legacy = await connectExistingTerminalHost(configPath);
   const configuredBinary = options.binaryPath?.trim();
   const binaryPath = configuredBinary || resolveRenderBinaryPath(configPath);
@@ -158,15 +160,12 @@ export async function createUpgradeAwareTerminalHost(
     throw new Error(`render.binaryPath points at ${configuredBinary}, which is not an executable file.`);
   }
 
+  let render: RenderDaemonClient;
   try {
-    const render = await createRenderTerminalHost(configPath, { binaryPath });
-    const version = await readRenderBinaryVersion(binaryPath);
-    process.stderr.write(
-      `[wand] Render engine active (${version ? `wand-render ${version}` : "version unknown"}, ${binaryPath})` +
-      `${legacy ? "; legacy terminald still serving pre-upgrade sessions" : ""}.\n`,
-    );
-    const host: TerminalHost = legacy ? new CompositeTerminalHost({ legacy, render }) : render;
-    return { host, renderHost: render, legacyHost: legacy };
+    render = await createRenderTerminalHost(configPath, {
+      binaryPath,
+      knownSessionIds: options.knownSessionIds,
+    });
   } catch (error) {
     if (engine === "rust") throw error;
     // auto 模式下把失败讲清楚再回退：这种情况用户最需要知道 Rust 引擎没生效。
@@ -176,6 +175,30 @@ export async function createUpgradeAwareTerminalHost(
     const fallback = legacy ?? await createTerminalHost(configPath);
     return { host: fallback, renderHost: null, legacyHost: asTerminalDaemonClient(fallback) };
   }
+
+  // Render v1 only owns PTYs. Structured CLI runs still need a daemon-backed
+  // host to survive a web restart, including on a fresh installation where no
+  // pre-upgrade terminald exists. The composite routes new PTYs to Render.
+  let structuredHost: TerminalDaemonClient;
+  try {
+    const daemon = legacy ?? await createTerminalHost(configPath);
+    const client = asTerminalDaemonClient(daemon);
+    if (!client) throw new Error("A persistent terminal daemon is required for structured CLI runs.");
+    structuredHost = client;
+  } catch (error) {
+    render.disconnect();
+    throw error;
+  }
+  const version = await readRenderBinaryVersion(binaryPath);
+  process.stderr.write(
+    `[wand] Render engine active (${version ? `wand-render ${version}` : "version unknown"}, ${binaryPath}); ` +
+    "terminald available for structured CLI runs and pre-upgrade PTYs.\n",
+  );
+  return {
+    host: new CompositeTerminalHost({ legacy: structuredHost, render }),
+    renderHost: render,
+    legacyHost: structuredHost,
+  };
 }
 
 /**
@@ -186,17 +209,17 @@ export async function createUpgradeAwareTerminalHost(
  */
 export async function createRenderTerminalHost(
   configPath: string,
-  options: { binaryPath?: string } = {},
+  options: { binaryPath?: string; knownSessionIds?: readonly string[] } = {},
 ): Promise<RenderDaemonClient> {
   const paths = renderPaths(configPath);
   const endpointExists = process.platform !== "win32" && existsSync(paths.socketPath);
 
   if (endpointExists) {
-    const adopted = await connectExistingRenderClient(configPath);
+    const adopted = await connectExistingRenderClient(configPath, options.knownSessionIds);
     if (adopted) return adopted;
     if (await isSocketListening(paths.socketPath)) {
       // 有人监听却拒绝 adopt（协议版本不符 / token 不符）：这是错误配置，必须报出来而不是绕开。
-      const starting = await waitForRender(configPath, RENDER_READY_TIMEOUT_MS);
+      const starting = await waitForRender(configPath, RENDER_READY_TIMEOUT_MS, options.knownSessionIds);
       if (starting) return starting;
       throw new Error(
         `A Render daemon is listening on ${paths.socketPath} but rejected adoption. Refusing to spawn a competing Render; ` +
@@ -214,7 +237,7 @@ export async function createRenderTerminalHost(
   // 绝不另起第二个 daemon（协议 §6 single instance）。
   const livePid = readLiveRenderPid(paths.pidPath);
   if (livePid !== null) {
-    const starting = await waitForRender(configPath, RENDER_READY_TIMEOUT_MS);
+    const starting = await waitForRender(configPath, RENDER_READY_TIMEOUT_MS, options.knownSessionIds);
     if (starting) return starting;
     throw new Error(
       `Render process ${livePid} is alive but its socket ${paths.socketPath} is unavailable; refusing to spawn a second daemon.`,
@@ -223,11 +246,15 @@ export async function createRenderTerminalHost(
 
   const binaryPath = options.binaryPath ?? resolveRenderBinaryPath(configPath);
   if (!binaryPath) throw new Error("wand-render binary is required to start Render");
-  return spawnDetachedRender(configPath, binaryPath);
+  return spawnDetachedRender(configPath, binaryPath, options.knownSessionIds);
 }
 
 /** detached spawn（stdio 忽略、unref），并等 socket + token 就绪。 */
-export async function spawnDetachedRender(configPath: string, binaryPath: string): Promise<RenderDaemonClient> {
+export async function spawnDetachedRender(
+  configPath: string,
+  binaryPath: string,
+  knownSessionIds?: readonly string[],
+): Promise<RenderDaemonClient> {
   const paths = renderPaths(configPath);
   // `-c <configPath>` 是按 config 隔离的既定约定（docs/render-protocol.md §6）：
   // socket / token / pid / meta 全部由它派生。
@@ -241,7 +268,7 @@ export async function spawnDetachedRender(configPath: string, binaryPath: string
     process.stderr.write(`[wand] Failed to spawn wand-render: ${getErrorMessage(error)}\n`);
   });
   child.unref();
-  const client = await waitForRender(configPath, RENDER_READY_TIMEOUT_MS);
+  const client = await waitForRender(configPath, RENDER_READY_TIMEOUT_MS, knownSessionIds);
   if (!client) {
     // 自己生的进程自己收：就位超时（选错了二进制、二进制是 stub、或者它卡在启动）
     // 时如果不回收，就会留下一个永久孤儿 daemon —— 它占着 socket 名字、下次启动会被
@@ -254,10 +281,14 @@ export async function spawnDetachedRender(configPath: string, binaryPath: string
   return client;
 }
 
-async function waitForRender(configPath: string, timeoutMs: number): Promise<RenderDaemonClient | null> {
+async function waitForRender(
+  configPath: string,
+  timeoutMs: number,
+  knownSessionIds?: readonly string[],
+): Promise<RenderDaemonClient | null> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const client = await connectExistingRenderClient(configPath);
+    const client = await connectExistingRenderClient(configPath, knownSessionIds);
     if (client) return client;
     await new Promise<void>((resolve) => setTimeout(resolve, 50));
   }

@@ -6,7 +6,11 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 import { defaultConfig } from "../src/config.js";
-import { ProcessManager } from "../src/process-manager.js";
+import { ProcessManager, PtyInputDeliveryError } from "../src/process-manager.js";
+import type {
+  TerminalAttachResult, TerminalDataEvent, TerminalExitEvent, TerminalHost,
+  TerminalProcess, TerminalSessionState, TerminalSpawnRequest,
+} from "../src/terminal-host.js";
 import type { SessionSnapshot } from "../src/types.js";
 import type { WandStorage } from "../src/storage.js";
 
@@ -58,6 +62,125 @@ class FakeStorage {
     this.sessions.delete(id);
   }
 }
+
+test("ProcessManager installs a Render resync snapshot before notifying clients", (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-pm-render-resync-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const sessionId = "render-resync";
+  const stored: SessionSnapshot = {
+    id: sessionId, sessionKind: "pty", runner: "pty", command: "/bin/sh",
+    cwd: root, mode: "default", status: "running", exitCode: null,
+    startedAt: new Date().toISOString(), endedAt: null, output: "old",
+    archived: false, archivedAt: null, ptyOutputSeq: 1,
+  };
+  const initial: TerminalSessionState = {
+    sessionId, incarnationId: "inc-1", pid: 42, status: "running", exitCode: null,
+    cols: 80, rows: 24, seq: 1, output: "old", chunks: [],
+    terminalSnapshot: { version: 1, data: "old", cols: 80, rows: 24, pending: [] },
+    launchMarkerToken: null,
+  };
+  let resyncListener: ((state: TerminalSessionState) => void) | null = null;
+  const terminal: TerminalProcess = {
+    sessionId, incarnationId: "inc-1", pid: 42,
+    write() {}, resize() {}, kill() {},
+    onData(_listener: (event: TerminalDataEvent) => void) { return { dispose() {} }; },
+    onExit(_listener: (event: TerminalExitEvent) => void) { return { dispose() {} }; },
+    onResync(listener) { resyncListener = listener; return { dispose() { resyncListener = null; } }; },
+  };
+  const host: TerminalHost = {
+    persistent: true,
+    attach(): TerminalAttachResult { return { process: terminal, state: initial, replay: [], isNew: false }; },
+    async createOrAttach(_request: TerminalSpawnRequest): Promise<TerminalAttachResult> {
+      throw new Error("unexpected spawn");
+    },
+    forget() {}, disconnect() {},
+  };
+  const storage = new FakeStorage([stored]) as unknown as WandStorage;
+  const manager = new ProcessManager(
+    { ...defaultConfig(), defaultCwd: root, startupCommands: [] }, storage, root, host,
+  );
+  t.after(() => manager.dispose());
+  let stateAtNotice: SessionSnapshot | null = null;
+  manager.on("process", (event: { type: string }) => {
+    if (event.type === "resync") stateAtNotice = manager.get(sessionId);
+  });
+  assert.ok(resyncListener);
+  resyncListener!({
+    ...initial, seq: 4, cols: 100, rows: 30, output: "full recovered output",
+    terminalSnapshot: {
+      version: 1, data: "full recovered screen", cols: 100, rows: 30, pending: [],
+    },
+  });
+  assert.equal(stateAtNotice?.output, "full recovered output");
+  assert.equal(stateAtNotice?.ptyOutputSeq, 4);
+  assert.equal(stateAtNotice?.ptyCols, 100);
+  const screen = manager.getTerminalState(sessionId);
+  assert.ok(screen);
+  assert.equal(screen.cols, 100);
+  assert.match(screen.data + screen.pending.map((operation) =>
+    operation.type === "data" ? operation.data : "").join(""), /full recovered screen/);
+  assert.equal(storage.getSession(sessionId)?.output, "full recovered output");
+});
+
+test("rejected confirmed PTY write leaves input tracking and persisted state untouched", async (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-pm-input-rejection-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const sessionId = "rejected-input";
+  const stored: SessionSnapshot = {
+    id: sessionId, sessionKind: "pty", runner: "pty", command: "/bin/sh",
+    cwd: root, mode: "default", status: "running", exitCode: null,
+    startedAt: new Date().toISOString(), endedAt: null, output: "unchanged",
+    archived: false, archivedAt: null, ptyOutputSeq: 1,
+  };
+  const state: TerminalSessionState = {
+    sessionId, incarnationId: "inc-1", pid: 42, status: "running", exitCode: null,
+    cols: 80, rows: 24, seq: 1, output: "unchanged", chunks: [],
+    terminalSnapshot: null, launchMarkerToken: null,
+  };
+  let deferredWrite = false;
+  let confirmWrite: (() => void) | null = null;
+  const process: TerminalProcess = {
+    sessionId, incarnationId: "inc-1", pid: 42,
+    write() {}, async writeConfirmed() {
+      if (!deferredWrite) throw new Error("Render write rejected");
+      await new Promise<void>((resolve) => { confirmWrite = resolve; });
+    },
+    resize() {}, kill() {},
+    onData() { return { dispose() {} }; },
+    onExit() { return { dispose() {} }; },
+  };
+  const host: TerminalHost = {
+    persistent: true,
+    attach(): TerminalAttachResult { return { process, state, replay: [], isNew: false }; },
+    async createOrAttach(): Promise<TerminalAttachResult> { throw new Error("unexpected spawn"); },
+    forget() {}, disconnect() {},
+  };
+  const storage = new FakeStorage([stored]) as unknown as WandStorage;
+  const manager = new ProcessManager(
+    { ...defaultConfig(), defaultCwd: root, startupCommands: [] }, storage, root, host,
+  );
+  t.after(() => manager.dispose());
+  await assert.rejects(
+    manager.sendInputConfirmed(sessionId, "never delivered\r", "chat", "enter_text"),
+    (error: unknown) => error instanceof PtyInputDeliveryError
+      && error.sessionId === sessionId
+      && error.cause instanceof Error,
+  );
+  const record = (manager as unknown as {
+    sessions: Map<string, { ptyTopicDraft?: unknown }>;
+  }).sessions.get(sessionId);
+  assert.equal(record?.ptyTopicDraft, undefined);
+  assert.equal(storage.getSession(sessionId)?.output, "unchanged");
+  assert.equal(manager.get(sessionId)?.messages, undefined);
+
+  deferredWrite = true;
+  const inFlight = manager.sendInputConfirmed(sessionId, "old incarnation\r", "chat");
+  manager.stop(sessionId);
+  assert.ok(confirmWrite);
+  confirmWrite();
+  await assert.rejects(inFlight, PtyInputDeliveryError);
+  assert.equal(storage.getSession(sessionId)?.status, "stopped");
+});
 
 function claudeProjectDir(home: string, cwd: string): string {
   return path.join(home, ".claude", "projects", path.resolve(cwd).replace(/[^a-zA-Z0-9]/g, "-"));

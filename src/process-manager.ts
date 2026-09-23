@@ -189,6 +189,14 @@ export class SessionInputError extends Error {
   }
 }
 
+/** Write outcome is unknown to the caller; do not record this as accepted input. */
+export class PtyInputDeliveryError extends Error {
+  constructor(readonly sessionId: string, cause: unknown) {
+    super("PTY input delivery could not be confirmed.", { cause });
+    this.name = "PtyInputDeliveryError";
+  }
+}
+
 
 interface SessionRecord extends SessionSnapshot {
   provider?: SessionProvider;
@@ -937,14 +945,42 @@ export class ProcessManager extends EventEmitter {
     child: TerminalProcess,
     onVisibleChunk?: (chunk: string) => void,
   ): void {
-    child.onExit(({ exitCode }) => this.handleTerminalExit(record, child, exitCode));
+    child.onResync?.((state) => this.handleTerminalResync(record, child, state));
     child.onData((event) => this.handleTerminalData(record, child, event, onVisibleChunk));
+    child.onExit(({ exitCode }) => this.handleTerminalExit(record, child, exitCode));
     if (record.ptyBridge) {
       record.ptyBridge.setPtyWrite((input: string) => {
         if (this.sessions.get(record.id) !== record || record.ptyProcess !== child) return;
         child.write(input);
       });
     }
+  }
+
+  private handleTerminalResync(
+    record: SessionRecord,
+    child: TerminalProcess,
+    state: TerminalSessionState,
+  ): void {
+    const current = this.sessions.get(record.id);
+    if (current !== record || current.ptyProcess !== child) return;
+    current.terminalState?.dispose();
+    current.terminalState = restoreTerminalState(state);
+    current.output = state.output;
+    current.storedOutput = state.output;
+    current.ptyOutputSeq = state.seq;
+    current.ptyCols = state.cols;
+    current.ptyRows = state.rows;
+    current.ptyLaunchMarkerToken = state.launchMarkerToken;
+    current.providerShellMarker = state.launchMarkerToken
+      ? new PtyCliExitMarker(state.launchMarkerToken)
+      : null;
+    if (current.ptyBridge) current.messages = current.ptyBridge.getMessages();
+    this.initializeClaudeBridge(current, state.output);
+    current.ptyBridge?.setPtyWrite((input: string) => {
+      if (this.sessions.get(record.id) === current && current.ptyProcess === child) child.write(input);
+    });
+    this.flushPersist(current, true);
+    this.emitEvent({ type: "resync", sessionId: record.id, data: { reason: "render_replay_gap" } });
   }
 
   private handleTerminalExit(record: SessionRecord, child: TerminalProcess, exitCode: number): void {
@@ -1723,6 +1759,51 @@ export class ProcessManager extends EventEmitter {
   }
 
   sendInput(id: string, input: string, view?: "chat" | "terminal", shortcutKey?: string, trackUserInput = true): SessionSnapshot {
+    const record = this.preparePtyInput(id, input, view, shortcutKey, trackUserInput);
+    record.ptyProcess!.write(input);
+    this.persist(record);
+    return this.snapshot(record);
+  }
+
+  async sendInputConfirmed(
+    id: string,
+    input: string,
+    view?: "chat" | "terminal",
+    shortcutKey?: string,
+    trackUserInput = true,
+  ): Promise<SessionSnapshot> {
+    const record = this.validatePtyInput(id);
+    const terminal = record.ptyProcess!;
+    try {
+      if (terminal.writeConfirmed) await terminal.writeConfirmed(input);
+      else terminal.write(input);
+    } catch (cause) {
+      throw new PtyInputDeliveryError(id, cause);
+    }
+    const current = this.sessions.get(id);
+    if (current !== record || record.ptyProcess !== terminal) {
+      // The write reached an old PTY, but the caller cannot treat it as input
+      // accepted by the current incarnation or persist the stale record.
+      throw new PtyInputDeliveryError(id, new Error("PTY incarnation changed during write"));
+    }
+    this.trackPtyInput(record, input, view, shortcutKey, trackUserInput);
+    this.persist(record);
+    return this.snapshot(record);
+  }
+
+  private preparePtyInput(
+    id: string,
+    input: string,
+    view?: "chat" | "terminal",
+    shortcutKey?: string,
+    trackUserInput = true,
+  ): SessionRecord {
+    const record = this.validatePtyInput(id);
+    this.trackPtyInput(record, input, view, shortcutKey, trackUserInput);
+    return record;
+  }
+
+  private validatePtyInput(id: string): SessionRecord {
     if (this.disposed) throw new Error("ProcessManager has been disposed.");
     const record = this.mustGet(id);
 
@@ -1737,6 +1818,17 @@ export class ProcessManager extends EventEmitter {
       console.error(`[ProcessManager] Rejecting input: session ${id} has no PTY`);
       throw new SessionInputError("Session is not running.", "SESSION_NO_PTY", id, record.status);
     }
+    return record;
+  }
+
+  private trackPtyInput(
+    record: SessionRecord,
+    input: string,
+    view?: "chat" | "terminal",
+    shortcutKey?: string,
+    trackUserInput = true,
+  ): void {
+    const id = record.id;
     if (!record.ptyTopicDraft) record.ptyTopicDraft = createPtyTopicLineBuffer();
     const topicInput = consumePtyInputForTopic(record.ptyTopicDraft, input, view, shortcutKey);
     if (topicInput) this.maybeGenerateSessionTopic(id, topicInput);
@@ -1759,9 +1851,6 @@ export class ProcessManager extends EventEmitter {
       record.ptyBridge.onUserInput(input);
     }
 
-    record.ptyProcess.write(input);
-    this.persist(record);
-    return this.snapshot(record);
   }
 
   resize(id: string, cols: number, rows: number): SessionSnapshot {

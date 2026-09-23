@@ -221,7 +221,10 @@ function noteTurnActivity(sessionId: string, active: boolean): void {
                 return;
               }
               if (msg && msg.type === "pty_error") {
-                showToast(msg.error || "终端输入失败", "error");
+                showToast("终端操作未确认。请检查输出后再重试。", "error");
+                if (msg.sessionId && state.ws && state.ws.readyState === WebSocket.OPEN) {
+                  state.ws.send(JSON.stringify({ type: "resync", sessionId: msg.sessionId }));
+                }
                 return;
               }
               if (msg && msg.type === "resync_required" && msg.sessionId) {

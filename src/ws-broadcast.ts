@@ -115,7 +115,7 @@ interface WsClient {
 export interface WsSessionPort {
   getSession(id: string): SessionSnapshot | null;
   getTerminalState?(id: string): PtyTerminalSnapshot | null;
-  sendPtyInput?(id: string, input: string, shortcutKey?: string, userInput?: boolean): void;
+  sendPtyInput?(id: string, input: string, shortcutKey?: string, userInput?: boolean): void | Promise<void>;
   resizePty?(id: string, cols: number, rows: number): void;
 }
 
@@ -263,12 +263,15 @@ export class WsBroadcastManager {
           } else if (msg.type === "pty_input" && msg.sessionId && typeof msg.data === "string") {
             if (!client.ptySubscriptions.has(msg.sessionId) || msg.data.length > MAX_PTY_INPUT_CHARS) return;
             try {
-              this.port?.sendPtyInput?.(
+              const delivery = this.port?.sendPtyInput?.(
                 msg.sessionId,
                 msg.data,
                 typeof msg.shortcutKey === "string" ? msg.shortcutKey : undefined,
                 msg.userInput !== false,
               );
+              if (delivery) {
+                void delivery.catch((error: unknown) => this.sendPtyError(client, msg.sessionId, error));
+              }
             } catch (error) {
               this.sendPtyError(client, msg.sessionId, error);
             }
@@ -339,6 +342,15 @@ export class WsBroadcastManager {
   /** Emit a process event to all subscribed WebSocket clients. */
   emitEvent(event: ProcessEvent): void {
     if (this.disposed) return;
+    if (event.type === "resync") {
+      this.flushOutput(event.sessionId);
+      for (const client of this.clients) {
+        if (client.ptySubscriptions.has(event.sessionId)) {
+          this.queueResyncNotice(client, event.sessionId, "render_replay_gap");
+        }
+      }
+      return;
+    }
     // Debounce output events to reduce flicker during rapid streaming
     if (event.type === "output") {
       const existing = this.outputDebounceCache.get(event.sessionId);

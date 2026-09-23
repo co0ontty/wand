@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Express } from "express";
 
-import { ProcessManager, SessionInputError } from "./process-manager.js";
+import { ProcessManager, PtyInputDeliveryError, SessionInputError } from "./process-manager.js";
 import { StructuredSessionManager } from "./structured-session-manager.js";
 import { WandStorage } from "./storage.js";
 import { ExecutionMode, InputRequest, ResizeRequest, SessionProvider, SessionRunner, SessionSnapshot, SessionSource, WandConfig } from "./types.js";
@@ -112,6 +112,17 @@ export function parseSessionCreationOrigin(
 }
 
 function getInputErrorResponse(error: unknown, sessionId: string) {
+  if (error instanceof PtyInputDeliveryError) {
+    return {
+      statusCode: 503,
+      payload: {
+        error: "PTY 输入结果未获确认；请先检查终端输出，不要直接重复提交。",
+        errorCode: "INPUT_DELIVERY_UNCONFIRMED",
+        sessionId,
+        sessionStatus: null,
+      },
+    };
+  }
   if (error instanceof SessionInputError) {
     const statusCode = error.code === "SESSION_NOT_FOUND" ? 404 : 409;
     return {
@@ -1428,14 +1439,17 @@ export function registerSessionRoutes(
       const autoResumeInput = getAutoResumeInitialInput(existingSession, input, view, shortcutKey);
       if (autoResumeInput !== null && canAutoResumePtyForInput(existingSession, autoResumeInput)) {
         const snapshot = await startResumedPtySession(processes, storage, existingSession, sessionId, defaultMode, {}, autoResumeInput);
+        // Resume input waits for the provider prompt and is deliberately queued after start.
+        // This branch reports a pending delivery, unlike an already-running PTY write.
+        res.setHeader("X-Wand-Input-Delivery", "pending");
         if (body.responseMode === "accepted") {
-          res.status(202).json({ accepted: true });
+          res.status(202).json({ accepted: true, deliveryConfirmed: false });
           return;
         }
         res.json(sessionResponseDTO(snapshot));
         return;
       }
-      const snapshot = processes.sendInput(sessionId, input, view, shortcutKey);
+      const snapshot = await processes.sendInputConfirmed(sessionId, input, view, shortcutKey);
       if (body.responseMode === "accepted") {
         res.status(202).json({ accepted: true });
         return;

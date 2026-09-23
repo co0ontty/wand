@@ -70,8 +70,11 @@ export class RenderAuthError extends Error {
 class RemoteRenderProcess implements TerminalProcess {
   private readonly dataListeners = new Set<(event: TerminalDataEvent) => void>();
   private readonly exitListeners = new Set<(event: TerminalExitEvent) => void>();
+  private readonly resyncListeners = new Set<(state: TerminalSessionState) => void>();
   private undeliveredEvents: TerminalDataEvent[] = [];
   private pendingExit: TerminalExitEvent | null = null;
+  private pendingResync: TerminalSessionState | null = null;
+  private resyncGeneration = 0;
 
   constructor(
     readonly sessionId: string,
@@ -82,6 +85,10 @@ class RemoteRenderProcess implements TerminalProcess {
 
   write(data: string): void {
     this.client.fireOperation(this.sessionId, "write", { sessionId: this.sessionId, data });
+  }
+
+  async writeConfirmed(data: string): Promise<void> {
+    await this.client.confirmWrite(this.sessionId, data);
   }
 
   resize(cols: number, rows: number): void {
@@ -120,6 +127,29 @@ class RemoteRenderProcess implements TerminalProcess {
     return { dispose: () => this.exitListeners.delete(listener) };
   }
 
+  onResync(listener: (state: TerminalSessionState) => void): { dispose(): void } {
+    this.resyncListeners.add(listener);
+    const pending = this.pendingResync;
+    if (pending) {
+      const generation = this.resyncGeneration;
+      queueMicrotask(() => {
+        if (this.resyncGeneration !== generation) return;
+        if (this.resyncListeners.has(listener)) listener(pending);
+        if (this.pendingResync === pending) this.pendingResync = null;
+      });
+    }
+    return { dispose: () => this.resyncListeners.delete(listener) };
+  }
+
+  acceptResync(state: TerminalSessionState): void {
+    this.resyncGeneration += 1;
+    this.pendingResync = this.resyncListeners.size === 0
+      ? { ...state, chunks: [...state.chunks] }
+      : null;
+    this.undeliveredEvents = [];
+    for (const listener of Array.from(this.resyncListeners)) listener(state);
+  }
+
   acceptData(event: TerminalDataEvent): void {
     if (this.dataListeners.size === 0) {
       this.undeliveredEvents = appendTerminalChunkWindow(this.undeliveredEvents, event);
@@ -153,6 +183,11 @@ export class RenderDaemonClient implements TerminalHost {
   private readonly inventory = new Map<string, TerminalSessionState>();
   private readonly handles = new Map<string, RemoteRenderProcess>();
   private readonly pendingEvents = new Map<string, RenderEvent[]>();
+  private readonly pendingEventOverflows = new Set<string>();
+  private readonly refreshingSessions = new Set<string>();
+  private reconciling = false;
+  private eventsDuringReconcile: RenderEvent[] = [];
+  private reconcileDuringSync: RenderEvent | null = null;
   // socket 帧解码状态：长度前缀最多 4 字节；正文按到达顺序分片，避免大帧反复整块拷贝。
   private headerParts: Buffer[] = [];
   private headerBytes = 0;
@@ -185,6 +220,8 @@ export class RenderDaemonClient implements TerminalHost {
      * （现象是 `createOrAttach` 全部失败、错误只显示 unavailable，旧会话被永久报成 running）。
      */
     private readonly tokenPath: string | null = null,
+    /** Persisted PTY IDs used only if v1 `list` exceeds its aggregate frame limit. */
+    private readonly knownSessionIds: readonly string[] = [],
   ) {
     this.lastKnownToken = token;
   }
@@ -224,6 +261,7 @@ export class RenderDaemonClient implements TerminalHost {
       this.rejectPending(error instanceof Error ? error : new Error(String(error)));
       this.handleDisconnect(socket);
     });
+    this.reconciling = true;
     try {
       const hello = this.parseHello(await this.request("hello", undefined, "hello"));
       if (hello.protocolVersion !== RENDER_PROTOCOL_VERSION) {
@@ -236,14 +274,28 @@ export class RenderDaemonClient implements TerminalHost {
       }
       this.daemonVersion = hello.version;
       const previous = new Map(this.inventory);
-      const sessions = await this.listSessions();
+      const sessions = await this.loadAuthoritativeSessions();
       this.inventory.clear();
       for (const state of sessions) this.inventory.set(state.sessionId, state);
       if (previous.size > 0) {
         this.reconcileAfterReconnect(previous);
         process.stderr.write("[wand] Reconnected to Render; reconciled PTY inventory.\n");
       }
+      this.reconciling = false;
+      const queued = this.eventsDuringReconcile;
+      this.eventsDuringReconcile = [];
+      const reconcile = this.reconcileDuringSync;
+      this.reconcileDuringSync = null;
+      for (const event of queued) this.routeEvent(event);
+      if (reconcile) this.routeEvent(reconcile);
+      for (const sessionId of this.pendingEventOverflows) {
+        const handle = this.handles.get(sessionId);
+        if (handle) void this.refreshSession(sessionId, handle);
+      }
     } catch (error) {
+      this.reconciling = false;
+      this.eventsDuringReconcile = [];
+      this.reconcileDuringSync = null;
       if (!this.disposed) {
         try { socket.destroy(); } catch { /* best-effort cleanup */ }
         this.handleDisconnect();
@@ -350,6 +402,8 @@ export class RenderDaemonClient implements TerminalHost {
     this.inventory.delete(sessionId);
     this.handles.delete(sessionId);
     this.pendingEvents.delete(sessionId);
+    this.pendingEventOverflows.delete(sessionId);
+    this.refreshingSessions.delete(sessionId);
     this.fireOperation(sessionId, "forget", { sessionId });
   }
 
@@ -369,6 +423,10 @@ export class RenderDaemonClient implements TerminalHost {
     this.rejectPending(new Error("Render client disposed"));
     this.handles.clear();
     this.pendingEvents.clear();
+    this.pendingEventOverflows.clear();
+    this.refreshingSessions.clear();
+    this.eventsDuringReconcile = [];
+    this.reconcileDuringSync = null;
     // inventory 只保留到本进程结束：它是内存快照，不写盘、不影响 Render。
   }
 
@@ -378,6 +436,10 @@ export class RenderDaemonClient implements TerminalHost {
    */
   fireOperation(sessionId: string, method: RenderMethod, params?: Record<string, unknown>): void {
     void this.request(method, params).catch((error) => this.reportOperationError(sessionId, method, error));
+  }
+
+  async confirmWrite(sessionId: string, data: string): Promise<void> {
+    await this.request("write", { sessionId, data });
   }
 
   reportOperationError(sessionId: string, method: RenderMethod, error: unknown): void {
@@ -403,6 +465,44 @@ export class RenderDaemonClient implements TerminalHost {
     for (const entry of raw) {
       const state = normalizeRenderSessionState(entry);
       if (state) states.push(state);
+    }
+    return states;
+  }
+
+  /** `list` locates sessions; each `attach` is the authoritative recovery state. */
+  private async loadAuthoritativeSessions(): Promise<TerminalSessionState[]> {
+    let sessionIds: string[];
+    try {
+      sessionIds = (await this.listSessions()).map((state) => state.sessionId);
+    } catch (error) {
+      // Protocol v1's list still includes bounded output/chunks per session,
+      // so a large inventory can exceed one 64 MiB frame. The persisted PTY
+      // IDs let this Server recover its own sessions via individual attaches.
+      if (!/Render list failed \(internal\).*?(frame limit|MAX_FRAME_BYTES|exceeds)/i.test(getErrorMessage(error))) {
+        throw error;
+      }
+      sessionIds = [...new Set([...this.knownSessionIds, ...this.inventory.keys(), ...this.handles.keys()])];
+      process.stderr.write(`[wand] Render list exceeded its frame limit; attaching ${sessionIds.length} known PTY sessions individually.\n`);
+    }
+    const states: TerminalSessionState[] = [];
+    // Keep in-flight full terminal snapshots bounded on a busy Render.
+    for (let index = 0; index < sessionIds.length; index += 4) {
+      const batch = sessionIds.slice(index, index + 4);
+      const attached = await Promise.all(batch.map(async (sessionId) => {
+        let result: { state?: unknown } | null;
+        try {
+          result = await this.request("attach", { sessionId, afterSeq: 0 }) as { state?: unknown } | null;
+        } catch (error) {
+          if (/Render attach failed \(notFound\)/.test(getErrorMessage(error))) return null;
+          throw error;
+        }
+        const state = normalizeRenderSessionState(result?.state);
+        if (!state || state.sessionId !== sessionId) {
+          throw new Error(`Render attach returned an unusable state for ${sessionId}; refusing partial recovery.`);
+        }
+        return state;
+      }));
+      states.push(...attached.filter((state): state is TerminalSessionState => state !== null));
     }
     return states;
   }
@@ -539,6 +639,18 @@ export class RenderDaemonClient implements TerminalHost {
   }
 
   private routeEvent(event: RenderEvent): void {
+    if (this.reconciling) {
+      if (event.event === "reconcile") {
+        this.reconcileDuringSync = event;
+        return;
+      }
+      this.eventsDuringReconcile.push(event);
+      if (this.eventsDuringReconcile.length > MAX_PENDING_EVENTS) {
+        const dropped = this.eventsDuringReconcile.shift();
+        if (dropped && "sessionId" in dropped) this.pendingEventOverflows.add(dropped.sessionId);
+      }
+      return;
+    }
     if (event.event === "reconcile") {
       this.handleReconcileEvent(event.sessionIds);
       return;
@@ -550,8 +662,21 @@ export class RenderDaemonClient implements TerminalHost {
       return;
     }
     const state = this.inventory.get(sessionId);
+    const handle = this.handles.get(sessionId);
+    if (this.refreshingSessions.has(sessionId) || !handle || handle.incarnationId !== incarnationId) {
+      // Keep the authoritative attach state immutable until a process handle
+      // exists. A later resultFromState filters events already in that state.
+      this.queuePendingEvent(sessionId, event);
+      return;
+    }
     if (state && state.incarnationId === incarnationId) {
       if (event.event === "data" && typeof event.data === "string" && typeof event.seq === "number") {
+        if (event.seq <= state.seq) return;
+        if (event.seq > state.seq + 1) {
+          this.queuePendingEvent(sessionId, event);
+          void this.refreshSession(sessionId, handle);
+          return;
+        }
         state.seq = Math.max(state.seq, event.seq);
         state.output = appendWindow(state.output, event.data, PTY_OUTPUT_MAX_SIZE);
         state.chunks = appendTerminalChunkWindow(state.chunks, { data: event.data, seq: event.seq });
@@ -560,19 +685,57 @@ export class RenderDaemonClient implements TerminalHost {
         state.exitCode = event.exitCode ?? -1;
       }
     }
-    const handle = this.handles.get(sessionId);
-    if (!handle || handle.incarnationId !== incarnationId) {
-      // 事件可能早于 createOrAttach 的响应，先缓存，句柄建立后再按 seq 过滤补发。
-      const buffered = this.pendingEvents.get(sessionId) ?? [];
-      buffered.push(event);
-      this.pendingEvents.set(sessionId, buffered.slice(-MAX_PENDING_EVENTS));
-      return;
-    }
     if (event.event === "data" && typeof event.data === "string" && typeof event.seq === "number") {
       handle.acceptData({ data: event.data, seq: event.seq });
     } else if (event.event === "exit") {
       handle.acceptExit({ exitCode: event.exitCode ?? -1, signal: event.signal ?? undefined });
       this.handles.delete(sessionId);
+    }
+  }
+
+  private queuePendingEvent(sessionId: string, event: RenderEvent): void {
+    const buffered = this.pendingEvents.get(sessionId) ?? [];
+    buffered.push(event);
+    if (buffered.length > MAX_PENDING_EVENTS) {
+      buffered.shift();
+      this.pendingEventOverflows.add(sessionId);
+    }
+    this.pendingEvents.set(sessionId, buffered);
+  }
+
+  /** Repair a bounded event-buffer overflow without replaying a partial stream. */
+  private async refreshSession(sessionId: string, handle: RemoteRenderProcess): Promise<void> {
+    if (this.refreshingSessions.has(sessionId) || this.disposed) return;
+    this.refreshingSessions.add(sessionId);
+    try {
+      const result = await this.request("attach", { sessionId, afterSeq: 0 }) as { state?: unknown } | null;
+      const state = normalizeRenderSessionState(result?.state);
+      if (!state || state.sessionId !== sessionId || state.incarnationId !== handle.incarnationId) {
+        throw new Error(`Render attach returned an unusable state while refreshing ${sessionId}`);
+      }
+      if (this.handles.get(sessionId) !== handle) {
+        this.refreshingSessions.delete(sessionId);
+        return;
+      }
+      this.inventory.set(sessionId, state);
+      handle.acceptResync(state);
+      if (state.status === "exited") {
+        this.handles.delete(sessionId);
+        handle.acceptExit({ exitCode: state.exitCode ?? -1 });
+      }
+      const pending = this.pendingEvents.get(sessionId) ?? [];
+      this.pendingEvents.delete(sessionId);
+      this.pendingEventOverflows.delete(sessionId);
+      this.refreshingSessions.delete(sessionId);
+      if (state.status === "running") {
+        for (const event of pending) this.routeEvent(event);
+      }
+    } catch (error) {
+      this.refreshingSessions.delete(sessionId);
+      this.reportOperationError(sessionId, "attach", error);
+      // A fresh connection will reattach all sessions; keeping this socket
+      // alive would leave its missing output invisible indefinitely.
+      this.socket?.destroy();
     }
   }
 
@@ -587,7 +750,11 @@ export class RenderDaemonClient implements TerminalHost {
     }
     const live = new Set(sessionIds.filter((id): id is string => typeof id === "string"));
     for (const sessionId of Array.from(this.inventory.keys())) {
-      if (!live.has(sessionId)) this.inventory.delete(sessionId);
+      if (!live.has(sessionId)) {
+        this.inventory.delete(sessionId);
+        this.pendingEvents.delete(sessionId);
+        this.pendingEventOverflows.delete(sessionId);
+      }
     }
     for (const sessionId of Array.from(this.handles.keys())) {
       if (live.has(sessionId)) continue;
@@ -700,18 +867,23 @@ export class RenderDaemonClient implements TerminalHost {
       const current = this.inventory.get(sessionId);
       const handle = this.handles.get(sessionId);
       const handleMatches = !!handle && handle.incarnationId === oldState.incarnationId;
-      const stillRunning = !!current
-        && current.incarnationId === oldState.incarnationId
-        && current.status === "running";
-      if (stillRunning && handleMatches) {
-        for (const chunk of current!.chunks) {
-          if (chunk.seq > oldState.seq) handle!.acceptData(chunk);
+      const sameIncarnation = !!current && current.incarnationId === oldState.incarnationId;
+      if (sameIncarnation && handleMatches) {
+        const missing = current!.chunks.filter((chunk) => chunk.seq > oldState.seq);
+        const contiguous = current!.seq === oldState.seq
+          || (missing.length > 0
+            && missing[0].seq === oldState.seq + 1
+            && missing[missing.length - 1].seq === current!.seq
+            && missing.every((chunk, index) => index === 0 || chunk.seq === missing[index - 1].seq + 1));
+        if (contiguous) {
+          for (const chunk of missing) handle!.acceptData(chunk);
+        } else {
+          handle!.acceptResync(current!);
+          process.stderr.write(`[wand] Render replay gap for ${sessionId}: ${oldState.seq} → ${current!.seq}; rebuilt from attach snapshot.\n`);
         }
-        continue;
+        if (current!.status === "running") continue;
       }
-      const exitedOnRender = !!current
-        && current.incarnationId === oldState.incarnationId
-        && current.status === "exited";
+      const exitedOnRender = sameIncarnation && current!.status === "exited";
       const exitCode = exitedOnRender ? current!.exitCode ?? -1 : -1;
       this.handles.delete(sessionId);
       if (handleMatches) handle!.acceptExit({ exitCode });
@@ -725,12 +897,19 @@ export class RenderDaemonClient implements TerminalHost {
       this.handles.set(state.sessionId, process);
       const buffered = this.pendingEvents.get(state.sessionId) ?? [];
       this.pendingEvents.delete(state.sessionId);
-      for (const event of buffered) {
-        // 已经在 state.seq 里的 data 重复投递会造成终端重复输出，必须过滤。
-        const alreadyInSnapshot = event.event === "data"
-          ? typeof event.seq === "number" && event.seq <= state.seq
-          : false;
-        if (!alreadyInSnapshot) this.routeEvent(event);
+      if (this.pendingEventOverflows.delete(state.sessionId)) {
+        // We have dropped at least one event before the caller could attach.
+        // Fetch the current screen after it binds listeners; stale buffered
+        // bytes must not be emitted as though they were contiguous.
+        queueMicrotask(() => void this.refreshSession(state.sessionId, process!));
+      } else {
+        for (const event of buffered) {
+          // 已经在 state.seq 里的 data 重复投递会造成终端重复输出，必须过滤。
+          const alreadyInSnapshot = event.event === "data"
+            ? typeof event.seq === "number" && event.seq <= state.seq
+            : false;
+          if (!alreadyInSnapshot) this.routeEvent(event);
+        }
       }
     }
     if (state.status !== "running") process = null;
@@ -920,14 +1099,17 @@ function asNumber(value: unknown, fallback: number, problems: string[], label: s
  * 连接一个已经存在的 Render（socket + token 都在）。**不 spawn**，找不到就返回 null，
  * 这样调用方可以区分「已被别处 adopt」和「需要自己拉起」。
  */
-export async function connectExistingRenderClient(configPath: string): Promise<RenderDaemonClient | null> {
+export async function connectExistingRenderClient(
+  configPath: string,
+  knownSessionIds: readonly string[] = [],
+): Promise<RenderDaemonClient | null> {
   const { socketPath, tokenPath } = renderPaths(configPath);
   let token: string;
   try { token = readFileSync(tokenPath, "utf8").trim(); }
   catch { return null; }
   if (!token) return null;
   // 传 tokenPath 让重连路径在 daemon 轮换 token 后能自愈（见构造函数注释）。
-  const client = new RenderDaemonClient(socketPath, token, tokenPath);
+  const client = new RenderDaemonClient(socketPath, token, tokenPath, knownSessionIds);
   try {
     await client.connect();
     return client;

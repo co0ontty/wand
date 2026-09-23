@@ -90,10 +90,10 @@ test("commands endpoint dispatches shell requests without a provider command", a
   const inputCalls: Array<[string, string, string | undefined, string | undefined]> = [];
   handle.processManager.get = ((id: string) => id === created.id ? created : undefined) as
     typeof handle.processManager.get;
-  handle.processManager.sendInput = ((id, input, view, shortcutKey) => {
+  handle.processManager.sendInputConfirmed = (async (id, input, view, shortcutKey) => {
     inputCalls.push([id, input, view, shortcutKey]);
     return { ...created, output: "x".repeat(200_000) };
-  }) as typeof handle.processManager.sendInput;
+  }) as typeof handle.processManager.sendInputConfirmed;
 
   const inputResponse = await fetch(`${handle.urls[0]!.url}/api/sessions/${created.id}/input`, {
     method: "POST",

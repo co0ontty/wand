@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import test from "node:test";
+import { promisify } from "node:util";
 
 import {
   readRenderBinaryVersion,
@@ -13,7 +15,8 @@ import {
   resolveRenderTriple,
 } from "../src/render-binary.js";
 import { RenderAuthError, RenderDaemonClient } from "../src/render-daemon-client.js";
-import { RENDER_PROTOCOL_VERSION, decodeRenderFrames, encodeRenderFrame } from "../src/render-protocol.js";
+import { RENDER_PROTOCOL_VERSION, decodeRenderFrames, encodeRenderFrame, renderPaths } from "../src/render-protocol.js";
+import { terminalDaemonPaths } from "../src/terminal-daemon-protocol.js";
 
 import { CompositeTerminalHost, resolveRenderEngine } from "../src/render-host.js";
 import type {
@@ -202,6 +205,47 @@ test("render engine resolution prefers the environment and rejects unknown value
   assert.equal(resolveRenderEngine("nonsense", undefined), "auto");
   assert.equal(resolveRenderEngine(undefined, "rust"), "rust");
   assert.equal(resolveRenderEngine(undefined, undefined), "auto");
+});
+
+test("Render startup provides a persistent structured host across web processes", async (t) => {
+  if (process.platform === "win32") return t.skip("Render does not support Windows");
+  const root = mkdtempSync(path.join("/tmp", "wand-render-structured-host-"));
+  const configPath = path.join(root, "config.json");
+  // Both clients canonicalize an existing config path before deriving sockets.
+  writeFileSync(configPath, "{}\n");
+  const binaryPath = resolveRenderBinaryPath(configPath);
+  if (!binaryPath) {
+    rmSync(root, { recursive: true, force: true });
+    return t.skip("No local Render binary available");
+  }
+  const fixture = path.resolve("tests/fixtures/render-structured-host-probe.ts");
+  const runId = "structured:render-host-restart";
+  const runProbe = async (mode: "start" | "adopt"): Promise<{ persistent: boolean; pid: number | null }> => {
+    const { stdout } = await promisify(execFile)(process.execPath, [
+      "--import", "tsx", fixture, mode, configPath, binaryPath, runId,
+    ], {
+      cwd: process.cwd(),
+      env: { ...process.env, NODE_TEST_CONTEXT: "", WAND_TEST_MODE: "0" },
+      timeout: 15_000,
+    });
+    return JSON.parse(stdout.trim()) as { persistent: boolean; pid: number | null };
+  };
+  try {
+    const started = await runProbe("start");
+    assert.equal(started.persistent, true);
+    assert.ok(started.pid && started.pid > 0);
+    const adopted = await runProbe("adopt");
+    assert.equal(adopted.persistent, true);
+    assert.equal(adopted.pid, started.pid);
+  } finally {
+    for (const pidPath of [terminalDaemonPaths(configPath).pidPath, renderPaths(configPath).pidPath]) {
+      try {
+        const pid = Number(readFileSync(pidPath, "utf8").trim());
+        if (Number.isSafeInteger(pid) && pid > 0) process.kill(pid, "SIGTERM");
+      } catch { /* The daemon may have already exited. */ }
+    }
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("binary resolution honours WAND_RENDER_BIN and prefers the version sidecar", async (t) => {

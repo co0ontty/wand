@@ -212,6 +212,34 @@ test("raw PTY output is scoped to the subscribed session", () => {
   assert.equal(sent.data.chunk, chunk);
 });
 
+test("Render replay gap asks only subscribed clients for an authoritative snapshot", () => {
+  const first = createHarness();
+  const otherSocket = new ControlledSocket();
+  const otherClient: TestClient = {
+    ...first.client,
+    ws: otherSocket as unknown as WebSocket,
+    sendQueue: [],
+    outputSeqBySession: new Map(),
+    pendingResyncSessions: new Set(),
+    ptySubscriptions: new Map([["other-session", newSubscription()]]),
+  };
+  first.client.ptySubscriptions.set("restored-session", newSubscription());
+  first.manager.clients.add(otherClient);
+
+  first.manager.emitEvent({
+    type: "resync",
+    sessionId: "restored-session",
+    data: { reason: "render_replay_gap" },
+  });
+
+  assert.deepEqual(first.socket.sent.map((frame) => JSON.parse(frame)), [{
+    type: "resync_required",
+    sessionId: "restored-session",
+    reason: "render_replay_gap",
+  }]);
+  assert.equal(otherSocket.sent.length, 0);
+});
+
 // 回归：以前任何客户端停止 ack（手机切后台 / WebView 被节流 / 标签页休眠）都会让服务端
 // 调用 pausePtyOutput，把「服务端读 daemon」整条暂停——整个会话对所有客户端冻结，连
 // 会话日志和落库也一起停，而且只靠那个客户端回来 ack 才恢复（它不回来就永久冻住）。

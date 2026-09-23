@@ -22,10 +22,14 @@ export interface TerminalProcess {
   readonly incarnationId: string;
   readonly pid: number;
   write(data: string): void;
+  /** Resolve only after a persistent host has acknowledged an interactive write. */
+  writeConfirmed?(data: string): Promise<void>;
   resize(cols: number, rows: number): void;
   kill(signal?: string): void;
   onData(listener: (event: TerminalDataEvent) => void): { dispose(): void };
   onExit(listener: (event: TerminalExitEvent) => void): { dispose(): void };
+  /** Persistent hosts call this when bounded replay cannot bridge a disconnect. */
+  onResync?(listener: (state: TerminalSessionState) => void): { dispose(): void };
 }
 
 export interface TerminalSessionState {
@@ -88,6 +92,10 @@ class InProcessTerminalProcess implements TerminalProcess {
   }
 
   write(data: string): void {
+    this.child.write(data);
+  }
+
+  async writeConfirmed(data: string): Promise<void> {
     this.child.write(data);
   }
 

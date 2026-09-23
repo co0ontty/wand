@@ -15,7 +15,7 @@ import {
 } from "../src/render-protocol.js";
 import { terminalDaemonPaths } from "../src/terminal-daemon-protocol.js";
 import { RenderDaemonClient, normalizeRenderSessionState } from "../src/render-daemon-client.js";
-import type { TerminalDataEvent } from "../src/terminal-host.js";
+import type { TerminalDataEvent, TerminalSessionState } from "../src/terminal-host.js";
 
 const CONFIG_PATH = "/tmp/wand-render-test/config.json";
 
@@ -226,6 +226,9 @@ class FakeRender {
   private readonly server: net.Server;
   private helloProtocolVersion = RENDER_PROTOCOL_VERSION;
   private sessions: unknown[] = [];
+  private listFrameLimit = false;
+  private floodDuringList = false;
+  private rejectWrites = false;
   /** createOrAttach 之前先推一条 data 事件，模拟「响应还没到、输出已经来了」。 */
   private emitDataBeforeCreateResponse = false;
 
@@ -251,6 +254,33 @@ class FakeRender {
   setSessions(sessions: unknown[]): this {
     this.sessions = sessions;
     return this;
+  }
+
+  rejectOversizedList(): this {
+    this.listFrameLimit = true;
+    return this;
+  }
+
+  floodListResponse(): this {
+    this.floodDuringList = true;
+    return this;
+  }
+
+  rejectConfirmedWrites(): this {
+    this.rejectWrites = true;
+    return this;
+  }
+
+  dropConnections(): void {
+    for (const socket of this.sockets) socket.destroy();
+  }
+
+  pushData(sessionId: string, seq: number, data: string): void {
+    for (const socket of this.sockets) {
+      socket.write(encodeRenderFrame({
+        event: "data", sessionId, incarnationId: `${sessionId}-inc`, seq, data,
+      }));
+    }
   }
 
   pushDataBeforeCreateResponse(): this {
@@ -292,8 +322,37 @@ class FakeRender {
         });
         return;
       case "list":
-        respond({ sessions: this.sessions });
+        if (this.floodDuringList) {
+          const sessionId = (this.sessions[0] as { sessionId?: string } | undefined)?.sessionId;
+          if (sessionId) {
+            for (let seq = 1; seq <= 600; seq += 1) {
+              socket.write(encodeRenderFrame({
+                event: "data", sessionId, incarnationId: `${sessionId}-inc`, seq, data: "x",
+              }));
+            }
+          }
+        }
+        if (this.listFrameLimit) {
+          socket.write(encodeRenderFrame({
+            id: request.id, ok: false,
+            error: { code: "internal", message: "list response exceeds MAX_FRAME_BYTES frame limit" },
+          }));
+        } else {
+          // v1 list is only a preview; attach has the full terminal snapshot.
+          respond({ sessions: this.sessions.map((entry) => ({ ...(entry as object), terminalSnapshot: null })) });
+        }
         return;
+      case "attach": {
+        const state = this.sessions.find((entry) => (entry as { sessionId?: string }).sessionId === request.params?.sessionId);
+        if (!state) {
+          socket.write(encodeRenderFrame({
+            id: request.id, ok: false, error: { code: "notFound", message: "session missing" },
+          }));
+        } else {
+          respond({ state });
+        }
+        return;
+      }
       case "createOrAttach": {
         const sessionId = String(request.params?.sessionId ?? "");
         const state = sessionState(sessionId, Number(request.params?.cols ?? 80), Number(request.params?.rows ?? 24));
@@ -305,6 +364,15 @@ class FakeRender {
       }
       case "forget":
         respond({});
+        return;
+      case "write":
+        if (this.rejectWrites) {
+          socket.write(encodeRenderFrame({
+            id: request.id, ok: false, error: { code: "internal", message: "write rejected" },
+          }));
+        } else {
+          respond({});
+        }
         return;
       default:
         respond({});
@@ -341,13 +409,14 @@ async function waitFor(probe: () => boolean, message: string, timeoutMs = 2_000)
 async function withFakeRender(
   configure: (fake: FakeRender) => void,
   body: (fake: FakeRender, client: RenderDaemonClient) => Promise<void>,
+  knownSessionIds: readonly string[] = [],
 ): Promise<void> {
   const dir = mkdtempSync(path.join(os.tmpdir(), "wand-render-client-"));
   const socketPath = path.join(dir, "render.sock");
   const fake = new FakeRender(socketPath);
   configure(fake);
   await fake.listen();
-  const client = new RenderDaemonClient(socketPath, "test-token");
+  const client = new RenderDaemonClient(socketPath, "test-token", null, knownSessionIds);
   try {
     await body(fake, client);
   } finally {
@@ -382,7 +451,7 @@ test("connect adopts the inventory and attach replays only chunks after afterSeq
       await client.connect();
       assert.equal(client.persistent, true);
       assert.equal(client.version, "0.1.0");
-      assert.deepEqual(fake.methods(), ["hello", "list"]);
+      assert.deepEqual(fake.methods(), ["hello", "list", "attach"]);
 
       const attached = client.attach("s1", 2);
       assert.ok(attached);
@@ -392,6 +461,156 @@ test("connect adopts the inventory and attach replays only chunks after afterSeq
       assert.equal(attached.state.pid, 1234);
 
       assert.equal(client.attach("unknown"), null);
+    },
+  );
+});
+
+test("startup recovery uses the full attach snapshot instead of the clipped list preview", async () => {
+  await withFakeRender(
+    (fake) => fake.setSessions([{
+      ...sessionState("wide"),
+      terminalSnapshot: { version: 1, data: "full wide screen", cols: 100, rows: 30, pending: [] },
+    }]),
+    async (fake, client) => {
+      await client.connect();
+      assert.deepEqual(fake.methods(), ["hello", "list", "attach"]);
+      assert.equal(client.attach("wide")?.state.terminalSnapshot?.data, "full wide screen");
+    },
+  );
+});
+
+test("oversized v1 list recovers persisted PTYs with individual attaches", async () => {
+  await withFakeRender(
+    (fake) => fake.setSessions([sessionState("saved")]).rejectOversizedList(),
+    async (fake, client) => {
+      await client.connect();
+      assert.equal(client.attach("saved")?.state.sessionId, "saved");
+      assert.deepEqual(fake.methods(), ["hello", "list", "attach", "attach"]);
+      assert.equal(fake.requests.filter((request) => request.method === "attach")[1]?.params?.sessionId, "stale");
+    },
+    ["saved", "stale"],
+  );
+});
+
+test("oversized v1 list with no persisted PTYs still permits a new Server owner", async () => {
+  await withFakeRender(
+    (fake) => fake.setSessions([sessionState("daemon-only")]).rejectOversizedList(),
+    async (fake, client) => {
+      await client.connect();
+      assert.equal(client.attach("daemon-only"), null);
+      assert.deepEqual(fake.methods(), ["hello", "list"]);
+    },
+  );
+});
+
+test("reconnect rebuilds from attach when bounded replay has a sequence gap", async () => {
+  await withFakeRender(
+    (fake) => fake.setSessions([sessionState("gap", 80, 24, 1, [{ data: "a", seq: 1 }])]),
+    async (fake, client) => {
+      await client.connect();
+      const process = client.attach("gap")?.process;
+      assert.ok(process);
+      const replayed: TerminalDataEvent[] = [];
+      const resynced: string[] = [];
+      process.onData((event) => replayed.push(event));
+      process.onResync?.((state) => resynced.push(state.output));
+      fake.setSessions([sessionState("gap", 80, 24, 4, [
+        { data: "c", seq: 3 }, { data: "d", seq: 4 },
+      ])]);
+      fake.dropConnections();
+      await waitFor(() => resynced.length === 1, "missing full resync after replay gap", 4_000);
+      assert.deepEqual(resynced, ["cd"]);
+      assert.deepEqual(replayed, []);
+      assert.equal(client.attach("gap")?.state.seq, 4);
+    },
+  );
+});
+
+test("reconnect replays contiguous chunks without replacing the terminal snapshot", async () => {
+  await withFakeRender(
+    (fake) => fake.setSessions([sessionState("continuous", 80, 24, 1, [{ data: "a", seq: 1 }])]),
+    async (fake, client) => {
+      await client.connect();
+      const process = client.attach("continuous")?.process;
+      assert.ok(process);
+      const replayed: TerminalDataEvent[] = [];
+      const resynced: number[] = [];
+      process.onData((event) => replayed.push(event));
+      process.onResync?.((state) => resynced.push(state.seq));
+      fake.setSessions([sessionState("continuous", 80, 24, 3, [
+        { data: "a", seq: 1 }, { data: "b", seq: 2 }, { data: "c", seq: 3 },
+      ])]);
+      fake.dropConnections();
+      await waitFor(() => replayed.length === 2, "missing contiguous replay", 4_000);
+      assert.deepEqual(replayed, [{ data: "b", seq: 2 }, { data: "c", seq: 3 }]);
+      assert.deepEqual(resynced, []);
+    },
+  );
+});
+
+test("reconnect delivers final output before an exit from the same incarnation", async () => {
+  await withFakeRender(
+    (fake) => fake.setSessions([sessionState("exiting", 80, 24, 1, [{ data: "a", seq: 1 }])]),
+    async (fake, client) => {
+      await client.connect();
+      const process = client.attach("exiting")?.process;
+      assert.ok(process);
+      const order: string[] = [];
+      process.onData((event) => order.push(`data:${event.data}`));
+      process.onExit((event) => order.push(`exit:${event.exitCode}`));
+      fake.setSessions([{
+        ...sessionState("exiting", 80, 24, 2, [
+          { data: "a", seq: 1 }, { data: "final", seq: 2 },
+        ]),
+        status: "exited", exitCode: 0,
+      }]);
+      fake.dropConnections();
+      await waitFor(() => order.length === 2, "missing final output or exit", 4_000);
+      assert.deepEqual(order, ["data:final", "exit:0"]);
+    },
+  );
+});
+
+test("startup event-buffer overflow refreshes the full state after listener binding", async () => {
+  await withFakeRender(
+    (fake) => fake.setSessions([sessionState("flood")]),
+    async (fake, client) => {
+      await client.connect();
+      fake.setSessions([{
+        ...sessionState("flood", 80, 24, 600, [{ data: "last", seq: 600 }]),
+        terminalSnapshot: { version: 1, data: "complete screen", cols: 80, rows: 24, pending: [] },
+      }]);
+      for (let seq = 1; seq <= 600; seq += 1) fake.pushData("flood", seq, "x");
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+      const process = client.attach("flood")?.process;
+      assert.ok(process);
+      const replayed: TerminalDataEvent[] = [];
+      const refreshed: TerminalSessionState[] = [];
+      process.onResync?.((state) => refreshed.push(state));
+      process.onData((event) => replayed.push(event));
+      await waitFor(() => refreshed.length === 1, "overflow did not trigger an attach resync");
+      assert.equal(refreshed[0].seq, 600);
+      assert.equal(refreshed[0].terminalSnapshot?.data, "complete screen");
+      assert.deepEqual(replayed, []);
+    },
+  );
+});
+
+test("reconnect-inventory event burst remains bounded and refreshes after adoption", async () => {
+  await withFakeRender(
+    (fake) => fake.setSessions([{
+      ...sessionState("burst", 80, 24, 600, [{ data: "last", seq: 600 }]),
+      terminalSnapshot: { version: 1, data: "complete burst screen", cols: 80, rows: 24, pending: [] },
+    }]).floodListResponse(),
+    async (fake, client) => {
+      await client.connect();
+      const process = client.attach("burst")?.process;
+      assert.ok(process);
+      const refreshed: TerminalSessionState[] = [];
+      process.onResync?.((state) => refreshed.push(state));
+      await waitFor(() => refreshed.length === 1, "bounded sync burst did not refresh");
+      assert.equal(refreshed[0].terminalSnapshot?.data, "complete burst screen");
+      assert.equal(fake.methods().filter((method) => method === "attach").length, 2);
     },
   );
 });
@@ -462,6 +681,22 @@ test("reconcile events finalize handles the daemon no longer owns", async () => 
       await waitFor(() => exits.length > 0, "reconcile did not finalize the orphaned handle");
       // Render 说这条会话已经不属于它 → 句柄必须收到退出，否则会永远停在 running。
       assert.deepEqual(exits, [{ exitCode: -1 }]);
+    },
+  );
+});
+
+test("confirmed PTY writes expose a Render rejection to the caller", async () => {
+  await withFakeRender(
+    (fake) => { fake.rejectConfirmedWrites(); },
+    async (fake, client) => {
+      await client.connect();
+      const attached = await client.createOrAttach({
+        sessionId: "write-failure", file: "/bin/zsh", args: [], cwd: "/tmp", env: {},
+        name: "xterm-256color", cols: 80, rows: 24,
+      });
+      assert.ok(attached.process?.writeConfirmed);
+      await assert.rejects(attached.process.writeConfirmed("echo test\r"), /write rejected/);
+      assert.equal(fake.methods().filter((method) => method === "write").length, 1);
     },
   );
 });

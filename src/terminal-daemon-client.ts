@@ -62,6 +62,10 @@ class RemoteTerminalProcess implements TerminalProcess {
     });
   }
 
+  async writeConfirmed(data: string): Promise<void> {
+    await this.client.request("write", { sessionId: this.sessionId, data });
+  }
+
   resize(cols: number, rows: number): void {
     void this.client.request("resize", { sessionId: this.sessionId, cols, rows }).catch((error) => {
       this.client.reportOperationError(this.sessionId, error);

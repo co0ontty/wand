@@ -15,7 +15,7 @@ type EscalationSource = "tool_permission_request" | "sandbox_hard_block" | "work
 
 /** WebSocket / ProcessManager event envelope used throughout the app. */
 export interface ProcessEvent {
-  type: "output" | "status" | "started" | "ended" | "usage" | "task" | "notification";
+  type: "output" | "status" | "started" | "ended" | "usage" | "task" | "notification" | "resync";
   sessionId: string;
   data?: unknown;
   /** Monotonic per-session sequence stamped by the WS broadcast layer for
