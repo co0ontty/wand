@@ -19,10 +19,13 @@ import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import {
   chmodSync,
+  closeSync,
   copyFileSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
+  readSync,
   renameSync,
   rmSync,
   statSync,
@@ -194,7 +197,34 @@ function withExecutableCopy(sourcePath, body) {
  * 校验单个产物：尺寸、sha256、能否执行、版本是否与 manifest 一致、是否 stub。
  * @returns {string | null} 通过返回 null，否则返回可直接打印的原因
  */
-function verifyArtifact({ triple, artifact, sourcePath, expectedVersion }) {
+/** 各平台产物应有的容器格式。用于「不能执行」的跨平台产物做格式级校验。 */
+const TRIPLE_CONTAINER_FORMAT = { darwin: "macho", linux: "elf", win32: "pe" };
+
+/**
+ * 读文件头判断容器格式。
+ *
+ * 跨平台校验只能做到这一步：Linux CI 上无法执行 macOS 产物（exec format error），
+ * 反过来也一样。但「这个槽位里放的是不是那一类二进制」可以判断 ——
+ * 文本 stub、放错平台的文件都能在这里被拦下。
+ */
+export function readBinaryContainerFormat(filePath) {
+  const header = Buffer.alloc(4);
+  const handle = openSync(filePath, "r");
+  try {
+    readSync(handle, header, 0, 4, 0);
+  } finally {
+    closeSync(handle);
+  }
+  const magic = header.toString("hex");
+  // Mach-O 64/32 小端与 FAT/Universal，以及大端变体
+  if (magic.startsWith("cffaedfe") || magic.startsWith("cefaedfe") || magic === "cafebabe" || magic === "bebafeca") return "macho";
+  if (magic === "7f454c46") return "elf";
+  if (magic.startsWith("4d5a")) return "pe";
+  if (magic.startsWith("2321")) return "script";
+  return "unknown";
+}
+
+function verifyArtifact({ triple, artifact, sourcePath, expectedVersion, hostTriple, log }) {
   if (!isFile(sourcePath)) return `${triple}: 产物缺失 ${sourcePath}（manifest 指向的路径不对？）`;
 
   const actualSize = statSync(sourcePath).size;
@@ -206,6 +236,21 @@ function verifyArtifact({ triple, artifact, sourcePath, expectedVersion }) {
   if (!expectedSha) return `${triple}: manifest 里没有 sha256，拒绝安装未固定哈希的产物`;
   if (actualSha !== expectedSha) {
     return `${triple}: sha256 与 manifest 不一致（实际 ${actualSha}，manifest ${expectedSha}）——产物被改过或仓库损坏`;
+  }
+
+  // 本平台产物直接执行校验 —— 这是最强的一档，能真实发现 stub / 版本不符 / 动态库缺失。
+  //
+  // 跨平台产物不能执行（Linux CI 上核对 macOS 产物会得到 exec format error，那是正常现象，
+  // 不是产物坏了）。所以退一步：完整性由 manifest 的 sha256 保证（上面已核对），
+  // 再用容器格式确认「这一槽位里放的是不是那一类二进制」——文本 stub 与放错平台的文件都能拦下。
+  if (triple !== hostTriple) {
+    const container = readBinaryContainerFormat(sourcePath);
+    const expectedContainer = TRIPLE_CONTAINER_FORMAT[triple.split("-")[0]];
+    if (expectedContainer && container !== expectedContainer) {
+      return `${triple}: 产物容器格式不对（期望 ${expectedContainer}，实际 ${container}）——放错平台的文件或是 stub`;
+    }
+    log(`${triple}: 非本平台产物，跳过 --version 执行校验（已核对 sha256 与容器格式 ${container}）`);
+    return null;
   }
 
   const probe = withExecutableCopy(sourcePath, probeRenderBinary);
@@ -240,7 +285,7 @@ function writeTextAtomically(filePath, content) {
  * 绝不留下半截的 `wand-render`，也绝不就地改写一个可能正在被执行的二进制。
  * @returns {{ error: string | null, targetPath: string, sha256: string, version: string }}
  */
-function stageTriple({ triple, artifact, sourcePath, expectedVersion, distDir, write }) {
+function stageTriple({ triple, artifact, sourcePath, expectedVersion, distDir, write, hostTriple }) {
   const targetPath = path.join(distDir, "native", triple, BINARY_NAME);
   const sha256 = sha256File(sourcePath);
   if (!write) return { error: null, targetPath, sha256, version: expectedVersion };
@@ -251,11 +296,26 @@ function stageTriple({ triple, artifact, sourcePath, expectedVersion, distDir, w
     copyFileSync(sourcePath, tempPath);
     // 可执行位必须在 rename 之前设好：先就位再 chmod 会留下一个短暂的不可执行文件。
     chmodSync(tempPath, 0o755);
-    const probe = probeRenderBinary(tempPath);
-    if (!probe.ran || probe.isStub || probe.version !== expectedVersion) {
-      throw new Error(
-        `就位后的副本自检失败（ran=${probe.ran} stub=${probe.isStub} version=${probe.version}，期望 ${expectedVersion}）：${probe.output || "无输出"}`,
-      );
+    // 自检「复制有没有损坏、有没有丢可执行位、是不是同一个文件」。
+    // 本平台可以执行二进制（最强），跨平台只能比对内容哈希 + 容器格式 ——
+    // 在 Linux runner 上执行 macOS 产物必然失败，那是预期现象，不是损坏。
+    const copiedSha = sha256File(tempPath);
+    if (copiedSha !== sha256) {
+      throw new Error(`就位后的副本 sha256 与源不一致（${copiedSha} != ${sha256}）`);
+    }
+    if (triple === hostTriple) {
+      const probe = probeRenderBinary(tempPath);
+      if (!probe.ran || probe.isStub || probe.version !== expectedVersion) {
+        throw new Error(
+          `就位后的副本自检失败（ran=${probe.ran} stub=${probe.isStub} version=${probe.version}，期望 ${expectedVersion}）：${probe.output || "无输出"}`,
+        );
+      }
+    } else {
+      const container = readBinaryContainerFormat(tempPath);
+      const expectedContainer = TRIPLE_CONTAINER_FORMAT[triple.split("-")[0]];
+      if (expectedContainer && container !== expectedContainer) {
+        throw new Error(`就位后的副本容器格式不对（期望 ${expectedContainer}，实际 ${container}）`);
+      }
     }
     renameSync(tempPath, targetPath);
   } catch (error) {
@@ -339,6 +399,9 @@ export function stageRenderBinaries(options = {}) {
   log(`${RENDER_BIN_DIR_NAME} v${latest}（协议 ${JSON.stringify(manifest.data.entry.protocolVersion ?? "?")}），可用平台：${available.join(", ") || "无"}`);
   log(`目标目录：${path.join(distDir, "native")}`);
 
+  // 宿主平台三元组：只有它才允许执行校验（跨平台 exec 必然失败）。
+  const hostTriple = resolvePlatformTriple(platform, arch, unameMachine, rosettaTranslated);
+
   let selected;
   if (all) {
     selected = available.slice().sort();
@@ -367,7 +430,7 @@ export function stageRenderBinaries(options = {}) {
   for (const triple of selected) {
     const artifact = versionTriples[triple] ?? {};
     const sourcePath = path.join(renderBinDir, typeof artifact.path === "string" && artifact.path ? artifact.path : path.join(`v${latest}`, triple, BINARY_NAME));
-    const problem = verifyArtifact({ triple, artifact, sourcePath, expectedVersion: latest });
+    const problem = verifyArtifact({ triple, artifact, sourcePath, expectedVersion: latest, hostTriple, log });
     if (problem) {
       failures.push(problem);
       log(`error: ${problem}`);
@@ -376,7 +439,7 @@ export function stageRenderBinaries(options = {}) {
     const sizeLabel = typeof artifact.size === "number" ? `${artifact.size} bytes` : "size 未知";
     log(`${triple}: 校验通过（sha256 ${sha256File(sourcePath).slice(0, 12)}…，${sizeLabel}，v${latest}）`);
 
-    const result = stageTriple({ triple, artifact, sourcePath, expectedVersion: latest, distDir, write: !check && !dryRun });
+    const result = stageTriple({ triple, artifact, sourcePath, expectedVersion: latest, distDir, write: !check && !dryRun, hostTriple });
     if (result.error) {
       failures.push(result.error);
       log(`error: ${result.error}`);

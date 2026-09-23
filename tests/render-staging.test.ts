@@ -10,6 +10,7 @@ import {
   SHA256_FILE_NAME,
   SUPPORTED_TRIPLES,
   VERSION_FILE_NAME,
+  readBinaryContainerFormat,
   resolvePlatformTriple,
   sha256File,
   stageRenderBinaries,
@@ -22,6 +23,24 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 const GOOD_BINARY = "#!/bin/sh\necho 'wand-render 0.1.0 (protocol 1)'\n";
 /** 上一轮真的进过分发目录的那种假二进制。 */
 const STUB_BINARY = "#!/bin/sh\necho 'wand-render (stub)'\n";
+
+/**
+ * 伪造一个容器格式为 Mach-O 的文件。
+ *
+ * 跨平台校验不执行二进制、只认魔数，所以测试不需要一个真能运行的 Mach-O 目标文件。
+ */
+function machoLikeBinary(): Buffer {
+  const buffer = Buffer.alloc(1024, 0);
+  buffer.write("cffaedfe", 0, "hex");
+  return buffer;
+}
+
+/** 伪造一个容器格式为 ELF 的文件（用于验证格式判定本身）。 */
+function elfLikeBinary(): Buffer {
+  const buffer = Buffer.alloc(1024, 0);
+  buffer.write("7f454c46", 0, "hex");
+  return buffer;
+}
 
 interface Fixture {
   root: string;
@@ -36,7 +55,8 @@ interface Fixture {
 interface FixtureOverrides {
   version?: string;
   triple?: string;
-  script?: string;
+  /** 产物内容。Buffer 用于伪造「容器格式像二进制」但内容无意义的文件。 */
+  script?: string | Buffer;
   sha256?: string | null;
   size?: number | null;
   binaryPath?: string;
@@ -272,5 +292,42 @@ test("the published render-bin manifest matches the checked-in artifact", (t) =>
     assert.ok(messages.some((message) => message.includes("校验通过")), messages.join("\n"));
   } finally {
     rmSync(distDir, { recursive: true, force: true });
+  }
+});
+
+test("a foreign-platform artifact is verified by hash and container format, never executed", () => {
+  // 回归：Linux CI 上核对 macOS 产物时曾直接去执行它，得到 exec format error，
+  // 于是发布门禁失败 —— 而产物其实是好的。跨平台只能校验哈希与格式。
+  const fixture = createFixture({ script: machoLikeBinary() });
+  try {
+    const { result, messages } = run(fixture, { all: true, platform: "linux", arch: "x64", unameMachine: "x86_64", rosettaTranslated: false });
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(result.triples, ["darwin-arm64"]);
+    assert.ok(messages.some((message) => message.includes("非本平台产物，跳过 --version 执行校验")), messages.join("\n"));
+    assert.ok(readFileSync(fixture.binaryPath).length > 0);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("a text stub in a foreign platform slot is rejected by the container check", () => {
+  // 跨平台不执行，但「这一槽位里放的是不是那一类二进制」仍然能判断：
+  // 一个 shell 脚本冒充 darwin 产物必须被拦下，否则它会被打进 npm 包。
+  const fixture = createFixture({ script: GOOD_BINARY });
+  try {
+    const { result, messages } = run(fixture, { all: true, platform: "linux", arch: "x64", unameMachine: "x86_64", rosettaTranslated: false });
+    assert.equal(result.exitCode, 1);
+    assert.ok(messages.some((message) => message.includes("容器格式不对")), messages.join("\n"));
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("container format detection distinguishes macho, elf, pe and text", () => {
+  const fixture = createFixture({ script: machoLikeBinary() });
+  try {
+    assert.equal(readBinaryContainerFormat(fixture.binaryPath), "macho");
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
   }
 });
