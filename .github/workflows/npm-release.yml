@@ -59,7 +59,8 @@ jobs:
       # 显式把关：npm run build 里的 stage 步骤是 best-effort（开发机没拉子模块也不该构建失败），
       # 但发版必须硬失败。这里用 --strict 重跑一次，缺产物就拦住发布。
       - name: Verify render binaries are packaged
-        run: node scripts/stage-render-binaries.js --strict --check
+        # --all：npm 包要内嵌 manifest 里的所有平台，而不是只内嵌 runner 自己的平台。
+        run: node scripts/stage-render-binaries.js --all --strict --check
 
       # Stable 与 beta 发布共用 npm-publish concurrency group，避免同时写同一个
       # packument。npm publish 返回成功后仍要反查 registry，因为并发写曾导致版本被

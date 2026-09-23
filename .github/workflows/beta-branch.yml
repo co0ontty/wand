@@ -28,6 +28,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # render-bin 子模块 pin 住各平台 wand-render 二进制。不初始化子模块时
+          # `npm run build` 里的 stage 步骤按设计只警告并跳过，于是这个 beta 包里
+          # 没有 dist/native/，用户的 render.engine=auto 会静默回退 legacy ——
+          # 也就是「发了个看起来升级过、实际没启用 Rust 引擎的 beta」。
+          submodules: recursive
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -72,6 +77,12 @@ jobs:
         env:
           # 让 scripts/stamp-build-info.js 写 channel=beta、commit=master HEAD。
           WAND_BUILD_CHANNEL: beta
+
+      # 发版必须硬失败：npm run build 里的 stage 是 best-effort（没拉子模块的开发机
+      # 不该因此构建失败），但 CI 不能把「没内嵌产物」的包发出去。
+      # --all 是必须的：包要覆盖 manifest 里的所有平台，而不是只覆盖 runner 自己的平台。
+      - name: Verify render binaries are packaged
+        run: node scripts/stage-render-binaries.js --all --strict --check
 
       - name: Publish beta to npm
         env:
