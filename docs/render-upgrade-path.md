@@ -215,6 +215,8 @@ wand web  ── socket ──► terminald      wand web ──┬─ socket �
 
 第三行是本次升级的硬边界：**只要还有结构化会话跑在 `terminald` 里，它就必须活着**。
 把结构化 runner 迁到 Rust 属于 `docs/rust-core-migration-plan.md` §7 的 P2，不在本次范围内。
+具体的“先迁进程托管、后迁 provider 解析”与 v1/v2 无损并存方案见
+[`structured-rust-migration-plan.md`](structured-rust-migration-plan.md)。
 
 ### 4.3 跨重启的持续可用
 

@@ -277,14 +277,17 @@ N0/N1 与内核轨 P0–P2 **完全并行**，不互为前置。
 - **验证**：差分（PTY 字节流逐字节比对 + 快照等价性）；真机多 provider TUI；`wand web` 重启后 shell 存活；resize/乱码/中文宽字符；attached/detached。
 - **回滚**：`core.ptyEngine = "node"` 即回到现状；两套 socket 隔离，不产生半迁移状态。
 
-### P2 Structured runner 迁到 Rust（3–5 人周）
+### P2 结构化 CLI 迁到 Rust（分两段实施）
 
-- **范围**：`wand-runtime` 的 `ProviderRunner` trait + 六 provider 模块；先做 Claude 双向 `stream-json` 控制协议 spike（替代屏幕抓取），再按 provider 逐个切换。
-- **交付物**：Rust runner、per-provider 开关、`claude-pty-bridge` 降级为 fallback（默认走协议路径）。
-- **退出标准**：六 provider 夹具差分 100% 全绿；权限弹窗、`AskUserQuestion`/escalation、resume、thinking effort、model 选择行为与现状一致；屏幕抓取路径仅作为开关保留。
-- **验证**：diff 门禁 + 真机逐 provider 验收（含权限批准/拒绝、提问作答、resume、超长输出、工具图片）。
-- **回滚**：per-provider 开关回退到 Node runner。
-- **依赖**：ADR-5 必须在此期前拍板。
+详细实施顺序、v1/v2 并存、接口不变量和验收门禁见
+[`structured-rust-migration-plan.md`](structured-rust-migration-plan.md)。先保持 Node provider
+解析不变，只让 Rust 通过现有 `StructuredExecHost` seam 持有 CLI 子进程与双流回放；通过
+跨重启、差分及真机验收后，再引入 Rust `ProviderRunner`，逐 provider 迁 argv/JSONL 解析。
+
+Render v1 只有 PTY，不能为增加 structured 方法原位改协议并断开正在运行的 PTY；新协议
+使用独立命名空间并与 legacy `terminald`、Render v1 暂时并存。`claude-sdk` 是 Node SDK 路径，
+不属于结构化 CLI 托管；`claude-pty-bridge` 是 PTY 投影路径，也不应被 P2 误写成已退役。
+每个阶段都只把**新 run** 切到新 owner，旧 run 留在原 daemon 到自然结束。
 
 ### P3 HTTP/WS 边缘 Rust 化 —— **决策门禁**
 
