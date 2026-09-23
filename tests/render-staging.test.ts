@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -272,28 +272,53 @@ test("triple resolution follows uname -m and matches the server-side logic", () 
   }
 });
 
-test("the published render-bin manifest matches the checked-in artifact", (t) => {
-  if (process.platform !== "darwin" || process.arch !== "arm64") {
-    t.skip("该断言针对仓库内 pin 住的 darwin-arm64 产物（需要能执行 Mach-O arm64）");
+test("the pinned render-bin artifacts match their manifest for every published platform", () => {
+  // 用仓库里真实 pin 住的产物跑一遍 CI 的打包路径（--all）：本平台走执行校验，
+  // 其余平台走 sha256 + 容器格式校验。版本号从 manifest 读，不写死 ——
+  // 写死会在每次升版本时假失败（真实产物被误报成不匹配）。
+  const renderBinDir = path.join(REPO_ROOT, "render-bin");
+  const manifestPath = path.join(renderBinDir, "manifest.json");
+  if (!existsSync(manifestPath)) {
+    // 没拉子模块的开发机不应因此失败。
+    return;
   }
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+    latest: string;
+    versions: Record<string, { triples: Record<string, { sha256: string }> }>;
+  };
+  const published = Object.keys(manifest.versions[manifest.latest]?.triples ?? {}).sort();
+  assert.ok(published.length > 0, "pinned manifest has no platforms");
+
   const distDir = mkdtempSync(path.join(os.tmpdir(), "wand-render-real-"));
   try {
     const messages: string[] = [];
     const result = stageRenderBinaries({
-      renderBinDir: path.join(REPO_ROOT, "render-bin"),
+      renderBinDir,
       distDir,
-      triples: ["darwin-arm64"],
-      check: true,
+      all: true,
       logger: (message: string) => messages.push(message),
     });
-    // 真实产物必须通过 sha256 + 版本 + 非 stub 三重校验（只读，不写 dist）。
     assert.equal(result.exitCode, 0, messages.join("\n"));
-    assert.equal(result.version, "0.1.0");
-    assert.ok(messages.some((message) => message.includes("校验通过")), messages.join("\n"));
+    assert.equal(result.version, manifest.latest);
+    assert.deepEqual(result.triples, published, "每一个已发布平台都必须能校验并就位");
+    for (const triple of published) {
+      const staged = path.join(distDir, "native", triple, "wand-render");
+      assert.ok(existsSync(staged), `missing staged artifact for ${triple}`);
+      // 容器格式必须与平台匹配：这能拦住「往 darwin 槽位塞 ELF」这类打包错误。
+      assert.equal(readBinaryContainerFormat(staged), expectedContainerFor(triple));
+    }
   } finally {
     rmSync(distDir, { recursive: true, force: true });
   }
 });
+
+/** 平台前缀 → 期望的容器格式，用于断言「这一槽位放的是不是那一类二进制」。 */
+function expectedContainerFor(triple: string): string {
+  const family = triple.split("-")[0];
+  if (family === "darwin") return "macho";
+  if (family === "linux") return "elf";
+  return family;
+}
 
 test("a foreign-platform artifact is verified by hash and container format, never executed", () => {
   // 回归：Linux CI 上核对 macOS 产物时曾直接去执行它，得到 exec format error，

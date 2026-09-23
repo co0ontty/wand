@@ -427,9 +427,12 @@ PTY 会话不中断、结构化会话不丢、终端可输入、重连/resume �
 2. **Render 自身的热升级（换二进制而不断 PTY）未实现。** `drain` 现在语义正确（保住运行中会话），
    但真正切换还需要 PTY master fd 的 `SCM_RIGHTS` 交接，或用「新版起新 daemon、旧版活到最后一个会话结束」
    的双实例编排。当前 0.1.0 的升级路径是「无运行中会话时直接换」。
-3. **平台覆盖只有 darwin-arm64。** `render-bin/manifest.json` 目前 1/4 个平台；
-   darwin-x64 / linux-x64 / linux-arm64 需要由 `render/.github/workflows/release.yml`
-   在对应 runner 上构建后才有。在补齐之前，非 darwin-arm64 机器上 `engine=auto` 会回退 legacy。
+3. ~~平台覆盖只有 darwin-arm64~~ **已解决**：`render/.github/workflows/release.yml` 现在
+   在四个平台构建（darwin 两个目标在 arm64 runner 上原生/交叉编译，Linux 两个在匹配架构的
+   runner 上用静态 musl），发布前断言四平台齐全，产物经 `wand-render-bin` 的 Sync artifacts
+   workflow 收录。`render-bin/manifest.json` 的 0.1.1 起含 `darwin-arm64` / `darwin-x64` /
+   `linux-x64` / `linux-arm64`，npm 包里内嵌全部四个（`npm run build:render-bin --all`）。
+   Windows 仍未实现，理由与所需工作见 `render/README.md` 的支持矩阵。
 4. **legacy `terminald` 空仓后不会自动退场**，会一直挂着（不占资源，机器重启自然回收）。
    自动停止必须先确认两侧都没有 running 会话——legacy 的 SIGTERM 会 `forget` 全部会话并杀掉 PTY。
 5. **Render 侧没有总会话内存上限。** 单个 1000 列、满回滚的会话 RSS 可达约 350MB；
