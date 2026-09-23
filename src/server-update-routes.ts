@@ -61,6 +61,8 @@ export interface PublicUpdateRoutesDependencies {
   computeAssetSha256(asset: DownloadAsset): Promise<string | null>;
   resolveLatestDmg(): Promise<ResolvedUpdateAsset | null>;
   resolveMacosDownload(): Promise<DownloadAsset | null>;
+  resolveLatestMacosBeta(): Promise<ResolvedUpdateAsset | null>;
+  resolveMacosBetaDownload(fileName: string): Promise<DownloadAsset | null>;
   resolveLatestIpa(): Promise<ResolvedUpdateAsset | null>;
   resolveIosDownload(): Promise<DownloadAsset | null>;
 }
@@ -193,6 +195,51 @@ export function registerPublicUpdateRoutes(app: Express, deps: PublicUpdateRoute
       disposition: `attachment; filename="${encodeURIComponent(asset.fileName)}"`,
       headers,
       readErrorMessage: "读取 APK 文件失败。",
+    });
+  }));
+
+  // 原生 macOS Beta 只使用当前连接服务端的本地分发文件；旧 DMG 接口保持兼容。
+  app.get("/api/macos-app-update", asyncRoute(async (req, res) => {
+    const currentVersion = requireCurrentVersion(req, res);
+    if (currentVersion === null) return;
+    const latest = await deps.resolveLatestMacosBeta();
+    if (!latest) {
+      res.json({ updateAvailable: false, currentVersion, latestVersion: null, downloadUrl: null, source: null, channel: "beta" });
+      return;
+    }
+    const updateAvailable = compareWandInstallOrder(latest.version, currentVersion) > 0;
+    res.json({
+      updateAvailable,
+      currentVersion,
+      latestVersion: latest.version,
+      downloadUrl: updateAvailable ? latest.downloadUrl : null,
+      fileName: updateAvailable ? latest.fileName : null,
+      size: updateAvailable ? latest.size : null,
+      source: "local",
+      channel: "beta",
+      sha256: updateAvailable ? latest.sha256 : null,
+    });
+  }));
+
+  app.get("/macos/update-download", asyncRoute(async (req, res) => {
+    const fileName = text(req.query.fileName);
+    const asset = await deps.resolveMacosBetaDownload(fileName);
+    if (!asset) {
+      res.status(404).json({ error: "当前没有可下载的 macOS Beta 更新包。" });
+      return;
+    }
+    const sha256 = await deps.computeAssetSha256(asset);
+    if (!sha256) {
+      res.status(503).json({ error: "无法校验 macOS Beta 更新包。" });
+      return;
+    }
+    streamFileWithRange(req, res, {
+      filePath: asset.filePath,
+      size: asset.size,
+      contentType: asset.fileName.toLowerCase().endsWith(".zip") ? "application/zip" : "application/x-apple-diskimage",
+      disposition: `attachment; filename="${encodeURIComponent(asset.fileName)}"`,
+      headers: { "X-MacOS-Sha256": sha256 },
+      readErrorMessage: "读取 macOS Beta 更新包失败。",
     });
   }));
 

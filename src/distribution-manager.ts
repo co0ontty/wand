@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { mkdir, readdir, readFile, stat, unlink } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 
 import type { WandConfig } from "./types.js";
@@ -72,6 +72,7 @@ export interface DistributionManagerOptions {
 }
 
 const GITHUB_CACHE_TTL_MS = 10 * 60 * 1000;
+const MACOS_UPDATE_FILE_PATTERN = /^wand-v\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?(?:\+[A-Za-z0-9.-]+)?\.(?:zip|dmg)$/i;
 
 /**
  * GitHub Release 正文还包含 Android/macOS/iOS 的安装指引；它们属于发布页，
@@ -129,7 +130,7 @@ function extractArtifactVersion(fileName: string, extension: string): string | n
 function compareLocalAssetCandidates(
   a: { name: string; mtimeMs: number },
   b: { name: string; mtimeMs: number },
-  extension: ".apk" | ".dmg" | ".ipa",
+  extension: ".apk" | ".dmg" | ".ipa" | ".zip",
   compareVersions: (a: string, b: string) => number,
 ): number {
   const aVersion = extractArtifactVersion(a.name, extension);
@@ -288,6 +289,77 @@ export class DistributionManager {
     return { deleted, freedBytes };
   }
 
+  /** Beta 仅从当前服务端的 macOS 分发目录选择，绝不回退 GitHub。 */
+  async resolveLatestMacosBeta(): Promise<ResolvedDistributionAsset | null> {
+    const asset = await this.resolveMacosBetaAsset();
+    if (!asset?.version || asset.size <= 0) return null;
+    const sha256 = await this.computeAssetSha256(asset);
+    if (!sha256) return null;
+    return {
+      version: asset.version.split("+")[0],
+      downloadUrl: `/macos/update-download?fileName=${encodeURIComponent(asset.fileName)}`,
+      fileName: asset.fileName,
+      size: asset.size,
+      source: "local",
+      sha256,
+    };
+  }
+
+  /** 固定下载文件名，避免检查与下载之间新增包后下载到另一个版本。 */
+  async resolveMacosBetaDownload(fileName: string): Promise<LocalDistributionAsset | null> {
+    if (!MACOS_UPDATE_FILE_PATTERN.test(fileName)) return null;
+    await this.refreshConfig();
+    const { config, configDir } = this.options;
+    if (config.macos?.enabled !== true) return null;
+    const directory = resolveConfiguredDir(configDir, config.macos.dmgDir, "macos");
+    const filePath = path.join(directory, fileName);
+    try {
+      if (!(await lstat(filePath)).isFile()) return null;
+    } catch {
+      return null;
+    }
+    return this.readLocalAsset(filePath, {
+      extension: fileName.toLowerCase().endsWith(".zip") ? ".zip" : ".dmg",
+      downloadUrl: `/macos/update-download?fileName=${encodeURIComponent(fileName)}`,
+    });
+  }
+
+  private async resolveMacosBetaAsset(): Promise<LocalDistributionAsset | null> {
+    await this.refreshConfig();
+    const { config, configDir } = this.options;
+    if (config.macos?.enabled !== true) return null;
+    const directory = resolveConfiguredDir(configDir, config.macos.dmgDir, "macos");
+    await mkdir(directory, { recursive: true });
+    const entries = await readdir(directory, { withFileTypes: true });
+    const candidates = await Promise.all(entries
+      .filter((entry) => entry.isFile() && MACOS_UPDATE_FILE_PATTERN.test(entry.name))
+      .map(async (entry) => ({
+        name: entry.name,
+        filePath: path.join(directory, entry.name),
+        fileStat: await stat(path.join(directory, entry.name)),
+      })));
+    candidates.sort((a, b) => {
+      const aVersion = extractArtifactVersion(a.name, path.extname(a.name));
+      const bVersion = extractArtifactVersion(b.name, path.extname(b.name));
+      const order = compareWandInstallOrder(aVersion ?? "", bVersion ?? "");
+      if (order !== 0) return -order;
+      // 同版本优先 ZIP，避免 DMG 挂载；同格式多构建按最新修改时间挑选。
+      const format = Number(b.name.toLowerCase().endsWith(".zip")) - Number(a.name.toLowerCase().endsWith(".zip"));
+      return format || b.fileStat.mtimeMs - a.fileStat.mtimeMs;
+    });
+    const selected = candidates[0];
+    if (!selected) return null;
+    return {
+      fileName: selected.name,
+      filePath: selected.filePath,
+      size: selected.fileStat.size,
+      updatedAt: selected.fileStat.mtime.toISOString(),
+      version: extractArtifactVersion(selected.name, path.extname(selected.name)),
+      downloadUrl: `/macos/update-download?fileName=${encodeURIComponent(selected.name)}`,
+      source: "local",
+    };
+  }
+
   async resolveLatestDmg(): Promise<ResolvedDistributionAsset | null> {
     const localDmg = await this.resolveMacosDownload();
     if (localDmg?.version) {
@@ -442,7 +514,7 @@ export class DistributionManager {
 
   private async resolveLocalAsset(options: {
     directory: string;
-    extension: ".apk" | ".dmg" | ".ipa";
+    extension: ".apk" | ".dmg" | ".ipa" | ".zip";
     configuredFile?: string;
     downloadUrl: string;
     compareVersions(a: string, b: string): number;
@@ -481,7 +553,7 @@ export class DistributionManager {
   }
 
   private async readLocalAsset(filePath: string, options: {
-    extension: ".apk" | ".dmg" | ".ipa";
+    extension: ".apk" | ".dmg" | ".ipa" | ".zip";
     downloadUrl: string;
     acceptVersion?: (version: string | null) => boolean;
   }): Promise<LocalDistributionAsset | null> {

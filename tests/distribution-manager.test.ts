@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, symlinkSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -54,6 +54,38 @@ test("DistributionManager applies stable and beta APK selection behind one inter
     assert.equal(stable?.downloadUrl, "/android/download?channel=stable");
     assert.equal(beta?.fileName, "wand-v2.0.0-debug.07151230.apk");
     assert.equal(beta?.downloadUrl, "/android/download?channel=beta");
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("macOS Beta selects local ZIP over DMG, never GitHub, and pins its download", async () => {
+  const fixture = createFixture([{
+    tag_name: "v99.0.0",
+    assets: [{ name: "wand-v99.0.0.dmg", browser_download_url: "https://example.test/remote.dmg", size: 10 }],
+  }]);
+  try {
+    const directory = path.join(fixture.root, "macos");
+    writeFileSync(path.join(directory, "wand-v4.72.2.dmg"), "old");
+    writeFileSync(path.join(directory, "wand-v4.72.2-debug.09230741.dmg"), "dmg");
+    writeFileSync(path.join(directory, "wand-v4.72.2-debug.09230741.zip"), "zip");
+    const latest = await fixture.manager.resolveLatestMacosBeta();
+    assert.equal(latest?.version, "4.72.2-debug.09230741");
+    assert.equal(latest?.fileName, "wand-v4.72.2-debug.09230741.zip");
+    assert.equal(latest?.downloadUrl, "/macos/update-download?fileName=wand-v4.72.2-debug.09230741.zip");
+    assert.equal(latest?.sha256, (await import("node:crypto")).createHash("sha256").update("zip").digest("hex"));
+    assert.equal(fixture.fetchCount(), 0);
+    assert.equal((await fixture.manager.resolveMacosBetaDownload(latest!.fileName))?.fileName, latest?.fileName);
+    assert.equal(await fixture.manager.resolveMacosBetaDownload("../config.json"), null);
+    assert.equal(await fixture.manager.resolveMacosBetaDownload("wand-v4.72.2.update.json"), null);
+    symlinkSync(fixture.configPath, path.join(directory, "wand-v4.72.2-debug.09230742.zip"));
+    assert.equal(await fixture.manager.resolveMacosBetaDownload("wand-v4.72.2-debug.09230742.zip"), null);
+    writeFileSync(path.join(directory, "wand-v4.72.3-debug.09231234.dmg"), "newer");
+    assert.equal((await fixture.manager.resolveLatestMacosBeta())?.fileName, "wand-v4.72.3-debug.09231234.dmg");
+    assert.equal((await fixture.manager.resolveMacosBetaDownload(latest!.fileName))?.fileName, latest?.fileName);
+    writeFileSync(fixture.configPath, JSON.stringify({ macos: { enabled: false } }));
+    assert.equal(await fixture.manager.resolveLatestMacosBeta(), null);
+    assert.equal(await fixture.manager.resolveMacosBetaDownload(latest!.fileName), null);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }

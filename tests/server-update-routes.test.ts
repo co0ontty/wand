@@ -36,6 +36,8 @@ test("extracted public update routes preserve metadata, channel, range, and miss
     },
     async resolveLatestDmg() { return null; },
     async resolveMacosDownload() { return null; },
+    async resolveLatestMacosBeta() { return null; },
+    async resolveMacosBetaDownload() { return null; },
     async resolveLatestIpa() { return null; },
     async resolveIosDownload() { return null; },
   });
@@ -113,6 +115,60 @@ test("extracted public update routes preserve metadata, channel, range, and miss
   }
 });
 
+test("macOS Beta check and pinned ZIP download use the connected server's local asset", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-macos-beta-"));
+  const name = "wand-v4.72.2-debug.09230741.zip";
+  const filePath = path.join(root, name);
+  writeFileSync(filePath, "zip-payload");
+  const app = express();
+  registerPublicUpdateRoutes(app, {
+    async resolveLatestApk() { return null; },
+    async resolveAndroidDownload() { return null; },
+    async resolveLatestDmg() { return null; },
+    async resolveMacosDownload() { return null; },
+    async resolveLatestMacosBeta() {
+      return {
+        version: "4.72.2-debug.09230741", downloadUrl: `/macos/update-download?fileName=${name}`,
+        fileName: name, size: 11, source: "local",
+        sha256: createHash("sha256").update("zip-payload").digest("hex"),
+      };
+    },
+    async resolveMacosBetaDownload(requested) {
+      return requested === name ? { fileName: name, filePath, size: 11 } : null;
+    },
+    async computeAssetSha256(asset) {
+      return createHash("sha256").update(readFileSync(asset.filePath)).digest("hex");
+    },
+    async resolveLatestIpa() { return null; },
+    async resolveIosDownload() { return null; },
+  });
+  app.use(jsonErrorHandler);
+  const server = createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    assert.equal((await fetch(`${base}/api/macos-app-update`)).status, 400);
+    const info = await (await fetch(`${base}/api/macos-app-update?currentVersion=4.72.2`)).json() as Record<string, unknown>;
+    assert.equal(info.updateAvailable, true);
+    assert.equal(info.source, "local");
+    assert.equal(info.channel, "beta");
+    assert.equal(info.downloadUrl, `/macos/update-download?fileName=${name}`);
+    assert.equal(info.sha256, createHash("sha256").update("zip-payload").digest("hex"));
+    const upToDate = await (await fetch(`${base}/api/macos-app-update?currentVersion=4.73.0`)).json() as Record<string, unknown>;
+    assert.equal(upToDate.updateAvailable, false);
+    assert.equal(upToDate.downloadUrl, null);
+    const download = await fetch(`${base}${info.downloadUrl}`);
+    assert.equal(download.status, 200);
+    assert.match(download.headers.get("content-type") ?? "", /application\/zip/);
+    assert.equal(download.headers.get("x-macos-sha256"), info.sha256);
+    assert.equal(await download.text(), "zip-payload");
+    assert.equal((await fetch(`${base}/macos/update-download?fileName=other.zip`)).status, 404);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("GitHub APK downloads are proxied through the wand server", async () => {
   const remote = createServer((req, res) => {
     assert.equal(req.headers["user-agent"], "wand-server");
@@ -146,6 +202,8 @@ test("GitHub APK downloads are proxied through the wand server", async () => {
     async computeAssetSha256() { return null; },
     async resolveLatestDmg() { return null; },
     async resolveMacosDownload() { return null; },
+    async resolveLatestMacosBeta() { return null; },
+    async resolveMacosBetaDownload() { return null; },
     async resolveLatestIpa() { return null; },
     async resolveIosDownload() { return null; },
   });
@@ -183,6 +241,8 @@ test("iOS OTA update routes expose check, manifest, and install page", async () 
     async computeAssetSha256() { return null; },
     async resolveLatestDmg() { return null; },
     async resolveMacosDownload() { return null; },
+    async resolveLatestMacosBeta() { return null; },
+    async resolveMacosBetaDownload() { return null; },
     async resolveLatestIpa() {
       return {
         version: "4.52.0",
