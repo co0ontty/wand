@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -18,6 +18,16 @@ function includesAll(relativePath: string, contracts: ReadonlyArray<string>): vo
       `${relativePath} must preserve native WebView contract: ${contract}`,
     );
   }
+}
+
+function assertOrdered(relativePath: string, before: string, after: string): void {
+  const contents = source(relativePath);
+  const beforeIndex = contents.indexOf(before);
+  const afterIndex = contents.indexOf(after);
+  assert.ok(
+    beforeIndex >= 0 && afterIndex > beforeIndex,
+    `${relativePath} must preserve native WebView ordering: ${before} before ${after}`,
+  );
 }
 
 test("web entry preserves native URL, viewport, and global bridge contracts", () => {
@@ -85,23 +95,65 @@ test("web source preserves native events, safe-area variables, and selector hook
 });
 
 test("Android WebView preserves its half of the web/native protocol", () => {
-  includesAll("android/app/src/main/java/com/wand/app/MainActivity.java", [
-    "window.handleNativeBack",
-    // window._onNativePermissionResult 已随通知权限桥接一并移除（1168cfa），
-    // web 侧保留防御性回调并有 resume / timeout 兑底，不再要求原生端实现。
-    "wand-android-resume",
-    "wand-android-network",
-    "wand-ime-state",
-    'appendQueryParameter("session", sessionId)',
-    'WandPlatform/Android',
-    "webView.canGoBack()",
-    "onShowFileChooser",
-    "onCreateWindow",
-    "onPermissionRequest",
-    "setDownloadListener",
-    // openNotificationSettings 已随通知权限桥接一并移除（1168cfa）。
-  ]);
+  const mainActivity = "android/app/src/main/java/com/wand/app/MainActivity.java";
+  if (existsSync(path.join(root, mainActivity))) {
+    // The pinned Android submodule still uses the full-page Java WebView shell.
+    includesAll(mainActivity, [
+      "window.handleNativeBack",
+      // window._onNativePermissionResult 已随通知权限桥接一并移除（1168cfa），
+      // web 侧保留防御性回调并有 resume / timeout 兑底，不再要求原生端实现。
+      "wand-android-resume",
+      "wand-android-network",
+      "wand-ime-state",
+      'appendQueryParameter("session", sessionId)',
+      'WandPlatform/Android',
+      "webView.canGoBack()",
+      "onShowFileChooser",
+      "onCreateWindow",
+      "onPermissionRequest",
+      "setDownloadListener",
+      // openNotificationSettings 已随通知权限桥接一并移除（1168cfa）。
+    ]);
+  } else {
+    // The native-shell client prepares authentication before loading its PTY WebView.
+    const screen = "android/app/src/main/java/com/wand/app/ui/screens/PtyTerminalScreen.kt";
+    includesAll(screen, [
+      "WandWebSession.prepare(",
+      "WandWebSession.OwnerRevocation {",
+      "WandWebSession.release(webSessionOwnerId)",
+      "activeWebView.get()?.onResume()",
+      "activeWebView.get()?.onPause()",
+      "override fun onPageFinished(view: WebView, url: String)",
+      "loadUrl(buildEmbedTerminalUrl(serverUrl, sessionId))",
+      "RefitTerminalScript",
+      'ptyComposerSubmitChunks(text, "terminal")',
+      "api.sendPtyInputChunk(",
+      "WandPlatform/Android",
+    ]);
+    assertOrdered(
+      screen,
+      "WandWebSession.prepare(",
+      "loadUrl(buildEmbedTerminalUrl(serverUrl, sessionId))",
+    );
+    includesAll("android/app/src/main/java/com/wand/app/data/WandWebSession.kt", [
+      "mutex.withLock",
+      "loginCookieHeaders(normalized, token)",
+      "replaceCookies(normalized, setCookies)",
+      "previous.onRevoked.onRevoked()",
+    ]);
+    includesAll("android/app/src/main/java/com/wand/app/ui/SessionTopic.kt", [
+      'PtyComposerChunk(input = text, view = view, shortcutKey = "enter_text")',
+      'PtyComposerChunk(input = "\\r", view = view, shortcutKey = "enter_text")',
+    ]);
+    includesAll("android/app/src/main/java/com/wand/app/data/WandSocket.kt", [
+      '"resync_required" -> {',
+      "requestResync()",
+      "lastSeqBySession[id] = seq",
+      "openSocket()",
+    ]);
+  }
   includesAll("android/app/src/main/java/com/wand/app/ui/screens/PtyTerminalScreen.kt", [
+    'appendQueryParameter("session", sessionId)',
     'appendQueryParameter("embed", "terminal")',
     'appendQueryParameter("nativeInput", "1")',
     'appendQueryParameter("passthrough", "1")',
@@ -112,27 +164,66 @@ test("Android WebView preserves its half of the web/native protocol", () => {
 test("Apple clients preserve mobile WebView and desktop native terminal contracts", () => {
   includesAll("ios/Wand/WebContainerView.swift", [
     "window.__wandIosNative = true",
-    "window.WandNative",
     'URLQueryItem(name: "session", value: sessionId)',
     'URLQueryItem(name: "embed", value: "terminal")',
     'URLQueryItem(name: "nativeInput", value: "1")',
     'URLQueryItem(name: "passthrough", value: "1")',
     "WandPlatform/iOS",
-    "terminal-scale-down-top",
-    "terminal-scale-label-top",
-    "terminal-scale-up-top",
-    "page-refresh-btn",
-    ".is-wand-embed-terminal .wand-joystick-root",
-    ".is-wand-embed-terminal .terminal-scroll-wrap",
-    ".is-wand-embed-terminal .input-panel",
-    ".is-wand-embed-terminal .notification-bubble",
-    ".is-wand-embed-terminal .terminal-container",
-    "__wandNativeTerminalTapInstalled",
-    "requestTerminalInput",
-    "restoreEmbeddedTerminalInput",
-    "refitEmbeddedTerminalViewport",
-    "suppressEmbeddedTerminalIme",
   ]);
+  const iosBridge = "ios/Wand/WebBridge.swift";
+  if (source(iosBridge).includes("__wandNativeBackHooked")) {
+    // The pinned iOS submodule still installs the legacy native-back bridge.
+    includesAll("ios/Wand/WebContainerView.swift", [
+      "window.WandNative",
+      "terminal-scale-down-top",
+      "terminal-scale-label-top",
+      "terminal-scale-up-top",
+      "page-refresh-btn",
+      ".is-wand-embed-terminal .wand-joystick-root",
+      ".is-wand-embed-terminal .terminal-scroll-wrap",
+      ".is-wand-embed-terminal .input-panel",
+      ".is-wand-embed-terminal .notification-bubble",
+      ".is-wand-embed-terminal .terminal-container",
+      "__wandNativeTerminalTapInstalled",
+      "requestTerminalInput",
+      "restoreEmbeddedTerminalInput",
+      "refitEmbeddedTerminalViewport",
+      "suppressEmbeddedTerminalIme",
+    ]);
+    includesAll(iosBridge, [
+      "wand-ios-ime-state",
+      "__wandNativeBackHooked",
+    ]);
+  } else {
+    const container = "ios/Wand/WebContainerView.swift";
+    includesAll(container, [
+      "coordinator.installEndpointContentBoundary(",
+      "self.authenticateAndLoad(",
+      "WandAuth.loginWithToken(",
+      "cookieStore.setCookie(cookie)",
+      "webView.load(URLRequest(url: targetURL))",
+      "reconnectTask?.cancel()",
+      "cancelAutomaticReconnect()",
+      "refitEmbeddedTerminalViewport",
+    ]);
+    assertOrdered(container, "coordinator.installEndpointContentBoundary(", "self.authenticateAndLoad(");
+    assertOrdered(
+      container,
+      "cookieStore.setCookie(cookie)",
+      "webView.load(URLRequest(url: targetURL))",
+    );
+    includesAll(iosBridge, ["wand-ios-ime-state", "installEndpointContentBoundary("]);
+    includesAll("ios/Wand/PtyInputProtocol.swift", [
+      'PtyInputChunk(input: text, view: view, shortcutKey: "enter_text")',
+      'PtyInputChunk(input: "\\r", view: view, shortcutKey: "enter_text")',
+    ]);
+    includesAll("ios/Wand/WandSocket.swift", [
+      'case "resync_required":',
+      "requestResync()",
+      "lastSeqBySession[id] = seq",
+      "task?.cancel(with: .goingAway, reason: nil)",
+    ]);
+  }
   includesAll("ios/Wand/NativeComposer.swift", [
     "IMEAwareComposerTextView",
     "markedTextRange",
@@ -148,10 +239,6 @@ test("Apple clients preserve mobile WebView and desktop native terminal contract
     "IMEAwareComposerTextView",
     "composerIsComposing",
     "suppressEmbeddedTerminalIme",
-  ]);
-  includesAll("ios/Wand/WebBridge.swift", [
-    "wand-ios-ime-state",
-    "__wandNativeBackHooked",
   ]);
   includesAll("macos/Wand/NativeTerminalView.swift", [
     "import SwiftTerm",
