@@ -88,6 +88,30 @@ node "$(npm root -g)/@co0ontty/wand/scripts/install-render-binary.js" --dry-run 
 
 `terminald` 也会自动启动或被领养，用于保证结构化 CLI run 跨 Web 重启继续运行。
 
+### 1.4 daemon 才是升级的最后一公里
+
+包升完了不等于修复生效：**npm / `start.sh` 都不会重启正在跑的 daemon**（`wand-render`、`terminald`
+里可能挂着用户的 shell）。2026-09-24 的「终端全部断联」就是这么来的 —— 端点自愈是 9/23 21:26 加的，
+但 `terminald` 是 9/19 启的老进程、`wand-render` 是 9/23 10:49 启的老二进制，socket 被系统临时目录
+清理器删掉后永远回不来，而当时没有任何机制会去换掉它们。现在的行为：
+
+| 情形 | 行为 |
+| --- | --- |
+| Render daemon 比包内二进制旧、且**空闲**（0 个 PTY） | Server 启动时自动 `shutdown mode=now` 收摊 → spawn 新二进制（`upgradeRenderDaemonIfIdle`）；日志出现 `Render daemon upgraded X -> Y (it was idle).` |
+| Render daemon 比包内二进制旧、还有会话 | 只告警（`WARN ... it keeps running the old code`），附 `./start.sh --restart-daemons`；**绝不为升级杀掉用户 shell** |
+| daemon 进程活着但端点丢失（socket 被清掉） | 新版 daemon 自己 rebind（约 1s）；旧构建不会 → `service:install` 复核 1.5s 后当僵尸清掉（否则 `wand web` 会以「pid 活着但 socket 不可用」拒绝启动，整个服务起不来） |
+| 想立刻换掉两边 daemon | `./start.sh --restart-daemons`（先 SIGTERM 让 Render drain，2s 后 SIGKILL；会结束它们持有的 shell，可按 provider 原生 session id 恢复） |
+
+排障两行命令：
+
+```bash
+./start.sh --status          # 面板里的 Daemons 段：pid / 端点 / Render 版本
+wand service:install --verbose -c ~/.wand/config.json   # detail 里有同样的 daemon 状态 + 清理了什么
+wand service:logs            # macOS 上现在直接读 <configDir>/web*.log、terminald*.log（plist 里配了 Standard*Path）
+```
+
+端点丢失的判据与成因见 `docs/server-logic-analysis.md` §7（「文件不在、进程还活着 = 端点丢了」）。
+
 ## 2. 分发布局：两个仓库、两个 submodule
 
 Render 的**源码**与**产物**都不在本仓库：
