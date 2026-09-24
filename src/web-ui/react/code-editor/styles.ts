@@ -144,6 +144,10 @@ export const codeEditorStyles = String.raw`
   background: var(--bg-primary, #fff);
   overscroll-behavior: contain;
 }
+.wand-code-editor-markdown:focus-visible {
+  outline: 2px solid var(--accent, #2563eb);
+  outline-offset: -2px;
+}
 .wand-code-editor-content,
 .wand-code-editor-textarea {
   margin: 0;

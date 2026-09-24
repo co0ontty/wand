@@ -12,15 +12,16 @@ import { resolveSystemAiContext } from "./session-ai-context.js";
 import type { SessionRegistry } from "./session-registry.js";
 import type { StructuredSessionManager } from "./structured-session-manager.js";
 import type { ProcessManager } from "./process-manager.js";
-import type { WandTaskAgent, WandTaskAgentEffort, WandTaskAgentKind, WandTaskAgentMode, WandTaskPriority, WandTaskStatus, WandTaskTitleSource } from "./task-types.js";
+import type { WandTaskAgent, WandTaskAgentKind, WandTaskAgentMode, WandTaskPriority, WandTaskStatus, WandTaskTitleSource } from "./task-types.js";
 import { DEFAULT_WAND_TASK_AGENT_KIND, DEFAULT_WAND_TASK_AGENT_MODE, DEFAULT_WAND_TASK_PRIORITY, isWandTaskAgentKind, isWandTaskAgentMode, normalizeWandTaskAgentMode, WAND_MILESTONE_NAME_MAX_LENGTH } from "./task-types.js";
 import { archiveBoardTask, ensureWorkspaceTaskForBoardTask, isAutoNameableBoardTask, moveSessionToWorkspaceTask, syncClosedBoardTask, syncUngroupedSessionsToBoard, syncWorkspaceTaskToBoard, taskAutoNameSignature, taskAutoNameSourceText } from "./wand-task-sync.js";
 import type { SessionProvider, SessionSnapshot, WandConfig } from "./types.js";
 import { isSessionProvider, providerCliCommand } from "./session-provider.js";
+import { isThinkingEffort } from "./structured-provider-common.js";
 
 const STATUSES = new Set<WandTaskStatus>(["todo", "doing", "done", "archived"]);
 const PRIORITIES = new Set<WandTaskPriority>(["none", "low", "medium", "high", "urgent"]);
-const AGENT_EFFORTS = new Set<WandTaskAgentEffort>(["off", "standard", "deep", "max"]);
+
 const TASK_BOARD_LAST_AGENT_KEY = "pref:taskBoardLastAgent";
 
 function defaultTaskBoardAgent(): WandTaskAgent {
@@ -149,8 +150,8 @@ export function parseTaskAgent(
   if (!isSessionProvider(provider)) throw new Error("请选择有效的 CLI 工具。");
   const model = text(body.model) || "default";
   if (model.length > 128) throw new Error("模型名称过长。");
-  const thinkingEffort = (text(body.thinkingEffort) || "off") as WandTaskAgentEffort;
-  if (!AGENT_EFFORTS.has(thinkingEffort)) throw new Error("思考深度无效。");
+  const thinkingEffort = text(body.thinkingEffort) || "off";
+  if (!isThinkingEffort(thinkingEffort)) throw new Error("思考深度无效。");
   const rawMode = body.mode === undefined || body.mode === null || body.mode === "" ? fallbackMode : body.mode;
   if (!isWandTaskAgentMode(rawMode)) throw new Error("工作模式无效。");
   // Codex 之类只认一种模式的 provider 在这里夹到有效值，落库值与实际执行保持一致。

@@ -7,9 +7,13 @@ import {
   ModelCommandRunner,
   ModelRefreshOptions,
   parseCodexModels,
+  parseCliEffortList,
   parseGrokModels,
+  parseOpenCodeModelCatalog,
   parseOpenCodeModels,
   parsePiModels,
+  parsePiRpcModels,
+  piThinkingLevelsForModel,
   parseQoderModels,
   refreshModels,
 } from "../src/models.js";
@@ -138,18 +142,87 @@ test("Grok model discovery parses default and available models", () => {
     "",
     "Available models:",
     "  * grok-4.5 (default)",
+    "  - grok-4.7-build-fast",
     "  * grok-3",
   ].join("\n"));
 
-  assert.deepEqual(models.map((model) => model.id), ["default", "grok-4.5", "grok-3"]);
+  assert.deepEqual(models.map((model) => model.id), ["default", "grok-4.5", "grok-4.7-build-fast", "grok-3"]);
   assert.equal(models[0]?.alias, true);
   assert.equal(models[0]?.label, "grok-4.5（Grok 默认）");
+});
+
+test("CLI effort lists are parsed from help text and rejection errors", () => {
+  assert.deepEqual(
+    parseCliEffortList("Warning: Unknown --effort value '__wand_probe__'. Valid values: low, medium, high, xhigh, max."),
+    ["low", "medium", "high", "xhigh", "max"],
+  );
+  assert.deepEqual(
+    parseCliEffortList("Error: unknown effort level '__wand_probe__'; use one of: xhigh, high, medium, low"),
+    ["xhigh", "high", "medium", "low"],
+  );
+  assert.deepEqual(
+    parseCliEffortList("Valid values are: auto, none, low, medium, high, xhigh, max, ultracode."),
+    ["auto", "none", "low", "medium", "high", "xhigh", "max", "ultracode"],
+  );
+  assert.deepEqual(
+    parseCliEffortList("--thinking <level>             Set thinking level: off, minimal, low, medium, high, xhigh, max"),
+    ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+  );
+});
+
+test("OpenCode verbose models keep per-model reasoning variants", () => {
+  const models = parseOpenCodeModelCatalog([
+    "opencode/space-bunny-free",
+    "{",
+    '  "id": "space-bunny-free",',
+    '  "variants": { "low": {}, "high": {}, "max": {} }',
+    "}",
+    "openai/plain-only",
+  ].join("\n"));
+  assert.deepEqual(models.map((model) => model.id), ["default", "opencode/space-bunny-free"]);
+  assert.deepEqual(
+    models.find((model) => model.id === "opencode/space-bunny-free")?.reasoningEfforts?.map((level) => level.effort),
+    ["low", "high", "max"],
+  );
 });
 
 test("Grok model discovery falls back when output is empty", () => {
   const models = parseGrokModels("not a model list");
   assert.equal(models[0]?.id, "default");
   assert.equal(models.some((model) => model.id === "grok-4.5"), true);
+});
+
+test("Pi thinking levels follow the model reasoning map", () => {
+  assert.deepEqual(piThinkingLevelsForModel({ reasoning: false }), ["off"]);
+  assert.deepEqual(
+    piThinkingLevelsForModel({ reasoning: true }),
+    ["off", "minimal", "low", "medium", "high"],
+  );
+  assert.deepEqual(
+    piThinkingLevelsForModel({
+      reasoning: true,
+      thinkingLevelMap: { minimal: null, xhigh: "high", max: "max" },
+    }),
+    ["off", "low", "medium", "high", "xhigh", "max"],
+  );
+});
+
+test("Pi RPC catalog keeps each model's thinking levels", () => {
+  const models = parsePiRpcModels([
+    "{\"type\":\"response\",\"command\":\"get_available_models\",\"success\":true,\"data\":{\"models\":[",
+    "{\"provider\":\"xai\",\"id\":\"grok-4.6\",\"name\":\"Grok\",\"reasoning\":true,\"thinkingLevelMap\":{\"xhigh\":\"high\",\"max\":null}},",
+    "{\"provider\":\"google\",\"id\":\"gemini\",\"name\":\"Gemini\",\"reasoning\":false}",
+    "]}}",
+  ].join(""));
+  assert.deepEqual(
+    models.find((model) => model.id === "xai/grok-4.6")?.reasoningEfforts?.map((level) => level.effort),
+    ["off", "minimal", "low", "medium", "high", "xhigh"],
+  );
+  assert.deepEqual(
+    models.find((model) => model.id === "google/gemini")?.reasoningEfforts?.map((level) => level.effort),
+    ["off"],
+  );
+  assert.ok(models.find((model) => model.id === "default")?.reasoningEfforts?.some((level) => level.effort === "xhigh"));
 });
 
 test("Pi model discovery parses provider/model table rows", () => {
@@ -215,7 +288,7 @@ test("server model catalog persists every provider and writes only when its cont
     if (file === "codex" && args.join(" ") === "debug models") {
       return { stdout: JSON.stringify({ models: [{ slug: "gpt-5.5", visibility: "list", priority: 0 }] }), stderr: "" };
     }
-    if (file === "opencode" && args.join(" ") === "models") return { stdout: "openai/gpt-5.4\n", stderr: "" };
+    if (file === "opencode" && args[0] === "models") return { stdout: "openai/gpt-5.4\n", stderr: "" };
     if (file === "opencode" && args.join(" ") === "--version") return { stdout: "1.2.3\n", stderr: "" };
     if (file === "grok" && args.join(" ") === "models") return { stdout: "Default model: grok-4.5\n* grok-4.5\n* grok-3", stderr: "" };
     if (file === "qodercli" && args.join(" ") === "--list-models") return { stdout: qoderOutput, stderr: "" };
@@ -294,8 +367,8 @@ test("server model catalog coalesces concurrent refreshes", async () => {
   allowQoder?.();
   const [firstResult, secondResult] = await Promise.all([first, second]);
   assert.equal(firstResult.revision, secondResult.revision);
-  // claude, codex, opencode models/version, grok, qoder, pi: one server scan.
-  assert.equal(calls, 7);
+  // 模型探针，再加上思考档位探针。Pi 先问 RPC，失败后再退回 --list-models。
+  assert.equal(calls, 12);
 });
 
 test("Claude candidates merge configured, verified, and Models API entries without asserting entitlement", async () => {

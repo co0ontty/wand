@@ -1323,6 +1323,7 @@ export const settingsAndQuickCommitStyles = String.raw`
 
 .wand-quick-footer > span { color: var(--text-muted); font-size: var(--font-size-xs); }
 .wand-quick-footer > div { display: flex; gap: 8px; }
+.wand-quick-submit { min-width: 8.5em; }
 
 .wand-quick-result {
   display: grid;

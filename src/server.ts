@@ -133,7 +133,8 @@ const AVATAR_CONTENT_TYPES: Record<string, string> = {
 // ── Update check cache ──
 
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
-const MODEL_CATALOG_AUTO_REFRESH_INTERVAL_MS = 30 * 60 * 1000;
+/** CLI 模型目录和思考档位的探测间隔。页面另有更密的快照拉取。 */
+const MODEL_CATALOG_AUTO_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 
 /** Cached update result broadcast to new clients on connect. */
 let cachedUpdateInfo: Pick<PackageUpdateInfo, "channel" | "current" | "latest" | "updateAvailable"> | null = null;
@@ -1110,6 +1111,14 @@ export async function startServer(
 
   // Model discovery runs exclusively in the server. Its first result is
   // persisted; later checks only write when catalog content changes.
+  // 变化后通知已连接的页面，下拉不用等用户点「刷新模型列表」。
+  modelCatalog.onChanged((result) => {
+    wsManager.emitEvent({
+      type: "notification",
+      sessionId: "__system__",
+      data: { kind: "models", revision: result.revision, refreshedAt: result.refreshedAt },
+    });
+  });
   let modelCatalogRefreshTimer: NodeJS.Timeout | null = null;
   if (!testMode) {
     void modelCatalog.refresh().catch(() => {});

@@ -29,8 +29,13 @@ type SettingsProvider = "claude" | "codex" | "opencode";
 type SettingsModelProvider = SettingsProvider | "grok" | "qoder" | "pi";
 /** CLI 工具选择：和 `WandConfig.defaultProvider` 一样开放全部 provider。 */
 export type SettingsSessionProvider = SettingsModelProvider;
-/** 新会话默认思考深度；`codex:` 前缀的动态档位（旧客户端写入）也允许出现。 */
-export type SettingsThinkingEffort = "off" | "standard" | "deep" | "max" | `codex:${string}`;
+/** 新会话默认思考深度。旧四档，或某个 CLI 报出的 `provider:level`。 */
+export type SettingsThinkingEffort =
+  | "off"
+  | "standard"
+  | "deep"
+  | "max"
+  | `${SettingsSessionProvider}:${string}`;
 type SettingsCliProvider = SettingsProvider | "grok" | "qoder" | "pi";
 type SettingsUpdateChannel = "stable" | "beta";
 type SettingsAutoUpdateTarget = "web" | "apk" | "dmg" | "cli";
@@ -187,6 +192,7 @@ export interface SettingsModelCatalog {
   grokModels: SettingsModelOption[];
   qoderModels: SettingsModelOption[];
   piModels: SettingsModelOption[];
+  thinkingEfforts?: Partial<Record<SettingsModelProvider, Array<{ effort: string; description?: string }>>>;
   claudeVersion: string | null;
   opencodeVersion: string | null;
   refreshedAt: string | null;

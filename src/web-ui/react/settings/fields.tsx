@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ComponentProps, type MouseEvent, type ReactNode } from "react";
 import { WandButton, WandSelect, WandSwitch } from "../ui";
 
 export function SettingsSection({
@@ -175,9 +175,43 @@ export function SettingsStatus({
   );
 }
 
+type ActionSettlement = "success" | "error" | null;
+
+function useActionFlash(
+  pending: boolean,
+  settled: ActionSettlement,
+): "success" | "error" | null {
+  const [flash, setFlash] = useState<"success" | "error" | null>(null);
+  const wasPending = useRef(false);
+  const timer = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (timer.current !== null) window.clearTimeout(timer.current);
+  }, []);
+  useEffect(() => {
+    if (pending) {
+      wasPending.current = true;
+      setFlash(null);
+      if (timer.current !== null) {
+        window.clearTimeout(timer.current);
+        timer.current = null;
+      }
+      return;
+    }
+    if (!wasPending.current || (settled !== "success" && settled !== "error")) return;
+    wasPending.current = false;
+    setFlash(settled);
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => {
+      timer.current = null;
+      setFlash(null);
+    }, 1400);
+  }, [pending, settled]);
+  return flash;
+}
+
 export function SettingsSaveBar({
   label,
-  pending,
+  pending = false,
   disabled,
   onSave,
   status,
@@ -190,24 +224,80 @@ export function SettingsSaveBar({
   status?: ReactNode;
   tone?: "info" | "success" | "warning" | "error";
 }) {
+  const settled: ActionSettlement = tone === "error"
+    ? "error"
+    : tone === "success" || tone === "warning"
+      ? "success"
+      : null;
   return (
     <div className="wand-settings-save-bar">
       <SettingsStatus tone={tone}>{status}</SettingsStatus>
-      <WandButton kind="primary" disabled={disabled || pending} onClick={onSave}>
-        {pending ? "保存中…" : label}
-      </WandButton>
+      <SettingsActionButton
+        kind="primary"
+        pending={pending}
+        settled={settled}
+        disabled={disabled}
+        pendingLabel="保存中…"
+        successLabel="已保存"
+        errorLabel="保存失败"
+        onClick={onSave}
+      >
+        {label}
+      </SettingsActionButton>
     </div>
   );
 }
 
 export function SettingsActionButton({
   children,
-  pending,
+  pending = false,
+  settled = null,
+  pendingLabel = "处理中…",
+  successLabel = "已完成",
+  errorLabel = "失败",
+  onClick,
+  disabled,
   ...props
-}: React.ComponentProps<typeof WandButton> & { pending?: boolean }) {
+}: Omit<ComponentProps<typeof WandButton>, "onClick"> & {
+  pending?: boolean;
+  settled?: ActionSettlement;
+  pendingLabel?: ReactNode;
+  successLabel?: ReactNode;
+  errorLabel?: ReactNode;
+  onClick?(event: MouseEvent<HTMLButtonElement>): void | boolean | Promise<void | boolean>;
+}) {
+  const settledFlash = useActionFlash(pending, settled);
+  const [clickFlash, setClickFlash] = useState<"success" | "error" | null>(null);
+  const timer = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (timer.current !== null) window.clearTimeout(timer.current);
+  }, []);
+  const flash = clickFlash ?? settledFlash;
+  const arm = (next: "success" | "error"): void => {
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    setClickFlash(next);
+    timer.current = window.setTimeout(() => {
+      timer.current = null;
+      setClickFlash(null);
+    }, 1400);
+  };
   return (
-    <WandButton {...props} disabled={props.disabled || pending}>
-      {pending ? "处理中…" : children}
+    <WandButton
+      {...props}
+      aria-busy={pending || undefined}
+      aria-live="polite"
+      disabled={disabled || pending || flash === "success"}
+      onClick={onClick ? async (event) => {
+        try {
+          const result = await onClick(event);
+          if (result === false) arm("error");
+          else if (result === true) arm("success");
+        } catch {
+          arm("error");
+        }
+      } : undefined}
+    >
+      {pending ? pendingLabel : flash === "success" ? successLabel : flash === "error" ? errorLabel : children}
     </WandButton>
   );
 }

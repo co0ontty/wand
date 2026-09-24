@@ -79,7 +79,7 @@ test("OpenCode adapter maps args and stream events without session lifecycle sta
     runner: "opencode-cli-run",
     mode: "auto-edit",
     selectedModel: "anthropic/claude-sonnet-4-6",
-    thinkingEffort: "codex:ultra",
+    thinkingEffort: "opencode:ultra",
     claudeSessionId: "oc-1",
   })), [
     "run", "--format", "json", "--thinking",

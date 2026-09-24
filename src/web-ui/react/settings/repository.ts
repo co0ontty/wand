@@ -173,7 +173,9 @@ function normalizeConfig(value: unknown): SettingsConfig {
     const raw = stringValue(input.defaultThinkingEffort);
     if (raw === "off" || raw === "standard" || raw === "deep" || raw === "max") return raw;
     // Codex 动态推理档位由旧客户端写入，原样保留而不是悄悄重置成 off。
-    if (/^codex:[a-z0-9][a-z0-9_-]{0,31}$/.test(raw)) return raw as SettingsThinkingEffort;
+    if (/^(claude|codex|opencode|grok|qoder|pi):[a-z0-9][a-z0-9_-]{0,31}$/.test(raw)) {
+      return raw as SettingsThinkingEffort;
+    }
     return "off";
   })();
   const claude = stringValue(defaults.claude, stringValue(input.defaultModel));
@@ -249,7 +251,7 @@ function normalizeAbout(value: unknown): SettingsAbout {
   };
 }
 
-function normalizeModels(value: unknown): SettingsModelCatalog {
+export function normalizeModels(value: unknown): SettingsModelCatalog {
   const input = record(value);
   const models = (key: string) => Array.isArray(input[key]) ? input[key] as SettingsModelCatalog["models"] : [];
   const defaults = record(input.defaultModels);
@@ -260,6 +262,7 @@ function normalizeModels(value: unknown): SettingsModelCatalog {
     grokModels: models("grokModels"),
     qoderModels: models("qoderModels"),
     piModels: models("piModels"),
+    thinkingEfforts: record(input.thinkingEfforts) as SettingsModelCatalog["thinkingEfforts"],
     claudeVersion: nullableString(input.claudeVersion),
     opencodeVersion: nullableString(input.opencodeVersion),
     refreshedAt: nullableString(input.refreshedAt),

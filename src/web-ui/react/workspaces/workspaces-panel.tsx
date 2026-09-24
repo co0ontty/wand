@@ -1266,14 +1266,31 @@ export function WorkspacesPanel({
   // 任务行「＋」的 Agent 选择器：先记下目标任务，确认后在该任务目录内新建会话。
   const [pendingNewSessionTask, setPendingNewSessionTask] = React.useState<TaskSummary | null>(null);
   const [manageMode, setManageMode] = React.useState(false);
+  const [manageFeedback, setManageFeedback] = React.useState<"idle" | "pending" | "done" | "error">("idle");
+  const [manageFeedbackLabel, setManageFeedbackLabel] = React.useState("");
+  const manageFeedbackTimer = React.useRef<number | null>(null);
   const [searchOpen, setSearchOpen] = React.useState(false);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
   const searchButtonRef = React.useRef<HTMLButtonElement>(null);
+  const searchWasVisible = React.useRef(false);
   const searchId = React.useId();
   const searchVisible = searchOpen || Boolean(searchQuery);
+  const clearManageFeedbackTimer = React.useCallback(() => {
+    if (manageFeedbackTimer.current === null) return;
+    window.clearTimeout(manageFeedbackTimer.current);
+    manageFeedbackTimer.current = null;
+  }, []);
+  React.useEffect(() => clearManageFeedbackTimer, [clearManageFeedbackTimer]);
   React.useEffect(() => {
-    if (searchOpen) searchInputRef.current?.focus();
-  }, [searchOpen]);
+    if (searchVisible) {
+      searchInputRef.current?.focus();
+      searchWasVisible.current = true;
+      return;
+    }
+    if (!searchWasVisible.current) return;
+    searchWasVisible.current = false;
+    searchButtonRef.current?.focus();
+  }, [searchVisible]);
   const [selection, setSelection] = React.useState<SidebarManageSelection>(EMPTY_SIDEBAR_MANAGE_SELECTION);
   const [confirmingManageDelete, setConfirmingManageDelete] = React.useState(false);
   const [manageBusy, setManageBusy] = React.useState(false);
@@ -1286,10 +1303,13 @@ export function WorkspacesPanel({
     && prunedSelection.taskIds.length === visibleManaged.taskIds.length
     && prunedSelection.sessionIds.length === visibleManaged.sessionIds.length;
   const exitManageMode = React.useCallback(() => {
+    clearManageFeedbackTimer();
     setManageMode(false);
     setSelection(EMPTY_SIDEBAR_MANAGE_SELECTION);
     setConfirmingManageDelete(false);
-  }, []);
+    setManageFeedback("idle");
+    setManageFeedbackLabel("");
+  }, [clearManageFeedbackTimer]);
 
   const openTask = React.useCallback((group: TaskDirectoryGroup, task: TaskSummary, preferredSessionId?: string): unknown => {
     onNavigate?.();
@@ -1382,6 +1402,8 @@ export function WorkspacesPanel({
     const resolved = prunedSelection;
     if (sidebarManageCount(resolved) === 0) return;
     setManageBusy(true);
+    setManageFeedback("pending");
+    setManageFeedbackLabel("");
     try {
       for (const taskId of resolved.taskIds) {
         await httpWorkspacesRepository.archiveTask(taskId);
@@ -1395,14 +1417,29 @@ export function WorkspacesPanel({
       } else {
         await runtime()?.refreshSessions();
       }
-      toast(`已${describeManagedResult(resolved)}`, "info");
-      exitManageMode();
+      const result = `已${describeManagedResult(resolved)}`;
+      toast(result, "info");
+      setManageFeedback("done");
+      setManageFeedbackLabel(result);
       await reload();
+      clearManageFeedbackTimer();
+      manageFeedbackTimer.current = window.setTimeout(() => {
+        manageFeedbackTimer.current = null;
+        exitManageMode();
+      }, 1100);
     } catch (cause) {
       toast(describeError(cause, "无法处理所选任务。"), "danger");
+      setManageFeedback("error");
+      setManageFeedbackLabel("处理失败");
+      clearManageFeedbackTimer();
+      manageFeedbackTimer.current = window.setTimeout(() => {
+        manageFeedbackTimer.current = null;
+        setConfirmingManageDelete(false);
+        setManageFeedback("idle");
+        setManageFeedbackLabel("");
+      }, 1400);
     } finally {
       setManageBusy(false);
-      setConfirmingManageDelete(false);
     }
   };
 
@@ -1454,10 +1491,15 @@ export function WorkspacesPanel({
                     className={classNames("sidebar-manage-action", manageActionTone === "danger" && "danger")}
                     kind={manageActionTone}
                     size="small"
-                    disabled={manageBusy || selectedCount === 0}
+                    aria-live="polite"
+                    disabled={(manageBusy || selectedCount === 0) && manageFeedback !== "done"}
                     onClick={() => { void applyManagedSelection(); }}
                   >
-                    {manageBusy ? "正在处理…" : `确认${describeManagedAction(prunedSelection)}`}
+                    {manageFeedback === "pending"
+                      ? "正在处理…"
+                      : manageFeedback === "done" || manageFeedback === "error"
+                        ? manageFeedbackLabel
+                        : `确认${describeManagedAction(prunedSelection)}`}
                   </WandButton>
                 </>
               ) : (
@@ -1475,20 +1517,42 @@ export function WorkspacesPanel({
             </div>
           ) : directoryId === undefined ? (
             <>
-            <div className="sidebar-list-heading">
-              <h2>项目与任务</h2>
+            <div className={classNames("sidebar-list-heading", searchVisible && "is-searching")}>
+              <h2 aria-hidden={searchVisible || undefined}>项目与任务</h2>
+              <div className="sidebar-search-expand" id={searchId} inert={!searchVisible || undefined}>
+                <WandInput
+                  ref={searchInputRef}
+                  className="sidebar-search-input"
+                  type="search"
+                  value={searchQuery}
+                  placeholder="搜索任务或会话"
+                  aria-label="搜索任务或会话"
+                  tabIndex={searchVisible ? 0 : -1}
+                  clearable
+                  startSlot={<WandIcon name="search" size={14}/>}
+                  onClear={() => onSearchChange?.("")}
+                  onChange={(event) => onSearchChange?.(event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Escape") return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onSearchChange?.("");
+                    setSearchOpen(false);
+                  }}
+                />
+              </div>
               <div className="sidebar-list-actions">
                 <WandIconButton
                   ref={searchButtonRef}
                   title={searchVisible ? "收起搜索" : "搜索任务或会话"}
                   aria-label={searchVisible ? "收起搜索" : "搜索任务或会话"}
                   aria-expanded={searchVisible}
-                  aria-controls={searchVisible ? searchId : undefined}
+                  aria-controls={searchId}
                   onClick={() => {
                     if (searchVisible) onSearchChange?.("");
                     setSearchOpen(!searchVisible);
                   }}
-                ><WandIcon name="search" size={15}/></WandIconButton>
+                ><WandIcon name={searchVisible ? "close" : "search"} size={15}/></WandIconButton>
                 <WandIconButton
                   className="sidebar-manage-toggle"
                   title="批量管理"
@@ -1501,28 +1565,6 @@ export function WorkspacesPanel({
                 ><WandIcon name="check" size={15}/></WandIconButton>
               </div>
             </div>
-            {searchVisible && <div className="sidebar-toolbar" id={searchId}>
-              <WandInput
-                ref={searchInputRef}
-                className="sidebar-search-input"
-                type="search"
-                value={searchQuery}
-                placeholder="搜索任务或会话"
-                aria-label="搜索任务或会话"
-                clearable
-                startSlot={<WandIcon name="search" size={14}/>}
-                onClear={() => onSearchChange?.("")}
-                onChange={(event) => onSearchChange?.(event.currentTarget.value)}
-                onKeyDown={(event) => {
-                  if (event.key !== "Escape") return;
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onSearchChange?.("");
-                  setSearchOpen(false);
-                  searchButtonRef.current?.focus();
-                }}
-              />
-            </div>}
             </>
           ) : null}
           {searchQuery && visibleGroups.length === 0 ? (

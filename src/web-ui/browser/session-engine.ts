@@ -1,6 +1,8 @@
 import { state, writeStoredBoolean } from "./state";
 import { createSessionReads } from "./session-reads";
 import { parseJsonResponse } from "../react/http-adapter";
+import { publishWandModelCatalog, startWandModelCatalogPolling } from "../react/model-catalog";
+import { compactThinkingLabel, dynamicThinkingChoices } from "../thinking-efforts";
 import { getErrorMessage } from "../../error-utils.js";
 
 import { mergeBlockWindowedMessages, mergeWindowedMessages } from "./message-reconciliation";
@@ -343,13 +345,8 @@ const sessionReads = createSessionReads();
 
       export function getThinkingCompactLabel(id, session?) {
         var effort = getThinkingLabel(id, session);
-        if (effort === "low") return "低";
-        if (effort === "medium") return "中";
-        if (effort === "high") return "高";
-        if (effort === "xhigh") return "超高";
-        if (effort === "max") return "极高";
-        if (effort === "ultra") return "极限";
-        return "自动";
+        if (!effort || effort === "auto") return "自动";
+        return compactThinkingLabel(effort);
       }
 
       export function getModelDisplayLabel(model, session) {
@@ -710,34 +707,28 @@ const sessionReads = createSessionReads();
         { id: "max",      label: "max",    hint: "Claude: max · Codex: xhigh · OpenCode variant: max" }
       ];
 
-      function codexThinkingId(effort) {
-        if (effort === "low") return "standard";
-        if (effort === "medium") return "deep";
-        if (effort === "xhigh") return "max";
-        return "codex:" + effort;
+      function thinkingSourceForSession(session) {
+        var provider = getProviderForSession(session);
+        var modelId = getEffectiveModel(session) || "default";
+        var models = getModelsForCurrentProvider(session);
+        var info = models.find(function(item) { return item.id === modelId; })
+          || models.find(function(item) { return item.id === "default"; });
+        if (info && Array.isArray(info.reasoningEfforts) && info.reasoningEfforts.length) {
+          return {
+            provider: provider,
+            efforts: info.reasoningEfforts,
+            defaultEffort: info.defaultReasoningEffort || "",
+          };
+        }
+        var catalog = state.providerThinkingEfforts || {};
+        var efforts = Array.isArray(catalog[provider]) ? catalog[provider] : [];
+        return { provider: provider, efforts: efforts, defaultEffort: "" };
       }
 
       export function getThinkingLevels(session?) {
-        if (getProviderForSession(session) !== "codex") return THINKING_LEVELS;
-        var model = getEffectiveModel(session) || "default";
-        var models = state.availableCodexModels || [];
-        var info = models.find(function(item) { return item.id === model; })
-          || models.find(function(item) { return item.id === "default"; });
-        var efforts = info && Array.isArray(info.reasoningEfforts) ? info.reasoningEfforts : [];
-        if (!efforts.length) return THINKING_LEVELS;
-        var defaultEffort = info.defaultReasoningEffort || "";
-        return [{
-          id: "off",
-          label: "auto",
-          hint: defaultEffort ? "使用模型默认档位（" + defaultEffort + "）" : "使用模型默认档位"
-        }].concat(efforts.map(function(level) {
-          var effort = String(level.effort || "").toLowerCase();
-          return {
-            id: codexThinkingId(effort),
-            label: effort,
-            hint: level.description || effort
-          };
-        }).filter(function(level) { return level.label; }));
+        var source = thinkingSourceForSession(session);
+        var dynamic = dynamicThinkingChoices(source.provider, source.efforts, source.defaultEffort);
+        return dynamic || THINKING_LEVELS;
       }
 
       export function getThinkingLabel(id, session?) {
@@ -771,7 +762,7 @@ const sessionReads = createSessionReads();
       export function applyConfigDefaultThinking(config) {
         var effort = config && typeof config === "object" ? config.defaultThinkingEffort : "";
         var supported = effort === "off" || effort === "standard" || effort === "deep" || effort === "max"
-          || /^codex:[a-z0-9][a-z0-9_-]{0,31}$/.test(String(effort || ""));
+          || /^(claude|codex|opencode|grok|qoder|pi):[a-z0-9][a-z0-9_-]{0,31}$/.test(String(effort || ""));
         if (!supported) return;
         try {
           if (localStorage.getItem("wand-thinking-effort")) return;
@@ -828,10 +819,12 @@ const sessionReads = createSessionReads();
         return m === "managed" || m === "full-access";
       }
       export function fetchAvailableModels() {
+        startWandModelCatalogPolling();
         return fetch("/api/models", { credentials: "same-origin" })
           .then(function(res) { return res.json(); })
           .then(function(data) {
             applyAvailableModels(data);
+            publishWandModelCatalog(data);
             return data;
           })
           .catch(function() { return null; });
@@ -845,8 +838,21 @@ const sessionReads = createSessionReads();
         state.availableGrokModels = Array.isArray(data.grokModels) ? data.grokModels : [];
         state.availableQoderModels = Array.isArray(data.qoderModels) ? data.qoderModels : [];
         state.availablePiModels = Array.isArray(data.piModels) ? data.piModels : [];
+        state.providerThinkingEfforts = data.thinkingEfforts && typeof data.thinkingEfforts === "object"
+          ? data.thinkingEfforts
+          : {};
+        if (data.revision) state.modelCatalogRevision = data.revision;
         syncComposerModelSelect(getSelectedSession());
         return true;
+      }
+
+      if (typeof window !== "undefined") {
+        window.addEventListener("wand-model-catalog", function(event) {
+          var detail = event && (event as CustomEvent).detail;
+          if (!detail || !Array.isArray(detail.models)) return;
+          if (detail.revision && detail.revision === state.modelCatalogRevision) return;
+          applyAvailableModels(detail);
+        });
       }
 
       /** Refresh every provider catalog and immediately repopulate all visible model selectors. */
@@ -865,6 +871,7 @@ const sessionReads = createSessionReads();
           })
           .then(function(data) {
             if (!applyAvailableModels(data)) throw new Error("刷新模型列表失败。");
+            publishWandModelCatalog(data);
             showToast("模型列表已刷新。", "success");
             return data;
           })

@@ -16,6 +16,7 @@ import { classNames } from "../ui/class-names";
 
 import { getShellSidebarEntryActions, type ShellSidebarEntryActions } from "./shell-sidebar";
 import { ChatWidthToggle } from "./chat-width-toggle";
+import { SidebarToggleIcon } from "./sidebar-toggle-icon";
 import { SessionElapsed } from "./session-elapsed";
 import { TopbarGitBadge } from "./topbar-git-badge";
 import { useUiDispatch, useUiStoreSnapshot } from "./ui-store-react";
@@ -165,13 +166,13 @@ export function ShellTopbar() {
           <WandIconButton
             id="sessions-toggle-button"
             className={classNames("floating-sidebar-toggle", snapshot.layout.sessionsDrawerOpen && "active")}
-            aria-label="切换会话侧栏"
+            aria-label={snapshot.layout.sessionsDrawerOpen ? "关闭会话侧栏" : "打开会话侧栏"}
             aria-expanded={snapshot.layout.sessionsDrawerOpen}
             aria-controls="sessions-drawer"
             data-pressed={snapshot.layout.sessionsDrawerOpen || undefined}
             onClick={() => void dispatch({ type: "layout.drawer.toggle" })}
           >
-            <WandIcon name="rail" size={18}/>
+            <SidebarToggleIcon open={snapshot.layout.sessionsDrawerOpen} size={18}/>
           </WandIconButton>
         )}
         {!snapshot.layout.sidebarAnchored && <WandBrandMark className="topbar-brand"/>}

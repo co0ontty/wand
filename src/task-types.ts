@@ -12,7 +12,8 @@ export const DEFAULT_WAND_TASK_PRIORITY: WandTaskPriority = "low";
 /** 任务派发时选择的 CLI 工具；空串表示尚未指定。 */
 export type WandTaskAgentProvider = "claude" | "codex" | "opencode" | "grok" | "qoder" | "pi";
 export type WandTaskAgentModel = string;
-export type WandTaskAgentEffort = "off" | "standard" | "deep" | "max";
+/** 与会话思考档位同一套：旧四档，或 `provider:level` 原生档。 */
+export type WandTaskAgentEffort = "off" | "standard" | "deep" | "max" | `${WandTaskAgentProvider}:${string}`;
 
 /**
  * 派发时的执行模式，只暴露三种：

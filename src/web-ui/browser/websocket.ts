@@ -9,7 +9,7 @@ import { clearStructuredQueuePersistence } from "./chat-scroll";
 import { mergeIncrementalWindowedTurn } from "./message-reconciliation";
 import { flushPendingMessages, buildMessagesForRender, isCurrentTerminalSession, updateInputHint, flushStructuredInputQueue, updateStructuredQueueCounter, setTerminalInteractive, flushCrossSessionQueue, reconcileInteractiveState, getSelectedSession, closeKeyboardPopup } from "./input";
 import { notifyTaskEnded, clearSessionProgressNative, _syncWakeLock, showNotificationBubble, notifyTaskProgress, syncSessionProgressToNative, notifyPermissionRequest, notifyUpdateAvailable, showAutoUpdateOverlay, showRestartOverlay, showToast } from "./notifications";
-import { refreshAll, scheduleSessionListUpdate, subscribeToSession, updateSessionSnapshot, getPreferredMessages, selectSession, updateShellChrome, loadOutput, isAutoApproveImpliedByMode, applyCurrentView } from "./session-engine";
+import { refreshAll, scheduleSessionListUpdate, subscribeToSession, updateSessionSnapshot, getPreferredMessages, selectSession, updateShellChrome, loadOutput, isAutoApproveImpliedByMode, applyCurrentView, fetchAvailableModels } from "./session-engine";
 import { getLastAssistantSummary } from "./session-ui";
 import { clampClientTerminalOutput, restoreTerminalState, scheduleTerminalChromeUpdate, syncTerminalBuffer, updateTerminalJumpToBottomButton, wandTerminalWrite } from "./terminal";
 import {
@@ -753,7 +753,9 @@ function noteTurnActivity(sessionId: string, active: boolean): void {
             break;
           case 'notification':
             if (msg.data) {
-              if (msg.data.kind === "update") {
+              if (msg.data.kind === "models") {
+                fetchAvailableModels();
+              } else if (msg.data.kind === "update") {
                 notifyUpdateAvailable(msg.data.current || "-", msg.data.latest || "-");
               } else if (msg.data.kind === "auto-update-start") {
                 showAutoUpdateOverlay(

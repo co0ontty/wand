@@ -73,6 +73,8 @@ interface ModelCacheStorage {
 interface ModelCommandOptions {
   env: NodeJS.ProcessEnv;
   timeout: number;
+  /** Written to stdin, then closed. Pi RPC needs this. */
+  input?: string;
 }
 
 interface ModelCommandResult {
@@ -107,6 +109,20 @@ export interface ModelRefreshOptions {
   now?: () => Date;
 }
 
+export interface ThinkingEffortLevel {
+  effort: string;
+  description?: string;
+}
+
+/** 各 CLI 自己报出来的思考档位。Codex / 部分 OpenCode 模型另有 per-model 列表。 */
+export interface ProviderThinkingEfforts {
+  claude: ThinkingEffortLevel[];
+  opencode: ThinkingEffortLevel[];
+  grok: ThinkingEffortLevel[];
+  qoder: ThinkingEffortLevel[];
+  pi: ThinkingEffortLevel[];
+}
+
 export interface ModelCache {
   models: ClaudeModelInfo[];
   codexModels: ClaudeModelInfo[];
@@ -114,9 +130,36 @@ export interface ModelCache {
   grokModels: ClaudeModelInfo[];
   qoderModels: ClaudeModelInfo[];
   piModels: ClaudeModelInfo[];
+  thinkingEfforts: ProviderThinkingEfforts;
   claudeVersion: string | null;
   opencodeVersion: string | null;
   refreshedAt: string;
+}
+
+const EFFORT_ID_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/;
+
+function effortLevels(ids: readonly string[]): ThinkingEffortLevel[] {
+  return ids.map((effort) => ({ effort }));
+}
+
+/** 探针失败时的已知档位。下一次 CLI 成功应答会把它换掉。 */
+export const FALLBACK_PROVIDER_THINKING: ProviderThinkingEfforts = {
+  claude: effortLevels(["low", "medium", "high", "xhigh", "max"]),
+  opencode: effortLevels(["low", "medium", "high", "max"]),
+  grok: effortLevels(["low", "medium", "high", "xhigh"]),
+  qoder: effortLevels(["auto", "none", "low", "medium", "high", "xhigh", "max", "ultracode"]),
+  pi: effortLevels(["minimal", "low", "medium", "high", "xhigh", "max"]),
+};
+
+function cloneThinkingEfforts(efforts: ProviderThinkingEfforts): ProviderThinkingEfforts {
+  const copy = (levels: readonly ThinkingEffortLevel[]) => levels.map((level) => ({ ...level }));
+  return {
+    claude: copy(efforts.claude),
+    opencode: copy(efforts.opencode),
+    grok: copy(efforts.grok),
+    qoder: copy(efforts.qoder),
+    pi: copy(efforts.pi),
+  };
 }
 
 /** Immutable-looking snapshot returned to API clients. */
@@ -195,6 +238,7 @@ function cloneCache(cache: ModelCache): ModelCache {
     grokModels: cloneModels(cache.grokModels),
     qoderModels: cloneModels(cache.qoderModels),
     piModels: cloneModels(cache.piModels),
+    thinkingEfforts: cloneThinkingEfforts(cache.thinkingEfforts),
     claudeVersion: cache.claudeVersion,
     opencodeVersion: cache.opencodeVersion,
     refreshedAt: cache.refreshedAt,
@@ -209,7 +253,8 @@ function defaultCommandRunner(
   return execFileAsync(file, args, {
     env: options.env,
     timeout: options.timeout,
-    maxBuffer: 1024 * 1024,
+    maxBuffer: 4 * 1024 * 1024,
+    ...(options.input !== undefined ? { input: options.input } : {}),
   }).then(({ stdout, stderr }) => ({ stdout: String(stdout), stderr: String(stderr) }));
 }
 
@@ -375,6 +420,7 @@ function createInitialCache(options: ModelRefreshOptions): ModelCache {
     grokModels: cloneModels(GROK_FALLBACK_MODELS),
     qoderModels: cloneModels(QODER_FALLBACK_MODELS),
     piModels: cloneModels(PI_FALLBACK_MODELS),
+    thinkingEfforts: cloneThinkingEfforts(FALLBACK_PROVIDER_THINKING),
     claudeVersion: null,
     opencodeVersion: null,
     refreshedAt: now.toISOString(),
@@ -423,11 +469,11 @@ async function probeOpenCode(
   env: NodeJS.ProcessEnv,
 ): Promise<{ models: ProbeResult<ClaudeModelInfo[]>; version: ProbeResult<string | null> }> {
   const [modelsResult, versionResult] = await Promise.allSettled([
-    runner("opencode", ["models"], { env, timeout: 8000 }),
+    runner("opencode", ["models", "--verbose"], { env, timeout: 8000 }),
     runner("opencode", ["--version"], { env, timeout: 5000 }),
   ]);
   const models = modelsResult.status === "fulfilled"
-    ? { ok: true as const, value: parseOpenCodeModels(modelsResult.value.stdout) }
+    ? { ok: true as const, value: parseOpenCodeModelCatalog(modelsResult.value.stdout) }
     : { ok: false as const };
   const version = versionResult.status === "fulfilled"
     ? {
@@ -466,12 +512,154 @@ async function probePiModels(
   runner: ModelCommandRunner,
   env: NodeJS.ProcessEnv,
 ): Promise<ProbeResult<ClaudeModelInfo[]>> {
+  const rpcText = await commandText(
+    runner,
+    "pi",
+    ["--mode", "rpc", "--no-session"],
+    env,
+    12_000,
+    `${JSON.stringify({ id: "wand-models", type: "get_available_models" })}\n`,
+  );
+  const fromRpc = parsePiRpcModels(rpcText);
+  if (fromRpc.length > 1 || (fromRpc.length === 1 && fromRpc[0]?.id !== "default")) {
+    return { ok: true, value: fromRpc };
+  }
   try {
     const { stdout } = await runner("pi", ["--list-models"], { env, timeout: 8000 });
-    return { ok: true, value: parsePiModels(stdout) };
+    const parsed = parsePiModels(stdout);
+    return parsed.some((model) => model.id !== "default") ? { ok: true, value: parsed } : { ok: false };
   } catch {
     return { ok: false };
   }
+}
+
+/** 从 CLI 的 help / 非法档位报错里抽出 `low, medium, high` 这种列表。 */
+export function parseCliEffortList(text: string): string[] {
+  const patterns = [
+    /valid values(?:\s+are)?\s*:\s*([^.`\n]+)/i,
+    /use one of:\s*([^.`\n]+)/i,
+    /set thinking level:\s*([^.`\n]+)/i,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (!match?.[1]) continue;
+    const ids = match[1]
+      .split(/[,/]/)
+      .map((part) => part.trim().toLowerCase())
+      .filter((part) => EFFORT_ID_PATTERN.test(part));
+    if (ids.length) return Array.from(new Set(ids));
+  }
+  return [];
+}
+
+function effortLevelsFromIds(ids: readonly string[]): ThinkingEffortLevel[] {
+  return ids.map((effort) => ({ effort }));
+}
+
+async function commandText(
+  runner: ModelCommandRunner,
+  file: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  timeout: number,
+  input?: string,
+): Promise<string> {
+  try {
+    const result = await runner(file, args, { env, timeout, ...(input !== undefined ? { input } : {}) });
+    return `${result.stderr}\n${result.stdout}`;
+  } catch (error) {
+    const record = error as { stdout?: unknown; stderr?: unknown; message?: unknown };
+    return `${String(record.stderr ?? "")}\n${String(record.stdout ?? "")}\n${String(record.message ?? "")}`;
+  }
+}
+
+async function probeEffortList(
+  runner: ModelCommandRunner,
+  env: NodeJS.ProcessEnv,
+  file: string,
+  args: string[],
+): Promise<ProbeResult<ThinkingEffortLevel[]>> {
+  const text = await commandText(runner, file, args, env, 8000);
+  const ids = parseCliEffortList(text);
+  return ids.length ? { ok: true, value: effortLevelsFromIds(ids) } : { ok: false };
+}
+
+function variantsToEfforts(value: unknown): ThinkingEffortLevel[] {
+  const ids: string[] = [];
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      if (typeof item === "string") ids.push(item);
+      else if (isRecord(item) && typeof item.effort === "string") ids.push(item.effort);
+    }
+  } else if (isRecord(value)) {
+    ids.push(...Object.keys(value));
+  }
+  const unique = Array.from(new Set(
+    ids.map((id) => id.trim().toLowerCase()).filter((id) => EFFORT_ID_PATTERN.test(id)),
+  ));
+  return effortLevelsFromIds(unique);
+}
+
+/**
+ * `opencode models --verbose` 是「一行 id + 一段 JSON」。
+ * variants 是这个模型自己的推理档位；没有 JSON 时退回一行一个 id。
+ */
+export function parseOpenCodeModelCatalog(stdout: string): ClaudeModelInfo[] {
+  const verbose = parseOpenCodeVerboseModels(stdout);
+  if (verbose.length) return verbose;
+  return parseOpenCodeModels(stdout);
+}
+
+function parseOpenCodeVerboseModels(stdout: string): ClaudeModelInfo[] {
+  const lines = stdout.split(/\r?\n/);
+  const found: ClaudeModelInfo[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const header = lines[index]?.trim() ?? "";
+    if (!/^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._:/-]*$/i.test(header)) continue;
+    if ((lines[index + 1] ?? "").trim() !== "{") continue;
+    let depth = 0;
+    let end = index + 1;
+    for (; end < lines.length; end += 1) {
+      for (const character of lines[end] ?? "") {
+        if (character === "{") depth += 1;
+        else if (character === "}") depth -= 1;
+      }
+      if (depth === 0) break;
+    }
+    if (depth !== 0) continue;
+    let record: Record<string, unknown> | null = null;
+    try {
+      record = JSON.parse(lines.slice(index + 1, end + 1).join("\n")) as Record<string, unknown>;
+    } catch {
+      record = null;
+    }
+    const reasoningEfforts = record ? variantsToEfforts(record.variants) : [];
+    found.push({
+      id: header,
+      label: header,
+      ...(reasoningEfforts.length ? { reasoningEfforts } : {}),
+    });
+    index = end;
+  }
+  if (!found.length) return [];
+  return [
+    { id: "default", label: "跟随 OpenCode 默认", alias: true },
+    ...found,
+  ];
+}
+
+function unionModelEfforts(models: readonly ClaudeModelInfo[]): ThinkingEffortLevel[] {
+  const seen = new Set<string>();
+  const levels: ThinkingEffortLevel[] = [];
+  for (const model of models) {
+    for (const level of model.reasoningEfforts ?? []) {
+      const effort = level.effort.trim().toLowerCase();
+      if (!EFFORT_ID_PATTERN.test(effort) || seen.has(effort)) continue;
+      seen.add(effort);
+      levels.push({ effort, ...(level.description ? { description: level.description } : {}) });
+    }
+  }
+  return levels;
 }
 
 function createOfficialModelsApi(apiKey: string): ClaudeModelsApi {
@@ -569,7 +757,7 @@ export function parseGrokModels(stdout: string): ClaudeModelInfo[] {
       defaultModel = defaultMatch[1];
       continue;
     }
-    const bulletMatch = line.match(/^\*+\s*([A-Za-z0-9][A-Za-z0-9._:-]{0,127})(?:\s*\(.*\))?\s*$/);
+    const bulletMatch = line.match(/^[-*•]+\s+([A-Za-z0-9][A-Za-z0-9._:-]{0,127})(?:\s*\(.*\))?\s*$/);
     if (bulletMatch) {
       ids.push(bulletMatch[1]);
       continue;
@@ -626,12 +814,86 @@ export function parseQoderModels(stdout: string): ClaudeModelInfo[] {
   return [...cloneModels(QODER_FALLBACK_MODELS), ...discovered];
 }
 
+const PI_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+
+/**
+ * Same rule as Pi's `getSupportedThinkingLevels`: no reasoning means only off;
+ * `xhigh` / `max` exist only when `thinkingLevelMap` defines them; `null` drops a level.
+ */
+export function piThinkingLevelsForModel(model: {
+  reasoning?: boolean;
+  thinkingLevelMap?: Record<string, unknown> | null;
+}): string[] {
+  if (!model.reasoning) return ["off"];
+  const map = model.thinkingLevelMap ?? {};
+  return PI_THINKING_LEVELS.filter((level) => {
+    if (!Object.prototype.hasOwnProperty.call(map, level)) {
+      return level !== "xhigh" && level !== "max";
+    }
+    return map[level] !== null;
+  });
+}
+
+/** `pi --mode rpc` + `get_available_models`. One JSON response holds every model's thinking map. */
+export function parsePiRpcModels(stdout: string): ClaudeModelInfo[] {
+  let models: unknown[] | null = null;
+  for (const rawLine of stdout.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line.startsWith("{")) continue;
+    let record: Record<string, unknown> | null = null;
+    try {
+      record = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      record = null;
+    }
+    if (!record || record.type !== "response" || record.command !== "get_available_models" || record.success !== true) {
+      continue;
+    }
+    const data = isRecord(record.data) ? record.data : null;
+    if (data && Array.isArray(data.models)) models = data.models;
+  }
+  if (!models) return [];
+  const discovered: ClaudeModelInfo[] = [];
+  const seen = new Set<string>();
+  for (const entry of models) {
+    if (!isRecord(entry)) continue;
+    const provider = typeof entry.provider === "string" ? entry.provider.trim() : "";
+    const modelId = typeof entry.id === "string" ? entry.id.trim() : "";
+    const id = provider && modelId ? `${provider}/${modelId}` : "";
+    if (!id || !PI_MODEL_ID_PATTERN.test(id) || id.length > 128 || seen.has(id)) continue;
+    seen.add(id);
+    const name = typeof entry.name === "string" && entry.name.trim() ? entry.name.trim() : id;
+    const reasoningEfforts = effortLevelsFromIds(piThinkingLevelsForModel({
+      reasoning: entry.reasoning === true,
+      thinkingLevelMap: isRecord(entry.thinkingLevelMap) || entry.thinkingLevelMap === null
+        ? entry.thinkingLevelMap as Record<string, unknown> | null
+        : undefined,
+    }));
+    discovered.push({
+      id,
+      label: name === id ? id : `${name} · ${id}`,
+      ...(reasoningEfforts.length ? { reasoningEfforts } : {}),
+    });
+  }
+  if (!discovered.length) return [];
+  const union = unionModelEfforts(discovered);
+  return [
+    {
+      id: "default",
+      label: "跟随 Pi 默认",
+      alias: true,
+      ...(union.length ? { reasoningEfforts: union } : {}),
+    },
+    ...discovered,
+  ];
+}
+
 /**
  * Parse `pi --list-models`.
  *
  * Pi prints a padEnd-aligned table whose selectable `--model` value is
- * `provider/id` (for example `xai/grok-4.6`). The first two columns are the
- * only ones we keep; context / max-out / thinking / images are display-only.
+ * `provider/id` (for example `xai/grok-4.6`). The table only says thinking
+ * yes/no, so per-model levels come from `parsePiRpcModels` instead.
  */
 export function parsePiModels(stdout: string): ClaudeModelInfo[] {
   const discovered: ClaudeModelInfo[] = [];
@@ -732,6 +994,7 @@ function catalogRevision(cache: ModelCache): string {
     grokModels: cache.grokModels,
     qoderModels: cache.qoderModels,
     piModels: cache.piModels,
+    thinkingEfforts: cache.thinkingEfforts,
     claudeVersion: cache.claudeVersion,
     opencodeVersion: cache.opencodeVersion,
   });
@@ -801,6 +1064,32 @@ function parsePersistedModelList(value: unknown): ClaudeModelInfo[] | null {
   return result;
 }
 
+function parsePersistedThinkingEfforts(value: unknown): ProviderThinkingEfforts {
+  const fallback = cloneThinkingEfforts(FALLBACK_PROVIDER_THINKING);
+  if (!isRecord(value)) return fallback;
+  const providers = ["claude", "opencode", "grok", "qoder", "pi"] as const;
+  for (const provider of providers) {
+    const levels = parsePersistedEffortLevels(value[provider]);
+    if (levels) fallback[provider] = levels;
+  }
+  return fallback;
+}
+
+function parsePersistedEffortLevels(value: unknown): ThinkingEffortLevel[] | null {
+  if (!Array.isArray(value)) return null;
+  const levels: ThinkingEffortLevel[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (!isRecord(entry)) return null;
+    const effort = safePersistedString(entry.effort, 32)?.toLowerCase() ?? "";
+    if (!EFFORT_ID_PATTERN.test(effort) || seen.has(effort)) return null;
+    seen.add(effort);
+    const description = safePersistedString(entry.description);
+    levels.push({ effort, ...(description ? { description } : {}) });
+  }
+  return levels.length ? levels : null;
+}
+
 function parsePersistedModelCatalog(value: unknown): PersistedModelCatalog | null {
   if (!isRecord(value) || value.version !== MODEL_CATALOG_CACHE_VERSION || !isRecord(value.catalog)) return null;
   const catalog = value.catalog;
@@ -829,6 +1118,7 @@ function parsePersistedModelCatalog(value: unknown): PersistedModelCatalog | nul
     grokModels,
     qoderModels,
     piModels,
+    thinkingEfforts: parsePersistedThinkingEfforts(catalog.thinkingEfforts),
     claudeVersion,
     opencodeVersion,
     refreshedAt,
@@ -874,7 +1164,19 @@ async function discoverModelCache(
   const now = options.now?.() ?? new Date();
   const env = resolveChildEnv(options);
   const runner = options.commandRunner ?? defaultCommandRunner;
-  const [claudeVersionProbe, codexProbe, opencodeProbe, grokProbe, qoderProbe, piProbe, apiProbe] = await Promise.all([
+  const [
+    claudeVersionProbe,
+    codexProbe,
+    opencodeProbe,
+    grokProbe,
+    qoderProbe,
+    piProbe,
+    apiProbe,
+    claudeEffortProbe,
+    grokEffortProbe,
+    qoderEffortProbe,
+    piEffortProbe,
+  ] = await Promise.all([
     probeClaudeVersion(runner, env),
     probeCodexModels(runner, env),
     probeOpenCode(runner, env),
@@ -882,6 +1184,10 @@ async function discoverModelCache(
     probeQoderModels(runner, env),
     probePiModels(runner, env),
     listClaudeModelsFromApi(options, env),
+    probeEffortList(runner, env, "claude", ["--effort", "__wand_probe__", "--help"]),
+    probeEffortList(runner, env, "grok", ["--effort", "__wand_probe__", "-p", "x", "--output-format", "streaming-json", "--max-turns", "1"]),
+    probeEffortList(runner, env, "qodercli", ["-p", "x", "--reasoning-effort", "__wand_probe__"]),
+    probeEffortList(runner, env, "pi", ["--help"]),
   ]);
   const claudeVersion = claudeVersionProbe.ok ? claudeVersionProbe.value : previous.claudeVersion;
   const priorVerifications = loadClaudeVerifications(options.storage);
@@ -913,6 +1219,19 @@ async function discoverModelCache(
     grokModels: grokProbe.ok ? grokProbe.value : cloneModels(previous.grokModels),
     qoderModels: qoderProbe.ok ? qoderProbe.value : cloneModels(previous.qoderModels),
     piModels: piProbe.ok ? piProbe.value : cloneModels(previous.piModels),
+    thinkingEfforts: {
+      claude: claudeEffortProbe.ok ? claudeEffortProbe.value : cloneThinkingEfforts(previous.thinkingEfforts).claude,
+      opencode: opencodeProbe.models.ok && unionModelEfforts(opencodeProbe.models.value).length
+        ? unionModelEfforts(opencodeProbe.models.value)
+        : cloneThinkingEfforts(previous.thinkingEfforts).opencode,
+      grok: grokEffortProbe.ok ? grokEffortProbe.value : cloneThinkingEfforts(previous.thinkingEfforts).grok,
+      qoder: qoderEffortProbe.ok ? qoderEffortProbe.value : cloneThinkingEfforts(previous.thinkingEfforts).qoder,
+      pi: piProbe.ok && unionModelEfforts(piProbe.value).length
+        ? unionModelEfforts(piProbe.value)
+        : piEffortProbe.ok
+          ? piEffortProbe.value
+          : cloneThinkingEfforts(previous.thinkingEfforts).pi,
+    },
     claudeVersion,
     opencodeVersion: opencodeProbe.version.ok ? opencodeProbe.version.value : previous.opencodeVersion,
     refreshedAt: now.toISOString(),
@@ -933,6 +1252,7 @@ export class ModelCatalogService {
   private hasPersistedSnapshot: boolean;
   private refreshPromise: Promise<ModelCatalogRefreshResult> | null = null;
   private inFlightIncludesVerification = false;
+  private readonly changeListeners = new Set<(result: ModelCatalogRefreshResult) => void>();
 
   constructor(private readonly getOptions: () => ModelRefreshOptions) {
     const initialOptions = getOptions();
@@ -944,6 +1264,12 @@ export class ModelCatalogService {
 
   snapshot(): ModelCatalogSnapshot {
     return { ...cloneCache(this.cache), revision: this.revision };
+  }
+
+  /** 目录内容真正变化时通知。客户端靠它刷新下拉，不用自己再跑一遍 CLI。 */
+  onChanged(listener: (result: ModelCatalogRefreshResult) => void): () => void {
+    this.changeListeners.add(listener);
+    return () => { this.changeListeners.delete(listener); };
   }
 
   refresh(request: ModelCatalogRefreshRequest = {}): Promise<ModelCatalogRefreshResult> {
@@ -987,7 +1313,13 @@ export class ModelCatalogService {
       savePersistedModelCatalog(options.storage, this.cache, this.revision);
       this.hasPersistedSnapshot = Boolean(options.storage);
     }
-    return { ...this.snapshot(), changed, checkedAt };
+    const result = { ...this.snapshot(), changed, checkedAt };
+    if (changed) {
+      for (const listener of this.changeListeners) {
+        try { listener(result); } catch { /* 通知失败不影响目录本身 */ }
+      }
+    }
+    return result;
   }
 }
 

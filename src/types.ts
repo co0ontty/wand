@@ -249,10 +249,15 @@ interface ReasoningEffortInfo {
 }
 
 /**
- * 旧的四档值需要继续兼容已有会话。Codex 动态档位加 provider 前缀，
- * 避免 `max`（旧值代表 xhigh）与 Codex 新增的原生 max 档位冲突。
+ * 旧的四档值需要继续兼容已有会话。CLI 动态档位加 provider 前缀，
+ * 避免 `max`（旧值，各家含义不同）和 CLI 新增的原生档位冲突。
  */
-export type ThinkingEffort = "off" | "standard" | "deep" | "max" | `codex:${string}`;
+export type ThinkingEffort =
+  | "off"
+  | "standard"
+  | "deep"
+  | "max"
+  | `${"claude" | "codex" | "opencode" | "grok" | "qoder" | "pi"}:${string}`;
 
 export interface WorktreeInfo {
   branch: string;
@@ -665,11 +670,9 @@ export interface SessionSnapshot {
   selectedModel?: string | null;
   /**
    * 用户选定的思考深度。
-   *   - off:      不覆盖默认思考深度（SDK: 不传 thinking；Claude CLI: auto/default；Codex: 使用模型默认值）
-   *   - standard: 标准（SDK: budget 4096；Claude CLI: low；Codex: low）
-   *   - deep:    深度（SDK: budget 16000；Claude CLI: medium；Codex: medium）
-   *   - max:     旧版最深档（SDK: budget 31999；Claude CLI: max；Codex: xhigh）
-   *   - codex:*: Codex CLI 动态声明的原生推理档位
+   *   - off:      不覆盖默认思考深度
+   *   - standard / deep / max: 旧四档，按各 CLI 当时的低、中、高档换算
+   *   - provider:level: 该 CLI 自己报出来的原生档位，原样传给对应 flag
    */
   thinkingEffort?: ThinkingEffort | null;
   /** 当前 PTY 列宽，由最近一次 resize 决定。前端用它来判断本端 fit 是否需要校准。 */

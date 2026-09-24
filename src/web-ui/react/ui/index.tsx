@@ -35,6 +35,7 @@ export {WandSelect, type WandSelectOption} from "./select";
 export {WandSkeleton} from "./skeleton";
 export {WandSearchField} from "./search-field";
 export {WandSwitch} from "./switch";
+export {WandStretchTabs, type WandStretchTab, type WandStretchTabsProps} from "./stretch-tabs";
 export {WandTabs} from "./tabs";
 export {WandToastRegion, showWandToast, type WandToastHandle, type WandToastTone} from "./toast";
 export { PortalContainerProvider, REACT_UI_PORTALS_ID } from "./portal-context";

@@ -139,7 +139,7 @@ function EditorBody({ snapshot, editorRef, ranges, activeRange }: {
   if (!file) return <div className="wand-code-editor-state">选择文件后将在这里编辑。</div>;
   if (snapshot.preview && isMarkdownPreview(file)) {
     return (
-      <div className="wand-code-editor-markdown">
+      <div className="wand-code-editor-markdown" tabIndex={0} aria-label={`${file.name} 预览`}>
         <MarkdownPreview content={file.draft} fontSize={snapshot.fontSize} wrap={snapshot.wrap}/>
       </div>
     );
@@ -325,8 +325,10 @@ export function CodeEditorHost() {
       return;
     }
     if (snapshot.status !== "ready" || !snapshot.file) return;
+    // Leaving the rendered Markdown view returns the caret to the source, so
+    // typing continues where the user left off.
     editorRef.current?.focus();
-  }, [snapshot.findOpen, snapshot.activePath, snapshot.status]);
+  }, [snapshot.findOpen, snapshot.activePath, snapshot.status, snapshot.preview]);
 
   useEffect(() => {
     if (snapshot.status !== "ready") return;

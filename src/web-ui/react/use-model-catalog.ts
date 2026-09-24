@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { cachedWandModelCatalog, loadWandModelCatalog, type WandModelCatalog } from "./model-catalog";
+import { cachedWandModelCatalog, loadWandModelCatalog, subscribeWandModelCatalog, type WandModelCatalog } from "./model-catalog";
 
 /**
  * 模型目录：冷缓存时拉一次 `GET /api/models`，热缓存直接同步渲染。
@@ -10,8 +10,14 @@ import { cachedWandModelCatalog, loadWandModelCatalog, type WandModelCatalog } f
  */
 export function useWandModelCatalog(enabled = true): WandModelCatalog | null {
   const [catalog, setCatalog] = useState<WandModelCatalog | null>(() => cachedWandModelCatalog());
+  useEffect(() => subscribeWandModelCatalog(setCatalog), []);
   useEffect(() => {
-    if (!enabled || cachedWandModelCatalog()) return;
+    if (!enabled) return;
+    const cached = cachedWandModelCatalog();
+    if (cached) {
+      setCatalog(cached);
+      return;
+    }
     const abort = new AbortController();
     void loadWandModelCatalog(abort.signal)
       .then((loaded) => { if (!abort.signal.aborted) setCatalog(loaded); })

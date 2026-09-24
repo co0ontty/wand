@@ -15,6 +15,7 @@ import type { WorkspaceSessionKind, WorkspaceSessionTarget } from "../workspaces
 import { ShellFilePanel } from "./shell-file-panel";
 import { TaskBoardHost } from "../issues/task-board-host";
 import { taskBoardController, taskBoardStore } from "../issues/task-board-controller";
+import { SidebarToggleIcon } from "./sidebar-toggle-icon";
 import { ShellTopbar } from "./shell-topbar";
 import { useUiDispatch, useUiStoreSnapshot } from "./ui-store-react";
 import type { UiSnapshotData } from "./ui-store";
@@ -194,11 +195,13 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
       {context.taskId ? null : <ShellTopbar/>}
       {context.taskId && snapshot.layout.sidebarDrawer && (
         <nav className="workspace-mobile-navigation" aria-label="任务导航">
-          <WandIconButton aria-label="打开任务" title="打开任务"
+          <WandIconButton
+            aria-label={snapshot.layout.sessionsDrawerOpen ? "关闭任务列表" : "打开任务"}
+            title={snapshot.layout.sessionsDrawerOpen ? "关闭任务列表" : "打开任务"}
             data-pressed={snapshot.layout.sessionsDrawerOpen || undefined}
             aria-expanded={snapshot.layout.sessionsDrawerOpen} aria-controls="sessions-drawer"
             onClick={() => void dispatch({ type: "layout.drawer.toggle" })}>
-            <WandIcon name="rail" size={19}/>
+            <SidebarToggleIcon open={snapshot.layout.sessionsDrawerOpen} size={19}/>
           </WandIconButton>
           <span title={context.taskName}>{context.taskName || "任务"}</span>
         </nav>
@@ -228,6 +231,7 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
       <CodeEditorHost/>
       {/* 看板是独立路由，不能替换 <main>：#output 等 LegacyHost 槽位必须一直挂着。 */}
       {taskBoard.open ? <TaskBoardHost
+        sidebarOpen={snapshot.layout.sessionsDrawerOpen}
         onBack={() => taskBoardController.close()}
         onOpenSidebar={snapshot.layout.sidebarDrawer
           ? () => void dispatch({ type: "layout.drawer.toggle" })

@@ -50,7 +50,8 @@ test("OpenCode thinking effort maps to CLI variants", () => {
   assert.equal(thinkingEffortToOpenCodeVariant("standard"), "low");
   assert.equal(thinkingEffortToOpenCodeVariant("deep"), "high");
   assert.equal(thinkingEffortToOpenCodeVariant("max"), "max");
-  assert.equal(thinkingEffortToOpenCodeVariant("codex:ultra"), "ultra");
+  assert.equal(thinkingEffortToOpenCodeVariant("opencode:minimal"), "minimal");
+  assert.equal(thinkingEffortToOpenCodeVariant("codex:ultra"), null);
 });
 
 test("Grok headless effort maps max to xhigh", () => {
@@ -58,8 +59,10 @@ test("Grok headless effort maps max to xhigh", () => {
   assert.equal(thinkingEffortToGrokEffort("standard"), "low");
   assert.equal(thinkingEffortToGrokEffort("deep"), "high");
   assert.equal(thinkingEffortToGrokEffort("max"), "xhigh");
-  assert.equal(thinkingEffortToGrokEffort("codex:max"), "xhigh");
-  assert.equal(thinkingEffortToGrokEffort("codex:medium"), "medium");
+  assert.equal(thinkingEffortToGrokEffort("grok:xhigh"), "xhigh");
+  assert.equal(thinkingEffortToGrokEffort("grok:medium"), "medium");
+  assert.equal(thinkingEffortToGrokEffort("grok:max"), "xhigh");
+  assert.equal(thinkingEffortToGrokEffort("codex:max"), null);
 });
 
 test("codex live output usage estimate grows with streamed content", () => {

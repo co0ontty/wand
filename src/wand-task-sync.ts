@@ -4,6 +4,7 @@ import { getErrorMessage } from "./error-utils.js";
 import type { WandStorage } from "./storage.js";
 import { provisionalTaskTitleFromDescription } from "./task-title.js";
 import { isSessionProvider } from "./session-provider.js";
+import { isThinkingEffort } from "./structured-provider-common.js";
 import { isClosedWandTaskStatus, normalizeWandTaskAgentMode, type WandTask, type WandTaskAgent, type WandTaskTitleSource } from "./task-types.js";
 import type { LayoutNode, SessionSnapshot, Workspace, WorkspaceTask } from "./types.js";
 import { firstLayoutTabId } from "./layout-tree.js";
@@ -96,7 +97,7 @@ function agentFromSession(session: SessionSnapshot): WandTaskAgent | null {
   return {
     provider: session.provider,
     model: session.selectedModel || session.structuredState?.model || "default",
-    thinkingEffort: effort === "standard" || effort === "deep" || effort === "max" ? effort : "off",
+    thinkingEffort: isThinkingEffort(effort) ? effort : "off",
     mode: normalizeWandTaskAgentMode(session.provider, session.mode),
     // 会话形态按会话自身的 sessionKind 还原，PTY 会话不会在「再指派」时被误当结构化。
     kind: (session.sessionKind ?? "pty") === "structured" ? "structured" : "pty",

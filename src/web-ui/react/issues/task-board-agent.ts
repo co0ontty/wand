@@ -17,7 +17,10 @@ import {
   supportedWandTaskAgentModes,
 } from "../../../task-types";
 import type { WandSelectOption } from "../ui";
+import { isThinkingEffort } from "../../../structured-provider-common";
+import { compactThinkingLabel, dynamicThinkingChoices } from "../../thinking-efforts";
 import {
+  catalogThinkingEfforts,
   MODEL_CATALOG_DEFAULT_VALUE,
   normalizeWandModelCatalog,
   wandModelOptions,
@@ -195,8 +198,32 @@ export function issueAgentProviderLabel(provider: string | null | undefined): st
   return ISSUE_AGENT_PROVIDERS.find((entry) => entry.value === provider)?.label ?? (provider || "Agent");
 }
 
+export function issueAgentEffortOptions(
+  provider: IssueAgentProvider,
+  catalog: IssueModelCatalog | null,
+  modelId?: string,
+  current?: string,
+): WandSelectOption[] {
+  const source = catalogThinkingEfforts(catalog, provider, modelId);
+  const dynamic = dynamicThinkingChoices(provider, source.efforts, source.defaultEffort);
+  const options = dynamic
+    ? dynamic.map((choice) => ({
+      value: choice.id,
+      label: choice.id === "off" ? "关闭" : compactThinkingLabel(choice.label),
+    }))
+    : ISSUE_AGENT_EFFORTS.map((entry) => ({ value: entry.value, label: entry.label }));
+  if (current && !options.some((option) => option.value === current)) {
+    options.push({ value: current, label: issueAgentEffortLabel(current) });
+  }
+  return options;
+}
+
 export function issueAgentEffortLabel(effort: string | null | undefined): string {
-  return ISSUE_AGENT_EFFORTS.find((entry) => entry.value === effort)?.label ?? (effort || "关闭");
+  const found = ISSUE_AGENT_EFFORTS.find((entry) => entry.value === effort);
+  if (found) return found.label;
+  if (!effort) return "关闭";
+  const native = effort.includes(":") ? effort.slice(effort.indexOf(":") + 1) : effort;
+  return compactThinkingLabel(native);
 }
 
 /** 任务可绑定的项目；`cwd` 即派发 Agent 时的运行目录。 */
@@ -233,11 +260,15 @@ export function withIssueAgentProvider(
   const model = options.some((option) => option.value === agent.model)
     ? agent.model
     : options[0]?.value ?? ISSUE_AGENT_DEFAULT_MODEL;
+  const effortOptions = issueAgentEffortOptions(provider, catalog, model);
   return {
     ...agent,
     provider,
     model,
     mode: normalizeWandTaskAgentMode(provider, agent.mode),
+    thinkingEffort: effortOptions.some((option) => option.value === agent.thinkingEffort)
+      ? agent.thinkingEffort
+      : "off",
   };
 }
 
@@ -245,7 +276,7 @@ export function isDispatchableIssueAgent(agent: WandTaskAgent | null | undefined
   if (!agent) return false;
   if (!ISSUE_AGENT_PROVIDERS.some((entry) => entry.value === agent.provider)) return false;
   if (!agent.model.trim()) return false;
-  if (!ISSUE_AGENT_EFFORTS.some((entry) => entry.value === agent.thinkingEffort)) return false;
+  if (!isThinkingEffort(agent.thinkingEffort)) return false;
   return ISSUE_AGENT_MODES.some((entry) => entry.value === agent.mode);
 }
 
@@ -285,8 +316,8 @@ function assignedAgents(
 
 function agentFromSession(session: IssueAgentGroup["sessions"][number]): WandTaskAgent | null {
   if (!isIssueAgentProvider(session.provider)) return null;
-  const thinkingEffort = ISSUE_AGENT_EFFORTS.some((entry) => entry.value === session.thinkingEffort)
-    ? session.thinkingEffort as WandTaskAgent["thinkingEffort"]
+  const thinkingEffort = isThinkingEffort(session.thinkingEffort)
+    ? session.thinkingEffort
     : "off";
   const mode = normalizeWandTaskAgentMode(session.provider, session.mode);
   return {

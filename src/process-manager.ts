@@ -17,7 +17,7 @@ import { buildChildEnv, isRunningAsRoot } from "./env-utils.js";
 import { buildLanguageDirective, buildManagedAutonomyDirective } from "./language-prompt.js";
 import { prepareSessionWorktree } from "./git-worktree.js";
 import { getProviderCommandSessionId, getProviderResumeCommandSessionId } from "./resume-policy.js";
-import { normalizeThinkingEffort, thinkingEffortToClaudeCliEffort, thinkingEffortToClaudeSlashEffort, thinkingEffortToCodexReasoningEffort, thinkingEffortToOpenCodeVariant, thinkingEffortToPiLevel } from "./structured-provider-common.js";
+import { normalizeThinkingEffort, thinkingEffortToClaudeCliEffort, thinkingEffortToClaudeSlashEffort, thinkingEffortToCodexReasoningEffort, thinkingEffortToGrokEffort, thinkingEffortToPiLevel, thinkingEffortToQoderEffort } from "./structured-provider-common.js";
 import {
   consumePtyInputForTopic,
   createPtyTopicLineBuffer,
@@ -2832,9 +2832,7 @@ export class ProcessManager extends EventEmitter {
       if (trimmedModel && trimmedModel !== "default" && !/--model(?:\s|=)/.test(result) && !/(?:^|\s)-m(?:\s|$)/.test(result)) {
         result += ` --model '${trimmedModel.replace(/'/g, "'\\''")}'`;
       }
-      // 交互 TUI 仍接受 `--effort max`。无头 `-p` 只接受 xhigh/high/medium/low，
-      // 那条路径用 thinkingEffortToGrokEffort，不要改成同一个映射。
-      const effort = thinkingEffortToOpenCodeVariant(thinkingEffort ?? null);
+      const effort = thinkingEffortToGrokEffort(thinkingEffort ?? null);
       if (effort && !/--(?:reasoning-)?effort(?:\s|=)/.test(result)) {
         result += ` --effort '${effort.replace(/'/g, "'\\''")}'`;
       }
@@ -2854,6 +2852,10 @@ export class ProcessManager extends EventEmitter {
       // 权限桥，保持 Qoder 自身确认只会让会话卡在 TUI 弹窗或直接拒绝工具调用。
       if (!/--(?:yolo|dangerously-skip-permissions|permission-mode)(?:\s|=|$)/.test(result)) {
         result += " --permission-mode bypass_permissions";
+      }
+      const qoderEffort = thinkingEffortToQoderEffort(thinkingEffort ?? null);
+      if (qoderEffort && !/--reasoning-effort(?:\s|=)/.test(result)) {
+        result += ` --reasoning-effort '${qoderEffort.replace(/'/g, "'\\''")}'`;
       }
       return result;
     }

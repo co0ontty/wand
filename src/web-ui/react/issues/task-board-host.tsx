@@ -1,4 +1,5 @@
 import * as React from "react";
+import { subscribeWandModelCatalog } from "../model-catalog";
 import { subscribeTaskChanges } from "../task-changes";
 import { draggedTaskId, isTaskDrag, startTaskDrag, TASK_DRAG_TYPE } from "./task-drag";
 import { draggedSessionId, isSessionDrag, startSessionDrag } from "../workspaces/session-drag";
@@ -13,9 +14,10 @@ import {
   WandSelect,
   WandSearchField,
   WandSkeleton,
+  WandStretchTabs,
   WandSwitch,
-  WandTabs,
 } from "../ui";
+import { SidebarToggleIcon } from "../shell/sidebar-toggle-icon";
 import { classNames } from "../ui/class-names";
 import { MilestonePicker } from "../milestones/picker";
 import { useDefaultMilestone, usePreselectMilestone } from "../milestones/default-iteration";
@@ -26,7 +28,7 @@ import {
   EMPTY_ISSUE_FILTERS,
   filterIssues,
   groupIssuesByStatus,
-  ISSUE_AGENT_EFFORTS,
+  issueAgentEffortOptions,
   ISSUE_AGENT_PROVIDERS,
   ISSUE_ARCHIVE_COLUMN,
   ISSUE_NO_PARENT,
@@ -129,6 +131,7 @@ export interface TaskBoardHostProps {
   readonly onOpenSession?: (sessionId: string) => void;
   readonly onBack?: () => void;
   readonly onOpenSidebar?: () => void;
+  readonly sidebarOpen?: boolean;
 }
 
 /** Wand 原生任务管理：布局与交互对标 dashi-taskboard。 */
@@ -136,6 +139,7 @@ export function TaskBoardHost({
   onOpenSession,
   onBack,
   onOpenSidebar,
+  sidebarOpen = false,
 }: TaskBoardHostProps = {}): React.ReactElement | null {
   const controller = React.useSyncExternalStore(taskBoardStore.subscribe, taskBoardStore.getSnapshot, taskBoardStore.getSnapshot);
   const [restored] = React.useState(readTaskBoardViewState);
@@ -233,6 +237,7 @@ export function TaskBoardHost({
     void taskBoardRepository.models()
       .then((payload) => setCatalog(normalizeIssueModelCatalog(payload)))
       .catch(() => setCatalog(null));
+    return subscribeWandModelCatalog(setCatalog);
     void taskBoardRepository.agentDefaults()
       .then((next) => {
         lastAgentRef.current = next;
@@ -748,8 +753,12 @@ export function TaskBoardHost({
     <header className="task-board-workspace-header">
       <div className="task-board-kicker">
         {onOpenSidebar ? (
-          <WandIconButton className="task-board-icon-button" aria-label="打开任务" onClick={onOpenSidebar}>
-            <WandIcon name="rail"/>
+          <WandIconButton
+            className="task-board-icon-button"
+            aria-label={sidebarOpen ? "关闭任务列表" : "打开任务"}
+            onClick={onOpenSidebar}
+          >
+            <SidebarToggleIcon open={sidebarOpen} size={16}/>
           </WandIconButton>
         ) : null}
         <WandIconButton
@@ -786,7 +795,7 @@ export function TaskBoardHost({
       </div>
     </header>
     {!selected && <div className="task-board-toolbar">
-      {!selected && <WandTabs
+      {!selected && <WandStretchTabs
         className="task-board-view-tabs"
         ariaLabel="看板视图"
         value={view}
@@ -794,7 +803,6 @@ export function TaskBoardHost({
         tabs={ISSUE_BOARD_VIEWS.map((entry) => ({
           value: entry.value,
           label: entry.label,
-          content: null,
         }))}
       />}
 
@@ -1081,7 +1089,7 @@ export function TaskBoardHost({
               />
               <WandSelect
                 value={draft.agent.thinkingEffort}
-                options={ISSUE_AGENT_EFFORTS.map((entry) => ({ value: entry.value, label: entry.label }))}
+                options={issueAgentEffortOptions(draft.agent.provider, catalog, draft.agent.model, draft.agent.thinkingEffort)}
                 ariaLabel="第一次指派的思考深度"
                 className="task-board-native-select"
                 onValueChange={(effort) => setDraft((current) => ({
@@ -1286,7 +1294,7 @@ function IssueDetail({
               <IssueField label="思考深度">
                 <WandSelect
                   value={agent.thinkingEffort}
-                  options={ISSUE_AGENT_EFFORTS.map((entry) => ({ value: entry.value, label: entry.label }))}
+                  options={issueAgentEffortOptions(agent.provider, catalog, agent.model, agent.thinkingEffort)}
                   ariaLabel="任务思考深度"
                   className="task-board-native-select"
                   disabled={busy}

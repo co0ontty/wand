@@ -43,6 +43,8 @@ import type {
   SettingsWebUpdate,
 } from "./types";
 import { failureMessage } from "../errors";
+import { compactThinkingLabel, dynamicThinkingChoices } from "../../thinking-efforts";
+import { normalizeModels } from "./repository";
 
 export interface SettingsTabProps {
   snapshot: SettingsSnapshot;
@@ -215,15 +217,17 @@ export function AboutSettingsTab({ snapshot, repository, refresh, toast, showRes
   const [update, setUpdate] = useState<SettingsWebUpdate | null>(null);
   const about = snapshot.about;
 
-  async function action(name: string, task: () => Promise<void>, success?: string) {
+  async function action(name: string, task: () => Promise<void>, success?: string): Promise<boolean> {
     setPending(name);
     setStatus("");
     try {
       await task();
       if (success) { setStatus(success); setTone("success"); }
+      return true;
     } catch (cause) {
       setStatus(failureMessage(cause, "操作失败。"));
       setTone("error");
+      return false;
     } finally {
       setPending("");
     }
@@ -285,9 +289,9 @@ export function AboutSettingsTab({ snapshot, repository, refresh, toast, showRes
               }, "自动更新偏好已保存。")}
             />
             <div className="wand-settings-button-row">
-              <SettingsActionButton className="wand-settings-update-primary" pending={pending === "check"} kind="primary" onClick={() => void action("check", async () => setUpdate(await repository.execute({ type: "webUpdate.check" })), "版本检查完成。")}>检查更新</SettingsActionButton>
-              <SettingsActionButton pending={pending === "install"} kind="secondary" onClick={() => void action("install", async () => { const result = await repository.execute({ type: "webUpdate.install" }); setStatus(result.message); }, undefined)}>更新或重新安装</SettingsActionButton>
-              {snapshot.restartRequired ? <SettingsActionButton pending={pending === "restart"} kind="secondary" onClick={() => void action("restart", async () => {
+              <SettingsActionButton className="wand-settings-update-primary" pending={pending === "check"} kind="primary" onClick={() => action("check", async () => setUpdate(await repository.execute({ type: "webUpdate.check" })), "版本检查完成。")}>检查更新</SettingsActionButton>
+              <SettingsActionButton pending={pending === "install"} kind="secondary" onClick={() => action("install", async () => { const result = await repository.execute({ type: "webUpdate.install" }); setStatus(result.message); }, undefined)}>更新或重新安装</SettingsActionButton>
+              {snapshot.restartRequired ? <SettingsActionButton pending={pending === "restart"} kind="secondary" onClick={() => action("restart", async () => {
                 try {
                   await repository.execute({ type: "server.restart" });
                 } finally {
@@ -315,13 +319,14 @@ export function AboutSettingsTab({ snapshot, repository, refresh, toast, showRes
               }, "CLI 自动更新偏好已保存。")}
             />
             <div className="wand-settings-button-row">
-              <SettingsActionButton pending={pending === "cli-check"} kind="secondary" onClick={() => void action("cli-check", async () => { await repository.execute({ type: "cliUpdates.load", force: true }); await refresh(); }, "CLI 版本检查完成。")}>检查 CLI 更新</SettingsActionButton>
-              {cliUpdates.length ? <SettingsActionButton pending={pending === "cli-install"} kind="primary" onClick={() => void action("cli-install", async () => {
+              <SettingsActionButton pending={pending === "cli-check"} kind="secondary" onClick={() => action("cli-check", async () => { await repository.execute({ type: "cliUpdates.load", force: true }); await refresh(); }, "CLI 版本检查完成。")}>检查 CLI 更新</SettingsActionButton>
+              {cliUpdates.length ? <SettingsActionButton pending={pending === "cli-install"} kind="primary" onClick={() => action("cli-install", async () => {
                 const result = await repository.execute({ type: "cliUpdates.install", ids: cliUpdates.map((item) => item.id) });
                 const summary = cliUpdateSummary(result);
                 setStatus(summary.text);
                 setTone(summary.ok ? "success" : "error");
                 await refresh();
+                if (!summary.ok) throw new Error(summary.text);
               }, undefined)}>快速更新 ({cliUpdates.length})</SettingsActionButton> : null}
             </div>
           </SettingsSection>
@@ -358,7 +363,7 @@ export function GithubSettingsTab({ snapshot, repository, refresh, setSnapshot, 
     setToken("");
   }, [snapshot.github]);
 
-  async function connect() {
+  async function connect(): Promise<boolean | void> {
     if (!token.trim()) {
       setStatus("请输入 GitHub Fine-grained Personal Access Token。");
       setTone("error");
@@ -374,15 +379,17 @@ export function GithubSettingsTab({ snapshot, repository, refresh, setSnapshot, 
       setTone("success");
       toast("GitHub 已连接", "success");
       await refresh();
+      return true;
     } catch (cause) {
       setStatus(failureMessage(cause, "连接 GitHub 失败。"));
       setTone("error");
+      return false;
     } finally {
       setPending("");
     }
   }
 
-  async function disconnect() {
+  async function disconnect(): Promise<boolean> {
     setPending("disconnect");
     setStatus("");
     try {
@@ -391,9 +398,11 @@ export function GithubSettingsTab({ snapshot, repository, refresh, setSnapshot, 
       setStatus("GitHub 已断开，已删除本地保存的 Token。");
       setTone("success");
       toast("GitHub 已断开", "success");
+      return true;
     } catch (cause) {
       setStatus(failureMessage(cause, "断开 GitHub 失败。"));
       setTone("error");
+      return false;
     } finally {
       setPending("");
     }
@@ -424,8 +433,8 @@ export function GithubSettingsTab({ snapshot, repository, refresh, setSnapshot, 
         </SettingsGrid>
         {connector.connected && connector.scopes.length ? <SettingsStatus tone="info">Token 权限：{connector.scopes.join("、")}</SettingsStatus> : null}
         <div className="wand-settings-button-row">
-          <SettingsActionButton pending={pending === "connect"} kind="primary" onClick={() => void connect()}>{connector.connected ? "验证并轮换 Token" : "连接 GitHub"}</SettingsActionButton>
-          {connector.connected ? <SettingsActionButton pending={pending === "disconnect"} kind="secondary" onClick={() => void disconnect()}>断开并删除 Token</SettingsActionButton> : null}
+          <SettingsActionButton pending={pending === "connect"} kind="primary" successLabel="已连接" onClick={() => connect()}>{connector.connected ? "验证并轮换 Token" : "连接 GitHub"}</SettingsActionButton>
+          {connector.connected ? <SettingsActionButton pending={pending === "disconnect"} kind="secondary" successLabel="已断开" onClick={() => disconnect()}>断开并删除 Token</SettingsActionButton> : null}
         </div>
         <SettingsStatus tone="warning">
           Token 会加密保存在当前 Wand 配置目录的 SQLite 数据库中，不会写入 config.json，也不会回传到浏览器。创建 Token：<a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">GitHub Fine-grained tokens</a>。
@@ -715,7 +724,7 @@ const SESSION_PROVIDER_OPTIONS: ReadonlyArray<{ value: SettingsSessionProvider; 
   { value: "pi", label: "Pi" },
 ];
 
-/** 与任务指派的「思考深度」保持同一套档位和文案。 */
+/** 目录还没回来时的四档。CLI 档位到达后换成原生列表。 */
 const THINKING_EFFORT_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
   { value: "off", label: "关闭（跟随模型默认）" },
   { value: "standard", label: "标准" },
@@ -723,15 +732,41 @@ const THINKING_EFFORT_OPTIONS: ReadonlyArray<{ value: string; label: string }> =
   { value: "max", label: "最大" },
 ];
 
-/** Codex 动态推理档位（如 `codex:ultra`）由客户端或旧设置写入，原样列出来免得下拉显示空值。 */
+function providerThinkingSource(
+  models: SettingsSnapshot["models"],
+  provider: SettingsSessionProvider,
+  modelId: string,
+): { efforts: Array<{ effort: string; description?: string }>; defaultEffort?: string } {
+  const list = providerModelSuggestions(models, provider);
+  const selected = list.find((model) => model.id === modelId);
+  const fallback = list.find((model) => model.id === "default");
+  const match = selected?.reasoningEfforts?.length ? selected : fallback?.reasoningEfforts?.length ? fallback : null;
+  if (match?.reasoningEfforts?.length) {
+    return { efforts: match.reasoningEfforts, defaultEffort: match.defaultReasoningEffort };
+  }
+  return { efforts: models?.thinkingEfforts?.[provider] ?? [] };
+}
+
+/** 当前 CLI 报出的思考档位。已保存但不在列表里的值仍留在下拉里，避免显示空。 */
 function thinkingEffortOptions(
+  provider: SettingsSessionProvider,
+  models: SettingsSnapshot["models"],
+  modelId: string,
   current: SettingsThinkingEffort,
 ): ReadonlyArray<{ value: string; label: string }> {
-  if (THINKING_EFFORT_OPTIONS.some((option) => option.value === current)) return THINKING_EFFORT_OPTIONS;
-  return [
-    ...THINKING_EFFORT_OPTIONS,
-    { value: current, label: `${current.slice("codex:".length)}（Codex 动态档位）` },
-  ];
+  const source = providerThinkingSource(models, provider, modelId);
+  const dynamic = dynamicThinkingChoices(provider, source.efforts, source.defaultEffort);
+  const options = dynamic
+    ? dynamic.map((choice) => ({
+      value: choice.id,
+      label: choice.id === "off" ? "关闭（跟随模型默认）" : compactThinkingLabel(choice.label),
+    }))
+    : [...THINKING_EFFORT_OPTIONS];
+  if (!options.some((option) => option.value === current)) {
+    const native = current.includes(":") ? current.slice(current.indexOf(":") + 1) : current;
+    options.push({ value: current, label: compactThinkingLabel(native) });
+  }
+  return options;
 }
 
 /** 一个 CLI 工具对应 `SettingsAiInput` 里的默认模型字段。 */
@@ -1245,6 +1280,14 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toas
   }
 
   const models = snapshot.models;
+  useEffect(() => {
+    const onCatalog = (event: Event) => {
+      const detail = (event as CustomEvent<unknown>).detail;
+      setSnapshot((current) => current ? { ...current, models: normalizeModels(detail) } : current);
+    };
+    window.addEventListener("wand-model-catalog", onCatalog);
+    return () => window.removeEventListener("wand-model-catalog", onCatalog);
+  }, [setSnapshot]);
   const systemAiProfiles = systemAiRoutes(form.systemAi);
   const configuredSystemAiProfiles = systemAiProfiles.filter(routeIsComplete);
   const systemAiOrder = configuredSystemAiProfiles
@@ -1269,7 +1312,17 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toas
               ariaLabel="新会话默认 CLI 工具"
               value={form.defaultProvider}
               options={SESSION_PROVIDER_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
-              onChange={(value) => update("defaultProvider", value as SettingsSessionProvider)}
+              onChange={(value) => {
+                const next = value as SettingsSessionProvider;
+                const modelId = providerModelValue({ ...form, defaultProvider: next }, next);
+                const supported = thinkingEffortOptions(next, models, modelId, "off")
+                  .some((option) => option.value === form.defaultThinkingEffort);
+                setForm((current) => ({
+                  ...current,
+                  defaultProvider: next,
+                  defaultThinkingEffort: supported ? current.defaultThinkingEffort : "off",
+                }));
+              }}
             />
           </SettingsField>
           <SettingsField
@@ -1289,7 +1342,12 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toas
               id="settings-default-thinking"
               ariaLabel="新会话默认思考深度"
               value={form.defaultThinkingEffort}
-              options={thinkingEffortOptions(form.defaultThinkingEffort)}
+              options={thinkingEffortOptions(
+                form.defaultProvider,
+                models,
+                providerModelValue(form, form.defaultProvider),
+                form.defaultThinkingEffort,
+              )}
               onChange={(value) => update("defaultThinkingEffort", value as SettingsThinkingEffort)}
             />
           </SettingsField>
@@ -1501,15 +1559,17 @@ export function NotificationSettingsTab(_props: SettingsTabProps) {
     }
   }
 
-  async function run(name: string, task: () => Promise<string>) {
+  async function run(name: string, task: () => Promise<string>): Promise<boolean> {
     setPending(name);
     setStatus("");
     try {
       setStatus(await task());
       setTone("success");
+      return true;
     } catch (cause) {
       setStatus(failureMessage(cause, "通知操作失败。"));
       setTone("error");
+      return false;
     } finally {
       setPending("");
     }
@@ -1580,7 +1640,7 @@ export function NotificationSettingsTab(_props: SettingsTabProps) {
               })}
             />
           </SettingsField>
-          <SettingsActionButton pending={pending === "sound-preview"} kind="secondary" onClick={() => void run("sound-preview", async () => {
+          <SettingsActionButton pending={pending === "sound-preview"} kind="secondary" onClick={() => run("sound-preview", async () => {
             await repository.execute({ type: "notification.nativeSound.preview", sound: preferences.nativeSound || preferences.nativeSounds[0].id });
             return "已播放铃声预览。";
           })}>试听铃声</SettingsActionButton>
@@ -1605,7 +1665,7 @@ export function NotificationSettingsTab(_props: SettingsTabProps) {
       <SettingsSection title="系统通知" description={`授权状态：${permissionLabel}`}>
         <div className="wand-settings-button-row">
           {preferences.permission !== "granted" && preferences.permission !== "unsupported" ? (
-            <SettingsActionButton pending={pending === "permission"} kind="primary" onClick={() => void run("permission", async () => {
+            <SettingsActionButton pending={pending === "permission"} kind="primary" onClick={() => run("permission", async () => {
               const result = await repository.execute({ type: "notification.permission.request" });
               setPreferences((current) => ({ ...current, permission: result.permission }));
               return result.permission === "granted" ? "系统通知已授权。" : "系统通知尚未授权。";
@@ -1615,7 +1675,7 @@ export function NotificationSettingsTab(_props: SettingsTabProps) {
             <SettingsActionButton
               pending={pending === "notification-settings"}
               kind="secondary"
-              onClick={() => void run("notification-settings", async () => {
+              onClick={() => run("notification-settings", async () => {
                 const result = await repository.execute({ type: "notification.settings.open" });
                 return result.native
                   ? "已打开 Wand 的系统通知设置；修改后返回此页即可。"
@@ -1625,12 +1685,12 @@ export function NotificationSettingsTab(_props: SettingsTabProps) {
               {snapshot.platform.kind === "android" ? "打开系统通知设置" : "如何重置权限"}
             </SettingsActionButton>
           ) : null}
-          <SettingsActionButton pending={pending === "test"} kind="secondary" onClick={() => void run("test", async () => {
+          <SettingsActionButton pending={pending === "test"} kind="secondary" onClick={() => run("test", async () => {
             const result = await repository.execute({ type: "notification.test" });
             toast("测试通知", "info");
             return `提示音：${result.sound === "passed" ? "通过" : "失败"}；气泡：${result.bubble === "passed" ? "通过" : "已关闭"}；系统：${result.system}`;
           })}>立即测试</SettingsActionButton>
-          <SettingsActionButton pending={pending === "delayed-test"} kind="secondary" onClick={() => void run("delayed-test", async () => {
+          <SettingsActionButton pending={pending === "delayed-test"} kind="secondary" onClick={() => run("delayed-test", async () => {
             await repository.execute({ type: "notification.test", delayMs: 10000 });
             return "10 秒延迟通知已发送。";
           })}>10 秒后发送</SettingsActionButton>
@@ -1648,6 +1708,7 @@ export function SecuritySettingsTab(_props: SettingsTabProps) {
   const [keyFile, setKeyFile] = useState<File | null>(null);
   const [certFile, setCertFile] = useState<File | null>(null);
   const [pending, setPending] = useState("");
+  const [settled, setSettled] = useState<"success" | "error" | null>(null);
   const [status, setStatus] = useState("");
   const [tone, setTone] = useState<StatusTone>("info");
   const [passwordError, setPasswordError] = useState("");
@@ -1662,6 +1723,7 @@ export function SecuritySettingsTab(_props: SettingsTabProps) {
       setPasswordError("两次输入的密码不一致。");
       return;
     }
+    setSettled(null);
     setPending("password");
     setStatus("");
     try {
@@ -1670,6 +1732,7 @@ export function SecuritySettingsTab(_props: SettingsTabProps) {
       setConfirmation("");
       setStatus("密码修改成功；所有旧登录会话已失效，正在返回登录页…");
       setTone("success");
+      setSettled("success");
       toast("密码已修改，请重新登录", "success");
       if (result.reauthenticationRequired) {
         window.setTimeout(() => {
@@ -1680,6 +1743,7 @@ export function SecuritySettingsTab(_props: SettingsTabProps) {
     } catch (cause) {
       setStatus(failureMessage(cause, "修改密码失败。"));
       setTone("error");
+      setSettled("error");
     } finally {
       setPending("");
     }
@@ -1691,6 +1755,7 @@ export function SecuritySettingsTab(_props: SettingsTabProps) {
       setTone("error");
       return;
     }
+    setSettled(null);
     setPending("certificate");
     setStatus("");
     try {
@@ -1698,11 +1763,13 @@ export function SecuritySettingsTab(_props: SettingsTabProps) {
       const result = await repository.execute({ type: "certificate.upload", key, cert });
       setStatus(result.restartRequired ? "证书已上传，重启服务后生效。" : "证书已上传。 ");
       setTone("success");
+      setSettled("success");
       await refresh();
       toast("SSL 证书已上传", "success");
     } catch (cause) {
       setStatus(failureMessage(cause, "上传证书失败。"));
       setTone("error");
+      setSettled("error");
     } finally {
       setPending("");
     }
@@ -1724,7 +1791,7 @@ export function SecuritySettingsTab(_props: SettingsTabProps) {
               <SettingsTextInput id="settings-confirm-password" type="password" autoComplete="new-password" value={confirmation} invalid={!!passwordError} placeholder="再次输入新密码" onChange={(value) => { setConfirmation(value); setPasswordError(""); }} />
             </SettingsField>
           </SettingsGrid>
-          <SettingsActionButton type="submit" pending={pending === "password"} kind="primary">修改密码并重新登录</SettingsActionButton>
+          <SettingsActionButton type="submit" pending={pending === "password"} settled={pending === "password" ? null : settled} successLabel="已修改密码" kind="primary">修改密码并重新登录</SettingsActionButton>
         </form>
       </SettingsSection>
 
@@ -1741,7 +1808,7 @@ export function SecuritySettingsTab(_props: SettingsTabProps) {
             <small>{certFile?.name || "未选择文件"}</small>
           </label>
         </div>
-        <SettingsActionButton pending={pending === "certificate"} kind="primary" onClick={() => void uploadCertificate()}>上传证书</SettingsActionButton>
+        <SettingsActionButton pending={pending === "certificate"} settled={pending === "certificate" ? null : settled} successLabel="已上传" kind="primary" onClick={() => uploadCertificate()}>上传证书</SettingsActionButton>
       </SettingsSection>
       {status ? <SettingsStatus tone={tone}>{status}</SettingsStatus> : null}
     </section>

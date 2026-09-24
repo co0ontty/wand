@@ -174,6 +174,8 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [submitPhase, setSubmitPhase] = useState<"idle" | "pending" | "success" | "error">("idle");
+  const [submitResult, setSubmitResult] = useState("");
   const [pushing, setPushing] = useState(false);
   const [error, setError] = useState("");
   const [pushError, setPushError] = useState("");
@@ -201,6 +203,8 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
     generationAbort.current?.abort();
     generationAbort.current = null;
     setStatus(null);
+    setSubmitPhase("idle");
+    setSubmitResult("");
     setForm(EMPTY_FORM);
     setAction("commit");
     setIncludeSubmodule(false);
@@ -345,12 +349,14 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
 
   async function submit(event?: FormEvent<HTMLFormElement>): Promise<void> {
     event?.preventDefault();
-    if (!context || !status || !canCommit) return;
+    if (!context || !status || !canCommit || submitting || submitPhase === "pending" || submitPhase === "success") return;
     const operationSessionId = context.sessionId;
     const operationRevision = quickCommitStore.getSnapshot().revision;
     const ownsCurrentSurface = () =>
       quickCommitController.isCurrentLifecycle(operationRevision, operationSessionId);
     setSubmitting(true);
+    setSubmitPhase("pending");
+    setSubmitResult("");
     setError("");
     setPushError("");
     try {
@@ -367,6 +373,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
         response,
       );
       const summary = commitSummary(nextOutcome);
+      const hash = nextOutcome.commitHash ? nextOutcome.commitHash.slice(0, 7) : "";
       if (!response.pushError) {
         quickCommitStore.getRuntime()?.toast(
           selectedMeta.push ? `${summary}，已推送。` : `${summary}。`,
@@ -374,26 +381,40 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
         );
         void reloadStatus(operationSessionId);
         void reloadContext(operationSessionId);
+        if (ownsCurrentSurface()) {
+          setSubmitResult(hash ? `已提交 ${hash}` : "已提交");
+          setSubmitPhase("success");
+          setSubmitting(false);
+        }
+        await new Promise((resolve) => { window.setTimeout(resolve, 1100); });
         if (ownsCurrentSurface()) quickCommitController.close();
         return;
       }
-      if (ownsCurrentSurface()) setOutcome(nextOutcome);
-      if (response.pushError) {
-        if (ownsCurrentSurface()) setPushError(response.pushError);
-        quickCommitStore.getRuntime()?.toast(`${summary}；push 失败：${response.pushError}`, "error");
-      } else {
-        quickCommitStore.getRuntime()?.toast(`${summary}。`, "success");
+      if (ownsCurrentSurface()) {
+        setOutcome(nextOutcome);
+        setPushError(response.pushError);
+        setSubmitResult("已提交，推送失败");
+        setSubmitPhase("error");
       }
+      quickCommitStore.getRuntime()?.toast(`${summary}；push 失败：${response.pushError}`, "error");
       await Promise.all([
         reloadStatus(operationSessionId),
         reloadContext(operationSessionId),
       ]);
+      await new Promise((resolve) => { window.setTimeout(resolve, 1400); });
+      if (ownsCurrentSurface()) setSubmitPhase("idle");
     } catch (commitError) {
       const message = describeError(commitError, "快捷提交失败。");
-      if (ownsCurrentSurface()) setError(message);
+      if (ownsCurrentSurface()) {
+        setError(message);
+        setSubmitResult("提交失败");
+        setSubmitPhase("error");
+      }
       quickCommitStore.getRuntime()?.toast(message, "error");
+      await new Promise((resolve) => { window.setTimeout(resolve, 1400); });
+      if (ownsCurrentSurface()) setSubmitPhase("idle");
     } finally {
-      setSubmitting(false);
+      if (ownsCurrentSurface()) setSubmitting(false);
     }
   }
 
@@ -602,10 +623,12 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
               <WandButton kind="ghost" onClick={() => quickCommitController.close()}>
                 取消
               </WandButton>
-              <WandButton kind="primary" type="submit" disabled={!canCommit}>
-                {submitting
+              <WandButton className="wand-quick-submit" kind="primary" type="submit" aria-live="polite" disabled={!canCommit || submitting || submitPhase === "pending" || submitPhase === "success"}>
+                {submitPhase === "pending"
                   ? (form.message.trim() ? "执行中…" : "AI 生成 + 提交中…")
-                  : selectedMeta.verb}
+                  : submitPhase === "success" || submitPhase === "error"
+                    ? submitResult
+                    : selectedMeta.verb}
               </WandButton>
             </div>
           </footer>

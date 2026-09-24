@@ -1,12 +1,27 @@
 import type { SessionProvider, SessionRunner, SessionSnapshot, StructuredSessionState, WandConfig } from "./types.js";
 
-/** 判断任意值是否为合法的 thinking effort 字面量（含 `codex:<level>` 形式）。 */
+const NATIVE_THINKING_EFFORT = /^(claude|codex|opencode|grok|qoder|pi):[a-z0-9][a-z0-9_-]{0,31}$/;
+
+/** 判断任意值是否为合法的 thinking effort（旧四档，或 `provider:level`）。 */
 export function isThinkingEffort(value: unknown): value is NonNullable<SessionSnapshot["thinkingEffort"]> {
   return value === "off"
     || value === "standard"
     || value === "deep"
     || value === "max"
-    || (typeof value === "string" && /^codex:[a-z0-9][a-z0-9_-]{0,31}$/.test(value));
+    || (typeof value === "string" && NATIVE_THINKING_EFFORT.test(value));
+}
+
+/** 只取本 provider 的原生档位。别的 CLI 的前缀不能串过去。 */
+export function prefixedThinkingEffort(
+  provider: SessionProvider,
+  effort: SessionSnapshot["thinkingEffort"],
+): string | null {
+  if (typeof effort !== "string") return null;
+  const separator = effort.indexOf(":");
+  if (separator <= 0) return null;
+  if (effort.slice(0, separator) !== provider) return null;
+  const level = effort.slice(separator + 1);
+  return /^[a-z0-9][a-z0-9_-]{0,31}$/.test(level) ? level : null;
 }
 
 export function isStructuredRunnerForProvider(provider: SessionProvider, runner: unknown): runner is SessionRunner {
@@ -53,20 +68,23 @@ export function normalizeThinkingEffort(value: unknown): SessionSnapshot["thinki
   if (typeof value !== "string") return null;
   const normalized = value.trim().toLowerCase();
   if (normalized === "off" || normalized === "standard" || normalized === "deep" || normalized === "max") return normalized;
-  if (/^codex:[a-z0-9][a-z0-9_-]{0,31}$/.test(normalized)) return normalized as SessionSnapshot["thinkingEffort"];
+  if (NATIVE_THINKING_EFFORT.test(normalized)) return normalized as SessionSnapshot["thinkingEffort"];
   return null;
 }
 
 export function thinkingEffortToSdkBudget(effort: SessionSnapshot["thinkingEffort"]): number {
-  if (effort === "standard") return 4096;
-  if (effort === "deep") return 16000;
-  if (effort === "max") return 31999;
+  const native = prefixedThinkingEffort("claude", effort) ?? effort;
+  if (native === "standard" || native === "low") return 4096;
+  if (native === "deep" || native === "medium" || native === "high") return 16000;
+  if (native === "max" || native === "xhigh" || native === "ultra") return 31999;
   return 0;
 }
 
 export function thinkingEffortToClaudeCliEffort(
   effort: SessionSnapshot["thinkingEffort"],
-): "low" | "medium" | "max" | null {
+): string | null {
+  const native = prefixedThinkingEffort("claude", effort);
+  if (native) return native;
   if (effort === "standard") return "low";
   if (effort === "deep") return "medium";
   if (effort === "max") return "max";
@@ -78,49 +96,58 @@ export function thinkingEffortToClaudeSlashEffort(effort: SessionSnapshot["think
 }
 
 export function thinkingEffortToCodexReasoningEffort(effort: SessionSnapshot["thinkingEffort"]): string | null {
-  if (typeof effort === "string" && effort.startsWith("codex:")) return effort.slice("codex:".length) || null;
+  const native = prefixedThinkingEffort("codex", effort);
+  if (native) return native;
   if (effort === "standard") return "low";
   if (effort === "deep") return "medium";
   if (effort === "max") return "xhigh";
   return null;
 }
 
-/**
- * OpenCode / Qoder 共用（off/standard/deep/max → null/low/high/max）。
- * `codex:<level>` 透传 level。Grok 无头模式不走这里，见 `thinkingEffortToGrokEffort`。
- */
-function thinkingEffortToLowHighMax(effort: SessionSnapshot["thinkingEffort"]): string | null {
+function thinkingEffortToNamedLevels(
+  provider: SessionProvider,
+  effort: SessionSnapshot["thinkingEffort"],
+  legacy: { standard: string; deep: string; max: string },
+): string | null {
+  const native = prefixedThinkingEffort(provider, effort);
+  if (native) return native;
   if (!effort || effort === "off") return null;
-  if (effort === "standard") return "low";
-  if (effort === "deep") return "high";
-  if (effort === "max") return "max";
-  return effort.startsWith("codex:") ? effort.slice("codex:".length) || null : null;
+  if (effort === "standard") return legacy.standard;
+  if (effort === "deep") return legacy.deep;
+  if (effort === "max") return legacy.max;
+  return null;
 }
 
-export const thinkingEffortToOpenCodeVariant = thinkingEffortToLowHighMax;
-export const thinkingEffortToQoderEffort = thinkingEffortToLowHighMax;
+/** OpenCode `--variant`。旧四档仍是 low/high/max；`opencode:<level>` 原样传递。 */
+export function thinkingEffortToOpenCodeVariant(effort: SessionSnapshot["thinkingEffort"]): string | null {
+  return thinkingEffortToNamedLevels("opencode", effort, { standard: "low", deep: "high", max: "max" });
+}
+
+/** Qoder `--reasoning-effort`。旧四档仍是 low/high/max；`qoder:<level>` 原样传递。 */
+export function thinkingEffortToQoderEffort(effort: SessionSnapshot["thinkingEffort"]): string | null {
+  return thinkingEffortToNamedLevels("qoder", effort, { standard: "low", deep: "high", max: "max" });
+}
 
 /**
- * Grok Build 无头 `--effort` 只接受 `xhigh | high | medium | low`。
- * `max` 会让 `grok -p` 直接退出（unknown effort level）。交互 TUI 仍接受 `max`，
- * PTY 启动参数不要改用这个函数。
+ * Grok `--effort`。当前 CLI 接受 xhigh/high/medium/low，不接受 `max`，
+ * 所以旧的「最大」和误存的 `grok:max` 都落到 xhigh。
  */
 export function thinkingEffortToGrokEffort(effort: SessionSnapshot["thinkingEffort"]): string | null {
+  const native = prefixedThinkingEffort("grok", effort);
+  if (native) return native === "max" ? "xhigh" : native;
   if (!effort || effort === "off") return null;
   if (effort === "standard") return "low";
   if (effort === "deep") return "high";
   if (effort === "max") return "xhigh";
-  if (!effort.startsWith("codex:")) return null;
-  const level = effort.slice("codex:".length);
-  if (!level) return null;
-  return level === "max" ? "xhigh" : level;
+  return null;
 }
 
 export function thinkingEffortToPiLevel(effort: SessionSnapshot["thinkingEffort"]): string | null {
+  const native = prefixedThinkingEffort("pi", effort);
+  if (native) return native;
   if (!effort || effort === "off") return "off";
   if (effort === "standard") return "low";
   if (effort === "deep") return "high";
-  // Pi uses `max`; `xhigh` is a Codex-only level and makes Pi reject the run.
   if (effort === "max") return "max";
-  return effort.startsWith("codex:") ? effort.slice("codex:".length) || null : null;
+  return null;
 }

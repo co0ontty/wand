@@ -172,7 +172,7 @@ export var state: AppState = {
   chatThinking: (function() {
     try {
       var v = localStorage.getItem("wand-thinking-effort") || "off";
-      return (v === "off" || v === "standard" || v === "deep" || v === "max" || /^codex:[a-z0-9][a-z0-9_-]{0,31}$/.test(v)) ? v : "off";
+      return (v === "off" || v === "standard" || v === "deep" || v === "max" || /^(claude|codex|opencode|grok|qoder|pi):[a-z0-9][a-z0-9_-]{0,31}$/.test(v)) ? v : "off";
     } catch (e) { return "off"; }
   })(),
   availableModels: [],
@@ -181,6 +181,8 @@ export var state: AppState = {
   availableGrokModels: [],
   availableQoderModels: [],
   availablePiModels: [],
+  providerThinkingEfforts: {},
+  modelCatalogRevision: "",
   modelsRefreshing: false,
   sessionTool: "claude",
   preferredCommand: "claude",

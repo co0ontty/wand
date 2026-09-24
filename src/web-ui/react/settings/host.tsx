@@ -15,7 +15,7 @@ import {
   PresetSettingsTab,
   SecuritySettingsTab,
 } from "./tabs";
-import { SettingsField, SettingsStatus, SettingsTextInput } from "./fields";
+import { SettingsActionButton, SettingsField, SettingsStatus, SettingsTextInput } from "./fields";
 import type { SettingsRepository, SettingsSnapshot, SettingsTab } from "./types";
 
 export interface SettingsHostProps {
@@ -127,6 +127,7 @@ function ConnectedAppAccess({
 }) {
   const [password, setPassword] = useState("");
   const [pending, setPending] = useState(false);
+  const [settled, setSettled] = useState<"success" | "error" | null>(null);
   const [error, setError] = useState("");
 
   async function authenticate() {
@@ -134,6 +135,7 @@ function ConnectedAppAccess({
       setError("请输入管理员密码。");
       return;
     }
+    setSettled(null);
     setPending(true);
     setError("");
     try {
@@ -141,9 +143,11 @@ function ConnectedAppAccess({
       const snapshot = await repository.load();
       if (snapshot.access !== "admin") throw new Error("登录成功，但当前会话仍没有管理权限。");
       setPassword("");
+      setSettled("success");
       onAuthenticated(snapshot);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "管理员登录失败。");
+      setSettled("error");
     } finally {
       setPending(false);
     }
@@ -178,9 +182,17 @@ function ConnectedAppAccess({
             }}
           />
         </SettingsField>
-        <WandButton type="submit" kind="primary" disabled={pending}>
-          {pending ? "登录中…" : "登录管理设置"}
-        </WandButton>
+        <SettingsActionButton
+          type="submit"
+          kind="primary"
+          pending={pending}
+          settled={pending ? null : settled}
+          pendingLabel="登录中…"
+          successLabel="已登录"
+          errorLabel="登录失败"
+        >
+          登录管理设置
+        </SettingsActionButton>
       </form>
       <SettingsStatus tone="warning">
         修改 Host、端口或 HTTPS 可能中断当前 App 连接；修改密码会使现有连接码失效。

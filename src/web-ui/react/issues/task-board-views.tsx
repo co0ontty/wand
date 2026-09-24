@@ -1,7 +1,7 @@
 import * as React from "react";
 import type { WandTaskAgent, WandTaskPriority, WandTaskStatus } from "../../../task-types";
 import { ProviderLogo } from "../provider-logo";
-import { WandIcon, WandIconButton, WandMenuItem, WandPopover, WandSwitch } from "../ui";
+import { WandIcon, WandIconButton, WandMenuItem, WandPopover, WandStretchTabs, WandSwitch } from "../ui";
 import { classNames } from "../ui/class-names";
 import {
   collectIssueLabels,
@@ -301,21 +301,51 @@ export function TaskBoardArchiveFolder({
   </div>;
 }
 
+function taskStatusLabel(status: WandTaskStatus): string {
+  return ISSUE_COLUMNS.find((column) => column.status === status)?.label
+    ?? (status === "archived" ? ISSUE_ARCHIVE_COLUMN.label : status);
+}
+
+function sessionActivityLabel(status: string): string {
+  if (status === "running" || status === "thinking") return "进行中";
+  if (status === "waiting-input") return "等待输入";
+  if (status === "exited" || status === "stopped") return "已结束";
+  if (status === "failed") return "失败";
+  return "空闲";
+}
+
 function TaskBoardListRow({
   task,
   parentLabel,
+  expanded,
+  onToggle,
   onOpen,
   onOpenSession,
 }: {
   task: WandTaskListed;
   parentLabel?: string;
+  expanded: boolean;
+  onToggle(): void;
   onOpen(id: string): void;
   onOpenSession?: (sessionId: string) => void;
 }): React.ReactElement {
+  const description = task.description.trim();
   return <article
-    className={classNames("task-board-list-row", task.status === "archived" && "is-archived")}
+    className={classNames("task-board-list-row", expanded && "is-open", task.status === "archived" && "is-archived")}
+    onClick={(event) => {
+      if ((event.target as HTMLElement).closest("button, a")) return;
+      onToggle();
+    }}
   >
-    <button type="button" className="task-board-list-title" aria-label={`打开 ${task.identifier}: ${task.title}`} onClick={() => onOpen(task.id)}>
+    <button
+      type="button"
+      className="task-board-list-title"
+      aria-expanded={expanded}
+      aria-controls={`task-list-detail-${task.id}`}
+      aria-label={`${expanded ? "收起" : "展开"} ${task.identifier}: ${task.title}`}
+      onClick={onToggle}
+    >
+      <WandIcon name="chevron" size={12} className="task-board-list-chevron"/>
       <small>{task.identifier}{parentLabel ? ` ↳ ${parentLabel}` : ""}</small>
       <strong>{task.title}</strong>
     </button>
@@ -328,6 +358,31 @@ function TaskBoardListRow({
       <TaskBoardConversationButton sessions={task.sessions} onOpen={onOpenSession}/>
       <time>{formatIssueStamp(task.updatedAt)}</time>
     </span>
+    <div className="task-board-list-detail" id={`task-list-detail-${task.id}`} inert={!expanded}>
+      <div className="task-board-list-detail-inner">
+        <p>
+          <span>{taskStatusLabel(task.status)}</span>
+          <span>更新于 {formatIssueStamp(task.updatedAt)}</span>
+        </p>
+        {description ? <p className="task-board-list-description">{description}</p> : null}
+        {task.sessions.length > 0 ? (
+          <ul>
+            {task.sessions.map((session) => (
+              <li key={session.id}>
+                <button type="button" onClick={() => onOpenSession?.(session.id)}>
+                  <ProviderLogo provider={session.provider} className="task-board-agent-logo"/>
+                  <span>{session.title || issueAgentProviderLabel(session.provider)}</span>
+                  <small>{sessionActivityLabel(session.status)}</small>
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : <p className="task-board-list-description">还没有关联会话</p>}
+        <button type="button" className="task-board-list-open" onClick={() => onOpen(task.id)}>
+          查看详情
+        </button>
+      </div>
+    </div>
   </article>;
 }
 
@@ -350,6 +405,10 @@ export function TaskBoardListView({
   onOpen(id: string): void;
   onOpenSession?: (sessionId: string) => void;
 }): React.ReactElement {
+  const [expandedId, setExpandedId] = React.useState<string | null>(null);
+  const toggleExpanded = (id: string): void => {
+    setExpandedId((current) => current === id ? null : id);
+  };
   const archived = grouped.archived;
   return <div className="task-board-list-view">
     {ISSUE_COLUMNS.map((column) => {
@@ -377,7 +436,9 @@ export function TaskBoardListView({
           {items.map((task) => <TaskBoardListRow
             key={task.id}
             task={task}
+            expanded={expandedId === task.id}
             parentLabel={allTasks.find((parent) => parent.id === task.parentTaskId)?.identifier}
+            onToggle={() => toggleExpanded(task.id)}
             onOpen={onOpen}
             onOpenSession={onOpenSession}
           />)}
@@ -390,7 +451,9 @@ export function TaskBoardListView({
               {archived.map((task) => <TaskBoardListRow
                 key={task.id}
                 task={task}
+                expanded={expandedId === task.id}
                 parentLabel={allTasks.find((parent) => parent.id === task.parentTaskId)?.identifier}
+                onToggle={() => toggleExpanded(task.id)}
                 onOpen={onOpen}
                 onOpenSession={onOpenSession}
               />)}
@@ -565,16 +628,13 @@ export function TaskBoardGantt({
         <input type="checkbox" checked={hideCompleted} onChange={(event) => onHideCompleted(event.currentTarget.checked)}/>
         隐藏已确认
       </label>
-      <div className="task-board-gantt-zooms">
-        {ISSUE_GANTT_ZOOMS.map((entry) => <button
-          key={entry.value}
-          type="button"
-          className={classNames(zoom === entry.value && "is-active")}
-          onClick={() => onZoom(entry.value)}
-        >
-          {entry.label}
-        </button>)}
-      </div>
+      <WandStretchTabs
+        className="task-board-gantt-zooms"
+        ariaLabel="甘特图缩放"
+        value={zoom}
+        tabs={ISSUE_GANTT_ZOOMS.map((entry) => ({ value: entry.value, label: entry.label }))}
+        onValueChange={(next) => onZoom(next as IssueGanttZoom)}
+      />
     </div>
     <div className="task-board-gantt-scroll">
       <div className="task-board-gantt-grid" style={{ "--gantt-days": range.days } as React.CSSProperties}>
