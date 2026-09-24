@@ -7,6 +7,7 @@
 - 后续所有 Wand 功能验收、真机验收和最终端到端验收，统一使用这台机器上已安装运行的 Wand 服务，以及用户指定的连接码；连接信息读取本机私密文件 `~/.wand/acceptance-connection.json`（`serverURL` / `connectionCode`）。不要使用隔离服务、mock 服务或另建测试实例代替最终验收。连接码包含鉴权信息，不得写进仓库、提交、日志或截图。单元测试和开发期隔离检查仍可使用独立环境。
 
 - 只要当前项目的 Android 客户端发生改动，收尾时必须重新编译带版本号的 beta APK，并部署到 `~/.wand/android/` Beta 更新目录；同时验证 `/api/android-apk-update?currentVersion=0.0.0&channel=beta` 能返回新版本。除非用户明确要求跳过，否则不得省略。
+- 只要当前项目的 macOS 客户端代码发生改动，收尾时必须重新编译带新版本号的 Beta ZIP/DMG，并部署到已安装 Wand 服务的 `~/.wand/macos/` 更新目录；用本机已安装客户端的真实版本请求该服务 `/api/macos-app-update?currentVersion=<已安装版本>`，确认返回新版本且 `updateAvailable: true`，并核对下载文件可用。不要用只留在 `macos/build/` 或 `macos/dist/` 的构建代替分发验收。除非用户明确要求跳过，否则不得省略。
 
 
 `wand` 是本机 AI CLI 工具的 Node.js Web 控制台，支持 Claude Code、Codex、OpenCode、Grok、Qoder、Pi 六个 provider。Express + WebSocket 服务浏览器 UI；会话跑在 PTY 或结构化非 PTY 进程里；PTY 由**独立的 terminal daemon**（`wand terminald`）持有，web 重启 / 自更新不杀 shell。配置、鉴权、会话状态持久化在激活配置文件所在目录。
@@ -210,6 +211,7 @@ cd ios && IPA_DIST_DIR="$HOME/.wand/ios" ./build.sh    # 未签名 IPA 编完即
 ```
 
 - macOS ad-hoc 自签，无公证；换签名身份会让老用户被 Gatekeeper 拦截。
+- macOS Beta 版本用最高语义 tag（`git tag --list 'v[0-9]*' --sort=-v:refname | head -1`）作基数，形如 `X.Y.Z-debug.MMDDHHMM`；用 `macos/build.sh <version>` 生成签名 ZIP/DMG，再把 `macos/dist/wand-v<version>.zip|dmg` 部署到 `~/.wand/macos/`。`debug.sh` 的未带版本构建不能供应用内更新。检查本机已安装服务的 `/api/macos-app-update?currentVersion=<已安装版本>` 必须返回新版本、`updateAvailable: true` 和同源 ZIP/DMG 下载地址，下载的大小与 SHA-256 也要核对。
 - iOS 构建仍是 `CODE_SIGNING_ALLOWED=NO`。模拟器设备用真实存在的名字（`Wand Debug`、`Wand Live Activity QA`、`Wand iPad Debug`，见 `xcrun simctl list devices`）。
 - 分发目录：默认实例 `~/.wand/macos|ios/`，隔离测试 `/tmp/wand-dev/macos|ios/`。macOS 需在 config 开 `macos.enabled`。
 - 每次 iOS 改动收尾都要重新编译带版本号的 IPA 并部署到 `~/.wand/ios/`（用户明确说不用才可跳过），并验证 `/api/ios-ipa-update?currentVersion=0.0.0` 返回新版本。无参数 `./build.sh` 的版本形如 `X.Y.Z-debug.MMDDHHMM`，规则与 Android 相同。
@@ -229,7 +231,7 @@ cd ios && IPA_DIST_DIR="$HOME/.wand/ios" ./build.sh    # 未签名 IPA 编完即
 
 - 更新通道存 SQLite `updateChannel`（stable/beta）。stable → `@co0ontty/wand@latest`；beta → `@beta`（beta 分支 CI 带 prebuilt dist）。更新判定用 `npm view` 比版本；`dist/build-info.json` 只给 UI 展示。
 - 更新后自修复：`repairServiceUnitAfterUpdate()` 重写 systemd/launchd unit；重启策略见 `src/relaunch.ts`。
-- APK beta 通道走 `?channel=beta`（本地 apkDir 是唯一 beta 来源）；macOS beta 走 GitHub prerelease 清单校验。iOS 走 `/api/ios-ipa-update` + `/ios/manifest.plist`（本地 `ipaDir` 签发后 OTA）。
+- APK beta 通道走 `?channel=beta`（本地 apkDir 是唯一 beta 来源）；macOS Beta 只走当前连接服务端的本地 `macos.dmgDir` ZIP/DMG（校验大小和 SHA-256），Stable 才走 GitHub Release。iOS 走 `/api/ios-ipa-update` + `/ios/manifest.plist`（本地 `ipaDir` 签发后 OTA）。
 
 正式发布全部由 tag 驱动：push 一个 `v*` tag，GitHub Actions 并行出 npm 包 / APK / DMG / release notes。相关 workflow：`npm-release.yml`、`android-release.yml`、`macos-release.yml`、`macos-beta.yml`、`ios-build.yml`、`release-notes.yml`、`beta-branch.yml`、`cleanup-old-releases.yml`。
 
