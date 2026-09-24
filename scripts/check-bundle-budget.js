@@ -40,10 +40,16 @@ const BUDGET = {
   //      task-board-host.tsx / task-board-agent.ts / task-board-views.tsx / input.ts
   //      四个文件，其余模块字节数不变）。minify 后 gzip 514_130 -> 515_168（+1.0 KiB），
   //      514_200 这个卡点本就只剩 70 字节余量，于是上调到 516_000。
+  //   4) Web 端连续两轮 UI 批次（v4.74.0 设置面板/模型与思考深度选择器、v4.75.0 看板
+  //      父子任务与迭代选择器、工作区面板、快捷提交、Shell 顶栏）把 scripts.js gzip
+  //      从 505.5 KiB（=517_632 B，已超旧预算 1.6 KiB）推到 509.5 KiB（=521_723 B）。
+  //      两次发布都因此被 CI 的 build 步骤挡住（npm publish 一步都没跑）。这次只补到
+  //      512 KiB（524_288 B）并留 ~2.5 KiB 余量，不再往上顶：下一批前端改动必须先瘦
+  //      身（懒加载重型面板 / 挪出 tool 元数据）或在此处降回数字。
   // 下一次真正瘦身（懒加载重型面板等）后必须把这几个值一起降回去。
   // 已知的最大单块肥肉：tailwind-merge（bundle 内 ~103 KiB raw，由 @appica/ui-react
   // 的 cn() 间接引入）与 react-dom（~553 KiB raw）；真要瘦身从这两处下手。
-  js: 516_000,
+  js: 524_288,
   css: 100_000,
 };
 
