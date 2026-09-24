@@ -743,8 +743,19 @@ function terminalServicePathFor(scope: ServiceScope): string {
   return "";
 }
 
+/**
+ * 本 config 的 config 文件 owner uid。
+ *
+ * daemon 在 unit/plist 里被钉成 config owner，端点路径里的 uid 也是它；而
+ * `wand service:install` 常常是 sudo 跑的（uid 0），所以任何涉及 daemon 文件的读取
+ * 都必须用这个 uid，不能用调用者的。
+ */
+function configOwnerUid(configPath: string): number | undefined {
+  try { return statUid(path.resolve(configPath)); } catch { return undefined; }
+}
+
 function hasLiveTerminalDaemon(configPath: string): boolean {
-  const pid = readTerminalDaemonPid(configPath);
+  const pid = readTerminalDaemonPid(configPath, configOwnerUid(configPath));
   return pid !== null && isPidAlive(pid);
 }
 
@@ -765,9 +776,7 @@ interface DaemonEndpointState {
  * 端点，把健康 daemon 当成僵尸（2026-09-24 真实发生过，两个 daemon 被误杀）。
  */
 function daemonEndpointStates(configPath: string): DaemonEndpointState[] {
-  const ownerUid = (() => {
-    try { return statUid(path.resolve(configPath)); } catch { return undefined; }
-  })();
+  const ownerUid = configOwnerUid(configPath);
   const render = renderPaths(configPath, ownerUid);
   const terminal = terminalDaemonPaths(configPath, ownerUid);
   const endpoints: Array<{ label: string; kind: "render" | "terminald"; pidPath: string; socketPath: string }> = [
@@ -854,7 +863,7 @@ export function isDaemonProcessForConfig(
  * 看不到 detail，所以这句拼进 message 里。
  */
 function staleDaemonNote(configPath: string): string | null {
-  const render = renderPaths(configPath);
+  const render = renderPaths(configPath, configOwnerUid(configPath));
   const pid = readDaemonPidFile(render.pidPath);
   if (pid === null || !isPidAlive(pid)) return null;
   const daemonVersion = (() => {

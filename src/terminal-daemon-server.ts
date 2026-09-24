@@ -591,9 +591,9 @@ function fileHoldsValue(filePath: string, expected: string): boolean {
   }
 }
 
-export function readTerminalDaemonPid(configPath: string): number | null {
+export function readTerminalDaemonPid(configPath: string, uidOverride?: number): number | null {
   try {
-    const value = Number(readFileSync(terminalDaemonPaths(configPath).pidPath, "utf8").trim());
+    const value = Number(readFileSync(terminalDaemonPaths(configPath, uidOverride).pidPath, "utf8").trim());
     return Number.isSafeInteger(value) && value > 0 ? value : null;
   } catch {
     return null;
