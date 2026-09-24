@@ -5,7 +5,7 @@ import process from "node:process";
 
 import { getErrorMessage } from "./error-utils.js";
 import { isExecutableFile, readRenderBinaryVersion, resolveRenderBinaryPath } from "./render-binary.js";
-import { connectExistingRenderClient, type RenderDaemonClient } from "./render-daemon-client.js";
+import { connectExistingRenderClient, type RenderDaemonClient, type RenderDaemonReviver } from "./render-daemon-client.js";
 import { renderPaths } from "./render-protocol.js";
 import { connectExistingTerminalHost, createTerminalHost, TerminalDaemonClient } from "./terminal-daemon-client.js";
 import {
@@ -18,6 +18,10 @@ import type { RenderEngine } from "./types.js";
 
 /** Render 的 socket/token 就绪等待窗口，与 legacy daemon 保持一致。 */
 const RENDER_READY_TIMEOUT_MS = 5_000;
+/** 自愈 revive 的最小间隔：重连退避可能很密集，窗口内只 spawn 一次。 */
+const RENDER_REVIVE_BACKOFF_MS = 5_000;
+/** 陈留 socket 的二次确认间隔（避开「刚 bind、还没 accept」的启动窗口）。 */
+const RENDER_STALE_PROBE_DELAY_MS = 250;
 
 export interface RenderHostOptions {
   /** 配置里显式指定的引擎；环境变量 WAND_RENDER_ENGINE 优先。 */
@@ -26,6 +30,62 @@ export interface RenderHostOptions {
   binaryPath?: string;
   /** DB 中仍在运行的 PTY，用于旧版 Render 的超大 list 失败时逐个 attach。 */
   knownSessionIds?: readonly string[];
+}
+
+/**
+ * 运行时自愈：没有活着的 owner、且端点不可用时，起一个 detached Render。
+ * 返回 true 表示起了新进程（调用方应立刻重连）。
+ *
+ * 覆盖两种「重试永远不会好」的形状（都是同一个后果：终端一直断、只能重启整个服务）：
+ * - daemon 没了，socket 文件也被清掉（临时目录清理器，线上真发生过）；
+ * - daemon 被 kill -9 / 崩溃，socket 文件作为陈留文件留了下来（没有监听者）。
+ *
+ * 保守之处：pid 文件里还有活进程就不插手（那个 daemon 会自己重建端点，
+ * docs/render-protocol.md §6 single instance）；能连上监听者也不插手；同一个窗口只 spawn 一次。
+ */
+export function createRenderDaemonReviver(
+  configPath: string,
+  binaryPath: string | null,
+): RenderDaemonReviver {
+  let inFlight: Promise<boolean> | null = null;
+  let lastSpawnAt = 0;
+  return (): Promise<boolean> => {
+    if (inFlight) return inFlight;
+    inFlight = (async (): Promise<boolean> => {
+      if (process.platform === "win32") return false;
+      const paths = renderPaths(configPath);
+      // 有活着的 owner 就不插手：端点要么还在，要么它自己会重建
+      // （旧版 daemon 没有看门狗，但也不能开第二个 daemon —— 协议 §6 single instance）。
+      if (readLiveRenderPid(paths.pidPath) !== null) return false;
+      if (await isSocketListening(paths.socketPath)) return false;
+      // 端点文件还在但没人监听 = 崩溃留下的陈留 socket。它可能是「刚 bind、 还没 accept」
+      // 的启动窗口，隔一下再确认一次；确认真死了就把陈留文件交给新 daemon 自己的
+      // prepare_socket_path 去判定（它只删本用户的 0600 socket，不碰别人的路径）。
+      if (existsSync(paths.socketPath)) {
+        await new Promise<void>((resolve) => setTimeout(resolve, RENDER_STALE_PROBE_DELAY_MS));
+        if (await isSocketListening(paths.socketPath)) return false;
+      }
+      if (Date.now() - lastSpawnAt < RENDER_REVIVE_BACKOFF_MS) return false;
+      const resolved = binaryPath && isExecutableFile(binaryPath) ? binaryPath : resolveRenderBinaryPath(configPath);
+      if (!resolved) return false;
+      lastSpawnAt = Date.now();
+      const pid = spawnDetachedRenderProcess(configPath, resolved);
+      const deadline = Date.now() + RENDER_READY_TIMEOUT_MS;
+      while (Date.now() < deadline) {
+        // 新 daemon 先 bind 再写 pid：pid 文件里出现活 pid 才算它真正接管了这个端点。
+        if (readLiveRenderPid(paths.pidPath) !== null && await isSocketListening(paths.socketPath)) {
+          process.stderr.write(`[wand] Restarted Render daemon (pid ${pid ?? "?"}); reconnecting.\n`);
+          return true;
+        }
+        await new Promise<void>((resolve) => setTimeout(resolve, 50));
+      }
+      // 起了却没就绪（二进制不对/卡在启动/端点被别人占着）：回收自己生的进程，
+      // 不留占着 socket 名字的孤儿 daemon。
+      reapUnreadyRender(pid ?? undefined);
+      return false;
+    })().finally(() => { inFlight = null; });
+    return inFlight;
+  };
 }
 
 export interface UpgradeAwareTerminalHost {
@@ -218,13 +278,19 @@ export async function createRenderTerminalHost(
 ): Promise<RenderDaemonClient> {
   const paths = renderPaths(configPath);
   const endpointExists = process.platform !== "win32" && existsSync(paths.socketPath);
+  // 已经 adopt 过的客户端需要能自己把 daemon 拉回来：adopt 完 binaryPath 就丢了，
+  // 所以这里把解析结果一次性算好交给它。
+  const reviveDaemon = createRenderDaemonReviver(
+    configPath,
+    options.binaryPath ?? resolveRenderBinaryPath(configPath),
+  );
 
   if (endpointExists) {
-    const adopted = await connectExistingRenderClient(configPath, options.knownSessionIds);
+    const adopted = await connectExistingRenderClient(configPath, options.knownSessionIds, reviveDaemon);
     if (adopted) return adopted;
     if (await isSocketListening(paths.socketPath)) {
       // 有人监听却拒绝 adopt（协议版本不符 / token 不符）：这是错误配置，必须报出来而不是绕开。
-      const starting = await waitForRender(configPath, RENDER_READY_TIMEOUT_MS, options.knownSessionIds);
+      const starting = await waitForRender(configPath, RENDER_READY_TIMEOUT_MS, options.knownSessionIds, reviveDaemon);
       if (starting) return starting;
       throw new Error(
         `A Render daemon is listening on ${paths.socketPath} but rejected adoption. Refusing to spawn a competing Render; ` +
@@ -242,7 +308,7 @@ export async function createRenderTerminalHost(
   // 绝不另起第二个 daemon（协议 §6 single instance）。
   const livePid = readLiveRenderPid(paths.pidPath);
   if (livePid !== null) {
-    const starting = await waitForRender(configPath, RENDER_READY_TIMEOUT_MS, options.knownSessionIds);
+    const starting = await waitForRender(configPath, RENDER_READY_TIMEOUT_MS, options.knownSessionIds, reviveDaemon);
     if (starting) return starting;
     throw new Error(
       `Render process ${livePid} is alive but its socket ${paths.socketPath} is unavailable; refusing to spawn a second daemon.`,
@@ -251,18 +317,16 @@ export async function createRenderTerminalHost(
 
   const binaryPath = options.binaryPath ?? resolveRenderBinaryPath(configPath);
   if (!binaryPath) throw new Error("wand-render binary is required to start Render");
-  return spawnDetachedRender(configPath, binaryPath, options.knownSessionIds);
+  return spawnDetachedRender(configPath, binaryPath, options.knownSessionIds, reviveDaemon);
 }
 
-/** detached spawn（stdio 忽略、unref），并等 socket + token 就绪。 */
-export async function spawnDetachedRender(
-  configPath: string,
-  binaryPath: string,
-  knownSessionIds?: readonly string[],
-): Promise<RenderDaemonClient> {
-  const paths = renderPaths(configPath);
-  // `-c <configPath>` 是按 config 隔离的既定约定（docs/render-protocol.md §6）：
-  // socket / token / pid / meta 全部由它派生。
+/**
+ * detached spawn（stdio 忽略、unref），返回子进程 pid。
+ *
+ * `-c <configPath>` 是按 config 隔离的既定约定（docs/render-protocol.md §6）：
+ * socket / token / pid / meta 全部由它派生。
+ */
+export function spawnDetachedRenderProcess(configPath: string, binaryPath: string): number | null {
   const child = spawn(binaryPath, ["-c", configPath], {
     detached: true,
     stdio: "ignore",
@@ -273,12 +337,24 @@ export async function spawnDetachedRender(
     process.stderr.write(`[wand] Failed to spawn wand-render: ${getErrorMessage(error)}\n`);
   });
   child.unref();
-  const client = await waitForRender(configPath, RENDER_READY_TIMEOUT_MS, knownSessionIds);
+  return typeof child.pid === "number" ? child.pid : null;
+}
+
+/** spawn 并等 socket + token 就绪（启动路径用）。 */
+export async function spawnDetachedRender(
+  configPath: string,
+  binaryPath: string,
+  knownSessionIds?: readonly string[],
+  reviveDaemon: RenderDaemonReviver | null = null,
+): Promise<RenderDaemonClient> {
+  const paths = renderPaths(configPath);
+  const pid = spawnDetachedRenderProcess(configPath, binaryPath);
+  const client = await waitForRender(configPath, RENDER_READY_TIMEOUT_MS, knownSessionIds, reviveDaemon);
   if (!client) {
     // 自己生的进程自己收：就位超时（选错了二进制、二进制是 stub、或者它卡在启动）
     // 时如果不回收，就会留下一个永久孤儿 daemon —— 它占着 socket 名字、下次启动会被
     // 当成「活着但不接受领养」而直接阻塞启动。收尾是 best-effort，失败不影响报错。
-    reapUnreadyRender(child.pid);
+    reapUnreadyRender(pid ?? undefined);
     throw new Error(
       `Spawned ${binaryPath} but its socket/token (${paths.socketPath}) did not become ready within ${RENDER_READY_TIMEOUT_MS}ms.`,
     );
@@ -290,10 +366,11 @@ async function waitForRender(
   configPath: string,
   timeoutMs: number,
   knownSessionIds?: readonly string[],
+  reviveDaemon: RenderDaemonReviver | null = null,
 ): Promise<RenderDaemonClient | null> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const client = await connectExistingRenderClient(configPath, knownSessionIds);
+    const client = await connectExistingRenderClient(configPath, knownSessionIds, reviveDaemon);
     if (client) return client;
     await new Promise<void>((resolve) => setTimeout(resolve, 50));
   }

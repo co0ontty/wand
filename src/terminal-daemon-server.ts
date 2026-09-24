@@ -555,16 +555,39 @@ export async function runTerminalDaemon(configPath: string): Promise<void> {
     for (const runId of Array.from(structuredRuns.keys())) structuredForget(runId);
     for (const client of clients) client.socket.destroy();
     server.close(() => process.exit(0));
-    cleanupDaemonFiles(paths.socketPath, paths.tokenPath, paths.pidPath);
+    cleanupDaemonFiles(paths, { token, pid: process.pid });
   };
   process.once("SIGINT", shutdown);
   process.once("SIGTERM", shutdown);
 }
 
-function cleanupDaemonFiles(socketPath: string, tokenPath: string, pidPath: string): void {
-  for (const file of [socketPath, tokenPath, pidPath]) {
-    if (process.platform === "win32" && file === socketPath) continue;
+/**
+ * 只清理**自己拥有**的 daemon 文件。
+ *
+ * 升级期/僵尸期可能有两个 daemon 指向同一个 config（老进程端点已被清理、新进程刚接上）：
+ * 老进程退出时无条件 unlink，会把新进程正在使用的 token/pid 一起删掉 —— 新 daemon 随即变成
+ * 「进程活着但凭据不见了」，所有终端永久断联。所以凭据按**内容**判归属，不是自己写的就不动。
+ * socket 仍然照删：它属于本进程的监听（真正被占时 bind 会 EADDRINUSE）。
+ */
+function cleanupDaemonFiles(
+  paths: { socketPath: string; tokenPath: string; pidPath: string },
+  owner: { token: string; pid: number },
+): void {
+  if (process.platform !== "win32") {
+    try { unlinkSync(paths.socketPath); } catch { /* already absent */ }
+  }
+  for (const file of [paths.tokenPath, paths.pidPath]) {
+    if (!fileHoldsValue(file, file === paths.tokenPath ? owner.token : String(owner.pid))) continue;
     try { unlinkSync(file); } catch { /* already absent */ }
+  }
+}
+
+/** 文件内容是否还是本进程写进去的值（读不到/已被别人改写都算「不是自己的」）。 */
+function fileHoldsValue(filePath: string, expected: string): boolean {
+  try {
+    return readFileSync(filePath, "utf8").trim() === expected;
+  } catch {
+    return false;
   }
 }
 

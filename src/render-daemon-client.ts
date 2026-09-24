@@ -68,6 +68,12 @@ export class RenderAuthError extends Error {
  * 远端 PTY 句柄。Render 可能在这个对象挂上 listener 之前就推来 data/exit
  * （大输出场景几乎必然发生），所以先做有界缓存，挂上后按序补发。
  */
+/**
+ * 运行时自愈回调：把「端点已消失、且 config 上没有活着的 daemon」的 Render 重新拉起来。
+ * 返回 true 表示起了新进程（调用方应立刻重连）。
+ */
+export type RenderDaemonReviver = () => Promise<boolean>;
+
 class RemoteRenderProcess implements TerminalProcess {
   private readonly dataListeners = new Set<(event: TerminalDataEvent) => void>();
   private readonly exitListeners = new Set<(event: TerminalExitEvent) => void>();
@@ -225,6 +231,11 @@ export class RenderDaemonClient implements TerminalHost {
     private readonly tokenPath: string | null = null,
     /** Persisted PTY IDs used only if v1 `list` exceeds its aggregate frame limit. */
     private readonly knownSessionIds: readonly string[] = [],
+    /**
+     * 运行时自愈回调：重连失败时问它能不能把 daemon 拉回来（返回 true = 起了新进程）。
+     * 只有「端点已消失 + config 上没有活着的 daemon」时它才动手，见 `render-host.ts`。
+     */
+    private readonly reviveDaemon: RenderDaemonReviver | null = null,
   ) {
     this.lastKnownToken = token;
   }
@@ -818,19 +829,53 @@ export class RenderDaemonClient implements TerminalHost {
     if (this.disposed) return;
     try {
       await this.connect();
-      this.reconnectDelayMs = RECONNECT_INITIAL_MS;
-      this.reconnectFailureLogged = false;
-      this.authBackoff = false;
+      this.noteReconnectSuccess();
+      return;
     } catch (error) {
       if (this.disposed) return;
-      const stalled = this.noteReconnectFailure(error);
-      if (stalled && this.reconnectTimer) {
-        // 断线路径已经按普通退避排过一次；用 60s 的长退避覆盖它。
-        clearTimeout(this.reconnectTimer);
-        this.reconnectTimer = null;
+      // 端点本身没了（socket 文件被临时目录清理器删掉，或 daemon 崩了没留下 socket）：
+      // 重试同一个路径永远不会成功，先把 daemon 拉回来再连一次。只要 pid 文件里还有
+      // 活进程，回调就不会动手 —— 那个 daemon 会自己重建端点（docs/render-protocol.md §6）。
+      if (await this.reviveDaemonForRetry()) {
+        try {
+          await this.connect();
+          this.noteReconnectSuccess();
+          return;
+        } catch (retryError) {
+          this.noteReconnectFailureAndSchedule(retryError);
+          return;
+        }
       }
-      this.scheduleReconnect();
+      this.noteReconnectFailureAndSchedule(error);
     }
+  }
+
+  private noteReconnectSuccess(): void {
+    this.reconnectDelayMs = RECONNECT_INITIAL_MS;
+    this.reconnectFailureLogged = false;
+    this.authBackoff = false;
+  }
+
+  /** 自愈回调本身绝不能让重连路径抛错；失败按「没拉起」处理。 */
+  private async reviveDaemonForRetry(): Promise<boolean> {
+    if (!this.reviveDaemon) return false;
+    try {
+      return await this.reviveDaemon();
+    } catch (error) {
+      process.stderr.write(`[wand] Render daemon revival failed: ${getErrorMessage(error)}\n`);
+      return false;
+    }
+  }
+
+  private noteReconnectFailureAndSchedule(error: unknown): void {
+    if (this.disposed) return;
+    const stalled = this.noteReconnectFailure(error);
+    if (stalled && this.reconnectTimer) {
+      // 断线路径已经按普通退避排过一次；用 60s 的长退避覆盖它。
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.scheduleReconnect();
   }
 
   /**
@@ -1119,6 +1164,7 @@ function asNumber(value: unknown, fallback: number, problems: string[], label: s
 export async function connectExistingRenderClient(
   configPath: string,
   knownSessionIds: readonly string[] = [],
+  reviveDaemon: RenderDaemonReviver | null = null,
 ): Promise<RenderDaemonClient | null> {
   const { socketPath, tokenPath } = renderPaths(configPath);
   let token: string;
@@ -1126,7 +1172,7 @@ export async function connectExistingRenderClient(
   catch { return null; }
   if (!token) return null;
   // 传 tokenPath 让重连路径在 daemon 轮换 token 后能自愈（见构造函数注释）。
-  const client = new RenderDaemonClient(socketPath, token, tokenPath, knownSessionIds);
+  const client = new RenderDaemonClient(socketPath, token, tokenPath, knownSessionIds, reviveDaemon);
   try {
     await client.connect();
     return client;

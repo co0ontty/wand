@@ -168,6 +168,13 @@ Claude SDK 默认权限模式经 `canUseTool` 产生 pending escalation；approv
 
 PTY daemon 以 config 路径哈希区分 socket/token/pid；客户端重连对账并补 seq。终端显示快照由 headless xterm 提供，浏览器消费原始字节。
 
+两套 daemon（legacy `terminald` 与 Render）的 socket 都放在 `/tmp`，会被系统/第三方的临时目录清理器 unlink 掉，
+而进程本身还活着。所以端点由 daemon 自己维护（缺了就 rebind，旧连接与 PTY 不动），Server 侧也有两条兜底：
+心跳成功后摸一下自己那个 inode 的 mtime（`daemon-connection.ts`，对付只认年龄的清理），以及重连失败时
+“没有活着的 owner + 端点不可用 → 重新拉起 daemon”（`render-host.ts: createRenderDaemonReviver`）。
+排查“终端突然全断”先看 `/tmp/wand-{render,terminald}-<uid>-<configHash>.sock` 在不在：文件不在、
+进程还活着 = 端点丢了；`lsof -p <pid> | grep sock` 能看到它抱着的已是 unlinked inode。
+
 **当前已不再是“所有 structured 重启必定中断”：**
 
 1. manager 构造时先把原 running 记录归一为 idle，并暂记中断提示；非 SDK 记录加入恢复候选。

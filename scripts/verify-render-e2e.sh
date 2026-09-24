@@ -691,24 +691,26 @@ MARK7="WAND_E2E_STEP7_$(date +%s)"
 WS7="$(run_helper ws "$SESSION_ID" web "echo $MARK7")"
 if [ "$(json_field "$WS7" echoFound)" = "true" ]; then pass "重启后输入仍有输出（continuity 成立）"; else fail "重启后拿不到输出：$WS7"; fi
 
-# ── 步骤 8：Render 崩溃 → Server 自愈（token 重读）───────────────────────
-step "步骤 8：kill -9 Render → 同 config 起新 daemon（token 轮换）→ Server 自愈"
+# ── 步骤 8：Render 崩溃 → Server 自愈（重新拉起 daemon + token 重读）──────
+step "步骤 8：kill -9 Render → Server 自己重新拉起 daemon（token 轮换）"
 kill -9 "$RENDER_PID_1" 2>/dev/null || true
 sleep 1
 if process_alive "$RENDER_PID_1"; then fail "Render 没被杀掉"; else pass "Render ($RENDER_PID_1) 已被 kill -9"; fi
 if process_alive "$PTY_PID_BEFORE"; then fail "旧 daemon 里的 PTY ${PTY_PID_BEFORE} 竟然还活着"; else pass "旧 daemon 里的 PTY ${PTY_PID_BEFORE} 随 daemon 消失（符合预期）"; fi
 
-( "$RENDER_BIN" -c "$CONFIG" >>"$DIR/render2.log" 2>&1 & )
+# 这里不再由本脚本代劳：崩溃后端点（socket 文件）也失效了，重连一万次都不会成功，
+# Server 必须自己把 daemon 拉回来（src/render-host.ts: createRenderDaemonReviver）。
 RENDER_PID_2=""
-for _ in $(seq 1 40); do
+for _ in $(seq 1 60); do
   RENDER_PID_2="$(render_pid)"
   if [ -n "$RENDER_PID_2" ] && [ "$RENDER_PID_2" != "$RENDER_PID_1" ] && process_alive "$RENDER_PID_2"; then break; fi
+  RENDER_PID_2=""
   sleep 0.5
 done
 if [ -n "$RENDER_PID_2" ] && [ "$RENDER_PID_2" != "$RENDER_PID_1" ]; then
-  pass "同 config 起了新 Render（pid ${RENDER_PID_2}）"
+  pass "Server 自己把 Render 拉回来了（新 pid ${RENDER_PID_2}）"
 else
-  fail "新 Render 没有起来（pid=${RENDER_PID_2}）"
+  fail "Server 没有自愈：Render 崩溃后没被重新拉起（pid=${RENDER_PID_2}；Server 日志里应出现 'Restarted Render daemon'）"
 fi
 TOKEN_SHA_AFTER="$(sha256_of "$(ls "$DIR"/.render-*.token | head -1)" 2>/dev/null || true)"
 if [ -n "$TOKEN_SHA_BEFORE" ] && [ -n "$TOKEN_SHA_AFTER" ] && [ "$TOKEN_SHA_BEFORE" != "$TOKEN_SHA_AFTER" ]; then
