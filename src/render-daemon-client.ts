@@ -244,6 +244,20 @@ export class RenderDaemonClient implements TerminalHost {
     return this.daemonVersion;
   }
 
+  /** daemon 侧已知的会话数（`inventory` 是 `list`/`attach` 的权威投影）。 */
+  get sessionCount(): number {
+    return this.inventory.size;
+  }
+
+  /**
+   * 让 daemon 干净收摊（`shutdown mode=now`：杀掉所有 PTY 后退出）。
+   * **只允许用在「daemon 空闲」的升级场景**（sessionCount === 0）；持有活会话时
+   * 调用它会杀掉用户的 shell。
+   */
+  async requestShutdownNow(): Promise<void> {
+    await this.request("shutdown", { mode: "now" });
+  }
+
   connect(): Promise<void> {
     if (this.disposed) return Promise.reject(new Error("Render client disposed"));
     if (this.connecting) return this.connecting;
