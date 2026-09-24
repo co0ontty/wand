@@ -751,23 +751,34 @@ function hasLiveTerminalDaemon(configPath: string): boolean {
 /** 一个常驻 daemon 的端点状态（排查「终端全断」的第一手证据）。 */
 interface DaemonEndpointState {
   label: string;
+  kind: "render" | "terminald";
   pid: number | null;
   pidAlive: boolean;
   socketPath: string;
   socketExists: boolean;
 }
 
-/** 按 config 派生两套 daemon 的端点（socket 在 /tmp、pid 在 config 目录旁边）。 */
+/** 按 config 派生两套 daemon 的端点（socket 在 /tmp、pid 在 config 目录旁边）。
+ *
+ * uid 用 **config 文件 owner** 的，不是调用者的：`wand service:install` 常常是 sudo 跑的，
+ * 而 daemon 在 unit/plist 里被钉成 config owner。用调用者的 uid 会算出 `-0-` 这种不存在的
+ * 端点，把健康 daemon 当成僵尸（2026-09-24 真实发生过，两个 daemon 被误杀）。
+ */
 function daemonEndpointStates(configPath: string): DaemonEndpointState[] {
-  const render = renderPaths(configPath);
-  const terminal = terminalDaemonPaths(configPath);
-  return [
-    { label: "Render", pidPath: render.pidPath, socketPath: render.socketPath },
-    { label: "terminald", pidPath: terminal.pidPath, socketPath: terminal.socketPath },
-  ].map(({ label, pidPath, socketPath }) => {
+  const ownerUid = (() => {
+    try { return statUid(path.resolve(configPath)); } catch { return undefined; }
+  })();
+  const render = renderPaths(configPath, ownerUid);
+  const terminal = terminalDaemonPaths(configPath, ownerUid);
+  const endpoints: Array<{ label: string; kind: "render" | "terminald"; pidPath: string; socketPath: string }> = [
+    { label: "Render", kind: "render", pidPath: render.pidPath, socketPath: render.socketPath },
+    { label: "terminald", kind: "terminald", pidPath: terminal.pidPath, socketPath: terminal.socketPath },
+  ];
+  return endpoints.map(({ label, kind, pidPath, socketPath }) => {
     const pid = readDaemonPidFile(pidPath);
     return {
       label,
+      kind,
       pid,
       pidAlive: pid !== null && isPidAlive(pid),
       socketPath,
@@ -804,6 +815,14 @@ function reapZombieDaemons(configPath: string): string[] {
   sleepSync(1_500);
   for (const state of daemonEndpointStates(configPath)) {
     if (!state.pidAlive || state.socketExists) continue;
+    // 最后一道闸：确认这个 pid 的**命令行**就是本 config 的这个 daemon。
+    // 路径解析一旦与 daemon 不一致（比如 uid 算错），这条能挡住误杀。
+    if (!isDaemonProcessForConfig(state.pid!, configPath, state.kind)) {
+      actions.push(
+        `${state.label} pid ${state.pid} 端点缺失但命令行不像是本 config 的 daemon，跳过清理（保存证据）`,
+      );
+      continue;
+    }
     try {
       process.kill(state.pid!, "SIGKILL");
       actions.push(`${state.label} daemon pid ${state.pid} 进程活着但端点已丢失（${state.socketPath}），已清理`);
@@ -812,6 +831,18 @@ function reapZombieDaemons(configPath: string): string[] {
     }
   }
   return actions;
+}
+
+/** pid 的命令行是否确实是「本 config 的 render / terminald」。 */
+export function isDaemonProcessForConfig(
+  pid: number,
+  configPath: string,
+  kind: "render" | "terminald",
+): boolean {
+  const result = spawnSync("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8", timeout: 5_000 });
+  const command = (result.stdout ?? "").trim();
+  if (!command || !command.includes(configPath)) return false;
+  return kind === "render" ? command.includes("wand-render") : command.includes("terminald");
 }
 
 /**

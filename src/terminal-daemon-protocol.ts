@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 
+import { resolveEndpointUid } from "./render-protocol.js";
 import type { TerminalSessionState, TerminalSpawnRequest } from "./terminal-host.js";
 
 export const TERMINAL_DAEMON_PROTOCOL_VERSION = 2;
@@ -68,13 +69,13 @@ export interface TerminalDaemonAttachPayload {
   isNew: boolean;
 }
 
-export function terminalDaemonPaths(configPath: string): TerminalDaemonPaths {
+export function terminalDaemonPaths(configPath: string, uidOverride?: number): TerminalDaemonPaths {
   const resolved = path.resolve(configPath);
   const suffix = createHash("sha256").update(resolved).digest("hex").slice(0, 12);
   const dir = path.dirname(resolved);
-  const uid = (() => {
-    try { return os.userInfo().uid; } catch { return 0; }
-  })();
+  // uid 属于跑 daemon 的那个用户；拿 sudo 调用的命令必须显式传 config owner 的 uid，
+  // 否则 root 会算出 `-0-` 这种不存在的端点（见 render-protocol 的 resolveEndpointUid）。
+  const uid = resolveEndpointUid(uidOverride);
   return {
     socketPath: process.platform === "win32"
       ? `\\\\.\\pipe\\wand-terminald-${suffix}`

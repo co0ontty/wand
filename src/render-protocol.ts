@@ -141,13 +141,11 @@ function canonicalConfigPath(configPath: string): string {
  * `.terminald-<suffix>.token`）**刻意使用不同文件名**：升级期两套并存，
  * 但永不互相领养。
  */
-export function renderPaths(configPath: string): RenderPaths {
+export function renderPaths(configPath: string, uidOverride?: number): RenderPaths {
   const resolved = canonicalConfigPath(configPath);
   const suffix = createHash("sha256").update(resolved).digest("hex").slice(0, 12);
   const dir = path.dirname(resolved);
-  const uid = (() => {
-    try { return os.userInfo().uid; } catch { return 0; }
-  })();
+  const uid = resolveEndpointUid(uidOverride);
   return {
     // macOS 的 Unix socket 路径上限约 100 字节，所以 socket 放 /tmp 保持短。
     socketPath: path.join("/tmp", `wand-render-${uid}-${suffix}.sock`),
@@ -155,6 +153,18 @@ export function renderPaths(configPath: string): RenderPaths {
     pidPath: path.join(dir, `.render-${suffix}.pid`),
     metaPath: path.join(dir, `.render-${suffix}.json`),
   };
+}
+
+/**
+ * 端点里的 uid 是**跑 daemon 那个用户**的，不是调用者的。
+ *
+ * `wand service:install` 是拿 sudo 跑的，而 daemon 在 unit/plist 里被钉成 config 的
+ * owner；调用方必须显式传 owner uid，否则 root 会算出 `/tmp/wand-render-0-<hash>.sock`
+ * 这种永远不存在的路径（2026-09-24 就这么把两个健康 daemon 误判成僵尸杀掉了）。
+ */
+export function resolveEndpointUid(uidOverride?: number): number {
+  if (typeof uidOverride === "number" && Number.isInteger(uidOverride) && uidOverride >= 0) return uidOverride;
+  try { return os.userInfo().uid; } catch { return 0; }
 }
 
 /** 编码一帧：`u32` 大端长度 + UTF-8 JSON。 */
