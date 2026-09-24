@@ -306,12 +306,52 @@ export function serviceLogs(lines: number = 80, opts?: ServiceOpts): CommandResu
     return { ok: false, message: "journalctl 调用失败", detail: r.stderr.trim() || `exit ${r.status}` };
   }
   if (process.platform === "darwin") {
-    return {
-      ok: false,
-      message: "launchd 不直接写日志，请用 Console.app 或在 plist 里配置 StandardOutPath",
-    };
+    // plist 里配了 StandardOutPath/StandardErrorPath（见 installLaunchdService）。
+    // 老安装没有这两项，退回到 Console.app 的提示。
+    const configDir = readLaunchdConfigDir(scope);
+    if (!configDir) {
+      return {
+        ok: false,
+        message: "launchd 不直接写日志，请用 Console.app 或在 plist 里配置 StandardOutPath",
+      };
+    }
+    const sections = ["web.log", "web-error.log"]
+      .map((name) => ({ name, file: path.join(configDir, name) }))
+      .filter(({ file }) => existsSync(file))
+      .map(({ name, file }) => `--- ${name} ---\n${tailLines(file, lines)}`);
+    if (sections.length === 0) {
+      return {
+        ok: false,
+        message: `还没有日志文件（${configDir}/web.log、web-error.log）`,
+        detail: "重新跑一次 `wand service:install` 让 plist 带上 StandardOutPath/StandardErrorPath",
+      };
+    }
+    return { ok: true, message: `读取 ${configDir} 下的服务日志`, detail: sections.join("\n") };
   }
   return unsupported();
+}
+
+/** 从已安装的 plist 里读 config 路径（ProgramArguments 的第 5 项）；读不到返回 null。 */
+function readLaunchdConfigDir(scope: ServiceScope): string | null {
+  const plistPath = servicePathFor(scope);
+  if (!existsSync(plistPath)) return null;
+  const result = spawnSync(
+    "plutil",
+    ["-extract", "ProgramArguments.4", "raw", "-o", "-", plistPath],
+    { encoding: "utf8", timeout: 5_000 },
+  );
+  const configPath = result.status === 0 ? (result.stdout || "").trim() : "";
+  return configPath ? path.dirname(path.resolve(configPath)) : null;
+}
+
+/** 文件末尾 N 行（整个文件读进内存：服务日志本来就是小文件）。 */
+function tailLines(filePath: string, lines: number): string {
+  try {
+    const all = readFileSync(filePath, "utf8").split("\n");
+    return all.slice(Math.max(0, all.length - lines)).join("\n").trim();
+  } catch (error) {
+    return `读取失败：${getErrorMessage(error)}`;
+  }
 }
 
 /** systemctl 调用根据 scope 决定要不要 --user。system scope 也意味着调用方需要 root。 */
@@ -1026,6 +1066,13 @@ function installLaunchdService(ctx: ServiceContext, scope: ServiceScope): Comman
   const runHome = scope === "system" ? homeForUser(runUser, fallbackHome) : fallbackHome;
   // 与 systemd 同理：launchd 默认 PATH 极简，spawn 出的 claude 会找不到。
   const servicePath = buildServicePath(nodeBinDir, runHome);
+  // launchd 默认把 stdout/stderr 丢进 /dev/null：线上出问题时连“daemon 活着但端点没了”
+  // 这种一行告警都看不到（只能靠 lsof / 系统日志反推）。写进 config 目录旁边，
+  // `wand service:logs` 直接读。
+  const configDir = path.dirname(path.resolve(ctx.configPath));
+  const logFields = (out: string, err: string): string =>
+    `  <key>StandardOutPath</key><string>${path.join(configDir, out)}</string>\n` +
+    `  <key>StandardErrorPath</key><string>${path.join(configDir, err)}</string>\n`;
   const userNameField = scope === "system"
     ? `  <key>UserName</key><string>${runUser}</string>\n`
     : "";
@@ -1050,7 +1097,7 @@ ${userNameField}  <key>WorkingDirectory</key><string>${runHome}</string>
     <key>HOME</key><string>${runHome}</string>
   </dict>
   <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
+${logFields("web.log", "web-error.log")}  <key>KeepAlive</key><true/>
 </dict>
 </plist>
 `;
@@ -1074,12 +1121,13 @@ ${userNameField}  <key>WorkingDirectory</key><string>${runHome}</string>
     <key>HOME</key><string>${runHome}</string>
   </dict>
   <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
+${logFields("terminald.log", "terminald-error.log")}  <key>KeepAlive</key><true/>
 </dict>
 </plist>
 `;
   try {
     mkdirSync(path.dirname(plistPath), { recursive: true });
+    mkdirSync(configDir, { recursive: true });
     writeFileSync(terminalPlistPath, terminalPlist, "utf8");
     writeFileSync(plistPath, plist, "utf8");
   } catch (err) {
