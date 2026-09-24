@@ -376,7 +376,10 @@ test("ShellSidebar keeps secondary tools in the closed overflow menu", () => {
     assert.doesNotMatch(html, new RegExp(`id="${id}"`));
   }
   assert.match(html, />项目与任务<\/h2>/);
-  assert.doesNotMatch(html, /placeholder="搜索任务或会话"/);
+  // 搜索框现在常驻 DOM（靠 CSS 展开、inert 收起），所以收起时断言「不可交互」，
+  // 而不是「不存在」（旧断言是 placeholder 不出现）。
+  assert.match(html, /class="sidebar-search-expand[^"]*"[^>]*inert=/);
+  assert.match(html, /aria-expanded="false"/);
 });
 
 test("ShellSidebar source uses the UiStore hooks and no forbidden legacy seam", () => {

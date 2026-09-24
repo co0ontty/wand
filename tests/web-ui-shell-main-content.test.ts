@@ -219,7 +219,8 @@ test("mobile tasks keep a sidebar navigation entry even without terminal windows
     path.join(root, "src", "web-ui", "react", "shell", "shell-main-content.tsx"), "utf8",
   );
   assert.match(source, /context\.taskId && snapshot\.layout\.sidebarDrawer &&/);
-  assert.match(source, /aria-label="打开任务"/);
+  // aria-label 现在跟着抽屉开合切换文案，所以两个状态都要在（以前只写死 "打开任务"）。
+  assert.match(source, /aria-label=\{[^}]*"关闭任务列表"[^}]*"打开任务"[^}]*\}/);
   assert.match(source, /aria-controls="sessions-drawer"/);
   assert.match(source, /dispatch\(\{ type: "layout\.drawer\.toggle" \}\)/);
 });

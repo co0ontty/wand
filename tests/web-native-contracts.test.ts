@@ -99,17 +99,29 @@ test("Android native terminal consumes Render snapshots over the PTY websocket",
   const terminal = "android/app/src/main/java/com/wand/app/ui/terminal/NativePtyTerminal.kt";
   const socket = "android/app/src/main/java/com/wand/app/data/WandSocket.kt";
   includesAll(screen, [
-    "NativePtyTerminalSurface(terminal, onTap = { inputDrawerOpen = true })",
+    // 参数名从 onTap 改成 onTerminalTap、行为改成直接拉起键盘（安卓直连输入那批改动）；
+    // 契约本身（可点 → 进输入路径）没变，这里跟着新 API 断言。
+    "NativePtyTerminalSurface(",
+    "onTerminalTap = { requestDirectKeyboard() }",
     'ptyComposerSubmitChunks(text, "terminal")',
   ]);
   includesAll(terminal, [
     "TerminalEmulatorFactory.create(",
-    "detectTapGestures(onTap = { onTap() })",
-    'typeface = Typeface.create("sans-serif-mono", Typeface.NORMAL)',
-    "initialFontSize = 14.sp",
+    // 点终端 → 交给调用方（安卓直连输入那批：拉起键盘而不是打开输入抽屉）。
+    "onTerminalTap = onTerminalTap,",
+    // 字号/字体现在是可缩放 + 资产字体（appica 终端重构），不再是写死的 14sp：
+    // 断言「参数化了 + 走统一 typeface 工厂」，而不是旧字面量。
+    "initialFontSize = fontSize,",
+    "val typeface = remember { terminalTypeface(context.assets) }",
     "replayTerminalSnapshot(emulator, data.terminalState, data.output, data.ptyCols, data.ptyRows)",
     "emulator.writeInput(it.toByteArray(Charsets.UTF_8))",
     "socket.acknowledgePty(event.ptyBytes ?: 0)",
+  ]);
+  // 字体回退链在 TerminalAppearance.kt：资产字体优先、系统 mono 兜底。
+  includesAll("android/app/src/main/java/com/wand/app/ui/terminal/TerminalAppearance.kt", [
+    "Typeface.CustomFallbackBuilder(FontFamily.Builder(font).build())",
+    '"sans-serif"',
+    "Typeface.MONOSPACE",
   ]);
   includesAll(socket, [
     '.put("ptyAck", ptyAck)',

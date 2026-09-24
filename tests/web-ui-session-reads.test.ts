@@ -43,10 +43,28 @@ function harness() {
   const source = readFileSync(new URL("../src/web-ui/browser/session-engine.ts", import.meta.url), "utf8");
   const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } });
   const api: Record<string, any> = {};
+  // 事件总线：session-engine 模块级会往 window 上挂自定义事件监听
+  // （与 React 层的 model-catalog 互通），假 window 光有形状不够 —— 浏览器里
+  // addEventListener 永远存在，缺了它整个模块就炸在 import 阶段。
+  const windowListeners = new Map<string, Set<(event: unknown) => void>>();
   runInNewContext(outputText, {
     exports: api, require: (id: string) => dependencies[id] ?? fallback,
     document: { getElementById: () => null, querySelector: () => null, querySelectorAll: () => [] },
-    window: {}, localStorage: { getItem: () => null, setItem: noop },
+    window: {
+      addEventListener: (type: string, listener: (event: unknown) => void) => {
+        const set = windowListeners.get(type) ?? new Set();
+        set.add(listener);
+        windowListeners.set(type, set);
+      },
+      removeEventListener: (type: string, listener: (event: unknown) => void) => {
+        windowListeners.get(type)?.delete(listener);
+      },
+      dispatchEvent: (event: { type?: string }) => {
+        for (const listener of windowListeners.get(String(event?.type)) ?? []) listener(event);
+        return true;
+      },
+    },
+    localStorage: { getItem: () => null, setItem: noop },
     console: { error: (...args: unknown[]) => errors.push(args) },
     setTimeout: noop, clearTimeout: noop, clearInterval: noop,
     fetch: (url: string) => { const response = deferred<Response>(); requests.push({ url, response }); return response.promise; },
