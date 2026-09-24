@@ -69,6 +69,9 @@ else
 fi
 
 if (( NEED_NODE )); then
+  if [ "$(uname -s)" = "Darwin" ]; then
+    error "需要 Node.js >= ${REQUIRED_NODE_MAJOR}：先 brew install node@${REQUIRED_NODE_MAJOR}（或 nvm install ${REQUIRED_NODE_MAJOR}）再重跑本脚本。"
+  fi
   info "Installing Node.js v${REQUIRED_NODE_MAJOR} via NodeSource..."
   if command -v curl &>/dev/null; then
     curl -fsSL "https://deb.nodesource.com/setup_${REQUIRED_NODE_MAJOR}.x" | sudo -E bash -
@@ -108,6 +111,27 @@ if command -v systemctl &>/dev/null; then
     systemctl --user stop wand.service 2>/dev/null || true
     WAND_SYSTEMD_UNIT="wand.service"
     WAND_SYSTEMD_SCOPE="user"
+  fi
+fi
+
+# macOS 同理：launchd 的 KeepAlive 会在 npm 覆盖包目录时立刻把 web 重新拉起来，
+# 和 npm 的目录 rename 撞上就留下 .wand-XXXXXX 残留、下次装 ENOTEMPTY。
+# 所以先 bootout 掉 web 服务，装完再用 `wand service:install` 重新注册
+# （顺带把 unit 里的 PATH 与新加的日志路径刷新一遍）。
+# terminald 故意不动：它持有用户的 shell，换包不需要重启它。
+WAND_LAUNCHD_SCOPE=""
+if command -v launchctl >/dev/null 2>&1; then
+  if [ -f "/Library/LaunchDaemons/${WAND_LAUNCHD_LABEL:-com.wand.web}.plist" ]; then
+    WAND_LAUNCHD_SCOPE="system"
+  elif [ -f "${HOME}/Library/LaunchAgents/${WAND_LAUNCHD_LABEL:-com.wand.web}.plist" ]; then
+    WAND_LAUNCHD_SCOPE="user"
+  fi
+  if [ "$WAND_LAUNCHD_SCOPE" = "system" ]; then
+    $SUDO launchctl bootout "system/${WAND_LAUNCHD_LABEL:-com.wand.web}" 2>/dev/null || true
+    info "已停止 launchd 服务 com.wand.web（system scope），装完会重新注册"
+  elif [ "$WAND_LAUNCHD_SCOPE" = "user" ]; then
+    launchctl bootout "gui/$(id -u)/${WAND_LAUNCHD_LABEL:-com.wand.web}" 2>/dev/null || true
+    info "已停止 launchd 用户代理 com.wand.web，装完会重新注册"
   fi
 fi
 pkill -f "wand web" 2>/dev/null || true
@@ -165,6 +189,22 @@ if [ -n "${WAND_SYSTEMD_UNIT:-}" ]; then
       warn "wand service:install 失败，回退到 systemctl start"
       $SUDO systemctl start "$WAND_SYSTEMD_UNIT" 2>/dev/null \
         || warn "也起不来，请手动跑 '${SUDO:+sudo }wand service:install'"
+    fi
+  fi
+elif [ -n "$WAND_LAUNCHD_SCOPE" ]; then
+  if [ "$WAND_LAUNCHD_SCOPE" = "user" ]; then
+    info "Re-registering launchd user agent to refresh baked-in PATH / log paths..."
+    if wand service:install --user; then
+      SKIP_INSTALL_MENU=1
+    else
+      warn "wand service:install --user 失败，手动跑 'wand service:install --user' 恢复。"
+    fi
+  else
+    info "Re-registering launchd daemon to refresh baked-in PATH / log paths..."
+    if $SUDO wand service:install; then
+      SKIP_INSTALL_MENU=1
+    else
+      warn "wand service:install 失败，手动跑 '${SUDO:+sudo }wand service:install' 恢复。"
     fi
   fi
 fi
@@ -225,7 +265,15 @@ if [ "$SKIP_INSTALL_MENU" = "1" ]; then
   # 升级场景：老服务已被 wand service:install 重新生成 + enable --now，没必要
   # 再问用户怎么启动。直接打印升级完成 + 状态查询提示。
   echo ""
-  if [ "$WAND_SYSTEMD_SCOPE" = "user" ]; then
+  if [ "$WAND_LAUNCHD_SCOPE" = "user" ]; then
+    info "升级完成，用户级 launchd 代理已重新注册并启动。"
+    info "查看状态：${GREEN}wand service:status --user${NC}"
+    info "看 日 志：${GREEN}wand service:logs --user${NC}"
+  elif [ "$WAND_LAUNCHD_SCOPE" = "system" ]; then
+    info "升级完成，系统级 launchd 守护已重新注册并启动。"
+    info "查看状态：${GREEN}wand service:status${NC}"
+    info "看 日 志：${GREEN}wand service:logs${NC}"
+  elif [ "$WAND_SYSTEMD_SCOPE" = "user" ]; then
     info "升级完成，用户级服务已用最新 PATH 重新注册并启动。"
     info "查看状态：${GREEN}wand service:status --user${NC}"
     info "看 日 志：${GREEN}wand service:logs --user${NC}"

@@ -15,6 +15,7 @@
 #   ./start.sh --logs         # follow service logs where supported
 #   ./start.sh --stop         # stop service
 #   ./start.sh --uninstall    # uninstall service and global package
+#   ./start.sh --restart-daemons  # 强制换掉正在跑的 Render/terminald（会结束其持有的 shell）
 #   ./start.sh --port 8443    # update config port before restart
 #
 # Scope defaults to system. The package always comes from the current working
@@ -46,6 +47,10 @@ ACTION="install-and-restart"
 DO_BUILD=1
 DO_INSTALL=1
 PORT_OVERRIDE=""
+# 升级后 daemon（Render / legacy terminald）还是老进程：npm/start.sh 都不会动正在跑的
+# daemon（那里可能挂着用户的 shell）。默认只告警 + 给出命令；--restart-daemons 才真换。
+RESTART_DAEMONS="${WAND_RESTART_DAEMONS:-0}"
+DAEMON_PIDS_BEFORE=""
 SCOPE="${WAND_SERVICE_SCOPE:-system}"
 SERVICE_STOPPED_FOR_INSTALL=0
 
@@ -69,6 +74,7 @@ while [[ $# -gt 0 ]]; do
     --restart)      ACTION="restart-only"; shift ;;
     --uninstall)    ACTION="uninstall"; shift ;;
     --port)         PORT_OVERRIDE="${2:-}"; [[ -n "$PORT_OVERRIDE" ]] || die "--port 需要端口值"; shift 2 ;;
+    --restart-daemons) RESTART_DAEMONS=1; shift ;;
     --user)         SCOPE="user"; shift ;;
     --system)       SCOPE="system"; shift ;;
     -h|--help)      print_help; exit 0 ;;
@@ -494,7 +500,17 @@ print_recent_logs() {
     [[ "$SCOPE" == "user" ]] && base=(--user)
     journalctl "${base[@]}" -u "$SERVICE_NAME" -n 6 --no-pager -o cat 2>/dev/null | sed "s/^/  /" || true
   else
-    echo "  launchd 日志请用 Console.app；脚本 --logs 会打开 log stream。"
+    # launchd 的 plist 现在配了 StandardOutPath/StandardErrorPath（见 service:install），
+    # 直接读文件；老安装没有这两项时退回提示。
+    local config_dir file found=0
+    config_dir="$(dirname "$CONFIG_PATH")"
+    for file in web-error.log web.log terminald-error.log; do
+      [[ -f "$config_dir/$file" ]] || continue
+      found=1
+      echo "  ${C_DIM}-- $file --${C_RESET}"
+      tail -n 4 "$config_dir/$file" 2>/dev/null | sed 's/^/  /' || true
+    done
+    [[ "$found" == "1" ]] || echo "  还没有日志文件；重新跑一次 service:install 让 plist 带上 StandardOutPath 后就会有。"
   fi
 }
 
@@ -523,6 +539,9 @@ print_panel() {
   printf "  ${C_DIM}%-10s${C_RESET} %s\n" "Config" "$CONFIG_PATH"
   printf "  ${C_DIM}%-10s${C_RESET} %s\n" "SQLite" "$db_file"
   echo
+  echo -e "  ${C_DIM}Daemons${C_RESET}"
+  print_daemon_lines
+  echo
   echo -e "  ${C_DIM}Recent logs${C_RESET}"
   print_recent_logs
   echo
@@ -534,8 +553,91 @@ follow_logs() {
     [[ "$SCOPE" == "user" ]] && base=(--user)
     exec journalctl "${base[@]}" -u "$SERVICE_NAME" -f --no-pager
   else
+    local config_dir files=()
+    config_dir="$(dirname "$CONFIG_PATH")"
+    for name in web.log web-error.log terminald.log terminald-error.log; do
+      [[ -f "$config_dir/$name" ]] && files+=("$config_dir/$name")
+    done
+    if [[ "${#files[@]}" -gt 0 ]]; then
+      exec tail -n 20 -f "${files[@]}"
+    fi
     exec log stream --style compact --predicate 'process == "node" || process == "wand"'
   fi
+}
+
+# 两套 daemon 的 pid/alive/端点状态；路径推导用**装好的那个包**（唯一真源，
+# 不在 bash 里重算 config 哈希），每行：label<TAB>pid<TAB>alive|dead<TAB>ok|MISSING<TAB>version
+daemon_state_lines() {
+  local root="$WAND_PREFIX/lib/node_modules/@co0ontty/wand"
+  [[ -d "$root/dist" ]] || return 0
+  "$NODE_BIN" -e '
+const path = require("path");
+const fs = require("fs");
+const { pathToFileURL } = require("url");
+(async () => {
+  const [configPath, root] = process.argv.slice(1);
+  const { renderPaths } = await import(pathToFileURL(path.join(root, "dist/render-protocol.js")));
+  const { terminalDaemonPaths } = await import(pathToFileURL(path.join(root, "dist/terminal-daemon-protocol.js")));
+  const readPid = (file) => {
+    try {
+      const value = Number(fs.readFileSync(file, "utf8").trim());
+      return Number.isSafeInteger(value) && value > 0 ? value : 0;
+    } catch { return 0; }
+  };
+  const alive = (pid) => {
+    if (!pid) return false;
+    try { process.kill(pid, 0); return true; } catch (error) { return error.code === "EPERM"; }
+  };
+  const rows = [];
+  const push = (label, pidPath, socketPath, version) => {
+    const pid = readPid(pidPath);
+    rows.push([label, pid, alive(pid) ? "alive" : "dead", fs.existsSync(socketPath) ? "ok" : "MISSING", version || ""].join("\t"));
+  };
+  const render = renderPaths(configPath);
+  let version = "";
+  try { version = String(JSON.parse(fs.readFileSync(render.metaPath, "utf8")).version || ""); } catch {}
+  push("render", render.pidPath, render.socketPath, version);
+  const terminal = terminalDaemonPaths(configPath);
+  push("terminald", terminal.pidPath, terminal.socketPath, "");
+  // 末尾换行：调用方是 `while read` 循环，最后一行没有换行符会被丢掉。
+  process.stdout.write(rows.join("\n") + "\n");
+})().catch(() => {});
+' "$CONFIG_PATH" "$root"
+}
+
+# 换掉正在跑的 daemon。会结束它们持有的 shell（会话可按 provider 原生 session id 恢复）。
+daemon_pids() {
+  daemon_state_lines | awk -F'\t' '$3 == "alive" { print $2 }'
+}
+
+restart_daemons_now() {
+  local pids pid
+  pids="$(daemon_pids | tr '\n' ' ')"
+  if [[ -z "${pids// /}" ]]; then
+    return 0
+  fi
+  warn "重启 daemon：$pids（它们持有的 shell 会结束，可按原生 session id 恢复）"
+  # Render 对 SIGTERM 是 drain（会等到会话退完），所以先礼后兵；terminald 则直接收摊。
+  for pid in $pids; do run_privileged kill "$pid" 2>/dev/null || true; done
+  sleep 2
+  for pid in $pids; do
+    kill -0 "$pid" 2>/dev/null || continue
+    warn "daemon $pid 没在 drain 中退出，SIGKILL"
+    run_privileged kill -9 "$pid" 2>/dev/null || true
+  done
+  sleep 1
+}
+
+print_daemon_lines() {
+  local line
+  daemon_state_lines | while IFS=$'\t' read -r label pid state endpoint version; do
+    [[ -n "$label" ]] || continue
+    if [[ "$state" == "alive" && "$endpoint" != "ok" ]]; then
+      echo "  ${C_YELLOW}${label}: pid ${pid} 活着但端点丢失（$endpoint）—— 旧构建没有端点自愈${C_RESET}"
+    else
+      echo "  ${label}: pid ${pid:-0} (${state}), endpoint ${endpoint}${version:+ · v$version}"
+    fi
+  done
 }
 
 refresh_wand_runtime
@@ -624,7 +726,20 @@ if [[ "$DO_BUILD" == "1" ]]; then
   msg "版本号: package $PACKAGE_VERSION, latest tag $BASE_VERSION -> $DEV_VERSION"
   "$NPM_FOR_WAND" version "$DEV_VERSION" --no-git-tag-version --allow-same-version --ignore-scripts >/dev/null 2>&1
   msg "WAND_BUILD_CHANNEL=beta npm run build"
-  WAND_BUILD_CHANNEL=beta "$NPM_FOR_WAND" run build
+  BUILD_LOG="$(mktemp -t wand-build.XXXXXX)"
+  if ! WAND_BUILD_CHANNEL=beta "$NPM_FOR_WAND" run build >"$BUILD_LOG" 2>&1; then
+    tail -30 "$BUILD_LOG" | sed 's/^/  /'
+    # 内联 web 资产的预算门（scripts/check-bundle-budget.js）是发布门禁，不是偶发报错，
+    # 直接把两种合法出路写出来（以前这里只会丢一段 npm 输出就退出）。
+    if grep -q "bundle-budget" "$BUILD_LOG"; then
+      die "构建失败：内联 web 资产超出 bundle 预算。
+   要么瘦身（懒加载重型面板 / 删死代码），要么在同一个提交里上调 scripts/check-bundle-budget.js
+   的 BUDGET 并写明原因（预算只降不升，松绑要留证据）。完整日志：$BUILD_LOG"
+    fi
+    die "构建失败。完整日志：$BUILD_LOG"
+  fi
+  tail -4 "$BUILD_LOG" | sed 's/^/  /'
+  rm -f "$BUILD_LOG"
   ok "build 完成 ($DEV_VERSION)"
 else
   [[ -f "$REPO_ROOT/dist/cli.js" ]] || die "--no-build 但 dist/cli.js 不存在。"
@@ -645,6 +760,7 @@ fi
 
 if [[ "$DO_INSTALL" == "1" ]]; then
   PACK_DIR="$(mktemp -d)"
+  DAEMON_PIDS_BEFORE="$(daemon_pids | tr '\n' ' ')"
   msg "npm pack -> install -g --prefix $WAND_PREFIX"
   repair_global_package_permissions
   cleanup_npm_package_temps
@@ -668,6 +784,27 @@ if [[ "$DO_INSTALL" == "1" ]]; then
   refresh_wand_runtime
   verify_installed_beta
   verify_render_binary_installed
+
+  # npm 只换包，不动正在跑的 daemon（那里可能挂着用户的 shell）—— 所以升级后 daemon
+  # 依旧跑旧代码。2026-09-24 的事故就是这两个老进程没有端点自愈，socket 被临时目录
+  # 清理器删掉后永远回不来。默认只把状态和出路说清楚；--restart-daemons 才真换。
+  echo
+  echo -e "  ${C_DIM}Daemons${C_RESET}"
+  print_daemon_lines
+  if [[ "$RESTART_DAEMONS" == "1" ]]; then
+    restart_daemons_now
+    echo "  重启后："
+    print_daemon_lines
+  else
+    STALE_DAEMON_ALIVE=0
+    for pid in $DAEMON_PIDS_BEFORE; do
+      kill -0 "$pid" 2>/dev/null && STALE_DAEMON_ALIVE=1
+    done
+    if [[ "$STALE_DAEMON_ALIVE" == "1" ]]; then
+      warn "上面那些 daemon 是更新前启动的：还在跑旧代码（端点自愈、连接泄漏修复都不在里面）。"
+      warn "要换掉它们：${C_GREEN}./start.sh --restart-daemons${C_RESET}（会结束它们持有的 shell，可按 provider 原生 session id 恢复）。"
+    fi
+  fi
 fi
 
 [[ -f "$WAND_BIN" || -x "$WAND_BIN" ]] || die "安装后仍找不到 wand: $WAND_BIN"

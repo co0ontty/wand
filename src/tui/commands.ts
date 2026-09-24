@@ -25,6 +25,10 @@ import { computeRelaunch } from "../relaunch.js";
 import { ensureDatabaseFile, resolveDatabasePath, WandStorage } from "../storage.js";
 import { getErrorMessage } from "../error-utils.js";
 import { readTerminalDaemonPid } from "../terminal-daemon-server.js";
+import { terminalDaemonPaths } from "../terminal-daemon-protocol.js";
+import { renderPaths } from "../render-protocol.js";
+import { resolveRenderBinaryPath } from "../render-binary.js";
+import { compareSemver } from "../version-utils.js";
 import { isPidAlive } from "../pidfile.js";
 
 export interface CommandResult {
@@ -744,6 +748,119 @@ function hasLiveTerminalDaemon(configPath: string): boolean {
   return pid !== null && isPidAlive(pid);
 }
 
+/** 一个常驻 daemon 的端点状态（排查「终端全断」的第一手证据）。 */
+interface DaemonEndpointState {
+  label: string;
+  pid: number | null;
+  pidAlive: boolean;
+  socketPath: string;
+  socketExists: boolean;
+}
+
+/** 按 config 派生两套 daemon 的端点（socket 在 /tmp、pid 在 config 目录旁边）。 */
+function daemonEndpointStates(configPath: string): DaemonEndpointState[] {
+  const render = renderPaths(configPath);
+  const terminal = terminalDaemonPaths(configPath);
+  return [
+    { label: "Render", pidPath: render.pidPath, socketPath: render.socketPath },
+    { label: "terminald", pidPath: terminal.pidPath, socketPath: terminal.socketPath },
+  ].map(({ label, pidPath, socketPath }) => {
+    const pid = readDaemonPidFile(pidPath);
+    return {
+      label,
+      pid,
+      pidAlive: pid !== null && isPidAlive(pid),
+      socketPath,
+      socketExists: existsSync(socketPath),
+    };
+  });
+}
+
+function readDaemonPidFile(pidPath: string): number | null {
+  try {
+    const pid = Number(readFileSync(pidPath, "utf8").trim());
+    return Number.isSafeInteger(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 清掉「进程活着但端点没了」的僵尸 daemon。
+ *
+ * 这种 daemon 对任何客户端都已不可达（`/tmp` 下的 socket 文件被临时目录清理器删掉，
+ * 它抱着一个已经无名的 inode），却会让 `wand web` 启动判定「pid 活着但 socket 不可用」
+ * 而拒绝启动 —— 表现是整个服务起不回来，只能人工 kill。
+ *
+ * 自愈版 daemon（Node/Rust 两侧都有 recovery）会在 1s 内 rebind，所以先等一会儿
+ * 复查，真的还是不可达才动手；杀掉后由服务（terminald 有 unit/plist，Render 由 Server
+ * 启动时拉起）重新起一份新进程。
+ */
+function reapZombieDaemons(configPath: string): string[] {
+  const actions: string[] = [];
+  const suspects = daemonEndpointStates(configPath).filter((state) => state.pidAlive && !state.socketExists);
+  if (suspects.length === 0) return actions;
+  // 给自愈看门狗一点时间：端点丢得比这里早得多的话，下一轮就直接判死。
+  sleepSync(1_500);
+  for (const state of daemonEndpointStates(configPath)) {
+    if (!state.pidAlive || state.socketExists) continue;
+    try {
+      process.kill(state.pid!, "SIGKILL");
+      actions.push(`${state.label} daemon pid ${state.pid} 进程活着但端点已丢失（${state.socketPath}），已清理`);
+    } catch (error) {
+      actions.push(`${state.label} daemon pid ${state.pid} 清理失败：${getErrorMessage(error)}`);
+    }
+  }
+  return actions;
+}
+
+/**
+ * 「正在跑的 daemon 比装好的二进制旧」的提示（没有这种情形时返回 null）。
+ *
+ * npm 升级 / service:install 都不重启 daemon（那里可能挂着用户的 shell），所以升级完
+ * 很容易一直在跑旧代码 —— 2026-09-24 的终端全断就是这么来的（9/23 补的端点自愈
+ * 在 9/19 启的 terminald 里根本不存在）。service:install 的输出不带 --verbose 时
+ * 看不到 detail，所以这句拼进 message 里。
+ */
+function staleDaemonNote(configPath: string): string | null {
+  const render = renderPaths(configPath);
+  const pid = readDaemonPidFile(render.pidPath);
+  if (pid === null || !isPidAlive(pid)) return null;
+  const daemonVersion = (() => {
+    try {
+      const meta = JSON.parse(readFileSync(render.metaPath, "utf8")) as { version?: unknown };
+      return typeof meta.version === "string" && meta.version ? meta.version : null;
+    } catch { return null; }
+  })();
+  const binaryPath = resolveRenderBinaryPath(configPath);
+  if (!binaryPath) return null;
+  const binaryVersion = (() => {
+    try {
+      const sidecar = readFileSync(`${binaryPath}.version`, "utf8").trim();
+      if (/^\d+\.\d+\.\d+/.test(sidecar)) return sidecar;
+    } catch { /* 没有 sidecar 就跑一次 --version */ }
+    const result = spawnSync(binaryPath, ["--version"], { encoding: "utf8", timeout: 5_000 });
+    const match = /(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.]+)?)/.exec(result.stdout ?? "");
+    return match?.[1] ?? null;
+  })();
+  if (!binaryVersion) return null;
+  if (daemonVersion && compareSemver(daemonVersion, binaryVersion) >= 0) return null;
+  const shown = daemonVersion ? `Render ${daemonVersion}` : "Render daemon";
+  return `；但 ${shown} 仍在跑（装好的二进制是 ${binaryVersion}），它要重启才会用上新代码：./start.sh --restart-daemons`;
+}
+
+/** daemon 端点状态摘要，给服务命令的 detail 用。 */
+function describeDaemonEndpoints(configPath: string): string {
+  return daemonEndpointStates(configPath)
+    .map((state) => {
+      const pid = state.pid ?? "-";
+      const alive = state.pidAlive ? "alive" : "-";
+      const socket = state.socketExists ? "endpoint ok" : "endpoint MISSING";
+      return `  ${state.label}: pid ${pid} (${alive}), ${socket} ${state.socketPath}`;
+    })
+    .join("\n");
+}
+
 /** 读取已安装服务 unit / plist 的入口命令；未安装或平台不支持时返回 null。 */
 export function readServiceEntrypoint(scope: ServiceScope): string | null {
   const servicePath = servicePathFor(scope);
@@ -897,6 +1014,9 @@ function readFileStat(targetPath: string): { uid: number } {
 function installSystemdService(ctx: ServiceContext, scope: ServiceScope): CommandResult {
   const unitPath = servicePathFor(scope);
   const terminalUnitPath = terminalServicePathFor(scope);
+  // 先清掉会阻塞启动的僵尸 daemon（pid 活着但端点没了），否则下一步 `wand web` 会
+  // 因为「活着但 socket 不可用」直接拒绝启动。
+  const daemonNotes = reapZombieDaemons(ctx.configPath);
   const wandBin = resolveWandBin(ctx);
   const nodeBin = process.execPath;
   const nodeBinDir = path.dirname(nodeBin);
@@ -1009,6 +1129,9 @@ function installSystemdService(ctx: ServiceContext, scope: ServiceScope): Comman
     `scope: ${scope}`,
     `unit: ${unitPath}`,
     `terminal unit: ${terminalUnitPath}`,
+    ...daemonNotes,
+    "daemons:",
+    describeDaemonEndpoints(ctx.configPath),
     `daemon-reload: ${reload.status === 0 ? "ok" : `failed (${reload.stderr.trim()})`}`,
     `terminal enable${terminalAlreadyLive ? " (kept existing daemon)" : " --now"}: ${enableTerminal.status === 0 ? "ok" : `failed (${enableTerminal.stderr.trim()})`}`,
     `enable --now: ${enable.status === 0 ? "ok" : `failed (${enable.stderr.trim()})`}`,
@@ -1024,7 +1147,9 @@ function installSystemdService(ctx: ServiceContext, scope: ServiceScope): Comman
   }
   return {
     ok: true,
-    message: `已注册 systemd ${scope === "user" ? "用户" : "系统"}服务: ${unitPath}`,
+    message: `已注册 systemd ${scope === "user" ? "用户" : "系统"}服务: ${unitPath}` +
+      (daemonNotes.length > 0 ? `（已清理 ${daemonNotes.length} 个僵尸 daemon）` : "") +
+      (staleDaemonNote(ctx.configPath) ?? ""),
     detail,
   };
 }
@@ -1058,6 +1183,8 @@ function uninstallSystemdService(scope: ServiceScope): CommandResult {
 function installLaunchdService(ctx: ServiceContext, scope: ServiceScope): CommandResult {
   const plistPath = servicePathFor(scope);
   const terminalPlistPath = terminalServicePathFor(scope);
+  // 同 systemd：先例行清理僵尸 daemon，否则新起的 web 会因为端点缺失而拒绝启动。
+  const daemonNotes = reapZombieDaemons(ctx.configPath);
   const wandBin = resolveWandBin(ctx);
   const nodeBin = process.execPath;
   const nodeBinDir = path.dirname(nodeBin);
@@ -1183,8 +1310,12 @@ ${logFields("terminald.log", "terminald-error.log")}  <key>KeepAlive</key><true/
   }
   return {
     ok: true,
-    message: `已注册 launchd ${scope === "user" ? "用户代理" : "系统守护"}: ${plistPath}`,
-    detail: [terminalDetail, started.detail].filter(Boolean).join("\n"),
+    message: `已注册 launchd ${scope === "user" ? "用户代理" : "系统守护"}: ${plistPath}` +
+      (daemonNotes.length > 0 ? `（已清理 ${daemonNotes.length} 个僵尸 daemon）` : "") +
+      (staleDaemonNote(ctx.configPath) ?? ""),
+    detail: [terminalDetail, started.detail, ...daemonNotes, "daemons:", describeDaemonEndpoints(ctx.configPath)]
+      .filter(Boolean)
+      .join("\n"),
   };
 }
 
@@ -1228,4 +1359,4 @@ function uninstallLaunchdService(scope: ServiceScope): CommandResult {
 // ─── 工具 ────────────────────────────────────────────────────────────────
 
 
-// compareSemver 已统一到 ../version-utils.ts
+// compareSemver 已统一到 ../version-utils.ts（上方已按需 import）
