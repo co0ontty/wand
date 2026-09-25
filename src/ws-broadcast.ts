@@ -107,8 +107,11 @@ interface WsClient {
      * 等它 ack 回落到低水位再让它按终端快照重建屏幕。只影响这一个客户端。
      */
     degraded: boolean;
+    /** 已丢帧后，等待客户端请求快照期间仍须停发原始字节。 */
+    resyncRequested: boolean;
     /** 上次给它发 resync_required 的时间戳（限流用）。 */
     lastResyncNoticeAt: number;
+    resyncTimer?: NodeJS.Timeout;
   }>;
 }
 
@@ -241,6 +244,7 @@ export class WsBroadcastManager {
               supportsAck: msg.capabilities?.ptyAck === true,
               unackedBytes: 0,
               degraded: false,
+              resyncRequested: false,
               lastResyncNoticeAt: 0,
             });
             this.flushOutput(msg.sessionId);
@@ -430,6 +434,19 @@ export class WsBroadcastManager {
     const seq = (client.outputSeqBySession.get(sessionId) ?? 0) + 1;
     client.outputSeqBySession.set(sessionId, seq);
     client.pendingResyncSessions.delete(sessionId);
+    const subscription = client.ptySubscriptions.get(sessionId);
+    if (resync && subscription) {
+      // sendInit bypasses the per-client send queue. Queued pre-snapshot output must not
+      // arrive after the new screen (or trigger a false sequence gap on the client).
+      client.sendQueue = client.sendQueue.filter((frame) => {
+        try { return JSON.parse(frame).sessionId !== sessionId; } catch { return true; }
+      });
+      if (subscription.resyncTimer) clearTimeout(subscription.resyncTimer);
+      subscription.resyncTimer = undefined;
+      subscription.unackedBytes = 0;
+      subscription.degraded = false;
+      subscription.resyncRequested = false;
+    }
     const terminalState = (snapshot.sessionKind ?? "pty") === "pty"
       ? this.port?.getTerminalState?.(sessionId) ?? undefined
       : undefined;
@@ -521,18 +538,11 @@ export class WsBroadcastManager {
       if (client.ws.readyState !== WebSocket.OPEN) continue;
       if (isRawPtyOutput && !client.ptySubscriptions.has(event.sessionId)) continue;
 
-      const clientEvent = eventForClient(client);
-      // Stamp output events with a per-(client, session) sequence number so
-      // the client can detect a gap caused by backpressure drops.
-      let outgoing: ProcessEvent = clientEvent;
-      if (event.type === "output") {
-        const seq = (client.outputSeqBySession.get(event.sessionId) ?? 0) + 1;
-        client.outputSeqBySession.set(event.sessionId, seq);
-        outgoing = { ...clientEvent, seq } as ProcessEvent;
-      }
       const subscription = client.ptySubscriptions.get(event.sessionId);
       const usesPtyAckFlowControl = isRawPtyOutput && subscription?.supportsAck === true;
-      if (usesPtyAckFlowControl && subscription.degraded) {
+      if (usesPtyAckFlowControl
+        && (subscription.degraded || subscription.unackedBytes >= PTY_UNACKED_HIGH_WATER)) {
+        subscription.degraded = true;
         // 已经积压到高水位的客户端：后面这些原始字节对它是**过期的 TUI 帧**（终端
         // 每帧整屏重绘，中间帧没有任何保留价值），停发这些分片；等它 ack 追上来
         // 再由 requestPtyResync 让它按终端快照重建屏幕。
@@ -543,12 +553,6 @@ export class WsBroadcastManager {
         // 才恢复；手机不回来就永久冻住。降级只影响积压的这一个客户端。
         continue;
       }
-      if (usesPtyAckFlowControl) {
-        outgoing = { ...outgoing, ptyBytes } as ProcessEvent;
-        subscription.unackedBytes += ptyBytes;
-        if (subscription.unackedBytes >= PTY_UNACKED_HIGH_WATER) subscription.degraded = true;
-      }
-
       // Backpressure only gates new business messages. The send pump must
       // keep draining messages that were already accepted; otherwise a queue
       // at the high-water mark can never reach the low-water mark again.
@@ -565,6 +569,19 @@ export class WsBroadcastManager {
         continue;
       }
 
+      // Only delivered output consumes a sequence number. In particular, do not advance it
+      // while waiting for a resync: the next init is the new ordering boundary.
+      const clientEvent = eventForClient(client);
+      const seq = event.type === "output"
+        ? (client.outputSeqBySession.get(event.sessionId) ?? 0) + 1
+        : undefined;
+      if (seq !== undefined) client.outputSeqBySession.set(event.sessionId, seq);
+      const outgoing = {
+        ...clientEvent,
+        ...(seq !== undefined ? { seq } : {}),
+        ...(usesPtyAckFlowControl ? { ptyBytes } : {}),
+      };
+      if (usesPtyAckFlowControl) subscription.unackedBytes += ptyBytes;
       client.sendQueue.push(JSON.stringify(outgoing));
       if (client.sendQueue.length >= MAX_QUEUE_SIZE) {
         client.backpressurePaused = true;
@@ -619,7 +636,6 @@ export class WsBroadcastManager {
     if (!subscription?.supportsAck) return;
     subscription.unackedBytes = Math.max(0, subscription.unackedBytes - Math.max(0, Math.floor(bytes)));
     if (subscription.degraded && subscription.unackedBytes <= PTY_UNACKED_LOW_WATER) {
-      subscription.degraded = false;
       this.requestPtyResync(client, sessionId);
     }
   }
@@ -632,9 +648,21 @@ export class WsBroadcastManager {
    */
   private requestPtyResync(client: WsClient, sessionId: string): void {
     const subscription = client.ptySubscriptions.get(sessionId);
-    if (!subscription) return;
+    if (!subscription || subscription.resyncRequested || subscription.resyncTimer) return;
     const now = Date.now();
-    if (now - subscription.lastResyncNoticeAt < PTY_RESYNC_MIN_INTERVAL_MS) return;
+    const delay = PTY_RESYNC_MIN_INTERVAL_MS - (now - subscription.lastResyncNoticeAt);
+    if (delay > 0) {
+      subscription.resyncTimer = setTimeout(() => {
+        subscription.resyncTimer = undefined;
+        if (client.ptySubscriptions.get(sessionId) === subscription && subscription.degraded
+          && subscription.unackedBytes <= PTY_UNACKED_LOW_WATER) {
+          this.requestPtyResync(client, sessionId);
+        }
+      }, delay);
+      subscription.resyncTimer.unref();
+      return;
+    }
+    subscription.resyncRequested = true;
     subscription.lastResyncNoticeAt = now;
     this.queueResyncNotice(client, sessionId, "pty_backlog_drop");
   }

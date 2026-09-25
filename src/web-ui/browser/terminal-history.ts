@@ -16,6 +16,9 @@ type HistoryEntry = {
   before: number;
   revision: number;
   live: string;
+  /** Live bytes can no longer be replayed against this baseline after the bounded tail overflows. */
+  stale: boolean;
+  resyncRequested: boolean;
   loading: boolean;
 };
 
@@ -33,7 +36,7 @@ function replaySnapshot(entry: HistoryEntry): HistorySnapshot {
 /** Reuse the exact cached baseline on remount; a new WS init has a new snapshot object. */
 export function cachedTerminalHistory(id: string, snapshot: HistorySnapshot): HistorySnapshot | null {
   const entry = entries.get(id);
-  return entry?.base === snapshot ? replaySnapshot(entry) : null;
+  return entry?.base === snapshot && !entry.stale ? replaySnapshot(entry) : null;
 }
 
 /** Reset the history cursor on every authoritative WS init, never reuse old row indices. */
@@ -43,20 +46,22 @@ export function resetTerminalHistory(id: string, snapshot: HistorySnapshot | nul
     || !Number.isSafeInteger(snapshot.historyRevision)) return;
   entries.set(id, {
     base: snapshot, prefix: "", before: snapshot.historyBefore!,
-    revision: snapshot.historyRevision!, live: "", loading: false,
+    revision: snapshot.historyRevision!, live: "", stale: false, resyncRequested: false,
+    loading: false,
   });
 }
 
 export function recordTerminalHistoryChunk(id: string, chunk: string): void {
   const entry = entries.get(id);
-  if (!entry) return;
+  if (!entry || entry.stale) return;
   entry.live += chunk;
-  // Do not hold unbounded live TUI frames just to support an older scrollback cursor.
+  // Pi and other inline TUIs continuously redraw their status line. Reaching this
+  // bound must not resync the *visible* terminal every few seconds: a WS init
+  // resets and replays xterm, making the screen jump even though no bytes were lost.
+  // Keep the history cursor stale until the user actually requests an older page.
   if (entry.live.length > 200_000) {
-    entries.delete(id);
-    if (state.ws?.readyState === WebSocket.OPEN) {
-      state.ws.send(JSON.stringify({ type: "resync", sessionId: id }));
-    }
+    entry.live = "";
+    entry.stale = true;
   }
 }
 
@@ -67,6 +72,15 @@ export async function loadTerminalHistory(
 ): Promise<void> {
   const entry = entries.get(id);
   if (!entry || entry.loading || entry.before <= 0) return;
+  if (entry.stale) {
+    if (!entry.resyncRequested && state.ws?.readyState === WebSocket.OPEN) {
+      try {
+        state.ws.send(JSON.stringify({ type: "resync", sessionId: id }));
+        entry.resyncRequested = true;
+      } catch { /* Keep the cursor stale so a later scroll can retry. */ }
+    }
+    return;
+  }
   entry.loading = true;
   const before = entry.before;
   try {
@@ -82,7 +96,7 @@ export async function loadTerminalHistory(
       return;
     }
     const page = await parseJsonResponse<any>(response);
-    if (entries.get(id) !== entry || entry.before !== before
+    if (entries.get(id) !== entry || entry.stale || entry.before !== before
       || !Number.isSafeInteger(page.start) || page.start < 0 || page.start >= before
       || page.before !== before || page.revision !== entry.revision
       || typeof page.data !== "string" || (page.separator !== "" && page.separator !== "\r\n")) return;
@@ -92,7 +106,7 @@ export async function loadTerminalHistory(
     }, before - page.start);
     // A tab switch or terminal teardown can occur while the request is in flight.
     // A page that was never rendered must remain fetchable on the next scroll.
-    if (applied && entries.get(id) === entry && entry.before === before) {
+    if (applied && entries.get(id) === entry && !entry.stale && entry.before === before) {
       entry.prefix = prefix;
       entry.before = page.start;
     }

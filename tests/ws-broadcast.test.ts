@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { WebSocket, type WebSocketServer } from "ws";
 
-import type { ProcessEvent } from "../src/types.js";
+import type { ProcessEvent, SessionSnapshot } from "../src/types.js";
 import { WsBroadcastManager } from "../src/ws-broadcast.js";
 
 type SendCallback = (error?: Error) => void;
@@ -40,7 +40,14 @@ interface TestClient {
   pendingResyncSessions: Set<string>;
   blockBudget?: number;
   lastSeenAt: number;
-  ptySubscriptions: Map<string, { supportsAck: boolean; unackedBytes: number; degraded: boolean; lastResyncNoticeAt: number }>;
+  ptySubscriptions: Map<string, {
+    supportsAck: boolean;
+    unackedBytes: number;
+    degraded: boolean;
+    resyncRequested: boolean;
+    lastResyncNoticeAt: number;
+    resyncTimer?: NodeJS.Timeout;
+  }>;
 }
 
 interface ManagerInternals {
@@ -50,12 +57,19 @@ interface ManagerInternals {
   broadcast(event: ProcessEvent): void;
   processWsQueue(client: TestClient): void;
   handlePtyAck(client: TestClient, sessionId: string, bytes: number): void;
+  sendInit(client: TestClient, sessionId: string, snapshot: SessionSnapshot, resync: boolean): void;
   queueResyncNotice(client: TestClient, sessionId: string, reason: string): void;
 }
 
 /** 新订阅的默认形状（与原实现一致：ack 配额从 0 开始、未降级）。 */
 function newSubscription(options: { supportsAck: boolean } = { supportsAck: true }) {
-  return { supportsAck: options.supportsAck, unackedBytes: 0, degraded: false, lastResyncNoticeAt: 0 };
+  return {
+    supportsAck: options.supportsAck,
+    unackedBytes: 0,
+    degraded: false,
+    resyncRequested: false,
+    lastResyncNoticeAt: 0,
+  };
 }
 
 function createHarness(): {
@@ -281,7 +295,7 @@ test("一个停止 ack 的客户端只降级自己，既不冻结会话也不影
 
   // 僵尸追上来（ack 到低水位）：只给它自己一条重建通知。
   healthy.manager.handlePtyAck(zombie, "session-a", 6 * 128 * 1024);
-  assert.equal(zombieSub.degraded, false);
+  assert.equal(zombieSub.degraded, true, "before init, even new output must remain paused");
   const notices = zombieSocket.sent
     .concat(zombie.sendQueue)
     .map((message) => JSON.parse(message) as Record<string, unknown>)
@@ -290,7 +304,11 @@ test("一个停止 ack 的客户端只降级自己，既不冻结会话也不影
   assert.equal(notices[0].sessionId, "session-a");
   assert.equal(notices[0].reason, "pty_backlog_drop");
 
-  // 紧接着再来一轮积压：限流窗口内不重复下发重建通知。
+  // 收到权威快照之后才能继续发送；紧接着再积压则限流重建通知。
+  healthy.manager.sendInit(zombie, "session-a", {
+    id: "session-a", sessionKind: "pty", cwd: "/tmp", output: "", messages: [],
+  } as SessionSnapshot, true);
+  assert.equal(zombieSub.degraded, false);
   for (let index = 0; index < 6; index += 1) {
     healthy.manager.broadcast({ type: "output", sessionId: "session-a", data: { incremental: true, chunk } });
     healthy.manager.handlePtyAck(healthy.client, "session-a", chunk.length);
@@ -300,7 +318,72 @@ test("一个停止 ack 的客户端只降级自己，既不冻结会话也不影
     .concat(zombie.sendQueue)
     .map((message) => JSON.parse(message) as Record<string, unknown>)
     .filter((message) => message.type === "resync_required");
-  assert.equal(afterSecondRound.length, 1, "重建通知有最小间隔，避免慢性慢客户端来回重建");
+  assert.equal(afterSecondRound.length, 0, "重建通知有最小间隔，避免慢性慢客户端来回重建");
+  assert.ok(zombieSub.resyncTimer, "限流结束后自动请求快照，不会停发后永远卡住");
+  clearTimeout(zombieSub.resyncTimer);
+});
+
+test("a large PTY frame ACKed before the next one does not cause a needless resync", () => {
+  const { manager, client, socket } = createHarness();
+  client.ptySubscriptions.set("session-a", newSubscription());
+
+  manager.broadcast({
+    type: "output", sessionId: "session-a", data: { incremental: true, chunk: "x".repeat(1024 * 1024) },
+  });
+  manager.handlePtyAck(client, "session-a", 1024 * 1024);
+  manager.broadcast({ type: "output", sessionId: "session-a", data: { incremental: true, chunk: "ok" } });
+
+  assert.equal(client.ptySubscriptions.get("session-a")?.degraded, false);
+  assert.equal(socket.sent.length + client.sendQueue.length, 2);
+  assert.equal(JSON.parse(client.sendQueue[0]).seq, 2);
+  assert.equal(client.sendQueue.some((frame) => JSON.parse(frame).type === "resync_required"), false);
+});
+
+test("dropped PTY output stays paused until init and does not create sequence gaps", () => {
+  const { manager, client, socket } = createHarness();
+  client.ptySubscriptions.set("session-a", newSubscription());
+  const broadcast = (chunk: string) => manager.broadcast({
+    type: "output", sessionId: "session-a", data: { incremental: true, chunk },
+  });
+  broadcast("a".repeat(512 * 1024));
+  broadcast("dropped");
+  manager.handlePtyAck(client, "session-a", 512 * 1024);
+  const sub = client.ptySubscriptions.get("session-a")!;
+  assert.equal(sub.degraded, true);
+  assert.equal(sub.resyncRequested, true);
+  broadcast("also dropped while awaiting init");
+  assert.equal(client.outputSeqBySession.get("session-a"), 1);
+
+  manager.sendInit(client, "session-a", {
+    id: "session-a", sessionKind: "pty", cwd: "/tmp", output: "", messages: [],
+  } as SessionSnapshot, true);
+  assert.equal(sub.degraded, false);
+  assert.equal(sub.resyncRequested, false);
+  assert.equal(client.sendQueue.some((frame) => JSON.parse(frame).data?.chunk), false,
+    "output queued before the snapshot must not follow it");
+  broadcast("after init");
+  const sentInit = socket.sent.map((frame) => JSON.parse(frame)).find((frame) => frame.type === "init");
+  assert.equal(sentInit.seq, 2);
+  assert.equal(JSON.parse(client.sendQueue.at(-1)!).seq, 3);
+});
+
+test("throttled PTY resync eventually resumes even if no new output arrives", async () => {
+  const { manager, client, socket } = createHarness();
+  const subscription = newSubscription();
+  client.ptySubscriptions.set("session-a", subscription);
+  subscription.lastResyncNoticeAt = Date.now() - 5_000 + 40;
+  const chunk = "x".repeat(512 * 1024);
+  manager.broadcast({ type: "output", sessionId: "session-a", data: { incremental: true, chunk } });
+  manager.broadcast({ type: "output", sessionId: "session-a", data: { incremental: true, chunk } });
+  manager.handlePtyAck(client, "session-a", chunk.length);
+
+  assert.equal(subscription.degraded, true);
+  assert.ok(subscription.resyncTimer);
+  await new Promise((resolve) => setTimeout(resolve, 85));
+  assert.equal(subscription.resyncRequested, true);
+  assert.ok(socket.sent.concat(client.sendQueue).some((frame) => (
+    JSON.parse(frame).type === "resync_required"
+  )));
 });
 
 test("one client can receive raw PTY output from multiple subscribed panes", () => {

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { state } from "../src/web-ui/browser/state.js";
 import {
   cachedTerminalHistory,
   forgetTerminalHistory,
@@ -74,6 +75,65 @@ test("history fetch does not advance the cursor when the terminal was unmounted"
       "only the same cached baseline may be replayed; a fresh init must reset the cursor");
   } finally {
     forgetTerminalHistory("terminal-unmounted");
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("busy PTY output does not periodically resync the live screen just to bound history", async () => {
+  const id = "terminal-busy-history";
+  const previousWs = state.ws;
+  const previousFetch = globalThis.fetch;
+  const sent: unknown[] = [];
+  let fetched = false;
+  state.ws = {
+    readyState: WebSocket.OPEN,
+    send: (message: string) => { sent.push(JSON.parse(message)); },
+  } as unknown as WebSocket;
+  globalThis.fetch = (async () => {
+    fetched = true;
+    throw new Error("stale history must not be fetched");
+  }) as typeof fetch;
+  try {
+    resetTerminalHistory(id, base);
+    recordTerminalHistoryChunk(id, "x".repeat(200_001));
+    recordTerminalHistoryChunk(id, "y".repeat(200_001));
+    assert.deepEqual(sent, [], "live streaming must never reset and replay the terminal");
+    assert.equal(cachedTerminalHistory(id, base), null,
+      "a stale baseline must not replay incomplete bytes");
+    await loadTerminalHistory(id, () => { throw new Error("stale history must not be applied"); });
+    await loadTerminalHistory(id, () => { throw new Error("stale history must not be applied"); });
+    assert.equal(fetched, false);
+    assert.deepEqual(sent, [{ type: "resync", sessionId: id }],
+      "request one fresh snapshot only when the user asks to read older history");
+    const refreshed = { ...base, historyRevision: 6 };
+    resetTerminalHistory(id, refreshed);
+    recordTerminalHistoryChunk(id, "fresh");
+    assert.deepEqual(cachedTerminalHistory(id, refreshed)?.pending,
+      [{ type: "data", data: "fresh" }]);
+  } finally {
+    forgetTerminalHistory(id);
+    state.ws = previousWs;
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("overflow while a history page is in flight cannot apply that stale page", async () => {
+  const id = "terminal-overflow-during-page";
+  const previousFetch = globalThis.fetch;
+  let respond!: (response: Response) => void;
+  globalThis.fetch = (() => new Promise<Response>((resolve) => { respond = resolve; })) as typeof fetch;
+  try {
+    resetTerminalHistory(id, base);
+    let applied = false;
+    const loading = loadTerminalHistory(id, () => { applied = true; return true; });
+    recordTerminalHistoryChunk(id, "x".repeat(200_001));
+    respond(new Response(JSON.stringify({ data: "older", separator: "\r\n", start: 80,
+      before: 160, revision: 5 }), { status: 200 }));
+    await loading;
+    assert.equal(applied, false);
+    assert.equal(cachedTerminalHistory(id, base), null);
+  } finally {
+    forgetTerminalHistory(id);
     globalThis.fetch = previousFetch;
   }
 });
