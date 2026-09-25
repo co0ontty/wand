@@ -15,6 +15,7 @@ import {
   showAutoUpdate as showReactAutoUpdate,
   showRestart as showReactRestart,
 } from "../react/restart-overlay/controller";
+import { imageViewerController } from "../react/image-viewer/controller";
 
 // TODO: import from correct modules when created
 
@@ -661,6 +662,7 @@ export function clearSessionProgressNative(sessionId: string) {
       if (reactFilePreview.closeTopmost()) return true;
     } catch (_e) {}
   }
+  if (imageViewerController.closeIfOpen()) return true;
   var reactQuickCommit = (window as any).__wandReactQuickCommit;
   if (reactQuickCommit && typeof reactQuickCommit.closeTopmost === "function") {
     try {

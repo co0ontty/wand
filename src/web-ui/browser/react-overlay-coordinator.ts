@@ -1,4 +1,5 @@
 import { folderPickerController } from "../react/folder-picker/controller";
+import { imageViewerController } from "../react/image-viewer/controller";
 import { newSessionController } from "../react/new-session/controller";
 import { quickCommitController } from "../react/quick-commit/controller";
 import { settingsController } from "../react/settings/controller";
@@ -7,7 +8,7 @@ import { localPreviewController } from "../react/local-preview/controller";
 import { missionsController } from "../react/missions/controller";
 import { workspacesController } from "../react/workspaces/controller";
 
-export type ReactOverlayName = "folderPicker" | "localPreview" | "missions" | "newSession" | "quickCommit" | "settings" | "worktreeMerge" | "workspaces";
+export type ReactOverlayName = "folderPicker" | "imageViewer" | "localPreview" | "missions" | "newSession" | "quickCommit" | "settings" | "worktreeMerge" | "workspaces";
 
 interface ClosableOverlayController {
   isOpen(): boolean;
@@ -16,6 +17,7 @@ interface ClosableOverlayController {
 
 const REACT_OVERLAY_CONTROLLERS: Record<ReactOverlayName, ClosableOverlayController> = {
   folderPicker: folderPickerController,
+  imageViewer: imageViewerController,
   localPreview: localPreviewController,
   missions: missionsController,
   newSession: newSessionController,

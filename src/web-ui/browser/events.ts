@@ -1,6 +1,7 @@
 import { state } from "./state";
 import "./i18n";
 import { HttpResponseError, parseJsonResponse } from "../react/http-adapter";
+import { imageViewerController } from "../react/image-viewer/controller";
 import { getErrorMessage } from "../../error-utils.js";
 import { escapeHtml } from "./utils";
 import { formatInlineResult, scheduleChatRender } from "./chat-render";
@@ -182,6 +183,10 @@ import { setupVisualViewportHandlers } from "./viewport";
       // 聊天里内联图片缩略图点击 → 打开文件预览弹层（复用文件浏览器同款模态）。
       (window as any).__openFilePreview = function(p: any) {
         if (p) openFilePreview(p);
+      };
+      // 没有服务端路径的内联图（工具返回的截图 / base64 图）只能按 src 放大。
+      (window as any).__openImageViewer = function(img: any, label?: any) {
+        if (img) imageViewerController.open(String(img), typeof label === "string" ? label : "");
       };
       // Toggle function for inline tool rows (Read, Glob, Grep, etc.)
       (window as any).__inlineToolToggle = function(el: any) {

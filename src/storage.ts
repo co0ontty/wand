@@ -1204,6 +1204,48 @@ export class WandStorage {
     return this.getConfigValue(key) !== null;
   }
 
+  // ============ 首页目录组顺序 ============
+
+  /**
+   * 用户在首页拖动排序后的目录组顺序（服务端偏好，所有客户端共用）。
+   * 存的是客户端看到的组 id：真实工作区用 workspace id，合成目录用 `cwd:<规范化路径>`。
+   * 不存在的 id 只是被忽略，不影响渲染。
+   */
+  getWorkspaceGroupOrder(): string[] {
+    const stored = this.getPreference<unknown>(WORKSPACE_GROUP_ORDER_KEY, []);
+    if (!Array.isArray(stored)) return [];
+    const seen = new Set<string>();
+    const ids: string[] = [];
+    for (const value of stored) {
+      if (typeof value !== "string") continue;
+      const id = value.trim();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      ids.push(id);
+    }
+    return ids;
+  }
+
+  setWorkspaceGroupOrder(ids: string[]): void {
+    const seen = new Set<string>();
+    const cleaned: string[] = [];
+    for (const value of ids) {
+      const id = typeof value === "string" ? value.trim() : "";
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      cleaned.push(id);
+    }
+    // 空顺序等于「没设置过」，回到默认排序，而不是存一个空数组。
+    this.setPreference(WORKSPACE_GROUP_ORDER_KEY, cleaned.length > 0 ? cleaned : null);
+  }
+
+  /** 工作区被删除后，把它的排序位也清掉，避免 id 被复用后继承旧位置。 */
+  forgetWorkspaceGroupOrder(id: string): void {
+    const current = this.getWorkspaceGroupOrder();
+    if (!current.includes(id)) return;
+    this.setWorkspaceGroupOrder(current.filter((item) => item !== id));
+  }
+
   // ============ Session Directory Names ============
 
   /** Return user-defined workspace labels keyed by normalized session cwd. */
@@ -1346,6 +1388,7 @@ export class WandStorage {
       ).run(id, id);
     }
     this.db.prepare("DELETE FROM workspaces WHERE id = ?").run(id);
+    this.forgetWorkspaceGroupOrder(id);
   }
 
   listSessionsByWorkspace(workspaceId: string): SessionSnapshot[] {
@@ -2693,6 +2736,9 @@ const SCHEMA_MIGRATIONS: ReadonlyArray<[column: string, sql: string]> = [
   ["workspace_id", "ALTER TABLE command_sessions ADD COLUMN workspace_id TEXT"],
   ["workspace_task_id", "ALTER TABLE command_sessions ADD COLUMN workspace_task_id TEXT"],
 ];
+
+/** 首页目录组顺序的偏好键（app_config 表，与其它 UI 偏好同一套读写）。 */
+const WORKSPACE_GROUP_ORDER_KEY = "workspaceGroupOrder";
 
 const AUTH_SESSION_MIGRATIONS: ReadonlyArray<[column: string, sql: string]> = [
   ["kind", "ALTER TABLE auth_sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'browser-admin'"],

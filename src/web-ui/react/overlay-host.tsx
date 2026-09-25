@@ -15,6 +15,7 @@ import { RestartOverlayHost } from "./restart-overlay/host";
 import { restartOverlayController } from "./restart-overlay/controller";
 import { FilePreviewHost } from "./file-preview/host";
 import { LocalPreviewHost } from "./local-preview/host";
+import { ImageViewerHost } from "./image-viewer/host";
 import { ComposerSelectHost } from "./composer-select/host";
 import { ComposerConfigHost } from "./composer-config/host";
 import { ComposerPopoverHost } from "./composer-popover/host";
@@ -61,6 +62,7 @@ export function OverlayHost({ portalContainer }: OverlayHostProps) {
       <WorktreeMergeHost />
       <FilePreviewHost />
       <LocalPreviewHost />
+      <ImageViewerHost />
       <RestartOverlayHost />
       <WandToastRegion />
 

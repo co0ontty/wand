@@ -68,6 +68,8 @@ function workspaceSessionSummary(
 function cheapTasksRevision(storage: WandStorage, registry?: SessionRegistry): string {
   const fingerprint = [
     storage.tasksAggregateFingerprint(),
+    // 排序只更新偏好，不改变任务和会话；轮询 revision 也必须跟着变化。
+    storage.getWorkspaceGroupOrder(),
     ...(registry?.listSlim() ?? []).map((session) => [
       session.id,
       session.status,
@@ -80,6 +82,35 @@ function cheapTasksRevision(storage: WandStorage, registry?: SessionRegistry): s
     ]),
   ];
   return crypto.createHash("sha256").update(JSON.stringify(fingerprint)).digest("base64url");
+}
+
+/**
+ * 目录组排序：先按用户拖动保存的顺序，再按默认规则（全局组在前、创建时间倒序、id 兜底）。
+ *
+ * 用户只要拖过一次，顺序就完全按存储值走——包括把「未归属」挪到后面；
+ * 没拖过（存储为空）时保持原有默认观感，不让改动影响没动过排序的人。
+ */
+function sortTaskDirectoryGroups<
+  T extends { workspaceId: string; createdAt?: string; global?: boolean },
+>(groups: T[], order: string[]): T[] {
+  const position = new Map<string, number>();
+  order.forEach((id, index) => position.set(id, index));
+  const defaultSorted = [...groups].sort((left, right) => {
+    const global = Number(Boolean(right.global)) - Number(Boolean(left.global));
+    if (global) return global;
+    const created = compareCreatedDesc(left.createdAt, right.createdAt);
+    if (created) return created;
+    return String(left.workspaceId).localeCompare(String(right.workspaceId));
+  });
+  if (position.size === 0) return defaultSorted;
+  return defaultSorted.sort((left, right) => {
+    const leftIndex = position.get(left.workspaceId);
+    const rightIndex = position.get(right.workspaceId);
+    if (leftIndex === undefined && rightIndex === undefined) return 0;
+    if (leftIndex === undefined) return 1;
+    if (rightIndex === undefined) return -1;
+    return leftIndex - rightIndex;
+  });
 }
 
 function compareCreatedDesc(left?: string | null, right?: string | null): number {
@@ -669,20 +700,38 @@ export function registerWorkspaceRoutes(
       }));
       if (group.synthetic) rememberCreatedAt(group, session.startedAt);
     }
-    const payload = [...groups.values()]
-      .filter((group) => !group.global || group.tasks.length > 0 || group.standaloneSessions.length > 0)
-      .sort((left, right) => {
-        const global = Number(Boolean(right.global)) - Number(Boolean(left.global));
-        if (global) return global;
-        const created = compareCreatedDesc(left.createdAt, right.createdAt);
-        if (created) return created;
-        return String(left.workspaceId).localeCompare(String(right.workspaceId));
-      });
+    const orderedGroups = [...groups.values()]
+      .filter((group) => !group.global || group.tasks.length > 0 || group.standaloneSessions.length > 0);
+    const payload = sortTaskDirectoryGroups(orderedGroups, storage.getWorkspaceGroupOrder());
     if (hasRevisionQuery) {
       res.json({ unchanged: false, revision: cheapTasksRevision(storage, sessions), groups: payload });
       return;
     }
     res.json(payload);
+  });
+
+  /**
+   * PUT /api/workspaces/order —— 保存首页目录组的展示顺序（拖动排序）。
+   *
+   * 存的是客户端看到的组 id（真实工作区 workspace id，合成目录 `cwd:<规范化路径>`），
+   * 未出现在本次提交里的既有 id 会按原相对顺序接在后面，避免某个客户端
+   * 只知道自己那部分分组时把别人的顺序抹掉。
+   */
+  app.put("/api/workspaces/order", (req, res) => {
+    const body = req.body as { ids?: unknown };
+    const incoming = Array.isArray(body?.ids)
+      ? body.ids.filter((value): value is string => typeof value === "string").slice(0, 500)
+      : null;
+    if (!incoming) {
+      res.status(400).json({ error: "缺少 ids 列表。" });
+      return;
+    }
+    const submitted = [...new Set(incoming.map((id) => id.trim()).filter(Boolean))];
+    const submittedSet = new Set(submitted);
+    const kept = storage.getWorkspaceGroupOrder().filter((id) => !submittedSet.has(id));
+    const next = [...submitted, ...kept];
+    storage.setWorkspaceGroupOrder(next);
+    res.json({ ok: true, ids: next });
   });
 
   // 列出某工作空间下的任务

@@ -2871,7 +2871,8 @@ import "./local-preview-adapter";
         if (inlineResultImages.length > 0) imageHtml = "";
         for (var ri = 0; ri < inlineResultImages.length; ri++) {
           imageHtml += '<div class="inline-tool-image" onclick="event.stopPropagation();">' +
-            '<img class="inline-tool-image-thumb" loading="lazy" src="' + inlineResultImages[ri].src + '" alt="工具返回图片" />' +
+            '<img class="inline-tool-image-thumb" loading="lazy" src="' + escapeHtml(inlineResultImages[ri].src) + '" alt="工具返回图片" ' +
+              'onclick="event.stopPropagation(); if(window.__openImageViewer)window.__openImageViewer(this.src, this.alt);" />' +
           '</div>';
         }
 
@@ -3317,7 +3318,8 @@ import "./local-preview-adapter";
           if (cardImages.length > 0) {
             resultHtml = cardImages.map(function(img) {
               return '<div class="inline-tool-image" onclick="event.stopPropagation();">' +
-                '<img class="inline-tool-image-thumb" loading="lazy" src="' + img.src + '" alt="工具返回图片" />' +
+                '<img class="inline-tool-image-thumb" loading="lazy" src="' + escapeHtml(img.src) + '" alt="工具返回图片" ' +
+                  'onclick="event.stopPropagation(); if(window.__openImageViewer)window.__openImageViewer(this.src, this.alt);" />' +
               '</div>';
             }).join("") + resultHtml;
           }

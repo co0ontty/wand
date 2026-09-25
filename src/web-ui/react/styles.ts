@@ -10,6 +10,7 @@ import {
   settingsAndQuickCommitStyles,
 } from "./styles/features";
 import { localPreviewStyles } from "./local-preview/styles";
+import { imageViewerStyles } from "./image-viewer/styles";
 
 const REACT_UI_STYLE_ID = "wand-react-ui-styles";
 
@@ -22,6 +23,7 @@ const reactUiStyles = [
   sessionPickerAndWorktreeStyles,
   composerSelectStyles,
   localPreviewStyles,
+  imageViewerStyles,
   missionsStyles,
   reducedMotionStyles,
 ].join("");
