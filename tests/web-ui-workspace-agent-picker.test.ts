@@ -6,6 +6,7 @@ import * as React from "react";
 import * as jsxRuntime from "react/jsx-runtime";
 import ts from "typescript";
 import { nextChoice } from "../src/web-ui/react/new-session/choice-navigation.js";
+import { sortProviderOptions } from "../src/web-ui/react/provider-usage.js";
 import type { WorkspaceAgentPickerProps } from "../src/web-ui/react/workspaces/workspace-agent-picker.js";
 
 const source = readFileSync(
@@ -54,7 +55,10 @@ function WandSelectStub(_props: ModelSelectProps): null {
 const WAND_SELECT_MARK = "wandSelectStub";
 (WandSelectStub as unknown as Record<string, unknown>)[WAND_SELECT_MARK] = true;
 
-function harness(overrides: Partial<WorkspaceAgentPickerProps> = {}) {
+function harness(
+  overrides: Partial<WorkspaceAgentPickerProps> = {},
+  usage: Record<string, number> = {},
+) {
   const preferences: unknown[] = [];
   const changes: string[] = [];
   const remembered: Array<{ provider: string; model: string }> = [];
@@ -97,6 +101,7 @@ function harness(overrides: Partial<WorkspaceAgentPickerProps> = {}) {
       },
     },
     "../provider-logo": { ProviderLogo: () => null },
+    "../provider-usage": { useProviderUsage: () => usage, sortProviderOptions },
     "../ui": {
       WandButton: () => null,
       WandIcon: () => null,
@@ -217,6 +222,20 @@ test("provider keyboard and click choices save the same preferences, excluding s
   assert.equal(h.key("shell", "Home"), true);
   assert.equal(h.props.target, "claude");
   assert.deepEqual(h.preferences.at(-1), { defaultProvider: "claude" });
+});
+
+test("workspace CLI picker follows descending launch count for display and keyboard navigation", () => {
+  const h = harness({}, { pi: 9, codex: 4, claude: 4, grok: 1 });
+  assert.deepEqual([...h.radios().keys()].slice(0, 7), [
+    "pi", "claude", "codex", "grok", "opencode", "qoder", "shell",
+  ]);
+  assert.equal(h.key("claude", "Home"), true);
+  assert.equal(h.props.target, "pi");
+  assert.equal(h.focused(), "pi");
+  assert.equal(h.key("pi", "ArrowLeft"), true);
+  assert.equal(h.props.target, "shell");
+  assert.equal(h.key("shell", "ArrowRight"), true);
+  assert.equal(h.props.target, "pi");
 });
 
 test("local and disabled pickers retain their preference and keyboard contracts", () => {

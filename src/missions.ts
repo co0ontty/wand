@@ -80,7 +80,7 @@ function sessionSummary(snapshot: SessionSnapshot): string | null {
   return cleanActivityText(snapshot.summary?.trim() || "", 160);
 }
 
-function hasUnansweredQuestion(messages: ConversationTurn[] | undefined): boolean {
+export function hasUnansweredQuestion(messages: ConversationTurn[] | undefined): boolean {
   if (!messages?.length || messages[messages.length - 1]?.role === "user") return false;
   const answered = new Set<string>();
   for (const turn of messages) {
@@ -98,7 +98,7 @@ function hasUnansweredQuestion(messages: ConversationTurn[] | undefined): boolea
   return false;
 }
 
-function activityState(snapshot: SessionSnapshot, event?: ProcessEvent): AgentActivityState {
+export function activityState(snapshot: SessionSnapshot, event?: ProcessEvent): AgentActivityState {
   if (snapshot.pendingEscalation || snapshot.permissionBlocked) return "needs_permission";
   if (hasUnansweredQuestion(snapshot.messages)) return "needs_input";
   if (snapshot.status === "failed" || (event?.type === "ended" && snapshot.exitCode !== null && snapshot.exitCode !== 0)) return "failed";

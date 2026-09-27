@@ -162,6 +162,84 @@ test("iteration context route exposes the window between commits and remembers t
   }
 });
 
+test("quick commit archives only completed tasks linked to this commit and directory", async (t) => {
+  resetRepoKeyCache();
+  t.after(() => resetRepoKeyCache());
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-commit-archive-"));
+  const repo = initRepo(path.join(root, "repo"));
+  const other = initRepo(path.join(root, "other"));
+  const harness = await startHarness(t, root);
+  const { baseUrl, storage } = harness;
+
+  try {
+    const created = await fetch(`${baseUrl}/api/structured-sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cwd: repo, provider: "opencode", mode: "assist" }),
+    });
+    assert.equal(created.status, 201);
+    const session = await created.json() as { id: string };
+    const workspaceId = storage.getSessionWorkspace(session.id)?.workspaceId;
+    assert.ok(workspaceId);
+    const otherWorkspace = storage.createWorkspace({ name: "other", cwd: other });
+    const iteration = storage.ensureDefaultWandMilestone();
+    const repoKey = await repoKeyForCwd(repo);
+    const current = storage.createWandTask({ workspaceId, title: "当前任务", status: "done" });
+    storage.bindWandTaskSession(current.id, session.id);
+    const sidebarTask = storage.createWorkspaceTask({ workspaceId, name: "本次完成" });
+    const selected = storage.createWandTask({
+      workspaceId, workspaceTaskId: sidebarTask.id, title: "本次完成", status: "done",
+    });
+    const skipped = storage.createWandTask({ workspaceId, title: "未选择的历史", status: "done" });
+    const active = storage.createWandTask({ workspaceId, title: "仍在处理中", status: "doing" });
+    const foreign = storage.createWandTask({ workspaceId: otherWorkspace.id, title: "别的目录", status: "done" });
+    const entries = [selected, skipped, active, foreign].map((task) => storage.createIterationPrompt({
+      milestoneId: iteration.id, taskId: task.id, repoKey, cwd: repo,
+      title: task.title, detail: "",
+    }));
+
+    const commit = (entryIds: string[], archiveRelatedTasks: boolean, push = false) => fetch(
+      `${baseUrl}/api/sessions/${session.id}/quick-commit`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ autoMessage: false, customMessage: "update", mode: "diff",
+          entryIds, archiveRelatedTasks, push }),
+      },
+    );
+    // A failed commit must not archive anything.
+    const empty = await commit([entries[0]!.id], true);
+    assert.equal(empty.status, 409);
+    assert.equal(storage.getWandTask(current.id)?.status, "done");
+
+    writeFileSync(path.join(repo, "tracked.txt"), "first\n");
+    const plain = await commit([entries[0]!.id], false);
+    assert.equal(plain.status, 200);
+    assert.deepEqual((await plain.json() as { archivedTaskIds: string[] }).archivedTaskIds, []);
+    assert.equal(storage.getWandTask(selected.id)?.status, "done");
+
+    writeFileSync(path.join(repo, "tracked.txt"), "second\n");
+    const archived = await commit([entries[0]!.id, entries[2]!.id, entries[3]!.id], true, true);
+    assert.equal(archived.status, 200);
+    const result = await archived.json() as {
+      commit: { hash: string }; pushError: string; archivedTaskIds: string[];
+    };
+    assert.ok(result.commit.hash);
+    assert.ok(result.pushError, "push without remote fails, but the commit is durable");
+    assert.deepEqual(result.archivedTaskIds, [current.id, selected.id]);
+    assert.equal(storage.getWandTask(current.id)?.status, "archived");
+    assert.equal(storage.getWandTask(selected.id)?.status, "archived");
+    assert.equal(storage.getWorkspaceTask(sidebarTask.id)?.status, "done", "side task stays recoverable");
+    assert.equal(storage.getWandTask(skipped.id)?.status, "done");
+    assert.equal(storage.getWandTask(active.id)?.status, "doing");
+    assert.equal(storage.getWandTask(foreign.id)?.status, "done");
+    assert.equal(storage.listIterationPromptsByIds([entries[0]!.id])[0]?.consumedCommit, result.commit.hash);
+    assert.equal(storage.listIterationPromptsByIds([entries[1]!.id])[0]?.consumedCommit, null);
+  } finally {
+    await harness.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("an empty iteration reports diff as the effective mode", async (t) => {
   resetRepoKeyCache();
   t.after(() => resetRepoKeyCache());

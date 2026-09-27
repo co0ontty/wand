@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { startStructuredCli } from "./structured-exec-pump.js";
 import type { StructuredExecHost } from "./structured-exec-host.js";
 import { asRecord } from "./structured-content.js";
-import { thinkingEffortToOpenCodeVariant } from "./structured-provider-common.js";
+import { thinkingEffortToOpenCodeVariant, promptWithSystemFallback } from "./structured-provider-common.js";
 import type {
   StructuredRunnerAdapter,
   StructuredRunnerContext,
@@ -150,7 +150,7 @@ export class OpenCodeRunner implements StructuredRunnerAdapter {
       args,
       cwd: context.session.cwd,
       env: context.env,
-      stdinData: context.prompt,
+      stdinData: promptWithSystemFallback(context.session, context.prompt),
       observer,
       execHost: this.execHost,
       spawnProcess: this.spawnProcess,

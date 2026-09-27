@@ -100,6 +100,7 @@ export function WorkspaceAgentDialog({
       <form noValidate className="wand-new-session-form" aria-busy={submitting} onSubmit={(event) => void submit(event)}>
         <div className="wand-new-session-body wand-workspace-agent-body">
           <WorkspaceAgentPicker
+            usageEnabled={open}
             target={target}
             kind={kind}
             model={model}

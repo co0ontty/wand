@@ -39,6 +39,11 @@ export interface RunClaudePrintOptions {
    * 莫名其妙变中英混搭，根因就在这。
    */
   language?: string;
+  /**
+   * 本次调用的规则 / 角色 / 输出格式。走 appendSystemPrompt，不拼进用户串，
+   * 避免规则被当成待处理内容，也避免它进 provider 历史时冒充用户输入。
+   */
+  systemInstructions?: string;
 }
 
 /**
@@ -153,6 +158,7 @@ export async function runClaudePrint(
 
   const sdkClaudeBinary = resolveSdkClaudeBinary();
   const languageDirective = options.language ? buildLanguageDirective(options.language) : "";
+  const appendSystemPrompt = [languageDirective, options.systemInstructions?.trim() ?? ""].filter(Boolean).join("\n\n");
   const model = options.model?.trim();
   const sdkOptions: SdkOptions = {
     abortController,
@@ -162,7 +168,7 @@ export async function runClaudePrint(
     persistSession: false,
     ...(cwd ? { cwd } : {}),
     ...(sdkClaudeBinary ? { pathToClaudeCodeExecutable: sdkClaudeBinary } : {}),
-    ...(languageDirective ? { appendSystemPrompt: languageDirective } : {}),
+    ...(appendSystemPrompt ? { appendSystemPrompt } : {}),
     ...(model && model !== "default" ? { model } : {}),
     ...(options.effort ? { effort: options.effort as SdkOptions["effort"] } : {}),
   };

@@ -17,7 +17,7 @@ import { buildChildEnv, isRunningAsRoot } from "./env-utils.js";
 import { buildLanguageDirective, buildManagedAutonomyDirective } from "./language-prompt.js";
 import { prepareSessionWorktree } from "./git-worktree.js";
 import { getProviderCommandSessionId, getProviderResumeCommandSessionId } from "./resume-policy.js";
-import { normalizeThinkingEffort, thinkingEffortToClaudeCliEffort, thinkingEffortToClaudeSlashEffort, thinkingEffortToCodexReasoningEffort, thinkingEffortToGrokEffort, thinkingEffortToPiLevel, thinkingEffortToQoderEffort } from "./structured-provider-common.js";
+import { commandWithSystemPrompt, composeSystemFallback, normalizeThinkingEffort, systemPromptFlag, thinkingEffortToClaudeCliEffort, thinkingEffortToClaudeSlashEffort, thinkingEffortToCodexReasoningEffort, thinkingEffortToGrokEffort, thinkingEffortToPiLevel, thinkingEffortToQoderEffort } from "./structured-provider-common.js";
 import {
   consumePtyInputForTopic,
   createPtyTopicLineBuffer,
@@ -1195,7 +1195,7 @@ export class ProcessManager extends EventEmitter {
     }
   }
 
-  async start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: { resumedFromSessionId?: string; autoRecovered?: boolean; worktreeEnabled?: boolean; provider?: SessionProvider; model?: string; reuseId?: string; cols?: number; rows?: number; thinkingEffort?: SessionSnapshot["thinkingEffort"]; sessionSource?: SessionSource; automationId?: string; workspaceId?: string; workspaceTaskId?: string; interactiveShell?: boolean }): Promise<SessionSnapshot> {
+  async start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: { resumedFromSessionId?: string; autoRecovered?: boolean; worktreeEnabled?: boolean; provider?: SessionProvider; model?: string; reuseId?: string; cols?: number; rows?: number; thinkingEffort?: SessionSnapshot["thinkingEffort"]; sessionSource?: SessionSource; automationId?: string; workspaceId?: string; workspaceTaskId?: string; interactiveShell?: boolean; systemPrompt?: string }): Promise<SessionSnapshot> {
     if (this.disposed) throw new Error("ProcessManager has been disposed.");
     if (!opts?.interactiveShell) this.assertCommandAllowed(command);
 
@@ -1244,6 +1244,12 @@ export class ProcessManager extends EventEmitter {
     const selectedModel = opts?.model?.trim() || undefined;
     const initialThinkingEffort = normalizeThinkingEffort(opts?.thinkingEffort);
     let processedCommand = this.processCommandForMode(command, effectiveMode, provider, selectedModel, initialThinkingEffort);
+    // 会话级系统提示：provider 有系统提示开关就走开关（PTY 与结构化行为一致），没有就并进首条输入。
+    const systemPrompt = opts?.systemPrompt?.trim() || undefined;
+    const initialInputText = initialInput && systemPrompt && !systemPromptFlag(provider)
+      ? composeSystemFallback(systemPrompt, initialInput)
+      : initialInput;
+    processedCommand = commandWithSystemPrompt(processedCommand, provider, systemPrompt);
     const isCodexProvider = provider === "codex";
     const isOpenCodeProvider = provider === "opencode";
     const existingProviderSessionId = provider
@@ -1280,6 +1286,7 @@ export class ProcessManager extends EventEmitter {
       id,
       sessionSource: opts?.sessionSource ?? inheritedSessionSource ?? "interactive",
       automationId: opts?.automationId ?? inheritedAutomationId,
+      systemPrompt: systemPrompt ?? null,
       workspaceId: opts?.workspaceId ?? inheritedWorkspaceId,
       workspaceTaskId: opts?.workspaceTaskId ?? inheritedWorkspaceTaskId,
       provider,
@@ -1400,28 +1407,28 @@ export class ProcessManager extends EventEmitter {
 
     let initialInputSent = false;
     const sendInitialInput = () => {
-      if (initialInputSent || !initialInput) return;
+      if (initialInputSent || !initialInputText) return;
       initialInputSent = true;
       const current = this.sessions.get(id);
       if (current !== record || current.ptyProcess !== child || current.status !== "running") {
         process.stderr.write(`[wand] Cannot send initial input: session not ready\n`);
         return;
       }
-      process.stderr.write(`[wand] Sending initial input (${initialInput.length} chars)\n`);
+      process.stderr.write(`[wand] Sending initial input (${initialInputText.length} chars)\n`);
 
       if (current.ptyBridge) {
-        current.ptyBridge.onUserInput(initialInput);
+        current.ptyBridge.onUserInput(initialInputText);
       }
 
-      child.write(initialInput);
+      child.write(initialInputText);
       child.write("\r");
     };
 
     this.bindTerminalProcess(record, child, (chunk) => {
-      if (initialInput && !initialInputSent && (chunk.includes("❯") || chunk.includes("›"))) sendInitialInput();
+      if (initialInputText && !initialInputSent && (chunk.includes("❯") || chunk.includes("›"))) sendInitialInput();
     });
     this.emitEvent({ type: "started", sessionId: id, data: this.snapshot(record) });
-    if (initialInput) this.maybeGenerateSessionTopic(id, initialInput);
+    if (initialInputText) this.maybeGenerateSessionTopic(id, initialInputText);
 
     if (launchPlan.commandToWrite) {
       child.write(launchPlan.commandToWrite);
@@ -2171,6 +2178,8 @@ export class ProcessManager extends EventEmitter {
       sessionKind: "pty",
       sessionSource: record.sessionSource ?? "interactive",
       automationId: record.automationId,
+      // 会话级系统提示要跟着快照回库（persist 就是走 snapshot），否则重启后 resume 会丢掉角色与规则。
+      systemPrompt: record.systemPrompt ?? null,
       provider: record.provider,
       providerCliActive: record.providerCliActive,
       providerCliExitCode: record.providerCliExitCode,

@@ -790,7 +790,7 @@ visibilitychange/focus 共 7 个）同类。单页应用里不算泄漏，但它
 | `react/workspaces/workspace-tab-bar.tsx` | 332 | 33 | `WorkspaceTabBar`(253L), `handleNewSession`(22L), `selectWindow`(19L) | — |
 | `react/workspaces/workspace-window.tsx` | 358 | 37 | `PaneNode`(118L), `WorkspaceWindow`(83L), `SplitNode`(52L) | — |
 | `react/workspaces/workspace-worktree-dialog.tsx` | 215 | 18 | `WorkspaceWorktreeDialog`(142L), `WorktreeBubble`(38L), `submit`(14L) | — |
-| `react/workspaces/workspace-worktree-model.ts` | 56 | 5 | `buildWorkspaceMergeAgentPrompt`(39L), `workspaceWorktreeSummary`(5L) | — |
+| `react/workspaces/workspace-worktree-model.ts` | 56 | 5 | `buildWorkspaceMergeAgentBrief`(39L), `workspaceWorktreeSummary`(5L) | — |
 | `react/workspaces/workspaces-panel.tsx` | 1600 | 145 | `TaskGroupSection`(441L), `WorkspacesPanel`(405L), `TaskItem`(358L) | — |
 | `react/worktree-merge/controller.ts` | 106 | 14 | `open`(13L), `configureWorktreeMergeRuntime`(8L), `close`(6L) | — |
 | `react/worktree-merge/host.tsx` | 283 | 21 | `WorktreeMergeHost`(195L), `InspectionDetails`(36L), `confirmMerge`(23L) | — |

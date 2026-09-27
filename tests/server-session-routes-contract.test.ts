@@ -97,6 +97,11 @@ test("session HTTP interface preserves create, list, update, detail, and delete 
     const listed = await listResponse.json() as Array<{ id: string; output: string }>;
     assert.deepEqual(listed.map((session) => session.id), [created.id]);
     assert.equal(listed[0].output, "");
+    const usageResponse = await fetch(`${baseUrl}/api/sessions/provider-usage`);
+    assert.equal(usageResponse.status, 200);
+    assert.deepEqual(await usageResponse.json(), {
+      claude: 0, codex: 0, opencode: 1, grok: 0, qoder: 0, pi: 0,
+    });
 
     for (const provider of ["claude", "codex", "opencode", "qoder"]) {
       const historyResponse = await fetch(`${baseUrl}/api/${provider}-history`);
@@ -220,6 +225,7 @@ test("session HTTP interface preserves create, list, update, detail, and delete 
       body: JSON.stringify({ cwd: root, provider: "opencode", mode: "assist" }),
     });
     assert.equal(secondCreatedResponse.status, 201);
+    assert.equal((await (await fetch(`${baseUrl}/api/sessions/provider-usage`)).json()).opencode, 2);
 
     const changedPageResponse = await fetch(
       `${baseUrl}/api/session-list?offset=1&limit=1&revision=${encodeURIComponent(firstPage.revision)}&cacheBust=2`,
@@ -250,6 +256,9 @@ test("session HTTP interface preserves create, list, update, detail, and delete 
     assert.equal(deleteResponse.status, 200);
     assert.deepEqual(await deleteResponse.json(), { ok: true });
     assert.equal((await fetch(`${baseUrl}/api/sessions/${created.id}`)).status, 404);
+    assert.deepEqual(await (await fetch(`${baseUrl}/api/sessions/provider-usage`)).json(), {
+      claude: 0, codex: 0, opencode: 1, grok: 0, qoder: 0, pi: 0,
+    });
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     processes.dispose();
@@ -476,6 +485,46 @@ test("首轮提示词不再把创建请求挂在 HTTP 上", async () => {
     const blocked = await pending;
     assert.equal(blocked.status, 201);
     assert.equal((await blocked.json() as { id: string }).id, "structured-2");
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    processes.dispose();
+    storage.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("创建会话时 systemPrompt 落到会话上，不并进首条消息", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-session-system-prompt-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const config = { ...defaultConfig(), defaultCwd: root, startupCommands: [] };
+  const processes = new ProcessManager(config, storage, root);
+  const structured = new StructuredSessionManager(storage, config);
+  const sessions = new SessionRegistry(processes, structured, storage);
+  const app = express();
+  app.use(express.json());
+  registerSessionRoutes(app, processes, structured, storage, config.defaultMode, config, sessions);
+  app.use(jsonErrorHandler);
+  const server = createServer(app);
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => { server.off("error", reject); resolve(); });
+  });
+  try {
+    const address = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+    const created = await (await fetch(`${baseUrl}/api/structured-sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        cwd: root,
+        provider: "opencode",
+        mode: "assist",
+        systemPrompt: "你是合并 Agent，只做本清单。",
+      }),
+    })).json() as { id: string };
+    assert.equal(structured.get(created.id)?.systemPrompt, "你是合并 Agent，只做本清单。");
+    assert.equal(storage.getSession(created.id)?.systemPrompt, "你是合并 Agent，只做本清单。");
+    assert.deepEqual(structured.get(created.id)?.messages, []);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     processes.dispose();

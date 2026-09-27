@@ -47,7 +47,7 @@ test("one-shot CLI rejects an early stdin close instead of throwing an uncaught 
   process.env.PATH = `${bin}${delimiter}${previousPath ?? ""}`;
   try {
     await assert.rejects(
-      callConfiguredAiText("input ".repeat(200_000), root, "English", { provider: "codex" }),
+      callConfiguredAiText({ system: "", prompt: "input ".repeat(200_000) }, root, "English", { provider: "codex" }),
       (error: unknown) => error instanceof QuickCommitError && error.code === "CLAUDE_CLI_FAILED",
     );
   } finally {
@@ -95,17 +95,17 @@ test("one-shot commit text keeps Codex ephemeral and dispatches Grok/Qoder witho
   process.env.WAND_CLAUDE_MARKER = claudeMarker;
 
   try {
-    const codex = await callConfiguredAiText("codex prompt", root, "English", {
+    const codex = await callConfiguredAiText({ system: "", prompt: "codex prompt" }, root, "English", {
       provider: "codex",
       model: "codex-test-model",
       thinkingEffort: "codex:xhigh",
     });
-    const grok = await callConfiguredAiText("grok prompt", root, "English", {
+    const grok = await callConfiguredAiText({ system: "grok rules", prompt: "grok prompt" }, root, "English", {
       provider: "grok",
       model: "grok-test-model",
       thinkingEffort: "max",
     });
-    const qoder = await callConfiguredAiText("qoder prompt", root, "English", {
+    const qoder = await callConfiguredAiText({ system: "qoder rules", prompt: "qoder prompt" }, root, "English", {
       provider: "qoder",
       model: "qoder-test-model",
       thinkingEffort: "deep",
@@ -145,6 +145,11 @@ test("one-shot commit text keeps Codex ephemeral and dispatches Grok/Qoder witho
       "--effort",
       "xhigh",
     ]);
+    // 规则走 Grok 自己的系统提示开关（--rules），不做成“用户内容”。
+    assert.deepEqual(grokArgs.slice(grokArgs.indexOf("--rules"), grokArgs.indexOf("--rules") + 2), [
+      "--rules",
+      "grok rules",
+    ]);
 
     const qoderArgs = lines(qoderArgsFile);
     assert.deepEqual(qoderArgs.slice(0, 5), [
@@ -162,6 +167,12 @@ test("one-shot commit text keeps Codex ephemeral and dispatches Grok/Qoder witho
       "--reasoning-effort",
       "high",
     ]);
+    assert.deepEqual(qoderArgs.slice(qoderArgs.indexOf("--append-system-prompt"), qoderArgs.indexOf("--append-system-prompt") + 2), [
+      "--append-system-prompt",
+      "qoder rules",
+    ]);
+    // Codex 没有系统提示开关：规则只能并进内容（stdin），不能凭空多出参数。
+    assert.equal(codexArgs.some((arg) => arg.includes("system")), false);
   } finally {
     if (previous.PATH === undefined) delete process.env.PATH;
     else process.env.PATH = previous.PATH;

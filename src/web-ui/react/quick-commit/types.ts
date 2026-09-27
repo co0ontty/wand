@@ -89,6 +89,8 @@ export interface QuickCommitInput {
   autoTag: boolean;
   push: boolean;
   submodule: boolean;
+  /** 提交成功后只归档本次关联且已完成的任务；默认关闭。 */
+  archiveRelatedTasks?: boolean;
   /** 生成 message 的输入源；不传则用服务端记住的偏好。 */
   mode?: QuickCommitContextMode;
   /** 本次当作已提交的迭代条目（提交成功后由服务端标记）。 */
@@ -104,6 +106,8 @@ export interface QuickCommitResponse {
   pushed: boolean;
   pushError: string;
   submoduleCommits: readonly { path: string; hash: string }[];
+  archivedTaskIds?: readonly string[];
+  archiveError?: string;
   /** 生成 message 用的输入源与条目；手写 message 时为 null。 */
   commitContext: { source: QuickCommitContextMode; entryIds: readonly string[] } | null;
 }

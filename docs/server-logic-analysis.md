@@ -121,6 +121,9 @@ DTO 已携带 `workspaceId`、`workspaceTaskId`、`queuedMessageSkills`、`title
 - 列表 `output:""`，不附全量 messages；标题由服务端统一裁定。
 - 详情有 `wandProtocolVersion`、output 窗口与 offset/total；默认 output 上限 200,000 字符。
 - 聊天支持 turn 窗口，也支持 `blockBudget` 及首 turn 的块级 offset；不能只按 turn 数判断响应大小。
+- **块级窗口的预算数的是用户可感知的条数**（默认收起的工具 / 思考块不计入），另叠一层首屏载荷上限（`MESSAGE_FIRST_PAINT_BYTES` ≈1MB）：整段历史在两份预算内就**不做窗口化**（短会话不准出现「更早消息」），超出才从尾部切。按原始块数预算会让一段长工具调用把预算吃光、把用户自己的提示词挤出首屏。
+- 块级切点会吸附到干净边界：不切开默认收起的工具 / 思考段，也不会只留 tool_result 而切掉它的 tool_use（否则客户端顶部会渲染出无头结果卡）。吸附往回吃掉的体积超过上限时改为跳到该段之后，避免首屏载荷被吸附撑大。
+- `leadingVisibleCount`（块级窗口与 `?turn=&blockOffset=` 翻页都带）是被切掉的头部里用户可感知的条数，默认收起的工具 / 思考块不计入；客户端「还有 N 条」必须用它，不能用 `leadingBlockOffset`（那是原始块数，长工具任务里会虚高几十倍）。
 - `offset=0` 且 revision 未变的 session-list 返回 `unchanged:true`；后续分页 revision 不一致返回 409。
 - `respondImmediately:true` 的 structured 输入返回 202 快照，表示接收/启动，不表示执行完成。
 - PTY `responseMode:"accepted"` 只返回轻量确认，不应每个按键拉整份详情。

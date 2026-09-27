@@ -569,8 +569,6 @@ function isElementExpanded(el: any, kind: string) {
       if (body) return body.style.display !== "none";
       return el.dataset.expanded === "true";
     }
-    case "tool-group":
-      return el.getAttribute("data-expanded") === "true";
     case "agent-run":
       return el.getAttribute("data-expanded") === "true";
     case "activity":
@@ -615,21 +613,15 @@ export function applyExpandedState(el: any, kind: string, expanded: boolean) {
       if (toggleIcon) toggleIcon.textContent = expanded ? "▼" : "▶";
       break;
     }
-    case "tool-group": {
-      el.setAttribute("data-expanded", expanded ? "true" : "false");
-      var groupBody = el.querySelector(".tool-group-body");
-      if (groupBody) groupBody.style.display = expanded ? "block" : "none";
-      var chevron = el.querySelector(".tool-group-chevron");
-      if (chevron) chevron.style.transform = expanded ? "rotate(180deg)" : "";
-      break;
-    }
     case "activity": {
       el.setAttribute("data-expanded", expanded ? "true" : "false");
       var activityBody = el.querySelector(".chat-activity-body");
       if (activityBody) {
-        activityBody.style.display = expanded ? "block" : "none";
         activityBody.setAttribute("aria-hidden", expanded ? "false" : "true");
-        if (expanded) activityBody.scrollTop = activityBody.scrollHeight;
+        if (expanded) {
+          el.classList.remove("is-unpinned");
+          activityBody.scrollTop = activityBody.scrollHeight;
+        }
       }
       var activitySummary = el.querySelector(".chat-activity-summary");
       if (activitySummary) activitySummary.setAttribute("aria-expanded", expanded ? "true" : "false");

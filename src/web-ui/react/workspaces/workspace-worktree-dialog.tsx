@@ -3,8 +3,9 @@ import * as React from "react";
 import { WandButton, WandDialogSurface, WandIcon } from "../ui";
 import { httpWorkspacesRepository } from "./repository";
 import {
-  buildWorkspaceMergeAgentPrompt,
+  buildWorkspaceMergeAgentBrief,
   workspaceWorktreeSummary,
+  type WorkspaceMergeAgentBrief,
 } from "./workspace-worktree-model";
 import type {
   Workspace,
@@ -18,7 +19,7 @@ interface WorkspaceWorktreeDialogProps {
   open: boolean;
   workspace: Workspace;
   repository?: WorkspacesRepository;
-  onStartAgent(prompt: string): void | Promise<unknown>;
+  onStartAgent(brief: WorkspaceMergeAgentBrief): void | Promise<unknown>;
   onDismiss(): void;
 }
 
@@ -130,8 +131,8 @@ export function WorkspaceWorktreeDialog({
     setSubmitting(true);
     setError("");
     try {
-      const prompt = buildWorkspaceMergeAgentPrompt(workspace, overview, [...selected]);
-      await onStartAgent(prompt);
+      const brief = buildWorkspaceMergeAgentBrief(workspace, overview, [...selected]);
+      await onStartAgent(brief);
       onDismiss();
     } catch (startError) {
       setError(describeError(startError, "无法启动 Worktree 合并 Agent。"));

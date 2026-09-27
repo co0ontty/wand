@@ -45,6 +45,7 @@ import type {
 import { failureMessage } from "../errors";
 import { compactThinkingLabel, dynamicThinkingChoices } from "../../thinking-efforts";
 import { normalizeModels } from "./repository";
+import { sortProviderOptions, useProviderUsage } from "../provider-usage";
 
 export interface SettingsTabProps {
   snapshot: SettingsSnapshot;
@@ -714,7 +715,7 @@ function ModelSuggestions({ id, models }: { id: string; models: SettingsModelOpt
   );
 }
 
-/** CLI 工具下拉：顺序与任务指派 / 新建会话一致。 */
+/** CLI 工具下拉与任务指派 / 新建会话共用使用频率排序。 */
 const SESSION_PROVIDER_OPTIONS: ReadonlyArray<{ value: SettingsSessionProvider; label: string }> = [
   { value: "claude", label: "Claude" },
   { value: "codex", label: "Codex" },
@@ -1024,6 +1025,10 @@ function routeIsComplete(route: SettingsSystemAi): boolean {
 }
 
 export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toast }: SettingsTabProps) {
+  const providerUsage = useProviderUsage();
+  const providerOptions = sortProviderOptions(
+    SESSION_PROVIDER_OPTIONS, providerUsage ?? {}, (entry) => entry.value,
+  );
   const [form, setForm] = useState(() => aiFromSnapshot(snapshot));
   const [pending, setPending] = useState("");
   const [status, setStatus] = useState("");
@@ -1311,7 +1316,8 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toas
               id="settings-default-provider"
               ariaLabel="新会话默认 CLI 工具"
               value={form.defaultProvider}
-              options={SESSION_PROVIDER_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+              options={providerOptions}
+              disabled={providerUsage === null}
               onChange={(value) => {
                 const next = value as SettingsSessionProvider;
                 const modelId = providerModelValue({ ...form, defaultProvider: next }, next);
@@ -1377,7 +1383,8 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toas
                   id="settings-system-ai-cli"
                   ariaLabel="系统 AI CLI 工具"
                   value={form.systemAiCli}
-                  options={SESSION_PROVIDER_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                  options={providerOptions}
+                  disabled={providerUsage === null}
                   onChange={(value) => setForm((current) => ({
                     ...current, systemAiCli: value as SettingsSessionProvider, systemAiModel: "",
                   }))}
@@ -1841,7 +1848,6 @@ const CARD_OPTIONS: Array<{ key: keyof SettingsCardDefaults; title: string; desc
   { key: "inlineTools", title: "内联工具", description: "Read / Glob / Grep 工具结果" },
   { key: "terminal", title: "终端输出", description: "Bash 命令执行结果" },
   { key: "thinking", title: "思考过程", description: "模型的 Thinking 内容" },
-  { key: "toolGroup", title: "工具组", description: "连续同类工具调用的折叠组" },
 ];
 
 export function DisplaySettingsTab({ snapshot, repository, refresh, toast }: SettingsTabProps) {

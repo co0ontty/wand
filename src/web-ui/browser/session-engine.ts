@@ -1010,6 +1010,7 @@ const sessionReads = createSessionReads();
           sessionSource: "interactive",
           workspaceId: extra && extra.workspaceId,
           workspaceTaskId: extra && extra.workspaceTaskId,
+          systemPrompt: extra && extra.systemPrompt,
           // 带了首轮提示词时不要在 HTTP 里等整轮跑完：创建接口会在发完提示词后
           // 立刻返回快照，首轮进展走 websocket。否则调用方（新建任务对话框）
           // 会被锁在「正在创建…」里直到模型答完，可能是几分钟。
@@ -2104,6 +2105,8 @@ const sessionReads = createSessionReads();
           mode?: string;
           model?: string;
           initialInput?: string;
+          /** 角色与规则：走会话的系统提示，不拼进 initialInput。 */
+          systemPrompt?: string;
         },
       ): Promise<unknown> {
         var shell = !!(options && options.shell);
@@ -2125,6 +2128,7 @@ const sessionReads = createSessionReads();
               workspaceTaskId: options && options.workspaceTaskId,
               provider: provider,
               model: pickedModel || undefined,
+              systemPrompt: options && options.systemPrompt,
             },
           );
         }
@@ -2154,6 +2158,7 @@ const sessionReads = createSessionReads();
               // PTY 会话按所选模型启动 CLI（processCommandForMode 注入 --model）。
               model: pickedModel || undefined,
               initialInput: options && options.initialInput,
+              systemPrompt: options && options.systemPrompt,
               sessionSource: "interactive",
             });
         if (options && options.workspaceId) body.workspaceId = options.workspaceId;

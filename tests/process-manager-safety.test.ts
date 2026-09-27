@@ -545,3 +545,35 @@ test("Claude PTY exposes per-turn ptyBusy on snapshots", async (t) => {
   assert.equal(afterExit?.status, "exited");
   assert.equal(afterExit?.ptyBusy, false);
 });
+
+test("PTY sessions hand the system prompt to the CLI's own flag, not to the first input", async (t) => {
+  const { manager, root, spawnCalls, spawned } = createHarness(t);
+  const session = await manager.start("pi", root, "managed", "首条消息", {
+    provider: "pi",
+    systemPrompt: "你是合并 Agent，只做清单里的事。",
+  });
+  assert.equal(session.systemPrompt, "你是合并 Agent，只做清单里的事。");
+  const launched = (spawnCalls[0][1] as string[]).at(-1) ?? "";
+  assert.match(launched, /--append-system-prompt '你是合并 Agent，只做清单里的事。'/);
+
+  // 首条输入保持原样：提示已经走 flag，不能重复并进消息。
+  spawned[0].emitData("❯");
+  assert.deepEqual(spawned[0].writes.slice(-2), ["首条消息", "\r"]);
+});
+
+test("providers without a system-prompt flag get it prepended to the first input", async (t) => {
+  const { manager, root, spawnCalls, spawned } = createHarness(t);
+  await manager.start("opencode", root, "managed", "首条消息", {
+    provider: "opencode",
+    systemPrompt: "你是合并 Agent。",
+  });
+  const launched = (spawnCalls[0][1] as string[]).at(-1) ?? "";
+  assert.doesNotMatch(launched, /--append-system-prompt|--rules/);
+
+  spawned[0].emitData("›");
+  assert.equal(
+    spawned[0].writes.at(-2),
+    "以下是本会话的固定要求（来自系统，不是用户输入，优先级高于后面的内容）：\n\n你是合并 Agent。\n\n---\n\n首条消息",
+  );
+  assert.equal(spawned[0].writes.at(-1), "\r");
+});

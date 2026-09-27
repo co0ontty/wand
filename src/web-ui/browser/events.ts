@@ -10,7 +10,7 @@ import { adjustTerminalScale, openFilePreview } from "./file-browser";
 import { attachQueueBarDelegates, bindInputTouchScroll, cancelVoiceRecording, handleInputBoxBlur, handleInputBoxFocus, handleVoiceMove, refreshInputBoxState, sendOrStart, setupMobileKeyboardHandlers, startVoiceRecording, stopSession, stopVoiceRecording, updateQueueBar } from "./input";
 import { hideError } from "./notifications";
 import { render, resetChatRenderCache } from "./render";
-import { addPendingAttachments, closeClaudeSkillsPicker, closePlusPopover, closeSessionsDrawer, dismissDrawerIfOverlay, handleInputBoxKeydown, handleInputPaste, handleInteractiveTextInput, handlePtyImagePaste, login, onChatModeChange, onChatModelChange, onChatThinkingChange, optimizePromptText, setDraftValue, switchServer, syncComposerHasText, togglePlusPopover } from "./session-engine";
+import { addPendingAttachments, closeClaudeSkillsPicker, closePlusPopover, closeSessionsDrawer, dismissDrawerIfOverlay, handleInputBoxKeydown, handleInputPaste, handleInteractiveTextInput, handlePtyImagePaste, login, onChatModeChange, onChatModelChange, onChatThinkingChange, optimizePromptText, selectSession, setDraftValue, switchServer, syncComposerHasText, togglePlusPopover } from "./session-engine";
 import { initTerminal, maybeScrollTerminalToBottom, softResyncTerminal } from "./terminal";
 import { setupVisualViewportHandlers } from "./viewport";
 
@@ -87,7 +87,11 @@ import { setupVisualViewportHandlers } from "./viewport";
         }
         if (e) { e.preventDefault(); e.stopPropagation(); }
       };
-      // Toggle function for inline thinking blocks — called via onclick attribute
+      // 群聊里点成员名：打开这位成员自己的会话。
+      (window as any).__openAuthorSession = function(sessionId: string) {
+        if (typeof sessionId === "string" && sessionId) selectSession(sessionId);
+      };
+            // Toggle function for inline thinking blocks — called via onclick attribute
       (window as any).__thinkingToggle = function(el: any) {
         var isCollapsed = el.classList.contains("collapsed");
         if (isCollapsed) {
@@ -169,15 +173,68 @@ import { setupVisualViewportHandlers } from "./viewport";
         if (runId && taskId) setPersistedAgentSelection(runId, taskId);
       }
 
-      // 活动折叠仍然是固定高度滚动区：流式刷新后锚定尾部，让用户持续看到
-      // 最新到达的思考和工具活动。折叠态下 body 为 display:none，直接跳过。
-      export function snapExpandedActivityFoldsToBottom(container: any) {
+      // ── 活动滚动窗口（.chat-activity）滚动状态 ──
+      // 流式刷新会整条重建消息 DOM，窗口内部的滚动位置不会自己保留；另外用户上滚
+      // 看历史时不能被“跟随最新”拽回去。所以按 expand key 记住每个窗口的滚动位置和
+      // 「是否贴尾」，重新渲染后还原：贴尾就继续跟随最新，离尾就回到用户的位置。
+      var ACTIVITY_TAIL_PIN_PX = 24;
+      var activityScrollMemory: { [key: string]: { top: number; pinned: boolean } } = {};
+      var activityScrollTrackingBound = false;
+
+      export function clearActivityScrollMemory(key?: string | null) {
+        if (!key) return;
+        delete activityScrollMemory[key];
+      }
+
+      function isActivityPinnedToTail(body: any): boolean {
+        if (!body) return true;
+        return body.scrollHeight - body.scrollTop - body.clientHeight <= ACTIVITY_TAIL_PIN_PX;
+      }
+
+      // scroll 事件不冒泡，只能在捕获阶段委托一次。
+      function bindActivityScrollTracking() {
+        if (activityScrollTrackingBound) return;
+        activityScrollTrackingBound = true;
+        document.addEventListener("scroll", function(event) {
+          var target = event.target as HTMLElement | null;
+          if (!target || target.nodeType !== 1) return;
+          if (!target.classList || !target.classList.contains("chat-activity-body")) return;
+          var wrap = target.closest(".chat-activity");
+          if (!wrap) return;
+          var pinned = isActivityPinnedToTail(target);
+          var key = wrap.getAttribute("data-expand-key");
+          if (key) activityScrollMemory[key] = { top: target.scrollTop, pinned: pinned };
+          wrap.classList.toggle("is-unpinned", !pinned);
+          target.classList.toggle("is-scrollable", target.scrollHeight > target.clientHeight + 1);
+        }, true);
+      }
+
+      /**
+       * 每次聊天渲染后同步活动窗口：贴尾的跟到最新一条，用户上滚过的还原他
+       * 原来的位置，并在离尾时露出「回到最新」。
+       */
+      export function syncActivityWindows(container: any) {
         if (!container) return;
-        var activities = container.querySelectorAll('.chat-activity[data-follow-tail="true"][data-expanded="true"]');
+        bindActivityScrollTracking();
+        var activities = container.querySelectorAll(".chat-activity");
         for (var a = 0; a < activities.length; a++) {
-          var actBody = activities[a].querySelector(".chat-activity-body");
-          if (!actBody || actBody.style.display === "none") continue;
-          actBody.scrollTop = actBody.scrollHeight;
+          var wrap = activities[a];
+          var body = wrap.querySelector(".chat-activity-body");
+          if (!body) continue;
+          if (wrap.getAttribute("data-expanded") !== "true") continue;
+          // 内容不到一屏时不去顶/底（顶部遮罩会先把只有一行内容的窗口淡化掉）。
+          body.classList.toggle("is-scrollable", body.scrollHeight > body.clientHeight + 1);
+          var key = wrap.getAttribute("data-expand-key");
+          var memory = key ? activityScrollMemory[key] : undefined;
+          if (!memory || memory.pinned) {
+            // 默认行为：窗口停在最新一条，新活动不断从底部进来。
+            wrap.classList.remove("is-unpinned");
+            body.scrollTop = body.scrollHeight;
+            if (key) activityScrollMemory[key] = { top: body.scrollTop, pinned: true };
+          } else {
+            body.scrollTop = memory.top;
+            wrap.classList.toggle("is-unpinned", !isActivityPinnedToTail(body));
+          }
         }
       }
       // 聊天里内联图片缩略图点击 → 打开文件预览弹层（复用文件浏览器同款模态）。

@@ -7,14 +7,18 @@ import { workspaceContextStore } from "../workspaces/workspace-context";
 import { openSessionWithOwningTask } from "../workspaces/session-open";
 import { workspacesStore } from "../workspaces/controller";
 import { httpWorkspacesRepository } from "../workspaces/repository";
-import { WorkspaceWelcomeChooser } from "../workspaces/workspace-agent-picker";
+import { WorkspaceWelcomeChooser, usableTeamWorkspaceId } from "../workspaces/workspace-agent-picker";
+import { aiTeamPickerOption, aiTeamsRepository, useAiTeamList } from "../ai-teams/repository";
 import { WorkspaceTabBar } from "../workspaces/workspace-tab-bar";
 import { WorkspaceWindow } from "../workspaces/workspace-window";
 import { activeWorkWindow } from "../workspaces/window-layout";
 import type { WorkspaceSessionKind, WorkspaceSessionTarget } from "../workspaces/types";
+import { HomeAttention } from "../attention/home-attention";
 import { ShellFilePanel } from "./shell-file-panel";
 import { TaskBoardHost } from "../issues/task-board-host";
 import { taskBoardController, taskBoardStore } from "../issues/task-board-controller";
+import { notifyTasksChanged } from "../task-changes";
+import { AiTeamsPage, TeamChatPage } from "../ai-teams/lazy";
 import { SidebarToggleIcon } from "./sidebar-toggle-icon";
 import { ShellTopbar } from "./shell-topbar";
 import { useUiDispatch, useUiStoreSnapshot } from "./ui-store-react";
@@ -76,6 +80,9 @@ function ShellBlankChat({ className, queueRef, workspaceTask, workspaceProject }
   };
 }) {
   const dispatch = useUiDispatch();
+  // 项目欢迎页的团队分支只在「无任务的项目」上下文出现；任务上下文分支刻意不加（§5.1）。
+  const teamWorkspaceId = usableTeamWorkspaceId(workspaceProject?.workspaceId);
+  const teamOptions = useAiTeamList(!!workspaceProject && !workspaceTask)?.map(aiTeamPickerOption) ?? null;
 
   const startInTask = async (target: WorkspaceSessionTarget, kind: WorkspaceSessionKind, model: string) => {
     if (!workspaceTask) return;
@@ -125,9 +132,40 @@ function ShellBlankChat({ className, queueRef, workspaceTask, workspaceProject }
     }
   };
 
+  /**
+   * 项目欢迎页直接开工（§5.1）：成功后原位停 dwell 再前进 —— 落到 IM 群聊页（teamchat，按 runId 打开，
+   * 与侧栏点群聊条目同一视图）；只有 run 没带回 chatSessionId 才退回团队页看运行（路径 b）。
+   */
+  const startTeamInProject = async (teamId: string, workspaceId: string) => {
+    const team = teamOptions?.find((option) => option.id === teamId);
+    try {
+      // 欢迎页没有输入框：note 用团队名，服务端据此建出的 team_direct 卡标题也就是团队名（§4.2）。
+      const started = await aiTeamsRepository.startDirect(teamId, {
+        note: team?.name ?? "直接开工",
+        workspaceId,
+      });
+      await aiTeamsRepository.settle("success");
+      // 开团后首屏直接进 IM 群聊页（§5.1 路径 a 改走 teamchat），和侧栏点群聊条目一致。
+      const sessionId = started.run.chatSessionId;
+      if (sessionId) {
+        taskBoardController.open("", "", "teamchat", started.run.id);
+      } else {
+        // 唯一退化分支：run 没带回群聊会话 id，跳团队页看这次运行（路径 b），不静默留在欢迎页。
+        taskBoardController.open("", "", "teams");
+      }
+      // 侧栏群聊徽标来自 /api/tasks（useTaskGroups 订阅 task-changes），开团后主动通知一次，
+      // 不等 ~6s 轮询；单次信号只让每个订阅者 reload 一遍，有 generation + revision 廉价校验，不会成刷新风暴。
+      notifyTasksChanged();
+    } catch (error) {
+      throw presentStartError(error, "无法启动团队运行。");
+    }
+  };
+
   return (
     <div id="blank-chat" className={className}>
+      <HomeAttention variant="home"/>
       {workspaceTask ? (
+        // 任务上下文已有这张卡，加团队只会冗余建卡，所以这里不传 teams/onStartTeam（§5.1）。
         <WorkspaceWelcomeChooser
           eyebrow={workspaceTask.workspaceName || undefined}
           title={workspaceTask.taskName}
@@ -143,7 +181,10 @@ function ShellBlankChat({ className, queueRef, workspaceTask, workspaceProject }
           subtitle="项目还是空白的。选择 CLI 工具和结构化 / PTY，开始第一个任务。"
           cwd={workspaceProject.cwd}
           submitLabel="开始 "
+          teams={teamWorkspaceId ? teamOptions : null}
+          teamWorkspaceId={teamWorkspaceId}
           onStart={startInProject}
+          onStartTeam={startTeamInProject}
         />
       ) : <div className="blank-chat-inner">
         <WandBrandMark className="blank-chat-logo" />
@@ -230,7 +271,33 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
       {inSplit ? <WorkspaceWindow/> : null}
       <CodeEditorHost/>
       {/* 看板是独立路由，不能替换 <main>：#output 等 LegacyHost 槽位必须一直挂着。 */}
-      {taskBoard.open ? <TaskBoardHost
+      {taskBoard.open && taskBoard.page === "teamchat" ? <TeamChatPage
+        runId={taskBoard.runId}
+        sidebarOpen={snapshot.layout.sessionsDrawerOpen}
+        onBack={() => taskBoardController.close()}
+        onOpenSidebar={snapshot.layout.sidebarDrawer
+          ? () => void dispatch({ type: "layout.drawer.toggle" })
+          : undefined}
+        onOpenSession={(sessionId) => {
+          taskBoardController.close();
+          // 群聊里点成员名字：同样带上任务上下文打开该成员的会话。
+          void openSessionWithOwningTask(sessionId, (id) => {
+            void dispatch({ type: "session.select", id });
+          });
+        }}
+      /> : taskBoard.open && taskBoard.page === "teams" ? <AiTeamsPage
+        sidebarOpen={snapshot.layout.sessionsDrawerOpen}
+        onBack={() => taskBoardController.close()}
+        onOpenSidebar={snapshot.layout.sidebarDrawer
+          ? () => void dispatch({ type: "layout.drawer.toggle" })
+          : undefined}
+        onOpenSession={(sessionId) => {
+          taskBoardController.close();
+          void openSessionWithOwningTask(sessionId, (id) => {
+            void dispatch({ type: "session.select", id });
+          });
+        }}
+      /> : taskBoard.open ? <TaskBoardHost
         sidebarOpen={snapshot.layout.sessionsDrawerOpen}
         onBack={() => taskBoardController.close()}
         onOpenSidebar={snapshot.layout.sidebarDrawer

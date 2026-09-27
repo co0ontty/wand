@@ -261,7 +261,7 @@ test("system AI tries configured APIs in order with each route's exact model", a
     const address = server.address();
     assert.ok(address && typeof address === "object");
     const baseUrl = `http://127.0.0.1:${address.port}/v1`;
-    const text = await callSystemAiTextWithFallback("prompt", {
+    const text = await callSystemAiTextWithFallback({ system: "", prompt: "prompt" }, {
       enabled: true,
       protocol: "openai",
       baseUrl,
@@ -311,7 +311,7 @@ test("OpenAI-compatible system AI calls the chat completions endpoint", async ()
   try {
     const address = server.address();
     assert.ok(address && typeof address === "object");
-    const text = await callSystemAiText("prompt", {
+    const text = await callSystemAiText({ system: "规则：只输出结果", prompt: "prompt" }, {
       enabled: true,
       protocol: "openai",
       baseUrl: `http://127.0.0.1:${address.port}/v1`,
@@ -324,7 +324,11 @@ test("OpenAI-compatible system AI calls the chat completions endpoint", async ()
     assert.equal(receivedBody.model, "gpt-5.3-codex-spark", "configured route model must be sent verbatim");
     assert.equal(receivedBody.reasoning_effort, "low");
     assert.equal(receivedBody.stream, false);
-    assert.deepEqual(receivedBody.messages, [{ role: "user", content: "prompt" }]);
+    // 规则走 system 消息，内容才是 user 消息。
+    assert.deepEqual(receivedBody.messages, [
+      { role: "system", content: "规则：只输出结果" },
+      { role: "user", content: "prompt" },
+    ]);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
@@ -341,7 +345,7 @@ test("OpenAI-compatible system AI appends chat completions directly to versioned
   try {
     const address = server.address();
     assert.ok(address && typeof address === "object");
-    const text = await callSystemAiText("prompt", {
+    const text = await callSystemAiText({ system: "", prompt: "prompt" }, {
       enabled: true,
       protocol: "openai",
       baseUrl: `http://127.0.0.1:${address.port}/api/coding/paas/v4`,
@@ -368,7 +372,7 @@ test("OpenAI-compatible system AI preserves x-api-key authentication", async () 
   try {
     const address = server.address();
     assert.ok(address && typeof address === "object");
-    const text = await callSystemAiText("prompt", {
+    const text = await callSystemAiText({ system: "", prompt: "prompt" }, {
       enabled: true,
       protocol: "openai",
       baseUrl: `http://127.0.0.1:${address.port}/v1`,
@@ -388,18 +392,24 @@ test("Anthropic-compatible system AI preserves x-api-key authentication", async 
   let receivedPath = "";
   let apiKey = "";
   let authorization = "";
+  let receivedBody: { system?: unknown; messages?: unknown } = {};
   const server = createServer((req, res) => {
     receivedPath = req.url ?? "";
     apiKey = String(req.headers["x-api-key"] ?? "");
     authorization = req.headers.authorization ?? "";
-    res.setHeader("content-type", "application/json");
-    res.end(JSON.stringify({ content: [{ type: "text", text: "generated message" }] }));
+    let raw = "";
+    req.on("data", (chunk) => { raw += chunk.toString(); });
+    req.on("end", () => {
+      receivedBody = JSON.parse(raw) as { system?: unknown; messages?: unknown };
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ content: [{ type: "text", text: "generated message" }] }));
+    });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
     const address = server.address();
     assert.ok(address && typeof address === "object");
-    const text = await callSystemAiText("prompt", {
+    const text = await callSystemAiText({ system: "规则：只输出结果", prompt: "prompt" }, {
       enabled: true,
       protocol: "anthropic",
       baseUrl: `http://127.0.0.1:${address.port}`,
@@ -411,6 +421,9 @@ test("Anthropic-compatible system AI preserves x-api-key authentication", async 
     assert.equal(receivedPath, "/v1/messages");
     assert.equal(apiKey, "anthropic-secret");
     assert.equal(authorization, "");
+    // Anthropic 的系统提示是顶层 system 字段，不是 messages 里的角色。
+    assert.equal(receivedBody.system, "规则：只输出结果");
+    assert.deepEqual(receivedBody.messages, [{ role: "user", content: "prompt" }]);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
@@ -433,14 +446,14 @@ test("system AI accepts complete OpenAI and Anthropic endpoint URLs", async () =
     assert.ok(address && typeof address === "object");
     const origin = `http://127.0.0.1:${address.port}`;
 
-    assert.equal(await callSystemAiText("prompt", {
+    assert.equal(await callSystemAiText({ system: "", prompt: "prompt" }, {
       enabled: true,
       protocol: "openai",
       baseUrl: `${origin}/gateway/v1/chat/completions?tenant=wand`,
       apiKey: "api-secret",
       model: "test-model",
     }), "openai result");
-    assert.equal(await callSystemAiText("prompt", {
+    assert.equal(await callSystemAiText({ system: "", prompt: "prompt" }, {
       enabled: true,
       protocol: "anthropic",
       baseUrl: `${origin}/gateway/v1/messages?tenant=wand`,

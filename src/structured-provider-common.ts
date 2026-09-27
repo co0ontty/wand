@@ -1,6 +1,65 @@
 import type { SessionProvider, SessionRunner, SessionSnapshot, StructuredSessionState, WandConfig } from "./types.js";
+import { shellQuote } from "./shell-quote.js";
 
 const NATIVE_THINKING_EFFORT = /^(claude|codex|opencode|grok|qoder|pi):[a-z0-9][a-z0-9_-]{0,31}$/;
+
+/**
+ * 把会话级系统提示交给 CLI 的开关。Claude / Qoder / Pi 用 `--append-system-prompt`，
+ * Grok 用 `--rules`；Codex / OpenCode 没有这个入口，只能退回并入本轮消息。
+ * 各 provider 的支持情况由 `--help` 实测得出，新增 provider 前先验。
+ */
+export function systemPromptFlag(provider: SessionProvider | null | undefined): string | null {
+  switch (provider) {
+    case "claude":
+    case "qoder":
+    case "pi":
+      return "--append-system-prompt";
+    case "grok":
+      return "--rules";
+    default:
+      return null;
+  }
+}
+
+/** 结构化 runner 的 args：provider 支持时把系统提示当成独立参数传。 */
+export function systemPromptArgs(session: Pick<SessionSnapshot, "provider" | "systemPrompt">): string[] {
+  const text = session.systemPrompt?.trim();
+  if (!text) return [];
+  const flag = systemPromptFlag(session.provider);
+  return flag ? [flag, text] : [];
+}
+
+/**
+ * provider 没有系统提示通道时的兜底：把它放在本会话第一条消息最前面，并写明它不是用户输入。
+ * 只在首轮拼一次：后续轮次的消息已经接在有它的对话历史后面。有通道的 provider 不会走这里。
+ */
+export function promptWithSystemFallback(
+  session: Pick<SessionSnapshot, "provider" | "systemPrompt" | "messages">,
+  prompt: string,
+): string {
+  const text = session.systemPrompt?.trim();
+  if (!text || systemPromptFlag(session.provider)) return prompt;
+  if ((session.messages?.length ?? 0) > 1) return prompt;
+  return composeSystemFallback(text, prompt);
+}
+
+/** provider 没有系统提示通道时的并接格式：明确标出这不是用户输入。 */
+export function composeSystemFallback(systemPrompt: string, prompt: string): string {
+  return `以下是本会话的固定要求（来自系统，不是用户输入，优先级高于后面的内容）：\n\n${systemPrompt.trim()}\n\n---\n\n${prompt}`;
+}
+
+/** 把系统提示接到 CLI 命令上（provider 支持时）；不支持时原样返回，由调用方并进首条输入。 */
+export function commandWithSystemPrompt(
+  command: string,
+  provider: SessionProvider | null | undefined,
+  systemPrompt: string | null | undefined,
+): string {
+  const text = systemPrompt?.trim();
+  if (!text) return command;
+  const flag = systemPromptFlag(provider);
+  if (!flag || command.includes(flag)) return command;
+  return `${command} ${flag} ${shellQuote(text)}`;
+}
 
 /** 判断任意值是否为合法的 thinking effort（旧四档，或 `provider:level`）。 */
 export function isThinkingEffort(value: unknown): value is NonNullable<SessionSnapshot["thinkingEffort"]> {

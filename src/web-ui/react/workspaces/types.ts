@@ -11,6 +11,18 @@ export type WorkspaceSessionTarget = WorkspaceProvider | "shell";
 /** Agent 窗口的运行形态；空白终端固定为 PTY。 */
 export type WorkspaceSessionKind = "structured" | "pty";
 
+/**
+ * picker「AI 团队」分组的一项（§5.1 修正 B8）。
+ * 团队不进 WorkspaceSessionTarget 联合：它是并列的独立选择态，`teamId` 空串表示
+ * 这一次起的是会话，非空表示直接开工；提交链路按「会话 or 团队」分叉。
+ */
+export interface WorkspaceTeamOption {
+  id: string;
+  name: string;
+  /** 分组项第二行的说明：成员数与擅长什么。 */
+  detail: string;
+}
+
 export type PaneTab =
   | { id: string; kind: "session"; sessionId: string }
   | { id: string; kind: "editor"; path: string }
@@ -68,6 +80,15 @@ export interface WorkspaceSessionSummary {
   ptyBusy?: boolean;
   providerCliActive?: boolean;
   inFlight?: boolean;
+  /** 这条会话是 AI 团队的群聊 relay 会话；服务端 join ai_team_runs 后带上入口信息。 */
+  teamChat?: WorkspaceSessionTeamChat;
+}
+
+/** 群聊标记的数据来源：ai_team_runs 中该 chat_session_id 最近一次运行（服务端 AiTeamRunChatMarker）。 */
+export interface WorkspaceSessionTeamChat {
+  runId: string;
+  teamName: string;
+  memberCount: number;
 }
 
 export interface WorkspaceDetail extends Workspace {
@@ -283,6 +304,8 @@ interface StartWorkspaceMergeAgentPayload {
   workspaceId: string;
   cwd: string;
   provider?: WorkspaceProvider;
+  /** 角色与规则：走会话的系统提示，不拼进 prompt。 */
+  systemPrompt: string;
   prompt: string;
 }
 

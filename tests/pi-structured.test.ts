@@ -184,6 +184,37 @@ test("Pi clears a missing resume ID after the CLI rejects it", async (t) => {
   assert.equal(storage.getSession("missing-pi")?.claudeSessionId, null);
 });
 
+test("Pi turns that only report a provider error fail instead of saving an empty reply", async (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-pi-error-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  t.after(() => {
+    storage.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+  storage.saveSession(session({ id: "limit-pi", cwd: root }));
+  const runner: StructuredRunnerAdapter = {
+    start() {
+      return {
+        args: [], spawnedAt: new Date().toISOString(), pid: null, interrupt() {},
+        // Pi 在额度用尽时仍以 0 退出，只在 message_end 里带 errorMessage。
+        completion: Promise.resolve({
+          state: { blocks: [], result: "", sessionId: null },
+          exitCode: 0, signal: null, stderr: "", primaryError: "Codex error: The usage limit has been reached",
+        }),
+      };
+    },
+  };
+  const manager = new StructuredSessionManager(
+    storage, { ...defaultConfig(), defaultCwd: root }, null, undefined, { pi: runner },
+  );
+  t.after(() => manager.dispose());
+  await assert.rejects(manager.sendMessage("limit-pi", "hi"), /usage limit/);
+  const failed = manager.get("limit-pi")!;
+  assert.equal(failed.status, "failed");
+  assert.equal(failed.structuredState?.lastError, "Codex error: The usage limit has been reached");
+  assert.match(JSON.stringify(failed.messages?.at(-1)), /结构化会话执行失败：Codex error: The usage limit/);
+});
+
 test("Pi errors surface the provider message", () => {
   const state = { blocks: [], result: "", sessionId: null };
   assert.equal(applyPiEvent(state, {

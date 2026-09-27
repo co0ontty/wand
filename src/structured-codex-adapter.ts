@@ -5,7 +5,7 @@ import type { StructuredExecHost } from "./structured-exec-host.js";
 import { CodexProtocolReducer } from "./structured-codex-protocol.js";
 import { whichSync } from "./path-repair.js";
 import type { SessionSnapshot } from "./types.js";
-import { thinkingEffortToCodexReasoningEffort } from "./structured-provider-common.js";
+import { thinkingEffortToCodexReasoningEffort, promptWithSystemFallback } from "./structured-provider-common.js";
 import type {
   StructuredRunnerAdapter,
   StructuredRunnerContext,
@@ -57,7 +57,7 @@ export class CodexRunner implements StructuredRunnerAdapter {
       args,
       cwd: context.session.cwd,
       env: context.env,
-      stdinData: context.prompt,
+      stdinData: promptWithSystemFallback(context.session, context.prompt),
       observer,
       execHost: this.execHost,
       spawnProcess: this.spawnProcess,

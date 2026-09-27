@@ -130,6 +130,8 @@ interface ClaudeCliTurnState extends StructuredRunnerTurnState {
 export class ClaudeCliProtocolReducer {
   readonly state: ClaudeCliTurnState;
   askUserQuestionDetected = false;
+  /** result 事件带 is_error 时的说明（如「API Error: 503 …」），作为这一轮的主错误。 */
+  errorText: string | null = null;
   private readonly blocksByKey = new Map<string, ContentBlock[]>();
   private readonly keyOrder: string[] = [];
   private readonly taskMetaRegistry: TaskMetaMap = new Map();
@@ -191,6 +193,7 @@ export class ClaudeCliProtocolReducer {
 
     if (event.type === "result") {
       if (typeof event.result === "string") this.state.result = event.result.trim();
+      if (event.is_error === true && this.state.result) this.errorText = this.state.result;
       this.state.model = extractClaudeModelName(
         event.modelUsage && typeof event.modelUsage === "object"
           ? event.modelUsage as Record<string, unknown>

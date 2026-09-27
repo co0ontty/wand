@@ -1,7 +1,13 @@
+/** 看板、AI 团队页与群聊页共用这一条独立路由：同一时刻只开其中一页，返回键行为一致。 */
+export type TaskBoardPage = "board" | "teams" | "teamchat";
+
 export interface TaskBoardControllerSnapshot {
   open: boolean;
+  page: TaskBoardPage;
   workspaceId: string;
   sessionId: string;
+  /** page === "teamchat" 时要打开的团队运行 id（也持久化在 URL `run` 参数里）。 */
+  runId: string;
   revision: number;
 }
 
@@ -10,14 +16,19 @@ type HistoryMode = "push" | "replace";
 
 export const TASK_BOARD_VIEW_PARAM = "view";
 export const TASK_BOARD_VIEW = "taskboard";
-const TASK_BOARD_VIEW_ALIASES = new Set(["taskboard", "issues"]);
+export const AI_TEAMS_VIEW = "teams";
+export const TEAM_CHAT_VIEW = "teamchat";
+export const TEAM_CHAT_RUN_PARAM = "run";
+const TASK_BOARD_VIEW_ALIASES = new Set(["taskboard", "issues", AI_TEAMS_VIEW, TEAM_CHAT_VIEW]);
 
 const HISTORY_STATE_KEY = "wandShellView";
 
 let snapshot: TaskBoardControllerSnapshot = {
   open: false,
+  page: "board",
   workspaceId: "",
   sessionId: "",
+  runId: "",
   revision: 0,
 };
 const listeners = new Set<Listener>();
@@ -25,7 +36,7 @@ let historyInstalled = false;
 /** True only for the history entry this tab pushed by opening the board. */
 let openedViaPush = false;
 let closingViaBack = false;
-let reopenAfterBack: { workspaceId: string; sessionId: string } | null = null;
+let reopenAfterBack: { workspaceId: string; sessionId: string; page: TaskBoardPage; runId: string } | null = null;
 
 function publish(next: Partial<TaskBoardControllerSnapshot>): void {
   snapshot = { ...snapshot, ...next, revision: snapshot.revision + 1 };
@@ -42,11 +53,36 @@ export function isTaskBoardView(search: string): boolean {
   return value != null && TASK_BOARD_VIEW_ALIASES.has(value);
 }
 
-/** Add or remove `view=taskboard` without touching unrelated query params. */
-export function taskBoardSearch(search: string, open: boolean): string {
+export function taskBoardPageOf(search: string): TaskBoardPage {
+  const value = new URLSearchParams(searchFrom(search)).get(TASK_BOARD_VIEW_PARAM);
+  if (value === AI_TEAMS_VIEW) return "teams";
+  if (value === TEAM_CHAT_VIEW) return "teamchat";
+  return "board";
+}
+
+/** 群聊页地址里带的运行 id；页面刷新后靠它恢复同一个群聊。 */
+export function teamChatRunOf(search: string): string {
+  return new URLSearchParams(searchFrom(search)).get(TEAM_CHAT_RUN_PARAM) ?? "";
+}
+
+/** Add or remove `view=taskboard` (or `view=teams` / `view=teamchat&run=…`) without touching unrelated query params. */
+export function taskBoardSearch(
+  search: string,
+  open: boolean,
+  page: TaskBoardPage = "board",
+  runId = "",
+): string {
   const params = new URLSearchParams(searchFrom(search));
-  if (open) params.set(TASK_BOARD_VIEW_PARAM, TASK_BOARD_VIEW);
-  else params.delete(TASK_BOARD_VIEW_PARAM);
+  if (open) {
+    params.set(
+      TASK_BOARD_VIEW_PARAM,
+      page === "teams" ? AI_TEAMS_VIEW : page === "teamchat" ? TEAM_CHAT_VIEW : TASK_BOARD_VIEW,
+    );
+  } else {
+    params.delete(TASK_BOARD_VIEW_PARAM);
+  }
+  if (open && page === "teamchat" && runId) params.set(TEAM_CHAT_RUN_PARAM, runId);
+  else params.delete(TEAM_CHAT_RUN_PARAM);
   const next = params.toString();
   return next ? `?${next}` : "";
 }
@@ -69,7 +105,7 @@ function historyState(): Record<string, unknown> {
 function writeLocation(open: boolean, mode: HistoryMode): void {
   if (typeof window === "undefined" || !window.history) return;
   const url = new URL(window.location.href);
-  url.search = taskBoardSearch(url.search, open);
+  url.search = taskBoardSearch(url.search, open, snapshot.page, snapshot.runId);
   const next = `${url.pathname}${url.search}${url.hash}`;
   const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
   const state = { ...historyState(), [HISTORY_STATE_KEY]: open ? TASK_BOARD_VIEW : null };
@@ -87,11 +123,16 @@ function onPopState(): void {
   const reopen = reopenAfterBack;
   reopenAfterBack = null;
   if (reopen) {
-    taskBoardController.open(reopen.workspaceId, reopen.sessionId);
+    taskBoardController.open(reopen.workspaceId, reopen.sessionId, reopen.page, reopen.runId);
     return;
   }
-  if (shouldOpen === snapshot.open) return;
-  publish({ open: shouldOpen });
+  const page = shouldOpen ? taskBoardPageOf(locationSearch()) : snapshot.page;
+  if (shouldOpen === snapshot.open && page === snapshot.page) return;
+  publish({
+    open: shouldOpen,
+    page,
+    ...(page === "teamchat" ? { runId: teamChatRunOf(locationSearch()) } : {}),
+  });
 }
 
 export function installTaskBoardHistory(): void {
@@ -99,20 +140,29 @@ export function installTaskBoardHistory(): void {
   historyInstalled = true;
   window.addEventListener("popstate", onPopState);
   if (!isTaskBoardView(locationSearch())) return;
-  if (!snapshot.open) publish({ open: true });
+  if (!snapshot.open) {
+    const page = taskBoardPageOf(locationSearch());
+    publish({ open: true, page, ...(page === "teamchat" ? { runId: teamChatRunOf(locationSearch()) } : {}) });
+  }
   writeLocation(true, "replace");
 }
 
 export const taskBoardController = {
-  open(workspaceId = "", sessionId = ""): void {
+  open(workspaceId = "", sessionId = "", page: TaskBoardPage = "board", runId = ""): void {
     installTaskBoardHistory();
     if (closingViaBack) {
-      reopenAfterBack = { workspaceId, sessionId };
+      reopenAfterBack = { workspaceId, sessionId, page, runId };
       return;
     }
     const wasOpen = snapshot.open;
-    publish({ open: true, workspaceId, sessionId });
-    if (wasOpen) return;
+    const pageChanged = snapshot.page !== page;
+    const runChanged = page === "teamchat" && snapshot.runId !== runId;
+    publish({ open: true, workspaceId, sessionId, page, runId: page === "teamchat" ? runId : "" });
+    if (wasOpen) {
+      // 看板 ⇄ 团队页 ⇄ 群聊页之间切换只改地址，不多压一层历史：返回键仍然一步回到会话。
+      if (pageChanged || runChanged) writeLocation(true, "replace");
+      return;
+    }
     if (isTaskBoardView(locationSearch())) {
       writeLocation(true, "replace");
       return;

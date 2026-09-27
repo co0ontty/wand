@@ -147,3 +147,14 @@ test("ClaudeCliProtocolReducer keeps final model, usage, and result authoritativ
     totalCostUsd: 0.1,
   });
 });
+
+test("ClaudeCliProtocolReducer keeps an errored result as the turn's primary error", () => {
+  const reducer = new ClaudeCliProtocolReducer(session());
+  reducer.apply({ type: "result", subtype: "success", is_error: false, result: "done" }, false);
+  assert.equal(reducer.errorText, null);
+  reducer.apply({
+    type: "result", subtype: "success", is_error: true, api_error_status: 503,
+    result: "API Error: 503 No available accounts",
+  }, false);
+  assert.equal(reducer.errorText, "API Error: 503 No available accounts");
+});

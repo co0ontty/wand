@@ -67,8 +67,6 @@ export interface CardExpandDefaults {
   terminal?: boolean;
   /** Thinking blocks (default: false) */
   thinking?: boolean;
-  /** Tool groups (default: false) */
-  toolGroup?: boolean;
 }
 
 export interface AndroidApkConfig {
@@ -387,6 +385,11 @@ export interface CommandRequest {
   cwd?: string;
   mode?: ExecutionMode;
   initialInput?: string;
+  /**
+   * 会话级系统提示（角色、规则）：走 provider 自己的系统提示开关，
+   * 不要拼进 initialInput。见 AGENTS.md「Session 输入契约」。
+   */
+  systemPrompt?: string;
   worktreeEnabled?: boolean;
   /** 模型（别名或完整 ID）。留空则按 provider 回落到服务端默认模型。 */
   model?: string;
@@ -558,9 +561,25 @@ export interface ToolResultBlock {
 
 export type ContentBlock = TextBlock | ThinkingBlock | ToolUseBlock | ToolResultBlock;
 
+/** 群聊（AI 团队）里的发言人；普通会话没有，按 role 用默认人设。 */
+export interface ConversationAuthor {
+  /** 团队成员 id；用户发言为 "user"。 */
+  id: string;
+  name: string;
+  /** 成员头像：上传的 data URL、"cat:<n>" 指定毛色，或空（按 id 哈希毛色）。 */
+  avatar?: string;
+  leader?: boolean;
+  provider?: SessionProvider;
+  /** 这条发言对应的成员会话，可点开看完整过程。 */
+  sessionId?: string;
+}
+
 export interface ConversationTurn {
   role: "user" | "assistant";
   content: ContentBlock[];
+  author?: ConversationAuthor;
+  /** 群聊里的进度提示（派工、开始、出错）：渲染成居中的一行，不是气泡。 */
+  notice?: boolean;
   /** ISO time when this turn was first recorded (user send / assistant start). */
   createdAt?: string;
   /** ISO time when an assistant turn finished streaming. */
@@ -596,6 +615,11 @@ export interface SessionSnapshot {
   sessionSource?: SessionSource;
   /** 自动化创建会话时关联的自动化任务 ID。 */
   automationId?: string;
+  /**
+   * 会话级系统提示：自动化 / 团队会话的角色与规则放这里，走 provider 的系统提示通道，
+   * 不要拼进首条用户消息。provider 没有该通道时（codex / opencode）由调用方退回并入消息。
+   */
+  systemPrompt?: string | null;
   /** 所属工作空间 ID（多标签 / 分屏项目）。会话在该工作空间窗口内作为一个标签。 */
   workspaceId?: string;
   /** 所属工作空间任务 ID；任务独占一个 worktree，其下所有会话共享该 worktree 目录。 */

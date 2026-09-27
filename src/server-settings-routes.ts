@@ -269,7 +269,7 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
     const startedAt = Date.now();
     try {
       const text = await callSystemAiText(
-        "这是 Wand 系统 API 线路验收。请只回复 WAND_API_OK。",
+        { system: "你是 Wand 的系统 API 线路探针。", prompt: "这是 Wand 系统 API 线路验收。请只回复 WAND_API_OK。" },
         route,
         30_000,
       );

@@ -98,7 +98,6 @@ export interface SettingsCardDefaults {
   inlineTools: boolean;
   terminal: boolean;
   thinking: boolean;
-  toolGroup: boolean;
 }
 
 type SettingsExecutionMode =

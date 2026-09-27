@@ -324,11 +324,28 @@ function endpoint(baseUrl: string, protocol: SystemAiProtocol): string {
   return url.toString();
 }
 
-export async function callSystemAiText(prompt: string, config: SystemAiConfig, timeoutMs = SYSTEM_AI_TIMEOUT_MS): Promise<string> {
+/**
+ * 一次性 AI 请求：规则 / 角色走系统提示，内容走用户消息。
+ * 直连 API 用各协议的 system 通道；CLI 用各 provider 自己的系统提示开关
+ * （`systemPromptFlag`），没有开关的 provider 退回把规则并在内容前面。
+ */
+export interface AiTextRequest {
+  /** 规则、角色、输出格式。空字符串表示这次调用不需要系统提示。 */
+  system: string;
+  /** 本次要处理的内容（diff、用户原话、对话摘要…）。 */
+  prompt: string;
+}
+
+function requestParts(request: AiTextRequest): { system: string; prompt: string } {
+  return { system: request.system?.trim() ?? "", prompt: request.prompt ?? "" };
+}
+
+export async function callSystemAiText(request: AiTextRequest, config: SystemAiConfig, timeoutMs = SYSTEM_AI_TIMEOUT_MS): Promise<string> {
   const normalized = normalizeSystemAiConfig(config);
   if (!normalized.enabled || !normalized.baseUrl || !normalized.apiKey || !normalized.model) {
     throw new SystemAiError("系统 AI API 配置不完整。", "SYSTEM_AI_CONFIG_INVALID");
   }
+  const { system, prompt } = requestParts(request);
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (normalized.protocol === "anthropic") {
     headers["anthropic-version"] = "2023-06-01";
@@ -339,14 +356,14 @@ export async function callSystemAiText(prompt: string, config: SystemAiConfig, t
     else headers.authorization = `Bearer ${normalized.apiKey}`;
   }
   const body = normalized.protocol === "anthropic"
-    ? { model: normalized.model, max_tokens: 2048, messages: [{ role: "user", content: prompt }] }
+    ? { model: normalized.model, max_tokens: 2048, ...(system ? { system } : {}), messages: [{ role: "user", content: prompt }] }
     : {
       model: normalized.model,
       // Quick system tasks should not silently inherit a model's expensive
       // default reasoning level. Settings probes a route with this same
       // payload, so an incompatible endpoint fails visibly before it is used.
       reasoning_effort: "low",
-      messages: [{ role: "user", content: prompt }],
+      messages: [...(system ? [{ role: "system", content: system }] : []), { role: "user", content: prompt }],
       stream: false,
     };
   let response: Response;
@@ -372,7 +389,7 @@ export async function callSystemAiText(prompt: string, config: SystemAiConfig, t
 
 /** Try every configured API in order. Empty responses are treated as unavailable. */
 export async function callSystemAiTextWithFallback(
-  prompt: string,
+  request: AiTextRequest,
   config: SystemAiConfig,
   timeoutMs = SYSTEM_AI_TIMEOUT_MS,
 ): Promise<string> {
@@ -383,7 +400,7 @@ export async function callSystemAiTextWithFallback(
   const errors: string[] = [];
   for (const profile of profiles) {
     try {
-      const text = await callSystemAiText(prompt, profile, timeoutMs);
+      const text = await callSystemAiText(request, profile, timeoutMs);
       if (text.trim()) return text;
       errors.push(`${profile.source ?? "custom"}: 返回空结果`);
     } catch (error) {

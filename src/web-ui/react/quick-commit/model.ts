@@ -65,6 +65,7 @@ export function buildQuickCommitInput(
   includeSubmodule: boolean,
   selection?: QuickCommitSelection,
   includeDiff = false,
+  archiveRelatedTasks = false,
 ): QuickCommitInput {
   const meta = quickCommitActionMeta(action);
   const message = form.message.trim();
@@ -84,6 +85,7 @@ export function buildQuickCommitInput(
   }
   // 显式要求时才带上完整 diff：默认走「提示词清单」，省 token。
   if (includeDiff) input.includeDiff = true;
+  if (archiveRelatedTasks) input.archiveRelatedTasks = true;
   return input;
 }
 

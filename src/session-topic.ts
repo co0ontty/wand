@@ -1,4 +1,5 @@
 import { callConfiguredAiText, type QuickCommitAiOptions } from "./git-quick-commit.js";
+import type { AiTextRequest } from "./system-ai.js";
 import { skipAnsiSequence } from "./pty-text-utils.js";
 import type { ConversationTurn } from "./types.js";
 import { clipAtWordBoundary } from "./text-utils.js";
@@ -323,19 +324,19 @@ export async function generateSessionTopic(
   const input = topicConversationInput(userMessages);
   if (!input) throw new Error("没有可总结的用户消息。");
   const outputLanguage = language?.trim() || "与用户消息相同的语言";
-  const prompt = [
-    "请综合总结下面这段用户与编码助手对话中的所有用户消息，用于单个终端/会话的列表标题。",
-    `使用${outputLanguage}输出。`,
-    "只输出一个 JSON 对象，不要 Markdown、解释或额外文字。",
-    '格式：{"title":"不超过20个字的具体主题标题","description":"不超过60个字的一句话任务描述"}',
-    "标题必须概括该会话用户命令自己的具体工作，不要复述项目名、目录名或上级任务标题，也不要使用“关于”“请求”“任务”等空泛词。",
-    "描述保留当前整体目标、关键对象和新增要求。",
-    "后续轮次与前面目标有关时必须共同概括；发生目标切换时优先反映最新目标，同时保留仍有效的上下文。",
-    "",
-    "按发送顺序排列的用户消息：",
-    input,
-  ].join("\n");
-  const raw = await callConfiguredAiText(prompt, cwd ?? process.cwd(), language ?? "", ai);
+  const request: AiTextRequest = {
+    system: [
+      "请综合总结用户消息里的所有轮次，用于单个终端/会话的列表标题。",
+      `使用${outputLanguage}输出。`,
+      "只输出一个 JSON 对象，不要 Markdown、解释或额外文字。",
+      '格式：{"title":"不超过20个字的具体主题标题","description":"不超过60个字的一句话任务描述"}',
+      "标题必须概括该会话用户命令自己的具体工作，不要复述项目名、目录名或上级任务标题，也不要使用“关于”“请求”“任务”等空泛词。",
+      "描述保留当前整体目标、关键对象和新增要求。",
+      "后续轮次与前面目标有关时必须共同概括；发生目标切换时优先反映最新目标，同时保留仍有效的上下文。",
+    ].join("\n"),
+    prompt: `按发送顺序排列的用户消息：\n${input}`,
+  };
+  const raw = await callConfiguredAiText(request, cwd ?? process.cwd(), language ?? "", ai);
   const topic = parseTopic(raw);
   if (!topic) throw new Error("模型返回的会话主题格式无效。");
   return topic;

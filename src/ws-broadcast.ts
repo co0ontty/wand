@@ -128,6 +128,7 @@ interface ClientMessageWindow {
   messageTotal: number;
   leadingBlockOffset?: number;
   leadingBlockTotal?: number;
+  leadingVisibleCount?: number;
 }
 
 // ── Manager ──
@@ -487,6 +488,7 @@ export class WsBroadcastManager {
         messageTotal: w.messageTotal,
         leadingBlockOffset: w.leadingBlockOffset,
         leadingBlockTotal: w.leadingBlockTotal,
+        leadingVisibleCount: w.leadingVisibleCount,
       };
     }
     const w = windowMessagesForTransport(messages, this.getCardDefaults());

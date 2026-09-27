@@ -17,6 +17,7 @@ import {
 } from "../model-catalog";
 import { useWandModelCatalog } from "../use-model-catalog";
 import { ProviderLogo } from "../provider-logo";
+import { sortProviderOptions, useProviderUsage } from "../provider-usage";
 import { WandButton, WandDialogSurface, WandSelect } from "../ui";
 import { newSessionController, newSessionStore } from "./controller";
 import {
@@ -75,7 +76,6 @@ const MODES: ReadonlyArray<{
   { value: "native", label: "原生", description: "原生结构化输出" },
 ];
 
-const PROVIDER_VALUES = PROVIDERS.map((provider) => provider.value);
 const KIND_VALUES = KINDS.map((kind) => kind.value);
 
 /**
@@ -165,8 +165,14 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
   const [suggestions, setSuggestions] = useState<NewSessionDefaults["recentPaths"]>([]);
   const [suggestionsActive, setSuggestionsActive] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  // 目录请求挂在对话框打开之后（登录前请求会 401），失败下次打开重试。
+  // 目录和使用次数都在打开后请求（登录前会 401）；加载完才展示选项，避免排序跳动。
   const modelCatalog = useWandModelCatalog(controller.open);
+  const providerUsage = useProviderUsage(controller.open);
+  const sortedProviders = useMemo(
+    () => sortProviderOptions(PROVIDERS, providerUsage ?? {}, (provider) => provider.value),
+    [providerUsage],
+  );
+  const providerValues = sortedProviders.map((provider) => provider.value);
   const providerRefs = useRef<Partial<Record<NewSessionProvider, HTMLButtonElement | null>>>({});
   const kindRefs = useRef<Partial<Record<NewSessionKind, HTMLButtonElement | null>>>({});
   const modeRefs = useRef<Partial<Record<NewSessionMode, HTMLButtonElement | null>>>({});
@@ -336,7 +342,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
       testId="new-session-dialog"
       dismissable={!submitting}
     >
-      {loading ? (
+      {loading || (controller.open && providerUsage === null) ? (
         <div className="wand-new-session-loading" role="status">正在加载新建会话配置…</div>
       ) : form && defaults ? (
         <form noValidate className="wand-new-session-form" aria-busy={submitting} onSubmit={(event) => void submit(event)}>
@@ -344,7 +350,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
             <fieldset className="wand-new-session-field wand-new-session-fieldset">
               <legend className="wand-new-session-field-label">CLI 工具</legend>
               <div className="wand-new-session-choices wand-new-session-provider-choices" role="radiogroup" aria-label="CLI 工具">
-                {PROVIDERS.map((provider) => (
+                {sortedProviders.map((provider) => (
                   <button
                     key={provider.value}
                     type="button"
@@ -359,7 +365,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                     onKeyDown={(event) => navigateChoice(
                       event,
                       form.provider,
-                      PROVIDER_VALUES,
+                      providerValues,
                       selectProvider,
                       providerRefs,
                     )}

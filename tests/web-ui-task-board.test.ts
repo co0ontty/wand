@@ -262,11 +262,14 @@ test("create form can assign the first agent from the description", () => {
   assert.match(host, /创建并指派/);
 
   assert.match(editor, /指派 Agent/);
-  assert.match(editor, /先输入提示词，再选参数直接派发/);
-  assert.match(editor, /任务 CLI 工具/);
-  assert.match(editor, /任务模型/);
-  assert.match(editor, /任务思考深度/);
-  assert.match(editor, /任务工作模式/);
+  assert.match(editor, /先输入提示词，再选 CLI 或团队直接派发/);
+  // 指派面板的执行配置控件与 AI 团队成员编辑共用 AgentFields，aria 标签按前缀拼出。
+  const agentFields = readFileSync(new URL("../src/web-ui/react/issues/agent-fields.tsx", import.meta.url), "utf8");
+  assert.match(editor, /<AgentFields[\s\S]*?ariaPrefix="任务"/);
+  assert.match(agentFields, /\$\{ariaPrefix\} CLI 工具/);
+  assert.match(agentFields, /\$\{ariaPrefix\}模型/);
+  assert.match(agentFields, /\$\{ariaPrefix\}思考深度/);
+  assert.match(agentFields, /\$\{ariaPrefix\}工作模式/);
   assert.match(host, /task-board-agent-add/);
   assert.match(host, /TaskBoardAgentSessionList/);
   assert.match(host, /TaskBoardAgentChips/);
@@ -298,8 +301,8 @@ test("board host preserves navigation, column creation, drag, and detail contrac
   assert.match(host, /issueArchiveFolderOpen/);
 });
 
-test("dropping an unassigned task into doing dispatches the first agent immediately", () => {
-  // 没派发过的任务拖进「处理中」= 已经决定开跑，直接派发，不再需要进详情再点一次。
+test("dropping an unassigned task into doing asks before sending the card description", () => {
+  // 没派发过的任务拖进「处理中」可以派发，但必须先把将要发出的任务说明摆出来确认。
   assert.equal(issueDropDispatches("doing", 0), true);
   // 已经在跑 / 跑过的任务只改状态，避免拖一下就多开一个 session。
   assert.equal(issueDropDispatches("doing", 1), false);
@@ -315,6 +318,9 @@ test("dropping an unassigned task into doing dispatches the first agent immediat
   const host = readFileSync(new URL("../src/web-ui/react/issues/task-board-host.tsx", import.meta.url), "utf8");
   assert.match(host, /const dispatches = issueDropDispatches\(status, moving\.sessions\.length\)/);
   assert.match(host, /issueDropDispatchPrompt\(moving\)/);
+  assert.match(host, /用任务说明启动/);
+  assert.match(host, /按这段说明派发/);
+  assert.match(host, /只移入处理中/);
   assert.match(host, /taskBoardRepository\.dispatch\(taskId, agent/);
   // 派发用任务上的指派，未指派时沿用面板上次选择。
   assert.match(host, /const agent = dispatches \? agentOf\(moving, lastAgentRef\.current\) : null/);
@@ -425,7 +431,7 @@ test("task board is a first-class view=taskboard route that does not unmount the
   assert.match(sidebar, /onNavigate=\{navigateFromTree\}/);
   // The active entry is handed to Appica's Navigation, which stamps
   // `aria-current="page"` on the matching link itself.
-  assert.match(sidebar, /active=\{taskBoard\.open \? "task-board" : null\}/);
+  assert.match(sidebar, /active=\{taskBoard\.open \? \(taskBoard\.page === "teams" \? "ai-teams" : "task-board"\) : null\}/);
   assert.match(sidebar, /value="task-board"/);
   assert.match(host, /aria-label=\{selected \? "返回任务看板" : "返回工作区"\}/);
   assert.doesNotMatch(host, /返回会话/);

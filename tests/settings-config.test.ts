@@ -107,7 +107,9 @@ test("system AI route test calls the submitted model with the saved route key", 
     assert.equal(receivedAuthorization, "Bearer saved-route-secret");
     assert.equal(receivedBody.model, "gpt-5.3-codex-spark");
     assert.equal(receivedBody.reasoning_effort, "low");
-    assert.match(receivedBody.messages?.[0]?.content ?? "", /WAND_API_OK/);
+    // 探针与真实调用同样把规则放 system、内容放 user（线路验收要覆盖同一种 payload）。
+    assert.deepEqual(receivedBody.messages?.map((message) => message.role), ["system", "user"]);
+    assert.match(receivedBody.messages?.at(-1)?.content ?? "", /WAND_API_OK/);
   } finally {
     await handle.close();
     await new Promise<void>((resolve, reject) => provider.close((error) => error ? reject(error) : resolve()));

@@ -109,6 +109,10 @@ PTY 输入服务端原样写入终端，客户端必须拆成**先文本、后�
 
 `SessionSnapshot.claudeSessionId` 名不副实：存的是各 provider 的原生 resume 标识（Claude UUID、Codex thread、OpenCode/Grok/Qoder ID）。恢复逻辑横跨 `process-manager.ts`、`resume-policy.ts`、`storage.ts` 和各 provider 历史目录，时间窗兜底只在候选唯一时绑定。
 
+角色 / 规则这类「系统提示」不要拼进首条用户消息：会话级系统提示统一走 `SessionSnapshot.systemPrompt`（持久化在 `session_options`；PTY 与结构化都是）。入口两个：服务端内部调 `dispatchAgentForTask` / `createSession` / `processes.start` 时传 `systemPrompt`，客户端开会话时在 `POST /api/commands`（`initialInput` 旁）或 `POST /api/structured-sessions`（`prompt` 旁）传 `systemPrompt`。由 `structured-provider-common.ts` 映射到各 provider 自己的开关——Claude / Qoder / Pi 是 `--append-system-prompt`，Grok 是 `--rules`；Codex / OpenCode 没有这个入口，只在首条消息用 `promptWithSystemFallback` 并接一次。
+
+一次性 AI 调用同理（commit message / tag、提示词优化、任务标题、会话标题、快捷提交兜底执行器）：用 `AiTextRequest { system, prompt }`（`src/system-ai.ts`），规则进 `system`。直连 API 走各自的系统通道（Anthropic 是顶层 `system`，OpenAI 兼容是 `role: "system"` 消息）；CLI 走 `systemPromptFlag(provider)`，没开关的 provider 用 `composeSystemFallback` 并入内容。
+
 ## Web UI 与生成文件
 
 统一技术栈与模块/样式职责见 `docs/web-architecture.md`；运行时全景与代码边界见 `架构图.md`，Appica token / 层叠契约见 `docs/appica-ui-migration.md`；先验证并清理失效实现，再调整保留组件的样式。

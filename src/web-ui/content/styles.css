@@ -165,6 +165,20 @@
       --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1);
       --ease-in-out-smooth: cubic-bezier(0.4, 0, 0.2, 1);
       --ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+
+      /* ===== 动效时长 token（docs/motion-design.md §7）=====
+         只定义时长，曲线由使用处配 var(--ease-*)；页面一律引用这些变量，
+         不写裸毫秒。值与 Android WandMotion 同名项一致。
+         dwell 两项是「结果停留」而非 transition 时长，JS 侧只从
+         src/web-ui/react/ui/motion-tokens.ts 取同名常量（两边同值由单测断言）。 */
+      --motion-press: 110ms;        /* 按下反馈 */
+      --motion-fast: 150ms;         /* 状态切换 */
+      --motion-normal: 240ms;       /* 展开 / 退场 */
+      --motion-morph: 200ms;        /* 图标变形 */
+      --motion-indicator: 260ms;    /* 指示条 */
+      --motion-quick-exit: 90ms;    /* 旧内容退场（快于进场） */
+      --motion-dwell-sent: 720ms;   /* 成功态停留 */
+      --motion-dwell-failed: 1500ms; /* 失败态停留（要读得完原因） */
     }
 
     /* ── 会话侧栏：时间视图 / 目录树视图 ─────────────────────── */
@@ -3669,6 +3683,56 @@
       color: var(--text-tertiary);
     }
 
+    /* ===== 群聊（AI 团队）=====
+       成员发言沿用普通气泡，只把头像换成成员的像素猫；进度提示是居中的一行。 */
+    .chat-author-link {
+      appearance: none;
+      border: 0;
+      background: none;
+      padding: 0;
+      font: inherit;
+      color: var(--accent);
+      cursor: pointer;
+    }
+
+    .chat-author-link:hover { text-decoration: underline; }
+
+    .chat-author-badge {
+      font-size: 9px;
+      line-height: 1;
+      padding: 2px 5px;
+      border-radius: var(--radius-full);
+      color: var(--accent);
+      background: var(--accent-muted);
+    }
+
+    .chat-message.chat-notice {
+      align-items: center;
+      align-self: stretch;
+      max-width: none;
+    }
+
+    .chat-notice-line {
+      display: inline-flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      justify-content: center;
+      gap: 6px;
+      max-width: min(560px, 100%);
+      padding: 4px 12px;
+      border-radius: var(--radius-full);
+      background: var(--bg-tertiary);
+      color: var(--text-secondary);
+      font-size: var(--font-size-xs);
+      line-height: 1.5;
+      text-align: center;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .chat-notice-author { font-weight: 600; color: var(--text-primary); }
+    .chat-notice-time { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
     /* ===== 消息气泡 =====
        兜底约束：气泡不应超出聊天容器宽度。即便子节点（长 URL、不可断字符串、
        嵌入元素）想撑宽，也由 max-width / overflow-x 截断或换行。 */
@@ -3821,8 +3885,7 @@
 
     .chat-message-content > .thinking-inline,
     .chat-message-content > .inline-tool,
-    .chat-message-content > .tool-use-card,
-    .chat-message-content > .tool-group {
+    .chat-message-content > .tool-use-card {
       margin: 3px 0;
     }
 
@@ -4191,7 +4254,6 @@
     }
     /* 时间线里的工具/思考是“过程”，压暗、去底，让最终结果成为视觉终点。 */
     .agent-run-detail .tool-use-card,
-    .agent-run-detail .tool-group,
     .agent-run-detail .inline-tool,
     .agent-run-detail .inline-diff {
       margin: 2px 0;
@@ -4952,27 +5014,42 @@
     }
 
     /* ──────────────────────────────────────────────────────────────
-       Chat Activity — Codex 风格的「活动折叠」状态条
-       连续思考 / 工具调用收成一条；正文出现即打断并显示在条下方。
-       点一下展开成固定高度窗口，内部自动滚动跟随最新活动。
+       Chat Activity — 活动滚动窗口
+       连续思考 / 工具调用收成一张有明确边界的窗口卡：头部只放缩略信息
+       （类型计数 + 条数），展开后是固定高度的滚动窗口 —— 具体活动就在窗口里，
+       头部不再重复一条「最新活动」文案。
+       同一回复里只有最新的一段默认展开（新的活动出现时，历史段收回状态条），
+       窗口内部跟随最新一条，用户上滚后不再被拽回（露出「回到最新」）。
        ────────────────────────────────────────────────────────────── */
     .chat-activity {
+      --activity-window-h: 220px;
+      position: relative;
       width: 100%;
       max-width: var(--chat-card-max-width, 720px);
       min-width: 0;
       box-sizing: border-box;
-      margin: 2px 0;
-      background: transparent;
-      border: 0;
+      margin: 6px 0;
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      background: rgba(255, 253, 249, 0.72);
+      overflow: hidden;
+      transition: border-color 0.18s ease, box-shadow 0.22s var(--ease-out-expo);
+    }
+    .chat-activity[data-expanded="true"] {
+      border-color: color-mix(in srgb, var(--accent) 20%, var(--border-subtle));
+      box-shadow: 0 1px 2px rgba(89, 58, 32, 0.04), 0 10px 24px -18px rgba(89, 58, 32, 0.28);
+      background: rgba(255, 253, 250, 0.9);
+    }
+    .chat-activity.is-running[data-expanded="true"] {
+      border-color: color-mix(in srgb, var(--accent) 34%, var(--border-subtle));
     }
     .chat-activity-summary {
       display: flex;
       flex-direction: column;
       align-items: stretch;
-      gap: 4px;
       width: 100%;
       min-width: 0;
-      padding: 4px 2px;
+      padding: 7px 10px;
       border: 0;
       background: transparent;
       font: inherit;
@@ -4981,59 +5058,20 @@
       color: var(--text-muted);
       text-align: left;
       cursor: pointer;
+      transition: background 0.16s ease;
     }
     .chat-activity-summary:hover {
       background: color-mix(in srgb, var(--accent) 5%, transparent);
+    }
+    .chat-activity-summary:focus-visible {
+      outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+      outline-offset: -2px;
     }
     .chat-activity-top {
       display: flex;
       align-items: center;
       gap: 8px;
       min-width: 0;
-    }
-    .chat-activity-latest {
-      display: none;
-      min-width: 0;
-      font-family: var(--font-mono);
-      font-size: 9.8px;
-      line-height: 1.45;
-    }
-    .chat-activity.is-running .chat-activity-latest {
-      display: block;
-    }
-    .chat-activity-latest-text {
-      display: block;
-      min-width: 0;
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-      word-break: break-word;
-      color: var(--text-muted);
-      background-image: linear-gradient(
-        90deg,
-        var(--text-muted) 0%,
-        var(--text-muted) 44%,
-        color-mix(in srgb, var(--accent) 88%, white) 50%,
-        var(--text-muted) 56%,
-        var(--text-muted) 100%
-      );
-      background-size: 240% 100%;
-      background-position: 100% 0;
-      -webkit-background-clip: text;
-      background-clip: text;
-      -webkit-text-fill-color: transparent;
-      animation: chat-activity-text-scan 2s linear infinite;
-    }
-    @keyframes chat-activity-text-scan {
-      0% { background-position: 100% 0; }
-      100% { background-position: -140% 0; }
-    }
-    @media (prefers-reduced-motion: reduce) {
-      .chat-activity-latest-text {
-        animation: none;
-        background: none;
-        -webkit-text-fill-color: var(--text-secondary);
-        color: var(--text-secondary);
-      }
     }
     .chat-activity-meta {
       flex: 1 1 auto;
@@ -5058,6 +5096,7 @@
       color: color-mix(in srgb, var(--accent) 78%, var(--text-primary));
       font-size: 9.24px;
       font-weight: 600;
+      font-variant-numeric: tabular-nums;
     }
     .chat-activity-chevron {
       flex: 0 0 auto;
@@ -5069,20 +5108,59 @@
     .chat-activity[data-expanded="true"] .chat-activity-chevron {
       transform: rotate(180deg);
     }
-    /* 展开态：固定高度窗口 + 内部滚动，活动再多也不会撑爆对话流。 */
+    /* 展开 / 收起：窗口高度从 0 长到满高，收起是同一段倒放；不做 display 硬切。
+       收起用 exit 更快的曲线，展开用 emphasized 曲线。 */
+    .chat-activity-window {
+      position: relative;
+      max-height: 0;
+      opacity: 0;
+      visibility: hidden;
+      overflow: hidden;
+      transition:
+        max-height 0.2s cubic-bezier(0.4, 0, 1, 1),
+        opacity 0.12s ease,
+        visibility 0s linear 0.2s;
+    }
+    .chat-activity[data-expanded="true"] .chat-activity-window {
+      max-height: var(--activity-window-h);
+      opacity: 1;
+      visibility: visible;
+      border-top: 1px solid var(--border-subtle);
+      transition:
+        max-height 0.24s var(--ease-out-expo),
+        opacity 0.2s ease,
+        visibility 0s;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .chat-activity-window,
+      .chat-activity[data-expanded="true"] .chat-activity-window {
+        transition: none;
+      }
+    }
+    /* 固定高度滚动窗口：活动再多也不会撑爆对话流。上下用遮罩淡出，让被裁掉的
+       工具卡看起来是「窗口外」而不是「被切了一半」。 */
     .chat-activity-body {
-      height: 220px;
+      height: var(--activity-window-h);
+      box-sizing: border-box;
       overflow-y: auto;
       overflow-x: hidden;
-      padding: 4px 2px 8px;
-      box-sizing: border-box;
-      border-top: 1px solid var(--border-subtle);
+      padding: 6px 10px 10px;
       overscroll-behavior: contain;
       -webkit-overflow-scrolling: touch;
       scrollbar-width: thin;
       font-size: 9.8px;
       line-height: 1.4;
       color: var(--text-muted);
+    }
+    /* 只有内容超出一屏时才淡化上下沿：让被裁掉的条目看起来是「窗口外」，
+       内容本来就装得下时不该出现半透明的一行。 */
+    .chat-activity-body.is-scrollable {
+      -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 10px, #000 calc(100% - 14px), transparent 100%);
+      mask-image: linear-gradient(180deg, transparent 0, #000 10px, #000 calc(100% - 14px), transparent 100%);
+    }
+    .chat-activity-body:focus-visible {
+      outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+      outline-offset: -2px;
     }
     .chat-activity-body::-webkit-scrollbar {
       width: 7px;
@@ -5099,13 +5177,47 @@
     }
     .chat-activity-body > :first-child { margin-top: 0; }
     .chat-activity-body > :last-child { margin-bottom: 0; }
+    /* 用户上滚离开尾部时给出的回位入口（纯状态驱动，不自动拽视图）。 */
+    .chat-activity-tail {
+      position: absolute;
+      right: 12px;
+      bottom: 12px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 9px 3px 7px;
+      border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border-subtle));
+      border-radius: 999px;
+      background: rgba(255, 253, 249, 0.94);
+      box-shadow: 0 4px 12px -8px rgba(89, 58, 32, 0.5);
+      color: var(--text-secondary);
+      font: inherit;
+      font-size: 9.8px;
+      font-weight: 600;
+      cursor: pointer;
+      opacity: 0;
+      transform: translateY(4px);
+      pointer-events: none;
+      /* visibility 一起收，收起态的按钮不进 Tab 序列。 */
+      visibility: hidden;
+      transition: opacity 0.16s ease, transform 0.18s var(--ease-out-expo), visibility 0s linear 0.18s;
+    }
+    .chat-activity.is-unpinned .chat-activity-tail {
+      opacity: 1;
+      transform: none;
+      pointer-events: auto;
+      visibility: visible;
+      transition: opacity 0.16s ease, transform 0.18s var(--ease-out-expo), visibility 0s;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .chat-activity-tail { transition: none; }
+    }
     /* 窗口内的浅色卡片收紧、弱化，和正文拉开层级。
        注意：深色卡（.inline-terminal / .term-*）不走这套「去底」规则——它靠
        深底 + 浅色文字成立，background 一旦抹成透明，标题栏的半透明黑就
        直接叠在米色页面上变成灰条，命令与输出变成灰底浅字（实测对比度 1.1）。
        终端卡只收紧外间距，保留自己的底色、边框和文字色。 */
     .chat-activity-body .tool-use-card,
-    .chat-activity-body .tool-group,
     .chat-activity-body .inline-tool,
     .chat-activity-body .inline-diff {
       margin: 2px 0;
@@ -5134,135 +5246,6 @@
       font-size: 13.3px;
       line-height: 1.65;
       color: var(--text-primary);
-    }
-
-    /* ── Tool Group (连续同类调用折叠) ── */
-    /* ──────────────────────────────────────────────────────────────
-       Tool Group — collapsible cluster of consecutive read-only tools
-       Cream card with brand-tinted status chip, count pill, smooth body.
-       ────────────────────────────────────────────────────────────── */
-    .tool-group {
-      margin: 4px 0;
-      width: 100%;
-      max-width: var(--chat-card-max-width, 720px);
-      /* 同 .tool-use-card：内部嵌套 inline-tool 长路径不能撑爆窄屏父容器。 */
-      min-width: 0;
-      box-sizing: border-box;
-      border-radius: var(--radius-sm);
-      border: 1px solid var(--border-subtle);
-      background: linear-gradient(180deg, rgba(255, 251, 245, 0.85) 0%, rgba(255, 248, 238, 0.7) 100%);
-      box-shadow: 0 1px 2px rgba(89, 58, 32, 0.03);
-      overflow: hidden;
-      transition: border-color 0.18s ease, box-shadow 0.22s ease, transform 0.22s ease;
-    }
-    .tool-group:hover {
-      border-color: rgba(125, 91, 57, 0.18);
-      box-shadow: 0 2px 8px rgba(89, 58, 32, 0.06);
-    }
-    .tool-group[data-status="pending"] {
-      border-color: rgba(169, 106, 47, 0.22);
-      background: linear-gradient(180deg, rgba(255, 244, 226, 0.85) 0%, rgba(255, 241, 218, 0.7) 100%);
-    }
-    .tool-group[data-status="error"] {
-      border-color: rgba(178, 79, 69, 0.28);
-      background: linear-gradient(180deg, rgba(252, 240, 238, 0.85) 0%, rgba(252, 236, 234, 0.7) 100%);
-    }
-    .tool-group-summary {
-      display: flex;
-      align-items: center;
-      gap: 9px;
-      padding: 8px 12px;
-      cursor: pointer;
-      font-size: 10.5px;
-      color: var(--text-secondary);
-      user-select: none;
-      transition: background 0.18s ease;
-    }
-    .tool-group-summary:hover {
-      background: rgba(197, 101, 61, 0.04);
-    }
-    .tool-group-status {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 18px;
-      height: 18px;
-      border-radius: 50%;
-      font-size: 9.625px;
-      font-weight: 700;
-      line-height: 1;
-      flex-shrink: 0;
-      letter-spacing: 0;
-    }
-    .tool-group[data-status="done"] .tool-group-status {
-      background: var(--success-muted);
-      color: var(--success);
-    }
-    .tool-group[data-status="error"] .tool-group-status {
-      background: var(--danger-muted);
-      color: var(--danger);
-    }
-    .tool-group[data-status="pending"] .tool-group-status {
-      background: var(--warning-muted);
-      color: var(--warning);
-      animation: tool-group-pulse 1.6s ease-in-out infinite;
-    }
-    @keyframes tool-group-pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.55; }
-    }
-    .tool-group-text {
-      flex: 1;
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      font-weight: 500;
-      color: var(--text-primary);
-      letter-spacing: -0.005em;
-    }
-    .tool-group-count {
-      flex-shrink: 0;
-      font-size: 9.625px;
-      color: var(--text-tertiary);
-      padding: 2px 8px;
-      border-radius: var(--radius-full);
-      background: rgba(125, 91, 57, 0.07);
-      font-variant-numeric: tabular-nums;
-    }
-    .tool-group-chevron {
-      flex-shrink: 0;
-      transition: transform 0.25s var(--ease-out-expo);
-      color: var(--text-muted);
-      opacity: 0.6;
-    }
-    .tool-group:hover .tool-group-chevron {
-      opacity: 1;
-    }
-    .tool-group[data-expanded="true"] .tool-group-chevron {
-      transform: rotate(180deg);
-    }
-    .tool-group-body {
-      display: none;
-      padding: 4px 8px 8px 18px;
-      border-top: 1px solid rgba(125, 91, 57, 0.06);
-      border-left: 2px solid rgba(125, 91, 57, 0.08);
-      background: rgba(255, 253, 248, 0.55);
-    }
-    /* 同一 tool-group 内多条 inline-tool 视觉收紧 + 左缩进，强化"嵌套" */
-    .tool-group-body > .inline-tool {
-      margin: 0;
-    }
-    .tool-group-body > .inline-tool + .inline-tool {
-      border-top: 1px dashed rgba(125, 91, 57, 0.06);
-    }
-    .tool-group[data-expanded="true"] .tool-group-body {
-      display: block;
-      animation: tool-group-reveal 0.18s var(--ease-out-expo);
-    }
-    @keyframes tool-group-reveal {
-      from { opacity: 0; transform: translateY(-2px); }
-      to { opacity: 1; transform: translateY(0); }
     }
 
     /* ──────────────────────────────────────────────────────────────
@@ -5382,9 +5365,10 @@
       cursor: pointer;
       transition: background 0.16s ease;
     }
-    /* 嵌套在 tool-group-body 里的 inline-tool 撑满父容器即可（父已经限宽） */
-    .tool-group-body > .inline-tool {
-      max-width: 100%;
+    /* 展开的内容块统一「上滑淡入」入场，和活动窗口内的条目共用一套节奏。 */
+    @keyframes wand-reveal {
+      from { opacity: 0; transform: translateY(-2px); }
+      to { opacity: 1; transform: translateY(0); }
     }
     .inline-tool-row {
       display: flex;
@@ -5485,7 +5469,7 @@
     }
     .inline-tool-open .inline-tool-expanded {
       display: block;
-      animation: tool-group-reveal 0.16s var(--ease-out-expo);
+      animation: wand-reveal 0.16s var(--ease-out-expo);
     }
     .inline-tool-result {
       background: rgba(125, 91, 57, 0.04);
@@ -14490,6 +14474,18 @@
       line-height: 1.4;
     }
 
+    .workspace-session-kind-team {
+      color: var(--accent);
+      background: var(--accent-muted);
+    }
+
+    .workspace-session-team-cats {
+      display: inline-flex;
+      align-items: center;
+    }
+    .workspace-session-team-cats > svg { width: 13px; height: 13px; }
+    .workspace-session-team-cats > svg + svg { margin-left: -5px; }
+
     .workspace-session-action {
       display: inline-flex;
       align-items: center;
@@ -19978,4 +19974,118 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task-activity
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 首页报错：侧栏触发条位置不变，列表向下展开；首页直接摊开。 */
+.home-attention {
+  width: min(560px, 100%);
+  margin: 0 auto 8px;
+  text-align: left;
+}
+.home-attention.is-sidebar {
+  width: auto;
+  margin: 0 10px 8px;
+}
+.home-attention-title,
+.home-attention-trigger {
+  margin: 0;
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 650;
+}
+.home-attention-title {
+  margin-bottom: 8px;
+}
+.home-attention-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--danger);
+  border-radius: 10px;
+  background: var(--danger-muted);
+  cursor: pointer;
+}
+.home-attention-trigger > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-attention-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--transition-normal);
+}
+.home-attention-panel.is-open {
+  grid-template-rows: 1fr;
+}
+.home-attention-panel > .home-attention-list {
+  overflow: hidden;
+}
+.home-attention-list {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.home-attention-panel:not(.is-open) .home-attention-list {
+  margin-top: 0;
+}
+.home-attention-item {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--danger);
+  border-radius: 10px;
+  background: var(--danger-muted);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+.home-attention-item strong,
+.home-attention-item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.home-attention-item strong {
+  font-size: 13px;
+}
+.home-attention-item span {
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.home-attention-item:hover {
+  border-color: var(--danger);
+}
+.sidebar.pinned.collapsed .home-attention.is-sidebar {
+  margin: 0 4px 8px;
+}
+.sidebar.pinned.collapsed .home-attention-trigger {
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  justify-content: center;
+  padding: 0;
+}
+.sidebar.pinned.collapsed .home-attention-trigger > span,
+.sidebar.pinned.collapsed .home-attention-panel {
+  display: none;
+}
+.blank-chat:has(> .home-attention) {
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: center;
+}
+@media (prefers-reduced-motion: reduce) {
+  .home-attention-panel {
+    transition: none;
+  }
 }

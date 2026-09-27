@@ -22,6 +22,7 @@ debug-*.mjs
 src/web-ui/embedded-assets.ts
 # 浏览器层 esbuild 打包产物（scripts/bundle-browser.js 生成），同理不入库
 src/web-ui/content/scripts.js
+src/web-ui/content/ai-teams.js
 # Tailwind v4 + Appica 编译产物（scripts/bundle-tailwind.js 生成），同理不入库
 src/web-ui/content/tailwind.css
 

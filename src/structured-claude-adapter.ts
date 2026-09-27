@@ -104,6 +104,20 @@ export function buildAppendSystemPromptParts(language: string | undefined, mode:
   return parts;
 }
 
+/**
+ * 完整 append 列表：模式 / 语言指令 + 会话级系统提示（团队、自动化会话的角色与规则）。
+ * CLI 与 SDK 两条路径共用，避免只改一边。
+ */
+export function buildSessionSystemPromptParts(
+  session: Pick<SessionSnapshot, "mode" | "systemPrompt">,
+  language: string | undefined,
+): string[] {
+  const parts = buildAppendSystemPromptParts(language, session.mode);
+  const sessionPrompt = session.systemPrompt?.trim();
+  if (sessionPrompt) parts.push(sessionPrompt);
+  return parts;
+}
+
 export interface ClaudeCliArgsOptions {
   permissionPolicy: PermissionPolicy;
   systemPromptParts?: string[];
@@ -152,7 +166,7 @@ export class ClaudeCliRunner implements StructuredRunnerAdapter {
     );
     const args = buildClaudeCliArgs(context.session, {
       permissionPolicy,
-      systemPromptParts: buildAppendSystemPromptParts(this.options.language?.(), context.session.mode),
+      systemPromptParts: buildSessionSystemPromptParts(context.session, this.options.language?.()),
     });
     const reducer = new ClaudeCliProtocolReducer(context.session);
     let killedForQuestion = false;
@@ -194,7 +208,7 @@ export class ClaudeCliRunner implements StructuredRunnerAdapter {
         signal,
         stderr: ctx.stderr,
         stdoutTail,
-        primaryError: null,
+        primaryError: reducer.errorText,
         stopReason: killedForQuestion ? "ask-user-question" : undefined,
         spawnError,
       }),

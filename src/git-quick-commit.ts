@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 
 import { ClaudeRunError, runClaudePrint } from "./claude-sdk-runner.js";
-import { callSystemAiTextWithFallback } from "./system-ai.js";
+import { callSystemAiTextWithFallback, type AiTextRequest } from "./system-ai.js";
 import { buildChildEnv } from "./env-utils.js";
 import { isSessionProvider } from "./session-provider.js";
 import {
@@ -11,6 +11,8 @@ import {
   getGitErrorMessage,
 } from "./git-utils.js";
 import {
+  composeSystemFallback,
+  systemPromptFlag,
   thinkingEffortToClaudeCliEffort,
   thinkingEffortToCodexReasoningEffort,
   thinkingEffortToGrokEffort,
@@ -346,17 +348,18 @@ export interface CommitInputOptions {
 // ── AI commit message generation ──
 
 async function callClaudeText(
-  prompt: string,
+  request: AiTextRequest,
   cwd: string,
   language: string | undefined,
   opts: QuickCommitAiOptions,
 ): Promise<string> {
   try {
     const effort = thinkingEffortToClaudeCliEffort(opts.thinkingEffort ?? "off");
-    return await runClaudePrint(prompt, {
+    return await runClaudePrint(request.prompt, {
       cwd,
       timeoutMs: CLAUDE_MESSAGE_TIMEOUT_MS,
       language,
+      systemInstructions: request.system,
       model: opts.model ?? undefined,
       ...(effort ? { effort } : {}),
     });
@@ -492,35 +495,51 @@ function extractPiText(stdout: string): string {
   return text.trim();
 }
 
-function buildPiTextArgs(prompt: string, opts: QuickCommitAiOptions, allowTools = false): string[] {
+function buildPiTextArgs(request: AiTextRequest, opts: QuickCommitAiOptions, allowTools = false): string[] {
   const args = ["--mode", "json", "--print", "--no-session"];
   if (!allowTools) args.push("--no-tools");
   const model = opts.model?.trim();
   if (model && model !== "default") args.push("--model", model);
   const level = thinkingEffortToPiLevel(opts.thinkingEffort ?? "off");
   if (level) args.push("--thinking", level);
-  args.push(prompt);
+  args.push(...systemPromptArgsFrom("pi", request.system));
+  args.push(request.prompt);
   return args;
 }
 
-function buildGrokTextArgs(prompt: string, opts: QuickCommitAiOptions, allowTools = false): string[] {
-  const args = ["--no-auto-update", "-p", prompt, "--output-format", "streaming-json"];
+function buildGrokTextArgs(request: AiTextRequest, opts: QuickCommitAiOptions, allowTools = false): string[] {
+  const args = ["--no-auto-update", "-p", request.prompt, "--output-format", "streaming-json"];
   const model = opts.model?.trim();
   if (model && model !== "default") args.push("--model", model);
   const effort = thinkingEffortToGrokEffort(opts.thinkingEffort ?? "off");
   if (effort) args.push("--effort", effort);
+  args.push(...systemPromptArgsFrom("grok", request.system));
   if (allowTools) args.push("--always-approve");
   return args;
 }
 
-function buildQoderTextArgs(prompt: string, opts: QuickCommitAiOptions, allowTools = false): string[] {
-  const args = ["-p", prompt, "--output-format", "stream-json", "--no-session-persistence"];
+function buildQoderTextArgs(request: AiTextRequest, opts: QuickCommitAiOptions, allowTools = false): string[] {
+  const args = ["-p", request.prompt, "--output-format", "stream-json", "--no-session-persistence"];
   const model = opts.model?.trim();
   if (model && model !== "default") args.push("--model", model);
   const effort = thinkingEffortToQoderEffort(opts.thinkingEffort ?? "off");
   if (effort) args.push("--reasoning-effort", effort);
+  args.push(...systemPromptArgsFrom("qoder", request.system));
   if (allowTools) args.push("--permission-mode", "bypass_permissions");
   return args;
+}
+
+/** provider 自己的系统提示开关 + 规则文本；没有开关的 provider 返回空。 */
+function systemPromptArgsFrom(provider: SessionProvider, system: string): string[] {
+  const text = system?.trim();
+  if (!text) return [];
+  const flag = systemPromptFlag(provider);
+  return flag ? [flag, text] : [];
+}
+
+/** 没有系统提示开关的 provider（codex / opencode）：规则只能并进内容前面。 */
+function contentWithSystemPrompt(provider: SessionProvider, request: AiTextRequest): string {
+  return systemPromptFlag(provider) ? request.prompt : composeSystemFallback(request.system, request.prompt);
 }
 
 function runCliText(
@@ -577,7 +596,7 @@ function runCliText(
   });
 }
 
-async function callCodexText(prompt: string, cwd: string, opts: QuickCommitAiOptions): Promise<string> {
+async function callCodexText(request: AiTextRequest, cwd: string, opts: QuickCommitAiOptions): Promise<string> {
   // Quick commit is an internal one-shot request, not a user conversation. Keep
   // Codex from persisting it into ~/.codex/sessions, where Wand would otherwise
   // surface the generated prompt as a recoverable session.
@@ -587,7 +606,7 @@ async function callCodexText(prompt: string, cwd: string, opts: QuickCommitAiOpt
   const reasoningEffort = thinkingEffortToCodexReasoningEffort(opts.thinkingEffort ?? "off");
   if (reasoningEffort) args.push("-c", `model_reasoning_effort=${reasoningEffort}`);
   args.push("-");
-  const stdout = await runCliText("codex", args, prompt, {
+  const stdout = await runCliText("codex", args, contentWithSystemPrompt("codex", request), {
     cwd,
     timeoutMs: CODEX_MESSAGE_TIMEOUT_MS,
     inheritEnv: opts.inheritEnv,
@@ -599,13 +618,13 @@ async function callCodexText(prompt: string, cwd: string, opts: QuickCommitAiOpt
   return text;
 }
 
-async function callOpenCodeText(prompt: string, cwd: string, opts: QuickCommitAiOptions): Promise<string> {
+async function callOpenCodeText(request: AiTextRequest, cwd: string, opts: QuickCommitAiOptions): Promise<string> {
   const args = ["run", "--format", "json"];
   const model = opts.model?.trim();
   if (model && model !== "default") args.push("--model", model);
   const variant = thinkingEffortToOpenCodeVariant(opts.thinkingEffort ?? "off");
   if (variant) args.push("--variant", variant);
-  const stdout = await runCliText("opencode", args, prompt, {
+  const stdout = await runCliText("opencode", args, contentWithSystemPrompt("opencode", request), {
     cwd,
     timeoutMs: CODEX_MESSAGE_TIMEOUT_MS,
     inheritEnv: opts.inheritEnv,
@@ -615,8 +634,8 @@ async function callOpenCodeText(prompt: string, cwd: string, opts: QuickCommitAi
   return text;
 }
 
-async function callGrokText(prompt: string, cwd: string, opts: QuickCommitAiOptions): Promise<string> {
-  const stdout = await runCliText("grok", buildGrokTextArgs(prompt, opts), "", {
+async function callGrokText(request: AiTextRequest, cwd: string, opts: QuickCommitAiOptions): Promise<string> {
+  const stdout = await runCliText("grok", buildGrokTextArgs(request, opts), "", {
     cwd,
     timeoutMs: CODEX_MESSAGE_TIMEOUT_MS,
     inheritEnv: opts.inheritEnv,
@@ -626,8 +645,8 @@ async function callGrokText(prompt: string, cwd: string, opts: QuickCommitAiOpti
   return text;
 }
 
-async function callQoderText(prompt: string, cwd: string, opts: QuickCommitAiOptions): Promise<string> {
-  const stdout = await runCliText("qodercli", buildQoderTextArgs(prompt, opts), "", {
+async function callQoderText(request: AiTextRequest, cwd: string, opts: QuickCommitAiOptions): Promise<string> {
+  const stdout = await runCliText("qodercli", buildQoderTextArgs(request, opts), "", {
     cwd,
     timeoutMs: CODEX_MESSAGE_TIMEOUT_MS,
     inheritEnv: opts.inheritEnv,
@@ -637,27 +656,27 @@ async function callQoderText(prompt: string, cwd: string, opts: QuickCommitAiOpt
   return text;
 }
 
-async function callPiText(prompt: string, cwd: string, opts: QuickCommitAiOptions): Promise<string> {
-  const stdout = await runCliText("pi", buildPiTextArgs(prompt, opts), "", { cwd, timeoutMs: CODEX_MESSAGE_TIMEOUT_MS, inheritEnv: opts.inheritEnv });
+async function callPiText(request: AiTextRequest, cwd: string, opts: QuickCommitAiOptions): Promise<string> {
+  const stdout = await runCliText("pi", buildPiTextArgs(request, opts), "", { cwd, timeoutMs: CODEX_MESSAGE_TIMEOUT_MS, inheritEnv: opts.inheritEnv });
   const text = extractPiText(stdout);
   if (!text) throw new QuickCommitError("Pi 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
   return text;
 }
 
-async function callCliAiText(prompt: string, cwd: string, language: string, opts: QuickCommitAiOptions): Promise<string> {
+async function callCliAiText(request: AiTextRequest, cwd: string, language: string, opts: QuickCommitAiOptions): Promise<string> {
   const provider = defaultProvider(opts.provider);
   if (provider === "codex") {
-    return callCodexText(prompt, cwd, opts);
+    return callCodexText(request, cwd, opts);
   }
-  if (provider === "opencode") return callOpenCodeText(prompt, cwd, opts);
-  if (provider === "grok") return callGrokText(prompt, cwd, opts);
-  if (provider === "qoder") return callQoderText(prompt, cwd, opts);
-  if (provider === "pi") return callPiText(prompt, cwd, opts);
-  return callClaudeText(prompt, cwd, language, opts);
+  if (provider === "opencode") return callOpenCodeText(request, cwd, opts);
+  if (provider === "grok") return callGrokText(request, cwd, opts);
+  if (provider === "qoder") return callQoderText(request, cwd, opts);
+  if (provider === "pi") return callPiText(request, cwd, opts);
+  return callClaudeText(request, cwd, language, opts);
 }
 
-async function callDirectApiText(prompt: string, systemAi: import("./types.js").SystemAiConfig): Promise<string> {
-  const text = await callSystemAiTextWithFallback(prompt, systemAi, DIRECT_API_PROFILE_TIMEOUT_MS);
+async function callDirectApiText(request: AiTextRequest, systemAi: import("./types.js").SystemAiConfig): Promise<string> {
+  const text = await callSystemAiTextWithFallback(request, systemAi, DIRECT_API_PROFILE_TIMEOUT_MS);
   if (!text.trim()) {
     throw new QuickCommitError("直连 API 返回了空结果。", "EMPTY_AI_MESSAGE");
   }
@@ -678,26 +697,26 @@ function aiFallbackFailed(primary: "直连 API" | "CLI", primaryError: unknown, 
  * CLI. CLI mode uses only that CLI.
  */
 export async function callConfiguredAiText(
-  prompt: string,
+  request: AiTextRequest,
   cwd: string,
   language: string,
   opts: QuickCommitAiOptions,
 ): Promise<string> {
   if (opts.systemAi?.enabled) {
     try {
-      return await callDirectApiText(prompt, opts.systemAi);
+      return await callDirectApiText(request, opts.systemAi);
     } catch (apiError) {
       try {
         // The user selected the direct API first. If it is unavailable or
         // empty, retry this exact request through their selected CLI.
-        return await callCliAiText(prompt, cwd, language, opts);
+        return await callCliAiText(request, cwd, language, opts);
       } catch (cliError) {
         throw aiFallbackFailed("直连 API", apiError, cliError);
       }
     }
   }
 
-  return callCliAiText(prompt, cwd, language, opts);
+  return callCliAiText(request, cwd, language, opts);
 }
 
 /** Read the unstaged + staged tree without touching the index. */
@@ -794,8 +813,7 @@ async function generateCommitMessage(
 ): Promise<string> {
   const { input, usedIteration } = await buildCommitPromptInput(cwd, options);
   const lang = language.trim() || "中文";
-  const prompt = `${commitTaskLine(lang, usedIteration)}\n\n${input}`;
-  const raw = await callConfiguredAiText(prompt, cwd, language, ai);
+  const raw = await callConfiguredAiText({ system: commitTaskLine(lang, usedIteration), prompt: input }, cwd, language, ai);
   const message = normalizeAiText(raw);
   if (!message) {
     throw new QuickCommitError("AI 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
@@ -850,15 +868,13 @@ async function generateCommitMessageWithTag(
   const tagHint = latestTag
     ? `当前最新 tag 是 \`${latestTag}\`，请基于它给出下一个版本号（保持原有前缀风格，例如有 \`v\` 就保留 \`v\`）。`
     : `仓库还没有任何 tag，请直接给一个起始版本号（建议 \`v0.0.1\` / \`v0.1.0\` / \`v1.0.0\` 之一，按改动幅度选择）。`;
-  const prompt = `阅读以下输入，完成两件事：
+  const system = `阅读本轮用户消息，完成两件事：
 1. 用${lang}写一条简洁的 commit message（祈使句，不超过 50 字，描述「做了什么」）。
-2. 根据改动幅度推荐下一个语义化版本 tag（破坏性变更 → 升 major；新增功能 → 升 minor；修复 / 文档 / 重构 / 维护 → 升 patch）。${tagHint}
+2. 根据改动幅度推荐下一个语义化版本 tag（破坏性变更 → 升 major；新增功能 → 升 minor；修复 / 文档 / 重构 / 维护 → 升 patch）。
 
 请严格输出**单行 JSON 对象**，不要 Markdown 代码块、不要任何解释文字、不要多余引号。格式：
-{"message":"...","tag":"v1.2.3"}
-
-${input}`;
-  const raw = await callConfiguredAiText(prompt, cwd, language, ai);
+{"message":"...","tag":"v1.2.3"}`;
+  const raw = await callConfiguredAiText({ system, prompt: `${tagHint}\n\n${input}` }, cwd, language, ai);
   const parsed = tryParseJson(raw);
 
   let message: string;
@@ -930,16 +946,12 @@ async function generateTagAfterCommit(
   const tagHint = latestTag
     ? `当前最新 tag 是 \`${latestTag}\`，请基于它给出下一个版本号（保持原有前缀风格，例如有 \`v\` 就保留 \`v\`）。`
     : `仓库还没有任何 tag，请给一个起始版本号（建议 \`v0.0.1\` / \`v0.1.0\` / \`v1.0.0\` 之一，按改动幅度选择）。`;
-  const prompt = `根据以下 commit message 和 git diff 推荐一个语义化版本 tag（破坏性变更 → 升 major；新增功能 → 升 minor；修复 / 文档 / 重构 / 维护 → 升 patch）。${tagHint}
+  const system = `根据本轮用户消息里的 commit message 和 git diff 推荐一个语义化版本 tag（破坏性变更 → 升 major；新增功能 → 升 minor；修复 / 文档 / 重构 / 维护 → 升 patch）。
 
 请用${lang}思考但严格输出**单行 JSON 对象**，不要 Markdown 代码块、不要任何解释文字、不要多余引号。格式：
-{"tag":"v1.2.3"}
-
-commit message：${commitMessage}
-
-git diff：
-${diff}`;
-  const raw = await callConfiguredAiText(prompt, cwd, language, ai);
+{"tag":"v1.2.3"}`;
+  const prompt = `${tagHint}\n\ncommit message：${commitMessage}\n\ngit diff：\n${diff}`;
+  const raw = await callConfiguredAiText({ system, prompt }, cwd, language, ai);
   const parsed = tryParseJson(raw);
   let suggested: string | undefined;
   if (parsed && typeof parsed.tag === "string") {
@@ -1346,7 +1358,7 @@ async function collectSubmodulesForPush(cwd: string): Promise<{ base: string; in
   return { base, infos };
 }
 
-function buildFallbackPrompt(opts: QuickCommitOptions, priorError: string): string {
+function buildFallbackPrompt(opts: QuickCommitOptions, priorError: string): AiTextRequest {
   const lang = opts.language.trim() || "中文";
   const digest = opts.iterationDigest?.trim();
   const messageLine = opts.autoMessage === false
@@ -1363,15 +1375,18 @@ function buildFallbackPrompt(opts: QuickCommitOptions, priorError: string): stri
   const submoduleLine = opts.submodule
     ? "- 如果 submodule 内部也有改动，先在对应 submodule 内 add/commit，再提交父仓库里的 submodule 指针"
     : "- 不进入 submodule 内部提交，只提交父仓库自身已纳入的改动";
-  return [
+  // 角色、约束、输出格式走系统提示；本次要做什么、为什么走到兜底走用户消息。
+  const system = [
     "你正在作为 Wand 的快捷提交兜底执行器运行。前置的内置快捷提交流程失败了，现在请直接用 CLI 工具完成同一件事。",
     "",
     "约束：",
     "- 只允许执行与 git 快捷提交直接相关的命令，例如 git status、git diff、git add、git commit、git tag、git push、git submodule status。",
     "- 不要修改源代码内容，不要运行测试，不要安装依赖，不要重构文件。",
     "- 如果没有可提交改动，明确说明并停止，不要创建空 commit。",
-    "- commit message 和自然语言输出使用 " + lang + "。",
-    "",
+    "- 完成后只输出一行 JSON：{\"ok\":true,\"message\":\"...\",\"tag\":\"...\"}。失败时输出一行 JSON：{\"ok\":false,\"error\":\"...\"}。",
+    `- commit message 和自然语言输出使用 ${lang}。`,
+  ].join("\n");
+  const prompt = [
     "任务：",
     "- 执行 git add -A 纳入当前改动。",
     messageLine,
@@ -1383,9 +1398,8 @@ function buildFallbackPrompt(opts: QuickCommitOptions, priorError: string): stri
       : []),
     "",
     `内置流程失败原因：${priorError}`,
-    "",
-    "完成后只输出一行 JSON：{\"ok\":true,\"message\":\"...\",\"tag\":\"...\"}。失败时输出一行 JSON：{\"ok\":false,\"error\":\"...\"}。",
   ].join("\n");
+  return { system, prompt };
 }
 
 async function getHead(cwd: string): Promise<string | null> {
@@ -1417,7 +1431,7 @@ async function getLatestTagAtHead(cwd: string): Promise<string | undefined> {
 async function runQuickCommitFallbackCli(opts: QuickCommitOptions, priorError: string): Promise<QuickCommitResult> {
   await assertGitWorkTreeAsync(opts.cwd);
   const beforeHead = await getHead(opts.cwd);
-  const prompt = buildFallbackPrompt(opts, priorError);
+  const request = buildFallbackPrompt(opts, priorError);
   const provider = defaultProvider(opts.provider);
   if (provider === "codex") {
     const args = ["exec", "--ephemeral", "--json", "--color", "never", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox"];
@@ -1426,7 +1440,7 @@ async function runQuickCommitFallbackCli(opts: QuickCommitOptions, priorError: s
     const reasoningEffort = thinkingEffortToCodexReasoningEffort(opts.thinkingEffort ?? "off");
     if (reasoningEffort) args.push("-c", `model_reasoning_effort=${reasoningEffort}`);
     args.push("-");
-    await runCliText("codex", args, prompt, {
+    await runCliText("codex", args, contentWithSystemPrompt("codex", request), {
       cwd: opts.cwd,
       timeoutMs: QUICK_COMMIT_CLI_TIMEOUT_MS,
       inheritEnv: opts.inheritEnv,
@@ -1437,25 +1451,25 @@ async function runQuickCommitFallbackCli(opts: QuickCommitOptions, priorError: s
     if (model && model !== "default") args.push("--model", model);
     const variant = thinkingEffortToOpenCodeVariant(opts.thinkingEffort ?? "off");
     if (variant) args.push("--variant", variant);
-    await runCliText("opencode", args, prompt, {
+    await runCliText("opencode", args, contentWithSystemPrompt("opencode", request), {
       cwd: opts.cwd,
       timeoutMs: QUICK_COMMIT_CLI_TIMEOUT_MS,
       inheritEnv: opts.inheritEnv,
     });
   } else if (provider === "grok") {
-    await runCliText("grok", buildGrokTextArgs(prompt, opts, true), "", {
+    await runCliText("grok", buildGrokTextArgs(request, opts, true), "", {
       cwd: opts.cwd,
       timeoutMs: QUICK_COMMIT_CLI_TIMEOUT_MS,
       inheritEnv: opts.inheritEnv,
     });
   } else if (provider === "qoder") {
-    await runCliText("qodercli", buildQoderTextArgs(prompt, opts, true), "", {
+    await runCliText("qodercli", buildQoderTextArgs(request, opts, true), "", {
       cwd: opts.cwd,
       timeoutMs: QUICK_COMMIT_CLI_TIMEOUT_MS,
       inheritEnv: opts.inheritEnv,
     });
   } else if (provider === "pi") {
-    await runCliText("pi", buildPiTextArgs(prompt, opts, true), "", {
+    await runCliText("pi", buildPiTextArgs(request, opts, true), "", {
       cwd: opts.cwd,
       timeoutMs: QUICK_COMMIT_CLI_TIMEOUT_MS,
       inheritEnv: opts.inheritEnv,
@@ -1475,7 +1489,8 @@ async function runQuickCommitFallbackCli(opts: QuickCommitOptions, priorError: s
     if (model && model !== "default") args.push("--model", model);
     const claudeEffort = thinkingEffortToClaudeCliEffort(opts.thinkingEffort ?? "off");
     if (claudeEffort) args.push("--effort", claudeEffort);
-    await runCliText("claude", args, prompt, {
+    args.push(...systemPromptArgsFrom("claude", request.system));
+    await runCliText("claude", args, request.prompt, {
       cwd: opts.cwd,
       timeoutMs: QUICK_COMMIT_CLI_TIMEOUT_MS,
       inheritEnv: opts.inheritEnv,

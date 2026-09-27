@@ -30,8 +30,8 @@ import { CodexRunner } from "./structured-codex-adapter.js";
 import { CodexProtocolReducer } from "./structured-codex-protocol.js";
 import { normalizeStructuredToolResultContent } from "./structured-content.js";
 import {
-  buildAppendSystemPromptParts,
   buildClaudeSdkThinking,
+  buildSessionSystemPromptParts,
   ClaudeCliRunner,
   derivePermissionPolicy,
 } from "./structured-claude-adapter.js";
@@ -89,6 +89,8 @@ interface CreateStructuredSessionOptions {
   thinkingEffort?: SessionSnapshot["thinkingEffort"];
   sessionSource?: SessionSource;
   automationId?: string;
+  /** 会话级系统提示（团队 / 自动化的角色与规则）；走 provider 的系统提示通道。 */
+  systemPrompt?: string;
   /** 所属工作空间 ID（多标签 / 分屏项目）。 */
   workspaceId?: string;
   /** 所属工作空间任务 ID（任务 = 独立 worktree + 一组标签）。 */
@@ -102,7 +104,12 @@ interface CreateStructuredSessionOptions {
   claudeSessionId?: string;
 }
 
-/** The runner already persisted/emitted its detailed terminal snapshot. */
+/**
+ * 转发会话（AI 团队群聊）：外观是普通结构化会话，但不起 CLI。
+ * 用户发的话交给 handler，别的参与者的发言由 appendRelayTurns 写进来。
+ * 按 automationId 前缀识别，重启后照样生效。
+ */
+export type StructuredRelayHandler = (sessionId: string, text: string) => void | Promise<void>;
 class PersistedStructuredRunnerError extends Error {
   constructor(message: string) {
     super(message);
@@ -519,6 +526,7 @@ export class StructuredSessionManager {
    * map 大小溢出时按时间裁剪。
    */
   private readonly seenIdempotencyKeys = new Map<string, number>();
+  private readonly relayHandlers = new Map<string, StructuredRelayHandler>();
   private emitEvent: ((event: ProcessEvent) => void) | null = null;
   private archiveTimer: NodeJS.Timeout | null = null;
   private readonly topicCoordinator = new SessionTopicCoordinator();
@@ -1297,6 +1305,7 @@ export class StructuredSessionManager {
       sessionKind: "structured",
       sessionSource: options.sessionSource ?? "interactive",
       automationId: options.automationId,
+      systemPrompt: options.systemPrompt?.trim() || null,
       workspaceId: options.workspaceId,
       workspaceTaskId: options.workspaceTaskId,
       provider,
@@ -1351,6 +1360,45 @@ export class StructuredSessionManager {
     return snapshot;
   }
 
+  registerRelay(automationIdPrefix: string, handler: StructuredRelayHandler): void {
+    this.relayHandlers.set(automationIdPrefix, handler);
+  }
+
+  private relayHandlerFor(session: SessionSnapshot): StructuredRelayHandler | null {
+    const automationId = session.automationId ?? "";
+    for (const [prefix, handler] of this.relayHandlers) {
+      if (automationId.startsWith(prefix)) return handler;
+    }
+    return null;
+  }
+
+  createRelaySession(options: CreateStructuredSessionOptions & { automationId: string; title: string }): SessionSnapshot {
+    const created = this.createSession(options);
+    const titled: SessionSnapshot = { ...created, title: options.title };
+    this.sessions.set(titled.id, titled);
+    this.storage.saveSession(titled);
+    this.emitStructuredSnapshot(titled);
+    return titled;
+  }
+
+  /** 往转发会话里追加别的参与者的发言。 */
+  appendRelayTurns(id: string, turns: ConversationTurn[]): SessionSnapshot | null {
+    const session = this.sessions.get(id);
+    if (!session || turns.length === 0) return session ?? null;
+    const createdAt = new Date().toISOString();
+    const updated: SessionSnapshot = {
+      ...session,
+      messages: [
+        ...(session.messages ?? []),
+        ...turns.map((turn) => ({ ...turn, createdAt: turn.createdAt ?? createdAt })),
+      ],
+    };
+    this.sessions.set(id, updated);
+    this.storage.saveSession(updated);
+    this.emitStructuredSnapshot(updated);
+    return updated;
+  }
+
   async sendMessage(
     id: string,
     input: string,
@@ -1360,6 +1408,19 @@ export class StructuredSessionManager {
     let session = this.requireSession(id);
     const prompt = input.trim();
     if (!prompt) return session;
+    const relay = this.relayHandlerFor(session);
+    if (relay) {
+      // 群聊不起 CLI：先落下用户这句话，再交给转发方；转发失败以提示行告诉用户。
+      const posted = this.appendRelayTurns(id, [{ role: "user", content: [{ type: "text", text: prompt }] }])!;
+      try {
+        await relay(id, prompt);
+      } catch (error) {
+        this.appendRelayTurns(id, [{
+          role: "assistant", notice: true, content: [{ type: "text", text: `没能转达：${getErrorMessage(error)}` }],
+        }]);
+      }
+      return this.sessions.get(id) ?? posted;
+    }
     const skills = opts?.skills ?? [];
     if (opts?.idempotencyKey) {
       const mapKey = `${id}:${opts.idempotencyKey}`;
@@ -2855,15 +2916,22 @@ export class StructuredSessionManager {
     const interruptedByUser = this.interruptedWith.has(sessionId);
     const interruptedForQuestion = result.stopReason === "ask-user-question";
     const failedExit = (result.exitCode !== null && result.exitCode !== 0) || result.signal !== null;
-    if (failedExit && !interruptedByUser && !interruptedForQuestion) {
-      const errorText = this.formatStructuredExitError(commandLabel, result.exitCode, result.signal, {
-        stderr: result.stderr,
-        stdoutTail: result.stdoutTail,
-        primary: result.primaryError,
-      });
+    // Pi 等 CLI 在 provider 报错（额度用尽、鉴权失败）时仍以 0 退出；这一轮没有任何产出时
+    // 必须按失败落盘，否则会被当成一次空回复，用户和团队调度都看不到真正的错误。
+    const erroredEmptyTurn = !failedExit && !!result.primaryError && !result.state.blocks.some(
+      (block) => block.type === "tool_use" || (block.type === "text" && block.text.trim() !== ""),
+    );
+    if ((failedExit || erroredEmptyTurn) && !interruptedByUser && !interruptedForQuestion) {
+      const errorText = erroredEmptyTurn
+        ? result.primaryError!.trim()
+        : this.formatStructuredExitError(commandLabel, result.exitCode, result.signal, {
+          stderr: result.stderr,
+          stdoutTail: result.stdoutTail,
+          primary: result.primaryError,
+        });
       const failed = this.finishStructuredFailure(
         current,
-        typeof result.exitCode === "number" ? result.exitCode : 1,
+        failedExit && typeof result.exitCode === "number" ? result.exitCode : 1,
         errorText,
         result.state,
       );
@@ -2968,7 +3036,7 @@ export class StructuredSessionManager {
 
     // 权限策略 + 系统提示词都通过共享 helper 派生，与 CLI runner 一字不差。
     const permPolicy = derivePermissionPolicy(session.mode, session.autoApprovePermissions ?? false, session.cwd);
-    const systemPromptParts = buildAppendSystemPromptParts(this.config.language, session.mode);
+    const systemPromptParts = buildSessionSystemPromptParts(session, this.config.language);
 
     const sdkClaudeBinary = resolveSdkClaudeBinary();
     // SDK 默认会把整个 process.env 透传给 claude 子进程；这里显式按 inheritEnv 配置组装，

@@ -135,7 +135,9 @@ Express route → 参数与权限检查 → 业务服务 / SessionRegistry → m
 - 修改某组件时修改其原规则，不在文件末尾不断叠加覆盖层。
 - 终端、代码高亮、diff 的语义颜色保留，不为视觉统一损失信息。
 - 动态尺寸可用内联 style；颜色、字体、圆角和交互状态使用共享 token。
-- 不手改 scripts.js、embedded-assets.ts、tailwind.css、vendor bundle 或 dist。
+- 不手改 scripts.js、ai-teams.js、embedded-assets.ts、tailwind.css、vendor bundle 或 dist。
+- 低频大块界面可拆成按需脚本、不进内联 `scripts.js`：现有先例是 AI 团队
+  （`scripts/ai-teams-chunk.js` + `react/ai-teams/lazy.tsx`，共享模块经主包注册表借用，见 `docs/ai-teams.md` §5.3）。
 
 ## 清理与验证
 

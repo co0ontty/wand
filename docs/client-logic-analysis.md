@@ -133,7 +133,7 @@ Web WS 优先、HTTP 轮询兜底，后台/前台有重连策略。HTTP 详情�
 | 端 | 详情窗口与启动顺序 |
 | --- | --- |
 | iOS | REST/WS 使用 blockBudget=60；支持首 turn 分块加载；有晚到 REST 保护 |
-| Android | turn 窗口；ChatStore 先 REST、模型/配置，再连详情 WS |
+| Android | 结构化会话用 blockBudget=60 的块级窗口（块级 → turn 两级翻页）；顶部文案只报服务端 `leadingVisibleCount`（默认收起的工具块不计入） |
 | macOS | ChatStore 常规详情/WS 仍按 turn；API 另有 blockBudget overload，WorkspaceStore 会使用 |
 | Web | turn 窗口和终端池；已有 seq/resync 与 output 单写保护 |
 

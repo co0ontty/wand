@@ -610,7 +610,7 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
     const cwd = typeof req.query.cwd === "string" ? req.query.cwd : defaultCwd;
     const maxDepth = parseBoundedInteger(req.query.depth, 5, 0, 8);
     const maxResults = parseBoundedInteger(req.query.limit, 50, 1, 200);
-    const ignoredDirectories = new Set([".git", "node_modules", ".next", "dist", "build", "coverage", ".wand-uploads"]);
+    const ignoredDirectories = new Set([".git", "node_modules", ".next", "dist", "build", "coverage", ".wand-uploads", ".wand-team"]);
     const maxVisitedEntries = 20_000;
     let resolvedCwd: string;
     try {

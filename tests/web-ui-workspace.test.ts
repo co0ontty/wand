@@ -44,7 +44,7 @@ import {
   normalizeWorkspaceWorktreeOverview,
 } from "../src/web-ui/react/workspaces/repository.js";
 import {
-  buildWorkspaceMergeAgentPrompt,
+  buildWorkspaceMergeAgentBrief,
   workspaceWorktreeSummary,
 } from "../src/web-ui/react/workspaces/workspace-worktree-model.js";
 import { sessionPickerAndWorktreeStyles } from "../src/web-ui/react/styles/features.js";
@@ -325,7 +325,7 @@ test("task list treats directories as group headers and exposes per-terminal del
   assert.match(styles, /\.workspace-tab-item\.active \.workspace-tab-item-close[\s\S]*?pointer-events:\s*auto/);
 });
 
-test("task session lists default to expanded and retain explicit disclosure preferences", () => {
+test("task session lists default to expanded, empty tasks collapse unless they are the only task", () => {
   const panel = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
   assert.match(panel, /useSidebarCollapsed\(`task\.\$\{task.id\}`, false\)/);
   assert.match(panel, /useSidebarCollapsed\(`project\.\$\{group.workspaceId\}`\)/);
@@ -338,7 +338,8 @@ test("task session lists default to expanded and retain explicit disclosure pref
   assert.equal(isDirectoryExpanded(true, 1), false);
   assert.equal(isDirectoryExpanded(false, 1), true);
   assert.equal(showsTaskSessionDisclosure(0), false);
-  assert.equal(isTaskSessionsExpanded(true, 0), true);
+  assert.equal(isTaskSessionsExpanded(true, 0), false);
+  assert.equal(isTaskSessionsExpanded(false, 0, true), true);
   assert.equal(isTaskSessionsExpanded(true, 2), false);
   assert.equal(isTaskSessionsExpanded(false, 2), true);
 });
@@ -508,7 +509,7 @@ test("workspace worktree review normalizes cards and builds one bounded merge Ag
   assert.equal(overview.worktrees[0].commits[0].shortHash, "abcdef1");
   assert.equal(workspaceWorktreeSummary(overview.worktrees[0]), "登录流程 · feat: add login");
 
-  const prompt = buildWorkspaceMergeAgentPrompt({
+  const brief = buildWorkspaceMergeAgentBrief({
     id: "workspace-1",
     name: "Wand",
     cwd: "/repo",
@@ -516,10 +517,12 @@ test("workspace worktree review normalizes cards and builds one bounded merge Ag
     createdAt: "2026-08-09T00:00:00.000Z",
     lastOpenedAt: null,
   }, overview, ["task-1", "task-empty"]);
-  assert.match(prompt, /唯一目标分支：main/);
-  assert.match(prompt, /wand\/login-1/);
-  assert.doesNotMatch(prompt, /wand\/done-1/);
-  assert.match(prompt, /不要 push，也不要删除 Worktree/);
+  // 角色与规则进系统提示，清单这类本次内容进用户消息。
+  assert.match(brief.system, /唯一目标分支：main/);
+  assert.match(brief.system, /不要 push，也不要删除 Worktree/);
+  assert.match(brief.message, /wand\/login-1/);
+  assert.doesNotMatch(brief.message, /wand\/done-1/);
+  assert.doesNotMatch(brief.message, /执行要求/, "rules stay out of the user message");
 
   const normalized = normalizeWorkspaceWorktreeOverview({ worktrees: [{ branch: "missing task" }] });
   assert.deepEqual(normalized.worktrees, []);
@@ -528,10 +531,15 @@ test("workspace worktree review normalizes cards and builds one bounded merge Ag
 test("project menus retain worktree management and a multi-select dialog", () => {
   const panel = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
   const dialog = readFileSync(new URL("../src/web-ui/react/workspaces/workspace-worktree-dialog.tsx", import.meta.url), "utf8");
+  const adapter = readFileSync(new URL("../src/web-ui/browser/workspaces-adapter.ts", import.meta.url), "utf8");
   assert.match(panel, /查看并合并 Worktree/);
   assert.match(panel, /startWorktreeMergeAgent/);
   assert.match(dialog, /role="checkbox"/);
   assert.match(dialog, /启动 Agent 合并/);
+  // 合并 Agent 的角色与规则走系统提示，不能和清单一起拼成首条用户消息。
+  assert.match(panel, /systemPrompt: brief\.system/);
+  assert.match(panel, /prompt: brief\.message/);
+  assert.match(adapter, /systemPrompt: payload\.systemPrompt/);
 });
 
 test("legacy pane tabsets migrate into independent work windows", () => {

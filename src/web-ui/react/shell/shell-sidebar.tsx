@@ -22,6 +22,8 @@ import { classNames } from "../ui/class-names";
 import { sidebarSearchMatches } from "../workspaces/sidebar-search";
 
 import { taskBoardController, taskBoardStore } from "../issues/task-board-controller";
+import { HomeAttention } from "../attention/home-attention";
+import { useAiTeamAttentionCount } from "../ai-teams/repository";
 import { SidebarPeek } from "./sidebar-peek";
 import { useHoverPointer, useSidebarPeek } from "./use-sidebar-peek";
 import { useSidebarDrawer } from "./use-sidebar-drawer";
@@ -551,6 +553,7 @@ export function ShellSidebar() {
   const snapshot = useUiStoreSnapshot();
   const dispatch = useUiDispatch();
   const taskBoard = React.useSyncExternalStore(taskBoardStore.subscribe, taskBoardStore.getSnapshot, taskBoardStore.getSnapshot);
+  const teamAttention = useAiTeamAttentionCount();
   const [moreOpen, setMoreOpen] = React.useState(false);
   const [searchQuery, setSearchQuery] = React.useState("");
   const narrow = !snapshot.layout.sidebarDrawer && snapshot.layout.sidebarPinned && snapshot.layout.sidebarCollapsed;
@@ -786,10 +789,11 @@ export function ShellSidebar() {
             </div>
           </div>
         </div>
+        <HomeAttention variant="sidebar"/>
         <WandNavigation
           className="sidebar-feature-nav"
           aria-label="功能菜单"
-          active={taskBoard.open ? "task-board" : null}
+          active={taskBoard.open ? (taskBoard.page === "teams" ? "ai-teams" : "task-board") : null}
         >
           <WandNavigationList className="sidebar-feature-list">
             <WandNavigationItem>
@@ -820,6 +824,23 @@ export function ShellSidebar() {
               >
                 <WandIcon name="board" slot="start" size={18}/>
                 <span>任务看板</span>
+              </WandNavigationLink>
+            </WandNavigationItem>
+            <WandNavigationItem>
+              <WandNavigationLink
+                id="ai-teams-button"
+                title="AI 团队"
+                value="ai-teams"
+                render={<button type="button"/>}
+                onClick={() => {
+                  peek.close();
+                  if (overlay) void dispatch({ type: "layout.drawer.close" });
+                  taskBoardController.open(snapshot.selected?.workspaceId ?? "", snapshot.selected?.id ?? "", "teams");
+                }}
+              >
+                <WandIcon name="parallel" slot="start" size={18}/>
+                <span>AI 团队</span>
+                {teamAttention > 0 ? <span className="sidebar-feature-badge" aria-label={`${teamAttention} 个团队运行等你处理`}>{teamAttention}</span> : null}
               </WandNavigationLink>
             </WandNavigationItem>
           </WandNavigationList>

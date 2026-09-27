@@ -196,6 +196,10 @@ test("quick-commit action model produces the four legacy API combinations", () =
     entryIds: [],
     includeDiff: true,
   });
+  assert.equal(buildQuickCommitInput(
+    { message: "ship", tag: "", tagEdited: false }, "commit-push", false,
+    undefined, false, true,
+  ).archiveRelatedTasks, true);
   // 勾选集合是快照：之后改数组不会反过来改输入对象。
   const ids = ["x"];
   const snapshot = buildQuickCommitInput(
@@ -302,6 +306,7 @@ test("HTTP quick-commit repository normalizes status and preserves endpoint cont
         tag: { name: "v2" },
         pushed: false,
         submoduleCommits: [{ path: "vendor/lib", hash: "123" }],
+        archivedTaskIds: ["task-1"],
       });
     }
     if (url.endsWith("/git/push")) {
@@ -355,6 +360,7 @@ test("HTTP quick-commit repository normalizes status and preserves endpoint cont
   const committed = await repository.commit("session/a", input);
   assert.equal(committed.commit?.hash, "abcdef123");
   assert.equal(committed.submoduleCommits.length, 1);
+  assert.deepEqual(committed.archivedTaskIds, ["task-1"]);
   const pushed = await repository.push("session/a", {
     pushCommits: true,
     pushTags: true,

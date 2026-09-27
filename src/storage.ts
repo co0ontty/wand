@@ -4,9 +4,15 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { SessionSnapshot, ConversationTurn, SessionKind, SessionProvider, SessionRunner, SessionSource, StructuredSessionState, WorktreeMergeInfo, Workspace, LayoutNode, TaskWindowLayout, WorkspaceDefaultProvider, WorkspaceKind, WorkspaceTask, WorkspaceTaskWorktree, WorkspaceTaskStatus, GLOBAL_WORKSPACE_ID } from "./types.js";
 import { normalizeSessionDirectory } from "./session-directory-tree.js";
-import { inferProviderFromCommand, inferProviderFromRunner, isSessionProvider } from "./session-provider.js";
+import { inferProviderFromCommand, inferProviderFromRunner, isSessionProvider, SESSION_PROVIDERS } from "./session-provider.js";
 import { DEFAULT_ITERATION_NAME, DEFAULT_WAND_TASK_AGENT_KIND, DEFAULT_WAND_TASK_PRIORITY, isWandTaskAgentKind, normalizeWandTaskAgentMode } from "./task-types.js";
 import { firstLayoutTabId } from "./layout-tree.js";
+import { AI_TEAM_DEFAULT_MAX_STEPS, isTeamMemberRole, memberAgents } from "./ai-team-types.js";
+import type {
+  AiTeam, AiTeamMember, AiTeamRun, AiTeamRunChatMarker, AiTeamRunStatus, AiTeamStep, AiTeamStepKind, AiTeamStepStatus,
+  CandidateFailureKind, StepDispatchInfo,
+} from "./ai-team-types.js";
+import type { WandTaskAgent, WandTaskAgentKind } from "./task-types.js";
 import { isThinkingEffort } from "./structured-provider-common.js";
 import type {
   AgentActivityItem,
@@ -33,6 +39,18 @@ import {
   type PasswordVaultItemInput,
   type PasswordVaultItemType,
 } from "./password-manager.js";
+
+/** `ai_team_runs.run_state_json`：本次运行的候选黑名单（§3.4 修正 B12 两层键值 + host-disabled）。 */
+export interface AiTeamRunState {
+  /** spawn-missing：该 provider 的候选全部直接跳过。 */
+  providers: SessionProvider[];
+  /** 五元组 key → 拉黑它的原因（model-unknown / startup-timeout）。 */
+  agents: Array<{ key: string; kind: CandidateFailureKind }>;
+  /** 五元组 key → startup-timeout 累计次数（到 2 次进 agents）。 */
+  strikes: Record<string, number>;
+  /** host-disabled：整个 run 不再尝试该 kind 的候选。 */
+  hostDisabled: WandTaskAgentKind[];
+}
 
 interface SessionRow {
   id: string;
@@ -127,7 +145,11 @@ function safeJsonParse<T>(raw: string | null): T | undefined {
  * 前端据此显示「未指定 CLI 工具」，而不是渲染出半个派发配置。
  */
 export function parseWandTaskAgent(raw: unknown): import("./task-types.js").WandTaskAgent | null {
-  const value = typeof raw === "string" ? safeJsonParse<Record<string, unknown>>(raw) : undefined;
+  const value = typeof raw === "string"
+    ? safeJsonParse<Record<string, unknown>>(raw)
+    : raw && typeof raw === "object" && !Array.isArray(raw)
+      ? raw as Record<string, unknown>
+      : undefined;
   if (!value || typeof value !== "object") return null;
   const provider = value.provider;
   const model = value.model;
@@ -197,6 +219,7 @@ type DurableSessionOptions = Pick<SessionSnapshot,
   | "providerCliExitCode"
   | "currentTaskTitle"
   | "summary"
+  | "systemPrompt"
 >;
 
 type PersistedSessionOptions = DurableSessionOptions & {
@@ -305,6 +328,7 @@ function serializeSessionOptions(snapshot: SessionSnapshot): string {
     providerCliExitCode: snapshot.providerCliExitCode,
     currentTaskTitle: snapshot.currentTaskTitle,
     summary: snapshot.summary,
+    systemPrompt: snapshot.systemPrompt,
   };
   return JSON.stringify(options);
 }
@@ -357,6 +381,7 @@ function parseSessionOptions(raw: string | null): DurableSessionOptions {
   }
   if (typeof parsed.currentTaskTitle === "string") options.currentTaskTitle = parsed.currentTaskTitle;
   if (typeof parsed.summary === "string") options.summary = parsed.summary;
+  if (typeof parsed.systemPrompt === "string") options.systemPrompt = parsed.systemPrompt;
   return options;
 }
 
@@ -960,7 +985,71 @@ const INIT_SQL = `
     FOREIGN KEY (session_id) REFERENCES command_sessions(id) ON DELETE CASCADE
   );
   CREATE INDEX IF NOT EXISTS idx_wand_task_sessions_session ON wand_task_sessions(session_id);
+
+  CREATE TABLE IF NOT EXISTS ai_teams (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    instructions TEXT NOT NULL DEFAULT '',
+    members_json TEXT NOT NULL,
+    require_plan_approval INTEGER NOT NULL DEFAULT 1,
+    max_steps INTEGER NOT NULL DEFAULT 30,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS ai_team_runs (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    team_json TEXT NOT NULL,
+    objective TEXT NOT NULL,
+    cwd TEXT NOT NULL,
+    status TEXT NOT NULL,
+    status_detail TEXT NOT NULL DEFAULT '',
+    steps_used INTEGER NOT NULL DEFAULT 0,
+    step_limit INTEGER NOT NULL,
+    format_retries INTEGER NOT NULL DEFAULT 0,
+    plan_approved INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_ai_team_runs_task ON ai_team_runs(task_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_ai_team_runs_status ON ai_team_runs(status);
+
+  CREATE TABLE IF NOT EXISTS ai_team_steps (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    member_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    instructions TEXT NOT NULL,
+    session_id TEXT,
+    status TEXT NOT NULL,
+    report TEXT NOT NULL DEFAULT '',
+    report_path TEXT NOT NULL,
+    depends_on_json TEXT NOT NULL DEFAULT '[]',
+    started_at TEXT,
+    ended_at TEXT,
+    UNIQUE (run_id, seq)
+  );
+  CREATE INDEX IF NOT EXISTS idx_ai_team_steps_session ON ai_team_steps(session_id, status);
 `;
+
+/** AI 团队表的后加列；只加不删，历史行取默认值。 */
+function ensureAiTeamSchema(db: DatabaseSync): void {
+  const teamColumns = new Set((db.prepare("PRAGMA table_info(ai_teams)").all() as Array<{ name: string }>).map((column) => column.name));
+  if (!teamColumns.has("instructions")) db.exec("ALTER TABLE ai_teams ADD COLUMN instructions TEXT NOT NULL DEFAULT ''");
+  const stepColumns = new Set((db.prepare("PRAGMA table_info(ai_team_steps)").all() as Array<{ name: string }>).map((column) => column.name));
+  if (!stepColumns.has("depends_on_json")) db.exec("ALTER TABLE ai_team_steps ADD COLUMN depends_on_json TEXT NOT NULL DEFAULT '[]'");
+  const runColumns = new Set((db.prepare("PRAGMA table_info(ai_team_runs)").all() as Array<{ name: string }>).map((column) => column.name));
+  if (!runColumns.has("chat_session_id")) db.exec("ALTER TABLE ai_team_runs ADD COLUMN chat_session_id TEXT");
+  if (!runColumns.has("pending_notes_json")) db.exec("ALTER TABLE ai_team_runs ADD COLUMN pending_notes_json TEXT NOT NULL DEFAULT '[]'");
+  // v2 多候选降级：步骤实际候选与跳过记录（StepDispatchInfo）、run 级状态（黑名单等）。只加列，旧行取默认 '{}'。
+  if (!stepColumns.has("dispatch_info_json")) db.exec("ALTER TABLE ai_team_steps ADD COLUMN dispatch_info_json TEXT NOT NULL DEFAULT '{}'");
+  if (!runColumns.has("run_state_json")) db.exec("ALTER TABLE ai_team_runs ADD COLUMN run_state_json TEXT NOT NULL DEFAULT '{}'");
+}
 
 function ensureWandTaskSchema(db: DatabaseSync): void {
   const columns = db.prepare("PRAGMA table_info(wand_tasks)").all() as Array<{ name: string }>;
@@ -1086,6 +1175,7 @@ export function ensureDatabaseFile(dbPath: string): boolean {
   ensureWandTaskSchema(db);
   ensureWandMilestoneSchema(db);
   ensureIterationPromptSchema(db);
+  ensureAiTeamSchema(db);
   ensureConnectorSchema(db);
   {
     const missionColumns = db.prepare("PRAGMA table_info(missions)").all() as Array<{ name: string }>;
@@ -1120,6 +1210,7 @@ export class WandStorage {
     ensureWandTaskSchema(this.db);
     ensureWandMilestoneSchema(this.db);
     ensureIterationPromptSchema(this.db);
+    ensureAiTeamSchema(this.db);
     ensureConnectorSchema(this.db);
     this.ensureDefaultPasswordVault();
   }
@@ -1425,6 +1516,31 @@ export class WandStorage {
       )
       .all() as unknown as Array<{ id: string; n: number }>;
     return new Map(rows.map((row) => [row.id, Number(row.n) || 0]));
+  }
+
+  /** Count user-initiated CLI launches (one per session), including archived sessions. */
+  countInteractiveSessionsByProvider(): Record<SessionProvider, number> {
+    const counts = Object.fromEntries(
+      SESSION_PROVIDERS.map((provider) => [provider, 0]),
+    ) as Record<SessionProvider, number>;
+    const rows = this.db.prepare(
+      `SELECT provider, runner, command, COUNT(*) AS n
+       FROM command_sessions
+       WHERE session_source = 'interactive'
+       GROUP BY provider, runner, command`,
+    ).all() as unknown as Array<{
+      provider: string | null;
+      runner: string | null;
+      command: string;
+      n: number;
+    }>;
+    for (const row of rows) {
+      const provider = isSessionProvider(row.provider)
+        ? row.provider
+        : inferProviderFromRunner(row.runner) ?? inferProviderFromCommand(row.command);
+      if (provider) counts[provider] += Number(row.n) || 0;
+    }
+    return counts;
   }
 
   /** Sessions not yet attached to a project. Omits messages/output. */
@@ -2320,6 +2436,168 @@ export class WandStorage {
     this.db.prepare("DELETE FROM auth_sessions WHERE expires_at < ?").run(now);
   }
 
+  // ============ AI Teams ============
+
+  listAiTeams(): AiTeam[] {
+    const rows = this.db.prepare("SELECT * FROM ai_teams ORDER BY created_at ASC").all() as unknown as Record<string, unknown>[];
+    return rows.map(mapAiTeamRow);
+  }
+
+  getAiTeam(id: string): AiTeam | null {
+    const row = this.db.prepare("SELECT * FROM ai_teams WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+    return row ? mapAiTeamRow(row) : null;
+  }
+
+  saveAiTeam(team: AiTeam): void {
+    this.db.prepare(
+      `INSERT INTO ai_teams (
+         id, name, description, instructions, members_json, require_plan_approval, max_steps,
+         created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         name = excluded.name, description = excluded.description,
+         instructions = excluded.instructions,
+         members_json = excluded.members_json,
+         require_plan_approval = excluded.require_plan_approval,
+         max_steps = excluded.max_steps, updated_at = excluded.updated_at`
+    ).run(
+      team.id, team.name, team.description, team.instructions, JSON.stringify(team.members),
+      team.requirePlanApproval ? 1 : 0, team.maxSteps, team.createdAt, team.updatedAt,
+    );
+  }
+
+  /** 只删团队定义；已有运行保存了团队快照，不受影响。 */
+  deleteAiTeam(id: string): void {
+    this.db.prepare("DELETE FROM ai_teams WHERE id = ?").run(id);
+  }
+
+  saveAiTeamRun(run: AiTeamRun): void {
+    this.db.prepare(
+      `INSERT INTO ai_team_runs (
+         id, team_id, task_id, team_json, objective, cwd, status, status_detail,
+         steps_used, step_limit, format_retries, plan_approved, chat_session_id, pending_notes_json,
+         created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         team_json = excluded.team_json,
+         status = excluded.status, status_detail = excluded.status_detail,
+         steps_used = excluded.steps_used, step_limit = excluded.step_limit,
+         format_retries = excluded.format_retries, plan_approved = excluded.plan_approved,
+         chat_session_id = excluded.chat_session_id, pending_notes_json = excluded.pending_notes_json,
+         updated_at = excluded.updated_at`
+    ).run(
+      run.id, run.teamId, run.taskId, JSON.stringify(run.team), run.objective, run.cwd,
+      run.status, run.statusDetail, run.stepsUsed, run.stepLimit, run.formatRetries,
+      run.planApproved ? 1 : 0, run.chatSessionId, JSON.stringify(run.pendingNotes), run.createdAt, run.updatedAt,
+    );
+  }
+
+  /** 群聊会话对应的最近一次运行（同一个群聊可以接着开新运行）。 */
+  getLatestAiTeamRunByChat(sessionId: string): AiTeamRun | null {
+    const row = this.db.prepare(
+      "SELECT * FROM ai_team_runs WHERE chat_session_id = ? ORDER BY created_at DESC LIMIT 1",
+    ).get(sessionId) as Record<string, unknown> | undefined;
+    return row ? mapAiTeamRunRow(row) : null;
+  }
+
+  /**
+   * 会话列表用的群聊标记索引：chat_session_id → 最近一次运行的入口信息。
+   * 一次查询建整张表，供 /api/tasks 每请求一次构建；不逐会话查询。
+   */
+  listAiTeamRunChatMarkers(): Map<string, AiTeamRunChatMarker> {
+    const rows = this.db.prepare(
+      `SELECT id, team_json, chat_session_id FROM ai_team_runs
+       WHERE chat_session_id IS NOT NULL AND chat_session_id <> '' ORDER BY created_at DESC`,
+    ).all() as unknown as Record<string, unknown>[];
+    const markers = new Map<string, AiTeamRunChatMarker>();
+    for (const row of rows) {
+      const chatSessionId = typeof row.chat_session_id === "string" ? row.chat_session_id : "";
+      if (!chatSessionId || markers.has(chatSessionId)) continue;
+      const rawTeam = safeJsonParse<Record<string, unknown>>(typeof row.team_json === "string" ? row.team_json : null);
+      markers.set(chatSessionId, {
+        runId: String(row.id),
+        teamName: String(rawTeam?.name ?? ""),
+        memberCount: Array.isArray(rawTeam?.members) ? rawTeam.members.length : 0,
+      });
+    }
+    return markers;
+  }
+
+  getAiTeamRun(id: string): AiTeamRun | null {
+    const row = this.db.prepare("SELECT * FROM ai_team_runs WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+    return row ? mapAiTeamRunRow(row) : null;
+  }
+
+  listAiTeamRuns(
+    filter: { taskId?: string; teamId?: string; statuses?: readonly AiTeamRunStatus[]; limit?: number } = {},
+  ): AiTeamRun[] {
+    const where: string[] = [];
+    const params: Array<string | number> = [];
+    if (filter.taskId) {
+      where.push("task_id = ?");
+      params.push(filter.taskId);
+    }
+    if (filter.teamId) {
+      where.push("team_id = ?");
+      params.push(filter.teamId);
+    }
+    if (filter.statuses) {
+      if (filter.statuses.length === 0) return [];
+      where.push(`status IN (${filter.statuses.map(() => "?").join(", ")})`);
+      params.push(...filter.statuses);
+    }
+    const rows = this.db.prepare(
+      `SELECT * FROM ai_team_runs ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY created_at DESC`
+        + (filter.limit ? ` LIMIT ${Math.max(1, Math.floor(filter.limit))}` : "")
+    ).all(...params) as unknown as Record<string, unknown>[];
+    return rows.map(mapAiTeamRunRow);
+  }
+
+  saveAiTeamStep(step: AiTeamStep): void {
+    this.db.prepare(
+      `INSERT INTO ai_team_steps (
+         id, run_id, seq, kind, member_id, title, instructions, session_id, status,
+         report, report_path, depends_on_json, started_at, ended_at, dispatch_info_json
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         session_id = excluded.session_id, status = excluded.status, report = excluded.report,
+         instructions = excluded.instructions,
+         depends_on_json = excluded.depends_on_json,
+         dispatch_info_json = excluded.dispatch_info_json,
+         started_at = excluded.started_at, ended_at = excluded.ended_at`
+    ).run(
+      step.id, step.runId, step.seq, step.kind, step.memberId, step.title, step.instructions,
+      step.sessionId, step.status, step.report, step.reportPath, JSON.stringify(step.dependsOn),
+      step.startedAt, step.endedAt, JSON.stringify(step.dispatchInfo ?? { usedCandidate: 0, skipped: [] }),
+    );
+  }
+
+  listAiTeamSteps(runId: string): AiTeamStep[] {
+    const rows = this.db.prepare("SELECT * FROM ai_team_steps WHERE run_id = ? ORDER BY seq ASC").all(runId) as unknown as Record<string, unknown>[];
+    return rows.map(mapAiTeamStepRow);
+  }
+
+  getRunningAiTeamStepBySession(sessionId: string): AiTeamStep | null {
+    const row = this.db.prepare(
+      "SELECT * FROM ai_team_steps WHERE session_id = ? AND status = 'running' LIMIT 1"
+    ).get(sessionId) as Record<string, unknown> | undefined;
+    return row ? mapAiTeamStepRow(row) : null;
+  }
+
+  /** `ai_team_runs.run_state_json` 的读侧入口（§3.4）；脏值 / 旧行退化成空黑名单。 */
+  getAiTeamRunState(runId: string): AiTeamRunState {
+    const row = this.db.prepare("SELECT run_state_json FROM ai_team_runs WHERE id = ?").get(runId) as
+      | { run_state_json?: unknown }
+      | undefined;
+    return parseAiTeamRunState(row?.run_state_json);
+  }
+
+  /** 只写 `run_state_json` 一列，不碰 `saveAiTeamRun` 负责的业务字段。 */
+  setAiTeamRunState(runId: string, state: AiTeamRunState): void {
+    this.db.prepare("UPDATE ai_team_runs SET run_state_json = ? WHERE id = ?")
+      .run(JSON.stringify(state), runId);
+  }
+
   // ============ Missions ============
 
   saveMission(mission: Mission): void {
@@ -2596,6 +2874,199 @@ export class WandStorage {
   deleteSession(id: string): void {
     this.db.prepare("DELETE FROM command_sessions WHERE id = ?").run(id);
   }
+}
+
+function mapAiTeamRow(row: Record<string, unknown>): AiTeam {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    description: String(row.description ?? ""),
+    instructions: String(row.instructions ?? ""),
+    members: normalizeAiTeamMembers(safeJsonParse<unknown>(typeof row.members_json === "string" ? row.members_json : null)),
+    requirePlanApproval: Number(row.require_plan_approval) !== 0,
+    maxSteps: Number(row.max_steps) || AI_TEAM_DEFAULT_MAX_STEPS,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+/**
+ * 旧行读端归一（§3.1 修正 B10）：members 是从 members_json/team_json 解析出的裸 JSON，
+ * 不满足 AiTeamMember 类型，必须逐成员经 memberAgents 补齐 agents 后才能当 AiTeamMember 用。
+ * 没有任何可识别执行配置的成员行直接丢弃（旧数据必然带 agent，走到这里说明行已损坏）。
+ */
+function normalizeAiTeamMember(raw: unknown): AiTeamMember | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const value = raw as Record<string, unknown>;
+  const rawAgent = parseWandTaskAgent(value.agent) ?? undefined;
+  const agents = memberAgents({
+    agent: rawAgent,
+    agents: Array.isArray(value.agents)
+      ? value.agents.map((candidate) => parseWandTaskAgent(candidate)).filter((candidate): candidate is WandTaskAgent => candidate !== null)
+      : undefined,
+  });
+  if (agents.length === 0) return null;
+  const member: AiTeamMember = {
+    id: String(value.id ?? ""),
+    name: String(value.name ?? ""),
+    duty: String(value.duty ?? ""),
+    agents,
+    agent: rawAgent ?? agents[0]!,
+    isLeader: value.isLeader === true,
+  };
+  if (typeof value.avatar === "string" && value.avatar) member.avatar = value.avatar;
+  if (isTeamMemberRole(value.role)) member.role = value.role;
+  return member;
+}
+
+function normalizeAiTeamMembers(raw: unknown): AiTeamMember[] {
+  if (!Array.isArray(raw)) return [];
+  const members: AiTeamMember[] = [];
+  for (const item of raw) {
+    const member = normalizeAiTeamMember(item);
+    if (member) members.push(member);
+  }
+  return members;
+}
+
+function mapAiTeamRunRow(row: Record<string, unknown>): AiTeamRun {
+  const rawTeam = safeJsonParse<Record<string, unknown>>(typeof row.team_json === "string" ? row.team_json : null);
+  const team: AiTeam | null = rawTeam ? {
+    id: String(rawTeam.id ?? row.team_id),
+    name: String(rawTeam.name ?? ""),
+    description: String(rawTeam.description ?? ""),
+    instructions: String(rawTeam.instructions ?? ""),
+    members: normalizeAiTeamMembers(rawTeam.members),
+    requirePlanApproval: rawTeam.requirePlanApproval === undefined ? true : rawTeam.requirePlanApproval !== false,
+    maxSteps: Number(rawTeam.maxSteps) || AI_TEAM_DEFAULT_MAX_STEPS,
+    createdAt: String(rawTeam.createdAt ?? row.created_at),
+    updatedAt: String(rawTeam.updatedAt ?? row.created_at),
+  } : null;
+  return {
+    id: String(row.id),
+    teamId: String(row.team_id),
+    team: team ?? {
+      id: String(row.team_id), name: "", description: "", instructions: "", members: [], requirePlanApproval: true,
+      maxSteps: AI_TEAM_DEFAULT_MAX_STEPS, createdAt: String(row.created_at), updatedAt: String(row.created_at),
+    },
+    taskId: String(row.task_id),
+    objective: String(row.objective),
+    cwd: String(row.cwd),
+    status: String(row.status) as AiTeamRunStatus,
+    statusDetail: String(row.status_detail ?? ""),
+    stepsUsed: Number(row.steps_used) || 0,
+    stepLimit: Number(row.step_limit) || AI_TEAM_DEFAULT_MAX_STEPS,
+    formatRetries: Number(row.format_retries) || 0,
+    planApproved: Number(row.plan_approved) !== 0,
+    chatSessionId: typeof row.chat_session_id === "string" && row.chat_session_id ? row.chat_session_id : null,
+    pendingNotes: (safeJsonParse<unknown[]>(typeof row.pending_notes_json === "string" ? row.pending_notes_json : null) ?? [])
+      .filter((note): note is string => typeof note === "string"),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+/** 候选失败类别的读侧白名单；真源是 `ai-team-types.ts` 的 `CandidateFailureKind`。 */
+const CANDIDATE_FAILURE_KINDS: readonly CandidateFailureKind[] = [
+  "spawn-missing", "host-disabled", "model-unknown", "startup-timeout",
+  "runtime-failure", "format-error", "user-stop",
+];
+
+function isCandidateFailureKind(value: unknown): value is CandidateFailureKind {
+  return CANDIDATE_FAILURE_KINDS.includes(value as CandidateFailureKind);
+}
+
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+/**
+ * `ai_team_steps.dispatch_info_json` 的读侧校验（§3.2）。脏值 / 旧行默认 `{}` 一律退化成
+ * 「首选、没跳过任何候选」，坏条目逐条丢弃，不整字段作废——降级留痕是可观测性数据，
+ * 不能因为一条脏记录把整条链丢掉。
+ */
+export function parseStepDispatchInfo(raw: unknown): StepDispatchInfo {
+  const value = typeof raw === "string" ? safeJsonParse<unknown>(raw) : raw;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { usedCandidate: 0, skipped: [] };
+  const record = value as Record<string, unknown>;
+  const skippedRaw = Array.isArray(record.skipped) ? record.skipped : [];
+  const skipped: StepDispatchInfo["skipped"] = [];
+  for (const item of skippedRaw) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const entry = item as Record<string, unknown>;
+    const agent = parseWandTaskAgent(entry.agent);
+    const candidate = Number(entry.candidate);
+    const reason = nonEmptyString(entry.reason);
+    if (!agent || !Number.isInteger(candidate) || candidate < 0 || !reason) continue;
+    // 未知类别按 runtime-failure 记：它不可降级，宁可少降一级也不因为脏数据错换候选。
+    skipped.push({
+      candidate,
+      agent,
+      reason,
+      errorKind: isCandidateFailureKind(entry.errorKind) ? entry.errorKind : "runtime-failure",
+    });
+  }
+  const usedRaw = Number(record.usedCandidate);
+  const used = Number.isInteger(usedRaw) && usedRaw > 0 ? usedRaw : 0;
+  // 与留痕自相矛盾的脏值以 skipped 链为准向下纠正，绝不凭空跳级。
+  const trail = skipped.reduce((highest, item) => Math.max(highest, item.candidate), -1) + 1;
+  return { usedCandidate: skipped.length > 0 ? Math.min(used, trail) : used, skipped };
+}
+
+/** `ai_team_runs.run_state_json` 的读侧校验（§3.4）；脏值退化成空黑名单。 */
+export function parseAiTeamRunState(raw: unknown): AiTeamRunState {
+  const value = typeof raw === "string" ? safeJsonParse<unknown>(raw) : raw;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { providers: [], agents: [], strikes: {}, hostDisabled: [] };
+  const record = value as Record<string, unknown>;
+  const state: AiTeamRunState = { providers: [], agents: [], strikes: {}, hostDisabled: [] };
+  for (const item of Array.isArray(record.providers) ? record.providers : []) {
+    const provider = nonEmptyString(item);
+    if (isSessionProvider(provider) && !state.providers.includes(provider)) state.providers.push(provider);
+  }
+  for (const item of Array.isArray(record.agents) ? record.agents : []) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const entry = item as Record<string, unknown>;
+    const key = nonEmptyString(entry.key);
+    if (key && !state.agents.some((agent) => agent.key === key)) {
+      state.agents.push({ key, kind: isCandidateFailureKind(entry.kind) ? entry.kind : "runtime-failure" });
+    }
+  }
+  const strikes = record.strikes;
+  if (strikes && typeof strikes === "object" && !Array.isArray(strikes)) {
+    for (const [key, count] of Object.entries(strikes as Record<string, unknown>)) {
+      const value2 = Number(count);
+      if (key && Number.isFinite(value2) && value2 > 0) state.strikes[key] = Math.min(999, Math.floor(value2));
+    }
+  }
+  for (const item of Array.isArray(record.hostDisabled) ? record.hostDisabled : []) {
+    const kind = nonEmptyString(item);
+    if (isWandTaskAgentKind(kind) && !state.hostDisabled.includes(kind)) state.hostDisabled.push(kind);
+  }
+  return state;
+}
+
+function mapAiTeamStepRow(row: Record<string, unknown>): AiTeamStep {
+  const step: AiTeamStep = {
+    id: String(row.id),
+    runId: String(row.run_id),
+    seq: Number(row.seq),
+    kind: String(row.kind) as AiTeamStepKind,
+    memberId: String(row.member_id),
+    title: String(row.title),
+    instructions: String(row.instructions),
+    sessionId: typeof row.session_id === "string" ? row.session_id : null,
+    status: String(row.status) as AiTeamStepStatus,
+    report: String(row.report ?? ""),
+    reportPath: String(row.report_path),
+    dependsOn: safeJsonParse<string[]>(typeof row.depends_on_json === "string" ? row.depends_on_json : null) ?? [],
+    startedAt: typeof row.started_at === "string" ? row.started_at : null,
+    endedAt: typeof row.ended_at === "string" ? row.ended_at : null,
+  };
+  const dispatchInfo = parseStepDispatchInfo(
+    typeof row.dispatch_info_json === "string" ? row.dispatch_info_json : null,
+  );
+  if (dispatchInfo.usedCandidate > 0 || dispatchInfo.skipped.length > 0) step.dispatchInfo = dispatchInfo;
+  return step;
 }
 
 function mapMissionRow(row: Record<string, unknown>): Mission {

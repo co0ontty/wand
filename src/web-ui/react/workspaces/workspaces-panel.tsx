@@ -5,15 +5,19 @@ import { httpWorkspacesRepository } from "./repository";
 import { workspaceContextStore } from "./workspace-context";
 import { WorkspaceAgentDialog } from "./workspace-agent-dialog";
 import { WorkspaceWorktreeDialog } from "./workspace-worktree-dialog";
+import type { WorkspaceMergeAgentBrief } from "./workspace-worktree-model";
 import { closeSessionPane } from "./window-layout";
 import type {
   OpenWorkspaceTaskPayload,
   TaskDirectoryGroup,
   TaskSummary,
   WorkspaceSessionKind,
-  WorkspaceSessionTarget,
   WorkspaceSessionSummary,
+  WorkspaceSessionTarget,
+  WorkspaceSessionTeamChat,
 } from "./types";
+import { taskBoardController } from "../issues/task-board-controller";
+import { PixelCat, memberCoatIndex } from "../ai-teams/avatar";
 import { classNames } from "../ui/class-names";
 import {
   WandButton,
@@ -161,6 +165,17 @@ function useTaskGroups(refreshKey: number): {
 
 // ── 会话行（任务内 / 未分组的会话共用）──
 
+/** 群聊条目的头像组标记：叠两隻像素猫，毛色按 runId 散列，和普通会话的 CLI logo 区分。 */
+function TeamChatSessionMark({ teamChat }: { teamChat: WorkspaceSessionTeamChat }): React.ReactElement {
+  const coats = Array.from(
+    { length: Math.min(Math.max(teamChat.memberCount, 1), 2) },
+    (_, index) => memberCoatIndex({ id: `${teamChat.runId}#${index}`, name: teamChat.teamName, avatar: "" }),
+  );
+  return <span className="workspace-session-team-cats">
+    {coats.map((coat, index) => <PixelCat key={index} coat={coat}/>)}
+  </span>;
+}
+
 function ManageCheck({
   checked,
   label,
@@ -230,10 +245,17 @@ function TaskSessionItem({
       >
         {manageMode && <ManageCheck checked={selected} label={`选择终端 ${label}`}/>}
         <span className="workspace-session-mark" aria-hidden="true">
-          <SessionProviderMark session={session}/>
+          {session.teamChat
+            ? <TeamChatSessionMark teamChat={session.teamChat}/>
+            : <SessionProviderMark session={session}/>}
         </span>
         <span className="workspace-session-name">{label}</span>
-        {session.sessionKind === "pty" && (
+        {session.teamChat ? (
+          <span
+            className="workspace-session-kind workspace-session-kind-team"
+            title={`${session.teamChat.teamName} · ${session.teamChat.memberCount} 人`}
+          >群聊</span>
+        ) : session.sessionKind === "pty" && (
           <span className="workspace-session-kind">终端</span>
         )}
       </WandNavigationLink>
@@ -303,6 +325,7 @@ function TaskItem({
   onOpen,
   onOpenSession,
   onRequestNewSession,
+  isOnlyTask = false,
   onClearSessions,
   onDeleteSession,
   onRename,
@@ -325,6 +348,8 @@ function TaskItem({
   onOpenSession(session: WorkspaceSessionSummary): void;
   /** 请求在该任务中新建会话；由上层弹出 Agent 选择器后回调。 */
   onRequestNewSession(): void;
+  /** 该任务是否为目录里的唯一任务；唯一任务才默认展开空提示。 */
+  isOnlyTask?: boolean;
   /** 批量结束并删除该任务的全部会话（batch-delete）。 */
   onClearSessions(): Promise<void>;
   onDeleteSession(session: WorkspaceSessionSummary): Promise<void>;
@@ -350,7 +375,7 @@ function TaskItem({
 
   const sessionCount = task.sessions.length;
   const canCollapseSessions = showsTaskSessionDisclosure(sessionCount);
-  const open = isTaskSessionsExpanded(collapsed, sessionCount);
+  const open = isTaskSessionsExpanded(collapsed, sessionCount, isOnlyTask);
 
   const submitRename = async () => {
     if (busy) return;
@@ -501,7 +526,7 @@ function TaskItem({
         </span>
         {manageMode ? null : !confirming ? (
           <>
-            {/* 任务已有会话时，行内「＋」是唯一常驻的新增会话入口（空任务用下方整行按钮）。 */}
+            {/* 行内「＋」是常驻的新增会话入口；空任务只有作为唯一任务时才额外显示下方整行按钮。 */}
             <WandIconButton
               className="workspace-task-action add"
               title={`新建会话（${task.name}）`}
@@ -619,7 +644,7 @@ function TaskItem({
           </span>
         )}
       </div>
-      {sessionCount === 0 && !manageMode && <button type="button" className="workspace-task-empty"
+      {open && sessionCount === 0 && !manageMode && <button type="button" className="workspace-task-empty"
         onClick={onRequestNewSession}><WandIcon name="plus" size={12}/>添加会话，或拖入已有会话</button>}
       {sessionCount > 0 && (
         <SidebarDisclosure id={sessionsId} open={open}>
@@ -822,13 +847,14 @@ function TaskGroupSection({
     }
   };
 
-  const handleStartMergeAgent = async (prompt: string) => {
+  const handleStartMergeAgent = async (brief: WorkspaceMergeAgentBrief) => {
     const rt = runtime();
     if (!rt) throw new Error("工作空间运行环境尚未就绪，请刷新页面后重试。");
     await rt.startWorktreeMergeAgent({
       workspaceId: group.workspaceId,
       cwd: group.workspaceCwd,
-      prompt,
+      systemPrompt: brief.system,
+      prompt: brief.message,
     });
     rt.toast(`已启动 Agent，准备合并所选 Worktree 到项目默认分支。`, "success");
   };
@@ -1063,6 +1089,7 @@ function TaskGroupSection({
               onOpen={() => onActiveTaskOpen(group, task)}
               onOpenSession={(session) => onOpenSession(group, session)}
               onRequestNewSession={() => onRequestNewSessionInTask(task)}
+              isOnlyTask={taskCount === 1}
               onClearSessions={async () => {
                 const ids = task.sessions.map((session) => session.id);
                 await handleDeleteSessions(ids, task, `已清空任务「${task.name}」的 ${ids.length} 个终端`);
@@ -1332,6 +1359,11 @@ export function WorkspacesPanel({
 
   const openSession = React.useCallback((group: TaskDirectoryGroup, session: WorkspaceSessionSummary) => {
     onNavigate?.();
+    // 群聊条目不进普通会话渲染：打开独立的 IM 群聊页（复用团队页按需脚本里的 TeamChatView）。
+    if (session.teamChat) {
+      taskBoardController.open("", "", "teamchat", session.teamChat.runId);
+      return;
+    }
     const rt = runtime();
     if (!rt) {
       toast("工作空间运行环境尚未就绪，请刷新页面后重试。", "warning");

@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { startStructuredCli } from "./structured-exec-pump.js";
 import type { StructuredExecHost } from "./structured-exec-host.js";
 import { asRecord } from "./structured-content.js";
-import { thinkingEffortToGrokEffort } from "./structured-provider-common.js";
+import { systemPromptArgs, thinkingEffortToGrokEffort } from "./structured-provider-common.js";
 import type {
   StructuredRunnerAdapter,
   StructuredRunnerContext,
@@ -144,6 +144,7 @@ export function buildGrokArgs(session: SessionSnapshot, prompt: string): string[
     args.push("--always-approve");
   }
   if (session.claudeSessionId) args.push("--resume", session.claudeSessionId);
+  args.push(...systemPromptArgs(session));
   return args;
 }
 

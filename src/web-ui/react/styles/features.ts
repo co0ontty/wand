@@ -1286,7 +1286,7 @@ export const settingsAndQuickCommitStyles = String.raw`
 .wand-quick-action-grid strong { font-size: var(--font-size-sm); }
 .wand-quick-action-grid span { color: var(--text-muted); font-size: var(--font-size-xs); }
 
-.wand-quick-submodule-toggle {
+.wand-quick-option-toggle {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1297,9 +1297,9 @@ export const settingsAndQuickCommitStyles = String.raw`
   background: var(--bg-secondary);
 }
 
-.wand-quick-submodule-toggle > div:first-child { display: grid; gap: 2px; }
-.wand-quick-submodule-toggle strong { font-size: var(--font-size-sm); }
-.wand-quick-submodule-toggle span { color: var(--text-muted); font-size: var(--font-size-xs); }
+.wand-quick-option-toggle > div:first-child { display: grid; gap: 2px; }
+.wand-quick-option-toggle strong { font-size: var(--font-size-sm); }
+.wand-quick-option-toggle span { color: var(--text-muted); font-size: var(--font-size-xs); }
 
 .wand-quick-error {
   margin: 0;
@@ -3026,5 +3026,132 @@ html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
   html:not(.is-wand-app) .input-composer .wand-composer-select-trigger {
     min-height: 44px;
   }
+}
+`;
+
+/** AI 团队：设置页的团队编辑与任务详情里的运行面板。展开一律是原位的行高过渡。 */
+// 团队页与任务详情运行面板的样式随按需加载的 ai-teams 脚本注入（ai-teams/styles.ts）；
+// 这里只留主包里也会出现的部分：成员头像、指派面板的团队预览、侧栏角标。
+export const aiTeamsStyles = String.raw`
+/* ---------- 成员头像：像素猫 / 上传图 + 负责人皇冠 + CLI 角标 + 状态环 ---------- */
+.wand-team-avatar {
+  --team-avatar-size: 32px;
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: var(--team-avatar-size);
+  height: var(--team-avatar-size);
+}
+.wand-team-avatar[data-size="sm"] { --team-avatar-size: 26px; }
+.wand-team-avatar[data-size="lg"] { --team-avatar-size: 44px; }
+.wand-team-avatar-face {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 30%;
+  background: var(--bg-tertiary);
+  box-shadow: 0 0 0 1.5px var(--bg-primary), 0 0 0 3px var(--team-ring, transparent);
+  transition: box-shadow var(--transition-normal);
+}
+.wand-team-avatar-cat { width: 74%; height: 74%; }
+.wand-team-avatar-face img,
+.wand-team-coat img { width: 100%; height: 100%; object-fit: cover; }
+.wand-team-avatar[data-state="working"] { --team-ring: var(--info); }
+.wand-team-avatar[data-state="waiting"] { --team-ring: var(--warning); }
+.wand-team-avatar[data-state="failed"] { --team-ring: var(--danger); }
+.wand-team-avatar[data-state="done"]::after {
+  content: "✓";
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--bg-primary);
+  border-radius: var(--radius-full);
+  color: var(--bg-primary);
+  background: var(--success);
+  font-size: 8px;
+  font-weight: var(--font-weight-bold);
+}
+.wand-team-avatar-crown {
+  position: absolute;
+  top: -7px;
+  left: 50%;
+  width: 12px;
+  height: 8px;
+  transform: translateX(-50%);
+  color: var(--warning);
+}
+.wand-team-avatar-crown svg { display: block; width: 100%; height: 100%; fill: currentColor; }
+.wand-team-avatar[data-size="sm"] .wand-team-avatar-crown { top: -5px; width: 9px; height: 6px; }
+.wand-team-avatar-provider {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border: 1.5px solid var(--bg-primary);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+}
+.wand-team-avatar-provider .wand-provider-logo { width: 11px; height: 11px; }
+.wand-team-avatar[data-state="done"] .wand-team-avatar-provider { display: none; }
+
+.wand-team-avatar-stack { display: inline-flex; align-items: center; padding-top: 5px; }
+.wand-team-avatar-stack > * + * { margin-left: -7px; }
+.wand-team-avatar-stack[data-size="md"] > * + * { margin-left: -9px; }
+.wand-team-avatar-more {
+  display: grid;
+  place-items: center;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 5px;
+  border-radius: 30%;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  box-shadow: 0 0 0 1.5px var(--bg-primary);
+  font-size: var(--font-size-xs);
+}
+
+/* ---------- 指派面板里选中团队时的成员预览 ---------- */
+.task-board-team-target { display: flex; align-items: center; gap: 10px; min-height: 36px; color: var(--text-tertiary); font-size: var(--font-size-xs); }
+
+/* 团队页脚本（ai-teams.js）按需下载期间的占位。 */
+.wand-teams-pending { display: grid; align-content: center; justify-items: center; gap: 10px; color: var(--text-tertiary); font-size: var(--font-size-sm); }
+.wand-teams-pending p { margin: 0; }
+
+/* 侧栏「AI 团队」角标：窄栏收成右上角的小圆点。 */
+.sidebar-feature-badge {
+  min-width: 18px;
+  margin-left: auto;
+  padding: 0 5px;
+  border-radius: var(--radius-full);
+  color: var(--bg-primary);
+  background: var(--warning);
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  line-height: 18px;
+  text-align: center;
+}
+.sidebar.pinned.collapsed .sidebar-feature-nav .sidebar-feature-list > li > button { position: relative; }
+.sidebar.pinned.collapsed .sidebar-feature-nav .sidebar-feature-list > li > button > .sidebar-feature-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: block;
+  min-width: 8px;
+  height: 8px;
+  padding: 0;
+  font-size: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wand-team-avatar-face { transition: none; }
 }
 `;

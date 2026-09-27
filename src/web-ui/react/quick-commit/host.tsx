@@ -31,6 +31,7 @@ import type {
   QuickCommitStatus,
 } from "./types";
 import { describeError } from "../errors";
+import { notifyTasksChanged } from "../task-changes";
 
 export interface QuickCommitHostProps {
   repository?: QuickCommitRepository;
@@ -164,6 +165,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
   const [form, setForm] = useState<QuickCommitForm>(EMPTY_FORM);
   const [action, setAction] = useState<QuickCommitAction>("commit");
   const [includeSubmodule, setIncludeSubmodule] = useState(false);
+  const [archiveRelatedTasks, setArchiveRelatedTasks] = useState(false);
   const [iterationContext, setIterationContext] = useState<QuickCommitIterationContext | null>(null);
   const [contextMode, setContextMode] = useState<QuickCommitContextMode>("iteration");
   // null = 用服务端给的默认勾选（上次提交以来的条目）；用户一动手就换成显式集合。
@@ -208,6 +210,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
     setForm(EMPTY_FORM);
     setAction("commit");
     setIncludeSubmodule(false);
+    setArchiveRelatedTasks(false);
     setIterationContext(null);
     setSelectedOverride(null);
     setIncludeDiff(false);
@@ -362,7 +365,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
     try {
       const response = await repository.commit(
         operationSessionId,
-        buildQuickCommitInput(form, action, includeSubmodule, contextSelection(), includeDiff),
+        buildQuickCommitInput(form, action, includeSubmodule, contextSelection(), includeDiff, archiveRelatedTasks),
       );
       if (!response.ok) throw new Error("快捷提交失败。");
       const nextOutcome = buildQuickCommitOutcome(
@@ -374,10 +377,16 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
       );
       const summary = commitSummary(nextOutcome);
       const hash = nextOutcome.commitHash ? nextOutcome.commitHash.slice(0, 7) : "";
+      if (response.archivedTaskIds?.length) notifyTasksChanged();
+      const archiveNote = response.archiveError
+        ? `；归档失败：${response.archiveError}`
+        : archiveRelatedTasks
+          ? `；${response.archivedTaskIds?.length ? `已归档 ${response.archivedTaskIds.length} 个关联任务` : "没有已完成的关联任务"}`
+          : "";
       if (!response.pushError) {
         quickCommitStore.getRuntime()?.toast(
-          selectedMeta.push ? `${summary}，已推送。` : `${summary}。`,
-          "success",
+          `${summary}${selectedMeta.push ? "，已推送" : ""}${archiveNote}。`,
+          response.archiveError ? "error" : "success",
         );
         void reloadStatus(operationSessionId);
         void reloadContext(operationSessionId);
@@ -396,7 +405,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
         setSubmitResult("已提交，推送失败");
         setSubmitPhase("error");
       }
-      quickCommitStore.getRuntime()?.toast(`${summary}；push 失败：${response.pushError}`, "error");
+      quickCommitStore.getRuntime()?.toast(`${summary}${archiveNote}；push 失败：${response.pushError}`, "error");
       await Promise.all([
         reloadStatus(operationSessionId),
         reloadContext(operationSessionId),
@@ -600,7 +609,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
                 ))}
               </div>
               {status.hasSubmodule ? (
-                <div className="wand-quick-submodule-toggle">
+                <div className="wand-quick-option-toggle">
                   <div>
                     <strong>包含 Submodule</strong>
                     <span>递归执行 commit、tag 和 push。</span>
@@ -614,6 +623,19 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
                   />
                 </div>
               ) : null}
+              <div className="wand-quick-option-toggle">
+                <div>
+                  <strong>归档关联任务</strong>
+                  <span>提交成功后，仅归档本次关联且已完成的任务。</span>
+                </div>
+                <WandSwitch
+                  id="wand-quick-archive-tasks"
+                  checked={archiveRelatedTasks}
+                  disabled={busy || !hasQuickCommitChanges(status)}
+                  ariaLabel="提交后归档关联任务"
+                  onCheckedChange={setArchiveRelatedTasks}
+                />
+              </div>
             </fieldset>
             {error ? <p className="wand-quick-error" role="alert">{error}</p> : null}
           </div>

@@ -53,6 +53,9 @@ import { registerTaskRoutes } from "./server-task-routes.js";
 import { getGithubConnectorStatus } from "./github-connector.js";
 import { registerMissionRoutes } from "./server-mission-routes.js";
 import { Missions } from "./missions.js";
+import { createAiTeamRunner } from "./ai-team-runner.js";
+import { registerAiTeamRoutes } from "./server-ai-team-routes.js";
+import { registerAttentionRoutes } from "./server-attention-routes.js";
 import {
   refreshProviderCliUpdateState,
   registerAdminUpdateRoutes,
@@ -90,6 +93,7 @@ import { DistributionManager } from "./distribution-manager.js";
 import { isLogBusActive, wandTuiLog } from "./tui/log-bus.js";
 import { EMBEDDED_WEB_ASSETS, type EmbeddedVendorAssetPath } from "./web-ui/embedded-assets.js";
 import { renderApp } from "./web-ui/index.js";
+import { getAiTeamsChunk } from "./web-ui/scripts.js";
 import { WsBroadcastManager } from "./ws-broadcast.js";
 import { TerminalDaemonClient } from "./terminal-daemon-client.js";
 import { createUpgradeAwareTerminalHost } from "./render-host.js";
@@ -449,6 +453,26 @@ export async function startServer(
   );
   const sessionRegistry = new SessionRegistry(processes, structuredSessions, storage);
   const missions = new Missions(storage, structuredSessions, sessionRegistry);
+  // wsManager 在后面才建：团队运行的变更通知经由这个转发口，接好之前静默丢弃。
+  let notifyAiTeamRun = (_data: { kind: "ai-team-run"; runId: string; taskId: string }): void => {};
+  // 团队降级的 model-unknown 事前比对只看这份已发现的清单；没刷新过就是空，判定方向是放行。
+  const aiTeamModelIds = (provider: SessionProvider): string[] => {
+    const cache = modelCatalog.snapshot();
+    const key = ({
+      claude: "models",
+      codex: "codexModels",
+      opencode: "opencodeModels",
+      grok: "grokModels",
+      qoder: "qoderModels",
+      pi: "piModels",
+    } as const)[provider];
+    return cache[key].map((entry) => entry.id);
+  };
+  const aiTeams = createAiTeamRunner({
+    storage, config, structured: structuredSessions, processes, sessions: sessionRegistry,
+    notify: (run) => notifyAiTeamRun({ kind: "ai-team-run", runId: run.id, taskId: run.taskId }),
+    models: aiTeamModelIds,
+  });
   const updateState = new ServerUpdateState();
   const getUpdateChannel = (): "stable" | "beta" =>
     normalizeUpdateChannel(storage.getConfigValue("updateChannel"));
@@ -505,6 +529,14 @@ export async function startServer(
   app.get("/vendor/xterm/xterm.bundle.js", (req, res) => sendEmbeddedVendorAsset("/vendor/xterm/xterm.bundle.js", req, res));
   app.get("/vendor/xterm/xterm.css", (req, res) => sendEmbeddedVendorAsset("/vendor/xterm/xterm.css", req, res));
   app.get("/vendor/qrcode/qrcode.bundle.js", (req, res) => sendEmbeddedVendorAsset("/vendor/qrcode/qrcode.bundle.js", req, res));
+  // AI 团队页按需脚本：页面 meta 里的地址带内容 hash，hash 对得上才长缓存。
+  app.get("/assets/ai-teams.js", (req, res) => {
+    const chunk = getAiTeamsChunk();
+    res.setHeader("Cache-Control", req.query.v === chunk.hash
+      ? "public, max-age=604800, immutable"
+      : "no-cache");
+    res.type("application/javascript").send(chunk.content);
+  });
 
   // ── Web UI endpoints ──
 
@@ -782,6 +814,8 @@ export async function startServer(
   registerGithubRoutes(app, { storage, requireAdmin, sessions: sessionRegistry });
   // 任务管理与 Missions 一样只需登录：原生 connected-app 也要能列/建/派发。
   registerTaskRoutes(app, { storage, sessions: sessionRegistry, structured: structuredSessions, processes, config });
+  registerAiTeamRoutes(app, { storage, runner: aiTeams });
+  registerAttentionRoutes(app, { sessions: sessionRegistry, runner: aiTeams });
 
   registerAdminUpdateRoutes(app, {
     storage,
@@ -908,6 +942,7 @@ export async function startServer(
               cols: reqCols,
               rows: reqRows,
               thinkingEffort: body.thinkingEffort ?? config.defaultThinkingEffort,
+              systemPrompt: body.systemPrompt,
               workspaceId,
               workspaceTaskId: body.workspaceTaskId,
               ...origin,
@@ -997,15 +1032,21 @@ export async function startServer(
   // Wire process events to WebSocket broadcast
   processes.on("process", (event: ProcessEvent) => {
     missions.ingest(event);
+    aiTeams.ingest(event);
     wsManager.emitEvent(event);
   });
   structuredSessions.setEventEmitter((event) => {
     missions.ingest(event);
+    aiTeams.ingest(event);
     wsManager.emitEvent(event);
   });
+  notifyAiTeamRun = (data) => {
+    wsManager.emitEvent({ type: "notification", sessionId: "__system__", data });
+  };
   // Re-attach structured CLI runs that kept going inside terminald while the
   // previous web process was down; fire-and-forget, failures are logged inside.
   void structuredSessions.recoverDetachedRuns();
+  aiTeams.reconcile();
 
   // ── Restart endpoint (needs server + wss in scope) ──
 
@@ -1057,6 +1098,7 @@ export async function startServer(
       shuttingDown = true;
       try { processes.dispose(); } catch { /* noop */ }
       try { structuredSessions.dispose(); } catch { /* noop */ }
+      aiTeams.dispose();
       try { structuredHosts.rustClient?.disconnect(); } catch { /* noop */ }
       try { structuredLogger.dispose(); } catch { /* noop */ }
       try { wsManager.dispose(); } catch { /* noop */ }
@@ -1310,6 +1352,7 @@ export async function startServer(
 
       try { processes.dispose(); } catch { /* best-effort shutdown */ }
       try { structuredSessions.dispose(); } catch { /* best-effort shutdown */ }
+      aiTeams.dispose();
       try { structuredHosts.rustClient?.disconnect(); } catch { /* best-effort shutdown */ }
       try { structuredLogger.dispose(); } catch { /* best-effort shutdown */ }
       try { wsManager.dispose(); } catch { /* best-effort shutdown */ }

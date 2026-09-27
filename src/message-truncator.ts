@@ -41,62 +41,319 @@ export interface BlockWindowedMessages extends WindowedMessages {
   leadingBlockOffset: number;
   /** turn messageOffset 的完整块数（客户端据此判断该 turn 是否已全部加载）。 */
   leadingBlockTotal: number;
+  /**
+   * 被切掉的头部里「用户可感知」的块数：默认收起的工具 / 思考块不计入（它们在客户端
+   * 合并成一条折叠条，不该被当成一条更早消息）。客户端据此显示「还有 N 条」。
+   */
+  leadingVisibleCount: number;
 }
 
 /**
- * 块级窗口：取完整历史「最近 blockBudget 个内容块」并做 transport 截断。
- * 从最新 turn 往回累计块数，能整条放下就整条放，放不下的那条（最旧的入窗 turn）
- * 只取其尾部若干块，并通过 leadingBlockOffset 告知客户端「这条 turn 还有更早的块」。
- * 客户端先按块翻完这条 turn 的头部，再按 turn 往前翻更早的整条。
+ * 首次下发（首屏）的载荷上限：截断后的聊天 JSON 体积。整段历史在这个体积内就不做窗口化 ——
+ * 一条提示词 + 一段长回复的会话不该因为几十个默认收起的工具块就出现「更早消息」。
+ * 超出的会话才按下面的预算从尾部切：客户端先翻这条 turn 的头部块，再按 turn 往前翻。
+ */
+export const MESSAGE_FIRST_PAINT_BYTES = 1024 * 1024;
+
+/**
+ * 吸附回退的额外载荷上限：折叠段往回吃掉的体积超过它就改为跳过整段，
+ * 而不是把整段拉进首屏（窗口的目标是压住首屏载荷，吸附不能反过来把它撑大）。
+ */
+const MAX_BLOCK_SNAP_BACK_BYTES = 128 * 1024;
+
+/** 每个块在客户端是否「默认收起」（思考块 + 默认收起的工具卡片，与传输截断同一口径）。 */
+export function collapsedBlockFlags(
+  content: ContentBlock[],
+  cardDefaults: CardExpandDefaults,
+): boolean[] {
+  const toolNameById = new Map<string, string>();
+  for (const block of content) {
+    if (block.type === "tool_use") toolNameById.set((block as ToolUseBlock).id, (block as ToolUseBlock).name);
+  }
+  return content.map((block) => {
+    switch (block.type) {
+      case "thinking":
+        return cardDefaults.thinking !== true;
+      case "tool_use":
+        return isToolDefaultCollapsed((block as ToolUseBlock).name, cardDefaults);
+      case "tool_result":
+        return isToolDefaultCollapsed(toolNameById.get((block as ToolResultBlock).tool_use_id) ?? "", cardDefaults);
+      default:
+        return false;
+    }
+  });
+}
+
+/**
+ * 单块在传输层的大致字节数（与 truncateMessagesForTransport 的截断口径一致，
+ * 否则「体积预算」会把已经截断的大块算得过重）。
+ */
+function blockTransportBytes(
+  block: ContentBlock,
+  cardDefaults: CardExpandDefaults,
+  toolNameById: Map<string, string>,
+): number {
+  switch (block.type) {
+    case "text":
+      return block.text.length;
+    case "thinking":
+      return block.thinking.length;
+    case "tool_use": {
+      const use = block as ToolUseBlock;
+      let bytes = use.id.length + use.name.length + 32;
+      if (use.input) bytes += JSON.stringify(use.input)?.length ?? 0;
+      if (use.description) bytes += use.description.length;
+      return bytes;
+    }
+    case "tool_result": {
+      const result = block as ToolResultBlock;
+      const raw = getContentString(result.content);
+      const collapsed = isToolDefaultCollapsed(
+        toolNameById.get(result.tool_use_id) ?? "",
+        cardDefaults,
+      );
+      const truncated = collapsed && !result.is_error &&
+        !contentHasStructuredImage(result.content) && raw.length > TRUNCATION_THRESHOLD;
+      return truncated ? SUMMARY_LENGTH + 4 : raw.length;
+    }
+    default:
+      return 0;
+  }
+}
+
+/**
+ * 一段内容在传输层的估算体积。`limit` 用来提前收尾：一旦确认超过它就不再往下算
+ * （预算判定只需要知道「超了」，不需要精确值）。
+ */
+export function contentTransportBytes(
+  content: ContentBlock[],
+  cardDefaults: CardExpandDefaults,
+  limit: number = Number.POSITIVE_INFINITY,
+): number {
+  const toolNameById = new Map<string, string>();
+  for (const block of content) {
+    if (block.type === "tool_use") toolNameById.set((block as ToolUseBlock).id, (block as ToolUseBlock).name);
+  }
+  let total = 0;
+  for (const block of content) {
+    total += blockTransportBytes(block, cardDefaults, toolNameById) + 32;
+    if (total > limit) return total;
+  }
+  return total;
+}
+
+/**
+ * 整段历史（或一条 turn）在可见条数 / 载荷两个预算内是否放得下。
+ * 任一预算被突破就立即返回 false，不把整段内容算完。
+ */
+function fitsBudgets(
+  turns: ConversationTurn[],
+  cardDefaults: CardExpandDefaults,
+  visibleBudget: number,
+  byteBudget: number,
+): boolean {
+  let visible = 0;
+  let bytes = 0;
+  for (let i = turns.length - 1; i >= 0; i -= 1) {
+    const content = turns[i].content;
+    visible += visibleBlockCount(content, cardDefaults, content.length);
+    if (visible > visibleBudget) return false;
+    bytes += contentTransportBytes(content, cardDefaults, byteBudget - bytes);
+    if (bytes > byteBudget) return false;
+  }
+  return true;
+}
+
+/**
+ * 从尾部往前取到两个预算用完为止，返回该起点：
+ * 默认收起的工具 / 思考块不占可见条数预算（它们在客户端合并成一条折叠条），只算体积。
+ */
+function cutStartByBudget(
+  content: ContentBlock[],
+  cardDefaults: CardExpandDefaults,
+  visibleBudget: number,
+  byteBudget: number,
+): number {
+  if (content.length === 0) return 0;
+  const collapsed = collapsedBlockFlags(content, cardDefaults);
+  const toolNameById = new Map<string, string>();
+  for (const block of content) {
+    if (block.type === "tool_use") toolNameById.set((block as ToolUseBlock).id, (block as ToolUseBlock).name);
+  }
+  let visible = 0;
+  let bytes = 0;
+  let cut = content.length;
+  for (let i = content.length - 1; i >= 0; i -= 1) {
+    const nextVisible = visible + (collapsed[i] ? 0 : 1);
+    const nextBytes = bytes + blockTransportBytes(content[i], cardDefaults, toolNameById) + 32;
+    if (nextVisible > visibleBudget || nextBytes > byteBudget) break;
+    visible = nextVisible;
+    bytes = nextBytes;
+    cut = i;
+  }
+  // 至少保留最后一块：单个巨块超预算时也得给客户端一点内容。
+  return cut >= content.length ? content.length - 1 : cut;
+}
+
+/** 段内最靠左的坐标：从 index 往回吃掉同一段折叠块。 */
+function collapsedRunStart(collapsed: boolean[], index: number): number {
+  let start = index;
+  while (start > 0 && collapsed[start - 1]) start -= 1;
+  return start;
+}
+
+/** 段内最靠右的坐标：从 index 往后吃掉同一段折叠块。 */
+function collapsedRunEnd(collapsed: boolean[], index: number): number {
+  let end = index;
+  while (end < collapsed.length && collapsed[end]) end += 1;
+  return end;
+}
+
+/**
+ * 把块级窗口 / 翻页的起点吸附到「语义干净」的位置：
+ *
+ * 1. 起点落在默认收起的折叠段中间 → 回到该段起点（整段入窗）。半截工具段在客户端
+ *    会渲染成一个少了前几个调用的折叠条，用户看着就是「更早消息缺了一块」。
+ * 2. 起点是配对的 tool_result（它的 tool_use 被切在前面）→ 回到 tool_use，否则客户端
+ *    顶部会冒出一张「无头结果」卡。
+ * 3. 需要往回吃掉的体积超过 MAX_BLOCK_SNAP_BACK_BYTES（或本页范围内吃不下）时不再
+ *    往回吸附，改为跳到该段之后（整段都是默认收起的内容，跳过去不会藏掉可见内容）。
+ *
+ * 返回吸附后的起点；起点越界时回退到 0（整条 turn 入窗，保证窗口不为空）。
+ */
+export function alignedBlockStart(
+  content: ContentBlock[],
+  cardDefaults: CardExpandDefaults,
+  rawStart: number,
+  forwardLimit: number = content.length,
+): number {
+  const total = content.length;
+  const start = Math.min(Math.max(rawStart, 0), total);
+  if (start <= 0 || total === 0) return 0;
+  const collapsed = collapsedBlockFlags(content, cardDefaults);
+  const useIndexById = new Map<string, number>();
+  content.forEach((block, index) => {
+    if (block.type === "tool_use") useIndexById.set((block as ToolUseBlock).id, index);
+  });
+
+  let cursor = start;
+  for (let guard = 0; guard <= total; guard += 1) {
+    let next = collapsed[cursor] ? collapsedRunStart(collapsed, cursor) : cursor;
+    const head = content[next];
+    if (head?.type === "tool_result") {
+      const useIndex = useIndexById.get((head as ToolResultBlock).tool_use_id);
+      if (useIndex !== undefined && useIndex < next) next = useIndex;
+    }
+    if (next === cursor) break;
+    cursor = next;
+  }
+  const snapBackBytes = contentTransportBytes(content.slice(cursor, start), cardDefaults);
+  if (snapBackBytes <= MAX_BLOCK_SNAP_BACK_BYTES) return cursor;
+
+  // 折叠段太长：不再往回吃，跳到该段之后，保证首屏载荷不因吸附膨胀。
+  const skipped = collapsed[cursor] ? collapsedRunEnd(collapsed, cursor) : cursor;
+  if (skipped >= total) return 0;
+  // 跳不到更晚的位置（只可能还是往回吃）或超过本页末尾时保持原切点。
+  if (skipped <= start || skipped >= forwardLimit) return start;
+  return skipped;
+}
+
+/** [0, end) 里用户可感知的块数（默认收起的工具 / 思考块不计入）。 */
+export function visibleBlockCount(
+  content: ContentBlock[],
+  cardDefaults: CardExpandDefaults,
+  end: number,
+): number {
+  const limit = Math.min(Math.max(end, 0), content.length);
+  const collapsed = collapsedBlockFlags(content, cardDefaults);
+  let count = 0;
+  for (let i = 0; i < limit; i += 1) {
+    if (!collapsed[i]) count += 1;
+  }
+  return count;
+}
+
+/**
+ * 块级窗口：默认取整段历史（只要它在预算内），超出的才从最新 turn 往回累计，
+ * 能整条放下就整条放，放不下的那条（最旧的入窗 turn）只取其尾部若干块，
+ * 并通过 leadingBlockOffset 告知客户端「这条 turn 还有更早的块」。
+ *
+ * 预算口径：`blockBudget` 数的是**用户可感知的条数**（默认收起的工具 / 思考块不计入），
+ * 另外叠加一层载荷上限 —— 否则一段长工具调用会把预算吃光，把用户自己的提示词挤出首屏，
+ * 一条提示词的会话也会莫名出现「更早消息」。
  */
 export function blockWindowMessagesForTransport(
   all: ConversationTurn[] | undefined,
   cardDefaults: CardExpandDefaults,
   blockBudget: number = MESSAGE_BLOCK_WINDOW,
+  byteBudget: number = MESSAGE_FIRST_PAINT_BYTES,
 ): BlockWindowedMessages {
   const turns = all ?? [];
   const total = turns.length;
   if (total === 0) {
-    return { messages: [], messageOffset: 0, messageTotal: 0, leadingBlockOffset: 0, leadingBlockTotal: 0 };
+    return {
+      messages: [],
+      messageOffset: 0,
+      messageTotal: 0,
+      leadingBlockOffset: 0,
+      leadingBlockTotal: 0,
+      leadingVisibleCount: 0,
+    };
   }
-  const budget = Math.max(1, blockBudget);
+  const visibleBudget = Math.max(1, blockBudget);
+
+  // 整段历史放得下就不做窗口化：短会话（一条提示词 + 一段长回复）不该出现「更早消息」。
+  if (fitsBudgets(turns, cardDefaults, visibleBudget, byteBudget)) {
+    const last = turns[total - 1];
+    return {
+      messages: truncateMessagesForTransport(turns, cardDefaults),
+      messageOffset: 0,
+      messageTotal: total,
+      leadingBlockOffset: 0,
+      leadingBlockTotal: last.content.length,
+      leadingVisibleCount: 0,
+    };
+  }
 
   let startTurn = total - 1;
   let leadingBlockOffset = 0;
-  let acc = 0;
-  for (let i = total - 1; i >= 0; i--) {
-    const n = turns[i].content.length;
-    if (i === total - 1) {
-      // 最新一条 turn 必须入窗：整条放得下就整条，放不下取尾部 budget 块。
-      if (n <= budget) {
-        acc = n;
-        startTurn = i;
-        leadingBlockOffset = 0;
-      } else {
-        startTurn = i;
-        leadingBlockOffset = n - budget;
-        acc = budget;
-        break;
-      }
-    } else if (acc + n <= budget) {
-      acc += n;
+  let accVisible = 0;
+  let accBytes = 0;
+  for (let i = total - 1; i >= 0; i -= 1) {
+    const content = turns[i].content;
+    const visible = visibleBlockCount(content, cardDefaults, content.length);
+    const bytes = contentTransportBytes(content, cardDefaults, byteBudget - accBytes);
+    if (accVisible + visible <= visibleBudget && accBytes + bytes <= byteBudget) {
+      accVisible += visible;
+      accBytes += bytes;
       startTurn = i;
       leadingBlockOffset = 0;
-    } else {
-      const remaining = budget - acc;
-      if (remaining > 0) {
-        startTurn = i;
-        leadingBlockOffset = n - remaining;
-        acc += remaining;
-      }
-      break;
+      continue;
     }
+    // 放不下：按剩余预算切进这条 turn 的尾部；预算已耗尽则到此为止。
+    const remainVisible = visibleBudget - accVisible;
+    const remainBytes = byteBudget - accBytes;
+    if (i !== total - 1 && (remainVisible <= 0 || remainBytes <= 0)) break;
+    startTurn = i;
+    leadingBlockOffset = cutStartByBudget(
+      content,
+      cardDefaults,
+      Math.max(remainVisible, 1),
+      Math.max(remainBytes, 1),
+    );
+    break;
   }
+
+  // 最旧入窗 turn 的切点吸附到干净边界：不切开折叠的工具段，也不留下无头 tool_result。
+  const headContent = turns[startTurn].content;
+  const startOffset = leadingBlockOffset > 0
+    ? alignedBlockStart(headContent, cardDefaults, leadingBlockOffset)
+    : 0;
 
   const windowedTurns: ConversationTurn[] = [];
   for (let i = startTurn; i < total; i++) {
-    if (i === startTurn && leadingBlockOffset > 0) {
-      windowedTurns.push({ ...turns[i], content: turns[i].content.slice(leadingBlockOffset) });
+    if (i === startTurn && startOffset > 0) {
+      windowedTurns.push({ ...turns[i], content: turns[i].content.slice(startOffset) });
     } else {
       windowedTurns.push(turns[i]);
     }
@@ -106,8 +363,9 @@ export function blockWindowMessagesForTransport(
     messages: truncateMessagesForTransport(windowedTurns, cardDefaults),
     messageOffset: startTurn,
     messageTotal: total,
-    leadingBlockOffset,
-    leadingBlockTotal: turns[startTurn].content.length,
+    leadingBlockOffset: startOffset,
+    leadingBlockTotal: headContent.length,
+    leadingVisibleCount: visibleBlockCount(headContent, cardDefaults, startOffset),
   };
 }
 

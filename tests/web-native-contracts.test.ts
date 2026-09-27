@@ -114,7 +114,8 @@ test("Android native terminal consumes Render snapshots over the PTY websocket",
     "initialFontSize = fontSize,",
     "val typeface = remember { terminalTypeface(context.assets) }",
     "replayTerminalSnapshot(emulator, data.terminalState, data.output, data.ptyCols, data.ptyRows)",
-    "emulator.writeInput(it.toByteArray(Charsets.UTF_8))",
+    // 输出帧必须同步写进 emulator 后才 ACK；变量名从 it 改成 chunk 只是写法调整。
+    "emulator.writeInput(chunk.toByteArray(Charsets.UTF_8))",
     "socket.acknowledgePty(event.ptyBytes ?: 0)",
   ]);
   // 字体回退链在 TerminalAppearance.kt：资产字体优先、系统 mono 兜底。
@@ -259,7 +260,8 @@ test("task board create sheets only assign agents from the doing column", () => 
     "var status by remember { mutableStateOf(initialStatus) }",
     "if (boardCreateDispatches(status) && description.isNotBlank())",
     "onCreateForStatus: (String) -> Unit",
-    'BoardSectionHeader(status = status, count = items.size, onAdd = onCreateForStatus)',
+    'BoardSectionHeader(',
+    'onAdd = onCreateForStatus,',
     'contentDescription = "在${boardTaskStatusLabel(status)}中新建任务"',
     'label = if (busy) "创建中…" else if (dispatches && description.trim().isNotEmpty()) "创建并指派" else "创建任务"',
     'enabled = !busy && (title.trim().isNotEmpty() || description.trim().isNotEmpty())',
@@ -429,21 +431,24 @@ test("activity folds stay consecutive and split when prose arrives", () => {
   );
 
   includesAll("android/app/src/main/java/com/wand/app/ui/screens/ChatBlocks.kt", [
-    "连续思考/工具收成一条压缩条",
+    "连续思考/工具收成一条滚动窗口",
     "fun collapseActivityItems(",
-    "renderItems.last() is SegmentRenderItem.Activity",
+    // 本轮最后一段活动标记成「最新」：新的活动一出现，上一段自己收回状态条。
+    "newest = isLastTurn",
+    "LocalActivityWindowTail provides group.items.lastIndex",
   ]);
 
   includesAll("ios/Wand/ChatView.swift", [
     "struct ActivityFoldCard",
-    // 折叠展开态由卡片自己的 @State 管理；running 只看当前轮次是否在回复。
-    "@State private var expanded = false",
+    // 展开态默认跟随「最新一段活动」，用户手动收放后不再被自动状态覆盖。
+    "_expanded = State(initialValue: group.newest)",
+    "activityWindowTail",
     "summarizeActivityItems",
   ]);
 
   includesAll("macos/Wand/ChatView.swift", [
     "struct ActivityFoldCard",
-    "@State private var expanded = false",
+    "_expanded = State(initialValue: activityGroup.newest)",
     "summarizeActivityItems",
   ]);
 });

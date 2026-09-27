@@ -1,0 +1,186 @@
+import type { AgentActivityState } from "./mission-types.js";
+import type { WandTaskAgent } from "./task-types.js";
+import type { ConversationTurn } from "./types.js";
+
+export const AI_TEAM_MIN_MEMBERS = 2;
+export const AI_TEAM_MAX_MEMBERS = 8;
+export const AI_TEAM_DEFAULT_MAX_STEPS = 30;
+export const AI_TEAM_MIN_STEPS = 5;
+export const AI_TEAM_MAX_STEPS = 200;
+/** 每个成员的执行候选上限（1 首选 + 3 备用，§11-Q5）。 */
+export const AI_TEAM_MAX_CANDIDATES = 4;
+
+/** 成员职责标注；缺省视同 "any"。 */
+export type TeamMemberRole = "plan" | "work" | "verify" | "any";
+export const TEAM_MEMBER_ROLES: readonly TeamMemberRole[] = ["plan", "work", "verify", "any"];
+
+export function isTeamMemberRole(value: unknown): value is TeamMemberRole {
+  return TEAM_MEMBER_ROLES.includes(value as TeamMemberRole);
+}
+
+export interface AiTeamMember {
+  /** 团队内唯一，形如 "m_xxxxxxxx"；Leader 派工时原样引用。 */
+  id: string;
+  name: string;
+  /** 职责说明，原样写进提示词。 */
+  duty: string;
+  /** v2：有序候选执行配置，第一个优先；至少 1 个。 */
+  agents: WandTaskAgent[];
+  /** 兼容字段：始终等于 agents[0]，供未升级读端使用（§3.6 读点清单）。 */
+  agent: WandTaskAgent;
+  /** 职责标注；缺省视同 "any"。 */
+  role?: TeamMemberRole;
+  isLeader: boolean;
+  /** 头像：空串按 id 哈希选毛色；"cat:<n>" 指定毛色；"data:image/…" 为用户上传的小图。 */
+  avatar?: string;
+}
+
+/**
+ * 取成员候选列表：agents 缺失/空 → [agent]，否则原样返回。
+ * 参数刻意放宽为部分字段，让未归一的裸 JSON（旧 members_json / team_json）也能直接调用。
+ */
+export function memberAgents(member: {
+  agent?: WandTaskAgent | undefined;
+  agents?: WandTaskAgent[] | undefined;
+}): WandTaskAgent[] {
+  if (Array.isArray(member.agents) && member.agents.length > 0) return member.agents;
+  return member.agent ? [member.agent] : [];
+}
+
+/**
+ * 候选身份 = 五元组精确匹配（§3.5）；黑名单与保存期去重共用。
+ * 按字面量比较：model:"default" 不与具体默认模型名做等价归一。
+ */
+export function agentKey(agent: WandTaskAgent): string {
+  return `${agent.provider}|${agent.model}|${agent.thinkingEffort}|${agent.mode}|${agent.kind}`;
+}
+
+/** 启动失败分类（§3.4）；ai-team-availability（T2）复用此联合类型。 */
+export type CandidateFailureKind =
+  | "spawn-missing"
+  | "host-disabled"
+  | "model-unknown"
+  | "startup-timeout"
+  | "runtime-failure"
+  | "format-error"
+  | "user-stop";
+
+/** 步骤实际派发用的候选与本步之前跳过的候选（§3.2，存 ai_team_steps.dispatch_info_json）。 */
+export interface StepDispatchInfo {
+  usedCandidate: number;
+  skipped: Array<{
+    candidate: number;
+    agent: WandTaskAgent;
+    /** summarizeError 式清洗后的人类文案。 */
+    reason: string;
+    errorKind: CandidateFailureKind;
+  }>;
+}
+
+/** 上传头像在前端缩成小图后的上限（data URL 字符数）。 */
+export const AI_TEAM_AVATAR_MAX_CHARS = 60_000;
+
+export interface AiTeam {
+  id: string;
+  name: string;
+  description: string;
+  /** 协作指令：分工、工作要求与注意事项，写进负责人和成员的提示词。 */
+  instructions: string;
+  members: AiTeamMember[];
+  requirePlanApproval: boolean;
+  /** Leader 轮次 + 成员步骤合计的上限。 */
+  maxSteps: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type AiTeamRunStatus =
+  | "running"
+  | "awaiting_approval"
+  | "waiting_user"
+  | "done"
+  | "failed"
+  | "stopped";
+
+export const AI_TEAM_ACTIVE_RUN_STATUSES: readonly AiTeamRunStatus[] = ["running", "awaiting_approval", "waiting_user"];
+
+export interface AiTeamRun {
+  id: string;
+  teamId: string;
+  /** 启动时的团队快照；之后改团队不影响已开始的运行。 */
+  team: AiTeam;
+  taskId: string;
+  objective: string;
+  cwd: string;
+  status: AiTeamRunStatus;
+  statusDetail: string;
+  stepsUsed: number;
+  stepLimit: number;
+  /** 当前这轮 Leader 回复格式错误的重试次数。 */
+  formatRetries: number;
+  /** 首个计划是否已被批准（或无需批准）。 */
+  planApproved: boolean;
+  /** 这次运行的群聊会话；旧运行没有。 */
+  chatSessionId: string | null;
+  /** 成员干活时用户在群里说的话，等负责人下一轮一起转告。 */
+  pendingNotes: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 会话列表用的群聊标记：chat_session_id → 最近一次运行（`AiTeamRunChatMarker` 索引的 value）。
+ * 只带列表徽标和点开 IM 视图所需的入口信息，不暴露运行细节。
+ */
+export interface AiTeamRunChatMarker {
+  runId: string;
+  teamName: string;
+  memberCount: number;
+}
+
+export type AiTeamStepKind = "leader" | "work";
+export type AiTeamStepStatus = "queued" | "running" | "done" | "failed" | "skipped";
+
+export interface AiTeamStep {
+  id: string;
+  runId: string;
+  seq: number;
+  kind: AiTeamStepKind;
+  memberId: string;
+  title: string;
+  /** 发给成员（或 Leader）的输入。 */
+  instructions: string;
+  sessionId: string | null;
+  status: AiTeamStepStatus;
+  /** 这些步骤都完成后才能开始；空数组表示可立即开始（同一成员仍一次只做一步）。 */
+  dependsOn: string[];
+  /** work：成员报告；leader：Leader 给用户看的说明。 */
+  report: string;
+  /** 约定的报告文件，相对 run.cwd。 */
+  reportPath: string;
+  startedAt: string | null;
+  endedAt: string | null;
+  /**
+   * 本步实际派发用的候选与之前的跳过链（§3.2，存 ai_team_steps.dispatch_info_json）。
+   * 缺省 = 首选、没跳过过任何候选；旧运行不凭空造出留痕。
+   */
+  dispatchInfo?: StepDispatchInfo;
+}
+
+/** 团队页的运行记录：带上任务卡标题，免去前端再查。 */
+export interface AiTeamRunSummary extends AiTeamRun {
+  taskTitle: string;
+  taskIdentifier: string;
+}
+
+/** detail() 里群聊回合的截尾条数（§4.4）：面板只给最近这一段，完整会话走「打开群聊」。 */
+export const AI_TEAM_DETAIL_CHAT_TURNS = 200;
+
+export interface AiTeamRunDetail {
+  run: AiTeamRun;
+  steps: AiTeamStep[];
+  /** 运行中步骤所在会话的实时状态（等待授权 / 等待回答等）。 */
+  memberStates: Record<string, AgentActivityState>;
+  /** 群聊 relay 会话的消息，截尾 AI_TEAM_DETAIL_CHAT_TURNS 条；没有群聊会话的旧运行为空数组。 */
+  chatTurns: ConversationTurn[];
+}

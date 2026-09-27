@@ -14,6 +14,7 @@ import {
 } from "./git-worktree.js";
 import type { SessionRegistry } from "./session-registry.js";
 import type { WandStorage } from "./storage.js";
+import type { AiTeamRunChatMarker } from "./ai-team-types.js";
 import { collectSessionTopicBlocklist } from "./session-topic.js";
 import { resolveSessionDisplayTitle } from "./session-transport.js";
 import { type LayoutNode, type PaneTab, type SessionSnapshot, type TaskWindowLayout, type Workspace, type WorkspaceDefaultProvider, type WorkspaceTask, type WorkspaceTaskWorktree } from "./types.js";
@@ -22,7 +23,7 @@ import { defaultMilestoneIdForWrite, resolvedMilestoneFields, scopedMilestoneId 
 import { archiveBoardTaskForWorkspaceTask, archiveWorkspaceTask, ensureBoardTaskForWorkspaceTask, isUnnamedWorkspaceTaskName, moveSessionToWorkspaceTask, syncSidebarTasksFromBoard, UNNAMED_WORKSPACE_TASK_NAME } from "./wand-task-sync.js";
 import { isSessionProvider } from "./session-provider.js";
 import { firstLayoutTabId } from "./layout-tree.js";
-import { refreshAutoBoardTaskTitles, type AutoTaskTitleOptions } from "./server-task-routes.js";
+import { parentTaskIdFrom, refreshAutoBoardTaskTitles, type AutoTaskTitleOptions } from "./server-task-routes.js";
 import { provisionalTaskTitleFromDescription } from "./task-title.js";
 
 function workspaceSessionTitle(
@@ -47,6 +48,7 @@ function workspaceSessionSummary(
   session: SessionSnapshot,
   names: { taskName?: string | null; workspaceName?: string | null } = {},
   registry?: SessionRegistry,
+  teamChat?: AiTeamRunChatMarker | null,
 ) {
   const live = liveSession(session, registry);
   return {
@@ -62,6 +64,7 @@ function workspaceSessionSummary(
     inFlight: live.structuredState?.inFlight === true,
     cwd: live.cwd,
     startedAt: live.startedAt,
+    ...(teamChat ? { teamChat } : {}),
   };
 }
 
@@ -170,7 +173,10 @@ function taskRuntimeCwd(task: WorkspaceTask, workspace: Pick<Workspace, "cwd"> |
 function createTaskForWorkspace(
   storage: WandStorage,
   workspace: Workspace,
-  body: { name?: unknown; description?: unknown; baseRef?: unknown; worktree?: unknown; cwd?: unknown; milestoneId?: unknown },
+  body: {
+    name?: unknown; description?: unknown; baseRef?: unknown; worktree?: unknown;
+    cwd?: unknown; milestoneId?: unknown; parentTaskId?: unknown;
+  },
 ): {
   task: WorkspaceTask;
   cwd: string;
@@ -180,6 +186,10 @@ function createTaskForWorkspace(
   const name = typeof body.name === "string" ? body.name.trim() : "";
   // 首个会话的提示词：任务没起名时用它先总结一个标题，不再留「未命名任务」占位。
   const description = typeof body.description === "string" ? body.description.trim() : "";
+  // 在建 workspace task / worktree 前校验，避免父任务失效时留下孤立任务。
+  const parentTaskId = parentTaskIdFrom(
+    storage, body.parentTaskId ?? null, isGlobalWorkspace(workspace) ? null : workspace.id,
+  );
   // 留空（或老客户端回传的占位名）走自动命名：先用提示词总结，再交给模型改写。
   const named = name.length > 0 && !isUnnamedWorkspaceTaskName(name);
   const provisional = named ? "" : provisionalTaskTitleFromDescription(description);
@@ -227,6 +237,7 @@ function createTaskForWorkspace(
   ensureBoardTaskForWorkspaceTask(storage, task, workspace, {
     titleSource: named ? "user" : "auto",
     description,
+    parentTaskId,
   });
   return {
     task,
@@ -392,10 +403,13 @@ export function registerWorkspaceRoutes(
       return;
     }
     storage.touchWorkspace(workspace.id);
+    const teamChatMarkers = storage.listAiTeamRunChatMarkers();
     res.json({
       ...workspaceWithCounts(storage, workspace),
       sessions: storage.listSessionsByWorkspace(workspace.id).map((session) => ({
-        ...workspaceSessionSummary(session, { workspaceName: workspace.name }, sessions),
+        ...workspaceSessionSummary(
+          session, { workspaceName: workspace.name }, sessions, teamChatMarkers.get(session.id),
+        ),
         workspaceTaskId: session.workspaceTaskId,
       })),
     });
@@ -495,7 +509,8 @@ export function registerWorkspaceRoutes(
     const workspace = storage.ensureGlobalWorkspace();
     try {
       const created = createTaskForWorkspace(storage, workspace, req.body as {
-        name?: unknown; description?: unknown; baseRef?: unknown; worktree?: unknown; cwd?: unknown; milestoneId?: unknown;
+        name?: unknown; description?: unknown; baseRef?: unknown; worktree?: unknown;
+        cwd?: unknown; milestoneId?: unknown; parentTaskId?: unknown;
       });
       // 带提示词建的任务立刻排上模型总结（响应里已经是提示词临时标题）。
       refreshAutoBoardTaskTitles(storage, titleOptions);
@@ -555,10 +570,12 @@ export function registerWorkspaceRoutes(
       tasks: unknown[];
       standaloneSessions: unknown[];
     }
+    // 群聊标记一次查全：列表里每条会话只做 Map 命中，不逐个查库。
+    const teamChatMarkers = storage.listAiTeamRunChatMarkers();
     const summarize = (
       session: SessionSnapshot,
       names: { taskName?: string; workspaceName?: string } = {},
-    ) => workspaceSessionSummary(session, names, sessions);
+    ) => workspaceSessionSummary(session, names, sessions, teamChatMarkers.get(session.id));
     // 目录自定义名（工作区名称）：没有项目实体的合成目录也按这个名字显示。
     const directoryNames = storage.listSessionDirectoryNames();
     const customNameForCwd = (cwd: string): string | undefined => {
@@ -834,7 +851,8 @@ export function registerWorkspaceRoutes(
     }
     try {
       const created = createTaskForWorkspace(storage, workspace, req.body as {
-        name?: unknown; description?: unknown; baseRef?: unknown; worktree?: unknown; cwd?: unknown; milestoneId?: unknown;
+        name?: unknown; description?: unknown; baseRef?: unknown; worktree?: unknown;
+        cwd?: unknown; milestoneId?: unknown; parentTaskId?: unknown;
       });
       refreshAutoBoardTaskTitles(storage, titleOptions);
       res.status(201).json({
@@ -858,6 +876,7 @@ export function registerWorkspaceRoutes(
     }
     storage.touchWorkspaceTask(task.id);
     const workspace = storage.getWorkspace(task.workspaceId);
+    const teamChatMarkers = storage.listAiTeamRunChatMarkers();
     res.json({
       ...task,
       ...resolvedMilestoneFields(storage, task.milestoneId),
@@ -866,7 +885,7 @@ export function registerWorkspaceRoutes(
         ...workspaceSessionSummary(session, {
           taskName: task.name,
           workspaceName: workspace?.name,
-        }, sessions),
+        }, sessions, teamChatMarkers.get(session.id)),
         workspaceTaskId: task.id,
       })),
     });

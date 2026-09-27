@@ -109,13 +109,14 @@ export function ensureBoardTaskForWorkspaceTask(
   storage: WandStorage,
   task: WorkspaceTask,
   workspace: Workspace,
-  options: { titleSource?: WandTaskTitleSource; description?: string } = {},
+  options: { titleSource?: WandTaskTitleSource; description?: string; parentTaskId?: string | null } = {},
 ): WandTask {
   const existing = storage.getWandTaskByWorkspaceTaskId(task.id);
   if (existing) return existing;
   return storage.createWandTask({
     workspaceId: workspace.kind === "global" ? null : workspace.id,
     workspaceTaskId: task.id,
+    parentTaskId: options.parentTaskId ?? null,
     title: task.name,
     // 占位名（未命名任务 / 新任务 / 空）走自动命名；用户填过名就是 user，永不被模型覆盖。
     titleSource: options.titleSource ?? (isUnnamedWorkspaceTaskName(task.name) ? "auto" : "user"),

@@ -1,5 +1,6 @@
 import * as React from "react";
 import { classNames } from "./class-names";
+import { reduceMotion } from "./reduce-motion";
 import { stretchIndicatorFrames, type StretchIndicatorBox } from "./stretch-indicator";
 
 export interface WandStretchTab {
@@ -13,10 +14,6 @@ export interface WandStretchTabsProps {
   ariaLabel: string;
   className?: string;
   onValueChange(value: string): void;
-}
-
-function reduceMotion(): boolean {
-  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
 function measureTab(list: HTMLElement, value: string): StretchIndicatorBox | null {

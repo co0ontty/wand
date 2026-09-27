@@ -46,6 +46,12 @@ const BUDGET = {
   //      两次发布都因此被 CI 的 build 步骤挡住（npm publish 一步都没跑）。这次只补到
   //      512 KiB（524_288 B）并留 ~2.5 KiB 余量，不再往上顶：下一批前端改动必须先瘦
   //      身（懒加载重型面板 / 挪出 tool 元数据）或在此处降回数字。
+  //   5) AI 团队（团队页、成员头像、CLI 下拉里的团队选项、任务详情运行面板）一度把 CI
+  //      （Node 22 zlib）下的 gzip 推到 526_340 B。没有再上调：团队页与运行面板连同样式
+  //      拆成按需脚本 content/ai-teams.js（scripts/ai-teams-chunk.js，约 12.5 KiB gzip，
+  //      不内联、不计入本预算），主包回落到约 504 KiB。之后的大块低频界面照此拆分。
+  //      注意：Homebrew Node 23 的 zlib 1.2.12 压出来比 CI 小约 2 KiB，本地核对预算
+  //      要用 Node 22/24，否则会误报通过。
   // 下一次真正瘦身（懒加载重型面板等）后必须把这几个值一起降回去。
   // 已知的最大单块肥肉：tailwind-merge（bundle 内 ~103 KiB raw，由 @appica/ui-react
   // 的 cn() 间接引入）与 react-dom（~553 KiB raw）；真要瘦身从这两处下手。

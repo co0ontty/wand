@@ -1,5 +1,5 @@
 import type { Express } from "express";
-import { getDefaultModelForProvider } from "./config.js";
+import { dispatchAgentForTask } from "./agent-dispatch.js";
 import { asyncRoute } from "./express-async.js";
 import { getErrorMessage } from "./error-utils.js";
 import { bodyObject, sendRouteError, text } from "./server-request.js";
@@ -15,8 +15,8 @@ import type { ProcessManager } from "./process-manager.js";
 import type { WandTaskAgent, WandTaskAgentKind, WandTaskAgentMode, WandTaskPriority, WandTaskStatus, WandTaskTitleSource } from "./task-types.js";
 import { DEFAULT_WAND_TASK_AGENT_KIND, DEFAULT_WAND_TASK_AGENT_MODE, DEFAULT_WAND_TASK_PRIORITY, isWandTaskAgentKind, isWandTaskAgentMode, normalizeWandTaskAgentMode, WAND_MILESTONE_NAME_MAX_LENGTH } from "./task-types.js";
 import { archiveBoardTask, ensureWorkspaceTaskForBoardTask, isAutoNameableBoardTask, moveSessionToWorkspaceTask, syncClosedBoardTask, syncUngroupedSessionsToBoard, syncWorkspaceTaskToBoard, taskAutoNameSignature, taskAutoNameSourceText } from "./wand-task-sync.js";
-import type { SessionProvider, SessionSnapshot, WandConfig } from "./types.js";
-import { isSessionProvider, providerCliCommand } from "./session-provider.js";
+import type { SessionSnapshot, WandConfig } from "./types.js";
+import { isSessionProvider } from "./session-provider.js";
 import { isThinkingEffort } from "./structured-provider-common.js";
 
 const STATUSES = new Set<WandTaskStatus>(["todo", "doing", "done", "archived"]);
@@ -75,7 +75,7 @@ function labelsFrom(value: unknown): string[] {
 }
 
 /** 新认领只能挂到同项目且正在处理的任务；历史归属在父任务完成后仍保留。 */
-function parentTaskIdFrom(
+export function parentTaskIdFrom(
   storage: WandStorage,
   value: unknown,
   workspaceId: string | null,
@@ -596,57 +596,27 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
         if (workspaceId !== task.workspaceId) assertTaskWorkspaceMove(storage, task.id, workspaceId);
         task = storage.updateWandTask(task.id, { workspaceId }) ?? task;
       }
-      const workspace = task.workspaceId ? storage.getWorkspace(task.workspaceId) : null;
-      if (task.workspaceId && !workspace) throw new Error("任务所属项目已被删除，请重新指定。");
-      const group = ensureWorkspaceTaskForBoardTask(storage, task);
-      task = storage.getWandTask(task.id)!;
-      const cwd = group.worktree?.path || group.cwd || workspace?.cwd || config.defaultCwd;
       const requestedPrompt = text(body.prompt);
       const existingSessions = storage.listWandTaskSessionIds(task.id).length;
       if (existingSessions > 0 && !requestedPrompt) throw new Error("请输入提示词。");
       const prompt = requestedPrompt || task.description.trim() || task.title || "执行此任务";
-      const model = agent.model === "default" ? "" : agent.model;
-      const provider = agent.provider as SessionProvider;
-      const resolvedModel = model || getDefaultModelForProvider(config, provider) || undefined;
-      const session = agent.kind === "pty"
-        ? await processes!.start(providerCliCommand(provider), cwd, agent.mode, prompt, {
-            provider,
-            model: resolvedModel,
-            thinkingEffort: agent.thinkingEffort,
-            sessionSource: "automation",
-            automationId: `wand-task:${task.id}`,
-            workspaceId: group.workspaceId,
-            workspaceTaskId: group.id,
-          })
-        : structured!.createSession({
-            cwd,
-            mode: agent.mode,
-            provider,
-            model: resolvedModel,
-            thinkingEffort: agent.thinkingEffort,
-            worktreeEnabled: false,
-            sessionSource: "automation",
-            automationId: `wand-task:${task.id}`,
-            workspaceId: group.workspaceId,
-            workspaceTaskId: group.id,
-          });
+      const { session, cwd, workspaceId } = await dispatchAgentForTask(
+        { storage, config, structured: structured ?? null, processes: processes ?? null },
+        { task, agent, prompt, automationId: `wand-task:${task.id}` },
+      );
+      task = storage.getWandTask(task.id)!;
       storage.updateWandTask(task.id, { agent, status: task.status === "todo" ? "doing" : task.status });
-      storage.bindWandTaskSession(task.id, session.id);
       // 派发也算一轮迭代里的改动意图：直接把任务的标题 / 描述记进迭代记录。
       recordIterationPromptForTask(storage, {
         sessionId: session.id,
         cwd,
-        workspaceId: group.workspaceId,
+        workspaceId,
         milestoneId: task.milestoneId,
         taskId: task.id,
         title: task.title,
         detail: task.description || prompt,
         source: "dispatch",
       });
-      if (agent.kind !== "pty") {
-        const completion = structured!.sendMessage(session.id, prompt);
-        completion.catch((error) => console.error(`[WandTask] Agent dispatch failed for ${task.id}:`, error));
-      }
       res.status(202).json({
         ok: true,
         taskId: task.id,

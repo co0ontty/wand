@@ -1,4 +1,5 @@
 import { callConfiguredAiText, type QuickCommitAiOptions } from "./git-quick-commit.js";
+import type { AiTextRequest } from "./system-ai.js";
 import { clipAtWordBoundary } from "./text-utils.js";
 
 /** 任务标题留空时由描述自动生成；面板上显示得下，也不至于截断成半句话。 */
@@ -77,16 +78,16 @@ export async function generateWandTaskTitle(
   const input = description.trim().slice(0, DESCRIPTION_HINT_MAX);
   if (!input) throw new Error("没有可总结的任务描述。");
   const outputLanguage = language.trim() || "与描述相同的语言";
-  const prompt = [
-    "根据下面的任务描述，写一个用于任务列表的具体标题。",
-    `使用${outputLanguage}输出。`,
-    "只输出标题本身：一行纯文本，不要引号、不要 Markdown、不要编号、不要「标题：」这类前缀、不要任何解释。",
-    "不超过 20 个字，必须点出描述里的具体对象或动作，不要使用「任务」「待办」「关于」「请求」等空泛词。",
-    "",
-    "任务描述：",
-    input,
-  ].join("\n");
-  const raw = await callConfiguredAiText(prompt, cwd || process.cwd(), language, ai);
+  const request: AiTextRequest = {
+    system: [
+      "根据用户消息里的任务描述，写一个用于任务列表的具体标题。",
+      `使用${outputLanguage}输出。`,
+      "只输出标题本身：一行纯文本，不要引号、不要 Markdown、不要编号、不要「标题：」这类前缀、不要任何解释。",
+      "不超过 20 个字，必须点出描述里的具体对象或动作，不要使用「任务」「待办」「关于」「请求」等空泛词。",
+    ].join("\n"),
+    prompt: `任务描述：\n${input}`,
+  };
+  const raw = await callConfiguredAiText(request, cwd || process.cwd(), language, ai);
   const stripped = stripGeneratedTitle(raw);
   // 拿到报错文案 / 整段解释时宁可保留占位标题，也不能把垃圾写进看板。
   // 先判可信度再裁剪：截断过的长句看起来就像标题，会绕过长度检查。

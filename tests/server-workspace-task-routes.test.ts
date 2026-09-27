@@ -9,6 +9,8 @@ import test from "node:test";
 
 import express from "express";
 
+import type { AiTeam, AiTeamRun } from "../src/ai-team-types.js";
+
 import { jsonErrorHandler } from "../src/express-async.js";
 import { registerWorkspaceRoutes } from "../src/server-workspace-routes.js";
 import { WandStorage } from "../src/storage.js";
@@ -183,6 +185,51 @@ test("a task created without a name is titled from its first prompt", async () =
     const card = storage.getWandTaskByWorkspaceTaskId(created.id);
     assert.equal(card?.titleSource, "auto");
     assert.equal(card?.description, prompt);
+  } finally {
+    await close();
+    storage.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workspace and standalone task creation can claim a doing parent without orphaning invalid children", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-task-parent-create-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const { baseUrl, close } = await startWorkspaceApp(storage);
+  try {
+    const workspace = storage.createWorkspace({ name: "Project", cwd: root });
+    const other = storage.createWorkspace({ name: "Other", cwd: path.join(root, "other") });
+    const parent = storage.createWandTask({ title: "Parent", workspaceId: workspace.id, status: "doing" });
+    const globalParent = storage.createWandTask({ title: "Global parent", status: "doing" });
+    const closed = storage.createWandTask({ title: "Closed", workspaceId: workspace.id, status: "done" });
+    const create = (route: string, parentTaskId: string) => fetch(`${baseUrl}${route}`,
+      json({ name: "Child", parentTaskId }));
+
+    const projectResponse = await create(`/api/workspaces/${workspace.id}/tasks`, parent.id);
+    assert.equal(projectResponse.status, 201);
+    const projectTask = await projectResponse.json() as { id: string };
+    assert.equal(storage.getWandTaskByWorkspaceTaskId(projectTask.id)?.parentTaskId, parent.id);
+    assert.equal(storage.getWandTaskByWorkspaceTaskId(projectTask.id)?.workspaceId, workspace.id);
+
+    const globalResponse = await create("/api/tasks", globalParent.id);
+    assert.equal(globalResponse.status, 201);
+    const globalTask = await globalResponse.json() as { id: string };
+    assert.equal(storage.getWandTaskByWorkspaceTaskId(globalTask.id)?.parentTaskId, globalParent.id);
+    assert.equal(storage.getWandTaskByWorkspaceTaskId(globalTask.id)?.workspaceId, null);
+
+    const before = storage.listWorkspaceTasks(workspace.id).length;
+    for (const [route, id, message] of [
+      [`/api/workspaces/${workspace.id}/tasks`, closed.id, /正在处理/],
+      [`/api/workspaces/${workspace.id}/tasks`, globalParent.id, /同一项目/],
+      [`/api/workspaces/${workspace.id}/tasks`, "missing", /不存在/],
+      ["/api/tasks", parent.id, /同一项目/],
+    ] as const) {
+      const response = await create(route, id);
+      assert.equal(response.status, 400);
+      assert.match((await response.json() as { error: string }).error, message);
+    }
+    assert.equal(storage.listWorkspaceTasks(workspace.id).length, before);
+    assert.equal(storage.listWorkspaceTasks(other.id).length, 0);
   } finally {
     await close();
     storage.close();
@@ -843,6 +890,55 @@ test("archiving a board card hides its sidebar container without deleting the ta
     assert.equal(storage.getWorkspaceTask(created.id)?.status, "done");
     assert.equal(storage.getWandTaskByWorkspaceTaskId(created.id)?.id, card!.id);
     assert.equal(storage.listWorkspaceTasks(ws.id).length, 1);
+  } finally {
+    await close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("group-chat relay sessions carry a teamChat marker built from the latest run", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-team-chat-marker-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const { baseUrl, close } = await startWorkspaceApp(storage);
+  try {
+    const config = { ...defaultConfig(), defaultCwd: root, structuredRunner: "sdk" as const };
+    const manager = new StructuredSessionManager(storage, config);
+    const chatSession = manager.createSession({ cwd: root, mode: config.defaultMode });
+    const plainSession = manager.createSession({ cwd: root, mode: config.defaultMode });
+
+    const team = {
+      id: "team-1", name: "开发三人组", description: "", instructions: "",
+      members: [{ id: "m1" }, { id: "m2" }, { id: "m3" }] as unknown as AiTeam["members"],
+      requirePlanApproval: true, maxSteps: 30,
+      createdAt: "2026-09-01T00:00:00.000Z", updatedAt: "2026-09-01T00:00:00.000Z",
+    } satisfies AiTeam;
+    const run = (over: Partial<AiTeamRun>): AiTeamRun => ({
+      id: "run-1", teamId: team.id, team, taskId: "task-1", objective: "群聊接入列表", cwd: root,
+      status: "running", statusDetail: "", stepsUsed: 1, stepLimit: 30, formatRetries: 0,
+      planApproved: true, chatSessionId: chatSession.id, pendingNotes: [],
+      createdAt: "2026-09-01T00:00:00.000Z", updatedAt: "2026-09-01T00:00:00.000Z",
+      ...over,
+    });
+    storage.saveAiTeamRun(run({}));
+    storage.saveAiTeamRun(run({ id: "run-older", createdAt: "2026-08-01T00:00:00.000Z" }));
+
+    type SessionRow = {
+      id: string;
+      teamChat?: { runId: string; teamName: string; memberCount: number };
+    };
+    const res = await fetch(`${baseUrl}/api/tasks`);
+    assert.equal(res.status, 200);
+    const groups = await res.json() as Array<{ standaloneSessions: SessionRow[]; tasks: Array<{ sessions: SessionRow[] }> }>;
+    const rows = groups.flatMap((group) => [
+      ...group.standaloneSessions,
+      ...group.tasks.flatMap((task) => task.sessions),
+    ]);
+    // 同一条群聊会话挂过两次运行时，标记取最近一次（run-1 晚于 run-older）。
+    assert.deepEqual(
+      rows.find((row) => row.id === chatSession.id)?.teamChat,
+      { runId: "run-1", teamName: "开发三人组", memberCount: 3 },
+    );
+    assert.equal(rows.find((row) => row.id === plainSession.id)?.teamChat, undefined);
   } finally {
     await close();
     rmSync(root, { recursive: true, force: true });

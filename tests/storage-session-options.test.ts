@@ -22,6 +22,7 @@ const DURABLE_OPTION_KEYS = [
   "ptyRows",
   "currentTaskTitle",
   "summary",
+  "systemPrompt",
 ] as const satisfies ReadonlyArray<keyof SessionSnapshot>;
 
 function tempDatabase(t: TestContext, prefix: string): string {
@@ -119,6 +120,7 @@ test("session runtime options survive a full close and reopen round-trip", (t) =
     ptyRows: 73,
     currentTaskTitle: "Durable task title",
     summary: "Durable session summary",
+    systemPrompt: "你是 AI 团队「三人组」的负责人。",
   });
 
   const writer = new WandStorage(dbPath);

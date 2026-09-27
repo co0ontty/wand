@@ -597,7 +597,6 @@ function defaultCardExpandDefaults(): CardExpandDefaults {
     inlineTools: false,
     terminal: false,
     thinking: false,
-    toolGroup: false,
   };
 }
 
@@ -609,7 +608,6 @@ function normalizeCardDefaults(input: unknown): CardExpandDefaults {
     inlineTools: typeof raw.inlineTools === "boolean" ? raw.inlineTools : false,
     terminal: typeof raw.terminal === "boolean" ? raw.terminal : false,
     thinking: typeof raw.thinking === "boolean" ? raw.thinking : false,
-    toolGroup: typeof raw.toolGroup === "boolean" ? raw.toolGroup : false,
   };
 }
 

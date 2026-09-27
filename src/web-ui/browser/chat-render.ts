@@ -9,12 +9,13 @@ import "./render";
 import { copyToClipboard, getPreferredMessages, isRecoverableToolError } from "./session-engine";
 import { buildTodoItemsHtml, buildTodoSegmentsHtml, summarizeTodoProgress } from "./todo-progress";
 import { renderStructuredStatusBar } from "./utils";
-import { getCardDefault, snapExpandedActivityFoldsToBottom } from "./events";
+import { clearActivityScrollMemory, getCardDefault, syncActivityWindows } from "./events";
 import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
 import { shouldExtractPtySystemInfo } from "./pty-system-info";
 import { codexActivityRe, codexFooterRe, isPtyCodexNoiseLine, isPtySystemInfoNoiseLine, isPtyTranscriptNoiseLine } from "./pty-noise";
 import { getToolDisplayName, getToolIcon } from "./tool-identity";
 import { localFilePreviewHref, localHttpPreviewHref } from "../react/local-preview/controller";
+import { catCoatGrid, memberCoatIndex } from "../react/ai-teams/cat-coats";
 import {
   agentRunBlockKey,
   agentRunTouchesMessage,
@@ -634,9 +635,9 @@ import "./local-preview-adapter";
           fullRenderChat();
         }
 
-        // 活动折叠仍是固定高度窗口；子 Agent 执行卡已经改用主对话滚动，
-        // 这里只负责把展开中的活动窗口锚到最新内容。
-        snapExpandedActivityFoldsToBottom(chatMessages);
+        // 活动滚动窗口：贴尾的跟随最新活动，用户上滚过的保留他的位置。
+        // 子 Agent 执行卡已经改用主对话滚动，不在这里处理。
+        syncActivityWindows(chatMessages);
 
         // 发新消息后把"最后一条用户消息"之前的历史折叠成摘要卡（后处理，不动上面的 DOM diff）。
         applyHistoryCollapse(chatMessages, selectedSession);
@@ -1885,7 +1886,49 @@ import "./local-preview-adapter";
         return '<div class="chat-message-time" title="' + escapeHtml(title) + '">' + escapeHtml(label) + '</div>';
       }
 
-      function chatAvatar(role) {
+      // 群聊（AI 团队）里的发言人：像素猫头像 + 成员名，负责人带「负责人」标；
+      // 有成员会话时名字可点，打开这位成员的完整过程。
+      function teamAuthorAvatar(author) {
+        var grid = catCoatGrid(memberCoatIndex({ id: author.id || "", name: author.name || "", avatar: author.avatar }));
+        var svg = buildPixelSvg(grid.map(function(row) {
+          return row.map(function(fill) { return fill || _AVATAR_T; });
+        }));
+        var name = escapeHtml(author.name || "成员");
+        var nameHtml = author.sessionId
+          ? '<button type="button" class="avatar-name chat-author-link" title="查看 ' + name + ' 的会话" onclick="__openAuthorSession(' + escapeHtml(JSON.stringify(author.sessionId)) + ')">' + name + '</button>'
+          : '<span class="avatar-name">' + name + '</span>';
+        return '<div class="chat-message-avatar assistant chat-message-author">' +
+          renderAvatarFallback(svg) +
+          nameHtml +
+          (author.leader ? '<span class="chat-author-badge">负责人</span>' : '') +
+        '</div>';
+      }
+
+      // 群聊进度提示：居中一行，不占气泡。
+      function renderChatNotice(msg, messageIndex) {
+        var text = turnPlainText(msg);
+        if (!text) return "";
+        var who = msg.author && msg.author.name ? '<span class="chat-notice-author">' + escapeHtml(msg.author.name) + '</span>' : "";
+        var clock = formatChatClock((msg.completedAt || msg.createdAt) || "");
+        return '<div class="chat-message chat-notice" data-message-key="' + escapeHtml(getMessageKey(msg, messageIndex)) + '">' +
+          '<div class="chat-notice-line">' + who + '<span class="chat-notice-text">' + escapeHtml(text) + '</span>' +
+            (clock ? '<span class="chat-notice-time">' + escapeHtml(clock) + '</span>' : '') +
+          '</div>' +
+        '</div>';
+      }
+
+      function turnPlainText(msg) {
+        if (typeof msg.content === "string") return msg.content.trim();
+        if (!Array.isArray(msg.content)) return "";
+        return msg.content
+          .filter(function(block) { return block && block.type === "text" && typeof block.text === "string"; })
+          .map(function(block) { return block.text.trim(); })
+          .filter(Boolean)
+          .join("\n");
+      }
+
+      function chatAvatar(role, author?) {
+        if (author && role === "assistant") return teamAuthorAvatar(author);
         var personaRole = role === "user" ? "user" : "assistant";
         var persona = getStructuredChatPersona(personaRole);
         var avatarInner = persona.avatar
@@ -1898,6 +1941,7 @@ import "./local-preview-adapter";
       }
 
       function renderChatMessage(msg, roundUsage, messageIndex, agentRunIndex, conversationToolResults) {
+        if (msg.notice) return renderChatNotice(msg, messageIndex);
         // Thinking card (deep thought) — from PTY parsing
         if (msg.role === "thinking") {
           // 空 / 全空白的 thinking 没有任何信息量，渲染出来只是一条带"展开"的紫色窄条，
@@ -1969,120 +2013,18 @@ import "./local-preview-adapter";
         return '<div class="structured-tool-hint">已自动恢复一次 ' + escapeHtml(getToolDisplayName(toolName)) + ' 参数问题</div>';
       }
 
-      // ── 连续同类工具调用分组 ──
-      // 注意：禁止把 Task/Agent 加入 GROUPABLE_TOOLS——它们由 renderContentBlock 入口屏蔽返空，
-      // 加入分组会导致空 group 包裹一堆空字符串，留下视觉空盒子。
-      var GROUPABLE_TOOLS = { Read: 1, Glob: 1, Grep: 1, WebFetch: 1, WebSearch: 1, TodoRead: 1 };
-
-      // 图片相关的操作不并入 tool-group：并到默认折叠的 group 里，body 整体
-      // display:none 会把内联缩略图一起藏掉。单独成卡时缩略图常驻可见，符合
-      // “对话里的图片操作默认直接显示、不折叠”。
-      function isGroupableToolBlock(block) {
-        if (!block || block.type !== "tool_use" || !GROUPABLE_TOOLS[block.name]) return false;
-        if (block.name === "Read") {
-          var input = block.input || {};
-          if (isImagePath(input.file_path || input.path || "")) return false;
-        }
-        return true;
-      }
-
-      function groupConsecutiveTools(content) {
+      // 连续同类工具调用不再单独成组折叠：活动窗口（.chat-activity）已经把
+      // 整段思考 + 工具调用收成一个滚动窗口，再嵌一层「N 个调用」摘要会和窗口
+      // 头部的缩略信息重复（两层折叠、两份计数）。工具卡在窗口里直接平铺。
+      function passthroughToolBlocks(content) {
         var groups = [];
-        var i = 0;
-        while (i < content.length) {
+        for (var i = 0; i < content.length; i++) {
           var block = content[i];
-          if (block.type === "tool_result") { i++; continue; }
-          if (isGroupableToolBlock(block)) {
-            var run = [{ block: block, index: i }];
-            var j = i + 1;
-            while (j < content.length) {
-              if (content[j].type === "tool_result") { j++; continue; }
-              if (isGroupableToolBlock(content[j])) {
-                run.push({ block: content[j], index: j });
-                j++;
-              } else { break; }
-            }
-            if (run.length >= 2) {
-              groups.push({ type: "group", items: run, endIndex: j });
-            } else {
-              groups.push({ type: "single", block: block, index: i });
-            }
-            i = j;
-          } else {
-            groups.push({ type: "single", block: block, index: i });
-            i++;
-          }
+          if (block && block.type === "tool_result") continue;
+          groups.push({ type: "single", block: block, index: i });
         }
         return groups;
       }
-
-      var TOOL_GROUP_LABELS = { Read: "读取", Glob: "搜索", Grep: "搜索", WebFetch: "抓取", WebSearch: "搜索", TodoRead: "待办" };
-
-      function renderToolGroup(items, role, toolResults, messageKey, options?: any) {
-        var opts = options || {};
-        // Count by tool name
-        var counts = {};
-        for (var k = 0; k < items.length; k++) {
-          var n = items[k].block.name;
-          counts[n] = (counts[n] || 0) + 1;
-        }
-        // Check if all done or still pending
-        var allDone = true;
-        var anyError = false;
-        for (var k = 0; k < items.length; k++) {
-          var b = items[k].block;
-          var tr = pickToolResultForDisplay(toolResults, b.id);
-          if (!tr) { allDone = false; }
-          else if (tr.is_error) { anyError = true; }
-        }
-        var statusIcon = !allDone
-          ? "…"
-          : (anyError
-            ? iconSvg("close", { size: 11, strokeWidth: 2.2 })
-            : iconSvg("check", { size: 11, strokeWidth: 2.2 }));
-        var statusClass = !allDone ? "pending" : (anyError ? "error" : "done");
-        // Summary text
-        var parts = [];
-        for (var name in counts) {
-          parts.push(counts[name] + " " + (TOOL_GROUP_LABELS[name] || name));
-        }
-        var summaryText = parts.join(" · ");
-        var groupKey = buildExpandKey("tool-group", [messageKey, items[0] && items[0].index, items.length]);
-        var persistedExpanded = getPersistedExpandState(groupKey);
-        var shouldExpand = opts.forceExpandedToolBodies ? true : (persistedExpanded === null ? getCardDefault("toolGroup") : persistedExpanded);
-
-        // Render each item's inline-tool card
-        var innerHtml = "";
-        for (var k = 0; k < items.length; k++) {
-          try {
-            innerHtml += renderContentBlock(items[k].block, role, toolResults, items[k].index, messageKey, opts);
-          } catch (e) {
-            innerHtml += '<div class="render-error">工具渲染失败</div>';
-          }
-        }
-
-        return '<div class="tool-group" data-expand-kind="tool-group" data-expand-key="' + escapeHtml(groupKey) + '" data-expanded="' + (shouldExpand ? 'true' : 'false') + '" data-status="' + statusClass + '">' +
-          '<div class="tool-group-summary" onclick="__toolGroupToggle(this.parentNode)">' +
-            '<span class="tool-group-status">' + statusIcon + '</span>' +
-            '<span class="tool-group-text">' + escapeHtml(summaryText) + '</span>' +
-            '<span class="tool-group-count">' + items.length + ' 个调用</span>' +
-            '<svg class="tool-group-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform:' + (shouldExpand ? 'rotate(180deg)' : '') + '"><polyline points="6 9 12 15 18 9"/></svg>' +
-          '</div>' +
-          '<div class="tool-group-body" style="display:' + (shouldExpand ? 'block' : 'none') + ';">' + innerHtml + '</div>' +
-        '</div>';
-      }
-
-      // global toggle
-      window.__toolGroupToggle = function(el) {
-        if (!el) return;
-        var expanded = el.getAttribute("data-expanded") === "true";
-        el.setAttribute("data-expanded", expanded ? "false" : "true");
-        var body = el.querySelector(".tool-group-body");
-        if (body) (body as HTMLElement).style.display = expanded ? "none" : "block";
-        var chevron = el.querySelector(".tool-group-chevron");
-        if (chevron) (chevron as HTMLElement).style.transform = expanded ? "" : "rotate(180deg)";
-        persistElementExpandState(el, "tool-group");
-      };
 
       // 折叠态：隐藏摘要卡之后的所有兄弟（DOM 顺序 newest→oldest，摘要卡之后 = 历史区），
       // 但保留「加载更早」哨兵可见。
@@ -2353,31 +2295,35 @@ import "./local-preview-adapter";
         return !!(session.structuredState && session.structuredState.inFlight) && session.status === "running";
       }
 
-      function summarizeActivityRun(items, toolResults) {
+      function summarizeActivityRun(items) {
         var counts = { read: 0, command: 0, search: 0, edit: 0, web: 0, other: 0, thinking: 0 };
-        var latest = "";
         for (var i = 0; i < items.length; i++) {
           var block = items[i].block;
           if (isHiddenActivityBlock(block)) continue;
           if (block.type === "thinking") {
             counts.thinking++;
-            var thinkLabel = activityItemLabel(block);
-            if (thinkLabel) latest = thinkLabel;
             continue;
           }
           if (block.type !== "tool_use") continue;
           counts[activityKindOf(block.name)]++;
-          var label = activityItemLabel(block);
-          if (label) latest = label;
         }
         var parts = [];
         for (var kind in ACTIVITY_KIND_META) {
           if (counts[kind] > 0) parts.push(ACTIVITY_KIND_META[kind] + " " + counts[kind]);
         }
-        return {
-          latest: latest || "处理中",
-          meta: parts.join(" · ")
-        };
+        return { meta: parts.join(" · ") };
+      }
+
+      /**
+       * 窗口里的条目默认展开态。滚动窗口按「只有最新的一条展开」呈现：新活动到达后，
+       * 更早的思考 / 工具调用都退化成一行摘要，窗口始终停在最新那一条的真实内容上。
+       * 用户手动展开过的条目由持久化状态覆盖这里的默认值。
+       */
+      function resolveCardExpanded(persisted, opts, index, fallback) {
+        if (persisted !== null && persisted !== undefined) return persisted;
+        if (!opts || !opts.activityBody) return fallback;
+        if (typeof opts.activityTailIndex !== "number") return fallback;
+        return index === opts.activityTailIndex;
       }
 
       function renderActivityFold(items, role, toolResults, messageKey, segmentFirstIndex, options?: any) {
@@ -2390,34 +2336,52 @@ import "./local-preview-adapter";
         // 避免留下一个只有外框的空气盒子。
         if (!visible.length) return "";
 
-        var summary = summarizeActivityRun(items, toolResults);
+        var summary = summarizeActivityRun(items);
         // 运行态：只有「当前正在流式生成的最后一条 assistant 消息」里、位于消息
         // 尾部、且还没被正文截断的那一段才算运行中。中间被正文切开的条一律已完成。
         // 只要这条还在当前轮尾部、会话仍在跑，就保持「进行中」：工具刚结束、
         // 下一轮思考还没到时也算运行，避免被误当成卡住/结束。
         var running = !!opts.isTrailing && isTurnActivityLive(_currentMessageGlobalIndex);
+        // 滚动窗口只开最新的一段：同一条回复里更早的活动段默认收起成状态条，
+        // 新的活动一出现就把上一段收回去，避免一屏堆着好几个展开的窗口。
+        // 最新一段只在本条消息位于会话末尾时才自动展开（历史回复保持紧凑）。
+        var isLatestMessage = !!state.currentMessages &&
+          _currentMessageGlobalIndex === state.currentMessages.length - 1;
+        var isNewestRun = !!opts.isNewestRun && isLatestMessage;
         // expand key 只绑 run 的起点，流式期间不断追加 item 也不会让已展开的
         // 用户视图被重置回折叠态。
         var runStart = items.length ? items[0].index : 0;
         var expandKey = buildExpandKey("activity", [messageKey, segmentFirstIndex, runStart]);
         var persisted = getPersistedExpandState(expandKey);
-        var expanded = persisted === null ? false : persisted;
+        var expanded = resolveCardExpanded(persisted, null, -1, running || isNewestRun);
 
         var blocksOnly = [];
-        for (var b = 0; b < items.length; b++) blocksOnly.push(items[b].block);
+        // blocksOnly 里跳过的是隐藏块（空 thinking / 已消费的 tool_result），行号不再等于
+        // 原块下标；把每张卡真正对应的块下标一并传下去，展开状态键才不会错位。
+        var bodyIndices = [];
+        var tailIndex = -1;
+        for (var b = 0; b < items.length; b++) {
+          blocksOnly.push(items[b].block);
+          bodyIndices.push(items[b].index + segmentFirstIndex);
+          if (!isHiddenActivityBlock(items[b].block)) tailIndex = bodyIndices[b];
+        }
         var bodyHtml = buildSegmentBlocksHtml(
           blocksOnly,
           segmentFirstIndex + runStart,
           role,
           toolResults,
           messageKey,
-          Object.assign({}, opts, { noActivityFold: true })
+          Object.assign({}, opts, {
+            noActivityFold: true,
+            activityBody: true,
+            activityBodyIndices: bodyIndices,
+            activityTailIndex: tailIndex,
+          })
         );
 
         return '<div class="chat-activity' + (running ? ' is-running' : '') + '" ' +
             'data-expand-kind="activity" ' +
             'data-expand-key="' + escapeHtml(expandKey) + '" ' +
-            'data-follow-tail="true" ' +
             'data-expanded="' + (expanded ? "true" : "false") + '">' +
           '<button type="button" class="chat-activity-summary" aria-expanded="' + (expanded ? "true" : "false") + '" onclick="__activityToggle(this)">' +
             '<span class="chat-activity-top">' +
@@ -2425,14 +2389,26 @@ import "./local-preview-adapter";
               '<span class="chat-activity-count">' + visible.length + '</span>' +
               '<span class="chat-activity-chevron">' + iconSvg("chevronDown", { size: 14, strokeWidth: 2 }) + '</span>' +
             '</span>' +
-            '<span class="chat-activity-latest">' +
-              '<span class="chat-activity-latest-text">' + escapeHtml(summary.latest) + '</span>' +
-            '</span>' +
           '</button>' +
-          '<div class="chat-activity-body" aria-hidden="' + (expanded ? "false" : "true") + '"' +
-            (expanded ? '' : ' style="display:none"') + '>' + bodyHtml + '</div>' +
+          '<div class="chat-activity-window">' +
+            '<div class="chat-activity-body" role="log" tabindex="0" aria-label="活动记录" aria-hidden="' + (expanded ? "false" : "true") + '">' + bodyHtml + '</div>' +
+            '<button type="button" class="chat-activity-tail" onclick="__activityJumpToTail(this)" aria-label="回到最新活动">' +
+              iconSvg("chevronDown", { size: 12, strokeWidth: 2.4 }) +
+              '<span>回到最新</span>' +
+            '</button>' +
+          '</div>' +
         '</div>';
       }
+
+      // 用户主动贴尾：清掉「离尾」状态，后续刷新重新跟随最新活动。
+      (window as any).__activityJumpToTail = function(node) {
+        var wrap = node && node.closest ? node.closest(".chat-activity") : null;
+        var body = wrap ? wrap.querySelector(".chat-activity-body") : null;
+        if (!wrap || !body) return;
+        clearActivityScrollMemory(wrap.getAttribute("data-expand-key"));
+        wrap.classList.remove("is-unpinned");
+        body.scrollTop = body.scrollHeight;
+      };
 
       // 展开 / 收起活动窗口。展开时内部滚动到尾部（显示最新活动），
       // 折叠时只留状态条。状态按 expand key 持久化到 localStorage。
@@ -2444,10 +2420,11 @@ import "./local-preview-adapter";
         if (btn.setAttribute) btn.setAttribute("aria-expanded", nowExpanded ? "true" : "false");
         var body = wrap.querySelector(".chat-activity-body");
         if (body) {
-          body.style.display = nowExpanded ? "block" : "none";
           body.setAttribute("aria-hidden", nowExpanded ? "false" : "true");
           if (nowExpanded) {
-            // 展开的瞬间先跳到底部，之后每次流式刷新由 tail 跟随逻辑接管。
+            // 展开的瞬间直接停在最新一条：清掉旧的离尾记录，之后由跟随逻辑接管。
+            clearActivityScrollMemory(wrap.getAttribute("data-expand-key"));
+            wrap.classList.remove("is-unpinned");
             body.scrollTop = body.scrollHeight;
           }
         }
@@ -2455,7 +2432,7 @@ import "./local-preview-adapter";
         if (key) setPersistedExpandState(key, nowExpanded);
       };
 
-      // 渲染一组普通（非 Agent Run）内容 blocks。group consecutive tools，
+      // 渲染一组普通（非 Agent Run）内容 blocks。活动窗口内直接平铺工具卡，
       // 偏移到原数组全局位置，保持 expand key 唯一。
       function buildSegmentBlocksHtml(segmentBlocks, segmentFirstIndex, role, toolResults, messageKey, options?: any) {
         var html = "";
@@ -2463,16 +2440,23 @@ import "./local-preview-adapter";
         // 活动折叠：连续 thinking / 工具调用收成一条状态条；正文、图片保持原位。
         if (ACTIVITY_FOLD_ENABLED && !opts.noActivityFold && role === "assistant") {
           try {
+            // 先找最后一段可折叠活动的起点：它就是这条消息里最新的活动窗口，
+            // 默认展开；其它历史窗口默认收起。
+            var newestActivityStart = -1;
+            for (var ni = 0; ni < segmentBlocks.length; ni++) {
+              if (isFoldableActivityBlock(segmentBlocks[ni], toolResults)) newestActivityStart = ni;
+            }
             var pendingActivity = [];
             var flushPendingActivity = function(isTrailing) {
               if (!pendingActivity.length) return;
+              var isNewestRun = pendingActivity[pendingActivity.length - 1].index === newestActivityStart;
               html += renderActivityFold(
                 pendingActivity,
                 role,
                 toolResults,
                 messageKey,
                 segmentFirstIndex,
-                Object.assign({}, opts, { isTrailing: !!isTrailing })
+                Object.assign({}, opts, { isTrailing: !!isTrailing, isNewestRun: isNewestRun })
               );
               pendingActivity = [];
             };
@@ -2493,19 +2477,16 @@ import "./local-preview-adapter";
           }
         }
         try {
-          var groups = groupConsecutiveTools(segmentBlocks);
+          var groups = passthroughToolBlocks(segmentBlocks);
           for (var g = 0; g < groups.length; g++) {
             var grp = groups[g];
             try {
-              if (grp.type === "group") {
-                var shifted = [];
-                for (var k = 0; k < grp.items.length; k++) {
-                  shifted.push({ block: grp.items[k].block, index: grp.items[k].index + segmentFirstIndex });
-                }
-                html += renderToolGroup(shifted, role, toolResults, messageKey, opts);
-              } else {
-                html += renderContentBlock(grp.block, role, toolResults, grp.index + segmentFirstIndex, messageKey, opts);
-              }
+              // 活动窗口里按块的真实下标渲染（见 renderActivityFold 的 bodyIndices）。
+              var blockIndex = opts.activityBodyIndices &&
+                typeof opts.activityBodyIndices[grp.index] === "number"
+                ? opts.activityBodyIndices[grp.index]
+                : grp.index + segmentFirstIndex;
+              html += renderContentBlock(grp.block, role, toolResults, blockIndex, messageKey, opts);
             } catch (e) {
               html += '<div class="render-error">消息块渲染失败</div>';
             }
@@ -2529,13 +2510,13 @@ import "./local-preview-adapter";
           if (role === "assistant") {
             return '<div class="chat-message ' + role + '">' +
               timeHtml +
-              chatAvatar(role) +
+              chatAvatar(role, msg.author) +
               '<div class="chat-message-content"><div class="typing-indicator"><span></span><span></span><span></span></div>' + usageHtml + '</div>' +
             '</div>';
           }
           return '<div class="chat-message ' + role + ' empty-message" data-message-key="' + escapeHtml(messageKey) + '">' +
             timeHtml +
-            chatAvatar(role) +
+            chatAvatar(role, msg.author) +
             '<div class="chat-message-content"><span class="empty-message-hint">（空消息）</span></div>' +
           '</div>';
         }
@@ -2591,7 +2572,7 @@ import "./local-preview-adapter";
         var queuedBadge = isQueued ? '<span class="queued-badge">排队中</span>' : "";
         return '<div class="chat-message ' + role + queuedClass + '" data-message-key="' + escapeHtml(messageKey) + '">' +
           timeHtml +
-          chatAvatar(role) +
+          chatAvatar(role, msg.author) +
           '<div class="chat-message-content">' + bodyHtml + queuedBadge + usageHtml + '</div>' +
         '</div>';
       }
@@ -2720,7 +2701,7 @@ import "./local-preview-adapter";
             if (!thinkingText.trim()) return "";
             var thinkingKey = buildExpandKey("thinking", [messageKey, index]);
             var thinkingPersisted = getPersistedExpandState(thinkingKey);
-            var thinkingExpanded = thinkingPersisted === null ? getCardDefault("thinking") : thinkingPersisted;
+            var thinkingExpanded = resolveCardExpanded(thinkingPersisted, opts, index, getCardDefault("thinking"));
             var preview = thinkingExpanded ? thinkingText : "深度思考";
             return '<div class="thinking-inline ' + (thinkingExpanded ? 'expanded' : 'collapsed') + '" data-expand-kind="thinking" data-expand-key="' + escapeHtml(thinkingKey) + '" data-thinking="' + escapeHtml(thinkingText) + '" onclick="__thinkingToggle(this)">' +
               '<span class="thinking-inline-icon">' + iconSvg("spark", { size: 12, strokeWidth: 1.8 }) + '</span>' +
@@ -2836,7 +2817,7 @@ import "./local-preview-adapter";
         var fullResult = resultContent;
 
         var expandedHtml = "";
-        var shouldExpand = opts.forceExpandedToolBodies ? true : (persistedExpanded === null ? getCardDefault("inlineTools") : persistedExpanded);
+        var shouldExpand = opts.forceExpandedToolBodies ? true : resolveCardExpanded(persistedExpanded, opts, index, getCardDefault("inlineTools"));
         if (hasResult) {
           expandedHtml = '<div class="inline-tool-expanded" style="display: ' + (shouldExpand ? 'block' : 'none') + ';">' +
             '<div class="inline-tool-result">' + formatInlineResult(resultContent, toolName) + '</div>' +
@@ -2947,7 +2928,7 @@ import "./local-preview-adapter";
 
         // Show command preview in header (truncate long commands)
         var cmdPreview = command.length > 80 ? command.slice(0, 77) + "…" : command;
-        var shouldExpand = opts.forceExpandedToolBodies ? true : (persistedExpanded === null ? getCardDefault("terminal") : persistedExpanded);
+        var shouldExpand = opts.forceExpandedToolBodies ? true : resolveCardExpanded(persistedExpanded, opts, index, getCardDefault("terminal"));
 
         var termTruncated = toolResult && toolResult._truncated === true;
         var termTruncAttrs = termTruncated
@@ -3075,7 +3056,7 @@ import "./local-preview-adapter";
         var expandKey = buildExpandKey("diff", [messageKey, toolId || index, index]);
         var persistedExpanded = getPersistedExpandState(expandKey);
         var cardDefaultExpand = getCardDefault("editCards");
-        var shouldExpand = opts.forceExpandedToolBodies ? true : (persistedExpanded === null ? cardDefaultExpand : persistedExpanded);
+        var shouldExpand = opts.forceExpandedToolBodies ? true : resolveCardExpanded(persistedExpanded, opts, index, cardDefaultExpand);
         var collapsedClass = shouldExpand ? "" : " collapsed";
 
         // If only one column has content, show full width
@@ -3330,7 +3311,7 @@ import "./local-preview-adapter";
         var expandKey = buildExpandKey("tool-card", [messageKey, toolId]);
         var persistedExpanded = getPersistedExpandState(expandKey);
         var cardDefaultExpand = getCardDefault("editCards");
-        var shouldExpand = opts.forceExpandedToolBodies ? true : (persistedExpanded === null ? cardDefaultExpand : persistedExpanded);
+        var shouldExpand = opts.forceExpandedToolBodies ? true : resolveCardExpanded(persistedExpanded, opts, index, cardDefaultExpand);
         // 带图片的工具卡默认展开：折叠会把整块 body（含缩略图）藏掉，
         // 与「图片直接展示」的诉求冲突。
         if (!opts.forceExpandedToolBodies && toolResult && extractToolResultImages(toolResult.content).length > 0) {

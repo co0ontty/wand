@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { startStructuredCli } from "./structured-exec-pump.js";
 import type { StructuredExecHost } from "./structured-exec-host.js";
 import { asRecord, normalizeStructuredToolResultContent } from "./structured-content.js";
-import { thinkingEffortToPiLevel } from "./structured-provider-common.js";
+import { systemPromptArgs, thinkingEffortToPiLevel } from "./structured-provider-common.js";
 import type {
   StructuredRunnerAdapter,
   StructuredRunnerContext,
@@ -50,6 +50,7 @@ export function buildPiArgs(session: SessionSnapshot, prompt: string): string[] 
   if (model && model !== "default") args.push("--model", model);
   const thinking = thinkingEffortToPiLevel(session.thinkingEffort);
   if (thinking) args.push("--thinking", thinking);
+  args.push(...systemPromptArgs(session));
   if (session.claudeSessionId) args.push("--session", session.claudeSessionId);
   args.push(prompt);
   return args;

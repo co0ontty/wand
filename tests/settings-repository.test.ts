@@ -59,7 +59,7 @@ function config(overrides: Record<string, unknown> = {}): Record<string, unknown
       source: "custom",
     },
     commandPresets: [],
-    cardDefaults: { editCards: false, inlineTools: false, terminal: false, thinking: false, toolGroup: false },
+    cardDefaults: { editCards: false, inlineTools: false, terminal: false, thinking: false },
     ...overrides,
   };
 }

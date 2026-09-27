@@ -4,6 +4,7 @@ import { workspaceContextStore } from "../workspaces/workspace-context";
 import { failureMessage } from "../errors";
 
 import { ProviderLogo } from "../provider-logo";
+import { sortProviderOptions, useProviderUsage } from "../provider-usage";
 import { WandButton, WandDialogSurface, WandIcon } from "../ui";
 import { milestonesStore, milestoneNameOf } from "../milestones/controller";
 import { MilestonePicker } from "../milestones/picker";
@@ -107,6 +108,7 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
   const [missions, setMissions] = useState<MissionDetails[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const providerUsage = useProviderUsage(controller.open);
   const [submitting, setSubmitting] = useState(false);
   const [createError, setCreateError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -376,7 +378,9 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
             ) : null}
             <label>项目目录<input required disabled={submitting} value={cwd} onChange={(event) => setCwd(event.target.value)}/></label>
             <div className="wand-missions-provider-picker">
-              {PROVIDERS.map((provider) => (
+              {providerUsage === null ? <p role="status">正在加载工具列表…</p> : sortProviderOptions(
+                PROVIDERS, providerUsage, (provider) => provider.id,
+              ).map((provider) => (
                 <label key={provider.id} className={providers.has(provider.id) ? "active" : ""}>
                   <input type="checkbox" disabled={submitting} checked={providers.has(provider.id)} onChange={() => setProviders((current) => {
                     const next = new Set(current); if (next.has(provider.id)) next.delete(provider.id); else next.add(provider.id); return next;

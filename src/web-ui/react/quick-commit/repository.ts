@@ -223,6 +223,8 @@ export class HttpQuickCommitRepository implements QuickCommitRepository {
       pushed: data.pushed === true,
       pushError: stringValue(data.pushError),
       submoduleCommits,
+      archivedTaskIds: stringList(data.archivedTaskIds),
+      archiveError: stringValue(data.archiveError),
       commitContext: rawContext
         ? { source: normalizeMode(rawContext.source, "diff"), entryIds: stringList(rawContext.entryIds) }
         : null,

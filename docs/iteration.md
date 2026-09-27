@@ -93,13 +93,18 @@ POST /api/sessions/:id/iteration-context  body { mode }
 
 POST /api/sessions/:id/generate-commit-message
 POST /api/sessions/:id/quick-commit
-  body ... { mode?, entryIds?, includeDiff? }
+  body ... { mode?, entryIds?, includeDiff?, archiveRelatedTasks? }
   → 回 { commitContext: { source, entryIds, iteration } }，quick-commit 另有
-    iterationEntriesConsumed
+    iterationEntriesConsumed、archivedTaskIds、归档失败时的 archiveError
 ```
 
 `entryIds` 只会匹配 `selectableIds`（这个迭代 + 同仓库），前端传错、传了别的迭代也不会
 串味。不传 `entryIds` 就等于默认的「上次提交以来」。服务端只校验、不信前端。
+
+`archiveRelatedTasks` 默认关闭。开启后只在 commit 成功落地时归档：本次选中条目绑定的
+已完成任务及当前会话直接绑定的已完成任务，且必须属于当前目录 / 工作区；待办、处理中、
+其他目录或未关联的历史任务不动。即使 push 失败，commit 已成功也会归档；归档出错会
+单独返回 `archiveError`，不会把已提交的请求变成可重试的 HTTP 错误。
 
 ## Web UI
 
@@ -110,7 +115,8 @@ POST /api/sessions/:id/quick-commit
 - `react/quick-commit/{repository,model,host}.tsx`：`loadContext` / `saveContextMode` 走上面
   两个接口；`buildQuickCommitInput(form, action, submodule, selection?, includeDiff?)`
   只在真有时才带上相关字段，没选过就交给服务端用记住的偏好兜底。提交成功后重新拉一次
-  上下文（刚提交的条目变成「已提交」，默认勾选随之清空）。
+  上下文（刚提交的条目变成「已提交」，默认勾选随之清空）。执行动作区另有默认关闭的
+  「归档关联任务」开关；成功归档后通知看板与侧栏刷新。
 - `react/milestones/default-iteration.ts`：`useDefaultMilestone()` 取当前工作区可见的默认
   迭代，`usePreselectMilestone()` 在每个面板**打开时预选一次**（用 ref，用户清空后不回填）。
   三个新建入口（看板建卡、侧栏新建会话、派发任务）都接上了它。
@@ -119,9 +125,9 @@ POST /api/sessions/:id/quick-commit
 
 ## 原生客户端
 
-刻意没有改 `android/` `ios/` `macos/` 子模块。服务端读路径已经把 NULL 兑成默认迭代
-（`taskDto` 同时给 `milestoneId` 和 `milestone{id,name,isDefault}`），所以老客户端显示的
-是真实归属，不需要跟着改；它们不传 `milestoneId` 时，新建任务照样落到默认迭代。
+Android 快捷提交的「归档」气泡是本次提交的可选修饰项，单击只切换、拖到发射区
+随 Commit/Tag/Push 一起执行；关闭面板后重置。任务看板「已完成」默认折叠，搜索或显式
+筛选仍可看到已完成任务。iOS / macOS 旧客户端不传 `archiveRelatedTasks`，行为不变。
 
 ## 验证
 

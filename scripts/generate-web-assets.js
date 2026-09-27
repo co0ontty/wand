@@ -15,6 +15,8 @@ const assets = [
   ["xtermJs", path.join("vendor", "xterm", "xterm.bundle.js"), "application/javascript"],
   ["xtermCss", path.join("vendor", "xterm", "xterm.css"), "text/css; charset=utf-8"],
   ["qrcodeJs", path.join("vendor", "qrcode", "qrcode.bundle.js"), "application/javascript"],
+  // 按需加载的 AI 团队脚本，bundle-browser.js 已按生产模式 minify，这里原样内嵌。
+  ["aiTeamsJs", "ai-teams.js", "application/javascript"],
 ];
 
 const entries = {};
@@ -45,6 +47,7 @@ function decode(value: string): string {
 
 export const EMBEDDED_WEB_ASSETS = {
   scriptsJs: decode(${JSON.stringify(entries.scriptsJs.base64)}),
+  aiTeamsJs: decode(${JSON.stringify(entries.aiTeamsJs.base64)}),
   stylesCss: decode(${JSON.stringify(entries.stylesCss.base64)}),
   vendor: {
     "/vendor/xterm/xterm.bundle.js": {

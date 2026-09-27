@@ -6,7 +6,7 @@ import { StructuredSessionManager } from "./structured-session-manager.js";
 import { WandStorage } from "./storage.js";
 import { ExecutionMode, InputRequest, ResizeRequest, SessionProvider, SessionRunner, SessionSnapshot, SessionSource, WandConfig } from "./types.js";
 import { getDefaultModelForProvider, isExecutionMode } from "./config.js";
-import { blockWindowMessagesForTransport, sliceTurnBlocksForTransport, truncateMessagesForTransport, windowMessagesForTransport } from "./message-truncator.js";
+import { alignedBlockStart, blockWindowMessagesForTransport, sliceTurnBlocksForTransport, truncateMessagesForTransport, visibleBlockCount, windowMessagesForTransport } from "./message-truncator.js";
 import { toSessionDetailDTO, toSessionListItemDTO } from "./session-transport.js";
 import {
   checkSessionWorktreeMergeabilityAsync,
@@ -27,6 +27,7 @@ import {
 } from "./git-quick-commit.js";
 
 import { getErrorMessage } from "./error-utils.js";
+import { archiveCommitTasks } from "./commit-task-archive.js";
 import {
   buildIterationCommitContext,
   COMMIT_CONTEXT_MODE_PREF_KEY,
@@ -464,6 +465,8 @@ async function startResumedPtySession(
     provider,
     model: existingSession.selectedModel ?? undefined,
     thinkingEffort: existingSession.thinkingEffort ?? undefined,
+    // 恢复会话也要把角色与规则带回来（PTY 的指令是拼在启动命令上的）。
+    systemPrompt: existingSession.systemPrompt ?? undefined,
     workspaceId: existingSession.workspaceId
       ?? resolveWorkspaceIdForNewSession(storage, projectCwdForSession(existingSession) || existingSession.cwd),
     workspaceTaskId: existingSession.workspaceTaskId,
@@ -614,8 +617,12 @@ export function registerSessionRoutes(
     res.json(sessions.listSlim().map(toSessionListItemDTO));
   });
 
+  app.get("/api/sessions/provider-usage", (_req, res) => {
+    res.json(storage.countInteractiveSessionsByProvider());
+  });
+
   app.post("/api/structured-sessions", asyncRoute(async (req, res) => {
-    const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner; provider?: string; worktreeEnabled?: boolean; model?: string; thinkingEffort?: string; sessionSource?: unknown; automationId?: unknown; workspaceId?: string; workspaceTaskId?: string; respondImmediately?: unknown };
+    const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner; provider?: string; worktreeEnabled?: boolean; model?: string; thinkingEffort?: string; sessionSource?: unknown; automationId?: unknown; workspaceId?: string; workspaceTaskId?: string; respondImmediately?: unknown; systemPrompt?: string };
     try {
       if (body.provider && !isSessionProvider(body.provider)) {
         res.status(400).json({ error: "结构化会话当前仅支持 Claude、Codex、OpenCode、Grok、Qoder 或 Pi provider。" });
@@ -639,6 +646,8 @@ export function registerSessionRoutes(
           : config.defaultThinkingEffort,
         workspaceId: resolveWorkspaceIdForNewSession(storage, cwd, body.workspaceId),
         workspaceTaskId: body.workspaceTaskId,
+        // 角色与规则走系统提示通道，不拼进 prompt（见 AGENTS.md「Session 输入契约」）。
+        systemPrompt: body.systemPrompt,
         ...origin,
       });
       onSessionCreated?.(snapshot.cwd);
@@ -1027,6 +1036,7 @@ export function registerSessionRoutes(
     const body = (req.body ?? {}) as {
       autoMessage?: boolean; customMessage?: string; tag?: string; autoTag?: boolean; push?: boolean;
       submodule?: boolean; mode?: unknown; entryIds?: unknown; includeDiff?: boolean;
+      archiveRelatedTasks?: boolean;
     };
     try {
       const ai = resolveCommitAiContext(snapshot, config);
@@ -1048,8 +1058,22 @@ export function registerSessionRoutes(
       const consumed = result.ok && result.commit?.hash && context.entryIds.length > 0
         ? storage.markIterationPromptsConsumed(context.entryIds, result.commit.hash)
         : 0;
+      let archivedTaskIds: string[] = [];
+      let archiveError: string | undefined;
+      if (body.archiveRelatedTasks === true && result.ok && result.commit?.hash) {
+        try {
+          // A commit is already durable, even when push failed. Archiving must not turn that
+          // successful commit into a retryable HTTP error (which would duplicate the commit).
+          archivedTaskIds = archiveCommitTasks(storage, snapshot, context.entryIds);
+        } catch (error) {
+          archiveError = getErrorMessage(error, "归档关联任务失败。");
+          console.error("[QuickCommit] Failed to archive related tasks:", archiveError);
+        }
+      }
       res.json({
         ...result,
+        archivedTaskIds,
+        ...(archiveError ? { archiveError } : {}),
         commitContext: {
           source: commitMessageFromIteration(body) && context.digest ? "iteration" : "diff",
           entryIds: context.entryIds,
@@ -1294,6 +1318,7 @@ export function registerSessionRoutes(
           messageTotal: windowed.messageTotal,
           leadingBlockOffset: windowed.leadingBlockOffset,
           leadingBlockTotal: windowed.leadingBlockTotal,
+          leadingVisibleCount: windowed.leadingVisibleCount,
         }));
         return;
       }
@@ -1337,14 +1362,16 @@ export function registerSessionRoutes(
       return;
     }
 
-    // 块级翻页（iOS）：?turn=<i>&blockOffset=<当前 leading 偏移>&blockLimit=<N>
+    // 块级翻页（iOS / Android）：?turn=<i>&blockOffset=<当前 leading 偏移>&blockLimit=<N>
     // 取该 turn 的 [start, blockOffset) 段（start = max(0, blockOffset - blockLimit)）。
+    // 起点同样吸附到干净边界（不切开折叠的工具段、不留下无头 tool_result），并回一份
+    // blockVisible：被切掉的头部里还剩多少条用户可感知的块（默认收起的工具块不计入）。
     const rawTurn = parseInt(String(req.query.turn ?? ""), 10);
     if (Number.isFinite(rawTurn)) {
       const turnIndex = Math.min(Math.max(rawTurn, 0), Math.max(total - 1, 0));
       const turn = all[turnIndex];
       if (!turn) {
-        res.json({ turnIndex, blocks: [], blockOffset: 0, blockTotal: 0 });
+        res.json({ turnIndex, blocks: [], blockOffset: 0, blockTotal: 0, blockVisible: 0 });
         return;
       }
       const blockTotal = turn.content.length;
@@ -1353,11 +1380,20 @@ export function registerSessionRoutes(
       const blockLimit = Math.min(Math.max(Number.isFinite(rawBlockLimit) ? rawBlockLimit : 40, 1), 200);
       const blockEnd = Math.min(Math.max(Number.isFinite(rawBlockOffset) ? rawBlockOffset : blockTotal, 0), blockTotal);
       const blockStart = Math.max(0, blockEnd - blockLimit);
+      const cardDefaults = config.cardDefaults ?? {};
+      const startOffset = alignedBlockStart(turn.content, cardDefaults, blockStart, blockEnd);
       const blocks = enrichStructuredMessages([{
         ...turn,
-        content: sliceTurnBlocksForTransport(turn, blockStart, blockEnd, config.cardDefaults ?? {}),
+        content: sliceTurnBlocksForTransport(turn, startOffset, blockEnd, cardDefaults),
       }], snapshot.id)[0].content;
-      res.json({ wandProtocolVersion: WAND_PROTOCOL_VERSION, turnIndex, blocks, blockOffset: blockStart, blockTotal });
+      res.json({
+        wandProtocolVersion: WAND_PROTOCOL_VERSION,
+        turnIndex,
+        blocks,
+        blockOffset: startOffset,
+        blockTotal,
+        blockVisible: visibleBlockCount(turn.content, cardDefaults, startOffset),
+      });
       return;
     }
 
@@ -1430,6 +1466,7 @@ export function registerSessionRoutes(
           reuseId: existingSession.id,
           cols: reqCols,
           rows: reqRows,
+          systemPrompt: existingSession.systemPrompt ?? undefined,
           workspaceId: existingSession.workspaceId
             ?? resolveWorkspaceIdForNewSession(storage, projectCwdForSession(existingSession) || existingSession.cwd),
           workspaceTaskId: existingSession.workspaceTaskId,

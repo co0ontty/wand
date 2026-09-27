@@ -44,3 +44,22 @@ test("rapid close-open waits for the pending back navigation without losing the 
   assert.equal(h.taskBoardStore.getSnapshot().workspaceId, "new");
   assert.equal(h.window.location.search, "?reactUi=0&view=taskboard");
 });
+
+test("teamchat page is a routed view carrying its run id in the URL", () => {
+  const h = browser();
+  h.taskBoardController.open("", "", "teamchat", "run_9");
+  assert.equal(h.window.location.search, "?reactUi=0&view=teamchat&run=run_9");
+  assert.equal(h.taskBoardStore.getSnapshot().page, "teamchat");
+  assert.equal(h.taskBoardStore.getSnapshot().runId, "run_9");
+
+  // 换一个群聊只改地址，不多压历史。
+  h.taskBoardController.open("", "", "teamchat", "run_10");
+  assert.equal(h.window.location.search, "?reactUi=0&view=teamchat&run=run_10");
+
+  // 浏览器返回一步回会话；再前进回到群聊时 run 从 URL 恢复。
+  h.taskBoardController.close();
+  h.flush(); h.forward();
+  assert.equal(h.window.location.search, "?reactUi=0&view=teamchat&run=run_10");
+  assert.equal(h.taskBoardStore.getSnapshot().open, true);
+  assert.equal(h.taskBoardStore.getSnapshot().runId, "run_10");
+});

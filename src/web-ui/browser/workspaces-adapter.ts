@@ -217,6 +217,7 @@ export function installWorkspacesLegacyAdapter(): void {
         workspaceId: payload.workspaceId,
         provider: payload.provider,
         mode: "managed",
+        systemPrompt: payload.systemPrompt,
         initialInput: payload.prompt,
       });
     },

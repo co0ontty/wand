@@ -10,6 +10,7 @@ import { MilestonePicker } from "../milestones/picker";
 import { useDefaultMilestone, usePreselectMilestone } from "../milestones/default-iteration";
 import { milestonesStore } from "../milestones/controller";
 import { taskBoardController } from "../issues/task-board-controller";
+import { notifyTasksChanged } from "../task-changes";
 import { workspacesController, workspacesStore } from "./controller";
 import {
   httpWorkspacesRepository,
@@ -26,7 +27,8 @@ import type {
   WorkspaceTaskDetail,
   WorkspacesRepository,
 } from "./types";
-import { WORKSPACE_AGENT_OPTIONS, WorkspaceAgentPicker, workspaceModelDefault } from "./workspace-agent-picker";
+import { WORKSPACE_AGENT_OPTIONS, WorkspaceAgentPicker, workspaceModelDefault, usableTeamWorkspaceId, TEAM_NEEDS_PROJECT_HINT } from "./workspace-agent-picker";
+import { aiTeamPickerOption, aiTeamsRepository, useAiTeamList } from "../ai-teams/repository";
 import { MODEL_CATALOG_DEFAULT_VALUE, pickedModelId } from "../model-catalog";
 import { describeError } from "../errors";
 import { confirmDiscardTaskDraft } from "../task-draft-guard";
@@ -57,10 +59,12 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
   const [target, setTarget] = useState<WorkspaceSessionTarget>("claude");
   const [sessionKind, setSessionKind] = useState<WorkspaceSessionKind>("structured");
   const [model, setModel] = useState(MODEL_CATALOG_DEFAULT_VALUE);
+  const [teamId, setTeamId] = useState("");
   const [milestoneId, setMilestoneId] = useState("");
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [suggestions, setSuggestions] = useState<RecentPath[]>([]);
   const [suggestionsActive, setSuggestionsActive] = useState(false);
   const draftTouched = React.useRef(false);
@@ -74,6 +78,8 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
     setLoading(true);
     setSubmitting(false);
     setError("");
+    setNotice("");
+    setTeamId("");
     setDefaults(null);
     setProjects([]);
     setSelectedProjectId("");
@@ -136,6 +142,15 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
 
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
   const mountedCwd = cwd.trim();
+  // 团队直发要一个已存在的项目 id：手输目录（提交时才 create）与无项目态都拿不到，整组禁用（§5.1）。
+  const teamWorkspaceId = usableTeamWorkspaceId(selectedProject?.id, selectedProject?.kind);
+  const teams = useAiTeamList(controller.open);
+  const teamOptions = teams?.map(aiTeamPickerOption) ?? null;
+  const selectedTeamName = teams?.find((team) => team.id === teamId)?.name ?? "";
+  React.useEffect(() => {
+    // 目录一改，原来选中的团队可能就没有可开工的项目了：清掉选择态，别留个看不见的团队。
+    if (teamId && !teamWorkspaceId) setTeamId("");
+  }, [teamId, teamWorkspaceId]);
   const milestoneWorkspaceId = selectedProject?.id ?? "";
   // 新建会话默认挂到「默认迭代」，不让用户在未选迭代时丢归属。
   const presetMilestone = useDefaultMilestone(milestoneWorkspaceId, controller.open);
@@ -187,6 +202,41 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
     void runtime.refreshSessions();
   }
 
+  /**
+   * 直接开工（§5.1 修正 B8）：成功后原位停够 dwell 再前进。
+   * 前进落到 IM 群聊页（teamchat，按 runId 打开）——服务端建运行时同步开好了群聊 relay 会话，
+   * 回包带 `chatSessionId`，开团首屏和侧栏点群聊条目用同一个视图。
+   * 只有拿不到 `chatSessionId`（会话没建出来）才退化到团队页看该运行，不静默留在对话框里。
+   */
+  async function startDirectTeamRun(): Promise<void> {
+    const workspaceId = usableTeamWorkspaceId(selectedProject?.id, selectedProject?.kind);
+    if (!workspaceId) {
+      // 不静默：禁用态可能被绕过（例如选完团队又清空目录），这里原位说明。
+      setError(TEAM_NEEDS_PROJECT_HINT);
+      return;
+    }
+    try {
+      const started = await aiTeamsRepository.startDirect(teamId, {
+        note: prompt.trim() || name.trim(),
+        workspaceId,
+      });
+      const sessionId = started.run.chatSessionId;
+      setNotice(`${selectedTeamName || "团队"}已开工，${sessionId ? "正在打开群聊…" : "正在打开团队页…"}`);
+      await aiTeamsRepository.settle("success");
+      taskBoardController.close();
+      workspacesController.close();
+      // 开团后首屏直接进 IM 群聊页（§5.1 路径 a 改走 teamchat），和侧栏点群聊条目一致。
+      if (sessionId) taskBoardController.open("", "", "teamchat", started.run.id);
+      else taskBoardController.open("", "", "teams");
+      // 侧栏群聊徽标来自 /api/tasks（useTaskGroups 订阅 task-changes），开团后主动通知一次，
+      // 不等 ~6s 轮询；单次信号只让每个订阅者 reload 一遍，有 generation + revision 廉价校验，不会成刷新风暴。
+      notifyTasksChanged();
+    } catch (cause) {
+      setError(describeError(cause, "开工失败，请选择已有项目后重试。"));
+      await aiTeamsRepository.settle("error");
+    }
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (submitting) return;
@@ -204,6 +254,11 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
     setSubmitting(true);
     setError("");
     try {
+      if (teamId) {
+        // 团队分支既不建任务卡也不起会话：直发路由自己建 team_direct 卡（§4.2）。
+        await startDirectTeamRun();
+        return;
+      }
       const project = selectedProject ?? (mountedCwd ? await repository.create({
         name: mountedCwd.replace(/\/+$/, "").split("/").pop() || "工作区",
         cwd: mountedCwd,
@@ -368,7 +423,9 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
                 placeholder="希望 CLI 帮你完成什么？" onChange={(event) => setPrompt(event.currentTarget.value)}/>
               <p className="wand-new-session-field-hint">{target === "shell"
                 ? "空白终端不会读取提示词，请填写任务名称。"
-                : "创建后发送给所选工具；留空则先打开会话，稍后再输入。"}</p>
+                : teamId
+                  ? "这段作为开工说明交给负责人；留空时用任务名称。"
+                  : "创建后发送给所选工具；留空则先打开会话，稍后再输入。"}</p>
             </div>
 
             <WorkspaceAgentPicker
@@ -376,6 +433,9 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
               kind={sessionKind}
               model={model}
               disabled={submitting}
+              teams={teamOptions}
+              teamWorkspaceId={teamWorkspaceId}
+              teamId={teamId}
               onTargetChange={(next) => {
                 draftTouched.current = true;
                 setTarget(next);
@@ -383,6 +443,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
               }}
               onKindChange={(next) => { draftTouched.current = true; setSessionKind(next); }}
               onModelChange={(next) => { draftTouched.current = true; setModel(next); }}
+              onTeamChange={(next) => { draftTouched.current = true; setTeamId(next); }}
             />
 
             {hasDirectory ? (
@@ -430,7 +491,9 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
             <span>即将创建</span>
             <strong>{name.trim() || (prompt.trim() ? "按提示词自动命名" : "待填写任务")}</strong>
             <span title={effectiveCwd}>{effectiveCwd}</span>
-            <span>{target === "shell" ? "空白终端" : `${WORKSPACE_AGENT_OPTIONS.find((option) => option.value === target)?.label ?? target} · ${sessionKind === "pty" ? "PTY" : "结构化"}${model === MODEL_CATALOG_DEFAULT_VALUE ? "" : ` · ${model}`}`}</span>
+            <span>{teamId
+              ? `AI 团队 · ${selectedTeamName}`
+              : target === "shell" ? "空白终端" : `${WORKSPACE_AGENT_OPTIONS.find((option) => option.value === target)?.label ?? target} · ${sessionKind === "pty" ? "PTY" : "结构化"}${model === MODEL_CATALOG_DEFAULT_VALUE ? "" : ` · ${model}`}`}</span>
           </div>
 
           <div className="wand-new-session-footer wand-new-project-footer">
@@ -442,10 +505,11 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
                 className="wand-new-session-submit wand-new-project-submit"
                 disabled={submitting || (!name.trim() && !prompt.trim())}
               >
-                {submitting ? "正在创建…" : "创建任务"}
+                {submitting ? (teamId ? "正在开工…" : "正在创建…") : teamId ? "直接开工" : "创建任务"}
               </WandButton>
             </div>
             {error ? <p className="wand-new-session-error wand-new-project-error" role="alert">{error}</p> : null}
+            {notice && !error ? <p className="wand-new-session-field-hint" role="status">{notice}</p> : null}
           </div>
         </form>
       )}

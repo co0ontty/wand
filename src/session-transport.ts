@@ -31,6 +31,8 @@ export interface SessionDetailDTO extends SessionBaseDTO {
   messageTotal?: number;
   leadingBlockOffset?: number;
   leadingBlockTotal?: number;
+  /** 被切掉的头部里用户可感知的块数（默认收起的工具 / 思考块不计入）。 */
+  leadingVisibleCount?: number;
 }
 
 function cleanDisplayTitle(value: string | undefined): string {
@@ -122,6 +124,7 @@ export interface SessionDetailDTOOptions {
   messageTotal?: number;
   leadingBlockOffset?: number;
   leadingBlockTotal?: number;
+  leadingVisibleCount?: number;
   outputLimit?: number;
 }
 
@@ -144,6 +147,7 @@ export function toSessionDetailDTO(
     ...(options.messageTotal !== undefined ? { messageTotal: options.messageTotal } : {}),
     ...(options.leadingBlockOffset !== undefined ? { leadingBlockOffset: options.leadingBlockOffset } : {}),
     ...(options.leadingBlockTotal !== undefined ? { leadingBlockTotal: options.leadingBlockTotal } : {}),
+    ...(options.leadingVisibleCount !== undefined ? { leadingVisibleCount: options.leadingVisibleCount } : {}),
   };
 }
 

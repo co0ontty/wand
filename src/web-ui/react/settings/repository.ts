@@ -223,7 +223,6 @@ function normalizeConfig(value: unknown): SettingsConfig {
       inlineTools: cards.inlineTools === true,
       terminal: cards.terminal === true,
       thinking: cards.thinking === true,
-      toolGroup: cards.toolGroup === true,
     },
   };
 }

@@ -124,6 +124,35 @@ Compose 没有路径级 morph，硬做需要 AnimatedVectorDrawable 且要求两
 
 **案例**：首页「会话 / 任务」切段。
 
+## 9. 活动滚动窗口（思考 + 工具调用）
+
+**要求**：一段连续的思考 / 工具调用收成**一张卡片**（头部只放缩略信息：类型计数 + 条数 ——
+具体活动就在下面窗口里，头部不再重复一条「最新活动」文案），展开后是**固定高度的滚动窗口**，
+窗口跟着最新一条走。
+同一个回复里**只有最新的一段默认展开**：新的活动一出现，上一段自己收回状态条；
+用户手动收放过的窗口不再被自动状态覆盖。窗口里也只有**最新一条默认展开**，
+更早的思考 / 工具调用退化成一行摘要。
+
+**边界**：窗口必须有明确的卡片边界（圆角 + 1px 边框 + 底色 + 展开态强调边框），
+否则看不出活动区从哪开始、到哪结束。入口只有头部这一行（点一下收/展开），
+展开向**下**长出，头部本身不位移。
+
+**滚动**：只有「贴尾」（距底 ≤ 24px/24dp）时才跟随最新活动；用户上滚看历史后
+**不许把他拽回尾部**，改为在窗口右下角露出「回到最新」。内容不到一屏时不加
+上下渐隐遮罩。流式刷新会重建 DOM，滚动位置按 expand key 记住并还原。
+
+**实现**：
+
+| 端 | 单层折叠 + 最新段 | 窗口滚动 |
+| --- | --- | --- |
+| Web | `.chat-activity` / `renderActivityFold`（`isNewestRun`、`activityTailIndex`） | `syncActivityWindows`（`is-unpinned`、`is-scrollable`） |
+| Android | `ActivityFoldCard`（`ActivityGroup.newest`、`LocalActivityWindowTail`） | `scrollState` + `pinned`（`isScrollInProgress` 只认用户拖动） |
+| iOS | `ActivityFoldCard`（`group.newest`、`activityWindowTail`） | `onScrollGeometryChange` + `onScrollPhaseChange` |
+| macOS | `ActivityFoldCard`（`activityGroup.newest`、`itemView(item, index, tail)`） | `ActivityTopEdgeKey` / `ActivityBottomEdgeKey` 哨兵（macOS 12 可用） |
+
+**注意**：连续同类工具的「工具组 / 探索上下文」折叠已经删除——它会嵌在活动窗口里
+再出现一层同样的摘要条，和窗口头部的缩略信息重复（两份计数、两层折叠）。
+
 ## 实现对照表
 
 | 规则 | 组件（`ui/components/WandMotionKit.kt`） | 已落地位置 |
@@ -136,6 +165,7 @@ Compose 没有路径级 morph，硬做需要 AnimatedVectorDrawable 且要求两
 | 6 按钮变步进器 | 待出现界面的组件 | —（本项目暂无计数型动作） |
 | 7 列表就地展开 | `WandInlinePanel` | `TaskBoardCard` |
 | 8 视图切换 | `AnimatedContent`（页面侧） | 首页会话/任务 |
+| 9 活动滚动窗口 | `ActivityFoldCard`（三端各一份） | 结构化聊天思考/工具调用 |
 
 ## 自检清单（改 UI 时逐条过）
 
