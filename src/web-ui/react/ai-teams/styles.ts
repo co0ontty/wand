@@ -391,6 +391,35 @@ export const aiTeamsChunkStyles = String.raw`
 }
 .task-board-team-chat { display: grid; gap: 8px; }
 
+/* 群聊首屏只留一行公告摘要；成员与任务都从同一处原位展开。 */
+.team-chat-context {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 38px;
+  padding: 7px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.team-chat-context:hover, .team-chat-context:focus-visible { border-color: var(--accent); }
+.team-chat-context-label { flex: none; color: var(--accent); font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); }
+.team-chat-context-title { flex: 1; min-width: 0; overflow: hidden; font-size: var(--font-size-sm); text-overflow: ellipsis; white-space: nowrap; }
+.team-chat-context-action { flex: none; color: var(--text-tertiary); font-size: var(--font-size-xs); }
+.team-chat-details {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows var(--motion-normal) var(--ease-in-out-smooth), opacity var(--motion-fast) var(--ease-in-out-smooth);
+}
+.team-chat-details[data-open] { grid-template-rows: 1fr; opacity: 1; }
+.team-chat-details-inner { display: grid; gap: 12px; min-height: 0; overflow: hidden; }
+
 /* 「主任务」：钉在群聊最上面的公告位，滚动时不动。 */
 .team-chat-goal {
   display: grid;
@@ -468,13 +497,7 @@ button.team-chat-office-member:hover, button.team-chat-office-member:focus-visib
 /* 子任务层：左侧一道导轨 + 状态色，和主任务/用户发言拉开层级。 */
 .team-chat-step {
   gap: 4px;
-  margin-left: 10px;
-  padding-left: 10px;
-  border-left: 2px solid var(--border-subtle);
 }
-.team-chat-step[data-status="running"] { border-left-color: var(--info); }
-.team-chat-step[data-status="done"] { border-left-color: var(--success); }
-.team-chat-step[data-status="failed"] { border-left-color: var(--danger); }
 .team-chat-step-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .team-chat-step-head .pixel-avatar { flex: 0 0 auto; }
 .team-chat-step-chip {
@@ -494,9 +517,8 @@ button.team-chat-office-member:hover, button.team-chat-office-member:focus-visib
   from { opacity: 0; transform: translateX(-10px); }
 }
 .team-chat-live-row {
-  margin-left: 10px;
-  padding-left: 10px;
-  border-left: 2px solid var(--info);
+  display: grid;
+  gap: 5px;
 }
 .team-chat-live-row[data-leaving] {
   animation: wand-team-live-grow var(--motion-quick-exit) var(--ease-in-out-smooth) reverse forwards;
@@ -526,6 +548,32 @@ button.team-chat-office-member:hover, button.team-chat-office-member:focus-visib
 .team-chat-live-state[data-state="needs_input"],
 .team-chat-live-state[data-state="needs_permission"] { color: var(--warning); background: var(--warning-muted); }
 .team-chat-live-state[data-state="failed"] { color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent); }
+.team-chat-live-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(100%, 560px);
+  min-height: 38px;
+  padding: 7px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  text-align: left;
+  cursor: pointer;
+}
+.team-chat-live-summary > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.team-chat-live-summary > small { flex: none; color: var(--accent); }
+.team-chat-live-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows var(--motion-normal) var(--ease-in-out-smooth), opacity var(--motion-fast) var(--ease-in-out-smooth);
+}
+.team-chat-live-body[data-open] { grid-template-rows: 1fr; opacity: 1; }
+.team-chat-live-body-inner { min-height: 0; overflow: hidden; }
 .team-chat-live-card {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -538,8 +586,6 @@ button.team-chat-office-member:hover, button.team-chat-office-member:focus-visib
   border-radius: var(--radius-md);
   background: var(--bg-tertiary);
   cursor: pointer;
-  animation: wand-team-live-grow var(--motion-normal) var(--ease-out-expo) both;
-  animation-delay: var(--motion-fast);
   transition: border-color var(--motion-fast) var(--ease-in-out-smooth),
               background var(--motion-fast) var(--ease-in-out-smooth);
 }
@@ -562,10 +608,9 @@ button.team-chat-office-member:hover, button.team-chat-office-member:focus-visib
 /* 主任务层：负责人决策是公告卡，派工渲染成任务条目，不跟成员报告混在一起。 */
 .team-chat-plan {
   gap: 6px;
-  padding: 10px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--bg-secondary);
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 .team-chat-plan-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .team-chat-plan-text { margin: 0; color: var(--text-primary); font-size: var(--font-size-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -575,9 +620,7 @@ button.team-chat-office-member:hover, button.team-chat-office-member:focus-visib
   flex-wrap: wrap;
   align-items: baseline;
   gap: 6px;
-  padding: 6px 8px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-tertiary);
+  padding: 3px 0;
   font-size: var(--font-size-xs);
 }
 .team-chat-plan-member { color: var(--accent); font-weight: var(--font-weight-semibold); }
@@ -657,21 +700,17 @@ button.team-chat-office-member:hover, button.team-chat-office-member:focus-visib
   max-height: none;
 }
 .wand-team-chat-body .task-board-team-chat-input { flex: 0 0 auto; }
+.wand-team-chat-body .team-chat-details[data-open] { max-height: 42vh; overflow-y: auto; overscroll-behavior-y: contain; }
 .wand-team-chat-head-meta { display: flex; align-items: center; gap: 10px; }
 /* 群聊页头部：面包屑用 variant="title"，末段就是页面 h1，这里只压小整行的导航字号。 */
 .wand-team-chat-crumb { font-size: var(--font-size-sm); }
-.wand-team-chat-provider { color: var(--text-tertiary); font-size: 11px; font-variant-numeric: tabular-nums; }
 .wand-team-chat-unconfirmed { color: var(--warning); font-size: var(--font-size-xs); }
 .task-board-team-chat .pixel-avatar .wand-team-avatar-cat { width: 100%; height: 100%; }
 
 /* ---------- 群聊页底部「工作任务」二级目录（本次运行派发给成员的工作）---------- */
 /* 沉在对话区下方：chat 层仍 flex 撑满、消息内部滚动，这里定高内滚，展开行在原位长高、其余顺势下移。 */
 .wand-team-work-tasks {
-  flex: 0 0 auto;
-  max-height: 46vh;
-  overflow-y: auto;
-  overscroll-behavior-y: contain;
-  padding: 6px 28px 20px;
+  padding: 6px 0 0;
   border-top: 1px solid var(--border-subtle);
 }
 .wand-team-work-tasks-inner { display: grid; gap: 8px; width: 100%; max-width: 920px; margin: 0 auto; }
@@ -874,7 +913,7 @@ button.team-chat-office-member:hover, button.team-chat-office-member:focus-visib
 @media (max-width: 760px) {
   .wand-ai-team-editor-grid { grid-template-columns: minmax(0, 1fr); }
   .wand-team-chat-body { padding: 0 14px 16px; }
-  .wand-team-work-tasks { max-height: 40vh; padding: 4px 14px 16px; }
+  .wand-team-work-tasks { padding: 4px 0 0; }
   .wand-teams-layout { grid-template-columns: minmax(0, 1fr); }
   .wand-teams-list { padding: 12px 14px; border-right: 0; }
   .wand-teams-detail { padding: 14px 14px 28px; }
@@ -902,6 +941,8 @@ button.team-chat-office-member:hover, button.team-chat-office-member:focus-visib
   .wand-team-run-body,
   .team-chat-step-body,
   .team-chat-goal-body,
+  .team-chat-details,
+  .team-chat-live-body,
   .task-board-team-step-head svg,
   .wand-team-member-head > svg,
   .wand-team-run-head > svg,
@@ -921,9 +962,6 @@ button.team-chat-office-member:hover, button.team-chat-office-member:focus-visib
   .task-board-team-steps { animation: none; }
   /* 面板改为叠放淡入淡出后，reduce-motion 下退化成瞬时切换。 */
   .wand-teams-detail-pane { transition: none; }
-  /* 两段式进场在 reduce-motion 下不留间隔：时长由全局规则压到近零，延迟这里归零，
-     否则卡片会比头名晚一拍出现。 */
-  .team-chat-live-head,
-  .team-chat-live-card { animation-delay: 0s; }
+  .team-chat-live-head { animation-delay: 0s; }
 }
 `;

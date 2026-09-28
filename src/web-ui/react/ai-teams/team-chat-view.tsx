@@ -6,14 +6,13 @@ import { failureMessage } from "../errors";
 import { HttpResponseError, jsonBody, requestJson } from "../http-adapter";
 import { issueAgentEffortLabel, issueAgentProviderLabel } from "../issues/task-board-agent";
 import { wandModelDisplayName, type WandModelCatalog } from "../model-catalog";
-import { useWandModelCatalog } from "../use-model-catalog";
 import { WandButton } from "../ui";
 import { memberCoatIndex, PixelCat, TeamAvatar } from "./avatar";
 import { aiTeamsRepository } from "./repository";
 
 /**
  * 面板内嵌的群聊视图（§5.3）：只读渲染 `detail.chatTurns`，加一个往 relay 会话发话的输入框。
- * 视觉对齐 IM 群聊：顶部钉住「主任务」，负责人的决策是公告卡，成员干活是带状态芯片的步骤块，
+ * 视觉对齐 IM 群聊：公告先显示一行，成员与任务按需展开；消息流保持主位。
  * 长报告默认折叠、原位展开。不复用 legacy chat-render（那套是命令式 DOM + 会话状态机），
  * 只借它的类名对齐视觉。
  */
@@ -341,8 +340,6 @@ function StepTurn({
   const text = chatTurnText(turn);
   const report = parseStepReport(text);
   const clock = chatTurnClock(turn);
-  const catalog = useWandModelCatalog();
-  const signature = agentSignatureLabel(author ?? {}, catalog);
   const status = step?.status ?? (report?.ok === false ? "failed" : report ? "done" : undefined);
   return <div className="chat-message assistant team-chat-step" data-status={status}>
     <div className="team-chat-step-head">
@@ -355,7 +352,6 @@ function StepTurn({
           onClick={() => onOpenSession(author.sessionId!)}
         >{author.name}</button>
         : <span className="avatar-name">{author?.name ?? "成员"}</span>}
-      {signature ? <span className="wand-team-chat-provider">{signature}</span> : null}
       {report ? <span className="team-chat-step-chip" data-ok={report.ok || undefined}>
         {report.ok ? "✅" : "❌"} {report.title}
       </span> : null}
@@ -379,8 +375,6 @@ function LeaderTurn({
 }): React.ReactElement {
   const author = turn.author;
   const clock = chatTurnClock(turn);
-  const catalog = useWandModelCatalog();
-  const signature = agentSignatureLabel(author ?? {}, catalog);
   const { head, assignments } = splitLeaderMessage(chatTurnText(turn));
   return <div className="chat-message assistant chat-message-lead team-chat-plan">
     <div className="team-chat-plan-head">
@@ -396,7 +390,6 @@ function LeaderTurn({
           : <span className="avatar-name">{author?.name ?? "负责人"}</span>}
       </span>
       <span className="chat-author-badge">负责人</span>
-      {signature ? <span className="wand-team-chat-provider">{signature}</span> : null}
       {clock ? <span className="chat-message-time">{clock}</span> : null}
     </div>
     {head ? <p className="team-chat-plan-text">{head}</p> : null}
@@ -553,17 +546,17 @@ function LiveStepRow({
   const bodyRef = React.useRef<HTMLPreElement>(null);
   const pinnedRef = React.useRef(true);
   const pressRef = React.useRef<{ x: number; y: number } | null>(null);
+  const [expanded, setExpanded] = React.useState(false);
   const label = liveStateLabel(state ?? step.state);
   const clock = chatTurnClock({ createdAt: step.updatedAt, completedAt: step.updatedAt });
   const omitted = liveOmittedText(step.omittedChars);
-  const catalog = useWandModelCatalog();
-  const signature = agentSignatureLabel(step, catalog);
+  const lastLine = step.text.trim().split("\n").filter(Boolean).at(-1) || LIVE_EMPTY_TEXT;
 
-  // 只有贴尾才跟随最新一行；程序自己滚到底那次回调里 pinned 仍是真，不会把自己关掉。
+  // 展开时才跟随最新一行；用户上滚看旧输出后不再拉回尾部。
   React.useEffect(() => {
     const body = bodyRef.current;
-    if (body && pinnedRef.current) body.scrollTop = body.scrollHeight;
-  }, [step.text]);
+    if (expanded && body && pinnedRef.current) body.scrollTop = body.scrollHeight;
+  }, [expanded, step.text]);
 
   const open = (): void => {
     if (!onOpenSession) return;
@@ -592,12 +585,22 @@ function LiveStepRow({
           onClick={open}
         >{step.memberName}</button>
         : <span className="avatar-name">{step.memberName}</span>}
-      {signature ? <span className="wand-team-chat-provider">{signature}</span> : null}
       <span className="team-chat-live-chip">#{step.seq}{title ? ` ${title}` : ""}</span>
       {label ? <span className="team-chat-live-state" data-state={step.state}>{label}</span> : null}
       {clock ? <span className="chat-message-time">{clock}</span> : null}
     </div>
-    <div
+    <button
+      type="button"
+      className="team-chat-live-summary"
+      aria-expanded={expanded}
+      onClick={() => setExpanded((current) => !current)}
+    >
+      <span>{lastLine}</span>
+      <small>{expanded ? "收起输出" : "展开输出"}</small>
+    </button>
+    <div className="team-chat-live-body" data-open={expanded || undefined} inert={!expanded}>
+      <div className="team-chat-live-body-inner">
+      <div
       className="team-chat-live-card"
       role="button"
       tabIndex={0}
@@ -623,6 +626,8 @@ function LiveStepRow({
           pinnedRef.current = isFollowingTail(event.currentTarget);
         }}
       >{step.text || LIVE_EMPTY_TEXT}</pre>
+      </div>
+      </div>
     </div>
   </div>;
 }
@@ -631,15 +636,18 @@ export interface TeamChatViewProps {
   detail: AiTeamRunDetail;
   onChange(detail: AiTeamRunDetail): void;
   onOpenSession?: (sessionId: string) => void;
+  details?: React.ReactNode;
 }
 
-export function TeamChatView({ detail, onChange, onOpenSession }: TeamChatViewProps): React.ReactElement {
+export function TeamChatView({ detail, onChange, onOpenSession, details }: TeamChatViewProps): React.ReactElement {
   const { run, chatTurns, steps } = detail;
   const [local, setLocal] = React.useState<LocalChatTurn[]>([]);
   const [draft, setDraft] = React.useState("");
   const [error, setError] = React.useState("");
   const [pending, setPending] = React.useState<"" | "send" | "stop">("");
   const [liveRows, setLiveRows] = React.useState<LiveRow[]>([]);
+  const [detailsOpen, setDetailsOpen] = React.useState(false);
+  const detailsId = React.useId();
   const listRef = React.useRef<HTMLDivElement>(null);
   /**
    * 外层列表的「贴尾」状态：跟 live 卡片同一套阈值（距底 ≤ LIVE_TAIL_PX）。
@@ -657,6 +665,7 @@ export function TeamChatView({ detail, onChange, onOpenSession }: TeamChatViewPr
     setDraft("");
     setError("");
     setPending("");
+    setDetailsOpen(false);
     // 贴尾状态也按 run.id 重置：上一轮里用户上滚过，不该让这一轮的新页面一进来就不跟随。
     listPinnedRef.current = true;
   }, [run.id]);
@@ -773,8 +782,24 @@ export function TeamChatView({ detail, onChange, onOpenSession }: TeamChatViewPr
   };
 
   return <div className="task-board-team-chat">
-    <MainTaskCard detail={detail}/>
-    <TeamOffice detail={detail} onOpenSession={onOpenSession}/>
+    <button
+      type="button"
+      className="team-chat-context"
+      aria-expanded={detailsOpen}
+      aria-controls={detailsId}
+      onClick={() => setDetailsOpen((current) => !current)}
+    >
+      <span className="team-chat-context-label">群公告</span>
+      <span className="team-chat-context-title" title={run.objective}>{run.objective.split("\n")[0] || "查看本次任务"}</span>
+      <span className="team-chat-context-action">{detailsOpen ? "收起" : "详情"}</span>
+    </button>
+    <div id={detailsId} className="team-chat-details" data-open={detailsOpen || undefined} inert={!detailsOpen}>
+      <div className="team-chat-details-inner">
+        <MainTaskCard detail={detail}/>
+        <TeamOffice detail={detail} onOpenSession={onOpenSession}/>
+        {details}
+      </div>
+    </div>
     <div
       className="task-board-team-chat-list"
       ref={listRef}

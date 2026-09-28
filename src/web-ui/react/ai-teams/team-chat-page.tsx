@@ -5,9 +5,9 @@ import { RUN_STATUS } from "../issues/team-run-panel";
 import { taskBoardController } from "../issues/task-board-controller";
 import { SidebarToggleIcon } from "../shell/sidebar-toggle-icon";
 import { WandBadge, WandBreadcrumb, WandButton, WandIcon, WandIconButton } from "../ui";
-import { TeamAvatar, TeamAvatarStack, type TeamAvatarState } from "./avatar";
+import { TeamAvatar, type TeamAvatarState } from "./avatar";
 import { aiTeamsRepository, subscribeAiTeamRunChanges } from "./repository";
-import { TeamChatView, teamRunIsActive } from "./team-chat-view";
+import { TeamChatView } from "./team-chat-view";
 
 const STEP_LABEL: Record<AiTeamStep["status"], string> = {
   queued: "排队",
@@ -126,7 +126,6 @@ export function TeamChatPage({
 }: TeamChatPageProps): React.ReactElement {
   const [detail, setDetail] = React.useState<AiTeamRunDetail | null>(null);
   const [error, setError] = React.useState("");
-  const [stopping, setStopping] = React.useState(false);
   const taskId = detail?.run.taskId ?? "";
 
   const load = React.useCallback(async () => {
@@ -154,22 +153,8 @@ export function TeamChatPage({
   React.useEffect(() => {
     setDetail(null);
     setError("");
-    setStopping(false);
     void load();
   }, [load]);
-
-  const stop = async (): Promise<void> => {
-    if (!detail || stopping || !teamRunIsActive(detail.run.status)) return;
-    setStopping(true);
-    setError("");
-    try {
-      setDetail(await aiTeamsRepository.stop(detail.run.id));
-    } catch (cause) {
-      setError(failureMessage(cause, "停止失败。"));
-    } finally {
-      setStopping(false);
-    }
-  };
 
   React.useEffect(() => subscribeAiTeamRunChanges((change) => {
     // 新一轮的 runId 和当前页不同，所以还要按任务 id 收通知，才跟得上「接着开一轮」。
@@ -221,22 +206,11 @@ export function TeamChatPage({
               { label: detail?.run.team.name || "群聊" },
             ]}
           />
-          <p>{detail ? detail.run.objective.split("\n")[0] : error || "正在加载群聊…"}</p>
+          <p>{detail ? `${detail.run.team.members.length} 位成员 · 团队群聊` : error || "正在加载群聊…"}</p>
         </div>
       </div>
       {detail && status ? <div className="task-board-header-actions wand-team-chat-head-meta">
-        <TeamAvatarStack members={detail.run.team.members} max={5}/>
         <WandBadge tone={status.tone}>{status.label}</WandBadge>
-        {detail.run.chatSessionId && onOpenSession ? <WandButton kind="ghost" size="small" onClick={() => onOpenSession(detail.run.chatSessionId!)}>
-          完整会话记录
-        </WandButton> : null}
-        {teamRunIsActive(detail.run.status) ? <WandButton
-          kind="danger"
-          size="small"
-          disabled={stopping}
-          aria-label="停止团队"
-          onClick={() => void stop()}
-        >{stopping ? "停止中…" : "停止"}</WandButton> : null}
       </div> : null}
     </header>
     {error ? <div className="task-board-native-banner is-error" role="alert">
@@ -244,9 +218,20 @@ export function TeamChatPage({
       {runId ? <WandButton kind="ghost" size="small" onClick={() => void load()}>重新加载</WandButton> : null}
     </div> : null}
     <div className="wand-team-chat-body">
-      {detail ? <TeamChatView detail={detail} onChange={setDetail} onOpenSession={onOpenSession}/>
+      {detail ? <TeamChatView
+        detail={detail}
+        onChange={setDetail}
+        onOpenSession={onOpenSession}
+        details={<>
+          <WorkTaskTree detail={detail} onOpenSession={onOpenSession}/>
+          {detail.run.chatSessionId && onOpenSession ? <WandButton
+            kind="ghost"
+            size="small"
+            onClick={() => onOpenSession(detail.run.chatSessionId!)}
+          >查看完整会话记录</WandButton> : null}
+        </>}
+      />
         : !error ? <p className="wand-team-empty-line">正在加载…</p> : null}
     </div>
-    {detail ? <WorkTaskTree detail={detail} onOpenSession={onOpenSession}/> : null}
   </section>;
 }

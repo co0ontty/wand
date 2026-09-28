@@ -142,10 +142,9 @@ test("团队页与群聊页头部：返回箭头只在列表态出现，收起�
   // 「完整会话记录」只在真的挂了 chat 会话、且外层给了打开会话的回调时才出现，避免点了没反应的死按钮。
   assert.match(chat, /\{detail\.run\.chatSessionId && onOpenSession \? <WandButton/);
   assert.match(chat, /onOpenSession\(detail\.run\.chatSessionId!\)/);
-  // 独立群聊页头部就能停：滚动看消息时输入栏可能不在视野里，顶栏这枚始终在。
-  assert.match(chat, /teamRunIsActive\(detail\.run\.status\) \? <WandButton/);
-  assert.match(chat, /aiTeamsRepository\.stop\(detail\.run\.id\)/);
-  assert.match(chat, /aria-label="停止团队"/);
+  // 顶栏只保留群状态；停止入口仍由群聊输入栏承接，避免首屏重复操作。
+  assert.doesNotMatch(chat, /aria-label="停止团队"/);
+  assert.match(chatSource, /aiTeamsRepository\.stop\(run\.id\)/);
   // 群聊页用的是 title 变体，样式里不该再留 compact 变体的死选择器。
   const chatStyles = read("react/ai-teams/styles.ts");
   assert.doesNotMatch(chatStyles, /\.wand-team-chat-crumb\.is-compact/);
@@ -719,12 +718,12 @@ test("[T8] 乐观临时行：确认靠 user 回合 + 发送时刻粗匹配，重
   assert.match(chatSource, /未确认/);
 });
 
-test("[T8] 群聊渲染对齐 chat-render 的类名，不复制色值也不自造气泡", () => {
+test("[T8] 群聊沿用消息类名，技术签名不反复挤进发言行", () => {
   assert.match(chatSource, /className="chat-message chat-notice"/);
   assert.match(chatSource, /className="chat-notice-line"/, "降级 notice 走居中弱化行");
   assert.match(chatSource, /className="chat-message-avatar assistant chat-message-author"/);
   assert.match(chatSource, /className="chat-author-badge">负责人/);
-  assert.match(chatSource, /const signature = agentSignatureLabel\(author \?\? \{\}, catalog\);/, "署名走同一个标签函数：provider + 模型 + 思考深度");
+  assert.doesNotMatch(chatSource, /wand-team-chat-provider/, "模型信息不反复出现在群聊发言行");
   assert.equal(chatTurnText(userTurn("第一行\n第二行", "")), "第一行\n第二行");
   for (const rel of ["react/ai-teams/team-chat-view.tsx"]) {
     assert.doesNotMatch(read(rel), /#[0-9a-f]{3,8}\b|rgba?\(|--[a-z-]+:\s/, `${rel} 不该定义颜色`);
@@ -799,7 +798,7 @@ test("[T8] 只有长报告才折叠，短报告原地铺开", () => {
   assert.equal(needsCollapse("啊".repeat(421)), true, "超长单行也折");
 });
 
-test("[T8] 群聊样式：主任务钉顶、子任务带导轨与状态色、展开走 token 且 reduce-motion 退化", () => {
+test("[T8] 群聊默认聚焦消息，公告和工作详情从一行入口原位展开", () => {
   const chatBlock = chatStylesSource.slice(
     chatStylesSource.indexOf("/* 「主任务」"),
     chatStylesSource.indexOf("/* 备用候选被跳原因"),
@@ -807,7 +806,8 @@ test("[T8] 群聊样式：主任务钉顶、子任务带导轨与状态色、展
   assert.match(chatBlock, /\.team-chat-goal \{/, "主任务公告位");
   assert.match(chatBlock, /\.team-chat-goal-label \{/, "主任务标签");
   assert.match(chatBlock, /\.team-chat-step \{/, "子任务块");
-  assert.match(chatBlock, /\.team-chat-step\[data-status="running"\]/, "子任务按状态上色");
+  assert.match(chatStylesSource, /\.team-chat-context \{/, "公告摘要保持一行");
+  assert.match(chatStylesSource, /\.team-chat-details\[data-open\]/, "详情原位展开");
   assert.match(chatBlock, /\.team-chat-plan-list li \{/, "派工清单是一组任务条目");
   assert.match(chatBlock, /\.team-chat-step-body,[\s\S]*grid-template-rows: 0fr/, "收起是倒放");
   assert.match(chatBlock, /var\(--transition-normal\)/);
@@ -816,12 +816,15 @@ test("[T8] 群聊样式：主任务钉顶、子任务带导轨与状态色、展
   const reduced = chatStylesSource.slice(chatStylesSource.indexOf("@media (prefers-reduced-motion: reduce)"));
   assert.match(reduced, /\.team-chat-step-body,/);
   assert.match(reduced, /\.team-chat-goal-body,/);
+  assert.match(reduced, /\.team-chat-details,/);
   // 主任务与子任务必须渲染成两个不同层，而不是同一个气泡换个名字。
   assert.match(chatSource, /className="team-chat-goal"/);
   assert.match(chatSource, /className="chat-message assistant team-chat-step"/);
   assert.match(chatSource, /className="chat-message assistant chat-message-lead team-chat-plan"/);
   assert.match(chatSource, /className="team-chat-expand"/);
   assert.match(chatSource, /aria-expanded=\{expanded\}/);
+  assert.match(chatSource, /aria-controls=\{detailsId\}/);
+  assert.match(chatSource, /<TeamOffice detail=\{detail\}/, "成员工位仍可从详情查看");
 });
 
 const liveStep = (over: Partial<AiTeamLiveStep> & { stepId: string; seq: number }): AiTeamLiveStep => ({
@@ -922,7 +925,7 @@ test("[live] 换一次运行就重新从尾部开始跟随（与 Android remembe
   // 上一轮里用户上滚过 → ref 停在 false；不换 run.id 时不重置，新页面一进来就不跟随。
   assert.match(
     chatSource,
-    /setLocal\(\[\]\);\s*setDraft\(""\);\s*setError\(""\);\s*setPending\(""\);\s*(?:\/\/[^\n]*\n\s*)?listPinnedRef\.current = true;\s*\}, \[run\.id\]\);/,
+    /setLocal\(\[\]\);\s*setDraft\(""\);\s*setError\(""\);\s*setPending\(""\);\s*setDetailsOpen\(false\);\s*(?:\/\/[^\n]*\n\s*)?listPinnedRef\.current = true;\s*\}, \[run\.id\]\);/,
     "重置点在按 run.id 的 effect 里",
   );
 });
@@ -937,7 +940,7 @@ test("[live] 外层列表与卡片同一套贴底口径：上滚看历史不被 
   assert.match(chatSource, /listPinnedRef\.current = true;/, "自己发消息算一次明确的回到底部");
 });
 
-test("[署名] CLI · 模型 · 思考深度：三处共用一个函数，缺字段只剩 provider", () => {
+test("[署名] 技术签名仍可解析，但群聊发言只突出成员名字", () => {
   assert.equal(agentSignatureLabel({ provider: "qoder", model: "Qwen3.8-Flash", thinkingEffort: "max" }), "Qoder · Qwen3.8-Flash · 最大");
   // `default` 是「跟随服务端默认」的哨兵值、不是模型名：有目录就换成服务端默认模型的名字。
   assert.equal(agentSignatureLabel({ provider: "claude", model: "default", thinkingEffort: "off" }, defaultCatalog), "Claude · opus · 关闭",
@@ -953,9 +956,7 @@ test("[署名] CLI · 模型 · 思考深度：三处共用一个函数，缺字
   assert.equal(agentSignatureLabel({ provider: null, model: null, thinkingEffort: null }), "", "全缺就不给芯片");
   assert.equal(agentSignatureLabel({ model: "glm-4.7" }), "glm-4.7", "只有模型也不能冒出前导分隔符");
   assert.doesNotMatch(agentSignatureLabel({ provider: "claude", model: undefined, thinkingEffort: undefined }), /undefined|·\s*$|\s·/, "不出现 undefined 或多余分隔符");
-  // 三处署名（live 卡头部、成员步骤行、负责人行）都走这个函数，不允许各自拼文案。
-  assert.equal(chatSource.match(/agentSignatureLabel\(/g)?.length, 4, "定义 1 处 + 调用 3 处");
-  assert.equal(chatSource.match(/agentSignatureLabel\([^)]*, catalog\)/g)?.length, 3, "三处调用都带上目录，才能把 default 换成具体模型名");
+  assert.equal(chatSource.match(/agentSignatureLabel\(/g)?.length, 1, "发言行不重复呈现 CLI 和模型");
   assert.doesNotMatch(chatSource, /\{issueAgentProviderLabel\(step\.provider\)\}/, "live 卡不再单独拼 provider");
 });
 
@@ -989,7 +990,7 @@ test("[live] 正在输出的成员：chatTurns 之后追加定尺寸内滚卡，
     "退场只认这一行自己的动画，头名/卡片分两段进场的 animationend 会冒泡上来");
 });
 
-test("[live] 卡片样式：宽高等于收起时也一样，窄屏不缩高，动画只取 token", () => {
+test("[live] 实时输出先收成一行，展开后保留定高内滚", () => {
   const block = chatStylesSource.slice(
     chatStylesSource.indexOf("/* ---------- 正在输出的成员"),
     chatStylesSource.indexOf("/* 主任务层：负责人决策"),
@@ -998,11 +999,13 @@ test("[live] 卡片样式：宽高等于收起时也一样，窄屏不缩高，�
   assert.match(block, /\.team-chat-live-card \{[\s\S]*?height: 200px;/);
   assert.match(block, /\.team-chat-live-text \{[\s\S]*?overflow-y: auto;[\s\S]*?overscroll-behavior-y: contain;/, "内部滚动且不抢外层");
   assert.match(block, /font-family: var\(--font-mono\)/, "等宽");
+  assert.match(block, /\.team-chat-live-summary \{/, "首屏是一行摘要");
+  assert.match(block, /\.team-chat-live-body\[data-open\]/, "输出原位展开");
+  assert.match(chatSource, /aria-expanded=\{expanded\}/);
   assert.match(block, /@keyframes wand-team-live-grow \{\s*from \{ opacity: 0; transform: translateX\(-10px\); \}/, "从头像方向长出");
   assert.match(block, /\.team-chat-live-row\[data-leaving\] \{\s*animation: wand-team-live-grow var\(--motion-quick-exit\) var\(--ease-in-out-smooth\) reverse forwards;/, "收起是同一段动画倒放，且快于进场");
-  // 两段式进场（负责人拍板，与 Android 同拍）：头像 + 名字行先来，卡片隔一拍再长出。
+  // 头名仍从头像方向进场；完整输出由用户主动展开。
   assert.match(block, /\.team-chat-live-head \{[\s\S]*?animation: wand-team-live-grow var\(--motion-fast\) var\(--ease-out-expo\) both;/, "第一段：头名");
-  assert.match(block, /\.team-chat-live-card \{[\s\S]*?animation: wand-team-live-grow var\(--motion-normal\) var\(--ease-out-expo\) both;[\s\S]*?animation-delay: var\(--motion-fast\);/, "第二段：卡片晚一拍，延迟取自 token");
   assert.doesNotMatch(block, /\.team-chat-live-row \{[^}]*animation:/, "整行不再同帧原子插入");
   assert.doesNotMatch(block, /\b(?:\d+(?:\.\d+)?)(?:ms|s)\b/, "不得写死时长");
   assert.doesNotMatch(block, /#[0-9a-f]{3,8}\b|rgba?\(/, "只能引用 token");
@@ -1012,8 +1015,7 @@ test("[live] 卡片样式：宽高等于收起时也一样，窄屏不缩高，�
   );
   assert.doesNotMatch(narrow, /team-chat-live/, "窄屏不改卡片高度");
   const reduced = chatStylesSource.slice(chatStylesSource.indexOf("@media (prefers-reduced-motion"));
-  assert.match(reduced, /\.team-chat-live-head,\s*\.team-chat-live-card \{ animation-delay: 0s; \}/,
-    "reduce-motion 下两段都瞬时：全局规则只压时长，延迟在这里归零");
+  assert.match(reduced, /\.team-chat-live-body,/);
 });
 
 test("团队详情：草稿未保存时，每个离开入口都先确认，取消不丢", () => {
