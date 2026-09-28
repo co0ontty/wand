@@ -790,6 +790,7 @@ function TeamStartRow({
   const [message, setMessage] = React.useState("");
   const rowRef = React.useRef<HTMLDivElement>(null);
   const noteRef = React.useRef<HTMLTextAreaElement>(null);
+  const projectMenuClass = "wand-team-start-project-menu-" + React.useId();
   const picked = workspaceId || defaultTeamStartProject(projects);
   const busy = phase === "sending" || phase === "sent";
 
@@ -820,11 +821,15 @@ function TeamStartRow({
     if (!open) return undefined;
     const onPointerDown = (event: PointerEvent): void => {
       if (rowRef.current?.contains(event.target as Node)) return;
+      // The authored select's popup lives in a portal outside this row.
+      // Treat only this row's popup as inside; unrelated outside clicks still close it.
+      if (event.target instanceof Element
+        && event.target.closest(".wand-ui-select-content")?.classList.contains(projectMenuClass)) return;
       collapse();
     };
     window.addEventListener("pointerdown", onPointerDown, true);
     return () => window.removeEventListener("pointerdown", onPointerDown, true);
-  }, [open, phase]);
+  }, [open, phase, projectMenuClass]);
 
   async function start(): Promise<void> {
     if (busy) return;
@@ -881,6 +886,7 @@ function TeamStartRow({
               <WandSelect
                 ariaLabel="开工项目"
                 className="wand-settings-input"
+                contentClassName={projectMenuClass}
                 value={picked}
                 disabled={busy}
                 searchable
