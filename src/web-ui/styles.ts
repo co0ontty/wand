@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { EMBEDDED_WEB_ASSETS } from "./embedded-assets.js";
+import { versionWebAsset, type VersionedWebAsset } from "./asset-version.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -46,4 +47,16 @@ export function getCSSStyles(): string {
     // Keep serving the embedded build CSS until the process restarts.
   }
   return _cssCache;
+}
+
+let _stylesAsset: VersionedWebAsset | null = null;
+const embeddedStylesAsset = versionWebAsset(EMBEDDED_WEB_ASSETS.stylesCss);
+
+export function getStylesAsset(requestedHash?: string): VersionedWebAsset {
+  const content = getCSSStyles();
+  if (!_stylesAsset || _stylesAsset.content !== content) {
+    _stylesAsset = versionWebAsset(content);
+  }
+  if (requestedHash === embeddedStylesAsset.hash) return embeddedStylesAsset;
+  return _stylesAsset;
 }

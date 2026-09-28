@@ -1,6 +1,16 @@
 import type { AppState } from "./types";
+import { ComposerQueueClock, ComposerStore } from "./composer.js";
 
-export var configPath = "${escapeHtml(configPath)}";
+export const composer = new ComposerStore({
+  storage: () => localStorage,
+  isUnloading: () => !!state.pageUnloading,
+  disposeAttachment: (attachment) => {
+    if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
+  },
+});
+export const composerQueue = new ComposerQueueClock();
+
+export var configPath = "${wandConfigPath}";
 export var CHAT_EXPAND_STATE_STORAGE_KEY = "wand-chat-expand-state-v1";
 
 // ===== 一次性 localStorage 迁移 =====
@@ -122,22 +132,9 @@ export var state: AppState = {
   queueBarExpanded: false,
   queueBarDrag: null,
   queueBarPromoting: false,
-  drafts: {},
-  // 只活在内存里的草稿：发送结果未知（传输层失败）时回填的内容。它不能落
-  // localStorage —— 否则刷新后同一条「可能已经发出」的消息会再次出现在输入框里，
-  // 用户一按回车就重复发送。用户重新编辑、发送成功或明确失败回填后即恢复普通持久化。
-  draftsMemoryOnly: {},
   // 页面正在卸载（刷新 / 关标签 / 原生壳回收 WebView）：在途 fetch 会被 abort，
   // 失败回填随之触发。这段时间一律不写 localStorage，避免污染下一次启动的草稿。
   pageUnloading: false,
-  // Attachments are composer state, so they must follow the same per-session
-  // isolation as drafts. File objects cannot be persisted across reloads, but
-  // they do survive in-memory session switches.
-  attachmentsBySession: {},
-  // Active composer submissions are keyed by session and fingerprint. A
-  // second gesture for the same captured payload reuses the first submission,
-  // while a newly typed payload can still enter the structured-session queue.
-  composerSubmissionsBySession: {},
   // Prompt optimization is global because the backing system-AI request is
   // shared. The session id keeps only the owning composer read-only while a
   // response may safely finish in the background after a session switch.
@@ -318,7 +315,6 @@ export var state: AppState = {
   codexHistoryExpandedDirs: {},
   selectedCodexHistoryIds: {},
   askUserSelections: {},  // { toolUseId: { 0: [optIdx...], submitted: false } }
-  queueEpoch: 0,  // Monotonic counter for queue state freshness
   // Load last used working directory from localStorage
   workingDir: (function() {
     try {
@@ -329,15 +325,6 @@ export var state: AppState = {
     }
   })()
 };
-
-// Hydrate the initially selected session before the first render. Subsequent
-// sessions are loaded lazily by getDraftValueForSession().
-if (state.selectedId) {
-  try {
-    var initialDraft = localStorage.getItem("wand-draft-" + state.selectedId);
-    if (initialDraft !== null) state.drafts[state.selectedId] = initialDraft;
-  } catch (e) { /* localStorage unavailable */ }
-}
 
 // 刷新 / 关标签 / 原生壳回收 WebView 时在途 fetch 会被 abort，发送失败的回填逻辑
 // 可能在卸载过程中跑完。标记出来后 setDraftValueForSession 会跳过 localStorage

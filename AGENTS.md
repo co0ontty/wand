@@ -12,7 +12,7 @@
 
 `wand` 是本机 AI CLI 工具的 Node.js Web 控制台，支持 Claude Code、Codex、OpenCode、Grok、Qoder、Pi 六个 provider。Express + WebSocket 服务浏览器 UI；会话跑在 PTY 或结构化非 PTY 进程里；PTY 由**独立的 terminal daemon**（`wand terminald`）持有，web 重启 / 自更新不杀 shell。配置、鉴权、会话状态持久化在激活配置文件所在目录。
 
-- Runtime: Node.js `>=22.5.0`, TypeScript, ESM。
+- Runtime: Node.js `>=26.10.0`（仓库 `.nvmrc` 固定构建/CI 版本；`nvm use`）, TypeScript, ESM。
 - 默认 config: `~/.wand/config.json`；SQLite: `~/.wand/wand.db`；会话制品: `~/.wand/sessions/<sessionId>/`。
 - `-c /path/to/config.json` 隔离以上全部（隔离测试统一用 `/tmp/wand-dev/`）。
 - 单实例按 config 路径隔离：已有实例时 `wand web` 走 IPC attach，不开第二个 server。
@@ -27,7 +27,7 @@
 | `render/` | `co0ontty/wand-render` | **Render 源码**（Rust 常驻进程，持有 PTY / 输出 journal / VT 屏幕模型） |
 | `render-bin/` | `co0ontty/wand-render-bin` | **Render 产物**（各平台二进制 + `manifest.json`，只由 CI 写入） |
 
-克隆后先 `git submodule update --init`（只想跑起来至少要 `--init render render-bin`，否则 npm 包里没有 Render 二进制，`engine=auto` 会回退 legacy 并打警告）。
+服务端开发/构建只需 `git submodule update --init -- render-bin`；修改 Rust 时另检出 `render`，修改原生客户端时另检出对应平台。不要默认递归检出全部子模块。未检出 `render-bin` 时 npm 包里没有 Render 二进制，`engine=auto` 会回退 legacy 并打警告。仓库精简进度与续接入口见 `docs/repository-slimming.md`。
 
 ## Server / Render 分离（不可破坏的边界）
 
@@ -148,7 +148,7 @@ scripts/qrcode-entry.js    -> scripts/bundle-qrcode.js   -> content/vendor/qrcod
 
 升级 `@xterm/*` 或 `qrcode` 后要重跑对应 vendor bundler。`npm run build` 必须保持把 `src/web-ui/content/` 拷进 `dist/web-ui/`，否则打包版坏。
 
-`scripts.js` + `tailwind.css` + `styles.css` 全部被 `src/web-ui/index.ts` 内联进单个 HTML 响应，不能单独缓存，移动端冷启动每次重传，所以三者合计有 gzip 预算：`scripts/check-bundle-budget.js`（`npm run check:bundle-budget`，已挂在 `npm run build` 末尾）。预算只降不升；要松绑必须在同一个提交里改 `BUDGET` 并说明原因。
+`src/web-ui/index.ts` 只返回轻量 no-store HTML；主脚本 `/assets/app.js?v=<内容指纹>`（含当前 configPath 与团队脚本地址）、合并样式 `/assets/app.css?v=<内容指纹>` 与 vendor 都单独请求，命中指纹后可浏览器缓存；JS 因包含实例路径用 `private`。`scripts.ts` / `styles.ts` 保留嵌入回退，保证 npm 自更新短暂删除磁盘产物时旧进程仍能服务。`scripts/check-bundle-budget.js`（`npm run check:bundle-budget`，构建末尾执行）分别约束复访 HTML、首次加载完整字节、主 JS/CSS、按需脚本，不能通过换成外部资源绕过预算；调高阈值必须在同一个提交说明首载/缓存影响。构建与 CI 的 Node 版本统一取 `.nvmrc`。
 
 Raw PTY 输出和结构化聊天 turn 是同一会话的两种表示；渲染 bug 先查 provider parser / WS payload / `chat-render.ts`，别急着怪 CSS。
 

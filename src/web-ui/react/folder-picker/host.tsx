@@ -145,6 +145,8 @@ export function FolderPickerHost({ repository = httpFolderPickerRepository }: Fo
   }
 
   function handleInputKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
+    // 组字期的回车/方向键属于候选词，不能让文件夹选择框提前提交或跳条目。
+    if (event.nativeEvent.isComposing) return;
     if (NAVIGATION_KEYS.has(event.key as FolderPickerNavigationKey)) {
       event.preventDefault();
       setActiveIndex((current) => nextFolderPickerIndex(

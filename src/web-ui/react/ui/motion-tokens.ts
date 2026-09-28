@@ -8,3 +8,16 @@
  */
 export const MOTION_DWELL_SENT_MS = 720;
 export const MOTION_DWELL_FAILED_MS = 1500;
+
+/**
+ * 一整句结果文案（批量操作计数、worktree 合并结论、密码修改说明）要在原位读完，
+ * 比按钮/标签级的 MOTION_DWELL_SENT_MS 长；刻意仍短于 MOTION_DWELL_FAILED_MS，
+ * 保持「失败停留 ≥ 成功」。页面不得再写自己的毫秒。
+ */
+export const MOTION_DWELL_RESULT_SENTENCE_MS = 1200;
+
+/**
+ * 处理中点阵的错峰间隔（不是驻留）：与 content/styles.css 里
+ * task-board-processing-dot 的 900ms 周期配套，改这里必须同时核对那条动画。
+ */
+export const MOTION_PROCESSING_STAGGER_MS = 150;

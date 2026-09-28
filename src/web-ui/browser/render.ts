@@ -1,4 +1,4 @@
-import { state, writeStoredBoolean } from "./state";
+import { composer, state, writeStoredBoolean } from "./state";
 import { restoreActiveTask } from "./active-task";
 import { renderLoginVisual } from "./login-visual.js";
 import { renderWandBrandMarkup } from "../brand-identity.js";
@@ -10,7 +10,7 @@ import { isSidebarDrawerLayout } from "./file-browser";
 import { loadGitStatus } from "./git-commit";
 import { autoResizeInput, getSelectedSession } from "./input";
 import { requestNotificationPermission, notifyUpdateAvailable, _apkVersion, _macAppVersion } from "./notifications";
-import { applyCurrentView, applyConfigDefaultThinking, checkApkAutoUpdate, checkDmgAutoUpdate, closeTransientSessionsDrawer, fetchAvailableModels, getComposerPlaceholder, hasNativeSwitchServer, loadSessions, refreshAll, refreshClaudeSkillsPicker, syncComposerModeSelect, syncComposerModelSelect, updateDrawerState, updateShellChrome } from "./session-engine";
+import { applyCurrentView, applyConfigDefaultThinking, checkApkAutoUpdate, checkDmgAutoUpdate, closeTransientSessionsDrawer, COMPOSER_IDLE_HINT, fetchAvailableModels, getComposerPlaceholder, hasNativeSwitchServer, loadSessions, refreshAll, refreshClaudeSkillsPicker, syncComposerModeSelect, syncComposerModelSelect, updateDrawerState, updateShellChrome } from "./session-engine";
 import { maybeScrollTerminalToBottom } from "./terminal";
 import { ensureTerminalFit, ensureTerminalFitWithRetry, teardownTerminal } from "./viewport";
 import { initWebSocket, forceReconnectWebSocket, cancelWsReconnect, evaluateWsHeartbeatStale, startPolling, syncComposerBadges } from "./websocket";
@@ -84,7 +84,8 @@ export function updateOfflineBanner() {
     var el = document.createElement('div');
     el.id = 'offline-banner';
     el.className = 'offline-banner';
-    el.textContent = 'You are offline - some features may be limited';
+    // 全站提示都是中文，这条也不例外（原来那句英文只在真断线时才看得见）。
+    el.textContent = '当前处于离线状态，部分功能可能不可用。';
     document.body.appendChild(el);
   } else if (state.isOnline && banner) {
     banner.remove();
@@ -349,11 +350,12 @@ document.addEventListener("click", function(e) {
   if (target.closest(".floating-sidebar-toggle")) return;
   if (target.closest(".sidebar-tile-bubble")) return;
   if (target.closest(
+    // 权限弹窗现在是 chat/terminal 面板内的既有 React 覆盖层（composer 之外），
+    // 不再需要一个 .permission-prompt-overlay 类；这里只列真实存在的宿主。
     ".modal-backdrop, .modal-overlay, .modal-container, " +
     "[role='dialog'], [role='menu'], " +
     ".topbar-more-menu, .sidebar-header-overflow, " +
-    ".path-suggestions, " +
-    ".permission-prompt-overlay"
+    ".path-suggestions"
   )) return;
   closeTransientSessionsDrawer();
 }, true);
@@ -528,18 +530,20 @@ export function renderLogin() {
 // are rendered exclusively by React; this markup is never mounted as a page.
 export function renderAppShell() {
   var selectedSession = state.sessions.find(function(s: any) { return s.id === state.selectedId; });
-  var currentDraft = state.selectedId ? (state.drafts[state.selectedId] || "") : "";
+  var currentDraft = composer.read(state.selectedId).text;
   return (
         // 文件面板（含 backdrop、头部、搜索框）归 React Shell 渲染；
         // 只保留 #file-explorer 槽位锚点，legacy 不再往里写内容。
         '<div class="file-explorer" id="file-explorer"></div>' +
         '<div id="output" class="terminal-container' + (state.selectedId ? "" : " hidden") + ' active">' +
           '<div class="terminal-scale-overlay" aria-label="终端缩放控件">' +
-            '<button id="terminal-scale-down-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="缩小">−</button>' +
+            // 只有 title 时读屏在图标 / 符号按钮上只能念出「减号 / 加号」，够不到动作本身
+            // （UX-CONTRACT 的 WCAG 2.2 AA 4.1.2）；aria-label 与 title 同步写明动作。
+            '<button id="terminal-scale-down-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="缩小" aria-label="缩小终端字号">−</button>' +
             '<span class="terminal-scale-overlay-label terminal-scale-label" id="terminal-scale-label-top">' + Math.round(state.terminalScale * 100) + '%</span>' +
-            '<button id="terminal-scale-up-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="放大">+</button>' +
+            '<button id="terminal-scale-up-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="放大" aria-label="放大终端字号">+</button>' +
             '<span class="terminal-scale-overlay-divider"></span>' +
-            '<button id="page-refresh-btn" class="terminal-scale-overlay-btn" type="button" title="刷新页面">' + iconSvg("refresh", { size: 13, strokeWidth: 2 }) + '</button>' +
+            '<button id="page-refresh-btn" class="terminal-scale-overlay-btn" type="button" title="刷新页面" aria-label="刷新页面">' + iconSvg("refresh", { size: 13, strokeWidth: 2 }) + '</button>' +
           '</div>' +
           '<button id="terminal-jump-bottom" class="terminal-jump-bottom' + (state.showTerminalJumpToBottom ? ' visible' : '') + '" type="button" title="回到底部" aria-label="回到底部"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></button>' +
         '</div>' +
@@ -610,6 +614,11 @@ export function renderAppShell() {
                   '<span class="composer-badge-host" data-composer-badge-host="auto-approve"></span>' +
                   '<span class="composer-badge-host hidden" data-composer-badge-host="permissions"></span>' +
                   '<span class="composer-badge-host" data-composer-badge-host="approval-stats"></span>' +
+                  // 输入区的原位结果行：空闲时常驻快捷键教学（这句话原来挂在已死的
+                  // .input-hint 上，没有任何宿主），发送时依次显示 加载 → 完成/失败 → 结果，
+                  // 不再用浮层 Toast 承担。aria-live 让读屏播报失败原因；成功态只是文字换色，
+                  // 不抢焦点（焦点留在输入框，用户可以接着打字）。
+                  '<span class="composer-status-line" id="composer-status-line" role="status" aria-live="polite">' + escapeHtml(COMPOSER_IDLE_HINT) + '</span>' +
                 '</div>' +
               '</div>' +
               '<div class="composer-actions-right" role="group" aria-label="模型与发送">' +
@@ -627,18 +636,30 @@ export function renderAppShell() {
                   '<span class="prompt-optimize-label">优化</span>' +
                   '<span class="prompt-optimize-spinner" aria-hidden="true"></span>' +
                 '</button>' +
-                // 停止按钮默认隐藏；updateInteractiveControls() 根据 computeRunningSignal
-                // 判断「真有 reply 在跑」时再露出，平时让位给主操作减少视觉噪声。
-                '<button id="stop-button" class="btn-circle btn-circle-stop hidden" type="button" title="停止" aria-label="停止生成">' +
-                  '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg>' +
-                '</button>' +
                 // 语音按钮位于输入框内部、发送按钮左侧；只在按钮自身处理长按。
                 '<button id="voice-record-btn" class="btn-circle btn-circle-action btn-circle-voice" type="button" title="按住语音输入" aria-label="按住语音输入" aria-pressed="false"' + (state.terminalInteractive ? ' disabled' : '') + '>' +
                   iconSvg("mic", { size: 19, strokeWidth: 2 }) +
                 '</button>' +
                 // 「立即发送」按钮已下线 —— 默认行为永远是排队（气泡），想插队点输入框上方那条气泡。
-                '<button id="send-input-button" class="btn-circle btn-circle-send" type="button" title="发送" aria-label="发送消息">' +
-                  '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m6 11 6-6 6 6"/></svg>' +
+                // 发送 / 停止是同一个按钮的两种状态（docs/motion-design.md §4）：四层 glyph
+                // 叠在同一个宿主里，靠宿主上的 data-phase 做交叉淡入 + 轻微旋转/缩放，
+                // 不再用「两个按钮 + display:none 互斥」（那种切换是硬切，且按钮会左右跳）。
+                // 相位优先级见 input.ts 的 composerBaseSendPhase()：结果态（sending/sent/failed）
+                // > 运行中且无草稿（running = 停止）> 有草稿（idle = 发送）。
+                // glyph 一律 aria-hidden：可读名称由宿主上的 title / aria-label 随相位更新。
+                '<button id="send-input-button" class="btn-circle btn-circle-send" type="button" data-phase="idle" title="发送" aria-label="发送消息">' +
+                  '<span class="composer-send-glyph composer-send-glyph-arrow" aria-hidden="true">' +
+                    '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m6 11 6-6 6 6"/></svg>' +
+                  '</span>' +
+                  '<span class="composer-send-glyph composer-send-glyph-stop" aria-hidden="true">' +
+                    '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg>' +
+                  '</span>' +
+                  '<span class="composer-send-glyph composer-send-glyph-sending" aria-hidden="true">' +
+                    '<span class="composer-send-spinner"></span>' +
+                  '</span>' +
+                  '<span class="composer-send-glyph composer-send-glyph-sent" aria-hidden="true">' +
+                    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 13 4 4L19 7"/></svg>' +
+                  '</span>' +
                 '</button>' +
               '</div>' +
             '</div>' +

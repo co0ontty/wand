@@ -459,16 +459,16 @@ test("migrated Worktree, File Preview, and Restart overlays keep only browser ad
 
 test("config-path injection and embedded web-asset fallbacks remain intact", () => {
   const contracts: Array<[string, string[]]> = [
-    ["src/web-ui/browser/state.ts", ['export var configPath = "${escapeHtml(configPath)}";']],
+    ["src/web-ui/browser/state.ts", ['export var configPath = "${wandConfigPath}";']],
     [
       "src/web-ui/scripts.ts",
       [
         "EMBEDDED_WEB_ASSETS.scriptsJs",
-        'replace("${escapeHtml(configPath)}", escapeHtml(configPath))',
+        `replace('"\${wandConfigPath}"', JSON.stringify(configPath))`,
       ],
     ],
     ["src/web-ui/styles.ts", ["EMBEDDED_WEB_ASSETS.stylesCss"]],
-    ["src/web-ui/index.ts", ["getScriptContent(configPath)"]],
+    ["src/web-ui/index.ts", ["getScriptAsset(configPath).hash", "getStylesAsset().hash"]],
     [
       "scripts/generate-web-assets.js",
       [
@@ -476,7 +476,7 @@ test("config-path injection and embedded web-asset fallbacks remain intact", () 
         '["stylesCss", "styles.css", "text/css; charset=utf-8"]',
       ],
     ],
-    ["src/web-ui/content/scripts.js", ['"${escapeHtml(configPath)}"']],
+    ["src/web-ui/content/scripts.js", ['"${wandConfigPath}"']],
   ];
   const violations: string[] = [];
 
@@ -493,4 +493,8 @@ test("config-path injection and embedded web-asset fallbacks remain intact", () 
     "The configPath placeholder and embedded scripts/styles fallback are packaged runtime contracts.",
     violations,
   );
+  const shell = source("src/web-ui/index.ts");
+  assert.match(shell, /\/assets\/app\.js\?v=/);
+  assert.match(shell, /\/assets\/app\.css\?v=/);
+  assert.doesNotMatch(shell, /\$\{scriptContent\}|\$\{cssStyles\}/);
 });

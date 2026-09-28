@@ -258,14 +258,35 @@ test("task board create sheets only assign agents from the doing column", () => 
     'internal fun boardCreateDispatches(status: String): Boolean = status == "doing"',
     "initialStatus: String",
     "var status by remember { mutableStateOf(initialStatus) }",
-    "if (boardCreateDispatches(status) && description.isNotBlank())",
     "onCreateForStatus: (String) -> Unit",
     'BoardSectionHeader(',
     'onAdd = onCreateForStatus,',
-    'contentDescription = "在${boardTaskStatusLabel(status)}中新建任务"',
-    'label = if (busy) "创建中…" else if (dispatches && description.trim().isNotEmpty()) "创建并指派" else "创建任务"',
+    "contentDescription = boardGroupAddTaskDescription(status)",
+    'label = boardCreateActionLabel(',
+    "dispatches = dispatches,",
+    "hasDescription = description.trim().isNotEmpty(),",
     'enabled = !busy && (title.trim().isNotEmpty() || description.trim().isNotEmpty())',
     "只创建任务，不指派 Agent",
+  ]);
+  // 派工门槛：两个条件都得成立，且必须是 `&&`。Kotlin 把这条 if 写成多行（teamId/retriedTaskId
+  // 在第一行，boardCreateDispatches/description 在第二行），所以断言只容忍换行与缩进，不容忍语义变化。
+  assert.match(
+    source("android/app/src/main/java/com/wand/app/ui/screens/TaskBoardScreen.kt"),
+    /if \([\s\S]{0,80}?boardCreateDispatches\(status\)\s*&&\s*description\.isNotBlank\(\)\s*\)\s*\{/,
+    "android/app/src/main/java/com/wand/app/ui/screens/TaskBoardScreen.kt must preserve native WebView contract:" +
+      " if (boardCreateDispatches(status) && description.isNotBlank())",
+  );
+  // 分组＋的可访问性文案已抽成纯函数；按钮必须调用它，避免退回无引号的歧义读法。
+  includesAll("android/app/src/main/java/com/wand/app/ui/screens/TaskBoardPresentation.kt", [
+    'internal fun boardGroupAddTaskDescription(status: String): String =',
+    '"在「${boardTaskStatusLabel(status)}」中新建任务"',
+  ]);
+  // 主按钮文案已抽成纯函数 boardCreateActionLabel（子仓库 23ee050），断言跟着搬到它的真源：
+  // 只有「进行中」列 + 描述非空才写「创建并指派」，其余一律「创建任务」。
+  includesAll("android/app/src/main/java/com/wand/app/ui/screens/TaskBoardPresentation.kt", [
+    'busy -> "创建中…"',
+    '!teamSelected && dispatches && hasDescription -> "创建并指派"',
+    'else -> "创建任务"',
   ]);
   assert.doesNotMatch(
     source("android/app/src/main/java/com/wand/app/ui/screens/TaskBoardScreen.kt"),
@@ -325,10 +346,19 @@ test("subagent execution surfaces stay compact, avatar-free, and follow the newe
     'class="agent-run-agent',
     'class="agent-run-detail-panel',
     'class="agent-run-result',
-    "renderAgentRunTimelineHtml(agent, agentStatus, role, toolResults, messageKey)",
+    "renderAgentRunAgentBody(agent, agentStatus, activity, role, toolResults, messageKey)",
+    'class="agent-run-process"',
+    'class="agent-run-body-inner"',
+    'class="agent-run-receipt"',
     "role=\"tabpanel\"",
     'onkeydown="__agentRunSelect(event, this)"',
     'aria-controls="\' + escapeHtml(panelId) + \'"',
+    // 类型小字与身份色都要「能区分才算数」：整卡同类型的 general-purpose
+    // 不许每行重复，一卡之内也不许两个 Agent 撞同一个颜色。
+    "function agentRunTypesCarryInfo(run)",
+    "var rowType = showType && agentType && agentType !== typeChip ? agentType : \"\";",
+    "taken.indexOf(other)",
+    "for (var shift = 0; shift < n && taken.indexOf(slot) >= 0; shift++) slot = (slot + 1) % n;",
   ]);
   includesAll("src/web-ui/browser/events.ts", [
     "(window as any).__agentRunToggle",
@@ -367,6 +397,60 @@ test("subagent execution surfaces stay compact, avatar-free, and follow the newe
     source("src/web-ui/content/styles.css"),
     /\.agent-run-body\s*\{[^}]*height:\s*\d+px/s,
     "Web Agent Run body must not use a fixed-height nested scroller",
+  );
+  // 动效合规：展开/收起必须是可动画的行高变形，收起是展开的倒放；
+  // 时长与曲线只能取 token，`.agent-run*` 区段里不许出现字面毫秒/秒。
+  const agentRunCss = (() => {
+    const css = source("src/web-ui/content/styles.css");
+    const start = css.indexOf(".agent-run {");
+    const end = css.indexOf(".chat-message.agent-run-owned");
+    return start >= 0 && end > start ? css.slice(start, end) : "";
+  })();
+  assert.ok(agentRunCss.length > 0, "Web Agent Run styles must exist");
+  assert.match(
+    agentRunCss,
+    /grid-template-rows:\s*0fr/,
+    "Agent Run collapse must animate grid-template-rows, not display:none",
+  );
+  assert.doesNotMatch(
+    agentRunCss,
+    /\[data-expanded="false"\][^}]*display:\s*none/s,
+    "Agent Run must not hard-cut the body with display:none",
+  );
+  // 收起态不能留下可聚焦元素：opacity/overflow 藏不住 rail 的 role="tab" 与 <details>
+  // summary，键盘会 Tab 进一张看不见的卡里（也与渲染侧 aria-hidden="true" 矛盾）。
+  // 必须用 visibility，且收起侧延迟到动画走完（step-end）、展开侧立刻恢复（step-start），
+  // 这样 0fr⇄1fr 的倒放与触发行不位移都不受影响。
+  assert.match(
+    agentRunCss,
+    /\.agent-run-body\s*\{[^}]*visibility:\s*hidden;[^}]*visibility\s+var\(--motion-\w+\)\s+step-end/s,
+    "Collapsed Agent Run body must hide its focusables via visibility, delayed to the animation end",
+  );
+  assert.match(
+    agentRunCss,
+    /\[data-expanded="true"\]\s+\.agent-run-body\s*\{[^}]*visibility:\s*visible;[^}]*visibility\s+var\(--motion-\w+\)\s+step-start/s,
+    "Expanded Agent Run body must restore visibility immediately",
+  );
+  // 时长既可能写在 transition 里，也可能写在 animation 里（上一轮只查 transition，
+  // 于是 spin 的 `2.4s` 从正则底下漏了出去）。两条一起查，字面值一律不许出现。
+  // 必须是**前缀**匹配而不是 `transition:` / `animation:` 紧跟冒号：
+  // `animation-duration: 2.4s;` 与 `transition-delay: 120ms;` 是同一类违规，
+  // 只查简写等于给守卫留一道可以从底下绕过去的口子。
+  assert.doesNotMatch(
+    agentRunCss,
+    /(?:transition|animation)(?:-[a-z]+)?:[^;]*\d+(?:\.\d+)?m?s\b/,
+    "Agent Run transition/animation durations must read from tokens (shorthand and *-duration / *-delay)",
+  );
+  // rail 不能被长结论挤成 0 宽（只剩两个点），也不能跟详情面板等长出空柱子。
+  assert.match(
+    agentRunCss,
+    /\.agent-run-rail\s*\{[^}]*flex:\s*0 0 [^;}]*;[^}]*align-self:\s*flex-start;/s,
+    "Agent Run rail must keep its own width and hug its rows",
+  );
+  assert.match(
+    agentRunCss,
+    /\.agent-run-detail\s*\{[^}]*flex:\s*1 1 0;/s,
+    "Agent Run detail must size from free space, not from its content",
   );
 
   includesAll("ios/Wand/ChatView.swift", [
@@ -414,6 +498,55 @@ test("subagent execution surfaces stay compact, avatar-free, and follow the newe
     "subagentTailRefreshToken(items)",
     "proxy.scrollTo(tailAnchorID, anchor: .bottom)",
   ]);
+});
+
+// 怪点 8 的 background 分支同类残留：展开一条派发回执时，「后台运行中」原本
+// 在摘要行与回执块头部各说一次。状态词归摘要行，回执头部只留图标 + 说明。
+// 这是**双端**契约，两端必须同批改，所以断言也放在同一处。
+test("receipt headers carry icon + note, not a second status word", () => {
+  const fnBody = (file: string, head: string, next: string): string => {
+    const text = source(file);
+    const start = text.indexOf(head);
+    assert.ok(start >= 0, `${file} must define ${head}`);
+    const end = text.indexOf(next, start + head.length);
+    return end > start ? text.slice(start, end) : text.slice(start);
+  };
+
+  const webReceipt = fnBody(
+    "src/web-ui/browser/chat-render.ts",
+    "function renderAgentRunReceiptHtml(",
+    "\n      function ",
+  );
+  assert.match(webReceipt, /agentRunStatusIcon\(/,
+    "Web receipt header must keep its status icon");
+  assert.match(webReceipt, /agentRun\.receipt\.note/,
+    "Web receipt header must keep the dispatch-receipt note");
+  assert.doesNotMatch(webReceipt, /agentRunStatusLabel\(/,
+    "Web receipt header must not repeat the status word — the summary row owns it");
+  // 反向保险：状态词不能两端一起丢，摘要行必须还在说它。
+  assert.match(
+    fnBody("src/web-ui/browser/chat-render.ts", "function renderAgentRunDetailHtml(", "\n      function "),
+    /agentRunStatusLabel\(/,
+    "Web summary/detail header must still render the status word",
+  );
+
+  const androidReceipt = fnBody(
+    "android/app/src/main/java/com/wand/app/ui/screens/ChatBlocks.kt",
+    "private fun SubagentReceiptSection(",
+    "\n@Composable\n",
+  );
+  assert.match(androidReceipt, /SubagentStatusIcon\(SubagentStatus\.Background/,
+    "Android receipt header must keep its status icon");
+  assert.match(androidReceipt, /这只是派发回执，不是最终结论/,
+    "Android receipt header must keep the dispatch-receipt note (same wording as Web zh)");
+  assert.doesNotMatch(androidReceipt, /statusLabel/,
+    "Android receipt header must not repeat the status word — the summary row owns it");
+  assert.match(
+    fnBody("android/app/src/main/java/com/wand/app/ui/screens/ChatBlocks.kt",
+      "private fun SubagentSummaryRow(", "\n@Composable\n"),
+    /statusLabel/,
+    "Android summary row must still render the status word",
+  );
 });
 
 test("activity folds stay consecutive and split when prose arrives", () => {

@@ -131,7 +131,9 @@ export function MoveEntryDialog({
       const applied = await onSubmit(request.from, destination);
       if (!applied) setError("移动失败，请检查目标目录后重试。");
     } catch (submitError) {
-      setError(failureMessage(submitError, "无法读取该目录。"));
+      // 这里是「移动」失败，不是读目录失败：兜底文案写成读目录那句，
+      // 用户会以为只是列表没刷出来，实际文件还在原地。
+      setError(failureMessage(submitError, "移动失败，请检查目标目录或权限后重试。"));
     } finally {
       setMoving(false);
     }
@@ -145,6 +147,8 @@ export function MoveEntryDialog({
   }
 
   function handleInputKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
+    // 组字期的回车/方向键属于候选词：不能提前进入目录，更不能把半截拼音当成目标路径提交。
+    if (event.nativeEvent.isComposing) return;
     if (NAVIGATION_KEYS.has(event.key as FolderPickerNavigationKey)) {
       event.preventDefault();
       setActiveIndex((current) => nextFolderPickerIndex(

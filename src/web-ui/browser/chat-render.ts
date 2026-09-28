@@ -17,14 +17,19 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
 import { localFilePreviewHref, localHttpPreviewHref } from "../react/local-preview/controller";
 import { catCoatGrid, memberCoatIndex } from "../react/ai-teams/cat-coats";
 import {
+  agentRunAccentSeed,
+  agentRunAgentTitle,
   agentRunBlockKey,
-  agentRunTouchesMessage,
+  agentRunInLatestWindow,
+  agentRunResultRawText,
+  agentRunStatusLabelKey,
   buildAgentRunRenderSignature,
   collectAgentRuns,
   deriveSubagentMeta,
+  flattenAgentRunInline,
   getAgentRunStatusSummary,
-  getLatestAgentRunId,
   shouldAgentRunStartExpanded,
+  truncateInlineText,
 } from "./agent-runs";
 import "./local-preview-adapter";
 
@@ -192,7 +197,10 @@ import "./local-preview-adapter";
         agentRunSignature += "|live:" + (selectedSession.status === "running" &&
           selectedSession.structuredState && selectedSession.structuredState.inFlight ? "1" : "0");
         var conversationToolResults = buildConversationToolResultMap(allMessages);
-        _currentLatestAgentRunId = getLatestAgentRunId(agentRunIndex);
+        // 状态口径需要这两个事实：会话是否在跑、最后一条真人文本轮在哪。
+        _currentLastUserTextMessageIndex = agentRunIndex.lastUserTextMessageIndex;
+        _currentSessionRunning = !!(selectedSession.structuredState &&
+          selectedSession.structuredState.inFlight && selectedSession.status === "running");
 
         if (allMessages.length === 0) {
           if (state.lastRenderedEmpty !== "empty") {
@@ -961,9 +969,9 @@ import "./local-preview-adapter";
             var code = codeBlock ? codeBlock.querySelector("code") : null;
             if (code) {
               copyToClipboard(code.textContent || "", null, function() {
-                btn.textContent = "Copied!";
+                btn.textContent = "已复制";
                 btn.classList.add("copied");
-                setTimeout(function() { btn.textContent = "Copy"; btn.classList.remove("copied"); }, 2000);
+                setTimeout(function() { btn.textContent = "复制"; btn.classList.remove("copied"); }, 2000);
               });
             }
           });
@@ -979,9 +987,9 @@ import "./local-preview-adapter";
             var code = codeBlock ? codeBlock.querySelector("code") : null;
             if (code) {
               copyToClipboard(code.textContent || "", null, function() {
-                clone.textContent = "Copied!";
+                clone.textContent = "已复制";
                 clone.classList.add("copied");
-                setTimeout(function() { clone.textContent = "Copy"; clone.classList.remove("copied"); }, 2000);
+                setTimeout(function() { clone.textContent = "复制"; clone.classList.remove("copied"); }, 2000);
               });
             }
           });
@@ -1588,55 +1596,132 @@ import "./local-preview-adapter";
         for (var i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
         return Math.abs(h) % mod;
       }
-      function agentRunAccent(agent) {
-        var seed = (agent && (agent.meta.agentType || agent.taskId)) || "agent-run";
-        return AGENT_RUN_ACCENTS[hashStringToIndex(seed, AGENT_RUN_ACCENTS.length)];
+      /**
+       * 身份色：种子用 taskId（同一批次并行子 Agent 的 agentType 往往完全相同，
+       * 按类型取色会让四个 Agent 撞成同一个颜色），但一卡之内撞色时向后取下一个
+       * 空位——同一张卡里四个点同色就等于没有身份色。
+       */
+      function agentRunAccent(run, agent) {
+        var n = AGENT_RUN_ACCENTS.length;
+        var taken = [];
+        var slot = hashStringToIndex(agentRunAccentSeed(agent), n);
+        var agents = (run && Array.isArray(run.agents)) ? run.agents : [];
+        for (var i = 0; i < agents.length; i++) {
+          if (agents[i] === agent) break;
+          var other = hashStringToIndex(agentRunAccentSeed(agents[i]), n);
+          for (var step = 0; step < n && taken.indexOf(other) >= 0; step++) other = (other + 1) % n;
+          taken.push(other);
+        }
+        for (var shift = 0; shift < n && taken.indexOf(slot) >= 0; shift++) slot = (slot + 1) % n;
+        return AGENT_RUN_ACCENTS[slot];
       }
-      function agentRunStatusLabel(status) {
-        if (status === "failed") return t("agentRun.status.failed");
-        if (status === "running") return t("agentRun.status.running");
-        if (status === "interrupted") return t("agentRun.status.interrupted");
-        return t("agentRun.status.completed");
+      // 这些类型名不携带信息（“通用 Agent”），不配占一个 chip 位。
+      var AGENT_RUN_DEFAULT_TYPES = ["general", "general-purpose", "generalist", "default"];
+      function agentRunTypeValue(agent) {
+        return String((agent && agent.meta && agent.meta.agentType) || "").trim();
+      }
+      function isDefaultAgentRunType(type) {
+        if (!type) return true;
+        return AGENT_RUN_DEFAULT_TYPES.indexOf(type.toLowerCase()) >= 0;
+      }
+      /**
+       * 卡级类型 chip 只在「整卡就一个类型、且这个类型有信息量」时出现。
+       * 多个类型混在一行等于没写；同类型的 general-purpose 是纯噪音。
+       */
+      function agentRunTypeChip(run) {
+        if (!agentRunTypesCarryInfo(run)) return "";
+        var types = [];
+        for (var i = 0; i < run.agents.length; i++) {
+          var type = agentRunTypeValue(run.agents[i]);
+          if (type && types.indexOf(type) < 0) types.push(type);
+        }
+        if (types.length !== 1) return "";
+        return types[0];
+      }
+      /**
+       * rail 每行都写 "general-purpose" 等于没写：只有类型能区分谁是谁（或非默认类型）
+       * 时才显示类型小字。
+       */
+      function agentRunTypesCarryInfo(run) {
+        var types = [];
+        for (var i = 0; i < run.agents.length; i++) {
+          var type = agentRunTypeValue(run.agents[i]);
+          if (type && types.indexOf(type) < 0) types.push(type);
+        }
+        if (types.length > 1) return true;
+        return types.length === 1 && !isDefaultAgentRunType(types[0]);
+      }
+      // 状态文字只在需要解释时出现：完成态由图标 + aria-label / title 表达。
+      function agentRunStatusNeedsText(status) {
+        return status !== "completed";
+      }
+      function agentRunStatusLabel(status, activity) {
+        return t(agentRunStatusLabelKey(status, activity));
       }
       function agentRunStatusIcon(status) {
         if (status === "failed") return iconSvg("close", { size: 12, strokeWidth: 2.2 });
         if (status === "running") return iconSvg("refresh", { size: 12, strokeWidth: 1.8 });
+        if (status === "background") return iconSvg("cpu", { size: 12, strokeWidth: 1.8 });
         if (status === "interrupted") return iconSvg("warning", { size: 12, strokeWidth: 1.8 });
+        if (status === "pending") return iconSvg("circle", { size: 12, strokeWidth: 1.8 });
         return iconSvg("check", { size: 12, strokeWidth: 2.2 });
       }
+      // 标题（设计 A）：任务描述优先，其次类型，最后兜底「子 Agent」。
+      // 反过来（类型当标题）会让并行批次的每一行都写着 general-purpose。
       function agentRunAgentName(agent) {
-        return (agent && agent.meta.agentType && String(agent.meta.agentType).trim()) || t("agentRun.agent");
+        return agentRunAgentTitle(agent, t("agentRun.subagent"));
       }
       function agentRunTaskDescription(agent) {
         var task = agent && agent.meta.taskDescription && String(agent.meta.taskDescription).trim();
         return task || t("agentRun.noTask");
       }
+      function agentRunTitle(run, summary) {
+        if (run.agents.length > 1) return t("agentRun.count", { count: String(summary.total) });
+        return agentRunAgentName(run.agents[0]);
+      }
+      // 多 Agent 卡的主 Agent：正在跑的那个优先，否则第一条（保持稳定，不随刷新跳字）。
+      function agentRunPrimaryAgent(run, activity) {
+        for (var i = 0; i < run.agents.length; i++) {
+          var status = getAgentRunStatusSummary({ agents: [run.agents[i]] } as any, activity).status;
+          if (status === "running" || status === "background") return run.agents[i];
+        }
+        return run.agents[0];
+      }
+      function agentRunTopicText(run, activity) {
+        if (run.agents.length < 2) return "";
+        var primary = agentRunPrimaryAgent(run, activity);
+        var desc = String((primary && primary.meta && primary.meta.taskDescription) || "").trim();
+        if (!desc) desc = agentRunTypeValue(primary) || t("agentRun.subagent");
+        return truncateInlineText(desc, 96);
+      }
+      // 结果体保留原始换行：压平后再走 renderMarkdown，标题/列表/代码块会全塌成一段。
       function agentRunResultText(agent) {
         if (!agent || !agent.result) return "";
-        var value = extractToolResultText(agent.result.block.content);
-        return String(value == null ? "" : value).replace(/\s+/g, " ").trim();
+        return agentRunResultRawText(agent.result.block);
       }
-      function agentRunLatestText(agent, status) {
-        var resultText = agentRunResultText(agent);
-        if (resultText) return resultText;
+      /**
+       * 副行只放「最后一步动作」：工具步用动作标签，正文/思考压平成一行纯文本。
+       * 原实现把整份最终报告塞进「最新」行，一行里混着裸 markdown 标题。
+       */
+      function agentRunLastActionText(agent, status) {
         var blocks = agent && Array.isArray(agent.blocks) ? agent.blocks : [];
         for (var i = blocks.length - 1; i >= 0; i--) {
-          var ref = blocks[i];
-          var block = ref && ref.block;
-          if (!block) continue;
-          if (block.type === "text" && String(block.text || "").trim()) {
-            return String(block.text).replace(/\s+/g, " ").trim();
-          }
-          if (block.type === "thinking" && String(block.thinking || "").trim()) {
-            return String(block.thinking).replace(/\s+/g, " ").trim();
-          }
+          var block = blocks[i] && blocks[i].block;
+          if (!block || block.type === "tool_result") continue;
           if (block.type === "tool_use") {
             var label = activityItemLabel(block);
-            if (label) return label;
+            if (label) return truncateInlineText(flattenAgentRunInline(String(label)), 150);
+            continue;
           }
+          var text = block.type === "text" ? String(block.text || "") :
+            (block.type === "thinking" ? String(block.thinking || "") : "");
+          if (text.trim()) return truncateInlineText(flattenAgentRunInline(text), 150);
         }
+        if (agent && agent.receipt) return t("agentRun.receipt.action");
+        var resultText = agentRunResultText(agent);
+        if (resultText.trim()) return truncateInlineText(flattenAgentRunInline(resultText), 150);
         if (status === "running") return t("agentRun.waiting");
-        return t("agentRun.noOutput");
+        return "";
       }
       function agentRunLatestRef(agent) {
         var latest = agent && (agent.result || agent.dispatch || agent.firstSeen);
@@ -1648,7 +1733,7 @@ import "./local-preview-adapter";
         }
         return latest;
       }
-      function agentRunLatestSummary(run, isLive) {
+      function agentRunLatestSummary(run, activity) {
         var latestAgent = null;
         var latestRef = null;
         for (var i = 0; i < run.agents.length; i++) {
@@ -1659,7 +1744,9 @@ import "./local-preview-adapter";
             latestAgent = run.agents[i];
           }
         }
-        return latestAgent ? truncateInline(agentRunLatestText(latestAgent, getAgentRunStatusSummary({ agents: [latestAgent] } as any, isLive).status), 220) : "";
+        if (!latestAgent) return "";
+        var status = getAgentRunStatusSummary({ agents: [latestAgent] } as any, activity).status;
+        return agentRunLastActionText(latestAgent, status);
       }
       function renderAgentRunStepHtml(ref, role, toolResults, messageKey) {
         var block = ref && ref.block;
@@ -1685,39 +1772,94 @@ import "./local-preview-adapter";
           '<div class="agent-run-step-content">' + blockHtml + '</div>' +
         '</div>';
       }
-      function renderAgentRunResultHtml(agent) {
-        if (!agent || !agent.result) return "";
-        var resultBlock = agent.result.block || {};
-        var isError = resultBlock.is_error === true;
-        var rawText = agentRunResultText(agent);
-        var displayText = rawText || t("agentRun.noOutput");
-        var bodyHtml = rawText ? renderMarkdown(displayText) : escapeHtml(displayText);
-        return '<div class="agent-run-result' + (isError ? ' is-error' : '') + '">' +
+      /**
+       * 异步派发的「回执」不是结论：它只说任务已交给后台。真实形状里 pi 只有
+       * run id（没有输出文件），兜底判据连 id 都没有——那种情况回落到渲染正文，
+       * 宁可让用户读到 provider 的原话，也不能给一张什么都不显示的卡。
+       */
+      function renderAgentRunReceiptHtml(agent, status) {
+        var receipt = agent.receipt || { runId: "", outputPath: "" };
+        var rows = "";
+        if (receipt.runId) {
+          rows += '<div class="agent-run-receipt-row"><span>' + escapeHtml(t("agentRun.receipt.run")) +
+            "</span><code>" + escapeHtml(receipt.runId) + "</code></div>";
+        }
+        if (receipt.outputPath) {
+          rows += '<div class="agent-run-receipt-row"><span>' + escapeHtml(t("agentRun.receipt.output")) +
+            "</span><code>" + escapeHtml(receipt.outputPath) + "</code></div>";
+        }
+        var bodyHtml = rows ? '<div class="agent-run-receipt-rows">' + rows + "</div>"
+          : '<div class="agent-run-receipt-body">' +
+              renderMarkdown(String(agentRunResultText(agent)).trim()) + "</div>";
+        // 状态词只属于摘要行：展开一条回执时「后台运行中」在摘要行和这里各出现一次，
+        // 等于同一屏说两遍（怪点 8 的同族）。头部留图标 + 说明文字就够表达「这不是结论」。
+        return '<div class="agent-run-receipt">' +
           '<div class="agent-run-result-label">' +
-            '<span class="agent-run-result-icon" aria-hidden="true">' + agentRunStatusIcon(isError ? "failed" : "completed") + '</span>' +
-            '<span>' + escapeHtml(isError ? t("agentRun.result.failed") : t("agentRun.result.done")) + '</span>' +
-          '</div>' +
-          '<div class="agent-run-result-content">' + bodyHtml + '</div>' +
-        '</div>';
+            '<span class="agent-run-result-icon" aria-hidden="true">' + agentRunStatusIcon(status) + "</span>" +
+            '<span class="agent-run-receipt-note">' + escapeHtml(t("agentRun.receipt.note")) + "</span>" +
+          "</div>" +
+          bodyHtml +
+        "</div>";
       }
-      function renderAgentRunTimelineHtml(agent, status, role, toolResults, messageKey) {
-        var html = "";
+      function renderAgentRunResultHtml(agent, status, activity) {
+        if (!agent || !agent.result) return "";
+        if (agent.receipt) return renderAgentRunReceiptHtml(agent, status);
+        var isError = agent.result.block && agent.result.block.is_error === true;
+        var rawText = agentRunResultText(agent).trim();
+        // 结论体保留换行再渲染 markdown；压平只用于摘要行。
+        var bodyHtml = rawText ? renderMarkdown(rawText) :
+          '<p class="agent-run-result-empty">' + escapeHtml(t("agentRun.noOutput")) + "</p>";
+        return '<div class="agent-run-result' + (isError ? " is-error" : "") + '">' +
+          '<div class="agent-run-result-label">' +
+            '<span class="agent-run-result-icon" aria-hidden="true">' + agentRunStatusIcon(status) + "</span>" +
+            "<span>" + escapeHtml(isError ? t("agentRun.result.failed") : t("agentRun.result.done")) + "</span>" +
+          "</div>" +
+          '<div class="agent-run-result-content">' + bodyHtml + "</div>" +
+        "</div>";
+      }
+      /**
+       * 过程块默认收起：展开卡片先看结论，想看怎么做的再点「过程 · N 步」。
+       * 运行中例外——那时过程就是正文，收起会让用户以为卡住。
+       */
+      function renderAgentRunProcessHtml(agent, role, toolResults, messageKey, open) {
+        var steps = [];
         var blocks = agent && Array.isArray(agent.blocks) ? agent.blocks : [];
         for (var i = 0; i < blocks.length; i++) {
-          html += renderAgentRunStepHtml(blocks[i], role || "assistant", toolResults, messageKey);
+          var stepHtml = renderAgentRunStepHtml(blocks[i], role || "assistant", toolResults, messageKey);
+          if (stepHtml && String(stepHtml).trim()) steps.push(stepHtml);
         }
-        // 只有最终 result、没有中间过程时，结果为唯一信息，不要再先放一行重复状态。
-        if (!html.trim() && !(agent && agent.result)) {
-          html = '<div class="agent-run-waiting">' + escapeHtml(agentRunStatusLabel(status)) + '</div>';
+        if (!steps.length) return "";
+        return '<details class="agent-run-process"' + (open ? " open" : "") + ">" +
+          '<summary class="agent-run-process-summary">' +
+            '<span class="agent-run-process-chevron" aria-hidden="true">' +
+              iconSvg("chevronRight", { size: 12, strokeWidth: 2 }) +
+            "</span>" +
+            '<span class="agent-run-process-label">' + escapeHtml(t("agentRun.process")) + "</span>" +
+            '<span class="agent-run-process-count">' +
+              escapeHtml(t("agentRun.process_count", { count: String(steps.length) })) +
+            "</span>" +
+          "</summary>" +
+          '<div class="agent-run-timeline">' + steps.join("") + "</div>" +
+        "</details>";
+      }
+      // 展开体顺序：结论在前、过程在后（原来是过程铺完才给结论，结论被挤到几十屏之下）。
+      function renderAgentRunAgentBody(agent, status, activity, role, toolResults, messageKey) {
+        var resultHtml = renderAgentRunResultHtml(agent, status, activity);
+        var processHtml = renderAgentRunProcessHtml(agent, role, toolResults, messageKey, status === "running");
+        if (!resultHtml && !processHtml) {
+          return '<div class="agent-run-waiting">' + escapeHtml(t("agentRun.waiting")) + "</div>";
         }
-        return html + renderAgentRunResultHtml(agent);
+        return resultHtml + processHtml;
       }
       function agentRunPanelId(runId, taskId) {
         return "agent-run-panel-" + String(runId + "-" + taskId).replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 120);
       }
-      function renderAgentRunDetailHtml(run, agent, selected, role, toolResults, messageKey, isLive, isMulti) {
+      function renderAgentRunDetailHtml(run, agent, selected, role, toolResults, messageKey, activity, isMulti, showType) {
         var taskId = agent.taskId;
-        var agentStatus = getAgentRunStatusSummary({ agents: [agent] } as any, isLive).status;
+        var agentStatus = getAgentRunStatusSummary({ agents: [agent] } as any, activity).status;
+        var agentType = agentRunTypeValue(agent);
+        var taskDesc = agentRunTaskDescription(agent);
+        var headStatusLabel = agentRunStatusLabel(agentStatus, activity);
         var domId = agentRunPanelId(run.id, taskId);
         var buttonId = domId + "-tab";
         // 单个 Agent 没有“切换”语义：不套 tab/tabpanel，rail 也整块不渲染，
@@ -1730,18 +1872,25 @@ import "./local-preview-adapter";
             'data-agent-run-id="' + escapeHtml(run.id) + '" data-agent-task-id="' + escapeHtml(taskId) + '" ' +
             (selected ? '' : 'hidden') + '>' +
           '<div class="agent-run-detail-head">' +
-            '<div>' +
-              '<div class="agent-run-detail-name">' + escapeHtml(agentRunAgentName(agent)) + '</div>' +
-              '<div class="agent-run-detail-task">' + escapeHtml(agentRunTaskDescription(agent)) + '</div>' +
+            '<div class="agent-run-detail-titles">' +
+              '<div class="agent-run-detail-task">' + escapeHtml(taskDesc) + '</div>' +
+              (showType && agentType && agentType !== taskDesc
+                ? '<span class="agent-run-type-chip">' + escapeHtml(agentType) + '</span>'
+                : '') +
             '</div>' +
-            '<span class="agent-run-detail-state">' + escapeHtml(agentRunStatusLabel(agentStatus)) + '</span>' +
+            // 状态词只出现在摘要行 / rail 行；详情头用同色的点，避免同一个词一屏出现多次。
+            '<span class="agent-run-detail-state is-' + agentStatus + '" role="img" ' +
+              'aria-label="' + escapeHtml(headStatusLabel) + '" ' +
+              'title="' + escapeHtml(headStatusLabel) + '"></span>' +
           '</div>' +
-          '<div class="agent-run-timeline">' + renderAgentRunTimelineHtml(agent, agentStatus, role, toolResults, messageKey) + '</div>' +
+          '<div class="agent-run-agent-body">' +
+            renderAgentRunAgentBody(agent, agentStatus, activity, role, toolResults, messageKey) +
+          '</div>' +
         '</div>';
       }
-      function renderAgentRunHtml(run, isLive, role, toolResults, messageKey) {
+      function renderAgentRunHtml(run, activity, role, toolResults, messageKey) {
         if (!run || !run.agents.length) return "";
-        var summary = getAgentRunStatusSummary(run, isLive);
+        var summary = getAgentRunStatusSummary(run, activity);
         var expandKey = buildExpandKey("agent-run", [run.id]);
         var persisted = getPersistedExpandState(expandKey);
         var expanded = shouldAgentRunStartExpanded(summary.status, persisted);
@@ -1753,7 +1902,7 @@ import "./local-preview-adapter";
         }
         if (!selectedAgent) {
           for (var j = 0; j < run.agents.length; j++) {
-            var candidateStatus = getAgentRunStatusSummary({ agents: [run.agents[j]] } as any, isLive).status;
+            var candidateStatus = getAgentRunStatusSummary({ agents: [run.agents[j]] } as any, activity).status;
             if (!selectedAgent || candidateStatus === "failed" || (candidateStatus === "running" && selectedAgent !== run.agents[j])) {
               selectedAgent = run.agents[j];
             }
@@ -1762,37 +1911,52 @@ import "./local-preview-adapter";
         }
         selectedAgent = selectedAgent || run.agents[0];
         var bodyId = "agent-run-body-" + String(run.id).replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 120);
-        var latest = agentRunLatestSummary(run, isLive);
-        var countText = t("agentRun.count", { count: String(summary.total) });
+        var latest = agentRunLatestSummary(run, activity);
+        var statusWord = agentRunStatusLabel(summary.status, activity);
+        // 标题（设计 A）：单 Agent 用任务描述，多 Agent 用「N 个子 Agent」+ 主 Agent 的描述。
+        // 「Agent 运行」这种卡名不再出现——它不告诉用户这一轮到底做了什么。
+        var titleText = agentRunTitle(run, summary);
+        var topicText = agentRunTopicText(run, activity);
+        var typeChip = agentRunTypeChip(run);
         var summaryAria = t("agentRun.summary_aria", {
           count: String(summary.total),
-          status: agentRunStatusLabel(summary.status),
+          status: statusWord,
           latest: latest || t("agentRun.noOutput"),
         });
         var railHtml = "";
         var detailHtml = "";
         var isMulti = run.agents.length > 1;
+        // 类型只在能区分时出现一次：摘要行已经代表整卡类型时，rail 行与详情头不再重复。
+        var showType = agentRunTypesCarryInfo(run);
         for (var k = 0; k < run.agents.length; k++) {
           var agent = run.agents[k];
-          var agentSummary = getAgentRunStatusSummary({ agents: [agent] } as any, isLive);
+          var agentStatus = getAgentRunStatusSummary({ agents: [agent] } as any, activity).status;
+          var agentStatusWord = agentRunStatusLabel(agentStatus, activity);
+          var agentLabel = agentRunTaskDescription(agent);
+          var agentType = agentRunTypeValue(agent);
           var isSelected = agent === selectedAgent;
           var panelId = agentRunPanelId(run.id, agent.taskId);
           var tabId = panelId + "-tab";
+          var rowType = showType && agentType && agentType !== typeChip ? agentType : "";
           if (isMulti) railHtml += '<button type="button" class="agent-run-agent' + (isSelected ? ' is-selected' : '') + '" ' +
               'id="' + escapeHtml(tabId) + '" role="tab" aria-controls="' + escapeHtml(panelId) + '" ' +
               'aria-selected="' + (isSelected ? "true" : "false") + '" ' +
               'tabindex="' + (isSelected ? "0" : "-1") + '" data-agent-task-id="' + escapeHtml(agent.taskId) + '" ' +
               'data-agent-run-id="' + escapeHtml(run.id) + '" onclick="__agentRunSelect(event, this)" ' +
               'onkeydown="__agentRunSelect(event, this)" ' +
-              'style="--agent-color:' + escapeHtml(agentRunAccent(agent)) + '">' +
+              'style="--agent-color:' + escapeHtml(agentRunAccent(run, agent)) + '">' +
             '<span class="agent-run-agent-marker" aria-hidden="true"></span>' +
+            // rail 行标题 = 任务描述（能区分谁在干什么），agentType 降为次要小字。
             '<span class="agent-run-agent-copy">' +
-              '<strong>' + escapeHtml(agentRunAgentName(agent)) + '</strong>' +
-              '<span>' + escapeHtml(truncateInline(agentRunTaskDescription(agent), 86)) + '</span>' +
+              '<strong>' + escapeHtml(truncateInlineText(agentLabel, 86)) + '</strong>' +
+              (rowType ? '<span class="agent-run-agent-type">' + escapeHtml(rowType) + '</span>' : '') +
             '</span>' +
-            '<span class="agent-run-agent-status is-' + agentSummary.status + '">' + escapeHtml(agentRunStatusLabel(agentSummary.status)) + '</span>' +
+            (agentRunStatusNeedsText(agentStatus)
+              ? '<span class="agent-run-agent-status is-' + agentStatus + '">' + escapeHtml(agentStatusWord) + '</span>'
+              : '<span class="agent-run-agent-status is-' + agentStatus + '" role="img" aria-label="' +
+                  escapeHtml(agentStatusWord) + '">' + agentRunStatusIcon(agentStatus) + '</span>') +
           '</button>';
-          detailHtml += renderAgentRunDetailHtml(run, agent, isSelected, role, toolResults, messageKey, isLive, isMulti);
+          detailHtml += renderAgentRunDetailHtml(run, agent, isSelected, role, toolResults, messageKey, activity, isMulti, !!rowType);
         }
         return '<section class="agent-run is-' + summary.status + (isMulti ? '' : ' is-single') + '" ' +
             'data-expand-kind="agent-run" data-expand-key="' + escapeHtml(expandKey) + '" ' +
@@ -1805,22 +1969,27 @@ import "./local-preview-adapter";
             '<span class="agent-run-summary-icon" aria-hidden="true">' + agentRunStatusIcon(summary.status) + '</span>' +
             '<span class="agent-run-summary-main">' +
               '<span class="agent-run-summary-top">' +
-                '<strong class="agent-run-title">' + escapeHtml(t("agentRun.title")) + '</strong>' +
-                '<span class="agent-run-count">' + escapeHtml(countText) + '</span>' +
-                '<span class="agent-run-status-label is-' + summary.status + '">' + escapeHtml(agentRunStatusLabel(summary.status)) + '</span>' +
+                '<strong class="agent-run-title">' + escapeHtml(titleText) + '</strong>' +
+                (topicText ? '<span class="agent-run-topic">' + escapeHtml(topicText) + '</span>' : '') +
+                (typeChip ? '<span class="agent-run-type-chip">' + escapeHtml(typeChip) + '</span>' : '') +
+                (agentRunStatusNeedsText(summary.status)
+                  ? '<span class="agent-run-status-label is-' + summary.status + '">' + escapeHtml(statusWord) + '</span>'
+                  : '') +
               '</span>' +
-              '<span class="agent-run-latest">' +
-                '<span class="agent-run-latest-label">' + escapeHtml(t("agentRun.latest")) + '</span>' +
-                '<span class="agent-run-latest-text">' + escapeHtml(latest || t("agentRun.waiting")) + '</span>' +
-              '</span>' +
+              // 副行 = 最后一步动作，纯文本一行，不渲染 markdown。
+              (latest
+                ? '<span class="agent-run-latest"><span class="agent-run-latest-text">' + escapeHtml(latest) + '</span></span>'
+                : '') +
             '</span>' +
             '<span class="agent-run-chevron" aria-hidden="true">' + iconSvg("chevronDown", { size: 14, strokeWidth: 2 }) + '</span>' +
           '</button>' +
           '<div class="agent-run-body" id="' + escapeHtml(bodyId) + '" aria-hidden="' + (expanded ? "false" : "true") + '">' +
-            (isMulti
-              ? '<div class="agent-run-rail" role="tablist" aria-label="' + escapeHtml(t("agentRun.agent_list")) + '">' + railHtml + '</div>'
-              : '') +
-            '<div class="agent-run-detail">' + detailHtml + '</div>' +
+            '<div class="agent-run-body-inner">' +
+              (isMulti
+                ? '<div class="agent-run-rail" role="tablist" aria-label="' + escapeHtml(t("agentRun.agent_list")) + '">' + railHtml + '</div>'
+                : '') +
+              '<div class="agent-run-detail">' + detailHtml + '</div>' +
+            '</div>' +
           '</div>' +
         '</section>';
       }
@@ -2187,9 +2356,11 @@ import "./local-preview-adapter";
       // 当前正在渲染的消息在 state.currentMessages 里的全局下标。渲染是同步单线程的，
       // 在 renderStructuredMessage 入口设置一次即可让下游活动折叠判断运行态。
       var _currentMessageGlobalIndex = -1;
-      // 当前渲染批次里“最新的 Agent Run”id。只有它可能是 live（running）状态——
-      // 更早的 Run 结论已定，不能再被当作进行中。
-      var _currentLatestAgentRunId = "";
+      // 最后一条真人文本轮（语义同 Android collectSubagentActivities 的 lastHumanTurn）
+      // 与本会话是否在跑：Agent Run 的状态判定只看这两个事实，不再看「是不是最新那个 run」，
+      // 否则历史 run 会被误标「已中断」，和 Android 同一份历史显示不一致。
+      var _currentLastUserTextMessageIndex = -1;
+      var _currentSessionRunning = false;
 
       // Agent dispatch 和 tool_result 都由 Run 或对应 tool card 消费，普通活动折叠
       // 不应再把它们当成独立可见步骤。
@@ -2547,7 +2718,7 @@ import "./local-preview-adapter";
             flushPendingBlocks();
             bodyHtml += renderAgentRunHtml(
               run,
-              isAgentRunLive(run, messageIndex),
+              agentRunActivity(run),
               role,
               conversationToolResults,
               messageKey
@@ -2666,12 +2837,11 @@ import "./local-preview-adapter";
         return toolResults;
       }
 
-      function isAgentRunLive(run, messageIndex) {
-        if (!run || !run.id || run.id !== _currentLatestAgentRunId) return false;
-        if (!agentRunTouchesMessage(run, messageIndex)) return false;
-        var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
-        if (!session) return false;
-        return !!(session.structuredState && session.structuredState.inFlight) && session.status === "running";
+      function agentRunActivity(run) {
+        return {
+          sessionRunning: _currentSessionRunning,
+          inLatestWindow: agentRunInLatestWindow(run, _currentLastUserTextMessageIndex),
+        };
       }
 
       function renderContentBlock(block, role, toolResults, index, messageKey, options?: any) {
@@ -3823,12 +3993,12 @@ import "./local-preview-adapter";
 
           var highlighted = highlightCode(code.trim(), lang);
           var protectedHighlighted = highlighted.replace(/\n/g, codeNewline).replace(/_/g, '&#95;').replace(/\*/g, '&#42;');
-          // 没有语言标注时留空占位（header 靠 flex 两端对齐把 Copy 推到右侧），
+          // 没有语言标注时留空占位（header 靠 flex 两端对齐把「复制」推到右侧），
           // 不要写 "code" 这个假语言名。
           var replacement = '<div class="code-block">' +
             '<div class="code-block-header">' +
               '<span class="code-lang">' + (lang ? escapeHtml(lang) : "") + '</span>' +
-              '<button class="code-copy">Copy</button>' +
+              '<button class="code-copy">复制</button>' +
             '</div>' +
             '<pre><code>' + protectedHighlighted + '</code></pre>' +
           '</div>';
@@ -3856,9 +4026,13 @@ import "./local-preview-adapter";
         result = replacePair(result, "**", '<strong>', '</strong>');
         result = replacePair(result, "*", '<em>', '</em>');
         result = replaceUnderscoreEmphasis(result, '<em>', '</em>');
-        result = replaceLinePrefix(result, "### ", '<h3>', '</h3>');
-        result = replaceLinePrefix(result, "## ", '<h2>', '</h2>');
-        result = replaceLinePrefix(result, "# ", '<h1>', '</h1>');
+        // 内容区标题整体下移一级：一屏的最高级标题（h1）属于页面本身
+        // （面包屑末段 / 对话框标题），气泡里的 `# ` 不能再占 h1。
+        // 三档各自有独立字号：styles.css 给 .markdown-content 定义了
+        // h1 17.5 / h2 15.4 / h3 14 / h4 13.3，所以 `### ` 用真 h4，不需要 aria-level。
+        result = replaceLinePrefix(result, "### ", '<h4>', '</h4>');
+        result = replaceLinePrefix(result, "## ", '<h3>', '</h3>');
+        result = replaceLinePrefix(result, "# ", '<h2>', '</h2>');
         result = replaceLinePrefix(result, "&gt; ", '<blockquote>', '</blockquote>');
         result = replaceLinePrefix(result, "- ", '<li>', '</li>');
         result = replaceLinePrefix(result, "* ", '<li>', '</li>');

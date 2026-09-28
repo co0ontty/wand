@@ -54,7 +54,8 @@ test("legacy wand_tasks without workspace_task_id can be opened and queried", (t
   const tasks = storage.listWandTasks();
   assert.equal(tasks.length, 1);
   assert.equal(tasks[0]?.id, "legacy-task");
-  assert.equal(tasks[0]?.workspaceTaskId, null);
+  assert.ok(tasks[0]?.workspaceTaskId);
+  assert.equal(storage.getWorkspaceTask(tasks[0]!.workspaceTaskId!)?.milestoneId, null);
   assert.equal(tasks[0]?.parentTaskId, null);
   assert.ok(columnNames(dbPath, "wand_tasks").includes("workspace_task_id"));
   assert.ok(columnNames(dbPath, "wand_tasks").includes("parent_task_id"));

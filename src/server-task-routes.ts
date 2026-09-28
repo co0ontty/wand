@@ -14,7 +14,7 @@ import type { StructuredSessionManager } from "./structured-session-manager.js";
 import type { ProcessManager } from "./process-manager.js";
 import type { WandTaskAgent, WandTaskAgentKind, WandTaskAgentMode, WandTaskPriority, WandTaskStatus, WandTaskTitleSource } from "./task-types.js";
 import { DEFAULT_WAND_TASK_AGENT_KIND, DEFAULT_WAND_TASK_AGENT_MODE, DEFAULT_WAND_TASK_PRIORITY, isWandTaskAgentKind, isWandTaskAgentMode, normalizeWandTaskAgentMode, WAND_MILESTONE_NAME_MAX_LENGTH } from "./task-types.js";
-import { archiveBoardTask, ensureWorkspaceTaskForBoardTask, isAutoNameableBoardTask, moveSessionToWorkspaceTask, syncClosedBoardTask, syncUngroupedSessionsToBoard, syncWorkspaceTaskToBoard, taskAutoNameSignature, taskAutoNameSourceText } from "./wand-task-sync.js";
+import { isAutoNameableBoardTask, taskAutoNameSignature, taskAutoNameSourceText } from "./wand-task-sync.js";
 import type { SessionSnapshot, WandConfig } from "./types.js";
 import { isSessionProvider } from "./session-provider.js";
 import { isThinkingEffort } from "./structured-provider-common.js";
@@ -308,11 +308,6 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
 
   app.get("/api/wand-tasks", (req, res) => {
     try {
-      syncUngroupedSessionsToBoard(storage);
-    } catch (error) {
-      console.error("[WandTask] Failed to sync ungrouped sessions onto the board:", getErrorMessage(error));
-    }
-    try {
       // 侧栏建的任务 / 后续新增的会话都会在这里补上自动标题。
       refreshAutoBoardTaskTitles(storage, { config, generateTitle: deps.generateTitle });
     } catch (error) {
@@ -432,8 +427,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       const requestedMilestoneId = milestoneIdFrom(storage, body.milestoneId) ?? defaultMilestoneIdForWrite(storage);
       const milestoneId = scopedMilestoneId(storage, requestedMilestoneId, workspaceId)
         ?? defaultMilestoneIdForWrite(storage);
-      const task = storage.transaction(() => {
-        const card = storage.createWandTask({
+      const task = storage.createWandTask({
           workspaceId,
           parentTaskId,
           title,
@@ -445,9 +439,6 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
           dueDate,
           milestoneId,
           agent,
-        });
-        ensureWorkspaceTaskForBoardTask(storage, card);
-        return storage.getWandTask(card.id)!;
       });
       if (titleSource === "auto") {
         refreshAutoBoardTaskTitles(storage, {
@@ -524,14 +515,13 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
         res.status(404).json({ error: "未找到该任务。" });
         return;
       }
-      if (task.status === "done" || task.status === "archived") syncClosedBoardTask(storage, task);
       res.json(dto(storage.getWandTask(task.id) ?? task));
     } catch (error) {
       sendRouteError(res, error, "无法更新任务。");
     }
   });
   app.delete("/api/wand-tasks/:id", (req, res) => {
-    const archived = archiveBoardTask(storage, req.params.id);
+    const archived = storage.updateWandTask(req.params.id, { status: "archived" });
     if (!archived) {
       res.status(404).json({ error: "未找到该任务。" });
       return;
@@ -548,8 +538,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
         res.status(404).json({ error: "未找到该任务。" });
         return;
       }
-      const task = ensureWorkspaceTaskForBoardTask(storage, card);
-      moveSessionToWorkspaceTask(storage, sessionId, task.id);
+      storage.bindWandTaskSession(card.id, sessionId);
       sessions?.refreshSessionWorkspace(sessionId);
       res.status(201).json(dto(storage.getWandTask(req.params.id)));
     } catch (error) {
@@ -560,7 +549,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
     const card = storage.getWandTask(req.params.id);
     const session = storage.getSession(req.params.sessionId);
     if (card?.workspaceTaskId && session?.workspaceTaskId === card.workspaceTaskId) {
-      moveSessionToWorkspaceTask(storage, session.id, null);
+      storage.moveSessionToWorkspaceTask(session.id, null);
       sessions?.refreshSessionWorkspace(session.id);
     } else {
       storage.unbindWandTaskSession(req.params.id, req.params.sessionId);
@@ -636,9 +625,6 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
   }));
 
   app.get("/api/wand-tasks/:id", asyncRoute(async (req, res) => {
-    // 单卡读取不跑全量同步，但至少把这张卡片自己的任务归属对上：
-    // 原生客户端 / 详情面板只拉单卡时，也不会看到一张没有会话的卡片。
-    syncWorkspaceTaskToBoard(storage, storage.getWandTask(req.params.id)?.workspaceTaskId);
     const task = dto(storage.getWandTask(req.params.id));
     if (!task) {
       res.status(404).json({ error: "未找到该任务。" });

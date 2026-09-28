@@ -1,4 +1,5 @@
 import { memberAgents, type AiTeam, type AiTeamMember, type AiTeamRun, type AiTeamRunStatus, type AiTeamStep, type TeamMemberRole } from "./ai-team-types.js";
+import type { WandTaskAgent } from "./task-types.js";
 import type { ConversationTurn } from "./types.js";
 
 export const AI_TEAM_REPORT_DIR = ".wand-team";
@@ -6,6 +7,14 @@ export const AI_TEAM_MAX_ASSIGN_STEPS = 5;
 const MESSAGE_MAX = 2000;
 const TITLE_MAX = 80;
 const INSTRUCTIONS_MAX = 8000;
+
+/**
+ * 消息里引用文件用的固定标签：用户消息只给路径，怎么用写在系统提示的「交接文件」段
+ * （`leaderSystemPrompt` / `memberSystemPrompt`），每轮不重复同一句规则。
+ */
+const ROUND_REPORT_LABEL = "本轮报告文件";
+const HANDOFF_LABEL = "上游交接文件";
+const CHAT_HISTORY_LABEL = "本群聊之前的记录";
 
 export interface AiTeamAssignedStep {
   memberId: string;
@@ -20,10 +29,21 @@ export type AiTeamLeaderDecision =
   | { action: "ask"; message: string }
   | { action: "finish"; message: string };
 
+/** 后一段已经完整包含前一段时只留后一段（任务标题常是描述开头被截断出来的前缀）。 */
+function mergeTaskTexts(title: string, description: string): string {
+  const head = title.trim();
+  const tail = description.trim();
+  if (!head) return tail;
+  if (!tail) return head;
+  if (tail.includes(head)) return tail;
+  if (head.includes(tail)) return head;
+  return `${head}\n\n${tail}`;
+}
+
 /**
  * 团队这一轮要做的事。
  * 指派框 / 群聊里刚输入的文字就是本轮任务，不再把任务卡上的旧描述静默拼进去。
- * 没有单独输入时（创建任务后立刻交给团队）才用标题 + 描述。
+ * 没有单独输入时（创建任务后立刻交给团队）才用标题 + 描述，标题已被描述覆盖时不重复。
  */
 export function buildAiTeamObjective(
   task: { title: string; description: string },
@@ -34,7 +54,7 @@ export function buildAiTeamObjective(
     const title = task.title.trim();
     return title && !assignment.includes(title) ? `任务：${title}\n\n${assignment}` : assignment;
   }
-  return [task.title.trim(), task.description.trim()].filter(Boolean).join("\n\n") || "完成这张任务";
+  return mergeTaskTexts(task.title, task.description) || "完成这张任务";
 }
 
 export function leaderOf(team: AiTeam): AiTeamMember {
@@ -207,8 +227,9 @@ export function renderChatHistoryFile(input: {
 }
 
 /**
- * 一轮提示词：`system` 交给 CLI 的系统提示通道（角色、规则、回复格式），`message` 是这一轮的
- * 用户消息（目标、指派、报告路径）。provider 支持系统提示时必须走 `system`，不要把规则塞进消息里。
+ * 一轮提示词：`system` 交给 CLI 的系统提示通道（角色、规则、回复格式、交接文件的用法），
+ * `message` 是这一轮的用户消息（目标、指派、文件路径）。
+ * provider 支持系统提示时一律走 `system`：规则不伪装成用户发言，也不每轮重复。
  */
 export interface AiTeamPrompt {
   system: string;
@@ -222,10 +243,15 @@ const TEAM_ROLE_LABELS: Partial<Record<TeamMemberRole, string>> = {
   verify: "验收测试",
 };
 
-function memberLine(member: AiTeamMember): string {
+/** `default` 哨兵在提示词里怎么写：换成服务端为该 CLI 配置的默认模型名；没配就退回「默认」。 */
+export type AiTeamModelNameResolver = (provider: WandTaskAgent["provider"]) => string;
+
+function memberLine(member: AiTeamMember, resolveModel?: AiTeamModelNameResolver): string {
   // 只渲染首选候选（§3.6）；备用候选不进提示词，降级由系统处理。
   const preferred = memberAgents(member)[0] ?? member.agent;
-  const model = preferred.model === "default" ? "默认模型" : preferred.model;
+  const configured = preferred.model === "default" ? resolveModel?.(preferred.provider)?.trim() ?? "" : "";
+  // `default` 不是模型名，写真正会用的那个（拿不到名字才写「默认」）。
+  const model = preferred.model === "default" ? configured || "默认" : preferred.model;
   const role = member.role ? TEAM_ROLE_LABELS[member.role] : undefined;
   const duty = member.duty.trim().replace(/\s+/g, " ") || "（未填写）";
   const parts = [`id: ${member.id}`, `名字: ${member.name}`];
@@ -237,7 +263,7 @@ function memberLine(member: AiTeamMember): string {
 function leaderReplyFormat(): string[] {
   return [
     "## 回复方式（必须遵守）",
-    "每轮消息都会给出本次的报告文件路径；把决定写成 JSON 写入该文件，写完简短回复「已写入」。",
+    `每轮消息末尾都给出这一轮的报告文件（标签「${ROUND_REPORT_LABEL}」）；把决定写成 JSON 写入该文件，写完只简短回复「已写入」，不要在消息里复述计划。`,
     "格式三选一：",
     '{"action":"assign","message":"给用户看的一句话说明","steps":[{"member":"成员 id","title":"简短标题","instructions":"具体要做什么、做到什么程度"}]}',
     '{"action":"ask","message":"要问用户的问题"}',
@@ -263,28 +289,26 @@ function teamInstructions(team: AiTeam): string[] {
 const OBJECTIVE_INTENT_NOTE = "目标与用户补充都是用户原话，可能带口述笔误（例如把 CLI 写成 ci），按用户意图理解，不要照字面复述。";
 
 /**
- * 接着同一个群聊跑的那一轮：负责人与成员先读上下文文件再动手。
- * 负责人还要据此避免重做已经完成的步骤；成员只需在已有改动上继续。
+ * 交接文件怎么用，写在系统提示里（消息里只给路径，会话级规则只说一次）。
+ * 负责人用它决定下一步，成员用它接着上游干活。
  */
-function chatHistoryBlock(path: string | null | undefined, audience: "leader" | "member"): string[] {
-  if (!path) return [];
-  const shared = `用户是在这个群聊里接着提要求，之前几轮的步骤摘要与群聊原文在：${path}`;
+function handoffRules(audience: "leader" | "member"): string[] {
   return audience === "leader"
     ? [
-      "## 接着这个群聊之前的几轮（动手前先读文件）",
-      shared,
-      "先读这个文件再安排：已经做完的不要重做，上一轮没做完的接着做；不要凭标题猜成员做过什么，也不要让他们复述历史。",
+      "## 交接文件（消息里出现下列标签时，先读文件再动手）",
+      `- ${HANDOFF_LABEL}：上一批步骤的报告全文汇总，先读它再决定下一步；不要凭标题猜成员做了什么，也不要让他们把报告复述进消息里。`,
+      `- ${CHAT_HISTORY_LABEL}：用户是在这个群聊里接着提要求；先读它，已经做完的不要重做，上一轮没做完的接着做。`,
       "",
     ]
     : [
-      "## 本群聊历史（动手前先读文件）",
-      shared,
-      "先读这个文件，在已有改动的基础上继续；已经完成的部分不要重做。",
+      "## 交接文件（消息里出现下列标签时，先读文件再动手）",
+      `- ${HANDOFF_LABEL}：上游步骤的报告全文汇总，先读它再开始本步骤；不要猜上游做了什么，也不要重复劳动。`,
+      `- ${CHAT_HISTORY_LABEL}：用户是在这个群聊里接着提要求；先读它，在已有改动的基础上继续，已经完成的部分不要重做。`,
       "",
     ];
 }
 
-function leaderSystemPrompt(run: AiTeamRun): string {
+function leaderSystemPrompt(run: AiTeamRun, resolveModel?: AiTeamModelNameResolver): string {
   const leader = leaderOf(run.team);
   return [
     `你是 AI 团队「${run.team.name}」的负责人（${leader.name}）。`,
@@ -292,7 +316,7 @@ function leaderSystemPrompt(run: AiTeamRun): string {
     "",
     "## 成员（只能把工作派给下列成员；id 必须原样使用）",
     "成员的名单行只列首选执行配置；执行配置由系统按候选顺序自动降级，你只按成员能力分派，不操心模型可用性。",
-    ...workersOf(run.team).map(memberLine),
+    ...workersOf(run.team).map((member) => memberLine(member, resolveModel)),
     ...teamInstructions(run.team),
     "",
     "## 工作方式",
@@ -305,6 +329,7 @@ function leaderSystemPrompt(run: AiTeamRun): string {
     "- 需要用户拍板时就提问，不要猜。",
     `- ${OBJECTIVE_INTENT_NOTE}`,
     "",
+    ...handoffRules("leader"),
     ...leaderReplyFormat(),
   ].join("\n");
 }
@@ -320,10 +345,16 @@ function memberSystemPrompt(run: AiTeamRun, member: AiTeamMember): string {
     "- 不要 git commit / push。",
     "- 你的发言会以群聊气泡出现，署名是你的名字；报告仍写进报告文件。",
     "",
+    ...handoffRules("member"),
     "## 报告约定",
-    "每轮消息都会给出本次的报告文件路径；完成后把报告写进该文件（Markdown）：",
+    `每轮消息末尾都给出这一轮的报告文件（标签「${ROUND_REPORT_LABEL}」）；完成后把报告写进该文件（Markdown）：`,
     "第一行写 `状态: 完成`、`状态: 受阻` 或 `状态: 失败`，然后写做了什么、改了哪些文件、怎么验证的、还有什么问题。",
   ].join("\n");
+}
+
+/** 本轮报告文件的引用行；怎么用写在系统提示里（见 `leaderReplyFormat` / 「报告约定」）。 */
+function reportLine(reportPath: string): string {
+  return `${ROUND_REPORT_LABEL}：${reportPath}`;
 }
 
 /** 会话是新建的时候才需要补目标：老会话的上下文里已经有目标了。 */
@@ -333,20 +364,28 @@ function objectiveBlock(run: AiTeamRun, fresh: boolean): string[] {
   return fresh ? [`团队目标：${run.objective}`, ""] : [];
 }
 
+/**
+ * 续跑（用户在同一个群聊里接着说话）的上下文文件（见 `aiTeamChatHistoryPath`）：
+ * 消息只给路径，「先读它、别重做已完成的」写在系统提示的「交接文件」段。
+ */
+function chatHistoryBlock(path: string | null | undefined): string[] {
+  return path ? [`${CHAT_HISTORY_LABEL}：${path}`, ""] : [];
+}
+
 /** `chatHistoryPath` 有值时说明这一轮是同一个群聊的续跑（见 `aiTeamChatHistoryPath`）。 */
 export function buildLeaderKickoffPrompt(
   run: AiTeamRun,
   reportPath: string,
   fresh: boolean,
   chatHistoryPath?: string | null,
+  resolveModel?: AiTeamModelNameResolver,
 ): AiTeamPrompt {
   return {
-    system: leaderSystemPrompt(run),
+    system: leaderSystemPrompt(run, resolveModel),
     message: [
       ...objectiveBlock(run, fresh),
-      ...chatHistoryBlock(chatHistoryPath, "leader"),
-      "## 本轮要求",
-      `把计划决策写成 JSON 写入：${reportPath}`,
+      ...chatHistoryBlock(chatHistoryPath),
+      reportLine(reportPath),
     ].join("\n"),
   };
 }
@@ -364,26 +403,21 @@ export function buildLeaderFollowupPrompt(
   fresh: boolean,
   handoffPath?: string | null,
   chatHistoryPath?: string | null,
+  resolveModel?: AiTeamModelNameResolver,
 ): AiTeamPrompt {
   // 续跑上下文只在新建的负责人会话里补一次：会话复用的时候，kickoff 那一轮已经给过路径。
-  const lines: string[] = [...objectiveBlock(run, fresh), ...chatHistoryBlock(fresh ? chatHistoryPath : null, "leader")];
+  const lines: string[] = [...objectiveBlock(run, fresh), ...chatHistoryBlock(fresh ? chatHistoryPath : null)];
   if (finished.length > 0) {
     lines.push("## 已结束的步骤", "");
     for (const { step, memberName } of finished) {
       lines.push(handoffStepLine({ ...step, memberName }));
     }
-    if (handoffPath) {
-      lines.push(
-        "",
-        `这些步骤的报告全文汇总在交接文件：${handoffPath}`,
-        "先读这个文件再决定下一步；不要凭标题猜成员做了什么，也不要让他们把报告复述进消息里。",
-      );
-    }
+    if (handoffPath) lines.push("", `${HANDOFF_LABEL}：${handoffPath}`);
     lines.push("");
   }
   if (userNote?.trim()) lines.push("## 用户补充", userNote.trim(), "");
-  lines.push("## 本轮要求", `把下一步决定写成 JSON 写入：${reportPath}`);
-  return { system: leaderSystemPrompt(run), message: lines.join("\n") };
+  lines.push(reportLine(reportPath));
+  return { system: leaderSystemPrompt(run, resolveModel), message: lines.join("\n") };
 }
 
 export function buildLeaderFormatRetryPrompt(
@@ -392,16 +426,16 @@ export function buildLeaderFormatRetryPrompt(
   reportPath: string,
   fresh: boolean,
   chatHistoryPath?: string | null,
+  resolveModel?: AiTeamModelNameResolver,
 ): AiTeamPrompt {
   return {
-    system: leaderSystemPrompt(run),
+    system: leaderSystemPrompt(run, resolveModel),
     message: [
       ...objectiveBlock(run, fresh),
-      ...chatHistoryBlock(fresh ? chatHistoryPath : null, "leader"),
+      ...chatHistoryBlock(fresh ? chatHistoryPath : null),
       `上次的回复没能解析：${error}`,
       "",
-      "## 本轮要求",
-      `请严格按上面的 JSON 格式重新写入：${reportPath}`,
+      reportLine(reportPath),
     ].join("\n"),
   };
 }
@@ -421,22 +455,17 @@ export function buildMemberPrompt(
   const lines = [
     ...objectiveBlock(run, fresh),
     // 续跑上下文只在新建的成员会话里补一次：成员这一轮以前的信息都在文件里。
-    ...chatHistoryBlock(fresh ? chatHistoryPath : null, "member"),
+    ...chatHistoryBlock(fresh ? chatHistoryPath : null),
     `## 本步骤：${step.title}`,
     step.instructions,
     "",
   ];
   if (upstream && upstream.steps.length > 0) {
-    lines.push("## 上游交接（动手前先读文件）", "");
+    lines.push("## 上游交接", "");
     for (const item of upstream.steps) lines.push(handoffStepLine(item));
-    lines.push(
-      "",
-      `上游报告全文：${upstream.handoffPath}`,
-      "先读这个文件，再开始本步骤；不要猜上游做了什么，也不要重复劳动。",
-      "",
-    );
+    lines.push("", `${HANDOFF_LABEL}：${upstream.handoffPath}`, "");
   }
-  lines.push("## 报告", `写入文件：${step.reportPath}`);
+  lines.push(reportLine(step.reportPath));
   return { system: memberSystemPrompt(run, member), message: lines.join("\n") };
 }
 

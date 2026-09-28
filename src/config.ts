@@ -811,6 +811,15 @@ export function isExecutionMode(value: unknown): value is ExecutionMode {
   return value === "assist" || value === "agent" || value === "agent-max" || value === "auto-edit" || value === "default" || value === "full-access" || value === "native" || value === "managed";
 }
 
+/**
+ * 配置里的默认模型 id：`default` 是「跟随 CLI 默认」的哨兵值、不是模型 id，
+ * 历史设置里可能存过它（会一路传成 `--model default`），读到就当没配。
+ */
+function configuredModelId(value: string | undefined): string {
+  const trimmed = (value ?? "").trim();
+  return trimmed === "default" ? "" : trimmed;
+}
+
 export function getProviderDefaultModels(config: Pick<WandConfig, "defaultModel" | "defaultCodexModel" | "defaultOpenCodeModel" | "defaultGrokModel" | "defaultQoderModel" | "defaultPiModel">): {
   claude: string;
   codex: string;
@@ -820,12 +829,12 @@ export function getProviderDefaultModels(config: Pick<WandConfig, "defaultModel"
   pi: string;
 } {
   return {
-    claude: (config.defaultModel ?? "").trim(),
-    codex: (config.defaultCodexModel ?? "").trim(),
-    opencode: (config.defaultOpenCodeModel ?? "").trim(),
-    grok: (config.defaultGrokModel ?? "").trim(),
-    qoder: (config.defaultQoderModel ?? "").trim(),
-    pi: (config.defaultPiModel ?? "").trim(),
+    claude: configuredModelId(config.defaultModel),
+    codex: configuredModelId(config.defaultCodexModel),
+    opencode: configuredModelId(config.defaultOpenCodeModel),
+    grok: configuredModelId(config.defaultGrokModel),
+    qoder: configuredModelId(config.defaultQoderModel),
+    pi: configuredModelId(config.defaultPiModel),
   };
 }
 

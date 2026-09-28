@@ -14,7 +14,7 @@ import {
   validateCommitAiConfig,
   writePreferenceToStorage,
 } from "./config.js";
-import type { ModelCatalogService } from "./models.js";
+import { withConfiguredDefaultModelLabels, type ModelCatalogService } from "./models.js";
 import { DEPLOYMENT_CONFIG_KEYS, type RuntimeConfigState } from "./runtime-config.js";
 import type { WandStorage } from "./storage.js";
 import type { SystemAiConfig, WandConfig } from "./types.js";
@@ -445,7 +445,7 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
     const cached = deps.modelCatalog.snapshot();
     const defaults = getProviderDefaultModels(config);
     res.json({
-      ...cached,
+      ...withConfiguredDefaultModelLabels(cached, defaults),
       defaultModel: defaults.claude,
       defaultCodexModel: defaults.codex,
       defaultOpenCodeModel: defaults.opencode,
@@ -461,7 +461,7 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
       const refreshed = await deps.modelCatalog.refresh({ verifyClaudeCandidates: true });
       const defaults = getProviderDefaultModels(config);
       res.json({
-        ...refreshed,
+        ...withConfiguredDefaultModelLabels(refreshed, defaults),
         defaultModel: defaults.claude,
         defaultCodexModel: defaults.codex,
         defaultOpenCodeModel: defaults.opencode,

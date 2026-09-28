@@ -12,6 +12,8 @@ import { TeamAvatar, TeamAvatarStack, type TeamAvatarState } from "../ai-teams/a
 import { TeamChatView } from "../ai-teams/team-chat-view";
 import { failureMessage } from "../errors";
 import { issueAgentProviderLabel } from "./task-board-agent";
+import { taskBoardController } from "./task-board-controller";
+import { MOTION_DWELL_FAILED_MS, MOTION_DWELL_SENT_MS } from "../ui/motion-tokens";
 import { WandBadge, WandButton, WandIcon, WandStretchTabs } from "../ui";
 
 type BadgeTone = "neutral" | "accent" | "info" | "success" | "warning";
@@ -63,7 +65,7 @@ function useActionState(): {
     }
     setFlash({ key, ok });
     if (timer.current !== null) window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => { timer.current = null; setFlash(null); }, ok ? 1400 : 2800);
+    timer.current = window.setTimeout(() => { timer.current = null; setFlash(null); }, ok ? MOTION_DWELL_SENT_MS : MOTION_DWELL_FAILED_MS);
   }, []);
   return { pending, flash, run };
 }
@@ -294,11 +296,12 @@ export function TeamRunView({
 
   return <div className="task-board-team-run" data-status={run.status}>
     <div className="task-board-team-run-head">
+      <span className="task-board-team-run-kicker">团队运行</span>
       <TeamAvatarStack members={run.team.members} size="sm"/>
       <strong>{run.team.name}</strong>
       <WandBadge tone={status.tone}>{status.label}</WandBadge>
       <small>步数 {run.stepsUsed}/{run.stepLimit}</small>
-      {run.chatSessionId && onOpenSession ? <WandButton kind="secondary" size="small" onClick={() => onOpenSession(run.chatSessionId!)}>
+      {run.chatSessionId ? <WandButton kind="secondary" size="small" onClick={() => taskBoardController.open("", "", "teamchat", run.id)}>
         打开群聊
       </WandButton> : null}
       {active ? <ActionButton

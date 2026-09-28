@@ -789,7 +789,7 @@ test("sidebar and board share containers and moving a live CLI session preserves
   });
 });
 
-test("reading a single card reconciles its own task sessions", async () => {
+test("reading a single card projects sessions without repairing membership", async () => {
   await withHarness(async ({ url, storage }) => {
     const workspace = storage.createWorkspace({ name: "wand", cwd: storage.directory() });
     const task = storage.createWorkspaceTask({ workspaceId: workspace.id, name: "按渠道配置 API" });
@@ -806,7 +806,7 @@ test("reading a single card reconciles its own task sessions", async () => {
       workspaceTaskId: task.id,
       provider: "pi",
     }));
-    assert.deepEqual(storage.listWandTaskSessionIds(card.id), []);
+    assert.deepEqual(storage.listWandTaskSessionIds(card.id), ["sess-unbound"]);
 
     const detail = await fetch(`${url}/api/wand-tasks/${card.id}`).then(jsonOf<{ sessions: Array<{ id: string }>; status: string }>);
     assert.deepEqual(detail.sessions.map((session) => session.id), ["sess-unbound"]);

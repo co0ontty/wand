@@ -104,6 +104,9 @@ export type AiTeamRunStatus =
 
 export const AI_TEAM_ACTIVE_RUN_STATUSES: readonly AiTeamRunStatus[] = ["running", "awaiting_approval", "waiting_user"];
 
+/** 终态：不会再有 live 变化，runner 据此清掉该 run 的推送指纹，避免长跑服务按 run 数攒字符串。 */
+export const AI_TEAM_TERMINAL_RUN_STATUSES: readonly AiTeamRunStatus[] = ["done", "failed", "stopped"];
+
 export interface AiTeamRun {
   id: string;
   teamId: string;
@@ -175,6 +178,42 @@ export interface AiTeamRunSummary extends AiTeamRun {
 
 /** detail() 里群聊回合的截尾条数（§4.4）：面板只给最近这一段，完整会话走「打开群聊」。 */
 export const AI_TEAM_DETAIL_CHAT_TURNS = 200;
+
+/** live 卡片文本的尾部保留上限（§4.9），超出部分回报 omittedChars 给前端显示「已省略前面 N 字」。 */
+export const AI_TEAM_LIVE_TEXT_MAX_CHARS = 2000;
+
+/**
+ * 一个正在干活的运行中步骤的实时快照（§4.9）：Web 走 ai-team-step-live 推送，
+ * 移动端轮询 GET /api/ai-team-runs/:id/live，两边共用这个形状。
+ */
+export interface AiTeamLiveStep {
+  stepId: string;
+  seq: number;
+  memberId: string;
+  memberName: string;
+  /** 该步实际使用候选的 provider（署名口径同 §3.6）。 */
+  provider: WandTaskAgent["provider"];
+  /**
+   * 该步实际使用候选的模型 id（provider 的原生 model id，`"default"` = 跟随服务端默认）；
+   * 取不到候选就不填。中文标签由客户端做。
+   */
+  model?: string;
+  /** 该步实际使用候选的思考深度；同上，取不到不填。 */
+  thinkingEffort?: string;
+  sessionId: string;
+  state: AgentActivityState;
+  /** renderLiveStepText 的渲染结果，尾部保留、至多 AI_TEAM_LIVE_TEXT_MAX_CHARS 字。 */
+  text: string;
+  omittedChars: number;
+  updatedAt: string;
+}
+
+/** notifyLive 回调与 ai-team-step-live 通知的 payload（§4.9）。 */
+export interface AiTeamLiveUpdate {
+  runId: string;
+  taskId: string;
+  steps: AiTeamLiveStep[];
+}
 
 export interface AiTeamRunDetail {
   run: AiTeamRun;

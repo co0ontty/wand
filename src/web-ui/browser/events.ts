@@ -7,7 +7,7 @@ import { escapeHtml } from "./utils";
 import { formatInlineResult, scheduleChatRender } from "./chat-render";
 import { applyExpandedState, persistElementExpandState, persistSelectedId, scrollChatToBottom, setPersistedAgentSelection } from "./chat-scroll";
 import { adjustTerminalScale, openFilePreview } from "./file-browser";
-import { attachQueueBarDelegates, bindInputTouchScroll, cancelVoiceRecording, handleInputBoxBlur, handleInputBoxFocus, handleVoiceMove, refreshInputBoxState, sendOrStart, setupMobileKeyboardHandlers, startVoiceRecording, stopSession, stopVoiceRecording, updateQueueBar } from "./input";
+import { attachQueueBarDelegates, bindInputTouchScroll, cancelVoiceRecording, getComposerSendPhase, handleInputBoxBlur, handleInputBoxFocus, handleVoiceMove, refreshInputBoxState, sendOrStart, setupMobileKeyboardHandlers, startVoiceRecording, stopSession, stopVoiceRecording, updateQueueBar } from "./input";
 import { hideError } from "./notifications";
 import { render, resetChatRenderCache } from "./render";
 import { addPendingAttachments, closeClaudeSkillsPicker, closePlusPopover, closeSessionsDrawer, dismissDrawerIfOverlay, handleInputBoxKeydown, handleInputPaste, handleInteractiveTextInput, handlePtyImagePaste, login, onChatModeChange, onChatModelChange, onChatThinkingChange, optimizePromptText, selectSession, setDraftValue, switchServer, syncComposerHasText, togglePlusPopover } from "./session-engine";
@@ -491,14 +491,17 @@ import { setupVisualViewportHandlers } from "./viewport";
           return;
         }
 
+        // 发送 / 停止是同一颗按钮，点下去按当前相位分派（原来是两个节点各自的监听）。
         var sendBtn = document.getElementById("send-input-button");
         if (sendBtn) sendBtn.addEventListener("click", function() {
           // 与 input focus 同理：手机 drawer 盖在上面才收起，桌面常驻栏保持原状。
           dismissDrawerIfOverlay();
+          if (getComposerSendPhase() === "running") {
+            stopSession();
+            return;
+          }
           sendOrStart();
         });
-        var stopBtn = document.getElementById("stop-button");
-        if (stopBtn) stopBtn.addEventListener("click", stopSession);
         var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
         if (inputBox) {
           // A render/login transition may replace a composing textarea without

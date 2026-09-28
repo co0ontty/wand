@@ -1,10 +1,12 @@
 import * as React from "react";
-import type { AiTeam, AiTeamMember, AiTeamRun, AiTeamRunDetail, AiTeamRunSummary } from "../../../ai-team-types";
+import type {
+  AiTeam, AiTeamLiveStep, AiTeamLiveUpdate, AiTeamMember, AiTeamRun, AiTeamRunDetail, AiTeamRunSummary,
+} from "../../../ai-team-types";
 import { jsonBody, requestJson } from "../http-adapter";
 import { MOTION_DWELL_FAILED_MS, MOTION_DWELL_SENT_MS } from "../ui/motion-tokens";
 
 export type { AiTeam, AiTeamMember, AiTeamRun, AiTeamRunDetail, AiTeamRunSummary };
-export type { AiTeamStep } from "../../../ai-team-types";
+export type { AiTeamLiveStep, AiTeamLiveUpdate, AiTeamStep } from "../../../ai-team-types";
 
 export type AiTeamInput = Pick<AiTeam, "name" | "description" | "instructions" | "members" | "requirePlanApproval" | "maxSteps">;
 
@@ -22,6 +24,29 @@ export function notifyAiTeamRunChanged(change: { runId: string; taskId: string }
 export function subscribeAiTeamRunChanges(listener: Listener): () => void {
   listeners.add(listener);
   return () => { listeners.delete(listener); };
+}
+
+type LiveListener = (update: AiTeamLiveUpdate) => void;
+const liveListeners = new Set<LiveListener>();
+
+/** WS 系统通知 `{ kind: "ai-team-step-live" }` 的转发口（§4.9.1）：只分发，不发请求。 */
+export function notifyAiTeamStepLive(update: AiTeamLiveUpdate): void {
+  for (const listener of liveListeners) listener(update);
+}
+
+/**
+ * 订阅运行中步骤的 live 推送。ai-teams chunk 经 lazy.tsx 注册表借本模块时只拿得到
+ * `aiTeamsRepository` 对象与 `subscribeAiTeamRunChanges`（名单手写、本步骤不在白名单），
+ * 所以下面把这对 live API 同时挂到仓储对象上，chunk 侧走 `aiTeamsRepository.*`。
+ */
+export function subscribeAiTeamStepLive(listener: LiveListener): () => void {
+  liveListeners.add(listener);
+  return () => { liveListeners.delete(listener); };
+}
+
+/** GET /api/ai-team-runs/:id/live（§4.9.1）：一次性拉当前 running 步骤的 live 文本。 */
+export function aiTeamLive(runId: string): Promise<AiTeamLiveUpdate> {
+  return requestJson<AiTeamLiveUpdate>(runUrl(runId, "/live"));
 }
 
 const runUrl = (runId: string, suffix = ""): string => `/api/ai-team-runs/${encodeURIComponent(runId)}${suffix}`;
@@ -112,6 +137,9 @@ export const aiTeamsRepository = {
   detail(runId: string): Promise<AiTeamRunDetail> {
     return requestJson(runUrl(runId));
   },
+  /** live 文本通道（§4.9.1）：chunk 里的 TeamChatView 只经这个对象借到拉取与订阅。 */
+  live: aiTeamLive,
+  subscribeAiTeamStepLive,
   approve(runId: string): Promise<AiTeamRunDetail> {
     return requestJson(runUrl(runId, "/approve"), jsonBody({}));
   },

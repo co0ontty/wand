@@ -57,12 +57,24 @@ export const aiTeamsChunkStyles = String.raw`
   animation: wand-settings-fade-in var(--transition-normal);
 }
 .wand-teams-detail > * { flex: 0 0 auto; width: 100%; max-width: 920px; }
-.wand-teams-detail-pane { animation: wand-settings-fade-in var(--transition-normal); }
+/* 团队详情两个面板叠放常驻，切标签只翻可见性：进场 normal、旧内容退场 quick-exit（§5.3）。 */
+.wand-teams-detail-stack { position: relative; display: grid; }
+.wand-teams-detail-pane {
+  grid-area: 1 / 1;
+  min-width: 0;
+  opacity: 1;
+  transition: opacity var(--motion-normal) var(--ease-in-out-smooth);
+}
+.wand-teams-detail-pane[data-hidden] {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity var(--motion-quick-exit) var(--ease-in-out-smooth), visibility var(--motion-quick-exit) step-end;
+}
 .wand-teams-detail > .wand-stretch-tabs { width: auto; align-self: flex-start; }
 .wand-teams-detail-head { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .wand-teams-detail-head h2 { margin: 0; font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); }
 .wand-teams-detail-head p { margin: 2px 0 0; color: var(--text-tertiary); font-size: var(--font-size-sm); }
-.wand-teams-detail-back { display: none; }
 .wand-teams-create-icon { transition: transform var(--transition-normal); }
 .task-board-create-button[aria-pressed="true"] .wand-teams-create-icon { transform: rotate(45deg); }
 
@@ -330,6 +342,8 @@ export const aiTeamsChunkStyles = String.raw`
   background: var(--bg-secondary);
 }
 .task-board-team-run-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+/* 区块标题行：只比正文高一档，不与页面头部争同层标题。 */
+.task-board-team-run-kicker { color: var(--text-tertiary); font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); letter-spacing: 0.04em; }
 .task-board-team-run-head strong { font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); }
 .task-board-team-run-head small { margin-right: auto; color: var(--text-tertiary); font-size: var(--font-size-xs); }
 .task-board-team-run-detail { margin: 0; color: var(--text-secondary); font-size: var(--font-size-xs); }
@@ -440,6 +454,78 @@ export const aiTeamsChunkStyles = String.raw`
 .team-chat-step-chip[data-ok] { color: var(--success); }
 .team-chat-step[data-status="failed"] .team-chat-step-chip { color: var(--danger); }
 
+/* ---------- 正在输出的成员（§4.9 live 卡片）---------- */
+/* 两段式进场（与 Android 群聊同拍）：头像 + 名字行先出现，气泡卡片隔一拍再长出；
+   收起仍是同一段动画倒放。卡片尺寸固定，文本在里面滚，所以长内容不顶行高。 */
+@keyframes wand-team-live-grow {
+  from { opacity: 0; transform: translateX(-10px); }
+}
+.team-chat-live-row {
+  margin-left: 10px;
+  padding-left: 10px;
+  border-left: 2px solid var(--info);
+}
+.team-chat-live-row[data-leaving] {
+  animation: wand-team-live-grow var(--motion-quick-exit) var(--ease-in-out-smooth) reverse forwards;
+}
+.team-chat-live-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  animation: wand-team-live-grow var(--motion-fast) var(--ease-out-expo) both;
+}
+.team-chat-live-head .pixel-avatar { flex: 0 0 auto; }
+.team-chat-live-chip {
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  font-size: var(--font-size-xs);
+}
+.team-chat-live-state {
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  color: var(--info);
+  background: color-mix(in srgb, var(--info) 14%, transparent);
+  font-size: var(--font-size-xs);
+}
+.team-chat-live-state[data-state="needs_input"],
+.team-chat-live-state[data-state="needs_permission"] { color: var(--warning); background: var(--warning-muted); }
+.team-chat-live-state[data-state="failed"] { color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent); }
+.team-chat-live-card {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: 100%;
+  max-width: 560px;
+  height: 200px;
+  padding: 8px 10px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-tertiary);
+  cursor: pointer;
+  animation: wand-team-live-grow var(--motion-normal) var(--ease-out-expo) both;
+  animation-delay: var(--motion-fast);
+  transition: border-color var(--motion-fast) var(--ease-in-out-smooth),
+              background var(--motion-fast) var(--ease-in-out-smooth);
+}
+.team-chat-live-card:hover,
+.team-chat-live-card:focus-visible { border-color: color-mix(in srgb, var(--accent) 45%, var(--border-subtle)); }
+.team-chat-live-omitted { margin: 0 0 4px; color: var(--text-tertiary); font-size: var(--font-size-xs); }
+.team-chat-live-text {
+  min-height: 0;
+  margin: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* 主任务层：负责人决策是公告卡，派工渲染成任务条目，不跟成员报告混在一起。 */
 .team-chat-plan {
   gap: 6px;
@@ -539,6 +625,8 @@ export const aiTeamsChunkStyles = String.raw`
 }
 .wand-team-chat-body .task-board-team-chat-input { flex: 0 0 auto; }
 .wand-team-chat-head-meta { display: flex; align-items: center; gap: 10px; }
+/* 群聊页头部：面包屑用 variant="title"，末段就是页面 h1，这里只压小整行的导航字号。 */
+.wand-team-chat-crumb { font-size: var(--font-size-sm); }
 .wand-team-chat-provider { color: var(--text-tertiary); font-size: 11px; font-variant-numeric: tabular-nums; }
 .wand-team-chat-unconfirmed { color: var(--warning); font-size: var(--font-size-xs); }
 .task-board-team-chat .pixel-avatar .wand-team-avatar-cat { width: 100%; height: 100%; }
@@ -759,7 +847,6 @@ export const aiTeamsChunkStyles = String.raw`
   .wand-teams-detail { padding: 14px 14px 28px; }
   .wand-teams-page[data-detail] .wand-teams-list { display: none; }
   .wand-teams-page:not([data-detail]) .wand-teams-detail { display: none; }
-  .wand-teams-detail-back { display: inline-flex; }
   .wand-team-run-head { grid-template-columns: auto minmax(0, 1fr) auto auto; }
   .wand-team-run-head small { display: none; }
   .wand-team-candidate { grid-template-columns: auto minmax(0, 1fr); }
@@ -768,6 +855,10 @@ export const aiTeamsChunkStyles = String.raw`
   .task-board-team-views-stack { display: block; }
   .task-board-team-view { opacity: 1; }
   .task-board-team-view[data-hidden] { display: none; visibility: visible; transition: none; }
+  /* 团队详情同理：常驻的另一块面板不占高度，否则窄屏会多出空白滚动区。 */
+  .wand-teams-detail-stack { display: block; }
+  .wand-teams-detail-pane { opacity: 1; }
+  .wand-teams-detail-pane[data-hidden] { display: none; visibility: visible; transition: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -789,9 +880,17 @@ export const aiTeamsChunkStyles = String.raw`
   .task-board-team-step-skip-head,
   .task-board-team-step-skip-head > svg:last-child,
   .task-board-team-step-skip-body,
-  .wand-teams-create-icon { transition: none; }
+  .wand-teams-create-icon,
+  /* live 行的长出动画不写进这条列表：animation: none 会让 animationend 不来，退场行撤不掉。
+     全局 reduce-motion 已经把时长压到近零并照常派发事件，退场仍然瞬时。 */
+  .team-chat-live-card { transition: none; }
   .wand-teams-detail,
-  .wand-teams-detail-pane,
   .task-board-team-steps { animation: none; }
+  /* 面板改为叠放淡入淡出后，reduce-motion 下退化成瞬时切换。 */
+  .wand-teams-detail-pane { transition: none; }
+  /* 两段式进场在 reduce-motion 下不留间隔：时长由全局规则压到近零，延迟这里归零，
+     否则卡片会比头名晚一拍出现。 */
+  .team-chat-live-head,
+  .team-chat-live-card { animation-delay: 0s; }
 }
 `;

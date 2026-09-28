@@ -241,9 +241,11 @@ export async function sendToAgentSession(
 ```
 
 - Leader 轮：把「上一轮 Leader 之后结束的 work 步骤」的报告全文汇总进 `handoff-<leaderSeq>-leader.md`；
-  提示词里只逐行列出 `第N步 · 成员 · 标题 · 状态 · 报告文件`，外加交接文件路径与一句「先读这个文件再决定下一步」。
-- 成员步骤：把它的依赖步骤（`dependsOn`）的报告汇总进 `handoff-<stepSeq>-work.md`，提示词里写明
-  「上游交接（动手前先读文件）」，上游报告正文一律不进提示词。没有依赖的步骤不带这一段。
+  提示词里只逐行列出 `第N步 · 成员 · 标题 · 状态 · 报告文件`（消息里的标签是 `上游交接文件：{path}`），
+  「先读这个文件再决定下一步」这句规则写在**系统提示**的「交接文件」段里，不每轮重复进用户消息。
+- 成员步骤：把它的依赖步骤（`dependsOn`）的报告汇总进 `handoff-<stepSeq>-work.md`，提示词里以
+  `## 上游交接` 逐行给出各步报告文件与 `上游交接文件：{path}`；上游报告正文一律不进提示词。
+  没有依赖的步骤不带这一段。读文件的规则同样只在系统提示里说一次。
 - 写文件失败只记日志，不阻断派发；提示词里仍逐行给出各步报告文件路径。
 - 这样做的原因：一批步骤的报告动辄数千字，全塞进提示词会撑爆上下文，也让 Leader 只看到「摘要」
   而看不到原文；改成读文件后，需要细节的人自己去读，提示词保持短而稳定。
@@ -259,8 +261,9 @@ export async function sendToAgentSession(
 - 摘要逐行列出每轮的 `状态` 与 `第N步 · 成员 · 标题 · 状态`（上一轮被跳过 / 失败的步骤就靠它看见）；
   群聊原文只留最近的这一段（总预算 64 KiB，超了从最早处丢并注明省略了多少条）。
 - 第一轮负责人（kickoff）与这一轮每个**新建会话**的成员提示词里只给这条路径
-  （`## 接着这个群聊之前的几轮（动手前先读文件）` / `## 本群聊历史（动手前先读文件）`），
-  要求先读完再动手：已经做完的不要重做、上一轮没做完的接着做。会话复用时不重复贴（`fresh` 才带）。
+  （消息里的标签是 `本群聊之前的记录：{path}`，文件自己的标题就是 `# 本群聊之前的记录`），
+  「先读完再动手：已经做完的不要重做、上一轮没做完的接着做」写在**系统提示**的「交接文件」段。
+  会话复用时不重复贴（`fresh` 才带）。
 - 文件名由运行 id 决定，所以库里不额外存列：「文件在不在」就是「是不是续跑」
   （`chatHistoryFor`），服务重启后同一路径依旧成立。
 - 非续跑的运行（没有群聊会话、之前没有运行）提示词里不带这一段；写文件失败只记日志，不拦派发。
@@ -273,8 +276,12 @@ export async function sendToAgentSession(
 
 | 段 | 内容 | 去哪 |
 | --- | --- | --- |
-| `system` | 角色、职责、成员名单、协作指令、工作方式、回复 / 报告格式 | 会话级系统提示：创建会话时交给 provider 自己的系统提示开关（`SessionSnapshot.systemPrompt`） |
-| `message` | 目标（用户原话）、本轮要求、本步骤、报告文件 / 交接文件路径 | 普通用户消息 |
+| `system` | 角色、职责、成员名单、协作指令、工作方式、交接文件怎么读、回复 / 报告格式与标签 | 会话级系统提示：创建会话时交给 provider 自己的系统提示开关（`SessionSnapshot.systemPrompt`） |
+| `message` | 目标（用户原话）、本步骤、报告 / 交接文件路径（只给路径与标签） | 普通用户消息 |
+
+只有「这一轮才有」的东西进 `message`：目标、用户补充、上游步骤与文件路径、解析失败原因。
+凡是每轮都一样的说明（怎么读交接文件、怎么写入报告、Leader 的 JSON 格式）一律进 `system`——
+它们只在新会话时交一次，不会在团队面板的「发给负责人」里、也不会在群聊的用户气泡里出现。
 
 这样规则不会伪装成用户发言（会话第一屏看不到那一大段说明，也不会被当成用户提示词记进迭代、拿去当会话标题），
 也避免模型把目标原文里的口述笔误当成我们的错别字。系统提示通道：
@@ -287,7 +294,7 @@ export async function sendToAgentSession(
 
 会话是新建的时候才把目标再放进消息（`fresh`）：老会话的对话历史里已经有目标了。
 
-**Leader 系统提示**（`leaderSystemPrompt`）：身份与职责 + 成员名单（`CLI: {provider}/{model}`）+ 协作指令 + 工作方式 + 回复格式。
+**Leader 系统提示**（`leaderSystemPrompt`）：身份与职责 + 成员名单（`CLI: {provider}/{model}`）+ 协作指令 + 工作方式 + 交接文件规则 + 回复格式。
 
 ```
 你是 AI 团队「{team.name}」的负责人（{leader.name}）。
@@ -302,10 +309,14 @@ export async function sendToAgentSession(
 - 每次只安排接下来要做的几步（1–5 步）…
 - 目标与用户补充都是用户原话，可能带口述笔误（例如把 CLI 写成 ci），按用户意图理解。
 
+## 交接文件（消息里出现下列标签时，先读文件再动手）
+- 上游交接文件：上一批步骤的报告全文汇总，先读它再决定下一步；不要凭标题猜成员做了什么，也不要让他们把报告复述进消息里。
+- 本群聊之前的记录：用户是在这个群聊里接着提要求；先读它，已经做完的不要重做，上一轮没做完的接着做。
+
 ## 回复方式（必须遵守）
-每轮消息都会给出本次的报告文件路径；把决定写成 JSON 写入该文件，写完简短回复「已写入」。
+每轮消息末尾都给出这一轮的报告文件（标签「本轮报告文件」）；把决定写成 JSON 写入该文件，写完只简短回复「已写入」，不要在消息里复述计划。
 格式三选一：
-{"action":"assign","message":"给用户看的一句话说明","steps":[{"member":"成员 id","title":"简短标题","instructions":"具体要做什么、做到什么程度","after":[1]}]}
+{"action":"assign","message":"给用户看的一句话说明","steps":[{"member":"成员 id","title":"简短标题","instructions":"具体要做什么、做到什么程度"}]}
 {"action":"ask","message":"要问用户的问题"}
 {"action":"finish","message":"最终总结：完成了什么、改了哪些文件、验收结论、遗留问题"}
 
@@ -315,52 +326,68 @@ steps 里 `after` 写这一步要等哪几步完成（写本次 steps 内的序�
 - "after": [1, 2]：等第 1、2 步都做完再开始。
 ```
 
-**Leader 首轮消息**（`buildLeaderKickoffPrompt(run, reportPath, fresh)`）：
+**Leader 首轮消息**（`buildLeaderKickoffPrompt(run, reportPath, fresh, chatHistoryPath)`）：
 
 ```
-## 团队目标
-{objective}
+团队目标：{objective}
 
-## 本轮要求
-把计划决策写成 JSON 写入：{reportPath}
+本群聊之前的记录：{chatHistoryPath}
+
+本轮报告文件：{reportPath}
 ```
+
+只有新建会话（`fresh`）才带「团队目标」；`chatHistoryPath` 只在同一个群聊续跑时有值。
+目标本身也去过重：任务标题是描述开头被截断出来的前缀时（`mergeTaskTexts`）只留描述，不重复两段。
 
 `after` 决定并行（系统提示里有同样的说明）：不写 = 等上一步做完（顺序）；`[]` = 立刻开始；
 `[1, 2]` = 等本次第 1、2 步都做完。只能引用前面的序号，解析时换算成 `AiTeamStep.dependsOn`
 （存的是步骤 id）。团队的「协作指令」（`AiTeam.instructions`，≤ 4000 字）以 `## 协作指令`
 段落同时写进负责人和每位成员的**系统提示**。
 
-**Leader 后续轮消息**（`buildLeaderFollowupPrompt(run, finished, reportPath, userNote, fresh)`）：
+**Leader 后续轮消息**（`buildLeaderFollowupPrompt(run, finished, reportPath, userNote, fresh, handoffPath, chatHistoryPath)`）：
 
 ```
 ## 已结束的步骤
-### 第{seq}步 · {member.name} · {title} · {done|failed}
-{report}
+
+- 第{seq}步 · {member.name} · {title} · {status} · 报告文件：{reportPath}
 ...
+
+上游交接文件：{handoffPath}
 
 ## 用户补充
 {userNote}
 
-## 本轮要求
-把下一步决定写成 JSON 写入：{reportPath}
+本轮报告文件：{reportPath}
 ```
 
-**成员系统提示**（`memberSystemPrompt`）：身份与职责 + 协作指令 + 工作方式（只做本步骤、不 commit）+ 报告约定。
+报告正文在交接文件里，消息只列元信息与路径。格式重试轮同样只带解析失败原因与本轮报告文件。
 
-**成员消息**（`buildMemberPrompt(run, step, member, fresh)`）：
+**成员系统提示**（`memberSystemPrompt`）：身份与职责 + 协作指令 + 工作方式（只做本步骤、不 commit）
++ 交接文件规则 + 报告约定（首行 `状态: 完成|受阻|失败` 的 Markdown 报告）。
+
+**成员消息**（`buildMemberPrompt(run, step, member, fresh, upstream, chatHistoryPath)`）：
 
 ```
-## 团队总目标
-{objective}
+团队目标：{objective}
+
+本群聊之前的记录：{chatHistoryPath}
 
 ## 本步骤：{title}
 {instructions}
 
-## 报告
-写入文件：{reportPath}
+## 上游交接
+
+- 第{seq}步 · {member.name} · {title} · {status} · 报告文件：{reportPath}
+
+上游交接文件：{handoffPath}
+
+本轮报告文件：{reportPath}
 ```
 
-同一个成员在同一次运行里第二次被派工时，发到他**已有的会话**里（上下文延续），消息省掉「团队总目标」一段；
+「团队目标」「本群聊之前的记录」都只在新建会话时带；「上游交接」只在有依赖步骤时带；
+读文件的规则在系统提示里，不在消息里重复。
+
+同一个成员在同一次运行里第二次被派工时，发到他**已有的会话**里（上下文延续），消息省掉「团队目标」一段；
 系统提示本来就只在新开会话时交一次，不重发。
 
 **Leader 回复解析**（`parseLeaderDecision(text, team)`）：
@@ -429,15 +456,15 @@ export class AiTeamRunner {
 **用户操作**：
 - `approve`：只在 `awaiting_approval` 时有效 → `running`，派第一个 queued 步骤。
 - `reject(feedback)`：只在 `awaiting_approval` 时有效 → 所有 queued 步骤改为 `skipped`；开新 leader 步骤，提示词为「用户没有批准这个计划，意见：{feedback}。请重新安排。」。重新安排后仍需批准（仍视为首个计划）。
-- `reply(text)`：只在 `waiting_user` 时有效 → 开新 leader 步骤，内容为用户的话，加上「上次 Leader 轮之后」结束的步骤报告。
-- `continueRun(n)`：只在 `waiting_user` 且原因是步数上限时有效 → `stepLimit += n`（n 取 5–50），派下一个 queued 步骤；没有 queued 步骤就开 leader 步骤。
+- `reply(text)`：只在 `waiting_user` 时有效。普通提问等状态 → 开新 leader 步骤，交给负责人用户的话及本轮报告。若因步数上限暂停，先增加运行预算（至少 10 步，若团队定义已调高则至少升到新上限）；纯「继续」保持 queued 计划并继续派发，包含新要求的回复则交回负责人重新安排。
+- `continueRun(n)`：只在 `waiting_user` 且原因是步数上限时有效 → `stepLimit` 至少加 n（n 取 5–50），团队定义已调高时至少升到新的 `maxSteps`；派下一个 queued 步骤，没有 queued 步骤就开 leader 步骤。其他等待原因不可用此接口绕过负责人提问。
 - `completeStep(stepId, report)`：只对 `running` 的 work 步骤有效。report 为空时用「用户手动标记完成」。
 - `stop`：只要不是 done / failed / stopped 都有效 → 调现有停止路径（与 `/api/sessions/:id/stop` 同样按 `ownerOf` 分派到 `structured.stop` / `processes.stop`）停掉 `running` 步骤的会话；running 和 queued 步骤改为 `skipped`，run 改为 `stopped`。**会话本身不删**，用户还能翻看。
 
 **群聊输入**（`chatInput(sessionId, text)`，经 `registerRelay` 从前缀 `ai-team-chat:<runId>` 的转发会话路由过来，转发会话不起 CLI）：
 - 按群聊找到**最近一次**运行（`storage.getLatestAiTeamRunByChat`），再按它的状态分流：
   `awaiting_approval` → 「批准」类短语（`APPROVE_REPLY`）走 `approve`，其余当修改意见走 `reject`；
-  `waiting_user` → `reply`；`running` → 记进 `pendingNotes`（负责人下一轮一起看到，并回一条 notice）；
+  `waiting_user` → `reply`（步数用完时单发「继续」会加预算并保留未执行计划）；`running` → 记进 `pendingNotes`（负责人下一轮一起看到，并回一条 notice）；
   已经结束（done / failed / stopped） → 按团队**当前定义**在同一张任务卡、**同一个群聊会话**上开新一轮（团队已删则报错）。
 - 任何状态下发「停止」都直接叫停（`STOP_REPLY`）。
 - 这些路径都带 `{ echo: false }`：参数里的话已经由转发会话落成用户回合，服务端不再重复回显。
@@ -521,6 +548,7 @@ CREATE INDEX IF NOT EXISTS ai_team_steps_session ON ai_team_steps (session_id, s
 | POST | `/api/wand-tasks/:id/team-runs` | `{ teamId, note? }` | `202 { run, steps }` |
 | GET | `/api/wand-tasks/:id/team-runs` | — | 该任务的运行列表（新的在前，不含 steps） |
 | GET | `/api/ai-team-runs/:id` | — | `{ run, steps, memberStates }` |
+| GET | `/api/ai-team-runs/:id/live` | — | `{ runId, steps: AiTeamLiveStep[] }`（运行中步骤的实时文本，§4.9） |
 | POST | `/api/ai-team-runs/:id/approve` | — | `{ run, steps }` |
 | POST | `/api/ai-team-runs/:id/reject` | `{ feedback }` | 同上 |
 | POST | `/api/ai-team-runs/:id/reply` | `{ text }` | 同上 |
@@ -530,6 +558,7 @@ CREATE INDEX IF NOT EXISTS ai_team_steps_session ON ai_team_steps (session_id, s
 
 - 成员校验：POST / PUT 时，成员的 `agent` 字段**直接用现有的 `parseTaskAgent`** 解析（它已经处理了 provider、模型、思考深度、模式和 kind 的合法性）；成员 `id` 缺失时由服务端生成；其余按 §4.2 的约束校验，出错返回 400 和中文消息。
 - `memberStates`：`Record<sessionId, "working" | "needs_permission" | "needs_input" | "done" | "failed">`，用 §4.6 抽出的 `activityState` 实时算，给界面显示「等待授权」等状态。
+- **群聊回合用的什么模型**：`ConversationAuthor`（`src/types.ts`）除 provider 外带可选 `model` / `thinkingEffort`，填的是**这条发言对应步骤实际使用的候选**（`actualAgent(member, step)`，降级换候选后跟着变；负责人发言或取不到步骤时回退首选候选），值就是候选上的真值——provider 原生 model id（`"default"` = 跟随该 provider 的服务端默认模型）与思考深度档位（`off/standard/deep/max` 或 `provider:<原生档>`）。服务端不生成中文标签，展示文案归客户端。**取不到就不填**（字段缺省），且**老数据的 `author` 根本没有这两个字段**，读端必须能在只有 provider 时正常显示。填充点全在 `chatAuthor(...)`：成员步骤报告（✅/❌）、负责人发言与派工清单、负责人出错提示、「某某开始…」与降级切换这几类带署名的回合；没有署名的纯系统提示（`author === undefined`，如「团队已停止」「等你批准计划」）不编造模型。
 - 状态不允许的操作（比如非 `awaiting_approval` 时 approve）返回 409 和中文消息。界面据此刷新，不重试。
 - 错误处理用现有的 `sendRouteError`。
 
@@ -542,6 +571,33 @@ wsManager.emitEvent({ type: "notification", sessionId: "__system__", data: { kin
 ```
 
 runner 在每次写 run 或 step 之后调用 `notify`。客户端收到后，如果正在看这个 run 就重新 GET 一次。成员会话本身的输出照常走现有会话事件，不用额外处理。
+
+### 4.9.1 live 文本（群聊固定卡片的「此刻在干什么」）
+
+给 Web/移动端的固定尺寸气泡卡片供文本。真源在 `src/ai-team-live.ts`（纯函数渲染）与 `AiTeamRunner.live()`（取数），形状是 `AiTeamLiveStep`（`ai-team-types.ts`）：`{ stepId, seq, memberId, memberName, provider, model?, thinkingEffort?, sessionId, state, text, omittedChars, updatedAt }`。`GET /live` 直接返回 `runner.live()`，不另挑字段——类型、`live()`、路由三者逐字段一致。
+
+- **只覆盖 running 且有会话的步骤**（按 seq 升序）；快照拿不到的步骤跳过不抛。`state` 复用 `activityState(snapshot)`。
+- **`model` / `thinkingEffort`**：与该步**实际使用候选**同源（同一个 `actualAgent(member, step)`，和 `provider` 一起降级换候选后一起变；成员查不到时两者都取不到）。值是真值——`model` 是候选上的 model id（`"default"` 表示跟随服务端默认模型），`thinkingEffort` 是 `off/standard/deep/max` 或 `provider:<原生档>`；取不到就不填（缺省）。中文标签、`default` 怎么显示都由客户端决定，服务端不翻译。
+- **文本口径**（`renderLiveStepText(messages, output, { preferOutput })`）：默认从最后一条 user turn（没有则最后一条 assistant turn）渲染到末尾；text 原样保留，tool_use 压成一行 `▸ 名称[ · 描述单行截 60 字]`，tool_result 与 thinking 不渲染；连续空行压成一个换行、首尾 trim；尾部保留最多 `AI_TEAM_LIVE_TEXT_MAX_CHARS = 2000` 字，超长回报 `omittedChars`（客户端显示「已省略前面 N 字」）；渲染为空时回落原始 `output` 尾部，PTY 会话因此也有内容。
+- **output 回落先截窗再剥 ANSI**（`outputTailText`）：先取末尾 `AI_TEAM_LIVE_TEXT_MAX_CHARS * 8` 字，再剥 ANSI / 归一换行 / 压缩空行 / 截尾。顺序反过来等于每 500ms 对几 MB 终端输出跑一遍全局正则，是白烧的 CPU。
+  - **`omittedChars` 是估算值（可能偏大也可能偏小，用于量级提示）**：按截窗点的**原始字数**计，含 ANSI 与控制字符，不精确到账。ANSI 密集时偏大（转义也计成字），切点为找序列起点往前挪时偏小。客户端只显示「已省略前面 N 字」，不要拿它做精确对账。
+  - **切点要落在安全边界上**（`safeTailStart`）：只在 `[切点 - 4096, 切点)` 这一小段里搜（不对整串跑 `lastIndexOf`），依次退到 ① 最近的 `ESC` 起点 —— 所以横跨切点的长 OSC（`ESC ] 0; <几百字标题> BEL`）会被整条剥掉，不留裸 BEL 和标题片段；② 找不到 ESC 就退到该段内最近的换行之后；③ 连换行也没有（超长转义负载）就不兜底，照原切点显示。
+  - **窗内全转义时文本为空，省略字数照旧计入**：`stripped` 为空不提前返回，仍按切点字数回报 `omittedChars`，不会出现「丢了几万字却报 0」。
+  - 输入没超窗、或窗内可见文本足够填满 2000 字上限时，**窗内显示的文本与「全量剥完再截尾」逐字相同**（有 120 组随机样例的回归单测）；窗内几乎全是转义序列的极端输出，显示的会比全量少一截，这是有意的取舍。
+- **`preferOutput`（终端形态的过期文本）**：`preferOutput: true` 时**只**看 `output` 尾部，完全不采纳 `messages`（哪怕里面有文本；`output` 还没东西就照实返回空串，客户端显示占位）。判定在 `AiTeamRunner.liveStep`，因为只有它拿得到 owner、provider 与会话快照：
+  `ownerOf(sessionId) === "pty" && !(provider === "claude" && snapshot.providerCliActive === true)`。
+  依据是 pty bridge 只给「claude 且 CLI 已激活」的会话挂载（`src/process-manager.ts` 的 `initializeClaudeBridge` 首行 `record.provider !== "claude" || !record.providerCliActive` 即早退），其余 PTY——包括没激活的 claude PTY——在流式期 `messages` 根本不增长，以「渲染是否为空」当唯一判据的话卡片会永远锚在上一条 turn 的残留文本上。只有 claude PTY（bridge 在跑）与 structured（一律有流式 messages）走默认口径。
+- **推送（Web）**：`ingest` 的四类事件（`output` / `status` / `task` / `ended`）都会为所属 run 挂一个**独立于 evaluate 的** `LIVE_NOTIFY_DEBOUNCE_MS = 500` 去抖计时器（同一 run 每 500ms 至多算一遍），到点算一遍 live 列表调 `notifyLive({ runId, taskId, steps })`；挂到 `status` / `task` 上是因为权限框、提问这类变化本来就是这两类事件带进来的，只挂 output 芯片就不会动。去重指纹是 **`stepId + text + omittedChars + state`**，四项全同不重复推，`state` 单独变化（working → needs_permission / needs_input）也要推一次，否则 Web 的状态芯片要等下一轮 `ai-team-run` 重拉才更新。`finishStep` 成功落地后与 `stop` 后各补推一次（可能是空数组），让卡片收尾。server.ts 把它转成同一条系统通知通道：
+
+  ```ts
+  wsManager.emitEvent({ type: "notification", sessionId: "__system__",
+    data: { kind: "ai-team-step-live", runId, taskId, steps } });
+  ```
+
+  不新增 WS 消息类型，也不改 `ai-team-run` 的既有语义。
+- **拉取（移动端）**：`GET /api/ai-team-runs/:id/live` 返回同一个 `{ runId, steps }`，轮询它即可，不需要 WS。分工：Web 走推送，移动端走这个端点。
+- **兜底巡检对账**：`startSweep` 的 `SWEEP_INTERVAL_MS = 5000` 巡检里，每个 running 的 run 在 evaluate 之前先 `pushLive(runId)` 对账一次。事件通道是尽力而为的：registry 内部状态静默翻转（没有 `status` / `task` / `output` 事件进来）时，卡片只能等客户端下一次重拉才更新，巡检负责把它补齐。仍然走同一个指纹，状态真变了才推，没变就一个字都不发。间隔与 evaluate 的行为都不因此改动。
+- **终态清指纹**：`setStatus` 进 `AI_TEAM_TERMINAL_RUN_STATUSES`（`done` / `failed` / `stopped`）时 `delete` 该 run 的 `lastLiveKey`；`pushLive` 发现 run 已是终态，收尾那一次推送之后也只 `delete` 不 `set`。留着终态指纹没有意义（不会再有变化），长跑的服务会按 run 数线性攒字符串（`dispose()` 只在进程退出时清）。
 
 ---
 
@@ -573,7 +629,8 @@ runner 在每次写 run 或 step 之后调用 `notify`。客户端收到后，�
 「团队 · {name}」（值为 `team:<id>`，见 `agentTargetOptions` / `agentTargetTeamId`）。选中团队后
 模型、思考深度、工作模式、会话形态隐藏，改为显示成员头像；按钮文字变「交给团队」。
 指派框不会预填任务卡描述；这次输入的提示词就是团队本轮要做的事，旧描述不会再静默拼进去。
-只有创建任务后立刻交给团队、且没有另写提示词时，才用任务标题和描述当目标。
+只有创建任务后立刻交给团队、且没有另写提示词时，才用任务标题和描述当目标；
+标题是描述开头被截断出来的前缀时（自动标题常见）只留描述，不把同一段话在目标里重复两遍。
 
 任务详情的「团队进度」（`issues/team-run-panel.tsx`，只显示该任务最近一次运行）：
 - 头部：团队、状态、步数；成员花名册（头像 + 已完成/总步数），点头像只看该成员的步骤。
@@ -588,6 +645,67 @@ runner 在每次写 run 或 step 之后调用 `notify`。客户端收到后，�
   - 系统 notice（如「成员 开始「T1」」）是居中弱化的小行；用户发言仍是右侧气泡。
 - 刷新：打开时 GET 一次，之后只响应 `ai-team-run` 通知。**不轮询。**
 
+### 5.2.1 正在输出的成员（live 气泡卡）
+
+`ai-team-run` 只说「步骤开始了」，成员真正在打什么字要靠 §4.9.1 的 live 通道。渲染落在
+`ai-teams/team-chat-view.tsx`（任务详情面板与独立群聊页共用同一个视图），样式在
+`ai-teams/styles.ts` 的「正在输出的成员」块：
+
+- **数据**：`running` 时进入 `TeamChatView` 才 GET 一次 `/live` 取初值，之后只吃 `ai-team-step-live`
+  推送（`websocket.ts` 分发 → `repository` 的订阅口 → 视图）。换运行、或运行不再是 `running`
+  立刻清空列表——收工那一步会由 `ai-team-run` 重拉进 `chatTurns`，不需要 live 再留着。
+  chunk 借不到 `lazy.tsx` 注册表里的新名字，所以拉取与订阅都挂在 `aiTeamsRepository` 对象上。
+- **位置与形状**：行追加在 `chatTurns` 之后、乐观临时行之前，按 `seq` 升序、按 `stepId` 去重。
+  头部是像素头像 + 成员名（可点，进成员会话）+ 署名 + `#seq 标题` 步骤芯片 + 状态芯片
+  （取 `detail.memberStates[sessionId]`，映射「工作中 / 等待回答 / 等待授权」）+ 时刻。
+  卡片 `max-width: 560px`、**高度固定 200px**（窄屏也不变），文本在卡内滚（`overscroll-behavior-y: contain`）、
+  等宽字体；`omittedChars > 0` 时顶部一行「已省略前面 N 字」，文本为空显示「已开始，等待第一段输出…」。
+- **署名（`agentSignatureLabel`）**：群聊三处（live 卡头部、成员步骤行、负责人行）原来只有 provider 的位置，
+  现在统一是「CLI · 模型 · 思考深度」，例如 `Qoder · Qwen3.8-Flash · 最大`。真值来自 §4.8 / §4.9.1 的
+  `provider` / `model` / `thinkingEffort`（实际使用候选，不是人设上的配置）。文案表两端同源：CLI 名走
+  `ISSUE_AGENT_PROVIDERS`（Android `boardTaskProviderLabel`）、四档思考深度走 `ISSUE_AGENT_EFFORTS`
+  的「关闭 / 标准 / 深入 / 最大」（Android `boardTaskEffortLabel`），CLI 自报的原生档位（`qoder:high` 这类）
+  走 `compactThinkingLabel`。`model` 等于 `ISSUE_AGENT_DEFAULT_MODEL`（`"default"`，含义是「跟随服务端默认」）
+  时**整段不显示**，与 Android 团队详情候选行同口径。哪一段缺就少一段：老服务端只有 provider 时显示
+  `Claude`，三样都没有时连芯片都不渲染——不会出现 `undefined`、空串或悬空的「 · 」。
+- **不抢滚动**：贴尾判定只有 `isFollowingTail`（阈值 `LIVE_TAIL_PX = 24`）一处，卡片内滚与外层
+  `task-board-team-chat-list` 都用它。外层列表原先在任何行数变化（含 live 行插入 / 摘除）时无条件
+  `scrollTop = scrollHeight`，会把正在上翻看历史的人拽回尾部；现在只有「上一次滚动他自己就贴底」
+  才跟随（`listPinnedRef`），发自己那句话算一次明确的回到底部意图（同 §9 活动窗口口径）。
+  `listPinnedRef` **按 `run.id` 重置为跟随**：换一次运行就是一页新内容，上一轮里的上滚不该让这一轮
+  一进来就不贴尾（与 Android `remember(runId)` 同口径）。阈值单位是 **CSS px**（`scrollTop/scrollHeight/clientHeight`
+  三者同单位），Web 侧不存在 Android 那个 dp/px 换算问题：移动端滚动几何是设备像素，阈值改记 dp
+  （`TeamChatPresentation.kt` 的 `LIVE_TAIL_DP = 24`，经 `liveTailThresholdPx(density)` 换算，并与卡片
+  内滚共用同一个换算函数）。
+- **动效**：**两段式进场**，与 Android 同拍——头像 + 名字行先长出（`--motion-fast` / `--ease-out-expo`），
+  气泡卡片隔一拍再长出（`--motion-normal` + `animation-delay: var(--motion-fast)`，`both` 填充让延迟期间不露白卡），
+  不再整行同帧原子插入。收工后整行原位倒放收回（`--motion-quick-exit` + `reverse`，退场快于进场，§7 要求 7）；
+  `mergeLiveRows` 的排序**只看 `seq`，与这一行是否在退场无关**（同一 `stepId` 只留一行，active 覆盖 leaving）：
+  把没播完的退场行搬到尾部会触发 DOM move，动画重播一次并且位置跳动，所以退场行一律留在原位。
+  退场行的摘除有两个入口，走同一个幂等函数：① 该行自己的 `animationend`（`mergeLiveRows` 不再把上一批
+  退场行丢掉，也不向第三次传递，「又来一批文本」不会把收工动画腰斩）；② 一行一个**等长定时器兜底**——
+  后台标签页不播 CSS 动画，`animationend` 可能永远不来。时长从 `--motion-quick-exit` 这个动效 token
+  现读（`parseMotionDurationMs`，页面不写字面毫秒，改了 CSS 兜底跟着变），按每行的退场起算时刻倒计时，
+  不被新推送续命；回到可见（`visibilitychange`）再补一次 `pruneExpiredLeaving` 清理隐藏期间攒下的过期行。
+  时长与延迟全部取 token；reduce-motion 下全局规则把时长压到近零、`animation-delay` 在样式表里归零，
+  两段都瞬时，但动画照常派发事件，退场行仍能撤掉。
+  卡片尺寸与位置不随文本增长变化（§0 总则 2）。
+- **点击**：整卡 `role="button" tabIndex={0}`，Enter / Space 与点击同一条路径 `onOpenSession(step.sessionId)`；
+  有文字选区（复制正文）或按下与松开之间有 >6px 位移（卡内拖动滚动）时不跳转。卡片带 `aria-label`
+  （「打开{成员名}正在输出的会话」），读屏只报动作，不把 200 字滚动的正文整段念出来。
+- **Android 同口径**（`ui/screens/TeamChatPresentation.kt` + `AiTeamChatScreen.kt`）：`mergeLiveRows` 与 Web 一样
+  **只按 `seq` 排、与 leaving 无关**，两端各守两条断言——「退场行前面还有 active 行时不被搬走」「同一批内
+  不会因新一轮推送交换位置」。贴尾阈值记 **dp**（`LIVE_TAIL_DP = 24`，`liveTailThresholdPx(density)` 换算，
+  外层列表与卡片内滚共用），并且外层列表的距底要**扣掉 `contentPadding.bottom`**：布局与判定用同一个
+  `TeamChatListBottomPadding`（14dp）常量，否则 density 2.625 的屏上「手动拖到底」那一次会被判成不跟随
+  （条目底离视口底正好差 37px > 旧的 24px），即「滚到底反而不跟新增的 live 行」。
+  退场摘除两端机制不同但等效：Compose 不派发 `animationend`，`TeamLiveStepRow` 按 `WandMotion.fast`
+  （与它自己的 `tweenExit` 同档）计时后调 `onRetire`——**本来就是等长定时器兜底，不是动画回调**，
+  所以 Web 那种「后台标签页事件不来、退场行攒着」的问题在端上不存在，无需再加可见性清理；
+  页面不可见（`resumed = false`）时整体推成退场，回到可见仍由行自己的计时摘。唯一残留差异：行滚出可视区
+  后不在 composition 里、计时随之取消，那条退场行会留在列表里（不可见、也不会重复显示）直到滚回来才摘，
+  数量有界于本次运行的步骤数。
+
 独立群聊页（`ai-teams/team-chat-page.tsx`，侧栏群聊条目 / 开工首屏，`?view=teamchat&run=`）复用同一个群聊视图，
 额外两件事：
 - **按 chat 会话跟随，不按运行钉死**：用户在群里接着说一句会让服务端在同一个群聊上开新一轮，
@@ -597,11 +715,14 @@ runner 在每次写 run 或 step 之后调用 `notify`。客户端收到后，�
   步骤报告会停在旧的一轮，新一轮的对话和步骤都看不见。
 - 输入框引导语：`awaiting_approval` / `running` 各有提示，运行已结束（完成 / 停止 / 失败）时显示
   「发消息会接着这一轮的进度开新一轮」（服务端真会这么做，见 §4.4 的群聊续跑上下文文件）。
+- **停止**：未结束的运行（`running` / `awaiting_approval` / `waiting_user`）可以叫停整次团队。
+  独立群聊页头部有一枚「停止」（滚动看消息时也在）；输入栏与普通会话同一位置——空草稿时发送按钮变成停止，
+  有草稿时停止排在发送左侧。两端都走 `POST /api/ai-team-runs/:id/stop`（Android `TeamRunAction.Stop`）。
 
 ### 5.3 样式与预算
 
 - 团队页（`ai-teams/teams-page.tsx`）、任务运行面板（`issues/team-run-panel.tsx`）及其样式（`ai-teams/styles.ts`）
-  **不进内联的 `scripts.js`**，打成按需脚本 `content/ai-teams.js`（`scripts/ai-teams-chunk.js`，入口
+  **不进首载的 `scripts.js`**，打成按需脚本 `content/ai-teams.js`（`scripts/ai-teams-chunk.js`，入口
   `ai-teams/chunk-entry.ts`），首次打开团队页或任务详情时由 `ai-teams/lazy.tsx` 下载，
   服务端路由 `GET /assets/ai-teams.js?v=<hash>`（hash 经 `getScriptContent` 注入，同 configPath）。
   下载中显示占位，失败可重试。
@@ -611,7 +732,10 @@ runner 在每次写 run 或 step 之后调用 `notify`。客户端收到后，�
 - 主包仍带的只有头像（`avatar.tsx`）、CLI 下拉的团队选项（`agent-fields.tsx`）、仓储，
   以及 `styles/features.ts` 里的 `aiTeamsStyles`（头像、指派面板团队预览、侧栏角标、加载占位）。
   字号、间距、动效只用现有 token，**不要**写进 `content/styles.css`。
-- 主包 JS 504.9 / 512 KiB（gzip，Node 22/24 的 zlib；Homebrew Node 23 会少算约 2 KiB）。
+- 主包 `scripts.js` 通过 `/assets/app.js?v=<内容指纹>` 单独缓存；构建/CI 固定 `.nvmrc` 的 Node 版本，
+  预算按实际首载（HTML + JS/CSS + vendor）、复访 HTML 与按需 chunk 分开核算，不再用旧的
+  「内联 JS ≤512 KiB」门槛。live 通道进主包的只有 `websocket.ts` 的一个分发分支与
+  `repository.ts` 的拉取/订阅口，ai-teams chunk 里的卡片与样式不占首载预算。
 
 ---
 
@@ -619,10 +743,17 @@ runner 在每次写 run 或 step 之后调用 `notify`。客户端收到后，�
 
 服务端 API 做完后，Android 的最小接入：
 - 任务详情页加「团队进度」：状态、时间线（点击展开报告）、批准 / 驳回 / 回复 / 停止。成员会话本来就挂在任务下，点击直接打开现有的会话页（Chat 或 PTY）。
-- 群聊：团队的 relay 会话就是普通结构化会话，所以安卓直接用现有聊天页打开就能旁观/插话。
+- 群聊：独立 `AiTeamChatScreen` 是主入口（侧栏点带 `teamChat` 标记的会话行）。顶栏停止图标与输入栏发送 ⇄ 停止变形
+  都走 `actOnTeamRun(..., Stop)`；空草稿且运行未结束时发送按钮变成停止，有草稿时左侧再放一枚停止，口径同 Web 与普通会话。
+  团队的 relay 会话也可以当普通结构化会话打开旁观/插话。
   `ConversationTurn` 已解析服务端的 `author`（名字 / 负责人 / provider）与 `notice`：负责人发言用品牌底色 +「负责人」徽标，
   成员发言显示成员名与 provider，notice 走居中弱化小行 —— 这样主任务与子任务能分开看，不再是一串没有署名的「Wand」回复。
-- 团队定义第一阶段只在 Web 编辑，Android 只读选择（发起时选团队）。
+- 团队定义在 Web 与 Android 两端都可编辑（共享同一套 `POST / PUT / DELETE /api/ai-teams` 契约）：
+  - 列表页（`AiTeamsScreen`）顶栏 `＋` 原地展开模板面板（开发三人组 / 修 Bug 二人组 / 调研加评审 / 空白团队，文案与 Web `TEMPLATES` 同源），选完进编辑器；
+  - 卡片上的「编辑」与团队详情顶栏的「编辑」都进同一个编辑器（`AiTeamEditorScreen`，新建 / 编辑同屏）；
+  - 编辑器支持团队名、简介、协作指令、步数上限（− / N / ＋，5–200）、计划批准开关，以及成员增删、名字 / 职责、设负责人、每成员 1–4 个执行候选的加 / 删 / 上移 / 下移；
+  - 校验与 `parseAiTeamInput` 同口径（名字 trim 后判长度、去重忽略大小写、恰好一位负责人、候选五元组不重复），错误原位列出，保存按钮原位显示保存中 → 已保存；有未保存改动时返回先确认；删除团队带确认。
+  - PUT 是整体替换，所以 Android 不编辑的 `avatar` / `role` 必须原样回写（`AiTeamMember.toJson()`），否则一次改名就抹掉 Web 上选好的头像与职责标注。
 - 收尾按 AGENTS.md：子模块提交并 push → 主仓库更新指针 → 编译带版本号的 beta APK 部署到 `~/.wand/android/` → 验证 `/api/android-apk-update?currentVersion=0.0.0&channel=beta`。
 
 ---

@@ -30,20 +30,16 @@ export function archiveCommitTasks(
     if (taskId) related.add(taskId);
   }
 
-  return storage.transaction(() => {
-    const archived: string[] = [];
-    for (const id of related) {
-      const task = storage.getWandTask(id);
-      if (task?.status !== "done") continue;
-      // The workspace is the authoritative directory for a card. Worktree sessions use the
-      // parent project directory; a global/unassigned card only qualifies via this very session.
-      const workspace = task.workspaceId ? storage.getWorkspace(task.workspaceId) : null;
-      const sameDirectory = !!workspace && workspace.kind !== "global"
-        && !!directory && normalizeProjectCwd(workspace.cwd) === directory;
-      if (!sameDirectory && !(id === currentTaskId && (!workspace || workspace.kind === "global"))) continue;
-      storage.updateWandTask(id, { status: "archived" });
-      archived.push(id);
-    }
-    return archived;
-  });
+  const completed: string[] = [];
+  for (const id of related) {
+    const task = storage.getWandTask(id);
+    if (task?.status !== "done") continue;
+    // Project directory constrains selected history; standalone cards qualify via this session.
+    const workspace = task.workspaceId ? storage.getWorkspace(task.workspaceId) : null;
+    const sameDirectory = !!workspace && workspace.kind !== "global"
+      && !!directory && normalizeProjectCwd(workspace.cwd) === directory;
+    if (!sameDirectory && !(id === currentTaskId && (!workspace || workspace.kind === "global"))) continue;
+    completed.push(id);
+  }
+  return storage.archiveCompletedWandTasks(completed);
 }

@@ -23,7 +23,6 @@ import { bodyObject, sendRouteError, text } from "./server-request.js";
 import { parseTaskAgent } from "./server-task-routes.js";
 import type { WandStorage } from "./storage.js";
 import { provisionalTaskTitleFromDescription } from "./task-title.js";
-import { ensureWorkspaceTaskForBoardTask } from "./wand-task-sync.js";
 import type { WandTaskAgent } from "./task-types.js";
 
 const NOT_FOUND = /不存在/;
@@ -204,8 +203,7 @@ export function registerAiTeamRoutes(app: Express, deps: { storage: WandStorage;
       const preferredMember = team.members.find((member) => member.isLeader) ?? team.members[0];
       const agent = preferredMember ? memberAgents(preferredMember)[0] ?? null : null;
       const milestoneId = defaultMilestoneIdForWrite(storage);
-      const task = storage.transaction(() => {
-        const card = storage.createWandTask({
+      const task = storage.createWandTask({
           workspaceId: workspace.id,
           title: provisionalTaskTitleFromDescription(note) || team.name,
           description: note,
@@ -214,9 +212,6 @@ export function registerAiTeamRoutes(app: Express, deps: { storage: WandStorage;
           labels: [TEAM_DIRECT_LABEL],
           milestoneId: scopedMilestoneId(storage, milestoneId, workspace.id) ?? milestoneId,
           agent,
-        });
-        ensureWorkspaceTaskForBoardTask(storage, card);
-        return storage.getWandTask(card.id)!;
       });
       try {
         const detail = await runner.start({ teamId: team.id, taskId: task.id, note });
@@ -259,6 +254,15 @@ export function registerAiTeamRoutes(app: Express, deps: { storage: WandStorage;
   app.get("/api/ai-team-runs/:id", (req, res) => {
     try {
       res.json(runner.detail(req.params.id));
+    } catch (error) {
+      sendTeamError(res, error);
+    }
+  });
+
+  /** 运行中步骤的 live 文本（§4.9）：Web 走 ai-team-step-live 推送，移动端轻量轮询这个端点。 */
+  app.get("/api/ai-team-runs/:id/live", (req, res) => {
+    try {
+      res.json({ runId: req.params.id, steps: runner.live(req.params.id) });
     } catch (error) {
       sendTeamError(res, error);
     }

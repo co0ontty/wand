@@ -14,7 +14,13 @@ import {
 import { localPreviewController } from "../local-preview/controller";
 import { classNames } from "../ui/class-names";
 
-import { getShellSidebarEntryActions, type ShellSidebarEntryActions } from "./shell-sidebar";
+import {
+  getShellSidebarEntryActions,
+  SHELL_SESSION_DELETE_LABEL,
+  SHELL_WORKTREE_CLEANUP_LABEL,
+  SHELL_WORKTREE_MERGE_LABEL,
+  type ShellSidebarEntryActions,
+} from "./shell-sidebar";
 import { ChatWidthToggle } from "./chat-width-toggle";
 import { SidebarToggleIcon } from "./sidebar-toggle-icon";
 import { SessionElapsed } from "./session-elapsed";
@@ -80,7 +86,7 @@ export function getTopbarMoreActions(
     items.push({
       action: actions.merge,
       actionName: "worktree-merge",
-      label: "合并到主分支…",
+      label: SHELL_WORKTREE_MERGE_LABEL,
       icon: "merge",
       dividerBefore: true,
       disabled: selected.status === "running" || selected.worktree?.mergeStatus === "merging",
@@ -90,7 +96,7 @@ export function getTopbarMoreActions(
     items.push({
       action: actions.cleanup,
       actionName: "worktree-cleanup",
-      label: "重试 worktree 清理",
+      label: SHELL_WORKTREE_CLEANUP_LABEL,
       icon: "trash",
     });
   }
@@ -98,7 +104,7 @@ export function getTopbarMoreActions(
     items.push({
       action: actions.delete,
       actionName: "delete-session",
-      label: "删除当前会话",
+      label: SHELL_SESSION_DELETE_LABEL,
       icon: "trash",
       tone: "danger",
     });

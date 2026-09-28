@@ -41,9 +41,12 @@ import {
 import {
   AI_TEAM_ACTIVE_RUN_STATUSES,
   AI_TEAM_DETAIL_CHAT_TURNS,
+  AI_TEAM_TERMINAL_RUN_STATUSES,
   agentKey,
   memberAgents,
   type AiTeam,
+  type AiTeamLiveStep,
+  type AiTeamLiveUpdate,
   type AiTeamMember,
   type AiTeamRun,
   type AiTeamRunDetail,
@@ -51,6 +54,7 @@ import {
   type AiTeamStep,
   type StepDispatchInfo,
 } from "./ai-team-types.js";
+import { renderLiveStepText } from "./ai-team-live.js";
 import { getErrorMessage } from "./error-utils.js";
 import { activityState } from "./missions.js";
 import type { AgentActivityState } from "./mission-types.js";
@@ -63,6 +67,8 @@ const REPORT_MAX_BYTES = 64 * 1024;
 /** 报告文件最后一次写入后要稳定这么久才读取，避免读到写了一半的文件。 */
 const REPORT_SETTLE_MS = 1500;
 const OUTPUT_DEBOUNCE_MS = 1000;
+/** live 文本推送的独立去抖（§4.9），与 evaluate 的 OUTPUT_DEBOUNCE_MS 互不干扰。 */
+const LIVE_NOTIFY_DEBOUNCE_MS = 500;
 const SWEEP_INTERVAL_MS = 5000;
 const MAX_FORMAT_RETRIES = 2;
 /** 同一个候选累计这么多次 startup-timeout 就按五元组拉黑（§3.4 黑名单 agents 层）。 */
@@ -72,6 +78,9 @@ export const AI_TEAM_CHAT_PREFIX = "ai-team-chat:";
 /** 等批准时，群里回复这些词就是批准，其余内容都当修改意见。 */
 const APPROVE_REPLY = /^(批准|同意|可以|开始|开干|好的?|ok|okay|yes|lgtm|approve)[。.!！]*$/i;
 const STOP_REPLY = /^(停止|停下|stop)[。.!！]*$/i;
+/** 步数用完后，纯「继续」保留尚未执行的计划；带新要求的回复交回负责人安排。 */
+const CONTINUE_REPLY = /^(继续|让团队继续|继续执行|接着做|接着干|continue)[。.!！]*$/i;
+const STEP_LIMIT_DETAIL = "已达到步数上限";
 
 /** 用户可见的冲突错误（路由转 409）。 */
 export class AiTeamConflictError extends Error {}
@@ -105,12 +114,19 @@ export interface AiTeamRunnerOptions {
   resolveCwd: (task: WandTask) => string;
   ops: AiTeamSessionOps;
   notify?: (run: AiTeamRun) => void;
+  /** 运行中步骤的 live 文本推送（§4.9）：去抖后每 500ms 至多一次，stepId+text+omittedChars+state 全同不重复推。 */
+  notifyLive?: (update: AiTeamLiveUpdate) => void;
   now?: () => number;
   /**
    * 某 provider 已发现的模型清单（§3.4 model-unknown 事前比对）。目录未就绪 / 清单为空时
    * 返回空值即可，判定方向是「拿不准就放行」。
    */
   models?: (provider: WandTaskAgent["provider"]) => ModelCatalogView;
+  /**
+   * 该 provider 服务端配置的默认模型（拿不到返回空串）。只用于提示词里的成员名单：
+   * `default` 哨兵不是模型名，写真正会用的那个。
+   */
+  defaultModelOf?: (provider: WandTaskAgent["provider"]) => string;
 }
 
 export function createAiTeamSessionOps(deps: AgentDispatchDeps & { sessions: SessionRegistry }): AiTeamSessionOps {
@@ -157,7 +173,9 @@ export function createAiTeamRunner(
   deps: AgentDispatchDeps & {
     sessions: SessionRegistry;
     notify?: (run: AiTeamRun) => void;
+    notifyLive?: (update: AiTeamLiveUpdate) => void;
     models?: (provider: WandTaskAgent["provider"]) => ModelCatalogView;
+    defaultModelOf?: (provider: WandTaskAgent["provider"]) => string;
   },
 ): AiTeamRunner {
   const runner = new AiTeamRunner({
@@ -166,7 +184,9 @@ export function createAiTeamRunner(
     ops: createAiTeamSessionOps(deps),
     chat: createAiTeamChatOps(deps),
     notify: deps.notify,
+    notifyLive: deps.notifyLive,
     models: deps.models,
+    defaultModelOf: deps.defaultModelOf,
   });
   deps.structured?.registerRelay(AI_TEAM_CHAT_PREFIX, (sessionId, text) => runner.chatInput(sessionId, text));
   return runner;
@@ -174,19 +194,23 @@ export function createAiTeamRunner(
 
 /**
  * 群聊里的发言人。上传的头像是 data URL，每条消息都带一份太重，改用按 id 取的像素猫。
- * `provider` 传该步**实际使用候选**的 provider（§3.6/B15）；Leader 或没有步骤的场景回退首选。
+ * `agent` 传该步**实际使用候选**（§3.6/B15，降级换候选后跟着变），model / thinkingEffort 与
+ * provider 同源；Leader 或没有步骤的场景回退首选候选。只填真值，展示文案归客户端。
  */
 function chatAuthor(
   member: AiTeamMember,
   sessionId?: string | null,
-  provider?: WandTaskAgent["provider"],
+  agent?: WandTaskAgent | null,
 ): ConversationAuthor {
+  const used = agent ?? memberAgents(member)[0] ?? member.agent;
   return {
     id: member.id,
     name: member.name,
     avatar: member.avatar && !member.avatar.startsWith("data:") ? member.avatar : undefined,
     leader: member.isLeader || undefined,
-    provider: provider ?? memberAgents(member)[0]?.provider ?? member.agent.provider,
+    provider: used?.provider ?? member.agent.provider,
+    model: used?.model?.trim() || undefined,
+    thinkingEffort: used?.thinkingEffort || undefined,
     sessionId: sessionId ?? undefined,
   };
 }
@@ -281,6 +305,27 @@ function assistantReplyAfterPrompt(snapshot: SessionSnapshot, reportPath: string
   return replies.map(turnText).filter(Boolean).join("\n\n");
 }
 
+/** 只看本步提示词之后的真实输出；structured 的失败提示是系统生成的，不是模型回答。 */
+function hasStepAssistantReply(snapshot: SessionSnapshot, reportPath: string, errorMessage: string): boolean {
+  const messages = snapshot.messages ?? [];
+  let promptIndex = -1;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const turn = messages[index]!;
+    if (turn.role === "user" && turnText(turn).includes(reportPath)) {
+      promptIndex = index;
+      break;
+    }
+  }
+  // 无法确认本步起点时，不把历史会话误判成「启动失败」后再次派工。
+  if (promptIndex < 0) return true;
+  const failureText = errorMessage ? `结构化会话执行失败：${errorMessage}` : null;
+  return messages.slice(promptIndex + 1).some((turn) => {
+    if (turn.role !== "assistant") return false;
+    return !failureText || turn.content.length !== 1
+      || turn.content[0]?.type !== "text" || turn.content[0].text !== failureText;
+  });
+}
+
 function readReport(file: string): string {
   const buffer = readFileSync(file);
   if (buffer.length <= REPORT_MAX_BYTES) return buffer.toString("utf8");
@@ -334,10 +379,16 @@ export class AiTeamRunner {
   private readonly chat?: AiTeamChatOps;
   private readonly resolveCwd: (task: WandTask) => string;
   private readonly notifyListener?: (run: AiTeamRun) => void;
+  private readonly notifyLiveListener?: (update: AiTeamLiveUpdate) => void;
   private readonly modelsOf?: (provider: WandTaskAgent["provider"]) => ModelCatalogView;
+  private readonly defaultModelOf?: (provider: WandTaskAgent["provider"]) => string;
   private readonly now: () => number;
   private readonly chains = new Map<string, Promise<unknown>>();
   private readonly outputTimers = new Map<string, NodeJS.Timeout>();
+  /** live 推送的去抖计时器，按 runId 计（§4.9）。 */
+  private readonly liveTimers = new Map<string, NodeJS.Timeout>();
+  /** 上次推出去的 live 列表指纹（§4.9）：stepId + text + omittedChars + state 全同就不重复推。 */
+  private readonly lastLiveKey = new Map<string, string>();
   private readonly recheckTimers = new Map<string, NodeJS.Timeout>();
   /** 已经确定「不降级、按既有路径记 failed」的步骤，防止 finishStep 再判一次形成回环。 */
   private readonly noDegrade = new Set<string>();
@@ -351,9 +402,15 @@ export class AiTeamRunner {
     this.chat = options.chat;
     this.resolveCwd = options.resolveCwd;
     this.notifyListener = options.notify;
+    this.notifyLiveListener = options.notifyLive;
     this.modelsOf = options.models;
+    this.defaultModelOf = options.defaultModelOf;
     this.now = options.now ?? Date.now;
   }
+
+  /** 提示词里的模型名解析器：`default` 哨兵交给服务端配置的默认模型。 */
+  private readonly defaultModelName = (provider: WandTaskAgent["provider"]): string =>
+    this.defaultModelOf?.(provider)?.trim() ?? "";
 
   /** 本 runner 的遮蔽参照目录（§4.5）。 */
   private get redactionDirs(): RedactionDirs {
@@ -421,7 +478,7 @@ export class AiTeamRunner {
     await this.enqueue(run.id, async () => {
       const step = this.createLeaderStep(run, "制定计划");
       await this.dispatchStep(run, step, (reportPath, fresh) => (
-        buildLeaderKickoffPrompt(run, reportPath, fresh, chatHistory)
+        buildLeaderKickoffPrompt(run, reportPath, fresh, chatHistory, this.defaultModelName)
       ));
     });
     return this.detail(run.id);
@@ -458,6 +515,14 @@ export class AiTeamRunner {
       if (!note) throw new Error("回复不能为空。");
       if (options.echo !== false) this.postUser(run, note);
       run.formatRetries = 0;
+      if (run.statusDetail === STEP_LIMIT_DETAIL) {
+        // 群聊的「继续」也要真正增加这次运行的预算，且不能作废尚未派出的计划。
+        this.extendStepLimit(run, 10);
+        this.setStatus(run, "running", "");
+        if (CONTINUE_REPLY.test(note)) await this.advance(run);
+        else await this.startLeaderRound(run, note);
+        return;
+      }
       this.refreshTeam(run);
       this.setStatus(run, "running", "");
       await this.startLeaderRound(run, note);
@@ -467,13 +532,22 @@ export class AiTeamRunner {
   continueRun(runId: string, extraSteps: number): Promise<AiTeamRunDetail> {
     return this.act(runId, async (run) => {
       this.requireStatus(run, "waiting_user", "团队当前没有在等你。");
-      const extra = Math.min(50, Math.max(5, Math.round(extraSteps) || 10));
-      this.refreshTeam(run);
-      run.stepLimit = Math.max(run.stepLimit, run.stepsUsed) + extra;
-      this.postNotice(run, `步数上限加到 ${run.stepLimit}，继续执行`);
+      if (run.statusDetail !== STEP_LIMIT_DETAIL) {
+        throw new AiTeamConflictError("团队正在等你回复，当前不是步数上限暂停。");
+      }
+      this.extendStepLimit(run, extraSteps);
       this.setStatus(run, "running", "");
       await this.advance(run);
     });
+  }
+
+  /** 已有运行的上限独立持久化；修改团队定义后，下次续跑至少采用新的团队上限。 */
+  private extendStepLimit(run: AiTeamRun, extraSteps: number): void {
+    const extra = Math.min(50, Math.max(5, Math.round(extraSteps) || 10));
+    this.refreshTeam(run);
+    run.stepLimit = Math.max(run.stepLimit, run.stepsUsed) + extra;
+    run.stepLimit = Math.max(run.stepLimit, run.team.maxSteps);
+    this.postNotice(run, `步数上限加到 ${run.stepLimit}，继续执行`);
   }
 
   completeStep(runId: string, stepId: string, report: string): Promise<AiTeamRunDetail> {
@@ -503,6 +577,8 @@ export class AiTeamRunner {
       }
       this.postNotice(run, "团队已停止。在群里发消息可以让团队接着处理。");
       this.setStatus(run, "stopped", "已由用户停止");
+      // 步骤全变 skipped：推一次空的 live 列表让卡片收尾（§4.9）。
+      this.pushLive(run.id);
     });
   }
 
@@ -566,6 +642,89 @@ export class AiTeamRunner {
     return this.storage.listAiTeamRuns({ taskId });
   }
 
+  /**
+   * 此刻正在干活的步骤的实时文本（§4.9）。只覆盖 running 且有会话的步骤，按 seq 升序；
+   * 快照拿不到的步骤跳过而不抛。run 不存在时与 detail() 同口径抛错。
+   */
+  live(runId: string): AiTeamLiveStep[] {
+    const run = this.storage.getAiTeamRun(runId);
+    if (!run) throw new Error("团队运行不存在。");
+    return this.liveSteps(run);
+  }
+
+  private liveSteps(run: AiTeamRun): AiTeamLiveStep[] {
+    const steps: AiTeamLiveStep[] = [];
+    for (const step of this.storage.listAiTeamSteps(run.id)) {
+      if (step.status !== "running" || !step.sessionId) continue;
+      const snapshot = this.ops.snapshot(step.sessionId);
+      if (!snapshot) continue;
+      steps.push(this.liveStep(run, step, snapshot));
+    }
+    return steps;
+  }
+
+  private liveStep(run: AiTeamRun, step: AiTeamStep, snapshot: SessionSnapshot): AiTeamLiveStep {
+    const member = this.member(run.team, step.memberId);
+    const agent = member ? this.actualAgent(member, step) : null;
+    const provider = agent?.provider ?? snapshot.provider ?? leaderOf(run.team).agent.provider;
+    const rendered = renderLiveStepText(snapshot.messages ?? [], snapshot.output ?? "", {
+      // pty bridge 只给「claude 且 CLI 已激活」的 PTY 会话挂载（`process-manager.ts` 的
+      // `initializeClaudeBridge` 首行 `record.provider !== "claude" || !record.providerCliActive`
+      // 就早退），其余 PTY 在流式期 `messages` 不增长，里面留着的是上一条 turn 的过期文本
+      // → 一律以终端 output 尾部为准。structured 有流式 messages，照旧。
+      preferOutput: this.ops.ownerOf(step.sessionId!) === "pty"
+        && !(provider === "claude" && snapshot.providerCliActive === true),
+    });
+    return {
+      stepId: step.id,
+      seq: step.seq,
+      memberId: step.memberId,
+      memberName: member?.name ?? step.memberId,
+      provider,
+      model: agent?.model?.trim() || undefined,
+      thinkingEffort: agent?.thinkingEffort || undefined,
+      sessionId: step.sessionId!,
+      state: activityState(snapshot),
+      text: rendered.text,
+      omittedChars: rendered.omittedChars,
+      updatedAt: this.iso(),
+    };
+  }
+
+  /** 挂一次 run 级 live 去抖：同一 run 每 500ms 至多算一遍、推一次，与 evaluate 的计时器互不干扰。 */
+  private scheduleLivePush(runId: string): void {
+    if (!this.notifyLiveListener || this.liveTimers.has(runId)) return;
+    const timer = setTimeout(() => {
+      this.liveTimers.delete(runId);
+      void this.enqueue(runId, async () => { this.pushLive(runId); });
+    }, LIVE_NOTIFY_DEBOUNCE_MS);
+    timer.unref?.();
+    this.liveTimers.set(runId, timer);
+  }
+
+  /** 推一次 live 列表（§4.9）；指纹（stepId + text + omittedChars + state）没变就不重复推，推送失败只忽略。 */
+  private pushLive(runId: string): void {
+    if (!this.notifyLiveListener) return;
+    const run = this.storage.getAiTeamRun(runId);
+    if (!run) return;
+    const steps = this.liveSteps(run);
+    const key = steps
+      .map((step) => `${step.stepId}\u0000${step.text}\u0000${step.omittedChars}\u0000${step.state}`)
+      .join("\u0001");
+    if (this.lastLiveKey.get(runId) === key) return;
+    if (AI_TEAM_TERMINAL_RUN_STATUSES.includes(run.status)) {
+      // 终态的收尾推送之后不再留指纹：留着就没人清，长跑服务会按 run 数攒字符串（§4.9）。
+      this.lastLiveKey.delete(runId);
+    } else {
+      this.lastLiveKey.set(runId, key);
+    }
+    try {
+      this.notifyLiveListener({ runId, taskId: run.taskId, steps });
+    } catch {
+      // 通知失败不影响调度；客户端靠下一次事件或轮询端点补齐。
+    }
+  }
+
   /** 团队页的运行记录；teamId 为空时列出所有团队（侧边栏计数用）。 */
   listRuns(filter: { teamId?: string; activeOnly?: boolean; limit?: number }): AiTeamRunSummary[] {
     const runs = this.storage.listAiTeamRuns({
@@ -587,6 +746,9 @@ export class AiTeamRunner {
     if (event.type !== "status" && event.type !== "ended" && event.type !== "task" && event.type !== "output") return;
     const step = this.storage.getRunningAiTeamStepBySession(event.sessionId);
     if (!step) return;
+    // 四类事件都挂上 live 去抖：权限/提问这类状态变化是靠 status、task 事件进来的，
+    // 只挂在 output 上，芯片就只能等下一次 ai-team-run 重拉才更新（§4.9）。
+    this.scheduleLivePush(step.runId);
     if (event.type === "output") {
       if (this.outputTimers.has(event.sessionId)) return;
       const timer = setTimeout(() => {
@@ -619,12 +781,20 @@ export class AiTeamRunner {
     this.startSweep();
   }
 
-  /** 兜底巡检：PTY 成员写完报告后可能不再产生事件。 */
+  /**
+   * 兜底巡检：PTY 成员写完报告后可能不再产生事件。
+   * 顺带对每个 run 强制对账一次 live（§4.9）：registry 内部状态静默翻转时一条事件都不会进来，
+   * 状态芯片只能等客户端下一次重拉；这里在同一串里重算列表走 pushLive，指纹变了才推，
+   * 没变就什么都不发。巡检间隔与 evaluate 行为都不动。
+   */
   startSweep(): void {
     if (this.sweepTimer) return;
     this.sweepTimer = setInterval(() => {
       for (const run of this.storage.listAiTeamRuns({ statuses: ["running"] })) {
-        void this.enqueue(run.id, () => this.evaluate(run.id));
+        void this.enqueue(run.id, async () => {
+          this.pushLive(run.id);
+          await this.evaluate(run.id);
+        });
       }
     }, SWEEP_INTERVAL_MS);
     this.sweepTimer.unref?.();
@@ -635,8 +805,11 @@ export class AiTeamRunner {
     this.sweepTimer = null;
     for (const timer of this.outputTimers.values()) clearTimeout(timer);
     for (const timer of this.recheckTimers.values()) clearTimeout(timer);
+    for (const timer of this.liveTimers.values()) clearTimeout(timer);
     this.outputTimers.clear();
     this.recheckTimers.clear();
+    this.liveTimers.clear();
+    this.lastLiveKey.clear();
     this.noDegrade.clear();
   }
 
@@ -750,8 +923,19 @@ export class AiTeamRunner {
     return { kind: "pending" };
   }
 
-  /** proceed=false 时只记结果不推进，由调用方在记完一批之后统一 advance。 */
+  /** 步骤落地后补推一次 live（§4.9）：让卡片收尾，列表可能已空。内部抛错时不推。 */
   private async finishStep(
+    run: AiTeamRun,
+    step: AiTeamStep,
+    outcome: Exclude<StepOutcome, { kind: "pending" }>,
+    proceed = true,
+  ): Promise<void> {
+    await this.finishStepCore(run, step, outcome, proceed);
+    this.pushLive(run.id);
+  }
+
+  /** proceed=false 时只记结果不推进，由调用方在记完一批之后统一 advance。 */
+  private async finishStepCore(
     run: AiTeamRun,
     step: AiTeamStep,
     outcome: Exclude<StepOutcome, { kind: "pending" }>,
@@ -777,7 +961,7 @@ export class AiTeamRunner {
       if (member) {
         this.postTurn(run, {
           role: "assistant",
-          author: chatAuthor(member, step.sessionId, this.actualAgent(member, step)?.provider),
+          author: chatAuthor(member, step.sessionId, this.actualAgent(member, step)),
           content: chatText(`${outcome.kind === "done" ? "✅ 完成" : "❌ 没完成"}「${step.title}」\n\n${report}`),
         });
       }
@@ -791,7 +975,7 @@ export class AiTeamRunner {
     if (outcome.kind === "failed" && outcome.sessionError) {
       this.saveStep({ ...step, status: "failed", report: outcome.text, endedAt });
       this.postTurn(run, {
-        role: "assistant", notice: true, author: chatAuthor(leader, step.sessionId),
+        role: "assistant", notice: true, author: chatAuthor(leader, step.sessionId, this.actualAgent(leader, step)),
         content: chatText(`负责人的模型出错：${outcome.text}\n可以去团队页换个模型，然后在群里回复一句让团队继续。`),
       });
       this.setStatus(run, "waiting_user", `负责人出错：${outcome.text}`);
@@ -813,7 +997,9 @@ export class AiTeamRunner {
       this.saveRun(run);
       const retry = this.createLeaderStep(run, "重新回复");
       await this.dispatchStep(run, retry, (reportPath, fresh) => (
-        buildLeaderFormatRetryPrompt(run, parsed.error, reportPath, fresh, this.chatHistoryFor(run))
+        buildLeaderFormatRetryPrompt(
+          run, parsed.error, reportPath, fresh, this.chatHistoryFor(run), this.defaultModelName,
+        )
       ));
       return;
     }
@@ -928,7 +1114,9 @@ export class AiTeamRunner {
       finished.map(({ step: item, memberName }) => this.handoffEntry(run, item, memberName)),
     );
     await this.dispatchStep(run, step, (reportPath, fresh) => (
-      buildLeaderFollowupPrompt(run, finished, reportPath, userNote, fresh, handoffPath, this.chatHistoryFor(run))
+      buildLeaderFollowupPrompt(
+        run, finished, reportPath, userNote, fresh, handoffPath, this.chatHistoryFor(run), this.defaultModelName,
+      )
     ));
   }
 
@@ -1026,7 +1214,7 @@ export class AiTeamRunner {
   private hasBudget(run: AiTeamRun): boolean {
     if (run.stepsUsed < run.stepLimit) return true;
     this.postNotice(run, `已用完 ${run.stepLimit} 步的上限，团队先停下。回复一句让团队继续，或在任务面板里加步数。`);
-    this.setStatus(run, "waiting_user", "已达到步数上限");
+    this.setStatus(run, "waiting_user", STEP_LIMIT_DETAIL);
     return false;
   }
 
@@ -1090,7 +1278,7 @@ export class AiTeamRunner {
     this.saveStep(running);
     this.notify(run);
     if (member && step.kind === "work") {
-      this.postNotice(run, `${member.name} 开始「${step.title}」`, reusable, member, agent?.provider);
+      this.postNotice(run, `${member.name} 开始「${step.title}」`, reusable, member, agent);
     }
     try {
       if (!member) throw new Error("成员不存在");
@@ -1218,7 +1406,7 @@ export class AiTeamRunner {
       `⚠️ ${member.name} 的首选配置不可用（${reason}），已切换到候选 ${next + 1}`,
       null,
       member,
-      candidates[next]?.provider,
+      candidates[next],
     );
     // ④ 依赖重指向（R1）：排队步骤等的仍是「这件事做完」，只是换了承载候选的步骤。
     //    running / done 的历史步骤不改写。
@@ -1257,7 +1445,9 @@ export class AiTeamRunner {
     const errorMessage = snapshot?.structuredState?.lastError ?? outcomeText;
     const kind = classifyStartupFailure({
       status: snapshot?.status ?? "failed",
-      hasAssistantReply: Boolean(snapshot?.messages?.some((turn) => turn.role === "assistant")),
+      hasAssistantReply: snapshot
+        ? hasStepAssistantReply(snapshot, step.reportPath, errorMessage)
+        : true,
       elapsedMs,
       errorMessage,
     });
@@ -1426,11 +1616,11 @@ export class AiTeamRunner {
     text: string,
     sessionId?: string | null,
     member?: AiTeamMember,
-    provider?: WandTaskAgent["provider"],
+    agent?: WandTaskAgent | null,
   ): void {
     this.postTurn(run, {
       role: "assistant", notice: true, content: chatText(text),
-      author: member ? chatAuthor(member, sessionId, provider) : undefined,
+      author: member ? chatAuthor(member, sessionId, agent) : undefined,
     });
   }
 
@@ -1449,9 +1639,10 @@ export class AiTeamRunner {
       });
       lines.push(assigned.join("\n"));
     }
+    const leader = leaderOf(run.team);
     this.postTurn(run, {
       role: "assistant",
-      author: chatAuthor(leaderOf(run.team), step.sessionId),
+      author: chatAuthor(leader, step.sessionId, this.actualAgent(leader, step)),
       content: chatText(lines.filter(Boolean).join("\n\n")),
     });
     if (decision.action === "assign" && !run.planApproved) {
@@ -1502,6 +1693,8 @@ export class AiTeamRunner {
     run.status = status;
     run.statusDetail = detail;
     this.saveRun(run);
+    // 进终态就不可能再有 live 变化，清掉该 run 的推送指纹：不然长跑的服务会按 run 数线性攒字符串。
+    if (AI_TEAM_TERMINAL_RUN_STATUSES.includes(status)) this.lastLiveKey.delete(run.id);
   }
 
   private saveRun(run: AiTeamRun): void {

@@ -25,6 +25,9 @@ src/web-ui/content/scripts.js
 src/web-ui/content/ai-teams.js
 # Tailwind v4 + Appica 编译产物（scripts/bundle-tailwind.js 生成），同理不入库
 src/web-ui/content/tailwind.css
+# 第三方浏览器资产同样由 bundler 从锁定依赖生成，源码仓库不保留副本。
+src/web-ui/content/vendor/xterm/
+src/web-ui/content/vendor/qrcode/
 
 # IDE / 工具本地状态，不该入库
 .qoder/

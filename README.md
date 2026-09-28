@@ -135,13 +135,19 @@ Use an isolated config for testing:
 npm run dev -- -c /tmp/wand-test/config.json
 ```
 
-The Android, iOS, and macOS clients are git submodules:
+For server development, check out only the pinned Render binaries. Native clients and
+Rust source are independent submodules; initialize the one you are changing:
 
 ```bash
-git clone --recurse-submodules https://github.com/co0ontty/wand.git
-# or, after cloning:
-git submodule update --init
+git clone https://github.com/co0ontty/wand.git
+cd wand
+git submodule update --init -- render-bin
+# Optional: git submodule update --init -- android  # or ios, macos, render
 ```
+
+The full cross-platform test suite reads native source contracts, so initialize
+`android ios macos render` before running `npm test`. To preview removable compiler
+caches, run `npm run clean:build-cache`; add `-- --apply` to remove them.
 
 Runtime data is stored under `~/.wand/`: `config.json`, `wand.db`, and `sessions/`.
 
@@ -326,13 +332,19 @@ wand/
 └── docs/                         # 文档与截图
 ```
 
-三个客户端壳应用是独立仓库，以 git submodule 引用。克隆源码开发时需要带上：
+服务端开发只需检出固定版本的 Render 二进制。原生客户端和 Rust 源码都是独立子模块，修改哪个再检出哪个：
 
 ```bash
-git clone --recurse-submodules https://github.com/co0ontty/wand.git
-# 或已克隆后补拉：
-git submodule update --init
+git clone https://github.com/co0ontty/wand.git
+cd wand
+git submodule update --init -- render-bin
+# 按需：git submodule update --init -- android  # 或 ios、macos、render
 ```
+
+全量 `npm test` 包含跨端源码契约检查，运行前另检出 `android ios macos render`。
+`npm run clean:build-cache` 预览可清理的编译缓存，追加 `-- --apply` 才执行删除；
+保留分发包、Release Render 二进制、签名、依赖和会话数据。审计与续接记录见
+[`docs/repository-slimming.md`](docs/repository-slimming.md)。
 
 数据存储在 `~/.wand/` 下：`config.json`（配置）、`wand.db`（SQLite）、`sessions/`（日志）。
 

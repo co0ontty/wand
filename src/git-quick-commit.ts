@@ -857,7 +857,7 @@ async function generateCommitMessageWithTag(
   ai: QuickCommitAiOptions = {},
   options: CommitInputOptions = {},
 ): Promise<GenerateCommitMessageResult> {
-  const { input, usedIteration } = await buildCommitPromptInput(cwd, options);
+  const { input } = await buildCommitPromptInput(cwd, options);
   let latestTag: string | undefined;
   try {
     latestTag = await runGitAsync(["describe", "--tags", "--abbrev=0"], cwd) || undefined;

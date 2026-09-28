@@ -7,12 +7,13 @@ import { normalizeSessionDirectory } from "./session-directory-tree.js";
 import { inferProviderFromCommand, inferProviderFromRunner, isSessionProvider, SESSION_PROVIDERS } from "./session-provider.js";
 import { DEFAULT_ITERATION_NAME, DEFAULT_WAND_TASK_AGENT_KIND, DEFAULT_WAND_TASK_PRIORITY, isWandTaskAgentKind, normalizeWandTaskAgentMode } from "./task-types.js";
 import { firstLayoutTabId } from "./layout-tree.js";
+import { isUnnamedWorkspaceTaskName } from "./wand-task-sync.js";
 import { AI_TEAM_DEFAULT_MAX_STEPS, isTeamMemberRole, memberAgents } from "./ai-team-types.js";
 import type {
   AiTeam, AiTeamMember, AiTeamRun, AiTeamRunChatMarker, AiTeamRunStatus, AiTeamStep, AiTeamStepKind, AiTeamStepStatus,
   CandidateFailureKind, StepDispatchInfo,
 } from "./ai-team-types.js";
-import type { WandTaskAgent, WandTaskAgentKind } from "./task-types.js";
+import type { WandTask, WandTaskAgent, WandTaskAgentKind, WandTaskTitleSource } from "./task-types.js";
 import { isThinkingEffort } from "./structured-provider-common.js";
 import type {
   AgentActivityItem,
@@ -1192,6 +1193,57 @@ export function ensureDatabaseFile(dbPath: string): boolean {
   return created;
 }
 
+interface CreateWandTaskInput {
+  workspaceId?: string | null;
+  workspaceTaskId?: string | null;
+  parentTaskId?: string | null;
+  title: string;
+  titleSource?: WandTaskTitleSource;
+  description?: string;
+  status?: WandTask["status"];
+  priority?: WandTask["priority"];
+  labels?: string[];
+  dueDate?: string | null;
+  milestoneId?: string | null;
+  agent?: WandTaskAgent | null;
+}
+
+type WandTaskPatch = Partial<Pick<WandTask,
+  "workspaceId" | "workspaceTaskId" | "parentTaskId" | "title" | "titleSource"
+  | "autoTitleSignature" | "description" | "status" | "priority" | "labels"
+  | "dueDate" | "milestoneId" | "sortOrder" | "agent">>;
+
+const WAND_TASK_FIELDS = `id, identifier, workspace_id, workspace_task_id, parent_task_id,
+  title, title_source, auto_title_signature, description, status, priority, labels_json,
+  due_date, milestone_id, sort_order, agent_json, created_at, updated_at`;
+
+// Shared metadata comes from the latest explicitly linked card, including meaningful NULLs.
+// The old container columns remain readable for legacy rows until the startup migration.
+const WORKSPACE_TASK_PROJECTION = `SELECT wt.id,
+  CASE WHEN card.id IS NULL THEN wt.workspace_id
+    ELSE COALESCE(card.workspace_id, '${GLOBAL_WORKSPACE_ID}') END AS workspace_id,
+  CASE WHEN card.id IS NULL THEN wt.name ELSE card.title END AS name,
+  CASE WHEN card.id IS NULL THEN wt.status
+    WHEN card.status IN ('done', 'archived') THEN 'done' ELSE 'active' END AS status,
+  CASE WHEN card.id IS NULL THEN wt.milestone_id ELSE card.milestone_id END AS milestone_id,
+  wt.worktree_json, wt.layout_json, wt.cwd, wt.created_at, wt.last_opened_at, wt.layout_revision,
+  wt.rowid AS _created_order
+  FROM workspace_tasks wt LEFT JOIN wand_tasks card ON card.id = (
+    SELECT id FROM wand_tasks WHERE workspace_task_id = wt.id
+    ORDER BY updated_at DESC, rowid DESC LIMIT 1
+  )`;
+
+function withoutSessionTab(node: LayoutNode, sessionId: string): LayoutNode {
+  if (node.type === "split") return {
+    ...node,
+    children: [withoutSessionTab(node.children[0], sessionId), withoutSessionTab(node.children[1], sessionId)],
+  };
+  const activeId = node.tabs[node.active]?.id;
+  const tabs = node.tabs.filter((tab) => tab.kind !== "session" || tab.sessionId !== sessionId);
+  const active = tabs.findIndex((tab) => tab.id === activeId);
+  return { ...node, tabs, active: active >= 0 ? active : Math.min(node.active, Math.max(0, tabs.length - 1)) };
+}
+
 export class WandStorage {
   private readonly db: DatabaseSync;
   private readonly dbPath: string;
@@ -1213,6 +1265,7 @@ export class WandStorage {
     ensureAiTeamSchema(this.db);
     ensureConnectorSchema(this.db);
     this.ensureDefaultPasswordVault();
+    this.migrateTaskRecords();
   }
 
   directory(): string {
@@ -1565,114 +1618,88 @@ export class WandStorage {
 
   // ── Workspace tasks（任务 = 命名 + 独立 worktree + 一组标签）──
 
-  /** 侧栏任务顺序：新创建在前。GET /api/tasks 按此顺序填充目录组。 */
+  /** Both task DTOs read one set of task metadata; containers own only local layout/worktree. */
   listWorkspaceTasks(workspaceId: string): WorkspaceTask[] {
-    const rows = this.db
-      .prepare(
-        `SELECT id, workspace_id, name, worktree_json, layout_json, status, cwd, milestone_id, created_at, last_opened_at, layout_revision
-         FROM workspace_tasks WHERE workspace_id = ?
-         ORDER BY created_at DESC, rowid DESC`
-      )
-      .all(workspaceId) as unknown as WorkspaceTaskRow[];
+    const rows = this.db.prepare(
+      `SELECT * FROM (${WORKSPACE_TASK_PROJECTION}) WHERE workspace_id = ?
+       ORDER BY created_at DESC, _created_order DESC`,
+    ).all(workspaceId) as unknown as WorkspaceTaskRow[];
     return rows.map(mapWorkspaceTaskRow);
   }
 
   getWorkspaceTask(id: string): WorkspaceTask | null {
-    const row = this.db
-      .prepare(
-        `SELECT id, workspace_id, name, worktree_json, layout_json, status, cwd, milestone_id, created_at, last_opened_at, layout_revision
-         FROM workspace_tasks WHERE id = ?`
-      )
+    const row = this.db.prepare(`${WORKSPACE_TASK_PROJECTION} WHERE wt.id = ?`)
       .get(id) as unknown as WorkspaceTaskRow | undefined;
     return row ? mapWorkspaceTaskRow(row) : null;
   }
 
-  createWorkspaceTask(input: {
-    workspaceId: string;
-    name: string;
-    worktree?: WorkspaceTaskWorktree | null;
-    cwd?: string | null;
-    status?: WorkspaceTaskStatus;
-    milestoneId?: string | null;
-  }): WorkspaceTask {
+  private insertWorkspaceTask(input: {
+    workspaceId: string; name: string; worktree?: WorkspaceTaskWorktree | null;
+    cwd?: string | null; status?: WorkspaceTaskStatus; milestoneId?: string | null;
+    createdAt?: string;
+  }): string {
     const id = crypto.randomUUID();
-    const createdAt = nowIso();
-    const status: WorkspaceTaskStatus = input.status ?? "active";
-    const cwd = typeof input.cwd === "string" && input.cwd.trim() ? input.cwd.trim() : null;
-    const milestoneId = typeof input.milestoneId === "string" && input.milestoneId ? input.milestoneId : null;
-    this.db
-      .prepare(
-        `INSERT INTO workspace_tasks (id, workspace_id, name, worktree_json, layout_json, status, cwd, milestone_id, created_at, last_opened_at)
-         VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL)`
-      )
-      .run(
-        id,
-        input.workspaceId,
-        input.name,
-        input.worktree ? JSON.stringify(input.worktree) : null,
-        status,
-        cwd,
-        milestoneId,
-        createdAt,
-      );
-    return {
-      id,
-      workspaceId: input.workspaceId,
-      name: input.name,
-      worktree: input.worktree ?? null,
-      ...(cwd ? { cwd } : {}),
-      milestoneId,
-      layout: null,
-      status,
-      createdAt,
-      lastOpenedAt: null,
-    };
+    this.db.prepare(`INSERT INTO workspace_tasks
+      (id, workspace_id, name, worktree_json, layout_json, status, cwd, milestone_id, created_at, last_opened_at)
+      VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL)`)
+      .run(id, input.workspaceId, input.name, input.worktree ? JSON.stringify(input.worktree) : null,
+        input.status ?? "active", input.cwd?.trim() || null, input.milestoneId ?? null,
+        input.createdAt ?? nowIso());
+    return id;
+  }
+
+  createWorkspaceTask(input: {
+    workspaceId: string; name: string; worktree?: WorkspaceTaskWorktree | null;
+    cwd?: string | null; status?: WorkspaceTaskStatus; milestoneId?: string | null;
+    board?: { titleSource?: WandTaskTitleSource; description?: string; parentTaskId?: string | null };
+  }): WorkspaceTask {
+    return this.transaction(() => {
+      const workspace = this.getWorkspace(input.workspaceId);
+      if (!workspace) throw new Error("任务所属工作区不存在。");
+      const milestoneId = input.milestoneId || this.ensureDefaultWandMilestone().id;
+      const id = this.insertWorkspaceTask({ ...input, milestoneId });
+      this.insertWandTask({
+        ...input.board, workspaceTaskId: id,
+        workspaceId: workspace.kind === "global" || workspace.id === GLOBAL_WORKSPACE_ID ? null : workspace.id,
+        title: input.name,
+        titleSource: input.board?.titleSource ?? (isUnnamedWorkspaceTaskName(input.name) ? "auto" : "user"),
+        status: input.status === "done" ? "done" : "todo", milestoneId,
+      });
+      return this.getWorkspaceTask(id)!;
+    });
   }
 
   updateWorkspaceTask(id: string, patch: {
-    name?: string;
-    status?: WorkspaceTaskStatus;
-    worktree?: WorkspaceTaskWorktree | null;
-    milestoneId?: string | null;
-    workspaceId?: string;
+    name?: string; status?: WorkspaceTaskStatus; worktree?: WorkspaceTaskWorktree | null;
+    milestoneId?: string | null; workspaceId?: string;
   }): void {
-    const assignments: string[] = [];
-    const values: Array<string | null> = [];
-    if (patch.workspaceId !== undefined) {
-      assignments.push("workspace_id = ?");
-      values.push(patch.workspaceId);
-    }
-    if (patch.name !== undefined) {
-      assignments.push("name = ?");
-      values.push(patch.name);
-    }
-    if (patch.status !== undefined) {
-      assignments.push("status = ?");
-      values.push(patch.status);
-    }
-    if (patch.worktree !== undefined) {
-      assignments.push("worktree_json = ?");
-      values.push(patch.worktree ? JSON.stringify(patch.worktree) : null);
-    }
-    if (patch.milestoneId !== undefined) {
-      assignments.push("milestone_id = ?");
-      values.push(patch.milestoneId || null);
-    }
-    if (assignments.length === 0) return;
-    this.db.prepare(`UPDATE workspace_tasks SET ${assignments.join(", ")} WHERE id = ?`).run(...values, id);
-    const card = this.getWandTaskByWorkspaceTaskId(id);
-    if (card) {
-      // Reverse projection uses direct SQL, so these writers cannot recurse.
-      this.updateWandTask(card.id, {
+    this.transaction(() => {
+      const card = this.getWandTaskByWorkspaceTaskId(id);
+      if (!card) throw new Error("未找到该任务。");
+      if (patch.worktree !== undefined) {
+        this.db.prepare("UPDATE workspace_tasks SET worktree_json = ? WHERE id = ?")
+          .run(patch.worktree ? JSON.stringify(patch.worktree) : null, id);
+      }
+      this.writeWandTask(card, {
         ...(patch.name !== undefined ? { title: patch.name, titleSource: "user" as const } : {}),
-        ...(patch.milestoneId !== undefined ? { milestoneId: patch.milestoneId } : {}),
+        ...(patch.milestoneId !== undefined ? {
+          milestoneId: patch.milestoneId || this.ensureDefaultWandMilestone().id,
+        } : {}),
+        ...(patch.workspaceId !== undefined ? {
+          workspaceId: patch.workspaceId === GLOBAL_WORKSPACE_ID ? null : patch.workspaceId,
+        } : {}),
         ...(patch.status !== undefined ? {
           status: patch.status === "done"
             ? card.status === "archived" ? "archived" as const : "done" as const
             : card.status === "todo" ? "todo" as const : "doing" as const,
         } : {}),
       });
-    }
+    });
+  }
+
+  archiveWorkspaceTask(id: string): WandTask | null {
+    const card = this.getWandTaskByWorkspaceTaskId(id);
+    return card ? this.updateWandTask(card.id, { status: "archived" }) : null;
   }
 
   saveWorkspaceTaskLayout(
@@ -1698,12 +1725,16 @@ export class WandStorage {
   }
 
   deleteWorkspaceTask(id: string, options: { cascade?: boolean } = {}): void {
-    if (options.cascade) {
-      this.db.prepare("DELETE FROM command_sessions WHERE workspace_task_id = ?").run(id);
-    } else {
-      this.db.prepare("UPDATE command_sessions SET workspace_task_id = NULL WHERE workspace_task_id = ?").run(id);
-    }
-    this.db.prepare("DELETE FROM workspace_tasks WHERE id = ?").run(id);
+    this.transaction(() => {
+      this.db.prepare(`UPDATE wand_tasks SET workspace_task_id = NULL, status = 'archived', updated_at = ?
+        WHERE workspace_task_id = ?`).run(nowIso(), id);
+      if (options.cascade) {
+        this.db.prepare("DELETE FROM command_sessions WHERE workspace_task_id = ?").run(id);
+      } else {
+        this.db.prepare("UPDATE command_sessions SET workspace_task_id = NULL WHERE workspace_task_id = ?").run(id);
+      }
+      this.db.prepare("DELETE FROM workspace_tasks WHERE id = ?").run(id);
+    });
   }
 
   tasksAggregateFingerprint(): string {
@@ -1719,7 +1750,7 @@ export class WandStorage {
     const tasks = this.db.prepare(
       `SELECT id, workspace_id, name, status, cwd, worktree_json, milestone_id,
               created_at, last_opened_at, layout_revision
-       FROM workspace_tasks ORDER BY id`
+       FROM (${WORKSPACE_TASK_PROJECTION}) ORDER BY id`
     ).all();
     const workspaces = this.db.prepare(
       `SELECT COUNT(*) AS count, COALESCE(MAX(last_opened_at), '') AS opened FROM workspaces`
@@ -1747,7 +1778,7 @@ export class WandStorage {
   /** GET /api/wand-tasks 的顺序：新创建在前。客户端按此顺序渲染，不再本地排序。 */
   listWandTasks(workspaceId?: string | null): import("./task-types.js").WandTask[] {
     const rows = this.db.prepare(
-      `SELECT id, identifier, workspace_id, workspace_task_id, parent_task_id, title, title_source, auto_title_signature, description, status, priority, labels_json, due_date, milestone_id, sort_order, agent_json, created_at, updated_at
+      `SELECT ${WAND_TASK_FIELDS}
        FROM wand_tasks ${workspaceId === undefined ? "" : "WHERE workspace_id IS ?"}
        ORDER BY created_at DESC, rowid DESC`,
     ).all(...(workspaceId === undefined ? [] : [workspaceId])) as unknown as Array<Record<string, unknown>>;
@@ -1777,46 +1808,158 @@ export class WandStorage {
     };
   }
 
-  getWandTask(id: string): import("./task-types.js").WandTask | null {
-    return this.listWandTasks().find((task) => task.id === id) ?? null;
-  }
-
-  getWandTaskByWorkspaceTaskId(workspaceTaskId: string): import("./task-types.js").WandTask | null {
-    const row = this.db.prepare(
-      `SELECT id, identifier, workspace_id, workspace_task_id, parent_task_id, title, title_source, auto_title_signature, description, status, priority, labels_json, due_date, milestone_id, sort_order, agent_json, created_at, updated_at
-       FROM wand_tasks WHERE workspace_task_id = ? ORDER BY updated_at DESC LIMIT 1`,
-    ).get(workspaceTaskId) as Record<string, unknown> | undefined;
+  getWandTask(id: string): WandTask | null {
+    const row = this.db.prepare(`SELECT ${WAND_TASK_FIELDS} FROM wand_tasks WHERE id = ?`)
+      .get(id) as Record<string, unknown> | undefined;
     return row ? this.mapWandTaskRow(row) : null;
   }
 
-  createWandTask(input: { workspaceId?: string | null; workspaceTaskId?: string | null; parentTaskId?: string | null; title: string; titleSource?: import("./task-types.js").WandTaskTitleSource; description?: string; status?: import("./task-types.js").WandTaskStatus; priority?: import("./task-types.js").WandTaskPriority; labels?: string[]; dueDate?: string | null; milestoneId?: string | null; agent?: import("./task-types.js").WandTaskAgent | null }): import("./task-types.js").WandTask {
-    const id = crypto.randomUUID(); const now = nowIso();
-    const status = input.status ?? "todo"; const priority = input.priority ?? DEFAULT_WAND_TASK_PRIORITY;
-    const max = this.db.prepare("SELECT COALESCE(MAX(sort_order), -1) AS value FROM wand_tasks WHERE workspace_id IS ? AND status = ?").get(input.workspaceId ?? null, status) as { value?: number } | undefined;
-    const numberRow = this.db.prepare("SELECT COALESCE(MAX(CAST(substr(identifier, 6) AS INTEGER)), 0) AS value FROM wand_tasks WHERE identifier GLOB 'TASK-[0-9]*'").get() as { value?: number } | undefined;
-    const identifier = `TASK-${(numberRow?.value ?? 0) + 1}`;
-    this.db.prepare(`INSERT INTO wand_tasks (id, identifier, workspace_id, workspace_task_id, parent_task_id, title, title_source, auto_title_signature, description, status, priority, labels_json, due_date, milestone_id, sort_order, agent_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, identifier, input.workspaceId ?? null, input.workspaceTaskId ?? null, input.parentTaskId ?? null, input.title, input.titleSource ?? "user", null, input.description ?? "", status, priority, JSON.stringify(input.labels ?? []), input.dueDate ?? null, input.milestoneId ?? null, (max?.value ?? -1) + 1, input.agent ? JSON.stringify(input.agent) : null, now, now);
+  getWandTaskByWorkspaceTaskId(workspaceTaskId: string): WandTask | null {
+    const row = this.db.prepare(`SELECT ${WAND_TASK_FIELDS} FROM wand_tasks
+      WHERE workspace_task_id = ? ORDER BY updated_at DESC, rowid DESC LIMIT 1`)
+      .get(workspaceTaskId) as Record<string, unknown> | undefined;
+    return row ? this.mapWandTaskRow(row) : null;
+  }
+
+  private insertWandTask(input: CreateWandTaskInput, createdAt = nowIso()): WandTask {
+    const id = crypto.randomUUID();
+    const status = input.status ?? "todo";
+    const max = this.db.prepare(`SELECT COALESCE(MAX(sort_order), -1) AS value FROM wand_tasks
+      WHERE workspace_id IS ? AND status = ?`).get(input.workspaceId ?? null, status) as { value: number };
+    const number = this.db.prepare(`SELECT COALESCE(MAX(CAST(substr(identifier, 6) AS INTEGER)), 0) AS value
+      FROM wand_tasks WHERE identifier GLOB 'TASK-[0-9]*'`).get() as { value: number };
+    this.db.prepare(`INSERT INTO wand_tasks (${WAND_TASK_FIELDS})
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, `TASK-${number.value + 1}`, input.workspaceId ?? null, input.workspaceTaskId ?? null,
+        input.parentTaskId ?? null, input.title, input.titleSource ?? "user", null,
+        input.description ?? "", status, input.priority ?? DEFAULT_WAND_TASK_PRIORITY,
+        JSON.stringify(input.labels ?? []), input.dueDate ?? null, input.milestoneId ?? null,
+        max.value + 1, input.agent ? JSON.stringify(input.agent) : null, createdAt, createdAt);
     return this.getWandTask(id)!;
   }
 
-  updateWandTask(id: string, patch: Partial<Pick<import("./task-types.js").WandTask, "workspaceId" | "workspaceTaskId" | "parentTaskId" | "title" | "titleSource" | "autoTitleSignature" | "description" | "status" | "priority" | "labels" | "dueDate" | "milestoneId" | "sortOrder" | "agent">>): import("./task-types.js").WandTask | null {
-    const current = this.getWandTask(id); if (!current) return null;
+  createWandTask(input: CreateWandTaskInput): WandTask {
+    return this.transaction(() => {
+      const workspaceId = input.workspaceId ?? null;
+      const workspace = workspaceId ? this.getWorkspace(workspaceId) : this.ensureGlobalWorkspace();
+      if (!workspace) throw new Error("任务所属工作区不存在。");
+      const milestoneId = input.milestoneId || this.ensureDefaultWandMilestone().id;
+      if (input.workspaceTaskId) {
+        const container = this.getWorkspaceTask(input.workspaceTaskId);
+        if (!container) throw new Error("未找到该任务。");
+        const existing = this.getWandTaskByWorkspaceTaskId(container.id);
+        // Compatibility for callers which supplied a previously created container.
+        if (existing) return this.writeWandTask(existing, { ...input, milestoneId });
+      }
+      const workspaceTaskId = input.workspaceTaskId ?? this.insertWorkspaceTask({
+        workspaceId: workspace.id, name: input.title,
+        status: input.status === "done" || input.status === "archived" ? "done" : "active",
+        milestoneId,
+      });
+      return this.insertWandTask({ ...input, workspaceId, workspaceTaskId, milestoneId });
+    });
+  }
+
+  /** Private canonical writer; callers own the transaction, never a reverse writer. */
+  private writeWandTask(current: WandTask, patch: WandTaskPatch): WandTask {
     const next = { ...current, ...patch, updatedAt: nowIso() };
-    this.db.prepare(`UPDATE wand_tasks SET workspace_id = ?, workspace_task_id = ?, parent_task_id = ?, title = ?, title_source = ?, auto_title_signature = ?, description = ?, status = ?, priority = ?, labels_json = ?, due_date = ?, milestone_id = ?, sort_order = ?, agent_json = ?, updated_at = ? WHERE id = ?`).run(next.workspaceId, next.workspaceTaskId, next.parentTaskId, next.title, next.titleSource, next.autoTitleSignature ?? null, next.description, next.status, next.priority, JSON.stringify(next.labels), next.dueDate, next.milestoneId ?? null, next.sortOrder, next.agent ? JSON.stringify(next.agent) : null, next.updatedAt, id);
-    if (next.workspaceTaskId) {
+    this.db.prepare(`UPDATE wand_tasks SET workspace_id = ?, workspace_task_id = ?, parent_task_id = ?,
+      title = ?, title_source = ?, auto_title_signature = ?, description = ?, status = ?, priority = ?,
+      labels_json = ?, due_date = ?, milestone_id = ?, sort_order = ?, agent_json = ?, updated_at = ?
+      WHERE id = ?`)
+      .run(next.workspaceId, next.workspaceTaskId, next.parentTaskId, next.title, next.titleSource,
+        next.autoTitleSignature ?? null, next.description, next.status, next.priority,
+        JSON.stringify(next.labels), next.dueDate, next.milestoneId ?? null, next.sortOrder,
+        next.agent ? JSON.stringify(next.agent) : null, next.updatedAt, next.id);
+    if (patch.workspaceId !== undefined && next.workspaceTaskId) {
       const workspaceId = next.workspaceId ?? this.ensureGlobalWorkspace().id;
-      this.db.prepare(`UPDATE workspace_tasks SET name = ?, status = ?, milestone_id = ?, workspace_id = ? WHERE id = ?`)
-        .run(next.title, next.status === "done" || next.status === "archived" ? "done" : "active",
-          next.milestoneId ?? null, workspaceId, next.workspaceTaskId);
+      // The container FK/index and standalone session workspace bucket follow the canonical project.
+      this.db.prepare("UPDATE workspace_tasks SET workspace_id = ? WHERE id = ?")
+        .run(workspaceId, next.workspaceTaskId);
       this.db.prepare("UPDATE command_sessions SET workspace_id = ? WHERE workspace_task_id = ?")
         .run(workspaceId, next.workspaceTaskId);
     }
     return next;
   }
 
+  updateWandTask(id: string, patch: WandTaskPatch): WandTask | null {
+    return this.transaction(() => {
+      const current = this.getWandTask(id);
+      if (!current) return null;
+      return this.writeWandTask(current, {
+        ...patch,
+        ...(patch.milestoneId !== undefined ? {
+          milestoneId: patch.milestoneId || this.ensureDefaultWandMilestone().id,
+        } : {}),
+      });
+    });
+  }
+
+  /** Commit completion archives only the selected completed cards, atomically. */
+  archiveCompletedWandTasks(ids: readonly string[]): string[] {
+    return this.transaction(() => {
+      const archived: string[] = [];
+      for (const id of new Set(ids)) {
+        const task = this.getWandTask(id);
+        if (task?.status !== "done") continue;
+        this.writeWandTask(task, { status: "archived" });
+        archived.push(id);
+      }
+      return archived;
+    });
+  }
+
   deleteWandTask(id: string): void {
-    this.db.prepare("UPDATE wand_tasks SET parent_task_id = NULL WHERE parent_task_id = ?").run(id);
-    this.db.prepare("DELETE FROM wand_tasks WHERE id = ?").run(id);
+    this.transaction(() => {
+      const card = this.getWandTask(id);
+      if (!card) return;
+      this.db.prepare("UPDATE wand_tasks SET parent_task_id = NULL WHERE parent_task_id = ?").run(id);
+      if (card.workspaceTaskId) {
+        this.db.prepare("UPDATE command_sessions SET workspace_task_id = NULL WHERE workspace_task_id = ?")
+          .run(card.workspaceTaskId);
+        this.db.prepare("DELETE FROM workspace_tasks WHERE id = ?").run(card.workspaceTaskId);
+      }
+      this.db.prepare("DELETE FROM wand_tasks WHERE id = ?").run(id);
+    });
+  }
+
+  /** One-time id-based reconciliation; normal reads never create tasks or repair membership. */
+  private migrateTaskRecords(): void {
+    if (this.getConfigValue("taskRecordsVersion") === "1") return;
+    this.transaction(() => {
+      for (const workspace of this.listWorkspaces()) {
+        for (const task of this.listWorkspaceTasks(workspace.id)) {
+          if (this.getWandTaskByWorkspaceTaskId(task.id)) continue;
+          this.insertWandTask({
+            workspaceId: workspace.kind === "global" || workspace.id === GLOBAL_WORKSPACE_ID ? null : workspace.id,
+            workspaceTaskId: task.id, title: task.name,
+            titleSource: isUnnamedWorkspaceTaskName(task.name) ? "auto" : "user",
+            status: task.status === "done" ? "done" : "todo", milestoneId: task.milestoneId,
+          }, task.createdAt);
+        }
+      }
+      for (const card of this.listWandTasks()) {
+        let container = card.workspaceTaskId ? this.getWorkspaceTask(card.workspaceTaskId) : null;
+        if (!container && card.status !== "archived") {
+          const workspace = card.workspaceId ? this.getWorkspace(card.workspaceId) : this.ensureGlobalWorkspace();
+          if (!workspace) continue;
+          const id = this.insertWorkspaceTask({
+            workspaceId: workspace.id, name: card.title, milestoneId: card.milestoneId,
+            status: card.status === "done" ? "done" : "active", createdAt: card.createdAt,
+          });
+          this.writeWandTask(card, { workspaceTaskId: id });
+          container = this.getWorkspaceTask(id);
+        }
+        if (!container) continue;
+        for (const sessionId of this.legacyWandTaskSessionIds(card.id)) {
+          const session = this.getSessionWorkspace(sessionId);
+          if (!session || (session.workspaceTaskId && session.workspaceTaskId !== container.id)) continue;
+          this.db.prepare("UPDATE command_sessions SET workspace_task_id = ?, workspace_id = ? WHERE id = ?")
+            .run(container.id, container.workspaceId, sessionId);
+        }
+      }
+      this.setConfigValue("taskRecordsVersion", "1");
+    });
   }
 
   // ── 里程碑（迭代，归属工作区；任务只存 milestoneId）──
@@ -2037,32 +2180,101 @@ export class WandStorage {
 
   // ============ 会话 → 任务 / 迭代 ============
 
-  /** 会话绑定的看板任务 id；没绑或已删除时返回 null。 */
+  /** Live membership has a single owner: command_sessions.workspace_task_id. */
   getWandTaskIdForSession(sessionId: string): string | null {
-    const row = this.db.prepare(
-      "SELECT task_id FROM wand_task_sessions WHERE session_id = ? ORDER BY rowid DESC LIMIT 1",
-    ).get(sessionId) as { task_id?: string } | undefined;
-    return row?.task_id || null;
+    const binding = this.getSessionWorkspace(sessionId);
+    if (binding?.workspaceTaskId) return this.getWandTaskByWorkspaceTaskId(binding.workspaceTaskId)?.id ?? null;
+    const row = this.db.prepare(`SELECT links.task_id FROM wand_task_sessions links
+      JOIN wand_tasks card ON card.id = links.task_id
+      WHERE links.session_id = ? AND card.workspace_task_id IS NULL AND card.status = 'archived'
+      ORDER BY links.rowid DESC LIMIT 1`).get(sessionId) as { task_id: string } | undefined;
+    return row?.task_id ?? null;
+  }
+
+  private legacyWandTaskSessionIds(taskId: string): string[] {
+    const rows = this.db.prepare(`SELECT session_id FROM wand_task_sessions
+      WHERE task_id = ? ORDER BY rowid ASC, session_id ASC`).all(taskId) as Array<{ session_id: string }>;
+    return rows.map((row) => row.session_id);
   }
 
   listWandTaskSessionIds(taskId: string): string[] {
-    const rows = this.db.prepare("SELECT session_id FROM wand_task_sessions WHERE task_id = ? ORDER BY rowid ASC, session_id ASC").all(taskId) as unknown as Array<{ session_id: string }>;
-    return rows.map((row) => row.session_id);
+    const task = this.getWandTask(taskId);
+    if (!task) return [];
+    if (!task.workspaceTaskId) return task.status === "archived" ? this.legacyWandTaskSessionIds(taskId) : [];
+    // Binding timestamps are ordering metadata only; stale membership cannot leak into this projection.
+    const rows = this.db.prepare(`SELECT s.id FROM command_sessions s
+      LEFT JOIN wand_task_sessions links ON links.session_id = s.id AND links.task_id = ?
+      WHERE s.workspace_task_id = ? ORDER BY COALESCE(links.bound_at, s.started_at), s.rowid`)
+      .all(task.id, task.workspaceTaskId) as Array<{ id: string }>;
+    return rows.map((row) => row.id);
   }
 
   listBoundWandTaskSessionIds(): string[] {
-    const rows = this.db.prepare("SELECT session_id FROM wand_task_sessions").all() as unknown as Array<{ session_id: string }>;
-    return rows.map((row) => row.session_id);
+    const rows = this.db.prepare(`SELECT s.id FROM command_sessions s
+      WHERE EXISTS (SELECT 1 FROM wand_tasks card WHERE card.workspace_task_id = s.workspace_task_id)
+      ORDER BY s.rowid`).all() as Array<{ id: string }>;
+    return rows.map((row) => row.id);
   }
 
   bindWandTaskSession(taskId: string, sessionId: string): void {
-    if (!this.getWandTask(taskId)) throw new Error("未找到该任务。");
-    if (!this.getSession(sessionId)) throw new Error("未找到该会话。");
-    this.db.prepare("DELETE FROM wand_task_sessions WHERE session_id = ? AND task_id != ?").run(sessionId, taskId);
-    this.db.prepare("INSERT OR IGNORE INTO wand_task_sessions (task_id, session_id, bound_at) VALUES (?, ?, ?)").run(taskId, sessionId, nowIso());
+    const task = this.getWandTask(taskId);
+    if (!task?.workspaceTaskId) throw new Error("未找到该任务。");
+    this.moveSessionToWorkspaceTask(sessionId, task.workspaceTaskId);
   }
 
-  unbindWandTaskSession(taskId: string, sessionId: string): void { this.db.prepare("DELETE FROM wand_task_sessions WHERE task_id = ? AND session_id = ?").run(taskId, sessionId); }
+  unbindWandTaskSession(taskId: string, sessionId: string): void {
+    if (this.getWandTaskIdForSession(sessionId) === taskId) this.moveSessionToWorkspaceTask(sessionId, null);
+    else this.db.prepare("DELETE FROM wand_task_sessions WHERE task_id = ? AND session_id = ?").run(taskId, sessionId);
+  }
+
+  /** Atomic exclusive ownership change; cwd, output and execution are untouched. */
+  moveSessionToWorkspaceTask(sessionId: string, taskId: string | null): void {
+    this.transaction(() => {
+      const session = this.getSessionWorkspace(sessionId);
+      if (!session) throw new Error("未找到该会话。");
+      const target = taskId ? this.getWorkspaceTask(taskId) : null;
+      if (taskId && !target) throw new Error("未找到目标任务。");
+      if (target && !this.getWorkspace(target.workspaceId)) throw new Error("目标工作区不存在。");
+      const source = session.workspaceTaskId ? this.getWorkspaceTask(session.workspaceTaskId) : null;
+      if (source && source.id !== target?.id && source.layout) {
+        const windows = source.layout.windows.map((window) => {
+          const layout = withoutSessionTab(window.layout, sessionId);
+          return { ...window, layout, activeTabId: firstLayoutTabId(layout) };
+        });
+        this.saveWorkspaceTaskLayout(source.id, { ...source.layout, windows });
+      }
+      this.db.prepare("DELETE FROM wand_task_sessions WHERE session_id = ? AND task_id NOT IN (SELECT id FROM wand_tasks WHERE workspace_task_id IS ?)")
+        .run(sessionId, target?.id ?? null);
+      this.db.prepare("UPDATE command_sessions SET workspace_task_id = ?, workspace_id = ? WHERE id = ?")
+        .run(target?.id ?? null, target?.workspaceId ?? session.workspaceId ?? null, sessionId);
+      if (target) {
+        const card = this.getWandTaskByWorkspaceTaskId(target.id);
+        if (!card) throw new Error("未找到目标任务。");
+        this.db.prepare("INSERT OR IGNORE INTO wand_task_sessions (task_id, session_id, bound_at) VALUES (?, ?, ?)")
+          .run(card.id, sessionId, nowIso());
+        if (source?.id !== target.id) this.recordTaskSession(this.getSessionSlim(sessionId)!);
+      }
+    });
+  }
+
+  /** Metadata promotion happens on session creation/move, never on reads or checkpoints. */
+  private recordTaskSession(session: SessionSnapshot): void {
+    if (!session.workspaceTaskId) return;
+    const card = this.getWandTaskByWorkspaceTaskId(session.workspaceTaskId);
+    if (!card) return;
+    const provider = session.provider;
+    const agent: WandTaskAgent | null = isSessionProvider(provider) ? {
+      provider,
+      model: session.selectedModel || session.structuredState?.model || "default",
+      thinkingEffort: isThinkingEffort(session.thinkingEffort) ? session.thinkingEffort : "off",
+      mode: normalizeWandTaskAgentMode(provider, session.mode),
+      kind: session.sessionKind === "structured" ? "structured" : "pty",
+    } : null;
+    this.db.prepare(`UPDATE wand_tasks SET agent_json = COALESCE(agent_json, ?),
+      status = CASE WHEN status = 'todo' THEN 'doing' ELSE status END,
+      updated_at = ? WHERE id = ?`)
+      .run(agent ? JSON.stringify(agent) : null, nowIso(), card.id);
+  }
 
   listGithubIssueBindings(owner: string, repo: string, issueNumber: number): Array<{ sessionId: string; boundAt: string }> {
     const rows = this.db.prepare(
@@ -2117,7 +2329,7 @@ export class WandStorage {
   }
 
   setSessionWorkspaceTaskId(sessionId: string, taskId: string | null): void {
-    this.db.prepare("UPDATE command_sessions SET workspace_task_id = ? WHERE id = ?").run(taskId, sessionId);
+    this.moveSessionToWorkspaceTask(sessionId, taskId);
   }
 
   /** Get password from database */
@@ -2738,6 +2950,7 @@ export class WandStorage {
   }
 
   saveSession(snapshot: SessionSnapshot): void {
+    const isNew = !this.getSessionWorkspace(snapshot.id);
     // A single SQLite statement is already atomic. Avoid BEGIN IMMEDIATE in
     // this hot path so streaming checkpoints do not take an unnecessary write
     // lock and saveSession can also participate in a caller-owned transaction.
@@ -2750,6 +2963,7 @@ export class WandStorage {
            ${sessionPersistAssignments()}`
       )
       .run(...sessionPersistValues(snapshot));
+    if (isNew) this.recordTaskSession(snapshot);
   }
 
   /** Update runtime/scalar fields without serializing or rewriting messages/output. */

@@ -20,7 +20,7 @@ import { resolveSessionDisplayTitle } from "./session-transport.js";
 import { type LayoutNode, type PaneTab, type SessionSnapshot, type TaskWindowLayout, type Workspace, type WorkspaceDefaultProvider, type WorkspaceTask, type WorkspaceTaskWorktree } from "./types.js";
 import { attachUnboundSessionsToWorkspace, backfillSessionWorkspaces, normalizeProjectCwd, projectCwdForSession, isGlobalWorkspace, syncDirectoryNameForWorkspace } from "./workspace-binding.js";
 import { defaultMilestoneIdForWrite, resolvedMilestoneFields, scopedMilestoneId } from "./milestone-scope.js";
-import { archiveBoardTaskForWorkspaceTask, archiveWorkspaceTask, ensureBoardTaskForWorkspaceTask, isUnnamedWorkspaceTaskName, moveSessionToWorkspaceTask, syncSidebarTasksFromBoard, UNNAMED_WORKSPACE_TASK_NAME } from "./wand-task-sync.js";
+import { isUnnamedWorkspaceTaskName, UNNAMED_WORKSPACE_TASK_NAME } from "./wand-task-sync.js";
 import { isSessionProvider } from "./session-provider.js";
 import { firstLayoutTabId } from "./layout-tree.js";
 import { parentTaskIdFrom, refreshAutoBoardTaskTitles, type AutoTaskTitleOptions } from "./server-task-routes.js";
@@ -233,11 +233,7 @@ function createTaskForWorkspace(
     cwd: storedCwd,
     worktree,
     milestoneId,
-  });
-  ensureBoardTaskForWorkspaceTask(storage, task, workspace, {
-    titleSource: named ? "user" : "auto",
-    description,
-    parentTaskId,
+    board: { titleSource: named ? "user" : "auto", description, parentTaskId },
   });
   return {
     task,
@@ -528,7 +524,6 @@ export function registerWorkspaceRoutes(
 
   // 目录组为一级容器的任务聚合列表，供侧栏「任务」视图一次拉全。
   app.get("/api/tasks", (req, res) => {
-    syncSidebarTasksFromBoard(storage);
     // 侧栏轮询也在补自动标题：不打开看板的任务（以及新增会话后的改名）也要吃到。
     try {
       refreshAutoBoardTaskTitles(storage, titleOptions);
@@ -899,7 +894,7 @@ export function registerWorkspaceRoutes(
       return;
     }
     try {
-      moveSessionToWorkspaceTask(storage, sessionId, req.params.taskId);
+      storage.moveSessionToWorkspaceTask(sessionId, req.params.taskId);
       sessions?.refreshSessionWorkspace(sessionId);
       res.json({ ok: true });
     } catch (error) {
@@ -928,7 +923,6 @@ export function registerWorkspaceRoutes(
       patch.milestoneId = milestoneId || defaultMilestoneIdForWrite(storage);
     }
     storage.updateWorkspaceTask(existing.id, patch);
-    if (patch.status === "done") archiveBoardTaskForWorkspaceTask(storage, existing.id);
     const updated = storage.getWorkspaceTask(existing.id);
     res.json({
       ...updated,
@@ -943,7 +937,7 @@ export function registerWorkspaceRoutes(
       res.status(404).json({ error: "未找到该任务。" });
       return;
     }
-    archiveWorkspaceTask(storage, existing);
+    storage.archiveWorkspaceTask(existing.id);
     const archived = storage.getWorkspaceTask(existing.id);
     res.json({
       ...archived,
@@ -976,9 +970,6 @@ export function registerWorkspaceRoutes(
     }
     // 尽力清理 worktree 与分支；失败不阻塞删除任务行。
     if (cascade) cleanupWorktreeSync(existing.worktree);
-    archiveBoardTaskForWorkspaceTask(storage, existing.id);
-    const board = storage.getWandTaskByWorkspaceTaskId(existing.id);
-    if (board) storage.updateWandTask(board.id, { workspaceTaskId: null, status: "archived" });
     storage.deleteWorkspaceTask(existing.id, { cascade });
     res.json({ ok: true });
   });

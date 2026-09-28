@@ -19,6 +19,8 @@ export interface WandModelEffortInfo {
 
 export interface WandModelCatalog {
   byProvider: Record<ModelCatalogProvider, WandSelectOption[]>;
+  /** 服务端为每个 CLI 配置的默认模型 id；空串 = 没配，交给 CLI 自己的默认模型。 */
+  defaultModels: Partial<Record<ModelCatalogProvider, string>>;
   /** CLI 级思考档位。Codex 和带 variants 的 OpenCode 模型优先看 modelEfforts。 */
   effortsByProvider: Partial<Record<ModelCatalogProvider, CliThinkingEffort[]>>;
   modelEfforts: Partial<Record<ModelCatalogProvider, Record<string, WandModelEffortInfo>>>;
@@ -83,15 +85,17 @@ export function normalizeWandModelCatalog(payload: unknown): WandModelCatalog {
     ? root.defaultModels as Record<string, unknown>
     : {};
   const byProvider = {} as Record<ModelCatalogProvider, WandSelectOption[]>;
+  const defaultModels: WandModelCatalog["defaultModels"] = {};
   const modelEfforts = {} as WandModelCatalog["modelEfforts"];
   for (const [provider, listKey, defaultKey] of MODEL_KEYS) {
     const raw = Array.isArray(root[listKey]) ? root[listKey] as ModelEntry[] : [];
     const options = raw.map(modelEntryToOption).filter((option): option is WandSelectOption => option !== null);
+    const candidate = typeof defaults[provider] === "string"
+      ? defaults[provider] as string
+      : typeof root[defaultKey] === "string" ? root[defaultKey] as string : "";
+    const fallback = candidate.trim();
+    if (fallback) defaultModels[provider] = fallback;
     if (!options.some((option) => option.value === MODEL_CATALOG_DEFAULT_VALUE)) {
-      const candidate = typeof defaults[provider] === "string"
-        ? defaults[provider] as string
-        : typeof root[defaultKey] === "string" ? root[defaultKey] as string : "";
-      const fallback = candidate.trim();
       options.unshift({
         value: MODEL_CATALOG_DEFAULT_VALUE,
         label: fallback ? `跟随服务端默认（${fallback}）` : "跟随服务端默认",
@@ -120,10 +124,45 @@ export function normalizeWandModelCatalog(payload: unknown): WandModelCatalog {
   }
   return {
     byProvider,
+    defaultModels,
     effortsByProvider,
     modelEfforts,
     refreshedAt: typeof root.refreshedAt === "string" ? root.refreshedAt : "",
   };
+}
+
+function providerOptions(
+  catalog: WandModelCatalog | null,
+  provider: string | null | undefined,
+): WandSelectOption[] {
+  if (!catalog || !provider) return [];
+  // provider 可能是会话 / 群聊 DTO 里的自由字符串（含 `session`、`shell`）；认不出来的当没这一项。
+  return catalog.byProvider[provider as ModelCatalogProvider] ?? [];
+}
+
+/**「跟随 X 默认」这种没写明模型的文案不算名字，其余去掉「（X 默认）」尾巴后就是 CLI 报出来的默认模型。 */
+const GENERIC_DEFAULT_LABEL = /^跟随.*默认$/;
+const TRAILING_DEFAULT_NOTE = /\s*[（(][^（()）]*默认[^（()）]*[）)]\s*$/;
+
+/**
+ * 界面上的模型名：`default`（哨兵）和空值都不是名字，换成真正会用的那个模型。
+ * 顺序：显式选的模型 id → 服务端为该 CLI 配置的默认模型 id → CLI 自己报出来的默认项
+ * （Codex / Grok 的目录项里写了具体模型名，如「GPT-6-Astra · gpt-6-astra（Codex 默认）」）。
+ * 三处都拿不到名字返回空串，由调用方决定兜底文案（单值显示给「默认」，署名这类多段显示直接省略）。
+ */
+export function wandModelDisplayName(
+  catalog: WandModelCatalog | null,
+  provider: string | null | undefined,
+  model: string | null | undefined,
+): string {
+  const id = (model ?? "").trim();
+  if (id && id !== MODEL_CATALOG_DEFAULT_VALUE) return id;
+  const configured = (catalog?.defaultModels as Record<string, string | undefined> | undefined)?.[provider ?? ""]?.trim();
+  if (configured) return configured;
+  const entry = providerOptions(catalog, provider)
+    .find((option) => option.value === MODEL_CATALOG_DEFAULT_VALUE)?.label.trim() ?? "";
+  const stripped = entry.replace(TRAILING_DEFAULT_NOTE, "").trim();
+  return GENERIC_DEFAULT_LABEL.test(stripped) ? "" : stripped;
 }
 
 /** 目录尚未加载时也要能渲染下拉，给出「跟随服务端默认」占位。 */
@@ -172,6 +211,7 @@ function catalogSignature(catalog: WandModelCatalog): string {
   return JSON.stringify({
     refreshedAt: catalog.refreshedAt,
     byProvider: catalog.byProvider,
+    defaultModels: catalog.defaultModels,
     effortsByProvider: catalog.effortsByProvider,
     modelEfforts: catalog.modelEfforts,
   });

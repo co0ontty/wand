@@ -2,6 +2,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+
+import { TaskBoardAgentSessionList } from "../src/web-ui/react/issues/task-board-views.js";
+import type { IssueSessionSummary } from "../src/web-ui/react/issues/task-board-repository.js";
+
 import {
   createDefaultIssueAgent,
   EMPTY_ISSUE_FILTERS,
@@ -23,12 +29,14 @@ import {
   issueCreateDispatches,
   issueDropDispatches,
   issueDropDispatchPrompt,
+  issueHideStatusFilterLabel,
   issueParentOptions,
   normalizeIssueAgentDefaults,
   resolveIssueAgent,
   issueBoardStats,
   issueWorkspaceIdFromSelect,
   issueWorkspaceOptions,
+  issueStatusLabel,
   issueWorkspaceSelectValue,
   normalizeIssueModelCatalog,
   withIssueAgentProvider,
@@ -291,7 +299,9 @@ test("board host preserves navigation, column creation, drag, and detail contrac
   assert.match(host, /TASK_DRAG_TYPE/);
   // 列内顺序固定按创建时间；跨列拖拽换状态，拖进「处理中」时还会顺手派发首次指派。
   assert.match(host, /moving\.status === status/);
-  assert.match(host, /返回任务看板/);
+  // 返回入口一个功能只留一个：未选中任务时是「返回工作区」箭头，选中任务后交给面包屑首段「任务看板」。
+  assert.match(host, /aria-label="返回工作区"/);
+  assert.match(host, /\{ label: "任务看板", onNavigate: \(\) => setSelectedId\(""\) \}/);
   assert.match(host, /新建任务/);
   assert.match(host, /创建更多/);
   assert.deepEqual(ISSUE_BOARD_VIEWS.map((entry) => entry.value), ["dashboard", "board", "list", "gantt"]);
@@ -299,6 +309,18 @@ test("board host preserves navigation, column creation, drag, and detail contrac
   assert.equal(ISSUE_ARCHIVE_COLUMN.status, "archived");
   assert.match(host, /TaskBoardArchiveFolder/);
   assert.match(host, /issueArchiveFolderOpen/);
+});
+
+test("已完成卡片不带「完成」死按钮：写回同一个状态、触屏也看不见", () => {
+  const host = readFileSync(new URL("../src/web-ui/react/issues/task-board-host.tsx", import.meta.url), "utf8");
+  const views = readFileSync(new URL("../src/web-ui/react/issues/task-board-views.tsx", import.meta.url), "utf8");
+  const styles = readFileSync(new URL("../src/web-ui/content/styles.css", import.meta.url), "utf8");
+  // done 卡片已经在 done 列，点按钮只是 patchTask(id, {status:"done"}) 写回同一个值；
+  // 改状态另有拖拽与详情两处入口，这个 hover 才浮现的按钮是无语义残留。
+  assert.doesNotMatch(host, /TaskBoardCompleteButton/);
+  assert.doesNotMatch(views, /TaskBoardCompleteButton/);
+  assert.doesNotMatch(styles, /\.task-board-card-complete\b/);
+  assert.doesNotMatch(styles, /\.task-board-card\.is-done:hover \.task-board-card-complete/);
 });
 
 test("dropping an unassigned task into doing asks before sending the card description", () => {
@@ -433,7 +455,10 @@ test("task board is a first-class view=taskboard route that does not unmount the
   // `aria-current="page"` on the matching link itself.
   assert.match(sidebar, /active=\{taskBoard\.open \? \(taskBoard\.page === "teams" \? "ai-teams" : "task-board"\) : null\}/);
   assert.match(sidebar, /value="task-board"/);
-  assert.match(host, /aria-label=\{selected \? "返回任务看板" : "返回工作区"\}/);
+  // 同一功能只留一个可见入口：箭头只在未选中任务时出现（返回工作区），选中任务后返回交给面包屑首段。
+  assert.match(host, /\{!selected \? <WandIconButton/);
+  assert.match(host, /aria-label="返回工作区"/);
+  assert.doesNotMatch(host, /返回任务看板/);
   assert.doesNotMatch(host, /返回会话/);
 });
 
@@ -464,4 +489,165 @@ test("task detail drafts survive the silent board refresh", () => {
   assert.doesNotMatch(host, /\[task\.id, task\.title, task\.description, task\.labels/);
   assert.match(host, /\[task\.id, task\.title, labelKey\]/);
   assert.match(host, /\[task\.id, sessionCount\]/);
+});
+
+test("done 状态只有一个界面名：列名、概览指标、进度图例、过滤开关同源", () => {
+  const column = ISSUE_COLUMNS.find((item) => item.status === "done")!;
+  assert.equal(issueStatusLabel("done"), "等你确认");
+  assert.equal(column.label, issueStatusLabel("done"), "列名就是那个唯一来源");
+  assert.equal(column.empty, `还没有${issueStatusLabel("done")}的任务`, "空态文案也跟着走，不再「待确认」另起一词");
+  assert.equal(issueStatusLabel("archived"), ISSUE_ARCHIVE_COLUMN.label);
+  assert.equal(issueHideStatusFilterLabel("done"), "隐藏「等你确认」");
+
+  const views = readFileSync(new URL("../src/web-ui/react/issues/task-board-views.tsx", import.meta.url), "utf8");
+  // 同文件曾经三处各写一份：概览「已确认」、图例「已确认」、开关「隐藏已确认」。
+  assert.doesNotMatch(views, /["」>]已确认|已确认["「<]/);
+  assert.doesNotMatch(views, /隐藏已确认|等你确认|待确认/);
+  assert.match(views, /\{metric\(issueStatusLabel\("done"\), stats\.done, "done"\)\}/);
+  assert.match(views, /<span className="tone-completed"><i\/>\{issueStatusLabel\("done"\)\} <strong>\{stats\.done\}<\/strong><\/span>/);
+  assert.match(views, /\{issueHideStatusFilterLabel\("done"\)\}/);
+  assert.match(views, /<span>\{issueStatusLabel\(task\.status\)\}<\/span>/, "行内状态标签也读同一处");
+});
+
+test("会话状态界面名只有一份映射，未知值不再一律兑成「空闲」", () => {
+  const views = readFileSync(new URL("../src/web-ui/react/issues/task-board-views.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(views, /function (issueSessionStatusLabel|taskStatusLabel)\b/, "同一概念的两套映射已合并");
+  assert.equal((views.match(/function sessionStatusLabel/g) ?? []).length, 1);
+  assert.match(views, /if \(status === "running" \|\| status === "thinking"\) return "进行中";/);
+  assert.match(views, /if \(status === "idle"\) return "空闲";/);
+  assert.match(views, /return status \|\| "会话";/, "认不出来回退原值，空串才给「会话」");
+  assert.doesNotMatch(views, /function sessionStatusLabel[\s\S]{0,400}return "空闲";\n\}/, "结尾不再是无兜底的「空闲」");
+  assert.match(views, /sessionStatusLabel\(session\.status\)\]/);
+  assert.match(views, /<small>\{sessionStatusLabel\(session\.status\)\}<\/small>/);
+});
+
+test("看板卡片点击就地展开，不再把整块看板换成详情页（动效第 7 条）", () => {
+  const host = readFileSync(new URL("../src/web-ui/react/issues/task-board-host.tsx", import.meta.url), "utf8");
+  const views = readFileSync(new URL("../src/web-ui/react/issues/task-board-views.tsx", import.meta.url), "utf8");
+  const styles = readFileSync(new URL("../src/web-ui/content/styles.css", import.meta.url), "utf8");
+  const card = host.slice(host.indexOf("const renderCard"), host.indexOf("const renderColumn"));
+  const detail = views.slice(
+    views.indexOf("export function TaskBoardCardDetail"),
+    views.indexOf("export function TaskBoardListView"),
+  );
+
+  // 触发区仍是整张卡片，但语义换成展开/收起，属性与列表行同一组。
+  assert.match(card, /className=\{classNames\(\s*"task-board-card",\s*`is-\$\{task\.status\}`,\s*expanded && "is-open"/);
+  assert.match(card, /aria-expanded=\{expanded\}/);
+  assert.match(card, /aria-controls=\{`task-card-detail-\$\{task\.id\}`\}/);
+  assert.match(card, /aria-label=\{`\$\{expanded \? "收起" : "展开"\} \$\{task\.identifier\}: \$\{task\.title\}`\}/);
+  assert.match(card, /onClick=\{\(\) => setExpandedTaskId\(\(current\) => current === task\.id \? "" : task\.id\)\}/);
+  assert.doesNotMatch(card, /setSelectedId\(task\.id\)/, "卡片点击不再走整板替换");
+
+  // 展开区必须比重叠态更完整：状态 / 负责人 / 迭代 / 截止 / 会话（带状态）/ 描述全文。
+  for (const label of ["状态", "负责人", "迭代", "截止", "更新", "父任务", "子任务"]) {
+    assert.ok(detail.includes(`<dt>${label}</dt>`), `展开区要有「${label}」`);
+  }
+  assert.match(detail, /<span>\{issueStatusLabel\(task\.status\)\}<\/span>|<dd>\{issueStatusLabel\(task\.status\)\}<\/dd>/);
+  assert.match(detail, /\{description \|\| "还没有填写任务说明。"\}/, "描述全文常驻，截断版才是条件显示");
+  assert.match(detail, /task\.sessions\.map/);
+  assert.match(detail, /<small>\{sessionStatusLabel\(session\.status\)\}<\/small>/);
+
+  // 完整详情仍是既有那条路（面包屑 任务看板 › TASK-xxx 依赖 selectedId）。
+  assert.match(detail, /onClick=\{\(\) => onOpen\(task\.id\)\}/);
+  assert.match(detail, /查看完整详情/);
+  assert.match(card, /onOpen=\{setSelectedId\}/);
+  assert.match(host, /\{selected \? <IssueDetail/);
+
+  // 关闭路径逐条：面板内收起按钮、再次点击（toggle）、Esc、切视图/搜索/筛选、进详情、重开面板、拖拽开始。
+  assert.match(detail, /onCollapse\(\)/);
+  assert.match(card, /onCollapse=\{\(\) => setExpandedTaskId\(""\)\}/);
+  assert.match(host, /setExpandedTaskId\(""\);\s*\}, \[view, query, filterWorkspaceId, filters, selectedId, controller\.open, controller\.revision\]\);/);
+  assert.match(host, /onDragStart=\{\(event\) => \{\s*if \(event\.target !== event\.currentTarget\) return;[\s\S]{0,120}setExpandedTaskId\(""\);/);
+  assert.match(host, /if \(expandedTaskId\) \{\s*setExpandedTaskId\(""\);\s*return;\s*\}/);
+  // Esc 一次只退一层：新建对话框 → 完整详情 → 展开的卡片 → 离开看板。
+  const esc = host.slice(host.indexOf('if (event.key !== "Escape"'), host.indexOf("window.addEventListener(\"keydown\", onKey)"));
+  const escOrder = ["createOpen", "selectedId", "expandedTaskId"].map((name) => esc.indexOf(`if (${name}) {`));
+  assert.deepEqual(escOrder, [...escOrder].sort((a, b) => a - b), "三段都在，且按 对话框→详情→展开卡片 的次序退");
+  assert.ok(escOrder.every((index) => index >= 0), "Esc 的三段退层缺一不可");
+  assert.match(views, /inert=\{!open\}/, "收起后展开区不可聚焦，Tab 不会走进面板");
+  assert.match(views, /id=\{`task-card-detail-\$\{task\.id\}`\}/);
+
+  // 动效：0fr→1fr 原地加长，时长与曲线只取 token；reduce-motion 名单里带上面板。
+  const block = styles.slice(styles.indexOf("看板卡片就地展开"), styles.indexOf(".task-board-card-topline"));
+  assert.match(block, /\.task-board-card-detail \{\s*display: grid;\s*grid-template-rows: 0fr;/);
+  assert.match(block, /\.task-board-card\.is-open \.task-board-card-detail \{ grid-template-rows: 1fr; opacity: 1; \}/);
+  assert.match(block, /grid-template-rows var\(--motion-normal\) var\(--ease-in-out-smooth\)/);
+  assert.doesNotMatch(block, /\d+ms/, "不许写字面毫秒");
+  assert.match(styles, /\.task-board-card-detail,\s*\.task-board-card-detail-inner,\s*\.task-board-list-chevron/);
+  // 面板里的会话是完整版，收起态那排简版行让位，同一条不列两遍。
+  assert.match(block, /\.task-board-card\.is-open > \.task-board-session-list \{ display: none; \}/);
+});
+
+test("死导出清理：TaskBoardCompleteIcon 随「完成」死按钮一起消失", () => {
+  const icons = readFileSync(new URL("../src/web-ui/react/issues/task-board-icons.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(icons, /TaskBoardCompleteIcon/);
+});
+
+test("非点击收起后焦点还给触发按钮，看板与列表共用一份实现", () => {
+  const host = readFileSync(new URL("../src/web-ui/react/issues/task-board-host.tsx", import.meta.url), "utf8");
+  const views = readFileSync(new URL("../src/web-ui/react/issues/task-board-views.tsx", import.meta.url), "utf8");
+  // 实现只有一份，放在列表行同一侧，宿主 import 过来用。
+  assert.equal((views.match(/function useExpansionFocusReturn/g) ?? []).length, 1);
+  assert.match(host, /useExpansionFocusReturn,\n\} from "\.\/task-board-views"/);
+  assert.match(host, /const bindCardTrigger = useExpansionFocusReturn\(expandedTaskId\);/);
+  assert.match(host, /<button\s+type="button"\s+ref=\{bindCardTrigger\(task\.id\)\}\s+className="task-board-card-open"/);
+  assert.match(views, /const bindTrigger = useExpansionFocusReturn\(expandedId \?\? ""\);/);
+  assert.match(views, /const triggerRef = React\.useMemo\(\(\) => bindTrigger\(task\.id\), \[bindTrigger, task\.id\]\);/);
+  assert.equal((views.match(/ref=\{triggerRef\}/g) ?? []).length, 1, "列表行的标题按钮就是归还目标");
+  assert.match(views, /bindTrigger=\{bindTrigger\}/, "普通行与归档行都挂同一个登记器");
+  // 边界：只在「由开转关」时处理，且触发元素还在文档里、焦点确实被甩掉，才动焦点。
+  assert.match(views, /if \(!previous \|\| openId\) return;/);
+  assert.match(views, /if \(!trigger\?\.isConnected\) return;/, "行被筛掉、视图换掉时不动焦点");
+  assert.match(views, /if \(active && active !== document\.body && active !== document\.documentElement\) return;/,
+    "用户已经点到别处就不抢");
+});
+
+test("拖入「处理中」的确认文案是一句连贯的话，不靠裸换行分段", () => {
+  const host = readFileSync(new URL("../src/web-ui/react/issues/task-board-host.tsx", import.meta.url), "utf8");
+  // ui/dialog.tsx 把 description 当单个字符串渲染成一段（没有 pre-line），\n\n 只会变成一个空格。
+  assert.doesNotMatch(host, /description: `拖进「处理中」[\s\S]{0,120}?\\n\\n/);
+  assert.match(host, /不是指派框里新写的提示词：「\$\{preview\}」`/);
+});
+
+test("看板行不写「默认模型」：default 哨兵渲染成服务端默认模型的名字", () => {
+  // 目录桩：Claude 配了默认模型 opus（目录里那个 default 项文案里没有名字）。
+  const catalog = normalizeIssueModelCatalog({
+    models: [{ id: "default", label: "跟随 Claude Code 默认" }, { id: "opus", label: "opus（最新 Opus）" }],
+    defaultModels: { claude: "opus" },
+  });
+  const session = (over: Partial<IssueSessionSummary> = {}): IssueSessionSummary => ({
+    id: "s1",
+    provider: "claude",
+    sessionKind: "structured",
+    title: "",
+    status: "idle",
+    cwd: "/repo",
+    model: "default",
+    thinkingEffort: "standard",
+    ...over,
+  });
+  const agent = { provider: "claude" as const, model: "default", thinkingEffort: "standard", mode: "default" as const };
+  const html = renderToStaticMarkup(createElement(TaskBoardAgentSessionList, {
+    sessions: [session()],
+    assigned: agent,
+    catalog,
+  }));
+  assert.match(html, /Claude/);
+  assert.match(html, /opus/, "组头写默认模型的名字");
+  assert.doesNotMatch(html, /默认模型/, "不再有占位文案");
+  // 目录里只有「跟随 Claude Code 默认」这种没名字的文案时同样不写占位，只省掉模型段。
+  const anonymous = renderToStaticMarkup(createElement(TaskBoardAgentSessionList, {
+    sessions: [session()],
+    assigned: agent,
+    catalog: normalizeIssueModelCatalog({ models: [{ id: "default", label: "跟随 Claude Code 默认" }] }),
+  }));
+  assert.doesNotMatch(anonymous, /默认模型|跟随 Claude Code 默认/);
+  // 目录没到时只省掉模型段，不落回占位文案。
+  const bare = renderToStaticMarkup(createElement(TaskBoardAgentSessionList, {
+    sessions: [session()],
+    assigned: agent,
+    catalog: null,
+  }));
+  assert.doesNotMatch(bare, /默认模型/);
 });

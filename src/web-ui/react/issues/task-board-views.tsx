@@ -16,11 +16,14 @@ import {
   issueAgentEffortLabel,
   issueAgentModeLabel,
   issueAgentProviderLabel,
+  issueAgentProviderModelLine,
+  type IssueModelCatalog,
   issueBoardStats,
   issueDueStamp,
   issueFilterCount,
   issueGanttRange,
   issueGanttSpan,
+  issueHideStatusFilterLabel,
   issueIsOverdue,
   issueLabelColor,
   issueLabelName,
@@ -28,13 +31,13 @@ import {
   issuePriorityLabel,
   issueProgressSeries,
   issueSessionRunning,
+  issueStatusLabel,
   listIssueAgents,
   type IssueBoardDisplay,
   type IssueBoardFilters,
   type IssueGanttZoom,
 } from "./task-board-agent";
 import {
-  TaskBoardCompleteIcon,
   TaskBoardConversationIcon,
   TaskBoardDueIcon,
   TaskBoardFilterIcon,
@@ -45,6 +48,8 @@ import {
   TaskBoardStatusIcon,
 } from "./task-board-icons";
 import type { IssueSessionSummary, WandTaskListed } from "./task-board-repository";
+import { wandModelDisplayName } from "../model-catalog";
+import { useWandModelCatalog } from "../use-model-catalog";
 
 export function TaskBoardStatusGlyph({ status }: { status: WandTaskStatus }): React.ReactElement {
   return <span className={`task-board-status-glyph is-${status}`} aria-hidden="true">
@@ -84,6 +89,7 @@ export function TaskBoardConversationButton({
   sessions: IssueSessionSummary[];
   onOpen?: (sessionId: string) => void;
 }): React.ReactElement | null {
+  const catalog = useWandModelCatalog();
   if (sessions.length === 0) return null;
   const multiple = sessions.length > 1;
   if (!multiple) {
@@ -126,7 +132,7 @@ export function TaskBoardConversationButton({
       <ProviderLogo provider={session.provider} className="task-board-agent-logo"/>
       <span>
         <strong>{session.title || issueAgentProviderLabel(session.provider)}</strong>
-        <small>{issueAgentProviderLabel(session.provider)}{session.model ? ` · ${session.model}` : ""}</small>
+        <small>{issueAgentProviderModelLine({ provider: session.provider, model: session.model }, catalog)}</small>
       </span>
     </button>)}
   </WandPopover>;
@@ -301,17 +307,48 @@ export function TaskBoardArchiveFolder({
   </div>;
 }
 
-function taskStatusLabel(status: WandTaskStatus): string {
-  return ISSUE_COLUMNS.find((column) => column.status === status)?.label
-    ?? (status === "archived" ? ISSUE_ARCHIVE_COLUMN.label : status);
-}
-
-function sessionActivityLabel(status: string): string {
+/**
+ * 会话状态的界面名，唯一来源（原来这里和「已指派的 Agent」列表各有一份映射，同概念两套词）。
+ * 覆盖 SessionStatus 的全部取值 + 看板用到的 thinking / waiting-input；认不出来才回退原值，
+ * 空值给「会话」，不再一律显示「空闲」把异常状态藏起来。
+ */
+function sessionStatusLabel(status: string): string {
   if (status === "running" || status === "thinking") return "进行中";
   if (status === "waiting-input") return "等待输入";
+  if (status === "idle") return "空闲";
   if (status === "exited" || status === "stopped") return "已结束";
   if (status === "failed") return "失败";
-  return "空闲";
+  return status || "会话";
+}
+
+/**
+ * 就地展开收起后的「焦点归还」，看板卡片与列表行共用一份。
+ *
+ * 面板收起时是带着焦点一起变 inert 的（用户没点收起，而是改了筛选、换了视图、按了 Esc），
+ * 浏览器会把焦点丢回 body，键盘用户就此失去位置。这里记住展开那一刻的触发按钮，
+ * 只在「由开转关」且焦点确实被甩掉时还回去：
+ *   - 触发按钮已经不连着文档（行被筛掉、整块视图换掉）→ 不动焦点；
+ *   - 焦点已经在别的元素上（搜索框、下一张卡片、用户刚点的地方）→ 不抢焦点。
+ * 归还只在同一个 openId 从有到无时触发；换成别的 id 说明是点开下一张，焦点本来就在新触发点上。
+ */
+export function useExpansionFocusReturn(openId: string): (id: string) => (element: HTMLElement | null) => void {
+  const triggers = React.useRef(new Map<string, HTMLElement>());
+  const lastOpenId = React.useRef("");
+  const bind = React.useCallback((id: string) => (element: HTMLElement | null): void => {
+    if (element) triggers.current.set(id, element);
+    else triggers.current.delete(id);
+  }, []);
+  React.useEffect(() => {
+    const previous = lastOpenId.current;
+    lastOpenId.current = openId;
+    if (!previous || openId) return;
+    const trigger = triggers.current.get(previous);
+    if (!trigger?.isConnected) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && active !== document.documentElement) return;
+    trigger.focus();
+  }, [openId]);
+  return bind;
 }
 
 function TaskBoardListRow({
@@ -321,6 +358,7 @@ function TaskBoardListRow({
   onToggle,
   onOpen,
   onOpenSession,
+  bindTrigger,
 }: {
   task: WandTaskListed;
   parentLabel?: string;
@@ -328,8 +366,10 @@ function TaskBoardListRow({
   onToggle(): void;
   onOpen(id: string): void;
   onOpenSession?: (sessionId: string) => void;
+  bindTrigger(id: string): (element: HTMLElement | null) => void;
 }): React.ReactElement {
   const description = task.description.trim();
+  const triggerRef = React.useMemo(() => bindTrigger(task.id), [bindTrigger, task.id]);
   return <article
     className={classNames("task-board-list-row", expanded && "is-open", task.status === "archived" && "is-archived")}
     onClick={(event) => {
@@ -339,6 +379,7 @@ function TaskBoardListRow({
   >
     <button
       type="button"
+      ref={triggerRef}
       className="task-board-list-title"
       aria-expanded={expanded}
       aria-controls={`task-list-detail-${task.id}`}
@@ -361,7 +402,7 @@ function TaskBoardListRow({
     <div className="task-board-list-detail" id={`task-list-detail-${task.id}`} inert={!expanded}>
       <div className="task-board-list-detail-inner">
         <p>
-          <span>{taskStatusLabel(task.status)}</span>
+          <span>{issueStatusLabel(task.status)}</span>
           <span>更新于 {formatIssueStamp(task.updatedAt)}</span>
         </p>
         {description ? <p className="task-board-list-description">{description}</p> : null}
@@ -372,7 +413,7 @@ function TaskBoardListRow({
                 <button type="button" onClick={() => onOpenSession?.(session.id)}>
                   <ProviderLogo provider={session.provider} className="task-board-agent-logo"/>
                   <span>{session.title || issueAgentProviderLabel(session.provider)}</span>
-                  <small>{sessionActivityLabel(session.status)}</small>
+                  <small>{sessionStatusLabel(session.status)}</small>
                 </button>
               </li>
             ))}
@@ -384,6 +425,70 @@ function TaskBoardListRow({
       </div>
     </div>
   </article>;
+}
+
+/**
+ * 看板卡片的就地展开面板，和 TaskBoardListRow 同一套语义（aria-expanded + aria-controls + inert），
+ * 差别有两处：卡片整面都是触发区，所以面板里必须自带「收起」按钮；
+ * 面板要比重叠态多东西，因此列出的是带状态与运行目录的会话，而不是卡片上那排可拖拽的简版行。
+ */
+export function TaskBoardCardDetail({
+  task,
+  open,
+  parentLabel,
+  childCount,
+  onOpen,
+  onCollapse,
+  onOpenSession,
+}: {
+  task: WandTaskListed;
+  open: boolean;
+  parentLabel?: string;
+  childCount: number;
+  onOpen(id: string): void;
+  onCollapse(): void;
+  onOpenSession?: (sessionId: string) => void;
+}): React.ReactElement {
+  const description = task.description.trim();
+  const agent = task.agent;
+  const assignee = agent
+    ? `${issueAgentProviderLabel(agent.provider)} · ${issueAgentModeLabel(agent.mode)}`
+    : "未指派";
+  return <div className="task-board-card-detail" id={`task-card-detail-${task.id}`} inert={!open}>
+    <div className="task-board-card-detail-inner">
+      <dl className="task-board-card-detail-fields">
+        <div><dt>状态</dt><dd>{issueStatusLabel(task.status)}</dd></div>
+        <div><dt>负责人</dt><dd>{assignee}</dd></div>
+        <div><dt>迭代</dt><dd>{task.milestone?.name ?? "默认迭代"}</dd></div>
+        <div><dt>截止</dt><dd>{task.dueDate ? issueDueStamp(task.dueDate) : "未设置"}</dd></div>
+        <div><dt>更新</dt><dd>{formatIssueStamp(task.updatedAt)}</dd></div>
+        {parentLabel ? <div><dt>父任务</dt><dd>{parentLabel}</dd></div> : null}
+        {childCount > 0 ? <div><dt>子任务</dt><dd>{childCount} 个</dd></div> : null}
+      </dl>
+      <p className="task-board-card-detail-body">{description || "还没有填写任务说明。"}</p>
+      {task.sessions.length > 0 ? (
+        <ul className="task-board-card-detail-sessions">
+          {task.sessions.map((session) => (
+            <li key={session.id}>
+              <button type="button" onClick={() => onOpenSession?.(session.id)} title={session.cwd}>
+                <ProviderLogo provider={session.provider} className="task-board-agent-logo"/>
+                <span>{session.title || issueAgentProviderLabel(session.provider)}</span>
+                <small>{sessionStatusLabel(session.status)}</small>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : <p className="task-board-card-detail-note">还没有关联会话。</p>}
+      <div className="task-board-card-detail-actions">
+        <button type="button" className="task-board-card-detail-open" onClick={() => onOpen(task.id)}>
+          查看完整详情
+        </button>
+        <button type="button" className="task-board-card-detail-collapse" onClick={onCollapse}>
+          收起
+        </button>
+      </div>
+    </div>
+  </div>;
 }
 
 export function TaskBoardListView({
@@ -406,6 +511,7 @@ export function TaskBoardListView({
   onOpenSession?: (sessionId: string) => void;
 }): React.ReactElement {
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
+  const bindTrigger = useExpansionFocusReturn(expandedId ?? "");
   const toggleExpanded = (id: string): void => {
     setExpandedId((current) => current === id ? null : id);
   };
@@ -441,6 +547,7 @@ export function TaskBoardListView({
             onToggle={() => toggleExpanded(task.id)}
             onOpen={onOpen}
             onOpenSession={onOpenSession}
+            bindTrigger={bindTrigger}
           />)}
           {column.status === "done" ? <TaskBoardArchiveFolder
             count={archived.length}
@@ -456,6 +563,7 @@ export function TaskBoardListView({
                 onToggle={() => toggleExpanded(task.id)}
                 onOpen={onOpen}
                 onOpenSession={onOpenSession}
+                bindTrigger={bindTrigger}
               />)}
             </div>
           </TaskBoardArchiveFolder> : null}
@@ -519,7 +627,7 @@ export function TaskBoardDashboard({
     <div className="task-board-dashboard-content">
       <div className="task-board-dashboard-overview">
         <header className="task-board-dashboard-heading">
-          <h1>{projectName}</h1>
+          <h2 className="task-board-dashboard-title">{projectName}</h2>
           <p className="task-board-hero-value">
             <strong>{stats.remaining}</strong>
             <span>未完成</span>
@@ -531,7 +639,7 @@ export function TaskBoardDashboard({
       </div>
       <div className="task-board-metrics">
         {metric("处理中", stats.doing, "doing")}
-        {metric("等你确认", stats.done, "done")}
+        {metric(issueStatusLabel("done"), stats.done, "done")}
         {metric("等待认领", stats.todo, "todo")}
         {metric("已逾期", stats.overdue, "overdue")}
         {metric("高优先级", stats.high, "high")}
@@ -542,7 +650,7 @@ export function TaskBoardDashboard({
           <div className="task-board-progress-legend">
             <span className="tone-scope"><i/>范围 <strong>{stats.total}</strong></span>
             <span className="tone-started"><i/>已开始 <strong>{stats.doing + stats.done}</strong></span>
-            <span className="tone-completed"><i/>已确认 <strong>{stats.done}</strong></span>
+            <span className="tone-completed"><i/>{issueStatusLabel("done")} <strong>{stats.done}</strong></span>
           </div>
         </header>
         <svg className="task-board-progress-chart" viewBox="0 0 426 272" role="img" aria-label="任务进度图">
@@ -626,7 +734,7 @@ export function TaskBoardGantt({
     <div className="task-board-gantt-toolbar">
       <label className="task-board-gantt-hide">
         <input type="checkbox" checked={hideCompleted} onChange={(event) => onHideCompleted(event.currentTarget.checked)}/>
-        隐藏已确认
+        {issueHideStatusFilterLabel("done")}
       </label>
       <WandStretchTabs
         className="task-board-gantt-zooms"
@@ -729,21 +837,6 @@ export function TaskBoardContextMenu({
   </div>;
 }
 
-export function TaskBoardCompleteButton({
-  onClick,
-}: {
-  onClick(): void;
-}): React.ReactElement {
-  return <button type="button" className="task-board-card-complete" onClick={(event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    onClick();
-  }}>
-    <TaskBoardCompleteIcon/>
-    完成
-  </button>;
-}
-
 export function TaskBoardAgentChip({
   agent,
   running = false,
@@ -777,22 +870,16 @@ export function TaskBoardAgentChips({
   />)}</>;
 }
 
-function issueSessionStatusLabel(status: string): string {
-  if (status === "running") return "进行中";
-  if (status === "idle") return "空闲";
-  if (status === "exited") return "已结束";
-  if (status === "failed") return "失败";
-  return status || "会话";
-}
-
 export function TaskBoardAgentSessionList({
   sessions,
   assigned,
   onOpenSession,
+  catalog,
 }: {
   sessions: IssueSessionSummary[];
   assigned: WandTaskAgent | null;
   onOpenSession?: (sessionId: string) => void;
+  catalog?: IssueModelCatalog | null;
 }): React.ReactElement {
   const groups = groupIssueSessionsByAgent(sessions, assigned);
   if (groups.length === 0) {
@@ -805,7 +892,11 @@ export function TaskBoardAgentSessionList({
       <header className="task-board-agent-group-head">
         <ProviderLogo provider={group.agent?.provider ?? group.provider} className="task-board-agent-logo"/>
         <strong>{issueAgentProviderLabel(group.agent?.provider ?? group.provider)}</strong>
-        {group.agent ? <span>{group.agent.model === "default" ? "默认模型" : group.agent.model} · {issueAgentEffortLabel(group.agent.thinkingEffort)} · {issueAgentModeLabel(group.agent.mode)}</span> : null}
+        {group.agent ? <span>{[
+          wandModelDisplayName(catalog ?? null, group.agent.provider, group.agent.model),
+          issueAgentEffortLabel(group.agent.thinkingEffort),
+          issueAgentModeLabel(group.agent.mode),
+        ].filter(Boolean).join(" · ")}</span> : null}
         <b>{group.sessions.length}</b>
       </header>
       {group.sessions.length === 0
@@ -819,7 +910,7 @@ export function TaskBoardAgentSessionList({
             <span className={classNames("task-board-agent-session-status", issueSessionRunning(session.status) && "is-running")}/>
             <strong>{session.title || issueAgentProviderLabel(session.provider)}</strong>
             <small>
-              {[session.model && session.model !== "default" ? session.model : null, issueSessionStatusLabel(session.status)]
+              {[wandModelDisplayName(catalog ?? null, session.provider, session.model), sessionStatusLabel(session.status)]
                 .filter(Boolean)
                 .join(" · ")}
             </small>

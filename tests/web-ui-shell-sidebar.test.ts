@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -9,6 +9,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   MemoryUiAdapter,
+  SHELL_SESSION_DELETE_LABEL,
+  SHELL_WORKTREE_CLEANUP_LABEL,
+  SHELL_WORKTREE_MERGE_LABEL,
   ShellSidebar,
   UiStoreProvider,
   getShellSidebarEntryActions,
@@ -206,7 +209,6 @@ test("ShellSidebar SSR preserves native ids, key classes, groups, and action con
   const requiredIds = [
     "sessions-drawer-backdrop",
     "sessions-drawer",
-    "sidebar-collapse-btn",
     "close-drawer-button",
     "sessions-panel",
     "sessions-list",
@@ -220,6 +222,10 @@ test("ShellSidebar SSR preserves native ids, key classes, groups, and action con
   for (const id of requiredIds) {
     assert.match(html, new RegExp(`id="${id}"`), `missing #${id}`);
   }
+  // 抽屉态只有一个关闭入口：抽屉态没有「折叠成窄栏」形态（sidebarCollapsed 在 sidebarDrawer 下恒为 false），
+  // 原先的 chevron 与 ✕ 派发同一个 layout.drawer.close，且被 CSS 藏成 display:none 的死节点。
+  assert.doesNotMatch(html, /id="sidebar-collapse-btn"/);
+  assert.equal((html.match(/id="close-drawer-button"/g) ?? []).length, 1);
   assert.doesNotMatch(html, /id="switch-server-button"/);
   assert.doesNotMatch(html, /id="sidebar-pin-btn"/);
   // 统一任务视图：不再有「会话/任务」切换，也不再有独立的新会话主按钮。
@@ -394,3 +400,53 @@ test("ShellSidebar source uses the UiStore hooks and no forbidden legacy seam", 
   assert.match(source, /layout\.drawer\.group\.set/);
   assert.doesNotMatch(source, /innerHTML|querySelector|getElementById|browser\/state|@radix-ui\//);
 });
+
+test("worktree / 删除会话的动作名只有一个来源，顶栏和侧栏都引用常量", () => {
+  // 这三条文案曾经是顶栏与侧栏各写一份，改一处漏一处；现在只允许从 shell-sidebar 导出。
+  const sidebar = readFileSync(
+    path.join(root, "src", "web-ui", "react", "shell", "shell-sidebar.tsx"), "utf8");
+  const topbar = readFileSync(
+    path.join(root, "src", "web-ui", "react", "shell", "shell-topbar.tsx"), "utf8");
+  const labels: Array<[string, string, string]> = [
+    ["SHELL_WORKTREE_MERGE_LABEL", SHELL_WORKTREE_MERGE_LABEL, "合并到主分支…"],
+    ["SHELL_WORKTREE_CLEANUP_LABEL", SHELL_WORKTREE_CLEANUP_LABEL, "重试 worktree 清理"],
+    ["SHELL_SESSION_DELETE_LABEL", SHELL_SESSION_DELETE_LABEL, "删除会话"],
+  ];
+  for (const [name, value, text] of labels) {
+    assert.equal(value, text, `${name} 的动作名不许悄悄换词`);
+    assert.match(sidebar, new RegExp(`export const ${name} = `), `${name} 由 shell-sidebar 导出`);
+    assert.ok((topbar.match(new RegExp(name, "g")) ?? []).length >= 2,
+      `topbar 要 import 并使用 ${name}，不能再写字面量`);
+    assert.ok((sidebar.match(new RegExp(`${name}\\b`, "g")) ?? []).length >= 2,
+      `sidebar 要在导出之外实际用上 ${name}`);
+    assert.equal(topbar.includes(`"${text}"`), false, `topbar 里不该再出现 ${text} 的字面量`);
+  }
+});
+
+// 侧栏时间戳是整站最后一处写死 locale 的日期格式（第 24 步 ①-丁 登记）。
+// 英文环境的用户在同一页里看到两种日期写法比看到「非本语言的格式」更糟。
+test("侧栏日期跟浏览器 locale 走，web 源码里没有写死的 locale", () => {
+  const sidebar = readFileSync(
+    path.join(root, "src", "web-ui", "react", "shell", "shell-sidebar.tsx"), "utf8");
+  assert.match(sidebar, /parsed\.toLocaleDateString\(\[\], \{ month: "numeric", day: "numeric" \}\)/,
+    "空 locale 数组 = 跟浏览器走");
+  assert.doesNotMatch(sidebar, /toLocale\w+\("zh-CN"/, "侧栏不许再写死 zh-CN");
+
+  const formatters = /toLocale(?:String|DateString|TimeString)\(\s*("[^"]+")/g;
+  const offenders: string[] = [];
+  for (const file of localeFormattableSources(path.join(root, "src", "web-ui"))) {
+    const hits = [...readFileSync(file, "utf8").matchAll(formatters)];
+    if (hits.length) offenders.push(`${file.slice(root.length + 1)}: ${hits.map((h) => h[1]).join(", ")}`);
+  }
+  assert.deepEqual(offenders, [], "日期/时刻格式化只能传空 locale");
+});
+
+/** 前端源码（不含生成的 bundle / 内联资产），用来扫有没有重新写死 locale。 */
+function localeFormattableSources(dir: string, into: string[] = []): string[] {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) localeFormattableSources(full, into);
+    else if (/\.tsx?$/.test(entry.name)) into.push(full);
+  }
+  return into;
+}

@@ -44,6 +44,19 @@ export interface ShellSidebarEntryActions {
   readonly cleanup: UiAction | null;
 }
 
+/**
+ * worktree / 会话动作的界面名，唯一来源。
+ * 侧栏条目动作与顶栏「更多」菜单是同一批 UiAction，之前各写一套词序
+ * （「重试清理 worktree」⇄「重试 worktree 清理」），这里收口。
+ * 「重试 worktree 清理」与 `worktree-merge/model.ts` 的提示语、
+ * `tests/web-ui-worktree-merge.test.ts` 的钉保持一致；「删除会话」对齐点击后弹出的
+ * 确认框标题（`browser/shell-commands.ts` 的 `confirmDelete(…, { title: "删除会话" })`）；
+ * 「合并到主分支…」保留省略号，因为这个动作总是先打开确认弹层。
+ */
+export const SHELL_WORKTREE_MERGE_LABEL = "合并到主分支…";
+export const SHELL_WORKTREE_CLEANUP_LABEL = "重试 worktree 清理";
+export const SHELL_SESSION_DELETE_LABEL = "删除会话";
+
 export function getSidebarEntryTarget(entry: Readonly<UiSessionVm>): UiManageTarget {
   if (entry.source.endsWith("-history")) return entry.source as UiManageTarget;
   return "session";
@@ -209,7 +222,10 @@ function formatEntryTime(entry: Readonly<UiSessionVm>): string {
   if (delta < 3_600_000) return `${Math.floor(delta / 60_000)}分钟前`;
   if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)}小时前`;
   if (delta < 604_800_000) return `${Math.floor(delta / 86_400_000)}天前`;
-  return parsed.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
+  // 日期格式跟着浏览器 locale 走（和 ai-teams/team-chat-view.tsx 的 chatTurnClock、
+  // teams-page.tsx 的运行记录同一口径）：写死 "zh-CN" 会让英文环境的用户在同一页里
+  // 看到两种日期写法。
+  return parsed.toLocaleDateString([], { month: "numeric", day: "numeric" });
 }
 
 function ProviderMark({ entry }: { entry: Readonly<UiSessionVm> }) {
@@ -385,7 +401,7 @@ function SessionEntry({
                   action={actions.merge}
                   dispatch={dispatch}
                   actionName="worktree-merge"
-                  label="合并到主分支"
+                  label={SHELL_WORKTREE_MERGE_LABEL}
                   icon="merge"
                   className="merge-btn"
                   disabled={entry.status === "running" || entry.worktree?.mergeStatus === "merging"}
@@ -397,7 +413,7 @@ function SessionEntry({
                   action={actions.cleanup}
                   dispatch={dispatch}
                   actionName="worktree-cleanup"
-                  label="重试清理 worktree"
+                  label={SHELL_WORKTREE_CLEANUP_LABEL}
                   icon="trash"
                   className="merge-btn"
                   data={data}
@@ -410,7 +426,7 @@ function SessionEntry({
                   actionName={isHistory
                     ? provider === "claude" ? "delete-history" : `delete-${provider}-history`
                     : "delete-session"}
-                  label="删除会话"
+                  label={SHELL_SESSION_DELETE_LABEL}
                   icon="trash"
                   className="delete-btn"
                   data={data}
@@ -762,29 +778,16 @@ export function ShellSidebar() {
                 />
               )}
               {snapshot.layout.sidebarDrawer && (
-                <>
-                  <WandIconButton
-                    id="sidebar-collapse-btn"
-                    className="legacy-sidebar-collapse"
-                    title="收起侧栏"
-                    aria-label="收起侧栏"
-                    tabIndex={-1}
-                    size="medium"
-                    onClick={() => void dispatch({ type: "layout.drawer.close" })}
-                  >
-                    <WandIcon name="chevronLeft"/>
-                  </WandIconButton>
-                  <WandIconButton
-                    id="close-drawer-button"
-                    className="sidebar-close"
-                    aria-label="关闭侧栏"
-                    title="关闭侧栏"
-                    size="medium"
-                    onClick={() => void dispatch({ type: "layout.drawer.close" })}
-                  >
-                    <WandIcon name="close"/>
-                  </WandIconButton>
-                </>
+                <WandIconButton
+                  id="close-drawer-button"
+                  className="sidebar-close"
+                  aria-label="关闭侧栏"
+                  title="关闭侧栏"
+                  size="medium"
+                  onClick={() => void dispatch({ type: "layout.drawer.close" })}
+                >
+                  <WandIcon name="close"/>
+                </WandIconButton>
               )}
             </div>
           </div>

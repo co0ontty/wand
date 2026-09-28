@@ -232,13 +232,9 @@ config_value() {
   ' "$CONFIG_PATH" "$key" "$fallback"
 }
 
-# 客户端与 Render 都是 submodule。Render 缺失时 `npm run build` 只会警告并跳过
-# （没拉子模块的开发机不该因此构建失败），结果是包里没有 dist/native/，
-# 线上 render.engine=auto 静默回退 legacy ——「更新了但 Rust 引擎没生效」正是这么来的。
-# 这里前置补齐，让它无法静默发生。
+# 服务端构建只需要 render-bin 的固定版本产物，Rust 源码与原生客户端按需检出。
 ensure_render_submodules() {
   local missing=()
-  [[ -f "$REPO_ROOT/render/Cargo.toml" ]] || missing+=("render")
   [[ -f "$REPO_ROOT/render-bin/manifest.json" ]] || missing+=("render-bin")
   if [[ "${#missing[@]}" -eq 0 ]]; then
     return 0
@@ -642,6 +638,12 @@ print_daemon_lines() {
 
 refresh_wand_runtime
 
+# Refuse a wrong active npm prefix before version rewrites or touching a live
+# service. This is especially important when migrating an older nvm install.
+if [[ "$ACTION" == "install-and-restart" ]]; then
+  "$NODE_BIN" "$REPO_ROOT/scripts/check-node-version.js" || die "请先运行 nvm use，再重新构建/安装。"
+fi
+
 case "$ACTION" in
   attach)
     attach_to_running_service
@@ -729,12 +731,12 @@ if [[ "$DO_BUILD" == "1" ]]; then
   BUILD_LOG="$(mktemp -t wand-build.XXXXXX)"
   if ! WAND_BUILD_CHANNEL=beta "$NPM_FOR_WAND" run build >"$BUILD_LOG" 2>&1; then
     tail -30 "$BUILD_LOG" | sed 's/^/  /'
-    # 内联 web 资产的预算门（scripts/check-bundle-budget.js）是发布门禁，不是偶发报错，
-    # 直接把两种合法出路写出来（以前这里只会丢一段 npm 输出就退出）。
-    if grep -q "bundle-budget" "$BUILD_LOG"; then
-      die "构建失败：内联 web 资产超出 bundle 预算。
-   要么瘦身（懒加载重型面板 / 删死代码），要么在同一个提交里上调 scripts/check-bundle-budget.js
-   的 BUDGET 并写明原因（预算只降不升，松绑要留证据）。完整日志：$BUILD_LOG"
+    # npm run build 的命令回显本身就含 check-bundle-budget.js；只有预算检查明确
+    # 打出 FAILED 标记，才能把构建失败归因于预算（而非 tsc / bundler 等）。
+    if grep -q '^\[bundle-budget\] FAILED:' "$BUILD_LOG"; then
+      die "构建失败：Web 资产超出首载/复访 bundle 预算。
+   检查上方具体超限项：瘦身、按需加载或在同一个提交里调整 scripts/check-bundle-budget.js
+   的 BUDGET 并说明首载与缓存影响。完整日志：$BUILD_LOG"
     fi
     die "构建失败。完整日志：$BUILD_LOG"
   fi

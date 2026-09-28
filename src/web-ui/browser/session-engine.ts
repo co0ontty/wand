@@ -1,4 +1,4 @@
-import { state, writeStoredBoolean } from "./state";
+import { composer, state, writeStoredBoolean } from "./state";
 import { createSessionReads } from "./session-reads";
 import { parseJsonResponse } from "../react/http-adapter";
 import { publishWandModelCatalog, startWandModelCatalogPolling } from "../react/model-catalog";
@@ -6,7 +6,6 @@ import { compactThinkingLabel, dynamicThinkingChoices } from "../thinking-effort
 import { getErrorMessage } from "../../error-utils.js";
 
 import { mergeBlockWindowedMessages, mergeWindowedMessages } from "./message-reconciliation";
-import { shouldPersistComposerDraft } from "./composer-draft";
 import { ensureChatMessagesContainer, extractToolResultText, parseMessages, renderChat, scheduleChatRender } from "./chat-render";
 import { bindChatScrollListener, normalizeStructuredSnapshot, persistSelectedId, restoreStructuredQueue, saveStructuredQueue, stripRenderOnlyStructuredMessages, syncStructuredQueueFromSession, updateChatUnreadBubble } from "./chat-scroll";
 import "./events";
@@ -30,6 +29,7 @@ import { syncBrowserComposerConfig } from "./composer-config-adapter";
 import { syncBrowserComposerAttachments } from "./composer-attachments-adapter";
 import { syncBrowserComposerSkills } from "./composer-skills-adapter";
 import {
+  modelDisplayName,
   normalizeAvailableComposerValue,
   normalizeComposerModelValue,
 } from "./composer-select-values";
@@ -216,8 +216,11 @@ const sessionReads = createSessionReads();
         return state.sessionTool || state.preferredCommand || "claude";
       }
 
-      export function getComposerPlaceholder(session, terminalInteractive) {
-        // Keep placeholders short so they don't wrap on portrait mobile screens.
+      // 输入区原位结果行的空闲文案：教快捷键。已死的 .input-hint 以前只在发送前后
+      // 被写这几个字，节点根本不在种子里，所以这句话从来没显示过。
+      export const COMPOSER_IDLE_HINT = "Enter 发送 · Shift+Enter 换行";
+
+      export function getComposerPlaceholder(session, terminalInteractive) {        // Keep placeholders short so they don't wrap on portrait mobile screens.
         // Only show informative state hints; drop the redundant "send to X" labels.
         if (terminalInteractive) return "键盘输入直通终端 · Enter 提交";
         // 只有真正进入终止态（exited / failed / stopped）才提示"会话已结束"。
@@ -350,23 +353,18 @@ const sessionReads = createSessionReads();
       }
 
       export function getModelDisplayLabel(model, session) {
-        var selected = model || "";
-        var models = getModelsForCurrentProvider(session);
-        if (!selected || selected === "default") {
-          for (var j = 0; j < models.length; j++) {
-            if (models[j].id === "default") return models[j].label || models[j].id;
-          }
-          return "默认";
-        }
-        for (var i = 0; i < models.length; i++) {
-          if (models[i].id === selected) return models[i].label || models[i].id;
-        }
-        return selected;
+        // 「跟随默认」不是模型名：解析成真正会用的那个模型（口径见 modelDisplayName）。
+        var label = modelDisplayName(
+          model,
+          getModelsForCurrentProvider(session),
+          getConfigDefaultModelForProvider(getProviderForSession(session))
+        );
+        return label || "默认";
       }
 
       export function getShortModelLabel(model, session) {
+        // getModelDisplayLabel 永不返回空串，所以这里直接用它的结果做压缩。
         var label = getModelDisplayLabel(model, session);
-        if (!label || label === "跟随服务端默认") return "默认";
         var cutAt = label.search(/[（(]/);
         if (cutAt > 0) label = label.slice(0, cutAt).trim();
         var slash = label.lastIndexOf("/");
@@ -1257,15 +1255,7 @@ const sessionReads = createSessionReads();
             var sessionIds = new Set(serverSessions.map(function(s) { return s.id; }));
             var previousSelectedId = state.selectedId;
 
-            Object.keys(state.drafts).forEach(function(id) {
-              if (!sessionIds.has(id)) delete state.drafts[id];
-            });
-            Object.keys(state.attachmentsBySession).forEach(function(id) {
-              if (!sessionIds.has(id)) {
-                discardPendingAttachments(state.attachmentsBySession[id]);
-                delete state.attachmentsBySession[id];
-              }
-            });
+            composer.retain(sessionIds);
             Object.keys(state.terminalStatesBySession).forEach(function(id) {
               if (!sessionIds.has(id)) delete state.terminalStatesBySession[id];
             });
@@ -1362,7 +1352,6 @@ const sessionReads = createSessionReads();
         // 只保留 legacy-owned 的槽内节点：#output 是 React 渲染的槽根（class 归
         // React），这里只用来判断终端实例是否需要初始化/重挂。
         var terminalContainer = document.getElementById("output");
-        var stopBtn = document.getElementById("stop-button");
 
         // 结构化会话没有 PTY。这里若初始化终端，initTerminal 的测量准备会
         // 直接触碰 #output 可见性，并可能与 React 外壳的 chat 投影打架。
@@ -1395,12 +1384,10 @@ const sessionReads = createSessionReads();
         }
 
         // #output / #chat-output / .input-panel / #blank-chat 的隐藏类归 React
-        // Shell 所有；legacy 侧只剩 #stop-button 是真正 legacy-owned 的槽内节点。
-        // v2: 停止按钮不在这里统一展示 —— 由 updateInteractiveControls()
-        // 按 computeRunningSignal 判断「真在跑」时才露出（applyCurrentView 末尾会调用）。
-        if (!selectedSession) {
-          if (stopBtn) stopBtn.classList.add("hidden");
-        }
+        // Shell 所有。composer 里 legacy 真正拥有的那颗发送/停止合一按钮也不在这里
+        // 插手：相位（空闲 / 运行中可停止 / 发送结果）统一由 updateInteractiveControls()
+        // 按 computeRunningSignal 算，applyCurrentView 末尾会调用它。无会话时整条
+        // .input-panel 已被 React 收起，不需要再单独藏一个停止节点。
         syncComposerModeSelect();
         syncComposerModelSelect(getSelectedSession());
         applyCurrentView();
@@ -1578,8 +1565,7 @@ const sessionReads = createSessionReads();
           if (previousInput) {
             // 发送结果未知时回填的草稿只活在内存里；切走时再顺手写一次 localStorage
             // 就等于把它重新变成持久草稿，刷新后又会「自己出现」。
-            var persistPreviousDraft = !state.draftsMemoryOnly[previousSessionId];
-            setDraftValueForSession(previousSessionId, previousInput.value, true, persistPreviousDraft);
+            composer.edit(previousSessionId, { preserve: previousInput.value });
           }
         }
         if (state.selectedId !== id) {
@@ -2534,53 +2520,18 @@ const sessionReads = createSessionReads();
         if (isImageType(file.type)) {
           entry.previewUrl = URL.createObjectURL(file);
         }
-        getPendingAttachments(state.selectedId, true).push(entry);
+        composer.edit(state.selectedId, { addAttachment: entry });
         renderAttachmentPreview();
       }
 
       export function removePendingAttachment(index) {
-        var items = getPendingAttachments(state.selectedId);
-        var removed = items.splice(index, 1);
-        if (removed.length && removed[0].previewUrl) {
-          URL.revokeObjectURL(removed[0].previewUrl);
-        }
+        composer.edit(state.selectedId, { removeAttachment: index });
         renderAttachmentPreview();
       }
 
-      export function getPendingAttachments(sessionId?, create?) {
+      export function getPendingAttachments(sessionId?) {
         var id = sessionId === undefined ? state.selectedId : sessionId;
-        if (!id) return [];
-        var items = state.attachmentsBySession[id];
-        if (!items && create) {
-          items = [];
-          state.attachmentsBySession[id] = items;
-        }
-        return items || [];
-      }
-
-      export function takePendingAttachments(sessionId) {
-        if (!sessionId) return [];
-        var items = getPendingAttachments(sessionId);
-        state.attachmentsBySession[sessionId] = [];
-        if (sessionId === state.selectedId) renderAttachmentPreview();
-        return items.slice();
-      }
-
-      export function restorePendingAttachments(sessionId, attachments) {
-        if (!sessionId || !attachments || !attachments.length) return;
-        var current = getPendingAttachments(sessionId);
-        var restored = attachments.slice();
-        current.forEach(function(item) {
-          if (restored.indexOf(item) < 0) restored.push(item);
-        });
-        state.attachmentsBySession[sessionId] = restored;
-        if (sessionId === state.selectedId) renderAttachmentPreview();
-      }
-
-      export function discardPendingAttachments(attachments) {
-        (attachments || []).forEach(function(a) {
-          if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
-        });
+        return composer.read(id).attachments;
       }
 
       export function renderAttachmentPreview() {
@@ -2700,40 +2651,21 @@ const sessionReads = createSessionReads();
       }
 
       export function getDraftValueForSession(sessionId) {
-        if (!sessionId) return "";
-        if (state.drafts[sessionId] !== undefined) {
-          return state.drafts[sessionId];
-        }
-        try {
-          var saved = localStorage.getItem("wand-draft-" + sessionId);
-          state.drafts[sessionId] = saved === null ? "" : saved;
-        } catch (e) {
-          state.drafts[sessionId] = "";
-        }
-        return state.drafts[sessionId];
+        return composer.read(sessionId).text;
       }
 
       // persist 三态：
       //   false —— 只写内存草稿，绝不落 localStorage。发送结果未知（传输层失败）的回填
       //     走这条：消息可能已经被服务端接收，持久化会让它在刷新后「重新出现在输入框
       //     里」并被重复发送（判定见 composer-draft.ts）。同一条草稿会被一直标记成
-      //     memory-only（state.draftsMemoryOnly），直到用户重新编辑或走明确的失败回填，
+      //     memory-only（composer Module），直到用户重新编辑或走明确的失败回填，
       //     这样「切到别的会话再刷新」也不会把它从 localStorage 里捞回来。
       //   true  —— 显式要求落盘（明确失败的回填、切会话时保存上一条草稿），卸载期间照办。
       //   省略  —— 普通写入；页面正在卸载时跳过。刷新 / 原生壳回收 WebView 会把在途
       //     fetch 全部 abort，卸载期间的隐式回写只会污染下一次启动的草稿。
       export function setDraftValueForSession(sessionId, value, skipDom?, persist?) {
         if (!sessionId) return;
-        state.drafts[sessionId] = value;
-        if (persist === false) {
-          state.draftsMemoryOnly[sessionId] = true;
-          try { localStorage.removeItem("wand-draft-" + sessionId); } catch (e) { /* ignore */ }
-        } else if (shouldPersistComposerDraft(persist, !!state.pageUnloading)) {
-          delete state.draftsMemoryOnly[sessionId];
-          try {
-            localStorage.setItem("wand-draft-" + sessionId, value);
-          } catch (e) { /* ignore */ }
-        }
+        composer.edit(sessionId, { text: String(value || ""), persist });
         if (!skipDom && sessionId === state.selectedId) {
           var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
           if (inputBox) {
@@ -2744,13 +2676,11 @@ const sessionReads = createSessionReads();
       }
 
       // 彻底忘掉某个会话的草稿（内存 + localStorage）。需要「这个会话的输入框必须是
-      // 空的」时用它：只改 state.drafts 会留下 localStorage 里的旧值，下次刷新又被
+      // 空的」时用它：只改内存会留下 localStorage 里的旧值，下次刷新又被
       // getDraftValueForSession() 读回来，表现为草稿「自己复活」。
       export function clearDraftValueForSession(sessionId, skipDom?) {
         if (!sessionId) return;
-        delete state.drafts[sessionId];
-        delete state.draftsMemoryOnly[sessionId];
-        try { localStorage.removeItem("wand-draft-" + sessionId); } catch (e) { /* ignore */ }
+        composer.edit(sessionId, { clear: true });
         if (!skipDom && sessionId === state.selectedId) {
           var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
           if (inputBox) {
@@ -2817,7 +2747,8 @@ const sessionReads = createSessionReads();
           inputBox.focus();
           return;
         }
-        var request = { sessionId: requestSessionId };
+        if (requestSessionId) composer.edit(requestSessionId, { text: inputBox.value });
+        var request = { sessionId: requestSessionId, revision: composer.read(requestSessionId).revision };
         var focusWasOnOptimizeButton = document.activeElement === btn;
         var shouldKeepInputFocused = document.activeElement === inputBox
           || focusWasOnOptimizeButton;
@@ -2849,8 +2780,14 @@ const sessionReads = createSessionReads();
             }
             var optimized = (result.data && result.data.optimized) || "";
             if (!optimized) throw new Error("Claude 返回为空。");
+            if (requestSessionId && !composer.edit(requestSessionId, {
+              text: optimized,
+              expectedRevision: request.revision,
+            })) {
+              showToast("原草稿已修改，保留最新内容。", "info");
+              return;
+            }
             if (requestSessionId && state.selectedId !== requestSessionId) {
-              setDraftValueForSession(requestSessionId, optimized, true);
               if (typeof showToast === "function") {
                 showToast("提示词已写回原会话草稿。", "info");
               }

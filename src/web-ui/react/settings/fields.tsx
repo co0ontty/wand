@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ComponentProps, type MouseEvent, type ReactNode } from "react";
 import { WandButton, WandSelect, WandSwitch } from "../ui";
+import { MOTION_DWELL_FAILED_MS, MOTION_DWELL_SENT_MS } from "../ui/motion-tokens";
 
 export function SettingsSection({
   title,
@@ -204,7 +205,7 @@ function useActionFlash(
     timer.current = window.setTimeout(() => {
       timer.current = null;
       setFlash(null);
-    }, 1400);
+    }, settled === "error" ? MOTION_DWELL_FAILED_MS : MOTION_DWELL_SENT_MS);
   }, [pending, settled]);
   return flash;
 }
@@ -279,7 +280,7 @@ export function SettingsActionButton({
     timer.current = window.setTimeout(() => {
       timer.current = null;
       setClickFlash(null);
-    }, 1400);
+    }, next === "error" ? MOTION_DWELL_FAILED_MS : MOTION_DWELL_SENT_MS);
   };
   return (
     <WandButton

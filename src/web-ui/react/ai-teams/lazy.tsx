@@ -5,14 +5,18 @@ import { jsonBody, requestJson } from "../http-adapter";
 import { AgentFields } from "../issues/agent-fields";
 import {
   createDefaultIssueAgent,
+  ISSUE_AGENT_DEFAULT_MODEL,
+  issueAgentEffortLabel,
   issueAgentProviderLabel,
+  issueAgentProviderModelLine,
   ISSUE_AGENT_PROVIDERS,
   normalizeIssueModelCatalog,
 } from "../issues/task-board-agent";
 import { taskBoardController } from "../issues/task-board-controller";
 import { taskBoardRepository } from "../issues/task-board-repository";
 import type { TaskTeamRunPanelProps } from "../issues/team-run-panel";
-import { subscribeWandModelCatalog } from "../model-catalog";
+import { subscribeWandModelCatalog, wandModelDisplayName } from "../model-catalog";
+import { useWandModelCatalog } from "../use-model-catalog";
 import { wandOverlay } from "../overlay-controller";
 import { sortProviderOptions, useProviderUsage } from "../provider-usage";
 import {
@@ -24,7 +28,8 @@ import {
 } from "../settings/fields";
 import { SidebarToggleIcon } from "../shell/sidebar-toggle-icon";
 import { installStyleSheet } from "../styles";
-import { WandBadge, WandButton, WandIcon, WandIconButton, WandSearchField, WandStretchTabs } from "../ui";
+import { WandBadge, WandBreadcrumb, WandButton, WandIcon, WandIconButton, WandSearchField, WandStretchTabs } from "../ui";
+import { MOTION_DWELL_FAILED_MS, MOTION_DWELL_SENT_MS } from "../ui/motion-tokens";
 import { CAT_COATS, memberCoatIndex, PixelCat, shrinkAvatarImage, TeamAvatar, TeamAvatarStack } from "./avatar";
 import { aiTeamsRepository, subscribeAiTeamRunChanges } from "./repository";
 import type { TeamChatViewProps } from "./team-chat-view";
@@ -44,13 +49,17 @@ const AI_TEAMS_HOST: Record<string, object> = {
   "issues/agent-fields": { AgentFields },
   "issues/task-board-agent": {
     createDefaultIssueAgent,
+    ISSUE_AGENT_DEFAULT_MODEL,
+    issueAgentEffortLabel,
     issueAgentProviderLabel,
+    issueAgentProviderModelLine,
     ISSUE_AGENT_PROVIDERS,
     normalizeIssueModelCatalog,
   },
   "issues/task-board-controller": { taskBoardController },
   "issues/task-board-repository": { taskBoardRepository },
-  "model-catalog": { subscribeWandModelCatalog },
+  "model-catalog": { subscribeWandModelCatalog, wandModelDisplayName },
+  "use-model-catalog": { useWandModelCatalog },
   "overlay-controller": { wandOverlay },
   "provider-usage": { sortProviderOptions, useProviderUsage },
   "settings/fields": {
@@ -62,7 +71,8 @@ const AI_TEAMS_HOST: Record<string, object> = {
   },
   "shell/sidebar-toggle-icon": { SidebarToggleIcon },
   "styles": { installStyleSheet },
-  "ui": { WandBadge, WandButton, WandIcon, WandIconButton, WandSearchField, WandStretchTabs },
+  "ui": { WandBadge, WandBreadcrumb, WandButton, WandIcon, WandIconButton, WandSearchField, WandStretchTabs },
+  "ui/motion-tokens": { MOTION_DWELL_FAILED_MS, MOTION_DWELL_SENT_MS },
   "ai-teams/avatar": { CAT_COATS, memberCoatIndex, PixelCat, shrinkAvatarImage, TeamAvatar, TeamAvatarStack },
   "ai-teams/repository": { aiTeamsRepository, subscribeAiTeamRunChanges },
 };

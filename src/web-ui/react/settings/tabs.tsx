@@ -10,6 +10,7 @@ import {
 } from "react";
 import * as React from "react";
 import { WandBadge, WandButton, WandDialogSurface, WandIcon, WandSearchField } from "../ui";
+import { MOTION_DWELL_RESULT_SENTENCE_MS } from "../ui/motion-tokens";
 import { settingsStore } from "./controller";
 import {
   SettingsActionButton,
@@ -44,6 +45,7 @@ import type {
 } from "./types";
 import { failureMessage } from "../errors";
 import { compactThinkingLabel, dynamicThinkingChoices } from "../../thinking-efforts";
+import { MODEL_CATALOG_DEFAULT_VALUE } from "../model-catalog";
 import { normalizeModels } from "./repository";
 import { sortProviderOptions, useProviderUsage } from "../provider-usage";
 
@@ -352,7 +354,7 @@ export function AboutSettingsTab({ snapshot, repository, refresh, toast, showRes
   );
 }
 
-export function GithubSettingsTab({ snapshot, repository, refresh, setSnapshot, toast }: SettingsTabProps) {
+export function GithubSettingsTab({ snapshot, repository, refresh, setSnapshot }: SettingsTabProps) {
   const [token, setToken] = useState("");
   const [apiUrl, setApiUrl] = useState(snapshot.github.apiUrl || "https://api.github.com");
   const [pending, setPending] = useState("");
@@ -378,7 +380,6 @@ export function GithubSettingsTab({ snapshot, repository, refresh, setSnapshot, 
       setSnapshot((current) => current ? { ...current, github: next } : current);
       setStatus(`已连接 GitHub 账号 ${next.username || ""}。`);
       setTone("success");
-      toast("GitHub 已连接", "success");
       await refresh();
       return true;
     } catch (cause) {
@@ -398,7 +399,6 @@ export function GithubSettingsTab({ snapshot, repository, refresh, setSnapshot, 
       await refresh();
       setStatus("GitHub 已断开，已删除本地保存的 Token。");
       setTone("success");
-      toast("GitHub 已断开", "success");
       return true;
     } catch (cause) {
       setStatus(failureMessage(cause, "断开 GitHub 失败。"));
@@ -563,7 +563,7 @@ function EnvironmentDialog({ repository }: { repository: SettingsRepository }) {
   );
 }
 
-export function GeneralSettingsTab({ snapshot, repository, refresh, toast }: SettingsTabProps) {
+export function GeneralSettingsTab({ snapshot, repository, refresh }: SettingsTabProps) {
   const [form, setForm] = useState(() => generalFromSnapshot(snapshot));
   const [pending, setPending] = useState(false);
   const [status, setStatus] = useState("");
@@ -597,7 +597,6 @@ export function GeneralSettingsTab({ snapshot, repository, refresh, toast }: Set
         : "基本配置已保存。");
       setTone(result.restartRequired ? "warning" : "success");
       await refresh();
-      toast("基本配置已保存", "success");
     } catch (cause) {
       setStatus(failureMessage(cause, "保存基本配置失败。"));
       setTone("error");
@@ -826,7 +825,10 @@ function DefaultModelControl({
   const [customEntry, setCustomEntry] = useState(false);
   useEffect(() => setCustomEntry(false), [provider]);
 
-  const suggestions = providerModelSuggestions(models, provider);
+  // 目录里的 `default` 项也是「跟随默认」哨兵：上面那条空值项已经表达同一件事，
+  // 留着它就能被选中并写成 defaultModel="default"，等于把哨兵当模型 id 存进配置。
+  const suggestions = providerModelSuggestions(models, provider)
+    .filter((model) => model.id !== MODEL_CATALOG_DEFAULT_VALUE);
   const options = suggestions.map((model) => ({ value: model.id, label: model.label || model.id }));
   const label = sessionProviderLabel(provider);
   const trimmed = value.trim();
@@ -1024,7 +1026,7 @@ function routeIsComplete(route: SettingsSystemAi): boolean {
   );
 }
 
-export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toast }: SettingsTabProps) {
+export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot }: SettingsTabProps) {
   const providerUsage = useProviderUsage();
   const providerOptions = sortProviderOptions(
     SESSION_PROVIDER_OPTIONS, providerUsage ?? {}, (entry) => entry.value,
@@ -1275,7 +1277,6 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toas
       setStatus(result.restartRequired ? "AI 配置已保存；部分部署变化等待重启。" : "AI 与模型配置已保存。");
       setTone(result.restartRequired ? "warning" : "success");
       await refresh();
-      toast("AI 与模型配置已保存", "success");
     } catch (cause) {
       setStatus(failureMessage(cause, "保存 AI 配置失败。"));
       setTone("error");
@@ -1740,12 +1741,12 @@ export function SecuritySettingsTab(_props: SettingsTabProps) {
       setStatus("密码修改成功；所有旧登录会话已失效，正在返回登录页…");
       setTone("success");
       setSettled("success");
-      toast("密码已修改，请重新登录", "success");
       if (result.reauthenticationRequired) {
+        // 延后 reload 与整句结果的驻留对齐：读得完「密码修改成功」再去登录页。
         window.setTimeout(() => {
           settingsStore.setNested(null);
           window.location.reload();
-        }, 650);
+        }, MOTION_DWELL_RESULT_SENTENCE_MS);
       }
     } catch (cause) {
       setStatus(failureMessage(cause, "修改密码失败。"));
@@ -1850,7 +1851,7 @@ const CARD_OPTIONS: Array<{ key: keyof SettingsCardDefaults; title: string; desc
   { key: "thinking", title: "思考过程", description: "模型的 Thinking 内容" },
 ];
 
-export function DisplaySettingsTab({ snapshot, repository, refresh, toast }: SettingsTabProps) {
+export function DisplaySettingsTab({ snapshot, repository, refresh }: SettingsTabProps) {
   const [value, setValue] = useState<SettingsCardDefaults>(() => ({ ...snapshot.config!.cardDefaults }));
   const [pending, setPending] = useState(false);
   const [status, setStatus] = useState("");
@@ -1866,7 +1867,6 @@ export function DisplaySettingsTab({ snapshot, repository, refresh, toast }: Set
       setStatus("显示设置已保存，并会立即应用于之后渲染的卡片。");
       setTone("success");
       await refresh();
-      toast("显示设置已保存", "success");
     } catch (cause) {
       setStatus(failureMessage(cause, "保存显示设置失败。"));
       setTone("error");

@@ -59,28 +59,34 @@ function initialSnapshot(revision = 0): CodeEditorSnapshot {
   };
 }
 
-function discardCopy(reason: CodeEditorDiscardReason): { title: string; message: string } {
+/** `subject` 是「关的是哪一个」：单个文件给名字，批量关闭给汇总，避免用户确认了个空气。 */
+function discardCopy(reason: CodeEditorDiscardReason, subject: string): { title: string; message: string } {
   if (reason === "switch") {
     return {
       title: "切换文件？",
-      message: "当前文件有未保存的改动，切换后会丢失。",
+      message: `${subject}有未保存的改动，切换后会丢失。`,
     };
   }
   if (reason === "replace") {
     return {
       title: "关闭编辑器？",
-      message: "当前文件有未保存的改动，关闭后会丢失。",
+      message: `${subject}有未保存的改动，关闭后会丢失。`,
     };
   }
   return {
     title: "关闭文件？",
-    message: "当前文件有未保存的改动，关闭后会丢失。",
+    message: `${subject}有未保存的改动，关闭后会丢失。`,
   };
+}
+
+/** 确认文案里的文件标识：用标签上的名字，用户看到的和点到的是一致的。 */
+function discardSubjectOf(name: string): string {
+  return `「${name}」`;
 }
 
 const defaultRuntime: CodeEditorRuntimeAdapter = {
   async confirmDiscard(reason, path): Promise<boolean> {
-    const copy = discardCopy(reason);
+    const copy = discardCopy(reason, discardSubjectOf(path.split("/").pop() || path));
     const result = await wandOverlay.dialog({
       title: copy.title,
       description: copy.message,
@@ -91,7 +97,6 @@ const defaultRuntime: CodeEditorRuntimeAdapter = {
       ],
       dismissable: true,
     });
-    void path;
     return "action" in result && result.action === true;
   },
 
@@ -154,15 +159,37 @@ export function createCodeEditorModule(options: CodeEditorModuleOptions): CodeEd
     });
   }
 
-  async function confirmDiscard(reason: CodeEditorDiscardReason): Promise<boolean> {
-    const active = snapshot.activePath ? files.get(snapshot.activePath) : null;
-    if (!active || !active.dirty) return true;
+  async function confirmDiscard(reason: CodeEditorDiscardReason, target?: CodeEditorFile | null): Promise<boolean> {
+    const subject = target ?? (snapshot.activePath ? files.get(snapshot.activePath) ?? null : null);
+    if (!subject || !subject.dirty) return true;
     try {
-      return await runtime.confirmDiscard(reason, active.path);
+      return await runtime.confirmDiscard(reason, subject.path);
     } catch (error) {
       runtime.notify(unknownFailure(error, "无法确认是否放弃修改。").message, "error");
       return false;
     }
+  }
+
+  /** 一次性关闭全部标签：弹**一个**汇总确认，列出脏文件数量与名字，取消则整体不动。 */
+  async function confirmDiscardAll(): Promise<boolean> {
+    const dirty = [...files.values()].filter((file) => file.dirty);
+    if (dirty.length === 0) return true;
+    const shown = dirty.slice(0, 3).map((file) => file.name).join("、");
+    const subject = `${dirty.length} 个未保存文件（${shown}${dirty.length > 3 ? "…" : ""}）`;
+    try {
+      return await runtime.confirmDiscard("replace", subject);
+    } catch (error) {
+      runtime.notify(unknownFailure(error, "无法确认是否放弃修改。").message, "error");
+      return false;
+    }
+  }
+
+  async function discardAll(): Promise<void> {
+    if (!await confirmDiscardAll()) return;
+    files.clear();
+    activeAbort?.abort();
+    activeAbort = null;
+    publish(initialSnapshot(snapshot.revision + 1));
   }
 
   async function load(path: string): Promise<boolean> {
@@ -293,10 +320,9 @@ export function createCodeEditorModule(options: CodeEditorModuleOptions): CodeEd
         const targetPath = command.path ?? snapshot.activePath;
         if (!targetPath) return true;
         const target = files.get(targetPath);
-        if (target?.dirty) {
-          const wasActive = snapshot.activePath === targetPath;
-          if (wasActive && !await confirmDiscard("close")) return false;
-        }
+        // 脏标签不管是不是当前激活的那个，关闭前都要确认：非激活标签的未保存
+        // 内容同样只存在内存里，静默 delete 等于直接丢用户改动。
+        if (target?.dirty && !await confirmDiscard("close", target)) return false;
         files.delete(targetPath);
         const remaining = tabsFromFiles(null).filter((tab) => tab.path !== targetPath);
         if (remaining.length === 0) {
@@ -419,10 +445,7 @@ export function createCodeEditorModule(options: CodeEditorModuleOptions): CodeEd
     execute,
 
     closeAll(): void {
-      files.clear();
-      activeAbort?.abort();
-      activeAbort = null;
-      publish(initialSnapshot(snapshot.revision + 1));
+      void discardAll();
     },
 
     isActive(): boolean {

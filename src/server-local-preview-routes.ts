@@ -1,5 +1,5 @@
 import http from "node:http";
-import type { Express, NextFunction, Request, RequestHandler, Response } from "express";
+import type { Express, Request, RequestHandler, Response } from "express";
 
 import { getErrorMessage } from "./error-utils.js";
 import { asyncRoute } from "./express-async.js";
@@ -94,7 +94,7 @@ export function registerLocalPreviewRoutes(
   app: Express,
   dependencies: { requireAuth: RequestHandler; requireFiles: RequestHandler },
 ): void {
-  const handler = asyncRoute(async (req: Request, res: Response, next: NextFunction) => {
+  const handler = asyncRoute(async (req: Request, res: Response) => {
     const target = parseLocalPreviewTarget(
       String(req.params.host ?? ""),
       String(req.params.port ?? ""),

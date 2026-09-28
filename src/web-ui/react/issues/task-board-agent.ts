@@ -23,6 +23,7 @@ import {
   catalogThinkingEfforts,
   MODEL_CATALOG_DEFAULT_VALUE,
   normalizeWandModelCatalog,
+  wandModelDisplayName,
   wandModelOptions,
   type WandModelCatalog,
 } from "../model-catalog";
@@ -74,6 +75,13 @@ export function issueAgentModeOptions(provider: IssueAgentProvider): WandSelectO
     .map((entry) => ({ value: entry.value, label: entry.label }));
 }
 
+/**
+ * 「done」状态的界面名，唯一来源。
+ * 语义是 Agent 跑完了等你点头，不是已经收尾：归档才是收尾，见下面 ISSUE_ARCHIVE_COLUMN。
+ * 列名、概览指标、进度图例、过滤开关、状态标签都必须从这里取，不得再写第二份。
+ */
+const ISSUE_DONE_LABEL = "等你确认";
+
 export const ISSUE_COLUMNS: ReadonlyArray<{
   status: WandTaskStatus;
   label: string;
@@ -81,8 +89,19 @@ export const ISSUE_COLUMNS: ReadonlyArray<{
 }> = [
   { status: "todo", label: "等待认领", empty: "还没有等待认领的任务" },
   { status: "doing", label: "处理中", empty: "暂无处理中的任务" },
-  { status: "done", label: "等你确认", empty: "还没有待确认的任务" },
+  { status: "done", label: ISSUE_DONE_LABEL, empty: `还没有${ISSUE_DONE_LABEL}的任务` },
 ];
+
+/** 状态界面名的唯一出口；列名与「等你确认」相关的文案都从这里读。 */
+export function issueStatusLabel(status: WandTaskStatus): string {
+  return ISSUE_COLUMNS.find((column) => column.status === status)?.label
+    ?? (status === "archived" ? ISSUE_ARCHIVE_COLUMN.label : status);
+}
+
+/** 过滤开关用的整句：把状态名框起来，避免和「隐藏已完成」这类历史说法混用。 */
+export function issueHideStatusFilterLabel(status: WandTaskStatus): string {
+  return `隐藏「${issueStatusLabel(status)}」`;
+}
 
 /** 归档不是第四列，而是「等你确认」下面的独立目录。 */
 export const ISSUE_ARCHIVE_COLUMN: {
@@ -196,6 +215,19 @@ export function issueSessionRunning(status: string | null | undefined): boolean 
 export function issueAgentProviderLabel(provider: string | null | undefined): string {
   if (provider === "session" || provider === "shell") return "终端";
   return ISSUE_AGENT_PROVIDERS.find((entry) => entry.value === provider)?.label ?? (provider || "Agent");
+}
+
+/**
+ * 「CLI · 模型」一行：`default` 哨兵不是模型名，换成服务端默认模型的具体名字；
+ * 解析不到名字就只留 CLI，不写「默认模型」这种占位。
+ */
+export function issueAgentProviderModelLine(
+  agent: { provider: string | null | undefined; model: string | null | undefined },
+  catalog: IssueModelCatalog | null,
+): string {
+  const provider = issueAgentProviderLabel(agent.provider);
+  const model = wandModelDisplayName(catalog, agent.provider, agent.model);
+  return model ? `${provider} · ${model}` : provider;
 }
 
 export function issueAgentEffortOptions(

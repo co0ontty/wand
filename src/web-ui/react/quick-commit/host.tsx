@@ -31,6 +31,7 @@ import type {
   QuickCommitStatus,
 } from "./types";
 import { describeError } from "../errors";
+import { MOTION_DWELL_FAILED_MS, MOTION_DWELL_SENT_MS } from "../ui/motion-tokens";
 import { notifyTasksChanged } from "../task-changes";
 
 export interface QuickCommitHostProps {
@@ -104,7 +105,7 @@ function ChangedFiles({ status }: { status: QuickCommitStatus }) {
             const submoduleLabels = file.submoduleState
               ? [
                   file.submoduleState.commitChanged ? "新指针" : "",
-                  file.submoduleState.hasTrackedChanges ? "dirty" : "",
+                  file.submoduleState.hasTrackedChanges ? "有改动" : "",
                   file.submoduleState.hasUntracked ? "未跟踪" : "",
                 ].filter(Boolean)
               : [];
@@ -112,6 +113,7 @@ function ChangedFiles({ status }: { status: QuickCommitStatus }) {
               <li key={`${file.path}-${index}`} title={file.path}>
                 <span
                   className={`wand-quick-file-badge wand-quick-file-badge-${badge.tone}`}
+                  role="img"
                   title={badge.label}
                   aria-label={badge.label}
                 >
@@ -178,6 +180,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
   const [submitting, setSubmitting] = useState(false);
   const [submitPhase, setSubmitPhase] = useState<"idle" | "pending" | "success" | "error">("idle");
   const [submitResult, setSubmitResult] = useState("");
+  const [resultNote, setResultNote] = useState("");
   const [pushing, setPushing] = useState(false);
   const [error, setError] = useState("");
   const [pushError, setPushError] = useState("");
@@ -207,6 +210,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
     setStatus(null);
     setSubmitPhase("idle");
     setSubmitResult("");
+    setResultNote("");
     setForm(EMPTY_FORM);
     setAction("commit");
     setIncludeSubmodule(false);
@@ -360,6 +364,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
     setSubmitting(true);
     setSubmitPhase("pending");
     setSubmitResult("");
+    setResultNote("");
     setError("");
     setPushError("");
     try {
@@ -384,18 +389,20 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
           ? `；${response.archivedTaskIds?.length ? `已归档 ${response.archivedTaskIds.length} 个关联任务` : "没有已完成的关联任务"}`
           : "";
       if (!response.pushError) {
-        quickCommitStore.getRuntime()?.toast(
-          `${summary}${selectedMeta.push ? "，已推送" : ""}${archiveNote}。`,
-          response.archiveError ? "error" : "success",
-        );
         void reloadStatus(operationSessionId);
         void reloadContext(operationSessionId);
         if (ownsCurrentSurface()) {
           setSubmitResult(hash ? `已提交 ${hash}` : "已提交");
+          // 原来只有 toast 承载的细节（submodule 数、tag、是否推送、归档结果）改在页脚原位显示。
+          setResultNote(`${summary}${selectedMeta.push ? "，已推送" : ""}${response.archiveError ? "" : archiveNote}。`);
           setSubmitPhase("success");
           setSubmitting(false);
+          // 归档失败是这次操作唯一的坏消息，弹层要关掉它，只能靠原位 alert 读完。
+          if (response.archiveError) setError(`提交已完成，但归档关联任务失败：${response.archiveError}`);
         }
-        await new Promise((resolve) => { window.setTimeout(resolve, 1100); });
+        await new Promise((resolve) => {
+          window.setTimeout(resolve, response.archiveError ? MOTION_DWELL_FAILED_MS : MOTION_DWELL_SENT_MS);
+        });
         if (ownsCurrentSurface()) quickCommitController.close();
         return;
       }
@@ -404,13 +411,13 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
         setPushError(response.pushError);
         setSubmitResult("已提交，推送失败");
         setSubmitPhase("error");
+        if (response.archiveError) setError(`归档关联任务失败：${response.archiveError}`);
       }
-      quickCommitStore.getRuntime()?.toast(`${summary}${archiveNote}；push 失败：${response.pushError}`, "error");
       await Promise.all([
         reloadStatus(operationSessionId),
         reloadContext(operationSessionId),
       ]);
-      await new Promise((resolve) => { window.setTimeout(resolve, 1400); });
+      await new Promise((resolve) => { window.setTimeout(resolve, MOTION_DWELL_FAILED_MS); });
       if (ownsCurrentSurface()) setSubmitPhase("idle");
     } catch (commitError) {
       const message = describeError(commitError, "快捷提交失败。");
@@ -419,8 +426,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
         setSubmitResult("提交失败");
         setSubmitPhase("error");
       }
-      quickCommitStore.getRuntime()?.toast(message, "error");
-      await new Promise((resolve) => { window.setTimeout(resolve, 1400); });
+      await new Promise((resolve) => { window.setTimeout(resolve, MOTION_DWELL_FAILED_MS); });
       if (ownsCurrentSurface()) setSubmitPhase("idle");
     } finally {
       if (ownsCurrentSurface()) setSubmitting(false);
@@ -443,21 +449,21 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
         tag: outcome.tagName,
       });
       if (!response.ok || response.error) {
-        const message = response.error || "推送失败。";
-        if (ownsCurrentSurface()) setPushError(message);
-        quickCommitStore.getRuntime()?.toast(`推送失败：${message}`, "error");
+        if (ownsCurrentSurface()) setPushError(response.error || "推送失败。");
         return;
       }
-      const pushed = [response.pushedCommits ? "commits" : "", response.pushedTags ? "tags" : ""]
+      const pushed = [response.pushedCommits ? "提交" : "", response.pushedTags ? "标签" : ""]
         .filter(Boolean)
         .join(" 和 ") || "（无内容）";
-      quickCommitStore.getRuntime()?.toast(`已推送 ${pushed}`, "success");
       void reloadStatus(operationSessionId);
+      if (ownsCurrentSurface()) {
+        setResultNote(`已推送 ${pushed}。`);
+        setOutcome({ ...outcome, pushed: true });
+      }
+      await new Promise((resolve) => { window.setTimeout(resolve, MOTION_DWELL_SENT_MS); });
       if (ownsCurrentSurface()) quickCommitController.close();
     } catch (pushFailure) {
-      const message = describeError(pushFailure, "推送失败。");
-      if (ownsCurrentSurface()) setPushError(message);
-      quickCommitStore.getRuntime()?.toast(message, "error");
+      if (ownsCurrentSurface()) setPushError(describeError(pushFailure, "推送失败。"));
     } finally {
       setPushing(false);
     }
@@ -500,9 +506,11 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
           {outcome.submoduleCount > 0 ? (
             <p className="wand-quick-result-note">已提交 {outcome.submoduleCount} 个 submodule。</p>
           ) : null}
+          {resultNote ? <p className="wand-quick-result-note">{resultNote}</p> : null}
           {outcome.pushError || pushError ? (
             <p className="wand-quick-error" role="alert">{pushError || outcome.pushError}</p>
           ) : null}
+          {error ? <p className="wand-quick-error" role="alert">{error}</p> : null}
           <div className="wand-quick-result-actions">
             <WandButton kind="ghost" onClick={() => quickCommitController.close()}>
               关闭
@@ -511,7 +519,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
               <span className="wand-quick-pushed">已推送</span>
             ) : (
               <WandButton kind="primary" disabled={pushing} onClick={() => void pushAndClose()}>
-                {pushing ? "推送中…" : "Push & Close"}
+                {pushing ? "推送中…" : "推送并关闭"}
               </WandButton>
             )}
           </div>
@@ -536,7 +544,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
             ) : null}
             <section className="wand-quick-editor" aria-labelledby="wand-quick-editor-title">
               <div className="wand-quick-section-heading">
-                <h3 id="wand-quick-editor-title">New</h3>
+                <h3 id="wand-quick-editor-title">提交信息</h3>
                 <WandButton
                   kind="ghost"
                   size="small"
@@ -640,7 +648,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
             {error ? <p className="wand-quick-error" role="alert">{error}</p> : null}
           </div>
           <footer className="wand-quick-footer">
-            <span>{hasQuickCommitChanges(status) ? "⌘/Ctrl + Enter 快速执行" : "工作区干净，无可提交改动"}</span>
+            <span>{resultNote || (hasQuickCommitChanges(status) ? "⌘/Ctrl + Enter 快速执行" : "工作区干净，无可提交改动")}</span>
             <div>
               <WandButton kind="ghost" onClick={() => quickCommitController.close()}>
                 取消
@@ -657,7 +665,11 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
         </form>
       ) : (
         <div className="wand-quick-loading">
-          {error ? <p className="wand-quick-error" role="alert">{error}</p> : "没有可用的 Git 状态。"}
+          {/* 走到这里说明既没 loading 也没 status：要么这次读取失败了，要么请求被后来的
+              打开顶掉（aborted）。「没读到」不能冒充「失败」，两句分开写。 */}
+          {error
+            ? <p className="wand-quick-error" role="alert">{error}</p>
+            : <p role="status">还没有读到 Git 状态，重新打开快捷提交即可再试一次。</p>}
         </div>
       )}
     </WandDialogSurface>

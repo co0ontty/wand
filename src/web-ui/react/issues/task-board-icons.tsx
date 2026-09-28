@@ -1,5 +1,6 @@
 import * as React from "react";
 import type { WandTaskPriority, WandTaskStatus } from "../../../task-types";
+import { MOTION_PROCESSING_STAGGER_MS } from "../ui/motion-tokens";
 
 interface GlyphProps {
   size?: number;
@@ -118,14 +119,8 @@ export function TaskBoardDueIcon({ size = 12, color = "currentColor", className 
   </svg>;
 }
 
-export function TaskBoardCompleteIcon({ size = 7, color = "currentColor", className }: GlyphProps): React.ReactElement {
-  return <svg {...svgProps({ size, color, className })} viewBox="0 0 7 6.03">
-    <path d="M.5 3.73 1.76 5.35a.5.5 0 0 0 .72.01L6.5.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round"/>
-  </svg>;
-}
-
 export function TaskBoardProcessingGlyph({ className }: { className?: string }): React.ReactElement {
   return <span className={className ? `task-board-processing-glyph ${className}` : "task-board-processing-glyph"} aria-hidden="true">
-    {Array.from({ length: 16 }, (_, index) => <i key={index} style={{ animationDelay: `${-150 * (index % 7)}ms` }}/>)}
+    {Array.from({ length: 16 }, (_, index) => <i key={index} style={{ animationDelay: `${-MOTION_PROCESSING_STAGGER_MS * (index % 7)}ms` }}/>)}
   </span>;
 }

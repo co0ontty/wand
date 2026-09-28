@@ -163,6 +163,44 @@ function cloneThinkingEfforts(efforts: ProviderThinkingEfforts): ProviderThinkin
 }
 
 /** Immutable-looking snapshot returned to API clients. */
+/** provider → 目录里的模型列表字段（与 `/api/models` 的 payload 同源）。 */
+const PROVIDER_MODEL_LIST_FIELDS = {
+  claude: "models",
+  codex: "codexModels",
+  opencode: "opencodeModels",
+  grok: "grokModels",
+  qoder: "qoderModels",
+  pi: "piModels",
+} as const;
+
+/**
+ * 目录里 `default` 项（「不传 --model」那一项）的标签补上服务端配置的默认模型名：
+ * CLI 自己报的文案（「跟随 Claude Code 默认」）看不出真正会跑哪个模型，两端选择器只能显示占位。
+ * 没配置、列表里没有这一项、或标签里已经写了这个 id 时原样返回（引用不变，便于上游比对缓存）。
+ */
+export function withConfiguredDefaultModelLabels<T extends object>(
+  catalog: T,
+  defaults: Readonly<Record<string, string>>,
+): T {
+  let next: Record<string, unknown> | null = null;
+  for (const [provider, field] of Object.entries(PROVIDER_MODEL_LIST_FIELDS)) {
+    const list = (catalog as Record<string, unknown>)[field];
+    const configured = (defaults[provider] ?? "").trim();
+    if (!configured || !Array.isArray(list)) continue;
+    const at = list.findIndex((entry) => (
+      !!entry && typeof entry === "object" && (entry as { id?: unknown }).id === "default"
+    ));
+    if (at < 0) continue;
+    const entry = list[at] as { label?: unknown };
+    if (String(entry.label ?? "").includes(configured)) continue;
+    const updated = [...list];
+    updated[at] = { ...(entry as object), label: `跟随服务端默认（${configured}）` };
+    next ??= { ...(catalog as Record<string, unknown>) };
+    next[field] = updated;
+  }
+  return (next ?? catalog) as T;
+}
+
 export interface ModelCatalogSnapshot extends ModelCache {
   /** SHA-256 of the catalog excluding `refreshedAt`. Changes only with content. */
   revision: string;

@@ -570,6 +570,13 @@ export interface ConversationAuthor {
   avatar?: string;
   leader?: boolean;
   provider?: SessionProvider;
+  /**
+   * 这条发言**实际使用候选**的模型 id（真值，不是展示文案；`"default"` 表示跟随该 provider
+   * 的服务端默认模型）。老数据没有这个字段，读端要能只按 provider 显示。
+   */
+  model?: string;
+  /** 实际使用候选的思考深度（`off/standard/deep/max` 或 `provider:<原生档位>`）；同上，可缺省。 */
+  thinkingEffort?: string;
   /** 这条发言对应的成员会话，可点开看完整过程。 */
   sessionId?: string;
 }

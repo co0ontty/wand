@@ -53,3 +53,57 @@ test("code block header only shows a real language label", () => {
     "语言标注留空占位即可",
   );
 });
+
+// 一屏的最高级标题属于页面本身（面包屑末段 / 对话框标题），气泡里的 `# ` 不能再占 h1。
+test("chat markdown headings never claim the page title's h1", () => {
+  assert.doesNotMatch(chatRender, /'<h1>'/, "renderMarkdown 不再产出 h1");
+  assert.match(
+    chatRender,
+    /replaceLinePrefix\(result, "# ", '<h2>', '<\/h2>'\)/,
+    "`# ` 下移成 h2",
+  );
+  assert.match(
+    chatRender,
+    /replaceLinePrefix\(result, "## ", '<h3>', '<\/h3>'\)/,
+    "`## ` 下移成 h3（既有 .markdown-content h3 字号档）",
+  );
+  assert.match(
+    chatRender,
+    /replaceLinePrefix\(result, "### ", '<h4>', '<\/h4>'\)/,
+    "`### ` 用真 h4（.markdown-content h4 有自己的字号档），不再借 aria-level",
+  );
+  assert.doesNotMatch(chatRender, /replaceLinePrefix\(result, "### ", '<h3 role="heading"/, "`### ` 不再借 h3 + aria-level 冒充层级");
+  // 降级不许丢字号：这四档是 .markdown-content 唯一的字号梯度，缺一条 h4 就会掉进
+  // tailwind preflight 的 font-size: inherit，第三级标题退化成正文。
+  const sheet = readFileSync(new URL("../src/web-ui/content/styles.css", import.meta.url), "utf8");
+  assert.match(
+    sheet,
+    /\.markdown-content h4 \{\s*margin: 16px 0 8px 0;\s*font-weight: 600;\s*font-size: 13\.3px;/,
+    "h4 有独立一档字号，且沿用该组的间距与字重",
+  );
+  for (const [tag, size] of [["h1", "17.5"], ["h2", "15.4"], ["h3", "14"]] as const) {
+    assert.match(
+      sheet,
+      new RegExp(`\\.markdown-content ${tag} \\{ font-size: ${size}px; \\}`),
+      `${tag} 这一档的声明值必须还是原样（本批只加 h4，不改既有三档）`,
+    );
+  }
+  // 顺序不能变：### 必须最先替换，否则 ## / # 会抢走同一行的前缀。
+  assert.ok(
+    chatRender.indexOf('replaceLinePrefix(result, "### "') < chatRender.indexOf('replaceLinePrefix(result, "## "'),
+    "三级标题要先于二级替换",
+  );
+  assert.ok(
+    chatRender.indexOf('replaceLinePrefix(result, "## "') < chatRender.indexOf('replaceLinePrefix(result, "# "'),
+    "二级标题要先于一级替换",
+  );
+});
+
+test("code copy button speaks the site language", () => {
+  assert.match(chatRender, /'<button class="code-copy">复制<\/button>'/);
+  assert.doesNotMatch(chatRender, /Copied!|>Copy</, "代码块复制按钮不再留英文成句");
+  // 点击处理器按 class 取按钮，改写文案不影响绑定；复位后的文案同样要是中文。
+  assert.doesNotMatch(chatRender, /textContent = "Copy"/, "复制完成后不能把文案改回英文");
+  assert.equal((chatRender.match(/textContent = "已复制"/g) ?? []).length, 3,
+    "两处代码块复制按钮 + 一处消息气泡复制按钮");
+});

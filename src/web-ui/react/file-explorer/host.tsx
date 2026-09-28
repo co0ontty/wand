@@ -220,6 +220,8 @@ function ExplorerRow({
             onClick={(event) => event.stopPropagation()}
             onBlur={() => void commitRename()}
             onKeyDown={(event) => {
+              // 输入法回车只结束选词，不能让改名提前落盘。
+              if (event.nativeEvent.isComposing) return;
               if (event.key === "Enter") {
                 event.preventDefault();
                 event.currentTarget.blur();
@@ -297,7 +299,7 @@ function ExplorerRow({
         <span className="wand-explorer-icon" aria-hidden="true"><ExplorerIcon name={iconForEntry(entry, isOpen && isDir)}/></span>
         <span className="wand-explorer-name">{entry.name}</span>
         {sizeLabel ? <span className="wand-explorer-size">{sizeLabel}</span> : null}
-        {badge && <span className={`wand-explorer-git ${badge.className}`} title={badge.label} aria-label={badge.label}>{badge.text}</span>}
+        {badge && <span className={`wand-explorer-git ${badge.className}`} role="img" title={badge.label} aria-label={badge.label}>{badge.text}</span>}
       </div>
       {isDir && isOpen && (
         <div className="wand-explorer-children">
@@ -384,6 +386,8 @@ function CreateInput({
           onClick={(event) => event.stopPropagation()}
           onBlur={() => (value.trim() ? onSubmit(value) : onCancel())}
           onKeyDown={(event) => {
+            // 输入法回车只结束选词，不能用半截拼音去创建文件/文件夹。
+            if (event.nativeEvent.isComposing) return;
             if (event.key === "Enter") {
               event.preventDefault();
               onSubmit(value);
@@ -615,7 +619,7 @@ function SearchPanel({
                       ))}
                     </span>
                     {badge && (
-                      <span className={`wand-explorer-git ${badge.className}`} title={badge.label} aria-label={badge.label}>
+                      <span className={`wand-explorer-git ${badge.className}`} role="img" title={badge.label} aria-label={badge.label}>
                         {badge.text}
                       </span>
                     )}
@@ -811,6 +815,25 @@ export function FileExplorerHost({ root }: { root: string }) {
     else activateResult(entry);
   };
 
+  // 根目录的创建输入框：目录为空时也要能出现，否则「新建文件 / 新建文件夹」是死点击。
+  const rootCreateInput = pendingCreate && snapshot.root && pendingCreate.dir === snapshot.root ? (
+    <CreateInput
+      depth={0}
+      kind={pendingCreate.kind}
+      onCancel={() => setPendingCreate(null)}
+      onSubmit={async (name) => {
+        const dir = pendingCreate.dir;
+        setPendingCreate(null);
+        if (!name) return;
+        await dispatch.execute({
+          type: pendingCreate.kind === "file" ? "create.file" : "create.dir",
+          dir,
+          name,
+        });
+      }}
+    />
+  ) : null;
+
   return (
     <TreeItemsContext.Provider value={treeItems.current}>
       <style id="wand-file-explorer-styles">{fileExplorerStyles}</style>
@@ -881,28 +904,20 @@ export function FileExplorerHost({ root }: { root: string }) {
               <div className="wand-file-explorer-empty">加载中…</div>
             )}
             {snapshot.root && rootNode?.status === "error" && (
-              <div className="wand-file-explorer-empty">{rootNode.error || "读取目录失败"}</div>
+              <div className="wand-file-explorer-empty" role="alert">
+                <p className="wand-file-explorer-empty-title">{rootNode.error || "读取目录失败"}</p>
+                <WandButton
+                  kind="ghost"
+                  size="small"
+                  // refresh 缺省目录就是 snapshot.root，会重新 loadDir 并把该节点打回 loading。
+                  onClick={() => void dispatch.execute({ type: "refresh", dir: snapshot.root })}
+                >重新加载</WandButton>
+              </div>
             )}
-            {rootNode?.status === "loaded" && rootNode.entries.length > 0 && (
+            {rootNode?.status === "loaded" && (
               <>
-                {pendingCreate && pendingCreate.dir === snapshot.root && (
-                  <CreateInput
-                    depth={0}
-                    kind={pendingCreate.kind}
-                    onCancel={() => setPendingCreate(null)}
-                    onSubmit={async (name) => {
-                      const dir = pendingCreate.dir;
-                      setPendingCreate(null);
-                      if (!name) return;
-                      await dispatch.execute({
-                        type: pendingCreate.kind === "file" ? "create.file" : "create.dir",
-                        dir,
-                        name,
-                      });
-                    }}
-                  />
-                )}
-                {rootNode.entries.map((entry) => (
+                {rootCreateInput}
+                {rootNode.entries.length > 0 ? rootNode.entries.map((entry) => (
                   <ExplorerRow
                     key={entry.path}
                     entry={entry}
@@ -917,11 +932,8 @@ export function FileExplorerHost({ root }: { root: string }) {
                     pendingCreate={pendingCreate}
                     setPendingCreate={setPendingCreate}
                   />
-                ))}
+                )) : <div className="wand-file-explorer-empty">这个目录是空的。</div>}
               </>
-            )}
-            {snapshot.root && rootNode?.status === "loaded" && rootNode.entries.length === 0 && (
-              <div className="wand-file-explorer-empty">这个目录是空的。</div>
             )}
           </div>
         )}

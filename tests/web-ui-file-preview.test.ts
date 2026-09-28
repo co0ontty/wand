@@ -107,6 +107,23 @@ test("safe code and Markdown models preserve formatting without executable HTML"
   }
 });
 
+// 预览面板的外壳已经用 h2 承载文档名，正文再出 h1 就是一屏两个最高级标题。
+test("markdown preview headings are shifted one level below the panel title", () => {
+  const renderer = readFileSync(new URL("../src/web-ui/react/file-preview/markdown.tsx", import.meta.url), "utf8");
+  assert.ok(!/<h1>\{content\}<\/h1>/.test(renderer), "预览正文不再产出 h1");
+  assert.match(
+    renderer,
+    /const level = Math\.min\(block\.level \+ 1, 6\);/,
+    "每个标题下移一级，最深封在 6 级",
+  );
+  assert.match(renderer, /const Tag: "h2" \| "h3" = level === 2 \? "h2" : "h3";/);
+  assert.match(
+    renderer,
+    /<Tag role="heading" aria-level=\{level\}>/,
+    "第 4 级往下仍用 h3 拿 markdown-styles.ts 的间距（那里只定义了 h1..h3），层级由 aria-level 播报",
+  );
+});
+
 test("memory repository clones reads, records calls, saves text, and exposes failures", async () => {
   const repository = new MemoryFilePreviewRepository({ files: [textFile()] });
   const first = await repository.load("/tmp/a.ts");
@@ -280,4 +297,27 @@ test("clean close is synchronous so a competing overlay never overlaps it", asyn
   await module.controller.open("/tmp/a.ts");
   assert.equal(module.controller.closeIfOpen(), true);
   assert.equal(module.controller.isOpen(), false, "clean preview must close before closeIfOpen returns");
+});
+
+test("预览失败在原位给出可点的重新加载，而不是只留一句错误", () => {
+  const source = readFileSync(
+    new URL("../src/web-ui/react/file-preview/host.tsx", import.meta.url),
+    "utf8",
+  );
+  // 错误块本身就是 role=alert，重试用既有 API：预览没有 reload 命令，
+  // 而 open(同一路径) 会命中「已打开且不脏」分支直接 return true 不读盘，
+  // 所以必须先 close 再 open 同一个 request 才真的走 load()。
+  assert.match(source, /className="wand-file-preview-state wand-file-preview-error" role="alert"/);
+  assert.match(source, /snapshot\.request \? <WandButton/);
+  assert.match(source, /void filePreviewController\.execute\(\{ type: "close" \}\);\n\s*void filePreviewController\.open\(request\);/);
+  assert.match(source, />重新加载<\/WandButton>/);
+  // 没有为重试新增 controller API：命令表仍是原来那一套。
+  const types = readFileSync(new URL("../src/web-ui/react/file-preview/types.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(types, /"reload"|"retry"/);
+});
+
+test("字号读数有语义承载：role=status，AT 读得到「字号 N」", () => {
+  const source = readFileSync(new URL("../src/web-ui/react/file-preview/host.tsx", import.meta.url), "utf8");
+  // 无 role 的 span 上 aria-label 被忽略，改前 AT 只能读到一个裸数字。
+  assert.match(source, /<span className="wand-file-preview-font-size" role="status" aria-label=\{`字号 \$\{snapshot\.fontSize\}`\}/);
 });

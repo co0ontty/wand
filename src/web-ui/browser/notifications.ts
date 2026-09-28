@@ -52,14 +52,18 @@ export function hideError(el: any) {
 }
 
 export function showToast(message: string, type?: string) {
-  var duration = type === "error" ? 4000 : 2200;
+  // "danger" 是 dialog 那套词表，在 toast 侧等同 error（React 通道由 toastTone 映射成 error）。
+  var isError = type === "error" || type === "danger";
+  var duration = isError ? 4000 : 2200;
   if (showReactLegacyToast(message, type, duration)) return;
 
   // The feature-flag fallback reuses the existing notification channel instead
   // of maintaining a second hand-written toast DOM implementation.
+  // 气泡通道只有 info / warning / success 三个 class（styles.css 里也只有这三条），
+  // 没有 error 语义，所以错误只能压成 warning；success 通道支持，原样透传。
   showNotificationBubble({
     title: message,
-    type: type === "error" ? "warning" : "info",
+    type: isError ? "warning" : type === "success" ? "success" : "info",
     duration: duration,
   });
 }
@@ -207,7 +211,9 @@ var NOTIFICATION_GAP = 6;
 var NOTIFICATION_TOP = 16;
 
 /**
- * Show an in-app notification bubble at bottom-right.
+ * Show an in-app notification bubble at the top, horizontally centred
+ * （CSS：.notification-bubble { position: fixed; left: 50%; transform: translateX(-50%) }，
+ * 垂直起点由下面的 NOTIFICATION_TOP 给）。多条气泡按 notificationStack 自上而下堆叠。
  * @param {object} opts
  * @param {string} opts.title - Notification title
  * @param {string} [opts.body] - Body text
@@ -239,7 +245,8 @@ export function showNotificationBubble(opts: any) {
     '<div class="notification-bubble-header">' +
       '<span class="notification-bubble-icon ' + type + '">' + icon + '</span>' +
       '<span class="notification-bubble-title">' + escapeHtml(opts.title) + '</span>' +
-      '<button class="notification-bubble-close" title="关闭">×</button>' +
+      // × 没有可见文本，只有 title 时读屏念不出动作（WCAG 2.2 AA 4.1.2）。
+      '<button class="notification-bubble-close" type="button" title="关闭" aria-label="关闭这条通知">×</button>' +
     '</div>';
 
   var bodyHtml = opts.body

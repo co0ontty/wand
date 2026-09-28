@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import test from "node:test";
 
-import { applyStoragePreferences, defaultConfig, resolveDefaultShell, writePreferenceToStorage } from "../src/config.js";
+import {
+  applyStoragePreferences,
+  defaultConfig,
+  getDefaultModelForProvider,
+  getProviderDefaultModels,
+  resolveDefaultShell,
+  writePreferenceToStorage,
+} from "../src/config.js";
 import type { WandStorage } from "../src/storage.js";
 
 class FakePreferenceStorage {
@@ -199,4 +206,18 @@ test("new-session preferences reject unsupported values", () => {
     () => writePreferenceToStorage(defaultConfig(), storage, "inheritEnv", "false"),
     /必须是布尔值/,
   );
+});
+
+test("`default` 哨兵不是模型 id：历史配置里读到它当没配", () => {
+  // 老设置页允许把目录里的 `default` 项存成默认模型，那会一路传成 `--model default`。
+  const config = { ...defaultConfig(), defaultModel: "default", defaultCodexModel: " gpt-5 " };
+  assert.deepEqual(getProviderDefaultModels(config), {
+    claude: "",
+    codex: "gpt-5",
+    opencode: "",
+    grok: "",
+    qoder: "",
+    pi: "",
+  });
+  assert.equal(getDefaultModelForProvider(config, "claude"), "", "哨兵不当作模型 id 下发");
 });

@@ -57,16 +57,18 @@ function MarkdownInline({ tokens }: { tokens: ReadonlyArray<FilePreviewMarkdownI
   );
 }
 
+// 内容区标题整体下移一级：文件预览对话框的标题是 h2（Base UI Dialog.Title 默认渲染
+// h2），正文再出 h1 就会盖过它；编辑器渲染模式没有标题元素，只有一个
+// aria-label=`${file.name} 预览` 的容器，同样不该在内部冒出 h1。
+// 元素最深只用到 h3：markdown-styles.ts 的标题间距规则只覆盖 h1..h3（而且它们共享
+// 同一条规则），落到 h4 连这段间距都没有。所以第 4 级往下仍用 h3 拿样式，
+// 真实层级交给 aria-level。
 function MarkdownHeading({ block }: { block: Extract<FilePreviewMarkdownBlock, { type: "heading" }> }) {
   const content = <MarkdownInline tokens={block.content} />;
-  switch (block.level) {
-    case 1: return <h1>{content}</h1>;
-    case 2: return <h2>{content}</h2>;
-    case 3: return <h3>{content}</h3>;
-    case 4: return <h4>{content}</h4>;
-    case 5: return <h5>{content}</h5>;
-    default: return <h6>{content}</h6>;
-  }
+  const level = Math.min(block.level + 1, 6);
+  const Tag: "h2" | "h3" = level === 2 ? "h2" : "h3";
+  if (level <= 3) return <Tag>{content}</Tag>;
+  return <Tag role="heading" aria-level={level}>{content}</Tag>;
 }
 
 function MarkdownBlock({ block }: { block: FilePreviewMarkdownBlock }) {

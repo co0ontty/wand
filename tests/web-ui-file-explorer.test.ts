@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { createFileExplorerModule } from "../src/web-ui/react/file-explorer/controller.ts";
@@ -449,4 +450,79 @@ test("entry size and timestamp labels stay empty when the API omits them", () =>
   assert.equal(fileExplorerEntrySizeLabel({ ...entry("/app/dir", "dir"), size: 1536 }), "");
   assert.equal(formatFileExplorerTimestamp("not-a-date"), "");
   assert.match(formatFileExplorerTimestamp("2026-09-19T02:38:54.893Z"), /^2026-09-19 \d{2}:\d{2}$/);
+});
+
+test("空目录里的「新建文件 / 新建文件夹」不是死点击，且输入框挡输入法回车", () => {
+  const host = readFileSync(new URL("../src/web-ui/react/file-explorer/host.tsx", import.meta.url), "utf8");
+  // 根目录的创建输入框提成两分支共用，目录为空时也会出现。
+  assert.match(host, /const rootCreateInput = pendingCreate && snapshot\.root && pendingCreate\.dir === snapshot\.root/);
+  assert.match(host, /\{rootNode\?\.status === "loaded" && \(\n\s*<>\n\s*\{rootCreateInput\}/);
+  // 空态文案仍在，但和创建入口同屏（三元 else 分支），不再各管一半。
+  assert.match(host, /rootNode\.entries\.length > 0 \? rootNode\.entries\.map/);
+  assert.match(host, /: <div className="wand-file-explorer-empty">这个目录是空的。<\/div>}/);
+  assert.doesNotMatch(host, /rootNode\.entries\.length === 0 && \(\n\s*<div className="wand-file-explorer-empty">这个目录是空的/);
+  // 改名 / 新建 / 搜索三处 Enter 都要先挡输入法组字。
+  const guards = host.match(/if \(event\.nativeEvent\.isComposing\) return;/g) ?? [];
+  assert.ok(guards.length >= 3, `IME 守卫应覆盖三处输入回车，实际 ${guards.length} 处`);
+});
+
+test("移动对话框的路径输入在输入法组字期不进入目录、也不提交", () => {
+  const source = readFileSync(
+    new URL("../src/web-ui/react/file-explorer/move-dialog.tsx", import.meta.url),
+    "utf8",
+  );
+  // Enter 会 activateItem（进目录）或 commit(targetDir)（真的移动文件），半截拼音必须先挡住。
+  assert.match(source, /function handleInputKeyDown\(event: KeyboardEvent<HTMLInputElement>\): void \{\n\s*\/\/ [^\n]*\n\s*if \(event\.nativeEvent\.isComposing\) return;\n\s*if \(NAVIGATION_KEYS\.has/);
+  assert.match(source, /void commit\(targetDir\);/);
+  // 文件面板的路径框同理：Enter 走 commitCwd + blur，半截拼音会被写成当前目录。
+  const panel = readFileSync(
+    new URL("../src/web-ui/react/shell/shell-file-panel.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(panel, /onKeyDown=\{\(event\) => \{\n\s*\/\/ [^\n]*\n\s*if \(event\.nativeEvent\.isComposing\) return;/);
+  // 关闭按钮不抢删除的红色（全站关闭语义是 ghost，danger 只留给删除）。
+  assert.doesNotMatch(panel, /id="file-side-panel-close"[\s\S]{0,200}kind="danger"/);
+});
+
+test("目录读取失败：原位给出重新加载，且该命令真的能把节点拉回 loaded", async () => {
+  const host = readFileSync(new URL("../src/web-ui/react/file-explorer/host.tsx", import.meta.url), "utf8");
+  // 错误块升成 role=alert，并在同一位置给出重试；命令沿用既有的 refresh（缺省目录就是 root）。
+  assert.match(host, /rootNode\?\.status === "error" && \(\n\s*<div className="wand-file-explorer-empty" role="alert">/);
+  assert.match(host, /dispatch\.execute\(\{ type: "refresh", dir: snapshot\.root \}\)/);
+  assert.match(host, />重新加载<\/WandButton>/);
+
+  const repo = new MemoryFileExplorerRepository({ "/app": [entry("/app/a.ts", "file")] });
+  const list = repo.list.bind(repo);
+  let fail = true;
+  repo.list = async (dir: string) => {
+    if (!fail) return list(dir);
+    fail = false;
+    return { ok: false, failure: { message: "读不了这个目录。" } };
+  };
+  const { controller, store } = createFileExplorerModule({ repository: repo, runtime: alwaysConfirmRuntime });
+  await controller.execute({ type: "setRoot", root: "/app" });
+  const rootNode = () => store.getSnapshot().expanded.get("/app");
+  assert.equal(rootNode()?.status, "error", "首次读取失败要落在树节点上");
+  await controller.execute({ type: "refresh", dir: "/app" });
+  assert.equal(rootNode()?.status, "loaded", "重试按钮的命令就是既有的 refresh，能真的重读");
+  assert.equal(rootNode()?.entries.length, 1);
+});
+
+test("git 状态徽章两处都带 role=img，aria-label 不再是哑的", () => {
+  const host = readFileSync(new URL("../src/web-ui/react/file-explorer/host.tsx", import.meta.url), "utf8");
+  // 无 role 的 span 上 aria-label 会被屏幕阅读器忽略，徽章字母是树行里唯一的 git 线索。
+  // 关键是 role/aria-label 必须落在**包着可见字形的那个 span**上：挂在父级或被
+  // role=treeitem 的行名覆盖，读屏就只念条目名，M / ? 变成看不懂的哑符号。
+  assert.equal((host.match(
+    /<span className=\{`wand-explorer-git \$\{badge\.className\}\`\} role="img" title=\{badge\.label\} aria-label=\{badge\.label\}>\s*\{badge\.text\}\s*<\/span>/g,
+  ) ?? []).length, 2, "树行与搜索结果行两处徽章都必须是 role+label+字形同节点");
+});
+
+test("移动失败的兜底文案说的是移动，不再借用读目录那句", () => {
+  const dialog = readFileSync(new URL("../src/web-ui/react/file-explorer/move-dialog.tsx", import.meta.url), "utf8");
+  // commit() 的 catch 里写「无法读取该目录。」，用户会以为只是列表没刷出来，实际文件还在原地。
+  assert.doesNotMatch(dialog, /catch \(submitError\) \{[\s\S]{0,200}无法读取该目录/);
+  assert.match(dialog, /setError\(failureMessage\(submitError, "移动失败，请检查目标目录或权限后重试。"\)\)/);
+  // 读目录那句还留在真正读目录的 catch 上（listing 加载），两处不再共用一条兜底。
+  assert.equal((dialog.match(/无法读取该目录。/g) ?? []).length, 1);
 });

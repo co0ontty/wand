@@ -8,6 +8,7 @@ import { workspacesStore } from "../workspaces/controller";
 import { sortProviderOptions, useProviderUsage } from "../provider-usage";
 import { DEFAULT_WAND_TASK_PRIORITY, type WandTaskAgent, type WandTaskPriority, type WandTaskStatus } from "../../../task-types";
 import {
+  WandBreadcrumb,
   WandButton,
   WandDialogSurface,
   WandIcon,
@@ -72,7 +73,7 @@ import {
   TaskBoardAgentChips,
   TaskBoardAgentSessionList,
   TaskBoardArchiveFolder,
-  TaskBoardCompleteButton,
+  TaskBoardCardDetail,
   TaskBoardContextMenu,
   TaskBoardConversationButton,
   TaskBoardDashboard,
@@ -87,6 +88,7 @@ import {
   TaskBoardProgressRow,
   TaskBoardProjectChip,
   TaskBoardStatusGlyph,
+  useExpansionFocusReturn,
 } from "./task-board-views";
 import { wandOverlay } from "../overlay-controller";
 import { confirmDiscardTaskDraft } from "../task-draft-guard";
@@ -168,6 +170,10 @@ export function TaskBoardHost({
   const [createExpanded, setCreateExpanded] = React.useState(false);
   const [draft, setDraft] = React.useState<DraftState>(() => emptyDraft(""));
   const [selectedId, setSelectedId] = React.useState("");
+  // 看板卡片的就地展开态，同一时刻只开一张；完整详情仍由 selectedId 那套详情页承担。
+  const [expandedTaskId, setExpandedTaskId] = React.useState("");
+  // 非点击收起（换视图、改筛选、Esc）后，把焦点还给那张卡片的触发按钮，和列表行共用一份实现。
+  const bindCardTrigger = useExpansionFocusReturn(expandedTaskId);
   const [detailAgent, setDetailAgent] = React.useState<WandTaskAgent | null>(null);
   // 团队与 CLI 在同一个下拉里：选中团队时记下团队 id，派发改成交给团队。
   const [teams, setTeams] = React.useState<AiTeam[] | null>(null);
@@ -453,7 +459,9 @@ export function TaskBoardHost({
       const preview = dispatchPrompt.length > 240 ? `${dispatchPrompt.slice(0, 240)}…` : dispatchPrompt;
       const answer = await wandOverlay.dialog({
         title: `用任务说明启动「${moving.title}」？`,
-        description: `拖进「处理中」会按任务卡上的这段说明派发，不是指派框里新写的提示词。\n\n${preview}`,
+        // 对话层把 description 当一个段落渲染（没有 pre-line），原来的 \n\n 只会变成一个空格，
+        // 预览会跟说明粘成一行；这里改成一句连贯的话，用引号把预览括起来。
+        description: `拖进「处理中」会按任务卡上已有的这段说明派发，不是指派框里新写的提示词：「${preview}」`,
         actions: [
           { label: "取消", value: "cancel" as const, autoFocus: true },
           { label: "只移入处理中", value: "move" as const },
@@ -542,6 +550,12 @@ export function TaskBoardHost({
     writeTaskBoardViewState({ view, query, workspaceId: filterWorkspaceId, filters });
   }, [view, query, filterWorkspaceId, filters]);
 
+  // 展开态只属于「当前这一屏看板」：换视图、改筛选或搜索、进完整详情、重开面板时一律收起，
+  // 不留半开（卡片可能已经不在这一列里了）。
+  React.useEffect(() => {
+    setExpandedTaskId("");
+  }, [view, query, filterWorkspaceId, filters, selectedId, controller.open, controller.revision]);
+
   React.useEffect(() => {
     const previous = document.title;
     document.title = selected ? `${selected.title} · Wand` : "任务看板 · Wand";
@@ -584,11 +598,16 @@ export function TaskBoardHost({
         setSelectedId("");
         return;
       }
+      // 展开的卡片先收起，再谈离开看板：Esc 一次只退一层。
+      if (expandedTaskId) {
+        setExpandedTaskId("");
+        return;
+      }
       onBack ? onBack() : taskBoardController.close();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [controller.open, createOpen, closeCreate, onBack, openCreate, selectedId]);
+  }, [controller.open, createOpen, closeCreate, expandedTaskId, onBack, openCreate, selectedId]);
 
   if (!controller.open) return null;
 
@@ -597,11 +616,13 @@ export function TaskBoardHost({
     const busy = busyId === task.id;
     const parent = tasks.find((item) => item.id === task.parentTaskId);
     const childCount = tasks.filter((item) => item.parentTaskId === task.id).length;
+    const expanded = expandedTaskId === task.id;
     return <article
       key={task.id}
       className={classNames(
         "task-board-card",
         `is-${task.status}`,
+        expanded && "is-open",
         draggedId === task.id && "is-dragging",
         dropStatus === task.status && draggedId && draggedId !== task.id && "is-shift",
         busy && "is-busy",
@@ -633,6 +654,8 @@ export function TaskBoardHost({
       draggable
       onDragStart={(event) => {
         if (event.target !== event.currentTarget) return;
+        // 拖走的是展开中的卡片时先收起，别让面板跟着卡片进列。
+        setExpandedTaskId("");
         startTaskDrag(event.dataTransfer, task.id);
         setDraggedId(task.id);
       }}
@@ -648,13 +671,15 @@ export function TaskBoardHost({
     >
       <button
         type="button"
+        ref={bindCardTrigger(task.id)}
         className="task-board-card-open"
-        aria-label={`打开 ${task.identifier}: ${task.title}`}
-        onClick={() => setSelectedId(task.id)}
+        aria-expanded={expanded}
+        aria-controls={`task-card-detail-${task.id}`}
+        aria-label={`${expanded ? "收起" : "展开"} ${task.identifier}: ${task.title}`}
+        onClick={() => setExpandedTaskId((current) => current === task.id ? "" : task.id)}
       />
       <div className="task-board-card-topline">
         <h3 id={`task-${task.id}-title`}>{task.title || "未命名任务"}</h3>
-        {task.status === "done" ? <TaskBoardCompleteButton onClick={() => void patchTask(task.id, { status: "done" })}/> : null}
       </div>
       {display.body && task.description && task.sessions.length === 0 && !task.agent
         ? <p className="task-board-card-body">{task.description}</p>
@@ -696,6 +721,15 @@ export function TaskBoardHost({
       {task.status === "doing"
         ? <TaskBoardProcessingRow task={task} onOpenSession={onOpenSession}/>
         : null}
+      <TaskBoardCardDetail
+        task={task}
+        open={expanded}
+        parentLabel={parent?.title}
+        childCount={childCount}
+        onOpen={setSelectedId}
+        onCollapse={() => setExpandedTaskId("")}
+        onOpenSession={onOpenSession}
+      />
     </article>;
   };
 
@@ -810,17 +844,26 @@ export function TaskBoardHost({
             <SidebarToggleIcon open={sidebarOpen} size={16}/>
           </WandIconButton>
         ) : null}
-        <WandIconButton
+        {!selected ? <WandIconButton
           className="task-board-icon-button"
-          aria-label={selected ? "返回任务看板" : "返回工作区"}
-          title={selected ? "返回任务看板" : "返回工作区"}
-          onClick={() => selected ? setSelectedId("") : onBack ? onBack() : taskBoardController.close()}
+          aria-label="返回工作区"
+          title="返回工作区"
+          onClick={() => onBack ? onBack() : taskBoardController.close()}
         >
           <WandIcon name="chevronLeft"/>
-        </WandIconButton>
+        </WandIconButton> : null}
         <div className="task-board-heading-copy">
-          <h1>{selected ? selected.identifier : "任务看板"}</h1>
-          <p>{selected ? "查看进度与执行记录" : "安排工作，跟进执行，确认结果。"}</p>
+          {selected ? <WandBreadcrumb
+            variant="title"
+            ariaLabel="任务看板导航"
+            items={[
+              { label: "任务看板", onNavigate: () => setSelectedId("") },
+              { label: selected.identifier },
+            ]}
+          /> : <>
+            <h1>任务看板</h1>
+            <p>安排工作，跟进执行，确认结果。</p>
+          </>}
         </div>
       </div>
 
@@ -1297,7 +1340,6 @@ function IssueDetail({
     <div className="task-board-detail-scroll">
       <div className="task-board-detail-layout">
         <div className="task-board-detail-main">
-          <p className="task-board-detail-id">ID: {task.identifier}</p>
           {parent && <button className="task-board-parent-link" type="button" onClick={() => onOpenTask(parent.id)}>
             ↳ 归属 {parent.identifier} · {parent.title}
           </button>}
@@ -1319,6 +1361,7 @@ function IssueDetail({
           <TaskBoardAgentSessionList
             sessions={task.sessions}
             assigned={task.agent}
+            catalog={catalog}
             onOpenSession={onOpenSession}
           />
           {(children.length > 0 || task.status === "doing") && <section className="task-board-children" aria-label="子任务">

@@ -4,10 +4,10 @@ import { failureMessage } from "../errors";
 import { RUN_STATUS } from "../issues/team-run-panel";
 import { taskBoardController } from "../issues/task-board-controller";
 import { SidebarToggleIcon } from "../shell/sidebar-toggle-icon";
-import { WandBadge, WandButton, WandIcon, WandIconButton } from "../ui";
+import { WandBadge, WandBreadcrumb, WandButton, WandIcon, WandIconButton } from "../ui";
 import { TeamAvatar, TeamAvatarStack, type TeamAvatarState } from "./avatar";
 import { aiTeamsRepository, subscribeAiTeamRunChanges } from "./repository";
-import { TeamChatView } from "./team-chat-view";
+import { TeamChatView, teamRunIsActive } from "./team-chat-view";
 
 const STEP_LABEL: Record<AiTeamStep["status"], string> = {
   queued: "排队",
@@ -126,6 +126,7 @@ export function TeamChatPage({
 }: TeamChatPageProps): React.ReactElement {
   const [detail, setDetail] = React.useState<AiTeamRunDetail | null>(null);
   const [error, setError] = React.useState("");
+  const [stopping, setStopping] = React.useState(false);
   const taskId = detail?.run.taskId ?? "";
 
   const load = React.useCallback(async () => {
@@ -153,8 +154,22 @@ export function TeamChatPage({
   React.useEffect(() => {
     setDetail(null);
     setError("");
+    setStopping(false);
     void load();
   }, [load]);
+
+  const stop = async (): Promise<void> => {
+    if (!detail || stopping || !teamRunIsActive(detail.run.status)) return;
+    setStopping(true);
+    setError("");
+    try {
+      setDetail(await aiTeamsRepository.stop(detail.run.id));
+    } catch (cause) {
+      setError(failureMessage(cause, "停止失败。"));
+    } finally {
+      setStopping(false);
+    }
+  };
 
   React.useEffect(() => subscribeAiTeamRunChanges((change) => {
     // 新一轮的 runId 和当前页不同，所以还要按任务 id 收通知，才跟得上「接着开一轮」。
@@ -190,20 +205,38 @@ export function TeamChatPage({
         </WandIconButton> : null}
         <WandIconButton
           className="task-board-icon-button"
-          aria-label="返回工作区"
-          title="返回工作区"
+          aria-label="返回上一会话"
+          title="返回上一会话"
           onClick={back}
         >
           <WandIcon name="chevronLeft"/>
         </WandIconButton>
         <div className="task-board-heading-copy">
-          <h1>{detail?.run.team.name || "群聊"}</h1>
+          <WandBreadcrumb
+            variant="title"
+            className="wand-team-chat-crumb"
+            ariaLabel="群聊导航"
+            items={[
+              { label: "任务看板", onNavigate: () => taskBoardController.open("", "", "board") },
+              { label: detail?.run.team.name || "群聊" },
+            ]}
+          />
           <p>{detail ? detail.run.objective.split("\n")[0] : error || "正在加载群聊…"}</p>
         </div>
       </div>
       {detail && status ? <div className="task-board-header-actions wand-team-chat-head-meta">
         <TeamAvatarStack members={detail.run.team.members} max={5}/>
         <WandBadge tone={status.tone}>{status.label}</WandBadge>
+        {detail.run.chatSessionId && onOpenSession ? <WandButton kind="ghost" size="small" onClick={() => onOpenSession(detail.run.chatSessionId!)}>
+          完整会话记录
+        </WandButton> : null}
+        {teamRunIsActive(detail.run.status) ? <WandButton
+          kind="danger"
+          size="small"
+          disabled={stopping}
+          aria-label="停止团队"
+          onClick={() => void stop()}
+        >{stopping ? "停止中…" : "停止"}</WandButton> : null}
       </div> : null}
     </header>
     {error ? <div className="task-board-native-banner is-error" role="alert">

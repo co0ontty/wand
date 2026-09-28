@@ -179,6 +179,10 @@
       --motion-quick-exit: 90ms;    /* 旧内容退场（快于进场） */
       --motion-dwell-sent: 720ms;   /* 成功态停留 */
       --motion-dwell-failed: 1500ms; /* 失败态停留（要读得完原因） */
+      /* 自转周期是「不确定态循环」的周期长度，不是任何一次状态切换的时长，
+         语义与上面 110~260ms 那组完全不同，所以单独一个 token，不复用 --motion-fast。
+         reduce-motion 下对应的 animation 一律置 none（见各区块的 reduce 块）。 */
+      --motion-spin: 2.4s;
     }
 
     /* ── 会话侧栏：时间视图 / 目录树视图 ─────────────────────── */
@@ -3955,6 +3959,15 @@
       --agent-run-status: var(--warning);
       --agent-run-status-muted: var(--warning-muted);
     }
+    /* 后台派发（Pi 异步回执）与「本轮没结果」都是中性偏冷的提示，不给绿。 */
+    .agent-run.is-background {
+      --agent-run-status: var(--accent);
+      --agent-run-status-muted: var(--accent-muted);
+    }
+    .agent-run.is-pending {
+      --agent-run-status: var(--text-muted);
+      --agent-run-status-muted: color-mix(in srgb, var(--text-muted) 14%, transparent);
+    }
     .agent-run.is-completed {
       --agent-run-status: var(--success);
       --agent-run-status-muted: var(--success-muted);
@@ -3975,7 +3988,8 @@
       text-align: left;
       color: var(--text-primary);
       cursor: pointer;
-      transition: background-color 0.16s var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1));
+      /* 时长与曲线只从 token 取（docs/motion-design.md 第 7 条）。 */
+      transition: background-color var(--motion-fast) var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1));
     }
     .agent-run-summary:hover { background: var(--bg-hover); }
     .agent-run-summary:focus-visible {
@@ -3996,7 +4010,7 @@
       color: var(--agent-run-status);
     }
     .agent-run.is-running .agent-run-summary-icon svg {
-      animation: agent-run-spin 2.4s linear infinite;
+      animation: agent-run-spin var(--motion-spin) linear infinite;
     }
     @keyframes agent-run-spin {
       0% { transform: rotate(0deg); }
@@ -4010,29 +4024,58 @@
       min-width: 0;
     }
     .agent-run-summary-top {
+      /* 收起态标题是一行：不折行，长内容就地省略，状态词永远留在右边。 */
       display: flex;
       align-items: center;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
       gap: 6px 8px;
       min-width: 0;
     }
     .agent-run-title {
+      flex: 0 1 auto;
+      min-width: 0;
       font-size: var(--font-size-xs);
       font-weight: var(--font-weight-semibold);
       line-height: 1.3;
       color: var(--text-primary);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
-    .agent-run-count {
+    /* 多 Agent 卡标题后的主 Agent 任务描述：同一行的补充，不是第二行。 */
+    .agent-run-topic {
+      flex: 1 1 auto;
+      min-width: 0;
+      font-size: 11px;
+      font-weight: var(--font-weight-medium);
+      line-height: 1.3;
+      color: var(--text-secondary);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .agent-run-topic::before {
+      content: "·";
+      margin-right: 6px;
+      color: var(--text-tertiary);
+    }
+    .agent-run-type-chip {
       flex: 0 0 auto;
       display: inline-flex;
       align-items: center;
       padding: 1px 6px;
+      border: 1px solid var(--border-subtle);
       border-radius: var(--radius-full);
       background: var(--bg-tertiary);
       color: var(--text-secondary);
-      font-size: 10.5px;
+      font-family: var(--font-mono, ui-monospace, monospace);
+      font-size: 10px;
       font-weight: var(--font-weight-medium);
       line-height: 1.5;
+      max-width: 148px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .agent-run-status-label {
       flex: 0 0 auto;
@@ -4043,6 +4086,7 @@
       font-weight: var(--font-weight-medium);
       color: var(--agent-run-status);
     }
+    /* 副行 = 最后一步动作：一行纯文本，CSS 省略号收尾，不渲染 markdown。 */
     .agent-run-latest {
       display: flex;
       align-items: baseline;
@@ -4052,14 +4096,6 @@
       line-height: 1.45;
       color: var(--text-muted);
     }
-    .agent-run-latest-label {
-      flex: 0 0 auto;
-      font-size: 9.5px;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      color: var(--text-tertiary);
-      opacity: 0.8;
-    }
     .agent-run-latest-text {
       flex: 1 1 auto;
       min-width: 0;
@@ -4067,41 +4103,64 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .agent-run.is-running .agent-run-latest-text {
-      white-space: normal;
-      display: -webkit-box;
-      -webkit-line-clamp: 2;
-      -webkit-box-orient: vertical;
-      overflow-wrap: anywhere;
-    }
     .agent-run-chevron {
       flex: 0 0 auto;
       display: inline-flex;
       align-items: center;
       margin-top: 3px;
       color: var(--text-muted);
-      transition: transform 0.2s var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1));
+      transition: transform var(--motion-morph) var(--ease-in-out-smooth, cubic-bezier(0.4, 0, 0.2, 1));
     }
     .agent-run[data-expanded="true"] .agent-run-chevron { transform: rotate(180deg); }
 
     /* ── 展开体：桌面 rail 在左、详情在右；永远不设固定高度 / 内嵌滚动 ──
        这是刻意选择：Agent 时间线是对话流的一部分，用户滚动的是整段对话，
-       而不是一个被困在卡片里的小窗口。 */
+       而不是一个被困在卡片里的小窗口。
+       收起 / 展开用 0fr→1fr 的行高变形（和 .task-board-card-detail 同一套路），
+       收起是展开的倒放：不再是 display:none 硬切，触发行位置与尺寸不变。 */
     .agent-run-body {
+      display: grid;
+      grid-template-rows: 0fr;
+      width: 100%;
+      min-width: 0;
+      opacity: 0;
+      /* 收起后内部仍有可聚焦元素（rail 的 role="tab"、<details> 的 summary）：
+         只靠 opacity/overflow 藏不住，键盘 Tab 会走进一张看不见的卡里，
+         也与渲染侧的 aria-hidden="true" 自相矛盾。visibility 是离散属性，
+         用 step-end / step-start 让它对齐动画的两端——收起时等动画走完再藏，
+         展开时立刻可见，位移与倒放关系都不变。时长仍只从 token 取。 */
+      visibility: hidden;
+      transition:
+        grid-template-rows var(--motion-normal) var(--ease-in-out-smooth, cubic-bezier(0.4, 0, 0.2, 1)),
+        opacity var(--motion-fast) var(--ease-in-out-smooth, cubic-bezier(0.4, 0, 0.2, 1)),
+        visibility var(--motion-normal) step-end;
+    }
+    .agent-run[data-expanded="true"] .agent-run-body {
+      grid-template-rows: 1fr;
+      opacity: 1;
+      visibility: visible;
+      transition:
+        grid-template-rows var(--motion-normal) var(--ease-in-out-smooth, cubic-bezier(0.4, 0, 0.2, 1)),
+        opacity var(--motion-fast) var(--ease-in-out-smooth, cubic-bezier(0.4, 0, 0.2, 1)),
+        visibility var(--motion-normal) step-start;
+    }
+    .agent-run-body-inner {
       display: flex;
       flex-direction: row;
       align-items: stretch;
-      width: 100%;
+      min-height: 0;
       min-width: 0;
-      height: auto;
       max-height: none;
-      overflow: visible;
+      overflow: hidden;
       border-top: 1px solid var(--border-subtle);
     }
-    .agent-run[data-expanded="false"] .agent-run-body { display: none; }
 
     .agent-run-rail {
-      flex: 0 0 208px;
+      /* 不再固定 208px，也不参与收缩：结论体里的长代码块会把 flex-basis:auto 的
+         详情面板撑到几千像素，rail 若可收缩就会被挤成 0 宽（只剩两个点）。 */
+      flex: 0 0 clamp(150px, 30%, 228px);
+      /* 不跟详情面板等高：结论一屏长时，rail 拉成一条只有四个点的空柱子。 */
+      align-self: flex-start;
       display: flex;
       flex-direction: column;
       gap: 2px;
@@ -4125,8 +4184,8 @@
       text-align: left;
       color: var(--text-secondary);
       cursor: pointer;
-      transition: background-color 0.15s var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)),
-                  color 0.15s var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1));
+      transition: background-color var(--motion-fast) var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)),
+                  color var(--motion-fast) var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1));
     }
     .agent-run-agent:hover { background: var(--bg-hover); }
     .agent-run-agent:active { transform: scale(0.985); }
@@ -4172,23 +4231,46 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    /* rail 行标题是任务描述，类型降为这一行次要小字（类型名不是身份）。 */
+    .agent-run-agent-type {
+      font-family: var(--font-mono, ui-monospace, monospace);
+    }
     .agent-run-agent-status {
       flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
       font-size: 9.5px;
       font-weight: var(--font-weight-medium);
       color: var(--text-muted);
     }
+    .agent-run-agent-status svg {
+      display: inline-flex;
+      width: 11px;
+      height: 11px;
+    }
     .agent-run-agent-status.is-failed { color: var(--danger); }
     .agent-run-agent-status.is-running { color: var(--accent); }
+    .agent-run-agent-status.is-background { color: var(--accent); }
     .agent-run-agent-status.is-interrupted { color: var(--warning); }
+    .agent-run-agent-status.is-pending { color: var(--text-muted); }
     .agent-run-agent-status.is-completed { color: var(--success); }
 
     .agent-run-detail {
-      flex: 1 1 auto;
+      /* basis 0：宽度只由剩余空间决定，长代码块不能反过来挤掉 rail。 */
+      flex: 1 1 0;
       min-width: 0;
       padding: 10px 12px 12px;
     }
     .agent-run-detail-panel[hidden] { display: none; }
+    /* 切换子 Agent：新面板就地淡入，旧面板已经在上一步消失，不整块重入场。 */
+    .agent-run-detail-panel.is-selected:not([hidden]) {
+      animation: agent-run-panel-enter var(--motion-fast) var(--ease-in-out-smooth, cubic-bezier(0.4, 0, 0.2, 1));
+    }
+    @keyframes agent-run-panel-enter {
+      from { opacity: 0; transform: translateY(2px); }
+      to { opacity: 1; transform: none; }
+    }
     .agent-run-detail-head {
       display: flex;
       align-items: flex-start;
@@ -4197,23 +4279,151 @@
       min-width: 0;
       margin-bottom: 8px;
     }
-    .agent-run-detail-name {
+    .agent-run-detail-titles {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 4px 8px;
+      min-width: 0;
+    }
+    .agent-run-detail-task {
       font-size: 11.5px;
       font-weight: var(--font-weight-semibold);
+      line-height: 1.4;
       color: var(--text-primary);
       overflow-wrap: anywhere;
     }
-    .agent-run-detail-task {
-      font-size: 10.5px;
-      line-height: 1.45;
-      color: var(--text-muted);
-      overflow-wrap: anywhere;
-    }
+    /* 状态词已在摘要行 / rail 行出现过，这里只留同色的点（hover 有 title）。 */
     .agent-run-detail-state {
       flex: 0 0 auto;
-      font-size: 10px;
+      width: 8px;
+      height: 8px;
+      margin-top: 5px;
+      border-radius: 50%;
+      background: var(--text-muted);
+    }
+    .agent-run-detail-state.is-failed { background: var(--danger); }
+    .agent-run-detail-state.is-running,
+    .agent-run-detail-state.is-background { background: var(--accent); }
+    .agent-run-detail-state.is-interrupted { background: var(--warning); }
+    .agent-run-detail-state.is-pending { background: var(--text-tertiary); }
+    .agent-run-detail-state.is-completed { background: var(--success); }
+
+    /* ── 先结论，后过程 ──
+       过程默认收起成一行「过程 · N 步」：展开卡片第一眼是结论，
+       不是 43~83 条步骤铺到屏幕外面去。运行中例外（那时过程就是正文）。 */
+    .agent-run-agent-body {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-width: 0;
+    }
+    .agent-run-process {
+      min-width: 0;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      background: var(--bg-secondary);
+    }
+    .agent-run-process-summary {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 9px;
+      cursor: pointer;
+      list-style: none;
+      font-size: 10.5px;
+      font-weight: var(--font-weight-medium);
+      color: var(--text-muted);
+      transition: background-color var(--motion-fast) var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1));
+    }
+    .agent-run-process-summary::-webkit-details-marker { display: none; }
+    .agent-run-process-summary:hover { background: var(--bg-hover); }
+    .agent-run-process-count {
+      padding: 0 5px;
+      border-radius: var(--radius-full);
+      background: var(--bg-tertiary);
+      color: var(--text-secondary);
+      font-size: 9.5px;
+    }
+    .agent-run-process-chevron,
+    .agent-run-process-chevron svg {
+      display: inline-flex;
+      align-items: center;
+      width: 12px;
+      height: 12px;
+      transition: transform var(--motion-morph) var(--ease-in-out-smooth, cubic-bezier(0.4, 0, 0.2, 1));
+    }
+    /* 展开的倒放就是这一步：箭头转 90°，内容在原位长出来，不跳页。 */
+    .agent-run-process[open] .agent-run-process-chevron { transform: rotate(90deg); }
+    .agent-run-process .agent-run-timeline {
+      padding: 2px 9px 9px;
+      border-top: 1px solid var(--border-subtle);
+    }
+    .agent-run-process[open] .agent-run-timeline {
+      animation: agent-run-process-enter var(--motion-normal) var(--ease-in-out-smooth, cubic-bezier(0.4, 0, 0.2, 1));
+    }
+    @keyframes agent-run-process-enter {
+      from { opacity: 0; transform: translateY(-3px); }
+      to { opacity: 1; transform: none; }
+    }
+
+    /* Pi 异步派发回执：结构化字段 + 等宽值，不走 markdown，不给「已完成」的绿。 */
+    .agent-run-receipt {
+      padding: 9px 10px;
+      border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
+      border-radius: var(--radius-sm);
+      background: color-mix(in srgb, var(--accent) 6%, transparent);
+    }
+    .agent-run-receipt .agent-run-result-label {
+      color: var(--accent);
+      align-items: flex-start;
+    }
+    /* 说明文字与状态图标同处一行头部：图标负责「什么状态」，这句话负责「所以别当结论」。
+       状态词本身不在这里出现——它已经写在摘要行上了。 */
+    .agent-run-receipt-note {
+      font-size: 10.5px;
+      font-weight: 400;
+      line-height: 1.5;
       color: var(--text-muted);
     }
+    .agent-run-receipt-rows {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      margin-top: 7px;
+      padding-top: 7px;
+      border-top: 1px solid var(--border-subtle);
+    }
+    .agent-run-receipt-row {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      min-width: 0;
+      font-size: 10.5px;
+      color: var(--text-muted);
+    }
+    .agent-run-receipt-row span { flex: 0 0 auto; }
+    .agent-run-receipt-row code {
+      flex: 1 1 auto;
+      min-width: 0;
+      overflow-wrap: anywhere;
+      color: var(--text-secondary);
+      font-family: var(--font-mono, ui-monospace, monospace);
+      font-size: 10.5px;
+    }
+    /* 兜底判据认不出字段时正文照原样渲染：宁可啰嗦，也不给一张只有说明的空卡。 */
+    .agent-run-receipt-body {
+      margin-top: 7px;
+      padding-top: 7px;
+      border-top: 1px solid var(--border-subtle);
+      font-size: 11.5px;
+      line-height: 1.55;
+      color: var(--text-secondary);
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    .agent-run-receipt-body > :first-child { margin-top: 0; }
+    .agent-run-receipt-body > :last-child { margin-bottom: 0; }
 
     .agent-run-timeline {
       display: flex;
@@ -4292,9 +4502,9 @@
       color: var(--text-muted);
     }
 
-    /* ── 最终结果：与时间线分开，成功/失败各自一套底色 ── */
+    /* ── 最终结果：结论在前、过程在后，成功/失败各自一套底色 ── */
     .agent-run-result {
-      margin-top: 8px;
+      margin-top: 0;
       padding: 9px 10px;
       border: 1px solid color-mix(in srgb, var(--success) 26%, transparent);
       border-radius: var(--radius-sm);
@@ -4342,6 +4552,10 @@
       color: var(--text-inverse);
       font-size: 10.5px;
     }
+    .agent-run-result-empty {
+      margin: 0;
+      color: var(--text-muted);
+    }
 
     /* 结果已回填到原 Run 的消息本身不再产生第二张卡，只留一个隐藏占位。 */
     .chat-message.agent-run-owned { display: none; }
@@ -4349,8 +4563,12 @@
     @media (prefers-reduced-motion: reduce) {
       .agent-run.is-running .agent-run-summary-icon svg { animation: none; }
       .agent-run-chevron,
+      .agent-run-body,
+      .agent-run-process-summary,
       .agent-run-summary,
       .agent-run-agent { transition: none; }
+      .agent-run-process[open] .agent-run-timeline,
+      .agent-run-detail-panel.is-selected { animation: none; }
       .agent-run-summary:active,
       .agent-run-agent:active { transform: none; }
     }
@@ -5978,6 +6196,15 @@
     .markdown-content h1 { font-size: 17.5px; }
     .markdown-content h2 { font-size: 15.4px; }
     .markdown-content h3 { font-size: 14px; }
+    /* `### ` 的独立一档：字重/间距/换行沿用上面那组，字号取梯度再下一档（正文是 13.3px，
+       这一档靠字重与上下边距区分，不再往下缩成比正文还小）。h1/h2/h3 三档声明值一字未改。 */
+    .markdown-content h4 {
+      margin: 16px 0 8px 0;
+      font-weight: 600;
+      font-size: 13.3px;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
     .markdown-content blockquote {
       margin: 8px 0;
       padding: 8px 12px;
@@ -6975,16 +7202,59 @@
     /* .chat-message.user.queued 与 .queued-badge 的 CSS 已下线 —— 排队消息现在只在
        右下角的 .queue-bar 里展示，不再以"半透明气泡 + 排队中徽章"形式占据 chat 流。 */
 
-    .input-hint {
-      font-size: 7px;          /* 8px — 让位给同一行的按钮，桌面端仍清晰可读 */
+    /* 输入区原位结果行（.composer-status-line，宿主在 .composer-status-row 内）：
+       空闲时是快捷键教学，发送时依次换成 加载 → 完成/失败 → 结果句子。
+       它取代了早已没有宿主的 .input-hint（那条规则的节点不在种子里，从未渲染）。
+       字号对齐同行的 pill 体系，不额外撑高输入区。 */
+    .composer-status-line {
+      position: relative;
+      flex-shrink: 0;
+      font-size: 8.75px;
       line-height: 1.2;
       color: var(--text-muted);
       white-space: nowrap;
       user-select: none;
-      opacity: 0.7;
       max-width: 38ch;             /* 防止突然变长的状态文案撑爆右侧区域 */
       overflow: hidden;
       text-overflow: ellipsis;
+      opacity: 0.72;
+      transition: color var(--motion-fast) var(--ease-in-out-smooth), opacity var(--motion-fast) var(--ease-in-out-smooth);
+    }
+    /* 结果相位配色：句子颜色区分进度 / 成功 / 失败，形状与位置都不动。 */
+    .composer-status-line[data-tone="sending"] { opacity: 0.85; }
+    .composer-status-line[data-tone="sent"] {
+      color: var(--success);
+      opacity: 1;
+    }
+    .composer-status-line[data-tone="failed"] {
+      color: var(--danger);
+      opacity: 1;
+    }
+    /* 驻留倒计时：底部一条随 dwell 收干的细线，读完文案正好收回快捷键教学。
+       时长只从 --motion-dwell-sent / --motion-dwell-failed 取 —— 与 JS 侧
+       MOTION_DWELL_*_MS 同值（两边同值由单测断言），这里不写字面毫秒。 */
+    .composer-status-line[data-tone="sent"]::after,
+    .composer-status-line[data-tone="failed"]::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      bottom: -2px;
+      height: 1px;
+      width: 100%;
+      background: currentColor;
+      opacity: 0.4;
+      transform-origin: left center;
+    }
+    .composer-status-line[data-tone="sent"]::after {
+      animation: composer-dwell-out var(--motion-dwell-sent) linear both;
+    }
+    .composer-status-line[data-tone="failed"]::after {
+      /* 失败驻留更长：原因要读完。 */
+      animation: composer-dwell-out var(--motion-dwell-failed) linear both;
+    }
+    @keyframes composer-dwell-out {
+      from { transform: scaleX(1); }
+      to { transform: scaleX(0); }
     }
 
     /* Composer top row: holds todo collapse bar (left) + reply status bar (right) on one line.
@@ -7363,8 +7633,8 @@
        变体：
          .composer-pill-select  → 原生 <select> 形态（右侧 chevron）
          .composer-pill-chip    → 按钮 / 切换状态的 chip（支持 .active 亮态）
-       现有 .chat-mode-select / .auto-approve-indicator / .composer-interactive-toggle
-       仍保留作为特定色彩或最大宽度等微调入口。
+       现有 .auto-approve-indicator 仍保留作为特定色彩或最大宽度等微调入口
+       （.chat-mode-select 已随旧 ID 形态一并下线，见 session-engine.ts 的三件套注释）。
        ====================================================================== */
     .composer-pill {
       appearance: none;
@@ -7431,12 +7701,6 @@
       display: none;
     }
 
-    /* 兼容旧类：保留为 alias，仅用于细节微调（如最大宽度） */
-    .chat-mode-select {
-      /* 旧标识，沿用 .composer-pill / .composer-pill-select 的基础风格 */
-      max-width: 78px;
-    }
-
     /* Circular action buttons */
     .btn-circle {
       width: var(--composer-action-size);
@@ -7465,24 +7729,9 @@
     .btn-circle-send:active {
       transform: scale(0.95);
     }
-    .btn-circle-stop {
-      background: rgba(178, 79, 69, 0.12);
-      color: var(--danger);
-    }
-    .btn-circle-stop:hover {
-      background: var(--danger);
-      color: white;
-      transform: scale(1.08);
-    }
-    .btn-circle-stop:active {
-      transform: scale(0.95);
-    }
 
-    /* .btn-pill-interrupt 与 @keyframes interruptPulse 已下线：
-       默认行为永远是"排队（气泡）"，想插队请点输入框上方那条气泡。 */
-
-    /* send 按钮在「排队模式」下退到次要色，让相邻的"立即发送"成为视觉重点。
-       不动尺寸 / 圆形，避免 layout shift。 */
+    /* send 按钮在「排队模式」下退到次要色：默认行为是排队而不是打断当前回复，
+       视觉上不该比正常发送更抢眼。不动尺寸 / 圆形，避免 layout shift。 */
     .btn-circle-send.queue-mode {
       background: rgba(197, 101, 61, 0.58);
       box-shadow: none;
@@ -7490,6 +7739,65 @@
     .btn-circle-send.queue-mode:hover {
       background: var(--accent);
       box-shadow: none;
+    }
+
+    /* ── 发送 ⇄ 停止：同一颗按钮的两种状态（docs/motion-design.md §4 图标变形）──
+       宿主是 #send-input-button，相位写在宿主自己的 data-phase 上
+       （idle / sending / sent / failed / running）。glyph 层叠放在宿主内，
+       切换 = 交叉淡入 + 轻微旋转/缩放，不再有第二个按钮节点 + display:none 硬切，
+       也不改变按钮尺寸与位置（§「不位移」）。时长/曲线只取 token。 */
+    .btn-circle-send {
+      position: relative;
+    }
+    .composer-send-glyph {
+      position: absolute;
+      inset: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      /* 退场侧：旧 glyph 先淡出（quick-exit 快于进场），同时轻微收缩旋转。 */
+      opacity: 0;
+      transform: rotate(-25deg) scale(0.72);
+      transition:
+        opacity var(--motion-quick-exit) var(--ease-in-out-smooth),
+        transform var(--motion-morph) var(--ease-in-out-smooth);
+    }
+    /* 进场侧：当前相位的 glyph 淡入并回正。 */
+    .btn-circle-send[data-phase="idle"] .composer-send-glyph-arrow,
+    .btn-circle-send[data-phase="sending"] .composer-send-glyph-sending,
+    .btn-circle-send[data-phase="sent"] .composer-send-glyph-sent,
+    .btn-circle-send[data-phase="failed"] .composer-send-glyph-arrow,
+    .btn-circle-send[data-phase="running"] .composer-send-glyph-stop {
+      opacity: 1;
+      transform: none;
+      transition:
+        opacity var(--motion-fast) var(--ease-in-out-smooth),
+        transform var(--motion-morph) var(--ease-out-expo);
+    }
+    /* 「停止」相位：同一颗按钮换成 danger 面，位置与尺寸不变。 */
+    .btn-circle-send[data-phase="running"] {
+      background: var(--danger);
+      color: #fff;
+    }
+    .btn-circle-send[data-phase="running"]:hover {
+      background: var(--danger-hover);
+    }
+    /* 「失败」驻留期：danger 面 + 描边（底色由 .input-composer 那条精修段决定），
+       glyph 仍是箭头不是方块 —— 读作「这次发送失败了」，不是「现在是停止」。 */
+    .btn-circle-send[data-phase="failed"] {
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 42%, transparent);
+    }
+    .composer-send-spinner {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      border: 2px solid rgba(255, 255, 255, 0.34);
+      border-top-color: #fff;
+      /* 加载是唯一持续循环的形态：900ms 与 .prompt-optimize-spinner 同族。 */
+      animation: composer-send-spin 900ms linear infinite;
+    }
+    @keyframes composer-send-spin {
+      to { transform: rotate(360deg); }
     }
 
     /* Prompt optimize button — top-right of the input composer */
@@ -7857,14 +8165,13 @@
        the pointer crossed it and amplified the composer's old size jump. */
     @media (min-width: 721px) and (hover: hover) and (pointer: fine) {
       .input-composer .btn-circle-send:hover,
-      .input-composer .btn-circle-stop:hover,
       .input-composer .btn-circle-action:hover,
       .input-composer.has-text .prompt-optimize-btn:hover {
         transform: none;
       }
 
       .input-composer .btn-circle-send:active,
-      .input-composer .btn-circle-stop:active,
+      .input-composer .btn-circle-action:active,
       .input-composer .btn-circle-action:active,
       .input-composer.has-text .prompt-optimize-btn:active {
         transform: scale(0.97);
@@ -9547,7 +9854,7 @@
         min-width: var(--composer-action-size);
         border-radius: 50%;
       }
-      .btn-circle-send svg, .btn-circle-stop svg {
+      .btn-circle-send svg {
         width: 12px;
         height: 12px;
       }
@@ -9572,18 +9879,10 @@
         font-size: 15px;
       }
 
-      .chat-mode-select {
-        max-width: 65px;
-        font-size: 7.875px;
-        height: 22px;
-        min-height: 22px;
-        padding: 0 14px 0 4px;
-        border-radius: 5px;
-      }
-      /* 窄屏（手机）保留提示，但用更小字号 + 更紧的宽度上限，避免把发送按钮挤出行外。
-         状态切换（"思考中…" / "已加入排队…"）能截断成省略号也比整条消失友好。 */
-      .input-hint {
-        font-size: 6.3px;
+      /* 窄屏（手机）结果行用更小字号 + 更紧的宽度上限，避免把同行控件挤出去；
+         状态句子（"正在发送…" / "已加入排队…"）截成省略号也比整条消失友好。 */
+      .composer-status-line {
+        font-size: 7.5px;
         max-width: 18ch;
         opacity: 0.6;
       }
@@ -9790,7 +10089,7 @@
          窄屏窄到放不下两栏时也不横向滚动——rail 允许横向滑动选 Agent。 */
       .agent-run { margin: 6px 0; }
       .agent-run-summary { padding: 9px 10px; gap: 8px; }
-      .agent-run-body { flex-direction: column; }
+      .agent-run-body-inner { flex-direction: column; }
       .agent-run-rail {
         flex: 0 0 auto;
         flex-direction: row;
@@ -10090,17 +10389,6 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-    }
-    /* 此处历史遗留的 .chat-mode-select 全局规则会覆盖上面 .composer-pill 的统一字号 / 边框，
-       已上移到 .composer-pill / .composer-pill-select 体系；这里只保留 outline / cursor 的兜底，
-       不再设置 font-size / max-width，避免和 6938 行的统一样式打架。 */
-    .chat-mode-select {
-      font-family: inherit;
-      cursor: pointer;
-      outline: none;
-    }
-    .chat-mode-select:focus {
-      border-color: var(--accent);
     }
     /* ── Notification Bubble ── */
     .notification-bubble {
@@ -12715,6 +13003,23 @@
       transform: none;
     }
 
+    /* 相位配色落在同一颗按钮上（换色不换几何）。选择器要带 .input-composer 前缀才压得过
+       上面那条 `.input-composer .btn-circle-send`。停止 / 失败走 danger，发送中降到半实心
+       表示「这条还在路上」，完成回到常规色。 */
+    .input-composer .btn-circle-send[data-phase="running"],
+    .input-composer .btn-circle-send[data-phase="failed"] {
+      background: var(--danger);
+    }
+
+    .input-composer .btn-circle-send[data-phase="running"]:hover:not(:disabled),
+    .input-composer .btn-circle-send[data-phase="failed"]:hover:not(:disabled) {
+      background: var(--danger-hover);
+    }
+
+    .input-composer .btn-circle-send[data-phase="sending"] {
+      background: color-mix(in srgb, var(--accent-solid) 62%, var(--bg-elevated));
+    }
+
     .input-composer #attach-btn {
       width: 34px;
       height: 34px;
@@ -13888,6 +14193,13 @@
     html:not(.is-wand-app) .input-composer.is-terminal-interactive .prompt-optimize-btn,
     html:not(.is-wand-app) .input-composer.is-terminal-interactive #voice-record-btn {
       display: none !important;
+    }
+
+    /* 直通模式没有草稿概念，发送交给 Enter 与 rail 按钮；但「停止」这颗必须留着 ——
+       原来它是独立的 #stop-button，在直通里照样可见。合成一颗按钮后按相位放行，
+       只有 running（可停止）时露出，位置仍在工具行末尾，不会挤到 rail 按钮。 */
+    html:not(.is-wand-app) .input-composer.is-terminal-interactive #send-input-button[data-phase="running"] {
+      display: inline-flex !important;
     }
 
     /* 原生嵌入壳：底部输入栏由原生壳渲染，网页侧把整条 drafting row 收掉。 */
@@ -17031,7 +17343,6 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-collapsed-task.
   color: var(--accent-active);
   background: var(--web-sidebar-active);
 }
-html:not(.is-wand-app) #app[data-react-shell="enabled"] .legacy-sidebar-collapse { display: none; }
 
 /* Final sidebar hierarchy pass: one connector, one action gutter. */
 html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-item,
@@ -17209,8 +17520,6 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar.pinned.collapse
 
 /* Sidebar hierarchy shared by the full tree and its compact preview. */
 .sidebar-brand-mark { width: 32px; height: 32px; flex: 0 0 auto; }
-/* Preserve the legacy ID for integrations without showing a second close button. */
-.sidebar-refined .sidebar-header-actions .legacy-sidebar-collapse { display: none; }
 .sidebar-tools-menu.wand-ui-dropdown-content {
   min-width: 196px;
   max-width: calc(100vw - 24px);
@@ -17742,6 +18051,37 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined.pinned.
 .task-board-heading-copy { min-width: 0; }
 .task-board-heading-copy h1 { margin: 0; font-size: 24px; font-weight: 650; line-height: 1.3; letter-spacing: -0.5px; }
 .task-board-heading-copy p { margin: 5px 0 0; color: var(--text-tertiary); font-size: var(--font-size-base); }
+
+/* ===== 面包屑（WandBreadcrumb）=====
+   单层页面头部的层级导航：任务详情、群聊页、团队详情共用，替代重复的二级标题。 */
+.wand-crumb { min-width: 0; }
+.wand-crumb ol { display: flex; align-items: center; gap: 6px; min-width: 0; margin: 0; padding: 0; list-style: none; }
+.wand-crumb li { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.wand-crumb li:last-child { overflow: hidden; }
+.wand-crumb button {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  margin-left: -6px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  color: var(--text-tertiary);
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  transition: color var(--motion-fast) var(--ease-in-out-smooth), background-color var(--motion-fast) var(--ease-in-out-smooth);
+}
+.wand-crumb button:hover { color: var(--text-primary); background: var(--bg-hover); }
+.wand-crumb button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.wand-crumb :is(h1, strong) { min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wand-crumb.is-compact strong { color: var(--text-primary); font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); }
+.wand-crumb-sep { flex: 0 0 auto; color: var(--text-tertiary); }
+/* 窄屏：面包屑仍只占一行，过长时省略中间段，不换行叠成两层标题。 */
+@media (max-width: 760px) {
+  .wand-crumb li:not(:first-child):not(:last-child) { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wand-crumb button { transition: none; }
+}
 .task-board-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 0 28px 14px; border-bottom: 1px solid var(--border-subtle); }
 .task-board-toolbar-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
 .task-board-toolbar-controls > .wand-ui-select-trigger { width: 220px; max-width: 100%; }
@@ -17857,6 +18197,8 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined.pinned.
   }
   .wand-stretch-tabs-indicator,
   .task-board-list-detail,
+  .task-board-card-detail,
+  .task-board-card-detail-inner,
   .task-board-list-chevron,
   .sidebar-search-expand,
   .sidebar-list-heading h2,
@@ -18099,8 +18441,107 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined.pinned.
 .task-board-card-sessions,
 .task-board-session,
 .task-board-conversation,
-.task-board-processing,
-.task-board-card-complete { pointer-events: auto; }
+.task-board-processing { pointer-events: auto; }
+
+/* ── 看板卡片就地展开（与 .task-board-list-detail 同一套语义）────────────────
+   展开只加长卡片下部，列里后面的卡片顺势下移；触发区（整张卡片）本身位置不变。
+   margin-top 抵掉父级 flex gap，收起态高度为 0 时卡片不会被撑高 8px。
+   时长与曲线一律取 token；reduce-motion 由文件头的 prefers-reduced-motion blanket 接管。 */
+.task-board-card > .task-board-card-detail { pointer-events: auto; margin-top: -8px; }
+.task-board-card-detail {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows var(--motion-normal) var(--ease-in-out-smooth),
+    opacity var(--motion-fast) var(--ease-in-out-smooth);
+}
+.task-board-card.is-open .task-board-card-detail { grid-template-rows: 1fr; opacity: 1; }
+.task-board-card-detail-inner {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+  padding: 0;
+  transition: padding var(--motion-normal) var(--ease-in-out-smooth);
+}
+.task-board-card.is-open .task-board-card-detail-inner { padding: 10px 0 2px; }
+/* 面板里的会话是带状态与运行目录的完整版，收起态那排简版行让位，同一条不列两遍。 */
+.task-board-card.is-open > .task-board-session-list { display: none; }
+.task-board-card.is-open {
+  border-color: var(--border-strong);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-sm);
+}
+.task-board-card-detail-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+}
+.task-board-card-detail-fields > div { display: flex; align-items: baseline; gap: 5px; min-width: 0; }
+.task-board-card-detail-fields dt { flex: none; color: var(--text-tertiary); font-size: 10px; }
+.task-board-card-detail-fields dd { margin: 0; color: var(--text-secondary); font-size: 11px; }
+.task-board-card-detail-body {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.task-board-card-detail-sessions {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.task-board-card-detail-sessions li button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.task-board-card-detail-sessions li button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-board-card-detail-sessions li button small { flex: none; color: var(--text-tertiary); }
+.task-board-card-detail-note { margin: 0; color: var(--text-tertiary); font-size: 11px; }
+.task-board-card-detail-actions { display: flex; gap: 6px; }
+.task-board-card-detail-open,
+.task-board-card-detail-collapse {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xs);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.task-board-card-detail-collapse { border-color: transparent; background: transparent; color: var(--text-tertiary); }
+.task-board-card-detail-open:hover,
+.task-board-card-detail-collapse:hover { border-color: var(--border-strong); color: var(--accent); }
+.task-board-card-detail-actions button:focus-visible {
+  outline: 2px solid var(--accent-solid);
+  outline-offset: 2px;
+}
 
 .task-board-card-topline {
   display: flex;
@@ -19027,28 +19468,6 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined.pinned.
 .task-board-due { flex: 0 0 auto; color: var(--text-secondary); }
 .task-board-due.is-overdue { color: var(--accent); }
 
-.task-board-card-complete {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 49px;
-  width: 49px;
-  height: 20px;
-  margin-left: auto;
-  padding: 0 8px;
-  gap: 4px;
-  border: 0;
-  border-radius: 32px;
-  background: color-mix(in srgb, var(--accent) 11%, transparent);
-  color: var(--accent);
-  font: inherit;
-  font-size: 10px;
-  line-height: 15px;
-  cursor: pointer;
-}
-
-.task-board-card.is-done:hover .task-board-card-complete { display: inline-flex; }
-
 .task-board-progress-row {
   display: flex;
   align-items: center;
@@ -19506,7 +19925,8 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined.pinned.
   padding: 24px 8px 20px;
 }
 
-.task-board-dashboard-heading h1 {
+/* 概览视图的项目名：页面级 h1 已由看板头部出，这里降成 h2，字号沿用原样。 */
+.task-board-dashboard-heading .task-board-dashboard-title {
   margin: 0;
   font-size: 36px;
   font-weight: 650;
@@ -19882,14 +20302,6 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined.pinned.
   color: var(--text-primary);
   font: inherit;
   white-space: nowrap;
-}
-
-.task-board-detail-id {
-  margin: 0 0 4px;
-  color: var(--text-tertiary);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.04em;
 }
 
 @media (prefers-reduced-motion: reduce) {

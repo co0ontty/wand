@@ -505,3 +505,46 @@ test("quick-commit controller owns one contextual overlay lifecycle", () => {
   uninstall();
   assert.equal(quickCommitController.open({ sessionId: "session-2" }), false);
 });
+
+test("快捷提交的结果全在弹层体内原位呈现，驻留取自 token", () => {
+  const host = readFileSync(new URL("../src/web-ui/react/quick-commit/host.tsx", import.meta.url), "utf8");
+  assert.ok(!host.includes("toast("), "原位已有三态反馈，不再同时弹 Toast");
+  assert.match(host, /setResultNote\(`\$\{summary\}/, "submodule / tag / 推送 / 归档细节改到页脚原位");
+  assert.match(host, /resultNote \|\| \(hasQuickCommitChanges\(status\)/);
+  assert.match(host, /window\.setTimeout\(resolve, response\.archiveError \? MOTION_DWELL_FAILED_MS : MOTION_DWELL_SENT_MS\)/);
+  assert.match(host, /setPushError\(describeError\(pushFailure, "推送失败。"\)\)/, "推送失败只走原位 alert");
+});
+
+test("快捷提交面板的可见文案不再中英混排", () => {
+  const host = readFileSync(new URL("../src/web-ui/react/quick-commit/host.tsx", import.meta.url), "utf8");
+  assert.match(host, /<h3 id="wand-quick-editor-title">提交信息<\/h3>/, "编辑区标题跟字段名走，不是 New");
+  assert.match(host, /\{pushing \? "推送中…" : "推送并关闭"\}/, "同一按钮的两态用同一种语言");
+  assert.match(host, /file\.submoduleState\.hasTrackedChanges \? "有改动" : ""/, "子模块徽章不再写 dirty");
+  assert.match(host, /response\.pushedCommits \? "提交" : "", response\.pushedTags \? "标签" : ""/, "推送结果句子里不夹 commits / tags");
+  assert.doesNotMatch(host, /New<\/h3>|Push & Close|"dirty"|"commits"|"tags"/);
+});
+
+test("文件状态徽章的 aria-label 挂到有 role 的承载上，AT 读得到含义", () => {
+  const host = readFileSync(new URL("../src/web-ui/react/quick-commit/host.tsx", import.meta.url), "utf8");
+  // 无 role 的 span 上 aria-label 会被忽略：字母 M/A/D 就是全部可读内容。
+  assert.match(host, /className=\{`wand-quick-file-badge wand-quick-file-badge-\$\{badge\.tone\}\`\}\n\s*role="img"\n\s*title=\{badge\.label\}\n\s*aria-label=\{badge\.label\}/);
+});
+
+test("读不到 Git 状态分成两句：失败要像失败，没读到别冒充失败", () => {
+  const host = readFileSync(new URL("../src/web-ui/react/quick-commit/host.tsx", import.meta.url), "utf8");
+  // 改前只有「没有可用的 Git 状态。」一句，请求失败和没读到长得一模一样。
+  assert.doesNotMatch(host, /没有可用的 Git 状态/);
+  assert.match(host, /\? <p className="wand-quick-error" role="alert">\{error\}<\/p>/, "失败态仍是 alert");
+  assert.match(host, /<p role="status">还没有读到 Git 状态，重新打开快捷提交即可再试一次。<\/p>/);
+  assert.match(host, /「没读到」不能冒充「失败」/);
+});
+
+test("迭代/diff 单选组补上方向键走位，Tab 只停在选中项", () => {
+  const panel = readFileSync(new URL("../src/web-ui/react/quick-commit/iteration-panel.tsx", import.meta.url), "utf8");
+  assert.match(panel, /tabIndex=\{mode === item\.mode \? 0 : -1\}/, "role=radio 的一组只有一个 Tab 停靠点");
+  assert.match(panel, /const keys = \["ArrowLeft", "ArrowRight", "Home", "End"\];/);
+  assert.match(panel, /onModeChange\(target\);\n\s*modeRefs\.current\.get\(target\)\?\.focus\(\);/,
+    "箭头既换选中也把焦点带过去（ref 登记簿，不摸 querySelector）");
+  assert.match(panel, /if \(!target \|\| disabled\) return;/, "禁用态不响应箭头");
+  assert.doesNotMatch(panel, /role="radio"\n\s*aria-checked=\{mode === item\.mode\}\n\s*tabIndex=\{0\}/, "不能每项都 tabIndex=0");
+});

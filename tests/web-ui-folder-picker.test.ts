@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   configureFolderPickerRuntime,
@@ -94,4 +95,14 @@ test("controller owns open, choose, close, and runtime synchronization", async (
 
   uninstall();
   assert.equal(folderPickerController.open(), false);
+});
+
+test("文件夹选择框在输入法组字期不提交、不跳条目", () => {
+  const source = readFileSync(
+    new URL("../src/web-ui/react/folder-picker/host.tsx", import.meta.url),
+    "utf8",
+  );
+  // 守卫在 handleInputKeyDown 第一行：Enter→activateItem、方向键→换选中项，都不能吃组字期的键。
+  assert.match(source, /function handleInputKeyDown\(event: KeyboardEvent<HTMLInputElement>\): void \{\n\s*\/\/ [^\n]*\n\s*if \(event\.nativeEvent\.isComposing\) return;\n\s*if \(NAVIGATION_KEYS\.has/);
+  assert.match(source, /activateItem\(activeItem\);/);
 });

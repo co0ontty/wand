@@ -50,14 +50,26 @@ process.exit(1);
 NODE
 }
 
-REQUIRED_NODE_MAJOR=22
+# A standalone downloaded install.sh has no .nvmrc beside it. In a checkout,
+# use the same pin as build/CI; keep the standalone fallback in sync.
+REQUIRED_NODE_VERSION="26.10.0"
+NODE_VERSION_FILE="$(dirname "${BASH_SOURCE[0]}")/.nvmrc"
+if [[ -f "$NODE_VERSION_FILE" ]]; then
+  REQUIRED_NODE_VERSION="$(<"$NODE_VERSION_FILE")"
+fi
 
 # --- Check Node.js ---
 if command -v node &>/dev/null; then
   NODE_VERSION=$(node -v | sed 's/^v//')
-  NODE_MAJOR=${NODE_VERSION%%.*}
-  if (( NODE_MAJOR < REQUIRED_NODE_MAJOR )); then
-    warn "Node.js v${NODE_VERSION} detected, but v${REQUIRED_NODE_MAJOR}+ is required."
+  if ! node -e '
+    const have = process.versions.node.split(".").map(Number);
+    const need = process.argv[1].split(".").map(Number);
+    for (let i = 0; i < 3; i++) {
+      if (have[i] > need[i]) process.exit(0);
+      if (have[i] < need[i]) process.exit(1);
+    }
+  ' "$REQUIRED_NODE_VERSION"; then
+    warn "Node.js v${NODE_VERSION} detected, but v${REQUIRED_NODE_VERSION}+ is required."
     NEED_NODE=1
   else
     info "Node.js v${NODE_VERSION} found."
@@ -70,17 +82,17 @@ fi
 
 if (( NEED_NODE )); then
   if [ "$(uname -s)" = "Darwin" ]; then
-    error "需要 Node.js >= ${REQUIRED_NODE_MAJOR}：先 brew install node@${REQUIRED_NODE_MAJOR}（或 nvm install ${REQUIRED_NODE_MAJOR}）再重跑本脚本。"
+    error "需要 Node.js >= ${REQUIRED_NODE_VERSION}：先 nvm install ${REQUIRED_NODE_VERSION} && nvm use，再重跑本脚本。"
   fi
-  info "Installing Node.js v${REQUIRED_NODE_MAJOR} via NodeSource..."
+  info "Installing Node.js v${REQUIRED_NODE_VERSION} via NodeSource..."
   if command -v curl &>/dev/null; then
-    curl -fsSL "https://deb.nodesource.com/setup_${REQUIRED_NODE_MAJOR}.x" | sudo -E bash -
+    curl -fsSL "https://deb.nodesource.com/setup_${REQUIRED_NODE_VERSION%%.*}.x" | sudo -E bash -
   elif command -v wget &>/dev/null; then
-    wget -qO- "https://deb.nodesource.com/setup_${REQUIRED_NODE_MAJOR}.x" | sudo -E bash -
+    wget -qO- "https://deb.nodesource.com/setup_${REQUIRED_NODE_VERSION%%.*}.x" | sudo -E bash -
   else
     error "curl or wget is required to install Node.js."
   fi
-  sudo apt-get install -y nodejs || error "Failed to install Node.js. Please install Node.js >= ${REQUIRED_NODE_MAJOR} manually."
+  sudo apt-get install -y nodejs || error "Failed to install Node.js. Please install Node.js >= ${REQUIRED_NODE_VERSION} manually."
   info "Node.js $(node -v) installed."
 fi
 

@@ -549,3 +549,16 @@ test("worktree host delegates focus, Escape, and focus restoration to the dialog
   assert.ok(!host.includes("document."));
   assert.ok(!host.includes("fetch("));
 });
+
+test("worktree 成功结果先在弹层体内原位读完，再关闭", () => {
+  const host = readFileSync(
+    new URL("../src/web-ui/react/worktree-merge/host.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(host, /setResultNote\(worktreeMergeResultMessage\(result\)\)/);
+  assert.match(host, /role="status">\{resultNote\}/);
+  assert.match(host, /window\.setTimeout\(resolve, MOTION_DWELL_RESULT_SENTENCE_MS\)/);
+  assert.ok(!host.includes("toast("), "成功不再靠 toast 抢在关闭前露一面");
+  // 失败仍然是原位 alert，两条通道对称。
+  assert.match(host, /className="wand-worktree-error" role="alert"/);
+});

@@ -17,7 +17,7 @@
 - **C 编辑体验**：成员卡片内多候选增删/上下移动排序，列表内展开不跳页。
 - **D 入口适配**：侧栏新建任务、工作区欢迎页（项目上下文）、团队页「直接开工」支持选团队。
 - **E 群聊面板**：三视图同一位置交叉淡入淡出，群聊默认。
-- **F Android**：Web 先做；Android 同批设计、随后落地（多候选只读）。
+- **F Android**：Web 先做；Android 同批设计、随后落地（团队定义与多候选**可编辑**，见 §11-Q6）。
 - **H 兼容**：旧单 agent 数据、旧运行快照（`team_json`）无损兼容；SQLite 只加不删。
 
 ### 非目标（修正 B4）
@@ -374,7 +374,7 @@ Web 先行合入并验收后开工；服务端契约（T1–T5）冻结后 Andro
 ### 6.2 页面与导航（A2/A3/A4）
 
 - `ui/AppNav.kt:10-48` 增 `AiTeams`、`AiTeamDetail(teamId)`、`AiTeamRun(runId)`；同步 `WandApp.kt:460-597` when 穷举、`AppNav.kt:195-204` 转场 saver——穷举分支不得用 else 吞新目的地。
-- 新 Screen（`ui/screens/`）：`AiTeamListScreen.kt`（列表）、`AiTeamDetailScreen.kt`（成员 + 候选只读行，首选高亮；编辑多候选不做，§11-Q6；「直接开工」底部弹 note，**必选 workspace**——对齐 §4.2 无 cwd 自由度）、`AiTeamRunScreen.kt`（TabRow「群聊 | 时间线」，群聊默认，交叉淡入）、`AiTeamChatPanel.kt`（author 气泡 + notice 居中行 + 输入走既有会话消息通道，镜像 §5.3 的批准引导语）。
+- 新 Screen（`ui/screens/`）：`AiTeamsScreen.kt`（列表 + ＋ 展开模板面板）、`AiTeamDetailScreen.kt`（成员 + 候选只读行，首选高亮；顶栏「编辑」进编辑器；「直接开工」底部弹 note，**必选 workspace**——对齐 §4.2 无 cwd 自由度）、`AiTeamEditorScreen.kt`（新建 / 编辑同屏，见 §11-Q6）、`AiTeamRunScreen.kt`（TabRow「群聊 | 时间线」，群聊默认，交叉淡入）、`AiTeamChatPanel.kt`（author 气泡 + notice 居中行 + 输入走既有会话消息通道，镜像 §5.3 的批准引导语）。
 - 复用：`ChatBlocks.kt:188-250` TurnView 结构（assistant 头换成员署名）；`ThinkingEfforts.kt:29-47` 目录消费用于首选展示。
 - `NewTaskComposerScreen.kt:146-177` provider 下拉加「AI 团队」组（走同一直发路由）。
 
@@ -572,7 +572,7 @@ Android（A5，真机）：列表→详情（候选只读、首选高亮）→�
 | Q3 | 团队直发卡的可见性/归属/清理 | **已落定不留白**：`labels_json` 的 `team_direct`、默认迭代、看板可见；暂不做清理界面 | 成立 |
 | Q4 | 默认视图群聊 vs 时间线 | 群聊（降级 notice 已同步进群聊，B15 闭环后可放心默认） | 成立，验收后复确认 |
 | Q5 | 候选上限 4 | 4（1 首选 + 3 备用） | 成立 |
-| Q6 | Android 多候选编辑 | 本期只读，编辑留 Web | 成立 |
+| Q6 | Android 多候选编辑 | **已推翻**：Android 现与 Web 同权——`AiTeamsScreen` 的 ＋ 按模板新建、列表卡与详情顶栏的「编辑」进 `AiTeamEditorScreen`，成员增删 / 名字 / 职责 / 负责人 / 候选（加删移）都能改；仍不编辑头像与 `role`，但 PUT 时原样回写。契约与测试见 `docs/ai-teams.md` §6 | 本条已按新需求更新（原「本期只读，编辑留 Web」） |
 | Q7 | startup window 是否 config 可配 | **改为不可配**：常量 45s + 注释（避免新配置项文档负担与误调） | 本条表述已按此更新 |
 | Q8 | 直发运行的工作目录 | **已落定**：workspaceId 必填、无 cwd 入参、拒绝 defaultCwd 兜底（B5）；**`kind:"global"` 工作区同样服务端 400 拒绝，前端只在已有非 global 项目时开放团队（R2）**；「无上下文时缺省最近工作区」不再提供——缺上下文就在 UI 上要求先选/建项目 | 本条已从「待定」升级为契约（§4.2/§5.1） |
 

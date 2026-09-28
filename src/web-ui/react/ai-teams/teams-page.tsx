@@ -16,6 +16,7 @@ import { AgentFields } from "../issues/agent-fields";
 import {
   createDefaultIssueAgent,
   issueAgentProviderLabel,
+  issueAgentProviderModelLine,
   ISSUE_AGENT_PROVIDERS,
   normalizeIssueModelCatalog,
   type IssueAgentProvider,
@@ -25,7 +26,7 @@ import {
 import { taskBoardController } from "../issues/task-board-controller";
 import { taskBoardRepository } from "../issues/task-board-repository";
 import { RUN_STATUS, TeamRunView } from "../issues/team-run-panel";
-import { subscribeWandModelCatalog } from "../model-catalog";
+import { subscribeWandModelCatalog, wandModelDisplayName } from "../model-catalog";
 import { wandOverlay } from "../overlay-controller";
 import { sortProviderOptions, useProviderUsage } from "../provider-usage";
 import {
@@ -36,7 +37,7 @@ import {
   SettingsToggle,
 } from "../settings/fields";
 import { SidebarToggleIcon } from "../shell/sidebar-toggle-icon";
-import { WandBadge, WandButton, WandIcon, WandIconButton, WandSearchField, WandStretchTabs } from "../ui";
+import { WandBadge, WandBreadcrumb, WandButton, WandIcon, WandIconButton, WandSearchField, WandStretchTabs } from "../ui";
 import { CAT_COATS, memberCoatIndex, PixelCat, shrinkAvatarImage, TeamAvatar, TeamAvatarStack } from "./avatar";
 import {
   aiTeamsRepository,
@@ -442,7 +443,7 @@ function MemberCard({
         <strong>{label}{member.isLeader ? <em>负责人</em> : null}</strong>
         <small>{member.duty || "还没写职责"}</small>
         <span className="wand-team-member-agent">
-          {issueAgentProviderLabel(member.agent.provider)} · {member.agent.model === "default" ? "默认模型" : member.agent.model}
+          {issueAgentProviderModelLine(member.agent, catalog)}
         </span>
       </span>
       <WandIcon name="chevronDown" size={14}/>
@@ -526,6 +527,7 @@ function TeamEditor({
   defaultAgent,
   onSaved,
   onDeleted,
+  onDirtyChange,
 }: {
   team: AiTeam | null;
   initial: AiTeamInput;
@@ -534,6 +536,8 @@ function TeamEditor({
   defaultAgent: WandTaskAgent;
   onSaved(team: AiTeam, created: boolean): void;
   onDeleted(id: string): void;
+  /** 草稿是否偏离初始值；宿主用它决定离开前要不要确认，编辑过程本身不上报服务端。 */
+  onDirtyChange?: (dirty: boolean) => void;
 }): React.ReactElement {
   const [draft, setDraft] = React.useState<AiTeamInput>(initial);
   const [openMember, setOpenMember] = React.useState(-1);
@@ -544,6 +548,11 @@ function TeamEditor({
   const busy = pending || deleting;
   const idPrefix = `ai-team-${team?.id ?? "new"}`;
   const leaderIndex = draft.members.findIndex((member) => member.isLeader);
+  // 草稿是否偏离初始值：AiTeamInput 是纯数据（成员数量有限），直接比序列化结果，
+  // 不给每个字段单独维护 touched 标记。宿主只读一个布尔，编辑过程零开销。
+  const initialKey = JSON.stringify(initial);
+  const dirty = React.useMemo(() => JSON.stringify(draft) !== initialKey, [draft, initialKey]);
+  React.useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
 
   const patchMember = (index: number, patch: Partial<AiTeamMember>): void => {
     setDraft((current) => ({
@@ -963,7 +972,9 @@ function TeamRuns({
           <span className="wand-team-run-id">{run.taskIdentifier}</span>
           <strong>{run.taskTitle || run.objective.split("\n")[0]}</strong>
           <WandBadge tone={status.tone}>{status.label}</WandBadge>
-          <small>{new Date(run.updatedAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</small>
+          {/* 时刻格式跟着浏览器 locale 走（和 team-chat-view.tsx 的 chatTurnClock 同一口径）：
+              写死 "zh-CN" 会让英文环境的用户在同一页里看到两种日期写法。 */}
+          <small>{new Date(run.updatedAt).toLocaleString([], { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</small>
           <WandIcon name="chevronDown" size={14}/>
         </button>
         <div className="wand-team-run-body" inert={!open}>
@@ -1063,7 +1074,9 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
       const target = event.target as HTMLElement | null;
       if (target?.closest("input, textarea, [contenteditable='true'], [role='dialog']")) return;
       if (selectedId) {
-        setSelectedId("");
+        // 和面包屑返回同一条路：脏草稿先问，取消就不离开（这里在 handler 里取，
+        // 不放依赖数组——leaveDetail 是后声明的 const，渲染期取值会踩 TDZ）。
+        void leaveDetail();
         return;
       }
       onBack ? onBack() : taskBoardController.close();
@@ -1090,9 +1103,58 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
   const creating = selectedId === NEW_TEAM;
   const detailOpen = creating || !!selected;
 
-  const startCreate = (): void => {
+  // 「新建团队」和换人、面包屑返回是同一件事：详情面板按 selectedId 挂 key，
+  // 换过去就把正在编辑的编辑器整个卸载。所以这里也先走同一套确认（脏才弹，不脏零打扰）。
+  const startCreate = async (): Promise<void> => {
+    if (!await confirmDiscardTeamDraft()) return;
+    teamDraftDirty.current = false;
     setTemplate(null);
     setSelectedId(NEW_TEAM);
+  };
+
+  // 编辑器只上报一个布尔，宿主用 ref 接：不因为每次击键重渲染整个页面。
+  const teamDraftDirty = React.useRef(false);
+  const onTeamDraftDirtyChange = React.useCallback((dirty: boolean): void => {
+    teamDraftDirty.current = dirty;
+  }, []);
+
+  /**
+   * 离开详情 / 换模板前的同一套确认（对齐 `confirmDiscardTaskDraft` 的形状：
+   * 默认继续编辑、危险动作才丢弃）。文案说明会丢什么，因为这里丢的是已存在团队的
+   * 未保存修改，不是新建任务草稿。取消（含关掉浮层）一律不丢。
+   */
+  const confirmDiscardTeamDraft = async (): Promise<boolean> => {
+    if (!teamDraftDirty.current) return true;
+    const answer = await wandOverlay.dialog({
+      title: "放弃未保存的团队改动？",
+      description: "名称、成员和各自的 CLI / 模型 / 执行模式改动还没保存，离开后回到上次保存的内容。",
+      actions: [
+        { label: "继续编辑", value: false, autoFocus: true },
+        { label: "放弃改动", value: true, kind: "danger" },
+      ],
+    });
+    return answer.dismissed === false && answer.action === true;
+  };
+
+  const leaveDetail = async (): Promise<void> => {
+    if (!await confirmDiscardTeamDraft()) return;
+    teamDraftDirty.current = false;
+    setSelectedId("");
+  };
+
+  // 左侧列表换人和面包屑返回是同一件事：详情面板按 selectedId 挂 key，换过去就把
+  // 未保存的编辑器整个卸载，所以走同一个确认。不脏直接放行，确认后立刻切，不插 loading。
+  const selectTeam = async (teamId: string): Promise<void> => {
+    if (teamId === selectedId) return;
+    if (!await confirmDiscardTeamDraft()) return;
+    teamDraftDirty.current = false;
+    setSelectedId(teamId);
+  };
+
+  const backToTemplates = async (): Promise<void> => {
+    if (!await confirmDiscardTeamDraft()) return;
+    teamDraftDirty.current = false;
+    setTemplate(null);
   };
 
   /**
@@ -1124,17 +1186,26 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
         >
           <SidebarToggleIcon open={sidebarOpen} size={16}/>
         </WandIconButton> : null}
-        <WandIconButton
+        {!selected ? <WandIconButton
           className="task-board-icon-button"
           aria-label="返回工作区"
           title="返回工作区"
           onClick={() => onBack ? onBack() : taskBoardController.close()}
         >
           <WandIcon name="chevronLeft"/>
-        </WandIconButton>
+        </WandIconButton> : null}
         <div className="task-board-heading-copy">
-          <h1>AI 团队</h1>
-          <p>负责人拆解分派，成员各用自己的 CLI 协作完成。</p>
+          {selected ? <WandBreadcrumb
+            variant="title"
+            ariaLabel="AI 团队导航"
+            items={[
+              { label: "AI 团队", onNavigate: () => { void leaveDetail(); } },
+              { label: selected.name },
+            ]}
+          /> : <>
+            <h1>AI 团队</h1>
+            <p>负责人拆解分派，成员各用自己的 CLI 协作完成。</p>
+          </>}
         </div>
       </div>
       <div className="task-board-header-actions">
@@ -1143,7 +1214,7 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
           kind="primary"
           size="small"
           aria-pressed={creating}
-          onClick={() => creating ? setSelectedId("") : startCreate()}
+          onClick={() => (creating ? void leaveDetail() : void startCreate())}
         >
           <WandIcon name="plus" slot="start" className="wand-teams-create-icon"/>
           <span>新建团队</span>
@@ -1173,7 +1244,7 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
                 className="wand-teams-card"
                 aria-pressed={selectedId === team.id}
                 data-state={state}
-                onClick={() => setSelectedId(team.id)}
+                onClick={() => { void selectTeam(team.id); }}
               >
                 <TeamAvatarStack members={team.members} max={4}/>
                 <span className="wand-teams-card-copy">
@@ -1197,7 +1268,7 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
           })}
           {teams !== null && visible.length === 0 ? <div className="wand-teams-empty">
             <p>{teams.length === 0 ? "还没有团队。" : "没有匹配的团队。"}</p>
-            {teams.length === 0 ? <WandButton kind="soft" size="small" onClick={startCreate}>从模板创建</WandButton> : null}
+            {teams.length === 0 ? <WandButton kind="soft" size="small" onClick={() => { void startCreate(); }}>从模板创建</WandButton> : null}
           </div> : null}
         </div>
       </aside>
@@ -1216,7 +1287,7 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
           </div>
         </div> : creating && template ? <>
           <div className="wand-teams-detail-head">
-            <WandIconButton className="task-board-icon-button" aria-label="换一个模板" onClick={() => setTemplate(null)}>
+            <WandIconButton className="task-board-icon-button" aria-label="换一个模板" onClick={() => { void backToTemplates(); }}>
               <WandIcon name="chevronLeft"/>
             </WandIconButton>
             <div>
@@ -1230,6 +1301,7 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
             catalog={catalog}
             providerOptions={providerOptions}
             defaultAgent={defaultAgent}
+            onDirtyChange={onTeamDraftDirtyChange}
             onSaved={(team) => {
               setTeams((current) => [team, ...(current ?? [])]);
               setSelectedId(team.id);
@@ -1239,33 +1311,44 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
           />
         </> : selected ? <>
           <div className="wand-teams-detail-head">
-            <WandIconButton className="task-board-icon-button wand-teams-detail-back" aria-label="返回团队列表" onClick={() => setSelectedId("")}>
-              <WandIcon name="chevronLeft"/>
-            </WandIconButton>
             <TeamAvatarStack members={selected.members} size="md" max={6}/>
             <div>
-              <h2>{selected.name}</h2>
               <p>{selected.description || `${selected.members.length} 位成员`}</p>
             </div>
           </div>
           <WandStretchTabs tabs={DETAIL_TABS} value={detailTab} ariaLabel="团队详情" onValueChange={setDetailTab}/>
-          <div className="wand-teams-detail-pane" key={detailTab}>
-            {detailTab === "runs" ? <TeamRuns
-              runs={teams === null ? null : runsOf(selected.id)}
-              focusRunId={focusRunId}
-              onOpenSession={onOpenSession}
-            /> : <TeamEditor
-                team={selected}
-                initial={inputOf(selected)}
-                catalog={catalog}
-                providerOptions={providerOptions}
-                defaultAgent={defaultAgent}
-                onSaved={(saved) => setTeams((current) => (current ?? []).map((item) => item.id === saved.id ? saved : item))}
-                onDeleted={(id) => {
-                  setSelectedId("");
-                  setTeams((current) => (current ?? []).filter((item) => item.id !== id));
-                }}
-              />}
+          {/*
+            两个面板都常驻，切标签只翻可见性（对齐 team-run-panel 的三视图叠放）：
+            原来这里写 key={detailTab} 强制重挂载，整块重新走一遍进场动画所以闪，
+            而且 TeamEditor 的草稿和成员卡展开态会被一起清掉。
+          */}
+          <div className="wand-teams-detail-stack">
+            {DETAIL_TABS.map((tab) => <div
+              key={tab.value}
+              className="wand-teams-detail-pane"
+              data-hidden={detailTab !== tab.value || undefined}
+              inert={detailTab !== tab.value}
+            >
+              {tab.value === "runs" ? <TeamRuns
+                runs={teams === null ? null : runsOf(selected.id)}
+                focusRunId={focusRunId}
+                onOpenSession={onOpenSession}
+              /> : <TeamEditor
+                  key={selected.id}
+                  team={selected}
+                  initial={inputOf(selected)}
+                  catalog={catalog}
+                  providerOptions={providerOptions}
+                  defaultAgent={defaultAgent}
+                  onDirtyChange={onTeamDraftDirtyChange}
+                  onSaved={(saved) => setTeams((current) => (current ?? []).map((item) => item.id === saved.id ? saved : item))}
+                  onDeleted={(id) => {
+                    teamDraftDirty.current = false;
+                    setSelectedId("");
+                    setTeams((current) => (current ?? []).filter((item) => item.id !== id));
+                  }}
+                />}
+            </div>)}
           </div>
         </> : <div className="wand-teams-empty is-detail">
           <WandIcon name="parallel" size={28}/>

@@ -94,6 +94,18 @@ function PreviewBody({ snapshot, editorRef }: {
         <strong>{snapshot.failure?.message || "加载预览失败"}</strong>
         {snapshot.failure?.size != null ? <small>文件大小：{formatFilePreviewSize(snapshot.failure.size)}</small> : null}
         {snapshot.failure?.download ? <DownloadLink file={snapshot.failure.download} label="仍然下载文件" /> : null}
+        {snapshot.request ? <WandButton
+          kind="ghost"
+          size="small"
+          // 预览没有 reload 命令，同路径 open() 会在「已打开且不脏」分支里直接返回而根本不读盘；
+          // 先 close（错误态必不脏，close 是同步复位）再 open 同一个 request，才走得到 load()。
+          onClick={() => {
+            const request = snapshot.request;
+            if (!request) return;
+            void filePreviewController.execute({ type: "close" });
+            void filePreviewController.open(request);
+          }}
+        >重新加载</WandButton> : null}
       </div>
     );
   }
@@ -231,7 +243,7 @@ function PreviewToolbar({ snapshot }: { snapshot: FilePreviewSnapshot }) {
                 自动换行
               </WandButton>
               <WandButton size="small" aria-label="缩小字号" onClick={() => run({ type: "view.font.adjust", delta: -1 })}>A−</WandButton>
-              <span className="wand-file-preview-font-size" aria-label={`字号 ${snapshot.fontSize}`}>{snapshot.fontSize}</span>
+              <span className="wand-file-preview-font-size" role="status" aria-label={`字号 ${snapshot.fontSize}`}>{snapshot.fontSize}</span>
               <WandButton size="small" aria-label="放大字号" onClick={() => run({ type: "view.font.adjust", delta: 1 })}>A+</WandButton>
             </div>
           ) : null}

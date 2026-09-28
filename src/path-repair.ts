@@ -24,9 +24,10 @@ import { spawn, spawnSync } from "node:child_process";
  * 修复分两层（都在 startServer() 开头跑）：
  *   1. repairRuntimePath()（同步、cheap）：扫常见工具链 bin 目录，把存在但 PATH
  *      里缺的"追加"到 process.env.PATH 末尾。
- *   2. deepRepairRuntimePath()（异步、贵一点）：起一个 login shell 拉用户实际的
- *      PATH（覆盖 ~/.bashrc、~/.zshrc、nvm/fnm/volta 的 shell-init 等所有动态
- *      逻辑），把里面 PATH 里我们还没的目录"前插"到 process.env.PATH 前面。这
+ *   2. deepRepairRuntimePath()（异步、贵一点）：起一个交互式 login shell 拉用户实际的
+ *      PATH（与 provider PTY 的 -lic 一致，覆盖 ~/.bashrc、~/.zshrc、
+ *      nvm/fnm/volta 的 shell-init 等动态逻辑），把里面 PATH 里我们还没的目录
+ *      "前插"到 process.env.PATH 前面。这
  *      是真正能修好"unit 里 PATH 太旧、用户 shell 里却好好的"这种场景的关键。
  *
  * 设计决策：
@@ -36,7 +37,7 @@ import { spawn, spawnSync } from "node:child_process";
  *   - 用 path.delimiter：Windows 用 `;`，POSIX 用 `:`，跨平台安全。
  *   - 不重写 service unit：那需要 sudo，且语义太重；只在 install.sh 主动调
  *     `wand service:install` 时才重新烧 PATH。
- *   - login shell 用 -lc 跑，4 秒超时；失败就静默走同步路径，不阻塞启动。
+ *   - provider PTY 用 -lic，PATH 探测也用 -lic（不是 -lc）；4 秒超时，失败走同步路径。
  *
  * WAND_PATH_REPAIR_DISABLE=1 可以彻底关掉同步那层（极端情况下用户想完全控制 PATH 时用）。
  * WAND_PATH_REPAIR_DEEP_DISABLE=1 只关掉 login shell 探测，但保留同步追加。
@@ -224,7 +225,7 @@ export function repairRuntimePath(): PathRepairResult {
  * 这种动态注入的 PATH。
  *
  * 行为：
- *   - 跑 `${shell} -l -c '...'` 拉 $PATH 和 command -v claude/codex/opencode（4s 超时）
+ *   - 跑 `${shell} -lic '...'` 拉 $PATH 和 command -v claude/codex/opencode（4s 超时）
  *   - 按 login shell 的 PATH 顺序重排 process.env.PATH，再把仅存在于 service 的
  *     目录追加回去。不能只前插新增目录：同一个 CLI 同时装在 nvm 和 Homebrew 时，
  *     两个目录本来都存在，旧实现不会重排，structured 与 PTY 会命中不同版本。
@@ -333,7 +334,7 @@ function pickProbeShell(configured?: string): string | null {
 }
 
 /**
- * 用 login shell 跑一段最小脚本，拿到用户实际的 PATH 和 provider CLI 解析路径。
+ * 用与 PTY provider 相同的交互式 login shell 跑最小脚本，拿到实际的 PATH 和 CLI 路径。
  * 用 \x1f（ASCII Unit Separator）作字段分隔符避免和路径里的字符冲突。
  */
 function probeLoginShell(shell: string, timeoutMs: number): Promise<ProbeResult> {
@@ -346,7 +347,7 @@ function probeLoginShell(shell: string, timeoutMs: number): Promise<ProbeResult>
     `printf 'QODERCLI\\x1f%s\\n' "$(command -v qodercli 2>/dev/null)"`;
 
   return new Promise((resolve, reject) => {
-    const child = spawn(shell, ["-l", "-c", script], {
+    const child = spawn(shell, ["-lic", script], {
       env: {
         ...process.env,
         // 防止 PROMPT_COMMAND / PS1 等钩子往 stdout 喷东西干扰解析

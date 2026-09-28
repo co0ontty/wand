@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import os from "node:os";
 import path from "node:path";
 
 import { resolveEndpointUid } from "./render-protocol.js";

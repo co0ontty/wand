@@ -12,6 +12,65 @@ function source(relativePath: string): string {
   return readFileSync(path.join(root, relativePath), "utf8");
 }
 
+// 直通模式（键盘输入即透传）不走普通提交链路，失败原本被 .catch(function(){}) 吞掉。
+test("终端直通提交失败：原位结果行不可见时退回错误气泡，并把没送出的字放回输入框", () => {
+  const input = source("src/web-ui/browser/input.ts");
+  assert.match(
+    input,
+    /return queueDirectInput\(passthroughText, "interactive_text"\)[\s\S]{0,200}?\.catch\(function\(err\) \{\n\s*\/\/[\s\S]{0,400}?reportPassthroughInputFailure\(passthroughSessionId, passthroughText, err\);/,
+    "有文本的直通提交失败必须交给统一播报，不能再空 catch",
+  );
+  assert.match(
+    input,
+    /return queueDirectInput\("\\r", "enter_text"\)\.catch\(function\(err\) \{[\s\S]{0,200}?reportPassthroughInputFailure\(passthroughSessionId, "", err\);/,
+    "空回车失败同样要响一声",
+  );
+  assert.match(
+    input,
+    /function reportPassthroughInputFailure\(sessionId, text, error\) \{[\s\S]*?restoreFailedComposerSubmission\(sessionId, text, \[\], false\);[\s\S]*?flashComposerFailed\(/,
+    "回填只留内存（送达未知），原因走 flashComposerFailed",
+  );
+  const passthroughStart = input.indexOf('if (state.terminalInteractive && !embedTerminal) {');
+  assert.ok(passthroughStart >= 0, "直通分支还在 sendInputFromBox 里");
+  assert.doesNotMatch(
+    input.slice(passthroughStart, input.indexOf("var inputBox =", passthroughStart)),
+    /\.catch\(function\(\) \{\}\)/,
+    "直通分支里不许留空 catch",
+  );
+});
+
+// 一次失败留在 state.inputQueue 上，之后每次 queueDirectInput 的 .then 都会被跳过。
+test("queueDirectInput：单次失败不污染队列，失败只交给调用方播报", () => {
+  const input = source("src/web-ui/browser/input.ts");
+  assert.match(
+    input,
+    /var queued = state\.inputQueue\.then\(function\(\) \{/,
+    "排队 promise 与队列本身分开持有",
+  );
+  assert.match(
+    input,
+    /state\.inputQueue = queued\.catch\(function\(\) \{\}\);\n\s*return queued;/,
+    "队列自身保持 fulfilled，返回给调用方的 promise 仍然带失败",
+  );
+});
+
+// readyState===OPEN 与 send() 成功之间没有保证：连接正在关闭时浏览器会同步抛
+// InvalidStateError。裸调用发生在 Promise 之外，会绕过调用方的 .catch 变成静默丢失。
+test("queueDirectInput：WS 快路径的同步抛转成同一条 rejection，不新增第二条播报", () => {
+  const input = source("src/web-ui/browser/input.ts");
+  const fastPath = input.slice(input.indexOf('if (effectiveView === "terminal"'), input.indexOf("state.messageQueue.push(input);"));
+  assert.ok(fastPath.length > 80, "没截到 WS 快路径");
+  assert.match(
+    fastPath,
+    /try \{\n\s*state\.ws\.send\(JSON\.stringify\(\{[\s\S]*?\}\)\);\n\s*\} catch \(error\) \{\n\s*return Promise\.reject\(error\);\n\s*\}/,
+    "send 必须整个包在 try 里，抛错转成这一条链路的 rejection",
+  );
+  // 注释里会提到播报函数名（解释为什么不在这里播报），所以只看代码。
+  const fastPathCode = fastPath.replace(/^\s*\/\/.*$/gm, "");
+  assert.doesNotMatch(fastPathCode, /flashComposer|showToast|reportPassthroughInputFailure/,
+    "快路径不许自己播报：播报只挂在调用方的 .catch 上，同步抛与异步 reject 共用同一出口，各一次");
+});
+
 // 复现路径：输入文本 → Enter（composer 与 localStorage 同步清空）→ 服务端还在流式
 // 响应时刷新页面 → 在途 fetch 被 abort → 失败回填把已经发出去的消息写回 localStorage
 // → 刷新后它重新出现在输入框里，用户一按回车就重复发送。

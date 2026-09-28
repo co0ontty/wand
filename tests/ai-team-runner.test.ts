@@ -14,7 +14,10 @@ import {
 import {
   agentKey,
   AI_TEAM_DETAIL_CHAT_TURNS,
+  AI_TEAM_LIVE_TEXT_MAX_CHARS,
   type AiTeam,
+  type AiTeamLiveStep,
+  type AiTeamLiveUpdate,
   type AiTeamMember,
   type AiTeamStep,
 } from "../src/ai-team-types.js";
@@ -35,6 +38,12 @@ interface FakeSession {
   sent: string[];
   provider: string;
   lastError: string | null;
+  /** PTY 终端原始输出（live 文本在 pty 非 claude 时的唯一来源）。 */
+  output?: string;
+  /** 置真即 activityState → needs_permission，用来验「只有状态变也要推」。 */
+  permissionBlocked?: boolean;
+  /** claude 的 PTY 只有在 CLI 已激活时才挂 pty bridge（messages 才会随流式更新）。 */
+  providerCliActive?: boolean;
 }
 
 class FakeOps implements AiTeamSessionOps {
@@ -57,7 +66,7 @@ class FakeOps implements AiTeamSessionOps {
     this.sessions.set(id, {
       id, owner: input.agent.kind === "pty" ? "pty" : "structured", status: "running", inFlight: true,
       messages: [{ role: "user", content: [{ type: "text", text: input.prompt }] }], sent: [input.prompt],
-      provider: input.agent.provider, lastError: null,
+      provider: input.agent.provider, lastError: null, output: "",
     });
     this.opened.push({
       sessionId: id,
@@ -92,6 +101,8 @@ class FakeOps implements AiTeamSessionOps {
     if (!session) return null;
     return {
       id: session.id, status: session.status, messages: session.messages, provider: session.provider,
+      output: session.output ?? "", permissionBlocked: session.permissionBlocked === true,
+      providerCliActive: session.providerCliActive === true,
       structuredState: session.owner === "structured"
         ? { inFlight: session.inFlight, lastError: session.lastError }
         : undefined,
@@ -161,6 +172,7 @@ function harness(
     worker?: WandTaskAgent;
     workerAgents?: WandTaskAgent[];
     models?: (provider: WandTaskAgent["provider"]) => string[];
+    notifyLive?: (update: AiTeamLiveUpdate) => void;
   } = {},
 ): Harness {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-ai-team-"));
@@ -200,7 +212,8 @@ function harness(
   const chat = new FakeChat(ops);
   const clock = { now: Date.parse("2026-02-01T00:00:00.000Z") };
   const runner = new AiTeamRunner({
-    storage, ops, chat, resolveCwd: () => cwd, now: () => clock.now, models: options.models,
+    storage, ops, chat, resolveCwd: () => cwd, now: () => clock.now,
+    models: options.models, notifyLive: options.notifyLive,
   });
   t.after(() => runner.dispose());
   return { storage, ops, chat, runner, cwd, team, taskId: task.id, clock, models: options.models };
@@ -465,6 +478,67 @@ test("the step limit pauses the run and continue extends it", async (t) => {
   assert.equal(detail.run.status, "running");
   assert.equal(detail.run.stepLimit, 12);
   assert.equal(runningStep(h, runId).memberId, "m_qa");
+});
+
+test("chat continue after the limit uses the raised team budget and preserves queued work", async (t) => {
+  const h = harness(t, { requirePlanApproval: false, maxSteps: 2 });
+  const runId = await startAndPlan(h, [["m_dev", "先实现"], ["m_qa", "再验收"]]);
+  const chatId = h.runner.detail(runId).run.chatSessionId!;
+  const dev = runningStep(h, runId);
+  h.ops.finishTurn(dev.sessionId!, "实现完成");
+  await settle(h, dev.sessionId!);
+  const queued = h.runner.detail(runId).steps.find((step) => step.title === "再验收")!;
+  assert.equal(queued.status, "queued");
+  assert.equal(h.runner.detail(runId).run.stepLimit, 2);
+
+  h.storage.saveAiTeam({ ...h.team, maxSteps: 80 });
+  await h.runner.chatInput(chatId, "让团队继续");
+  const after = h.runner.detail(runId);
+  assert.equal(after.run.status, "running");
+  assert.equal(after.run.stepLimit, 80, "团队新上限在原运行明确续跑时生效");
+  assert.equal(after.run.team.maxSteps, 80);
+  assert.equal(after.steps.find((step) => step.id === queued.id)?.status, "running");
+  assert.equal(runningStep(h, runId).memberId, "m_qa", "不能重新请负责人而跳过原计划");
+  assert.equal(after.steps.filter((step) => step.kind === "leader").length, 1);
+  assert.equal(h.chat.lines(chatId).filter((line) => line.includes("步数上限加到 80")).length, 1);
+});
+
+test("a simple reply also extends the limit; new instructions go to the leader", async (t) => {
+  const h = harness(t, { requirePlanApproval: false, maxSteps: 2 });
+  const runId = await startAndPlan(h, [["m_dev", "先实现"], ["m_qa", "再验收"]]);
+  const dev = runningStep(h, runId);
+  h.ops.finishTurn(dev.sessionId!, "实现完成");
+  await settle(h, dev.sessionId!);
+
+  const after = await h.runner.reply(runId, "继续");
+  assert.equal(after.run.stepLimit, 12, "没有改团队配置也要给旧运行加步数");
+  assert.equal(after.steps.find((step) => step.title === "再验收")?.status, "running");
+
+  const other = harness(t, { requirePlanApproval: false, maxSteps: 2 });
+  const otherRunId = await startAndPlan(other, [["m_dev", "先实现"], ["m_qa", "再验收"]]);
+  const otherDev = runningStep(other, otherRunId);
+  other.ops.finishTurn(otherDev.sessionId!, "实现完成");
+  await settle(other, otherDev.sessionId!);
+  const changed = await other.runner.reply(otherRunId, "先调整验收范围再继续");
+  assert.equal(changed.run.stepLimit, 12);
+  assert.equal(changed.steps.find((step) => step.title === "再验收")?.status, "skipped");
+  const leader = runningStep(other, otherRunId);
+  assert.equal(leader.kind, "leader");
+  assert.match(other.ops.sessions.get(leader.sessionId!)!.sent.at(-1)!, /先调整验收范围再继续/);
+});
+
+test("continue is rejected for a leader question even when its budget is exhausted", async (t) => {
+  const h = harness(t, { maxSteps: 1 });
+  const detail = await h.runner.start({ teamId: h.team.id, taskId: h.taskId });
+  const leader = runningStep(h, detail.run.id);
+  writeReport(h, leader, JSON.stringify({ action: "ask", message: "选哪种格式？" }));
+  h.ops.finishTurn(leader.sessionId!);
+  await settle(h, leader.sessionId!);
+  const waiting = h.runner.detail(detail.run.id);
+  assert.equal(waiting.run.stepsUsed, waiting.run.stepLimit);
+  assert.equal(waiting.run.statusDetail, "选哪种格式？");
+  await assert.rejects(h.runner.continueRun(detail.run.id, 10), AiTeamConflictError);
+  assert.deepEqual(h.runner.detail(detail.run.id).run, waiting.run);
 });
 
 test("stop halts the running session and skips pending work", async (t) => {
@@ -764,7 +838,8 @@ test("a follow-up in the same group chat hands the earlier rounds to the new lea
   const lead = runningStep(h, again.id);
   const leadOpened = h.ops.opened.find((item) => item.sessionId === lead.sessionId)!;
   assert.ok(leadOpened.prompt.includes(historyPath), "新负责人一上来就拿到续跑文件");
-  assert.match(leadOpened.prompt, /已经做完的不要重做/);
+  assert.ok(!leadOpened.prompt.includes("已经做完的不要重做"), "读文件的规则不重复进用户消息");
+  assert.match(leadOpened.systemPrompt!, /已经做完的不要重做/);
   const file = readFileSync(path.join(h.cwd, historyPath), "utf8");
   assert.match(file, /第2步 · 实现 · 改 README · 完成/, "上一轮的步骤与结局写进摘要");
   assert.match(file, /README\.md 顶部加了 npm 安装说明/, "上一轮的报告正文留在群聊原文里");
@@ -782,7 +857,8 @@ test("a follow-up in the same group chat hands the earlier rounds to the new lea
   const work = runningStep(h, again.id);
   const workOpened = h.ops.opened.find((item) => item.sessionId === work.sessionId)!;
   assert.ok(workOpened.prompt.includes(historyPath));
-  assert.match(workOpened.prompt, /本群聊历史/);
+  assert.ok(workOpened.prompt.includes("本群聊之前的记录"));
+  assert.match(workOpened.systemPrompt!, /在已有改动的基础上继续/);
 });
 
 test("replies from the run panel are echoed into the group chat", async (t) => {
@@ -935,6 +1011,56 @@ test("[T3] only failures inside the startup window degrade; later ones go back t
   assert.equal(runningStep(outside, outsideRun).kind, "leader");
 });
 
+test("[T3] a failed Pi startup notice is not a model reply and tries the backup model", async (t) => {
+  const h = harness(t, { requirePlanApproval: false }, {
+    workerAgents: [candidate("pi", "mk2api/monkeycode-ultra/gpt-6-astra"), candidate("pi", "openai-codex/gpt-6-sol")],
+  });
+  const runId = await startAndPlan(h, [["m_dev", "设计界面"]]);
+  const first = runningStep(h, runId);
+  const session = h.ops.sessions.get(first.sessionId!)!;
+  session.status = "failed";
+  session.inFlight = false;
+  session.lastError = "积分已耗尽，调用失败";
+  session.messages.push({
+    role: "assistant", content: [{ type: "text", text: `结构化会话执行失败：${session.lastError}` }],
+  });
+  h.clock.now += 2_000;
+  await settle(h, first.sessionId!);
+
+  const skipped = h.storage.listAiTeamSteps(runId).find((step) => step.id === first.id)!;
+  assert.equal(skipped.status, "skipped");
+  assert.equal(h.ops.opened.at(-1)!.model, "openai-codex/gpt-6-sol");
+  assert.equal(runningStep(h, runId).dispatchInfo?.usedCandidate, 1);
+  assert.equal(h.runner.detail(runId).run.stepsUsed, 1, "系统错误提示不扣步骤预算");
+});
+
+test("[T3] a reused session's earlier replies do not hide the current step's startup failure", async (t) => {
+  const h = harness(t, { requirePlanApproval: false }, {
+    workerAgents: [candidate("pi", "first"), candidate("pi", "backup")],
+  });
+  const runId = await startAndPlan(h, [["m_dev", "第一轮设计"]]);
+  const first = runningStep(h, runId);
+  writeReport(h, first, "状态: 完成\n第一轮规格");
+  h.ops.finishTurn(first.sessionId!, "第一轮规格已交付");
+  await settle(h, first.sessionId!);
+  await planMore(h, runId, [{ member: "m_dev", title: "补充设计", after: [] }]);
+
+  const next = runningStep(h, runId);
+  assert.equal(next.sessionId, first.sessionId, "第二轮复用原会话");
+  const session = h.ops.sessions.get(next.sessionId!)!;
+  session.status = "failed";
+  session.inFlight = false;
+  session.lastError = "积分已耗尽，调用失败";
+  session.messages.push({
+    role: "assistant", content: [{ type: "text", text: `结构化会话执行失败：${session.lastError}` }],
+  });
+  h.clock.now += 2_000;
+  await settle(h, next.sessionId!);
+
+  assert.equal(h.storage.listAiTeamSteps(runId).find((step) => step.id === next.id)!.status, "skipped");
+  assert.equal(h.ops.opened.at(-1)!.model, "backup", "当前轮没正常输出，应改用第二候选");
+});
+
 test("[T3] a session that already produced output never degrades", async (t) => {
   const h = harness(t, { requirePlanApproval: false }, {
     workerAgents: [candidate("codex"), candidate("opencode")],
@@ -946,6 +1072,9 @@ test("[T3] a session that already produced output never degrades", async (t) => 
   session.status = "failed";
   session.inFlight = false;
   session.lastError = "503 upstream unavailable";
+  session.messages.push({
+    role: "assistant", content: [{ type: "text", text: `结构化会话执行失败：${session.lastError}` }],
+  });
   await settle(h, step.sessionId!);
   assert.equal(h.ops.opened.length, 2);
   assert.equal(h.runner.detail(runId).steps.find((item) => item.id === step.id)!.status, "failed");
@@ -1370,4 +1499,313 @@ test("[T3b] redaction is a pure function over the directories it is handed", () 
   const noisy = `ENOENT /Users/other/.wand token=sk-ABCDEFGHIJKLMNOP1234 ${"/tmp/wand-dev/wand.db"}`;
   const once = redactAiTeamErrorText(noisy, dirs);
   assert.equal(redactAiTeamErrorText(once, dirs), once, "同一输入重复清洗结果不变（纯函数、幂等）");
+});
+
+// ── live 文本通道（§4.9）──
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+test("output events push debounced live text, identical text is not re-pushed", async (t) => {
+  const pushes: AiTeamLiveUpdate[] = [];
+  const h = harness(t, {}, { notifyLive: (update) => pushes.push(update) });
+  const started = await h.runner.start({ teamId: h.team.id, taskId: h.taskId });
+  const runId = started.run.id;
+  const leader = runningStep(h, runId);
+  writeReport(h, leader, assign([["m_dev", "写安装说明"]]));
+  h.ops.finishTurn(leader.sessionId!);
+  await settle(h, leader.sessionId!);
+  await h.runner.approve(runId);
+  const work = runningStep(h, runId);
+  assert.equal(work.kind, "work");
+  pushes.length = 0;
+
+  // 会话里多了一行 tool_use，连发三个 output 事件：去抖后只推一次，payload 带 runId/taskId。
+  const session = h.ops.sessions.get(work.sessionId!)!;
+  session.messages.push({
+    role: "assistant",
+    content: [{ type: "tool_use", id: "t1", name: "Read", description: "读 README", input: {} }],
+  });
+  h.runner.ingest({ type: "output", sessionId: work.sessionId! });
+  h.runner.ingest({ type: "output", sessionId: work.sessionId! });
+  h.runner.ingest({ type: "output", sessionId: work.sessionId! });
+  await sleep(650);
+  await h.runner.idle();
+  assert.equal(pushes.length, 1, "500ms 去抖：三次事件一次推送");
+  assert.equal(pushes[0]!.runId, runId);
+  assert.equal(pushes[0]!.taskId, h.taskId);
+  const liveStep: AiTeamLiveStep = pushes[0]!.steps[0]!;
+  assert.equal(pushes[0]!.steps.length, 1);
+  assert.equal(liveStep.stepId, work.id);
+  assert.equal(liveStep.memberName, "实现");
+  assert.equal(liveStep.provider, "codex");
+  assert.equal(liveStep.state, "working");
+  assert.ok(liveStep.text.includes("▸ Read · 读 README"), liveStep.text.slice(0, 120));
+
+  // 文本没变：再来 output 不重复推。
+  h.runner.ingest({ type: "output", sessionId: work.sessionId! });
+  await sleep(650);
+  await h.runner.idle();
+  assert.equal(pushes.length, 1, "文本与上次完全相同就不重复推");
+
+  // 文本变了：再推一次。
+  session.messages.push({ role: "assistant", content: [{ type: "text", text: "接着写第二段" }] });
+  h.runner.ingest({ type: "output", sessionId: work.sessionId! });
+  await sleep(650);
+  await h.runner.idle();
+  assert.equal(pushes.length, 2);
+  assert.ok(pushes[1]!.steps[0]!.text.includes("接着写第二段"));
+
+  // 步骤结束：finishStep 落地后补推一次收尾，结束的步不再出现。
+  writeReport(h, work, "状态: 完成\n安装了 npm 说明");
+  h.ops.finishTurn(work.sessionId!);
+  await settle(h, work.sessionId!);
+  const last = pushes[pushes.length - 1]!;
+  assert.ok(last.steps.every((step) => step.stepId !== work.id), "结束的步不再出现在 live 列表");
+
+  // stop：所有步骤落定，最后推一次空列表让卡片收尾。
+  await h.runner.stop(runId);
+  assert.equal(pushes[pushes.length - 1]!.steps.length, 0, "stop 后推空列表收尾");
+});
+
+test("live() only covers running steps with a snapshot and truncates long text", async (t) => {
+  const h = harness(t);
+  const detail = await h.runner.start({ teamId: h.team.id, taskId: h.taskId });
+  const leader = runningStep(h, detail.run.id);
+  h.ops.sessions.get(leader.sessionId!)!.messages.push({
+    role: "assistant", content: [{ type: "text", text: "字".repeat(AI_TEAM_LIVE_TEXT_MAX_CHARS + 7) }],
+  });
+  const steps = h.runner.live(detail.run.id);
+  assert.equal(steps.length, 1);
+  assert.equal(steps[0]!.text.length, AI_TEAM_LIVE_TEXT_MAX_CHARS);
+  assert.ok(steps[0]!.omittedChars >= 7, "提示词 + 长文本一起截尾");
+  // 会话快照丢了也不抛，直接跳过；queued/done 的步骤不进来。
+  h.ops.sessions.delete(leader.sessionId!);
+  assert.deepEqual(h.runner.live(detail.run.id), []);
+  assert.throws(() => h.runner.live("run_nope"), /团队运行不存在/);
+});
+
+// ── live 文本的来源：pty 非 claude 走 output（R1），claude pty / structured 走 messages ──
+
+const ptyAgent = (provider: WandTaskAgent["provider"]): WandTaskAgent => ({
+  provider, model: "default", thinkingEffort: "off", mode: "full-access", kind: "pty",
+});
+
+test("[live R1] a non-claude PTY step reports the growing terminal output, not the stale turn", async (t) => {
+  const h = harness(t, { requirePlanApproval: false }, { worker: ptyAgent("codex") });
+  const runId = await startAndPlan(h, [["m_dev", "改 README"]]);
+  const work = runningStep(h, runId);
+  assert.equal(h.ops.ownerOf(work.sessionId!), "pty");
+  const session = h.ops.sessions.get(work.sessionId!)!;
+  // codex 的 PTY 没挂 pty bridge，流式期 messages 不增长：里面留着的是上一条 turn。
+  session.messages = [{ role: "assistant", content: [{ type: "text", text: "上一轮残留的旧回复" }] }];
+  session.output = "reading src/readme.md\ncoding: 改写安装章节";
+  const steps = h.runner.live(runId);
+  assert.equal(steps.length, 1);
+  assert.equal(steps[0]!.provider, "codex");
+  assert.equal(steps[0]!.text, "reading src/readme.md\ncoding: 改写安装章节");
+  assert.ok(!steps[0]!.text.includes("上一轮残留"), "过期文本不能锚在卡片上");
+});
+
+test("[live R1] a claude PTY step with the CLI active still renders messages", async (t) => {
+  const h = harness(t, { requirePlanApproval: false }, { worker: ptyAgent("claude") });
+  const runId = await startAndPlan(h, [["m_dev", "改 README"]]);
+  const work = runningStep(h, runId);
+  assert.equal(h.ops.ownerOf(work.sessionId!), "pty");
+  const session = h.ops.sessions.get(work.sessionId!)!;
+  // bridge 只在 claude 且 providerCliActive 时挂载，这时 messages 是新鲜的。
+  session.providerCliActive = true;
+  session.messages = [
+    { role: "user", content: [{ type: "text", text: "本轮指令" }] },
+    {
+      role: "assistant",
+      content: [
+        { type: "text", text: "我先读文件" },
+        { type: "tool_use", id: "t1", name: "Read", description: "读 README", input: {} },
+      ],
+    },
+  ];
+  session.output = "一堆不该进卡片的原始终端噪声";
+  const steps = h.runner.live(runId);
+  assert.ok(steps[0]!.text.includes("我先读文件"), "claude PTY 仍按 messages 渲染");
+  assert.ok(steps[0]!.text.includes("▸ Read · 读 README"));
+  assert.ok(!steps[0]!.text.includes("原始终端噪声"), "有 bridge 时不回落 output");
+});
+
+test("[live R1] a structured step is unchanged: messages win even while output grows", async (t) => {
+  const h = harness(t, { requirePlanApproval: false });
+  const runId = await startAndPlan(h, [["m_dev", "改 README"]]);
+  const work = runningStep(h, runId);
+  assert.equal(h.ops.ownerOf(work.sessionId!), "structured");
+  const session = h.ops.sessions.get(work.sessionId!)!;
+  session.messages = [
+    { role: "user", content: [{ type: "text", text: "本轮指令" }] },
+    { role: "assistant", content: [{ type: "text", text: "结构化流式进度" }] },
+  ];
+  session.output = "stderr: 一些无关输出";
+  const steps = h.runner.live(runId);
+  assert.equal(steps[0]!.text, "本轮指令\n结构化流式进度");
+  assert.ok(!steps[0]!.text.includes("stderr"));
+});
+
+test("[live R1] a claude PTY step whose CLI is not active is a bare terminal too", async (t) => {
+  const h = harness(t, { requirePlanApproval: false }, { worker: ptyAgent("claude") });
+  const runId = await startAndPlan(h, [["m_dev", "改 README"]]);
+  const work = runningStep(h, runId);
+  const session = h.ops.sessions.get(work.sessionId!)!;
+  assert.equal(session.providerCliActive, undefined, "没激活 = initializeClaudeBridge 首行就早退");
+  // 和 codex PTY 同一个反例：messages 里是上一条 turn 的残留。
+  session.messages = [{ role: "assistant", content: [{ type: "text", text: "上一轮残留的旧回复" }] }];
+  session.output = "claude 终端此刻在输出的新内容";
+  const steps = h.runner.live(runId);
+  assert.equal(steps[0]!.text, "claude 终端此刻在输出的新内容");
+  assert.ok(!steps[0]!.text.includes("上一轮残留"), "bridge 没挂上就不能锚在旧回合上");
+});
+
+test("[live] a step reports the model and effort of the candidate actually in use", async (t) => {
+  const h = harness(t, { requirePlanApproval: false }, {
+    workerAgents: [
+      { provider: "codex", model: "gpt-5.1-codex", thinkingEffort: "codex:medium", mode: "full-access", kind: "pty" },
+      { provider: "opencode", model: "glm-4.7", thinkingEffort: "max", mode: "full-access", kind: "pty" },
+    ],
+  });
+  h.ops.openFailure = (agent) => agent.provider === "codex" ? ENOENT : null;
+  const runId = await startAndPlan(h, [["m_dev", "改 README"]]);
+  const work = runningStep(h, runId);
+  assert.equal(h.ops.opened.find((item) => item.sessionId === work.sessionId)!.provider, "opencode", "首选起不来，已降级");
+  const steps = h.runner.live(runId);
+  // 降级换候选后，卡片上的模型与思考深度跟着切过去的新候选，不是首选。
+  assert.equal(steps[0]!.model, "glm-4.7");
+  assert.equal(steps[0]!.thinkingEffort, "max");
+});
+
+test("[live] model and effort pass through as truth, including default and off", async (t) => {
+  const h = harness(t, { requirePlanApproval: false }, { worker: ptyAgent("codex") });
+  const detail = await h.runner.start({ teamId: h.team.id, taskId: h.taskId });
+  const leader = runningStep(h, detail.run.id);
+  assert.equal(leader.kind, "leader");
+  const steps = h.runner.live(detail.run.id);
+  // structuredAgent("claude") 是 model:"default" / thinkingEffort:"off"：原样给出去，不翻译成文案。
+  assert.equal(steps[0]!.model, "default");
+  assert.equal(steps[0]!.thinkingEffort, "off");
+});
+
+test("[chat] authored turns carry the model and effort of the candidate actually used", async (t) => {
+  const h = harness(t, { requirePlanApproval: false }, {
+    workerAgents: [
+      candidate("codex", "broken"),
+      { provider: "opencode", model: "glm-4.7", thinkingEffort: "deep", mode: "full-access", kind: "structured" },
+    ],
+  });
+  h.ops.openFailure = (agent) => agent.provider === "codex" ? ENOENT : null;
+  const runId = await startAndPlan(h, [["m_dev", "改 README"]]);
+  const chatId = h.runner.detail(runId).run.chatSessionId!;
+  const turns = h.chat.turns.get(chatId)!;
+
+  const leaderTurn = turns.find((turn) => turn.author?.leader === true)!;
+  assert.equal(leaderTurn.author?.model, "default", "负责人回合署自己步骤实际候选的模型");
+  assert.equal(leaderTurn.author?.thinkingEffort, "off");
+
+  const starts = turns.filter((turn) => turnText(turn).includes("开始「改 README」"));
+  assert.equal(starts[0]!.author?.model, "broken", "第一次开工行署当时真正用的首选");
+  assert.equal(starts[starts.length - 1]!.author?.model, "glm-4.7", "降级后的开工行跟着换");
+  assert.equal(starts[starts.length - 1]!.author?.thinkingEffort, "deep");
+
+  const degradeLine = turns.find((turn) => turn.notice && turnText(turn).includes("首选配置不可用"))!;
+  assert.equal(degradeLine.author?.model, "glm-4.7", "降级行署切过去的新候选");
+  assert.equal(degradeLine.author?.thinkingEffort, "deep");
+
+  const work = runningStep(h, runId);
+  writeReport(h, work, "状态: 完成");
+  h.ops.finishTurn(work.sessionId!);
+  await settle(h, work.sessionId!);
+  const done = turns.find((turn) => turnText(turn).includes("✅ 完成"))!;
+  assert.equal(done.author?.model, "glm-4.7");
+  assert.equal(done.author?.thinkingEffort, "deep");
+
+  const bareNotices = turns.filter((turn) => turn.notice && !turn.author);
+  assert.ok(bareNotices.length > 0, "没有署名的系统提示不编造模型");
+  assert.ok(bareNotices.every((turn) => turn.author === undefined));
+});
+
+test("[live] a terminal run drops its push fingerprint", async (t) => {
+  const pushes: AiTeamLiveUpdate[] = [];
+  const h = harness(t, {}, { notifyLive: (update) => pushes.push(update) });
+  const runId = await startAndPlan(h, [["m_dev", "写安装说明"]]);
+  await h.runner.approve(runId);
+  const work = runningStep(h, runId);
+  const session = h.ops.sessions.get(work.sessionId!)!;
+  session.messages.push({ role: "assistant", content: [{ type: "text", text: "第一段输出" }] });
+  h.runner.ingest({ type: "output", sessionId: work.sessionId! });
+  await sleep(650);
+  await h.runner.idle();
+  const keys = (h.runner as unknown as { lastLiveKey: Map<string, string> }).lastLiveKey;
+  assert.ok(keys.has(runId), "推过一次就留下指纹");
+
+  await h.runner.stop(runId);
+  assert.equal(pushes[pushes.length - 1]!.steps.length, 0, "终态收尾仍推一次空列表");
+  assert.ok(!keys.has(runId), "收尾之后不留指纹，长跑服务不按 run 数攒字符串");
+});
+
+test("[live] the fallback sweep reconciles state even when no event ever arrives", async (t) => {
+  const pushes: AiTeamLiveUpdate[] = [];
+  const h = harness(t, {}, { notifyLive: (update) => pushes.push(update) });
+  const runId = await startAndPlan(h, [["m_dev", "写安装说明"]]);
+  await h.runner.approve(runId);
+  const work = runningStep(h, runId);
+  const session = h.ops.sessions.get(work.sessionId!)!;
+  session.messages.push({ role: "assistant", content: [{ type: "text", text: "第一段输出" }] });
+  // 先让「文本 + 状态」的列表落地一次，作为对账前的基线。
+  h.runner.ingest({ type: "output", sessionId: work.sessionId! });
+  await sleep(650);
+  await h.runner.idle();
+  const baseline = pushes[pushes.length - 1]!;
+  assert.equal(baseline.steps[0]!.state, "working");
+  const before = baseline.steps[0]!.text;
+  pushes.length = 0;
+
+  // registry 内部静默翻转：一条事件都不会进来，只有兜底巡检会重算这一份列表。
+  session.permissionBlocked = true;
+  t.mock.timers.enable({ timers: ["setInterval"] });
+  try {
+    h.runner.reconcile();
+    t.mock.timers.tick(5_000);
+  } finally {
+    t.mock.timers.reset();
+  }
+  await h.runner.idle();
+  assert.equal(pushes.length, 1, "巡检对账推一次");
+  assert.equal(pushes[0]!.steps[0]!.state, "needs_permission");
+  assert.equal(pushes[0]!.steps[0]!.text, before, "文本没变，只是把状态对齐");
+});
+
+test("[live] a state change alone re-pushes even when the text is byte-identical", async (t) => {
+  const pushes: AiTeamLiveUpdate[] = [];
+  const h = harness(t, {}, { notifyLive: (update) => pushes.push(update) });
+  const runId = await startAndPlan(h, [["m_dev", "写安装说明"]]);
+  await h.runner.approve(runId);
+  const work = runningStep(h, runId);
+  const session = h.ops.sessions.get(work.sessionId!)!;
+  session.messages.push({ role: "assistant", content: [{ type: "text", text: "第一段输出" }] });
+  pushes.length = 0;
+
+  h.runner.ingest({ type: "output", sessionId: work.sessionId! });
+  await sleep(650);
+  await h.runner.idle();
+  assert.equal(pushes.length, 1);
+  assert.equal(pushes[0]!.steps[0]!.state, "working");
+
+  // 文本一字未动，只是弹了权限框：状态芯片必须立刻更新，不能等下一次 run 重拉。
+  // 权限/提问这类变化是 status 事件带进来的，所以这里刻意不发 output。
+  session.permissionBlocked = true;
+  h.runner.ingest({ type: "status", sessionId: work.sessionId! });
+  await sleep(650);
+  await h.runner.idle();
+  assert.equal(pushes.length, 2, "state 单独变化也要推一次");
+  assert.equal(pushes[1]!.steps[0]!.text, pushes[0]!.steps[0]!.text);
+  assert.equal(pushes[1]!.steps[0]!.state, "needs_permission");
+
+  h.runner.ingest({ type: "output", sessionId: work.sessionId! });
+  await sleep(650);
+  await h.runner.idle();
+  assert.equal(pushes.length, 2, "文本与状态都没变就不重复推");
 });

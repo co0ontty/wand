@@ -88,7 +88,6 @@ export function ShellFilePanel({ explorerRef }: ShellFilePanelProps = {}) {
             <WandIconButton
               id="file-side-panel-close"
               className="file-side-panel-iconbtn close"
-              kind="danger"
               aria-label="关闭文件面板"
               title="关闭"
               onClick={() => void dispatch({ type: "layout.files.close" })}
@@ -135,6 +134,8 @@ export function ShellFilePanel({ explorerRef }: ShellFilePanelProps = {}) {
                 commitCwd();
               }}
               onKeyDown={(event) => {
+                // 输入法组字期间的回车/ESC 只属于候选词，不能把半截拼音当成路径提交。
+                if (event.nativeEvent.isComposing) return;
                 if (event.key === "Enter") {
                   event.preventDefault();
                   commitCwd();

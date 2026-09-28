@@ -6,14 +6,14 @@
 
 | 层 | 统一选型 | 职责 |
 | --- | --- | --- |
-| 服务端 | Node.js ≥22.5、TypeScript strict、ESM、Express 4 | 鉴权、参数校验、业务路由与运行时组合 |
+| 服务端 | Node.js ≥26.10（构建/CI 用 `.nvmrc`）、TypeScript strict、ESM、Express 4 | 鉴权、参数校验、业务路由与运行时组合 |
 | 实时与执行 | ws、node-pty、terminal daemon、provider adapters | 实时事件、终端及结构化会话；按 SessionRegistry 分派 |
 | 存储 | node:sqlite | 配置偏好、会话与任务持久化；迁移只加不删 |
 | Web 页面 | React 19、TypeScript strict | Shell、导航、设置、任务、文件管理与业务弹层 |
 | UI 基础组件 | react/ui 下的 Wand 封装，底层 Appica | 按钮、表单、弹层、菜单、焦点与键盘交互 |
 | 样式 | CSS 语义 token + Tailwind 4 构建 | Wand 主题与业务布局；Tailwind 生成 Appica 所需工具类 |
 | 浏览器运行时 | browser 下的 TypeScript、xterm | 终端、流式聊天、输入协议、WebSocket、登录引导与原生桥接 |
-| 构建与测试 | esbuild、tsc、node:test + tsx | 单 HTML 内联资产、三套类型检查、行为测试与包体预算 |
+| 构建与测试 | esbuild、tsc、node:test + tsx | 版本化缓存资产、三套类型检查、行为测试与首载/复访预算 |
 
 React 与 browser 不是两个竞争的页面框架。认证后的 Shell 已只有 React 实现；
 browser 仍持有实际使用中的终端池、聊天渲染和连接生命周期。不能因为文件名含
@@ -136,6 +136,7 @@ Express route → 参数与权限检查 → 业务服务 / SessionRegistry → m
 - 终端、代码高亮、diff 的语义颜色保留，不为视觉统一损失信息。
 - 动态尺寸可用内联 style；颜色、字体、圆角和交互状态使用共享 token。
 - 不手改 scripts.js、ai-teams.js、embedded-assets.ts、tailwind.css、vendor bundle 或 dist。
+- HTML 只放挂载节点和带内容指纹的资源 URL；主 JS (`private`) / 合并 CSS (`public`) 独立缓存，vendor 同理。服务端旧进程留嵌入副本，在磁盘资产被 npm 自更新替换时可按旧 hash 服务；未知旧 hash 下发当前资源但必须 `no-store`。HTML 继续 `no-store`，不能把当前配置路径跨实例或跨用户共享缓存。`check:bundle-budget` 按真实首载总量与复访 HTML 分开检查，不按是否内联区别对待。
 - 低频大块界面可拆成按需脚本、不进内联 `scripts.js`：现有先例是 AI 团队
   （`scripts/ai-teams-chunk.js` + `react/ai-teams/lazy.tsx`，共享模块经主包注册表借用，见 `docs/ai-teams.md` §5.3）。
 

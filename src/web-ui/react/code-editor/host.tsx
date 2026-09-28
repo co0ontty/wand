@@ -3,7 +3,7 @@ import { Fragment, type KeyboardEvent, type RefObject, useEffect, useRef, useSyn
 import { isMarkdownPreview, tokenizeFilePreviewCode, type FilePreviewCodeToken } from "../file-preview/model";
 import { MarkdownPreview } from "../file-preview/markdown";
 import { markdownPreviewStyles } from "../file-preview/markdown-styles";
-import { WandIcon } from "../ui";
+import { WandButton, WandIcon } from "../ui";
 import { codeEditorController, codeEditorStore } from "./controller";
 import { codeEditorFindMatches, maxCodeEditorFindHighlights, type CodeEditorFindMatch } from "./model";
 import { codeEditorStyles } from "./styles";
@@ -94,6 +94,9 @@ function SyntaxLayer({ content, ranges, activeRange }: {
   return <code>{nodes}</code>;
 }
 
+/** 标签页 aria-controls 指向的面板 id：EditorBody 的每种状态都挂同一个 id，面板换内容不换身份。 */
+const CODE_EDITOR_PANEL_ID = "wand-code-editor-panel";
+
 function EditorBody({ snapshot, editorRef, ranges, activeRange }: {
   snapshot: CodeEditorSnapshot;
   editorRef: RefObject<HTMLTextAreaElement | null>;
@@ -125,21 +128,27 @@ function EditorBody({ snapshot, editorRef, ranges, activeRange }: {
   }, [editorRef, ranges, activeRange]);
 
   if (snapshot.status === "loading") {
-    return <div className="wand-code-editor-state" role="status">正在打开文件…</div>;
+    return <div id={CODE_EDITOR_PANEL_ID} className="wand-code-editor-state" role="status">正在打开文件…</div>;
   }
   if (snapshot.status === "error") {
     return (
-      <div className="wand-code-editor-state error" role="alert">
+      <div id={CODE_EDITOR_PANEL_ID} className="wand-code-editor-state error" role="alert">
         <span aria-hidden="true">!</span>
         <strong>{snapshot.failure?.message || "打开文件失败"}</strong>
+        {snapshot.activePath ? <WandButton
+          kind="ghost"
+          size="small"
+          // 失败的文件没进 files 缓存，open(同一路径) 会真的重读磁盘（activate/open 的已开分支只会复用）。
+          onClick={() => void codeEditorController.open(snapshot.activePath!)}
+        >重新加载</WandButton> : null}
       </div>
     );
   }
   const file = snapshot.file;
-  if (!file) return <div className="wand-code-editor-state">选择文件后将在这里编辑。</div>;
+  if (!file) return <div id={CODE_EDITOR_PANEL_ID} className="wand-code-editor-state">选择文件后将在这里编辑。</div>;
   if (snapshot.preview && isMarkdownPreview(file)) {
     return (
-      <div className="wand-code-editor-markdown" tabIndex={0} aria-label={`${file.name} 预览`}>
+      <div id={CODE_EDITOR_PANEL_ID} className="wand-code-editor-markdown" tabIndex={0} aria-label={`${file.name} 预览`}>
         <MarkdownPreview content={file.draft} fontSize={snapshot.fontSize} wrap={snapshot.wrap}/>
       </div>
     );
@@ -147,7 +156,7 @@ function EditorBody({ snapshot, editorRef, ranges, activeRange }: {
   const content = file.draft;
   const lineCount = Math.max(1, content.split("\n").length);
   return (
-    <div className="wand-code-editor-body" style={{ fontSize: `${snapshot.fontSize}px` }}>
+    <div id={CODE_EDITOR_PANEL_ID} className="wand-code-editor-body" style={{ fontSize: `${snapshot.fontSize}px` }}>
       <pre
         ref={linesRef}
         className="wand-code-editor-lines"
@@ -211,6 +220,8 @@ function FindBar({ snapshot, matchCount, activeIndex, activeLine, inputRef }: {
         spellCheck={false}
         onChange={(event) => run({ type: "find.set", query: event.currentTarget.value })}
         onKeyDown={(event) => {
+          // 中文输入法选词的回车只结束组字，不能当成「跳到下一个匹配」。
+          if (event.nativeEvent.isComposing) return;
           if (event.key === "Enter") {
             event.preventDefault();
             run({ type: "find.step", delta: event.shiftKey ? -1 : 1 });
@@ -269,6 +280,8 @@ function handleEditorKeydown(event: KeyboardEvent<HTMLTextAreaElement>, content:
     return;
   }
   if (event.key === "Tab") {
+    // 组字期的 Tab 属于输入法（确认/翻页候选），不能当成插入两空格写进正文。
+    if (event.nativeEvent.isComposing) return;
     event.preventDefault();
     const input = event.currentTarget;
     const start = input.selectionStart;
@@ -291,6 +304,8 @@ export function CodeEditorHost() {
   );
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const findInputRef = useRef<HTMLInputElement>(null);
+  // 方向键走位要焦点，但 React 侧不许摸 DOM 查询（见 web-ui-architecture 的边界）：按路径记标签节点。
+  const tabRefs = useRef(new Map<string, HTMLDivElement>());
 
   const file = snapshot.file;
   const markdown = file ? isMarkdownPreview(file) : false;
@@ -382,20 +397,51 @@ export function CodeEditorHost() {
         {snapshot.tabs.length > 0 && (
           <div className="wand-code-editor-tabs" role="tablist" aria-label="打开的文件">
             {snapshot.tabs.map((tab) => (
-              <button
+              <div
                 key={tab.path}
-                type="button"
+                ref={(element) => {
+                  if (element) tabRefs.current.set(tab.path, element);
+                  else tabRefs.current.delete(tab.path);
+                }}
                 role="tab"
+                tabIndex={snapshot.activePath === tab.path ? 0 : -1}
                 aria-selected={snapshot.activePath === tab.path}
+                aria-controls={CODE_EDITOR_PANEL_ID}
+                aria-label={tab.dirty ? `${tab.name}，未保存` : tab.name}
                 className={`wand-code-editor-tab${snapshot.activePath === tab.path ? " active" : ""}`}
                 title={tab.path}
                 onClick={() => run({ type: "activate", path: tab.path })}
+                onKeyDown={(event) => {
+                  // 外层从 button 换成 div（button 里不能再套 button），
+                  // Enter / Space 激活要自己补；子节点上的按键不归标签页处理。
+                  if (event.target !== event.currentTarget) return;
+                  const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+                  if (step !== 0 || event.key === "Home" || event.key === "End") {
+                    event.preventDefault();
+                    // roving tabindex：一组只有一个停靠点，方向键在标签之间走并跟着激活。
+                    const order = snapshot.tabs.map((item) => item.path);
+                    const at = order.indexOf(tab.path);
+                    const next = event.key === "Home" ? 0
+                      : event.key === "End" ? order.length - 1
+                        : (at + step + order.length) % order.length;
+                    const target = order[next];
+                    if (!target || target === tab.path) return;
+                    run({ type: "activate", path: target });
+                    // 标签节点原地不动，焦点直接跟上；关闭按钮是独立停靠点，不参与走位。
+                    tabRefs.current.get(target)?.focus();
+                    return;
+                  }
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    run({ type: "activate", path: tab.path });
+                  }
+                }}
               >
-                {tab.dirty && <span className="wand-code-editor-tab-dirty" aria-label="未保存"/>}
+                {tab.dirty && <span className="wand-code-editor-tab-dirty" aria-hidden="true" title="未保存"/>}
                 <span className="wand-code-editor-tab-name">{tab.name}</span>
-                <span
+                <button
+                  type="button"
                   className="wand-code-editor-tab-close"
-                  role="button"
                   aria-label={`关闭 ${tab.name}`}
                   onClick={(event) => {
                     event.stopPropagation();
@@ -403,8 +449,8 @@ export function CodeEditorHost() {
                   }}
                 >
                   <WandIcon name="close" size={11}/>
-                </span>
-              </button>
+                </button>
+              </div>
             ))}
           </div>
         )}
@@ -464,7 +510,7 @@ export function CodeEditorHost() {
               aria-label="缩小字号"
               onClick={() => run({ type: "font.adjust", delta: -1 })}
             >A−</button>
-            <span aria-label={`字号 ${snapshot.fontSize}`}>{snapshot.fontSize}</span>
+            <span role="status" aria-label={`字号 ${snapshot.fontSize}`}>{snapshot.fontSize}</span>
             <button
               type="button"
               className="wand-code-editor-btn"

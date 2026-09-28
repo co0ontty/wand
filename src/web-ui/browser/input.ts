@@ -1,8 +1,9 @@
 import type { SendError } from "./types";
-import { state } from "./state";
+import { composer as composerStore, composerQueue, state } from "./state";
 import { t } from "./i18n";
 import { parseJsonResponse } from "../react/http-adapter";
 import { getErrorMessage } from "../../error-utils.js";
+import { MOTION_DWELL_FAILED_MS, MOTION_DWELL_SENT_MS } from "../react/ui/motion-tokens";
 import { collapseTodoProgress, computeRunningSignal, escapeHtml } from "./utils";
 import { renderChat, shortCommand } from "./chat-render";
 import { getStructuredQueuedInputs, persistCrossSessionQueue, persistSelectedId, prepareChatBottomFollow, stripRenderOnlyStructuredMessages, syncStructuredQueueFromSession } from "./chat-scroll";
@@ -10,7 +11,7 @@ import "./file-browser";
 import "./git-commit";
 import { showToast, wandConfirm } from "./notifications";
 import { getEffectiveCwd } from "./render";
-import { applyCurrentView, buildAttachmentPrefix, canSendComposer, clearDraftValueForSession, closePlusPopover, discardPendingAttachments, dismissDrawerIfOverlay, getComposerPlaceholder, getDraftValueForSession, getPendingAttachments, getPreferredMessages, getPreferredTool, getSelectedClaudeSkills, isStructuredSession, selectSession, loadOutput, refreshAll, restoreComposerStateForSession, restorePendingAttachments, setDraftValue, setDraftValueForSession, shouldBracketPtyPaste, subscribeToSession, supportsClaudeSkillSelection, syncComposerHasText, takePendingAttachments, updateSessionSnapshot, updateSessionsList, uploadAttachments, withTerminalDimensions } from "./session-engine";
+import { applyCurrentView, buildAttachmentPrefix, canSendComposer, clearDraftValueForSession, closePlusPopover, COMPOSER_IDLE_HINT, dismissDrawerIfOverlay, getComposerPlaceholder, getDraftValueForSession, getPendingAttachments, getPreferredMessages, getPreferredTool, getSelectedClaudeSkills, isStructuredSession, selectSession, loadOutput, refreshAll, renderAttachmentPreview, restoreComposerStateForSession, setDraftValue, setDraftValueForSession, shouldBracketPtyPaste, subscribeToSession, supportsClaudeSkillSelection, syncComposerHasText, updateSessionSnapshot, updateSessionsList, uploadAttachments, withTerminalDimensions } from "./session-engine";
 import { confirmDelete } from "./sidebar";
 import { initTerminal, maybeScrollTerminalToBottom, scheduleSoftResyncTerminal, waitForProviderPaint, waitForTerminalSettled } from "./terminal";
 import { ensureTerminalFit, scheduleClosedViewportBaselineWindow, syncAppViewportHeight, updateJoystickPanelUI, updateJoystickVisibility } from "./viewport";
@@ -22,7 +23,7 @@ import { syncBrowserComposerRail } from "./composer-rail-adapter";
 import { syncBrowserComposerPopover } from "./composer-popover-adapter";
 import { showActionError } from "./composer-action-error";
 import { syncBrowserComposerVoice } from "./composer-voice-adapter";
-import { isAmbiguousComposerSubmissionFailure, shouldPersistQueueItemRestore } from "./composer-draft";
+import { shouldPersistQueueItemRestore } from "./composer-draft";
 import { resolveInsertBeforeAnchor } from "./queue-dom";
 
       // 改为在识别回调里调用 updateVoiceTranscript(累积文本) 即可，交互层不用动。
@@ -265,43 +266,10 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         return "";
       }
 
-      // Structured queue mutations can overlap: a slower HTTP response must
-      // never replace a newer optimistic queue. Keep a lightweight
-      // per-session revision and strip stale `queuedMessages` snapshots while
-      // still accepting the rest of the server session update.
-      var structuredQueueMutationRevisionBySession = {};
-
-      function getStructuredQueueMutationRevision(sessionId) {
-        return sessionId ? structuredQueueMutationRevisionBySession[sessionId] || 0 : 0;
-      }
-
-      function bumpStructuredQueueMutationRevision(sessionId) {
-        if (!sessionId) return 0;
-        var next = getStructuredQueueMutationRevision(sessionId) + 1;
-        structuredQueueMutationRevisionBySession[sessionId] = next;
-        return next;
-      }
-
-      function removeOneQueuedMessage(sessionId, text, preferredIndex?) {
-        var latestSession = state.sessions.find(function(item) { return item.id === sessionId; });
-        var latestQueue = latestSession && Array.isArray(latestSession.queuedMessages)
-          ? latestSession.queuedMessages.slice()
-          : [];
-        var index = typeof preferredIndex === "number"
-          && latestQueue[preferredIndex] === text
-          ? preferredIndex
-          : latestQueue.lastIndexOf(text);
-        if (index >= 0) latestQueue.splice(index, 1);
-        return latestQueue;
-      }
-
-      function stripStaleStructuredQueueSnapshot(snapshot, sessionId, requestRevision, requestQueueEpoch) {
-        if (!snapshot || !snapshot.queuedMessages) return snapshot;
-        if (getStructuredQueueMutationRevision(sessionId) !== requestRevision
-            || state.queueEpoch > requestQueueEpoch) {
-          delete snapshot.queuedMessages;
-        }
-        return snapshot;
+      function rollbackQueueAppend(sessionId, text, index, requestVersion) {
+        var latest = state.sessions.find(function(item) { return item.id === sessionId; });
+        var queue = latest && Array.isArray(latest.queuedMessages) ? latest.queuedMessages : [];
+        return composerQueue.rollback(sessionId, queue, [], requestVersion, { text, index });
       }
 
       function continueStructuredSession(session, text) {
@@ -316,8 +284,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         var prevQueue = Array.isArray(session.queuedMessages) ? session.queuedMessages.slice() : [];
         var nextQueue = prevQueue.slice();
         nextQueue.push(text);
-        var queueRevision = bumpStructuredQueueMutationRevision(session.id);
-        var queueEpoch = state.queueEpoch;
+        var queueVersion = composerQueue.advance(session.id, "local");
         // 乐观更新目标会话的排队，让侧栏 / 已打开的该会话视图立即有反馈。
         updateSessionSnapshot({ id: session.id, queuedMessages: nextQueue });
         if (session.id === state.selectedId) updateQueueBar();
@@ -343,7 +310,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
           })
           .then(function(snapshot) {
             if (snapshot && snapshot.id) {
-              stripStaleStructuredQueueSnapshot(snapshot, session.id, queueRevision, queueEpoch);
+              snapshot = composerQueue.filter(snapshot, session.id, queueVersion);
               updateSessionSnapshot(snapshot);
               if (snapshot.id === state.selectedId) updateQueueBar();
             }
@@ -352,9 +319,8 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
             // Only remove this optimistic item from the latest queue. Replacing
             // the whole queue with prevQueue would erase newer concurrent
             // submissions.
-            var rollbackQueue = removeOneQueuedMessage(session.id, text, prevQueue.length);
-            bumpStructuredQueueMutationRevision(session.id);
-            updateSessionSnapshot({ id: session.id, queuedMessages: rollbackQueue });
+            var rollbackQueue = rollbackQueueAppend(session.id, text, prevQueue.length, queueVersion);
+            if (rollbackQueue) updateSessionSnapshot({ id: session.id, queuedMessages: rollbackQueue });
             if (session.id === state.selectedId) updateQueueBar();
             showToast((err && err.message) || "排队失败，请重试。", "error");
           });
@@ -389,7 +355,8 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         });
         persistCrossSessionQueue();
         renderCrossSessionQueue();
-        showToast("已排队，将在空闲后自动开始新会话。", "info");
+        // 结果原位可见：跨会话排队条（登录页 / 无会话时的欢迎页也渲染）立刻多出这一条，
+        // 不再叠一条会自己飘走的气泡。
       }
 
       function launchQueueItem(item) {
@@ -468,9 +435,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         state.crossSessionQueue.splice(idx, 1);
         persistCrossSessionQueue();
         renderCrossSessionQueue();
-        if (state.crossSessionQueue.length === 0) {
-          showToast("排队已清空。", "info");
-        }
+        // 删完最后一条时排队条整块收起，这本身就是原位结果，不再提示「排队已清空」。
       }
 
       export function flushCrossSessionQueue() {
@@ -567,7 +532,8 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
             '<span class="queue-item-text" title="' + escapeHtml(item.text) + '">' + escapeHtml(preview) + '</span>' +
             '<span class="queue-item-age">' + age + '</span>' +
             '<button class="queue-item-send-now" data-queue-id="' + escapeHtml(item.id) + '" title="立即发送" type="button">发送</button>' +
-            '<button class="queue-item-cancel" data-queue-id="' + escapeHtml(item.id) + '" title="取消" type="button">×</button>' +
+            // × 没有可见文本，只有 title 时读屏念不出动作（WCAG 2.2 AA 4.1.2）。
+            '<button class="queue-item-cancel" data-queue-id="' + escapeHtml(item.id) + '" title="取消" aria-label="取消这条排队消息" type="button">×</button>' +
           '</div>';
         }).join("");
 
@@ -624,7 +590,8 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
           state.crossSessionQueue = [];
           persistCrossSessionQueue();
           renderCrossSessionQueue();
-          showToast("排队已清空。", "info");
+          // 结果原位可见：排队条自己在同一帧里收起（上面 renderCrossSessionQueue 做完），
+          // 不再叠一条会自己飘走的气泡。
           return;
         }
         var sendNow = target.closest(".queue-item-send-now") as HTMLElement | null;
@@ -684,6 +651,9 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         })
         .catch(function(error) {
           // 创会话失败：草稿与输入框内容保持原样，只提示可读原因（含 HTTP 状态码）。
+          // 分类 ③（保留气泡）：这条链路只在 `!state.selectedId` 时跑到 —— 发起点是欢迎页，
+          // legacy composer 与 #composer-status-line 整条不渲染，原位根本没有承载，
+          // 所以这里就是「发送相关反馈」在本页的唯一出口（tests/web-ui-legacy-fetch-errors.test.ts 钉住必播报一次）。
           showToast(getErrorMessage(error, preferredTool === "codex"
             ? "无法启动 Codex 会话。"
             : "无法启动 Claude 会话。"), "error");
@@ -752,34 +722,9 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
           });
       }
 
-      function getComposerSubmissionFingerprint(value, attachments) {
-        var attachmentPart = (attachments || []).map(function(item) {
-          return [item.name || "", item.size || 0, item.file && item.file.lastModified || 0].join(":");
-        }).join("|");
-        return String(value || "").trim() + "\u0000" + attachmentPart;
-      }
-
-      // persist=false：发送结果未知（fetch 被 abort / 网络中断）时的回填。请求可能
-      // 已经被服务端接收，只把文本放回当前页面让用户能改写或重试，绝不落 localStorage，
-      // 否则刷新后同一条消息会重新出现在输入框里、被当成新消息重复发送。
       function restoreFailedComposerSubmission(sessionId, value, attachments, persist?) {
-        var currentDraft = getDraftValueForSession(sessionId);
-        var restoredDraft = value;
-        if (currentDraft && currentDraft !== value) {
-          restoredDraft = value ? value + "\n" + currentDraft : currentDraft;
-        }
-        setDraftValueForSession(sessionId, restoredDraft, true, persist);
-        restorePendingAttachments(sessionId, attachments);
-        if (sessionId === state.selectedId) {
-          var currentInput = document.getElementById("input-box") as HTMLTextAreaElement | null;
-          if (currentInput) {
-            currentInput.value = restoredDraft;
-            autoResizeInput(currentInput);
-            try {
-              currentInput.setSelectionRange(restoredDraft.length, restoredDraft.length);
-            } catch (e) { /* ignore */ }
-          }
-        }
+        composerStore.edit(sessionId, { restore: { text: value, attachments }, persist });
+        restoreComposerStateForSession(sessionId);
         updateInteractiveControls();
       }
 
@@ -797,6 +742,23 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         requestAnimationFrame(refocus);
       }
 
+      // 直通提交失败：既要把原因说给用户，也要把没送出去的字放回来。
+      // 通道选 flashComposerFailed 而不是新造一条：它在原位结果行不可见时
+      // （直通的 .composer-status-row 被 CSS display:none 收掉，见 styles.css
+      // 「is-terminal-interactive .composer-status-row」）自己退回错误气泡，
+      // 原生 App 壳里结果行可见时就仍走原位。
+      // persist=false：请求可能已经到达服务端（响应失败不等于没送达），只回填到
+      // 当前页面，不落 localStorage，否则刷新后同一段字会当成新消息重发。
+      function reportPassthroughInputFailure(sessionId, text, error) {
+        var reason = getInputErrorMessage(error);
+        if (sessionId && text) {
+          restoreFailedComposerSubmission(sessionId, text, [], false);
+          flashComposerFailed("这段输入没有送到终端（" + reason + "），已放回输入框；重试前先看终端里是否留下半行。");
+          return;
+        }
+        flashComposerFailed("回车没有送到终端（" + reason + "）。");
+      }
+
       export function sendInputFromBox(opts) {
         opts = opts || {};
         var interruptFlag = !!opts.interrupt;
@@ -807,15 +769,27 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
           // 按服务端契约拆成「先文本、后单独 \r」两包发出去。
           var passthroughBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
           var passthroughText = passthroughBox ? passthroughBox.value : "";
+          var passthroughSessionId = state.selectedId;
           if (passthroughBox && passthroughText) {
             passthroughBox.value = "";
             setDraftValue("", true);
             autoResizeInput(passthroughBox);
             return queueDirectInput(passthroughText, "interactive_text")
               .then(function() { return queueDirectInput("\r", "enter_text"); })
-              .catch(function() {});
+              .catch(function(err) {
+                // 直通模式自己就是提交链路，不走下面那条带原位状态行的链路，
+                // 所以失败必须在这里说清楚：文本刚从框里清空，不响就是整条丢失。
+                // 通道选 flashComposerFailed —— 它在原位结果行不可见时（直通的
+                // .composer-status-row 被 CSS display:none 收掉）自己退回错误气泡，
+                // 见 flashComposerPhase 的 failed 分支；不新增第二条播报通道。
+                reportPassthroughInputFailure(passthroughSessionId, passthroughText, err);
+              });
           }
-          return queueDirectInput("\r", "enter_text").catch(function() {});
+          return queueDirectInput("\r", "enter_text").catch(function(err) {
+            // 空回车没送到终端同样要响一声：用户会以为是自己按键丢了。
+            // 这条没有草稿可回填，只播报。
+            reportPassthroughInputFailure(passthroughSessionId, "", err);
+          });
         }
 
         var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
@@ -830,22 +804,11 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         }
         if (!sessionId || !canSendComposer(value, sessionId)) return Promise.resolve();
 
-        var fingerprint = getComposerSubmissionFingerprint(value, pendingAttachments);
-        var activeSubmissions = state.composerSubmissionsBySession[sessionId];
-        if (!activeSubmissions) {
-          activeSubmissions = {};
-          state.composerSubmissionsBySession[sessionId] = activeSubmissions;
-        }
-        var existingSubmission = activeSubmissions[fingerprint];
-        if (existingSubmission) {
-          return existingSubmission.promise || Promise.resolve();
-        }
+        var existingSubmission = composerStore.pendingSubmission(sessionId, { text: value, attachments: pendingAttachments });
+        if (existingSubmission) return existingSubmission;
 
-        // Capture and clear synchronously before the first await. Click and
-        // Enter therefore observe the same empty composer on a duplicate
-        // gesture, while a genuinely new draft can still be queued.
-        var capturedAttachments = takePendingAttachments(sessionId);
-        setDraftValueForSession(sessionId, "", true);
+        // The composer Module captures/clears before the first await; DOM only
+        // mirrors that empty state while delivery runs against the snapshot.
         if (inputBox && state.selectedId === sessionId) {
           inputBox.value = "";
           autoResizeInput(inputBox);
@@ -853,17 +816,19 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         updateInteractiveControls();
         refocusComposerAfterTouchSubmit(inputBox, sessionId);
 
-        var submission = { fingerprint: fingerprint, promise: null };
-        activeSubmissions[fingerprint] = submission;
+        // 提交瞬间按钮进「加载」相位、状态行给句子；结果到了再原地换 完成/失败。
+        // 全程不弹气泡，也不挪动任何控件（docs/motion-design.md §3）。
+        flashComposerSending("正在发送…");
 
-        var submissionPromise = Promise.resolve()
+        var submissionPromise = composerStore.submit(sessionId, value, function(payload) {
+          var capturedAttachments = payload.attachments;
+          return Promise.resolve()
           .then(function() {
             if (!capturedAttachments.length) return [];
+            // 上传失败也是「这条没发出去」的一部分：换成可读原因后抛回提交链路，
+            // 由状态行原位播报 + 回填草稿，不再单独飘一条气泡（同一件事只说一次）。
             return uploadAttachments(sessionId, capturedAttachments).catch(function(err) {
-              showToast("附件上传失败: " + ((err && err.message) || err), "error");
-              var marked: any = err instanceof Error ? err : new Error(String(err));
-              marked.__wandToasted = true;
-              throw marked;
+              throw new Error("附件上传失败：" + ((err && err.message) || err));
             });
           })
           .then(function(uploadedFiles) {
@@ -931,8 +896,10 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
 
             return ensureSessionReadyForInput(selectedSession).then(function(readySession) {
               if (!readySession) {
+                // 具体原因已由 ensureSessionReadyForInput 原位播报，这里只负责中断发送，
+                // 不能再把它覆盖成泛化文案。
                 var unavailable: any = new Error("会话尚未准备好，消息未发送。");
-                unavailable.__wandToasted = true;
+                unavailable.__wandComposerReported = true;
                 throw unavailable;
               }
               if (state.selectedId !== sessionId) {
@@ -953,32 +920,22 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
             });
           })
           .then(function(result) {
-            discardPendingAttachments(capturedAttachments);
+            // 发送链路自己给出更具体结论时（已加入排队 / 已中断）不覆盖，
+            // 否则统一落到「已发送」，在同一位置原地显示后自动收回。
+            if (getComposerResultPhase() === "sending") flashComposerDone("已发送");
             return result;
           })
-          .catch(function(err) {
-            restoreFailedComposerSubmission(
-              sessionId,
-              value,
-              capturedAttachments,
-              !isAmbiguousComposerSubmissionFailure(err),
-            );
-            if (!(err && (err.__wandToasted || err.__wandHandled))) {
-              showToast(getInputErrorMessage(err), "error");
-            }
+        }).catch(function(err) {
+            restoreComposerStateForSession(sessionId);
+            // 失败原因在原位读（状态行 aria-live + 驻留比成功更长），草稿同帧回填，
+            // 不再靠会自己飘走的气泡承担结果。已经原位播报过的（送达不确定）不重写。
+            if (!(err && err.__wandComposerReported)) flashComposerFailed(getInputErrorMessage(err));
           })
           .finally(function() {
-            if (activeSubmissions[fingerprint] === submission) {
-              delete activeSubmissions[fingerprint];
-            }
-            if (Object.keys(activeSubmissions).length === 0
-                && state.composerSubmissionsBySession[sessionId] === activeSubmissions) {
-              delete state.composerSubmissionsBySession[sessionId];
-            }
             updateInteractiveControls();
           });
 
-        submission.promise = submissionPromise;
+        renderAttachmentPreview();
         return submissionPromise;
       }
 
@@ -1000,10 +957,8 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         var requestedInterrupt = !!opts.interrupt;
         if (!input) return Promise.resolve();
         if (!session) {
-          showToast("会话不存在，请重新选择或新建会话。", "error");
-          var missingSession: any = new Error("会话不存在，请重新选择或新建会话。");
-          missingSession.__wandToasted = true;
-          return Promise.reject(missingSession);
+          // 原因由提交链路的 catch 原位播报（状态行 + 草稿回填），不再弹气泡。
+          return Promise.reject(new Error("会话不存在，请重新选择或新建会话。"));
         }
         var sessionInFlight = !!(session.structuredState && session.structuredState.inFlight && session.status === "running");
         if (sessionInFlight && !requestedInterrupt && getLastStructuredSubmittedInput(session) === input.trim()) {
@@ -1014,8 +969,8 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
             }
             setDraftValueForSession(session.id, "", true);
           }
-          showToast("与上一条消息相同，已忽略，不会加入排队。", "warning");
-          if (session.id === state.selectedId) updateInputHint("Enter 发送 · Shift+Enter 换行");
+          // 「没发出去」这件事在原位说清楚：排队条没有新增气泡，状态行给出原因。
+          flashComposerFailed("与上一条消息相同，未加入排队。");
           return Promise.resolve();
         }
         // 短窗口内的连击当作重复点击丢掉；正常间隔的两次提交（哪怕第一次还在流式）
@@ -1033,7 +988,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
 
         var isInterrupting = sessionInFlight && requestedInterrupt;
         var isQueueing = sessionInFlight && !requestedInterrupt;
-        var requestQueueRevision = getStructuredQueueMutationRevision(session.id);
+        var requestQueueVersion = composerQueue.read(session.id);
         var optimisticQueueIndex = -1;
 
         var userMsgs = stripRenderOnlyStructuredMessages(Array.isArray(session.messages) ? session.messages.slice() : []);
@@ -1046,7 +1001,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
           var nextQueue = Array.isArray(session.queuedMessages) ? session.queuedMessages.slice() : [];
           optimisticQueueIndex = nextQueue.length;
           nextQueue.push(input);
-          requestQueueRevision = bumpStructuredQueueMutationRevision(session.id);
+          requestQueueVersion = composerQueue.advance(session.id, "local");
           optimisticPatch = {
             id: session.id,
             queuedMessages: nextQueue,
@@ -1055,13 +1010,19 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
           if (session.id === state.selectedId) {
             var queueRefreshed = state.sessions.find(function(s) { return s.id === session.id; }) || session;
             state.currentMessages = buildMessagesForRender(queueRefreshed, getPreferredMessages(queueRefreshed, queueRefreshed.output, false));
-            updateInputHint("已加入排队…");
             renderChat(true);
             updateStructuredQueueCounter();
           }
-          // 乐观 toast：原本只在 POST 完成后才提示，Claude 流式拖太久时用户根本
-          // 看不到反馈，会误判"点了没反应"。点击瞬间就给一条短提示。
-          showToast(nextQueue.length > 1 ? ("已加入排队（共 " + nextQueue.length + " 条等待）") : "已加入排队，等当前回复完成会自动发送。", "info");
+          // 排队结果原位可见：输入框上方那条 .queue-bar 立刻多出第 N 个气泡（乐观更新），
+          // 状态行同时给出这一条的排队句子，不再叠加一条会自己飘走的气泡。
+          if (session.id === state.selectedId) {
+            flashComposerDone(nextQueue.length > 1
+              ? ("已加入排队（共 " + nextQueue.length + " 条等待）")
+              : "已加入排队，等当前回复完成会自动发送。");
+          } else {
+            // 排进的是另一个会话：当前页没有它的排队条，原位宿主不存在，只能保留气泡。
+            showToast(nextQueue.length > 1 ? ("已加入「" + (session.title || "该会话") + "」排队（共 " + nextQueue.length + " 条等待）") : "已加入「" + (session.title || "该会话") + "」排队，等它当前回复完成会自动发送。", "info");
+          }
         } else {
           // 普通发送 / interrupt 发送：照旧乐观推 user turn + inFlight=true
           var userTurn = { role: "user", content: [{ type: "text", text: input }] };
@@ -1079,14 +1040,14 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
               messages: userMsgs,
               structuredState: optimisticStructuredState,
             }), userMsgs);
-            updateInputHint(isInterrupting ? "已中断，正在处理新消息…" : "思考中…");
             prepareChatBottomFollow();
             renderChat(true);
-          }
-          // 中断模式：乐观给一条提示，让用户立刻知道"中断成功了"，否则跟 queue 一样会
-          // 觉得"点了没反应"。原 toast 在 then() 里，等 SIGTERM/HTTP roundtrip 完才出。
-          if (isInterrupting) {
-            showToast("已中断上一条回复，正在处理新消息…", "info");
+            // 中断的成功语义落在原位：chat 流立刻出现这条 user turn，状态行说明
+            // 「上一条已被打断」。普通发送不写句子（chat 流自己就是可见结果），
+            // 由提交链路的 then 统一收口成「已发送」。
+            if (isInterrupting) {
+              flashComposerDone("已中断上一条回复，正在处理新消息…");
+            }
           }
         }
 
@@ -1097,11 +1058,6 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
           }
           setDraftValueForSession(session.id, "", true);
         }
-
-        // Capture queue epoch before the POST so we can detect whether
-        // a newer WS update has already refreshed the queue by the time
-        // the HTTP response arrives.
-        var epochBeforePost = state.queueEpoch;
 
         // 给每次发送生成唯一 idempotency key。Android WebView 进程被冻结再恢复
         // 的边界场景下，底层网络栈偶尔会把上次未收到响应的 POST 重发一次（前端
@@ -1140,12 +1096,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
             throw new Error(snapshot.error);
           }
           if (snapshot && snapshot.id) {
-            stripStaleStructuredQueueSnapshot(
-              snapshot,
-              session.id,
-              requestQueueRevision,
-              epochBeforePost,
-            );
+            snapshot = composerQueue.filter(snapshot, session.id, requestQueueVersion);
             updateSessionSnapshot(snapshot);
             // 仅当 snapshot 仍属当前选中会话时才覆盖视图状态，否则只更新底层数据。
             if (snapshot.id === state.selectedId) {
@@ -1164,8 +1115,13 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
           // 被服务端接收并处理（或正在处理），ws 推送会带回真实状态；如果在
           // 这里把 user turn rollback 掉，第一次的 user 消息会从 UI 上消失。
           if (error && error.errorCode === "duplicate_idempotency_key") {
-            showToast(error.message || "检测到重复发送，已拦截。", "warning");
-            if (session.id === state.selectedId) updateInputHint("Enter 发送 · Shift+Enter 换行");
+            // 服务端识别出重发并拦截：这一条没被处理两次。原位说明即可，
+            // 乐观更新按注释保持不回滚（第一次已送达）。
+            if (session.id === state.selectedId) {
+              flashComposerFailed(error.message || "检测到重复发送，已拦截。");
+            } else {
+              showToast(error.message || "检测到重复发送，已拦截。", "warning");
+            }
             return;
           }
 
@@ -1176,12 +1132,8 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
           if (isQueueing) {
             // Remove only this optimistic item from the latest queue. A full
             // prevQueue rollback can erase messages added by newer requests.
-            var rollbackQueue = removeOneQueuedMessage(session.id, input, optimisticQueueIndex);
-            bumpStructuredQueueMutationRevision(session.id);
-            updateSessionSnapshot({
-              id: session.id,
-              queuedMessages: rollbackQueue,
-            });
+            var rollbackQueue = rollbackQueueAppend(session.id, input, optimisticQueueIndex, requestQueueVersion);
+            if (rollbackQueue) updateSessionSnapshot({ id: session.id, queuedMessages: rollbackQueue });
             if (session.id === state.selectedId) {
               var rolledQueueSession = state.sessions.find(function(s) { return s.id === session.id; }) || session;
               state.currentMessages = buildMessagesForRender(rolledQueueSession, getPreferredMessages(rolledQueueSession, rolledQueueSession.output, false));
@@ -1214,20 +1166,128 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
           if (isTransientAbort) {
             // 传输层失败 / 请求被 abort：这条消息可能已经被服务端接收。打标记让
             // sendInputFromBox 知道回填只能留在内存里（见 composer-draft.ts）。
+            // 送达不确定也要原位说明，否则用户只会看到草稿莫名其妙回来。
             error.__wandAmbiguousDelivery = true;
-          } else {
-            showToast((error && error.message) || "无法发送结构化消息。", "error");
-            error.__wandToasted = true;
+            if (session.id === state.selectedId) {
+              flashComposerFailed("网络中断，这条消息可能已送达；草稿已回填，重试前请先看会话内容。");
+              error.__wandComposerReported = true;
+            }
           }
-          error.__wandHandled = true;
-          if (session.id === state.selectedId) updateInputHint("Enter 发送 · Shift+Enter 换行");
           throw error;
         });
       }
 
-      export function updateInputHint(text) {
-        var hint = document.querySelector(".input-hint");
-        if (hint) hint.textContent = text;
+      // ── 发送按钮相位机（docs/motion-design.md §3 提交状态反馈、§4 图标变形）──────
+      // 一个宿主 #send-input-button 承载发送 / 停止 / 加载 / 完成四种可见状态：
+      // 结果相位（sending / sent / failed）是短暂覆盖，驻留后回落到结构相位
+      // （running = 可停止 / idle = 可发送）。优先级与 Android 的
+      // SendActionVisual 一致：结果 > 运行中且无草稿 → 停止 > 有草稿 → 发送。
+      // 「有草稿」这一档不能省：结构化会话在跑时点发送是排队，不是停止。
+      //
+      // 同一相位文案写在 .composer-status-line 上（原位），不再靠 Toast 气泡承担。
+      type ComposerSendPhase = "idle" | "sending" | "sent" | "failed" | "running";
+      var composerResultPhase: ComposerSendPhase | null = null;
+      var composerResultText = "";
+      var composerResultTimer = 0;
+
+      function composerResultDwellMs(phase: ComposerSendPhase) {
+        // 失败要读完原因，驻留必须 ≥ 成功；数值只从 motion-tokens 取，页面不写字面毫秒。
+        return phase === "failed" ? MOTION_DWELL_FAILED_MS : MOTION_DWELL_SENT_MS;
+      }
+
+      // 结构相位：没有结果覆盖时按钮该长什么样。
+      function composerBaseSendPhase(selectedSession, hasDraft): ComposerSendPhase {
+        if (!hasDraft && computeRunningSignal(selectedSession).active) return "running";
+        return "idle";
+      }
+
+      export function getComposerSendPhase(): string {
+        var host = document.getElementById("send-input-button");
+        return (host && host.getAttribute("data-phase")) || "idle";
+      }
+
+      // 当前是否还压着一个结果相位（发送链路用它判断「有没有人写过更具体的结论」）。
+      export function getComposerResultPhase(): string {
+        return composerResultPhase || "";
+      }
+
+      function composerIdleHint(isCodex) {
+        // Codex 会话顺带解释 chat / terminal 两种视图的差别（原 .input-hint 的文案分叉）。
+        return isCodex
+          ? "Enter 发送 · chat 为解析视图，terminal 为原始输出"
+          : COMPOSER_IDLE_HINT;
+      }
+
+      // 相位 → DOM：glyph 交叉淡入靠宿主 data-phase，可读名称靠 title / aria-label，
+      // 结果句子靠 .composer-status-line（aria-live，成功态不抢焦点）。
+      // 可读名称跟着相位走：空闲/排队沿用发送链路自己算出来的那串（含 Codex、
+      // 优化中等等分支），结果相位与停止相位由这里覆盖。
+      function composerPhaseLabels(phase: ComposerSendPhase, title: string, label: string, resultText: string) {
+        if (phase === "running") return { title: "停止生成", label: "停止生成" };
+        if (phase === "sending") return { title: "正在发送…", label: "正在发送…" };
+        if (phase === "sent") return { title: resultText || "已发送", label: "已发送" };
+        if (phase === "failed") return { title: resultText || "发送失败", label: "发送失败" };
+        return { title: title, label: label };
+      }
+
+      function renderComposerPhaseHost(phase: ComposerSendPhase, text: string, isCodex: boolean) {
+        var line = document.getElementById("composer-status-line");
+        if (line) {
+          var isResult = phase === "sending" || phase === "sent" || phase === "failed";
+          line.textContent = isResult && text ? text : composerIdleHint(isCodex);
+          var tone = isResult ? phase : "";
+          line.removeAttribute("data-tone");
+          if (tone) {
+            // 同名 animation 改属性不会重播；强制一次重排让驻留倒计时重新开始走。
+            void line.offsetWidth;
+            line.setAttribute("data-tone", tone);
+          }
+        }
+      }
+
+      // 原位宿主此刻到底可不可见。getClientRects() 对 display:none 子树与未挂载节点
+      // 都返回空列表（不像 offsetParent 会被 position:fixed 祖先骗过去）。
+      function composerResultHostVisible(): boolean {
+        var line = document.getElementById("composer-status-line") as HTMLElement | null;
+        return !!line && line.getClientRects().length > 0;
+      }
+
+      function flashComposerPhase(phase: ComposerSendPhase, text: string, dwell: number) {
+        if (composerResultTimer) {
+          clearTimeout(composerResultTimer);
+          composerResultTimer = 0;
+        }
+        composerResultPhase = phase;
+        composerResultText = text || "";
+        updateInteractiveControls();
+        // 失败原因不许静默：这一处「原位根本没有宿主」时才退回旧气泡，不是原位已有结果再叠一层。
+        // 直通模式整条 .composer-status-row 被 CSS 收掉（输入即透传，没有草稿位），原生嵌入壳
+        // 同样隐藏 drafting row —— 这两种情况下原位行读不到 rect。成功态不退回气泡：直通下
+        // 结果本来就写在终端/聊天流里，加气泡只会变成每次发送都响一下的噪音。
+        if (phase === "failed" && !composerResultHostVisible()) {
+          showToast(text || "操作未完成。", "error");
+        }
+        if (dwell <= 0) return;
+        composerResultTimer = window.setTimeout(function() {
+          composerResultTimer = 0;
+          composerResultPhase = null;
+          composerResultText = "";
+          updateInteractiveControls();
+        }, dwell);
+      }
+
+      // 「正在发送」是进行态不是结果：不设驻留计时，由提交链路的 then/catch 推进，
+      // 否则慢上传（附件、首条流式响应）会被 720ms 后的自动回落打断。
+      export function flashComposerSending(text: string) {
+        flashComposerPhase("sending", text, 0);
+      }
+
+      export function flashComposerDone(text: string) {
+        flashComposerPhase("sent", text, composerResultDwellMs("sent"));
+      }
+
+      export function flashComposerFailed(reason: string) {
+        flashComposerPhase("failed", reason, composerResultDwellMs("failed"));
       }
 
       export function updateStructuredQueueCounter() {
@@ -1352,18 +1412,16 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
       }
 
       // ── 单条删除 / 全部清空 / 队首插队 ──
-      function rollbackQueueOptimistic(session, prevQueue, expectedRevision?) {
-        if (typeof expectedRevision === "number"
-            && getStructuredQueueMutationRevision(session.id) !== expectedRevision) {
+      function rollbackQueueOptimistic(session, prevQueue, requestVersion) {
+        var latest = state.sessions.find(function(s) { return s.id === session.id; }) || session;
+        var restored = composerQueue.rollback(session.id, latest.queuedMessages || [], prevQueue, requestVersion);
+        if (restored) updateSessionSnapshot({ id: session.id, queuedMessages: restored });
+        if (session.id === state.selectedId) {
+          var refreshed = state.sessions.find(function(s) { return s.id === session.id; }) || session;
+          state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, refreshed.output, false));
+          renderChat(true);
           updateQueueBar();
-          return;
         }
-        bumpStructuredQueueMutationRevision(session.id);
-        updateSessionSnapshot({ id: session.id, queuedMessages: prevQueue });
-        var refreshed = state.sessions.find(function(s) { return s.id === session.id; }) || session;
-        state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, refreshed.output, false));
-        renderChat(true);
-        updateQueueBar();
       }
 
       async function queueBarEditItem(index) {
@@ -1372,7 +1430,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         if (typeof original !== "string") return;
         var edited = window.prompt("编辑排队消息", original);
         if (edited === null || edited.trim() === original) return;
-        if (!edited.trim()) { showToast("排队消息不能为空。", "error"); return; }
+        if (!edited.trim()) { flashComposerFailed("排队消息不能为空。"); return; }
         try {
           var res = await fetch("/api/structured-sessions/" + encodeURIComponent(session.id) + "/queued/" + index, {
             method: "PATCH", credentials: "same-origin",
@@ -1382,7 +1440,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
           if (!res.ok) throw new Error((await res.json()).error || "编辑失败");
           updateSessionSnapshot({ id: session.id, queuedMessages: (await res.json()).queuedMessages });
           updateQueueBar();
-        } catch (err) { showToast((err && err.message) || "编辑失败", "error"); }
+        } catch (err) { flashComposerFailed((err && err.message) || "编辑排队消息失败。"); }
       }
 
       function queueBarDeleteItem(index) {
@@ -1392,7 +1450,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         if (index < 0 || index >= queue.length) return;
         var prev = queue.slice();
         var next = queue.slice(0, index).concat(queue.slice(index + 1));
-        var mutationRevision = bumpStructuredQueueMutationRevision(session.id);
+        var mutationVersion = composerQueue.advance(session.id, "local");
         updateSessionSnapshot({ id: session.id, queuedMessages: next });
         var refreshed = state.sessions.find(function(s) { return s.id === session.id; }) || session;
         state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, refreshed.output, false));
@@ -1410,8 +1468,8 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
           }
         })
         .catch(function(err) {
-          rollbackQueueOptimistic(session, prev, mutationRevision);
-          showToast((err && err.message) || "删除排队消息失败。", "error");
+          rollbackQueueOptimistic(session, prev, mutationVersion);
+          flashComposerFailed((err && err.message) || "删除排队消息失败。");
         });
       }
 
@@ -1422,7 +1480,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         if (prev.length === 0) return;
         // 全部清空后收起列表，UX 上更干净（用户不需要盯着一条不剩的展开面板）。
         state.queueBarExpanded = false;
-        var mutationRevision = bumpStructuredQueueMutationRevision(session.id);
+        var mutationVersion = composerQueue.advance(session.id, "local");
         updateSessionSnapshot({ id: session.id, queuedMessages: [] });
         var refreshed = state.sessions.find(function(s) { return s.id === session.id; }) || session;
         state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, refreshed.output, false));
@@ -1438,11 +1496,12 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
               throw new Error((p && p.error) || "清空失败");
             });
           }
-          showToast("已清空 " + prev.length + " 条排队消息。", "info");
+          // 「清空」的结果原位可见：整条 .queue-bar 已经收起（上面 updateQueueBar 乐观做完），
+          // 不再补一条「已清空 N 条」的气泡，同一件事只说一次。
         })
         .catch(function(err) {
-          rollbackQueueOptimistic(session, prev, mutationRevision);
-          showToast((err && err.message) || "清空排队消息失败。", "error");
+          rollbackQueueOptimistic(session, prev, mutationVersion);
+          flashComposerFailed((err && err.message) || "清空排队消息失败。");
         });
       }
 
@@ -1467,16 +1526,16 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         if (rest.length === 0) {
           state.queueBarExpanded = false;
         }
-        var mutationRevision = bumpStructuredQueueMutationRevision(session.id);
-        var mutationQueueEpoch = state.queueEpoch;
+        var mutationVersion = composerQueue.advance(session.id, "local");
         updateSessionSnapshot({ id: session.id, queuedMessages: rest });
 
         var idempotencyKey = (typeof crypto !== "undefined" && crypto.randomUUID)
           ? crypto.randomUUID()
           : (Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10));
 
-        // 给一个乐观 toast，让用户瞬间知道点击生效了
-        showToast(inFlight ? "已请求中断当前回复，立即发送这条。" : "已立即发送这条消息。", "info");
+        // 插队的即时反馈在原位：这一条气泡已经从小条里剥掉（乐观），状态行同步说明
+        // 接下来发生什么；不再是右上角飘走的气泡。
+        flashComposerSending(inFlight ? "正在插队发送，准备打断当前回复…" : "正在发送这条…");
 
         fetch("/api/structured-sessions/" + session.id + "/queued/" + index + "/promote", {
           method: "POST",
@@ -1494,12 +1553,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         })
         .then(function(snapshot) {
           if (snapshot && snapshot.id) {
-            stripStaleStructuredQueueSnapshot(
-              snapshot,
-              session.id,
-              mutationRevision,
-              mutationQueueEpoch,
-            );
+            snapshot = composerQueue.filter(snapshot, session.id, mutationVersion);
             updateSessionSnapshot(snapshot);
             if (snapshot.id === state.selectedId) {
               var refreshed = state.sessions.find(function(s) { return s.id === snapshot.id; }) || snapshot;
@@ -1508,12 +1562,13 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
               updateQueueBar();
             }
           }
+          flashComposerDone(inFlight ? "已中断上一条回复，这条立即发送。" : "已立即发送这条消息。");
           state.queueBarPromoting = false;
         })
         .catch(function(err) {
           state.queueBarPromoting = false;
-          rollbackQueueOptimistic(session, prev, mutationRevision);
-          showToast((err && err.message) || "立即发送失败。", "error");
+          rollbackQueueOptimistic(session, prev, mutationVersion);
+          flashComposerFailed((err && err.message) || "立即发送失败。");
         });
       }
 
@@ -1656,7 +1711,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
 
         var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
         if (!session) { updateQueueBar(); return; }
-        var mutationRevision = bumpStructuredQueueMutationRevision(session.id);
+        var mutationVersion = composerQueue.advance(session.id, "local");
         updateSessionSnapshot({ id: session.id, queuedMessages: nextQueue });
         updateQueueBar();
 
@@ -1674,8 +1729,8 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
           }
         })
         .catch(function(err) {
-          rollbackQueueOptimistic(session, queueSnapshot, mutationRevision);
-          showToast((err && err.message) || "调整排队顺序失败。", "error");
+          rollbackQueueOptimistic(session, queueSnapshot, mutationVersion);
+          flashComposerFailed((err && err.message) || "调整排队顺序失败。");
         });
       }
 
@@ -1801,8 +1856,9 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
       }
 
       function ensureSessionReadyForInput(session) {
+        // 只在发送链路被调用（唯一调用点见 sendInputFromBox），所以失败原因原位播报。
         if (!session) {
-          showToast("会话不存在，请重新选择或新建会话。", "error");
+          flashComposerFailed("会话不存在，请重新选择或新建会话。");
           return Promise.resolve(null);
         }
         if (session.status === "running") {
@@ -1811,7 +1867,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         if (!canAutoResumeSession(session)) {
           var providerLabels = { claude: "Claude", codex: "Codex", opencode: "OpenCode", grok: "Grok", qoder: "Qoder", pi: "Pi" };
           var providerLabel = (session && providerLabels[session.provider]) || "Provider";
-          showToast("该会话没有可恢复的 " + providerLabel + " 历史上下文，请新建会话。", "error");
+          flashComposerFailed("该会话没有可恢复的 " + providerLabel + " 历史上下文，请新建会话。");
           return Promise.resolve(null);
         }
 
@@ -1906,23 +1962,38 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
             && targetSessionId === state.selectedId
             && state.ws
             && state.ws.readyState === WebSocket.OPEN) {
-          state.ws.send(JSON.stringify({
-            type: "pty_input",
-            sessionId: targetSessionId,
-            data: input,
-            shortcutKey: shortcutKey,
-            userInput: true
-          }));
+          // readyState 读到 OPEN 不代表 send() 一定不抛：浏览器在连接正在关闭的
+          // 竞争窗口里会同步抛 InvalidStateError（还有超背压时的 QuotaExceededError）。
+          // 这一抛发生在 Promise 之外，会绕过调用方的 .catch（批I 的播报挂在
+          // reportPassthroughInputFailure 上）变成未处理拒绝、用户那条输入静默丢失。
+          // 所以在这里接住、转成同一条链路的 rejection：同步抛与异步 reject 从此
+          // 走同一个出口，只播报一次，也不会再顺手补发一次 HTTP（可能已经送达）。
+          try {
+            state.ws.send(JSON.stringify({
+              type: "pty_input",
+              sessionId: targetSessionId,
+              data: input,
+              shortcutKey: shortcutKey,
+              userInput: true
+            }));
+          } catch (error) {
+            return Promise.reject(error);
+          }
           return Promise.resolve();
         }
         state.messageQueue.push(input);
-        state.inputQueue = state.inputQueue.then(function() {
+        var queued = state.inputQueue.then(function() {
           return postInput(input, shortcutKey, viewOverride, targetSessionId, !!sessionId).finally(function() {
             var idx = state.messageQueue.indexOf(input);
             if (idx > -1) state.messageQueue.splice(idx, 1);
           });
         });
-        return state.inputQueue;
+        // 队列自己永远保持 fulfilled：一次失败（网络抖动、会话已停止）若留在
+        // state.inputQueue 上，之后每次 queueDirectInput 的 .then 都会被跳过，
+        // 直通输入从此静默死掉，直到刷新页面。失败只交给上面那条 promise 带给
+        // 调用方去播报。
+        state.inputQueue = queued.catch(function() {});
+        return queued;
       }
 
       export function postInput(input, shortcutKey, viewOverride, sessionId?, strictTarget?) {
@@ -2304,15 +2375,6 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
           onAttach: function(keyboard) { openComposerFilePicker(keyboard); },
           onToggleInteractive: toggleTerminalInteractive,
         });
-        var inputHint = document.querySelector(".input-hint");
-        if (inputHint) {
-          inputHint.classList.toggle("hidden", structured ? true : state.currentView === "terminal");
-          if (!structured && selectedSession) {
-            inputHint.textContent = isCodex
-              ? "Enter 发送 · chat 为解析视图，terminal 为原始输出"
-              : "Enter 发送 · Shift+Enter 换行";
-          }
-        }
         // 历史会话只要可自动恢复（Claude/Codex PTY + 有历史 id），输入框/发送按钮
         // 就保持可用——发送时由 ensureSessionReadyForInput 透明完成恢复。
         var canResumeOnSend = !structured && !isRunning && canAutoResumeSession(selectedSession);
@@ -2387,40 +2449,40 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
           var composerValue = composer ? composer.value : "";
           var currentAttachments = getPendingAttachments(state.selectedId);
           var composerCanSend = canSendComposer(composerValue, state.selectedId);
-          var activeSubmissions = state.selectedId && state.composerSubmissionsBySession[state.selectedId];
-          var duplicateInFlight = !!(composerCanSend && activeSubmissions
-            && activeSubmissions[getComposerSubmissionFingerprint(composerValue, currentAttachments)]);
-          sendBtn.disabled = promptOptimizeBusyForCurrent
+          var duplicateInFlight = !!(composerCanSend && composerStore.pendingSubmission(
+            state.selectedId, { text: composerValue, attachments: currentAttachments },
+          ));
+          var sendDisabled = promptOptimizeBusyForCurrent
             || !composerCanSend
             || duplicateInFlight
             || sessionUnavailable;
+          // 相位 = 结果覆盖 > 运行中且无草稿（停止）> 空闲（发送）。
+          var sendPhase: ComposerSendPhase = composerResultPhase
+            || composerBaseSendPhase(selectedSession, composerCanSend);
+          // 「停止」是这一相位下唯一的动作，原来那颗独立停止按钮从来没有禁用逻辑；
+          // 空草稿不算「不能点」，否则在跑会话的唯一出口又被发条件锁死。
+          if (sendPhase === "running") sendDisabled = false;
+          sendBtn.disabled = sendDisabled;
           sendBtn.setAttribute("aria-disabled", sendBtn.disabled ? "true" : "false");
-          sendBtn.setAttribute("title", promptOptimizeBusyForCurrent
+          sendBtn.setAttribute("data-phase", sendPhase);
+          var sendTitle = promptOptimizeBusyForCurrent
             ? "正在优化提示词"
             : (structured
               ? (structuredInFlight ? "排队发送（当前回复结束后处理）" : "发送")
-              : (isCodex ? (isRunning ? "发送给 Codex" : "Codex 会话已结束") : (!selectedSession || isRunning || canResumeOnSend ? "发送" : "会话已结束"))));
-          sendBtn.setAttribute("aria-label", promptOptimizeBusyForCurrent
+              : (isCodex ? (isRunning ? "发送给 Codex" : "Codex 会话已结束") : (!selectedSession || isRunning || canResumeOnSend ? "发送" : "会话已结束")));
+          var sendLabel = promptOptimizeBusyForCurrent
             ? "正在优化提示词"
-            : (structuredInFlight ? "加入发送队列" : "发送消息"));
-          sendBtn.classList.toggle("queue-mode", structuredInFlight);
+            : (structuredInFlight ? "加入发送队列" : "发送消息");
+          var phaseLabels = composerPhaseLabels(sendPhase, sendTitle, sendLabel, composerResultText);
+          sendBtn.setAttribute("title", phaseLabels.title);
+          sendBtn.setAttribute("aria-label", phaseLabels.label);
+          // queue-mode 只描述「点下去是排队」这一语义；露出停止 glyph 时不参与。
+          sendBtn.classList.toggle("queue-mode", structuredInFlight && sendPhase !== "running");
+          renderComposerPhaseHost(sendPhase, composerResultText, isCodex);
         }
-        // 停止按钮：仅当当前会话真"在跑"才露出（结构化 inFlight / PTY running / 等待权限阻塞）。
-        // 平时让位给主操作（send 按钮一侧整齐，输入区视觉更安静）。
-        var stopBtn = document.getElementById("stop-button");
-        if (stopBtn) {
-          var sig = computeRunningSignal(selectedSession);
-          stopBtn.classList.toggle("hidden", !sig.active);
-        }
-        // v2: 停止按钮仅在「真有 reply 在跑」时显示。computeRunningSignal 给出统一信号
-        //  · structured.inFlight  → 结构化会话流式输出中
-        //  · pty status==running  → PTY 会话进程在跑
-        //  · permissionBlocked    → 卡在权限审批（也允许停止解封）
-        var stopBtnEl = document.getElementById("stop-button");
-        if (stopBtnEl) {
-          var runSig = computeRunningSignal(selectedSession);
-          stopBtnEl.classList.toggle("hidden", !runSig.active);
-        }
+        // 「是否有 reply 在跑」由 computeRunningSignal 统一给出（结构化 inFlight /
+        // PTY running / 权限审批阻塞），它只决定上面那颗按钮的相位，
+        // 不再单独控制一个停止节点的显隐。
         var container = document.getElementById("output");
         if (container) container.classList.toggle("interactive", !structured && state.terminalInteractive);
         updateJoystickVisibility();
@@ -2647,7 +2709,15 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
           // 确认期间用户可能切走会话，沿用确认时捕获的 id，避免停错会话。
           if (state.selectedId !== id) return;
           fetch("/api/sessions/" + id + "/stop", { method: "POST", credentials: "same-origin" })
-            .then(refreshAll);
+            .then(function(res) {
+              if (!res.ok) throw new Error("无法停止当前回复（HTTP " + res.status + "）。");
+              // 停止的结果在原位读：按钮已从「停止」变回「发送」，状态行说明结论。
+              flashComposerDone("已停止当前回复。");
+              return refreshAll();
+            })
+            .catch(function(error) {
+              flashComposerFailed(getErrorMessage(error, "无法停止当前回复。"));
+            });
         });
       }
 

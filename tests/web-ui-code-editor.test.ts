@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { createCodeEditorModule } from "../src/web-ui/react/code-editor/controller.ts";
@@ -174,6 +175,104 @@ test("closing the last tab hides the editor", async () => {
   await controller.execute({ type: "close", path: "/app/a.ts" });
   assert.equal(store.getSnapshot().open, false);
   assert.equal(store.getSnapshot().activePath, null);
+});
+
+test("closing an inactive dirty tab still asks before discarding", async () => {
+  const repo = new MemoryCodeEditorRepository([
+    textFile("/app/a.ts", "a"),
+    textFile("/app/b.ts", "b"),
+  ]);
+  const subjects: string[] = [];
+  let decide = false;
+  const module_ = createCodeEditorModule({
+    repository: repo,
+    runtime: {
+      ...noopRuntime,
+      async confirmDiscard(_reason, path) {
+        subjects.push(path);
+        return decide;
+      },
+    },
+  });
+  const { controller, store } = module_;
+
+  await controller.open("/app/a.ts");
+  await controller.execute({ type: "change", value: "dirty-a" });
+  await controller.open("/app/b.ts"); // a 成了非激活的脏标签
+  assert.equal(store.getSnapshot().activePath, "/app/b.ts");
+
+  assert.equal(await controller.execute({ type: "close", path: "/app/a.ts" }), false);
+  assert.deepEqual(subjects, ["/app/a.ts"], "确认框要指向被关闭的那个文件，不是当前激活的");
+  assert.equal(store.getSnapshot().tabs.length, 2);
+  assert.equal(store.getSnapshot().tabs.find((tab) => tab.path === "/app/a.ts")?.dirty, true, "取消后草稿还在");
+
+  decide = true;
+  assert.equal(await controller.execute({ type: "close", path: "/app/a.ts" }), true);
+  assert.deepEqual(store.getSnapshot().tabs.map((tab) => tab.path), ["/app/b.ts"]);
+  assert.equal(store.getSnapshot().activePath, "/app/b.ts", "关掉非激活标签不该抢走当前编辑焦点");
+});
+
+test("closeAll asks once with the dirty summary and keeps every tab on cancel", async () => {
+  const repo = new MemoryCodeEditorRepository([
+    textFile("/app/a.ts", "a"),
+    textFile("/app/b.ts", "b"),
+  ]);
+  const subjects: string[] = [];
+  let decide = false;
+  const module_ = createCodeEditorModule({
+    repository: repo,
+    runtime: {
+      ...noopRuntime,
+      async confirmDiscard(_reason, subject) {
+        subjects.push(subject);
+        return decide;
+      },
+    },
+  });
+  const { controller, store } = module_;
+  const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+  await controller.open("/app/a.ts");
+  await controller.execute({ type: "change", value: "dirty-a" });
+  await controller.open("/app/b.ts");
+  await controller.execute({ type: "change", value: "dirty-b" });
+
+  controller.closeAll();
+  await settle();
+  assert.equal(subjects.length, 1, "整批关闭只弹一次汇总确认");
+  assert.match(subjects[0]!, /2 个未保存文件/, "汇总要给出脏文件数量");
+  assert.match(subjects[0]!, /a\.ts、b\.ts/, "并列出名字，用户知道会丢掉哪些");
+  assert.equal(store.getSnapshot().tabs.length, 2, "取消则整体不关");
+  assert.equal(store.getSnapshot().file?.draft, "dirty-b");
+
+  decide = true;
+  controller.closeAll();
+  await settle();
+  assert.equal(store.getSnapshot().open, false);
+  assert.equal(store.getSnapshot().tabs.length, 0);
+  assert.equal(subjects.length, 2);
+});
+
+test("closeAll without dirty tabs closes straight away without a prompt", async () => {
+  const repo = new MemoryCodeEditorRepository([textFile("/app/a.ts", "a")]);
+  let confirmCalls = 0;
+  const module_ = createCodeEditorModule({
+    repository: repo,
+    runtime: {
+      ...noopRuntime,
+      async confirmDiscard() {
+        confirmCalls += 1;
+        return true;
+      },
+    },
+  });
+  const { controller, store } = module_;
+
+  await controller.open("/app/a.ts");
+  controller.closeAll();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(confirmCalls, 0, "没有未保存内容时不该拦人");
+  assert.equal(store.getSnapshot().open, false);
 });
 
 test("revert restores baseline content and clears dirty state", async () => {
@@ -568,4 +667,96 @@ test("entering the rendered Markdown mode closes the find bar", async () => {
   assert.equal(await controller.execute({ type: "preview.toggle" }), true);
   assert.equal(store.getSnapshot().findOpen, false);
   assert.equal(store.getSnapshot().findQuery, "标题");
+});
+
+test("discard 确认文案点名到具体文件，非激活脏标签也拦", () => {
+  const source = readFileSync(
+    new URL("../src/web-ui/react/code-editor/controller.ts", import.meta.url),
+    "utf8",
+  );
+  // 文案里带文件标识，用户才知道放弃的是哪一个标签。
+  assert.match(source, /discardCopy\(reason, discardSubjectOf\(path\.split\("\/"\)\.pop\(\) \|\| path\)\)/);
+  assert.match(source, /message: `\$\{subject\}有未保存的改动，关闭后会丢失。`/);
+  // 关闭路径不再区分激活 / 非激活：脏就要确认。
+  assert.match(source, /if \(target\?\.dirty && !await confirmDiscard\("close", target\)\) return false;/);
+  assert.doesNotMatch(source, /wasActive && !await confirmDiscard/);
+});
+
+test("编辑器的 Tab 缩进在输入法组字期不写进正文", () => {
+  const hostSource = readFileSync(
+    new URL("../src/web-ui/react/code-editor/host.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(hostSource, /isComposing/);
+  // 查找框回车 + 正文 Tab 两处都要挡组字，且都在 preventDefault 之前。
+  const guards = hostSource.match(/if \(event\.nativeEvent\.isComposing\) return;/g) ?? [];
+  assert.equal(guards.length, 2, `IME 守卫应为 2 处，实际 ${guards.length} 处`);
+  assert.match(hostSource, /if \(event\.key === "Tab"\) \{\n\s*\/\/ [^\n]*\n\s*if \(event\.nativeEvent\.isComposing\) return;\n\s*event\.preventDefault\(\);/);
+  // 保存的 Ctrl/Cmd+S 分支在 Tab 之前，不受组字守卫影响。
+  assert.match(hostSource, /\(event\.ctrlKey \|\| event\.metaKey\) && event\.key\.toLowerCase\(\) === "s"[\s\S]{0,160}if \(event\.key === "Tab"\)/);
+});
+
+test("编辑器打开失败：原位给出重新加载，且 open(同一路径) 真的重读磁盘", async () => {
+  const hostSource = readFileSync(
+    new URL("../src/web-ui/react/code-editor/host.tsx", import.meta.url),
+    "utf8",
+  );
+  // id 是批H 给标签页 aria-controls 用的面板身份，不影响这段失败态本身。
+  assert.match(hostSource, /<div id=\{CODE_EDITOR_PANEL_ID\} className="wand-code-editor-state error" role="alert">[\s\S]{0,400}\{snapshot\.activePath \? <WandButton/);
+  assert.match(hostSource, /void codeEditorController\.open\(snapshot\.activePath!\)/);
+  assert.match(hostSource, />重新加载<\/WandButton>/);
+  // 不用 activate：activate 的「已激活同一路径」分支只 return true，不读盘。
+  assert.doesNotMatch(hostSource, /execute\(\{ type: "activate", path: snapshot\.activePath/);
+
+  const repo = new MemoryCodeEditorRepository();
+  const module_ = createCodeEditorModule({ repository: repo, runtime: noopRuntime });
+  const { controller, store } = module_;
+  await controller.open("/app/late.ts");
+  assert.equal(store.getSnapshot().status, "error");
+  assert.equal(store.getSnapshot().activePath, "/app/late.ts", "失败态留着路径，重试按钮才有目标");
+  repo.disk.set("/app/late.ts", { content: "ok", mtime: "t1", size: 2 });
+  const reloaded = await controller.open(store.getSnapshot().activePath!);
+  assert.equal(reloaded, true);
+  assert.equal(store.getSnapshot().status, "ready");
+  assert.equal(store.getSnapshot().file?.baseline, "ok");
+  assert.equal(repo.calls.filter((call) => call.op === "load" && call.path === "/app/late.ts").length, 2);
+});
+
+test("标签页是合法的可键盘结构：外层 role=tab 的 div，关闭是真的 button", () => {
+  const host = readFileSync(new URL("../src/web-ui/react/code-editor/host.tsx", import.meta.url), "utf8");
+  const tabs = host.slice(host.indexOf('role="tablist"'), host.indexOf('className="wand-code-editor-toolbar"'));
+  // 改前是 <button role="tab"> 里套 <span role="button">，button 内嵌交互元素非法。
+  assert.doesNotMatch(tabs, /<button[\s\S]{0,400}role="tab"/);
+  assert.match(tabs, /<div\n\s*key=\{tab\.path\}[\s\S]{0,220}?\n\s*role="tab"\n\s*tabIndex=\{snapshot\.activePath === tab\.path \? 0 : -1\}/,
+    "div 自己补上可聚焦，且一组只留一个 Tab 停靠点");
+  assert.match(tabs, /aria-controls=\{CODE_EDITOR_PANEL_ID\}/, "标签指向它控制的面板");
+  assert.match(tabs, /aria-selected=\{snapshot\.activePath === tab\.path\}/);
+  assert.match(tabs, /if \(event\.key === "Enter" \|\| event\.key === " "\)/, "原生 button 白给的激活要自己写回来");
+  assert.match(tabs, /<button\n\s*type="button"\n\s*className="wand-code-editor-tab-close"\n\s*aria-label=\{`关闭 \$\{tab\.name\}`\}/);
+  // 未保存标记：点本身是装饰，含义写进标签的可读名称，避免同一句读两遍。
+  assert.match(tabs, /aria-label=\{tab\.dirty \? `\$\{tab\.name\}，未保存` : tab\.name\}/);
+  assert.match(tabs, /className="wand-code-editor-tab-dirty" aria-hidden="true" title="未保存"/);
+  // 字号读数：无 role 的 span 上 aria-label 会被忽略。
+  assert.match(host, /<span role="status" aria-label=\{`字号 \$\{snapshot\.fontSize\}`\}/);
+});
+
+test("编辑器标签栏：方向键在标签间走位并跟着激活，Tab 只停一次", () => {
+  const host = readFileSync(new URL("../src/web-ui/react/code-editor/host.tsx", import.meta.url), "utf8");
+  const tabs = host.slice(host.indexOf('role="tablist"'), host.indexOf('className="wand-code-editor-toolbar"'));
+  // roving tabindex：非激活标签从 Tab 序列里退出，改由方向键走访。
+  assert.match(tabs, /tabIndex=\{snapshot\.activePath === tab\.path \? 0 : -1\}/);
+  assert.doesNotMatch(tabs, /tabIndex=\{0\}\n\s*aria-selected/, "不能所有标签都 tabIndex=0");
+  assert.match(tabs, /const step = event\.key === "ArrowRight" \? 1 : event\.key === "ArrowLeft" \? -1 : 0;/);
+  assert.match(tabs, /if \(step !== 0 \|\| event\.key === "Home" \|\| event\.key === "End"\)/, "Home/End 跳首尾");
+  assert.match(tabs, /: \(at \+ step \+ order\.length\) % order\.length;/, "首尾环形相接");
+  assert.match(tabs, /run\(\{ type: "activate", path: target \}\);/, "选中跟着焦点走（tablist 口径）");
+  assert.match(tabs, /tabRefs\.current\.get\(target\)\?\.focus\(\);/,
+    "焦点靠 ref 登记簿移动，不摸 querySelector（架构边界）");
+  assert.match(tabs, /ref=\{\(element\) => \{\n\s*if \(element\) tabRefs\.current\.set\(tab\.path, element\);/);
+  // 面板 id 挂在既有结构上（不新增包裹层，避免动 flex 布局），每种状态都同一个身份。
+  assert.match(host, /const CODE_EDITOR_PANEL_ID = "wand-code-editor-panel";/);
+  assert.equal((host.match(/id=\{CODE_EDITOR_PANEL_ID\}/g) ?? []).length, 5,
+    "loading / error / 未选文件 / Markdown 预览 / 编辑主体都算这块面板");
+  // 关闭按钮仍是独立停靠点：它没有 role=tab，也不参与方向键走位。
+  assert.match(tabs, /<button\n\s*type="button"\n\s*className="wand-code-editor-tab-close"/);
 });

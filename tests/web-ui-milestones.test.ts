@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { createElement } from "react";
@@ -132,4 +133,21 @@ test("MilestonePicker renders a 里程碑 trigger and shows the selected name", 
   }));
   assert.match(selected, /is-set/);
   assert.match(selected, /v5\.0 发布/);
+});
+
+test("里程碑下拉把加载失败和空列表分开了，且输入框挡输入法回车", () => {
+  const picker = readFileSync(new URL("../src/web-ui/react/milestones/picker.tsx", import.meta.url), "utf8");
+  assert.match(picker, /const loadError = itemsProp \|\| items\.length > 0 \? "" : snapshot\.error;/);
+  // 错误条 + 重新加载排在空态文案之前，绝不出现「还没有里程碑」冒充失败。
+  const errorBranch = picker.indexOf(": loadError ? (");
+  const emptyCopy = picker.indexOf("这个工作区还没有里程碑");
+  assert.ok(errorBranch > 0 && emptyCopy > errorBranch, "先判错误，再判空态");
+  // 同一个下拉里的用户可见文案不得「里程碑 / 迭代」混用。
+  assert.match(picker, /scoped \? "这个工作区还没有里程碑，新增一个吧。" : "还没有里程碑，新增一个吧。"/);
+  assert.doesNotMatch(picker, /"(这个工作区还没有|还没有|新增|选择|里程碑名称)[^"]*迭代/);
+  assert.match(picker, /<p className="milestone-picker-error" role="alert">\{loadError\}<\/p>/);
+  assert.match(picker, /onClick=\{\(\) => void milestonesStore\.load\(true\)\}/);
+  assert.match(picker, /\"重新加载\"/);
+  // 新增里程碑输入框：回车只结束组字，不提交半截拼音。
+  assert.match(picker, /if \(event\.nativeEvent\.isComposing\) return;/);
 });

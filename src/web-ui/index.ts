@@ -1,22 +1,17 @@
-// Main entry point for web-ui module
-// Combines CSS and JavaScript into a single HTML document
+// Main entry point for the web UI shell. Only versioned external assets carry JS/CSS.
 
 import { EMBEDDED_WEB_ASSETS, type EmbeddedVendorAssetPath } from "./embedded-assets.js";
-import { getCSSStyles } from "./styles.js";
-import { getScriptContent } from "./scripts.js";
+import { getStylesAsset } from "./styles.js";
+import { getScriptAsset } from "./scripts.js";
 import { WAND_FAVICON_URL } from "./brand-identity.js";
-
-// Use String.fromCharCode to avoid template literal interpretation of </script>
-const scriptClose = String.fromCharCode(60, 47) + "script>";
-const scriptOpen = "<" + "script";
 
 function vendorAssetUrl(relPath: EmbeddedVendorAssetPath): string {
   return `${relPath}?v=${EMBEDDED_WEB_ASSETS.vendor[relPath].hash}`;
 }
 
 export function renderApp(configPath: string): string {
-  const cssStyles = getCSSStyles();
-  const scriptContent = getScriptContent(configPath);
+  const stylesHref = `/assets/app.css?v=${getStylesAsset().hash}`;
+  const scriptSrc = `/assets/app.js?v=${getScriptAsset(configPath).hash}`;
   const xtermSrc = vendorAssetUrl("/vendor/xterm/xterm.bundle.js");
   const qrcodeSrc = vendorAssetUrl("/vendor/qrcode/qrcode.bundle.js");
   const xtermCssHref = vendorAssetUrl("/vendor/xterm/xterm.css");
@@ -34,18 +29,14 @@ export function renderApp(configPath: string): string {
   <meta name="format-detection" content="telephone=no" />
   <meta name="msapplication-tap-highlight" content="no" />
   <link rel="stylesheet" href="${xtermCssHref}" />
-  <style>
-${cssStyles}
-  </style>
+  <link rel="stylesheet" href="${stylesHref}" />
 </head>
 <body>
   <div id="app"></div>
   <div id="overlay-root" data-wand-ui-root></div>
-${scriptOpen} src="${xtermSrc}">${scriptClose}
-${scriptOpen} src="${qrcodeSrc}">${scriptClose}
-${scriptOpen}>
-${scriptContent}
-${scriptClose}
+<script src="${xtermSrc}"></script>
+<script src="${qrcodeSrc}"></script>
+<script src="${scriptSrc}"></script>
 </body>
 </html>`;
 }

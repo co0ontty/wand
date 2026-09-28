@@ -94,8 +94,15 @@ test("React-owned controls are not rebound or imperatively rewritten", () => {
     assert.ok(!events.includes(dead), `${dead} should stay deleted`);
   }
   // 组合器仍由 legacy 渲染（.input-panel 槽），它的监听器必须在无守卫路径上保留。
+  // 发送与停止现在是同一颗按钮的两种相位（docs/motion-design.md §4）：只剩一个
+  // click 监听器，按宿主 data-phase 分派 sendOrStart() / stopSession()。旧的
+  // #stop-button 节点与它的监听器一起下线，不留隐藏节点。
   assert.match(events, /getElementById\("send-input-button"\)/);
-  assert.match(events, /getElementById\("stop-button"\)/);
+  assert.doesNotMatch(events, /stop-button/);
+  assert.match(
+    events,
+    /getElementById\("send-input-button"\)[\s\S]{0,260}getComposerSendPhase\(\) === "running"\)\s*\{\s*stopSession\(\);/
+  );
   assert.match(events, /getElementById\("input-box"\)/);
   assert.match(events, /getElementById\("terminal-scale-down-top"\)/);
   // 会话列表整簇由 React 渲染：legacy 的 HTML 渲染器、在 React-owned
@@ -320,9 +327,13 @@ test("legacy shell chrome writes that can no longer take effect stay deleted", (
     assert.ok(!engine.includes(dead), `${dead} should stay deleted`);
   }
 
-  // legacy 真正拥有的部分必须保留：#stop-button 在 legacy 种子 composer 槽内，
-  // #output 是槽根（只用来判断终端实例），#chat-output 的聊天容器仍需命令式收口。
-  assert.match(engine, /if \(!selectedSession\) \{\s*if \(stopBtn\) stopBtn\.classList\.add\("hidden"\);/);
+  // legacy 真正拥有的部分必须保留：#output 是 React 渲染的槽根（class 归
+  // React），这里只用来判断终端实例是否需要初始化/重挂，#chat-output 的聊天
+  // 容器仍需命令式收口。原来这里还会直接给 #stop-button 加 hidden —— 那颗
+  // 按钮已合成 #send-input-button 的相位模型，显隐不再由 session-engine 决定
+  // （相位归 input.ts 的 updateInteractiveControls），但「composer 槽里不存在
+  // 第二颗发送/停止节点」这条不变量仍然成立，session-engine 也不再抓这个节点。
+  assert.doesNotMatch(engine, /stopBtn|"stop-button"/);
   assert.match(engine, /var terminalContainer = document\.getElementById\("output"\);/);
   assert.match(engine, /if \(chatContainer && showChat\) \{\s*ensureChatMessagesContainer\(chatContainer\);/s);
 });

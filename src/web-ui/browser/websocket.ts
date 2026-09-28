@@ -1,14 +1,14 @@
-import { state } from "./state";
+import { composerQueue, state } from "./state";
 import { syncBrowserComposerBadges } from "./composer-badges-adapter";
 import { getErrorMessage } from "../../error-utils.js";
 import { parseJsonResponse } from "../react/http-adapter";
-import { notifyAiTeamRunChanged } from "../react/ai-teams/repository";
+import { notifyAiTeamRunChanged, notifyAiTeamStepLive } from "../react/ai-teams/repository";
 import { resolveComposerPermission } from "../react/composer-badges/model";
 import type { ComposerPermissionAction } from "../react/composer-badges/controller";
 import { renderChat, scheduleChatRender } from "./chat-render";
 import { clearStructuredQueuePersistence } from "./chat-scroll";
 import { mergeIncrementalWindowedTurn } from "./message-reconciliation";
-import { flushPendingMessages, buildMessagesForRender, isCurrentTerminalSession, updateInputHint, flushStructuredInputQueue, updateStructuredQueueCounter, setTerminalInteractive, flushCrossSessionQueue, reconcileInteractiveState, getSelectedSession, closeKeyboardPopup } from "./input";
+import { flushPendingMessages, buildMessagesForRender, isCurrentTerminalSession, flashComposerFailed, flushStructuredInputQueue, updateStructuredQueueCounter, setTerminalInteractive, flushCrossSessionQueue, reconcileInteractiveState, getSelectedSession, closeKeyboardPopup } from "./input";
 import { notifyTaskEnded, clearSessionProgressNative, _syncWakeLock, showNotificationBubble, notifyTaskProgress, syncSessionProgressToNative, notifyPermissionRequest, notifyUpdateAvailable, showAutoUpdateOverlay, showRestartOverlay, showToast } from "./notifications";
 import { refreshAll, scheduleSessionListUpdate, subscribeToSession, updateSessionSnapshot, getPreferredMessages, selectSession, updateShellChrome, loadOutput, isAutoApproveImpliedByMode, applyCurrentView, fetchAvailableModels } from "./session-engine";
 import { getLastAssistantSummary } from "./session-ui";
@@ -329,7 +329,7 @@ function noteTurnActivity(sessionId: string, active: boolean): void {
               }
               if (Object.prototype.hasOwnProperty.call(msg.data, 'queuedMessages')) {
                 snapshot.queuedMessages = msg.data.queuedMessages || [];
-                state.queueEpoch++;
+                composerQueue.advance(msg.sessionId, "server");
               }
               if (msg.data.structuredState) {
                 snapshot.structuredState = msg.data.structuredState;
@@ -499,7 +499,6 @@ function noteTurnActivity(sessionId: string, active: boolean): void {
             updateSessionSnapshot(endedSnapshot);
 
             if (msg.sessionId === state.selectedId) {
-              updateInputHint("Enter 发送 · Shift+Enter 换行");
               // Trigger status bar completion animation
               scheduleChatRender(true);
             }
@@ -657,7 +656,7 @@ function noteTurnActivity(sessionId: string, active: boolean): void {
               }
               if (Object.prototype.hasOwnProperty.call(msg.data, 'queuedMessages')) {
                 statusUpdate.queuedMessages = msg.data.queuedMessages || [];
-                state.queueEpoch++;
+                composerQueue.advance(msg.sessionId, "server");
               }
               if (Object.prototype.hasOwnProperty.call(msg.data, 'permissionBlocked')) {
                 statusUpdate.permissionBlocked = !!msg.data.permissionBlocked;
@@ -744,7 +743,6 @@ function noteTurnActivity(sessionId: string, active: boolean): void {
                   // Flush queued structured messages synchronously before render
                   // so the chat view uses up-to-date queue state.
                   if (!statusUpdate.structuredState.inFlight) {
-                    updateInputHint("Enter 发送 · Shift+Enter 换行");
                     flushStructuredInputQueue();
                   }
                   scheduleChatRender();
@@ -770,6 +768,12 @@ function noteTurnActivity(sessionId: string, active: boolean): void {
                 showRestartOverlay();
               } else if (msg.data.kind === "ai-team-run" && typeof msg.data.runId === "string") {
                 notifyAiTeamRunChanged({ runId: msg.data.runId, taskId: String(msg.data.taskId || "") });
+              } else if (msg.data.kind === "ai-team-step-live" && typeof msg.data.runId === "string") {
+                notifyAiTeamStepLive({
+                  runId: msg.data.runId,
+                  taskId: String(msg.data.taskId || ""),
+                  steps: Array.isArray(msg.data.steps) ? msg.data.steps : [],
+                });
               }
             }
             break;

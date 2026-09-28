@@ -54,6 +54,7 @@ import { getGithubConnectorStatus } from "./github-connector.js";
 import { registerMissionRoutes } from "./server-mission-routes.js";
 import { Missions } from "./missions.js";
 import { createAiTeamRunner } from "./ai-team-runner.js";
+import type { AiTeamLiveUpdate } from "./ai-team-types.js";
 import { registerAiTeamRoutes } from "./server-ai-team-routes.js";
 import { registerAttentionRoutes } from "./server-attention-routes.js";
 import {
@@ -84,7 +85,6 @@ import {
   checkManagedServiceUpdatePreflight,
 } from "./update-helper.js";
 import { toSessionDetailDTO } from "./session-transport.js";
-import { syncWorkspaceTaskToBoard } from "./wand-task-sync.js";
 import { registerUploadRoutes } from "./upload-routes.js";
 import { optimizePrompt, PromptOptimizeError } from "./prompt-optimizer.js";
 import { resolveDatabasePath, WandStorage, type AuthPrincipal, type AuthScope } from "./storage.js";
@@ -93,7 +93,8 @@ import { DistributionManager } from "./distribution-manager.js";
 import { isLogBusActive, wandTuiLog } from "./tui/log-bus.js";
 import { EMBEDDED_WEB_ASSETS, type EmbeddedVendorAssetPath } from "./web-ui/embedded-assets.js";
 import { renderApp } from "./web-ui/index.js";
-import { getAiTeamsChunk } from "./web-ui/scripts.js";
+import { getAiTeamsChunk, getScriptAsset } from "./web-ui/scripts.js";
+import { getStylesAsset } from "./web-ui/styles.js";
 import { WsBroadcastManager } from "./ws-broadcast.js";
 import { TerminalDaemonClient } from "./terminal-daemon-client.js";
 import { createUpgradeAwareTerminalHost } from "./render-host.js";
@@ -120,7 +121,7 @@ const PKG_JSON = JSON.parse(readFileSync(path.join(RUNTIME_ROOT_DIR, "package.js
 };
 const PKG_NAME = PKG_JSON.name;
 const PKG_VERSION = PKG_JSON.version;
-const PKG_NODE_REQ = PKG_JSON.engines?.node ?? ">=22.5.0";
+const PKG_NODE_REQ = PKG_JSON.engines?.node ?? ">=26.10.0";
 const PKG_REPO_URL = "https://github.com/co0ontty/wand";
 
 /** 结构化聊天头像允许的图片类型；未知扩展名回 415。 */
@@ -455,6 +456,8 @@ export async function startServer(
   const missions = new Missions(storage, structuredSessions, sessionRegistry);
   // wsManager 在后面才建：团队运行的变更通知经由这个转发口，接好之前静默丢弃。
   let notifyAiTeamRun = (_data: { kind: "ai-team-run"; runId: string; taskId: string }): void => {};
+  // 运行中步骤的 live 文本推送（§4.9），同样走系统通知，接好之前静默丢弃。
+  let notifyAiTeamRunLive = (_update: AiTeamLiveUpdate): void => {};
   // 团队降级的 model-unknown 事前比对只看这份已发现的清单；没刷新过就是空，判定方向是放行。
   const aiTeamModelIds = (provider: SessionProvider): string[] => {
     const cache = modelCatalog.snapshot();
@@ -471,7 +474,10 @@ export async function startServer(
   const aiTeams = createAiTeamRunner({
     storage, config, structured: structuredSessions, processes, sessions: sessionRegistry,
     notify: (run) => notifyAiTeamRun({ kind: "ai-team-run", runId: run.id, taskId: run.taskId }),
+    notifyLive: (update) => notifyAiTeamRunLive(update),
     models: aiTeamModelIds,
+    // 成员名单里的模型名：`default` 哨兵换成服务端为该 CLI 配置的默认模型。
+    defaultModelOf: (provider) => getDefaultModelForProvider(config, provider),
   });
   const updateState = new ServerUpdateState();
   const getUpdateChannel = (): "stable" | "beta" =>
@@ -521,20 +527,37 @@ export async function startServer(
     next();
   });
 
-  const sendEmbeddedVendorAsset = (assetPath: EmbeddedVendorAssetPath, _req: Request, res: Response): void => {
+  const requestedHash = (req: Request): string | undefined =>
+    typeof req.query.v === "string" ? req.query.v : undefined;
+  const setAssetCache = (req: Request, res: Response, hash: string, visibility: "public" | "private"): void => {
+    // Never cache new bytes under an old URL after a package replacement. An old
+    // process can still serve its embedded version; a new process serves current
+    // bytes without caching the mismatch so an in-flight page remains usable.
+    res.setHeader("Cache-Control", requestedHash(req) === hash
+      ? `${visibility}, max-age=31536000, immutable`
+      : "no-store");
+  };
+  const sendEmbeddedVendorAsset = (assetPath: EmbeddedVendorAssetPath, req: Request, res: Response): void => {
     const asset = EMBEDDED_WEB_ASSETS.vendor[assetPath];
-    res.setHeader("Cache-Control", "public, max-age=604800, immutable");
+    setAssetCache(req, res, asset.hash, "public");
     res.type(asset.contentType).send(asset.content);
   };
   app.get("/vendor/xterm/xterm.bundle.js", (req, res) => sendEmbeddedVendorAsset("/vendor/xterm/xterm.bundle.js", req, res));
   app.get("/vendor/xterm/xterm.css", (req, res) => sendEmbeddedVendorAsset("/vendor/xterm/xterm.css", req, res));
   app.get("/vendor/qrcode/qrcode.bundle.js", (req, res) => sendEmbeddedVendorAsset("/vendor/qrcode/qrcode.bundle.js", req, res));
-  // AI 团队页按需脚本：页面 meta 里的地址带内容 hash，hash 对得上才长缓存。
+  app.get("/assets/app.css", (req, res) => {
+    const asset = getStylesAsset(requestedHash(req));
+    setAssetCache(req, res, asset.hash, "public");
+    res.type("text/css").send(asset.content);
+  });
+  app.get("/assets/app.js", (req, res) => {
+    const asset = getScriptAsset(configPath, requestedHash(req));
+    setAssetCache(req, res, asset.hash, "private");
+    res.type("application/javascript").send(asset.content);
+  });
   app.get("/assets/ai-teams.js", (req, res) => {
-    const chunk = getAiTeamsChunk();
-    res.setHeader("Cache-Control", req.query.v === chunk.hash
-      ? "public, max-age=604800, immutable"
-      : "no-cache");
+    const chunk = getAiTeamsChunk(requestedHash(req));
+    setAssetCache(req, res, chunk.hash, "public");
     res.type("application/javascript").send(chunk.content);
   });
 
@@ -950,7 +973,6 @@ export async function startServer(
           ));
       recordRecentPath(storage, snapshot.cwd);
       // 会话一落地就挂到任务的看板卡片上，不等下一次看板列表的兜底同步。
-      syncWorkspaceTaskToBoard(storage, snapshot.workspaceTaskId);
       res.status(201).json(toSessionDetailDTO(snapshot));
     } catch (error) {
       sendRouteError(res, error, "无法启动命令。请检查命令是否安装。");
@@ -1042,6 +1064,11 @@ export async function startServer(
   });
   notifyAiTeamRun = (data) => {
     wsManager.emitEvent({ type: "notification", sessionId: "__system__", data });
+  };
+  notifyAiTeamRunLive = (update) => {
+    wsManager.emitEvent({
+      type: "notification", sessionId: "__system__", data: { kind: "ai-team-step-live", ...update },
+    });
   };
   // Re-attach structured CLI runs that kept going inside terminald while the
   // previous web process was down; fire-and-forget, failures are logged inside.

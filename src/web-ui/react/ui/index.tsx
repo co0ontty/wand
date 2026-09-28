@@ -3,6 +3,7 @@
 // third-party interface across the application.
 export {WandBadge} from "./badge";
 export { WandBrandMark } from "./brand-mark";
+export { WandBreadcrumb, type WandBreadcrumbProps, type WandCrumbItem } from "./breadcrumb";
 export {WandButton, WandIconButton, type WandButtonKind, type WandIconButtonProps} from "./button";
 export {WandChip, type WandChipProps} from "./chip";
 export {WandDialog, WandDialogSurface, type WandDialogTone} from "./dialog";

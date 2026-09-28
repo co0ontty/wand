@@ -28,16 +28,16 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # render-bin 子模块 pin 住各平台 wand-render 二进制。不初始化子模块时
-          # `npm run build` 里的 stage 步骤按设计只警告并跳过，于是这个 beta 包里
-          # 没有 dist/native/，用户的 render.engine=auto 会静默回退 legacy ——
-          # 也就是「发了个看起来升级过、实际没启用 Rust 引擎的 beta」。
-          submodules: recursive
+          submodules: false
+
+      - name: Checkout pinned Render binaries
+        # 与 stable 一样只检出 npm 包需要的产物，保留后面的严格校验。
+        run: git submodule update --init -- render-bin
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version-file: .nvmrc
           registry-url: "https://registry.npmjs.org"
 
       - name: Compute beta version
@@ -113,7 +113,8 @@ jobs:
             exit $?
           fi
           for attempt in 1 2 3 4 5; do
-            if npm publish --access public --tag beta && wait_for_publish; then
+            # 已完成构建与严格产物校验，不再触发 prepublishOnly 重复构建。
+            if npm publish --ignore-scripts --access public --tag beta && wait_for_publish; then
               exit 0
             fi
             if published; then

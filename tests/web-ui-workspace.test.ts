@@ -885,3 +885,47 @@ test("workspaces controller keeps the dialog state stable while submitting", asy
     uninstall();
   }
 });
+
+test("danger 语义不再被静默降级，批量失败的原因留在原位", () => {
+  const overlays = readFileSync(
+    new URL("../src/web-ui/react/legacy-overlays.ts", import.meta.url),
+    "utf8",
+  );
+  // 调用方（workspaces-adapter）沿用的是 dialog 那套词表里的 "danger"，
+  // toastTone 之前不认它 → 落到 info（不报错、不变红、4s 也没有），属静默降级。
+  assert.equal((overlays.match(/case "danger":\n\s*return "error";/g) ?? []).length, 1);
+  assert.match(overlays, /function toastTone\(value: unknown\): WandToastTone \{[\s\S]*?case "danger":[\s\S]*?return "error";/);
+  const adapter = readFileSync(
+    new URL("../src/web-ui/browser/workspaces-adapter.ts", import.meta.url),
+    "utf8",
+  );
+  // 现在真正吃到这条修正的 danger 调用点（两处都是错误语义）。
+  assert.equal((adapter.match(/showToast\([\s\S]{0,160}, "danger"\);/g) ?? []).length, 2);
+
+  const notifications = readFileSync(
+    new URL("../src/web-ui/browser/notifications.ts", import.meta.url),
+    "utf8",
+  );
+  // danger 与 error 同等待遇（4s 驻留）；气泡通道只有 info/warning/success 三个 class，
+  // 所以回退路径仍把错误压成 warning，但 success 不再被压成 info。
+  assert.match(notifications, /var isError = type === "error" \|\| type === "danger";/);
+  assert.match(notifications, /var duration = isError \? 4000 : 2200;/);
+  assert.match(notifications, /type: isError \? "warning" : type === "success" \? "success" : "info",/);
+});
+
+test("批量处理失败：原因写进原位文案位，不再只活在 Toast 里", () => {
+  const panel = readFileSync(
+    new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.doesNotMatch(panel, /toast\(describeError\(cause, "无法处理所选任务。"\), "danger"\);/);
+  assert.match(panel, /setManageFeedbackReason\(describeError\(cause, "无法处理所选任务。"\)\);/);
+  // 原位槽位是工具条左侧的文案位（.sidebar-manage-count: flex:1 / min-width:0，会换行），
+  // 按钮位是 30px 高的 pill，塞整句会被裁掉，所以原因不并进按钮。
+  assert.match(panel, /<span className="sidebar-manage-count" role=\{manageFeedbackReason \? "alert" : undefined\}>/);
+  assert.match(panel, /\{manageFeedbackReason \|\| \(selectedCount > 0 \? `已选择 \$\{selectedCount\} 项` : "点选任务或终端"\)\}/);
+  // 下一次尝试与退出选择模式都会清掉原因；dwell 定时器只收回确认行，不清原因（1.5s 读不完一句）。
+  assert.match(panel, /setManageFeedback\("pending"\);\n\s*setManageFeedbackLabel\(""\);\n\s*setManageFeedbackReason\(""\);/);
+  assert.match(panel, /setManageFeedback\("idle"\);\n\s*setManageFeedbackLabel\(""\);\n\s*setManageFeedbackReason\(""\);\n\s*\}, \[clearManageFeedbackTimer\]\)/);
+  assert.match(panel, /setConfirmingManageDelete\(false\);\n\s*setManageFeedback\("idle"\);\n\s*setManageFeedbackLabel\(""\);\n\s*\}, MOTION_DWELL_FAILED_MS\);/);
+});

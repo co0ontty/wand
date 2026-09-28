@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -90,4 +91,18 @@ test("model refresh summary lists every CLI, including empty catalogs", () => {
     modelCatalogSummary(catalog),
     "Claude 1 · Codex 0（未发现） · OpenCode 2 · Grok 1 · Qoder 0（未发现） · Pi 0（未发现）",
   );
+});
+
+test("设置按钮 flash 失败停得比成功久，两处计时都取 token", () => {
+  const fields = readFileSync(new URL("../src/web-ui/react/settings/fields.tsx", import.meta.url), "utf8");
+  assert.equal((fields.match(/settled === "error" \? MOTION_DWELL_FAILED_MS : MOTION_DWELL_SENT_MS/g) ?? []).length, 1);
+  assert.equal((fields.match(/next === "error" \? MOTION_DWELL_FAILED_MS : MOTION_DWELL_SENT_MS/g) ?? []).length, 1);
+});
+
+test("默认模型下拉不重复提供「跟随默认」哨兵项", () => {
+  // 空值项已经表达「跟随 X 默认」；目录里那个 id=default 的哨兵项再被选中，
+  // 就会把哨兵当模型 id 存进配置（服务端会一路传成 --model default）。
+  const source = readFileSync(new URL("../src/web-ui/react/settings/tabs.tsx", import.meta.url), "utf8");
+  assert.match(source, /\.filter\(\(model\) => model\.id !== MODEL_CATALOG_DEFAULT_VALUE\)/);
+  assert.match(source, /label: `跟随 \$\{label\} 默认`/);
 });

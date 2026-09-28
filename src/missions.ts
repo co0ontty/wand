@@ -22,7 +22,6 @@ import type { StructuredSessionManager } from "./structured-session-manager.js";
 import type { WandStorage } from "./storage.js";
 import type { ConversationTurn, ProcessEvent, SessionProvider, SessionSnapshot } from "./types.js";
 import { isSessionProvider } from "./session-provider.js";
-import { syncWorkspaceTaskToBoard } from "./wand-task-sync.js";
 
 const MAX_ATTEMPTS = 6;
 
@@ -343,7 +342,6 @@ export class Missions {
         automationId: mission.id,
       });
       // 关联任务的派发会话立刻落到任务卡片上，不等下一次看板列表的兜底同步。
-      syncWorkspaceTaskToBoard(this.storage, mission.taskId);
       attempt = {
         ...attempt,
         sessionId: session.id,

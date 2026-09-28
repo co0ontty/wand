@@ -67,14 +67,31 @@ test("a typed assignment replaces the task card description", () => {
   assert.equal(buildAiTeamObjective(task), "新功能\n\n你不要执行，你是制定计划的人，然后我现在有很多ci");
 });
 
+test("a task title the description already covers is not repeated", () => {
+  // 真实案例（run_46c0a39145b3）：标题是描述开头被截断出来的前缀，拼起来目标会整段重复。
+  const description = "subagent的显示效果很奇怪，你去找到合理的实现方式，进行优化，可以参考其他vibecoding 客户端的实现方式";
+  const title = "subagent的显示效果很奇怪，你去找到合理的实现方式，进行优化，可以参考其他";
+  assert.equal(buildAiTeamObjective({ title, description }), description);
+  assert.equal(buildAiTeamObjective({ title: description, description }), description);
+  assert.equal(buildAiTeamObjective({ title: `${description}（补充）`, description }), `${description}（补充）`);
+  assert.equal(buildAiTeamObjective({ title: "新功能", description: "加一段安装说明" }), "新功能\n\n加一段安装说明");
+});
+
 test("leader prompts keep role and rules in the system prompt, content in the message", () => {
   const run = { team, objective: "把安装说明写清楚" } as AiTeamRun;
   const kickoff = buildLeaderKickoffPrompt(run, ".wand-team/r1/1-leader.json", true);
   assert.ok(kickoff.system.includes("m_dev") && kickoff.system.includes("Dev Bot"));
-  assert.ok(kickoff.system.includes("CLI: claude/默认模型"));
+  assert.ok(kickoff.system.includes("CLI: claude/默认"), "没有默认模型解析器时只写「默认」，不写「默认模型」");
+  // `default` 哨兵不是模型名：给了服务端默认模型就写它的名字。
+  const named = buildLeaderKickoffPrompt(run, ".wand-team/r1/1-leader.json", true, null, () => "opus");
+  assert.ok(named.system.includes("CLI: claude/opus/"), "有默认模型时名单里写具体名字");
+  assert.ok(!named.system.includes("默认模型"));
   assert.ok(kickoff.system.includes("回复方式") && kickoff.system.includes("after"));
-  assert.ok(kickoff.message.includes("把安装说明写清楚"));
-  assert.ok(kickoff.message.includes(".wand-team/r1/1-leader.json"));
+  assert.equal(
+    kickoff.message,
+    "团队目标：把安装说明写清楚\n\n本轮报告文件：.wand-team/r1/1-leader.json",
+    "用户消息只剩目标与本轮文件路径",
+  );
   assert.ok(!kickoff.message.includes("回复方式"), "rules stay out of the user message");
 
   const reused = buildLeaderKickoffPrompt(run, ".wand-team/r1/1-leader.json", false);
@@ -110,7 +127,9 @@ test("handoff files carry the upstream reports while prompts only carry paths", 
   });
   assert.ok(member.message.includes(aiTeamHandoffPath("r1", 4, "work")));
   assert.ok(member.message.includes(dev.reportPath));
-  assert.ok(member.message.includes("上游交接（动手前先读文件）"));
+  assert.ok(member.message.includes("## 上游交接"));
+  assert.ok(!member.message.includes("先读这个文件"), "读交接文件的规则在系统提示里，不进用户消息");
+  assert.ok(member.system.includes("上游交接文件") && member.system.includes("先读它再开始本步骤"));
   assert.ok(!member.message.includes("改了 README.md"), "报告正文不进提示词");
 
   // Leader 轮次：同样只给路径 + 汇总文件。
@@ -125,6 +144,8 @@ test("handoff files carry the upstream reports while prompts only carry paths", 
   assert.ok(followup.message.includes(aiTeamHandoffPath("r1", 5, "leader")));
   assert.ok(followup.message.includes(dev.reportPath) && followup.message.includes(qa.reportPath));
   assert.ok(!followup.message.includes("改了 README.md") && !followup.message.includes("测试通过"));
+  assert.ok(!followup.message.includes("先读这个文件") && !followup.message.includes("凭标题猜"));
+  assert.ok(followup.system.includes("先读它再决定下一步") && followup.system.includes("不要凭标题猜"));
 });
 
 test("the chat history file carries the earlier rounds and the transcript tail", () => {
@@ -175,12 +196,14 @@ test("kickoff and fresh-session prompts point at the chat history, reused sessio
   assert.equal(historyPath, ".wand-team/r2/chat-history.md");
   const kickoff = buildLeaderKickoffPrompt(run, "report.json", true, historyPath);
   assert.ok(kickoff.message.includes(historyPath));
-  assert.match(kickoff.message, /已经做完的不要重做/);
+  assert.ok(!kickoff.message.includes("已经做完的不要重做"), "读文件的规则在系统提示里，不重复进用户消息");
+  assert.match(kickoff.system, /已经做完的不要重做/);
   assert.ok(!buildLeaderKickoffPrompt(run, "report.json", true).message.includes("chat-history"), "不续跑就不带这一段");
 
   const step = { title: "换成 pnpm", instructions: "做事", reportPath: "r.md" } as AiTeamStep;
   const member = buildMemberPrompt(run, step, team.members[1]!, true, null, historyPath);
-  assert.ok(member.message.includes(historyPath) && member.message.includes("本群聊历史"));
+  assert.ok(member.message.includes(historyPath) && member.message.includes("本群聊之前的记录"));
+  assert.ok(member.system.includes("在已有改动的基础上继续"));
   assert.ok(!buildMemberPrompt(run, step, team.members[1]!, false, null, historyPath).message.includes(historyPath),
     "复用的会话已经读过一次，不再重复贴路径");
   assert.ok(buildLeaderFollowupPrompt(run, [], "report.json", "继续", true, null, historyPath).message.includes(historyPath));
@@ -195,6 +218,7 @@ test("member prompts name the report file and skip the goal on reused sessions",
   const later = buildMemberPrompt(run, step, team.members[1]!, false);
   assert.ok(first.message.includes("团队目标：目标") && first.message.includes(step.reportPath));
   assert.ok(!later.message.includes("团队目标") && later.message.includes(step.reportPath));
+  assert.ok(first.message.includes(`本轮报告文件：${step.reportPath}`), "用户消息用固定标签给出本轮文件");
   assert.ok(first.system.includes("Dev Bot") && first.system.includes("报告约定"));
   assert.ok(!first.message.includes("报告约定"), "report rules live in the system prompt");
 });
@@ -237,7 +261,7 @@ test("[T4] memberLine renders role label and only the preferred candidate", () =
   assert.ok(system.includes("名字: Plan | 角色: 制定计划"));
   assert.ok(!/名字: Any[^\n]*角色/.test(system), "any/缺省角色不显示标签");
   // 首选候选一行 provider/model/effort；非首选候选绝不出现。
-  assert.ok(system.includes("CLI: claude/默认模型/off"));
+  assert.ok(system.includes("CLI: claude/默认/off"));
   assert.ok(!system.includes("gpt-backup"), "backup candidates must not leak into the leader prompt");
   assert.ok(!system.includes("codex/"), "backup candidate provider must not leak either");
   assert.ok(system.includes("执行配置由系统按候选顺序自动降级，你只按成员能力分派，不操心模型可用性"));

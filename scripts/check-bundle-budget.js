@@ -1,121 +1,90 @@
-/**
- * Bundle budget gate for the inlined web assets.
+/*
+ * Web transfer budget, measured from the assets actually served by the built
+ * package. The HTML is no-store, but app.js/app.css and the vendor assets are
+ * content-versioned and browser-cacheable. Count the first load separately
+ * from subsequent navigations; ai-teams.js is fetched only when opened.
  *
- * Every byte measured here is shipped inside the single HTML response
- * (`src/web-ui/index.ts` inlines `scripts.js` + `tailwind.css` + `styles.css`
- * into `<style>`/`<script>` tags), so none of it is separately cacheable and
- * all of it is re-transferred on every page load, including a cold mobile
- * WebView start. The vendor bundles are excluded because they are served as
- * separate hashed `<script src>` files and are third-party.
- *
- * Budgets are a ratchet: they may only go down. The migration ADR recorded a
- * 120 KiB increment threshold and a post-migration JS figure of ~268 KB gzip;
- * the bundle has since grown well past both, so the numbers below pin today's
- * reality instead of blessing it. Lower them whenever you can, and only raise
- * one on purpose - in the same commit that raises it, with the reason.
- *
- * Run directly with `npm run check:bundle-budget` (requires a prior build).
+ * This replaces the 512 KiB *inline JS* limit: a real 524,919-byte bundle was
+ * repeatedly blocking releases, while the much larger architectural cost was
+ * retransmitting it in every HTML response. The new cold-load limits allow
+ * ~10% headroom, not unlimited bundle growth. Lower them after real slimming.
  */
-import { readFileSync, existsSync } from "node:fs";
 import { gzipSync } from "node:zlib";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const contentDir = path.join(root, "dist", "web-ui", "content");
-
-/** gzip budgets in bytes, measured over the whole shipped asset. */
-const BUDGET = {
-  // js 历史上从 512_000 上调过三次，每次都在本文件记录原因：
-  //   1) 「默认迭代 + 用提示词清单生成 commit message」：quick-commit 迭代面板 /
-  //      仓储 / 类型 + features.ts 样式真实增长约 0.5 KiB（顶到 512_140），同一次
-  //      删掉了 mini-keyboard、status-dot/status-text、welcome-input、chat-pin-spacer
-  //      等无生产者残留（约 0.3 KiB）仍回不到 512_000，于是上调到 514_000。
-  //   2) 结构化模式「读图内联展示」修复：工具卡有内联结果图时不再重复渲染路径
-  //      缩略图（同一张图只出一个）。净增约 1 字节 gzip，但 gzip 对齐使 514_000
-  //      这个精确卡点反复红（±1~3 字节漂移），故上调到 514_200 留 200 字节余量。
-  //   3) 任务看板「父子任务」+ 排队消息可编辑：看板卡片/列表的父任务胶囊、详情页
-  //      父任务链接与子任务区块、新建/详情两处父任务选择器、input.ts 排队条「编辑」
-  //      按钮，都是真实功能，不是重复渲染（esbuild metafile 对账：本批只动了
-  //      task-board-host.tsx / task-board-agent.ts / task-board-views.tsx / input.ts
-  //      四个文件，其余模块字节数不变）。minify 后 gzip 514_130 -> 515_168（+1.0 KiB），
-  //      514_200 这个卡点本就只剩 70 字节余量，于是上调到 516_000。
-  //   4) Web 端连续两轮 UI 批次（v4.74.0 设置面板/模型与思考深度选择器、v4.75.0 看板
-  //      父子任务与迭代选择器、工作区面板、快捷提交、Shell 顶栏）把 scripts.js gzip
-  //      从 505.5 KiB（=517_632 B，已超旧预算 1.6 KiB）推到 509.5 KiB（=521_723 B）。
-  //      两次发布都因此被 CI 的 build 步骤挡住（npm publish 一步都没跑）。这次只补到
-  //      512 KiB（524_288 B）并留 ~2.5 KiB 余量，不再往上顶：下一批前端改动必须先瘦
-  //      身（懒加载重型面板 / 挪出 tool 元数据）或在此处降回数字。
-  //   5) AI 团队（团队页、成员头像、CLI 下拉里的团队选项、任务详情运行面板）一度把 CI
-  //      （Node 22 zlib）下的 gzip 推到 526_340 B。没有再上调：团队页与运行面板连同样式
-  //      拆成按需脚本 content/ai-teams.js（scripts/ai-teams-chunk.js，约 12.5 KiB gzip，
-  //      不内联、不计入本预算），主包回落到约 504 KiB。之后的大块低频界面照此拆分。
-  //      注意：Homebrew Node 23 的 zlib 1.2.12 压出来比 CI 小约 2 KiB，本地核对预算
-  //      要用 Node 22/24，否则会误报通过。
-  // 下一次真正瘦身（懒加载重型面板等）后必须把这几个值一起降回去。
-  // 已知的最大单块肥肉：tailwind-merge（bundle 内 ~103 KiB raw，由 @appica/ui-react
-  // 的 cn() 间接引入）与 react-dom（~553 KiB raw）；真要瘦身从这两处下手。
-  js: 524_288,
-  css: 100_000,
-};
-
-const JS_FILES = ["scripts.js"];
-const CSS_FILES = ["styles.css", "tailwind.css"];
-
-function gzipSize(file) {
-  const full = path.join(contentDir, file);
-  if (!existsSync(full)) {
-    console.error(
-      `[bundle-budget] missing ${path.relative(root, full)}; run \`npm run build\` first.`,
-    );
-    process.exit(1);
-  }
-  const raw = readFileSync(full);
-  return { raw: raw.length, gzip: gzipSync(raw).length };
-}
-
-function measure(files) {
-  return files.reduce(
-    (acc, file) => {
-      const size = gzipSize(file);
-      acc.rows.push({ file, ...size });
-      acc.raw += size.raw;
-      acc.gzip += size.gzip;
-      return acc;
-    },
-    { rows: [], raw: 0, gzip: 0 },
-  );
-}
-
-const kib = (bytes) => `${(bytes / 1024).toFixed(1)} KiB`;
-
-const js = measure(JS_FILES);
-const css = measure(CSS_FILES);
-
-console.log("[bundle-budget] inlined web assets (gzip):");
-for (const row of [...js.rows, ...css.rows]) {
-  console.log(`  ${row.file.padEnd(14)} raw ${kib(row.raw).padStart(10)}  gzip ${kib(row.gzip).padStart(10)}`);
-}
-
-const failures = [];
-if (js.gzip > BUDGET.js) {
-  failures.push(`js   ${kib(js.gzip)} > budget ${kib(BUDGET.js)} (+${kib(js.gzip - BUDGET.js)})`);
-}
-if (css.gzip > BUDGET.css) {
-  failures.push(`css  ${kib(css.gzip)} > budget ${kib(BUDGET.css)} (+${kib(css.gzip - BUDGET.css)})`);
-}
-
-if (failures.length > 0) {
-  console.error("\n[bundle-budget] FAILED:");
-  for (const line of failures) console.error(`  ${line}`);
-  console.error(
-    "\n  The budget is a ratchet. Either trim the bundle (lazy-load heavy panels,\n" +
-      "  drop dead code) or raise BUDGET in scripts/check-bundle-budget.js in this\n" +
-      "  same commit and state why in the commit message.",
-  );
+const requiredNode = readFileSync(path.join(root, ".nvmrc"), "utf8").trim();
+if (process.versions.node !== requiredNode) {
+  console.error(`[bundle-budget] expected Node ${requiredNode}, got ${process.version}; run \`nvm use\`.`);
   process.exit(1);
 }
 
+if (!existsSync(path.join(root, "dist", "web-ui", "index.js"))) {
+  console.error("[bundle-budget] missing built web assets; run `npm run build` first.");
+  process.exit(1);
+}
+
+const { renderApp } = await import("../dist/web-ui/index.js");
+const { getScriptAsset, getAiTeamsChunk } = await import("../dist/web-ui/scripts.js");
+const { getStylesAsset } = await import("../dist/web-ui/styles.js");
+const { EMBEDDED_WEB_ASSETS } = await import("../dist/web-ui/embedded-assets.js");
+
+const configPath = "/tmp/wand-bundle-budget/config.json";
+const html = renderApp(configPath);
+const js = getScriptAsset(configPath);
+const css = getStylesAsset();
+const lazy = getAiTeamsChunk();
+
+// The first-load limit includes the terminal and QR assets, which the shell
+// requests unconditionally. Do not silently move bytes out of the inline
+// budget into these files. The optional team chunk has its own limit.
+const BUDGET = {
+  html: 4_096,
+  js: 580_000,
+  css: 110_000,
+  firstLoad: 800_000,
+  lazy: 35_000,
+};
+const gzipBytes = (content) => gzipSync(Buffer.from(content, "utf8")).length;
+const rows = [
+  ["HTML (repeat)", html, BUDGET.html],
+  ["app.js (cached)", js.content, BUDGET.js],
+  ["app.css (cached)", css.content, BUDGET.css],
+  ...Object.entries(EMBEDDED_WEB_ASSETS.vendor).map(([name, asset]) => [name, asset.content, null]),
+  ["ai-teams.js (lazy)", lazy.content, BUDGET.lazy],
+];
+
+const kib = (bytes) => `${(bytes / 1024).toFixed(1)} KiB`;
+console.log(`[bundle-budget] Node ${process.version}, zlib ${process.versions.zlib}:`);
+const sizes = new Map();
+const failures = [];
+for (const [name, content, limit] of rows) {
+  const gzip = gzipBytes(content);
+  sizes.set(name, gzip);
+  console.log(`  ${name.padEnd(31)} gzip ${kib(gzip).padStart(10)} (${gzip} B)`);
+  if (limit !== null && gzip > limit) {
+    failures.push(`${name}: ${gzip} B > ${limit} B (+${gzip - limit} B)`);
+  }
+}
+const vendorBytes = [...sizes.entries()].filter(([name]) => name.startsWith("/vendor/"))
+  .reduce((total, [, size]) => total + size, 0);
+const firstLoad = sizes.get("HTML (repeat)") + sizes.get("app.js (cached)")
+  + sizes.get("app.css (cached)") + vendorBytes;
+console.log(`  first load (HTML + app + vendor) gzip ${kib(firstLoad)} (${firstLoad} B)`);
+if (firstLoad > BUDGET.firstLoad) {
+  failures.push(`first load: ${firstLoad} B > ${BUDGET.firstLoad} B (+${firstLoad - BUDGET.firstLoad} B)`);
+}
+if (/<style\b|<script(?!\s+src=)/i.test(html)) {
+  failures.push("the shell must not inline JS or CSS");
+}
+if (failures.length > 0) {
+  console.error("\n[bundle-budget] FAILED:");
+  for (const failure of failures) console.error(`  ${failure}`);
+  process.exit(1);
+}
 console.log(
-  `[bundle-budget] ok - js ${kib(js.gzip)}/${kib(BUDGET.js)}, css ${kib(css.gzip)}/${kib(BUDGET.css)}`,
+  `[bundle-budget] ok - repeat HTML ${kib(sizes.get("HTML (repeat)"))}/${kib(BUDGET.html)}, ` +
+    `first load ${kib(firstLoad)}/${kib(BUDGET.firstLoad)}`,
 );

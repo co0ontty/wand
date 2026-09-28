@@ -7,6 +7,7 @@ import {
 } from "react";
 import * as React from "react";
 import { WandButton, WandDialogSurface } from "../ui";
+import { MOTION_DWELL_RESULT_SENTENCE_MS } from "../ui/motion-tokens";
 import { worktreeMergeController, worktreeMergeStore } from "./controller";
 import {
   canConfirmWorktreeMerge,
@@ -104,6 +105,7 @@ export function WorktreeMergeHost({
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [resultNote, setResultNote] = useState("");
   const cancelButton = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
@@ -113,6 +115,7 @@ export function WorktreeMergeHost({
     setMergeResult(null);
     setSubmitting(false);
     setError("");
+    setResultNote("");
 
     if (!availability.allowed || context.intent === "cleanup") {
       setLoading(false);
@@ -157,9 +160,12 @@ export function WorktreeMergeHost({
       const result = await repository.merge(context.sessionId);
       setMergeResult(result);
       notifyChanged(context.sessionId);
-      const message = worktreeMergeResultMessage(result);
-      worktreeMergeStore.getRuntime()?.toast(message, result.cleanupDone ? "success" : "info");
-      if (result.cleanupDone) worktreeMergeController.close();
+      setResultNote(worktreeMergeResultMessage(result));
+      if (result.cleanupDone) {
+        // 成功先在弹层体内原位读完，再关；不靠 toast 抢在关闭前露一面。
+        await new Promise((resolve) => { window.setTimeout(resolve, MOTION_DWELL_RESULT_SENTENCE_MS); });
+        worktreeMergeController.close();
+      }
     } catch (mergeError) {
       if (mergeError instanceof WorktreeMergeRepositoryError && mergeError.result) {
         setMergeResult(mergeError.result);
@@ -181,7 +187,8 @@ export function WorktreeMergeHost({
       const result = await repository.cleanup(context.sessionId);
       if (!result.ok) throw new Error("无法清理 worktree。");
       notifyChanged(context.sessionId);
-      worktreeMergeStore.getRuntime()?.toast("已完成 worktree 清理。", "success");
+      setResultNote("已完成 worktree 清理。");
+      await new Promise((resolve) => { window.setTimeout(resolve, MOTION_DWELL_RESULT_SENTENCE_MS); });
       worktreeMergeController.close();
     } catch (cleanupError) {
       setError(describeError(cleanupError, "无法清理 worktree。"));
@@ -251,6 +258,9 @@ export function WorktreeMergeHost({
             </>
           ) : null}
 
+          {resultNote ? (
+            <p className="wand-worktree-status wand-worktree-status-success" role="status">{resultNote}</p>
+          ) : null}
           {error ? <p className="wand-worktree-error" role="alert">{error}</p> : null}
         </div>
 

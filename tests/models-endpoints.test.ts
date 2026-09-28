@@ -82,8 +82,15 @@ test("model endpoints expose the server snapshot to apps while only admins can r
     const initial = await fetch(`${baseUrl}/api/models`, { headers });
     assert.equal(initial.status, 200);
     assert.equal(initial.headers.get("cache-control"), "no-store");
-    const initialBody = await initial.json() as { models: Array<{ id: string; availability?: string }> };
+    const initialBody = await initial.json() as {
+      models: Array<{ id: string; availability?: string; label?: string }>;
+    };
     assert.equal(initialBody.models.find((model) => model.id === "claude-endpoint-good")?.availability, "candidate");
+    // `default` 项（不传 --model）的标签要写出服务端配置的默认模型名，选择器不显示「跟随 … 默认」占位。
+    assert.match(
+      initialBody.models.find((model) => model.id === "default")?.label ?? "",
+      /claude-endpoint-good/,
+    );
     assert.equal(initialBody.models.some((model) => model.id === "claude-api-candidate"), false);
 
     const denied = await fetch(`${baseUrl}/api/models/refresh`, { method: "POST", headers });

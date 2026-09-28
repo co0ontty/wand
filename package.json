@@ -1,6 +1,6 @@
 {
   "name": "@co0ontty/wand",
-  "version": "4.76.0",
+  "version": "4.77.0",
   "description": "A web console for Claude Code, Codex, OpenCode, and other local CLI tools.",
   "type": "module",
   "bin": {
@@ -20,18 +20,19 @@
   "preferGlobal": true,
   "scripts": {
     "generate:web-assets": "node scripts/generate-web-assets.js",
-    "build": "rm -rf dist && node scripts/bundle-tailwind.js && node scripts/bundle-xterm.js && node scripts/bundle-qrcode.js && node scripts/bundle-browser.js && npm run generate:web-assets && tsc -p tsconfig.json && npm run build:copy-content && node scripts/check-bundle-budget.js && (npm run build:render-bin || echo '[wand] WARNING: build:render-bin failed; dist/native/ has no wand-render (run: npm run build:render-bin)' >&2) && node scripts/stamp-build-info.js && node scripts/fix-dist-permissions.js",
+    "build": "node scripts/check-node-version.js && rm -rf dist && node scripts/bundle-tailwind.js && node scripts/bundle-xterm.js && node scripts/bundle-qrcode.js && node scripts/bundle-browser.js && npm run generate:web-assets && tsc -p tsconfig.json && npm run build:copy-content && node scripts/check-bundle-budget.js && (npm run build:render-bin || echo '[wand] WARNING: build:render-bin failed; dist/native/ has no wand-render (run: npm run build:render-bin)' >&2) && node scripts/stamp-build-info.js && node scripts/fix-dist-permissions.js",
     "build:copy-content": "cp -r src/web-ui/content dist/web-ui/ && node scripts/minify-dist-content.js",
     "build:render-bin": "node scripts/stage-render-binaries.js --all",
     "build:render-native": "cargo build --release --manifest-path render/Cargo.toml -p wand-renderd",
     "build:structured-render-native": "cargo build --release --manifest-path render/Cargo.toml -p wand-structured-renderd",
-    "dev": "node scripts/bundle-tailwind.js && node scripts/bundle-xterm.js && node scripts/bundle-browser.js --development && npm run generate:web-assets && tsx src/cli.ts web",
-    "check": "node scripts/bundle-tailwind.js && node scripts/bundle-xterm.js && node scripts/bundle-browser.js && npm run generate:web-assets && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.browser.json && tsc --noEmit -p tsconfig.react.json",
-    "test": "node --test --import tsx tests/*.test.ts",
-    "check:bundle-budget": "node scripts/check-bundle-budget.js",
+    "dev": "node scripts/check-node-version.js && node scripts/bundle-tailwind.js && node scripts/bundle-xterm.js && node scripts/bundle-qrcode.js && node scripts/bundle-browser.js --development && npm run generate:web-assets && tsx src/cli.ts web",
+    "check": "node scripts/check-node-version.js && node scripts/bundle-tailwind.js && node scripts/bundle-xterm.js && node scripts/bundle-qrcode.js && node scripts/bundle-browser.js && npm run generate:web-assets && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.browser.json && tsc --noEmit -p tsconfig.react.json",
+    "test": "node scripts/check-node-version.js && node --test --import tsx tests/*.test.ts",
+    "check:bundle-budget": "node scripts/check-node-version.js && node scripts/check-bundle-budget.js",
     "sync:brand-assets": "node scripts/sync-brand-assets.js",
     "check:brand-assets": "node scripts/sync-brand-assets.js --check",
     "audit:remnants": "node scripts/audit-legacy-remnants.js",
+    "clean:build-cache": "node scripts/clean-build-cache.js",
     "prepublishOnly": "VER=${WAND_PUBLISH_VERSION:-$(git tag --sort=-v:refname --list 'v*' | head -1)} && VER=${VER#v} && npm version \"$VER\" --no-git-tag-version --allow-same-version && npm run build",
     "bundle:tailwind": "node scripts/bundle-tailwind.js"
   },
@@ -43,27 +44,23 @@
   ],
   "license": "MIT",
   "engines": {
-    "node": ">=22.5.0"
+    "node": ">=26.10.0"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.138",
     "@anthropic-ai/sdk": "^0.81.0",
-    "@appica/ui-react": "^1.1.0",
-    "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-serialize": "^0.14.0",
     "@xterm/addon-unicode11": "^0.9.0",
     "@xterm/headless": "^6.0.0",
-    "@xterm/xterm": "^6.0.0",
     "compression": "^1.8.1",
     "express": "^4.21.2",
     "multer": "^2.1.1",
     "neo-blessed": "^0.2.0",
     "node-pty": "^1.1.0",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7",
     "ws": "^8.19.0"
   },
   "devDependencies": {
+    "@appica/ui-react": "^1.1.0",
     "@tailwindcss/cli": "^4.3.3",
     "@types/compression": "^1.8.1",
     "@types/express": "^4.17.21",
@@ -72,8 +69,12 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@types/ws": "^8.18.1",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "esbuild": "^0.28.0",
     "qrcode": "^1.5.4",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2"

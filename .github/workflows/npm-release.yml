@@ -18,15 +18,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # render-bin 子模块 pin 住各平台 wand-render 二进制；不初始化子模块，
-          # npm 包里就不会有 dist/native/，线上 engine=auto 永远找不到 Rust 引擎、
-          # 静默回退 legacy —— 也就是「Rust 化」在产品上等于没发生。
-          submodules: recursive
+          submodules: false
+
+      - name: Checkout pinned Render binaries
+        # npm 构建只消费发布产物；原生客户端和 Rust 源码各自独立构建。
+        run: git submodule update --init -- render-bin
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version-file: .nvmrc
           registry-url: "https://registry.npmjs.org"
 
       - name: Extract version from tag
@@ -92,7 +93,8 @@ jobs:
             exit $?
           fi
           for attempt in 1 2 3 4 5; do
-            if npm publish --access public && wait_for_publish; then
+            # 已完成构建与严格产物校验，不再触发 prepublishOnly 重复构建。
+            if npm publish --ignore-scripts --access public && wait_for_publish; then
               exit 0
             fi
             if published; then

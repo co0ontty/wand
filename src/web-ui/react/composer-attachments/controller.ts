@@ -3,17 +3,17 @@
  *
  * 旧实现用 `innerHTML` 拼 pill 列表、挂 `.att-remove` 监听、再用
  * `.hidden` 表达空状态；每次列表变化都要整段重建 DOM。现在 items 由
- * legacy 侧的 `state.attachmentsBySession` 算出快照，React 渲染并自带移除回调。
+ * composer Module 算出快照，React 渲染并自带移除回调。
  *
  * `previewUrl` 是 legacy 侧 `URL.createObjectURL` 的产物，revoke 也由 legacy
- * 负责（`removePendingAttachment` / `discardPendingAttachments`），React 只负责显示。
+ * 负责（composer Module 的移除/提交生命周期），React 只负责显示。
  *
  * 幂等注册表见 `../composer-portal/mount-store`。
  */
 import { MountStore, type MountSnapshot } from "../composer-portal/mount-store";
 
 export interface ComposerAttachmentItem {
-  /** 在 `state.attachmentsBySession[sessionId]` 里的下标，移除时回传给 legacy。 */
+  /** 在当前会话附件快照里的下标，移除时回传给 legacy。 */
   readonly index: number;
   readonly name: string;
   /** 由 legacy 侧的 `formatFileSize` 算好，React 不做业务格式化。 */

@@ -6,7 +6,6 @@ import type { WandStorage } from "./storage.js";
 import type { StructuredSessionManager } from "./structured-session-manager.js";
 import type { WandTask, WandTaskAgent } from "./task-types.js";
 import type { SessionProvider, SessionSnapshot, WandConfig } from "./types.js";
-import { ensureWorkspaceTaskForBoardTask } from "./wand-task-sync.js";
 
 export interface AgentDispatchDeps {
   storage: WandStorage;
@@ -28,7 +27,8 @@ export function resolveTaskDispatchTarget(
 ): { cwd: string; workspaceId: string; workspaceTaskId: string } {
   const workspace = task.workspaceId ? deps.storage.getWorkspace(task.workspaceId) : null;
   if (task.workspaceId && !workspace) throw new Error("任务所属项目已被删除，请重新指定。");
-  const group = ensureWorkspaceTaskForBoardTask(deps.storage, task);
+  const group = task.workspaceTaskId ? deps.storage.getWorkspaceTask(task.workspaceTaskId) : null;
+  if (!group) throw new Error("任务容器不存在，请恢复任务后再派发。");
   const cwd = group.worktree?.path || group.cwd || workspace?.cwd || deps.config.defaultCwd;
   return { cwd, workspaceId: group.workspaceId, workspaceTaskId: group.id };
 }

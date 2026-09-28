@@ -64,6 +64,9 @@ function toastTone(value: unknown): WandToastTone {
     case "warning":
     case "error":
       return value;
+    // 调用方（workspaces-adapter 等）沿用的是 dialog 的 "danger" 词表，不能悄悄降级成 info。
+    case "danger":
+      return "error";
     default:
       return "info";
   }

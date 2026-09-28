@@ -303,3 +303,38 @@ test("[T5] team routes stay behind the global /api auth middleware (§9.6)", () 
     "团队路由在全局鉴权之后注册，本路由文件不自己挂 requireAuth",
   );
 });
+
+// ── live 端点（§4.9）──
+
+test("GET /api/ai-team-runs/:id/live returns running steps and 404s unknown runs", async (t) => {
+  const { url, storage } = await harness(t);
+  const team = (await call(`${url}/api/ai-teams`, "POST", validTeam())).json;
+  const task = storage.createWandTask({ title: "任务" });
+  const started = await call(`${url}/api/wand-tasks/${task.id}/team-runs`, "POST", { teamId: team.id });
+  assert.equal(started.status, 202);
+
+  const live = await call(`${url}/api/ai-team-runs/${started.json.run.id}/live`, "GET");
+  assert.equal(live.status, 200);
+  assert.equal(live.json.runId, started.json.run.id);
+  assert.equal(live.json.steps.length, 1, "负责人那一步正在跑");
+  const step = live.json.steps[0];
+  assert.equal(step.stepId, started.json.steps[0].id);
+  assert.equal(step.memberName, "负责人");
+  assert.equal(step.provider, "claude");
+  assert.equal(step.state, "working");
+  assert.equal(typeof step.text, "string");
+  assert.equal(step.omittedChars, 0);
+  assert.equal(step.sessionId, "s1");
+  // 模型与思考深度是给候选真值，客户端才有东西可显示；路由不另挑字段。
+  assert.equal(step.model, "default");
+  assert.equal(typeof step.thinkingEffort, "string");
+  assert.deepEqual(Object.keys(step).sort(), [
+    "memberId", "memberName", "model", "omittedChars", "provider", "seq", "sessionId",
+    "state", "stepId", "text", "thinkingEffort", "updatedAt",
+  ], "/live 返回与 AiTeamLiveStep 逐字段一致");
+  assert.match(step.updatedAt, /^\d{4}-\d{2}-\d{2}T/);
+
+  const missing = await call(`${url}/api/ai-team-runs/nope/live`, "GET");
+  assert.equal(missing.status, 404);
+  assert.match(missing.json.error, /团队运行不存在/);
+});

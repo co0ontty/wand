@@ -24,7 +24,18 @@ export interface AgentRunAgent {
   firstSeen: AgentRunBlockRef;
   blocks: AgentRunBlockRef[];
   result: AgentRunBlockRef | null;
+  /**
+   * 异步派发的「回执」：表示任务已交给后台，不等于子 Agent 真的跑完并给出了结论。
+   * 命中时结果块按回执渲染。两个字段都可能为空（真实 pi 回执就没有输出文件），
+   * 此时渲染侧回落到正文，信息不丢。
+   */
+  receipt: AgentRunReceipt | null;
   runId: string;
+}
+
+export interface AgentRunReceipt {
+  runId: string;
+  outputPath: string;
 }
 
 export interface AgentRun {
@@ -42,16 +53,41 @@ export interface AgentRunIndex {
   ownerByBlockKey: Map<string, string>;
   runs: AgentRun[];
   runsByMessageIndex: Map<number, Map<number, AgentRun>>;
+  /**
+   * 最后一条「真人文本轮」的消息下标，与 Android `collectSubagentActivities`
+   * 的 lastHumanTurn 同一语义（role=user、有非空 Text、且不是子 Agent 轨迹）。
+   * 没有则为 -1（整段历史都算最新窗口）。
+   */
+  lastUserTextMessageIndex: number;
 }
 
-export type AgentRunStatus = "failed" | "running" | "interrupted" | "completed";
+/**
+ * 状态口径需要两个独立事实，不能像以前那样只给一个 isLive：
+ * 只看「是不是最新那个 run」会让不在最新一轮、仍在跑的 Agent 被误标「已中断」。
+ */
+export interface AgentRunActivity {
+  /** 会话仍在执行（status=running 且 structuredState.inFlight）。 */
+  sessionRunning: boolean;
+  /** 该 run 位于最后一条真人文本轮之后（仍在当前这一轮里）。 */
+  inLatestWindow: boolean;
+}
+
+export type AgentRunStatus =
+  | "failed"
+  | "running"
+  | "background"
+  | "interrupted"
+  | "pending"
+  | "completed";
 
 export interface AgentRunStatusSummary {
   status: AgentRunStatus;
   total: number;
   failed: number;
   running: number;
+  background: number;
   interrupted: number;
+  pending: number;
   completed: number;
 }
 
@@ -61,6 +97,150 @@ function textValue(value: unknown): string | undefined {
 
 function inputRecord(block: any): Record<string, unknown> {
   return block && block.input && typeof block.input === "object" ? block.input : {};
+}
+
+/**
+ * 工具结果文本原样取出（保留换行）：结论体要用它渲染 markdown，
+ * 早先把 `\n` 压成空格再走 renderMarkdown，标题/列表/代码块会全塌成一段。
+ */
+export function agentRunResultRawText(block: any): string {
+  if (!block) return "";
+  const content = block.content;
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter((item: any) => item && item.type === "text" && typeof item.text === "string")
+      .map((item: any) => item.text)
+      .join("\n");
+  }
+  if (content && typeof content === "object" && typeof (content as any).text === "string") {
+    return String((content as any).text);
+  }
+  return "";
+}
+
+/**
+ * 「派发回执」判据。形状来自 271 条真实 `Pi/subagent` toolResult 的全量聚类
+ * （取证见 `.wand-team/run_46c0a39145b3/8-m_ca82f853.md`，形状表见
+ * `docs/subagent-display.md` §6），不是照猜的合取式。分三层，顺序不可调换。
+ *
+ * 第一层：否决。状态查询与转录报告正文里同样含 `Run fan-out:` 和 `Output:`
+ * （真实样本 130 + 12 条），只按「含什么关键字」判必然误判，所以先按首行前缀排除。
+ */
+const RECEIPT_DENY_HEAD =
+  /^(Status target:|Transcript target:|Steering queued|Revived async subagent|Background task completed)/;
+
+/** 第二层：认形状。pi 的两种异步派发回执首行都是 fan-out 预算行。 */
+const RECEIPT_PI_HEAD = /^Run fan-out:\s*\d+\/\d+ used\b/;
+const RECEIPT_PI_SINGLE = /^Async:\s*(\S[^\n]*)$/;
+const RECEIPT_PI_WORKFLOW = /^Async workflow\b([^\n]*)$/;
+/** qoder 的启动 ack 没有 fan-out 行，id 在 `agentId:` 且不是 uuid。 */
+const RECEIPT_QODER_HEAD = /^Async agent launched successfully\./;
+const RECEIPT_QODER_AGENT_ID = /^agentId:\s*([^\s(]+)/m;
+/** 取行内最后一个方括号段：类型名自己带 `[general]` 时不能只取第一个。 */
+const RECEIPT_BRACKET_ID = /\[([0-9a-fA-F-]{8,64})\]/g;
+/**
+ * `Output:` / `output_file:` **只用于字段提取，绝不作为判据条件**：
+ * 真实 pi 派发回执根本没有 `Output:` 行（只有 `details.asyncDir` 目录），
+ * 把它当必要条件会让真实语料里的 pi 派发回执**一条都不命中**。
+ */
+const RECEIPT_OUTPUT_FIELD = /^Output:\s*(\S+)/m;
+const RECEIPT_QODER_OUTPUT_FIELD = /^output_file:\s*(\S+)/m;
+/**
+ * 第三层：兜底。provider 文案会变，白名单必然漏新形状；漏的时候宁可判中性
+ * 「后台运行中」也不能标绿「最终结论」——后者是用户认定过的 bug，前者只是不够精确。
+ * 正文一律照常渲染，不丢。
+ */
+const RECEIPT_BACKGROUND_PHRASES = [
+  "detached and running in the background",
+  "is working in the background",
+  "will be notified automatically when it completes",
+];
+
+function lastBracketId(line: string): string {
+  var found = "";
+  var match: RegExpExecArray | null;
+  RECEIPT_BRACKET_ID.lastIndex = 0;
+  while ((match = RECEIPT_BRACKET_ID.exec(line)) !== null) found = match[1];
+  return found;
+}
+
+/**
+ * 识别「已交给后台、结果尚未回来」的派发回执。命中时结果块按回执渲染，
+ * 不进「最终结论」、不标绿、不把 provider 的指令文案当 markdown 正文渲染。
+ */
+export function parseAsyncDispatchReceipt(text: string): AgentRunReceipt | null {
+  const value = String(text || "").trim();
+  if (!value) return null;
+  if (RECEIPT_DENY_HEAD.test(value)) return null;
+
+  const lines = value.split("\n");
+  if (RECEIPT_PI_HEAD.test(lines[0])) {
+    // 派发行通常在预算行之后，但中间可能插一整段 Preflight 计划表：真实语料里
+    // 57 条紧跟第二行、9 条在第 6 行、最远一条在第 14 行（10 lanes 的表）。
+    // 所以扫预算行之后的前 24 行，而不是硬写「第二行」——只认行首，正文里提到不算。
+    for (let i = 1; i < Math.min(lines.length, 25); i++) {
+      const line = String(lines[i] || "").trim();
+      const shape = RECEIPT_PI_SINGLE.exec(line) || RECEIPT_PI_WORKFLOW.exec(line);
+      if (shape) {
+        return {
+          runId: lastBracketId(shape[1]),
+          outputPath: (RECEIPT_OUTPUT_FIELD.exec(value) || [])[1] || "",
+        };
+      }
+    }
+  }
+  if (RECEIPT_QODER_HEAD.test(lines[0])) {
+    const agentId = RECEIPT_QODER_AGENT_ID.exec(value);
+    const output = RECEIPT_QODER_OUTPUT_FIELD.exec(value);
+    return { runId: agentId ? agentId[1] : "", outputPath: output ? output[1] : "" };
+  }
+  const lowered = value.toLowerCase();
+  if (RECEIPT_BACKGROUND_PHRASES.some((phrase) => lowered.includes(phrase))) {
+    // 认不出形状，但正文明确说它已进后台：字段留空，由渲染侧回落到正文。
+    return { runId: "", outputPath: "" };
+  }
+  return null;
+}
+
+/** 压平 + 去掉行内 markdown 记号，只用于单行摘要；正文不走这里。 */
+export function flattenAgentRunInline(text: string): string {
+  return String(text || "")
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`([^`]*)`/g, "$1")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/^\s{0,3}#{1,6}\s*/gm, "")
+    .replace(/^\s{0,3}[-*+]\s+/gm, "")
+    .replace(/^\s{0,3}>\s?/gm, "")
+    .replace(/\*\*([^*]*)\*\*/g, "$1")
+    .replace(/__([^_]*)__/g, "$1")
+    .replace(/(^|[\s(])\*([^*\s][^*]*)\*/g, "$1$2")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function truncateInlineText(value: string, max: number): string {
+  const text = String(value || "").trim();
+  if (text.length <= max) return text;
+  return text.slice(0, Math.max(1, max - 1)).trimEnd() + "…";
+}
+
+/**
+ * 标题取名：任务描述优先（能区分每个 Agent 在干什么），其次才是 agentType。
+ * 反过来（agentType 当标题）会让并行批次的 rail 每一行都写着 general-purpose。
+ */
+export function agentRunAgentTitle(agent: AgentRunAgent | null | undefined, fallback: string): string {
+  const description = textValue(agent?.meta?.taskDescription);
+  if (description) return description;
+  const agentType = textValue(agent?.meta?.agentType);
+  if (agentType) return agentType;
+  return fallback;
+}
+
+/** 身份色种子：taskId 优先（同一批次并行 Agent 的 agentType 往往相同，取色会撞成一色）。 */
+export function agentRunAccentSeed(agent: AgentRunAgent | null | undefined): string {
+  return String(agent?.taskId || agent?.meta?.agentType || "agent-run");
 }
 
 export function deriveSubagentMeta(block: any): AgentRunSourceMeta | null {
@@ -73,7 +253,6 @@ export function deriveSubagentMeta(block: any): AgentRunSourceMeta | null {
       ...(textValue(stamped.taskDescription) ? { taskDescription: textValue(stamped.taskDescription) } : {}),
     };
   }
-  if (block.type !== "tool_use" && block.type !== "tool_result") return null;
   if (block.type !== "tool_use") return null;
 
   var input = inputRecord(block);
@@ -122,59 +301,84 @@ function compareRefs(a: AgentRunBlockRef, b: AgentRunBlockRef): number {
   return a.messageIndex - b.messageIndex || a.blockIndex - b.blockIndex;
 }
 
-function agentStatus(agent: AgentRunAgent, isLive: boolean): AgentRunStatus {
-  if (agent.result) return agent.result.block && agent.result.block.is_error === true ? "failed" : "completed";
-  return isLive ? "running" : "interrupted";
+function activityOf(live: AgentRunActivity): AgentRunActivity {
+  return {
+    sessionRunning: !!live?.sessionRunning,
+    inLatestWindow: !!live?.inLatestWindow,
+  };
 }
 
-export function getAgentRunStatusSummary(run: AgentRun, isLive: boolean): AgentRunStatusSummary {
+/**
+ * 单个子 Agent 的状态。三条事实缺一不可：有没有最终 result、会话还在不在跑、
+ * 这个 run 是不是落在最新一轮里。只看「有没有 result」会把分页截断、
+ * 结果尚未回填的历史任务读成「已中断」，与 Android 同一份历史显示不一致。
+ */
+function agentStatus(agent: AgentRunAgent, activity: AgentRunActivity): AgentRunStatus {
+  if (agent.result) {
+    if (agent.receipt) return "background";
+    return agent.result.block && agent.result.block.is_error === true ? "failed" : "completed";
+  }
+  if (!activity.inLatestWindow) return "pending";
+  return activity.sessionRunning ? "running" : "interrupted";
+}
+
+export function getAgentRunStatusSummary(
+  run: AgentRun,
+  live: AgentRunActivity,
+): AgentRunStatusSummary {
+  var activity = activityOf(live);
   var summary: AgentRunStatusSummary = {
     status: "completed",
     total: run.agents.length,
     failed: 0,
     running: 0,
+    background: 0,
     interrupted: 0,
+    pending: 0,
     completed: 0,
   };
   for (var i = 0; i < run.agents.length; i++) {
-    var status = agentStatus(run.agents[i], isLive);
-    summary[status]++;
+    summary[agentStatus(run.agents[i], activity)]++;
   }
   if (summary.failed > 0) summary.status = "failed";
   else if (summary.running > 0) summary.status = "running";
+  else if (summary.background > 0) summary.status = "background";
   else if (summary.interrupted > 0) summary.status = "interrupted";
+  else if (summary.pending > 0) summary.status = "pending";
   else summary.status = "completed";
   return summary;
 }
 
+/**
+ * 「后台已结束」不是第七种状态，而是 background 在会话已停时的说法：
+ * 回执证明不了后台到底跑完没有，所以不给绿色「已完成」，只中性说明已脱离本次会话。
+ */
+export function agentRunStatusLabelKey(status: AgentRunStatus, live: AgentRunActivity): string {
+  var activity = activityOf(live);
+  if (status === "background") {
+    return activity.sessionRunning ? "agentRun.status.background" : "agentRun.status.backgroundDone";
+  }
+  return "agentRun.status." + status;
+}
+
 export function shouldAgentRunStartExpanded(status: AgentRunStatus, persisted: boolean | null): boolean {
   if (persisted !== null) return persisted;
-  return status === "failed" || status === "running";
+  return status === "failed" || status === "running" || status === "background";
 }
 
-export function getLatestAgentRunId(index: AgentRunIndex | null | undefined): string {
-  if (!index || !index.runs.length) return "";
-  var latest = index.runs[0];
-  for (var i = 1; i < index.runs.length; i++) {
-    var run = index.runs[i];
-    if (run.messageIndex > latest.messageIndex ||
-        (run.messageIndex === latest.messageIndex && run.startBlockIndex >= latest.startBlockIndex)) {
-      latest = run;
-    }
-  }
-  return latest.id;
-}
-
-export function agentRunTouchesMessage(run: AgentRun, messageIndex: number): boolean {
-  if (!run || typeof messageIndex !== "number" || messageIndex < 0) return false;
+/**
+ * run 是否落在最新一轮：任一成员块出现在最后一条真人文本轮之后。
+ * 分页窗口截断的历史 run 因此不再参与 running / interrupted 判定。
+ */
+export function agentRunInLatestWindow(run: AgentRun, lastUserTextMessageIndex: number): boolean {
+  if (lastUserTextMessageIndex < 0) return true;
+  var refs: Array<AgentRunBlockRef | null | undefined> = [];
   for (var i = 0; i < run.agents.length; i++) {
     var agent = run.agents[i];
-    var refs = [agent.dispatch, agent.firstSeen, agent.result].concat(agent.blocks);
-    for (var j = 0; j < refs.length; j++) {
-      if (refs[j] && refs[j].messageIndex === messageIndex) return true;
-    }
+    refs.push(agent.dispatch, agent.result, agent.firstSeen);
+    for (var j = 0; j < agent.blocks.length; j++) refs.push(agent.blocks[j]);
   }
-  return false;
+  return refs.some(function (ref) { return !!ref && ref.messageIndex > lastUserTextMessageIndex; });
 }
 
 function blockRenderSignature(block: any): string {
@@ -204,6 +408,27 @@ export function buildAgentRunRenderSignature(index: AgentRunIndex): string {
   }).join("###");
 }
 
+/**
+ * 最后一条「真人文本轮」的下标，语义与 Android collectSubagentActivities 的
+ * lastHumanTurn 一致：role=user、有非空 text、且这个 text 不是子 Agent 轨迹。
+ * 子 Agent 的结果也是以 user 消息回传的，不排掉会把窗口越推越后。
+ */
+function lastUserTextIndex(messages: AgentRunMessage[]): number {
+  var lastIndex = -1;
+  for (var mi = 0; mi < messages.length; mi++) {
+    var message = messages[mi] || {};
+    if (message.role !== "user") continue;
+    var content = Array.isArray(message.content) ? message.content : [];
+    var isHumanText = content.some(function (block: any) {
+      return !!block && block.type === "text" &&
+        String(block.text || "").trim() !== "" &&
+        !deriveSubagentMeta(block);
+    });
+    if (isHumanText) lastIndex = mi;
+  }
+  return lastIndex;
+}
+
 export function collectAgentRuns(messages: AgentRunMessage[]): AgentRunIndex {
   var agentByTaskId = new Map<string, AgentRunAgent>();
   var dispatchTaskByBlockKey = new Map<string, string>();
@@ -220,6 +445,7 @@ export function collectAgentRuns(messages: AgentRunMessage[]): AgentRunIndex {
         firstSeen: ref,
         blocks: [],
         result: null,
+        receipt: null,
         runId: "",
       };
       agentByTaskId.set(meta.taskId, existing);
@@ -276,7 +502,13 @@ export function collectAgentRuns(messages: AgentRunMessage[]): AgentRunIndex {
       }
       ownerByBlockKey.set(key2, taskId);
       if (isFinalResultBlock(block2, taskId)) {
-        if (!agent2.result || compareRefs(ref2, agent2.result) > 0) agent2.result = ref2;
+        if (!agent2.result || compareRefs(ref2, agent2.result) > 0) {
+          agent2.result = ref2;
+          // 失败的结果不是「已交给后台」，判据不参与，保持「失败原因」展示。
+          agent2.receipt = block2.is_error === true
+            ? null
+            : parseAsyncDispatchReceipt(agentRunResultRawText(block2));
+        }
       } else {
         agent2.blocks.push(ref2);
       }
@@ -370,5 +602,6 @@ export function collectAgentRuns(messages: AgentRunMessage[]): AgentRunIndex {
     ownerByBlockKey: ownerByBlockKey,
     runs: runs,
     runsByMessageIndex: runsByMessageIndex,
+    lastUserTextMessageIndex: lastUserTextIndex(messages),
   };
 }

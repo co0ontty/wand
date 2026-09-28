@@ -20,25 +20,51 @@ import {
 import { usableTeamWorkspaceId } from "../src/web-ui/react/workspaces/workspace-agent-picker.js";
 import { agentTargetOptions, agentTargetTeamId } from "../src/web-ui/react/issues/agent-fields.js";
 import {
+  agentSignatureLabel,
+  CHAT_INPUT_PLACEHOLDER,
   chatInputHint,
+  teamChatComposerMode,
+  teamRunIsActive,
   chatMessageBody,
   chatMessageUrl,
   chatTurnKind,
   chatTurnText,
   isConfirmedBy,
+  isFollowingTail,
+  liveOmittedText,
+  liveStateLabel,
+  LIVE_EMPTY_TEXT,
+  mergeLiveRows,
+  MOTION_QUICK_EXIT_VAR,
   needsCollapse,
+  orderLiveSteps,
+  parseMotionDurationMs,
   parseStepReport,
+  pruneExpiredLeaving,
   settleLocalTurns,
+  shouldFollowTail,
   splitLeaderMessage,
   type LocalChatTurn,
 } from "../src/web-ui/react/ai-teams/team-chat-view.js";
+import type { AiTeamLiveStep } from "../src/ai-team-types.js";
 import { memberCoatIndex, CAT_COATS } from "../src/web-ui/react/ai-teams/avatar.js";
+import { normalizeWandModelCatalog } from "../src/web-ui/react/model-catalog.js";
 import { taskBoardPageOf, taskBoardSearch, isTaskBoardView } from "../src/web-ui/react/issues/task-board-controller.js";
-import type { AiTeam, AiTeamMember } from "../src/ai-team-types.js";
+import { aiTeamsChunkStyles } from "../src/web-ui/react/ai-teams/styles.js";
+import type { AiTeam, AiTeamMember, AiTeamRun } from "../src/ai-team-types.js";
 import type { ConversationTurn } from "../src/types.js";
 import type { WandTaskAgent } from "../src/task-types.js";
 
 const read = (rel: string): string => readFileSync(new URL(`../src/web-ui/${rel}`, import.meta.url), "utf8");
+
+/** 目录快照桩：Claude 配了默认模型 opus，Codex 没配（默认名由 CLI 自己报在目录项里）。 */
+const defaultCatalog = normalizeWandModelCatalog({
+  models: [{ id: "default", label: "跟随 Claude Code 默认" }, { id: "opus", label: "opus（最新 Opus）" }],
+  defaultModels: { claude: "opus" },
+});
+const unconfiguredCatalog = normalizeWandModelCatalog({
+  codexModels: [{ id: "default", label: "GPT-6-Astra · gpt-6-astra（Codex 默认）" }],
+});
 
 test("AI teams live on their own sidebar page, not in settings", () => {
   const sidebar = read("react/shell/shell-sidebar.tsx");
@@ -64,6 +90,32 @@ test("群聊条目走独立 IM 路由：teamchat 页带 run 参数，侧栏点�
   const panel = read("react/workspaces/workspaces-panel.tsx");
   assert.match(panel, /taskBoardController\.open\("", "", "teamchat", session\.teamChat\.runId\)/);
   assert.match(panel, /workspace-session-kind-team/);
+});
+
+test("团队页与群聊页头部：返回箭头只在列表态出现，收起交给面包屑", () => {
+  const teams = read("react/ai-teams/teams-page.tsx");
+  // 未选中团队时页面标题是「AI 团队」，退出靠箭头；选中后同一功能只留面包屑首段，箭头必须收起。
+  assert.match(teams, /\{!selected \? <WandIconButton[\s\S]{0,160}aria-label="返回工作区"/);
+  assert.match(teams, /\{ label: "AI 团队", onNavigate: \(\) => \{ void leaveDetail\(\); \} \}/);
+  assert.doesNotMatch(teams, /\{selected \? <WandIconButton/);
+
+  const chat = read("react/ai-teams/team-chat-page.tsx");
+  // 群聊页是页面级面包屑（variant="title"，末段即 h1），首段回任务看板；箭头的落点不同（回进入前的会话），
+  // 所以两个出口都保留，但文案要跟着落点走，不再写「返回工作区」。
+  assert.match(chat, /<WandBreadcrumb\n\s*variant="title"\n\s*className="wand-team-chat-crumb"/);
+  assert.match(chat, /\{ label: "任务看板", onNavigate: \(\) => taskBoardController\.open\("", "", "board"\) \}/);
+  assert.match(chat, /aria-label="返回上一会话"/);
+  assert.doesNotMatch(chat, /aria-label="返回工作区"/);
+  // 「完整会话记录」只在真的挂了 chat 会话、且外层给了打开会话的回调时才出现，避免点了没反应的死按钮。
+  assert.match(chat, /\{detail\.run\.chatSessionId && onOpenSession \? <WandButton/);
+  assert.match(chat, /onOpenSession\(detail\.run\.chatSessionId!\)/);
+  // 独立群聊页头部就能停：滚动看消息时输入栏可能不在视野里，顶栏这枚始终在。
+  assert.match(chat, /teamRunIsActive\(detail\.run\.status\) \? <WandButton/);
+  assert.match(chat, /aiTeamsRepository\.stop\(detail\.run\.id\)/);
+  assert.match(chat, /aria-label="停止团队"/);
+  // 群聊页用的是 title 变体，样式里不该再留 compact 变体的死选择器。
+  const chatStyles = read("react/ai-teams/styles.ts");
+  assert.doesNotMatch(chatStyles, /\.wand-team-chat-crumb\.is-compact/);
 });
 
 test("群聊页对话区下方展示工作任务二级目录", () => {
@@ -130,7 +182,7 @@ test("team page and run panel stay out of the inline bundle and load on demand",
   assert.match(lazy, /import type \{ TaskTeamRunPanelProps \} from "\.\.\/issues\/team-run-panel";/);
   assert.match(read("react/ai-teams/chunk-entry.ts"), /installStyleSheet\("wand-ai-teams-styles", aiTeamsChunkStyles\)/);
   assert.match(read("react/ai-teams/lazy.tsx"), /const AI_TEAMS_CHUNK_SRC = "\$\{aiTeamsChunkSrc\}";/);
-  assert.match(read("scripts.ts"), /\.replace\("\$\{aiTeamsChunkSrc\}", `\/assets\/ai-teams\.js\?v=\$\{getAiTeamsChunk\(\)\.hash\}`\)/);
+  assert.match(read("scripts.ts"), /\.replace\("\$\{aiTeamsChunkSrc\}", `\/assets\/ai-teams\.js\?v=\$\{chunkHash\}`\)/);
 });
 
 test("ai-teams chunk borrows every shared import from the main-bundle host registry", () => {
@@ -472,6 +524,61 @@ test("[T8] team-chat-view 进 chunk、主包不含它，借的模块靠注册表
   assert.match(registry, /"http-adapter": \{ jsonBody, requestJson \}/, "群聊发送要的 http-adapter 没注册");
 });
 
+// chunk 的 CSS 要等按需脚本到位才注入（chunk-entry.ts 先 installStyleSheet 再导出组件）。
+// 所以真正的硬约束不是「主包不许出现这些类名」，而是「主包出现的每一个 chunk 类名，主包样式池里
+// 必须另有定义」—— 否则就会有一帧「节点已渲染、样式还没到」。
+// 下面这份共享清单是当前事实（团队页头像两处都用），它由断言算出来，不是手工豁免。
+const SHARED_CHUNK_CLASSES = [
+  "task-board-create-button",
+  "wand-stretch-tabs",
+  "wand-settings-save-bar",
+  "wand-team-avatar",
+  "wand-team-avatar-cat",
+  "wand-team-avatar-stack",
+  "wand-team-coat",
+].sort();
+
+/** 整词匹配类名：既不让 `wand-teams-list` 冒充 `wand-teams-list-head`，也认 CSS 里的 `.name` 写法。 */
+function mentionsClass(source: string, name: string): boolean {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?<![\\w-])${escaped}(?![\\w-])`).test(source);
+}
+
+test("[T8] 主包用到的 chunk 类名必须在主包样式池里另有定义", () => {
+  const chunkClasses = [...new Set(
+    [...aiTeamsChunkStyles.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/\.([A-Za-z][\w-]*)/g)].map((hit) => hit[1]!),
+  )];
+  assert.ok(chunkClasses.length > 100, `只枚举到 ${chunkClasses.length} 个类名，枚举方式可能失效`);
+
+  // tsSources 拼路径会留下重复斜杠（和上面那条 importers 断言同款），归一化后再比。
+  const relOf = (file: string): string =>
+    file.slice(file.indexOf("/src/web-ui/") + "/src/web-ui/".length).replace(/\/{2,}/g, "/");
+  const chunkFiles = new Set(
+    [...chunkScriptSource.matchAll(/path\.join\(REACT_ROOT, "([^"]+)", "([^"]+)"\)/g)]
+      .map((hit) => `react/${hit[1]}/${hit[2]}`),
+  );
+  assert.ok(chunkFiles.has("react/ai-teams/chunk-entry.ts"), "CHUNK_FILES 写法变了，这条断言要一起改");
+  assert.ok(chunkFiles.has("react/ai-teams/styles.ts"), "chunk 样式模块没在 CHUNK_FILES 里");
+
+  // 主包 = src/web-ui/react/** 去掉 CHUNK_FILES。注意不能整目录排除 ai-teams：
+  // avatar.tsx / cat-coats.ts / lazy.tsx 都在主包里，只有那 6 个文件跟着按需脚本走。
+  const mainSources = tsSources(new URL("../src/web-ui/react/", import.meta.url))
+    .filter((file) => !chunkFiles.has(relOf(file)));
+  const shared = chunkClasses
+    .filter((name) => mainSources.some((file) => mentionsClass(readFileSync(file, "utf8"), name)))
+    .sort();
+  assert.deepEqual(shared, SHARED_CHUNK_CLASSES,
+    "主包与 chunk 共用的类名变了：新增的一律要在主包样式池里补定义，并同步这份清单");
+
+  const mainSheets = [
+    read("content/styles.css"),
+    ...tsSources(new URL("../src/web-ui/react/styles/", import.meta.url)).map((file) => readFileSync(file, "utf8")),
+  ].join("\n");
+  const unstyled = shared.filter((name) => !mentionsClass(mainSheets, name));
+  assert.deepEqual(unstyled, [],
+    `这些类名主包组件在用、样式却只在 /assets/ai-teams.js 里：${unstyled.join(", ")}（首帧会裸样式）`);
+});
+
 test("[T8] 三视图 tabs 以群聊为默认，切换走持久容器可见性、不 remount", () => {
   const compact = panelSource.replace(/\s+/g, " ");
   assert.match(compact, /const RUN_VIEWS = \[ \{ value: "chat", label: "群聊" \}, \{ value: "timeline", label: "时间线" \}, \{ value: "members", label: "按成员" \}, \]/);
@@ -516,6 +623,43 @@ test("[T8] 群聊输入走 messages 端点，请求体字段是 input 不是 tex
   assert.equal(chatInputHint("failed"), chatInputHint("done"));
 });
 
+test("群聊输入栏发送 ⇄ 停止：未结束的运行占发送的位置，有草稿时两者并排", () => {
+  assert.equal(teamRunIsActive("running"), true);
+  assert.equal(teamRunIsActive("awaiting_approval"), true);
+  assert.equal(teamRunIsActive("waiting_user"), true);
+  assert.equal(teamRunIsActive("done"), false);
+  assert.equal(teamRunIsActive("stopped"), false);
+  assert.equal(teamRunIsActive("failed"), false);
+  assert.equal(teamChatComposerMode("running", false), "stop");
+  assert.equal(teamChatComposerMode("awaiting_approval", false), "stop");
+  assert.equal(teamChatComposerMode("waiting_user", false), "stop");
+  assert.equal(teamChatComposerMode("running", true), "send-and-stop");
+  assert.equal(teamChatComposerMode("done", true), "send");
+  assert.equal(teamChatComposerMode("stopped", false), "blocked");
+  assert.equal(teamChatComposerMode("failed", false), "blocked");
+  assert.equal(teamChatComposerMode("running", false, "send"), "send-and-stop", "发送中清掉草稿仍留发送按钮");
+  assert.equal(teamChatComposerMode("done", false, "send"), "send");
+  const body = stripComments(chatSource);
+  assert.match(body, /composerMode === "send-and-stop" \|\| composerMode === "stop"/);
+  assert.match(body, /aiTeamsRepository\.stop\(run\.id\)/);
+  assert.match(body, /aria-label="停止团队"/);
+  assert.match(body, /composerMode === "stop" \? null : <WandButton/, "空草稿时发送让位给停止，不占第二枚按钮");
+});
+
+test("[T8] 群聊输入框占位文案不等于任何引导语：空输入框同一句话只显示一遍", () => {
+  const hints = ["awaiting_approval", "running", "done", "stopped", "failed"]
+    .map((status) => chatInputHint(status as AiTeamRun["status"]))
+    .filter((hint) => hint !== "");
+  assert.ok(hints.length >= 4, "引导语覆盖的状态要有样本");
+  for (const hint of hints) {
+    assert.notEqual(CHAT_INPUT_PLACEHOLDER, hint, `placeholder 不能顶掉引导语（${hint}）`);
+  }
+  const body = stripComments(chatSource);
+  assert.match(body, /placeholder=\{CHAT_INPUT_PLACEHOLDER\}/);
+  assert.doesNotMatch(body, /placeholder=\{hint/, "placeholder 不再复用引导语，否则同一句话显示两遍");
+  assert.match(body, /className="task-board-team-chat-hint"/, "引导语仍走 <p>，「回复『批准』即开工」要一直看得见");
+});
+
 test("[T8] 群聊页按 chat 会话跟随新运行：接着开一轮后状态与步骤不停在旧的一轮", () => {
   const page = read("react/ai-teams/team-chat-page.tsx");
   assert.match(read("react/ai-teams/repository.ts"), /runsForChat\(taskId: string, chatSessionId: string\)/);
@@ -547,7 +691,7 @@ test("[T8] 群聊渲染对齐 chat-render 的类名，不复制色值也不自�
   assert.match(chatSource, /className="chat-notice-line"/, "降级 notice 走居中弱化行");
   assert.match(chatSource, /className="chat-message-avatar assistant chat-message-author"/);
   assert.match(chatSource, /className="chat-author-badge">负责人/);
-  assert.match(chatSource, /issueAgentProviderLabel\(author\.provider\)/, "署名要带上该步实际用的 provider");
+  assert.match(chatSource, /const signature = agentSignatureLabel\(author \?\? \{\}, catalog\);/, "署名走同一个标签函数：provider + 模型 + 思考深度");
   assert.equal(chatTurnText(userTurn("第一行\n第二行", "")), "第一行\n第二行");
   for (const rel of ["react/ai-teams/team-chat-view.tsx"]) {
     assert.doesNotMatch(read(rel), /#[0-9a-f]{3,8}\b|rgba?\(|--[a-z-]+:\s/, `${rel} 不该定义颜色`);
@@ -645,4 +789,261 @@ test("[T8] 群聊样式：主任务钉顶、子任务带导轨与状态色、展
   assert.match(chatSource, /className="chat-message assistant chat-message-lead team-chat-plan"/);
   assert.match(chatSource, /className="team-chat-expand"/);
   assert.match(chatSource, /aria-expanded=\{expanded\}/);
+});
+
+const liveStep = (over: Partial<AiTeamLiveStep> & { stepId: string; seq: number }): AiTeamLiveStep => ({
+  memberId: "m_impl",
+  memberName: "实现者",
+  provider: "claude",
+  sessionId: `sess_${over.stepId}`,
+  state: "working",
+  text: "开始读文件",
+  omittedChars: 0,
+  updatedAt: "2026-09-27T10:00:00.000Z",
+  ...over,
+});
+
+test("[live] 状态芯片与提示文案：等人才说话，空文本不留白框", () => {
+  assert.equal(liveStateLabel("needs_permission"), "等待授权");
+  assert.equal(liveStateLabel("needs_input"), "等待回答");
+  assert.equal(liveStateLabel("working"), "工作中");
+  assert.equal(liveStateLabel(undefined), "", "未知状态不给芯片");
+  assert.equal(liveOmittedText(0), "", "没截断就不提示");
+  assert.equal(liveOmittedText(431), "已省略前面 431 字");
+  assert.equal(LIVE_EMPTY_TEXT, "已开始，等待第一段输出…");
+});
+
+test("[live] 贴尾判定与排序去重：用户上滚以后不把他拽回尾部", () => {
+  assert.equal(shouldFollowTail(0, 400, 200), false, "在中间看历史");
+  assert.equal(shouldFollowTail(200, 400, 200), true, "正好贴底");
+  assert.equal(shouldFollowTail(176, 400, 200), true, "距底 24px 以内仍跟随");
+  assert.equal(shouldFollowTail(175, 400, 200), false, "超过阈值就不跟随");
+  const ordered = orderLiveSteps([liveStep({ stepId: "s3", seq: 3 }), liveStep({ stepId: "s1", seq: 1 }), liveStep({ stepId: "s1b", seq: 1 })]);
+  assert.deepEqual(ordered.map((step) => step.stepId), ["s1", "s1b", "s3"], "按 seq 升序");
+  assert.deepEqual(orderLiveSteps([liveStep({ stepId: "s1", seq: 1 }), liveStep({ stepId: "s1", seq: 2 })]).length, 1, "同一 stepId 只留一行");
+});
+
+test("[live] merge 只按 seq 排：退场行留在原位，不被搬到尾部", () => {
+  const now = 1_000;
+  const base = mergeLiveRows([], [
+    liveStep({ stepId: "a", seq: 1 }), liveStep({ stepId: "b", seq: 2 }), liveStep({ stepId: "c", seq: 3 }),
+  ], now);
+  // a 收工、b/c 还在输出。a 本来就在最前面：排序不看 leaving，不能被搬到尾部
+  // （DOM move 会让没播完的收工动画重播一次并且位置跳动）。
+  const rows = mergeLiveRows(base, [liveStep({ stepId: "b", seq: 2 }), liveStep({ stepId: "c", seq: 3 })], now + 50);
+  assert.deepEqual(rows.map((row) => [row.step.stepId, row.leaving]), [["a", true], ["b", false], ["c", false]],
+    "退场行前面还有 active 行时也不被搬走");
+  assert.equal(rows[0]!.leavingSince, now + 50, "刚开始退场的行按这一批推送的时刻起算");
+  assert.equal(rows[1]!.leavingSince, 0, "还在输出的行没有退场时刻");
+  // 同一批内再来一次推送：位置一个都不交换。
+  const again = mergeLiveRows(rows, [liveStep({ stepId: "b", seq: 2 }), liveStep({ stepId: "c", seq: 3 })], now + 90);
+  assert.deepEqual(again.map((row) => row.step.stepId), rows.map((row) => row.step.stepId), "新一轮推送不产生位置交换");
+  assert.equal(again[0]!.leavingSince, now + 50, "已经在退场的行不被新推送续命");
+  // 中间行退场也留在中间，不被前面的 active 行顶到后面。
+  const middle = mergeLiveRows(base, [liveStep({ stepId: "a", seq: 1 }), liveStep({ stepId: "c", seq: 3 })], now + 10);
+  assert.deepEqual(middle.map((row) => [row.step.stepId, row.leaving]), [["a", false], ["b", true], ["c", false]]);
+  // 全部消失也保持原顺序（旧断言里「新行在前」的口径已作废）。
+  assert.deepEqual(mergeLiveRows(rows, []).map((row) => row.step.stepId), ["a", "b", "c"], "退场行按 seq 留在原位");
+  // 同一步又开工就取消退场、不出现两行，起算时刻归零。
+  assert.deepEqual(
+    mergeLiveRows(rows, [
+      liveStep({ stepId: "a", seq: 1 }), liveStep({ stepId: "b", seq: 2 }), liveStep({ stepId: "c", seq: 3 }),
+    ], now + 200).map((row) => [row.step.stepId, row.leaving, row.leavingSince]),
+    [["a", false, 0], ["b", false, 0], ["c", false, 0]],
+  );
+});
+
+test("[live] 退场兜底：时长取自动效 token，后台标签页攒下的退场行回可见时摘掉", () => {
+  assert.equal(parseMotionDurationMs("90ms"), 90);
+  assert.equal(parseMotionDurationMs(" 0.09s "), 90, "秒写法换算成毫秒");
+  assert.equal(parseMotionDurationMs("1.5s"), 1500);
+  assert.equal(parseMotionDurationMs(""), null, "读不到 token 就不挂兜底定时器");
+  assert.equal(parseMotionDurationMs("fast"), null, "不合法值不当成 0 毫秒（会把动画腰斩）");
+  const now = 5_000;
+  const rows = mergeLiveRows(
+    mergeLiveRows([], [liveStep({ stepId: "a", seq: 1 }), liveStep({ stepId: "b", seq: 2 })], now),
+    [liveStep({ stepId: "b", seq: 2 })],
+    now,
+  );
+  assert.equal(pruneExpiredLeaving(rows, now + 89, 90), rows, "没到退场时长的一行都不摘");
+  assert.equal(pruneExpiredLeaving(rows, now + 89, 90) === rows, true, "没摘就不换引用，免得白重渲染");
+  assert.deepEqual(pruneExpiredLeaving(rows, now + 90, 90).map((row) => row.step.stepId), ["b"],
+    "到点的退场行摘掉，还在输出的留下");
+  const retired = pruneExpiredLeaving(rows, now + 90, 90);
+  assert.equal(pruneExpiredLeaving(retired, now + 5_000, 90), retired, "已经没有退场行就原样返回");
+  // 组件侧：兜底定时器、animationend、可见性恢复三处都走同一个幂等摘除。
+  assert.match(chatSource, /const retireMs = liveExitDurationMs\(\);/, "兜底时长从动效 token 读");
+  assert.match(chatSource, /getPropertyValue\(MOTION_QUICK_EXIT_VAR\)/);
+  assert.match(chatSource, /Math\.max\(0, row\.leavingSince \+ retireMs - now\)/, "按每行自己的起算时刻兜底，不被新推送续命");
+  assert.match(chatSource, /setLiveRows\(\(current\) => dropRetiredRow\(current, row\.step\.stepId\)\)/);
+  assert.match(chatSource, /onRetire=\{\(stepId\) => setLiveRows\(\(current\) => dropRetiredRow\(current, stepId\)\)\}/,
+    "animationend 与兜底定时器共用同一个摘除函数");
+  assert.match(chatSource, /document\.addEventListener\("visibilitychange", onVisible\)/, "回到可见补一次清理");
+  assert.doesNotMatch(chatSource, /setTimeout\(\s*\(\) => setLiveRows[\s\S]{0,140}\d{2,}\)/, "兜底时长不写字面毫秒");
+  // 兜底读的 token 必须正是退场动画用的那一个，否则两边会漂到不同时长。
+  assert.ok(read("react/ai-teams/styles.ts").includes(MOTION_QUICK_EXIT_VAR),
+    "styles.ts 的退场动画与 JS 兜底共用同一个动效 token");
+});
+
+test("[live] 换一次运行就重新从尾部开始跟随（与 Android remember(runId) 同口径）", () => {
+  // 上一轮里用户上滚过 → ref 停在 false；不换 run.id 时不重置，新页面一进来就不跟随。
+  assert.match(
+    chatSource,
+    /setLocal\(\[\]\);\s*setDraft\(""\);\s*setError\(""\);\s*setPending\(""\);\s*(?:\/\/[^\n]*\n\s*)?listPinnedRef\.current = true;\s*\}, \[run\.id\]\);/,
+    "重置点在按 run.id 的 effect 里",
+  );
+});
+
+test("[live] 外层列表与卡片同一套贴底口径：上滚看历史不被 live 行拽到底", () => {
+  assert.equal(isFollowingTail({ scrollTop: 175, scrollHeight: 400, clientHeight: 200 }), false, "距底 25px 不算贴底");
+  assert.equal(isFollowingTail({ scrollTop: 176, scrollHeight: 400, clientHeight: 200 }), true, "距底 24px 仍贴底");
+  assert.equal(isFollowingTail({ scrollTop: 0, scrollHeight: 400, clientHeight: 200 }), false, "看历史时不跟随");
+  assert.match(chatSource, /listPinnedRef\.current = isFollowingTail\(event\.currentTarget\)/, "外层列表的贴底状态由滚动算出来");
+  assert.match(chatSource, /if \(!list \|\| !listPinnedRef\.current\) return;/, "行数变了也不无条件拉底");
+  assert.doesNotMatch(chatSource, /if \(list\) list\.scrollTop = list\.scrollHeight;/, "旧的无条件拉底已经去掉");
+  assert.match(chatSource, /listPinnedRef\.current = true;/, "自己发消息算一次明确的回到底部");
+});
+
+test("[署名] CLI · 模型 · 思考深度：三处共用一个函数，缺字段只剩 provider", () => {
+  assert.equal(agentSignatureLabel({ provider: "qoder", model: "Qwen3.8-Flash", thinkingEffort: "max" }), "Qoder · Qwen3.8-Flash · 最大");
+  // `default` 是「跟随服务端默认」的哨兵值、不是模型名：有目录就换成服务端默认模型的名字。
+  assert.equal(agentSignatureLabel({ provider: "claude", model: "default", thinkingEffort: "off" }, defaultCatalog), "Claude · opus · 关闭",
+    "default 解析成服务端配置的默认模型，不写「默认模型」");
+  assert.equal(agentSignatureLabel({ provider: "claude", model: "default", thinkingEffort: "off" }), "Claude · 关闭",
+    "目录还没到时只省略模型段，不冒出「默认」");
+  assert.equal(agentSignatureLabel({ provider: "codex", model: "default" }, unconfiguredCatalog), "Codex · GPT-6-Astra · gpt-6-astra",
+    "没配默认模型时用 CLI 报出来的默认项名字");
+  assert.equal(agentSignatureLabel({ provider: "codex", model: "gpt-5.2", thinkingEffort: "deep" }), "Codex · gpt-5.2 · 深入");
+  assert.equal(agentSignatureLabel({ provider: "opencode", model: "  ", thinkingEffort: "opencode:minimal" }), "OpenCode · 最低",
+    "CLI 原生档位走 compactThinkingLabel");
+  assert.equal(agentSignatureLabel({ provider: "pi" }), "Pi", "老服务端没有 model / effort 时只剩 provider");
+  assert.equal(agentSignatureLabel({ provider: null, model: null, thinkingEffort: null }), "", "全缺就不给芯片");
+  assert.equal(agentSignatureLabel({ model: "glm-4.7" }), "glm-4.7", "只有模型也不能冒出前导分隔符");
+  assert.doesNotMatch(agentSignatureLabel({ provider: "claude", model: undefined, thinkingEffort: undefined }), /undefined|·\s*$|\s·/, "不出现 undefined 或多余分隔符");
+  // 三处署名（live 卡头部、成员步骤行、负责人行）都走这个函数，不允许各自拼文案。
+  assert.equal(chatSource.match(/agentSignatureLabel\(/g)?.length, 4, "定义 1 处 + 调用 3 处");
+  assert.equal(chatSource.match(/agentSignatureLabel\([^)]*, catalog\)/g)?.length, 3, "三处调用都带上目录，才能把 default 换成具体模型名");
+  assert.doesNotMatch(chatSource, /\{issueAgentProviderLabel\(step\.provider\)\}/, "live 卡不再单独拼 provider");
+});
+
+test("[live] 数据接进来：GET /live 一次 + 只吃 ai-team-step-live 推送，不轮询", () => {
+  const repo = read("react/ai-teams/repository.ts");
+  const ws = read("browser/websocket.ts");
+  assert.match(repo, /aiTeamLive\(runId: string\)[\s\S]*?runUrl\(runId, "\/live"\)/);
+  assert.match(repo, /export function notifyAiTeamStepLive/);
+  assert.match(repo, /export function subscribeAiTeamStepLive/);
+  // lazy.tsx 的注册表名单不含 live 函数，所以 chunk 只经 aiTeamsRepository 对象借到它们。
+  assert.match(repo, /live: aiTeamLive,\n  subscribeAiTeamStepLive,/);
+  assert.match(chatSource, /aiTeamsRepository\.subscribeAiTeamStepLive\(/);
+  assert.match(ws, /msg\.data\.kind === "ai-team-step-live"[\s\S]*?notifyAiTeamStepLive/);
+  assert.doesNotMatch(chatSource, /setInterval|setTimeout\([^)]*live/i, "live 不引入轮询");
+});
+
+test("[live] 正在输出的成员：chatTurns 之后追加定尺寸内滚卡，整卡可点可键盘", () => {
+  assert.match(chatSource, /React\.useEffect\(\(\) => \{\s*setLiveRows\(\[\]\);\s*if \(!running\) return undefined;/, "运行结束或换运行就清空");
+  assert.match(chatSource, /if \(!alive \|\| update\.runId !== run\.id\) return;/, "只吃本次运行的推送");
+  assert.match(chatSource, /\{liveRows\.map\(\(row\) => <LiveStepRow/, "live 行在 chatTurns 之后");
+  assert.match(chatSource, /state=\{detail\.memberStates\[row\.step\.sessionId\]\}/, "状态芯片取 detail 的实时状态");
+  assert.match(chatSource, /title=\{steps\.find\(\(step\) => step\.id === row\.step\.stepId\)\?\.title/, "步骤芯片「#seq 标题」查本次运行的步骤");
+  assert.match(chatSource, /className="team-chat-live-card"\s*\n\s*role="button"\s*\n\s*tabIndex=\{0\}/, "整卡是键盘可达的按钮");
+  assert.match(chatSource, /if \(event\.key !== "Enter" && event\.key !== " "\) return;/);
+  assert.match(chatSource, /if \(window\.getSelection\(\)\?\.toString\(\)\) return;/, "选中正文复制不算点开");
+  assert.match(chatSource, /LIVE_CARD_DRAG_PX/, "卡片内拖动滚动不算点开");
+  assert.match(chatSource, /pinnedRef\.current = isFollowingTail\(/, "只有贴尾才跟随最新一行");
+  assert.match(chatSource, /onOpenSession\(step\.sessionId\)/, "点击进成员会话，复用群聊页跳转路径");
+  assert.match(chatSource, /aria-label=\{`打开\$\{step\.memberName\}正在输出的会话`\}/, "读屏只报名字与动作，不整段朗读正文");
+  assert.match(chatSource, /if \(row\.leaving && event\.target === event\.currentTarget\) onRetire\(step\.stepId\);/,
+    "退场只认这一行自己的动画，头名/卡片分两段进场的 animationend 会冒泡上来");
+});
+
+test("[live] 卡片样式：宽高等于收起时也一样，窄屏不缩高，动画只取 token", () => {
+  const block = chatStylesSource.slice(
+    chatStylesSource.indexOf("/* ---------- 正在输出的成员"),
+    chatStylesSource.indexOf("/* 主任务层：负责人决策"),
+  ).replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.match(block, /\.team-chat-live-card \{[\s\S]*?max-width: 560px;/);
+  assert.match(block, /\.team-chat-live-card \{[\s\S]*?height: 200px;/);
+  assert.match(block, /\.team-chat-live-text \{[\s\S]*?overflow-y: auto;[\s\S]*?overscroll-behavior-y: contain;/, "内部滚动且不抢外层");
+  assert.match(block, /font-family: var\(--font-mono\)/, "等宽");
+  assert.match(block, /@keyframes wand-team-live-grow \{\s*from \{ opacity: 0; transform: translateX\(-10px\); \}/, "从头像方向长出");
+  assert.match(block, /\.team-chat-live-row\[data-leaving\] \{\s*animation: wand-team-live-grow var\(--motion-quick-exit\) var\(--ease-in-out-smooth\) reverse forwards;/, "收起是同一段动画倒放，且快于进场");
+  // 两段式进场（负责人拍板，与 Android 同拍）：头像 + 名字行先来，卡片隔一拍再长出。
+  assert.match(block, /\.team-chat-live-head \{[\s\S]*?animation: wand-team-live-grow var\(--motion-fast\) var\(--ease-out-expo\) both;/, "第一段：头名");
+  assert.match(block, /\.team-chat-live-card \{[\s\S]*?animation: wand-team-live-grow var\(--motion-normal\) var\(--ease-out-expo\) both;[\s\S]*?animation-delay: var\(--motion-fast\);/, "第二段：卡片晚一拍，延迟取自 token");
+  assert.doesNotMatch(block, /\.team-chat-live-row \{[^}]*animation:/, "整行不再同帧原子插入");
+  assert.doesNotMatch(block, /\b(?:\d+(?:\.\d+)?)(?:ms|s)\b/, "不得写死时长");
+  assert.doesNotMatch(block, /#[0-9a-f]{3,8}\b|rgba?\(/, "只能引用 token");
+  const narrow = chatStylesSource.slice(
+    chatStylesSource.indexOf("@media (max-width: 760px)"),
+    chatStylesSource.indexOf("@media (prefers-reduced-motion"),
+  );
+  assert.doesNotMatch(narrow, /team-chat-live/, "窄屏不改卡片高度");
+  const reduced = chatStylesSource.slice(chatStylesSource.indexOf("@media (prefers-reduced-motion"));
+  assert.match(reduced, /\.team-chat-live-head,\s*\.team-chat-live-card \{ animation-delay: 0s; \}/,
+    "reduce-motion 下两段都瞬时：全局规则只压时长，延迟在这里归零");
+});
+
+test("团队详情：草稿未保存时，每个离开入口都先确认，取消不丢", () => {
+  const teams = read("react/ai-teams/teams-page.tsx");
+  // 编辑器只上报一个布尔，宿主用 ref 接，避免每次击键重渲染整页。
+  assert.match(teams, /const teamDraftDirty = React\.useRef\(false\);/);
+  assert.match(teams, /const dirty = React\.useMemo\(\(\) => JSON\.stringify\(draft\) !== initialKey/);
+  assert.match(teams, /React\.useEffect\(\(\) => \{ onDirtyChange\?\.\(dirty\); \}, \[dirty, onDirtyChange\]\);/);
+  // 三个入口共用同一段守卫：面包屑父段、「新建团队」收起、「换一个模板」。
+  assert.match(teams, /const confirmDiscardTeamDraft = async \(\): Promise<boolean> => \{\s*if \(!teamDraftDirty\.current\) return true;/);
+  assert.match(teams, /const leaveDetail = async \(\): Promise<void> => \{\s*if \(!await confirmDiscardTeamDraft\(\)\) return;/);
+  assert.match(teams, /\{ label: "AI 团队", onNavigate: \(\) => \{ void leaveDetail\(\); \} \}/);
+  assert.match(teams, /onClick=\{\(\) => \(creating \? void leaveDetail\(\) : void startCreate\(\)\)\}/);
+  assert.match(teams, /aria-label="换一个模板" onClick=\{\(\) => \{ void backToTemplates\(\); \}\}/);
+  assert.doesNotMatch(teams, /onClick=\{\(\) => setTemplate\(null\)\}/);
+  assert.doesNotMatch(teams, /creating \? setSelectedId\(""\)/);
+  // 左侧列表换人也是「离开当前详情」：详情面板按 selectedId 挂 key，直接切会静默卸载未保存的编辑器。
+  assert.match(teams, /const selectTeam = async \(teamId: string\): Promise<void> => \{\s*if \(teamId === selectedId\) return;\s*if \(!await confirmDiscardTeamDraft\(\)\) return;/);
+  assert.match(teams, /onClick=\{\(\) => \{ void selectTeam\(team\.id\); \}\}/);
+  assert.doesNotMatch(teams, /onClick=\{\(\) => setSelectedId\(team\.id\)\}/, "列表项不再有绕过确认的直连入口");
+  // Esc 与面包屑同路；leaveDetail 在 handler 里取，不写进依赖数组（后声明的 const，渲染期取值会 TDZ）。
+  assert.match(teams, /if \(selectedId\) \{\s*\/\/[^\n]*\n[^\n]*\n\s*void leaveDetail\(\);\s*return;/);
+  assert.doesNotMatch(teams, /if \(selectedId\) \{\s*setSelectedId\(""\);/);
+  // 取消（含关掉浮层）不丢：默认焦点在「继续编辑」，丢弃才是 danger。
+  assert.match(teams, /title: "放弃未保存的团队改动？"/);
+  assert.match(teams, /\{ label: "继续编辑", value: false, autoFocus: true \}/);
+  assert.match(teams, /\{ label: "放弃改动", value: true, kind: "danger" \}/);
+  assert.match(teams, /return answer\.dismissed === false && answer\.action === true;/);
+  // 切标签的叠放面板常驻，TeamEditor 不再因换团队留旧草稿。
+  assert.match(teams, /> : <TeamEditor\n\s*key=\{selected\.id\}/);
+});
+
+test("团队详情切标签：两块面板常驻叠放，只翻可见性，不再整块重挂载", () => {
+  const teams = read("react/ai-teams/teams-page.tsx");
+  assert.doesNotMatch(teams, /className="wand-teams-detail-pane" key=\{detailTab\}/);
+  assert.match(teams, /<div className="wand-teams-detail-stack">\s*\{DETAIL_TABS\.map\(\(tab\) => <div\n\s*key=\{tab\.value\}/);
+  assert.match(teams, /data-hidden=\{detailTab !== tab\.value \|\| undefined\}\n\s*inert=\{detailTab !== tab\.value\}/, "隐藏面板不可聚焦、不可点");
+
+  const styles = read("react/ai-teams/styles.ts");
+  const block = styles.slice(styles.indexOf("/* 团队详情两个面板叠放常驻"), styles.indexOf(".wand-teams-detail > .wand-stretch-tabs"));
+  assert.match(block, /\.wand-teams-detail-stack \{ position: relative; display: grid; \}/);
+  assert.match(block, /\.wand-teams-detail-pane \{\s*grid-area: 1 \/ 1;/, "两块面板叠在同一格");
+  assert.match(block, /transition: opacity var\(--motion-normal\) var\(--ease-in-out-smooth\);/, "进场用 normal");
+  assert.match(block, /\.wand-teams-detail-pane\[data-hidden\] \{\s*opacity: 0;\s*visibility: hidden;\s*pointer-events: none;\s*transition: opacity var\(--motion-quick-exit\)/, "旧内容退场快于进场");
+  assert.doesNotMatch(block, /\b\d+(?:\.\d+)?ms\b/, "时长只从 token 取，不写字面毫秒");
+  const narrow = styles.slice(styles.indexOf("@media (max-width: 760px)"), styles.indexOf("@media (prefers-reduced-motion"));
+  assert.match(narrow, /\.wand-teams-detail-stack \{ display: block; \}/, "窄屏退回静态流式，常驻块不占高度");
+  const reduced = styles.slice(styles.indexOf("@media (prefers-reduced-motion"));
+  assert.match(reduced, /\.wand-teams-detail-pane \{ transition: none; \}/, "reduce-motion 下瞬时切换");
+});
+
+test("团队页：「新建团队」也先确认，开工成功那条路刻意不插确认", () => {
+  const teams = read("react/ai-teams/teams-page.tsx");
+  // 第五个丢草稿入口：正在改某个团队时点「新建团队」，详情面板按 selectedId/key 换掉，草稿直接没了。
+  assert.match(teams, /const startCreate = async \(\): Promise<void> => \{\s*if \(!await confirmDiscardTeamDraft\(\)\) return;/);
+  assert.match(teams, /onClick=\{\(\) => \(creating \? void leaveDetail\(\) : void startCreate\(\)\)\}/);
+  assert.match(teams, /onClick=\{\(\) => \{ void startCreate\(\); \}\}/, "空列表里的「从模板创建」也等确认结果");
+  assert.doesNotMatch(teams, /onClick=\{startCreate\}/, "异步守卫不能当成同步 click 直接传");
+  // afterDirectRun 不弹确认：运行已经成功、主路径是把用户送去群聊会话（整页要走），
+  // 在成果之后追问「放弃改动」只会打断交接。它仍是同步函数，没被 async 守卫污染。
+  assert.match(teams, /const afterDirectRun = \(teamId: string, started: AiTeamDirectRun\): void => \{/);
+  assert.match(teams, /if \(sessionId && onOpenSession\) \{\s*onOpenSession\(sessionId\);\s*return;\s*\}/);
+  // 运行时刻的格式交给浏览器，和群聊 chatTurnClock 的 toLocaleTimeString([]) 同一口径。
+  assert.match(teams, /new Date\(run\.updatedAt\)\.toLocaleString\(\[\], \{ month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" \}\)/);
+  assert.doesNotMatch(teams, /toLocaleString\("zh-CN"/, "不再写死 zh-CN");
 });

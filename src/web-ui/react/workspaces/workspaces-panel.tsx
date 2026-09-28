@@ -19,6 +19,7 @@ import type {
 import { taskBoardController } from "../issues/task-board-controller";
 import { PixelCat, memberCoatIndex } from "../ai-teams/avatar";
 import { classNames } from "../ui/class-names";
+import { MOTION_DWELL_FAILED_MS, MOTION_DWELL_RESULT_SENTENCE_MS } from "../ui/motion-tokens";
 import {
   WandButton,
   WandChip,
@@ -1295,6 +1296,9 @@ export function WorkspacesPanel({
   const [manageMode, setManageMode] = React.useState(false);
   const [manageFeedback, setManageFeedback] = React.useState<"idle" | "pending" | "done" | "error">("idle");
   const [manageFeedbackLabel, setManageFeedbackLabel] = React.useState("");
+  // 失败原因只进 Toast 的话，气泡一消失就没法回看，也没法知道是哪一个环节炸了；
+  // 原因放在工具条左侧文案位（.sidebar-manage-count 是可换行的文本槽，按钮位放不下整句）。
+  const [manageFeedbackReason, setManageFeedbackReason] = React.useState("");
   const manageFeedbackTimer = React.useRef<number | null>(null);
   const [searchOpen, setSearchOpen] = React.useState(false);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
@@ -1336,6 +1340,7 @@ export function WorkspacesPanel({
     setConfirmingManageDelete(false);
     setManageFeedback("idle");
     setManageFeedbackLabel("");
+    setManageFeedbackReason("");
   }, [clearManageFeedbackTimer]);
 
   const openTask = React.useCallback((group: TaskDirectoryGroup, task: TaskSummary, preferredSessionId?: string): unknown => {
@@ -1436,6 +1441,7 @@ export function WorkspacesPanel({
     setManageBusy(true);
     setManageFeedback("pending");
     setManageFeedbackLabel("");
+    setManageFeedbackReason("");
     try {
       for (const taskId of resolved.taskIds) {
         await httpWorkspacesRepository.archiveTask(taskId);
@@ -1450,7 +1456,6 @@ export function WorkspacesPanel({
         await runtime()?.refreshSessions();
       }
       const result = `已${describeManagedResult(resolved)}`;
-      toast(result, "info");
       setManageFeedback("done");
       setManageFeedbackLabel(result);
       await reload();
@@ -1458,18 +1463,20 @@ export function WorkspacesPanel({
       manageFeedbackTimer.current = window.setTimeout(() => {
         manageFeedbackTimer.current = null;
         exitManageMode();
-      }, 1100);
+      }, MOTION_DWELL_RESULT_SENTENCE_MS);
     } catch (cause) {
-      toast(describeError(cause, "无法处理所选任务。"), "danger");
       setManageFeedback("error");
       setManageFeedbackLabel("处理失败");
+      setManageFeedbackReason(describeError(cause, "无法处理所选任务。"));
       clearManageFeedbackTimer();
+      // 定时器只收回确认行；原因留在原位，直到下一次尝试或退出选择模式才清，
+      // 否则 1.5s 的 dwell 一过，用户既看不到 Toast 也看不到为什么失败。
       manageFeedbackTimer.current = window.setTimeout(() => {
         manageFeedbackTimer.current = null;
         setConfirmingManageDelete(false);
         setManageFeedback("idle");
         setManageFeedbackLabel("");
-      }, 1400);
+      }, MOTION_DWELL_FAILED_MS);
     } finally {
       setManageBusy(false);
     }
@@ -1503,7 +1510,9 @@ export function WorkspacesPanel({
         <>
           {manageMode ? (
             <div className="sidebar-manage-bar" role="toolbar" aria-label="批量操作">
-              <span className="sidebar-manage-count">{selectedCount > 0 ? `已选择 ${selectedCount} 项` : "点选任务或终端"}</span>
+              <span className="sidebar-manage-count" role={manageFeedbackReason ? "alert" : undefined}>
+                {manageFeedbackReason || (selectedCount > 0 ? `已选择 ${selectedCount} 项` : "点选任务或终端")}
+              </span>
               <WandButton
                 className="sidebar-manage-action"
                 kind="ghost"

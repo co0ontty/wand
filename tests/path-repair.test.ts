@@ -4,12 +4,13 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { deepRepairRuntimePath, type PathRepairResult } from "../src/path-repair.js";
+import { buildChildEnv } from "../src/env-utils.js";
+import { deepRepairRuntimePath, whichSync, type PathRepairResult } from "../src/path-repair.js";
 
-test("deepRepairRuntimePath follows login shell order for existing CLI directories", async (t) => {
+test("deepRepairRuntimePath follows provider PTY interactive login shell PATH", async (t) => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-path-repair-"));
-  const oldBin = path.join(root, "nvm-bin");
-  const preferredBin = path.join(root, "homebrew-bin");
+  const oldBin = path.join(root, "homebrew-bin");
+  const preferredBin = path.join(root, "nvm-bin");
   const serviceOnlyBin = path.join(root, "service-only-bin");
   mkdirSync(oldBin);
   mkdirSync(preferredBin);
@@ -25,6 +26,8 @@ test("deepRepairRuntimePath follows login shell order for existing CLI directori
   const probeShell = path.join(root, "probe-shell");
   makeExecutable(probeShell, [
     "#!/bin/sh",
+    "# The provider PTY launches with -lic; -lc would miss interactive shell init (e.g. nvm).",
+    "[ \"$1\" = '-lic' ] || exit 2",
     "printf 'PATH\\037%s\\n' \"$WAND_TEST_LOGIN_PATH\"",
     "printf 'CODEX\\037%s\\n' \"$WAND_TEST_CODEX\"",
   ].join("\n") + "\n");
@@ -62,6 +65,9 @@ test("deepRepairRuntimePath follows login shell order for existing CLI directori
   assert.equal(segments[1], oldBin);
   assert.ok(segments.indexOf(serviceOnlyBin) > segments.indexOf(oldBin));
   assert.equal(result.resolved.codex, path.join(preferredBin, "codex"));
+  // The structured Codex runner uses whichSync against buildChildEnv; it must
+  // resolve the same CLI as the interactive provider shell, not the service's stale PATH.
+  assert.equal(whichSync("codex", { env: buildChildEnv(true) }), path.join(preferredBin, "codex"));
   assert.deepEqual(result.added, []);
   assert.equal(result.deepProbe, "success");
 });

@@ -56,6 +56,8 @@ export function IterationContextPanel({
   onIncludeDiffChange,
 }: IterationContextPanelProps): React.ReactElement {
   const [now, setNow] = React.useState(() => Date.now());
+  // 方向键走位需要的节点：React 侧不许摸 querySelector，按 mode 记这两个按钮。
+  const modeRefs = React.useRef(new Map<QuickCommitContextMode, HTMLButtonElement>());
   // 相对时间只在面板打开时刷新一次，不必按秒重渲染。
   React.useEffect(() => setNow(Date.now()), [context]);
   const selectedCount = context.entries.filter((entry) => selectedIds.has(entry.id)).length;
@@ -70,13 +72,38 @@ export function IterationContextPanel({
         </span>
       </div>
 
-      <div className="wand-quick-iteration-modes" role="radiogroup" aria-label="生成 Commit 信息的输入">
+      <div
+        className="wand-quick-iteration-modes"
+        role="radiogroup"
+        aria-label="生成 Commit 信息的输入"
+        onKeyDown={(event) => {
+          // radiogroup 的键盘契约：整组只占一个 Tab 停靠点，箭头在选项间移动并即时选中。
+          const keys = ["ArrowLeft", "ArrowRight", "Home", "End"];
+          if (!keys.includes(event.key)) return;
+          const options = ITERATION_CONTEXT_MODES.map((item) => item.mode);
+          const at = options.indexOf(mode);
+          const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+          const next = event.key === "Home" ? 0
+            : event.key === "End" ? options.length - 1
+              : (at + step + options.length) % options.length;
+          const target = options[next];
+          if (!target || disabled) return;
+          event.preventDefault();
+          onModeChange(target);
+          modeRefs.current.get(target)?.focus();
+        }}
+      >
         {ITERATION_CONTEXT_MODES.map((item) => (
           <button
             key={item.mode}
             type="button"
+            ref={(element) => {
+              if (element) modeRefs.current.set(item.mode, element);
+              else modeRefs.current.delete(item.mode);
+            }}
             role="radio"
             aria-checked={mode === item.mode}
+            tabIndex={mode === item.mode ? 0 : -1}
             className={classNames("wand-quick-iteration-mode", mode === item.mode && "is-selected")}
             title={item.hint}
             disabled={disabled}

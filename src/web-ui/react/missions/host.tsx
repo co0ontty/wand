@@ -4,6 +4,7 @@ import { workspaceContextStore } from "../workspaces/workspace-context";
 import { failureMessage } from "../errors";
 
 import { ProviderLogo } from "../provider-logo";
+import { issueAgentProviderLabel } from "../issues/task-board-agent";
 import { sortProviderOptions, useProviderUsage } from "../provider-usage";
 import { WandButton, WandDialogSurface, WandIcon } from "../ui";
 import { milestonesStore, milestoneNameOf } from "../milestones/controller";
@@ -31,6 +32,15 @@ const STATE_LABELS: Record<string, string> = {
   needs_input: "等待答复", needs_permission: "等待授权", completed: "已完成",
   done: "已完成", failed: "失败",
 };
+
+/**
+ * 状态标签唯一出口：认不出来不再漏英文原值，也不再渲染成 undefined 空芯片
+ * （原先 :94/:286/:300 三处 `STATE_LABELS[x]` 没有兜底，:278 直接把英文 id 印出来）。
+ */
+function missionStateLabel(state: string | null | undefined): string {
+  if (!state) return "未知状态";
+  return STATE_LABELS[state] ?? "未知状态";
+}
 
 interface DiffLine {
   key: string;
@@ -90,8 +100,8 @@ function AttemptCard({ attempt, onOpen, onDiff }: {
   return (
     <article className="wand-missions-attempt">
       <div className="wand-missions-attempt-head">
-        <span className="wand-missions-provider"><ProviderLogo provider={attempt.provider}/><strong>{attempt.provider}</strong></span>
-        <span className={`wand-missions-state is-${attempt.state}`}>{STATE_LABELS[attempt.state]}</span>
+        <span className="wand-missions-provider"><ProviderLogo provider={attempt.provider}/><strong>{issueAgentProviderLabel(attempt.provider)}</strong></span>
+        <span className={`wand-missions-state is-${attempt.state}`}>{missionStateLabel(attempt.state)}</span>
       </div>
       <p>{attempt.summary || attempt.error || attempt.branch || "正在准备独立 worktree…"}</p>
       <div className="wand-missions-attempt-actions">
@@ -236,6 +246,12 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
     ? selected.comments.filter((comment) => comment.attemptId === diffAttempt.id && comment.status === "pending")
     : [];
 
+  // 空态和工具栏的「新任务」是同一条路：就地展开新建表单，不跳页、不新造页面。
+  const startCreateMission = (): void => {
+    setCreateError("");
+    setCreating(true);
+  };
+
   return (
     <WandDialogSurface
       open={controller.open}
@@ -251,10 +267,10 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
     >
       <div className="wand-missions-toolbar">
         <span className="wand-missions-toolbar-note">{missions.length} 个任务</span>
-        <WandButton kind="primary" size="small" disabled={busy || submitting} onClick={() => {
-          setCreateError("");
-          setCreating(true);
-        }}>＋ 新任务</WandButton>
+        <WandButton kind="primary" size="small" disabled={busy || submitting} onClick={startCreateMission}>
+          <WandIcon name="plus" slot="start" size={13}/>
+          <span>新任务</span>
+        </WandButton>
       </div>
 
       {error ? <div className="wand-missions-error" role="alert">{error}</div> : null}
@@ -275,7 +291,7 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
                     }}
                   >
                     <strong>{item.title}</strong>
-                    <small>{STATE_LABELS[item.state] || item.state}{item.summary ? ` · ${item.summary}` : ""}</small>
+                    <small>{missionStateLabel(item.state)}{item.summary ? ` · ${item.summary}` : ""}</small>
                   </button>
                 ))}
               </div>
@@ -283,21 +299,24 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
             {missions.map((mission) => (
               <button key={mission.id} className={selected?.id === mission.id ? "active" : ""} onClick={() => { setSelectedId(mission.id); setDiff(null); }}>
                 <strong>{mission.title}</strong>
-                <small>{mission.attempts.length} 个 Agent · {STATE_LABELS[mission.status]}</small>
+                <small>{mission.attempts.length} 个 Agent · {missionStateLabel(mission.status)}</small>
                 {mission.milestoneId ? <small className="wand-missions-milestone">
                   <WandIcon name="milestone" size={11}/>
                   {milestoneNameOf(milestoneSnapshot.items, mission.milestoneId) || "里程碑"}
                 </small> : null}
               </button>
             ))}
-            {!missions.length ? <div className="wand-missions-empty">创建一个任务，让多个 Agent 在独立 worktree 中并行尝试。</div> : null}
+            {!missions.length ? <div className="wand-missions-empty">
+              <p>还没有并行任务。创建一个，让多个 Agent 在独立 worktree 中并行尝试。</p>
+              <WandButton kind="soft" size="small" disabled={creating} onClick={startCreateMission}>新建任务</WandButton>
+            </div> : null}
           </aside>
           <main className="wand-missions-detail">
             {selected ? (
               <>
                 <div className="wand-missions-detail-head">
                   <div><h2>{selected.title}</h2><p>{selected.cwd} · 基线 {selected.worktree.baseRef || "当前分支"}</p></div>
-                  <span className={`wand-missions-state is-${selected.status}`}>{STATE_LABELS[selected.status]}</span>
+                  <span className={`wand-missions-state is-${selected.status}`}>{missionStateLabel(selected.status)}</span>
                 </div>
                 {selected.milestoneId ? <p className="wand-missions-detail-milestone">
                   <WandIcon name="milestone" size={12}/>
@@ -312,7 +331,7 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
                 {diff && diffAttempt ? (
                   <section className="wand-missions-review">
                     <div className="wand-missions-review-head">
-                      <div><h3>{diffAttempt.provider} Diff</h3><span>{diff.files.length} 个文件{diff.truncated ? " · 内容已截断" : ""}</span></div>
+                      <div><h3>{issueAgentProviderLabel(diffAttempt.provider)} 的 Diff</h3><span>{diff.files.length} 个文件{diff.truncated ? " · 内容已截断" : ""}</span></div>
                       <WandButton size="small" kind="ghost" onClick={() => setDiff(null)}>收起</WandButton>
                     </div>
                     <div className="wand-missions-diff" role="list" aria-label="任务 Diff">
@@ -332,19 +351,26 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
                       <div className="wand-missions-comment-form">
                         <label>{reviewTarget.filePath}{reviewTarget.line ? `:${reviewTarget.line}` : ""}</label>
                         <textarea className="resize-none" value={reviewBody} onChange={(event) => setReviewBody(event.target.value)} placeholder="写下具体、可执行的修改意见…"/>
-                        <WandButton kind="primary" size="small" disabled={busy || !reviewBody.trim()} onClick={() => void addComment()}>加入 Review</WandButton>
+                        <WandButton kind="primary" size="small" disabled={busy || !reviewBody.trim()} onClick={() => void addComment()}>
+                          {busy ? "处理中…" : "加入 Review"}
+                        </WandButton>
                       </div>
                     ) : null}
                     {pendingComments.length ? (
                       <div className="wand-missions-pending-review">
                         <div>{pendingComments.map((comment) => <p key={comment.id}><strong>{comment.filePath}{comment.line ? `:${comment.line}` : ""}</strong>{comment.body}</p>)}</div>
-                        <WandButton kind="primary" disabled={busy} onClick={() => void sendReview()}>发送 {pendingComments.length} 条意见</WandButton>
+                        <WandButton kind="primary" disabled={busy} onClick={() => void sendReview()}>
+                          {busy ? "处理中…" : `发送 ${pendingComments.length} 条意见`}
+                        </WandButton>
                       </div>
                     ) : null}
                   </section>
                 ) : null}
               </>
-            ) : <div className="wand-missions-empty">选择或创建一个任务。</div>}
+            ) : <div className="wand-missions-empty">
+              <p>选择或创建一个任务，看每个 Agent 的尝试与 Diff。</p>
+              <WandButton kind="soft" size="small" disabled={creating} onClick={startCreateMission}>新建任务</WandButton>
+            </div>}
           </main>
         </div>
       </div>

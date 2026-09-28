@@ -9,6 +9,7 @@ import {
 } from "../src/web-ui/react/composer-select/controller.ts";
 import { filterSelectOptions, WandSelect } from "../src/web-ui/react/ui/select.tsx";
 import {
+  modelDisplayName,
   normalizeAvailableComposerValue,
   normalizeComposerModelValue,
 } from "../src/web-ui/browser/composer-select-values.ts";
@@ -150,4 +151,21 @@ test("composer 三件套的 chip 与内层 select 宿主都由 React 渲染", ()
   assert.match(selectHost, /<WandSelect/);
   assert.match(selectHost, /searchable=\{mount\.control === "model"\}/);
   assert.match(selectHost, /searchPlaceholder="搜索模型"/);
+});
+
+test("输入栏模型触发器不写「默认模型/默认」：哨兵换成服务端默认模型的名字", () => {
+  const models = [
+    { id: "default", label: "跟随 Claude Code 默认" },
+    { id: "opus", label: "opus（最新 Opus）" },
+  ];
+  // 服务端配了默认模型：写它的名字（触发器再压缩掉括号补充）。
+  assert.equal(modelDisplayName("default", models, "opus"), "opus（最新 Opus）");
+  assert.equal(modelDisplayName("", models, "opus"), "opus（最新 Opus）");
+  // 没配：用 CLI 自己报出来的默认项名字；只有「跟随 X 默认」这种没名字的文案才留空给调用方兜底。
+  assert.equal(modelDisplayName("default", [{ id: "default", label: "grok-4.7（Grok 默认）" }], ""), "grok-4.7");
+  // 真实文案「跟随 Claude Code 默认」是多词，别被单字的正则放过去当成模型名。
+  assert.equal(modelDisplayName("default", models, ""), "");
+  // 显式选的模型原样回它的目录标签。
+  assert.equal(modelDisplayName("opus", models, ""), "opus（最新 Opus）");
+  assert.equal(modelDisplayName("custom-id", models, ""), "custom-id");
 });

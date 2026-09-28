@@ -60,6 +60,9 @@ export function MilestonePicker({
   }, [itemsProp, open, value]);
 
   const selected = value ? items.find((item) => item.id === value) ?? null : null;
+  // 列表拉取失败绝不能被「还没有里程碑，新增一个吧。」这类空态冒充（UX-CONTRACT：错误不得被空列表代替）。
+  // 宿主自带列表时 store 的失败与这个下拉无关，所以只在列表真的为空时才报错误。
+  const loadError = itemsProp || items.length > 0 ? "" : snapshot.error;
 
   const close = (nextValue?: string | null): void => {
     if (nextValue !== undefined) onChange(nextValue);
@@ -143,6 +146,8 @@ export function MilestonePicker({
               disabled={busy}
               onChange={(event) => setName(event.currentTarget.value)}
               onKeyDown={(event) => {
+                // 输入法选词的回车只结束组字，不能拿半截拼音去提交新增。
+                if (event.nativeEvent.isComposing) return;
                 if (event.key === "Enter") {
                   event.preventDefault();
                   void submit();
@@ -191,7 +196,17 @@ export function MilestonePicker({
                   {item.taskCount > 0 ? <span className="milestone-picker-item-count">{item.taskCount}</span> : null}
                 </button>)}
               </div>
-            ) : <p className="milestone-picker-empty">{scoped ? "这个工作区还没有迭代，新增一个吧。" : "还没有里程碑，新增一个吧。"}</p>}
+            ) : loadError ? (
+              <>
+                <p className="milestone-picker-error" role="alert">{loadError}</p>
+                <WandButton
+                  kind="ghost"
+                  size="small"
+                  disabled={snapshot.loading}
+                  onClick={() => void milestonesStore.load(true)}
+                >{snapshot.loading ? "加载中…" : "重新加载"}</WandButton>
+              </>
+            ) : <p className="milestone-picker-empty">{scoped ? "这个工作区还没有里程碑，新增一个吧。" : "还没有里程碑，新增一个吧。"}</p>}
             <button type="button" className="milestone-picker-add" onClick={startCreating}>
               <WandIcon name="plus" size={13}/><span>新增里程碑</span>
             </button>
