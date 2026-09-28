@@ -158,7 +158,7 @@ Raw PTY 输出和结构化聊天 turn 是同一会话的两种表示；渲染 bu
 - 当前会话任务归属只看 `command_sessions.workspace_task_id`，历史关联表不决定独占归属。移动后刷新 SessionRegistry，runner checkpoint 不得回写旧归属；原进程、cwd、历史与输出继续保留。
 - Web `browser/composer.ts` 拥有按会话的草稿、附件、提交恢复和队列 freshness；React、DOM、input 与 WebSocket 通过它的入口修改。异步优化/上传绑定会话与 revision，删除会话清理附件 URL，迟到结果不得复活会话或覆盖新输入。
 - Android 会话级 `ChatComposer` 拥有提交锁、上传与发送反馈，`SessionDraftStore` 拥有按会话的未发送内容；`ChatStore` 仍拥有聊天、PTY/structured 协议、权限与队列。页面只投影状态，dispose 时取消 composer；语音/上传回调绑定启动时会话。
-- 未知送达的已提交内容只留内存，明确拒收可恢复持久化；不得取消重复提交保护，也不得改变 native PTY 的分包契约。
+- 未知送达的已提交内容只留内存；部分 PTY chunk 已接受、成功 ack 后解析失败、5xx/408/409 都属于未知。只有输入被接受前的明确拒收或本地未发送才可恢复持久化；不得取消重复提交保护，也不得改变 native PTY 的分包契约。
 - Android sherpa 只编译 `app/libs/sherpa-onnx-api-1.13.2.jar`；固定来源/hash 与复现工具见 Android README。完整 AAR 不入库，常规构建/单测不下载大产物。
 
 ## State、Config 与目录
@@ -301,3 +301,40 @@ npm run build && node dist/cli.js web -c /tmp/wand-dev/config.json
 ```
 
 会话 / DTO / 权限相关改动补针对 `session-transport`、`server-session-routes`、`password-manager` 的单测。
+
+## Web 设计契约（DESIGN.md 的维护等价物）
+
+本节承接已删除 DESIGN.md / UX-CONTRACT.md 的有效约束，避免重新分散文档。`premium-ui.json.canonicalMap` 指向本文。产品是默认中文的本地 AI 工作台，技术标识保留原文；日期按本地时区展示，date-only 仍用 YYYY-MM-DD。
+
+`src/web-ui/content/styles.css` 的语义 token 是唯一运行时数值来源；Appica 桥接与 react/ui 使用同一套值，feature 只拥有业务布局，不增加第二套框架、图标库或主题源。沿用暖纸色与赤陶色动作、系统中文字体；终端使用独立深色语义。桌面侧栏296px/56px，窄屏保留全部操作与独立滚动；聊天宽度偏好保留铺满/居中。控件反馈留在原位，异步失败保留已有输入，成功以服务端结果为准。
+
+### Canonical UI Map
+
+| Capability | Canonical owner | Source of truth | Allowed variants | Verification |
+| --- | --- | --- | --- | --- |
+| Select/Listbox | src/web-ui/react/ui/select.tsx | 本节与组件契约 | authored plain / searchable | popup、键盘、窄屏 |
+| Date | task-board-host.tsx 的 date-only 字段 | 服务端 YYYY-MM-DD | native 平台日历 | 日期不做 UTC 偏移 |
+| Form | feature Host + Controller / composer | 对应 API 与状态所有权 | 就地创建/保存/发送 | 保留输入、失败恢复、重复提交 |
+| Scrollbar | src/web-ui/content/styles.css | 语义 token | 原生终端几何保留 | computed style |
+| Toast | wandOverlay + react/ui/toast.tsx | 共享通知服务 | success/info/warning/error | live region；发送结果用原位反馈 |
+| CRUD | workspaces controller / taskBoardRepository | storage 规范任务写入 | 立即工作/记录待办/归档 | 已安装服务完整流程 |
+| Search | react/ui/search-field.tsx | 公共组件契约 | 本地即时/远程防抖 | clear、IME、取消、无结果 |
+| Dialog | react/ui/dialog.tsx + wandOverlay | 公共组件契约 | modal / confirmation | Escape、焦点、输入保留 |
+
+静态 premium 审计目前只按固定 DESIGN.md 文件名检查维护入口，无法识别本节等价物；对此保留审计记录，不恢复已删除的重复文档，也不关闭产品审计。
+
+## 架构精简工作记录与续接
+
+2026-09-28，用户指定本轮完成 Web/Android，其他端仅保留既有工作。详细本机日志在忽略目录 `output/architecture-stage2/WORKLOG.md` 与同目录验证输出；下次先读本节，保留全部未提交及外部提交，不 reset/clean。
+
+- 第一轮：生产 lock 193→154项（少39项，当前本机文件少53.47 MiB）；npm发布与start只检出render-bin；生成vendor退出源码；内嵌备用资产gzip减少约2.90 MB；受限缓存清理回收2.77 GiB。签名、用户数据、Git历史与SourcePackages保留。
+- 任务：storage统一规范投影与原子写入，移除wand-task-sync约205行协调链（剩自动命名）。GET无修复写入、单卡定点SQL。迁移入口 `WandStorage.constructor → migrateTaskRecords()`，SQLite标记 `pref:taskRecordsVersion=1`；按ID补齐、历史NULL迭代保留，无容器归档不复活，恢复在写事务内建新容器。
+- Web：ComposerStore统一草稿/附件/提交；队列按会话revision/epoch处理过期HTTP与rollback。删除会话释放URL，迟到失败不得复活会话；提示词优化有revision CAS。移除AppState四个重复容器与全局queueEpoch。
+- Android：固定会话ChatComposer + SessionDraftStore + ChatStore协议边界；ack前保留内容，失败保留新编辑，unknown不进入Saver，正常4xx拒收可持久化。picker/voice固定会话，dispose取消；PTY部分送达视为unknown。
+- 语音：38,208,264 B AAR→547,634 B API jar，依赖本体少37,660,630 B（98.57%）；保留许可证/NOTICE、三层SHA与可复现工具。常规构建不下载AAR；小fixture测真实提取逻辑，可选官方AAR验证22 MB arm64库。Git历史不重写。
+- 同族修复：团队开工项目使用公共WandSelect；三处textarea禁resize；lazy host注册公共选择器。保持既有交互与动效token。
+- 送达保护：Web 与 Android 都将已接受部分 PTY chunk、成功 ack 后解析失败、5xx/408/409 视为 unknown；只有任何输入被接受前的明确拒收可恢复持久草稿。Web 最后修复提交 `82fdb05`，新增真实发送入口的7项行为测试，保留文本与单独 `"\r"` 两包。
+- 已验证：`npm run check`、`npm test`、beta `npm run build` 全部成功；最终1553项，1543通过/10跳过/0失败。Android575项通过、0跳过（含可选官方AAR与PTY部分送达）；服务端定点184项、SQLite合同10项、Web定点128项也通过。
+- 已安装服务：最终Web beta `4.77.0-debug.9282125` 已部署；生产依赖导入、真实PTY启动、全局服务重启后的健康检查与产物字节一致性通过。真实验收通过建任务、PTY提交、双DTO改名/状态/迭代投影、独占移动且cwd/输出/运行状态保留、草稿切换与刷新、结构化回复、附件上传及新编辑保护；桌面/390px窄屏无横向溢出，公共选择器搜索/键盘关闭通过。本轮两张QA任务已软归档，历史保留。
+- Android分发：本轮构建 `4.77.0-debug.09282105`（9,697,830 B）；并发客户端更新后再次核对全局最新包 `4.77.0-debug.09282135`（9,717,074 B），SHA-256 `65394ed61e87ef09114c69b21347a18e121605c3ae4111166b80a8d5729bdd15`。metadata、版本标记、Beta更新端点均一致，APK不含sherpa JNI库。子仓库源码已push，主仓库指针可拉取；默认未安装/启动设备。
+- 全局 Codex/Pi AGENTS 已更新规范所有权、unknown送达、轻量语音依赖、按需submodule和本文续接入口。Web设计契约合并在本文；strict审计仅剩固定DESIGN.md文件名提示，具体控件所有权问题已修复。
