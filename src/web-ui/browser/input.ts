@@ -1069,6 +1069,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
 
         // 用 session.id（参数绑定，in-flight 期间不变）而不是 state.selectedId
         // 拼 URL，避免用户切到别的会话后 fetch 落到错误 sessionId。
+        var requestAccepted = false;
         return fetch("/api/structured-sessions/" + session.id + "/messages", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1089,6 +1090,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
               throw err;
             });
           }
+          requestAccepted = true;
           return res.json();
         })
         .then(function(snapshot) {
@@ -1110,6 +1112,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
           }
         })
         .catch(function(error) {
+          if (requestAccepted) error = ambiguousInputDelivery(error);
           // duplicate_idempotency_key：服务端识别出 WebView 底层重发的副本，
           // 直接拦截不处理。这里**不**回滚乐观更新——第一次的请求实际上已经
           // 被服务端接收并处理（或正在处理），ws 推送会带回真实状态；如果在
@@ -1917,12 +1920,19 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
       // 等太短会让紧随其后的回车把未完成的芯片当成普通路径文本提交。
       var PTY_IMAGE_CHIP_SETTLE_MAX_MS = 3000;
 
+      function ambiguousInputDelivery(error) {
+        return Object.assign(new Error(getErrorMessage(error, "输入提交结果未知。")), error, {
+          __wandAmbiguousDelivery: true,
+        });
+      }
+
       function sendTerminalChunks(chunks, shortcutKey, delayMs, viewOverride, sessionId?, settleChunks?: boolean) {
         var sequence = (Array.isArray(chunks) ? chunks : []).map(normalizeTerminalChunk).filter(Boolean);
         if (sequence.length === 0) {
           return Promise.resolve();
         }
         var delay = typeof delayMs === "number" ? delayMs : 0;
+        var acceptedChunks = 0;
         return sequence.reduce(function(promise, chunk, index) {
           // 文本段和单独的 "\r" 都带 enter_text：服务端用它判断这是整段提交，
           // 从而给 PTY 会话生成标题；中间若有其它 chunk 则不打标。
@@ -1948,8 +1958,15 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
               });
             }
             return queueDirectInput(chunk.data, key, viewOverride, sessionId);
+          }).then(function(result) {
+            acceptedChunks += 1;
+            return result;
           });
-        }, Promise.resolve());
+        }, Promise.resolve()).catch(function(error) {
+          // Text/image chunks may already be in the PTY even when the final
+          // Enter is rejected. Persisting the whole payload would replay them.
+          throw acceptedChunks > 0 ? ambiguousInputDelivery(error) : error;
+        });
       }
 
       // pendingMessages 缓存 ws 离线时的输入，重连后回放。每条带时间戳，
@@ -2050,6 +2067,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
           return Promise.resolve();
         }
 
+        var requestAccepted = false;
         return fetch("/api/sessions/" + requestSessionId + "/input", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -2074,6 +2092,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
               throw error;
             });
           }
+          requestAccepted = true;
           return res.json();
         })
         .then(function(snapshot) {
@@ -2092,6 +2111,10 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
             }
           }
           return snapshot;
+        }).catch(function(error) {
+          // A successful acknowledgement followed by response parsing/render
+          // failure still means the input may already have reached the PTY.
+          throw requestAccepted ? ambiguousInputDelivery(error) : error;
         });
       }
 

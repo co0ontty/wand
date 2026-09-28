@@ -95,9 +95,9 @@ test("传输层失败（刷新/切前后台 abort）视为送达未知：回填�
   assert.equal(shouldPersistComposerDraft(false, true), false);
 });
 
-test("明确失败（HTTP 4xx/5xx、本地前置条件）不算送达未知：草稿回填并持久化", () => {
+test("明确失败（普通 HTTP 4xx、本地前置条件）不算送达未知：草稿回填并持久化", () => {
   const definiteFailures: unknown[] = [
-    Object.assign(new Error("无法发送结构化消息。"), { httpStatus: 500 }),
+    Object.assign(new Error("无法发送结构化消息。"), { httpStatus: 403 }),
     Object.assign(new Error("invalid input"), { httpStatus: 400, errorCode: "invalid_input" }),
     new Error("网络已断开，消息未发送，原草稿已恢复。"),
     new Error("发送前会话已切换，原草稿已恢复。"),
@@ -111,6 +111,16 @@ test("明确失败（HTTP 4xx/5xx、本地前置条件）不算送达未知：�
   }
   // 明确没送达：必须落盘，用户刷新后还能找回这段文字。
   assert.equal(shouldPersistComposerDraft(!isAmbiguousComposerSubmissionFailure(definiteFailures[0]), true), true);
+});
+
+test("HTTP 5xx、408、409 与已送出部分输入的失败不能证明未送达", () => {
+  for (const httpStatus of [500, 502, 503, 504, 408, 409]) {
+    assert.equal(isAmbiguousComposerSubmissionFailure({ httpStatus }), true, String(httpStatus));
+  }
+  for (const httpStatus of [400, 401, 403, 404, 422, 429]) {
+    assert.equal(isAmbiguousComposerSubmissionFailure({ httpStatus }), false, String(httpStatus));
+    assert.equal(isAmbiguousComposerSubmissionFailure({ httpStatus, __wandAmbiguousDelivery: true }), true);
+  }
 });
 
 test("shouldPersistComposerDraft：只有显式 true 才会在页面卸载期间写 localStorage", () => {

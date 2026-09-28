@@ -126,7 +126,7 @@ test("implicit unload writes are skipped, definite rejection persists, and clear
   h.store.edit("A", { text: "unload" });
   assert.equal(h.data.get("wand-draft-A"), "old");
   await assert.rejects(h.store.submit("A", "rejected", async () => {
-    throw Object.assign(new Error("server rejected"), { httpStatus: 500 });
+    throw Object.assign(new Error("server rejected"), { httpStatus: 400 });
   }));
   assert.equal(h.data.get("wand-draft-A"), "rejected");
   h.store.edit("A", { clear: true });

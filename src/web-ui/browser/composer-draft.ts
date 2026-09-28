@@ -3,10 +3,10 @@
 // 背景：发送消息时 composer 会在第一处 await 之前同步清空（内存草稿 + localStorage），
 // 请求失败才回填。但「请求失败」有两种性质完全不同的情况：
 //
-//   · 明确未送达：服务端返回了 4xx/5xx（HTTP 响应到手，说明应用层没有接收这条消息），
+//   · 明确未送达：服务端在任何输入被接收前明确拒收（普通 4xx），
 //     或本地前置条件不成立（WS 断开、会话已切换、会话未就绪）。回填并持久化草稿是
 //     安全的，也是用户期望的「别弄丢我刚写的字」。
-//   · 送达未知：传输层失败（fetch abort / network error）。请求可能已经被服务端接收，
+//   · 送达未知：5xx / 408 / 409、部分 PTY 输入已送出，或传输层失败。请求可能已接收，
 //     只是响应没回来 —— 刷新页面、切前后台、原生壳回收 WebView 都会让在途 fetch 被 abort。
 //     此时把这条消息重新写进 localStorage 草稿，刷新后它会「重新出现在输入框里」，用户
 //     一按回车就会把同一条消息发第二遍。所以这种情况只回填到内存（当前页面可见，
@@ -47,8 +47,11 @@ export function isAmbiguousComposerSubmissionFailure(error: unknown): boolean {
   if (failure.errorCode === "duplicate_idempotency_key" || failure.errorCode === "duplicate_queued_message") {
     return true;
   }
-  // 服务端明确回了一个错误码，说明这条消息没有被接收。
-  if (typeof failure.httpStatus === "number") return false;
+  // 5xx 可能发生在写入/执行之后；超时和冲突也不能证明整次提交未被接收。
+  // 普通 4xx 只有在未曾成功送出任何 PTY chunk 时才代表明确拒收（上面的标记优先）。
+  if (typeof failure.httpStatus === "number") {
+    return failure.httpStatus >= 500 || failure.httpStatus === 408 || failure.httpStatus === 409;
+  }
   var message = failure.message == null ? "" : String(failure.message);
   if (!message) return false;
   return /failed to fetch|networkerror|load failed|network connection was lost|aborted|aborterror|err_network|err_connection/i
