@@ -338,3 +338,4 @@ npm run build && node dist/cli.js web -c /tmp/wand-dev/config.json
 - 已安装服务：最终Web beta `4.77.0-debug.9282148` 已部署；生产依赖导入、真实PTY启动、全局服务重启后的健康检查与产物字节一致性通过。真实验收通过建任务、PTY提交、双DTO改名/状态/迭代投影、独占移动且cwd/输出/运行状态保留、草稿切换与刷新、结构化回复、附件上传及新编辑保护；桌面/390px窄屏无横向溢出，公共选择器搜索/键盘关闭通过。本轮两张QA任务已软归档，历史保留。
 - Android分发：本轮构建 `4.77.0-debug.09282105`（9,697,830 B）；并发客户端更新后再次核对全局最新包 `4.77.0-debug.09282135`（9,717,074 B），SHA-256 `65394ed61e87ef09114c69b21347a18e121605c3ae4111166b80a8d5729bdd15`。metadata、版本标记、Beta更新端点均一致，APK不含sherpa JNI库。子仓库源码已push，主仓库指针可拉取；默认未安装/启动设备。
 - 全局 Codex/Pi AGENTS 已更新规范所有权、unknown送达、轻量语音依赖、按需submodule和本文续接入口。Web设计契约合并在本文；strict审计仅剩固定DESIGN.md文件名提示，具体控件所有权问题已修复。
+- 2026-09-29 Android 首页会话与任务列表改为下拉刷新；任务/会话长按进入多选，并修复任务内会话长按误选父任务。源码 `c30c6e7` 已推送 Android master，Beta `4.77.0-debug.09290500` 已部署并通过 metadata、版本标记和更新端点核对；默认未安装设备。详见 `output/architecture-stage2/WORKLOG.md`。
