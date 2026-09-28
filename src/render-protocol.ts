@@ -6,7 +6,7 @@ import path from "node:path";
 /**
  * Render 协议 v1 的 TS 镜像。Rust 单一真源在
  * `render/crates/wand-render-protocol/src/lib.rs`，契约文档在
- * `render/docs/render-protocol.md`（本仓库 `docs/render-protocol.md` 只是指针）。
+ * `render/docs/render-protocol.md`。
  *
  * 两侧常量与字段名必须逐一对齐；任一侧改动都要同时提升版本号并更新文档。
  */

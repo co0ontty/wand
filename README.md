@@ -13,15 +13,7 @@
 
 Wand is a web console for remotely accessing and managing local CLI tools from a browser. It supports [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), [OpenCode](https://opencode.ai/), [Grok Build](https://grok.com/), [Qoder CLI](https://docs.qoder.com/en/cli/quick-start), and [Pi](https://pi.dev/), with terminal and structured conversation views, persistent resumable sessions, permission controls, file browsing, and native clients for multiple platforms.
 
-The browser password manager extension source lives in `browser-extension/`; setup and supported baseline features are documented in [docs/browser-extension.md](docs/browser-extension.md).
-
-<p align="center">
-  <img src="docs/screenshots/clients-overview.png" width="100%" alt="Web centered with iOS and Android clients on both sides" />
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/hero.png" width="100%" alt="PTY terminal and structured conversation views" />
-</p>
+The browser password manager extension source lives in `browser-extension/`.
 
 ### Installation
 
@@ -164,14 +156,6 @@ npm install -g opencode-ai@latest
 
 通过浏览器远程访问和管理本地 CLI 工具的 Web 控制台。支持 [Claude Code](https://docs.anthropic.com/en/docs/claude-code)、[Codex](https://github.com/openai/codex)、[OpenCode](https://opencode.ai/)、[Grok Build](https://grok.com/)、[Qoder CLI](https://docs.qoder.com/zh/cli/quick-start) 和 [Pi](https://pi.dev/)，提供终端和结构化对话双视图、会话持久化与恢复、权限管控、文件浏览和多平台客户端。
 
-<p align="center">
-  <img src="docs/screenshots/clients-overview.png" width="100%" alt="Web 居中，iOS 和 Android 客户端在两侧的多端详情总览" />
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/hero.png" width="100%" alt="PTY 终端与结构化对话双视图" />
-</p>
-
 ### 安装
 
 选择下面任意一种安装方式：
@@ -231,24 +215,6 @@ npm install -g opencode-ai@latest
 - **HTTPS** — 可选自签证书，适合远程或移动端访问
 - **版本管理** — 内置更新检查与升级提示，支持 stable/beta 双通道
 - **CLI 更新** — 在服务端设置中检查并快速更新 Claude Code、Codex、OpenCode、Qoder CLI 和 Pi，也可开启自动更新
-
-### 截图
-
-| Web 结构化详情 | Web PTY 详情 |
-|:---:|:---:|
-| <img src="docs/screenshots/web-structured-detail.png" width="400" alt="Web 结构化会话详情" /> | <img src="docs/screenshots/web-pty-detail.png" width="400" alt="Web PTY 终端详情" /> |
-
-| iOS 客户端 | Android 客户端 |
-|:---:|:---:|
-| <img src="docs/screenshots/ios-home.png" width="300" alt="iOS 原生会话列表" /> | <img src="docs/screenshots/android-terminal.png" width="300" alt="Android 移动端 PTY 详情" /> |
-
-| 登录页 | App 连接页 |
-|:---:|:---:|
-| <img src="docs/screenshots/login.png" width="400" alt="登录页" /> | <img src="docs/screenshots/android-main.png" width="300" alt="Android App 连接页" /> |
-
-| Android 会话列表 | Android 聊天视图 |
-|:---:|:---:|
-| <img src="docs/screenshots/android-home.png" width="300" alt="Android 会话列表" /> | <img src="docs/screenshots/android-chat.png" width="300" alt="Android 聊天视图" /> |
 
 ### 配置
 
@@ -327,9 +293,7 @@ wand/
 │   └── web-ui/                   # 前端 HTML/CSS/JS
 ├── android/                      # Android 客户端（submodule）
 ├── ios/                          # iOS 客户端（submodule）
-├── macos/                        # macOS 客户端（submodule）
-├── 架构图.md                     # 运行时架构与代码边界（mermaid）
-└── docs/                         # 文档与截图
+└── macos/                        # macOS 客户端（submodule）
 ```
 
 服务端开发只需检出固定版本的 Render 二进制。原生客户端和 Rust 源码都是独立子模块，修改哪个再检出哪个：
@@ -343,8 +307,7 @@ git submodule update --init -- render-bin
 
 全量 `npm test` 包含跨端源码契约检查，运行前另检出 `android ios macos render`。
 `npm run clean:build-cache` 预览可清理的编译缓存，追加 `-- --apply` 才执行删除；
-保留分发包、Release Render 二进制、签名、依赖和会话数据。审计与续接记录见
-[`docs/repository-slimming.md`](docs/repository-slimming.md)。
+保留分发包、Release Render 二进制、签名、依赖和会话数据。
 
 数据存储在 `~/.wand/` 下：`config.json`（配置）、`wand.db`（SQLite）、`sessions/`（日志）。
 

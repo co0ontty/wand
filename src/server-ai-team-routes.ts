@@ -204,14 +204,14 @@ export function registerAiTeamRoutes(app: Express, deps: { storage: WandStorage;
       const agent = preferredMember ? memberAgents(preferredMember)[0] ?? null : null;
       const milestoneId = defaultMilestoneIdForWrite(storage);
       const task = storage.createWandTask({
-          workspaceId: workspace.id,
-          title: provisionalTaskTitleFromDescription(note) || team.name,
-          description: note,
-          // 团队开工即进行中（§4.2 的 "processing" 对应看板列 doing；runner.start 不再回退它）。
-          status: "doing",
-          labels: [TEAM_DIRECT_LABEL],
-          milestoneId: scopedMilestoneId(storage, milestoneId, workspace.id) ?? milestoneId,
-          agent,
+        workspaceId: workspace.id,
+        title: provisionalTaskTitleFromDescription(note) || team.name,
+        description: note,
+        // 团队开工即进行中（§4.2 的 "processing" 对应看板列 doing；runner.start 不再回退它）。
+        status: "doing",
+        labels: [TEAM_DIRECT_LABEL],
+        milestoneId: scopedMilestoneId(storage, milestoneId, workspace.id) ?? milestoneId,
+        agent,
       });
       try {
         const detail = await runner.start({ teamId: team.id, taskId: task.id, note });

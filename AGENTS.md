@@ -1,6 +1,6 @@
 # AGENTS.md
 
-本文件是本仓库所有编码 agent 的**唯一操作指南**。原 `CLAUDE.md` 已删除，其内容已并入本文；深入的行为分析见 `docs/`（服务端 `docs/server-logic-analysis.md`、客户端 `docs/client-logic-analysis.md`）。
+本文件是本仓库所有编码 agent 的**唯一操作指南**。历史设计与分析文档已移除，后续调整以本文和源码为准。
 
 ## 项目记忆
 
@@ -27,7 +27,7 @@
 | `render/` | `co0ontty/wand-render` | **Render 源码**（Rust 常驻进程，持有 PTY / 输出 journal / VT 屏幕模型） |
 | `render-bin/` | `co0ontty/wand-render-bin` | **Render 产物**（各平台二进制 + `manifest.json`，只由 CI 写入） |
 
-服务端开发/构建只需 `git submodule update --init -- render-bin`；修改 Rust 时另检出 `render`，修改原生客户端时另检出对应平台。不要默认递归检出全部子模块。未检出 `render-bin` 时 npm 包里没有 Render 二进制，`engine=auto` 会回退 legacy 并打警告。仓库精简进度与续接入口见 `docs/repository-slimming.md`。
+服务端开发/构建只需 `git submodule update --init -- render-bin`；修改 Rust 时另检出 `render`，修改原生客户端时另检出对应平台。不要默认递归检出全部子模块。未检出 `render-bin` 时 npm 包里没有 Render 二进制，`engine=auto` 会回退 legacy 并打警告。
 
 ## Server / Render 分离（不可破坏的边界）
 
@@ -39,9 +39,9 @@ Server（本仓库，Node）与 Render（`render/`，Rust）是两个独立进�
 | 生命周期 | 随 npm 升级重启 | 独立 detached 进程，**Server 重启不停** |
 | 版本 | `package.json` | `render/Cargo.toml` + `render-bin/manifest.json` |
 
-- 契约（权威）：`render/docs/render-protocol.md`（本仓库 `docs/render-protocol.md` 只是指针）；
+- 契约（权威）：`render/docs/render-protocol.md`；
   Rust 类型真源 `render/crates/wand-render-protocol/src/lib.rs` ↔ TS 镜像 `src/render-protocol.ts`。
-  改协议必须同时提升 `RENDER_PROTOCOL_VERSION` 并同步两侧与文档。
+  改协议必须同时提升 `RENDER_PROTOCOL_VERSION` 并同步两侧与该文档。
 - 引擎开关：`render.engine = auto | rust | legacy`，环境变量 `WAND_RENDER_ENGINE` 优先。
   `protocolVersion` 不匹配时**拒绝启动**，不做降级运行。
 - **Render 的更新与 Server 的更新分开**：Render 改完以后在 `render/` 内提交并 push，再回主仓库 bump 子模块指针；
@@ -105,7 +105,7 @@ WebSocket fanout:   src/ws-broadcast.ts -> src/web-ui/browser/websocket.ts
 
 ## Session 输入契约（最容易写错）
 
-PTY 输入服务端原样写入终端，客户端必须拆成**先文本、后单独 `"\r"`** 两包（快捷键回车标 `shortcutKey = "enter_text"`）；不要用 `text + "\n"` 代替回车。参考实现：Web `getTerminalSubmitChunks`、iOS `sendPtyInput`、Android `PtyTerminalScreen.sendPtyDraft`。详见 `docs/client-logic-analysis.md` §6。
+PTY 输入服务端原样写入终端，客户端必须拆成**先文本、后单独 `"\r"`** 两包（快捷键回车标 `shortcutKey = "enter_text"`）；不要用 `text + "\n"` 代替回车。参考实现：Web `getTerminalSubmitChunks`、iOS `sendPtyInput`、Android `PtyTerminalScreen.sendPtyDraft`。
 
 `SessionSnapshot.claudeSessionId` 名不副实：存的是各 provider 的原生 resume 标识（Claude UUID、Codex thread、OpenCode/Grok/Qoder ID）。恢复逻辑横跨 `process-manager.ts`、`resume-policy.ts`、`storage.ts` 和各 provider 历史目录，时间窗兜底只在候选唯一时绑定。
 
@@ -115,9 +115,9 @@ PTY 输入服务端原样写入终端，客户端必须拆成**先文本、后�
 
 ## Web UI 与生成文件
 
-统一技术栈与模块/样式职责见 `docs/web-architecture.md`；运行时全景与代码边界见 `架构图.md`，Appica token / 层叠契约见 `docs/appica-ui-migration.md`；先验证并清理失效实现，再调整保留组件的样式。
+先验证并清理失效实现，再调整保留组件的样式。运行时边界以上面的 Runtime Map 为准。
 
-扫 legacy 残留（React 迁移删了渲染层、留下查询与写入）用 `npm run audit:remnants`，口径与配套检查见 `docs/web-architecture.md` §「Legacy 残留审计」。
+扫 legacy 残留（React 迁移删了渲染层、留下查询与写入）用 `npm run audit:remnants`。
 
 前端是服务端渲染的单 HTML shell + 内联资产，浏览器侧有**两层并存**：
 
@@ -152,6 +152,15 @@ scripts/qrcode-entry.js    -> scripts/bundle-qrcode.js   -> content/vendor/qrcod
 
 Raw PTY 输出和结构化聊天 turn 是同一会话的两种表示；渲染 bug 先查 provider parser / WS payload / `chat-render.ts`，别急着怪 CSS。
 
+## 任务与输入状态的唯一所有权
+
+- `wand_tasks` 拥有标题、状态、工作区归属、迭代与 Agent 元数据；`workspace_tasks` 拥有 cwd、worktree、layout、revision 与 last opened。通过 `storage` 的创建/修改/会话移动入口原子更新；旧侧栏/看板 DTO 从同一事实源投影，不得在 GET 或路由中重新增加双向同步/全表修复。
+- 当前会话任务归属只看 `command_sessions.workspace_task_id`，历史关联表不决定独占归属。移动后刷新 SessionRegistry，runner checkpoint 不得回写旧归属；原进程、cwd、历史与输出继续保留。
+- Web `browser/composer.ts` 拥有按会话的草稿、附件、提交恢复和队列 freshness；React、DOM、input 与 WebSocket 通过它的入口修改。异步优化/上传绑定会话与 revision，删除会话清理附件 URL，迟到结果不得复活会话或覆盖新输入。
+- Android 会话级 `ChatComposer` 拥有提交锁、上传与发送反馈，`SessionDraftStore` 拥有按会话的未发送内容；`ChatStore` 仍拥有聊天、PTY/structured 协议、权限与队列。页面只投影状态，dispose 时取消 composer；语音/上传回调绑定启动时会话。
+- 未知送达的已提交内容只留内存，明确拒收可恢复持久化；不得取消重复提交保护，也不得改变 native PTY 的分包契约。
+- Android sherpa 只编译 `app/libs/sherpa-onnx-api-1.13.2.jar`；固定来源/hash 与复现工具见 Android README。完整 AAR 不入库，常规构建/单测不下载大产物。
+
 ## State、Config 与目录
 
 - Config 默认值与合并：`src/config.ts`。`loadConfigWithStorage()` 会把合并结果写回磁盘——改 config schema 必须同步它。
@@ -165,7 +174,7 @@ Raw PTY 输出和结构化聊天 turn 是同一会话的两种表示；渲染 bu
 
 「迭代」就是里程碑（同一张表、同一套路由），加了两条规则：每个任务都有归属（没选时落到
 全局唯一的**默认迭代**，惰性创建、不可删、不可改挂工作区），以及把用户在这一轮里发过的
-提示词标题记下来当 commit message 的默认输入（省 token）。深入说明见 `docs/iteration.md`。
+提示词标题记下来当 commit message 的默认输入（省 token）。
 
 最容易改错的三处：
 
@@ -178,7 +187,7 @@ Raw PTY 输出和结构化聊天 turn 是同一会话的两种表示；渲染 bu
 
 ## Browser Extension
 
-MV3 密码库扩展在 `browser-extension/`，后端在 `src/password-manager.ts` + `/api/browser-extension/*`。改鉴权、保险库、TOTP、自动填充前先读 `docs/browser-extension.md`。扩展通过 `POST /api/login { client: "browser-extension" }` 拿 appToken；改密码会使旧 token 失效。后端改动跑 `tests/password-manager.test.ts`。
+MV3 密码库扩展在 `browser-extension/`，后端在 `src/password-manager.ts` + `/api/browser-extension/*`。扩展通过 `POST /api/login { client: "browser-extension" }` 拿 appToken；改密码会使旧 token 失效。后端改动跑 `tests/password-manager.test.ts`。
 
 ## Native Client Workflow
 
@@ -224,7 +233,7 @@ cd ios && IPA_DIST_DIR="$HOME/.wand/ios" ./build.sh    # 未签名 IPA 编完即
 
 ### Mobile UX 对齐规范
 
-移动端开发优先对齐 iOS 已验证布局与 `android/docs/ios-mobile-updates-reference-2026-06-18.md`，要点：
+移动端开发优先对齐 iOS 已验证布局，要点：
 
 - PTY 页是原生外壳（原生顶栏 + `embed=terminal&nativeInput=1` WebView + 原生底栏），网页输入栏隐藏。
 - Chat/PTY 快速提交共用 GitChangesButton / QuickCommitStore / QuickCommitSheet。
@@ -243,11 +252,10 @@ cd ios && IPA_DIST_DIR="$HOME/.wand/ios" ./build.sh    # 未签名 IPA 编完即
 
 ## 动效与交互（强制）
 
-**所有端（Web / Android / iOS / macOS）的动效改动一律沿用 `docs/motion-design.md`**，
-该文档是唯一规范，落地实现是 `src/web-ui`（前端）与 `android/.../ui/components/WandMotionKit.kt`（Android）。
-改动动画、展开/收起、状态反馈、页面切换前先读它，改完照它的自检清单过一遍。
+动效规范以本节为准。落地实现是 `src/web-ui`（前端）与 `android/.../ui/components/WandMotionKit.kt`（Android）。
+改完动画、展开/收起、状态反馈、页面切换后，用下面八条自检。
 
-八条硬要求（详见文档）：
+八条硬要求：
 
 1. 搜索在**原位**展开成输入框、光标自动定位，不跳页；
 2. 加号**从原位**展开面板，关闭时收回加号；
@@ -272,7 +280,7 @@ cd ios && IPA_DIST_DIR="$HOME/.wand/ios" ./build.sh    # 未签名 IPA 编完即
 - Commit：短祈使句 subject，一次一个逻辑变更；UI 改动附截图/录屏。
 - Schema 迁移只加不删；不合并两套 runner；不在 PTY bridge 伪造 tool block。
 - 绝不提交真实密码、appToken、私钥或机器本地路径；`host` 默认 `127.0.0.1`，除非有意远程访问。
-- 新增命令执行类配置项必须在文档写明。
+- 新增命令执行类配置项必须在 `AGENTS.md` 写明。
 
 ## Validation
 

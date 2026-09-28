@@ -428,17 +428,17 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       const milestoneId = scopedMilestoneId(storage, requestedMilestoneId, workspaceId)
         ?? defaultMilestoneIdForWrite(storage);
       const task = storage.createWandTask({
-          workspaceId,
-          parentTaskId,
-          title,
-          titleSource,
-          description,
-          status,
-          priority,
-          labels,
-          dueDate,
-          milestoneId,
-          agent,
+        workspaceId,
+        parentTaskId,
+        title,
+        titleSource,
+        description,
+        status,
+        priority,
+        labels,
+        dueDate,
+        milestoneId,
+        agent,
       });
       if (titleSource === "auto") {
         refreshAutoBoardTaskTitles(storage, {

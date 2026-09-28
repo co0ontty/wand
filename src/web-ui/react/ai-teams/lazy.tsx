@@ -28,7 +28,7 @@ import {
 } from "../settings/fields";
 import { SidebarToggleIcon } from "../shell/sidebar-toggle-icon";
 import { installStyleSheet } from "../styles";
-import { WandBadge, WandBreadcrumb, WandButton, WandIcon, WandIconButton, WandSearchField, WandStretchTabs } from "../ui";
+import { WandBadge, WandBreadcrumb, WandButton, WandIcon, WandIconButton, WandSearchField, WandSelect, WandStretchTabs } from "../ui";
 import { MOTION_DWELL_FAILED_MS, MOTION_DWELL_SENT_MS } from "../ui/motion-tokens";
 import { CAT_COATS, memberCoatIndex, PixelCat, shrinkAvatarImage, TeamAvatar, TeamAvatarStack } from "./avatar";
 import { aiTeamsRepository, subscribeAiTeamRunChanges } from "./repository";
@@ -71,7 +71,7 @@ const AI_TEAMS_HOST: Record<string, object> = {
   },
   "shell/sidebar-toggle-icon": { SidebarToggleIcon },
   "styles": { installStyleSheet },
-  "ui": { WandBadge, WandBreadcrumb, WandButton, WandIcon, WandIconButton, WandSearchField, WandStretchTabs },
+  "ui": { WandBadge, WandBreadcrumb, WandButton, WandIcon, WandIconButton, WandSearchField, WandSelect, WandStretchTabs },
   "ui/motion-tokens": { MOTION_DWELL_FAILED_MS, MOTION_DWELL_SENT_MS },
   "ai-teams/avatar": { CAT_COATS, memberCoatIndex, PixelCat, shrinkAvatarImage, TeamAvatar, TeamAvatarStack },
   "ai-teams/repository": { aiTeamsRepository, subscribeAiTeamRunChanges },

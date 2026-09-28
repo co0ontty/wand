@@ -341,7 +341,6 @@ export class Missions {
         sessionSource: "automation",
         automationId: mission.id,
       });
-      // 关联任务的派发会话立刻落到任务卡片上，不等下一次看板列表的兜底同步。
       attempt = {
         ...attempt,
         sessionId: session.id,

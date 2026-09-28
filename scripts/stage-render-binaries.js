@@ -13,7 +13,7 @@
  *   - `render-bin` 子模块没初始化时要**警告并跳过**（退出码 0）：没拉子模块的开发机上
  *     `npm run build` 不该因此失败；`--strict` 才是「必须内嵌」的场景（CI 发布链路）。
  *
- * 用法见 `--help`；布局与升级路径见 `docs/render-upgrade-path.md`。
+ * 用法见 `--help`；布局与升级路径见 AGENTS.md 的 Server / Render 一节。
  */
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";

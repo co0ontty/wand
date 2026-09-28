@@ -1431,6 +1431,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         var edited = window.prompt("编辑排队消息", original);
         if (edited === null || edited.trim() === original) return;
         if (!edited.trim()) { flashComposerFailed("排队消息不能为空。"); return; }
+        var mutationVersion = composerQueue.advance(session.id, "local");
         try {
           var res = await fetch("/api/structured-sessions/" + encodeURIComponent(session.id) + "/queued/" + index, {
             method: "PATCH", credentials: "same-origin",
@@ -1438,7 +1439,8 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
             body: JSON.stringify({ expectedText: original, text: edited }),
           });
           if (!res.ok) throw new Error((await res.json()).error || "编辑失败");
-          updateSessionSnapshot({ id: session.id, queuedMessages: (await res.json()).queuedMessages });
+          var snapshot = { id: session.id, queuedMessages: (await res.json()).queuedMessages };
+          updateSessionSnapshot(composerQueue.filter(snapshot, session.id, mutationVersion));
           updateQueueBar();
         } catch (err) { flashComposerFailed((err && err.message) || "编辑排队消息失败。"); }
       }
@@ -1607,6 +1609,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
           startY: ev.clientY,
           gap: gap,
           queueSnapshot: queue,
+          sessionId: session.id,
         };
 
         chipEl.classList.add("dragging");
@@ -1710,7 +1713,14 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         var nextQueue = order.map(function(i) { return queueSnapshot[i]; });
 
         var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
-        if (!session) { updateQueueBar(); return; }
+        if (!session || session.id !== d.sessionId) { updateQueueBar(); return; }
+        var currentQueue = Array.isArray(session.queuedMessages) ? session.queuedMessages : [];
+        if (currentQueue.length !== queueSnapshot.length
+          || currentQueue.some(function(text, index) { return text !== queueSnapshot[index]; })) {
+          updateQueueBar();
+          flashComposerFailed("排队内容已更新，请重新拖动排序。");
+          return;
+        }
         var mutationVersion = composerQueue.advance(session.id, "local");
         updateSessionSnapshot({ id: session.id, queuedMessages: nextQueue });
         updateQueueBar();
@@ -2731,6 +2741,9 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
               if (data && data.error) {
                 throw new Error(data.error);
               }
+              composerStore.retain(new Set(state.sessions
+                .filter(function(candidate) { return candidate.id !== id; })
+                .map(function(candidate) { return candidate.id; })));
               if (state.selectedId === id) {
                 state.selectedId = null;
                 persistSelectedId();

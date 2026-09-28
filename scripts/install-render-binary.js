@@ -12,7 +12,7 @@
  *   - 不读 config.json 内容（只取其所在目录）：既避免把配置里的密钥带进日志，
  *     也允许「配置还没生成」时就能把二进制放好。
  *
- * 用法见 `--help`；设计与回滚见 `docs/render-upgrade-path.md`。
+ * 用法见 `--help`；设计与回滚见 AGENTS.md 的 Server / Render 一节。
  *
  * 依赖的外部约定（与 Node 侧集成方共享，改这里要同步改文档）：
  *   `wand-render --version` 必须打印含语义化版本号的一行（形如 `wand-render 0.1.0`）并以 0 退出，
@@ -465,7 +465,7 @@ const USAGE = `用法：node scripts/install-render-binary.js [选项]
   3  就位失败（只读盘 / 无写权限 / 磁盘满）
   4  --check 判定需要就位
 
-设计说明与升级/回滚流程：docs/render-upgrade-path.md`;
+设计说明与升级/回滚流程见仓库 AGENTS.md 的 Server / Render 一节。`;
 
 /**
  * @param {string[]} argv

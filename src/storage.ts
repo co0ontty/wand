@@ -1516,23 +1516,38 @@ export class WandStorage {
   }
 
   deleteWorkspace(id: string, options: { cascade?: boolean } = {}): void {
-    if (options.cascade) {
-      this.db.prepare(
-        `DELETE FROM command_sessions
-         WHERE workspace_id = ?
-            OR workspace_task_id IN (SELECT id FROM workspace_tasks WHERE workspace_id = ?)`,
-      ).run(id, id);
-    } else {
-      // 解绑：保留会话，同时清空 workspace 与即将级联删除的 task 归属。
-      this.db.prepare(
-        `UPDATE command_sessions
-         SET workspace_id = NULL, workspace_task_id = NULL
-         WHERE workspace_id = ?
-            OR workspace_task_id IN (SELECT id FROM workspace_tasks WHERE workspace_id = ?)`,
-      ).run(id, id);
-    }
-    this.db.prepare("DELETE FROM workspaces WHERE id = ?").run(id);
-    this.forgetWorkspaceGroupOrder(id);
+    this.transaction(() => {
+      const cards = this.db.prepare(`SELECT ${WAND_TASK_FIELDS} FROM wand_tasks
+        WHERE workspace_task_id IN (SELECT id FROM workspace_tasks WHERE workspace_id = ?)`)
+        .all(id) as Array<Record<string, unknown>>;
+      if (options.cascade) {
+        this.db.prepare(`DELETE FROM command_sessions WHERE workspace_id = ?
+          OR workspace_task_id IN (SELECT id FROM workspace_tasks WHERE workspace_id = ?)`)
+          .run(id, id);
+      } else {
+        this.db.prepare(`UPDATE command_sessions SET workspace_id = NULL, workspace_task_id = NULL
+          WHERE workspace_id = ? OR workspace_task_id IN
+            (SELECT id FROM workspace_tasks WHERE workspace_id = ?)`)
+          .run(id, id);
+      }
+      this.db.prepare(`UPDATE wand_tasks SET workspace_task_id = NULL
+        WHERE workspace_task_id IN (SELECT id FROM workspace_tasks WHERE workspace_id = ?)`)
+        .run(id);
+      this.db.prepare("DELETE FROM workspaces WHERE id = ?").run(id);
+      // Direct project removal detaches active cards; their next dispatch still uses the default cwd.
+      // Route-level destructive removal archives cards first, so those cards never gain a container.
+      for (const row of cards) {
+        const card = this.mapWandTaskRow(row);
+        if (card.status === "archived") continue;
+        const global = this.ensureGlobalWorkspace();
+        const containerId = this.insertWorkspaceTask({
+          workspaceId: global.id, name: card.title, milestoneId: card.milestoneId,
+          status: card.status === "done" ? "done" : "active", createdAt: card.createdAt,
+        });
+        this.writeWandTask(this.getWandTask(card.id)!, { workspaceTaskId: containerId });
+      }
+      this.forgetWorkspaceGroupOrder(id);
+    });
   }
 
   listSessionsByWorkspace(workspaceId: string): SessionSnapshot[] {
@@ -1555,7 +1570,10 @@ export class WandStorage {
   }
 
   setSessionWorkspaceId(sessionId: string, workspaceId: string | null): void {
-    this.db.prepare("UPDATE command_sessions SET workspace_id = ? WHERE id = ?").run(workspaceId, sessionId);
+    const binding = this.getSessionWorkspace(sessionId);
+    const task = binding?.workspaceTaskId ? this.getWorkspaceTask(binding.workspaceTaskId) : null;
+    this.db.prepare("UPDATE command_sessions SET workspace_id = ? WHERE id = ?")
+      .run(task?.workspaceId ?? workspaceId, sessionId);
   }
 
   /** Lightweight count of persisted sessions grouped by workspace. */
@@ -1648,6 +1666,14 @@ export class WandStorage {
     return id;
   }
 
+  private taskMilestoneForWrite(id: string | null | undefined, workspaceId: string | null): string {
+    if (!id) return this.ensureDefaultWandMilestone().id;
+    const milestone = this.getWandMilestone(id);
+    if (!milestone) throw new Error("未找到该里程碑。");
+    return workspaceId && milestone.workspaceId && milestone.workspaceId !== workspaceId
+      ? this.ensureDefaultWandMilestone().id : id;
+  }
+
   createWorkspaceTask(input: {
     workspaceId: string; name: string; worktree?: WorkspaceTaskWorktree | null;
     cwd?: string | null; status?: WorkspaceTaskStatus; milestoneId?: string | null;
@@ -1656,11 +1682,12 @@ export class WandStorage {
     return this.transaction(() => {
       const workspace = this.getWorkspace(input.workspaceId);
       if (!workspace) throw new Error("任务所属工作区不存在。");
-      const milestoneId = input.milestoneId || this.ensureDefaultWandMilestone().id;
+      const projectId = workspace.kind === "global" || workspace.id === GLOBAL_WORKSPACE_ID ? null : workspace.id;
+      const milestoneId = this.taskMilestoneForWrite(input.milestoneId, projectId);
       const id = this.insertWorkspaceTask({ ...input, milestoneId });
       this.insertWandTask({
         ...input.board, workspaceTaskId: id,
-        workspaceId: workspace.kind === "global" || workspace.id === GLOBAL_WORKSPACE_ID ? null : workspace.id,
+        workspaceId: projectId,
         title: input.name,
         titleSource: input.board?.titleSource ?? (isUnnamedWorkspaceTaskName(input.name) ? "auto" : "user"),
         status: input.status === "done" ? "done" : "todo", milestoneId,
@@ -1682,9 +1709,7 @@ export class WandStorage {
       }
       this.writeWandTask(card, {
         ...(patch.name !== undefined ? { title: patch.name, titleSource: "user" as const } : {}),
-        ...(patch.milestoneId !== undefined ? {
-          milestoneId: patch.milestoneId || this.ensureDefaultWandMilestone().id,
-        } : {}),
+        ...(patch.milestoneId !== undefined ? { milestoneId: patch.milestoneId } : {}),
         ...(patch.workspaceId !== undefined ? {
           workspaceId: patch.workspaceId === GLOBAL_WORKSPACE_ID ? null : patch.workspaceId,
         } : {}),
@@ -1840,16 +1865,19 @@ export class WandStorage {
 
   createWandTask(input: CreateWandTaskInput): WandTask {
     return this.transaction(() => {
-      const workspaceId = input.workspaceId ?? null;
+      const linked = input.workspaceTaskId ? this.getWorkspaceTask(input.workspaceTaskId) : null;
+      const workspaceId = input.workspaceId === undefined && linked
+        ? linked.workspaceId === GLOBAL_WORKSPACE_ID ? null : linked.workspaceId
+        : input.workspaceId ?? null;
       const workspace = workspaceId ? this.getWorkspace(workspaceId) : this.ensureGlobalWorkspace();
       if (!workspace) throw new Error("任务所属工作区不存在。");
-      const milestoneId = input.milestoneId || this.ensureDefaultWandMilestone().id;
+      const milestoneId = this.taskMilestoneForWrite(input.milestoneId, workspaceId);
       if (input.workspaceTaskId) {
         const container = this.getWorkspaceTask(input.workspaceTaskId);
         if (!container) throw new Error("未找到该任务。");
         const existing = this.getWandTaskByWorkspaceTaskId(container.id);
         // Compatibility for callers which supplied a previously created container.
-        if (existing) return this.writeWandTask(existing, { ...input, milestoneId });
+        if (existing) return this.writeWandTask(existing, { ...input, workspaceId, milestoneId });
       }
       const workspaceTaskId = input.workspaceTaskId ?? this.insertWorkspaceTask({
         workspaceId: workspace.id, name: input.title,
@@ -1863,6 +1891,17 @@ export class WandStorage {
   /** Private canonical writer; callers own the transaction, never a reverse writer. */
   private writeWandTask(current: WandTask, patch: WandTaskPatch): WandTask {
     const next = { ...current, ...patch, updatedAt: nowIso() };
+    if (patch.milestoneId !== undefined || patch.workspaceId !== undefined) {
+      next.milestoneId = this.taskMilestoneForWrite(next.milestoneId, next.workspaceId);
+    }
+    if (!next.workspaceTaskId && next.status !== "archived") {
+      const workspace = next.workspaceId ? this.getWorkspace(next.workspaceId) : this.ensureGlobalWorkspace();
+      if (!workspace) throw new Error("任务所属工作区不存在。");
+      next.workspaceTaskId = this.insertWorkspaceTask({
+        workspaceId: workspace.id, name: next.title, milestoneId: next.milestoneId,
+        status: next.status === "done" ? "done" : "active", createdAt: next.createdAt,
+      });
+    }
     this.db.prepare(`UPDATE wand_tasks SET workspace_id = ?, workspace_task_id = ?, parent_task_id = ?,
       title = ?, title_source = ?, auto_title_signature = ?, description = ?, status = ?, priority = ?,
       labels_json = ?, due_date = ?, milestone_id = ?, sort_order = ?, agent_json = ?, updated_at = ?
@@ -1886,12 +1925,7 @@ export class WandStorage {
     return this.transaction(() => {
       const current = this.getWandTask(id);
       if (!current) return null;
-      return this.writeWandTask(current, {
-        ...patch,
-        ...(patch.milestoneId !== undefined ? {
-          milestoneId: patch.milestoneId || this.ensureDefaultWandMilestone().id,
-        } : {}),
-      });
+      return this.writeWandTask(current, patch);
     });
   }
 
@@ -1925,7 +1959,7 @@ export class WandStorage {
 
   /** One-time id-based reconciliation; normal reads never create tasks or repair membership. */
   private migrateTaskRecords(): void {
-    if (this.getConfigValue("taskRecordsVersion") === "1") return;
+    if (this.getPreference<number>("pref:taskRecordsVersion", 0) === 1) return;
     this.transaction(() => {
       for (const workspace of this.listWorkspaces()) {
         for (const task of this.listWorkspaceTasks(workspace.id)) {
@@ -1950,15 +1984,32 @@ export class WandStorage {
           this.writeWandTask(card, { workspaceTaskId: id });
           container = this.getWorkspaceTask(id);
         }
-        if (!container) continue;
-        for (const sessionId of this.legacyWandTaskSessionIds(card.id)) {
+        if (!container || this.getWandTaskByWorkspaceTaskId(container.id)?.id !== card.id) continue;
+        this.db.prepare("UPDATE workspace_tasks SET workspace_id = ? WHERE id = ?")
+          .run(container.workspaceId, container.id);
+        const previouslyBound = new Set(this.legacyWandTaskSessionIds(card.id));
+        for (const sessionId of previouslyBound) {
           const session = this.getSessionWorkspace(sessionId);
           if (!session || (session.workspaceTaskId && session.workspaceTaskId !== container.id)) continue;
           this.db.prepare("UPDATE command_sessions SET workspace_task_id = ?, workspace_id = ? WHERE id = ?")
             .run(container.id, container.workspaceId, sessionId);
         }
+        this.db.prepare("UPDATE command_sessions SET workspace_id = ? WHERE workspace_task_id = ?")
+          .run(container.workspaceId, container.id);
+        const sessions = this.listSessionsByWorkspaceTaskSlim(container.id);
+        for (const session of sessions) {
+          this.db.prepare("INSERT OR IGNORE INTO wand_task_sessions (task_id, session_id, bound_at) VALUES (?, ?, ?)")
+            .run(card.id, session.id, nowIso());
+        }
+        const agentSession = sessions.find((session) => isSessionProvider(session.provider));
+        const newlyAssigned = sessions.some((session) => !previouslyBound.has(session.id));
+        if (agentSession && (!card.agent || newlyAssigned)) {
+          this.recordTaskSession(agentSession, newlyAssigned);
+        } else if (newlyAssigned && sessions[0]) {
+          this.recordTaskSession(sessions[0]);
+        }
       }
-      this.setConfigValue("taskRecordsVersion", "1");
+      this.setPreference("pref:taskRecordsVersion", 1);
     });
   }
 
@@ -2243,25 +2294,27 @@ export class WandStorage {
         });
         this.saveWorkspaceTaskLayout(source.id, { ...source.layout, windows });
       }
-      this.db.prepare("DELETE FROM wand_task_sessions WHERE session_id = ? AND task_id NOT IN (SELECT id FROM wand_tasks WHERE workspace_task_id IS ?)")
-        .run(sessionId, target?.id ?? null);
+      const targetCard = target ? this.getWandTaskByWorkspaceTaskId(target.id) : null;
+      if (target && !targetCard) throw new Error("未找到目标任务。");
+      this.db.prepare("DELETE FROM wand_task_sessions WHERE session_id = ? AND (? IS NULL OR task_id != ?)")
+        .run(sessionId, targetCard?.id ?? null, targetCard?.id ?? null);
       this.db.prepare("UPDATE command_sessions SET workspace_task_id = ?, workspace_id = ? WHERE id = ?")
         .run(target?.id ?? null, target?.workspaceId ?? session.workspaceId ?? null, sessionId);
       if (target) {
-        const card = this.getWandTaskByWorkspaceTaskId(target.id);
-        if (!card) throw new Error("未找到目标任务。");
         this.db.prepare("INSERT OR IGNORE INTO wand_task_sessions (task_id, session_id, bound_at) VALUES (?, ?, ?)")
-          .run(card.id, sessionId, nowIso());
+          .run(targetCard!.id, sessionId, nowIso());
         if (source?.id !== target.id) this.recordTaskSession(this.getSessionSlim(sessionId)!);
       }
     });
   }
 
   /** Metadata promotion happens on session creation/move, never on reads or checkpoints. */
-  private recordTaskSession(session: SessionSnapshot): void {
+  private recordTaskSession(session: SessionSnapshot, newlyAssigned = true): void {
     if (!session.workspaceTaskId) return;
     const card = this.getWandTaskByWorkspaceTaskId(session.workspaceTaskId);
     if (!card) return;
+    this.db.prepare("INSERT OR IGNORE INTO wand_task_sessions (task_id, session_id, bound_at) VALUES (?, ?, ?)")
+      .run(card.id, session.id, nowIso());
     const provider = session.provider;
     const agent: WandTaskAgent | null = isSessionProvider(provider) ? {
       provider,
@@ -2271,9 +2324,9 @@ export class WandStorage {
       kind: session.sessionKind === "structured" ? "structured" : "pty",
     } : null;
     this.db.prepare(`UPDATE wand_tasks SET agent_json = COALESCE(agent_json, ?),
-      status = CASE WHEN status = 'todo' THEN 'doing' ELSE status END,
+      status = CASE WHEN status = 'todo' AND ? THEN 'doing' ELSE status END,
       updated_at = ? WHERE id = ?`)
-      .run(agent ? JSON.stringify(agent) : null, nowIso(), card.id);
+      .run(agent ? JSON.stringify(agent) : null, newlyAssigned ? 1 : 0, nowIso(), card.id);
   }
 
   listGithubIssueBindings(owner: string, repo: string, issueNumber: number): Array<{ sessionId: string; boundAt: string }> {
@@ -2963,7 +3016,14 @@ export class WandStorage {
            ${sessionPersistAssignments()}`
       )
       .run(...sessionPersistValues(snapshot));
-    if (isNew) this.recordTaskSession(snapshot);
+    if (isNew) {
+      const task = snapshot.workspaceTaskId ? this.getWorkspaceTask(snapshot.workspaceTaskId) : null;
+      if (task && task.workspaceId !== snapshot.workspaceId) {
+        this.db.prepare("UPDATE command_sessions SET workspace_id = ? WHERE id = ?")
+          .run(task.workspaceId, snapshot.id);
+      }
+      this.recordTaskSession(snapshot);
+    }
   }
 
   /** Update runtime/scalar fields without serializing or rewriting messages/output. */

@@ -650,7 +650,6 @@ export function registerSessionRoutes(
         ...origin,
       });
       onSessionCreated?.(snapshot.cwd);
-      // 会话一落地就挂到任务的看板卡片上，不等下一次看板列表的兜底同步。
       const prompt = body.prompt?.trim();
       if (prompt) {
         if (body.respondImmediately === true) {

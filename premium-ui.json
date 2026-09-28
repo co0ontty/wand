@@ -4,7 +4,7 @@
     "src/web-ui/react"
   ],
   "locale": "zh-CN",
-  "canonicalMap": "UX-CONTRACT.md",
+  "canonicalMap": "AGENTS.md",
   "requiredCapabilities": [
     "Select/Listbox",
     "Date",
@@ -28,7 +28,7 @@
     "build": "npm run build"
   },
   "evidence": {
-    "crudFullFlow": "docs/web-cleanup-review.md",
+    "crudFullFlow": "tests/web-ui-task-board.test.ts",
     "failurePaths": "tests/web-ui-task-board.test.ts"
   }
 }

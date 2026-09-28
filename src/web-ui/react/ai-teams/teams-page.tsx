@@ -37,7 +37,7 @@ import {
   SettingsToggle,
 } from "../settings/fields";
 import { SidebarToggleIcon } from "../shell/sidebar-toggle-icon";
-import { WandBadge, WandBreadcrumb, WandButton, WandIcon, WandIconButton, WandSearchField, WandStretchTabs } from "../ui";
+import { WandBadge, WandBreadcrumb, WandButton, WandIcon, WandIconButton, WandSearchField, WandSelect, WandStretchTabs } from "../ui";
 import { CAT_COATS, memberCoatIndex, PixelCat, shrinkAvatarImage, TeamAvatar, TeamAvatarStack } from "./avatar";
 import {
   aiTeamsRepository,
@@ -461,7 +461,7 @@ function MemberCard({
         </SettingsField>
         <AvatarPicker member={member} disabled={disabled} onChange={(avatar) => onChange({ avatar })}/>
         <textarea
-          className="wand-settings-input wand-ai-team-duty"
+          className="wand-settings-input wand-ai-team-duty resize-none"
           rows={3}
           value={member.duty}
           placeholder="职责：这位成员负责什么、交付什么"
@@ -707,7 +707,7 @@ function TeamEditor({
       <SettingsField label="协作指令" htmlFor={`${idPrefix}-instructions`} hint="写进负责人和每位成员的提示词：分工约定、工作要求、注意事项。">
         <textarea
           id={`${idPrefix}-instructions`}
-          className="wand-settings-input wand-ai-team-duty"
+          className="wand-settings-input wand-ai-team-duty resize-none"
           rows={4}
           value={draft.instructions}
           placeholder="例如：先读 AGENTS.md；改动必须附测试；不要动 migrations 目录。"
@@ -877,18 +877,19 @@ function TeamStartRow({
               还没有可开工的项目，先在工作区创建一个项目。
             </p> : <p className="wand-team-empty-line">正在加载项目…</p>
           ) : <>
-            <SettingsField label="项目" htmlFor={`team-start-project-${teamId}`}>
-              <select
-                id={`team-start-project-${teamId}`}
+            <SettingsField label="项目">
+              <WandSelect
+                ariaLabel="开工项目"
                 className="wand-settings-input"
                 value={picked}
                 disabled={busy}
-                onChange={(event) => setWorkspaceId(event.currentTarget.value)}
-              >
-                {startable.map((project) => <option key={project.id} value={project.id}>
-                  {project.name} · {project.cwd}
-                </option>)}
-              </select>
+                searchable
+                searchPlaceholder="搜索项目"
+                options={startable.map((project) => ({
+                  value: project.id, label: `${project.name} · ${project.cwd}`,
+                }))}
+                onValueChange={setWorkspaceId}
+              />
             </SettingsField>
             <SettingsField
               label="开工说明"
@@ -898,7 +899,7 @@ function TeamStartRow({
               <textarea
                 id={`team-start-note-${teamId}`}
                 ref={noteRef}
-                className="wand-settings-input wand-ai-team-duty"
+                className="wand-settings-input wand-ai-team-duty resize-none"
                 rows={2}
                 value={note}
                 placeholder="例如：把设置页的模型下拉换成可搜索的选择器，并补单测。"

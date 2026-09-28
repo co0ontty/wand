@@ -207,7 +207,7 @@ export const aiTeamsChunkStyles = String.raw`
 .wand-team-empty-line { margin: 0; color: var(--text-tertiary); font-size: var(--font-size-sm); }
 
 .wand-ai-team-editor-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 12px; }
-.wand-ai-team-duty { min-height: 58px; resize: vertical; }
+.wand-ai-team-duty { min-height: 58px; resize: none; }
 .wand-ai-team-member-agent { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
 .wand-ai-team-editor-footer { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
 .wand-ai-team-editor-footer .wand-settings-save-bar { flex: 1 1 auto; }

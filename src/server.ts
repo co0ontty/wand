@@ -972,7 +972,6 @@ export async function startServer(
             }
           ));
       recordRecentPath(storage, snapshot.cwd);
-      // 会话一落地就挂到任务的看板卡片上，不等下一次看板列表的兜底同步。
       res.status(201).json(toSessionDetailDTO(snapshot));
     } catch (error) {
       sendRouteError(res, error, "无法启动命令。请检查命令是否安装。");

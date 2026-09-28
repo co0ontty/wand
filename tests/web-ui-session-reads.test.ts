@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
+import { ComposerStore } from "../src/web-ui/browser/composer.js";
 import { createSessionReads } from "../src/web-ui/browser/session-reads.js";
 import { parseJsonResponse } from "../src/web-ui/react/http-adapter.js";
 import { getErrorMessage } from "../src/error-utils.js";
@@ -17,16 +18,21 @@ const tick = async () => { for (let i = 0; i < 25; i++) await Promise.resolve();
 
 function harness() {
   const state: Record<string, any> = {
-    sessions: [], selectedId: null, drafts: {}, attachmentsBySession: {}, terminalStatesBySession: {},
+    sessions: [], selectedId: null, terminalStatesBySession: {},
     crossSessionQueue: [], config: {}, currentMessages: [], chatMode: "default", availableModels: [],
   };
+  const composer = new ComposerStore({
+    storage: () => ({ getItem: () => null, setItem: () => {}, removeItem: () => {} }),
+    isUnloading: () => false,
+    disposeAttachment: () => {},
+  });
   const requests: Array<{ url: string; response: ReturnType<typeof deferred<Response>> }> = [];
   const errors: unknown[] = [];
   const toasts: Array<{ message: string; tone?: string }> = [];
   const noop = () => {};
   const fallback = new Proxy({}, { get: () => noop });
   const dependencies: Record<string, unknown> = {
-    "./state": { state, writeStoredBoolean: noop },
+    "./state": { composer, state, writeStoredBoolean: noop },
     "./session-reads": { createSessionReads },
     "../react/http-adapter": { parseJsonResponse },
     "../../error-utils.js": { getErrorMessage },
@@ -70,7 +76,7 @@ function harness() {
     fetch: (url: string) => { const response = deferred<Response>(); requests.push({ url, response }); return response.promise; },
   });
   const respond = (index: number, body: unknown, status = 200) => requests[index].response.resolve(new Response(JSON.stringify(body), { status }));
-  return { state, api, requests, respond, errors, toasts };
+  return { composer, state, api, requests, respond, errors, toasts };
 }
 
 test("shared session reads protect only fields updated during a read and reset on logout", () => {
@@ -92,10 +98,10 @@ test("out-of-order list reads cannot remove newer sessions or their drafts", asy
   const older = h.api.loadSessions({ skipSelectedOutputReload: true });
   const newer = h.api.loadSessions({ skipSelectedOutputReload: true });
   h.respond(1, [{ id: "A", archived: true }]); await newer;
-  h.state.drafts.A = "keep";
+  h.composer.edit("A", { text: "keep" });
   h.respond(0, []); await older;
   assert.equal(h.state.sessions[0]?.id, "A");
-  assert.equal(h.state.drafts.A, "keep");
+  assert.equal(h.composer.read("A").text, "keep");
   assert.deepEqual(h.errors, []);
 });
 
@@ -114,11 +120,25 @@ test("HTTP detail cannot roll back a newer status push or append old queued inpu
 
 test("invalid or failed list responses preserve drafts and sessions", async () => {
   for (const [body, status] of [[{ error: "unavailable" }, 503], [{}, 200], [null, 200]] as const) {
-    const h = harness(); h.state.sessions = [{ id: "A" }]; h.state.drafts.A = "keep";
+    const h = harness(); h.state.sessions = [{ id: "A" }]; h.composer.edit("A", { text: "keep" });
     const pending = h.api.loadSessions(); h.respond(0, body, status); await pending;
-    assert.equal(h.state.sessions[0].id, "A"); assert.equal(h.state.drafts.A, "keep");
+    assert.equal(h.state.sessions[0].id, "A"); assert.equal(h.composer.read("A").text, "keep");
     assert.equal(h.errors.length, 1);
   }
+});
+
+test("an authoritative list closes removed composers before their pending delivery can restore a draft", async () => {
+  const h = harness();
+  h.state.sessions = [{ id: "A", archived: true }];
+  const delivery = deferred<void>();
+  const request = h.composer.submit("A", "deleted", () => delivery.promise);
+  const list = h.api.loadSessions({ skipSelectedOutputReload: true });
+  h.respond(0, []);
+  await list;
+  delivery.reject(Object.assign(new Error("rejected"), { httpStatus: 400 }));
+  await assert.rejects(request);
+  assert.equal(h.state.sessions.length, 0);
+  assert.equal(h.composer.read("A").text, "");
 });
 
 test("earlier messages use the current snapshot and deduplicate independently per session", async () => {
@@ -216,12 +236,12 @@ test("a list started before a push retains newly created sessions and fresh stat
   const pending = h.api.loadSessions({ skipSelectedOutputReload: true });
   h.api.updateSessionSnapshot({ id: "A", status: "exited" });
   h.api.updateSessionSnapshot({ id: "B", title: "created" });
-  h.state.drafts.B = "new draft";
+  h.composer.edit("B", { text: "new draft" });
   h.respond(0, [{ id: "A", status: "running", title: "loaded" }]); await pending;
   assert.equal(h.state.sessions.find((s: any) => s.id === "A").status, "exited");
   assert.equal(h.state.sessions.find((s: any) => s.id === "A").title, "loaded");
   assert.equal(h.state.sessions.find((s: any) => s.id === "B").title, "created");
-  assert.equal(h.state.drafts.B, "new draft");
+  assert.equal(h.composer.read("B").text, "new draft");
   assert.deepEqual(h.errors, []);
 });
 

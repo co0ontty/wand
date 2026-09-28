@@ -51,6 +51,7 @@ export function composerPayloadFingerprint(payload: ComposerPayload): string {
 /** Owns drafts and captured submissions; DOM/React only render its snapshots. */
 export class ComposerStore {
   private readonly sessions = new Map<string, ComposerSession>();
+  private revision = 0;
 
   constructor(private readonly dependencies: ComposerDependencies) {}
 
@@ -59,7 +60,7 @@ export class ComposerStore {
     if (!session) {
       let text = "";
       try { text = this.dependencies.storage().getItem("wand-draft-" + sessionId) ?? ""; } catch {}
-      session = { text, attachments: [], memoryOnly: false, revision: 0, submissions: new Map() };
+      session = { text, attachments: [], memoryOnly: false, revision: ++this.revision, submissions: new Map() };
       this.sessions.set(sessionId, session);
     }
     return session;
@@ -76,7 +77,7 @@ export class ComposerStore {
   }
 
   private writeText(sessionId: string, session: ComposerSession, text: string, persist?: boolean): void {
-    if (session.text !== text) session.revision += 1;
+    if (session.text !== text) session.revision = ++this.revision;
     session.text = text;
     if (persist === false) {
       session.memoryOnly = true;
@@ -90,6 +91,7 @@ export class ComposerStore {
   /** Returns false when a late text transformation no longer owns this draft. */
   edit(sessionId: string | null | undefined, change: ComposerEdit): boolean {
     if (!sessionId) return false;
+    if ("text" in change && change.expectedRevision !== undefined && !this.sessions.has(sessionId)) return false;
     const session = this.session(sessionId);
     if ("text" in change) {
       if (change.expectedRevision !== undefined && change.expectedRevision !== session.revision) return false;
@@ -98,10 +100,12 @@ export class ComposerStore {
       this.writeText(sessionId, session, change.preserve, !session.memoryOnly);
     } else if ("addAttachment" in change) {
       session.attachments.push(change.addAttachment);
+      session.revision = ++this.revision;
     } else if ("removeAttachment" in change) {
       if (change.removeAttachment < 0 || change.removeAttachment >= session.attachments.length) return false;
       const [removed] = session.attachments.splice(change.removeAttachment, 1);
       this.dependencies.disposeAttachment(removed);
+      session.revision = ++this.revision;
     } else if ("restore" in change) {
       const text = change.restore.text;
       const current = session.text;
@@ -109,10 +113,13 @@ export class ComposerStore {
         current && current !== text ? (text ? text + "\n" + current : current) : text,
         change.persist,
       );
-      session.attachments = [...change.restore.attachments,
-        ...session.attachments.filter((item) => !change.restore.attachments.includes(item))];
+      if (change.restore.attachments.length > 0) {
+        session.attachments = [...change.restore.attachments,
+          ...session.attachments.filter((item) => !change.restore.attachments.includes(item))];
+        session.revision = ++this.revision;
+      }
     } else {
-      session.revision += 1;
+      session.revision = ++this.revision;
       session.text = "";
       session.memoryOnly = false;
       try { this.dependencies.storage().removeItem("wand-draft-" + sessionId); } catch {}
@@ -137,7 +144,13 @@ export class ComposerStore {
       payload.attachments.forEach(this.dependencies.disposeAttachment);
       return result;
     }, (error: unknown) => {
-      this.edit(sessionId, { restore: payload, persist: !isAmbiguousComposerSubmissionFailure(error) });
+      if (this.sessions.get(sessionId) === session) {
+        this.edit(sessionId, { restore: payload, persist: !isAmbiguousComposerSubmissionFailure(error) });
+      } else {
+        // A server list removed this session while delivery was pending.
+        // Its late failure must release the capture instead of recreating a draft.
+        payload.attachments.forEach(this.dependencies.disposeAttachment);
+      }
       throw error;
     }).finally(() => {
       if (session.submissions.get(fingerprint) === submission) session.submissions.delete(fingerprint);
@@ -148,9 +161,10 @@ export class ComposerStore {
 
   retain(sessionIds: ReadonlySet<string>): void {
     for (const [id, session] of this.sessions) {
-      if (sessionIds.has(id) || session.submissions.size > 0) continue;
+      if (sessionIds.has(id)) continue;
       session.attachments.forEach(this.dependencies.disposeAttachment);
       this.sessions.delete(id);
+      try { this.dependencies.storage().removeItem("wand-draft-" + id); } catch {}
     }
   }
 }

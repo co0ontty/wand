@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const reactRoot = path.join(root, "src", "web-ui", "react");
@@ -236,8 +237,28 @@ test("React modules consume legacy behavior only through installed runtime inter
 });
 
 test("shell state boundary does not re-enter render or websocket modules", () => {
-  const stateSource = readFileSync(path.join(root, "src", "web-ui", "browser", "state.ts"), "utf8");
-  assert.doesNotMatch(stateSource, /^import\s+(?!type\b)/m);
+  const entry = path.join(root, "src/web-ui/browser/state.ts");
+  const visited = new Set<string>();
+  const visit = (file: string): void => {
+    if (visited.has(file)) return;
+    visited.add(file);
+    const parsed = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest);
+    for (const statement of parsed.statements) {
+      if (!ts.isImportDeclaration(statement) || statement.importClause?.isTypeOnly
+        || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+      const specifier = statement.moduleSpecifier.text;
+      if (!specifier.startsWith(".")) continue;
+      const resolved = path.resolve(path.dirname(file), specifier).replace(/\.[cm]?js$/, "");
+      const dependency = [resolved + ".ts", resolved + ".tsx", path.join(resolved, "index.ts")]
+        .find((candidate) => existsSync(candidate));
+      assert.ok(dependency, `${file} has an unresolved runtime import: ${specifier}`);
+      assert.notEqual(dependency, entry, `${file} re-enters state.ts during initialization`);
+      assert.ok(!/\/(?:render|websocket|session-engine|input)\.ts$/.test(dependency),
+        `${file} re-enters UI runtime through ${specifier}`);
+      visit(dependency);
+    }
+  };
+  visit(entry);
 });
 
 test("fetch and WandNative access stay inside repository or platform adapter boundaries", () => {

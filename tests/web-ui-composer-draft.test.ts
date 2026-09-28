@@ -122,25 +122,8 @@ test("shouldPersistComposerDraft：只有显式 true 才会在页面卸载期间
   assert.equal(shouldPersistComposerDraft(undefined, true), false);
 });
 
-test("input.ts 按送达确定性决定回填是否落盘", () => {
-  const input = source("src/web-ui/browser/input.ts");
-  assert.match(input, /import \{[^}]*isAmbiguousComposerSubmissionFailure[^}]*\} from "\.\/composer-draft"/);
-  assert.match(
-    input,
-    /restoreFailedComposerSubmission\([\s\S]{0,220}?isAmbiguousComposerSubmissionFailure\(err\)/,
-    "sendInputFromBox 的失败回填必须带上「送达是否未知」判定",
-  );
-  assert.match(input, /error\.__wandAmbiguousDelivery = true;/, "structured 传输层失败要打标记");
-});
-
-test("session-engine 的草稿写入区分三态并支持彻底清除", () => {
-  const engine = source("src/web-ui/browser/session-engine.ts");
-  assert.match(engine, /shouldPersistComposerDraft\(persist, !!state\.pageUnloading\)/);
-  assert.match(engine, /state\.draftsMemoryOnly\[sessionId\] = true/);
-  assert.match(engine, /export function clearDraftValueForSession/);
-  assert.match(engine, /delete state\.draftsMemoryOnly\[sessionId\]/);
-  assert.match(engine, /persistPreviousDraft = !state\.draftsMemoryOnly\[previousSessionId\]/);
-});
+// Draft ownership, unloading policy, and delivery rollback are exercised through
+// ComposerStore in web-ui-composer-state.test.ts rather than its implementation.
 
 test("新建 / 恢复会话时草稿被整条清除，不留下 localStorage 旧值", () => {
   const input = source("src/web-ui/browser/input.ts");
@@ -211,7 +194,6 @@ test("结构化排队：队列排空时清掉 localStorage，不留可复活的�
 test("页面卸载期间隐式草稿写入被跳过，pageshow 复位标记", () => {
   const stateSource = source("src/web-ui/browser/state.ts");
   assert.match(stateSource, /pageUnloading: false/);
-  assert.match(stateSource, /draftsMemoryOnly: \{\}/);
   assert.match(stateSource, /addEventListener\("pagehide", markUnloading\)/);
   assert.match(stateSource, /addEventListener\("beforeunload", markUnloading\)/);
   assert.match(stateSource, /addEventListener\("pageshow", function\(\) \{ state\.pageUnloading = false; \}\)/);
