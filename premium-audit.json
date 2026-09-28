@@ -1,13 +1,32 @@
 {
-  "findings": [],
+  "findings": [
+    {
+      "category": "unresolved",
+      "file": "AGENTS.md",
+      "line": null,
+      "message": "The configured UX contract has no Canonical UI Map with the required columns.",
+      "remediation": "Add the exact Capability, Canonical owner, Source of truth, Allowed variants, and Verification columns.",
+      "ruleId": "canonical.map-missing",
+      "severity": "error"
+    },
+    {
+      "category": "violation",
+      "file": "DESIGN.md",
+      "line": null,
+      "message": "A product/admin project has no maintained DESIGN.md.",
+      "remediation": "Create DESIGN.md or document the maintained equivalent in project policy.",
+      "ruleId": "contract.design-missing",
+      "severity": "error"
+    }
+  ],
   "mode": "strict",
   "projectRoot": "/Users/co0ontty/Self/vibe_coding/wand",
   "schemaVersion": 1,
   "summary": {
-    "errors": 0,
-    "total": 0,
-    "unresolved": 0,
-    "violations": 0,
+    "errors": 2,
+    "total": 2,
+    "unresolved": 1,
+    "violations": 1,
     "warnings": 0
   }
 }
