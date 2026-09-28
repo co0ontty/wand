@@ -312,7 +312,7 @@ npm run build && node dist/cli.js web -c /tmp/wand-dev/config.json
 
 | Capability | Canonical owner | Source of truth | Allowed variants | Verification |
 | --- | --- | --- | --- | --- |
-| Select/Listbox | src/web-ui/react/ui/select.tsx | 本节与组件契约 | authored plain / searchable | popup、键盘、窄屏 |
+| Select/Listbox | src/web-ui/react/ui/select.tsx | 本节与组件契约 | authored plain / searchable | popup、键盘、窄屏、所属表单边界 |
 | Date | task-board-host.tsx 的 date-only 字段 | 服务端 YYYY-MM-DD | native 平台日历 | 日期不做 UTC 偏移 |
 | Form | feature Host + Controller / composer | 对应 API 与状态所有权 | 就地创建/保存/发送 | 保留输入、失败恢复、重复提交 |
 | Scrollbar | src/web-ui/content/styles.css | 语义 token | 原生终端几何保留 | computed style |
@@ -332,9 +332,9 @@ npm run build && node dist/cli.js web -c /tmp/wand-dev/config.json
 - Web：ComposerStore统一草稿/附件/提交；队列按会话revision/epoch处理过期HTTP与rollback。删除会话释放URL，迟到失败不得复活会话；提示词优化有revision CAS。移除AppState四个重复容器与全局queueEpoch。
 - Android：固定会话ChatComposer + SessionDraftStore + ChatStore协议边界；ack前保留内容，失败保留新编辑，unknown不进入Saver，正常4xx拒收可持久化。picker/voice固定会话，dispose取消；PTY部分送达视为unknown。
 - 语音：38,208,264 B AAR→547,634 B API jar，依赖本体少37,660,630 B（98.57%）；保留许可证/NOTICE、三层SHA与可复现工具。常规构建不下载AAR；小fixture测真实提取逻辑，可选官方AAR验证22 MB arm64库。Git历史不重写。
-- 同族修复：团队开工项目使用公共WandSelect；三处textarea禁resize；lazy host注册公共选择器。保持既有交互与动效token。
+- 同族修复：团队开工项目使用公共WandSelect；三处textarea禁resize；lazy host注册公共选择器。最终截图发现Portal搜索被父级误判外点，提交 `f845f15` 为每行自己的popup标记边界；搜索/选项保留表单，外点/Escape关闭、输入保留，真实点击通过。保持既有交互与动效token。
 - 送达保护：Web 与 Android 都将已接受部分 PTY chunk、成功 ack 后解析失败、5xx/408/409 视为 unknown；只有任何输入被接受前的明确拒收可恢复持久草稿。Web 最后修复提交 `82fdb05`，新增真实发送入口的7项行为测试，保留文本与单独 `"\r"` 两包。
-- 已验证：`npm run check`、`npm test`、beta `npm run build` 全部成功；最终1553项，1543通过/10跳过/0失败。Android575项通过、0跳过（含可选官方AAR与PTY部分送达）；服务端定点184项、SQLite合同10项、Web定点128项也通过。
-- 已安装服务：最终Web beta `4.77.0-debug.9282125` 已部署；生产依赖导入、真实PTY启动、全局服务重启后的健康检查与产物字节一致性通过。真实验收通过建任务、PTY提交、双DTO改名/状态/迭代投影、独占移动且cwd/输出/运行状态保留、草稿切换与刷新、结构化回复、附件上传及新编辑保护；桌面/390px窄屏无横向溢出，公共选择器搜索/键盘关闭通过。本轮两张QA任务已软归档，历史保留。
+- 已验证：`npm run check`、`npm test`、beta `npm run build` 全部成功；最终1553项，1543通过/10跳过/0失败。Android576项通过、0跳过（含可选官方AAR与PTY部分送达）；服务端定点184项、SQLite合同10项、Web定点128项也通过。
+- 已安装服务：最终Web beta `4.77.0-debug.9282148` 已部署；生产依赖导入、真实PTY启动、全局服务重启后的健康检查与产物字节一致性通过。真实验收通过建任务、PTY提交、双DTO改名/状态/迭代投影、独占移动且cwd/输出/运行状态保留、草稿切换与刷新、结构化回复、附件上传及新编辑保护；桌面/390px窄屏无横向溢出，公共选择器搜索/键盘关闭通过。本轮两张QA任务已软归档，历史保留。
 - Android分发：本轮构建 `4.77.0-debug.09282105`（9,697,830 B）；并发客户端更新后再次核对全局最新包 `4.77.0-debug.09282135`（9,717,074 B），SHA-256 `65394ed61e87ef09114c69b21347a18e121605c3ae4111166b80a8d5729bdd15`。metadata、版本标记、Beta更新端点均一致，APK不含sherpa JNI库。子仓库源码已push，主仓库指针可拉取；默认未安装/启动设备。
 - 全局 Codex/Pi AGENTS 已更新规范所有权、unknown送达、轻量语音依赖、按需submodule和本文续接入口。Web设计契约合并在本文；strict审计仅剩固定DESIGN.md文件名提示，具体控件所有权问题已修复。
