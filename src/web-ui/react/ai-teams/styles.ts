@@ -427,7 +427,7 @@ export const aiTeamsChunkStyles = String.raw`
 .team-chat-office { display: grid; gap: 8px; }
 .team-chat-office-head { display: flex; align-items: baseline; gap: 8px; }
 .team-chat-office-head strong { font-size: var(--font-size-sm); color: var(--text-primary); }
-.team-chat-office-head small { margin-left: auto; color: var(--text-tertiary); font-size: var(--font-size-xs); }
+.team-chat-office-head small { min-width: 0; margin-left: auto; color: var(--text-tertiary); font-size: var(--font-size-xs); text-align: right; }
 .team-chat-office-members { display: flex; gap: 8px; overflow-x: auto; padding: 1px 1px 5px; scroll-snap-type: x proximity; }
 .team-chat-office-member {
   display: flex;
