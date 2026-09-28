@@ -21,10 +21,12 @@ import { usableTeamWorkspaceId } from "../src/web-ui/react/workspaces/workspace-
 import { agentTargetOptions, agentTargetTeamId } from "../src/web-ui/react/issues/agent-fields.js";
 import {
   agentSignatureLabel,
+  chatSendDefinitelyRejected,
   CHAT_INPUT_PLACEHOLDER,
   chatInputHint,
   teamChatComposerMode,
   teamRunIsActive,
+  teamOfficeMembers,
   chatMessageBody,
   chatMessageUrl,
   chatTurnKind,
@@ -46,7 +48,8 @@ import {
   splitLeaderMessage,
   type LocalChatTurn,
 } from "../src/web-ui/react/ai-teams/team-chat-view.js";
-import type { AiTeamLiveStep } from "../src/ai-team-types.js";
+import type { AiTeamLiveStep, AiTeamRunDetail } from "../src/ai-team-types.js";
+import { HttpResponseError } from "../src/web-ui/react/http-adapter.js";
 import { memberCoatIndex, CAT_COATS } from "../src/web-ui/react/ai-teams/avatar.js";
 import { normalizeWandModelCatalog } from "../src/web-ui/react/model-catalog.js";
 import { taskBoardPageOf, taskBoardSearch, isTaskBoardView } from "../src/web-ui/react/issues/task-board-controller.js";
@@ -64,6 +67,36 @@ const defaultCatalog = normalizeWandModelCatalog({
 });
 const unconfiguredCatalog = normalizeWandModelCatalog({
   codexModels: [{ id: "default", label: "GPT-6-Astra · gpt-6-astra（Codex 默认）" }],
+});
+
+test("团队工位从步骤和会话状态投影，待授权与已完成分层", () => {
+  const detail = {
+    run: { team: { members: [
+      { id: "lead", name: "负责人", duty: "分派工作" },
+      { id: "dev", name: "开发者", duty: "实现" },
+      { id: "qa", name: "审查者", duty: "检查" },
+    ] } },
+    steps: [
+      { id: "s1", memberId: "lead", seq: 1, title: "拟定计划", status: "done", sessionId: "lead-session" },
+      { id: "s2", memberId: "dev", seq: 2, title: "实现接口", status: "running", sessionId: "dev-session" },
+      { id: "s3", memberId: "qa", seq: 3, title: "审查接口", status: "queued", sessionId: null },
+    ],
+    memberStates: { "dev-session": "needs_permission" },
+  } as unknown as AiTeamRunDetail;
+  assert.deepEqual(teamOfficeMembers(detail).map(({ state, label, task, sessionId }) =>
+    [state, label, task, sessionId]), [
+    ["done", "已完成", "拟定计划", "lead-session"],
+    ["attention", "待授权", "实现接口", "dev-session"],
+    ["queued", "排队中", "审查接口", null],
+  ]);
+});
+
+test("群聊只把明确拒收判为可恢复草稿，未知送达留未确认", () => {
+  assert.equal(chatSendDefinitelyRejected(new HttpResponseError("bad", 400)), true);
+  for (const status of [0, 200, 408, 409, 500]) {
+    assert.equal(chatSendDefinitelyRejected(new HttpResponseError("unknown", status)), false);
+  }
+  assert.equal(chatSendDefinitelyRejected(new Error("network")), false);
 });
 
 test("AI teams live on their own sidebar page, not in settings", () => {
@@ -521,7 +554,7 @@ test("[T8] team-chat-view 进 chunk、主包不含它，借的模块靠注册表
   assert.match(read("react/ai-teams/lazy.tsx"), /import type \{ TeamChatViewProps \} from "\.\/team-chat-view";/);
   const lazy = read("react/ai-teams/lazy.tsx");
   const registry = lazy.slice(lazy.indexOf("const AI_TEAMS_HOST"), lazy.indexOf("};\n", lazy.indexOf("const AI_TEAMS_HOST")));
-  assert.match(registry, /"http-adapter": \{ jsonBody, requestJson \}/, "群聊发送要的 http-adapter 没注册");
+  assert.match(registry, /"http-adapter": \{ HttpResponseError, jsonBody, requestJson \}/, "群聊发送要的 http-adapter 没注册");
 });
 
 // chunk 的 CSS 要等按需脚本到位才注入（chunk-entry.ts 先 installStyleSheet 再导出组件）。

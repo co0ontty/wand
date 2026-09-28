@@ -1,7 +1,7 @@
 import * as React from "react";
 import * as jsxRuntime from "react/jsx-runtime";
 import { failureMessage } from "../errors";
-import { jsonBody, requestJson } from "../http-adapter";
+import { HttpResponseError, jsonBody, requestJson } from "../http-adapter";
 import { AgentFields } from "../issues/agent-fields";
 import {
   createDefaultIssueAgent,
@@ -45,7 +45,7 @@ const AI_TEAMS_HOST: Record<string, object> = {
   "react": React,
   "react/jsx-runtime": jsxRuntime,
   "errors": { failureMessage },
-  "http-adapter": { jsonBody, requestJson },
+  "http-adapter": { HttpResponseError, jsonBody, requestJson },
   "issues/agent-fields": { AgentFields },
   "issues/task-board-agent": {
     createDefaultIssueAgent,

@@ -423,6 +423,39 @@ export const aiTeamsChunkStyles = String.raw`
 }
 .team-chat-goal-body-text { margin: 0; color: var(--text-secondary); font: inherit; font-size: var(--font-size-xs); white-space: pre-wrap; overflow-wrap: anywhere; }
 
+/* 群聊的工位总览来自本轮真实步骤；成员有会话时整张卡可进入该工位。 */
+.team-chat-office { display: grid; gap: 8px; }
+.team-chat-office-head { display: flex; align-items: baseline; gap: 8px; }
+.team-chat-office-head strong { font-size: var(--font-size-sm); color: var(--text-primary); }
+.team-chat-office-head small { margin-left: auto; color: var(--text-tertiary); font-size: var(--font-size-xs); }
+.team-chat-office-members { display: flex; gap: 8px; overflow-x: auto; padding: 1px 1px 5px; scroll-snap-type: x proximity; }
+.team-chat-office-member {
+  display: flex;
+  flex: 0 0 210px;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 52px;
+  padding: 7px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  text-align: left;
+  scroll-snap-align: start;
+}
+button.team-chat-office-member { cursor: pointer; transition: border-color var(--motion-fast) var(--ease-in-out-smooth); }
+button.team-chat-office-member:hover, button.team-chat-office-member:focus-visible { border-color: var(--accent); }
+.team-chat-office-copy { display: grid; flex: 1; gap: 2px; min-width: 0; }
+.team-chat-office-copy strong, .team-chat-office-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.team-chat-office-copy strong { font-size: var(--font-size-xs); }
+.team-chat-office-copy small { color: var(--text-tertiary); font-size: var(--font-size-xs); }
+.team-chat-office-state { flex: 0 0 auto; color: var(--text-tertiary); font-size: var(--font-size-xs); }
+.team-chat-office-state[data-state="working"] { color: var(--info); }
+.team-chat-office-state[data-state="attention"] { color: var(--warning); }
+.team-chat-office-state[data-state="done"] { color: var(--success); }
+.team-chat-office-state[data-state="failed"] { color: var(--danger); }
+
 .task-board-team-chat-list {
   display: flex;
   flex-direction: column;

@@ -3,12 +3,12 @@ import type { AgentActivityState } from "../../../mission-types";
 import type { AiTeamLiveStep, AiTeamRun, AiTeamRunDetail, AiTeamStep } from "../../../ai-team-types";
 import type { ConversationAuthor, ConversationTurn } from "../../../types";
 import { failureMessage } from "../errors";
-import { jsonBody, requestJson } from "../http-adapter";
+import { HttpResponseError, jsonBody, requestJson } from "../http-adapter";
 import { issueAgentEffortLabel, issueAgentProviderLabel } from "../issues/task-board-agent";
 import { wandModelDisplayName, type WandModelCatalog } from "../model-catalog";
 import { useWandModelCatalog } from "../use-model-catalog";
 import { WandButton } from "../ui";
-import { memberCoatIndex, PixelCat } from "./avatar";
+import { memberCoatIndex, PixelCat, TeamAvatar } from "./avatar";
 import { aiTeamsRepository } from "./repository";
 
 /**
@@ -52,6 +52,69 @@ export function isConfirmedBy(turn: ConversationTurn, sentAt: number): boolean {
 export function settleLocalTurns(local: LocalChatTurn[], turns: ConversationTurn[] | null): LocalChatTurn[] {
   if (!turns) return local.map((row) => ({ ...row, unconfirmed: true }));
   return local.filter((row) => !turns.some((turn) => isConfirmedBy(turn, row.sentAt)));
+}
+
+/** 408/409/5xx、网络中断与成功响应解析失败都不能证明服务端未接收。 */
+export function chatSendDefinitelyRejected(error: unknown): boolean {
+  return error instanceof HttpResponseError && error.status >= 400 && error.status < 500
+    && error.status !== 408 && error.status !== 409;
+}
+
+export type TeamOfficeState = "working" | "attention" | "queued" | "done" | "failed" | "idle";
+
+export interface TeamOfficeMember {
+  member: AiTeamRun["team"]["members"][number];
+  state: TeamOfficeState;
+  label: string;
+  task: string;
+  sessionId: string | null;
+}
+
+/** 从真实步骤和会话状态投影工位；没有步骤时只显示待派工。 */
+export function teamOfficeMembers(detail: AiTeamRunDetail): TeamOfficeMember[] {
+  return detail.run.team.members.map((member) => {
+    const own = detail.steps.filter((step) => step.memberId === member.id);
+    const step = own.find((item) => item.status === "running")
+      ?? [...own].sort((a, b) => b.seq - a.seq)[0];
+    const activity = step?.sessionId ? detail.memberStates[step.sessionId] : undefined;
+    const state: TeamOfficeState = step?.status === "running"
+      ? activity === "needs_input" || activity === "needs_permission" ? "attention" : "working"
+      : step?.status === "queued" ? "queued"
+        : step?.status === "done" ? "done"
+          : step?.status === "failed" ? "failed" : "idle";
+    const label = state === "attention" ? activity === "needs_permission" ? "待授权" : "待回答"
+      : { working: "工作中", queued: "排队中", done: "已完成", failed: "失败", idle: "待派工" }[state];
+    return { member, state, label, task: step?.title || member.duty || "等待负责人派工", sessionId: step?.sessionId ?? null };
+  });
+}
+
+function TeamOffice({ detail, onOpenSession }: {
+  detail: AiTeamRunDetail;
+  onOpenSession?: (sessionId: string) => void;
+}): React.ReactElement {
+  const members = teamOfficeMembers(detail);
+  const working = members.filter((item) => item.state === "working").length;
+  const attention = members.filter((item) => item.state === "attention").length;
+  return <section className="team-chat-office" aria-label="团队工位">
+    <header className="team-chat-office-head">
+      <strong>团队工位</strong>
+      <small>{attention ? `${attention} 人待处理 · ` : ""}{working} 人工作中 · {members.length} 人在组</small>
+    </header>
+    <div className="team-chat-office-members">
+      {members.map(({ member, state, label, task, sessionId }) => {
+        const content = <>
+          <TeamAvatar member={member} size="sm" state={state === "working" ? "working" : state === "done" ? "done" : state === "failed" ? "failed" : "idle"}/>
+          <span className="team-chat-office-copy"><strong>{member.name}</strong><small title={task}>{task}</small></span>
+          <span className="team-chat-office-state" data-state={state}>{label}</span>
+        </>;
+        return sessionId && onOpenSession
+          ? <button key={member.id} type="button" className="team-chat-office-member" onClick={() => onOpenSession(sessionId)} aria-label={`查看${member.name}的会话：${label}`}>
+            {content}
+          </button>
+          : <div key={member.id} className="team-chat-office-member">{content}</div>;
+      })}
+    </div>
+  </section>;
 }
 
 const CHAT_HINTS: Partial<Record<AiTeamRun["status"], string>> = {
@@ -671,9 +734,16 @@ export function TeamChatView({ detail, onChange, onOpenSession }: TeamChatViewPr
     try {
       await requestJson(chatMessageUrl(sessionId), jsonBody(chatMessageBody(text)));
     } catch (cause) {
-      setLocal((current) => current.filter((row) => row.sentAt !== sentAt));
+      if (chatSendDefinitelyRejected(cause)) {
+        setLocal((current) => current.filter((row) => row.sentAt !== sentAt));
+        setDraft((current) => current ? `${text}\n${current}` : text);
+      } else {
+        setLocal((current) => current.map((row) => row.sentAt === sentAt ? { ...row, unconfirmed: true } : row));
+      }
       setPending("");
-      setError(failureMessage(cause, "发送失败。"));
+      setError(chatSendDefinitelyRejected(cause)
+        ? failureMessage(cause, "发送失败，内容已放回输入框。")
+        : "送达状态未知，请先查看群聊记录，避免重复发送。");
       return;
     }
     // postTurn 不发通知，这里自己补一次重拉；失败就把临时行留在原位标未确认。
@@ -704,6 +774,7 @@ export function TeamChatView({ detail, onChange, onOpenSession }: TeamChatViewPr
 
   return <div className="task-board-team-chat">
     <MainTaskCard detail={detail}/>
+    <TeamOffice detail={detail} onOpenSession={onOpenSession}/>
     <div
       className="task-board-team-chat-list"
       ref={listRef}
