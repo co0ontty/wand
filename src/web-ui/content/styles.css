@@ -1326,6 +1326,58 @@
       flex-shrink: 0;
     }
 
+    /* 任务列表报错徽标（品牌区右侧）：宽度跟内容走，不再占列表空间。
+       完整原因在 title 里，点击就地重试。 */
+    .sidebar-list-error {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      flex: 0 1 auto;
+      min-width: 0;
+      padding: 2px 7px 2px 5px;
+      border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--danger) 9%, transparent);
+      color: var(--danger);
+      font-size: 10.5px;
+      font-weight: 600;
+      line-height: 1.4;
+      cursor: pointer;
+      transition: background-color 140ms ease, border-color 140ms ease, opacity 140ms ease;
+    }
+
+    .sidebar-list-error:hover {
+      border-color: color-mix(in srgb, var(--danger) 48%, transparent);
+      background: color-mix(in srgb, var(--danger) 16%, transparent);
+    }
+
+    .sidebar-list-error:disabled {
+      opacity: 0.72;
+      cursor: default;
+    }
+
+    .sidebar-list-error-label {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .sidebar-list-error.is-retrying .sidebar-list-error-icon {
+      animation: sidebar-list-error-spin 900ms linear infinite;
+    }
+
+    @keyframes sidebar-list-error-spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* 减少动效时不转圈：禁用态与描边变化已经说明「正在重试」。 */
+    @media (prefers-reduced-motion: reduce) {
+      .sidebar-list-error.is-retrying .sidebar-list-error-icon {
+        animation: none;
+      }
+    }
+
     .session-count {
       font-size: 10.5px;
       color: var(--text-secondary);
@@ -20532,6 +20584,8 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task-activity
   color: var(--web-sidebar-muted, var(--text-secondary));
   font: inherit;
   font-size: 11.5px;
+  /* button 的 UA 样式是居中，标签被 flex 拉满后文字会悬在中间，点状指示器与文字脱节 */
+  text-align: left;
   cursor: pointer;
   transition: background var(--motion-fast) var(--ease-in-out-smooth),
     color var(--motion-fast) var(--ease-in-out-smooth);
@@ -20591,6 +20645,7 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .workspace-task-activity
   color: var(--text-secondary);
   font: inherit;
   font-size: var(--font-size-xs);
+  text-align: left;
   cursor: pointer;
   transition: background var(--motion-fast) var(--ease-in-out-smooth);
 }

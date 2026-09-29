@@ -20,6 +20,11 @@ import {
 } from "../ui";
 import { classNames } from "../ui/class-names";
 import { sidebarSearchMatches } from "../workspaces/sidebar-search";
+import {
+  getSidebarListError,
+  subscribeSidebarListError,
+  type SidebarListErrorKind,
+} from "../workspaces/sidebar-list-error";
 
 import { taskBoardController, taskBoardStore } from "../issues/task-board-controller";
 import { HomeAttention } from "../attention/home-attention";
@@ -441,6 +446,43 @@ function SessionEntry({
 }
 
 
+const SIDEBAR_ERROR_LABELS: Readonly<Record<SidebarListErrorKind, string>> = {
+  load: "加载失败",
+  sync: "未同步",
+};
+
+/**
+ * 任务列表的加载 / 同步报错不占列表位置，收成品牌区右侧这一枚内容自适应徽标：
+ * 完整原因留在 tooltip，点击就地重试，成功后徽标自行消失。
+ */
+function SidebarListErrorBadge() {
+  const error = React.useSyncExternalStore(
+    subscribeSidebarListError, getSidebarListError, getSidebarListError,
+  );
+  const [retrying, setRetrying] = React.useState(false);
+  React.useEffect(() => {
+    if (!error) setRetrying(false);
+  }, [error]);
+  if (!error) return null;
+  const label = SIDEBAR_ERROR_LABELS[error.kind];
+  return (
+    <button
+      type="button"
+      className={classNames("sidebar-list-error", retrying && "is-retrying")}
+      title={`${error.message}｜点击重新加载`}
+      aria-label={`${label}：${error.message}，点击重新加载`}
+      disabled={retrying}
+      onClick={() => {
+        setRetrying(true);
+        void error.retry().finally(() => setRetrying(false));
+      }}
+    >
+      <WandIcon name="refresh" size={11} className="sidebar-list-error-icon"/>
+      <span className="sidebar-list-error-label">{label}</span>
+    </button>
+  );
+}
+
 export interface ShellSidebarPrimaryAction {
   readonly action: UiAction;
   readonly label: string;
@@ -684,6 +726,7 @@ export function ShellSidebar() {
             <div className="sidebar-header-main">
               <WandBrandMark className="sidebar-brand-mark" />
               <span className="sidebar-title">Wand</span>
+              <SidebarListErrorBadge />
             </div>
             <div className="sidebar-header-actions">
               <div className="sidebar-header-more">

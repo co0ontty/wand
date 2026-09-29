@@ -75,6 +75,7 @@ import {
   toggleManagedTask,
   type SidebarManageSelection,
 } from "./sidebar-manage";
+import { reportSidebarListError } from "./sidebar-list-error";
 import { describeError } from "../errors";
 
 const NAME_MAX = 80;
@@ -1463,6 +1464,20 @@ export function WorkspacesPanel({
   const { groups: sourceGroups, loading, error, reload } = useTaskGroups(refreshTick);
   // Every task is a visible container, including empty and legacy unnamed tasks.
   const groups = sourceGroups;
+  // 报错只由侧栏主树上报（窄栏 rail 自己显示「!」，悬浮预览树不接管头部徽标）。
+  const reportsHeaderError = !compact && directoryId === undefined;
+  React.useEffect(() => {
+    if (!reportsHeaderError) return;
+    if (!error) {
+      reportSidebarListError(null);
+      return;
+    }
+    reportSidebarListError({
+      kind: groups.length === 0 ? "load" : "sync",
+      message: error,
+      retry: () => reload(),
+    });
+  }, [reportsHeaderError, error, groups.length, reload]);
   const [displayMode, cycleDisplayMode] = useSidebarDisplayMode();
   const searchedGroups = filterSidebarGroups(
     directoryId === undefined ? groups : groups.filter((group) => group.workspaceId === directoryId),
@@ -1700,11 +1715,6 @@ export function WorkspacesPanel({
     <section className="workspaces-panel" aria-label="任务">
         {loading && groups.length === 0 ? (
         <div className="workspaces-panel-state">正在加载任务…</div>
-      ) : error && groups.length === 0 ? (
-        <div className="workspaces-panel-state error" role="alert">
-          <span>{error}</span>
-          <WandButton kind="ghost" size="small" className="workspaces-empty-action" onClick={() => void reload()}>重新加载</WandButton>
-        </div>
       ) : (
         <>
           {manageMode ? (
@@ -1873,12 +1883,6 @@ export function WorkspacesPanel({
             </div>
           ) : null}
         </>
-      )}
-      {error && groups.length > 0 && (
-        <div className="workspaces-panel-state error" role="status">
-          列表暂未同步，正在显示上次结果。
-          <WandButton kind="ghost" size="small" className="workspaces-empty-action" onClick={() => void reload()}>重试</WandButton>
-        </div>
       )}
       {manageMode || directoryId !== undefined ? null : extraGroups}
       {pendingNewSessionTask !== null ? (
