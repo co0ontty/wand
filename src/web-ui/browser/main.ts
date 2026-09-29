@@ -25,6 +25,7 @@ import "./notifications";
 import { configPath, state } from "./state";
 import { startReactUi } from "../react";
 import { installFolderPickerLegacyAdapter } from "./folder-picker-adapter";
+import { installAiTeamComposerAdapter } from "./ai-team-composer-adapter";
 import { installNewSessionLegacyAdapter } from "./new-session-adapter";
 import { installSettingsRuntimeBridge } from "./settings-runtime-bridge";
 import { createBrowserShellCommands } from "./shell-commands";
@@ -43,6 +44,7 @@ import { appendToComposer, copyTextSafely, setFilePanelOpen } from "./file-brows
 import { fileExplorerController, fileExplorerStore } from "../react/file-explorer/controller";
 import { explorerParentOf } from "../react/file-explorer/paths";
 
+installAiTeamComposerAdapter();
 installSettingsRuntimeBridge();
 configureBrowserShellCommands(createBrowserShellCommands());
 window.__wandDesktopTools = createDesktopToolsNavigation({

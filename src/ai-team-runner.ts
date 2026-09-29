@@ -197,6 +197,20 @@ export function createAiTeamRunner(
  * `agent` 传该步**实际使用候选**（§3.6/B15，降级换候选后跟着变），model / thinkingEffort 与
  * provider 同源；Leader 或没有步骤的场景回退首选候选。只填真值，展示文案归客户端。
  */
+export function displayAiTeam(snapshot: AiTeam, current: AiTeam | null): AiTeam {
+  if (!current) return snapshot;
+  const byId = new Map(current.members.map((member) => [member.id, member]));
+  return {
+    ...snapshot,
+    name: current.name,
+    updatedAt: current.updatedAt,
+    members: snapshot.members.map((member) => {
+      const live = byId.get(member.id);
+      return live ? { ...member, name: live.name, avatar: live.avatar } : member;
+    }),
+  };
+}
+
 function chatAuthor(
   member: AiTeamMember,
   sessionId?: string | null,
@@ -286,6 +300,89 @@ function turnText(turn: { content: Array<{ type: string; text?: string }> }): st
     .map((block) => block.text!.trim())
     .filter(Boolean)
     .join("\n\n");
+}
+
+// ── 群聊开场与协作流转的文案（设计 v2.1 S1–S5）──
+// 全部由服务端纯函数拼好：客户端只做 @ 高亮，不拼句子、不猜字段；也**不引任何 LLM 文本**。
+
+/** 每行邀请名单上限（S2/S3）：`邀请 @a、@b、@c、@d 加入群聊`。 */
+export const CHAT_INVITE_PER_LINE = 4;
+
+/** 开工发言与派工行共用的步骤说法：`第 2 步「实现 Web 端」`；标题空白时只剩步数。 */
+function chatStepLabel(seq: number, title: string): string {
+  const label = title.trim();
+  return label ? `第 ${seq} 步「${label}」` : `第 ${seq} 步`;
+}
+
+/**
+ * 首次建群的入群序列（S1–S3）：负责人先入群，再按 `team.members` 原顺序邀请其余成员。
+ * 每行最多 [CHAT_INVITE_PER_LINE] 人，第二行起用 `继续邀请 …`；除负责人外没人时给
+ * `还没有邀请其他成员入群`（仍两条，不伪造成员）。
+ */
+export function chatIntroLines(team: Pick<AiTeam, "name" | "members">): string[] {
+  const teamName = team.name.trim();
+  const lines = [teamName ? `创建了团队群聊「${teamName}」` : "创建了团队群聊"];
+  const invitees = team.members.filter((member) => !member.isLeader)
+    .map((member) => member.name.trim())
+    .filter(Boolean);
+  if (invitees.length === 0) {
+    lines.push("还没有邀请其他成员入群");
+    return lines;
+  }
+  for (let index = 0; index < invitees.length; index += CHAT_INVITE_PER_LINE) {
+    const names = invitees.slice(index, index + CHAT_INVITE_PER_LINE).map((name) => `@${name}`).join("、");
+    lines.push(`${index === 0 ? "邀请" : "继续邀请"} ${names} 加入群聊`);
+  }
+  return lines;
+}
+
+/** 开工发言里的一条依据（来自 `step.dependsOn` 解析出的上游步骤）。 */
+export interface AiTeamStepBasis {
+  seq: number;
+  title: string;
+  memberName: string;
+  reportPath: string;
+}
+
+/**
+ * 开工发言正文（S4）：
+ * - 第 1 行 `我正在开始工作：第 N 步「标题」`；
+ * - 有依赖时第 2 行 `依据 @上游成员 第 M 步「上游标题」的产物 <reportPath>`，超过两条
+ *   只列前两条并在尾上 `等 N 步`（N = 依赖总数）；
+ * - 依赖解析不到（旧数据/步骤被删）→ `依据上游步骤的产物继续`。
+ */
+export function stepStartText(
+  step: Pick<AiTeamStep, "seq" | "title">,
+  upstream: ReadonlyArray<AiTeamStepBasis> = [],
+  dependencyCount: number = upstream.length,
+): string {
+  const lines = [`我正在开始工作：${chatStepLabel(step.seq, step.title)}`];
+  if (dependencyCount > 0) lines.push(stepBasisLine(upstream, dependencyCount));
+  return lines.join("\n");
+}
+
+function stepBasisLine(upstream: ReadonlyArray<AiTeamStepBasis>, dependencyCount: number): string {
+  const shown = upstream.slice(0, 2);
+  if (shown.length === 0) return "依据上游步骤的产物继续";
+  const parts = shown.map((item) => {
+    const reportPath = item.reportPath.trim();
+    return `@${item.memberName} ${chatStepLabel(item.seq, item.title)}的产物${reportPath ? ` ${reportPath}` : ""}`;
+  });
+  return `依据 ${parts.join("、")}${dependencyCount > shown.length ? ` 等 ${dependencyCount} 步` : ""}`;
+}
+
+/**
+ * 派工行的依据括注（S5）：`（依据：第 1 步「设计规格」的产物）`，多个依赖用 `、` 连接。
+ * 位置 `at` 是**本批 steps 内**的 0-based 下标（展示成第 at+1 步）；没有依赖就是空串（首步无依据）。
+ * 它**取代**旧的 `（等第 N 项完成后）`：同一个依赖关系不写两遍。
+ */
+export function assignmentBasisNote(after: readonly number[], titles: readonly string[]): string {
+  if (after.length === 0) return "";
+  const parts = after.map((at) => {
+    const label = (titles[at] ?? "").trim();
+    return `第 ${at + 1} 步${label ? `「${label}」` : ""}的产物`;
+  });
+  return `（依据：${parts.join("、")}）`;
 }
 
 /** 找到提示词（含 reportPath）那一轮之后的 assistant 文本；没有回复返回 null。 */
@@ -630,10 +727,13 @@ export class AiTeamRunner {
     }
     // 群聊回合只给最近这一段（§4.4）；没有群聊会话的旧运行给空数组，前端不用判 null。
     const messages = run.chatSessionId ? this.ops.snapshot(run.chatSessionId)?.messages ?? [] : [];
+    const currentTeam = this.storage.getAiTeam(run.teamId);
     return {
       run,
       steps,
       memberStates,
+      // 别把展示字段写回 run.team：运行快照里的执行候选/职责由 runner 独立管理。
+      displayTeam: displayAiTeam(run.team, currentTeam),
       chatTurns: messages.slice(-AI_TEAM_DETAIL_CHAT_TURNS),
     };
   }
@@ -1136,6 +1236,42 @@ export class AiTeamRunner {
    * 成员步骤的上游交接：把依赖步骤的报告写成一个交接文件，提示词只给路径。
    * 没有依赖、或写文件失败时返回 null（提示词仍逐行列出上游报告文件）。
    */
+  /**
+   * 开工发言（S4）：成员**自己发的真实发言**（头像 + 名字 + 气泡），不是居中 notice；
+   * 文案由 [stepStartText] 拼（依据只来自 `step.dependsOn`，不引 `decision.message` / 报告正文 / 提示词文本）。
+   */
+  private postStepStart(
+    run: AiTeamRun,
+    step: AiTeamStep,
+    member: AiTeamMember,
+    agent: WandTaskAgent | undefined,
+    reusable: string | null,
+  ): void {
+    this.postTurn(run, {
+      role: "assistant",
+      author: chatAuthor(member, reusable, agent),
+      content: chatText(stepStartText(step, this.upstreamBasis(run, step), step.dependsOn.length)),
+    });
+  }
+
+  /**
+   * 开工发言的依据：只看 `step.dependsOn`，按依赖顺序解析出上游步骤（没有依赖返回空数组）。
+   * 不调 `memberUpstream`：那个会顺手写交接文件，而这里只要读数据（设计 v2.1 强调不引 LLM 文本）。
+   */
+  private upstreamBasis(run: AiTeamRun, step: AiTeamStep): AiTeamStepBasis[] {
+    if (step.dependsOn.length === 0) return [];
+    const byId = new Map(this.storage.listAiTeamSteps(run.id).map((item) => [item.id, item]));
+    return step.dependsOn
+      .map((id) => byId.get(id))
+      .filter((item): item is AiTeamStep => Boolean(item))
+      .map((item) => ({
+        seq: item.seq,
+        title: item.title,
+        memberName: this.member(run.team, item.memberId)?.name ?? item.memberId,
+        reportPath: item.reportPath,
+      }));
+  }
+
   private memberUpstream(run: AiTeamRun, step: AiTeamStep): AiTeamUpstream | null {
     if (step.dependsOn.length === 0) return null;
     const byId = new Map(this.storage.listAiTeamSteps(run.id).map((item) => [item.id, item]));
@@ -1277,9 +1413,10 @@ export class AiTeamRunner {
     let running: AiTeamStep = { ...step, instructions: step.kind === "leader" ? prompt.message : step.instructions, status: "running", startedAt, sessionId: reusable };
     this.saveStep(running);
     this.notify(run);
-    if (member && step.kind === "work") {
-      this.postNotice(run, `${member.name} 开始「${step.title}」`, reusable, member, agent);
-    }
+    // 开工发言（S4）：就发在这个位置（原来那条居中 notice 的地方），所以候选起不来的那次尝试
+    // 也会留一句「我正在开始工作」+ 随后的降级/失败出口；作者署名与报告同一套口径，
+    // 复用会话时带真实 sessionId，新建在 open 前未知；若 open 失败，失败报告也可能无 ID。
+    if (member && step.kind === "work") this.postStepStart(run, running, member, agent, reusable);
     try {
       if (!member) throw new Error("成员不存在");
       if (!agent) throw new Error("成员没有配置可用的 CLI 候选");
@@ -1582,20 +1719,31 @@ export class AiTeamRunner {
 
   private openChat(run: AiTeamRun, task: WandTask, objective: string, chatHistory?: string | null): void {
     if (!this.chat) return;
+    // 「首次建群」只能在这一拍判定：`open()` 之后 run.chatSessionId 就有值了。
+    // 入群序列（S1–S3）只跟这个分支走，续跑/重启接回/同一个群里开新 run 都不重播（v2.1 规则 1）。
+    const firstChat = !run.chatSessionId;
     try {
-      if (!run.chatSessionId) {
+      if (firstChat) {
         run.chatSessionId = this.chat.open({ task, run, title: `${run.team.name} · ${task.title}` });
       }
     } catch (error) {
       console.error(`[AiTeam] open chat for ${run.id} failed:`, getErrorMessage(error));
       return;
     }
-    const roster = run.team.members.map((member) => member.isLeader ? `${member.name}（负责人）` : member.name).join("、");
     if (objective) this.postUser(run, objective);
-    // 续跑时不说「接手」：用户看得出这是同一轮工作往下走，并把交给团队的历史文件摊开给他核。
-    this.postNotice(run, chatHistory
-      ? `接着这个群聊里上一轮的进度继续；交给负责人和成员的记录见 ${chatHistory}`
-      : `团队「${run.team.name}」接手了这个任务：${roster}`);
+    if (!firstChat) {
+      // 续跑时不说「接手」：用户看得出这是同一轮工作往下走，并把交给团队的历史文件摊开给他核。
+      if (chatHistory) {
+        this.postNotice(run, `接着这个群聊里上一轮的进度继续；交给负责人和成员的记录见 ${chatHistory}`);
+      }
+      return;
+    }
+    // 首次建群：负责人先入群，再按名单邀请其余成员（2–3 条系统行，作者都是负责人）。
+    const leader = leaderOf(run.team);
+    const leaderAgent = leader ? memberAgents(leader)[0] ?? leader.agent : undefined;
+    for (const line of chatIntroLines(run.team)) {
+      this.postNotice(run, line, run.chatSessionId, leader, leaderAgent);
+    }
   }
 
   private postTurn(run: AiTeamRun, turn: ConversationTurn): void {
@@ -1634,8 +1782,8 @@ export class AiTeamRunner {
     if (decision.action === "assign") {
       const assigned = decision.steps.map((item, index) => {
         const name = this.member(run.team, item.memberId)?.name ?? item.memberId;
-        const after = item.after.length > 0 ? `（等第 ${item.after.map((at) => at + 1).join("、")} 项完成后）` : "";
-        return `${index + 1}. **@${name}** ${item.title}${after}`;
+        const basis = assignmentBasisNote(item.after, decision.steps.map((entry) => entry.title));
+        return `${index + 1}. **@${name}** ${item.title}${basis}`;
       });
       lines.push(assigned.join("\n"));
     }

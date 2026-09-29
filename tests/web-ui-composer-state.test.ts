@@ -42,6 +42,17 @@ test("composer hydrates per-session drafts and keeps attachment ownership out of
   assert.deepEqual(h.store.read("B").attachments, []);
 });
 
+test("composer subscribers see session edits and synchronous submit clearing", async () => {
+  const h = harness();
+  const seen: string[] = [];
+  const unsubscribe = h.store.subscribe(() => seen.push(h.store.read("A").text));
+  h.store.edit("A", { text: "准备发送" });
+  await h.store.submit("A", "准备发送", async () => "ok");
+  unsubscribe();
+  h.store.edit("A", { text: "下一条" });
+  assert.deepEqual(seen, ["准备发送", ""]);
+});
+
 test("submit captures and clears synchronously, deduplicates gestures, and leaves the next draft alone", async () => {
   const h = harness();
   const attachment = image("a.png");

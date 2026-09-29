@@ -110,7 +110,7 @@ export const AI_TEAM_TERMINAL_RUN_STATUSES: readonly AiTeamRunStatus[] = ["done"
 export interface AiTeamRun {
   id: string;
   teamId: string;
-  /** 启动时的团队快照；之后改团队不影响已开始的运行。 */
+  /** 执行快照；仅 runner 在明确续跑/回复边界按规则刷新，展示层改名不写回这里。 */
   team: AiTeam;
   taskId: string;
   objective: string;
@@ -139,6 +139,25 @@ export interface AiTeamRunChatMarker {
   runId: string;
   teamName: string;
   memberCount: number;
+}
+
+/**
+ * 会话列表用的成员步骤标记：`ai_team_steps.session_id` → 这一步的身份（`AiTeamStepSessionMarker` 索引的 value）。
+ * 派发出来的会话没有人类起的标题，列表用 `title` 当短标题；`runFinished` 决定它算进行中还是历史。
+ * 成员名按当前团队定义投影，团队或成员被删时退回运行快照，和群聊署名同一套规则。
+ */
+export interface AiTeamStepSessionMarker {
+  runId: string;
+  stepId: string;
+  kind: AiTeamStepKind;
+  /** 这一步的任务标题，短、稳定。 */
+  title: string;
+  memberId: string;
+  memberName: string;
+  teamName: string;
+  stepStatus: AiTeamStepStatus;
+  runStatus: AiTeamRunStatus;
+  runFinished: boolean;
 }
 
 export type AiTeamStepKind = "leader" | "work";
@@ -220,6 +239,8 @@ export interface AiTeamRunDetail {
   steps: AiTeamStep[];
   /** 运行中步骤所在会话的实时状态（等待授权 / 等待回答等）。 */
   memberStates: Record<string, AgentActivityState>;
-  /** 群聊 relay 会话的消息，截尾 AI_TEAM_DETAIL_CHAT_TURNS 条；没有群聊会话的旧运行为空数组。 */
+  /** 仅供展示：运行时成员顺序/职责保持快照，仍存在的成员按 id 取当前名字/头像。不得用于派工。 */
+  displayTeam?: AiTeam;
+  /** 群聊 relay 会话的原始消息；作者和正文是历史记录，不因改名而改写。 */
   chatTurns: ConversationTurn[];
 }

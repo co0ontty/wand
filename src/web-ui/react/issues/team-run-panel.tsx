@@ -3,13 +3,14 @@ import type { AgentActivityState } from "../../../mission-types";
 import {
   aiTeamsRepository,
   subscribeAiTeamRunChanges,
+  subscribeAiTeamDefinitionChanges,
   type AiTeamMember,
   type AiTeamRun,
   type AiTeamRunDetail,
   type AiTeamStep,
 } from "../ai-teams/repository";
 import { TeamAvatar, TeamAvatarStack, type TeamAvatarState } from "../ai-teams/avatar";
-import { TeamChatView } from "../ai-teams/team-chat-view";
+import { displayTeamOf, TeamChatView } from "../ai-teams/team-chat-view";
 import { failureMessage } from "../errors";
 import { issueAgentProviderLabel } from "./task-board-agent";
 import { taskBoardController } from "./task-board-controller";
@@ -261,7 +262,8 @@ export function TeamRunView({
   const active = ACTIVE.includes(run.status);
   const budgetSpent = run.stepsUsed >= run.stepLimit;
   const needsYou = run.status === "awaiting_approval" || run.status === "waiting_user";
-  const members = [...run.team.members].sort((a, b) => Number(b.isLeader) - Number(a.isLeader));
+  const displayTeam = displayTeamOf(detail);
+  const members = [...displayTeam.members].sort((a, b) => Number(b.isLeader) - Number(a.isLeader));
 
   // 切到另一次运行，或运行进入新的等待态时，清掉上一轮的输入。
   React.useEffect(() => { setText(""); setError(""); }, [run.id, run.status]);
@@ -281,7 +283,7 @@ export function TeamRunView({
     key={step.id}
     step={step}
     steps={steps}
-    member={run.team.members.find((item) => item.id === step.memberId)}
+    member={displayTeam.members.find((item) => item.id === step.memberId)}
     memberState={step.sessionId ? memberStates[step.sessionId] : undefined}
     open={openStepId === step.id}
     onToggle={() => setOpenStepId((current) => current === step.id ? "" : step.id)}
@@ -297,8 +299,8 @@ export function TeamRunView({
   return <div className="task-board-team-run" data-status={run.status}>
     <div className="task-board-team-run-head">
       <span className="task-board-team-run-kicker">团队运行</span>
-      <TeamAvatarStack members={run.team.members} size="sm"/>
-      <strong>{run.team.name}</strong>
+      <TeamAvatarStack members={displayTeam.members} size="sm"/>
+      <strong>{displayTeam.name}</strong>
       <WandBadge tone={status.tone}>{status.label}</WandBadge>
       <small>步数 {run.stepsUsed}/{run.stepLimit}</small>
       {run.chatSessionId ? <WandButton kind="secondary" size="small" onClick={() => taskBoardController.open("", "", "teamchat", run.id)}>
@@ -455,6 +457,9 @@ export function TaskTeamRunPanel({
   React.useEffect(() => subscribeAiTeamRunChanges((change) => {
     if (change.taskId === taskId || change.runId === latestId) void load();
   }), [latestId, load, taskId]);
+  React.useEffect(() => subscribeAiTeamDefinitionChanges((teamId) => {
+    if (teamId === detail?.run.teamId) void load();
+  }), [detail?.run.teamId, load]);
 
   if (!detail) return null;
   return <section className="task-board-team" aria-label="AI 团队">

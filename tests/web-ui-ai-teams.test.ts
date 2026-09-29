@@ -21,31 +21,52 @@ import { usableTeamWorkspaceId } from "../src/web-ui/react/workspaces/workspace-
 import { agentTargetOptions, agentTargetTeamId } from "../src/web-ui/react/issues/agent-fields.js";
 import {
   agentSignatureLabel,
+  acknowledgedChatFingerprint,
+  chatAvatarSpec,
   chatSendDefinitelyRejected,
+  CHAT_EMPTY_BODY,
+  CHAT_EXPAND_LABEL,
   CHAT_INPUT_PLACEHOLDER,
+  CHAT_SELF_NAME,
   chatInputHint,
+  chatAttachmentIsImage,
+  chatAttachmentPrompt,
+  chatUploadUrl,
+  collapsedPreview,
   teamChatComposerMode,
+  teamChatMessageShape,
   teamRunIsActive,
   teamOfficeMembers,
+  displayChatTurn,
+  displayTeamOf,
   chatMessageBody,
   chatMessageUrl,
+  chatTurnFingerprint,
+  projectChatTurns,
   chatTurnKind,
   chatTurnText,
+  chatTimeMarker,
   isConfirmedBy,
   isFollowingTail,
   liveOmittedText,
   liveStateLabel,
   LIVE_EMPTY_TEXT,
+  mentionSegments,
+  mergeTeamChatDetail,
+  mergeTeamChatTurns,
   mergeLiveRows,
   MOTION_QUICK_EXIT_VAR,
   needsCollapse,
   orderLiveSteps,
   parseMotionDurationMs,
   parseStepReport,
+  parseChatAttachments,
   pruneExpiredLeaving,
+  reportTypeLabel,
   settleLocalTurns,
   shouldFollowTail,
   splitLeaderMessage,
+  teamChatScope,
   type LocalChatTurn,
 } from "../src/web-ui/react/ai-teams/team-chat-view.js";
 import type { AiTeamLiveStep, AiTeamRunDetail } from "../src/ai-team-types.js";
@@ -89,6 +110,33 @@ test("团队工位从步骤和会话状态投影，待授权与已完成分层",
     ["attention", "待授权", "实现接口", "dev-session"],
     ["queued", "排队中", "审查接口", null],
   ]);
+});
+
+test("群聊改名只投影可见身份，原始消息指纹和旧引用保持不变", () => {
+  const snapshot = { id: "team-1", name: "旧群名", updatedAt: "2026-01-01T00:00:00Z", members: [
+    { id: "m_dev", name: "旧名字", avatar: "cat:1", duty: "开发" },
+  ] } as AiTeam;
+  const current = { ...snapshot, name: "新群名", updatedAt: "2026-01-02T00:00:00Z",
+    members: [{ ...snapshot.members[0]!, name: "新名字", avatar: "cat:2" }] };
+  const raw: ConversationTurn = { role: "assistant", author: { id: "m_dev", name: "旧名字", avatar: "cat:1", sessionId: "s1" },
+    content: [{ type: "text", text: "@旧名字 已经处理" }] };
+  const detail = { run: { id: "run-1", updatedAt: "2026-01-01T00:00:00Z", team: snapshot },
+    displayTeam: current, steps: [], memberStates: {}, chatTurns: [raw] } as AiTeamRunDetail;
+  assert.equal(displayTeamOf(detail).name, "新群名");
+  assert.equal(teamOfficeMembers(detail)[0]?.member.name, "新名字");
+  const fingerprint = chatTurnFingerprint(raw);
+  const visible = displayChatTurn(raw, displayTeamOf(detail));
+  assert.equal(visible.author?.name, "新名字");
+  assert.equal(visible.author?.avatar, "cat:2");
+  assert.equal(visible.author?.sessionId, "s1");
+  assert.equal(chatTurnText(visible), "@旧名字 已经处理");
+  assert.equal(chatTurnFingerprint(raw), fingerprint, "消息原文和账本身份不可变");
+  assert.equal(displayChatTurn({ ...raw, author: { id: "deleted", name: "离职成员" } }, current).author?.name, "离职成员");
+  assert.equal(displayTeamOf({ ...detail, displayTeam: undefined }), snapshot, "旧服务端仍可展示快照");
+  const staleRun = { ...detail, run: { ...detail.run, updatedAt: "2025-12-31T00:00:00Z" },
+    displayTeam: { ...snapshot, updatedAt: "2025-12-31T00:00:00Z" } };
+  assert.equal(mergeTeamChatDetail(detail, staleRun).displayTeam?.name, "新群名",
+    "旧运行请求不能回退新署名");
 });
 
 test("群聊只把明确拒收判为可恢复草稿，未知送达留未确认", () => {
@@ -140,11 +188,11 @@ test("团队页与群聊页头部：返回箭头只在列表态出现，收起�
   assert.match(chat, /aria-label="返回上一会话"/);
   assert.doesNotMatch(chat, /aria-label="返回工作区"/);
   // 「完整会话记录」只在真的挂了 chat 会话、且外层给了打开会话的回调时才出现，避免点了没反应的死按钮。
-  assert.match(chat, /\{detail\.run\.chatSessionId && onOpenSession \? <WandButton/);
-  assert.match(chat, /onOpenSession\(detail\.run\.chatSessionId!\)/);
+  assert.match(chat, /\{visibleDetail\.run\.chatSessionId && onOpenSession \? <WandButton/);
+  assert.match(chat, /onOpenSession\(visibleDetail\.run\.chatSessionId!\)/);
   // 顶栏只保留群状态；停止入口仍由群聊输入栏承接，避免首屏重复操作。
   assert.doesNotMatch(chat, /aria-label="停止团队"/);
-  assert.match(chatSource, /aiTeamsRepository\.stop\(run\.id\)/);
+  assert.match(chatSource, /const stopRunId = run\.id;[\s\S]*aiTeamsRepository\.stop\(stopRunId\)/);
   // 群聊页用的是 title 变体，样式里不该再留 compact 变体的死选择器。
   const chatStyles = read("react/ai-teams/styles.ts");
   assert.doesNotMatch(chatStyles, /\.wand-team-chat-crumb\.is-compact/);
@@ -153,7 +201,7 @@ test("团队页与群聊页头部：返回箭头只在列表态出现，收起�
 test("群聊页对话区下方展示工作任务二级目录", () => {
   const page = read("react/ai-teams/team-chat-page.tsx");
   // 目录沉在对话区下方，数据来自已加载的 detail（run/steps），运行推进仍走 ai-team-run 通知，不轮询。
-  assert.match(page, /<WorkTaskTree detail=\{detail\} onOpenSession=\{onOpenSession\}\/>/);
+  assert.match(page, /<WorkTaskTree detail=\{visibleDetail\} onOpenSession=\{onOpenSession\}\/>/);
   assert.match(page, /detail\.steps\.filter\(\(step\) => step\.kind === "work"\)/, "一级只列派发给成员的工作步骤");
   assert.match(page, /<TeamAvatar member=\{member\}[\s\S]*?state=\{stepAvatarState\(step\.status\)\}/, "二级带归属成员头像");
   assert.match(page, /onOpenSession\(step\.sessionId!\)/, "二级里的会话跳转复用群聊页成员跳转路径");
@@ -468,11 +516,14 @@ test("[T7] 团队列表轻缓存：运行通知不失效，团队页保存才失
   const list = body.slice(body.indexOf("list(): Promise<AiTeam[]>"), body.indexOf("async create"));
   assert.match(list, /if \(teamList\) return Promise\.resolve\(teamList\)/);
   assert.match(list, /if \(!teamListPending\)/, "并发只发一次请求");
-  assert.match(list, /teamListPending = null/, "失败不留缓存");
-  assert.equal(body.match(/teamList = null/g)?.length, 3, "只有 create/update/remove 各清一次");
-  const notify = body.slice(body.indexOf("export function notifyAiTeamRunChanged"), body.indexOf("const runUrl"));
-  assert.ok(notify.includes("subscribeAiTeamRunChanges"), "片段应是运行通知那两个函数");
-  assert.doesNotMatch(notify, /teamList/, "ai-team-run 通知不重拉团队定义");
+  assert.match(list, /if \(teamListPending === pending\) teamListPending = null/, "旧请求不能清掉新请求");
+  assert.match(list, /if \(version === teamListVersion\) teamList = list/, "改名期间返回的旧名单不回填缓存");
+  assert.match(body, /function invalidateTeamList\(\): void/, "定义变更共用失效入口");
+  const runNotify = body.slice(body.indexOf("export function notifyAiTeamRunChanged"),
+    body.indexOf("type TeamListener"));
+  assert.doesNotMatch(runNotify, /teamList/, "运行状态通知不重拉团队定义");
+  assert.match(body, /function notifyAiTeamDefinitionChanged\(teamId: string\): void \{\s*invalidateTeamList\(\);/,
+    "定义变更统一清缓存并广播");
 });
 
 test("[T7] 团队页「直接开工」原位展开，提交期间禁点，结果不靠 Toast", () => {
@@ -561,6 +612,7 @@ test("[T8] team-chat-view 进 chunk、主包不含它，借的模块靠注册表
 // 必须另有定义」—— 否则就会有一帧「节点已渲染、样式还没到」。
 // 下面这份共享清单是当前事实（团队页头像两处都用），它由断言算出来，不是手工豁免。
 const SHARED_CHUNK_CLASSES = [
+  "composer-plus-popover",
   "task-board-create-button",
   "wand-stretch-tabs",
   "wand-settings-save-bar",
@@ -568,6 +620,9 @@ const SHARED_CHUNK_CLASSES = [
   "wand-team-avatar-cat",
   "wand-team-avatar-stack",
   "wand-team-coat",
+  // 全文弹层沿用通用弹层的几何类（设计 §6.3 要求带 .wand-team-chat-doc-dialog 一起覆盖，
+  // 提高特异性但不是给 base 重定义），base.ts 里已有定义，不会出现首帧裸样式。
+  "wand-ui-dialog-content",
 ].sort();
 
 /** 整词匹配类名：既不让 `wand-teams-list` 冒充 `wand-teams-list-head`，也认 CSS 里的 `.name` 写法。 */
@@ -646,13 +701,43 @@ test("[T8] 群聊输入走 messages 端点，请求体字段是 input 不是 tex
   assert.equal(Object.hasOwn(chatMessageBody("批准"), "text"), false, "不能发 text 字段");
   assert.equal(Object.hasOwn(chatMessageBody("批准"), "interrupt"), false, "插话不带 interrupt");
   const body = stripComments(chatSource);
-  assert.match(body, /requestJson\(chatMessageUrl\(sessionId\), jsonBody\(chatMessageBody\(text\)\)\)/);
+  assert.match(body, /requestJson\(chatMessageUrl\(sessionId\), jsonBody\(chatMessageBody\(message\)\)\)/);
   assert.doesNotMatch(body, /new WebSocket|\/ws\b|io\.sockets/, "不新增 WS 消息类型");
   assert.equal(chatInputHint("awaiting_approval"), "回复『批准』即开工，其他内容会作为修改意见转给负责人");
   assert.equal(chatInputHint("running"), "将作为插话，负责人下一轮看到");
   assert.equal(chatInputHint("done"), "发消息会接着这一轮的进度开新一轮", "跑完再说话是接着开新一轮，先说清行为");
   assert.equal(chatInputHint("stopped"), chatInputHint("done"));
   assert.equal(chatInputHint("failed"), chatInputHint("done"));
+});
+
+test("群聊图片和文件上传沿用会话接口，回显只隐藏路径前缀", () => {
+  assert.equal(chatUploadUrl("relay/1"), "/api/sessions/relay%2F1/upload");
+  const files = [
+    { savedPath: "/workspace/.wand-uploads/1790-aabbccdd-screen.png" },
+    { savedPath: "/workspace/.wand-uploads/1790-aabbccdd-notes.pdf" },
+  ];
+  const prompt = chatAttachmentPrompt(files, "请看图和文档");
+  assert.deepEqual(parseChatAttachments(prompt), {
+    paths: files.map((file) => file.savedPath), body: "请看图和文档",
+  });
+  assert.equal(parseChatAttachments("普通消息").body, "普通消息");
+  assert.equal(parseChatAttachments(chatAttachmentPrompt(files, "")).body, "请查看附件。");
+  assert.equal(chatAttachmentIsImage(files[0]!.savedPath), true);
+  assert.equal(chatAttachmentIsImage(files[1]!.savedPath), false);
+  assert.match(chatSource, /teamChatComposer\.submit\(sessionId, text, async \(payload\) =>/);
+  assert.match(chatSource, /form\.append\("files", item\.file, item\.name\)/);
+  assert.match(chatSource, /<ChatAttachments paths=\{parsed\.paths\}\/>/);
+});
+
+test("群聊时间标签只在开场或长时间间隔出现", () => {
+  const now = new Date("2026-09-29T12:00:00+08:00");
+  const first = { createdAt: "2026-09-29T07:40:00+08:00" };
+  const soon = { createdAt: "2026-09-29T07:50:00+08:00" };
+  const later = { createdAt: "2026-09-29T09:40:00+08:00" };
+  assert.equal(chatTimeMarker(first, undefined, now), "今天 07:40");
+  assert.equal(chatTimeMarker(soon, first, now), "");
+  assert.equal(chatTimeMarker(later, soon, now), "今天 09:40");
+  assert.equal(chatTimeMarker({ createdAt: "2026-09-28T07:40:00+08:00" }, undefined, now), "昨天 07:40");
 });
 
 test("群聊输入栏发送 ⇄ 停止：未结束的运行占发送的位置，有草稿时两者并排", () => {
@@ -671,11 +756,14 @@ test("群聊输入栏发送 ⇄ 停止：未结束的运行占发送的位置，
   assert.equal(teamChatComposerMode("failed", false), "blocked");
   assert.equal(teamChatComposerMode("running", false, "send"), "send-and-stop", "发送中清掉草稿仍留发送按钮");
   assert.equal(teamChatComposerMode("done", false, "send"), "send");
-  const body = stripComments(chatSource);
-  assert.match(body, /composerMode === "send-and-stop" \|\| composerMode === "stop"/);
-  assert.match(body, /aiTeamsRepository\.stop\(run\.id\)/);
+  const body = chatSource;
+  assert.match(body, /composerMode === "send-and-stop" \? <button/);
+  assert.match(body, /const stopRunId = run\.id;[\s\S]*aiTeamsRepository\.stop\(stopRunId\)/);
   assert.match(body, /aria-label="停止团队"/);
-  assert.match(body, /composerMode === "stop" \? null : <WandButton/, "空草稿时发送让位给停止，不占第二枚按钮");
+  assert.match(body, /const primaryStops = composerMode === "stop";/);
+  assert.match(body, /data-phase=\{primaryPhase\}/, "空草稿时停止占据发送按钮原位");
+  assert.match(body, /<ComposerAttachmentList/, "待发送附件共用普通会话预览组件");
+  assert.match(body, /className="input-composer-row"/, "输入框共用普通会话的布局与样式");
 });
 
 test("[T8] 群聊输入框占位文案不等于任何引导语：空输入框同一句话只显示一遍", () => {
@@ -701,28 +789,111 @@ test("[T8] 群聊页按 chat 会话跟随新运行：接着开一轮后状态与
   assert.match(page, /newerRunIdOnSameChat\(next\)/, "重拉时也判一次，不停在旧运行的 chatTurns 上");
   // 跟随只在同一个群聊会话内生效，别的 chat 不属于这一页。
   assert.match(page, /runs\.filter\(\(run\) => run\.chatSessionId === chatSessionId\)|sameChat\[0\]/);
+  assert.match(page, /const epoch = \+\+loadEpochRef\.current;/);
+  assert.match(page, /epoch !== loadEpochRef\.current \|\| currentRunRef\.current !== runId/,
+    "旧的详情请求与同 chat 查询都不能盖过后来的导航");
+  assert.match(page, /continuingRunRef\.current = newer;\s*taskBoardController\.open\("", "", "teamchat", newer\)/,
+    "自动跟随后保留旧 View，直到新 run 详情到达");
+  assert.match(page, /if \(continuingRunRef\.current !== runId\) \{\s*continuingRunRef\.current = "";\s*setDetail\(null\);/,
+    "手动切到别的群聊仍卸载旧 View");
+  assert.match(page, /if \(next\.run\.id === currentRunRef\.current\) \{\s*setDetail\(\(current\) => mergeTeamChatDetail\(current, next\)\);/,
+    "旧 View 异步回包不能把新 run 拉回去");
+  assert.match(page, /setDetail\(\(current\) => mergeTeamChatDetail\(current, next\)\)/,
+    "页面同 run 的并发重拉只合入较新的详情");
+  assert.match(page, /staleRun=\{showingPreviousRun\}/,
+    "跟随新 run 的过渡期保留旧输入，但禁止旧 run 的发送和停止");
 });
 
-test("[T8] 乐观临时行：确认靠 user 回合 + 发送时刻粗匹配，重拉失败留「未确认」", () => {
+test("[T8] 乐观临时行：ACK 服务端指纹优先；无 ACK 才用已见基线和有界时间窗", () => {
   const sentAt = Date.parse("2026-09-27T10:00:00.000Z");
   const row = localRow("把报告写短一点", sentAt);
-  assert.equal(isConfirmedBy(userTurn("收到", new Date(sentAt + 500).toISOString()), sentAt), true);
-  assert.equal(isConfirmedBy(userTurn("收到", new Date(sentAt - 1).toISOString()), sentAt), false, "早于发送时刻的是上一轮");
-  assert.equal(isConfirmedBy({ role: "assistant", content: [{ type: "text", text: "好" }], createdAt: new Date(sentAt + 500).toISOString() }, sentAt), false);
-  assert.equal(isConfirmedBy(userTurn("没有时刻", ""), sentAt), false, "没有 createdAt 不认");
+  assert.equal(isConfirmedBy(userTurn(row.text, new Date(sentAt + 500).toISOString()), sentAt, row.text), true);
+  assert.equal(isConfirmedBy(userTurn("别人发的话", new Date(sentAt + 500).toISOString()), sentAt, row.text), false,
+    "别的客户端稍晚发言不能撤掉自己的临时行");
+  const oldSameText = userTurn(row.text, new Date(sentAt - 1).toISOString());
+  assert.equal(isConfirmedBy(oldSameText, sentAt, row.text, [chatTurnFingerprint(oldSameText)!]), false,
+    "发送前已见的同文旧话不能确认本次提交");
+  assert.equal(isConfirmedBy(userTurn(row.text, new Date(sentAt - 6 * 60_000).toISOString()), sentAt, row.text), false,
+    "无 ACK 的回退匹配不能越过五分钟窗口");
+  assert.equal(isConfirmedBy({ role: "assistant", content: [{ type: "text", text: row.text }], createdAt: new Date(sentAt + 500).toISOString() }, sentAt, row.text), false);
+  assert.equal(isConfirmedBy(userTurn(row.text, ""), sentAt, row.text), false, "没有 createdAt 不认");
 
   const turns = [userTurn("旧话", new Date(sentAt - 9e5).toISOString()), userTurn(row.text, new Date(sentAt + 300).toISOString())];
   assert.deepEqual(settleLocalTurns([row], turns), [], "服务端已回显 → 撤掉临时行");
   assert.deepEqual(settleLocalTurns([row], [userTurn("别的", new Date(sentAt - 9e5).toISOString())]), [row]);
+  assert.deepEqual(settleLocalTurns([row], [userTurn("别的", new Date(sentAt + 300).toISOString())]), [row],
+    "较新的其他消息仍不能确认本地行");
+  const duplicate = localRow(row.text, sentAt + 1);
+  assert.deepEqual(settleLocalTurns([row, duplicate], [userTurn(row.text, new Date(sentAt + 300).toISOString())]),
+    [duplicate], "一条服务端回合只能确认一条本地行");
+  assert.deepEqual(settleLocalTurns([{ ...row, accepted: false, unconfirmed: true }], turns),
+    [{ ...row, accepted: false, unconfirmed: true }], "送达未知时不能靠同文回合猜测成功");
   assert.deepEqual(settleLocalTurns([row], null), [localRow(row.text, sentAt, true)], "重拉失败 → 留着标未确认");
   assert.match(chatSource, /未确认/);
+});
+
+test("[T8] 客户端时钟快于服务端仍用成功 ACK 的唯一新回合撤临时行", () => {
+  const sentAt = Date.parse("2026-09-27T10:10:00.000Z");
+  const text = "继续检查报告";
+  const known = userTurn(text, new Date(sentAt - 10 * 60_000).toISOString());
+  const echoed = userTurn(text, new Date(sentAt - 7 * 60_000).toISOString());
+  const baseline = [chatTurnFingerprint(known)!];
+  const ack = acknowledgedChatFingerprint({ messages: [known, echoed] }, text, baseline);
+  assert.equal(ack, chatTurnFingerprint(echoed));
+  assert.equal(isConfirmedBy(echoed, sentAt, text, baseline), false, "七分钟偏差超出模糊匹配窗口");
+  const accepted = { ...localRow(text, sentAt), accepted: true, knownFingerprints: baseline,
+    ackFingerprint: ack! };
+  assert.deepEqual(settleLocalTurns([accepted], [known, echoed]), [], "服务端 ACK 能唯一确认回显");
+  assert.equal(acknowledgedChatFingerprint({ messages: [known, echoed, { ...echoed }] }, text, baseline), null,
+    "两个无法区分的同文新回合不猜哪条是本次提交");
+  assert.equal(acknowledgedChatFingerprint({ messages: [echoed] }, text, baseline), null,
+    "旧窗与 ACK 完全无重叠时不推断新尾");
+});
+
+test("[T8] 同 run 详情只推进消息窗和步骤，迟到旧 GET 不覆盖 WS 新回合", () => {
+  const [a, b, c, d] = ["A", "B", "C", "D"].map((text, index) =>
+    userTurn(text, `2026-09-27T10:00:0${index}.000Z`));
+  assert.deepEqual(mergeTeamChatTurns([a, b, c], [a, b]), [a, b, c], "旧 GET 的短窗不回退");
+  assert.deepEqual(mergeTeamChatTurns([a, b, c], [b, c, d]), [a, b, c, d], "连续重叠才能补新尾");
+  assert.deepEqual(mergeTeamChatTurns([a, b, c], [d]), [a, b, c], "无重叠时不猜顺序");
+  const before = { run: { id: "run-1", status: "done", updatedAt: "2026-09-27T10:00:03.000Z",
+    stepsUsed: 3 }, steps: [{ status: "done" }], chatTurns: [a, b, c], memberStates: {} } as AiTeamRunDetail;
+  const stale = { ...before, run: { ...before.run, status: "running",
+    updatedAt: "2026-09-27T10:00:02.000Z", stepsUsed: 1 }, steps: [], chatTurns: [a, b] } as AiTeamRunDetail;
+  assert.deepEqual(mergeTeamChatDetail(before, stale), before, "旧状态、旧步骤和旧聊天均不能回退");
+  const newRun = { ...stale, run: { ...stale.run, id: "run-2" } } as AiTeamRunDetail;
+  assert.equal(mergeTeamChatDetail(before, newRun), newRun, "另一轮的状态和步骤直接切换");
+});
+
+test("[T8] 同一 relay 群聊接续运行时维持消息与草稿作用域，切群聊才隔离", () => {
+  const first = teamChatScope({ id: "run-1", chatSessionId: "chat-1" });
+  assert.equal(teamChatScope({ id: "run-2", chatSessionId: "chat-1" }), first);
+  assert.notEqual(teamChatScope({ id: "run-3", chatSessionId: "chat-2" }), first);
+  assert.notEqual(teamChatScope({ id: "run-4", chatSessionId: null }), first);
+  assert.notEqual(teamChatScope({ id: "run-4", chatSessionId: null }),
+    teamChatScope({ id: "run-5", chatSessionId: null }));
+  assert.match(chatSource, /const scope = teamChatScope\(run\);/);
+  assert.match(chatSource, /if \(composerScopeRef\.current === scope\) return;/);
+  assert.match(chatSource, /setLocal\(\[\]\);\s*setError\(""\);\s*setPending\(""\);\s*listPinnedRef\.current = true;\s*\}, \[scope\]\);/);
+  assert.match(chatSource, /teamChatComposer\.read\(chatSessionId\)/, "草稿与附件由会话 Composer 持有");
+  assert.match(chatSource, /const requestedRunId = activeRunRef\.current\.runId;/);
+  assert.match(chatSource, /activeRunRef\.current\.epoch === sendEpoch/,
+    "A→B→A 的旧请求也不能误以为还属于当前群聊实例");
+  assert.match(chatSource, /activeRunRef\.current\.runId === requestedRunId\s*&& latestDetailRef\.current\.run\.id === requestedRunId/,
+    "旧发送回包不覆盖正在看的新 run");
+  assert.match(chatSource, /const merged = mergeTeamChatDetail\(latestDetailRef\.current,/,
+    "发送后仅合入可证明的新聊天尾部，不回退较新的运行状态");
+  assert.match(chatSource, /const primaryDisabled = busy \|\| staleRun \|\| composerMode === "blocked";[\s\S]*disabled=\{primaryDisabled\}/,
+    "新一轮详情未就绪时，保留草稿但禁用旧 run 发送入口");
 });
 
 test("[T8] 群聊沿用消息类名，技术签名不反复挤进发言行", () => {
   assert.match(chatSource, /className="chat-message chat-notice"/);
   assert.match(chatSource, /className="chat-notice-line"/, "降级 notice 走居中弱化行");
-  assert.match(chatSource, /className="chat-message-avatar assistant chat-message-author"/);
-  assert.match(chatSource, /className="chat-author-badge">负责人/);
+  assert.match(chatSource, /className="chat-message assistant team-chat-msg"/, "消息行仍沿用普通会话的消息类名");
+  assert.doesNotMatch(chatSource, /className="chat-message-avatar assistant chat-message-author"/,
+    "署名行不再借用普通会话的头像槽（它会把头像塞进文本流里）");
+  assert.match(chatSource, /badge="负责人"/, "负责人徽标仍在这一行上，只是换成属性传");
   assert.doesNotMatch(chatSource, /wand-team-chat-provider/, "模型信息不反复出现在群聊发言行");
   assert.equal(chatTurnText(userTurn("第一行\n第二行", "")), "第一行\n第二行");
   for (const rel of ["react/ai-teams/team-chat-view.tsx"]) {
@@ -744,6 +915,164 @@ test("[T8] 时间线备用候选在原位展开被跳原因，收起是倒放", 
   assert.match(skipBlock, /grid-template-rows: 0fr/);
   assert.match(skipBlock, /var\(--motion-normal\)/);
   assert.doesNotMatch(skipBlock, /:[^;]*\b\d+(?:ms|s)\b/, "展开时长必须是 token");
+});
+
+// ---------- [T8] 群聊消息 IM 化：头像 + 名字、气泡/文档卡分流、点击展开弹层 ----------
+
+test("[T8] 形态分流：notice 居中、自己的发言走气泡、超长或含派工清单走文档卡", () => {
+  assert.equal(teamChatMessageShape("notice", "团队已停止"), "notice");
+  assert.equal(teamChatMessageShape("user", "啊".repeat(500)), "bubble", "自己的长消息仍是气泡，只是预览 + 点击展开");
+  assert.equal(teamChatMessageShape("step", "T1 改完了"), "bubble", "短发言不套文档卡");
+  assert.equal(teamChatMessageShape("step", "行\n".repeat(9)), "document", "超行数阈值走文档卡");
+  assert.equal(teamChatMessageShape("step", "啊".repeat(421)), "document", "超字符阈值走文档卡");
+  assert.equal(teamChatMessageShape("leader", "先做后端", 2), "document", "含派工清单就是文档性质");
+  assert.equal(teamChatMessageShape("leader", "要不要改目录？", 0), "bubble", "负责人发短消息也还是气泡");
+});
+
+test("[T8] 预览 = 前 6 行且不超过 420 字，被截断一定以 … 结尾", () => {
+  assert.equal(collapsedPreview("短报告"), "短报告");
+  assert.equal(needsCollapse(collapsedPreview("短报告")), false, "没截断就不出展开入口");
+  const byLines = collapsedPreview("行\n".repeat(9));
+  assert.equal(byLines.endsWith("…"), true, "行数截断要补省略号");
+  assert.equal(byLines.split("\n").length, 6);
+  const byChars = collapsedPreview("啊".repeat(500));
+  assert.equal(byChars.length, 421, "420 字 + 一个省略号（与 Android 单测同值）");
+  assert.equal(byChars.endsWith("…"), true);
+  const plain = "第一行\n第二行";
+  assert.equal(collapsedPreview(plain), plain, "没超阈值时预览就是全文");
+  assert.equal(needsCollapse(plain), false);
+});
+
+test("[T8] 头像解析：上传图 > 显式毛色 > 派生毛色 > 默认 APP logo", () => {
+  assert.deepEqual(chatAvatarSpec({ id: "m_impl", name: "实现者" }),
+    { kind: "cat", coat: memberCoatIndex({ id: "m_impl", name: "实现者" }) }, "没选毛色的成员用派生毛色（与团队页同一张脸）");
+  assert.deepEqual(chatAvatarSpec({ id: "m_impl", name: "实现者", avatar: "cat:3" }), { kind: "cat", coat: 3 });
+  assert.deepEqual(chatAvatarSpec({ id: "m_impl", name: "实现者", avatar: "data:image/png;base64,AAA" }),
+    { kind: "upload", src: "data:image/png;base64,AAA" });
+  assert.deepEqual(chatAvatarSpec(null), { kind: "brand" }, "没有署名的发言（用户自己）用默认 APP logo");
+  assert.deepEqual(chatAvatarSpec({ id: "", name: "", avatar: "说不清的取值" }), { kind: "brand" },
+    "非法 avatar 且定位不到身份也不渲染空 <img>");
+  assert.deepEqual(chatAvatarSpec({ id: "", name: "实现者", avatar: "说不清的取值" }),
+    { kind: "cat", coat: memberCoatIndex({ id: "", name: "实现者" }) }, "非法 avatar 但能定位身份 → 派生毛色");
+});
+
+test("[T8] 每条发言都有头像 + 名字，自己的发言是「我」+ 默认 APP logo", () => {
+  const body = stripComments(chatSource);
+  assert.equal(CHAT_SELF_NAME, "我");
+  assert.match(chatSource, /export const CHAT_SELF_NAME = "我";/);
+  assert.match(body, /<MessageAvatar spec=\{avatar\}\/>/, "消息行先渲染头像");
+  assert.match(body, /<div className="team-chat-msg-head">/, "然后是署名行");
+  assert.match(body, /data-side=\{side\}/);
+  assert.match(body, /\{sessionId && onOpenSession[\s\S]{0,240}className="avatar-name chat-author-link"/, "成员名字可点进会话");
+  assert.match(body, /: <span className="avatar-name">\{name\}<\/span>\}/, "不可点时名字仍是普通文本");
+  assert.match(chatSource, /avatar=\{\{ kind: "brand" \}\}/, "自己的发言与临时行固定用默认 APP logo");
+  assert.match(body, /<WandBrandMark className="team-chat-avatar-brand"\/>/, "默认头像就是系统 APP logo");
+  assert.match(body, /<PixelCat coat=\{spec\.coat\}\/>/, "成员头像是像素猫");
+  assert.match(body, /<img className="team-chat-avatar-upload" src=\{spec\.src\} alt=""\/>/);
+  // 消息行在 hover 时不位移（普通会话的 .chat-message:hover 会上浮 1px）。
+  assert.match(chatStylesSource, /\.task-board-team-chat \.team-chat-msg:hover \{ transform: none; \}/);
+  assert.match(chatStylesSource, /\.team-chat-avatar \{[\s\S]*?width: 32px;[\s\S]*?height: 32px;[\s\S]*?border-radius: 30%;/, "头像 32px / 圆角 30%");
+});
+
+test("[T8] 超长正文只渲染预览 + 「点击展开」，不藏第二份全文", () => {
+  const body = stripComments(chatSource);
+  const messageBody = body.slice(body.indexOf("function MessageBody("), body.indexOf("function TeamMessageRow("));
+  assert.ok(messageBody.length > 400, "没切到正文块");
+  assert.equal(CHAT_EXPAND_LABEL, "点击展开");
+  assert.equal(CHAT_EMPTY_BODY, "（这条消息没有正文）");
+  assert.match(body, /className="team-chat-preview"><MentionText text=\{collapsedPreview\(body\)\} names=\{names\} source=\{body\}\/>/, "预览用去路径后的正文验证边界");
+  assert.match(body, /\{CHAT_EXPAND_LABEL\}<\/button>/);
+  assert.match(chatSource, /aria-haspopup="dialog"/, "触发点是覆盖层入口");
+  assert.equal(chatSource.match(/className="team-chat-expand"\s*\n\s*aria-expanded=/g)?.length, 1,
+    "只有公告卡的原位展开带 aria-expanded");
+  assert.match(chatSource, /className="team-chat-expand"\s*\n\s*aria-haspopup="dialog"\s*\n\s*onClick=\{onExpand\}/,
+    "消息触发点只有「打开弹层」一个状态，不是两分支硬切");
+  assert.doesNotMatch(messageBody, /-webkit-line-clamp/, "行数截断交给 collapsedPreview，不叠第二层夹取");
+  assert.doesNotMatch(chatStylesSource, /\.team-chat-preview[^}]*line-clamp/, "预览样式只负责排版");
+  assert.doesNotMatch(messageBody, /inert=/, "预览态不靠 inert 藏全文（DOM 里只有一份文本）");
+  assert.match(body, /: list\.length === 0 && parsed\.paths\.length === 0[\s\S]{0,120}CHAT_EMPTY_BODY/, "没有正文和附件才显示空正文");
+});
+
+test("[T8] 点击展开：Portal 弹层显示全文，关闭路径四条齐全且触发点不位移", () => {
+  const body = stripComments(chatSource);
+  assert.match(body, /<WandDialogSurface/, "复用既有弹层，不自造覆盖层");
+  assert.match(body, /open=\{docLayer\?\.phase === "open"\}/);
+  assert.match(body, /if \(!open\) closeDoc\(\)/, "✕ / Escape / 点遮罩都走同一退场路径");
+  assert.match(body, /closeLabel="关闭"/);
+  assert.match(body, /title=\{docLayer\?\.name \?\? ""\}/);
+  assert.match(body, /\[docLayer\.clock, docLayer\.typeLabel\]\.filter\(Boolean\)\.join\(" · "\)/, "副标题 = 时刻 · 类型");
+  assert.match(body, /className=\{\[\s*"wand-ui-dialog-content",\s*"wand-team-chat-doc-dialog"/);
+  assert.match(body, /"wand-doc-dx-end" : "wand-doc-dx-start"/, "水平方向取发言侧");
+  assert.match(body, /"wand-doc-dy-top" : "wand-doc-dy-bottom"/, "垂直方向取触发点上/下半");
+  assert.match(body, /<pre className="team-chat-doc-layer-text" tabIndex=\{0\} data-wand-autofocus>/, "正文可聚焦可滚动");
+  assert.match(body, /<MentionText text=\{parsed\.body\} names=\{layer\.mentionNames\}\/>/, "全文名单来自打开来源快照");
+  assert.match(body, /rect\.top \+ rect\.height \/ 2 < window\.innerHeight \/ 2/, "只在打开时量一次触发点");
+  // 兜底关闭：弹层开着时那条回合消失了就关层。
+  assert.match(body, /chatDocOwnerPresent\(docLayer\.ownerId, docLayer\.scope, projection, local\)/);
+  assert.match(body, /phase: "closing"/);
+  // 弹层正文是整条发言（负责人行给的是未拆分的原文），一定比预览长。
+  assert.match(body, /const text = report \? report\.body : chatTurnText\(turn\);/, "报告剥掉前缀后再进正文块");
+  assert.match(body, /const \{ head, assignments \} = splitLeaderMessage\(text\);/);
+});
+
+test("[T8] 弹层样式：Portal 前缀 + 只用 token + 不碰全局 .chat-*", () => {
+  const layer = chatStylesSource.slice(
+    chatStylesSource.indexOf("/* ---------- 全文弹层"),
+    chatStylesSource.indexOf("/* ---------- 独立群聊页"),
+  );
+  assert.ok(layer.length > 600, "没切到弹层样式块");
+  assert.match(layer, /\.wand-ui-dialog-content\.wand-team-chat-doc-dialog \{/, "覆盖通用弹层几何");
+  assert.match(layer, /width: min\(720px, calc\(100vw - var\(--wand-safe-left\) - var\(--wand-safe-right\) - 32px\)\)/);
+  assert.match(layer, /max-height: min\(72vh, 640px\)/, "高度上限 72vh（与 Android 同比例）");
+  assert.match(layer, /animation: team-chat-doc-in var\(--motion-normal\) var\(--ease-out-expo\)/);
+  assert.match(layer, /animation: team-chat-doc-out var\(--motion-quick-exit\) var\(--ease-in-out-smooth\)/, "退场快于进场");
+  assert.match(layer, /translate: var\(--wand-doc-dx, 0\) var\(--wand-doc-dy, 0\); scale: 0.98/, "translate/scale 是独立属性，不拼 transform");
+  assert.match(layer, /\.wand-doc-dx-start \{ --wand-doc-dx: -10px; \}/);
+  assert.match(layer, /\.team-chat-doc-layer-text \{[\s\S]*?min-height: 40px;/, "空内容也不让滚动区塌陷");
+  assert.doesNotMatch(layer, /!important/);
+  assert.doesNotMatch(layer, /\d+ms\b|cubic-bezier\(/, "时长与曲线只从 token 取");
+  assert.doesNotMatch(layer, /#[0-9a-fA-F]{3,8}\b|rgba?\(/, "只能引用 token");
+  assert.doesNotMatch(layer, /\.chat-message|\.chat-input/, "不碰普通会话聊天的类名");
+  assert.doesNotMatch(layer, /\.wand-team-chat-page /, "弹层不在页面树里，不许写页面后代选择器");
+  // Base UI 靠动画结束卸载：reduce-motion 交给全局兜底，这里不能写 animation: none。
+  assert.doesNotMatch(layer, /animation: none/);
+  const reduced = chatStylesSource.slice(chatStylesSource.indexOf("@media (prefers-reduced-motion: reduce)"));
+  assert.doesNotMatch(reduced, /team-chat-doc/, "reduce-motion 不接管弹层：压掉动画会卡半开");
+});
+
+test("[T8] 新样式全部作用域化：消息层在 .task-board-team-chat 下，弹层用自己的前缀", () => {
+  const block = chatStylesSource.slice(
+    chatStylesSource.indexOf("/* ---------- 消息行（IM）"),
+    chatStylesSource.indexOf("/* ---------- 正在输出的成员"),
+  ).replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.ok(block.length > 1500, "没切到消息行样式块");
+  const selectors = [...block.matchAll(/(^|\})[^{}]*?\{/g)].map((hit) => hit[0].slice(1).trim());
+  assert.ok(selectors.length > 20, `只枚举到 ${selectors.length} 个选择器，枚举方式可能失效`);
+  for (const selector of selectors) {
+    if (selector.startsWith("@")) continue;
+    for (const part of selector.split(",").map((item) => item.trim()).filter(Boolean)) {
+      // .team-chat-step-chip 是署名行与弹层元信息行共用的那一枚，两端同一套样式；
+      // .team-chat-doc-layer 是弹层自己的前缀（G3：Portal 不在 .task-board-team-chat 树里）。
+      assert.ok(
+        part.startsWith(".task-board-team-chat ")
+          || part.startsWith(".team-chat-step-chip")
+          || part.startsWith(".team-chat-doc-layer"),
+        `新增的消息层选择器必须作用域在 .task-board-team-chat 下：${part}`,
+      );
+    }
+  }
+  // 消息层的新类名一个都不许裸着写（裸类名会外泄到普通会话聊天）。
+  const SCOPED = [
+    "team-chat-msg", "team-chat-msg-content", "team-chat-msg-head", "team-chat-avatar",
+    "team-chat-avatar-upload", "team-chat-avatar-brand", "team-chat-bubble", "team-chat-bubble-text",
+    "team-chat-doc", "team-chat-doc-text", "team-chat-preview", "team-chat-msg-empty",
+  ];
+  for (const name of SCOPED) {
+    assert.match(chatStylesSource, new RegExp(`\\.task-board-team-chat \\.${name}\\b`), `${name} 必须作用域在 .task-board-team-chat 下`);
+  }
+  // 弹层经 Portal 渲染，不在页面树里：头像靠 G3 的共享前缀同时命中两个根。
+  assert.match(chatStylesSource, /\.team-chat-doc-layer \.team-chat-avatar\b/);
+  assert.doesNotMatch(chatStylesSource, /\.chat-message-bubble \{|\n\.chat-message \{/, "不重定义普通会话的聊天规则");
 });
 
 // ---------- [T8] 群聊分层：主任务 / 子任务 ----------
@@ -783,9 +1112,19 @@ test("[T8] 子任务报告识别状态前缀，主任务派工拆成任务条目
   ].join("\n"));
   assert.equal(plan.head, "本轮先做后端，再做前端。");
   assert.deepEqual(plan.assignments, [
-    { member: "实现者", title: "T1 类型与存储迁移", wait: "" },
-    { member: "审查者", title: "T1 验收", wait: "等第 1 项完成后" },
+    { member: "实现者", title: "T1 类型与存储迁移", note: "" },
+    { member: "审查者", title: "T1 验收", note: "等第 1 项完成后" },
+  ], "旧数据的「等第 N 项完成后」仍读得出来（同一个 note 槽位）");
+  // 新数据（S5）：`（依据：…）` 取代等待说明，仍然是同一个槽位。
+  const basis = splitLeaderMessage([
+    "1. **@实现者** T1 类型与存储迁移",
+    "2. **@审查者** T1 验收（依据：第 1 步「T1 类型与存储迁移」的产物）",
+  ].join("\n"));
+  assert.deepEqual(basis.assignments, [
+    { member: "实现者", title: "T1 类型与存储迁移", note: "" },
+    { member: "审查者", title: "T1 验收", note: "依据：第 1 步「T1 类型与存储迁移」的产物" },
   ]);
+  assert.equal(basis.assignments[1]!.title.includes("依据"), false, "依据不进标题");
   const ask = splitLeaderMessage("这一步需要你拍板：用哪个目录？");
   assert.equal(ask.head, "这一步需要你拍板：用哪个目录？");
   assert.deepEqual(ask.assignments, [], "没有清单就不是计划卡，照常当正文渲染");
@@ -805,22 +1144,23 @@ test("[T8] 群聊默认聚焦消息，公告和工作详情从一行入口原位
   ).replace(/\/\*[\s\S]*?\*\//g, "");
   assert.match(chatBlock, /\.team-chat-goal \{/, "主任务公告位");
   assert.match(chatBlock, /\.team-chat-goal-label \{/, "主任务标签");
-  assert.match(chatBlock, /\.team-chat-step \{/, "子任务块");
+  assert.match(chatBlock, /\.team-chat-msg \{/, "消息行是头像 + 内容列的两列布局");
+  assert.match(chatBlock, /\.team-chat-msg\[data-side="end"\] \{ flex-direction: row-reverse/, "自己的发言镜像靠右");
   assert.match(chatStylesSource, /\.team-chat-context \{/, "公告摘要保持一行");
   assert.match(chatStylesSource, /\.team-chat-details\[data-open\]/, "详情原位展开");
   assert.match(chatBlock, /\.team-chat-plan-list li \{/, "派工清单是一组任务条目");
-  assert.match(chatBlock, /\.team-chat-step-body,[\s\S]*grid-template-rows: 0fr/, "收起是倒放");
+  assert.match(chatBlock, /\.team-chat-goal-body \{[\s\S]*grid-template-rows: 0fr/, "主任务收起是倒放");
+  assert.match(chatBlock, /\.team-chat-goal-body\[data-open\]/, "主任务展开态");
   assert.match(chatBlock, /var\(--transition-normal\)/);
   assert.doesNotMatch(chatBlock, /\b(?:\d+(?:\.\d+)?)(?:ms|s)\b/, "新的群聊样式不得写死时长");
   assert.doesNotMatch(chatBlock, /#[0-9a-f]{3,8}\b|rgba?\(/, "只能引用 token");
   const reduced = chatStylesSource.slice(chatStylesSource.indexOf("@media (prefers-reduced-motion: reduce)"));
-  assert.match(reduced, /\.team-chat-step-body,/);
   assert.match(reduced, /\.team-chat-goal-body,/);
   assert.match(reduced, /\.team-chat-details,/);
   // 主任务与子任务必须渲染成两个不同层，而不是同一个气泡换个名字。
   assert.match(chatSource, /className="team-chat-goal"/);
-  assert.match(chatSource, /className="chat-message assistant team-chat-step"/);
-  assert.match(chatSource, /className="chat-message assistant chat-message-lead team-chat-plan"/);
+  assert.match(chatSource, /kind="step"/, "成员报告是 step 层");
+  assert.match(chatSource, /kind="leader"/, "负责人发言是 leader 层");
   assert.match(chatSource, /className="team-chat-expand"/);
   assert.match(chatSource, /aria-expanded=\{expanded\}/);
   assert.match(chatSource, /aria-controls=\{detailsId\}/);
@@ -921,13 +1261,14 @@ test("[live] 退场兜底：时长取自动效 token，后台标签页攒下的�
     "styles.ts 的退场动画与 JS 兜底共用同一个动效 token");
 });
 
-test("[live] 换一次运行就重新从尾部开始跟随（与 Android remember(runId) 同口径）", () => {
-  // 上一轮里用户上滚过 → ref 停在 false；不换 run.id 时不重置，新页面一进来就不跟随。
+test("[live] 同 chat 续跑保留滚动锚点；换 chat 才重新从尾部开始跟随", () => {
   assert.match(
     chatSource,
-    /setLocal\(\[\]\);\s*setDraft\(""\);\s*setError\(""\);\s*setPending\(""\);\s*setDetailsOpen\(false\);\s*(?:\/\/[^\n]*\n\s*)?listPinnedRef\.current = true;\s*\}, \[run\.id\]\);/,
-    "重置点在按 run.id 的 effect 里",
+    /if \(lastScopeRef\.current !== scope\) \{\s*anchorRef\.current = null;\s*listPinnedRef\.current = true;\s*lastScopeRef\.current = scope;/,
+    "滚动复位由 relay 群聊作用域控制",
   );
+  assert.match(chatSource, /setDetailsOpen\(false\);\s*closeDoc\(\);\s*\}, \[run\.id, closeDoc\]\);/,
+    "运行级详情切换仍会收起");
 });
 
 test("[live] 外层列表与卡片同一套贴底口径：上滚看历史不被 live 行拽到底", () => {
@@ -985,7 +1326,7 @@ test("[live] 正在输出的成员：chatTurns 之后追加定尺寸内滚卡，
   assert.match(chatSource, /LIVE_CARD_DRAG_PX/, "卡片内拖动滚动不算点开");
   assert.match(chatSource, /pinnedRef\.current = isFollowingTail\(/, "只有贴尾才跟随最新一行");
   assert.match(chatSource, /onOpenSession\(step\.sessionId\)/, "点击进成员会话，复用群聊页跳转路径");
-  assert.match(chatSource, /aria-label=\{`打开\$\{step\.memberName\}正在输出的会话`\}/, "读屏只报名字与动作，不整段朗读正文");
+  assert.match(chatSource, /aria-label=\{`打开\$\{memberName\}正在输出的会话`\}/, "读屏只报最新名字与动作，不整段朗读正文");
   assert.match(chatSource, /if \(row\.leaving && event\.target === event\.currentTarget\) onRetire\(step\.stepId\);/,
     "退场只认这一行自己的动画，头名/卡片分两段进场的 animationend 会冒泡上来");
 });
@@ -1081,4 +1422,171 @@ test("团队页：「新建团队」也先确认，开工成功那条路刻意�
   // 运行时刻的格式交给浏览器，和群聊 chatTurnClock 的 toLocaleTimeString([]) 同一口径。
   assert.match(teams, /new Date\(run\.updatedAt\)\.toLocaleString\(\[\], \{ month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" \}\)/);
   assert.doesNotMatch(teams, /toLocaleString\("zh-CN"/, "不再写死 zh-CN");
+});
+
+// ---------- [v2] 群聊开场与协作流转（入群序列 / 开工发言 / @ 流转） ----------
+
+test("[v2] @ 流转：mentionSegments 按 roster 最长优先 + 前边界命中", () => {
+  const names = ["实现者", "审查者", "设计师", "设计"];
+  // 最长优先：`@设计师` 命中「设计师」而不是「设计」。
+  assert.deepEqual(mentionSegments("依据 @设计师 第 1 步", names), [
+    { text: "依据 " }, { text: "@设计师", mention: true }, { text: " 第 1 步" },
+  ]);
+  // 前边界：行首 / 空白 / 中文标点都算；多个 @ 各自成段。
+  assert.deepEqual(mentionSegments("邀请 @实现者、@审查者 加入群聊", names), [
+    { text: "邀请 " }, { text: "@实现者", mention: true }, { text: "、" },
+    { text: "@审查者", mention: true }, { text: " 加入群聊" },
+  ]);
+  assert.deepEqual(mentionSegments("@实现者 开工", names)[0], { text: "@实现者", mention: true });
+  assert.deepEqual(mentionSegments("（@实现者）", names), [
+    { text: "（" }, { text: "@实现者", mention: true }, { text: "）" },
+  ]);
+  // 前边界不成立时不命中；成对包裹的完整名字保留标记并装饰。
+  assert.equal(mentionSegments("a@实现者", names).some((segment) => segment.mention), false);
+  assert.deepEqual(mentionSegments("1. **@实现者** 改代码", names), [
+    { text: "1. **" }, { text: "@实现者", mention: true }, { text: "** 改代码" },
+  ]);
+  // 名字不在 roster / 空名单 / 被切在半截 → 整段普通文本，不丢字符、不崩。
+  assert.deepEqual(mentionSegments("找 @某人 帮忙", names), [{ text: "找 @某人 帮忙" }]);
+  assert.deepEqual(mentionSegments("@实现", names), [{ text: "@实现" }]);
+  assert.deepEqual(mentionSegments("@实现者", []), [{ text: "@实现者" }]);
+  assert.deepEqual(mentionSegments("", names), []);
+  // 拼回来必须与原文逐字相同（高亮不改字）。
+  const text = "邀请 @实现者、@审查者 加入群聊";
+  assert.equal(mentionSegments(text, names).map((segment) => segment.text).join(""), text);
+});
+
+test("[v2] 报告类型标签：标题纯空白 → 成员发言（与 Android 同规则）", () => {
+  assert.equal(reportTypeLabel(null), "成员发言");
+  assert.equal(reportTypeLabel({ ok: true, title: "", body: "正文" }), "成员发言");
+  assert.equal(reportTypeLabel({ ok: true, title: "   ", body: "正文" }), "成员发言");
+  assert.equal(reportTypeLabel({ ok: true, title: " T1 实现 ", body: "正文" }), "成员报告 ·  T1 实现 ");
+  assert.match(stripComments(chatSource), /typeLabel: reportTypeLabel\(report\)/);
+});
+
+test("[v2] 入群序列与开工发言按到达顺序渲染，@ 高亮只作用在群聊作用域", () => {
+  const body = stripComments(chatSource);
+  // 入群行仍是 notice 系统行：作者槽 + 正文（正文走 MentionText）。
+  assert.match(body, /className="chat-notice-text"><MentionText text=\{chatTurnText\(turn\)\} names=\{rosterNames\}\/>/);
+  assert.doesNotMatch(body, /className="chat-notice-text">\{chatTurnText\(turn\)\}/, "notice 正文不再直接铺纯文本");
+  // roster 从当前运行的成员来（空名单 → 不高亮）。
+  assert.match(body, /const rosterNames = React\.useMemo\(\s*\(\) => \[\.\.\.new Set\(\[\.\.\.displayTeam\.members\.map/,
+    "当前署名和历史 @ 提及都能识别");
+  // 开工发言是普通 step 回合：走 StepTurn → TeamMessageRow（头像 + 名字 + 气泡/文档卡），正文走 MentionText。
+  assert.match(body, /<MessageBody\s*\n\s*shape=\{shape\}\s*\n\s*text=\{text\}\s*\n\s*names=\{names\}/);
+  // 派工行：mention + 标题 + 依据槽（wait 选择器已改名）。
+  assert.match(body, /<span className="team-chat-mention">@\{item\.member\}<\/span>/);
+  assert.match(body, /<small className="team-chat-plan-basis">\{item\.note\}<\/small>/);
+  assert.doesNotMatch(chatSource, /team-chat-plan-member|team-chat-plan-wait/, "旧 JSX 类名已退出");
+  assert.doesNotMatch(chatStylesSource, /\.team-chat-plan-member\s*\{/, "无 DOM 的旧派工 CSS 规则也必须清理");
+  // 入群行也跟进场动画（它就是新到的回合）。
+  assert.match(chatStylesSource, /\.task-board-team-chat \.chat-message\.chat-notice\[data-arriving\] \{[\s\S]{0,120}animation: wand-team-msg-in/);
+});
+
+test("[v2] 名字排版与行距对齐（A1/A2/A3）", () => {
+  // A1：署名行名字 12px / 600，且只用群聊作用域覆盖，不动共享 .avatar-name。
+  assert.match(chatStylesSource,
+    /\.task-board-team-chat \.team-chat-msg-head \.avatar-name \{[\s\S]*?font-size: var\(--font-size-xs\);[\s\S]*?font-weight: var\(--font-weight-semibold\);/);
+  assert.doesNotMatch(read("content/styles.css"), /\.avatar-name \{[^}]*font-size: var\(--font-size-xs\)/, "共享 .avatar-name 未被改");
+  // A2：不可点的名字是正文色；可点的按钮保持动作色（由 .chat-author-link 那条负责）。
+  assert.match(chatStylesSource,
+    /\.task-board-team-chat \.team-chat-msg-head span\.avatar-name \{ color: var\(--text-primary\); \}/);
+  assert.doesNotMatch(chatStylesSource, /span\.avatar-name\.chat-author-link/, "可点那条没有被一起改成正文色");
+  // A3：消息行自身外边距清零，列表 gap 12 才是最终行距。
+  assert.match(chatStylesSource, /\.task-board-team-chat \.chat-message\.team-chat-msg \{ margin: 0; \}/);
+});
+
+test("[v2] live 行署名行去头像，卡片本体与退场沿用 v1", () => {
+  const live = chatSource.slice(chatSource.indexOf("function LiveStepRow("), chatSource.indexOf("export function chatTurnFingerprint("));
+  assert.ok(live.length > 800, "没切到 live 行");
+  assert.doesNotMatch(live, /MessageAvatar|team-chat-avatar/, "live 署名行不再重复一张脸");
+  assert.match(live, /<span className="team-chat-live-name" title=\{memberName\}>\{memberName\}<\/span>/);
+  // 名字不再单独挂链接（整卡已可点），步骤 chip / 状态 chip / 时刻都在。
+  assert.doesNotMatch(live, /chat-author-link/);
+  assert.match(live, /team-chat-live-chip/);
+  assert.match(live, /team-chat-live-state/);
+  assert.match(live, /className="chat-message-time"/);
+  const block = chatStylesSource.slice(
+    chatStylesSource.indexOf("/* ---------- 正在输出的成员"),
+    chatStylesSource.indexOf("/* 主任务层：负责人决策"),
+  ).replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.match(block, /\.team-chat-live-card \{[\s\S]*?max-width: 560px;/);
+  assert.match(block, /\.team-chat-live-card \{[\s\S]*?height: 200px;/);
+  assert.match(block, /wand-team-live-grow var\(--motion-quick-exit\) var\(--ease-in-out-smooth\) reverse forwards/, "退场仍是入场倒放");
+  assert.match(block, /\.team-chat-live-name \{[\s\S]*?font-size: var\(--font-size-2xs\);/);
+});
+
+test("[v2续接] 入场由页面呈现账本结算，不从挂载或窗口下标推断", () => {
+  const body = stripComments(chatSource);
+  assert.match(body, /\{projection\.rows\.map\(\(\{ turn: storedTurn, presentationId: key \}, index\) => \{\s*const turn = displayChatTurn\(storedTurn, displayTeam\);/,
+    "先以原始 turn 定位再投影展示身份");
+  assert.doesNotMatch(body, /createdAt \?\? ""\}#\$\{index\}/, "下标不再当 key");
+  assert.match(chatSource, /export function projectChatTurns\(/);
+  // 没有任何演示用定时动画：入场不串播、不写 delay；也不许为入群/开工新建定时器。
+  // 注释里的词不算；只检查真正的声明（那条死重置 `.team-chat-live-head { animation-delay: 0s }` 已删）。
+  assert.doesNotMatch(chatStylesSource, /animation-delay\s*:/, "连那条死重置也删了");
+  assert.equal(chatSource.match(/window\.setTimeout\(/g)?.length, 2,
+    "仅有 IME 确认键保护和 live 行退场兜底，没有演示动画定时器");
+  assert.match(chatSource, /onCompositionEnd=\{\(\) => \{[\s\S]*?window\.setTimeout\(\(\) => \{/,
+    "确认输入法候选的 Enter 不能作为发送");
+  assert.match(chatSource, /retireMs = liveExitDurationMs\(\)/, "确认那一个定时器读的是 token 时长");
+  // 入场动画本身：淡入 + 下 4px，只用 token。
+  assert.match(chatStylesSource, /@keyframes wand-team-msg-in \{\s*from \{ opacity: 0; translate: 0 4px; \}/);
+  assert.match(chatStylesSource,
+    /\.task-board-team-chat \.chat-message\.team-chat-msg\[data-arriving\],[\s\S]{0,120}animation: wand-team-msg-in var\(--motion-normal\) var\(--ease-out-expo\);/);
+  // reduce-motion：入场整条关掉（它不承载退场清理，和 live 行区别对待）。
+  const reduced = chatStylesSource.slice(chatStylesSource.indexOf("@media (prefers-reduced-motion: reduce)"));
+  assert.match(reduced, /\.task-board-team-chat \.chat-message\.team-chat-msg\[data-arriving\],[\s\S]{0,120}\{ animation: none; \}/);
+});
+
+test("[v2] mention / 依据 的样式只用 token，且不溢出到普通会话", () => {
+  const block = chatStylesSource.slice(
+    chatStylesSource.indexOf("/* @ 流转 token"),
+    chatStylesSource.indexOf("/* 头像只在这一处画"),
+  ).replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.ok(block.length > 300, "没切到 mention 样式块");
+  assert.match(block, /\.task-board-team-chat \.team-chat-mention,/);
+  assert.match(block, /\.team-chat-doc-layer \.team-chat-mention \{/);
+  for (const wanted of ["color: var(--accent);", "background: var(--accent-muted);", "font-weight: var(--font-weight-medium);", "padding: 0 4px;", "border-radius: var(--radius-xs);", "max-width: min(24ch, 100%);", "white-space: nowrap;", "text-overflow: ellipsis;"]) {
+    assert.ok(block.includes(wanted), `mention token 缺 ${wanted}`);
+  }
+  assert.doesNotMatch(block, /#[0-9a-fA-F]{3,8}\b|rgba?\(/, "只能引用 token");
+  assert.doesNotMatch(block, /^\s*\.team-chat-mention/m, "不允许裸类名（会污染普通会话）");
+  assert.match(chatStylesSource, /\.team-chat-plan-basis \{ color: var\(--text-tertiary\); font-size: var\(--font-size-2xs\); \}/);
+});
+
+test("[v2续接] 相同毫秒与重复载荷仍逐条呈现；句柄不等于服务端 ID", () => {
+  const lead = { id: "m_lead", name: "沈砚", leader: true };
+  const dev = { id: "m_dev", name: "实现者" };
+  const turns: ConversationTurn[] = [
+    userTurn("把报告写短一点", "2026-09-29T10:00:00.000Z"),
+    assistantTurn("创建了团队群聊「前端双人组」", lead, { notice: true, createdAt: "2026-09-29T10:00:01.000Z" }),
+    assistantTurn("邀请 @实现者、@审查者 加入群聊", lead, { notice: true, createdAt: "2026-09-29T10:00:01.000Z" }),
+    assistantTurn("计划\n\n1. **@实现者** 实现 Web 端", lead, { createdAt: "2026-09-29T10:00:02.000Z" }),
+    assistantTurn("我正在开始工作：第 2 步「实现 Web 端」", dev, { createdAt: "2026-09-29T10:00:03.000Z" }),
+    assistantTurn("✅ 完成「实现 Web 端」\n\n改好了", dev, { createdAt: "2026-09-29T10:00:09.000Z" }),
+  ];
+  const baseline = projectChatTurns(null, "run/chat", turns);
+  const keys = baseline.rows.map((row) => row.presentationId);
+  assert.equal(new Set(keys).size, keys.length);
+  const repeat = projectChatTurns(baseline, "run/chat", turns.map((turn) => ({ ...turn })));
+  assert.deepEqual(repeat.rows.map((row) => row.presentationId), keys);
+  assert.deepEqual(repeat.candidates, []);
+  assert.notEqual(chatTurnFingerprint(assistantTurn("别的话", dev, { createdAt: "2026-09-29T10:00:03.000Z" })),
+    baseline.rows[4]!.fingerprint);
+});
+
+test("[v2] 旧数据降级：旧 roster / 旧开工 notice 与「（等第…）」都还能读", () => {
+  // 旧服务端发的是居中 notice（入群序列与开工都还没有）：分类规则不变，客户端不崩、不空。
+  const oldRoster = assistantTurn("团队「前端双人组」接手了这个任务：沈砚（负责人）、实现者", null, { notice: true });
+  assert.equal(chatTurnKind(oldRoster), "notice");
+  assert.equal(chatTurnText(oldRoster), "团队「前端双人组」接手了这个任务：沈砚（负责人）、实现者");
+  const oldStart = assistantTurn("实现者 开始「写代码」", { id: "m_dev", name: "实现者" }, { notice: true });
+  assert.equal(chatTurnKind(oldStart), "notice", "旧开工 notice 仍按 notice 渲染，不冒充开工发言");
+  // 旧派工括注仍落在同一个 note 槽位（同一个渲染分支）。
+  assert.equal(splitLeaderMessage("1. **@实现者** 写代码（等第 1 项完成后）").assignments[0]!.note, "等第 1 项完成后");
+  // 缺字段不冒 undefined：没有 author → 默认头像；没有报告前缀 → 成员发言。
+  assert.equal(chatAvatarSpec(null).kind, "brand");
+  assert.equal(reportTypeLabel(parseStepReport("普通发言")), "成员发言");
+  assert.deepEqual(mentionSegments("依据 @查不到的名字 继续", ["实现者"]), [{ text: "依据 @查不到的名字 继续" }]);
 });

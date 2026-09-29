@@ -51,9 +51,19 @@ export function composerPayloadFingerprint(payload: ComposerPayload): string {
 /** Owns drafts and captured submissions; DOM/React only render its snapshots. */
 export class ComposerStore {
   private readonly sessions = new Map<string, ComposerSession>();
+  private readonly listeners = new Set<() => void>();
   private revision = 0;
 
   constructor(private readonly dependencies: ComposerDependencies) {}
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  }
+
+  private notify(): void {
+    for (const listener of this.listeners) listener();
+  }
 
   private session(sessionId: string): ComposerSession {
     let session = this.sessions.get(sessionId);
@@ -124,6 +134,7 @@ export class ComposerStore {
       session.memoryOnly = false;
       try { this.dependencies.storage().removeItem("wand-draft-" + sessionId); } catch {}
     }
+    this.notify();
     return true;
   }
 

@@ -8,9 +8,9 @@ import { inferProviderFromCommand, inferProviderFromRunner, isSessionProvider, S
 import { DEFAULT_ITERATION_NAME, DEFAULT_WAND_TASK_AGENT_KIND, DEFAULT_WAND_TASK_PRIORITY, isWandTaskAgentKind, normalizeWandTaskAgentMode } from "./task-types.js";
 import { firstLayoutTabId } from "./layout-tree.js";
 import { isUnnamedWorkspaceTaskName } from "./wand-task-sync.js";
-import { AI_TEAM_DEFAULT_MAX_STEPS, isTeamMemberRole, memberAgents } from "./ai-team-types.js";
+import { AI_TEAM_DEFAULT_MAX_STEPS, AI_TEAM_TERMINAL_RUN_STATUSES, isTeamMemberRole, memberAgents } from "./ai-team-types.js";
 import type {
-  AiTeam, AiTeamMember, AiTeamRun, AiTeamRunChatMarker, AiTeamRunStatus, AiTeamStep, AiTeamStepKind, AiTeamStepStatus,
+  AiTeam, AiTeamMember, AiTeamRun, AiTeamRunChatMarker, AiTeamRunStatus, AiTeamStep, AiTeamStepKind, AiTeamStepSessionMarker, AiTeamStepStatus,
   CandidateFailureKind, StepDispatchInfo,
 } from "./ai-team-types.js";
 import type { WandTask, WandTaskAgent, WandTaskAgentKind, WandTaskTitleSource } from "./task-types.js";
@@ -1800,6 +1800,26 @@ export class WandStorage {
     });
   }
 
+  /**
+   * 会话列表团队标记的廉价指纹：运行/步骤状态一变，`/api/tasks` 里的 `teamChat`/`teamStep`
+   * 就跟着变，客户端必须肯重拉。只看聚合值和最近若干条状态，不逐行拼整张表。
+   */
+  teamSessionFingerprint(): string {
+    const runs = this.db.prepare(
+      `SELECT COUNT(*) AS count,
+              COALESCE((SELECT GROUP_CONCAT(status || ':' || COALESCE(chat_session_id, ''), '|')
+                        FROM (SELECT status, chat_session_id FROM ai_team_runs ORDER BY rowid DESC LIMIT 500)), '') AS statuses
+       FROM ai_team_runs`,
+    ).get() as { count: number; statuses: string };
+    const steps = this.db.prepare(
+      `SELECT COUNT(*) AS count,
+              COALESCE((SELECT GROUP_CONCAT(status || ':' || COALESCE(session_id, ''), '|')
+                        FROM (SELECT status, session_id FROM ai_team_steps ORDER BY rowid DESC LIMIT 500)), '') AS statuses
+       FROM ai_team_steps`,
+    ).get() as { count: number; statuses: string };
+    return JSON.stringify({ runs, steps });
+  }
+
   /** GET /api/wand-tasks 的顺序：新创建在前。客户端按此顺序渲染，不再本地排序。 */
   listWandTasks(workspaceId?: string | null): import("./task-types.js").WandTask[] {
     const rows = this.db.prepare(
@@ -2771,8 +2791,9 @@ export class WandStorage {
    */
   listAiTeamRunChatMarkers(): Map<string, AiTeamRunChatMarker> {
     const rows = this.db.prepare(
-      `SELECT id, team_json, chat_session_id FROM ai_team_runs
-       WHERE chat_session_id IS NOT NULL AND chat_session_id <> '' ORDER BY created_at DESC`,
+      `SELECT r.id, r.team_json, r.chat_session_id, t.name AS current_team_name
+       FROM ai_team_runs r LEFT JOIN ai_teams t ON t.id = r.team_id
+       WHERE r.chat_session_id IS NOT NULL AND r.chat_session_id <> '' ORDER BY r.created_at DESC`,
     ).all() as unknown as Record<string, unknown>[];
     const markers = new Map<string, AiTeamRunChatMarker>();
     for (const row of rows) {
@@ -2781,8 +2802,59 @@ export class WandStorage {
       const rawTeam = safeJsonParse<Record<string, unknown>>(typeof row.team_json === "string" ? row.team_json : null);
       markers.set(chatSessionId, {
         runId: String(row.id),
-        teamName: String(rawTeam?.name ?? ""),
+        teamName: typeof row.current_team_name === "string" ? row.current_team_name : String(rawTeam?.name ?? ""),
         memberCount: Array.isArray(rawTeam?.members) ? rawTeam.members.length : 0,
+      });
+    }
+    return markers;
+  }
+
+  /**
+   * 会话列表用的成员步骤标记：session_id → 这一步的身份。
+   * 和 `listAiTeamRunChatMarkers()` 一样一次查询建整张表，供 /api/tasks 每请求一次构建。
+   * 同一个会话被多个步骤复用时取 seq 最大的那一步（最近一次派发）。
+   */
+  listAiTeamStepSessionMarkers(): Map<string, AiTeamStepSessionMarker> {
+    const rows = this.db.prepare(
+      `SELECT s.id, s.run_id, s.kind, s.seq, s.member_id, s.title, s.status, s.session_id,
+              r.status AS run_status, r.team_json, t.name AS current_team_name, t.members_json AS current_members_json
+       FROM ai_team_steps s
+       JOIN ai_team_runs r ON r.id = s.run_id
+       LEFT JOIN ai_teams t ON t.id = r.team_id
+       WHERE s.session_id IS NOT NULL AND s.session_id <> ''
+       ORDER BY s.seq DESC`,
+    ).all() as unknown as Record<string, unknown>[];
+    const markers = new Map<string, AiTeamStepSessionMarker>();
+    const currentTeams = new Map<string, unknown>();
+    for (const row of rows) {
+      const sessionId = typeof row.session_id === "string" ? row.session_id : "";
+      if (!sessionId || markers.has(sessionId)) continue;
+      const runTeam = safeJsonParse<Record<string, unknown>>(typeof row.team_json === "string" ? row.team_json : null);
+      const runId = String(row.run_id);
+      const memberId = String(row.member_id ?? "");
+      if (!currentTeams.has(runId)) {
+        // ai_teams.members_json 存的是裸成员数组；team_json 存的是整份团队对象。
+        currentTeams.set(runId, safeJsonParse<unknown>(
+          typeof row.current_members_json === "string" ? row.current_members_json : null,
+        ));
+      }
+      const memberName = teamMemberName(currentTeams.get(runId), memberId)
+        ?? teamMemberName(runTeam?.members, memberId)
+        ?? memberId;
+      const runStatus = String(row.run_status ?? "") as AiTeamRunStatus;
+      markers.set(sessionId, {
+        runId,
+        stepId: String(row.id),
+        kind: String(row.kind ?? "work") === "leader" ? "leader" : "work",
+        title: String(row.title ?? ""),
+        memberId,
+        memberName,
+        teamName: typeof row.current_team_name === "string" && row.current_team_name
+          ? row.current_team_name
+          : String(runTeam?.name ?? ""),
+        stepStatus: String(row.status ?? "queued") as AiTeamStepStatus,
+        runStatus,
+        runFinished: AI_TEAM_TERMINAL_RUN_STATUSES.includes(runStatus),
       });
     }
     return markers;
@@ -3201,6 +3273,22 @@ function normalizeAiTeamMembers(raw: unknown): AiTeamMember[] {
     if (member) members.push(member);
   }
   return members;
+}
+
+/**
+ * 从裸成员 JSON（`ai_teams.members_json` 是数组、`team_json.members` 是数组）里按 id 取显示名。
+ * 列表只要名字投影，不做读端归一，损坏行也不该把名字整个丢掉。
+ */
+function teamMemberName(members: unknown, memberId: string): string | undefined {
+  if (!Array.isArray(members)) return undefined;
+  for (const member of members) {
+    if (!member || typeof member !== "object") continue;
+    const record = member as Record<string, unknown>;
+    if (String(record.id ?? "") !== memberId) continue;
+    const name = typeof record.name === "string" ? record.name.trim() : "";
+    if (name) return name;
+  }
+  return undefined;
 }
 
 function mapAiTeamRunRow(row: Record<string, unknown>): AiTeamRun {

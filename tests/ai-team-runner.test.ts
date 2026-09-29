@@ -7,7 +7,11 @@ import test, { type TestContext } from "node:test";
 import {
   AiTeamConflictError,
   AiTeamRunner,
+  assignmentBasisNote,
+  CHAT_INVITE_PER_LINE,
+  chatIntroLines,
   redactAiTeamErrorText,
+  stepStartText,
   type AiTeamChatOps,
   type AiTeamSessionOps,
 } from "../src/ai-team-runner.js";
@@ -300,6 +304,40 @@ test("a typed team assignment does not resend the task card description", async 
   assert.match(detail.run.objective, /只改指派框里这句/);
   assert.ok(h.ops.opened[0]!.prompt.includes("只改指派框里这句"));
   assert.equal(h.ops.opened[0]!.prompt.includes("写清楚 npm 安装"), false);
+});
+
+test("renaming a member updates display identity without rewriting run snapshots or chat history", async (t) => {
+  const h = harness(t);
+  const started = await h.runner.start({ teamId: h.team.id, taskId: h.taskId });
+  const before = h.runner.detail(started.run.id);
+  const originalTurns = JSON.stringify(before.chatTurns);
+  assert.ok(before.chatTurns.some((turn) => turn.author?.id === "m_lead"));
+
+  const updated: AiTeam = {
+    ...h.team, name: "新群名", updatedAt: "2026-02-02T00:00:00.000Z",
+    members: h.team.members.map((member) => member.id === "m_lead"
+      ? { ...member, name: "新负责人", avatar: "cat:3" }
+      : member.id === "m_dev" ? { ...member, name: "新实现", avatar: "cat:2" } : member),
+  };
+  h.storage.saveAiTeam(updated);
+  const after = h.runner.detail(started.run.id);
+  assert.equal(after.run.team.name, "测试团队", "runner retains its execution snapshot");
+  assert.equal(after.run.team.members[0]!.name, "负责人");
+  assert.equal(after.displayTeam?.name, "新群名");
+  assert.equal(after.displayTeam?.members[0]?.name, "新负责人");
+  assert.equal(after.displayTeam?.members[1]?.name, "新实现");
+  assert.equal(after.displayTeam?.members[1]?.avatar, "cat:2");
+  assert.deepEqual(after.displayTeam?.members.map((member) => member.id),
+    before.run.team.members.map((member) => member.id), "existing run roster never gains new members");
+  assert.equal(JSON.stringify(after.chatTurns), originalTurns, "historical author and text are immutable");
+  assert.equal(h.storage.getAiTeamRun(started.run.id)?.team.members[0]?.name, "负责人");
+  assert.equal(h.storage.listAiTeamRunChatMarkers().get(started.run.chatSessionId!)?.teamName, "新群名",
+    "会话列表的群名也走当前定义");
+
+  h.storage.deleteAiTeam(h.team.id);
+  assert.equal(h.storage.listAiTeamRunChatMarkers().get(started.run.chatSessionId!)?.teamName, "测试团队");
+  assert.equal(h.runner.detail(started.run.id).displayTeam?.members[0]?.name, "负责人",
+    "deleting a definition falls back to the saved roster");
 });
 
 test("first plan waits for approval, then the first member is dispatched", async (t) => {
@@ -758,11 +796,15 @@ test("a team run posts its plan, dispatches and reports into one group chat", as
   await settle(h, dev.sessionId!);
   const lines = h.chat.lines(chatId);
   assert.match(lines[0]!, /^用户: 给 README 加安装说明/);
-  assert.match(lines[1]!, /^·: 团队「测试团队」接手了这个任务：负责人（负责人）、实现、验收/);
-  assert.match(lines[2]!, /^负责人: 计划\n\n1\. \*\*@实现\*\* 写代码/);
-  assert.equal(lines[3], "·实现: 实现 开始「写代码」");
-  assert.equal(lines[4], "实现: ✅ 完成「写代码」\n\n改好了");
-  const report = h.chat.turns.get(chatId)![4]!;
+  // v2 入群序列（S1/S2）：两条居中系统行，作者都是负责人，不再有旧的「接手了这个任务：roster」。
+  assert.match(lines[1]!, /^·负责人: 创建了团队群聊「测试团队」$/);
+  assert.match(lines[2]!, /^·负责人: 邀请 @实现、@验收 加入群聊$/);
+  assert.equal(lines.some((line) => line.includes("接手了这个任务")), false, "旧 roster 文案已被入群序列取代");
+  assert.match(lines[3]!, /^负责人: 计划\n\n1\. \*\*@实现\*\* 写代码$/);
+  // 开工发言（S4）：成员自己发的真实发言，第 1 行带真实步号与标题。
+  assert.equal(lines[4], "实现: 我正在开始工作：第 2 步「写代码」");
+  assert.equal(lines[5], "实现: ✅ 完成「写代码」\n\n改好了");
+  const report = h.chat.turns.get(chatId)![5]!;
   assert.equal(report.author?.sessionId, dev.sessionId);
   assert.equal(report.author?.provider, "codex");
 });
@@ -845,7 +887,7 @@ test("a follow-up in the same group chat hands the earlier rounds to the new lea
   assert.match(file, /README\.md 顶部加了 npm 安装说明/, "上一轮的报告正文留在群聊原文里");
   assert.match(file, /都做完了/);
   assert.match(file, /安装命令换成 pnpm/);
-  assert.equal(file.split("接手了这个任务").length - 1, 1, "历史只收上一轮，不带新运行自己的接手 notice");
+  assert.equal(file.split("创建了团队群聊").length - 1, 1, "历史只收上一轮的入群序列，不带新运行自己的那条");
   assert.ok(!file.includes("接着这个群聊里上一轮的进度继续"), "新运行的续跑 notice 也不进历史");
   assert.ok(h.chat.lines(chatId).some((line) => line.startsWith("·: 接着这个群聊里上一轮的进度继续")),
     "群里看得出这是接着上一轮往下走");
@@ -932,6 +974,11 @@ test("[T3] the last candidate failing hands a single failed step back to the lea
   assert.match(failed[0]!.report, /候选 1/);
   assert.match(failed[0]!.report, /候选 2/);
   assert.equal(runningStep(h, runId).kind, "leader", "耗尽后交回 Leader，不另设 waiting_user 捷径");
+  const turns = h.chat.turns.get(h.runner.detail(runId).run.chatSessionId!)!;
+  assert.equal(turns.filter((turn) => turnText(turn).startsWith("我正在开始工作：")).length, 1,
+    "第一候选尝试保留 S4；第二候选被预检拉黑不虚构 S4");
+  assert.equal(turns.find((turn) => turnText(turn).startsWith("❌ 没完成「改 README」"))?.author?.sessionId,
+    undefined, "从未成功 open 的失败报告不伪造 sessionId");
 });
 
 test("[T3] degraded steps keep their dependents pointed at the replacement step", async (t) => {
@@ -1135,7 +1182,8 @@ test("[T3] a model missing from a ready catalog is skipped before dispatch, with
   assert.equal(runningStep(h, runId).kind, "work");
   assert.equal(h.ops.opened.at(-1)!.provider, "opencode");
   const chatId = h.runner.detail(runId).run.chatSessionId!;
-  assert.ok(h.chat.lines(chatId).some((line) => line.includes("开始「改 README」")), "群聊看得到新候选开工");
+  assert.ok(h.chat.lines(chatId).some((line) => line.includes("我正在开始工作：") && line.includes("「改 README」")),
+    "群聊看得到新候选开工");
 });
 
 test("[T3] an unknown model with no ready catalog is dispatched anyway", async (t) => {
@@ -1373,7 +1421,7 @@ test("[T3b] group chat signing follows the candidate actually used, not the pref
   const degradeLine = turns.filter((turn) => turn.notice && turnText(turn).includes("首选配置不可用"));
   assert.equal(degradeLine.length, 1);
   assert.equal(degradeLine[0]!.author?.provider, "opencode", "降级行署切过去的新候选");
-  const starts = turns.filter((turn) => turnText(turn).includes("开始「改 README」"));
+  const starts = turns.filter((turn) => turnText(turn).includes("我正在开始工作："));
   assert.equal(starts[0]!.author?.provider, "codex", "第一次开工确实用的首选");
   assert.equal(starts[starts.length - 1]!.author?.provider, "opencode", "降级后的开工行跟着换候选");
   const leaderTurn = turns.find((turn) => turn.author?.leader === true)!;
@@ -1705,7 +1753,7 @@ test("[chat] authored turns carry the model and effort of the candidate actually
   assert.equal(leaderTurn.author?.model, "default", "负责人回合署自己步骤实际候选的模型");
   assert.equal(leaderTurn.author?.thinkingEffort, "off");
 
-  const starts = turns.filter((turn) => turnText(turn).includes("开始「改 README」"));
+  const starts = turns.filter((turn) => turnText(turn).includes("我正在开始工作："));
   assert.equal(starts[0]!.author?.model, "broken", "第一次开工行署当时真正用的首选");
   assert.equal(starts[starts.length - 1]!.author?.model, "glm-4.7", "降级后的开工行跟着换");
   assert.equal(starts[starts.length - 1]!.author?.thinkingEffort, "deep");
@@ -1722,9 +1770,13 @@ test("[chat] authored turns carry the model and effort of the candidate actually
   assert.equal(done.author?.model, "glm-4.7");
   assert.equal(done.author?.thinkingEffort, "deep");
 
-  const bareNotices = turns.filter((turn) => turn.notice && !turn.author);
-  assert.ok(bareNotices.length > 0, "没有署名的系统提示不编造模型");
-  assert.ok(bareNotices.every((turn) => turn.author === undefined));
+  // 入群序列（S1/S2）是带署名的系统提示：作者就是负责人本人，模型/深度取他真实的首选候选，不凭空造。
+  // （「不给 author 的系统提示不会冒出署名」由续跑那条 `·: 接着…` 断言守着：`·:` 前缀 = 无作者。）
+  const intro = turns.filter((turn) => turn.notice && turnText(turn).includes("创建了团队群聊"));
+  assert.equal(intro.length, 1);
+  assert.equal(intro[0]!.author?.leader, true, "入群行署负责人");
+  assert.equal(intro[0]!.author?.model, "default");
+  assert.equal(intro[0]!.author?.thinkingEffort, "off");
 });
 
 test("[live] a terminal run drops its push fingerprint", async (t) => {
@@ -1808,4 +1860,302 @@ test("[live] a state change alone re-pushes even when the text is byte-identical
   await sleep(650);
   await h.runner.idle();
   assert.equal(pushes.length, 2, "文本与状态都没变就不重复推");
+});
+
+// ---------- v2：入群序列与开工发言（设计 v2.1 S1–S5） ----------
+
+const introMember = (name: string, id = `m_${name}`): AiTeamMember => ({
+  id, name, duty: "", agents: [structuredAgent("codex")], agent: structuredAgent("codex"), isLeader: false,
+});
+
+const introLeader: AiTeamMember = {
+  id: "m_lead2", name: "沈砚", duty: "", agents: [structuredAgent("claude")],
+  agent: structuredAgent("claude"), isLeader: true,
+};
+
+test("[v2] chat intro lines follow S1–S3 with four invitees per line", () => {
+  assert.equal(CHAT_INVITE_PER_LINE, 4);
+  assert.deepEqual(
+    chatIntroLines({ name: "前端双人组", members: [introLeader, introMember("实现者"), introMember("审查者")] }),
+    ["创建了团队群聊「前端双人组」", "邀请 @实现者、@审查者 加入群聊"],
+  );
+  // 除负责人外没人：仍两条，第二条不伪造成员。
+  assert.deepEqual(
+    chatIntroLines({ name: "单人组", members: [introLeader] }),
+    ["创建了团队群聊「单人组」", "还没有邀请其他成员入群"],
+  );
+  // 团队名空白 → 不带书名号；>4 人拆行，第二行起「继续邀请」。
+  assert.deepEqual(
+    chatIntroLines({
+      name: "   ",
+      members: [introLeader, introMember("a"), introMember("b"), introMember("c"), introMember("d"), introMember("e"), introMember("f")],
+    }),
+    ["创建了团队群聊", "邀请 @a、@b、@c、@d 加入群聊", "继续邀请 @e、@f 加入群聊"],
+  );
+  // 名字空白的成员不进名单。
+  assert.deepEqual(
+    chatIntroLines({ name: "T", members: [introLeader, introMember("", "m_blank")] }),
+    ["创建了团队群聊「T」", "还没有邀请其他成员入群"],
+  );
+});
+
+test("[v2] step start text keeps the basis deterministic", () => {
+  assert.equal(stepStartText({ seq: 2, title: "实现 Web 端" }), "我正在开始工作：第 2 步「实现 Web 端」");
+  assert.equal(stepStartText({ seq: 2, title: "  " }), "我正在开始工作：第 2 步");
+  const upstream = [{
+    seq: 1, title: "设计规格", memberName: "设计师",
+    reportPath: ".wand-team/run_1/report-1-work-m_designer.md",
+  }];
+  assert.equal(
+    stepStartText({ seq: 2, title: "实现 Web 端" }, upstream, 1),
+    "我正在开始工作：第 2 步「实现 Web 端」\n依据 @设计师 第 1 步「设计规格」的产物 .wand-team/run_1/report-1-work-m_designer.md",
+  );
+  // 依赖解析不到（旧数据 / 步骤被删）→ 降级句；上游标题空白 → 只剩步号；reportPath 前后空白被裁掉。
+  assert.equal(
+    stepStartText({ seq: 3, title: "联调" }, [], 2),
+    "我正在开始工作：第 3 步「联调」\n依据上游步骤的产物继续",
+  );
+  assert.equal(
+    stepStartText({ seq: 3, title: "联调" }, [{ seq: 1, title: " ", memberName: "甲", reportPath: "  " }], 1),
+    "我正在开始工作：第 3 步「联调」\n依据 @甲 第 1 步的产物",
+  );
+  // 上游超过两条：列前两条 + 「等 N 步」（N = 依赖总数）。
+  assert.equal(
+    stepStartText({ seq: 4, title: "D" }, [
+      { seq: 1, title: "A", memberName: "甲", reportPath: "a.md" },
+      { seq: 2, title: "B", memberName: "乙", reportPath: "b.md" },
+      { seq: 3, title: "C", memberName: "丙", reportPath: "c.md" },
+    ], 3),
+    "我正在开始工作：第 4 步「D」\n依据 @甲 第 1 步「A」的产物 a.md、@乙 第 2 步「B」的产物 b.md 等 3 步",
+  );
+});
+
+test("[v2] assignment basis note replaces the old wait parenthesis", () => {
+  assert.equal(assignmentBasisNote([], ["设计规格"]), "", "首步没有上游就没有括注");
+  assert.equal(assignmentBasisNote([0], ["设计规格", "实现"]), "（依据：第 1 步「设计规格」的产物）");
+  assert.equal(
+    assignmentBasisNote([0, 1], ["设计规格", "实现"]),
+    "（依据：第 1 步「设计规格」的产物、第 2 步「实现」的产物）",
+  );
+  assert.equal(assignmentBasisNote([0], ["  "]), "（依据：第 1 步的产物）", "上游标题空白只剩步号");
+});
+
+test("[v2] the intro sequence is posted once per group chat and never replayed", async (t) => {
+  const h = harness(t, { requirePlanApproval: false });
+  const runId = await startAndPlan(h, [["m_dev", "写代码"]]);
+  const chatId = h.runner.detail(runId).run.chatSessionId!;
+
+  const lines = h.chat.lines(chatId);
+  assert.match(lines[1]!, /^·负责人: 创建了团队群聊「测试团队」$/);
+  assert.match(lines[2]!, /^·负责人: 邀请 @实现、@验收 加入群聊$/);
+  assert.equal(lines.filter((line) => line.includes("创建了团队群聊")).length, 1);
+  assert.equal(lines.filter((line) => line.includes("加入群聊")).length, 1);
+
+  // 同一个群聊里接着开新一轮（续跑 / 结束后再说话）：入群序列不重播，只留续跑那句。
+  const dev = runningStep(h, runId);
+  writeReport(h, dev, "状态: 完成");
+  h.ops.finishTurn(dev.sessionId!);
+  await settle(h, dev.sessionId!);
+  const finisher = runningStep(h, runId);
+  writeReport(h, finisher, JSON.stringify({ action: "finish", message: "都做完了" }));
+  h.ops.finishTurn(finisher.sessionId!);
+  await settle(h, finisher.sessionId!);
+  assert.equal(h.runner.detail(runId).run.status, "done");
+
+  h.chat.post(chatId, [{ role: "user", content: [{ type: "text", text: "再补一段 FAQ" }] }]);
+  await h.runner.chatInput(chatId, "再补一段 FAQ");
+  const runs = h.runner.listForTask(h.taskId);
+  assert.equal(runs.length, 2);
+  assert.equal(runs.find((run) => run.id !== runId)!.chatSessionId, chatId, "续跑落在同一个群聊里");
+
+  const after = h.chat.lines(chatId);
+  assert.equal(after.filter((line) => line.includes("创建了团队群聊")).length, 1, "入群序列只出现一次");
+  assert.equal(after.filter((line) => line.includes("加入群聊")).length, 1);
+  assert.ok(after.some((line) => line.startsWith("·: 接着这个群聊里上一轮的进度继续")), "续跑只有那句继续 notice");
+});
+
+test("[v2] a work start is a real member turn with the upstream basis in the second line", async (t) => {
+  const h = harness(t, { requirePlanApproval: false });
+  // 两步顺序执行（parseLeaderDecision 的默认 after = 上一步）：第 2 步才有上游依据。
+  const runId = await startAndPlan(h, [["m_dev", "设计规格"], ["m_qa", "验收"]]);
+  const chatId = h.runner.detail(runId).run.chatSessionId!;
+  const turns = h.chat.turns.get(chatId)!;
+
+  const plan = turns.find((turn) => !turn.notice && turn.author?.leader === true)!;
+  const planText = turnText(plan);
+  assert.match(planText, /^1\. \*\*@实现\*\* 设计规格$/m, "首步没有上游 → 不带括注");
+  assert.match(planText, /^2\. \*\*@验收\*\* 验收（依据：第 1 步「设计规格」的产物）$/m);
+  assert.equal(planText.includes("等第"), false, "旧的等待文案不再与新依据并列");
+
+  const dev = runningStep(h, runId);
+  assert.equal(dev.seq, 2);
+  const devStart = turns.find((turn) => turnText(turn).includes("我正在开始工作：第 2 步"))!;
+  assert.equal(devStart.notice, undefined, "开工发言是真实发言，不是居中 notice");
+  assert.equal(turnText(devStart), "我正在开始工作：第 2 步「设计规格」", "无依赖时只有第一行");
+  assert.equal(devStart.author?.name, "实现");
+  assert.equal(devStart.author?.provider, "codex");
+  // 新开会话的那一刻还不知道 sessionId（与旧 notice 同位置），报告回合一定带；复用会话时开工行也带。
+  assert.equal(devStart.author?.sessionId, undefined);
+
+  writeReport(h, dev, "状态: 完成\n设计写好了");
+  h.ops.finishTurn(dev.sessionId!);
+  await settle(h, dev.sessionId!);
+
+  const qa = runningStep(h, runId);
+  assert.equal(qa.seq, 3);
+  const qaStart = h.chat.turns.get(chatId)!.find((turn) => turnText(turn).includes("我正在开始工作：第 3 步"))!;
+  assert.equal(qaStart.notice, undefined);
+  assert.equal(
+    turnText(qaStart),
+    `我正在开始工作：第 3 步「验收」\n依据 @实现 第 2 步「设计规格」的产物 ${dev.reportPath}`,
+  );
+  assert.equal(qaStart.author?.name, "验收");
+  assert.equal(qaStart.author?.provider, "pi");
+  // 已成功打开过的会话，报告使用其真实 ID；尚未打开就失败时不能伪造（下方另测）。
+  writeReport(h, qa, "状态: 完成");
+  h.ops.finishTurn(qa.sessionId!);
+  await settle(h, qa.sessionId!);
+  const qaReport = h.chat.turns.get(chatId)!.find((turn) => turnText(turn).includes("✅ 完成「验收」"))!;
+  assert.equal(qaReport.author?.sessionId, qa.sessionId);
+});
+
+test("[R1 S-1] new work S4 is posted before open resolves, never gains an invented ID", async (t) => {
+  const h = harness(t);
+  const runId = await startAndPlan(h, [["m_dev", "第一步"]]);
+  const chatId = h.runner.detail(runId).run.chatSessionId!;
+  const original = h.ops.open.bind(h.ops);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let enter!: () => void;
+  const entered = new Promise<void>((resolve) => { enter = resolve; });
+  h.ops.open = async (input) => {
+    if (input.agent.provider === "codex") { enter(); await gate; }
+    return original(input);
+  };
+  const approving = h.runner.approve(runId);
+  await entered;
+  const start = h.chat.turns.get(chatId)!.find((turn) => turnText(turn).startsWith("我正在开始工作："))!;
+  assert.equal(start.notice, undefined);
+  assert.equal(start.author?.sessionId, undefined);
+  assert.equal(start.author?.provider, "codex");
+  assert.equal(start.author?.model, "default");
+  assert.equal(start.author?.thinkingEffort, "off");
+  assert.equal(runningStep(h, runId).sessionId, null, "running 已写入，而 open 尚未完成");
+  release();
+  await approving;
+  const work = runningStep(h, runId);
+  assert.ok(work.sessionId);
+  assert.equal(start.author?.sessionId, undefined, "同一条 S4 不补发/不回填");
+  assert.equal(h.chat.turns.get(chatId)!.filter((turn) => turnText(turn).startsWith("我正在开始工作：")).length, 1);
+  writeReport(h, work, "状态: 完成");
+  h.ops.finishTurn(work.sessionId!);
+  await settle(h, work.sessionId!);
+  const report = h.chat.turns.get(chatId)!.find((turn) => turnText(turn).startsWith("✅ 完成「第一步」"))!;
+  assert.equal(report.author?.sessionId, work.sessionId);
+});
+
+test("[R1 S-2] reused work S4 is before send and carries that exact session, not a recent guess", async (t) => {
+  const h = harness(t, { requirePlanApproval: false }, { worker: {
+    provider: "codex", model: "gpt-real", thinkingEffort: "deep", kind: "structured", mode: "full-access",
+  } });
+  const runId = await startAndPlan(h, [["m_dev", "第一步"], ["m_dev", "第二步"]]);
+  const first = runningStep(h, runId);
+  const chatId = h.runner.detail(runId).run.chatSessionId!;
+  const original = h.ops.send.bind(h.ops);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let enter!: () => void;
+  const entered = new Promise<void>((resolve) => { enter = resolve; });
+  h.ops.send = async (id, text) => {
+    if (id === first.sessionId) { enter(); await gate; }
+    return original(id, text);
+  };
+  writeReport(h, first, "状态: 完成");
+  h.ops.finishTurn(first.sessionId!);
+  const processing = settle(h, first.sessionId!);
+  await entered;
+  const second = h.runner.detail(runId).steps.find((step) => step.kind === "work"
+    && step.status === "running" && step.id !== first.id)!;
+  assert.ok(second, "同一成员第二步已进入 running");
+  const start = h.chat.turns.get(chatId)!.find((turn) => turnText(turn).startsWith(`我正在开始工作：第 ${second.seq} 步`))!;
+  assert.equal(start.author?.sessionId, first.sessionId);
+  assert.equal(start.author?.provider, "codex");
+  assert.equal(start.author?.model, "gpt-real");
+  assert.equal(start.author?.thinkingEffort, "deep");
+  assert.equal(h.ops.sessions.get(first.sessionId!)!.sent.length, 1, "send 仍被拦住");
+  release();
+  await processing;
+  assert.equal(h.ops.sessions.get(first.sessionId!)!.sent.length, 2);
+});
+
+test("[R1 S-3] reused send failure retains the real ID and original failure exit", async (t) => {
+  const h = harness(t, { requirePlanApproval: false });
+  const runId = await startAndPlan(h, [["m_dev", "第一步"], ["m_dev", "第二步"]]);
+  const first = runningStep(h, runId);
+  const original = h.ops.send.bind(h.ops);
+  h.ops.send = async (id, text) => {
+    if (id === first.sessionId) throw new Error("permission denied");
+    return original(id, text);
+  };
+  writeReport(h, first, "状态: 完成");
+  h.ops.finishTurn(first.sessionId!);
+  await settle(h, first.sessionId!);
+  const turns = h.chat.turns.get(h.runner.detail(runId).run.chatSessionId!)!;
+  const second = h.runner.detail(runId).steps.find((step) => step.kind === "work" && step.title === "第二步")!;
+  assert.equal(second.status, "failed");
+  assert.equal(second.sessionId, first.sessionId);
+  assert.equal(turns.find((turn) => turnText(turn).startsWith(`我正在开始工作：第 ${second.seq} 步`))?.author?.sessionId,
+    first.sessionId);
+  assert.equal(turns.find((turn) => turnText(turn).startsWith("❌ 没完成「第二步」"))?.author?.sessionId,
+    first.sessionId);
+});
+
+test("[R1 S-3/S-4] open failure retains unlinked S4/report; preflight skip has no S4", async (t) => {
+  const failed = harness(t, { requirePlanApproval: false }, { worker: candidate("codex", "bad") });
+  failed.ops.openFailure = (agent) => agent.provider === "codex" ? "permission denied" : null;
+  const failedRun = await startAndPlan(failed, [["m_dev", "执行"]]);
+  const failedTurns = failed.chat.turns.get(failed.runner.detail(failedRun).run.chatSessionId!)!;
+  const start = failedTurns.find((turn) => turnText(turn).startsWith("我正在开始工作："))!;
+  const report = failedTurns.find((turn) => turnText(turn).startsWith("❌ 没完成「执行」"))!;
+  assert.equal(start.author?.sessionId, undefined);
+  assert.equal(report.author?.sessionId, undefined);
+  assert.equal(failed.runner.detail(failedRun).steps.find((step) => step.kind === "work")?.status, "failed");
+
+  const skipped = harness(t, { requirePlanApproval: false }, {
+    workerAgents: [candidate("codex", "ghost"), candidate("opencode", "valid")],
+    models: (provider) => provider === "codex" ? ["different"] : [],
+  });
+  const skippedRun = await startAndPlan(skipped, [["m_dev", "执行"]]);
+  const turns = skipped.chat.turns.get(skipped.runner.detail(skippedRun).run.chatSessionId!)!;
+  const attempts = turns.filter((turn) => turnText(turn).startsWith("我正在开始工作："));
+  const noticeIndex = turns.findIndex((turn) => turn.notice && turnText(turn).includes("已切换到候选 2"));
+  const startIndex = turns.indexOf(attempts[0]!);
+  assert.equal(attempts.length, 1, "预检拒绝的第一候选不虚构 S4");
+  assert.ok(noticeIndex >= 0 && noticeIndex < startIndex, "降级 notice 早于新派发");
+  assert.equal(attempts[0]!.author?.provider, "opencode");
+  assert.equal(skipped.runner.detail(skippedRun).steps.filter((step) => step.status === "skipped").length, 1);
+});
+
+test("[R1 S-4/S-5] replacement has new seq; S5 uses batch position, not persisted seq", async (t) => {
+  const h = harness(t, { requirePlanApproval: false }, {
+    workerAgents: [candidate("codex", "bad"), candidate("opencode", "real")],
+  });
+  h.ops.openFailure = (agent) => agent.provider === "codex" ? ENOENT : null;
+  const runId = await startAndPlanRaw(h, [
+    { member: "m_dev", title: "实现" }, { member: "m_qa", title: "审查", after: [1] },
+  ]);
+  const detail = h.runner.detail(runId);
+  const turns = h.chat.turns.get(detail.run.chatSessionId!)!;
+  const plan = turns.find((turn) => !turn.notice && turn.author?.leader && turnText(turn).includes("**@实现**"))!;
+  assert.match(turnText(plan), /2\. \*\*@验收\*\* 审查（依据：第 1 步「实现」的产物）/);
+  const starts = turns.filter((turn) => turnText(turn).startsWith("我正在开始工作："));
+  assert.equal(starts.length, 2, "失败与替换各留一条；不按同标题去重");
+  assert.equal(starts[0]!.author?.provider, "codex");
+  assert.equal(starts[1]!.author?.provider, "opencode");
+  assert.match(turnText(starts[0]!), /第 2 步「实现」/);
+  assert.match(turnText(starts[1]!), /第 4 步「实现」/);
+  const notice = turns.findIndex((turn) => turn.notice && turnText(turn).includes("已切换到候选 2"));
+  assert.ok(turns.indexOf(starts[0]!) < notice && notice < turns.indexOf(starts[1]!));
+  assert.equal(detail.steps.find((step) => step.seq === 2)?.status, "skipped");
+  assert.equal(detail.steps.find((step) => step.seq === 4)?.status, "running");
 });

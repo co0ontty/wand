@@ -135,8 +135,19 @@ export function parseAiTeamInput(value: unknown, existing: AiTeam | null, now: s
   };
 }
 
-export function registerAiTeamRoutes(app: Express, deps: { storage: WandStorage; runner: AiTeamRunner }): void {
+export function registerAiTeamRoutes(app: Express, deps: {
+  storage: WandStorage;
+  runner: AiTeamRunner;
+  notifyTeamChanged?: (teamId: string) => void;
+}): void {
   const { storage, runner } = deps;
+  const notifyTeam = (teamId: string): void => {
+    try {
+      deps.notifyTeamChanged?.(teamId);
+    } catch (error) {
+      console.error("[AiTeam] notify definition failed:", getErrorMessage(error));
+    }
+  };
 
   app.get("/api/ai-teams", (_req, res) => {
     res.json(storage.listAiTeams());
@@ -158,6 +169,7 @@ export function registerAiTeamRoutes(app: Express, deps: { storage: WandStorage;
       if (!existing) throw new Error("团队不存在。");
       const team = parseAiTeamInput(req.body, existing, new Date().toISOString());
       storage.saveAiTeam(team);
+      notifyTeam(team.id);
       res.json(team);
     } catch (error) {
       sendTeamError(res, error);
@@ -166,6 +178,7 @@ export function registerAiTeamRoutes(app: Express, deps: { storage: WandStorage;
 
   app.delete("/api/ai-teams/:id", (req, res) => {
     storage.deleteAiTeam(req.params.id);
+    notifyTeam(req.params.id);
     res.json({ ok: true });
   });
 

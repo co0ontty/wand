@@ -1,6 +1,9 @@
 import * as React from "react";
 import * as jsxRuntime from "react/jsx-runtime";
 import { failureMessage } from "../errors";
+import { ComposerAttachmentList } from "../composer-attachments/host";
+import { ComposerPopoverAction } from "../composer-popover/action";
+import { filePreviewController } from "../file-preview/controller";
 import { HttpResponseError, jsonBody, requestJson } from "../http-adapter";
 import { AgentFields } from "../issues/agent-fields";
 import {
@@ -28,10 +31,11 @@ import {
 } from "../settings/fields";
 import { SidebarToggleIcon } from "../shell/sidebar-toggle-icon";
 import { installStyleSheet } from "../styles";
-import { WandBadge, WandBreadcrumb, WandButton, WandIcon, WandIconButton, WandSearchField, WandSelect, WandStretchTabs } from "../ui";
+import { WandBadge, WandBrandMark, WandBreadcrumb, WandButton, WandDialogSurface, WandIcon, WandIconButton, WandSearchField, WandSelect, WandStretchTabs } from "../ui";
 import { MOTION_DWELL_FAILED_MS, MOTION_DWELL_SENT_MS } from "../ui/motion-tokens";
 import { CAT_COATS, memberCoatIndex, PixelCat, shrinkAvatarImage, TeamAvatar, TeamAvatarStack } from "./avatar";
-import { aiTeamsRepository, subscribeAiTeamRunChanges } from "./repository";
+import { teamChatComposer } from "./composer-bridge";
+import { aiTeamsRepository, subscribeAiTeamDefinitionChanges, subscribeAiTeamRunChanges } from "./repository";
 import type { TeamChatViewProps } from "./team-chat-view";
 import type { TeamChatPageProps } from "./team-chat-page";
 import type { AiTeamsPageProps } from "./teams-page";
@@ -45,6 +49,9 @@ const AI_TEAMS_HOST: Record<string, object> = {
   "react": React,
   "react/jsx-runtime": jsxRuntime,
   "errors": { failureMessage },
+  "composer-attachments/host": { ComposerAttachmentList },
+  "composer-popover/action": { ComposerPopoverAction },
+  "file-preview/controller": { filePreviewController },
   "http-adapter": { HttpResponseError, jsonBody, requestJson },
   "issues/agent-fields": { AgentFields },
   "issues/task-board-agent": {
@@ -71,10 +78,11 @@ const AI_TEAMS_HOST: Record<string, object> = {
   },
   "shell/sidebar-toggle-icon": { SidebarToggleIcon },
   "styles": { installStyleSheet },
-  "ui": { WandBadge, WandBreadcrumb, WandButton, WandIcon, WandIconButton, WandSearchField, WandSelect, WandStretchTabs },
+  "ui": { WandBadge, WandBrandMark, WandBreadcrumb, WandButton, WandDialogSurface, WandIcon, WandIconButton, WandSearchField, WandSelect, WandStretchTabs },
   "ui/motion-tokens": { MOTION_DWELL_FAILED_MS, MOTION_DWELL_SENT_MS },
   "ai-teams/avatar": { CAT_COATS, memberCoatIndex, PixelCat, shrinkAvatarImage, TeamAvatar, TeamAvatarStack },
-  "ai-teams/repository": { aiTeamsRepository, subscribeAiTeamRunChanges },
+  "ai-teams/composer-bridge": { teamChatComposer },
+  "ai-teams/repository": { aiTeamsRepository, subscribeAiTeamDefinitionChanges, subscribeAiTeamRunChanges },
 };
 
 interface AiTeamsChunk {

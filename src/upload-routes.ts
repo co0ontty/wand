@@ -3,7 +3,7 @@ import path from "node:path";
 import { randomBytes } from "node:crypto";
 import type { Express, NextFunction, Request, Response } from "express";
 import multer from "multer";
-import type { ProcessManager } from "./process-manager.js";
+import type { SessionRegistry } from "./session-registry.js";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 const MAX_FILES = 5;
@@ -14,7 +14,7 @@ function sanitizeFilename(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 200);
 }
 
-export function registerUploadRoutes(app: Express, processes: ProcessManager): void {
+export function registerUploadRoutes(app: Express, sessions: Pick<SessionRegistry, "getLatest">): void {
   const storage = multer.diskStorage({
     destination(_req, _file, cb) {
       const cwd = (_req as UploadRequest).uploadCwd;
@@ -41,12 +41,19 @@ export function registerUploadRoutes(app: Express, processes: ProcessManager): v
 
   function requireUploadSession(req: Request, res: Response, next: NextFunction): void {
     const sessionId = req.params.id;
-    const session = processes.get(sessionId);
+    // Group chats are structured relay sessions; ProcessManager does not own them.
+    // Resolve through the same registry used by the rest of the session API so
+    // PTY, structured and stored sessions all upload into their own cwd.
+    const session = sessions.getLatest(sessionId);
     if (!session) {
       res.status(404).json({ error: "会话不存在。" });
       return;
     }
-    (req as UploadRequest).uploadCwd = session.cwd || "/tmp";
+    if (!session.cwd || !path.isAbsolute(session.cwd)) {
+      res.status(400).json({ error: "会话工作目录无效。" });
+      return;
+    }
+    (req as UploadRequest).uploadCwd = session.cwd;
     next();
   }
 

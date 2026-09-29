@@ -161,6 +161,8 @@ Raw PTY 输出和结构化聊天 turn 是同一会话的两种表示；渲染 bu
 - 未知送达的已提交内容只留内存；部分 PTY chunk 已接受、成功 ack 后解析失败、5xx/408/409 都属于未知。只有输入被接受前的明确拒收或本地未发送才可恢复持久化；不得取消重复提交保护，也不得改变 native PTY 的分包契约。
 - Android sherpa 只编译 `app/libs/sherpa-onnx-api-1.13.2.jar`；固定来源/hash 与复现工具见 Android README。完整 AAR 不入库，常规构建/单测不下载大产物。
 
+AI 团队改名：`ai_team_runs.team_json` 是执行快照，relay `ConversationTurn.author` 与正文是历史事实，不批量重写。`AiTeamRunner.detail().displayTeam` 按稳定成员 id 从当前团队定义投影名字/头像，删除定义或成员时退回运行快照；Web/Android 仅在渲染时替换署名，不改变消息指纹/去重/派工。团队 PUT/DELETE 用独立定义变更通知刷新展示与团队轻缓存，不能把进度通知当作配置变更。
+
 ## State、Config 与目录
 
 - Config 默认值与合并：`src/config.ts`。`loadConfigWithStorage()` 会把合并结果写回磁盘——改 config schema 必须同步它。
@@ -346,5 +348,7 @@ npm run build && node dist/cli.js web -c /tmp/wand-dev/config.json
 - 2026-09-29 Android 连接页与开屏：参考 Web 登录插画的“信号汇入工作区→同步到手机”节奏，实现仅冷启动播放的短 Compose 动画；选服页改为已存服务器优先、新服务器独立表单、行内连接失败反馈，自动连接与深链/管理入口保留原有协议。Android 源码 `dc5a39b` + 死焦点清理 `bb31b41` 已推送，主仓库指针 `8dd28eb`；Beta `4.77.0-debug.09291046`（9,812,618 B，SHA-256 `826e92d1c5e0e22939f5bb21fb3abdec34cb158cefff8595e1b772910fa74d1c`）已部署并与 metadata、APK 内版本和更新端点一致。隔离工作树 Android 602 项 / 0 失败 / 1 跳过；本机未安装新包，设备动效视觉尚未验收。根 `npm run check` 通过，`npm test` 的唯一失败来自并行未提交 Web 群聊文件的 DOM 查询，详见工作日志。
 - 2026-09-29 Android 选服页后续重设计：选服首屏直接显示已存服务器，完整开屏插画只在冷启动播放；“添加服务器”从列表末尾原位展开。服务器别名可在首次添加时填写、在列表行内编辑，留空恢复地址显示；别名仅作本机标签，URL/凭据/稳定 ID 不变，首页、聊天、终端与设置页统一显示别名。管理页仅改别名时首页原位刷新名称，保留导航与草稿；扫码/深链与已存服务器的输入草稿隔离。Android 源码 `c7a6c88`、`c74f16b` 已推送 master，Beta `4.77.0-debug.09291134`（9,832,758 B，SHA-256 `67e1b2455aeef12bdcbcedf5abaf11e7f07f80c643aa6e1c7d59be5316f64e89`）已部署，Gradle、metadata、APK 内版本与更新端点一致；隔离工作树 Android Debug/Release 各 607 项、各 1 跳过/0 失败。默认未安装/启动设备，设备视觉验收未执行，详见工作日志。
 - 2026-09-29 Android 首页列表顶栏：服务器名称胶囊改为按内容占宽、最大 160dp，长名称单行截断，右侧操作靠右；移除首页搜索入口及其会话/任务共用查询、筛选状态和空态代码，保留“只看等你”与独立任务看板搜索。Android 源码 `2f56b7c` 已推送 master，Beta `4.77.0-debug.09291154`（9,817,650 B，SHA-256 `da57af43e746c8daf37d00ef2112e376a5b7ecfc54a1b27e410a0d351c822036`）由干净检出构建并部署；Debug/Release 各 607 项、各 1 跳过/0 失败，metadata、APK 内版本与已安装服务更新端点一致。并行未提交 Android 群聊/Web 改动保留；默认未安装设备，视觉点击未验收，详见工作日志。
+- 2026-09-29 Web 团队对话页续接现有 v2 改动：同一 relay 新 run 保留草稿、未确认消息、消息身份与上滚位置；独立页的旧加载和旧发送回包不能覆盖新一轮。同 run 的详情/聊天快照只单调合入；成功 ACK 优先以服务端消息指纹确认，未知送达不靠时间猜；新一轮加载中暂禁提交，草稿仍可编辑。`npm run check`、`npm test`（1593 项、1583 通过/10 跳过/0 失败）、`npm run build` 及合成 Chrome 18 项通过。已安装 Web Beta `4.77.0-debug.t09291240` 的群聊资产和相关服务端产物与最终本机构建逐字节一致，真实服务路由/API 只读检查通过；CUA 无可用浏览器窗口，安装版页面未做真实点击视觉验收。Android 与审计文件原有未提交改动保留，详见工作日志。
 
 - 2026-09-29 Android Team 对话收简：历史接手 notice 与新开工模板在渲染时转为成员第一人称「我开始处理「任务」这项工作。」；主群聊停止 /live 工具/终端文本轮询，进度归公告下的真实步骤摘要，授权/回答/异常保留当前成员会话入口；修复发布版 200 条窗口满后新尾消息不贴尾。Android `2150ade` + 纯删除 `2e64b64`（398 行）已推送，未提交 v2/Markdown/Web 工作保留。干净源码 Debug/Release 各 603 项、各 1 跳过/0 失败；Beta `4.77.0-debug.09291230`（9,806,278 B，SHA-256 `f061edc0c5522df97a215b9a7ba225939ff6f855edaf2c236014aec9aeca14e1`）已部署，metadata/APK 内版本/版本标记/已安装服务更新端点一致。真实服务脱敏样例解析通过；默认未安装设备，视觉未验收。并行工作树测试限制及完整记录见 `output/android-team-feed/REPORT.md` 和工作日志。
+- 2026-09-29 AI Team 改名展示：保留 run.team 执行快照与历史 turn，detail.displayTeam 只按 id 投影当前名字/头像；会话列表群名 JOIN 当前定义，Web 独立定义变更通知/缓存防旧请求反灌，Web/Android 展示投影不改消息指纹。已安装服务 26 个改名历史 run、187 条旧作者只读核对；npm 全量1601项0失败、Android Debug/Release 全量通过，隔离 Chrome 真实 React 改名 DOM 通过。Android Beta `4.77.0-debug.09291423` 更新端点一致；安装版浏览器登录限流429未真实点击，默认未安装 Android。详细记录见工作日志；保留所有并行未提交工作。

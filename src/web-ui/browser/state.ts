@@ -143,6 +143,9 @@ export var state: AppState = {
   actionError: null,
   loginPending: false,
   loginChecked: false,
+  // 服务端 429 的冷却截止时间戳；未到点前不发登录请求，也不恢复按钮
+  loginLockUntil: 0,
+  loginLockTicker: 0,
   sessionsDrawerOpen: readStoredBoolean("wand-sidebar-open", false),
   // 桌面仅保留完整 / 窄栏两态，完整侧栏为默认状态。
   sidebarPinned: readStoredBoolean("wand-sidebar-pinned", true),

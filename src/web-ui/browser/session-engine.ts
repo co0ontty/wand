@@ -56,13 +56,44 @@ const sessionReads = createSessionReads();
         if (hint) hint.classList.add("hidden");
       }
 
-      export function login() {
-        if (state.loginPending) return;
+      function scheduleLoginLockTick() {
+        if (state.loginLockTicker) return;
+        state.loginLockTicker = setTimeout(function tick() {
+          state.loginLockTicker = 0;
+          var loginButton = document.getElementById("login-button") as HTMLButtonElement | null;
+          var errorEl = document.getElementById("login-error");
+          var left = Math.ceil((state.loginLockUntil - Date.now()) / 1000);
+          if (left > 0) {
+            scheduleLoginLockTick();
+            if (state.loginPending || !loginButton) return;
+            loginButton.disabled = true;
+            loginButton.textContent = "请等待 " + left + "s";
+            if (errorEl) showError(errorEl, "登录尝试次数过多，请等待 " + left + " 秒。");
+            return;
+          }
+          state.loginLockUntil = 0;
+          if (loginButton) {
+            loginButton.disabled = false;
+            loginButton.textContent = "进入控制台";
+          }
+          if (errorEl) showError(errorEl, "现在可以再试一次了。");
+        }, 1000);
+      }
 
+      export function login() {
         var passwordEl = document.getElementById("password") as HTMLInputElement | null;
         var loginButton = document.getElementById("login-button") as HTMLButtonElement | null;
         var errorEl = document.getElementById("login-error");
         if (!passwordEl || !loginButton || !errorEl) return;
+
+        // 冷却未到不发包：服务端会按剩余时间回 429，白烧一次往返
+        var lockedFor = Math.ceil((state.loginLockUntil - Date.now()) / 1000);
+        if (lockedFor > 0) {
+          showError(errorEl, "登录尝试次数过多，请等待 " + lockedFor + " 秒。");
+          scheduleLoginLockTick();
+          return;
+        }
+        if (state.loginPending) return;
 
         hideError(errorEl);
         hideLoginCertHint();
@@ -72,16 +103,37 @@ const sessionReads = createSessionReads();
         loginButton.disabled = true;
         loginButton.textContent = "登录中...";
 
+        var finishLoginAttempt = function () {
+          state.loginPending = false;
+          // 冷却期内保持按钮禁用，由 tick 归零后恢复；否则用户会对着 429 连点
+          if (state.loginLockUntil > Date.now()) {
+            loginButton.disabled = true;
+            return;
+          }
+          state.loginLockUntil = 0;
+          loginButton.disabled = false;
+          loginButton.textContent = "进入控制台";
+        };
+
         fetch("/api/login", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ password: passwordEl.value }),
           credentials: "same-origin"
         })
-        .then(function(res) {
+        .then(function (res) {
           if (res.status === 429) {
-            showError(errorEl, "登录尝试次数过多，请稍后再试。");
-            return Promise.reject("handled");
+            return res.json().then(function (body) {
+              var seconds = body && typeof body.retryAfter === "number" ? Math.max(1, Math.ceil(body.retryAfter)) : 0;
+              showError(
+                errorEl,
+                body && typeof body.error === "string" ? body.error : "登录尝试次数过多，请稍后再试。"
+              );
+              if (!seconds) return Promise.reject("handled");
+              state.loginLockUntil = Date.now() + seconds * 1000;
+              scheduleLoginLockTick();
+              return Promise.reject("handled");
+            });
           }
           if (!res.ok) {
             passwordEl.dataset.error = "true";
@@ -120,9 +172,7 @@ const sessionReads = createSessionReads();
           showError(errorEl, "登录失败，请重试。");
         })
         .finally(function() {
-          state.loginPending = false;
-          loginButton.disabled = false;
-          loginButton.textContent = "进入控制台";
+          finishLoginAttempt();
         });
       }
 

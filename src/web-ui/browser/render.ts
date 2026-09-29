@@ -600,7 +600,7 @@ export function renderAppShell() {
               '</div>' +
               '<div class="composer-actions-left" role="group" aria-label="添加内容与权限">' +
                 // 加号按钮 —— 点击向上展开 popover：附件 / 终端交互 / 三件套（模式·模型·思考）
-                '<button id="attach-btn" class="btn-circle btn-circle-action" type="button" title="更多" aria-label="更多操作" aria-haspopup="dialog" aria-controls="composer-plus-popover" aria-expanded="false">' +
+                '<button id="attach-btn" class="btn-circle btn-circle-action composer-attach-trigger" type="button" title="更多" aria-label="更多操作" aria-haspopup="dialog" aria-controls="composer-plus-popover" aria-expanded="false">' +
                   iconSvg("plus", { size: 18, strokeWidth: 2.2 }) +
                 '</button>' +
                 // tabindex="-1": 把 file input 移出 iOS Safari 表单导航链，避免软键盘顶部工具条出现 ⌃ ⌄ ✓。

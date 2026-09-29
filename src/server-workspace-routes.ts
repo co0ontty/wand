@@ -14,7 +14,7 @@ import {
 } from "./git-worktree.js";
 import type { SessionRegistry } from "./session-registry.js";
 import type { WandStorage } from "./storage.js";
-import type { AiTeamRunChatMarker } from "./ai-team-types.js";
+import type { AiTeamRunChatMarker, AiTeamStepSessionMarker } from "./ai-team-types.js";
 import { collectSessionTopicBlocklist } from "./session-topic.js";
 import { resolveSessionDisplayTitle } from "./session-transport.js";
 import { type LayoutNode, type PaneTab, type SessionSnapshot, type TaskWindowLayout, type Workspace, type WorkspaceDefaultProvider, type WorkspaceTask, type WorkspaceTaskWorktree } from "./types.js";
@@ -48,7 +48,7 @@ function workspaceSessionSummary(
   session: SessionSnapshot,
   names: { taskName?: string | null; workspaceName?: string | null } = {},
   registry?: SessionRegistry,
-  teamChat?: AiTeamRunChatMarker | null,
+  team: { chat?: AiTeamRunChatMarker | null; step?: AiTeamStepSessionMarker | null } = {},
 ) {
   const live = liveSession(session, registry);
   return {
@@ -64,13 +64,38 @@ function workspaceSessionSummary(
     inFlight: live.structuredState?.inFlight === true,
     cwd: live.cwd,
     startedAt: live.startedAt,
-    ...(teamChat ? { teamChat } : {}),
+    ...(team.chat ? { teamChat: team.chat } : {}),
+    ...(team.step ? { teamStep: team.step } : {}),
   };
+}
+
+/**
+ * 会话列表用的团队标记索引：群聊入口 + 成员派发步骤，各一次查询建整张表，
+ * 列表里每条会话只做 Map 命中，不逐个查库。
+ */
+function teamSessionMarkers(storage: WandStorage): {
+  chat: Map<string, AiTeamRunChatMarker>;
+  step: Map<string, AiTeamStepSessionMarker>;
+} {
+  return { chat: storage.listAiTeamRunChatMarkers(), step: storage.listAiTeamStepSessionMarkers() };
+}
+
+/** 单条会话的团队标记；群聊条目只按群聊算，别再当成派发步骤折进任务下面的团队分组。 */
+function teamMarkersFor(
+  markers: { chat: Map<string, AiTeamRunChatMarker>; step: Map<string, AiTeamStepSessionMarker> },
+  sessionId: string,
+): { chat?: AiTeamRunChatMarker; step?: AiTeamStepSessionMarker } {
+  const chat = markers.chat.get(sessionId);
+  if (chat) return { chat };
+  const step = markers.step.get(sessionId);
+  return step ? { step } : {};
 }
 
 function cheapTasksRevision(storage: WandStorage, registry?: SessionRegistry): string {
   const fingerprint = [
     storage.tasksAggregateFingerprint(),
+    // 团队标记（群聊入口、成员步骤与运行状态）也在列表里。
+    storage.teamSessionFingerprint(),
     // 排序只更新偏好，不改变任务和会话；轮询 revision 也必须跟着变化。
     storage.getWorkspaceGroupOrder(),
     ...(registry?.listSlim() ?? []).map((session) => [
@@ -399,12 +424,12 @@ export function registerWorkspaceRoutes(
       return;
     }
     storage.touchWorkspace(workspace.id);
-    const teamChatMarkers = storage.listAiTeamRunChatMarkers();
+    const teamMarkers = teamSessionMarkers(storage);
     res.json({
       ...workspaceWithCounts(storage, workspace),
       sessions: storage.listSessionsByWorkspace(workspace.id).map((session) => ({
         ...workspaceSessionSummary(
-          session, { workspaceName: workspace.name }, sessions, teamChatMarkers.get(session.id),
+          session, { workspaceName: workspace.name }, sessions, teamMarkersFor(teamMarkers, session.id),
         ),
         workspaceTaskId: session.workspaceTaskId,
       })),
@@ -565,12 +590,12 @@ export function registerWorkspaceRoutes(
       tasks: unknown[];
       standaloneSessions: unknown[];
     }
-    // 群聊标记一次查全：列表里每条会话只做 Map 命中，不逐个查库。
-    const teamChatMarkers = storage.listAiTeamRunChatMarkers();
+    // 群聊与成员派发标记一次查全：列表里每条会话只做 Map 命中，不逐个查库。
+    const teamMarkers = teamSessionMarkers(storage);
     const summarize = (
       session: SessionSnapshot,
       names: { taskName?: string; workspaceName?: string } = {},
-    ) => workspaceSessionSummary(session, names, sessions, teamChatMarkers.get(session.id));
+    ) => workspaceSessionSummary(session, names, sessions, teamMarkersFor(teamMarkers, session.id));
     // 目录自定义名（工作区名称）：没有项目实体的合成目录也按这个名字显示。
     const directoryNames = storage.listSessionDirectoryNames();
     const customNameForCwd = (cwd: string): string | undefined => {
@@ -871,7 +896,7 @@ export function registerWorkspaceRoutes(
     }
     storage.touchWorkspaceTask(task.id);
     const workspace = storage.getWorkspace(task.workspaceId);
-    const teamChatMarkers = storage.listAiTeamRunChatMarkers();
+    const teamMarkers = teamSessionMarkers(storage);
     res.json({
       ...task,
       ...resolvedMilestoneFields(storage, task.milestoneId),
@@ -880,7 +905,7 @@ export function registerWorkspaceRoutes(
         ...workspaceSessionSummary(session, {
           taskName: task.name,
           workspaceName: workspace?.name,
-        }, sessions, teamChatMarkers.get(session.id)),
+        }, sessions, teamMarkersFor(teamMarkers, session.id)),
         workspaceTaskId: task.id,
       })),
     });

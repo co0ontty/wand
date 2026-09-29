@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { WandIcon } from "../ui";
 import {
   composerAttachmentsController,
+  type ComposerAttachmentItem,
   type ComposerAttachmentsMount,
 } from "./controller";
 
@@ -12,10 +13,13 @@ import {
  * 这套 class：桌面与移动两套 CSS 都挂在它们上面（移动端是 36px 横向滚动条）。
  * 空列表时适配器不发布 mount，整条预览不渲染 —— 等价于旧的 `.hidden` 且不占布局。
  */
-export function ComposerAttachments({ mount }: { mount: ComposerAttachmentsMount }): React.ReactElement {
+export function ComposerAttachmentList({ items, onRemove }: {
+  items: ReadonlyArray<ComposerAttachmentItem>;
+  onRemove(index: number): void;
+}): React.ReactElement {
   return (
     <div className="attachment-preview" aria-label="待发送附件" aria-live="polite">
-      {mount.items.map((item) => (
+      {items.map((item) => (
         <span className="attachment-pill" data-index={item.index} key={item.index}>
           {item.previewUrl ? (
             <img src={item.previewUrl} alt="" />
@@ -35,7 +39,7 @@ export function ComposerAttachments({ mount }: { mount: ComposerAttachmentsMount
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              mount.onRemove(item.index);
+              onRemove(item.index);
             }}
           >
             ×
@@ -44,6 +48,10 @@ export function ComposerAttachments({ mount }: { mount: ComposerAttachmentsMount
       ))}
     </div>
   );
+}
+
+export function ComposerAttachments({ mount }: { mount: ComposerAttachmentsMount }): React.ReactElement {
+  return <ComposerAttachmentList items={mount.items} onRemove={mount.onRemove} />;
 }
 
 export function ComposerAttachmentsHost(): React.ReactElement[] {

@@ -6,8 +6,8 @@ import { taskBoardController } from "../issues/task-board-controller";
 import { SidebarToggleIcon } from "../shell/sidebar-toggle-icon";
 import { WandBadge, WandBreadcrumb, WandButton, WandIcon, WandIconButton } from "../ui";
 import { TeamAvatar, type TeamAvatarState } from "./avatar";
-import { aiTeamsRepository, subscribeAiTeamRunChanges } from "./repository";
-import { TeamChatView } from "./team-chat-view";
+import { aiTeamsRepository, subscribeAiTeamDefinitionChanges, subscribeAiTeamRunChanges } from "./repository";
+import { displayTeamOf, mergeTeamChatDetail, TeamChatView } from "./team-chat-view";
 
 const STEP_LABEL: Record<AiTeamStep["status"], string> = {
   queued: "排队",
@@ -43,7 +43,7 @@ function stepAvatarState(status: AiTeamStep["status"]): TeamAvatarState {
 /**
  * 对话区下方的「工作任务」二级目录：一级是本次运行派发给成员的工作步骤（AiTeamStep，kind=work），
  * 二级展开显示归属成员（头像/名字/职责）、状态、报告文件，并复用群聊页的成员跳转打开该步骤会话。
- * 数据来自 detail.steps / run.team.members，运行推进靠 ai-team-run 通知重拉，本页不轮询。
+ * 数据来自 detail.steps / displayTeam（执行仍用 run.team 快照），运行推进靠服务端通知重拉。
  */
 function WorkTaskTree({
   detail,
@@ -71,7 +71,7 @@ function WorkTaskTree({
       </header>
       {steps.length ? <ol className="wand-team-work-list">
         {steps.map((step) => {
-          const member = detail.run.team.members.find((item) => item.id === step.memberId);
+          const member = displayTeamOf(detail).members.find((item) => item.id === step.memberId);
           const open = openIds.has(step.id);
           return <li key={step.id} className="wand-team-work-item" data-status={step.status} data-open={open || undefined}>
             <button type="button" className="wand-team-work-head" aria-expanded={open} onClick={() => toggle(step.id)}>
@@ -126,32 +126,54 @@ export function TeamChatPage({
 }: TeamChatPageProps): React.ReactElement {
   const [detail, setDetail] = React.useState<AiTeamRunDetail | null>(null);
   const [error, setError] = React.useState("");
-  const taskId = detail?.run.taskId ?? "";
+  const currentRunRef = React.useRef(runId);
+  currentRunRef.current = runId;
+  const loadEpochRef = React.useRef(0);
+  // 跟随同一 relay 的新运行时保留视图实例，草稿和上滚位置由它继续持有。
+  const continuingRunRef = React.useRef("");
+  const visibleDetail = detail && (detail.run.id === runId || continuingRunRef.current === runId)
+    ? detail : null;
+  const showingPreviousRun = !!visibleDetail && visibleDetail.run.id !== runId;
+  const taskId = visibleDetail?.run.taskId ?? "";
+
+  React.useEffect(() => () => { loadEpochRef.current++; }, []);
 
   const load = React.useCallback(async () => {
+    const epoch = ++loadEpochRef.current;
     if (!runId) {
       setError("没有要打开的群聊。");
       return;
     }
+    setError("");
     try {
       const next = await aiTeamsRepository.detail(runId);
+      if (epoch !== loadEpochRef.current || currentRunRef.current !== runId) return;
       // 群聊绑的是 chat 会话，不是某一次运行：用户在群里接着说话时服务端会在同一个群聊上开新一轮，
       // 这里原地跟着切过去（地址栏 replace，返回键行为仍是一步回到原会话），
       // 否则状态条、工作任务和步骤报告都停在旧的一轮，新一轮的活根本看不到。
       const newer = await newerRunIdOnSameChat(next);
+      if (epoch !== loadEpochRef.current || currentRunRef.current !== runId) return;
       if (newer) {
+        continuingRunRef.current = newer;
         taskBoardController.open("", "", "teamchat", newer);
         return;
       }
-      setDetail(next);
+      setDetail((current) => mergeTeamChatDetail(current, next));
+      continuingRunRef.current = "";
       setError("");
     } catch (cause) {
-      setError(failureMessage(cause, "群聊加载失败。"));
+      if (epoch !== loadEpochRef.current || currentRunRef.current !== runId) return;
+      const message = failureMessage(cause, "群聊加载失败。");
+      setError(continuingRunRef.current === runId
+        ? `新一轮加载失败，当前显示上一轮记录。${message}` : message);
     }
   }, [runId]);
 
   React.useEffect(() => {
-    setDetail(null);
+    if (continuingRunRef.current !== runId) {
+      continuingRunRef.current = "";
+      setDetail(null);
+    }
     setError("");
     void load();
   }, [load]);
@@ -160,6 +182,16 @@ export function TeamChatPage({
     // 新一轮的 runId 和当前页不同，所以还要按任务 id 收通知，才跟得上「接着开一轮」。
     if (change.runId === runId || (taskId && change.taskId === taskId)) void load();
   }), [load, runId, taskId]);
+  React.useEffect(() => subscribeAiTeamDefinitionChanges((teamId) => {
+    if (teamId === visibleDetail?.run.teamId) void load();
+  }), [load, visibleDetail?.run.teamId]);
+
+  const onDetailChange = React.useCallback((next: AiTeamRunDetail): void => {
+    // 发送后的旧 run 重拉可能晚于导航，不能将新一轮的标题、状态和任务拉回旧版。
+    if (next.run.id === currentRunRef.current) {
+      setDetail((current) => mergeTeamChatDetail(current, next));
+    }
+  }, []);
 
   const back = React.useCallback(() => {
     if (onBack) onBack();
@@ -177,7 +209,8 @@ export function TeamChatPage({
     return () => window.removeEventListener("keydown", onKey);
   }, [back]);
 
-  const status = detail ? RUN_STATUS[detail.run.status] : null;
+  const status = visibleDetail && !showingPreviousRun
+    ? RUN_STATUS[visibleDetail.run.status] : null;
   return <section className="task-board-native-page wand-team-chat-page" aria-label="群聊">
     <header className="task-board-workspace-header">
       <div className="task-board-kicker">
@@ -203,13 +236,16 @@ export function TeamChatPage({
             ariaLabel="群聊导航"
             items={[
               { label: "任务看板", onNavigate: () => taskBoardController.open("", "", "board") },
-              { label: detail?.run.team.name || "群聊" },
+              { label: visibleDetail ? displayTeamOf(visibleDetail).name : "群聊" },
             ]}
           />
-          <p>{detail ? `${detail.run.team.members.length} 位成员 · 团队群聊` : error || "正在加载群聊…"}</p>
+          <p>{showingPreviousRun
+            ? error ? "上一轮记录 · 新一轮加载失败" : "上一轮记录 · 正在接入新一轮…"
+            : visibleDetail ? `${displayTeamOf(visibleDetail).members.length} 位成员 · 团队群聊`
+              : error || "正在加载群聊…"}</p>
         </div>
       </div>
-      {detail && status ? <div className="task-board-header-actions wand-team-chat-head-meta">
+      {visibleDetail && status ? <div className="task-board-header-actions wand-team-chat-head-meta">
         <WandBadge tone={status.tone}>{status.label}</WandBadge>
       </div> : null}
     </header>
@@ -218,16 +254,17 @@ export function TeamChatPage({
       {runId ? <WandButton kind="ghost" size="small" onClick={() => void load()}>重新加载</WandButton> : null}
     </div> : null}
     <div className="wand-team-chat-body">
-      {detail ? <TeamChatView
-        detail={detail}
-        onChange={setDetail}
+      {visibleDetail ? <TeamChatView
+        detail={visibleDetail}
+        staleRun={showingPreviousRun}
+        onChange={onDetailChange}
         onOpenSession={onOpenSession}
         details={<>
-          <WorkTaskTree detail={detail} onOpenSession={onOpenSession}/>
-          {detail.run.chatSessionId && onOpenSession ? <WandButton
+          <WorkTaskTree detail={visibleDetail} onOpenSession={onOpenSession}/>
+          {visibleDetail.run.chatSessionId && onOpenSession ? <WandButton
             kind="ghost"
             size="small"
-            onClick={() => onOpenSession(detail.run.chatSessionId!)}
+            onClick={() => onOpenSession(visibleDetail.run.chatSessionId!)}
           >查看完整会话记录</WandButton> : null}
         </>}
       />

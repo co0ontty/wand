@@ -23,7 +23,9 @@ function validTeam() {
   };
 }
 
-async function harness(t: TestContext): Promise<{ url: string; storage: WandStorage; runner: AiTeamRunner }> {
+async function harness(t: TestContext): Promise<{
+  url: string; storage: WandStorage; runner: AiTeamRunner; changes: string[];
+}> {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-ai-team-routes-"));
   const storage = new WandStorage(path.join(root, "wand.db"));
   const ops: AiTeamSessionOps = {
@@ -36,7 +38,8 @@ async function harness(t: TestContext): Promise<{ url: string; storage: WandStor
   const runner = new AiTeamRunner({ storage, ops, resolveCwd: () => root });
   const app = express();
   app.use(express.json());
-  registerAiTeamRoutes(app, { storage, runner });
+  const changes: string[] = [];
+  registerAiTeamRoutes(app, { storage, runner, notifyTeamChanged: (id) => changes.push(id) });
   app.use(jsonErrorHandler);
   const server = createServer(app);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -46,7 +49,7 @@ async function harness(t: TestContext): Promise<{ url: string; storage: WandStor
     storage.close();
     rmSync(root, { recursive: true, force: true });
   });
-  return { url: `http://127.0.0.1:${(server.address() as { port: number }).port}`, storage, runner };
+  return { url: `http://127.0.0.1:${(server.address() as { port: number }).port}`, storage, runner, changes };
 }
 
 async function call(url: string, method: string, body?: unknown): Promise<{ status: number; json: any }> {
@@ -71,6 +74,25 @@ test("teams are created, updated and listed with normalized members", async (t) 
   assert.equal(updated.json.members[0].id, created.json.members[0].id, "member ids are kept on update");
   assert.equal(updated.json.maxSteps, 50);
   assert.equal((await call(`${url}/api/ai-teams`, "GET")).json.length, 1);
+});
+
+test("PUT notifies readers and run detail projects renamed members without rewriting execution", async (t) => {
+  const { url, storage, runner, changes } = await harness(t);
+  const created = await call(`${url}/api/ai-teams`, "POST", validTeam());
+  const task = storage.createWandTask({ title: "改名验证", description: "验证成员署名" });
+  const started = await runner.start({ teamId: created.json.id, taskId: task.id });
+  const members = created.json.members.map((member: { id: string; name: string }) =>
+    member.name === "实现" ? { ...member, name: "新名字", avatar: "cat:4" } : member);
+  const updated = await call(`${url}/api/ai-teams/${created.json.id}`, "PUT", {
+    ...created.json, members,
+  });
+  assert.equal(updated.status, 200);
+  assert.deepEqual(changes, [created.json.id]);
+  const detail = await call(`${url}/api/ai-team-runs/${started.run.id}`, "GET");
+  assert.equal(detail.json.run.team.members[1].name, "实现");
+  assert.equal(detail.json.displayTeam.members[1].name, "新名字");
+  assert.equal(detail.json.displayTeam.members[1].avatar, "cat:4");
+  assert.equal(storage.getAiTeamRun(started.run.id)?.team.members[1]?.name, "实现");
 });
 
 test("team validation rejects bad member lists with Chinese messages", async (t) => {

@@ -1,4 +1,5 @@
 import { inferProviderIdFromCommand } from "../../provider-identity";
+import { teamChatLabel, teamStepLabel } from "./team-sessions";
 import type { WorkspaceProvider, WorkspaceSessionSummary } from "./types";
 
 /** 工作区内统一使用的 provider 展示名，保证单窗格与分屏标签一致。 */
@@ -75,6 +76,21 @@ export function listSessionLabel(
 ): string {
   if (!isGenericSessionTitle(session, parentNames)) return (session.title || "").trim();
   return `${workspaceProviderLabel(workspaceSessionProvider(session))} ${index + 1}`;
+}
+
+/**
+ * 侧栏行标题的唯一入口：团队条目用短标题（这一步的任务名 / 团队名），
+ * 其余仍走通用生成标题 + 「CLI N」兜底。
+ */
+export function sidebarSessionLabel(
+  session: WorkspaceSessionSummary,
+  index: number,
+  parentNames: readonly string[] = [],
+  liveTitle?: string,
+): string {
+  if (session.teamStep) return teamStepLabel(session.teamStep);
+  if (session.teamChat) return teamChatLabel(session);
+  return listSessionLabel(withLiveSessionTitle(session, liveTitle, parentNames), index, parentNames);
 }
 
 function isCommandFallbackTitle(title: string): boolean {

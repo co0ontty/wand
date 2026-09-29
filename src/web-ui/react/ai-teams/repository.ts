@@ -26,6 +26,19 @@ export function subscribeAiTeamRunChanges(listener: Listener): () => void {
   return () => { listeners.delete(listener); };
 }
 
+type TeamListener = (teamId: string) => void;
+const teamListeners = new Set<TeamListener>();
+
+export function notifyAiTeamDefinitionChanged(teamId: string): void {
+  invalidateTeamList();
+  for (const listener of teamListeners) listener(teamId);
+}
+
+export function subscribeAiTeamDefinitionChanges(listener: TeamListener): () => void {
+  teamListeners.add(listener);
+  return () => { teamListeners.delete(listener); };
+}
+
 type LiveListener = (update: AiTeamLiveUpdate) => void;
 const liveListeners = new Set<LiveListener>();
 
@@ -58,6 +71,13 @@ const runUrl = (runId: string, suffix = ""): string => `/api/ai-team-runs/${enco
  */
 let teamList: AiTeam[] | null = null;
 let teamListPending: Promise<AiTeam[]> | null = null;
+let teamListVersion = 0;
+
+function invalidateTeamList(): void {
+  teamListVersion++;
+  teamList = null;
+  teamListPending = null;
+}
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => {
   window.setTimeout(resolve, ms);
@@ -67,31 +87,33 @@ export const aiTeamsRepository = {
   list(): Promise<AiTeam[]> {
     if (teamList) return Promise.resolve(teamList);
     if (!teamListPending) {
-      teamListPending = requestJson<AiTeam[]>("/api/ai-teams")
+      const version = teamListVersion;
+      const pending = requestJson<AiTeam[]>("/api/ai-teams")
         .then((list) => {
-          teamList = list;
+          if (version === teamListVersion) teamList = list;
           return list;
         })
         .finally(() => {
-          // 失败不留在缓存里，下一次调用重新拉。
-          teamListPending = null;
+          // 定义变更后旧请求不得清掉新请求，也不得把旧名单塞回缓存。
+          if (teamListPending === pending) teamListPending = null;
         });
+      teamListPending = pending;
     }
     return teamListPending;
   },
   async create(input: AiTeamInput): Promise<AiTeam> {
     const team = await requestJson<AiTeam>("/api/ai-teams", jsonBody(input));
-    teamList = null;
+    invalidateTeamList();
     return team;
   },
   async update(id: string, input: AiTeamInput): Promise<AiTeam> {
     const team = await requestJson<AiTeam>(`/api/ai-teams/${encodeURIComponent(id)}`, jsonBody(input, "PUT"));
-    teamList = null;
+    notifyAiTeamDefinitionChanged(team.id);
     return team;
   },
   async remove(id: string): Promise<void> {
     await requestJson(`/api/ai-teams/${encodeURIComponent(id)}`, { method: "DELETE" });
-    teamList = null;
+    notifyAiTeamDefinitionChanged(id);
   },
   runs(filter: { teamId?: string; activeOnly?: boolean; limit?: number } = {}): Promise<AiTeamRunSummary[]> {
     const params = new URLSearchParams();

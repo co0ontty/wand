@@ -2,6 +2,7 @@ import { useSyncExternalStore } from "react";
 import * as React from "react";
 import { createPortal } from "react-dom";
 import { WandIcon } from "../ui";
+import { ComposerPopoverAction } from "./action";
 import { composerPopoverController, type ComposerPopoverMount } from "./controller";
 
 /**
@@ -15,15 +16,12 @@ export function ComposerPopoverItems({ mount }: { mount: ComposerPopoverMount })
 
   return (
     <>
-      <button
-        className="plus-popover-item"
+      <ComposerPopoverAction
         id="plus-attach-item"
-        type="button"
+        icon="paperclip"
+        label="上传附件"
         onClick={(event) => mount.onAttach(event.detail === 0)}
-      >
-        <WandIcon name="paperclip" size={14} strokeWidth={1.8} className="plus-popover-icon" />
-        <span className="plus-popover-label">上传附件</span>
-      </button>
+      />
       <button
         className={interactiveClass}
         id="terminal-interactive-toggle-top"

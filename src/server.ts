@@ -100,7 +100,7 @@ import { TerminalDaemonClient } from "./terminal-daemon-client.js";
 import { createUpgradeAwareTerminalHost } from "./render-host.js";
 import { createUpgradeAwareStructuredHost } from "./render-structured-host.js";
 import type { TerminalHost } from "./terminal-host.js";
-import { checkRateLimit, recordFailedLogin, resetRateLimit } from "./middleware/rate-limit.js";
+import { checkPasswordRateLimit, recordFailedPassword, resetPasswordRateLimit } from "./middleware/rate-limit.js";
 import {
   updateProviderClis,
   verifyProviderCliUpdateResults,
@@ -455,7 +455,9 @@ export async function startServer(
   const sessionRegistry = new SessionRegistry(processes, structuredSessions, storage);
   const missions = new Missions(storage, structuredSessions, sessionRegistry);
   // wsManager 在后面才建：团队运行的变更通知经由这个转发口，接好之前静默丢弃。
-  let notifyAiTeamRun = (_data: { kind: "ai-team-run"; runId: string; taskId: string }): void => {};
+  let notifyAiTeamRun = (_data:
+    | { kind: "ai-team-run"; runId: string; taskId: string }
+    | { kind: "ai-team-definition"; teamId: string }): void => {};
   // 运行中步骤的 live 文本推送（§4.9），同样走系统通知，接好之前静默丢弃。
   let notifyAiTeamRunLive = (_update: AiTeamLiveUpdate): void => {};
   // 团队降级的 model-unknown 事前比对只看这份已发现的清单；没刷新过就是空，判定方向是放行。
@@ -607,16 +609,14 @@ export async function startServer(
 
   app.post("/api/login", (req, res) => {
     const clientIp = req.ip || req.socket.remoteAddress || "unknown";
-    if (!checkRateLimit(clientIp)) {
-      res.status(429).json({ error: "登录尝试次数过多，请在 15 分钟后再试。" });
-      return;
-    }
-
     const { password, appToken, client } = req.body as { password?: string; appToken?: string; client?: string };
     const effectivePassword = getEffectivePassword(storage, config);
 
     // App token login is intentionally restricted even though the token remains
     // password-derived for compatibility with existing connect codes.
+    // A stale token gets 401 without feeding the counter: the client cannot fix it by
+    // retrying, and one device holding one used to lock out every user behind the same
+    // reverse proxy IP. An active lock still gates unverified attempts.
     let principal: AuthPrincipal | null = null;
     if (appToken) {
       try {
@@ -629,15 +629,27 @@ export async function startServer(
     }
 
     if (!principal) {
+      const lock = checkPasswordRateLimit(clientIp);
+      if (lock) {
+        const minutes = Math.max(1, Math.ceil(lock.retryAfter / 60));
+        res.setHeader("Retry-After", String(lock.retryAfter));
+        res
+          .status(429)
+          .json({ error: `登录尝试次数过多，请在约 ${minutes} 分钟后再试。`, retryAfter: lock.retryAfter });
+        return;
+      }
+    }
+
+    if (!principal) {
       if (password !== effectivePassword) {
-        recordFailedLogin(clientIp);
+        if (!appToken) recordFailedPassword(clientIp);
         res.status(401).json({ error: "密码错误，请重试。" });
         return;
       }
       principal = { ...BROWSER_ADMIN_PRINCIPAL, scopes: [...BROWSER_ADMIN_PRINCIPAL.scopes] };
     }
 
-    resetRateLimit(clientIp);
+    resetPasswordRateLimit(clientIp);
     const token = authService.createSession(principal);
     const cookieOpts = {
       httpOnly: true,
@@ -837,7 +849,11 @@ export async function startServer(
   registerGithubRoutes(app, { storage, requireAdmin, sessions: sessionRegistry });
   // 任务管理与 Missions 一样只需登录：原生 connected-app 也要能列/建/派发。
   registerTaskRoutes(app, { storage, sessions: sessionRegistry, structured: structuredSessions, processes, config });
-  registerAiTeamRoutes(app, { storage, runner: aiTeams });
+  registerAiTeamRoutes(app, {
+    storage,
+    runner: aiTeams,
+    notifyTeamChanged: (teamId) => notifyAiTeamRun({ kind: "ai-team-definition", teamId }),
+  });
   registerAttentionRoutes(app, { sessions: sessionRegistry, runner: aiTeams });
 
   registerAdminUpdateRoutes(app, {
@@ -873,7 +889,7 @@ export async function startServer(
   registerClaudeHistoryRoutes(app, processes, storage);
   registerWorkspaceRoutes(app, storage, sessionRegistry, { config });
   registerMissionRoutes(app, missions);
-  registerUploadRoutes(app, processes);
+  registerUploadRoutes(app, sessionRegistry);
 
   app.post("/api/optimize-prompt", asyncRoute(async (req, res) => {
     const body = (req.body ?? {}) as { text?: string; sessionId?: string };

@@ -82,6 +82,8 @@ export interface WorkspaceSessionSummary {
   inFlight?: boolean;
   /** 这条会话是 AI 团队的群聊 relay 会话；服务端 join ai_team_runs 后带上入口信息。 */
   teamChat?: WorkspaceSessionTeamChat;
+  /** 这条会话是 AI 团队派发出来的成员工作会话；服务端 join ai_team_steps 后带上这一步的身份。 */
+  teamStep?: WorkspaceSessionTeamStep;
 }
 
 /** 群聊标记的数据来源：ai_team_runs 中该 chat_session_id 最近一次运行（服务端 AiTeamRunChatMarker）。 */
@@ -89,6 +91,23 @@ export interface WorkspaceSessionTeamChat {
   runId: string;
   teamName: string;
   memberCount: number;
+}
+
+/** 成员步骤标记的数据来源：ai_team_steps.session_id（服务端 AiTeamStepSessionMarker）。 */
+export interface WorkspaceSessionTeamStep {
+  runId: string;
+  stepId: string;
+  /** leader = 负责人自己的回合，work = 派给成员干活的会话。 */
+  kind: string;
+  /** 这一步的任务标题，列表拿它当短标题，不等 CLI 生成会话名。 */
+  title: string;
+  memberId: string;
+  memberName: string;
+  teamName: string;
+  stepStatus: string;
+  runStatus: string;
+  /** 运行已进入终态：这一步的会话算历史，默认折起来、可以清空。 */
+  runFinished: boolean;
 }
 
 export interface WorkspaceDetail extends Workspace {

@@ -1,0 +1,34 @@
+{
+  "contract": "R3 / R7-I/A — local presentation handles, not service turn IDs; an identical returned window cannot reveal a real replacement",
+  "time": "2026-09-29T10:00:00.000Z",
+  "fixtureShape": "ConversationTurn {role, notice?, createdAt?, completedAt?, author?, content:[{type:'text',text}]} with all fields participating in full payload comparison",
+  "fixtures": {
+    "a": { "role": "assistant", "createdAt": "2026-09-29T10:00:00.000Z", "author": { "id": "m-a", "name": "甲" }, "content": [{ "type": "text", "text": "同一前缀一二三四五六七八九十甲报告后半持续保持共同的二十四字前缀 A" }] },
+    "b": { "role": "assistant", "createdAt": "2026-09-29T10:00:00.000Z", "author": { "id": "m-a", "name": "甲" }, "content": [{ "type": "text", "text": "同一前缀一二三四五六七八九十甲报告后半持续保持共同的二十四字前缀 B" }] },
+    "c": { "role": "assistant", "createdAt": "2026-09-29T10:00:00.000Z", "author": { "id": "m-b", "name": "乙" }, "content": [{ "type": "text", "text": "同一前缀一二三四五六七八九十甲报告后半持续保持共同的二十四字前缀 A" }] },
+    "tail": { "role": "assistant", "createdAt": "2026-09-29T10:00:01.000Z", "author": { "id": "m-a", "name": "甲" }, "content": [{ "type": "text", "text": "新尾" }] },
+    "unknownTime": { "role": "assistant", "author": { "id": "m-a", "name": "甲" }, "content": [{ "type": "text", "text": "时刻缺失" }] },
+    "unrelated": { "role": "user", "createdAt": "2026-09-29T10:00:02.000Z", "content": [{ "type": "text", "text": "不重叠" }] }
+  },
+  "cases": [
+    { "id": "repeat-reload", "scope": "run-1/chat-1", "initial": ["a", "b"], "openOwner": 0,
+      "steps": [{ "successful": true, "next": ["a", "b"], "expect": { "retained": [0, 1], "rebound": [], "candidates": [], "closeOwner": false } }] },
+    { "id": "same-millisecond-different-full-text-author", "scope": "run-1/chat-1", "initial": ["a"],
+      "steps": [{ "successful": true, "next": ["a", "b", "c"], "expect": { "retained": [0], "rebound": [1, 2], "candidates": [1, 2], "closeOwner": false } }] },
+    { "id": "exact-duplicates-no-dedup", "scope": "run-1/chat-1", "initial": ["a", "a", "b"], "openOwner": 0,
+      "steps": [{ "successful": true, "next": ["a", "b", "tail"], "expect": { "retained": [1], "rebound": [0, 2], "candidates": [2], "closeOwner": true, "notes": "duplicate group rebound while unique b retains its handle" } }] },
+    { "id": "window-200-to-200", "scope": "run-1/chat-1", "initial": { "generate": 200 }, "openOwner": 100,
+      "steps": [{ "successful": true, "next": { "dropHead": 1, "append": "tail" }, "expect": { "retained": [0, 198], "rebound": [199], "candidates": [199], "closeOwner": false, "notes": "indexes in retained refer to new window; all 199 overlap rows retain IDs" } }] },
+    { "id": "no-overlap-reconnect", "scope": "run-1/chat-1", "initial": ["a", "b"], "openOwner": 0,
+      "steps": [{ "successful": true, "next": ["unrelated", "tail"], "expect": { "retained": [], "rebound": [0, 1], "candidates": [], "closeOwner": true } }] },
+    { "id": "failed-snapshot-does-not-clear", "scope": "run-1/chat-1", "initial": ["a", "b"], "openOwner": 0,
+      "steps": [{ "successful": false, "next": [], "expect": { "retained": [0, 1], "rebound": [], "candidates": [], "closeOwner": false } },
+        { "successful": true, "next": ["a", "b"], "expect": { "retained": [0, 1], "rebound": [], "candidates": [], "closeOwner": false } }] },
+    { "id": "scope-switch-run-and-chat", "scope": "run-1/chat-1", "initial": ["a", "b"], "openOwner": 0,
+      "steps": [{ "successful": true, "scope": "run-2/chat-2", "next": ["a", "b"], "expect": { "retained": [], "rebound": [0, 1], "candidates": [], "closeOwner": true } }] },
+    { "id": "missing-time-tail-static", "scope": "run-1/chat-1", "initial": ["a", "b"],
+      "steps": [{ "successful": true, "next": ["a", "b", "unknownTime"], "expect": { "retained": [0, 1], "rebound": [2], "candidates": [], "closeOwner": false } }] }
+  ],
+  "arrival": "A candidate animates once only if the page is foreground, previously pinned to tail and the row is visible on the first committed layout; otherwise consume it as static. Reduced motion consumes it instantly. Virtualization/remount does not replay. Keys and doc owners use (scope, presentationId).",
+  "mention": "Use longest complete roster candidate, paired wrapper and full-source cutoff evidence; keep text unchanged. Own/temporary body and document use empty mention roster."
+}

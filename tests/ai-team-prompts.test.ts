@@ -296,3 +296,40 @@ test("[T4] parseLeaderDecision still has no role hard validation", () => {
     assert.equal(result.ok, true, ref);
   }
 });
+
+test("[v2] the chat history file renders the intro and start turns verbatim", () => {
+  const turns: ConversationTurn[] = [
+    {
+      role: "assistant", notice: true,
+      author: { id: "m_lead", name: "沈砚", leader: true },
+      content: [{ type: "text", text: "创建了团队群聊「前端双人组」" }],
+    },
+    {
+      role: "assistant", notice: true,
+      author: { id: "m_lead", name: "沈砚", leader: true },
+      content: [{ type: "text", text: "邀请 @实现者、@审查者 加入群聊" }],
+    },
+    {
+      role: "assistant",
+      author: { id: "m_dev", name: "实现者", provider: "codex" },
+      content: [{
+        type: "text",
+        text: "我正在开始工作：第 2 步「实现 Web 端」\n依据 @设计师 第 1 步「设计规格」的产物 .wand-team/run_1/report-1-work-m_designer.md",
+      }],
+    },
+  ];
+  const file = renderChatHistoryFile({ runs: [], turns, generatedAt: "now" });
+  // 入群行是 notice → 引用行；作者槽写负责人。
+  assert.match(file, /> 沈砚（负责人）：创建了团队群聊「前端双人组」/);
+  assert.match(file, /> 沈砚（负责人）：邀请 @实现者、@审查者 加入群聊/);
+  // 开工发言是真实发言 → 加粗说话人 + 正文（依据行不丢字）。
+  assert.match(file, /\*\*实现者\*\*\n我正在开始工作：第 2 步「实现 Web 端」/);
+  assert.match(file, /依据 @设计师 第 1 步「设计规格」的产物 \.wand-team\/run_1\/report-1-work-m_designer\.md/);
+  assert.ok(!file.includes("undefined"), "缺字段不冒 undefined");
+});
+
+test("[v2] the leader prompt explains that after becomes the basis shown in the chat", () => {
+  const kickoff = buildLeaderKickoffPrompt({ team, objective: "把安装说明写清楚" } as AiTeamRun, ".wand-team/r1/1-leader.json", true);
+  assert.ok(kickoff.system.includes("依据"), "派工提示词说明 after 会渲染成群里的「依据」");
+  assert.ok(kickoff.system.includes('"after": [1, 2]：等第 1、2 步都做完再开始。'), "原 after 说明一字不改");
+});

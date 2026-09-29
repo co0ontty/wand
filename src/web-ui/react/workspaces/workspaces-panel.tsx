@@ -31,7 +31,7 @@ import {
   workspaceTaskIconName,
 } from "../ui";
 import { SessionProviderMark } from "./session-mark";
-import { listSessionLabel, withLiveSessionTitle } from "./session-order";
+import { sidebarSessionLabel } from "./session-order";
 import { SidebarDisclosure, useSidebarCollapsed } from "./sidebar-disclosure";
 import {
   formatTaskRecency,
@@ -40,6 +40,18 @@ import {
   taskRecency,
 } from "./sidebar-task-meta";
 import { filterSidebarGroups } from "./sidebar-search";
+import {
+  collectActiveSessions,
+  isSessionActive,
+  isSessionAttention,
+  sidebarDisplayModeHint,
+  sidebarDisplayModeLabel,
+  useSidebarDisplayMode,
+  filterActiveGroups,
+  type SidebarDisplayMode,
+  type ActiveSessionEntry,
+} from "./sidebar-display-mode";
+import { nonTeamSessions, splitTeamSessions } from "./team-sessions";
 import {
   isDirectoryExpanded,
   isTaskSessionsExpanded,
@@ -217,8 +229,10 @@ function TaskSessionItem({
 }) {
   const [confirming, setConfirming] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
-  const labeled = withLiveSessionTitle(session, liveTitle, parentNames);
-  const label = listSessionLabel(labeled, index, parentNames);
+  const label = sidebarSessionLabel(session, index, parentNames, liveTitle);
+  const rowTitle = session.teamStep
+    ? `${session.teamStep.teamName} · ${session.teamStep.memberName} · ${session.teamStep.title}`
+    : session.cwd || session.title || session.id;
   const activate = manageMode ? (onToggleSelect ?? onOpen) : onOpen;
 
   return (
@@ -241,7 +255,7 @@ function TaskSessionItem({
         size="sm"
         active={active}
         aria-pressed={manageMode ? selected : undefined}
-        title={session.cwd || session.title || session.id}
+        title={rowTitle}
         render={<button type="button" onClick={activate}/>}
       >
         {manageMode && <ManageCheck checked={selected} label={`选择终端 ${label}`}/>}
@@ -251,7 +265,12 @@ function TaskSessionItem({
             : <SessionProviderMark session={session}/>}
         </span>
         <span className="workspace-session-name">{label}</span>
-        {session.teamChat ? (
+        {session.teamStep ? (
+          <span
+            className="workspace-session-kind workspace-session-kind-team"
+            title={`${session.teamStep.teamName} · ${session.teamStep.stepStatus}`}
+          >{session.teamStep.memberName || "团队"}</span>
+        ) : session.teamChat ? (
           <span
             className="workspace-session-kind workspace-session-kind-team"
             title={`${session.teamChat.teamName} · ${session.teamChat.memberCount} 人`}
@@ -319,6 +338,7 @@ function TaskItem({
   activeTaskId,
   activeSessionId,
   manageMode = false,
+  displayMode = "full",
   selected = false,
   selectedSessionIds,
   onToggleSelect,
@@ -328,6 +348,7 @@ function TaskItem({
   onRequestNewSession,
   isOnlyTask = false,
   onClearSessions,
+  onClearTeamHistory,
   onDeleteSession,
   onRename,
   onArchive,
@@ -341,6 +362,8 @@ function TaskItem({
   activeTaskId: string | null;
   activeSessionId: string | null;
   manageMode?: boolean;
+  /** 侧栏显示模式：folded 时任务下的终端整块收起。 */
+  displayMode?: SidebarDisplayMode;
   selected?: boolean;
   selectedSessionIds?: ReadonlySet<string>;
   onToggleSelect?(): void;
@@ -353,6 +376,8 @@ function TaskItem({
   isOnlyTask?: boolean;
   /** 批量结束并删除该任务的全部会话（batch-delete）。 */
   onClearSessions(): Promise<void>;
+  /** 只清空已结束运行的团队会话，人工会话和任务本身不动。 */
+  onClearTeamHistory(sessionIds: readonly string[]): Promise<void>;
   onDeleteSession(session: WorkspaceSessionSummary): Promise<void>;
   onRename(name: string): Promise<void>;
   /** 归档（软删除）：终端与 worktree 都保留，只从侧栏隐藏并进入看板归档。 */
@@ -362,6 +387,11 @@ function TaskItem({
   onMoveSession(sessionId: string): Promise<void>;
 }) {
   const [collapsed, toggleCollapsed] = useSidebarCollapsed(`task.${task.id}`, false);
+  // 收起模式默认把终端整块折起来，用户在原位点开的那几条单独记住。
+  const [expandedInFoldedMode, toggleExpandedInFoldedMode] = useSidebarCollapsed(`expandedTask.${task.id}`, false);
+  // 团队派发的会话默认折起：不常驻在任务下面，点标题行才展开。
+  const [teamCollapsed, toggleTeamCollapsed] = useSidebarCollapsed(`team.${task.id}`, true);
+  const [teamHistoryCollapsed, toggleTeamHistoryCollapsed] = useSidebarCollapsed(`teamhistory.${task.id}`, true);
   const [dropTarget, setDropTarget] = React.useState(false);
   const [confirming, setConfirming] = React.useState<"archive" | "delete" | false>(false);
   const [taskMenuOpen, setTaskMenuOpen] = React.useState(false);
@@ -373,10 +403,24 @@ function TaskItem({
   const isActive = activeTaskId === task.id;
   const activity = taskActivity(task);
   const sessionsId = React.useId();
+  const teamId = React.useId();
+  const teamHistoryId = React.useId();
 
-  const sessionCount = task.sessions.length;
-  const canCollapseSessions = showsTaskSessionDisclosure(sessionCount);
-  const open = isTaskSessionsExpanded(collapsed, sessionCount, isOnlyTask);
+  // 人工会话和群聊入口照常显示，团队派发的会话收进一个可点的折叠头。
+  const teamSplit = splitTeamSessions(task.sessions);
+  const shownSessions = nonTeamSessions(task.sessions);
+  const teamCount = teamSplit.live.length + teamSplit.history.length;
+  const sessionCount = shownSessions.length;
+  const totalSessionCount = sessionCount + teamCount;
+  const canCollapseSessions = showsTaskSessionDisclosure(totalSessionCount);
+  // 收起模式改的是「默认折哪一层」，不是锁死：点开的任务在原位展开，其余保持收起。
+  const open = displayMode === "folded"
+    ? (canCollapseSessions ? expandedInFoldedMode : isOnlyTask)
+    : isTaskSessionsExpanded(collapsed, totalSessionCount, isOnlyTask);
+  const toggleSessionsOpen = displayMode === "folded" ? toggleExpandedInFoldedMode : toggleCollapsed;
+  const teamOpen = !teamCollapsed;
+  const teamHistoryOpen = !teamHistoryCollapsed;
+  const teamRunning = teamSplit.live.some(isSessionActive);
 
   const submitRename = async () => {
     if (busy) return;
@@ -520,7 +564,7 @@ function TaskItem({
               title={open ? "收起终端" : "展开终端"}
               onClick={toggleCollapsed}
             >
-              <span className="workspace-task-count">{sessionCount}</span>
+              <span className="workspace-task-count">{totalSessionCount}</span>
               <WandIcon name="chevron" size={10} className={classNames("workspace-task-chevron", open && "open")}/>
             </WandChip>
           ) : null}
@@ -645,12 +689,12 @@ function TaskItem({
           </span>
         )}
       </div>
-      {open && sessionCount === 0 && !manageMode && <button type="button" className="workspace-task-empty"
+      {open && totalSessionCount === 0 && !manageMode && <button type="button" className="workspace-task-empty"
         onClick={onRequestNewSession}><WandIcon name="plus" size={12}/>添加会话，或拖入已有会话</button>}
-      {sessionCount > 0 && (
+      {totalSessionCount > 0 && (
         <SidebarDisclosure id={sessionsId} open={open}>
           <div className="workspace-task-sessions">
-          {task.sessions.map((session, index) => (
+          {(manageMode ? task.sessions : shownSessions).map((session, index) => (
             <TaskSessionItem
               key={session.id}
               session={session}
@@ -665,6 +709,82 @@ function TaskItem({
               onDelete={() => onDeleteSession(session)}
             />
           ))}
+          {/* 批量选择照常列出团队会话，折叠只作用于日常视图，不缩小删除范围。 */}
+          {!manageMode && teamCount > 0 && (
+            <div className="workspace-team-fold">
+              <button
+                type="button"
+                className="workspace-team-fold-head"
+                aria-expanded={teamOpen}
+                aria-controls={teamId}
+                title={teamOpen ? "收起团队会话" : `展开任务「${task.name}」的 ${teamCount} 个团队会话`}
+                onClick={toggleTeamCollapsed}
+              >
+                <WandIcon name="chevron" size={10} className={classNames("workspace-task-chevron", teamOpen && "open")}/>
+                <span className="workspace-team-fold-label">团队会话</span>
+                {teamRunning ? (
+                  <span className="workspace-task-activity running"><span aria-hidden="true"/>运行中</span>
+                ) : null}
+                <span className="workspace-team-fold-count">{teamCount}</span>
+              </button>
+              <SidebarDisclosure id={teamId} open={teamOpen}>
+                <div className="workspace-team-fold-list">
+                  {teamSplit.live.map((session, index) => (
+                    <TaskSessionItem
+                      key={session.id}
+                      session={session}
+                      index={index}
+                      parentNames={[...parentNames, task.name]}
+                      liveTitle={liveTitles?.[session.id]}
+                      active={activeSessionId === session.id}
+                      onOpen={() => onOpenSession(session)}
+                      onDelete={() => onDeleteSession(session)}
+                    />
+                  ))}
+                  {teamSplit.history.length > 0 && (
+                    <div className="workspace-team-history">
+                      <div className="workspace-team-history-head">
+                        <button
+                          type="button"
+                          className="workspace-team-fold-head is-nested"
+                          aria-expanded={teamHistoryOpen}
+                          aria-controls={teamHistoryId}
+                          title={teamHistoryOpen ? "收起已结束的团队会话" : `展开 ${teamSplit.history.length} 个已结束的团队会话`}
+                          onClick={toggleTeamHistoryCollapsed}
+                        >
+                          <WandIcon name="chevron" size={10} className={classNames("workspace-task-chevron", teamHistoryOpen && "open")}/>
+                          <span className="workspace-team-fold-label">已结束</span>
+                          <span className="workspace-team-fold-count">{teamSplit.history.length}</span>
+                        </button>
+                        <ClearSessionsButton
+                          count={teamSplit.history.length}
+                          label={`任务「${task.name}」已结束的团队会话`}
+                          detail={`将删除这一轮协作留下的 ${teamSplit.history.length} 个成员会话，你自己的会话和任务都会保留。`}
+                          onClear={() => onClearTeamHistory(teamSplit.history.map((session) => session.id))}
+                        />
+                      </div>
+                      <SidebarDisclosure id={teamHistoryId} open={teamHistoryOpen}>
+                        <div className="workspace-team-fold-list">
+                          {teamSplit.history.map((session, index) => (
+                            <TaskSessionItem
+                              key={session.id}
+                              session={session}
+                              index={index}
+                              parentNames={[...parentNames, task.name]}
+                              liveTitle={liveTitles?.[session.id]}
+                              active={activeSessionId === session.id}
+                              onOpen={() => onOpenSession(session)}
+                              onDelete={() => onDeleteSession(session)}
+                            />
+                          ))}
+                        </div>
+                      </SidebarDisclosure>
+                    </div>
+                  )}
+                </div>
+              </SidebarDisclosure>
+            </div>
+          )}
 
           </div>
         </SidebarDisclosure>
@@ -673,42 +793,45 @@ function TaskItem({
   );
 }
 
-function ClearSessionsButton({ count, label, onClear, menuItem = false }: {
+function ClearSessionsButton({ count, label, onClear, menuItem = false, detail }: {
   count: number;
   label: string;
   onClear(): Promise<void>;
   menuItem?: boolean;
+  /** 覆盖确认文案的第二行；默认说明会连正在运行的会话一起删。 */
+  detail?: string;
 }) {
   const [open, setOpen] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
+  const unit = detail ? "会话" : "终端";
   if (count === 0) return null;
   return (
     <WandPopover
       open={open}
       onOpenChange={(next) => { if (!busy) setOpen(next); }}
       align="end"
-      ariaLabel={`清空${label}的终端`}
+      ariaLabel={`清空${label}的${unit}`}
       className="workspace-clear-popover"
       trigger={(
         menuItem ? (
           <button type="button" role="menuitem"
-            className="workspace-task-menu-item danger" title={`清空${label}的 ${count} 个终端`}
-            aria-label={`清空${label}的 ${count} 个终端`}>
+            className="workspace-task-menu-item danger" title={`清空${label}的 ${count} 个${unit}`}
+            aria-label={`清空${label}的 ${count} 个${unit}`}>
             <WandIcon name="terminal" size={13}/>
-            <span>清空终端（{count}）</span>
+            <span>清空{unit}（{count}）</span>
           </button>
         ) : (
           <WandIconButton
             className="workspace-row-action clear"
-            title={`清空${label}的 ${count} 个终端`}
-            aria-label={`清空${label}的 ${count} 个终端`}>
+            title={`清空${label}的 ${count} 个${unit}`}
+            aria-label={`清空${label}的 ${count} 个${unit}`}>
             <WandIcon name="terminal" size={13}/>
           </WandIconButton>
         )
       )}
     >
-      <strong>清空{label}的终端？</strong>
-      <p>将删除全部 {count} 个终端，包括正在运行的会话。任务和项目会保留。</p>
+      <strong>清空{label}的{unit}？</strong>
+      <p>{detail ?? `将删除全部 ${count} 个终端，包括正在运行的会话。任务和项目会保留。`}</p>
       <div className="workspace-clear-popover-actions">
         <WandButton kind="ghost" size="small" disabled={busy} onClick={() => setOpen(false)}>取消</WandButton>
         <WandButton kind="danger" size="small" disabled={busy} onClick={async () => {
@@ -740,6 +863,7 @@ function TaskGroupSection({
   activeTaskId,
   activeSessionId,
   manageMode = false,
+  displayMode = "full",
   selection,
   onToggleTask,
   onToggleGroup,
@@ -759,6 +883,8 @@ function TaskGroupSection({
   activeTaskId: string | null;
   activeSessionId: string | null;
   manageMode?: boolean;
+  /** 侧栏显示模式，透传给每个任务行。 */
+  displayMode?: SidebarDisplayMode;
   selection?: SidebarManageSelection;
   onToggleTask?(taskId: string): void;
   onToggleGroup?(group: TaskDirectoryGroup): void;
@@ -1083,6 +1209,7 @@ function TaskGroupSection({
               activeTaskId={activeTaskId}
               activeSessionId={activeSessionId}
               manageMode={manageMode}
+              displayMode={displayMode}
               selected={selection?.taskIds.includes(task.id) ?? false}
               selectedSessionIds={selection ? new Set(selection.sessionIds) : undefined}
               onToggleSelect={() => onToggleTask?.(task.id)}
@@ -1095,11 +1222,15 @@ function TaskGroupSection({
                 const ids = task.sessions.map((session) => session.id);
                 await handleDeleteSessions(ids, task, `已清空任务「${task.name}」的 ${ids.length} 个终端`);
               }}
+              onClearTeamHistory={async (ids) => {
+                await handleDeleteSessions(ids, task, `已清空任务「${task.name}」的 ${ids.length} 个已结束团队会话`);
+              }}
               onDeleteSession={async (session) => {
-                const label = listSessionLabel(
-                  withLiveSessionTitle(session, liveTitles?.[session.id], [group.workspaceName, task.name]),
+                const label = sidebarSessionLabel(
+                  session,
                   task.sessions.indexOf(session),
                   [group.workspaceName, task.name],
+                  liveTitles?.[session.id],
                 );
                 await handleDeleteSessions([session.id], task, `已删除终端「${label}」`);
               }}
@@ -1144,10 +1275,11 @@ function TaskGroupSection({
                     onDelete={() => handleDeleteSessions(
                       [session.id],
                       null,
-                      `已删除终端「${listSessionLabel(
-                        withLiveSessionTitle(session, liveTitles?.[session.id], [group.workspaceName]),
+                      `已删除终端「${sidebarSessionLabel(
+                        session,
                         index,
                         [group.workspaceName],
+                        liveTitles?.[session.id],
                       )}」`,
                     )}
                   />
@@ -1221,6 +1353,68 @@ export function CompactDirectoryRail({
     </div>
   );
 }
+/**
+ * 列表上方的活动条：标题行是显示模式循环（点一下展开全部、再点收起、再点只看活动），
+ * 下面的行是此刻在跑或在等你的会话，点一条直接进那个会话。
+ */
+function SidebarActivityRail({ mode, entries, onCycleMode, onOpen, liveTitles }: {
+  mode: SidebarDisplayMode;
+  entries: ActiveSessionEntry[];
+  onCycleMode(): void;
+  onOpen(entry: ActiveSessionEntry): void;
+  liveTitles: Readonly<Record<string, string>>;
+}) {
+  const showList = entries.length > 0 && mode !== "active";
+  return (
+    <div className={classNames("sidebar-activity-rail", entries.length === 0 && "is-idle")} data-mode={mode}>
+      <button
+        type="button"
+        className="sidebar-activity-rail-head"
+        onClick={onCycleMode}
+        title={sidebarDisplayModeHint(mode)}
+        aria-label={sidebarDisplayModeHint(mode)}
+        aria-expanded={showList}
+      >
+        <span className={classNames("sidebar-activity-dot", entries.length > 0 && "is-live")} aria-hidden="true"/>
+        <span className="sidebar-activity-rail-label">
+          {entries.length > 0 ? `正在运行 ${entries.length}` : "当前没有活动会话"}
+        </span>
+        <span className="sidebar-activity-rail-mode">{sidebarDisplayModeLabel(mode)}</span>
+      </button>
+      {showList && (
+        <div className="sidebar-activity-rail-list">
+          {entries.map((entry) => {
+            const { session } = entry;
+            const parentNames = entry.taskName ? [entry.taskName] : [];
+            const label = sidebarSessionLabel(session, 0, parentNames, liveTitles[session.id]);
+            const attention = isSessionAttention(session);
+            return (
+              <button
+                key={session.id}
+                type="button"
+                className="sidebar-activity-row"
+                title={`${entry.taskName ? `${entry.taskName}\n` : ""}${session.cwd || session.title || session.id}`}
+                onClick={() => onOpen(entry)}
+              >
+                <span className="workspace-session-mark" aria-hidden="true">
+                  {session.teamChat
+                    ? <TeamChatSessionMark teamChat={session.teamChat}/>
+                    : <SessionProviderMark session={session}/>}
+                </span>
+                <span className="sidebar-activity-row-name">{label}</span>
+                {entry.taskName && <span className="sidebar-activity-row-task">{entry.taskName}</span>}
+                <span className={classNames("workspace-task-activity", attention ? "attention" : "running")}>
+                  <span aria-hidden="true"/>{attention ? "待处理" : "运行中"}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function WorkspacesPanel({
   selectedSessionId = null,
   sessionTitles = null,
@@ -1269,11 +1463,16 @@ export function WorkspacesPanel({
   const { groups: sourceGroups, loading, error, reload } = useTaskGroups(refreshTick);
   // Every task is a visible container, including empty and legacy unnamed tasks.
   const groups = sourceGroups;
-  const visibleGroups = filterSidebarGroups(
+  const [displayMode, cycleDisplayMode] = useSidebarDisplayMode();
+  const searchedGroups = filterSidebarGroups(
     directoryId === undefined ? groups : groups.filter((group) => group.workspaceId === directoryId),
     directoryId === undefined ? searchQuery : "",
     sessionTitles ?? {},
   );
+  // 只看活动：没有会话在动的任务整条不显示（正在看的那条始终保留）。
+  const visibleGroups = displayMode === "active" && directoryId === undefined
+    ? filterActiveGroups(searchedGroups, selectedSessionId)
+    : searchedGroups;
 
   // 活动高亮统一读 workspaceContextStore（主区标签栏与这里共用同一来源，
   // 关闭工作区窗口时这里也会同步取消高亮）。
@@ -1606,6 +1805,13 @@ export function WorkspacesPanel({
                 ><WandIcon name="check" size={15}/></WandIconButton>
               </div>
             </div>
+            <SidebarActivityRail
+              mode={displayMode}
+              entries={collectActiveSessions(visibleGroups)}
+              onCycleMode={cycleDisplayMode}
+              liveTitles={sessionTitles ?? {}}
+              onOpen={(entry) => openSession(entry.group, entry.session)}
+            />
             </>
           ) : null}
           {searchQuery && visibleGroups.length === 0 ? (
@@ -1623,6 +1829,7 @@ export function WorkspacesPanel({
                     now={now}
                     directoryCount={visibleGroups.length}
                     liveTitles={sessionTitles ?? undefined}
+                    displayMode={displayMode}
                     activeWorkspaceId={activeWorkspaceId}
                     activeTaskId={activeTaskId}
                     activeSessionId={selectedSessionId}
@@ -1644,11 +1851,23 @@ export function WorkspacesPanel({
             </div>
           ) : (
             <div className="workspaces-section-empty">
-              <span>按目录查看任务，任务下面是执行过的会话。</span>
-              <WandButton kind="ghost" size="small" className="workspaces-empty-action" aria-label="新建任务"
-                onClick={() => { onOpenDialog?.(); workspacesController.open(); }}>
-                <WandIcon name="plus" slot="start" size={13}/><span>开始一个任务</span>
-              </WandButton>
+              {displayMode === "active" ? (
+                <>
+                  <span>现在没有在运行或等你处理的会话。</span>
+                  <WandButton kind="ghost" size="small" className="workspaces-empty-action"
+                    onClick={cycleDisplayMode}>
+                    <WandIcon name="eye" slot="start" size={13}/><span>显示全部任务</span>
+                  </WandButton>
+                </>
+              ) : (
+                <>
+                  <span>按目录查看任务，任务下面是执行过的会话。</span>
+                  <WandButton kind="ghost" size="small" className="workspaces-empty-action" aria-label="新建任务"
+                    onClick={() => { onOpenDialog?.(); workspacesController.open(); }}>
+                    <WandIcon name="plus" slot="start" size={13}/><span>开始一个任务</span>
+                  </WandButton>
+                </>
+              )}
             </div>
           )}
             </div>
