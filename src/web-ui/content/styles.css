@@ -5410,18 +5410,6 @@
       padding: 4px 3px 4px 0;
       box-sizing: border-box;
     }
-    @keyframes activity-menu-in {
-      from { opacity: 0; transform: translateY(-3px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-    .chat-activity-group + .chat-activity-group { margin-top: 5px; }
-    .chat-activity-group-title {
-      padding: 2px 4px 3px;
-      color: var(--text-secondary);
-      font-size: 10.5px;
-      font-weight: 600;
-      line-height: 1.45;
-    }
     .chat-activity-entry { min-width: 0; position: relative; }
     .chat-activity-entry::before {
       content: "";
