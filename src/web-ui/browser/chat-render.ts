@@ -1,5 +1,7 @@
 import { state } from "./state";
 import { ChatRenderCache } from "./chat-render-cache.js";
+import { beginChatInteraction, chatViewLease, isChatLeaseCurrent, patchChatContents, patchChatRow, prepareChatOwners, reconcileChatRows, retireChatTurnOwners, scopeChatMarkup } from "./chat-render-focus.js";
+import type { ChatOwnerPlan, ChatViewLease } from "./chat-render-focus.js";
 import { t, getActiveLang, iconSvg } from "./i18n";
 import { escapeHtml, isImagePath, refreshTailMarqueePaths, renderTailMarqueePath } from "./utils";
 import { applyPersistedExpandState, bindChatScrollListener, buildExpandKey, clearChatUnread, getMessageKey, getPersistedAgentSelection, getPersistedExpandState, isChatNearBottom, observeLoadMoreSentinel, persistElementExpandState, refreshChatUnreadDivider, setPersistedExpandState, updateChatUnreadBubble } from "./chat-scroll";
@@ -40,9 +42,51 @@ import "./local-preview-adapter";
 // the user opens a specific entry. Completed responses share the existing cache.
 const activityDetailOpen = new Set<string>();
 const activityDetailRequests = new Map<string, Promise<any>>();
+const activityRequestLeases = new Map<string, ChatViewLease | null>();
+const activityRequestScopes = new Map<string, object | undefined>();
 const activityPendingDetails = new Map<string, any>();
 const activityResultRefreshRequested = new Set<string>();
 let activityDetailEpoch = 0;
+let chatOwnerPlan: ChatOwnerPlan | null = null;
+const activityGroupAnchors = new Map<string, Array<{ anchor: string; key: string }>>();
+let groupsUsedInPaint = new Set<string>();
+const activityEntryStates = new Map<string, { lease: ChatViewLease; open: object; request: object | null; error: string | null }>();
+const questionSchemas = new Map<string, string>();
+const copyBound = new WeakSet<Element>();
+let unprovenRowSequence = 0;
+
+function renderMessageKey(message: any, index: number): string {
+  return chatOwnerPlan?.messages[index]?.displayKey || getMessageKey(message, index);
+}
+function renderBlockScope(messageKey: string, index: number, block: any): string {
+  const cursor = chatOwnerPlan?.messages[_currentMessageGlobalIndex]?.blockOffset || 0;
+  const scope = block?.id ? ["tool", block.id, block.name] : ["source-block", index + cursor, block?.type];
+  const questions = block?.semantic?.kind === "question_request" ? block.semantic.questions : block?.input?.questions;
+  if (questions) {
+    const schema = JSON.stringify(questions);
+    const key = JSON.stringify([messageKey, block.id]);
+    if (questionSchemas.has(key) && questionSchemas.get(key) !== schema) delete state.askUserSelections[block.id];
+    questionSchemas.set(key, schema);
+    scope.push(schema);
+  }
+  return JSON.stringify([messageKey, scope]);
+}
+function chatRowMarkup(html: string, index: number): string {
+  if (!html) return html;
+  const owner = chatOwnerPlan?.messages[index]?.key || (typeof HTMLElement !== "undefined"
+    ? "view:" + chatViewLease()?.id + ":unproven:" + (++unprovenRowSequence) : null);
+  return html.replace(/^<div /, '<div data-msg-index="' + index + '"' +
+    (owner ? ' data-chat-owner="' + escapeHtml(owner) + '"' : '') + ' ');
+}
+function activityGroupKey(items: any[], messageKey: string, segmentFirstIndex: number): string {
+  const scopes = items.map(item => renderBlockScope(messageKey, item.index + segmentFirstIndex, item.block));
+  const previous = activityGroupAnchors.get(messageKey) || [];
+  const continued = previous.find(group => scopes.includes(group.anchor) && !groupsUsedInPaint.has(group.key));
+  const group = continued || { anchor: scopes[0], key: JSON.stringify(["activity-group", messageKey, scopes[0]]) };
+  groupsUsedInPaint.add(group.key);
+  if (!previous.some(candidate => candidate.key === group.key)) activityGroupAnchors.set(messageKey, previous.concat(group));
+  return group.key;
+}
 let activityElapsedTimer: ReturnType<typeof setTimeout> | null = null;
 
 function refreshActivityElapsedLabels(): void {
@@ -68,8 +112,13 @@ export function clearActivityDetailState(): void {
   activityDetailEpoch++;
   activityDetailOpen.clear();
   activityDetailRequests.clear();
+  activityRequestLeases.clear();
+  activityRequestScopes.clear();
   activityPendingDetails.clear();
   activityResultRefreshRequested.clear();
+  activityEntryStates.clear();
+  activityGroupAnchors.clear();
+  questionSchemas.clear();
   if (activityElapsedTimer !== null) clearTimeout(activityElapsedTimer);
   activityElapsedTimer = null;
 }
@@ -330,7 +379,8 @@ function buildChatRowDependencies(messages: any[], revisions: number[], runs: an
       live: isTurnActivityLive(index), commandRunning: commandRunning,
       lang: getActiveLang(), persona: state.config?.structuredChatPersona,
       defaults: state.config?.cardDefaults,
-      employee: [session.employeeId, session.employeeName, session.employeeAvatar] };
+      employee: [session.employeeId, session.employeeName, session.employeeAvatar],
+      interactionOwner: chatOwnerPlan?.messages[index]?.key || null };
   });
 }
 
@@ -359,6 +409,8 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         var sessionId = state.selectedId;
         var epoch = state.chatRenderEpoch || 0;
         var pendingToken = state.chatRenderPendingToken;
+        var root = document.querySelector("#chat-output > .chat-messages") as HTMLElement | null;
+        var interaction = root && typeof HTMLElement !== "undefined" ? beginChatInteraction(root) : null;
         try {
           paintChat(forceFullRender);
         } catch (error) {
@@ -371,6 +423,8 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
             state.lastRenderedEmpty = null;
           }
           throw error;
+        } finally {
+          interaction?.finish();
         }
       }
 
@@ -395,6 +449,9 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         }
 
         var allMessages = state.currentMessages;
+        var ownerRoot = ensureChatMessagesContainer(chatOutput);
+        chatOwnerPlan = typeof HTMLElement !== "undefined" ? prepareChatOwners(selectedSession, allMessages, ownerRoot) : null;
+        groupsUsedInPaint = new Set();
         // Agent Run 是聊天渲染的稳定索引：dispatch、子 Agent 轨迹、最终 result
         // 可能分散在多条消息里，不能在单条消息内各自计算一份。
         var agentRunIndex = collectAgentRuns(allMessages);
@@ -426,6 +483,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           renderStructuredStatusBar(null, selectedSession);
           updateTodoProgress([]);
           state.chatRenderCache?.reset();
+          if (typeof HTMLElement !== "undefined") retireChatTurnOwners();
           return;
         }
 
@@ -482,6 +540,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           if (unchangedMessages) renderStructuredStatusBar(unchangedMessages, selectedSession);
           updateTodoProgress(allMessages);
           cache.commit(plan);
+          chatOwnerPlan?.commit();
           refreshActivityElapsedLabels();
           return;
         }
@@ -495,7 +554,8 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         // （bindChatScrollListener + wheel/touch 提前下台），这里不再做
         // "近底即锁回 true"的自愈，避免 resize / 键盘动画 / 锚点回填瞬间
         // 把已经上滚阅读的用户误判回贴底状态。
-        var renderWasAtBottom = isChatNearBottom(chatMessages);
+        var readingInteraction = typeof HTMLElement !== "undefined" ? beginChatInteraction(chatMessages) : null;
+        var renderWasAtBottom = isChatNearBottom(chatMessages) && !readingInteraction?.anchor;
         var renderIsInitial = !state.chatInitialRenderDone;
 
         // 把 .system-info 卡片从计数里剔除——它由 extractPtySystemInfo 在
@@ -506,7 +566,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         // The semantic structure tracks array/window changes. Agent Run-owned
         // turns may deliberately have no row, so DOM count is not message count.
         var needsFullRender = forceRender || existingCount === 0;
-        var renderAnchor = !renderIsInitial && !renderWasAtBottom && existingCount > 0
+        var renderAnchor = !readingInteraction?.anchor && !renderIsInitial && !renderWasAtBottom && existingCount > 0
           && !(prevMsgCount === 0 && state.chatStickToBottom)
           ? captureChatRenderAnchor(chatMessages, changedVisibleIndices) : null;
 
@@ -551,7 +611,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
               conversationToolResults,
               isGrouped
             );
-            if (messageHtml) html += messageHtml.replace(/^<div /, '<div data-msg-index="' + originalIndex + '" ');
+            if (messageHtml) html += chatRowMarkup(messageHtml, originalIndex);
           }
 
         // 思考中原位占位行（inFlight 且尾部无内容时原位呼吸）
@@ -586,7 +646,8 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           // 路径下 prevMsgCount 被重置为 0，但 DOM 里仍有节点可作锚点，必须保住
           // 用户的阅读位置。
           // renderAnchor is restored after all existing collapse/expand helpers.
-          chatMessages.innerHTML = html;
+          if (typeof HTMLElement !== "undefined") reconcileChatRows(chatMessages, html);
+          else chatMessages.innerHTML = html; // Synthetic control-flow harness has no DOM tree.
           // 给每条消息打 data-msg-index（用 state.currentMessages 的全局索引），
           // 后面 refreshChatUnreadDivider 用它找未读分割线的位置。
           (function() {
@@ -646,9 +707,9 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           changedVisibleIndices.forEach(function(index) {
             var currentEl = chatMessages.querySelector('.chat-message[data-msg-index="' + index + '"]');
             var wrapper = document.createElement("div");
-            wrapper.innerHTML = renderChatMessage(allMessages[index], roundUsageByIndex[index] || null,
+            wrapper.innerHTML = chatRowMarkup(renderChatMessage(allMessages[index], roundUsageByIndex[index] || null,
               index, agentRunIndex, conversationToolResults,
-              isGroupedChatMessage(messages, index - visibleOffset));
+              isGroupedChatMessage(messages, index - visibleOffset)), index);
             var replacementEl = wrapper.firstElementChild;
             if (!replacementEl) {
               if (currentEl) replacements.push({ current: currentEl, next: null });
@@ -663,8 +724,12 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           } else if (replacements.length) {
             replacements.forEach(function(replacement) {
               if (replacement.next) {
-                chatMessages.replaceChild(replacement.next, replacement.current);
-                attachCopyHandler(replacement.next);
+                var painted = replacement.next;
+                if (typeof HTMLElement !== "undefined" && replacement.current.getAttribute("data-chat-owner") &&
+                  replacement.current.getAttribute("data-chat-owner") === replacement.next.getAttribute("data-chat-owner")) {
+                  painted = patchChatRow(replacement.current, replacement.next);
+                } else chatMessages.replaceChild(replacement.next, replacement.current);
+                attachCopyHandler(painted);
               } else replacement.current.remove();
             });
             bindChatScrollListener();
@@ -708,7 +773,13 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
             }
           }
         }
+        if (readingInteraction?.anchor && readingInteraction.current() && readingInteraction.anchor.node.isConnected) {
+          var focusDelta = readingInteraction.anchor.node.getBoundingClientRect().top -
+            chatMessages.getBoundingClientRect().top - readingInteraction.anchor.top;
+          if (Math.abs(focusDelta) > 0.5) chatMessages.scrollTop += focusDelta;
+        }
         cache.commit(plan);
+        chatOwnerPlan?.commit();
         state.lastRenderedMsgCount = msgCount;
         state.lastRenderedEmpty = null;
         refreshActivityElapsedLabels();
@@ -1018,6 +1089,8 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
 
       function attachCopyHandler(el) {
         el.querySelectorAll(".code-copy").forEach(function(btn) {
+          if (copyBound.has(btn)) return;
+          copyBound.add(btn);
           btn.addEventListener("click", function() {
             var codeBlock = btn.closest(".code-block");
             var code = codeBlock ? codeBlock.querySelector("code") : null;
@@ -1033,21 +1106,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
       }
 
       function attachAllCopyHandlers(container) {
-        container.querySelectorAll(".code-copy").forEach(function(btn) {
-          var clone = btn.cloneNode(true);
-          btn.parentNode.replaceChild(clone, btn);
-          clone.addEventListener("click", function() {
-            var codeBlock = clone.closest(".code-block");
-            var code = codeBlock ? codeBlock.querySelector("code") : null;
-            if (code) {
-              copyToClipboard(code.textContent || "", null, function() {
-                clone.textContent = "已复制";
-                clone.classList.add("copied");
-                setTimeout(function() { clone.textContent = "复制"; clone.classList.remove("copied"); }, 2000);
-              });
-            }
-          });
-        });
+        attachCopyHandler(container);
         attachMessageCopyButtons(container);
       }
 
@@ -2187,7 +2246,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           // 展开了也看不到内容——直接跳过。
           var ptyThinkingText = typeof msg.content === "string" ? msg.content : "";
           if (!ptyThinkingText.trim()) return "";
-          var thinkingKey = buildExpandKey("thinking", [getMessageKey(msg, messageIndex), "pty"]);
+          var thinkingKey = buildExpandKey("thinking", [renderMessageKey(msg, messageIndex), "pty"]);
           var thinkingPersisted = getPersistedExpandState(thinkingKey);
           var thinkingExpanded = thinkingPersisted === null ? getCardDefault("thinking") : thinkingPersisted;
           return '<div class="chat-message thinking">' +
@@ -2355,12 +2414,13 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           var idx = parseInt(el.getAttribute("data-msg-index") || "", 10);
           if (isNaN(idx) || !allMessages[idx] || allMessages[idx].role !== "assistant") continue;
           var historical = idx < lastUserIdx;
-          var key = buildExpandKey(historical ? "assistant-reply-history" : "assistant-reply-current", [getMessageKey(allMessages[idx], idx)]);
+          var key = buildExpandKey(historical ? "assistant-reply-history" : "assistant-reply-current", [renderMessageKey(allMessages[idx], idx)]);
           var persisted = getPersistedExpandState(key);
-          // 最新轮次的 assistant 回复始终展开，不沿用历史持久化折叠状态；
-          // 只有历史轮次才尊重用户之前的展开/折叠偏好。
-          var expanded = persisted === null ? true : persisted;
           var disclosure = el.querySelector(":scope > .assistant-reply-disclosure");
+          // Same-owner soft/full paint keeps the current user's choice, including
+          // the current→history boundary. Initial defaults remain unchanged.
+          var expanded = disclosure ? disclosure.getAttribute("aria-expanded") === "true"
+            : persisted === null ? true : persisted;
           if (!disclosure) {
             disclosure = document.createElement("button");
             disclosure.className = "assistant-reply-disclosure";
@@ -2370,11 +2430,13 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           disclosure.setAttribute("data-expand-key", key);
           disclosure.setAttribute("aria-expanded", expanded ? "true" : "false");
           var previewText = getMessagePreviewText(allMessages[idx]) || "助手回复";
-          disclosure.innerHTML =
+          var disclosureHtml =
             '<span class="assistant-reply-label">回复</span>' +
             '<span class="assistant-reply-preview" title="' + escapeHtml(previewText) + '">' + escapeHtml(previewText) + '</span>' +
             '<span class="assistant-reply-action">' + (expanded ? "收起" : "展开") + '</span>' +
             '<span class="assistant-reply-chevron">' + iconSvg("chevronDown", { size: 15 }) + '</span>';
+          if (typeof HTMLElement !== "undefined") patchChatContents(disclosure, disclosureHtml);
+          else disclosure.innerHTML = disclosureHtml;
           el.classList.toggle("assistant-reply-collapsed", !expanded);
           el.classList.toggle("assistant-reply-expanded", expanded);
           disclosure.onclick = function() {
@@ -2554,7 +2616,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         return String(sessionId || "") + ":" + String(toolId || "");
       }
 
-      function fetchActivityToolDetail(sessionId, toolId) {
+      function fetchActivityToolDetail(sessionId, toolId, openScope?: object) {
         if (!sessionId || !toolId) return Promise.reject(new Error("工具详情不可用"));
         var cacheKey = activityDetailCacheKey(sessionId, toolId);
         var cached = state.toolContentCache[cacheKey];
@@ -2562,13 +2624,17 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           return Promise.resolve(cached);
         }
         var inFlight = activityDetailRequests.get(cacheKey);
-        if (inFlight) return inFlight;
+        if (inFlight && activityRequestScopes.get(cacheKey) === openScope &&
+          (typeof HTMLElement === "undefined" || isChatLeaseCurrent(activityRequestLeases.get(cacheKey)))) return inFlight;
         var requestedEpoch = activityDetailEpoch;
+        var requestedView = typeof HTMLElement !== "undefined" ? chatViewLease() : null;
         var request = fetch("/api/sessions/" + encodeURIComponent(sessionId) +
           "/tool-content/" + encodeURIComponent(toolId), { credentials: "same-origin" })
           .then(function(response) { return parseJsonResponse<any>(response); })
           .then(function(data) {
-            if (requestedEpoch !== activityDetailEpoch || state.selectedId !== sessionId) return data;
+            if (requestedEpoch !== activityDetailEpoch || state.selectedId !== sessionId ||
+              activityDetailRequests.get(cacheKey) !== request ||
+              typeof HTMLElement !== "undefined" && !isChatLeaseCurrent(requestedView)) return data;
             if (data && data.pending) activityPendingDetails.set(cacheKey, data);
             else {
               state.toolContentCache[cacheKey] = data;
@@ -2577,13 +2643,23 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
             return data;
           })
           .finally(function() {
-            if (activityDetailRequests.get(cacheKey) === request) activityDetailRequests.delete(cacheKey);
+            if (activityDetailRequests.get(cacheKey) === request) {
+              activityDetailRequests.delete(cacheKey);
+              activityRequestLeases.delete(cacheKey);
+              activityRequestScopes.delete(cacheKey);
+            }
           });
         activityDetailRequests.set(cacheKey, request);
+        activityRequestLeases.set(cacheKey, requestedView);
+        activityRequestScopes.set(cacheKey, openScope);
         return request;
       }
 
-      function renderActivityEntryDetails(entry, messageKey, segmentFirstIndex, toolResults, running) {
+      function renderActivityEntryDetails(entry, messageKey, segmentFirstIndex, toolResults, running, entryKey) {
+        var entryState = activityEntryStates.get(entryKey);
+        if (entryState?.error) return '<button type="button" class="chat-activity-retry" onclick="__activityEntryRetry(this)">' +
+          escapeHtml(entryState.error) + '，点击重试</button>';
+        if (!entry.calls.some(function(call) { return !!call.block?.id; })) return "这条调用没有可读取的详情。";
         var content = "";
         for (var c = 0; c < entry.calls.length; c++) {
           var call = entry.calls[c];
@@ -2595,14 +2671,25 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
             continue;
           }
           if (detail.pending && pickToolResultForDisplay(toolResults, block.id) &&
-            !activityResultRefreshRequested.has(cacheKey)) {
+            !entryState?.request && !activityResultRefreshRequested.has(cacheKey)) {
             // A result arrived after an already-open running detail. Refresh it once,
             // using the same on-demand endpoint; unopened entries never request data.
             activityResultRefreshRequested.add(cacheKey);
             var sessionId = state.selectedId;
-            fetchActivityToolDetail(sessionId, block.id).then(function() {
-              if (state.selectedId === sessionId) renderChat(true);
-            }).catch(function() { /* The entry can be reopened to retry. */ });
+            if (entryState) {
+              var resultRequest = {};
+              entryState.request = resultRequest;
+              fetchActivityToolDetail(sessionId, block.id, resultRequest).then(function() {
+                if (!currentActivityEntry(entryKey, entryState) || entryState.request !== resultRequest) return;
+                entryState.request = null;
+                renderChat(true);
+              }).catch(function(error) {
+                if (!currentActivityEntry(entryKey, entryState) || entryState.request !== resultRequest) return;
+                entryState.request = null;
+                entryState.error = String(error && error.message || "加载失败");
+                renderChat(true);
+              });
+            }
           }
           if (detail.pending) {
             content += '<div class="chat-activity-pending-detail">' +
@@ -2644,16 +2731,15 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         var latestBlock = items.length ? items[items.length - 1].block : null;
         var thinkingRunning = !commandRunning && !!opts.isTrailing &&
           latestBlock?.type === "thinking" && isTurnActivityLive(_currentMessageGlobalIndex);
-        var runStart = items.length ? items[0].index : 0;
-        var expandKey = buildExpandKey("activity-menu", [messageKey, segmentFirstIndex, runStart]);
+        var groupKey = activityGroupKey(items, messageKey, segmentFirstIndex);
+        var expandKey = buildExpandKey("activity-menu", [groupKey]);
         var persisted = getPersistedExpandState(expandKey);
         var expanded = persisted === true;
         var menuHtml = "";
         if (summary.thinking.length) {
-          var thinkingKey = buildExpandKey("activity-thinking", [state.selectedId, messageKey,
-            segmentFirstIndex, runStart]);
+          var thinkingKey = buildExpandKey("activity-thinking", [state.selectedId, groupKey]);
           var thinkingOpen = activityDetailOpen.has(thinkingKey);
-          menuHtml += '<section class="chat-activity-group chat-activity-thinking-group" aria-label="深度思考">' +
+          menuHtml += '<section class="chat-activity-group chat-activity-thinking-group" data-chat-key="category:thinking" aria-label="深度思考">' +
             '<div class="chat-activity-entry" data-entry-key="' + escapeHtml(thinkingKey) +
               '" data-thinking-entry="true" data-expanded="' + (thinkingOpen ? "true" : "false") + '">' +
               '<button type="button" class="chat-activity-entry-button" aria-expanded="' +
@@ -2674,15 +2760,14 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           var entries = summary.groups[kind];
           if (!entries.length) continue;
           var groupMeta = ACTIVITY_KIND_META[kind];
-          menuHtml += '<section class="chat-activity-group" aria-label="' +
+          menuHtml += '<section class="chat-activity-group" data-chat-key="category:' + kind + '" aria-label="' +
             escapeHtml(groupMeta.summary + entries.length + groupMeta.unit) + '">' +
             '<div class="chat-activity-group-title">' +
               escapeHtml(groupMeta.summary + entries.length + groupMeta.unit) +
             '</div>';
           for (var e = 0; e < entries.length; e++) {
             var entry = entries[e];
-            var entryKey = buildExpandKey("activity-detail", [state.selectedId, messageKey,
-              segmentFirstIndex, runStart, entry.key]);
+            var entryKey = buildExpandKey("activity-detail", [state.selectedId, groupKey, entry.key]);
             var entryOpen = activityDetailOpen.has(entryKey);
             var itemLabel = groupMeta.item + (entries.length > 1 ? " " + (e + 1) : "");
             var ids = entry.calls.map(function(call) { return String(call.block.id || ""); }).filter(Boolean);
@@ -2690,7 +2775,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
               return call.block.id === _currentLatestPendingCommandId;
             });
             var detailHtml = entryOpen && expanded
-              ? renderActivityEntryDetails(entry, messageKey, segmentFirstIndex, toolResults, entryRunning)
+              ? renderActivityEntryDetails(entry, messageKey, segmentFirstIndex, toolResults, entryRunning, entryKey)
               : "";
             menuHtml += '<div class="chat-activity-entry" data-entry-key="' + escapeHtml(entryKey) +
               '" data-tool-ids="' + escapeHtml(JSON.stringify(ids)) +
@@ -2760,7 +2845,9 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         var openEntries = wrap.querySelectorAll('.chat-activity-entry[data-expanded="true"]');
         for (var i = 0; i < openEntries.length; i++) {
           var entry = openEntries[i];
-          activityDetailOpen.delete(entry.getAttribute("data-entry-key") || "");
+          var entryKey = entry.getAttribute("data-entry-key") || "";
+          activityDetailOpen.delete(entryKey);
+          activityEntryStates.delete(entryKey);
           entry.setAttribute("data-expanded", "false");
           var entryButton = entry.querySelector(".chat-activity-entry-button");
           var entryDetail = entry.querySelector(".chat-activity-entry-detail");
@@ -2769,7 +2856,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         }
         if (summary) {
           summary.setAttribute("aria-expanded", "false");
-          if (restoreFocus) summary.focus();
+          if (restoreFocus) summary.focus({ preventScroll: true });
         }
         var key = wrap.getAttribute("data-expand-key");
         if (key) setPersistedExpandState(key, false);
@@ -2804,40 +2891,56 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         if (detail) detail.hidden = !nowExpanded;
         if (!nowExpanded) {
           activityDetailOpen.delete(key);
+          activityEntryStates.delete(key);
           return;
         }
         activityDetailOpen.add(key);
         if (row.getAttribute("data-thinking-entry") === "true") return;
-        if (detail) detail.innerHTML = '<span class="chat-activity-loading">加载详情…</span>';
+        var view = chatViewLease();
+        if (!view) return;
+        activityEntryStates.set(key, { lease: view, open: {}, request: null, error: null });
+        requestActivityEntry(key, row);
+      };
+
+      function currentActivityEntry(key, entryState) {
+        if (activityEntryStates.get(key) !== entryState || !activityDetailOpen.has(key) ||
+          !isChatLeaseCurrent(entryState.lease)) return null;
+        var entries = entryState.lease.root.querySelectorAll(".chat-activity-entry");
+        for (var i = 0; i < entries.length; i++) {
+          if (entries[i].getAttribute("data-entry-key") === key && entries[i].getAttribute("data-expanded") === "true" &&
+            entries[i].closest('.chat-activity[data-expanded="true"]')) return entries[i];
+        }
+        return null;
+      }
+      function requestActivityEntry(key, row) {
+        var entryState = activityEntryStates.get(key);
+        if (!entryState || !currentActivityEntry(key, entryState)) return;
         var sessionId = state.selectedId;
         var ids: string[] = [];
         try { ids = JSON.parse(row.getAttribute("data-tool-ids") || "[]"); } catch (_e) {}
-        if (!ids.length) {
-          if (detail) detail.textContent = "这条调用没有可读取的详情。";
-          return;
-        }
-        if (ids.every(function(id) {
-          var cached = state.toolContentCache[activityDetailCacheKey(sessionId, id)];
-          return cached && Object.prototype.hasOwnProperty.call(cached, "input");
-        })) {
-          renderChat(true);
-          return;
-        }
-        Promise.all(ids.map(function(id) { return fetchActivityToolDetail(sessionId, id); }))
+        var requestToken = {};
+        entryState.request = requestToken;
+        entryState.error = null;
+        // Same paint transaction retires a focused retry with the exact entry fallback.
+        renderChat(true);
+        if (!ids.length) return;
+        Promise.all(ids.map(function(id) { return fetchActivityToolDetail(sessionId, id, requestToken); }))
           .then(function() {
-            if (state.selectedId === sessionId && activityDetailOpen.has(key)) renderChat(true);
+            if (!currentActivityEntry(key, entryState) || entryState.request !== requestToken) return;
+            entryState.request = null;
+            renderChat(true);
           })
           .catch(function(error) {
-            if (!row.isConnected || state.selectedId !== sessionId || !detail) return;
-            detail.innerHTML = '<button type="button" class="chat-activity-retry">' +
-              escapeHtml(String(error && error.message || "加载失败")) + '，点击重试</button>';
-            var retry = detail.querySelector(".chat-activity-retry");
-            if (retry) retry.onclick = function() {
-              activityDetailOpen.delete(key);
-              row.setAttribute("data-expanded", "false");
-              (window as any).__activityEntryToggle(btn);
-            };
+            if (!currentActivityEntry(key, entryState) || entryState.request !== requestToken) return;
+            entryState.request = null;
+            entryState.error = String(error && error.message || "加载失败");
+            renderChat(true);
           });
+      }
+      (window as any).__activityEntryRetry = function(btn) {
+        var row = btn && btn.closest ? btn.closest(".chat-activity-entry") : null;
+        if (!row) return;
+        requestActivityEntry(row.getAttribute("data-entry-key") || "", row);
       };
 
       if (!(window as any).__activityDismissBound) {
@@ -2849,9 +2952,12 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           for (var i = 0; i < openMenus.length; i++) closeActivityMenu(openMenus[i], false);
         });
         document.addEventListener("keydown", function(event) {
-          if (event.key !== "Escape") return;
-          var openMenu = document.querySelector('.chat-activity[data-expanded="true"]');
-          if (!openMenu) return;
+          if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
+          var target = event.target as HTMLElement;
+          var active = document.activeElement as HTMLElement;
+          if (!target?.closest || target !== active && !target.contains(active)) return;
+          var openMenu = target.closest('.chat-activity[data-expanded="true"]');
+          if (!openMenu || target.closest('[role="dialog"], dialog, [aria-modal="true"]')) return;
           closeActivityMenu(openMenu, true);
           event.preventDefault();
         });
@@ -2914,7 +3020,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
       function renderStructuredMessage(msg, roundUsage, messageIndex, agentRunIndex, conversationToolResults, isGrouped?) {
         _currentMessageGlobalIndex = typeof messageIndex === "number" ? messageIndex : -1;
         var role = msg.role;
-        var messageKey = getMessageKey(msg, messageIndex);
+        var messageKey = renderMessageKey(msg, messageIndex);
         var timeHtml = renderChatMessageTime(msg);
         var usageHtml = role === "assistant" ? renderUsageSummaryHtml(roundUsage) : "";
         var content = Array.isArray(msg.content) ? msg.content : [];
@@ -3090,6 +3196,12 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
       }
 
       function renderContentBlock(block, role, toolResults, index, messageKey, options?: any) {
+        var scope = renderBlockScope(messageKey, index, block);
+        var html = renderContentBlockBody(block, role, toolResults, index, messageKey, options);
+        return typeof HTMLElement !== "undefined" ? scopeChatMarkup(html, scope) : html;
+      }
+
+      function renderContentBlockBody(block, role, toolResults, index, messageKey, options?: any) {
         var opts = options || {};
         if (!block || !block.type) return "";
 
@@ -3159,7 +3271,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
       function renderInlineTool(block, toolResult, toolName, fileInfo, extraInfo, messageKey, index, options?: any) {
         var opts = options || {};
         var toolId = block.id || "tool-" + toolName;
-        var expandKey = buildExpandKey("inline-tool", [messageKey, toolId || index, index]);
+        var expandKey = buildExpandKey("inline-tool", [messageKey, toolId || index]);
         var persistedExpanded = getPersistedExpandState(expandKey);
         var inputData = block.input || {};
         var resultContent = extractToolResultText(toolResult && toolResult.content);
@@ -3306,7 +3418,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         var command = inputData.command || inputData.cmd || "";
         var resultContent = extractToolResultText(toolResult && toolResult.content);
         var toolId = block.id || "tool-" + toolName;
-        var expandKey = buildExpandKey("terminal", [messageKey, toolId || index, index]);
+        var expandKey = buildExpandKey("terminal", [messageKey, toolId || index]);
         var persistedExpanded = getPersistedExpandState(expandKey);
 
         var isError = toolResult && toolResult.is_error;
@@ -3468,7 +3580,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         }
 
         // Expand state: respect cardDefaults.editCards and persisted state
-        var expandKey = buildExpandKey("diff", [messageKey, toolId || index, index]);
+        var expandKey = buildExpandKey("diff", [messageKey, toolId || index]);
         var persistedExpanded = getPersistedExpandState(expandKey);
         var cardDefaultExpand = getCardDefault("editCards");
         var shouldExpand = opts.forceExpandedToolBodies ? true : resolveCardExpanded(persistedExpanded, opts, index, cardDefaultExpand);

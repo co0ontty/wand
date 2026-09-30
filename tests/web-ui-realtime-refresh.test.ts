@@ -76,6 +76,26 @@ test("a failed partial render does not commit a signature or suppress the retry"
   h.chat.doRenderChat(false); assert.match(h.bodyAt(0), /a revised longer body/);
 });
 
+test("R06: a partially mutated DOM is repainted even if the next state equals the old cache", () => {
+  const h = createRealtimeRenderHarness(); const original = [textTurn("old first"), textTurn("old second")];
+  h.setMessages(original); h.chat.doRenderChat(false);
+  h.setMessages([textTurn("new first"), textTurn("new second")]); h.failReplacementAfter(1);
+  h.chat.renderChat(); h.flush();
+  assert.equal(h.state.renderPending, false); assert.equal(h.errors.length, 1);
+  assert.ok(h.bodyAt(0).includes("new first"), "the failure occurred after one DOM mutation");
+  h.setMessages(original); h.chat.renderChat(); h.flush();
+  assert.ok(h.bodyAt(0).includes("old first")); assert.ok(h.bodyAt(1).includes("old second"));
+});
+
+test("R06: a failed post-write phase cannot leave the empty-state cache valid", () => {
+  const h = createRealtimeRenderHarness(); h.setMessages([]); h.chat.doRenderChat(false);
+  h.setMessages([textTurn("failed paint")]); h.failNextPostWrite();
+  h.chat.renderChat(true); assert.equal(h.errors.length, 1);
+  assert.ok(h.bodyAt(0).includes("failed paint"), "the full DOM write preceded the failure");
+  h.setMessages([]); h.chat.renderChat(true);
+  assert.equal(h.bodyAt(0), ""); assert.equal(h.state.renderPending, false);
+});
+
 test("R06: old A callbacks cannot draw B or release B's pending frame", () => {
   const h = createRealtimeRenderHarness(); h.setMessages([textTurn("A")]); h.chat.renderChat(); const old = h.frames.shift()!;
   h.state.selectedId = "B"; h.render.resetChatRenderCache(); h.setMessages([textTurn("B")]); h.chat.renderChat();

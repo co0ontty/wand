@@ -13,7 +13,6 @@ import { runGitAsync } from "./git-utils.js";
 import { shouldGenerateSessionTopicFromInput, summarizeSessionTitleFromInput } from "./session-topic.js";
 import type { WandStorage } from "./storage.js";
 import {
-  DEFAULT_ITERATION_NAME,
   WAND_ITERATION_PROMPT_DETAIL_MAX_LENGTH,
   WAND_ITERATION_PROMPT_TITLE_MAX_LENGTH,
   type WandIterationPrompt,
@@ -278,12 +277,6 @@ export function iterationPromptDigest(entries: readonly WandIterationPrompt[]): 
   }
   return kept.map((line, index) => `${index + 1}. ${line}`).join("\n");
 }
-
-/** 迭代为空时给模型的一句话，避免它把「没有输入」理解成「没有改动」。 */
-export const EMPTY_ITERATION_DIGEST_HINT = `（本迭代还没有记录到提示词，改为依据文件改动判断。）`;
-
-/** 默认迭代的名字；UI 与文档共用，避免各处硬编码。 */
-export const DEFAULT_ITERATION_LABEL = DEFAULT_ITERATION_NAME;
 
 // ── 一屏可选的「本轮变更」上下文 ──
 

@@ -85,12 +85,6 @@ export function systemEmployeeDefinition(agents: WandTaskAgent[], now: string, e
   };
 }
 
-/** 内置员工只保留结构化候选（会话与内部 AI 调用都要求结构化执行）。 */
-export function systemEmployeeAgentsOrNull(value: unknown): WandTaskAgent[] | null {
-  if (!Array.isArray(value) || value.length === 0) return null;
-  return value as WandTaskAgent[];
-}
-
 /**
  * 内部 AI 调用的 CLI 降级链：按用户设置的顺序，模型为空 / "default" 时跟随 provider 默认值。
  */

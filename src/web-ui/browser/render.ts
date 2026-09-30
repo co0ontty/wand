@@ -1,4 +1,5 @@
 import { composer, state, writeStoredBoolean } from "./state";
+import { invalidateChatInteraction } from "./chat-render-focus.js";
 import { restoreActiveTask } from "./active-task";
 import { renderLoginVisual } from "./login-visual.js";
 import { renderWandBrandMarkup } from "../brand-identity.js";
@@ -34,7 +35,10 @@ export function resetChatRenderCache(options?: any) {
   state.lastRenderedEmpty = null;
   state.renderPending = false;
   state.chatRenderedCount = state.chatPageSize;
-  state.askUserSelections = {};
+  if (!opts.preserveStickState) {
+    invalidateChatInteraction();
+    state.askUserSelections = {};
+  }
   if (state.chatScrollElement) {
     if (state.chatScrollHandler) {
       state.chatScrollElement.removeEventListener("scroll", state.chatScrollHandler);

@@ -53,6 +53,10 @@ Server（本仓库，Node）与 Render（`render/`，Rust）是两个独立进�
   `dist/native/<triple>/wand-render`（npm 包内嵌，由 `npm run build:render-bin` 从 `render-bin/` stage，校验 sha256）。
 - 端到端验证：`scripts/verify-render-e2e.sh`（隔离实例+新端口，验 Server 重启后 PTY pid 不变、
   Render 崩溃自愈、drain 保留 PTY、Web/Android 两种 profile、回滚路径）。
+- 无损升级验证另有一个独立入口，别当死代码删：`scripts/verify-render-upgrade-e2e.sh`
+  （legacy 引擎下跑着旧会话 → 直接升级到 rust → 旧 PTY 全程存活并由 legacy 继续服务、
+  新会话归 Render、回滚不破坏会话）。`verify-render-e2e.sh` 只覆盖 engine=legacy 的就地回滚，
+  不覆盖这条跨版本存活路径。
 
 ## Common Commands
 
@@ -73,6 +77,10 @@ npm run build && node dist/cli.js web -c /tmp/wand-dev/config.json   # QA 冒烟
 ```
 
 没有 lint / format 脚本。测试用 `node:test` via `tsx`。
+
+`tests/fixtures/structured-cli-recordings/` 是入库的 provider 真实输出样本，唯一再生成入口是
+`node --import tsx scripts/capture-structured-cli-fixtures.ts --record`（必须显式 `--record`；
+会真的调用本机 CLI 并消耗额度，失败/超时也不会落盘原始 stdout/stderr）。别当死代码删。
 
 ## Runtime Map
 
@@ -372,7 +380,7 @@ npm run build && node dist/cli.js web -c /tmp/wand-dev/config.json
 
 - 2026-09-29 Android Team 对话收简：历史接手 notice 与新开工模板在渲染时转为成员第一人称「我开始处理「任务」这项工作。」；主群聊停止 /live 工具/终端文本轮询，进度归公告下的真实步骤摘要，授权/回答/异常保留当前成员会话入口；修复发布版 200 条窗口满后新尾消息不贴尾。Android `2150ade` + 纯删除 `2e64b64`（398 行）已推送，未提交 v2/Markdown/Web 工作保留。干净源码 Debug/Release 各 603 项、各 1 跳过/0 失败；Beta `4.77.0-debug.09291230`（9,806,278 B，SHA-256 `f061edc0c5522df97a215b9a7ba225939ff6f855edaf2c236014aec9aeca14e1`）已部署，metadata/APK 内版本/版本标记/已安装服务更新端点一致。真实服务脱敏样例解析通过；默认未安装设备，视觉未验收。并行工作树测试限制及完整记录见 `output/android-team-feed/REPORT.md` 和工作日志。
 - 2026-09-29 AI Team 改名展示：保留 run.team 执行快照与历史 turn，detail.displayTeam 只按 id 投影当前名字/头像；会话列表群名 JOIN 当前定义，Web 独立定义变更通知/缓存防旧请求反灌，Web/Android 展示投影不改消息指纹。已安装服务 26 个改名历史 run、187 条旧作者只读核对；npm 全量1601项0失败、Android Debug/Release 全量通过，隔离 Chrome 真实 React 改名 DOM 通过。Android Beta `4.77.0-debug.09291423` 更新端点一致；安装版浏览器登录限流429未真实点击，默认未安装 Android。详细记录见工作日志；保留所有并行未提交工作。
-- 2026-09-30 IM 与硅基员工：员工定义保存有序结构化 CLI 候选，任务执行主体可选员工/团队/CLI，PTY 仅 CLI；Web/Android 以联系人与最近对话作为入口，已有会话优先回访。最终 `npm run check`、`npm test` 1635 项/0 失败、`npm run build`，Android Debug/Release 各 636 项/0 失败；安装版 Chrome 桌面与 390px 点击及真实员工 Codex 回复通过。Web Beta `4.79.0-debug.t09301118`、Android Beta `4.79.0-debug.09301101` 已部署并通过更新端点核对；未安装 Android 设备。主仓与 Android 原有未提交工作保留，未代提交/推送或更新子模块指针。详细记录与隐去正文截图见 `output/architecture-stage2/WORKLOG.md`、`output/im-transition/`。
+- 2026-09-30 IM 与硅基员工：员工定义保存有序结构化 CLI 候选，任务执行主体可选员工/团队/CLI，PTY 仅 CLI；Web/Android 以联系人与最近对话作为入口，已有会话优先回访。最终 `npm run check`、`npm test` 1635 项/0 失败、`npm run build`，Android Debug/Release 各 636 项/0 失败；安装版 Chrome 桌面与 390px 点击及真实员工 Codex 回复通过。Web Beta `4.79.0-debug.t09301118`、Android Beta `4.79.0-debug.09301101` 已部署并通过更新端点核对；未安装 Android 设备。主仓与 Android 原有未提交工作保留，未代提交/推送或更新子模块指针。详细记录见 `output/architecture-stage2/WORKLOG.md`（本轮配套的 `output/im-transition/` 截图与日志目录已在 2026-10-01 整理忽略目录时删除）。
 - 2026-09-30 Web 新建硅基员工改为「默认一个期望输入框」：手动字段（名字/头像/职责/Prompt/候选）收进可原位展开的「高级配置」，期望填完点「创建员工」由 `POST /api/silicon-employees/draft` 按系统 AI 通道（直连 API 优先、否则默认 CLI）起草名字/职责/角色设定与一个按已安装 CLI 选出的首选候选，再走原有落库入口；高级配置里手动填了名字则直接按手动值创建，「按期望生成」只填充字段不落库。`src/silicon-employee-draft.ts` 负责提示词、JSON 解析与 provider 兜底，`src/server-employee-routes.ts` 注入可测试的 `generateDraft`。展开/收起用 `0fr→1fr` 从触发按钮原位长出来，触发按钮尺寸不变（箭头同实例旋转），`is-wand-app` 下瞬时。验证：`npm run check`、`npm test` 1640 项 / 1630 通过 / 10 跳过 / 0 失败、`npm run build`（含 bundle 预算）与 `tests/helpers/run-employee-create-browser-harness.mjs`（真实 Chrome：默认态、自动创建、原位展开、AI 填充、手动创建不调模型、收起、reduce-motion）全部通过。未做已安装服务人工验收（本轮改动与并行未提交工作同在工作树），Android 原生创建页仍是手动表单、未跟随改造。
 - 2026-09-30 系统层默认员工「勤劳的初二」：新增内置「系统运维」员工（`silicon_employees.system_key='wand-ops'`，只加列），名字/职责/人设/头像由服务端固定，不可归档、不可删除，只有执行候选（CLI 工具 + 模型 + 思考深度 + 顺序）可改；`loadConfigWithStorage()` 幂等补齐并按用户已有的 `systemAiCli`/`systemAiModel`（否则 `defaultProvider`）落首条候选，员工列表内置员工置顶。Wand 自有 AI（commit message/tag、快捷提交兜底、会话与任务标题、提示词优化、员工起草）改为统一由它执行：`withOpsPersona` 把角色设定作为系统提示前缀，`resolveSystemAiContext(..., systemEmployee)` 输出候选链，`callConfiguredAiText` 跳过未安装的 CLI、按顺序降级（150s 总预算），「跟随默认模型」在选举时固化为 `getDefaultModelForProvider`。设置页「系统 AI」改为只读投影执行者与候选链（`SystemAiOwnerSummary`），不再编辑 `systemAiCli`/`systemAiModel`（保留为员工缺失时的兼容兜底）。验证：`npm run check`、`npm test` 1650 项 / 1640 通过 / 10 跳过 / 0 失败、`npm run build`；`tests/system-employee.test.ts`（seed/锁定/候选链/人设顺序/真实假 CLI 降级）与真实 Chrome `tests/helpers/run-system-employee-browser-harness.mjs`（设置页投影、内置员工置顶与 Tag、锁定字段不可编辑、无归档/删除、保存只提交候选、普通员工不受影响）通过；隔离实例（`/tmp/wand-dev-sysops`，`node dist/cli.js web` 与 `tsx src/cli.ts`）真实 HTTP 核对 seed、改名/归档/删除 400、候选 PUT 200，并用真实 codex 候选跑通 `/api/optimize-prompt`。未做已安装服务人工验收（本轮改动与并行未提交工作同在工作树，详见 `output/architecture-stage2/WORKLOG.md`）；Android 原生员工页仍是完整编辑表单，未跟随锁定与 Tag（服务端会拒绝其改名/删除请求）。
 - 2026-09-30 移除直连 API：`src/system-ai.ts`（411 行）与 `tests/system-ai.test.ts`（706 行）整体删除，`SystemAiConfig` / `SystemAiProtocol` / `CommitAiSource` / `Config.systemAi` / `Config.commitAiSource` 与 `pref:systemAi` / `pref:commitAiSource` 两个偏好键一并移除；设置页去掉「生成方式 CLI/直连 API」「直连 API 模型路由」（导入/测试线路、密钥、顺序、回退）与「Commit 生成」来源选择，`/api/settings/system-ai/import`、`/api/settings/system-ai/test`、配置 PATCH 的 systemAi 分支、`config:show` 的密钥脱敏分支全部删除，`resolveCommitAiContext` 与 `AiTextRequest` 归并到 `session-ai-context` / `types`。Wand 自有 AI 现在只有一条路：系统运维员工的 CLI 候选链（`callConfiguredAiText` → `callCliCandidates`）。顺手修掉同族 bug：`runQuickCommit` 原来逐字段抄一份 `QuickCommitAiOptions`，会静默丢掉后来新增的 `opsPersona` / `cliCandidates`（提交消息没有走人设与降级链），现在直接复用 `opts`。老库里的 `pref:systemAi`（含 API Key）与 `pref:commitAiSource` 值**保留但不读取**，不再出现在 `/api/settings`、`config:show` 或任何客户端投影里。验证：`npm run check`（server/browser/react 三套 tsc）、`npm test` 1627 项 / 1617 通过 / 10 跳过 / 0 失败、`npm run build` + bundle 预算（首载 730.2 KiB / 781.3 KiB）；真实 Chrome 隔离验收 `output/architecture-stage2/verify-system-employee-web.mjs`：设置页只剩「新会话默认 + 系统 AI 执行者投影」，`settings-system-ai-cli`、生成方式单选、Commit 来源单选、`.wand-settings-route-list` 全为 0，弹层内不再出现「直连 API / API 线路 / API Key」文案，控制台零错误，桌面与 390px 截图 `output/architecture-stage2/system-ai-{settings,owner}-{desktop,390}.png`。

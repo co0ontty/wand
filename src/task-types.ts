@@ -64,9 +64,6 @@ export function normalizeWandTaskAgentMode(
  */
 export type WandTaskAgentKind = "structured" | "pty";
 
-/** 合法会话形态清单；顺序即下拉顺序。 */
-export const WAND_TASK_AGENT_KINDS: readonly WandTaskAgentKind[] = ["structured", "pty"];
-
 /** 历史行 / 老客户端没带 kind 时的兜底：结构化对话，与旧派发行为一致。 */
 export const DEFAULT_WAND_TASK_AGENT_KIND: WandTaskAgentKind = "structured";
 

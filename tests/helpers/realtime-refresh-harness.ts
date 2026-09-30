@@ -42,6 +42,8 @@ export const jsonValue = (value: unknown) => JSON.parse(JSON.stringify(value));
 export function createRealtimeRenderHarness() {
   let failWrite = false;
   let failFrameSchedule = false;
+  let replacementsBeforeFailure: number | null = null;
+  let failPostWrite = false;
   let fullWrites = 0;
   const rendered: number[] = [];
   const errors: unknown[] = [];
@@ -73,7 +75,15 @@ export function createRealtimeRenderHarness() {
       return index ? this.children.find(c => c.getAttribute("data-msg-index") === index[1]) || null : null;
     }
     appendChild(child: Element) { this.children.push(child); return child; }
-    replaceChild(next: Element, prev: Element) { this.children[this.children.indexOf(prev)] = next; return prev; }
+    replaceChild(next: Element, prev: Element) {
+      if (replacementsBeforeFailure !== null) {
+        if (replacementsBeforeFailure === 0) {
+          replacementsBeforeFailure = null; throw new Error("injected partial replacement failure");
+        }
+        replacementsBeforeFailure--;
+      }
+      this.children[this.children.indexOf(prev)] = next; return prev;
+    }
     setAttribute(key: string, value: string) { this.attributes.set(key, value); }
     getAttribute(key: string) { return this.attributes.get(key) ?? null; }
     getBoundingClientRect() { return { top: 0, bottom: 100 }; }
@@ -94,6 +104,9 @@ export function createRealtimeRenderHarness() {
     },
     setTimeout: noop, clearTimeout: noop, fetch: () => new Promise(() => {}),
     localStorage: { getItem: () => null, setItem: noop, removeItem: noop },
+    fixtureAfterWrite: () => {
+      if (failPostWrite) { failPostWrite = false; throw new Error("injected post-write failure"); }
+    },
     fixtureRenderer: (msg: any, usage: any, index: number, _runs: any, results: any, grouped: boolean) => {
       rendered.push(index);
       const body = JSON.stringify({ msg, usage, results, grouped: !!grouped }).replace(/</g, "&lt;");
@@ -111,8 +124,8 @@ export function createRealtimeRenderHarness() {
     applyHistoryCollapse = function() {};
     applyAutoFoldBar = function() {};
     updateTodoProgress = function() {};
-    attachAllCopyHandlers = function() {};
-    attachCopyHandler = function() {};
+    attachAllCopyHandlers = fixtureAfterWrite;
+    attachCopyHandler = fixtureAfterWrite;
   `;
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const chat: any = {};
@@ -129,7 +142,8 @@ export function createRealtimeRenderHarness() {
   const bodyAt = (index: number) => messages.children.find(c => c.getAttribute("data-msg-index") === String(index))?.innerHTML ?? "";
   return { state, chat, render, frames, errors, rendered, messages, setMessages, flush, bodyAt,
     failNextWrite: () => { failWrite = true; }, failNextFrameSchedule: () => { failFrameSchedule = true; },
-    fullWrites: () => fullWrites };
+    failReplacementAfter: (count: number) => { replacementsBeforeFailure = count; },
+    failNextPostWrite: () => { failPostWrite = true; }, fullWrites: () => fullWrites };
 }
 
 export function createRealtimeSessionHarness() {
