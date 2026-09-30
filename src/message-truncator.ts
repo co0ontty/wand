@@ -425,34 +425,28 @@ function inputString(input: Record<string, unknown>, ...keys: string[]): string 
 }
 
 function toolActivity(use: ToolUseBlock, hasImage: boolean): NonNullable<ToolUseBlock["activity"]> {
-  if (use.activity) {
-    const kind = use.activity.kind;
-    return {
-      kind,
-      label: activityLabel(kind),
-      ...(use.activity.fileKey ? { fileKey: use.activity.fileKey } : {}),
-      ...(hasImage || use.activity.hasImage ? { hasImage: true } : {}),
-    };
-  }
   const name = use.name.toLowerCase();
   const input = use.input ?? {};
   const path = inputString(input, "file_path", "path", "filename", "file", "notebook_path");
-  const kind = /^(edit|write|multiedit|notebookedit|apply_patch|file_change|file_edit)$/.test(name)
+  const hasMultipleFiles = ["paths", "file_paths", "files"].some((key) =>
+    Array.isArray(input[key]) && (input[key] as unknown[]).length > 1);
+  const singleFileKey = !hasMultipleFiles && path
+    ? createHash("sha256").update(path.replace(/\\/g, "/")).digest("hex").slice(0, 20)
+    : !hasMultipleFiles ? use.activity?.fileKey : undefined;
+  const kind = singleFileKey && /^(edit|write|multiedit|notebookedit|file_change|file_edit)$/.test(name)
     ? "edit_file"
-    : /^(read|glob|grep|webfetch|websearch|todoread|search|read_file)$/.test(name)
+    : singleFileKey && /^(read|read_file)$/.test(name)
       ? "read_file"
       : /^(bash|exec|exec_command|command_execution|shell_command|terminal|run_command)$/.test(name)
         ? "run_command"
         : "other";
-  const fileKey = path && (kind === "edit_file" || kind === "read_file")
-    ? createHash("sha256").update(path.replace(/\\/g, "/")).digest("hex").slice(0, 20)
-    : undefined;
+  const fileKey = kind === "edit_file" || kind === "read_file" ? singleFileKey : undefined;
   const imagePath = /\.(?:png|jpe?g|gif|webp|svg|bmp|avif)(?:[?#].*)?$/i.test(path);
   return {
     kind,
     label: activityLabel(kind),
     ...(fileKey ? { fileKey } : {}),
-    ...(hasImage || imagePath ? { hasImage: true } : {}),
+    ...(hasImage || imagePath || use.activity?.hasImage ? { hasImage: true } : {}),
   };
 }
 
