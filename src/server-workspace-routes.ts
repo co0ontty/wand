@@ -57,7 +57,7 @@ function workspaceSessionSummary(
     sessionKind: live.sessionKind,
     runner: live.runner,
     command: live.command,
-    title: workspaceSessionTitle(live, names),
+    title: team.chat?.chatTitle ?? workspaceSessionTitle(live, names),
     status: live.status,
     ptyBusy: live.ptyBusy === true,
     providerCliActive: live.providerCliActive,

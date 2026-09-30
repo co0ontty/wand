@@ -177,6 +177,11 @@ export interface AiTeamRun {
   updatedAt: string;
 }
 
+/** 群聊名从任务标题派生；不修改团队定义，也不回写历史消息。 */
+export function aiTeamChatTitle(taskTitle?: string | null): string {
+  return `${taskTitle?.trim() ?? ""}任务处理群`;
+}
+
 /**
  * 会话列表用的群聊标记：chat_session_id → 最近一次运行（`AiTeamRunChatMarker` 索引的 value）。
  * 只带列表徽标和点开 IM 视图所需的入口信息，不暴露运行细节。
@@ -185,6 +190,8 @@ export interface AiTeamRunChatMarker {
   runId: string;
   teamId: string;
   teamName: string;
+  /** 当前任务名派生的群名；旧服务端可能没有。 */
+  chatTitle?: string;
   memberCount: number;
 }
 
@@ -283,6 +290,10 @@ export interface AiTeamLiveUpdate {
 
 export interface AiTeamRunDetail {
   run: AiTeamRun;
+  /** 仅供展示的群名，读取当前任务标题，不以团队名代替。 */
+  chatTitle?: string;
+  /** 任务标题的版本；任务改名不改变 run.updatedAt。 */
+  chatTitleUpdatedAt?: string;
   steps: AiTeamStep[];
   /** 运行中步骤所在会话的实时状态（等待授权 / 等待回答等）。 */
   memberStates: Record<string, AgentActivityState>;

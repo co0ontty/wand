@@ -1214,7 +1214,13 @@ export function mergeTeamChatDetail(
   const base = stale ? current : next;
   const displayTeam = Date.parse(current.displayTeam?.updatedAt ?? "") > Date.parse(next.displayTeam?.updatedAt ?? "")
     ? current.displayTeam : next.displayTeam;
+  // 任务改名与运行推进独立：不能因 run 没变而丢掉新群名，也不能被迟到快照改回旧名。
+  const titleDetail = next.chatTitle === undefined
+    || Date.parse(current.chatTitleUpdatedAt ?? "") > Date.parse(next.chatTitleUpdatedAt ?? "")
+    ? current : next;
   return { ...base, ...(displayTeam ? { displayTeam } : {}),
+    ...(titleDetail.chatTitle !== undefined
+      ? { chatTitle: titleDetail.chatTitle, chatTitleUpdatedAt: titleDetail.chatTitleUpdatedAt } : {}),
     chatTurns: mergeTeamChatTurns(current.chatTurns, next.chatTurns) };
 }
 

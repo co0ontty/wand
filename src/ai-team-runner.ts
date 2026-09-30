@@ -43,6 +43,7 @@ import {
   AI_TEAM_DETAIL_CHAT_TURNS,
   AI_TEAM_TERMINAL_RUN_STATUSES,
   agentKey,
+  aiTeamChatTitle,
   memberAgents,
   type AiTeam,
   type AiTeamLiveStep,
@@ -319,9 +320,9 @@ function chatStepLabel(seq: number, title: string): string {
  * 每行最多 [CHAT_INVITE_PER_LINE] 人，第二行起用 `继续邀请 …`；除负责人外没人时给
  * `还没有邀请其他成员入群`（仍两条，不伪造成员）。
  */
-export function chatIntroLines(team: Pick<AiTeam, "name" | "members">): string[] {
-  const teamName = team.name.trim();
-  const lines = [teamName ? `创建了团队群聊「${teamName}」` : "创建了团队群聊"];
+export function chatIntroLines(team: Pick<AiTeam, "members">, chatTitle: string): string[] {
+  const title = chatTitle.trim();
+  const lines = [title ? `创建了团队群聊「${title}」` : "创建了团队群聊"];
   const invitees = team.members.filter((member) => !member.isLeader)
     .map((member) => member.name.trim())
     .filter(Boolean);
@@ -728,8 +729,14 @@ export class AiTeamRunner {
     // 群聊回合只给最近这一段（§4.4）；没有群聊会话的旧运行给空数组，前端不用判 null。
     const messages = run.chatSessionId ? this.ops.snapshot(run.chatSessionId)?.messages ?? [] : [];
     const currentTeam = this.storage.getAiTeam(run.teamId);
+    const binding = run.chatSessionId ? this.storage.getSessionWorkspace(run.chatSessionId) : null;
+    const task = (binding?.workspaceTaskId
+      ? this.storage.getWandTaskByWorkspaceTaskId(binding.workspaceTaskId) : null)
+      ?? this.storage.getWandTask(run.taskId);
     return {
       run,
+      chatTitle: aiTeamChatTitle(task?.title),
+      chatTitleUpdatedAt: task?.updatedAt ?? "",
       steps,
       memberStates,
       // 别把展示字段写回 run.team：运行快照里的执行候选/职责由 runner 独立管理。
@@ -1726,7 +1733,7 @@ export class AiTeamRunner {
     const firstChat = !run.chatSessionId;
     try {
       if (firstChat) {
-        run.chatSessionId = this.chat.open({ task, run, title: `${run.team.name} · ${task.title}` });
+        run.chatSessionId = this.chat.open({ task, run, title: aiTeamChatTitle(task.title) });
       }
     } catch (error) {
       console.error(`[AiTeam] open chat for ${run.id} failed:`, getErrorMessage(error));
@@ -1743,7 +1750,7 @@ export class AiTeamRunner {
     // 首次建群：负责人先入群，再按名单邀请其余成员（2–3 条系统行，作者都是负责人）。
     const leader = leaderOf(run.team);
     const leaderAgent = leader ? memberAgents(leader)[0] ?? leader.agent : undefined;
-    for (const line of chatIntroLines(run.team)) {
+    for (const line of chatIntroLines(run.team, aiTeamChatTitle(task.title))) {
       this.postNotice(run, line, run.chatSessionId, leader, leaderAgent);
     }
   }

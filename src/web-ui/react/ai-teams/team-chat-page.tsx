@@ -4,6 +4,7 @@ import { failureMessage } from "../errors";
 import { RUN_STATUS } from "../issues/team-run-panel";
 import { taskBoardController } from "../issues/task-board-controller";
 import { SidebarToggleIcon } from "../shell/sidebar-toggle-icon";
+import { subscribeTaskChanges } from "../task-changes";
 import { WandBadge, WandBreadcrumb, WandButton, WandIcon, WandIconButton } from "../ui";
 import { TeamAvatar, TeamAvatarStack, type TeamAvatarState } from "./avatar";
 import { aiTeamsRepository, subscribeAiTeamDefinitionChanges, subscribeAiTeamRunChanges } from "./repository";
@@ -185,6 +186,7 @@ export function TeamChatPage({
   React.useEffect(() => subscribeAiTeamDefinitionChanges((teamId) => {
     if (teamId === visibleDetail?.run.teamId) void load();
   }), [load, visibleDetail?.run.teamId]);
+  React.useEffect(() => subscribeTaskChanges(() => { void load(); }), [load]);
 
   const onDetailChange = React.useCallback((next: AiTeamRunDetail): void => {
     // 发送后的旧 run 重拉可能晚于导航，不能将新一轮的标题、状态和任务拉回旧版。
@@ -239,7 +241,7 @@ export function TeamChatPage({
             ariaLabel="群聊导航"
             items={[
               { label: "任务看板", onNavigate: () => taskBoardController.open("", "", "board") },
-              { label: visibleDetail ? displayTeamOf(visibleDetail).name : "群聊" },
+              { label: visibleDetail?.chatTitle || "任务处理群" },
             ]}
           />
           <p>{showingPreviousRun

@@ -139,6 +139,22 @@ test("群聊改名只投影可见身份，原始消息指纹和旧引用保持�
     "旧运行请求不能回退新署名");
 });
 
+test("群聊名称单独跟随任务版本，不被运行快照和团队名覆盖", () => {
+  const detail = { run: { id: "run-1", updatedAt: "2026-01-03T00:00:00Z", stepsUsed: 1 },
+    chatTitle: "旧任务任务处理群", chatTitleUpdatedAt: "2026-01-01T00:00:00Z",
+    steps: [], memberStates: {}, chatTurns: [] } as unknown as AiTeamRunDetail;
+  const renamed = { ...detail, chatTitle: "新任务任务处理群", chatTitleUpdatedAt: "2026-01-04T00:00:00Z",
+    run: { ...detail.run, updatedAt: "2026-01-02T00:00:00Z" } };
+  const merged = mergeTeamChatDetail(detail, renamed);
+  assert.equal(merged.run, detail.run, "运行仍取较新的进度");
+  assert.equal(merged.chatTitle, renamed.chatTitle, "任务标题独立刷新");
+  assert.equal(mergeTeamChatDetail(merged, detail).chatTitle, renamed.chatTitle, "迟到请求不能回退群名");
+  assert.equal(mergeTeamChatDetail(merged, { ...detail, chatTitle: undefined }).chatTitle, renamed.chatTitle);
+  const page = read("react/ai-teams/team-chat-page.tsx");
+  assert.match(page, /label: visibleDetail\?\.chatTitle \|\| "任务处理群"/);
+  assert.match(page, /subscribeTaskChanges/);
+});
+
 test("群聊只把明确拒收判为可恢复草稿，未知送达留未确认", () => {
   assert.equal(chatSendDefinitelyRejected(new HttpResponseError("bad", 400)), true);
   for (const status of [0, 200, 408, 409, 500]) {

@@ -94,6 +94,7 @@ export interface WorkspaceSessionTeamChat {
   teamId: string;
   runId: string;
   teamName: string;
+  chatTitle?: string;
   memberCount: number;
 }
 

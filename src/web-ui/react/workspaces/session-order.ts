@@ -81,7 +81,7 @@ export function listSessionLabel(
 }
 
 /**
- * 侧栏行标题的唯一入口：团队条目用短标题（这一步的任务名 / 团队名），
+ * 侧栏行标题的唯一入口：团队条目用步骤标题 / 任务处理群名，
  * 其余仍走通用生成标题 + 「CLI N」兜底。
  */
 export function sidebarSessionLabel(

@@ -8,7 +8,7 @@ import test from "node:test";
 
 import express from "express";
 
-import type { AiTeam, AiTeamRun, AiTeamStep } from "../src/ai-team-types.js";
+import { aiTeamChatTitle, type AiTeam, type AiTeamRun, type AiTeamStep } from "../src/ai-team-types.js";
 import { defaultConfig } from "../src/config.js";
 import { jsonErrorHandler } from "../src/express-async.js";
 import { registerWorkspaceRoutes } from "../src/server-workspace-routes.js";
@@ -198,6 +198,67 @@ test("/api/tasks carries team markers on the sessions they belong to", async () 
   }
 });
 
+test("chat titles project current task names for existing chats and follow exclusive task moves", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-chat-task-title-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const { baseUrl, close } = await startWorkspaceApp(storage);
+  const config = defaultConfig();
+  const manager = new StructuredSessionManager(storage, config);
+  try {
+    const workspace = storage.createWorkspace({ name: "Repo", cwd: root });
+    const task = storage.createWandTask({ workspaceId: workspace.id, title: "补安装说明" });
+    const other = storage.createWandTask({ workspaceId: workspace.id, title: "排查登录" });
+    const chat = manager.createRelaySession({ cwd: root, mode: config.defaultMode,
+      automationId: "ai-team-chat:run-1", title: "测试团队 · 补安装说明",
+      workspaceId: workspace.id, workspaceTaskId: task.workspaceTaskId! });
+    const plain = manager.createSession({ cwd: root, mode: config.defaultMode,
+      workspaceId: workspace.id, workspaceTaskId: task.workspaceTaskId! });
+    storage.saveAiTeam(TEAM);
+    storage.saveAiTeamRun({ ...run("done"), taskId: task.id, chatSessionId: chat.id });
+    const checkTitles = async (expected: string, taskId: string): Promise<void> => {
+      const groups = await fetch(`${baseUrl}/api/tasks`).then((r) => r.json() as Promise<TaskDirectoryGroup[]>);
+      const row = groups.flatMap((g) => g.tasks.flatMap((t) => t.sessions)).find((s) => s.id === chat.id)!;
+      assert.equal(row.title, expected);
+      assert.equal(sidebarSessionLabel(row, 0), expected, "不能再被前端覆盖成团队名");
+      const detail = await fetch(`${baseUrl}/api/workspace-tasks/${taskId}`)
+        .then((r) => r.json() as Promise<{ sessions: WorkspaceSessionSummary[] }>);
+      assert.equal(detail.sessions.find((s) => s.id === chat.id)?.title, expected);
+      const project = await fetch(`${baseUrl}/api/workspaces/${workspace.id}`)
+        .then((r) => r.json() as Promise<{ sessions: WorkspaceSessionSummary[] }>);
+      assert.equal(project.sessions.find((s) => s.id === chat.id)?.title, expected);
+      assert.equal(storage.listAiTeamRunChatMarkers().get(chat.id)?.chatTitle, expected);
+      assert.equal(storage.getSession(chat.id)?.title, "测试团队 · 补安装说明", "读取不回写历史会话");
+      assert.equal(storage.listAiTeamRunChatMarkers().has(plain.id), false, "普通会话不受影响");
+    };
+    await checkTitles("补安装说明任务处理群", task.workspaceTaskId!);
+    const before = await fetch(`${baseUrl}/api/tasks?revision=initial`).then((r) => r.json());
+    storage.updateWandTask(task.id, { title: "整理文档" });
+    const after = await fetch(`${baseUrl}/api/tasks?revision=${encodeURIComponent(before.revision)}`)
+      .then((r) => r.json());
+    assert.equal(after.unchanged, false, "改任务名即使不改运行也会刷新列表");
+    await checkTitles("整理文档任务处理群", task.workspaceTaskId!);
+    storage.saveAiTeam({ ...TEAM, name: "新团队名称" });
+    await checkTitles("整理文档任务处理群", task.workspaceTaskId!);
+    storage.moveSessionToWorkspaceTask(chat.id, other.workspaceTaskId!);
+    await checkTitles("排查登录任务处理群", other.workspaceTaskId!);
+    assert.equal(storage.getAiTeamRun("run-1")!.taskId, task.id, "运行归属快照保留");
+  } finally {
+    manager.dispose();
+    await close();
+    storage.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("group titles retain the whole task name and have a neutral fallback", () => {
+  assert.equal(aiTeamChatTitle("  修复登录  "), "修复登录任务处理群");
+  assert.equal(aiTeamChatTitle("检查 🐱 & <标签>"), "检查 🐱 & <标签>任务处理群");
+  assert.equal(aiTeamChatTitle("长标题".repeat(50)), `${"长标题".repeat(50)}任务处理群`);
+  assert.equal(aiTeamChatTitle(" "), "任务处理群");
+  assert.equal(aiTeamChatTitle(null), "任务处理群");
+  assert.equal(aiTeamChatTitle(), "任务处理群");
+});
+
 // ── 展示层：折叠分组、短标题、显示模式 ──
 
 const memberSession: WorkspaceSessionSummary = {
@@ -233,7 +294,7 @@ const chatSession: WorkspaceSessionSummary = {
   title: "测试团队 · 补安装说明",
   cwd: "/repo",
   status: "idle",
-  teamChat: { runId: "run-1", teamId: "team-1", teamName: "测试团队", memberCount: 2 },
+  teamChat: { runId: "run-1", teamId: "team-1", teamName: "测试团队", chatTitle: "补安装说明任务处理群", memberCount: 2 },
 };
 
 const humanSession: WorkspaceSessionSummary = {
@@ -278,7 +339,7 @@ test("team-dispatched sessions fold away from the task's own sessions", () => {
 
 test("team rows show the step title, not the generated CLI signature", () => {
   assert.equal(sidebarSessionLabel(memberSession, 1, ["Repo"]), "补安装章节并核对命令");
-  assert.equal(sidebarSessionLabel(chatSession, 0, ["Repo"]), "测试团队");
+  assert.equal(sidebarSessionLabel(chatSession, 0, ["Repo"]), "补安装说明任务处理群");
   assert.equal(sidebarSessionLabel(humanSession, 0, ["Repo"]), "帮我看下这个报错");
   const long = teamStepLabel({ ...memberSession.teamStep!, title: "把侧栏里的团队会话默认折叠起来，点击以后才展开显示具体的每一条" });
   assert.ok(Array.from(long).length <= 26, `短标题太长：${long}`);

@@ -126,14 +126,16 @@ class FakeOps implements AiTeamSessionOps {
 }
 
 class FakeChat implements AiTeamChatOps {
+  readonly titles = new Map<string, string>();
   readonly turns = new Map<string, ConversationTurn[]>();
   private counter = 0;
 
   /** 转发会话在真实现里就是一个普通结构化会话，所以这里也把它映进 ops.sessions。 */
   constructor(private readonly ops: FakeOps) {}
 
-  open(): string {
+  open({ title }: Parameters<AiTeamChatOps["open"]>[0]): string {
     const id = `chat${++this.counter}`;
+    this.titles.set(id, title);
     this.turns.set(id, []);
     this.ops.sessions.set(id, {
       id, owner: "structured", status: "running", inFlight: false, messages: [], sent: [],
@@ -785,6 +787,30 @@ test("replying after the team changed a member's CLI picks up the new config in 
   assert.equal(h.runner.detail(detail.run.id).run.team.members.find((member) => member.isLeader)!.agent.provider, "pi");
 });
 
+test("group chat title follows the task, not team renames or subsequent instructions", async (t) => {
+  const h = harness(t);
+  const started = await h.runner.start({ teamId: h.team.id, taskId: h.taskId });
+  const chatId = started.run.chatSessionId!;
+  const expected = "给 README 加安装说明任务处理群";
+  assert.equal(h.chat.titles.get(chatId), expected, "新建会话的标题按任务命名");
+  assert.equal(started.chatTitle, expected, "聊天页头与会话标题一致");
+  assert.equal(h.storage.listAiTeamRunChatMarkers().get(chatId)?.chatTitle, expected);
+  assert.ok(h.chat.lines(chatId).includes(`·负责人: 创建了团队群聊「${expected}」`));
+  const history = JSON.stringify(started.chatTurns);
+  const snapshot = JSON.stringify(started.run.team);
+  h.storage.updateWandTask(h.taskId, { title: "整理 README" });
+  const renamed = h.runner.detail(started.run.id);
+  assert.equal(renamed.chatTitle, "整理 README任务处理群");
+  assert.equal(renamed.chatTitleUpdatedAt, h.storage.getWandTask(h.taskId)!.updatedAt);
+  assert.equal(h.storage.listAiTeamRunChatMarkers().get(chatId)?.chatTitle, renamed.chatTitle);
+  assert.equal(JSON.stringify(renamed.chatTurns), history, "不批量改写历史发言");
+  assert.equal(JSON.stringify(renamed.run.team), snapshot, "不修改执行快照");
+  h.storage.saveAiTeam({ ...h.team, name: "另一个团队名称" });
+  assert.equal(h.runner.detail(started.run.id).chatTitle, renamed.chatTitle, "团队改名不改变群名");
+  await h.runner.chatInput(chatId, "顺便检查拼写");
+  assert.equal(h.runner.detail(started.run.id).chatTitle, renamed.chatTitle, "输入指令不是群名");
+});
+
 test("a team run posts its plan, dispatches and reports into one group chat", async (t) => {
   const h = harness(t, { requirePlanApproval: false });
   const runId = await startAndPlan(h, [["m_dev", "写代码"]]);
@@ -797,7 +823,7 @@ test("a team run posts its plan, dispatches and reports into one group chat", as
   const lines = h.chat.lines(chatId);
   assert.match(lines[0]!, /^用户: 给 README 加安装说明/);
   // v2 入群序列（S1/S2）：两条居中系统行，作者都是负责人，不再有旧的「接手了这个任务：roster」。
-  assert.match(lines[1]!, /^·负责人: 创建了团队群聊「测试团队」$/);
+  assert.match(lines[1]!, /^·负责人: 创建了团队群聊「给 README 加安装说明任务处理群」$/);
   assert.match(lines[2]!, /^·负责人: 邀请 @实现、@验收 加入群聊$/);
   assert.equal(lines.some((line) => line.includes("接手了这个任务")), false, "旧 roster 文案已被入群序列取代");
   assert.match(lines[3]!, /^负责人: 计划\n\n1\. \*\*@实现\*\* 写代码$/);
@@ -1876,25 +1902,24 @@ const introLeader: AiTeamMember = {
 test("[v2] chat intro lines follow S1–S3 with four invitees per line", () => {
   assert.equal(CHAT_INVITE_PER_LINE, 4);
   assert.deepEqual(
-    chatIntroLines({ name: "前端双人组", members: [introLeader, introMember("实现者"), introMember("审查者")] }),
-    ["创建了团队群聊「前端双人组」", "邀请 @实现者、@审查者 加入群聊"],
+    chatIntroLines({ members: [introLeader, introMember("实现者"), introMember("审查者")] }, "前端优化任务处理群"),
+    ["创建了团队群聊「前端优化任务处理群」", "邀请 @实现者、@审查者 加入群聊"],
   );
   // 除负责人外没人：仍两条，第二条不伪造成员。
   assert.deepEqual(
-    chatIntroLines({ name: "单人组", members: [introLeader] }),
-    ["创建了团队群聊「单人组」", "还没有邀请其他成员入群"],
+    chatIntroLines({ members: [introLeader] }, "单人验证任务处理群"),
+    ["创建了团队群聊「单人验证任务处理群」", "还没有邀请其他成员入群"],
   );
-  // 团队名空白 → 不带书名号；>4 人拆行，第二行起「继续邀请」。
+  // 群名空白 → 不带书名号；>4 人拆行，第二行起「继续邀请」。
   assert.deepEqual(
     chatIntroLines({
-      name: "   ",
       members: [introLeader, introMember("a"), introMember("b"), introMember("c"), introMember("d"), introMember("e"), introMember("f")],
-    }),
+    }, "   "),
     ["创建了团队群聊", "邀请 @a、@b、@c、@d 加入群聊", "继续邀请 @e、@f 加入群聊"],
   );
   // 名字空白的成员不进名单。
   assert.deepEqual(
-    chatIntroLines({ name: "T", members: [introLeader, introMember("", "m_blank")] }),
+    chatIntroLines({ members: [introLeader, introMember("", "m_blank")] }, "T"),
     ["创建了团队群聊「T」", "还没有邀请其他成员入群"],
   );
 });
@@ -1946,7 +1971,7 @@ test("[v2] the intro sequence is posted once per group chat and never replayed",
   const chatId = h.runner.detail(runId).run.chatSessionId!;
 
   const lines = h.chat.lines(chatId);
-  assert.match(lines[1]!, /^·负责人: 创建了团队群聊「测试团队」$/);
+  assert.match(lines[1]!, /^·负责人: 创建了团队群聊「给 README 加安装说明任务处理群」$/);
   assert.match(lines[2]!, /^·负责人: 邀请 @实现、@验收 加入群聊$/);
   assert.equal(lines.filter((line) => line.includes("创建了团队群聊")).length, 1);
   assert.equal(lines.filter((line) => line.includes("加入群聊")).length, 1);

@@ -8,7 +8,7 @@ import { inferProviderFromCommand, inferProviderFromRunner, isSessionProvider, S
 import { DEFAULT_ITERATION_NAME, DEFAULT_WAND_TASK_AGENT_KIND, DEFAULT_WAND_TASK_PRIORITY, isWandTaskAgentKind, normalizeWandTaskAgentMode } from "./task-types.js";
 import { firstLayoutTabId } from "./layout-tree.js";
 import { isUnnamedWorkspaceTaskName } from "./wand-task-sync.js";
-import { AI_TEAM_DEFAULT_MAX_STEPS, AI_TEAM_TERMINAL_RUN_STATUSES, isTeamMemberRole, memberAgents } from "./ai-team-types.js";
+import { AI_TEAM_DEFAULT_MAX_STEPS, AI_TEAM_TERMINAL_RUN_STATUSES, aiTeamChatTitle, isTeamMemberRole, memberAgents } from "./ai-team-types.js";
 import type {
   AiTeam, AiTeamMember, AiTeamRun, AiTeamRunChatMarker, AiTeamRunStatus, AiTeamStep, AiTeamStepKind, AiTeamStepSessionMarker, AiTeamStepStatus,
   CandidateFailureKind, SiliconEmployee, StepDispatchInfo,
@@ -2949,8 +2949,14 @@ export class WandStorage {
    */
   listAiTeamRunChatMarkers(): Map<string, AiTeamRunChatMarker> {
     const rows = this.db.prepare(
-      `SELECT r.id, r.team_id, r.team_json, r.chat_session_id, t.name AS current_team_name
+      `SELECT r.id, r.team_id, r.team_json, r.chat_session_id, t.name AS current_team_name,
+              task.title AS task_title
        FROM ai_team_runs r LEFT JOIN ai_teams t ON t.id = r.team_id
+       LEFT JOIN command_sessions s ON s.id = r.chat_session_id
+       LEFT JOIN wand_tasks task ON task.id = COALESCE((
+         SELECT id FROM wand_tasks WHERE workspace_task_id = s.workspace_task_id
+         ORDER BY updated_at DESC, rowid DESC LIMIT 1
+       ), r.task_id)
        WHERE r.chat_session_id IS NOT NULL AND r.chat_session_id <> '' ORDER BY r.created_at DESC`,
     ).all() as unknown as Record<string, unknown>[];
     const markers = new Map<string, AiTeamRunChatMarker>();
@@ -2962,6 +2968,7 @@ export class WandStorage {
         runId: String(row.id),
         teamId: String(row.team_id),
         teamName: typeof row.current_team_name === "string" ? row.current_team_name : String(rawTeam?.name ?? ""),
+        chatTitle: aiTeamChatTitle(typeof row.task_title === "string" ? row.task_title : ""),
         memberCount: Array.isArray(rawTeam?.members) ? rawTeam.members.length : 0,
       });
     }

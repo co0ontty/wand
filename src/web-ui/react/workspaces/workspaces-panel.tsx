@@ -51,7 +51,7 @@ import {
   type SidebarDisplayMode,
   type ActiveSessionEntry,
 } from "./sidebar-display-mode";
-import { nonTeamSessions, splitTeamSessions } from "./team-sessions";
+import { nonTeamSessions, splitTeamSessions, teamChatLabel } from "./team-sessions";
 import {
   isDirectoryExpanded,
   isTaskSessionsExpanded,
@@ -1970,7 +1970,7 @@ export function WorkspacesPanel({
               {!contactTeams ? teamChatSessions.map(({ group, session }) => <ImSidebarItem
                 key={session.id}
                 id={session.id}
-                title={session.teamChat?.teamName || "AI 团队"}
+                title={teamChatLabel(session)}
                 avatarNode={<TeamChatSessionMark teamChat={session.teamChat!} />}
                 summary={`群聊 · ${session.title || "未命名会话"}`}
                 compact={compact}

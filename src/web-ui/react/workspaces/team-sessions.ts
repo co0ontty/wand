@@ -32,8 +32,7 @@ export function teamStepLabel(step: WorkspaceSessionTeamStep): string {
   return `${Array.from(title).slice(0, TEAM_LABEL_MAX_CHARS - 1).join("")}…`;
 }
 
-/** 群聊条目的短标题：行尾已有「群聊」徽标，名字里不再重复团队和任务。 */
+/** 群聊条目与页头使用服务端按任务派生的群名；团队名只作身份信息。 */
 export function teamChatLabel(session: WorkspaceSessionSummary): string {
-  const teamName = (session.teamChat?.teamName || "").trim();
-  return teamName || (session.title || "").trim();
+  return session.teamChat?.chatTitle?.trim() || session.title?.trim() || "任务处理群";
 }
