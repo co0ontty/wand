@@ -5,7 +5,7 @@ import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import * as toolActivity from "../src/web-ui/browser/tool-activity.js";
 
-function renderActivity(blocks: unknown[], pendingCommandId = "cmd"): string {
+function renderActivity(blocks: unknown[], pendingCommandId = "cmd", expanded = false): string {
   const source = readFileSync(new URL("../src/web-ui/browser/chat-render.ts", import.meta.url), "utf8") + `
     export function renderActivityFixture(blocks, pendingId) {
       _currentMessageGlobalIndex = 1;
@@ -29,7 +29,7 @@ function renderActivity(blocks: unknown[], pendingCommandId = "cmd"): string {
       if (id === "./state") return { state: { selectedId: "session", toolContentCache: {}, sessions: [] } };
       if (id === "./chat-scroll") return {
         buildExpandKey: (kind: string, parts: unknown[]) => `${kind}:${parts.join(":")}`,
-        getPersistedExpandState: () => null,
+        getPersistedExpandState: () => expanded,
       };
       if (id === "./utils") return { escapeHtml: (value: unknown) => String(value)
         .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;") };
@@ -39,6 +39,7 @@ function renderActivity(blocks: unknown[], pendingCommandId = "cmd"): string {
     window: { matchMedia: () => ({ matches: false }) },
     document: { addEventListener: noop },
     setTimeout: noop, clearTimeout: noop,
+    fetch: () => { throw new Error("Opening the timeline must never fetch tool details"); },
   });
   return exports.renderActivityFixture(blocks, pendingCommandId);
 }
@@ -58,7 +59,8 @@ test("adjacent thinking and command share one inline activity with hidden proces
   assert.match(html, /<time class="chat-activity-command-time" datetime="2026-09-30T12:03:10Z"/);
   assert.match(html, /运行中/);
   assert.doesNotMatch(html, /thinking-inline/);
-  assert.match(html, /chat-activity-entry-detail" hidden>.*  Private reasoning text\n/s);
+  assert.match(html, /chat-activity-entry-detail" inert aria-hidden="true"/);
+  assert.doesNotMatch(html, /Private reasoning text|More private reasoning/);
 });
 
 test("completed command keeps its real time but has no running animation", () => {
@@ -83,7 +85,25 @@ test("old command history without a timestamp does not invent one", () => {
 test("an empty live thinking placeholder shows a status until its text arrives", () => {
   const html = renderActivity([{ type: "thinking", thinking: "" }], "");
   assert.match(html, /正在思考/);
-  assert.match(html, /思考内容尚未到达/);
+  assert.match(html, /data-thinking-entry="true"/);
+});
+
+test("expanded timeline shows every call identity in order, with no detail bodies or prefetch", () => {
+  const html = renderActivity([
+    { type: "tool_use", id: "read", name: "Read", activity: {
+      kind: "read_file", label: "查看 src/main.ts", fileKey: "same", occurredAt: "2026-09-30T12:00:00Z",
+    }, input: { file_path: "src/main.ts", private: "do-not-render" } },
+    { type: "tool_use", id: "run", name: "Bash", activity: { kind: "run_command", label: "运行命令 · Bash" } },
+    { type: "tool_use", id: "edit", name: "Edit", activity: { kind: "edit_file", label: "修改 src/main.ts", fileKey: "same" } },
+    { type: "tool_use", id: "edit-again", name: "Edit", activity: { kind: "edit_file", label: "修改 src/main.ts", fileKey: "same" } },
+  ], "", true);
+  assert.equal((html.match(/class="chat-activity-entry"/g) ?? []).length, 4);
+  assert.match(html, /chat-activity-timeline" role="list"/);
+  assert.ok(html.indexOf("查看 src/main.ts") < html.indexOf("运行命令 · Bash"));
+  assert.ok(html.indexOf("运行命令 · Bash") < html.indexOf("修改 src/main.ts"));
+  assert.match(html, /修改了1个文件/);
+  assert.match(html, /chat-activity-entry-time" datetime="2026-09-30T12:00:00Z"/);
+  assert.doesNotMatch(html, /do-not-render|<pre|tool-use-card|chat-activity-group-title/);
 });
 
 test("latest event clock and waiting duration can refer to different commands", () => {

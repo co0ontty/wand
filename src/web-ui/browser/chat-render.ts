@@ -20,7 +20,7 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
 import { localFilePreviewHref, localHttpPreviewHref } from "../react/local-preview/controller";
 import { catCoatGrid, memberCoatIndex } from "../react/ai-teams/cat-coats";
 import { parseJsonResponse } from "../react/http-adapter";
-import { commandOccurredAt, currentToolActivity, formatActivityElapsed, groupToolActivities, latestCommandOccurredAt, TOOL_ACTIVITY_KINDS } from "./tool-activity";
+import { commandOccurredAt, currentToolActivity, formatActivityElapsed, groupToolActivities, isToolActivityOnly, latestCommandOccurredAt, toolActivityTimeline, TOOL_ACTIVITY_KINDS } from "./tool-activity";
 import { cachedSiliconEmployee, subscribeSiliconEmployeeCache } from "../react/agents/employee-repository.js";
 import {
   agentRunAccentSeed,
@@ -2413,6 +2413,11 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           var el = msgEls[m];
           var idx = parseInt(el.getAttribute("data-msg-index") || "", 10);
           if (isNaN(idx) || !allMessages[idx] || allMessages[idx].role !== "assistant") continue;
+          if (isToolActivityOnly(allMessages[idx].content || [])) {
+            el.querySelector(":scope > .assistant-reply-disclosure")?.remove();
+            el.classList.remove("assistant-reply-collapsed", "assistant-reply-expanded");
+            continue;
+          }
           var historical = idx < lastUserIdx;
           var key = buildExpandKey(historical ? "assistant-reply-history" : "assistant-reply-current", [renderMessageKey(allMessages[idx], idx)]);
           var persisted = getPersistedExpandState(key);
@@ -2581,8 +2586,6 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
       function summarizeActivityRun(items) {
         var groups = groupToolActivities(items);
         var thinking = items.filter(function(item) { return item.block.type === "thinking"; });
-        var thinkingText = thinking.map(function(item) { return String(item.block.thinking || ""); })
-          .filter(function(value) { return value.trim().length > 0; }).join("\n\n");
         var parts = [];
         for (var j = 0; j < TOOL_ACTIVITY_KINDS.length; j++) {
           var summaryKind = TOOL_ACTIVITY_KINDS[j];
@@ -2593,7 +2596,6 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           }
         }
         return { groups: groups, parts: parts, thinking: thinking,
-          thinkingText: thinkingText,
           latestCommandAt: latestCommandOccurredAt(groups.run_command) };
       }
 
@@ -2736,59 +2738,49 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         var persisted = getPersistedExpandState(expandKey);
         var expanded = persisted === true;
         var menuHtml = "";
-        if (summary.thinking.length) {
-          var thinkingKey = buildExpandKey("activity-thinking", [state.selectedId, groupKey]);
-          var thinkingOpen = activityDetailOpen.has(thinkingKey);
-          menuHtml += '<section class="chat-activity-group chat-activity-thinking-group" data-chat-key="category:thinking" aria-label="深度思考">' +
-            '<div class="chat-activity-entry" data-entry-key="' + escapeHtml(thinkingKey) +
-              '" data-thinking-entry="true" data-expanded="' + (thinkingOpen ? "true" : "false") + '">' +
+        var timeline = toolActivityTimeline(items);
+        for (var k = 0; k < timeline.length; k++) {
+          var call = timeline[k];
+          var block = call.block;
+          var isThinking = block.type === "thinking";
+          var kind = block.activity?.kind || "other";
+          var callScope = renderBlockScope(messageKey, call.index + segmentFirstIndex, block);
+          var entryKey = buildExpandKey(isThinking ? "activity-thinking" : "activity-detail",
+            [state.selectedId, groupKey, callScope]);
+          var entryOpen = activityDetailOpen.has(entryKey);
+          var entryRunning = isThinking ? thinkingRunning && block === latestBlock
+            : commandRunning && block.id === _currentLatestPendingCommandId;
+          var result = isThinking ? null : pickToolResultForDisplay(toolResults, block.id);
+          var status = entryRunning ? "运行中" : result?.is_error ? "失败" : result ? "完成" : "未返回";
+          var itemLabel = isThinking ? "深度思考" : block.activity?.label ||
+            (ACTIVITY_KIND_META[kind]?.item || "调用") + " · " + (block.name || "工具");
+          var occurredAt = block.activity?.occurredAt;
+          var itemClock = occurredAt ? formatActivityEventTime(occurredAt) : "";
+          var detailHtml = "";
+          if (entryOpen && expanded) {
+            detailHtml = isThinking
+              ? '<div class="chat-activity-thinking-content">' +
+                escapeHtml(block.thinking || "思考内容尚未到达。") + '</div>'
+              : renderActivityEntryDetails({ calls: [call] }, messageKey, segmentFirstIndex,
+                toolResults, entryRunning, entryKey);
+          }
+          menuHtml += '<div class="chat-activity-entry" role="listitem" data-entry-key="' + escapeHtml(entryKey) +
+            (isThinking ? '" data-thinking-entry="true' : '" data-tool-ids="' +
+              escapeHtml(JSON.stringify(block.id ? [String(block.id)] : []))) +
+            '" data-expanded="' + (entryOpen ? "true" : "false") + '">' +
               '<button type="button" class="chat-activity-entry-button" aria-expanded="' +
-                (thinkingOpen ? "true" : "false") + '" onclick="__activityEntryToggle(this)">' +
-                '<span>深度思考</span>' +
+                (entryOpen ? "true" : "false") + '" onclick="__activityEntryToggle(this)">' +
+                '<span class="chat-activity-entry-dot' + (entryRunning ? ' is-active' : '') + '" aria-hidden="true"></span>' +
+                '<span class="chat-activity-entry-label">' + escapeHtml(itemLabel) + '</span>' +
+                (itemClock ? '<time class="chat-activity-entry-time" datetime="' + escapeHtml(occurredAt) + '">' +
+                  escapeHtml(itemClock) + '</time>' : '') +
+                (isThinking && !entryRunning ? '' : '<span class="chat-activity-entry-status' +
+                  (result?.is_error ? ' is-error' : '') + '">' + escapeHtml(status) + '</span>') +
                 '<span class="chat-activity-entry-arrow">' + iconSvg("chevronDown", { size: 13 }) + '</span>' +
               '</button>' +
-              '<div class="chat-activity-entry-detail"' + (thinkingOpen ? "" : " hidden") + '>' +
-                '<div class="chat-activity-thinking-content">' +
-                  escapeHtml(summary.thinkingText || "思考内容尚未到达。") +
-                '</div>' +
-              '</div>' +
-            '</div>' +
-          '</section>';
-        }
-        for (var k = 0; k < TOOL_ACTIVITY_KINDS.length; k++) {
-          var kind = TOOL_ACTIVITY_KINDS[k];
-          var entries = summary.groups[kind];
-          if (!entries.length) continue;
-          var groupMeta = ACTIVITY_KIND_META[kind];
-          menuHtml += '<section class="chat-activity-group" data-chat-key="category:' + kind + '" aria-label="' +
-            escapeHtml(groupMeta.summary + entries.length + groupMeta.unit) + '">' +
-            '<div class="chat-activity-group-title">' +
-              escapeHtml(groupMeta.summary + entries.length + groupMeta.unit) +
+              '<div class="chat-activity-entry-detail"' + (entryOpen ? '' : ' inert aria-hidden="true"') + '>' +
+                '<div class="chat-activity-detail-content">' + detailHtml + '</div></div>' +
             '</div>';
-          for (var e = 0; e < entries.length; e++) {
-            var entry = entries[e];
-            var entryKey = buildExpandKey("activity-detail", [state.selectedId, groupKey, entry.key]);
-            var entryOpen = activityDetailOpen.has(entryKey);
-            var itemLabel = groupMeta.item + (entries.length > 1 ? " " + (e + 1) : "");
-            var ids = entry.calls.map(function(call) { return String(call.block.id || ""); }).filter(Boolean);
-            var entryRunning = commandRunning && entry.calls.some(function(call) {
-              return call.block.id === _currentLatestPendingCommandId;
-            });
-            var detailHtml = entryOpen && expanded
-              ? renderActivityEntryDetails(entry, messageKey, segmentFirstIndex, toolResults, entryRunning, entryKey)
-              : "";
-            menuHtml += '<div class="chat-activity-entry" data-entry-key="' + escapeHtml(entryKey) +
-              '" data-tool-ids="' + escapeHtml(JSON.stringify(ids)) +
-              '" data-expanded="' + (entryOpen ? "true" : "false") + '">' +
-                '<button type="button" class="chat-activity-entry-button" aria-expanded="' +
-                  (entryOpen ? "true" : "false") + '" onclick="__activityEntryToggle(this)">' +
-                  '<span>' + escapeHtml(itemLabel) + '</span>' +
-                  '<span class="chat-activity-entry-arrow">' + iconSvg("chevronDown", { size: 13 }) + '</span>' +
-                '</button>' +
-                '<div class="chat-activity-entry-detail"' + (entryOpen ? "" : " hidden") + '>' + detailHtml + '</div>' +
-              '</div>';
-          }
-          menuHtml += '</section>';
         }
 
         var summaryItems = [];
@@ -2832,7 +2824,9 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
               '<span class="chat-activity-separator" aria-hidden="true">·</span>') + '</span>' +
             '<span class="chat-activity-chevron">' + iconSvg("chevronDown", { size: 13, strokeWidth: 2 }) + '</span>' +
           '</button>' +
-          '<div class="chat-activity-menu"' + (expanded ? "" : " hidden") + '>' + menuHtml + '</div>' +
+          '<div class="chat-activity-menu"' + (expanded ? '' : ' inert aria-hidden="true"') + '>' +
+            '<div class="chat-activity-menu-inner"><div class="chat-activity-timeline" role="list" aria-label="工具调用时间线">' +
+              menuHtml + '</div></div></div>' +
         '</div>';
       }
 
@@ -2841,7 +2835,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         wrap.setAttribute("data-expanded", "false");
         var menu = wrap.querySelector(".chat-activity-menu");
         var summary = wrap.querySelector(".chat-activity-summary");
-        if (menu) menu.hidden = true;
+        if (menu) { menu.inert = true; menu.setAttribute("aria-hidden", "true"); }
         var openEntries = wrap.querySelectorAll('.chat-activity-entry[data-expanded="true"]');
         for (var i = 0; i < openEntries.length; i++) {
           var entry = openEntries[i];
@@ -2852,7 +2846,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           var entryButton = entry.querySelector(".chat-activity-entry-button");
           var entryDetail = entry.querySelector(".chat-activity-entry-detail");
           if (entryButton) entryButton.setAttribute("aria-expanded", "false");
-          if (entryDetail) entryDetail.hidden = true;
+          if (entryDetail) { entryDetail.inert = true; entryDetail.setAttribute("aria-hidden", "true"); }
         }
         if (summary) {
           summary.setAttribute("aria-expanded", "false");
@@ -2875,7 +2869,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         wrap.setAttribute("data-expanded", "true");
         btn.setAttribute("aria-expanded", "true");
         var menu = wrap.querySelector(".chat-activity-menu");
-        if (menu) menu.hidden = false;
+        if (menu) { menu.inert = false; menu.removeAttribute("aria-hidden"); }
         var key = wrap.getAttribute("data-expand-key");
         if (key) setPersistedExpandState(key, true);
       };
@@ -2888,14 +2882,18 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         var nowExpanded = row.getAttribute("data-expanded") !== "true";
         row.setAttribute("data-expanded", nowExpanded ? "true" : "false");
         btn.setAttribute("aria-expanded", nowExpanded ? "true" : "false");
-        if (detail) detail.hidden = !nowExpanded;
+        if (detail) {
+          detail.inert = !nowExpanded;
+          if (nowExpanded) detail.removeAttribute("aria-hidden");
+          else detail.setAttribute("aria-hidden", "true");
+        }
         if (!nowExpanded) {
           activityDetailOpen.delete(key);
           activityEntryStates.delete(key);
           return;
         }
         activityDetailOpen.add(key);
-        if (row.getAttribute("data-thinking-entry") === "true") return;
+        if (row.getAttribute("data-thinking-entry") === "true") { renderChat(true); return; }
         var view = chatViewLease();
         if (!view) return;
         activityEntryStates.set(key, { lease: view, open: {}, request: null, error: null });
@@ -3025,7 +3023,8 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         var usageHtml = role === "assistant" ? renderUsageSummaryHtml(roundUsage) : "";
         var content = Array.isArray(msg.content) ? msg.content : [];
         var isQueued = role === "user" && content.some(function(b) { return b && b.__queued; });
-        var avatarHtml = (isGrouped || role === "user") ? "" : chatAvatar(role, msg.author);
+        var activityOnly = role === "assistant" && isToolActivityOnly(content);
+        var avatarHtml = (isGrouped || role === "user" || activityOnly) ? "" : chatAvatar(role, msg.author);
         var groupedAttr = isGrouped ? ' data-grouped="true"' : "";
 
         if (content.length === 0) {
@@ -3090,7 +3089,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           return '<div class="chat-message agent-run-owned" data-message-key="' + escapeHtml(messageKey) + '" hidden></div>';
         }
 
-        var queuedClass = isQueued ? " queued" : "";
+        var queuedClass = (isQueued ? " queued" : "") + (activityOnly ? " activity-only" : "");
         var queuedBadge = isQueued ? '<span class="queued-badge">排队中</span>' : "";
         return '<div class="chat-message ' + role + queuedClass + '"' + groupedAttr + ' data-role="' + escapeHtml(role) + '" data-message-key="' + escapeHtml(messageKey) + '">' +
           timeHtml +

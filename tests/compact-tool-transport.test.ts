@@ -29,7 +29,7 @@ test("compact projection omits ordinary tool input/results, including live, erro
   const results = compact[1].content as ToolResultBlock[];
   assert.deepEqual(uses.map((use) => use.input), [{}, {}, {}]);
   assert.deepEqual(uses.map((use) => use.activity?.kind), ["edit_file", "edit_file", "run_command"]);
-  assert.equal(uses[0].activity?.label, "修改文件");
+  assert.equal(uses[0].activity?.label, "修改 repo/a.ts");
   assert.equal(uses[0].activity?.fileKey, uses[1].activity?.fileKey);
   assert.ok(uses[0].activity?.fileKey);
   assert.equal(uses[2].activity?.fileKey, undefined);
@@ -69,6 +69,28 @@ test("file activity only counts tools with one identifiable file", () => {
     assert.deepEqual(use.input, {});
   }
   assert.equal(uses[0].activity?.fileKey, uses[1].activity?.fileKey);
+  assert.deepEqual(compactToolMessagesForTransport(compact), compact);
+});
+
+test("timeline metadata carries bounded file/tool labels and real times, not tool bodies", () => {
+  const occurredAt = "2026-09-30T12:00:00Z";
+  const raw: ConversationTurn[] = [{ role: "assistant", content: [
+    { type: "tool_use", id: "read", name: "Read", occurredAt,
+      input: { file_path: "/private/workspace/src/main.ts", offset: 123 } },
+    { type: "tool_use", id: "edit", name: "Edit", occurredAt,
+      input: { path: "C:\\workspace\\src\\other.ts", old_string: "secret", new_string: "private" } },
+    { type: "tool_use", id: "search", name: "Grep", occurredAt,
+      input: { pattern: "secret-query" } },
+    { type: "tool_use", id: "long", name: "Read", input: { path: "x/" + "a".repeat(300) } },
+  ] }];
+  const compact = compactToolMessagesForTransport(raw);
+  const uses = compact[0].content as ToolUseBlock[];
+  assert.deepEqual(uses.slice(0, 3).map(use => use.activity?.label), [
+    "查看 src/main.ts", "修改 src/other.ts", "调用 Grep",
+  ]);
+  assert.ok(uses.every(use => (use.activity?.label.length ?? 0) <= 120));
+  assert.deepEqual(uses.map(use => use.activity?.occurredAt), [occurredAt, occurredAt, occurredAt, undefined]);
+  assert.doesNotMatch(JSON.stringify(compact), /secret|private|workspace|offset/);
   assert.deepEqual(compactToolMessagesForTransport(compact), compact);
 });
 

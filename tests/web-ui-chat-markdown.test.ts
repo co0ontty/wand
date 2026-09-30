@@ -104,6 +104,6 @@ test("code copy button speaks the site language", () => {
   assert.doesNotMatch(chatRender, /Copied!|>Copy</, "代码块复制按钮不再留英文成句");
   // 点击处理器按 class 取按钮，改写文案不影响绑定；复位后的文案同样要是中文。
   assert.doesNotMatch(chatRender, /textContent = "Copy"/, "复制完成后不能把文案改回英文");
-  assert.equal((chatRender.match(/textContent = "已复制"/g) ?? []).length, 3,
-    "两处代码块复制按钮 + 一处消息气泡复制按钮");
+  assert.equal((chatRender.match(/textContent = "已复制"/g) ?? []).length, 2,
+    "统一代码块复制处理器 + 一处消息气泡复制按钮");
 });

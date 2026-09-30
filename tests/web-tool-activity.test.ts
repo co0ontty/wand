@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   commandOccurredAt, currentToolActivity, formatActivityElapsed, groupToolActivities,
-  latestCommandOccurredAt,
+  isToolActivityOnly, latestCommandOccurredAt, toolActivityTimeline,
 } from "../src/web-ui/browser/tool-activity.js";
 
 test("tool activity counts distinct files and groups their calls for on-demand detail", () => {
@@ -22,6 +22,31 @@ test("tool activity counts distinct files and groups their calls for on-demand d
   assert.equal(groups.read_file.length, 1);
   assert.equal(groups.run_command.length, 2);
   assert.equal(groups.other.length, 0);
+});
+
+test("timeline preserves mixed invocation order and separate calls to the same file", () => {
+  const blocks = [
+    { type: "tool_use", id: "read", activity: { kind: "read_file", fileKey: "same" } },
+    { type: "thinking" },
+    { type: "tool_use", id: "edit", activity: { kind: "edit_file", fileKey: "same" } },
+    { type: "tool_use", id: "run", activity: { kind: "run_command" } },
+    { type: "tool_use", id: "edit-again", activity: { kind: "edit_file", fileKey: "same" } },
+    { type: "tool_use", id: "edit", activity: { kind: "edit_file", fileKey: "same" } },
+  ];
+  const calls = toolActivityTimeline(blocks.map((block, index) => ({ block, index })));
+  assert.deepEqual(calls.map(call => call.index), [0, 1, 2, 3, 4]);
+  assert.equal(groupToolActivities(calls).edit_file.length, 1, "summary still counts distinct files");
+});
+
+test("only ordinary activity turns bypass the outer reply disclosure", () => {
+  const tool = { type: "tool_use", activity: { kind: "read_file" } };
+  assert.equal(isToolActivityOnly([tool, { type: "tool_result" }]), true);
+  assert.equal(isToolActivityOnly([{ type: "thinking" }, tool]), true);
+  assert.equal(isToolActivityOnly([{ type: "text", text: "  " }, tool]), true);
+  assert.equal(isToolActivityOnly([{ type: "text", text: "正文" }, tool]), false);
+  assert.equal(isToolActivityOnly([{ type: "tool_use", name: "AskUserQuestion" }]), false);
+  assert.equal(isToolActivityOnly([]), false);
+  assert.equal(isToolActivityOnly([{ type: "tool_result" }]), false);
 });
 
 test("latest command time uses the newest real event and elapsed text is stable", () => {

@@ -616,7 +616,11 @@ export function applyExpandedState(el: any, kind: string, expanded: boolean) {
     case "activity": {
       el.setAttribute("data-expanded", expanded ? "true" : "false");
       var activityMenu = el.querySelector(".chat-activity-menu");
-      if (activityMenu) activityMenu.hidden = !expanded;
+      if (activityMenu) {
+        activityMenu.toggleAttribute("inert", !expanded);
+        if (expanded) activityMenu.removeAttribute("aria-hidden");
+        else activityMenu.setAttribute("aria-hidden", "true");
+      }
       var activitySummary = el.querySelector(".chat-activity-summary");
       if (activitySummary) activitySummary.setAttribute("aria-expanded", expanded ? "true" : "false");
       break;

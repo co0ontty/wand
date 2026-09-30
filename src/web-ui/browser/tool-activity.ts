@@ -14,11 +14,38 @@ export interface ToolActivityEntry<T> {
 type ActivityBlock = {
   type?: string;
   id?: string;
-  activity?: { kind?: string; fileKey?: string; occurredAt?: string };
+  name?: string;
+  text?: string;
+  thinking?: string;
+  activity?: { kind?: string; label?: string; fileKey?: string; occurredAt?: string };
 };
 
 export const TOOL_ACTIVITY_KINDS: readonly ToolActivityKind[] =
   ["edit_file", "read_file", "run_command", "other"];
+
+/** Pure activity turns show their small menu directly, without a reply disclosure. */
+export function isToolActivityOnly(blocks: ActivityBlock[]): boolean {
+  return blocks.some(block => block.type === "thinking" || block.type === "tool_use" && !!block.activity)
+    && blocks.every(block => block.type === "thinking" || block.type === "tool_result"
+      || block.type === "tool_use" && !!block.activity
+      || block.type === "text" && !block.text?.trim());
+}
+
+/** Source order is invocation order, including untimed legacy calls and thinking.
+ * Distinct accesses to the same file stay distinct; retransmitted ids do not. */
+export function toolActivityTimeline<T extends ActivityBlock>(
+  items: Array<ToolActivityCall<T>>,
+): Array<ToolActivityCall<T>> {
+  const seen = new Set<string>();
+  return items.filter(({ block }) => {
+    if (block.type === "thinking") return true;
+    if (block.type !== "tool_use" || !block.activity) return false;
+    if (!block.id) return true;
+    if (seen.has(block.id)) return false;
+    seen.add(block.id);
+    return true;
+  });
+}
 
 /** Counts distinct files for edit/read and distinct calls for the other groups. */
 export function groupToolActivities<T extends ActivityBlock>(

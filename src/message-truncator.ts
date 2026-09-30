@@ -445,20 +445,27 @@ function toolActivity(use: ToolUseBlock, hasImage: boolean): NonNullable<ToolUse
   const occurredAt = use.occurredAt ?? use.activity?.occurredAt;
   return {
     kind,
-    label: activityLabel(kind),
+    label: activityLabel(kind, use, path),
     ...(fileKey ? { fileKey } : {}),
     ...(hasImage || imagePath || use.activity?.hasImage ? { hasImage: true } : {}),
-    ...(kind === "run_command" && occurredAt ? { occurredAt } : {}),
+    ...(occurredAt ? { occurredAt } : {}),
   };
 }
 
-function activityLabel(kind: NonNullable<ToolUseBlock["activity"]>["kind"]): string {
-  switch (kind) {
-    case "edit_file": return "修改文件";
-    case "read_file": return "查看文件";
-    case "run_command": return "运行命令";
-    default: return "使用工具";
-  }
+function activityLabel(
+  kind: NonNullable<ToolUseBlock["activity"]>["kind"],
+  use: ToolUseBlock,
+  path: string,
+): string {
+  // Only a bounded file/tool identity belongs in the timeline, never commands,
+  // patches, search queries or output. Keep labels stable when projecting twice.
+  if (!path && use.activity?.label) return use.activity.label;
+  const file = path.replace(/\\/g, "/").split("/").filter(Boolean).slice(-2).join("/");
+  const name = use.name.replace(/\s+/g, " ").trim().slice(0, 80) || "工具";
+  const label = kind === "edit_file" ? `修改 ${file}`
+    : kind === "read_file" ? `查看 ${file}`
+      : kind === "run_command" ? `运行命令 · ${name}` : `调用 ${name}`;
+  return label.length > 120 ? `${label.slice(0, 119)}…` : label;
 }
 
 const INDEPENDENT_TOOL_NAMES = new Set([
