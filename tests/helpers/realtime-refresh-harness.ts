@@ -5,6 +5,7 @@ import { ComposerStore } from "../../src/web-ui/browser/composer.js";
 import { createSessionReads } from "../../src/web-ui/browser/session-reads.js";
 import * as reconciliation from "../../src/web-ui/browser/message-reconciliation.js";
 import * as agentRuns from "../../src/web-ui/browser/agent-runs.js";
+import * as toolActivity from "../../src/web-ui/browser/tool-activity.js";
 import { parseJsonResponse } from "../../src/web-ui/react/http-adapter.js";
 
 const compiled = new Map<string, string>();
@@ -85,7 +86,7 @@ export function createRealtimeRenderHarness() {
     chatStickToBottom: false, chatInitialRenderDone: true, chatUnreadCount: 0, chatUnreadStartIndex: -1, config: {}, renderPending: false };
   const globals = { window: { addEventListener: noop, matchMedia: () => ({ matches: false }) },
     document: { addEventListener: noop, getElementById: (id: string) => id === "chat-output" ? output : null,
-      querySelector: () => null, createElement: () => new Element() },
+      querySelector: () => null, querySelectorAll: () => [], createElement: () => new Element() },
     console: { error: (...args: unknown[]) => errors.push(args) },
     requestAnimationFrame: (fn: () => void) => {
       if (failFrameSchedule) { failFrameSchedule = false; throw new Error("injected frame scheduling failure"); }
@@ -100,6 +101,7 @@ export function createRealtimeRenderHarness() {
     },
   };
   const dependencies = { "./state": { state }, "./agent-runs": agentRuns,
+    "./tool-activity": toolActivity,
     "./chat-scroll": new Proxy({ isChatNearBottom: () => false }, { get: (o: any, k: string) => o[k] ?? noop }),
     "./pty-system-info": { shouldExtractPtySystemInfo: () => false },
     "./i18n": { getActiveLang: () => "zh", t: (v: string) => v, iconSvg: () => "" } };

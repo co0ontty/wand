@@ -18,7 +18,7 @@ import { getToolDisplayName, getToolIcon } from "./tool-identity";
 import { localFilePreviewHref, localHttpPreviewHref } from "../react/local-preview/controller";
 import { catCoatGrid, memberCoatIndex } from "../react/ai-teams/cat-coats";
 import { parseJsonResponse } from "../react/http-adapter";
-import { groupToolActivities, TOOL_ACTIVITY_KINDS } from "./tool-activity";
+import { commandOccurredAt, currentToolActivity, formatActivityElapsed, groupToolActivities, latestCommandOccurredAt, TOOL_ACTIVITY_KINDS } from "./tool-activity";
 import { cachedSiliconEmployee, subscribeSiliconEmployeeCache } from "../react/agents/employee-repository.js";
 import {
   agentRunAccentSeed,
@@ -43,6 +43,26 @@ const activityDetailRequests = new Map<string, Promise<any>>();
 const activityPendingDetails = new Map<string, any>();
 const activityResultRefreshRequested = new Set<string>();
 let activityDetailEpoch = 0;
+let activityElapsedTimer: ReturnType<typeof setTimeout> | null = null;
+
+function refreshActivityElapsedLabels(): void {
+  const labels = document.querySelectorAll<HTMLElement>(
+    ".chat-activity.is-command-running .chat-activity-command-elapsed[data-started-at]",
+  );
+  for (const label of labels) {
+    const startedAt = Date.parse(label.dataset.startedAt || "");
+    if (Number.isFinite(startedAt)) {
+      label.textContent = "已等待 " + formatActivityElapsed(Date.now() - startedAt);
+    }
+  }
+  if (activityElapsedTimer !== null) clearTimeout(activityElapsedTimer);
+  activityElapsedTimer = labels.length > 0
+    ? setTimeout(() => {
+      activityElapsedTimer = null;
+      refreshActivityElapsedLabels();
+    }, 1000)
+    : null;
+}
 
 export function clearActivityDetailState(): void {
   activityDetailEpoch++;
@@ -50,6 +70,8 @@ export function clearActivityDetailState(): void {
   activityDetailRequests.clear();
   activityPendingDetails.clear();
   activityResultRefreshRequested.clear();
+  if (activityElapsedTimer !== null) clearTimeout(activityElapsedTimer);
+  activityElapsedTimer = null;
 }
 
 
@@ -297,10 +319,16 @@ function buildChatRowDependencies(messages: any[], revisions: number[], runs: an
     var toolResults = Array.isArray(message.content) ? message.content
       .filter(function(block) { return block?.type === "tool_use" && block.id; })
       .map(function(block) { return [block.id, results.get(block.id) || []]; }) : [];
+    var commandRunning = _currentActivitySessionBusy && Array.isArray(message.content) &&
+      message.content.some(function(block) {
+        return block?.type === "tool_use" && block.activity?.kind === "run_command" &&
+          block.id === _currentLatestPendingCommandId;
+      });
     return { toolResults: toolResults, runs: runRows.get(index) || [], owned: ownedRows.get(index) || [],
       usage: roundUsage[index] || null,
       grouped: index >= visibleOffset && isGroupedChatMessage(visible, index - visibleOffset),
-      live: isTurnActivityLive(index), lang: getActiveLang(), persona: state.config?.structuredChatPersona,
+      live: isTurnActivityLive(index), commandRunning: commandRunning,
+      lang: getActiveLang(), persona: state.config?.structuredChatPersona,
       defaults: state.config?.cardDefaults,
       employee: [session.employeeId, session.employeeName, session.employeeAvatar] };
   });
@@ -375,6 +403,13 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         _currentLastUserTextMessageIndex = agentRunIndex.lastUserTextMessageIndex;
         _currentSessionRunning = !!(selectedSession.structuredState &&
           selectedSession.structuredState.inFlight && selectedSession.status === "running");
+        _currentActivitySessionBusy = selectedSession.status === "running" &&
+          (!!selectedSession.structuredState?.inFlight || selectedSession.ptyBusy === true ||
+            selectedSession.isResponding === true);
+        var currentActivity = currentToolActivity(allMessages,
+          _currentLastUserTextMessageIndex, conversationToolResults);
+        _currentLatestAssistantMessageIndex = currentActivity.latestAssistantIndex;
+        _currentLatestPendingCommandId = currentActivity.pendingCommandId || "";
 
         if (allMessages.length === 0) {
           if (state.lastRenderedEmpty !== "empty") {
@@ -447,6 +482,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           if (unchangedMessages) renderStructuredStatusBar(unchangedMessages, selectedSession);
           updateTodoProgress(allMessages);
           cache.commit(plan);
+          refreshActivityElapsedLabels();
           return;
         }
         var prevMsgCount = state.lastRenderedMsgCount;
@@ -675,6 +711,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         cache.commit(plan);
         state.lastRenderedMsgCount = msgCount;
         state.lastRenderedEmpty = null;
+        refreshActivityElapsedLabels();
       }
 
       // 注：旧版的 smartScrollToBottom / chatAutoFollow / chat-follow-toggle 都已经
@@ -2381,9 +2418,9 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         }
       };
 
-      // ===== 普通活动折叠 =================================================
-      // 连续 thinking / 工具调用收成一条状态条；正文出现就切断当前活动。
-      // Agent Run 有自己的摘要 + 轨迹容器，不进入这条普通折叠路径。
+      // ===== 普通活动轨迹 =================================================
+      // 相邻 thinking / 普通工具调用共用一行摘要；正文出现就切断当前轨迹。
+      // Agent Run 有自己的摘要 + 轨迹容器，不进入这里。
       var ACTIVITY_FOLD_ENABLED = true;
       // 当前正在渲染的消息在 state.currentMessages 里的全局下标。渲染是同步单线程的，
       // 在 renderStructuredMessage 入口设置一次即可让下游活动折叠判断运行态。
@@ -2393,12 +2430,18 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
       // 否则历史 run 会被误标「已中断」，和 Android 同一份历史显示不一致。
       var _currentLastUserTextMessageIndex = -1;
       var _currentSessionRunning = false;
+      var _currentActivitySessionBusy = false;
+      var _currentLatestAssistantMessageIndex = -1;
+      var _currentLatestPendingCommandId = "";
 
-      // Agent dispatch 和 tool_result 都由 Run 或对应 tool card 消费，普通活动折叠
+      // Agent dispatch 和 tool_result 都由 Run 或对应 tool card 消费，普通活动轨迹
       // 不应再把它们当成独立可见步骤。
       function isHiddenActivityBlock(block) {
         if (!block) return true;
-        if (block.type === "thinking") return !String(block.thinking || "").trim();
+        if (block.type === "thinking") {
+          return !String(block.thinking || "").trim() &&
+            !isTurnActivityLive(_currentMessageGlobalIndex);
+        }
         if (block.type === "tool_use" && deriveSubagentMeta(block)) return true;
         if (block.type === "tool_result") return true;
         return false;
@@ -2406,6 +2449,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
 
       function isFoldableActivityBlock(block) {
         if (!block) return false;
+        if (block.type === "thinking") return true;
         if (block.type === "tool_use") {
           // 服务端只给可延后载入的普通工具附 activity；独立交互和图片卡保持原位。
           return !!block.activity;
@@ -2466,30 +2510,37 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         other: { summary: "使用了", unit: "次工具", item: "使用工具" },
       };
 
-      // 本轮 assistant turn 是否还在流式生成。只有「最后一条消息 + busy」
-      // 才算活跃，避免历史 turn 的状态条常亮。
+      // Thinking 自身只在当前轮最新 assistant 消息的尾段活跃；命令运行态
+      // 另由最新未返回的 tool id 决定，允许命令后继续出现 thinking。
       function isTurnActivityLive(messageIndex) {
-        var total = Array.isArray(state.currentMessages) ? state.currentMessages.length : 0;
-        if (typeof messageIndex !== "number" || messageIndex !== total - 1) return false;
-        var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
-        if (!session) return false;
-        var busy = !!(session.structuredState && session.structuredState.inFlight) ||
-          session.ptyBusy === true || session.isResponding === true;
-        return busy && session.status === "running";
+        return _currentActivitySessionBusy && messageIndex === _currentLatestAssistantMessageIndex;
       }
 
       function summarizeActivityRun(items) {
         var groups = groupToolActivities(items);
+        var thinking = items.filter(function(item) { return item.block.type === "thinking"; });
+        var thinkingText = thinking.map(function(item) { return String(item.block.thinking || ""); })
+          .filter(function(value) { return value.trim().length > 0; }).join("\n\n");
         var parts = [];
         for (var j = 0; j < TOOL_ACTIVITY_KINDS.length; j++) {
           var summaryKind = TOOL_ACTIVITY_KINDS[j];
           var count = groups[summaryKind].length;
           if (count > 0) {
             var kindMeta = ACTIVITY_KIND_META[summaryKind];
-            parts.push(kindMeta.summary + count + kindMeta.unit);
+            parts.push({ kind: summaryKind, text: kindMeta.summary + count + kindMeta.unit });
           }
         }
-        return { groups: groups, parts: parts };
+        return { groups: groups, parts: parts, thinking: thinking,
+          thinkingText: thinkingText,
+          latestCommandAt: latestCommandOccurredAt(groups.run_command) };
+      }
+
+      function formatActivityEventTime(occurredAt) {
+        var date = new Date(occurredAt);
+        if (!Number.isFinite(date.getTime())) return "";
+        return date.toLocaleTimeString(undefined, {
+          hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+        });
       }
 
       /** Existing tool renderers still use their own defaults outside the activity menu. */
@@ -2580,14 +2631,44 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
       function renderActivityFold(items, role, toolResults, messageKey, segmentFirstIndex, options?: any) {
         var opts = options || {};
         var summary = summarizeActivityRun(items);
-        if (!summary.parts.length) return "";
-        // 只有当前轮尾部流式活动才呼吸，历史摘要保持安静。
-        var running = !!opts.isTrailing && isTurnActivityLive(_currentMessageGlobalIndex);
+        if (!summary.parts.length && !summary.thinking.length) return "";
+        var commandRunning = _currentActivitySessionBusy && !!_currentLatestPendingCommandId &&
+          summary.groups.run_command.some(function(entry) {
+            return entry.calls.some(function(call) {
+              return call.block.id === _currentLatestPendingCommandId;
+            });
+          });
+        var runningCommandAt = commandRunning
+          ? commandOccurredAt(summary.groups.run_command, _currentLatestPendingCommandId)
+          : null;
+        var latestBlock = items.length ? items[items.length - 1].block : null;
+        var thinkingRunning = !commandRunning && !!opts.isTrailing &&
+          latestBlock?.type === "thinking" && isTurnActivityLive(_currentMessageGlobalIndex);
         var runStart = items.length ? items[0].index : 0;
         var expandKey = buildExpandKey("activity-menu", [messageKey, segmentFirstIndex, runStart]);
         var persisted = getPersistedExpandState(expandKey);
         var expanded = persisted === true;
         var menuHtml = "";
+        if (summary.thinking.length) {
+          var thinkingKey = buildExpandKey("activity-thinking", [state.selectedId, messageKey,
+            segmentFirstIndex, runStart]);
+          var thinkingOpen = activityDetailOpen.has(thinkingKey);
+          menuHtml += '<section class="chat-activity-group chat-activity-thinking-group" aria-label="深度思考">' +
+            '<div class="chat-activity-entry" data-entry-key="' + escapeHtml(thinkingKey) +
+              '" data-thinking-entry="true" data-expanded="' + (thinkingOpen ? "true" : "false") + '">' +
+              '<button type="button" class="chat-activity-entry-button" aria-expanded="' +
+                (thinkingOpen ? "true" : "false") + '" onclick="__activityEntryToggle(this)">' +
+                '<span>深度思考</span>' +
+                '<span class="chat-activity-entry-arrow">' + iconSvg("chevronDown", { size: 13 }) + '</span>' +
+              '</button>' +
+              '<div class="chat-activity-entry-detail"' + (thinkingOpen ? "" : " hidden") + '>' +
+                '<div class="chat-activity-thinking-content">' +
+                  escapeHtml(summary.thinkingText || "思考内容尚未到达。") +
+                '</div>' +
+              '</div>' +
+            '</div>' +
+          '</section>';
+        }
         for (var k = 0; k < TOOL_ACTIVITY_KINDS.length; k++) {
           var kind = TOOL_ACTIVITY_KINDS[k];
           var entries = summary.groups[kind];
@@ -2605,8 +2686,11 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
             var entryOpen = activityDetailOpen.has(entryKey);
             var itemLabel = groupMeta.item + (entries.length > 1 ? " " + (e + 1) : "");
             var ids = entry.calls.map(function(call) { return String(call.block.id || ""); }).filter(Boolean);
+            var entryRunning = commandRunning && entry.calls.some(function(call) {
+              return call.block.id === _currentLatestPendingCommandId;
+            });
             var detailHtml = entryOpen && expanded
-              ? renderActivityEntryDetails(entry, messageKey, segmentFirstIndex, toolResults, running)
+              ? renderActivityEntryDetails(entry, messageKey, segmentFirstIndex, toolResults, entryRunning)
               : "";
             menuHtml += '<div class="chat-activity-entry" data-entry-key="' + escapeHtml(entryKey) +
               '" data-tool-ids="' + escapeHtml(JSON.stringify(ids)) +
@@ -2622,14 +2706,45 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           menuHtml += '</section>';
         }
 
-        return '<div class="chat-activity' + (running ? ' is-running' : '') + '" ' +
+        var summaryItems = [];
+        if (summary.thinking.length) {
+          summaryItems.push('<span class="chat-activity-meta-item is-thinking' +
+            (thinkingRunning ? ' is-active' : '') + '">' +
+            (thinkingRunning ? "正在思考" : "深度思考") + '</span>');
+        }
+        for (var p = 0; p < summary.parts.length; p++) {
+          var part = summary.parts[p];
+          var itemHtml = '<span class="chat-activity-meta-item' +
+            (part.kind === "run_command" ? ' is-command' : '') + '">' + escapeHtml(part.text);
+          if (part.kind === "run_command") {
+            if (summary.latestCommandAt) {
+              var clock = formatActivityEventTime(summary.latestCommandAt);
+              if (clock) itemHtml += '<time class="chat-activity-command-time" datetime="' +
+                escapeHtml(summary.latestCommandAt) + '" title="最近命令 ' +
+                escapeHtml(new Date(summary.latestCommandAt).toLocaleString()) + '">' +
+                escapeHtml(clock) + '</time>';
+            }
+            if (commandRunning) {
+              itemHtml += '<span class="chat-activity-command-indicator" aria-hidden="true"></span>' +
+                '<span class="chat-activity-command-running">运行中</span>';
+              if (runningCommandAt) {
+                itemHtml += '<span class="chat-activity-command-elapsed" data-started-at="' +
+                  escapeHtml(runningCommandAt) + '">已等待 ' +
+                  formatActivityElapsed(Date.now() - Date.parse(runningCommandAt)) + '</span>';
+              }
+            }
+          }
+          summaryItems.push(itemHtml + '</span>');
+        }
+
+        return '<div class="chat-activity' + (commandRunning ? ' is-command-running' : '') +
+            (thinkingRunning ? ' is-thinking-running' : '') + '" ' +
             'data-expand-kind="activity" ' +
             'data-expand-key="' + escapeHtml(expandKey) + '" ' +
             'data-expanded="' + (expanded ? "true" : "false") + '">' +
           '<button type="button" class="chat-activity-summary" aria-expanded="' + (expanded ? "true" : "false") + '" onclick="__activityToggle(this)">' +
-            '<span class="chat-activity-meta">' + summary.parts.map(function(part) {
-              return '<span class="chat-activity-meta-item">' + escapeHtml(part) + '</span>';
-            }).join('<span class="chat-activity-separator" aria-hidden="true">·</span>') + '</span>' +
+            '<span class="chat-activity-meta">' + summaryItems.join(
+              '<span class="chat-activity-separator" aria-hidden="true">·</span>') + '</span>' +
             '<span class="chat-activity-chevron">' + iconSvg("chevronDown", { size: 13, strokeWidth: 2 }) + '</span>' +
           '</button>' +
           '<div class="chat-activity-menu"' + (expanded ? "" : " hidden") + '>' + menuHtml + '</div>' +
@@ -2692,6 +2807,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           return;
         }
         activityDetailOpen.add(key);
+        if (row.getAttribute("data-thinking-entry") === "true") return;
         if (detail) detail.innerHTML = '<span class="chat-activity-loading">加载详情…</span>';
         var sessionId = state.selectedId;
         var ids: string[] = [];

@@ -10,6 +10,7 @@ import {
   WandConfig,
 } from "./types.js";
 import { truncateMessagesForTransport } from "./message-truncator.js";
+import { stampNewToolUseTimes } from "./tool-use-timestamps.js";
 import { buildChildEnv } from "./env-utils.js";
 import { getErrorMessage } from "./error-utils.js";
 import { getDefaultModelForProvider } from "./config.js";
@@ -494,13 +495,18 @@ function upsertAssistantMessage(
   messages: ConversationTurn[] | undefined,
   turn: ConversationTurn,
   complete = false,
+  stampNewTools = true,
 ): ConversationTurn[] {
   const msgs = [...(messages ?? [])];
   const last = msgs[msgs.length - 1];
-  const createdAt = (last?.role === "assistant" ? last.createdAt : undefined) ?? turn.createdAt ?? isoNow();
+  const observedAt = isoNow();
+  const createdAt = (last?.role === "assistant" ? last.createdAt : undefined) ?? turn.createdAt ?? observedAt;
   const next: ConversationTurn = {
     ...turn,
     createdAt,
+    content: stampNewToolUseTimes(
+      turn.content, last?.role === "assistant" ? last.content : undefined, observedAt, stampNewTools,
+    ),
   };
   if (complete) next.completedAt = isoNow();
   else if (last?.role === "assistant" && last.completedAt) next.completedAt = last.completedAt;
@@ -831,6 +837,7 @@ export class StructuredSessionManager {
     // 不能用它覆盖 messages/output，也不能就此冻结前端。
     const replayTruncated = initialState.stdoutTruncated;
     const replayView = new TruncatedReplayView(resumed.messages);
+    let replayingHistory = true;
     const syncTurn = (turnState: StructuredRunnerTurnState): void => {
       const current = this.currentSessionForRequest(sessionId, requestId);
       if (!current) return;
@@ -855,7 +862,7 @@ export class StructuredSessionManager {
         };
         const patched: SessionSnapshot = {
           ...current,
-          messages: upsertAssistantMessage(current.messages, merged),
+          messages: upsertAssistantMessage(current.messages, merged, false, !replayingHistory),
           structuredState,
         };
         this.sessions.set(sessionId, patched);
@@ -867,7 +874,7 @@ export class StructuredSessionManager {
         content: this.compactContentBlocks([...turnState.blocks], turnState.result),
         usage: turnState.usage,
       };
-      const messages = upsertAssistantMessage(current.messages, turn);
+      const messages = upsertAssistantMessage(current.messages, turn, false, !replayingHistory);
       const patched: SessionSnapshot = {
         ...current,
         claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
@@ -956,6 +963,7 @@ export class StructuredSessionManager {
     }
     // 首轮 feed + attach 完成后再定锚点，之后 onStream 的事件都走合并视图。
     replayView.prime([...processor.state.blocks]);
+    replayingHistory = false;
     runningHandle.onStream((event) => {
       // Events may be buffered while structuredAttach is in flight. Sequence
       // watermarks distinguish overlap with the snapshot from genuinely new
@@ -1039,7 +1047,7 @@ export class StructuredSessionManager {
     const keepRunning = interruptedForQuestion;
     const messages = replayTruncated
       ? this.mergeTruncatedReplayTurn(current, processor, replayView, !keepRunning)
-      : this.buildCompletedAssistantMessages(current, processor.state);
+      : this.buildCompletedAssistantMessages(current, processor.state, false);
     const finished: SessionSnapshot = {
       ...current,
       status: keepRunning ? "running" : "idle",
@@ -2905,13 +2913,17 @@ export class StructuredSessionManager {
     return compacted;
   }
 
-  private buildCompletedAssistantMessages(current: SessionSnapshot, turnState: StreamingTurnState): ConversationTurn[] {
+  private buildCompletedAssistantMessages(
+    current: SessionSnapshot,
+    turnState: StreamingTurnState,
+    stampNewTools = true,
+  ): ConversationTurn[] {
     const assistantTurn: ConversationTurn = {
       role: "assistant",
       content: this.compactContentBlocks([...turnState.blocks], turnState.result),
       usage: turnState.usage,
     };
-    return upsertAssistantMessage(current.messages, assistantTurn, true);
+    return upsertAssistantMessage(current.messages, assistantTurn, true, stampNewTools);
   }
 
   /**
@@ -2934,7 +2946,7 @@ export class StructuredSessionManager {
       content: this.compactContentBlocks(view.content([...processor.state.blocks]), processor.state.result),
       usage: processor.state.usage,
     };
-    return upsertAssistantMessage([...(current.messages ?? [])], turn, complete);
+    return upsertAssistantMessage([...(current.messages ?? [])], turn, complete, false);
   }
 
   private resolveQueuedMessagesAfterInterrupt(

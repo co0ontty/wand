@@ -13,6 +13,7 @@ import type {
   StructuredRunnerObserver,
 } from "../src/structured-runner.js";
 import { StructuredSessionManager } from "../src/structured-session-manager.js";
+import type { ToolUseBlock } from "../src/types.js";
 
 class ScriptedOpenCodeRunner implements StructuredRunnerAdapter {
   starts: StructuredRunnerContext[] = [];
@@ -149,6 +150,43 @@ test("StructuredSessionManager drives OpenCode through the runner interface", as
   // 聊天时间戳是新增字段：完成态必须同时给出开始与结束的 ISO 时间。
   assert.match(String(lastTurn?.createdAt), /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
   assert.match(String(lastTurn?.completedAt), /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+});
+
+test("structured streaming persists the first observed command time", async (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-tool-time-seam-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const runner: StructuredRunnerAdapter = {
+    start(_context, observer) {
+      const first = { type: "tool_use" as const, id: "command-1", name: "Bash",
+        input: { command: "private command" } };
+      const finalState = { blocks: [first, {
+        type: "tool_result" as const, tool_use_id: "command-1", content: "private result",
+      }], result: "done" };
+      const completion = Promise.resolve().then(() => {
+        observer.onUpdate({ blocks: [first], result: "" });
+        observer.onUpdate(finalState);
+        return { state: finalState, exitCode: 0, signal: null, stderr: "", primaryError: null };
+      });
+      return { args: ["run"], spawnedAt: new Date().toISOString(), pid: 44,
+        completion, interrupt() {} };
+    },
+  };
+  const manager = new StructuredSessionManager(
+    storage, { ...defaultConfig(), defaultCwd: root }, null, { opencode: runner },
+  );
+  t.after(() => {
+    manager.dispose();
+    storage.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+  const session = manager.createSession({ cwd: root, mode: "assist", provider: "opencode" });
+  manager.setSessionTopic(session.id, "test", "test");
+  const finished = await manager.sendMessage(session.id, "run");
+  const command = finished.messages?.at(-1)?.content.find((block) => block.type === "tool_use") as ToolUseBlock;
+  assert.match(command.occurredAt ?? "", /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+  const persisted = storage.getSession(session.id)?.messages?.at(-1)?.content
+    .find((block) => block.type === "tool_use") as ToolUseBlock;
+  assert.equal(persisted.occurredAt, command.occurredAt);
 });
 
 test("StructuredSessionManager drives Codex through the runner interface", async (t) => {

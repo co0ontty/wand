@@ -442,11 +442,13 @@ function toolActivity(use: ToolUseBlock, hasImage: boolean): NonNullable<ToolUse
         : "other";
   const fileKey = kind === "edit_file" || kind === "read_file" ? singleFileKey : undefined;
   const imagePath = /\.(?:png|jpe?g|gif|webp|svg|bmp|avif)(?:[?#].*)?$/i.test(path);
+  const occurredAt = use.occurredAt ?? use.activity?.occurredAt;
   return {
     kind,
     label: activityLabel(kind),
     ...(fileKey ? { fileKey } : {}),
     ...(hasImage || imagePath || use.activity?.hasImage ? { hasImage: true } : {}),
+    ...(kind === "run_command" && occurredAt ? { occurredAt } : {}),
   };
 }
 

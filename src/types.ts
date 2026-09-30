@@ -544,6 +544,8 @@ export interface ToolUseBlock {
   name: string;
   description?: string;
   input: Record<string, unknown>;
+  /** ISO time when the server first observed this tool invocation; absent for older transcripts. */
+  occurredAt?: string;
   /** Small transport-only label; the complete input is fetched when a tool is opened. */
   activity?: {
     kind: "edit_file" | "read_file" | "run_command" | "other";
@@ -551,6 +553,8 @@ export interface ToolUseBlock {
     /** Opaque, stable identifier for counting repeated accesses to one file. */
     fileKey?: string;
     hasImage?: boolean;
+    /** ISO time of the original invocation, never the snapshot/render time. */
+    occurredAt?: string;
   };
   semantic?: ToolUseSemantic;
   __subagent?: SubagentMeta;

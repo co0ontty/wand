@@ -5331,14 +5331,41 @@
     }
     .chat-activity-meta-item { white-space: nowrap; }
     .chat-activity-separator { opacity: 0.55; }
-    .chat-activity.is-running .chat-activity-meta-item {
+    .chat-activity.is-thinking-running .chat-activity-meta-item.is-thinking {
       animation: activity-ink-breathe var(--motion-spin) var(--ease-in-out-smooth) infinite;
     }
-    .chat-activity.is-running .chat-activity-meta-item:nth-child(3) {
-      animation-delay: calc(var(--motion-spin) * -0.33);
+    .chat-activity-meta-item.is-command {
+      display: inline-flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 5px;
     }
-    .chat-activity.is-running .chat-activity-meta-item:nth-child(5) {
-      animation-delay: calc(var(--motion-spin) * -0.66);
+    .chat-activity-command-time,
+    .chat-activity-command-elapsed {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .chat-activity-command-time { color: var(--text-secondary); }
+    .chat-activity-command-elapsed { color: var(--text-muted); }
+    .chat-activity-command-running {
+      color: var(--accent);
+      white-space: nowrap;
+    }
+    .chat-activity-command-indicator {
+      display: inline-block;
+      align-self: center;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent);
+      animation: activity-command-pulse var(--motion-spin) var(--ease-in-out-smooth) infinite;
+    }
+    @keyframes activity-command-pulse {
+      0%, 100% { opacity: 0.55; transform: scale(0.82); }
+      50% { opacity: 1; transform: scale(1.16); }
     }
     @keyframes activity-ink-breathe {
       0%, 100% { opacity: 0.58; color: var(--text-muted); }
@@ -5367,7 +5394,7 @@
       from { opacity: 0; transform: translateY(-3px); }
       to { opacity: 1; transform: translateY(0); }
     }
-    .chat-activity-group + .chat-activity-group { margin-top: 9px; }
+    .chat-activity-group + .chat-activity-group { margin-top: 5px; }
     .chat-activity-group-title {
       padding: 2px 4px 3px;
       color: var(--text-secondary);
@@ -5423,8 +5450,16 @@
       margin-bottom: 5px;
       font-size: 10.5px;
     }
+    .chat-activity-thinking-content {
+      color: var(--text-secondary);
+      font-size: 11px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
     @media (prefers-reduced-motion: reduce) {
-      .chat-activity.is-running .chat-activity-meta-item,
+      .chat-activity.is-thinking-running .chat-activity-meta-item.is-thinking,
+      .chat-activity-command-indicator,
       .chat-activity-menu,
       .chat-activity-entry-detail { animation: none; }
       .chat-activity-chevron,
