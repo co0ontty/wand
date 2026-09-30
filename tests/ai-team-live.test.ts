@@ -13,6 +13,14 @@ const text = (value: string): ConversationTurn["content"][number] => ({ type: "t
 const toolUse = (name: string, description?: string): ConversationTurn["content"][number] => ({
   type: "tool_use", id: `t-${name}`, name, ...(description ? { description } : {}), input: {},
 });
+/** 带 input 的 tool_use：adapter 没填 description 时，卡片靠 input 里的命令/路径说话。 */
+const toolUseWithInput = (
+  name: string,
+  input: Record<string, unknown>,
+  description?: string,
+): ConversationTurn["content"][number] => ({
+  type: "tool_use", id: `t-${name}`, name, ...(description ? { description } : {}), input,
+});
 const toolResult = (content = "一大堆结果输出"): ConversationTurn["content"][number] => ({
   type: "tool_result", tool_use_id: "t-x", content,
 });
@@ -62,6 +70,52 @@ test("long multi-line descriptions collapse to one 60-char line", () => {
   ], "");
   const line = result.text.split("\n").find((item) => item.startsWith("▸ Write · "))!;
   assert.ok(line.length <= `▸ Write · `.length + 60, `整行截断: ${line.length}`);
+  assert.ok(!line.includes("\n"));
+  assert.match(line, /…$/);
+});
+
+test("tool_use without a description falls back to a one-line summary of its input", () => {
+  // pi / claude / qoder 的 adapter 不填 description，卡片不能只剩下一个工具名
+  // （「▸ Pi/todo」刷一屏），要从真实参数里把命令/路径/搜索词抬出来。
+  const result = renderLiveStepText([
+    user("开工"),
+    assistant(
+      toolUseWithInput("Pi/todo", { action: "create", subject: "确认消息刷新链路" }),
+      toolUseWithInput("Bash", { command: "rg -n live src/web-ui/react/ai-teams/" }),
+      toolUseWithInput("Read", { path: "src/ai-team-live.ts" }),
+      toolUseWithInput("Grep", { pattern: "renderLiveStepText" }),
+    ),
+  ], "");
+  assert.ok(result.text.includes("▸ Pi/todo · 确认消息刷新链路"), result.text);
+  assert.ok(result.text.includes("▸ Bash · rg -n live src/web-ui/react/ai-teams/"));
+  assert.ok(result.text.includes("▸ Read · src/ai-team-live.ts"));
+  assert.ok(result.text.includes("▸ Grep · renderLiveStepText"));
+});
+
+test("adapter description wins over the input, and an empty input stays a bare tool name", () => {
+  const result = renderLiveStepText([
+    user("开工"),
+    assistant(
+      toolUseWithInput("Bash", { command: "rm -rf /" }, "跑一次真实命令"),
+      toolUseWithInput("Read", { offset: 120, limit: 40 }),
+      toolUseWithInput("Read", { path: "   " }),
+      toolUse("Bash"),
+    ),
+  ], "");
+  const lines = result.text.split("\n");
+  assert.equal(lines[1], "▸ Bash · 跑一次真实命令", "adapter 给了 description 就不看 input");
+  assert.equal(lines[2], "▸ Read", "input 里没有可读字段时不编描述（数字参数不算）");
+  assert.equal(lines[3], "▸ Read", "空白字符串不算描述");
+  assert.equal(lines[4], "▸ Bash");
+});
+
+test("an input-derived description is collapsed and truncated like an adapter one", () => {
+  const result = renderLiveStepText([
+    user("开工"),
+    assistant(toolUseWithInput("Bash", { command: `第一行\n第二行   ${"很长的命令".repeat(30)}` })),
+  ], "");
+  const line = result.text.split("\n").find((item) => item.startsWith("▸ Bash · "))!;
+  assert.ok(line.length <= `▸ Bash · `.length + 60, `整行截断: ${line.length}`);
   assert.ok(!line.includes("\n"));
   assert.match(line, /…$/);
 });

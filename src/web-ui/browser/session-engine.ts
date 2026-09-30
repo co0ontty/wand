@@ -5,7 +5,7 @@ import { publishWandModelCatalog, startWandModelCatalogPolling } from "../react/
 import { compactThinkingLabel, dynamicThinkingChoices } from "../thinking-efforts";
 import { getErrorMessage } from "../../error-utils.js";
 
-import { mergeBlockWindowedMessages, mergeWindowedMessages } from "./message-reconciliation";
+import { mergeBlockWindowedMessages, mergeWindowedMessages, type MessageMergeSource } from "./message-reconciliation";
 import { ensureChatMessagesContainer, extractToolResultText, parseMessages, renderChat, scheduleChatRender } from "./chat-render";
 import { bindChatScrollListener, normalizeStructuredSnapshot, persistSelectedId, restoreStructuredQueue, saveStructuredQueue, stripRenderOnlyStructuredMessages, syncStructuredQueueFromSession, updateChatUnreadBubble } from "./chat-scroll";
 import "./events";
@@ -982,19 +982,24 @@ const sessionReads = createSessionReads();
         notifyLegacyUiChange("shell:view");
       }
 
-      export function updateSessionSnapshot(snapshot) {
+      export function updateSessionSnapshot(snapshot, messageSource: MessageMergeSource = "unknown") {
         if (!snapshot || !snapshot.id) return;
         var currentSession = state.sessions.find(function(session) { return session.id === snapshot.id; }) || null;
-        var normalizedSnapshot = normalizeStructuredSnapshot(snapshot, currentSession);
+        var normalizedSnapshot = Object.assign({}, normalizeStructuredSnapshot(snapshot, currentSession));
+        if (messageSource === "latest" && Array.isArray(normalizedSnapshot.messages)
+          && typeof normalizedSnapshot.messageOffset !== "number") {
+          normalizedSnapshot.messageOffset = 0;
+          normalizedSnapshot.messageTotal = normalizedSnapshot.messages.length;
+        }
         // 全量 messages（带 messageOffset）走窗口合并，避免尾部窗口清掉已加载的更早消息。
         if (Array.isArray(normalizedSnapshot.messages) && typeof normalizedSnapshot.messageOffset === "number") {
           var incomingOffset = normalizedSnapshot.messageOffset;
           var mw = typeof normalizedSnapshot.leadingBlockOffset === "number"
             ? mergeBlockWindowedMessages(currentSession, normalizedSnapshot.messages,
               normalizedSnapshot.messageOffset, normalizedSnapshot.messageTotal,
-              normalizedSnapshot.leadingBlockOffset, normalizedSnapshot.leadingBlockTotal || 0)
+              normalizedSnapshot.leadingBlockOffset, normalizedSnapshot.leadingBlockTotal || 0, messageSource)
             : mergeWindowedMessages(currentSession, normalizedSnapshot.messages,
-              normalizedSnapshot.messageOffset, normalizedSnapshot.messageTotal);
+              normalizedSnapshot.messageOffset, normalizedSnapshot.messageTotal, messageSource);
           Object.assign(normalizedSnapshot, mw);
           if (typeof normalizedSnapshot.leadingBlockOffset !== "number") {
             normalizedSnapshot.leadingBlockOffset = mw.messageOffset < incomingOffset
@@ -1362,7 +1367,9 @@ const sessionReads = createSessionReads();
             }
             if (data.id !== id) throw new Error("Session detail identity mismatch");
             data = read.merge(data, state.sessions.find(function(s) { return s.id === id; }));
-            updateSessionSnapshot(data);
+            // This request still owns the view; push-written fields have already
+            // been protected by read.merge. Remaining fields are a fresh detail.
+            updateSessionSnapshot(data, "latest");
             updateShellChrome();
 
             if (state.terminal && id === state.selectedId && data.output !== undefined) {

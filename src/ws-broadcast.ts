@@ -21,6 +21,7 @@ const QUEUE_RESUME_SIZE = Math.floor(MAX_QUEUE_SIZE * 0.8);
 const SEND_BATCH_SIZE = 8;
 const MAX_BLOCK_BUDGET = 2_000;
 const OUTPUT_DEBOUNCE_MS = 16;
+const MAX_DEBOUNCED_CHUNK_CHARS = 256 * 1024;
 /**
  * 服务端心跳节奏。20s 一次，比常见 NAT/代理空闲超时（30~60s）更短，可以保活；
  * 也不至于让 idle 连接每秒都在跑 timer。前后端在心跳间窗内任何方向消息都会
@@ -356,8 +357,14 @@ export class WsBroadcastManager {
       }
       return;
     }
-    // Debounce output events to reduce flicker during rapid streaming
+    // Coalesce within the first event's deadline; continuous output must not starve.
     if (event.type === "output") {
+      const eventData = asEventData(event.data);
+      if (typeof eventData.chunk === "string" && eventData.chunk.length >= MAX_DEBOUNCED_CHUNK_CHARS) {
+        this.flushOutput(event.sessionId);
+        this.broadcast(event);
+        return;
+      }
       const existing = this.outputDebounceCache.get(event.sessionId);
       if (existing) {
         const prevData = asEventData(existing.event.data);
@@ -374,14 +381,15 @@ export class WsBroadcastManager {
         // 形状不一致时 flush 上一条立即广播，新事件单独开窗口。这样客户端永远
         // 不会在一条 WS 消息里同时看到 messages 和 lastMessage 两种语义。
         const shapeMismatch = outputEventShapeMismatch(prevData, curData);
+        const chunkChars = (typeof prevData.chunk === "string" ? prevData.chunk.length : 0)
+          + (typeof curData.chunk === "string" ? curData.chunk.length : 0);
 
-        if (shapeMismatch) {
+        if (shapeMismatch || chunkChars > MAX_DEBOUNCED_CHUNK_CHARS) {
           clearTimeout(existing.timer);
           this.outputDebounceCache.delete(event.sessionId);
           this.broadcast(existing.event);
           // Fall through to schedule cur on a fresh debounce window
         } else {
-          clearTimeout(existing.timer);
           // Merge prev + cur. Cur takes precedence for identically-named fields,
           // but fields only present on prev (e.g. chunk while cur carries
           // messages, or messages while cur carries chunk) survive — the old
@@ -394,14 +402,17 @@ export class WsBroadcastManager {
           } else if (prevChunk && !curChunk) {
             merged.chunk = prevChunk;
           }
-          event = { ...event, data: merged };
+          existing.event = { ...event, data: merged };
+          return;
         }
       }
-      const timer = setTimeout(() => {
+      const pending = { event, timer: undefined as unknown as NodeJS.Timeout };
+      pending.timer = setTimeout(() => {
+        if (this.outputDebounceCache.get(event.sessionId) !== pending) return;
         this.outputDebounceCache.delete(event.sessionId);
-        this.broadcast(event);
+        this.broadcast(pending.event);
       }, OUTPUT_DEBOUNCE_MS);
-      this.outputDebounceCache.set(event.sessionId, { event, timer });
+      this.outputDebounceCache.set(event.sessionId, pending);
       return;
     }
 

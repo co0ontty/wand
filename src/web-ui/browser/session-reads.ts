@@ -32,6 +32,14 @@ export function createSessionReads() {
         for (const field of Object.keys(snapshot)) {
           if (field !== "id") fields.add(field);
         }
+        // Body and cursors are one atomic window. A push without an explicit
+        // cursor must not let an older HTTP cursor reinterpret the new body.
+        if ("messages" in snapshot) {
+          for (const field of ["messages", "messageOffset", "messageTotal", "leadingBlockOffset", "leadingBlockTotal"]) fields.add(field);
+        }
+        if ("permissionBlocked" in snapshot || "pendingEscalation" in snapshot) {
+          fields.add("permissionBlocked"); fields.add("pendingEscalation");
+        }
       }
     },
     reset(): void { active.clear(); },

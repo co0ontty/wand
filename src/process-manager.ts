@@ -230,6 +230,8 @@ interface SessionRecord extends SessionSnapshot {
   ptyBridge: ClaudePtyBridge | null;
   /** 运行时每轮忙碌信号（对齐 structured inFlight）；由 bridge 事件驱动，不持久化 */
   ptyBusy?: boolean;
+  /** Last published chat sequence boundary; never persisted or exposed as a DTO field. */
+  ptyChatMessageCount?: number;
   /** Current PTY dimensions, last applied by resize(). */
   ptyCols: number;
   ptyRows: number;
@@ -2637,8 +2639,10 @@ export class ProcessManager extends EventEmitter {
       case "output.chat": {
         record.output = record.ptyBridge?.getRawOutput() ?? record.output;
         const rawMessages = record.ptyBridge?.getMessages() ?? [];
-        const isStreaming = record.status === "running";
         const bridgeData = event.data as ChatOutputData | undefined;
+        const sequenceChanged = record.ptyChatMessageCount !== rawMessages.length;
+        const isStreaming = record.status === "running" && bridgeData?.isResponding === true;
+        record.ptyChatMessageCount = rawMessages.length;
 
         // 每轮忙碌信号：turn 开始置 true，回复结束清 false。只在翻转时广播，
         // 避免流式期间每个 chunk 都发 status 事件。
@@ -2662,7 +2666,10 @@ export class ProcessManager extends EventEmitter {
           data.isResponding = bridgeData.isResponding;
         }
 
-        if (isStreaming && rawMessages.length > 0) {
+        // A new round can append user + assistant at once. Last-only payloads
+        // cannot establish that sequence for any of the existing clients.
+        // Idle is a turn boundary even when the shell process remains running.
+        if (isStreaming && !sequenceChanged && rawMessages.length > 0) {
           data.incremental = true;
           const lastTurn = rawMessages[rawMessages.length - 1];
           const truncatedLast = truncateMessagesForTransport([lastTurn], this.config.cardDefaults ?? {}, 0);

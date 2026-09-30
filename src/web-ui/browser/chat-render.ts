@@ -1,4 +1,5 @@
 import { state } from "./state";
+import { ChatRenderCache } from "./chat-render-cache.js";
 import { t, getActiveLang, iconSvg } from "./i18n";
 import { escapeHtml, isImagePath, refreshTailMarqueePaths, renderTailMarqueePath } from "./utils";
 import { applyPersistedExpandState, bindChatScrollListener, buildExpandKey, clearChatUnread, getMessageKey, getPersistedAgentSelection, getPersistedExpandState, isChatNearBottom, observeLoadMoreSentinel, persistElementExpandState, refreshChatUnreadDivider, setPersistedExpandState, updateChatUnreadBubble } from "./chat-scroll";
@@ -24,7 +25,6 @@ import {
   agentRunInLatestWindow,
   agentRunResultRawText,
   agentRunStatusLabelKey,
-  buildAgentRunRenderSignature,
   collectAgentRuns,
   deriveSubagentMeta,
   flattenAgentRunInline,
@@ -37,18 +37,36 @@ import "./local-preview-adapter";
 
 
       export function renderChat(forceFullRender?) {
-        if (state.renderPending && !forceFullRender) return;
+        var sessionId = state.selectedId;
+        var epoch = state.chatRenderEpoch || 0;
+        var pending = state.chatRenderPendingToken;
+        if (state.renderPending && !forceFullRender && pending &&
+          pending.sessionId === sessionId && pending.epoch === epoch) return;
+        var token = { sessionId: sessionId, epoch: epoch };
+        state.chatRenderPendingToken = token;
         state.renderPending = true;
-
-        if (forceFullRender) {
-          // Immediate render for page refresh / session switch
-          doRenderChat(true);
-          state.renderPending = false;
-        } else {
-          requestAnimationFrame(function() {
-            doRenderChat(false);
+        var release = function() {
+          if (state.chatRenderPendingToken === token) {
+            state.chatRenderPendingToken = null;
             state.renderPending = false;
-          });
+          }
+        };
+        var draw = function() {
+          try {
+            if (state.chatRenderPendingToken !== token || state.selectedId !== sessionId ||
+              (state.chatRenderEpoch || 0) !== epoch) return;
+            doRenderChat(!!forceFullRender);
+          } catch (error) {
+            console.error("[wand] chat render failed:", error);
+          } finally {
+            // An obsolete callback must not unlock a newer session's frame.
+            release();
+          }
+        };
+        if (forceFullRender) draw();
+        else {
+          try { requestAnimationFrame(draw); }
+          catch (error) { release(); console.error("[wand] chat frame scheduling failed:", error); }
         }
       }
 
@@ -76,14 +94,19 @@ import "./local-preview-adapter";
           && selectedForDelay.sessionKind !== "structured";
         // 活跃流时拉到 LIVE 减少高频重渲；空闲时用 IDLE 快速响应。
         var delay = isActiveStream ? CHAT_RENDER_LIVE_MS : CHAT_RENDER_IDLE_MS;
-        state.chatRenderTimer = setTimeout(function() {
+        var scheduledSessionId = state.selectedId;
+        var scheduledEpoch = state.chatRenderEpoch || 0;
+        var timer = setTimeout(function() {
+          if (state.chatRenderTimer !== timer) return;
           state.chatRenderTimer = null;
-          var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
+          if (state.selectedId !== scheduledSessionId || (state.chatRenderEpoch || 0) !== scheduledEpoch) return;
+          var selectedSession = state.sessions.find(function(s) { return s.id === scheduledSessionId; });
           if (selectedSession) {
               state.currentMessages = buildMessagesForRender(selectedSession, getPreferredMessages(selectedSession, selectedSession.output, true));
           }
           renderChat();
         }, delay);
+        state.chatRenderTimer = timer;
       }
       // Extract system info from PTY output that's not in structured messages
       function extractPtySystemInfo(output, messages) {
@@ -179,17 +202,130 @@ import "./local-preview-adapter";
         return chatMessages;
       }
 
+function isGroupedChatMessage(messages: any[], index: number): boolean {
+  var msg = messages[index];
+  var prev = index > 0 ? messages[index - 1] : null;
+  if (!prev || prev.role !== msg.role) return false;
+  if ((msg.author || prev.author) && !(msg.author && prev.author && msg.author.id === prev.author.id)) return false;
+  var currentTime = Date.parse(msg.completedAt || msg.createdAt || "");
+  var previousTime = Date.parse(prev.completedAt || prev.createdAt || "");
+  return !isNaN(currentTime) && !isNaN(previousTime) && currentTime >= previousTime
+    && currentTime - previousTime < 60 * 60_000;
+}
+
+function buildRoundUsage(messages: any[]): Record<number, any> {
+  var result: Record<number, any> = {};
+  var empty = function() { return { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0,
+    cacheCreationInputTokens: 0, reasoningOutputTokens: 0, totalCostUsd: 0, estimated: false }; };
+  var acc = empty();
+  var hasUsage = false;
+  var lastAssistant = -1;
+  messages.forEach(function(message, index) {
+    if (message.role === "user") {
+      if (lastAssistant >= 0 && hasUsage) result[lastAssistant] = acc;
+      acc = empty(); hasUsage = false; lastAssistant = -1;
+    } else if (message.role === "assistant") {
+      lastAssistant = index;
+      if (message.usage) {
+        hasUsage = true;
+        Object.keys(acc).forEach(function(key) {
+          if (key === "estimated") acc.estimated = acc.estimated || message.usage.estimated === true;
+          else acc[key] += message.usage[key] || 0;
+        });
+      }
+    }
+  });
+  if (lastAssistant >= 0 && hasUsage) result[lastAssistant] = acc;
+  return result;
+}
+
+function buildChatRowDependencies(messages: any[], revisions: number[], runs: any,
+  roundUsage: Record<number, any>, visibleOffset: number, session: any): any[] {
+  // Cross-turn consumers depend on exact source revisions, not the length-based
+  // Agent Run signature. A nested result/usage change can repaint an older anchor.
+  var results = new Map<string, any[]>();
+  messages.forEach(function(message, index) {
+    if (!Array.isArray(message.content)) return;
+    message.content.forEach(function(block) {
+      if (block?.type !== "tool_result" || !block.tool_use_id) return;
+      var linked = results.get(block.tool_use_id) || [];
+      linked.push([index, revisions[index]]);
+      results.set(block.tool_use_id, linked);
+    });
+  });
+  var refSignature = function(ref) {
+    return ref ? [ref.messageIndex, ref.blockIndex, revisions[ref.messageIndex],
+      ref.block?.id ? results.get(ref.block.id) || [] : []] : null;
+  };
+  var runRows = new Map<number, any[]>();
+  runs.runs.forEach(function(run) {
+    var linked = runRows.get(run.messageIndex) || [];
+    linked.push({ id: run.id, start: run.startBlockIndex, end: run.endBlockIndex,
+      running: _currentSessionRunning, latestUser: _currentLastUserTextMessageIndex,
+      agents: run.agents.map(function(agent) {
+        return { taskId: agent.taskId, meta: agent.meta, receipt: agent.receipt, runId: agent.runId,
+          refs: [agent.dispatch, agent.firstSeen, agent.result].concat(agent.blocks).map(refSignature) };
+      }) });
+    runRows.set(run.messageIndex, linked);
+  });
+  var ownedRows = new Map<number, any[]>();
+  runs.ownerByBlockKey.forEach(function(owner, key) {
+    var index = Number(key.split(":")[0]);
+    var owned = ownedRows.get(index) || [];
+    owned.push([key, owner]); ownedRows.set(index, owned);
+  });
+  var visible = messages.slice(visibleOffset);
+  return messages.map(function(message, index) {
+    var toolResults = Array.isArray(message.content) ? message.content
+      .filter(function(block) { return block?.type === "tool_use" && block.id; })
+      .map(function(block) { return [block.id, results.get(block.id) || []]; }) : [];
+    return { toolResults: toolResults, runs: runRows.get(index) || [], owned: ownedRows.get(index) || [],
+      usage: roundUsage[index] || null,
+      grouped: index >= visibleOffset && isGroupedChatMessage(visible, index - visibleOffset),
+      live: isTurnActivityLive(index), lang: getActiveLang(), persona: state.config?.structuredChatPersona,
+      defaults: state.config?.cardDefaults,
+      employee: [session.employeeId, session.employeeName, session.employeeAvatar] };
+  });
+}
+
+function captureChatRenderAnchor(container: any, changedIndices: number[]): { index: number; top: number } | null {
+  var bounds = container.getBoundingClientRect();
+  var changed = new Set(changedIndices);
+  var selected: { index: number; top: number; changed: boolean; distance: number } | null = null;
+  var elements = container.querySelectorAll(".chat-message:not(.system-info):not(.is-inflight-placeholder)");
+  for (var i = 0; i < elements.length; i++) {
+    var attribute = elements[i].getAttribute("data-msg-index");
+    if (attribute === null) continue;
+    var rect = elements[i].getBoundingClientRect();
+    // In column-reverse, the first DOM row may be far below the viewport.
+    // Prefer an unchanged visible reading row, not a resizing/offscreen tail.
+    if (rect.bottom <= bounds.top || rect.top >= bounds.bottom) continue;
+    var index = Number(attribute);
+    var candidate = { index: index, top: rect.top - bounds.top, changed: changed.has(index),
+      distance: Math.max(0, rect.top - bounds.top) };
+    if (!selected || Number(candidate.changed) < Number(selected.changed)
+      || candidate.changed === selected.changed && candidate.distance < selected.distance) selected = candidate;
+  }
+  return selected ? { index: selected.index, top: selected.top } : null;
+}
+
       export function doRenderChat(forceFullRender) {
         var chatOutput = document.getElementById("chat-output");
         if (!chatOutput) return;
 
-        var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        var renderSessionId = state.selectedId;
+        var renderEpoch = state.chatRenderEpoch || 0;
+        var isCurrentChatPaint = function() {
+          return state.selectedId === renderSessionId && (state.chatRenderEpoch || 0) === renderEpoch;
+        };
+        var selectedSession = state.sessions.find(function(s) { return s.id === renderSessionId; });
         if (!selectedSession) {
           if (state.lastRenderedEmpty !== "none") {
             renderChatEmptyState(chatOutput, '<div class="empty-state"><strong>未选择会话</strong><br>点击上方「新对话」开始你的第一次对话。</div>');
             state.lastRenderedEmpty = "none";
             state.lastRenderedMsgCount = 0;
           }
+          state.chatRenderCache?.reset();
           return;
         }
 
@@ -197,11 +333,6 @@ import "./local-preview-adapter";
         // Agent Run 是聊天渲染的稳定索引：dispatch、子 Agent 轨迹、最终 result
         // 可能分散在多条消息里，不能在单条消息内各自计算一份。
         var agentRunIndex = collectAgentRuns(allMessages);
-        var agentRunSignature = buildAgentRunRenderSignature(agentRunIndex);
-        // inFlight 的状态切换本身也应该刷新 Run：例如中断会话恢复执行时，
-        // 新状态要把未完成的 Run 从“已中断”切回“运行中”，即使正文还没有新内容。
-        agentRunSignature += "|live:" + (selectedSession.status === "running" &&
-          selectedSession.structuredState && selectedSession.structuredState.inFlight ? "1" : "0");
         var conversationToolResults = buildConversationToolResultMap(allMessages);
         // 状态口径需要这两个事实：会话是否在跑、最后一条真人文本轮在哪。
         _currentLastUserTextMessageIndex = agentRunIndex.lastUserTextMessageIndex;
@@ -222,6 +353,7 @@ import "./local-preview-adapter";
           // 这里是 selectSession 之外的兜底：WS init 等异步路径也会落到这条空分支。
           renderStructuredStatusBar(null, selectedSession);
           updateTodoProgress([]);
+          state.chatRenderCache?.reset();
           return;
         }
 
@@ -261,73 +393,27 @@ import "./local-preview-adapter";
           || (typeof selectedSession.leadingBlockOffset === "number" && selectedSession.leadingBlockOffset > 0);
         var hasOlderMessages = visibleOffset > 0 || hasServerOlder;
 
-        // Check if messages actually changed
         var msgCount = messages.length;
-        var outputHash = selectedSession.output ? selectedSession.output.length : 0;
-        // For structured messages, hash block count + content lengths for change detection
-        if (selectedSession.messages && selectedSession.messages.length > 0) {
-          var totalBlocks = 0;
-          var contentLen = 0;
-          for (var bi = 0; bi < selectedSession.messages.length; bi++) {
-            var msgContent = selectedSession.messages[bi].content;
-            if (msgContent) {
-              if (Array.isArray(msgContent)) {
-                totalBlocks += msgContent.length;
-                // Include all block content lengths for change detection
-                for (var bj = 0; bj < msgContent.length; bj++) {
-                  var block = msgContent[bj];
-                  if (block.text) contentLen += block.text.length;
-                  if (block.thinking) contentLen += block.thinking.length;
-                  if (block.content) contentLen += block.content.length; // tool_result content
-                  if (block.id) contentLen += block.id.length; // tool_use id
-                  if (block.tool_use_id) contentLen += block.tool_use_id.length; // tool_result id
-                  if (block.description) contentLen += block.description.length; // tool_use description
-                  if (block.input) contentLen += JSON.stringify(block.input).length; // tool_use input
-                }
-                if (selectedSession.messages[bi].usage) {
-                  var hashUsage = selectedSession.messages[bi].usage;
-                  // Hash values (not JSON length): 12→13 tokens must re-render even
-                  // though the serialized object keeps exactly the same length.
-                  contentLen += (hashUsage.inputTokens || 0)
-                    + (hashUsage.outputTokens || 0)
-                    + (hashUsage.cacheReadInputTokens || 0)
-                    + (hashUsage.cacheCreationInputTokens || 0)
-                    + (hashUsage.reasoningOutputTokens || 0)
-                    + Math.round((hashUsage.totalCostUsd || 0) * 1000000)
-                    + (hashUsage.estimated === true ? 1 : 0);
-                }
-              } else {
-                totalBlocks += 1;
-                contentLen = String(msgContent).length;
-              }
-            }
-          }
-          outputHash = msgCount * 100000 + totalBlocks * 1000 + contentLen;
-        }
-
-        // Force full render if message count changed, an Agent Run changed shape/status,
-        // or explicitly requested. Run details live on the dispatch message, so a result
-        // arriving in a later message must rebuild that older anchor instead of appending
-        // an isolated result bubble.
-        var forceRender = forceFullRender || msgCount !== state.lastRenderedMsgCount ||
-          agentRunSignature !== state.lastRenderedAgentRunSignature;
-        if (!forceRender && msgCount === state.lastRenderedMsgCount && outputHash === state.lastRenderedHash) {
-          // Even if message content hasn't changed, update the status bar
-          // (inFlight state may have changed without new message content)
-          var chatMessages = chatOutput.querySelector(".chat-messages");
-          if (chatMessages) renderStructuredStatusBar(chatMessages, selectedSession);
-          // 同步刷一次进度条：inFlight 从 true→false 时（turn 结束）没有新消息，
-          // updateTodoProgress 不被调到就会让"5/6"卡在底部一直不消失。
+        var roundUsageByIndex = buildRoundUsage(allMessages);
+        var systemInfo = shouldExtractPtySystemInfo(selectedSession)
+          ? extractPtySystemInfo(selectedSession.output, messages) : [];
+        var cache = state.chatRenderCache || (state.chatRenderCache = new ChatRenderCache());
+        var plan = cache.prepare(selectedSession.id, allMessages, function(revisions) {
+          return buildChatRowDependencies(allMessages, revisions, agentRunIndex, roundUsageByIndex,
+            visibleOffset, selectedSession);
+        }, { visibleOffset: visibleOffset, count: msgCount, hasOlder: hasOlderMessages,
+          systemInfo: systemInfo, placeholder: !!selectedSession.inFlight });
+        var changedVisibleIndices = plan.changedIndices.filter(function(index) { return index >= visibleOffset; });
+        var forceRender = forceFullRender || plan.structureChanged;
+        if (!forceRender && changedVisibleIndices.length === 0) {
+          var unchangedMessages = chatOutput.querySelector(".chat-messages");
+          if (unchangedMessages) renderStructuredStatusBar(unchangedMessages, selectedSession);
           updateTodoProgress(allMessages);
+          cache.commit(plan);
           return;
         }
-        var prevHash = state.lastRenderedHash;
         var prevMsgCount = state.lastRenderedMsgCount;
-        state.lastRenderedMsgCount = msgCount;
-        state.lastRenderedHash = outputHash;
-        state.lastRenderedAgentRunSignature = agentRunSignature;
-
-        chatMessages = ensureChatMessagesContainer(chatOutput);
+        var chatMessages = ensureChatMessagesContainer(chatOutput);
         if (!chatMessages) return;
 
         // 在动 DOM 之前先看用户是不是贴在底部——这决定后面我们要不要让视图
@@ -344,15 +430,14 @@ import "./local-preview-adapter";
         // 会让 msgCount !== existingCount 永远为真，每帧都走 fullRenderChat，从而
         // 不断 wipe innerHTML，触发"莫名其妙跳到最上面"的视觉错位。
         var existingCount = chatMessages.querySelectorAll(".chat-message:not(.system-info)").length;
-        // Full render when: forced, no existing messages, or message count decreased/changed
-        var needsFullRender = forceRender || existingCount === 0 || msgCount !== existingCount;
+        // The semantic structure tracks array/window changes. Agent Run-owned
+        // turns may deliberately have no row, so DOM count is not message count.
+        var needsFullRender = forceRender || existingCount === 0;
+        var renderAnchor = !renderIsInitial && !renderWasAtBottom && existingCount > 0
+          && !(prevMsgCount === 0 && state.chatStickToBottom)
+          ? captureChatRenderAnchor(chatMessages, changedVisibleIndices) : null;
 
         function fullRenderChat() {
-          // Extract system info from PTY output
-          var systemInfo = shouldExtractPtySystemInfo(selectedSession)
-            ? extractPtySystemInfo(selectedSession.output, messages)
-            : [];
-
           // Build HTML with system info cards interleaved
           var html = '';
           var reversedMessages = messages.slice().reverse();
@@ -363,22 +448,7 @@ import "./local-preview-adapter";
             var localIndex = visibleCount - 1 - i; // Index within visible slice
             var originalIndex = localIndex + visibleOffset; // Index in full messages array
 
-            // 连续发言归拢判定：同一作者、间隔 < 60 分钟、中间无其他作者
-            var prevMsg = localIndex > 0 ? messages[localIndex - 1] : null;
-            var isGrouped = false;
-            if (prevMsg && prevMsg.role === msg.role) {
-              var sameAuthor = true;
-              if (msg.author || prevMsg.author) {
-                sameAuthor = (msg.author && prevMsg.author && msg.author.id === prevMsg.author.id);
-              }
-              if (sameAuthor) {
-                var tCurr = Date.parse(msg.completedAt || msg.createdAt || "");
-                var tPrev = Date.parse(prevMsg.completedAt || prevMsg.createdAt || "");
-                if (!isNaN(tCurr) && !isNaN(tPrev) && (tCurr - tPrev) >= 0 && (tCurr - tPrev) < 60 * 60_000) {
-                  isGrouped = true;
-                }
-              }
-            }
+            var isGrouped = isGroupedChatMessage(messages, localIndex);
 
             // Find system info for this message position
             var sysInfo = null;
@@ -400,7 +470,7 @@ import "./local-preview-adapter";
             }
 
             // Render message
-            html += renderChatMessage(
+            var messageHtml = renderChatMessage(
               msg,
               roundUsageByIndex[originalIndex] || null,
               originalIndex,
@@ -408,6 +478,7 @@ import "./local-preview-adapter";
               conversationToolResults,
               isGrouped
             );
+            if (messageHtml) html += messageHtml.replace(/^<div /, '<div data-msg-index="' + originalIndex + '" ');
           }
 
         // 思考中原位占位行（inFlight 且尾部无内容时原位呼吸）
@@ -441,25 +512,7 @@ import "./local-preview-adapter";
           // 改用 existingCount 而非 prevMsgCount：page-refresh 等 preserveStickState
           // 路径下 prevMsgCount 被重置为 0，但 DOM 里仍有节点可作锚点，必须保住
           // 用户的阅读位置。
-          var anchorMsgIndex = -1;
-          var anchorOffset = 0;
-          if (existingCount > 0 && !renderWasAtBottom) {
-            var containerTop = chatMessages.getBoundingClientRect().top;
-            var preEls = chatMessages.querySelectorAll(".chat-message:not(.system-info)");
-            for (var pi = 0; pi < preEls.length; pi++) {
-              var rect = preEls[pi].getBoundingClientRect();
-              // 第一条 top >= containerTop 的就是视口内最靠上的可见消息
-              if (rect.bottom >= containerTop) {
-                var idxAttr = preEls[pi].getAttribute("data-msg-index");
-                if (idxAttr != null) {
-                  anchorMsgIndex = parseInt(idxAttr, 10);
-                  anchorOffset = rect.top - containerTop;
-                }
-                break;
-              }
-            }
-          }
-
+          // renderAnchor is restored after all existing collapse/expand helpers.
           chatMessages.innerHTML = html;
           // 给每条消息打 data-msg-index（用 state.currentMessages 的全局索引），
           // 后面 refreshChatUnreadDivider 用它找未读分割线的位置。
@@ -468,7 +521,9 @@ import "./local-preview-adapter";
             // column-reverse: DOM[0] = 最新（最高 originalIndex）
             var totalVisible = msgEls.length;
             for (var idx = 0; idx < totalVisible; idx++) {
-              msgEls[idx].setAttribute("data-msg-index", String(visibleOffset + totalVisible - 1 - idx));
+              if (msgEls[idx].getAttribute("data-msg-index") === null) {
+                msgEls[idx].setAttribute("data-msg-index", String(visibleOffset + totalVisible - 1 - idx));
+              }
             }
           })();
           refreshTailMarqueePaths(chatMessages);
@@ -491,21 +546,6 @@ import "./local-preview-adapter";
             // 同一会话内的全量重渲染：用户原本贴底就保持贴底，浏览器在 innerHTML
             // 重置后可能把 scrollTop 钳到一个奇怪的值，这里显式拉回 0。
             chatMessages.scrollTop = 0;
-          } else if (anchorMsgIndex >= 0) {
-            // 用户当前不在底部——根据保存的锚点恢复视图位置，避免被"踢到最上面"。
-            var newAnchor = chatMessages.querySelector(
-              '.chat-message[data-msg-index="' + anchorMsgIndex + '"]'
-            );
-            if (newAnchor) {
-              var newContainerTop = chatMessages.getBoundingClientRect().top;
-              var newRect = newAnchor.getBoundingClientRect();
-              var delta = (newRect.top - newContainerTop) - anchorOffset;
-              if (Math.abs(delta) > 0.5) {
-                state.chatIsProgrammaticScroll = true;
-                chatMessages.scrollTop += delta;
-                requestAnimationFrame(function() { state.chatIsProgrammaticScroll = false; });
-              }
-            }
           }
           attachAllCopyHandlers(chatMessages);
           bindChatScrollListener();
@@ -515,170 +555,60 @@ import "./local-preview-adapter";
           // 走 prevMsgCount===0 那条分支已经处理）。让浏览器自带的 scroll
           // anchoring 接手，避免在用户阅读时把视图拽走。
           requestAnimationFrame(function() {
+            if (!isCurrentChatPaint()) return;
             refreshChatUnreadDivider(chatMessages);
             updateChatUnreadBubble();
             observeLoadMoreSentinel();
           });
         }
 
-        // Pre-compute per-round cumulative usage using original (full array) indices.
-        // A "round" starts at a user message and includes all subsequent assistant turns
-        // until the next user message. Only the last assistant in each round shows the total.
-        var roundUsageByIndex = {};
-        (function() {
-          var acc = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, reasoningOutputTokens: 0, totalCostUsd: 0, estimated: false };
-          var hasUsage = false;
-          var lastAssistantIdx = -1;
-          for (var mi = 0; mi < allMessages.length; mi++) {
-            var m = allMessages[mi];
-            if (m.role === "user") {
-              if (lastAssistantIdx >= 0 && hasUsage) {
-                roundUsageByIndex[lastAssistantIdx] = acc;
-              }
-              acc = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, reasoningOutputTokens: 0, totalCostUsd: 0, estimated: false };
-              hasUsage = false;
-              lastAssistantIdx = -1;
-            } else if (m.role === "assistant" && m.usage) {
-              var u = m.usage;
-              hasUsage = true;
-              acc.inputTokens += (u.inputTokens || 0);
-              acc.outputTokens += (u.outputTokens || 0);
-              acc.cacheReadInputTokens += (u.cacheReadInputTokens || 0);
-              acc.cacheCreationInputTokens += (u.cacheCreationInputTokens || 0);
-              acc.reasoningOutputTokens += (u.reasoningOutputTokens || 0);
-              acc.totalCostUsd += (u.totalCostUsd || 0);
-              acc.estimated = acc.estimated || u.estimated === true;
-              lastAssistantIdx = mi;
-            } else if (m.role === "assistant") {
-              lastAssistantIdx = mi;
-            }
-          }
-          if (lastAssistantIdx >= 0 && hasUsage) {
-            roundUsageByIndex[lastAssistantIdx] = acc;
-          }
-        })();
-
         if (needsFullRender) {
           fullRenderChat();
-        } else if (msgCount > existingCount) {
-          // New messages added — prepend them (column-reverse means prepend = visual append)
-          var newMessages = messages.slice(existingCount);
-          // Reverse so the newest ends up at the bottom
-          newMessages.reverse();
-          var fragment = document.createDocumentFragment();
-          var insertedEls = [];
-          // 记录每条新消息的 originalIndex，方便后面打标签 / 计算未读起点。
-          var insertedOrigIdx = [];
-          // 第一条新消息（数组里 index 最小的，时间上最早的那条）对应的全局索引——
-          // 用作未读起点。
-          var firstNewOrigIdx = visibleOffset + existingCount;
-          for (var i = 0; i < newMessages.length; i++) {
-            var div = document.createElement("div");
-            var nmOrigIdx = visibleOffset + existingCount + (newMessages.length - 1 - i);
-            div.innerHTML = renderChatMessage(
-              newMessages[i],
-              roundUsageByIndex[nmOrigIdx] || null,
-              nmOrigIdx,
-              agentRunIndex,
-              conversationToolResults
-            );
-            var el = div.firstElementChild;
-            if (el) {
-              el.classList.add("animate-in");
-              el.setAttribute("data-msg-index", String(nmOrigIdx));
-              insertedEls.push(el);
-              insertedOrigIdx.push(nmOrigIdx);
-              fragment.appendChild(el);
+        } else {
+          // Stage only semantically changed rows (including cross-turn consumers).
+          // Count/shape changes already take the full path; the former prepend and
+          // count-decrease branches here were unreachable under needsFullRender.
+          var replacements = [];
+          var needsShapeRepair = false;
+          changedVisibleIndices.forEach(function(index) {
+            var currentEl = chatMessages.querySelector('.chat-message[data-msg-index="' + index + '"]');
+            var wrapper = document.createElement("div");
+            wrapper.innerHTML = renderChatMessage(allMessages[index], roundUsageByIndex[index] || null,
+              index, agentRunIndex, conversationToolResults,
+              isGroupedChatMessage(messages, index - visibleOffset));
+            var replacementEl = wrapper.firstElementChild;
+            if (!replacementEl) {
+              if (currentEl) replacements.push({ current: currentEl, next: null });
+              return;
             }
-          }
-          chatMessages.insertBefore(fragment, chatMessages.firstChild);
-          bindChatScrollListener();
-          attachAllCopyHandlers(chatMessages);
-          applyPersistedExpandState(chatMessages);
-          // Telegram 行为：
-          // - 用户原本就贴在底部 → 维持贴底（column-reverse 通常会自动留在底部，
-          //   但浏览器的 scroll anchoring 在某些边界场景会把 scrollTop 调成非 0；
-          //   这里显式拉回 0 做兜底，不用动画，不会让用户感觉"被甩"）。
-          // - 用户已经滚上去 → 一根毛都不动他的视图，只把未读累到气泡里。
-          if (renderWasAtBottom) {
-            requestAnimationFrame(function() {
-              if (chatMessages.isConnected && Math.abs(chatMessages.scrollTop) > 1) {
-                state.chatIsProgrammaticScroll = true;
-                chatMessages.scrollTop = 0;
-                requestAnimationFrame(function() { state.chatIsProgrammaticScroll = false; });
-              }
-              // 视为已读 —— 用户当前就在底部看着，这些新消息直接进入"已读"。
-              clearChatUnread({ removeDivider: true });
-              updateChatUnreadBubble();
-            });
-          } else {
-            // 累计未读。如果之前没有未读，就用这一批的最早一条做分割线起点。
-            if (state.chatUnreadStartIndex < 0) {
-              state.chatUnreadStartIndex = firstNewOrigIdx;
-            }
-            state.chatUnreadCount += insertedEls.length;
-            refreshChatUnreadDivider(chatMessages);
-            updateChatUnreadBubble();
-          }
-        } else if (msgCount === existingCount && outputHash !== prevHash) {
-          // Same message count but content changed (streaming update).
-          // Optimization: only re-render the newest N messages (column-reverse: first children)
-          // that actually differ, starting from the top (newest). Most streaming updates only
-          // touch the latest assistant turn, so we can skip scanning all older messages.
-          // 同样剔除 system-info 卡片，否则 existingEls 长度对不上 reversedMessages，
-          // top-N 对照会拿 system-info 卡片去比真消息的 HTML，永远 replacedAny=false，
-          // 触发 fullRenderChat 兜底分支——这是滚动跳顶的另一条触发路径。
-          var existingEls = Array.from(chatMessages.querySelectorAll(".chat-message:not(.system-info)"));
-          var reversedMessages = messages.slice().reverse();
-          var replacedAny = false;
-          // Scan from newest (index 0 in reversed) up to MAX_STREAMING_SCAN messages
-          var MAX_STREAMING_SCAN = Math.min(4, reversedMessages.length, existingEls.length);
-          for (var mi = 0; mi < MAX_STREAMING_SCAN; mi++) {
-            var currentEl = existingEls[mi];
-            var tmpWrap = document.createElement("div");
-            var srOrigIdx = visibleOffset + reversedMessages.length - 1 - mi;
-            tmpWrap.innerHTML = renderChatMessage(
-              reversedMessages[mi],
-              roundUsageByIndex[srOrigIdx] || null,
-              srOrigIdx,
-              agentRunIndex,
-              conversationToolResults
-            );
-            var replacementEl = tmpWrap.firstElementChild;
-            if (!replacementEl) continue;
-            if (currentEl.innerHTML !== replacementEl.innerHTML || currentEl.className !== replacementEl.className) {
-              chatMessages.replaceChild(replacementEl, currentEl);
-              attachCopyHandler(replacementEl);
-              replacedAny = true;
-            } else if (mi > 0) {
-              // Once we hit an unchanged older message, stop scanning
-              break;
-            }
-          }
-          // Fallback: if hash changed but no visible diff found in the top N messages,
-          // the change is deeper — trigger a full render to avoid stale display.
-          if (!replacedAny && reversedMessages.length > MAX_STREAMING_SCAN) {
+            if (!currentEl) { needsShapeRepair = true; return; }
+            replacementEl.setAttribute("data-msg-index", String(index));
+            replacements.push({ current: currentEl, next: replacementEl });
+          });
+          if (needsShapeRepair) {
             fullRenderChat();
-          }
-          if (replacedAny) {
+          } else if (replacements.length) {
+            replacements.forEach(function(replacement) {
+              if (replacement.next) {
+                chatMessages.replaceChild(replacement.next, replacement.current);
+                attachCopyHandler(replacement.next);
+              } else replacement.current.remove();
+            });
             bindChatScrollListener();
             applyPersistedExpandState(chatMessages);
-            // Streaming 更新只是改最新一条的内容，不改条数。column-reverse 下
-            // 浏览器的 scroll anchoring 会自动保持视觉位置；用户贴底时新内容
-            // 自然出现在底部，用户上滚时视图也不受打扰——不需要再 smartScroll。
             requestAnimationFrame(function() {
-              // 兜底：用户贴底时如果浏览器把 scrollTop 调成非零，拉回来。
+              if (!isCurrentChatPaint()) return;
               if (renderWasAtBottom && chatMessages.isConnected && Math.abs(chatMessages.scrollTop) > 1) {
                 state.chatIsProgrammaticScroll = true;
                 chatMessages.scrollTop = 0;
-                requestAnimationFrame(function() { state.chatIsProgrammaticScroll = false; });
+                requestAnimationFrame(function() {
+                  if (isCurrentChatPaint()) state.chatIsProgrammaticScroll = false;
+                });
               }
               refreshChatUnreadDivider(chatMessages);
               updateChatUnreadBubble();
             });
           }
-        } else if (msgCount < existingCount) {
-          fullRenderChat();
         }
 
         // 活动滚动窗口：贴尾的跟随最新活动，用户上滚过的保留他的位置。
@@ -694,8 +624,24 @@ import "./local-preview-adapter";
         // Update structured session status bar (in-flight / completed indicator)
         renderStructuredStatusBar(chatMessages, selectedSession);
 
-        // Update todo progress bar from latest messages
+        // Commit only after every rendering/post-processing stage succeeds.
         updateTodoProgress(allMessages);
+        if (renderAnchor) {
+          var anchor = chatMessages.querySelector('.chat-message[data-msg-index="' + renderAnchor.index + '"]');
+          if (anchor) {
+            var delta = anchor.getBoundingClientRect().top - chatMessages.getBoundingClientRect().top - renderAnchor.top;
+            if (Math.abs(delta) > 0.5) {
+              state.chatIsProgrammaticScroll = true;
+              chatMessages.scrollTop += delta;
+              requestAnimationFrame(function() {
+                if (isCurrentChatPaint()) state.chatIsProgrammaticScroll = false;
+              });
+            }
+          }
+        }
+        cache.commit(plan);
+        state.lastRenderedMsgCount = msgCount;
+        state.lastRenderedEmpty = null;
       }
 
       // 注：旧版的 smartScrollToBottom / chatAutoFollow / chat-follow-toggle 都已经

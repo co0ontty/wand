@@ -13,6 +13,33 @@ export interface LiveStepText {
 /** tool_use 行的 description 单行截断长度。 */
 const TOOL_DESCRIPTION_MAX_CHARS = 60;
 
+/**
+ * 没有 `description` 时按序从这里挑一个 input 字段当描述。顺序 = 具体到笼统：
+ * 命令/路径/搜索词/网址这些一眼看出「在干什么」的排在前，待办与子代理的说明排在后。
+ * 只认字符串字段，不塞 JSON 尾巴：live 卡的目的是让人看懂进展，不是看参数。
+ */
+const TOOL_INPUT_DESCRIPTION_KEYS = [
+  "command", "cmd",
+  "file_path", "filePath", "path", "notebook_path", "move_path",
+  "pattern", "query", "url",
+  "subject", "title", "explanation", "description", "prompt",
+];
+
+/**
+ * adapter 给的 `description` 只有 grok / opencode / codex 少数几种工具会填，pi / claude / qoder
+ * 基本没有，卡片就只剩一个工具名（「▸ Pi/todo」重复刷屏）。这里从 input 里派生一行摘要，
+ * 与客户端会话里的工具卡同一个思路（路径 / 命令 / 搜索词）。取不到就返回空串，仍是裸工具名。
+ */
+function toolInputDescription(input: unknown): string {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return "";
+  const record = input as Record<string, unknown>;
+  for (const key of TOOL_INPUT_DESCRIPTION_KEYS) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return "";
+}
+
 /** CSI + OSC + 两字节转义，覆盖 PTY 输出里常见的控制序列。 */
 const ANSI_PATTERN = /\x1B(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1B]*(?:\x07|\x1B\\)|[ @-Z\\-_])/g;
 
@@ -102,7 +129,9 @@ function oneLine(text: string, max: number): string {
 /**
  * 渲染「成员此刻干到哪儿了」的紧凑文本，给固定尺寸、内部滚动的 live 卡片用。
  * 口径：从最后一条 user turn（没有就取最后一条 assistant turn）渲染到末尾；
- * text 原样保留，tool_use 压成一行 `▸ 名称[ · 描述]`，tool_result 与 thinking 不渲染；
+ * text 原样保留，tool_use 压成一行 `▸ 名称[ · 描述]`（描述优先用 adapter 填的 `description`，
+ * 没有就从 input 里的命令/路径/搜索词派生，见 `toolInputDescription`），
+ * tool_result 与 thinking 不渲染；
  * 尾部保留最多 AI_TEAM_LIVE_TEXT_MAX_CHARS 字；渲染结果为空时回落原始 output 尾部
  * （先按尾部截窗再剥 ANSI、同样截尾，见 `outputTailText`），保证 PTY 会话也有内容可显示。
  * 纯函数、无 IO。
@@ -140,7 +169,7 @@ export function renderLiveStepText(
         const text = block.text?.trim();
         if (text) fragments.push(text);
       } else if (block.type === "tool_use") {
-        const description = block.description?.trim();
+        const description = block.description?.trim() || toolInputDescription(block.input);
         fragments.push(description
           ? `▸ ${block.name} · ${oneLine(description, TOOL_DESCRIPTION_MAX_CHARS)}`
           : `▸ ${block.name}`);

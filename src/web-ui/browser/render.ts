@@ -27,9 +27,10 @@ import {
 // 默认（false）：切会话 / 新建 / home 等真正"换上下文"路径用，全清。
 export function resetChatRenderCache(options?: any) {
   var opts = options || {};
-  state.lastRenderedHash = 0;
+  state.chatRenderCache?.reset();
+  state.chatRenderEpoch = (state.chatRenderEpoch || 0) + 1;
+  state.chatRenderPendingToken = null;
   state.lastRenderedMsgCount = 0;
-  state.lastRenderedAgentRunSignature = "";
   state.lastRenderedEmpty = null;
   state.renderPending = false;
   state.chatRenderedCount = state.chatPageSize;

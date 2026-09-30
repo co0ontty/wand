@@ -1248,6 +1248,7 @@ export class AiTeamRunner {
   /**
    * 开工发言（S4）：成员**自己发的真实发言**（头像 + 名字 + 气泡），不是居中 notice；
    * 文案由 [stepStartText] 拼（依据只来自 `step.dependsOn`，不引 `decision.message` / 报告正文 / 提示词文本）。
+   * 工作步骤与负责人步骤都走这里：负责人轮（制定计划 / 安排下一步 / 回应用户）同样要让人看见他开工了。
    */
   private postStepStart(
     run: AiTeamRun,
@@ -1425,7 +1426,10 @@ export class AiTeamRunner {
     // 开工发言（S4）：就发在这个位置（原来那条居中 notice 的地方），所以候选起不来的那次尝试
     // 也会留一句「我正在开始工作」+ 随后的降级/失败出口；作者署名与报告同一套口径，
     // 复用会话时带真实 sessionId，新建在 open 前未知；若 open 失败，失败报告也可能无 ID。
-    if (member && step.kind === "work") this.postStepStart(run, running, member, agent, reusable);
+    // 负责人步骤同样要发：负责人一轮可能要读代码好几分钟，中途只在群里留一条 live 卡，
+    // 群聊看上去就是「工位上写着工作中、消息里什么都没有」，等他交出计划才突然出现一屏文字。
+    // 设计 v2 的口径本来就是「步骤开工时该成员自己发一条」，工作步骤那条门是从旧 notice 继承来的。
+    if (member) this.postStepStart(run, running, member, agent, reusable);
     try {
       if (!member) throw new Error("成员不存在");
       if (!agent) throw new Error("成员没有配置可用的 CLI 候选");

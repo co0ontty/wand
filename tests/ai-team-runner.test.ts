@@ -826,11 +826,13 @@ test("a team run posts its plan, dispatches and reports into one group chat", as
   assert.match(lines[1]!, /^·负责人: 创建了团队群聊「给 README 加安装说明任务处理群」$/);
   assert.match(lines[2]!, /^·负责人: 邀请 @实现、@验收 加入群聊$/);
   assert.equal(lines.some((line) => line.includes("接手了这个任务")), false, "旧 roster 文案已被入群序列取代");
-  assert.match(lines[3]!, /^负责人: 计划\n\n1\. \*\*@实现\*\* 写代码$/);
+  // 负责人开工发言（S4）：负责人一轮可能想几分钟，群里得先有条真实发言。
+  assert.equal(lines[3], "负责人: 我正在开始工作：第 1 步「制定计划」");
+  assert.match(lines[4]!, /^负责人: 计划\n\n1\. \*\*@实现\*\* 写代码$/);
   // 开工发言（S4）：成员自己发的真实发言，第 1 行带真实步号与标题。
-  assert.equal(lines[4], "实现: 我正在开始工作：第 2 步「写代码」");
-  assert.equal(lines[5], "实现: ✅ 完成「写代码」\n\n改好了");
-  const report = h.chat.turns.get(chatId)![5]!;
+  assert.equal(lines[5], "实现: 我正在开始工作：第 2 步「写代码」");
+  assert.equal(lines[6], "实现: ✅ 完成「写代码」\n\n改好了");
+  const report = h.chat.turns.get(chatId)![6]!;
   assert.equal(report.author?.sessionId, dev.sessionId);
   assert.equal(report.author?.provider, "codex");
 });
@@ -1001,7 +1003,7 @@ test("[T3] the last candidate failing hands a single failed step back to the lea
   assert.match(failed[0]!.report, /候选 2/);
   assert.equal(runningStep(h, runId).kind, "leader", "耗尽后交回 Leader，不另设 waiting_user 捷径");
   const turns = h.chat.turns.get(h.runner.detail(runId).run.chatSessionId!)!;
-  assert.equal(turns.filter((turn) => turnText(turn).startsWith("我正在开始工作：")).length, 1,
+  assert.equal(workStarts(turns).length, 1,
     "第一候选尝试保留 S4；第二候选被预检拉黑不虚构 S4");
   assert.equal(turns.find((turn) => turnText(turn).startsWith("❌ 没完成「改 README」"))?.author?.sessionId,
     undefined, "从未成功 open 的失败报告不伪造 sessionId");
@@ -1387,6 +1389,13 @@ function turnText(turn: ConversationTurn): string {
   return turn.content.map((block) => (block.type === "text" ? block.text : "")).join("");
 }
 
+/**
+ * 成员的开工发言（S4）。负责人轮（制定计划 / 安排下一步 / 回应用户）也发同一条发言，
+ * 所以断言「这一步谁开的工」时必须排掉负责人，否则第一条命中的永远是负责人。
+ */
+const workStarts = (turns: ConversationTurn[]): ConversationTurn[] =>
+  turns.filter((turn) => !turn.author?.leader && turnText(turn).startsWith("我正在开始工作："));
+
 const notices = (h: Harness, chatId: string): string[] =>
   h.chat.lines(chatId).filter((line) => line.startsWith("·"));
 
@@ -1447,10 +1456,11 @@ test("[T3b] group chat signing follows the candidate actually used, not the pref
   const degradeLine = turns.filter((turn) => turn.notice && turnText(turn).includes("首选配置不可用"));
   assert.equal(degradeLine.length, 1);
   assert.equal(degradeLine[0]!.author?.provider, "opencode", "降级行署切过去的新候选");
-  const starts = turns.filter((turn) => turnText(turn).includes("我正在开始工作："));
+  const starts = workStarts(turns);
   assert.equal(starts[0]!.author?.provider, "codex", "第一次开工确实用的首选");
   assert.equal(starts[starts.length - 1]!.author?.provider, "opencode", "降级后的开工行跟着换候选");
-  const leaderTurn = turns.find((turn) => turn.author?.leader === true)!;
+  const leaderTurn = turns.find((turn) => turn.notice === undefined && turn.author?.leader
+    && !turnText(turn).startsWith("我正在开始工作："))!;
   assert.equal(leaderTurn.author?.provider, "claude", "Leader 没有步骤候选可取，回退首选");
 });
 
@@ -1775,11 +1785,12 @@ test("[chat] authored turns carry the model and effort of the candidate actually
   const chatId = h.runner.detail(runId).run.chatSessionId!;
   const turns = h.chat.turns.get(chatId)!;
 
-  const leaderTurn = turns.find((turn) => turn.author?.leader === true)!;
+  const leaderTurn = turns.find((turn) => turn.notice === undefined && turn.author?.leader
+    && !turnText(turn).startsWith("我正在开始工作："))!;
   assert.equal(leaderTurn.author?.model, "default", "负责人回合署自己步骤实际候选的模型");
   assert.equal(leaderTurn.author?.thinkingEffort, "off");
 
-  const starts = turns.filter((turn) => turnText(turn).includes("我正在开始工作："));
+  const starts = workStarts(turns);
   assert.equal(starts[0]!.author?.model, "broken", "第一次开工行署当时真正用的首选");
   assert.equal(starts[starts.length - 1]!.author?.model, "glm-4.7", "降级后的开工行跟着换");
   assert.equal(starts[starts.length - 1]!.author?.thinkingEffort, "deep");
@@ -2006,11 +2017,20 @@ test("[v2] a work start is a real member turn with the upstream basis in the sec
   const chatId = h.runner.detail(runId).run.chatSessionId!;
   const turns = h.chat.turns.get(chatId)!;
 
-  const plan = turns.find((turn) => !turn.notice && turn.author?.leader === true)!;
+  const plan = turns.find((turn) => !turn.notice && turn.author?.leader && turnText(turn).includes("**@实现**"))!;
   const planText = turnText(plan);
   assert.match(planText, /^1\. \*\*@实现\*\* 设计规格$/m, "首步没有上游 → 不带括注");
   assert.match(planText, /^2\. \*\*@验收\*\* 验收（依据：第 1 步「设计规格」的产物）$/m);
   assert.equal(planText.includes("等第"), false, "旧的等待文案不再与新依据并列");
+
+  // 负责人自己的步骤（制定计划）也要先发一条真实发言：工位上写着「工作中」而群里一条消息都没有，
+  // 是他一轮里最容易出现几十秒到几分钟的静默期。
+  const leaderStart = turns.find((turn) => turnText(turn).startsWith("我正在开始工作：第 1 步"))!;
+  assert.equal(turnText(leaderStart), "我正在开始工作：第 1 步「制定计划」", "负责人的开工发言用同一套模板");
+  assert.equal(leaderStart.notice, undefined, "负责人开工发言同样是真实发言，不是居中 notice");
+  assert.equal(leaderStart.author?.name, "负责人");
+  assert.equal(leaderStart.author?.leader, true);
+  assert.ok(turns.indexOf(leaderStart) < turns.indexOf(plan), "开工发言早于计划消息");
 
   const dev = runningStep(h, runId);
   assert.equal(dev.seq, 2);
@@ -2059,7 +2079,7 @@ test("[R1 S-1] new work S4 is posted before open resolves, never gains an invent
   };
   const approving = h.runner.approve(runId);
   await entered;
-  const start = h.chat.turns.get(chatId)!.find((turn) => turnText(turn).startsWith("我正在开始工作："))!;
+  const start = workStarts(h.chat.turns.get(chatId)!)[0]!;
   assert.equal(start.notice, undefined);
   assert.equal(start.author?.sessionId, undefined);
   assert.equal(start.author?.provider, "codex");
@@ -2071,7 +2091,7 @@ test("[R1 S-1] new work S4 is posted before open resolves, never gains an invent
   const work = runningStep(h, runId);
   assert.ok(work.sessionId);
   assert.equal(start.author?.sessionId, undefined, "同一条 S4 不补发/不回填");
-  assert.equal(h.chat.turns.get(chatId)!.filter((turn) => turnText(turn).startsWith("我正在开始工作：")).length, 1);
+  assert.equal(workStarts(h.chat.turns.get(chatId)!).length, 1);
   writeReport(h, work, "状态: 完成");
   h.ops.finishTurn(work.sessionId!);
   await settle(h, work.sessionId!);
@@ -2140,7 +2160,7 @@ test("[R1 S-3/S-4] open failure retains unlinked S4/report; preflight skip has n
   failed.ops.openFailure = (agent) => agent.provider === "codex" ? "permission denied" : null;
   const failedRun = await startAndPlan(failed, [["m_dev", "执行"]]);
   const failedTurns = failed.chat.turns.get(failed.runner.detail(failedRun).run.chatSessionId!)!;
-  const start = failedTurns.find((turn) => turnText(turn).startsWith("我正在开始工作："))!;
+  const start = workStarts(failedTurns)[0]!;
   const report = failedTurns.find((turn) => turnText(turn).startsWith("❌ 没完成「执行」"))!;
   assert.equal(start.author?.sessionId, undefined);
   assert.equal(report.author?.sessionId, undefined);
@@ -2152,7 +2172,7 @@ test("[R1 S-3/S-4] open failure retains unlinked S4/report; preflight skip has n
   });
   const skippedRun = await startAndPlan(skipped, [["m_dev", "执行"]]);
   const turns = skipped.chat.turns.get(skipped.runner.detail(skippedRun).run.chatSessionId!)!;
-  const attempts = turns.filter((turn) => turnText(turn).startsWith("我正在开始工作："));
+  const attempts = workStarts(turns);
   const noticeIndex = turns.findIndex((turn) => turn.notice && turnText(turn).includes("已切换到候选 2"));
   const startIndex = turns.indexOf(attempts[0]!);
   assert.equal(attempts.length, 1, "预检拒绝的第一候选不虚构 S4");
@@ -2173,7 +2193,7 @@ test("[R1 S-4/S-5] replacement has new seq; S5 uses batch position, not persiste
   const turns = h.chat.turns.get(detail.run.chatSessionId!)!;
   const plan = turns.find((turn) => !turn.notice && turn.author?.leader && turnText(turn).includes("**@实现**"))!;
   assert.match(turnText(plan), /2\. \*\*@验收\*\* 审查（依据：第 1 步「实现」的产物）/);
-  const starts = turns.filter((turn) => turnText(turn).startsWith("我正在开始工作："));
+  const starts = workStarts(turns);
   assert.equal(starts.length, 2, "失败与替换各留一条；不按同标题去重");
   assert.equal(starts[0]!.author?.provider, "codex");
   assert.equal(starts[1]!.author?.provider, "opencode");

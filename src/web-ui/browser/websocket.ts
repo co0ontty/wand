@@ -39,6 +39,27 @@ function noteTurnActivity(sessionId: string, active: boolean): void {
   if (previous === true && !active) scheduleGitStatusRefresh();
 }
 
+function requestChatResync(sessionId: string): void {
+  if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+  var pending = state.chatResyncPendingBySession || (state.chatResyncPendingBySession = {});
+  if (pending[sessionId]) return;
+  pending[sessionId] = true;
+  try {
+    state.ws.send(JSON.stringify({ type: "resync", sessionId: sessionId }));
+  } catch (error) {
+    delete pending[sessionId];
+    console.error("[wand] chat resync failed:", error);
+  }
+}
+
+function projectSelectedChat(sessionId: string): any {
+  if (sessionId !== state.selectedId) return null;
+  var session = state.sessions.find(function(s) { return s.id === sessionId; });
+  if (!session) return null;
+  state.currentMessages = buildMessagesForRender(session, getPreferredMessages(session, session.output, false));
+  return session;
+}
+
 // ── External functions not defined in this module ──
 
       export function startPolling() {
@@ -189,6 +210,7 @@ function noteTurnActivity(sessionId: string, active: boolean): void {
             // Server's per-client output sequence counter restarts on every
             // new socket; clear ours so the first init isn't treated as a gap.
             state.lastSeqBySession = {};
+            state.chatResyncPendingBySession = {};
             // 启动客户端心跳检测：每 10s 检查一次 lastWsMessageAt，超过 40s
             // 没收到任何消息（包括服务端 20s 一次的 ping）就视为半开连接。
             startWsHeartbeatCheck();
@@ -234,11 +256,7 @@ function noteTurnActivity(sessionId: string, active: boolean): void {
                 // Server dropped some output events under backpressure and
                 // is asking us for a fresh snapshot. Send a resync so the
                 // server replies with a new init carrying the full output.
-                if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-                  try {
-                    state.ws.send(JSON.stringify({ type: "resync", sessionId: msg.sessionId }));
-                  } catch (sendErr) { /* ignore */ }
-                }
+                requestChatResync(msg.sessionId);
                 if (!state.lastSeqBySession) state.lastSeqBySession = {};
                 state.lastSeqBySession[msg.sessionId] = 0;
                 return;
@@ -247,25 +265,25 @@ function noteTurnActivity(sessionId: string, active: boolean): void {
                 if (!state.lastSeqBySession) state.lastSeqBySession = {};
                 var prevSeq = state.lastSeqBySession[msg.sessionId] || 0;
                 if (msg.type === "init") {
+                  if (prevSeq > 0 && msg.seq <= prevSeq) return;
                   state.lastSeqBySession[msg.sessionId] = msg.seq;
                 } else if (msg.seq === prevSeq + 1) {
                   state.lastSeqBySession[msg.sessionId] = msg.seq;
                 } else if (msg.seq > prevSeq + 1 && prevSeq > 0) {
                   // We missed at least one event — request a resync and
                   // skip this stale event so we don't apply a partial gap.
-                  if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-                    try {
-                      state.ws.send(JSON.stringify({ type: "resync", sessionId: msg.sessionId }));
-                    } catch (sendErr) { /* ignore */ }
-                  }
+                  requestChatResync(msg.sessionId);
                   state.lastSeqBySession[msg.sessionId] = 0;
                   return;
                 } else {
                   // seq <= prevSeq: duplicate or out-of-order from a stale
                   // queue; drop quietly.
-                  if (msg.seq < prevSeq) return;
+                  if (prevSeq > 0 && msg.seq <= prevSeq) return;
                   state.lastSeqBySession[msg.sessionId] = msg.seq;
                 }
+              }
+              if (msg?.sessionId && (msg.type === "init" || Array.isArray(msg.data?.messages))) {
+                if (state.chatResyncPendingBySession) delete state.chatResyncPendingBySession[msg.sessionId];
               }
               handleWebSocketMessage(msg);
             } catch (e) {
@@ -372,28 +390,31 @@ function noteTurnActivity(sessionId: string, active: boolean): void {
                 var existingSession = state.sessions.find(function(s: any) { return s.id === msg.sessionId; });
                 if (existingSession) {
                   var msgs = Array.isArray(existingSession.messages) ? existingSession.messages.slice() : [];
-                  var expectedCount = msg.data.messageCount || 0;
-                  // 窗口化：本地是后缀，绝对条数 = messageOffset + msgs.length。
-                  var baseOffset = (typeof existingSession.messageOffset === "number") ? existingSession.messageOffset : 0;
-                  // 防御性合并：lastMessage 应当至少和本地最后一条一样长。如果服务端
-                  // 因为上游 bug（如 upsertBlocks 整段覆盖）回退发来一条更短的同 role
-                  // 消息，保留本地版本——文字会被刷新或下一次 emit 修正。
-                  var localLast = msgs.length > 0 ? msgs[msgs.length - 1] : null;
+                  var expectedCount = msg.data.messageCount;
+                  var baseOffset = typeof existingSession.messageOffset === "number" ? existingSession.messageOffset : 0;
+                  var localEnd = baseOffset + msgs.length;
                   var incoming = msg.data.lastMessage;
-                  if (localLast && incoming.role && localLast.role === incoming.role) {
-                    msgs[msgs.length - 1] = mergeIncrementalWindowedTurn(localLast, incoming,
+                  var awaitingResync = state.chatResyncPendingBySession?.[msg.sessionId];
+                  if (awaitingResync || !Number.isInteger(expectedCount) ||
+                    !(expectedCount === localEnd && msgs.length > 0 || expectedCount === localEnd + 1)) {
+                    // A last-only event cannot describe a missing user+assistant
+                    // pair. Keep the actual sequence/total and request one init.
+                    requestChatResync(msg.sessionId);
+                  } else {
+                    if (expectedCount === localEnd + 1) msgs.push(incoming);
+                    else msgs[msgs.length - 1] = mergeIncrementalWindowedTurn(msgs[msgs.length - 1], incoming,
                       msgs.length === 1 ? existingSession.leadingBlockOffset || 0 : 0,
-                      existingSession.leadingBlockTotal || 0);
-                  } else if (baseOffset + msgs.length < expectedCount) {
-                    msgs.push(incoming);
-                  }
-                  snapshot.messages = msgs;
-                  if (expectedCount > 0) snapshot.messageTotal = expectedCount;
-                  if (msgs.length === 1 && existingSession.leadingBlockOffset > 0
-                    && msgs[0] === incoming && Array.isArray(incoming.content)
-                    && incoming.content.length >= (existingSession.leadingBlockTotal || 0)) {
-                    snapshot.leadingBlockOffset = 0;
-                    snapshot.leadingBlockTotal = incoming.content.length;
+                      existingSession.leadingBlockTotal || 0, "latest");
+                    snapshot.messages = msgs;
+                    snapshot.messageOffset = baseOffset;
+                    snapshot.messageTotal = expectedCount;
+                    snapshot.leadingBlockOffset = existingSession.leadingBlockOffset || 0;
+                    snapshot.leadingBlockTotal = existingSession.leadingBlockTotal || 0;
+                    if (msgs.length === 1) {
+                      // lastMessage is a complete turn under the existing wire contract.
+                      snapshot.leadingBlockOffset = 0;
+                      snapshot.leadingBlockTotal = Array.isArray(incoming.content) ? incoming.content.length : 0;
+                    }
                   }
                 }
               }
@@ -412,16 +433,16 @@ function noteTurnActivity(sessionId: string, active: boolean): void {
                 if (msg.data.permissionBlocked !== undefined) {
                   var existingPB = state.sessions.find(function(s: any) { return s.id === msg.sessionId; });
                   if (existingPB && !!existingPB.permissionBlocked !== !!msg.data.permissionBlocked) {
-                    updateSessionSnapshot(snapshot);
+                    updateSessionSnapshot(snapshot, "latest");
                     if (msg.sessionId === state.selectedId) updateTaskDisplay();
                   }
                 }
               } else if (snapshot.output !== undefined || snapshot.messages || isIncremental || msg.data.permissionBlocked !== undefined || snapshot.title || snapshot.description || snapshot.titleGenerating !== undefined) {
-                updateSessionSnapshot(snapshot);
+                updateSessionSnapshot(snapshot, "latest");
                 if (topicMetadataChanged) scheduleSessionListUpdate();
                 if (msg.sessionId === state.selectedId) {
                   var updatedSession = state.sessions.find(function(s: any) { return s.id === msg.sessionId; }) || snapshot;
-                  state.currentMessages = buildMessagesForRender(updatedSession, getPreferredMessages(updatedSession, updatedSession.output, false));
+                  projectSelectedChat(msg.sessionId);
                   updateTaskDisplay();
                   // Structured sessions: render immediately for responsiveness
                   if (updatedSession.sessionKind === 'structured' || msg.data.sessionKind === 'structured') {
@@ -497,9 +518,10 @@ function noteTurnActivity(sessionId: string, active: boolean): void {
             if (msg.data && msg.data.queuedMessages) {
               endedSnapshot.queuedMessages = msg.data.queuedMessages;
             }
-            updateSessionSnapshot(endedSnapshot);
+            updateSessionSnapshot(endedSnapshot, "latest");
 
             if (msg.sessionId === state.selectedId) {
+              projectSelectedChat(msg.sessionId);
               // Trigger status bar completion animation
               scheduleChatRender(true);
             }
@@ -587,9 +609,8 @@ function noteTurnActivity(sessionId: string, active: boolean): void {
             // Initial state for subscribed session (after reconnect or subscription)
             if (msg.sessionId === state.selectedId && msg.data) {
               if (state.chatRenderTimer) { clearTimeout(state.chatRenderTimer); state.chatRenderTimer = null; }
-              updateSessionSnapshot(msg.data);
-              var initSession = state.sessions.find(function(s: any) { return s.id === msg.sessionId; });
-              state.currentMessages = buildMessagesForRender(initSession || msg.data, getPreferredMessages(initSession || msg.data, msg.data.output, false));
+              updateSessionSnapshot(msg.data, "latest");
+              projectSelectedChat(msg.sessionId);
               renderChat(true);
               updateTaskDisplay();
               syncComposerBadges();
@@ -603,7 +624,7 @@ function noteTurnActivity(sessionId: string, active: boolean): void {
                 ensureTerminalFitWithRetry("init");
               }
             } else if (msg.data && hasPooledTerminal(msg.sessionId)) {
-              updateSessionSnapshot(msg.data);
+              updateSessionSnapshot(msg.data, "latest");
               var pooledInitOutput = msg.data.output || "";
               if (!restorePooledTerminalState(msg.sessionId, msg.data.terminalState, pooledInitOutput)) {
                 replacePooledTerminalOutput(msg.sessionId, pooledInitOutput);
@@ -730,7 +751,13 @@ function noteTurnActivity(sessionId: string, active: boolean): void {
               if (Object.prototype.hasOwnProperty.call(msg.data, 'ptyBusy')) {
                 noteTurnActivity(msg.sessionId, !!msg.data.ptyBusy);
               }
-              updateSessionSnapshot(statusUpdate);
+              if (Array.isArray(msg.data.messages)) {
+                statusUpdate.messages = msg.data.messages;
+                ["messageOffset", "messageTotal", "leadingBlockOffset", "leadingBlockTotal"].forEach(function(field) {
+                  if (typeof msg.data[field] === "number") statusUpdate[field] = msg.data[field];
+                });
+              }
+              updateSessionSnapshot(statusUpdate, "latest");
               if (topicMetadataChanged) scheduleSessionListUpdate();
               syncSessionProgressToNative(msg.sessionId);
               _syncWakeLock();
@@ -740,12 +767,14 @@ function noteTurnActivity(sessionId: string, active: boolean): void {
                   syncComposerBadges();
                 }
                 // Re-render chat when structured session inFlight state changes
-                if (statusUpdate.structuredState) {
+                if (statusUpdate.structuredState || statusUpdate.messages ||
+                  Object.prototype.hasOwnProperty.call(statusUpdate, "ptyBusy")) {
                   // Flush queued structured messages synchronously before render
                   // so the chat view uses up-to-date queue state.
-                  if (!statusUpdate.structuredState.inFlight) {
+                  if (statusUpdate.structuredState && !statusUpdate.structuredState.inFlight) {
                     flushStructuredInputQueue();
                   }
+                  projectSelectedChat(msg.sessionId);
                   scheduleChatRender();
                 }
               }

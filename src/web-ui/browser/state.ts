@@ -1,5 +1,6 @@
 import type { AppState } from "./types";
 import { ComposerQueueClock, ComposerStore } from "./composer.js";
+import { ChatRenderCache } from "./chat-render-cache.js";
 
 export const composer = new ComposerStore({
   storage: () => localStorage,
@@ -212,6 +213,7 @@ export var state: AppState = {
   // Used to detect gaps caused by server-side backpressure drops and
   // request a fresh snapshot.
   lastSeqBySession: {},
+  chatResyncPendingBySession: {},
   currentView: "terminal",
   terminalScale: (function() {
     try {
@@ -266,9 +268,10 @@ export var state: AppState = {
   wsReconnectAttempts: 0,
   wsReconnectTimer: null,
   currentMessages: [],
-  lastRenderedHash: 0,
+  chatRenderCache: new ChatRenderCache(),
+  chatRenderEpoch: 0,
+  chatRenderPendingToken: null,
   lastRenderedMsgCount: 0,
-  lastRenderedAgentRunSignature: "",
   lastRenderedEmpty: null,
   renderPending: false,
   chatPageSize: 20,

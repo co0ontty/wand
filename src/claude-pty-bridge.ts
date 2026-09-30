@@ -250,6 +250,10 @@ export class ClaudePtyBridge extends EventEmitter {
       return;
     }
 
+    if (this.chatEmitTimer) {
+      clearTimeout(this.chatEmitTimer);
+      this.chatEmitTimer = null;
+    }
     const cleanInput = input.replace(/[\r\n]+$/, "").trim();
 
     const now = new Date().toISOString();
@@ -908,8 +912,12 @@ export class ClaudePtyBridge extends EventEmitter {
     const now = Date.now();
     if (now - this.lastChatEmitAt < ClaudePtyBridge.CHAT_THROTTLE_MS) {
       if (!this.chatEmitTimer) {
-        this.chatEmitTimer = setTimeout(() => {
+        const streamedIndex = idx;
+        const timer = setTimeout(() => {
+          if (this.chatEmitTimer !== timer) return;
           this.chatEmitTimer = null;
+          if (this._exited || this.chatState.phase !== "responding"
+            || this.chatState.assistantIndex !== streamedIndex) return;
           this.lastChatEmitAt = Date.now();
           this.emitEvent({
             type: "output.chat",
@@ -922,6 +930,7 @@ export class ClaudePtyBridge extends EventEmitter {
             } as ChatOutputData,
           });
         }, ClaudePtyBridge.CHAT_THROTTLE_MS);
+        this.chatEmitTimer = timer;
       }
       return;
     }
@@ -940,6 +949,10 @@ export class ClaudePtyBridge extends EventEmitter {
   }
 
   private finalizeResponse(): void {
+    if (this.chatEmitTimer) {
+      clearTimeout(this.chatEmitTimer);
+      this.chatEmitTimer = null;
+    }
     const idx = this.chatState.assistantIndex;
 
     if (idx !== null) {

@@ -94,6 +94,55 @@ function createHarness(): {
   return { manager, client, socket };
 }
 
+test("R07: continuous small chunks retain the first output deadline and preserve raw byte order", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const instance = new WsBroadcastManager({} as WebSocketServer);
+  const events: ProcessEvent[] = [];
+  (instance as any).broadcast = (event: ProcessEvent) => events.push(structuredClone(event));
+  t.after(() => instance.dispose());
+  const chunks: string[] = [];
+  for (let index = 0; index < 24; index++) {
+    const chunk = `字${index}\r\n`; chunks.push(chunk);
+    instance.emitEvent({ type: "output", sessionId: "fixture", data: { incremental: true, chunk } });
+    t.mock.timers.tick(4);
+  }
+  assert.ok(events.length > 0, "output cannot be withheld throughout an uninterrupted burst");
+  instance.emitEvent({ type: "ended", sessionId: "fixture" });
+  assert.equal(events.at(-1)?.type, "ended");
+  assert.equal(events.filter(e => e.type === "output").map(e => (e.data as any).chunk).join(""), chunks.join(""));
+});
+
+test("R07: synchronous chunk bursts have a bounded debounce cache and never lose bytes", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const instance = new WsBroadcastManager({} as WebSocketServer);
+  const events: ProcessEvent[] = [];
+  (instance as any).broadcast = (event: ProcessEvent) => events.push(structuredClone(event));
+  t.after(() => instance.dispose());
+  const chunk = "x".repeat(128 * 1024);
+  for (let i = 0; i < 8; i++) instance.emitEvent({ type: "output", sessionId: "fixture", data: { incremental: true, chunk } });
+  assert.ok(events.length > 0, "the cache must flush before arbitrarily many synchronous bytes accumulate");
+  instance.flushOutput("fixture");
+  assert.equal(events.map(e => (e.data as any).chunk).join(""), chunk.repeat(8));
+});
+
+test("R07: an oversized single chunk flushes prior bytes immediately and status cancels the timer", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const manager = new WsBroadcastManager({} as WebSocketServer);
+  const events: ProcessEvent[] = [];
+  (manager as any).broadcast = (event: ProcessEvent) => events.push(structuredClone(event));
+  t.after(() => manager.dispose());
+  const large = "字".repeat(300 * 1024);
+  manager.emitEvent({ type: "output", sessionId: "fixture", data: { chunk: "before" } });
+  manager.emitEvent({ type: "output", sessionId: "fixture", data: { chunk: large } });
+  assert.equal(events.length, 2, "a single oversized chunk cannot linger in the coalescing cache");
+  manager.emitEvent({ type: "output", sessionId: "fixture", data: { chunk: "after" } });
+  manager.emitEvent({ type: "status", sessionId: "fixture", data: { status: "running" } });
+  const count = events.length; t.mock.timers.tick(100);
+  assert.equal(events.length, count); assert.equal(events.at(-1)?.type, "status");
+  assert.equal(events.filter(event => event.type === "output").map(event => (event.data as any).chunk).join(""),
+    "before" + large + "after");
+});
+
 function nextImmediate(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
 }
