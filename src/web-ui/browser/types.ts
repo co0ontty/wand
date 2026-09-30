@@ -72,7 +72,6 @@ declare global {
     wandAlert?: (msg: string, opts?: any) => void;
     QRCodeLib?: any;
     _onNativePermissionResult?: (result: string) => void;
-    __activityJumpToTail?: (btn: HTMLElement) => void;
     __historySummaryToggle?: (btn: HTMLElement) => void;
     __queueDelegated?: boolean;
     readonly visualViewport: VisualViewport | null;

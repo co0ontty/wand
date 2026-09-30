@@ -26,7 +26,7 @@ function harness() {
     isUnloading: () => false,
     disposeAttachment: () => {},
   });
-  const requests: Array<{ url: string; response: ReturnType<typeof deferred<Response>> }> = [];
+  const requests: Array<{ url: string; init?: RequestInit; response: ReturnType<typeof deferred<Response>> }> = [];
   const errors: unknown[] = [];
   const toasts: Array<{ message: string; tone?: string }> = [];
   const noop = () => {};
@@ -73,7 +73,11 @@ function harness() {
     localStorage: { getItem: () => null, setItem: noop },
     console: { error: (...args: unknown[]) => errors.push(args) },
     setTimeout: noop, clearTimeout: noop, clearInterval: noop,
-    fetch: (url: string) => { const response = deferred<Response>(); requests.push({ url, response }); return response.promise; },
+    fetch: (url: string, init?: RequestInit) => {
+      const response = deferred<Response>();
+      requests.push({ url, init, response });
+      return response.promise;
+    },
   });
   const respond = (index: number, body: unknown, status = 200) => requests[index].response.resolve(new Response(JSON.stringify(body), { status }));
   return { composer, state, api, requests, respond, errors, toasts };
@@ -116,6 +120,16 @@ test("HTTP detail cannot roll back a newer status push or append old queued inpu
   assert.equal(h.state.sessions[0].queuedMessages.length, 0);
   assert.equal(h.state.sessions[0].title, "fetched");
   assert.deepEqual(h.errors, []);
+});
+
+test("session detail requests opt in to compact tool projection", async () => {
+  const h = harness();
+  h.state.selectedId = "A";
+  h.state.sessions = [{ id: "A", status: "running" }];
+  const pending = h.api.loadOutput("A");
+  assert.equal((h.requests[0]?.init?.headers as Record<string, string>)["X-Wand-Tool-Projection"], "compact");
+  h.respond(0, { id: "A", status: "running", messages: [] });
+  await pending;
 });
 
 test("invalid or failed list responses preserve drafts and sessions", async () => {

@@ -36,7 +36,7 @@ export interface ResumeRouteDependencies {
   defaultMode: ExecutionMode;
   onSessionCreated?: (cwd: string | undefined | null) => void;
   /** 会话快照 → 响应 DTO；由调用方注入以免这里再依赖消息截断层。 */
-  toDetailDTO: (snapshot: SessionSnapshot) => unknown;
+  toDetailDTO: (snapshot: SessionSnapshot, req: Request) => unknown;
 }
 
 interface StructuredResumeSpec {
@@ -161,11 +161,10 @@ export function registerStructuredResumeRoutes(app: Express, deps: ResumeRouteDe
           ...parseSessionCreationOrigin(body),
         });
         onSessionCreated?.(cwd);
-        res.status(201).json({ resumedClaudeSessionId: nativeId, ...(toDetailDTO(snapshot) as object) });
+        res.status(201).json({ resumedClaudeSessionId: nativeId, ...(toDetailDTO(snapshot, req) as object) });
       } catch (error) {
         res.status(400).json({ error: getErrorMessage(error, `无法按 ${spec.label} 会话 ID 恢复会话。`) });
       }
     }));
   }
 }
-

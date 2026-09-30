@@ -1747,7 +1747,10 @@ export function TeamChatView({ detail, onChange, onOpenSession, details, staleRu
         }]);
         let acknowledgement: unknown;
         try {
-          acknowledgement = await requestJson(chatMessageUrl(sessionId), jsonBody(chatMessageBody(message)));
+          acknowledgement = await requestJson(chatMessageUrl(sessionId), {
+            ...jsonBody(chatMessageBody(message)),
+            headers: { "content-type": "application/json", "X-Wand-Tool-Projection": "compact" },
+          });
         } catch (cause) {
           const rejected = chatSendDefinitelyRejected(cause);
           if (sameChat()) setLocal((current) => rejected

@@ -11,6 +11,12 @@ import { isSidebarDrawerLayout } from "./file-browser";
 import { renderChat } from "./chat-render";
 import { fitTerminalToContainer } from "./terminal-fit";
 
+function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return fetch(input, { ...init,
+    headers: { ...(init?.headers as Record<string, string> | undefined),
+      "X-Wand-Tool-Projection": "compact" } });
+}
+
       var appViewportBaselineWidth = 0;
       var appViewportBaselineHeight = 0;
       var closedViewportBaselineUntil = 0;
@@ -717,7 +723,7 @@ import { fitTerminalToContainer } from "./terminal-fit";
 
       function interruptStructuredSessionFromJoystick(session, key) {
         if (!session || !session.id) return;
-        fetch("/api/structured-sessions/" + session.id + "/messages", {
+        compactSessionFetch("/api/structured-sessions/" + session.id + "/messages", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
@@ -1019,7 +1025,7 @@ import { fitTerminalToContainer } from "./terminal-fit";
               rows: nextSize.rows
             }));
           } else {
-            fetch("/api/sessions/" + state.selectedId + "/resize", {
+            compactSessionFetch("/api/sessions/" + state.selectedId + "/resize", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               credentials: "same-origin",

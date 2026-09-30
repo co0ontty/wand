@@ -319,7 +319,8 @@ export function createPooledTerminal(sessionId: string, container: HTMLElement):
   }
 
   // 订阅该会话的实时输出（服务端支持多会话并发订阅）。
-  sendJson({ type: "subscribe", mode: "add", sessionId, capabilities: { ptyAck: true } });
+  sendJson({ type: "subscribe", mode: "add", sessionId, compactTools: true,
+    capabilities: { ptyAck: true } });
 
   // React/flex 布局通常要到下一帧才稳定。无论 fit 是否改变 xterm 尺寸，都显式
   // 把当前 cols/rows 发给 PTY，避免“前端已半宽、后端仍是合并前全宽”的换行错位。
@@ -330,7 +331,8 @@ export function createPooledTerminal(sessionId: string, container: HTMLElement):
 /** WebSocket 重连后，服务端会清掉旧连接的订阅；恢复全部可见池终端。 */
 export function resubscribePooledTerminals(): void {
   for (const sessionId of pool.keys()) {
-    sendJson({ type: "subscribe", mode: "add", sessionId, capabilities: { ptyAck: true } });
+    sendJson({ type: "subscribe", mode: "add", sessionId, compactTools: true,
+      capabilities: { ptyAck: true } });
   }
 }
 

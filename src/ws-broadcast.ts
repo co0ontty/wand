@@ -7,7 +7,7 @@ import type { IncomingMessage } from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
 import type { CardExpandDefaults, ConversationTurn, SessionSnapshot, ProcessEvent } from "./types.js";
 import { readSessionCookie, type AuthService } from "./auth.js";
-import { blockWindowMessagesForTransport, windowMessagesForTransport } from "./message-truncator.js";
+import { blockWindowMessagesForTransport, compactToolMessagesForTransport, windowMessagesForTransport } from "./message-truncator.js";
 import { boundSessionEventData, toSessionDetailDTO } from "./session-transport.js";
 import { enrichStructuredMessages } from "./structured-client-protocol.js";
 import type { PtyTerminalSnapshot } from "./pty-terminal-state.js";
@@ -94,6 +94,9 @@ interface WsClient {
    * undefined 表示走原有 turn 级窗口（Web/Android），行为与改动前完全一致。
    */
   blockBudget?: number;
+  /** Explicit capability: Web/Android can fetch full tool input/result on demand. */
+  compactTools: boolean;
+  toolNamesBySession: Map<string, Map<string, string>>;
   /**
    * 上次收到该客户端任意消息（应用层 message / protocol pong / 任何 frame）的
    * 时间戳。心跳 tick 用它来判断半开连接。
@@ -208,6 +211,8 @@ export class WsBroadcastManager {
         backpressurePaused: false,
         outputSeqBySession: new Map(),
         pendingResyncSessions: new Set(),
+        compactTools: false,
+        toolNamesBySession: new Map(),
         lastSeenAt: Date.now(),
         ptySubscriptions: new Map(),
       };
@@ -233,6 +238,8 @@ export class WsBroadcastManager {
         try {
           const msg = JSON.parse(data.toString());
           if (msg.type === "subscribe" && msg.sessionId) {
+            client.compactTools = client.compactTools
+              || msg.compactTools === true || msg.capabilities?.compactTools === true;
             // 客户端可在 subscribe 时声明块级窗口预算（iOS）；后续 init/resync/广播
             // 全量快照都按它块级窗口化。不带则保持 turn 级（Web/Android）。
             if (Number.isSafeInteger(msg.blockBudget) && msg.blockBudget > 0) {
@@ -241,6 +248,7 @@ export class WsBroadcastManager {
             // 默认仍是历史的“切换当前会话”；分屏池显式用 mode:add 叠加订阅。
             if (msg.mode !== "add") {
               client.ptySubscriptions.clear();
+              client.toolNamesBySession.clear();
             }
             client.ptySubscriptions.set(msg.sessionId, {
               supportsAck: msg.capabilities?.ptyAck === true,
@@ -262,6 +270,7 @@ export class WsBroadcastManager {
             }
           } else if (msg.type === "unsubscribe" && msg.sessionId) {
             client.ptySubscriptions.delete(msg.sessionId);
+            client.toolNamesBySession.delete(msg.sessionId);
           } else if (msg.type === "resync" && msg.sessionId) {
             this.flushOutput(msg.sessionId);
             const snapshot = this.port?.getSession(msg.sessionId) ?? null;
@@ -491,6 +500,10 @@ export class WsBroadcastManager {
       return { messages: undefined, messageOffset: 0, messageTotal: 0 };
     }
     messages = enrichStructuredMessages(messages, sessionId);
+    if (client.compactTools) {
+      this.rememberToolNames(client, sessionId, messages);
+      messages = compactToolMessagesForTransport(messages);
+    }
     if (client.blockBudget && client.blockBudget > 0) {
       const w = blockWindowMessagesForTransport(messages, this.getCardDefaults(), client.blockBudget);
       return {
@@ -504,6 +517,21 @@ export class WsBroadcastManager {
     }
     const w = windowMessagesForTransport(messages, this.getCardDefaults());
     return { messages: w.messages, messageOffset: w.messageOffset, messageTotal: w.messageTotal };
+  }
+
+  private rememberToolNames(client: WsClient, sessionId: string, messages: ConversationTurn[]): void {
+    let names = client.toolNamesBySession.get(sessionId);
+    if (!names) {
+      names = new Map();
+      client.toolNamesBySession.set(sessionId, names);
+    }
+    for (const turn of messages) {
+      for (const block of turn.content) {
+        if (block.type !== "tool_use") continue;
+        names.set(block.id, block.name);
+        if (names.size > 2_000) names.delete(names.keys().next().value!);
+      }
+    }
   }
 
   private broadcast(event: ProcessEvent): void {
@@ -526,8 +554,17 @@ export class WsBroadcastManager {
       : undefined;
     let turnWindowedEvent: ProcessEvent | undefined;
     const eventForClient = (client: WsClient): ProcessEvent => {
-      if (!hasFullMessages) return boundedEvent;
-      if (client.blockBudget && client.blockBudget > 0) {
+      if (!hasFullMessages) {
+        if (!client.compactTools || !data?.lastMessage) return boundedEvent;
+        const last = enrichStructuredMessages([data.lastMessage as ConversationTurn], event.sessionId);
+        this.rememberToolNames(client, event.sessionId, last);
+        const names = client.toolNamesBySession.get(event.sessionId);
+        return {
+          ...boundedEvent,
+          data: { ...data, lastMessage: compactToolMessagesForTransport(last, names)[0] },
+        } as ProcessEvent;
+      }
+      if (client.compactTools || (client.blockBudget && client.blockBudget > 0)) {
         return {
           ...boundedEvent,
           data: { ...data, ...this.windowForClient(client, event.sessionId, rawMessages) },

@@ -767,7 +767,7 @@ test("[T8] 群聊输入走 messages 端点，请求体字段是 input 不是 tex
   assert.equal(Object.hasOwn(chatMessageBody("批准"), "text"), false, "不能发 text 字段");
   assert.equal(Object.hasOwn(chatMessageBody("批准"), "interrupt"), false, "插话不带 interrupt");
   const body = stripComments(chatSource);
-  assert.match(body, /requestJson\(chatMessageUrl\(sessionId\), jsonBody\(chatMessageBody\(message\)\)\)/);
+  assert.match(body, /requestJson\(chatMessageUrl\(sessionId\), \{\s*\.\.\.jsonBody\(chatMessageBody\(message\)\),\s*headers: \{ "content-type": "application\/json", "X-Wand-Tool-Projection": "compact" \}/);
   assert.doesNotMatch(body, /new WebSocket|\/ws\b|io\.sockets/, "不新增 WS 消息类型");
   assert.equal(chatInputHint("awaiting_approval"), "回复『批准』即开工，其他内容会作为修改意见转给负责人");
   assert.equal(chatInputHint("running"), "将作为插话，负责人下一轮看到");

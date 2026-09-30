@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
-import type { Express } from "express";
+import type { Express, Request } from "express";
 
 import { ProcessManager, PtyInputDeliveryError, SessionInputError } from "./process-manager.js";
 import { StructuredSessionManager } from "./structured-session-manager.js";
 import { WandStorage } from "./storage.js";
-import { ExecutionMode, InputRequest, ResizeRequest, SessionProvider, SessionRunner, SessionSnapshot, SessionSource, WandConfig } from "./types.js";
+import { ExecutionMode, InputRequest, ResizeRequest, SessionProvider, SessionRunner, SessionSnapshot, SessionSource, ToolResultBlock, ToolUseBlock, WandConfig } from "./types.js";
 import { getDefaultModelForProvider, isExecutionMode } from "./config.js";
-import { alignedBlockStart, blockWindowMessagesForTransport, sliceTurnBlocksForTransport, truncateMessagesForTransport, visibleBlockCount, windowMessagesForTransport } from "./message-truncator.js";
+import { alignedBlockStart, blockWindowMessagesForTransport, compactToolMessagesForTransport, sliceTurnBlocksForTransport, truncateMessagesForTransport, visibleBlockCount, windowMessagesForTransport } from "./message-truncator.js";
 import { toSessionDetailDTO, toSessionListItemDTO } from "./session-transport.js";
 import {
   checkSessionWorktreeMergeabilityAsync,
@@ -502,9 +502,13 @@ export function registerSessionRoutes(
   sessions: SessionRegistry,
   onSessionCreated?: (cwd: string | undefined | null) => void
 ): void {
-  const sessionResponseDTO = (snapshot: SessionSnapshot) => {
+  const wantsCompactTools = (req: Request): boolean =>
+    req.get("X-Wand-Tool-Projection") === "compact" || req.query.compactTools === "1";
+
+  const sessionResponseDTO = (snapshot: SessionSnapshot, req: Request) => {
+    const enriched = enrichStructuredMessages(snapshot.messages ?? [], snapshot.id);
     const windowed = windowMessagesForTransport(
-      enrichStructuredMessages(snapshot.messages ?? [], snapshot.id),
+      wantsCompactTools(req) ? compactToolMessagesForTransport(enriched) : enriched,
       config.cardDefaults ?? {},
     );
     return toSessionDetailDTO(snapshot, {
@@ -671,14 +675,14 @@ export function registerSessionRoutes(
           });
           const accepted = structured.get(snapshot.id);
           if (!accepted) throw new Error("未找到该结构化会话。");
-          res.status(201).json(sessionResponseDTO(accepted));
+          res.status(201).json(sessionResponseDTO(accepted, req));
           return;
         }
         const finished = await structured.sendMessage(snapshot.id, prompt);
-        res.status(201).json(sessionResponseDTO(finished));
+        res.status(201).json(sessionResponseDTO(finished, req));
         return;
       }
-      res.status(201).json(sessionResponseDTO(snapshot));
+      res.status(201).json(sessionResponseDTO(snapshot, req));
     } catch (error) {
       sendRouteError(res, error, "无法启动结构化会话。");
     }
@@ -694,7 +698,7 @@ export function registerSessionRoutes(
         res.status(404).json({ error: "未找到该会话。" });
         return;
       }
-      res.json(updated);
+      res.json(wantsCompactTools(req) ? sessionResponseDTO(updated, req) : updated);
     } catch (error) {
       sendRouteError(res, error, "切换模型失败。");
     }
@@ -712,7 +716,7 @@ export function registerSessionRoutes(
         res.status(404).json({ error: "未找到该会话。" });
         return;
       }
-      res.json(updated);
+      res.json(wantsCompactTools(req) ? sessionResponseDTO(updated, req) : updated);
     } catch (error) {
       sendRouteError(res, error, "切换思考深度失败。");
     }
@@ -741,7 +745,8 @@ export function registerSessionRoutes(
         return;
       }
       const effective = (snapshot.provider ?? "claude") === "codex" ? "full-access" : mode;
-      res.json(sessions.setSessionMode(id, effective));
+      const updated = sessions.setSessionMode(id, effective);
+      res.json(updated && wantsCompactTools(req) ? sessionResponseDTO(updated, req) : updated);
     } catch (error) {
       sendRouteError(res, error, "切换模式失败。");
     }
@@ -753,7 +758,10 @@ export function registerSessionRoutes(
       res.status(404).json({ error: "未找到该结构化会话。" });
       return;
     }
-    const all = snapshot.messages ?? [];
+    const raw = snapshot.messages ?? [];
+    const all = wantsCompactTools(req)
+      ? compactToolMessagesForTransport(enrichStructuredMessages(raw, snapshot.id))
+      : raw;
     const offset = parseBoundedInteger(req.query.offset, Math.max(0, all.length - 40), 0, all.length);
     const limit = parseBoundedInteger(req.query.limit, 40, 1, 200);
     res.json({
@@ -782,7 +790,7 @@ export function registerSessionRoutes(
         preserveQueue,
         idempotencyKey,
       });
-      res.json(sessionResponseDTO(snapshot));
+      res.json(sessionResponseDTO(snapshot, req));
     } catch (error) {
       const errorCode = (error as { code?: string } | null | undefined)?.code;
       const status = errorCode === "duplicate_idempotency_key" || errorCode === "duplicate_queued_message" ? 409 : 400;
@@ -804,7 +812,7 @@ export function registerSessionRoutes(
     }
     try {
       const snapshot = structured.reorderQueuedMessages(req.params.id, rawOrder.map((v: unknown) => Number(v)));
-      res.json(sessionResponseDTO(snapshot));
+      res.json(sessionResponseDTO(snapshot, req));
     } catch (error) {
       sendRouteError(res, error, "无法调整排队顺序。");
     }
@@ -819,7 +827,7 @@ export function registerSessionRoutes(
     try {
       res.json(sessionResponseDTO(structured.editQueuedMessage(
         req.params.id, Number(req.params.index), expectedText, text,
-      )));
+      ), req));
     } catch (error) {
       sendRouteError(res, error, "无法编辑排队消息。");
     }
@@ -834,7 +842,7 @@ export function registerSessionRoutes(
     const expectedText = typeof req.body?.expectedText === "string" ? req.body.expectedText : undefined;
     try {
       const snapshot = structured.deleteQueuedMessage(req.params.id, index, expectedText);
-      res.json(sessionResponseDTO(snapshot));
+      res.json(sessionResponseDTO(snapshot, req));
     } catch (error) {
       sendRouteError(res, error, "无法删除排队消息。");
     }
@@ -850,7 +858,7 @@ export function registerSessionRoutes(
     const idempotencyKey = typeof req.body?.idempotencyKey === "string" ? req.body.idempotencyKey : undefined;
     try {
       const snapshot = await structured.promoteQueuedMessage(req.params.id, index, expectedText, idempotencyKey);
-      res.json(sessionResponseDTO(snapshot));
+      res.json(sessionResponseDTO(snapshot, req));
     } catch (error) {
       const errorCode = (error as { code?: string } | null | undefined)?.code;
       const status = errorCode === "duplicate_idempotency_key" ? 409 : 400;
@@ -864,7 +872,7 @@ export function registerSessionRoutes(
   app.delete("/api/structured-sessions/:id/queued", (req, res) => {
     try {
       const snapshot = structured.clearQueuedMessages(req.params.id);
-      res.json(sessionResponseDTO(snapshot));
+      res.json(sessionResponseDTO(snapshot, req));
     } catch (error) {
       sendRouteError(res, error, "无法清空排队消息。");
     }
@@ -880,19 +888,26 @@ export function registerSessionRoutes(
     }
     const toolUseId = req.params.toolUseId;
     const messages = snapshot.messages ?? [];
+    let toolUse: ToolUseBlock | undefined;
+    let toolResult: ToolResultBlock | undefined;
     for (const turn of messages) {
       for (const block of turn.content) {
-        if (block.type === "tool_result" && block.tool_use_id === toolUseId) {
-          res.json({
-            tool_use_id: block.tool_use_id,
-            content: block.content,
-            is_error: block.is_error || false,
-          });
-          return;
-        }
+        if (block.type === "tool_use" && block.id === toolUseId) toolUse = block;
+        if (block.type === "tool_result" && block.tool_use_id === toolUseId) toolResult = block;
       }
     }
-    res.status(404).json({ error: "未找到该工具结果。" });
+    if (!toolUse && !toolResult) {
+      res.status(404).json({ error: "未找到该工具调用。" });
+      return;
+    }
+    res.json({
+      tool_use_id: toolUseId,
+      input: toolUse?.input ?? {},
+      content: toolResult?.content ?? "",
+      is_error: toolResult?.is_error ?? false,
+      pending: !toolResult,
+      resultAvailable: !!toolResult,
+    });
   });
 
   // ── Inline tool image endpoint ──
@@ -953,7 +968,7 @@ export function registerSessionRoutes(
         conflict: result.hasConflicts,
         lastError: result.ok ? undefined : result.reason,
       });
-      res.json({ session: updated, result });
+      res.json({ session: wantsCompactTools(req) ? sessionResponseDTO(updated, req) : updated, result });
     } catch (error) {
       res.status(getWorktreeMergeResponseStatus(error)).json(getWorktreeMergePayload(error, "无法检查 worktree 合并状态。"));
     }
@@ -983,7 +998,7 @@ export function registerSessionRoutes(
         lastError: undefined,
         conflict: false,
       });
-      res.json({ session: updated, result });
+      res.json({ session: wantsCompactTools(req) ? sessionResponseDTO(updated, req) : updated, result });
     } catch (error) {
       const current = sessions.getLatest(req.params.id);
       if (current && canMergeSession(current)) {
@@ -1231,7 +1246,7 @@ export function registerSessionRoutes(
         lastError: undefined,
         conflict: false,
       });
-      res.json({ session: updated, ok: true });
+      res.json({ session: wantsCompactTools(req) ? sessionResponseDTO(updated, req) : updated, ok: true });
     } catch (error) {
       res.status(getWorktreeMergeResponseStatus(error)).json(getWorktreeMergePayload(error, "无法清理 worktree。"));
     }
@@ -1296,6 +1311,8 @@ export function registerSessionRoutes(
     const transcriptOutput = (snapshot.sessionKind ?? "pty") === "pty"
       ? processes.getPtyTranscript(snapshot.id) ?? snapshot.output
       : snapshot.output;
+    const enriched = enrichStructuredMessages(snapshot.messages ?? [], snapshot.id);
+    const messages = wantsCompactTools(req) ? compactToolMessagesForTransport(enriched) : enriched;
     if (req.query.format === "chat") {
       // 客户端带 blockBudget（Web/iOS）走块级窗口：只回最近 N 个块（必要时切掉最旧 turn 的头部），
       // 根治「单条 turn 上百块/1MB」的长任务打开慢；未启用的客户端保持 turn 级窗口。
@@ -1303,7 +1320,7 @@ export function registerSessionRoutes(
       if (typeof rawBudget === "string" && /^\d+$/.test(rawBudget) && Number(rawBudget) > 0) {
         const blockBudget = parseBoundedInteger(rawBudget, 1, 1, 2_000);
         const windowed = blockWindowMessagesForTransport(
-          enrichStructuredMessages(snapshot.messages ?? [], snapshot.id),
+          messages,
           config.cardDefaults ?? {},
           blockBudget,
         );
@@ -1320,7 +1337,7 @@ export function registerSessionRoutes(
       }
       // 与 WS init 对齐：只回最近一窗 turn + offset/total，更早的走 /messages 翻页。
       const windowed = windowMessagesForTransport(
-        enrichStructuredMessages(snapshot.messages ?? [], snapshot.id),
+        messages,
         config.cardDefaults ?? {},
       );
       res.json(toSessionDetailDTO(snapshot, {
@@ -1342,7 +1359,8 @@ export function registerSessionRoutes(
       res.status(404).json({ error: "未找到该会话，可能已被删除。" });
       return;
     }
-    const all = enrichStructuredMessages(snapshot.messages ?? [], snapshot.id);
+    const enriched = enrichStructuredMessages(snapshot.messages ?? [], snapshot.id);
+    const all = wantsCompactTools(req) ? compactToolMessagesForTransport(enriched) : enriched;
     const total = all.length;
 
     // Web history: fetch at most one block window *before* the currently
@@ -1416,7 +1434,7 @@ export function registerSessionRoutes(
         return;
       }
       const newSnapshot = await startResumedPtySession(processes, storage, existingSession, sessionId, defaultMode, body);
-      res.status(201).json(sessionResponseDTO(newSnapshot));
+      res.status(201).json(sessionResponseDTO(newSnapshot, req));
     } catch (error) {
       sendRouteError(res, error, "无法恢复会话。");
     }
@@ -1468,7 +1486,7 @@ export function registerSessionRoutes(
           workspaceTaskId: existingSession.workspaceTaskId,
           ...(requestedOrigin ?? {}),
         });
-        res.status(201).json({ resumedClaudeSessionId: claudeSessionId, ...sessionResponseDTO(newSnapshot) });
+        res.status(201).json({ resumedClaudeSessionId: claudeSessionId, ...sessionResponseDTO(newSnapshot, req) });
       } else {
         const cwd = body.cwd?.trim();
         if (!cwd) {
@@ -1485,7 +1503,7 @@ export function registerSessionRoutes(
           workspaceId: resolveWorkspaceIdForNewSession(storage, cwd),
           ...(requestedOrigin ?? {}),
         });
-        res.status(201).json({ resumedClaudeSessionId: claudeSessionId, ...sessionResponseDTO(newSnapshot) });
+        res.status(201).json({ resumedClaudeSessionId: claudeSessionId, ...sessionResponseDTO(newSnapshot, req) });
       }
     } catch (error) {
       sendRouteError(res, error, "无法按 Claude 会话 ID 恢复会话。");
@@ -1517,11 +1535,11 @@ export function registerSessionRoutes(
           if (!accepted) {
             throw new Error("未找到该结构化会话。");
           }
-          res.status(202).json(sessionResponseDTO(accepted));
+          res.status(202).json(sessionResponseDTO(accepted, req));
           return;
         }
         const snapshot = await completion;
-        res.json(sessionResponseDTO(snapshot));
+        res.json(sessionResponseDTO(snapshot, req));
         return;
       }
       const existingSession = processes.get(sessionId) || storage.getSession(sessionId);
@@ -1535,7 +1553,7 @@ export function registerSessionRoutes(
           res.status(202).json({ accepted: true, deliveryConfirmed: false });
           return;
         }
-        res.json(sessionResponseDTO(snapshot));
+        res.json(sessionResponseDTO(snapshot, req));
         return;
       }
       const snapshot = await processes.sendInputConfirmed(sessionId, input, view, shortcutKey);
@@ -1543,7 +1561,7 @@ export function registerSessionRoutes(
         res.status(202).json({ accepted: true });
         return;
       }
-      res.json(sessionResponseDTO(snapshot));
+      res.json(sessionResponseDTO(snapshot, req));
     } catch (error) {
       const response = getInputErrorResponse(error, sessionId);
       console.error("[wand] Input request failed", {
@@ -1572,7 +1590,7 @@ export function registerSessionRoutes(
         return;
       }
       const snapshot = processes.resize(req.params.id, body.cols ?? 0, body.rows ?? 0);
-      res.json(sessionResponseDTO(snapshot));
+      res.json(sessionResponseDTO(snapshot, req));
     } catch (error) {
       sendRouteError(res, error, "无法调整终端大小。");
     }
@@ -1581,7 +1599,7 @@ export function registerSessionRoutes(
   app.post("/api/sessions/:id/approve-permission", (req, res) => {
     try {
       if (sessions.ownerOf(req.params.id) === "structured") {
-        res.json(sessionResponseDTO(structured.approvePermission(req.params.id)));
+        res.json(sessionResponseDTO(structured.approvePermission(req.params.id), req));
         return;
       }
       const snapshot = sessions.get(req.params.id);
@@ -1589,7 +1607,7 @@ export function registerSessionRoutes(
         res.status(400).json({ error: "Codex provider 不支持权限批准操作。" });
         return;
       }
-      res.json(sessionResponseDTO(processes.approvePermission(req.params.id)));
+      res.json(sessionResponseDTO(processes.approvePermission(req.params.id), req));
     } catch (error) {
       sendRouteError(res, error, "无法批准该授权请求。");
     }
@@ -1598,7 +1616,7 @@ export function registerSessionRoutes(
   app.post("/api/sessions/:id/deny-permission", (req, res) => {
     try {
       if (sessions.ownerOf(req.params.id) === "structured") {
-        res.json(sessionResponseDTO(structured.denyPermission(req.params.id)));
+        res.json(sessionResponseDTO(structured.denyPermission(req.params.id), req));
         return;
       }
       const snapshot = sessions.get(req.params.id);
@@ -1606,7 +1624,7 @@ export function registerSessionRoutes(
         res.status(400).json({ error: "Codex provider 不支持权限拒绝操作。" });
         return;
       }
-      res.json(sessionResponseDTO(processes.denyPermission(req.params.id)));
+      res.json(sessionResponseDTO(processes.denyPermission(req.params.id), req));
     } catch (error) {
       sendRouteError(res, error, "无法拒绝该授权请求。");
     }
@@ -1615,7 +1633,7 @@ export function registerSessionRoutes(
   app.post("/api/sessions/:id/toggle-auto-approve", (req, res) => {
     try {
       if (sessions.ownerOf(req.params.id) === "structured") {
-        res.json(sessionResponseDTO(structured.toggleAutoApprove(req.params.id)));
+        res.json(sessionResponseDTO(structured.toggleAutoApprove(req.params.id), req));
         return;
       }
       const snapshot = sessions.get(req.params.id);
@@ -1623,7 +1641,7 @@ export function registerSessionRoutes(
         res.status(400).json({ error: "Codex provider 不支持自动批准切换。" });
         return;
       }
-      res.json(sessionResponseDTO(processes.toggleAutoApprove(req.params.id)));
+      res.json(sessionResponseDTO(processes.toggleAutoApprove(req.params.id), req));
     } catch (error) {
       sendRouteError(res, error, "无法切换自动批准状态。");
     }
@@ -1639,10 +1657,10 @@ export function registerSessionRoutes(
         return;
       }
       if (sessions.ownerOf(req.params.id) === "structured") {
-        res.json(sessionResponseDTO(structured.resolveEscalation(req.params.id, requestId, resolution)));
+        res.json(sessionResponseDTO(structured.resolveEscalation(req.params.id, requestId, resolution), req));
         return;
       }
-      res.json(sessionResponseDTO(processes.resolveEscalation(req.params.id, requestId, resolution)));
+      res.json(sessionResponseDTO(processes.resolveEscalation(req.params.id, requestId, resolution), req));
     } catch (error) {
       sendRouteError(res, error, "无法处理该授权请求。");
     }
@@ -1651,10 +1669,10 @@ export function registerSessionRoutes(
   app.post("/api/sessions/:id/stop", (req, res) => {
     try {
       if (sessions.ownerOf(req.params.id) === "structured") {
-        res.json(sessionResponseDTO(structured.stop(req.params.id)));
+        res.json(sessionResponseDTO(structured.stop(req.params.id), req));
         return;
       }
-      res.json(sessionResponseDTO(processes.stop(req.params.id)));
+      res.json(sessionResponseDTO(processes.stop(req.params.id), req));
     } catch (error) {
       sendRouteError(res, error, "无法停止会话。");
     }

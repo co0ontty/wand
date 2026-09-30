@@ -92,6 +92,65 @@ test("session HTTP interface preserves create, list, update, detail, and delete 
     assert.equal(boundedPage.messages[0].content[0].text, "large-138");
     messages.length = 0;
 
+    messages.push({ role: "assistant", content: [
+      { type: "tool_use", id: "lazy-edit", name: "Edit", input: {
+        file_path: "/repo/private.ts", old_string: "PRIVATE_OLD", new_string: "PRIVATE_NEW",
+      } },
+      { type: "tool_result", tool_use_id: "lazy-edit", content: "PRIVATE_RESULT" },
+    ] });
+    const legacyDetail = await (await fetch(
+      `${baseUrl}/api/sessions/${created.id}?format=chat&blockBudget=60`,
+    )).json() as { messages: Array<{ content: Array<Record<string, any>> }> };
+    assert.equal(legacyDetail.messages[0].content[0].input.old_string, "PRIVATE_OLD");
+    assert.equal(legacyDetail.messages[0].content[1].content, "PRIVATE_RESULT");
+    const compactHeaders = { "X-Wand-Tool-Projection": "compact" };
+    const compactDetail = await (await fetch(
+      `${baseUrl}/api/sessions/${created.id}?format=chat&blockBudget=60`,
+      { headers: compactHeaders },
+    )).json() as typeof legacyDetail;
+    assert.deepEqual(compactDetail.messages[0].content[0].input, {});
+    assert.equal(compactDetail.messages[0].content[0].activity.kind, "edit_file");
+    assert.equal(compactDetail.messages[0].content[1].content, "");
+    assert.equal(compactDetail.messages[0].content[1]._truncated, true);
+    assert.doesNotMatch(JSON.stringify(compactDetail.messages), /PRIVATE_|\/repo\/private\.ts/);
+    const compactPage = await (await fetch(
+      `${baseUrl}/api/sessions/${created.id}/messages?offset=0&limit=1`,
+      { headers: compactHeaders },
+    )).json() as { messages: Array<{ content: Array<Record<string, any>> }> };
+    assert.deepEqual(compactPage.messages[0].content[0].input, {});
+    const compactBlocks = await (await fetch(
+      `${baseUrl}/api/sessions/${created.id}/messages?turn=0&blockOffset=2&blockLimit=2`,
+      { headers: compactHeaders },
+    )).json() as { blocks: Array<Record<string, any>> };
+    assert.deepEqual(compactBlocks.blocks[0].input, {});
+    assert.equal(compactBlocks.blocks[1].content, "");
+    const structuredPageCompact = await (await fetch(
+      `${baseUrl}/api/structured-sessions/${created.id}/messages?offset=0&limit=1`,
+      { headers: compactHeaders },
+    )).json() as { messages: Array<{ content: Array<Record<string, any>> }> };
+    assert.deepEqual(structuredPageCompact.messages[0].content[0].input, {});
+    const complete = await (await fetch(
+      `${baseUrl}/api/sessions/${created.id}/tool-content/lazy-edit`,
+      { headers: compactHeaders },
+    )).json() as Record<string, any>;
+    assert.equal(complete.input.old_string, "PRIVATE_OLD");
+    assert.equal(complete.content, "PRIVATE_RESULT");
+    assert.equal(complete.pending, false);
+    assert.equal("tool_use" in complete, false);
+    assert.equal("tool_result" in complete, false);
+    messages.length = 0;
+    messages.push({ role: "assistant", content: [
+      { type: "tool_use", id: "pending-tool", name: "Bash", input: { command: "echo pending" } },
+    ] });
+    const pending = await (await fetch(
+      `${baseUrl}/api/sessions/${created.id}/tool-content/pending-tool`,
+      { headers: compactHeaders },
+    )).json() as Record<string, any>;
+    assert.equal(pending.input.command, "echo pending");
+    assert.equal(pending.content, "");
+    assert.equal(pending.pending, true);
+    messages.length = 0;
+
     const listResponse = await fetch(`${baseUrl}/api/sessions`);
     assert.equal(listResponse.status, 200);
     const listed = await listResponse.json() as Array<{ id: string; output: string }>;
@@ -232,6 +291,10 @@ test("session HTTP interface preserves create, list, update, detail, and delete 
     );
     assert.equal(changedPageResponse.status, 409);
 
+    messages.push({ role: "assistant", content: [
+      { type: "tool_use", id: "mutation-read", name: "Read", input: { file_path: "/private/mutation.txt" } },
+      { type: "tool_result", tool_use_id: "mutation-read", content: "PRIVATE_MUTATION_RESULT" },
+    ] });
     for (const [endpoint, body] of [
       ["model", { model: "anthropic/claude-sonnet-4-6" }],
       ["thinking-effort", { thinkingEffort: "deep" }],
@@ -243,7 +306,21 @@ test("session HTTP interface preserves create, list, update, detail, and delete 
         body: JSON.stringify(body),
       });
       assert.equal(response.status, 200);
+      const legacyMutation = await response.json() as { messages: Array<{ content: Array<Record<string, any>> }> };
+      assert.equal(legacyMutation.messages[0].content[0].input.file_path, "/private/mutation.txt");
+      assert.equal(legacyMutation.messages[0].content[1].content, "PRIVATE_MUTATION_RESULT");
+      const compactResponse = await fetch(`${baseUrl}/api/sessions/${created.id}/${endpoint}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "X-Wand-Tool-Projection": "compact" },
+        body: JSON.stringify(body),
+      });
+      assert.equal(compactResponse.status, 200);
+      const compactMutation = await compactResponse.json() as typeof legacyMutation;
+      assert.deepEqual(compactMutation.messages[0].content[0].input, {});
+      assert.equal(compactMutation.messages[0].content[1].content, "");
+      assert.doesNotMatch(JSON.stringify(compactMutation.messages), /PRIVATE_MUTATION|\/private\/mutation\.txt/);
     }
+    messages.length = 0;
 
     const detailResponse = await fetch(`${baseUrl}/api/sessions/${created.id}`);
     assert.equal(detailResponse.status, 200);

@@ -480,7 +480,8 @@ test("subagent execution surfaces stay compact, avatar-free, and follow the newe
     "key = { page -> activities.getOrNull(page)?.id",
     "pagerState.settledPage",
     "val motionEnabled = !reduceMotionEnabled()",
-    "collapseActivities = false",
+    "segmentScope = \"sub-${activity.id}\"",
+    "showSubagentTags = false",
     "snapshotFlow { scrollState.maxValue }",
     "LaunchedEffect(refreshToken)",
     "scrollState.scrollTo(maxValue)",
@@ -549,13 +550,15 @@ test("receipt headers carry icon + note, not a second status word", () => {
   );
 });
 
-test("activity folds stay consecutive and split when prose arrives", () => {
+test("tool activity summaries stay consecutive and split when prose arrives", () => {
   includesAll("src/web-ui/browser/chat-render.ts", [
     "flushPendingActivity(false)",
     "flushPendingActivity(true)",
     "opts.isTrailing",
     "isFoldableActivityBlock",
-    'class="chat-activity-top"',
+    'class="chat-activity-summary"',
+    'class="chat-activity-menu"',
+    "__activityEntryToggle",
   ]);
   assert.doesNotMatch(
     source("src/web-ui/browser/chat-render.ts"),
@@ -564,11 +567,18 @@ test("activity folds stay consecutive and split when prose arrives", () => {
   );
 
   includesAll("android/app/src/main/java/com/wand/app/ui/screens/ChatBlocks.kt", [
-    "连续思考/工具收成一条滚动窗口",
     "fun collapseActivityItems(",
-    // 本轮最后一段活动标记成「最新」：新的活动一出现，上一段自己收回状态条。
-    "newest = isLastTurn",
-    "LocalActivityWindowTail provides group.items.lastIndex",
+    "ToolActivitySummary(",
+    "isLastTurn && isResponding",
+  ]);
+  includesAll("android/app/src/main/java/com/wand/app/ui/screens/ToolActivitySummary.kt", [
+    "toolActivityCategories(",
+    "fetchToolDetail(sessionId, use.id)",
+    "ToolActivityEntryRow(",
+    "ToolActivitySingleDetail(",
+  ]);
+  includesAll("android/app/src/main/java/com/wand/app/data/WandSocket.kt", [
+    '.put("compactTools", true)',
   ]);
 
   includesAll("ios/Wand/ChatView.swift", [

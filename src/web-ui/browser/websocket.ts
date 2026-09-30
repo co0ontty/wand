@@ -27,6 +27,12 @@ import { scheduleGitStatusRefresh, startGitStatusPolling, stopGitStatusPolling }
 import { notifyLegacyUiChange } from "./ui-store-bridge";
 import { recordTerminalHistoryChunk } from "./terminal-history";
 
+function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return fetch(input, { ...init,
+    headers: { ...(init?.headers as Record<string, string> | undefined),
+      "X-Wand-Tool-Projection": "compact" } });
+}
+
 /**
  * 记录会话“这一轮是否还在生成”。落到 false 的那一刻说明 agent 刚动过工作区，
  * 顶栏快捷提交徽章得跟着重新取一次 git 状态（信号会成串到达，内部合并）。
@@ -870,7 +876,7 @@ function projectSelectedChat(sessionId: string): any {
         permissionPending.add(sessionId);
         syncComposerBadges();
         try {
-          const response = await fetch(url, {
+          const response = await compactSessionFetch(url, {
             method: "POST",
             credentials: "same-origin",
             ...(action === "approve-turn" ? {
@@ -903,7 +909,7 @@ function projectSelectedChat(sessionId: string): any {
         autoApprovePending.add(sessionId);
         syncComposerBadges();
         try {
-          const response = await fetch("/api/sessions/" + encodeURIComponent(sessionId) + "/toggle-auto-approve", {
+          const response = await compactSessionFetch("/api/sessions/" + encodeURIComponent(sessionId) + "/toggle-auto-approve", {
             method: "POST",
             credentials: "same-origin",
           });

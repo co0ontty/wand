@@ -6,7 +6,7 @@ import { compactThinkingLabel, dynamicThinkingChoices } from "../thinking-effort
 import { getErrorMessage } from "../../error-utils.js";
 
 import { mergeBlockWindowedMessages, mergeWindowedMessages, type MessageMergeSource } from "./message-reconciliation";
-import { ensureChatMessagesContainer, extractToolResultText, parseMessages, renderChat, scheduleChatRender } from "./chat-render";
+import { clearActivityDetailState, ensureChatMessagesContainer, extractToolResultText, parseMessages, renderChat, scheduleChatRender } from "./chat-render";
 import { bindChatScrollListener, normalizeStructuredSnapshot, persistSelectedId, restoreStructuredQueue, saveStructuredQueue, stripRenderOnlyStructuredMessages, syncStructuredQueueFromSession, updateChatUnreadBubble } from "./chat-scroll";
 import "./events";
 import { isSidebarDrawerLayout, terminalZoomFromKeyboard, updateFilePanelCwd, updateLayoutState } from "./file-browser";
@@ -37,6 +37,12 @@ import { hasPooledTerminal, isPooledTerminalBracketedPasteMode } from "./termina
 import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExtension, isClipboardImageMimeType } from "./pty-paste";
 
 const sessionReads = createSessionReads();
+
+function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return fetch(input, { ...init,
+    headers: { ...(init?.headers as Record<string, string> | undefined),
+      "X-Wand-Tool-Projection": "compact" } });
+}
 
       // 证书不受信任时浏览器会丢弃 Secure Cookie —— 密码正确也存不住登录态。
       // 这里揭示专用提示，并把「改用 HTTP」按钮指向同 host 的 http:// 地址。
@@ -696,7 +702,7 @@ const sessionReads = createSessionReads();
           if (prerequisite && !prerequisite.ok) {
             return { error: prerequisite.error || "切换模型失败" };
           }
-          return fetch("/api/sessions/" + encodeURIComponent(session.id) + "/thinking-effort", {
+          return compactSessionFetch("/api/sessions/" + encodeURIComponent(session.id) + "/thinking-effort", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             credentials: "same-origin",
@@ -833,7 +839,7 @@ const sessionReads = createSessionReads();
         if (!session) return;
         var prerequisite = { ok: false, error: "" };
         enqueueSessionConfigMutation(session.id, function() {
-          return fetch("/api/sessions/" + encodeURIComponent(session.id) + "/model", {
+          return compactSessionFetch("/api/sessions/" + encodeURIComponent(session.id) + "/model", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             credentials: "same-origin",
@@ -878,7 +884,7 @@ const sessionReads = createSessionReads();
         }
         setPendingSessionConfig(session.id, "mode", normalized);
         enqueueSessionConfigMutation(session.id, function() {
-          return fetch("/api/sessions/" + encodeURIComponent(session.id) + "/mode", {
+          return compactSessionFetch("/api/sessions/" + encodeURIComponent(session.id) + "/mode", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             credentials: "same-origin",
@@ -939,7 +945,7 @@ const sessionReads = createSessionReads();
           // 会被锁在「正在创建…」里直到模型答完，可能是几分钟。
           respondImmediately: prompt ? true : undefined,
         };
-        return fetch("/api/structured-sessions", {
+        return compactSessionFetch("/api/structured-sessions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
@@ -1043,6 +1049,7 @@ const sessionReads = createSessionReads();
           mode: hasPooledTerminal(sessionId) ? "add" : "replace",
           sessionId: sessionId,
           blockBudget: 60,
+          compactTools: true,
           capabilities: { ptyAck: true },
         }));
       }
@@ -1341,7 +1348,7 @@ const sessionReads = createSessionReads();
         if (shouldRequestChatFormat(sess)) {
           url += "?format=chat&blockBudget=60";
         }
-        return fetch(url, { credentials: "same-origin" })
+        return compactSessionFetch(url, { credentials: "same-origin" })
           .then(async function(res) {
             if (!read.isCurrent() || state.selectedId !== id) return;
             // Only a missing session warrants deselection; HTTP failures retain the current view.
@@ -1359,6 +1366,7 @@ const sessionReads = createSessionReads();
             if (data.missing) {
               // Session no longer exists — deselect and refresh list
               if (state.selectedId === id) {
+                clearActivityDetailState();
                 state.selectedId = null;
                 persistSelectedId();
               }
@@ -1430,7 +1438,7 @@ const sessionReads = createSessionReads();
           ? "/api/sessions/" + encodeURIComponent(id) + "/messages?turn=" + offset
             + "&blockOffset=" + blockOffset + "&blockLimit=60"
           : "/api/sessions/" + encodeURIComponent(id) + "/messages?before=" + offset + "&blockBudget=60";
-        fetch(url,
+        compactSessionFetch(url,
           { credentials: "same-origin" })
           .then(function(res) { return parseJsonResponse<any>(res); })
           .then(function(data) {
@@ -1503,6 +1511,7 @@ const sessionReads = createSessionReads();
         if (state.selectedId !== id) {
           teardownTerminal();
         }
+        clearActivityDetailState();
         state.selectedId = id;
         persistSelectedId();
         state.toolContentCache = {};
@@ -1556,6 +1565,7 @@ const sessionReads = createSessionReads();
       /** DOM-free home navigation used by the React shell command port. */
       export function goHome() {
         if (!state.selectedId) return;
+        clearActivityDetailState();
         state.selectedId = null;
         state.currentTask = null;
         state.currentMessages = [];
@@ -1974,7 +1984,7 @@ const sessionReads = createSessionReads();
         state.preferredCommand = provider;
         state.chatMode = getSafeModeForTool(provider, state.chatMode);
         return ensureTerminalReady().then(function() {
-          return fetch("/api/commands", {
+          return compactSessionFetch("/api/commands", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
@@ -2079,7 +2089,7 @@ const sessionReads = createSessionReads();
         if (options && options.workspaceId) body.workspaceId = options.workspaceId;
         if (options && options.workspaceTaskId) body.workspaceTaskId = options.workspaceTaskId;
         return ensureTerminalReady().then(function() {
-          return fetch("/api/commands", {
+          return compactSessionFetch("/api/commands", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             credentials: "same-origin",

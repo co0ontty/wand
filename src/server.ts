@@ -85,6 +85,8 @@ import {
   checkManagedServiceUpdatePreflight,
 } from "./update-helper.js";
 import { toSessionDetailDTO } from "./session-transport.js";
+import { compactToolMessagesForTransport, windowMessagesForTransport } from "./message-truncator.js";
+import { enrichStructuredMessages } from "./structured-client-protocol.js";
 import { registerUploadRoutes } from "./upload-routes.js";
 import { optimizePrompt, PromptOptimizeError } from "./prompt-optimizer.js";
 import { resolveDatabasePath, WandStorage, type AuthPrincipal, type AuthScope } from "./storage.js";
@@ -988,7 +990,17 @@ export async function startServer(
             }
           ));
       recordRecentPath(storage, snapshot.cwd);
-      res.status(201).json(toSessionDetailDTO(snapshot));
+      const compactTools = req.get("X-Wand-Tool-Projection") === "compact"
+        || req.query.compactTools === "1";
+      if (compactTools) {
+        const messages = compactToolMessagesForTransport(
+          enrichStructuredMessages(snapshot.messages ?? [], snapshot.id),
+        );
+        const windowed = windowMessagesForTransport(messages, config.cardDefaults ?? {});
+        res.status(201).json(toSessionDetailDTO(snapshot, windowed));
+      } else {
+        res.status(201).json(toSessionDetailDTO(snapshot));
+      }
     } catch (error) {
       sendRouteError(res, error, "无法启动命令。请检查命令是否安装。");
     }

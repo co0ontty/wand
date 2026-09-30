@@ -615,14 +615,8 @@ export function applyExpandedState(el: any, kind: string, expanded: boolean) {
     }
     case "activity": {
       el.setAttribute("data-expanded", expanded ? "true" : "false");
-      var activityBody = el.querySelector(".chat-activity-body");
-      if (activityBody) {
-        activityBody.setAttribute("aria-hidden", expanded ? "false" : "true");
-        if (expanded) {
-          el.classList.remove("is-unpinned");
-          activityBody.scrollTop = activityBody.scrollHeight;
-        }
-      }
+      var activityMenu = el.querySelector(".chat-activity-menu");
+      if (activityMenu) activityMenu.hidden = !expanded;
       var activitySummary = el.querySelector(".chat-activity-summary");
       if (activitySummary) activitySummary.setAttribute("aria-expanded", expanded ? "true" : "false");
       break;

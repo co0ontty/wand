@@ -544,6 +544,14 @@ export interface ToolUseBlock {
   name: string;
   description?: string;
   input: Record<string, unknown>;
+  /** Small transport-only label; the complete input is fetched when a tool is opened. */
+  activity?: {
+    kind: "edit_file" | "read_file" | "run_command" | "other";
+    label: string;
+    /** Opaque, stable identifier for counting repeated accesses to one file. */
+    fileKey?: string;
+    hasImage?: boolean;
+  };
   semantic?: ToolUseSemantic;
   __subagent?: SubagentMeta;
 }

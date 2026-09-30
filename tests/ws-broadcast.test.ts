@@ -39,6 +39,8 @@ interface TestClient {
   outputSeqBySession: Map<string, number>;
   pendingResyncSessions: Set<string>;
   blockBudget?: number;
+  compactTools?: boolean;
+  toolNamesBySession?: Map<string, Map<string, string>>;
   lastSeenAt: number;
   ptySubscriptions: Map<string, {
     supportsAck: boolean;
@@ -87,12 +89,60 @@ function createHarness(): {
     backpressurePaused: false,
     outputSeqBySession: new Map(),
     pendingResyncSessions: new Set(),
+    compactTools: false,
+    toolNamesBySession: new Map(),
     lastSeenAt: Date.now(),
     ptySubscriptions: new Map(),
   };
   manager.clients.add(client);
   return { manager, client, socket };
 }
+
+test("compact subscribers omit tool payloads in init and incremental frames while legacy keeps them", () => {
+  const compact = createHarness();
+  compact.client.compactTools = true;
+  const legacy = createHarness();
+  const messages: SessionSnapshot["messages"] = [
+    { role: "assistant", content: [
+      { type: "tool_use", id: "read-1", name: "Read", input: { file_path: "/private/file.txt" } },
+    ] },
+    { role: "assistant", content: [
+      { type: "tool_result", tool_use_id: "read-1", content: "PRIVATE RESULT" },
+    ] },
+  ];
+  const snapshot = {
+    id: "session-a", sessionKind: "structured", cwd: "/tmp", output: "", messages,
+  } as SessionSnapshot;
+  compact.manager.sendInit(compact.client, "session-a", snapshot, false);
+  legacy.manager.sendInit(legacy.client, "session-a", snapshot, false);
+  const compactInit = JSON.parse(compact.socket.sent[0]);
+  const legacyInit = JSON.parse(legacy.socket.sent[0]);
+  assert.deepEqual(compactInit.data.messages[0].content[0].input, {});
+  assert.equal(compactInit.data.messages[1].content[0].content, "");
+  assert.equal(legacyInit.data.messages[0].content[0].input.file_path, "/private/file.txt");
+  assert.equal(legacyInit.data.messages[1].content[0].content, "PRIVATE RESULT");
+
+  const lastMessage = { role: "assistant" as const, content: [
+    { type: "tool_result" as const, tool_use_id: "read-1", content: "NEXT PRIVATE RESULT" },
+  ] };
+  compact.manager.broadcast({ type: "output", sessionId: "session-a", data: {
+    incremental: true, lastMessage, messageCount: 2,
+  } });
+  legacy.manager.broadcast({ type: "output", sessionId: "session-a", data: {
+    incremental: true, lastMessage, messageCount: 2,
+  } });
+  assert.equal(JSON.parse(compact.socket.sent[1]).data.lastMessage.content[0].content, "");
+  assert.equal(JSON.parse(legacy.socket.sent[1]).data.lastMessage.content[0].content, "NEXT PRIVATE RESULT");
+
+  const full = createHarness();
+  full.client.compactTools = true;
+  full.manager.broadcast({ type: "output", sessionId: "session-a", data: {
+    messages, incremental: false,
+  } });
+  const fullFrame = JSON.parse(full.socket.sent[0]);
+  assert.deepEqual(fullFrame.data.messages[0].content[0].input, {});
+  assert.equal(fullFrame.data.messages[1].content[0].content, "");
+});
 
 test("R07: continuous small chunks retain the first output deadline and preserve raw byte order", (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });

@@ -10,13 +10,15 @@ import "./render";
 import { copyToClipboard, getPreferredMessages, isRecoverableToolError } from "./session-engine";
 import { buildTodoItemsHtml, buildTodoSegmentsHtml, summarizeTodoProgress } from "./todo-progress";
 import { renderStructuredStatusBar } from "./utils";
-import { clearActivityScrollMemory, getCardDefault, syncActivityWindows } from "./events";
+import { getCardDefault } from "./events";
 import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
 import { shouldExtractPtySystemInfo } from "./pty-system-info";
 import { codexActivityRe, codexFooterRe, isPtyCodexNoiseLine, isPtySystemInfoNoiseLine, isPtyTranscriptNoiseLine } from "./pty-noise";
 import { getToolDisplayName, getToolIcon } from "./tool-identity";
 import { localFilePreviewHref, localHttpPreviewHref } from "../react/local-preview/controller";
 import { catCoatGrid, memberCoatIndex } from "../react/ai-teams/cat-coats";
+import { parseJsonResponse } from "../react/http-adapter";
+import { groupToolActivities, TOOL_ACTIVITY_KINDS } from "./tool-activity";
 import { cachedSiliconEmployee, subscribeSiliconEmployeeCache } from "../react/agents/employee-repository.js";
 import {
   agentRunAccentSeed,
@@ -33,6 +35,22 @@ import {
   truncateInlineText,
 } from "./agent-runs";
 import "./local-preview-adapter";
+
+// Activity details survive streaming DOM refreshes, but are fetched only after
+// the user opens a specific entry. Completed responses share the existing cache.
+const activityDetailOpen = new Set<string>();
+const activityDetailRequests = new Map<string, Promise<any>>();
+const activityPendingDetails = new Map<string, any>();
+const activityResultRefreshRequested = new Set<string>();
+let activityDetailEpoch = 0;
+
+export function clearActivityDetailState(): void {
+  activityDetailEpoch++;
+  activityDetailOpen.clear();
+  activityDetailRequests.clear();
+  activityPendingDetails.clear();
+  activityResultRefreshRequested.clear();
+}
 
 
 
@@ -309,7 +327,26 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
   return selected ? { index: selected.index, top: selected.top } : null;
 }
 
-      export function doRenderChat(forceFullRender) {
+      export function doRenderChat(forceFullRender): void {
+        var sessionId = state.selectedId;
+        var epoch = state.chatRenderEpoch || 0;
+        var pendingToken = state.chatRenderPendingToken;
+        try {
+          paintChat(forceFullRender);
+        } catch (error) {
+          // A failed paint may already have mutated part of the DOM. Neither the
+          // previous row snapshot nor an old empty-state marker is then reliable.
+          // Invalidate only this paint's ownership, and repair on the next update.
+          if (state.selectedId === sessionId && (state.chatRenderEpoch || 0) === epoch
+            && state.chatRenderPendingToken === pendingToken) {
+            state.chatRenderCache?.reset();
+            state.lastRenderedEmpty = null;
+          }
+          throw error;
+        }
+      }
+
+      function paintChat(forceFullRender): void {
         var chatOutput = document.getElementById("chat-output");
         if (!chatOutput) return;
 
@@ -610,10 +647,6 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
             });
           }
         }
-
-        // 活动滚动窗口：贴尾的跟随最新活动，用户上滚过的保留他的位置。
-        // 子 Agent 执行卡已经改用主对话滚动，不在这里处理。
-        syncActivityWindows(chatMessages);
 
         // 发新消息后把"最后一条用户消息"之前的历史折叠成摘要卡（后处理，不动上面的 DOM diff）。
         applyHistoryCollapse(chatMessages, selectedSession);
@@ -2183,9 +2216,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         return '<div class="structured-tool-hint">已自动恢复一次 ' + escapeHtml(getToolDisplayName(toolName)) + ' 参数问题</div>';
       }
 
-      // 连续同类工具调用不再单独成组折叠：活动窗口（.chat-activity）已经把
-      // 整段思考 + 工具调用收成一个滚动窗口，再嵌一层「N 个调用」摘要会和窗口
-      // 头部的缩略信息重复（两层折叠、两份计数）。工具卡在窗口里直接平铺。
+      // 独立交互卡与图片卡不进活动摘要，照原内容顺序渲染。
       function passthroughToolBlocks(content) {
         var groups = [];
         for (var i = 0; i < content.length; i++) {
@@ -2373,25 +2404,11 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         return false;
       }
 
-      // 这个 tool_use 最终会渲染出图片吗？路径命中图片扩展名，或它的 tool_result
-      // 里带 image content block，都算。这类块必须常驻可见（不能被折叠藏起来）。
-      function toolBlockShowsImage(block, toolResults) {
-        if (!block || block.type !== "tool_use") return false;
-        var input = block.input || {};
-        var candidate = input.file_path || input.path || input.url || "";
-        if (typeof candidate === "string" && isImagePath(candidate)) return true;
-        var result = block.id && toolResults ? pickToolResultForDisplay(toolResults, block.id) : null;
-        if (result && extractToolResultImages(result.content).length > 0) return true;
-        return false;
-      }
-
-      function isFoldableActivityBlock(block, toolResults) {
+      function isFoldableActivityBlock(block) {
         if (!block) return false;
-        if (block.type === "thinking") return true;
         if (block.type === "tool_use") {
-          // 图片相关的调用直接常驻渲染缩略图，不折进默认折叠的窗口里藏起来。
-          if (toolBlockShowsImage(block, toolResults)) return false;
-          return true;
+          // 服务端只给可延后载入的普通工具附 activity；独立交互和图片卡保持原位。
+          return !!block.activity;
         }
         return false;
       }
@@ -2406,16 +2423,6 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         var text = String(value || "").replace(/\s+/g, " ").trim();
         if (!text) return "";
         return text.length > max ? "…" + text.slice(-(max - 1)) : text;
-      }
-
-      function activityKindOf(name) {
-        var lower = String(name || "").toLowerCase();
-        if (/read|inspect|view|open|list|load/.test(lower)) return "read";
-        if (/bash|exec|command|shell|stdin|terminal/.test(lower)) return "command";
-        if (/grep|glob|search|find|query|lookup/.test(lower)) return "search";
-        if (/edit|write|patch|replace|notebook/.test(lower)) return "edit";
-        if (/web|fetch|http|url|browser/.test(lower)) return "web";
-        return "other";
       }
 
       // 单条活动的「人类可读」描述，用作折叠条的最新内容文本。
@@ -2453,189 +2460,312 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
       }
 
       var ACTIVITY_KIND_META = {
-        read: "浏览", command: "命令", search: "搜索",
-        edit: "编辑", web: "网页", other: "调用", thinking: "思考"
+        edit_file: { summary: "修改了", unit: "个文件", item: "修改文件" },
+        read_file: { summary: "查看了", unit: "个文件", item: "查看文件" },
+        run_command: { summary: "运行了", unit: "条命令", item: "运行命令" },
+        other: { summary: "使用了", unit: "次工具", item: "使用工具" },
       };
 
-      // 本轮 assistant turn 是否还在流式生成。只有「最后一条消息 + inFlight」
+      // 本轮 assistant turn 是否还在流式生成。只有「最后一条消息 + busy」
       // 才算活跃，避免历史 turn 的状态条常亮。
       function isTurnActivityLive(messageIndex) {
         var total = Array.isArray(state.currentMessages) ? state.currentMessages.length : 0;
         if (typeof messageIndex !== "number" || messageIndex !== total - 1) return false;
         var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
         if (!session) return false;
-        return !!(session.structuredState && session.structuredState.inFlight) && session.status === "running";
+        var busy = !!(session.structuredState && session.structuredState.inFlight) ||
+          session.ptyBusy === true || session.isResponding === true;
+        return busy && session.status === "running";
       }
 
       function summarizeActivityRun(items) {
-        var counts = { read: 0, command: 0, search: 0, edit: 0, web: 0, other: 0, thinking: 0 };
-        for (var i = 0; i < items.length; i++) {
-          var block = items[i].block;
-          if (isHiddenActivityBlock(block)) continue;
-          if (block.type === "thinking") {
-            counts.thinking++;
-            continue;
-          }
-          if (block.type !== "tool_use") continue;
-          counts[activityKindOf(block.name)]++;
-        }
+        var groups = groupToolActivities(items);
         var parts = [];
-        for (var kind in ACTIVITY_KIND_META) {
-          if (counts[kind] > 0) parts.push(ACTIVITY_KIND_META[kind] + " " + counts[kind]);
+        for (var j = 0; j < TOOL_ACTIVITY_KINDS.length; j++) {
+          var summaryKind = TOOL_ACTIVITY_KINDS[j];
+          var count = groups[summaryKind].length;
+          if (count > 0) {
+            var kindMeta = ACTIVITY_KIND_META[summaryKind];
+            parts.push(kindMeta.summary + count + kindMeta.unit);
+          }
         }
-        return { meta: parts.join(" · ") };
+        return { groups: groups, parts: parts };
       }
 
-      /**
-       * 窗口里的条目默认展开态。滚动窗口按「只有最新的一条展开」呈现：新活动到达后，
-       * 更早的思考 / 工具调用都退化成一行摘要，窗口始终停在最新那一条的真实内容上。
-       * 用户手动展开过的条目由持久化状态覆盖这里的默认值。
-       */
+      /** Existing tool renderers still use their own defaults outside the activity menu. */
       function resolveCardExpanded(persisted, opts, index, fallback) {
-        if (persisted !== null && persisted !== undefined) return persisted;
-        if (!opts || !opts.activityBody) return fallback;
-        if (typeof opts.activityTailIndex !== "number") return fallback;
-        return index === opts.activityTailIndex;
+        void opts;
+        void index;
+        return persisted !== null && persisted !== undefined ? persisted : fallback;
+      }
+
+      function activityDetailCacheKey(sessionId, toolId) {
+        return String(sessionId || "") + ":" + String(toolId || "");
+      }
+
+      function fetchActivityToolDetail(sessionId, toolId) {
+        if (!sessionId || !toolId) return Promise.reject(new Error("工具详情不可用"));
+        var cacheKey = activityDetailCacheKey(sessionId, toolId);
+        var cached = state.toolContentCache[cacheKey];
+        if (cached && Object.prototype.hasOwnProperty.call(cached, "input")) {
+          return Promise.resolve(cached);
+        }
+        var inFlight = activityDetailRequests.get(cacheKey);
+        if (inFlight) return inFlight;
+        var requestedEpoch = activityDetailEpoch;
+        var request = fetch("/api/sessions/" + encodeURIComponent(sessionId) +
+          "/tool-content/" + encodeURIComponent(toolId), { credentials: "same-origin" })
+          .then(function(response) { return parseJsonResponse<any>(response); })
+          .then(function(data) {
+            if (requestedEpoch !== activityDetailEpoch || state.selectedId !== sessionId) return data;
+            if (data && data.pending) activityPendingDetails.set(cacheKey, data);
+            else {
+              state.toolContentCache[cacheKey] = data;
+              activityPendingDetails.delete(cacheKey);
+            }
+            return data;
+          })
+          .finally(function() {
+            if (activityDetailRequests.get(cacheKey) === request) activityDetailRequests.delete(cacheKey);
+          });
+        activityDetailRequests.set(cacheKey, request);
+        return request;
+      }
+
+      function renderActivityEntryDetails(entry, messageKey, segmentFirstIndex, toolResults, running) {
+        var content = "";
+        for (var c = 0; c < entry.calls.length; c++) {
+          var call = entry.calls[c];
+          var block = call.block;
+          var cacheKey = activityDetailCacheKey(state.selectedId, block.id);
+          var detail = state.toolContentCache[cacheKey] || activityPendingDetails.get(cacheKey);
+          if (!detail || !Object.prototype.hasOwnProperty.call(detail, "input")) {
+            content += '<div class="chat-activity-loading">加载详情…</div>';
+            continue;
+          }
+          if (detail.pending && pickToolResultForDisplay(toolResults, block.id) &&
+            !activityResultRefreshRequested.has(cacheKey)) {
+            // A result arrived after an already-open running detail. Refresh it once,
+            // using the same on-demand endpoint; unopened entries never request data.
+            activityResultRefreshRequested.add(cacheKey);
+            var sessionId = state.selectedId;
+            fetchActivityToolDetail(sessionId, block.id).then(function() {
+              if (state.selectedId === sessionId) renderChat(true);
+            }).catch(function() { /* The entry can be reopened to retry. */ });
+          }
+          if (detail.pending) {
+            content += '<div class="chat-activity-pending-detail">' +
+              '<div class="chat-activity-pending-label">' + (running ? "执行中" : "结果未返回") + '</div>' +
+              '<pre class="tool-use-content">' + escapeHtml(JSON.stringify(detail.input || {}, null, 2)) + '</pre>' +
+            '</div>';
+            continue;
+          }
+          var hydrated = Object.assign({}, block, { input: detail.input || {} });
+          var results = {} as any;
+          if (detail.resultAvailable !== false && !detail.pending) {
+            results[block.id] = [{
+              type: "tool_result",
+              tool_use_id: block.id,
+              content: detail.content,
+              is_error: !!detail.is_error,
+            }];
+          }
+          content += renderContentBlock(hydrated, "assistant", results,
+            call.index + segmentFirstIndex, messageKey,
+            { noActivityFold: true, forceExpandedToolBodies: true });
+        }
+        return content;
       }
 
       function renderActivityFold(items, role, toolResults, messageKey, segmentFirstIndex, options?: any) {
         var opts = options || {};
-        var visible = [];
-        for (var i = 0; i < items.length; i++) {
-          if (!isHiddenActivityBlock(items[i].block)) visible.push(items[i]);
-        }
-        // 全是空块（空 thinking / 已被消费的 tool_result）：保持旧行为不渲染，
-        // 避免留下一个只有外框的空气盒子。
-        if (!visible.length) return "";
-
         var summary = summarizeActivityRun(items);
-        // 运行态：只有「当前正在流式生成的最后一条 assistant 消息」里、位于消息
-        // 尾部、且还没被正文截断的那一段才算运行中。中间被正文切开的条一律已完成。
-        // 只要这条还在当前轮尾部、会话仍在跑，就保持「进行中」：工具刚结束、
-        // 下一轮思考还没到时也算运行，避免被误当成卡住/结束。
+        if (!summary.parts.length) return "";
+        // 只有当前轮尾部流式活动才呼吸，历史摘要保持安静。
         var running = !!opts.isTrailing && isTurnActivityLive(_currentMessageGlobalIndex);
-        // 滚动窗口只开最新的一段：同一条回复里更早的活动段默认收起成状态条，
-        // 新的活动一出现就把上一段收回去，避免一屏堆着好几个展开的窗口。
-        // 最新一段只在本条消息位于会话末尾时才自动展开（历史回复保持紧凑）。
-        var isLatestMessage = !!state.currentMessages &&
-          _currentMessageGlobalIndex === state.currentMessages.length - 1;
-        var isNewestRun = !!opts.isNewestRun && isLatestMessage;
-        // expand key 只绑 run 的起点，流式期间不断追加 item 也不会让已展开的
-        // 用户视图被重置回折叠态。
         var runStart = items.length ? items[0].index : 0;
-        var expandKey = buildExpandKey("activity", [messageKey, segmentFirstIndex, runStart]);
+        var expandKey = buildExpandKey("activity-menu", [messageKey, segmentFirstIndex, runStart]);
         var persisted = getPersistedExpandState(expandKey);
-        var expanded = resolveCardExpanded(persisted, null, -1, running || isNewestRun);
-
-        var blocksOnly = [];
-        // blocksOnly 里跳过的是隐藏块（空 thinking / 已消费的 tool_result），行号不再等于
-        // 原块下标；把每张卡真正对应的块下标一并传下去，展开状态键才不会错位。
-        var bodyIndices = [];
-        var tailIndex = -1;
-        for (var b = 0; b < items.length; b++) {
-          blocksOnly.push(items[b].block);
-          bodyIndices.push(items[b].index + segmentFirstIndex);
-          if (!isHiddenActivityBlock(items[b].block)) tailIndex = bodyIndices[b];
+        var expanded = persisted === true;
+        var menuHtml = "";
+        for (var k = 0; k < TOOL_ACTIVITY_KINDS.length; k++) {
+          var kind = TOOL_ACTIVITY_KINDS[k];
+          var entries = summary.groups[kind];
+          if (!entries.length) continue;
+          var groupMeta = ACTIVITY_KIND_META[kind];
+          menuHtml += '<section class="chat-activity-group" aria-label="' +
+            escapeHtml(groupMeta.summary + entries.length + groupMeta.unit) + '">' +
+            '<div class="chat-activity-group-title">' +
+              escapeHtml(groupMeta.summary + entries.length + groupMeta.unit) +
+            '</div>';
+          for (var e = 0; e < entries.length; e++) {
+            var entry = entries[e];
+            var entryKey = buildExpandKey("activity-detail", [state.selectedId, messageKey,
+              segmentFirstIndex, runStart, entry.key]);
+            var entryOpen = activityDetailOpen.has(entryKey);
+            var itemLabel = groupMeta.item + (entries.length > 1 ? " " + (e + 1) : "");
+            var ids = entry.calls.map(function(call) { return String(call.block.id || ""); }).filter(Boolean);
+            var detailHtml = entryOpen && expanded
+              ? renderActivityEntryDetails(entry, messageKey, segmentFirstIndex, toolResults, running)
+              : "";
+            menuHtml += '<div class="chat-activity-entry" data-entry-key="' + escapeHtml(entryKey) +
+              '" data-tool-ids="' + escapeHtml(JSON.stringify(ids)) +
+              '" data-expanded="' + (entryOpen ? "true" : "false") + '">' +
+                '<button type="button" class="chat-activity-entry-button" aria-expanded="' +
+                  (entryOpen ? "true" : "false") + '" onclick="__activityEntryToggle(this)">' +
+                  '<span>' + escapeHtml(itemLabel) + '</span>' +
+                  '<span class="chat-activity-entry-arrow">' + iconSvg("chevronDown", { size: 13 }) + '</span>' +
+                '</button>' +
+                '<div class="chat-activity-entry-detail"' + (entryOpen ? "" : " hidden") + '>' + detailHtml + '</div>' +
+              '</div>';
+          }
+          menuHtml += '</section>';
         }
-        var bodyHtml = buildSegmentBlocksHtml(
-          blocksOnly,
-          segmentFirstIndex + runStart,
-          role,
-          toolResults,
-          messageKey,
-          Object.assign({}, opts, {
-            noActivityFold: true,
-            activityBody: true,
-            activityBodyIndices: bodyIndices,
-            activityTailIndex: tailIndex,
-          })
-        );
 
         return '<div class="chat-activity' + (running ? ' is-running' : '') + '" ' +
             'data-expand-kind="activity" ' +
             'data-expand-key="' + escapeHtml(expandKey) + '" ' +
             'data-expanded="' + (expanded ? "true" : "false") + '">' +
           '<button type="button" class="chat-activity-summary" aria-expanded="' + (expanded ? "true" : "false") + '" onclick="__activityToggle(this)">' +
-            '<span class="chat-activity-top">' +
-              (summary.meta ? '<span class="chat-activity-meta">' + escapeHtml(summary.meta) + '</span>' : "") +
-              '<span class="chat-activity-count">' + visible.length + '</span>' +
-              '<span class="chat-activity-chevron">' + iconSvg("chevronDown", { size: 14, strokeWidth: 2 }) + '</span>' +
-            '</span>' +
+            '<span class="chat-activity-meta">' + summary.parts.map(function(part) {
+              return '<span class="chat-activity-meta-item">' + escapeHtml(part) + '</span>';
+            }).join('<span class="chat-activity-separator" aria-hidden="true">·</span>') + '</span>' +
+            '<span class="chat-activity-chevron">' + iconSvg("chevronDown", { size: 13, strokeWidth: 2 }) + '</span>' +
           '</button>' +
-          '<div class="chat-activity-window">' +
-            '<div class="chat-activity-body" role="log" tabindex="0" aria-label="活动记录" aria-hidden="' + (expanded ? "false" : "true") + '">' + bodyHtml + '</div>' +
-            '<button type="button" class="chat-activity-tail" onclick="__activityJumpToTail(this)" aria-label="回到最新活动">' +
-              iconSvg("chevronDown", { size: 12, strokeWidth: 2.4 }) +
-              '<span>回到最新</span>' +
-            '</button>' +
-          '</div>' +
+          '<div class="chat-activity-menu"' + (expanded ? "" : " hidden") + '>' + menuHtml + '</div>' +
         '</div>';
       }
 
-      // 用户主动贴尾：清掉「离尾」状态，后续刷新重新跟随最新活动。
-      (window as any).__activityJumpToTail = function(node) {
-        var wrap = node && node.closest ? node.closest(".chat-activity") : null;
-        var body = wrap ? wrap.querySelector(".chat-activity-body") : null;
-        if (!wrap || !body) return;
-        clearActivityScrollMemory(wrap.getAttribute("data-expand-key"));
-        wrap.classList.remove("is-unpinned");
-        body.scrollTop = body.scrollHeight;
-      };
+      function closeActivityMenu(wrap, restoreFocus) {
+        if (!wrap || wrap.getAttribute("data-expanded") !== "true") return;
+        wrap.setAttribute("data-expanded", "false");
+        var menu = wrap.querySelector(".chat-activity-menu");
+        var summary = wrap.querySelector(".chat-activity-summary");
+        if (menu) menu.hidden = true;
+        var openEntries = wrap.querySelectorAll('.chat-activity-entry[data-expanded="true"]');
+        for (var i = 0; i < openEntries.length; i++) {
+          var entry = openEntries[i];
+          activityDetailOpen.delete(entry.getAttribute("data-entry-key") || "");
+          entry.setAttribute("data-expanded", "false");
+          var entryButton = entry.querySelector(".chat-activity-entry-button");
+          var entryDetail = entry.querySelector(".chat-activity-entry-detail");
+          if (entryButton) entryButton.setAttribute("aria-expanded", "false");
+          if (entryDetail) entryDetail.hidden = true;
+        }
+        if (summary) {
+          summary.setAttribute("aria-expanded", "false");
+          if (restoreFocus) summary.focus();
+        }
+        var key = wrap.getAttribute("data-expand-key");
+        if (key) setPersistedExpandState(key, false);
+      }
 
-      // 展开 / 收起活动窗口。展开时内部滚动到尾部（显示最新活动），
-      // 折叠时只留状态条。状态按 expand key 持久化到 localStorage。
       (window as any).__activityToggle = function(btn) {
         var wrap = btn && btn.closest ? btn.closest(".chat-activity") : null;
         if (!wrap) return;
         var nowExpanded = wrap.getAttribute("data-expanded") !== "true";
-        wrap.setAttribute("data-expanded", nowExpanded ? "true" : "false");
-        if (btn.setAttribute) btn.setAttribute("aria-expanded", nowExpanded ? "true" : "false");
-        var body = wrap.querySelector(".chat-activity-body");
-        if (body) {
-          body.setAttribute("aria-hidden", nowExpanded ? "false" : "true");
-          if (nowExpanded) {
-            // 展开的瞬间直接停在最新一条：清掉旧的离尾记录，之后由跟随逻辑接管。
-            clearActivityScrollMemory(wrap.getAttribute("data-expand-key"));
-            wrap.classList.remove("is-unpinned");
-            body.scrollTop = body.scrollHeight;
-          }
+        if (!nowExpanded) {
+          closeActivityMenu(wrap, false);
+          return;
         }
+        var openMenus = document.querySelectorAll('.chat-activity[data-expanded="true"]');
+        for (var i = 0; i < openMenus.length; i++) closeActivityMenu(openMenus[i], false);
+        wrap.setAttribute("data-expanded", "true");
+        btn.setAttribute("aria-expanded", "true");
+        var menu = wrap.querySelector(".chat-activity-menu");
+        if (menu) menu.hidden = false;
         var key = wrap.getAttribute("data-expand-key");
-        if (key) setPersistedExpandState(key, nowExpanded);
+        if (key) setPersistedExpandState(key, true);
       };
 
-      // 渲染一组普通（非 Agent Run）内容 blocks。活动窗口内直接平铺工具卡，
-      // 偏移到原数组全局位置，保持 expand key 唯一。
+      (window as any).__activityEntryToggle = function(btn) {
+        var row = btn && btn.closest ? btn.closest(".chat-activity-entry") : null;
+        if (!row) return;
+        var key = row.getAttribute("data-entry-key") || "";
+        var detail = row.querySelector(".chat-activity-entry-detail");
+        var nowExpanded = row.getAttribute("data-expanded") !== "true";
+        row.setAttribute("data-expanded", nowExpanded ? "true" : "false");
+        btn.setAttribute("aria-expanded", nowExpanded ? "true" : "false");
+        if (detail) detail.hidden = !nowExpanded;
+        if (!nowExpanded) {
+          activityDetailOpen.delete(key);
+          return;
+        }
+        activityDetailOpen.add(key);
+        if (detail) detail.innerHTML = '<span class="chat-activity-loading">加载详情…</span>';
+        var sessionId = state.selectedId;
+        var ids: string[] = [];
+        try { ids = JSON.parse(row.getAttribute("data-tool-ids") || "[]"); } catch (_e) {}
+        if (!ids.length) {
+          if (detail) detail.textContent = "这条调用没有可读取的详情。";
+          return;
+        }
+        if (ids.every(function(id) {
+          var cached = state.toolContentCache[activityDetailCacheKey(sessionId, id)];
+          return cached && Object.prototype.hasOwnProperty.call(cached, "input");
+        })) {
+          renderChat(true);
+          return;
+        }
+        Promise.all(ids.map(function(id) { return fetchActivityToolDetail(sessionId, id); }))
+          .then(function() {
+            if (state.selectedId === sessionId && activityDetailOpen.has(key)) renderChat(true);
+          })
+          .catch(function(error) {
+            if (!row.isConnected || state.selectedId !== sessionId || !detail) return;
+            detail.innerHTML = '<button type="button" class="chat-activity-retry">' +
+              escapeHtml(String(error && error.message || "加载失败")) + '，点击重试</button>';
+            var retry = detail.querySelector(".chat-activity-retry");
+            if (retry) retry.onclick = function() {
+              activityDetailOpen.delete(key);
+              row.setAttribute("data-expanded", "false");
+              (window as any).__activityEntryToggle(btn);
+            };
+          });
+      };
+
+      if (!(window as any).__activityDismissBound) {
+        (window as any).__activityDismissBound = true;
+        document.addEventListener("pointerdown", function(event) {
+          var target = event.target as HTMLElement;
+          if (target && target.closest && target.closest(".chat-activity")) return;
+          var openMenus = document.querySelectorAll('.chat-activity[data-expanded="true"]');
+          for (var i = 0; i < openMenus.length; i++) closeActivityMenu(openMenus[i], false);
+        });
+        document.addEventListener("keydown", function(event) {
+          if (event.key !== "Escape") return;
+          var openMenu = document.querySelector('.chat-activity[data-expanded="true"]');
+          if (!openMenu) return;
+          closeActivityMenu(openMenu, true);
+          event.preventDefault();
+        });
+      }
+
+      // 渲染一组普通（非 Agent Run）内容 blocks。只有带轻量 activity 元数据的
+      // 调用进入摘要；交互式/图片工具和普通正文保持原位。
       function buildSegmentBlocksHtml(segmentBlocks, segmentFirstIndex, role, toolResults, messageKey, options?: any) {
         var html = "";
         var opts = options || {};
-        // 活动折叠：连续 thinking / 工具调用收成一条状态条；正文、图片保持原位。
+        // 连续普通工具调用收成一行摘要；其余内容保持原位。
         if (ACTIVITY_FOLD_ENABLED && !opts.noActivityFold && role === "assistant") {
           try {
-            // 先找最后一段可折叠活动的起点：它就是这条消息里最新的活动窗口，
-            // 默认展开；其它历史窗口默认收起。
-            var newestActivityStart = -1;
-            for (var ni = 0; ni < segmentBlocks.length; ni++) {
-              if (isFoldableActivityBlock(segmentBlocks[ni], toolResults)) newestActivityStart = ni;
-            }
             var pendingActivity = [];
             var flushPendingActivity = function(isTrailing) {
               if (!pendingActivity.length) return;
-              var isNewestRun = pendingActivity[pendingActivity.length - 1].index === newestActivityStart;
               html += renderActivityFold(
                 pendingActivity,
                 role,
                 toolResults,
                 messageKey,
                 segmentFirstIndex,
-                Object.assign({}, opts, { isTrailing: !!isTrailing, isNewestRun: isNewestRun })
+                Object.assign({}, opts, { isTrailing: !!isTrailing })
               );
               pendingActivity = [];
             };
             for (var fi = 0; fi < segmentBlocks.length; fi++) {
               var fBlock = segmentBlocks[fi];
               if (isHiddenActivityBlock(fBlock)) continue;
-              if (isFoldableActivityBlock(fBlock, toolResults)) {
+              if (isFoldableActivityBlock(fBlock)) {
                 pendingActivity.push({ block: fBlock, index: fi });
               } else {
                 flushPendingActivity(false);
@@ -2653,12 +2783,8 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           for (var g = 0; g < groups.length; g++) {
             var grp = groups[g];
             try {
-              // 活动窗口里按块的真实下标渲染（见 renderActivityFold 的 bodyIndices）。
-              var blockIndex = opts.activityBodyIndices &&
-                typeof opts.activityBodyIndices[grp.index] === "number"
-                ? opts.activityBodyIndices[grp.index]
-                : grp.index + segmentFirstIndex;
-              html += renderContentBlock(grp.block, role, toolResults, blockIndex, messageKey, opts);
+              html += renderContentBlock(grp.block, role, toolResults,
+                grp.index + segmentFirstIndex, messageKey, opts);
             } catch (e) {
               html += '<div class="render-error">消息块渲染失败</div>';
             }

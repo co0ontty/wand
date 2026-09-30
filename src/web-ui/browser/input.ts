@@ -5,7 +5,7 @@ import { parseJsonResponse } from "../react/http-adapter";
 import { getErrorMessage } from "../../error-utils.js";
 import { MOTION_DWELL_FAILED_MS, MOTION_DWELL_SENT_MS } from "../react/ui/motion-tokens";
 import { collapseTodoProgress, computeRunningSignal, escapeHtml } from "./utils";
-import { renderChat, shortCommand } from "./chat-render";
+import { clearActivityDetailState, renderChat, shortCommand } from "./chat-render";
 import { getStructuredQueuedInputs, persistCrossSessionQueue, persistSelectedId, prepareChatBottomFollow, stripRenderOnlyStructuredMessages, syncStructuredQueueFromSession } from "./chat-scroll";
 import "./file-browser";
 import "./git-commit";
@@ -25,6 +25,12 @@ import { showActionError } from "./composer-action-error";
 import { syncBrowserComposerVoice } from "./composer-voice-adapter";
 import { shouldPersistQueueItemRestore } from "./composer-draft";
 import { resolveInsertBeforeAnchor } from "./queue-dom";
+
+function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return fetch(input, { ...init,
+    headers: { ...(init?.headers as Record<string, string> | undefined),
+      "X-Wand-Tool-Projection": "compact" } });
+}
 
       // 改为在识别回调里调用 updateVoiceTranscript(累积文本) 即可，交互层不用动。
       // ─────────────────────────────────────────────────────────────────
@@ -290,7 +296,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         if (session.id === state.selectedId) updateQueueBar();
         var label = session.title || shortCommand(session.command) || "当前会话";
         showToast("已加入「" + label + "」的排队，回复结束后自动发送（含上下文）。", "info");
-        return fetch("/api/structured-sessions/" + session.id + "/messages", {
+        return compactSessionFetch("/api/structured-sessions/" + session.id + "/messages", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
@@ -369,7 +375,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
           return;
         }
         _queueLaunching = true;
-        fetch("/api/commands", {
+        compactSessionFetch("/api/commands", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
@@ -404,7 +410,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         persistCrossSessionQueue();
         renderCrossSessionQueue();
         // 立即发送不受 _queueLaunching 限制
-        fetch("/api/commands", {
+        compactSessionFetch("/api/commands", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
@@ -630,7 +636,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         var mode = state.chatMode || "managed";
         var defaultCwd = getEffectiveCwd();
         var preferredTool = getPreferredTool();
-        fetch("/api/commands", {
+        compactSessionFetch("/api/commands", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
@@ -1069,7 +1075,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         // 用 session.id（参数绑定，in-flight 期间不变）而不是 state.selectedId
         // 拼 URL，避免用户切到别的会话后 fetch 落到错误 sessionId。
         var requestAccepted = false;
-        return fetch("/api/structured-sessions/" + session.id + "/messages", {
+        return compactSessionFetch("/api/structured-sessions/" + session.id + "/messages", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
@@ -1434,7 +1440,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         if (!edited.trim()) { flashComposerFailed("排队消息不能为空。"); return; }
         var mutationVersion = composerQueue.advance(session.id, "local");
         try {
-          var res = await fetch("/api/structured-sessions/" + encodeURIComponent(session.id) + "/queued/" + index, {
+          var res = await compactSessionFetch("/api/structured-sessions/" + encodeURIComponent(session.id) + "/queued/" + index, {
             method: "PATCH", credentials: "same-origin",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ expectedText: original, text: edited }),
@@ -1459,7 +1465,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, refreshed.output, false));
         renderChat(true);
         updateQueueBar();
-        fetch("/api/structured-sessions/" + session.id + "/queued/" + index, {
+        compactSessionFetch("/api/structured-sessions/" + session.id + "/queued/" + index, {
           method: "DELETE",
           credentials: "same-origin",
         })
@@ -1489,7 +1495,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, refreshed.output, false));
         renderChat(true);
         updateQueueBar();
-        fetch("/api/structured-sessions/" + session.id + "/queued", {
+        compactSessionFetch("/api/structured-sessions/" + session.id + "/queued", {
           method: "DELETE",
           credentials: "same-origin",
         })
@@ -1540,7 +1546,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         // 接下来发生什么；不再是右上角飘走的气泡。
         flashComposerSending(inFlight ? "正在插队发送，准备打断当前回复…" : "正在发送这条…");
 
-        fetch("/api/structured-sessions/" + session.id + "/queued/" + index + "/promote", {
+        compactSessionFetch("/api/structured-sessions/" + session.id + "/queued/" + index + "/promote", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
@@ -1726,7 +1732,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         updateSessionSnapshot({ id: session.id, queuedMessages: nextQueue });
         updateQueueBar();
 
-        fetch("/api/structured-sessions/" + session.id + "/queued", {
+        compactSessionFetch("/api/structured-sessions/" + session.id + "/queued", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
@@ -2066,7 +2072,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         }
 
         var requestAccepted = false;
-        return fetch("/api/sessions/" + requestSessionId + "/input", {
+        return compactSessionFetch("/api/sessions/" + requestSessionId + "/input", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
@@ -2689,7 +2695,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         // 同 postInput：flushPendingMessages 重连后批量回放离线消息时，
         // 用户可能已在切到别的会话，必须用本次请求的 sessionId 快照。
         var requestSessionId = state.selectedId;
-        return fetch("/api/sessions/" + requestSessionId + "/input", {
+        return compactSessionFetch("/api/sessions/" + requestSessionId + "/input", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
@@ -2739,7 +2745,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
           if (!ok) return;
           // 确认期间用户可能切走会话，沿用确认时捕获的 id，避免停错会话。
           if (state.selectedId !== id) return;
-          fetch("/api/sessions/" + id + "/stop", { method: "POST", credentials: "same-origin" })
+          compactSessionFetch("/api/sessions/" + id + "/stop", { method: "POST", credentials: "same-origin" })
             .then(function(res) {
               if (!res.ok) throw new Error("无法停止当前回复（HTTP " + res.status + "）。");
               // 停止的结果在原位读：按钮已从「停止」变回「发送」，状态行说明结论。
@@ -2756,7 +2762,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
         var session = state.sessions.find(function(candidate: any) { return candidate.id === id; });
         var providerSessionId = session && session.claudeSessionId;
         setTimeout(function() {
-          fetch("/api/sessions/" + id, { method: "DELETE", credentials: "same-origin" })
+          compactSessionFetch("/api/sessions/" + id, { method: "DELETE", credentials: "same-origin" })
             .then(function(res) { return res.json(); })
             .then(function(data) {
               if (data && data.error) {
@@ -2766,6 +2772,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
                 .filter(function(candidate) { return candidate.id !== id; })
                 .map(function(candidate) { return candidate.id; })));
               if (state.selectedId === id) {
+                clearActivityDetailState();
                 state.selectedId = null;
                 persistSelectedId();
               }
@@ -2819,7 +2826,7 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
       function resumeSession(sessionId) {
         if (!sessionId || _resumeInProgress) return Promise.resolve(null);
         _resumeInProgress = true;
-        return fetch("/api/sessions/" + encodeURIComponent(sessionId) + "/resume", {
+        return compactSessionFetch("/api/sessions/" + encodeURIComponent(sessionId) + "/resume", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",

@@ -1,14 +1,12 @@
-/**
- * Truncates tool_result content in messages for WebSocket transport.
- * Cards that are collapsed by default have their large results replaced
- * with a summary, and clients fetch full content on-demand via API.
- */
+/** Keep tool payloads out of all chat snapshots and fetch them only when opened. */
 
+import { createHash } from "node:crypto";
 import { contentHasStructuredImage } from "./structured-content.js";
 import type { CardExpandDefaults, ContentBlock, ConversationTurn, ToolResultBlock, ToolUseBlock } from "./types.js";
 
 const TRUNCATION_THRESHOLD = 200;
 const SUMMARY_LENGTH = 100;
+
 
 /**
  * 默认窗口大小：init/resync/快照/REST 默认只下发最近这么多条 turn，更早的由客户端
@@ -103,15 +101,14 @@ function blockTransportBytes(
       let bytes = use.id.length + use.name.length + 32;
       if (use.input) bytes += JSON.stringify(use.input)?.length ?? 0;
       if (use.description) bytes += use.description.length;
+      if (use.semantic) bytes += JSON.stringify(use.semantic).length;
+      if (use.activity) bytes += JSON.stringify(use.activity).length;
       return bytes;
     }
     case "tool_result": {
       const result = block as ToolResultBlock;
       const raw = getContentString(result.content);
-      const collapsed = isToolDefaultCollapsed(
-        toolNameById.get(result.tool_use_id) ?? "",
-        cardDefaults,
-      );
+      const collapsed = isToolDefaultCollapsed(toolNameById.get(result.tool_use_id) ?? "", cardDefaults);
       const truncated = collapsed && !result.is_error &&
         !contentHasStructuredImage(result.content) && raw.length > TRUNCATION_THRESHOLD;
       return truncated ? SUMMARY_LENGTH + 4 : raw.length;
@@ -417,63 +414,146 @@ function isToolDefaultCollapsed(toolName: string, defaults: CardExpandDefaults):
   }
 }
 
+function inputString(input: Record<string, unknown>, ...keys: string[]): string {
+  for (const key of keys) {
+    const value = input[key];
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (trimmed) return trimmed;
+  }
+  return "";
+}
+
+function toolActivity(use: ToolUseBlock, hasImage: boolean): NonNullable<ToolUseBlock["activity"]> {
+  if (use.activity) {
+    const kind = use.activity.kind;
+    return {
+      kind,
+      label: activityLabel(kind),
+      ...(use.activity.fileKey ? { fileKey: use.activity.fileKey } : {}),
+      ...(hasImage || use.activity.hasImage ? { hasImage: true } : {}),
+    };
+  }
+  const name = use.name.toLowerCase();
+  const input = use.input ?? {};
+  const path = inputString(input, "file_path", "path", "filename", "file", "notebook_path");
+  const kind = /^(edit|write|multiedit|notebookedit|apply_patch|file_change|file_edit)$/.test(name)
+    ? "edit_file"
+    : /^(read|glob|grep|webfetch|websearch|todoread|search|read_file)$/.test(name)
+      ? "read_file"
+      : /^(bash|exec|exec_command|command_execution|shell_command|terminal|run_command)$/.test(name)
+        ? "run_command"
+        : "other";
+  const fileKey = path && (kind === "edit_file" || kind === "read_file")
+    ? createHash("sha256").update(path.replace(/\\/g, "/")).digest("hex").slice(0, 20)
+    : undefined;
+  const imagePath = /\.(?:png|jpe?g|gif|webp|svg|bmp|avif)(?:[?#].*)?$/i.test(path);
+  return {
+    kind,
+    label: activityLabel(kind),
+    ...(fileKey ? { fileKey } : {}),
+    ...(hasImage || imagePath ? { hasImage: true } : {}),
+  };
+}
+
+function activityLabel(kind: NonNullable<ToolUseBlock["activity"]>["kind"]): string {
+  switch (kind) {
+    case "edit_file": return "修改文件";
+    case "read_file": return "查看文件";
+    case "run_command": return "运行命令";
+    default: return "使用工具";
+  }
+}
+
+const INDEPENDENT_TOOL_NAMES = new Set([
+  "AskUserQuestion", "TodoWrite", "TaskCreate", "TaskUpdate", "TaskList",
+  "Pi/todo", "Task", "Agent", "Pi/subagent",
+]);
+
+function toolInputShowsImage(input: Record<string, unknown>): boolean {
+  const path = inputString(input, "file_path", "path", "url");
+  return /\.(?:png|jpe?g|gif|webp|svg|bmp|avif)(?:[?#].*)?$/i.test(path);
+}
+
+/**
+ * Project ordinary activity tools to a lean transport shape, regardless of
+ * result size or streaming/error state. Interactive questions, task lists,
+ * subagents and image cards retain their independent visible contracts.
+ */
+export function compactToolMessagesForTransport(
+  messages: ConversationTurn[],
+  knownToolNames?: ReadonlyMap<string, string>,
+): ConversationTurn[] {
+  const toolNameMap = new Map<string, string>(knownToolNames);
+  const imageToolIds = new Set<string>();
+  const independentToolIds = new Set<string>();
+  for (const turn of messages) {
+    for (const block of turn.content) {
+      if (block.type === "tool_use") {
+        toolNameMap.set((block as ToolUseBlock).id, (block as ToolUseBlock).name);
+        if (INDEPENDENT_TOOL_NAMES.has(block.name) || block.semantic || block.__subagent
+          || toolInputShowsImage(block.input ?? {})) independentToolIds.add(block.id);
+      } else if (block.type === "tool_result" && contentHasStructuredImage(block.content)) {
+        imageToolIds.add(block.tool_use_id);
+      }
+    }
+  }
+  return messages.map((turn) => {
+    const truncatedContent: ContentBlock[] = turn.content.map((block): ContentBlock => {
+      if (block.type === "tool_use") {
+        if (independentToolIds.has(block.id) || imageToolIds.has(block.id)) return block;
+        return {
+          ...block,
+          description: undefined,
+          input: {},
+          activity: toolActivity(block, imageToolIds.has(block.id)),
+          __subagent: block.__subagent ? {
+            ...block.__subagent,
+            taskDescription: undefined,
+          } : undefined,
+        };
+      }
+      if (block.type === "tool_result" && toolNameMap.has(block.tool_use_id)
+        && !INDEPENDENT_TOOL_NAMES.has(toolNameMap.get(block.tool_use_id)!)
+        && !independentToolIds.has(block.tool_use_id)
+        && !imageToolIds.has(block.tool_use_id)
+        && !block.__subagent) {
+        return { ...block, content: "", _truncated: true };
+      }
+      return block;
+    });
+    return { ...turn, content: truncatedContent };
+  });
+}
+
 function getContentString(content: ToolResultBlock["content"]): string {
   return typeof content === "string" ? content : JSON.stringify(content);
 }
 
-/**
- * Truncate messages for WebSocket transport. Tool results for collapsed card
- * types are replaced with a short summary when they exceed the threshold.
- *
- * @param messages - Original messages array (not mutated)
- * @param cardDefaults - Current card expand defaults from config
- * @param streamingTurnIndex - Index of the currently streaming turn (-1 if none).
- *   Tool results in the streaming turn are never truncated.
- */
+/** Existing transport behavior for clients that have not opted into compact tool cards. */
 export function truncateMessagesForTransport(
   messages: ConversationTurn[],
   cardDefaults: CardExpandDefaults,
   streamingTurnIndex = -1,
 ): ConversationTurn[] {
   return messages.map((turn, turnIndex) => {
-    // Never truncate the currently streaming turn
     if (turnIndex === streamingTurnIndex) return turn;
-
     const toolNameMap = new Map<string, string>();
     for (const block of turn.content) {
-      if (block.type === "tool_use") {
-        toolNameMap.set((block as ToolUseBlock).id, (block as ToolUseBlock).name);
-      }
+      if (block.type === "tool_use") toolNameMap.set(block.id, block.name);
     }
-
     let changed = false;
     const truncatedContent: ContentBlock[] = turn.content.map((block) => {
       if (block.type !== "tool_result") return block;
-
-      const result = block as ToolResultBlock;
-
-      // Never truncate errors
-      if (result.is_error) return block;
-
-      const toolName = toolNameMap.get(result.tool_use_id) || "";
+      if (block.is_error) return block;
+      const toolName = toolNameMap.get(block.tool_use_id) ?? "";
       if (!isToolDefaultCollapsed(toolName, cardDefaults)) return block;
-
-      // 带图片的 tool_result 永不截断：图片 part 被 JSON.stringify 截半后客户端再也
-      // 抽不出 data URI（线上表现就是「读图不显示，只剩一串 base64 残文」）。图片要么
-      // 整块送达（客户端会强制展开渲染），要么由 _truncated + 懒加载单独取回。
-      if (contentHasStructuredImage(result.content)) return block;
-
-      const contentStr = getContentString(result.content);
+      if (contentHasStructuredImage(block.content)) return block;
+      const contentStr = getContentString(block.content);
       if (contentStr.length <= TRUNCATION_THRESHOLD) return block;
-
       changed = true;
-      return {
-        ...result,
-        content: contentStr.slice(0, SUMMARY_LENGTH) + "…",
-        _truncated: true,
-      } as ToolResultBlock;
+      return { ...block, content: `${contentStr.slice(0, SUMMARY_LENGTH)}…`, _truncated: true };
     });
-
     return changed ? { ...turn, content: truncatedContent } : turn;
   });
 }
