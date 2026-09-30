@@ -89,6 +89,7 @@ try {
     assert.deepEqual(await e('Array.from(document.querySelectorAll(".chat-activity-entry[data-tool-ids]")).map(n=>JSON.parse(n.dataset.toolIds))'), Array.from({length:40},(_,i)=>["call-"+i]));
     const metrics = await e('(()=>{const n=document.querySelector(".chat-activity-timeline");return{height:n.clientHeight,overflow:n.scrollHeight>n.clientHeight,detail:!!n.querySelector("pre,.tool-use-card,.inline-diff,.inline-terminal"),summary:document.querySelector(".chat-activity-summary").getBoundingClientRect().toJSON(),wide:document.documentElement.scrollWidth>innerWidth}})()');
     assert.equal(metrics.height, 240); assert.equal(metrics.overflow, true); assert.equal(metrics.detail, false); assert.equal(metrics.wide, false);
+    assert.equal(await e('Array.from(document.querySelectorAll(".chat-activity-entry-button")).every(row=>{const clock=row.querySelector("time");const label=row.querySelector(".chat-activity-entry-label");return !clock || clock.getBoundingClientRect().right <= label.getBoundingClientRect().left})'), true, "each time is rendered at the beginning, before its file/tool label");
     for (const axis of ["x","y","width","height"]) assert.ok(Math.abs(metrics.summary[axis]-before[axis])<=1, "summary stays in place: " + axis);
     if (output && (mode === "desktop" || mode === "390px")) {
       mkdirSync(output,{recursive:true});

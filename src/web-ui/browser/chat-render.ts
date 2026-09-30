@@ -2771,9 +2771,9 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
               '<button type="button" class="chat-activity-entry-button" aria-expanded="' +
                 (entryOpen ? "true" : "false") + '" onclick="__activityEntryToggle(this)">' +
                 '<span class="chat-activity-entry-dot' + (entryRunning ? ' is-active' : '') + '" aria-hidden="true"></span>' +
-                '<span class="chat-activity-entry-label">' + escapeHtml(itemLabel) + '</span>' +
                 (itemClock ? '<time class="chat-activity-entry-time" datetime="' + escapeHtml(occurredAt) + '">' +
                   escapeHtml(itemClock) + '</time>' : '') +
+                '<span class="chat-activity-entry-label">' + escapeHtml(itemLabel) + '</span>' +
                 (isThinking && !entryRunning ? '' : '<span class="chat-activity-entry-status' +
                   (result?.is_error ? ' is-error' : '') + '">' + escapeHtml(status) + '</span>') +
                 '<span class="chat-activity-entry-arrow">' + iconSvg("chevronDown", { size: 13 }) + '</span>' +

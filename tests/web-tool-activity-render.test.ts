@@ -103,6 +103,8 @@ test("expanded timeline shows every call identity in order, with no detail bodie
   assert.ok(html.indexOf("运行命令 · Bash") < html.indexOf("修改 src/main.ts"));
   assert.match(html, /修改了1个文件/);
   assert.match(html, /chat-activity-entry-time" datetime="2026-09-30T12:00:00Z"/);
+  assert.ok(html.indexOf('class="chat-activity-entry-time"') <
+    html.indexOf('class="chat-activity-entry-label"'), "invocation time precedes the file/tool summary");
   assert.doesNotMatch(html, /do-not-render|<pre|tool-use-card|chat-activity-group-title/);
 });
 
