@@ -21,7 +21,6 @@ import {
 } from "./auth.js";
 import { type WandBuildInfo } from "./build-info.js";
 import { ensureCertificates } from "./cert.js";
-import { listClaudeSkills } from "./claude-skills.js";
 import {
   getDefaultModelForProvider,
   getProviderDefaultModels,
@@ -452,7 +451,7 @@ export async function startServer(
     configPath, legacyStructuredHost, config.structured?.processHost,
   );
   const structuredSessions = new StructuredSessionManager(
-    storage, config, structuredLogger, undefined, {}, structuredHosts.host,
+    storage, config, structuredLogger, {}, structuredHosts.host,
   );
   const sessionRegistry = new SessionRegistry(processes, structuredSessions, storage);
   const missions = new Missions(storage, structuredSessions, sessionRegistry);
@@ -728,7 +727,6 @@ export async function startServer(
     "/api/session-directories",
     "/api/structured-sessions",
     "/api/commands",
-    "/api/claude-skills",
     "/api/claude-history",
     "/api/codex-history",
     "/api/opencode-history",
@@ -788,7 +786,6 @@ export async function startServer(
       defaultModels,
       defaultThinkingEffort: config.defaultThinkingEffort ?? "off",
       commandPresets: config.commandPresets,
-      structuredRunner: config.structuredRunner ?? "cli",
       structuredRunners: [
         { label: "Claude Structured", runner: "claude-cli-print" },
         { label: "Codex Structured", runner: "codex-cli-exec" },
@@ -812,18 +809,6 @@ export async function startServer(
   }));
 
   // ── Claude skills & browser extension vault ──
-
-  app.get("/api/claude-skills", (req, res) => {
-    try {
-      const cwd = resolveSessionCwd(
-        typeof req.query.cwd === "string" ? req.query.cwd : undefined,
-        config.defaultCwd,
-      );
-      res.json({ skills: listClaudeSkills(cwd) });
-    } catch (error) {
-      sendRouteError(res, error, "无法读取 skills。");
-    }
-  });
 
   registerVaultRoutes(app, { storage, config, useHttps });
 

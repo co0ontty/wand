@@ -315,7 +315,7 @@ test("task creation makes an isolated worktree in a git workspace", async () => 
     const patched = await res.json() as { name: string };
     assert.equal(patched.name, "重构恢复流程 v2");
 
-    const config = { ...defaultConfig(), defaultCwd: root, structuredRunner: "sdk" as const };
+    const config = { ...defaultConfig(), defaultCwd: root };
     const manager = new StructuredSessionManager(storage, config);
     const boundSession = manager.createSession({
       cwd: task.cwd,
@@ -415,7 +415,7 @@ test("task creation can skip worktree isolation and /api/tasks aggregates across
 
     // 绑定一个会话到共享任务；另建一个不绑任务的散会话，应归入同目录组的
     // standaloneSessions（未分组会话）。
-    const config = { ...defaultConfig(), defaultCwd: root, structuredRunner: "sdk" as const };
+    const config = { ...defaultConfig(), defaultCwd: root };
     const manager = new StructuredSessionManager(storage, config);
     const boundSession = manager.createSession({
       cwd: shared.cwd,
@@ -561,7 +561,7 @@ test("sessions bind to a workspace task and are listed under it", () => {
   git(["add", "."], root);
   git(["commit", "-q", "-m", "init"], root);
 
-  const config = { ...defaultConfig(), defaultCwd: root, structuredRunner: "sdk" as const };
+  const config = { ...defaultConfig(), defaultCwd: root };
   const storage = new WandStorage(path.join(root, "wand.db"));
   const manager = new StructuredSessionManager(storage, config);
 
@@ -607,7 +607,6 @@ test("task list reassigns stale workspace bindings by the session path", async (
     const manager = new StructuredSessionManager(storage, {
       ...defaultConfig(),
       defaultCwd: second,
-      structuredRunner: "sdk",
     });
     // 模拟旧数据：workspaceId 仍指向第一项目，但会话实际 cwd 已在第二项目。
     const stale = manager.createSession({
@@ -824,7 +823,7 @@ test("archiving a sidebar task keeps its terminals and worktree, and restoring b
   git(["commit", "-q", "--allow-empty", "-m", "init"], root);
 
   const storage = new WandStorage(path.join(root, "wand.db"));
-  const config = { ...defaultConfig(), defaultCwd: root, structuredRunner: "sdk" as const };
+  const config = { ...defaultConfig(), defaultCwd: root };
   const { baseUrl, close } = await startWorkspaceApp(storage);
   try {
     const ws = storage.createWorkspace({ name: "Wand", cwd: root });
@@ -901,7 +900,7 @@ test("group-chat relay sessions carry a teamChat marker built from the latest ru
   const storage = new WandStorage(path.join(root, "wand.db"));
   const { baseUrl, close } = await startWorkspaceApp(storage);
   try {
-    const config = { ...defaultConfig(), defaultCwd: root, structuredRunner: "sdk" as const };
+    const config = { ...defaultConfig(), defaultCwd: root };
     const manager = new StructuredSessionManager(storage, config);
     const chatSession = manager.createSession({ cwd: root, mode: config.defaultMode });
     const plainSession = manager.createSession({ cwd: root, mode: config.defaultMode });

@@ -110,30 +110,6 @@ type SettingsExecutionMode =
   | "native"
   | "managed";
 
-export interface SettingsSystemAi {
-  id: string;
-  enabled: boolean;
-  protocol: "openai" | "anthropic";
-  baseUrl: string;
-  /** The server always returns an empty string here. A non-empty save value rotates the key. */
-  apiKey: string;
-  /** Explicitly clears a saved key; an empty apiKey alone retains it. */
-  clearApiKey?: boolean;
-  hasApiKey: boolean;
-  model: string;
-  authHeader: "bearer" | "x-api-key";
-  source: Exclude<SettingsModelProvider, "qoder" | "pi" | "gemini"> | "custom";
-  fallbacks?: SettingsSystemAi[];
-}
-
-interface SettingsSystemAiTestResult {
-  ok: true;
-  source: SettingsSystemAi["source"];
-  requestedModel: string;
-  reasoningEffort: "low" | "disabled";
-  latencyMs: number;
-}
-
 export interface SettingsConfig {
   host: string;
   port: number;
@@ -142,7 +118,6 @@ export interface SettingsConfig {
   defaultCwd: string;
   shell: string;
   language: string;
-  structuredRunner: "cli" | "sdk";
   inheritEnv: boolean;
   defaultModel: string;
   defaultCodexModel: string;
@@ -156,14 +131,6 @@ export interface SettingsConfig {
   defaultThinkingEffort: SettingsThinkingEffort;
   commitCli: SettingsProvider;
   commitModel: string;
-  commitAiSource: "cli" | "api";
-  systemAi: SettingsSystemAi;
-  /**
-   * 旧字段：系统 AI 专用 CLI 与模型。现在由内置「系统运维」员工的候选链接管，
-   * 只在员工缺失时还拿来当底（仍在 SettingsConfig 里供展示/校验）。
-   */
-  systemAiCli: SettingsSessionProvider | null;
-  systemAiModel: string;
   commandPresets: SettingsCommandPreset[];
   cardDefaults: SettingsCardDefaults;
 }
@@ -316,7 +283,6 @@ export interface SettingsGeneralInput {
   defaultCwd: string;
   shell: string;
   language: string;
-  structuredRunner: "cli" | "sdk";
   inheritEnv: boolean;
 }
 
@@ -330,8 +296,6 @@ export interface SettingsAiInput {
   defaultGeminiModel: string;
   defaultProvider: SettingsSessionProvider;
   defaultThinkingEffort: SettingsThinkingEffort;
-  commitAiSource: "cli" | "api";
-  systemAi: SettingsSystemAi;
 }
 
 interface SettingsSaveResult {
@@ -391,8 +355,6 @@ export type SettingsCommand =
   | { type: "certificate.upload"; key: string; cert: string }
   | { type: "environment.load"; reveal?: boolean }
   | { type: "models.refresh" }
-  | { type: "systemAi.import" }
-  | { type: "systemAi.test"; route: SettingsSystemAi }
   | { type: "github.connect"; value: SettingsGithubConnectInput }
   | { type: "github.disconnect" }
   | { type: "github.request"; method: "GET" | "POST" | "PATCH"; path: string; body?: Record<string, unknown> }
@@ -430,8 +392,6 @@ interface SettingsCommandResultMap {
   "certificate.upload": { ok: boolean; restartRequired: boolean; hasCert: boolean };
   "environment.load": SettingsEnvironmentPreview;
   "models.refresh": SettingsModelCatalog;
-  "systemAi.import": { ok: boolean; count: number; systemAi: SettingsSystemAi };
-  "systemAi.test": SettingsSystemAiTestResult;
   "github.connect": SettingsGithubConnector;
   "github.disconnect": { ok: boolean; connected: false };
   "github.request": unknown;

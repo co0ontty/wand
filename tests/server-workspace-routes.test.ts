@@ -135,7 +135,7 @@ test("workspace CRUD + layout round-trip via REST", async () => {
 
 test("sessions bind to a workspace and are listed under it", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-workspace-bind-"));
-  const config = { ...defaultConfig(), defaultCwd: root, structuredRunner: "sdk" as const };
+  const config = { ...defaultConfig(), defaultCwd: root };
   const storage = new WandStorage(path.join(root, "wand.db"));
   const manager = new StructuredSessionManager(storage, config);
   const ws = storage.createWorkspace({ name: "Bind", cwd: root });
@@ -179,7 +179,7 @@ test("listing workspaces backfills unbound sessions into directory projects", as
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-workspace-backfill-route-"));
   const other = mkdtempSync(path.join(os.tmpdir(), "wand-workspace-backfill-other-"));
   const storage = new WandStorage(path.join(root, "wand.db"));
-  const config = { ...defaultConfig(), defaultCwd: root, structuredRunner: "sdk" as const };
+  const config = { ...defaultConfig(), defaultCwd: root };
   const manager = new StructuredSessionManager(storage, config);
   const existing = storage.createWorkspace({ name: "Existing", cwd: root });
   const inExisting = manager.createSession({ cwd: root, mode: config.defaultMode });
@@ -208,7 +208,7 @@ test("listing workspaces backfills unbound sessions into directory projects", as
 test("creating a workspace attaches matching unbound sessions", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-workspace-absorb-route-"));
   const storage = new WandStorage(path.join(root, "wand.db"));
-  const config = { ...defaultConfig(), defaultCwd: root, structuredRunner: "sdk" as const };
+  const config = { ...defaultConfig(), defaultCwd: root };
   const manager = new StructuredSessionManager(storage, config);
   const session = manager.createSession({ cwd: root, mode: config.defaultMode });
   const { baseUrl, close } = await startWorkspaceApp(storage);

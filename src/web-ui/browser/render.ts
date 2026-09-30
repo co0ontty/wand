@@ -10,7 +10,7 @@ import { isSidebarDrawerLayout } from "./file-browser";
 import { loadGitStatus } from "./git-commit";
 import { autoResizeInput, getSelectedSession } from "./input";
 import { requestNotificationPermission, notifyUpdateAvailable, _apkVersion, _macAppVersion } from "./notifications";
-import { applyCurrentView, applyConfigDefaultThinking, checkApkAutoUpdate, checkDmgAutoUpdate, closeTransientSessionsDrawer, COMPOSER_IDLE_HINT, fetchAvailableModels, getComposerPlaceholder, hasNativeSwitchServer, loadSessions, refreshAll, refreshClaudeSkillsPicker, syncComposerModeSelect, syncComposerModelSelect, updateDrawerState, updateShellChrome } from "./session-engine";
+import { applyCurrentView, applyConfigDefaultThinking, checkApkAutoUpdate, checkDmgAutoUpdate, closeTransientSessionsDrawer, COMPOSER_IDLE_HINT, fetchAvailableModels, getComposerPlaceholder, hasNativeSwitchServer, loadSessions, refreshAll, syncComposerModeSelect, syncComposerModelSelect, updateDrawerState, updateShellChrome } from "./session-engine";
 import { maybeScrollTerminalToBottom } from "./terminal";
 import { ensureTerminalFit, ensureTerminalFitWithRetry, teardownTerminal } from "./viewport";
 import { initWebSocket, forceReconnectWebSocket, cancelWsReconnect, evaluateWsHeartbeatStale, startPolling, syncComposerBadges } from "./websocket";
@@ -418,7 +418,6 @@ export function render(options?: any) {
   syncComposerModelSelect(getSelectedSession());
   syncComposerBadges();
   syncComposerActionError();
-  refreshClaudeSkillsPicker();
   applyCurrentView();
   if (!skipShellChrome) {
     updateShellChrome();
@@ -680,9 +679,7 @@ export function renderAppShell() {
               '<span class="composer-config-host" data-composer-config-host="all"></span>' +
             '</div>' +
           '</div>' +
-          // Skills 弹层由 React portal 渲染（见 composer-skills 组件）：宿主常驻，
           // 关闭时不发布 mount。落点与旧实现 insertAdjacentElement("afterend") 一致。
-          '<span class="composer-skills-host" data-composer-skills-host="main"></span>' +
           // 语音实时转写气泡 —— 浮在输入框上方（.input-composer 之外，绕开它的
           // overflow:hidden）。**内容由 React portal 渲染**（见 composer-voice 组件）：
           // 非录音态不发布 mount，整条气泡不渲染，等价于原来的 .hidden。

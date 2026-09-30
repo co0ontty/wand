@@ -111,7 +111,6 @@ test("recoverDetachedRuns preserves the running marker and reattaches the daemon
     storage,
     { ...defaultConfig(), defaultCwd: root },
     null,
-    undefined,
     {},
     fakeHost([run]),
   );
@@ -186,9 +185,8 @@ test("recoverDetachedRuns skips SDK sessions and missing daemon runs", async (t)
   });
   const manager = new StructuredSessionManager(
     storage,
-    { ...defaultConfig(), defaultCwd: root, structuredRunner: "sdk" },
+    { ...defaultConfig(), defaultCwd: root },
     null,
-    undefined,
     {},
     fakeHost([]),
   );
@@ -263,7 +261,6 @@ test("recoverDetachedRuns retains durable recovery intent after a transient daem
     storage,
     { ...defaultConfig(), defaultCwd: root },
     null,
-    undefined,
     {},
     host,
   );
@@ -363,7 +360,6 @@ test("recoverDetachedRuns reports a clean exit as success when the replay log wa
     storage,
     { ...defaultConfig(), defaultCwd: root },
     null,
-    undefined,
     {},
     fakeHost([truncatedPiRun(sessionId, 0)]),
   );
@@ -404,7 +400,6 @@ test("recoverDetachedRuns keeps the stored transcript when a truncated replay fa
     storage,
     { ...defaultConfig(), defaultCwd: root },
     null,
-    undefined,
     {},
     fakeHost([truncatedPiRun(sessionId, 1)]),
   );
@@ -438,7 +433,6 @@ test("recoverDetachedRuns streams a truncated replay instead of freezing the vie
     storage,
     { ...defaultConfig(), defaultCwd: root },
     null,
-    undefined,
     {},
     host,
   );

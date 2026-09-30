@@ -11,7 +11,7 @@ import "./file-browser";
 import "./git-commit";
 import { showToast, wandConfirm } from "./notifications";
 import { getEffectiveCwd } from "./render";
-import { applyCurrentView, buildAttachmentPrefix, canSendComposer, clearDraftValueForSession, closePlusPopover, COMPOSER_IDLE_HINT, dismissDrawerIfOverlay, getComposerPlaceholder, getDraftValueForSession, getPendingAttachments, getPreferredMessages, getPreferredTool, getSelectedClaudeSkills, isStructuredSession, selectSession, loadOutput, refreshAll, renderAttachmentPreview, restoreComposerStateForSession, setDraftValue, setDraftValueForSession, shouldBracketPtyPaste, subscribeToSession, supportsClaudeSkillSelection, syncComposerHasText, updateSessionSnapshot, updateSessionsList, uploadAttachments, withTerminalDimensions } from "./session-engine";
+import { applyCurrentView, buildAttachmentPrefix, canSendComposer, clearDraftValueForSession, closePlusPopover, COMPOSER_IDLE_HINT, dismissDrawerIfOverlay, getComposerPlaceholder, getDraftValueForSession, getPendingAttachments, getPreferredMessages, getPreferredTool, isStructuredSession, selectSession, loadOutput, refreshAll, renderAttachmentPreview, restoreComposerStateForSession, setDraftValue, setDraftValueForSession, shouldBracketPtyPaste, subscribeToSession, syncComposerHasText, updateSessionSnapshot, updateSessionsList, uploadAttachments, withTerminalDimensions } from "./session-engine";
 import { confirmDelete } from "./sidebar";
 import { initTerminal, maybeScrollTerminalToBottom, scheduleSoftResyncTerminal, waitForProviderPaint, waitForTerminalSettled } from "./terminal";
 import { ensureTerminalFit, scheduleClosedViewportBaselineWindow, syncAppViewportHeight, updateJoystickPanelUI, updateJoystickVisibility } from "./viewport";
@@ -297,7 +297,6 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
           body: JSON.stringify({
             input: text,
             idempotencyKey: idempotencyKey,
-            ...(supportsClaudeSkillSelection(session) ? { skills: getSelectedClaudeSkills(session) } : {}),
           })
         })
           .then(function(res) {
@@ -1078,7 +1077,6 @@ import { resolveInsertBeforeAnchor } from "./queue-dom";
             input: input,
             interrupt: isInterrupting || undefined,
             idempotencyKey: idempotencyKey,
-            ...(supportsClaudeSkillSelection(session) ? { skills: getSelectedClaudeSkills(session) } : {}),
           })
         })
         .then(function(res) {

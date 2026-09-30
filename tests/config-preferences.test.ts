@@ -48,23 +48,13 @@ test("commit CLI and model preferences update live config and restore from stora
 
   writePreferenceToStorage(config, storage, "commitCli", "codex");
   writePreferenceToStorage(config, storage, "commitModel", "  gpt-5.4-mini  ");
-  writePreferenceToStorage(config, storage, "systemAi", {
-    enabled: false,
-    protocol: "openai",
-    baseUrl: "https://api.example.test/v1",
-    apiKey: "direct-secret",
-    model: "direct-model",
-  });
-  writePreferenceToStorage(config, storage, "commitAiSource", "api");
 
   assert.equal(config.commitCli, "codex");
   assert.equal(config.commitModel, "gpt-5.4-mini");
-  assert.equal(config.commitAiSource, "api");
 
   const restored = applyStoragePreferences(defaultConfig(), storage);
   assert.equal(restored.commitCli, "codex");
   assert.equal(restored.commitModel, "gpt-5.4-mini");
-  assert.equal(restored.commitAiSource, "api");
 });
 
 test("system AI CLI and model round-trip independently from API route preferences", () => {
@@ -89,22 +79,19 @@ test("commit CLI preference rejects unsupported commands", () => {
     () => writePreferenceToStorage(defaultConfig(), storage, "commitCli", "cursor"),
     /无效 commit CLI/,
   );
-  assert.throws(
-    () => writePreferenceToStorage(defaultConfig(), storage, "commitAiSource", "automatic"),
-    /无效 commit AI 来源/,
-  );
 });
 
-test("commit API source allows runtime discovery while system AI still rejects non-object profiles", () => {
+test("removed direct-API preferences are gone and legacy DB rows are ignored", () => {
   const storage = new FakePreferenceStorage() as unknown as WandStorage;
-  const config = defaultConfig();
+  // 老实例的库里还留着这两条偏好；升级后必须既不读回 config，也不影响其它偏好。
+  storage.setPreference("pref:systemAi", { enabled: true, apiKey: "legacy-secret", baseUrl: "https://old.test", model: "old" });
+  storage.setPreference("pref:commitAiSource", "api");
+  storage.setPreference("pref:commitCli", "codex");
 
-  writePreferenceToStorage(config, storage, "commitAiSource", "api");
-  assert.equal(config.commitAiSource, "api");
-  assert.throws(
-    () => writePreferenceToStorage(config, storage, "systemAi", "not-an-object"),
-    /systemAi 必须是对象/,
-  );
+  const restored = applyStoragePreferences(defaultConfig(), storage);
+  assert.equal("systemAi" in restored, false);
+  assert.equal("commitAiSource" in restored, false);
+  assert.equal(restored.commitCli, "codex", "其余偏好照常生效");
 });
 
 test("Codex dynamic reasoning effort preference round-trips through storage", () => {
@@ -203,10 +190,6 @@ test("new-session preferences reject unsupported values", () => {
   assert.throws(
     () => writePreferenceToStorage(defaultConfig(), storage, "defaultSessionKind", "terminal"),
     /无效会话类型/,
-  );
-  assert.throws(
-    () => writePreferenceToStorage(defaultConfig(), storage, "structuredRunner", "unknown"),
-    /无效 structured runner/,
   );
   assert.throws(
     () => writePreferenceToStorage(defaultConfig(), storage, "defaultThinkingEffort", "turbo"),

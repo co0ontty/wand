@@ -1,6 +1,6 @@
 export type SessionKind = "pty" | "structured";
 export type SessionProvider = "claude" | "codex" | "opencode" | "grok" | "qoder" | "pi" | "gemini";
-type CommitAiSource = "cli" | "api";
+/** "claude-sdk" 是历史值：SDK 执行路径已移除，读旧会话时归一为 claude-cli-print。 */
 export type SessionRunner = "claude-cli" | "claude-cli-print" | "claude-sdk" | "codex-cli-exec" | "opencode-cli-run" | "grok-cli-headless" | "qoder-cli-print" | "pi-cli-json" | "gemini-cli-json" | "pty";
 export type SessionSource = "interactive" | "automation" | "startup";
 
@@ -176,24 +176,30 @@ export interface WandConfig {
   commitCli?: SessionProvider;
   /** 快捷提交专用模型。留空则跟随所选 CLI 的默认模型。 */
   commitModel?: string;
-  /** 快捷提交生成 commit message / tag 时使用 CLI 或直连 API。 */
-  commitAiSource?: CommitAiSource;
-  /** Wand 自身轻量 AI 功能与 Commit 直连模式复用的 API 配置。enabled 表示系统 AI 优先使用 API。 */
-  systemAi?: SystemAiConfig;
   /** 系统 AI 使用 CLI 模式时的专用工具；未配置时沿用当前会话工具（兼容旧设置）。 */
   systemAiCli?: SessionProvider;
   /** 系统 AI 专用 CLI 模型；留空跟随该工具的新会话默认模型。 */
   systemAiModel?: string;
   /** 新建会话时默认使用的思考深度。 */
   defaultThinkingEffort?: ThinkingEffort;
-  /** 结构化会话使用的 runner: "cli"（默认，spawn claude -p）或 "sdk"（@anthropic-ai/claude-agent-sdk）。 */
-  structuredRunner?: "cli" | "sdk";
   /**
    * 启动 PTY / 结构化子进程时是否继承父进程的环境变量（process.env）。默认 true。
    * 关闭后子进程仅获得最小可用环境（PATH/HOME/SHELL/LANG/LC_ALL/TERM 等）外加 WAND_* 控制变量，
    * 用于隔离敏感凭据或避免 API key 泄漏到子命令。
    */
   inheritEnv?: boolean;
+}
+
+/**
+ * 一次性 AI 请求：规则 / 角色走系统提示，内容走用户消息。
+ * CLI 用各 provider 自己的系统提示开关（`systemPromptFlag`），没有开关的
+ * provider 退回把规则并在内容前面。
+ */
+export interface AiTextRequest {
+  /** 规则、角色、输出格式。空字符串表示这次调用不需要系统提示。 */
+  system: string;
+  /** 本次要处理的内容（diff、用户原话、对话摘要…）。 */
+  prompt: string;
 }
 
 /**
@@ -205,27 +211,6 @@ export interface AiCliCandidate {
   /** 具体模型 ID；未设置表示跟随 provider 默认模型。 */
   model?: string;
   thinkingEffort?: ThinkingEffort;
-}
-
-export type SystemAiProtocol = "openai" | "anthropic";
-type SystemAiAuthHeader = "bearer" | "x-api-key";
-
-export interface SystemAiConfig {
-  /** 设置页路由的稳定标识，用于重排后安全地关联已保存密钥。 */
-  id?: string;
-  enabled: boolean;
-  protocol: SystemAiProtocol;
-  baseUrl: string;
-  apiKey: string;
-  model: string;
-  authHeader?: SystemAiAuthHeader;
-  /** 自动导入时记录来源，仅用于设置页说明。 */
-  source?: "claude" | "codex" | "opencode" | "grok" | "custom";
-  /**
-   * 其余可直连 API，按数组顺序依次尝试。保留顶层字段作为首选项，
-   * 以兼容已有配置与手工编辑入口。
-   */
-  fallbacks?: SystemAiConfig[];
 }
 
 export type ClaudeModelSource = "builtin" | "configured" | "verified-cache" | "models-api";
@@ -698,7 +683,6 @@ export interface SessionSnapshot {
   /** Pending structured user inputs queued while an assistant response is in flight. */
   queuedMessages?: string[];
   /** Per-message Claude Agent SDK skill allowlists aligned with queuedMessages. */
-  queuedMessageSkills?: string[][];
   structuredState?: StructuredSessionState;
   /** 此会话是从哪个 Wand 会话恢复而来 */
   resumedFromSessionId?: string | null;

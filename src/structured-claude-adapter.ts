@@ -6,7 +6,7 @@ import { isRunningAsRoot } from "./env-utils.js";
 import { startStructuredCli } from "./structured-exec-pump.js";
 import type { StructuredExecHost } from "./structured-exec-host.js";
 import { buildLanguageDirective, buildManagedAutonomyDirective } from "./language-prompt.js";
-import { thinkingEffortToClaudeCliEffort, thinkingEffortToSdkBudget } from "./structured-provider-common.js";
+import { thinkingEffortToClaudeCliEffort } from "./structured-provider-common.js";
 import { ClaudeCliProtocolReducer } from "./structured-claude-protocol.js";
 import type {
   StructuredRunnerAdapter,
@@ -140,12 +140,6 @@ export function buildClaudeCliArgs(session: SessionSnapshot, options: ClaudeCliA
   return args;
 }
 
-export function buildClaudeSdkThinking(
-  effort: SessionSnapshot["thinkingEffort"],
-): { type: "enabled"; budgetTokens: number } | { type: "disabled" } {
-  const budgetTokens = thinkingEffortToSdkBudget(effort);
-  return budgetTokens > 0 ? { type: "enabled", budgetTokens } : { type: "disabled" };
-}
 
 export interface ClaudeCliRunnerOptions {
   language?: () => string | undefined;

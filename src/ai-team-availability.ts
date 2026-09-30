@@ -27,7 +27,6 @@ export function isSessionGoneStatus(status: string): boolean {
  * CLI 缺失类文案（spawn-missing）。来源样例（只引用不改）：
  *   - structured-session-manager.ts: codex exec ENOENT →「PATH 中找不到 … 可执行文件」
  *   - git-quick-commit.ts: error.code === "ENOENT" →「未找到 <cmd> CLI。」
- *   - claude-sdk-runner.ts:「Claude Code native binary not found」/ ENOENT →「未找到 claude CLI。」
  */
 const SPAWN_MISSING_PATTERNS: readonly RegExp[] = [
   /\bENOENT\b/i,

@@ -124,7 +124,6 @@ test("StructuredSessionManager drives OpenCode through the runner interface", as
     storage,
     { ...defaultConfig(), defaultCwd: root },
     null,
-    undefined,
     { opencode: runner },
   );
   t.after(() => {
@@ -160,7 +159,6 @@ test("StructuredSessionManager drives Codex through the runner interface", async
     storage,
     { ...defaultConfig(), defaultCwd: root },
     null,
-    undefined,
     { codex: runner },
   );
   t.after(() => {
@@ -188,7 +186,6 @@ test("StructuredSessionManager drives Claude CLI through the runner interface", 
     storage,
     { ...defaultConfig(), defaultCwd: root },
     null,
-    undefined,
     { claudeCli: runner },
   );
   t.after(() => {
@@ -220,7 +217,6 @@ test("StructuredSessionManager exposes Pi background draining until the CLI exit
     storage,
     { ...defaultConfig(), defaultCwd: root },
     null,
-    undefined,
     { pi: runner },
   );
   t.after(() => {
@@ -255,7 +251,6 @@ test("StructuredSessionManager interrupts OpenCode without accessing its process
     storage,
     { ...defaultConfig(), defaultCwd: root },
     null,
-    undefined,
     { opencode: runner },
   );
   t.after(() => {
@@ -284,7 +279,6 @@ test("StructuredSessionManager interrupts Codex without accessing its process ha
     storage,
     { ...defaultConfig(), defaultCwd: root },
     null,
-    undefined,
     { codex: runner },
   );
   t.after(() => {

@@ -419,16 +419,6 @@ function parseQueuedMessages(raw: string | null): string[] | undefined {
   return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : undefined;
 }
 
-function parseQueuedMessageSkills(raw: string | null, queueLength: number): string[][] | undefined {
-  const parsed = safeJsonParse<unknown>(raw);
-  if (!Array.isArray(parsed)) return undefined;
-  return Array.from({ length: queueLength }, (_, index) => {
-    const skills = parsed[index];
-    return Array.isArray(skills)
-      ? skills.filter((skill): skill is string => typeof skill === "string")
-      : [];
-  });
-}
 
 function parseWorktreeInfo(raw: string | null): SessionSnapshot["worktree"] | undefined {
   const parsed = safeJsonParse<{ branch?: unknown; path?: unknown }>(raw);
@@ -581,7 +571,6 @@ function sessionPersistAssignments(): string {
              runner = excluded.runner,
              messages = excluded.messages,
              queued_messages = excluded.queued_messages,
-             queued_message_skills = excluded.queued_message_skills,
              structured_state = excluded.structured_state,
              resumed_from_session_id = excluded.resumed_from_session_id,
              auto_recovered = excluded.auto_recovered,
@@ -601,7 +590,7 @@ function sessionRuntimeMetadataAssignments(): string {
            command = ?, cwd = ?, mode = ?, status = ?, exit_code = ?,
            started_at = ?, ended_at = ?,
            archived = ?, archived_at = ?, claude_session_id = ?,
-           provider = ?, session_kind = ?, runner = ?, queued_messages = ?, queued_message_skills = ?, structured_state = ?,
+           provider = ?, session_kind = ?, runner = ?, queued_messages = ?, structured_state = ?,
            resumed_from_session_id = ?, auto_recovered = ?,
            worktree_enabled = ?, worktree_info = ?, worktree_merge_status = ?, worktree_merge_info = ?,
            title = ?, description = ?, session_options = ?`;
@@ -629,7 +618,8 @@ function sessionPersistValues(snapshot: SessionSnapshot): Array<string | number 
     snapshot.runner ?? null,
     snapshot.messages ? JSON.stringify(snapshot.messages) : null,
     snapshot.queuedMessages ? JSON.stringify(snapshot.queuedMessages) : null,
-    snapshot.queuedMessageSkills ? JSON.stringify(snapshot.queuedMessageSkills) : null,
+    // queued_message_skills 列按「只加不删」保留，但 SDK skills 功能已移除，不再写入。
+    null,
     snapshot.structuredState ? JSON.stringify(snapshot.structuredState) : null,
     snapshot.resumedFromSessionId ?? null,
     snapshot.autoRecovered ? 1 : 0,
@@ -663,7 +653,6 @@ function sessionRuntimeMetadataValues(snapshot: SessionSnapshot): Array<string |
     snapshot.sessionKind ?? "pty",
     snapshot.runner ?? null,
     snapshot.queuedMessages ? JSON.stringify(snapshot.queuedMessages) : null,
-    snapshot.queuedMessageSkills ? JSON.stringify(snapshot.queuedMessageSkills) : null,
     snapshot.structuredState ? JSON.stringify(snapshot.structuredState) : null,
     snapshot.resumedFromSessionId ?? null,
     snapshot.autoRecovered ? 1 : 0,
@@ -705,7 +694,6 @@ function mapSessionCore(row: SessionRow): SessionSnapshot {
     claudeSessionId: row.claude_session_id,
     messages: safeJsonParse<ConversationTurn[]>(row.messages),
     queuedMessages,
-    queuedMessageSkills: parseQueuedMessageSkills(row.queued_message_skills, queuedMessages?.length ?? 0),
     structuredState: safeJsonParse<StructuredSessionState>(row.structured_state),
     resumedFromSessionId: row.resumed_from_session_id ?? undefined,
     autoRecovered: Boolean(row.auto_recovered),

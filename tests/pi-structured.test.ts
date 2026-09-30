@@ -146,7 +146,7 @@ test("Pi retries a previously failed Wand session without its missing resume ID"
     },
   };
   const manager = new StructuredSessionManager(
-    storage, { ...defaultConfig(), defaultCwd: root }, null, undefined, { pi: runner },
+    storage, { ...defaultConfig(), defaultCwd: root }, null, { pi: runner },
   );
   t.after(() => manager.dispose());
   const result = await manager.sendMessage("failed-pi", "retry");
@@ -176,7 +176,7 @@ test("Pi clears a missing resume ID after the CLI rejects it", async (t) => {
     },
   };
   const manager = new StructuredSessionManager(
-    storage, { ...defaultConfig(), defaultCwd: root }, null, undefined, { pi: runner },
+    storage, { ...defaultConfig(), defaultCwd: root }, null, { pi: runner },
   );
   t.after(() => manager.dispose());
   await assert.rejects(manager.sendMessage("missing-pi", "retry"), /No session found matching/);
@@ -205,7 +205,7 @@ test("Pi turns that only report a provider error fail instead of saving an empty
     },
   };
   const manager = new StructuredSessionManager(
-    storage, { ...defaultConfig(), defaultCwd: root }, null, undefined, { pi: runner },
+    storage, { ...defaultConfig(), defaultCwd: root }, null, { pi: runner },
   );
   t.after(() => manager.dispose());
   await assert.rejects(manager.sendMessage("limit-pi", "hi"), /usage limit/);

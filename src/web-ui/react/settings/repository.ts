@@ -19,7 +19,6 @@ import type {
   SettingsRepository,
   SettingsSessionProvider,
   SettingsSnapshot,
-  SettingsSystemAi,
   SettingsThinkingEffort,
 } from "./types";
 import { finiteNumber, record, stringValue, type JsonRecord } from "../json-utils";
@@ -61,18 +60,6 @@ const EMPTY_DISTRIBUTION: SettingsDistribution = {
   source: null,
   local: null,
   github: null,
-};
-
-const EMPTY_SYSTEM_AI: SettingsSystemAi = {
-  id: "",
-  enabled: false,
-  protocol: "openai",
-  baseUrl: "",
-  apiKey: "",
-  hasApiKey: false,
-  model: "",
-  authHeader: "bearer",
-  source: "custom",
 };
 
 function nullableString(value: unknown): string | null {
@@ -117,31 +104,6 @@ function normalizeDistribution(value: unknown): SettingsDistribution {
   };
 }
 
-function normalizeSystemAi(value: unknown, includeFallbacks = true): SettingsSystemAi {
-  const input = record(value);
-  const source = input.source === "claude"
-    || input.source === "codex"
-    || input.source === "opencode"
-    || input.source === "grok"
-    ? input.source
-    : "custom";
-  const normalized: SettingsSystemAi = {
-    ...EMPTY_SYSTEM_AI,
-    id: stringValue(input.id),
-    enabled: input.enabled === true,
-    protocol: input.protocol === "anthropic" ? "anthropic" : "openai",
-    baseUrl: stringValue(input.baseUrl),
-    apiKey: "",
-    hasApiKey: input.hasApiKey === true,
-    model: stringValue(input.model),
-    authHeader: input.authHeader === "x-api-key" ? "x-api-key" : "bearer",
-    source,
-  };
-  if (includeFallbacks && Array.isArray(input.fallbacks)) {
-    normalized.fallbacks = input.fallbacks.map((profile) => normalizeSystemAi(profile, false));
-  }
-  return normalized;
-}
 
 function normalizeGithubConnector(value: unknown): SettingsGithubConnector {
   const input = record(value);
@@ -194,7 +156,6 @@ function normalizeConfig(value: unknown): SettingsConfig {
     defaultCwd: stringValue(input.defaultCwd),
     shell: stringValue(input.shell, "/bin/zsh"),
     language: stringValue(input.language),
-    structuredRunner: input.structuredRunner === "sdk" ? "sdk" : "cli",
     inheritEnv: input.inheritEnv !== false,
     defaultModel: claude,
     defaultCodexModel: codex,
@@ -208,11 +169,6 @@ function normalizeConfig(value: unknown): SettingsConfig {
     defaultThinkingEffort,
     commitCli,
     commitModel: stringValue(input.commitModel),
-    commitAiSource: input.commitAiSource === "api" ? "api" : "cli",
-    systemAi: normalizeSystemAi(input.systemAi),
-    systemAiCli: SESSION_PROVIDERS.includes(input.systemAiCli as SettingsSessionProvider)
-      ? input.systemAiCli as SettingsSessionProvider : null,
-    systemAiModel: stringValue(input.systemAiModel),
     commandPresets: presets.map((item) => {
       const preset = record(item);
       return {
@@ -587,12 +543,6 @@ export class HttpSettingsRepository implements SettingsRepository {
         break;
       case "models.refresh":
         result = normalizeModels(await post("/api/models/refresh", undefined, options.signal));
-        break;
-      case "systemAi.import":
-        result = await post("/api/settings/system-ai/import", undefined, options.signal);
-        break;
-      case "systemAi.test":
-        result = await post("/api/settings/system-ai/test", { route: command.route }, options.signal);
         break;
       case "webUpdate.check":
         result = await request("/api/check-update", { signal: options.signal });

@@ -38,7 +38,6 @@ function normalizeConfig(value: JsonRecord): NewSessionConfig {
     defaultSessionKind: oneOf(value.defaultSessionKind, KINDS, "structured"),
     defaultMode: oneOf(value.defaultMode, MODES, "default"),
     defaultCwd: stringValue(value.defaultCwd),
-    structuredRunner: stringValue(value.structuredRunner, "cli"),
   };
 }
 
@@ -71,16 +70,14 @@ export function safeMode(
   return supported[0];
 }
 
-function structuredRunner(provider: NewSessionProvider, configured: string): string {
+function structuredRunner(provider: NewSessionProvider): string {
   if (provider === "codex") return "codex-cli-exec";
   if (provider === "opencode") return "opencode-cli-run";
   if (provider === "grok") return "grok-cli-headless";
   if (provider === "qoder") return "qoder-cli-print";
   if (provider === "pi") return "pi-cli-json";
   if (provider === "gemini") return "gemini-cli-json";
-  return configured === "sdk" || configured === "claude-sdk"
-    ? "claude-sdk"
-    : "claude-cli-print";
+  return "claude-cli-print";
 }
 
 export function buildCreateRequest(
@@ -133,7 +130,7 @@ export function buildCreateRequest(
   return {
     ...base,
     kind: "structured",
-    runner: structuredRunner(form.provider, defaults.structuredRunner),
+    runner: structuredRunner(form.provider),
     model: model || undefined,
     thinkingEffort: thinkingEffort || undefined,
     ...(form.employeeId ? { employeeId: form.employeeId } : {}),

@@ -9,7 +9,6 @@ import { syncPortalMounts } from "./mount-sync";
 export interface BrowserComposerConfigConfig {
   resolve(scope: ComposerConfigScope): ComposerConfigState;
   onRefreshModels(): void;
-  onOpenSkills(trigger: HTMLButtonElement): void;
 }
 
 function isScope(value: string | undefined): value is ComposerConfigScope {
@@ -39,7 +38,6 @@ export function syncBrowserComposerConfig(config: BrowserComposerConfigConfig): 
         scope,
         ...config.resolve(scope),
         onRefreshModels: config.onRefreshModels,
-        onOpenSkills: config.onOpenSkills,
       };
     },
   });

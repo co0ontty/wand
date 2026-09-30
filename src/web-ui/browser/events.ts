@@ -10,7 +10,7 @@ import { adjustTerminalScale, openFilePreview } from "./file-browser";
 import { attachQueueBarDelegates, bindInputTouchScroll, cancelVoiceRecording, getComposerSendPhase, handleInputBoxBlur, handleInputBoxFocus, handleVoiceMove, refreshInputBoxState, sendOrStart, setupMobileKeyboardHandlers, startVoiceRecording, stopSession, stopVoiceRecording, updateQueueBar } from "./input";
 import { hideError } from "./notifications";
 import { render, resetChatRenderCache } from "./render";
-import { addPendingAttachments, closeClaudeSkillsPicker, closePlusPopover, closeSessionsDrawer, dismissDrawerIfOverlay, handleInputBoxKeydown, handleInputPaste, handleInteractiveTextInput, handlePtyImagePaste, login, onChatModeChange, onChatModelChange, onChatThinkingChange, optimizePromptText, selectSession, setDraftValue, switchServer, syncComposerHasText, togglePlusPopover } from "./session-engine";
+import { addPendingAttachments, closePlusPopover, closeSessionsDrawer, dismissDrawerIfOverlay, handleInputBoxKeydown, handleInputPaste, handleInteractiveTextInput, handlePtyImagePaste, login, onChatModeChange, onChatModelChange, onChatThinkingChange, optimizePromptText, selectSession, setDraftValue, switchServer, syncComposerHasText, togglePlusPopover } from "./session-engine";
 import { initTerminal, maybeScrollTerminalToBottom, softResyncTerminal } from "./terminal";
 import { setupVisualViewportHandlers } from "./viewport";
 
@@ -416,16 +416,13 @@ import { setupVisualViewportHandlers } from "./viewport";
             e.preventDefault();
             closePlusPopover(true);
           }
-          if (e.key === "Escape") closeClaudeSkillsPicker();
         });
 
         document.addEventListener("click", function(e) {
           var target = e.target as HTMLElement;
           if (!target || typeof target.closest !== "function") return;
-          var picker = document.getElementById("composer-skills-popover");
           // trigger 自己的点击由 React 的 onClick 处理（toggle），这里必须排除它，
           // 否则同一个 click 会被“点外部关闭”再关掉一次，表现为点了没反应。
-          if (picker && !picker.contains(target) && !target.closest("[data-claude-skills-trigger]")) closeClaudeSkillsPicker();
         });
 
         // 三件套（模式 / 模型 / 思考）走全局委托，多个实例共用同一状态源。

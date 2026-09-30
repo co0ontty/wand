@@ -1,5 +1,5 @@
 import { callConfiguredAiText, type QuickCommitAiOptions } from "./git-quick-commit.js";
-import type { AiTextRequest } from "./system-ai.js";
+import type { AiTextRequest } from "./types.js";
 import { clipAtWordBoundary } from "./text-utils.js";
 
 /** 任务标题留空时由描述自动生成；面板上显示得下，也不至于截断成半句话。 */

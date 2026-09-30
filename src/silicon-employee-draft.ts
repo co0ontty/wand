@@ -8,7 +8,7 @@ import {
 } from "./task-types.js";
 import { clipAtWordBoundary } from "./text-utils.js";
 import type { SiliconEmployeeDraft } from "./ai-team-types.js";
-import type { AiTextRequest } from "./system-ai.js";
+import type { AiTextRequest } from "./types.js";
 import type { WandTaskAgent } from "./task-types.js";
 import type { SessionProvider } from "./types.js";
 

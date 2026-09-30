@@ -65,7 +65,6 @@ test("create-request builder preserves structured and PTY legacy contracts", () 
     defaultSessionKind: "structured" as const,
     defaultMode: "managed" as const,
     defaultCwd: "/configured",
-    structuredRunner: "sdk",
   };
   const context = {
     effectiveCwd: "/effective",
@@ -91,7 +90,7 @@ test("create-request builder preserves structured and PTY legacy contracts", () 
     mode: "managed",
     worktreeEnabled: false,
     sessionSource: "interactive",
-    runner: "claude-sdk",
+    runner: "claude-cli-print",
     model: "claude-sonnet",
     thinkingEffort: "deep",
   });
@@ -194,7 +193,6 @@ test("模型选择随创建请求发出，PTY 也按模型启动 CLI", () => {
     defaultSessionKind: "structured" as const,
     defaultMode: "default" as const,
     defaultCwd: "/configured",
-    structuredRunner: "claude-cli-print",
   };
   const context = {
     effectiveCwd: "/repo",
@@ -283,7 +281,6 @@ test("HTTP repository serializes preferences and loads the latest server default
         defaultSessionKind: "pty",
         defaultMode: "managed",
         defaultCwd: "/repo",
-        structuredRunner: "cli",
       });
     }
     if (url === "/api/recent-paths") return json([{ path: "/repo", name: "repo" }]);

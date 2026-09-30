@@ -159,7 +159,7 @@ test("/api/tasks carries team markers on the sessions they belong to", async () 
       body: JSON.stringify({ name: "补安装说明", worktree: false }),
     }).then((res) => res.json() as Promise<{ id: string; cwd: string }>);
 
-    const config = { ...defaultConfig(), defaultCwd: task.cwd, structuredRunner: "sdk" as const };
+    const config = { ...defaultConfig(), defaultCwd: task.cwd };
     const manager = new StructuredSessionManager(storage, config);
     manager.createSession({ cwd: task.cwd, mode: config.defaultMode, workspaceId: workspace.id, workspaceTaskId: task.id });
     const memberSession = manager.createSession({

@@ -17,10 +17,6 @@ const STATE: ComposerConfigState = {
   modelRefreshing: false,
   thinkingValue: "standard",
   thinkingLabel: "中",
-  skillsVisible: true,
-  skillsLabel: "Skills 2",
-  skillsTitle: "已选择 2 个 skills",
-  skillsExpanded: true,
 };
 
 const TARGET = {} as HTMLElement;
@@ -35,7 +31,6 @@ function mountFor(
     scope,
     ...STATE,
     onRefreshModels() {},
-    onOpenSkills() {},
     ...overrides,
   };
 }
@@ -62,7 +57,7 @@ test("composer config controller publishes immutable snapshots and skips no-op s
   assert.equal(controller.getSnapshot(), first);
 
   // 回调每次都是新闭包，但行为等价，不参与比较。
-  controller.sync([mountFor("all", { onRefreshModels() {}, onOpenSkills() {} })]);
+  controller.sync([mountFor("all", { onRefreshModels() {} })]);
   assert.equal(notifications, 1);
 
   controller.sync([mountFor("all", { modeLabel: "托管" })]);
@@ -92,10 +87,9 @@ test("mode 作用域只渲染模式 chip", () => {
   assert.doesNotMatch(html, /data-mode-control-pill="model"/);
   assert.doesNotMatch(html, /data-mode-control-pill="thinking"/);
   assert.doesNotMatch(html, /data-models-refresh/);
-  assert.doesNotMatch(html, /data-claude-skills-trigger/);
 });
 
-test("runtime 作用域渲染模型与思考，含刷新按钮但不含 Skills", () => {
+test("runtime 作用域渲染模型与思考，含刷新按钮", () => {
   const html = render(mountFor("runtime"));
   assert.match(html, /aria-label="模型与思考设置"/);
   assert.doesNotMatch(html, /data-mode-control-pill="mode"/);
@@ -103,22 +97,15 @@ test("runtime 作用域渲染模型与思考，含刷新按钮但不含 Skills",
   assert.match(html, /data-mode-control-pill="thinking"/);
   assert.match(html, /data-models-refresh=""/);
   assert.match(html, /data-models-refresh-scope="runtime"/);
-  assert.doesNotMatch(html, /data-claude-skills-trigger/);
 });
 
-test("all 作用域渲染三件套并把缺失的 skills 支持隐藏掉", () => {
+test("all 作用域渲染三件套", () => {
   const full = render(mountFor("all"));
   assert.match(full, /aria-label="会话设置"/);
   assert.match(full, /data-mode-control-pill="mode"/);
   assert.match(full, /data-mode-control-pill="model"/);
   assert.match(full, /data-mode-control-pill="thinking"/);
   assert.match(full, /data-models-refresh-scope="all"/);
-  assert.match(full, /data-claude-skills-trigger=""/);
-  assert.match(full, /aria-expanded="true"/);
-  assert.match(full, /Skills 2/);
-
-  const noSkills = render(mountFor("all", { skillsVisible: false }));
-  assert.doesNotMatch(noSkills, /data-claude-skills-trigger/);
 });
 
 test("chip 暴露完整值给 tooltip，并用 data-thinking 记录归一化后的深度", () => {

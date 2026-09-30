@@ -76,7 +76,7 @@ setTimeout(() => process.exit(2), 15000).unref();
 `);
   chmodSync(fakeCli, 0o755);
   writeFileSync(configPath, JSON.stringify({ host: "127.0.0.1", port, password,
-    defaultCwd: root, defaultMode: "assist", structuredRunner: "cli",
+    defaultCwd: root, defaultMode: "assist",
     render: { engine: "legacy" }, structured: { processHost: "rust" } }), { mode: 0o600 });
   const env = { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`,
     WAND_STRUCTURED_RENDER_BIN: RUST_BIN };

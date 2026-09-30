@@ -9,6 +9,7 @@ import {
   isPtyTypedTopicCandidate,
   measureSessionTopicInputWeight,
   provisionalSessionTopic,
+  SessionNativeTitleTracker,
   SessionTopicCoordinator,
   shouldAcceptGeneratedSessionTitle,
   shouldGenerateSessionTopicFromInput,
@@ -163,4 +164,80 @@ test("command titles skip the parent task name and keep the specific ask", () =>
   });
   assert.equal(shouldAcceptGeneratedSessionTitle("重构会话恢复流程", blocked), false);
   assert.equal(shouldAcceptGeneratedSessionTitle("收紧 resume 时间窗", blocked), true);
+});
+
+test("SessionTopicCoordinator prefers the native CLI title over the model", async () => {
+  const generateCalls: string[][] = [];
+  const coordinator = new SessionTopicCoordinator((messages) => {
+    generateCalls.push([...messages]);
+    return Promise.resolve({ title: "模型标题", description: "模型描述" });
+  });
+  const topics: SessionTopic[] = [];
+  coordinator.request("session-native", {
+    input: "把会话标题改成 CLI 自己起的名字",
+    readNativeTitle: async () => "CLI 起的名字",
+    onGenerating: () => {},
+    onTopic: (topic) => topics.push(topic),
+    onError: assert.fail,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(topics, [{ title: "CLI 起的名字", description: "CLI 起的名字", source: "native" }]);
+  assert.equal(generateCalls.length, 0);
+});
+
+test("SessionTopicCoordinator falls back to the system silicon employee without a native title", async () => {
+  const coordinator = new SessionTopicCoordinator(() => Promise.resolve({
+    title: "员工补的标题",
+    description: "员工补的描述",
+  }));
+  const topics: SessionTopic[] = [];
+  coordinator.request("session-fallback", {
+    input: "让系统员工补一个会话标题",
+    readNativeTitle: async () => "",
+    onGenerating: () => {},
+    onTopic: (topic) => topics.push(topic),
+    onError: assert.fail,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(topics, [{ title: "员工补的标题", description: "员工补的描述" }]);
+});
+
+test("SessionTopicCoordinator keeps a confirmed native title when the CLI reads empty", async () => {
+  const generateCalls: number[] = [];
+  const coordinator = new SessionTopicCoordinator(() => {
+    generateCalls.push(1);
+    return Promise.resolve({ title: "模型标题", description: "模型描述" });
+  });
+  const topics: SessionTopic[] = [];
+  const request = (readNativeTitle: () => Promise<string>, hasNativeTitle: boolean) =>
+    coordinator.request("session-keep", {
+      input: "再来一轮输入换标题",
+      readNativeTitle,
+      hasNativeTitle,
+      onGenerating: () => {},
+      onTopic: (topic) => topics.push(topic),
+      onError: assert.fail,
+    });
+  request(async () => "CLI 起的名字", false);
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  request(async () => "", true);
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(generateCalls, []);
+  assert.deepEqual(topics.map((topic) => topic.title), ["CLI 起的名字"]);
+});
+
+test("SessionNativeTitleTracker records the confirmed native title", () => {
+  const tracker = new SessionNativeTitleTracker();
+  assert.equal(tracker.has("s1"), false);
+  tracker.record("s1", "  CLI 起的名字  ");
+  assert.equal(tracker.has("s1"), true);
+  assert.equal(tracker.get("s1"), "CLI 起的名字");
+  tracker.record("s1", "");
+  assert.equal(tracker.get("s1"), "CLI 起的名字");
+  tracker.delete("s1");
+  assert.equal(tracker.has("s1"), false);
 });

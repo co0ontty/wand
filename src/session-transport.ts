@@ -94,7 +94,6 @@ function sessionBase(snapshot: SessionSnapshot): SessionBaseDTO {
     claudeSessionId: snapshot.claudeSessionId,
     providerSessionId: snapshot.claudeSessionId,
     queuedMessages: snapshot.queuedMessages,
-    queuedMessageSkills: snapshot.queuedMessageSkills,
     structuredState: snapshot.structuredState,
     resumedFromSessionId: snapshot.resumedFromSessionId,
     autoRecovered: snapshot.autoRecovered,

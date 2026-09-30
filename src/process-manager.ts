@@ -22,16 +22,18 @@ import {
   consumePtyInputForTopic,
   createPtyTopicLineBuffer,
   provisionalSessionTopic,
+  SessionNativeTitleTracker,
   SessionTopicCoordinator,
   sessionTopicBlocklistForSnapshot,
   shouldAcceptGeneratedSessionTitle,
   shouldGenerateSessionTopicFromInput,
   type PtyTopicLineBuffer,
 } from "./session-topic.js";
+import { readNativeSessionTitle } from "./native-session-title.js";
 import { getErrorMessage } from "./error-utils.js";
 import { recordIterationPrompt } from "./iteration-log.js";
 import { describePtySpawnFailure } from "./ensure-node-pty-helper.js";
-import { resolveSystemAiContext } from "./session-ai-context.js";
+import { resolveSessionProvider, resolveSystemAiContext } from "./session-ai-context.js";
 import { resolveSessionCwd } from "./session-cwd.js";
 import { inferProviderFromCommand } from "./session-provider.js";
 import { PtyTerminalState, type PtyTerminalSnapshot, type PtyHistoryPage } from "./pty-terminal-state.js";
@@ -727,6 +729,7 @@ export class ProcessManager extends EventEmitter {
   /** 启动时被识别为孤儿 PTY 并标记为 exited 的旧会话数（旧服务器进程已死） */
   private orphanRecoveredCount = 0;
   private readonly topicCoordinator = new SessionTopicCoordinator();
+  private readonly nativeTitles = new SessionNativeTitleTracker();
   private disposed = false;
   private readonly terminalHost: TerminalHost;
 
@@ -1138,6 +1141,7 @@ export class ProcessManager extends EventEmitter {
     }
 
     this.topicCoordinator.clear();
+    this.nativeTitles.clear();
     this.removeAllListeners("process");
     this.logger.dispose();
     this.terminalHost.disconnect();
@@ -2301,9 +2305,12 @@ export class ProcessManager extends EventEmitter {
     // 迭代提示词记录：和会话标题共用同一套「有没有信息量」判断，用户不用多做一步。
     recordIterationPrompt(this.storage, record, prompt, "session");
     const blockedTitles = sessionTopicBlocklistForSnapshot(record, this.storage);
+    // CLI 自己起了名字就归它，模型标题与输入首行都不再覆盖；取不到原生标题才走系统硅基员工。
+    const hasNativeTitle = this.nativeTitles.has(id);
     const provisional = provisionalSessionTopic(prompt, blockedTitles);
     if (
       provisional
+      && !hasNativeTitle
       && shouldGenerateSessionTopicFromInput(prompt)
       && (record.title !== provisional.title || record.description !== provisional.description)
     ) {
@@ -2315,11 +2322,23 @@ export class ProcessManager extends EventEmitter {
       cwd: record.cwd,
       language: this.config.language,
       ai: resolveSystemAiContext(record, this.config, this.storage.getSystemSiliconEmployee()),
+      readNativeTitle: () => readNativeSessionTitle(
+        resolveSessionProvider(record),
+        record.claudeSessionId,
+        record.cwd,
+      ),
+      hasNativeTitle,
       onGenerating: (generating) => {
         if (!this.disposed) this.setSessionTopicGenerating(id, generating);
       },
-      onTopic: ({ title, description }) => {
-        if (!this.disposed && this.sessions.has(id) && shouldAcceptGeneratedSessionTitle(title, blockedTitles)) {
+      onTopic: ({ title, description, source }) => {
+        if (this.disposed || !this.sessions.has(id)) return;
+        if (source === "native") {
+          this.applyNativeSessionTitle(id, title, blockedTitles);
+          return;
+        }
+        if (this.nativeTitles.has(id)) return;
+        if (shouldAcceptGeneratedSessionTitle(title, blockedTitles)) {
           this.setSessionTopic(id, title, description);
         }
       },
@@ -2327,6 +2346,15 @@ export class ProcessManager extends EventEmitter {
         console.error(`[ProcessManager] Failed to generate session topic ${id}:`, getErrorMessage(error));
       },
     });
+  }
+
+  /** 原生标题优先于模型标题：只受「不能是任务名/目录名」约束，命中且变化时才落库。 */
+  private applyNativeSessionTitle(id: string, title: string, blockedTitles: readonly string[]): void {
+    this.nativeTitles.record(id, title);
+    const current = this.sessions.get(id);
+    if (!current || !shouldAcceptGeneratedSessionTitle(title, blockedTitles)) return;
+    if (current.title === title && current.description === title) return;
+    this.setSessionTopic(id, title, title);
   }
 
   private defaultAutonomyPolicy(mode: ExecutionMode): AutonomyPolicy {

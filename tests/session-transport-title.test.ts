@@ -66,12 +66,11 @@ test("server prefers a command summary over the parent task title", () => {
   }), ["重构会话恢复流程", "wand"]), "会话");
 });
 
-test("session DTOs expose workspace binding, queue skills, and title-generating state", () => {
+test("session DTOs expose workspace binding and title-generating state", () => {
   const source = snapshot({
     workspaceId: "ws-1",
     workspaceTaskId: "task-9",
     queuedMessages: ["follow up"],
-    queuedMessageSkills: [["review"]],
     titleGenerating: true,
     claudeSessionId: "native-thread-1",
     ptyOutputSeq: 42,
@@ -85,7 +84,6 @@ test("session DTOs expose workspace binding, queue skills, and title-generating 
     assert.equal(dto.workspaceId, "ws-1");
     assert.equal(dto.workspaceTaskId, "task-9");
     assert.deepEqual(dto.queuedMessages, ["follow up"]);
-    assert.deepEqual(dto.queuedMessageSkills, [["review"]]);
     assert.equal(dto.titleGenerating, true);
     assert.equal(dto.claudeSessionId, "native-thread-1");
     assert.equal(dto.providerSessionId, "native-thread-1");
@@ -96,7 +94,6 @@ test("session DTOs expose workspace binding, queue skills, and title-generating 
   const encoded = JSON.parse(JSON.stringify(list)) as Record<string, unknown>;
   assert.equal(encoded.workspaceId, "ws-1");
   assert.equal(encoded.workspaceTaskId, "task-9");
-  assert.deepEqual(encoded.queuedMessageSkills, [["review"]]);
   assert.equal(encoded.titleGenerating, true);
   assert.equal("ptyOutputSeq" in encoded, false);
   assert.equal("ptyLaunchMarkerToken" in encoded, false);
@@ -106,6 +103,5 @@ test("session DTOs omit unset workspace and queue fields from JSON", () => {
   const encoded = JSON.parse(JSON.stringify(toSessionListItemDTO(snapshot()))) as Record<string, unknown>;
   assert.equal("workspaceId" in encoded, false);
   assert.equal("workspaceTaskId" in encoded, false);
-  assert.equal("queuedMessageSkills" in encoded, false);
   assert.equal("titleGenerating" in encoded, false);
 });

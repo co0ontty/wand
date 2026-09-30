@@ -127,13 +127,13 @@ test("config:show redacts every runtime secret", (t) => {
   const displayed = JSON.parse(output) as {
     password?: string;
     appSecret?: string;
-    systemAi?: { apiKey?: string; fallbacks?: Array<{ apiKey?: string }> };
+    systemAi?: unknown;
   };
 
   assert.equal(displayed.password, "<set>");
   assert.equal(displayed.appSecret, "<set>");
-  assert.equal(displayed.systemAi?.apiKey, "<set>");
-  assert.equal(displayed.systemAi?.fallbacks?.[0]?.apiKey, "<set>");
+  // 直连 API 已移除：老库里残留的 systemAi 偏好（含密钥）不得再出现在 config:show 里。
+  assert.equal(displayed.systemAi, undefined);
   assert.equal(output.includes(password), false);
   assert.equal(output.includes(appSecret), false);
   assert.equal(output.includes(apiKey), false);
@@ -157,8 +157,10 @@ test("config loading never copies provider CLI credentials", async (t) => {
   const storage = new WandStorage(path.join(dir, "wand.db"));
   try {
     const config = await loadConfigWithStorage(path.join(dir, "config.json"), storage);
-    assert.equal(config.systemAi?.apiKey, "");
+    // 直连 API 已移除，加载配置不再从 CLI 凭据文件派生任何 API 配置。
+    assert.equal("systemAi" in config, false);
     assert.equal(storage.hasPreference("pref:systemAi"), false);
+    assert.equal(JSON.stringify(config).includes("must-not-be-copied"), false);
   } finally {
     storage.close();
     if (previousHome === undefined) delete process.env.HOME;

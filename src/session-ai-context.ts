@@ -1,13 +1,8 @@
 import { getDefaultModelForProvider } from "./config.js";
-import {
-  discoverCliSystemAiConfigs,
-  mergeSystemAiConfigs,
-  systemAiProfiles,
-} from "./system-ai.js";
 import { providerCliInstalled, isSessionProvider } from "./session-provider.js";
 import type { SiliconEmployee } from "./ai-team-types.js";
 import { isSystemSiliconEmployee, systemEmployeeCliCandidates } from "./system-employee.js";
-import type { SessionProvider, SessionSnapshot, SystemAiConfig, WandConfig } from "./types.js";
+import type { AiCliCandidate, SessionProvider, SessionSnapshot, WandConfig } from "./types.js";
 import { inferProviderFromCommand, inferProviderFromRunner } from "./session-provider.js";
 
 export interface SessionAiContext {
@@ -15,11 +10,10 @@ export interface SessionAiContext {
   model?: string;
   thinkingEffort: SessionSnapshot["thinkingEffort"];
   inheritEnv?: boolean;
-  systemAi?: SystemAiConfig;
   /** 内置「系统运维」员工的人设；作为系统提示前缀注入 Wand 自有 AI 调用。 */
   opsPersona?: string;
   /** CLI 降级链（按顺序）。为空时只用 provider/model 这一次调用。 */
-  cliCandidates?: import("./types.js").AiCliCandidate[];
+  cliCandidates?: AiCliCandidate[];
 }
 
 /**
@@ -42,11 +36,6 @@ export function resolveSessionProvider(snapshot: Pick<
 function normalizeModel(value: string | null | undefined): string | undefined {
   const model = value?.trim();
   return model && model !== "default" ? model : undefined;
-}
-
-function usableSystemAi(config: SystemAiConfig): SystemAiConfig | undefined {
-  if (!systemAiProfiles(config, true).length) return undefined;
-  return { ...config, enabled: true };
 }
 
 /** Build the provider-specific settings used by session-adjacent AI actions. */
@@ -73,7 +62,7 @@ export function resolveSessionAiContext(
 export function resolveSystemAiContext(
   snapshot: Parameters<typeof resolveSessionAiContext>[0],
   config: Parameters<typeof resolveSessionAiContext>[1]
-    & Pick<WandConfig, "systemAi" | "systemAiCli" | "systemAiModel">,
+    & Pick<WandConfig, "systemAiCli" | "systemAiModel">,
   systemEmployee?: SiliconEmployee | null,
 ): SessionAiContext {
   const sessionContext = resolveSessionAiContext(snapshot, config);
@@ -96,10 +85,6 @@ export function resolveSystemAiContext(
     owned.model = preferred.model ?? normalizeModel(getDefaultModelForProvider(config, preferred.provider));
     owned.thinkingEffort = preferred.thinkingEffort ?? config.defaultThinkingEffort;
   }
-  if (config.systemAi?.enabled) {
-    const directApi = usableSystemAi(config.systemAi);
-    return directApi ? { ...owned, systemAi: directApi } : owned;
-  }
   if (chain.length) return owned;
   // Older installations without a system AI CLI preference still follow the
   // current session. A chosen CLI must never inherit another provider's model.
@@ -110,46 +95,5 @@ export function resolveSystemAiContext(
     model: normalizeModel(config.systemAiModel)
       ?? normalizeModel(getDefaultModelForProvider(config, config.systemAiCli)),
     thinkingEffort: config.defaultThinkingEffort,
-  };
-}
-
-/** Build the AI context for quick-commit actions from their global preferences. */
-export function resolveCommitAiContext(
-  snapshot: Pick<
-    SessionSnapshot,
-    "provider" | "structuredState" | "runner" | "command" | "selectedModel" | "thinkingEffort"
-  >,
-  config: Pick<
-    WandConfig,
-    | "defaultModel"
-    | "defaultCodexModel"
-    | "defaultOpenCodeModel"
-    | "defaultGrokModel"
-    | "defaultQoderModel"
-    | "defaultPiModel"
-    | "defaultThinkingEffort"
-    | "inheritEnv"
-    | "commitAiSource"
-    | "systemAi"
-    | "systemAiCli"
-    | "systemAiModel"
-  >,
-  discoverApis: typeof discoverCliSystemAiConfigs = discoverCliSystemAiConfigs,
-  systemEmployee?: SiliconEmployee | null,
-): SessionAiContext {
-  const sessionContext = resolveSystemAiContext(snapshot, config, systemEmployee);
-  if (config.commitAiSource !== "api") {
-    // 快捷提交的直连来源只看 commitAiSource；系统 AI 的 enabled 不能顺手把它打开。
-    const cliContext: SessionAiContext = { ...sessionContext };
-    delete cliContext.systemAi;
-    return cliContext;
-  }
-  const directApi = mergeSystemAiConfigs(
-    config.systemAi,
-    discoverApis(sessionContext.provider),
-  );
-  return {
-    ...sessionContext,
-    ...(directApi ? { systemAi: directApi } : {}),
   };
 }

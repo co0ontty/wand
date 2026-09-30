@@ -11,34 +11,18 @@ import {
   getProviderDefaultModels,
   PREFERENCE_KEYS,
   saveConfig,
-  validateCommitAiConfig,
   writePreferenceToStorage,
 } from "./config.js";
 import { withConfiguredDefaultModelLabels, type ModelCatalogService } from "./models.js";
 import { DEPLOYMENT_CONFIG_KEYS, type RuntimeConfigState } from "./runtime-config.js";
 import type { WandStorage } from "./storage.js";
-import type { SystemAiConfig, WandConfig } from "./types.js";
+import type { WandConfig } from "./types.js";
 import type { GithubConnectorStatus } from "./github-connector.js";
-import {
-  callSystemAiText,
-  discoverCliSystemAiConfigs,
-  mergeSystemAiConfigs,
-  normalizeSystemAiConfig,
-} from "./system-ai.js";
 
 interface SettingsDistributionPayload {
   androidApk: Record<string, unknown>;
   macosDmg: Record<string, unknown>;
   iosIpa: Record<string, unknown>;
-}
-
-function systemAiRouteIdentity(profile: SystemAiConfig): string {
-  return [
-    profile.protocol,
-    profile.baseUrl,
-    profile.model,
-    profile.authHeader ?? "bearer",
-  ].join("\0");
 }
 
 export interface ServerSettingsRoutesDependencies {
@@ -64,7 +48,6 @@ function publicConfig(config: WandConfig): Record<string, unknown> {
   const defaultModels = getProviderDefaultModels(config);
   return {
     ...safe,
-    systemAi: publicSystemAi(safe.systemAi),
     defaultModel: defaultModels.claude,
     defaultCodexModel: defaultModels.codex,
     defaultOpenCodeModel: defaultModels.opencode,
@@ -73,21 +56,6 @@ function publicConfig(config: WandConfig): Record<string, unknown> {
     defaultPiModel: defaultModels.pi,
     defaultGeminiModel: defaultModels.gemini,
     defaultModels,
-  };
-}
-
-function publicSystemAi(systemAi: WandConfig["systemAi"]): Record<string, unknown> | undefined {
-  if (!systemAi) return undefined;
-  return {
-    ...systemAi,
-    apiKey: "",
-    hasApiKey: Boolean(systemAi.apiKey),
-    fallbacks: systemAi.fallbacks?.map((profile) => ({
-      ...profile,
-      apiKey: "",
-      hasApiKey: Boolean(profile.apiKey),
-      fallbacks: undefined,
-    })),
   };
 }
 
@@ -194,103 +162,6 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
     }
   });
 
-  app.post("/api/settings/system-ai/import", requireAdmin, (_req, res) => {
-    const imported = discoverCliSystemAiConfigs();
-    if (!imported.length) {
-      res.status(404).json({ error: "没有在已配置的 CLI 文件中找到可直连的 API 地址、密钥和模型。" });
-      return;
-    }
-    const candidate = runtimeConfig.createCandidate();
-    const remainingImported = [...imported];
-    const existingRoutes = candidate.systemAi
-      ? [candidate.systemAi, ...(candidate.systemAi.fallbacks ?? [])]
-        .map((profile) => ({ ...profile, fallbacks: undefined }))
-      : [];
-    const refreshedExisting = existingRoutes.map((profile) => {
-      const importedIndex = remainingImported.findIndex((item) =>
-        systemAiRouteIdentity(item) === systemAiRouteIdentity(profile));
-      if (importedIndex < 0) return profile;
-      const [matchingImport] = remainingImported.splice(importedIndex, 1);
-      return {
-        ...profile,
-        apiKey: matchingImport!.apiKey,
-        source: matchingImport!.source,
-      };
-    });
-    const merged = mergeSystemAiConfigs(refreshedExisting, remainingImported);
-    if (!merged) {
-      res.status(404).json({ error: "没有找到可用的系统 AI API 配置。" });
-      return;
-    }
-    writePreferenceToStorage(candidate, storage, "systemAi", {
-      ...merged,
-      enabled: candidate.systemAi?.enabled === true,
-    });
-    runtimeConfig.commit(candidate, new Set(["systemAi"]));
-    res.json({ ok: true, count: imported.length, systemAi: (publicConfig(candidate).systemAi) });
-  });
-
-  app.post("/api/settings/system-ai/test", requireAdmin, asyncRoute(async (req, res) => {
-    const raw = req.body?.route;
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-      res.status(400).json({ error: "请提供要测试的系统 AI 线路。" });
-      return;
-    }
-    const submitted = raw as Record<string, unknown>;
-    const desired = runtimeConfig.desiredSnapshot().systemAi;
-    const storedRoutes = desired
-      ? [desired, ...(desired.fallbacks ?? [])].map((profile) => ({ ...profile, fallbacks: undefined }))
-      : [];
-    const submittedId = typeof submitted.id === "string" ? submitted.id.trim() : "";
-    const stored = submittedId
-      ? storedRoutes.find((profile) => profile.id === submittedId)
-      : undefined;
-    const apiKey = submitted.clearApiKey === true
-      ? ""
-      : typeof submitted.apiKey === "string" && submitted.apiKey.trim()
-        ? submitted.apiKey.trim()
-        : stored?.apiKey ?? "";
-    let route: SystemAiConfig;
-    try {
-      route = normalizeSystemAiConfig({
-        ...stored,
-        ...submitted,
-        enabled: true,
-        apiKey,
-        fallbacks: undefined,
-      }, stored);
-      if (!route.baseUrl || !route.apiKey || !route.model) {
-        throw new Error("测试线路需要完整的 API 地址、API Key 和模型。");
-      }
-    } catch (error) {
-      sendRouteError(res, error, "测试线路配置无效。");
-      return;
-    }
-
-    const startedAt = Date.now();
-    try {
-      const text = await callSystemAiText(
-        { system: "你是 Wand 的系统 API 线路探针。", prompt: "这是 Wand 系统 API 线路验收。请只回复 WAND_API_OK。" },
-        route,
-        30_000,
-      );
-      if (!text.trim()) throw new Error("系统 AI API 返回了空结果。");
-      res.json({
-        ok: true,
-        source: route.source ?? "custom",
-        requestedModel: route.model,
-        reasoningEffort: route.protocol === "openai" ? "low" : "disabled",
-        latencyMs: Date.now() - startedAt,
-      });
-    } catch (error) {
-      res.status(502).json({
-        error: getErrorMessage(error, "系统 AI API 测试失败。"),
-        requestedModel: route.model,
-        latencyMs: Date.now() - startedAt,
-      });
-    }
-  }));
-
   app.get("/api/app-connect-code", requireAdmin, (req, res) => {
     res.json(deps.resolveAppConnectCode(req));
   });
@@ -298,7 +169,6 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
   app.post("/api/settings/config", requireAdminOrSessionPreferences, asyncRoute(async (req, res) => {
     const body = req.body as Partial<WandConfig> & {
       defaultModels?: { claude?: unknown; codex?: unknown; opencode?: unknown; grok?: unknown; qoder?: unknown; pi?: unknown; gemini?: unknown };
-      systemAi?: Record<string, unknown>;
     };
     const previousDesiredConfig = runtimeConfig.desiredSnapshot();
     const candidateConfig = runtimeConfig.createCandidate();
@@ -308,9 +178,7 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
       setPreference(key: string, value: unknown): void { stagedPreferences.push({ key, value }); },
     } as unknown as WandStorage;
     const stagePreference = (field: (typeof PREFERENCE_KEYS)[number], value: unknown): void => {
-      writePreferenceToStorage(candidateConfig, stagingStorage, field, value, {
-        deferCommitAiValidation: true,
-      });
+      writePreferenceToStorage(candidateConfig, stagingStorage, field, value);
       stagedPreferenceFields.add(field);
     };
     let touchedDeployField = false;
@@ -345,65 +213,11 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
         if (Object.hasOwn(body.defaultModels, "pi")) stagePreference("defaultPiModel", body.defaultModels.pi);
         if (Object.hasOwn(body.defaultModels, "gemini")) stagePreference("defaultGeminiModel", body.defaultModels.gemini);
       }
-      if (body.systemAi !== undefined) {
-        if (!body.systemAi || typeof body.systemAi !== "object" || Array.isArray(body.systemAi)) {
-          throw new Error("systemAi 必须是对象。");
-        }
-        const previous = candidateConfig.systemAi;
-        const systemAiEnabled = body.systemAi.enabled === true;
-        const previousRoutes = previous ? [previous, ...(previous.fallbacks ?? [])] : [];
-        const previousById = new Map(previousRoutes.flatMap((profile) =>
-          profile.id ? [[profile.id, profile] as const] : []));
-        const rawFallbacks = Array.isArray(body.systemAi.fallbacks) ? body.systemAi.fallbacks : [];
-        const rawRoutes = [body.systemAi, ...rawFallbacks].map((item) =>
-          item && typeof item === "object" && !Array.isArray(item)
-            ? item as unknown as Record<string, unknown>
-            : {});
-        const submittedIds = new Set<string>();
-        const normalizedRoutes = rawRoutes.map((raw, index) => {
-          const submittedId = typeof raw.id === "string" ? raw.id.trim() : "";
-          if (submittedId) {
-            if (submittedIds.has(submittedId)) throw new Error("系统 AI 路由 ID 不能重复。");
-            submittedIds.add(submittedId);
-          }
-          // Older web clients did not submit route IDs. For those clients only,
-          // match a unique route by its non-secret identity; never fall back to
-          // the array index because routes may have been reordered.
-          const identityMatches = submittedId ? [] : previousRoutes.filter((profile) =>
-            profile.protocol === (raw.protocol === "anthropic" ? "anthropic" : "openai")
-            && profile.baseUrl === (typeof raw.baseUrl === "string" ? raw.baseUrl.trim().replace(/\/+$/, "") : "")
-            && profile.model === (typeof raw.model === "string" ? raw.model.trim() : "")
-            && (profile.authHeader ?? "bearer") === (raw.authHeader === "x-api-key" ? "x-api-key" : "bearer"));
-          const prior = (submittedId ? previousById.get(submittedId) : undefined)
-            ?? (identityMatches.length === 1 ? identityMatches[0] : undefined);
-          const apiKey = raw.clearApiKey === true
-            ? ""
-            : typeof raw.apiKey === "string" && raw.apiKey.trim()
-              ? raw.apiKey.trim()
-              : prior?.apiKey ?? "";
-          return normalizeSystemAiConfig({
-            ...prior,
-            ...raw,
-            enabled: index === 0 ? systemAiEnabled : true,
-            apiKey,
-            fallbacks: undefined,
-          }, prior);
-        });
-        const [primary, ...fallbacks] = normalizedRoutes;
-        if (!primary) throw new Error("系统 AI 至少需要一个路由占位。");
-        stagePreference("systemAi", {
-          ...primary,
-          enabled: systemAiEnabled,
-          ...(fallbacks.length ? { fallbacks } : { fallbacks: [] }),
-        });
-      }
       for (const field of PREFERENCE_KEYS) {
-        if (field === "systemAi") continue;
         const value = (body as Record<string, unknown>)[field];
         if (!(field in body) || value === undefined) continue;
         stagePreference(field, value);
       }
-      validateCommitAiConfig(candidateConfig);
     } catch (error) {
       sendRouteError(res, error, "配置校验失败。");
       return;

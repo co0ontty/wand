@@ -498,64 +498,6 @@ export const settingsAndQuickCommitStyles = String.raw`
   .wand-settings-default-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
-.wand-settings-route-toolbar,
-.wand-settings-route-heading,
-.wand-settings-route-identity,
-.wand-settings-route-actions {
-  display: flex;
-  align-items: center;
-}
-
-.wand-settings-route-toolbar,
-.wand-settings-route-heading {
-  justify-content: space-between;
-  gap: 14px;
-}
-
-.wand-settings-route-toolbar > div,
-.wand-settings-route-identity > div {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-
-.wand-settings-route-toolbar strong,
-.wand-settings-route-identity strong {
-  color: var(--text-primary);
-  font-size: var(--font-size-sm);
-}
-
-.wand-settings-route-toolbar span,
-.wand-settings-route-identity span {
-  color: var(--text-secondary);
-  font-size: var(--font-size-xs);
-}
-
-.wand-settings-route-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.wand-settings-route {
-  border: 1px solid var(--border-subtle);
-  border-radius: 12px;
-  padding: 13px;
-  background: color-mix(in srgb, var(--bg-primary) 82%, var(--bg-elevated));
-}
-
-.wand-settings-route-heading {
-  margin-bottom: 13px;
-  border-bottom: 1px solid var(--border-subtle);
-  padding-bottom: 10px;
-}
-
-.wand-settings-route-identity { gap: 10px; min-width: 0; }
-
 .wand-settings-route-rank {
   display: inline-grid;
   flex: 0 0 auto;
@@ -569,15 +511,6 @@ export const settingsAndQuickCommitStyles = String.raw`
   font-family: var(--font-mono);
   font-weight: var(--font-weight-bold);
 }
-
-.wand-settings-route-actions {
-  flex: 0 0 auto;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 2px;
-}
-
-.wand-settings-route-actions .wand-ui-button:last-child { color: var(--danger); }
 
 /* 系统 AI 的执行者：内置「系统运维」员工的只读投影（候选在员工页维护）。 */
 .wand-settings-system-ai-owner {
@@ -650,10 +583,6 @@ export const settingsAndQuickCommitStyles = String.raw`
   font-size: 11px;
   font-style: normal;
 }
-.wand-settings-route-test { margin-top: 12px; }
-.wand-settings-clear-key { align-self: flex-start; color: var(--danger); }
-.wand-settings-route .wand-settings-field:last-child { grid-column: 1 / -1; }
-
 .wand-settings-field {
   display: flex;
   flex-direction: column;
@@ -2867,12 +2796,6 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   .wand-settings-section-heading { padding: 15px 14px; }
   .wand-settings-section-body { padding: 15px 14px; }
   .wand-settings-grid, .wand-settings-default-row, .wand-settings-file-grid, .wand-settings-env-toolbar { grid-template-columns: minmax(0, 1fr); }
-  .wand-settings-route .wand-settings-field:last-child { grid-column: auto; }
-  .wand-settings-route-toolbar, .wand-settings-route-heading { align-items: flex-start; }
-  .wand-settings-route-toolbar { flex-direction: column; }
-  .wand-settings-route-toolbar > .wand-ui-button { width: 100%; }
-  .wand-settings-route-heading { flex-direction: column; }
-  .wand-settings-route-actions { width: 100%; justify-content: flex-end; }
   .wand-settings-section-heading { flex-direction: column; }
   .wand-settings-section-action { width: 100%; }
   .wand-settings-section-action .wand-ui-button { width: 100%; }

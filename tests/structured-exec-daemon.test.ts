@@ -344,7 +344,6 @@ test("structured manager detaches on web shutdown and recovers the same daemon r
       firstStorage,
       { ...defaultConfig(), defaultCwd: root },
       null,
-      undefined,
       { claudeCli: runner },
       firstClient,
     );
@@ -383,7 +382,6 @@ test("structured manager detaches on web shutdown and recovers the same daemon r
       secondStorage,
       { ...defaultConfig(), defaultCwd: root },
       null,
-      undefined,
       {},
       secondClient,
     );
@@ -516,7 +514,6 @@ test("truncated daemon replay keeps the checkpoint transcript instead of failing
       storage,
       { ...defaultConfig(), defaultCwd: root },
       null,
-      undefined,
       { pi: new ScriptedPiFloodRunner(client) },
       client,
     );
@@ -561,7 +558,6 @@ test("truncated daemon replay keeps the checkpoint transcript instead of failing
       storage,
       { ...defaultConfig(), defaultCwd: root },
       null,
-      undefined,
       { pi: new ScriptedPiFloodRunner(client) },
       client,
     );

@@ -344,7 +344,7 @@ function taskTitleAiOptions(config?: WandConfig, storage?: WandStorage): QuickCo
     selectedModel: null,
     thinkingEffort: config.defaultThinkingEffort,
   };
-  // resolveSystemAiContext 会在直连 API 可用且已启用时优先走 API，否则走系统运维员工的 CLI 候选链。
+  // resolveSystemAiContext 按系统运维员工的 CLI 候选链解析（首个已安装的优先）。
   return resolveSystemAiContext(defaultSession, config, storage?.getSystemSiliconEmployee() ?? null);
 }
 

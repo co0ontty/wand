@@ -20,10 +20,6 @@ export interface ComposerConfigState {
   readonly modelRefreshing: boolean;
   readonly thinkingValue: string;
   readonly thinkingLabel: string;
-  readonly skillsVisible: boolean;
-  readonly skillsLabel: string;
-  readonly skillsTitle: string;
-  readonly skillsExpanded: boolean;
 }
 
 export interface ComposerConfigMount extends ComposerConfigState {
@@ -31,7 +27,6 @@ export interface ComposerConfigMount extends ComposerConfigState {
   readonly target: HTMLElement;
   readonly scope: ComposerConfigScope;
   readonly onRefreshModels: () => void;
-  readonly onOpenSkills: (trigger: HTMLButtonElement) => void;
 }
 
 export interface ComposerConfigSnapshot extends MountSnapshot<ComposerConfigMount> {}
@@ -43,10 +38,6 @@ function sameState(a: ComposerConfigState, b: ComposerConfigState): boolean {
     && a.modelRefreshing === b.modelRefreshing
     && a.thinkingValue === b.thinkingValue
     && a.thinkingLabel === b.thinkingLabel
-    && a.skillsVisible === b.skillsVisible
-    && a.skillsLabel === b.skillsLabel
-    && a.skillsTitle === b.skillsTitle
-    && a.skillsExpanded === b.skillsExpanded;
 }
 
 /**

@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { query as sdkQuery, type CanUseTool, type Options as SdkOptions, type PermissionResult, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 
 import { prepareSessionWorktree, type WorktreeSetupSpec } from "./git-worktree.js";
 
@@ -17,9 +16,9 @@ import { getDefaultModelForProvider } from "./config.js";
 import type { WandTaskAgent } from "./task-types.js";
 import { recordIterationPrompt } from "./iteration-log.js";
 import { signalNameFromNumber } from "./signal-utils.js";
-import { resolveSdkClaudeBinary } from "./claude-sdk-runner.js";
 import {
   provisionalSessionTopic,
+  SessionNativeTitleTracker,
   SessionTopicCoordinator,
   sessionTopicBlocklistForSnapshot,
   shouldAcceptGeneratedSessionTitle,
@@ -27,12 +26,12 @@ import {
 } from "./session-topic.js";
 import { resolveSessionCwd } from "./session-cwd.js";
 import { isSessionProvider, providerCliCommand } from "./session-provider.js";
-import { resolveSystemAiContext } from "./session-ai-context.js";
+import { resolveSessionProvider, resolveSystemAiContext } from "./session-ai-context.js";
+import { readNativeSessionTitle } from "./native-session-title.js";
 import { CodexRunner } from "./structured-codex-adapter.js";
 import { CodexProtocolReducer } from "./structured-codex-protocol.js";
 import { normalizeStructuredToolResultContent } from "./structured-content.js";
 import {
-  buildClaudeSdkThinking,
   buildSessionSystemPromptParts,
   ClaudeCliRunner,
   derivePermissionPolicy,
@@ -321,7 +320,6 @@ function buildStructuredOutputPayload(snapshot: SessionSnapshot): ProcessEvent["
     output: snapshot.output,
     messages: snapshot.messages ? enrichStructuredMessages(snapshot.messages, snapshot.id) : undefined,
     queuedMessages: snapshot.queuedMessages,
-    queuedMessageSkills: snapshot.queuedMessageSkills,
     sessionKind: "structured",
     structuredState: snapshot.structuredState,
     provider: snapshot.provider,
@@ -400,7 +398,6 @@ function buildIncrementalStructuredPayload(
     wandProtocolVersion: WAND_PROTOCOL_VERSION,
     incremental: true,
     queuedMessages: snapshot.queuedMessages,
-    queuedMessageSkills: snapshot.queuedMessageSkills,
     sessionKind: "structured",
     structuredState: snapshot.structuredState,
     lastMessage,
@@ -515,32 +512,7 @@ function upsertAssistantMessage(
 export class StructuredSessionManager {
   private readonly sessions = new Map<string, SessionSnapshot>();
   private readonly pendingRunnerExecutions = new Map<string, StructuredRunnerExecution>();
-  private readonly pendingSdkAbort = new Map<string, AbortController>();
-  /**
-   * Active SDK Query handle per session, kept around so we can call
-   * `query.interrupt()` for a graceful stop instead of aborting via signal.
-   * Only populated while an SDK call is in flight.
-   */
-  private readonly pendingSdkQueries = new Map<string, { interrupt(): Promise<void> }>();
-  /** In-flight canUseTool waiters. One pending prompt per session. */
-  private readonly pendingPermissions = new Map<string, {
-    requestId: string;
-    resolve: (result: PermissionResult) => void;
-  }>();
-  /** approve_turn memory, scoped to the current SDK query. */
-  private readonly turnApprovalMemory = new Map<string, {
-    scopes: Set<EscalationScope>;
-    targets: Set<string>;
-  }>();
   private readonly interruptedWith = new Map<string, string>();
-  private readonly interruptedSkills = new Map<string, string[]>();
-  /**
-   * Sessions where the current interrupt is a "queue promote" (用户从排队条点了「立即」
-   * 把队首插队到 now)。退出处理三个分支默认会把 queuedMessages 清空——因为常规的
-   * interrupt 语义是"算了，做这个"，把队列也作废。但 queue-promote 的语义是
-   * "先做这条，剩下的队列还要继续"，所以这里打个标记，让退出 handler 保留 queue。
-   * 收到后必须 delete 掉，避免下一次普通 interrupt 误带 flag。
-   */
   private readonly preserveQueueOnInterrupt = new Set<string>();
   /** Last wall-clock time (ms) a streaming checkpoint reached SQLite. */
   private readonly lastStreamSaveAt = new Map<string, number>();
@@ -558,6 +530,7 @@ export class StructuredSessionManager {
   private emitEvent: ((event: ProcessEvent) => void) | null = null;
   private archiveTimer: NodeJS.Timeout | null = null;
   private readonly topicCoordinator = new SessionTopicCoordinator();
+  private readonly nativeTitles = new SessionNativeTitleTracker();
   private readonly streamEmitTimers = new Set<NodeJS.Timeout>();
   private readonly claudeCliRunner: StructuredRunnerAdapter;
   private readonly codexRunner: StructuredRunnerAdapter;
@@ -577,7 +550,6 @@ export class StructuredSessionManager {
     private readonly storage: WandStorage,
     private readonly config: WandConfig,
     private readonly logger: SessionLogger | null = null,
-    private readonly sdkQueryFactory: typeof sdkQuery = sdkQuery,
     runners: StructuredSessionManagerRunners = {},
     private readonly execHost?: StructuredExecHost,
   ) {
@@ -598,9 +570,8 @@ export class StructuredSessionManager {
       // rely on the provider/runner invariant without making startup fail.
       const runner = isStructuredRunnerForProvider(provider, storedRunner)
         ? storedRunner
-        : defaultStructuredRunner(provider, this.config.structuredRunner);
+        : defaultStructuredRunner(provider);
       const recoverableDetachedRun = snapshot.status === "running"
-        && runner !== "claude-sdk"
         && this.execHost?.persistent === true;
       if (recoverableDetachedRun) this.pendingRecoveryIds.push(snapshot.id);
       const restored: SessionSnapshot = {
@@ -614,7 +585,6 @@ export class StructuredSessionManager {
         autoApprovePermissions: snapshot.autoApprovePermissions ?? shouldAutoApproveForMode(snapshot.mode),
         approvalStats: snapshot.approvalStats ?? { tool: 0, command: 0, file: 0, total: 0 },
         queuedMessages: snapshot.queuedMessages ?? [],
-        queuedMessageSkills: (snapshot.queuedMessages ?? []).map((_, index) => snapshot.queuedMessageSkills?.[index] ?? []),
         pendingEscalation: null,
         permissionBlocked: false,
         structuredState: {
@@ -683,8 +653,6 @@ export class StructuredSessionManager {
 
     const activeSessionIds = new Set<string>([
       ...this.pendingRunnerExecutions.keys(),
-      ...this.pendingSdkQueries.keys(),
-      ...this.pendingSdkAbort.keys(),
       ...Array.from(this.sessions.values())
         .filter((session) => session.structuredState?.inFlight)
         .map((session) => session.id),
@@ -695,7 +663,7 @@ export class StructuredSessionManager {
     for (const id of activeSessionIds) {
       const session = this.sessions.get(id);
       if (!session) continue;
-      if (detachSafe && session.runner !== "claude-sdk") continue;
+      if (detachSafe) continue;
       const cancelled: SessionSnapshot = {
         ...session,
         status: "idle",
@@ -715,29 +683,18 @@ export class StructuredSessionManager {
     }
 
     for (const [executionId, execution] of this.pendingRunnerExecutions) {
-      if (detachSafe && this.sessions.get(executionId)?.runner !== "claude-sdk") continue;
+      if (detachSafe) continue;
       execution.interrupt();
     }
-    for (const [sessionId, waiter] of this.pendingPermissions) {
-      waiter.resolve(structuredPermissionDenied("服务已关闭"));
-      this.pendingPermissions.delete(sessionId);
-    }
-    this.turnApprovalMemory.clear();
-    for (const query of this.pendingSdkQueries.values()) {
-      void query.interrupt().catch(() => { /* ignore */ });
-    }
-    for (const controller of this.pendingSdkAbort.values()) controller.abort();
     this.pendingRunnerExecutions.clear();
-    this.pendingSdkQueries.clear();
-    this.pendingSdkAbort.clear();
     this.interruptedWith.clear();
-    this.interruptedSkills.clear();
     this.preserveQueueOnInterrupt.clear();
     for (const timer of this.streamCheckpointTimers.values()) clearTimeout(timer);
     this.streamCheckpointTimers.clear();
     this.streamCheckpointDirty.clear();
     this.lastStreamSaveAt.clear();
     this.topicCoordinator.clear();
+    this.nativeTitles.clear();
     this.emitEvent = null;
   }
 
@@ -1286,9 +1243,12 @@ export class StructuredSessionManager {
     // 迭代提示词记录：和会话标题共用同一套「有没有信息量」判断，用户不用多做一步。
     recordIterationPrompt(this.storage, session, input, "session");
     const blockedTitles = sessionTopicBlocklistForSnapshot(session, this.storage);
+    // CLI 自己起了名字就归它，模型标题与输入首行都不再覆盖；取不到原生标题才走系统硅基员工。
+    const hasNativeTitle = this.nativeTitles.has(id);
     const provisional = provisionalSessionTopic(input, blockedTitles);
     if (
       provisional
+      && !hasNativeTitle
       && shouldGenerateSessionTopicFromInput(input)
       && (session.title !== provisional.title || session.description !== provisional.description)
     ) {
@@ -1300,11 +1260,23 @@ export class StructuredSessionManager {
       cwd: session.cwd,
       language: this.config.language,
       ai: resolveSystemAiContext(session, this.config, this.storage.getSystemSiliconEmployee()),
+      readNativeTitle: () => readNativeSessionTitle(
+        resolveSessionProvider(session),
+        session.claudeSessionId,
+        session.cwd,
+      ),
+      hasNativeTitle,
       onGenerating: (generating) => {
         if (!this.disposed) this.setSessionTopicGenerating(id, generating);
       },
-      onTopic: ({ title, description }) => {
-        if (!this.disposed && this.sessions.has(id) && shouldAcceptGeneratedSessionTitle(title, blockedTitles)) {
+      onTopic: ({ title, description, source }) => {
+        if (this.disposed || !this.sessions.has(id)) return;
+        if (source === "native") {
+          this.applyNativeSessionTitle(id, title, blockedTitles);
+          return;
+        }
+        if (this.nativeTitles.has(id)) return;
+        if (shouldAcceptGeneratedSessionTitle(title, blockedTitles)) {
           this.setSessionTopic(id, title, description);
         }
       },
@@ -1312,6 +1284,15 @@ export class StructuredSessionManager {
         console.error(`[StructuredSessionManager] Failed to generate session topic ${id}:`, getErrorMessage(error));
       },
     });
+  }
+
+  /** 原生标题优先于模型标题：只受「不能是任务名/目录名」约束，命中且变化时才落库。 */
+  private applyNativeSessionTitle(id: string, title: string, blockedTitles: readonly string[]): void {
+    this.nativeTitles.record(id, title);
+    const current = this.sessions.get(id);
+    if (!current || !shouldAcceptGeneratedSessionTitle(title, blockedTitles)) return;
+    if (current.title === title && current.description === title) return;
+    this.setSessionTopic(id, title, title);
   }
 
   createSession(options: CreateStructuredSessionOptions): SessionSnapshot {
@@ -1323,7 +1304,7 @@ export class StructuredSessionManager {
       throw new Error(`不支持的结构化 provider: ${String(requestedProvider)}`);
     }
     const provider: SessionProvider = requestedProvider;
-    const runner = resolveStructuredRunner(provider, options.runner, this.config.structuredRunner);
+    const runner = resolveStructuredRunner(provider, options.runner);
     const baseCwd = resolveSessionCwd(options.cwd, this.config.defaultCwd);
     const worktreeSetup = options.worktreeEnabled
       ? prepareSessionWorktree({ cwd: baseCwd, sessionId: id, spec: options.worktreeSpec })
@@ -1358,8 +1339,8 @@ export class StructuredSessionManager {
             ? "pi --mode json --print"
           : provider === "gemini"
             ? "gemini -p --output-format stream-json"
-          : runner === "claude-sdk"
-            ? "claude-agent-sdk (stream-json)"
+          : runner === "claude-cli-print"
+            ? "claude -p (stream-json)"
             : "claude -p --output-format stream-json",
       cwd: worktreeSetup?.cwd ?? baseCwd,
       mode: options.mode,
@@ -1424,7 +1405,6 @@ export class StructuredSessionManager {
     original: SessionSnapshot,
     prompt: string,
     error: unknown,
-    skills: string[],
   ): Promise<SessionSnapshot> | null {
     const candidates = original.employeeCandidates ?? [];
     const nextIndex = (original.employeeCandidateIndex ?? 0) + 1;
@@ -1434,7 +1414,7 @@ export class StructuredSessionManager {
     if ((current.messages ?? []).length !== 1 || current.messages?.[0]?.role !== "user") return null;
     if (!(error instanceof UnacceptedStructuredSpawnError)) return null;
     const next = candidates[nextIndex]!;
-    const runner = resolveStructuredRunner(next.provider, undefined, this.config.structuredRunner);
+    const runner = resolveStructuredRunner(next.provider, undefined);
     const model = next.model === "default"
       ? getDefaultModelForProvider(this.config, next.provider) || null
       : next.model;
@@ -1461,7 +1441,7 @@ export class StructuredSessionManager {
     this.sessions.set(id, retry);
     this.saveAuthoritativeSession(retry);
     this.emitStructuredSnapshot(retry);
-    return this.sendMessage(id, prompt, { skills });
+    return this.sendMessage(id, prompt);
   }
 
   /** 往转发会话里追加别的参与者的发言。 */
@@ -1485,7 +1465,7 @@ export class StructuredSessionManager {
   async sendMessage(
     id: string,
     input: string,
-    opts?: { interrupt?: boolean; idempotencyKey?: string; preserveQueue?: boolean; queueAlreadyRemoved?: boolean; skills?: string[] },
+    opts?: { interrupt?: boolean; idempotencyKey?: string; preserveQueue?: boolean; queueAlreadyRemoved?: boolean },
   ): Promise<SessionSnapshot> {
     if (this.disposed) throw new Error("StructuredSessionManager has been disposed.");
     let session = this.requireSession(id);
@@ -1504,7 +1484,6 @@ export class StructuredSessionManager {
       }
       return this.sessions.get(id) ?? posted;
     }
-    const skills = opts?.skills ?? [];
     if (opts?.idempotencyKey) {
       const mapKey = `${id}:${opts.idempotencyKey}`;
       if (this.seenIdempotencyKeys.has(mapKey)) {
@@ -1524,15 +1503,11 @@ export class StructuredSessionManager {
     this.maybeGenerateSessionTopic(id, prompt);
     if (session.structuredState?.inFlight) {
       const runnerExecution = this.pendingRunnerExecutions.get(id);
-      const sdkAbort = this.pendingSdkAbort.get(id);
-      const sdkQueryHandle = this.pendingSdkQueries.get(id);
       // interrupt() only requests cancellation; completion can settle later.
       // Treat runner-map ownership as the authoritative in-flight state.
       const childActive = Boolean(runnerExecution);
-      const sdkAlive = Boolean(sdkQueryHandle || (sdkAbort && !sdkAbort.signal.aborted));
-      if (!childActive && !sdkAlive) {
+      if (!childActive) {
         if (runnerExecution) this.releasePendingRunnerExecution(id, runnerExecution);
-        if (sdkAbort) this.releasePendingSdkAbort(id, sdkAbort);
         const recovered: SessionSnapshot = {
           ...session,
           status: "idle",
@@ -1548,7 +1523,6 @@ export class StructuredSessionManager {
         session = recovered;
       } else if (opts?.interrupt) {
         this.interruptedWith.set(id, prompt);
-        this.interruptedSkills.set(id, skills);
         if (opts.preserveQueue) {
           this.preserveQueueOnInterrupt.add(id);
           // 「立即发送」排队条某一条：interrupt 把它作为新输入重发，但该条仍留在
@@ -1561,12 +1535,7 @@ export class StructuredSessionManager {
             const removeAt = queue.indexOf(prompt);
             if (removeAt !== -1) {
               const trimmedQueue = queue.slice(0, removeAt).concat(queue.slice(removeAt + 1));
-              const queuedMessageSkills = session.queuedMessageSkills ?? [];
-              session = {
-                ...session,
-                queuedMessages: trimmedQueue,
-                queuedMessageSkills: queuedMessageSkills.slice(0, removeAt).concat(queuedMessageSkills.slice(removeAt + 1)),
-              };
+              session = { ...session, queuedMessages: trimmedQueue };
               this.sessions.set(id, session);
               this.storage.updateSessionRuntimeMetadata(session);
               this.emitStructuredSnapshot(session);
@@ -1576,10 +1545,6 @@ export class StructuredSessionManager {
           this.preserveQueueOnInterrupt.delete(id);
         }
         runnerExecution?.interrupt();
-        if (sdkQueryHandle) {
-          void sdkQueryHandle.interrupt().catch(() => { /* ignore */ });
-        }
-        if (sdkAbort) sdkAbort.abort();
         return session;
       } else {
         const queue = [...(session.queuedMessages ?? [])];
@@ -1594,7 +1559,6 @@ export class StructuredSessionManager {
         const queued: SessionSnapshot = {
           ...session,
           queuedMessages: [...queue, prompt],
-          queuedMessageSkills: [...queue.map((_, index) => session.queuedMessageSkills?.[index] ?? []), skills],
         };
         this.sessions.set(id, queued);
         this.storage.updateSessionRuntimeMetadata(queued);
@@ -1700,8 +1664,6 @@ export class StructuredSessionManager {
           logKind: "gemini-json",
           installHint: "请安装 @google/gemini-cli ≥ 0.11（`npm i -g @google/gemini-cli@latest`），或重跑 `wand service:install` 刷新服务的 PATH",
         });
-      } else if (runner === "claude-sdk") {
-        await this.runClaudeSdkStreaming(id, updated, prompt, requestId, skills);
       } else {
         await this.runClaudeStreaming(id, updated, cliClaudePrompt, requestId);
       }
@@ -1713,7 +1675,7 @@ export class StructuredSessionManager {
       // the detailed failure. Re-throw even if an ended-event listener removed
       // the session synchronously; there is no request-id marker to leak.
       if (error instanceof PersistedStructuredRunnerError) {
-        const retry = this.retryEmployeeCandidate(id, session, prompt, error, skills);
+        const retry = this.retryEmployeeCandidate(id, session, prompt, error);
         if (retry) return await retry;
         throw error;
       }
@@ -1724,10 +1686,8 @@ export class StructuredSessionManager {
       if (!this.isCurrentRequest(id, requestId)) {
         return current;
       }
-      const retry = this.retryEmployeeCandidate(id, session, prompt, error, skills);
+      const retry = this.retryEmployeeCandidate(id, session, prompt, error);
       if (retry) return await retry;
-      this.settlePendingPermission(id, undefined, structuredPermissionDenied("会话执行失败"));
-      this.turnApprovalMemory.delete(id);
       const failed: SessionSnapshot = {
         ...current,
         status: "failed",
@@ -1779,7 +1739,6 @@ export class StructuredSessionManager {
     const updated: SessionSnapshot = {
       ...session,
       queuedMessages: reordered,
-      queuedMessageSkills: order.map((idx) => (session.queuedMessageSkills ?? [])[idx] ?? []),
     };
     this.sessions.set(sessionId, updated);
     this.storage.updateSessionRuntimeMetadata(updated);
@@ -1816,11 +1775,9 @@ export class StructuredSessionManager {
       throw new Error("排队消息已变化，请按最新顺序重试。");
     }
     const next = queue.slice(0, index).concat(queue.slice(index + 1));
-    const skills = session.queuedMessageSkills ?? [];
     const updated: SessionSnapshot = {
       ...session,
       queuedMessages: next,
-      queuedMessageSkills: skills.slice(0, index).concat(skills.slice(index + 1)),
     };
     this.sessions.set(sessionId, updated);
     this.storage.updateSessionRuntimeMetadata(updated);
@@ -1852,15 +1809,11 @@ export class StructuredSessionManager {
     }
 
     const prompt = queue[index];
-    const skills = (session.queuedMessageSkills ?? [])[index] ?? [];
     const remaining = queue.slice(0, index).concat(queue.slice(index + 1));
-    const remainingSkills = (session.queuedMessageSkills ?? []).slice(0, index)
-      .concat((session.queuedMessageSkills ?? []).slice(index + 1));
     const inFlight = session.status === "running" && session.structuredState?.inFlight === true;
     const updated: SessionSnapshot = {
       ...session,
       queuedMessages: remaining,
-      queuedMessageSkills: remainingSkills,
     };
     this.sessions.set(sessionId, updated);
     this.storage.updateSessionRuntimeMetadata(updated);
@@ -1872,7 +1825,6 @@ export class StructuredSessionManager {
         preserveQueue: inFlight,
         queueAlreadyRemoved: true,
         idempotencyKey,
-        skills,
       });
     } catch {
       // Once the item has been promoted it must not return to the queue: the
@@ -1887,7 +1839,7 @@ export class StructuredSessionManager {
     if (!session.queuedMessages || session.queuedMessages.length === 0) {
       return session;
     }
-    const updated: SessionSnapshot = { ...session, queuedMessages: [], queuedMessageSkills: [] };
+    const updated: SessionSnapshot = { ...session, queuedMessages: [] };
     this.sessions.set(sessionId, updated);
     this.storage.updateSessionRuntimeMetadata(updated);
     this.emitStructuredSnapshot(updated);
@@ -2022,16 +1974,6 @@ export class StructuredSessionManager {
     if (approved && scope) {
       this.incrementApprovalStats(session, scope);
     }
-    if (approved && resolution === "approve_turn") {
-      this.rememberTurnApproval(sessionId, pending.scope, pending.target);
-    }
-    this.settlePendingPermission(
-      sessionId,
-      pending.requestId,
-      approved
-        ? { behavior: "allow" }
-        : structuredPermissionDenied("User rejected permission request"),
-    );
     const updated: SessionSnapshot = {
       ...session,
       pendingEscalation: null,
@@ -2053,11 +1995,8 @@ export class StructuredSessionManager {
   }
 
   stop(id: string): SessionSnapshot {
-    this.settlePendingPermission(id, undefined, structuredPermissionDenied("已停止"));
-    this.turnApprovalMemory.delete(id);
     const session = this.requireSession(id);
     this.interruptedWith.delete(id);
-    this.interruptedSkills.delete(id);
     this.preserveQueueOnInterrupt.delete(id);
     // Clearing activeRequestId is the generation barrier: late data/close callbacks
     // from the cancelled runner can no longer mutate this session or a replacement turn.
@@ -2084,18 +2023,6 @@ export class StructuredSessionManager {
       runnerExecution.interrupt();
       this.releasePendingRunnerExecution(id, runnerExecution);
     }
-    // SDK runner：先尝试 query.interrupt() 优雅停止，失败再走 abort。
-    // 两个都清掉避免后续重复操作。
-    const sdkQuery = this.pendingSdkQueries.get(id);
-    if (sdkQuery) {
-      void sdkQuery.interrupt().catch(() => { /* ignore */ });
-      this.releasePendingSdkQuery(id, sdkQuery);
-    }
-    const sdkAbort = this.pendingSdkAbort.get(id);
-    if (sdkAbort) {
-      sdkAbort.abort();
-      this.releasePendingSdkAbort(id, sdkAbort);
-    }
     this.saveAuthoritativeSession(cancelled);
     // 仍发 "ended" 事件让各端停掉"回复中"指示 / 灵动岛，但携带的 status 是 idle。
     this.emitStructuredSnapshot(cancelled, "ended");
@@ -2103,29 +2030,16 @@ export class StructuredSessionManager {
   }
 
   delete(id: string): void {
-    this.settlePendingPermission(id, undefined, structuredPermissionDenied("会话已删除"));
-    this.turnApprovalMemory.delete(id);
     const runnerExecution = this.pendingRunnerExecutions.get(id);
-    const sdkQuery = this.pendingSdkQueries.get(id);
-    const sdkAbort = this.pendingSdkAbort.get(id);
     // Invalidate callback ownership before signalling the runner. Cancellation
-    // can synchronously wake listeners in some SDK/adapter implementations.
+    // can synchronously wake listeners in some adapter implementations.
     this.sessions.delete(id);
     if (runnerExecution) {
       runnerExecution.interrupt();
       this.releasePendingRunnerExecution(id, runnerExecution);
     }
-    if (sdkQuery) {
-      void sdkQuery.interrupt().catch(() => { /* ignore */ });
-      this.releasePendingSdkQuery(id, sdkQuery);
-    }
-    if (sdkAbort) {
-      sdkAbort.abort();
-      this.releasePendingSdkAbort(id, sdkAbort);
-    }
     this.clearStreamingCheckpoint(id);
     this.interruptedWith.delete(id);
-    this.interruptedSkills.delete(id);
     this.preserveQueueOnInterrupt.delete(id);
     this.storage.deleteSession(id);
     this.logger?.deleteSession(id);
@@ -2163,18 +2077,6 @@ export class StructuredSessionManager {
     return true;
   }
 
-  private releasePendingSdkAbort(sessionId: string, controller: AbortController): boolean {
-    if (this.pendingSdkAbort.get(sessionId) !== controller) return false;
-    this.pendingSdkAbort.delete(sessionId);
-    return true;
-  }
-
-  private releasePendingSdkQuery(sessionId: string, query: { interrupt(): Promise<void> }): boolean {
-    if (this.pendingSdkQueries.get(sessionId) !== query) return false;
-    this.pendingSdkQueries.delete(sessionId);
-    return true;
-  }
-
   private emitStructuredSnapshot(session: SessionSnapshot, eventType: "output" | "ended" = "output"): void {
     // 排队消息只通过 payload.queuedMessages 单独下发，由各端在消息卡片外的「排队条」
     // 里纵向渲染——绝不再把它们当成 __queued 占位 turn 混进 messages 消息流里，否则会
@@ -2205,17 +2107,15 @@ export class StructuredSessionManager {
     if (!nextInput) {
       return;
     }
-    const [nextSkills = [], ...restSkills] = current.queuedMessageSkills ?? [];
     const nextSession: SessionSnapshot = {
       ...current,
       queuedMessages: restQueue,
-      queuedMessageSkills: restSkills,
     };
     this.sessions.set(sessionId, nextSession);
     this.storage.updateSessionRuntimeMetadata(nextSession);
     this.emitStructuredSnapshot(nextSession);
     try {
-      await this.sendMessage(sessionId, nextInput, { skills: nextSkills });
+      await this.sendMessage(sessionId, nextInput);
     } catch (error) {
       console.error("[WAND] flushNextQueuedMessage failed:", error);
       // 发送失败时把消息放回队首，避免永久丢失
@@ -2224,7 +2124,6 @@ export class StructuredSessionManager {
         const rescued: SessionSnapshot = {
           ...afterFail,
           queuedMessages: [nextInput, ...(afterFail.queuedMessages ?? [])],
-          queuedMessageSkills: [nextSkills, ...(afterFail.queuedMessageSkills ?? [])],
         };
         this.sessions.set(sessionId, rescued);
         this.storage.updateSessionRuntimeMetadata(rescued);
@@ -2251,134 +2150,6 @@ export class StructuredSessionManager {
     }
     stats.total++;
     session.approvalStats = stats;
-  }
-
-  private rememberTurnApproval(sessionId: string, scope: EscalationScope, target?: string): void {
-    let memory = this.turnApprovalMemory.get(sessionId);
-    if (!memory) {
-      memory = { scopes: new Set(), targets: new Set() };
-      this.turnApprovalMemory.set(sessionId, memory);
-    }
-    memory.scopes.add(scope);
-    if (target) memory.targets.add(target);
-  }
-
-  private settlePendingPermission(
-    sessionId: string,
-    requestId: string | undefined,
-    result: PermissionResult,
-  ): void {
-    const waiter = this.pendingPermissions.get(sessionId);
-    if (!waiter) return;
-    if (requestId !== undefined && waiter.requestId !== requestId) return;
-    this.pendingPermissions.delete(sessionId);
-    waiter.resolve(result);
-  }
-
-  private async handleCanUseTool(
-    sessionId: string,
-    requestId: string,
-    toolName: string,
-    input: Record<string, unknown>,
-    ctx: Parameters<CanUseTool>[2],
-  ): Promise<PermissionResult> {
-    const deny = (message: string): PermissionResult => structuredPermissionDenied(message);
-    if (ctx.signal.aborted || this.disposed) return deny("已取消");
-    const current = this.currentSessionForRequest(sessionId, requestId);
-    if (!current) return deny("会话已结束");
-
-    const inferred = inferStructuredEscalation(toolName, input, ctx);
-    if (current.autoApprovePermissions) {
-      this.incrementApprovalStats(current, inferred.scope);
-      this.storage.updateSessionRuntimeMetadata(current);
-      return { behavior: "allow" };
-    }
-    const memory = this.turnApprovalMemory.get(sessionId);
-    if (memory && (memory.scopes.has(inferred.scope) || (inferred.target && memory.targets.has(inferred.target)))) {
-      return { behavior: "allow" };
-    }
-
-    const existing = this.pendingPermissions.get(sessionId);
-    if (existing) {
-      await new Promise<PermissionResult>((resolve) => {
-        const previous = existing.resolve;
-        existing.resolve = (result) => {
-          previous(result);
-          resolve(result);
-        };
-      });
-      if (ctx.signal.aborted || this.disposed) return deny("已取消");
-      return this.handleCanUseTool(sessionId, requestId, toolName, input, ctx);
-    }
-
-    const escalation: EscalationRequest = {
-      requestId: ctx.toolUseID ? `sdk-${ctx.toolUseID}` : `sdk-${Date.now()}`,
-      scope: inferred.scope,
-      runner: "json",
-      source: "tool_permission_request",
-      target: inferred.target,
-      reason: inferred.reason,
-    };
-
-    return await new Promise<PermissionResult>((resolve) => {
-      let settled = false;
-      const finish = (result: PermissionResult) => {
-        if (settled) return;
-        settled = true;
-        ctx.signal.removeEventListener("abort", onAbort);
-        if (this.pendingPermissions.get(sessionId)?.requestId === escalation.requestId) {
-          this.pendingPermissions.delete(sessionId);
-        }
-        resolve(result);
-      };
-      const onAbort = () => {
-        finish(deny("已取消"));
-        const latest = this.currentSessionForRequest(sessionId, requestId);
-        if (latest?.pendingEscalation?.requestId === escalation.requestId) {
-          const cleared: SessionSnapshot = {
-            ...latest,
-            pendingEscalation: null,
-            permissionBlocked: false,
-          };
-          this.sessions.set(sessionId, cleared);
-          this.storage.updateSessionRuntimeMetadata(cleared);
-          this.emit({
-            type: "status",
-            sessionId,
-            data: { permissionBlocked: false, sessionKind: "structured" },
-          });
-        }
-      };
-      ctx.signal.addEventListener("abort", onAbort, { once: true });
-      this.pendingPermissions.set(sessionId, { requestId: escalation.requestId, resolve: finish });
-
-      const latest = this.currentSessionForRequest(sessionId, requestId);
-      if (!latest || ctx.signal.aborted) {
-        finish(deny("会话已结束"));
-        return;
-      }
-      const updated: SessionSnapshot = {
-        ...latest,
-        pendingEscalation: escalation,
-        permissionBlocked: true,
-      };
-      this.sessions.set(sessionId, updated);
-      this.storage.updateSessionRuntimeMetadata(updated);
-      this.emit({
-        type: "status",
-        sessionId,
-        data: {
-          sessionKind: "structured",
-          permissionBlocked: true,
-          permissionRequest: {
-            scope: escalation.scope,
-            target: escalation.target,
-            prompt: escalation.reason,
-          },
-          pendingEscalation: escalation,
-        },
-      });
-    });
   }
 
   // ---------------------------------------------------------------------------
@@ -2525,7 +2296,6 @@ export class StructuredSessionManager {
       claudeSessionId: result.state.sessionId ?? current.claudeSessionId,
       messages,
       queuedMessages: this.resolveQueuedMessagesAfterInterrupt(sessionId, current, interruptPrompt),
-      queuedMessageSkills: this.resolveQueuedMessageSkillsAfterInterrupt(sessionId, current, interruptPrompt),
       pendingEscalation: null,
       permissionBlocked: false,
       structuredState: {
@@ -2542,12 +2312,10 @@ export class StructuredSessionManager {
     if (!keepRunning) this.emitStructuredSnapshot(finished, "ended");
 
     if (interruptPrompt) {
-      const interruptedSkills = this.interruptedSkills.get(sessionId) ?? [];
       this.interruptedWith.delete(sessionId);
-      this.interruptedSkills.delete(sessionId);
       this.preserveQueueOnInterrupt.delete(sessionId);
       setImmediate(() => {
-        this.sendMessage(sessionId, interruptPrompt, { skills: interruptedSkills }).catch((error) => {
+        this.sendMessage(sessionId, interruptPrompt).catch((error) => {
           console.error("[WAND] codex interrupt-and-send failed:", error);
         });
       });
@@ -2680,7 +2448,6 @@ export class StructuredSessionManager {
       claudeSessionId: result.state.sessionId ?? current.claudeSessionId,
       messages,
       queuedMessages: this.resolveQueuedMessagesAfterInterrupt(sessionId, current, interruptPrompt),
-      queuedMessageSkills: this.resolveQueuedMessageSkillsAfterInterrupt(sessionId, current, interruptPrompt),
       pendingEscalation: null,
       permissionBlocked: false,
       structuredState: {
@@ -2696,11 +2463,9 @@ export class StructuredSessionManager {
     this.emitStructuredSnapshot(finished);
     if (!keepRunning) this.emitStructuredSnapshot(finished, "ended");
     if (interruptPrompt) {
-      const interruptedSkills = this.interruptedSkills.get(sessionId) ?? [];
       this.interruptedWith.delete(sessionId);
-      this.interruptedSkills.delete(sessionId);
       this.preserveQueueOnInterrupt.delete(sessionId);
-      setImmediate(() => this.sendMessage(sessionId, interruptPrompt, { skills: interruptedSkills }).catch((error) => {
+      setImmediate(() => this.sendMessage(sessionId, interruptPrompt).catch((error) => {
         console.error("[WAND] grok interrupt-and-send failed:", error);
       }));
       return;
@@ -2847,7 +2612,6 @@ export class StructuredSessionManager {
       claudeSessionId: result.state.sessionId ?? current.claudeSessionId,
       messages,
       queuedMessages: this.resolveQueuedMessagesAfterInterrupt(sessionId, current, interruptPrompt),
-      queuedMessageSkills: this.resolveQueuedMessageSkillsAfterInterrupt(sessionId, current, interruptPrompt),
       pendingEscalation: null,
       permissionBlocked: false,
       structuredState: {
@@ -2864,12 +2628,10 @@ export class StructuredSessionManager {
     if (!keepRunning) this.emitStructuredSnapshot(finished, "ended");
 
     if (interruptPrompt) {
-      const interruptedSkills = this.interruptedSkills.get(sessionId) ?? [];
       this.interruptedWith.delete(sessionId);
-      this.interruptedSkills.delete(sessionId);
       this.preserveQueueOnInterrupt.delete(sessionId);
       setImmediate(() => {
-        this.sendMessage(sessionId, interruptPrompt, { skills: interruptedSkills }).catch((error) => {
+        this.sendMessage(sessionId, interruptPrompt).catch((error) => {
           console.error("[WAND] opencode interrupt-and-send failed:", error);
         });
       });
@@ -3058,7 +2820,6 @@ export class StructuredSessionManager {
       claudeSessionId: result.state.sessionId ?? current.claudeSessionId,
       messages,
       queuedMessages: this.resolveQueuedMessagesAfterInterrupt(sessionId, current, interruptPrompt),
-      queuedMessageSkills: this.resolveQueuedMessageSkillsAfterInterrupt(sessionId, current, interruptPrompt),
       pendingEscalation: null,
       permissionBlocked: false,
       structuredState: {
@@ -3076,12 +2837,10 @@ export class StructuredSessionManager {
     if (!keepRunning) this.emitStructuredSnapshot(finished, "ended");
 
     if (interruptPrompt) {
-      const interruptedSkills = this.interruptedSkills.get(sessionId) ?? [];
       this.interruptedWith.delete(sessionId);
-      this.interruptedSkills.delete(sessionId);
       this.preserveQueueOnInterrupt.delete(sessionId);
       setImmediate(() => {
-        this.sendMessage(sessionId, interruptPrompt, { skills: interruptedSkills }).catch((error) => {
+        this.sendMessage(sessionId, interruptPrompt).catch((error) => {
           console.error("[WAND] interrupt-and-send failed:", error);
         });
       });
@@ -3104,527 +2863,6 @@ export class StructuredSessionManager {
       });
       return;
     }
-    setImmediate(() => { void this.flushNextQueuedMessage(sessionId); });
-  }
-
-  // ---------------------------------------------------------------------------
-  // Streaming claude-agent-sdk execution
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Use @anthropic-ai/claude-agent-sdk instead of spawning claude -p directly.
-   * The SDK still spawns the claude binary but provides typed AsyncGenerator<SDKMessage>
-   * messages, so we skip NDJSON parsing. Options are 1:1 with the CLI flags.
-   *
-   * Streaming is enabled via includePartialMessages: true — the SDK emits
-   * SDKPartialAssistantMessage (type: "stream_event") with BetaRawMessageStreamEvent
-   * payloads for incremental text/thinking/tool_use updates, followed by a final
-   * SDKAssistantMessage with the authoritative complete content.
-   */
-  private async runClaudeSdkStreaming(
-    sessionId: string,
-    session: SessionSnapshot,
-    prompt: string,
-    requestId: string,
-    skills: string[],
-  ): Promise<void> {
-    const abortController = new AbortController();
-    this.pendingSdkAbort.set(sessionId, abortController);
-    this.turnApprovalMemory.delete(sessionId);
-
-    const isManaged = session.mode === "managed";
-    let killedForAskUserQuestion = false;
-
-    // 权限策略 + 系统提示词都通过共享 helper 派生，与 CLI runner 一字不差。
-    const permPolicy = derivePermissionPolicy(session.mode, session.autoApprovePermissions ?? false, session.cwd);
-    const systemPromptParts = buildSessionSystemPromptParts(session, this.config.language);
-
-    const sdkClaudeBinary = resolveSdkClaudeBinary();
-    // SDK 默认会把整个 process.env 透传给 claude 子进程；这里显式按 inheritEnv 配置组装，
-    // 否则关闭"继承环境变量"开关时 SDK 路径会被静默忽略。
-    const sdkEnv = buildChildEnv(this.config.inheritEnv !== false);
-    const sdkThinking = buildClaudeSdkThinking(session.thinkingEffort);
-
-    const sdkOptions: SdkOptions = {
-      cwd: session.cwd,
-      abortController,
-      env: sdkEnv as Record<string, string | undefined>,
-      permissionMode: permPolicy.permissionMode,
-      ...(permPolicy.permissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
-      ...(permPolicy.permissionMode !== "bypassPermissions"
-        ? {
-            canUseTool: (toolName, input, ctx) => this.handleCanUseTool(sessionId, requestId, toolName, input, ctx),
-          }
-        : {}),
-      ...(permPolicy.allowedTools ? { allowedTools: permPolicy.allowedTools } : {}),
-      ...(isManaged ? { disallowedTools: ["AskUserQuestion"] } : {}),
-      skills,
-      thinking: sdkThinking,
-      includePartialMessages: true,
-      // 把子 agent 的 text/thinking 也转发回来，UI 才能把"被 Task 召唤来的协作者"
-      // 渲染成独立角色的群聊消息。关掉这个开关时只会收到子 agent 的 tool_use/tool_result，
-      // text/thinking 被 SDK 吞掉。
-      forwardSubagentText: true,
-      ...(systemPromptParts.length > 0 ? { appendSystemPrompt: systemPromptParts.join("\n\n") } : {}),
-      ...(sdkClaudeBinary ? { pathToClaudeCodeExecutable: sdkClaudeBinary } : {}),
-    };
-
-    if (session.claudeSessionId) sdkOptions.resume = session.claudeSessionId;
-
-    const modelChoice = session.selectedModel?.trim();
-    if (modelChoice && modelChoice !== "default") sdkOptions.model = modelChoice;
-
-    // Streaming input mode：把这一轮的 user turn 重建成一条 SDKUserMessage 喂给 SDK。
-    // 上层 sendMessage 已经把 userTurn 写进 session.messages 末尾——如果它的内容是
-    // tool_result，说明本次是用户在回答上一轮 AskUserQuestion，否则就是普通文本。
-    // 走 streaming input 而非 string prompt 的好处：tool_result 是真的 tool_result
-    // block，对 Claude 来说就是标准工具回传，不需要 "[对刚才工具的回答…]" 这种文本
-    // 提示让模型脑补语义。
-    const lastUserTurn = (session.messages ?? []).slice().reverse().find((m) => m.role === "user");
-    const lastUserBlock = lastUserTurn?.content?.[0];
-
-    let sdkInitialMessage: SDKUserMessage;
-    if (lastUserBlock?.type === "tool_result") {
-      // Anthropic 的 tool_result.content 原生支持 string 或 content-block 数组（text/image
-      // 等）。wand 内部 ToolResultBlock 的 array 形态是 `{type: string; ...}` 比官方 union
-      // 宽，但实际取值都是 `{type: "text", text}`，结构上兼容；用 `as` 把宽类型缩到 SDK
-      // 接受的形态即可，比 JSON.stringify 把数组拍成一坨 JSON 文本更忠实。
-      sdkInitialMessage = {
-        type: "user",
-        message: {
-          role: "user",
-          content: [
-            {
-              type: "tool_result",
-              tool_use_id: lastUserBlock.tool_use_id,
-              content: lastUserBlock.content as string | Array<{ type: "text"; text: string }>,
-              is_error: lastUserBlock.is_error === true,
-            },
-          ],
-        },
-        parent_tool_use_id: null,
-      };
-    } else {
-      sdkInitialMessage = {
-        type: "user",
-        message: {
-          role: "user",
-          content: [{ type: "text", text: prompt }],
-        },
-        parent_tool_use_id: null,
-      };
-    }
-
-    async function* singleShotPrompt(): AsyncGenerator<SDKUserMessage> {
-      yield sdkInitialMessage;
-    }
-
-    const turnState: StreamingTurnState = {
-      blocks: [],
-      result: "",
-      sessionId: null,
-      model: undefined,
-      usage: undefined,
-    };
-
-    // Tracks in-progress streaming blocks keyed by content_block index from stream_event.
-    // The map is cleared whenever a complete `assistant` message arrives — its blocks
-    // are then promoted into `finalizedBlocks` below.
-    //
-    // `parentToolUseId` carries through from SDKPartialAssistantMessage so we can
-    // stamp streaming blocks with subagent persona *during* streaming, not only
-    // after the completion event. Without it, subagent text shows up under the
-    // parent's avatar for tens of ms then snaps to the subagent — visible flicker.
-    const streamingBlockByIndex = new Map<number, {
-      type: "text" | "thinking" | "tool_use";
-      id?: string;
-      name?: string;
-      text: string;
-      thinking: string;
-      partialInput: string;
-      finalized: boolean;
-      parentToolUseId: string | null;
-    }>();
-
-    // Blocks from messages that have already completed within this turn — including
-    // the parent assistant's prior messages, every subagent assistant message, and
-    // every tool_result. Subagent (Task tool) flows produce many assistant messages
-    // back-to-back; without this list, each new streaming message would visually
-    // erase everything that came before it in the same turn.
-    const finalizedBlocks: ContentBlock[] = [];
-
-    // Per-turn Task tool_use_id → meta map; populated from the parent assistant's
-    // Task tool_use blocks and consulted when subagent messages arrive.
-    const taskMetaRegistry: TaskMetaMap = new Map();
-
-    let emitTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const flushEmit = (): void => {
-      if (emitTimer) { this.clearStreamEmitTimer(emitTimer); emitTimer = null; }
-      const current = this.currentSessionForRequest(sessionId, requestId);
-      if (!current) return;
-      this.emit({ type: "output", sessionId, data: buildIncrementalStructuredPayload(current, this.config.cardDefaults ?? {}) });
-    };
-
-    const scheduleEmit = (): void => {
-      if (!emitTimer) emitTimer = this.trackStreamEmitTimer(setTimeout(flushEmit, STREAM_EMIT_DEBOUNCE_MS));
-    };
-
-    // Rebuild ContentBlock[] from finalized history + the in-progress streaming map.
-    // Returning only the streaming blocks would drop every prior parent/subagent
-    // message in this turn (the original disappearing-output bug).
-    const rebuildStreamingBlocks = (): ContentBlock[] => {
-      const sorted = [...streamingBlockByIndex.entries()].sort((a, b) => a[0] - b[0]);
-      const streaming: ContentBlock[] = [];
-      for (const [, sb] of sorted) {
-        let block: ContentBlock | null = null;
-        if (sb.type === "text") {
-          block = { type: "text", text: sb.text };
-        } else if (sb.type === "thinking") {
-          block = { type: "thinking", thinking: sb.thinking };
-        } else if (sb.type === "tool_use" && sb.id && sb.name) {
-          let input: Record<string, unknown> = {};
-          if (sb.finalized && sb.partialInput) {
-            try { input = JSON.parse(sb.partialInput) as Record<string, unknown>; } catch { /* partial json */ }
-          }
-          block = { type: "tool_use", id: sb.id, name: sb.name, input: normalizeClaudeToolInput(sb.name, input) };
-        }
-        if (!block) continue;
-        if (sb.parentToolUseId) {
-          const [stamped] = tagSubagentBlocks([block], sb.parentToolUseId, taskMetaRegistry);
-          streaming.push(stamped);
-        } else {
-          streaming.push(block);
-        }
-      }
-      // 流式阶段就给 Task/Agent tool_use 本身盖章，防止"先显示工具卡片几秒再跳为
-      // handoff 行"的闪烁。content_block_start 阶段就有 name=Task/Agent，
-      // stampSelfTask 据此即可命中；agentType 字段藏在 input 里，delta 累计后再由
-      // 后续 captureTaskMeta 回填 registry，下次 rebuild 自动补上更完整的 stamp。
-      captureTaskMeta(streaming, taskMetaRegistry);
-      const stampedStreaming = stampSelfTask(streaming, taskMetaRegistry);
-      return [...finalizedBlocks, ...stampedStreaming];
-    };
-
-    const syncSnapshot = (): void => {
-      const current = this.currentSessionForRequest(sessionId, requestId);
-      if (!current) return;
-      const inProgressTurn: ConversationTurn = {
-        role: "assistant",
-        content: this.compactContentBlocks([...turnState.blocks], turnState.result),
-        usage: turnState.usage,
-      };
-      const msgs = upsertAssistantMessage(current.messages, inProgressTurn);
-      const patched: SessionSnapshot = {
-        ...current,
-        claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
-        messages: msgs,
-        output: turnState.result || current.output,
-        structuredState: {
-          ...(current.structuredState as StructuredSessionState),
-          model: turnState.model ?? current.structuredState?.model,
-        },
-      };
-      this.sessions.set(sessionId, patched);
-      this.saveStreamingSnapshot(patched);
-    };
-
-    const spawnedAt = new Date().toISOString();
-    this.logger?.appendStructuredSpawn(sessionId, {
-      kind: "claude-sdk",
-      provider: "claude",
-      cwd: session.cwd,
-      permissionMode: permPolicy.permissionMode,
-      prompt: prompt.slice(0, 2048),
-      promptLength: prompt.length,
-      claudeSessionId: session.claudeSessionId,
-      spawnedAt,
-    });
-
-    let queryHandle: ReturnType<typeof sdkQuery>;
-    try {
-      queryHandle = this.sdkQueryFactory({ prompt: singleShotPrompt(), options: sdkOptions });
-    } catch (error) {
-      this.releasePendingSdkAbort(sessionId, abortController);
-      throw error;
-    }
-    this.pendingSdkQueries.set(sessionId, queryHandle);
-
-    try {
-      for await (const msg of queryHandle as AsyncIterable<SDKMessage>) {
-        if (abortController.signal.aborted || !this.isCurrentRequest(sessionId, requestId)) break;
-
-        // 同 CLI runner 的关键修复：从任何带 session_id 的 SDK 消息（system / assistant /
-        // user / result）即时捕获并落库。AskUserQuestion 的 interrupt 发生在 assistant
-        // 之后、result 之前，若只在 result 捕获，被 interrupt 的轮次会丢掉 session_id，
-        // 续接时不 resume → 上下文丢失。stream_event 等无 session_id 的消息被 guard 跳过。
-        const msgSessionId = (msg as { session_id?: unknown }).session_id;
-        if (typeof msgSessionId === "string" && msgSessionId && turnState.sessionId !== msgSessionId) {
-          turnState.sessionId = msgSessionId;
-          const cur = this.currentSessionForRequest(sessionId, requestId);
-          if (cur && cur.claudeSessionId !== msgSessionId) {
-            const patched: SessionSnapshot = { ...cur, claudeSessionId: msgSessionId };
-            this.sessions.set(sessionId, patched);
-            this.saveStreamingSnapshot(patched, { metadata: true });
-          }
-        }
-
-        // Incremental streaming events (opt-in via includePartialMessages: true)
-        if (msg.type === "stream_event") {
-          const partial = msg as unknown as {
-            type: "stream_event";
-            event: Record<string, unknown>;
-            parent_tool_use_id?: string | null;
-          };
-          const ev = partial.event;
-          const partialParentId = partial.parent_tool_use_id ?? null;
-          if (ev.type === "content_block_start") {
-            const cb = ev.content_block as Record<string, unknown>;
-            const blockType = cb.type as string;
-            if (blockType === "text" || blockType === "thinking" || blockType === "tool_use") {
-              streamingBlockByIndex.set(ev.index as number, {
-                type: blockType as "text" | "thinking" | "tool_use",
-                id: typeof cb.id === "string" ? cb.id : undefined,
-                name: typeof cb.name === "string" ? cb.name : undefined,
-                text: typeof cb.text === "string" ? cb.text : "",
-                thinking: typeof cb.thinking === "string" ? cb.thinking : "",
-                partialInput: "",
-                finalized: false,
-                parentToolUseId: partialParentId,
-              });
-              turnState.blocks = rebuildStreamingBlocks();
-              syncSnapshot();
-              scheduleEmit();
-            }
-          } else if (ev.type === "content_block_delta") {
-            const sb = streamingBlockByIndex.get(ev.index as number);
-            if (sb) {
-              const delta = ev.delta as Record<string, unknown>;
-              if (delta.type === "text_delta" && typeof delta.text === "string") {
-                sb.text += delta.text;
-                turnState.result = sb.text;
-              } else if (delta.type === "thinking_delta" && typeof delta.thinking === "string") {
-                sb.thinking += delta.thinking;
-              } else if (delta.type === "input_json_delta" && typeof delta.partial_json === "string") {
-                sb.partialInput += delta.partial_json;
-              }
-              turnState.blocks = rebuildStreamingBlocks();
-              syncSnapshot();
-              scheduleEmit();
-            }
-          } else if (ev.type === "content_block_stop") {
-            const sb = streamingBlockByIndex.get(ev.index as number);
-            if (sb) {
-              sb.finalized = true;
-              turnState.blocks = rebuildStreamingBlocks();
-              syncSnapshot();
-              scheduleEmit();
-            }
-          }
-          continue;
-        }
-
-        // Complete assistant turn — promote streaming content into the finalized
-        // history so subsequent messages (subagents, follow-up parent messages)
-        // append to it instead of erasing it.
-        if (msg.type === "assistant") {
-          const assistantMsg = msg as unknown as {
-            type: "assistant";
-            message: Record<string, unknown>;
-            session_id: string;
-            parent_tool_use_id?: string | null;
-          };
-          const extracted = extractClaudeAssistantMessage(assistantMsg.message);
-          // 父 assistant 的 Task tool_use → 注册到本轮 taskMeta map；
-          // 子 agent 的 message（parent_tool_use_id 非空）→ 给每个 block 盖章。
-          const parentToolUseId = assistantMsg.parent_tool_use_id ?? null;
-          if (parentToolUseId === null) {
-            captureTaskMeta(extracted.content, taskMetaRegistry);
-            finalizedBlocks.push(...stampSelfTask(extracted.content, taskMetaRegistry));
-          } else {
-            finalizedBlocks.push(...tagSubagentBlocks(extracted.content, parentToolUseId, taskMetaRegistry));
-          }
-          streamingBlockByIndex.clear();
-          turnState.blocks = rebuildStreamingBlocks();
-          if (assistantMsg.session_id) turnState.sessionId = assistantMsg.session_id;
-          syncSnapshot();
-          scheduleEmit();
-
-          // Non-managed mode: detect AskUserQuestion. Prefer query.interrupt()
-          // (streaming input mode 的 control message，让 SDK 优雅地停掉当前 turn）
-          // 而不是 abortController.abort()——abort 会让 SDK throw AbortError，整段
-          // try/catch 走异常路径；interrupt 让 for-await 自然结束，行为更干净。
-          // 失败时 fallback 到 abort，保证一定能跳出。
-          //
-          // 注意：interrupt 之后下一次 sendMessage 会重新 spawn 一次 SDK 调用并通过
-          // resume 续接 + tool_result block 回答，不用文本伪造。
-          if (!isManaged && !killedForAskUserQuestion) {
-            const askBlock = extracted.content.find(
-              (b): b is ContentBlock & { type: "tool_use" } => b.type === "tool_use" && b.name === "AskUserQuestion",
-            );
-            if (askBlock) {
-              killedForAskUserQuestion = true;
-              flushEmit();
-              try {
-                await queryHandle.interrupt();
-              } catch (_err) {
-                // interrupt 在某些情况下（已经结束 / SDK 版本不支持）会 reject，
-                // 兜底用 abort 强制退出。
-                abortController.abort();
-              }
-            }
-          }
-          continue;
-        }
-
-        // Tool results fed back from the claude subprocess (parent's view of a
-        // tool call, or a subagent's tool_result during Task execution).
-        if (msg.type === "user") {
-          const userMsg = msg as unknown as {
-            type: "user";
-            message: Record<string, unknown>;
-            parent_tool_use_id?: string | null;
-          };
-          const parentToolUseId = userMsg.parent_tool_use_id ?? null;
-          const content = Array.isArray(userMsg.message?.content) ? userMsg.message.content as unknown[] : [];
-          const collected: ContentBlock[] = [];
-          for (const block of content) {
-            const b = block as Record<string, unknown>;
-            if (b?.type === "tool_result") {
-              collected.push({
-                type: "tool_result",
-                tool_use_id: typeof b.tool_use_id === "string" ? b.tool_use_id : "",
-                content: this.normalizeToolResultContent(b.content),
-                is_error: b.is_error === true,
-              });
-            }
-          }
-          if (parentToolUseId === null) {
-            finalizedBlocks.push(...stampParentTaskResults(collected, taskMetaRegistry));
-          } else {
-            finalizedBlocks.push(...tagSubagentBlocks(collected, parentToolUseId, taskMetaRegistry));
-          }
-          turnState.blocks = rebuildStreamingBlocks();
-          syncSnapshot();
-          scheduleEmit();
-          continue;
-        }
-
-        // Final result — capture session_id, usage, model
-        if (msg.type === "result") {
-          const resultMsg = msg as Record<string, unknown>;
-          if (typeof resultMsg.result === "string") turnState.result = resultMsg.result.trim();
-          if (typeof resultMsg.session_id === "string") turnState.sessionId = resultMsg.session_id;
-          turnState.model = extractClaudeModelName(resultMsg.modelUsage as Record<string, unknown> | undefined) ?? turnState.model;
-          turnState.usage = this.extractSdkUsage(resultMsg);
-          syncSnapshot();
-          scheduleEmit();
-          continue;
-        }
-      }
-    } catch (err) {
-      // AbortError from abortController.abort() is intentional — fall through to finish logic
-      const isAbort = abortController.signal.aborted || (err instanceof Error && err.name === "AbortError");
-      if (!isAbort) {
-        const releasedAbort = this.releasePendingSdkAbort(sessionId, abortController);
-        const releasedQuery = this.releasePendingSdkQuery(sessionId, queryHandle);
-        if (releasedAbort || releasedQuery) this.cancelStreamingCheckpointTimer(sessionId);
-        if (emitTimer) this.clearStreamEmitTimer(emitTimer);
-        if (!this.isCurrentRequest(sessionId, requestId)) return;
-        this.logger?.appendStructuredSpawn(sessionId, {
-          kind: "claude-sdk-error",
-          spawnedAt,
-          closedAt: new Date().toISOString(),
-          error: getErrorMessage(err),
-        });
-        throw err;
-      }
-    }
-
-    // Cleanup
-    this.settlePendingPermission(sessionId, undefined, structuredPermissionDenied("本轮已结束"));
-    this.turnApprovalMemory.delete(sessionId);
-    const releasedAbort = this.releasePendingSdkAbort(sessionId, abortController);
-    const releasedQuery = this.releasePendingSdkQuery(sessionId, queryHandle);
-    if (releasedAbort || releasedQuery) this.cancelStreamingCheckpointTimer(sessionId);
-    if (emitTimer) this.clearStreamEmitTimer(emitTimer);
-    if (!this.isCurrentRequest(sessionId, requestId)) return;
-    flushEmit();
-
-    const current = this.currentSessionForRequest(sessionId, requestId);
-    if (!current) return;
-
-    this.logger?.appendStructuredSpawn(sessionId, {
-      kind: "claude-sdk-close",
-      spawnedAt,
-      closedAt: new Date().toISOString(),
-      killedForAskUserQuestion,
-      sessionId: turnState.sessionId,
-    });
-
-    const msgs = this.buildCompletedAssistantMessages(current, turnState);
-
-    const interruptPrompt = this.interruptedWith.get(sessionId);
-    const keepRunning = killedForAskUserQuestion || !!interruptPrompt;
-    const finished: SessionSnapshot = {
-      ...current,
-      status: keepRunning ? "running" : "idle",
-      exitCode: keepRunning ? null : 0,
-      endedAt: keepRunning ? null : new Date().toISOString(),
-      output: turnState.result,
-      claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
-      messages: msgs,
-      queuedMessages: this.resolveQueuedMessagesAfterInterrupt(sessionId, current, interruptPrompt),
-      queuedMessageSkills: this.resolveQueuedMessageSkillsAfterInterrupt(sessionId, current, interruptPrompt),
-      pendingEscalation: null,
-      permissionBlocked: false,
-      structuredState: {
-        ...(current.structuredState as StructuredSessionState),
-        model: turnState.model ?? current.structuredState?.model,
-        inFlight: false,
-        activeRequestId: null,
-        lastError: null,
-      },
-    };
-    this.sessions.set(sessionId, finished);
-    this.saveAuthoritativeSession(finished);
-    this.emitStructuredSnapshot(finished);
-    if (!keepRunning) this.emitStructuredSnapshot(finished, "ended");
-
-    if (interruptPrompt) {
-      const interruptedSkills = this.interruptedSkills.get(sessionId) ?? [];
-      this.interruptedWith.delete(sessionId);
-      this.interruptedSkills.delete(sessionId);
-      // 与 codex/cli runner 对齐：清掉"保留队列"标记，避免 stale flag 影响下一次普通 interrupt。
-      this.preserveQueueOnInterrupt.delete(sessionId);
-      setImmediate(() => {
-        this.sendMessage(sessionId, interruptPrompt, { skills: interruptedSkills }).catch((err) => {
-          console.error("[WAND] sdk interrupt-and-send failed:", err);
-        });
-      });
-      return;
-    }
-
-    if (killedForAskUserQuestion) {
-      if ((finished.queuedMessages?.length ?? 0) > 0) {
-        setImmediate(() => { void this.flushNextQueuedMessage(sessionId); });
-      }
-      return;
-    }
-
-    // Auto-continue after ExitPlanMode (same as CLI runner)
-    const lastToolUse = [...turnState.blocks].reverse().find(
-      (b): b is ContentBlock & { type: "tool_use" } => b.type === "tool_use",
-    );
-    if (lastToolUse && lastToolUse.name === "ExitPlanMode" && turnState.sessionId) {
-      setImmediate(() => {
-        this.sendMessage(sessionId, "Plan approved. Proceed with the implementation.").catch((err) => {
-          console.error("[WAND] sdk auto-continue after ExitPlanMode failed:", err);
-        });
-      });
-      return;
-    }
-
     setImmediate(() => { void this.flushNextQueuedMessage(sessionId); });
   }
 
@@ -3706,16 +2944,6 @@ export class StructuredSessionManager {
   ): string[] | undefined {
     if (interruptPrompt && !this.preserveQueueOnInterrupt.has(sessionId)) return [];
     return current.queuedMessages;
-  }
-
-  private resolveQueuedMessageSkillsAfterInterrupt(
-    sessionId: string,
-    current: SessionSnapshot,
-    interruptPrompt: string | undefined,
-  ): string[][] {
-    if (interruptPrompt && !this.preserveQueueOnInterrupt.has(sessionId)) return [];
-    const queue = current.queuedMessages ?? [];
-    return queue.map((_, index) => current.queuedMessageSkills?.[index] ?? []);
   }
 
 

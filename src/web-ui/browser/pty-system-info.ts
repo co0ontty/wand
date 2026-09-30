@@ -4,6 +4,7 @@ interface SessionLike {
 }
 
 const STRUCTURED_RUNNERS = new Set([
+  // "claude-sdk" 是历史值（SDK 已移除），旧会话仍可能带它。
   "claude-sdk",
   "claude-cli-print",
   "codex-cli-exec",

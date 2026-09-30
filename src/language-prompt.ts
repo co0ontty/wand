@@ -1,6 +1,6 @@
 /**
  * 强语言指令生成器：供 PTY runner、structured-session-manager（CLI + SDK 两个分支）、
- * 一次性 SDK 调用（claude-sdk-runner.ts）共用。
+ * 会话与一次性 CLI 调用（git-quick-commit 等）共用。
  *
  * 原本各 runner 散落写 "请使用中文回复" 这种软指令，Claude 写技术内容时还是会条件
  * 反射切英文（"Now let me ..."、"OK, ..."），用户设置中文也照样夹英文。

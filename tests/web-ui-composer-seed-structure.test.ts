@@ -67,7 +67,6 @@ test(".input-panel 之后的浮层仍留在输入面板内", () => {
     ["错误条宿主", 'data-composer-action-error-host="main"'],
     ["附件预览宿主", 'data-composer-attachments-host="main"'],
     ["语音气泡宿主", 'data-composer-voice-host="main"'],
-    ["skills 弹层宿主", 'data-composer-skills-host="main"'],
   ];
   for (const [label, needle] of floating) {
     const at = SHELL_BODY.indexOf(needle);
@@ -91,7 +90,6 @@ test("输入面板不再出现已迁移到 React 的旧渲染函数", () => {
     "renderComposerSelectHost",
     "renderAutoApproveChip",
     "renderApprovalStatsBadge",
-    "renderClaudeSkillsPickerHtml",
   ]) {
     assert.ok(!SHELL_BODY.includes(legacy), `${legacy} 应已由 React portal 取代`);
   }

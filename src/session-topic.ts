@@ -1,5 +1,5 @@
 import { callConfiguredAiText, type QuickCommitAiOptions } from "./git-quick-commit.js";
-import type { AiTextRequest } from "./system-ai.js";
+import type { AiTextRequest } from "./types.js";
 import { skipAnsiSequence } from "./pty-text-utils.js";
 import type { ConversationTurn } from "./types.js";
 import { clipAtWordBoundary } from "./text-utils.js";
@@ -134,6 +134,8 @@ export function consumePtyInputForTopic(
 export interface SessionTopic {
   title: string;
   description: string;
+  /** native = CLI 自己生成的标题；缺省表示由系统硅基员工总结出来的候选。 */
+  source?: "native";
 }
 
 export interface SessionTopicRequest {
@@ -142,6 +144,10 @@ export interface SessionTopicRequest {
   cwd?: string;
   language?: string;
   ai?: QuickCommitAiOptions;
+  /** provider 自己在运行期写下的标题；命中即优先使用，不再调用模型。 */
+  readNativeTitle?: () => Promise<string>;
+  /** 已确认过原生标题：本轮没有新名字时不要让模型覆盖它。 */
+  hasNativeTitle?: boolean;
   onGenerating(generating: boolean): void;
   onTopic(topic: SessionTopic): void;
   onError(error: unknown): void;
@@ -153,6 +159,7 @@ interface PendingTopicState {
   userMessages: string[];
   request: SessionTopicRequest;
 }
+
 
 const TITLE_MAX_LENGTH = 24;
 const DESCRIPTION_MAX_LENGTH = 120;
@@ -347,6 +354,35 @@ export async function generateSessionTopic(
  * in-flight result and is summarized together with every earlier user turn.
  * Short inputs (single commands, choices) are dropped before any model call.
  */
+/**
+ * 记住哪些会话的标题来自 provider 原生 CLI。原生标题优先于模型标题：
+ * 一旦记下，后续输入不再发起模型总结；provider 改名时直接覆盖。
+ */
+export class SessionNativeTitleTracker {
+  private readonly titles = new Map<string, string>();
+
+  record(sessionId: string, title: string): void {
+    const cleaned = title.replace(/\s+/g, " ").trim();
+    if (cleaned) this.titles.set(sessionId, cleaned);
+  }
+
+  get(sessionId: string): string {
+    return this.titles.get(sessionId) ?? "";
+  }
+
+  has(sessionId: string): boolean {
+    return this.titles.has(sessionId);
+  }
+
+  delete(sessionId: string): void {
+    this.titles.delete(sessionId);
+  }
+
+  clear(): void {
+    this.titles.clear();
+  }
+}
+
 export class SessionTopicCoordinator {
   private readonly states = new Map<string, PendingTopicState>();
   private disposed = false;
@@ -390,14 +426,27 @@ export class SessionTopicCoordinator {
     const request = state.request;
     const userMessages = state.userMessages.slice();
     try {
-      const topic = await this.generate(
-        userMessages,
-        request.cwd,
-        request.language,
-        request.ai,
-      );
-      if (!this.disposed && this.states.get(sessionId) === state && state.revision === revision) {
-        state.request.onTopic(topic);
+      const pendingNativeTitle = this.readNativeTitle(request);
+      // 没有原生标题源时保持同步短路，不给普通会话增加一次等待。
+      const nativeTitle = typeof pendingNativeTitle === "string"
+        ? pendingNativeTitle
+        : pendingNativeTitle ? await pendingNativeTitle : "";
+      if (nativeTitle) {
+        if (!this.disposed && this.states.get(sessionId) === state && state.revision === revision) {
+          request.onTopic({ title: nativeTitle, description: nativeTitle, source: "native" });
+        }
+      } else if (request.hasNativeTitle) {
+        // CLI 这次没读到名字（锁库、改名中），也不能让模型盖掉已确认的原生标题。
+      } else {
+        const topic = await this.generate(
+          userMessages,
+          request.cwd,
+          request.language,
+          request.ai,
+        );
+        if (!this.disposed && this.states.get(sessionId) === state && state.revision === revision) {
+          state.request.onTopic(topic);
+        }
       }
     } catch (error) {
       if (!this.disposed && this.states.get(sessionId) === state && state.revision === revision) {
@@ -412,5 +461,15 @@ export class SessionTopicCoordinator {
     }
     state.running = false;
     state.request.onGenerating(false);
+  }
+
+  private readNativeTitle(request: SessionTopicRequest): Promise<string> | null {
+    if (!request.readNativeTitle) return null;
+    try {
+      // 读取失败按「没有原生标题」处理，回退系统硅基员工。
+      return request.readNativeTitle().catch(() => "");
+    } catch {
+      return Promise.resolve("");
+    }
   }
 }

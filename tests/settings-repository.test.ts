@@ -34,7 +34,6 @@ function config(overrides: Record<string, unknown> = {}): Record<string, unknown
     defaultCwd: "/tmp",
     shell: "/bin/zsh",
     language: "zh-CN",
-    structuredRunner: "cli",
     inheritEnv: true,
     defaultModel: "claude-sonnet",
     defaultCodexModel: "gpt-5",
@@ -154,11 +153,12 @@ test("admin load is settings-first and maps models, CLI updates, and connect cod
   assert.equal(snapshot.models?.models[0].id, "claude-sonnet");
   assert.equal(snapshot.providerCliUpdates?.items[0].id, "claude");
   assert.equal(snapshot.connectCode?.code, "connect-secret");
-  assert.equal(snapshot.config?.systemAi.apiKey, "", "repository must redact a malicious server secret");
-  assert.equal(snapshot.config?.systemAi.hasApiKey, true);
   assert.equal(snapshot.config?.defaultProvider, "grok");
   assert.equal(snapshot.config?.defaultThinkingEffort, "deep");
-  assert.equal(snapshot.config?.systemAiCli, null, "old settings preserve session CLI until explicitly saved");
+  // 直连 API 已移除：客户端快照里不再有 systemAi / commitAiSource，也不回显旧 CLI 字段。
+  assert.equal("systemAi" in (snapshot.config ?? {}), false);
+  assert.equal("commitAiSource" in (snapshot.config ?? {}), false);
+  assert.equal("systemAiCli" in (snapshot.config ?? {}), false);
 });
 
 test("new-session defaults fall back safely and keep Codex dynamic thinking levels", async () => {
@@ -253,85 +253,15 @@ test("AI save preserves the empty-key sentinel and emits only a redacted runtime
     defaultQoderModel: "performance",
     defaultProvider: "grok" as const,
     defaultThinkingEffort: "deep" as const,
-    commitAiSource: "api" as const,
     systemAiCli: "pi" as const,
     systemAiModel: "google/gemini-3",
-    systemAi: {
-      id: "route-primary",
-      enabled: true,
-      protocol: "openai" as const,
-      baseUrl: "https://api.example.test",
-      apiKey: "",
-      hasApiKey: true,
-      model: "gpt-test",
-      authHeader: "bearer" as const,
-      source: "custom" as const,
-      fallbacks: [{
-        id: "route-fallback",
-        enabled: true,
-        protocol: "anthropic" as const,
-        baseUrl: "https://fallback.example.test",
-        apiKey: "",
-        hasApiKey: true,
-        model: "fallback-model",
-        authHeader: "x-api-key" as const,
-        source: "claude" as const,
-      }],
-    },
   };
   await new HttpSettingsRepository(runtime).execute({ type: "ai.save", value });
-  assert.equal((submitted?.systemAi as Record<string, unknown>).apiKey, "");
-  assert.equal((submitted?.systemAi as Record<string, unknown>).id, "route-primary");
-  assert.deepEqual(
-    ((submitted?.systemAi as Record<string, unknown>).fallbacks as Array<Record<string, unknown>>)
-      .map((profile) => profile.id),
-    ["route-fallback"],
-  );
-  assert.equal(Object.hasOwn(submitted ?? {}, "commitCli"), false);
-  assert.equal(Object.hasOwn(submitted ?? {}, "commitModel"), false);
+  assert.equal(Object.hasOwn(submitted ?? {}, "systemAi"), false, "直连 API 字段已不再提交");
   assert.equal(submitted?.defaultProvider, "grok", "the CLI tool choice must reach the config endpoint");
   assert.equal(submitted?.defaultThinkingEffort, "deep");
   assert.equal(submitted?.systemAiCli, "pi");
   assert.equal(submitted?.systemAiModel, "google/gemini-3");
-  assert.equal(runtime.configs[0].systemAi.apiKey, "");
-  assert.equal(runtime.configs[0].systemAi.hasApiKey, true);
-});
-
-test("system AI test submits exactly one route without saving it", async () => {
-  let requestUrl = "";
-  let submitted: Record<string, unknown> | null = null;
-  globalThis.fetch = async (input, init) => {
-    requestUrl = String(input);
-    submitted = JSON.parse(String(init?.body));
-    return json({
-      ok: true,
-      source: "codex",
-      requestedModel: "gpt-5.3-codex-spark",
-      reasoningEffort: "low",
-      latencyMs: 25,
-    });
-  };
-  const route = {
-    id: "route-spark",
-    enabled: true,
-    protocol: "openai" as const,
-    baseUrl: "https://api.example.test/v1",
-    apiKey: "",
-    hasApiKey: true,
-    model: "gpt-5.3-codex-spark",
-    authHeader: "bearer" as const,
-    source: "codex" as const,
-  };
-
-  const result = await new HttpSettingsRepository(new RuntimeSpy()).execute({
-    type: "systemAi.test",
-    route,
-  });
-
-  assert.equal(requestUrl, "/api/settings/system-ai/test");
-  assert.deepEqual(submitted, { route });
-  assert.equal(result.requestedModel, "gpt-5.3-codex-spark");
-  assert.equal(result.reasoningEffort, "low");
 });
 
 test("notification preference commands synchronize the injected runtime adapter", async () => {

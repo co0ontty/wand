@@ -17,7 +17,6 @@ export interface NewSessionConfig {
   defaultSessionKind: NewSessionPreferenceKind;
   defaultMode: NewSessionMode;
   defaultCwd: string;
-  structuredRunner: string;
 }
 
 export interface NewSessionPath {

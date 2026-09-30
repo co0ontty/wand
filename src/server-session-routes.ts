@@ -16,7 +16,7 @@ import {
   WorktreeMergeError,
 } from "./git-worktree.js";
 import { resolveSessionCwd } from "./session-cwd.js";
-import { resolveCommitAiContext } from "./session-ai-context.js";
+import { resolveSystemAiContext } from "./session-ai-context.js";
 import {
   getGitStatusAsync,
   QuickCommitError,
@@ -161,23 +161,6 @@ function getInputErrorResponse(error: unknown, sessionId: string) {
   };
 }
 
-function parseClaudeSdkSkills(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    throw new Error("skills 必须是数组。");
-  }
-  if (value.length > 50) {
-    throw new Error("最多选择 50 个 skills。");
-  }
-
-  const names = new Set<string>();
-  for (const item of value) {
-    if (typeof item !== "string") throw new Error("skills 只能包含字符串。");
-    const name = item.trim();
-    if (!name || name.length > 128) throw new Error("skill 名称无效。");
-    names.add(name);
-  }
-  return Array.from(names);
-}
 
 function getInputDebugMeta(error: unknown) {
   if (error instanceof Error) {
@@ -794,17 +777,10 @@ export function registerSessionRoutes(
         res.status(404).json({ error: "未找到该结构化会话。" });
         return;
       }
-      const hasSkills = Object.prototype.hasOwnProperty.call(req.body ?? {}, "skills");
-      if (hasSkills && (session.provider !== "claude" || session.runner !== "claude-sdk")) {
-        res.status(400).json({ error: "skills 仅支持 Claude SDK 结构化会话。" });
-        return;
-      }
-      const skills = hasSkills ? parseClaudeSdkSkills(req.body.skills) : [];
       const snapshot = await structured.sendMessage(req.params.id, input, {
         interrupt,
         preserveQueue,
         idempotencyKey,
-        skills,
       });
       res.json(sessionResponseDTO(snapshot));
     } catch (error) {
@@ -1059,7 +1035,7 @@ export function registerSessionRoutes(
       archiveRelatedTasks?: boolean;
     };
     try {
-      const ai = resolveCommitAiContext(snapshot, config, undefined, storage.getSystemSiliconEmployee());
+      const ai = resolveSystemAiContext(snapshot, config, storage.getSystemSiliconEmployee());
       // 自动 message + 迭代模式：拿本轮提示词当输入；提交成功后标记已用掉。
       const context = await iterationCommitInput(storage, snapshot, body);
       const result = await runQuickCommitWithFallback({
@@ -1155,7 +1131,7 @@ export function registerSessionRoutes(
     }
     const body = (req.body ?? {}) as { mode?: unknown; entryIds?: unknown; includeDiff?: boolean };
     try {
-      const ai = resolveCommitAiContext(snapshot, config, undefined, storage.getSystemSiliconEmployee());
+      const ai = resolveSystemAiContext(snapshot, config, storage.getSystemSiliconEmployee());
       const context = await iterationCommitInput(storage, snapshot, body);
       const result = await generateCommitMessageOnly(snapshot.cwd, config.language ?? "", {
         ...ai,
@@ -1192,7 +1168,7 @@ export function registerSessionRoutes(
     }
     const body = (req.body ?? {}) as { tag?: string; autoTag?: boolean; push?: boolean };
     try {
-      const ai = resolveCommitAiContext(snapshot, config, undefined, storage.getSystemSiliconEmployee());
+      const ai = resolveSystemAiContext(snapshot, config, storage.getSystemSiliconEmployee());
       const result = await runTagHead({
         cwd: snapshot.cwd,
         language: config.language ?? "",

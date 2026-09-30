@@ -22,7 +22,6 @@ import { ComposerPopoverHost } from "./composer-popover/host";
 import { ComposerActionErrorHost } from "./composer-action-error/host";
 import { ComposerAttachmentsHost } from "./composer-attachments/host";
 import { ComposerVoiceHost } from "./composer-voice/host";
-import { ComposerSkillsHost } from "./composer-skills/host";
 import { ComposerBadgesHost } from "./composer-badges/host";
 import { ComposerRailHost } from "./composer-rail/host";
 import { MissionsHost } from "./missions/host";
@@ -49,7 +48,6 @@ export function OverlayHost({ portalContainer }: OverlayHostProps) {
       <ComposerActionErrorHost />
       <ComposerAttachmentsHost />
       <ComposerVoiceHost />
-      <ComposerSkillsHost />
       <ComposerBadgesHost />
       <ComposerRailHost />
       <MissionsHost />

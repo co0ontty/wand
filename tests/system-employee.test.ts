@@ -10,7 +10,7 @@ import { defaultConfig, loadConfigWithStorage } from "../src/config.js";
 import { jsonErrorHandler } from "../src/express-async.js";
 import { callConfiguredAiText, withOpsPersona } from "../src/git-quick-commit.js";
 import { registerSiliconEmployeeRoutes } from "../src/server-employee-routes.js";
-import { resolveCommitAiContext, resolveSystemAiContext } from "../src/session-ai-context.js";
+import { resolveSystemAiContext } from "../src/session-ai-context.js";
 import {
   SYSTEM_EMPLOYEE_KEY,
   SYSTEM_EMPLOYEE_NAME,
@@ -211,7 +211,7 @@ test("系统 AI：CLI 模式按候选链取首个已安装工具，并带上运�
     const employee = { ...storageEmployee(), agents: [CLAUDE, GROK] };
     await withPath(bin, () => {
       // 只有 grok 在 PATH 上：链首的 claude 被跳过，但仍保留整条链做运行期降级。
-      const context = resolveSystemAiContext(session(), { ...config, systemAi: undefined }, employee);
+      const context = resolveSystemAiContext(session(), { ...config }, employee);
       assert.equal(context.provider, "grok");
       assert.equal(context.model, "grok-4.5");
       assert.equal(context.opsPersona, SYSTEM_EMPLOYEE_PROMPT);
@@ -220,24 +220,10 @@ test("系统 AI：CLI 模式按候选链取首个已安装工具，并带上运�
         { provider: "grok", model: "grok-4.5", thinkingEffort: "off" },
       ]);
 
-      // API 模式：仍然优先直连 API，但 CLI 兜底也换成运维链。
-      const api = resolveSystemAiContext(session(), {
-        ...config,
-        systemAi: { enabled: true, protocol: "anthropic", baseUrl: "https://api.example.test", apiKey: "k", model: "m" },
-      }, employee);
-      assert.equal(api.systemAi?.model, "m");
-      assert.equal(api.provider, "grok");
-      assert.deepEqual(api.cliCandidates?.map((candidate) => candidate.provider), ["claude", "grok"]);
-
-      // 快捷提交的直连来源只由 commitAiSource 决定。
-      const commit = resolveCommitAiContext(session(), {
-        ...config,
-        commitAiSource: "cli",
-        systemAi: { enabled: true, protocol: "anthropic", baseUrl: "https://api.example.test", apiKey: "k", model: "m" },
-      }, undefined, employee);
-      assert.equal(commit.systemAi, undefined);
-      assert.equal(commit.provider, "grok");
-      assert.equal(commit.opsPersona, SYSTEM_EMPLOYEE_PROMPT);
+      // 直接沿用同一份上下文时，provider/model/effort 也来自首选候选。
+      const viaEmployee = resolveSystemAiContext(session(), { ...config }, employee);
+      assert.equal(viaEmployee.provider, "grok");
+      assert.equal(viaEmployee.cliCandidates?.length, 2);
 
       // 没有内置员工时退回旧的 systemAiCli 行为。
       const legacy = resolveSystemAiContext(session(), { ...config, systemAiCli: "pi", systemAiModel: "" }, null);

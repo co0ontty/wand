@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { resolveCommitAiContext, resolveSessionAiContext, resolveSessionProvider, resolveSystemAiContext } from "../src/session-ai-context.js";
+import { resolveSessionAiContext, resolveSessionProvider, resolveSystemAiContext } from "../src/session-ai-context.js";
 import type { SessionSnapshot } from "../src/types.js";
 
 const config = {
@@ -137,125 +137,6 @@ test("resolveSessionAiContext uses Codex default for legacy Codex sessions", () 
   assert.equal(context.model, "gpt-5.5-codex");
 });
 
-test("resolveCommitAiContext keeps the complete current-session CLI context", () => {
-  const context = resolveCommitAiContext(session({
-    provider: "claude",
-    selectedModel: "claude-opus-4-6",
-    thinkingEffort: "max",
-  }), {
-    ...config,
-    commitCli: "codex",
-    commitModel: "gpt-5.4-mini",
-  });
-
-  assert.deepEqual(context, {
-    provider: "claude",
-    model: "claude-opus-4-6",
-    thinkingEffort: "max",
-    inheritEnv: true,
-  });
-});
-
-test("resolveCommitAiContext ignores legacy commit CLI preferences", () => {
-  const context = resolveCommitAiContext(session({ provider: "codex", thinkingEffort: "codex:ultra" }), {
-    ...config,
-    commitCli: "claude",
-    commitModel: "default",
-  });
-
-  assert.equal(context.provider, "codex");
-  assert.equal(context.model, "gpt-5.5-codex");
-  assert.equal(context.thinkingEffort, "codex:ultra");
-});
-
-test("resolveCommitAiContext uses only the current session CLI in CLI mode", () => {
-  const context = resolveCommitAiContext(session({ provider: "claude" }), {
-    ...config,
-    commitAiSource: "cli",
-    systemAi: {
-      enabled: true,
-      protocol: "anthropic",
-      baseUrl: "https://api.example.test",
-      apiKey: "secret",
-      model: "model-a",
-    },
-  });
-
-  assert.equal(context.systemAi, undefined);
-  assert.equal(context.thinkingEffort, "deep");
-});
-
-test("resolveCommitAiContext prefers the preset route order and appends discovered APIs", () => {
-  const context = resolveCommitAiContext(
-    session({ provider: "codex", selectedModel: "gpt-5.6-sol" }),
-    {
-      ...config,
-      commitAiSource: "api",
-      systemAi: {
-        id: "preset-route",
-        enabled: false,
-        protocol: "anthropic",
-        baseUrl: "https://manual.example.test",
-        apiKey: "manual-secret",
-        model: "manual-model",
-        authHeader: "x-api-key",
-      },
-    },
-    () => [{
-      id: "discovered-route",
-      enabled: true,
-      protocol: "openai",
-      baseUrl: "https://discovered.example.test/v1",
-      apiKey: "discovered-secret",
-      model: "discovered-model",
-      source: "opencode",
-    }],
-  );
-
-  assert.deepEqual(context.systemAi, {
-    id: "preset-route",
-    enabled: true,
-    protocol: "anthropic",
-    baseUrl: "https://manual.example.test",
-    apiKey: "manual-secret",
-    model: "manual-model",
-    authHeader: "x-api-key",
-    source: "custom",
-    fallbacks: [{
-      id: "discovered-route",
-      enabled: true,
-      protocol: "openai",
-      baseUrl: "https://discovered.example.test/v1",
-      apiKey: "discovered-secret",
-      model: "discovered-model",
-      authHeader: "bearer",
-      source: "opencode",
-      fallbacks: undefined,
-    }],
-  });
-  assert.equal(context.provider, "codex");
-  assert.equal(context.model, "gpt-5.6-sol");
-  assert.equal(context.thinkingEffort, "deep");
-});
-
-test("resolveCommitAiContext falls straight through to the session CLI when no API is usable", () => {
-  const context = resolveCommitAiContext(session({ provider: "codex" }), {
-    ...config,
-    commitAiSource: "api",
-    systemAi: {
-      enabled: false,
-      protocol: "openai",
-      baseUrl: "",
-      apiKey: "",
-      model: "",
-    },
-  }, () => []);
-
-  assert.equal(context.systemAi, undefined);
-  assert.equal(context.provider, "codex");
-  assert.equal(context.thinkingEffort, "deep");
-});
-
 test("system AI CLI selection overrides the session provider and never reuses its model", () => {
   const snapshot = session({
     provider: "codex",
@@ -266,7 +147,6 @@ test("system AI CLI selection overrides the session provider and never reuses it
     ...config,
     systemAiCli: "pi",
     systemAiModel: "  google/gemini-3  ",
-    systemAi: { enabled: false, protocol: "openai", baseUrl: "", apiKey: "", model: "" },
   });
   assert.deepEqual(selected, {
     provider: "pi",
@@ -286,28 +166,15 @@ test("system AI CLI selection overrides the session provider and never reuses it
   assert.equal(legacy.model, "gpt-5.6-sol");
 });
 
-test("resolveSystemAiContext keeps the current session CLI context independently of Commit", () => {
+test("resolveSystemAiContext keeps the current session CLI context when no system employee is available", () => {
   const context = resolveSystemAiContext(session({
     provider: "codex",
     selectedModel: "gpt-5.6-sol",
     thinkingEffort: "codex:xhigh",
-  }), {
-    ...config,
-    commitAiSource: "cli",
-    systemAiCli: "pi",
-    systemAiModel: "google/gemini-3",
-    systemAi: {
-      enabled: true,
-      protocol: "openai",
-      baseUrl: "https://api.example.test",
-      apiKey: "secret",
-      model: "model-a",
-    },
-  });
+  }), config);
 
   assert.equal(context.provider, "codex");
   assert.equal(context.model, "gpt-5.6-sol");
   assert.equal(context.thinkingEffort, "codex:xhigh");
   assert.equal(context.inheritEnv, true);
-  assert.equal(context.systemAi?.enabled, true);
 });

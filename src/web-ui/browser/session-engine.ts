@@ -27,7 +27,6 @@ import { closeReactOverlays } from "./react-overlay-coordinator";
 import { syncBrowserComposerSelects } from "./composer-select-adapter";
 import { syncBrowserComposerConfig } from "./composer-config-adapter";
 import { syncBrowserComposerAttachments } from "./composer-attachments-adapter";
-import { syncBrowserComposerSkills } from "./composer-skills-adapter";
 import {
   modelDisplayName,
   normalizeAvailableComposerValue,
@@ -435,129 +434,6 @@ const sessionReads = createSessionReads();
         });
       }
 
-      export function supportsClaudeSkillSelection(session) {
-        return !!session
-          && session.sessionKind === "structured"
-          && session.provider === "claude"
-          && session.runner === "claude-sdk";
-      }
-
-      export function getSelectedClaudeSkills(session) {
-        if (!supportsClaudeSkillSelection(session)) return [];
-        var selected = state.selectedClaudeSkillsBySession && state.selectedClaudeSkillsBySession[session.id];
-        return Array.isArray(selected) ? selected : [];
-      }
-
-      var claudeSkillsTrigger: HTMLElement | null = null;
-      var EMPTY_COMPOSER_SKILLS = {
-        visible: false,
-        loading: false,
-        options: [],
-        selectedCount: 0,
-        onToggle: function() {},
-      };
-
-      function refreshClaudeSkillControls() {
-        // skill chip 的文案 / aria / 可见性现在由 refreshComposerConfigControls
-        // 发布给 React，这里只需让三件套重新同步一次并刷新弹层本体。
-        refreshAllChatModeTrios();
-        refreshClaudeSkillsPicker();
-      }
-
-      /**
-       * Skills 弹层的选项快照。标签翻译（项目/用户）等业务规则留在 legacy，
-       * React 只负责渲染 —— 与 composer-config 的 Skills 按钮同一套约定。
-       */
-      function buildClaudeSkillOptions(session) {
-        var selected = getSelectedClaudeSkills(session);
-        var skills = state.claudeSkillsByCwd && Array.isArray(state.claudeSkillsByCwd[session.cwd])
-          ? state.claudeSkillsByCwd[session.cwd]
-          : [];
-        return skills.reduce(function(acc, skill) {
-          var name = typeof skill.name === "string" ? skill.name : "";
-          if (!name) return acc;
-          acc.push({
-            name: name,
-            description: typeof skill.description === "string" ? skill.description : "",
-            sourceLabel: skill.source === "project" ? "项目" : "用户",
-            selected: selected.indexOf(name) !== -1,
-          });
-          return acc;
-        }, []);
-      }
-
-      export function refreshClaudeSkillsPicker() {
-        var session = getSelectedSession();
-        if (!supportsClaudeSkillSelection(session)) {
-          syncBrowserComposerSkills(EMPTY_COMPOSER_SKILLS);
-          return;
-        }
-        syncBrowserComposerSkills({
-          visible: !!state.claudeSkillsPickerOpen,
-          loading: !!(state.claudeSkillsLoadingByCwd && state.claudeSkillsLoadingByCwd[session.cwd]),
-          options: buildClaudeSkillOptions(session),
-          selectedCount: getSelectedClaudeSkills(session).length,
-          onToggle: function(name) {
-            toggleClaudeSkill(getSelectedSession(), name);
-          },
-        });
-      }
-
-      export function loadClaudeSkillsForSession(session) {
-        if (!supportsClaudeSkillSelection(session) || !session.cwd) return Promise.resolve();
-        var cwd = session.cwd;
-        if ((state.claudeSkillsByCwd && Object.prototype.hasOwnProperty.call(state.claudeSkillsByCwd, cwd))
-          || (state.claudeSkillsLoadingByCwd && state.claudeSkillsLoadingByCwd[cwd])) {
-          return Promise.resolve();
-        }
-        state.claudeSkillsLoadingByCwd[cwd] = true;
-        return fetch("/api/claude-skills?cwd=" + encodeURIComponent(cwd), { credentials: "same-origin" })
-          .then(function(res) {
-            if (!res.ok) throw new Error("无法加载 skills。");
-            return res.json();
-          })
-          .then(function(payload) {
-            state.claudeSkillsByCwd[cwd] = Array.isArray(payload && payload.skills) ? payload.skills : [];
-          })
-          .catch(function() {
-            state.claudeSkillsByCwd[cwd] = [];
-          })
-          .finally(function() {
-            delete state.claudeSkillsLoadingByCwd[cwd];
-            refreshClaudeSkillControls();
-          });
-      }
-
-      export function toggleClaudeSkillsPicker(trigger?: HTMLElement | null) {
-        var session = getSelectedSession();
-        if (!supportsClaudeSkillSelection(session)) return;
-        if (state.claudeSkillsPickerOpen) {
-          closeClaudeSkillsPicker();
-          return;
-        }
-        claudeSkillsTrigger = trigger ?? document.activeElement as HTMLElement | null;
-        state.claudeSkillsPickerOpen = true;
-        void loadClaudeSkillsForSession(session);
-        refreshClaudeSkillControls();
-      }
-
-      export function closeClaudeSkillsPicker() {
-        if (!state.claudeSkillsPickerOpen) return;
-        state.claudeSkillsPickerOpen = false;
-        refreshClaudeSkillControls();
-        claudeSkillsTrigger?.focus();
-        claudeSkillsTrigger = null;
-      }
-
-      export function toggleClaudeSkill(session, name) {
-        if (!supportsClaudeSkillSelection(session) || !name) return;
-        var selected = getSelectedClaudeSkills(session).slice();
-        var index = selected.indexOf(name);
-        if (index === -1) selected.push(name);
-        else selected.splice(index, 1);
-        state.selectedClaudeSkillsBySession[session.id] = selected;
-        refreshClaudeSkillControls();
-      }
 
       // 把所有三件套实例的 label / select 同步到当前会话设置。
       export function refreshAllChatModeTrios() {
@@ -577,7 +453,6 @@ const sessionReads = createSessionReads();
         var modelLabel = getShortModelLabel(normalizedModel, session);
         var modelFullLabel = getModelDisplayLabel(normalizedModel, session) || modelLabel;
         var thinkingLabel = getThinkingCompactLabel(normalizedThinking, session);
-        var selectedSkills = getSelectedClaudeSkills(session);
         syncBrowserComposerConfig({
           // 三个宿主的 chip 内容是同一份状态，只有 scope 决定显示哪几个 chip。
           resolve: function() {
@@ -588,16 +463,9 @@ const sessionReads = createSessionReads();
               modelRefreshing: !!state.modelsRefreshing,
               thinkingValue: normalizedThinking,
               thinkingLabel: thinkingLabel,
-              skillsVisible: supportsClaudeSkillSelection(session),
-              skillsLabel: selectedSkills.length ? ("Skills " + selectedSkills.length) : "Skills",
-              skillsTitle: selectedSkills.length
-                ? ("已选择 " + selectedSkills.length + " 个 skills")
-                : "选择本条消息要应用的 skills",
-              skillsExpanded: !!state.claudeSkillsPickerOpen,
             };
           },
           onRefreshModels: function() { void refreshAvailableModels(); },
-          onOpenSkills: function(trigger) { toggleClaudeSkillsPicker(trigger); },
         });
         syncBrowserComposerSelects({
           resolve: function(control) {
@@ -1051,7 +919,7 @@ const sessionReads = createSessionReads();
               ? "pi-cli-json"
             : provider === "gemini"
               ? "gemini-cli-json"
-              : ((state.config && state.config.structuredRunner === "sdk") ? "claude-sdk" : (state.structuredRunner || "claude-cli-print"));
+              : "claude-cli-print";
         var payload = {
           cwd: cwdOverride || getEffectiveCwd(),
           mode: modeOverride || state.chatMode || (state.config && state.config.defaultMode) || "default",
@@ -1629,10 +1497,6 @@ const sessionReads = createSessionReads();
           teardownTerminal();
         }
         state.selectedId = id;
-        state.claudeSkillsPickerOpen = false;
-        // 弹层由 React 渲染，重置打开标记后必须重新发布一次，否则切换会话会
-        // 把上一个会话的 skills 弹层留在屏幕上（旧实现靠 outerHTML 重建顺手收掉）。
-        refreshClaudeSkillsPicker();
         persistSelectedId();
         state.toolContentCache = {};
         // Clear queued inputs from the previous session to prevent cross-session leaks
@@ -1675,7 +1539,6 @@ const sessionReads = createSessionReads();
           if (state.selectedId === id) focusInputBox(true);
         });
         subscribeToSession(id);
-        loadClaudeSkillsForSession(foundSession);
         // 切会话：先用缓存里的上一次结果顶上（没有就空着），再异步刷新，
         // 避免慢仓库上徽章先消失、隔一两秒才出现。
         restoreGitStatusForSession(id);

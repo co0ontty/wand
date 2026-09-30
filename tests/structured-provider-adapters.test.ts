@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildClaudeCliArgs, buildClaudeSdkThinking, buildSessionSystemPromptParts } from "../src/structured-claude-adapter.js";
+import { buildClaudeCliArgs, buildSessionSystemPromptParts } from "../src/structured-claude-adapter.js";
 import { buildCodexArgs } from "../src/structured-codex-adapter.js";
 import { applyOpenCodeEvent, buildOpenCodeArgs } from "../src/structured-opencode-adapter.js";
 import { applyGrokEvent, buildGrokArgs } from "../src/structured-grok-adapter.js";
@@ -72,8 +72,6 @@ test("Claude adapter keeps variadic permission flags ahead of all following flag
     "--disallowedTools", "AskUserQuestion",
     "--resume", "session-1",
   ]);
-  assert.deepEqual(buildClaudeSdkThinking("off"), { type: "disabled" });
-  assert.deepEqual(buildClaudeSdkThinking("standard"), { type: "enabled", budgetTokens: 4096 });
 });
 
 test("OpenCode adapter maps args and stream events without session lifecycle state", () => {

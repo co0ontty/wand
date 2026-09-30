@@ -66,7 +66,7 @@ test("new sessions without an explicit workspace join or create the project for 
 test("backfill attaches unbound sessions and creates missing projects", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-backfill-workspace-"));
   const other = mkdtempSync(path.join(os.tmpdir(), "wand-backfill-other-"));
-  const config = { ...defaultConfig(), defaultCwd: root, structuredRunner: "sdk" as const };
+  const config = { ...defaultConfig(), defaultCwd: root };
   const storage = new WandStorage(path.join(root, "wand.db"));
   const manager = new StructuredSessionManager(storage, config);
   try {
@@ -93,7 +93,7 @@ test("backfill attaches unbound sessions and creates missing projects", () => {
 
 test("creating a project absorbs unbound sessions in that directory", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-absorb-workspace-"));
-  const config = { ...defaultConfig(), defaultCwd: root, structuredRunner: "sdk" as const };
+  const config = { ...defaultConfig(), defaultCwd: root };
   const storage = new WandStorage(path.join(root, "wand.db"));
   const manager = new StructuredSessionManager(storage, config);
   try {

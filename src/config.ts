@@ -7,10 +7,8 @@ import process from "node:process";
 import { AndroidApkConfig, CardExpandDefaults, ExecutionMode, IosIpaConfig, MacosDmgConfig, RenderConfig, RenderEngine, SessionProvider, StructuredChatPersonaConfig, WandConfig } from "./types.js";
 import type { WandStorage } from "./storage.js";
 import { isRunningAsRoot } from "./env-utils.js";
-import { normalizeSystemAiConfig, systemAiProfiles } from "./system-ai.js";
 import { isSessionProvider } from "./session-provider.js";
 import { isThinkingEffort } from "./structured-provider-common.js";
-type StructuredRunnerOption = WandConfig["structuredRunner"];
 
 const DEFAULT_CONFIG_DIR = ".wand";
 const DEFAULT_CONFIG_FILE = "config.json";
@@ -37,12 +35,9 @@ export const PREFERENCE_KEYS = [
   "defaultGeminiModel",
   "commitCli",
   "commitModel",
-  "commitAiSource",
-  "systemAi",
   "systemAiCli",
   "systemAiModel",
   "defaultThinkingEffort",
-  "structuredRunner",
   "language",
   "cardDefaults",
   "inheritEnv",
@@ -115,20 +110,8 @@ export const defaultConfig = (): WandConfig => ({
   defaultGeminiModel: "",
   commitCli: "claude",
   commitModel: "",
-  commitAiSource: "cli",
-  systemAi: {
-    id: crypto.randomUUID(),
-    enabled: false,
-    protocol: "openai",
-    baseUrl: "",
-    apiKey: "",
-    model: "",
-    authHeader: "bearer",
-    source: "custom",
-  },
   systemAiModel: "",
   defaultThinkingEffort: "off",
-  structuredRunner: "cli" as StructuredRunnerOption,
   inheritEnv: true,
   commandPresets: [
     {
@@ -397,14 +380,6 @@ export function applyStoragePreferences(config: WandConfig, storage: WandStorage
     const v = storage.getPreference<string>(preferenceStorageKey("commitModel"), defaults.commitModel ?? "");
     if (typeof v === "string") config.commitModel = v.trim();
   }
-  if (storage.hasPreference(preferenceStorageKey("commitAiSource"))) {
-    const v = storage.getPreference<string>(preferenceStorageKey("commitAiSource"), defaults.commitAiSource ?? "cli");
-    if (v === "cli" || v === "api") config.commitAiSource = v;
-  }
-  if (storage.hasPreference(preferenceStorageKey("systemAi"))) {
-    const v = storage.getPreference<unknown>(preferenceStorageKey("systemAi"), defaults.systemAi);
-    config.systemAi = normalizeSystemAiConfig(v, defaults.systemAi);
-  }
   if (storage.hasPreference(preferenceStorageKey("systemAiCli"))) {
     const v = storage.getPreference<unknown>(preferenceStorageKey("systemAiCli"), defaults.systemAiCli);
     if (isSessionProvider(v)) config.systemAiCli = v;
@@ -416,10 +391,6 @@ export function applyStoragePreferences(config: WandConfig, storage: WandStorage
   if (storage.hasPreference(preferenceStorageKey("defaultThinkingEffort"))) {
     const v = storage.getPreference<string>(preferenceStorageKey("defaultThinkingEffort"), defaults.defaultThinkingEffort ?? "off");
     if (isThinkingEffort(v)) config.defaultThinkingEffort = v;
-  }
-  if (storage.hasPreference(preferenceStorageKey("structuredRunner"))) {
-    const v = storage.getPreference<string>(preferenceStorageKey("structuredRunner"), defaults.structuredRunner ?? "cli");
-    if (v === "cli" || v === "sdk") config.structuredRunner = v;
   }
   if (storage.hasPreference(preferenceStorageKey("language"))) {
     const v = storage.getPreference<string>(preferenceStorageKey("language"), defaults.language ?? "");
@@ -433,7 +404,6 @@ export function applyStoragePreferences(config: WandConfig, storage: WandStorage
     const v = storage.getPreference<unknown>(preferenceStorageKey("inheritEnv"), defaults.inheritEnv ?? true);
     config.inheritEnv = v === false ? false : true;
   }
-  validateCommitAiConfig(config);
   return config;
 }
 
@@ -443,7 +413,6 @@ export function writePreferenceToStorage(
   storage: WandStorage,
   key: PreferenceKey,
   value: unknown,
-  options: { deferCommitAiValidation?: boolean } = {},
 ): void {
   const dbKey = preferenceStorageKey(key);
   switch (key) {
@@ -531,30 +500,6 @@ export function writePreferenceToStorage(
       config.commitModel = v;
       break;
     }
-    case "commitAiSource": {
-      if (value !== "cli" && value !== "api") throw new Error(`无效 commit AI 来源: ${String(value)}`);
-      if (!options.deferCommitAiValidation) {
-        validateCommitAiConfig({ ...config, commitAiSource: value });
-      }
-      storage.setPreference(dbKey, value);
-      config.commitAiSource = value;
-      break;
-    }
-    case "systemAi": {
-      if (!value || typeof value !== "object" || Array.isArray(value)) {
-        throw new Error("systemAi 必须是对象。");
-      }
-      const normalized = normalizeSystemAiConfig(value, config.systemAi ?? defaultConfig().systemAi);
-      if (normalized.enabled && !systemAiProfiles(normalized, true).length) {
-        throw new Error("启用系统 AI API 时，至少需要一条地址、API Key 和模型完整的路由。");
-      }
-      if (!options.deferCommitAiValidation) {
-        validateCommitAiConfig({ ...config, systemAi: normalized });
-      }
-      storage.setPreference(dbKey, normalized);
-      config.systemAi = normalized;
-      break;
-    }
     case "systemAiCli": {
       if (!isSessionProvider(value)) throw new Error(`无效系统 AI CLI: ${String(value)}`);
       storage.setPreference(dbKey, value);
@@ -572,13 +517,6 @@ export function writePreferenceToStorage(
       const v = value;
       storage.setPreference(dbKey, v);
       config.defaultThinkingEffort = v;
-      break;
-    }
-    case "structuredRunner": {
-      if (value !== "cli" && value !== "sdk") throw new Error(`无效 structured runner: ${String(value)}`);
-      const v: StructuredRunnerOption = value;
-      storage.setPreference(dbKey, v);
-      config.structuredRunner = v;
       break;
     }
     case "language": {
@@ -602,15 +540,6 @@ export function writePreferenceToStorage(
     }
   }
 }
-
-/**
- * Kept as a compatibility seam for callers that validate preference batches.
- * Commit API profiles are discovered from the configured tools at request time,
- * so selecting API is valid even when no manual systemAi profile is stored.
- */
-export function validateCommitAiConfig(
-  _config: Pick<WandConfig, "commitAiSource" | "systemAi">,
-): void {}
 
 function defaultCardExpandDefaults(): CardExpandDefaults {
   return {
@@ -820,11 +749,9 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
     defaultGeminiModel: typeof input.defaultGeminiModel === "string" ? input.defaultGeminiModel.trim() : defaults.defaultGeminiModel,
     commitCli: input.commitCli === "codex" || input.commitCli === "opencode" ? input.commitCli : "claude",
     commitModel: typeof input.commitModel === "string" ? input.commitModel.trim() : defaults.commitModel,
-    commitAiSource: input.commitAiSource === "api" ? "api" : "cli",
     systemAiCli: isSessionProvider(input.systemAiCli) ? input.systemAiCli : undefined,
     systemAiModel: typeof input.systemAiModel === "string" ? input.systemAiModel.trim() : defaults.systemAiModel,
     defaultThinkingEffort: isThinkingEffort(input.defaultThinkingEffort) ? input.defaultThinkingEffort : "off",
-    structuredRunner: (input.structuredRunner === "sdk" || input.structuredRunner === "cli") ? input.structuredRunner : defaults.structuredRunner,
     inheritEnv: typeof input.inheritEnv === "boolean" ? input.inheritEnv : (defaults.inheritEnv ?? true),
   };
 }

@@ -83,19 +83,6 @@ export function ComposerConfigControl({ mount }: { mount: ComposerConfigMount })
           </span>
         </>
       )}
-      {scope === "all" && mount.skillsVisible && (
-        <button
-          className="composer-config-chip composer-config-skills"
-          type="button"
-          data-claude-skills-trigger=""
-          aria-haspopup="dialog"
-          aria-expanded={mount.skillsExpanded ? "true" : "false"}
-          title={mount.skillsTitle}
-          onClick={(event) => mount.onOpenSkills(event.currentTarget)}
-        >
-          {mount.skillsLabel}
-        </button>
-      )}
     </div>
   );
 }

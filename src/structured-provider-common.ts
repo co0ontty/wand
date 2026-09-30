@@ -1,4 +1,4 @@
-import type { SessionProvider, SessionRunner, SessionSnapshot, StructuredSessionState, WandConfig } from "./types.js";
+import type { SessionProvider, SessionRunner, SessionSnapshot, StructuredSessionState } from "./types.js";
 import { shellQuote } from "./shell-quote.js";
 
 const NATIVE_THINKING_EFFORT = /^(claude|codex|opencode|grok|qoder|pi):[a-z0-9][a-z0-9_-]{0,31}$/;
@@ -85,6 +85,7 @@ export function prefixedThinkingEffort(
 }
 
 export function isStructuredRunnerForProvider(provider: SessionProvider, runner: unknown): runner is SessionRunner {
+  // "claude-sdk" 是历史值：SDK 执行路径已移除，只在读旧会话时用来识别（见 normalizeStructuredRunner）。
   if (provider === "claude") return runner === "claude-sdk" || runner === "claude-cli-print";
   if (provider === "codex") return runner === "codex-cli-exec";
   if (provider === "opencode") return runner === "opencode-cli-run";
@@ -94,29 +95,34 @@ export function isStructuredRunnerForProvider(provider: SessionProvider, runner:
   return runner === "gemini-cli-json";
 }
 
-export function defaultStructuredRunner(
-  provider: SessionProvider,
-  configuredClaudeRunner: WandConfig["structuredRunner"] = "cli",
-): SessionRunner {
+export function defaultStructuredRunner(provider: SessionProvider): SessionRunner {
   if (provider === "codex") return "codex-cli-exec";
   if (provider === "opencode") return "opencode-cli-run";
   if (provider === "grok") return "grok-cli-headless";
   if (provider === "qoder") return "qoder-cli-print";
   if (provider === "pi") return "pi-cli-json";
   if (provider === "gemini") return "gemini-cli-json";
-  return configuredClaudeRunner === "sdk" ? "claude-sdk" : "claude-cli-print";
+  return "claude-cli-print";
+}
+
+/**
+ * 历史值归一：`claude-sdk` 是 SDK 执行路径的遗留会话值（含旧客户端仍会提交的值）。
+ * SDK 已移除，读路径把它映射成同一套 `claude -p` 执行，不报错、不丢会话。
+ */
+export function normalizeStructuredRunner(runner: unknown): unknown {
+  return runner === "claude-sdk" ? "claude-cli-print" : runner;
 }
 
 export function resolveStructuredRunner(
   provider: SessionProvider,
   requestedRunner: unknown,
-  configuredClaudeRunner: WandConfig["structuredRunner"] = "cli",
 ): SessionRunner {
-  const runner = requestedRunner ?? defaultStructuredRunner(provider, configuredClaudeRunner);
+  const normalized = normalizeStructuredRunner(requestedRunner);
+  const runner = normalized ?? defaultStructuredRunner(provider);
   if (!isStructuredRunnerForProvider(provider, runner)) {
     throw new Error(`runner ${String(runner)} 不支持 provider ${provider}。`);
   }
-  return runner;
+  return runner === "claude-sdk" ? "claude-cli-print" : runner;
 }
 
 export function defaultStructuredState(
@@ -132,14 +138,6 @@ export function normalizeThinkingEffort(value: unknown): SessionSnapshot["thinki
   if (normalized === "off" || normalized === "standard" || normalized === "deep" || normalized === "max") return normalized;
   if (NATIVE_THINKING_EFFORT.test(normalized)) return normalized as SessionSnapshot["thinkingEffort"];
   return null;
-}
-
-export function thinkingEffortToSdkBudget(effort: SessionSnapshot["thinkingEffort"]): number {
-  const native = prefixedThinkingEffort("claude", effort) ?? effort;
-  if (native === "standard" || native === "low") return 4096;
-  if (native === "deep" || native === "medium" || native === "high") return 16000;
-  if (native === "max" || native === "xhigh" || native === "ultra") return 31999;
-  return 0;
 }
 
 export function thinkingEffortToClaudeCliEffort(

@@ -158,31 +158,6 @@ test("React-owned controls are not rebound or imperatively rewritten", () => {
   }
 });
 
-test("composer skill picker stays scoped to Claude SDK structured sessions", () => {
-  const engine = readFileSync(path.join(root, "src/web-ui/browser/session-engine.ts"), "utf8");
-  const input = readFileSync(path.join(root, "src/web-ui/browser/input.ts"), "utf8");
-  const events = readFileSync(path.join(root, "src/web-ui/browser/events.ts"), "utf8");
-  const host = readFileSync(path.join(root, "src/web-ui/react/composer-config/host.tsx"), "utf8");
-  const skillsHost = readFileSync(path.join(root, "src/web-ui/react/composer-skills/host.tsx"), "utf8");
-
-  assert.match(engine, /session\.sessionKind === "structured"/);
-  assert.match(engine, /session\.provider === "claude"/);
-  assert.match(engine, /session\.runner === "claude-sdk"/);
-  // trigger 与弹层的作用域守卫都在 legacy 侧算（弹层不支持时直接清空 portal），
-  // React 只按 skillsVisible 渲染按钮、按 mount 渲染弹层。
-  assert.match(engine, /skillsVisible: supportsClaudeSkillSelection\(session\)/);
-  assert.match(engine, /if \(!supportsClaudeSkillSelection\(session\)\) \{\n          syncBrowserComposerSkills\(EMPTY_COMPOSER_SKILLS\);/);
-  assert.match(host, /data-claude-skills-trigger/);
-  assert.match(host, /scope === "all" && mount\.skillsVisible/);
-  assert.match(input, /supportsClaudeSkillSelection\(session\) \? \{ skills: getSelectedClaudeSkills\(session\) \} : \{\}/);
-  // 选项渲染与点击已迁到 React；legacy 只保留「点外部关闭」与 Escape 的节点判断。
-  assert.match(skillsHost, /data-claude-skill-name/);
-  assert.match(events, /getElementById\("composer-skills-popover"\)/);
-  // trigger 自己的 click 由 React 的 onClick 处理；“点外部关闭”必须排除它，
-  // 否则同一次 click 会被当成外部点击立刻关掉刚打开的弹层。
-  assert.match(events, /!target\.closest\("\[data-claude-skills-trigger\]"\)/);
-});
-
 test("PTY running indicators stop when the provider exits into its retained shell", () => {
   const sessions = readFileSync(path.join(root, "src/web-ui/browser/session-engine.ts"), "utf8");
   assert.equal(computeRunningSignal({ status: "running", provider: "claude", ptyBusy: true, providerCliActive: false }).active, false);

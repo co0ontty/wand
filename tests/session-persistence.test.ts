@@ -54,7 +54,7 @@ function createHarness(t: TestContext) {
   const storage = new CountingStorage(path.join(root, "wand.db"));
   const manager = new StructuredSessionManager(
     storage,
-    { ...defaultConfig(), defaultCwd: root, structuredRunner: "sdk" },
+    { ...defaultConfig(), defaultCwd: root },
   );
   const session = manager.createSession({
     cwd: root,
@@ -146,7 +146,6 @@ test("structured restore marks an interrupted in-flight turn and keeps the queue
     ...session,
     status: "running",
     queuedMessages: ["continue"],
-    queuedMessageSkills: [["review"]],
     structuredState: {
       provider: "claude",
       runner: "claude-cli-print",
@@ -168,5 +167,4 @@ test("structured restore marks an interrupted in-flight turn and keeps the queue
   assert.equal(snapshot?.structuredState?.inFlight, false);
   assert.equal(snapshot?.structuredState?.lastError, "服务重启，上一轮已中断。");
   assert.deepEqual(snapshot?.queuedMessages, ["continue"]);
-  assert.deepEqual(snapshot?.queuedMessageSkills, [["review"]]);
 });

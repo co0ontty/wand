@@ -24,7 +24,7 @@ test("relay sessions hand user input to their handler and never start a CLI turn
     },
   };
   const manager = new StructuredSessionManager(
-    storage, { ...defaultConfig(), defaultCwd: root }, null, undefined, { pi: runner },
+    storage, { ...defaultConfig(), defaultCwd: root }, null, { pi: runner },
   );
   t.after(() => manager.dispose());
   const received: string[] = [];

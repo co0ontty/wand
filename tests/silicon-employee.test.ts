@@ -329,7 +329,7 @@ test("a failed spawn falls back before acceptance; a CLI runtime failure never r
     return { args: [], spawnedAt: new Date().toISOString(), pid: 1,
       completion: Promise.resolve(result()), interrupt() {} };
   } } as StructuredRunnerAdapter;
-  const manager = new StructuredSessionManager(storage, { ...defaultConfig(), defaultCwd: root }, null, undefined, { codex, pi });
+  const manager = new StructuredSessionManager(storage, { ...defaultConfig(), defaultCwd: root }, null, { codex, pi });
   t.after(async () => {
     manager.dispose();
     await whenIterationPromptsSettled();

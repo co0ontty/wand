@@ -126,7 +126,6 @@ test("composer 三件套的 chip 与内层 select 宿主都由 React 渲染", ()
   assert.doesNotMatch(sessionEngine, /renderComposerConfigControlsHtml/);
   assert.doesNotMatch(sessionEngine, /renderComposerSelectHost/);
   assert.doesNotMatch(sessionEngine, /data-models-refresh/);
-  assert.doesNotMatch(sessionEngine, /data-claude-skills-trigger/);
   assert.doesNotMatch(sessionEngine, /"\.composer-config-controls"/);
 
   // 宿主常驻在种子 markup 里，切会话后 portal 目标仍然有效。
@@ -141,7 +140,6 @@ test("composer 三件套的 chip 与内层 select 宿主都由 React 渲染", ()
   assert.match(host, /data-composer-select-host=""/);
   assert.match(host, /data-models-refresh=""/);
   assert.match(host, /data-models-refresh-scope=\{scope\}/);
-  assert.match(host, /data-claude-skills-trigger=""/);
   assert.doesNotMatch(host, /<select/);
 
   // chip 里会长出 select 宿主，所以配置同步必须同步提交后 select 才能扫到。

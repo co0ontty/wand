@@ -1,9 +1,8 @@
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 
-import { ClaudeRunError, runClaudePrint } from "./claude-sdk-runner.js";
-import { callSystemAiTextWithFallback, type AiTextRequest } from "./system-ai.js";
 import { buildChildEnv } from "./env-utils.js";
+import { buildLanguageDirective } from "./language-prompt.js";
 import { isSessionProvider, providerCliInstalled } from "./session-provider.js";
 import {
   runGitAsync as runGitAsyncBase,
@@ -20,6 +19,7 @@ import {
   thinkingEffortToQoderEffort,
   thinkingEffortToPiLevel,
 } from "./structured-provider-common.js";
+import type { AiTextRequest } from "./types.js";
 import {
   GitStatusFileEntry,
   GitStatusResult,
@@ -42,10 +42,6 @@ const MAX_FILE_ENTRIES = 200;
 // 30s 在 API 抖动时不够用，放宽到 60s。
 const CLAUDE_MESSAGE_TIMEOUT_MS = 60_000;
 const CODEX_MESSAGE_TIMEOUT_MS = 60_000;
-// API mode can contain several profiles. Keep each probe bounded so the whole
-// chain can still reach the current-session CLI before native clients' 180s
-// request deadline.
-const DIRECT_API_PROFILE_TIMEOUT_MS = 20_000;
 const QUICK_COMMIT_CLI_TIMEOUT_MS = 120_000;
 const MAX_DIFF_FOR_AI = 100_000;
 // 迭代提示词模式下只给文件清单做核对，不需要完整 diff：单次上限比 diff 小一个量级。
@@ -319,7 +315,6 @@ export interface QuickCommitAiOptions {
   model?: string | null;
   thinkingEffort?: SessionSnapshot["thinkingEffort"];
   inheritEnv?: boolean;
-  systemAi?: import("./types.js").SystemAiConfig;
   /** 内置「系统运维」员工的角色设定：作为系统提示前缀注入。 */
   opsPersona?: string;
   /** CLI 降级链（按顺序）；未设置时只用 provider/model 这一次调用。 */
@@ -346,38 +341,38 @@ export interface CommitInputOptions {
 
 // ── AI commit message generation ──
 
+/**
+ * 一次性 Claude 文本生成（commit message / tag / 提示词优化…）。
+ *
+ * 直接 spawn 本机 `claude -p`，与 PTY / 结构化会话同源：认证、模型、`~/.claude`
+ * 配置完全一致。对齐原来 SDK 时代的行为：
+ *   - `--tools ""` 关掉全部工具：纯文本生成不需要工具，也避免一次性短调用顺手读文件；
+ *   - `--no-session-persistence`：不污染 `~/.claude/projects/` 的会话历史；
+ *   - `--strict-mcp-config`（不给 --mcp-config）：跳过用户配置的 MCP，省启动时间与 token。
+ * 语言指令与任务规则都走 `--append-system-prompt`，任务自己的输出格式排在后面。
+ */
 async function callClaudeText(
   request: AiTextRequest,
   cwd: string,
   language: string | undefined,
   opts: QuickCommitAiOptions,
 ): Promise<string> {
-  try {
-    const effort = thinkingEffortToClaudeCliEffort(opts.thinkingEffort ?? "off");
-    return await runClaudePrint(request.prompt, {
-      cwd,
-      timeoutMs: CLAUDE_MESSAGE_TIMEOUT_MS,
-      language,
-      systemInstructions: request.system,
-      model: opts.model ?? undefined,
-      ...(effort ? { effort } : {}),
-    });
-  } catch (error) {
-    if (error instanceof ClaudeRunError) {
-      // 把通用 ClaudeRunError 翻译成 quick-commit 自己的错误码 + 中文话术。
-      if (error.code === "CLAUDE_TIMEOUT") {
-        throw new QuickCommitError(
-          "Claude 生成超时，请手动填写 commit message。",
-          "CLAUDE_TIMEOUT",
-        );
-      }
-      if (error.code === "CLAUDE_EMPTY_RESULT") {
-        throw new QuickCommitError("Claude 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
-      }
-      throw new QuickCommitError(error.message, error.code);
-    }
-    throw error;
-  }
+  const args = ["-p", "--output-format", "text", "--tools", "", "--no-session-persistence", "--strict-mcp-config"];
+  const languageDirective = language ? buildLanguageDirective(language) : "";
+  const systemPrompt = [languageDirective, (request.system ?? "").trim()].filter(Boolean).join("\n\n");
+  if (systemPrompt) args.push("--append-system-prompt", systemPrompt);
+  const model = opts.model?.trim();
+  if (model && model !== "default") args.push("--model", model);
+  const effort = thinkingEffortToClaudeCliEffort(opts.thinkingEffort ?? "off");
+  if (effort) args.push("--effort", effort);
+  const stdout = await runCliText("claude", args, request.prompt, {
+    cwd,
+    timeoutMs: CLAUDE_MESSAGE_TIMEOUT_MS,
+    inheritEnv: opts.inheritEnv,
+  });
+  const text = stdout.trim();
+  if (!text) throw new QuickCommitError("Claude 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
+  return text;
 }
 
 function stripFences(raw: string): string {
@@ -717,22 +712,6 @@ async function callCliAiText(request: AiTextRequest, cwd: string, language: stri
   return callClaudeText(request, cwd, language, opts);
 }
 
-async function callDirectApiText(request: AiTextRequest, systemAi: import("./types.js").SystemAiConfig): Promise<string> {
-  const text = await callSystemAiTextWithFallback(request, systemAi, DIRECT_API_PROFILE_TIMEOUT_MS);
-  if (!text.trim()) {
-    throw new QuickCommitError("直连 API 返回了空结果。", "EMPTY_AI_MESSAGE");
-  }
-  return text;
-}
-
-function aiFallbackFailed(primary: "直连 API" | "CLI", primaryError: unknown, fallbackError: unknown): QuickCommitError {
-  const fallback = primary === "直连 API" ? "CLI" : "直连 API";
-  return new QuickCommitError(
-    `${primary} 与 ${fallback} 均失败：${getGitErrorMessage(primaryError)}；${getGitErrorMessage(fallbackError)}`,
-    "AI_FALLBACK_FAILED",
-  );
-}
-
 /**
  * 多候选降级时给整条链的时间上限。原生客户端的请求宽限约 180s，
  * 候选再多也不能把整个请求拖死；单次仍受各自 CLI 超时保护。
@@ -802,9 +781,8 @@ async function callCliCandidates(
 }
 
 /**
- * Run a lightweight AI request through the selected Commit source. API mode
- * exhausts its profile chain and then falls back once to the system employee's
- * CLI chain. CLI mode walks that chain in order.
+ * Run a lightweight AI request through the system employee's CLI chain.
+ * 所有 Wand 自有文本调用都走本机已安装的 CLI，没有任何直连 API 分支。
  */
 export async function callConfiguredAiText(
   request: AiTextRequest,
@@ -812,22 +790,7 @@ export async function callConfiguredAiText(
   language: string,
   opts: QuickCommitAiOptions,
 ): Promise<string> {
-  const effective = withOpsPersona(request, opts.opsPersona);
-  if (opts.systemAi?.enabled) {
-    try {
-      return await callDirectApiText(effective, opts.systemAi);
-    } catch (apiError) {
-      try {
-        // The user selected the direct API first. If it is unavailable or
-        // empty, retry this exact request through their selected CLI chain.
-        return await callCliCandidates(effective, cwd, language, opts);
-      } catch (cliError) {
-        throw aiFallbackFailed("直连 API", apiError, cliError);
-      }
-    }
-  }
-
-  return callCliCandidates(effective, cwd, language, opts);
+  return callCliCandidates(withOpsPersona(request, opts.opsPersona), cwd, language, opts);
 }
 
 /** Read the unstaged + staged tree without touching the index. */
@@ -1153,7 +1116,6 @@ interface TagHeadOptions {
   model?: string | null;
   thinkingEffort?: SessionSnapshot["thinkingEffort"];
   inheritEnv?: boolean;
-  systemAi?: import("./types.js").SystemAiConfig;
   /** Explicit tag name. If empty and `autoTag` is true, ask the session provider to generate one. */
   tag?: string;
   autoTag?: boolean;
@@ -1181,13 +1143,7 @@ export async function runTagHead(opts: TagHeadOptions): Promise<TagHeadResult> {
     } catch {
       headSubject = "";
     }
-    tagName = await generateTagAfterCommit(cwd, language, headSubject || "", {
-      provider: opts.provider,
-      model: opts.model,
-      thinkingEffort: opts.thinkingEffort,
-      inheritEnv: opts.inheritEnv,
-      systemAi: opts.systemAi,
-    });
+    tagName = await generateTagAfterCommit(cwd, language, headSubject || "", opts);
   }
   if (!tagName) {
     throw new QuickCommitError("请填写 tag 名称，或开启 AI 生成。", "EMPTY_TAG");
@@ -1656,13 +1612,9 @@ export async function runQuickCommitWithFallback(opts: QuickCommitOptions): Prom
 
 export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCommitResult> {
   const { cwd, language, autoMessage, customMessage, tag, autoTag, push, submodule } = opts;
-  const ai: QuickCommitAiOptions = {
-    provider: opts.provider,
-    model: opts.model,
-    thinkingEffort: opts.thinkingEffort,
-    inheritEnv: opts.inheritEnv,
-    systemAi: opts.systemAi,
-  };
+  // QuickCommitOptions 本身带全套 AI 字段（模型、系统运维人设、候选链）：
+  // 逐字段抄一份会静默丢掉新增字段，直接复用同一个对象。
+  const ai: QuickCommitAiOptions = opts;
 
   await assertGitWorkTreeAsync(cwd);
 

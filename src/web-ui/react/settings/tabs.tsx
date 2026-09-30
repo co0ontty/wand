@@ -39,7 +39,6 @@ import type {
   SettingsRepository,
   SettingsSessionProvider,
   SettingsSnapshot,
-  SettingsSystemAi,
   SettingsThinkingEffort,
   SettingsWebUpdate,
 } from "./types";
@@ -470,7 +469,6 @@ function generalFromSnapshot(snapshot: SettingsSnapshot): SettingsGeneralInput {
     defaultCwd: config.defaultCwd,
     shell: config.shell,
     language: config.language,
-    structuredRunner: config.structuredRunner,
     inheritEnv: config.inheritEnv,
   };
 }
@@ -635,15 +633,6 @@ export function GeneralSettingsTab({ snapshot, repository, refresh }: SettingsTa
           <SettingsField label="默认模式">
             <SettingsSelect id="settings-default-mode" ariaLabel="默认执行模式" value={form.defaultMode} options={MODE_OPTIONS} onChange={(value) => update("defaultMode", value as SettingsGeneralInput["defaultMode"])} />
           </SettingsField>
-          <SettingsField label="结构化运行器">
-            <SettingsSelect
-              id="settings-structured-runner"
-              ariaLabel="结构化运行器"
-              value={form.structuredRunner}
-              options={[{ value: "cli", label: "CLI" }, { value: "sdk", label: "SDK" }]}
-              onChange={(value) => update("structuredRunner", value as "cli" | "sdk")}
-            />
-          </SettingsField>
           <SettingsField label="界面语言">
             <SettingsSelect
               id="settings-language"
@@ -682,13 +671,6 @@ export function GeneralSettingsTab({ snapshot, repository, refresh }: SettingsTa
 
 function aiFromSnapshot(snapshot: SettingsSnapshot): SettingsAiInput {
   const config = snapshot.config!;
-  const withClientId = (profile: SettingsSystemAi): SettingsSystemAi => ({
-    ...profile,
-    id: profile.id || createSystemAiRouteId(),
-    apiKey: "",
-    fallbacks: undefined,
-  });
-  const primary = withClientId(config.systemAi);
   return {
     defaultModel: config.defaultModel,
     defaultCodexModel: config.defaultCodexModel,
@@ -699,12 +681,6 @@ function aiFromSnapshot(snapshot: SettingsSnapshot): SettingsAiInput {
     defaultGeminiModel: config.defaultGeminiModel,
     defaultProvider: config.defaultProvider,
     defaultThinkingEffort: config.defaultThinkingEffort,
-    commitAiSource: config.commitAiSource,
-    systemAi: {
-      ...primary,
-      enabled: config.systemAi.enabled,
-      fallbacks: (config.systemAi.fallbacks || []).map(withClientId),
-    },
   };
 }
 
@@ -943,95 +919,6 @@ export function cliStatusDetail(item: SettingsProviderCliStatus): string {
   return error || cliStatusText(item);
 }
 
-function createSystemAiRouteId(): string {
-  if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
-  return `route-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function withoutSystemAiFallbacks(profile: SettingsSystemAi): SettingsSystemAi {
-  const { fallbacks: _fallbacks, ...route } = profile;
-  return route;
-}
-
-function systemAiRoutes(systemAi: SettingsSystemAi): SettingsSystemAi[] {
-  return [
-    withoutSystemAiFallbacks(systemAi),
-    ...(systemAi.fallbacks || []).map(withoutSystemAiFallbacks),
-  ];
-}
-
-function packSystemAiRoutes(systemAi: SettingsSystemAi, routes: SettingsSystemAi[]): SettingsSystemAi {
-  const [primary, ...fallbacks] = routes;
-  const first = primary || {
-    id: createSystemAiRouteId(),
-    enabled: systemAi.enabled,
-    protocol: "openai" as const,
-    baseUrl: "",
-    apiKey: "",
-    hasApiKey: false,
-    model: "",
-    authHeader: "bearer" as const,
-    source: "custom" as const,
-  };
-  return {
-    ...withoutSystemAiFallbacks(first),
-    enabled: systemAi.enabled,
-    fallbacks: fallbacks.map((route) => ({
-      ...withoutSystemAiFallbacks(route),
-      enabled: true,
-    })),
-  };
-}
-
-const SYSTEM_AI_SOURCE_LABELS: Record<SettingsSystemAi["source"], string> = {
-  claude: "Claude",
-  codex: "Codex",
-  opencode: "OpenCode",
-  grok: "Grok",
-  custom: "自定义",
-};
-
-function routeModelOptions(
-  route: SettingsSystemAi,
-  models: SettingsSnapshot["models"],
-): SettingsModelOption[] {
-  if (!models) return [];
-  const groups = [
-    { source: "claude", label: "Claude", options: models.models },
-    { source: "codex", label: "Codex", options: models.codexModels },
-    { source: "opencode", label: "OpenCode", options: models.opencodeModels },
-    { source: "grok", label: "Grok", options: models.grokModels },
-  ];
-  const ordered = [
-    ...groups.filter((group) => group.source === route.source),
-    ...groups.filter((group) => group.source !== route.source),
-  ];
-  const seen = new Set<string>();
-  return ordered.flatMap((group) => group.options.flatMap((option) => {
-    if (seen.has(option.id)) return [];
-    seen.add(option.id);
-    return [{
-      ...option,
-      label: `${group.label} · ${option.label || option.id}`,
-    }];
-  }));
-}
-
-function routeIsEmpty(route: SettingsSystemAi): boolean {
-  return !route.baseUrl.trim()
-    && !route.model.trim()
-    && !route.apiKey.trim()
-    && !route.hasApiKey;
-}
-
-function routeIsComplete(route: SettingsSystemAi): boolean {
-  return Boolean(
-    route.baseUrl.trim()
-    && route.model.trim()
-    && (route.apiKey.trim() || route.hasApiKey),
-  );
-}
-
 export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot }: SettingsTabProps) {
   const providerUsage = useProviderUsage();
   const { employees } = useSiliconEmployees();
@@ -1044,7 +931,6 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot }: Se
   const [status, setStatus] = useState("");
   const [tone, setTone] = useState<StatusTone>("info");
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [routeTests, setRouteTests] = useState<Record<string, { tone: StatusTone; message: string }>>({});
 
   useEffect(() => setForm(aiFromSnapshot(snapshot)), [snapshot.config]);
 
@@ -1056,118 +942,6 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot }: Se
   function updateProviderModel(provider: SettingsSessionProvider, model: string) {
     const field = PROVIDER_MODEL_FIELDS[provider];
     setForm((current) => ({ ...current, [field]: model }));
-  }
-
-  function updateSystemEnabled(enabled: boolean) {
-    setForm((current) => ({
-      ...current,
-      systemAi: { ...current.systemAi, enabled },
-    }));
-  }
-
-  function changeSystemAiRoutes(
-    transform: (routes: SettingsSystemAi[]) => SettingsSystemAi[],
-  ) {
-    setForm((current) => ({
-      ...current,
-      systemAi: packSystemAiRoutes(
-        current.systemAi,
-        transform(systemAiRoutes(current.systemAi)),
-      ),
-    }));
-  }
-
-  function updateSystemRoute<K extends keyof SettingsSystemAi>(
-    index: number,
-    key: K,
-    value: SettingsSystemAi[K],
-  ) {
-    changeSystemAiRoutes((routes) => routes.map((route, routeIndex) =>
-      routeIndex === index ? { ...route, [key]: value } : route));
-    const route = systemAiRoutes(form.systemAi)[index];
-    if (route) {
-      setErrors((current) => ({ ...current, [`${route.id}.${String(key)}`]: "" }));
-      setRouteTests((current) => {
-        const next = { ...current };
-        delete next[route.id];
-        return next;
-      });
-    }
-  }
-
-  function updateSystemRouteKey(index: number, apiKey: string) {
-    changeSystemAiRoutes((routes) => routes.map((route, routeIndex) =>
-      routeIndex === index
-        ? { ...route, apiKey, clearApiKey: false }
-        : route));
-    const route = systemAiRoutes(form.systemAi)[index];
-    if (route) {
-      setErrors((current) => ({ ...current, [`${route.id}.apiKey`]: "" }));
-      setRouteTests((current) => {
-        const next = { ...current };
-        delete next[route.id];
-        return next;
-      });
-    }
-  }
-
-  function clearSystemRouteKey(index: number) {
-    const currentRoutes = systemAiRoutes(form.systemAi);
-    const clearingLastUsableRoute = routeIsComplete(currentRoutes[index]!)
-      && currentRoutes.filter(routeIsComplete).length === 1;
-    changeSystemAiRoutes((routes) => routes.map((route, routeIndex) =>
-      routeIndex === index
-        ? { ...route, apiKey: "", hasApiKey: false, clearApiKey: true }
-        : route));
-    const clearedRoute = currentRoutes[index];
-    if (clearedRoute) {
-      setRouteTests((current) => {
-        const next = { ...current };
-        delete next[clearedRoute.id];
-        return next;
-      });
-    }
-    if (clearingLastUsableRoute) updateSystemEnabled(false);
-  }
-
-  function moveSystemRoute(index: number, delta: -1 | 1) {
-    changeSystemAiRoutes((routes) => {
-      const destination = index + delta;
-      if (destination < 0 || destination >= routes.length) return routes;
-      const next = [...routes];
-      [next[index], next[destination]] = [next[destination]!, next[index]!];
-      return next;
-    });
-  }
-
-  function addSystemRoute() {
-    changeSystemAiRoutes((routes) => [...routes, {
-      id: createSystemAiRouteId(),
-      enabled: true,
-      protocol: "openai",
-      baseUrl: "",
-      apiKey: "",
-      hasApiKey: false,
-      model: "",
-      authHeader: "bearer",
-      source: "custom",
-    }]);
-  }
-
-  function removeSystemRoute(index: number) {
-    const removingLastRoute = systemAiRoutes(form.systemAi).length === 1;
-    changeSystemAiRoutes((routes) => routes.length > 1
-      ? routes.filter((_route, routeIndex) => routeIndex !== index)
-      : routes.map((route) => ({
-        ...route,
-        id: createSystemAiRouteId(),
-        baseUrl: "",
-        apiKey: "",
-        hasApiKey: false,
-        model: "",
-        source: "custom",
-      })));
-    if (removingLastRoute) updateSystemEnabled(false);
   }
 
   async function refreshModels() {
@@ -1187,101 +961,11 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot }: Se
     }
   }
 
-  async function importSystemAi() {
-    setPending("import");
-    setStatus("");
-    try {
-      const result = await repository.execute({ type: "systemAi.import" });
-      setForm((current) => ({ ...current, systemAi: { ...result.systemAi, apiKey: "" } }));
-      setStatus(`已从全部已配置工具导入并保存 ${result.count} 个 API。`);
-      setTone("success");
-      await refresh();
-    } catch (cause) {
-      setStatus(failureMessage(cause, "没有找到可导入的 CLI API 配置。"));
-      setTone("error");
-    } finally {
-      setPending("");
-    }
-  }
-
-  async function testSystemRoute(index: number) {
-    const route = systemAiRoutes(form.systemAi)[index];
-    if (!route) return;
-    const pendingKey = `test:${route.id}`;
-    if (!routeIsComplete(route)) {
-      setRouteTests((current) => ({
-        ...current,
-        [route.id]: { tone: "error", message: "请先填写完整的 API 地址、API Key 和模型。" },
-      }));
-      return;
-    }
-    setPending(pendingKey);
-    setRouteTests((current) => ({
-      ...current,
-      [route.id]: { tone: "info", message: `正在用 ${route.model} 发出真实系统 API 请求…` },
-    }));
-    try {
-      const result = await repository.execute({
-        type: "systemAi.test",
-        route: withoutSystemAiFallbacks(route),
-      });
-      setRouteTests((current) => ({
-        ...current,
-        [route.id]: {
-          tone: "success",
-          message: `${result.requestedModel} 调用成功，${result.latencyMs} ms${result.reasoningEffort === "low" ? "，最低推理" : "，未启用扩展推理"}。`,
-        },
-      }));
-    } catch (cause) {
-      setRouteTests((current) => ({
-        ...current,
-        [route.id]: { tone: "error", message: failureMessage(cause, `${route.model} 调用失败。`) },
-      }));
-    } finally {
-      setPending("");
-    }
-  }
-
   async function save() {
-    const nextErrors: Record<string, string> = {};
-    const allRoutes = systemAiRoutes(form.systemAi);
-    const nonEmptyRoutes = allRoutes.filter((route) => !routeIsEmpty(route));
-    const routes = nonEmptyRoutes.length ? nonEmptyRoutes : [allRoutes[0]!];
-    const configuredRoutes = routes.filter(routeIsComplete);
-    routes.forEach((route, index) => {
-      const shouldValidate = form.systemAi.enabled
-        && (!routeIsEmpty(route) || (configuredRoutes.length === 0 && index === 0));
-      if (!shouldValidate) return;
-      if (!route.baseUrl.trim()) nextErrors[`${route.id}.baseUrl`] = "请输入 API 地址。";
-      else {
-        try {
-          const url = new URL(route.baseUrl);
-          if (url.protocol !== "http:" && url.protocol !== "https:") {
-            nextErrors[`${route.id}.baseUrl`] = "API 地址必须使用 http(s)。";
-          }
-        } catch { nextErrors[`${route.id}.baseUrl`] = "请输入有效的 API 地址。"; }
-      }
-      if (!route.model.trim()) nextErrors[`${route.id}.model`] = "请输入模型。";
-      if (!route.apiKey.trim() && !route.hasApiKey && !route.clearApiKey) {
-        nextErrors[`${route.id}.apiKey`] = "请输入 API Key。";
-      }
-    });
-    setErrors(nextErrors);
-    if (Object.keys(nextErrors).length) {
-      setStatus("直连 API 模式需要完整的模型线路。");
-      setTone("error");
-      return;
-    }
     setPending("save");
     setStatus("");
     try {
-      const result = await repository.execute({
-        type: "ai.save",
-        value: {
-          ...form,
-          systemAi: packSystemAiRoutes(form.systemAi, routes),
-        },
-      });
+      const result = await repository.execute({ type: "ai.save", value: form });
       setStatus(result.restartRequired ? "AI 配置已保存；部分部署变化等待重启。" : "AI 与模型配置已保存。");
       setTone(result.restartRequired ? "warning" : "success");
       await refresh();
@@ -1302,16 +986,11 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot }: Se
     window.addEventListener("wand-model-catalog", onCatalog);
     return () => window.removeEventListener("wand-model-catalog", onCatalog);
   }, [setSnapshot]);
-  const systemAiProfiles = systemAiRoutes(form.systemAi);
-  const configuredSystemAiProfiles = systemAiProfiles.filter(routeIsComplete);
-  const systemAiOrder = configuredSystemAiProfiles
-    .map((profile) => `${SYSTEM_AI_SOURCE_LABELS[profile.source]} · ${profile.model}`)
-    .join(" → ");
 
   return (
     <section className="wand-settings-panel" aria-label="AI 与模型">
       <header className="wand-settings-panel-heading">
-        <h2>AI 与模型</h2><p>集中管理会话默认模型、系统 AI 的执行者与来源、以及快捷提交的 AI 来源。</p>
+        <h2>AI 与模型</h2><p>集中管理会话默认模型，以及 Wand 自有 AI 的执行者与候选链。</p>
       </header>
 
       <SettingsSection
@@ -1374,147 +1053,12 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot }: Se
 
       <SettingsSection
         title="系统 AI"
-        description="由内置「系统运维」员工执行：Commit message 与 tag、会话与任务标题、提示词优化、员工起草。选 CLI 时按候选顺序降级，选直连 API 时先试 API 线路。"
+        description="由内置「系统运维」员工执行：Commit message 与 tag、会话与任务标题、提示词优化、员工起草。全部走本机 CLI，按候选顺序降级。"
       >
-        <fieldset className="wand-settings-radio-group">
-          <legend>生成方式</legend>
-          <label><input type="radio" name="settings-system-ai-source" value="cli" checked={!form.systemAi.enabled} onChange={() => updateSystemEnabled(false)} />CLI</label>
-          <label><input type="radio" name="settings-system-ai-source" value="api" checked={form.systemAi.enabled} onChange={() => updateSystemEnabled(true)} />直连 API</label>
-        </fieldset>
         <SystemAiOwnerSummary employee={systemEmployee} />
-        {form.systemAi.enabled
-          ? <SettingsStatus tone="info">先尝试下方 API 线路；全部失败时回退到上面的候选链。</SettingsStatus>
-          : <SettingsStatus tone="info">按上面的候选顺序执行；已安装的候选优先，失败自动换下一条。</SettingsStatus>}
-      </SettingsSection>
-
-      <SettingsSection
-        title="直连 API 模型路由"
-        description="从上到下依次尝试；系统 AI 选 CLI 时，这些线路仍可供 Commit 的直连模式使用。API Key 只保存在服务端。"
-        action={<SettingsActionButton pending={pending === "import"} kind="secondary" onClick={() => void importSystemAi()}>导入全部工具 API</SettingsActionButton>}
-      >
-        {configuredSystemAiProfiles.length > 0 ? (
-          <SettingsStatus tone="success">
-            已配置 {configuredSystemAiProfiles.length} 条线路：{systemAiOrder}。请求会依次尝试，成功后停止。
-          </SettingsStatus>
-        ) : null}
-        <div className="wand-settings-route-toolbar">
-          <div>
-            <strong>调用顺序</strong>
-            <span>可输入接口支持的任意模型 ID；已导入线路会提供本机发现的模型建议。</span>
-          </div>
-          <WandButton size="small" kind="secondary" onClick={addSystemRoute}>添加线路</WandButton>
-        </div>
-        <ol className="wand-settings-route-list" aria-label="系统 AI API 调用顺序">
-          {systemAiProfiles.map((route, index) => {
-            const routeErrors = {
-              baseUrl: errors[`${route.id}.baseUrl`],
-              model: errors[`${route.id}.model`],
-              apiKey: errors[`${route.id}.apiKey`],
-            };
-            const modelOptions = routeModelOptions(route, models);
-            const inputPrefix = `settings-system-ai-${index}`;
-            return (
-              <li className="wand-settings-route" key={route.id}>
-                <header className="wand-settings-route-heading">
-                  <div className="wand-settings-route-identity">
-                    <span className="wand-settings-route-rank" aria-label={`优先级 ${index + 1}`}>{String(index + 1).padStart(2, "0")}</span>
-                    <div>
-                      <strong>{index === 0 ? "首选线路" : `备用线路 ${index}`}</strong>
-                      <span>{SYSTEM_AI_SOURCE_LABELS[route.source]} · {route.model || "尚未选择模型"}</span>
-                    </div>
-                  </div>
-                  <div className="wand-settings-route-actions" role="group" aria-label={`线路 ${index + 1} 操作`}>
-                    <SettingsActionButton
-                      size="small"
-                      kind="secondary"
-                      pending={pending === `test:${route.id}`}
-                      disabled={!!pending && pending !== `test:${route.id}`}
-                      onClick={() => void testSystemRoute(index)}
-                    >
-                      测试线路
-                    </SettingsActionButton>
-                    <WandButton size="small" kind="ghost" disabled={index === 0} aria-label={`上移线路 ${index + 1}`} onClick={() => moveSystemRoute(index, -1)}>上移</WandButton>
-                    <WandButton size="small" kind="ghost" disabled={index === systemAiProfiles.length - 1} aria-label={`下移线路 ${index + 1}`} onClick={() => moveSystemRoute(index, 1)}>下移</WandButton>
-                    <WandButton size="small" kind="ghost" aria-label={`删除线路 ${index + 1}`} onClick={() => removeSystemRoute(index)}>删除</WandButton>
-                  </div>
-                </header>
-                <SettingsGrid>
-                  <SettingsField label="接口格式">
-                    <SettingsSelect
-                      id={`${inputPrefix}-protocol`}
-                      ariaLabel={`线路 ${index + 1} 接口格式`}
-                      value={route.protocol}
-                      options={[{ value: "openai", label: "OpenAI-compatible" }, { value: "anthropic", label: "Anthropic-compatible" }]}
-                      onChange={(value) => updateSystemRoute(index, "protocol", value as "openai" | "anthropic")}
-                    />
-                  </SettingsField>
-                  <SettingsField label="认证方式">
-                    <SettingsSelect
-                      id={`${inputPrefix}-auth`}
-                      ariaLabel={`线路 ${index + 1} 认证方式`}
-                      value={route.authHeader}
-                      options={[{ value: "bearer", label: "Bearer Token" }, { value: "x-api-key", label: "x-api-key" }]}
-                      onChange={(value) => updateSystemRoute(index, "authHeader", value as "bearer" | "x-api-key")}
-                    />
-                  </SettingsField>
-                  <SettingsField label="API 地址" htmlFor={`${inputPrefix}-url`} error={routeErrors.baseUrl}>
-                    <SettingsTextInput id={`${inputPrefix}-url`} type="url" value={route.baseUrl} invalid={!!routeErrors.baseUrl} placeholder="https://api.example.com" onChange={(value) => updateSystemRoute(index, "baseUrl", value)} />
-                  </SettingsField>
-                  <SettingsField
-                    label="模型"
-                    htmlFor={`${inputPrefix}-model`}
-                    error={routeErrors.model}
-                    hint={modelOptions.length ? `${modelOptions.length} 个本机模型建议；接口是否支持以线路测试为准。` : "使用接口实际支持的模型 ID。"}
-                  >
-                    <SettingsTextInput id={`${inputPrefix}-model`} list={`${inputPrefix}-models`} value={route.model} invalid={!!routeErrors.model} placeholder="例如 gpt-5.5" onChange={(value) => updateSystemRoute(index, "model", value)} />
-                    <ModelSuggestions id={`${inputPrefix}-models`} models={modelOptions} />
-                  </SettingsField>
-                  <SettingsField
-                    label="API Key"
-                    htmlFor={`${inputPrefix}-key`}
-                    error={routeErrors.apiKey}
-                    hint={route.clearApiKey
-                      ? "保存后会清除此线路的密钥；输入新值可撤销。"
-                      : route.hasApiKey
-                        ? "已保存；留空会按线路 ID 保留现有密钥。"
-                        : "仅保存在服务端。"}
-                  >
-                    <SettingsTextInput id={`${inputPrefix}-key`} type="password" autoComplete="new-password" value={route.apiKey} invalid={!!routeErrors.apiKey} placeholder={route.hasApiKey ? "已保存；留空保持不变" : "输入 API Key"} onChange={(value) => updateSystemRouteKey(index, value)} />
-                    {route.hasApiKey ? (
-                      <WandButton className="wand-settings-clear-key" size="small" kind="ghost" onClick={() => clearSystemRouteKey(index)}>
-                        清除已保存密钥
-                      </WandButton>
-                    ) : null}
-                  </SettingsField>
-                </SettingsGrid>
-                {routeTests[route.id] ? (
-                  <div className="wand-settings-route-test">
-                    <SettingsStatus tone={routeTests[route.id]!.tone}>
-                      {routeTests[route.id]!.message}
-                    </SettingsStatus>
-                  </div>
-                ) : null}
-              </li>
-            );
-          })}
-        </ol>
-      </SettingsSection>
-
-      <SettingsSection title="Commit 生成" description="选择快捷提交生成 message 与 tag 时使用的 AI 来源。">
-        <fieldset className="wand-settings-radio-group">
-          <legend>生成方式</legend>
-          <label><input type="radio" name="settings-commit-source" value="cli" checked={form.commitAiSource === "cli"} onChange={() => update("commitAiSource", "cli")} />CLI</label>
-          <label><input type="radio" name="settings-commit-source" value="api" checked={form.commitAiSource === "api"} onChange={() => update("commitAiSource", "api")} />直连 API</label>
-        </fieldset>
-        {form.commitAiSource === "api" ? (
-          <SettingsStatus tone="success">
-            先按上方预设顺序以最低推理调用，再追加自动发现但尚未列出的工具 API；全部不可用时使用当前会话的 CLI、模型和推理配置。
-          </SettingsStatus>
-        ) : (
-          <SettingsStatus tone="success">
-            使用当前会话的 CLI、模型和推理配置。
-          </SettingsStatus>
-        )}
+        <SettingsStatus tone="info">
+          全部走本机 CLI：已安装的候选优先，失败自动换下一条。
+        </SettingsStatus>
       </SettingsSection>
 
       <SettingsSaveBar label="保存 AI 与模型配置" pending={pending === "save"} disabled={!!pending && pending !== "save"} onSave={() => void save()} status={status} tone={tone} />

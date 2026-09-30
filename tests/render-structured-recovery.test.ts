@@ -59,7 +59,7 @@ test("S1 v2 metadata inventory replays authoritative pages into recovery after W
   const reconnect = new RenderStructuredClient(configPath);
   await reconnect.connect();
   const manager = new StructuredSessionManager(storage, { ...defaultConfig(), defaultCwd: root },
-    null, undefined, {}, reconnect);
+    null, {}, reconnect);
   t.after(() => { manager.dispose(); reconnect.disconnect(); storage.close(); });
   await manager.recoverDetachedRuns();
   assert.equal((await reconnect.attachRun(structuredRunId(sessionId)))?.pid, pid);

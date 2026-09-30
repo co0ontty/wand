@@ -14,6 +14,11 @@ import { ProcessManager } from "../src/process-manager.js";
 import { startServer } from "../src/server.js";
 import { WandStorage } from "../src/storage.js";
 import { StructuredSessionManager } from "../src/structured-session-manager.js";
+import type {
+  StructuredRunnerAdapter,
+  StructuredRunnerExecution,
+  StructuredRunnerTurnState,
+} from "../src/structured-runner.js";
 import type { SessionSnapshot } from "../src/types.js";
 import { WsBroadcastManager } from "../src/ws-broadcast.js";
 
@@ -100,27 +105,41 @@ class FakePty {
   }
 }
 
-class DeferredSdkQuery {
+class DeferredClaudeCliRunner implements StructuredRunnerAdapter {
+  starts = 0;
   interruptCalls = 0;
-  private finished = false;
-  private wake: (() => void) | null = null;
+  private finishRun: (() => void) | null = null;
 
-  async interrupt(): Promise<void> {
-    this.interruptCalls += 1;
+  start(): StructuredRunnerExecution {
+    this.starts += 1;
+    const state: StructuredRunnerTurnState = {
+      blocks: [],
+      result: "",
+      sessionId: "lifecycle-session",
+    };
+    const completion = new Promise<Awaited<StructuredRunnerExecution["completion"]>>((resolve) => {
+      this.finishRun = () => resolve({
+        state,
+        exitCode: null,
+        signal: "SIGTERM",
+        stderr: "",
+        primaryError: null,
+      });
+    });
+    return {
+      args: ["-p"],
+      spawnedAt: new Date().toISOString(),
+      pid: null,
+      completion,
+      interrupt: () => {
+        this.interruptCalls += 1;
+      },
+    };
   }
 
   finish(): void {
-    this.finished = true;
-    this.wake?.();
-    this.wake = null;
-  }
-
-  async *[Symbol.asyncIterator](): AsyncGenerator<never> {
-    while (!this.finished) {
-      await new Promise<void>((resolve) => {
-        this.wake = resolve;
-      });
-    }
+    this.finishRun?.();
+    this.finishRun = null;
   }
 }
 
@@ -187,23 +206,18 @@ test("ProcessManager dispose clears timers, kills PTYs, flushes, and rejects new
   assert.throws(() => manager.sendInput(started.id, "late input"), /disposed/);
 });
 
-test("StructuredSessionManager dispose aborts active SDK work and clears timers", async (t) => {
+test("StructuredSessionManager dispose interrupts active runner work and clears timers", async (t) => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-structured-lifecycle-"));
   const storage = new WandStorage(path.join(root, "wand.db"));
-  const queries: DeferredSdkQuery[] = [];
-  const sdkFactory = (() => {
-    const query = new DeferredSdkQuery();
-    queries.push(query);
-    return query;
-  }) as unknown as ConstructorParameters<typeof StructuredSessionManager>[3];
+  const runner = new DeferredClaudeCliRunner();
   const manager = new StructuredSessionManager(
     storage,
-    { ...defaultConfig(), defaultCwd: root, structuredRunner: "sdk" },
+    { ...defaultConfig(), defaultCwd: root },
     null,
-    sdkFactory,
+    { claudeCli: runner },
   );
   t.after(() => {
-    for (const query of queries) query.finish();
+    runner.finish();
     try { storage.close(); } catch { /* already closed */ }
     rmSync(root, { recursive: true, force: true });
   });
@@ -212,17 +226,15 @@ test("StructuredSessionManager dispose aborts active SDK work and clears timers"
     cwd: root,
     mode: "assist",
     provider: "claude",
-    runner: "claude-sdk",
+    runner: "claude-cli-print",
   });
   manager.setSessionTopic(session.id, "Lifecycle", "Lifecycle test");
   const run = manager.sendMessage(session.id, "keep running");
-  await waitFor(() => queries.length === 1, "SDK query did not start");
+  await waitFor(() => runner.starts === 1, "runner did not start");
 
   const internals = manager as unknown as {
     archiveTimer: NodeJS.Timeout | null;
     streamEmitTimers: Set<NodeJS.Timeout>;
-    pendingSdkQueries: Map<string, unknown>;
-    pendingSdkAbort: Map<string, AbortController>;
   };
   const deferredTimer = setTimeout(() => {}, 60_000);
   deferredTimer.unref?.();
@@ -231,20 +243,18 @@ test("StructuredSessionManager dispose aborts active SDK work and clears timers"
   manager.dispose();
   manager.dispose();
 
-  assert.equal(queries[0].interruptCalls, 1);
+  assert.equal(runner.interruptCalls, 1);
   assert.equal(internals.archiveTimer, null);
   assert.equal(internals.streamEmitTimers.size, 0);
-  assert.equal(internals.pendingSdkQueries.size, 0);
-  assert.equal(internals.pendingSdkAbort.size, 0);
   assert.equal(manager.get(session.id)?.status, "idle");
   assert.equal(manager.get(session.id)?.structuredState?.inFlight, false);
   assert.throws(() => manager.createSession({ cwd: root, mode: "assist" }), /disposed/);
   await assert.rejects(() => manager.sendMessage(session.id, "late"), /disposed/);
 
   // Match server shutdown ordering: storage closes immediately after dispose,
-  // then the aborted SDK iterator is allowed to unwind its late callbacks.
+  // then the interrupted runner is allowed to unwind its late callbacks.
   storage.close();
-  queries[0].finish();
+  runner.finish();
   await run;
   const reopened = new WandStorage(path.join(root, "wand.db"));
   assert.equal(reopened.getSession(session.id)?.structuredState?.inFlight, false);
