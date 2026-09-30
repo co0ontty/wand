@@ -47,6 +47,9 @@ interface LegacySession {
   description?: string;
   summary?: string;
   titleGenerating?: boolean;
+  employeeId?: string;
+  employeeName?: string;
+  employeeAvatar?: string;
   cwd?: string;
   status?: string;
   permissionBlocked?: boolean;
@@ -212,6 +215,9 @@ function sessionToVm(
     inFlight: activity.inFlight,
     turnActive: activity.inFlight || activity.ptyRunning,
     titleGenerating: Boolean(session.titleGenerating),
+    ...(session.employeeId ? { employeeId: session.employeeId } : {}),
+    ...(session.employeeName ? { employeeName: session.employeeName } : {}),
+    ...(session.employeeAvatar ? { employeeAvatar: session.employeeAvatar } : {}),
     ...(session.startedAt ? { startedAt: session.startedAt } : {}),
     ...(session.endedAt ? { endedAt: session.endedAt } : {}),
     ...(session.claudeSessionId ? { claudeSessionId: session.claudeSessionId } : {}),

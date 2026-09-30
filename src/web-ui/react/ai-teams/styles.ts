@@ -307,6 +307,29 @@ export const aiTeamsChunkStyles = String.raw`
 .wand-team-candidate-add:disabled { opacity: 0.4; cursor: not-allowed; }
 .wand-team-candidate-error { color: var(--danger); font-size: var(--font-size-xs); }
 
+/* ---------- 新建员工：默认只填期望，手动字段收进高级配置 ---------- */
+/* 创建 / 生成中标签长度不同，固定最小宽度保证提交按钮原地不位移。 */
+.wand-employee-create-submit { min-inline-size: 92px; }
+.wand-employee-hint { margin: 0; color: var(--text-tertiary); font-size: var(--font-size-xs); }
+.wand-employee-advanced-toggle { display: flex; justify-content: flex-start; }
+.wand-employee-advanced-toggle button > svg:last-child { transition: transform var(--transition-fast); }
+.wand-employee-advanced-toggle[data-open] button > svg:last-child { transform: rotate(180deg); }
+.wand-employee-advanced {
+  display: grid;
+  grid-template-rows: 0fr;
+  /* 作为父网格的项目不能跟着行高拉伸，否则收起后仍占一段 gap 的高度。 */
+  align-self: start;
+  /* 抵消 .wand-team-member-inner 的 10px gap：收起时不能多留一段空白。 */
+  margin-block-start: -10px;
+  opacity: 0;
+  transition: grid-template-rows var(--transition-normal),
+              margin-block-start var(--transition-normal),
+              opacity var(--transition-fast);
+}
+.wand-employee-advanced[data-open] { grid-template-rows: 1fr; margin-block-start: 0; opacity: 1; }
+.wand-employee-advanced-inner { display: grid; gap: 10px; min-height: 0; overflow: hidden; }
+.wand-employee-advanced-tools { display: flex; justify-content: flex-end; }
+
 /* ---------- 运行记录 ---------- */
 .wand-team-runs { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .wand-team-run { border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-secondary); }
@@ -961,6 +984,8 @@ button.team-chat-office-member:hover, button.team-chat-office-member:focus-visib
 .wand-team-chat-head-meta { display: flex; align-items: center; gap: 10px; }
 /* 群聊页头部：面包屑用 variant="title"，末段就是页面 h1，这里只压小整行的导航字号。 */
 .wand-team-chat-crumb { font-size: var(--font-size-sm); }
+.wand-team-chat-heading-avatar { flex: 0 0 auto; display: inline-flex; align-items: center; }
+.wand-team-chat-heading-avatar .wand-team-avatar-stack { padding-top: 0; }
 .wand-team-chat-unconfirmed { color: var(--warning); font-size: var(--font-size-xs); }
 
 /* ---------- 群聊页底部「工作任务」二级目录（本次运行派发给成员的工作）---------- */
@@ -1230,5 +1255,128 @@ button.team-chat-office-member:hover, button.team-chat-office-member:focus-visib
   .task-board-team-steps { animation: none; }
   /* 面板改为叠放淡入淡出后，reduce-motion 下退化成瞬时切换。 */
   .wand-teams-detail-pane { transition: none; }
+  /* 高级配置是纯位移展开，原生壳没有全局兑底，这里直接去掉过渡。 */
+  .wand-employee-advanced,
+  .wand-employee-advanced-toggle button > svg { transition: none; }
+}
+
+/* ---------- 硅基员工列表与卡片样式 ---------- */
+.wand-employees-layout {
+  display: block !important;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 16px 20px 40px;
+}
+.wand-employee-list {
+  display: grid;
+  gap: 16px;
+  width: 100%;
+}
+.wand-employee-card.is-archived {
+  opacity: 0.65;
+}
+.wand-employee-card.is-system {
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border-subtle));
+  background: color-mix(in srgb, var(--accent) 4%, var(--bg-primary));
+}
+.wand-employee-system-note {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border-subtle));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-primary));
+}
+.wand-employee-system-note strong {
+  color: var(--accent-active);
+  font-size: var(--font-size-xs);
+}
+.wand-employee-system-note span {
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+}
+.wand-employee-archived-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-style: normal;
+}
+.wand-employee-filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+.wand-employee-filter-toggle input {
+  cursor: pointer;
+}
+.wand-teams-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.wand-teams-toolbar-search {
+  flex: 1 1 300px;
+  max-width: 400px;
+}
+.wand-teams-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.wand-settings-field {
+  display: grid;
+  gap: 6px;
+}
+.wand-settings-label {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+}
+
+/* ---------- 统一执行主体选择器样式 ---------- */
+.wand-execution-subject-picker {
+  display: grid;
+  gap: 16px;
+}
+.wand-subject-group {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+.wand-subject-group-title {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+}
+.wand-subject-empty-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
+}
+.wand-link-btn {
+  background: transparent;
+  border: 0;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+  text-decoration: underline;
+}
+.wand-link-btn:hover {
+  color: var(--accent-strong);
 }
 `;

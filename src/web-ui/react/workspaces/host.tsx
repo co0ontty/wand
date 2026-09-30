@@ -60,6 +60,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
   const [sessionKind, setSessionKind] = useState<WorkspaceSessionKind>("structured");
   const [model, setModel] = useState(MODEL_CATALOG_DEFAULT_VALUE);
   const [teamId, setTeamId] = useState("");
+  const [employeeId, setEmployeeId] = useState("");
   const [milestoneId, setMilestoneId] = useState("");
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -198,6 +199,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
       kind: target === "shell" ? "pty" : sessionKind,
       prompt: target === "shell" ? undefined : prompt.trim() || undefined,
       model: target === "shell" ? undefined : pickedModel || undefined,
+      employeeId: employeeId || undefined,
     });
     void runtime.refreshSessions();
   }
@@ -436,6 +438,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
               teams={teamOptions}
               teamWorkspaceId={teamWorkspaceId}
               teamId={teamId}
+              employeeId={employeeId}
               onTargetChange={(next) => {
                 draftTouched.current = true;
                 setTarget(next);
@@ -444,6 +447,7 @@ export function WorkspacesHost({ repository = httpWorkspacesRepository }: Worksp
               onKindChange={(next) => { draftTouched.current = true; setSessionKind(next); }}
               onModelChange={(next) => { draftTouched.current = true; setModel(next); }}
               onTeamChange={(next) => { draftTouched.current = true; setTeamId(next); }}
+              onEmployeeChange={(next) => { draftTouched.current = true; setEmployeeId(next); }}
             />
 
             {hasDirectory ? (

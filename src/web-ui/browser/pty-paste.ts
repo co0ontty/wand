@@ -35,11 +35,13 @@ export function buildTerminalPathPasteSequence(path: string, bracketed = true): 
  * TUIs that splice the attachment placeholder into the draft without a trailing
  * separator, so the next chunk of text lands flush against it (`[Image #1]看这张图`).
  * Codex / OpenCode / Grok / Qoder insert their own space after the chip, and
- * prefixing one there would show up as a double space.
+ * prefixing one there would show up as a double space. Gemini is treated like
+ * Claude/Pi (a missing separator breaks the path reference; an extra space is
+ * only cosmetic).
  */
 export function providerGluesAfterAttachment(provider: string | null | undefined): boolean {
   const id = String(provider || "").trim().toLowerCase();
-  return id === "claude" || id === "pi";
+  return id === "claude" || id === "pi" || id === "gemini";
 }
 
 export interface PtyAttachmentChunk {

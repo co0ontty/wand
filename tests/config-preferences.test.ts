@@ -183,6 +183,16 @@ test("Pi provider and model preferences round-trip through storage", () => {
   assert.equal(restored.defaultPiModel, "openai/gpt-5.4");
 });
 
+test("Gemini provider and model preferences round-trip through storage", () => {
+  const storage = new FakePreferenceStorage() as unknown as WandStorage;
+  const config = defaultConfig();
+  writePreferenceToStorage(config, storage, "defaultProvider", "gemini");
+  writePreferenceToStorage(config, storage, "defaultGeminiModel", " gemini-2.5-pro ");
+  const restored = applyStoragePreferences(defaultConfig(), storage);
+  assert.equal(restored.defaultProvider, "gemini");
+  assert.equal(restored.defaultGeminiModel, "gemini-2.5-pro");
+});
+
 test("new-session preferences reject unsupported values", () => {
   const storage = new FakePreferenceStorage() as unknown as WandStorage;
 
@@ -218,6 +228,7 @@ test("`default` 哨兵不是模型 id：历史配置里读到它当没配", () =
     grok: "",
     qoder: "",
     pi: "",
+    gemini: "",
   });
   assert.equal(getDefaultModelForProvider(config, "claude"), "", "哨兵不当作模型 id 下发");
 });

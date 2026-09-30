@@ -48,6 +48,9 @@ import { compactThinkingLabel, dynamicThinkingChoices } from "../../thinking-eff
 import { MODEL_CATALOG_DEFAULT_VALUE } from "../model-catalog";
 import { normalizeModels } from "./repository";
 import { sortProviderOptions, useProviderUsage } from "../provider-usage";
+import { useSiliconEmployees } from "../agents/employee-repository";
+import { SystemAiOwnerSummary } from "./system-ai-owner";
+import { isSystemSiliconEmployee } from "../../../ai-team-types.js";
 
 export interface SettingsTabProps {
   snapshot: SettingsSnapshot;
@@ -693,11 +696,10 @@ function aiFromSnapshot(snapshot: SettingsSnapshot): SettingsAiInput {
     defaultGrokModel: config.defaultGrokModel,
     defaultQoderModel: config.defaultQoderModel,
     defaultPiModel: config.defaultPiModel,
+    defaultGeminiModel: config.defaultGeminiModel,
     defaultProvider: config.defaultProvider,
     defaultThinkingEffort: config.defaultThinkingEffort,
     commitAiSource: config.commitAiSource,
-    systemAiCli: config.systemAiCli ?? config.defaultProvider,
-    systemAiModel: config.systemAiModel,
     systemAi: {
       ...primary,
       enabled: config.systemAi.enabled,
@@ -722,6 +724,7 @@ const SESSION_PROVIDER_OPTIONS: ReadonlyArray<{ value: SettingsSessionProvider; 
   { value: "grok", label: "Grok" },
   { value: "qoder", label: "Qoder" },
   { value: "pi", label: "Pi" },
+  { value: "gemini", label: "Gemini" },
 ];
 
 /** 目录还没回来时的四档。CLI 档位到达后换成原生列表。 */
@@ -777,6 +780,7 @@ const PROVIDER_MODEL_FIELDS: Record<SettingsSessionProvider, keyof SettingsAiInp
   grok: "defaultGrokModel",
   qoder: "defaultQoderModel",
   pi: "defaultPiModel",
+  gemini: "defaultGeminiModel",
 };
 
 function sessionProviderLabel(provider: SettingsSessionProvider): string {
@@ -794,6 +798,7 @@ function providerModelSuggestions(
   if (provider === "grok") return models.grokModels;
   if (provider === "qoder") return models.qoderModels;
   if (provider === "pi") return models.piModels;
+  if (provider === "gemini") return models.geminiModels;
   return models.models;
 }
 
@@ -911,6 +916,7 @@ export function modelCatalogSummary(models: SettingsModelCatalog): string {
     ["Grok", models.grokModels.length],
     ["Qoder", models.qoderModels.length],
     ["Pi", models.piModels.length],
+    ["Gemini", models.geminiModels.length],
   ];
   return groups
     .map(([label, count]) => count > 0 ? `${label} ${count}` : `${label} 0（未发现）`)
@@ -1028,6 +1034,8 @@ function routeIsComplete(route: SettingsSystemAi): boolean {
 
 export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot }: SettingsTabProps) {
   const providerUsage = useProviderUsage();
+  const { employees } = useSiliconEmployees();
+  const systemEmployee = employees.find((employee) => isSystemSiliconEmployee(employee)) ?? null;
   const providerOptions = sortProviderOptions(
     SESSION_PROVIDER_OPTIONS, providerUsage ?? {}, (entry) => entry.value,
   );
@@ -1303,7 +1311,7 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot }: Se
   return (
     <section className="wand-settings-panel" aria-label="AI 与模型">
       <header className="wand-settings-panel-heading">
-        <h2>AI 与模型</h2><p>集中管理会话默认模型、系统 AI 来源和快捷提交的 AI 来源。</p>
+        <h2>AI 与模型</h2><p>集中管理会话默认模型、系统 AI 的执行者与来源、以及快捷提交的 AI 来源。</p>
       </header>
 
       <SettingsSection
@@ -1366,45 +1374,17 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot }: Se
 
       <SettingsSection
         title="系统 AI"
-        description="用于提示词优化、会话及任务标题生成；选择 CLI 或按顺序尝试直连 API。"
+        description="由内置「系统运维」员工执行：Commit message 与 tag、会话与任务标题、提示词优化、员工起草。选 CLI 时按候选顺序降级，选直连 API 时先试 API 线路。"
       >
         <fieldset className="wand-settings-radio-group">
           <legend>生成方式</legend>
           <label><input type="radio" name="settings-system-ai-source" value="cli" checked={!form.systemAi.enabled} onChange={() => updateSystemEnabled(false)} />CLI</label>
           <label><input type="radio" name="settings-system-ai-source" value="api" checked={form.systemAi.enabled} onChange={() => updateSystemEnabled(true)} />直连 API</label>
         </fieldset>
-        {!form.systemAi.enabled ? (
-          <>
-            {snapshot.config?.systemAiCli === null ? (
-              <SettingsStatus tone="info">当前仍跟随会话 CLI；保存后将使用下方选择的专用工具和模型。</SettingsStatus>
-            ) : null}
-            <div className="wand-settings-grid">
-              <SettingsField label="CLI 工具" hint="与当前会话使用的 CLI 相互独立">
-                <SettingsSelect
-                  id="settings-system-ai-cli"
-                  ariaLabel="系统 AI CLI 工具"
-                  value={form.systemAiCli}
-                  options={providerOptions}
-                  disabled={providerUsage === null}
-                  onChange={(value) => setForm((current) => ({
-                    ...current, systemAiCli: value as SettingsSessionProvider, systemAiModel: "",
-                  }))}
-                />
-              </SettingsField>
-              <SettingsField label="模型" htmlFor="settings-system-ai-cli-model" hint="留空时跟随此 CLI 的新会话默认模型">
-                <DefaultModelControl
-                  id="settings-system-ai-cli-model"
-                  provider={form.systemAiCli}
-                  value={form.systemAiModel}
-                  models={models}
-                  onChange={(value) => update("systemAiModel", value)}
-                />
-              </SettingsField>
-            </div>
-          </>
-        ) : (
-          <SettingsStatus tone="info">先尝试下方 API 线路；全部失败时回退到当前会话的 CLI 和模型。</SettingsStatus>
-        )}
+        <SystemAiOwnerSummary employee={systemEmployee} />
+        {form.systemAi.enabled
+          ? <SettingsStatus tone="info">先尝试下方 API 线路；全部失败时回退到上面的候选链。</SettingsStatus>
+          : <SettingsStatus tone="info">按上面的候选顺序执行；已安装的候选优先，失败自动换下一条。</SettingsStatus>}
       </SettingsSection>
 
       <SettingsSection

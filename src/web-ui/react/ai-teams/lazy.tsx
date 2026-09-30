@@ -15,7 +15,7 @@ import {
   ISSUE_AGENT_PROVIDERS,
   normalizeIssueModelCatalog,
 } from "../issues/task-board-agent";
-import { taskBoardController } from "../issues/task-board-controller";
+import { taskBoardController, taskBoardStore } from "../issues/task-board-controller";
 import { taskBoardRepository } from "../issues/task-board-repository";
 import type { TaskTeamRunPanelProps } from "../issues/team-run-panel";
 import { subscribeWandModelCatalog, wandModelDisplayName } from "../model-catalog";
@@ -34,6 +34,7 @@ import { installStyleSheet } from "../styles";
 import { WandBadge, WandBrandMark, WandBreadcrumb, WandButton, WandDialogSurface, WandIcon, WandIconButton, WandSearchField, WandSelect, WandStretchTabs } from "../ui";
 import { MOTION_DWELL_FAILED_MS, MOTION_DWELL_SENT_MS } from "../ui/motion-tokens";
 import { CAT_COATS, memberCoatIndex, PixelCat, shrinkAvatarImage, TeamAvatar, TeamAvatarStack } from "./avatar";
+import { useSiliconEmployees, siliconEmployeesRepository } from "../agents/employee-repository.js";
 import { teamChatComposer } from "./composer-bridge";
 import { aiTeamsRepository, subscribeAiTeamDefinitionChanges, subscribeAiTeamRunChanges } from "./repository";
 import type { TeamChatViewProps } from "./team-chat-view";
@@ -63,8 +64,9 @@ const AI_TEAMS_HOST: Record<string, object> = {
     ISSUE_AGENT_PROVIDERS,
     normalizeIssueModelCatalog,
   },
-  "issues/task-board-controller": { taskBoardController },
+  "issues/task-board-controller": { taskBoardController, taskBoardStore },
   "issues/task-board-repository": { taskBoardRepository },
+  "agents/employee-repository": { useSiliconEmployees, siliconEmployeesRepository },
   "model-catalog": { subscribeWandModelCatalog, wandModelDisplayName },
   "use-model-catalog": { useWandModelCatalog },
   "overlay-controller": { wandOverlay },
@@ -80,6 +82,7 @@ const AI_TEAMS_HOST: Record<string, object> = {
   "styles": { installStyleSheet },
   "ui": { WandBadge, WandBrandMark, WandBreadcrumb, WandButton, WandDialogSurface, WandIcon, WandIconButton, WandSearchField, WandSelect, WandStretchTabs },
   "ui/motion-tokens": { MOTION_DWELL_FAILED_MS, MOTION_DWELL_SENT_MS },
+  "ai-teams/cat-coats": { CAT_COATS },
   "ai-teams/avatar": { CAT_COATS, memberCoatIndex, PixelCat, shrinkAvatarImage, TeamAvatar, TeamAvatarStack },
   "ai-teams/composer-bridge": { teamChatComposer },
   "ai-teams/repository": { aiTeamsRepository, subscribeAiTeamDefinitionChanges, subscribeAiTeamRunChanges },

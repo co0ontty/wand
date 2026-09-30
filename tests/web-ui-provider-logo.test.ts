@@ -29,20 +29,26 @@ test("ProviderLogo renders a distinct local brand mark for every supported provi
   assert.match(rendered[5], /viewBox="0 0 800 800"/);
   assert.match(rendered[5], /fill-rule="evenodd"/);
   assert.match(rendered[5], /M517\.36 400H634\.72V634\.72H517\.36Z/);
+  assert.match(rendered[6], /viewBox="0 0 24 24"/);
+  assert.match(rendered[6], /M11\.04 19\.32/);
 });
 
 test("provider identity normalizes legacy executable names and keeps display labels consistent", () => {
   assert.equal(normalizeProviderId("codex-cli-exec"), "codex");
   assert.equal(normalizeProviderId("grok-cli-headless"), "grok");
+  assert.equal(normalizeProviderId("gemini-cli-json"), "gemini");
   assert.equal(normalizeProviderId("custom-agent"), null);
   assert.equal(inferProviderIdFromCommand("/opt/homebrew/bin/claude --resume abc"), "claude");
   assert.equal(inferProviderIdFromCommand("open-code run"), "opencode");
   assert.equal(inferProviderIdFromCommand("qodercli --print"), "qoder");
+  assert.equal(inferProviderIdFromCommand("gemini -p '' --output-format stream-json"), "gemini");
   assert.equal(inferProviderIdFromCommand("claude -p codex"), "claude");
   assert.equal(inferProviderIdFromCommand("/tmp/opencode-tools/bin/claude --resume abc"), "claude");
   assert.equal(providerDisplayName("qoder"), "Qoder");
+  assert.equal(providerDisplayName("gemini"), "Gemini");
   assert.equal(providerDisplayName("custom-agent"), "custom-agent");
   assert.match(renderProviderLogoMarkup("opencode"), /data-provider-logo="opencode"/);
   assert.match(renderProviderLogoMarkup("claude"), /fill="#D97757"/);
   assert.match(renderProviderLogoMarkup("pi"), /viewBox="0 0 800 800"/);
+  assert.match(renderProviderLogoMarkup("gemini"), /data-provider-logo="gemini"/);
 });

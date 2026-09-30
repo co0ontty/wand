@@ -64,6 +64,9 @@ function workspaceSessionSummary(
     inFlight: live.structuredState?.inFlight === true,
     cwd: live.cwd,
     startedAt: live.startedAt,
+    employeeId: live.employeeId,
+    employeeName: live.employeeName,
+    employeeAvatar: live.employeeAvatar,
     ...(team.chat ? { teamChat: team.chat } : {}),
     ...(team.step ? { teamStep: team.step } : {}),
   };

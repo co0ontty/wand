@@ -11,6 +11,7 @@ const config = {
   defaultGrokModel: "grok-4.5",
   defaultQoderModel: "performance",
   defaultPiModel: "anthropic/claude-sonnet-4-6",
+  defaultGeminiModel: "gemini-2.5-pro",
   defaultThinkingEffort: "deep" as const,
   inheritEnv: true,
   commitCli: "claude" as const,
@@ -67,6 +68,21 @@ test("resolveSessionProvider recognizes Qoder session representations", () => {
   assert.equal(resolveSessionProvider(session({ provider: "qoder" })), "qoder");
   assert.equal(resolveSessionProvider(session({ provider: undefined, runner: "qoder-cli-print" })), "qoder");
   assert.equal(resolveSessionProvider(session({ provider: undefined, command: "qodercli -p hello" })), "qoder");
+});
+
+test("resolveSessionProvider recognizes Gemini session representations", () => {
+  assert.equal(resolveSessionProvider(session({ provider: "gemini" })), "gemini");
+  assert.equal(resolveSessionProvider(session({ provider: undefined, runner: "gemini-cli-json" })), "gemini");
+  assert.equal(resolveSessionProvider(session({
+    provider: undefined,
+    command: "gemini -p --output-format stream-json",
+  })), "gemini");
+});
+
+test("resolveSessionAiContext uses the Gemini default model", () => {
+  const context = resolveSessionAiContext(session({ provider: "gemini", command: "gemini" }), config);
+  assert.equal(context.provider, "gemini");
+  assert.equal(context.model, "gemini-2.5-pro");
 });
 
 test("resolveSessionAiContext uses the OpenCode default model", () => {

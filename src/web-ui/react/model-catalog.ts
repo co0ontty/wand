@@ -72,6 +72,7 @@ const MODEL_KEYS: ReadonlyArray<readonly [ModelCatalogProvider, string, string]>
   ["grok", "grokModels", "defaultGrokModel"],
   ["qoder", "qoderModels", "defaultQoderModel"],
   ["pi", "piModels", "defaultPiModel"],
+  ["gemini", "geminiModels", "defaultGeminiModel"],
 ];
 
 /**

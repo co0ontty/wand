@@ -10,7 +10,7 @@ export type WandTaskPriority = "none" | "low" | "medium" | "high" | "urgent";
 export const DEFAULT_WAND_TASK_PRIORITY: WandTaskPriority = "low";
 
 /** 任务派发时选择的 CLI 工具；空串表示尚未指定。 */
-export type WandTaskAgentProvider = "claude" | "codex" | "opencode" | "grok" | "qoder" | "pi";
+export type WandTaskAgentProvider = "claude" | "codex" | "opencode" | "grok" | "qoder" | "pi" | "gemini";
 export type WandTaskAgentModel = string;
 /** 与会话思考档位同一套：旧四档，或 `provider:level` 原生档。 */
 export type WandTaskAgentEffort = "off" | "standard" | "deep" | "max" | `${WandTaskAgentProvider}:${string}`;
@@ -84,6 +84,19 @@ export interface WandTaskAgent {
   mode: WandTaskAgentMode;
   /** 派发出来的会话是结构化对话还是 PTY 终端；缺省时按结构化处理。 */
   kind: WandTaskAgentKind;
+}
+
+/** 看板任务指定的对话对象。CLI id 是 provider，员工/团队 id 是稳定定义 ID。 */
+export interface TaskExecutionSubject {
+  type: "employee" | "team" | "cli";
+  id: string;
+}
+
+export function isTaskExecutionSubject(value: unknown): value is TaskExecutionSubject {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const subject = value as Record<string, unknown>;
+  return (subject.type === "employee" || subject.type === "team" || subject.type === "cli")
+    && typeof subject.id === "string" && subject.id.length > 0;
 }
 
 /** 任务标题来源；标题是可选字段，留空时由服务端按描述自动生成。 */
@@ -185,6 +198,7 @@ export interface WandTask {
   sortOrder: number;
   /** 该任务绑定的执行 Agent；null 表示还没指定。 */
   agent: WandTaskAgent | null;
+  executionSubject?: TaskExecutionSubject | null;
   createdAt: string;
   updatedAt: string;
 }

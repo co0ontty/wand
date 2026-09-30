@@ -136,12 +136,13 @@ test("workspace sessions use chronological tab order and stable labels", () => {
 test("new task conversations offer every supported Agent provider", () => {
   assert.deepEqual(
     WORKSPACE_AGENT_OPTIONS.map((option) => option.value),
-    ["claude", "codex", "opencode", "grok", "qoder", "pi", "shell"],
+    ["claude", "codex", "opencode", "grok", "qoder", "pi", "gemini", "shell"],
   );
   assert.equal(WORKSPACE_AGENT_OPTIONS.at(-1)?.label, "空白终端");
   const source = readFileSync(new URL("../src/web-ui/react/workspaces/workspace-agent-picker.tsx", import.meta.url), "utf8");
   assert.match(source, /value: "structured".*智能对话模式/s);
-  assert.match(source, /会话类型/);
+  assert.match(source, /UnifiedExecutionSubjectPicker/);
+  assert.match(readFileSync(new URL("../src/web-ui/react/workspaces/unified-execution-subject-picker.tsx", import.meta.url), "utf8"), /会话类型/);
 });
 
 test("opening an empty workspace task keeps creation user-driven", () => {
@@ -766,7 +767,7 @@ test("workspaces panel exposes multi-select and a compact directory rail", () =>
   const html = renderToStaticMarkup(createElement(WorkspacesPanel));
   assert.match(html, /aria-label="多选任务和终端"/);
   assert.match(html, /title="批量管理"/);
-  assert.match(html, />项目与任务<\/h2>/);
+  assert.match(html, />对话与任务<\/h2>/);
   const panel = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
   assert.match(panel, /CompactDirectoryRail/);
   assert.match(panel, /groups=\{visibleGroups\}/);
@@ -928,4 +929,15 @@ test("批量处理失败：原因写进原位文案位，不再只活在 Toast �
   assert.match(panel, /setManageFeedback\("pending"\);\n\s*setManageFeedbackLabel\(""\);\n\s*setManageFeedbackReason\(""\);/);
   assert.match(panel, /setManageFeedback\("idle"\);\n\s*setManageFeedbackLabel\(""\);\n\s*setManageFeedbackReason\(""\);\n\s*\}, \[clearManageFeedbackTimer\]\)/);
   assert.match(panel, /setConfirmingManageDelete\(false\);\n\s*setManageFeedback\("idle"\);\n\s*setManageFeedbackLabel\(""\);\n\s*\}, MOTION_DWELL_FAILED_MS\);/);
+});
+
+test("IM 联系人按员工身份汇总任务内与未分组会话", () => {
+  const panel = readFileSync(
+    new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url),
+    "utf8",
+  );
+  const contacts = panel.slice(panel.indexOf("const contactSessions ="), panel.indexOf("const teamChatSessions ="));
+  assert.match(contacts, /group\.standaloneSessions\.map\(\(session\) => \(\{ group, session \}\)\)/);
+  assert.match(contacts, /group\.tasks\.flatMap\(\(task\) => task\.sessions\.map/);
+  assert.match(panel, /item\.session\.employeeId === emp\.id/);
 });

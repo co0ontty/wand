@@ -924,7 +924,7 @@ test("group-chat relay sessions carry a teamChat marker built from the latest ru
 
     type SessionRow = {
       id: string;
-      teamChat?: { runId: string; teamName: string; memberCount: number };
+      teamChat?: { runId: string; teamId: string; teamName: string; memberCount: number };
     };
     const res = await fetch(`${baseUrl}/api/tasks`);
     assert.equal(res.status, 200);
@@ -936,7 +936,7 @@ test("group-chat relay sessions carry a teamChat marker built from the latest ru
     // 同一条群聊会话挂过两次运行时，标记取最近一次（run-1 晚于 run-older）。
     assert.deepEqual(
       rows.find((row) => row.id === chatSession.id)?.teamChat,
-      { runId: "run-1", teamName: "开发三人组", memberCount: 3 },
+      { runId: "run-1", teamId: team.id, teamName: "开发三人组", memberCount: 3 },
     );
     assert.equal(rows.find((row) => row.id === plainSession.id)?.teamChat, undefined);
   } finally {

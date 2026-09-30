@@ -36,20 +36,20 @@ test("tool counts reflect retained interactive CLI launches, not messages or bar
   storage.saveSession(snapshot("automation", { provider: "codex", sessionSource: "automation" }));
 
   assert.deepEqual(storage.countInteractiveSessionsByProvider(), {
-    claude: 2, codex: 1, opencode: 0, grok: 0, qoder: 1, pi: 1,
+    claude: 2, codex: 1, opencode: 0, grok: 0, qoder: 1, pi: 1, gemini: 0,
   });
   storage.deleteSession("claude-2");
   assert.equal(storage.countInteractiveSessionsByProvider().claude, 1);
 });
 
 test("provider choices sort by usage descending, retain tie order and leave shell last", () => {
-  const values = ["claude", "codex", "opencode", "grok", "qoder", "pi", "shell"];
+  const values = ["claude", "codex", "opencode", "grok", "qoder", "pi", "gemini", "shell"];
   const original = values.map((value) => ({ value }));
   assert.deepEqual(sortProviderOptions(original, {}, (entry) => entry.value), original);
   assert.deepEqual(sortProviderOptions(original, {
     pi: 8, codex: 4, claude: 4, grok: 1,
   }, (entry) => entry.value).map((entry) => entry.value), [
-    "pi", "claude", "codex", "grok", "opencode", "qoder", "shell",
+    "pi", "claude", "codex", "grok", "opencode", "qoder", "gemini", "shell",
   ]);
   assert.deepEqual(original.map((entry) => entry.value), values, "never reorder the shared constants");
 });

@@ -258,6 +258,15 @@ test("Qoder model catalog exposes the official tier aliases", async () => {
   ]);
 });
 
+test("Gemini model catalog exposes only stable aliases and never claims a thinking knob", async () => {
+  const result = await refreshModels(refreshOptions());
+  assert.deepEqual(result.geminiModels.map((model) => model.id), [
+    "default", "auto", "pro", "flash", "flash-lite",
+  ]);
+  // Gemini CLI 没有思考档位开关：只留「不覆盖」，下拉不会假装能调。
+  assert.deepEqual(result.thinkingEfforts.gemini, [{ effort: "off" }]);
+});
+
 test("Qoder model discovery accepts bare and provider-qualified IDs", () => {
   const models = parseQoderModels([
     "outside-list-id",

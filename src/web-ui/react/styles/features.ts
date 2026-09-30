@@ -578,6 +578,78 @@ export const settingsAndQuickCommitStyles = String.raw`
 }
 
 .wand-settings-route-actions .wand-ui-button:last-child { color: var(--danger); }
+
+/* 系统 AI 的执行者：内置「系统运维」员工的只读投影（候选在员工页维护）。 */
+.wand-settings-system-ai-owner {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border-subtle));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 4%, var(--bg-primary));
+}
+
+.wand-settings-system-ai-owner-copy {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.wand-settings-system-ai-owner-copy > strong {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-size-sm);
+}
+
+.wand-settings-system-ai-chain {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wand-settings-system-ai-chain li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-primary);
+  font-size: var(--font-size-xs);
+}
+
+.wand-settings-system-ai-chain .wand-settings-route-rank {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  font-size: var(--font-size-2xs);
+}
+
+.wand-settings-system-ai-chain-empty {
+  color: var(--text-tertiary);
+}
+
+.wand-settings-system-ai-hint {
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+}
+
+/* 内置员工标识：设置页与员工卡片共用，所以放在主包样式里。 */
+.wand-employee-system-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent-active);
+  font-size: 11px;
+  font-style: normal;
+}
 .wand-settings-route-test { margin-top: 12px; }
 .wand-settings-clear-key { align-self: flex-start; color: var(--danger); }
 .wand-settings-route .wand-settings-field:last-child { grid-column: 1 / -1; }

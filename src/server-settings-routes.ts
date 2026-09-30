@@ -71,6 +71,7 @@ function publicConfig(config: WandConfig): Record<string, unknown> {
     defaultGrokModel: defaultModels.grok,
     defaultQoderModel: defaultModels.qoder,
     defaultPiModel: defaultModels.pi,
+    defaultGeminiModel: defaultModels.gemini,
     defaultModels,
   };
 }
@@ -296,7 +297,7 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
 
   app.post("/api/settings/config", requireAdminOrSessionPreferences, asyncRoute(async (req, res) => {
     const body = req.body as Partial<WandConfig> & {
-      defaultModels?: { claude?: unknown; codex?: unknown; opencode?: unknown; grok?: unknown; qoder?: unknown; pi?: unknown };
+      defaultModels?: { claude?: unknown; codex?: unknown; opencode?: unknown; grok?: unknown; qoder?: unknown; pi?: unknown; gemini?: unknown };
       systemAi?: Record<string, unknown>;
     };
     const previousDesiredConfig = runtimeConfig.desiredSnapshot();
@@ -342,6 +343,7 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
         if (Object.hasOwn(body.defaultModels, "grok")) stagePreference("defaultGrokModel", body.defaultModels.grok);
         if (Object.hasOwn(body.defaultModels, "qoder")) stagePreference("defaultQoderModel", body.defaultModels.qoder);
         if (Object.hasOwn(body.defaultModels, "pi")) stagePreference("defaultPiModel", body.defaultModels.pi);
+        if (Object.hasOwn(body.defaultModels, "gemini")) stagePreference("defaultGeminiModel", body.defaultModels.gemini);
       }
       if (body.systemAi !== undefined) {
         if (!body.systemAi || typeof body.systemAi !== "object" || Array.isArray(body.systemAi)) {
@@ -452,6 +454,7 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
       defaultGrokModel: defaults.grok,
       defaultQoderModel: defaults.qoder,
       defaultPiModel: defaults.pi,
+      defaultGeminiModel: defaults.gemini,
       defaultModels: defaults,
     });
   });
@@ -468,6 +471,7 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
         defaultGrokModel: defaults.grok,
         defaultQoderModel: defaults.qoder,
         defaultPiModel: defaults.pi,
+        defaultGeminiModel: defaults.gemini,
         defaultModels: defaults,
       });
     } catch (error) {

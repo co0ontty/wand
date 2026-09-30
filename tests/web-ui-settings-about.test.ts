@@ -86,10 +86,11 @@ test("model refresh summary lists every CLI, including empty catalogs", () => {
     grokModels: [{ id: "default", label: "默认" }],
     qoderModels: [],
     piModels: [],
+    geminiModels: [],
   } as unknown as SettingsModelCatalog;
   assert.equal(
     modelCatalogSummary(catalog),
-    "Claude 1 · Codex 0（未发现） · OpenCode 2 · Grok 1 · Qoder 0（未发现） · Pi 0（未发现）",
+    "Claude 1 · Codex 0（未发现） · OpenCode 2 · Grok 1 · Qoder 0（未发现） · Pi 0（未发现） · Gemini 0（未发现）",
   );
 });
 

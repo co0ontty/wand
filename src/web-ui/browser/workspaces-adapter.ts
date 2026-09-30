@@ -191,6 +191,7 @@ export function installWorkspacesLegacyAdapter(): void {
         provider: payload.target === "shell" ? undefined : payload.target,
         kind: payload.target === "shell" ? "pty" : (payload.kind ?? "structured"),
         model: payload.model,
+        employeeId: payload.employeeId,
         initialInput: payload.prompt,
       })).then(async (created) => {
         const sessionId = typeof created === "string" && created

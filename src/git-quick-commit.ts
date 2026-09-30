@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { ClaudeRunError, runClaudePrint } from "./claude-sdk-runner.js";
 import { callSystemAiTextWithFallback, type AiTextRequest } from "./system-ai.js";
 import { buildChildEnv } from "./env-utils.js";
-import { isSessionProvider } from "./session-provider.js";
+import { isSessionProvider, providerCliInstalled } from "./session-provider.js";
 import {
   runGitAsync as runGitAsyncBase,
   runGitRawAsync as runGitRawAsyncBase,
@@ -298,14 +298,9 @@ export async function getGitStatusAsync(cwd: string): Promise<GitStatusResult> {
   };
 }
 
-interface QuickCommitOptions extends CommitInputOptions {
+interface QuickCommitOptions extends CommitInputOptions, QuickCommitAiOptions {
   cwd: string;
   language: string;
-  provider?: SessionProvider;
-  model?: string | null;
-  thinkingEffort?: SessionSnapshot["thinkingEffort"];
-  inheritEnv?: boolean;
-  systemAi?: import("./types.js").SystemAiConfig;
   autoMessage: boolean;
   customMessage?: string;
   tag?: string;
@@ -325,6 +320,10 @@ export interface QuickCommitAiOptions {
   thinkingEffort?: SessionSnapshot["thinkingEffort"];
   inheritEnv?: boolean;
   systemAi?: import("./types.js").SystemAiConfig;
+  /** 内置「系统运维」员工的角色设定：作为系统提示前缀注入。 */
+  opsPersona?: string;
+  /** CLI 降级链（按顺序）；未设置时只用 provider/model 这一次调用。 */
+  cliCandidates?: import("./types.js").AiCliCandidate[];
 }
 
 export class QuickCommitError extends Error {
@@ -495,6 +494,22 @@ function extractPiText(stdout: string): string {
   return text.trim();
 }
 
+/** Gemini `--output-format stream-json`：assistant message 是增量 chunk，拼接即可。 */
+function extractGeminiText(stdout: string): string {
+  let text = "";
+  for (const line of stdout.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{")) continue;
+    try {
+      const event = JSON.parse(trimmed) as { type?: string; role?: string; content?: unknown };
+      if (event.type === "message" && event.role === "assistant" && typeof event.content === "string") {
+        text += event.content;
+      }
+    } catch { /* ignore non-protocol stdout */ }
+  }
+  return text.trim();
+}
+
 function buildPiTextArgs(request: AiTextRequest, opts: QuickCommitAiOptions, allowTools = false): string[] {
   const args = ["--mode", "json", "--print", "--no-session"];
   if (!allowTools) args.push("--no-tools");
@@ -507,14 +522,29 @@ function buildPiTextArgs(request: AiTextRequest, opts: QuickCommitAiOptions, all
   return args;
 }
 
-function buildGrokTextArgs(request: AiTextRequest, opts: QuickCommitAiOptions, allowTools = false): string[] {
-  const args = ["--no-auto-update", "-p", request.prompt, "--output-format", "streaming-json"];
+function buildGrokTextArgs(request: AiTextRequest, opts: QuickCommitAiOptions, allowTools = false): string[] {  const args = ["--no-auto-update", "-p", request.prompt, "--output-format", "streaming-json"];
   const model = opts.model?.trim();
   if (model && model !== "default") args.push("--model", model);
   const effort = thinkingEffortToGrokEffort(opts.thinkingEffort ?? "off");
   if (effort) args.push("--effort", effort);
   args.push(...systemPromptArgsFrom("grok", request.system));
   if (allowTools) args.push("--always-approve");
+  return args;
+}
+
+/**
+ * Gemini CLI 没有 `--append-system-prompt`，规则走 `contentWithSystemPrompt` 并进内容；
+ * headless 下必须带 `--skip-trust`，否则未信任的工作目录会直接以 55 退出。
+ *
+ * `-p ""` 只把 CLI 钉在 headless 模式，真正的 prompt 走 stdin：commit diff 可能很大，
+ * 塞进 argv 会撞 ARG_MAX。Gemini 没有 Codex `--ephemeral` 那样的临时会话开关，
+ * 一次性调用会留在它自己的聊天记录里（Wand 不扫描 Gemini 历史，不会误当可恢复会话）。
+ */
+function buildGeminiTextArgs(opts: QuickCommitAiOptions, allowTools = false): string[] {
+  const args = ["-p", "", "--output-format", "stream-json", "--skip-trust"];
+  const model = opts.model?.trim();
+  if (model && model !== "default") args.push("--model", model);
+  if (allowTools) args.push("--approval-mode", "yolo");
   return args;
 }
 
@@ -663,6 +693,17 @@ async function callPiText(request: AiTextRequest, cwd: string, opts: QuickCommit
   return text;
 }
 
+async function callGeminiText(request: AiTextRequest, cwd: string, opts: QuickCommitAiOptions): Promise<string> {
+  const stdout = await runCliText("gemini", buildGeminiTextArgs(opts), contentWithSystemPrompt("gemini", request), {
+    cwd,
+    timeoutMs: CODEX_MESSAGE_TIMEOUT_MS,
+    inheritEnv: opts.inheritEnv,
+  });
+  const text = extractGeminiText(stdout);
+  if (!text) throw new QuickCommitError("Gemini 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
+  return text;
+}
+
 async function callCliAiText(request: AiTextRequest, cwd: string, language: string, opts: QuickCommitAiOptions): Promise<string> {
   const provider = defaultProvider(opts.provider);
   if (provider === "codex") {
@@ -672,6 +713,7 @@ async function callCliAiText(request: AiTextRequest, cwd: string, language: stri
   if (provider === "grok") return callGrokText(request, cwd, opts);
   if (provider === "qoder") return callQoderText(request, cwd, opts);
   if (provider === "pi") return callPiText(request, cwd, opts);
+  if (provider === "gemini") return callGeminiText(request, cwd, opts);
   return callClaudeText(request, cwd, language, opts);
 }
 
@@ -692,9 +734,77 @@ function aiFallbackFailed(primary: "直连 API" | "CLI", primaryError: unknown, 
 }
 
 /**
+ * 多候选降级时给整条链的时间上限。原生客户端的请求宽限约 180s，
+ * 候选再多也不能把整个请求拖死；单次仍受各自 CLI 超时保护。
+ */
+const CLI_CHAIN_BUDGET_MS = 150_000;
+
+/** 角色设定走系统提示前缀；任务自己的输出格式与约束必须排在后面。 */
+export function withOpsPersona(request: AiTextRequest, persona?: string): AiTextRequest {
+  const trimmed = (persona ?? "").trim();
+  if (!trimmed) return request;
+  const task = (request.system ?? "").trim();
+  return { ...request, system: task ? `${trimmed}\n\n${task}` : trimmed };
+}
+
+/** 链上的每条候选变成一次普通的 CLI 文本调用参数。 */
+function candidateOptions(base: QuickCommitAiOptions, candidate: import("./types.js").AiCliCandidate): QuickCommitAiOptions {
+  return {
+    ...base,
+    provider: candidate.provider,
+    model: candidate.model ?? null,
+    thinkingEffort: candidate.thinkingEffort ?? base.thinkingEffort ?? undefined,
+  };
+}
+
+/** 没有候选链时，把当前 provider/model 当作唯一的候选。 */
+function singleCandidate(opts: QuickCommitAiOptions): import("./types.js").AiCliCandidate {
+  return {
+    provider: defaultProvider(opts.provider),
+    model: opts.model ?? undefined,
+    thinkingEffort: opts.thinkingEffort ?? undefined,
+  };
+}
+
+/**
+ * 按顺序尝试候选：跳过没安装的 CLI，逐条收集错误，成功即返回。
+ * 只有一条候选时保持原行为（错误原样抛出，不摘要）。
+ */
+async function callCliCandidates(
+  request: AiTextRequest,
+  cwd: string,
+  language: string,
+  opts: QuickCommitAiOptions,
+): Promise<string> {
+  const chain = opts.cliCandidates?.length ? opts.cliCandidates : [singleCandidate(opts)];
+  if (chain.length === 1) {
+    return callCliAiText(request, cwd, language, candidateOptions(opts, chain[0]!));
+  }
+
+  const installed = chain.filter((candidate) => providerCliInstalled(candidate.provider));
+  const attempts = installed.length ? installed : chain;
+  const deadline = Date.now() + CLI_CHAIN_BUDGET_MS;
+  const errors: string[] = [];
+  for (const candidate of attempts) {
+    if (Date.now() > deadline) {
+      errors.push("已超过等待上限");
+      break;
+    }
+    try {
+      const text = await callCliAiText(request, cwd, language, candidateOptions(opts, candidate));
+      if (text.trim()) return text;
+      errors.push(`${candidate.provider}: 返回空结果`);
+    } catch (error) {
+      errors.push(`${candidate.provider}: ${getGitErrorMessage(error)}`);
+    }
+  }
+  throw new QuickCommitError(`所有 CLI 候选均失败：${errors.join("；")}`, "AI_FALLBACK_FAILED");
+}
+
+/**
  * Run a lightweight AI request through the selected Commit source. API mode
- * exhausts its profile chain and then falls back once to the current-session
- * CLI. CLI mode uses only that CLI.
+ * exhausts its profile chain and then falls back once to the system employee's
+ * CLI chain. CLI mode walks that chain in order.
  */
 export async function callConfiguredAiText(
   request: AiTextRequest,
@@ -702,21 +812,22 @@ export async function callConfiguredAiText(
   language: string,
   opts: QuickCommitAiOptions,
 ): Promise<string> {
+  const effective = withOpsPersona(request, opts.opsPersona);
   if (opts.systemAi?.enabled) {
     try {
-      return await callDirectApiText(request, opts.systemAi);
+      return await callDirectApiText(effective, opts.systemAi);
     } catch (apiError) {
       try {
         // The user selected the direct API first. If it is unavailable or
-        // empty, retry this exact request through their selected CLI.
-        return await callCliAiText(request, cwd, language, opts);
+        // empty, retry this exact request through their selected CLI chain.
+        return await callCliCandidates(effective, cwd, language, opts);
       } catch (cliError) {
         throw aiFallbackFailed("直连 API", apiError, cliError);
       }
     }
   }
 
-  return callCliAiText(request, cwd, language, opts);
+  return callCliCandidates(effective, cwd, language, opts);
 }
 
 /** Read the unstaged + staged tree without touching the index. */
@@ -1431,7 +1542,7 @@ async function getLatestTagAtHead(cwd: string): Promise<string | undefined> {
 async function runQuickCommitFallbackCli(opts: QuickCommitOptions, priorError: string): Promise<QuickCommitResult> {
   await assertGitWorkTreeAsync(opts.cwd);
   const beforeHead = await getHead(opts.cwd);
-  const request = buildFallbackPrompt(opts, priorError);
+  const request = withOpsPersona(buildFallbackPrompt(opts, priorError), opts.opsPersona);
   const provider = defaultProvider(opts.provider);
   if (provider === "codex") {
     const args = ["exec", "--ephemeral", "--json", "--color", "never", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox"];
@@ -1470,6 +1581,12 @@ async function runQuickCommitFallbackCli(opts: QuickCommitOptions, priorError: s
     });
   } else if (provider === "pi") {
     await runCliText("pi", buildPiTextArgs(request, opts, true), "", {
+      cwd: opts.cwd,
+      timeoutMs: QUICK_COMMIT_CLI_TIMEOUT_MS,
+      inheritEnv: opts.inheritEnv,
+    });
+  } else if (provider === "gemini") {
+    await runCliText("gemini", buildGeminiTextArgs(opts, true), contentWithSystemPrompt("gemini", request), {
       cwd: opts.cwd,
       timeoutMs: QUICK_COMMIT_CLI_TIMEOUT_MS,
       inheritEnv: opts.inheritEnv,

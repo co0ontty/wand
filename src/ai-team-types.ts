@@ -78,7 +78,53 @@ export interface StepDispatchInfo {
 }
 
 /** 上传头像在前端缩成小图后的上限（data URL 字符数）。 */
+export interface SiliconEmployee {
+  id: string; // "e_<uuid>"
+  name: string;
+  duty: string; // 一句话职责：侧栏/选择器/署名都用它
+  prompt: string; // 角色设定；建会话时走 SessionSnapshot.systemPrompt（不拼进首条用户消息）
+  avatar: string; // 与 ai-teams 同口径："" | "cat:<n>" | "data:image/…"
+  agents: WandTaskAgent[]; // 1..4 项，顺序 = 降级顺序（首选在前）
+  /**
+   * 非空 = Wand 内置员工（如 "wand-ops" 系统运维）：名字/职责/人设/头像锁定，
+   * 不可归档、不可删除，只有执行候选由用户维护。
+   */
+  systemKey?: string;
+  archivedAt?: string; // 归档后不出现在选择器；其历史会话仍可打开
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * AI 按自然语言期望起草的员工配置：只带一个首选执行候选，
+ * 其余手动字段（头像、备用候选）仍由表单和「高级配置」负责。
+ */
+export interface SiliconEmployeeDraft {
+  name: string;
+  duty: string;
+  prompt: string;
+  agent: WandTaskAgent;
+}
+
 export const AI_TEAM_AVATAR_MAX_CHARS = 60_000;
+export const SILICON_EMPLOYEE_AVATAR_MAX_CHARS = 60_000;
+
+// ============ 内置「系统运维」员工 ============
+// 纯常量与判定放在这里：浏览器端要拿 Tag 和判定，不能把 server-only 的
+// system-employee.ts（依赖 node:fs）拉进前端 bundle。
+
+export const SYSTEM_EMPLOYEE_KEY = "wand-ops";
+export const SYSTEM_EMPLOYEE_ID = "e_wand_ops";
+export const SYSTEM_EMPLOYEE_NAME = "勤劳的初二";
+/** 员工列表 / 设置页上的标识。 */
+export const SYSTEM_EMPLOYEE_TAG = "系统运维";
+
+export function isSystemSiliconEmployee(
+  employee: Pick<SiliconEmployee, "systemKey"> | null | undefined,
+): boolean {
+  return employee?.systemKey === SYSTEM_EMPLOYEE_KEY;
+}
+
 
 export interface AiTeam {
   id: string;
@@ -137,6 +183,7 @@ export interface AiTeamRun {
  */
 export interface AiTeamRunChatMarker {
   runId: string;
+  teamId: string;
   teamName: string;
   memberCount: number;
 }

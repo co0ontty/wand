@@ -1,7 +1,7 @@
 export type SessionKind = "pty" | "structured";
-export type SessionProvider = "claude" | "codex" | "opencode" | "grok" | "qoder" | "pi";
+export type SessionProvider = "claude" | "codex" | "opencode" | "grok" | "qoder" | "pi" | "gemini";
 type CommitAiSource = "cli" | "api";
-export type SessionRunner = "claude-cli" | "claude-cli-print" | "claude-sdk" | "codex-cli-exec" | "opencode-cli-run" | "grok-cli-headless" | "qoder-cli-print" | "pi-cli-json" | "pty";
+export type SessionRunner = "claude-cli" | "claude-cli-print" | "claude-sdk" | "codex-cli-exec" | "opencode-cli-run" | "grok-cli-headless" | "qoder-cli-print" | "pi-cli-json" | "gemini-cli-json" | "pty";
 export type SessionSource = "interactive" | "automation" | "startup";
 
 export type ExecutionMode = "assist" | "agent" | "agent-max" | "default" | "auto-edit" | "full-access" | "native" | "managed";
@@ -170,6 +170,8 @@ export interface WandConfig {
   defaultQoderModel?: string;
   /** 新建 Pi 会话时默认使用的 provider/model pattern。 */
   defaultPiModel?: string;
+  /** 新建 Gemini 会话时默认使用的模型。留空则不传 --model，由 gemini 自行决定。 */
+  defaultGeminiModel?: string;
   /** 快捷提交生成 commit message / tag 时使用的 CLI。 */
   commitCli?: SessionProvider;
   /** 快捷提交专用模型。留空则跟随所选 CLI 的默认模型。 */
@@ -192,6 +194,17 @@ export interface WandConfig {
    * 用于隔离敏感凭据或避免 API key 泄漏到子命令。
    */
   inheritEnv?: boolean;
+}
+
+/**
+ * Wand 自有 AI 调用（commit message、标题、提示词优化…）的一条 CLI 执行候选。
+ * 候选顺序即降级顺序；由内置「系统运维」员工维护。
+ */
+export interface AiCliCandidate {
+  provider: SessionProvider;
+  /** 具体模型 ID；未设置表示跟随 provider 默认模型。 */
+  model?: string;
+  thinkingEffort?: ThinkingEffort;
 }
 
 export type SystemAiProtocol = "openai" | "anthropic";
@@ -250,12 +263,13 @@ interface ReasoningEffortInfo {
  * 旧的四档值需要继续兼容已有会话。CLI 动态档位加 provider 前缀，
  * 避免 `max`（旧值，各家含义不同）和 CLI 新增的原生档位冲突。
  */
+export type { SiliconEmployee } from "./ai-team-types.js";
 export type ThinkingEffort =
   | "off"
   | "standard"
   | "deep"
   | "max"
-  | `${"claude" | "codex" | "opencode" | "grok" | "qoder" | "pi"}:${string}`;
+  | `${"claude" | "codex" | "opencode" | "grok" | "qoder" | "pi" | "gemini"}:${string}`;
 
 export interface WorktreeInfo {
   branch: string;
@@ -622,6 +636,13 @@ export interface SessionSnapshot {
   sessionSource?: SessionSource;
   /** 自动化创建会话时关联的自动化任务 ID。 */
   automationId?: string;
+  /** 创建会话时选定的员工身份快照；定义归档或删除后仍可展示历史会话。 */
+  employeeId?: string;
+  employeeName?: string;
+  employeeAvatar?: string;
+  /** 员工建会话时的有序候选快照；首轮启动失败时沿此链降级。 */
+  employeeCandidates?: import("./task-types.js").WandTaskAgent[];
+  employeeCandidateIndex?: number;
   /**
    * 会话级系统提示：自动化 / 团队会话的角色与规则放这里，走 provider 的系统提示通道，
    * 不要拼进首条用户消息。provider 没有该通道时（codex / opencode）由调用方退回并入消息。

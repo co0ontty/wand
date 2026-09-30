@@ -1256,10 +1256,10 @@ export class ProcessManager extends EventEmitter {
       ? getProviderCommandSessionId(provider, processedCommand)
         ?? getProviderCommandSessionId(provider, command)
       : null;
-    // Grok and Qoder accept caller-selected IDs for new conversations. Assigning
+    // Grok / Qoder / Gemini accept caller-selected IDs for new conversations. Assigning
     // one up front avoids depending on provider-specific TUI rendering to learn
     // the durable ID later.
-    const assignedProviderSessionId = !existingProviderSessionId && (provider === "grok" || provider === "qoder")
+    const assignedProviderSessionId = !existingProviderSessionId && (provider === "grok" || provider === "qoder" || provider === "gemini")
       ? randomUUID()
       : null;
     if (assignedProviderSessionId) {
@@ -2314,7 +2314,7 @@ export class ProcessManager extends EventEmitter {
       input: prompt,
       cwd: record.cwd,
       language: this.config.language,
-      ai: resolveSystemAiContext(record, this.config),
+      ai: resolveSystemAiContext(record, this.config, this.storage.getSystemSiliconEmployee()),
       onGenerating: (generating) => {
         if (!this.disposed) this.setSessionTopicGenerating(id, generating);
       },
@@ -2877,6 +2877,20 @@ export class ProcessManager extends EventEmitter {
       }
       const level = thinkingEffortToPiLevel(thinkingEffort ?? null);
       if (level && !/--thinking(?:\s|=)/.test(result)) result += ` --thinking '${level}'`;
+      return result;
+    }
+
+    if (provider === "gemini") {
+      let result = command;
+      const trimmedModel = model?.trim();
+      if (trimmedModel && trimmedModel !== "default" && !/--model(?:\s|=)/.test(result) && !/(?:^|\s)-m(?:\s|$)/.test(result)) {
+        result += ` --model '${trimmedModel.replace(/'/g, "'\\''")}'`;
+      }
+      // Gemini CLI 没有 thinking 档位开关。approval mode 与其它 provider 的
+      // auto-approve 语义对齐，default 下让 TUI 自己弹确认。
+      if ((mode === "managed" || mode === "full-access" || mode === "auto-edit") && !/--approval-mode(?:\s|=)/.test(result) && !/(?:^|\s)-y(?:\s|$)/.test(result)) {
+        result += " --approval-mode yolo";
+      }
       return result;
     }
 

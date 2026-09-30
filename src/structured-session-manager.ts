@@ -13,6 +13,8 @@ import {
 import { truncateMessagesForTransport } from "./message-truncator.js";
 import { buildChildEnv } from "./env-utils.js";
 import { getErrorMessage } from "./error-utils.js";
+import { getDefaultModelForProvider } from "./config.js";
+import type { WandTaskAgent } from "./task-types.js";
 import { recordIterationPrompt } from "./iteration-log.js";
 import { signalNameFromNumber } from "./signal-utils.js";
 import { resolveSdkClaudeBinary } from "./claude-sdk-runner.js";
@@ -24,7 +26,7 @@ import {
   shouldGenerateSessionTopicFromInput,
 } from "./session-topic.js";
 import { resolveSessionCwd } from "./session-cwd.js";
-import { isSessionProvider } from "./session-provider.js";
+import { isSessionProvider, providerCliCommand } from "./session-provider.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
 import { CodexRunner } from "./structured-codex-adapter.js";
 import { CodexProtocolReducer } from "./structured-codex-protocol.js";
@@ -51,6 +53,7 @@ import { OpenCodeRunner, applyOpenCodeEvent } from "./structured-opencode-adapte
 import { GrokRunner, applyGrokEvent } from "./structured-grok-adapter.js";
 import { QoderRunner } from "./structured-qoder-adapter.js";
 import { PiRunner, applyPiEvent, isMissingPiSession } from "./structured-pi-adapter.js";
+import { GeminiRunner, applyGeminiEvent, isMissingGeminiSession } from "./structured-gemini-adapter.js";
 import {
   structuredRunId,
   type StructuredExecHost,
@@ -74,6 +77,7 @@ export interface StructuredSessionManagerRunners {
   grok?: StructuredRunnerAdapter;
   qoder?: StructuredRunnerAdapter;
   pi?: StructuredRunnerAdapter;
+  gemini?: StructuredRunnerAdapter;
 }
 
 interface CreateStructuredSessionOptions {
@@ -89,6 +93,11 @@ interface CreateStructuredSessionOptions {
   thinkingEffort?: SessionSnapshot["thinkingEffort"];
   sessionSource?: SessionSource;
   automationId?: string;
+  employeeId?: string;
+  employeeName?: string;
+  employeeAvatar?: string;
+  employeeCandidates?: WandTaskAgent[];
+  employeeCandidateIndex?: number;
   /** 会话级系统提示（团队 / 自动化的角色与规则）；走 provider 的系统提示通道。 */
   systemPrompt?: string;
   /** 所属工作空间 ID（多标签 / 分屏项目）。 */
@@ -114,6 +123,14 @@ class PersistedStructuredRunnerError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "PersistedStructuredRunnerError";
+  }
+}
+
+/** The child process never started, so retrying the same input with another CLI cannot duplicate work. */
+class UnacceptedStructuredSpawnError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UnacceptedStructuredSpawnError";
   }
 }
 
@@ -180,7 +197,7 @@ function buildReplayProcessor(session: SessionSnapshot): ReplayProcessor {
     };
     return processor;
   }
-  // grok-cli-headless / opencode-cli-run / pi-cli-json share the same shape.
+  // grok-cli-headless / opencode-cli-run / pi-cli-json / gemini-cli-json share the same shape.
   const state: StructuredRunnerTurnState = {
     blocks: [],
     result: "",
@@ -201,7 +218,9 @@ function buildReplayProcessor(session: SessionSnapshot): ReplayProcessor {
         ? applyGrokEvent(state as Parameters<typeof applyGrokEvent>[0], event)
         : runner === "opencode-cli-run"
           ? applyOpenCodeEvent(state, event)
-          : applyPiEvent(state, event);
+          : runner === "gemini-cli-json"
+            ? applyGeminiEvent(state, event)
+            : applyPiEvent(state, event);
       if (error) processor.primaryError = error;
       return true;
     },
@@ -216,6 +235,7 @@ function recoveredCommandLabel(runner: SessionRunner | undefined): string {
     case "grok-cli-headless": return "grok -p --output-format streaming-json";
     case "qoder-cli-print": return "qodercli -p --output-format stream-json";
     case "pi-cli-json": return "pi --mode json";
+    case "gemini-cli-json": return "gemini -p --output-format stream-json";
     default: return "claude -p";
   }
 }
@@ -304,6 +324,14 @@ function buildStructuredOutputPayload(snapshot: SessionSnapshot): ProcessEvent["
     queuedMessageSkills: snapshot.queuedMessageSkills,
     sessionKind: "structured",
     structuredState: snapshot.structuredState,
+    provider: snapshot.provider,
+    runner: snapshot.runner,
+    selectedModel: snapshot.selectedModel,
+    thinkingEffort: snapshot.thinkingEffort,
+    employeeId: snapshot.employeeId,
+    employeeName: snapshot.employeeName,
+    employeeAvatar: snapshot.employeeAvatar,
+    employeeCandidateIndex: snapshot.employeeCandidateIndex,
     title: snapshot.title,
     description: snapshot.description,
     summary: snapshot.description ?? snapshot.summary,
@@ -537,6 +565,7 @@ export class StructuredSessionManager {
   private readonly grokRunner: StructuredRunnerAdapter;
   private readonly qoderRunner: StructuredRunnerAdapter;
   private readonly piRunner: StructuredRunnerAdapter;
+  private readonly geminiRunner: StructuredRunnerAdapter;
   /** Structured CLI runs that were mid-flight when the previous web process died. */
   private pendingRecoveryIds: string[] = [];
   private detachedRecoveryPromise: Promise<void> | null = null;
@@ -558,6 +587,7 @@ export class StructuredSessionManager {
     this.grokRunner = runners.grok ?? new GrokRunner(undefined, this.execHost);
     this.qoderRunner = runners.qoder ?? new QoderRunner(undefined, this.execHost);
     this.piRunner = runners.pi ?? new PiRunner(undefined, this.execHost);
+    this.geminiRunner = runners.gemini ?? new GeminiRunner(undefined, this.execHost);
     for (const snapshot of this.storage.loadSessions()) {
       if ((snapshot.sessionKind ?? "pty") !== "structured") continue;
       const restoredStatus = snapshot.status === "running" ? "idle" : snapshot.status;
@@ -1269,7 +1299,7 @@ export class StructuredSessionManager {
       input,
       cwd: session.cwd,
       language: this.config.language,
-      ai: resolveSystemAiContext(session, this.config),
+      ai: resolveSystemAiContext(session, this.config, this.storage.getSystemSiliconEmployee()),
       onGenerating: (generating) => {
         if (!this.disposed) this.setSessionTopicGenerating(id, generating);
       },
@@ -1305,6 +1335,11 @@ export class StructuredSessionManager {
       sessionKind: "structured",
       sessionSource: options.sessionSource ?? "interactive",
       automationId: options.automationId,
+      employeeId: options.employeeId,
+      employeeName: options.employeeName,
+      employeeAvatar: options.employeeAvatar,
+      employeeCandidates: options.employeeCandidates,
+      employeeCandidateIndex: options.employeeCandidateIndex,
       systemPrompt: options.systemPrompt?.trim() || null,
       workspaceId: options.workspaceId,
       workspaceTaskId: options.workspaceTaskId,
@@ -1321,6 +1356,8 @@ export class StructuredSessionManager {
             ? "qodercli -p --output-format stream-json"
           : provider === "pi"
             ? "pi --mode json --print"
+          : provider === "gemini"
+            ? "gemini -p --output-format stream-json"
           : runner === "claude-sdk"
             ? "claude-agent-sdk (stream-json)"
             : "claude -p --output-format stream-json",
@@ -1379,6 +1416,52 @@ export class StructuredSessionManager {
     this.storage.saveSession(titled);
     this.emitStructuredSnapshot(titled);
     return titled;
+  }
+
+  /** Only an unstarted employee conversation may change CLI after a failed first turn. */
+  private retryEmployeeCandidate(
+    id: string,
+    original: SessionSnapshot,
+    prompt: string,
+    error: unknown,
+    skills: string[],
+  ): Promise<SessionSnapshot> | null {
+    const candidates = original.employeeCandidates ?? [];
+    const nextIndex = (original.employeeCandidateIndex ?? 0) + 1;
+    if (!original.employeeId || (original.messages?.length ?? 0) !== 0 || nextIndex >= candidates.length) return null;
+    const current = this.sessions.get(id);
+    if (!current || (current.status !== "running" && current.status !== "failed")) return null;
+    if ((current.messages ?? []).length !== 1 || current.messages?.[0]?.role !== "user") return null;
+    if (!(error instanceof UnacceptedStructuredSpawnError)) return null;
+    const next = candidates[nextIndex]!;
+    const runner = resolveStructuredRunner(next.provider, undefined, this.config.structuredRunner);
+    const model = next.model === "default"
+      ? getDefaultModelForProvider(this.config, next.provider) || null
+      : next.model;
+    const retry: SessionSnapshot = {
+      ...current,
+      provider: next.provider,
+      runner,
+      command: providerCliCommand(next.provider),
+      mode: next.mode,
+      autoApprovePermissions: shouldAutoApproveForMode(next.mode),
+      selectedModel: model,
+      thinkingEffort: next.thinkingEffort,
+      employeeCandidateIndex: nextIndex,
+      claudeSessionId: null,
+      messages: [],
+      status: "idle",
+      exitCode: null,
+      endedAt: null,
+      structuredState: {
+        ...defaultStructuredState(next.provider, runner),
+        model: model ?? undefined,
+      },
+    };
+    this.sessions.set(id, retry);
+    this.saveAuthoritativeSession(retry);
+    this.emitStructuredSnapshot(retry);
+    return this.sendMessage(id, prompt, { skills });
   }
 
   /** 往转发会话里追加别的参与者的发言。 */
@@ -1544,7 +1627,8 @@ export class StructuredSessionManager {
           content: [{ type: "text", text: prompt }],
         };
     const requestId = randomUUID();
-    if (session.provider === "pi" && isMissingPiSession(session.structuredState?.lastError, session.claudeSessionId)) {
+    if ((session.provider === "pi" && isMissingPiSession(session.structuredState?.lastError, session.claudeSessionId))
+      || (session.provider === "gemini" && isMissingGeminiSession(session.structuredState?.lastError))) {
       session = { ...session, claudeSessionId: null };
     }
     const updated: SessionSnapshot = {
@@ -1608,6 +1692,14 @@ export class StructuredSessionManager {
           logKind: "pi-json",
           installHint: "请安装 @earendil-works/pi-coding-agent（或兼容的 Pi CLI），或重跑 `wand service:install` 刷新服务的 PATH",
         });
+      } else if (provider === "gemini") {
+        await this.runClaudeStreaming(id, updated, prompt, requestId, {
+          runner: this.geminiRunner,
+          provider: "gemini",
+          commandLabel: "gemini -p --output-format stream-json",
+          logKind: "gemini-json",
+          installHint: "请安装 @google/gemini-cli ≥ 0.11（`npm i -g @google/gemini-cli@latest`），或重跑 `wand service:install` 刷新服务的 PATH",
+        });
       } else if (runner === "claude-sdk") {
         await this.runClaudeSdkStreaming(id, updated, prompt, requestId, skills);
       } else {
@@ -1620,7 +1712,11 @@ export class StructuredSessionManager {
       // Close handlers use this tagged error after they have already persisted
       // the detailed failure. Re-throw even if an ended-event listener removed
       // the session synchronously; there is no request-id marker to leak.
-      if (error instanceof PersistedStructuredRunnerError) throw error;
+      if (error instanceof PersistedStructuredRunnerError) {
+        const retry = this.retryEmployeeCandidate(id, session, prompt, error, skills);
+        if (retry) return await retry;
+        throw error;
+      }
       const current = this.sessions.get(id);
       if (!current) throw error;
       // stop() or a newer turn may have invalidated this execution while its
@@ -1628,6 +1724,8 @@ export class StructuredSessionManager {
       if (!this.isCurrentRequest(id, requestId)) {
         return current;
       }
+      const retry = this.retryEmployeeCandidate(id, session, prompt, error, skills);
+      if (retry) return await retry;
       this.settlePendingPermission(id, undefined, structuredPermissionDenied("会话执行失败"));
       this.turnApprovalMemory.delete(id);
       const failed: SessionSnapshot = {
@@ -2378,7 +2476,7 @@ export class StructuredSessionManager {
       const hint = result.spawnError.code === "ENOENT"
         ? "（PATH 中找不到 codex 可执行文件；请确认 codex 已安装，或重跑 `wand service:install` 刷新服务的 PATH）"
         : "";
-      throw new Error(`codex exec 启动失败：${result.spawnError.message}${hint}`);
+      throw new UnacceptedStructuredSpawnError(`codex exec 启动失败：${result.spawnError.message}${hint}`);
     }
 
     this.logger?.appendStructuredSpawn(sessionId, {
@@ -2537,7 +2635,7 @@ export class StructuredSessionManager {
       const hint = result.spawnError.code === "ENOENT"
         ? "（PATH 中找不到 grok；请安装 Grok Build CLI，或重跑 `wand service:install` 刷新服务 PATH）"
         : "";
-      throw new Error(`grok 启动失败：${result.spawnError.message}${hint}`);
+      throw new UnacceptedStructuredSpawnError(`grok 启动失败：${result.spawnError.message}${hint}`);
     }
     this.logger?.appendStructuredSpawn(sessionId, {
       kind: "grok-headless-close",
@@ -2698,7 +2796,7 @@ export class StructuredSessionManager {
       const hint = result.spawnError.code === "ENOENT"
         ? "（PATH 中找不到 opencode；请安装 opencode-ai，或重跑 `wand service:install` 刷新服务 PATH）"
         : "";
-      throw new Error(`opencode run 启动失败：${result.spawnError.message}${hint}`);
+      throw new UnacceptedStructuredSpawnError(`opencode run 启动失败：${result.spawnError.message}${hint}`);
     }
 
     this.logger?.appendStructuredSpawn(sessionId, {
@@ -2897,9 +2995,9 @@ export class StructuredSessionManager {
 
     if (result.spawnError) {
       const hint = result.spawnError.code === "ENOENT"
-        ? `（PATH 中找不到 ${provider === "qoder" ? "qodercli" : provider === "pi" ? "pi" : "claude"} 可执行文件；${options.installHint ?? "请确认 claude 已安装，或重跑 `wand service:install` 刷新服务的 PATH"}）`
+        ? `（PATH 中找不到 ${provider === "qoder" ? "qodercli" : provider === "gemini" ? "gemini" : provider === "pi" ? "pi" : "claude"} 可执行文件；${options.installHint ?? "请确认 claude 已安装，或重跑 `wand service:install` 刷新服务的 PATH"}）`
         : "";
-      throw new Error(`${commandLabel} 启动失败：${result.spawnError.message}${hint}`);
+      throw new UnacceptedStructuredSpawnError(`${commandLabel} 启动失败：${result.spawnError.message}${hint}`);
     }
 
     this.logger?.appendStructuredSpawn(sessionId, {
@@ -2936,6 +3034,9 @@ export class StructuredSessionManager {
         result.state,
       );
       if (provider === "pi" && isMissingPiSession(result.stderr, current.claudeSessionId)) {
+        failed.claudeSessionId = null;
+      }
+      if (provider === "gemini" && isMissingGeminiSession(`${result.stderr}\n${errorText}`)) {
         failed.claudeSessionId = null;
       }
       this.sessions.set(sessionId, failed);

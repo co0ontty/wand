@@ -27,7 +27,7 @@ function renderLogin(loginChecked: boolean, native = false): string {
   ) as string;
 }
 
-test("login illustration reuses all six local provider marks, without text or remote media", () => {
+test("login illustration reuses all seven local provider marks, without text or remote media", () => {
   const html = renderLogin(true);
   const scene = html.match(/<svg class="login-visual-scene"[\s\S]*?<\/svg>\s*<\/div>/)?.[0];
   assert.ok(scene);

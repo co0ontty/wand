@@ -18,7 +18,7 @@ export interface SessionActivity {
   readonly permissionBlocked: boolean;
 }
 
-const PROVIDER_CLI_IDS = new Set(["claude", "codex", "opencode", "grok", "qoder", "pi"]);
+const PROVIDER_CLI_IDS = new Set(["claude", "codex", "opencode", "grok", "qoder", "pi", "gemini"]);
 
 function isStructured(session: SessionActivitySource): boolean {
   return session.sessionKind === "structured" || session.runner === "claude-cli-print";

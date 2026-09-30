@@ -4,11 +4,13 @@ export interface NewSessionControllerSnapshot {
   open: boolean;
   dismissable: boolean;
   initialCwd: string;
+  initialEmployeeId: string;
   revision: number;
 }
 
 interface NewSessionOpenOptions {
   initialCwd?: string;
+  initialEmployeeId?: string;
 }
 
 export interface WandNewSessionController {
@@ -27,15 +29,17 @@ let snapshot: NewSessionControllerSnapshot = {
   open: false,
   dismissable: true,
   initialCwd: "",
+  initialEmployeeId: "",
   revision: 0,
 };
 const listeners = new Set<Listener>();
 
-function publish(open: boolean, initialCwd = ""): void {
+function publish(open: boolean, initialCwd = "", initialEmployeeId = ""): void {
   snapshot = {
     open,
     dismissable: true,
     initialCwd: open ? initialCwd.trim() : "",
+    initialEmployeeId: open ? initialEmployeeId.trim() : "",
     revision: snapshot.revision + 1,
   };
   for (const listener of listeners) listener();
@@ -53,7 +57,7 @@ export const newSessionController: WandNewSessionController = {
   open(options = {}): boolean {
     if (!runtime) return false;
     runtime.onOpen();
-    publish(true, options.initialCwd);
+    publish(true, options.initialCwd, options.initialEmployeeId);
     return true;
   },
 

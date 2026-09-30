@@ -45,7 +45,12 @@ const BUDGET = {
   js: 580_000,
   css: 110_000,
   firstLoad: 800_000,
-  lazy: 35_000,
+  // The team chunk now also contains employee management and candidate editors.
+  // Measured gzip: 38,007 B (was capped at 35,000 B); 40,000 B leaves ~5% headroom.
+  // This changes only the on-demand allowance (+5,000 B), not the shell's cold
+  // load or repeat HTML budgets. Opening a team/chat page fetches the chunk once;
+  // its content-versioned URL remains browser-cacheable until the bytes change.
+  lazy: 40_000,
 };
 const gzipBytes = (content) => gzipSync(Buffer.from(content, "utf8")).length;
 const rows = [

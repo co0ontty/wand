@@ -56,6 +56,21 @@ test("commands endpoint dispatches shell requests without a provider command", a
   const { appToken } = await login.json() as { appToken?: string };
   assert.ok(appToken);
 
+  for (const identity of [
+    { employeeId: "e_test123" },
+    { teamId: "team_test" },
+    { subject: { type: "employee", id: "e_test123" } },
+    { subject: { type: "team", id: "team_test" } },
+  ]) {
+    const rejected = await fetch(`${handle.urls[0]!.url}/api/commands`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${appToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ shell: true, cwd: root, ...identity }),
+    });
+    assert.equal(rejected.status, 400);
+  }
+  assert.equal(calls.length, 0, "PTY must reject non-CLI identity before starting a process");
+
   const response = await fetch(`${handle.urls[0]!.url}/api/commands`, {
     method: "POST",
     headers: {

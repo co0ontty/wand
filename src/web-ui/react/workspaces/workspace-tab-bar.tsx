@@ -135,7 +135,7 @@ export function WorkspaceTabBar(): React.ReactElement | null {
   // 避免空标签栏和选择器叠在一起。
   if (!context.taskId || taskLayout.windows.length === 0) return null;
 
-  const handleNewSession = async (target: WorkspaceSessionTarget, kind: WorkspaceSessionKind, model: string) => {
+  const handleNewSession = async (target: WorkspaceSessionTarget, kind: WorkspaceSessionKind, model: string, employeeId?: string) => {
     if (!context.taskId || !context.workspaceId) {
       throw new Error("当前任务上下文已失效，请重新打开任务后重试。");
     }
@@ -148,6 +148,7 @@ export function WorkspaceTabBar(): React.ReactElement | null {
       target,
       kind,
       model: model || undefined,
+      employeeId,
     };
     const result = await rt.newTaskSession(payload);
     const sessionId = typeof result === "string" ? result : null;
@@ -155,7 +156,7 @@ export function WorkspaceTabBar(): React.ReactElement | null {
     if (workspaceContextStore.getSnapshot().taskId !== payload.taskId) return;
     // The runtime refreshes task detail and persists the new window through its queue.
     void dispatch({ type: "session.select", id: sessionId });
-    rt.toast(target === "shell" ? "已新建空白终端" : `已新建 ${workspaceProviderLabel(target)} 对话`, "success");
+    rt.toast(employeeId ? "已开始员工对话" : target === "shell" ? "已新建空白终端" : `已新建 ${workspaceProviderLabel(target)} 对话`, "success");
   };
 
   const selectWindow = (window: WorkWindowLayout) => {

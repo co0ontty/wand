@@ -1071,12 +1071,14 @@ export class AiTeamRunner {
     }
 
     // 负责人的模型报错时停下来等用户（换模型或稍后回复即可接着来），不当成格式错误空转重试。
+    // 按真实角色身份发出正常对话气泡并展示完整报错，而不是次级 notice 小字。
     const leader = leaderOf(run.team);
     if (outcome.kind === "failed" && outcome.sessionError) {
       this.saveStep({ ...step, status: "failed", report: outcome.text, endedAt });
       this.postTurn(run, {
-        role: "assistant", notice: true, author: chatAuthor(leader, step.sessionId, this.actualAgent(leader, step)),
-        content: chatText(`负责人的模型出错：${outcome.text}\n可以去团队页换个模型，然后在群里回复一句让团队继续。`),
+        role: "assistant",
+        author: chatAuthor(leader, step.sessionId, this.actualAgent(leader, step)),
+        content: chatText(`我的模型调用失败，无法继续处理任务：\n\n\`\`\`\n${outcome.text}\n\`\`\`\n\n可以去团队设置页面为我更换可用模型，或者在群里回复我继续重试。`),
       });
       this.setStatus(run, "waiting_user", `负责人出错：${outcome.text}`);
       return;

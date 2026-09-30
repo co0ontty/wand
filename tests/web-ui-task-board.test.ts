@@ -178,7 +178,7 @@ test("issue helpers expose columns, grouping, sorting, and workspace options", (
   assert.notEqual(options[0]!.value, "");
   assert.match(options[1]!.label, /wand/);
   assert.match(options[1]!.label, /\/tmp\/wand/);
-  assert.equal(ISSUE_AGENT_PROVIDERS.length, 6);
+  assert.equal(ISSUE_AGENT_PROVIDERS.length, 7);
 
   // 哨兵值 ↔ workspaceId 的双向转换：null / 空串 / 真实 id 都要还原正确。
   assert.equal(issueWorkspaceSelectValue(null), ISSUE_NO_WORKSPACE);
@@ -238,7 +238,7 @@ test("only the doing column creates and assigns in one step", () => {
 
   const host = readFileSync(new URL("../src/web-ui/react/issues/task-board-host.tsx", import.meta.url), "utf8");
   // 创建链路和新建对话框共用同一个判定，避免「按钮写创建并指派但没派发」这类不一致。
-  assert.match(host, /issueCreateDispatches\(draft\.status\) && submitDescription && isDispatchableIssueAgent\(draft\.agent\)/);
+  assert.match(host, /issueCreateDispatches\(draft\.status\) && submitDescription && \(employee \|\| isDispatchableIssueAgent\(draft\.agent\)\)/);
   assert.match(host, /const createDispatches = issueCreateDispatches\(draft\.status\)/);
   // 运行模式始终可选：即使只创建任务，也要把工作模式写进全局默认。
   assert.match(host, /<div className="task-board-create-assign" aria-label=\{createDispatches \? "第一次指派" : "Agent 与运行模式"\}>/);
@@ -256,13 +256,14 @@ test("create form can assign the first agent from the description", () => {
   assert.match(composer, /可选/);
   assert.match(composer, /按描述自动生成/);
   assert.match(host, /指定项目目录/);
-  assert.match(composer, /第一次指派的 CLI 工具/);
+  assert.match(composer, /第一次指派给谁/);
   assert.match(composer, /第一次指派的思考深度/);
   assert.match(composer, /ariaLabel="运行模式"/);
   assert.match(composer, /issueAgentModeOptions\(draft\.agent\.provider\)/);
   assert.match(host, /作为第一个 Agent 的指派内容/);
-  assert.match(host, /submitDescription && isDispatchableIssueAgent\(draft\.agent\)/);
-  assert.match(host, /taskBoardRepository\.dispatch\(created\.id, draft\.agent/);
+  assert.match(host, /submitDescription && \(employee \|\| isDispatchableIssueAgent\(draft\.agent\)\)/);
+  assert.match(host, /taskBoardRepository\.dispatch\(created\.id, subject\.type === "cli" \? draft\.agent : null/);
+  assert.match(host, /\.\.\.\(subject\.type === "cli" \? \{ agent: draft\.agent \} : \{\}\)/);
   assert.match(host, /parentTaskId: draft\.parentTaskId \|\| null/);
   assert.match(composer, /ariaLabel="归属父任务"/);
   assert.match(host, /onCreateChild=\{\(\) => openCreate\("doing", selected\)\}/);
@@ -270,11 +271,11 @@ test("create form can assign the first agent from the description", () => {
   assert.match(host, /创建并指派/);
 
   assert.match(editor, /指派 Agent/);
-  assert.match(editor, /先输入提示词，再选 CLI 或团队直接派发/);
+  assert.match(editor, /先输入提示词，再选员工、团队或 CLI/);
   // 指派面板的执行配置控件与 AI 团队成员编辑共用 AgentFields，aria 标签按前缀拼出。
   const agentFields = readFileSync(new URL("../src/web-ui/react/issues/agent-fields.tsx", import.meta.url), "utf8");
   assert.match(editor, /<AgentFields[\s\S]*?ariaPrefix="任务"/);
-  assert.match(agentFields, /\$\{ariaPrefix\} CLI 工具/);
+  assert.match(agentFields, /\$\{ariaPrefix\}指派给/);
   assert.match(agentFields, /\$\{ariaPrefix\}模型/);
   assert.match(agentFields, /\$\{ariaPrefix\}思考深度/);
   assert.match(agentFields, /\$\{ariaPrefix\}工作模式/);
@@ -343,7 +344,7 @@ test("dropping an unassigned task into doing asks before sending the card descri
   assert.match(host, /用任务说明启动/);
   assert.match(host, /按这段说明派发/);
   assert.match(host, /只移入处理中/);
-  assert.match(host, /taskBoardRepository\.dispatch\(taskId, agent/);
+  assert.match(host, /taskBoardRepository\.dispatch\(taskId,[\s\S]*?moving\.executionSubject && moving\.executionSubject\.type !== "cli" \? null : agent/);
   // 派发用任务上的指派，未指派时沿用面板上次选择。
   assert.match(host, /const agent = dispatches \? agentOf\(moving, lastAgentRef\.current\) : null/);
   // 派发失败不回滚状态，只提示并保留任务在「处理中」。

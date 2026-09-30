@@ -18,16 +18,39 @@ function openAttention(item: AttentionItem, dispatch: ReturnType<typeof useUiDis
   taskBoardController.open("", "", "teams");
 }
 
+export function HomeAttentionBadge(): React.ReactElement | null {
+  const items = useAttentionItems();
+  const dispatch = useUiDispatch();
+  const snapshot = useUiStoreSnapshot();
+  const signature = sessionSignature(snapshot.sidebar.groups);
+
+  React.useEffect(() => {
+    refreshAttention();
+  }, [signature]);
+
+  if (items.length === 0) return null;
+
+  return (
+    <button
+      type="button"
+      className="sidebar-attention-badge"
+      title={`${items.length} 个报错，点开处理`}
+      aria-label={`${items.length} 个报错，点开处理`}
+      onClick={() => {
+        openAttention(items[0], dispatch);
+      }}
+    >
+      <WandIcon name="info" size={12} className="sidebar-attention-badge-icon" />
+      <span className="sidebar-attention-badge-label">{items.length} 个报错</span>
+    </button>
+  );
+}
+
 export function HomeAttention({ variant }: { variant: "home" | "sidebar" }): React.ReactElement | null {
   const items = useAttentionItems();
   const dispatch = useUiDispatch();
   const snapshot = useUiStoreSnapshot();
-  const narrow = variant === "sidebar"
-    && !snapshot.layout.sidebarDrawer
-    && snapshot.layout.sidebarPinned
-    && snapshot.layout.sidebarCollapsed;
   const signature = sessionSignature(snapshot.sidebar.groups);
-  const [open, setOpen] = React.useState(true);
 
   React.useEffect(() => {
     refreshAttention();
@@ -48,30 +71,8 @@ export function HomeAttention({ variant }: { variant: "home" | "sidebar" }): Rea
     );
   }
 
-  return (
-    <section className="home-attention is-sidebar" aria-label="需要处理的报错">
-      <button
-        type="button"
-        className="home-attention-trigger"
-        aria-expanded={open}
-        title={`${items.length} 个报错，点开处理`}
-        onClick={() => {
-          if (narrow) {
-            void dispatch({ type: "layout.drawer.collapse" });
-            setOpen(true);
-            return;
-          }
-          setOpen((value) => !value);
-        }}
-      >
-        <WandIcon name="info" size={16}/>
-        <span>{items.length} 个报错</span>
-      </button>
-      <div className={open ? "home-attention-panel is-open" : "home-attention-panel"}>
-        <AttentionList items={items} onOpen={openItem}/>
-      </div>
-    </section>
-  );
+  // 侧栏中的报错收成顶部 title 旁边的徽标，不再在此处渲染大横幅
+  return null;
 }
 
 function AttentionList({

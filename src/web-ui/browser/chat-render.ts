@@ -16,6 +16,7 @@ import { codexActivityRe, codexFooterRe, isPtyCodexNoiseLine, isPtySystemInfoNoi
 import { getToolDisplayName, getToolIcon } from "./tool-identity";
 import { localFilePreviewHref, localHttpPreviewHref } from "../react/local-preview/controller";
 import { catCoatGrid, memberCoatIndex } from "../react/ai-teams/cat-coats";
+import { cachedSiliconEmployee, subscribeSiliconEmployeeCache } from "../react/agents/employee-repository.js";
 import {
   agentRunAccentSeed,
   agentRunAgentTitle,
@@ -50,6 +51,11 @@ import "./local-preview-adapter";
           });
         }
       }
+
+      subscribeSiliconEmployeeCache(function() {
+        var selected = state.sessions.find(function(session) { return session.id === state.selectedId; });
+        if (selected && selected.employeeId) renderChat(true);
+      });
 
       state.chatRenderTimer = null;
       export function scheduleChatRender(immediate?) {
@@ -357,6 +363,23 @@ import "./local-preview-adapter";
             var localIndex = visibleCount - 1 - i; // Index within visible slice
             var originalIndex = localIndex + visibleOffset; // Index in full messages array
 
+            // 连续发言归拢判定：同一作者、间隔 < 60 分钟、中间无其他作者
+            var prevMsg = localIndex > 0 ? messages[localIndex - 1] : null;
+            var isGrouped = false;
+            if (prevMsg && prevMsg.role === msg.role) {
+              var sameAuthor = true;
+              if (msg.author || prevMsg.author) {
+                sameAuthor = (msg.author && prevMsg.author && msg.author.id === prevMsg.author.id);
+              }
+              if (sameAuthor) {
+                var tCurr = Date.parse(msg.completedAt || msg.createdAt || "");
+                var tPrev = Date.parse(prevMsg.completedAt || prevMsg.createdAt || "");
+                if (!isNaN(tCurr) && !isNaN(tPrev) && (tCurr - tPrev) >= 0 && (tCurr - tPrev) < 60 * 60_000) {
+                  isGrouped = true;
+                }
+              }
+            }
+
             // Find system info for this message position
             var sysInfo = null;
             for (var j = 0; j < systemInfo.length; j++) {
@@ -382,11 +405,26 @@ import "./local-preview-adapter";
               roundUsageByIndex[originalIndex] || null,
               originalIndex,
               agentRunIndex,
-              conversationToolResults
+              conversationToolResults,
+              isGrouped
             );
           }
 
-          // Add sentinel for loading older messages (DOM end = visual top in column-reverse)
+        // 思考中原位占位行（inFlight 且尾部无内容时原位呼吸）
+        if (selectedSession && selectedSession.inFlight && messages.length > 0) {
+          var lastMsg = messages[messages.length - 1];
+          if (lastMsg && lastMsg.role === "assistant" && (!lastMsg.content || (Array.isArray(lastMsg.content) && lastMsg.content.length === 0))) {
+            // 已有空助手消息，自带 typing-indicator
+          } else if (lastMsg && lastMsg.role === "user") {
+            // 在消息流尾部原位追加思考占位行
+            html = '<div class="chat-message assistant is-inflight-placeholder animate-in" data-role="assistant">' +
+              '<div class="chat-message-avatar assistant"><span class="chat-thinking-dot-pulse"></span></div>' +
+              '<div class="chat-message-bubble"><div class="typing-indicator"><span></span><span></span><span></span></div></div>' +
+            '</div>' + html;
+          }
+        }
+
+        // Add sentinel for loading older messages (DOM end = visual top in column-reverse)
           if (hasOlderMessages) {
             var loadMoreLabel = visibleOffset > 0
               ? ('加载更早的 ' + Math.min(state.chatPageSize, visibleOffset) + ' 条消息')
@@ -2098,6 +2136,22 @@ import "./local-preview-adapter";
 
       function chatAvatar(role, author?) {
         if (author && role === "assistant") return teamAuthorAvatar(author);
+        var selectedSession = state.sessions.find(function(session) { return session.id === state.selectedId; });
+        if (role === "assistant" && selectedSession && selectedSession.employeeId) {
+          var currentEmployee = cachedSiliconEmployee(selectedSession.employeeId);
+          var employee = {
+            id: selectedSession.employeeId,
+            name: currentEmployee?.name || selectedSession.employeeName || "硅基员工",
+            avatar: currentEmployee ? currentEmployee.avatar : selectedSession.employeeAvatar || "",
+          };
+          var employeeAvatar = employee.avatar.startsWith("data:image/")
+            ? '<img class="pixel-avatar-image" src="' + escapeHtml(employee.avatar) + '" alt="" />'
+            : renderAvatarFallback(buildPixelSvg(catCoatGrid(memberCoatIndex(employee)).map(function(row) {
+                return row.map(function(fill) { return fill || _AVATAR_T; });
+              })));
+          return '<div class="chat-message-avatar assistant">' + employeeAvatar +
+            '<span class="avatar-name">' + escapeHtml(employee.name) + '</span></div>';
+        }
         var personaRole = role === "user" ? "user" : "assistant";
         var persona = getStructuredChatPersona(personaRole);
         var avatarInner = persona.avatar
@@ -2109,7 +2163,7 @@ import "./local-preview-adapter";
         '</div>';
       }
 
-      function renderChatMessage(msg, roundUsage, messageIndex, agentRunIndex, conversationToolResults) {
+      function renderChatMessage(msg, roundUsage, messageIndex, agentRunIndex, conversationToolResults, isGrouped?) {
         if (msg.notice) return renderChatNotice(msg, messageIndex);
         // Thinking card (deep thought) — from PTY parsing
         if (msg.role === "thinking") {
@@ -2141,15 +2195,16 @@ import "./local-preview-adapter";
 
         // Structured content blocks (from JSON chat mode)
         if (Array.isArray(msg.content)) {
-          return renderStructuredMessage(msg, roundUsage, messageIndex, agentRunIndex, conversationToolResults);
+          return renderStructuredMessage(msg, roundUsage, messageIndex, agentRunIndex, conversationToolResults, isGrouped);
         }
 
         // Legacy string content (from PTY parsing)
-        var avatar = chatAvatar(msg.role);
+        var avatar = isGrouped || msg.role === "user" ? "" : chatAvatar(msg.role);
         var bubbleContent = msg.role === "assistant"
           ? renderMarkdown(msg.content)
           : (msg.role === "user" ? renderUserText(msg.content) : escapeHtml(msg.content));
-        return '<div class="chat-message ' + msg.role + '">' +
+        var groupedAttr = isGrouped ? ' data-grouped="true"' : "";
+        return '<div class="chat-message ' + msg.role + '"' + groupedAttr + ' data-role="' + escapeHtml(msg.role) + '">' +
           renderChatMessageTime(msg) +
           avatar +
           '<div class="chat-message-bubble">' + bubbleContent + '</div>' +
@@ -2668,7 +2723,7 @@ import "./local-preview-adapter";
         return html;
       }
 
-      function renderStructuredMessage(msg, roundUsage, messageIndex, agentRunIndex, conversationToolResults) {
+      function renderStructuredMessage(msg, roundUsage, messageIndex, agentRunIndex, conversationToolResults, isGrouped?) {
         _currentMessageGlobalIndex = typeof messageIndex === "number" ? messageIndex : -1;
         var role = msg.role;
         var messageKey = getMessageKey(msg, messageIndex);
@@ -2676,18 +2731,20 @@ import "./local-preview-adapter";
         var usageHtml = role === "assistant" ? renderUsageSummaryHtml(roundUsage) : "";
         var content = Array.isArray(msg.content) ? msg.content : [];
         var isQueued = role === "user" && content.some(function(b) { return b && b.__queued; });
+        var avatarHtml = (isGrouped || role === "user") ? "" : chatAvatar(role, msg.author);
+        var groupedAttr = isGrouped ? ' data-grouped="true"' : "";
 
         if (content.length === 0) {
           if (role === "assistant") {
-            return '<div class="chat-message ' + role + '">' +
+            return '<div class="chat-message ' + role + '"' + groupedAttr + ' data-role="' + escapeHtml(role) + '">' +
               timeHtml +
-              chatAvatar(role, msg.author) +
+              avatarHtml +
               '<div class="chat-message-content"><div class="typing-indicator"><span></span><span></span><span></span></div>' + usageHtml + '</div>' +
             '</div>';
           }
-          return '<div class="chat-message ' + role + ' empty-message" data-message-key="' + escapeHtml(messageKey) + '">' +
+          return '<div class="chat-message ' + role + ' empty-message"' + groupedAttr + ' data-role="' + escapeHtml(role) + '" data-message-key="' + escapeHtml(messageKey) + '">' +
             timeHtml +
-            chatAvatar(role, msg.author) +
+            avatarHtml +
             '<div class="chat-message-content"><span class="empty-message-hint">（空消息）</span></div>' +
           '</div>';
         }
@@ -2741,9 +2798,9 @@ import "./local-preview-adapter";
 
         var queuedClass = isQueued ? " queued" : "";
         var queuedBadge = isQueued ? '<span class="queued-badge">排队中</span>' : "";
-        return '<div class="chat-message ' + role + queuedClass + '" data-message-key="' + escapeHtml(messageKey) + '">' +
+        return '<div class="chat-message ' + role + queuedClass + '"' + groupedAttr + ' data-role="' + escapeHtml(role) + '" data-message-key="' + escapeHtml(messageKey) + '">' +
           timeHtml +
-          chatAvatar(role, msg.author) +
+          avatarHtml +
           '<div class="chat-message-content">' + bodyHtml + queuedBadge + usageHtml + '</div>' +
         '</div>';
       }
@@ -3490,6 +3547,15 @@ import "./local-preview-adapter";
         var tcTruncated = toolResult && toolResult._truncated === true;
         var collapsedClass = shouldExpand ? "" : " collapsed";
         var toggleHtml = '<span class="tool-use-toggle">▼</span>';
+        var fallbackChipHtml = "";
+        if (block && block.dispatchInfo && block.dispatchInfo.usedCandidate > 0) {
+          var skippedReason = block.dispatchInfo.skipped && block.dispatchInfo.skipped[0] ? block.dispatchInfo.skipped[0].reason : "首选不可用";
+          fallbackChipHtml = '<div class="tool-use-downgrade-chip" role="status">' +
+            iconSvg("info", { size: 11, strokeWidth: 1.8 }) +
+            '<span>首选不可用，已自动降级：' + escapeHtml(skippedReason) + '</span>' +
+          '</div>';
+        }
+
         return '<div class="tool-use-card ' + statusClass + collapsedClass + '" data-expand-kind="tool-card" data-expand-key="' + escapeHtml(expandKey) + '" data-tool-use-id="' + escapeHtml(toolId) + '"' + (tcTruncated ? ' data-truncated="true"' : '') + '>' +
           '<div class="tool-use-header" role="button" tabindex="0" aria-expanded="' + (shouldExpand ? 'true' : 'false') + '" data-tool-toggle onclick="__tcToggle(event,this)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();__tcToggle(event,this);}">' +
             '<span class="tool-use-icon">' + headerIcon + '</span>' +
@@ -3502,6 +3568,7 @@ import "./local-preview-adapter";
             '<pre class="tool-use-content">' + escapeHtml(fullJson) + '</pre>' +
             (resultHtml ? '<div class="tool-use-result">' + resultHtml + '</div>' : '') +
           '</div>' +
+          fallbackChipHtml +
         '</div>';
       }
 

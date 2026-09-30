@@ -5,7 +5,7 @@ import { RUN_STATUS } from "../issues/team-run-panel";
 import { taskBoardController } from "../issues/task-board-controller";
 import { SidebarToggleIcon } from "../shell/sidebar-toggle-icon";
 import { WandBadge, WandBreadcrumb, WandButton, WandIcon, WandIconButton } from "../ui";
-import { TeamAvatar, type TeamAvatarState } from "./avatar";
+import { TeamAvatar, TeamAvatarStack, type TeamAvatarState } from "./avatar";
 import { aiTeamsRepository, subscribeAiTeamDefinitionChanges, subscribeAiTeamRunChanges } from "./repository";
 import { displayTeamOf, mergeTeamChatDetail, TeamChatView } from "./team-chat-view";
 
@@ -229,6 +229,9 @@ export function TeamChatPage({
         >
           <WandIcon name="chevronLeft"/>
         </WandIconButton>
+        {visibleDetail ? <span className="wand-team-chat-heading-avatar" aria-hidden="true">
+          <TeamAvatarStack members={displayTeamOf(visibleDetail).members} max={2} size="sm" />
+        </span> : null}
         <div className="task-board-heading-copy">
           <WandBreadcrumb
             variant="title"

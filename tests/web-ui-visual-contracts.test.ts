@@ -60,6 +60,18 @@ test("the task welcome glyph remains visible on the paper surface", () => {
   assert.doesNotMatch(icon, /color: white/);
 });
 
+test("web sidebar uses a create row, two destinations, and a marked session tree", () => {
+  const start = styles.indexOf("/* ========================================================================\n   Web sidebar hierarchy");
+  assert.ok(start >= 0, "missing web sidebar hierarchy block");
+  const block = styles.slice(start, styles.indexOf("/* ── GitHub", start));
+  assert.match(block, /grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\)/);
+  assert.match(block, /\.sidebar-feature-create \{\s*grid-column: 1 \/ -1/);
+  assert.match(block, /\.sidebar-refined \.workspace-session-mark \{\s*display: inline-flex/);
+  assert.match(block, /\.sidebar-feature-badge \{/);
+  assert.match(block, /border-left: 1px solid color-mix\(in srgb, var\(--accent\) 22%/);
+  assert.match(block, /\.sidebar\.pinned\.collapsed[\s\S]*span:not\(\.sidebar-feature-badge\)/);
+});
+
 test("hover actions preserve title width and keyboard access", () => {
   const start = styles.indexOf("/* Reserve the action gutter");
   assert.ok(start >= 0);

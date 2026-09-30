@@ -194,6 +194,7 @@ test("run actions map state conflicts to 409 and unknown runs to 404", async (t)
   assert.equal(started.status, 202);
   assert.equal(started.json.run.status, "running");
   assert.equal(started.json.steps.length, 1);
+  assert.deepEqual(storage.getWandTask(task.id)?.executionSubject, { type: "team", id: team.id });
 
   assert.equal((await call(`${url}/api/wand-tasks/${task.id}/team-runs`, "POST", { teamId: team.id })).status, 409);
   assert.equal((await call(`${url}/api/ai-team-runs/${started.json.run.id}/approve`, "POST")).status, 409);
@@ -256,6 +257,7 @@ test("[T5] a successful kickoff creates the team_direct card and returns the run
   assert.equal(card.workspaceId, project.id, "显式落已校验项目，不静默兜到 scratch（N2）");
   assert.deepEqual(card.labels, ["team_direct"]);
   assert.equal(card.status, "doing");
+  assert.deepEqual(card.executionSubject, { type: "team", id: team.id });
   assert.equal(card.description, note);
   assert.ok(card.title.length <= 40 && card.title.startsWith("给 README"), `首行走既有截断：${card.title}`);
   assert.equal(card.milestoneId, storage.ensureDefaultWandMilestone().id, "没选迭代落默认迭代");

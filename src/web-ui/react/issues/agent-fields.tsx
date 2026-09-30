@@ -1,5 +1,5 @@
 import * as React from "react";
-import type { AiTeam } from "../../../ai-team-types";
+import type { AiTeam, SiliconEmployee } from "../../../ai-team-types";
 import type { WandTaskAgent } from "../../../task-types";
 import { TeamAvatarStack } from "../ai-teams/avatar";
 import { WandSelect } from "../ui";
@@ -13,14 +13,20 @@ import {
 } from "./task-board-agent";
 
 const TEAM_VALUE_PREFIX = "team:";
+const EMPLOYEE_VALUE_PREFIX = "employee:";
 
 /** CLI 工具下拉的候选：CLI 在前，团队接在后面，值带 "team:" 前缀区分。 */
 export function agentTargetOptions(
   providerOptions: Array<{ value: IssueAgentProvider; label: string }>,
   teams: ReadonlyArray<AiTeam> | null | undefined,
+  employees?: ReadonlyArray<SiliconEmployee> | null,
 ): Array<{ value: string; label: string }> {
   return [
     ...providerOptions,
+    ...(employees ?? []).filter((employee) => !employee.archivedAt).map((employee) => ({
+      value: `${EMPLOYEE_VALUE_PREFIX}${employee.id}`,
+      label: `员工 · ${employee.name}`,
+    })),
     ...(teams ?? []).map((team) => ({ value: `${TEAM_VALUE_PREFIX}${team.id}`, label: `团队 · ${team.name}` })),
   ];
 }
@@ -28,6 +34,10 @@ export function agentTargetOptions(
 /** 选中的是团队时返回团队 id，否则返回空串。 */
 export function agentTargetTeamId(value: string): string {
   return value.startsWith(TEAM_VALUE_PREFIX) ? value.slice(TEAM_VALUE_PREFIX.length) : "";
+}
+
+export function agentTargetEmployeeId(value: string): string {
+  return value.startsWith(EMPLOYEE_VALUE_PREFIX) ? value.slice(EMPLOYEE_VALUE_PREFIX.length) : "";
 }
 
 const AGENT_KIND_OPTIONS = [
@@ -56,6 +66,9 @@ export function AgentFields({
   teams,
   teamId = "",
   onTeamChange,
+  employees,
+  employeeId = "",
+  onEmployeeChange,
   onChange,
 }: {
   agent: WandTaskAgent;
@@ -68,26 +81,40 @@ export function AgentFields({
   teams?: ReadonlyArray<AiTeam> | null;
   teamId?: string;
   onTeamChange?(teamId: string): void;
+  employees?: ReadonlyArray<SiliconEmployee> | null;
+  employeeId?: string;
+  onEmployeeChange?(employeeId: string): void;
   onChange(agent: WandTaskAgent): void;
 }): React.ReactElement {
   const team = teamId ? teams?.find((item) => item.id === teamId) ?? null : null;
+  const employee = employeeId ? employees?.find((item) => item.id === employeeId) ?? null : null;
   const selectTarget = (value: string): void => {
     const nextTeam = agentTargetTeamId(value);
+    const nextEmployee = agentTargetEmployeeId(value);
     onTeamChange?.(nextTeam);
-    if (!nextTeam) onChange(withIssueAgentProvider(agent, value as WandTaskAgent["provider"], catalog));
+    onEmployeeChange?.(nextEmployee);
+    if (nextTeam || nextEmployee) {
+      if (agent.kind !== "structured") onChange({ ...agent, kind: "structured" });
+      return;
+    }
+    onChange(withIssueAgentProvider(agent, value as WandTaskAgent["provider"], catalog));
   };
   return <>
-    <AgentField label="CLI 工具">
+    <AgentField label={onTeamChange || onEmployeeChange ? "指派给" : "CLI 工具"}>
       {providerOptions ? <WandSelect
-        value={team ? `${TEAM_VALUE_PREFIX}${team.id}` : agent.provider}
-        options={onTeamChange ? agentTargetOptions(providerOptions, teams) : providerOptions}
-        ariaLabel={`${ariaPrefix} CLI 工具`}
+        value={employee ? `${EMPLOYEE_VALUE_PREFIX}${employee.id}` : team ? `${TEAM_VALUE_PREFIX}${team.id}` : agent.provider}
+        options={onTeamChange || onEmployeeChange ? agentTargetOptions(providerOptions, teams, employees) : providerOptions}
+        ariaLabel={`${ariaPrefix}指派给`}
         className="task-board-native-select"
         disabled={disabled}
         onValueChange={selectTarget}
       /> : <span role="status">正在加载工具列表…</span>}
     </AgentField>
-    {team ? <AgentField label="团队成员">
+    {employee ? <AgentField label="执行顺序">
+      <span className="task-board-team-target">
+        <span>{employee.agents.length} 个结构化候选 · 按顺序降级</span>
+      </span>
+    </AgentField> : team ? <AgentField label="团队成员">
       <span className="task-board-team-target">
         <TeamAvatarStack members={team.members}/>
         <span>{team.members.length} 人 · 由负责人拆解分派</span>

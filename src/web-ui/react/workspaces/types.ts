@@ -80,6 +80,9 @@ export interface WorkspaceSessionSummary {
   ptyBusy?: boolean;
   providerCliActive?: boolean;
   inFlight?: boolean;
+  employeeId?: string;
+  employeeName?: string;
+  employeeAvatar?: string;
   /** 这条会话是 AI 团队的群聊 relay 会话；服务端 join ai_team_runs 后带上入口信息。 */
   teamChat?: WorkspaceSessionTeamChat;
   /** 这条会话是 AI 团队派发出来的成员工作会话；服务端 join ai_team_steps 后带上这一步的身份。 */
@@ -88,6 +91,7 @@ export interface WorkspaceSessionSummary {
 
 /** 群聊标记的数据来源：ai_team_runs 中该 chat_session_id 最近一次运行（服务端 AiTeamRunChatMarker）。 */
 export interface WorkspaceSessionTeamChat {
+  teamId: string;
   runId: string;
   teamName: string;
   memberCount: number;
@@ -317,6 +321,8 @@ export interface NewTaskSessionPayload {
   prompt?: string;
   /** 启动会话时使用的模型 id；空串表示跟随服务端默认。 */
   model?: string;
+  /** Structured-only employee identity; the server resolves its ordered CLI candidates. */
+  employeeId?: string;
 }
 
 interface StartWorkspaceMergeAgentPayload {

@@ -36,6 +36,7 @@ test("PTY resume policy supports every provider-native CLI syntax", () => {
     ["opencode", "opencode --mini", "ses_123", "opencode --mini --session ses_123"],
     ["grok", "grok --minimal", "019f6f1f-fd54-7d40-aa70-9f42f1be2a03", "grok --minimal --resume 019f6f1f-fd54-7d40-aa70-9f42f1be2a03"],
     ["qoder", "qodercli --model coder", "qs_123", "qodercli --model coder --resume qs_123"],
+    ["gemini", "gemini --model gemini-2.5-pro", "019f6f1f-fd54-7d40-aa70-9f42f1be2a03", "gemini --model gemini-2.5-pro --resume 019f6f1f-fd54-7d40-aa70-9f42f1be2a03"],
   ] as const;
 
   for (const [provider, command, id, expected] of cases) {
@@ -47,8 +48,8 @@ test("PTY resume policy supports every provider-native CLI syntax", () => {
   }
 });
 
-test("PTY resume replaces a caller-assigned Grok or Qoder session ID", () => {
-  for (const provider of ["grok", "qoder"] as const) {
+test("PTY resume replaces a caller-assigned Grok, Qoder, or Gemini session ID", () => {
+  for (const provider of ["grok", "qoder", "gemini"] as const) {
     const executable = provider === "qoder" ? "qodercli" : provider;
     const command = `${executable} --session-id original-id`;
     assert.equal(getProviderCommandSessionId(provider, command), "original-id");

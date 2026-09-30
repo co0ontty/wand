@@ -56,7 +56,7 @@ function normalizePaths(value: unknown): NewSessionPath[] {
 export function supportedModes(provider: NewSessionProvider): readonly NewSessionMode[] {
   if (provider === "codex") return ["full-access"];
   if (provider === "opencode" || provider === "grok" || provider === "pi") return ["default", "full-access", "managed"];
-  if (provider === "qoder") return ["default", "full-access", "auto-edit", "managed"];
+  if (provider === "qoder" || provider === "gemini") return ["default", "full-access", "auto-edit", "managed"];
   return ["default", "full-access", "auto-edit", "native", "managed"];
 }
 
@@ -77,6 +77,7 @@ function structuredRunner(provider: NewSessionProvider, configured: string): str
   if (provider === "grok") return "grok-cli-headless";
   if (provider === "qoder") return "qoder-cli-print";
   if (provider === "pi") return "pi-cli-json";
+  if (provider === "gemini") return "gemini-cli-json";
   return configured === "sdk" || configured === "claude-sdk"
     ? "claude-sdk"
     : "claude-cli-print";
@@ -135,6 +136,7 @@ export function buildCreateRequest(
     runner: structuredRunner(form.provider, defaults.structuredRunner),
     model: model || undefined,
     thinkingEffort: thinkingEffort || undefined,
+    ...(form.employeeId ? { employeeId: form.employeeId } : {}),
   };
 }
 
@@ -212,6 +214,7 @@ export class HttpNewSessionRepository implements NewSessionRepository {
           worktreeEnabled: request.worktreeEnabled,
           model: request.model,
           thinkingEffort: request.thinkingEffort,
+          employeeId: request.employeeId,
           sessionSource: request.sessionSource,
         }
       : {

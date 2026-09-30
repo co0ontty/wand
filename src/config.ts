@@ -34,6 +34,7 @@ export const PREFERENCE_KEYS = [
   "defaultGrokModel",
   "defaultQoderModel",
   "defaultPiModel",
+  "defaultGeminiModel",
   "commitCli",
   "commitModel",
   "commitAiSource",
@@ -111,6 +112,7 @@ export const defaultConfig = (): WandConfig => ({
   defaultGrokModel: "",
   defaultQoderModel: "",
   defaultPiModel: "",
+  defaultGeminiModel: "",
   commitCli: "claude",
   commitModel: "",
   commitAiSource: "cli",
@@ -241,6 +243,15 @@ export async function loadConfigWithStorage(configPath: string, storage: WandSto
 
   // password: DB 优先映射到 runtime config，让 config:show 与 server.ts 都看到真值
   applyStoragePassword(config, storage);
+
+  // 内置「系统运维」员工：Wand 自有 AI 调用（commit message / 标题 / 提示词优化 /
+  // 员工起草）都由它执行。这里只做幂等补齐——首次按用户已有的系统 AI 工具与默认
+  // provider 建首条候选，之后候选由用户在员工设置里维护，不再回写 config。
+  storage.ensureSystemSiliconEmployee({
+    cli: config.systemAiCli,
+    model: config.systemAiModel,
+    provider: config.defaultProvider,
+  });
 
   // 如果 JSON 里有偏好字段（说明是老版本配置或刚迁移），重写一次干净版本
   const hasLegacyPrefs = PREFERENCE_KEYS.some((key) => key in rawInput);
@@ -374,6 +385,10 @@ export function applyStoragePreferences(config: WandConfig, storage: WandStorage
     const v = storage.getPreference<string>(preferenceStorageKey("defaultPiModel"), defaults.defaultPiModel ?? "");
     if (typeof v === "string") config.defaultPiModel = v.trim();
   }
+  if (storage.hasPreference(preferenceStorageKey("defaultGeminiModel"))) {
+    const v = storage.getPreference<string>(preferenceStorageKey("defaultGeminiModel"), defaults.defaultGeminiModel ?? "");
+    if (typeof v === "string") config.defaultGeminiModel = v.trim();
+  }
   if (storage.hasPreference(preferenceStorageKey("commitCli"))) {
     const v = storage.getPreference<string>(preferenceStorageKey("commitCli"), defaults.commitCli ?? "claude");
     if (v === "claude" || v === "codex" || v === "opencode") config.commitCli = v;
@@ -496,6 +511,12 @@ export function writePreferenceToStorage(
       const v = typeof value === "string" ? value.trim() : "";
       storage.setPreference(dbKey, v);
       config.defaultPiModel = v;
+      break;
+    }
+    case "defaultGeminiModel": {
+      const v = typeof value === "string" ? value.trim() : "";
+      storage.setPreference(dbKey, v);
+      config.defaultGeminiModel = v;
       break;
     }
     case "commitCli": {
@@ -796,6 +817,7 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
     defaultGrokModel: typeof input.defaultGrokModel === "string" ? input.defaultGrokModel.trim() : defaults.defaultGrokModel,
     defaultQoderModel: typeof input.defaultQoderModel === "string" ? input.defaultQoderModel.trim() : defaults.defaultQoderModel,
     defaultPiModel: typeof input.defaultPiModel === "string" ? input.defaultPiModel.trim() : defaults.defaultPiModel,
+    defaultGeminiModel: typeof input.defaultGeminiModel === "string" ? input.defaultGeminiModel.trim() : defaults.defaultGeminiModel,
     commitCli: input.commitCli === "codex" || input.commitCli === "opencode" ? input.commitCli : "claude",
     commitModel: typeof input.commitModel === "string" ? input.commitModel.trim() : defaults.commitModel,
     commitAiSource: input.commitAiSource === "api" ? "api" : "cli",
@@ -820,13 +842,14 @@ function configuredModelId(value: string | undefined): string {
   return trimmed === "default" ? "" : trimmed;
 }
 
-export function getProviderDefaultModels(config: Pick<WandConfig, "defaultModel" | "defaultCodexModel" | "defaultOpenCodeModel" | "defaultGrokModel" | "defaultQoderModel" | "defaultPiModel">): {
+export function getProviderDefaultModels(config: Pick<WandConfig, "defaultModel" | "defaultCodexModel" | "defaultOpenCodeModel" | "defaultGrokModel" | "defaultQoderModel" | "defaultPiModel" | "defaultGeminiModel">): {
   claude: string;
   codex: string;
   opencode: string;
   grok: string;
   qoder: string;
   pi: string;
+  gemini: string;
 } {
   return {
     claude: configuredModelId(config.defaultModel),
@@ -835,11 +858,12 @@ export function getProviderDefaultModels(config: Pick<WandConfig, "defaultModel"
     grok: configuredModelId(config.defaultGrokModel),
     qoder: configuredModelId(config.defaultQoderModel),
     pi: configuredModelId(config.defaultPiModel),
+    gemini: configuredModelId(config.defaultGeminiModel),
   };
 }
 
 export function getDefaultModelForProvider(
-  config: Pick<WandConfig, "defaultModel" | "defaultCodexModel" | "defaultOpenCodeModel" | "defaultGrokModel" | "defaultQoderModel" | "defaultPiModel">,
+  config: Pick<WandConfig, "defaultModel" | "defaultCodexModel" | "defaultOpenCodeModel" | "defaultGrokModel" | "defaultQoderModel" | "defaultPiModel" | "defaultGeminiModel">,
   provider: SessionProvider | undefined,
 ): string {
   const defaults = getProviderDefaultModels(config);
@@ -848,6 +872,7 @@ export function getDefaultModelForProvider(
   if (provider === "grok") return defaults.grok;
   if (provider === "qoder") return defaults.qoder;
   if (provider === "pi") return defaults.pi;
+  if (provider === "gemini") return defaults.gemini;
   return defaults.claude;
 }
 

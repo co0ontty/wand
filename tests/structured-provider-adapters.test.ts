@@ -7,6 +7,7 @@ import { applyOpenCodeEvent, buildOpenCodeArgs } from "../src/structured-opencod
 import { applyGrokEvent, buildGrokArgs } from "../src/structured-grok-adapter.js";
 import { buildQoderArgs } from "../src/structured-qoder-adapter.js";
 import { buildPiArgs } from "../src/structured-pi-adapter.js";
+import { buildGeminiArgs } from "../src/structured-gemini-adapter.js";
 import { commandWithSystemPrompt, promptWithSystemFallback } from "../src/structured-provider-common.js";
 import type { SessionSnapshot } from "../src/types.js";
 

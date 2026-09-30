@@ -37,6 +37,7 @@ import {
   type IterationCommitContext,
 } from "./iteration-log.js";
 import { inferProviderFromCommand, isSessionProvider, providerCliCommand, SESSION_PROVIDERS } from "./session-provider.js";
+import { selectEmployeeCandidate } from "./silicon-employee-dispatch.js";
 import { buildProviderResumeCommand, isProviderSessionId } from "./resume-policy.js";
 import { parseBoundedInteger } from "./request-limits.js";
 import { asyncRoute } from "./express-async.js";
@@ -621,32 +622,54 @@ export function registerSessionRoutes(
   });
 
   app.post("/api/structured-sessions", asyncRoute(async (req, res) => {
-    const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner; provider?: string; worktreeEnabled?: boolean; model?: string; thinkingEffort?: string; sessionSource?: unknown; automationId?: unknown; workspaceId?: string; workspaceTaskId?: string; respondImmediately?: unknown; systemPrompt?: string };
+    const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner; provider?: string; worktreeEnabled?: boolean; model?: string; thinkingEffort?: string; sessionSource?: unknown; automationId?: unknown; workspaceId?: string; workspaceTaskId?: string; respondImmediately?: unknown; systemPrompt?: string; employeeId?: unknown; teamId?: unknown; kind?: unknown; subject?: { type?: unknown } };
     try {
-      if (body.provider && !isSessionProvider(body.provider)) {
-        res.status(400).json({ error: "结构化会话当前仅支持 Claude、Codex、OpenCode、Grok、Qoder 或 Pi provider。" });
+      if (body.teamId !== undefined || body.subject?.type === "team") {
+        throw new Error("AI 团队请通过团队开工入口创建群聊。");
+      }
+      if (body.subject?.type === "employee") throw new Error("员工会话请传 employeeId。");
+      const employeeId = body.employeeId === undefined ? "" : typeof body.employeeId === "string" ? body.employeeId.trim() : null;
+      if (employeeId === null || (body.employeeId !== undefined && !employeeId)) {
+        throw new Error("employeeId 必须是员工 ID。");
+      }
+      if (employeeId && (body.kind === "pty" || body.runner === "pty")) {
+        throw new Error("硅基员工只支持结构化会话。");
+      }
+      const employee = employeeId ? storage.getSiliconEmployee(employeeId) : null;
+      if (employeeId && (!employee || employee.archivedAt)) throw new Error("硅基员工不存在或已归档。");
+      const selectedEmployeeCandidate = employee ? selectEmployeeCandidate(employee) : null;
+      const employeeAgent = selectedEmployeeCandidate?.agent;
+      if (!employee && body.provider && !isSessionProvider(body.provider)) {
+        res.status(400).json({ error: "结构化会话当前仅支持 Claude、Codex、OpenCode、Grok、Qoder、Pi 或 Gemini provider。" });
         return;
       }
-      const provider: SessionProvider = isSessionProvider(body.provider) ? body.provider : "claude";
+      const provider: SessionProvider = employeeAgent?.provider ?? (isSessionProvider(body.provider) ? body.provider : "claude");
       const rawModel = typeof body.model === "string" ? body.model.trim() : "";
       const origin = parseSessionCreationOrigin(body);
       const cwd = resolveSessionCwd(body.cwd, config.defaultCwd);
       const snapshot = structured.createSession({
         cwd,
-        mode: parseExecutionMode(body.mode, defaultMode),
+        mode: employeeAgent?.mode ?? parseExecutionMode(body.mode, defaultMode),
         provider,
         // Omit runner to let StructuredSessionManager apply the configured
         // Claude default; explicit values are validated against the provider.
-        runner: body.runner,
+        runner: employee ? undefined : body.runner,
         worktreeEnabled: body.worktreeEnabled === true,
-        model: rawModel || getDefaultModelForProvider(config, provider) || undefined,
-        thinkingEffort: typeof body.thinkingEffort === "string"
+        model: employeeAgent
+          ? employeeAgent.model === "default" ? getDefaultModelForProvider(config, provider) || undefined : employeeAgent.model
+          : rawModel || getDefaultModelForProvider(config, provider) || undefined,
+        thinkingEffort: employeeAgent?.thinkingEffort ?? (typeof body.thinkingEffort === "string"
           ? (body.thinkingEffort as SessionSnapshot["thinkingEffort"])
-          : config.defaultThinkingEffort,
+          : config.defaultThinkingEffort),
         workspaceId: resolveWorkspaceIdForNewSession(storage, cwd, body.workspaceId),
         workspaceTaskId: body.workspaceTaskId,
         // 角色与规则走系统提示通道，不拼进 prompt（见 AGENTS.md「Session 输入契约」）。
-        systemPrompt: body.systemPrompt,
+        systemPrompt: employee?.prompt ?? body.systemPrompt,
+        employeeId: employee?.id,
+        employeeName: employee?.name,
+        employeeAvatar: employee?.avatar,
+        employeeCandidates: employee?.agents,
+        employeeCandidateIndex: selectedEmployeeCandidate?.index,
         ...origin,
       });
       onSessionCreated?.(snapshot.cwd);
@@ -669,7 +692,7 @@ export function registerSessionRoutes(
           return;
         }
         const finished = await structured.sendMessage(snapshot.id, prompt);
-        res.status(201).json(finished);
+        res.status(201).json(sessionResponseDTO(finished));
         return;
       }
       res.status(201).json(sessionResponseDTO(snapshot));
@@ -1036,7 +1059,7 @@ export function registerSessionRoutes(
       archiveRelatedTasks?: boolean;
     };
     try {
-      const ai = resolveCommitAiContext(snapshot, config);
+      const ai = resolveCommitAiContext(snapshot, config, undefined, storage.getSystemSiliconEmployee());
       // 自动 message + 迭代模式：拿本轮提示词当输入；提交成功后标记已用掉。
       const context = await iterationCommitInput(storage, snapshot, body);
       const result = await runQuickCommitWithFallback({
@@ -1132,7 +1155,7 @@ export function registerSessionRoutes(
     }
     const body = (req.body ?? {}) as { mode?: unknown; entryIds?: unknown; includeDiff?: boolean };
     try {
-      const ai = resolveCommitAiContext(snapshot, config);
+      const ai = resolveCommitAiContext(snapshot, config, undefined, storage.getSystemSiliconEmployee());
       const context = await iterationCommitInput(storage, snapshot, body);
       const result = await generateCommitMessageOnly(snapshot.cwd, config.language ?? "", {
         ...ai,
@@ -1169,7 +1192,7 @@ export function registerSessionRoutes(
     }
     const body = (req.body ?? {}) as { tag?: string; autoTag?: boolean; push?: boolean };
     try {
-      const ai = resolveCommitAiContext(snapshot, config);
+      const ai = resolveCommitAiContext(snapshot, config, undefined, storage.getSystemSiliconEmployee());
       const result = await runTagHead({
         cwd: snapshot.cwd,
         language: config.language ?? "",

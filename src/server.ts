@@ -56,6 +56,7 @@ import { Missions } from "./missions.js";
 import { createAiTeamRunner } from "./ai-team-runner.js";
 import type { AiTeamLiveUpdate } from "./ai-team-types.js";
 import { registerAiTeamRoutes } from "./server-ai-team-routes.js";
+import { registerSiliconEmployeeRoutes } from "./server-employee-routes.js";
 import { registerAttentionRoutes } from "./server-attention-routes.js";
 import {
   refreshProviderCliUpdateState,
@@ -393,13 +394,14 @@ export async function startServer(
   const runtimeConfig = new RuntimeConfigState(config);
   const authService = new AuthService(storage);
   // 默认模型优先读存储（UI 改设置后实时生效），未设置时由 getPreference 回落到 config。
-  const getCurrentDefaultModels = (): { claude: string; codex: string; opencode: string; grok: string; qoder: string; pi: string } => ({
+  const getCurrentDefaultModels = (): { claude: string; codex: string; opencode: string; grok: string; qoder: string; pi: string; gemini: string } => ({
     claude: storage.getPreference("pref:defaultModel", config.defaultModel ?? ""),
     codex: storage.getPreference("pref:defaultCodexModel", config.defaultCodexModel ?? ""),
     opencode: storage.getPreference("pref:defaultOpenCodeModel", config.defaultOpenCodeModel ?? ""),
     grok: storage.getPreference("pref:defaultGrokModel", config.defaultGrokModel ?? ""),
     qoder: storage.getPreference("pref:defaultQoderModel", config.defaultQoderModel ?? ""),
     pi: storage.getPreference("pref:defaultPiModel", config.defaultPiModel ?? ""),
+    gemini: storage.getPreference("pref:defaultGeminiModel", config.defaultGeminiModel ?? ""),
   });
 
   const getModelRefreshOptions = (): ModelRefreshOptions => {
@@ -457,7 +459,8 @@ export async function startServer(
   // wsManager 在后面才建：团队运行的变更通知经由这个转发口，接好之前静默丢弃。
   let notifyAiTeamRun = (_data:
     | { kind: "ai-team-run"; runId: string; taskId: string }
-    | { kind: "ai-team-definition"; teamId: string }): void => {};
+    | { kind: "ai-team-definition"; teamId: string }
+    | { kind: "silicon-employee-definition"; employeeId: string }): void => {};
   // 运行中步骤的 live 文本推送（§4.9），同样走系统通知，接好之前静默丢弃。
   let notifyAiTeamRunLive = (_update: AiTeamLiveUpdate): void => {};
   // 团队降级的 model-unknown 事前比对只看这份已发现的清单；没刷新过就是空，判定方向是放行。
@@ -470,6 +473,7 @@ export async function startServer(
       grok: "grokModels",
       qoder: "qoderModels",
       pi: "piModels",
+      gemini: "geminiModels",
     } as const)[provider];
     return cache[key].map((entry) => entry.id);
   };
@@ -848,11 +852,16 @@ export async function startServer(
 
   registerGithubRoutes(app, { storage, requireAdmin, sessions: sessionRegistry });
   // 任务管理与 Missions 一样只需登录：原生 connected-app 也要能列/建/派发。
-  registerTaskRoutes(app, { storage, sessions: sessionRegistry, structured: structuredSessions, processes, config });
+  registerTaskRoutes(app, { storage, sessions: sessionRegistry, structured: structuredSessions, processes, config, aiTeams });
   registerAiTeamRoutes(app, {
     storage,
     runner: aiTeams,
     notifyTeamChanged: (teamId) => notifyAiTeamRun({ kind: "ai-team-definition", teamId }),
+  });
+  registerSiliconEmployeeRoutes(app, {
+    storage,
+    config,
+    notifyEmployeeChanged: (employeeId) => notifyAiTeamRun({ kind: "silicon-employee-definition", employeeId }),
   });
   registerAttentionRoutes(app, { sessions: sessionRegistry, runner: aiTeams });
 
@@ -899,7 +908,7 @@ export async function startServer(
     if (typeof body.sessionId === "string" && body.sessionId.length > 0) {
       const snapshot = sessionRegistry.getLatest(body.sessionId);
       if (snapshot?.cwd) cwd = snapshot.cwd;
-      if (snapshot) ai = resolveSystemAiContext(snapshot, config);
+      if (snapshot) ai = resolveSystemAiContext(snapshot, config, storage.getSystemSiliconEmployee());
     }
     if (!ai) {
       const defaultSession = {
@@ -910,7 +919,7 @@ export async function startServer(
         selectedModel: null,
         thinkingEffort: config.defaultThinkingEffort,
       };
-      ai = resolveSystemAiContext(defaultSession, config);
+      ai = resolveSystemAiContext(defaultSession, config, storage.getSystemSiliconEmployee());
     }
     try {
       const optimized = await optimizePrompt(text, config.language ?? "", cwd, ai);
@@ -930,7 +939,13 @@ export async function startServer(
   // ── Session control ──
 
   app.post("/api/commands", asyncRoute(async (req, res) => {
-    const body = req.body as CommandRequest & { sessionSource?: unknown; automationId?: unknown };
+    const body = req.body as CommandRequest & { sessionSource?: unknown; automationId?: unknown;
+      employeeId?: unknown; teamId?: unknown; subject?: { type?: unknown; id?: unknown } };
+    if (body.employeeId !== undefined || body.teamId !== undefined
+      || (body.subject !== undefined && body.subject?.type !== "cli")) {
+      res.status(400).json({ error: "PTY 只能选择 CLI 工具。" });
+      return;
+    }
     const interactiveShell = body.shell === true;
     if (!interactiveShell && !body.command?.trim()) {
       res.status(400).json({ error: "请输入要执行的命令。" });

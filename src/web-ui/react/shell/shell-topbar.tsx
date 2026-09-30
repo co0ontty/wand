@@ -25,6 +25,9 @@ import { ChatWidthToggle } from "./chat-width-toggle";
 import { SidebarToggleIcon } from "./sidebar-toggle-icon";
 import { SessionElapsed } from "./session-elapsed";
 import { TopbarGitBadge } from "./topbar-git-badge";
+import { ObjectProfilePanel } from "./object-profile-panel.js";
+import { EmployeeAvatar } from "../agents/employee-avatar.js";
+import { useSiliconEmployees } from "../agents/employee-repository.js";
 import { useUiDispatch, useUiStoreSnapshot } from "./ui-store-react";
 import type { UiAction, UiSessionVm } from "./ui-store";
 
@@ -152,6 +155,28 @@ export function ShellTopbar() {
   const selected = snapshot.selected;
   const moreOpen = snapshot.layout.topbarMoreOpen;
   const selectedActions = selected ? getShellSidebarEntryActions(selected, false) : null;
+  const { employees } = useSiliconEmployees();
+  const [profileOpen, setProfileOpen] = React.useState(false);
+  const profileTriggerRef = React.useRef<HTMLButtonElement>(null);
+
+  // 匹配当前会话关联的员工
+  const matchedEmployee = React.useMemo(() => {
+    if (!selected) return null;
+    return employees.find((employee) => employee.id === selected.employeeId) || null;
+  }, [selected, employees]);
+  const employeeSnapshot = selected?.employeeId ? {
+    id: selected.employeeId,
+    name: matchedEmployee?.name || selected.employeeName || "硅基员工",
+    avatar: matchedEmployee ? matchedEmployee.avatar : selected.employeeAvatar || "",
+  } : null;
+
+  // 切会话时如果新对象没有员工/团队身份，平滑收起资料面板
+  React.useEffect(() => {
+    if (!selected?.employeeId) {
+      setProfileOpen(false);
+    }
+  }, [selected?.id, selected?.employeeId]);
+
   const openFiles = () => {
     if (!snapshot.layout.filePanelOpen) void dispatch({ type: "layout.files.toggle" });
   };
@@ -159,6 +184,13 @@ export function ShellTopbar() {
   // itself is all that is left to dispatch here.
   const runMoreAction = (action: UiAction) => {
     void dispatch(action);
+  };
+
+  const toggleProfile = () => {
+    if (!profileOpen && snapshot.layout.filePanelOpen) {
+      void dispatch({ type: "layout.files.close" });
+    }
+    setProfileOpen((v) => !v);
   };
 
   return (
@@ -186,6 +218,23 @@ export function ShellTopbar() {
       <div className="topbar-center">
         {selected ? (
           <>
+            {/* 对话对象是主标题，会话题目保留为次级上下文。 */}
+            <button
+              ref={profileTriggerRef}
+              type="button"
+              className={classNames("topbar-object-btn", profileOpen && "active")}
+              aria-label={`查看${employeeSnapshot?.name || selected.provider}资料`}
+              aria-expanded={profileOpen}
+              onClick={toggleProfile}
+            >
+              {employeeSnapshot ? (
+                <EmployeeAvatar employee={employeeSnapshot} size="sm" className="topbar-object-avatar" />
+              ) : (
+                <span className="topbar-object-cli-icon"><WandIcon name="terminal" size={14} /></span>
+              )}
+              <span className="topbar-object-name">{employeeSnapshot?.name || selected.provider}</span>
+              <span className={classNames("topbar-object-dot", (selected.turnActive || selected.inFlight) ? "is-active" : "")} />
+            </button>
             <span
               className={classNames("topbar-session-title", snapshot.topbar.titleGenerating && "title-generating")}
               title={snapshot.topbar.description || selected.title}
@@ -294,6 +343,14 @@ export function ShellTopbar() {
           </div>
         )}
       </div>
+      <ObjectProfilePanel
+        open={profileOpen}
+        employee={matchedEmployee}
+        employeeSnapshot={employeeSnapshot}
+        selectedSession={selected}
+        triggerRef={profileTriggerRef}
+        onClose={() => setProfileOpen(false)}
+      />
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import type { Express } from "express";
-import { dispatchAgentForTask } from "./agent-dispatch.js";
+import { dispatchAgentForTask, resolveTaskDispatchTarget } from "./agent-dispatch.js";
 import { asyncRoute } from "./express-async.js";
 import { getErrorMessage } from "./error-utils.js";
 import { bodyObject, sendRouteError, text } from "./server-request.js";
@@ -12,7 +12,10 @@ import { resolveSystemAiContext } from "./session-ai-context.js";
 import type { SessionRegistry } from "./session-registry.js";
 import type { StructuredSessionManager } from "./structured-session-manager.js";
 import type { ProcessManager } from "./process-manager.js";
-import type { WandTaskAgent, WandTaskAgentKind, WandTaskAgentMode, WandTaskPriority, WandTaskStatus, WandTaskTitleSource } from "./task-types.js";
+import type { AiTeamRunner } from "./ai-team-runner.js";
+import { memberAgents } from "./ai-team-types.js";
+import { selectEmployeeCandidate } from "./silicon-employee-dispatch.js";
+import type { TaskExecutionSubject, WandTaskAgent, WandTaskAgentKind, WandTaskAgentMode, WandTaskPriority, WandTaskStatus, WandTaskTitleSource } from "./task-types.js";
 import { DEFAULT_WAND_TASK_AGENT_KIND, DEFAULT_WAND_TASK_AGENT_MODE, DEFAULT_WAND_TASK_PRIORITY, isWandTaskAgentKind, isWandTaskAgentMode, normalizeWandTaskAgentMode, WAND_MILESTONE_NAME_MAX_LENGTH } from "./task-types.js";
 import { isAutoNameableBoardTask, taskAutoNameSignature, taskAutoNameSourceText } from "./wand-task-sync.js";
 import type { SessionSnapshot, WandConfig } from "./types.js";
@@ -56,8 +59,48 @@ export interface TaskRouteDependencies {
   /** PTY 会话创建入口；派发 `kind: "pty"` 的任务时使用。测试里可换成同步桩。 */
   processes?: ProcessManager;
   config?: WandConfig;
+  aiTeams?: AiTeamRunner;
   /** 可注入的任务标题生成器；测试里换成同步桩，避免真的起 CLI。 */
   generateTitle?: typeof generateWandTaskTitle;
+}
+
+function parseExecutionSubject(storage: WandStorage, value: unknown): TaskExecutionSubject | null {
+  if (value === null) return null;
+  const body = bodyObject(value);
+  const type = text(body.type);
+  const id = text(body.id);
+  if (!id) throw new Error("请选择执行对象。");
+  if (type === "employee") {
+    const employee = storage.getSiliconEmployee(id);
+    if (!employee || employee.archivedAt) throw new Error("硅基员工不存在或已归档。");
+    return { type, id };
+  }
+  if (type === "team") {
+    if (!storage.getAiTeam(id)) throw new Error("AI 团队不存在。");
+    return { type, id };
+  }
+  if (type === "cli") {
+    if (!isSessionProvider(id)) throw new Error("请选择有效的 CLI 工具。");
+    return { type, id };
+  }
+  throw new Error("执行对象类型无效。");
+}
+
+function preferredAgentForSubject(storage: WandStorage, subject: TaskExecutionSubject): WandTaskAgent | null {
+  if (subject.type === "employee") return storage.getSiliconEmployee(subject.id)?.agents[0] ?? null;
+  if (subject.type === "team") {
+    const team = storage.getAiTeam(subject.id);
+    const member = team?.members.find((entry) => entry.isLeader) ?? team?.members[0];
+    return member ? memberAgents(member)[0] ?? null : null;
+  }
+  return null;
+}
+
+function cliAgentForSubject(subject: TaskExecutionSubject, current?: WandTaskAgent | null): WandTaskAgent {
+  return parseTaskAgent({
+    ...(current?.provider === subject.id ? current : defaultTaskBoardAgent()),
+    provider: subject.id,
+  })!;
 }
 
 function dateValue(value: unknown): string | null | undefined {
@@ -201,6 +244,9 @@ function taskSessionSummary(session: SessionSnapshot) {
     thinkingEffort: session.thinkingEffort || "off",
     // 会话实际跑的执行模式；旧会话没有该字段时留空，前端回落到任务上的配置。
     mode: session.mode || "",
+    employeeId: session.employeeId,
+    employeeName: session.employeeName,
+    employeeAvatar: session.employeeAvatar,
   };
 }
 
@@ -226,7 +272,7 @@ function scheduleWandTaskTitleGeneration(
   const cwd = options.cwd || options.config?.defaultCwd || process.cwd();
   const run = async (): Promise<void> => {
     try {
-      const title = await generateTitle(source, cwd, options.config?.language ?? "", taskTitleAiOptions(options.config));
+      const title = await generateTitle(source, cwd, options.config?.language ?? "", taskTitleAiOptions(options.config, storage));
       const current = storage.getWandTask(taskId);
       // 用户已经自己写了标题（原生端 / 面板编辑）就不要覆盖。
       if (!current || current.titleSource !== "auto") return;
@@ -287,7 +333,7 @@ export function refreshAutoBoardTaskTitles(storage: WandStorage, options: AutoTa
 }
 
 /** 自动生成标题没有会话上下文，按「默认 provider + 默认模型」解析，与提示词优化一致。 */
-function taskTitleAiOptions(config?: WandConfig): QuickCommitAiOptions {
+function taskTitleAiOptions(config?: WandConfig, storage?: WandStorage): QuickCommitAiOptions {
   if (!config) return {};
   const provider = config.defaultProvider ?? "claude";
   const defaultSession = {
@@ -298,12 +344,12 @@ function taskTitleAiOptions(config?: WandConfig): QuickCommitAiOptions {
     selectedModel: null,
     thinkingEffort: config.defaultThinkingEffort,
   };
-  // resolveSystemAiContext 会在直连 API 可用且已启用时优先走 API，否则回落到 CLI。
-  return resolveSystemAiContext(defaultSession, config);
+  // resolveSystemAiContext 会在直连 API 可用且已启用时优先走 API，否则走系统运维员工的 CLI 候选链。
+  return resolveSystemAiContext(defaultSession, config, storage?.getSystemSiliconEmployee() ?? null);
 }
 
 export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): void {
-  const { storage, sessions, structured, processes, config } = deps;
+  const { storage, sessions, structured, processes, config, aiTeams } = deps;
   const dto = (task: ReturnType<WandStorage["getWandTask"]>) => taskDto(deps, task);
 
   app.get("/api/wand-tasks", (req, res) => {
@@ -420,7 +466,18 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       const status = STATUSES.has(body.status as WandTaskStatus) ? body.status as WandTaskStatus : "todo";
       const priority = PRIORITIES.has(body.priority as WandTaskPriority) ? body.priority as WandTaskPriority : DEFAULT_WAND_TASK_PRIORITY;
       const agent = body.agent === undefined ? null : parseTaskAgent(body.agent);
-      if (agent) writeTaskBoardLastAgent(storage, agent);
+      const executionSubject = body.executionSubject === undefined
+        ? agent ? { type: "cli" as const, id: agent.provider } : null
+        : parseExecutionSubject(storage, body.executionSubject);
+      if (executionSubject?.type === "cli" && agent && agent.provider !== executionSubject.id) {
+        throw new Error("CLI 执行对象与工具配置不一致。");
+      }
+      if (executionSubject?.type !== "cli" && executionSubject && agent?.kind === "pty") {
+        throw new Error("PTY 只能选择 CLI 工具。");
+      }
+      const assignedAgent = executionSubject && executionSubject.type !== "cli"
+        ? preferredAgentForSubject(storage, executionSubject)
+        : executionSubject?.type === "cli" ? agent ?? cliAgentForSubject(executionSubject) : agent;
       const labels = labelsFrom(body.labels);
       const dueDate = dateValue(body.dueDate) ?? null;
       // 没选迭代就落到默认迭代：每个任务都属于一个迭代。
@@ -438,8 +495,10 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
         labels,
         dueDate,
         milestoneId,
-        agent,
+        agent: assignedAgent,
+        executionSubject,
       });
+      if (agent) writeTaskBoardLastAgent(storage, agent);
       if (titleSource === "auto") {
         refreshAutoBoardTaskTitles(storage, {
           cwd: workspaceId ? storage.getWorkspace(workspaceId)?.cwd : undefined,
@@ -505,7 +564,23 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       if (body.agent !== undefined) {
         // 老客户端不传 mode / kind：沿用任务当前值，而不是复位成标准 / 结构化。
         patch.agent = parseTaskAgent(body.agent, currentTask.agent?.mode, currentTask.agent?.kind);
-        if (patch.agent) writeTaskBoardLastAgent(storage, patch.agent);
+        if (body.executionSubject === undefined && patch.agent) {
+          patch.executionSubject = { type: "cli", id: patch.agent.provider };
+        }
+      }
+      if (body.executionSubject !== undefined) {
+        patch.executionSubject = parseExecutionSubject(storage, body.executionSubject);
+        if (patch.executionSubject?.type === "cli" && patch.agent
+          && patch.agent.provider !== patch.executionSubject.id) {
+          throw new Error("CLI 执行对象与工具配置不一致。");
+        }
+        if (patch.executionSubject?.type === "cli" && !patch.agent) {
+          patch.agent = cliAgentForSubject(patch.executionSubject, currentTask.agent);
+        }
+        if (patch.executionSubject && patch.executionSubject.type !== "cli") {
+          if (patch.agent?.kind === "pty") throw new Error("PTY 只能选择 CLI 工具。");
+          patch.agent = preferredAgentForSubject(storage, patch.executionSubject);
+        }
       }
       if (body.sortOrder !== undefined && Number.isFinite(Number(body.sortOrder))) {
         patch.sortOrder = Math.floor(Number(body.sortOrder));
@@ -515,6 +590,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
         res.status(404).json({ error: "未找到该任务。" });
         return;
       }
+      if (body.agent !== undefined && patch.agent) writeTaskBoardLastAgent(storage, patch.agent);
       res.json(dto(storage.getWandTask(task.id) ?? task));
     } catch (error) {
       sendRouteError(res, error, "无法更新任务。");
@@ -571,13 +647,73 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       }
       if (!config) throw new Error("当前服务未启用派发，无法派发 Agent。");
       const body = bodyObject(req.body);
-      const agent = body.agent === undefined
-        ? task.agent ?? parseWandTaskAgent(JSON.stringify(body))
-        : parseTaskAgent(body.agent, task.agent?.mode, task.agent?.kind);
+      const subject = body.subject === undefined
+        ? body.agent !== undefined ? null : task.executionSubject ?? null
+        : parseExecutionSubject(storage, body.subject);
+      if ((subject?.type === "employee" || subject?.type === "team")
+        && (body.kind === "pty" || (body.agent && bodyObject(body.agent).kind === "pty"))) {
+        throw new Error("PTY 只能选择 CLI 工具。");
+      }
+      const requestedPrompt = text(body.prompt);
+      const existingSessions = storage.listWandTaskSessionIds(task.id).length;
+      if (existingSessions > 0 && !requestedPrompt) throw new Error("请输入提示词。");
+      const prompt = requestedPrompt || task.description.trim() || task.title || "执行此任务";
+      if (subject?.type === "team") {
+        if (!aiTeams) throw new Error("当前服务未启用 AI 团队。");
+        const team = storage.getAiTeam(subject.id);
+        if (!team) throw new Error("AI 团队不存在。");
+        if (body.workspaceId !== undefined) {
+          const workspaceId = body.workspaceId === null ? null : text(body.workspaceId) || null;
+          if (workspaceId && !storage.getWorkspace(workspaceId)) throw new Error("项目不存在。");
+          parentTaskIdFrom(storage, task.parentTaskId, workspaceId, task.id, task.parentTaskId);
+          if (workspaceId !== task.workspaceId) assertTaskWorkspaceMove(storage, task.id, workspaceId);
+          task = storage.updateWandTask(task.id, { workspaceId }) ?? task;
+        }
+        const target = resolveTaskDispatchTarget({ storage, config }, task);
+        const detail = await aiTeams.start({ teamId: team.id, taskId: task.id, note: prompt });
+        const preferredMember = team.members.find((member) => member.isLeader) ?? team.members[0];
+        const preferredAgent = preferredMember ? memberAgents(preferredMember)[0] ?? null : null;
+        storage.updateWandTask(task.id, {
+          executionSubject: subject,
+          agent: preferredAgent,
+          status: task.status === "todo" ? "doing" : task.status,
+        });
+        recordIterationPromptForTask(storage, {
+          sessionId: detail.run.chatSessionId ?? undefined,
+          cwd: target.cwd,
+          workspaceId: target.workspaceId,
+          milestoneId: task.milestoneId,
+          taskId: task.id,
+          title: task.title,
+          detail: task.description || prompt,
+          source: "dispatch",
+        });
+        res.status(202).json({
+          ok: true,
+          taskId: task.id,
+          subject,
+          teamRun: detail,
+          session: detail.run.chatSessionId ? { id: detail.run.chatSessionId, sessionKind: "structured" } : null,
+        });
+        return;
+      }
+      const employee = subject?.type === "employee" ? storage.getSiliconEmployee(subject.id) : null;
+      if (subject?.type === "employee" && (!employee || employee.archivedAt)) {
+        throw new Error("硅基员工不存在或已归档。");
+      }
+      const selected = employee ? selectEmployeeCandidate(employee) : null;
+      const cliDefault = subject?.type === "cli"
+        ? parseTaskAgent({ ...cliAgentForSubject(subject, task.agent), ...(body.kind === "pty" ? { kind: "pty" } : {}) })
+        : null;
+      const agent = selected?.agent ?? (body.agent === undefined
+        ? cliDefault ?? task.agent ?? parseWandTaskAgent(JSON.stringify(body))
+        : parseTaskAgent(body.agent, task.agent?.mode, task.agent?.kind));
       if (!agent) throw new Error("请先为该任务选择 CLI 工具。");
+      if (subject?.type === "cli" && agent.provider !== subject.id) {
+        throw new Error("CLI 执行对象与工具配置不一致。");
+      }
       if (agent.kind === "structured" && !structured) throw new Error("当前服务未启用结构化会话，无法派发 Agent。");
       if (agent.kind === "pty" && !processes) throw new Error("当前服务未启用终端会话，无法派发 Agent。");
-      writeTaskBoardLastAgent(storage, agent);
       if (body.workspaceId !== undefined) {
         const workspaceId = body.workspaceId === null ? null : text(body.workspaceId) || null;
         if (workspaceId && !storage.getWorkspace(workspaceId)) throw new Error("项目不存在。");
@@ -585,16 +721,20 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
         if (workspaceId !== task.workspaceId) assertTaskWorkspaceMove(storage, task.id, workspaceId);
         task = storage.updateWandTask(task.id, { workspaceId }) ?? task;
       }
-      const requestedPrompt = text(body.prompt);
-      const existingSessions = storage.listWandTaskSessionIds(task.id).length;
-      if (existingSessions > 0 && !requestedPrompt) throw new Error("请输入提示词。");
-      const prompt = requestedPrompt || task.description.trim() || task.title || "执行此任务";
       const { session, cwd, workspaceId } = await dispatchAgentForTask(
         { storage, config, structured: structured ?? null, processes: processes ?? null },
-        { task, agent, prompt, automationId: `wand-task:${task.id}` },
+        { task, agent, prompt, automationId: `wand-task:${task.id}`,
+          systemPrompt: employee?.prompt, employee: employee ?? undefined,
+          employeeCandidateIndex: selected?.index },
       );
       task = storage.getWandTask(task.id)!;
-      storage.updateWandTask(task.id, { agent, status: task.status === "todo" ? "doing" : task.status });
+      const usedSubject = subject ?? { type: "cli" as const, id: agent.provider };
+      storage.updateWandTask(task.id, {
+        agent,
+        executionSubject: usedSubject,
+        status: task.status === "todo" ? "doing" : task.status,
+      });
+      if (!employee) writeTaskBoardLastAgent(storage, agent);
       // 派发也算一轮迭代里的改动意图：直接把任务的标题 / 描述记进迭代记录。
       recordIterationPromptForTask(storage, {
         sessionId: session.id,
@@ -609,6 +749,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       res.status(202).json({
         ok: true,
         taskId: task.id,
+        subject: usedSubject,
         session: {
           id: session.id,
           provider: session.provider,
@@ -617,6 +758,10 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
           thinkingEffort: session.thinkingEffort,
           mode: session.mode,
           cwd: session.cwd,
+          employeeId: session.employeeId,
+          employeeName: session.employeeName,
+          employeeAvatar: session.employeeAvatar,
+          employeeCandidateIndex: session.employeeCandidateIndex,
         },
       });
     } catch (error) {

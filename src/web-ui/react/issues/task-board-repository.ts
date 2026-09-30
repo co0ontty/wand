@@ -4,6 +4,7 @@ import type {
   WandTaskDetail,
   WandTaskPriority,
   WandTaskStatus,
+  TaskExecutionSubject,
 } from "../../../task-types";
 import { normalizeIssueAgentDefaults, type IssueWorkspace } from "./task-board-agent";
 import { jsonBody, requestJson } from "../http-adapter";
@@ -47,7 +48,9 @@ export interface IssueDispatchResult {
     thinkingEffort: string;
     mode?: string;
     cwd: string;
-  };
+  } | null;
+  subject?: TaskExecutionSubject;
+  teamRun?: { run: { id: string } };
 }
 
 export const taskBoardRepository = {
@@ -75,6 +78,7 @@ export const taskBoardRepository = {
     /** 将任务认领为另一项处理中任务的子任务。 */
     parentTaskId?: string | null;
     agent?: WandTaskAgent | null;
+    executionSubject?: TaskExecutionSubject | null;
   }): Promise<WandTaskListed> {
     return mutateTask("/api/wand-tasks", jsonBody(input));
   },
@@ -84,7 +88,7 @@ export const taskBoardRepository = {
   },
   update(
     id: string,
-    patch: Partial<Pick<WandTask, "title" | "titleSource" | "description" | "status" | "priority" | "labels" | "dueDate" | "milestoneId" | "workspaceId" | "parentTaskId" | "sortOrder" | "agent">>,
+    patch: Partial<Pick<WandTask, "title" | "titleSource" | "description" | "status" | "priority" | "labels" | "dueDate" | "milestoneId" | "workspaceId" | "parentTaskId" | "sortOrder" | "agent" | "executionSubject">>,
   ): Promise<WandTaskListed> {
     return mutateTask(`/api/wand-tasks/${encodeURIComponent(id)}`, jsonBody(patch, "PATCH"));
   },
@@ -94,11 +98,12 @@ export const taskBoardRepository = {
   /** 用选定的 CLI 工具开一个结构化会话；prompt 作为这次派发的首条消息。 */
   dispatch(
     id: string,
-    agent: WandTaskAgent,
-    extra?: { prompt?: string; workspaceId?: string | null },
+    agent: WandTaskAgent | null,
+    extra?: { prompt?: string; workspaceId?: string | null; subject?: TaskExecutionSubject },
   ): Promise<IssueDispatchResult> {
     return mutateTask(`/api/wand-tasks/${encodeURIComponent(id)}/dispatch`, jsonBody({
-      agent,
+      ...(agent ? { agent } : {}),
+      ...(extra?.subject ? { subject: extra.subject } : {}),
       ...(extra?.prompt != null ? { prompt: extra.prompt } : {}),
       ...(extra && "workspaceId" in extra ? { workspaceId: extra.workspaceId ?? null } : {}),
     }));

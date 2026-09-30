@@ -65,6 +65,19 @@ const PI_FALLBACK_MODELS: ClaudeModelInfo[] = [
   { id: "default", label: "跟随 Pi 默认", alias: true },
 ];
 
+/**
+ * Gemini CLI 没有列模型的子命令，只能给出稳定别名（`packages/core/src/config/models.ts`
+ * 里的 GEMINI_MODEL_ALIAS_*）。具体版本名随发布滚动，不适合写死在这里；
+ * 设置页的模型输入框是自由文本，用户可以自己填完整模型名。
+ */
+const GEMINI_FALLBACK_MODELS: ClaudeModelInfo[] = [
+  { id: "default", label: "跟随 Gemini 默认", alias: true },
+  { id: "auto", label: "Auto（按任务自动选模型）" },
+  { id: "pro", label: "Pro" },
+  { id: "flash", label: "Flash" },
+  { id: "flash-lite", label: "Flash Lite" },
+];
+
 interface ModelCacheStorage {
   getConfigValue(key: string): string | null;
   setConfigValue(key: string, value: string): void;
@@ -121,6 +134,8 @@ export interface ProviderThinkingEfforts {
   grok: ThinkingEffortLevel[];
   qoder: ThinkingEffortLevel[];
   pi: ThinkingEffortLevel[];
+  /** Gemini CLI 没有思考档位开关，只保留「不覆盖」一项，不假装能调。 */
+  gemini: ThinkingEffortLevel[];
 }
 
 export interface ModelCache {
@@ -130,6 +145,7 @@ export interface ModelCache {
   grokModels: ClaudeModelInfo[];
   qoderModels: ClaudeModelInfo[];
   piModels: ClaudeModelInfo[];
+  geminiModels: ClaudeModelInfo[];
   thinkingEfforts: ProviderThinkingEfforts;
   claudeVersion: string | null;
   opencodeVersion: string | null;
@@ -149,6 +165,7 @@ export const FALLBACK_PROVIDER_THINKING: ProviderThinkingEfforts = {
   grok: effortLevels(["low", "medium", "high", "xhigh"]),
   qoder: effortLevels(["auto", "none", "low", "medium", "high", "xhigh", "max", "ultracode"]),
   pi: effortLevels(["minimal", "low", "medium", "high", "xhigh", "max"]),
+  gemini: effortLevels(["off"]),
 };
 
 function cloneThinkingEfforts(efforts: ProviderThinkingEfforts): ProviderThinkingEfforts {
@@ -159,6 +176,7 @@ function cloneThinkingEfforts(efforts: ProviderThinkingEfforts): ProviderThinkin
     grok: copy(efforts.grok),
     qoder: copy(efforts.qoder),
     pi: copy(efforts.pi),
+    gemini: copy(efforts.gemini),
   };
 }
 
@@ -171,6 +189,7 @@ const PROVIDER_MODEL_LIST_FIELDS = {
   grok: "grokModels",
   qoder: "qoderModels",
   pi: "piModels",
+  gemini: "geminiModels",
 } as const;
 
 /**
@@ -276,6 +295,7 @@ function cloneCache(cache: ModelCache): ModelCache {
     grokModels: cloneModels(cache.grokModels),
     qoderModels: cloneModels(cache.qoderModels),
     piModels: cloneModels(cache.piModels),
+    geminiModels: cloneModels(cache.geminiModels),
     thinkingEfforts: cloneThinkingEfforts(cache.thinkingEfforts),
     claudeVersion: cache.claudeVersion,
     opencodeVersion: cache.opencodeVersion,
@@ -458,6 +478,7 @@ function createInitialCache(options: ModelRefreshOptions): ModelCache {
     grokModels: cloneModels(GROK_FALLBACK_MODELS),
     qoderModels: cloneModels(QODER_FALLBACK_MODELS),
     piModels: cloneModels(PI_FALLBACK_MODELS),
+    geminiModels: cloneModels(GEMINI_FALLBACK_MODELS),
     thinkingEfforts: cloneThinkingEfforts(FALLBACK_PROVIDER_THINKING),
     claudeVersion: null,
     opencodeVersion: null,
@@ -1032,6 +1053,7 @@ function catalogRevision(cache: ModelCache): string {
     grokModels: cache.grokModels,
     qoderModels: cache.qoderModels,
     piModels: cache.piModels,
+    geminiModels: cache.geminiModels,
     thinkingEfforts: cache.thinkingEfforts,
     claudeVersion: cache.claudeVersion,
     opencodeVersion: cache.opencodeVersion,
@@ -1105,7 +1127,7 @@ function parsePersistedModelList(value: unknown): ClaudeModelInfo[] | null {
 function parsePersistedThinkingEfforts(value: unknown): ProviderThinkingEfforts {
   const fallback = cloneThinkingEfforts(FALLBACK_PROVIDER_THINKING);
   if (!isRecord(value)) return fallback;
-  const providers = ["claude", "opencode", "grok", "qoder", "pi"] as const;
+  const providers = ["claude", "opencode", "grok", "qoder", "pi", "gemini"] as const;
   for (const provider of providers) {
     const levels = parsePersistedEffortLevels(value[provider]);
     if (levels) fallback[provider] = levels;
@@ -1137,9 +1159,10 @@ function parsePersistedModelCatalog(value: unknown): PersistedModelCatalog | nul
   const grokModels = parsePersistedModelList(catalog.grokModels);
   const qoderModels = parsePersistedModelList(catalog.qoderModels);
   const piModels = parsePersistedModelList(catalog.piModels);
+  const geminiModels = parsePersistedModelList(catalog.geminiModels);
   const refreshedAt = safePersistedString(catalog.refreshedAt, 64);
   if (
-    !models || !codexModels || !opencodeModels || !grokModels || !qoderModels || !piModels
+    !models || !codexModels || !opencodeModels || !grokModels || !qoderModels || !piModels || !geminiModels
     || !refreshedAt || Number.isNaN(Date.parse(refreshedAt))
   ) {
     return null;
@@ -1156,6 +1179,7 @@ function parsePersistedModelCatalog(value: unknown): PersistedModelCatalog | nul
     grokModels,
     qoderModels,
     piModels,
+    geminiModels,
     thinkingEfforts: parsePersistedThinkingEfforts(catalog.thinkingEfforts),
     claudeVersion,
     opencodeVersion,
@@ -1257,6 +1281,7 @@ async function discoverModelCache(
     grokModels: grokProbe.ok ? grokProbe.value : cloneModels(previous.grokModels),
     qoderModels: qoderProbe.ok ? qoderProbe.value : cloneModels(previous.qoderModels),
     piModels: piProbe.ok ? piProbe.value : cloneModels(previous.piModels),
+    geminiModels: cloneModels(previous.geminiModels),
     thinkingEfforts: {
       claude: claudeEffortProbe.ok ? claudeEffortProbe.value : cloneThinkingEfforts(previous.thinkingEfforts).claude,
       opencode: opencodeProbe.models.ok && unionModelEfforts(opencodeProbe.models.value).length
@@ -1269,6 +1294,7 @@ async function discoverModelCache(
         : piEffortProbe.ok
           ? piEffortProbe.value
           : cloneThinkingEfforts(previous.thinkingEfforts).pi,
+      gemini: cloneThinkingEfforts(previous.thinkingEfforts).gemini,
     },
     claudeVersion,
     opencodeVersion: opencodeProbe.version.ok ? opencodeProbe.version.value : previous.opencodeVersion,

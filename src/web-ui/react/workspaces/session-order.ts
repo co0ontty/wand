@@ -11,6 +11,7 @@ export function workspaceProviderLabel(provider?: string): string {
     case "grok": return "Grok";
     case "qoder": return "Qoder";
     case "pi": return "Pi";
+    case "gemini": return "Gemini";
     default: return "终端";
   }
 }
@@ -26,6 +27,7 @@ export function workspaceSessionProvider(
     || session.provider === "grok"
     || session.provider === "qoder"
     || session.provider === "pi"
+    || session.provider === "gemini"
   ) {
     return session.provider;
   }
@@ -104,8 +106,9 @@ function isCommandFallbackTitle(title: string): boolean {
     || normalized === "grok"
     || normalized === "qoder"
     || normalized === "pi"
+    || normalized === "gemini"
     || normalized === "终端"
-    || /^(claude|codex|opencode|grok|qoder|pi|终端)\s+\d+$/i.test(normalized);
+    || /^(claude|codex|opencode|grok|qoder|pi|gemini|终端)\s+\d+$/i.test(normalized);
 }
 
 export function withLiveSessionTitle<T extends { title?: string; cwd?: string }>(

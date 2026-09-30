@@ -23,7 +23,7 @@ export interface WorkspaceAgentDialogProps {
   initialProvider?: WorkspaceProvider;
   initialKind?: WorkspaceSessionKind;
   /** `model` 为真实模型 id；空串表示跟随服务端默认。 */
-  onConfirm(target: WorkspaceSessionTarget, kind: WorkspaceSessionKind, model: string): void | Promise<void>;
+  onConfirm(target: WorkspaceSessionTarget, kind: WorkspaceSessionKind, model: string, employeeId?: string): void | Promise<void>;
   onDismiss(): void;
 }
 
@@ -38,6 +38,7 @@ export function WorkspaceAgentDialog({
   const [target, setTarget] = useState<WorkspaceSessionTarget>(initialProvider);
   const [kind, setKind] = useState<WorkspaceSessionKind>(initialKind);
   const [model, setModel] = useState(MODEL_CATALOG_DEFAULT_VALUE);
+  const [employeeId, setEmployeeId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -47,6 +48,7 @@ export function WorkspaceAgentDialog({
     setSubmitting(false);
     setError("");
     setTarget(initialProvider);
+    setEmployeeId("");
     setKind(initialKind === "pty" ? "pty" : "structured");
     setModel(workspaceModelDefault(initialProvider));
     void httpNewSessionRepository.loadConfig()
@@ -73,7 +75,8 @@ export function WorkspaceAgentDialog({
     setSubmitting(true);
     setError("");
     try {
-      await onConfirm(target, target === "shell" ? "pty" : kind, pickedModelId(model));
+      await onConfirm(target, employeeId ? "structured" : target === "shell" ? "pty" : kind,
+        employeeId ? "" : pickedModelId(model), employeeId || undefined);
       onDismiss();
     } catch (createError) {
       setError(failureMessage(createError, "无法新建工作窗口，请确认对应 CLI 或 Shell 配置正确。"));
@@ -105,16 +108,18 @@ export function WorkspaceAgentDialog({
             kind={kind}
             model={model}
             disabled={submitting}
+            employeeId={employeeId}
             onTargetChange={(next) => { setTarget(next); setModel(workspaceModelDefault(next)); }}
             onKindChange={setKind}
             onModelChange={setModel}
+            onEmployeeChange={setEmployeeId}
           />
           {error ? <p className="wand-new-session-error" role="alert">{error}</p> : null}
         </div>
         <div className="wand-new-session-footer wand-workspace-agent-footer">
           <WandButton kind="ghost" disabled={submitting} onClick={onDismiss}>取消</WandButton>
           <WandButton kind="primary" size="large" type="submit" disabled={submitting}>
-            {submitting ? "正在创建…" : `创建 ${WORKSPACE_AGENT_OPTIONS.find((option) => option.value === target)?.label ?? target}`}
+            {submitting ? "正在创建…" : employeeId ? "与员工对话" : `创建 ${WORKSPACE_AGENT_OPTIONS.find((option) => option.value === target)?.label ?? target}`}
           </WandButton>
         </div>
       </form>

@@ -11,9 +11,16 @@ import { isUnnamedWorkspaceTaskName } from "./wand-task-sync.js";
 import { AI_TEAM_DEFAULT_MAX_STEPS, AI_TEAM_TERMINAL_RUN_STATUSES, isTeamMemberRole, memberAgents } from "./ai-team-types.js";
 import type {
   AiTeam, AiTeamMember, AiTeamRun, AiTeamRunChatMarker, AiTeamRunStatus, AiTeamStep, AiTeamStepKind, AiTeamStepSessionMarker, AiTeamStepStatus,
-  CandidateFailureKind, StepDispatchInfo,
+  CandidateFailureKind, SiliconEmployee, StepDispatchInfo,
 } from "./ai-team-types.js";
+import { isTaskExecutionSubject } from "./task-types.js";
 import type { WandTask, WandTaskAgent, WandTaskAgentKind, WandTaskTitleSource } from "./task-types.js";
+import {
+  SYSTEM_EMPLOYEE_KEY,
+  systemEmployeeDefinition,
+  systemEmployeeSeedAgents,
+  type SystemEmployeeSeed,
+} from "./system-employee.js";
 import { isThinkingEffort } from "./structured-provider-common.js";
 import type {
   AgentActivityItem,
@@ -157,7 +164,7 @@ export function parseWandTaskAgent(raw: unknown): import("./task-types.js").Wand
   const thinkingEffort = value.thinkingEffort;
   if (!isSessionProvider(provider)) return null;
   if (typeof model !== "string" || !model.trim() || model.trim().length > 128) return null;
-  if (thinkingEffort !== "off" && thinkingEffort !== "standard" && thinkingEffort !== "deep" && thinkingEffort !== "max") return null;
+  if (!isThinkingEffort(thinkingEffort)) return null;
   // mode 是后加列：历史行没有该字段时按标准模式读取，不因此整条配置退化成 null。
   const mode = normalizeWandTaskAgentMode(provider, value.mode);
   // kind 同样是后加字段：老数据 / 老客户端没带时按结构化会话读取。
@@ -221,6 +228,11 @@ type DurableSessionOptions = Pick<SessionSnapshot,
   | "currentTaskTitle"
   | "summary"
   | "systemPrompt"
+  | "employeeId"
+  | "employeeName"
+  | "employeeAvatar"
+  | "employeeCandidates"
+  | "employeeCandidateIndex"
 >;
 
 type PersistedSessionOptions = DurableSessionOptions & {
@@ -330,6 +342,11 @@ function serializeSessionOptions(snapshot: SessionSnapshot): string {
     currentTaskTitle: snapshot.currentTaskTitle,
     summary: snapshot.summary,
     systemPrompt: snapshot.systemPrompt,
+    employeeId: snapshot.employeeId,
+    employeeName: snapshot.employeeName,
+    employeeAvatar: snapshot.employeeAvatar,
+    employeeCandidates: snapshot.employeeCandidates,
+    employeeCandidateIndex: snapshot.employeeCandidateIndex,
   };
   return JSON.stringify(options);
 }
@@ -383,6 +400,17 @@ function parseSessionOptions(raw: string | null): DurableSessionOptions {
   if (typeof parsed.currentTaskTitle === "string") options.currentTaskTitle = parsed.currentTaskTitle;
   if (typeof parsed.summary === "string") options.summary = parsed.summary;
   if (typeof parsed.systemPrompt === "string") options.systemPrompt = parsed.systemPrompt;
+  if (typeof parsed.employeeId === "string") options.employeeId = parsed.employeeId;
+  if (typeof parsed.employeeName === "string") options.employeeName = parsed.employeeName;
+  if (typeof parsed.employeeAvatar === "string") options.employeeAvatar = parsed.employeeAvatar;
+  if (Array.isArray(parsed.employeeCandidates)) {
+    options.employeeCandidates = parsed.employeeCandidates
+      .map(parseWandTaskAgent)
+      .filter((agent): agent is WandTaskAgent => agent?.kind === "structured");
+  }
+  if (Number.isSafeInteger(parsed.employeeCandidateIndex) && (parsed.employeeCandidateIndex as number) >= 0) {
+    options.employeeCandidateIndex = parsed.employeeCandidateIndex as number;
+  }
   return options;
 }
 
@@ -968,6 +996,7 @@ const INIT_SQL = `
     milestone_id TEXT,
     sort_order INTEGER NOT NULL DEFAULT 0,
     agent_json TEXT,
+    execution_subject_json TEXT,
     workspace_task_id TEXT,
     parent_task_id TEXT,
     title_source TEXT,
@@ -998,6 +1027,21 @@ const INIT_SQL = `
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS silicon_employees (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    duty TEXT NOT NULL DEFAULT '',
+    prompt TEXT NOT NULL DEFAULT '',
+    avatar TEXT NOT NULL DEFAULT '',
+    agents_json TEXT NOT NULL,
+    system_key TEXT,
+    archived_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_silicon_employees_archived ON silicon_employees(archived_at);
+
 
   CREATE TABLE IF NOT EXISTS ai_team_runs (
     id TEXT PRIMARY KEY,
@@ -1050,6 +1094,28 @@ function ensureAiTeamSchema(db: DatabaseSync): void {
   // v2 多候选降级：步骤实际候选与跳过记录（StepDispatchInfo）、run 级状态（黑名单等）。只加列，旧行取默认 '{}'。
   if (!stepColumns.has("dispatch_info_json")) db.exec("ALTER TABLE ai_team_steps ADD COLUMN dispatch_info_json TEXT NOT NULL DEFAULT '{}'");
   if (!runColumns.has("run_state_json")) db.exec("ALTER TABLE ai_team_runs ADD COLUMN run_state_json TEXT NOT NULL DEFAULT '{}'");
+
+  // 硅基员工表结构保护（遵循只加不删）
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS silicon_employees (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      duty TEXT NOT NULL DEFAULT '',
+      prompt TEXT NOT NULL DEFAULT '',
+      avatar TEXT NOT NULL DEFAULT '',
+      agents_json TEXT NOT NULL,
+      system_key TEXT,
+      archived_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_silicon_employees_archived ON silicon_employees(archived_at);
+  `);
+  // 内置员工标记（如 "wand-ops"）：只加列，用户员工保持 NULL。
+  const employeeColumns = new Set((db.prepare("PRAGMA table_info(silicon_employees)").all() as Array<{ name: string }>).map((column) => column.name));
+  if (employeeColumns.size > 0 && !employeeColumns.has("system_key")) {
+    db.exec("ALTER TABLE silicon_employees ADD COLUMN system_key TEXT");
+  }
 }
 
 function ensureWandTaskSchema(db: DatabaseSync): void {
@@ -1059,6 +1125,7 @@ function ensureWandTaskSchema(db: DatabaseSync): void {
   if (columns.length > 0 && !names.has("due_date")) db.exec("ALTER TABLE wand_tasks ADD COLUMN due_date TEXT");
   // 任务的默认派发配置（CLI 工具 / 模型 / 思考深度）。只加列，历史行保持 NULL。
   if (columns.length > 0 && !names.has("agent_json")) db.exec("ALTER TABLE wand_tasks ADD COLUMN agent_json TEXT");
+  if (columns.length > 0 && !names.has("execution_subject_json")) db.exec("ALTER TABLE wand_tasks ADD COLUMN execution_subject_json TEXT");
   if (columns.length > 0 && !names.has("workspace_task_id")) db.exec("ALTER TABLE wand_tasks ADD COLUMN workspace_task_id TEXT");
   // 父任务归属只加列；历史任务仍然是顶层任务。
   if (columns.length > 0 && !names.has("parent_task_id")) db.exec("ALTER TABLE wand_tasks ADD COLUMN parent_task_id TEXT");
@@ -1206,16 +1273,17 @@ interface CreateWandTaskInput {
   dueDate?: string | null;
   milestoneId?: string | null;
   agent?: WandTaskAgent | null;
+  executionSubject?: WandTask["executionSubject"];
 }
 
 type WandTaskPatch = Partial<Pick<WandTask,
   "workspaceId" | "workspaceTaskId" | "parentTaskId" | "title" | "titleSource"
   | "autoTitleSignature" | "description" | "status" | "priority" | "labels"
-  | "dueDate" | "milestoneId" | "sortOrder" | "agent">>;
+  | "dueDate" | "milestoneId" | "sortOrder" | "agent" | "executionSubject">>;
 
 const WAND_TASK_FIELDS = `id, identifier, workspace_id, workspace_task_id, parent_task_id,
   title, title_source, auto_title_signature, description, status, priority, labels_json,
-  due_date, milestone_id, sort_order, agent_json, created_at, updated_at`;
+  due_date, milestone_id, sort_order, agent_json, execution_subject_json, created_at, updated_at`;
 
 // Shared metadata comes from the latest explicitly linked card, including meaningful NULLs.
 // The old container columns remain readable for legacy rows until the startup migration.
@@ -1848,6 +1916,10 @@ export class WandStorage {
       milestoneId: typeof row.milestone_id === "string" && row.milestone_id ? row.milestone_id : null,
       sortOrder: Number(row.sort_order) || 0,
       agent: parseWandTaskAgent(row.agent_json),
+      executionSubject: (() => {
+        const parsed = safeJsonParse<unknown>(typeof row.execution_subject_json === "string" ? row.execution_subject_json : null);
+        return isTaskExecutionSubject(parsed) ? parsed : null;
+      })(),
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at),
     };
@@ -1874,12 +1946,13 @@ export class WandStorage {
     const number = this.db.prepare(`SELECT COALESCE(MAX(CAST(substr(identifier, 6) AS INTEGER)), 0) AS value
       FROM wand_tasks WHERE identifier GLOB 'TASK-[0-9]*'`).get() as { value: number };
     this.db.prepare(`INSERT INTO wand_tasks (${WAND_TASK_FIELDS})
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(id, `TASK-${number.value + 1}`, input.workspaceId ?? null, input.workspaceTaskId ?? null,
         input.parentTaskId ?? null, input.title, input.titleSource ?? "user", null,
         input.description ?? "", status, input.priority ?? DEFAULT_WAND_TASK_PRIORITY,
         JSON.stringify(input.labels ?? []), input.dueDate ?? null, input.milestoneId ?? null,
-        max.value + 1, input.agent ? JSON.stringify(input.agent) : null, createdAt, createdAt);
+        max.value + 1, input.agent ? JSON.stringify(input.agent) : null,
+        input.executionSubject ? JSON.stringify(input.executionSubject) : null, createdAt, createdAt);
     return this.getWandTask(id)!;
   }
 
@@ -1924,12 +1997,13 @@ export class WandStorage {
     }
     this.db.prepare(`UPDATE wand_tasks SET workspace_id = ?, workspace_task_id = ?, parent_task_id = ?,
       title = ?, title_source = ?, auto_title_signature = ?, description = ?, status = ?, priority = ?,
-      labels_json = ?, due_date = ?, milestone_id = ?, sort_order = ?, agent_json = ?, updated_at = ?
+      labels_json = ?, due_date = ?, milestone_id = ?, sort_order = ?, agent_json = ?, execution_subject_json = ?, updated_at = ?
       WHERE id = ?`)
       .run(next.workspaceId, next.workspaceTaskId, next.parentTaskId, next.title, next.titleSource,
         next.autoTitleSignature ?? null, next.description, next.status, next.priority,
         JSON.stringify(next.labels), next.dueDate, next.milestoneId ?? null, next.sortOrder,
-        next.agent ? JSON.stringify(next.agent) : null, next.updatedAt, next.id);
+        next.agent ? JSON.stringify(next.agent) : null,
+        next.executionSubject ? JSON.stringify(next.executionSubject) : null, next.updatedAt, next.id);
     if (patch.workspaceId !== undefined && next.workspaceTaskId) {
       const workspaceId = next.workspaceId ?? this.ensureGlobalWorkspace().id;
       // The container FK/index and standalone session workspace bucket follow the canonical project.
@@ -2721,6 +2795,102 @@ export class WandStorage {
     this.db.prepare("DELETE FROM auth_sessions WHERE expires_at < ?").run(now);
   }
 
+  // ============ Silicon Employees ============
+
+  listSiliconEmployees(options?: { includeArchived?: boolean }): SiliconEmployee[] {
+    const includeArchived = options?.includeArchived ?? false;
+    // 内置员工（system_key 非空）始终排在最前，其余按创建时间。
+    const sql = includeArchived
+      ? "SELECT * FROM silicon_employees ORDER BY (system_key IS NULL), created_at ASC"
+      : "SELECT * FROM silicon_employees WHERE archived_at IS NULL ORDER BY (system_key IS NULL), created_at ASC";
+    const rows = this.db.prepare(sql).all() as unknown as Record<string, unknown>[];
+    return rows.map(mapSiliconEmployeeRow);
+  }
+
+  getSiliconEmployee(id: string): SiliconEmployee | null {
+    const row = this.db.prepare("SELECT * FROM silicon_employees WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+    return row ? mapSiliconEmployeeRow(row) : null;
+  }
+
+  /** 内置「系统运维」员工；未创建（或被删除过）时返回 null。 */
+  getSystemSiliconEmployee(key: string = SYSTEM_EMPLOYEE_KEY): SiliconEmployee | null {
+    const row = this.db.prepare("SELECT * FROM silicon_employees WHERE system_key = ?").get(key) as Record<string, unknown> | undefined;
+    return row ? mapSiliconEmployeeRow(row) : null;
+  }
+
+  /**
+   * 幂等地保证内置员工存在。已存在时只补齐锁定字段（防止旧的同名定义漂移），
+   * 候选保留用户当下的设置；不存在时按 seed 建首条候选。
+   */
+  ensureSystemSiliconEmployee(seed: SystemEmployeeSeed = {}): SiliconEmployee {
+    const existing = this.getSystemSiliconEmployee();
+    if (!existing) {
+      const employee = systemEmployeeDefinition(systemEmployeeSeedAgents(seed), new Date().toISOString());
+      this.saveSiliconEmployee(employee);
+      return employee;
+    }
+    const locked = systemEmployeeDefinition(existing.agents, new Date().toISOString(), existing);
+    if (
+      existing.name !== locked.name
+      || existing.duty !== locked.duty
+      || existing.prompt !== locked.prompt
+      || existing.avatar !== locked.avatar
+      || existing.archivedAt !== undefined
+      || existing.agents.length === 0
+    ) {
+      this.saveSiliconEmployee(locked);
+      return locked;
+    }
+    return existing;
+  }
+
+  saveSiliconEmployee(employee: SiliconEmployee): void {
+    this.db.prepare(
+      `INSERT INTO silicon_employees (
+         id, name, duty, prompt, avatar, agents_json, system_key, archived_at, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         name = excluded.name,
+         duty = excluded.duty,
+         prompt = excluded.prompt,
+         avatar = excluded.avatar,
+         agents_json = excluded.agents_json,
+         system_key = excluded.system_key,
+         archived_at = excluded.archived_at,
+         updated_at = excluded.updated_at`
+    ).run(
+      employee.id,
+      employee.name,
+      employee.duty,
+      employee.prompt,
+      employee.avatar,
+      JSON.stringify(employee.agents),
+      employee.systemKey ?? null,
+      employee.archivedAt ?? null,
+      employee.createdAt,
+      employee.updatedAt,
+    );
+  }
+
+  archiveSiliconEmployee(id: string, archivedAt = new Date().toISOString()): void {
+    this.db.prepare("UPDATE silicon_employees SET archived_at = ?, updated_at = ? WHERE id = ?").run(
+      archivedAt,
+      new Date().toISOString(),
+      id,
+    );
+  }
+
+  unarchiveSiliconEmployee(id: string): void {
+    this.db.prepare("UPDATE silicon_employees SET archived_at = NULL, updated_at = ? WHERE id = ?").run(
+      new Date().toISOString(),
+      id,
+    );
+  }
+
+  deleteSiliconEmployee(id: string): void {
+    this.db.prepare("DELETE FROM silicon_employees WHERE id = ?").run(id);
+  }
+
   // ============ AI Teams ============
 
   listAiTeams(): AiTeam[] {
@@ -2791,7 +2961,7 @@ export class WandStorage {
    */
   listAiTeamRunChatMarkers(): Map<string, AiTeamRunChatMarker> {
     const rows = this.db.prepare(
-      `SELECT r.id, r.team_json, r.chat_session_id, t.name AS current_team_name
+      `SELECT r.id, r.team_id, r.team_json, r.chat_session_id, t.name AS current_team_name
        FROM ai_team_runs r LEFT JOIN ai_teams t ON t.id = r.team_id
        WHERE r.chat_session_id IS NOT NULL AND r.chat_session_id <> '' ORDER BY r.created_at DESC`,
     ).all() as unknown as Record<string, unknown>[];
@@ -2802,6 +2972,7 @@ export class WandStorage {
       const rawTeam = safeJsonParse<Record<string, unknown>>(typeof row.team_json === "string" ? row.team_json : null);
       markers.set(chatSessionId, {
         runId: String(row.id),
+        teamId: String(row.team_id),
         teamName: typeof row.current_team_name === "string" ? row.current_team_name : String(rawTeam?.name ?? ""),
         memberCount: Array.isArray(rawTeam?.members) ? rawTeam.members.length : 0,
       });
@@ -3220,6 +3391,29 @@ export class WandStorage {
   deleteSession(id: string): void {
     this.db.prepare("DELETE FROM command_sessions WHERE id = ?").run(id);
   }
+}
+
+function mapSiliconEmployeeRow(row: Record<string, unknown>): SiliconEmployee {
+  const rawAgents = safeJsonParse<unknown>(typeof row.agents_json === "string" ? row.agents_json : null);
+  const agents = Array.isArray(rawAgents)
+    ? rawAgents
+        .map((candidate) => parseWandTaskAgent(candidate))
+        .filter((candidate): candidate is WandTaskAgent => candidate !== null)
+    : [];
+  const systemKey = typeof row.system_key === "string" && row.system_key ? row.system_key : undefined;
+
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    duty: String(row.duty ?? ""),
+    prompt: String(row.prompt ?? ""),
+    avatar: String(row.avatar ?? ""),
+    agents,
+    systemKey,
+    archivedAt: typeof row.archived_at === "string" && row.archived_at ? row.archived_at : undefined,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
 }
 
 function mapAiTeamRow(row: Record<string, unknown>): AiTeam {

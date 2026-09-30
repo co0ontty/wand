@@ -43,6 +43,7 @@ const legacyRuntime: NewSessionRuntimeAdapter = {
         grok: getChatModelForProvider("grok"),
         qoder: getChatModelForProvider("qoder"),
         pi: getChatModelForProvider("pi"),
+        gemini: getChatModelForProvider("gemini"),
       },
       thinkingEffort: state.chatThinking || "off",
     };

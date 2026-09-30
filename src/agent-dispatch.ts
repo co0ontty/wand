@@ -5,6 +5,7 @@ import type { SessionRegistry } from "./session-registry.js";
 import type { WandStorage } from "./storage.js";
 import type { StructuredSessionManager } from "./structured-session-manager.js";
 import type { WandTask, WandTaskAgent } from "./task-types.js";
+import type { SiliconEmployee } from "./ai-team-types.js";
 import type { SessionProvider, SessionSnapshot, WandConfig } from "./types.js";
 
 export interface AgentDispatchDeps {
@@ -40,7 +41,8 @@ export function resolveTaskDispatchTarget(
  */
 export async function dispatchAgentForTask(
   deps: AgentDispatchDeps,
-  input: { task: WandTask; agent: WandTaskAgent; prompt: string; automationId: string; systemPrompt?: string },
+  input: { task: WandTask; agent: WandTaskAgent; prompt: string; automationId: string; systemPrompt?: string;
+    employee?: SiliconEmployee; employeeCandidateIndex?: number },
 ): Promise<AgentDispatchResult> {
   const { storage, config, structured, processes } = deps;
   const { agent } = input;
@@ -73,6 +75,11 @@ export async function dispatchAgentForTask(
         sessionSource: "automation",
         automationId: input.automationId,
         systemPrompt,
+        employeeId: input.employee?.id,
+        employeeName: input.employee?.name,
+        employeeAvatar: input.employee?.avatar,
+        employeeCandidates: input.employee?.agents,
+        employeeCandidateIndex: input.employeeCandidateIndex,
         workspaceId: group.workspaceId,
         workspaceTaskId: group.workspaceTaskId,
       });

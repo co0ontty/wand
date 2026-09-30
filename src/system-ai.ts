@@ -245,7 +245,7 @@ export function discoverCliSystemAiConfigs(preferred?: SessionProvider, home = o
   const found: SystemAiConfig[] = [];
   const seen = new Set<string>();
   for (const provider of [...new Set(order)]) {
-    if (provider === "qoder" || provider === "pi") continue;
+    if (provider === "qoder" || provider === "pi" || provider === "gemini") continue;
     let discovered: SystemAiConfig[];
     try {
       discovered = discoverers[provider](home);

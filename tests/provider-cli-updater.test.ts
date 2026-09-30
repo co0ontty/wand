@@ -34,6 +34,8 @@ case "$2" in
   opencode-ai@latest) echo 1.1.0 ;;
   @qoder-ai/qodercli@latest) echo 0.8.0 ;;
   @earendil-works/pi-coding-agent@latest) echo 0.75.0 ;;
+  @google/gemini-cli@latest) echo 0.63.0 ;;
+  -g) [ "$3" = "@google/gemini-cli@latest" ] && echo gemini >> "$UPDATE_LOG" || exit 1 ;;
   *) exit 1 ;;
 esac`);
   executable(path.join(bin, "claude"), `[ "$1" = "--version" ] && echo '2.1.0 (Claude Code)' || echo claude >> "$UPDATE_LOG"`);
@@ -41,6 +43,8 @@ esac`);
   executable(path.join(bin, "opencode"), `[ "$1" = "--version" ] && echo '1.0.0' || echo opencode >> "$UPDATE_LOG"`);
   executable(path.join(bin, "qodercli"), `[ "$1" = "--version" ] && echo '0.7.0' || echo qoder >> "$UPDATE_LOG"`);
   executable(path.join(bin, "pi"), `[ "$1" = "--version" ] && echo '0.74.0' || echo pi >> "$UPDATE_LOG"`);
+  // gemini 没有自更新子命令，走 npm install -g；--version 之外的调用都不该发生。
+  executable(path.join(bin, "gemini"), `[ "$1" = "--version" ] && echo '0.62.0' || echo SHOULD_NOT_RUN >> "$UPDATE_LOG"`);
   // Grok CLI 没有 npm 渠道，最新版只能问它自己；装在自己的 ~/.grok/bin 下。
   const grokBin = path.join(root, "home", ".grok", "bin");
   mkdirSync(grokBin, { recursive: true });
@@ -60,6 +64,7 @@ esac`);
     ["grok", "1.0.20", "1.0.30", true],
     ["qoder", "0.7.0", "0.8.0", true],
     ["pi", "0.74.0", "0.75.0", true],
+    ["gemini", "0.62.0", "0.63.0", true],
   ]);
   assert.equal(statuses.find((item) => item.id === "grok")?.installKind, "native");
 
@@ -70,8 +75,9 @@ esac`);
     ["grok", true, false],
     ["qoder", true, false],
     ["pi", true, false],
+    ["gemini", true, false],
   ]);
-  assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), ["claude", "opencode", "grok", "qoder", "pi"]);
+  assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), ["claude", "opencode", "grok", "qoder", "pi", "gemini"]);
 });
 
 test("legacy OpenCode is reported without running an unsafe automatic migration", async (t) => {

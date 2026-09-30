@@ -4,6 +4,7 @@ import {
   CLAUDE_BRAND_COLOR,
   CLAUDE_LOGO_PATH,
   CODEX_LOGO_PATH,
+  GEMINI_LOGO_PATH,
   GROK_LOGO_PATHS,
   PI_LOGO_DOT_PATH,
   PI_LOGO_PATH,
@@ -75,6 +76,20 @@ export function ProviderLogo({ provider, className }: ProviderLogoProps) {
         data-provider-logo="grok"
       >
         {GROK_LOGO_PATHS.map((path) => <path key={path} d={path}/>)}
+      </svg>
+    );
+  }
+  if (normalized === "gemini") {
+    return (
+      <svg
+        className={logoClass}
+        viewBox="0 0 24 24"
+        fill="currentColor"
+        aria-hidden="true"
+        focusable="false"
+        data-provider-logo="gemini"
+      >
+        <path d={GEMINI_LOGO_PATH}/>
       </svg>
     );
   }

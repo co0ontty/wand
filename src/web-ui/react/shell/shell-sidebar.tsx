@@ -27,7 +27,7 @@ import {
 } from "../workspaces/sidebar-list-error";
 
 import { taskBoardController, taskBoardStore } from "../issues/task-board-controller";
-import { HomeAttention } from "../attention/home-attention";
+import { HomeAttention, HomeAttentionBadge } from "../attention/home-attention";
 import { useAiTeamAttentionCount } from "../ai-teams/repository";
 import { SidebarPeek } from "./sidebar-peek";
 import { useHoverPointer, useSidebarPeek } from "./use-sidebar-peek";
@@ -727,6 +727,7 @@ export function ShellSidebar() {
               <WandBrandMark className="sidebar-brand-mark" />
               <span className="sidebar-title">Wand</span>
               <SidebarListErrorBadge />
+              <HomeAttentionBadge />
             </div>
             <div className="sidebar-header-actions">
               <div className="sidebar-header-more">
@@ -842,7 +843,7 @@ export function ShellSidebar() {
           active={taskBoard.open ? (taskBoard.page === "teams" ? "ai-teams" : "task-board") : null}
         >
           <WandNavigationList className="sidebar-feature-list">
-            <WandNavigationItem>
+            <WandNavigationItem className="sidebar-feature-create">
               <WandButton
                 id="drawer-new-session-button"
                 className="sidebar-new-task"

@@ -19,6 +19,10 @@ import { useWandModelCatalog } from "../use-model-catalog";
 import { ProviderLogo } from "../provider-logo";
 import { sortProviderOptions, useProviderUsage } from "../provider-usage";
 import { WandButton, WandDialogSurface, WandSelect } from "../ui";
+import {
+  UnifiedExecutionSubjectPicker,
+  type UnifiedExecutionSubject,
+} from "../workspaces/unified-execution-subject-picker.js";
 import { newSessionController, newSessionStore } from "./controller";
 import {
   buildCreateRequest,
@@ -52,6 +56,7 @@ const PROVIDERS: ReadonlyArray<{
   { value: "grok", label: "Grok", description: "Grok Build 结构化或 PTY 会话" },
   { value: "qoder", label: "Qoder", description: "Qoder CLI 结构化或 PTY 会话" },
   { value: "pi", label: "Pi", description: "Pi 多模型结构化或 PTY 会话" },
+  { value: "gemini", label: "Gemini", description: "Gemini CLI 结构化或 PTY 会话" },
 ];
 
 const KINDS: ReadonlyArray<{
@@ -96,6 +101,7 @@ function kindHint(provider: NewSessionProvider, kind: NewSessionKind): string {
     if (provider === "grok") return "Grok streaming-json 结构化聊天界面，支持多轮续聊与思考过程展示。";
     if (provider === "qoder") return "Qoder stream-json 结构化聊天界面，支持续聊、思考过程和工具调用展示。";
     if (provider === "pi") return "Pi JSON 结构化聊天界面，支持续聊、思考过程和工具调用展示。";
+    if (provider === "gemini") return "Gemini stream-json 结构化聊天界面，支持续聊与工具调用展示。";
     return "结构化聊天界面，支持多轮对话、流式输出和工具调用展示。";
   }
   if (provider === "codex") return "Codex PTY 终端会话；terminal 是原始输出，chat 是解析后的阅读视图。";
@@ -103,6 +109,7 @@ function kindHint(provider: NewSessionProvider, kind: NewSessionKind): string {
   if (provider === "grok") return "Grok Build TUI 的原始 PTY 终端会话。";
   if (provider === "qoder") return "Qoder CLI TUI 的原始 PTY 终端会话。";
   if (provider === "pi") return "Pi TUI 的原始 PTY 终端会话。";
+  if (provider === "gemini") return "Gemini CLI TUI 的原始 PTY 终端会话。";
   return "原始 PTY 终端会话，支持持续交互、终端视图和权限流。";
 }
 
@@ -124,6 +131,13 @@ function modeHint(provider: NewSessionProvider, mode: NewSessionMode): string {
     return "Qoder 一律以 yolo（bypass_permissions）启动，不再弹出权限确认；支持 TUI 与 stream-json 结构化会话。";
   }
   if (provider === "pi") return "Pi 支持标准与托管模式；模型和 thinking 会传给 Pi CLI。";
+  if (provider === "gemini") {
+    return mode === "full-access" || mode === "managed"
+      ? "Gemini 以 yolo（自动批准全部工具）运行；支持 TUI 与 stream-json 结构化会话。"
+      : mode === "auto-edit"
+        ? "Gemini 以 auto_edit（自动批准编辑工具）运行；支持 TUI 与 stream-json 结构化会话。"
+        : "Gemini 使用自身权限确认；结构化模式下未批准的工具调用会被拒绝。";
+  }
   if (mode === "full-access") return "自动确认权限请求与高权限操作，适合你确认环境安全后的连续修改。";
   if (mode === "auto-edit") return "保留交互式会话，同时更偏向直接编辑代码。";
   if (mode === "native") return "调用 Claude 原生 API 输出，适合快速问答或一次性生成。";
@@ -196,7 +210,8 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
         setDefaults(loaded);
         setForm({
           provider: loaded.config.defaultProvider,
-          kind: loaded.config.defaultSessionKind,
+          employeeId: controller.initialEmployeeId || undefined,
+          kind: controller.initialEmployeeId ? "structured" : loaded.config.defaultSessionKind,
           mode: safeMode(
             loaded.config.defaultProvider,
             loaded.config.defaultMode,
@@ -215,7 +230,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
         if (!abort.signal.aborted) setLoading(false);
       });
     return () => abort.abort();
-  }, [controller.initialCwd, controller.open, controller.revision, repository]);
+  }, [controller.initialCwd, controller.initialEmployeeId, controller.open, controller.revision, repository]);
 
   useEffect(() => {
     if (!controller.open || !form || !suggestionsActive) return;
@@ -311,7 +326,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
       const request = buildCreateRequest(form, defaults.config, runtime.getContext(), dimensions);
       void repository.savePreferences({
         ...(request.kind === "shell" ? {} : {
-          defaultProvider: request.provider,
+          ...(!form.employeeId ? { defaultProvider: request.provider } : {}),
           defaultSessionKind: request.kind,
           defaultMode: request.mode,
         }),
@@ -347,132 +362,102 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
       ) : form && defaults ? (
         <form noValidate className="wand-new-session-form" aria-busy={submitting} onSubmit={(event) => void submit(event)}>
           <div className="wand-new-session-body">
-            <fieldset className="wand-new-session-field wand-new-session-fieldset">
-              <legend className="wand-new-session-field-label">CLI 工具</legend>
-              <div className="wand-new-session-choices wand-new-session-provider-choices" role="radiogroup" aria-label="CLI 工具">
-                {sortedProviders.map((provider) => (
-                  <button
-                    key={provider.value}
-                    type="button"
-                    role="radio"
-                    aria-checked={form.provider === provider.value}
-                    tabIndex={form.provider === provider.value ? 0 : -1}
-                    ref={(element) => { providerRefs.current[provider.value] = element; }}
-                    className={`wand-new-session-choice wand-new-session-provider-choice${form.provider === provider.value ? " active" : ""}`}
-                    autoFocus={form.provider === provider.value}
-                    data-wand-autofocus={form.provider === provider.value ? "" : undefined}
-                    onClick={() => selectProvider(provider.value)}
-                    onKeyDown={(event) => navigateChoice(
-                      event,
-                      form.provider,
-                      providerValues,
-                      selectProvider,
-                      providerRefs,
-                    )}
-                  >
-                    <ProviderLogo
-                      provider={provider.value}
-                      className="wand-new-session-provider-logo"
-                    />
-                    <span className="wand-new-session-choice-label">{provider.label}</span>
-                    <span className="wand-new-session-choice-description">{provider.description}</span>
-                  </button>
-                ))}
-              </div>
-            </fieldset>
+            <UnifiedExecutionSubjectPicker
+              selectedSubject={form.employeeId
+                ? { type: "employee", id: form.employeeId }
+                : { type: "cli", id: form.kind === "shell" ? "shell" : form.provider }}
+              kind={form.kind === "shell" ? "pty" : form.kind}
+              model={form.model}
+              showModel={false}
+              disabled={submitting}
+              onSubjectChange={(subj) => {
+                if (subj.type === "cli") {
+                  if (subj.id === "shell") {
+                    setForm((current) => current
+                      ? { ...current, employeeId: undefined, kind: "shell" }
+                      : current);
+                  } else {
+                    setForm((current) => current
+                      ? { ...current, employeeId: undefined, kind: current.kind === "shell" ? "pty" : current.kind }
+                      : current);
+                    selectProvider(subj.id as NewSessionProvider);
+                  }
+                } else if (subj.type === "employee") {
+                  setForm((current) => current
+                    ? { ...current, employeeId: subj.id, kind: "structured" }
+                    : current);
+                }
+              }}
+              onKindChange={(nextKind) => {
+                if (nextKind === "pty") {
+                  setForm((current) => current ? { ...current, employeeId: undefined } : current);
+                }
+                selectKind(nextKind);
+              }}
+              onModelChange={(nextModel) => selectModel(nextModel)}
+            />
 
-            <div className="wand-new-session-primary-grid">
-              <fieldset className="wand-new-session-field wand-new-session-fieldset">
-                <legend className="wand-new-session-field-label">会话类型</legend>
-                <div className="wand-new-session-choices" role="radiogroup" aria-label="会话类型">
-                  {KINDS.map((kind) => (
-                    <button
-                      key={kind.value}
-                      type="button"
-                      role="radio"
-                      aria-checked={form.kind === kind.value}
-                      tabIndex={form.kind === kind.value ? 0 : -1}
-                      ref={(element) => { kindRefs.current[kind.value] = element; }}
-                      className={`wand-new-session-choice wand-new-session-kind-choice${form.kind === kind.value ? " active" : ""}`}
-                      onClick={() => selectKind(kind.value)}
-                      onKeyDown={(event) => navigateChoice(
-                        event,
-                        form.kind,
-                        KIND_VALUES,
-                        selectKind,
-                        kindRefs,
-                      )}
-                    >
-                      <span className="wand-new-session-choice-label">{kind.label}</span>
-                      <span className="wand-new-session-choice-description">{kind.description}</span>
-                    </button>
-                  ))}
-                </div>
-                <p className="wand-new-session-field-hint">{kindHint(form.provider, form.kind)}</p>
-              </fieldset>
-
-              <div className="wand-new-session-field">
-                <label className="wand-new-session-field-label" htmlFor="wand-new-session-cwd">工作目录</label>
-                <div className="wand-new-session-suggestions-wrap">
-                  <input
-                    id="wand-new-session-cwd"
-                    className="wand-new-session-input"
-                    type="text"
-                    value={form.cwd}
-                    placeholder={newSessionStore.getRuntime()?.getContext().effectiveCwd || defaults.config.defaultCwd}
-                    autoComplete="off"
-                    autoCorrect="off"
-                    autoCapitalize="off"
-                    spellCheck={false}
-                    aria-invalid={error.includes("目录") || undefined}
-                    aria-describedby="wand-new-session-cwd-hint"
-                    onFocus={() => setSuggestionsActive(true)}
-                    onChange={(event) => setForm({ ...form, cwd: event.currentTarget.value })}
-                    onBlur={() => window.setTimeout(() => setSuggestionsActive(false), 120)}
-                  />
-                  {suggestionsActive && suggestions.length > 0 ? (
-                    <div className="wand-new-session-suggestions" role="listbox" aria-label="工作目录建议">
-                      {suggestions.map((item) => (
-                        <button
-                          key={item.path}
-                          type="button"
-                          className="wand-new-session-suggestion"
-                          role="option"
-                          aria-selected={form.cwd === item.path}
-                          onMouseDown={(event) => event.preventDefault()}
-                          onClick={() => {
-                            setForm({ ...form, cwd: item.path });
-                            setSuggestionsActive(false);
-                          }}
-                        >
-                          <strong>{item.name}</strong>
-                          <small className="wand-new-session-suggestion-path">{item.path}</small>
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-                <p id="wand-new-session-cwd-hint" className="wand-new-session-field-hint">留空则使用当前目录，支持路径自动补全。</p>
-                {defaults.recentPaths.length > 0 ? (
-                  <div className="wand-new-session-recent-paths" aria-label="最近使用的工作目录">
-                    {defaults.recentPaths.map((item) => (
+            <div className="wand-new-session-field">
+              <label className="wand-new-session-field-label" htmlFor="wand-new-session-cwd">工作目录</label>
+              <div className="wand-new-session-suggestions-wrap">
+                <input
+                  id="wand-new-session-cwd"
+                  className="wand-new-session-input"
+                  type="text"
+                  value={form.cwd}
+                  placeholder={newSessionStore.getRuntime()?.getContext().effectiveCwd || defaults.config.defaultCwd}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  aria-invalid={error.includes("目录") || undefined}
+                  aria-describedby="wand-new-session-cwd-hint"
+                  onFocus={() => setSuggestionsActive(true)}
+                  onChange={(event) => setForm({ ...form, cwd: event.currentTarget.value })}
+                  onBlur={() => window.setTimeout(() => setSuggestionsActive(false), 120)}
+                />
+                {suggestionsActive && suggestions.length > 0 ? (
+                  <div className="wand-new-session-suggestions" role="listbox" aria-label="工作目录建议">
+                    {suggestions.map((item) => (
                       <button
                         key={item.path}
                         type="button"
-                        className={`wand-new-session-recent-path${form.cwd === item.path ? " active" : ""}`}
-                        title={item.path}
-                        aria-pressed={form.cwd === item.path}
-                        onClick={() => setForm({ ...form, cwd: item.path })}
+                        className="wand-new-session-suggestion"
+                        role="option"
+                        aria-selected={form.cwd === item.path}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => {
+                          setForm({ ...form, cwd: item.path });
+                          setSuggestionsActive(false);
+                        }}
                       >
-                        <span className="wand-new-session-recent-path-value">{item.path}</span>
+                        <strong>{item.name}</strong>
+                        <small className="wand-new-session-suggestion-path">{item.path}</small>
                       </button>
                     ))}
                   </div>
                 ) : null}
               </div>
+              <p id="wand-new-session-cwd-hint" className="wand-new-session-field-hint">留空则使用当前目录，支持路径自动补全。</p>
+              {defaults.recentPaths.length > 0 ? (
+                <div className="wand-new-session-recent-paths" aria-label="最近使用的工作目录">
+                  {defaults.recentPaths.map((item) => (
+                    <button
+                      key={item.path}
+                      type="button"
+                      className={`wand-new-session-recent-path${form.cwd === item.path ? " active" : ""}`}
+                      title={item.path}
+                      aria-pressed={form.cwd === item.path}
+                      onClick={() => setForm({ ...form, cwd: item.path })}
+                    >
+                      <span className="wand-new-session-recent-path-value">{item.path}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
             </div>
 
-            {form.kind !== "shell" ? (
+            {form.kind !== "shell" && !form.employeeId ? (
               <fieldset className="wand-new-session-field wand-new-session-fieldset">
                 <legend className="wand-new-session-field-label">模型</legend>
                 <WandSelect
@@ -501,12 +486,13 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
               >
                 <span>高级选项</span>
                 <span className="wand-new-session-advanced-summary">
-                  {form.kind === "shell" ? "Shell 环境" : selectedMode?.label ?? "标准"}
+                  {form.employeeId ? "按员工工具链执行" : form.kind === "shell" ? "Shell 环境" : selectedMode?.label ?? "标准"}
                 </span>
               </button>
               {advancedOpen ? (
                 <div id="wand-new-session-advanced-content" className="wand-new-session-advanced-content">
-                  {form.kind !== "shell" ? <fieldset className="wand-new-session-field wand-new-session-fieldset">
+                  {form.employeeId ? <p className="wand-new-session-field-hint">模型、权限与候选顺序由员工配置决定。可在硅基员工页修改。</p>
+                    : form.kind !== "shell" ? <fieldset className="wand-new-session-field wand-new-session-fieldset">
                     <legend className="wand-new-session-field-label">模式</legend>
                     <div className="wand-new-session-choices wand-new-session-mode-choices" role="radiogroup" aria-label="执行模式">
                       {MODES.map((mode) => {
@@ -548,11 +534,11 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
 
           <div className="wand-new-session-summary" aria-live="polite">
             <span>即将启动</span>
-            <strong>{form.kind === "shell"
+            <strong>{form.employeeId ? "硅基员工 · 结构化对话" : form.kind === "shell"
               ? "空白终端 · Shell"
               : `${PROVIDERS.find((provider) => provider.value === form.provider)?.label} · ${form.kind === "structured" ? "结构化" : "PTY"}`}</strong>
             <span title={effectiveCwd}>{effectiveCwd}</span>
-            <span>{form.kind === "shell" ? "不启动 CLI" : selectedMode?.label ?? "标准"}</span>
+            <span>{form.employeeId ? "按员工工具链顺序启动" : form.kind === "shell" ? "不启动 CLI" : selectedMode?.label ?? "标准"}</span>
           </div>
 
           <div className="wand-new-session-footer">

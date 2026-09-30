@@ -14,7 +14,7 @@ const REGISTRY_TIMEOUT_MS = 15_000;
 const UPDATE_TIMEOUT_MS = 5 * 60_000;
 const MAX_BUFFER = 4 * 1024 * 1024;
 
-export type ProviderCliId = "claude" | "codex" | "opencode" | "grok" | "qoder" | "pi";
+export type ProviderCliId = "claude" | "codex" | "opencode" | "grok" | "qoder" | "pi" | "gemini";
 
 interface ProviderCliSpec {
   id: ProviderCliId;
@@ -23,7 +23,8 @@ interface ProviderCliSpec {
   /** 有 npm 发布渠道时用它查最新版；Grok 只提供自更新，见 `cliLatestArgs`。 */
   npmPackage?: string;
   versionArgs: string[];
-  updateArgs: string[];
+  /** 没有自更新子命令时留空，改走 `npm install -g <npmPackage>@latest`（如 Gemini CLI）。 */
+  updateArgs?: string[];
   /** 没有 npm 渠道的 CLI 用自身 --check 读取最新版（如 `grok update --check --json`）。 */
   cliLatestArgs?: string[];
 }
@@ -79,6 +80,14 @@ const PROVIDER_CLI_SPECS: readonly ProviderCliSpec[] = [
     npmPackage: "@earendil-works/pi-coding-agent",
     versionArgs: ["--version"],
     updateArgs: ["update", "self"],
+  },
+  {
+    id: "gemini",
+    label: "Gemini CLI",
+    command: "gemini",
+    npmPackage: "@google/gemini-cli",
+    versionArgs: ["--version"],
+    // 没有 `gemini update` 子命令，只能走 npm 发布渠道。
   },
 ] as const;
 
@@ -411,7 +420,15 @@ export async function updateProviderClis(
     }
     options.onLog?.(`[CLI Update] ${spec.label}: ${status.currentVersion} -> ${status.latestVersion}`);
     try {
-      const output = await runCommand(executable, spec.updateArgs, options.updateTimeoutMs ?? UPDATE_TIMEOUT_MS, options);
+      // 没有自更新子命令的 CLI（Gemini）走它的 npm 发布渠道。
+      const output = spec.updateArgs
+        ? await runCommand(executable, spec.updateArgs, options.updateTimeoutMs ?? UPDATE_TIMEOUT_MS, options)
+        : await runCommand(
+            options.env?.WAND_NPM_BIN || process.env.WAND_NPM_BIN || (process.platform === "win32" ? "npm.cmd" : "npm"),
+            ["install", "-g", `${spec.npmPackage}@latest`],
+            options.updateTimeoutMs ?? UPDATE_TIMEOUT_MS,
+            options,
+          );
       const combined = trimOutput([output.stdout, output.stderr].filter(Boolean).join("\n"));
       results.push({
         id: spec.id,

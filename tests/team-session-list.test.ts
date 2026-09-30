@@ -110,6 +110,9 @@ test("step markers key dispatched sessions by session id and project the live me
     storage.saveAiTeamRun(run("running"));
     storage.saveAiTeamStep(STEP);
 
+    assert.equal(storage.listAiTeamRunChatMarkers().get("chat-1")?.teamId, TEAM.id,
+      "群聊入口按稳定团队 ID 归类，团队改名后仍能匹配");
+
     const markers = storage.listAiTeamStepSessionMarkers();
     const marker = markers.get("step-session-1");
     assert.ok(marker);
@@ -230,7 +233,7 @@ const chatSession: WorkspaceSessionSummary = {
   title: "测试团队 · 补安装说明",
   cwd: "/repo",
   status: "idle",
-  teamChat: { runId: "run-1", teamName: "测试团队", memberCount: 2 },
+  teamChat: { runId: "run-1", teamId: "team-1", teamName: "测试团队", memberCount: 2 },
 };
 
 const humanSession: WorkspaceSessionSummary = {
@@ -280,7 +283,7 @@ test("team rows show the step title, not the generated CLI signature", () => {
   const long = teamStepLabel({ ...memberSession.teamStep!, title: "把侧栏里的团队会话默认折叠起来，点击以后才展开显示具体的每一条" });
   assert.ok(Array.from(long).length <= 26, `短标题太长：${long}`);
   assert.ok(long.endsWith("…"));
-  assert.equal(teamChatLabel({ id: "x", teamChat: { runId: "r", teamName: "", memberCount: 1 }, title: "旧标题" }), "旧标题");
+  assert.equal(teamChatLabel({ id: "x", teamChat: { runId: "r", teamId: "team-1", teamName: "", memberCount: 1 }, title: "旧标题" }), "旧标题");
 });
 
 test("display mode cycles full → folded → active and survives dirty storage values", () => {

@@ -8,6 +8,8 @@ export interface TaskBoardControllerSnapshot {
   sessionId: string;
   /** page === "teamchat" 时要打开的团队运行 id（也持久化在 URL `run` 参数里）。 */
   runId: string;
+  /** 团队联系人入口要预选并展开开工表单的团队。 */
+  teamId: string;
   revision: number;
 }
 
@@ -29,6 +31,7 @@ let snapshot: TaskBoardControllerSnapshot = {
   workspaceId: "",
   sessionId: "",
   runId: "",
+  teamId: "",
   revision: 0,
 };
 const listeners = new Set<Listener>();
@@ -36,7 +39,7 @@ let historyInstalled = false;
 /** True only for the history entry this tab pushed by opening the board. */
 let openedViaPush = false;
 let closingViaBack = false;
-let reopenAfterBack: { workspaceId: string; sessionId: string; page: TaskBoardPage; runId: string } | null = null;
+let reopenAfterBack: { workspaceId: string; sessionId: string; page: TaskBoardPage; runId: string; teamId: string } | null = null;
 
 function publish(next: Partial<TaskBoardControllerSnapshot>): void {
   snapshot = { ...snapshot, ...next, revision: snapshot.revision + 1 };
@@ -123,7 +126,7 @@ function onPopState(): void {
   const reopen = reopenAfterBack;
   reopenAfterBack = null;
   if (reopen) {
-    taskBoardController.open(reopen.workspaceId, reopen.sessionId, reopen.page, reopen.runId);
+    taskBoardController.open(reopen.workspaceId, reopen.sessionId, reopen.page, reopen.runId, reopen.teamId);
     return;
   }
   const page = shouldOpen ? taskBoardPageOf(locationSearch()) : snapshot.page;
@@ -131,7 +134,8 @@ function onPopState(): void {
   publish({
     open: shouldOpen,
     page,
-    ...(page === "teamchat" ? { runId: teamChatRunOf(locationSearch()) } : {}),
+    runId: page === "teamchat" ? teamChatRunOf(locationSearch()) : "",
+    teamId: "",
   });
 }
 
@@ -148,16 +152,16 @@ export function installTaskBoardHistory(): void {
 }
 
 export const taskBoardController = {
-  open(workspaceId = "", sessionId = "", page: TaskBoardPage = "board", runId = ""): void {
+  open(workspaceId = "", sessionId = "", page: TaskBoardPage = "board", runId = "", teamId = ""): void {
     installTaskBoardHistory();
     if (closingViaBack) {
-      reopenAfterBack = { workspaceId, sessionId, page, runId };
+      reopenAfterBack = { workspaceId, sessionId, page, runId, teamId };
       return;
     }
     const wasOpen = snapshot.open;
     const pageChanged = snapshot.page !== page;
     const runChanged = page === "teamchat" && snapshot.runId !== runId;
-    publish({ open: true, workspaceId, sessionId, page, runId: page === "teamchat" ? runId : "" });
+    publish({ open: true, workspaceId, sessionId, page, runId: page === "teamchat" ? runId : "", teamId: page === "teams" ? teamId : "" });
     if (wasOpen) {
       // 看板 ⇄ 团队页 ⇄ 群聊页之间切换只改地址，不多压一层历史：返回键仍然一步回到会话。
       if (pageChanged || runChanged) writeLocation(true, "replace");

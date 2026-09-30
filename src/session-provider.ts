@@ -1,7 +1,10 @@
+import { constants, accessSync, statSync } from "node:fs";
+import path from "node:path";
+
 import type { SessionProvider } from "./types.js";
 
 /** 全部受支持的会话 provider；顺序与 UI / 派发选择器一致。 */
-export const SESSION_PROVIDERS = ["claude", "codex", "opencode", "grok", "qoder", "pi"] as const;
+export const SESSION_PROVIDERS = ["claude", "codex", "opencode", "grok", "qoder", "pi", "gemini"] as const;
 
 const SESSION_PROVIDER_SET: ReadonlySet<string> = new Set(SESSION_PROVIDERS);
 
@@ -15,6 +18,23 @@ export function providerCliCommand(provider: SessionProvider): string {
   return provider === "qoder" ? "qodercli" : provider;
 }
 
+/**
+ * 不启动 shell 也能判断某个 provider 的 CLI 是否在 PATH 上（与子进程 PATH 一致）。
+ * 用于多候选降级时跳过没安装的工具，避免白等一次 spawn 失败。
+ */
+export function providerCliInstalled(provider: SessionProvider, pathValue = process.env.PATH ?? ""): boolean {
+  const command = providerCliCommand(provider);
+  for (const directory of pathValue.split(path.delimiter)) {
+    if (!directory) continue;
+    try {
+      const executable = path.join(directory, command);
+      accessSync(executable, constants.X_OK);
+      if (statSync(executable).isFile()) return true;
+    } catch { /* 检查下一个 PATH 目录 */ }
+  }
+  return false;
+}
+
 /** 从 runner 名推断 provider；`pty` 等与 provider 无关的 runner 返回 undefined。 */
 export function inferProviderFromRunner(runner: unknown): SessionProvider | undefined {
   if (runner === "claude-cli" || runner === "claude-cli-print" || runner === "claude-sdk") return "claude";
@@ -23,6 +43,7 @@ export function inferProviderFromRunner(runner: unknown): SessionProvider | unde
   if (runner === "grok-cli-headless") return "grok";
   if (runner === "qoder-cli-print") return "qoder";
   if (runner === "pi-cli-json") return "pi";
+  if (runner === "gemini-cli-json") return "gemini";
   return undefined;
 }
 
@@ -40,5 +61,7 @@ export function inferProviderFromCommand(command: string): SessionProvider | und
   if (/^grok\b/i.test(value)) return "grok";
   if (/^qodercli\b/i.test(value)) return "qoder";
   if (/^pi\b/i.test(value)) return "pi";
+  // Gemini CLI 的可执行文件就叫 gemini；-p / --prompt 等参数不影响首 token 识别。
+  if (/^gemini\b/i.test(value)) return "gemini";
   return undefined;
 }

@@ -23,7 +23,7 @@ import {
   type IssueModelCatalog,
   type IssueWorkspace,
 } from "../issues/task-board-agent";
-import { taskBoardController } from "../issues/task-board-controller";
+import { taskBoardController, taskBoardStore } from "../issues/task-board-controller";
 import { taskBoardRepository } from "../issues/task-board-repository";
 import { RUN_STATUS, TeamRunView } from "../issues/team-run-panel";
 import { subscribeWandModelCatalog, wandModelDisplayName } from "../model-catalog";
@@ -144,61 +144,25 @@ function leaderFirst(members: AiTeamMember[]): AiTeamMember[] {
   return [...members].sort((a, b) => Number(b.isLeader) - Number(a.isLeader));
 }
 
-/** 候选行标题：第一行是首选，其余按降级顺序编号。 */
-export function candidateLabel(index: number): string {
-  return index === 0 ? "首选" : `备用 ${index + 1}`;
-}
-
-/** 加一个候选：复制末位配置作为起点，重复由校验逼着改掉；到上限原样返回。 */
-export function addCandidate(agents: WandTaskAgent[]): WandTaskAgent[] {
-  if (agents.length >= AI_TEAM_MAX_CANDIDATES) return agents;
-  const last = agents[agents.length - 1];
-  return [...agents, last ? { ...last } : createDefaultIssueAgent()];
-}
-
-export function setCandidate(agents: WandTaskAgent[], index: number, agent: WandTaskAgent): WandTaskAgent[] {
-  return agents.map((item, at) => (at === index ? { ...agent } : item));
-}
-
-/** 删一个候选：最后一个不许删（每成员至少 1 个候选，§4.1）。 */
-export function removeCandidate(agents: WandTaskAgent[], index: number): WandTaskAgent[] {
-  if (agents.length <= 1) return agents;
-  return agents.filter((_, at) => at !== index);
-}
-
-/** 上移 / 下移一位；越界原样返回（顺序即降级顺序）。 */
-export function moveCandidate(agents: WandTaskAgent[], index: number, delta: number): WandTaskAgent[] {
-  const target = index + delta;
-  if (target < 0 || target >= agents.length) return agents;
-  const next = [...agents];
-  const moved = next[index]!;
-  next[index] = next[target]!;
-  next[target] = moved;
-  return next;
-}
-
-/** 与更靠前的候选五元组相同的行下标（§3.5 同一身份口径）。 */
-export function duplicateCandidates(agents: WandTaskAgent[]): number[] {
-  const seen = new Set<string>();
-  const duplicates: number[] = [];
-  agents.forEach((agent, index) => {
-    const key = agentKey(agent);
-    if (seen.has(key)) duplicates.push(index);
-    else seen.add(key);
-  });
-  return duplicates;
-}
-
-/** 一个成员的候选列表自身的错误，空串表示没问题。 */
-export function candidateListError(agents: WandTaskAgent[]): string {
-  if (agents.length === 0) return "至少保留 1 个执行候选。";
-  if (agents.length > AI_TEAM_MAX_CANDIDATES) return `执行候选最多 ${AI_TEAM_MAX_CANDIDATES} 个。`;
-  const duplicates = duplicateCandidates(agents);
-  if (duplicates.length > 0) {
-    return `候选「${candidateLabel(duplicates[0]!)}」与更靠前的配置相同，改一项即可。`;
-  }
-  return "";
-}
+import {
+  CandidatesListEditor,
+  candidateLabel,
+  addCandidate,
+  setCandidate,
+  removeCandidate,
+  moveCandidate,
+  duplicateCandidates,
+  candidateListError,
+} from "../agents/candidate-editor.js";
+export {
+  candidateLabel,
+  addCandidate,
+  setCandidate,
+  removeCandidate,
+  moveCandidate,
+  duplicateCandidates,
+  candidateListError,
+};
 
 /** 保存前的整份草稿校验，与 §4.1 服务端同口径；返回要原位显示的中文文案。 */
 export function validateTeamDraft(members: AiTeamMember[]): string[] {
@@ -270,117 +234,6 @@ function AvatarPicker({
   </div>;
 }
 
-/**
- * 一行候选：行首标首选/备用，中间复用看板的 AgentFields，行尾上移/下移/删除。
- * 新行首帧收成 0fr，放开时原位长高 + 淡入；删除由父级挂 data-leaving 把同一段过渡倒放。
- */
-function CandidateRow({
-  agent,
-  index,
-  total,
-  catalog,
-  providerOptions,
-  disabled,
-  locked,
-  leaving,
-  duplicate,
-  fresh,
-  ariaPrefix,
-  onChange,
-  onMove,
-  onRemove,
-  onLeaveEnd,
-}: {
-  agent: WandTaskAgent;
-  index: number;
-  total: number;
-  catalog: IssueModelCatalog | null;
-  providerOptions: ProviderOptions;
-  disabled: boolean;
-  locked: boolean;
-  leaving: boolean;
-  duplicate: boolean;
-  fresh: boolean;
-  ariaPrefix: string;
-  onChange(agent: WandTaskAgent): void;
-  onMove(delta: number): void;
-  onRemove(): void;
-  onLeaveEnd(): void;
-}): React.ReactElement {
-  const label = candidateLabel(index);
-  const [settled, setSettled] = React.useState(!fresh);
-  React.useLayoutEffect(() => {
-    if (settled) return undefined;
-    // 双帧：先让收起态画出一帧，下一帧才放开，过渡才有起点。
-    let inner = 0;
-    const outer = requestAnimationFrame(() => {
-      inner = requestAnimationFrame(() => setSettled(true));
-    });
-    return () => {
-      cancelAnimationFrame(outer);
-      cancelAnimationFrame(inner);
-    };
-  }, [settled]);
-  return <div
-    className="wand-team-candidate-slot"
-    data-collapsed={!settled || leaving || undefined}
-    data-leaving={leaving || undefined}
-    onTransitionEnd={(event) => {
-      if (leaving && event.currentTarget === event.target) onLeaveEnd();
-    }}
-  >
-    <div className="wand-team-candidate" data-duplicate={duplicate || undefined} inert={leaving}>
-      <span className="wand-team-candidate-tag">{label}</span>
-      <div className="wand-ai-team-member-agent">
-        <AgentFields
-          agent={agent}
-          catalog={catalog}
-          providerOptions={providerOptions}
-          disabled={disabled || locked}
-          ariaPrefix={`${ariaPrefix} ${label}`}
-          showKind
-          onChange={onChange}
-        />
-      </div>
-      <div className="wand-team-candidate-tools">
-        <button
-          type="button"
-          className="wand-team-candidate-tool"
-          data-tool="up"
-          title="上移"
-          aria-label={`把${label}上移`}
-          disabled={disabled || locked || index === 0}
-          onClick={() => onMove(-1)}
-        >
-          <WandIcon name="chevronUp" size={14}/>
-        </button>
-        <button
-          type="button"
-          className="wand-team-candidate-tool"
-          data-tool="down"
-          title="下移"
-          aria-label={`把${label}下移`}
-          disabled={disabled || locked || index === total - 1}
-          onClick={() => onMove(1)}
-        >
-          <WandIcon name="chevronDown" size={14}/>
-        </button>
-        <button
-          type="button"
-          className="wand-team-candidate-tool"
-          data-tool="remove"
-          title={total <= 1 ? "至少要保留 1 个候选" : "删除该候选"}
-          aria-label={`删除${label}`}
-          disabled={disabled || locked || total <= 1}
-          onClick={onRemove}
-        >
-          <WandIcon name="close" size={14}/>
-        </button>
-      </div>
-    </div>
-  </div>;
-}
-
 /** 组织图里的一张成员卡：点卡片在原位展开编辑区，再点一次原路收起。 */
 function MemberCard({
   member,
@@ -407,33 +260,9 @@ function MemberCard({
 }): React.ReactElement {
   const label = member.name || `成员 ${index + 1}`;
   const agents = memberAgents(member);
-  const duplicates = duplicateCandidates(agents);
-  const listError = candidateListError(agents);
-  const [freshIndex, setFreshIndex] = React.useState(-1);
-  const [leavingIndex, setLeavingIndex] = React.useState(-1);
-  const [listKey, setListKey] = React.useState(0);
-  // 倒放期间锁住整张候选表：行的下标还在，此时再改会错位。
-  const locked = leavingIndex >= 0;
-
   const showAgents = (next: WandTaskAgent[]): void => {
     // 双写兼容字段：agent 永远是 agents[0]（§3.6）。
     onChange({ agents: next, agent: { ...next[0]! } });
-  };
-
-  const addRow = (): void => {
-    const next = addCandidate(agents);
-    if (next === agents) return;
-    showAgents(next);
-    setFreshIndex(next.length - 1);
-  };
-
-  const commitLeave = (at: number): void => {
-    setLeavingIndex(-1);
-    setFreshIndex(-1);
-    // 行的 key 是下标：删掉中间一行后原来的 DOM 节点会被下一候选复用，
-    // 收起过渡会反过来再放一次。换 key 整块重建，倒放到此为止。
-    setListKey((current) => current + 1);
-    showAgents(removeCandidate(agents, at));
   };
 
   return <article className="wand-team-member" data-leader={member.isLeader || undefined} data-open={open || undefined}>
@@ -469,43 +298,14 @@ function MemberCard({
           disabled={disabled}
           onChange={(event) => onChange({ duty: event.currentTarget.value })}
         />
-        <div className="wand-team-candidates" key={listKey} role="group" aria-label={`${label} 的执行候选`}>
-          <header className="wand-team-candidates-head">
-            <span>执行候选</span>
-            <small>首选不可用时按顺序自动降级，最多 {AI_TEAM_MAX_CANDIDATES} 个</small>
-          </header>
-          {agents.map((agent, at) => <CandidateRow
-            key={at}
-            agent={agent}
-            index={at}
-            total={agents.length}
-            catalog={catalog}
-            providerOptions={providerOptions}
-            disabled={disabled}
-            locked={locked}
-            leaving={leavingIndex === at}
-            duplicate={duplicates.includes(at)}
-            fresh={freshIndex === at}
-            ariaPrefix={label}
-            onChange={(next) => showAgents(setCandidate(agents, at, next))}
-            onMove={(delta) => showAgents(moveCandidate(agents, at, delta))}
-            onRemove={() => setLeavingIndex(at)}
-            onLeaveEnd={() => commitLeave(at)}
-          />)}
-          <div className="wand-team-candidates-foot">
-            <button
-              type="button"
-              className="wand-team-candidate-add"
-              disabled={disabled || locked || agents.length >= AI_TEAM_MAX_CANDIDATES}
-              title={agents.length >= AI_TEAM_MAX_CANDIDATES ? `已经到 ${AI_TEAM_MAX_CANDIDATES} 个候选上限` : "在末尾加一个备用候选"}
-              onClick={addRow}
-            >
-              <WandIcon name="plus" size={14}/>
-              <span>添加候选</span>
-            </button>
-            {listError ? <small className="wand-team-candidate-error" role="alert">{listError}</small> : null}
-          </div>
-        </div>
+        <CandidatesListEditor
+          agents={agents}
+          label={label}
+          catalog={catalog}
+          providerOptions={providerOptions}
+          disabled={disabled}
+          onChange={showAgents}
+        />
         <div className="wand-team-member-actions">
           {member.isLeader ? null : <WandButton kind="ghost" size="small" disabled={disabled} onClick={() => onChange({ isLeader: true })}>
             设为负责人
@@ -773,16 +573,18 @@ function TeamStartRow({
   teamName,
   projects,
   projectsLoaded,
+  openRequest = 0,
   onStarted,
 }: {
   teamId: string;
   teamName: string;
   projects: readonly IssueWorkspace[];
   projectsLoaded: boolean;
+  openRequest?: number;
   onStarted(run: AiTeamDirectRun): void;
 }): React.ReactElement {
   const startable = teamStartProjects(projects);
-  const [open, setOpen] = React.useState(false);
+  const [open, setOpen] = React.useState(openRequest > 0);
   const [settled, setSettled] = React.useState(false);
   const [note, setNote] = React.useState("");
   const [workspaceId, setWorkspaceId] = React.useState("");
@@ -793,6 +595,16 @@ function TeamStartRow({
   const projectMenuClass = "wand-team-start-project-menu-" + React.useId();
   const picked = workspaceId || defaultTeamStartProject(projects);
   const busy = phase === "sending" || phase === "sent";
+
+  React.useEffect(() => {
+    if (openRequest > 0) {
+      setOpen(true);
+      setSettled(false);
+    } else {
+      setOpen(false);
+      setSettled(false);
+    }
+  }, [openRequest]);
 
   function collapse(): void {
     if (phase === "sending") return;
@@ -996,6 +808,8 @@ function TeamRuns({
   </ol>;
 }
 
+import { EmployeeListPage } from "../agents/employee-list-page.js";
+
 const DETAIL_TABS = [
   { value: "members", label: "成员与设置" },
   { value: "runs", label: "运行记录" },
@@ -1005,6 +819,11 @@ const FILTER_TABS = [
   { value: "all", label: "全部" },
   { value: "running", label: "运行中" },
   { value: "attention", label: "待你处理" },
+];
+
+const PAGE_MODE_TABS = [
+  { value: "employees", label: "员工" },
+  { value: "teams", label: "团队" },
 ];
 
 export interface AiTeamsPageProps {
@@ -1019,11 +838,13 @@ export interface AiTeamsPageProps {
  * 右边是选中团队的成员组织图、协作设置与运行记录；新建从模板开始。
  */
 export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpenSession }: AiTeamsPageProps): React.ReactElement {
+  const teamRoute = React.useSyncExternalStore(taskBoardStore.subscribe, taskBoardStore.getSnapshot, taskBoardStore.getSnapshot);
   const usage = useProviderUsage(true);
   const providerOptions: ProviderOptions = usage === null ? null : sortProviderOptions(
     ISSUE_AGENT_PROVIDERS, usage, (entry) => entry.value,
   ).map((entry) => ({ value: entry.value, label: entry.label }));
   const [teams, setTeams] = React.useState<AiTeam[] | null>(null);
+  const [pageMode, setPageMode] = React.useState<"employees" | "teams">("employees");
   const [runs, setRuns] = React.useState<AiTeamRunSummary[]>([]);
   const [loadError, setLoadError] = React.useState("");
   const [catalog, setCatalog] = React.useState<IssueModelCatalog | null>(null);
@@ -1036,6 +857,12 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
   const [projects, setProjects] = React.useState<IssueWorkspace[]>([]);
   const [projectsLoaded, setProjectsLoaded] = React.useState(false);
   const [focusRunId, setFocusRunId] = React.useState("");
+
+  React.useEffect(() => {
+    if (teamRoute.page !== "teams" || !teamRoute.teamId) return;
+    setPageMode("teams");
+    setSelectedId(window.matchMedia("(max-width: 760px)").matches ? "" : teamRoute.teamId);
+  }, [teamRoute.page, teamRoute.teamId, teamRoute.revision]);
 
   const loadTeams = React.useCallback(async () => {
     try {
@@ -1183,7 +1010,7 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
     setDetailTab("runs");
   };
 
-  return <section className="task-board-native-page wand-teams-page" aria-label="AI 团队" data-detail={detailOpen || undefined}>
+  return <section className="task-board-native-page wand-teams-page" aria-label="硅基员工与 AI 团队" data-detail={detailOpen || undefined}>
     <header className="task-board-workspace-header">
       <div className="task-board-kicker">
         {onOpenSidebar ? <WandIconButton
@@ -1202,7 +1029,7 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
           <WandIcon name="chevronLeft"/>
         </WandIconButton> : null}
         <div className="task-board-heading-copy">
-          {selected ? <WandBreadcrumb
+          {pageMode === "teams" && selected ? <WandBreadcrumb
             variant="title"
             ariaLabel="AI 团队导航"
             items={[
@@ -1210,24 +1037,37 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
               { label: selected.name },
             ]}
           /> : <>
-            <h1>AI 团队</h1>
-            <p>负责人拆解分派，成员各用自己的 CLI 协作完成。</p>
+            <h1>{pageMode === "employees" ? "硅基员工" : "AI 团队"}</h1>
+            <p>{pageMode === "employees" ? "定义专属角色与工具链降级顺序，以对话方式协作完成工作。" : "负责人拆解分派，成员各用自己的 CLI 协作完成。"}</p>
           </>}
         </div>
       </div>
-      <div className="task-board-header-actions">
-        <WandButton
-          className="task-board-create-button"
-          kind="primary"
-          size="small"
-          aria-pressed={creating}
-          onClick={() => (creating ? void leaveDetail() : void startCreate())}
-        >
-          <WandIcon name="plus" slot="start" className="wand-teams-create-icon"/>
-          <span>新建团队</span>
-        </WandButton>
+      <div className="task-board-header-actions" style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+        <WandStretchTabs
+          tabs={PAGE_MODE_TABS}
+          value={pageMode}
+          ariaLabel="切换员工或团队"
+          onValueChange={(val) => setPageMode(val as "employees" | "teams")}
+        />
+        {pageMode === "teams" ? (
+          <WandButton
+            className="task-board-create-button"
+            kind="primary"
+            size="small"
+            aria-pressed={creating}
+            onClick={() => (creating ? void leaveDetail() : void startCreate())}
+          >
+            <WandIcon name="plus" slot="start" className="wand-teams-create-icon"/>
+            <span>新建团队</span>
+          </WandButton>
+        ) : null}
       </div>
     </header>
+    {pageMode === "employees" ? (
+      <div className="wand-teams-layout wand-employees-layout">
+        <EmployeeListPage catalog={catalog} providerOptions={providerOptions} />
+      </div>
+    ) : (
     <div className="wand-teams-layout">
       <aside className="wand-teams-list" aria-label="团队列表">
         <WandSearchField value={query} onValueChange={setQuery} label="搜索团队或成员"/>
@@ -1269,6 +1109,7 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
                 teamName={team.name}
                 projects={projects}
                 projectsLoaded={projectsLoaded}
+                openRequest={teamRoute.teamId === team.id ? teamRoute.revision : 0}
                 onStarted={(started) => afterDirectRun(team.id, started)}
               />
             </div>;
@@ -1363,5 +1204,6 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
         </div>}
       </div>
     </div>
+    )}
   </section>;
 }

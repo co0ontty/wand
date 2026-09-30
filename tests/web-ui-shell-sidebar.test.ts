@@ -357,6 +357,8 @@ test("ShellSidebar keeps creation above the directory task tree and settings in 
   const createIndex = html.indexOf('id="drawer-new-session-button"');
   const treeIndex = html.indexOf('class="workspaces-panel"');
   assert.ok(createIndex > 0 && createIndex < treeIndex);
+  assert.match(html, /class="[^"]*sidebar-feature-create/);
+  assert.ok(html.indexOf("sidebar-feature-create") < createIndex);
   assert.ok(html.indexOf('id="settings-button"') > html.indexOf('class="sidebar-footer"'));
   assert.equal(html.match(/id="drawer-new-session-button"/g)?.length, 1);
   assert.doesNotMatch(html, /aria-label="新建项目"/);
@@ -381,7 +383,7 @@ test("ShellSidebar keeps secondary tools in the closed overflow menu", () => {
   for (const id of ["missions-button", "github-issues-button", "logout-button"]) {
     assert.doesNotMatch(html, new RegExp(`id="${id}"`));
   }
-  assert.match(html, />项目与任务<\/h2>/);
+  assert.match(html, />对话与任务<\/h2>/);
   // 搜索框现在常驻 DOM（靠 CSS 展开、inert 收起），所以收起时断言「不可交互」，
   // 而不是「不存在」（旧断言是 placeholder 不出现）。
   assert.match(html, /class="sidebar-search-expand[^"]*"[^>]*inert=/);
@@ -439,6 +441,18 @@ test("侧栏日期跟浏览器 locale 走，web 源码里没有写死的 locale"
     if (hits.length) offenders.push(`${file.slice(root.length + 1)}: ${hits.map((h) => h[1]).join(", ")}`);
   }
   assert.deepEqual(offenders, [], "日期/时刻格式化只能传空 locale");
+});
+
+test("员工资料面板外点与 Escape 都可关闭，面板和触发按钮属于内部", () => {
+  const profile = readFileSync(
+    new URL("../src/web-ui/react/shell/object-profile-panel.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(profile, /e\.key === "Escape"/);
+  assert.match(profile, /document\.addEventListener\("pointerdown", onPointerDown\)/);
+  assert.match(profile, /panelRef\.current\?\.contains\(target\)/);
+  assert.match(profile, /triggerRef\.current\?\.contains\(target\)/);
+  assert.match(profile, /document\.removeEventListener\("pointerdown", onPointerDown\)/);
 });
 
 /** 前端源码（不含生成的 bundle / 内联资产），用来扫有没有重新写死 locale。 */

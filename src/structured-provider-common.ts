@@ -5,7 +5,8 @@ const NATIVE_THINKING_EFFORT = /^(claude|codex|opencode|grok|qoder|pi):[a-z0-9][
 
 /**
  * 把会话级系统提示交给 CLI 的开关。Claude / Qoder / Pi 用 `--append-system-prompt`，
- * Grok 用 `--rules`；Codex / OpenCode 没有这个入口，只能退回并入本轮消息。
+ * Grok 用 `--rules`；Codex / OpenCode / Gemini 没有这个入口，只能退回并入本轮消息
+ * （Gemini 只有 `GEMINI_SYSTEM_MD`，那是整体替换而非追加）。
  * 各 provider 的支持情况由 `--help` 实测得出，新增 provider 前先验。
  */
 export function systemPromptFlag(provider: SessionProvider | null | undefined): string | null {
@@ -89,7 +90,8 @@ export function isStructuredRunnerForProvider(provider: SessionProvider, runner:
   if (provider === "opencode") return runner === "opencode-cli-run";
   if (provider === "grok") return runner === "grok-cli-headless";
   if (provider === "qoder") return runner === "qoder-cli-print";
-  return runner === "pi-cli-json";
+  if (provider === "pi") return runner === "pi-cli-json";
+  return runner === "gemini-cli-json";
 }
 
 export function defaultStructuredRunner(
@@ -101,6 +103,7 @@ export function defaultStructuredRunner(
   if (provider === "grok") return "grok-cli-headless";
   if (provider === "qoder") return "qoder-cli-print";
   if (provider === "pi") return "pi-cli-json";
+  if (provider === "gemini") return "gemini-cli-json";
   return configuredClaudeRunner === "sdk" ? "claude-sdk" : "claude-cli-print";
 }
 

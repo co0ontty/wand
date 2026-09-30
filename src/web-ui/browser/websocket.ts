@@ -3,6 +3,7 @@ import { syncBrowserComposerBadges } from "./composer-badges-adapter";
 import { getErrorMessage } from "../../error-utils.js";
 import { parseJsonResponse } from "../react/http-adapter";
 import { notifyAiTeamDefinitionChanged, notifyAiTeamRunChanged, notifyAiTeamStepLive } from "../react/ai-teams/repository";
+import { notifySiliconEmployeeDefinitionChanged } from "../react/agents/employee-repository.js";
 import { resolveComposerPermission } from "../react/composer-badges/model";
 import type { ComposerPermissionAction } from "../react/composer-badges/controller";
 import { renderChat, scheduleChatRender } from "./chat-render";
@@ -770,6 +771,8 @@ function noteTurnActivity(sessionId: string, active: boolean): void {
                 notifyAiTeamRunChanged({ runId: msg.data.runId, taskId: String(msg.data.taskId || "") });
               } else if (msg.data.kind === "ai-team-definition" && typeof msg.data.teamId === "string") {
                 notifyAiTeamDefinitionChanged(msg.data.teamId);
+              } else if (msg.data.kind === "silicon-employee-definition" && typeof msg.data.employeeId === "string") {
+                notifySiliconEmployeeDefinitionChanged(msg.data.employeeId);
               } else if (msg.data.kind === "ai-team-step-live" && typeof msg.data.runId === "string") {
                 notifyAiTeamStepLive({
                   runId: msg.data.runId,

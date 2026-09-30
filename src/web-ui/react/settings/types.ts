@@ -26,7 +26,7 @@ export type SettingsTab =
 type SettingsAccess = "admin" | "read-only";
 type SettingsProvider = "claude" | "codex" | "opencode";
 /** Providers that have per-session default model preferences. */
-type SettingsModelProvider = SettingsProvider | "grok" | "qoder" | "pi";
+type SettingsModelProvider = SettingsProvider | "grok" | "qoder" | "pi" | "gemini";
 /** CLI 工具选择：和 `WandConfig.defaultProvider` 一样开放全部 provider。 */
 export type SettingsSessionProvider = SettingsModelProvider;
 /** 新会话默认思考深度。旧四档，或某个 CLI 报出的 `provider:level`。 */
@@ -36,7 +36,7 @@ export type SettingsThinkingEffort =
   | "deep"
   | "max"
   | `${SettingsSessionProvider}:${string}`;
-type SettingsCliProvider = SettingsProvider | "grok" | "qoder" | "pi";
+type SettingsCliProvider = SettingsProvider | "grok" | "qoder" | "pi" | "gemini";
 type SettingsUpdateChannel = "stable" | "beta";
 type SettingsAutoUpdateTarget = "web" | "apk" | "dmg" | "cli";
 export type SettingsDistributionKind = "apk" | "dmg" | "ipa";
@@ -122,7 +122,7 @@ export interface SettingsSystemAi {
   hasApiKey: boolean;
   model: string;
   authHeader: "bearer" | "x-api-key";
-  source: Exclude<SettingsModelProvider, "qoder" | "pi"> | "custom";
+  source: Exclude<SettingsModelProvider, "qoder" | "pi" | "gemini"> | "custom";
   fallbacks?: SettingsSystemAi[];
 }
 
@@ -150,6 +150,7 @@ export interface SettingsConfig {
   defaultGrokModel: string;
   defaultQoderModel: string;
   defaultPiModel: string;
+  defaultGeminiModel: string;
   defaultModels: Record<SettingsModelProvider, string>;
   defaultProvider: SettingsSessionProvider;
   defaultThinkingEffort: SettingsThinkingEffort;
@@ -157,7 +158,10 @@ export interface SettingsConfig {
   commitModel: string;
   commitAiSource: "cli" | "api";
   systemAi: SettingsSystemAi;
-  /** Absent in older configs: system AI then follows the current session CLI. */
+  /**
+   * 旧字段：系统 AI 专用 CLI 与模型。现在由内置「系统运维」员工的候选链接管，
+   * 只在员工缺失时还拿来当底（仍在 SettingsConfig 里供展示/校验）。
+   */
   systemAiCli: SettingsSessionProvider | null;
   systemAiModel: string;
   commandPresets: SettingsCommandPreset[];
@@ -191,6 +195,7 @@ export interface SettingsModelCatalog {
   grokModels: SettingsModelOption[];
   qoderModels: SettingsModelOption[];
   piModels: SettingsModelOption[];
+  geminiModels: SettingsModelOption[];
   thinkingEfforts?: Partial<Record<SettingsModelProvider, Array<{ effort: string; description?: string }>>>;
   claudeVersion: string | null;
   opencodeVersion: string | null;
@@ -201,6 +206,7 @@ export interface SettingsModelCatalog {
   defaultGrokModel: string;
   defaultQoderModel: string;
   defaultPiModel: string;
+  defaultGeminiModel: string;
   defaultModels: Record<SettingsModelProvider, string>;
 }
 
@@ -321,12 +327,11 @@ export interface SettingsAiInput {
   defaultGrokModel: string;
   defaultQoderModel: string;
   defaultPiModel: string;
+  defaultGeminiModel: string;
   defaultProvider: SettingsSessionProvider;
   defaultThinkingEffort: SettingsThinkingEffort;
   commitAiSource: "cli" | "api";
   systemAi: SettingsSystemAi;
-  systemAiCli: SettingsSessionProvider;
-  systemAiModel: string;
 }
 
 interface SettingsSaveResult {

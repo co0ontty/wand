@@ -10,6 +10,8 @@ const STRUCTURED_RUNNERS = new Set([
   "opencode-cli-run",
   "grok-cli-headless",
   "qoder-cli-print",
+  "pi-cli-json",
+  "gemini-cli-json",
 ]);
 
 /**

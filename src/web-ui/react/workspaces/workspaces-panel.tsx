@@ -177,7 +177,13 @@ function useTaskGroups(refreshKey: number): {
   return { groups, loading, error, reload };
 }
 
-// ── 会话行（任务内 / 未分组的会话共用）──
+import { ImSidebarGroup } from "../shell/im-sidebar-group.js";
+import { ImSidebarItem } from "../shell/im-sidebar-item.js";
+import { useSiliconEmployees } from "../agents/employee-repository.js";
+import { getEmployeePresence } from "../agents/employee-presence.js";
+import { EmployeeAvatar } from "../agents/employee-avatar.js";
+import { newSessionController } from "../new-session/controller.js";
+import { useAiTeamList } from "../ai-teams/repository.js";
 
 /** 群聊条目的头像组标记：叠两隻像素猫，毛色按 runId 散列，和普通会话的 CLI logo 区分。 */
 function TeamChatSessionMark({ teamChat }: { teamChat: WorkspaceSessionTeamChat }): React.ReactElement {
@@ -1620,6 +1626,7 @@ export function WorkspacesPanel({
     target: WorkspaceSessionTarget,
     kind: WorkspaceSessionKind,
     model: string,
+    employeeId?: string,
   ) => {
     const rt = runtime();
     if (!rt) throw new Error("工作空间运行环境尚未就绪，请刷新页面后重试。");
@@ -1633,12 +1640,56 @@ export function WorkspacesPanel({
       target,
       kind,
       model: model || undefined,
+      employeeId,
     });
-    toast(target === "shell" ? "已在该任务中新建空白终端" : "已在该任务中新建会话", "success");
+    toast(employeeId ? "已开始员工对话" : target === "shell" ? "已在该任务中新建空白终端" : "已在该任务中新建会话", "success");
     await reload();
   }, [openTask, reload]);
 
   const sessionRefresh = React.useRef(true);
+  const { employees } = useSiliconEmployees();
+  const contactTeams = useAiTeamList(true);
+  const [employeeExpanded, setEmployeeExpanded] = React.useState(true);
+  const [teamExpanded, setTeamExpanded] = React.useState(true);
+  const [cliExpanded, setCliExpanded] = React.useState(true);
+
+  // 展开强制路径：当处于只看活动、搜索非空、或者进入批量管理模式时自动展开
+  React.useEffect(() => {
+    if (displayMode === "active" || searchQuery.trim() !== "" || manageMode) {
+      setEmployeeExpanded(true);
+      setTeamExpanded(true);
+      setCliExpanded(true);
+    }
+  }, [displayMode, searchQuery, manageMode]);
+
+  const contactSessions = React.useMemo(() => sourceGroups
+    .flatMap((group) => [
+      ...group.standaloneSessions.map((session) => ({ group, session })),
+      ...group.tasks.flatMap((task) => task.sessions.map((session) => ({ group, session }))),
+    ])
+    .sort((left, right) => Date.parse(right.session.startedAt || "") - Date.parse(left.session.startedAt || "")),
+  [sourceGroups]);
+  const teamChatSessions = React.useMemo(() => contactSessions.filter((item) => Boolean(item.session.teamChat)), [contactSessions]);
+  const cliConversations = React.useMemo(() => {
+    const seen = new Set<string>();
+    return contactSessions.filter((item) => {
+      if (item.session.teamChat || item.session.teamStep || item.session.employeeId) return false;
+      const provider = item.session.provider || "terminal";
+      if (seen.has(provider)) return false;
+      seen.add(provider);
+      return !searchQuery.trim() || provider.toLowerCase().includes(searchQuery.toLowerCase())
+        || (item.session.title || "").toLowerCase().includes(searchQuery.toLowerCase());
+    });
+  }, [contactSessions, searchQuery]);
+
+  // 过滤后的员工列表
+  const filteredEmployees = React.useMemo(() => {
+    if (!searchQuery.trim()) return employees;
+    const q = searchQuery.toLowerCase();
+    return employees.filter(
+      (e) => e.name.toLowerCase().includes(q) || e.duty.toLowerCase().includes(q),
+    );
+  }, [employees, searchQuery]);
   React.useEffect(() => {
     if (sessionRefresh.current) {
       sessionRefresh.current = false;
@@ -1698,7 +1749,7 @@ export function WorkspacesPanel({
 
   if (compact) {
     return (
-      <section className="workspaces-panel workspaces-panel-compact" aria-label="项目目录">
+      <section className="workspaces-panel workspaces-panel-compact" aria-label="对话与项目目录">
         <CompactDirectoryRail
           groups={visibleGroups}
           loading={loading}
@@ -1712,7 +1763,7 @@ export function WorkspacesPanel({
   }
 
   return (
-    <section className="workspaces-panel" aria-label="任务">
+    <section className="workspaces-panel" aria-label="对话与任务">
         {loading && groups.length === 0 ? (
         <div className="workspaces-panel-state">正在加载任务…</div>
       ) : (
@@ -1768,15 +1819,15 @@ export function WorkspacesPanel({
           ) : directoryId === undefined ? (
             <>
             <div className={classNames("sidebar-list-heading", searchVisible && "is-searching")}>
-              <h2 aria-hidden={searchVisible || undefined}>项目与任务</h2>
+              <h2 aria-hidden={searchVisible || undefined}>对话与任务</h2>
               <div className="sidebar-search-expand" id={searchId} inert={!searchVisible || undefined}>
                 <WandInput
                   ref={searchInputRef}
                   className="sidebar-search-input"
                   type="search"
                   value={searchQuery}
-                  placeholder="搜索任务或会话"
-                  aria-label="搜索任务或会话"
+                  placeholder="搜索联系人、任务或会话"
+                  aria-label="搜索联系人、任务或会话"
                   tabIndex={searchVisible ? 0 : -1}
                   clearable
                   startSlot={<WandIcon name="search" size={14}/>}
@@ -1824,9 +1875,129 @@ export function WorkspacesPanel({
             />
             </>
           ) : null}
-          {searchQuery && visibleGroups.length === 0 ? (
-            <div className="sidebar-search-empty">没有找到匹配的任务或会话。</div>
+          {searchQuery && visibleGroups.length === 0 && filteredEmployees.length === 0 && cliConversations.length === 0
+            && !(contactTeams ?? []).some((team) => team.name.toLowerCase().includes(searchQuery.toLowerCase())) ? (
+            <div className="sidebar-search-empty">没有找到匹配的联系人、任务或会话。</div>
           ) : null}
+          {/* 硅基员工分组 (仅非紧凑模式与非单目录预览) */}
+          {!manageMode && directoryId === undefined ? (
+            <ImSidebarGroup
+              label="硅基员工"
+              count={filteredEmployees.length}
+              expanded={employeeExpanded}
+              emptyCta={
+                <div className="im-sidebar-empty-cta">
+                  <span>还没有硅基员工</span>
+                  <button
+                    type="button"
+                    className="wand-link-btn"
+                    onClick={() => {
+                      onOpenDialog?.();
+                      taskBoardController.open("", "", "teams");
+                    }}
+                  >
+                    创建你的第一个
+                  </button>
+                </div>
+              }
+              onToggle={() => setEmployeeExpanded((v) => !v)}
+            >
+              {filteredEmployees.map((emp) => {
+                // 查找属于该员工的最近会话
+                const matched = contactSessions.find((item) => item.session.employeeId === emp.id);
+
+                const presence = getEmployeePresence({
+                  hasSession: Boolean(matched),
+                  status: matched?.session.status,
+                  inFlight: matched?.session.inFlight,
+                });
+
+                return (
+                  <ImSidebarItem
+                    key={emp.id}
+                    id={emp.id}
+                    title={emp.name}
+                    avatarNode={<EmployeeAvatar employee={emp} size="md" />}
+                    presence={presence}
+                    summary={matched ? `会话 · ${matched.session.title || "未命名会话"}` : emp.duty || "开始新对话"}
+                    compact={compact}
+                    active={Boolean(matched && selectedSessionId === matched.session.id)}
+                    onClick={() => {
+                      if (matched) {
+                        openSession(matched.group, matched.session);
+                      } else {
+                        onOpenDialog?.();
+                        newSessionController.open({ initialEmployeeId: emp.id });
+                      }
+                    }}
+                  />
+                );
+              })}
+            </ImSidebarGroup>
+          ) : null}
+
+          {/* 团队联系人与最近群聊 */}
+          {!manageMode && directoryId === undefined && ((contactTeams?.length ?? 0) > 0 || teamChatSessions.length > 0) ? (
+            <ImSidebarGroup
+              label="AI 团队"
+              count={contactTeams?.length ?? teamChatSessions.length}
+              expanded={teamExpanded}
+              onToggle={() => setTeamExpanded((v) => !v)}
+            >
+              {(contactTeams ?? []).filter((team) => !searchQuery.trim() || team.name.toLowerCase().includes(searchQuery.toLowerCase())).map((team) => {
+                const matched = teamChatSessions.find((item) => item.session.teamChat?.teamId === team.id);
+                const teamChat = matched?.session.teamChat;
+                const active = Boolean(matched && selectedSessionId === matched.session.id);
+                return (
+                  <ImSidebarItem
+                    key={team.id}
+                    id={team.id}
+                    title={team.name}
+                    avatarNode={teamChat ? <TeamChatSessionMark teamChat={teamChat} /> : <WandIcon name="parallel" size={19} />}
+                    summary={matched ? `群聊 · ${matched.session.title || "未命名会话"}` : "开始团队协作"}
+                    active={active}
+                    compact={compact}
+                    onClick={() => {
+                      if (matched) openSession(matched.group, matched.session);
+                      else {
+                        onOpenDialog?.();
+                        taskBoardController.open("", "", "teams", "", team.id);
+                      }
+                    }}
+                  />
+                );
+              })}
+              {!contactTeams ? teamChatSessions.map(({ group, session }) => <ImSidebarItem
+                key={session.id}
+                id={session.id}
+                title={session.teamChat?.teamName || "AI 团队"}
+                avatarNode={<TeamChatSessionMark teamChat={session.teamChat!} />}
+                summary={`群聊 · ${session.title || "未命名会话"}`}
+                compact={compact}
+                onClick={() => openSession(group, session)}
+              />) : null}
+            </ImSidebarGroup>
+          ) : null}
+
+          {!manageMode && directoryId === undefined ? <ImSidebarGroup
+            label="CLI 对话"
+            count={cliConversations.length}
+            expanded={cliExpanded}
+            emptyCta={<button type="button" className="wand-link-btn" onClick={() => { onOpenDialog?.(); newSessionController.open(); }}>新建 CLI 对话</button>}
+            onToggle={() => setCliExpanded((value) => !value)}
+          >
+            {cliConversations.map(({ group, session }) => <ImSidebarItem
+              key={session.id}
+              id={session.id}
+              title={session.provider || "终端"}
+              avatarNode={<SessionProviderMark session={session} />}
+              summary={`会话 · ${session.title || "未命名会话"}`}
+              active={selectedSessionId === session.id}
+              compact={compact}
+              onClick={() => openSession(group, session)}
+            />)}
+          </ImSidebarGroup> : null}
+
           {!searchQuery || visibleGroups.length > 0 ? (
             <div className="sidebar-results" aria-label="目录">
             {visibleGroups.length > 0 ? (
@@ -1889,12 +2060,12 @@ export function WorkspacesPanel({
         <WorkspaceAgentDialog
           open
           key={pendingNewSessionTask.id}
-          onConfirm={(target, kind, model) => {
+          onConfirm={(target, kind, model, employeeId) => {
             const task = pendingNewSessionTask;
             const group = groups.find((candidate) => candidate.tasks.some((item) => item.id === task.id));
             setPendingNewSessionTask(null);
             if (!task || !group) return;
-            void newSessionInTask(group, task, target, kind, model).catch((cause) => {
+            void newSessionInTask(group, task, target, kind, model, employeeId).catch((cause) => {
               toast(describeError(cause, "无法在任务中新建会话。"), "danger");
             });
           }}

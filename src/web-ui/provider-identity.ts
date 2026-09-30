@@ -1,4 +1,4 @@
-export const PROVIDER_IDS = ["claude", "codex", "opencode", "grok", "qoder", "pi"] as const;
+export const PROVIDER_IDS = ["claude", "codex", "opencode", "grok", "qoder", "pi", "gemini"] as const;
 
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 
@@ -11,6 +11,7 @@ const PROVIDER_LABELS: Readonly<Record<ProviderId, string>> = {
   grok: "Grok",
   qoder: "Qoder",
   pi: "Pi",
+  gemini: "Gemini",
 };
 
 const PROVIDER_ALIASES: Readonly<Record<string, ProviderId>> = {
@@ -35,6 +36,9 @@ const PROVIDER_ALIASES: Readonly<Record<string, ProviderId>> = {
   pi: "pi",
   "pi-cli": "pi",
   "pi-cli-json": "pi",
+  gemini: "gemini",
+  "gemini-cli": "gemini",
+  "gemini-cli-json": "gemini",
 };
 
 /** Normalizes a persisted provider id or provider-runner alias. */
@@ -91,6 +95,10 @@ export const PI_LOGO_PATH =
   "M165.29 165.29H517.36V400H400V517.36H282.65V634.72H165.29ZM282.65 282.65V400H400V282.65Z";
 export const PI_LOGO_DOT_PATH = "M517.36 400H634.72V634.72H517.36Z";
 
+// Official Google Gemini mark from simple-icons (CC0).
+export const GEMINI_LOGO_PATH =
+  "M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81";
+
 export const GROK_LOGO_PATHS = [
   "M13.2371 21.0407L24.3186 12.8506C24.8619 12.4491 25.6384 12.6057 25.8973 13.2294C27.2597 16.5185 26.651 20.4712 23.9403 23.1851C21.2297 25.8989 17.4581 26.4941 14.0108 25.1386L10.2449 26.8843C15.6463 30.5806 22.2053 29.6665 26.304 25.5601C29.5551 22.3051 30.562 17.8683 29.6205 13.8673L29.629 13.8758C28.2637 7.99809 29.9647 5.64871 33.449.844576C33.5314.730667 33.6139.616757 33.6964.5L29.1113 5.09055V5.07631L13.2343 21.0436Z",
   "M10.9503 23.0313C7.07343 19.3235 7.74185 13.5853 11.0498 10.2763C13.4959 7.82722 17.5036 6.82767 21.0021 8.2971L24.7595 6.55998C24.0826 6.07017 23.215 5.54334 22.2195 5.17313C17.7198 3.31926 12.3326 4.24192 8.67479 7.90126C5.15635 11.4239 4.0499 16.8403 5.94992 21.4622C7.36924 24.9165 5.04257 27.3598 2.69884 29.826C1.86829 30.7002 1.0349 31.5745.36364 32.5L10.9474 23.0341Z",
@@ -113,6 +121,9 @@ export function renderProviderLogoMarkup(value: unknown): string {
   }
   if (provider === "pi") {
     return `<svg ${common} viewBox="0 0 800 800" fill="currentColor"><path d="${PI_LOGO_PATH}" fill-rule="evenodd"/><path d="${PI_LOGO_DOT_PATH}"/></svg>`;
+  }
+  if (provider === "gemini") {
+    return `<svg ${common} viewBox="0 0 24 24" fill="currentColor"><path d="${GEMINI_LOGO_PATH}"/></svg>`;
   }
   if (provider === "claude") {
     return `<svg ${common} viewBox="0 0 24 24" fill="${CLAUDE_BRAND_COLOR}"><path d="${CLAUDE_LOGO_PATH}"/></svg>`;

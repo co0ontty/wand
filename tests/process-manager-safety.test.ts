@@ -73,6 +73,11 @@ class FakeStorage {
     this.sessions.delete(id);
   }
 
+  /** 这个假存储没有内置员工，会话主题按会话自身的 provider 解析。 */
+  getSystemSiliconEmployee() {
+    return null;
+  }
+
   resetCounts(): void {
     this.fullSaveCalls = 0;
     this.runtimeMetadataCalls = 0;
@@ -216,6 +221,25 @@ test("Pi PTY launches the TUI with model and thinking flags", async (t) => {
   const shellArgs = spawnCalls[0][1] as string[];
   assert.equal(shellArgs[0], "-lic");
   assert.match(shellArgs.at(-1) ?? "", /if pi --model 'openai\/gpt-5\.4' --thinking 'high'/);
+});
+
+test("Gemini PTY launches the TUI with model, mode-derived approval, and an assigned session id", async (t) => {
+  const { manager, root, spawnCalls } = createHarness(t);
+  const session = await manager.start("gemini", root, "managed", undefined, {
+    provider: "gemini",
+    model: "gemini-2.5-pro",
+  });
+  assert.equal(session.provider, "gemini");
+  assert.equal(session.runner, "pty");
+  // gemini 接受调用方指定的 UUID，PTY 直接前置 --session-id 就能拿到可 resume 的 ID。
+  assert.match(session.claudeSessionId ?? "", /^[0-9a-f-]{36}$/);
+  const shellArgs = spawnCalls[0][1] as string[];
+  assert.equal(shellArgs[0], "-lic");
+  assert.match(shellArgs.at(-1) ?? "", /if gemini --model 'gemini-2\.5-pro' --approval-mode yolo --session-id [0-9a-f-]{36}/);
+
+  const standard = await manager.start("gemini", root, "default", undefined, { provider: "gemini" });
+  assert.equal(standard.mode, "default");
+  assert.doesNotMatch((spawnCalls.at(-1)?.[1] as string[]).at(-1) ?? "", /--approval-mode/);
 });
 
 test("OpenCode PTY never injects --variant (TUI-only flags must stay on `opencode run`)", async (t) => {

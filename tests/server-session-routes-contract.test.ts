@@ -100,7 +100,7 @@ test("session HTTP interface preserves create, list, update, detail, and delete 
     const usageResponse = await fetch(`${baseUrl}/api/sessions/provider-usage`);
     assert.equal(usageResponse.status, 200);
     assert.deepEqual(await usageResponse.json(), {
-      claude: 0, codex: 0, opencode: 1, grok: 0, qoder: 0, pi: 0,
+      claude: 0, codex: 0, opencode: 1, grok: 0, qoder: 0, pi: 0, gemini: 0,
     });
 
     for (const provider of ["claude", "codex", "opencode", "qoder"]) {
@@ -257,7 +257,7 @@ test("session HTTP interface preserves create, list, update, detail, and delete 
     assert.deepEqual(await deleteResponse.json(), { ok: true });
     assert.equal((await fetch(`${baseUrl}/api/sessions/${created.id}`)).status, 404);
     assert.deepEqual(await (await fetch(`${baseUrl}/api/sessions/provider-usage`)).json(), {
-      claude: 0, codex: 0, opencode: 1, grok: 0, qoder: 0, pi: 0,
+      claude: 0, codex: 0, opencode: 1, grok: 0, qoder: 0, pi: 0, gemini: 0,
     });
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));

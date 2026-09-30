@@ -31,6 +31,9 @@ export interface UiSessionVm {
    */
   turnActive: boolean;
   titleGenerating: boolean;
+  employeeId?: string;
+  employeeName?: string;
+  employeeAvatar?: string;
   startedAt?: string;
   endedAt?: string;
   claudeSessionId?: string;

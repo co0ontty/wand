@@ -225,6 +225,7 @@ export function registerAiTeamRoutes(app: Express, deps: {
         labels: [TEAM_DIRECT_LABEL],
         milestoneId: scopedMilestoneId(storage, milestoneId, workspace.id) ?? milestoneId,
         agent,
+        executionSubject: { type: "team", id: team.id },
       });
       try {
         const detail = await runner.start({ teamId: team.id, taskId: task.id, note });
@@ -258,7 +259,9 @@ export function registerAiTeamRoutes(app: Express, deps: {
       const body = bodyObject(req.body);
       const teamId = text(body.teamId);
       if (!teamId) throw new Error("请选择团队。");
-      res.status(202).json(await runner.start({ teamId, taskId: req.params.id, note: text(body.note) }));
+      const detail = await runner.start({ teamId, taskId: req.params.id, note: text(body.note) });
+      storage.updateWandTask(req.params.id, { executionSubject: { type: "team", id: teamId } });
+      res.status(202).json(detail);
     } catch (error) {
       sendTeamError(res, error);
     }

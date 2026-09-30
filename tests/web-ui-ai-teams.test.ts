@@ -219,11 +219,12 @@ test("群聊页对话区下方展示工作任务二级目录", () => {
 
 test("team page edits members with the shared agent fields; only one leader", () => {
   const page = read("react/ai-teams/teams-page.tsx");
-  assert.match(page, /<AgentFields[\s\S]*?showKind/);
+  const editor = read("react/agents/candidate-editor.tsx");
+  assert.match(editor, /<AgentFields[\s\S]*?showKind/);
   assert.match(page, /patch\.isLeader \? \{ \.\.\.member, isLeader: false \} : member/);
 });
 
-test("teams join the CLI picker as extra options", () => {
+test("task assignment offers CLI and teams as distinct targets", () => {
   const team = { id: "t1", name: "全栈" } as AiTeam;
   const options = agentTargetOptions([{ value: "claude", label: "Claude" }], [team]);
   assert.deepEqual(options.map((option) => option.value), ["claude", "team:t1"]);
@@ -231,7 +232,8 @@ test("teams join the CLI picker as extra options", () => {
   assert.equal(agentTargetTeamId("team:t1"), "t1");
   assert.equal(agentTargetTeamId("claude"), "");
   const board = read("react/issues/task-board-host.tsx");
-  assert.match(board, /team \? dispatchTeam\(selected, team, prompt\) : dispatchTask\(/);
+  assert.match(board, /team \? dispatchTeam\(selected, team, prompt\)/);
+  assert.match(board, /subject: \{ type: "team", id: team\.id \}/);
 });
 
 test("member avatars pick a stable coat unless one is chosen", () => {
@@ -273,6 +275,12 @@ test("ai-teams chunk borrows every shared import from the main-bundle host regis
     "ai-teams/team-chat-page": "react/ai-teams/team-chat-page.tsx",
     "ai-teams/styles": "react/ai-teams/styles.ts",
     "issues/team-run-panel": "react/issues/team-run-panel.tsx",
+    "agents/candidate-list": "react/agents/candidate-list.ts",
+    "agents/candidate-editor": "react/agents/candidate-editor.tsx",
+    "agents/employee-avatar": "react/agents/employee-avatar.tsx",
+    "agents/employee-card": "react/agents/employee-card.tsx",
+    "agents/employee-create-form": "react/agents/employee-create-form.tsx",
+    "agents/employee-list-page": "react/agents/employee-list-page.tsx",
   };
   const lazy = read("react/ai-teams/lazy.tsx");
   const registry = lazy.slice(lazy.indexOf("const AI_TEAMS_HOST"), lazy.indexOf("};\n", lazy.indexOf("const AI_TEAMS_HOST")));
@@ -295,7 +303,7 @@ test("ai-teams chunk borrows every shared import from the main-bundle host regis
         if (segment === "..") parts.pop();
         else if (segment !== ".") parts.push(segment);
       }
-      const key = parts.join("/");
+      const key = parts.join("/").replace(/\.js$/, "");
       // react 目录外的纯数据模块（ai-team-types 等）直接打进 chunk；chunk 自己的文件互相引用。
       if (key.startsWith("..") || parts.length === 0 || spec.startsWith("../../../")) continue;
       if (Object.hasOwn(chunkFiles, key)) continue;
@@ -308,6 +316,38 @@ test("ai-teams chunk borrows every shared import from the main-bundle host regis
 });
 
 // ---------- [T6] Web 动效 token + 成员多候选编辑 ----------
+
+test("员工头像选择器沿用团队的有界头像按钮尺寸", () => {
+  const avatar = read("react/agents/employee-avatar.tsx");
+  const styles = read("react/ai-teams/styles.ts");
+  assert.match(avatar, /className="wand-team-avatar-picker"/);
+  assert.match(avatar, /className="wand-team-coat"/);
+  assert.doesNotMatch(avatar, /wand-ai-team-avatar-grid|wand-ai-team-coat-btn/);
+  assert.match(styles, /\.wand-team-coat\s*\{[^}]*width:\s*30px;[^}]*height:\s*30px;/);
+});
+
+test("新建员工默认只填期望，手动字段收进可原位展开的高级配置", () => {
+  const form = read("react/agents/employee-create-form.tsx");
+  // 默认只有期望输入框 + 创建按钮：名字/职责/Prompt/候选都在高级配置里。
+  assert.match(form, /id="new-employee-expectation"/);
+  assert.match(form, /const \[advanced, setAdvanced\] = React\.useState\(false\)/);
+  assert.match(form, /className="wand-employee-advanced"/);
+  assert.match(form, /data-open=\{advanced \|\| undefined\}/);
+  assert.match(form, /id="new-employee-name"/);
+  assert.match(form, /<CandidatesListEditor/);
+  // 期望为空时不调模型；高级配置里手动填了名字则按手动值落库。
+  assert.match(form, /if \(advanced && name\.trim\(\)\) \{/);
+  assert.match(form, /\/api\/silicon-employees\/draft|siliconEmployeesRepository\.draft/);
+
+  const styles = read("react/ai-teams/styles.ts");
+  assert.match(styles, /\.wand-employee-advanced \{[^}]*grid-template-rows: 0fr/);
+  assert.match(styles, /\.wand-employee-advanced\[data-open\] \{ grid-template-rows: 1fr/);
+  assert.match(styles, /\.wand-employee-advanced,\s*\n\s*\.wand-employee-advanced-toggle button > svg \{ transition: none; \}/);
+  assert.match(styles, /\.wand-employee-create-submit \{ min-inline-size:/);
+  // 箭头同实例旋转变形，标签不换字，按钮尺寸不变。
+  assert.match(styles, /\.wand-employee-advanced-toggle\[data-open\] button > svg:last-child \{ transform: rotate\(180deg\)/);
+  assert.doesNotMatch(form, /收起高级配置/);
+});
 
 const DWELL_TOKENS: Array<[string, number]> = [["--motion-dwell-sent", 720], ["--motion-dwell-failed", 1500]];
 const TRANSITION_TOKENS: Array<[string, string]> = [
@@ -404,22 +444,24 @@ test("[T6] 重复与超上限的候选在保存前就被拦住，错误原位显
   assert.equal(validateTeamDraft([ok[0]!]).length, 1, "成员数不足也要报");
 
   const page = read("react/ai-teams/teams-page.tsx");
-  assert.match(page, /className="wand-team-candidate-error" role="alert"/);
+  const editor = read("react/agents/candidate-editor.tsx");
+  assert.match(editor, /className="wand-team-candidate-error" role="alert"/);
   assert.doesNotMatch(page, /alert\(|WandToast|wandOverlay\.toast/);
   assert.doesNotMatch(page, /draggable|onDragStart|dragover/, "不做拖拽排序");
 });
 
 test("[T6] 成员卡一行一候选：复用 AgentFields，双写 agents/agent，上限与末位保护落在按钮上", () => {
   const page = read("react/ai-teams/teams-page.tsx");
+  const editor = read("react/agents/candidate-editor.tsx");
   const compact = page.replace(/\s+/g, " ");
-  assert.match(page, /<AgentFields[\s\S]*?showKind/);
+  const editorCompact = editor.replace(/\s+/g, " ");
+  assert.match(editor, /<AgentFields[\s\S]*?showKind/);
   assert.match(page, /memberAgents\(member\)/, "读候选要走 memberAgents，不依赖兼容字段");
   assert.match(compact, /onChange\(\{ agents: next, agent: \{ \.\.\.next\[0\]! \} \}\)/, "保存要双写 agents + agent");
-  assert.match(compact, /disabled=\{disabled \|\| locked \|\| agents\.length >= AI_TEAM_MAX_CANDIDATES\}/);
-  assert.match(compact, /disabled=\{disabled \|\| locked \|\| total <= 1\}/);
-  assert.match(page, /duplicate=\{duplicates\.includes\(at\)\}/);
-  assert.match(page, /data-leaving=/, "删除走同一段过渡的倒放");
-  assert.match(page, /candidateLabel\(index\)/);
+  assert.match(editorCompact, /disabled=\{disabled \|\| agents\.length >= AI_TEAM_MAX_CANDIDATES\}/);
+  assert.match(editorCompact, /disabled=\{disabled \|\| total <= 1\}/);
+  assert.match(editor, /duplicate=\{duplicates\.includes\(at\)\}/);
+  assert.match(editor, /candidateLabel\(index\)/);
   // 旧的单候选写法不该还留在成员卡上。
   assert.doesNotMatch(compact, /onChange\(\{ agent, agents: \[agent\] \}\)/);
   assert.match(read("react/ai-teams/styles.ts"), /grid-template-rows: 0fr/);
@@ -428,6 +470,7 @@ test("[T6] 成员卡一行一候选：复用 AgentFields，双写 agents/agent�
 // ---------- [T7] 入口适配：picker 团队分组、三入口、原位「直接开工」 ----------
 
 const pickerSource = read("react/workspaces/workspace-agent-picker.tsx");
+const unifiedPickerSource = read("react/workspaces/unified-execution-subject-picker.tsx");
 const hostSource = read("react/workspaces/host.tsx");
 const teamPageSource = read("react/ai-teams/teams-page.tsx");
 const repositorySource = read("react/ai-teams/repository.ts");
@@ -446,10 +489,10 @@ test("[T7] 团队只在「已选中已有项目」时可选，global 与未选�
   assert.equal(usableTeamWorkspaceId(undefined), "", "还没选项目");
   assert.equal(usableTeamWorkspaceId(""), "");
 
-  assert.match(pickerSource, /const teamBlocked = teamWorkspaceId === ""/);
-  assert.match(pickerSource, /disabled=\{disabled \|\| teamBlocked\}/);
-  assert.match(pickerSource, /TEAM_NEEDS_PROJECT_HINT\}<\/p>/, "禁用说明原位出现在分组里");
-  assert.doesNotMatch(pickerSource, /wandOverlay|Toast|toast\(/);
+  assert.match(unifiedPickerSource, /const teamBlocked = teamWorkspaceId === ""/);
+  assert.match(unifiedPickerSource, /disabled=\{disabled \|\| teamBlocked\}/);
+  assert.match(unifiedPickerSource, /TEAM_NEEDS_PROJECT_HINT[\s\S]*?<\/p>/, "禁用说明原位出现在分组里");
+  assert.doesNotMatch(unifiedPickerSource, /wandOverlay|Toast|toast\(/);
 });
 
 test("[T7] 团队是 picker 自己的选择态，没有撑宽 WorkspaceSessionTarget", () => {
@@ -457,14 +500,14 @@ test("[T7] 团队是 picker 自己的选择态，没有撑宽 WorkspaceSessionTa
   assert.doesNotMatch(workspaceTypesSource, /export type WorkspaceSessionTarget[^;]*team/, "types.ts 只加新类型，不动联合");
   assert.match(workspaceTypesSource, /export interface WorkspaceTeamOption/);
 
-  // 选中团队后隐藏「会话类型 / 模型」，选回 CLI 时清掉团队。
-  assert.match(pickerSource, /const teamSelected = teamId !== ""/);
-  assert.equal(pickerSource.match(/\{!teamSelected && target !== "shell" \? \(/g)?.length, 2, "会话类型与模型两处一起让位");
-  assert.match(pickerSource, /<legend className="wand-new-session-field-label">会话类型<\/legend>/);
-  assert.match(pickerSource, /<legend className="wand-new-session-field-label">模型<\/legend>/);
-  assert.match(pickerSource, /if \(teamSelected\) onTeamChange\?\.\(""\)/);
-  // WelcomeChooser 的 onStart 签名不变，团队走可选旁路。
-  assert.match(pickerSource, /onStart\(target: WorkspaceSessionTarget, kind: WorkspaceSessionKind, model: string\): void \| Promise<void>;/);
+  // 共享选择器把团队/员工/CLI 作为互斥主体；PTY 下只保留 CLI。
+  assert.match(pickerSource, /<UnifiedExecutionSubjectPicker/);
+  assert.match(unifiedPickerSource, /kind !== "pty"/);
+  assert.match(unifiedPickerSource, /selectedSubject\.type === "cli"/);
+  assert.match(unifiedPickerSource, /<legend className="wand-new-session-field-label">会话类型<\/legend>/);
+  assert.match(unifiedPickerSource, /<legend className="wand-new-session-field-label">模型<\/legend>/);
+  assert.match(pickerSource, /onTeamChange\?\.\(""\)/);
+  assert.match(pickerSource, /onStart\(target: WorkspaceSessionTarget, kind: WorkspaceSessionKind, model: string, employeeId\?: string\): void \| Promise<void>;/);
   assert.match(pickerSource, /onStartTeam\?\(teamId: string, workspaceId: string\): void \| Promise<void>;/);
   assert.match(pickerSource, /if \(!onStartTeam \|\| !teamWorkspaceId\) throw new Error\(TEAM_NEEDS_PROJECT_HINT\)/);
 });
@@ -613,9 +656,16 @@ test("[T8] team-chat-view 进 chunk、主包不含它，借的模块靠注册表
 // 下面这份共享清单是当前事实（团队页头像两处都用），它由断言算出来，不是手工豁免。
 const SHARED_CHUNK_CLASSES = [
   "composer-plus-popover",
+  "is-archived",
   "task-board-create-button",
-  "wand-stretch-tabs",
+  "wand-execution-subject-picker",
+  "wand-link-btn",
+  "wand-settings-field",
   "wand-settings-save-bar",
+  "wand-stretch-tabs",
+  "wand-subject-empty-row",
+  "wand-subject-group",
+  "wand-subject-group-title",
   "wand-team-avatar",
   "wand-team-avatar-cat",
   "wand-team-avatar-stack",

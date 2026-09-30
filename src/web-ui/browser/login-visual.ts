@@ -2,13 +2,15 @@ import { PROVIDER_IDS, renderProviderLogoMarkup, type ProviderId } from "../prov
 
 // A local, decorative model of Wand: provider CLIs feed one workspace, with
 // terminal/chat panes, a Git branch and a mobile client. No live session data.
+// 七个节点沿外层轨道弧线均匀展开（角度 209°→331°，椭球 rx=255 / ry=203，圆心 290/246）。
 const PROVIDER_POSITIONS: Record<ProviderId, readonly [number, number]> = {
-  claude: [54, 128],
-  codex: [142, 70],
-  opencode: [240, 46],
-  grok: [340, 46],
-  qoder: [438, 70],
-  pi: [526, 128],
+  claude: [67, 148],
+  codex: [124, 92],
+  opencode: [201, 56],
+  grok: [290, 43],
+  qoder: [379, 56],
+  pi: [456, 92],
+  gemini: [513, 148],
 };
 
 function renderProviderConnections(): string {

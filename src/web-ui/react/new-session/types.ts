@@ -32,6 +32,7 @@ export interface NewSessionDefaults {
 
 export interface NewSessionForm {
   provider: NewSessionProvider;
+  employeeId?: string;
   kind: NewSessionKind;
   cwd: string;
   mode: NewSessionMode;
@@ -71,6 +72,7 @@ interface StructuredNewSessionCreateRequest extends NewSessionCreateRequestBase 
   runner: string;
   model?: string;
   thinkingEffort?: string;
+  employeeId?: string;
 }
 
 interface PtyNewSessionCreateRequest extends NewSessionCreateRequestBase {

@@ -643,7 +643,7 @@ const sessionReads = createSessionReads();
       }
 
       export function getProviderKey(provider) {
-        return provider === "codex" || provider === "opencode" || provider === "grok" || provider === "qoder" || provider === "pi" ? provider : "claude";
+        return provider === "codex" || provider === "opencode" || provider === "grok" || provider === "qoder" || provider === "pi" || provider === "gemini" ? provider : "claude";
       }
 
       export function getProviderForSession(session) {
@@ -661,6 +661,7 @@ const sessionReads = createSessionReads();
           grok: typeof configured.grok === "string" ? configured.grok : ((state.config && state.config.defaultGrokModel) || ""),
           qoder: typeof configured.qoder === "string" ? configured.qoder : ((state.config && state.config.defaultQoderModel) || "")
           , pi: typeof configured.pi === "string" ? configured.pi : ((state.config && state.config.defaultPiModel) || "")
+          , gemini: typeof configured.gemini === "string" ? configured.gemini : ((state.config && state.config.defaultGeminiModel) || "")
         };
       }
 
@@ -672,6 +673,7 @@ const sessionReads = createSessionReads();
         if (key === "grok") return defaults.grok || "";
         if (key === "qoder") return defaults.qoder || "";
         if (key === "pi") return defaults.pi || "";
+        if (key === "gemini") return defaults.gemini || "";
         return defaults.claude || "";
       }
 
@@ -685,7 +687,7 @@ const sessionReads = createSessionReads();
       export function setChatModelForProvider(provider, model) {
         var key = getProviderKey(provider);
         var normalized = (model || "").trim();
-        if (!state.chatModels) state.chatModels = { claude: "", codex: "", opencode: "", grok: "", qoder: "", pi: "" };
+        if (!state.chatModels) state.chatModels = { claude: "", codex: "", opencode: "", grok: "", qoder: "", pi: "", gemini: "" };
         state.chatModels[key] = normalized;
         state.chatModel = normalized;
         try {
@@ -710,6 +712,7 @@ const sessionReads = createSessionReads();
         if (provider === "grok") return state.availableGrokModels || [];
         if (provider === "qoder") return state.availableQoderModels || [];
         if (provider === "pi") return state.availablePiModels || [];
+        if (provider === "gemini") return state.availableGeminiModels || [];
         return state.availableModels || [];
       }
 
@@ -886,6 +889,7 @@ const sessionReads = createSessionReads();
         state.availableGrokModels = Array.isArray(data.grokModels) ? data.grokModels : [];
         state.availableQoderModels = Array.isArray(data.qoderModels) ? data.qoderModels : [];
         state.availablePiModels = Array.isArray(data.piModels) ? data.piModels : [];
+        state.availableGeminiModels = Array.isArray(data.geminiModels) ? data.geminiModels : [];
         state.providerThinkingEfforts = data.thinkingEfforts && typeof data.thinkingEfforts === "object"
           ? data.thinkingEfforts
           : {};
@@ -1045,6 +1049,8 @@ const sessionReads = createSessionReads();
               ? "qoder-cli-print"
             : provider === "pi"
               ? "pi-cli-json"
+            : provider === "gemini"
+              ? "gemini-cli-json"
               : ((state.config && state.config.structuredRunner === "sdk") ? "claude-sdk" : (state.structuredRunner || "claude-cli-print"));
         var payload = {
           cwd: cwdOverride || getEffectiveCwd(),
@@ -1059,6 +1065,7 @@ const sessionReads = createSessionReads();
           workspaceId: extra && extra.workspaceId,
           workspaceTaskId: extra && extra.workspaceTaskId,
           systemPrompt: extra && extra.systemPrompt,
+          employeeId: extra && extra.employeeId,
           // 带了首轮提示词时不要在 HTTP 里等整轮跑完：创建接口会在发完提示词后
           // 立刻返回快照，首轮进展走 websocket。否则调用方（新建任务对话框）
           // 会被锁在「正在创建…」里直到模型答完，可能是几分钟。
@@ -2143,6 +2150,7 @@ const sessionReads = createSessionReads();
           initialInput?: string;
           /** 角色与规则：走会话的系统提示，不拼进 initialInput。 */
           systemPrompt?: string;
+          employeeId?: string;
         },
       ): Promise<unknown> {
         var shell = !!(options && options.shell);
@@ -2165,6 +2173,7 @@ const sessionReads = createSessionReads();
               provider: provider,
               model: pickedModel || undefined,
               systemPrompt: options && options.systemPrompt,
+              employeeId: options && options.employeeId,
             },
           );
         }

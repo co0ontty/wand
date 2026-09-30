@@ -121,6 +121,7 @@ test("system AI CLI preference runs the chosen model for prompt optimization", a
   process.env.WAND_TEST_MODE = "1";
   const dir = mkdtempSync(path.join(os.tmpdir(), "wand-system-ai-cli-"));
   const previousPath = process.env.PATH;
+  const previousDeepRepairDisable = process.env.WAND_PATH_REPAIR_DEEP_DISABLE;
   const argsPath = path.join(dir, "pi-args.txt");
   const binDir = path.join(dir, "bin");
   mkdirSync(binDir);
@@ -133,6 +134,9 @@ test("system AI CLI preference runs the chosen model for prompt optimization", a
   ].join("\n"));
   chmodSync(binary, 0o755);
   process.env.PATH = `${binDir}${path.delimiter}${previousPath ?? ""}`;
+  // This test owns the fake CLI at the front of PATH. Login-shell path repair
+  // can otherwise put the user's real Pi before it and invoke live credentials.
+  process.env.WAND_PATH_REPAIR_DEEP_DISABLE = "1";
   const config = {
     ...defaultConfig(), host: "127.0.0.1", port: 0, https: false,
     password: "test-password", startupCommands: [], defaultProvider: "codex" as const,
@@ -161,7 +165,7 @@ test("system AI CLI preference runs the chosen model for prompt optimization", a
     const optimized = await fetch(`${baseUrl}/api/optimize-prompt`, {
       method: "POST", headers, body: JSON.stringify({ text: "fix bug" }),
     });
-    assert.equal(optimized.status, 200);
+    assert.equal(optimized.status, 200, await optimized.clone().text());
     assert.deepEqual(await optimized.json(), { optimized: "CLI_OK" });
     const args = readFileSync(argsPath, "utf8").split("\n");
     assert.ok(args.includes("--model"));
@@ -178,6 +182,8 @@ test("system AI CLI preference runs the chosen model for prompt optimization", a
     if (handle) await handle.close();
     if (previousPath === undefined) delete process.env.PATH;
     else process.env.PATH = previousPath;
+    if (previousDeepRepairDisable === undefined) delete process.env.WAND_PATH_REPAIR_DEEP_DISABLE;
+    else process.env.WAND_PATH_REPAIR_DEEP_DISABLE = previousDeepRepairDisable;
     rmSync(dir, { recursive: true, force: true });
   }
 });
