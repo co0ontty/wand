@@ -12,12 +12,17 @@ export function linkedTeamReportFile(
   try {
     const root = realpathSync(cwd);
     const links = /\[([^\]\r\n]+)\]\(\s*(?:<([^>\r\n]+)>|([^\s)]+))\s*\)/g;
-    for (const match of reply.matchAll(links)) {
-      const raw = match[2] ?? match[3]!;
-      const before = reply.slice(reply.lastIndexOf("\n", match.index) + 1, match.index);
+    const references = [
+      ...[...reply.matchAll(links)].map((m) => ({ raw: m[2] ?? m[3]!, label: m[1]!, index: m.index, text: m[0] })),
+      ...[...reply.matchAll(/`([^`\r\n]+\.(?:md|markdown))`/gi)]
+        .map((m) => ({ raw: m[1]!, label: "", index: m.index, text: m[0] })),
+    ];
+    for (const reference of references) {
+      const { raw } = reference;
+      const before = reply.slice(reply.lastIndexOf("\n", reference.index) + 1, reference.index);
       const delivered = /(?:已(?:写入|保存|生成|完成)|交付|报告(?:文件)?[：:]|report\s*[:：]|\b(?:written|saved|created|delivered)\b)/i.test(before)
-        || reply.trim() === match[0];
-      if (!delivered || !/(?:报告|report)/i.test(`${match[1]} ${path.basename(raw)}`)) continue;
+        || reply.trim() === reference.text;
+      if (!delivered || !/(?:报告|report)/i.test(`${reference.label} ${before} ${path.basename(raw)}`)) continue;
       if (!/\.(?:md|markdown)$/i.test(raw)) continue;
       try {
         const local = /^file:/i.test(raw) ? fileURLToPath(raw)
@@ -26,6 +31,7 @@ export function linkedTeamReportFile(
         if (!local) continue;
         const file = realpathSync(path.resolve(root, local));
         const relativePath = path.relative(root, file);
+        if (!/\.(?:md|markdown)$/i.test(file)) continue;
         if (!relativePath || relativePath === ".." || relativePath.startsWith(`..${path.sep}`) || path.isAbsolute(relativePath)) continue;
         const stat = statSync(file);
         // 文件系统有亚毫秒精度，startedAt 只有整数毫秒；同一毫秒不能误判为旧文件。

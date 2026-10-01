@@ -2288,27 +2288,29 @@ test("failed members keep error feedback rather than manufacturing a completed r
 });
 
 test("a newly delivered alternate report file supplies the card and leader handoff instead of a completion reply", async (t) => {
-  const h = harness(t, { requirePlanApproval: false });
-  const runId = await startAndPlan(h, [["m_dev", "生成报告"]]);
-  const dev = runningStep(h, runId);
-  const relativePath = `.wand-team/${runId}/alternate-report.md`;
-  const file = path.join(h.cwd, relativePath);
-  const body = "# 真实验收报告\n\n## 结论\n标题和摘录来自原文件。\n\n## 全文\nFULL_REPORT_ONLY_TAIL";
-  writeFileSync(file, body);
-  const wrote = new Date(h.clock.now); utimesSync(file, wrote, wrote);
-  h.clock.now += 3000;
-  h.ops.finishTurn(dev.sessionId!, `已写入并核对报告：[验收报告](<${file}>)。`);
-  await settle(h, dev.sessionId!);
-  const finished = h.storage.listAiTeamSteps(runId).find((step) => step.id === dev.id)!;
-  assert.equal(finished.reportPath, relativePath);
-  assert.equal(finished.report, body);
-  const card = h.runner.detail(runId).chatTurns.find((turn) => turn.reportFile?.stepId === dev.id)!;
-  assert.equal(card.reportFile!.name, "alternate-report.md");
-  assert.deepEqual(card.reportFile!.preview, { title: "真实验收报告", excerpt: "标题和摘录来自原文件。" });
-  assert.ok(!turnText(card).includes("已写入并核对报告"));
-  assert.ok(!existsSync(path.join(h.cwd, dev.reportPath)), "没有生成一份装着回复文案的伪报告");
-  const nextLeader = runningStep(h, runId);
-  assert.ok(h.ops.sessions.get(nextLeader.sessionId!)!.sent.at(-1)!.includes(relativePath));
+  for (const inline of [false, true]) {
+    const h = harness(t, { requirePlanApproval: false });
+    const runId = await startAndPlan(h, [["m_dev", "生成报告"]]);
+    const dev = runningStep(h, runId);
+    const relativePath = `.wand-team/${runId}/alternate-report.md`;
+    const file = path.join(h.cwd, relativePath);
+    const body = "# 真实验收报告\n\n## 结论\n标题和摘录来自原文件。\n\n## 全文\nFULL_REPORT_ONLY_TAIL";
+    writeFileSync(file, body);
+    const wrote = new Date(h.clock.now); utimesSync(file, wrote, wrote);
+    h.clock.now += 3000;
+    h.ops.finishTurn(dev.sessionId!, inline ? `已写入：\`${relativePath}\`` : `已写入并核对报告：[验收报告](<${file}>)。`);
+    await settle(h, dev.sessionId!);
+    const finished = h.storage.listAiTeamSteps(runId).find((step) => step.id === dev.id)!;
+    assert.equal(finished.reportPath, relativePath);
+    assert.equal(finished.report, body);
+    const card = h.runner.detail(runId).chatTurns.find((turn) => turn.reportFile?.stepId === dev.id)!;
+    assert.equal(card.reportFile!.name, "alternate-report.md");
+    assert.deepEqual(card.reportFile!.preview, { title: "真实验收报告", excerpt: "标题和摘录来自原文件。" });
+    assert.ok(!turnText(card).includes("已写入并核对报告"));
+    assert.ok(!existsSync(path.join(h.cwd, dev.reportPath)), "没有生成一份装着回复文案的伪报告");
+    const nextLeader = runningStep(h, runId);
+    assert.ok(h.ops.sessions.get(nextLeader.sessionId!)!.sent.at(-1)!.includes(relativePath));
+  }
 });
 
 test("the designated report wins over links to other files in a completion reply", async (t) => {

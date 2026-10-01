@@ -20,6 +20,7 @@ test("an explicit newly delivered report link resolves to its real local file", 
   assert.equal(delivered.relativePath, "报告 report.md");
   assert.equal(linkedTeamReportFile(f.cwd, `Written report: [report](${pathToFileURL(f.report)})`, f.started)?.relativePath, delivered.relativePath);
   assert.equal(linkedTeamReportFile(f.cwd, `[报告](报告%20report.md)`, f.started)?.relativePath, delivered.relativePath);
+  assert.equal(linkedTeamReportFile(f.cwd, `已写入：\`${f.report}\``, f.started)?.relativePath, delivered.relativePath);
   const sameMillisecond = new Date(f.started); utimesSync(f.report, sameMillisecond, sameMillisecond);
   assert.ok(linkedTeamReportFile(f.cwd, `[报告](<${f.report}>)`, f.started), "文件系统亚毫秒精度不能误拒同一毫秒的产物");
 });
