@@ -12,6 +12,10 @@ import { getErrorMessage } from "./error-utils.js";
 import { runGitAsync } from "./git-utils.js";
 import { shouldGenerateSessionTopicFromInput, summarizeSessionTitleFromInput } from "./session-topic.js";
 import type { WandStorage } from "./storage.js";
+import { recordUserMemory } from "./user-memory.js";
+import { DEFAULT_EMPLOYEE_ID } from "./ai-team-types.js";
+import { explicitEmployeeMemoryContent } from "./employee-knowledge-content.js";
+import type { SessionSource } from "./types.js";
 import {
   WAND_ITERATION_PROMPT_DETAIL_MAX_LENGTH,
   WAND_ITERATION_PROMPT_TITLE_MAX_LENGTH,
@@ -42,6 +46,10 @@ export interface IterationPromptSession {
   cwd?: string;
   workspaceId?: string;
   workspaceTaskId?: string;
+  sessionSource?: SessionSource;
+  automationId?: string;
+  interactiveShell?: boolean;
+  employeeId?: string;
 }
 
 export interface IterationPromptTarget {
@@ -171,9 +179,17 @@ export function recordIterationPrompt(
   options: { skipFilter?: boolean } = {},
 ): void {
   const raw = prompt?.trim();
-  if (!raw) return;
+  if (!raw || explicitEmployeeMemoryContent(raw)) return;
+  // 明确记忆不是代码变更意图，不进入共享迭代/commit 摘要。
   // 与会话标题共用同一把尺子：太短的输入不值得进迭代记录。
   if (!options.skipFilter && !shouldGenerateSessionTopicFromInput(raw)) return;
+  // Only real interactive user prompts; never learn from team-generated instructions or shell input.
+  if (((!session.sessionSource || session.sessionSource === "interactive") && !session.automationId
+    || session.automationId?.startsWith("wand-task:"))
+    && (!session.employeeId || session.employeeId === DEFAULT_EMPLOYEE_ID)
+    && !session.interactiveShell && !/^[\/!]/.test(raw)) {
+    recordUserMemory(storage, "session.prompt", raw, session.id);
+  }
   const run = async (): Promise<void> => {
     try {
       const detail = clip(cleanIterationPromptText(raw), WAND_ITERATION_PROMPT_DETAIL_MAX_LENGTH);

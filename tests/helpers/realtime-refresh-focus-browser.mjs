@@ -11,7 +11,7 @@ import { build } from "esbuild";
 export const modes = ["desktop", "390px", "native-shell", "reactUi=0", "reduce-motion", "390px-native-reduce"];
 const sleep = ms => new Promise(resolveSleep => setTimeout(resolveSleep, ms));
 export async function runFocusBrowser({ root = resolve(import.meta.dirname, "../.."), matrix = modes,
-  coreOnly = false, output } = {}) {
+  coreOnly = false, geometryProbe = false, output } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "wand-focus-source-"));
   const result = { ok: false, evidence: "production source + synthetic HTTP data + real Chrome; no installed service, Shell login or device", cases: [], exceptions: [], errors: [], requests: [], otherRequests: [] };
   const responsePlans = []; const deferred = []; let browser, socket, server, diagnosticEval;
@@ -107,6 +107,18 @@ export async function runFocusBrowser({ root = resolve(import.meta.dirname, "../
       })()`);
       const summary = "button.chat-activity-summary";
       const entry = '.chat-activity-entry[data-tool-ids] > button.chat-activity-entry-button';
+      if (geometryProbe) {
+        // Observational repair/baseline comparison only, never a B01/matrix pass.
+        responsePlans.push({defer:true,input:{file_path:"fixture.txt"},pending:true,resultAvailable:false});
+        await evaluate('h.fresh([{role:"assistant",uuid:"pending",content:[{type:"thinking",thinking:""},{type:"tool_use",id:"pending-read",name:"Read",input:{},activity:{kind:"read_file",fileKey:"same-file"}}]}],{status:"running",structuredState:{inFlight:true}})');
+        await click(summary);await click(entry);await wait('!!document.querySelector(".chat-activity-loading")',"probe loading");await evaluate("h.frames()");
+        const snapshot='(()=>{const n=document.querySelector(".chat-activity-entry[data-tool-ids] > button.chat-activity-entry-button"),r=document.querySelector(".chat-messages");return {rect:n.getBoundingClientRect().toJSON(),text:n.textContent,scrollTop:r.scrollTop,clientHeight:r.clientHeight,scrollHeight:r.scrollHeight,flexDirection:getComputedStyle(r).flexDirection,activeTag:document.activeElement.tagName,documentScroll:document.scrollingElement.scrollTop}})()';
+        const before=await evaluate(snapshot);await evaluate('window.probeEntry=document.querySelector(".chat-activity-entry[data-tool-ids] > button.chat-activity-entry-button");');
+        assert.equal(deferred.length,1);deferred.shift()();await wait('!!document.querySelector(".chat-activity-pending-detail")',"probe pending");await evaluate("h.frames()");
+        const after=await evaluate(snapshot);
+        result.cases.push({id:"geometry-observation",mode,before,after,deltaY:after.rect.y-before.rect.y,sameInstance:await evaluate('probeEntry===document.querySelector(".chat-activity-entry[data-tool-ids] > button.chat-activity-entry-button")')});
+        continue;
+      }
       await click(summary); await click(entry);
       await wait('document.querySelector(".chat-activity-entry-detail .inline-tool-result-text")?.textContent === "AAAA"', "exact on-demand Read result AAAA");
       await evaluate("h.frames()");
@@ -134,7 +146,9 @@ export async function runFocusBrowser({ root = resolve(import.meta.dirname, "../
       if (!coreOnly) await runExtended({ evaluate, send, click, key, wait, mode, result, responsePlans, deferred });
     }
     assert.deepEqual(result.exceptions, []);
-    result.ok = true; return result;
+    result.ok = !geometryProbe;
+    if (geometryProbe) result.verdict = "source_layout_observation_only_not_b01_or_matrix_pass";
+    return result;
   } catch (error) {
     if (diagnosticEval) {
       try { result.failureDiagnostic = await diagnosticEval('({visible:!document.hidden,front:document.hasFocus(),active:document.activeElement?.outerHTML?.slice(0,300),animations:document.getAnimations().map(a=>({state:a.playState,timing:a.effect?.getComputedTiming(),target:a.effect?.target?.className}))})'); }
@@ -155,6 +169,7 @@ async function runExtended({ evaluate: e, send, click, key, wait, mode, result, 
   const checkStable = observation => {
     for (const field of ["focusedAfter", "originalConnected", "chainContinuous", "glyphSame"]) assert.equal(observation[field], true, field + ": " + JSON.stringify(observation));
     assert.equal(observation.blurCount, 0); assert.equal(observation.replayCount, 0);
+    for (const axis of ["x","y","width","height"]) assert.ok(Math.abs(observation.rectAfter[axis]-observation.rectBefore[axis])<=1, "same trigger geometry: " + axis + " " + JSON.stringify(observation));
   };
   const focusTab = async selector => {
     for (let step = 0; step < 50 && !await e(`document.activeElement.matches(${JSON.stringify(selector)})`); step++) await key("Tab");
@@ -238,7 +253,7 @@ async function runExtended({ evaluate: e, send, click, key, wait, mode, result, 
   // Confirmed raw structured coordinate: prepend, hidden owned source turns and block cursor.
   await e(`(async()=>{
     window.rawFocus=JSON.parse(JSON.stringify(focusTurns)); delete rawFocus[0].uuid;
-    await h.fresh(rawFocus,{messageOffset:5,leadingBlockOffset:3});
+    await h.fresh(rawFocus,{messageOffset:5,leadingBlockOffset:0});
   })()`); await openRead();
   await focusTab(summary); await e(`window.o=h.watch(${JSON.stringify(summary)});window.rawRow=o.row;`);
   await e(`(async()=>{h.publish([{role:"user",content:[{type:"text",text:"earlier source"}]}].concat(rawFocus),{messageOffset:4,leadingBlockOffset:0});h.doRenderChat(true);await h.frames();})()`);
@@ -266,9 +281,9 @@ async function runExtended({ evaluate: e, send, click, key, wait, mode, result, 
   await e(`(async()=>{window.pendingTurns=[{role:"assistant",uuid:"pending",content:[{type:"thinking",thinking:""},{type:"tool_use",id:"pending-read",name:"Read",input:{},activity:{kind:"read_file",fileKey:"same-file"}}]}];await h.fresh(pendingTurns,{status:"running",structuredState:{inFlight:true}});})()`);
   assert.equal(result.requests.length,requestsBefore,"unopened entries do not prefetch");
   await click(summary);await click(entry);await wait('document.querySelector(".chat-activity-loading")?.textContent.includes("加载详情")',"loading state");
-  await e(`window.o=h.watch(${JSON.stringify(entry)});`);assert.equal(deferred.length,1);deferred.shift()();
+  await e("h.frames()");await e(`window.o=h.watch(${JSON.stringify(entry)});`);assert.equal(deferred.length,1);deferred.shift()();
   await wait('!!document.querySelector(".chat-activity-pending-detail")',"pending detail");await e("h.frames()");
-  observed=await e('o.result()');checkStable(observed);record("A06","loading→pending retains actual entry",observed);
+  observed=await e('o.result()');record("A06-observation","loading→pending mandatory geometry observation",observed);checkStable(observed);record("A06","loading→pending retains actual entry",observed);
   plans.push({input:{file_path:"fixture.txt"},content:"CROSS-RESULT",pending:false,resultAvailable:true});
   await e(`window.o=h.watch(${JSON.stringify(entry)}); h.publish(pendingTurns.concat([{role:"user",content:[{type:"tool_result",tool_use_id:"pending-read",content:""}]}]));h.doRenderChat(false);`);
   await wait(`document.querySelector(${JSON.stringify(exact)})?.textContent==="CROSS-RESULT"`,"cross-turn actual result");await e("h.frames()");

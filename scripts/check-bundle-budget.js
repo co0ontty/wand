@@ -52,7 +52,8 @@ const BUDGET = {
   // its content-versioned URL remains browser-cacheable until the bytes change.
   // 团队报告增加真实标题、三行摘录与文本缩略图：实测 39960→40201 B gzip。
   // 仅打开团队时下载并按内容指纹缓存，不增加首载；其它预算保持不变。
-  lazy: 41_000,
+  // 每员工独立知识库面板仅按需加载：实测 42,586 B，比上轮多937 B，首载不变。
+  lazy: 43_000,
 };
 const gzipBytes = (content) => gzipSync(Buffer.from(content, "utf8")).length;
 const rows = [

@@ -1,5 +1,5 @@
 import * as React from "react";
-import { isSystemSiliconEmployee, type SiliconEmployee } from "../../../ai-team-types.js";
+import { isBuiltinSiliconEmployee, type SiliconEmployee } from "../../../ai-team-types.js";
 import { WandButton, WandIcon, WandSearchField } from "../ui";
 import { EmployeeCard } from "./employee-card.js";
 import { EmployeeCreateForm } from "./employee-create-form.js";
@@ -50,15 +50,16 @@ export function EmployeeListPage({
   const handleSave = async (id: string, patch: Partial<SiliconEmployee>) => {
     const current = employees.find((e) => e.id === id);
     if (!current) return;
-    // 内置员工的名字/职责/人设/头像由服务端定义：只回传候选，别把锁定字段带过去。
-    const lockedSource = isSystemSiliconEmployee(current) ? current : patch;
-    await siliconEmployeesRepository.update(id, {
-      name: lockedSource.name ?? current.name,
-      duty: lockedSource.duty ?? current.duty,
-      prompt: lockedSource.prompt ?? current.prompt,
-      avatar: lockedSource.avatar ?? current.avatar,
-      agents: patch.agents ?? current.agents,
-    });
+    // 自动记忆更新可能刚好发生在编辑期间；内置员工只回传候选，不能拿旧 Prompt 覆盖它。
+    await siliconEmployeesRepository.update(id, isBuiltinSiliconEmployee(current)
+      ? { agents: patch.agents ?? current.agents }
+      : {
+          name: patch.name ?? current.name,
+          duty: patch.duty ?? current.duty,
+          prompt: patch.prompt ?? current.prompt,
+          avatar: patch.avatar ?? current.avatar,
+          agents: patch.agents ?? current.agents,
+        });
     reload();
   };
 
@@ -87,7 +88,7 @@ export function EmployeeListPage({
     if (!employee) return;
     const answer = await wandOverlay.dialog({
       title: `删除员工「${employee.name}」？`,
-      description: "员工配置将被删除；已有会话与历史消息会保留。",
+      description: "员工配置和其独立知识库将被删除；已有会话与历史消息会保留。",
       actions: [
         { label: "取消", value: false, autoFocus: true },
         { label: "删除员工", value: true, kind: "danger" },

@@ -6,6 +6,7 @@ import { StructuredSessionManager } from "./structured-session-manager.js";
 import { WandStorage } from "./storage.js";
 import { ExecutionMode, InputRequest, ResizeRequest, SessionProvider, SessionRunner, SessionSnapshot, SessionSource, ToolResultBlock, ToolUseBlock, WandConfig } from "./types.js";
 import { getDefaultModelForProvider, isExecutionMode } from "./config.js";
+import { defaultRoleForCli } from "./default-employee.js";
 import { alignedBlockStart, blockWindowMessagesForTransport, compactToolMessagesForTransport, sliceTurnBlocksForTransport, truncateMessagesForTransport, visibleBlockCount, windowMessagesForTransport } from "./message-truncator.js";
 import { toSessionDetailDTO, toSessionListItemDTO } from "./session-transport.js";
 import {
@@ -630,9 +631,14 @@ export function registerSessionRoutes(
         res.status(400).json({ error: "结构化会话当前仅支持 Claude、Codex、OpenCode、Grok、Qoder、Pi 或 Gemini provider。" });
         return;
       }
-      const provider: SessionProvider = employeeAgent?.provider ?? (isSessionProvider(body.provider) ? body.provider : "claude");
+      const provider: SessionProvider = employeeAgent?.provider
+        ?? (isSessionProvider(body.provider) ? body.provider : config.defaultProvider ?? "claude");
       const rawModel = typeof body.model === "string" ? body.model.trim() : "";
       const origin = parseSessionCreationOrigin(body);
+      // Explicit employees/custom role rules and internal automation retain their own role.
+      const defaultEmployee = !employee && !body.systemPrompt?.trim()
+        && origin.sessionSource === "interactive" ? defaultRoleForCli(storage, provider) : null;
+      const role = employee ?? defaultEmployee;
       const cwd = resolveSessionCwd(body.cwd, config.defaultCwd);
       const snapshot = structured.createSession({
         cwd,
@@ -651,10 +657,10 @@ export function registerSessionRoutes(
         workspaceId: resolveWorkspaceIdForNewSession(storage, cwd, body.workspaceId),
         workspaceTaskId: body.workspaceTaskId,
         // 角色与规则走系统提示通道，不拼进 prompt（见 AGENTS.md「Session 输入契约」）。
-        systemPrompt: employee?.prompt ?? body.systemPrompt,
-        employeeId: employee?.id,
-        employeeName: employee?.name,
-        employeeAvatar: employee?.avatar,
+        systemPrompt: role?.prompt ?? body.systemPrompt,
+        employeeId: role?.id,
+        employeeName: role?.name,
+        employeeAvatar: role?.avatar,
         employeeCandidates: employee?.agents,
         employeeCandidateIndex: selectedEmployeeCandidate?.index,
         ...origin,

@@ -90,7 +90,7 @@ export const siliconEmployeesRepository = {
     return employee;
   },
 
-  async update(id: string, input: SiliconEmployeeInput): Promise<SiliconEmployee> {
+  async update(id: string, input: SiliconEmployeeInput | Pick<SiliconEmployee, "agents">): Promise<SiliconEmployee> {
     const employee = await requestJson<SiliconEmployee>(
       `/api/silicon-employees/${encodeURIComponent(id)}`,
       jsonBody(input, "PUT"),

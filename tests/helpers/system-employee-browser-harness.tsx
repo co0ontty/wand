@@ -27,6 +27,14 @@ const SYSTEM_EMPLOYEE = {
   updatedAt: "2026-09-30T00:00:00.000Z",
 };
 
+const DEFAULT_EMPLOYEE = {
+  ...SYSTEM_EMPLOYEE, id: "e_wand_default", systemKey: "wand-default", name: "默契的初一",
+  duty: "默认任务伙伴", prompt: "默认伙伴基础规则与近期偏好。", agents: [CLAUDE],
+};
+let memory = { enabled: true, retentionDays: 30, eventCount: 3, features: [],
+  profile: { generatedAt: Date.now(), expiresAt: Date.now() + 100_000,
+    preferences: [{ category: "communication", text: "偏好先结论后证据", evidenceIds: [1] }] }, refreshing: false };
+
 const USER_EMPLOYEE = {
   id: "e_user",
   name: "接口守夜人",
@@ -41,9 +49,14 @@ const USER_EMPLOYEE = {
 interface HarnessState {
   updates: Array<{ id: string; body: unknown }>;
   mutations: string[];
+  memoryCalls: string[];
+  knowledgeCalls: Array<{ method: string; employeeId: string }>;
 }
 
-const state: HarnessState = { updates: [], mutations: [] };
+const state: HarnessState = { updates: [], mutations: [], memoryCalls: [], knowledgeCalls: [] };
+const knowledge: Record<string, string[]> = {
+  e_wand_ops: ["系统运维的独立知识"], e_user: ["普通员工的独立知识"], e_wand_default: ["默认伙伴的独立知识"],
+};
 (window as unknown as { systemEmployeeHarness: HarnessState }).systemEmployeeHarness = state;
 
 // 服务端意义上的当前定义：PUT 之后 GET 必须能读到新候选，
@@ -57,8 +70,24 @@ const realFetch = window.fetch.bind(window);
 window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
   const url = String(input);
   const method = (init?.method ?? "GET").toUpperCase();
+  if (url.includes("/api/user-memory")) {
+    state.memoryCalls.push(method);
+    if (method !== "GET") await new Promise((resolve) => setTimeout(resolve, 100));
+    if (method === "PATCH") memory = { ...memory, ...JSON.parse(String(init?.body)) };
+    if (method === "DELETE") memory = { ...memory, eventCount: 0, profile: null! };
+    return json({ ...memory, updated: method === "POST" });
+  }
+  if (url.includes("/knowledge")) {
+    const employeeId = url.split("/api/silicon-employees/")[1].split("/")[0];
+    state.knowledgeCalls.push({ method, employeeId });
+    if (method === "DELETE") knowledge[employeeId] = [];
+    const entries = (knowledge[employeeId] ?? []).map((content, index) => ({
+      id: `k_fixture_${index}`, employeeId, content, createdAt: new Date().toISOString(),
+    }));
+    return json({ employeeId, entries, total: entries.length, maxEntries: 200 });
+  }
   if (url.includes("/api/silicon-employees")) {
-    if (method === "GET") return json({ employees: [currentSystemEmployee, USER_EMPLOYEE] });
+    if (method === "GET") return json({ employees: [currentSystemEmployee, USER_EMPLOYEE, DEFAULT_EMPLOYEE] });
     const id = decodeURIComponent(url.split("/api/silicon-employees/")[1]?.split("/")[0] ?? "");
     const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
     if (/archive|unarchive/.test(url) || method !== "PUT") {

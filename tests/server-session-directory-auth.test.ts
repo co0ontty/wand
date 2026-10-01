@@ -9,7 +9,7 @@ import test from "node:test";
 import { defaultConfig } from "../src/config.js";
 import { startServer } from "../src/server.js";
 
-test("session directory reads and renames require the sessions scope", async (t) => {
+test("session directory and short-term memory controls require the sessions scope", async (t) => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-directory-auth-"));
   const previousTestMode = process.env.WAND_TEST_MODE;
   process.env.WAND_TEST_MODE = "1";
@@ -47,6 +47,21 @@ test("session directory reads and renames require the sessions scope", async (t)
     body: JSON.stringify({ path: root, name: "Bearer workspace" }),
   });
   assert.equal(renameResponse.status, 200);
+  const memoryRead = await fetch(`${baseUrl}/api/user-memory`, { headers: bearerHeaders });
+  assert.equal(memoryRead.status, 200);
+  assert.equal(Object.hasOwn(await memoryRead.json(), "events"), false, "raw prompts are not exposed");
+  assert.equal((await fetch(`${baseUrl}/api/user-memory`)).status, 401);
+
+  const employeeResponse = await fetch(`${baseUrl}/api/silicon-employees`, {
+    method: "POST", headers: { ...bearerHeaders, "content-type": "application/json" },
+    body: JSON.stringify({ name: "Knowledge auth fixture", duty: "", prompt: "", avatar: "",
+      agents: [{ provider: "pi", model: "default", thinkingEffort: "off", mode: "default", kind: "structured" }] }),
+  });
+  assert.equal(employeeResponse.status, 201);
+  const employee = await employeeResponse.json() as { id: string };
+  const knowledgeRoute = `/api/silicon-employees/${employee.id}/knowledge`;
+  assert.equal((await fetch(`${baseUrl}${knowledgeRoute}`, { headers: bearerHeaders })).status, 200);
+  assert.equal((await fetch(`${baseUrl}${knowledgeRoute}`)).status, 401);
 
   const filesOnlyToken = handle.authService.createSession({
     kind: "connected-app",
@@ -65,4 +80,15 @@ test("session directory reads and renames require the sessions scope", async (t)
     })).status,
     403,
   );
+  for (const [method, route] of [
+    ["GET", "/api/user-memory"], ["PATCH", "/api/user-memory"],
+    ["DELETE", "/api/user-memory"], ["POST", "/api/user-memory/refresh"],
+    ["GET", knowledgeRoute], ["POST", knowledgeRoute], ["DELETE", knowledgeRoute],
+    ["DELETE", `${knowledgeRoute}/k_fixture`],
+  ]) {
+    assert.equal((await fetch(`${baseUrl}${route}`, {
+      method, headers: { ...cookieHeaders, "content-type": "application/json" },
+      ...(method === "PATCH" ? { body: JSON.stringify({ enabled: false }) } : {}),
+    })).status, 403, `${method} memory endpoint requires sessions scope`);
+  }
 });

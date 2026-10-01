@@ -109,12 +109,13 @@ export function buildAppendSystemPromptParts(language: string | undefined, mode:
  * CLI 与 SDK 两条路径共用，避免只改一边。
  */
 export function buildSessionSystemPromptParts(
-  session: Pick<SessionSnapshot, "mode" | "systemPrompt">,
+  session: Pick<SessionSnapshot, "mode" | "systemPrompt" | "runtimeSystemPrompt">,
   language: string | undefined,
 ): string[] {
   const parts = buildAppendSystemPromptParts(language, session.mode);
   const sessionPrompt = session.systemPrompt?.trim();
   if (sessionPrompt) parts.push(sessionPrompt);
+  if (session.runtimeSystemPrompt?.trim()) parts.push(session.runtimeSystemPrompt.trim());
   return parts;
 }
 

@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { buildChildEnv } from "./env-utils.js";
 import { buildLanguageDirective } from "./language-prompt.js";
 import { isSessionProvider, providerCliInstalled } from "./session-provider.js";
+import { asRecord } from "./structured-content.js";
 import {
   runGitAsync as runGitAsyncBase,
   runGitRawAsync as runGitRawAsyncBase,
@@ -341,6 +342,12 @@ export interface CommitInputOptions {
 
 // ── AI commit message generation ──
 
+type CliAiTextOptions = QuickCommitAiOptions & { deadline?: number };
+
+function cliTextTimeoutMs(defaultMs: number, opts: CliAiTextOptions): number {
+  return opts.deadline === undefined ? defaultMs : Math.min(defaultMs, Math.max(1, opts.deadline - Date.now()));
+}
+
 /**
  * 一次性 Claude 文本生成（commit message / tag / 提示词优化…）。
  *
@@ -355,7 +362,7 @@ async function callClaudeText(
   request: AiTextRequest,
   cwd: string,
   language: string | undefined,
-  opts: QuickCommitAiOptions,
+  opts: CliAiTextOptions,
 ): Promise<string> {
   const args = ["-p", "--output-format", "text", "--tools", "", "--no-session-persistence", "--strict-mcp-config"];
   const languageDirective = language ? buildLanguageDirective(language) : "";
@@ -367,7 +374,7 @@ async function callClaudeText(
   if (effort) args.push("--effort", effort);
   const stdout = await runCliText("claude", args, request.prompt, {
     cwd,
-    timeoutMs: CLAUDE_MESSAGE_TIMEOUT_MS,
+    timeoutMs: cliTextTimeoutMs(CLAUDE_MESSAGE_TIMEOUT_MS, opts),
     inheritEnv: opts.inheritEnv,
   });
   const text = stdout.trim();
@@ -383,7 +390,54 @@ function normalizeAiText(raw: string): string {
   return stripFences(raw).replace(/^["'`]+|["'`]+$/g, "").trim();
 }
 
+/** Read explicit protocol failures, not error-looking prose that could be legitimate output. */
+function cliProtocolErrorText(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (Array.isArray(value)) return value.map(cliProtocolErrorText).filter(Boolean).join("\n");
+  const record = asRecord(value);
+  if (!record) return "";
+  for (const key of ["message", "error", "errors", "data", "result"]) {
+    const text = cliProtocolErrorText(record[key]);
+    if (text) return text;
+  }
+  return "";
+}
+
+/** A zero process exit does not imply a successful model response. */
+function assertCliProtocolSucceeded(stdout: string, provider: SessionProvider): void {
+  let failure: string | null = null;
+  const failed = (value: unknown): string => cliProtocolErrorText(value) || `${provider} CLI execution failed`;
+  for (const line of stdout.split(/\r?\n/)) {
+    let event: Record<string, unknown> | null;
+    try { event = asRecord(JSON.parse(line)); } catch { continue; }
+    if (!event) continue;
+    if (provider === "codex") {
+      if (event.type === "error" || event.type === "turn.failed") failure = failed(event);
+      if (event.type === "turn.completed") failure = null;
+    } else if (provider === "qoder" && event.type === "result") {
+      failure = event.is_error === true || event.subtype !== "success" ? failed(event) : null;
+    } else if (provider === "pi") {
+      const messages = event.type === "agent_end" && Array.isArray(event.messages)
+        ? event.messages
+        : event.type === "message_end" || event.type === "turn_end" ? [event.message] : [];
+      for (const raw of messages) {
+        const message = asRecord(raw);
+        if (message?.role !== "assistant") continue;
+        failure = message.stopReason === "error" || message.stopReason === "aborted"
+          ? failed(message.errorMessage) : null;
+      }
+    } else if (provider === "gemini") {
+      if (event.type === "error" && event.severity === "error") failure = failed(event);
+      if (event.type === "result") failure = event.status === "error" ? failed(event) : null;
+    } else if ((provider === "grok" || provider === "opencode") && event.type === "error") {
+      failure = failed(event);
+    }
+  }
+  if (failure) throw new QuickCommitError(`${provider} CLI 失败：${failure}`, "CLAUDE_CLI_FAILED");
+}
+
 function extractCodexText(stdout: string): string {
+  assertCliProtocolSucceeded(stdout, "codex");
   let lastAgentText = "";
   for (const line of stdout.split(/\r?\n/)) {
     const trimmed = line.trim();
@@ -408,6 +462,7 @@ function extractCodexText(stdout: string): string {
 }
 
 function extractOpenCodeText(stdout: string): string {
+  assertCliProtocolSucceeded(stdout, "opencode");
   const texts: string[] = [];
   for (const line of stdout.split(/\r?\n/)) {
     const trimmed = line.trim();
@@ -425,6 +480,7 @@ function extractOpenCodeText(stdout: string): string {
 }
 
 function extractGrokText(stdout: string): string {
+  assertCliProtocolSucceeded(stdout, "grok");
   let text = "";
   for (const line of stdout.split(/\r?\n/)) {
     const trimmed = line.trim();
@@ -440,6 +496,7 @@ function extractGrokText(stdout: string): string {
 }
 
 function extractQoderText(stdout: string): string {
+  assertCliProtocolSucceeded(stdout, "qoder");
   let resultText = "";
   const assistantTexts: string[] = [];
   for (const line of stdout.split(/\r?\n/)) {
@@ -475,6 +532,7 @@ function extractQoderText(stdout: string): string {
 }
 
 function extractPiText(stdout: string): string {
+  assertCliProtocolSucceeded(stdout, "pi");
   let text = "";
   for (const line of stdout.split(/\r?\n/)) {
     try {
@@ -491,6 +549,7 @@ function extractPiText(stdout: string): string {
 
 /** Gemini `--output-format stream-json`：assistant message 是增量 chunk，拼接即可。 */
 function extractGeminiText(stdout: string): string {
+  assertCliProtocolSucceeded(stdout, "gemini");
   let text = "";
   for (const line of stdout.split(/\r?\n/)) {
     const trimmed = line.trim();
@@ -621,7 +680,7 @@ function runCliText(
   });
 }
 
-async function callCodexText(request: AiTextRequest, cwd: string, opts: QuickCommitAiOptions): Promise<string> {
+async function callCodexText(request: AiTextRequest, cwd: string, opts: CliAiTextOptions): Promise<string> {
   // Quick commit is an internal one-shot request, not a user conversation. Keep
   // Codex from persisting it into ~/.codex/sessions, where Wand would otherwise
   // surface the generated prompt as a recoverable session.
@@ -633,7 +692,7 @@ async function callCodexText(request: AiTextRequest, cwd: string, opts: QuickCom
   args.push("-");
   const stdout = await runCliText("codex", args, contentWithSystemPrompt("codex", request), {
     cwd,
-    timeoutMs: CODEX_MESSAGE_TIMEOUT_MS,
+    timeoutMs: cliTextTimeoutMs(CODEX_MESSAGE_TIMEOUT_MS, opts),
     inheritEnv: opts.inheritEnv,
   });
   const text = extractCodexText(stdout);
@@ -643,7 +702,7 @@ async function callCodexText(request: AiTextRequest, cwd: string, opts: QuickCom
   return text;
 }
 
-async function callOpenCodeText(request: AiTextRequest, cwd: string, opts: QuickCommitAiOptions): Promise<string> {
+async function callOpenCodeText(request: AiTextRequest, cwd: string, opts: CliAiTextOptions): Promise<string> {
   const args = ["run", "--format", "json"];
   const model = opts.model?.trim();
   if (model && model !== "default") args.push("--model", model);
@@ -651,7 +710,7 @@ async function callOpenCodeText(request: AiTextRequest, cwd: string, opts: Quick
   if (variant) args.push("--variant", variant);
   const stdout = await runCliText("opencode", args, contentWithSystemPrompt("opencode", request), {
     cwd,
-    timeoutMs: CODEX_MESSAGE_TIMEOUT_MS,
+    timeoutMs: cliTextTimeoutMs(CODEX_MESSAGE_TIMEOUT_MS, opts),
     inheritEnv: opts.inheritEnv,
   });
   const text = extractOpenCodeText(stdout);
@@ -659,10 +718,10 @@ async function callOpenCodeText(request: AiTextRequest, cwd: string, opts: Quick
   return text;
 }
 
-async function callGrokText(request: AiTextRequest, cwd: string, opts: QuickCommitAiOptions): Promise<string> {
+async function callGrokText(request: AiTextRequest, cwd: string, opts: CliAiTextOptions): Promise<string> {
   const stdout = await runCliText("grok", buildGrokTextArgs(request, opts), "", {
     cwd,
-    timeoutMs: CODEX_MESSAGE_TIMEOUT_MS,
+    timeoutMs: cliTextTimeoutMs(CODEX_MESSAGE_TIMEOUT_MS, opts),
     inheritEnv: opts.inheritEnv,
   });
   const text = extractGrokText(stdout);
@@ -670,10 +729,10 @@ async function callGrokText(request: AiTextRequest, cwd: string, opts: QuickComm
   return text;
 }
 
-async function callQoderText(request: AiTextRequest, cwd: string, opts: QuickCommitAiOptions): Promise<string> {
+async function callQoderText(request: AiTextRequest, cwd: string, opts: CliAiTextOptions): Promise<string> {
   const stdout = await runCliText("qodercli", buildQoderTextArgs(request, opts), "", {
     cwd,
-    timeoutMs: CODEX_MESSAGE_TIMEOUT_MS,
+    timeoutMs: cliTextTimeoutMs(CODEX_MESSAGE_TIMEOUT_MS, opts),
     inheritEnv: opts.inheritEnv,
   });
   const text = extractQoderText(stdout);
@@ -681,17 +740,19 @@ async function callQoderText(request: AiTextRequest, cwd: string, opts: QuickCom
   return text;
 }
 
-async function callPiText(request: AiTextRequest, cwd: string, opts: QuickCommitAiOptions): Promise<string> {
-  const stdout = await runCliText("pi", buildPiTextArgs(request, opts), "", { cwd, timeoutMs: CODEX_MESSAGE_TIMEOUT_MS, inheritEnv: opts.inheritEnv });
+async function callPiText(request: AiTextRequest, cwd: string, opts: CliAiTextOptions): Promise<string> {
+  const stdout = await runCliText("pi", buildPiTextArgs(request, opts), "", {
+    cwd, timeoutMs: cliTextTimeoutMs(CODEX_MESSAGE_TIMEOUT_MS, opts), inheritEnv: opts.inheritEnv,
+  });
   const text = extractPiText(stdout);
   if (!text) throw new QuickCommitError("Pi 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
   return text;
 }
 
-async function callGeminiText(request: AiTextRequest, cwd: string, opts: QuickCommitAiOptions): Promise<string> {
+async function callGeminiText(request: AiTextRequest, cwd: string, opts: CliAiTextOptions): Promise<string> {
   const stdout = await runCliText("gemini", buildGeminiTextArgs(opts), contentWithSystemPrompt("gemini", request), {
     cwd,
-    timeoutMs: CODEX_MESSAGE_TIMEOUT_MS,
+    timeoutMs: cliTextTimeoutMs(CODEX_MESSAGE_TIMEOUT_MS, opts),
     inheritEnv: opts.inheritEnv,
   });
   const text = extractGeminiText(stdout);
@@ -699,7 +760,7 @@ async function callGeminiText(request: AiTextRequest, cwd: string, opts: QuickCo
   return text;
 }
 
-async function callCliAiText(request: AiTextRequest, cwd: string, language: string, opts: QuickCommitAiOptions): Promise<string> {
+async function callCliAiText(request: AiTextRequest, cwd: string, language: string, opts: CliAiTextOptions): Promise<string> {
   const provider = defaultProvider(opts.provider);
   if (provider === "codex") {
     return callCodexText(request, cwd, opts);
@@ -746,18 +807,20 @@ function singleCandidate(opts: QuickCommitAiOptions): import("./types.js").AiCli
 }
 
 /**
- * 按顺序尝试候选：跳过没安装的 CLI，逐条收集错误，成功即返回。
+ * 按顺序尝试候选：跳过没安装的 CLI，协议与输出校验均成功才返回。
  * 只有一条候选时保持原行为（错误原样抛出，不摘要）。
+ * 仅用于一次性文本生成；执行工具的任务不能使用这条无条件重试路径。
  */
-async function callCliCandidates(
+async function callCliCandidates<T>(
   request: AiTextRequest,
   cwd: string,
   language: string,
   opts: QuickCommitAiOptions,
-): Promise<string> {
+  parseOutput: (raw: string) => T,
+): Promise<T> {
   const chain = opts.cliCandidates?.length ? opts.cliCandidates : [singleCandidate(opts)];
   if (chain.length === 1) {
-    return callCliAiText(request, cwd, language, candidateOptions(opts, chain[0]!));
+    return parseOutput(await callCliAiText(request, cwd, language, candidateOptions(opts, chain[0]!)));
   }
 
   const installed = chain.filter((candidate) => providerCliInstalled(candidate.provider));
@@ -765,16 +828,22 @@ async function callCliCandidates(
   const deadline = Date.now() + CLI_CHAIN_BUDGET_MS;
   const errors: string[] = [];
   for (const candidate of attempts) {
-    if (Date.now() > deadline) {
+    if (Date.now() >= deadline) {
       errors.push("已超过等待上限");
       break;
     }
     try {
-      const text = await callCliAiText(request, cwd, language, candidateOptions(opts, candidate));
-      if (text.trim()) return text;
-      errors.push(`${candidate.provider}: 返回空结果`);
+      const text = await callCliAiText(request, cwd, language, { ...candidateOptions(opts, candidate), deadline });
+      const result = await parseOutput(text);
+      if (candidate !== attempts[0]) {
+        console.info(`[SystemAi] 候选 ${chain.indexOf(candidate) + 1}/${chain.length} (${candidate.provider}) 成功`);
+      }
+      return result;
     } catch (error) {
       errors.push(`${candidate.provider}: ${getGitErrorMessage(error)}`);
+      // 不记录提示词、路径、CLI 原始响应或可能带鉴权信息的错误正文。
+      const code = error instanceof QuickCommitError ? error.code : "INVALID_AI_RESULT";
+      console.warn(`[SystemAi] 候选 ${chain.indexOf(candidate) + 1}/${chain.length} (${candidate.provider}) 失败: ${code}`);
     }
   }
   throw new QuickCommitError(`所有 CLI 候选均失败：${errors.join("；")}`, "AI_FALLBACK_FAILED");
@@ -783,14 +852,29 @@ async function callCliCandidates(
 /**
  * Run a lightweight AI request through the system employee's CLI chain.
  * 所有 Wand 自有文本调用都走本机已安装的 CLI，没有任何直连 API 分支。
+ * parseOutput 在候选链内解析/校验结果；失败后继续下一条，而非提前宣布成功。
  */
+export function callConfiguredAiText(
+  request: AiTextRequest,
+  cwd: string,
+  language: string,
+  opts: QuickCommitAiOptions,
+): Promise<string>;
+export function callConfiguredAiText<T>(
+  request: AiTextRequest,
+  cwd: string,
+  language: string,
+  opts: QuickCommitAiOptions,
+  parseOutput: (raw: string) => T,
+): Promise<T>;
 export async function callConfiguredAiText(
   request: AiTextRequest,
   cwd: string,
   language: string,
   opts: QuickCommitAiOptions,
-): Promise<string> {
-  return callCliCandidates(withOpsPersona(request, opts.opsPersona), cwd, language, opts);
+  parseOutput: (raw: string) => unknown = (raw) => raw,
+): Promise<unknown> {
+  return callCliCandidates(withOpsPersona(request, opts.opsPersona), cwd, language, opts, parseOutput);
 }
 
 /** Read the unstaged + staged tree without touching the index. */
@@ -887,12 +971,11 @@ async function generateCommitMessage(
 ): Promise<string> {
   const { input, usedIteration } = await buildCommitPromptInput(cwd, options);
   const lang = language.trim() || "中文";
-  const raw = await callConfiguredAiText({ system: commitTaskLine(lang, usedIteration), prompt: input }, cwd, language, ai);
-  const message = normalizeAiText(raw);
-  if (!message) {
-    throw new QuickCommitError("AI 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
-  }
-  return message;
+  return callConfiguredAiText({ system: commitTaskLine(lang, usedIteration), prompt: input }, cwd, language, ai, (raw) => {
+    const message = normalizeAiText(raw);
+    if (!message) throw new QuickCommitError("AI 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
+    return message;
+  });
 }
 
 export interface GenerateCommitMessageResult {
@@ -948,24 +1031,14 @@ async function generateCommitMessageWithTag(
 
 请严格输出**单行 JSON 对象**，不要 Markdown 代码块、不要任何解释文字、不要多余引号。格式：
 {"message":"...","tag":"v1.2.3"}`;
-  const raw = await callConfiguredAiText({ system, prompt: `${tagHint}\n\n${input}` }, cwd, language, ai);
-  const parsed = tryParseJson(raw);
-
-  let message: string;
-  let suggestedTag: string | undefined;
-  if (parsed && typeof parsed.message === "string") {
-    message = normalizeAiText(parsed.message);
-    suggestedTag = sanitizeSuggestedTag(parsed.tag);
-  } else {
-    // Fallback: treat whole output as message, no tag suggestion
-    message = normalizeAiText(raw);
-    suggestedTag = undefined;
-  }
-  if (!message) {
-    throw new QuickCommitError("AI 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
-  }
-
-  return { message, suggestedTag };
+  return callConfiguredAiText({ system, prompt: `${tagHint}\n\n${input}` }, cwd, language, ai, (raw) => {
+    const parsed = tryParseJson(raw);
+    // Preserve the plain-message fallback for older CLIs that do not return JSON.
+    const message = normalizeAiText(parsed && typeof parsed.message === "string" ? parsed.message : raw);
+    const suggestedTag = parsed && typeof parsed.message === "string" ? sanitizeSuggestedTag(parsed.tag) : undefined;
+    if (!message) throw new QuickCommitError("AI 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
+    return { message, suggestedTag };
+  });
 }
 
 export async function generateCommitMessageOnly(
@@ -1025,18 +1098,12 @@ async function generateTagAfterCommit(
 请用${lang}思考但严格输出**单行 JSON 对象**，不要 Markdown 代码块、不要任何解释文字、不要多余引号。格式：
 {"tag":"v1.2.3"}`;
   const prompt = `${tagHint}\n\ncommit message：${commitMessage}\n\ngit diff：\n${diff}`;
-  const raw = await callConfiguredAiText({ system, prompt }, cwd, language, ai);
-  const parsed = tryParseJson(raw);
-  let suggested: string | undefined;
-  if (parsed && typeof parsed.tag === "string") {
-    suggested = sanitizeSuggestedTag(parsed.tag);
-  } else {
-    suggested = sanitizeSuggestedTag(raw);
-  }
-  if (!suggested) {
-    throw new QuickCommitError("AI 没有给出合法的 tag，请手动填写。", "INVALID_AI_TAG");
-  }
-  return suggested;
+  return callConfiguredAiText({ system, prompt }, cwd, language, ai, (raw) => {
+    const parsed = tryParseJson(raw);
+    const suggested = sanitizeSuggestedTag(parsed && typeof parsed.tag === "string" ? parsed.tag : raw);
+    if (!suggested) throw new QuickCommitError("AI 没有给出合法的 tag，请手动填写。", "INVALID_AI_TAG");
+    return suggested;
+  });
 }
 
 // ── Direct git operations ──

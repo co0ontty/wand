@@ -16,6 +16,7 @@ import { getErrorMessage } from "./error-utils.js";
 import { getDefaultModelForProvider } from "./config.js";
 import type { WandTaskAgent } from "./task-types.js";
 import { recordIterationPrompt } from "./iteration-log.js";
+import { startEmployeeKnowledgeRunner } from "./employee-knowledge.js";
 import { signalNameFromNumber } from "./signal-utils.js";
 import {
   provisionalSessionTopic,
@@ -2211,7 +2212,7 @@ export class StructuredSessionManager {
       }
     };
 
-    const execution = this.codexRunner.start({
+    const execution = startEmployeeKnowledgeRunner(this.storage, this.codexRunner, {
       session,
       prompt,
       env: buildChildEnv(this.config.inheritEnv !== false),
@@ -2371,7 +2372,7 @@ export class StructuredSessionManager {
       if (!emitTimer) emitTimer = this.trackStreamEmitTimer(setTimeout(flushEmit, STREAM_EMIT_DEBOUNCE_MS));
     };
 
-    const execution = this.grokRunner.start({
+    const execution = startEmployeeKnowledgeRunner(this.storage, this.grokRunner, {
       session,
       prompt,
       env: buildChildEnv(this.config.inheritEnv !== false),
@@ -2525,7 +2526,7 @@ export class StructuredSessionManager {
       }
     };
 
-    const execution = this.openCodeRunner.start({
+    const execution = startEmployeeKnowledgeRunner(this.storage, this.openCodeRunner, {
       session,
       prompt,
       env: buildChildEnv(this.config.inheritEnv !== false),
@@ -2723,7 +2724,7 @@ export class StructuredSessionManager {
     const provider = options.provider ?? "claude";
     const commandLabel = options.commandLabel ?? "claude -p";
     const logKind = options.logKind ?? "claude-print";
-    const execution = runner.start({
+    const execution = startEmployeeKnowledgeRunner(this.storage, runner, {
       session,
       prompt,
       env: buildChildEnv(this.config.inheritEnv !== false),

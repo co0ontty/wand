@@ -55,9 +55,11 @@ export function isSessionAttention(session: WorkspaceSessionSummary): boolean {
 }
 
 export function isSessionRunning(session: WorkspaceSessionSummary): boolean {
+  // Provider CLIs stay alive at their prompt between turns, so liveness alone
+  // (`providerCliActive`) is not "running". Only a real in-flight turn counts:
+  // ptyBusy for PTY (bridge or quiet-window tracker) and inFlight for structured.
   return session.ptyBusy === true
     || session.inFlight === true
-    || session.providerCliActive === true
     || session.status === "thinking";
 }
 

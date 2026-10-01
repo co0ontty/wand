@@ -65,11 +65,11 @@ test("employee management fits the lazy allowance without increasing shell trans
 test("the raised lazy allowance still rejects oversized team chunks", (t) => {
   const fixture = budgetFixture();
   t.after(fixture.cleanup);
-  const lazy = chunkText(1_200);
+  const lazy = chunkText(1_400);
   const size = gzipSync(lazy).length;
-  assert.ok(size > 40_000, `fixture gzip size: ${size}`);
+  assert.ok(size > 43_000, `fixture gzip size: ${size}`);
   const result = fixture.run(lazy);
   assert.equal(result.status, 1);
   assert.match(String(result.stderr), /\[bundle-budget\] FAILED:/);
-  assert.match(String(result.stderr), /ai-teams\.js \(lazy\): \d+ B > 41000 B/);
+  assert.match(String(result.stderr), /ai-teams\.js \(lazy\): \d+ B > 43000 B/);
 });

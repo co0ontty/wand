@@ -87,10 +87,11 @@ export async function generateWandTaskTitle(
     ].join("\n"),
     prompt: `任务描述：\n${input}`,
   };
-  const raw = await callConfiguredAiText(request, cwd || process.cwd(), language, ai);
-  const stripped = stripGeneratedTitle(raw);
-  // 拿到报错文案 / 整段解释时宁可保留占位标题，也不能把垃圾写进看板。
-  // 先判可信度再裁剪：截断过的长句看起来就像标题，会绕过长度检查。
-  if (!isPlausibleTaskTitle(stripped)) throw new Error("模型返回的任务标题不可用。");
-  return clipAtWordBoundary(stripped, TASK_TITLE_MAX_LENGTH);
+  return callConfiguredAiText(request, cwd || process.cwd(), language, ai, (raw) => {
+    const stripped = stripGeneratedTitle(raw);
+    // 校验在候选链内：格式不可用也要继续备用候选，不能先把非空文本当成功。
+    // 先判可信度再裁剪：截断过的长句看起来就像标题，会绕过长度检查。
+    if (!isPlausibleTaskTitle(stripped)) throw new Error("模型返回的任务标题不可用。");
+    return clipAtWordBoundary(stripped, TASK_TITLE_MAX_LENGTH);
+  });
 }

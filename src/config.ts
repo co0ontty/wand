@@ -235,6 +235,8 @@ export async function loadConfigWithStorage(configPath: string, storage: WandSto
     model: config.systemAiModel,
     provider: config.defaultProvider,
   });
+  // 默认任务伙伴独立于系统运维；重启保留短期偏好与用户维护的候选。
+  storage.ensureDefaultSiliconEmployee(config.defaultProvider);
 
   // 如果 JSON 里有偏好字段（说明是老版本配置或刚迁移），重写一次干净版本
   const hasLegacyPrefs = PREFERENCE_KEYS.some((key) => key in rawInput);

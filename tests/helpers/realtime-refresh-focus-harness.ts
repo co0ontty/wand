@@ -17,11 +17,13 @@ attachEventListeners();
 const frames = async (): Promise<void> => {
   await document.fonts.ready;
   await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-  await Promise.all(document.getAnimations().filter(animation => {
+  // A native details close can retire a CSS transition while its old finished
+  // promise remains pending. Observe current finite animations, not stale promises.
+  while (document.getAnimations().some(animation => {
     const target = (animation.effect as KeyframeEffect | null)?.target;
     return animation.playState === "running" && Number.isFinite(animation.effect?.getComputedTiming().endTime)
       && target instanceof Element && target.getClientRects().length > 0;
-  }).map(animation => animation.finished.catch(() => {})));
+  })) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
   await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
 };
 let turns: any[] = [];
@@ -68,7 +70,9 @@ function publish(next = turns, patch: Record<string, unknown> = {}): void {
     const glyph = node.querySelector(".chat-activity-chevron, .chat-activity-entry-arrow, svg, .assistant-reply-chevron");
     const row = node.closest(".chat-message");
     const rect = node.getBoundingClientRect().toJSON();
-    const scroll = document.querySelector<HTMLElement>(".chat-messages")!.scrollTop;
+    const container = document.querySelector<HTMLElement>(".chat-messages")!;
+    const scroll = container.scrollTop; const triggerText = node.textContent;
+    const initialScrollHeight = container.scrollHeight; const initialClientHeight = container.clientHeight;
     let disconnected = false; let blurCount = 0; let replayCount = 0; const changes: MutationRecord[] = [];
     const replay = (event: Event) => {
       if (event.target instanceof Element && row?.contains(event.target) && event.target.matches(
@@ -94,7 +98,12 @@ function publish(next = turns, patch: Record<string, unknown> = {}): void {
           activeTag: document.activeElement?.tagName, originalConnected: node.isConnected,
           chainContinuous: !disconnected && chain.every(part => part.isConnected), blurCount,
           glyphSame: !glyph || node.contains(glyph), rectBefore: rect, rectAfter: node.getBoundingClientRect().toJSON(),
-          scrollBefore: scroll, scrollAfter: document.querySelector<HTMLElement>(".chat-messages")!.scrollTop,
+          triggerTextBefore: triggerText, triggerTextAfter: node.textContent,
+          scrollBefore: scroll, scrollAfter: container.scrollTop,
+          scrollHeightBefore: initialScrollHeight, clientHeightBefore: initialClientHeight,
+          scrollHeightAfter: container.scrollHeight, clientHeightAfter: container.clientHeight,
+          flexDirection: getComputedStyle(container).flexDirection,
+          documentScroll: document.scrollingElement?.scrollTop, visualViewportTop: visualViewport?.offsetTop,
           mutationCount: changes.length, replayCount, owner: row?.getAttribute("data-chat-owner") || row?.getAttribute("data-message-key") };
       },
     };

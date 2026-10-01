@@ -1,5 +1,7 @@
 import * as React from "react";
-import { SYSTEM_EMPLOYEE_TAG, isSystemSiliconEmployee, type SiliconEmployee } from "../../../ai-team-types.js";
+import { DEFAULT_EMPLOYEE_TAG, SYSTEM_EMPLOYEE_TAG, isBuiltinSiliconEmployee, isDefaultSiliconEmployee, type SiliconEmployee } from "../../../ai-team-types.js";
+import { EmployeeMemory } from "./employee-memory.js";
+import { EmployeeKnowledge } from "./employee-knowledge.js";
 import { WandButton, WandIcon } from "../ui";
 import { CandidatesListEditor } from "./candidate-editor.js";
 import { EmployeeAvatar, EmployeeAvatarPicker } from "./employee-avatar.js";
@@ -69,13 +71,22 @@ export function EmployeeCard({
   };
 
   const isArchived = Boolean(employee.archivedAt);
-  const isSystem = isSystemSiliconEmployee(employee);
+  const isSystem = isBuiltinSiliconEmployee(employee);
+  const isDefault = isDefaultSiliconEmployee(employee);
+  const tag = isDefault ? DEFAULT_EMPLOYEE_TAG : SYSTEM_EMPLOYEE_TAG;
   const cardCls = `wand-team-member wand-employee-card${isArchived ? " is-archived" : ""}${isSystem ? " is-system" : ""}`;
 
   return (
     <article
       className={cardCls}
       data-open={editing || undefined}
+      data-employee-id={employee.id}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && !event.defaultPrevented && editing && !saving) {
+          event.preventDefault();
+          onToggle();
+        }
+      }}
     >
       <button
         type="button"
@@ -87,7 +98,7 @@ export function EmployeeCard({
         <span className="wand-team-member-copy">
           <strong>
             {employee.name}
-            {isSystem ? <em className="wand-employee-system-tag">{SYSTEM_EMPLOYEE_TAG}</em> : null}
+            {isSystem ? <em className="wand-employee-system-tag">{tag}</em> : null}
             {isArchived ? <em className="wand-employee-archived-tag">已归档</em> : null}
           </strong>
           <small>{employee.duty || "还没写职责"}</small>
@@ -106,8 +117,10 @@ export function EmployeeCard({
         <div className="wand-team-member-inner">
           {isSystem ? (
             <div className="wand-employee-system-note" role="note">
-              <strong>{SYSTEM_EMPLOYEE_TAG}</strong>
-              <span>Wand 内置员工：名字、职责与角色设定由服务端固定，不可修改、不可删除；Wand 自己的 AI 调用（Commit、标题、提示词优化）都按下面的候选链执行。</span>
+              <strong>{tag}</strong>
+              <span>{isDefault
+                ? "选择 CLI 或未选择员工时使用这个默认角色；你选的工具、模型与权限保持不变。名字与基础设定固定，工作风格由短期记忆定期调整；下面的候选用于直接找这位员工或未配置工具的任务。"
+                : "Wand 内置员工：名字、职责与角色设定由服务端固定，不可修改、不可删除；Wand 自己的 AI 调用（Commit、标题、提示词优化）都按下面的候选链执行。"}</span>
             </div>
           ) : (
             <>
@@ -164,6 +177,17 @@ export function EmployeeCard({
               </div>
             </>
           )}
+
+          {isDefault ? <>
+            <EmployeeMemory active={editing} />
+            <div className="wand-settings-field">
+              <label className="wand-settings-label" htmlFor={`employee-${employee.id}-prompt`}>当前角色设定</label>
+              <textarea id={`employee-${employee.id}-prompt`} className="wand-settings-input resize-none"
+                rows={6} value={employee.prompt} readOnly />
+            </div>
+          </> : null}
+
+          <EmployeeKnowledge employeeId={employee.id} active={editing} />
 
           <CandidatesListEditor
             agents={draft.agents}

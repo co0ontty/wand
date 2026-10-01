@@ -99,7 +99,7 @@ try {
   const action = async (expression) => { await evaluate(expression); await sleep(60); };
 
   await send("Runtime.enable");
-  await waitFor("Boolean(window.systemEmployeeHarness && document.querySelectorAll('.wand-employee-card').length === 2)");
+  await waitFor("Boolean(window.systemEmployeeHarness && document.querySelectorAll('.wand-employee-card').length === 3)");
 
   // 设置页「系统 AI」的执行者投影：只读展示候选链，不提供编辑入口。
   const owner = await evaluate(`(() => {
@@ -136,7 +136,7 @@ try {
       agents: cards[0].querySelector('.wand-team-member-agent').textContent.trim(),
     };
   })()`);
-  assert.equal(layout.order.length, 2);
+  assert.equal(layout.order.length, 3);
   assert.match(layout.order[0], /勤劳的初二/);
   assert.equal(layout.tags[0], "系统运维");
   assert.equal(layout.tags[1], "");
@@ -178,9 +178,7 @@ try {
   const saved = await evaluate("window.systemEmployeeHarness.updates[0]");
   assert.equal(saved.id, "e_wand_ops");
   assert.deepEqual(saved.body.agents.map((agent) => agent.provider), ["grok", "claude"], "候选顺序按界面保存");
-  assert.equal(saved.body.name, "勤劳的初二");
-  assert.equal(saved.body.prompt, "你是 Wand 的系统运维「勤劳的初二」。……");
-  assert.equal(saved.body.avatar, "");
+  assert.deepEqual(Object.keys(saved.body), ["agents"], "自动更新的锁定字段不能被旧表单回写");
   results.push({ check: "card/save-only-candidates", saved });
 
   // 设置页的投影必须自己跟上：不刷新页面也要变成新顺序（用户报的就是这一条）。
@@ -208,6 +206,54 @@ try {
   results.push({ check: "card/user-unchanged", userBody });
 
   assert.deepEqual(await evaluate("window.systemEmployeeHarness.mutations"), [], "内置员工不应发出归档/删除请求");
+
+  assert.deepEqual(await evaluate("window.systemEmployeeHarness.memoryCalls"), [], "收起态不预取记忆");
+  await action("document.querySelectorAll('.wand-employee-card .wand-team-member-head')[2].click()");
+  await waitFor("document.querySelector('[data-employee-id=e_wand_default] .wand-employee-memory')?.textContent.includes('先结论后证据')");
+  const defaultCard = await evaluate(`(() => {
+    const card = document.querySelectorAll('.wand-employee-card')[2];
+    return { tag: card.querySelector('.wand-employee-system-tag').textContent,
+      promptReadOnly: card.querySelector('textarea').readOnly,
+      actions: [...card.querySelectorAll('.wand-team-member-actions button')].map(b => b.textContent.trim()) };
+  })()`);
+  assert.equal(defaultCard.tag, '默认伙伴');
+  assert.equal(defaultCard.promptReadOnly, true);
+  assert.deepEqual(defaultCard.actions, ['保存修改', '取消']);
+  await sleep(await evaluate("parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--motion-normal')) + 80"));
+  for (const [index, result] of [[0, '已暂停'], [0, '已开启'], [1, '已更新'], [2, '已清空']]) {
+    const before = await evaluate(`(() => {
+      const b = document.querySelectorAll('.wand-employee-memory-actions button')[${index}];
+      const r = b.getBoundingClientRect(); window.memoryButton = b;
+      b.click(); return {x:r.x,y:r.y,width:r.width,height:r.height};
+    })()`);
+    await waitFor(`document.querySelectorAll('.wand-employee-memory-actions button')[${index}]?.textContent === '${result}'`);
+    const after = await evaluate(`(() => {
+      const b = document.querySelectorAll('.wand-employee-memory-actions button')[${index}];
+      const r = b.getBoundingClientRect(); return {x:r.x,y:r.y,width:r.width,height:r.height,same:b===window.memoryButton};
+    })()`);
+    assert.equal(after.same, true);
+    assert.equal(after.width, before.width);
+    assert.equal(after.height, before.height);
+    assert.equal(after.x, before.x);
+    // Data above can shorten after clear, so keep the action row before the variable knowledge list.
+    assert.equal(after.y, before.y);
+  }
+  await send('Emulation.setDeviceMetricsOverride', {width:390,height:844,deviceScaleFactor:1,mobile:false});
+  await sleep(150);
+  assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true);
+  results.push({ check: 'default-role-memory-controls-stable-and-narrow', defaultCard });
+  await waitFor("document.querySelector('[data-employee-id=e_wand_default] .wand-employee-knowledge-list')?.textContent.includes('默认伙伴的独立知识')");
+  const namespaces = await evaluate(`[...document.querySelectorAll('.wand-employee-card')].map(c => ({id:c.dataset.employeeId,text:c.querySelector('.wand-employee-knowledge-list').textContent}))`);
+  assert.deepEqual(namespaces.map(n => n.text), ['系统运维的独立知识','普通员工的独立知识','默认伙伴的独立知识']);
+  await action("document.querySelectorAll('[data-employee-id=e_user] .wand-employee-knowledge-actions button')[1].click()");
+  assert.equal(await evaluate("window.systemEmployeeHarness.knowledgeCalls.filter(c => c.method==='DELETE').length"),0,'清空须二次确认');
+  await action("document.querySelectorAll('[data-employee-id=e_user] .wand-employee-knowledge-actions button')[1].click()");
+  await waitFor("document.querySelector('[data-employee-id=e_user] .wand-employee-knowledge-list').textContent.includes('还没有明确记录')");
+  assert.equal(await evaluate("document.querySelector('[data-employee-id=e_wand_default] .wand-employee-knowledge-list').textContent"),'默认伙伴的独立知识');
+  assert.deepEqual(await evaluate("window.systemEmployeeHarness.knowledgeCalls.filter(c=>c.method==='DELETE').map(c=>c.employeeId)"),['e_user']);
+  await action("document.querySelector('[data-employee-id=e_user] input').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))");
+  assert.equal(await evaluate("document.querySelector('[data-employee-id=e_user]').dataset.open"),undefined);
+  results.push({check:'per-employee-knowledge-isolation-confirm-clear-and-escape',namespaces});
 
   console.log("system employee browser harness passed");
   console.log(JSON.stringify(results, null, 2));

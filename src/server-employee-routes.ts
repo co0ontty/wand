@@ -5,6 +5,7 @@ import {
   AI_TEAM_MAX_CANDIDATES,
   SILICON_EMPLOYEE_AVATAR_MAX_CHARS,
   agentKey,
+  isBuiltinSiliconEmployee,
   type SiliconEmployee,
   type SiliconEmployeeDraft,
 } from "./ai-team-types.js";
@@ -14,8 +15,8 @@ import { bodyObject, sendRouteError, text } from "./server-request.js";
 import { parseTaskAgent } from "./server-task-routes.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
 import { generateSiliconEmployeeDraft } from "./silicon-employee-draft.js";
-import { isSystemSiliconEmployee } from "./system-employee.js";
 import type { QuickCommitAiOptions } from "./git-quick-commit.js";
+import { EMPLOYEE_KNOWLEDGE_MAX_ENTRIES } from "./employee-knowledge-types.js";
 import type { WandStorage } from "./storage.js";
 import type { WandTaskAgent } from "./task-types.js";
 import type { SessionProvider, WandConfig } from "./types.js";
@@ -51,8 +52,8 @@ function sendEmployeeError(res: Response, error: unknown): void {
 
 /** 内置员工是 Wand 自己的执行者，不能被归档或删除。 */
 function rejectSystemEmployeeMutation(existing: SiliconEmployee, action: string): void {
-  if (!isSystemSiliconEmployee(existing)) return;
-  throw new Error(`「${existing.name}」是 Wand 内置的系统运维员工，不能${action}。`);
+  if (!isBuiltinSiliconEmployee(existing)) return;
+  throw new Error(`「${existing.name}」是 Wand 内置员工，不能${action}。`);
 }
 
 function boundedText(value: unknown, label: string, min: number, max: number): string {
@@ -94,7 +95,7 @@ export function parseSystemEmployeeAgents(value: unknown, existing: SiliconEmplo
     const current = existing[field.key];
     const isSame = typeof incoming === "string" && incoming === current;
     if (!isSame) {
-      throw new Error(`系统运维员工是内置的，${field.label}不可修改。`);
+      throw new Error(`该员工是内置的，${field.label}不可修改。`);
     }
   }
 
@@ -243,12 +244,46 @@ export function registerSiliconEmployeeRoutes(
     }
   });
 
+  app.get("/api/silicon-employees/:id/knowledge", (req, res) => {
+    try {
+      res.setHeader("Cache-Control", "no-store");
+      const employeeId = req.params.id;
+      const query = typeof req.query.q === "string" ? req.query.q : "";
+      res.json({ employeeId, entries: storage.listEmployeeKnowledge(employeeId, query),
+        total: storage.countEmployeeKnowledge(employeeId), maxEntries: EMPLOYEE_KNOWLEDGE_MAX_ENTRIES });
+    } catch (error) { sendEmployeeError(res, error); }
+  });
+
+  app.post("/api/silicon-employees/:id/knowledge", (req, res) => {
+    try {
+      const body = bodyObject(req.body);
+      if (typeof body.content !== "string") throw new Error("content 必须是知识文字。");
+      const entry = storage.rememberEmployeeKnowledge(req.params.id, body.content);
+      res.status(201).json(entry);
+    } catch (error) { sendEmployeeError(res, error); }
+  });
+
+  app.delete("/api/silicon-employees/:id/knowledge/:entryId", (req, res) => {
+    try {
+      const deleted = storage.forgetEmployeeKnowledge(req.params.id, req.params.entryId);
+      if (!deleted) { res.status(404).json({ error: "该知识不属于当前员工或已删除。" }); return; }
+      res.json({ deleted: true });
+    } catch (error) { sendEmployeeError(res, error); }
+  });
+
+  app.delete("/api/silicon-employees/:id/knowledge", (req, res) => {
+    try {
+      storage.clearEmployeeKnowledge(req.params.id);
+      res.json({ employeeId: req.params.id, entries: [], total: 0, maxEntries: EMPLOYEE_KNOWLEDGE_MAX_ENTRIES });
+    } catch (error) { sendEmployeeError(res, error); }
+  });
+
   app.put("/api/silicon-employees/:id", (req, res) => {
     try {
       const existing = storage.getSiliconEmployee(req.params.id);
       if (!existing) throw new Error(`硅基员工「${req.params.id}」不存在。`);
       const now = new Date().toISOString();
-      const employee = isSystemSiliconEmployee(existing)
+      const employee = isBuiltinSiliconEmployee(existing)
         ? { ...existing, agents: parseSystemEmployeeAgents(req.body, existing), updatedAt: now }
         : parseSiliconEmployeeInput(req.body, existing, now);
       storage.saveSiliconEmployee(employee);

@@ -42,9 +42,16 @@ export async function optimizePrompt(
     );
   }
   const request = buildOptimizePrompt(text, language);
-  let raw: string;
   try {
-    raw = await callConfiguredAiText(request, cwd ?? process.cwd(), language, ai);
+    return await callConfiguredAiText(request, cwd ?? process.cwd(), language, ai, (raw) => {
+      const cleaned = raw
+        .replace(/^```[a-zA-Z]*\n?/, "")
+        .replace(/\n?```$/, "")
+        .replace(/^["'`]+|["'`]+$/g, "")
+        .trim();
+      if (!cleaned) throw new PromptOptimizeError("AI 返回了空结果。", "EMPTY_RESULT");
+      return cleaned;
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const code = error && typeof error === "object" && "code" in error && typeof error.code === "string"
@@ -52,13 +59,4 @@ export async function optimizePrompt(
       : "AI_OPTIMIZE_FAILED";
     throw new PromptOptimizeError(message, code);
   }
-  const cleaned = raw
-    .replace(/^```[a-zA-Z]*\n?/, "")
-    .replace(/\n?```$/, "")
-    .replace(/^["'`]+|["'`]+$/g, "")
-    .trim();
-  if (!cleaned) {
-    throw new PromptOptimizeError("AI 返回了空结果。", "EMPTY_RESULT");
-  }
-  return cleaned;
 }

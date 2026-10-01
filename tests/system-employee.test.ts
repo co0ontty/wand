@@ -350,10 +350,10 @@ test("加载配置时幂等创建内置员工，并沿用用户已有的系统 A
     assert.equal(seeded?.systemKey, SYSTEM_EMPLOYEE_KEY);
     assert.deepEqual(seeded?.agents.map((agent) => [agent.provider, agent.model]), [["grok", "grok-4.5"]]);
 
-    // 再加载一次不会多出第二行，也不会覆盖用户改过的候选顺序。
+    // 再加载一次不会重复创建内置员工，也不会覆盖用户改过的候选顺序。
     storage.saveSiliconEmployee({ ...seeded!, agents: [CLAUDE, GROK] });
     await loadConfigWithStorage(join(root, "config.json"), storage);
-    assert.deepEqual(storage.listSiliconEmployees().map((employee) => employee.id), ["e_wand_ops"]);
+    assert.deepEqual(storage.listSiliconEmployees().map((employee) => employee.id), ["e_wand_ops", "e_wand_default"]);
     assert.deepEqual(storage.getSystemSiliconEmployee()?.agents.map((agent) => agent.provider), ["claude", "grok"]);
   } finally {
     storage.close();

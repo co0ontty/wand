@@ -193,6 +193,13 @@ async function main(): Promise<void> {
       await runAgentCliCommand(command, args, configPath);
       break;
     }
+    case "knowledge:remember":
+    case "knowledge:search":
+    case "knowledge:forget": {
+      const { runEmployeeKnowledgeCli } = await import("./employee-knowledge-cli.js");
+      await runEmployeeKnowledgeCli(command, args.slice(1));
+      break;
+    }
     case "service:install":
     case "service:uninstall":
     case "service:start":
@@ -243,6 +250,10 @@ Agent runtime:
   wand mission:diff <mission-id> <attempt-id>
   wand mission:review <mission-id> <attempt-id> --file <path> --body <text> [--line N]
   wand mission:review:send <mission-id> <attempt-id>
+  wand knowledge:remember <text> | --stdin
+  wand knowledge:search [query]
+  wand knowledge:forget <entry-id>
+    Knowledge commands are bound to the current Wand employee execution environment.
 
 System service (default = system-wide; pass --user for user-level):
   wand service:install      Register and start the background service (needs sudo for system)

@@ -1326,6 +1326,12 @@ button.team-chat-office-member:hover, button.team-chat-office-member:focus-visib
     animation-duration: calc(var(--motion-quick-exit) * 0);
   }
   .team-chat-live-card { transition: none; }
+  /* Grid disclosures use transitions, not animations; reduce-motion must stop those too. */
+  .task-board-team-step-body,
+  .wand-team-member-body,
+  .wand-team-run-body,
+  .wand-team-member-head > svg,
+  .wand-team-run-head > svg { transition: none; }
   .wand-teams-detail,
   .task-board-team-steps { animation: none; }
   /* 面板改为叠放淡入淡出后，reduce-motion 下退化成瞬时切换。 */
@@ -1371,6 +1377,15 @@ button.team-chat-office-member:hover, button.team-chat-office-member:focus-visib
   font-size: var(--font-size-xs);
   line-height: 1.5;
 }
+.wand-employee-memory { color: var(--text-secondary); font-size: var(--font-size-xs); line-height: 1.6; }
+.wand-employee-memory p { margin: 0.5em 0; }
+.wand-employee-memory ul { margin: 0.5em 0; padding-inline-start: 1.5em; overflow-wrap: anywhere; }
+.wand-employee-memory-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5em; }
+.wand-employee-memory-actions button { width: 100%; min-width: 0; font-size: inherit; }
+.wand-employee-knowledge-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5em; }
+.wand-employee-knowledge-actions button { width: 100%; min-width: 0; font-size: inherit; }
+.wand-employee-knowledge-list { height: 240px; overflow-y: auto; white-space: pre-wrap; }
+.wand-employee-knowledge-list li + li { margin-block-start: 0.5em; }
 .wand-employee-archived-tag {
   display: inline-block;
   padding: 1px 6px;

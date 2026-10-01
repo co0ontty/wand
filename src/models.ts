@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import Anthropic from "@anthropic-ai/sdk";
 import { resolveChildEnv } from "./env-utils.js";
+import { discoverPiEndpointModels, type PiModelEndpointDiscoveryOptions } from "./pi-model-discovery.js";
 import { ClaudeModelAvailability, ClaudeModelInfo, ClaudeModelSource } from "./types.js";
 import { extractSemver } from "./version-utils.js";
 
@@ -119,6 +120,7 @@ export interface ModelRefreshOptions {
   commandRunner?: ModelCommandRunner;
   modelsApi?: ClaudeModelsApi;
   verifyClaudeCandidates?: boolean;
+  piEndpointDiscovery?: PiModelEndpointDiscoveryOptions & { enabled: boolean };
   now?: () => Date;
 }
 
@@ -570,6 +572,7 @@ async function probeQoderModels(
 async function probePiModels(
   runner: ModelCommandRunner,
   env: NodeJS.ProcessEnv,
+  options: ModelRefreshOptions,
 ): Promise<ProbeResult<ClaudeModelInfo[]>> {
   const rpcText = await commandText(
     runner,
@@ -580,16 +583,43 @@ async function probePiModels(
     `${JSON.stringify({ id: "wand-models", type: "get_available_models" })}\n`,
   );
   const fromRpc = parsePiRpcModels(rpcText);
-  if (fromRpc.length > 1 || (fromRpc.length === 1 && fromRpc[0]?.id !== "default")) {
-    return { ok: true, value: fromRpc };
+  let configuredModels = fromRpc.length > 1 || (fromRpc.length === 1 && fromRpc[0]?.id !== "default")
+    ? fromRpc
+    : [];
+  if (!configuredModels.length) {
+    try {
+      const { stdout } = await runner("pi", ["--list-models"], { env, timeout: 8000 });
+      const parsed = parsePiModels(stdout);
+      if (parsed.some((model) => model.id !== "default")) configuredModels = parsed;
+    } catch {
+      // The remote endpoint catalog can still be useful when the Pi CLI is temporarily unavailable.
+    }
   }
-  try {
-    const { stdout } = await runner("pi", ["--list-models"], { env, timeout: 8000 });
-    const parsed = parsePiModels(stdout);
-    return parsed.some((model) => model.id !== "default") ? { ok: true, value: parsed } : { ok: false };
-  } catch {
-    return { ok: false };
+  const endpointModels = options.piEndpointDiscovery?.enabled
+    ? await discoverPiEndpointModels({
+      agentDir: options.piEndpointDiscovery.agentDir,
+      env,
+      fetchImpl: options.piEndpointDiscovery.fetchImpl,
+    })
+    : [];
+  if (!configuredModels.length && !endpointModels.length) return { ok: false };
+  return { ok: true, value: mergePiModelCatalog(configuredModels, endpointModels) };
+}
+
+function mergePiModelCatalog(
+  configuredModels: readonly ClaudeModelInfo[],
+  endpointModels: readonly ClaudeModelInfo[],
+): ClaudeModelInfo[] {
+  const defaultModel = configuredModels.find((model) => model.id === "default")
+    ?? cloneModels(PI_FALLBACK_MODELS)[0]!;
+  const models = new Map<string, ClaudeModelInfo>();
+  for (const model of configuredModels) {
+    if (model.id !== "default") models.set(model.id, model);
   }
+  for (const model of endpointModels) {
+    if (model.id !== "default" && !models.has(model.id)) models.set(model.id, model);
+  }
+  return [defaultModel, ...models.values()];
 }
 
 /** 从 CLI 的 help / 非法档位报错里抽出 `low, medium, high` 这种列表。 */
@@ -1244,7 +1274,7 @@ async function discoverModelCache(
     probeOpenCode(runner, env),
     probeGrokModels(runner, env),
     probeQoderModels(runner, env),
-    probePiModels(runner, env),
+    probePiModels(runner, env, options),
     listClaudeModelsFromApi(options, env),
     probeEffortList(runner, env, "claude", ["--effort", "__wand_probe__", "--help"]),
     probeEffortList(runner, env, "grok", ["--effort", "__wand_probe__", "-p", "x", "--output-format", "streaming-json", "--max-turns", "1"]),

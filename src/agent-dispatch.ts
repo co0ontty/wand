@@ -1,5 +1,6 @@
 import { getDefaultModelForProvider } from "./config.js";
 import type { ProcessManager } from "./process-manager.js";
+import { defaultRoleForCli } from "./default-employee.js";
 import { providerCliCommand } from "./session-provider.js";
 import type { SessionRegistry } from "./session-registry.js";
 import type { WandStorage } from "./storage.js";
@@ -46,7 +47,9 @@ export async function dispatchAgentForTask(
 ): Promise<AgentDispatchResult> {
   const { storage, config, structured, processes } = deps;
   const { agent } = input;
-  const systemPrompt = input.systemPrompt?.trim() || undefined;
+  const role = input.employee ?? (!input.systemPrompt?.trim()
+    && input.automationId.startsWith("wand-task:") ? defaultRoleForCli(storage, agent.provider) : null);
+  const systemPrompt = input.systemPrompt?.trim() || role?.prompt || undefined;
   if (agent.kind === "structured" && !structured) throw new Error("当前服务未启用结构化会话，无法派发 Agent。");
   if (agent.kind === "pty" && !processes) throw new Error("当前服务未启用终端会话，无法派发 Agent。");
   const group = resolveTaskDispatchTarget(deps, input.task);
@@ -75,9 +78,9 @@ export async function dispatchAgentForTask(
         sessionSource: "automation",
         automationId: input.automationId,
         systemPrompt,
-        employeeId: input.employee?.id,
-        employeeName: input.employee?.name,
-        employeeAvatar: input.employee?.avatar,
+        employeeId: role?.id,
+        employeeName: role?.name,
+        employeeAvatar: role?.avatar,
         employeeCandidates: input.employee?.agents,
         employeeCandidateIndex: input.employeeCandidateIndex,
         workspaceId: group.workspaceId,

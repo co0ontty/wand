@@ -22,6 +22,14 @@ import {
   type SystemEmployeeSeed,
 } from "./system-employee.js";
 import { isThinkingEffort } from "./structured-provider-common.js";
+import { DEFAULT_EMPLOYEE_KEY } from "./ai-team-types.js";
+import { defaultEmployeeDefinition } from "./default-employee.js";
+import { normalizeEmployeeKnowledge } from "./employee-knowledge-content.js";
+import { EMPLOYEE_KNOWLEDGE_MAX_ENTRIES, type EmployeeKnowledgeEntry } from "./employee-knowledge-types.js";
+import {
+  USER_MEMORY_MAX_EVENTS, USER_MEMORY_RETENTION_MS,
+  type UserMemoryEvent, type UserMemoryProfile, type UserMemoryState,
+} from "./user-memory-types.js";
 import type {
   AgentActivityItem,
   AgentActivityState,
@@ -1030,6 +1038,41 @@ const INIT_SQL = `
   );
   CREATE INDEX IF NOT EXISTS idx_silicon_employees_archived ON silicon_employees(archived_at);
 
+  CREATE TABLE IF NOT EXISTS employee_knowledge (
+    id TEXT PRIMARY KEY,
+    employee_id TEXT NOT NULL REFERENCES silicon_employees(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (employee_id, content_hash)
+  );
+  CREATE INDEX IF NOT EXISTS idx_employee_knowledge_owner ON employee_knowledge(employee_id, created_at);
+  CREATE TABLE IF NOT EXISTS employee_knowledge_access (
+    token_hash TEXT PRIMARY KEY,
+    employee_id TEXT NOT NULL REFERENCES silicon_employees(id) ON DELETE CASCADE,
+    session_id TEXT NOT NULL REFERENCES command_sessions(id) ON DELETE CASCADE,
+    expires_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_employee_knowledge_access_expiry ON employee_knowledge_access(expires_at);
+
+  CREATE TABLE IF NOT EXISTS user_memory_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    feature TEXT NOT NULL,
+    text TEXT NOT NULL DEFAULT '',
+    dedup_key TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_user_memory_events_created ON user_memory_events(created_at);
+  CREATE INDEX IF NOT EXISTS idx_user_memory_events_dedup ON user_memory_events(dedup_key, created_at);
+  CREATE TABLE IF NOT EXISTS user_memory_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    enabled INTEGER NOT NULL DEFAULT 1,
+    revision INTEGER NOT NULL DEFAULT 0,
+    last_attempt_at INTEGER NOT NULL DEFAULT 0,
+    source_id INTEGER NOT NULL DEFAULT 0,
+    profile_json TEXT
+  );
+  INSERT OR IGNORE INTO user_memory_state (id) VALUES (1);
 
   CREATE TABLE IF NOT EXISTS ai_team_runs (
     id TEXT PRIMARY KEY,
@@ -1303,6 +1346,7 @@ function withoutSessionTab(node: LayoutNode, sessionId: string): LayoutNode {
 export class WandStorage {
   private readonly db: DatabaseSync;
   private readonly dbPath: string;
+  private memoryCapture = { enabled: true, revision: 0 };
 
   constructor(dbPath: string) {
     const dir = path.dirname(dbPath);
@@ -1310,6 +1354,7 @@ export class WandStorage {
     chmodSync(dir, 0o700);
     this.dbPath = dbPath;
     this.db = new DatabaseSync(dbPath);
+    this.db.exec("PRAGMA busy_timeout = 5000");
     chmodSync(dbPath, 0o600);
     this.db.exec(INIT_SQL);
     ensureAuthSessionSchema(this.db);
@@ -1322,10 +1367,16 @@ export class WandStorage {
     ensureConnectorSchema(this.db);
     this.ensureDefaultPasswordVault();
     this.migrateTaskRecords();
+    const memory = this.getUserMemoryState();
+    this.memoryCapture = { enabled: memory.enabled, revision: memory.revision };
   }
 
   directory(): string {
     return path.dirname(this.dbPath);
+  }
+
+  databasePath(): string {
+    return this.dbPath;
   }
 
   close(): void {
@@ -2792,12 +2843,41 @@ export class WandStorage {
       ? "SELECT * FROM silicon_employees ORDER BY (system_key IS NULL), created_at ASC"
       : "SELECT * FROM silicon_employees WHERE archived_at IS NULL ORDER BY (system_key IS NULL), created_at ASC";
     const rows = this.db.prepare(sql).all() as unknown as Record<string, unknown>[];
-    return rows.map(mapSiliconEmployeeRow);
+    return rows.map((row) => this.projectDefaultEmployee(mapSiliconEmployeeRow(row)));
+  }
+
+  private projectDefaultEmployee(employee: SiliconEmployee): SiliconEmployee {
+    if (employee.systemKey !== DEFAULT_EMPLOYEE_KEY) return employee;
+    const state = this.getUserMemoryState();
+    return defaultEmployeeDefinition(employee.agents, employee.updatedAt, employee,
+      state.enabled ? state.profile : null);
   }
 
   getSiliconEmployee(id: string): SiliconEmployee | null {
     const row = this.db.prepare("SELECT * FROM silicon_employees WHERE id = ?").get(id) as Record<string, unknown> | undefined;
-    return row ? mapSiliconEmployeeRow(row) : null;
+    return row ? this.projectDefaultEmployee(mapSiliconEmployeeRow(row)) : null;
+  }
+
+  getDefaultSiliconEmployee(): SiliconEmployee | null {
+    const employee = this.getSystemSiliconEmployee(DEFAULT_EMPLOYEE_KEY);
+    return employee ? this.projectDefaultEmployee(employee) : null;
+  }
+
+  /** Seed once, preserve execution choices, and never reset learned preferences on restart. */
+  ensureDefaultSiliconEmployee(provider?: SessionProvider): SiliconEmployee {
+    const existing = this.getSystemSiliconEmployee(DEFAULT_EMPLOYEE_KEY);
+    const state = this.getUserMemoryState();
+    const definition = defaultEmployeeDefinition(
+      existing?.agents ?? systemEmployeeSeedAgents({ provider }), new Date().toISOString(), existing,
+      state.enabled ? state.profile : null,
+    );
+    if (!existing || existing.name !== definition.name || existing.duty !== definition.duty
+      || existing.prompt !== definition.prompt || existing.avatar !== definition.avatar
+      || existing.archivedAt || !existing.agents.length) {
+      this.saveSiliconEmployee(definition);
+      return definition;
+    }
+    return existing;
   }
 
   /** 内置「系统运维」员工；未创建（或被删除过）时返回 null。 */
@@ -2877,6 +2957,230 @@ export class WandStorage {
 
   deleteSiliconEmployee(id: string): void {
     this.db.prepare("DELETE FROM silicon_employees WHERE id = ?").run(id);
+  }
+
+  // ============ Employee-owned explicit knowledge ============
+
+  private requireKnowledgeEmployee(employeeId: string): void {
+    if (!this.db.prepare("SELECT id FROM silicon_employees WHERE id = ?").get(employeeId)) {
+      throw new Error("员工已删除或不存在，不能改存到其他员工的知识库。");
+    }
+  }
+
+  listEmployeeKnowledge(employeeId: string, query = "", limit = 20): EmployeeKnowledgeEntry[] {
+    this.requireKnowledgeEmployee(employeeId);
+    const normalizedQuery = query.trim().slice(0, 200).toLowerCase();
+    const boundedLimit = Math.max(1, Math.min(Math.floor(limit), EMPLOYEE_KNOWLEDGE_MAX_ENTRIES));
+    // SQLite lower() is ASCII-only. Load at most this employee's fixed quota,
+    // perform Unicode case folding, and apply the result limit after filtering.
+    const rows = this.db.prepare(`SELECT id, employee_id, content, created_at FROM employee_knowledge
+      WHERE employee_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?`)
+      .all(employeeId, EMPLOYEE_KNOWLEDGE_MAX_ENTRIES) as
+      Array<{ id: string; employee_id: string; content: string; created_at: string }>;
+    return rows.filter((row) => row.content.toLowerCase().includes(normalizedQuery))
+      .slice(0, boundedLimit).map((row) => ({
+        id: row.id, employeeId: row.employee_id, content: row.content, createdAt: row.created_at,
+      }));
+  }
+
+  countEmployeeKnowledge(employeeId: string): number {
+    this.requireKnowledgeEmployee(employeeId);
+    return Number(this.db.prepare("SELECT COUNT(*) AS count FROM employee_knowledge WHERE employee_id = ?")
+      .get(employeeId)?.count ?? 0);
+  }
+
+  rememberEmployeeKnowledge(employeeId: string, value: string, accessToken?: string): EmployeeKnowledgeEntry {
+    const content = normalizeEmployeeKnowledge(value);
+    const hash = crypto.createHash("sha256").update(content).digest("hex");
+    return this.transaction(() => {
+      this.requireKnowledgeEmployee(employeeId);
+      if (accessToken && this.resolveEmployeeKnowledgeAccess(accessToken) !== employeeId) {
+        throw new Error("知识库访问已失效，请等待新的会话执行。");
+      }
+      const existing = this.db.prepare("SELECT id, content, created_at FROM employee_knowledge WHERE employee_id = ? AND content_hash = ?")
+        .get(employeeId, hash);
+      if (existing) return { id: String(existing.id), employeeId,
+        content: String(existing.content), createdAt: String(existing.created_at) };
+      if (this.countEmployeeKnowledge(employeeId) >= EMPLOYEE_KNOWLEDGE_MAX_ENTRIES) {
+        throw new Error("该员工知识库已满，请先删除不需要的内容，不会自动丢弃旧知识。");
+      }
+      const entry = { id: `k_${crypto.randomUUID().replace(/-/g, "")}`, employeeId,
+        content, createdAt: new Date().toISOString() };
+      this.db.prepare(`INSERT INTO employee_knowledge (id, employee_id, content, content_hash, created_at)
+        VALUES (?, ?, ?, ?, ?)`).run(entry.id, employeeId, content, hash, entry.createdAt);
+      return entry;
+    });
+  }
+
+  forgetEmployeeKnowledge(employeeId: string, entryId: string, accessToken?: string): boolean {
+    return this.transaction(() => {
+      this.requireKnowledgeEmployee(employeeId);
+      if (accessToken && this.resolveEmployeeKnowledgeAccess(accessToken) !== employeeId) {
+        throw new Error("知识库访问已失效，请等待新的会话执行。");
+      }
+      return this.db.prepare("DELETE FROM employee_knowledge WHERE employee_id = ? AND id = ?")
+        .run(employeeId, entryId).changes === 1;
+    });
+  }
+
+  clearEmployeeKnowledge(employeeId: string): void {
+    this.transaction(() => {
+      this.requireKnowledgeEmployee(employeeId);
+      this.db.prepare("DELETE FROM employee_knowledge WHERE employee_id = ?").run(employeeId);
+      this.db.prepare("DELETE FROM employee_knowledge_access WHERE employee_id = ?").run(employeeId);
+    });
+  }
+
+  /** Opaque per-execution capability: no employee selector, app token or DB secret in model prompts. */
+  issueEmployeeKnowledgeAccess(sessionId: string, employeeId: string, now = Date.now()): string {
+    this.requireKnowledgeEmployee(employeeId);
+    const row = this.getSessionSlim(sessionId);
+    if (!row || row.employeeId !== employeeId) throw new Error("知识库归属与会话员工不一致。");
+    this.db.prepare("DELETE FROM employee_knowledge_access WHERE expires_at <= ?").run(now);
+    const token = crypto.randomBytes(32).toString("base64url");
+    const hash = crypto.createHash("sha256").update(token).digest("hex");
+    this.db.prepare(`INSERT INTO employee_knowledge_access (token_hash, employee_id, session_id, expires_at)
+      VALUES (?, ?, ?, ?)`).run(hash, employeeId, sessionId, now + 6 * 60 * 60 * 1000);
+    return token;
+  }
+
+  resolveEmployeeKnowledgeAccess(token: string, now = Date.now()): string | null {
+    if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
+    const hash = crypto.createHash("sha256").update(token).digest("hex");
+    const row = this.db.prepare(`SELECT a.employee_id FROM employee_knowledge_access a
+      JOIN command_sessions s ON s.id = a.session_id JOIN silicon_employees e ON e.id = a.employee_id
+      WHERE a.token_hash = ? AND a.expires_at > ? AND json_extract(s.session_options, '$.employeeId') = a.employee_id`)
+      .get(hash, now);
+    return typeof row?.employee_id === "string" ? row.employee_id : null;
+  }
+
+  revokeEmployeeKnowledgeAccess(token: string): void {
+    this.db.prepare("DELETE FROM employee_knowledge_access WHERE token_hash = ?")
+      .run(crypto.createHash("sha256").update(token).digest("hex"));
+  }
+
+  // ============ User short-term memory ============
+
+  /** No IO on input hot paths; queued observations still CAS against the database before writing. */
+  userMemoryCaptureState(): Readonly<{ enabled: boolean; revision: number }> {
+    return this.memoryCapture;
+  }
+
+  stopUserMemoryCapture(): void {
+    this.memoryCapture = { ...this.memoryCapture, enabled: false };
+  }
+
+  getUserMemoryState(now = Date.now()): UserMemoryState {
+    const row = this.db.prepare("SELECT * FROM user_memory_state WHERE id = 1").get()!;
+    const candidate = safeJsonParse<UserMemoryProfile>(row.profile_json as string | null);
+    let profile = candidate && candidate.expiresAt > now && Array.isArray(candidate.preferences)
+      && candidate.preferences.length <= 10 && candidate.preferences.every((entry) =>
+        entry && typeof entry.text === "string" && entry.text.length <= 160
+        && Array.isArray(entry.evidenceIds) && entry.evidenceIds.length <= 5
+        && entry.evidenceIds.every((id) => Number.isSafeInteger(id))) ? candidate : null;
+    const ids = profile ? [...new Set(profile.preferences.flatMap((entry) => entry.evidenceIds))] : [];
+    if (ids.length) {
+      const count = this.db.prepare(`SELECT COUNT(*) AS total FROM user_memory_events
+        WHERE id IN (${ids.map(() => "?").join(",")}) AND created_at > ? AND created_at <= ?`)
+        .get(...ids, now - USER_MEMORY_RETENTION_MS, now)?.total;
+      if (count !== ids.length) profile = null;
+    }
+    return {
+      enabled: row.enabled === 1,
+      revision: Number(row.revision),
+      lastAttemptAt: Number(row.last_attempt_at),
+      sourceId: Number(row.source_id),
+      profile,
+    };
+  }
+
+  listUserMemoryEvents(now = Date.now(), limit = 80): UserMemoryEvent[] {
+    const rows = this.db.prepare(`SELECT id, feature, text, created_at FROM user_memory_events
+      WHERE created_at > ? AND created_at <= ? ORDER BY id DESC LIMIT ?`)
+      .all(now - USER_MEMORY_RETENTION_MS, now, Math.max(1, Math.min(limit, USER_MEMORY_MAX_EVENTS))) as
+      Array<{ id: number; feature: string; text: string; created_at: number }>;
+    return rows.reverse().map((row) => ({
+      id: row.id, feature: row.feature, text: row.text, createdAt: row.created_at,
+    }));
+  }
+
+  userMemoryFeatureCounts(now = Date.now()): Array<{ feature: string; count: number }> {
+    return this.db.prepare(`SELECT feature, COUNT(*) AS count FROM user_memory_events
+      WHERE created_at > ? AND created_at <= ? GROUP BY feature ORDER BY count DESC, feature`)
+      .all(now - USER_MEMORY_RETENTION_MS, now) as Array<{ feature: string; count: number }>;
+  }
+
+  /** Only already-redacted, bounded observations reach this table. Queued writes use revision CAS. */
+  appendUserMemoryEvent(
+    feature: string, text: string, dedupKey: string, revision: number, now = Date.now(),
+  ): void {
+    this.transaction(() => {
+      const state = this.getUserMemoryState(now);
+      if (!state.enabled || state.revision !== revision) return;
+      this.pruneUserMemory(now);
+      const duplicate = this.db.prepare(`SELECT id FROM user_memory_events
+        WHERE dedup_key = ? AND created_at > ? LIMIT 1`).get(dedupKey, now - 120_000);
+      if (duplicate) return;
+      this.db.prepare(`INSERT INTO user_memory_events (feature, text, dedup_key, created_at)
+        VALUES (?, ?, ?, ?)`).run(feature, text, dedupKey, now);
+      this.db.prepare(`DELETE FROM user_memory_events WHERE id NOT IN
+        (SELECT id FROM user_memory_events ORDER BY id DESC LIMIT ?)`)
+        .run(USER_MEMORY_MAX_EVENTS);
+      this.pruneUserMemory(now);
+    });
+  }
+
+  pruneUserMemory(now = Date.now()): void {
+    this.db.prepare("DELETE FROM user_memory_events WHERE created_at <= ?")
+      .run(now - USER_MEMORY_RETENTION_MS);
+    const saved = this.db.prepare("SELECT profile_json FROM user_memory_state WHERE id = 1").get();
+    if (saved?.profile_json && !this.getUserMemoryState(now).profile) {
+      this.db.exec("UPDATE user_memory_state SET profile_json = NULL, source_id = 0 WHERE id = 1");
+      this.ensureDefaultSiliconEmployee();
+    }
+  }
+
+  setUserMemoryEnabled(enabled: boolean): void {
+    this.transaction(() => {
+      this.db.prepare(`UPDATE user_memory_state SET enabled = ?, revision = revision + 1,
+        last_attempt_at = 0, source_id = 0, profile_json = NULL WHERE id = 1`).run(enabled ? 1 : 0);
+      this.ensureDefaultSiliconEmployee();
+    });
+    this.memoryCapture = { enabled, revision: this.memoryCapture.revision + 1 };
+  }
+
+  clearUserMemory(): void {
+    this.transaction(() => {
+      this.db.exec(`DELETE FROM user_memory_events;
+        UPDATE user_memory_state SET revision = revision + 1, last_attempt_at = 0,
+          source_id = 0, profile_json = NULL WHERE id = 1;`);
+      this.ensureDefaultSiliconEmployee();
+    });
+    this.memoryCapture = { ...this.memoryCapture, revision: this.memoryCapture.revision + 1 };
+  }
+
+  markUserMemoryAttempt(revision: number, now: number): boolean {
+    return this.db.prepare(`UPDATE user_memory_state SET last_attempt_at = ?
+      WHERE id = 1 AND enabled = 1 AND revision = ?`).run(now, revision).changes === 1;
+  }
+
+  /** Read fresh candidates inside the transaction; a late model result cannot undo user edits/clear. */
+  applyUserMemoryProfile(
+    profile: UserMemoryProfile, revision: number, sourceId: number, now = Date.now(),
+  ): boolean {
+    return this.transaction(() => {
+      const state = this.getUserMemoryState(now);
+      if (!state.enabled || state.revision !== revision || profile.expiresAt <= now) return false;
+      const evidence = this.db.prepare("SELECT created_at FROM user_memory_events WHERE id = ?");
+      for (const id of new Set(profile.preferences.flatMap((entry) => entry.evidenceIds))) {
+        const row = evidence.get(id);
+        if (!row || Number(row.created_at) <= now - USER_MEMORY_RETENTION_MS) return false;
+      }
+      this.db.prepare(`UPDATE user_memory_state SET profile_json = ?, source_id = ? WHERE id = 1`)
+        .run(JSON.stringify(profile), sourceId);
+      this.ensureDefaultSiliconEmployee();
+      return true;
+    });
   }
 
   // ============ AI Teams ============

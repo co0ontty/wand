@@ -37,6 +37,7 @@ import { resolveSessionProvider, resolveSystemAiContext } from "./session-ai-con
 import { resolveSessionCwd } from "./session-cwd.js";
 import { inferProviderFromCommand } from "./session-provider.js";
 import { PtyTerminalState, type PtyTerminalSnapshot, type PtyHistoryPage } from "./pty-terminal-state.js";
+import { isPtySubmitInput } from "./pty-turn-activity.js";
 import { buildPtyShellLaunchPlan, PtyCliExitMarker } from "./pty-shell-launch.js";
 import {
   InProcessTerminalHost,
@@ -230,6 +231,8 @@ interface SessionRecord extends SessionSnapshot {
   ptyBridge: ClaudePtyBridge | null;
   /** 运行时每轮忙碌信号（对齐 structured inFlight）；由 bridge 事件驱动，不持久化 */
   ptyBusy?: boolean;
+  /** Quiet-window timer for the non-Claude PTY turn tracker (no bridge). */
+  ptyTurnTimer?: NodeJS.Timeout | null;
   /** Last published chat sequence boundary; never persisted or exposed as a DTO field. */
   ptyChatMessageCount?: number;
   /** Current PTY dimensions, last applied by resize(). */
@@ -655,6 +658,12 @@ function restoreTerminalState(state: TerminalSessionState): PtyTerminalState {
 const MAX_SESSIONS = 200;
 const ARCHIVE_AFTER_MS = 1000 * 60 * 60 * 24;
 const CONFIRM_WINDOW_SIZE = 800;
+/**
+ * Quiet window for the non-Claude PTY turn tracker: a submitted turn stays busy
+ * until the CLI has produced no output for this long (see pty-turn-activity.ts).
+ * Matches the bridge's own idle-probe delay so both paths make the same call.
+ */
+export const PTY_TURN_IDLE_MS = 3000;
 
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -716,10 +725,17 @@ function deriveSessionSummary(messages: ConversationTurn[]): string | undefined 
 }
 
 
+export interface ProcessManagerOptions {
+  /** Overrides the non-Claude PTY turn quiet window (tests use a short one). */
+  ptyTurnIdleMs?: number;
+}
+
 export class ProcessManager extends EventEmitter {
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly logger: SessionLogger;
   private readonly providerHistory = new ProviderHistoryScanner();
+  /** Quiet window for the non-Claude PTY turn tracker. */
+  private readonly ptyTurnIdleMs: number;
   /** 24h archive scan timer */
   private archiveTimer: NodeJS.Timeout | null = null;
   /** Per-session debounce timers for throttled persist calls */
@@ -740,8 +756,10 @@ export class ProcessManager extends EventEmitter {
     private readonly storage: WandStorage,
     configDir?: string,
     terminalHost?: TerminalHost,
+    options: ProcessManagerOptions = {},
   ) {
     super();
+    this.ptyTurnIdleMs = options.ptyTurnIdleMs ?? PTY_TURN_IDLE_MS;
     this.terminalHost = terminalHost ?? new InProcessTerminalHost();
     this.logger = new SessionLogger(configDir || path.join(process.env.HOME || process.cwd(), ".wand"), config.shortcutLogMaxBytes);
     let startupCodexHistory: CodexHistorySession[] | null = null;
@@ -945,6 +963,47 @@ export class ProcessManager extends EventEmitter {
     });
   }
 
+  /**
+   * Open a non-Claude PTY turn and start its quiet-window timer. Claude's bridge
+   * owns ptyBusy, so bridged sessions are left untouched.
+   */
+  private openPtyTurn(record: SessionRecord): void {
+    if (record.ptyBridge || !record.providerCliActive || record.status !== "running") return;
+    if (record.ptyBusy !== true) {
+      record.ptyBusy = true;
+      this.emitEvent({ type: "status", sessionId: record.id, data: { ptyBusy: true } });
+    }
+    this.refreshPtyTurn(record);
+  }
+
+  /** Extend the quiet window because the CLI is still producing output. */
+  private refreshPtyTurn(record: SessionRecord): void {
+    if (record.ptyBridge || !record.providerCliActive) return;
+    if (record.ptyTurnTimer) clearTimeout(record.ptyTurnTimer);
+    const timer = setTimeout(() => {
+      record.ptyTurnTimer = null;
+      if (this.sessions.get(record.id) !== record) return;
+      this.closePtyTurn(record);
+    }, this.ptyTurnIdleMs);
+    timer.unref?.();
+    record.ptyTurnTimer = timer;
+  }
+
+  /** The quiet window elapsed: the CLI is back at its prompt, so the turn is done. */
+  private closePtyTurn(record: SessionRecord): void {
+    this.clearPtyTurn(record);
+    if (record.ptyBusy !== true) return;
+    record.ptyBusy = false;
+    this.emitEvent({ type: "status", sessionId: record.id, data: { ptyBusy: false } });
+  }
+
+  private clearPtyTurn(record: SessionRecord): void {
+    if (record.ptyTurnTimer) {
+      clearTimeout(record.ptyTurnTimer);
+      record.ptyTurnTimer = null;
+    }
+  }
+
   private bindTerminalProcess(
     record: SessionRecord,
     child: TerminalProcess,
@@ -1021,6 +1080,7 @@ export class ProcessManager extends EventEmitter {
       current.providerCliActive = false;
       current.providerCliExitCode = exitCode;
     }
+    this.clearPtyTurn(current);
     current.ptyBusy = false;
     current.pendingEscalation = null;
     current.ptyPermissionBlocked = false;
@@ -1096,6 +1156,9 @@ export class ProcessManager extends EventEmitter {
     if (chunk && current.providerCliActive && current.autoApprovePermissions && !current.ptyBridge && current.provider === "claude") {
       this.autoConfirmWithRecord(current, chunk, child);
     }
+    // Non-Claude CLIs have no parsed turn boundary; any output while a turn is
+    // open keeps it open (see pty-turn-activity.ts).
+    if (chunk && current.ptyBusy === true) this.refreshPtyTurn(current);
     if (chunk) onVisibleChunk?.(chunk);
     if (boundary.exitCode !== null) this.finishProviderCli(current, boundary.exitCode);
     this.schedulePersist(current);
@@ -1428,6 +1491,7 @@ export class ProcessManager extends EventEmitter {
 
       child.write(initialInputText);
       child.write("\r");
+      if (!current.ptyBridge) this.openPtyTurn(current);
     };
 
     this.bindTerminalProcess(record, child, (chunk) => {
@@ -1863,6 +1927,11 @@ export class ProcessManager extends EventEmitter {
     if (record.ptyBridge && trackUserInput) {
       record.ptyBridge.onUserInput(input);
     }
+    // Non-Claude CLIs report no parsed boundary, so a line submit opens a turn
+    // that a quiet window later closes.
+    if (trackUserInput && !record.ptyBridge && isPtySubmitInput(input)) {
+      this.openPtyTurn(record);
+    }
 
   }
 
@@ -1918,6 +1987,7 @@ export class ProcessManager extends EventEmitter {
     record.providerCliExitCode = exitCode;
     record.providerShellMarker = null;
     record.ptyLaunchMarkerToken = null;
+    this.clearPtyTurn(record);
     record.ptyBusy = false;
 
     if (record.claudeTaskDiscoveryTimer) {
@@ -1991,6 +2061,7 @@ export class ProcessManager extends EventEmitter {
     record.providerCliActive = false;
     record.providerShellMarker = null;
     record.ptyLaunchMarkerToken = null;
+    this.clearPtyTurn(record);
     record.ptyBusy = false;
     // Kill any running child process (from JSON chat turns)
     if (record.childProcess) {
@@ -2030,6 +2101,7 @@ export class ProcessManager extends EventEmitter {
   }
 
   private cleanupRecord(record: SessionRecord, terminateTerminal = true): void {
+    this.clearPtyTurn(record);
     if (record.claudeTaskDiscoveryTimer) {
       clearTimeout(record.claudeTaskDiscoveryTimer);
       record.claudeTaskDiscoveryTimer = null;

@@ -15,6 +15,7 @@ import type { ProcessManager } from "./process-manager.js";
 import type { AiTeamRunner } from "./ai-team-runner.js";
 import { memberAgents } from "./ai-team-types.js";
 import { selectEmployeeCandidate } from "./silicon-employee-dispatch.js";
+import { defaultRoleForCli } from "./default-employee.js";
 import type { TaskExecutionSubject, WandTaskAgent, WandTaskAgentKind, WandTaskAgentMode, WandTaskPriority, WandTaskStatus, WandTaskTitleSource } from "./task-types.js";
 import { DEFAULT_WAND_TASK_AGENT_KIND, DEFAULT_WAND_TASK_AGENT_MODE, DEFAULT_WAND_TASK_PRIORITY, isWandTaskAgentKind, isWandTaskAgentMode, normalizeWandTaskAgentMode, WAND_MILESTONE_NAME_MAX_LENGTH } from "./task-types.js";
 import { isAutoNameableBoardTask, taskAutoNameSignature, taskAutoNameSourceText } from "./wand-task-sync.js";
@@ -705,8 +706,12 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       const cliDefault = subject?.type === "cli"
         ? parseTaskAgent({ ...cliAgentForSubject(subject, task.agent), ...(body.kind === "pty" ? { kind: "pty" } : {}) })
         : null;
+      const fallbackCandidate = !subject && body.agent === undefined && !task.agent
+        && !body.provider ? selectEmployeeCandidate(defaultRoleForCli(storage, config.defaultProvider)).agent : null;
+      const fallbackAgent = fallbackCandidate && body.kind === "pty"
+        ? { ...fallbackCandidate, kind: "pty" as const } : fallbackCandidate;
       const agent = selected?.agent ?? (body.agent === undefined
-        ? cliDefault ?? task.agent ?? parseWandTaskAgent(JSON.stringify(body))
+        ? cliDefault ?? task.agent ?? fallbackAgent ?? parseWandTaskAgent(JSON.stringify(body))
         : parseTaskAgent(body.agent, task.agent?.mode, task.agent?.kind));
       if (!agent) throw new Error("请先为该任务选择 CLI 工具。");
       if (subject?.type === "cli" && agent.provider !== subject.id) {

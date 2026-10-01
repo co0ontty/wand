@@ -594,7 +594,7 @@ test("dispatching with kind pty starts a terminal session and binds it", async (
   }, { processes: stub as never });
 });
 
-test("dispatch refuses an issue whose CLI tool is still unset", async () => {
+test("dispatch rejects invalid explicit CLI selection rather than silently defaulting", async () => {
   await withHarness(async ({ url }) => {
     const noAgent = await fetch(`${url}/api/wand-tasks`, {
       method: "POST",
@@ -604,7 +604,7 @@ test("dispatch refuses an issue whose CLI tool is still unset", async () => {
     const rejected = await fetch(`${url}/api/wand-tasks/${noAgent.id}/dispatch`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ agent: { provider: "not-a-cli" } }),
     });
     assert.equal(rejected.status, 400);
     assert.match((await rejected.json() as { error: string }).error, /CLI 工具/);

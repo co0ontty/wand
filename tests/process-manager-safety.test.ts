@@ -7,7 +7,7 @@ import test from "node:test";
 
 import pty, { type IPty } from "node-pty";
 import { defaultConfig } from "../src/config.js";
-import { isCommandAllowedByPrefixes, ProcessManager } from "../src/process-manager.js";
+import { isCommandAllowedByPrefixes, ProcessManager, type ProcessManagerOptions } from "../src/process-manager.js";
 import { toSessionListItemDTO } from "../src/session-transport.js";
 import type { EscalationRequest, ProcessEvent, SessionSnapshot } from "../src/types.js";
 import type { WandStorage } from "../src/storage.js";
@@ -136,7 +136,7 @@ class FakePty {
   }
 }
 
-function createHarness(t: test.TestContext, allowedCommandPrefixes: string[] = []) {
+function createHarness(t: test.TestContext, allowedCommandPrefixes: string[] = [], options: ProcessManagerOptions = {}) {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-pm-safety-"));
   const spawned: FakePty[] = [];
   const spawnCalls: unknown[][] = [];
@@ -154,6 +154,8 @@ function createHarness(t: test.TestContext, allowedCommandPrefixes: string[] = [
     { ...defaultConfig(), defaultCwd: root, startupCommands: [], allowedCommandPrefixes },
     storage as unknown as WandStorage,
     path.join(root, ".wand"),
+    undefined,
+    options,
   );
 
   t.after(() => {
@@ -568,6 +570,53 @@ test("Claude PTY exposes per-turn ptyBusy on snapshots", async (t) => {
   const afterExit = manager.get(session.id);
   assert.equal(afterExit?.status, "exited");
   assert.equal(afterExit?.ptyBusy, false);
+});
+
+test("non-Claude PTY providers get a quiet-window turn signal on ptyBusy", async (t) => {
+  const { manager, root, spawned } = createHarness(t, [], { ptyTurnIdleMs: 60 });
+  const session = await manager.start("pi", root, "managed", undefined, { provider: "pi" });
+  assert.equal(session.ptyBusy, false);
+
+  const statuses: boolean[] = [];
+  manager.on("process", (event: ProcessEvent) => {
+    if (event.type !== "status" || event.sessionId !== session.id) return;
+    const busy = (event.data as { ptyBusy?: boolean }).ptyBusy;
+    if (typeof busy === "boolean") statuses.push(busy);
+  });
+
+  // Body text without a terminator does not start a turn.
+  manager.sendInput(session.id, "hello", "terminal");
+  assert.equal(manager.get(session.id)?.ptyBusy, false);
+
+  // The separate Enter chunk opens the turn and surfaces on the wire DTO.
+  manager.sendInput(session.id, "\r", "terminal", "enter_text");
+  assert.equal(manager.get(session.id)?.ptyBusy, true);
+  assert.equal(toSessionListItemDTO(manager.get(session.id)!).ptyBusy, true);
+
+  // Output refreshes the window, so the turn stays open past the first deadline.
+  spawned[0].emitData("working...");
+  await delay(40);
+  assert.equal(manager.get(session.id)?.ptyBusy, true);
+
+  // Silence beyond the window means the CLI is back at its prompt.
+  await delay(120);
+  assert.equal(manager.get(session.id)?.ptyBusy, false);
+  assert.deepEqual(statuses, [true, false]);
+
+  // Stray output after a closed turn must not reopen it (only submits do).
+  spawned[0].emitData("leftover repaint");
+  await delay(10);
+  assert.equal(manager.get(session.id)?.ptyBusy, false);
+});
+
+test("stopping a non-Claude PTY turn clears the quiet-window timer", async (t) => {
+  const { manager, root } = createHarness(t, [], { ptyTurnIdleMs: 60 });
+  const session = await manager.start("pi", root, "managed", undefined, { provider: "pi" });
+  manager.sendInput(session.id, "\r", "terminal", "enter_text");
+  assert.equal(manager.get(session.id)?.ptyBusy, true);
+  manager.stop(session.id);
+  assert.equal(manager.get(session.id)?.ptyBusy, false);
+  assert.equal(manager.get(session.id)?.status, "stopped");
 });
 
 test("PTY sessions hand the system prompt to the CLI's own flag, not to the first input", async (t) => {

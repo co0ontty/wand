@@ -168,13 +168,12 @@ export async function generateSiliconEmployeeDraft(
   const available = availableEmployeeProviders(options.preferredProvider, options.isProviderAvailable);
   const providers = available.length ? available : [options.preferredProvider ?? "claude", ...SESSION_PROVIDERS];
   const request = buildEmployeeDraftPrompt(trimmed, providers, options.existingNames);
-  let raw: string;
   try {
-    raw = await callConfiguredAiText(request, options.cwd || process.cwd(), options.language ?? "", ai);
+    return await callConfiguredAiText(request, options.cwd || process.cwd(), options.language ?? "", ai,
+      (raw) => parseSiliconEmployeeDraft(raw, { allowedProviders: providers, fallbackProvider: providers[0] }));
   } catch (error) {
     if (error instanceof SiliconEmployeeDraftError) throw error;
     const message = error instanceof Error ? error.message : String(error);
     throw new SiliconEmployeeDraftError(message || "AI 生成员工配置失败。", "DRAFT_AI_FAILED");
   }
-  return parseSiliconEmployeeDraft(raw, { allowedProviders: providers, fallbackProvider: providers[0] });
 }

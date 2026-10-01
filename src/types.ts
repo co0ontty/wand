@@ -656,6 +656,8 @@ export interface SessionSnapshot {
    * 不要拼进首条用户消息。provider 没有该通道时（codex / opencode）由调用方退回并入消息。
    */
   systemPrompt?: string | null;
+  /** Runner-only live employee knowledge. Never persisted in session_options or sent in DTOs. */
+  runtimeSystemPrompt?: string;
   /** 所属工作空间 ID（多标签 / 分屏项目）。会话在该工作空间窗口内作为一个标签。 */
   workspaceId?: string;
   /** 所属工作空间任务 ID；任务独占一个 worktree，其下所有会话共享该 worktree 目录。 */

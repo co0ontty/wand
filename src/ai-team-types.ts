@@ -126,6 +126,24 @@ export function isSystemSiliconEmployee(
 }
 
 
+// 默认任务角色与系统运维分开；CLI 是执行器，角色不替换用户选定的工具/权限。
+export const DEFAULT_EMPLOYEE_KEY = "wand-default";
+export const DEFAULT_EMPLOYEE_ID = "e_wand_default";
+export const DEFAULT_EMPLOYEE_NAME = "默契的初一";
+export const DEFAULT_EMPLOYEE_TAG = "默认伙伴";
+
+export function isDefaultSiliconEmployee(
+  employee: Pick<SiliconEmployee, "systemKey"> | null | undefined,
+): boolean {
+  return employee?.systemKey === DEFAULT_EMPLOYEE_KEY;
+}
+
+export function isBuiltinSiliconEmployee(
+  employee: Pick<SiliconEmployee, "systemKey"> | null | undefined,
+): boolean {
+  return isSystemSiliconEmployee(employee) || isDefaultSiliconEmployee(employee);
+}
+
 export interface AiTeam {
   id: string;
   name: string;

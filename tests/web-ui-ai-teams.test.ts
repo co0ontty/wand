@@ -295,6 +295,8 @@ test("ai-teams chunk borrows every shared import from the main-bundle host regis
     "agents/candidate-editor": "react/agents/candidate-editor.tsx",
     "agents/employee-avatar": "react/agents/employee-avatar.tsx",
     "agents/employee-card": "react/agents/employee-card.tsx",
+    "agents/employee-memory": "react/agents/employee-memory.tsx",
+    "agents/employee-knowledge": "react/agents/employee-knowledge.tsx",
     "agents/employee-create-form": "react/agents/employee-create-form.tsx",
     "agents/employee-list-page": "react/agents/employee-list-page.tsx",
   };

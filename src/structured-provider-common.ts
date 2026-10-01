@@ -23,8 +23,8 @@ export function systemPromptFlag(provider: SessionProvider | null | undefined): 
 }
 
 /** 结构化 runner 的 args：provider 支持时把系统提示当成独立参数传。 */
-export function systemPromptArgs(session: Pick<SessionSnapshot, "provider" | "systemPrompt">): string[] {
-  const text = session.systemPrompt?.trim();
+export function systemPromptArgs(session: Pick<SessionSnapshot, "provider" | "systemPrompt" | "runtimeSystemPrompt">): string[] {
+  const text = [session.systemPrompt?.trim(), session.runtimeSystemPrompt?.trim()].filter(Boolean).join("\n\n");
   if (!text) return [];
   const flag = systemPromptFlag(session.provider);
   return flag ? [flag, text] : [];
@@ -35,13 +35,14 @@ export function systemPromptArgs(session: Pick<SessionSnapshot, "provider" | "sy
  * 只在首轮拼一次：后续轮次的消息已经接在有它的对话历史后面。有通道的 provider 不会走这里。
  */
 export function promptWithSystemFallback(
-  session: Pick<SessionSnapshot, "provider" | "systemPrompt" | "messages">,
+  session: Pick<SessionSnapshot, "provider" | "systemPrompt" | "runtimeSystemPrompt" | "messages">,
   prompt: string,
 ): string {
-  const text = session.systemPrompt?.trim();
-  if (!text || systemPromptFlag(session.provider)) return prompt;
-  if ((session.messages?.length ?? 0) > 1) return prompt;
-  return composeSystemFallback(text, prompt);
+  if (systemPromptFlag(session.provider)) return prompt;
+  const base = (session.messages?.length ?? 0) <= 1 ? session.systemPrompt?.trim() : "";
+  // Knowledge is live per turn, including resumed Codex/OpenCode/Gemini conversations.
+  const text = [base, session.runtimeSystemPrompt?.trim()].filter(Boolean).join("\n\n");
+  return text ? composeSystemFallback(text, prompt) : prompt;
 }
 
 /** provider 没有系统提示通道时的并接格式：明确标出这不是用户输入。 */

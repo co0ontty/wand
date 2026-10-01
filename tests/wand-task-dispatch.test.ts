@@ -193,7 +193,7 @@ printf '%s\\n' \\
   assert.deepEqual(refreshed.sessions.map((entry) => entry.provider), ["codex"]);
 });
 
-test("dispatch refuses an issue that has no CLI tool yet", async (t) => {
+test("dispatch rejects an invalid explicitly selected CLI instead of silently defaulting", async (t) => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-board-noagent-"));
   const storage = new WandStorage(path.join(root, "wand.db"));
   const config = { ...defaultConfig(), defaultCwd: root };
@@ -213,7 +213,7 @@ test("dispatch refuses an issue that has no CLI tool yet", async (t) => {
   const response = await invokeApp(app, {
     method: "POST",
     url: `/api/wand-tasks/${task.id}/dispatch`,
-    body: JSON.stringify({}),
+    body: JSON.stringify({ agent: { provider: "not-a-cli" } }),
   });
   assert.equal(response.status, 400);
   assert.match(JSON.stringify(response.json), /CLI 工具/);

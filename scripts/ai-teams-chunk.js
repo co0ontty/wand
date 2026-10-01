@@ -24,6 +24,8 @@ const CHUNK_FILES = new Set([
   path.join(REACT_ROOT, "agents", "candidate-editor.tsx"),
   path.join(REACT_ROOT, "agents", "employee-avatar.tsx"),
   path.join(REACT_ROOT, "agents", "employee-card.tsx"),
+  path.join(REACT_ROOT, "agents", "employee-memory.tsx"),
+  path.join(REACT_ROOT, "agents", "employee-knowledge.tsx"),
   path.join(REACT_ROOT, "agents", "employee-create-form.tsx"),
   path.join(REACT_ROOT, "agents", "employee-list-page.tsx"),
 ]);

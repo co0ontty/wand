@@ -56,6 +56,9 @@ import { createAiTeamRunner } from "./ai-team-runner.js";
 import type { AiTeamLiveUpdate } from "./ai-team-types.js";
 import { registerAiTeamRoutes } from "./server-ai-team-routes.js";
 import { registerSiliconEmployeeRoutes } from "./server-employee-routes.js";
+import { defaultRoleForCli } from "./default-employee.js";
+import { UserMemoryService } from "./user-memory.js";
+import { registerUserMemoryRoutes, userMemoryOperationLog } from "./server-user-memory.js";
 import { registerAttentionRoutes } from "./server-attention-routes.js";
 import {
   refreshProviderCliUpdateState,
@@ -390,6 +393,7 @@ export async function startServer(
 
   const app = express();
   let shuttingDown = false;
+  const testMode = process.env.WAND_TEST_MODE === "1";
   app.set("trust proxy", "loopback, 172.16.0.0/12");
   const storage = new WandStorage(resolveDatabasePath(configPath));
   const runtimeConfig = new RuntimeConfigState(config);
@@ -413,6 +417,7 @@ export async function startServer(
       inheritEnv: config.inheritEnv !== false,
       apiKey: process.env.ANTHROPIC_API_KEY,
       ...injected,
+      piEndpointDiscovery: injected.piEndpointDiscovery ?? { enabled: !testMode },
       configuredClaudeModels: [
         currentDefaults.claude,
         config.commitCli === "claude" ? (storage.getPreference("pref:commitModel", config.commitModel) ?? "") : undefined,
@@ -729,6 +734,7 @@ export async function startServer(
     "/api/session-directories",
     "/api/structured-sessions",
     "/api/commands",
+    "/api/user-memory",
     "/api/claude-history",
     "/api/codex-history",
     "/api/opencode-history",
@@ -765,6 +771,16 @@ export async function startServer(
     "/api/local-file",
   ], requireFiles);
   app.use("/api/browser-extension", requirePasswordVault);
+  app.use("/api/silicon-employees/:employeeId/knowledge", requireSessions);
+  app.use(userMemoryOperationLog(storage));
+  const userMemory = new UserMemoryService({
+    storage, config,
+    notifyChanged: (employeeId) => notifyAiTeamRun({ kind: "silicon-employee-definition", employeeId }),
+  });
+  registerUserMemoryRoutes(app, {
+    storage, service: userMemory,
+    notifyChanged: (employeeId) => notifyAiTeamRun({ kind: "silicon-employee-definition", employeeId }),
+  });
 
   // ── Config & Session info ──
 
@@ -983,7 +999,9 @@ export async function startServer(
               cols: reqCols,
               rows: reqRows,
               thinkingEffort: body.thinkingEffort ?? config.defaultThinkingEffort,
-              systemPrompt: body.systemPrompt,
+              systemPrompt: body.systemPrompt?.trim() || (origin.sessionSource === "interactive"
+                && (isSessionProvider(body.provider) || inferProviderFromCommand(command))
+                ? defaultRoleForCli(storage, provider).prompt : undefined),
               workspaceId,
               workspaceTaskId: body.workspaceTaskId,
               ...origin,
@@ -1195,8 +1213,8 @@ export async function startServer(
     );
   }
 
-  const testMode = process.env.WAND_TEST_MODE === "1";
   const updateChecksEnabled = !testMode && process.env.WAND_DISABLE_UPDATE_CHECK !== "1";
+  if (!testMode) userMemory.start();
 
   // Start configured background sessions after the server is already reachable.
   if (!testMode) {
@@ -1372,6 +1390,7 @@ export async function startServer(
     if (closePromise) return closePromise;
     closePromise = (async () => {
       shuttingDown = true;
+      await userMemory.dispose();
       if (updateCheckTimer) {
         clearInterval(updateCheckTimer);
         updateCheckTimer = null;

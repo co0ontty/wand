@@ -36,7 +36,7 @@ import { subscribeTaskChanges } from "../task-changes";
 import { WandBadge, WandBrandMark, WandBreadcrumb, WandButton, WandDialogSurface, WandIcon, WandIconButton, WandSearchField, WandSelect, WandStretchTabs } from "../ui";
 import { MOTION_DWELL_FAILED_MS, MOTION_DWELL_SENT_MS } from "../ui/motion-tokens";
 import { CAT_COATS, memberCoatIndex, PixelCat, shrinkAvatarImage, TeamAvatar, TeamAvatarStack } from "./avatar";
-import { useSiliconEmployees, siliconEmployeesRepository } from "../agents/employee-repository.js";
+import { useSiliconEmployees, siliconEmployeesRepository, notifySiliconEmployeeDefinitionChanged } from "../agents/employee-repository.js";
 import { teamChatComposer } from "./composer-bridge";
 import { aiTeamsRepository, subscribeAiTeamDefinitionChanges, subscribeAiTeamRunChanges } from "./repository";
 import type { TeamChatViewProps } from "./team-chat-view";
@@ -69,7 +69,7 @@ const AI_TEAMS_HOST: Record<string, object> = {
   },
   "issues/task-board-controller": { taskBoardController, taskBoardStore },
   "issues/task-board-repository": { taskBoardRepository },
-  "agents/employee-repository": { useSiliconEmployees, siliconEmployeesRepository },
+  "agents/employee-repository": { useSiliconEmployees, siliconEmployeesRepository, notifySiliconEmployeeDefinitionChanged },
   "model-catalog": { subscribeWandModelCatalog, wandModelDisplayName },
   "use-model-catalog": { useWandModelCatalog },
   "overlay-controller": { wandOverlay },
