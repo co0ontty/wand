@@ -5352,7 +5352,8 @@
       font-variant-numeric: tabular-nums;
       white-space: nowrap;
     }
-    .chat-activity-command-time { color: var(--text-secondary); }
+    /* 行首时间与展开行的时间同一套样式：等宽、弱色，只作时间列。 */
+    .chat-activity-command-time,
     .chat-activity-command-elapsed { color: var(--text-muted); }
     .chat-activity-command-running {
       color: var(--accent);

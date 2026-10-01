@@ -2784,6 +2784,12 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         }
 
         var summaryItems = [];
+        // 收起态的时间列：最新的真实命令时间排在这一行最前，和展开行的时间同一个位置。
+        var leadClockAt = summary.latestCommandAt;
+        var leadClock = leadClockAt ? formatActivityEventTime(leadClockAt) : "";
+        var leadClockHtml = leadClock ? '<time class="chat-activity-command-time" datetime="' +
+          escapeHtml(leadClockAt) + '" title="最近命令 ' +
+          escapeHtml(new Date(leadClockAt).toLocaleString()) + '">' + escapeHtml(leadClock) + '</time>' : "";
         if (summary.thinking.length) {
           summaryItems.push('<span class="chat-activity-meta-item is-thinking' +
             (thinkingRunning ? ' is-active' : '') + '">' +
@@ -2793,22 +2799,13 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           var part = summary.parts[p];
           var itemHtml = '<span class="chat-activity-meta-item' +
             (part.kind === "run_command" ? ' is-command' : '') + '">' + escapeHtml(part.text);
-          if (part.kind === "run_command") {
-            if (summary.latestCommandAt) {
-              var clock = formatActivityEventTime(summary.latestCommandAt);
-              if (clock) itemHtml += '<time class="chat-activity-command-time" datetime="' +
-                escapeHtml(summary.latestCommandAt) + '" title="最近命令 ' +
-                escapeHtml(new Date(summary.latestCommandAt).toLocaleString()) + '">' +
-                escapeHtml(clock) + '</time>';
-            }
-            if (commandRunning) {
-              itemHtml += '<span class="chat-activity-command-indicator" aria-hidden="true"></span>' +
-                '<span class="chat-activity-command-running">运行中</span>';
-              if (runningCommandAt) {
-                itemHtml += '<span class="chat-activity-command-elapsed" data-started-at="' +
-                  escapeHtml(runningCommandAt) + '">已等待 ' +
-                  formatActivityElapsed(Date.now() - Date.parse(runningCommandAt)) + '</span>';
-              }
+          if (part.kind === "run_command" && commandRunning) {
+            itemHtml += '<span class="chat-activity-command-indicator" aria-hidden="true"></span>' +
+              '<span class="chat-activity-command-running">运行中</span>';
+            if (runningCommandAt) {
+              itemHtml += '<span class="chat-activity-command-elapsed" data-started-at="' +
+                escapeHtml(runningCommandAt) + '">已等待 ' +
+                formatActivityElapsed(Date.now() - Date.parse(runningCommandAt)) + '</span>';
             }
           }
           summaryItems.push(itemHtml + '</span>');
@@ -2820,7 +2817,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
             'data-expand-key="' + escapeHtml(expandKey) + '" ' +
             'data-expanded="' + (expanded ? "true" : "false") + '">' +
           '<button type="button" class="chat-activity-summary" aria-expanded="' + (expanded ? "true" : "false") + '" onclick="__activityToggle(this)">' +
-            '<span class="chat-activity-meta">' + summaryItems.join(
+            '<span class="chat-activity-meta">' + leadClockHtml + summaryItems.join(
               '<span class="chat-activity-separator" aria-hidden="true">·</span>') + '</span>' +
             '<span class="chat-activity-chevron">' + iconSvg("chevronDown", { size: 13, strokeWidth: 2 }) + '</span>' +
           '</button>' +

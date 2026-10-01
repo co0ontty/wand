@@ -12,6 +12,9 @@ test("real Chrome tool timeline keeps all calls, fixed height and click-only det
   ], { maxBuffer: 2 * 1024 * 1024, timeout: 170_000 });
   const report = JSON.parse(stdout.trim());
   assert.equal(report.ok, true);
-  assert.equal(report.cases.length, 6);
+  assert.equal(report.cases.length, 7);
+  const summaryCase = report.cases.find((entry: any) => entry.mode === "collapsed-summary-time");
+  assert.match(summaryCase?.clock ?? "", /^\d{2}:\d{2}:\d{2}$/);
+  assert.equal(summaryCase?.first, "深度思考");
   assert.equal(report.errors.length, 0);
 });

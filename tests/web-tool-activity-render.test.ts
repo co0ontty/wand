@@ -57,6 +57,8 @@ test("adjacent thinking and command share one inline activity with hidden proces
   assert.match(html, /运行了1条命令/);
   assert.match(html, /is-command-running/);
   assert.match(html, /<time class="chat-activity-command-time" datetime="2026-09-30T12:03:10Z"/);
+  assert.match(html, /<span class="chat-activity-meta"><time class="chat-activity-command-time"/,
+    "collapsed summary leads with the command time");
   assert.match(html, /运行中/);
   assert.doesNotMatch(html, /thinking-inline/);
   assert.match(html, /chat-activity-entry-detail" inert aria-hidden="true"/);
@@ -71,6 +73,7 @@ test("completed command keeps its real time but has no running animation", () =>
     } },
   ], "");
   assert.match(html, /chat-activity-command-time/);
+  assert.match(html, /<span class="chat-activity-meta"><time class="chat-activity-command-time"/);
   assert.doesNotMatch(html, /is-command-running|已等待|chat-activity-command-indicator/);
 });
 
@@ -118,5 +121,6 @@ test("latest event clock and waiting duration can refer to different commands", 
     } },
   ], "older-pending");
   assert.match(html, /<time class="chat-activity-command-time" datetime="2026-09-30T12:03:10Z"/);
+  assert.equal((html.match(/chat-activity-command-time/g) ?? []).length, 1, "the time appears once, at the line head");
   assert.match(html, /class="chat-activity-command-elapsed" data-started-at="2026-09-30T12:00:00Z"/);
 });

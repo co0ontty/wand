@@ -133,6 +133,22 @@ try {
     assert.equal(await e('document.querySelectorAll(".assistant-reply-disclosure").length'),1);
     report.cases.push({ mode, fixedHeight:240, rows:40, requestCount:2, stableScroll:true, closePaths:true });
   }
+  // 收起态行首时间：没有展开时也能一眼看到「什么时候跑的」，位置在分类计数之前。
+  await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+  await e('document.documentElement.classList.remove("is-wand-app")');
+  await e('(async()=>{window.h=toolTimelineHarness;await h.fresh([{role:"assistant",uuid:"summary-time",content:[{type:"thinking",thinking:"planning"},{type:"tool_use",id:"cmd-1",name:"Bash",input:{},activity:{kind:"run_command",label:"运行命令 · Bash",occurredAt:"2026-09-30T12:03:10Z"}}]}])})()');
+  const lead = await e('(()=>{const s=document.querySelector(".chat-activity-summary");const meta=s.querySelector(".chat-activity-meta");const clock=meta&&meta.firstElementChild;const first=meta&&meta.querySelector(".chat-activity-meta-item");return{tag:clock&&clock.tagName,clock:clock&&clock.textContent.trim(),first:first&&first.textContent,expanded:s.getAttribute("aria-expanded"),before:!!clock&&!!first&&clock.getBoundingClientRect().right<=first.getBoundingClientRect().left}})()');
+  assert.equal(lead.tag, "TIME", "collapsed summary starts with the command time");
+  assert.match(lead.clock ?? "", /^\d{2}:\d{2}:\d{2}$/, "collapsed summary shows a real clock");
+  assert.equal(lead.first, "深度思考", "the time precedes the thinking/count text");
+  assert.equal(lead.expanded, "false", "the time is visible while the timeline stays closed");
+  assert.equal(lead.before, true, "collapsed summary renders the time before its summary items");
+  report.cases.push({ mode: "collapsed-summary-time", clock: lead.clock, first: lead.first });
+  if (output) {
+    mkdirSync(output,{recursive:true});
+    const shot = await send("Page.captureScreenshot",{format:"png"});
+    writeFileSync(join(output,"collapsed-summary-time.png"),Buffer.from(shot.data,"base64"));
+  }
   assert.deepEqual(report.errors, []); assert.ok(report.removedSelectorHits.every(x=>x.groups===0 && x.oldAnimation===0));
   report.ok = true; console.log(JSON.stringify(report));
 } catch (error) {
