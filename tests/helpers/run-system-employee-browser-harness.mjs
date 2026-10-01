@@ -113,6 +113,7 @@ try {
       hint: box.querySelector('.wand-settings-system-ai-hint')?.textContent?.trim() ?? '',
       inputs: box.querySelectorAll('input, select, textarea').length,
       background: style.backgroundColor,
+      cliLogo: box.querySelector('.wand-employee-avatar-provider [data-provider-logo]')?.dataset.providerLogo,
     };
   })()`);
   assert.equal(owner.label, "系统 AI 执行者");
@@ -123,6 +124,7 @@ try {
   assert.match(owner.chain[1], /^02\s*Grok · grok-4\.5$/);
   assert.match(owner.hint, /硅基员工/);
   assert.equal(owner.inputs, 0, "设置页只做投影，不在原地改候选");
+  assert.equal(owner.cliLogo, "claude", "系统员工头像显示首选 CLI 角标");
   assert.ok(owner.background && owner.background !== "rgba(0, 0, 0, 0)", "投影卡片有背景样式");
   results.push({ check: "settings/system-ai-owner-projection", owner });
 
@@ -134,6 +136,13 @@ try {
       tags: cards.map((card) => card.querySelector('.wand-employee-system-tag')?.textContent?.trim() ?? ''),
       firstIsSystem: cards[0].classList.contains('is-system'),
       agents: cards[0].querySelector('.wand-team-member-agent').textContent.trim(),
+      cliLogos: cards.map((card) => card.querySelector('.wand-employee-avatar-provider [data-provider-logo]')?.dataset.providerLogo),
+      badgeGeometry: cards.map((card) => {
+        const avatar = card.querySelector('.wand-employee-avatar').getBoundingClientRect();
+        const badge = card.querySelector('.wand-employee-avatar-provider').getBoundingClientRect();
+        return { size: badge.width, square: badge.width === badge.height,
+          right: avatar.right - badge.right, bottom: avatar.bottom - badge.bottom };
+      }),
     };
   })()`);
   assert.equal(layout.order.length, 3);
@@ -141,6 +150,13 @@ try {
   assert.equal(layout.tags[0], "系统运维");
   assert.equal(layout.tags[1], "");
   assert.equal(layout.firstIsSystem, true, "内置员工卡片带 is-system 状态");
+  assert.deepEqual(layout.cliLogos, ["claude", "claude", "claude"]);
+  for (const badge of layout.badgeGeometry) {
+    assert.equal(badge.square, true);
+    assert.ok(badge.size >= 13 && badge.size <= 20);
+    assert.equal(badge.right, -2, "角标贴头像右下角");
+    assert.equal(badge.bottom, -2);
+  }
   assert.match(layout.agents, /备用/, "候选链摘要要显示备用数量");
   results.push({ check: "list/system-first-with-tag", layout });
 
@@ -187,7 +203,9 @@ try {
   assert.equal(afterSave.length, 2);
   assert.match(afterSave[0], /^01\s*Grok · grok-4\.5$/);
   assert.match(afterSave[1], /^02\s*Claude · 默认模型$/);
-  results.push({ check: "settings/follows-definition-change", afterSave });
+  await waitFor("document.querySelector('.wand-settings-system-ai-owner .wand-employee-avatar-provider [data-provider-logo]')?.dataset.providerLogo === 'grok'");
+  assert.equal(await evaluate("document.querySelector('[data-employee-id=e_wand_ops] .wand-team-member-head .wand-employee-avatar-provider [data-provider-logo]').dataset.providerLogo"), "grok");
+  results.push({ check: "settings/follows-definition-change", afterSave, cliBadgeUpdated: true });
 
   // 普通员工保持原有编辑能力。
   await action("document.querySelectorAll('.wand-employee-card .wand-team-member-head')[1].click()");

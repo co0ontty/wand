@@ -31,7 +31,7 @@ import {
   workspaceTaskIconName,
 } from "../ui";
 import { SessionProviderMark } from "./session-mark";
-import { sidebarSessionLabel } from "./session-order";
+import { sidebarSessionLabel, workspaceSessionProvider } from "./session-order";
 import { SidebarDisclosure, useSidebarCollapsed } from "./sidebar-disclosure";
 import {
   formatTaskRecency,
@@ -1917,7 +1917,7 @@ export function WorkspacesPanel({
                     key={emp.id}
                     id={emp.id}
                     title={emp.name}
-                    avatarNode={<EmployeeAvatar employee={emp} size="md" />}
+                    avatarNode={<EmployeeAvatar employee={emp} provider={matched ? workspaceSessionProvider(matched.session) ?? "" : undefined} size="md" />}
                     presence={presence}
                     summary={matched ? `会话 · ${matched.session.title || "未命名会话"}` : emp.duty || "开始新对话"}
                     compact={compact}

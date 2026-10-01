@@ -3711,6 +3711,34 @@
       box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
     }
 
+    /* 员工 CLI 角标叠在头像右下角，不改变头像及触发点的布局尺寸。 */
+    .wand-employee-avatar { position: relative; }
+    .pixel-avatar.wand-employee-avatar { overflow: visible; }
+    .wand-employee-avatar-face {
+      display: block;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      border-radius: inherit;
+    }
+    .wand-employee-avatar-face > .pixel-avatar { width: 100%; height: 100%; }
+    .wand-employee-avatar-provider {
+      position: absolute;
+      right: -2px;
+      bottom: -2px;
+      z-index: 1;
+      display: grid;
+      place-items: center;
+      width: clamp(13px, 50%, 20px);
+      height: clamp(13px, 50%, 20px);
+      border: 1.5px solid var(--bg-primary);
+      border-radius: 35%;
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+      pointer-events: none;
+    }
+    .wand-employee-avatar-provider > .wand-provider-logo { width: 75%; height: 75%; }
+
     .pixel-avatar-image {
       display: block;
       width: 100%;
@@ -18161,6 +18189,11 @@ html:not(.is-wand-app) #app[data-react-shell="enabled"] .sidebar-refined .worksp
   height: 8px;
   border-radius: var(--radius-full);
   border: 1.5px solid var(--bg-primary);
+}
+/* 右下角留给 CLI logo；联系人状态点移到右上角，二者均保持可见。 */
+.im-sidebar-item-avatar-wrap:has(.wand-employee-avatar-provider) > .im-sidebar-presence-dot {
+  top: -2px;
+  bottom: auto;
 }
 .im-sidebar-presence-dot.tone-warning {
   background: var(--warning);

@@ -3,18 +3,24 @@ import { memberCoatIndex, PixelCat, shrinkAvatarImage } from "../ai-teams/avatar
 import { CAT_COATS } from "../ai-teams/cat-coats.js";
 import { WandButton, WandIcon } from "../ui";
 import { SILICON_EMPLOYEE_AVATAR_MAX_CHARS } from "../../../ai-team-types.js";
+import { employeeAvatarProvider, employeeCliLabel } from "./employee-identity.js";
+import { ProviderLogo } from "../provider-logo.js";
 
 export function EmployeeAvatar({
   employee,
+  provider,
   size = "md",
   className = "",
 }: {
-  employee: { id: string; name: string; avatar?: string };
+  employee: { id: string; name: string; avatar?: string; agents?: ReadonlyArray<{ provider?: string }> };
+  provider?: string;
   size?: "sm" | "md" | "lg" | "xl";
   className?: string;
 }): React.ReactElement {
   const upload = employee.avatar?.startsWith("data:image/") ? employee.avatar : "";
-  const cls = `wand-team-avatar ${className}`.trim();
+  const cli = employeeAvatarProvider(employee, provider);
+  const cliLabel = cli ? employeeCliLabel(cli) : "";
+  const cls = `wand-team-avatar wand-employee-avatar ${className}`.trim();
   return (
     <span
       className={cls}
@@ -24,6 +30,9 @@ export function EmployeeAvatar({
       <span className="wand-team-avatar-face">
         {upload ? <img src={upload} alt="" /> : <PixelCat coat={memberCoatIndex(employee)} />}
       </span>
+      {cli ? <span className="wand-employee-avatar-provider" role="img" aria-label={cliLabel} title={cliLabel}>
+        <ProviderLogo provider={cli} />
+      </span> : null}
     </span>
   );
 }

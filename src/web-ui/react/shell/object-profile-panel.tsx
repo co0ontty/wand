@@ -96,7 +96,7 @@ export function ObjectProfilePanel({
           {/* 头像 + 核心名片 */}
           <div className="object-profile-card">
             {identity ? (
-              <EmployeeAvatar employee={identity} size="xl" />
+              <EmployeeAvatar employee={identity} provider={selectedSession?.provider} size="xl" />
             ) : (
               <div className="object-profile-cli-avatar">
                 <WandIcon name="terminal" size={32} />

@@ -228,7 +228,7 @@ export function ShellTopbar() {
               onClick={toggleProfile}
             >
               {employeeSnapshot ? (
-                <EmployeeAvatar employee={employeeSnapshot} size="sm" className="topbar-object-avatar" />
+                <EmployeeAvatar employee={employeeSnapshot} provider={selected.provider} size="sm" className="topbar-object-avatar" />
               ) : (
                 <span className="topbar-object-cli-icon"><WandIcon name="terminal" size={14} /></span>
               )}

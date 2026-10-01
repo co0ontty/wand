@@ -22,6 +22,7 @@ import { catCoatGrid, memberCoatIndex } from "../react/ai-teams/cat-coats";
 import { parseJsonResponse } from "../react/http-adapter";
 import { commandOccurredAt, currentToolActivity, formatActivityElapsed, groupToolActivities, isToolActivityOnly, latestCommandOccurredAt, toolActivityTimeline, TOOL_ACTIVITY_KINDS } from "./tool-activity";
 import { cachedSiliconEmployee, subscribeSiliconEmployeeCache } from "../react/agents/employee-repository.js";
+import { renderEmployeeCliBadge } from "../react/agents/employee-identity.js";
 import {
   agentRunAccentSeed,
   agentRunAgentTitle,
@@ -379,7 +380,7 @@ function buildChatRowDependencies(messages: any[], revisions: number[], runs: an
       live: isTurnActivityLive(index), commandRunning: commandRunning,
       lang: getActiveLang(), persona: state.config?.structuredChatPersona,
       defaults: state.config?.cardDefaults,
-      employee: [session.employeeId, session.employeeName, session.employeeAvatar],
+      employee: [session.employeeId, session.employeeName, session.employeeAvatar, session.provider],
       interactionOwner: chatOwnerPlan?.messages[index]?.key || null };
   });
 }
@@ -2224,7 +2225,9 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
             : renderAvatarFallback(buildPixelSvg(catCoatGrid(memberCoatIndex(employee)).map(function(row) {
                 return row.map(function(fill) { return fill || _AVATAR_T; });
               })));
-          return '<div class="chat-message-avatar assistant">' + employeeAvatar +
+          return '<div class="chat-message-avatar assistant"><span class="pixel-avatar wand-employee-avatar">' +
+            '<span class="wand-employee-avatar-face">' + employeeAvatar + '</span>' +
+            renderEmployeeCliBadge(selectedSession.provider) + '</span>' +
             '<span class="avatar-name">' + escapeHtml(employee.name) + '</span></div>';
         }
         var personaRole = role === "user" ? "user" : "assistant";
