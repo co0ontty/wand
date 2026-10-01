@@ -831,10 +831,15 @@ test("a team run posts its plan, dispatches and reports into one group chat", as
   assert.match(lines[4]!, /^负责人: 计划\n\n1\. \*\*@实现\*\* 写代码$/);
   // 开工发言（S4）：成员自己发的真实发言，第 1 行带真实步号与标题。
   assert.equal(lines[5], "实现: 我正在开始工作：第 2 步「写代码」");
-  assert.equal(lines[6], "实现: ✅ 完成「写代码」\n\n改好了");
+  assert.match(lines[6]!, /^实现: ✅ 完成「写代码」\n\n\[附件已上传，请查看以下文件:/);
+  assert.equal(lines[6]!.includes("改好了"), false, "报告正文不进群聊");
   const report = h.chat.turns.get(chatId)![6]!;
   assert.equal(report.author?.sessionId, dev.sessionId);
   assert.equal(report.author?.provider, "codex");
+  assert.deepEqual(report.reportFile, {
+    stepId: dev.id, path: path.resolve(h.cwd, dev.reportPath), name: path.basename(dev.reportPath),
+    size: Buffer.byteLength("改好了"), preview: { title: "写代码", excerpt: "改好了" },
+  });
 });
 
 test("group chat replies approve, revise, queue notes, and restart finished runs", async (t) => {
@@ -912,7 +917,9 @@ test("a follow-up in the same group chat hands the earlier rounds to the new lea
   assert.match(leadOpened.systemPrompt!, /已经做完的不要重做/);
   const file = readFileSync(path.join(h.cwd, historyPath), "utf8");
   assert.match(file, /第2步 · 实现 · 改 README · 完成/, "上一轮的步骤与结局写进摘要");
-  assert.match(file, /README\.md 顶部加了 npm 安装说明/, "上一轮的报告正文留在群聊原文里");
+  assert.ok(file.includes(path.resolve(h.cwd, dev.reportPath)), "群聊历史引用真实报告文件");
+  assert.ok(!file.includes("README.md 顶部加了 npm 安装说明"), "群聊不重复整份报告正文");
+  assert.match(readFileSync(path.resolve(h.cwd, dev.reportPath), "utf8"), /README\.md 顶部加了 npm 安装说明/);
   assert.match(file, /都做完了/);
   assert.match(file, /安装命令换成 pnpm/);
   assert.equal(file.split("创建了团队群聊").length - 1, 1, "历史只收上一轮的入群序列，不带新运行自己的那条");
@@ -2203,4 +2210,79 @@ test("[R1 S-4/S-5] replacement has new seq; S5 uses batch position, not persiste
   assert.ok(turns.indexOf(starts[0]!) < notice && notice < turns.indexOf(starts[1]!));
   assert.equal(detail.steps.find((step) => step.seq === 2)?.status, "skipped");
   assert.equal(detail.steps.find((step) => step.seq === 4)?.status, "running");
+});
+
+test("completed reports send one file card with the original bytes, never inline or truncated text", async (t) => {
+  const h = harness(t, { requirePlanApproval: false });
+  const runId = await startAndPlan(h, [["m_dev", "写报告"]]);
+  const dev = runningStep(h, runId);
+  const body = "# 完整报告\n" + "中文报告内容\n".repeat(10_000);
+  writeReport(h, dev, body);
+  h.ops.finishTurn(dev.sessionId!);
+  await settle(h, dev.sessionId!);
+  await settle(h, dev.sessionId!);
+  const turns = h.runner.detail(runId).chatTurns.filter((turn) => turn.reportFile?.stepId === dev.id);
+  assert.equal(turns.length, 1, "重复状态事件不重复投递");
+  const file = turns[0]!.reportFile!;
+  assert.equal(file.size, Buffer.byteLength(body));
+  assert.equal(readFileSync(file.path, "utf8"), body, "下载对应完整原始文件，不是64KB存储摘要");
+  assert.ok(!turnText(turns[0]!).includes("中文报告内容"), "聊天正文不重复报告");
+  assert.ok(file.preview?.excerpt.includes("中文报告内容"), "卡片带真实的有限摘录");
+  assert.ok(Array.from(file.preview!.excerpt).length <= 240);
+  assert.ok(JSON.stringify(turns[0]).length < 1600, "不会把整份报告混进元数据");
+  assert.ok(!JSON.stringify(turns[0]).includes("已截断"));
+  assert.ok(h.storage.listAiTeamSteps(runId).find((step) => step.id === dev.id)!.report.includes("已截断"));
+});
+
+test("assistant fallback and manual completion materialize report files before sending cards", async (t) => {
+  for (const manual of [false, true]) {
+    const h = harness(t, { requirePlanApproval: false });
+    const runId = await startAndPlan(h, [["m_dev", "短报告"]]);
+    const dev = runningStep(h, runId);
+    const body = manual ? "手动补充的报告" : "CLI没写文件的短报告";
+    if (manual) await h.runner.completeStep(runId, dev.id, body);
+    else {
+      h.ops.finishTurn(dev.sessionId!, body);
+      await settle(h, dev.sessionId!);
+    }
+    const turn = h.runner.detail(runId).chatTurns.find((item) => item.reportFile?.stepId === dev.id)!;
+    assert.ok(turn.reportFile);
+    assert.equal(readFileSync(turn.reportFile.path, "utf8"), body);
+    assert.equal(turn.reportFile.size, Buffer.byteLength(body));
+    assert.ok(!turnText(turn).includes(body));
+    assert.equal(turn.reportFile.preview!.excerpt, body);
+  }
+});
+
+test("manual completion never overwrites an existing report; unavailable file stays a brief message", async (t) => {
+  for (const directory of [false, true]) {
+    const h = harness(t, { requirePlanApproval: false });
+    const runId = await startAndPlan(h, [["m_dev", "手动完成"]]);
+    const dev = runningStep(h, runId);
+    const file = path.resolve(h.cwd, dev.reportPath);
+    if (directory) mkdirSync(file, { recursive: true });
+    else writeReport(h, dev, "真实CLI产物");
+    await h.runner.completeStep(runId, dev.id, "手动完成正文");
+    const turn = h.runner.detail(runId).chatTurns.find((item) => turnText(item).startsWith("✅ 完成「手动完成」"))!;
+    assert.ok(!turnText(turn).includes("手动完成正文"));
+    if (directory) {
+      assert.equal(turn.reportFile, undefined);
+      assert.match(turnText(turn), /报告文件暂不可用/);
+    } else {
+      assert.equal(readFileSync(turn.reportFile!.path, "utf8"), "真实CLI产物");
+      assert.equal(turn.reportFile!.preview!.excerpt, "真实CLI产物", "缩略信息来自真正文件，不是手动完成文案");
+    }
+  }
+});
+
+test("failed members keep error feedback rather than manufacturing a completed report file", async (t) => {
+  const h = harness(t, { requirePlanApproval: false });
+  const runId = await startAndPlan(h, [["m_dev", "失败步骤"]]);
+  const dev = runningStep(h, runId);
+  h.ops.sessions.get(dev.sessionId!)!.status = "stopped";
+  h.ops.finishTurn(dev.sessionId!);
+  await settle(h, dev.sessionId!);
+  const turn = h.runner.detail(runId).chatTurns.find((item) => turnText(item).startsWith("❌ 没完成「失败步骤」"))!;
+  assert.equal(turn.reportFile, undefined);
+  assert.match(turnText(turn), /未交付报告/);
 });

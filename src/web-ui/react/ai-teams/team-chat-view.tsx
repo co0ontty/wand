@@ -2,9 +2,10 @@ import * as React from "react";
 import type { AgentActivityState } from "../../../mission-types";
 import { AI_TEAM_DETAIL_CHAT_TURNS, type AiTeamLiveStep, type AiTeamRun,
   type AiTeamRunDetail, type AiTeamStep, type AiTeam } from "../../../ai-team-types";
-import type { ConversationAuthor, ConversationTurn } from "../../../types";
+import type { ConversationAuthor, ConversationTurn, TeamReportFile } from "../../../types";
 import { failureMessage } from "../errors";
 import { filePreviewController } from "../file-preview/controller";
+import { formatFilePreviewSize } from "../file-preview/model";
 import { HttpResponseError, jsonBody, requestJson } from "../http-adapter";
 import { issueAgentEffortLabel, issueAgentProviderLabel } from "../issues/task-board-agent";
 import { wandModelDisplayName, type WandModelCatalog } from "../model-catalog";
@@ -595,6 +596,29 @@ function ChatAttachments({ paths }: { paths: readonly string[] }): React.ReactEl
   </div>;
 }
 
+/** 真正的文件消息，不展示正文或报告预览；只有点击后才读取文件。 */
+function ReportFileCard({ file }: { file: TeamReportFile }): React.ReactElement {
+  const title = file.preview?.title || file.name;
+  const excerpt = file.preview?.excerpt || (file.preview ? "报告暂无正文" : "点击查看完整报告");
+  return <div className="team-chat-file-card">
+    <button type="button" className="team-chat-file-open" title={`查看完整报告：${title}`}
+      onClick={() => { void filePreviewController.open(file.path); }}>
+      <span className="team-chat-file-copy">
+        <strong>{title}</strong>
+        <span className="team-chat-file-excerpt">{excerpt}</span>
+      </span>
+      <span className="team-chat-file-icon" aria-hidden="true">
+        <WandIcon name="file" size={12}/>
+        <b>{title}</b>
+        <span>{file.preview?.excerpt}</span>
+      </span>
+      <span className="team-chat-file-meta">
+        <span>{file.name}</span><span>Markdown · {formatFilePreviewSize(file.size)}</span>
+      </span>
+    </button>
+  </div>;
+}
+
 /** 发言头像：32px 圆角方块，成员是各自的像素猫，没有身份的发言用系统 APP logo。 */
 function MessageAvatar({ spec, size = "md" }: {
   spec: ChatAvatarSpec;
@@ -826,7 +850,7 @@ function StepTurn({
   const text = report ? report.body : chatTurnText(turn);
   const clock = chatTurnClock(turn);
   const status = step?.status ?? (report?.ok === false ? "failed" : report ? "done" : undefined);
-  const shape = teamChatMessageShape("step", text, 0);
+  const shape = turn.reportFile ? "bubble" : teamChatMessageShape("step", text, 0);
   const name = author?.name ?? "成员";
   const avatar = chatAvatarSpec(author);
   const chip = report ? `${report.ok ? "✅" : "❌"} ${report.title}` : "";
@@ -845,7 +869,7 @@ function StepTurn({
     arriving={arriving}
     onArrivalEnd={onArrivalEnd}
   >
-    <MessageBody
+    {turn.reportFile ? <ReportFileCard file={turn.reportFile}/> : <MessageBody
       shape={shape}
       text={text}
       names={names}
@@ -859,7 +883,7 @@ function StepTurn({
         side: "start",
         mentionNames: [...names],
       })}
-    />
+    />}
   </TeamMessageRow>;
 }
 
@@ -1155,6 +1179,8 @@ export function chatTurnFingerprint(turn: ConversationTurn): string | null {
       author.sessionId ?? null, author.provider ?? null, author.model ?? null,
       author.thinkingEffort ?? null, author.avatar ?? null] : null,
     content,
+    ...(turn.reportFile ? [[turn.reportFile.stepId, turn.reportFile.path, turn.reportFile.name,
+      turn.reportFile.size, turn.reportFile.preview?.title ?? null, turn.reportFile.preview?.excerpt ?? null]] : []),
   ]);
 }
 
@@ -1926,8 +1952,9 @@ export function TeamChatView({ detail, onChange, onOpenSession, details, staleRu
           />);
         }
         const report = parseStepReport(chatTurnText(turn));
-        const step = report
-          ? steps.find((item) => item.kind === "work" && item.title === report.title)
+        const step = turn.reportFile
+          ? steps.find((item) => item.id === turn.reportFile!.stepId)
+          : report ? steps.find((item) => item.kind === "work" && item.title === report.title)
           : undefined;
         return withTimeMarker(<StepTurn
           presentationId={key}

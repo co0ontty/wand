@@ -592,10 +592,21 @@ export interface ConversationAuthor {
   sessionId?: string;
 }
 
+/** 团队成员完成报告后投递的文件元数据；正文按需预览，不嵌进群聊。 */
+export interface TeamReportFile {
+  stepId: string;
+  path: string;
+  name: string;
+  size: number;
+  /** 完成时从原文件提取的标题与有限摘录；旧消息可缺省。 */
+  preview?: { title: string; excerpt: string };
+}
+
 export interface ConversationTurn {
   role: "user" | "assistant";
   content: ContentBlock[];
   author?: ConversationAuthor;
+  reportFile?: TeamReportFile;
   /** 群聊里的进度提示（派工、开始、出错）：渲染成居中的一行，不是气泡。 */
   notice?: boolean;
   /** ISO time when this turn was first recorded (user send / assistant start). */

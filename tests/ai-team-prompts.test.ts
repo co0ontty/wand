@@ -286,7 +286,8 @@ test("[T4] member system prompt teaches chat bubbles with the member name", () =
   const run = { team: v2Team, objective: "目标" } as AiTeamRun;
   const step = { title: "改", instructions: "做事", reportPath: aiTeamReportPath("r1", 2, "work", "m_dev") } as AiTeamStep;
   const system = buildMemberPrompt(run, step, v2Team.members[1]!, true).system;
-  assert.ok(system.includes("你的发言会以群聊气泡出现，署名是你的名字；报告仍写进报告文件。"));
+  assert.ok(system.includes("你的发言会以群聊气泡出现，署名是你的名字"));
+  assert.ok(system.includes("以文件卡片发到群聊，不要再复述报告正文"));
 });
 
 test("[T4] parseLeaderDecision still has no role hard validation", () => {

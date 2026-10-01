@@ -50,7 +50,9 @@ const BUDGET = {
   // This changes only the on-demand allowance (+5,000 B), not the shell's cold
   // load or repeat HTML budgets. Opening a team/chat page fetches the chunk once;
   // its content-versioned URL remains browser-cacheable until the bytes change.
-  lazy: 40_000,
+  // 团队报告增加真实标题、三行摘录与文本缩略图：实测 39960→40201 B gzip。
+  // 仅打开团队时下载并按内容指纹缓存，不增加首载；其它预算保持不变。
+  lazy: 41_000,
 };
 const gzipBytes = (content) => gzipSync(Buffer.from(content, "utf8")).length;
 const rows = [

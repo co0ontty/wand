@@ -4,6 +4,7 @@ import { failureMessage } from "../errors";
 import { ComposerAttachmentList } from "../composer-attachments/host";
 import { ComposerPopoverAction } from "../composer-popover/action";
 import { filePreviewController } from "../file-preview/controller";
+import { formatFilePreviewSize } from "../file-preview/model";
 import { HttpResponseError, jsonBody, requestJson } from "../http-adapter";
 import { AgentFields } from "../issues/agent-fields";
 import {
@@ -54,6 +55,7 @@ const AI_TEAMS_HOST: Record<string, object> = {
   "composer-attachments/host": { ComposerAttachmentList },
   "composer-popover/action": { ComposerPopoverAction },
   "file-preview/controller": { filePreviewController },
+  "file-preview/model": { formatFilePreviewSize },
   "http-adapter": { HttpResponseError, jsonBody, requestJson },
   "issues/agent-fields": { AgentFields },
   "issues/task-board-agent": {

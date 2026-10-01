@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -56,13 +56,14 @@ import {
   type StepDispatchInfo,
 } from "./ai-team-types.js";
 import { renderLiveStepText } from "./ai-team-live.js";
+import { teamReportPreview } from "./team-report-preview.js";
 import { getErrorMessage } from "./error-utils.js";
 import { activityState } from "./missions.js";
 import type { AgentActivityState } from "./mission-types.js";
 import type { SessionRegistry } from "./session-registry.js";
 import type { AiTeamRunState, WandStorage } from "./storage.js";
 import type { WandTask, WandTaskAgent } from "./task-types.js";
-import type { ConversationAuthor, ConversationTurn, ProcessEvent, SessionSnapshot } from "./types.js";
+import type { ConversationAuthor, ConversationTurn, ProcessEvent, SessionSnapshot, TeamReportFile } from "./types.js";
 
 const REPORT_MAX_BYTES = 64 * 1024;
 /** 报告文件最后一次写入后要稳定这么久才读取，避免读到写了一半的文件。 */
@@ -425,9 +426,21 @@ function hasStepAssistantReply(snapshot: SessionSnapshot, reportPath: string, er
 }
 
 function readReport(file: string): string {
-  const buffer = readFileSync(file);
-  if (buffer.length <= REPORT_MAX_BYTES) return buffer.toString("utf8");
-  return `${buffer.subarray(0, REPORT_MAX_BYTES).toString("utf8")}\n\n（已截断）`;
+  // 交接摘要与卡片预览都只读预算内的字节，完整产物仍由下载接口流式提供。
+  const fd = openSync(file, "r");
+  const buffer = Buffer.alloc(REPORT_MAX_BYTES + 1);
+  let bytes = 0;
+  try {
+    while (bytes < buffer.length) {
+      const count = readSync(fd, buffer, bytes, buffer.length - bytes, null);
+      if (count === 0) break;
+      bytes += count;
+    }
+  } finally {
+    closeSync(fd);
+  }
+  const text = buffer.subarray(0, Math.min(bytes, REPORT_MAX_BYTES)).toString("utf8");
+  return bytes > REPORT_MAX_BYTES ? `${text}\n\n（已截断）` : text;
 }
 
 /** 把 .wand-team/ 加进仓库的 info/exclude，避免报告文件出现在未跟踪列表里。 */
@@ -1066,10 +1079,16 @@ export class AiTeamRunner {
       this.saveStep({ ...step, status: outcome.kind === "done" ? "done" : "failed", report, endedAt });
       const member = this.member(run.team, step.memberId);
       if (member) {
+        const reportFile = outcome.kind === "done" ? this.completedReportFile(run, step, report, outcome.fromFile) : undefined;
+        // 旧客户端也能用已有附件协议打开文件；新客户端用元数据渲染完整文件卡片。
+        const body = reportFile
+          ? `[附件已上传，请查看以下文件:\n${reportFile.path}\n]\n\n请查看附件。`
+          : outcome.kind === "done" ? "报告文件暂不可用，请查看成员会话。" : report;
         this.postTurn(run, {
           role: "assistant",
           author: chatAuthor(member, step.sessionId, this.actualAgent(member, step)),
-          content: chatText(`${outcome.kind === "done" ? "✅ 完成" : "❌ 没完成"}「${step.title}」\n\n${report}`),
+          content: chatText(`${outcome.kind === "done" ? "✅ 完成" : "❌ 没完成"}「${step.title}」\n\n${body}`),
+          ...(reportFile ? { reportFile } : {}),
         });
       }
       this.saveRun(run);
@@ -1756,6 +1775,27 @@ export class AiTeamRunner {
     const leaderAgent = leader ? memberAgents(leader)[0] ?? leader.agent : undefined;
     for (const line of chatIntroLines(run.team, aiTeamChatTitle(task.title))) {
       this.postNotice(run, line, run.chatSessionId, leader, leaderAgent);
+    }
+  }
+
+  /** 真实文件保持原字节；CLI 回复/手动完成的报告先落成文件，再投递卡片。 */
+  private completedReportFile(run: AiTeamRun, step: AiTeamStep, report: string, fromFile: boolean): TeamReportFile | undefined {
+    try {
+      const file = path.resolve(run.cwd, step.reportPath);
+      if (!fromFile) {
+        mkdirSync(path.dirname(file), { recursive: true });
+        // 不覆盖恰好迟到的 CLI 文件：它才是产物真源。
+        if (!existsSync(file)) writeFileSync(file, report, { encoding: "utf8", flag: "wx" });
+      }
+      const stat = statSync(file);
+      if (!stat.isFile()) throw new Error("报告路径不是文件");
+      return {
+        stepId: step.id, path: file, name: path.basename(file), size: stat.size,
+        preview: teamReportPreview(readReport(file), step.title),
+      };
+    } catch (error) {
+      console.error("[AiTeam] report attachment unavailable:", getErrorMessage(error));
+      return undefined;
     }
   }
 

@@ -145,7 +145,7 @@ export interface AiTeamUpstream {
   steps: AiTeamHandoffStep[];
 }
 
-/** 群聊上下文文件里的一段「之前几轮运行」摘要：只列步骤与状态，报告正文在群聊原文里。 */
+/** 群聊上下文文件里的一段「之前几轮运行」摘要：只列步骤与状态，报告正文通过群聊文件引用读取。 */
 export interface AiTeamHistoryRun {
   status: AiTeamRunStatus;
   steps: Array<{ seq: number; memberName: string; title: string; status: AiTeamStep["status"] }>;
@@ -199,7 +199,7 @@ export function renderChatHistoryFile(input: {
     "# 本群聊之前的记录",
     "",
     `> 生成时间：${input.generatedAt}。用户在这个群聊里接着提了新要求，动手前先读完这份记录。`,
-    "> 已经完成的部分不要重做；上一轮没做完的步骤见下面的运行摘要，报告正文见群聊原文。",
+    "> 已经完成的部分不要重做；上一轮没做完的步骤见下面的运行摘要，报告正文请读取群聊里的报告文件。",
     "",
   ];
   if (input.runs.length > 0) {
@@ -346,7 +346,7 @@ function memberSystemPrompt(run: AiTeamRun, member: AiTeamMember): string {
     "## 工作方式",
     "- 只做本轮消息里指派给你的这一步，不要顺手改别的。",
     "- 不要 git commit / push。",
-    "- 你的发言会以群聊气泡出现，署名是你的名字；报告仍写进报告文件。",
+    "- 你的发言会以群聊气泡出现，署名是你的名字；报告写进报告文件，完成后服务端会以文件卡片发到群聊，不要再复述报告正文。",
     "",
     ...handoffRules("member"),
     "## 报告约定",

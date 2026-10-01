@@ -71,5 +71,5 @@ test("the raised lazy allowance still rejects oversized team chunks", (t) => {
   const result = fixture.run(lazy);
   assert.equal(result.status, 1);
   assert.match(String(result.stderr), /\[bundle-budget\] FAILED:/);
-  assert.match(String(result.stderr), /ai-teams\.js \(lazy\): \d+ B > 40000 B/);
+  assert.match(String(result.stderr), /ai-teams\.js \(lazy\): \d+ B > 41000 B/);
 });

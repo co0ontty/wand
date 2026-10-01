@@ -699,6 +699,81 @@ button.team-chat-office-member:hover, button.team-chat-office-member:focus-visib
   max-height: 180px;
   object-fit: contain;
 }
+/* 文件消息只显示文件身份；正文在公共预览中按需读取。 */
+.task-board-team-chat .team-chat-file-card {
+  width: min(100%, 360px);
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+.task-board-team-chat .team-chat-file-open {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 54px;
+  align-items: start;
+  gap: 12px;
+  width: 100%;
+  padding: 14px;
+  border: 0;
+  color: var(--text-primary);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+.task-board-team-chat .team-chat-file-open:hover { background: var(--bg-tertiary); }
+.task-board-team-chat .team-chat-file-copy { display: grid; gap: 6px; min-width: 0; }
+.task-board-team-chat .team-chat-file-copy strong,
+.task-board-team-chat .team-chat-file-excerpt {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+}
+.task-board-team-chat .team-chat-file-copy strong {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  -webkit-line-clamp: 2;
+}
+.task-board-team-chat .team-chat-file-excerpt {
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-base);
+  white-space: pre-line;
+  -webkit-line-clamp: 3;
+}
+.task-board-team-chat .team-chat-file-icon {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  height: 76px;
+  padding: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  color: var(--text-tertiary);
+  background: var(--bg-primary);
+  font-size: 6px;
+  line-height: 8px;
+  overflow-wrap: anywhere;
+}
+.task-board-team-chat .team-chat-file-icon svg { flex: 0 0 auto; color: var(--accent); }
+.task-board-team-chat .team-chat-file-icon b { max-height: 16px; overflow: hidden; color: var(--text-secondary); }
+.task-board-team-chat .team-chat-file-meta {
+  display: flex;
+  grid-column: 1 / -1;
+  gap: 8px;
+  min-width: 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-tertiary);
+  font-size: var(--font-size-2xs);
+}
+.task-board-team-chat .team-chat-file-meta > :first-child { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-board-team-chat .team-chat-file-meta > :last-child { flex: 0 0 auto; white-space: nowrap; }
+.task-board-team-chat .team-chat-file-open:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
 /* 文档卡：比气泡深一档的纸面，全宽铺开。 */
 .task-board-team-chat .team-chat-doc {
   display: grid;
