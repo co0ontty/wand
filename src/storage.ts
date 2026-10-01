@@ -3064,7 +3064,7 @@ export class WandStorage {
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          session_id = excluded.session_id, status = excluded.status, report = excluded.report,
-         instructions = excluded.instructions,
+         instructions = excluded.instructions, report_path = excluded.report_path,
          depends_on_json = excluded.depends_on_json,
          dispatch_info_json = excluded.dispatch_info_json,
          started_at = excluded.started_at, ended_at = excluded.ended_at`

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
@@ -2285,4 +2285,41 @@ test("failed members keep error feedback rather than manufacturing a completed r
   const turn = h.runner.detail(runId).chatTurns.find((item) => turnText(item).startsWith("❌ 没完成「失败步骤」"))!;
   assert.equal(turn.reportFile, undefined);
   assert.match(turnText(turn), /未交付报告/);
+});
+
+test("a newly delivered alternate report file supplies the card and leader handoff instead of a completion reply", async (t) => {
+  const h = harness(t, { requirePlanApproval: false });
+  const runId = await startAndPlan(h, [["m_dev", "生成报告"]]);
+  const dev = runningStep(h, runId);
+  const relativePath = `.wand-team/${runId}/alternate-report.md`;
+  const file = path.join(h.cwd, relativePath);
+  const body = "# 真实验收报告\n\n## 结论\n标题和摘录来自原文件。\n\n## 全文\nFULL_REPORT_ONLY_TAIL";
+  writeFileSync(file, body);
+  const wrote = new Date(h.clock.now); utimesSync(file, wrote, wrote);
+  h.clock.now += 3000;
+  h.ops.finishTurn(dev.sessionId!, `已写入并核对报告：[验收报告](<${file}>)。`);
+  await settle(h, dev.sessionId!);
+  const finished = h.storage.listAiTeamSteps(runId).find((step) => step.id === dev.id)!;
+  assert.equal(finished.reportPath, relativePath);
+  assert.equal(finished.report, body);
+  const card = h.runner.detail(runId).chatTurns.find((turn) => turn.reportFile?.stepId === dev.id)!;
+  assert.equal(card.reportFile!.name, "alternate-report.md");
+  assert.deepEqual(card.reportFile!.preview, { title: "真实验收报告", excerpt: "标题和摘录来自原文件。" });
+  assert.ok(!turnText(card).includes("已写入并核对报告"));
+  assert.ok(!existsSync(path.join(h.cwd, dev.reportPath)), "没有生成一份装着回复文案的伪报告");
+  const nextLeader = runningStep(h, runId);
+  assert.ok(h.ops.sessions.get(nextLeader.sessionId!)!.sent.at(-1)!.includes(relativePath));
+});
+
+test("the designated report wins over links to other files in a completion reply", async (t) => {
+  const h = harness(t, { requirePlanApproval: false });
+  const runId = await startAndPlan(h, [["m_dev", "正式报告"]]);
+  const dev = runningStep(h, runId);
+  writeReport(h, dev, "# 指定报告\n\n真正交接正文");
+  const alternate = path.join(h.cwd, "other-report.md"); writeFileSync(alternate, "# 另一个文件");
+  h.ops.finishTurn(dev.sessionId!, `已写入[报告](<${alternate}>)`);
+  await settle(h, dev.sessionId!);
+  const card = h.runner.detail(runId).chatTurns.find((turn) => turn.reportFile?.stepId === dev.id)!;
+  assert.equal(card.reportFile!.name, path.basename(dev.reportPath));
+  assert.equal(card.reportFile!.preview!.title, "指定报告");
 });

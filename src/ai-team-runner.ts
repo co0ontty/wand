@@ -57,6 +57,7 @@ import {
 } from "./ai-team-types.js";
 import { renderLiveStepText } from "./ai-team-live.js";
 import { teamReportPreview } from "./team-report-preview.js";
+import { linkedTeamReportFile } from "./team-report-file-link.js";
 import { getErrorMessage } from "./error-utils.js";
 import { activityState } from "./missions.js";
 import type { AgentActivityState } from "./mission-types.js";
@@ -462,7 +463,7 @@ function excludeReportDir(cwd: string): void {
 
 type StepOutcome =
   | { kind: "pending"; recheckInMs?: number }
-  | { kind: "done"; text: string; fromFile: boolean }
+  | { kind: "done"; text: string; fromFile: boolean; reportPath?: string }
   /** sessionError：会话以出错结束（额度用尽、鉴权失败等），重试同一个模型只会再错一次。 */
   | { kind: "failed"; text: string; sessionError?: boolean };
 
@@ -1028,6 +1029,13 @@ export class AiTeamRunner {
 
     if (busy) return { kind: "pending" };
     const reply = snapshot.messages?.length ? assistantReplyAfterPrompt(snapshot, step.reportPath) : null;
+    const linked = step.kind === "work" && reply && snapshot.status !== "failed"
+      ? linkedTeamReportFile(run.cwd, reply, step.startedAt) : null;
+    if (linked) {
+      const age = this.now() - linked.mtimeMs;
+      if (!gone && age < REPORT_SETTLE_MS) return { kind: "pending", recheckInMs: REPORT_SETTLE_MS - age + 100 };
+      return { kind: "done", text: readReport(linked.path), fromFile: true, reportPath: linked.relativePath };
+    }
     if (gone) {
       // 出错退出时最后一条回复往往就是错误本身（如 API 503），不能当成报告或决定。
       if (reply && snapshot.status !== "failed") return { kind: "done", text: reply, fromFile: false };
@@ -1076,10 +1084,11 @@ export class AiTeamRunner {
     run.stepsUsed += 1;
     if (step.kind === "work") {
       const report = outcome.text.trim() || (outcome.kind === "done" ? "（成员没有写报告）" : "失败");
-      this.saveStep({ ...step, status: outcome.kind === "done" ? "done" : "failed", report, endedAt });
+      const delivered = outcome.kind === "done" && outcome.reportPath ? { ...step, reportPath: outcome.reportPath } : step;
+      this.saveStep({ ...delivered, status: outcome.kind === "done" ? "done" : "failed", report, endedAt });
       const member = this.member(run.team, step.memberId);
       if (member) {
-        const reportFile = outcome.kind === "done" ? this.completedReportFile(run, step, report, outcome.fromFile) : undefined;
+        const reportFile = outcome.kind === "done" ? this.completedReportFile(run, delivered, report, outcome.fromFile) : undefined;
         // 旧客户端也能用已有附件协议打开文件；新客户端用元数据渲染完整文件卡片。
         const body = reportFile
           ? `[附件已上传，请查看以下文件:\n${reportFile.path}\n]\n\n请查看附件。`
