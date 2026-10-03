@@ -1,7 +1,6 @@
 import type { SessionProvider, SessionRunner, SessionSnapshot, StructuredSessionState } from "./types.js";
+import { isNativeThinkingEffort } from "./provider-catalog.js";
 import { shellQuote } from "./shell-quote.js";
-
-const NATIVE_THINKING_EFFORT = /^(claude|codex|opencode|grok|qoder|pi):[a-z0-9][a-z0-9_-]{0,31}$/;
 
 /**
  * 把会话级系统提示交给 CLI 的开关。Claude / Qoder / Pi 用 `--append-system-prompt`，
@@ -69,7 +68,7 @@ export function isThinkingEffort(value: unknown): value is NonNullable<SessionSn
     || value === "standard"
     || value === "deep"
     || value === "max"
-    || (typeof value === "string" && NATIVE_THINKING_EFFORT.test(value));
+    || isNativeThinkingEffort(value);
 }
 
 /** 只取本 provider 的原生档位。别的 CLI 的前缀不能串过去。 */
@@ -137,7 +136,7 @@ export function normalizeThinkingEffort(value: unknown): SessionSnapshot["thinki
   if (typeof value !== "string") return null;
   const normalized = value.trim().toLowerCase();
   if (normalized === "off" || normalized === "standard" || normalized === "deep" || normalized === "max") return normalized;
-  if (NATIVE_THINKING_EFFORT.test(normalized)) return normalized as SessionSnapshot["thinkingEffort"];
+  if (isNativeThinkingEffort(normalized)) return normalized as SessionSnapshot["thinkingEffort"];
   return null;
 }
 

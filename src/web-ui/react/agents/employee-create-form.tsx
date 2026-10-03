@@ -8,6 +8,8 @@ import type { WandTaskAgent } from "../../../task-types.js";
 import { candidateListError } from "./candidate-list.js";
 import { createDefaultIssueAgent } from "../issues/task-board-agent.js";
 import { siliconEmployeesRepository } from "./employee-repository.js";
+import { EmployeeTagsField } from "./employee-tags-field.js";
+import { parseSiliconEmployeeTagInput } from "../../../ai-team-types.js";
 
 export function EmployeeCreateForm({
   catalog,
@@ -22,6 +24,7 @@ export function EmployeeCreateForm({
     duty: string;
     prompt: string;
     avatar: string;
+    tags: string[];
     agents: WandTaskAgent[];
   }): Promise<void>;
   onCancel(): void;
@@ -32,6 +35,7 @@ export function EmployeeCreateForm({
   const [duty, setDuty] = React.useState("");
   const [prompt, setPrompt] = React.useState("");
   const [avatar, setAvatar] = React.useState("");
+  const [tagInput, setTagInput] = React.useState("");
   const [agents, setAgents] = React.useState<WandTaskAgent[]>(() => [{ ...createDefaultIssueAgent(), kind: "structured" }]);
   const [saving, setSaving] = React.useState(false);
   const [filling, setFilling] = React.useState(false);
@@ -56,13 +60,16 @@ export function EmployeeCreateForm({
   };
 
   const handleCreate = async () => {
+    let tags: string[];
+    try { tags = parseSiliconEmployeeTagInput(tagInput); }
+    catch (cause) { setError(failureMessage(cause)); return; }
     if (advanced && name.trim()) {
       const draft = manualDraft();
       if (!draft) return;
       try {
         setSaving(true);
         setError(null);
-        await onSave(draft);
+        await onSave({ ...draft, tags });
       } catch (cause) {
         setError(failureMessage(cause));
       } finally {
@@ -84,6 +91,7 @@ export function EmployeeCreateForm({
         duty: draft.duty,
         prompt: draft.prompt,
         avatar: "",
+        tags,
         agents: [draft.agent],
       });
     } catch (cause) {
@@ -141,6 +149,9 @@ export function EmployeeCreateForm({
                 : "AI 会按你的期望配好名字、职责、角色设定和执行工具。"}
             </p>
           </div>
+
+          <EmployeeTagsField id="new-employee-tags" value={tagInput}
+            disabled={saving || filling} onChange={setTagInput} />
 
           <div className="wand-employee-advanced-toggle" data-open={advanced || undefined}>
             <WandButton
@@ -239,12 +250,6 @@ export function EmployeeCreateForm({
             </div>
           </section>
 
-          {error ? (
-            <div className="wand-team-candidate-error" role="alert">
-              {error}
-            </div>
-          ) : null}
-
           <div className="wand-team-member-actions">
             <WandButton
               kind="primary"
@@ -265,6 +270,7 @@ export function EmployeeCreateForm({
               取消
             </WandButton>
           </div>
+          {error ? <div className="wand-team-candidate-error" role="alert">{error}</div> : null}
         </div>
       </div>
     </div>

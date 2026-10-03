@@ -8,11 +8,12 @@ import { inferProviderFromCommand, inferProviderFromRunner, isSessionProvider, S
 import { DEFAULT_ITERATION_NAME, DEFAULT_WAND_TASK_AGENT_KIND, DEFAULT_WAND_TASK_PRIORITY, isWandTaskAgentKind, normalizeWandTaskAgentMode } from "./task-types.js";
 import { firstLayoutTabId } from "./layout-tree.js";
 import { isUnnamedWorkspaceTaskName } from "./wand-task-sync.js";
-import { AI_TEAM_DEFAULT_MAX_STEPS, AI_TEAM_TERMINAL_RUN_STATUSES, aiTeamChatTitle, isTeamMemberRole, memberAgents } from "./ai-team-types.js";
+import { AI_TEAM_DEFAULT_MAX_STEPS, AI_TEAM_TERMINAL_RUN_STATUSES, aiTeamChatTitle, isBuiltinSiliconEmployee, isTeamMemberRole, memberAgents, parseSiliconEmployeeTags, siliconEmployeeTags } from "./ai-team-types.js";
 import type {
   AiTeam, AiTeamMember, AiTeamRun, AiTeamRunChatMarker, AiTeamRunStatus, AiTeamStep, AiTeamStepKind, AiTeamStepSessionMarker, AiTeamStepStatus,
   CandidateFailureKind, SiliconEmployee, StepDispatchInfo,
 } from "./ai-team-types.js";
+import { freezeTeamEmployees, projectTeamDefinition, restoreTeamMemberEmployee, serializeExecutionTeam } from "./ai-team-employee-binding.js";
 import { isTaskExecutionSubject } from "./task-types.js";
 import type { WandTask, WandTaskAgent, WandTaskAgentKind, WandTaskTitleSource } from "./task-types.js";
 import {
@@ -23,7 +24,7 @@ import {
 } from "./system-employee.js";
 import { isThinkingEffort } from "./structured-provider-common.js";
 import { DEFAULT_EMPLOYEE_KEY } from "./ai-team-types.js";
-import { defaultEmployeeDefinition } from "./default-employee.js";
+import { defaultEmployeeDefinition, legacyPtyRoleIdentity } from "./default-employee.js";
 import { normalizeEmployeeKnowledge } from "./employee-knowledge-content.js";
 import { EMPLOYEE_KNOWLEDGE_MAX_ENTRIES, type EmployeeKnowledgeEntry } from "./employee-knowledge-types.js";
 import {
@@ -84,6 +85,8 @@ interface SessionRow {
   exit_code: number | null;
   started_at: string;
   ended_at: string | null;
+  completion_revision: number;
+  viewed_completion_revision: number;
   output: string;
   pty_output_seq: number;
   archived: number;
@@ -466,7 +469,7 @@ function mapWorktreeMergeFields(row: SessionRow): Pick<SessionSnapshot, "worktre
 
 function sessionSelectFields(slim = false): string {
   return `id, session_source, automation_id, provider, session_kind, runner, command, cwd, mode, status, exit_code, started_at, ended_at, ${slim ? "'' AS output" : "output"}, pty_output_seq, archived, archived_at, claude_session_id, ${slim ? "NULL AS messages" : "messages"}, queued_messages, queued_message_skills, structured_state
-             , resumed_from_session_id, auto_recovered, worktree_enabled, worktree_info, worktree_merge_status, worktree_merge_info, title, description, session_options, workspace_id, workspace_task_id`;
+             , resumed_from_session_id, auto_recovered, worktree_enabled, worktree_info, worktree_merge_status, worktree_merge_info, title, description, session_options, workspace_id, workspace_task_id, completion_revision, viewed_completion_revision`;
 }
 
 interface WorkspaceRow {
@@ -695,6 +698,8 @@ function mapSessionCore(row: SessionRow): SessionSnapshot {
     exitCode: row.exit_code,
     startedAt: row.started_at,
     endedAt: row.ended_at,
+    completionRevision: row.completion_revision ?? 0,
+    viewedCompletionRevision: row.viewed_completion_revision ?? 0,
     output: row.output,
     ptyOutputSeq: row.pty_output_seq,
     archived: Boolean(row.archived),
@@ -713,6 +718,7 @@ function mapSessionCore(row: SessionRow): SessionSnapshot {
     workspaceTaskId: row.workspace_task_id ?? undefined,
     ...mapWorktreeMergeFields(row),
     ...sessionOptions,
+    ...legacyPtyRoleIdentity({ ...sessionOptions, sessionKind: row.session_kind ?? "pty", provider }),
     ...(Object.prototype.hasOwnProperty.call(sessionOptions, "pendingEscalation")
       ? { permissionBlocked: Boolean(sessionOptions.pendingEscalation) }
       : {}),
@@ -997,6 +1003,7 @@ const INIT_SQL = `
     parent_task_id TEXT,
     title_source TEXT,
     auto_title_signature TEXT,
+    archived_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE SET NULL
@@ -1054,6 +1061,13 @@ const INIT_SQL = `
     expires_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_employee_knowledge_access_expiry ON employee_knowledge_access(expires_at);
+
+  CREATE TABLE IF NOT EXISTS decision_access (
+    token_hash TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES command_sessions(id) ON DELETE CASCADE,
+    expires_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_decision_access_expiry ON decision_access(expires_at);
 
   CREATE TABLE IF NOT EXISTS user_memory_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1147,6 +1161,9 @@ function ensureAiTeamSchema(db: DatabaseSync): void {
   if (employeeColumns.size > 0 && !employeeColumns.has("system_key")) {
     db.exec("ALTER TABLE silicon_employees ADD COLUMN system_key TEXT");
   }
+  if (employeeColumns.size > 0 && !employeeColumns.has("tags_json")) {
+    db.exec("ALTER TABLE silicon_employees ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]'");
+  }
 }
 
 function ensureWandTaskSchema(db: DatabaseSync): void {
@@ -1166,6 +1183,8 @@ function ensureWandTaskSchema(db: DatabaseSync): void {
   if (columns.length > 0 && !names.has("auto_title_signature")) db.exec("ALTER TABLE wand_tasks ADD COLUMN auto_title_signature TEXT");
   // 里程碑：只加列，历史行保持 NULL；里程碑本体在 wand_milestones（INIT_SQL 建表）。
   if (columns.length > 0 && !names.has("milestone_id")) db.exec("ALTER TABLE wand_tasks ADD COLUMN milestone_id TEXT");
+  // 归档时间（自动/手动归档都写它）：保留期清理按它起算 7 天，历史归档行保持 NULL。
+  if (columns.length > 0 && !names.has("archived_at")) db.exec("ALTER TABLE wand_tasks ADD COLUMN archived_at TEXT");
   if (columns.length > 0) {
     // Index creation must wait until the column exists on legacy databases.
     // INIT_SQL cannot create it: CREATE TABLE IF NOT EXISTS is a no-op on old
@@ -1314,7 +1333,7 @@ type WandTaskPatch = Partial<Pick<WandTask,
 
 const WAND_TASK_FIELDS = `id, identifier, workspace_id, workspace_task_id, parent_task_id,
   title, title_source, auto_title_signature, description, status, priority, labels_json,
-  due_date, milestone_id, sort_order, agent_json, execution_subject_json, created_at, updated_at`;
+  due_date, milestone_id, sort_order, agent_json, execution_subject_json, archived_at, created_at, updated_at`;
 
 // Shared metadata comes from the latest explicitly linked card, including meaningful NULLs.
 // The old container columns remain readable for legacy rows until the startup migration.
@@ -1872,11 +1891,14 @@ export class WandStorage {
   tasksAggregateFingerprint(): string {
     const sessions = this.db.prepare(
       `SELECT COUNT(*) AS count,
+              COALESCE(SUM(archived), 0) AS archivedCount,
               COALESCE(MAX(started_at), '') AS started,
               COALESCE(MAX(ended_at), '') AS ended,
-              COALESCE(MAX(title), '') AS title
+              COALESCE(MAX(title), '') AS title,
+              COALESCE(SUM(completion_revision), 0) AS completionRevision,
+              COALESCE(SUM(viewed_completion_revision), 0) AS viewedCompletionRevision
        FROM command_sessions`
-    ).get() as { count: number; started: string; ended: string; title: string };
+    ).get() as { count: number; archivedCount: number; started: string; ended: string; title: string };
     // Per-task metadata catches edits even when another task owns the maximum
     // timestamp/revision. Layout payloads are represented by their own revision.
     const tasks = this.db.prepare(
@@ -1961,6 +1983,7 @@ export class WandStorage {
       })(),
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at),
+      archivedAt: typeof row.archived_at === "string" && row.archived_at ? row.archived_at : null,
     };
   }
 
@@ -1980,18 +2003,20 @@ export class WandStorage {
   private insertWandTask(input: CreateWandTaskInput, createdAt = nowIso()): WandTask {
     const id = crypto.randomUUID();
     const status = input.status ?? "todo";
+    const createdAtValue = createdAt;
+    const archivedAt = status === "archived" ? createdAtValue : null;
     const max = this.db.prepare(`SELECT COALESCE(MAX(sort_order), -1) AS value FROM wand_tasks
       WHERE workspace_id IS ? AND status = ?`).get(input.workspaceId ?? null, status) as { value: number };
     const number = this.db.prepare(`SELECT COALESCE(MAX(CAST(substr(identifier, 6) AS INTEGER)), 0) AS value
       FROM wand_tasks WHERE identifier GLOB 'TASK-[0-9]*'`).get() as { value: number };
     this.db.prepare(`INSERT INTO wand_tasks (${WAND_TASK_FIELDS})
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(id, `TASK-${number.value + 1}`, input.workspaceId ?? null, input.workspaceTaskId ?? null,
         input.parentTaskId ?? null, input.title, input.titleSource ?? "user", null,
         input.description ?? "", status, input.priority ?? DEFAULT_WAND_TASK_PRIORITY,
         JSON.stringify(input.labels ?? []), input.dueDate ?? null, input.milestoneId ?? null,
         max.value + 1, input.agent ? JSON.stringify(input.agent) : null,
-        input.executionSubject ? JSON.stringify(input.executionSubject) : null, createdAt, createdAt);
+        input.executionSubject ? JSON.stringify(input.executionSubject) : null, archivedAt, createdAtValue, createdAtValue);
     return this.getWandTask(id)!;
   }
 
@@ -2023,6 +2048,12 @@ export class WandStorage {
   /** Private canonical writer; callers own the transaction, never a reverse writer. */
   private writeWandTask(current: WandTask, patch: WandTaskPatch): WandTask {
     const next = { ...current, ...patch, updatedAt: nowIso() };
+    // 归档时间只在进入归档时写一次；取消归档/重新打开时清空，恢复“未动多久”重新计时。
+    if (next.status === "archived") {
+      if (!next.archivedAt) next.archivedAt = next.updatedAt;
+    } else {
+      next.archivedAt = null;
+    }
     if (patch.milestoneId !== undefined || patch.workspaceId !== undefined) {
       next.milestoneId = this.taskMilestoneForWrite(next.milestoneId, next.workspaceId);
     }
@@ -2036,13 +2067,15 @@ export class WandStorage {
     }
     this.db.prepare(`UPDATE wand_tasks SET workspace_id = ?, workspace_task_id = ?, parent_task_id = ?,
       title = ?, title_source = ?, auto_title_signature = ?, description = ?, status = ?, priority = ?,
-      labels_json = ?, due_date = ?, milestone_id = ?, sort_order = ?, agent_json = ?, execution_subject_json = ?, updated_at = ?
+      labels_json = ?, due_date = ?, milestone_id = ?, sort_order = ?, agent_json = ?, execution_subject_json = ?,
+      archived_at = ?, updated_at = ?
       WHERE id = ?`)
       .run(next.workspaceId, next.workspaceTaskId, next.parentTaskId, next.title, next.titleSource,
         next.autoTitleSignature ?? null, next.description, next.status, next.priority,
         JSON.stringify(next.labels), next.dueDate, next.milestoneId ?? null, next.sortOrder,
         next.agent ? JSON.stringify(next.agent) : null,
-        next.executionSubject ? JSON.stringify(next.executionSubject) : null, next.updatedAt, next.id);
+        next.executionSubject ? JSON.stringify(next.executionSubject) : null,
+        next.archivedAt, next.updatedAt, next.id);
     if (patch.workspaceId !== undefined && next.workspaceTaskId) {
       const workspaceId = next.workspaceId ?? this.ensureGlobalWorkspace().id;
       // The container FK/index and standalone session workspace bucket follow the canonical project.
@@ -2913,16 +2946,20 @@ export class WandStorage {
   }
 
   saveSiliconEmployee(employee: SiliconEmployee): void {
+    const tags = isBuiltinSiliconEmployee(employee)
+      ? siliconEmployeeTags(employee)
+      : parseSiliconEmployeeTags(employee.tags ?? []);
     this.db.prepare(
       `INSERT INTO silicon_employees (
-         id, name, duty, prompt, avatar, agents_json, system_key, archived_at, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         id, name, duty, prompt, avatar, agents_json, system_key, archived_at, created_at, updated_at, tags_json
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          name = excluded.name,
          duty = excluded.duty,
          prompt = excluded.prompt,
          avatar = excluded.avatar,
          agents_json = excluded.agents_json,
+         tags_json = excluded.tags_json,
          system_key = excluded.system_key,
          archived_at = excluded.archived_at,
          updated_at = excluded.updated_at`
@@ -2937,6 +2974,7 @@ export class WandStorage {
       employee.archivedAt ?? null,
       employee.createdAt,
       employee.updatedAt,
+      JSON.stringify(tags),
     );
   }
 
@@ -3056,6 +3094,28 @@ export class WandStorage {
 
   revokeEmployeeKnowledgeAccess(token: string): void {
     this.db.prepare("DELETE FROM employee_knowledge_access WHERE token_hash = ?")
+      .run(crypto.createHash("sha256").update(token).digest("hex"));
+  }
+
+  /** Inference-only capability; never accepted by general HTTP authentication. */
+  issueDecisionAccess(sessionId: string, now = Date.now()): string {
+    if (!this.getSessionSlim(sessionId)) throw new Error("决策调用所属会话不存在。");
+    this.db.prepare("DELETE FROM decision_access WHERE expires_at <= ? OR session_id = ?").run(now, sessionId);
+    const token = `wd_${crypto.randomBytes(32).toString("base64url")}`;
+    this.db.prepare("INSERT INTO decision_access (token_hash, session_id, expires_at) VALUES (?, ?, ?)")
+      .run(crypto.createHash("sha256").update(token).digest("hex"), sessionId, now + 6 * 60 * 60 * 1000);
+    return token;
+  }
+
+  resolveDecisionAccess(token: string, now = Date.now()): string | null {
+    if (!/^wd_[A-Za-z0-9_-]{43}$/.test(token)) return null;
+    const row = this.db.prepare("SELECT session_id FROM decision_access WHERE token_hash = ? AND expires_at > ?")
+      .get(crypto.createHash("sha256").update(token).digest("hex"), now);
+    return typeof row?.session_id === "string" ? row.session_id : null;
+  }
+
+  revokeDecisionAccess(token: string): void {
+    this.db.prepare("DELETE FROM decision_access WHERE token_hash = ?")
       .run(crypto.createHash("sha256").update(token).digest("hex"));
   }
 
@@ -3187,15 +3247,16 @@ export class WandStorage {
 
   listAiTeams(): AiTeam[] {
     const rows = this.db.prepare("SELECT * FROM ai_teams ORDER BY created_at ASC").all() as unknown as Record<string, unknown>[];
-    return rows.map(mapAiTeamRow);
+    return rows.map((row) => projectTeamDefinition(mapAiTeamRow(row), this));
   }
 
   getAiTeam(id: string): AiTeam | null {
     const row = this.db.prepare("SELECT * FROM ai_teams WHERE id = ?").get(id) as Record<string, unknown> | undefined;
-    return row ? mapAiTeamRow(row) : null;
+    return row ? projectTeamDefinition(mapAiTeamRow(row), this) : null;
   }
 
   saveAiTeam(team: AiTeam): void {
+    team = freezeTeamEmployees(team, this);
     this.db.prepare(
       `INSERT INTO ai_teams (
          id, name, description, instructions, members_json, require_plan_approval, max_steps,
@@ -3233,7 +3294,7 @@ export class WandStorage {
          chat_session_id = excluded.chat_session_id, pending_notes_json = excluded.pending_notes_json,
          updated_at = excluded.updated_at`
     ).run(
-      run.id, run.teamId, run.taskId, JSON.stringify(run.team), run.objective, run.cwd,
+      run.id, run.teamId, run.taskId, serializeExecutionTeam(run.team), run.objective, run.cwd,
       run.status, run.statusDetail, run.stepsUsed, run.stepLimit, run.formatRetries,
       run.planApproved ? 1 : 0, run.chatSessionId, JSON.stringify(run.pendingNotes), run.createdAt, run.updatedAt,
     );
@@ -3308,7 +3369,12 @@ export class WandStorage {
           typeof row.current_members_json === "string" ? row.current_members_json : null,
         ));
       }
-      const memberName = teamMemberName(currentTeams.get(runId), memberId)
+      const frozenMember = normalizeAiTeamMembers(runTeam?.members).find((member) => member.id === memberId);
+      const currentMember = normalizeAiTeamMembers(currentTeams.get(runId)).find((member) => member.id === memberId);
+      const employee = frozenMember?.employeeId ? this.getSiliconEmployee(frozenMember.employeeId) : null;
+      const memberName = (frozenMember?.employeeId
+        ? employee?.name ?? frozenMember.name
+        : currentMember?.employeeId ? undefined : teamMemberName(currentTeams.get(runId), memberId))
         ?? teamMemberName(runTeam?.members, memberId)
         ?? memberId;
       const runStatus = String(row.run_status ?? "") as AiTeamRunStatus;
@@ -3544,6 +3610,29 @@ export class WandStorage {
     else this.db.prepare("UPDATE agent_activity SET read_at = ? WHERE read_at IS NULL").run(at);
   }
 
+  /** Completion/read state is independent of runner checkpoints and survives restarts. */
+  getSessionCompletion(id: string): { completionRevision: number; viewedCompletionRevision: number } | null {
+    const row = this.db.prepare(`SELECT completion_revision AS completionRevision,
+      viewed_completion_revision AS viewedCompletionRevision FROM command_sessions WHERE id = ?`)
+      .get(id) as { completionRevision: number; viewedCompletionRevision: number } | undefined;
+    return row ? { ...row } : null;
+  }
+
+  recordSessionCompletion(id: string): ReturnType<WandStorage["getSessionCompletion"]> {
+    const row = this.db.prepare(`UPDATE command_sessions SET completion_revision = completion_revision + 1
+      WHERE id = ? RETURNING completion_revision AS completionRevision,
+        viewed_completion_revision AS viewedCompletionRevision`)
+      .get(id) as { completionRevision: number; viewedCompletionRevision: number } | undefined;
+    return row ? { ...row } : null;
+  }
+
+  /** A delayed view of generation N must never consume a newer completion N+1. */
+  markSessionCompletionViewed(id: string, revision: number): boolean {
+    return this.db.prepare(`UPDATE command_sessions SET viewed_completion_revision = ?
+      WHERE id = ? AND completion_revision = ? AND viewed_completion_revision < ?`)
+      .run(revision, id, revision, revision).changes > 0;
+  }
+
   saveSession(snapshot: SessionSnapshot): void {
     const isNew = !this.getSessionWorkspace(snapshot.id);
     // A single SQLite statement is already atomic. Avoid BEGIN IMMEDIATE in
@@ -3700,6 +3789,8 @@ function mapSiliconEmployeeRow(row: Record<string, unknown>): SiliconEmployee {
         .filter((candidate): candidate is WandTaskAgent => candidate !== null)
     : [];
   const systemKey = typeof row.system_key === "string" && row.system_key ? row.system_key : undefined;
+  const rawTags = safeJsonParse<unknown>(typeof row.tags_json === "string" ? row.tags_json : null);
+  const tags = Array.isArray(rawTags) ? rawTags.filter((tag): tag is string => typeof tag === "string") : [];
 
   return {
     id: String(row.id),
@@ -3709,6 +3800,7 @@ function mapSiliconEmployeeRow(row: Record<string, unknown>): SiliconEmployee {
     avatar: String(row.avatar ?? ""),
     agents,
     systemKey,
+    tags: siliconEmployeeTags({ systemKey, tags }),
     archivedAt: typeof row.archived_at === "string" && row.archived_at ? row.archived_at : undefined,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
@@ -3755,6 +3847,20 @@ function normalizeAiTeamMember(raw: unknown): AiTeamMember | null {
   };
   if (typeof value.avatar === "string" && value.avatar) member.avatar = value.avatar;
   if (isTeamMemberRole(value.role)) member.role = value.role;
+  if (typeof value.employeeId === "string" && value.employeeId.trim()) {
+    member.employeeId = value.employeeId.trim();
+    const raw = value._employeeSnapshot;
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+      const snapshot = raw as Record<string, unknown>;
+      if (snapshot.id === member.employeeId && typeof snapshot.prompt === "string") {
+        restoreTeamMemberEmployee(member, {
+          id: member.employeeId, name: member.name, avatar: member.avatar ?? "",
+          prompt: snapshot.prompt, duty: String(snapshot.duty ?? ""), agents,
+          createdAt: String(snapshot.createdAt ?? ""), updatedAt: String(snapshot.updatedAt ?? ""),
+        });
+      }
+    }
+  }
   return member;
 }
 
@@ -4061,6 +4167,8 @@ const SCHEMA_MIGRATIONS: ReadonlyArray<[column: string, sql: string]> = [
   ["session_options", `ALTER TABLE command_sessions ADD COLUMN session_options TEXT NOT NULL DEFAULT '{"schemaVersion":1}'`],
   ["workspace_id", "ALTER TABLE command_sessions ADD COLUMN workspace_id TEXT"],
   ["workspace_task_id", "ALTER TABLE command_sessions ADD COLUMN workspace_task_id TEXT"],
+  ["completion_revision", "ALTER TABLE command_sessions ADD COLUMN completion_revision INTEGER NOT NULL DEFAULT 0"],
+  ["viewed_completion_revision", "ALTER TABLE command_sessions ADD COLUMN viewed_completion_revision INTEGER NOT NULL DEFAULT 0"],
 ];
 
 /** 首页目录组顺序的偏好键（app_config 表，与其它 UI 偏好同一套读写）。 */

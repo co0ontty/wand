@@ -5,6 +5,8 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
+import { DEFAULT_EMPLOYEE_ID, DEFAULT_EMPLOYEE_NAME } from "../src/ai-team-types.js";
+import { DEFAULT_EMPLOYEE_PROMPT } from "../src/default-employee.js";
 import { defaultConfig } from "../src/config.js";
 import { PtyInputDeliveryError } from "../src/process-manager.js";
 import { startServer } from "../src/server.js";
@@ -203,17 +205,35 @@ test("commands endpoint puts a new session on its task card without a board relo
   t.after(() => observer.close());
   // 真的 `start` 会先把会话落库再返回快照；桩里补上落库这一步，
   // 不然看板同步查不到这个会话，测的就不是路由的钩子了。
+  const roleCalls: Array<Parameters<typeof handle.processManager.start>[4]> = [];
   handle.processManager.start = ((_command, _cwd, _mode, _input, opts) => {
-    observer.saveSession({ ...created, workspaceId: opts?.workspaceId, workspaceTaskId: opts?.workspaceTaskId });
-    return created;
+    roleCalls.push(opts);
+    const snapshot = { ...created, ...opts, selectedModel: opts?.model };
+    observer.saveSession(snapshot);
+    return snapshot;
   }) as typeof handle.processManager.start;
 
   const response = await fetch(`${baseUrl}/api/commands`, {
     method: "POST",
     headers: authHeaders,
-    body: JSON.stringify({ command: "pi", cwd: root, workspaceId: workspace.id, workspaceTaskId: task.id }),
+    body: JSON.stringify({ command: "pi", cwd: root, workspaceId: workspace.id, workspaceTaskId: task.id,
+      model: "explicit-model", thinkingEffort: "deep" }),
   });
   assert.equal(response.status, 201);
+  const dto = await response.json() as SessionSnapshot;
+  assert.equal(dto.employeeId, DEFAULT_EMPLOYEE_ID);
+  assert.equal(dto.employeeName, DEFAULT_EMPLOYEE_NAME);
+  assert.equal(dto.selectedModel, "explicit-model");
+  assert.equal(dto.thinkingEffort, "deep");
+  assert.equal(dto.sessionKind, "pty");
+  assert.equal("systemPrompt" in dto, false);
+  assert.equal(roleCalls[0]?.systemPrompt, DEFAULT_EMPLOYEE_PROMPT);
+  assert.equal(observer.getSession(created.id)?.employeeId, DEFAULT_EMPLOYEE_ID);
+  const tasks = await fetch(`${baseUrl}/api/tasks`, { headers: authHeaders }).then((r) => r.json()) as
+    Array<{ tasks: Array<{ sessions: SessionSnapshot[] }> }>;
+  const summary = tasks.flatMap((g) => g.tasks.flatMap((task) => task.sessions)).find((s) => s.id === created.id);
+  assert.equal(summary?.employeeId, DEFAULT_EMPLOYEE_ID);
+  assert.equal(summary?.sessionKind, "pty");
 
   // 侧栏「＋」建出来的 PTY 会话：卡片绑定在创建时就写好了，不需要再拉一次看板列表。
   const db = new DatabaseSync(handle.dbPath, { readOnly: true });
@@ -224,5 +244,18 @@ test("commands endpoint puts a new session on its task card without a board relo
     assert.deepEqual(bound.map((row) => row.session_id), [created.id]);
   } finally {
     db.close();
+  }
+  for (const request of [
+    { command: "pi", systemPrompt: "自定义角色" },
+    { command: "pi", sessionSource: "automation", automationId: "test:internal" },
+    { command: "echo hello" },
+  ]) {
+    const result = await fetch(`${baseUrl}/api/commands`, {
+      method: "POST", headers: authHeaders, body: JSON.stringify({ cwd: root, ...request }),
+    });
+    assert.equal(result.status, 201);
+    assert.equal((await result.json() as SessionSnapshot).employeeId, undefined);
+    assert.equal(roleCalls.at(-1)?.employeeId, undefined);
+    assert.equal(roleCalls.at(-1)?.systemPrompt, request.systemPrompt);
   }
 });

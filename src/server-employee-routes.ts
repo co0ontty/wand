@@ -6,6 +6,8 @@ import {
   SILICON_EMPLOYEE_AVATAR_MAX_CHARS,
   agentKey,
   isBuiltinSiliconEmployee,
+  parseSiliconEmployeeTags,
+  siliconEmployeeTags,
   type SiliconEmployee,
   type SiliconEmployeeDraft,
 } from "./ai-team-types.js";
@@ -99,6 +101,13 @@ export function parseSystemEmployeeAgents(value: unknown, existing: SiliconEmplo
     }
   }
 
+  if (body.tags !== undefined && JSON.stringify(body.tags) !== JSON.stringify(siliconEmployeeTags(existing))) {
+    throw new Error("该员工是内置的，标签不可修改。");
+  }
+  if (body.systemKey !== undefined && body.systemKey !== existing.systemKey) {
+    throw new Error("该员工是内置的，身份不可修改。");
+  }
+
   if (!Array.isArray(body.agents)) throw new Error("请提供执行候选数组。");
   if (body.agents.length === 0) throw new Error("至少需要一个执行候选。");
   if (body.agents.length > AI_TEAM_MAX_CANDIDATES) {
@@ -157,6 +166,7 @@ export function parseSiliconEmployeeInput(
   }
 
   const avatar = parseAvatar(body.avatar, name);
+  const tags = parseSiliconEmployeeTags(body.tags === undefined ? existing?.tags ?? [] : body.tags);
 
   const id = existing?.id ?? `e_${randomUUID().replace(/-/g, "")}`;
 
@@ -167,6 +177,7 @@ export function parseSiliconEmployeeInput(
     prompt,
     avatar,
     agents,
+    tags,
     archivedAt: existing?.archivedAt,
     createdAt: existing ? existing.createdAt : now,
     updatedAt: now,

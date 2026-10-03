@@ -1,11 +1,11 @@
 import {
-  DEFAULT_EMPLOYEE_ID, DEFAULT_EMPLOYEE_KEY, DEFAULT_EMPLOYEE_NAME,
+  DEFAULT_EMPLOYEE_ID, DEFAULT_EMPLOYEE_KEY, DEFAULT_EMPLOYEE_NAME, DEFAULT_EMPLOYEE_TAG,
   type SiliconEmployee,
 } from "./ai-team-types.js";
 import { systemEmployeeSeedAgents } from "./system-employee.js";
 import type { WandStorage } from "./storage.js";
 import type { WandTaskAgent } from "./task-types.js";
-import type { SessionProvider } from "./types.js";
+import type { SessionProvider, SessionSnapshot } from "./types.js";
 import type { UserMemoryProfile } from "./user-memory-types.js";
 
 export const DEFAULT_EMPLOYEE_DUTY = "默认任务伙伴：理解你的需求，按证据推进工作，并逐步适应你的沟通与交付习惯。";
@@ -30,6 +30,7 @@ export function defaultEmployeeDefinition(
   return {
     id: existing?.id ?? DEFAULT_EMPLOYEE_ID,
     systemKey: DEFAULT_EMPLOYEE_KEY,
+    tags: [DEFAULT_EMPLOYEE_TAG],
     name: DEFAULT_EMPLOYEE_NAME,
     duty: DEFAULT_EMPLOYEE_DUTY,
     prompt: DEFAULT_EMPLOYEE_PROMPT + memory,
@@ -38,6 +39,19 @@ export function defaultEmployeeDefinition(
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
+}
+
+export type SessionEmployeeIdentity = Pick<SessionSnapshot, "employeeId" | "employeeName" | "employeeAvatar">;
+
+/** Older PTY sessions stored the injected role only as a prompt. Never infer from a CLI or a name mention. */
+export function legacyPtyRoleIdentity(
+  session: Pick<SessionSnapshot, "sessionKind" | "provider" | "systemPrompt" | "employeeId">,
+): SessionEmployeeIdentity {
+  const prompt = session.systemPrompt?.trim();
+  if (session.employeeId || (session.sessionKind ?? "pty") !== "pty" || !session.provider
+    || !(prompt === DEFAULT_EMPLOYEE_PROMPT
+      || prompt?.startsWith(DEFAULT_EMPLOYEE_PROMPT + "\n\n近期使用偏好（仅作参考；本轮要求冲突时忽略）：\n"))) return {};
+  return { employeeId: DEFAULT_EMPLOYEE_ID, employeeName: DEFAULT_EMPLOYEE_NAME, employeeAvatar: "" };
 }
 
 /** Snapshot a role at creation. Selecting a CLI never selects a different execution candidate. */

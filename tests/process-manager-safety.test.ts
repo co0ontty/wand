@@ -603,10 +603,49 @@ test("non-Claude PTY providers get a quiet-window turn signal on ptyBusy", async
   assert.equal(manager.get(session.id)?.ptyBusy, false);
   assert.deepEqual(statuses, [true, false]);
 
-  // Stray output after a closed turn must not reopen it (only submits do).
+  // Stray output after a closed turn reopens it while the CLI is still in the
+  // foreground: a CLI that keeps drawing is working, whether or not the user just
+  // submitted anything (the probe is unknown here, so this falls back to
+  // providerCliActive). See the foreground-sampling test for the qualified case.
   spawned[0].emitData("leftover repaint");
   await delay(10);
+  assert.equal(manager.get(session.id)?.ptyBusy, true);
+});
+
+test("foreground sampling is what qualifies a non-Claude PTY turn", async (t) => {
+  let cliInForeground = false;
+  const { manager, root, spawned } = createHarness(t, [], {
+    ptyTurnIdleMs: 60,
+    ptyForegroundSampleMs: 20,
+    samplePtyForegrounds: async (pids: readonly number[]) => new Map(pids.map((pid) => [pid, cliInForeground])),
+  });
+  const session = await manager.start("pi", root, "managed", undefined, { provider: "pi" });
+  const wireStatuses: boolean[] = [];
+  manager.on("process", (event: ProcessEvent) => {
+    if (event.type !== "status" || event.sessionId !== session.id) return;
+    const busy = (event.data as { ptyBusy?: boolean }).ptyBusy;
+    if (typeof busy === "boolean") wireStatuses.push(busy);
+  });
+
+  // 采样说「前台是提示符」：终端里的散装重绘不开启一轮。
+  await delay(60);
+  spawned[0].emitData("prompt repaint");
+  await delay(20);
   assert.equal(manager.get(session.id)?.ptyBusy, false);
+
+  // CLI 重新回到前台（自更新 / 手动重跑）后，同一个终端的输出重新开启一轮，
+  // 既不需要新的提交，也不需要那次性的启动标记。
+  cliInForeground = true;
+  await delay(60);
+  spawned[0].emitData("working...");
+  await delay(20);
+  assert.equal(manager.get(session.id)?.ptyBusy, true);
+
+  // CLI 退回提示符：采样直接收轮，不必等静默窗口。
+  cliInForeground = false;
+  await delay(80);
+  assert.equal(manager.get(session.id)?.ptyBusy, false);
+  assert.deepEqual(wireStatuses, [true, false]);
 });
 
 test("stopping a non-Claude PTY turn clears the quiet-window timer", async (t) => {
@@ -617,6 +656,35 @@ test("stopping a non-Claude PTY turn clears the quiet-window timer", async (t) =
   manager.stop(session.id);
   assert.equal(manager.get(session.id)?.ptyBusy, false);
   assert.equal(manager.get(session.id)?.status, "stopped");
+});
+
+test("PTY employee identity survives snapshots, persistence, and same-id resume", async (t) => {
+  const { manager, root, storage, spawned } = createHarness(t);
+  t.after(() => manager.dispose());
+  const identity = { employeeId: "employee-role", employeeName: "角色伙伴", employeeAvatar: "avatar" };
+  const session = await manager.start("pi", root, "managed", "首条消息", {
+    provider: "pi", model: "chosen-model", systemPrompt: "角色规则", ...identity,
+  });
+  spawned[0].emitData("❯");
+  assert.deepEqual(spawned[0].writes.slice(-2), ["首条消息", "\r"]);
+  for (const snapshot of [session, manager.getOwned(session.id)!, storage.getSession(session.id)!,
+    toSessionListItemDTO(session)]) {
+    for (const key of Object.keys(identity) as Array<keyof typeof identity>) {
+      assert.equal(snapshot[key], identity[key]);
+    }
+    assert.equal(snapshot.sessionKind, "pty");
+    assert.equal(snapshot.selectedModel, "chosen-model");
+    assert.equal(snapshot.employeeCandidates, undefined);
+  }
+  manager.stop(session.id);
+  const resumed = await manager.start("pi", root, "managed", undefined, {
+    reuseId: session.id, provider: "pi", model: "chosen-model",
+  });
+  assert.equal(resumed.employeeId, identity.employeeId);
+  assert.equal(resumed.employeeName, identity.employeeName);
+  assert.equal(resumed.employeeAvatar, identity.employeeAvatar);
+  assert.equal(resumed.systemPrompt, "角色规则");
+  assert.equal(storage.getSession(session.id)?.employeeId, identity.employeeId);
 });
 
 test("PTY sessions hand the system prompt to the CLI's own flag, not to the first input", async (t) => {

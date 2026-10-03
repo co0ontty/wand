@@ -6,7 +6,7 @@ import type { SessionRegistry } from "./session-registry.js";
 import type { WandStorage } from "./storage.js";
 import type { StructuredSessionManager } from "./structured-session-manager.js";
 import type { WandTask, WandTaskAgent } from "./task-types.js";
-import type { SiliconEmployee } from "./ai-team-types.js";
+import { agentKey, type SiliconEmployee } from "./ai-team-types.js";
 import type { SessionProvider, SessionSnapshot, WandConfig } from "./types.js";
 
 export interface AgentDispatchDeps {
@@ -43,10 +43,18 @@ export function resolveTaskDispatchTarget(
 export async function dispatchAgentForTask(
   deps: AgentDispatchDeps,
   input: { task: WandTask; agent: WandTaskAgent; prompt: string; automationId: string; systemPrompt?: string;
-    employee?: SiliconEmployee; employeeCandidateIndex?: number },
+    employee?: SiliconEmployee; employeeCandidateIndex?: number;
+    teamRequestStarted?: (sessionId: string, requestId: string) => void },
 ): Promise<AgentDispatchResult> {
   const { storage, config, structured, processes } = deps;
   const { agent } = input;
+  if (input.employee) {
+    if (agent.kind !== "structured") throw new Error("绑定员工只支持结构化会话。");
+    const candidate = input.employee.agents[input.employeeCandidateIndex ?? 0];
+    if (!candidate || agentKey(candidate) !== agentKey(agent)) {
+      throw new Error("员工执行候选与启动快照不一致。");
+    }
+  }
   const role = input.employee ?? (!input.systemPrompt?.trim()
     && input.automationId.startsWith("wand-task:") ? defaultRoleForCli(storage, agent.provider) : null);
   const systemPrompt = input.systemPrompt?.trim() || role?.prompt || undefined;
@@ -65,6 +73,9 @@ export async function dispatchAgentForTask(
         sessionSource: "automation",
         automationId: input.automationId,
         systemPrompt,
+        employeeId: role?.id,
+        employeeName: role?.name,
+        employeeAvatar: role?.avatar,
         workspaceId: group.workspaceId,
         workspaceTaskId: group.workspaceTaskId,
       })
@@ -88,7 +99,9 @@ export async function dispatchAgentForTask(
       });
   storage.bindWandTaskSession(input.task.id, session.id);
   if (agent.kind !== "pty") {
-    const completion = structured!.sendMessage(session.id, input.prompt);
+    const completion = input.teamRequestStarted
+      ? structured!.sendMessage(session.id, input.prompt, { teamRequestStarted: input.teamRequestStarted })
+      : structured!.sendMessage(session.id, input.prompt);
     completion.catch((error) => console.error(`[AgentDispatch] ${input.automationId} failed:`, error));
   }
   return { session, cwd, workspaceId: group.workspaceId };
@@ -102,9 +115,12 @@ export async function sendToAgentSession(
   deps: Pick<AgentDispatchDeps, "structured" | "processes"> & { sessions: SessionRegistry },
   sessionId: string,
   text: string,
+  teamRequestStarted?: (sessionId: string, requestId: string) => void,
 ): Promise<void> {
   if (deps.sessions.ownerOf(sessionId) === "structured") {
-    const completion = deps.structured!.sendMessage(sessionId, text);
+    const completion = teamRequestStarted
+      ? deps.structured!.sendMessage(sessionId, text, { teamRequestStarted })
+      : deps.structured!.sendMessage(sessionId, text);
     completion.catch((error) => console.error(`[AgentDispatch] message to ${sessionId} failed:`, error));
     return;
   }

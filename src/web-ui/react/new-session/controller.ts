@@ -1,16 +1,19 @@
-import type { NewSessionRuntimeAdapter } from "./types";
+import type { NewSessionKind, NewSessionRuntimeAdapter } from "./types";
 
 export interface NewSessionControllerSnapshot {
   open: boolean;
   dismissable: boolean;
   initialCwd: string;
   initialEmployeeId: string;
+  /** 侧栏「新建空白终端」这类入口直接带上形态；空串表示用默认形态。 */
+  initialKind: NewSessionKind | "";
   revision: number;
 }
 
 interface NewSessionOpenOptions {
   initialCwd?: string;
   initialEmployeeId?: string;
+  initialKind?: NewSessionKind;
 }
 
 export interface WandNewSessionController {
@@ -30,16 +33,23 @@ let snapshot: NewSessionControllerSnapshot = {
   dismissable: true,
   initialCwd: "",
   initialEmployeeId: "",
+  initialKind: "",
   revision: 0,
 };
 const listeners = new Set<Listener>();
 
-function publish(open: boolean, initialCwd = "", initialEmployeeId = ""): void {
+function publish(
+  open: boolean,
+  initialCwd = "",
+  initialEmployeeId = "",
+  initialKind: NewSessionKind | "" = "",
+): void {
   snapshot = {
     open,
     dismissable: true,
     initialCwd: open ? initialCwd.trim() : "",
     initialEmployeeId: open ? initialEmployeeId.trim() : "",
+    initialKind: open ? initialKind : "",
     revision: snapshot.revision + 1,
   };
   for (const listener of listeners) listener();
@@ -57,7 +67,7 @@ export const newSessionController: WandNewSessionController = {
   open(options = {}): boolean {
     if (!runtime) return false;
     runtime.onOpen();
-    publish(true, options.initialCwd, options.initialEmployeeId);
+    publish(true, options.initialCwd, options.initialEmployeeId, options.initialKind ?? "");
     return true;
   },
 

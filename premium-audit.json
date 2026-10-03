@@ -11,7 +11,7 @@
     }
   ],
   "mode": "strict",
-  "projectRoot": "/Users/co0ontty/Self/vibe_coding/wand",
+  "projectRoot": ".",
   "schemaVersion": 1,
   "summary": {
     "errors": 1,

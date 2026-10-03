@@ -18,7 +18,7 @@ import { ensureTerminalFit, scheduleClosedViewportBaselineWindow, syncAppViewpor
 import "./websocket";
 import { buildPtyAttachmentChunks, isImageAttachmentSource } from "./pty-paste";
 import { notifyLegacyUiChange } from "./ui-store-bridge";
-import { PROVIDER_IDS, inferProviderIdFromCommand } from "../provider-identity";
+import { PROVIDER_IDS, PROVIDER_LABELS, inferProviderIdFromCommand } from "../provider-identity";
 import { syncBrowserComposerRail } from "./composer-rail-adapter";
 import { syncBrowserComposerPopover } from "./composer-popover-adapter";
 import { showActionError } from "./composer-action-error";
@@ -1882,8 +1882,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           return Promise.resolve(session);
         }
         if (!canAutoResumeSession(session)) {
-          var providerLabels = { claude: "Claude", codex: "Codex", opencode: "OpenCode", grok: "Grok", qoder: "Qoder", pi: "Pi", gemini: "Gemini" };
-          var providerLabel = (session && providerLabels[session.provider]) || "Provider";
+          var providerLabel = (session && PROVIDER_LABELS[session.provider]) || "Provider";
           flashComposerFailed("该会话没有可恢复的 " + providerLabel + " 历史上下文，请新建会话。");
           return Promise.resolve(null);
         }

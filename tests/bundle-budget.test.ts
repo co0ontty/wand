@@ -62,14 +62,48 @@ test("employee management fits the lazy allowance without increasing shell trans
   assert.equal(repeatHtml(result.stdout), repeatHtml(small.stdout));
 });
 
+test("employee invitations fit the new lazy boundary without becoming shell bytes", (t) => {
+  const fixture = budgetFixture();
+  t.after(fixture.cleanup);
+  const lazy = chunkText(1_280);
+  const size = gzipSync(lazy).length;
+  assert.ok(size > 44_000 && size <= 46_000, `fixture gzip size: ${size}`);
+  const small = fixture.run("");
+  const result = fixture.run(lazy);
+  assert.equal(small.status, 0, String(small.stderr));
+  assert.equal(result.status, 0, String(result.stderr));
+  const firstLoad = (stdout: unknown): string | undefined =>
+    String(stdout).match(/first load \(HTML \+ app \+ vendor\).*\((\d+) B\)/)?.[1];
+  const shellBytes = firstLoad(small.stdout);
+  assert.ok(shellBytes, "the actual shell byte count must be reported");
+  assert.equal(firstLoad(result.stdout), shellBytes);
+});
+
+test("delivery overview fits only its on-demand allowance", (t) => {
+  const fixture = budgetFixture();
+  t.after(fixture.cleanup);
+  const lazy = chunkText(1_330);
+  const size = gzipSync(lazy).length;
+  assert.ok(size > 46_000 && size <= 48_000, `fixture gzip size: ${size}`);
+  const small = fixture.run("");
+  const result = fixture.run(lazy);
+  assert.equal(small.status, 0, String(small.stderr));
+  assert.equal(result.status, 0, String(result.stderr));
+  const firstLoad = (stdout: unknown): string | undefined =>
+    String(stdout).match(/first load \(HTML \+ app \+ vendor\).*\((\d+) B\)/)?.[1];
+  const bytes = firstLoad(small.stdout);
+  assert.ok(bytes);
+  assert.equal(firstLoad(result.stdout), bytes);
+});
+
 test("the raised lazy allowance still rejects oversized team chunks", (t) => {
   const fixture = budgetFixture();
   t.after(fixture.cleanup);
   const lazy = chunkText(1_400);
   const size = gzipSync(lazy).length;
-  assert.ok(size > 43_000, `fixture gzip size: ${size}`);
+  assert.ok(size > 48_000, `fixture gzip size: ${size}`);
   const result = fixture.run(lazy);
   assert.equal(result.status, 1);
   assert.match(String(result.stderr), /\[bundle-budget\] FAILED:/);
-  assert.match(String(result.stderr), /ai-teams\.js \(lazy\): \d+ B > 43000 B/);
+  assert.match(String(result.stderr), /ai-teams\.js \(lazy\): \d+ B > 48000 B/);
 });

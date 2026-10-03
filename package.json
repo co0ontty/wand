@@ -1,6 +1,6 @@
 {
   "name": "@co0ontty/wand",
-  "version": "4.81.0",
+  "version": "4.82.0",
   "description": "A web console for Claude Code, Codex, OpenCode, and other local CLI tools.",
   "type": "module",
   "bin": {
@@ -13,6 +13,7 @@
   },
   "files": [
     "dist",
+    "skills/wand-decision",
     "browser-extension",
     "scripts/install-render-binary.js",
     "scripts/stage-render-binaries.js"
@@ -21,7 +22,7 @@
   "scripts": {
     "generate:web-assets": "node scripts/generate-web-assets.js",
     "build": "node scripts/check-node-version.js && rm -rf dist && node scripts/bundle-tailwind.js && node scripts/bundle-xterm.js && node scripts/bundle-qrcode.js && node scripts/bundle-browser.js && npm run generate:web-assets && tsc -p tsconfig.json && npm run build:copy-content && node scripts/check-bundle-budget.js && (npm run build:render-bin || echo '[wand] WARNING: build:render-bin failed; dist/native/ has no wand-render (run: npm run build:render-bin)' >&2) && node scripts/stamp-build-info.js && node scripts/fix-dist-permissions.js",
-    "build:copy-content": "cp -r src/web-ui/content dist/web-ui/ && node scripts/minify-dist-content.js",
+    "build:copy-content": "cp -r src/web-ui/content dist/web-ui/ && cp src/decision-worker.py dist/decision-worker.py && node scripts/minify-dist-content.js",
     "build:render-bin": "node scripts/stage-render-binaries.js --all",
     "build:render-native": "cargo build --release --manifest-path render/Cargo.toml -p wand-renderd",
     "build:structured-render-native": "cargo build --release --manifest-path render/Cargo.toml -p wand-structured-renderd",

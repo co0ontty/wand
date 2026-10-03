@@ -7,7 +7,7 @@ import process from "node:process";
 import { AndroidApkConfig, CardExpandDefaults, ExecutionMode, IosIpaConfig, MacosDmgConfig, RenderConfig, RenderEngine, SessionProvider, StructuredChatPersonaConfig, WandConfig } from "./types.js";
 import type { WandStorage } from "./storage.js";
 import { isRunningAsRoot } from "./env-utils.js";
-import { isSessionProvider } from "./session-provider.js";
+import { isSessionProvider, SESSION_PROVIDERS } from "./session-provider.js";
 import { isThinkingEffort } from "./structured-provider-common.js";
 
 const DEFAULT_CONFIG_DIR = ".wand";
@@ -44,6 +44,29 @@ export const PREFERENCE_KEYS = [
 ] as const satisfies readonly (keyof WandConfig)[];
 
 export type PreferenceKey = (typeof PREFERENCE_KEYS)[number];
+
+/**
+ * 每个 provider 的默认模型偏好字段。新增 provider 时只改这一处：
+ * 偏好读写、环境归一、默认模型投影都从这张表派生。
+ */
+export const PROVIDER_MODEL_PREFERENCE_FIELDS = {
+  claude: "defaultModel",
+  codex: "defaultCodexModel",
+  opencode: "defaultOpenCodeModel",
+  grok: "defaultGrokModel",
+  qoder: "defaultQoderModel",
+  pi: "defaultPiModel",
+  gemini: "defaultGeminiModel",
+} as const satisfies Record<SessionProvider, keyof WandConfig>;
+
+export type ProviderModelField = (typeof PROVIDER_MODEL_PREFERENCE_FIELDS)[SessionProvider];
+
+const PROVIDER_MODEL_FIELDS: readonly ProviderModelField[] = Object.values(PROVIDER_MODEL_PREFERENCE_FIELDS);
+const PROVIDER_MODEL_FIELD_SET: ReadonlySet<string> = new Set(PROVIDER_MODEL_FIELDS);
+
+function isProviderModelField(key: PreferenceKey): key is ProviderModelField {
+  return PROVIDER_MODEL_FIELD_SET.has(key);
+}
 
 const PREFERENCE_KEY_SET = new Set<string>(PREFERENCE_KEYS);
 
@@ -100,6 +123,7 @@ export const defaultConfig = (): WandConfig => ({
   ios: defaultIosIpaConfig(),
   render: defaultRenderConfig(),
   structured: { processHost: "legacy" },
+  localDecision: { enabled: false, pythonPath: "", modelPath: "" },
   cardDefaults: defaultCardExpandDefaults(),
   defaultModel: "",
   defaultCodexModel: "",
@@ -346,33 +370,11 @@ export function applyStoragePreferences(config: WandConfig, storage: WandStorage
     const v = storage.getPreference<string>(preferenceStorageKey("defaultCwd"), defaults.defaultCwd);
     if (typeof v === "string" && v.trim()) config.defaultCwd = v;
   }
-  if (storage.hasPreference(preferenceStorageKey("defaultModel"))) {
-    const v = storage.getPreference<string>(preferenceStorageKey("defaultModel"), defaults.defaultModel ?? "");
-    if (typeof v === "string") config.defaultModel = v.trim();
-  }
-  if (storage.hasPreference(preferenceStorageKey("defaultCodexModel"))) {
-    const v = storage.getPreference<string>(preferenceStorageKey("defaultCodexModel"), defaults.defaultCodexModel ?? "");
-    if (typeof v === "string") config.defaultCodexModel = v.trim();
-  }
-  if (storage.hasPreference(preferenceStorageKey("defaultOpenCodeModel"))) {
-    const v = storage.getPreference<string>(preferenceStorageKey("defaultOpenCodeModel"), defaults.defaultOpenCodeModel ?? "");
-    if (typeof v === "string") config.defaultOpenCodeModel = v.trim();
-  }
-  if (storage.hasPreference(preferenceStorageKey("defaultGrokModel"))) {
-    const v = storage.getPreference<string>(preferenceStorageKey("defaultGrokModel"), defaults.defaultGrokModel ?? "");
-    if (typeof v === "string") config.defaultGrokModel = v.trim();
-  }
-  if (storage.hasPreference(preferenceStorageKey("defaultQoderModel"))) {
-    const v = storage.getPreference<string>(preferenceStorageKey("defaultQoderModel"), defaults.defaultQoderModel ?? "");
-    if (typeof v === "string") config.defaultQoderModel = v.trim();
-  }
-  if (storage.hasPreference(preferenceStorageKey("defaultPiModel"))) {
-    const v = storage.getPreference<string>(preferenceStorageKey("defaultPiModel"), defaults.defaultPiModel ?? "");
-    if (typeof v === "string") config.defaultPiModel = v.trim();
-  }
-  if (storage.hasPreference(preferenceStorageKey("defaultGeminiModel"))) {
-    const v = storage.getPreference<string>(preferenceStorageKey("defaultGeminiModel"), defaults.defaultGeminiModel ?? "");
-    if (typeof v === "string") config.defaultGeminiModel = v.trim();
+  for (const field of PROVIDER_MODEL_FIELDS) {
+    const dbKey = preferenceStorageKey(field);
+    if (!storage.hasPreference(dbKey)) continue;
+    const v = storage.getPreference<string>(dbKey, defaults[field] ?? "");
+    if (typeof v === "string") config[field] = v.trim();
   }
   if (storage.hasPreference(preferenceStorageKey("commitCli"))) {
     const v = storage.getPreference<string>(preferenceStorageKey("commitCli"), defaults.commitCli ?? "claude");
@@ -417,6 +419,14 @@ export function writePreferenceToStorage(
   value: unknown,
 ): void {
   const dbKey = preferenceStorageKey(key);
+  // Default model fields share one shape (trimmed string) across every provider;
+  // handling them before the switch keeps the switch free of seven copies.
+  if (isProviderModelField(key)) {
+    const v = typeof value === "string" ? value.trim() : "";
+    storage.setPreference(dbKey, v);
+    config[key] = v;
+    return;
+  }
   switch (key) {
     case "defaultProvider": {
       if (!isSessionProvider(value)) throw new Error(`无效 Provider: ${String(value)}`);
@@ -446,48 +456,6 @@ export function writePreferenceToStorage(
       const v = typeof value === "string" ? value : "";
       storage.setPreference(dbKey, v);
       config.defaultCwd = v || defaultConfig().defaultCwd;
-      break;
-    }
-    case "defaultModel": {
-      const v = typeof value === "string" ? value.trim() : "";
-      storage.setPreference(dbKey, v);
-      config.defaultModel = v;
-      break;
-    }
-    case "defaultCodexModel": {
-      const v = typeof value === "string" ? value.trim() : "";
-      storage.setPreference(dbKey, v);
-      config.defaultCodexModel = v;
-      break;
-    }
-    case "defaultOpenCodeModel": {
-      const v = typeof value === "string" ? value.trim() : "";
-      storage.setPreference(dbKey, v);
-      config.defaultOpenCodeModel = v;
-      break;
-    }
-    case "defaultGrokModel": {
-      const v = typeof value === "string" ? value.trim() : "";
-      storage.setPreference(dbKey, v);
-      config.defaultGrokModel = v;
-      break;
-    }
-    case "defaultQoderModel": {
-      const v = typeof value === "string" ? value.trim() : "";
-      storage.setPreference(dbKey, v);
-      config.defaultQoderModel = v;
-      break;
-    }
-    case "defaultPiModel": {
-      const v = typeof value === "string" ? value.trim() : "";
-      storage.setPreference(dbKey, v);
-      config.defaultPiModel = v;
-      break;
-    }
-    case "defaultGeminiModel": {
-      const v = typeof value === "string" ? value.trim() : "";
-      storage.setPreference(dbKey, v);
-      config.defaultGeminiModel = v;
       break;
     }
     case "commitCli": {
@@ -738,17 +706,16 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
     ios: normalizeIosIpaConfig(input.ios) ?? defaults.ios,
     render: normalizeRenderConfig(input.render) ?? defaults.render,
     structured: { processHost: input.structured?.processHost === "rust" ? "rust" : "legacy" },
+    localDecision: {
+      enabled: input.localDecision?.enabled === true,
+      pythonPath: typeof input.localDecision?.pythonPath === "string" ? input.localDecision.pythonPath.trim() : "",
+      modelPath: typeof input.localDecision?.modelPath === "string" ? input.localDecision.modelPath.trim() : "",
+    },
     cardDefaults: normalizeCardDefaults(input.cardDefaults),
     defaultProvider: isSessionProvider(input.defaultProvider) ? input.defaultProvider : "claude",
     defaultSessionKind: input.defaultSessionKind === "pty" ? "pty" : "structured",
     defaultTaskWorktree: typeof input.defaultTaskWorktree === "boolean" ? input.defaultTaskWorktree : defaults.defaultTaskWorktree,
-    defaultModel: typeof input.defaultModel === "string" ? input.defaultModel.trim() : defaults.defaultModel,
-    defaultCodexModel: typeof input.defaultCodexModel === "string" ? input.defaultCodexModel.trim() : defaults.defaultCodexModel,
-    defaultOpenCodeModel: typeof input.defaultOpenCodeModel === "string" ? input.defaultOpenCodeModel.trim() : defaults.defaultOpenCodeModel,
-    defaultGrokModel: typeof input.defaultGrokModel === "string" ? input.defaultGrokModel.trim() : defaults.defaultGrokModel,
-    defaultQoderModel: typeof input.defaultQoderModel === "string" ? input.defaultQoderModel.trim() : defaults.defaultQoderModel,
-    defaultPiModel: typeof input.defaultPiModel === "string" ? input.defaultPiModel.trim() : defaults.defaultPiModel,
-    defaultGeminiModel: typeof input.defaultGeminiModel === "string" ? input.defaultGeminiModel.trim() : defaults.defaultGeminiModel,
+    ...providerModelOverrides(input, defaults),
     commitCli: input.commitCli === "codex" || input.commitCli === "opencode" ? input.commitCli : "claude",
     commitModel: typeof input.commitModel === "string" ? input.commitModel.trim() : defaults.commitModel,
     systemAiCli: isSessionProvider(input.systemAiCli) ? input.systemAiCli : undefined,
@@ -771,38 +738,44 @@ function configuredModelId(value: string | undefined): string {
   return trimmed === "default" ? "" : trimmed;
 }
 
-export function getProviderDefaultModels(config: Pick<WandConfig, "defaultModel" | "defaultCodexModel" | "defaultOpenCodeModel" | "defaultGrokModel" | "defaultQoderModel" | "defaultPiModel" | "defaultGeminiModel">): {
-  claude: string;
-  codex: string;
-  opencode: string;
-  grok: string;
-  qoder: string;
-  pi: string;
-  gemini: string;
-} {
-  return {
-    claude: configuredModelId(config.defaultModel),
-    codex: configuredModelId(config.defaultCodexModel),
-    opencode: configuredModelId(config.defaultOpenCodeModel),
-    grok: configuredModelId(config.defaultGrokModel),
-    qoder: configuredModelId(config.defaultQoderModel),
-    pi: configuredModelId(config.defaultPiModel),
-    gemini: configuredModelId(config.defaultGeminiModel),
-  };
+/** 归一每个 provider 的默认模型：字符串则 trim，否则回落到默认值。 */
+function providerModelOverrides(
+  input: Partial<WandConfig>,
+  defaults: WandConfig,
+): Pick<WandConfig, ProviderModelField> {
+  const result = {} as Record<ProviderModelField, string | undefined>;
+  for (const field of PROVIDER_MODEL_FIELDS) {
+    const value = input[field];
+    result[field] = typeof value === "string" ? value.trim() : defaults[field];
+  }
+  return result;
+}
+
+export function getProviderDefaultModels(config: Pick<WandConfig, ProviderModelField>): Record<SessionProvider, string> {
+  const models = {} as Record<SessionProvider, string>;
+  for (const provider of SESSION_PROVIDERS) {
+    models[provider] = configuredModelId(config[PROVIDER_MODEL_PREFERENCE_FIELDS[provider]]);
+  }
+  return models;
 }
 
 export function getDefaultModelForProvider(
-  config: Pick<WandConfig, "defaultModel" | "defaultCodexModel" | "defaultOpenCodeModel" | "defaultGrokModel" | "defaultQoderModel" | "defaultPiModel" | "defaultGeminiModel">,
+  config: Pick<WandConfig, ProviderModelField>,
   provider: SessionProvider | undefined,
 ): string {
   const defaults = getProviderDefaultModels(config);
-  if (provider === "codex") return defaults.codex;
-  if (provider === "opencode") return defaults.opencode;
-  if (provider === "grok") return defaults.grok;
-  if (provider === "qoder") return defaults.qoder;
-  if (provider === "pi") return defaults.pi;
-  if (provider === "gemini") return defaults.gemini;
-  return defaults.claude;
+  return provider ? defaults[provider] : defaults.claude;
+}
+
+/** 把按 provider 归档的默认模型投影回各自的 `default*Model` 字段（客户端兼容字段）。 */
+export function providerModelFields(
+  models: Record<SessionProvider, string>,
+): Pick<WandConfig, ProviderModelField> {
+  const result = {} as Record<ProviderModelField, string>;
+  for (const provider of SESSION_PROVIDERS) {
+    result[PROVIDER_MODEL_PREFERENCE_FIELDS[provider]] = models[provider];
+  }
+  return result;
 }
 
 function normalizePresetCommand(command: string): string {

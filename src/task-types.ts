@@ -9,8 +9,8 @@ export type WandTaskPriority = "none" | "low" | "medium" | "high" | "urgent";
 /** 新建任务的默认优先级：用户没挑就是「低」，不再落成「无优先级」。 */
 export const DEFAULT_WAND_TASK_PRIORITY: WandTaskPriority = "low";
 
-/** 任务派发时选择的 CLI 工具；空串表示尚未指定。 */
-export type WandTaskAgentProvider = "claude" | "codex" | "opencode" | "grok" | "qoder" | "pi" | "gemini";
+/** 任务派发时选择的 CLI 工具；空串表示尚未指定。沿用 provider 的唯一真源。 */
+export type WandTaskAgentProvider = import("./provider-catalog.js").SessionProvider;
 export type WandTaskAgentModel = string;
 /** 与会话思考档位同一套：旧四档，或 `provider:level` 原生档。 */
 export type WandTaskAgentEffort = "off" | "standard" | "deep" | "max" | `${WandTaskAgentProvider}:${string}`;
@@ -196,6 +196,8 @@ export interface WandTask {
   /** 该任务绑定的执行 Agent；null 表示还没指定。 */
   agent: WandTaskAgent | null;
   executionSubject?: TaskExecutionSubject | null;
+  /** 进入归档的时间；未归档为 null。保留期清理按它起算。 */
+  archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }

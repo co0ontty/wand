@@ -287,7 +287,10 @@ test("ai-teams chunk borrows every shared import from the main-bundle host regis
   const chunkFiles: Record<string, string> = {
     "ai-teams/chunk-entry": "react/ai-teams/chunk-entry.ts",
     "ai-teams/teams-page": "react/ai-teams/teams-page.tsx",
+    "ai-teams/team-employee-invite": "react/ai-teams/team-employee-invite.tsx",
+    "ai-teams/team-employee-binding": "react/ai-teams/team-employee-binding.ts",
     "ai-teams/team-chat-view": "react/ai-teams/team-chat-view.tsx",
+    "ai-teams/team-delivery": "react/ai-teams/team-delivery.tsx",
     "ai-teams/team-chat-page": "react/ai-teams/team-chat-page.tsx",
     "ai-teams/styles": "react/ai-teams/styles.ts",
     "issues/team-run-panel": "react/issues/team-run-panel.tsx",
@@ -297,6 +300,7 @@ test("ai-teams chunk borrows every shared import from the main-bundle host regis
     "agents/employee-card": "react/agents/employee-card.tsx",
     "agents/employee-memory": "react/agents/employee-memory.tsx",
     "agents/employee-knowledge": "react/agents/employee-knowledge.tsx",
+    "agents/employee-tags-field": "react/agents/employee-tags-field.tsx",
     "agents/employee-create-form": "react/agents/employee-create-form.tsx",
     "agents/employee-list-page": "react/agents/employee-list-page.tsx",
   };
@@ -344,10 +348,11 @@ test("员工头像选择器沿用团队的有界头像按钮尺寸", () => {
   assert.match(styles, /\.wand-team-coat\s*\{[^}]*width:\s*30px;[^}]*height:\s*30px;/);
 });
 
-test("新建员工默认只填期望，手动字段收进可原位展开的高级配置", () => {
+test("新建员工默认填写期望与可选标签，角色字段收进可原位展开的高级配置", () => {
   const form = read("react/agents/employee-create-form.tsx");
-  // 默认只有期望输入框 + 创建按钮：名字/职责/Prompt/候选都在高级配置里。
+  // 默认期望 + 可选标签：名字/职责/Prompt/候选仍在高级配置里。
   assert.match(form, /id="new-employee-expectation"/);
+  assert.match(form, /<EmployeeTagsField id="new-employee-tags"/);
   assert.match(form, /const \[advanced, setAdvanced\] = React\.useState\(false\)/);
   assert.match(form, /className="wand-employee-advanced"/);
   assert.match(form, /data-open=\{advanced \|\| undefined\}/);
@@ -361,10 +366,12 @@ test("新建员工默认只填期望，手动字段收进可原位展开的高�
   assert.match(styles, /\.wand-employee-advanced \{[^}]*grid-template-rows: 0fr/);
   assert.match(styles, /\.wand-employee-advanced\[data-open\] \{ grid-template-rows: 1fr/);
   assert.match(styles, /\.wand-employee-advanced,\s*\n\s*\.wand-employee-advanced-toggle button > svg \{ transition: none; \}/);
-  assert.match(styles, /\.wand-employee-create-submit \{ min-inline-size:/);
+  assert.match(styles, /\.wand-employee-create-submit,\s*\.wand-employee-save-submit \{ min-inline-size:/);
   // 箭头同实例旋转变形，标签不换字，按钮尺寸不变。
   assert.match(styles, /\.wand-employee-advanced-toggle\[data-open\] button > svg:last-child \{ transform: rotate\(180deg\)/);
   assert.doesNotMatch(form, /收起高级配置/);
+  assert.match(styles, /\.wand-employees-layout \{[^}]*overflow-y: auto;[^}]*overscroll-behavior: contain;/,
+    "员工长表单必须由面板自己滚动，不能让保存按钮溢出到外壳之外");
 });
 
 const DWELL_TOKENS: Array<[string, number]> = [["--motion-dwell-sent", 720], ["--motion-dwell-failed", 1500]];
@@ -660,8 +667,10 @@ test("[T8] team-chat-view 进 chunk、主包不含它，借的模块靠注册表
     "src/web-ui/react/ai-teams/chunk-entry.ts",
     "src/web-ui/react/ai-teams/lazy.tsx",
     "src/web-ui/react/ai-teams/team-chat-page.tsx",
+    "src/web-ui/react/ai-teams/teams-page.tsx",
     "src/web-ui/react/issues/team-run-panel.tsx",
   ]);
+  assert.match(chunkScriptSource, /"ai-teams", "teams-page\.tsx"/, "新增运行历史合并消费者仍必须属于按需包，不能进主包");
   assert.match(read("react/ai-teams/lazy.tsx"), /import type \{ TeamChatViewProps \} from "\.\/team-chat-view";/);
   const lazy = read("react/ai-teams/lazy.tsx");
   const registry = lazy.slice(lazy.indexOf("const AI_TEAMS_HOST"), lazy.indexOf("};\n", lazy.indexOf("const AI_TEAMS_HOST")));
@@ -798,14 +807,23 @@ test("群聊图片和文件上传沿用会话接口，回显只隐藏路径前�
 });
 
 test("群聊时间标签只在开场或长时间间隔出现", () => {
-  const now = new Date("2026-09-29T12:00:00+08:00");
-  const first = { createdAt: "2026-09-29T07:40:00+08:00" };
-  const soon = { createdAt: "2026-09-29T07:50:00+08:00" };
-  const later = { createdAt: "2026-09-29T09:40:00+08:00" };
-  assert.equal(chatTimeMarker(first, undefined, now), "今天 07:40");
-  assert.equal(chatTimeMarker(soon, first, now), "");
-  assert.equal(chatTimeMarker(later, soon, now), "今天 09:40");
-  assert.equal(chatTimeMarker({ createdAt: "2026-09-28T07:40:00+08:00" }, undefined, now), "昨天 07:40");
+  // 标签按浏览器本地时区渲染，而本用例的期望值是 +08:00 的本地钟点。
+  // CI 与多数 Linux 容器默认 UTC，不锁定时区这条断言会随机器漂移。
+  const previousTz = process.env.TZ;
+  process.env.TZ = "Asia/Shanghai";
+  try {
+    const now = new Date("2026-09-29T12:00:00+08:00");
+    const first = { createdAt: "2026-09-29T07:40:00+08:00" };
+    const soon = { createdAt: "2026-09-29T07:50:00+08:00" };
+    const later = { createdAt: "2026-09-29T09:40:00+08:00" };
+    assert.equal(chatTimeMarker(first, undefined, now), "今天 07:40");
+    assert.equal(chatTimeMarker(soon, first, now), "");
+    assert.equal(chatTimeMarker(later, soon, now), "今天 09:40");
+    assert.equal(chatTimeMarker({ createdAt: "2026-09-28T07:40:00+08:00" }, undefined, now), "昨天 07:40");
+  } finally {
+    if (previousTz === undefined) delete process.env.TZ;
+    else process.env.TZ = previousTz;
+  }
 });
 
 test("群聊输入栏发送 ⇄ 停止：未结束的运行占发送的位置，有草稿时两者并排", () => {
@@ -1432,9 +1450,9 @@ test("团队详情：草稿未保存时，每个离开入口都先确认，取�
   // 编辑器只上报一个布尔，宿主用 ref 接，避免每次击键重渲染整页。
   assert.match(teams, /const teamDraftDirty = React\.useRef\(false\);/);
   assert.match(teams, /const dirty = React\.useMemo\(\(\) => JSON\.stringify\(draft\) !== initialKey/);
-  assert.match(teams, /React\.useEffect\(\(\) => \{ onDirtyChange\?\.\(dirty\); \}, \[dirty, onDirtyChange\]\);/);
+  assert.match(teams, /React\.useEffect\(\(\) => \{ onDirtyChange\?\.\(dirty \|\| busy, pending \|\| deleting\); \}, \[dirty, busy, pending, deleting, onDirtyChange\]\);/);
   // 三个入口共用同一段守卫：面包屑父段、「新建团队」收起、「换一个模板」。
-  assert.match(teams, /const confirmDiscardTeamDraft = async \(\): Promise<boolean> => \{\s*if \(!teamDraftDirty\.current\) return true;/);
+  assert.match(teams, /const confirmDiscardTeamDraft = async \(\): Promise<boolean> => \{\s*if \(teamDraftPending\.current\) return false;\s*if \(!teamDraftDirty\.current\) return true;/);
   assert.match(teams, /const leaveDetail = async \(\): Promise<void> => \{\s*if \(!await confirmDiscardTeamDraft\(\)\) return;/);
   assert.match(teams, /\{ label: "AI 团队", onNavigate: \(\) => \{ void leaveDetail\(\); \} \}/);
   assert.match(teams, /onClick=\{\(\) => \(creating \? void leaveDetail\(\) : void startCreate\(\)\)\}/);

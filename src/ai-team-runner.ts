@@ -3,6 +3,9 @@ import { randomUUID } from "node:crypto";
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { freezeTeamEmployees, projectTeamEmployees, teamMemberEmployee } from "./ai-team-employee-binding.js";
+import { buildAiTeamDeliverySummary } from "./ai-team-delivery.js";
+import type { SiliconEmployee } from "./ai-team-types.js";
 import {
   dispatchAgentForTask,
   resolveTaskDispatchTarget,
@@ -97,11 +100,16 @@ export interface AiTeamSessionOps {
     automationId: string;
     /** 角色与规则；走 provider 的系统提示通道，不拼进 prompt。 */
     systemPrompt?: string;
+    employee?: SiliconEmployee;
+    employeeCandidateIndex?: number;
+    teamRequestStarted?: (sessionId: string, requestId: string) => void;
   }): Promise<string>;
-  send(sessionId: string, text: string): Promise<void>;
+  send(sessionId: string, text: string, teamRequestStarted?: (sessionId: string, requestId: string) => void): Promise<void>;
   stop(sessionId: string): void;
   snapshot(sessionId: string): SessionSnapshot | null;
   ownerOf(sessionId: string): "structured" | "pty" | "storage" | null;
+  /** Server-private generation and one-shot, explicitly unaccepted startup fact. */
+  consumeUnacceptedStartup?(sessionId: string, requestId: string): boolean;
 }
 
 /** 群聊：一次运行一个转发会话，团队的决定、派工和报告都以成员身份发在里面。 */
@@ -138,10 +146,12 @@ export function createAiTeamSessionOps(deps: AgentDispatchDeps & { sessions: Ses
       const { session } = await dispatchAgentForTask(deps, input);
       return session.id;
     },
-    send: (sessionId, text) => sendToAgentSession(deps, sessionId, text),
+    send: (sessionId, text, teamRequestStarted) => sendToAgentSession(deps, sessionId, text, teamRequestStarted),
     stop: (sessionId) => stopAgentSession(deps, sessionId),
     snapshot: (sessionId) => deps.sessions.getLatest(sessionId),
     ownerOf: (sessionId) => deps.sessions.ownerOf(sessionId),
+    consumeUnacceptedStartup: (sessionId, requestId) =>
+      deps.structured?.consumeUnacceptedTeamStartup(sessionId, requestId) ?? false,
   };
 }
 
@@ -209,7 +219,8 @@ export function displayAiTeam(snapshot: AiTeam, current: AiTeam | null): AiTeam 
     updatedAt: current.updatedAt,
     members: snapshot.members.map((member) => {
       const live = byId.get(member.id);
-      return live ? { ...member, name: live.name, avatar: live.avatar } : member;
+      return live && !member.employeeId && !live.employeeId
+        ? { ...member, name: live.name, avatar: live.avatar } : member;
     }),
   };
 }
@@ -504,6 +515,7 @@ export class AiTeamRunner {
   private readonly recheckTimers = new Map<string, NodeJS.Timeout>();
   /** 已经确定「不降级、按既有路径记 failed」的步骤，防止 finishStep 再判一次形成回环。 */
   private readonly noDegrade = new Set<string>();
+  private readonly teamRequestIds = new Map<string, string>();
   private sweepTimer: NodeJS.Timeout | null = null;
   /** 脱敏参照目录只算一次：os.homedir() 读 env，configDir 随 storage 定，运行期不变。 */
   private redactionDirsValue: RedactionDirs | null = null;
@@ -551,8 +563,9 @@ export class AiTeamRunner {
   // ── 公开操作 ──
 
   async start(input: { teamId: string; taskId: string; note?: string; chatSessionId?: string }): Promise<AiTeamRunDetail> {
-    const team = this.storage.getAiTeam(input.teamId);
-    if (!team) throw new Error("团队不存在。");
+    const definition = this.storage.getAiTeam(input.teamId);
+    if (!definition) throw new Error("团队不存在。");
+    const team = freezeTeamEmployees(definition, this.storage);
     const task = this.storage.getWandTask(input.taskId);
     if (!task) throw new Error("任务不存在。");
     const active = this.storage.listAiTeamRuns({ taskId: task.id, statuses: AI_TEAM_ACTIVE_RUN_STATUSES });
@@ -747,14 +760,16 @@ export class AiTeamRunner {
     const task = (binding?.workspaceTaskId
       ? this.storage.getWandTaskByWorkspaceTaskId(binding.workspaceTaskId) : null)
       ?? this.storage.getWandTask(run.taskId);
+    const displayTeam = projectTeamEmployees(displayAiTeam(run.team, currentTeam), this.storage);
     return {
       run,
+      delivery: buildAiTeamDeliverySummary({ run, steps, displayTeam, relayTurns: messages, memberStates }),
       chatTitle: aiTeamChatTitle(task?.title),
       chatTitleUpdatedAt: task?.updatedAt ?? "",
       steps,
       memberStates,
       // 别把展示字段写回 run.team：运行快照里的执行候选/职责由 runner 独立管理。
-      displayTeam: displayAiTeam(run.team, currentTeam),
+      displayTeam,
       chatTurns: messages.slice(-AI_TEAM_DETAIL_CHAT_TURNS),
     };
   }
@@ -932,6 +947,7 @@ export class AiTeamRunner {
     this.liveTimers.clear();
     this.lastLiveKey.clear();
     this.noDegrade.clear();
+    this.teamRequestIds.clear();
   }
 
   /** 等当前排队的所有操作跑完（测试用）。 */
@@ -1109,6 +1125,9 @@ export class AiTeamRunner {
     // 按真实角色身份发出正常对话气泡并展示完整报错，而不是次级 notice 小字。
     const leader = leaderOf(run.team);
     if (outcome.kind === "failed" && outcome.sessionError) {
+      // Leaders keep their existing wait-for-user rule, not worker candidate fallback.
+      const requestId = this.teamRequestIds.get(step.id);
+      if (step.sessionId && requestId) this.ops.consumeUnacceptedStartup?.(step.sessionId, requestId);
       this.saveStep({ ...step, status: "failed", report: outcome.text, endedAt });
       this.postTurn(run, {
         role: "assistant",
@@ -1461,8 +1480,11 @@ export class AiTeamRunner {
     try {
       if (!member) throw new Error("成员不存在");
       if (!agent) throw new Error("成员没有配置可用的 CLI 候选");
+      if (member.employeeId && !teamMemberEmployee(member)) throw new Error("员工执行快照缺失，不能重绑定旧运行。");
       if (reusable) {
-        await this.ops.send(reusable, prompt.message);
+        await this.ops.send(reusable, prompt.message, (_sessionId, requestId) => {
+          this.teamRequestIds.set(step.id, requestId);
+        });
       } else {
         const task = this.storage.getWandTask(run.taskId);
         if (!task) throw new Error("任务卡已被删除");
@@ -1472,9 +1494,14 @@ export class AiTeamRunner {
           prompt: prompt.message,
           automationId: `ai-team:${run.id}`,
           systemPrompt: prompt.system,
+          employee: teamMemberEmployee(member),
+          employeeCandidateIndex: member.employeeId ? info.usedCandidate : undefined,
+          teamRequestStarted: (_sessionId, requestId) => { this.teamRequestIds.set(step.id, requestId); },
         });
         running = { ...running, sessionId };
         this.saveStep(running);
+        // Immediate async spawn failure can precede open() returning and the session→step link.
+        if (this.ops.snapshot(sessionId)?.status === "failed") this.ingest({ type: "status", sessionId });
       }
     } catch (error) {
       const message = getErrorMessage(error);
@@ -1484,6 +1511,7 @@ export class AiTeamRunner {
         // 尝试，也不能当成「不可降级」直接吞掉——记进黑名单后交给既有失败出口。
         this.disableHostKind(run.id, agent.kind);
       } else if (agent && step.kind === "work" && kind === "spawn-missing"
+        && (!member?.employeeId || reusable === null)
         && !existsSync(path.join(run.cwd, step.reportPath)) && !this.noDegrade.has(step.id)) {
         // §3.4 触发点 1：会话根本没起来，ENOENT 对 structured / pty 同样可靠（修正 B4 排除的是
         // PTY 的异步分类）。传 `running` 而不是入参 `step`：复用会话时 sessionId 只在 running 上。
@@ -1612,6 +1640,14 @@ export class AiTeamRunner {
   private asyncStartupFailure(run: AiTeamRun, step: AiTeamStep, outcomeText: string): CandidateFailure | null {
     const member = this.member(run.team, step.memberId);
     if (!member) return null;
+    const requestId = this.teamRequestIds.get(step.id);
+    const unaccepted = !!(step.sessionId && requestId
+      && this.ops.consumeUnacceptedStartup?.(step.sessionId, requestId));
+    // Bound employees may retry only this request's explicit unaccepted fact, never a text/time guess.
+    if (member.employeeId) {
+      if (!unaccepted || existsSync(path.join(run.cwd, step.reportPath))) return null;
+      return { kind: "spawn-missing", reason: outcomeText };
+    }
     const info = this.infoOf(step);
     const candidates = memberAgents(member);
     const agent = candidates[info.usedCandidate];
@@ -1719,13 +1755,15 @@ export class AiTeamRunner {
 
   /**
    * 运行停下来等用户时，用户可能刚在团队页换了成员的 CLI / 模型（比如额度用尽换一个）。
-   * 接着跑之前换成最新配置；成员被删了或没有负责人时保留原快照。
+   * 独立 CLI 团队沿用旧刷新规则；带员工链接的运行全程保留新开工时的执行快照。
    */
   private refreshTeam(run: AiTeamRun): void {
+    if (run.team.members.some((member) => member.employeeId)) return;
     const latest = this.storage.getAiTeam(run.teamId);
     if (!latest || !latest.members.some((member) => member.isLeader)) return;
     const used = new Set(this.storage.listAiTeamSteps(run.id).map((step) => step.memberId));
     if ([...used].some((id) => !latest.members.some((member) => member.id === id))) return;
+    if (latest.members.some((member) => member.employeeId)) return;
     run.team = latest;
   }
 
@@ -1745,6 +1783,7 @@ export class AiTeamRunner {
       if (step.id === excludeStepId || step.memberId !== member.id || !step.sessionId) continue;
       const snapshot = this.ops.snapshot(step.sessionId);
       if (!snapshot || isSessionGone(snapshot)) return null;
+      if ((snapshot.employeeId ?? undefined) !== member.employeeId) return null;
       const candidates = memberAgents(member);
       const previous = candidates[this.infoOf(step).usedCandidate] ?? candidates[0];
       if (!previous || (agent && agentKey(previous) !== agentKey(agent))) return null;
@@ -1914,6 +1953,11 @@ export class AiTeamRunner {
   }
 
   private saveStep(step: AiTeamStep): void {
+    if (step.status !== "running" && step.status !== "queued") {
+      const requestId = this.teamRequestIds.get(step.id);
+      if (step.sessionId && requestId) this.ops.consumeUnacceptedStartup?.(step.sessionId, requestId);
+      this.teamRequestIds.delete(step.id);
+    }
     this.storage.saveAiTeamStep(step);
   }
 

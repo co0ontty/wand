@@ -1,5 +1,6 @@
 import { inferProviderIdFromCommand, normalizeProviderId } from "../../provider-identity";
 import { computeRunningSignal } from "../../session-activity";
+import { isSessionJustCompleted } from "../../../session-completion-state.js";
 import type {
   UiAuthPhase,
   UiProvider,
@@ -52,6 +53,8 @@ interface LegacySession {
   employeeAvatar?: string;
   cwd?: string;
   status?: string;
+  completionRevision?: number;
+  viewedCompletionRevision?: number;
   permissionBlocked?: boolean;
   ptyBusy?: boolean;
   runner?: string;
@@ -149,6 +152,7 @@ function sessionStatusLabel(session: LegacySession): string {
   if (kind === "structured" && session.structuredState?.inFlight) {
     return session.structuredState.phase === "background" ? "后台任务中" : "思考中";
   }
+  if (isSessionJustCompleted(session)) return "刚完成";
   const status = stringValue(session.status, "idle");
   // provider CLI 进程活着但本轮已结束 → 空闲而不是运行中
   if (isIdleAtPrompt(kind, status, session.provider ?? "", Boolean(session.ptyBusy))) return "空闲";
@@ -159,6 +163,7 @@ function sessionStatusTone(session: LegacySession): string {
   if (session.permissionBlocked) return "permission-blocked";
   const kind = session.sessionKind === "structured" ? "structured" : "pty";
   if (kind === "structured" && session.structuredState?.inFlight) return "running";
+  if (isSessionJustCompleted(session)) return "just-completed";
   const status = stringValue(session.status);
   if (isIdleAtPrompt(kind, status, session.provider ?? "", Boolean(session.ptyBusy))) return "idle";
   return status;

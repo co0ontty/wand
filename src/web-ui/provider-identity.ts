@@ -1,82 +1,32 @@
-export const PROVIDER_IDS = ["claude", "codex", "opencode", "grok", "qoder", "pi", "gemini"] as const;
+// Provider 的列表 / 别名 / 展示名 / 推断规则统一在 src/provider-catalog.ts（服务端共用）。
+// 这里只补充浏览器层特有的品牌 logo 与 HTML 渲染。
+import {
+  SESSION_PROVIDERS as PROVIDER_IDS,
+  inferProviderFromCommand,
+  normalizeProviderId,
+  type SessionProvider,
+} from "../provider-catalog.js";
 
-export type ProviderId = (typeof PROVIDER_IDS)[number];
+export {
+  inferProviderFromCommand,
+  providerCliCommand,
+  providerDisplayName,
+  isNativeThinkingEffort,
+  NATIVE_THINKING_EFFORT_PATTERN,
+  PROVIDER_LABELS,
+} from "../provider-catalog.js";
+export { PROVIDER_IDS, normalizeProviderId };
+
+export type ProviderId = SessionProvider;
+
+/** 兼容旧名：浏览器层的调用点叫 inferProviderIdFromCommand。 */
+export const inferProviderIdFromCommand = inferProviderFromCommand;
 
 const PROVIDER_ID_SET: ReadonlySet<string> = new Set(PROVIDER_IDS);
 
-const PROVIDER_LABELS: Readonly<Record<ProviderId, string>> = {
-  claude: "Claude",
-  codex: "Codex",
-  opencode: "OpenCode",
-  grok: "Grok",
-  qoder: "Qoder",
-  pi: "Pi",
-  gemini: "Gemini",
-};
-
-const PROVIDER_ALIASES: Readonly<Record<string, ProviderId>> = {
-  anthropic: "claude",
-  claude: "claude",
-  "claude-cli": "claude",
-  "claude-cli-print": "claude",
-  codex: "codex",
-  "codex-cli": "codex",
-  "codex-cli-exec": "codex",
-  grok: "grok",
-  "grok-cli": "grok",
-  "grok-cli-headless": "grok",
-  "open-code": "opencode",
-  open_code: "opencode",
-  opencode: "opencode",
-  "opencode-cli-run": "opencode",
-  qoder: "qoder",
-  "qoder-cli": "qoder",
-  "qoder-cli-print": "qoder",
-  qodercli: "qoder",
-  pi: "pi",
-  "pi-cli": "pi",
-  "pi-cli-json": "pi",
-  gemini: "gemini",
-  "gemini-cli": "gemini",
-  "gemini-cli-json": "gemini",
-};
-
-/** Normalizes a persisted provider id or provider-runner alias. */
-export function normalizeProviderId(value: unknown): ProviderId | null {
-  if (typeof value !== "string") return null;
-  const normalized = value.trim().toLowerCase();
-  return normalized ? PROVIDER_ALIASES[normalized] ?? null : null;
-}
-
-/**
- * Infers old sessions from the command's executable only. Arguments and parent
- * directory names must not be allowed to impersonate a different provider.
- */
-export function inferProviderIdFromCommand(value: unknown): ProviderId | null {
-  if (typeof value !== "string") return null;
-  const command = value.trim();
-  if (!command) return null;
-  const match = command.match(/^(?:"([^"]+)"|'([^']+)'|(\S+))/);
-  const executablePath = match?.[1] ?? match?.[2] ?? match?.[3] ?? "";
-  const executable = executablePath.split(/[\\/]/).pop()?.replace(/\.(?:cmd|exe)$/i, "") ?? "";
-  return normalizeProviderId(executable);
-}
-
-/** provider 对应的 CLI 可执行文件名（Qoder 的 CLI 叫 qodercli）。 */
-export function providerCliCommand(provider: string): string {
-  return provider === "qoder" ? "qodercli" : provider;
-}
-
-/** 严格判断：只接受 6 个 provider 字面量，不做别名 / 大小写归一。 */
+/** 严格判断：只接受 7 个 provider 字面量，不做别名 / 大小写归一。 */
 export function isProviderId(value: unknown): value is ProviderId {
   return typeof value === "string" && PROVIDER_ID_SET.has(value);
-}
-
-export function providerDisplayName(value: unknown): string {
-  if (typeof value === "string" && value.trim().toLowerCase() === "terminal") return "终端";
-  const provider = normalizeProviderId(value);
-  if (provider) return PROVIDER_LABELS[provider];
-  return typeof value === "string" && value.trim() ? value.trim() : "AI";
 }
 
 // Claude/Codex paths match the existing Android BrandLogos source (simple-icons,

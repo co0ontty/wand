@@ -9,11 +9,12 @@
  * bytes stop. So a turn is opened on submit and closed once the session has been
  * silent for a quiet window, refreshed on every chunk.
  *
- * The principled alternative is to ask the OS whether the terminal's foreground
- * process group is blocked on a tty read (that is the real meaning of "waiting
- * for input"). It works for any provider and is immune to spinners, but it needs
- * the PTY-owning daemon (Render) to expose foreground-pgrp state, so it is left
- * as a follow-up. This module is the deliberate fallback.
+ * The principled input — is the CLI still in the foreground? — now comes from
+ * the kernel instead of a one-shot marker: `pty-foreground.ts` samples each
+ * live terminal's foreground process group (`tpgid`), so a CLI that exits and is
+ * started again in the same terminal (self-update, manual re-run) is recognised
+ * again. Output activity then only decides whether the current turn is still
+ * running. This module remains the quiet-window fallback for that last call.
  */
 
 /**

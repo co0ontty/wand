@@ -1560,9 +1560,9 @@ test("[T3b] the degrade reason reaching notice, report and dispatch_info_json ca
 });
 
 test("[T3b] redaction is a pure function over the directories it is handed", () => {
-  const dirs = { homeDir: "/Users/co0ontty", configDir: "/tmp/wand-dev" };
+  const dirs = { homeDir: "/home/example", configDir: "/tmp/wand-dev" };
   assert.equal(
-    redactAiTeamErrorText("spawn codex ENOENT in /Users/co0ontty/.nvm/versions/node", dirs),
+    redactAiTeamErrorText("spawn codex ENOENT in /home/example/.nvm/versions/node", dirs),
     "spawn codex ENOENT in ~/.nvm/versions/node");
   assert.equal(
     redactAiTeamErrorText("read /home/li/.wand/config.json failed", dirs),

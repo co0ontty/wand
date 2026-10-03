@@ -193,6 +193,38 @@ async function main(): Promise<void> {
       await runAgentCliCommand(command, args, configPath);
       break;
     }
+    case "decision:configure": {
+      const { isAbsolute, join } = await import("node:path");
+      const disabling = args.includes("--disable");
+      const pythonPath = readFlagValue(args, "--python") ?? "";
+      const modelPath = readFlagValue(args, "--model") ?? "";
+      if (!disabling && (!isAbsolute(pythonPath) || !isAbsolute(modelPath)
+        || !existsSync(pythonPath) || !existsSync(join(modelPath, "model.safetensors")))) {
+        throw new Error("用法：wand decision:configure --python <Python绝对路径> --model <已下载模型目录>；或 --disable。");
+      }
+      const { config } = await loadConfigForCli(configPath);
+      config.localDecision = disabling
+        ? { enabled: false, pythonPath: config.localDecision?.pythonPath ?? "", modelPath: config.localDecision?.modelPath ?? "" }
+        : { enabled: true, pythonPath, modelPath };
+      await saveConfig(configPath, config);
+      process.stdout.write("本地决策配置已保存，重启 Wand 服务后生效。未修改系统 Python，也未下载模型。\n");
+      break;
+    }
+    case "decision:skills": {
+      const { dirname } = await import("node:path");
+      const { installDecisionSkill } = await import("./decision-skill.js");
+      const { SESSION_PROVIDERS } = await import("./provider-catalog.js");
+      const selected = readFlagValue(args, "--providers")?.split(",") ?? [...SESSION_PROVIDERS];
+      if (selected.some((provider) => !SESSION_PROVIDERS.includes(provider as typeof SESSION_PROVIDERS[number]))) throw new Error("未知CLI技能目标。");
+      const result = await installDecisionSkill(dirname(configPath), selected as typeof SESSION_PROVIDERS[number][]);
+      process.stdout.write(`${JSON.stringify(result)}\n`);
+      break;
+    }
+    case "decide": {
+      const { runDecisionCli } = await import("./decision-client.js");
+      await runDecisionCli(args.slice(1));
+      break;
+    }
     case "knowledge:remember":
     case "knowledge:search":
     case "knowledge:forget": {
@@ -250,6 +282,9 @@ Agent runtime:
   wand mission:diff <mission-id> <attempt-id>
   wand mission:review <mission-id> <attempt-id> --file <path> --body <text> [--line N]
   wand mission:review:send <mission-id> <attempt-id>
+  wand decide --stdin | --status  Use the session-bound local decision service
+  wand decision:configure --python <path> --model <dir> | --disable
+  wand decision:skills [--providers pi,claude,...]  Install managed user-level skills
   wand knowledge:remember <text> | --stdin
   wand knowledge:search [query]
   wand knowledge:forget <entry-id>

@@ -79,6 +79,11 @@ function harness() {
 
   const storage = {
     getSession: (id: string) => storageRows.get(id) ?? null,
+    getSessionCompletion: (id: string) => {
+      const row = storageRows.get(id);
+      return row ? { completionRevision: row.completionRevision ?? 0,
+        viewedCompletionRevision: row.viewedCompletionRevision ?? 0 } : null;
+    },
     getSessionWorkspace: (id: string) => {
       const row = storageRows.get(id);
       return row ? { workspaceId: row.workspaceId, workspaceTaskId: row.workspaceTaskId } : null;

@@ -70,7 +70,7 @@ export class SessionRegistry {
   get(id: string): SessionSnapshot | null {
     const snapshot = this.structured.get(id) ?? this.processes.getOwned(id) ?? this.storage.getSession(id);
     const membership = this.storage.getSessionWorkspace(id);
-    return snapshot && membership ? { ...snapshot, ...membership } : snapshot;
+    return snapshot ? { ...snapshot, ...membership, ...this.storage.getSessionCompletion(id) } : null;
   }
 
   getLatest(id: string): SessionSnapshot | null {
@@ -87,6 +87,8 @@ export class SessionRegistry {
       const live = byId.get(snapshot.id);
       byId.set(snapshot.id, live ? {
         ...live, workspaceId: snapshot.workspaceId, workspaceTaskId: snapshot.workspaceTaskId,
+        completionRevision: snapshot.completionRevision,
+        viewedCompletionRevision: snapshot.viewedCompletionRevision,
       } : snapshot);
     }
     return Array.from(byId.values()).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
@@ -133,6 +135,21 @@ export class SessionRegistry {
     if (owner === "structured") return this.structured.setSessionTopic(id, title, description);
     if (owner === "pty") return this.processes.setSessionTopic(id, title, description);
     return this.updateStored(id, (snapshot) => ({ ...snapshot, title, description, summary: description }));
+  }
+
+  /**
+   * 归档 / 取消归档一个会话：只写标记，不杀进程、不删历史；真正的清理留给保留期扫描。
+   * 会话可能只存在于 storage（重启后未加载），因此 storage-only 也要能改。
+   */
+  setArchived(id: string, archived: boolean): SessionSnapshot | null {
+    const owner = this.ownerOf(id);
+    if (owner === "structured") return this.structured.setSessionArchived(id, archived);
+    if (owner === "pty") return this.processes.setSessionArchived(id, archived);
+    return this.updateStored(id, (snapshot) => ({
+      ...snapshot,
+      archived,
+      archivedAt: archived ? new Date().toISOString() : null,
+    }));
   }
 
   updateWorktreeState(

@@ -5,10 +5,10 @@ import { resetChatRenderCache } from "../../src/web-ui/browser/render.js";
 import { buildMessagesForRender } from "../../src/web-ui/browser/input.js";
 
 let turns: any[] = [];
-function publish(next: any[]): void {
+function publish(next: any[], running = false): void {
   turns = next;
   const session: any = { id: "timeline-fixture", command: "claude", sessionKind: "structured",
-    status: "idle", structuredState: { inFlight: false }, messages: next,
+    status: running ? "running" : "idle", structuredState: { inFlight: running }, messages: next,
     messageOffset: 0, messageTotal: next.length };
   state.sessions = [session];
   state.selectedId = session.id;

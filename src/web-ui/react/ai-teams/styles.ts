@@ -1,6 +1,26 @@
 // 团队页与任务运行面板的样式，只打进按需加载的 ai-teams 脚本（见 ai-teams/chunk-entry.ts）。
 // 头像、指派面板里的团队预览、侧栏角标主包也用，仍在 styles/features.ts 的 aiTeamsStyles。
 export const aiTeamsChunkStyles = String.raw`
+/* Read-only delivery context. Trigger remains a single fixed-height row. */
+.team-delivery-card { min-width: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }
+.team-delivery-trigger { display: flex; align-items: center; gap: 8px; width: 100%; height: 44px; padding: 0 12px; border: 0; border-radius: var(--radius-md); background: var(--bg-secondary); color: var(--text-primary); font: inherit; text-align: left; cursor: pointer; }
+.team-delivery-trigger > span { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--font-size-sm); }
+.team-delivery-trigger > small { flex: none; color: var(--text-tertiary); font-size: var(--font-size-xs); }
+.team-delivery-trigger > svg { flex: none; transition: transform var(--motion-normal) var(--ease-in-out-smooth); }
+.team-delivery-trigger[aria-expanded="true"] > svg { transform: rotate(180deg); }
+.team-delivery-body { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows var(--motion-normal) var(--ease-in-out-smooth), opacity var(--motion-fast) var(--ease-in-out-smooth); }
+.team-delivery-body[data-open] { grid-template-rows: 1fr; opacity: 1; }
+.team-delivery-inner { min-height: 0; overflow: hidden; }
+.team-delivery-details { display: grid; gap: 12px; padding: 12px; color: var(--text-primary); font-size: var(--font-size-sm); overflow-wrap: anywhere; }
+.team-delivery-details h4, .team-delivery-details p { margin: 0; }
+.team-delivery-details section, .team-delivery-details ul { display: grid; gap: 6px; }
+.team-delivery-details ul { list-style: none; padding: 0; margin: 0; }
+.team-delivery-note, .team-delivery-details small { color: var(--text-tertiary); font-size: var(--font-size-xs); }
+.team-delivery-attention { color: var(--accent); }
+.team-delivery-file { display: flex; align-items: start; gap: 8px; width: 100%; padding: 8px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-secondary); color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.team-delivery-file:hover, .team-delivery-trigger:focus-visible { border-color: var(--accent); }
+.team-delivery-file > svg { flex: none; }
+.team-delivery-file > span, .team-delivery-handoff { display: grid; min-width: 0; gap: 4px; }
 /* ---------- 团队页：左列表、右详情 ---------- */
 .wand-teams-layout {
   display: grid;
@@ -171,6 +191,9 @@ export const aiTeamsChunkStyles = String.raw`
 .wand-team-member-inner { display: grid; gap: 10px; padding: 0 12px; }
 .wand-team-member[data-open] .wand-team-member-inner { padding-bottom: 12px; }
 .wand-team-member-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.wand-team-employee-invite { min-width: 0; }
+.wand-team-employee-invite-inner { min-width: 0; min-height: 0; overflow: hidden; }
+.wand-team-employee-invite .wand-team-candidates { min-width: 0; overflow-wrap: anywhere; }
 .wand-team-member-add {
   display: grid;
   place-items: center;
@@ -309,7 +332,8 @@ export const aiTeamsChunkStyles = String.raw`
 
 /* ---------- 新建员工：默认只填期望，手动字段收进高级配置 ---------- */
 /* 创建 / 生成中标签长度不同，固定最小宽度保证提交按钮原地不位移。 */
-.wand-employee-create-submit { min-inline-size: 92px; }
+.wand-employee-create-submit,
+.wand-employee-save-submit { min-inline-size: 92px; }
 .wand-employee-hint { margin: 0; color: var(--text-tertiary); font-size: var(--font-size-xs); }
 .wand-employee-advanced-toggle { display: flex; justify-content: flex-start; }
 .wand-employee-advanced-toggle button > svg:last-child { transition: transform var(--transition-fast); }
@@ -1291,6 +1315,8 @@ button.team-chat-office-member:hover, button.team-chat-office-member:focus-visib
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .team-delivery-body, .team-delivery-trigger > svg, .team-chat-details { transition: none; }
+  .wand-team-employee-invite .wand-team-candidate-slot { transition: none; }
   .task-board-team-step-body,
   .wand-team-work-body,
   .wand-team-work-head > svg,
@@ -1342,11 +1368,23 @@ button.team-chat-office-member:hover, button.team-chat-office-member:focus-visib
 }
 
 /* ---------- 硅基员工列表与卡片样式 ---------- */
+.wand-employee-tags {
+  display: flex; align-items: center; gap: 4px; height: 22px;
+  overflow: hidden; white-space: nowrap;
+}
+.wand-employee-tags .wand-employee-tag {
+  flex-shrink: 0; max-inline-size: 100%; overflow: hidden; text-overflow: ellipsis;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  font-size: var(--font-size-xs);
+}
 .wand-employees-layout {
   display: block !important;
   max-width: 960px;
   margin: 0 auto;
   padding: 16px 20px 40px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .wand-employee-list {
   display: grid;

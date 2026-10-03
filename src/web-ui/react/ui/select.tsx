@@ -37,6 +37,7 @@ export interface WandSelectProps {
   /** 悬停 tooltip 用的完整值，不参与可见文本；缺省时回退 displayValue。 */
   displayTitle?: string;
   ariaLabel: string;
+  triggerRef?: React.Ref<HTMLButtonElement>;
   disabled?: boolean;
   searchable?: boolean;
   searchPlaceholder?: string;
@@ -73,6 +74,7 @@ function ClassicWandSelect({
   displayValue,
   displayTitle,
   ariaLabel,
+  triggerRef,
   disabled,
   className,
   contentClassName,
@@ -101,6 +103,7 @@ function ClassicWandSelect({
       onOpenChange={(open) => onOpenChange?.(open)}
     >
       <AppicaSelectTrigger
+        ref={triggerRef}
         className={classNames("wand-ui-select-trigger", className)}
         aria-label={ariaLabel}
         title={displayTitle ?? displayValue ?? placeholder}
@@ -143,6 +146,7 @@ function SearchableWandSelect({
   displayValue,
   displayTitle,
   ariaLabel,
+  triggerRef,
   disabled,
   searchPlaceholder = "搜索",
   className,
@@ -184,6 +188,7 @@ function SearchableWandSelect({
       onOpenChange={(open) => onOpenChange?.(open)}
     >
       <AppicaComboboxTrigger
+        ref={triggerRef}
         className={classNames("wand-ui-select-trigger", className)}
         aria-label={ariaLabel}
         title={displayTitle ?? shown ?? placeholder}

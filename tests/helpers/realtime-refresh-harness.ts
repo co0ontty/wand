@@ -6,6 +6,7 @@ import { createSessionReads } from "../../src/web-ui/browser/session-reads.js";
 import * as reconciliation from "../../src/web-ui/browser/message-reconciliation.js";
 import * as agentRuns from "../../src/web-ui/browser/agent-runs.js";
 import * as toolActivity from "../../src/web-ui/browser/tool-activity.js";
+import * as completionState from "../../src/session-completion-state.js";
 import { parseJsonResponse } from "../../src/web-ui/react/http-adapter.js";
 
 const compiled = new Map<string, string>();
@@ -170,6 +171,7 @@ export function createRealtimeSessionHarness() {
     localStorage: { getItem: () => null, setItem: noop, removeItem: noop } };
   const dependencies = { "./state": { state, composer, composerQueue: { advance: noop }, writeStoredBoolean: noop },
     "./session-reads": { createSessionReads }, "./message-reconciliation": reconciliation,
+    "../../session-completion-state.js": completionState,
     "../react/http-adapter": { parseJsonResponse },
     "./input": new Proxy({ buildMessagesForRender: (_s: any, turns: any) => turns }, { get: (o: any, k: string) => o[k] ?? noop }),
     "./chat-scroll": new Proxy({ normalizeStructuredSnapshot: (s: any) => s, stripRenderOnlyStructuredMessages: (m: any) => m }, { get: (o: any, k: string) => o[k] ?? noop }) };

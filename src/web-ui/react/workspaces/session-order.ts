@@ -34,19 +34,33 @@ export function workspaceSessionProvider(
   return inferProviderIdFromCommand(session.command) ?? undefined;
 }
 
-function sessionCwdLeaf(session: Pick<WorkspaceSessionSummary, "cwd">): string {
-  return (session.cwd || "").replace(/\\/g, "/").replace(/\/+$/, "").split("/").filter(Boolean).at(-1) || "";
+/**
+ * 系统自己生成的占位标题（空、占位词、裸 provider 名、`CLI N`）不是会话标题。
+ * 任务名 / 工作区名重复**不算**占位：那正是会话自己的标题，显示它比「Pi 1」有意义。
+ */
+function isPlaceholderSessionTitle(title: string): boolean {
+  const normalized = title.trim().toLowerCase();
+  return !normalized
+    || normalized === "会话"
+    || normalized === "wand 会话"
+    || normalized === "claude"
+    || normalized === "codex"
+    || normalized === "opencode"
+    || normalized === "grok"
+    || normalized === "qoder"
+    || normalized === "pi"
+    || normalized === "gemini"
+    || normalized === "终端"
+    || /^(claude|codex|opencode|grok|qoder|pi|gemini|终端)\s+\d+$/i.test(normalized);
 }
 
-function isGenericSessionTitle(
-  session: Pick<WorkspaceSessionSummary, "title" | "cwd">,
-  parentNames: readonly string[] = [],
-): boolean {
-  const title = (session.title || "").trim();
-  if (!title || title === "会话") return true;
-  const leaf = sessionCwdLeaf(session);
-  if (leaf && title.toLowerCase() === leaf.toLowerCase()) return true;
-  return parentNames.some((name) => typeof name === "string" && name.toLowerCase() === title.toLowerCase());
+/**
+ * 目录名不是会话标题：旧版终端把 cwd 末段当标题，客户端仍然要挡住。
+ */
+function isDirectoryFallbackTitle(session: Pick<WorkspaceSessionSummary, "title" | "cwd">): boolean {
+  const title = (session.title || "").trim().toLowerCase();
+  const leaf = (session.cwd || "").replace(/\\/g, "/").replace(/\/+$/, "").split("/").filter(Boolean).at(-1)?.toLowerCase() ?? "";
+  return Boolean(leaf) && title === leaf;
 }
 
 /**
@@ -70,54 +84,39 @@ export function orderWorkspaceSessions(
     .map(({ session }) => session);
 }
 
-/** 侧栏 / 详情共用：目录名、任务名不要再当终端标题。 */
+/**
+ * 侧栏 / 详情共用：有会话标题就显示标题；只有占位标题 / 目录名兜底时回退「CLI 序号」。
+ * 标题和任务名 / 工作区名重复也照显示——最新会话的标题常常正好等于任务首行。
+ */
 export function listSessionLabel(
   session: WorkspaceSessionSummary,
   index: number,
-  parentNames: readonly string[] = [],
 ): string {
-  if (!isGenericSessionTitle(session, parentNames)) return (session.title || "").trim();
+  const title = (session.title || "").trim();
+  if (!isPlaceholderSessionTitle(title) && !isDirectoryFallbackTitle(session)) return title;
   return `${workspaceProviderLabel(workspaceSessionProvider(session))} ${index + 1}`;
 }
 
 /**
  * 侧栏行标题的唯一入口：团队条目用步骤标题 / 任务处理群名，
- * 其余仍走通用生成标题 + 「CLI N」兜底。
+ * 其余走会话标题 + 「CLI N」兜底。
  */
 export function sidebarSessionLabel(
   session: WorkspaceSessionSummary,
   index: number,
-  parentNames: readonly string[] = [],
   liveTitle?: string,
 ): string {
   if (session.teamStep) return teamStepLabel(session.teamStep);
   if (session.teamChat) return teamChatLabel(session);
-  return listSessionLabel(withLiveSessionTitle(session, liveTitle, parentNames), index, parentNames);
+  return listSessionLabel(withLiveSessionTitle(session, liveTitle), index);
 }
 
-function isCommandFallbackTitle(title: string): boolean {
-  const normalized = title.trim().toLowerCase();
-  return !normalized
-    || normalized === "会话"
-    || normalized === "wand 会话"
-    || normalized === "claude"
-    || normalized === "codex"
-    || normalized === "opencode"
-    || normalized === "grok"
-    || normalized === "qoder"
-    || normalized === "pi"
-    || normalized === "gemini"
-    || normalized === "终端"
-    || /^(claude|codex|opencode|grok|qoder|pi|gemini|终端)\s+\d+$/i.test(normalized);
-}
-
+/** WS / 提交时带过来的实时标题：只挡占位词与目录名兜底，任务名重复的标题照用。 */
 export function withLiveSessionTitle<T extends { title?: string; cwd?: string }>(
   session: T,
   liveTitle?: string,
-  parentNames: readonly string[] = [],
 ): T {
   const title = (liveTitle || "").trim();
-  if (!title || isCommandFallbackTitle(title)) return session;
-  if (isGenericSessionTitle({ ...session, title }, parentNames)) return session;
+  if (isPlaceholderSessionTitle(title) || isDirectoryFallbackTitle({ ...session, title })) return session;
   return { ...session, title };
 }

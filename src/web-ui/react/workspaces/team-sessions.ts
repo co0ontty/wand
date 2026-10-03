@@ -1,3 +1,4 @@
+import { isSessionJustCompleted } from "../../../session-completion-state.js";
 import type { WorkspaceSessionSummary, WorkspaceSessionTeamStep } from "./types";
 
 export interface TaskTeamSessionSplit {
@@ -12,7 +13,7 @@ export function splitTeamSessions(sessions: readonly WorkspaceSessionSummary[]):
   const history: WorkspaceSessionSummary[] = [];
   for (const session of sessions) {
     if (!session.teamStep) continue;
-    (session.teamStep.runFinished ? history : live).push(session);
+    (session.teamStep.runFinished && !isSessionJustCompleted(session) ? history : live).push(session);
   }
   return { live, history };
 }

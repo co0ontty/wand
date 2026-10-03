@@ -256,16 +256,15 @@ function LayoutRenderer({ node, path, api }: { node: LayoutNode; path: readonly 
 /** 轮询任务详情，拿会话标题/provider 给窗格标题显示。 */
 function useTaskSessionMeta(
   taskId: string | null,
-  parentNames: readonly string[] = [],
   liveTitles: ReadonlyMap<string, string> = new Map(),
 ): Map<string, SessionMeta> {
   const detail = useTaskDetail(taskId);
   const sessions = orderWorkspaceSessions(detail?.sessions ?? []);
   const meta = new Map<string, SessionMeta>();
   sessions.forEach((s, index) => {
-    const session = withLiveSessionTitle(s, liveTitles.get(s.id), parentNames);
+    const session = withLiveSessionTitle(s, liveTitles.get(s.id));
     meta.set(s.id, {
-      title: listSessionLabel(session, index, parentNames),
+      title: listSessionLabel(session, index),
       provider: session.provider,
       command: session.command,
     });
@@ -282,11 +281,10 @@ export function WorkspaceWindow(): React.ReactElement | null {
     workspaceContextStore.getSnapshot,
     workspaceContextStore.getServerSnapshot,
   );
-  const parentNames = [context.taskName, context.workspaceName].map((name) => name.trim()).filter(Boolean);
   const liveTitles = new Map(snapshot.sidebar.groups.flatMap((group) => (
     group.entries.map((entry) => [entry.id, entry.title] as const)
   )));
-  const sessionMeta = useTaskSessionMeta(context.taskId, parentNames, liveTitles);
+  const sessionMeta = useTaskSessionMeta(context.taskId, liveTitles);
 
   // 分屏关闭 / 任务切换时，释放所有池终端。
   React.useEffect(() => {

@@ -24,7 +24,8 @@ test("first observed tool time survives streaming updates, result and compact pr
   const firstProjected = projected[0].content[0] as ToolUseBlock;
   assert.equal(firstProjected.activity?.occurredAt, first);
   assert.deepEqual(firstProjected.input, {});
-  assert.doesNotMatch(JSON.stringify(projected), /private|next command/);
+  assert.equal(firstProjected.preview, "private updated command");
+  assert.doesNotMatch(JSON.stringify(firstProjected.activity), /private|next command/);
 });
 
 test("legacy and replayed commands never acquire recovery time", () => {

@@ -1,7 +1,9 @@
-/** Keep tool payloads out of all chat snapshots and fetch them only when opened. */
+/** Keep full tool payloads out of compact snapshots; retain bounded card previews. */
 
+import { withToolPreview } from "./tool-preview.js";
 import { createHash } from "node:crypto";
 import { contentHasStructuredImage } from "./structured-content.js";
+import { isDecisionToolCall } from "./decision-tool.js";
 import type { CardExpandDefaults, ContentBlock, ConversationTurn, ToolResultBlock, ToolUseBlock } from "./types.js";
 
 const TRUNCATION_THRESHOLD = 200;
@@ -59,23 +61,27 @@ export const MESSAGE_FIRST_PAINT_BYTES = 1024 * 1024;
  */
 const MAX_BLOCK_SNAP_BACK_BYTES = 128 * 1024;
 
+/** Decision calls keep their raw names; only this local defaults lookup treats them as always visible. */
+function toolNamesForTransport(content: ContentBlock[]): Map<string, string> {
+  return new Map(content.flatMap((block) => block.type === "tool_use"
+    ? [[block.id, isDecisionToolCall(block) ? "__wand_decision" : block.name] as [string, string]] : []));
+}
+
 /** 每个块在客户端是否「默认收起」（思考块 + 默认收起的工具卡片，与传输截断同一口径）。 */
 export function collapsedBlockFlags(
   content: ContentBlock[],
   cardDefaults: CardExpandDefaults,
 ): boolean[] {
-  const toolNameById = new Map<string, string>();
-  for (const block of content) {
-    if (block.type === "tool_use") toolNameById.set((block as ToolUseBlock).id, (block as ToolUseBlock).name);
-  }
+  const toolNameById = toolNamesForTransport(content);
   return content.map((block) => {
     switch (block.type) {
       case "thinking":
         return cardDefaults.thinking !== true;
       case "tool_use":
-        return isToolDefaultCollapsed((block as ToolUseBlock).name, cardDefaults);
+        return !isDecisionToolCall(block) && isToolDefaultCollapsed(block.name, cardDefaults);
       case "tool_result":
-        return isToolDefaultCollapsed(toolNameById.get((block as ToolResultBlock).tool_use_id) ?? "", cardDefaults);
+        return block.semantic?.kind !== "decision"
+          && isToolDefaultCollapsed(toolNameById.get(block.tool_use_id) ?? "", cardDefaults);
       default:
         return false;
     }
@@ -108,7 +114,8 @@ function blockTransportBytes(
     case "tool_result": {
       const result = block as ToolResultBlock;
       const raw = getContentString(result.content);
-      const collapsed = isToolDefaultCollapsed(toolNameById.get(result.tool_use_id) ?? "", cardDefaults);
+      const collapsed = result.semantic?.kind !== "decision"
+        && isToolDefaultCollapsed(toolNameById.get(result.tool_use_id) ?? "", cardDefaults);
       const truncated = collapsed && !result.is_error &&
         !contentHasStructuredImage(result.content) && raw.length > TRUNCATION_THRESHOLD;
       return truncated ? SUMMARY_LENGTH + 4 : raw.length;
@@ -127,10 +134,7 @@ export function contentTransportBytes(
   cardDefaults: CardExpandDefaults,
   limit: number = Number.POSITIVE_INFINITY,
 ): number {
-  const toolNameById = new Map<string, string>();
-  for (const block of content) {
-    if (block.type === "tool_use") toolNameById.set((block as ToolUseBlock).id, (block as ToolUseBlock).name);
-  }
+  const toolNameById = toolNamesForTransport(content);
   let total = 0;
   for (const block of content) {
     total += blockTransportBytes(block, cardDefaults, toolNameById) + 32;
@@ -173,10 +177,7 @@ function cutStartByBudget(
 ): number {
   if (content.length === 0) return 0;
   const collapsed = collapsedBlockFlags(content, cardDefaults);
-  const toolNameById = new Map<string, string>();
-  for (const block of content) {
-    if (block.type === "tool_use") toolNameById.set((block as ToolUseBlock).id, (block as ToolUseBlock).name);
-  }
+  const toolNameById = toolNamesForTransport(content);
   let visible = 0;
   let bytes = 0;
   let cut = content.length;
@@ -490,11 +491,13 @@ export function compactToolMessagesForTransport(
   const toolNameMap = new Map<string, string>(knownToolNames);
   const imageToolIds = new Set<string>();
   const independentToolIds = new Set<string>();
+  const decisionToolIds = new Set<string>();
   for (const turn of messages) {
     for (const block of turn.content) {
       if (block.type === "tool_use") {
         toolNameMap.set((block as ToolUseBlock).id, (block as ToolUseBlock).name);
-        if (INDEPENDENT_TOOL_NAMES.has(block.name) || block.semantic || block.__subagent
+        if (isDecisionToolCall(block)) decisionToolIds.add(block.id);
+        if (INDEPENDENT_TOOL_NAMES.has(block.name) || block.semantic || isDecisionToolCall(block) || block.__subagent
           || toolInputShowsImage(block.input ?? {})) independentToolIds.add(block.id);
       } else if (block.type === "tool_result" && contentHasStructuredImage(block.content)) {
         imageToolIds.add(block.tool_use_id);
@@ -502,8 +505,10 @@ export function compactToolMessagesForTransport(
     }
   }
   return messages.map((turn) => {
-    const truncatedContent: ContentBlock[] = turn.content.map((block): ContentBlock => {
+    const truncatedContent: ContentBlock[] = turn.content.map(withToolPreview).map((block): ContentBlock => {
       if (block.type === "tool_use") {
+        // 决策卡携带服务端缩略投影（题数/要点/结论），压缩时不能把它降回只有 kind。
+        if (decisionToolIds.has(block.id)) return { ...block, semantic: { ...block.semantic, kind: "decision" }, activity: undefined };
         if (independentToolIds.has(block.id) || imageToolIds.has(block.id)) return block;
         return {
           ...block,
@@ -515,6 +520,9 @@ export function compactToolMessagesForTransport(
             taskDescription: undefined,
           } : undefined,
         };
+      }
+      if (block.type === "tool_result" && (block.semantic?.kind === "decision" || decisionToolIds.has(block.tool_use_id))) {
+        return { ...block, semantic: { ...block.semantic, kind: "decision" } };
       }
       if (block.type === "tool_result" && toolNameMap.has(block.tool_use_id)
         && !INDEPENDENT_TOOL_NAMES.has(toolNameMap.get(block.tool_use_id)!)
@@ -539,6 +547,8 @@ export function truncateMessagesForTransport(
   cardDefaults: CardExpandDefaults,
   streamingTurnIndex = -1,
 ): ConversationTurn[] {
+  const decisionIds = new Set(messages.flatMap((turn) => turn.content.flatMap((block) =>
+    block.type === "tool_use" && isDecisionToolCall(block) ? [block.id] : [])));
   return messages.map((turn, turnIndex) => {
     if (turnIndex === streamingTurnIndex) return turn;
     const toolNameMap = new Map<string, string>();
@@ -548,7 +558,7 @@ export function truncateMessagesForTransport(
     let changed = false;
     const truncatedContent: ContentBlock[] = turn.content.map((block) => {
       if (block.type !== "tool_result") return block;
-      if (block.is_error) return block;
+      if (block.is_error || block.semantic?.kind === "decision" || decisionIds.has(block.tool_use_id)) return block;
       const toolName = toolNameMap.get(block.tool_use_id) ?? "";
       if (!isToolDefaultCollapsed(toolName, cardDefaults)) return block;
       if (contentHasStructuredImage(block.content)) return block;

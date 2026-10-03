@@ -11,7 +11,7 @@ import { clearStructuredQueuePersistence } from "./chat-scroll";
 import { mergeIncrementalWindowedTurn } from "./message-reconciliation";
 import { flushPendingMessages, buildMessagesForRender, isCurrentTerminalSession, flashComposerFailed, flushStructuredInputQueue, updateStructuredQueueCounter, setTerminalInteractive, flushCrossSessionQueue, reconcileInteractiveState, getSelectedSession, closeKeyboardPopup } from "./input";
 import { notifyTaskEnded, clearSessionProgressNative, _syncWakeLock, showNotificationBubble, notifyTaskProgress, syncSessionProgressToNative, notifyPermissionRequest, notifyUpdateAvailable, showAutoUpdateOverlay, showRestartOverlay, showToast } from "./notifications";
-import { refreshAll, scheduleSessionListUpdate, subscribeToSession, updateSessionSnapshot, getPreferredMessages, selectSession, updateShellChrome, loadOutput, isAutoApproveImpliedByMode, applyCurrentView, fetchAvailableModels } from "./session-engine";
+import { refreshAll, scheduleSessionListUpdate, subscribeToSession, updateSessionSnapshot, markSessionCompletionViewed, getPreferredMessages, selectSession, updateShellChrome, loadOutput, isAutoApproveImpliedByMode, applyCurrentView, fetchAvailableModels } from "./session-engine";
 import { getLastAssistantSummary } from "./session-ui";
 import { clampClientTerminalOutput, restoreTerminalState, scheduleTerminalChromeUpdate, syncTerminalBuffer, updateTerminalJumpToBottomButton, wandTerminalWrite } from "./terminal";
 import {
@@ -26,6 +26,7 @@ import { bindForegroundSyncListeners } from "./render";
 import { scheduleGitStatusRefresh, startGitStatusPolling, stopGitStatusPolling } from "./git-commit";
 import { notifyLegacyUiChange } from "./ui-store-bridge";
 import { recordTerminalHistoryChunk } from "./terminal-history";
+import { notifyTasksChanged } from "../react/task-changes";
 
 function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   return fetch(input, { ...init,
@@ -509,6 +510,9 @@ function projectSelectedChat(sessionId: string): any {
             var endedStatus = (msg.data && msg.data.status) ? msg.data.status : "exited";
             var endedPermBlocked = (msg.data && Object.prototype.hasOwnProperty.call(msg.data, "permissionBlocked")) ? !!msg.data.permissionBlocked : false;
             var endedSnapshot: any = { id: msg.sessionId, status: endedStatus, permissionBlocked: endedPermBlocked };
+            for (const field of ["completionRevision", "viewedCompletionRevision"]) {
+              if (typeof msg.data?.[field] === "number") endedSnapshot[field] = msg.data[field];
+            }
             if (msg.data && msg.data.messages) {
               endedSnapshot.messages = msg.data.messages;
               if (typeof msg.data.messageOffset === "number") endedSnapshot.messageOffset = msg.data.messageOffset;
@@ -525,6 +529,10 @@ function projectSelectedChat(sessionId: string): any {
               endedSnapshot.queuedMessages = msg.data.queuedMessages;
             }
             updateSessionSnapshot(endedSnapshot, "latest");
+            if (typeof msg.data?.completionRevision === "number") notifyTasksChanged();
+            if (state.currentView === "terminal") {
+              void markSessionCompletionViewed(state.sessions.find((session) => session.id === msg.sessionId));
+            }
 
             if (msg.sessionId === state.selectedId) {
               projectSelectedChat(msg.sessionId);
@@ -654,6 +662,9 @@ function projectSelectedChat(sessionId: string): any {
           case 'status':
             if (msg.sessionId && msg.data) {
               var statusUpdate: any = { id: msg.sessionId };
+              for (const field of ["completionRevision", "viewedCompletionRevision"]) {
+                if (typeof msg.data[field] === "number") statusUpdate[field] = msg.data[field];
+              }
               if (Object.prototype.hasOwnProperty.call(msg.data, 'status')) {
                 statusUpdate.status = msg.data.status;
               }
@@ -764,6 +775,12 @@ function projectSelectedChat(sessionId: string): any {
                 });
               }
               updateSessionSnapshot(statusUpdate, "latest");
+              if (typeof msg.data.completionRevision === "number") {
+                notifyTasksChanged();
+                if (state.currentView === "terminal") {
+                  void markSessionCompletionViewed(state.sessions.find((session) => session.id === msg.sessionId));
+                }
+              }
               if (topicMetadataChanged) scheduleSessionListUpdate();
               syncSessionProgressToNative(msg.sessionId);
               _syncWakeLock();

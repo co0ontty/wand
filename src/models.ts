@@ -1,5 +1,8 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
 import { promisify } from "node:util";
 import Anthropic from "@anthropic-ai/sdk";
 import { resolveChildEnv } from "./env-utils.js";
@@ -117,6 +120,7 @@ export interface ModelRefreshOptions {
   inheritEnv?: boolean;
   env?: NodeJS.ProcessEnv;
   apiKey?: string;
+  baseUrl?: string;
   commandRunner?: ModelCommandRunner;
   modelsApi?: ClaudeModelsApi;
   verifyClaudeCandidates?: boolean;
@@ -751,21 +755,48 @@ function unionModelEfforts(models: readonly ClaudeModelInfo[]): ThinkingEffortLe
   return levels;
 }
 
-function createOfficialModelsApi(apiKey: string): ClaudeModelsApi {
-  const client = new Anthropic({ apiKey });
+function createOfficialModelsApi(apiKey: string, baseURL?: string): ClaudeModelsApi {
+  const client = new Anthropic({ apiKey, baseURL: baseURL || undefined });
   return {
     list: () => client.models.list({ limit: 100 }) as AsyncIterable<ClaudeModelsApiEntry>,
   };
+}
+
+function resolveClaudeAuth(
+  options: ModelRefreshOptions,
+  env: NodeJS.ProcessEnv,
+): { apiKey?: string; baseURL?: string } {
+  let apiKey = options.apiKey?.trim() || env.ANTHROPIC_API_KEY?.trim() || env.ANTHROPIC_AUTH_TOKEN?.trim();
+  let baseURL = options.baseUrl?.trim() || env.ANTHROPIC_BASE_URL?.trim();
+  if (!apiKey) {
+    try {
+      const settingsPath = path.join(homedir(), ".claude", "settings.json");
+      if (existsSync(settingsPath)) {
+        const raw = JSON.parse(readFileSync(settingsPath, "utf8"));
+        const token = raw?.env?.ANTHROPIC_AUTH_TOKEN || raw?.env?.ANTHROPIC_API_KEY;
+        if (typeof token === "string" && token.trim()) {
+          apiKey = token.trim();
+        }
+        const base = raw?.env?.ANTHROPIC_BASE_URL;
+        if (typeof base === "string" && base.trim() && !baseURL) {
+          baseURL = base.trim();
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return { apiKey, baseURL };
 }
 
 async function listClaudeModelsFromApi(
   options: ModelRefreshOptions,
   env: NodeJS.ProcessEnv,
 ): Promise<ProbeResult<ClaudeModelsApiEntry[]>> {
-  const apiKey = options.apiKey?.trim() || env.ANTHROPIC_API_KEY?.trim();
+  const { apiKey, baseURL } = resolveClaudeAuth(options, env);
   if (!apiKey) return { ok: false };
   try {
-    const api = options.modelsApi ?? createOfficialModelsApi(apiKey);
+    const api = options.modelsApi ?? createOfficialModelsApi(apiKey, baseURL);
     const models: ClaudeModelsApiEntry[] = [];
     for await (const model of api.list()) {
       const id = normalizeClaudeModelId(model?.id);

@@ -159,7 +159,7 @@ test("tasks can be pointed at a workspace and expose its directory", async () =>
   await withHarness(async ({ url, storage }) => {
     const workspace = storage.createWorkspace({
       name: "wand",
-      cwd: "/Users/co0ontty/Self/vibe_coding/wand",
+      cwd: "/home/example/wand",
     });
 
     const created = await fetch(`${url}/api/wand-tasks`, {
@@ -172,7 +172,7 @@ test("tasks can be pointed at a workspace and expose its directory", async () =>
     assert.deepEqual(created.workspace, {
       id: workspace.id,
       name: "wand",
-      cwd: "/Users/co0ontty/Self/vibe_coding/wand",
+      cwd: "/home/example/wand",
     });
 
     const unassigned = await fetch(`${url}/api/wand-tasks/${created.id}`, {

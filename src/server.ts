@@ -31,8 +31,12 @@ import { ModelCatalogService, type ModelRefreshOptions } from "./models.js";
 import { ProcessManager, ProcessEvent } from "./process-manager.js";
 import { SessionLogger } from "./session-logger.js";
 import { SessionRegistry } from "./session-registry.js";
+import { SessionCompletionTracker } from "./session-completion.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
 import { StructuredSessionManager } from "./structured-session-manager.js";
+import { DecisionService } from "./decision-service.js";
+import type { DecisionRuntimeAccess } from "./decision-runner.js";
+import { registerDecisionRoutes } from "./server-decision-routes.js";
 import { recordRecentPath, registerFileRoutes } from "./server-file-routes.js";
 import { registerLocalPreviewRoutes } from "./server-local-preview-routes.js";
 import { registerSettingsRoutes } from "./server-settings-routes.js";
@@ -82,6 +86,7 @@ import {
 } from "./npm-update-utils.js";
 import { repairServiceUnitAfterUpdate } from "./service-self-repair.js";
 import { computeRelaunch } from "./relaunch.js";
+import { startRetentionTimer } from "./retention.js";
 import { RuntimeConfigState } from "./runtime-config.js";
 import { safeServiceInstalled } from "./tui/runtime-utils.js";
 import {
@@ -398,6 +403,7 @@ export async function startServer(
   const storage = new WandStorage(resolveDatabasePath(configPath));
   const runtimeConfig = new RuntimeConfigState(config);
   const authService = new AuthService(storage);
+  const decisions = new DecisionService(config.localDecision);
   // 默认模型优先读存储（UI 改设置后实时生效），未设置时由 getPreference 回落到 config。
   const getCurrentDefaultModels = (): { claude: string; codex: string; opencode: string; grok: string; qoder: string; pi: string; gemini: string } => ({
     claude: storage.getPreference("pref:defaultModel", config.defaultModel ?? ""),
@@ -416,6 +422,7 @@ export async function startServer(
       storage,
       inheritEnv: config.inheritEnv !== false,
       apiKey: process.env.ANTHROPIC_API_KEY,
+      baseUrl: process.env.ANTHROPIC_BASE_URL,
       ...injected,
       piEndpointDiscovery: injected.piEndpointDiscovery ?? { enabled: !testMode },
       configuredClaudeModels: [
@@ -457,10 +464,12 @@ export async function startServer(
   const structuredHosts = await createUpgradeAwareStructuredHost(
     configPath, legacyStructuredHost, config.structured?.processHost,
   );
+  let decisionRuntime: DecisionRuntimeAccess | null = null;
   const structuredSessions = new StructuredSessionManager(
-    storage, config, structuredLogger, {}, structuredHosts.host,
+    storage, config, structuredLogger, {}, structuredHosts.host, () => decisionRuntime,
   );
   const sessionRegistry = new SessionRegistry(processes, structuredSessions, storage);
+  const sessionCompletions = new SessionCompletionTracker(storage, (id) => sessionRegistry.get(id));
   const missions = new Missions(storage, structuredSessions, sessionRegistry);
   // wsManager 在后面才建：团队运行的变更通知经由这个转发口，接好之前静默丢弃。
   let notifyAiTeamRun = (_data:
@@ -511,6 +520,7 @@ export async function startServer(
 
   // Route-specific parsers must run before the global parser. Once body-parser
   // has consumed a request, a later express.json() cannot tighten or widen it.
+  app.use("/api/decisions", express.json({ limit: "32kb" }));
   app.use("/api/optimize-prompt", express.json({ limit: "256kb" }));
   app.use("/api/file-write", express.json({ limit: "2mb" }));
   app.use(express.json({ limit: "1mb" }));
@@ -722,6 +732,7 @@ export async function startServer(
     res.json({ authed: authService.validateSession(readSessionCookie(req, useHttps)) });
   });
 
+  registerDecisionRoutes(app, { storage, decisions, requireAuth, requireSessions });
   app.use("/api", requireAuth);
 
   // Connected apps receive only the route families used by native clients and
@@ -897,7 +908,7 @@ export async function startServer(
 
   registerSessionRoutes(app, processes, structuredSessions, storage, config.defaultMode, config, sessionRegistry, (cwd) => {
     recordRecentPath(storage, cwd);
-  });
+  }, (event) => wsManager.emitEvent(event));
   registerClaudeHistoryRoutes(app, processes, storage);
   registerWorkspaceRoutes(app, storage, sessionRegistry, { config });
   registerMissionRoutes(app, missions);
@@ -978,6 +989,9 @@ export async function startServer(
       const reqRows = typeof body.rows === "number" && Number.isFinite(body.rows) ? body.rows : undefined;
       const sessionCwd = resolveSessionCwd(body.cwd, config.defaultCwd);
       const workspaceId = resolveWorkspaceIdForNewSession(storage, sessionCwd, body.workspaceId);
+      const role = !interactiveShell && !body.systemPrompt?.trim() && origin.sessionSource === "interactive"
+        && (isSessionProvider(body.provider) || inferProviderFromCommand(command))
+        ? defaultRoleForCli(storage, provider) : null;
       const snapshot = await (interactiveShell
         ? processes.startShell(sessionCwd, body.mode ?? "default", {
             worktreeEnabled: body.worktreeEnabled === true,
@@ -999,9 +1013,10 @@ export async function startServer(
               cols: reqCols,
               rows: reqRows,
               thinkingEffort: body.thinkingEffort ?? config.defaultThinkingEffort,
-              systemPrompt: body.systemPrompt?.trim() || (origin.sessionSource === "interactive"
-                && (isSessionProvider(body.provider) || inferProviderFromCommand(command))
-                ? defaultRoleForCli(storage, provider).prompt : undefined),
+              systemPrompt: body.systemPrompt?.trim() || role?.prompt,
+              employeeId: role?.id,
+              employeeName: role?.name,
+              employeeAvatar: role?.avatar,
               workspaceId,
               workspaceTaskId: body.workspaceTaskId,
               ...origin,
@@ -1098,11 +1113,13 @@ export async function startServer(
 
   // Wire process events to WebSocket broadcast
   processes.on("process", (event: ProcessEvent) => {
+    sessionCompletions.ingest(event);
     missions.ingest(event);
     aiTeams.ingest(event);
     wsManager.emitEvent(event);
   });
   structuredSessions.setEventEmitter((event) => {
+    sessionCompletions.ingest(event);
     missions.ingest(event);
     aiTeams.ingest(event);
     wsManager.emitEvent(event);
@@ -1168,6 +1185,7 @@ export async function startServer(
   await new Promise<void>((resolve, reject) => {
     const cleanupFailedListen = (): void => {
       shuttingDown = true;
+      decisions.dispose();
       try { processes.dispose(); } catch { /* noop */ }
       try { structuredSessions.dispose(); } catch { /* noop */ }
       aiTeams.dispose();
@@ -1194,6 +1212,11 @@ export async function startServer(
       const address = server.address();
       const actualPort = typeof address === "object" && address ? address.port : config.port;
       bindAddr = `${config.host}:${actualPort}`;
+      if (config.localDecision?.enabled) {
+        const localHost = config.host === "::1" ? "[::1]" : config.host === "0.0.0.0" || config.host === "::" ? "127.0.0.1" : config.host;
+        decisionRuntime = { url: `${protocol}://${localHost}:${actualPort}`,
+          ...(activeSslCertPath ? { caPath: activeSslCertPath } : {}) };
+      }
       const scheme: "HTTP" | "HTTPS" = useHttps ? "HTTPS" : "HTTP";
       // 主 URL：本机回环；若绑定 0.0.0.0 再补一个对外提示。
       collectedUrls.push({ url: `${protocol}://127.0.0.1:${actualPort}`, scheme });
@@ -1240,6 +1263,12 @@ export async function startServer(
       if (!shuttingDown) void modelCatalog.refresh().catch(() => {});
     }, MODEL_CATALOG_AUTO_REFRESH_INTERVAL_MS);
     modelCatalogRefreshTimer.unref();
+  }
+
+  // 保留期扫描：7 天没活动的会话/任务自动归档，归档 7 天后自动清理。
+  let retentionTimer: NodeJS.Timeout | null = null;
+  if (!testMode) {
+    retentionTimer = startRetentionTimer({ storage, sessions: sessionRegistry });
   }
 
   // Express 4 does not forward rejected route promises automatically. Every
@@ -1390,6 +1419,7 @@ export async function startServer(
     if (closePromise) return closePromise;
     closePromise = (async () => {
       shuttingDown = true;
+      decisions.dispose();
       await userMemory.dispose();
       if (updateCheckTimer) {
         clearInterval(updateCheckTimer);
@@ -1402,6 +1432,10 @@ export async function startServer(
       if (modelCatalogRefreshTimer) {
         clearInterval(modelCatalogRefreshTimer);
         modelCatalogRefreshTimer = null;
+      }
+      if (retentionTimer) {
+        clearInterval(retentionTimer);
+        retentionTimer = null;
       }
 
       // Stop accepting requests first. Existing requests get a short grace

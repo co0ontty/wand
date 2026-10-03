@@ -1,4 +1,5 @@
 import type { AgentActivityState } from "./mission-types.js";
+import type { AiTeamDeliverySummary } from "./ai-team-delivery-types.js";
 import type { WandTaskAgent } from "./task-types.js";
 import type { ConversationTurn } from "./types.js";
 
@@ -21,6 +22,8 @@ export function isTeamMemberRole(value: unknown): value is TeamMemberRole {
 export interface AiTeamMember {
   /** 团队内唯一，形如 "m_xxxxxxxx"；Leader 派工时原样引用。 */
   id: string;
+  /** 通讯录身份链接；缺省是独立 CLI 成员，不按名字猜测。 */
+  employeeId?: string;
   name: string;
   /** 职责说明，原样写进提示词。 */
   duty: string;
@@ -85,6 +88,8 @@ export interface SiliconEmployee {
   prompt: string; // 角色设定；建会话时走 SessionSnapshot.systemPrompt（不拼进首条用户消息）
   avatar: string; // 与 ai-teams 同口径："" | "cat:<n>" | "data:image/…"
   agents: WandTaskAgent[]; // 1..4 项，顺序 = 降级顺序（首选在前）
+  /** 内置标签按 systemKey 固定；普通员工的标签由用户维护。旧客户端可不传。 */
+  tags?: string[];
   /**
    * 非空 = Wand 内置员工（如 "wand-ops" 系统运维）：名字/职责/人设/头像锁定，
    * 不可归档、不可删除，只有执行候选由用户维护。
@@ -117,7 +122,7 @@ export const SYSTEM_EMPLOYEE_KEY = "wand-ops";
 export const SYSTEM_EMPLOYEE_ID = "e_wand_ops";
 export const SYSTEM_EMPLOYEE_NAME = "勤劳的初二";
 /** 员工列表 / 设置页上的标识。 */
-export const SYSTEM_EMPLOYEE_TAG = "系统运维";
+export const SYSTEM_EMPLOYEE_TAG = "系统用户";
 
 export function isSystemSiliconEmployee(
   employee: Pick<SiliconEmployee, "systemKey"> | null | undefined,
@@ -129,8 +134,8 @@ export function isSystemSiliconEmployee(
 // 默认任务角色与系统运维分开；CLI 是执行器，角色不替换用户选定的工具/权限。
 export const DEFAULT_EMPLOYEE_KEY = "wand-default";
 export const DEFAULT_EMPLOYEE_ID = "e_wand_default";
-export const DEFAULT_EMPLOYEE_NAME = "默契的初一";
-export const DEFAULT_EMPLOYEE_TAG = "默认伙伴";
+export const DEFAULT_EMPLOYEE_NAME = "赛博虎妞";
+export const DEFAULT_EMPLOYEE_TAG = "默认用户";
 
 export function isDefaultSiliconEmployee(
   employee: Pick<SiliconEmployee, "systemKey"> | null | undefined,
@@ -142,6 +147,45 @@ export function isBuiltinSiliconEmployee(
   employee: Pick<SiliconEmployee, "systemKey"> | null | undefined,
 ): boolean {
   return isSystemSiliconEmployee(employee) || isDefaultSiliconEmployee(employee);
+}
+
+export const SILICON_EMPLOYEE_MAX_TAGS = 8;
+export const SILICON_EMPLOYEE_TAG_MAX_CHARS = 20;
+
+/** 内置标识只由真实员工身份投影，不能用自定义标签冒充。 */
+export function siliconEmployeeTags(
+  employee: Pick<SiliconEmployee, "systemKey" | "tags">,
+): string[] {
+  if (isSystemSiliconEmployee(employee)) return [SYSTEM_EMPLOYEE_TAG];
+  if (isDefaultSiliconEmployee(employee)) return [DEFAULT_EMPLOYEE_TAG];
+  return employee.tags ?? [];
+}
+
+/** API / storage / Web 共用：去空白、去重，保留用户顺序，不静默截断。 */
+export function parseSiliconEmployeeTags(value: unknown): string[] {
+  if (!Array.isArray(value)) throw new Error("员工标签必须是数组。");
+  const tags: string[] = [];
+  for (const raw of value) {
+    if (typeof raw !== "string") throw new Error("员工标签必须是文字。");
+    const tag = raw.trim();
+    if (!tag) continue;
+    if (tag.length > SILICON_EMPLOYEE_TAG_MAX_CHARS) {
+      throw new Error(`每个员工标签不能超过 ${SILICON_EMPLOYEE_TAG_MAX_CHARS} 个字符。`);
+    }
+    if (/[,，、\x00-\x1f\x7f]/.test(tag)) throw new Error("员工标签不能包含分隔符或控制字符。");
+    if (tag === SYSTEM_EMPLOYEE_TAG || tag === DEFAULT_EMPLOYEE_TAG) {
+      throw new Error(`「${tag}」是内置标签，不可自定义。`);
+    }
+    if (!tags.includes(tag)) tags.push(tag);
+  }
+  if (tags.length > SILICON_EMPLOYEE_MAX_TAGS) {
+    throw new Error(`最多 ${SILICON_EMPLOYEE_MAX_TAGS} 个员工标签。`);
+  }
+  return tags;
+}
+
+export function parseSiliconEmployeeTagInput(value: string): string[] {
+  return parseSiliconEmployeeTags(value.split(/[,，、\n]+/));
 }
 
 export interface AiTeam {
@@ -308,6 +352,8 @@ export interface AiTeamLiveUpdate {
 
 export interface AiTeamRunDetail {
   run: AiTeamRun;
+  /** One run's result/files/current handoffs; absent on older servers, no side effects. */
+  delivery?: AiTeamDeliverySummary;
   /** 仅供展示的群名，读取当前任务标题，不以团队名代替。 */
   chatTitle?: string;
   /** 任务标题的版本；任务改名不改变 run.updatedAt。 */

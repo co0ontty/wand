@@ -1,5 +1,9 @@
+import type { SessionCompletionState } from "./session-completion-state.js";
+
 export type SessionKind = "pty" | "structured";
-export type SessionProvider = "claude" | "codex" | "opencode" | "grok" | "qoder" | "pi" | "gemini";
+// Provider 的唯一真源在 provider-catalog.ts（浏览器 bundle 也复用）；这里只做转发。
+export type { SessionProvider } from "./provider-catalog.js";
+import type { SessionProvider } from "./provider-catalog.js";
 /** "claude-sdk" 是历史值：SDK 执行路径已移除，读旧会话时归一为 claude-cli-print。 */
 export type SessionRunner = "claude-cli" | "claude-cli-print" | "claude-sdk" | "codex-cli-exec" | "opencode-cli-run" | "grok-cli-headless" | "qoder-cli-print" | "pi-cli-json" | "gemini-cli-json" | "pty";
 export type SessionSource = "interactive" | "automation" | "startup";
@@ -156,6 +160,8 @@ export interface WandConfig {
   render?: RenderConfig;
   /** Structured CLI process owner for new runs; default legacy. SDK stays in Node. */
   structured?: StructuredProcessConfig;
+  /** Optional offline, inference-only local decision worker. Never a chat provider. */
+  localDecision?: import("./decision-types.js").LocalDecisionConfig;
   /** Default expand/collapse state for card types in structured chat view */
   cardDefaults?: CardExpandDefaults;
   /** 新建会话时默认使用的 Claude 模型（别名或完整 ID）。留空则不传 --model，由 claude 自行决定。 */
@@ -531,18 +537,39 @@ export interface StructuredTaskItem {
 }
 
 /**
+ * 决策卡缩略投影：服务端从工具入参（请求体）与结果 JSON 派生出的有界展示数据。
+ * Web 与 Android 渲染同一份字段，不再各自解析原始 command / 结果 JSON。
+ * 这里只放「模型问了什么、答了什么」，不放状态词（运行中/完成/失败由客户端按自己的状态源渲染）。
+ */
+export interface DecisionCardSummary {
+  /** 判定模式：一题一种类型时取该类型，多题混合为 mixed；请求与结果都读不出时省略。 */
+  mode?: "choice" | "score" | "noul" | "mixed";
+  /** 题数；请求体与结果都不可得时省略。 */
+  questions?: number;
+  /** 请求侧要点（被判定内容摘要，单行、有界）；请求体不可得（如 `--data @file`）时省略。 */
+  preview?: string;
+  /** 结果侧一行结论（如 `category=billing 84%`）；未返回、失败或结果不可解析时省略。 */
+  outcome?: string;
+  /** 卡头副标题：outcome → preview → 题数 的有界拼接，两边都缺数据时退化为模式提示。 */
+  label: string;
+}
+
+/**
  * Wand-owned semantic projection of provider-specific tools. Clients should
  * render this field and treat `name` / `input` as a legacy fallback only.
  */
 type ToolUseSemantic =
   | { kind: "question_request"; questions: StructuredQuestion[] }
-  | { kind: "task_list"; items: StructuredTaskItem[] };
+  | { kind: "task_list"; items: StructuredTaskItem[] }
+  | { kind: "decision"; summary?: DecisionCardSummary };
 
 export interface ToolUseBlock {
   type: "tool_use";
   id: string;
   name: string;
   description?: string;
+  /** Bounded factual input excerpt for collapsed cards; transport projection only. */
+  preview?: string;
   input: Record<string, unknown>;
   /** ISO time when the server first observed this tool invocation; absent for older transcripts. */
   occurredAt?: string;
@@ -565,8 +592,12 @@ export interface ToolResultBlock {
   tool_use_id: string;
   content: string | Array<{ type: string; [key: string]: unknown }>;
   is_error?: boolean;
+  /** Bounded factual result excerpt, retained even when content is compacted. */
+  preview?: string;
   /** When true, content has been truncated for transport. Client should fetch full content via API. */
   _truncated?: boolean;
+  /** Read-only projection, retained on late/results-only pages as well as the invocation. */
+  semantic?: { kind: "decision"; summary?: DecisionCardSummary };
   __subagent?: SubagentMeta;
 }
 
@@ -638,7 +669,7 @@ export interface StructuredSessionState {
   phase?: "responding" | "background";
 }
 
-export interface SessionSnapshot {
+export interface SessionSnapshot extends SessionCompletionState {
   id: string;
   /** 会话创建来源。旧数据和缺省值按 interactive 处理。 */
   sessionSource?: SessionSource;

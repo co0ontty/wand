@@ -4,7 +4,7 @@ import type { Express, Request } from "express";
 import { ProcessManager, PtyInputDeliveryError, SessionInputError } from "./process-manager.js";
 import { StructuredSessionManager } from "./structured-session-manager.js";
 import { WandStorage } from "./storage.js";
-import { ExecutionMode, InputRequest, ResizeRequest, SessionProvider, SessionRunner, SessionSnapshot, SessionSource, ToolResultBlock, ToolUseBlock, WandConfig } from "./types.js";
+import { ExecutionMode, InputRequest, ProcessEvent, ResizeRequest, SessionProvider, SessionRunner, SessionSnapshot, SessionSource, ToolResultBlock, ToolUseBlock, WandConfig } from "./types.js";
 import { getDefaultModelForProvider, isExecutionMode } from "./config.js";
 import { defaultRoleForCli } from "./default-employee.js";
 import { alignedBlockStart, blockWindowMessagesForTransport, compactToolMessagesForTransport, sliceTurnBlocksForTransport, truncateMessagesForTransport, visibleBlockCount, windowMessagesForTransport } from "./message-truncator.js";
@@ -278,6 +278,8 @@ function sessionListRevision(
     entry.sortTimestamp,
     entry.session.title,
     entry.session.status,
+    entry.session.completionRevision ?? 0,
+    entry.session.viewedCompletionRevision ?? 0,
     entry.session.ptyBusy === true,
     entry.session.structuredState?.inFlight === true,
   ]);
@@ -501,7 +503,8 @@ export function registerSessionRoutes(
   defaultMode: ExecutionMode,
   config: WandConfig,
   sessions: SessionRegistry,
-  onSessionCreated?: (cwd: string | undefined | null) => void
+  onSessionCreated?: (cwd: string | undefined | null) => void,
+  onCompletionViewed?: (event: ProcessEvent) => void,
 ): void {
   const wantsCompactTools = (req: Request): boolean =>
     req.get("X-Wand-Tool-Projection") === "compact" || req.query.compactTools === "1";
@@ -693,6 +696,29 @@ export function registerSessionRoutes(
       sendRouteError(res, error, "无法启动结构化会话。");
     }
   }));
+
+  app.post("/api/sessions/:id/provider", (req, res) => {
+    const provider = req.body?.provider;
+    if (!isSessionProvider(provider)) {
+      res.status(400).json({ error: "请选择有效的 CLI 工具。" });
+      return;
+    }
+    const id = req.params.id;
+    const owner = sessions.ownerOf(id);
+    if (!owner) {
+      res.status(404).json({ error: "未找到该会话。" });
+      return;
+    }
+    if (owner !== "structured") {
+      res.status(400).json({ error: "只有新建空白结构化对话可以更换工具。" });
+      return;
+    }
+    try {
+      res.json(sessionResponseDTO(structured.setSessionProvider(id, provider), req));
+    } catch (error) {
+      sendRouteError(res, error, "切换工具失败。");
+    }
+  });
 
   app.post("/api/sessions/:id/model", (req, res) => {
     const body = req.body as { model?: string | null };
@@ -1308,6 +1334,24 @@ export function registerSessionRoutes(
     res.json(page);
   }));
 
+  // Explicit display acknowledgement: reads/prefetch/resync never consume completion state.
+  app.post("/api/sessions/:id/completion/view", (req, res) => {
+    const snapshot = sessions.get(req.params.id);
+    if (!snapshot) {
+      res.status(404).json({ error: "未找到该会话。" });
+      return;
+    }
+    const revision = req.body?.completionRevision;
+    if (!Number.isSafeInteger(revision) || revision <= 0) {
+      res.status(400).json({ error: "完成代次无效。" });
+      return;
+    }
+    const changed = storage.markSessionCompletionViewed(snapshot.id, revision);
+    const completion = storage.getSessionCompletion(snapshot.id)!;
+    if (changed) onCompletionViewed?.({ type: "status", sessionId: snapshot.id, data: completion });
+    res.json({ ok: true, ...completion });
+  });
+
   app.get("/api/sessions/:id", (req, res) => {
     const snapshot = sessions.get(req.params.id);
     if (!snapshot) {
@@ -1682,6 +1726,57 @@ export function registerSessionRoutes(
     } catch (error) {
       sendRouteError(res, error, "无法停止会话。");
     }
+  });
+
+  // 归档 / 取消归档会话：只写标记，不杀终端、不删历史；保留期扫描再按 archivedAt 清理。
+  app.post("/api/sessions/:id/archive", (req, res) => {
+    try {
+      const updated = sessions.setArchived(req.params.id, true);
+      if (!updated) {
+        res.status(404).json({ error: "未找到该会话。" });
+        return;
+      }
+      res.json(sessionResponseDTO(updated, req));
+    } catch (error) {
+      sendRouteError(res, error, "无法归档会话。");
+    }
+  });
+
+  app.post("/api/sessions/:id/unarchive", (req, res) => {
+    try {
+      const updated = sessions.setArchived(req.params.id, false);
+      if (!updated) {
+        res.status(404).json({ error: "未找到该会话。" });
+        return;
+      }
+      res.json(sessionResponseDTO(updated, req));
+    } catch (error) {
+      sendRouteError(res, error, "无法恢复会话。");
+    }
+  });
+
+  // 批量归档 / 恢复：与 /api/sessions/batch-delete 对称，返回失败项让客户端保留选择。
+  app.post("/api/sessions/batch-archive", (req, res) => {
+    const body = req.body as { sessionIds?: unknown; archived?: unknown } | null | undefined;
+    const ids: string[] = Array.isArray(body?.sessionIds)
+      ? body!.sessionIds.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0)
+      : [];
+    if (ids.length === 0) {
+      res.status(400).json({ error: "至少提供一个会话 ID。" });
+      return;
+    }
+    const archived = body?.archived !== false;
+    const failed: string[] = [];
+    let changed = 0;
+    for (const id of ids) {
+      try {
+        if (sessions.setArchived(id, archived)) changed += 1;
+        else failed.push(id);
+      } catch {
+        failed.push(id);
+      }
+    }
+    res.json({ ok: true, archived: changed, ...(failed.length > 0 ? { failed } : {}) });
   });
 
   app.delete("/api/sessions/:id", (req, res) => {

@@ -11,7 +11,7 @@ import type { ConversationTurn, ToolResultBlock, ToolUseBlock } from "../src/typ
 
 const large = "private output".repeat(20_000);
 
-test("compact projection omits ordinary tool input/results, including live, errors and cross-turn results", () => {
+test("compact projection keeps bounded previews while omitting full input/results, including live and late results", () => {
   const raw: ConversationTurn[] = [
     { role: "assistant", content: [
       { type: "tool_use", id: "edit-1", name: "Edit", description: "private patch",
@@ -36,7 +36,11 @@ test("compact projection omits ordinary tool input/results, including live, erro
   assert.deepEqual(results.map((result) => result.content), ["", ""]);
   assert.ok(results.every((result) => result._truncated === true));
   assert.equal(results[1].is_error, true);
-  assert.doesNotMatch(JSON.stringify(compact), /secret|private|\/repo\/a\.ts/);
+  assert.ok(uses.every(use => (use.preview?.length ?? 0) <= 180));
+  assert.ok(results.every(result => (result.preview?.length ?? 0) <= 180));
+  assert.ok(JSON.stringify(compact).length < 4_000);
+  assert.equal(results[1].preview, "secret failure");
+  assert.doesNotMatch(JSON.stringify(uses.map(use => use.activity)), /secret|private|\/repo\/a\.ts/);
   assert.equal((raw[0].content[0] as ToolUseBlock).input.old_string, large, "persisted source remains intact");
 });
 
@@ -90,7 +94,9 @@ test("timeline metadata carries bounded file/tool labels and real times, not too
   ]);
   assert.ok(uses.every(use => (use.activity?.label.length ?? 0) <= 120));
   assert.deepEqual(uses.map(use => use.activity?.occurredAt), [occurredAt, occurredAt, occurredAt, undefined]);
-  assert.doesNotMatch(JSON.stringify(compact), /secret|private|workspace|offset/);
+  assert.equal(uses[2].preview, "secret-query");
+  assert.match(uses[0].preview ?? "", /src\/main.ts.*起始行 123/);
+  assert.doesNotMatch(JSON.stringify(compact), /private|workspace|old_string|new_string/);
   assert.deepEqual(compactToolMessagesForTransport(compact), compact);
 });
 

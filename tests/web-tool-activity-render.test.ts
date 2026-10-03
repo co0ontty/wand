@@ -102,8 +102,9 @@ test("expanded timeline shows every call identity in order, with no detail bodie
   ], "", true);
   assert.equal((html.match(/class="chat-activity-entry"/g) ?? []).length, 4);
   assert.match(html, /chat-activity-timeline" role="list"/);
-  assert.ok(html.indexOf("查看 src/main.ts") < html.indexOf("运行命令 · Bash"));
-  assert.ok(html.indexOf("运行命令 · Bash") < html.indexOf("修改 src/main.ts"));
+  const timeline = html.slice(html.indexOf('class="chat-activity-timeline"'));
+  assert.ok(timeline.indexOf("查看 src/main.ts") < timeline.indexOf("运行命令 · Bash"));
+  assert.ok(timeline.indexOf("运行命令 · Bash") < timeline.indexOf("修改 src/main.ts"));
   assert.match(html, /修改了1个文件/);
   assert.match(html, /chat-activity-entry-time" datetime="2026-09-30T12:00:00Z"/);
   assert.ok(html.indexOf('class="chat-activity-entry-time"') <

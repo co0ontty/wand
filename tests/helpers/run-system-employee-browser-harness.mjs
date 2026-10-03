@@ -117,7 +117,7 @@ try {
     };
   })()`);
   assert.equal(owner.label, "系统 AI 执行者");
-  assert.equal(owner.tag, "系统运维");
+  assert.equal(owner.tag, "系统用户");
   assert.match(owner.name, /勤劳的初二/);
   assert.equal(owner.chain.length, 2);
   assert.match(owner.chain[0], /^01\s*Claude · 默认模型$/);
@@ -147,7 +147,7 @@ try {
   })()`);
   assert.equal(layout.order.length, 3);
   assert.match(layout.order[0], /勤劳的初二/);
-  assert.equal(layout.tags[0], "系统运维");
+  assert.equal(layout.tags[0], "系统用户");
   assert.equal(layout.tags[1], "");
   assert.equal(layout.firstIsSystem, true, "内置员工卡片带 is-system 状态");
   assert.deepEqual(layout.cliLogos, ["claude", "claude", "claude"]);
@@ -173,7 +173,7 @@ try {
       actions: [...card.querySelectorAll('.wand-team-member-actions button')].map((b) => b.textContent.trim()),
     };
   })()`);
-  assert.match(systemBody.note, /系统运维/);
+  assert.match(systemBody.note, /系统用户/);
   assert.equal(systemBody.nameInputs, 0, "内置员工不提供名字输入框");
   assert.equal(systemBody.textareas, 0, "内置员工不提供职责/Prompt 输入框");
   assert.ok(systemBody.candidateRows >= 2, "候选仍然可编辑");
@@ -223,6 +223,57 @@ try {
   assert.deepEqual(userBody.actions, ["保存修改", "取消", "归档", "删除"]);
   results.push({ check: "card/user-unchanged", userBody });
 
+  // 普通员工的标签可编辑；保存中、成功、失败都留在同一个按钮，输入不丢失。
+  const setTags = async (value) => action(`(() => {
+    const input = document.getElementById('employee-e_user-tags');
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(value)});
+    input.dispatchEvent(new Event('input', {bubbles:true}));
+  })()`);
+  await sleep(await evaluate("parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--motion-normal')) + 80"));
+  await setTags("交付，Équipe，交付");
+  assert.equal(await evaluate("getComputedStyle(document.querySelector('.wand-employees-layout')).overflowY"), "auto");
+  await action("document.querySelector('[data-employee-id=e_user] .wand-employee-save-submit').scrollIntoView({block:'center',behavior:'instant'})");
+  assert.equal(await evaluate("(() => {const b=document.querySelector('[data-employee-id=e_user] .wand-employee-save-submit'),r=b.getBoundingClientRect();return r.y>=0 && r.bottom<=innerHeight && b.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));})()"), true, "长表单保存按钮必须真实可点击");
+  const saveBefore = await evaluate(`(() => {
+    const b = document.querySelector('[data-employee-id=e_user] .wand-employee-save-submit');
+    window.tagSaveButton = b;
+    const r = b.getBoundingClientRect(); b.click();
+    return {x:r.x,y:r.y,width:r.width,height:r.height};
+  })()`);
+  await waitFor("document.querySelector('[data-employee-id=e_user] .wand-employee-save-submit').textContent === '保存中…'");
+  await waitFor("document.querySelector('[data-employee-id=e_user] .wand-employee-save-submit').textContent === '已保存'");
+  const saveAfter = await evaluate(`(() => {
+    const b = document.querySelector('[data-employee-id=e_user] .wand-employee-save-submit');
+    const r = b.getBoundingClientRect(); return {geometry:{x:r.x,y:r.y,width:r.width,height:r.height},same:b===window.tagSaveButton};
+  })()`);
+  assert.deepEqual(saveAfter.geometry, saveBefore);
+  assert.equal(saveAfter.same, true);
+  assert.deepEqual(await evaluate("window.systemEmployeeHarness.updates[1].body.tags"), ["交付","Équipe"]);
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('[data-employee-id=e_user] .wand-employee-tag')].map(e=>e.textContent)"), ["交付","Équipe"]);
+
+  await setTags("暂存标签");
+  await evaluate("window.systemEmployeeHarness.failNextSave = true");
+  await action("document.querySelector('[data-employee-id=e_user] .wand-employee-save-submit').click()");
+  await waitFor("document.querySelector('[data-employee-id=e_user] .wand-employee-save-submit').textContent === '保存失败'");
+  assert.equal(await evaluate("document.getElementById('employee-e_user-tags').value"), "暂存标签");
+  const failureGeometry = await evaluate(`(() => {
+    const r = document.querySelector('[data-employee-id=e_user] .wand-employee-save-submit').getBoundingClientRect();
+    return {x:r.x,y:r.y,width:r.width,height:r.height};
+  })()`);
+  assert.deepEqual(failureGeometry, saveBefore, "失败提示不能推动提交按钮");
+  await setTags("系统用户");
+  await action("document.querySelector('[data-employee-id=e_user] .wand-employee-save-submit').click()");
+  await waitFor("document.querySelector('[data-employee-id=e_user] [role=alert]')?.textContent.includes('内置标签')");
+  assert.equal(await evaluate("window.systemEmployeeHarness.updates.length"), 2);
+  assert.equal(await evaluate("document.getElementById('employee-e_user-tags').value"), "系统用户");
+  await setTags("");
+  await action("document.querySelector('[data-employee-id=e_user] .wand-employee-save-submit').click()");
+  await waitFor("window.systemEmployeeHarness.updates.length === 3");
+  assert.deepEqual(await evaluate("window.systemEmployeeHarness.updates[2].body.tags"), []);
+  assert.equal(await evaluate("document.querySelectorAll('[data-employee-id=e_user] .wand-employee-tag').length"), 0);
+  results.push({check:"card/custom-tags-and-in-place-feedback",saveBefore,saveAfter,inputRetained:true});
+
+
   assert.deepEqual(await evaluate("window.systemEmployeeHarness.mutations"), [], "内置员工不应发出归档/删除请求");
 
   assert.deepEqual(await evaluate("window.systemEmployeeHarness.memoryCalls"), [], "收起态不预取记忆");
@@ -234,7 +285,7 @@ try {
       promptReadOnly: card.querySelector('textarea').readOnly,
       actions: [...card.querySelectorAll('.wand-team-member-actions button')].map(b => b.textContent.trim()) };
   })()`);
-  assert.equal(defaultCard.tag, '默认伙伴');
+  assert.equal(defaultCard.tag, '默认用户');
   assert.equal(defaultCard.promptReadOnly, true);
   assert.deepEqual(defaultCard.actions, ['保存修改', '取消']);
   await sleep(await evaluate("parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--motion-normal')) + 80"));

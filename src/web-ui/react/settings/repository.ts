@@ -23,16 +23,10 @@ import type {
 } from "./types";
 import { finiteNumber, record, stringValue, type JsonRecord } from "../json-utils";
 
-/** `/api/config` 能回给客户端的全部 CLI 工具，顺序与设置页下拉一致。 */
-const SESSION_PROVIDERS: readonly SettingsSessionProvider[] = [
-  "claude",
-  "codex",
-  "opencode",
-  "grok",
-  "qoder",
-  "pi",
-  "gemini",
-];
+import { PROVIDER_IDS, isNativeThinkingEffort } from "../../provider-identity";
+
+/** `/api/config` 能回给客户端的全部 CLI 工具，顺序与设置页下拉一致（provider 唯一真源）。 */
+const SESSION_PROVIDERS: readonly SettingsSessionProvider[] = PROVIDER_IDS;
 
 export interface SettingsRuntimeAdapter {
   notificationPreferencesChanged(preferences: SettingsNotificationPreferences): void;
@@ -136,7 +130,8 @@ function normalizeConfig(value: unknown): SettingsConfig {
     const raw = stringValue(input.defaultThinkingEffort);
     if (raw === "off" || raw === "standard" || raw === "deep" || raw === "max") return raw;
     // Codex 动态推理档位由旧客户端写入，原样保留而不是悄悄重置成 off。
-    if (/^(claude|codex|opencode|grok|qoder|pi|gemini):[a-z0-9][a-z0-9_-]{0,31}$/.test(raw)) {
+    // gemini 不在原生档位名单里，不接受 `gemini:<level>`。
+    if (isNativeThinkingEffort(raw)) {
       return raw as SettingsThinkingEffort;
     }
     return "off";

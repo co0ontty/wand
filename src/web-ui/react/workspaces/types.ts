@@ -74,11 +74,17 @@ export interface WorkspaceSessionSummary {
   command?: string;
   title?: string;
   status?: string;
+  completionRevision?: number;
+  viewedCompletionRevision?: number;
   cwd?: string;
   startedAt?: string;
   workspaceTaskId?: string;
   ptyBusy?: boolean;
+  /** 已归档：从正常列表收起，进「已归档」区，可恢复；归档 7 天后由保留期清理。 */
+  archived?: boolean;
+  archivedAt?: string | null;
   providerCliActive?: boolean;
+  providerCliExitCode?: number | null;
   inFlight?: boolean;
   employeeId?: string;
   employeeName?: string;
@@ -162,6 +168,8 @@ export interface WorkspaceTaskDetail extends WorkspaceTask {
 export type TaskSummary = WorkspaceTaskDetail & {
   /** 使用 maxSessions 截断时的真实会话总数（未截断时等于 sessions.length）。 */
   totalSessions?: number;
+  /** 已归档的会话：不进正常列表，在任务下单独收起，可恢复。 */
+  archivedSessions?: WorkspaceSessionSummary[];
 };
 
 /**
@@ -180,6 +188,8 @@ export interface TaskDirectoryGroup {
   global?: boolean;
   tasks: TaskSummary[];
   standaloneSessions: WorkspaceSessionSummary[];
+  /** 该目录下未绑定任务的已归档会话。 */
+  archivedSessions?: WorkspaceSessionSummary[];
 }
 
 export type WorkspaceWorktreeState = "ready" | "dirty" | "conflict" | "empty" | "unavailable";
@@ -290,6 +300,10 @@ export interface WorkspacesRepository {
   deleteTask(taskId: string, cascade?: boolean): Promise<void>;
   /** 归档任务：保留终端与 worktree，仅从侧栏隐藏并移入看板归档。 */
   archiveTask(taskId: string): Promise<WorkspaceTask>;
+  /** 归档 / 恢复单个会话：软处理，不杀终端、不删历史；与任务同一套 7 天清理规则。 */
+  archiveSession(sessionId: string, archived: boolean): Promise<void>;
+  /** 批量归档 / 恢复会话。 */
+  batchArchiveSessions(sessionIds: readonly string[], archived: boolean): Promise<void>;
   saveTaskLayout(taskId: string, layout: TaskWindowLayout | null, layoutRevision?: number): Promise<{ layout: TaskWindowLayout | null; layoutRevision?: number }>;
   /** Project-level review data used by the multi-worktree merge Agent launcher. */
   listWorktrees(workspaceId: string, options?: { signal?: AbortSignal }): Promise<WorkspaceWorktreeOverview>;

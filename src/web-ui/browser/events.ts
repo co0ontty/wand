@@ -184,9 +184,15 @@ import { setupVisualViewportHandlers } from "./viewport";
       // Toggle function for inline tool rows (Read, Glob, Grep, etc.)
       (window as any).__inlineToolToggle = function(el: any) {
         var expanded = el.classList.toggle("inline-tool-open");
+        el.setAttribute("aria-expanded", expanded ? "true" : "false");
+        // 展开区高度由 .inline-tool-open 的 grid-template-rows 过渡驱动，
+        // 收起是同一段动画倒放，所以这里不再直接写 display。
         var body = el.querySelector(".inline-tool-expanded");
+        var bodyInner = el.querySelector(".inline-tool-expanded-inner");
         if (body) {
-          body.style.display = expanded ? "block" : "none";
+          body.inert = !expanded;
+          if (expanded) body.removeAttribute("aria-hidden");
+          else body.setAttribute("aria-hidden", "true");
         }
         // Update status indicator
         var statusSpan = el.querySelector(".inline-tool-status");
@@ -198,12 +204,18 @@ import { setupVisualViewportHandlers } from "./viewport";
           }
         }
         if (expanded) {
-          lazyLoadTruncatedToolContent(el, body, function(content: any) {
+          lazyLoadTruncatedToolContent(el, bodyInner, function(content: any) {
             el.dataset.result = content;
-            if (body) body.innerHTML = '<div class="inline-tool-result">' + formatInlineResult(content, "") + '</div>';
+            if (bodyInner) bodyInner.innerHTML = '<div class="inline-tool-result">' + formatInlineResult(content, "") + '</div>';
           });
         }
         persistElementExpandState(el, "inline-tool");
+      };
+      // 内联工具卡也是按钮：回车 / 空格与点击同一条路径。
+      (window as any).__inlineToolKeydown = function(event: any, el: any) {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        (window as any).__inlineToolToggle(el);
       };
       // Toggle function for terminal tool blocks
       (window as any).__terminalExpand = function(el: any) {

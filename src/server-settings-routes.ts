@@ -10,9 +10,12 @@ import { sendRouteError } from "./server-request.js";
 import {
   getProviderDefaultModels,
   PREFERENCE_KEYS,
+  PROVIDER_MODEL_PREFERENCE_FIELDS,
+  providerModelFields,
   saveConfig,
   writePreferenceToStorage,
 } from "./config.js";
+import { SESSION_PROVIDERS } from "./session-provider.js";
 import { withConfiguredDefaultModelLabels, type ModelCatalogService } from "./models.js";
 import { DEPLOYMENT_CONFIG_KEYS, type RuntimeConfigState } from "./runtime-config.js";
 import type { WandStorage } from "./storage.js";
@@ -48,13 +51,7 @@ function publicConfig(config: WandConfig): Record<string, unknown> {
   const defaultModels = getProviderDefaultModels(config);
   return {
     ...safe,
-    defaultModel: defaultModels.claude,
-    defaultCodexModel: defaultModels.codex,
-    defaultOpenCodeModel: defaultModels.opencode,
-    defaultGrokModel: defaultModels.grok,
-    defaultQoderModel: defaultModels.qoder,
-    defaultPiModel: defaultModels.pi,
-    defaultGeminiModel: defaultModels.gemini,
+    ...providerModelFields(defaultModels),
     defaultModels,
   };
 }
@@ -205,13 +202,11 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
         if (!body.defaultModels || typeof body.defaultModels !== "object" || Array.isArray(body.defaultModels)) {
           throw new Error("defaultModels 必须是对象。");
         }
-        if (Object.hasOwn(body.defaultModels, "claude")) stagePreference("defaultModel", body.defaultModels.claude);
-        if (Object.hasOwn(body.defaultModels, "codex")) stagePreference("defaultCodexModel", body.defaultModels.codex);
-        if (Object.hasOwn(body.defaultModels, "opencode")) stagePreference("defaultOpenCodeModel", body.defaultModels.opencode);
-        if (Object.hasOwn(body.defaultModels, "grok")) stagePreference("defaultGrokModel", body.defaultModels.grok);
-        if (Object.hasOwn(body.defaultModels, "qoder")) stagePreference("defaultQoderModel", body.defaultModels.qoder);
-        if (Object.hasOwn(body.defaultModels, "pi")) stagePreference("defaultPiModel", body.defaultModels.pi);
-        if (Object.hasOwn(body.defaultModels, "gemini")) stagePreference("defaultGeminiModel", body.defaultModels.gemini);
+        for (const provider of SESSION_PROVIDERS) {
+          if (Object.hasOwn(body.defaultModels, provider)) {
+            stagePreference(PROVIDER_MODEL_PREFERENCE_FIELDS[provider], body.defaultModels[provider]);
+          }
+        }
       }
       for (const field of PREFERENCE_KEYS) {
         const value = (body as Record<string, unknown>)[field];
@@ -262,13 +257,7 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
     const defaults = getProviderDefaultModels(config);
     res.json({
       ...withConfiguredDefaultModelLabels(cached, defaults),
-      defaultModel: defaults.claude,
-      defaultCodexModel: defaults.codex,
-      defaultOpenCodeModel: defaults.opencode,
-      defaultGrokModel: defaults.grok,
-      defaultQoderModel: defaults.qoder,
-      defaultPiModel: defaults.pi,
-      defaultGeminiModel: defaults.gemini,
+      ...providerModelFields(defaults),
       defaultModels: defaults,
     });
   });
@@ -279,13 +268,7 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
       const defaults = getProviderDefaultModels(config);
       res.json({
         ...withConfiguredDefaultModelLabels(refreshed, defaults),
-        defaultModel: defaults.claude,
-        defaultCodexModel: defaults.codex,
-        defaultOpenCodeModel: defaults.opencode,
-        defaultGrokModel: defaults.grok,
-        defaultQoderModel: defaults.qoder,
-        defaultPiModel: defaults.pi,
-        defaultGeminiModel: defaults.gemini,
+        ...providerModelFields(defaults),
         defaultModels: defaults,
       });
     } catch (error) {

@@ -1,3 +1,5 @@
+import { isDecisionToolCall } from "../../decision-tool.js";
+
 export type ToolActivityKind = "edit_file" | "read_file" | "run_command" | "other";
 
 export interface ToolActivityCall<T> {
@@ -17,6 +19,9 @@ type ActivityBlock = {
   name?: string;
   text?: string;
   thinking?: string;
+  input?: Record<string, unknown>;
+  preview?: string;
+  semantic?: { kind?: string };
   activity?: { kind?: string; label?: string; fileKey?: string; occurredAt?: string };
 };
 
@@ -24,8 +29,9 @@ export const TOOL_ACTIVITY_KINDS: readonly ToolActivityKind[] =
   ["edit_file", "read_file", "run_command", "other"];
 
 /** Pure activity turns show their small menu directly, without a reply disclosure. */
-export function isToolActivityOnly(blocks: ActivityBlock[]): boolean {
-  return blocks.some(block => block.type === "thinking" || block.type === "tool_use" && !!block.activity)
+export function isToolActivityOnly(blocks: ActivityBlock[], decisionIds?: ReadonlySet<string>): boolean {
+  return !blocks.some(block => isDecisionToolCall(block) || block.type === "tool_use" && !!block.id && decisionIds?.has(block.id))
+    && blocks.some(block => block.type === "thinking" || block.type === "tool_use" && !!block.activity)
     && blocks.every(block => block.type === "thinking" || block.type === "tool_result"
       || block.type === "tool_use" && !!block.activity
       || block.type === "text" && !block.text?.trim());
@@ -39,7 +45,7 @@ export function toolActivityTimeline<T extends ActivityBlock>(
   const seen = new Set<string>();
   return items.filter(({ block }) => {
     if (block.type === "thinking") return true;
-    if (block.type !== "tool_use" || !block.activity) return false;
+    if (block.type !== "tool_use" || !block.activity || isDecisionToolCall(block)) return false;
     if (!block.id) return true;
     if (seen.has(block.id)) return false;
     seen.add(block.id);
@@ -58,7 +64,7 @@ export function groupToolActivities<T extends ActivityBlock>(
   const fileEntries = new Map<string, ToolActivityEntry<T>>();
   for (const [index, call] of items.entries()) {
     const block = call.block;
-    if (block?.type !== "tool_use" || !block.activity) continue;
+    if (block?.type !== "tool_use" || !block.activity || isDecisionToolCall(block)) continue;
     const id = String(block.id || "");
     if (id && seenIds.has(id)) continue;
     if (id) seenIds.add(id);
@@ -137,7 +143,7 @@ export function currentToolActivity(
     const blocks = Array.isArray(message.content) ? message.content as ActivityBlock[] : [];
     for (let blockIndex = blocks.length - 1; blockIndex >= 0; blockIndex--) {
       const block = blocks[blockIndex];
-      if (block?.type !== "tool_use" || block.activity?.kind !== "run_command" || !block.id) continue;
+      if (block?.type !== "tool_use" || block.activity?.kind !== "run_command" || !block.id || isDecisionToolCall(block)) continue;
       if (!toolResults[block.id]?.length) {
         pendingCommandId = block.id;
         break;

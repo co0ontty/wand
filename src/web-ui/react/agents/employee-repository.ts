@@ -4,7 +4,7 @@ import { jsonBody, requestJson } from "../http-adapter.js";
 
 export type SiliconEmployeeInput = Pick<
   SiliconEmployee,
-  "name" | "duty" | "prompt" | "avatar" | "agents"
+  "name" | "duty" | "prompt" | "avatar" | "agents" | "tags"
 >;
 
 type EmployeeListener = (employeeId: string) => void;
@@ -115,38 +115,55 @@ export const siliconEmployeesRepository = {
   },
 };
 
-export function useSiliconEmployees(options?: { includeArchived?: boolean }): {
+export function useSiliconEmployees(options?: { includeArchived?: boolean; enabled?: boolean }): {
   employees: SiliconEmployee[];
   loading: boolean;
   error: string | null;
   reload: () => void;
 } {
   const [employees, setEmployees] = React.useState<SiliconEmployee[]>(() => (!options?.includeArchived && employeeList) || []);
-  const [loading, setLoading] = React.useState<boolean>(() => !(!options?.includeArchived && employeeList));
+  const enabled = options?.enabled !== false;
+  const [loading, setLoading] = React.useState<boolean>(() => enabled && !(!options?.includeArchived && employeeList));
   const [error, setError] = React.useState<string | null>(null);
+  const active = React.useRef(false);
+  const enabledRef = React.useRef(enabled);
+  const generation = React.useRef(0);
+  enabledRef.current = enabled;
 
   const load = React.useCallback(() => {
+    if (!active.current || !enabledRef.current) return;
+    const request = ++generation.current;
+    const current = (): boolean => active.current && enabledRef.current && generation.current === request;
     setLoading(true);
     siliconEmployeesRepository
-      .list(options)
+      .list({ includeArchived: options?.includeArchived })
       .then((list) => {
+        if (!current()) return;
         setEmployees(list);
         setError(null);
       })
       .catch((err) => {
-        setError(err instanceof Error ? err.message : String(err));
+        if (current()) setError(err instanceof Error ? err.message : String(err));
       })
       .finally(() => {
-        setLoading(false);
+        if (current()) setLoading(false);
       });
   }, [options?.includeArchived]);
 
   React.useEffect(() => {
+    if (!enabled) {
+      setLoading(false);
+      return undefined;
+    }
+    active.current = true;
     load();
-    return subscribeSiliconEmployeeDefinitionChanges(() => {
-      load();
-    });
-  }, [load]);
+    const unsubscribe = subscribeSiliconEmployeeDefinitionChanges(load);
+    return () => {
+      active.current = false;
+      generation.current++;
+      unsubscribe();
+    };
+  }, [load, enabled]);
 
   return { employees, loading, error, reload: load };
 }

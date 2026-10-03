@@ -4,12 +4,12 @@ import { beginChatInteraction, chatViewLease, isChatLeaseCurrent, patchChatConte
 import type { ChatOwnerPlan, ChatViewLease } from "./chat-render-focus.js";
 import { t, getActiveLang, iconSvg } from "./i18n";
 import { escapeHtml, isImagePath, refreshTailMarqueePaths, renderTailMarqueePath } from "./utils";
-import { applyPersistedExpandState, bindChatScrollListener, buildExpandKey, clearChatUnread, getMessageKey, getPersistedAgentSelection, getPersistedExpandState, isChatNearBottom, observeLoadMoreSentinel, persistElementExpandState, refreshChatUnreadDivider, setPersistedExpandState, updateChatUnreadBubble } from "./chat-scroll";
+import { applyExpandedState, applyPersistedExpandState, bindChatScrollListener, buildExpandKey, clearChatUnread, getMessageKey, getPersistedAgentSelection, getPersistedExpandState, isChatNearBottom, observeLoadMoreSentinel, persistElementExpandState, refreshChatUnreadDivider, setPersistedExpandState, updateChatUnreadBubble } from "./chat-scroll";
 import "./file-browser";
 import { buildMessagesForRender } from "./input";
 import { syncSessionProgressToNative } from "./notifications";
 import "./render";
-import { copyToClipboard, getPreferredMessages, isRecoverableToolError } from "./session-engine";
+import { copyToClipboard, getPreferredMessages, isRecoverableToolError, markSessionCompletionViewed } from "./session-engine";
 import { buildTodoItemsHtml, buildTodoSegmentsHtml, summarizeTodoProgress } from "./todo-progress";
 import { renderStructuredStatusBar } from "./utils";
 import { getCardDefault } from "./events";
@@ -21,6 +21,7 @@ import { localFilePreviewHref, localHttpPreviewHref } from "../react/local-previ
 import { catCoatGrid, memberCoatIndex } from "../react/ai-teams/cat-coats";
 import { parseJsonResponse } from "../react/http-adapter";
 import { commandOccurredAt, currentToolActivity, formatActivityElapsed, groupToolActivities, isToolActivityOnly, latestCommandOccurredAt, toolActivityTimeline, TOOL_ACTIVITY_KINDS } from "./tool-activity";
+import { isDecisionToolCall } from "../../decision-tool.js";
 import { cachedSiliconEmployee, subscribeSiliconEmployeeCache } from "../react/agents/employee-repository.js";
 import { renderEmployeeCliBadge } from "../react/agents/employee-identity.js";
 import {
@@ -146,6 +147,9 @@ export function clearActivityDetailState(): void {
             if (state.chatRenderPendingToken !== token || state.selectedId !== sessionId ||
               (state.chatRenderEpoch || 0) !== epoch) return;
             doRenderChat(!!forceFullRender);
+            if (state.currentView === "chat") {
+              void markSessionCompletionViewed(state.sessions.find((session) => session.id === sessionId));
+            }
           } catch (error) {
             console.error("[wand] chat render failed:", error);
           } finally {
@@ -457,6 +461,16 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         // 可能分散在多条消息里，不能在单条消息内各自计算一份。
         var agentRunIndex = collectAgentRuns(allMessages);
         var conversationToolResults = buildConversationToolResultMap(allMessages);
+        _currentDecisionToolIds = new Set(allMessages.flatMap(function(message) {
+          return (message.content || []).flatMap(function(block) {
+            return block.type === "tool_use" && isDecisionToolCall(block) ? [block.id]
+              : block.type === "tool_result" && block.semantic?.kind === "decision" ? [block.tool_use_id] : [];
+          });
+        }));
+        _currentVisibleToolIds = new Set(allMessages.flatMap(function(message) {
+          return (message.content || []).filter(function(block) { return block.type === "tool_use"; })
+            .map(function(block) { return block.id; });
+        }));
         // 状态口径需要这两个事实：会话是否在跑、最后一条真人文本轮在哪。
         _currentLastUserTextMessageIndex = agentRunIndex.lastUserTextMessageIndex;
         _currentSessionRunning = !!(selectedSession.structuredState &&
@@ -2416,7 +2430,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           var el = msgEls[m];
           var idx = parseInt(el.getAttribute("data-msg-index") || "", 10);
           if (isNaN(idx) || !allMessages[idx] || allMessages[idx].role !== "assistant") continue;
-          if (isToolActivityOnly(allMessages[idx].content || [])) {
+          if (isToolActivityOnly(allMessages[idx].content || [], _currentDecisionToolIds)) {
             el.querySelector(":scope > .assistant-reply-disclosure")?.remove();
             el.classList.remove("assistant-reply-collapsed", "assistant-reply-expanded");
             continue;
@@ -2501,6 +2515,8 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
       var _currentLastUserTextMessageIndex = -1;
       var _currentSessionRunning = false;
       var _currentActivitySessionBusy = false;
+      var _currentVisibleToolIds = new Set<string>();
+      var _currentDecisionToolIds = new Set<string>();
       var _currentLatestAssistantMessageIndex = -1;
       var _currentLatestPendingCommandId = "";
 
@@ -2513,7 +2529,8 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
             !isTurnActivityLive(_currentMessageGlobalIndex);
         }
         if (block.type === "tool_use" && deriveSubagentMeta(block)) return true;
-        if (block.type === "tool_result") return true;
+        if (block.type === "tool_result") return block.semantic?.kind !== "decision"
+          || _currentVisibleToolIds.has(block.tool_use_id);
         return false;
       }
 
@@ -2522,7 +2539,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         if (block.type === "thinking") return true;
         if (block.type === "tool_use") {
           // 服务端只给可延后载入的普通工具附 activity；独立交互和图片卡保持原位。
-          return !!block.activity;
+          return !!block.activity && !isDecisionToolCall(block) && !_currentDecisionToolIds.has(block.id);
         }
         return false;
       }
@@ -2759,6 +2776,8 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
             (ACTIVITY_KIND_META[kind]?.item || "调用") + " · " + (block.name || "工具");
           var occurredAt = block.activity?.occurredAt;
           var itemClock = occurredAt ? formatActivityEventTime(occurredAt) : "";
+          var inputPreview = block.preview || "";
+          var resultPreview = result?.preview || "";
           var detailHtml = "";
           if (entryOpen && expanded) {
             detailHtml = isThinking
@@ -2767,7 +2786,8 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
               : renderActivityEntryDetails({ calls: [call] }, messageKey, segmentFirstIndex,
                 toolResults, entryRunning, entryKey);
           }
-          menuHtml += '<div class="chat-activity-entry" role="listitem" data-entry-key="' + escapeHtml(entryKey) +
+          var entryState = result?.is_error ? "error" : entryRunning ? "running" : result ? "complete" : "pending";
+          menuHtml += '<div class="chat-activity-entry" data-status="' + entryState + '" role="listitem" data-entry-key="' + escapeHtml(entryKey) +
             (isThinking ? '" data-thinking-entry="true' : '" data-tool-ids="' +
               escapeHtml(JSON.stringify(block.id ? [String(block.id)] : []))) +
             '" data-expanded="' + (entryOpen ? "true" : "false") + '">' +
@@ -2776,7 +2796,9 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
                 '<span class="chat-activity-entry-dot' + (entryRunning ? ' is-active' : '') + '" aria-hidden="true"></span>' +
                 (itemClock ? '<time class="chat-activity-entry-time" datetime="' + escapeHtml(occurredAt) + '">' +
                   escapeHtml(itemClock) + '</time>' : '') +
-                '<span class="chat-activity-entry-label">' + escapeHtml(itemLabel) + '</span>' +
+                '<span class="chat-activity-entry-copy"><span class="chat-activity-entry-label">' + escapeHtml(itemLabel) + '</span>' +
+                  (inputPreview ? '<span class="chat-activity-entry-preview">' + escapeHtml(inputPreview) + '</span>' : '') +
+                  (resultPreview ? '<span class="chat-activity-entry-result">' + escapeHtml(resultPreview) + '</span>' : '') + '</span>' +
                 (isThinking && !entryRunning ? '' : '<span class="chat-activity-entry-status' +
                   (result?.is_error ? ' is-error' : '') + '">' + escapeHtml(status) + '</span>') +
                 '<span class="chat-activity-entry-arrow">' + iconSvg("chevronDown", { size: 13 }) + '</span>' +
@@ -2820,6 +2842,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
             'data-expand-key="' + escapeHtml(expandKey) + '" ' +
             'data-expanded="' + (expanded ? "true" : "false") + '">' +
           '<button type="button" class="chat-activity-summary" aria-expanded="' + (expanded ? "true" : "false") + '" onclick="__activityToggle(this)">' +
+            '<span class="chat-activity-summary-dot" aria-hidden="true"></span>' +
             '<span class="chat-activity-meta">' + leadClockHtml + summaryItems.join(
               '<span class="chat-activity-separator" aria-hidden="true">·</span>') + '</span>' +
             '<span class="chat-activity-chevron">' + iconSvg("chevronDown", { size: 13, strokeWidth: 2 }) + '</span>' +
@@ -3023,7 +3046,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         var usageHtml = role === "assistant" ? renderUsageSummaryHtml(roundUsage) : "";
         var content = Array.isArray(msg.content) ? msg.content : [];
         var isQueued = role === "user" && content.some(function(b) { return b && b.__queued; });
-        var activityOnly = role === "assistant" && isToolActivityOnly(content);
+        var activityOnly = role === "assistant" && isToolActivityOnly(content, _currentDecisionToolIds);
         var avatarHtml = (isGrouped || role === "user" || activityOnly) ? "" : chatAvatar(role, msg.author);
         var groupedAttr = isGrouped ? ' data-grouped="true"' : "";
 
@@ -3244,6 +3267,9 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
             return rendered;
 
           case "tool_result":
+            if (block.semantic?.kind === "decision" && !_currentVisibleToolIds.has(block.tool_use_id)) {
+              return renderDecisionToolCard({ id: block.tool_use_id, input: {} }, block);
+            }
             // tool_result 通常被对应的 tool_use 卡片以"结果"区域消化掉，不在主流渲染。
             // 但如果父 tool_use 在另一条 turn 或被裁剪掉了，结果会变成孤儿——返回空字符串
             // 会让这条消息看起来"消失"。下面 renderStructuredMessage 在切段前会再做一次
@@ -3344,15 +3370,22 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
 
         var expandedHtml = "";
         var shouldExpand = opts.forceExpandedToolBodies ? true : resolveCardExpanded(persistedExpanded, opts, index, getCardDefault("inlineTools"));
+        // 展开区始终留在 DOM 里，由 .inline-tool-open 驱动高度动画（收起是同一段倒放），
+        // 所以这里只负责内容，不再写 display。
         if (hasResult) {
-          expandedHtml = '<div class="inline-tool-expanded" style="display: ' + (shouldExpand ? 'block' : 'none') + ';">' +
+          expandedHtml = '<div class="inline-tool-expanded"' + (shouldExpand ? '' : ' inert aria-hidden="true"') + '>' +
+            '<div class="inline-tool-expanded-inner">' +
             '<div class="inline-tool-result">' + formatInlineResult(resultContent, toolName) + '</div>' +
-          '</div>';
+          '</div></div>';
         } else if (isError) {
-          expandedHtml = '<div class="inline-tool-expanded" style="display: ' + (shouldExpand ? 'block' : 'none') + ';"><div class="inline-tool-result inline-tool-error">' +
-            escapeHtml(resultContent || "操作失败") + '</div></div>';
+          expandedHtml = '<div class="inline-tool-expanded"' + (shouldExpand ? '' : ' inert aria-hidden="true"') + '>' +
+            '<div class="inline-tool-expanded-inner">' +
+            '<div class="inline-tool-result inline-tool-error">' +
+            escapeHtml(resultContent || "操作失败") + '</div></div></div>';
         } else if (!toolResult) {
-          expandedHtml = '<div class="inline-tool-expanded" style="display: ' + (shouldExpand ? 'block' : 'none') + ';"><div class="inline-tool-loading">等待响应…</div></div>';
+          expandedHtml = '<div class="inline-tool-expanded"' + (shouldExpand ? '' : ' inert aria-hidden="true"') + '>' +
+            '<div class="inline-tool-expanded-inner">' +
+            '<div class="inline-tool-loading">等待响应…</div></div></div>';
         }
 
         var isTruncated = toolResult && toolResult._truncated === true;
@@ -3384,6 +3417,10 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         }
 
         var extraInfoHtml = meta ? '<span class="inline-tool-meta">' + escapeHtml(meta) + '</span>' : '';
+        // 只有真的能展开的卡片才给箭头，和活动折叠卡同一个箭头组件。
+        var chevronHtml = expandedHtml
+          ? '<span class="inline-tool-chevron" aria-hidden="true">' + iconSvg("chevronDown", { size: 13 }) + '</span>'
+          : '';
         var extraClass = isError ? 'inline-tool-error-inline' : '';
         if (shouldExpand) extraClass += ' inline-tool-open';
 
@@ -3397,14 +3434,18 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           'data-result="' + escapeHtml(fullResult) + '" ' +
           'data-preview="' + previewDataAttr + '" ' +
           'data-status="' + (isError ? 'error' : (hasResult ? 'done' : 'pending')) + '" ' +
+          'role="button" tabindex="0" aria-expanded="' + (shouldExpand ? "true" : "false") + '" ' +
           truncatedAttrs +
-          'onclick="__inlineToolToggle(this)">' +
+          'onclick="__inlineToolToggle(this)" ' +
+          'onkeydown="__inlineToolKeydown(event,this)">' +
           '<div class="inline-tool-row">' +
             '<span class="inline-tool-status">' + statusIcon + '</span>' +
             icon +
             '<span class="inline-tool-title">' + escapeHtml(title) + '</span>' +
             extraInfoHtml +
+            chevronHtml +
           '</div>' +
+          renderToolPreview(block, toolResult) +
           imageHtml +
           expandedHtml +
         '</div>';
@@ -3467,6 +3508,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
             '<span class="term-cmd-preview"><span class="term-prompt">$</span> ' + escapeHtml(cmdPreview) + '</span>' +
             '<span class="term-toggle-icon">' + (shouldExpand ? '▼' : '▶') + '</span>' +
           '</div>' +
+          renderToolPreview(block, toolResult, false) +
           '<div class="term-body" aria-hidden="' + (shouldExpand ? 'false' : 'true') + '" style="display:' + (shouldExpand ? 'block' : 'none') + ';">' +
             '<div class="term-command"><span class="term-prompt">$</span> ' + cmdDisplay + '</div>' +
             (outputHtml ? '<div class="term-output">' + outputHtml + '</div>' : '') +
@@ -3607,6 +3649,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
             openButton +
             '<span class="diff-toggle">▼</span>' +
           '</div>' +
+          renderToolPreview(block, toolResult) +
           '<div class="diff-body" aria-hidden="' + (shouldExpand ? 'false' : 'true') + '">' +
             '<div class="diff-columns">' +
               columnsHtml +
@@ -3643,7 +3686,86 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         return '<pre class="inline-tool-result-text" style="max-height: 300px; overflow-y: auto;">' + escapeHtml(content) + '</pre>';
       }
 
+      /** 决策卡摘要行：服务端投影的 label（结论 → 题数 → 被判定内容）优先，
+       *  入参与迟到结果携带同一份投影，孤立的迟到结果卡也能读到。 */
+      function decisionSummaryLabel(block, toolResult) {
+        var semantic = toolResult && toolResult.semantic && toolResult.semantic.kind === "decision"
+          ? toolResult.semantic
+          : block && block.semantic && block.semantic.kind === "decision" ? block.semantic : null;
+        var label = semantic && semantic.summary ? semantic.summary.label : "";
+        return label || "选择 / 评分 / 是非判断";
+      }
+
+      function renderDecisionToolCard(block, toolResult) {
+        var toolId = block.id || "";
+        var expandKey = buildExpandKey("decision", [toolId]);
+        var expanded = getPersistedExpandState(expandKey) === true;
+        var detail = state.toolContentCache[activityDetailCacheKey(state.selectedId, toolId)];
+        var cached = toolResult?._truncated ? detail : null;
+        var input = block.input || {};
+        var content = cached ? extractToolResultText(cached.content) : toolResult ? extractToolResultText(toolResult.content) : "";
+        try { content = JSON.stringify(JSON.parse(content), null, 2); } catch (_e) {}
+        var failed = cached ? cached.is_error : toolResult?.is_error;
+        var running = !toolResult && isTurnActivityLive(_currentMessageGlobalIndex);
+        var status = toolResult ? failed ? "失败" : "完成" : running ? "判断中" : "未返回";
+        var inputText = typeof input.command === "string" ? input.command : JSON.stringify(input, null, 2);
+        var fixedResultWindow = !!(toolResult?._truncated || detail);
+        var load = fixedResultWindow ? '<button type="button" class="chat-activity-retry decision-result-load" data-tool-use-id="' + escapeHtml(toolId) + '" onclick="__decisionLoadResult(this)"' + (detail ? ' disabled' : '') + '>' + (detail ? '已加载完整结果' : '加载完整结果') + '</button>' : '';
+        var summaryLabel = decisionSummaryLabel(block, toolResult);
+        return '<section class="tool-use-card decision-tool-card ' + (failed ? 'error' : toolResult ? 'success' : 'loading') + (expanded ? '' : ' collapsed') + '" data-expand-kind="tool-card" data-expand-key="' + escapeHtml(expandKey) + '" data-tool-use-id="' + escapeHtml(toolId) + '" data-decision-result-window="' + fixedResultWindow + '" aria-label="本地决策">' +
+          '<div class="tool-use-header" role="button" tabindex="0" aria-expanded="' + expanded + '" onclick="__decisionToggle(event,this)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();__decisionToggle(event,this);}">' +
+            '<span class="tool-use-icon">' + iconSvg("spark", { size: 16 }) + '</span>' +
+            '<span class="tool-use-head"><span class="tool-use-name">本地决策</span>' +
+            '<span class="decision-tool-summary" role="status">' + escapeHtml(summaryLabel + " · 实验性 · " + status) + '</span></span>' +
+            '<span class="tool-use-toggle" aria-hidden="true">' + iconSvg("chevronDown", { size: 14 }) + '</span></div>' +
+          '<div class="decision-tool-details"><div class="decision-tool-details-inner"><div class="tool-use-body" aria-hidden="' + !expanded + '"' + (expanded ? '' : ' inert') + '>' + load +
+            '<div class="tool-use-result"><pre class="tool-use-result-content" tabindex="0" aria-label="决策结果">' + escapeHtml(content || (running ? '正在等待决策结果…' : toolResult ? '本次调用没有文本输出' : '尚未收到结果')) + '</pre></div>' +
+            (Object.keys(input).length ? '<div class="tool-use-meta">调用输入</div><pre class="tool-use-content" tabindex="0" aria-label="调用输入">' + escapeHtml(inputText) + '</pre>' : '') +
+          '</div></div></div></section>';
+      }
+
+      (window as any).__decisionToggle = function(event, header) {
+        var card = header?.closest(".decision-tool-card");
+        if (!card) return;
+        var expanded = card.classList.contains("collapsed");
+        applyExpandedState(card, "tool-card", expanded);
+        header.setAttribute("aria-expanded", String(expanded));
+        var body = card.querySelector(".tool-use-body");
+        body?.setAttribute("aria-hidden", String(!expanded));
+        body?.toggleAttribute("inert", !expanded);
+        persistElementExpandState(card, "tool-card");
+        event?.preventDefault(); event?.stopPropagation();
+      };
+
+      var decisionDetailScope = {};
+      (window as any).__decisionLoadResult = function(button) {
+        var view = chatViewLease();
+        if (!view || button.disabled || button.getAttribute("aria-busy") === "true") return;
+        // Keep keyboard focus until the paint transaction captures its scroll anchor.
+        button.setAttribute("aria-busy", "true");
+        button.setAttribute("aria-disabled", "true");
+        button.textContent = "加载中…";
+        fetchActivityToolDetail(state.selectedId, button.getAttribute("data-tool-use-id"), decisionDetailScope)
+          .then(function() { if (isChatLeaseCurrent(view)) renderChat(true); })
+          .catch(function() {
+            if (isChatLeaseCurrent(view) && button.isConnected) {
+              button.removeAttribute("aria-busy"); button.removeAttribute("aria-disabled");
+              button.textContent = "加载失败，重试";
+            }
+          });
+      };
+
+      function renderToolPreview(block, result, includeInput = true) {
+        var input = includeInput ? block.preview || "" : "";
+        var output = result?.preview || "";
+        if (!input && !output) return "";
+        return '<div class="tool-preview' + (result?.is_error ? ' is-error' : '') + '">' +
+          (input ? '<div class="tool-preview-input">' + escapeHtml(input) + '</div>' : '') +
+          (output ? '<div class="tool-preview-output">' + escapeHtml(output) + '</div>' : '') + '</div>';
+      }
+
       function renderToolUseCard(block, toolResult, index, messageKey, options?: any) {
+        if (isDecisionToolCall(block) || toolResult?.semantic?.kind === "decision") return renderDecisionToolCard(block, toolResult);
         var opts = options || {};
         var toolName = block.name || "unknown";
         var toolId = block.id || "tool-" + toolName + "-" + (typeof index === "number" ? index : 0);
@@ -3862,6 +3984,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
             subtitleHtml +
             toggleHtml +
           '</div>' +
+          renderToolPreview(block, toolResult) +
           '<div class="tool-use-body" aria-hidden="' + (shouldExpand ? 'false' : 'true') + '">' +
             (description ? '<div class="tool-use-meta"><span class="tool-use-meta-label">工具：</span>' + escapeHtml(toolName) + '</div>' : '') +
             '<pre class="tool-use-content">' + escapeHtml(fullJson) + '</pre>' +

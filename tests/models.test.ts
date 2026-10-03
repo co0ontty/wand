@@ -476,3 +476,23 @@ test("failed model API discovery leaves configured candidates usable and never w
   assert.equal(custom?.availability, "candidate");
   assert.equal(storage.getRaw("claude-model-verifications-v1"), undefined);
 });
+
+test("Claude model discovery recognizes custom baseURL and token", async () => {
+  const storage = new FakeModelStorage();
+  let requestedBaseUrl: string | undefined;
+  const models = await refreshModels(refreshOptions({
+    storage,
+    apiKey: "test-auth-token",
+    baseUrl: "https://llm.example.com:8123",
+    modelsApi: {
+      list: () => onePage([
+        { id: "claude-opus-4-6", display_name: "Claude Opus 4.6" },
+      ]),
+    },
+  }));
+
+  const found = models.models.find((model) => model.id === "claude-opus-4-6");
+  assert.equal(found?.id, "claude-opus-4-6");
+  assert.equal(found?.source, "models-api");
+});
+

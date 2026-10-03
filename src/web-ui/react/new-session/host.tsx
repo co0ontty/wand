@@ -210,8 +210,10 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
         setDefaults(loaded);
         setForm({
           provider: loaded.config.defaultProvider,
-          employeeId: controller.initialEmployeeId || undefined,
-          kind: controller.initialEmployeeId ? "structured" : loaded.config.defaultSessionKind,
+          employeeId: controller.initialKind === "shell" ? undefined : controller.initialEmployeeId || undefined,
+          kind: controller.initialKind
+            ? controller.initialKind
+            : controller.initialEmployeeId ? "structured" : loaded.config.defaultSessionKind,
           mode: safeMode(
             loaded.config.defaultProvider,
             loaded.config.defaultMode,

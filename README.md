@@ -85,9 +85,23 @@ Common options:
 | `host` | `127.0.0.1` | Listen address; use `0.0.0.0` for remote access |
 | `port` | `8443` | Listen port |
 | `https` | `false` | Enable HTTPS with an auto-generated self-signed certificate |
-| `password` | random | Login password |
-| `language` | `""` | Preferred Claude response language |
+| `password` | Random on first `wand init`; `change-me` placeholder otherwise | Login password. Stored in SQLite, not `config.json` (`wand config:password` prints it). Running with the `change-me` placeholder logs a warning |
+| `language` | `""` | Preferred Claude response language (a preference, stored in SQLite) |
 | `publicOrigin` | unset | Public URL clients should use, e.g. `https://home.example.com:8443`. Required when TLS terminates in an L4 proxy |
+
+### Optional local decisions (experimental)
+
+On Apple Silicon, Wand can share one offline Laya-MLX worker across structured CLI sessions. It answers bounded `choice`/`score`/`noul` questions, not chat messages or execution/permission approvals. Install Python dependencies and a verified multilingual checkpoint separately, then configure their absolute paths:
+
+```bash
+wand decision:configure --python /path/to/venv/bin/python --model /path/to/laya-multilingual-mlx
+wand decision:skills                 # Install the managed wand-decision skill for all seven CLIs
+# Restart the existing Wand service, then start a new structured CLI conversation.
+```
+
+The skill's helper calls `wand decide --stdin` over the existing HTTP service. `/api/decisions/evaluate` and `/api/decisions/status` require authentication; runner capabilities authorize only inference, expire within6h, and are revoked when the run ends. No token is stored in the skill and no new public port is opened. Inputs that would be truncated are rejected. The worker unloads after5 minutes idle. `wand decision:configure --disable` disables it after a server restart. Standalone CLI/PTY sessions are not implicitly authorized.
+
+Web and Android show inference calls as standalone local-decision cards, outside activity groups. Details start collapsed; click the header to expand the input and result in place. Explicit expansion choices survive refreshes and late results. Skill reads and status checks remain ordinary tools. This feature does not automatically install the model or change task assignment. Local evaluation found substantial routing errors, including high-confidence mistakes; use it as an optional aid, not a reliable arbiter. See [AGENTS.md](AGENTS.md) for deployment and safety boundaries.
 
 ### System Service
 
@@ -138,8 +152,11 @@ git submodule update --init -- render-bin
 ```
 
 The full cross-platform test suite reads native source contracts, so initialize
-`android ios macos render` before running `npm test`. To preview removable compiler
-caches, run `npm run clean:build-cache`; add `-- --apply` to remove them.
+`android ios macos render` before running `npm test`. The brand-consistency test
+also reads generated iOS/macOS AppIcon PNGs, which on macOS come from
+`swift <platform>/scripts/generate-icons.swift` (run `npm run sync:brand-assets`
+first; CI does the same in `.github/workflows/ci.yml`). To preview removable
+compiler caches, run `npm run clean:build-cache`; add `-- --apply` to remove them.
 
 Runtime data is stored under `~/.wand/`: `config.json`, `wand.db`, and `sessions/`.
 
@@ -246,9 +263,23 @@ wand config:set port 9443
 | `host` | `127.0.0.1` | 监听地址，`0.0.0.0` 允许远程访问 |
 | `port` | `8443` | 监听端口 |
 | `https` | `false` | 启用 HTTPS（自签证书自动生成） |
-| `password` | (随机生成) | 登录密码 |
-| `language` | `""` | Claude 回复语言偏好 |
+| `password` | 首次 `wand init` 随机生成；否则为 `change-me` 占位 | 登录密码。存在 SQLite 而非 `config.json`（`wand config:password` 查看）。仍是 `change-me` 时会打警告 |
+| `language` | `""` | Claude 回复语言偏好（偏好项，存 SQLite） |
 | `publicOrigin` | 未设置 | 客户端应使用的公开访问地址，如 `https://home.example.com:8443`。TLS 在 L4 反代终止时必填 |
+
+### 可选本地决策（实验性）
+
+Apple Silicon 服务端可共享一份离线 Laya-MLX，为结构化 CLI 提供通用选择、评分和是非判断。它不是聊天模型，也不负责授权或自动派工。
+
+```bash
+wand decision:configure --python /绝对路径/venv/bin/python --model /绝对路径/多语言模型目录
+wand decision:skills                 # 安装七种CLI共用的 wand-decision 技能
+# 重启现有Wand服务，新建结构化CLI会话后使用该技能。
+```
+
+需先安装依赖和校验过的多语言模型，本命令不自动下载。Skill辅助命令通过已有HTTP服务调用，凭据只在本轮执行环境中，最长6小时、结束撤销；不写进Skill、不另开公网端口。单例worker空闲5分钟卸载，超长输入拒绝截断后判断。普通终端/在Wand外启动的CLI不自动获得凭据。停用：`wand decision:configure --disable`，然后重启服务。
+
+Web/Android 的推理调用独立显示为「本地决策」卡，不混入普通工具分组；详情默认收起，点击卡头原位展开输入与结果，显式展开/收起状态在刷新和结果迟到时保留。读取Skill和查询状态仍按普通工具处理。本机合成任务评测发现明显误判和高概率选错，目前只能作为可选参考；不得据此自动审批权限、执行危险操作或派工。部署细节见 [AGENTS.md](AGENTS.md)。
 
 ### 系统服务
 
@@ -299,14 +330,21 @@ wand/
 │   ├── cli.ts                    # CLI 入口
 │   ├── server.ts                 # Express 服务器 + WebSocket
 │   ├── process-manager.ts        # PTY 会话编排
+│   ├── structured-session-manager.ts  # 结构化会话编排（非 PTY）
 │   ├── claude-pty-bridge.ts      # PTY 输出解析为结构化对话
 │   ├── storage.ts                # SQLite 持久化
 │   ├── config.ts                 # 配置加载
-│   └── web-ui/                   # 前端 HTML/CSS/JS
+│   ├── provider-catalog.ts       # Provider 唯一真源（服务端与浏览器共用）
+│   └── web-ui/                   # 前端 HTML/CSS/JS（legacy TS + React 两层）
+├── browser-extension/            # MV3 密码库浏览器扩展
 ├── android/                      # Android 客户端（submodule）
 ├── ios/                          # iOS 客户端（submodule）
-└── macos/                        # macOS 客户端（submodule）
+├── macos/                        # macOS 客户端（submodule）
+├── render/                       # Render 源码：Rust 常驻进程，持有 PTY（submodule）
+└── render-bin/                   # Render 各平台产物 + manifest（submodule，只由 CI 写入）
 ```
+
+配置分三处：部署项（`config.json`）、用户偏好（SQLite `pref:*`，设置面板与 `wand config:set` 都写这里）、密钥（SQLite，不回写 JSON）。
 
 服务端开发只需检出固定版本的 Render 二进制。原生客户端和 Rust 源码都是独立子模块，修改哪个再检出哪个：
 
@@ -317,7 +355,7 @@ git submodule update --init -- render-bin
 # 按需：git submodule update --init -- android  # 或 ios、macos、render
 ```
 
-全量 `npm test` 包含跨端源码契约检查，运行前另检出 `android ios macos render`。
+全量 `npm test` 包含跨端源码契约检查，运行前另检出 `android ios macos render`。品牌一致性用例还会读 iOS/macOS 的 AppIcon PNG（生成物），在 macOS 上先跑 `npm run sync:brand-assets`，再用 `swift <平台>/scripts/generate-icons.swift` 生成（CI 的 `.github/workflows/ci.yml` 做同样的事）。
 `npm run clean:build-cache` 预览可清理的编译缓存，追加 `-- --apply` 才执行删除；
 保留分发包、Release Render 二进制、签名、依赖和会话数据。
 

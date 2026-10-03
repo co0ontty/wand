@@ -1,7 +1,8 @@
 import * as React from "react";
-import { DEFAULT_EMPLOYEE_TAG, SYSTEM_EMPLOYEE_TAG, isBuiltinSiliconEmployee, isDefaultSiliconEmployee, type SiliconEmployee } from "../../../ai-team-types.js";
+import { DEFAULT_EMPLOYEE_TAG, SYSTEM_EMPLOYEE_TAG, isBuiltinSiliconEmployee, isDefaultSiliconEmployee, parseSiliconEmployeeTagInput, siliconEmployeeTags, type SiliconEmployee } from "../../../ai-team-types.js";
 import { EmployeeMemory } from "./employee-memory.js";
 import { EmployeeKnowledge } from "./employee-knowledge.js";
+import { EmployeeTagsField } from "./employee-tags-field.js";
 import { WandButton, WandIcon } from "../ui";
 import { CandidatesListEditor } from "./candidate-editor.js";
 import { EmployeeAvatar, EmployeeAvatarPicker } from "./employee-avatar.js";
@@ -30,13 +31,19 @@ export function EmployeeCard({
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft] = React.useState<SiliconEmployee>(employee);
   const [saving, setSaving] = React.useState(false);
+  const [tagInput, setTagInput] = React.useState(() => siliconEmployeeTags(employee).join("，"));
+  const [saveStatus, setSaveStatus] = React.useState<"idle" | "saved" | "failed">("idle");
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     setDraft(employee);
+    setTagInput(siliconEmployeeTags(employee).join("，"));
   }, [employee]);
 
   const onToggle = () => {
+    if (saving) return;
+    setSaveStatus("idle");
+    setTagInput(siliconEmployeeTags(employee).join("，"));
     if (editing) {
       setDraft(employee);
       setError(null);
@@ -47,6 +54,7 @@ export function EmployeeCard({
   };
 
   const handleSave = async () => {
+    setSaveStatus("failed");
     const listErr = draft.agents.some((agent) => agent.kind !== "structured")
       ? "硅基员工只能使用结构化候选。"
       : candidateListError(draft.agents);
@@ -61,10 +69,13 @@ export function EmployeeCard({
     try {
       setSaving(true);
       setError(null);
-      await onSave(draft);
-      setEditing(false);
+      const tags = isBuiltinSiliconEmployee(employee)
+        ? siliconEmployeeTags(employee) : parseSiliconEmployeeTagInput(tagInput);
+      await onSave({ ...draft, tags });
+      setSaveStatus("saved");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      setSaveStatus("failed");
     } finally {
       setSaving(false);
     }
@@ -74,6 +85,7 @@ export function EmployeeCard({
   const isSystem = isBuiltinSiliconEmployee(employee);
   const isDefault = isDefaultSiliconEmployee(employee);
   const tag = isDefault ? DEFAULT_EMPLOYEE_TAG : SYSTEM_EMPLOYEE_TAG;
+  const tags = siliconEmployeeTags(employee);
   const cardCls = `wand-team-member wand-employee-card${isArchived ? " is-archived" : ""}${isSystem ? " is-system" : ""}`;
 
   return (
@@ -81,6 +93,7 @@ export function EmployeeCard({
       className={cardCls}
       data-open={editing || undefined}
       data-employee-id={employee.id}
+      onChange={() => { setSaveStatus("idle"); setError(null); }}
       onKeyDown={(event) => {
         if (event.key === "Escape" && !event.defaultPrevented && editing && !saving) {
           event.preventDefault();
@@ -101,6 +114,10 @@ export function EmployeeCard({
             {isSystem ? <em className="wand-employee-system-tag">{tag}</em> : null}
             {isArchived ? <em className="wand-employee-archived-tag">已归档</em> : null}
           </strong>
+          {!isSystem ? <span className="wand-employee-tags" aria-label={`员工标签：${tags.join("、") || "暂无"}`}>
+            {tags.length ? tags.map((label) => <em className="wand-employee-tag" key={label}>{label}</em>)
+              : <small>暂无标签</small>}
+          </span> : null}
           <small>{employee.duty || "还没写职责"}</small>
           <span className="wand-team-member-agent">
             {employee.agents[0]
@@ -119,8 +136,8 @@ export function EmployeeCard({
             <div className="wand-employee-system-note" role="note">
               <strong>{tag}</strong>
               <span>{isDefault
-                ? "选择 CLI 或未选择员工时使用这个默认角色；你选的工具、模型与权限保持不变。名字与基础设定固定，工作风格由短期记忆定期调整；下面的候选用于直接找这位员工或未配置工具的任务。"
-                : "Wand 内置员工：名字、职责与角色设定由服务端固定，不可修改、不可删除；Wand 自己的 AI 调用（Commit、标题、提示词优化）都按下面的候选链执行。"}</span>
+                ? "选择 CLI 或未选择员工时使用这个默认角色；你选的工具、模型与权限保持不变。内置标签、名字与基础设定固定，工作风格由短期记忆定期调整；下面的候选用于直接找这位员工或未配置工具的任务。"
+                : "Wand 内置员工：标签、名字、职责与角色设定由服务端固定，不可修改、不可删除；Wand 自己的 AI 调用（Commit、标题、提示词优化）都按下面的候选链执行。"}</span>
             </div>
           ) : (
             <>
@@ -138,6 +155,9 @@ export function EmployeeCard({
                   onChange={(e) => setDraft({ ...draft, name: e.target.value })}
                 />
               </div>
+
+              <EmployeeTagsField id={`employee-${employee.id}-tags`} value={tagInput}
+                disabled={saving} onChange={setTagInput} />
 
               <EmployeeAvatarPicker
                 avatar={draft.avatar}
@@ -196,23 +216,19 @@ export function EmployeeCard({
             providerOptions={providerOptions}
             disabled={saving}
             structuredOnly
-            onChange={(agents: WandTaskAgent[]) => setDraft({ ...draft, agents })}
+            onChange={(agents: WandTaskAgent[]) => { setSaveStatus("idle"); setDraft({ ...draft, agents }); }}
           />
-
-          {error ? (
-            <div className="wand-team-candidate-error" role="alert">
-              {error}
-            </div>
-          ) : null}
 
           <div className="wand-team-member-actions">
             <WandButton
               kind="primary"
               size="small"
+              className="wand-employee-save-submit"
+              aria-busy={saving || undefined}
               disabled={saving}
               onClick={handleSave}
             >
-              保存修改
+              {saving ? "保存中…" : saveStatus === "saved" ? "已保存" : saveStatus === "failed" ? "保存失败" : "保存修改"}
             </WandButton>
             <WandButton
               kind="ghost"
@@ -253,6 +269,7 @@ export function EmployeeCard({
               </WandButton>
             )}
           </div>
+          {error ? <div className="wand-team-candidate-error" role="alert">{error}</div> : null}
         </div>
       </div>
     </article>

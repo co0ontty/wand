@@ -73,19 +73,29 @@ test("emptyLayout yields a single empty pane", () => {
   assert.deepEqual((layout as Extract<LayoutNode, { type: "pane" }>).tabs, []);
 });
 
-test("list session labels skip titles that only repeat the directory or task name", () => {
+test("list session labels keep the session title even when it repeats the task name", () => {
+  // 最新会话的标题常常正好等于任务首行（任务名由同一条消息生成）；
+  // 之前这种「重复」会被退回「Pi 1」，把标题藏起来。
   assert.equal(
-    listSessionLabel({ id: "s1", provider: "pi", title: "wand", cwd: "/Users/me/wand" }, 0, ["wand"]),
-    "Pi 1",
+    listSessionLabel({ id: "s1", provider: "pi", title: "重构会话恢复流程" }, 0),
+    "重构会话恢复流程",
   );
   assert.equal(
-    listSessionLabel({ id: "s1", provider: "pi", title: "重构会话恢复流程" }, 0, ["wand", "重构会话恢复流程"]),
-    "Pi 1",
-  );
-  assert.equal(
-    listSessionLabel({ id: "s1", provider: "pi", title: "修侧栏" }, 0, ["wand", "重构会话恢复流程"]),
+    listSessionLabel({ id: "s1", provider: "pi", title: "修侧栏" }, 0),
     "修侧栏",
   );
+  // 旧版终端把 cwd 末段当标题，仍然不算会话标题。
+  assert.equal(
+    listSessionLabel({ id: "s1", provider: "pi", title: "wand", cwd: "/Users/me/wand" }, 0),
+    "Pi 1",
+  );
+});
+
+test("placeholder-only titles still fall back to 「CLI 序号」", () => {
+  assert.equal(listSessionLabel({ id: "s1", provider: "pi", title: "会话" }, 0), "Pi 1");
+  assert.equal(listSessionLabel({ id: "s1", provider: "pi", title: "pi" }, 0), "Pi 1");
+  assert.equal(listSessionLabel({ id: "s1", provider: "pi", title: "Pi 1" }, 0), "Pi 1");
+  assert.equal(listSessionLabel({ id: "s1", provider: "pi" }, 0), "Pi 1");
 });
 
 test("workspace session labels ignore PTY cwd fallback titles and infer CLI from command", () => {
@@ -103,8 +113,8 @@ test("workspace session labels ignore PTY cwd fallback titles and infer CLI from
     "修权限弹窗",
   );
   assert.equal(
-    listSessionLabel({ id: "s4", provider: "claude", title: "重构会话恢复流程" }, 0, ["重构会话恢复流程"]),
-    "Claude 1",
+    listSessionLabel({ id: "s4", provider: "claude", title: "重构会话恢复流程" }, 0),
+    "重构会话恢复流程",
   );
   assert.equal(
     withLiveSessionTitle({ id: "s5", title: "Claude 1" }, "收紧 resume 时间窗").title,
@@ -352,7 +362,7 @@ test("task session rows and work-window tabs render each CLI logo", () => {
   const processManager = readFileSync(new URL("../src/process-manager.ts", import.meta.url), "utf8");
   assert.match(panel, /SessionProviderMark session=\{session\}/);
   assert.match(tabs, /SessionProviderMark session=\{presentation\.session\}/);
-  assert.match(tabs, /listSessionLabel\(meta\.session, meta\.index, parentNames\)/);
+  assert.match(tabs, /listSessionLabel\(meta\.session, meta\.index\)/);
   assert.match(input, /index === 0 \|\| index === sequence\.length - 1/);
   assert.match(processManager, /consumePtyInputForTopic\(record\.ptyTopicDraft, input, view, shortcutKey\)/);
   assert.match(processManager, /provisionalSessionTopic\(prompt, blockedTitles\)/);
@@ -712,10 +722,10 @@ test("sidebar multi-select archives tasks and only deletes the terminals that we
   // 归档任务不会连带它的终端：只有显式选中的 session-1 / loose-1 会被删除。
   assert.deepEqual([...selection.taskIds], ["task-1"]);
   assert.deepEqual([...selection.sessionIds], ["session-1", "loose-1"]);
-  assert.equal(describeManagedAction(selection), "归档任务并删除终端");
+  assert.equal(describeManagedAction(selection), "归档任务并归档终端");
   assert.equal(describeManagedAction({ taskIds: ["task-1"], sessionIds: [] }), "归档任务");
-  assert.equal(describeManagedAction({ taskIds: [], sessionIds: ["session-1"] }), "删除终端");
-  assert.equal(describeManagedResult(selection), "归档 1 个任务、删除 2 个终端");
+  assert.equal(describeManagedAction({ taskIds: [], sessionIds: ["session-1"] }), "归档终端");
+  assert.equal(describeManagedResult(selection), "归档 1 个任务、归档 2 个终端");
   const pruned = pruneManagedSelection({
     taskIds: ["task-1", "gone"],
     sessionIds: ["session-1", "missing"],
@@ -928,16 +938,43 @@ test("批量处理失败：原因写进原位文案位，不再只活在 Toast �
   // 下一次尝试与退出选择模式都会清掉原因；dwell 定时器只收回确认行，不清原因（1.5s 读不完一句）。
   assert.match(panel, /setManageFeedback\("pending"\);\n\s*setManageFeedbackLabel\(""\);\n\s*setManageFeedbackReason\(""\);/);
   assert.match(panel, /setManageFeedback\("idle"\);\n\s*setManageFeedbackLabel\(""\);\n\s*setManageFeedbackReason\(""\);\n\s*\}, \[clearManageFeedbackTimer\]\)/);
-  assert.match(panel, /setConfirmingManageDelete\(false\);\n\s*setManageFeedback\("idle"\);\n\s*setManageFeedbackLabel\(""\);\n\s*\}, MOTION_DWELL_FAILED_MS\);/);
+  assert.match(panel, /setConfirmingManage\(false\);\n\s*setManageFeedback\("idle"\);\n\s*setManageFeedbackLabel\(""\);\n\s*\}, MOTION_DWELL_FAILED_MS\);/);
 });
 
-test("IM 联系人按员工身份汇总任务内与未分组会话", () => {
+test("侧栏只留「最近对话 + 任务与工作区」两段，活动条与联系人分组并进最近对话", () => {
   const panel = readFileSync(
     new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url),
     "utf8",
   );
-  const contacts = panel.slice(panel.indexOf("const contactSessions ="), panel.indexOf("const teamChatSessions ="));
-  assert.match(contacts, /group\.standaloneSessions\.map\(\(session\) => \(\{ group, session \}\)\)/);
-  assert.match(contacts, /group\.tasks\.flatMap\(\(task\) => task\.sessions\.map/);
-  assert.match(panel, /item\.session\.employeeId === emp\.id/);
+  // 归属分组只有一个真源（sidebar-recent.ts），面板只做过滤与转发。
+  assert.match(panel, /collectRecentEntries\(sourceGroups\)/);
+  assert.match(panel, /<SidebarRecentSection\b[\s\S]*?entries=\{visibleRecentEntries\}/);
+  assert.match(panel, /filterRecentEntries\(recentEntries, \{[\s\S]*?activeOnly: displayMode === "active" && directoryId === undefined,/);
+  // 第二段仍是目录 → 任务 → 会话树，带自己的表头。
+  assert.match(panel, /<h3 className="sidebar-section-title">任务与工作区<\/h3>/);
+  // 重复的入口不再各自渲染一份。
+  assert.doesNotMatch(panel, /sidebar-activity-rail/);
+  assert.doesNotMatch(panel, /label="硅基员工"/);
+  assert.doesNotMatch(panel, /label="CLI 对话"/);
+});
+
+test("最近对话：头像与「+」都在一级行，二级行只说工具", () => {
+  const section = readFileSync(
+    new URL("../src/web-ui/react/workspaces/sidebar-recent-section.tsx", import.meta.url),
+    "utf8",
+  );
+  // 一级行承载身份（员工头像/群聊猫/终端标记）与快捷新增。
+  assert.match(section, /avatarNode=\{<GroupMark group=\{group\} employees=\{employees\}\/>\}/);
+  assert.match(section, /action=\{<GroupCreateButton group=\{group\} onStartConversation=\{onStartConversation\}\/>\}/);
+  // 二级会话行只标工具，不再重复员工头像。
+  assert.match(section, /avatarNode=\{group\.showsHeader\n\s*\? <SecondaryRowMark entry=\{entry\} group=\{group\}\/>\n\s*: <GroupMark group=\{group\} employees=\{employees\}\/>\}/);
+  assert.match(section, /function SecondaryRowMark\(\{[\s\S]*?SessionProviderMark session=\{session\}/);
+  assert.doesNotMatch(section, /<EmployeeAvatar[\s\S]{0,120}entry\.session/);
+  // 空白终端「+」直接带上形态，员工「+」带上员工 id。
+  assert.match(section, /newSessionController\.open\(\{ initialKind: "shell" \}\)/);
+  assert.match(section, /newSessionController\.open\(employeeId \? \{ initialEmployeeId: employeeId \} : \{\}\)/);
+  assert.match(section, /onClick=\{\(\) => onStartConversation\(group\.employeeId \?\? undefined\)\}/);
+  // 侧栏一键新建员工对话：段头「+」原位展开联系人列表。
+  assert.match(section, /className=\{classNames\("sidebar-section-add"/);
+  assert.match(section, /className=\{classNames\("sidebar-contact-picker", pickerOpen && "is-open"\)\} inert=\{!pickerOpen\}/);
 });

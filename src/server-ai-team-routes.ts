@@ -16,6 +16,7 @@ import {
   type AiTeam,
   type AiTeamMember,
 } from "./ai-team-types.js";
+import { requireTeamEmployee, type AiTeamEmployeeSource } from "./ai-team-employee-binding.js";
 import { asyncRoute } from "./express-async.js";
 import { getErrorMessage } from "./error-utils.js";
 import { defaultMilestoneIdForWrite, scopedMilestoneId } from "./milestone-scope.js";
@@ -54,20 +55,30 @@ function parseAvatar(value: unknown, name: string): string {
   return avatar;
 }
 
-function parseMembers(value: unknown): AiTeamMember[] {
+function parseMembers(value: unknown, existing: AiTeam | null, source?: AiTeamEmployeeSource): AiTeamMember[] {
   if (!Array.isArray(value)) throw new Error("成员列表必须是数组。");
   if (value.length < AI_TEAM_MIN_MEMBERS || value.length > AI_TEAM_MAX_MEMBERS) {
     throw new Error(`团队需要 ${AI_TEAM_MIN_MEMBERS}–${AI_TEAM_MAX_MEMBERS} 名成员。`);
   }
   const names = new Set<string>();
   const ids = new Set<string>();
+  const employees = new Set<string>();
   const members = value.map((raw, index): AiTeamMember => {
     const body = bodyObject(raw);
-    const name = boundedText(body.name, `第 ${index + 1} 位成员的名字`, 1, 40);
+    const rawId = text(body.id);
+    const prior = existing?.members.find((member) => member.id === rawId);
+    if (body.employeeId !== undefined && body.employeeId !== null && typeof body.employeeId !== "string") {
+      throw new Error("员工 ID 必须是文字。");
+    }
+    const employeeId = body.employeeId === undefined ? prior?.employeeId : text(body.employeeId) || undefined;
+    if (employeeId && !source) throw new Error("员工绑定需要真实员工来源。");
+    if (employeeId && employees.has(employeeId)) throw new Error("同一员工不能重复加入同一团队。");
+    if (employeeId) employees.add(employeeId);
+    const employee = employeeId ? requireTeamEmployee(source!, employeeId) : null;
+    const name = employee?.name ?? boundedText(body.name, `第 ${index + 1} 位成员的名字`, 1, 40);
     const key = name.toLowerCase();
     if (names.has(key)) throw new Error(`成员名字「${name}」重复。`);
     names.add(key);
-    const rawId = text(body.id);
     const id = /^m_[A-Za-z0-9]{1,32}$/.test(rawId) && !ids.has(rawId)
       ? rawId
       : `m_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
@@ -76,7 +87,9 @@ function parseMembers(value: unknown): AiTeamMember[] {
     if (duty.length > 2000) throw new Error(`成员「${name}」的职责不能超过 2000 个字符。`);
     let agents: WandTaskAgent[];
     try {
-      if (Array.isArray(body.agents)) {
+      if (employee) {
+        agents = employee.agents.map((candidate) => ({ ...candidate }));
+      } else if (Array.isArray(body.agents)) {
         if (body.agents.length === 0) throw new Error("至少需要一个执行候选。");
         if (body.agents.length > AI_TEAM_MAX_CANDIDATES) throw new Error(`最多 ${AI_TEAM_MAX_CANDIDATES} 个执行候选。`);
         agents = body.agents.map((rawAgent): WandTaskAgent => {
@@ -98,10 +111,11 @@ function parseMembers(value: unknown): AiTeamMember[] {
     if (seenKeys.size !== agents.length) throw new Error(`成员「${name}」的执行候选重复。`);
     const member: AiTeamMember = {
       id, name, duty, agents,
+      ...(employeeId ? { employeeId } : {}),
       // 服务端强制兼容字段 = 首选候选，不信任客户端传来的 agent。
       agent: agents[0]!,
       isLeader: body.isLeader === true,
-      avatar: parseAvatar(body.avatar, name),
+      avatar: employee?.avatar ?? parseAvatar(body.avatar, name),
     };
     if (isTeamMemberRole(body.role)) member.role = body.role;
     return member;
@@ -110,7 +124,7 @@ function parseMembers(value: unknown): AiTeamMember[] {
   return members;
 }
 
-export function parseAiTeamInput(value: unknown, existing: AiTeam | null, now: string): AiTeam {
+export function parseAiTeamInput(value: unknown, existing: AiTeam | null, now: string, source?: AiTeamEmployeeSource): AiTeam {
   const body = bodyObject(value);
   const maxSteps = body.maxSteps === undefined ? existing?.maxSteps ?? AI_TEAM_DEFAULT_MAX_STEPS : Number(body.maxSteps);
   if (!Number.isInteger(maxSteps) || maxSteps < AI_TEAM_MIN_STEPS || maxSteps > AI_TEAM_MAX_STEPS) {
@@ -125,7 +139,7 @@ export function parseAiTeamInput(value: unknown, existing: AiTeam | null, now: s
     name: boundedText(body.name, "团队名", 1, 60),
     description,
     instructions,
-    members: parseMembers(body.members),
+    members: parseMembers(body.members, existing, source),
     requirePlanApproval: typeof body.requirePlanApproval === "boolean"
       ? body.requirePlanApproval
       : existing?.requirePlanApproval ?? true,
@@ -155,7 +169,7 @@ export function registerAiTeamRoutes(app: Express, deps: {
 
   app.post("/api/ai-teams", (req, res) => {
     try {
-      const team = parseAiTeamInput(req.body, null, new Date().toISOString());
+      const team = parseAiTeamInput(req.body, null, new Date().toISOString(), storage);
       storage.saveAiTeam(team);
       res.status(201).json(team);
     } catch (error) {
@@ -167,7 +181,7 @@ export function registerAiTeamRoutes(app: Express, deps: {
     try {
       const existing = storage.getAiTeam(req.params.id);
       if (!existing) throw new Error("团队不存在。");
-      const team = parseAiTeamInput(req.body, existing, new Date().toISOString());
+      const team = parseAiTeamInput(req.body, existing, new Date().toISOString(), storage);
       storage.saveAiTeam(team);
       notifyTeam(team.id);
       res.json(team);

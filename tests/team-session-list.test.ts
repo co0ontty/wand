@@ -16,7 +16,6 @@ import { StructuredSessionManager } from "../src/structured-session-manager.js";
 import { WandStorage } from "../src/storage.js";
 import { sidebarSessionLabel } from "../src/web-ui/react/workspaces/session-order.js";
 import {
-  collectActiveSessions,
   filterActiveGroups,
   isSessionActive,
   isSessionAttention,
@@ -338,9 +337,9 @@ test("team-dispatched sessions fold away from the task's own sessions", () => {
 });
 
 test("team rows show the step title, not the generated CLI signature", () => {
-  assert.equal(sidebarSessionLabel(memberSession, 1, ["Repo"]), "补安装章节并核对命令");
-  assert.equal(sidebarSessionLabel(chatSession, 0, ["Repo"]), "补安装说明任务处理群");
-  assert.equal(sidebarSessionLabel(humanSession, 0, ["Repo"]), "帮我看下这个报错");
+  assert.equal(sidebarSessionLabel(memberSession, 1), "补安装章节并核对命令");
+  assert.equal(sidebarSessionLabel(chatSession, 0), "补安装说明任务处理群");
+  assert.equal(sidebarSessionLabel(humanSession, 0), "帮我看下这个报错");
   const long = teamStepLabel({ ...memberSession.teamStep!, title: "把侧栏里的团队会话默认折叠起来，点击以后才展开显示具体的每一条" });
   assert.ok(Array.from(long).length <= 26, `短标题太长：${long}`);
   assert.ok(long.endsWith("…"));
@@ -372,9 +371,3 @@ test("active mode drops idle sessions, then idle tasks and directories", () => {
   assert.deepEqual(kept[0]?.tasks[0]?.sessions.map((session) => session.id), ["step-session-2"]);
 });
 
-test("the running rail lists active sessions and puts the ones waiting for the user first", () => {
-  const waiting = { ...memberSession, id: "step-wait", status: "waiting_input", inFlight: false };
-  const entries = collectActiveSessions([group([finishedMemberSession, humanSession, waiting, chatSession])]);
-  assert.deepEqual(entries.map((entry) => entry.session.id), ["step-wait", "human-1"]);
-  assert.equal(entries[0]?.taskName, "补安装说明");
-});

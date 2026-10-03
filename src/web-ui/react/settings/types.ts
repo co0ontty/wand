@@ -24,9 +24,10 @@ export type SettingsTab =
   | "display";
 
 type SettingsAccess = "admin" | "read-only";
-type SettingsProvider = "claude" | "codex" | "opencode";
+/** Provider 的唯一真源：浏览器层沿用 provider-identity（不拉服务端 types 进 bundle）。 */
+type SettingsProvider = import("../../provider-identity").ProviderId;
 /** Providers that have per-session default model preferences. */
-type SettingsModelProvider = SettingsProvider | "grok" | "qoder" | "pi" | "gemini";
+type SettingsModelProvider = SettingsProvider;
 /** CLI 工具选择：和 `WandConfig.defaultProvider` 一样开放全部 provider。 */
 export type SettingsSessionProvider = SettingsModelProvider;
 /** 新会话默认思考深度。旧四档，或某个 CLI 报出的 `provider:level`。 */
@@ -36,7 +37,7 @@ export type SettingsThinkingEffort =
   | "deep"
   | "max"
   | `${SettingsSessionProvider}:${string}`;
-type SettingsCliProvider = SettingsProvider | "grok" | "qoder" | "pi" | "gemini";
+type SettingsCliProvider = SettingsProvider;
 type SettingsUpdateChannel = "stable" | "beta";
 type SettingsAutoUpdateTarget = "web" | "apk" | "dmg" | "cli";
 export type SettingsDistributionKind = "apk" | "dmg" | "ipa";

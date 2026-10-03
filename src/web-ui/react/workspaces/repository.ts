@@ -301,6 +301,29 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
       throw new Error(`有 ${body.failed.length} 个终端无法关闭。`);
     }
   }
+
+  /** 归档 / 恢复单个会话（软处理，不杀终端）。 */
+  async archiveSession(sessionId: string, archived: boolean): Promise<void> {
+    await parseJsonResponse(await this.fetchImpl(
+      `/api/sessions/${encodeURIComponent(sessionId)}/${archived ? "archive" : "unarchive"}`,
+      { method: "POST", credentials: "same-origin" },
+    ));
+  }
+
+  /** 批量归档 / 恢复会话；部分失败时抛错，调用方按失败数提示。 */
+  async batchArchiveSessions(sessionIds: readonly string[], archived: boolean): Promise<void> {
+    const ids = [...new Set(sessionIds.filter((id) => typeof id === "string" && id.trim().length > 0))];
+    if (ids.length === 0) return;
+    const body = await parseJsonResponse<{ failed?: string[] }>(await this.fetchImpl("/api/sessions/batch-archive", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ sessionIds: ids, archived }),
+    }));
+    if (Array.isArray(body.failed) && body.failed.length > 0) {
+      throw new Error(`有 ${body.failed.length} 个会话未能归档。`);
+    }
+  }
 }
 
 /** 加载新建项目默认值：默认 provider + 默认 cwd + 最近目录。镜像 new-session 的 load()。 */

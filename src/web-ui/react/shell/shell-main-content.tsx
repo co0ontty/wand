@@ -165,7 +165,7 @@ function ShellBlankChat({ className, queueRef, workspaceTask, workspaceProject }
 
   return (
     <div id="blank-chat" className={className}>
-      <HomeAttention variant="home"/>
+      <HomeAttention/>
       {workspaceTask ? (
         // 任务上下文已有这张卡，加团队只会冗余建卡，所以这里不传 teams/onStartTeam（§5.1）。
         <WorkspaceWelcomeChooser

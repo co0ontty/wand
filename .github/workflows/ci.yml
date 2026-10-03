@@ -1,0 +1,62 @@
+name: CI
+
+# 类型检查 + 全量单测的质量门。
+#
+# 为什么固定跑在 macOS runner：`npm test` 是全量的跨端契约套件，
+# 其中「生成品牌资源与 Android launcher 同步」用例要读 iOS/macOS 的 AppIcon PNG，
+# 而这些图标由 `generate-icons.swift`（CoreGraphics，仅 macOS）生成。Linux runner
+# 上该用例必然失败，只有 macOS 才能跑完整套件。
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # 跨端源码契约用例会读 android/ios/macos 源码，render-bin 提供固定
+          # Render 产物（render-e2e 用例）。render（Rust 源码）测试时不需要，但它
+          # 与产物指针独立，一起检出成本很低。
+          submodules: recursive
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install dependencies
+        run: npm ci
+
+      # 内嵌品牌资产（browser-extension 图标、wand-logo、生成的 swift 脚本）是
+      # 构建产物，未入库；干净检出必须先同步，否则品牌一致性用例直接失败。
+      - name: Sync generated brand assets
+        run: npm run sync:brand-assets
+
+      # AppIcon PNG 同为生成物（.gitignore 忽略），由各平台的 generate-icons.swift
+      # 产出，品牌用例会校验其尺寸与不透明度。
+      - name: Generate native app icons
+        run: |
+          set -euo pipefail
+          swift ios/scripts/generate-icons.swift ios/Wand/Assets.xcassets/AppIcon.appiconset
+          swift macos/scripts/generate-icons.swift macos/Wand/Assets.xcassets/AppIcon.appiconset
+
+      # 三套 tsconfig 的 tsc + 前端 bundle + bundle 预算门禁。
+      - name: Typecheck and bundle
+        run: npm run check
+
+      # 真实的 Chrome CDP 用例；macOS runner 预装 Google Chrome。
+      - name: Unit and contract tests
+        run: npm test

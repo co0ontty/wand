@@ -1,5 +1,5 @@
 import * as React from "react";
-import { isBuiltinSiliconEmployee, type SiliconEmployee } from "../../../ai-team-types.js";
+import { isBuiltinSiliconEmployee, siliconEmployeeTags, type SiliconEmployee } from "../../../ai-team-types.js";
 import { WandButton, WandIcon, WandSearchField } from "../ui";
 import { EmployeeCard } from "./employee-card.js";
 import { EmployeeCreateForm } from "./employee-create-form.js";
@@ -30,7 +30,8 @@ export function EmployeeListPage({
       return (
         emp.name.toLowerCase().includes(q) ||
         emp.duty.toLowerCase().includes(q) ||
-        emp.prompt.toLowerCase().includes(q)
+        emp.prompt.toLowerCase().includes(q) ||
+        siliconEmployeeTags(emp).some((tag) => tag.toLowerCase().includes(q))
       );
     });
   }, [employees, showArchived, query]);
@@ -40,6 +41,7 @@ export function EmployeeListPage({
     duty: string;
     prompt: string;
     avatar: string;
+    tags: string[];
     agents: WandTaskAgent[];
   }) => {
     await siliconEmployeesRepository.create(draft);
@@ -58,6 +60,7 @@ export function EmployeeListPage({
           duty: patch.duty ?? current.duty,
           prompt: patch.prompt ?? current.prompt,
           avatar: patch.avatar ?? current.avatar,
+          tags: patch.tags ?? current.tags ?? [],
           agents: patch.agents ?? current.agents,
         });
     reload();
@@ -110,8 +113,8 @@ export function EmployeeListPage({
         <div className="wand-teams-toolbar-search">
           <WandSearchField
             value={query}
-            label="搜索员工名字、职责或 Prompt"
-            placeholder="搜索员工名字、职责或 Prompt…"
+            label="搜索员工名字、标签、职责或 Prompt"
+            placeholder="搜索员工名字、标签、职责或 Prompt…"
             onValueChange={setQuery}
           />
         </div>

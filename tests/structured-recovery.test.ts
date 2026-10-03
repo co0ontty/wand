@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
+import express from "express";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { ProcessManager } from "../src/process-manager.js";
+import { SessionRegistry } from "../src/session-registry.js";
+import { registerSessionRoutes } from "../src/server-session-routes.js";
+import type { StructuredRunnerAdapter, StructuredRunnerResult } from "../src/structured-runner.js";
 
 import { defaultConfig } from "../src/config.js";
 import { WandStorage } from "../src/storage.js";
@@ -10,6 +17,8 @@ import { structuredRunId, type StructuredExecHost, type StructuredExitEvent, typ
 import { StructuredSessionManager } from "../src/structured-session-manager.js";
 
 interface ScriptedStructuredHost extends StructuredExecHost {
+  interrupts: string[];
+  forgotten: string[];
   /** 模拟 attach 之后 daemon 继续吐出的 stdout。 */
   push(runId: string, data: string): void;
   /** 模拟运行进程退出。 */
@@ -20,7 +29,11 @@ function fakeHost(runs: StructuredRunState[]): ScriptedStructuredHost {
   const streamHandlers = new Map<string, Array<(event: StructuredStreamEvent) => void>>();
   const exitHandlers = new Map<string, Array<(event: StructuredExitEvent) => void>>();
   let nextSeq = 100;
+  const interrupts: string[] = [];
+  const forgotten: string[] = [];
   return {
+    interrupts,
+    forgotten,
     persistent: true,
     async spawnStructured() { throw new Error("not used"); },
     async attachRun(runId) { return runs.find((run) => run.runId === runId) ?? null; },
@@ -31,7 +44,7 @@ function fakeHost(runs: StructuredRunState[]): ScriptedStructuredHost {
         runId: run.runId,
         incarnationId: run.incarnationId,
         pid: run.pid,
-        interrupt() {},
+        interrupt() { interrupts.push(runId); },
         onStream(cb) {
           const list = streamHandlers.get(runId) ?? [];
           list.push(cb);
@@ -47,7 +60,7 @@ function fakeHost(runs: StructuredRunState[]): ScriptedStructuredHost {
       };
     },
     async listRuns() { return runs; },
-    forgetRun() {},
+    forgetRun(runId) { forgotten.push(runId); },
     push(runId, data) {
       const seq = nextSeq += 1;
       for (const cb of streamHandlers.get(runId) ?? []) cb({ stream: "stdout", data, seq });
@@ -57,6 +70,191 @@ function fakeHost(runs: StructuredRunState[]): ScriptedStructuredHost {
     },
   };
 }
+
+function recoveredInputHarness(t: TestContext) {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-recovered-input-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const sessionId = "recovered-input";
+  storage.saveSession(piInterruptedSession(root, sessionId));
+  const run = { ...truncatedPiRun(sessionId, 0), status: "running" as const, exitCode: null };
+  const host = fakeHost([run]);
+  const starts: string[] = [];
+  const releases: Array<() => void> = [];
+  const runner: StructuredRunnerAdapter = {
+    start({ prompt }) {
+      starts.push(prompt);
+      return {
+        args: [], pid: 45, spawnedAt: new Date().toISOString(), interrupt() {},
+        completion: new Promise<StructuredRunnerResult>((resolve) => {
+          releases.push(() => resolve({
+            state: { blocks: [], result: "done", sessionId: "native-pi" },
+            exitCode: 0, signal: null, stderr: "", primaryError: null,
+          }));
+        }),
+      };
+    },
+  };
+  const manager = new StructuredSessionManager(storage, { ...defaultConfig(), defaultCwd: root }, null, { pi: runner }, host);
+  t.after(() => {
+    manager.dispose();
+    for (const release of releases) release();
+    storage.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+  return { manager, host, starts, releases, sessionId, runId: run.runId, storage, root };
+}
+
+const nextLoop = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+
+test("recovered Pi input queues until the original run exits and then drains once in order", async (t) => {
+  const { manager, host, starts, releases, sessionId, runId } = recoveredInputHarness(t);
+  await manager.recoverDetachedRuns();
+  const requestId = manager.get(sessionId)?.structuredState?.activeRequestId;
+  await manager.sendMessage(sessionId, "second");
+  await manager.sendMessage(sessionId, "third");
+  assert.deepEqual(starts, [], "queue submission must not start another CLI");
+  assert.deepEqual(host.interrupts, []);
+  assert.deepEqual(manager.get(sessionId)?.queuedMessages, ["second", "third"]);
+  assert.equal(manager.get(sessionId)?.structuredState?.activeRequestId, requestId);
+  assert.equal(manager.get(sessionId)?.messages?.filter((turn) => turn.role === "user").length, 1);
+  host.finish(runId, 0);
+  await nextLoop();
+  assert.deepEqual(starts, ["second"]);
+  assert.deepEqual(manager.get(sessionId)?.queuedMessages, ["third"]);
+  releases[0]();
+  await nextLoop();
+  await nextLoop();
+  assert.deepEqual(starts, ["second", "third"]);
+});
+
+test("inputs remain queued before inventory and while daemon adoption is pending", async (t) => {
+  const { manager, host, starts, sessionId } = recoveredInputHarness(t);
+  await manager.sendMessage(sessionId, "before recovery");
+  assert.deepEqual(starts, []);
+  await assert.rejects(manager.promoteQueuedMessage(sessionId, 0), /正在恢复/);
+  assert.deepEqual(manager.get(sessionId)?.queuedMessages, ["before recovery"]);
+  assert.throws(() => manager.stop(sessionId), /正在恢复/);
+  assert.throws(() => manager.delete(sessionId), /正在恢复/);
+  const adopt = host.adoptRun.bind(host);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  host.adoptRun = async (id) => { await gate; return adopt(id); };
+  const recovery = manager.recoverDetachedRuns();
+  await nextLoop();
+  await manager.sendMessage(sessionId, "during adoption");
+  assert.deepEqual(starts, []);
+  release();
+  await recovery;
+  assert.deepEqual(manager.get(sessionId)?.queuedMessages, ["before recovery", "during adoption"]);
+});
+
+test("explicit promotion interrupts an adopted run, preserves the remainder and sends exactly once", async (t) => {
+  const { manager, host, starts, sessionId, runId } = recoveredInputHarness(t);
+  await manager.recoverDetachedRuns();
+  await manager.sendMessage(sessionId, "second");
+  await manager.sendMessage(sessionId, "third");
+  await manager.promoteQueuedMessage(sessionId, 1, "third");
+  assert.deepEqual(host.interrupts, [runId]);
+  assert.deepEqual(starts, []);
+  host.finish(runId, null, 15);
+  await nextLoop();
+  assert.deepEqual(starts, ["third"]);
+  assert.deepEqual(manager.get(sessionId)?.queuedMessages, ["second"]);
+  assert.equal(manager.get(sessionId)?.structuredState?.lastError, null);
+});
+
+test("stopping an adopted run signals it and a late old exit cannot forget or overwrite its replacement", async (t) => {
+  const { manager, host, starts, sessionId, runId } = recoveredInputHarness(t);
+  await manager.recoverDetachedRuns();
+  manager.stop(sessionId);
+  assert.deepEqual(host.interrupts, [runId]);
+  const replacement = manager.sendMessage(sessionId, "replacement");
+  const requestId = manager.get(sessionId)?.structuredState?.activeRequestId;
+  const forgottenBeforeOldExit = [...host.forgotten];
+  host.finish(runId, null, 15);
+  assert.deepEqual(host.forgotten, forgottenBeforeOldExit);
+  assert.equal(manager.get(sessionId)?.structuredState?.activeRequestId, requestId);
+  await manager.sendMessage(sessionId, "wait for replacement");
+  assert.deepEqual(starts, ["replacement"]);
+  assert.deepEqual(manager.get(sessionId)?.queuedMessages, ["wait for replacement"]);
+  manager.stop(sessionId);
+  // The harness settles the replacement only after disposing the manager.
+  void replacement;
+});
+
+test("stop during adoption interrupts the late handle without reviving the stopped session", async (t) => {
+  const { manager, host, sessionId, runId } = recoveredInputHarness(t);
+  const adopt = host.adoptRun.bind(host);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  host.adoptRun = async (id) => { await gate; return adopt(id); };
+  const recovery = manager.recoverDetachedRuns();
+  await nextLoop();
+  manager.stop(sessionId);
+  release();
+  await recovery;
+  assert.deepEqual(host.interrupts, [runId]);
+  assert.equal(manager.get(sessionId)?.status, "idle");
+  assert.equal(manager.get(sessionId)?.structuredState?.inFlight, false);
+});
+
+test("server shutdown during adoption leaves the persistent CLI running", async (t) => {
+  const { manager, host } = recoveredInputHarness(t);
+  const adopt = host.adoptRun.bind(host);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  host.adoptRun = async (id) => { await gate; return adopt(id); };
+  const recovery = manager.recoverDetachedRuns();
+  await nextLoop();
+  manager.dispose();
+  release();
+  await recovery;
+  assert.deepEqual(host.interrupts, []);
+  assert.deepEqual(host.forgotten, []);
+});
+
+test("Android acknowledgement on a recovered session returns its queue without starting another runner", async (t) => {
+  const { manager, starts, sessionId, storage, root } = recoveredInputHarness(t);
+  await manager.recoverDetachedRuns();
+  const config = { ...defaultConfig(), defaultCwd: root, startupCommands: [] };
+  const processes = new ProcessManager(config, storage, root);
+  const sessions = new SessionRegistry(processes, manager, storage);
+  assert.equal(sessions.ownerOf(sessionId), "structured");
+  const app = express();
+  app.use(express.json());
+  registerSessionRoutes(app, processes, manager, storage, config.defaultMode, config, sessions);
+  const server = createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/sessions/${sessionId}/input`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ input: "Android queued input", respondImmediately: true }),
+      signal: AbortSignal.timeout(2000),
+    });
+    assert.equal(response.status, 202);
+    const accepted = await response.json() as { queuedMessages: string[]; structuredState: { inFlight: boolean } };
+    assert.deepEqual(accepted.queuedMessages, ["Android queued input"]);
+    assert.equal(accepted.structuredState.inFlight, true);
+    assert.deepEqual(starts, []);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    processes.dispose();
+  }
+});
+
+test("failed adoption retains daemon ownership intent and queued input for retry", async (t) => {
+  const { manager, host, starts, sessionId } = recoveredInputHarness(t);
+  const adopt = host.adoptRun.bind(host);
+  host.adoptRun = async () => { throw new Error("temporary attach failure"); };
+  await manager.recoverDetachedRuns();
+  assert.deepEqual(host.forgotten, []);
+  await manager.sendMessage(sessionId, "wait for recovery retry");
+  assert.deepEqual(starts, []);
+  host.adoptRun = adopt;
+  await manager.recoverDetachedRuns();
+  assert.deepEqual(manager.get(sessionId)?.queuedMessages, ["wait for recovery retry"]);
+  assert.equal(manager.get(sessionId)?.structuredState?.inFlight, true);
+});
 
 test("recoverDetachedRuns preserves the running marker and reattaches the daemon run", async (t) => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-recover-"));

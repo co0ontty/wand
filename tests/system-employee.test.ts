@@ -361,7 +361,7 @@ test("加载配置时幂等创建内置员工，并沿用用户已有的系统 A
   }
 });
 
-test("Tag 常量固定为系统运维", () => {
-  assert.equal(SYSTEM_EMPLOYEE_TAG, "系统运维");
+test("Tag 常量固定为系统用户", () => {
+  assert.equal(SYSTEM_EMPLOYEE_TAG, "系统用户");
   assert.equal(defaultConfig().defaultProvider, "claude");
 });

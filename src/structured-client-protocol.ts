@@ -1,7 +1,10 @@
+import { withToolPreview } from "./tool-preview.js";
 import { asRecord, isStructuredImagePart } from "./structured-content.js";
+import { isDecisionToolCall, decisionCardSummary } from "./decision-tool.js";
 import type {
   ContentBlock,
   ConversationTurn,
+  DecisionCardSummary,
   StructuredQuestion,
   StructuredTaskItem,
   SubagentMeta,
@@ -256,9 +259,41 @@ function rewriteInlineToolImageUrls(messages: ConversationTurn[], sessionId: str
  * 传 sessionId 时额外把内联图片改写成取图 URL（见 rewriteInlineToolImageUrls）。
  */
 export function enrichStructuredMessages(messages: ConversationTurn[], sessionId?: string): ConversationTurn[] {
+  // 决策卡缩略投影：入参与结果可能分属不同 turn（流式/分页），先按调用 id 配对，
+  // 让两个块拿到同一份摘要；只有窗口里存在的那一侧才参与计算。
+  const decisionCalls = new Map<string, { use?: ToolUseBlock; result?: ToolResultBlock }>();
+  for (const turn of messages) {
+    for (const block of turn.content) {
+      if (block.type === "tool_use" && isDecisionToolCall(block)) {
+        const call = decisionCalls.get(block.id) ?? {};
+        call.use = block;
+        decisionCalls.set(block.id, call);
+      } else if (block.type === "tool_result") {
+        const call = decisionCalls.get(block.tool_use_id);
+        if (call) call.result = block;
+      }
+    }
+  }
+  const decisionIds = new Set(decisionCalls.keys());
+  const decisionSummaries = new Map([...decisionCalls].map(([id, call]) =>
+    [id, decisionCardSummary(call.use?.input, call.result)] as const));
+  const decisionSemantic = (id: string): { kind: "decision"; summary?: DecisionCardSummary } => {
+    const summary = decisionSummaries.get(id);
+    return summary ? { kind: "decision", summary } : { kind: "decision" };
+  };
   const enriched = stampDerivedSubagents(messages).map((turn) => ({
     ...turn,
-    content: turn.content.map((block) => {
+    content: turn.content.map(withToolPreview).map((block) => {
+      if (block.type === "tool_use" && decisionIds.has(block.id)) {
+        return { ...block, semantic: decisionSemantic(block.id), activity: undefined };
+      }
+      if (block.type === "tool_result" && decisionIds.has(block.tool_use_id)) {
+        return { ...block, semantic: decisionSemantic(block.tool_use_id) };
+      }
+      if (block.type === "tool_result" && block.semantic?.kind === "decision") {
+        const summary = decisionSummaries.get(block.tool_use_id) ?? block.semantic.summary;
+        return { ...block, semantic: { kind: "decision" as const, ...(summary ? { summary } : {}) } };
+      }
       if (block.type !== "tool_use" || block.name !== "AskUserQuestion") return block;
       const questions = questionsFromInput(block.input);
       return questions.length > 0

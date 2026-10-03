@@ -10,6 +10,7 @@ import { asyncRoute } from "./express-async.js";
 import { sendRouteError, text } from "./server-request.js";
 import type { ModelCatalogService } from "./models.js";
 import type { PackageUpdateInfo, UpdateChannel } from "./npm-update-utils.js";
+import { isSessionProvider } from "./session-provider.js";
 import {
   checkProviderCliUpdates,
   updateProviderClis,
@@ -514,7 +515,7 @@ export function registerAdminUpdateRoutes(app: Express, deps: AdminUpdateRoutesD
       return;
     }
     const rawIds = Array.isArray(req.body?.ids) ? req.body.ids : [];
-    const ids = rawIds.filter((value: unknown): value is ProviderCliId => value === "claude" || value === "codex" || value === "opencode" || value === "grok" || value === "qoder" || value === "pi" || value === "gemini");
+    const ids = rawIds.filter((value: unknown): value is ProviderCliId => isSessionProvider(value));
     state.providerCliUpdateInFlight = true;
     try {
       const before = await refreshProviderCliUpdateState(state, config);

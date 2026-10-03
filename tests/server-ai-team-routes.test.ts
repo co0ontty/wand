@@ -362,3 +362,41 @@ test("GET /api/ai-team-runs/:id/live returns running steps and 404s unknown runs
   assert.equal(missing.status, 404);
   assert.match(missing.json.error, /团队运行不存在/);
 });
+
+test("employee-bound team HTTP save ignores forged fields and old-client PUT preserves the link", async (t) => {
+  const { url, storage } = await harness(t);
+  storage.saveSiliconEmployee({
+    id: "e_contact", name: "通讯录员工", avatar: "cat:3", duty: "员工职责", prompt: "PRIVATE_BASE_ROLE",
+    agents: [{ provider: "pi", model: "default", thinkingEffort: "off", mode: "default", kind: "structured" }],
+    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+  });
+  const created = await call(`${url}/api/ai-teams`, "POST", {
+    ...validTeam(), members: [
+      { id: "m_bound", employeeId: "e_contact", name: "客户端伪造", avatar: "invalid",
+        agents: [{ provider: "not-a-cli" }], prompt: "FORGED_PROMPT", isLeader: true, duty: "团队职责" },
+      validTeam().members[1],
+    ],
+  });
+  assert.equal(created.status, 201);
+  assert.equal(created.json.members[0].name, "通讯录员工");
+  assert.equal(created.json.members[0].avatar, "cat:3");
+  assert.equal(created.json.members[0].agent.provider, "pi");
+  assert.equal(created.json.members[0].duty, "团队职责");
+  assert.ok(!JSON.stringify(created.json).includes("PRIVATE_BASE_ROLE"));
+  const oldClient = { ...created.json, members: created.json.members.map(
+    ({ employeeId: _employeeId, ...member }: Record<string, unknown>) => member,
+  ) };
+  const updated = await call(`${url}/api/ai-teams/${created.json.id}`, "PUT", oldClient);
+  assert.equal(updated.status, 200);
+  assert.equal(updated.json.members[0].employeeId, "e_contact");
+  const duplicate = await call(`${url}/api/ai-teams/${created.json.id}`, "PUT", {
+    ...created.json, members: [created.json.members[0], { ...created.json.members[1], employeeId: "e_contact" }],
+  });
+  assert.equal(duplicate.status, 400);
+  assert.equal(storage.getAiTeam(created.json.id)!.members[1]!.employeeId, undefined);
+  const unlinked = await call(`${url}/api/ai-teams/${created.json.id}`, "PUT", {
+    ...oldClient, members: [{ ...oldClient.members[0], employeeId: null }, oldClient.members[1]],
+  });
+  assert.equal(unlinked.status, 200);
+  assert.equal(unlinked.json.members[0].employeeId, undefined);
+});

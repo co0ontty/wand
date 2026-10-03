@@ -27,7 +27,7 @@ import {
 } from "../workspaces/sidebar-list-error";
 
 import { taskBoardController, taskBoardStore } from "../issues/task-board-controller";
-import { HomeAttention, HomeAttentionBadge } from "../attention/home-attention";
+import { HomeAttentionBadge, HomeAttentionPanel } from "../attention/home-attention";
 import { useAiTeamAttentionCount } from "../ai-teams/repository";
 import { SidebarPeek } from "./sidebar-peek";
 import { useHoverPointer, useSidebarPeek } from "./use-sidebar-peek";
@@ -614,6 +614,8 @@ export function ShellSidebar() {
   const teamAttention = useAiTeamAttentionCount();
   const [moreOpen, setMoreOpen] = React.useState(false);
   const [searchQuery, setSearchQuery] = React.useState("");
+  // 报错清单默认收起：头部徽标只显示条数，点开才在下方就地展开。
+  const [attentionOpen, setAttentionOpen] = React.useState(false);
   const narrow = !snapshot.layout.sidebarDrawer && snapshot.layout.sidebarPinned && snapshot.layout.sidebarCollapsed;
   const sidebarClass = classNames(
     "sidebar sidebar-refined",
@@ -676,6 +678,10 @@ export function ShellSidebar() {
   React.useEffect(() => {
     setMoreOpen(false);
   }, [visible, narrow]);
+  // 窄栏放不下清单，收成窄条时一并收起，展开窄栏不会停在半开状态。
+  React.useEffect(() => {
+    if (narrow) setAttentionOpen(false);
+  }, [narrow]);
   const extraGroups = snapshot.sidebar.groups
     .filter((group) => group.kind === "history")
     .map((group) => ({
@@ -727,7 +733,7 @@ export function ShellSidebar() {
               <WandBrandMark className="sidebar-brand-mark" />
               <span className="sidebar-title">Wand</span>
               <SidebarListErrorBadge />
-              <HomeAttentionBadge />
+              <HomeAttentionBadge open={attentionOpen} onToggle={() => setAttentionOpen((value) => !value)} />
             </div>
             <div className="sidebar-header-actions">
               <div className="sidebar-header-more">
@@ -836,7 +842,7 @@ export function ShellSidebar() {
             </div>
           </div>
         </div>
-        <HomeAttention variant="sidebar"/>
+        <HomeAttentionPanel open={attentionOpen && !narrow} onClose={() => setAttentionOpen(false)} />
         <WandNavigation
           className="sidebar-feature-nav"
           aria-label="功能菜单"

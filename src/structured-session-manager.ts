@@ -17,6 +17,7 @@ import { getDefaultModelForProvider } from "./config.js";
 import type { WandTaskAgent } from "./task-types.js";
 import { recordIterationPrompt } from "./iteration-log.js";
 import { startEmployeeKnowledgeRunner } from "./employee-knowledge.js";
+import { withDecisionAccess, type DecisionRuntimeAccess } from "./decision-runner.js";
 import { signalNameFromNumber } from "./signal-utils.js";
 import {
   provisionalSessionTopic,
@@ -69,6 +70,7 @@ import {
   resolveStructuredRunner,
 } from "./structured-provider-common.js";
 import { enrichStructuredMessages, WAND_PROTOCOL_VERSION } from "./structured-client-protocol.js";
+import { RETENTION_IDLE_MS } from "./retention.js";
 
 
 export interface StructuredSessionManagerRunners {
@@ -253,7 +255,7 @@ const STREAM_EMIT_DEBOUNCE_MS = 16;
 // second on the event loop.
 const STREAM_SAVE_THROTTLE_MS = 1_000;
 const DETACHED_RECOVERY_RETRY_MS = 500;
-const ARCHIVE_AFTER_MS = 1000 * 60 * 60 * 24;
+const ARCHIVE_AFTER_MS = RETENTION_IDLE_MS;
 
 interface StreamingCheckpointDirty {
   metadata: boolean;
@@ -518,7 +520,11 @@ function upsertAssistantMessage(
 
 export class StructuredSessionManager {
   private readonly sessions = new Map<string, SessionSnapshot>();
-  private readonly pendingRunnerExecutions = new Map<string, StructuredRunnerExecution>();
+  // Both freshly started runners and adopted daemon runs own the same input gate.
+  private readonly pendingRunnerExecutions = new Map<string, Pick<StructuredRunnerExecution, "interrupt">>();
+  // Server-only, one-shot execution UUIDs. Actual request lifecycle clears them; metadata updates do not.
+  // Never persisted or included in session DTOs.
+  private readonly unacceptedTeamStarts = new Map<string, { requestId: string }>();
   private readonly interruptedWith = new Map<string, string>();
   private readonly preserveQueueOnInterrupt = new Set<string>();
   /** Last wall-clock time (ms) a streaming checkpoint reached SQLite. */
@@ -559,14 +565,16 @@ export class StructuredSessionManager {
     private readonly logger: SessionLogger | null = null,
     runners: StructuredSessionManagerRunners = {},
     private readonly execHost?: StructuredExecHost,
+    decisionRuntime: () => DecisionRuntimeAccess | null = () => null,
   ) {
-    this.claudeCliRunner = runners.claudeCli ?? new ClaudeCliRunner({ language: () => this.config.language }, this.execHost);
-    this.codexRunner = runners.codex ?? new CodexRunner(undefined, this.execHost);
-    this.openCodeRunner = runners.opencode ?? new OpenCodeRunner(undefined, this.execHost);
-    this.grokRunner = runners.grok ?? new GrokRunner(undefined, this.execHost);
-    this.qoderRunner = runners.qoder ?? new QoderRunner(undefined, this.execHost);
-    this.piRunner = runners.pi ?? new PiRunner(undefined, this.execHost);
-    this.geminiRunner = runners.gemini ?? new GeminiRunner(undefined, this.execHost);
+    const wrap = (runner: StructuredRunnerAdapter): StructuredRunnerAdapter => withDecisionAccess(runner, storage, decisionRuntime);
+    this.claudeCliRunner = wrap(runners.claudeCli ?? new ClaudeCliRunner({ language: () => this.config.language }, this.execHost));
+    this.codexRunner = wrap(runners.codex ?? new CodexRunner(undefined, this.execHost));
+    this.openCodeRunner = wrap(runners.opencode ?? new OpenCodeRunner(undefined, this.execHost));
+    this.grokRunner = wrap(runners.grok ?? new GrokRunner(undefined, this.execHost));
+    this.qoderRunner = wrap(runners.qoder ?? new QoderRunner(undefined, this.execHost));
+    this.piRunner = wrap(runners.pi ?? new PiRunner(undefined, this.execHost));
+    this.geminiRunner = wrap(runners.gemini ?? new GeminiRunner(undefined, this.execHost));
     for (const snapshot of this.storage.loadSessions()) {
       if ((snapshot.sessionKind ?? "pty") !== "structured") continue;
       const restoredStatus = snapshot.status === "running" ? "idle" : snapshot.status;
@@ -646,6 +654,7 @@ export class StructuredSessionManager {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.unacceptedTeamStarts.clear();
 
     if (this.archiveTimer) {
       clearInterval(this.archiveTimer);
@@ -744,12 +753,15 @@ export class StructuredSessionManager {
       return;
     }
 
-    const ids = this.pendingRecoveryIds;
-    this.pendingRecoveryIds = [];
+    if (this.disposed) return;
+    const ids = [...this.pendingRecoveryIds];
     const byRunId = new Map(runs.map((run) => [run.runId, run]));
     for (const sessionId of ids) {
       const session = this.sessions.get(sessionId);
-      if (!session) continue;
+      if (!session) {
+        this.pendingRecoveryIds = this.pendingRecoveryIds.filter((id) => id !== sessionId);
+        continue;
+      }
       const state = byRunId.get(structuredRunId(sessionId));
       if (!state) {
         // Inventory was read successfully, so this is a genuinely lost run,
@@ -769,16 +781,19 @@ export class StructuredSessionManager {
         this.sessions.set(sessionId, interrupted);
         this.saveAuthoritativeSession(interrupted);
         this.emitStructuredSnapshot(interrupted);
+        this.pendingRecoveryIds = this.pendingRecoveryIds.filter((id) => id !== sessionId);
         continue;
       }
       try {
         // listRuns is metadata-only on Render v2. Fetch the authoritative
         // paged replay from the owner before feeding any provider reducer.
         const attached = await this.execHost.attachRun(state.runId);
+        if (this.disposed) return;
         if (!attached || attached.incarnationId !== state.incarnationId) {
           throw new Error("Structured run changed owner between inventory and replay");
         }
-        await this.resumeDetachedRun(session, attached);
+        await this.resumeDetachedRun(this.requireSession(sessionId), attached);
+        this.pendingRecoveryIds = this.pendingRecoveryIds.filter((id) => id !== sessionId);
       } catch (error) {
         console.error(`[WAND] structured run recovery failed for ${sessionId}:`, error);
         if (!this.disposed && !this.pendingRecoveryIds.includes(sessionId)) {
@@ -800,8 +815,19 @@ export class StructuredSessionManager {
 
   private async resumeDetachedRun(snapshot: SessionSnapshot, initialState: StructuredRunState): Promise<void> {
     const sessionId = snapshot.id;
-    if (!this.execHost || !snapshot.structuredState) return;
+    if (this.disposed || !this.execHost || !snapshot.structuredState) return;
     const requestId = `recover-${initialState.incarnationId}`;
+    let runningHandle: Awaited<ReturnType<StructuredExecHost["adoptRun"]>> = null;
+    let interruptRequested = false;
+    const execution = {
+      interrupt: (): void => {
+        interruptRequested = true;
+        runningHandle?.interrupt();
+      },
+    };
+    // Reserve ownership before publishing inFlight or awaiting adoption. Inputs
+    // arriving during replay/attach must queue just like inputs to a fresh runner.
+    this.pendingRunnerExecutions.set(sessionId, execution);
 
     // Re-arm the in-flight marker so UI and request guards treat the resumed
     // turn like any other streaming turn.
@@ -907,7 +933,6 @@ export class StructuredSessionManager {
       }
     };
 
-    let runningHandle: Awaited<ReturnType<StructuredExecHost["adoptRun"]>> = null;
     let lastStdoutSeq = initialState.stdoutSeq;
     let lastStderrSeq = initialState.stderrSeq;
     const feedLine = (line: string): void => {
@@ -949,7 +974,20 @@ export class StructuredSessionManager {
       carry = lines.pop() ?? "";
       for (const line of lines) feedLine(line);
     }
-    runningHandle = await this.execHost.adoptRun(structuredRunId(sessionId));
+    try {
+      runningHandle = await this.execHost.adoptRun(structuredRunId(sessionId));
+    } catch (error) {
+      this.releasePendingRunnerExecution(sessionId, execution, false);
+      throw error;
+    }
+    // Server shutdown detaches persistent runs; only an explicit stop/delete
+    // should cancel a handle that arrived after its request was invalidated.
+    if (this.disposed) return;
+    if (!this.isCurrentRequest(sessionId, requestId)) {
+      runningHandle?.interrupt();
+      this.releasePendingRunnerExecution(sessionId, execution);
+      return;
+    }
     if (!runningHandle) {
       // Run vanished between listing and adoption; fall back to failure notes.
       this.finalizeRecoveredRun(sessionId, requestId, processor, replayView, {
@@ -994,6 +1032,8 @@ export class StructuredSessionManager {
       });
       flushEmit();
     });
+    // Install exit listeners before delivering an interrupt that arrived during adopt.
+    if (interruptRequested) runningHandle.interrupt();
   }
 
   private finalizeRecoveredRun(
@@ -1009,8 +1049,10 @@ export class StructuredSessionManager {
       lost?: boolean;
     },
   ): void {
-    this.execHost?.forgetRun(structuredRunId(sessionId));
     if (!this.isCurrentRequest(sessionId, requestId)) return;
+    const execution = this.pendingRunnerExecutions.get(sessionId);
+    if (execution) this.releasePendingRunnerExecution(sessionId, execution);
+    else this.execHost?.forgetRun(structuredRunId(sessionId));
     const current = this.sessions.get(sessionId);
     if (!current) return;
 
@@ -1022,7 +1064,8 @@ export class StructuredSessionManager {
     const failedExit = outcome.lost
       || (outcome.exitCode !== null && outcome.exitCode !== 0)
       || outcome.signal !== null;
-    if ((processor.primaryError || failedExit) && !interruptedForQuestion) {
+    const interruptPrompt = this.interruptedWith.get(sessionId);
+    if ((processor.primaryError || failedExit) && !interruptedForQuestion && !interruptPrompt) {
       const errorText = outcome.lost
         ? "服务重启后运行进程已丢失，本轮未能完成。"
         : this.formatStructuredExitError(commandLabel, outcome.exitCode, outcome.signal, {
@@ -1045,7 +1088,7 @@ export class StructuredSessionManager {
       return;
     }
 
-    const keepRunning = interruptedForQuestion;
+    const keepRunning = interruptedForQuestion || !!interruptPrompt;
     const messages = replayTruncated
       ? this.mergeTruncatedReplayTurn(current, processor, replayView, !keepRunning)
       : this.buildCompletedAssistantMessages(current, processor.state, false);
@@ -1058,6 +1101,7 @@ export class StructuredSessionManager {
       output: replayTruncated ? current.output || processor.state.result : processor.state.result,
       claudeSessionId: processor.state.sessionId ?? current.claudeSessionId,
       messages,
+      queuedMessages: this.resolveQueuedMessagesAfterInterrupt(sessionId, current, interruptPrompt),
       pendingEscalation: null,
       permissionBlocked: false,
       structuredState: {
@@ -1074,7 +1118,15 @@ export class StructuredSessionManager {
     this.emitStructuredSnapshot(finished);
     if (!keepRunning) this.emitStructuredSnapshot(finished, "ended");
 
-    if ((finished.queuedMessages?.length ?? 0) > 0) {
+    if (interruptPrompt) {
+      this.interruptedWith.delete(sessionId);
+      this.preserveQueueOnInterrupt.delete(sessionId);
+      setImmediate(() => {
+        this.sendMessage(sessionId, interruptPrompt).catch((error) => {
+          console.error("[WAND] recovered interrupt-and-send failed:", error);
+        });
+      });
+    } else if ((finished.queuedMessages?.length ?? 0) > 0) {
       setImmediate(() => { void this.flushNextQueuedMessage(sessionId); });
     }
   }
@@ -1205,6 +1257,21 @@ export class StructuredSessionManager {
     this.sessions.set(id, updated);
     this.storage.updateSessionRuntimeMetadata({ ...updated, titleGenerating: undefined });
     this.emitStructuredSnapshot(updated);
+    return updated;
+  }
+
+  /** 归档 / 取消归档：只写标记并广播，不中断运行中的 run，也不删历史。 */
+  setSessionArchived(id: string, archived: boolean): SessionSnapshot {
+    const current = this.requireSession(id);
+    const archivedAt = archived ? new Date().toISOString() : null;
+    const updated: SessionSnapshot = { ...current, archived, archivedAt };
+    this.sessions.set(id, updated);
+    this.storage.updateSessionRuntimeMetadata(updated);
+    this.emit({
+      type: "status",
+      sessionId: id,
+      data: { archived, archivedAt, sessionKind: "structured" },
+    });
     return updated;
   }
 
@@ -1408,6 +1475,26 @@ export class StructuredSessionManager {
     return titled;
   }
 
+  /** Server-only generation anchor, including a failed unaccepted turn whose activeRequestId is cleared. */
+  teamRequestId(id: string): string | null {
+    if (this.disposed) return null;
+    const session = this.sessions.get(id);
+    if (!session?.automationId?.startsWith("ai-team:")) return null;
+    const failed = this.unacceptedTeamStarts.get(id);
+    return session.structuredState?.activeRequestId
+      ?? (session.status === "failed" && !session.structuredState?.inFlight ? failed?.requestId ?? null : null);
+  }
+
+  /** Consume only the exact failed request observed by the team's dispatch, never error-text inference. */
+  consumeUnacceptedTeamStartup(id: string, requestId: string): boolean {
+    const fact = this.unacceptedTeamStarts.get(id);
+    if (!fact || fact.requestId !== requestId) return false;
+    this.unacceptedTeamStarts.delete(id);
+    const session = this.sessions.get(id);
+    return !this.disposed && session?.status === "failed"
+      && !session.structuredState?.activeRequestId && !session.structuredState?.inFlight;
+  }
+
   /** Only an unstarted employee conversation may change CLI after a failed first turn. */
   private retryEmployeeCandidate(
     id: string,
@@ -1415,9 +1502,13 @@ export class StructuredSessionManager {
     prompt: string,
     error: unknown,
   ): Promise<SessionSnapshot> | null {
+    // Team runs own candidate scheduling; keep the snapshot without a second retry loop.
+    if (original.automationId?.startsWith("ai-team:")) return null;
     const candidates = original.employeeCandidates ?? [];
     const nextIndex = (original.employeeCandidateIndex ?? 0) + 1;
     if (!original.employeeId || (original.messages?.length ?? 0) !== 0 || nextIndex >= candidates.length) return null;
+    // 手动选择候选链外的工具时，不把明确选择又换回员工的另一条候选。
+    if (original.provider !== candidates[original.employeeCandidateIndex ?? 0]?.provider) return null;
     const current = this.sessions.get(id);
     if (!current || (current.status !== "running" && current.status !== "failed")) return null;
     if ((current.messages ?? []).length !== 1 || current.messages?.[0]?.role !== "user") return null;
@@ -1474,7 +1565,8 @@ export class StructuredSessionManager {
   async sendMessage(
     id: string,
     input: string,
-    opts?: { interrupt?: boolean; idempotencyKey?: string; preserveQueue?: boolean; queueAlreadyRemoved?: boolean },
+    opts?: { interrupt?: boolean; idempotencyKey?: string; preserveQueue?: boolean; queueAlreadyRemoved?: boolean;
+      teamRequestStarted?: (sessionId: string, requestId: string) => void },
   ): Promise<SessionSnapshot> {
     if (this.disposed) throw new Error("StructuredSessionManager has been disposed.");
     let session = this.requireSession(id);
@@ -1514,9 +1606,8 @@ export class StructuredSessionManager {
       const runnerExecution = this.pendingRunnerExecutions.get(id);
       // interrupt() only requests cancellation; completion can settle later.
       // Treat runner-map ownership as the authoritative in-flight state.
-      const childActive = Boolean(runnerExecution);
+      const childActive = Boolean(runnerExecution) || this.pendingRecoveryIds.includes(id);
       if (!childActive) {
-        if (runnerExecution) this.releasePendingRunnerExecution(id, runnerExecution);
         const recovered: SessionSnapshot = {
           ...session,
           status: "idle",
@@ -1531,6 +1622,7 @@ export class StructuredSessionManager {
         this.storage.updateSessionRuntimeMetadata(recovered);
         session = recovered;
       } else if (opts?.interrupt) {
+        this.requireRecoveryControl(id);
         this.interruptedWith.set(id, prompt);
         if (opts.preserveQueue) {
           this.preserveQueueOnInterrupt.add(id);
@@ -1600,6 +1692,7 @@ export class StructuredSessionManager {
           content: [{ type: "text", text: prompt }],
         };
     const requestId = randomUUID();
+    this.unacceptedTeamStarts.delete(id);
     if ((session.provider === "pi" && isMissingPiSession(session.structuredState?.lastError, session.claudeSessionId))
       || (session.provider === "gemini" && isMissingGeminiSession(session.structuredState?.lastError))) {
       session = { ...session, claudeSessionId: null };
@@ -1618,6 +1711,7 @@ export class StructuredSessionManager {
       },
     };
     this.sessions.set(id, updated);
+    if (updated.automationId?.startsWith("ai-team:")) opts?.teamRequestStarted?.(id, requestId);
     this.checkpointSessionMessages(updated);
     this.emitStructuredSnapshot(updated);
     this.emit({
@@ -1713,6 +1807,14 @@ export class StructuredSessionManager {
       };
       this.sessions.set(id, failed);
       this.saveAuthoritativeSession(failed);
+      if (!this.disposed && error instanceof UnacceptedStructuredSpawnError
+        && current.automationId?.startsWith("ai-team:")) {
+        // Available before status/ended listeners run. A later turn/stop/delete invalidates this fact.
+        if (this.unacceptedTeamStarts.size >= 1024) {
+          this.unacceptedTeamStarts.delete(this.unacceptedTeamStarts.keys().next().value!);
+        }
+        this.unacceptedTeamStarts.set(id, { requestId });
+      }
       this.emit({
         type: "status",
         sessionId: id,
@@ -1806,6 +1908,7 @@ export class StructuredSessionManager {
     idempotencyKey?: string,
   ): Promise<SessionSnapshot> {
     const session = this.requireSession(sessionId);
+    this.requireRecoveryControl(sessionId);
     if (idempotencyKey && this.seenIdempotencyKeys.has(`${sessionId}:${idempotencyKey}`)) {
       return session;
     }
@@ -1852,6 +1955,55 @@ export class StructuredSessionManager {
     this.sessions.set(sessionId, updated);
     this.storage.updateSessionRuntimeMetadata(updated);
     this.emitStructuredSnapshot(updated);
+    return updated;
+  }
+
+  /** 新建空白对话可原位换 CLI；接受过输入、恢复会话和自动化不跨 provider 搬历史。 */
+  setSessionProvider(sessionId: string, provider: SessionProvider): SessionSnapshot {
+    const session = this.requireSession(sessionId);
+    if (!isSessionProvider(provider)) throw new Error("请选择有效的 CLI 工具。");
+    if (session.status !== "idle" || session.archived || session.structuredState?.inFlight ||
+        this.pendingRunnerExecutions.has(sessionId) || session.claudeSessionId ||
+        (session.messages?.length ?? 0) > 0 || (session.queuedMessages?.length ?? 0) > 0 ||
+        session.automationId || (session.sessionSource && session.sessionSource !== "interactive") ||
+        this.relayHandlerFor(session)) {
+      throw new Error("只有尚未发送消息的新建空白对话可以更换工具。");
+    }
+    if (session.provider === provider) return session;
+    const candidates = session.employeeCandidates ?? [];
+    const candidateIndex = candidates.findIndex((candidate) => candidate.provider === provider);
+    const candidate = candidateIndex >= 0 ? candidates[candidateIndex] : undefined;
+    const runner = defaultStructuredRunner(provider);
+    const model = candidate && candidate.model !== "default" ? candidate.model
+      : getDefaultModelForProvider(this.config, provider) || null;
+    const effort = normalizeThinkingEffort(candidate?.thinkingEffort ?? this.config.defaultThinkingEffort);
+    const thinkingEffort = effort?.includes(":") && !effort.startsWith(`${provider}:`) ? "off" : effort;
+    const requestedMode = candidate?.mode ?? session.mode;
+    const unsupportedMode = (requestedMode === "native" && provider !== "claude") ||
+      (requestedMode === "auto-edit" && ["opencode", "grok", "pi"].includes(provider));
+    const mode: ExecutionMode = provider === "codex" ? "full-access"
+      : unsupportedMode ? "default" : requestedMode;
+    const updated: SessionSnapshot = {
+      ...session,
+      provider,
+      runner,
+      command: recoveredCommandLabel(runner),
+      mode,
+      autoApprovePermissions: shouldAutoApproveForMode(mode),
+      selectedModel: model,
+      thinkingEffort,
+      employeeCandidateIndex: candidateIndex >= 0 ? candidateIndex : undefined,
+      structuredState: { ...defaultStructuredState(provider, runner), model: model ?? undefined },
+    };
+    // 身份、知识归属、任务/目录和候选快照不变；只更新本会话的执行参数。
+    this.storage.saveSession(updated);
+    this.sessions.set(sessionId, updated);
+    this.emit({
+      type: "status",
+      sessionId,
+      data: { ...(buildStructuredOutputPayload(updated) as Record<string, unknown>), command: updated.command,
+        mode, autoApprovePermissions: updated.autoApprovePermissions },
+    });
     return updated;
   }
 
@@ -2003,8 +2155,16 @@ export class StructuredSessionManager {
     return updated;
   }
 
+  private requireRecoveryControl(id: string): void {
+    if (this.pendingRecoveryIds.includes(id) && !this.pendingRunnerExecutions.has(id)) {
+      throw new Error("正在恢复运行中的任务，请稍后重试控制操作；新消息仍可排队。");
+    }
+  }
+
   stop(id: string): SessionSnapshot {
+    this.unacceptedTeamStarts.delete(id);
     const session = this.requireSession(id);
+    this.requireRecoveryControl(id);
     this.interruptedWith.delete(id);
     this.preserveQueueOnInterrupt.delete(id);
     // Clearing activeRequestId is the generation barrier: late data/close callbacks
@@ -2039,6 +2199,8 @@ export class StructuredSessionManager {
   }
 
   delete(id: string): void {
+    this.unacceptedTeamStarts.delete(id);
+    this.requireRecoveryControl(id);
     const runnerExecution = this.pendingRunnerExecutions.get(id);
     // Invalidate callback ownership before signalling the runner. Cancellation
     // can synchronously wake listeners in some adapter implementations.
@@ -2077,12 +2239,15 @@ export class StructuredSessionManager {
   }
 
   /** Delete a handle only if it still belongs to the execution doing cleanup. */
-  private releasePendingRunnerExecution(sessionId: string, execution: StructuredRunnerExecution): boolean {
+  private releasePendingRunnerExecution(
+    sessionId: string,
+    execution: Pick<StructuredRunnerExecution, "interrupt">,
+    forgetRun = true,
+  ): boolean {
     if (this.pendingRunnerExecutions.get(sessionId) !== execution) return false;
     this.pendingRunnerExecutions.delete(sessionId);
-    // Drop the daemon-side record once the manager has taken over completion;
-    // no-op for the in-process fallback host.
-    this.execHost?.forgetRun(structuredRunId(sessionId));
+    // A failed recovery attach must retain the daemon record for the next retry.
+    if (forgetRun) this.execHost?.forgetRun(structuredRunId(sessionId));
     return true;
   }
 

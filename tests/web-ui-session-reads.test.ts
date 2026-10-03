@@ -7,6 +7,7 @@ import { ComposerStore } from "../src/web-ui/browser/composer.js";
 import { createSessionReads } from "../src/web-ui/browser/session-reads.js";
 import { parseJsonResponse } from "../src/web-ui/react/http-adapter.js";
 import { getErrorMessage } from "../src/error-utils.js";
+import * as completionState from "../src/session-completion-state.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -34,6 +35,7 @@ function harness() {
   const dependencies: Record<string, unknown> = {
     "./state": { composer, state, writeStoredBoolean: noop },
     "./session-reads": { createSessionReads },
+    "../../session-completion-state.js": completionState,
     "../react/http-adapter": { parseJsonResponse },
     "../../error-utils.js": { getErrorMessage },
     "./notifications": new Proxy(

@@ -601,8 +601,13 @@ export function applyExpandedState(el: any, kind: string, expanded: boolean) {
     }
     case "inline-tool": {
       el.classList.toggle("inline-tool-open", !!expanded);
+      el.setAttribute("aria-expanded", expanded ? "true" : "false");
       var inlineBody = el.querySelector(".inline-tool-expanded");
-      if (inlineBody) inlineBody.style.display = expanded ? "block" : "none";
+      if (inlineBody) {
+        inlineBody.toggleAttribute("inert", !expanded);
+        if (expanded) inlineBody.removeAttribute("aria-hidden");
+        else inlineBody.setAttribute("aria-hidden", "true");
+      }
       break;
     }
     case "terminal": {

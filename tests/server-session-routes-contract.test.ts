@@ -112,7 +112,8 @@ test("session HTTP interface preserves create, list, update, detail, and delete 
     assert.equal(compactDetail.messages[0].content[0].activity.kind, "edit_file");
     assert.equal(compactDetail.messages[0].content[1].content, "");
     assert.equal(compactDetail.messages[0].content[1]._truncated, true);
-    assert.doesNotMatch(JSON.stringify(compactDetail.messages), /PRIVATE_|\/repo\/private\.ts/);
+    assert.doesNotMatch(JSON.stringify(compactDetail.messages), /PRIVATE_OLD|PRIVATE_NEW|\/repo\/private\.ts/);
+    assert.equal(compactDetail.messages[0].content[1].preview, "PRIVATE_RESULT");
     const compactPage = await (await fetch(
       `${baseUrl}/api/sessions/${created.id}/messages?offset=0&limit=1`,
       { headers: compactHeaders },
@@ -318,7 +319,8 @@ test("session HTTP interface preserves create, list, update, detail, and delete 
       const compactMutation = await compactResponse.json() as typeof legacyMutation;
       assert.deepEqual(compactMutation.messages[0].content[0].input, {});
       assert.equal(compactMutation.messages[0].content[1].content, "");
-      assert.doesNotMatch(JSON.stringify(compactMutation.messages), /PRIVATE_MUTATION|\/private\/mutation\.txt/);
+      assert.doesNotMatch(JSON.stringify(compactMutation.messages), /\/private\/mutation\.txt/);
+      assert.equal(compactMutation.messages[0].content[1].preview, "PRIVATE_MUTATION_RESULT");
     }
     messages.length = 0;
 

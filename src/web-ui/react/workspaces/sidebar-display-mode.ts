@@ -1,4 +1,5 @@
 import * as React from "react";
+import { isSessionJustCompleted } from "../../../session-completion-state.js";
 
 import type { TaskDirectoryGroup, WorkspaceSessionSummary } from "./types";
 
@@ -65,7 +66,7 @@ export function isSessionRunning(session: WorkspaceSessionSummary): boolean {
 
 /** 「活动」= 在跑或等你处理；群聊条目按同一规则判定。 */
 export function isSessionActive(session: WorkspaceSessionSummary): boolean {
-  return isSessionAttention(session) || isSessionRunning(session);
+  return isSessionAttention(session) || isSessionRunning(session) || isSessionJustCompleted(session);
 }
 
 /** 只看活动：任务里只留在动的会话，没有活动会话的任务和目录整条不显示；正在看的那条始终保留。 */
@@ -79,45 +80,13 @@ export function filterActiveGroups(
     );
     const tasks = group.tasks.flatMap((task) => {
       const sessions = task.sessions.filter(keep);
-      return sessions.length ? [{ ...task, sessions }] : [];
+      // 「只看活动」不展示归档区（归档会话本就不在跑）。
+      return sessions.length ? [{ ...task, sessions, archivedSessions: [] }] : [];
     });
     const standaloneSessions = group.standaloneSessions.filter(keep);
     if (!tasks.length && !standaloneSessions.length) return [];
-    return [{ ...group, tasks, standaloneSessions }];
+    return [{ ...group, tasks, standaloneSessions, archivedSessions: [] }];
   });
-}
-
-/** 跨目录收集活动会话，供列表上方的「正在运行」条使用。 */
-export interface ActiveSessionEntry {
-  session: WorkspaceSessionSummary;
-  group: TaskDirectoryGroup;
-  taskName: string | null;
-}
-
-export function collectActiveSessions(
-  groups: readonly TaskDirectoryGroup[],
-  limit = 6,
-): ActiveSessionEntry[] {
-  const entries: ActiveSessionEntry[] = [];
-  for (const group of groups) {
-    for (const task of group.tasks) {
-      for (const session of task.sessions) {
-        if (isSessionActive(session)) entries.push({ session, group, taskName: task.name });
-      }
-    }
-    for (const session of group.standaloneSessions) {
-      if (isSessionActive(session)) entries.push({ session, group, taskName: null });
-    }
-  }
-  // 等你的排在前面，其次是在跑的；同样状态按最近启动。
-  const rank = (entry: ActiveSessionEntry): number => (isSessionAttention(entry.session) ? 0 : 1);
-  return entries
-    .sort((left, right) => {
-      const byRank = rank(left) - rank(right);
-      if (byRank) return byRank;
-      return Date.parse(right.session.startedAt || "") - Date.parse(left.session.startedAt || "");
-    })
-    .slice(0, Math.max(0, limit));
 }
 
 export function useSidebarDisplayMode(): [SidebarDisplayMode, () => void, (mode: SidebarDisplayMode) => void] {

@@ -36,8 +36,10 @@ import { describePtySpawnFailure } from "./ensure-node-pty-helper.js";
 import { resolveSessionProvider, resolveSystemAiContext } from "./session-ai-context.js";
 import { resolveSessionCwd } from "./session-cwd.js";
 import { inferProviderFromCommand } from "./session-provider.js";
+import { RETENTION_IDLE_MS } from "./retention.js";
 import { PtyTerminalState, type PtyTerminalSnapshot, type PtyHistoryPage } from "./pty-terminal-state.js";
 import { isPtySubmitInput } from "./pty-turn-activity.js";
+import { samplePtyForegrounds } from "./pty-foreground.js";
 import { buildPtyShellLaunchPlan, PtyCliExitMarker } from "./pty-shell-launch.js";
 import {
   InProcessTerminalHost,
@@ -233,6 +235,11 @@ interface SessionRecord extends SessionSnapshot {
   ptyBusy?: boolean;
   /** Quiet-window timer for the non-Claude PTY turn tracker (no bridge). */
   ptyTurnTimer?: NodeJS.Timeout | null;
+  /**
+   * 实时前台状态：终端的前台进程组不是 shell 自己（即有 CLI 在前台运行）。
+   * `undefined` = 还没采到（平台不支持或采样失败），回退一次性的 providerCliActive。
+   */
+  ptyForeground?: boolean;
   /** Last published chat sequence boundary; never persisted or exposed as a DTO field. */
   ptyChatMessageCount?: number;
   /** Current PTY dimensions, last applied by resize(). */
@@ -656,7 +663,8 @@ function restoreTerminalState(state: TerminalSessionState): PtyTerminalState {
 }
 
 const MAX_SESSIONS = 200;
-const ARCHIVE_AFTER_MS = 1000 * 60 * 60 * 24;
+// 与会话/任务的统一保留期一致：7 天没活动才自动归档（随后由保留期扫描在 7 天后清理）。
+const ARCHIVE_AFTER_MS = RETENTION_IDLE_MS;
 const CONFIRM_WINDOW_SIZE = 800;
 /**
  * Quiet window for the non-Claude PTY turn tracker: a submitted turn stays busy
@@ -664,6 +672,11 @@ const CONFIRM_WINDOW_SIZE = 800;
  * Matches the bridge's own idle-probe delay so both paths make the same call.
  */
 export const PTY_TURN_IDLE_MS = 3000;
+/**
+ * 采样间隔：多久向内核问一次「这个 PTY 的前台进程组还是 CLI 吗」。
+ * 只查运行中的 PTY 会话，一次 `ps` 拿全部会话，开销与间隔同量级（毫秒）。
+ */
+export const PTY_FOREGROUND_SAMPLE_MS = 1000;
 
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -728,6 +741,10 @@ function deriveSessionSummary(messages: ConversationTurn[]): string | undefined 
 export interface ProcessManagerOptions {
   /** Overrides the non-Claude PTY turn quiet window (tests use a short one). */
   ptyTurnIdleMs?: number;
+  /** Overrides the foreground-process-group sampling interval (tests use a short one). */
+  ptyForegroundSampleMs?: number;
+  /** Overrides the foreground probe itself, so tests can drive it deterministically. */
+  samplePtyForegrounds?: typeof samplePtyForegrounds;
 }
 
 export class ProcessManager extends EventEmitter {
@@ -736,8 +753,16 @@ export class ProcessManager extends EventEmitter {
   private readonly providerHistory = new ProviderHistoryScanner();
   /** Quiet window for the non-Claude PTY turn tracker. */
   private readonly ptyTurnIdleMs: number;
+  /** Foreground-process-group sampling interval. */
+  private readonly ptyForegroundSampleMs: number;
+  /** Foreground probe; injectable so tests can drive it without a real process table. */
+  private readonly probePtyForegrounds: typeof samplePtyForegrounds;
   /** 24h archive scan timer */
   private archiveTimer: NodeJS.Timeout | null = null;
+  /** 前台进程组采样定时器（见 samplePtyForegrounds） */
+  private ptyForegroundTimer: NodeJS.Timeout | null = null;
+  /** 采样是 async 的，避免慢 ps 重叠成多个进程 */
+  private ptyForegroundSampling = false;
   /** Per-session debounce timers for throttled persist calls */
   private readonly persistDebounceTimers = new Map<string, NodeJS.Timeout>();
   /** Last persisted message state per session — used to skip redundant message writes */
@@ -760,6 +785,8 @@ export class ProcessManager extends EventEmitter {
   ) {
     super();
     this.ptyTurnIdleMs = options.ptyTurnIdleMs ?? PTY_TURN_IDLE_MS;
+    this.ptyForegroundSampleMs = options.ptyForegroundSampleMs ?? PTY_FOREGROUND_SAMPLE_MS;
+    this.probePtyForegrounds = options.samplePtyForegrounds ?? samplePtyForegrounds;
     this.terminalHost = terminalHost ?? new InProcessTerminalHost();
     this.logger = new SessionLogger(configDir || path.join(process.env.HOME || process.cwd(), ".wand"), config.shortcutLogMaxBytes);
     let startupCodexHistory: CodexHistorySession[] | null = null;
@@ -867,6 +894,45 @@ export class ProcessManager extends EventEmitter {
       }
     }, 60 * 1000);
     this.archiveTimer.unref?.();
+    this.ptyForegroundTimer = setInterval(() => { void this.samplePtyForegrounds(); }, this.ptyForegroundSampleMs);
+    this.ptyForegroundTimer.unref?.();
+  }
+
+  /**
+   * 采样每个运行中 PTY 会话的终端前台进程组，得出「CLI 是否还在前台」。
+   *
+   * 这是 ptyBusy 的实时资格判断，取代一次性启动标记：CLI 退出后又被重新拉起
+   * （自更新、手动重跑）时，前台进程组会自然回到 CLI，于是新一轮仍然能被跟踪。
+   * 采样不到（不支持的平台、ps 失败、pid 已消失）就保持上次结论，绝不因此清状态。
+   */
+  private async samplePtyForegrounds(): Promise<void> {
+    if (this.disposed || this.ptyForegroundSampling) return;
+    const candidates = [...this.sessions.values()].filter((record) => (
+      record.status === "running"
+      && record.ptyProcess !== null
+      && !record.ptyBridge
+      && typeof record.processId === "number"
+      && record.processId > 0
+    ));
+    if (candidates.length === 0) return;
+
+    this.ptyForegroundSampling = true;
+    try {
+      const samples = await this.probePtyForegrounds(candidates.map((record) => record.processId as number));
+      if (!samples || this.disposed) return;
+      for (const record of candidates) {
+        if (this.sessions.get(record.id) !== record) continue;
+        const next = samples.get(record.processId as number);
+        if (next === undefined || record.ptyForeground === next) continue;
+        record.ptyForeground = next;
+        // CLI 退回提示符：这一轮立刻结束，不必再等静默窗口。
+        if (!next) this.closePtyTurn(record);
+      }
+    } catch {
+      // 探测失败只意味着这一轮没有新信息，保留上次结论。
+    } finally {
+      this.ptyForegroundSampling = false;
+    }
   }
 
   private makeRestoredRecord(
@@ -964,11 +1030,25 @@ export class ProcessManager extends EventEmitter {
   }
 
   /**
+   * 这一轮的终端是否值得跟踪：这个会话有 provider CLI，且它现在就在前台
+   * （实时采样的内核事实）；采样不可用时退回一次性的 providerCliActive 标记。
+   *
+   * 纯 shell 会话（没有 provider）不跟踪：用户在终端里随手敲一条命令不应该
+   * 把任务标成「运行中 / 刚完成」。
+   */
+  private canTrackPtyTurn(record: SessionRecord): boolean {
+    if (record.ptyForeground !== undefined) {
+      return record.ptyForeground && record.provider !== undefined;
+    }
+    return record.providerCliActive;
+  }
+
+  /**
    * Open a non-Claude PTY turn and start its quiet-window timer. Claude's bridge
    * owns ptyBusy, so bridged sessions are left untouched.
    */
   private openPtyTurn(record: SessionRecord): void {
-    if (record.ptyBridge || !record.providerCliActive || record.status !== "running") return;
+    if (record.ptyBridge || !this.canTrackPtyTurn(record) || record.status !== "running") return;
     if (record.ptyBusy !== true) {
       record.ptyBusy = true;
       this.emitEvent({ type: "status", sessionId: record.id, data: { ptyBusy: true } });
@@ -978,7 +1058,7 @@ export class ProcessManager extends EventEmitter {
 
   /** Extend the quiet window because the CLI is still producing output. */
   private refreshPtyTurn(record: SessionRecord): void {
-    if (record.ptyBridge || !record.providerCliActive) return;
+    if (record.ptyBridge || !this.canTrackPtyTurn(record)) return;
     if (record.ptyTurnTimer) clearTimeout(record.ptyTurnTimer);
     const timer = setTimeout(() => {
       record.ptyTurnTimer = null;
@@ -1156,9 +1236,14 @@ export class ProcessManager extends EventEmitter {
     if (chunk && current.providerCliActive && current.autoApprovePermissions && !current.ptyBridge && current.provider === "claude") {
       this.autoConfirmWithRecord(current, chunk, child);
     }
-    // Non-Claude CLIs have no parsed turn boundary; any output while a turn is
-    // open keeps it open (see pty-turn-activity.ts).
-    if (chunk && current.ptyBusy === true) this.refreshPtyTurn(current);
+    // Non-Claude CLIs have no parsed turn boundary: output keeps an open turn
+    // open, and output while the CLI is in the foreground opens one — the CLI may
+    // have (re)started in this terminal long after the one-shot launch marker was
+    // consumed (see pty-turn-activity.ts / pty-foreground.ts).
+    if (chunk && this.canTrackPtyTurn(current)) {
+      if (current.ptyBusy === true) this.refreshPtyTurn(current);
+      else this.openPtyTurn(current);
+    }
     if (chunk) onVisibleChunk?.(chunk);
     if (boundary.exitCode !== null) this.finishProviderCli(current, boundary.exitCode);
     this.schedulePersist(current);
@@ -1181,6 +1266,10 @@ export class ProcessManager extends EventEmitter {
     if (this.archiveTimer) {
       clearInterval(this.archiveTimer);
       this.archiveTimer = null;
+    }
+    if (this.ptyForegroundTimer) {
+      clearInterval(this.ptyForegroundTimer);
+      this.ptyForegroundTimer = null;
     }
     const pendingPersistIds = new Set(this.persistDebounceTimers.keys());
     for (const timer of this.persistDebounceTimers.values()) clearTimeout(timer);
@@ -1264,7 +1353,7 @@ export class ProcessManager extends EventEmitter {
     }
   }
 
-  async start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: { resumedFromSessionId?: string; autoRecovered?: boolean; worktreeEnabled?: boolean; provider?: SessionProvider; model?: string; reuseId?: string; cols?: number; rows?: number; thinkingEffort?: SessionSnapshot["thinkingEffort"]; sessionSource?: SessionSource; automationId?: string; workspaceId?: string; workspaceTaskId?: string; interactiveShell?: boolean; systemPrompt?: string }): Promise<SessionSnapshot> {
+  async start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: { resumedFromSessionId?: string; autoRecovered?: boolean; worktreeEnabled?: boolean; provider?: SessionProvider; model?: string; reuseId?: string; cols?: number; rows?: number; thinkingEffort?: SessionSnapshot["thinkingEffort"]; sessionSource?: SessionSource; automationId?: string; workspaceId?: string; workspaceTaskId?: string; interactiveShell?: boolean; systemPrompt?: string } & Pick<SessionSnapshot, "employeeId" | "employeeName" | "employeeAvatar">): Promise<SessionSnapshot> {
     if (this.disposed) throw new Error("ProcessManager has been disposed.");
     if (!opts?.interactiveShell) this.assertCommandAllowed(command);
 
@@ -1281,6 +1370,7 @@ export class ProcessManager extends EventEmitter {
     let inheritedAutomationId: string | undefined;
     let inheritedWorkspaceId: string | undefined;
     let inheritedWorkspaceTaskId: string | undefined;
+    let inheritedRole: Pick<SessionSnapshot, "employeeId" | "employeeName" | "employeeAvatar" | "systemPrompt"> | undefined;
     if (opts?.reuseId) {
       const oldRecord = this.sessions.get(id);
       if (oldRecord) {
@@ -1289,6 +1379,7 @@ export class ProcessManager extends EventEmitter {
         inheritedAutomationId = oldRecord.automationId;
         inheritedWorkspaceId = oldRecord.workspaceId;
         inheritedWorkspaceTaskId = oldRecord.workspaceTaskId;
+        inheritedRole = oldRecord;
         this.cleanupRecord(oldRecord);
         this.sessions.delete(id);
       } else {
@@ -1298,6 +1389,7 @@ export class ProcessManager extends EventEmitter {
         inheritedAutomationId = stored?.automationId;
         inheritedWorkspaceId = stored?.workspaceId;
         inheritedWorkspaceTaskId = stored?.workspaceTaskId;
+        inheritedRole = stored ?? undefined;
       }
       this.terminalHost.forget(id);
     }
@@ -1314,7 +1406,7 @@ export class ProcessManager extends EventEmitter {
     const initialThinkingEffort = normalizeThinkingEffort(opts?.thinkingEffort);
     let processedCommand = this.processCommandForMode(command, effectiveMode, provider, selectedModel, initialThinkingEffort);
     // 会话级系统提示：provider 有系统提示开关就走开关（PTY 与结构化行为一致），没有就并进首条输入。
-    const systemPrompt = opts?.systemPrompt?.trim() || undefined;
+    const systemPrompt = (opts?.systemPrompt ?? inheritedRole?.systemPrompt)?.trim() || undefined;
     const initialInputText = initialInput && systemPrompt && !systemPromptFlag(provider)
       ? composeSystemFallback(systemPrompt, initialInput)
       : initialInput;
@@ -1356,6 +1448,9 @@ export class ProcessManager extends EventEmitter {
       sessionSource: opts?.sessionSource ?? inheritedSessionSource ?? "interactive",
       automationId: opts?.automationId ?? inheritedAutomationId,
       systemPrompt: systemPrompt ?? null,
+      employeeId: opts?.employeeId ?? inheritedRole?.employeeId,
+      employeeName: opts?.employeeName ?? inheritedRole?.employeeName,
+      employeeAvatar: opts?.employeeAvatar ?? inheritedRole?.employeeAvatar,
       workspaceId: opts?.workspaceId ?? inheritedWorkspaceId,
       workspaceTaskId: opts?.workspaceTaskId ?? inheritedWorkspaceTaskId,
       provider,
@@ -1789,6 +1884,18 @@ export class ProcessManager extends EventEmitter {
     }
     this.persist(record);
     this.emitEvent({ type: "status", sessionId: id, data: { selectedModel: normalized } });
+    return this.snapshot(record);
+  }
+
+  /**
+   * 归档 / 取消归档一个 PTY 会话：只写标记，不杀进程；保留期清理再按 archivedAt 删除。
+   */
+  setSessionArchived(id: string, archived: boolean): SessionSnapshot {
+    const record = this.mustGet(id);
+    record.archived = archived;
+    record.archivedAt = archived ? new Date().toISOString() : null;
+    this.persist(record);
+    this.emitEvent({ type: "status", sessionId: id, data: { archived, archivedAt: record.archivedAt } });
     return this.snapshot(record);
   }
 
@@ -2258,6 +2365,9 @@ export class ProcessManager extends EventEmitter {
       automationId: record.automationId,
       // 会话级系统提示要跟着快照回库（persist 就是走 snapshot），否则重启后 resume 会丢掉角色与规则。
       systemPrompt: record.systemPrompt ?? null,
+      employeeId: record.employeeId,
+      employeeName: record.employeeName,
+      employeeAvatar: record.employeeAvatar,
       provider: record.provider,
       providerCliActive: record.providerCliActive,
       providerCliExitCode: record.providerCliExitCode,

@@ -1,3 +1,4 @@
+import { teamMemberEmployee } from "./ai-team-employee-binding.js";
 import { memberAgents, type AiTeam, type AiTeamMember, type AiTeamRun, type AiTeamRunStatus, type AiTeamStep, type TeamMemberRole } from "./ai-team-types.js";
 import type { WandTaskAgent } from "./task-types.js";
 import type { ConversationTurn } from "./types.js";
@@ -313,7 +314,9 @@ function handoffRules(audience: "leader" | "member"): string[] {
 
 function leaderSystemPrompt(run: AiTeamRun, resolveModel?: AiTeamModelNameResolver): string {
   const leader = leaderOf(run.team);
+  const employeePrompt = teamMemberEmployee(leader)?.prompt;
   return [
+    ...(employeePrompt ? [employeePrompt] : []),
     `你是 AI 团队「${run.team.name}」的负责人（${leader.name}）。`,
     `你的职责：${leader.duty.trim() || "拆分任务、派工、根据报告决定下一步。"}`,
     "",
@@ -338,7 +341,9 @@ function leaderSystemPrompt(run: AiTeamRun, resolveModel?: AiTeamModelNameResolv
 }
 
 function memberSystemPrompt(run: AiTeamRun, member: AiTeamMember): string {
+  const employeePrompt = teamMemberEmployee(member)?.prompt;
   return [
+    ...(employeePrompt ? [employeePrompt] : []),
     `你是 AI 团队「${run.team.name}」的成员（${member.name}）。`,
     `你的职责：${member.duty.trim() || "（未填写）"}`,
     ...teamInstructions(run.team),

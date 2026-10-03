@@ -28,7 +28,7 @@ const SYSTEM_EMPLOYEE = {
 };
 
 const DEFAULT_EMPLOYEE = {
-  ...SYSTEM_EMPLOYEE, id: "e_wand_default", systemKey: "wand-default", name: "默契的初一",
+  ...SYSTEM_EMPLOYEE, id: "e_wand_default", systemKey: "wand-default", name: "赛博虎妞",
   duty: "默认任务伙伴", prompt: "默认伙伴基础规则与近期偏好。", agents: [CLAUDE],
 };
 let memory = { enabled: true, retentionDays: 30, eventCount: 3, features: [],
@@ -51,6 +51,7 @@ interface HarnessState {
   mutations: string[];
   memoryCalls: string[];
   knowledgeCalls: Array<{ method: string; employeeId: string }>;
+  failNextSave?: boolean;
 }
 
 const state: HarnessState = { updates: [], mutations: [], memoryCalls: [], knowledgeCalls: [] };
@@ -62,6 +63,7 @@ const knowledge: Record<string, string[]> = {
 // 服务端意义上的当前定义：PUT 之后 GET 必须能读到新候选，
 // 否则无法验证「员工页改完，设置页投影跟着变」。
 let currentSystemEmployee: typeof SYSTEM_EMPLOYEE = { ...SYSTEM_EMPLOYEE };
+let currentUserEmployee = { ...USER_EMPLOYEE, tags: ["研发", "测试"] };
 
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -87,14 +89,20 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
     return json({ employeeId, entries, total: entries.length, maxEntries: 200 });
   }
   if (url.includes("/api/silicon-employees")) {
-    if (method === "GET") return json({ employees: [currentSystemEmployee, USER_EMPLOYEE, DEFAULT_EMPLOYEE] });
+    if (method === "GET") return json({ employees: [currentSystemEmployee, currentUserEmployee, DEFAULT_EMPLOYEE] });
     const id = decodeURIComponent(url.split("/api/silicon-employees/")[1]?.split("/")[0] ?? "");
     const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
     if (/archive|unarchive/.test(url) || method !== "PUT") {
       state.mutations.push(`${method} ${url}`);
       return json({ ok: true });
     }
+    await new Promise((resolve) => setTimeout(resolve, 180));
+    if (state.failNextSave) { state.failNextSave = false; return json({ error: "标签保存失败，请重试。" }, 400); }
     state.updates.push({ id, body });
+    if (id === USER_EMPLOYEE.id) {
+      currentUserEmployee = { ...currentUserEmployee, ...body, id };
+      return json(currentUserEmployee);
+    }
     currentSystemEmployee = { ...currentSystemEmployee, ...body, id };
     return json(currentSystemEmployee);
   }
@@ -113,8 +121,10 @@ function SettingsOwnerHarness(): React.ReactElement {
 }
 
 createRoot(document.getElementById("root")!).render(
-  <div className="wand-employees-layout">
-    <SettingsOwnerHarness />
-    <EmployeeListPage catalog={null} providerOptions={null} />
+  <div className="task-board-native-page wand-teams-page" style={{ height: "100vh" }}>
+    <div style={{ flex: "0 0 auto" }}><SettingsOwnerHarness /></div>
+    <div className="wand-teams-layout wand-employees-layout">
+      <EmployeeListPage catalog={null} providerOptions={null} />
+    </div>
   </div>,
 );

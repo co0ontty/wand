@@ -81,25 +81,32 @@ export function pruneManagedSelection(
 }
 
 /**
- * 任务在批量操作里是归档（终端继续跑、worktree 保留），只有被显式选中的终端才是真删除。
- * 所以这里不再把任务名下的终端并入删除集合，两者互不覆盖。
+ * 任务和会话在批量操作里是同一套逻辑：主操作都是归档（软处理——终端继续跑、worktree 保留、
+ * 7 天后由保留期清理），只有显式选中的终端才走真删除。所以两个按钮分开描述，
+ * 不再用一句「归档任务并删除终端」把两种动作揉在一起。
  */
 export function describeManagedAction(selection: SidebarManageSelection): string {
   const tasks = selection.taskIds.length > 0;
   const sessions = selection.sessionIds.length > 0;
-  if (tasks && sessions) return "归档任务并删除终端";
+  if (tasks && sessions) return "归档任务并归档终端";
   if (tasks) return "归档任务";
-  return "删除终端";
+  return "归档终端";
 }
 
 export function describeManagedResult(selection: SidebarManageSelection): string {
   const parts: string[] = [];
   if (selection.taskIds.length > 0) parts.push(`归档 ${selection.taskIds.length} 个任务`);
-  if (selection.sessionIds.length > 0) parts.push(`删除 ${selection.sessionIds.length} 个终端`);
+  if (selection.sessionIds.length > 0) parts.push(`归档 ${selection.sessionIds.length} 个终端`);
   return parts.join("、") || "处理所选项目";
 }
 
-/** 只有真的会杀终端时才用危险样式；纯归档不该渲染成红色破坏性操作。 */
+/** 危险按钮：只在选中了真的会被关闭的终端时才出现。 */
+export function describeManagedDelete(selection: SidebarManageSelection): string {
+  const sessions = selection.sessionIds.length;
+  return sessions > 0 ? `删除 ${sessions} 个终端` : "删除终端";
+}
+
+/** 只有真的会杀终端时才用危险样式；纯归档不该渲染成红色破坏操作。 */
 export function managedSelectionIsDestructive(selection: SidebarManageSelection): boolean {
   return selection.sessionIds.length > 0;
 }

@@ -77,10 +77,26 @@ export async function runFocusBrowser({ root = resolve(import.meta.dirname, "../
       for (let i = 0; i < 100; i++) { if (await evaluate(expression)) return; await sleep(20); }
       throw new Error("Fixture condition not reached: " + description);
     };
+    // A real user cannot click a control that is still clipped by an in-flight
+    // expand/collapse animation (grid-template-rows: 0fr→1fr leaves the child at
+    // zero height), and a moving target would also make the dispatched pointer miss:
+    // the coordinates are probed one CDP round-trip before the click lands. Wait for
+    // the point to hit-test to the target *and* stay put across two frames first.
     const click = async selector => {
-      const rect = await evaluate(`(() => { const n=document.querySelector(${JSON.stringify(selector)}); if(!n || !n.getClientRects().length) throw Error(${JSON.stringify("real visible control absent: " + selector)}); const r=n.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`);
-      await send("Input.dispatchMouseEvent", { type: "mousePressed", ...rect, button: "left", clickCount: 1 });
-      await send("Input.dispatchMouseEvent", { type: "mouseReleased", ...rect, button: "left", clickCount: 1 });
+      let previous = null;
+      for (let i = 0; i < 200; i++) {
+        const state = await evaluate(`(() => { const n=document.querySelector(${JSON.stringify(selector)}); if(!n || !n.getClientRects().length) throw Error(${JSON.stringify("real visible control absent: " + selector)}); const r=n.getBoundingClientRect(); const x=r.x+r.width/2, y=r.y+r.height/2; const hit=document.elementFromPoint(x,y); return {x,y,hit:n===hit||n.contains(hit)}; })()`);
+        const settled = previous && Math.abs(previous.x - state.x) < 0.5 && Math.abs(previous.y - state.y) < 0.5;
+        if (state.hit && settled) {
+          await send("Input.dispatchMouseEvent", { type: "mousePressed", x: state.x, y: state.y, button: "left", clickCount: 1 });
+          await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: state.x, y: state.y, button: "left", clickCount: 1 });
+          return;
+        }
+        previous = state;
+        // Let the pending grid-row transition advance before re-probing.
+        await evaluate("new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))");
+      }
+      throw new Error("click target never became hit-testable and settled: " + selector);
     };
     const key = async (name, type = "both", shift = false) => {
       const code = name === " " ? "Space" : name;

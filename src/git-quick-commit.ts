@@ -669,8 +669,14 @@ function runCliText(
     // The writable stream emits EPIPE independently of ChildProcess.error;
     // without a listener that becomes an uncaught exception after callers
     // have already finished their turn or closed storage.
+    //
+    // A closed stdin is only a delivery failure when we actually had prompt
+    // bytes to send. Arg-driven providers (e.g. `pi`) are called with an empty
+    // prompt, so the child may close stdin before we end the stream; treating
+    // that as failure made the same run succeed or fail at random.
+    const expectsStdin = prompt.length > 0;
     child.stdin?.on("error", (error: NodeJS.ErrnoException) => {
-      if (settled) return;
+      if (settled || !expectsStdin) return;
       settled = true;
       clearTimeout(timeout);
       child.kill("SIGTERM");

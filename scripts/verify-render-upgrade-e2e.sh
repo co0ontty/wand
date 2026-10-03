@@ -67,7 +67,7 @@ trap cleanup EXIT
 # 只认本实例的 daemon。判据是「<可执行文件> -c <本实例 config>」这个完整调用形态：
 #   · 不能只用命令行子串 —— 本脚本的隔离目录名里就含 "wand-render"，
 #     Server 自己的命令行（... web -c .../wand-render-upgrade-e2e/config.json）也会命中；
-#   · 也不能用 `ps -o comm` —— macOS 上 comm 会被截断成 "/Users/co0ontty/" 之类，
+#   · 也不能用 `ps -o comm` —— macOS 上 comm 会被截断成 "/Users/…/" 之类，
 #     比不出可执行文件名。
 legacy_daemon_pid() {
   ps -Ao pid=,command= | awk -v cfg="$CONFIG" '

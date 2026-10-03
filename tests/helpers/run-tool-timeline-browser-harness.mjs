@@ -131,7 +131,68 @@ try {
     // Body-bearing replies retain their existing disclosure and regular copy/identity.
     await e('(async()=>{fixture[0].content.push({type:"text",text:"正式回复"});await h.fresh(fixture)})()');
     assert.equal(await e('document.querySelectorAll(".assistant-reply-disclosure").length'),1);
-    report.cases.push({ mode, fixedHeight:240, rows:40, requestCount:2, stableScroll:true, closePaths:true });
+    // Decisions stay independent but their own details start closed, regardless of general tool defaults.
+    const decisionRequestsBefore = report.requests.length;
+    await e(`(async()=>{h.state.config={...(h.state.config||{}),cardDefaults:{terminal:true,editCards:true}};window.decisionSummary={mode:"mixed",questions:3,preview:"订单被重复扣款",outcome:"category=billing 84%",label:"category=billing 84% · 3 题 · 订单被重复扣款"};window.decisionUse={type:"tool_use",id:${JSON.stringify('decision-'+mode)},name:"Bash",input:{command:"wand decide --stdin"},semantic:{kind:"decision",summary:decisionSummary},activity:{kind:"run_command",label:"stale metadata"}};window.decisionResult={type:"tool_result",tool_use_id:decisionUse.id,semantic:{kind:"decision",summary:decisionSummary},content:JSON.stringify({runtime:"laya-mlx",experimental:true,answers:{department:{choice:"billing"},unsafe:"<img src=x onerror='globalThis.injected=true'>"}})};await h.fresh([{role:"assistant",uuid:"decision-call",content:[decisionUse]}]);h.publish(h.turns(),true);await h.settle()})()`);
+    assert.equal(await e('document.querySelectorAll(".decision-tool-card").length'),1);
+    assert.equal(await e('!!document.querySelector(".decision-tool-card").closest(".chat-activity")'),false);
+    assert.equal(await e('document.querySelector(".decision-tool-card .tool-use-header").getAttribute("aria-expanded")'),"false");
+    // 收起态就要看得到服务端投影：结论 + 题数 + 被判定内容，两端渲染同一份 label。
+    const decisionHead = await e('document.querySelector(".decision-tool-card .decision-tool-summary").textContent');
+    assert.ok(decisionHead.includes("category=billing 84% · 3 题 · 订单被重复扣款"), "collapsed decision card shows the projected summary: " + decisionHead);
+    assert.ok(decisionHead.endsWith("· 实验性 · 判断中"), "summary stays ahead of the experimental and status labels: " + decisionHead);
+    assert.equal(await e('document.querySelector(".decision-tool-card .decision-tool-summary").getAttribute("role")'),"status");
+    // 两行卡头：箭头留在标题行右侧（窄屏也不换行到下一行左侧）。
+    const decisionHeadBox = await e('(()=>{const h=document.querySelector(".decision-tool-card .tool-use-header");const toggle=h.querySelector(".tool-use-toggle");const hb=h.getBoundingClientRect();const tb=toggle.getBoundingClientRect();return{sameRow:(tb.top+tb.height/2)<=hb.top+hb.height/2+1,rightGap:hb.right-tb.right}})()');
+    assert.equal(decisionHeadBox.sameRow,true,"decision toggle stays on the header's first row: "+JSON.stringify({mode,...decisionHeadBox}));
+    assert.ok(decisionHeadBox.rightGap>=0&&decisionHeadBox.rightGap<=20,"decision toggle stays at the trailing edge: "+JSON.stringify({mode,...decisionHeadBox}));
+    assert.equal(await e('document.querySelector(".decision-tool-card .tool-use-body").getAttribute("aria-hidden")'),"true");
+    assert.equal(await e('document.querySelector(".decision-tool-card .tool-use-body").inert'),true);
+    assert.equal(await e('document.querySelector(".decision-tool-details").getBoundingClientRect().height'),0);
+    assert.equal(await e('document.querySelector(".decision-tool-card").textContent.includes("判断中")'),true);
+    await e('window.decisionHeader=document.querySelector(".decision-tool-card .tool-use-header");window.decisionArrow=decisionHeader.querySelector(".tool-use-toggle svg");decisionHeader.scrollIntoView({block:"nearest"})');await e('h.settle()');
+    const headerBefore=await e('decisionHeader.getBoundingClientRect().toJSON()');
+    if(output&&(mode==="desktop"||mode==="390px")){const shot=await send("Page.captureScreenshot",{format:"png"});writeFileSync(join(output,`decision-collapsed-${mode}.png`),Buffer.from(shot.data,"base64"));}
+    await click(".decision-tool-card .tool-use-header");await e('h.settle()');
+    assert.equal(await e('document.querySelector(".decision-tool-card").classList.contains("collapsed")'),false);
+    assert.equal(await e('decisionHeader===document.querySelector(".decision-tool-card .tool-use-header")&&decisionHeader.contains(decisionArrow)'),true);
+    const headerAfter=await e('decisionHeader.getBoundingClientRect().toJSON()');
+    for(const axis of ["x","y","width","height"])assert.ok(Math.abs(headerBefore[axis]-headerAfter[axis])<=1,"decision header stays in place: "+axis);
+    assert.equal(await e('document.querySelector(".decision-tool-card .tool-use-body").inert'),false);
+    await e('(async()=>{h.publish([{role:"assistant",uuid:"decision-call",content:[decisionUse]},{role:"assistant",uuid:"decision-result",content:[decisionResult]}]);await h.settle()})()');
+    assert.equal(await e('document.querySelectorAll(".decision-tool-card").length'),1,"late result updates the invocation, not a second card");
+    assert.equal(await e('document.querySelector(".decision-tool-card .tool-use-result-content").textContent.includes("billing")'),true);
+    assert.equal(await e('document.querySelectorAll(".decision-tool-card img").length'),0,"result text cannot inject HTML");
+    assert.equal(report.requests.length,decisionRequestsBefore,"decision disclosure must not prefetch details");
+    assert.equal(await e('document.querySelector(".decision-tool-card").classList.contains("collapsed")'),false,"late results preserve explicit expansion");
+    await click('.decision-tool-card .tool-use-header');await e('h.settle()');
+    await e('(async()=>{h.publish(h.turns());await h.settle()})()');
+    assert.equal(await e('document.querySelector(".decision-tool-card").classList.contains("collapsed")'),true,"refresh preserves explicit collapse");
+    await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});await e('h.settle()');
+    assert.equal(await e('document.querySelector(".decision-tool-card").classList.contains("collapsed")'),false,"keyboard opens the same disclosure");
+    if(output && (mode==="desktop" || mode==="390px")){const shot=await send("Page.captureScreenshot",{format:"png"});writeFileSync(join(output,`decision-${mode}.png`),Buffer.from(shot.data,"base64"));}
+    await e('(async()=>{await h.fresh([{role:"assistant",uuid:"decision-orphan",content:[decisionResult]}])})()');
+    assert.equal(await e('document.querySelectorAll(".decision-tool-card").length'),1,"a results-only page stays visible");
+    // 迟到的结果页只有结果块：摘要必须从它自己的投影里读出来，没有投影才退回通用文案。
+    assert.equal(await e('document.querySelector(".decision-tool-card .decision-tool-summary").textContent.startsWith("category=billing 84%")'),true);
+    await e('(async()=>{await h.fresh([{role:"assistant",uuid:"decision-legacy",content:[{...decisionResult,semantic:{kind:"decision"}}]}])})()');
+    assert.equal(await e('document.querySelector(".decision-tool-card .decision-tool-summary").textContent.startsWith("选择 / 评分 / 是非判断")'),true,"no projection falls back without inventing a result");
+    await e('(async()=>{await h.fresh([{role:"assistant",uuid:"decision-error",content:[{...decisionUse,id:decisionUse.id+"-error"},{...decisionResult,tool_use_id:decisionUse.id+"-error",is_error:true,content:"CONTEXT_LIMIT"}]}])})()');
+    assert.equal(await e('!!document.querySelector(".decision-tool-card.error.collapsed")'),true,"new errors keep the collapsed default");
+    await click('.decision-tool-card .tool-use-header');await e('h.settle()');
+    assert.equal(await e('!!document.querySelector(".decision-tool-card.error:not(.collapsed)")'),true);
+    assert.equal(await e('document.querySelector(".decision-tool-card").textContent.includes("CONTEXT_LIMIT")'),true);
+    assert.equal(await e('document.documentElement.scrollWidth > innerWidth'),false);
+    await e('(async()=>{await h.fresh([{role:"assistant",uuid:"decision-truncated",content:[decisionUse,{...decisionResult,content:"SHORT_PART",_truncated:true}]}]);window.decisionButton=document.querySelector(".decision-result-load")})()');
+    await e('decisionButton.scrollIntoView({block:"nearest"})');await e('h.settle()');
+    const loadBounds=await e('decisionButton.getBoundingClientRect().toJSON()');
+    await click('.decision-result-load');await wait('document.querySelector(".decision-tool-card").textContent.includes("DETAIL_ONLY")');await e('h.settle()');
+    assert.equal(await e('decisionButton===document.querySelector(".decision-result-load")'),true,"detail loading keeps the same feedback button");
+    const loadedBounds=await e('decisionButton.getBoundingClientRect().toJSON()');
+    for(const axis of ["x","y","width","height"])assert.ok(Math.abs(loadBounds[axis]-loadedBounds[axis])<=1,"decision load feedback stays in place: "+axis+" "+JSON.stringify({mode,before:loadBounds,after:loadedBounds}));
+    await e('(async()=>{h.publish([{role:"assistant",uuid:"decision-truncated",content:[decisionUse,{...decisionResult,content:"NEW_LIVE_RESULT"}]}]);await h.settle()})()');
+    assert.equal(await e('document.querySelector(".decision-tool-card").textContent.includes("NEW_LIVE_RESULT")'),true,"late full result wins over cached detail");
+    report.cases.push({ mode, fixedHeight:240, rows:40, requestCount:2, stableScroll:true, closePaths:true, decisionIndependent:true, decisionPendingErrorAndOrphan:true, decisionFeedbackStable:true, decisionDefaultCollapsed:true, decisionHeaderStable:true });
   }
   // 收起态行首时间：没有展开时也能一眼看到「什么时候跑的」，位置在分类计数之前。
   await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
@@ -149,6 +210,20 @@ try {
     const shot = await send("Page.captureScreenshot",{format:"png"});
     writeFileSync(join(output,"collapsed-summary-time.png"),Buffer.from(shot.data,"base64"));
   }
+  // Compact data must remain useful before any detail request is made.
+  await e(`(async()=>{await h.fresh([{role:"assistant",uuid:"preview-row",content:[
+    {type:"tool_use",id:"preview-call",name:"Bash",input:{},preview:"npm run check",activity:{kind:"run_command",label:"运行命令 · Bash"}},
+    {type:"tool_result",tool_use_id:"preview-call",content:"",_truncated:true,is_error:true,preview:"退出码 1 · TypeError: missing element"}
+  ]}])})()`);
+  const previewRequests = report.requests.length;
+  assert.doesNotMatch(await e('document.querySelector(".chat-activity-summary").textContent'), /npm run check|退出码 1/);
+  assert.equal(await e('document.querySelector(".chat-activity-menu").getBoundingClientRect().height'), 0);
+  await click('.chat-activity-summary'); await e('h.settle()');
+  assert.equal(await e('document.querySelector(".chat-activity-entry-preview").textContent'), 'npm run check');
+  assert.match(await e('document.querySelector(".chat-activity-entry-result").textContent'), /TypeError/);
+  assert.equal(report.requests.length, previewRequests, 'summary and timeline do not fetch bodies');
+  assert.equal(await e('document.querySelector(".chat-activity-entry").dataset.status'), 'error');
+  report.cases.push({mode:'compact-preview',collapsedOverviewOnly:true,inputVisible:true,resultVisible:true,noDetailFetch:true});
   assert.deepEqual(report.errors, []); assert.ok(report.removedSelectorHits.every(x=>x.groups===0 && x.oldAnimation===0));
   report.ok = true; console.log(JSON.stringify(report));
 } catch (error) {

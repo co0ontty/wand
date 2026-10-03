@@ -15,6 +15,7 @@ import { ComposerPopoverAction } from "../composer-popover/action";
 import { memberCoatIndex, PixelCat, TeamAvatar } from "./avatar";
 import { teamChatComposer } from "./composer-bridge";
 import { aiTeamsRepository } from "./repository";
+import { deliveryResultText, deliverySummaryText, TeamDeliveryDetails } from "./team-delivery";
 
 /**
  * 面板内嵌的群聊视图（§5.3）：只读渲染 `detail.chatTurns`，加一个往 relay 会话发话的输入框。
@@ -1224,7 +1225,12 @@ export function mergeTeamChatDetail(
   current: AiTeamRunDetail | null,
   next: AiTeamRunDetail,
 ): AiTeamRunDetail {
-  if (!current || current.run.id !== next.run.id) return next;
+  if (!current) return next;
+  if (current.run.id !== next.run.id) {
+    // A delayed older run cannot replace the current run of the same task.
+    return current.run.taskId === next.run.taskId
+      && Date.parse(next.run.createdAt) < Date.parse(current.run.createdAt) ? current : next;
+  }
   const currentAt = Date.parse(current.run.updatedAt ?? "");
   const nextAt = Date.parse(next.run.updatedAt ?? "");
   const settled = (detail: AiTeamRunDetail): number => detail.steps.filter((step) =>
@@ -1244,7 +1250,24 @@ export function mergeTeamChatDetail(
   const titleDetail = next.chatTitle === undefined
     || Date.parse(current.chatTitleUpdatedAt ?? "") > Date.parse(next.chatTitleUpdatedAt ?? "")
     ? current : next;
-  return { ...base, ...(displayTeam ? { displayTeam } : {}),
+  const beforeDelivery = current.delivery;
+  const afterDelivery = next.delivery;
+  const delivery = stale ? beforeDelivery : beforeDelivery && (nextAt === currentAt && !afterDelivery
+    || afterDelivery && (Date.parse(afterDelivery.updatedAt) < Date.parse(beforeDelivery.updatedAt)
+      || afterDelivery.updatedAt === beforeDelivery.updatedAt
+        && (afterDelivery.totalFiles < beforeDelivery.totalFiles
+          || afterDelivery.files.length < beforeDelivery.files.length
+          || afterDelivery.handoffs.length < beforeDelivery.handoffs.length
+          || beforeDelivery.files.some((item) => {
+            const fetched = afterDelivery.files.find((file) => file.stepId === item.stepId
+              && file.file.path === item.file.path);
+            // A full bounded window can regress without shrinking; keep the snapshot, not a union.
+            // Frozen previews may arrive after the run timestamp; an older DTO can omit them.
+            return !fetched || (item.file.preview?.title.trim() && !fetched.file.preview?.title.trim()
+              || item.file.preview?.excerpt.trim() && !fetched.file.preview?.excerpt.trim());
+          }))))
+    ? beforeDelivery : afterDelivery;
+  return { ...base, ...(delivery ? { delivery } : {}), ...(displayTeam ? { displayTeam } : {}),
     ...(titleDetail.chatTitle !== undefined
       ? { chatTitle: titleDetail.chatTitle, chatTitleUpdatedAt: titleDetail.chatTitleUpdatedAt } : {}),
     chatTurns: mergeTeamChatTurns(current.chatTurns, next.chatTurns) };
@@ -1394,6 +1417,7 @@ export function TeamChatView({ detail, onChange, onOpenSession, details, staleRu
   const compositionEpochRef = React.useRef(0);
   const [liveRows, setLiveRows] = React.useState<LiveRow[]>([]);
   const [detailsOpen, setDetailsOpen] = React.useState(false);
+  const contextTriggerRef = React.useRef<HTMLButtonElement>(null);
   const [docLayer, setDocLayer] = React.useState<ChatDocLayer | null>(null);
   const [arrival, setArrival] = React.useState<{ scope: string; ids: ReadonlySet<string> }>(
     { scope: "", ids: new Set() },
@@ -1848,20 +1872,32 @@ export function TeamChatView({ detail, onChange, onOpenSession, details, staleRu
     }
   };
 
-  return <div className="task-board-team-chat">
+  const delivery = detail.delivery?.runId === run.id ? detail.delivery : undefined;
+  return <div className="task-board-team-chat" onKeyDown={(event) => {
+    if (event.key === "Escape" && detailsOpen && !docLayer) {
+      event.stopPropagation();
+      setDetailsOpen(false);
+      contextTriggerRef.current?.focus({ preventScroll: true });
+    }
+  }}>
     <button
+      ref={contextTriggerRef}
       type="button"
       className="team-chat-context"
       aria-expanded={detailsOpen}
       aria-controls={detailsId}
       onClick={() => setDetailsOpen((current) => !current)}
     >
-      <span className="team-chat-context-label">群公告</span>
-      <span className="team-chat-context-title" title={run.objective}>{run.objective.split("\n")[0] || "查看本次任务"}</span>
+      <span className="team-chat-context-label">{delivery ? "交付" : "群公告"}</span>
+      <span className="team-chat-context-title" title={delivery ? deliverySummaryText(delivery) : run.objective}>
+        {delivery ? deliveryResultText(delivery) : run.objective.split("\n")[0] || "查看本次任务"}
+      </span>
+      {delivery ? <small className="team-chat-context-action">{delivery.totalFiles} 文件 · {delivery.totalHandoffs} 接力</small> : null}
       <span className="team-chat-context-action">{detailsOpen ? "收起" : "详情"}</span>
     </button>
     <div id={detailsId} className="team-chat-details" data-open={detailsOpen || undefined} inert={!detailsOpen}>
       <div className="team-chat-details-inner">
+        {delivery ? <TeamDeliveryDetails delivery={delivery}/> : null}
         <MainTaskCard detail={detail}/>
         <TeamOffice detail={detail} onOpenSession={onOpenSession}/>
         {details}

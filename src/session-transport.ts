@@ -86,6 +86,8 @@ function sessionBase(snapshot: SessionSnapshot): SessionBaseDTO {
     exitCode: snapshot.exitCode,
     startedAt: snapshot.startedAt,
     endedAt: snapshot.endedAt,
+    completionRevision: snapshot.completionRevision ?? 0,
+    viewedCompletionRevision: snapshot.viewedCompletionRevision ?? 0,
     archived: snapshot.archived,
     archivedAt: snapshot.archivedAt,
     permissionBlocked: snapshot.permissionBlocked,

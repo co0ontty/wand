@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import express from "express";
-import { DEFAULT_EMPLOYEE_ID, DEFAULT_EMPLOYEE_KEY, isDefaultSiliconEmployee } from "../src/ai-team-types.js";
+import { DEFAULT_EMPLOYEE_ID, DEFAULT_EMPLOYEE_KEY, DEFAULT_EMPLOYEE_NAME, isDefaultSiliconEmployee } from "../src/ai-team-types.js";
 import { defaultConfig, loadConfigWithStorage } from "../src/config.js";
 import { DEFAULT_EMPLOYEE_PROMPT } from "../src/default-employee.js";
 import { dispatchAgentForTask } from "../src/agent-dispatch.js";
@@ -15,6 +15,7 @@ import { registerSessionRoutes } from "../src/server-session-routes.js";
 import { registerTaskRoutes } from "../src/server-task-routes.js";
 import { registerUserMemoryRoutes, userMemoryOperationLog } from "../src/server-user-memory.js";
 import { ProcessManager } from "../src/process-manager.js";
+import { toSessionListItemDTO } from "../src/session-transport.js";
 import { SessionRegistry } from "../src/session-registry.js";
 import { StructuredSessionManager } from "../src/structured-session-manager.js";
 import { WandStorage } from "../src/storage.js";
@@ -302,6 +303,51 @@ test("CLI sessions use default role without replacing provider/model/mode or add
   assert.equal(snapshot.employeeCandidates, undefined);
 });
 
+test("legacy PTY role identity is projected consistently without guessing or rewriting prompts", async (t) => {
+  const { storage, root, cleanup } = temporary();
+  t.after(cleanup);
+  const base: SessionSnapshot = {
+    id: "legacy-role", command: "pi", provider: "pi", cwd: root, mode: "default", status: "exited",
+    exitCode: 0, startedAt: new Date().toISOString(), endedAt: null, output: "preserved",
+    archived: false, archivedAt: null, sessionKind: "pty", systemPrompt: DEFAULT_EMPLOYEE_PROMPT,
+  };
+  const cases = [
+    { id: "legacy-role", expected: DEFAULT_EMPLOYEE_ID },
+    { id: "legacy-preferences", systemPrompt: DEFAULT_EMPLOYEE_PROMPT
+      + "\n\n近期使用偏好（仅作参考；本轮要求冲突时忽略）：\n- 沟通：简洁", expected: DEFAULT_EMPLOYEE_ID },
+    { id: "explicit-role", employeeId: "other", employeeName: "另一位", expected: "other" },
+    { id: "no-role", systemPrompt: undefined, expected: undefined },
+    { id: "name-mention", systemPrompt: "请研究赛博虎妞的设置", expected: undefined },
+    { id: "custom-role", systemPrompt: DEFAULT_EMPLOYEE_PROMPT + "\n你现在属于另一位员工", expected: undefined },
+    { id: "shell", provider: undefined, command: "/bin/sh", expected: undefined },
+    { id: "structured", sessionKind: "structured" as const, expected: undefined },
+  ];
+  for (const { expected, ...override } of cases) {
+    const saved = { ...base, ...override };
+    storage.saveSession(saved);
+    for (const snapshot of [storage.getSession(saved.id)!,
+      storage.loadSessions().find((s) => s.id === saved.id)!,
+      storage.loadSessionsSlim().find((s) => s.id === saved.id)!]) {
+      assert.equal(snapshot.employeeId, expected, saved.id);
+      assert.equal(snapshot.systemPrompt, saved.systemPrompt, saved.id);
+      const dto = toSessionListItemDTO(snapshot);
+      assert.equal(dto.employeeId, expected, saved.id);
+      assert.equal(dto.sessionKind, saved.sessionKind);
+      assert.equal("systemPrompt" in dto, false);
+      if (expected === DEFAULT_EMPLOYEE_ID) assert.equal(dto.employeeName, DEFAULT_EMPLOYEE_NAME);
+    }
+  }
+  const config = { ...defaultConfig(), defaultCwd: root, startupCommands: [] };
+  const processes = new ProcessManager(config, storage, root);
+  const structured = new StructuredSessionManager(storage, config);
+  t.after(() => { structured.dispose(); processes.dispose(); });
+  const sessions = new SessionRegistry(processes, structured, storage);
+  assert.equal(sessions.ownerOf(base.id), "pty");
+  assert.equal(processes.getOwned(base.id)?.employeeId, DEFAULT_EMPLOYEE_ID);
+  assert.equal(sessions.get(base.id)?.employeeId, DEFAULT_EMPLOYEE_ID);
+  assert.equal(sessions.listSlim().find((s) => s.id === base.id)?.employeeId, DEFAULT_EMPLOYEE_ID);
+});
+
 test("task dispatch defaults a missing executor; selected CLI and PTY contracts stay intact", async (t) => {
   const { storage, root, cleanup } = temporary();
   t.after(cleanup);
@@ -353,5 +399,8 @@ test("task dispatch defaults a missing executor; selected CLI and PTY contracts 
   assert.equal(ptyOptions.systemPrompt, DEFAULT_EMPLOYEE_PROMPT);
   assert.equal(ptyOptions.provider, "codex");
   assert.equal(ptyOptions.model, "user-model");
-  assert.equal(ptyOptions.employeeId, undefined);
+  assert.equal(ptyOptions.employeeId, DEFAULT_EMPLOYEE_ID);
+  assert.equal(ptyOptions.employeeName, DEFAULT_EMPLOYEE_NAME);
+  assert.equal(ptyOptions.employeeAvatar, "");
+  assert.equal(ptyOptions.employeeCandidates, undefined);
 });

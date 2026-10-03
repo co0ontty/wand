@@ -1,6 +1,7 @@
 import type { AppState } from "./types";
 import { ComposerQueueClock, ComposerStore } from "./composer.js";
 import { ChatRenderCache } from "./chat-render-cache.js";
+import { PROVIDER_IDS, isNativeThinkingEffort } from "../provider-identity";
 
 export const composer = new ComposerStore({
   storage: () => localStorage,
@@ -155,16 +156,16 @@ export var state: AppState = {
   chatModels: (function() {
     try {
       var legacy = localStorage.getItem("wand-chat-model") || "";
-      return {
-        claude: localStorage.getItem("wand-chat-model-claude") || legacy,
-        codex: localStorage.getItem("wand-chat-model-codex") || "",
-        opencode: localStorage.getItem("wand-chat-model-opencode") || "",
-        grok: localStorage.getItem("wand-chat-model-grok") || "",
-        qoder: localStorage.getItem("wand-chat-model-qoder") || "",
-        pi: localStorage.getItem("wand-chat-model-pi") || "",
-      };
+      // 按 provider 唯一真源构造，新增 provider 不会再漏掉这里的键。
+      var models: Record<string, string> = {};
+      PROVIDER_IDS.forEach(function(provider) {
+        models[provider] = localStorage.getItem("wand-chat-model-" + provider) || (provider === "claude" ? legacy : "");
+      });
+      return models;
     } catch (e) {
-      return { claude: "", codex: "", opencode: "", grok: "", qoder: "", pi: "" };
+      var fallback: Record<string, string> = {};
+      PROVIDER_IDS.forEach(function(provider) { fallback[provider] = ""; });
+      return fallback;
     }
   })(),
   chatModel: (function() {
@@ -173,7 +174,7 @@ export var state: AppState = {
   chatThinking: (function() {
     try {
       var v = localStorage.getItem("wand-thinking-effort") || "off";
-      return (v === "off" || v === "standard" || v === "deep" || v === "max" || /^(claude|codex|opencode|grok|qoder|pi):[a-z0-9][a-z0-9_-]{0,31}$/.test(v)) ? v : "off";
+      return (v === "off" || v === "standard" || v === "deep" || v === "max" || isNativeThinkingEffort(v)) ? v : "off";
     } catch (e) { return "off"; }
   })(),
   availableModels: [],

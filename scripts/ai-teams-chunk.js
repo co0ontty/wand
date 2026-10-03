@@ -16,7 +16,10 @@ export const AI_TEAMS_CHUNK_OUTFILE = path.join(WEB_UI_ROOT, "content", "ai-team
 const CHUNK_FILES = new Set([
   AI_TEAMS_CHUNK_ENTRY,
   path.join(REACT_ROOT, "ai-teams", "teams-page.tsx"),
+  path.join(REACT_ROOT, "ai-teams", "team-employee-invite.tsx"),
+  path.join(REACT_ROOT, "ai-teams", "team-employee-binding.ts"),
   path.join(REACT_ROOT, "ai-teams", "team-chat-view.tsx"),
+  path.join(REACT_ROOT, "ai-teams", "team-delivery.tsx"),
   path.join(REACT_ROOT, "ai-teams", "team-chat-page.tsx"),
   path.join(REACT_ROOT, "ai-teams", "styles.ts"),
   path.join(REACT_ROOT, "issues", "team-run-panel.tsx"),
@@ -26,6 +29,7 @@ const CHUNK_FILES = new Set([
   path.join(REACT_ROOT, "agents", "employee-card.tsx"),
   path.join(REACT_ROOT, "agents", "employee-memory.tsx"),
   path.join(REACT_ROOT, "agents", "employee-knowledge.tsx"),
+  path.join(REACT_ROOT, "agents", "employee-tags-field.tsx"),
   path.join(REACT_ROOT, "agents", "employee-create-form.tsx"),
   path.join(REACT_ROOT, "agents", "employee-list-page.tsx"),
 ]);

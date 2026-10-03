@@ -10,6 +10,11 @@ import {
   agentKey,
   memberAgents,
 } from "../../../ai-team-types";
+import type { SiliconEmployee } from "../../../ai-team-types.js";
+import { useSiliconEmployees } from "../agents/employee-repository.js";
+import { TeamEmployeeInvite } from "./team-employee-invite.js";
+import { bindTeamEmployee, duplicateTeamEmployees, employeeJoinError, teamRequestInput, teamSaveDefinitelyRejected,
+  type TeamDraftInput, type TeamMemberDraft } from "./team-employee-binding.js";
 import type { WandTaskAgent } from "../../../task-types";
 import { failureMessage } from "../errors";
 import { AgentFields } from "../issues/agent-fields";
@@ -26,6 +31,7 @@ import {
 import { taskBoardController, taskBoardStore } from "../issues/task-board-controller";
 import { taskBoardRepository } from "../issues/task-board-repository";
 import { RUN_STATUS, TeamRunView } from "../issues/team-run-panel";
+import { mergeTeamChatDetail } from "./team-chat-view";
 import { subscribeWandModelCatalog, wandModelDisplayName } from "../model-catalog";
 import { wandOverlay } from "../overlay-controller";
 import { sortProviderOptions, useProviderUsage } from "../provider-usage";
@@ -165,12 +171,13 @@ export {
 };
 
 /** 保存前的整份草稿校验，与 §4.1 服务端同口径；返回要原位显示的中文文案。 */
-export function validateTeamDraft(members: AiTeamMember[]): string[] {
+export function validateTeamDraft(members: TeamMemberDraft[]): string[] {
   const errors: string[] = [];
   if (members.length < AI_TEAM_MIN_MEMBERS) errors.push(`至少要有 ${AI_TEAM_MIN_MEMBERS} 位成员。`);
   if (members.length > AI_TEAM_MAX_MEMBERS) errors.push(`最多 ${AI_TEAM_MAX_MEMBERS} 位成员。`);
   const leaders = members.filter((member) => member.isLeader).length;
   if (leaders !== 1) errors.push(`负责人要恰好 1 位，当前 ${leaders} 位。`);
+  for (const name of duplicateTeamEmployees(members)) errors.push(`${name}：同一员工不能重复加入团队。`);
   members.forEach((member, index) => {
     const error = candidateListError(memberAgents(member));
     if (error) errors.push(`${member.name || `成员 ${index + 1}`}：${error}`);
@@ -184,7 +191,7 @@ function AvatarPicker({
   disabled,
   onChange,
 }: {
-  member: AiTeamMember;
+  member: TeamMemberDraft;
   disabled: boolean;
   onChange(avatar: string): void;
 }): React.ReactElement {
@@ -243,21 +250,30 @@ function MemberCard({
   providerOptions,
   disabled,
   canRemove,
+  employeeSource,
+  members,
+  onBind,
   onToggle,
   onChange,
   onRemove,
 }: {
-  member: AiTeamMember;
+  member: TeamMemberDraft;
   index: number;
   open: boolean;
   catalog: IssueModelCatalog | null;
   providerOptions: ProviderOptions;
   disabled: boolean;
   canRemove: boolean;
+  employeeSource: ReturnType<typeof useSiliconEmployees>;
+  members: TeamMemberDraft[];
+  onBind(employee: SiliconEmployee): void;
   onToggle(): void;
-  onChange(patch: Partial<AiTeamMember>): void;
+  onChange(patch: Partial<TeamMemberDraft>): void;
   onRemove(): void;
 }): React.ReactElement {
+  const bound = !!member.employeeId;
+  const employee = employeeSource.employees.find((entry) => entry.id === member.employeeId);
+  if (bound && employee?.agents.length) member = bindTeamEmployee(member, employee);
   const label = member.name || `成员 ${index + 1}`;
   const agents = memberAgents(member);
   const showAgents = (next: WandTaskAgent[]): void => {
@@ -279,16 +295,25 @@ function MemberCard({
     </button>
     <div className="wand-team-member-body" inert={!open}>
       <div className="wand-team-member-inner">
+        <TeamEmployeeInvite {...employeeSource} members={members} replacingIndex={index}
+          disabled={disabled} onPick={onBind}/>
+        {bound ? <>
+          <small className="wand-new-session-field-hint">已绑定通讯录员工；名字、头像、基础角色与候选只读。知识归属仍是该员工，不共享私聊。</small>
+          {employee?.archivedAt || (!employeeSource.loading && !employeeSource.error && !employee)
+            ? <small className="wand-new-session-error" role="alert">绑定员工已归档或删除，绑定保留。请明确替换、移除或改为手工 CLI 成员。</small> : null}
+          <WandButton kind="ghost" size="small" disabled={disabled}
+            onClick={() => onChange({ ...member, employeeId: null })}>改为手工 CLI 成员（解除绑定）</WandButton>
+        </> : null}
         <SettingsField label="名字" htmlFor={`team-member-${index}-name`}>
           <SettingsTextInput
             id={`team-member-${index}-name`}
             value={member.name}
             placeholder="成员名字"
-            disabled={disabled}
+            disabled={disabled || bound}
             onChange={(name) => onChange({ name })}
           />
         </SettingsField>
-        <AvatarPicker member={member} disabled={disabled} onChange={(avatar) => onChange({ avatar })}/>
+        <AvatarPicker member={member} disabled={disabled || bound} onChange={(avatar) => onChange({ avatar })}/>
         <textarea
           className="wand-settings-input wand-ai-team-duty resize-none"
           rows={3}
@@ -303,9 +328,15 @@ function MemberCard({
           label={label}
           catalog={catalog}
           providerOptions={providerOptions}
-          disabled={disabled}
+          disabled={disabled || bound}
           onChange={showAgents}
         />
+        <SettingsField label="团队角色">
+          <WandSelect ariaLabel={`${label}的团队角色`} value={member.role ?? "any"} disabled={disabled}
+            options={[{ value: "any", label: "不限" }, { value: "plan", label: "规划" },
+              { value: "work", label: "执行" }, { value: "verify", label: "验证" }]}
+            onValueChange={(role) => onChange({ role: role as AiTeamMember["role"] })}/>
+        </SettingsField>
         <div className="wand-team-member-actions">
           {member.isLeader ? null : <WandButton kind="ghost" size="small" disabled={disabled} onClick={() => onChange({ isLeader: true })}>
             设为负责人
@@ -319,9 +350,10 @@ function MemberCard({
   </article>;
 }
 
-function TeamEditor({
+export function TeamEditor({
   team,
   initial,
+  active = true,
   catalog,
   providerOptions,
   defaultAgent,
@@ -331,30 +363,33 @@ function TeamEditor({
 }: {
   team: AiTeam | null;
   initial: AiTeamInput;
+  active?: boolean;
   catalog: IssueModelCatalog | null;
   providerOptions: ProviderOptions;
   defaultAgent: WandTaskAgent;
   onSaved(team: AiTeam, created: boolean): void;
   onDeleted(id: string): void;
   /** 草稿是否偏离初始值；宿主用它决定离开前要不要确认，编辑过程本身不上报服务端。 */
-  onDirtyChange?: (dirty: boolean) => void;
+  onDirtyChange?: (dirty: boolean, pending: boolean) => void;
 }): React.ReactElement {
-  const [draft, setDraft] = React.useState<AiTeamInput>(initial);
+  const [draft, setDraft] = React.useState<TeamDraftInput>(initial);
   const [openMember, setOpenMember] = React.useState(-1);
   const [pending, setPending] = React.useState(false);
+  const employeeSource = useSiliconEmployees({ includeArchived: true, enabled: active });
+  const [unknownSave, setUnknownSave] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
   const [status, setStatus] = React.useState("");
   const [tone, setTone] = React.useState<"info" | "success" | "error">("info");
-  const busy = pending || deleting;
+  const busy = pending || deleting || unknownSave;
   const idPrefix = `ai-team-${team?.id ?? "new"}`;
   const leaderIndex = draft.members.findIndex((member) => member.isLeader);
   // 草稿是否偏离初始值：AiTeamInput 是纯数据（成员数量有限），直接比序列化结果，
   // 不给每个字段单独维护 touched 标记。宿主只读一个布尔，编辑过程零开销。
   const initialKey = JSON.stringify(initial);
   const dirty = React.useMemo(() => JSON.stringify(draft) !== initialKey, [draft, initialKey]);
-  React.useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
+  React.useEffect(() => { onDirtyChange?.(dirty || busy, pending || deleting); }, [dirty, busy, pending, deleting, onDirtyChange]);
 
-  const patchMember = (index: number, patch: Partial<AiTeamMember>): void => {
+  const patchMember = (index: number, patch: Partial<TeamMemberDraft>): void => {
     setDraft((current) => ({
       ...current,
       members: current.members.map((member, at) => {
@@ -375,6 +410,7 @@ function TeamEditor({
   };
 
   async function save(): Promise<void> {
+    if (busy) return;
     const errors = validateTeamDraft(draft.members);
     if (errors.length > 0) {
       // 与 §4.1 同口径的前端拦截：错误原位显示在保存条上，不另起浮层。
@@ -385,13 +421,16 @@ function TeamEditor({
     setPending(true);
     setStatus("");
     try {
-      const saved = team ? await aiTeamsRepository.update(team.id, draft) : await aiTeamsRepository.create(draft);
+      const saved = team ? await aiTeamsRepository.update(team.id, teamRequestInput(draft)) : await aiTeamsRepository.create(teamRequestInput(draft));
       setDraft(inputOf(saved));
       setStatus(team ? "已保存。" : "团队已创建。");
       setTone("success");
       onSaved(saved, !team);
     } catch (cause) {
-      setStatus(failureMessage(cause, "保存团队失败。"));
+      const rejected = teamSaveDefinitelyRejected(cause);
+      setUnknownSave(!rejected);
+      setStatus(rejected ? failureMessage(cause, "保存团队失败。")
+        : "保存结果尚未确认，草稿保留。请先核对团队列表，不要重复保存。");
       setTone("error");
     } finally {
       setPending(false);
@@ -431,6 +470,11 @@ function TeamEditor({
     providerOptions={providerOptions}
     disabled={busy}
     canRemove={draft.members.length > AI_TEAM_MIN_MEMBERS}
+    employeeSource={employeeSource}
+    members={draft.members}
+    onBind={(employee) => setDraft((current) => employeeJoinError(employee, current.members, index)
+      ? current : { ...current, members: current.members.map((member, at) =>
+        at === index ? bindTeamEmployee(member, employee) : member) })}
     onToggle={() => setOpenMember((current) => current === index ? -1 : index)}
     onChange={(patch) => patchMember(index, patch)}
     onRemove={() => removeMember(index)}
@@ -442,6 +486,14 @@ function TeamEditor({
         <h3>成员</h3>
         <small>{draft.members.length}/{AI_TEAM_MAX_MEMBERS} · 点成员卡展开编辑</small>
       </header>
+      <TeamEmployeeInvite {...employeeSource} members={draft.members}
+        disabled={busy || draft.members.length >= AI_TEAM_MAX_MEMBERS}
+        onPick={(employee) => {
+          setDraft((current) => employeeJoinError(employee, current.members) ? current : ({ ...current, members: [...current.members, bindTeamEmployee({
+            id: "", name: "", duty: employee.duty, agents: [], agent: defaultAgent, isLeader: false,
+          }, employee)] }));
+          setOpenMember(draft.members.length);
+        }}/>
       <div className="wand-team-org">
         {leaderIndex >= 0 ? <div className="wand-team-org-leader">{card(leaderIndex)}</div> : null}
         <div className="wand-team-org-members">
@@ -462,7 +514,7 @@ function TeamEditor({
             }}
           >
             <WandIcon name="plus" size={16}/>
-            <span>添加成员</span>
+            <span>添加手工 CLI 成员</span>
           </button>
         </div>
       </div>
@@ -533,7 +585,7 @@ function TeamEditor({
         pending={deleting}
         pendingLabel="删除中…"
         errorLabel="删除失败"
-        disabled={pending}
+        disabled={pending || unknownSave}
         onClick={remove}
       >
         删除团队
@@ -541,7 +593,7 @@ function TeamEditor({
       <SettingsSaveBar
         label={team ? "保存团队" : "创建团队"}
         pending={pending}
-        disabled={deleting}
+        disabled={deleting || unknownSave}
         onSave={() => void save()}
         status={status}
         tone={tone}
@@ -745,7 +797,7 @@ function TeamStartRow({
 }
 
 /** 团队的运行记录：点一条在原位展开完整的运行视图。 */
-function TeamRuns({
+export function TeamRuns({
   runs,
   focusRunId,
   onOpenSession,
@@ -756,12 +808,26 @@ function TeamRuns({
 }): React.ReactElement {
   const [openId, setOpenId] = React.useState("");
   const [detail, setDetail] = React.useState<AiTeamRunDetail | null>(null);
+  const selectedRun = React.useRef(openId);
+  const requestGeneration = React.useRef(0);
+  const alive = React.useRef(true);
+  selectedRun.current = openId;
+  React.useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; requestGeneration.current++; };
+  }, []);
 
   const load = React.useCallback(async (runId: string) => {
+    const generation = ++requestGeneration.current;
+    const current = (): boolean => alive.current && selectedRun.current === runId
+      && generation === requestGeneration.current;
     try {
-      setDetail(await aiTeamsRepository.detail(runId));
+      const next = await aiTeamsRepository.detail(runId);
+      if (current() && next.run.id === runId) {
+        setDetail((previous) => mergeTeamChatDetail(previous, next));
+      }
     } catch {
-      setDetail(null);
+      // A failed or superseded refresh never erases the latest confirmed delivery.
     }
   }, []);
 
@@ -785,6 +851,8 @@ function TeamRuns({
       const status = RUN_STATUS[run.status];
       return <li key={run.id} className="wand-team-run" data-open={open || undefined}>
         <button type="button" className="wand-team-run-head" aria-expanded={open} onClick={() => {
+          requestGeneration.current++;
+          selectedRun.current = open ? "" : run.id;
           setDetail(null);
           setOpenId((current) => current === run.id ? "" : run.id);
         }}>
@@ -799,7 +867,11 @@ function TeamRuns({
         <div className="wand-team-run-body" inert={!open}>
           <div className="wand-team-run-inner">
             {open && detail?.run.id === run.id
-              ? <TeamRunView detail={detail} onChange={setDetail} onOpenSession={onOpenSession}/>
+              ? <TeamRunView detail={detail} onChange={(next) => {
+                  if (!alive.current || next.run.id !== selectedRun.current) return;
+                  requestGeneration.current++;
+                  setDetail((previous) => mergeTeamChatDetail(previous, next));
+                }} onOpenSession={onOpenSession}/>
               : open ? <p className="wand-team-empty-line">正在加载…</p> : null}
           </div>
         </div>
@@ -948,8 +1020,10 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
 
   // 编辑器只上报一个布尔，宿主用 ref 接：不因为每次击键重渲染整个页面。
   const teamDraftDirty = React.useRef(false);
-  const onTeamDraftDirtyChange = React.useCallback((dirty: boolean): void => {
+  const teamDraftPending = React.useRef(false);
+  const onTeamDraftDirtyChange = React.useCallback((dirty: boolean, pending: boolean): void => {
     teamDraftDirty.current = dirty;
+    teamDraftPending.current = pending;
   }, []);
 
   /**
@@ -958,6 +1032,7 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
    * 未保存修改，不是新建任务草稿。取消（含关掉浮层）一律不丢。
    */
   const confirmDiscardTeamDraft = async (): Promise<boolean> => {
+    if (teamDraftPending.current) return false;
     if (!teamDraftDirty.current) return true;
     const answer = await wandOverlay.dialog({
       title: "放弃未保存的团队改动？",
@@ -1047,7 +1122,11 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
           tabs={PAGE_MODE_TABS}
           value={pageMode}
           ariaLabel="切换员工或团队"
-          onValueChange={(val) => setPageMode(val as "employees" | "teams")}
+          onValueChange={(val) => {
+            void confirmDiscardTeamDraft().then((allowed) => {
+              if (allowed) { teamDraftDirty.current = false; setPageMode(val as "employees" | "teams"); }
+            });
+          }}
         />
         {pageMode === "teams" ? (
           <WandButton
@@ -1183,6 +1262,7 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
                 onOpenSession={onOpenSession}
               /> : <TeamEditor
                   key={selected.id}
+                  active={detailTab === "members"}
                   team={selected}
                   initial={inputOf(selected)}
                   catalog={catalog}

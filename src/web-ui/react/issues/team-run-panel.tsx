@@ -10,7 +10,8 @@ import {
   type AiTeamStep,
 } from "../ai-teams/repository";
 import { TeamAvatar, TeamAvatarStack, type TeamAvatarState } from "../ai-teams/avatar";
-import { displayTeamOf, TeamChatView } from "../ai-teams/team-chat-view";
+import { displayTeamOf, mergeTeamChatDetail, TeamChatView } from "../ai-teams/team-chat-view";
+import { TeamDeliveryCard } from "../ai-teams/team-delivery";
 import { failureMessage } from "../errors";
 import { issueAgentProviderLabel } from "./task-board-agent";
 import { taskBoardController } from "./task-board-controller";
@@ -265,16 +266,27 @@ export function TeamRunView({
   const displayTeam = displayTeamOf(detail);
   const members = [...displayTeam.members].sort((a, b) => Number(b.isLeader) - Number(a.isLeader));
 
-  // 切到另一次运行，或运行进入新的等待态时，清掉上一轮的输入。
-  React.useEffect(() => { setText(""); setError(""); }, [run.id, run.status]);
+  const inputRevision = React.useRef(0);
+  const currentRun = React.useRef(run.id);
+  currentRun.current = run.id;
+  // Status refreshes must not erase a reply being edited.
+  React.useEffect(() => { setText(""); setError(""); }, [run.id]);
+  React.useEffect(() => {
+    currentRun.current = run.id;
+    return () => { currentRun.current = ""; };
+  }, [run.id]);
 
   const act = (task: () => Promise<AiTeamRunDetail>) => async (): Promise<void> => {
+    const actionRunId = run.id;
+    const revision = inputRevision.current;
     setError("");
     try {
-      onChange(await task());
-      setText("");
+      const next = await task();
+      if (currentRun.current !== actionRunId) return;
+      onChange(next);
+      if (inputRevision.current === revision) setText("");
     } catch (cause) {
-      setError(failureMessage(cause, "操作失败。"));
+      if (currentRun.current === actionRunId) setError(failureMessage(cause, "操作失败。"));
       throw cause;
     }
   };
@@ -333,8 +345,11 @@ export function TeamRunView({
         </button>;
       })}
     </div>
-    {needsYou || run.statusDetail ? <div className="task-board-team-banner" data-attention={needsYou || undefined}>
-      {run.statusDetail ? <p>{run.statusDetail}</p> : null}
+    {detail.delivery?.runId === run.id ? <div hidden={activeView === "chat"} inert={activeView === "chat"}>
+      <TeamDeliveryCard delivery={detail.delivery}/>
+    </div> : null}
+    {needsYou || !detail.delivery && run.statusDetail ? <div className="task-board-team-banner" data-attention={needsYou || undefined}>
+      {!detail.delivery && run.statusDetail ? <p>{run.statusDetail}</p> : null}
       {needsYou ? <div className="task-board-team-respond">
         <textarea
           className="resize-none task-board-detail-body"
@@ -342,7 +357,7 @@ export function TeamRunView({
           value={text}
           placeholder={run.status === "awaiting_approval" ? "退回时写下修改意见" : "回复负责人的问题或补充要求"}
           aria-label={run.status === "awaiting_approval" ? "退回意见" : "回复负责人"}
-          onChange={(event) => setText(event.currentTarget.value)}
+          onChange={(event) => { inputRevision.current++; setText(event.currentTarget.value); }}
         />
         <div className="task-board-native-editor-actions">
           {run.status === "awaiting_approval" ? <>
@@ -430,18 +445,33 @@ export interface TaskTeamRunPanelProps {
   onOpenSession?: (sessionId: string) => void;
 }
 
-export function TaskTeamRunPanel({
+export function TaskTeamRunPanel(props: TaskTeamRunPanelProps): React.ReactElement {
+  return <TaskTeamRunPanelContent key={props.taskId} {...props}/>;
+}
+
+function TaskTeamRunPanelContent({
   taskId,
   refreshKey = 0,
   onOpenSession,
 }: TaskTeamRunPanelProps): React.ReactElement | null {
   const [detail, setDetail] = React.useState<AiTeamRunDetail | null>(null);
+  const requestGeneration = React.useRef(0);
+  const alive = React.useRef(true);
+  React.useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; requestGeneration.current++; };
+  }, []);
   const latestId = detail?.run.id ?? "";
 
   const load = React.useCallback(async () => {
+    const generation = ++requestGeneration.current;
+    const isCurrent = (): boolean => alive.current && generation === requestGeneration.current;
     try {
       const runs = await aiTeamsRepository.runsForTask(taskId);
-      setDetail(runs[0] ? await aiTeamsRepository.detail(runs[0].id) : null);
+      if (!isCurrent()) return;
+      const next = runs[0] ? await aiTeamsRepository.detail(runs[0].id) : null;
+      if (!isCurrent() || next && next.run.taskId !== taskId) return;
+      setDetail((current) => next ? mergeTeamChatDetail(current, next) : null);
     } catch {
       // 拉取失败时保留上一次的内容，下一条通知会再试。
     }
@@ -462,7 +492,13 @@ export function TaskTeamRunPanel({
   }), [detail?.run.teamId, load]);
 
   if (!detail) return null;
+  const acceptAction = (next: AiTeamRunDetail): void => {
+    if (!alive.current || next.run.taskId !== taskId || next.run.id !== latestId) return;
+    // An operation receipt invalidates GETs started before that receipt.
+    requestGeneration.current++;
+    setDetail((current) => mergeTeamChatDetail(current, next));
+  };
   return <section className="task-board-team" aria-label="AI 团队">
-    <TeamRunView detail={detail} onChange={setDetail} onOpenSession={onOpenSession}/>
+    <TeamRunView key={detail.run.id} detail={detail} onChange={acceptAction} onOpenSession={onOpenSession}/>
   </section>;
 }

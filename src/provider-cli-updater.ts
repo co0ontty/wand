@@ -14,7 +14,8 @@ const REGISTRY_TIMEOUT_MS = 15_000;
 const UPDATE_TIMEOUT_MS = 5 * 60_000;
 const MAX_BUFFER = 4 * 1024 * 1024;
 
-export type ProviderCliId = "claude" | "codex" | "opencode" | "grok" | "qoder" | "pi" | "gemini";
+// 与 SessionProvider 同一集合：Provider 的唯一真源在 provider-catalog.ts。
+export type ProviderCliId = import("./provider-catalog.js").SessionProvider;
 
 interface ProviderCliSpec {
   id: ProviderCliId;

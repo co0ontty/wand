@@ -130,12 +130,14 @@ try {
 
   // 只填期望 → 自动生成并创建。
   await setValue("#new-employee-expectation", "帮我盯着线上接口");
+  await setValue("#new-employee-tags", "研发，测试、研发");
   await action(`document.querySelector('.wand-employee-create-submit').click()`);
   await waitFor("window.employeeHarness.saved.length === 1");
   const autoSaved = await evaluate("window.employeeHarness.saved[0]");
   const draftRequest = await evaluate("window.employeeHarness.draftRequests[0]");
   assert.deepEqual(draftRequest, { expectation: "帮我盯着线上接口" });
   assert.equal(autoSaved.name, "接口守夜人");
+  assert.deepEqual(autoSaved.tags, ["研发", "测试"], "AI 起草保留用户标签");
   assert.equal(autoSaved.duty, "守护线上接口稳定");
   assert.equal(autoSaved.prompt, "你是值守接口的工程师。");
   assert.equal(autoSaved.avatar, "");
@@ -189,16 +191,27 @@ try {
   // 手动填了名字 → 直接按手动配置创建，不再调模型。
   const draftsBeforeManual = await evaluate("window.employeeHarness.draftRequests.length");
   await setValue("#new-employee-name", "手动员工");
+  assert.equal(await evaluate("document.getElementById('new-employee-tags').value"), "研发，测试、研发", "按期望生成不能覆盖标签");
+  await setValue("#new-employee-tags", "设计");
   await action(`document.querySelector('.wand-employee-create-submit').click()`);
   await waitFor("window.employeeHarness.saved.length === 2");
   const manualSaved = await evaluate("window.employeeHarness.saved[1]");
   assert.equal(manualSaved.name, "手动员工");
+  assert.deepEqual(manualSaved.tags, ["设计"]);
   assert.equal(
     await evaluate("window.employeeHarness.draftRequests.length"),
     draftsBeforeManual,
     "手动创建不得再调模型",
   );
   results.push({ check: "advanced/manual-create-without-model", manualSaved });
+
+  // 系统保留标签不可手动使用，失败保留输入，不再发起 AI 或保存。
+  await setValue("#new-employee-tags", "系统用户");
+  await action("document.querySelector('.wand-employee-create-submit').click()");
+  await waitFor("document.querySelector('[role=alert]')?.textContent.includes('内置标签')");
+  assert.equal(await evaluate("window.employeeHarness.saved.length"), 2);
+  assert.equal(await evaluate("document.getElementById('new-employee-tags').value"), "系统用户");
+  await setValue("#new-employee-tags", "设计");
 
   // 收起：倒放回触发的按钮，字段回到收起态。
   await action("document.querySelector('.wand-employee-advanced-toggle button').click()");

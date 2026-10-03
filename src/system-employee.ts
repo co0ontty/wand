@@ -80,6 +80,7 @@ export function systemEmployeeDefinition(agents: WandTaskAgent[], now: string, e
     avatar: "",
     agents: agents.length ? agents : systemEmployeeSeedAgents(),
     systemKey: SYSTEM_EMPLOYEE_KEY,
+    tags: [SYSTEM_EMPLOYEE_TAG],
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };

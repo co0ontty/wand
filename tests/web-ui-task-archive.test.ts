@@ -49,14 +49,19 @@ test("archiving a sidebar task goes through the archive endpoint and never the c
   }
 });
 
-test("batch selection archives tasks but stays a plain action until terminals are picked", async () => {
-  const { describeManagedAction, managedSelectionIsDestructive } = await import("../src/web-ui/react/workspaces/sidebar-manage.js");
+test("batch selection archives tasks and sessions, and delete is its own danger action", async () => {
+  const { describeManagedAction, describeManagedDelete, managedSelectionIsDestructive } = await import("../src/web-ui/react/workspaces/sidebar-manage.js");
   const panel = source("src/web-ui/react/workspaces/workspaces-panel.tsx");
   const tasksOnly = { taskIds: ["t1", "t2"], sessionIds: [] };
   assert.equal(managedSelectionIsDestructive(tasksOnly), false);
   assert.equal(managedSelectionIsDestructive({ taskIds: [], sessionIds: ["s1"] }), true);
-  assert.match(panel, /managedSelectionIsDestructive\(prunedSelection\) \? "danger" : "secondary"/);
   assert.equal(describeManagedAction(tasksOnly), "归档任务");
+  assert.equal(describeManagedAction({ taskIds: [], sessionIds: ["s1", "s2"] }), "归档终端");
+  assert.equal(describeManagedDelete({ taskIds: [], sessionIds: ["s1", "s2"] }), "删除 2 个终端");
+  // 归档主操作恒为 secondary，危险按钮只在选中了终端时出现，且动的是删除而不是归档。
+  assert.match(panel, /kind="secondary"[\s\S]{0,240}setConfirmingManage\("archive"\)/);
+  assert.match(panel, /hasManageSessions && \(/);
+  assert.match(panel, /kind="danger"[\s\S]{0,200}setConfirmingManage\("delete"\)/);
 });
 
 test("sidebar task menus archive by default and only isolated tasks keep a worktree delete", () => {
@@ -90,6 +95,37 @@ test("board cards archive by dragging into the archive zone and restore by dragg
   assert.match(host, /onRestore=\{\(\) => \{/);
   assert.ok(styles.includes(".task-board-archive-zone.is-over .task-board-archive-hint"));
   assert.ok(styles.includes(".task-board-column-list > .task-board-archive-zone"));
+});
+
+test("archived sessions leave the normal sidebar list and stay restorable in their own fold", async () => {
+  const { groupSessionsByArchive, archivedSessionCount } = await import("../src/web-ui/react/workspaces/session-archive.js");
+  const groups = [{
+    workspaceId: "workspace-1",
+    workspaceName: "Wand",
+    workspaceCwd: "/work",
+    tasks: [{ id: "t1", sessions: [{ id: "active-1" }, { id: "archived-task", archived: true }] }],
+    standaloneSessions: [{ id: "active-2" }, { id: "archived-loose", archived: true }],
+  }] as never;
+  const [group] = groupSessionsByArchive(groups) as Array<{
+    tasks: Array<{ sessions: Array<{ id: string }>; archivedSessions?: Array<{ id: string }> }>;
+    standaloneSessions: Array<{ id: string }>;
+    archivedSessions?: Array<{ id: string }>;
+  }>;
+  assert.deepEqual(group.tasks[0].sessions.map((session) => session.id), ["active-1"]);
+  assert.deepEqual(group.tasks[0].archivedSessions?.map((session) => session.id), ["archived-task"]);
+  assert.deepEqual(group.standaloneSessions.map((session) => session.id), ["active-2"]);
+  assert.deepEqual(group.archivedSessions?.map((session) => session.id), ["archived-loose"]);
+  assert.equal(archivedSessionCount(group as never), 2);
+
+  const panel = source("src/web-ui/react/workspaces/workspaces-panel.tsx");
+  // 分拆只在数据加载后做一次，归档区可展开、可恢复，批量归档走的是同一套逻辑。
+  assert.match(panel, /groupSessionsByArchive\(page\.groups\)/);
+  assert.match(panel, /<ArchivedSessionsFold/);
+  assert.match(panel, /batchArchiveSessions\(resolved\.sessionIds, true\)/);
+  assert.match(panel, /httpWorkspacesRepository\.batchArchiveSessions\(ids, archived\)/);
+  const repo = source("src/web-ui/react/workspaces/repository.ts");
+  assert.match(repo, /\/api\/sessions\/\$\{encodeURIComponent\(sessionId\)\}\/\$\{archived \? "archive" : "unarchive"\}/);
+  assert.match(repo, /\/api\/sessions\/batch-archive/);
 });
 
 test("task and session drags never satisfy each other's drop targets", () => {

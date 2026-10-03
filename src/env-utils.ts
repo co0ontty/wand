@@ -52,6 +52,8 @@ export function buildChildEnv(
       if (typeof v === "string") base[key] = v;
     }
   }
+  // Do not let nested Wand/PTY or one-shot automation inherit another run's decision capability.
+  for (const key of ["WAND_DECISION_URL", "WAND_DECISION_TOKEN", "WAND_DECISION_CA", "WAND_DECISION_NODE", "WAND_DECISION_CLI"]) delete base[key];
   for (const [k, v] of Object.entries(extras)) {
     if (typeof v === "string") base[k] = v;
   }

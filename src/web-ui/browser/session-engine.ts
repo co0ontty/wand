@@ -1,5 +1,7 @@
 import { composer, state, writeStoredBoolean } from "./state";
 import { createSessionReads } from "./session-reads";
+import { createSessionCompletionViewIntent, isSessionJustCompleted, mergeSessionCompletionState } from "../../session-completion-state.js";
+import { notifyTasksChanged } from "../react/task-changes";
 import { parseJsonResponse } from "../react/http-adapter";
 import { publishWandModelCatalog, startWandModelCatalogPolling } from "../react/model-catalog";
 import { compactThinkingLabel, dynamicThinkingChoices } from "../thinking-efforts";
@@ -32,11 +34,43 @@ import {
   normalizeAvailableComposerValue,
   normalizeComposerModelValue,
 } from "./composer-select-values";
-import { inferProviderIdFromCommand, providerCliCommand } from "../provider-identity";
+import { PROVIDER_IDS, inferProviderIdFromCommand, isNativeThinkingEffort, providerCliCommand } from "../provider-identity";
 import { hasPooledTerminal, isPooledTerminalBracketedPasteMode } from "./terminal-pool";
 import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExtension, isClipboardImageMimeType } from "./pty-paste";
 
 const sessionReads = createSessionReads();
+const completionViews = new Map<string, number>();
+// Automatic preferred-session selection is not a user opening a conversation.
+const completionViewIntent = createSessionCompletionViewIntent();
+
+/** Only acknowledge a generation whose result is actually displayed in the active view. */
+export async function markSessionCompletionViewed(session: any): Promise<void> {
+  if (!session || !completionViewIntent.isOpen(session.id) || state.selectedId !== session.id
+    || document.visibilityState !== "visible"
+    || !isSessionJustCompleted(session)) return;
+  const view = document.getElementById(state.currentView === "chat" ? "chat-output" : "output");
+  if (!view?.getClientRects().length || Array.from(document.querySelectorAll('[role="dialog"][aria-modal="true"]'))
+    .some((dialog) => dialog.getClientRects().length > 0)) return;
+  const revision = session.completionRevision;
+  if (completionViews.get(session.id) === revision) return;
+  completionViews.set(session.id, revision);
+  try {
+    const response = await fetch("/api/sessions/" + encodeURIComponent(session.id) + "/completion/view", {
+      method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ completionRevision: revision }),
+    });
+    const completion = await parseJsonResponse<any>(response);
+    updateSessionSnapshot({ id: session.id,
+      completionRevision: completion.completionRevision,
+      viewedCompletionRevision: completion.viewedCompletionRevision }, "latest");
+    updateSessionsList();
+    notifyTasksChanged();
+  } catch {
+    // Keep the unread result on failure; the next explicit view can retry.
+  } finally {
+    if (completionViews.get(session.id) === revision) completionViews.delete(session.id);
+  }
+}
 
 function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   return fetch(input, { ...init,
@@ -561,7 +595,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
       export function setChatModelForProvider(provider, model) {
         var key = getProviderKey(provider);
         var normalized = (model || "").trim();
-        if (!state.chatModels) state.chatModels = { claude: "", codex: "", opencode: "", grok: "", qoder: "", pi: "", gemini: "" };
+        if (!state.chatModels) { state.chatModels = {}; PROVIDER_IDS.forEach(function(provider) { state.chatModels[provider] = ""; }); }
         state.chatModels[key] = normalized;
         state.chatModel = normalized;
         try {
@@ -687,7 +721,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
       export function applyConfigDefaultThinking(config) {
         var effort = config && typeof config === "object" ? config.defaultThinkingEffort : "";
         var supported = effort === "off" || effort === "standard" || effort === "deep" || effort === "max"
-          || /^(claude|codex|opencode|grok|qoder|pi):[a-z0-9][a-z0-9_-]{0,31}$/.test(String(effort || ""));
+          || isNativeThinkingEffort(String(effort || ""));
         if (!supported) return;
         try {
           if (localStorage.getItem("wand-thinking-effort")) return;
@@ -991,7 +1025,8 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
       export function updateSessionSnapshot(snapshot, messageSource: MessageMergeSource = "unknown") {
         if (!snapshot || !snapshot.id) return;
         var currentSession = state.sessions.find(function(session) { return session.id === snapshot.id; }) || null;
-        var normalizedSnapshot = Object.assign({}, normalizeStructuredSnapshot(snapshot, currentSession));
+        var normalizedSnapshot = Object.assign({}, normalizeStructuredSnapshot(snapshot, currentSession),
+          mergeSessionCompletionState(currentSession, snapshot));
         if (messageSource === "latest" && Array.isArray(normalizedSnapshot.messages)
           && typeof normalizedSnapshot.messageOffset !== "number") {
           normalizedSnapshot.messageOffset = 0;
@@ -1057,7 +1092,8 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
       export function mergeServerSession(localSession, serverSession) {
         if (!localSession) return serverSession;
 
-        var merged = Object.assign({}, localSession, serverSession);
+        var merged = Object.assign({}, localSession, serverSession,
+          mergeSessionCompletionState(localSession, serverSession));
         var slimList = !Array.isArray(serverSession.messages)
           && (typeof serverSession.output !== "string");
         if (slimList) {
@@ -1416,6 +1452,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
               state.currentMessages = buildMessagesForRender(selectedSession, getPreferredMessages(selectedSession, data.output, false));
 
             renderChat(false);
+            if (data.sessionKind !== "structured") void markSessionCompletionViewed(selectedSession);
           }).catch(function(error) {
             if (read.isCurrent()) console.error("[wand] loadOutput failed:", error);
           }).finally(function() { read.finish(); });
@@ -1499,6 +1536,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         if (!foundSession) {
           return;
         }
+        completionViewIntent.open(id);
         var previousSessionId = state.selectedId;
         if (previousSessionId && previousSessionId !== id) {
           var previousInput = document.getElementById("input-box") as HTMLTextAreaElement | null;
@@ -1564,6 +1602,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
 
       /** DOM-free home navigation used by the React shell command port. */
       export function goHome() {
+        completionViewIntent.clear();
         if (!state.selectedId) return;
         clearActivityDetailState();
         state.selectedId = null;
